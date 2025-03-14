@@ -2,32 +2,31 @@ package discovery
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
-	"sort"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // Constants for internet discovery
 const (
 	// DefaultBootstrapNodes are default nodes to connect to when first joining the network
 	DefaultBootstrapNodes = "discovery.novacron.io:7700,discovery2.novacron.io:7700"
-	
+
 	// MaxPeerConnections is the maximum number of direct peer connections
 	MaxPeerConnections = 100
-	
+
 	// RoutingTableSize is the size of the DHT routing table buckets
 	RoutingTableSize = 20
-	
+
 	// DistanceCalculationBits affects the key space for peer distance calculation
 	DistanceCalculationBits = 256 // SHA-256
 )
@@ -35,15 +34,15 @@ const (
 // PeerInfo contains information about a peer in the network
 type PeerInfo struct {
 	NodeInfo
-	PeerID     string    `json:"peer_id"`      // SHA-256 hash of NodeID for DHT
-	Endpoints  []string  `json:"endpoints"`    // List of IP:Port endpoints
-	PublicKey  string    `json:"public_key"`   // Optional public key for authentication
-	LastPing   time.Time `json:"last_ping"`
+	PeerID    string    `json:"peer_id"`    // SHA-256 hash of NodeID for DHT
+	Endpoints []string  `json:"endpoints"`  // List of IP:Port endpoints
+	PublicKey string    `json:"public_key"` // Optional public key for authentication
+	LastPing  time.Time `json:"last_ping"`
 }
 
 // RoutingTableBucket represents a k-bucket in the Kademlia DHT
 type RoutingTableBucket struct {
-	Peers []PeerInfo  // Sorted by last ping time
+	Peers []PeerInfo // Sorted by last ping time
 	Mutex sync.RWMutex
 }
 
@@ -63,11 +62,11 @@ type InternetDiscoveryConfig struct {
 type InternetDiscoveryService struct {
 	*Service
 	config           InternetDiscoveryConfig
-	peerID           string                       // SHA-256 hash of NodeID
+	peerID           string // SHA-256 hash of NodeID
 	routingTable     [DistanceCalculationBits]RoutingTableBucket
-	peerEndpoints    map[string][]string          // NodeID -> endpoints
+	peerEndpoints    map[string][]string // NodeID -> endpoints
 	peerMutex        sync.RWMutex
-	peerConnections  map[string]net.Conn          // NodeID -> connection
+	peerConnections  map[string]net.Conn // NodeID -> connection
 	connectionsMutex sync.RWMutex
 	httpServer       *http.Server
 }
@@ -75,13 +74,13 @@ type InternetDiscoveryService struct {
 // DefaultInternetDiscoveryConfig returns a default configuration for internet discovery
 func DefaultInternetDiscoveryConfig() InternetDiscoveryConfig {
 	return InternetDiscoveryConfig{
-		Config:            DefaultConfig(),
-		BootstrapNodes:    DefaultBootstrapNodes,
+		Config:             DefaultConfig(),
+		BootstrapNodes:     DefaultBootstrapNodes,
 		EnableNATTraversal: true,
-		EnableDHT:         true,
-		EnableGossip:      true,
-		PingInterval:      30 * time.Second,
-		StunServers:       []string{"stun.l.google.com:19302", "stun1.l.google.com:19302"},
+		EnableDHT:          true,
+		EnableGossip:       true,
+		PingInterval:       30 * time.Second,
+		StunServers:        []string{"stun.l.google.com:19302", "stun1.l.google.com:19302"},
 	}
 }
 
@@ -91,20 +90,20 @@ func NewInternetDiscovery(config InternetDiscoveryConfig) (*InternetDiscoverySer
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Create peer ID from node ID
 	h := sha256.New()
 	h.Write([]byte(config.NodeID))
 	peerID := hex.EncodeToString(h.Sum(nil))
-	
+
 	service := &InternetDiscoveryService{
-		Service:        baseService,
-		config:         config,
-		peerID:         peerID,
-		peerEndpoints:  make(map[string][]string),
+		Service:         baseService,
+		config:          config,
+		peerID:          peerID,
+		peerEndpoints:   make(map[string][]string),
 		peerConnections: make(map[string]net.Conn),
 	}
-	
+
 	return service, nil
 }
 
@@ -114,25 +113,25 @@ func (s *InternetDiscoveryService) Start() error {
 	if err := s.Service.Start(); err != nil {
 		return err
 	}
-	
+
 	// Determine our external IP and port via STUN if NAT traversal is enabled
 	if s.config.EnableNATTraversal {
 		go s.setupNATTraversal()
 	}
-	
+
 	// Start the HTTP discovery server for direct connections
 	go s.startHTTPServer()
-	
+
 	// Connect to bootstrap nodes
 	if s.config.BootstrapNodes != "" {
 		go s.connectToBootstrapNodes()
 	}
-	
+
 	// Start periodic maintenance tasks
 	go s.maintenanceLoop()
-	
+
 	log.Printf("Internet discovery service started, peer ID: %s", s.peerID)
-	
+
 	return nil
 }
 
@@ -144,16 +143,16 @@ func (s *InternetDiscoveryService) Stop() error {
 		conn.Close()
 	}
 	s.connectionsMutex.Unlock()
-	
+
 	// Stop the HTTP server
 	if s.httpServer != nil {
 		// Give 5 seconds for graceful shutdown
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		
+
 		s.httpServer.Shutdown(ctx)
 	}
-	
+
 	// Stop the base discovery service
 	return s.Service.Stop()
 }
@@ -162,7 +161,7 @@ func (s *InternetDiscoveryService) Stop() error {
 func (s *InternetDiscoveryService) FindPeer(id string) (PeerInfo, bool) {
 	s.peerMutex.RLock()
 	defer s.peerMutex.RUnlock()
-	
+
 	// First, check if we have this peer in our direct connections
 	nodeInfo, exists := s.GetNodeByID(id)
 	if exists {
@@ -172,9 +171,9 @@ func (s *InternetDiscoveryService) FindPeer(id string) (PeerInfo, bool) {
 			Endpoints: s.peerEndpoints[id],
 		}, true
 	}
-	
+
 	// TODO: Implement DHT lookup for peers we don't directly know
-	
+
 	return PeerInfo{}, false
 }
 
@@ -183,15 +182,15 @@ func (s *InternetDiscoveryService) ConnectToPeer(peer PeerInfo) error {
 	s.connectionsMutex.Lock()
 	_, exists := s.peerConnections[peer.ID]
 	s.connectionsMutex.Unlock()
-	
+
 	if exists {
 		return nil // Already connected
 	}
-	
+
 	// Try each endpoint until we succeed
 	var conn net.Conn
 	var err error
-	
+
 	for _, endpoint := range peer.Endpoints {
 		// Attempt to establish a TCP connection
 		conn, err = net.DialTimeout("tcp", endpoint, 10*time.Second)
@@ -200,19 +199,19 @@ func (s *InternetDiscoveryService) ConnectToPeer(peer PeerInfo) error {
 		}
 		log.Printf("Failed to connect to endpoint %s: %v", endpoint, err)
 	}
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to connect to peer %s: %v", peer.ID, err)
 	}
-	
+
 	// Register the connection
 	s.connectionsMutex.Lock()
 	s.peerConnections[peer.ID] = conn
 	s.connectionsMutex.Unlock()
-	
+
 	// Start handling messages from this peer
 	go s.handlePeerConnection(peer.ID, conn)
-	
+
 	return nil
 }
 
@@ -220,11 +219,11 @@ func (s *InternetDiscoveryService) ConnectToPeer(peer PeerInfo) error {
 func (s *InternetDiscoveryService) setupNATTraversal() {
 	// TODO: Implement STUN client to determine external IP and port
 	// This is a simplified placeholder
-	
+
 	for _, stunServer := range s.config.StunServers {
 		// Attempt to connect to STUN server and get external IP
 		log.Printf("Attempting NAT traversal via STUN server: %s", stunServer)
-		
+
 		// In a real implementation, this would use the STUN protocol to discover
 		// the external IP address and update the node's information
 	}
@@ -233,11 +232,11 @@ func (s *InternetDiscoveryService) setupNATTraversal() {
 // startHTTPServer starts the HTTP discovery server
 func (s *InternetDiscoveryService) startHTTPServer() {
 	mux := http.NewServeMux()
-	
+
 	// Handler for peer discovery
 	mux.HandleFunc("/discover", func(w http.ResponseWriter, r *http.Request) {
 		remoteAddr := r.RemoteAddr
-		
+
 		// Extract request information (peer announcing itself)
 		var peerInfo PeerInfo
 		decoder := json.NewDecoder(r.Body)
@@ -245,19 +244,19 @@ func (s *InternetDiscoveryService) startHTTPServer() {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-		
+
 		// Add remote address to peer endpoints if not already there
 		endpoint := remoteAddr
 		if !contains(peerInfo.Endpoints, endpoint) {
 			peerInfo.Endpoints = append(peerInfo.Endpoints, endpoint)
 		}
-		
+
 		// Update our knowledge of this peer
 		s.updatePeer(peerInfo)
-		
+
 		// Respond with our peers (up to a limit)
 		peers := s.getRandomPeers(20)
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		encoder := json.NewEncoder(w)
 		if err := encoder.Encode(peers); err != nil {
@@ -265,20 +264,20 @@ func (s *InternetDiscoveryService) startHTTPServer() {
 			return
 		}
 	})
-	
+
 	// Handler for ping requests
 	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
 		// Simple ping-pong for connection testing
 		w.Write([]byte("pong"))
 	})
-	
+
 	// Start the HTTP server
 	serverAddr := fmt.Sprintf(":%d", s.config.Port)
 	s.httpServer = &http.Server{
 		Addr:    serverAddr,
 		Handler: mux,
 	}
-	
+
 	log.Printf("Starting HTTP discovery server on %s", serverAddr)
 	if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
 		log.Printf("HTTP server error: %v", err)
@@ -288,16 +287,16 @@ func (s *InternetDiscoveryService) startHTTPServer() {
 // connectToBootstrapNodes connects to the configured bootstrap nodes
 func (s *InternetDiscoveryService) connectToBootstrapNodes() {
 	bootstrapNodes := strings.Split(s.config.BootstrapNodes, ",")
-	
+
 	for _, node := range bootstrapNodes {
 		node = strings.TrimSpace(node)
 		if node == "" {
 			continue
 		}
-		
+
 		// Connect to bootstrap node over HTTP
 		url := fmt.Sprintf("http://%s/discover", node)
-		
+
 		// Prepare our node info to announce
 		selfPeer := PeerInfo{
 			NodeInfo: NodeInfo{
@@ -314,7 +313,7 @@ func (s *InternetDiscoveryService) connectToBootstrapNodes() {
 			PeerID:    s.peerID,
 			Endpoints: []string{fmt.Sprintf("%s:%d", s.config.Address, s.config.Port)},
 		}
-		
+
 		// Perform discovery request
 		s.performDiscoveryRequest(url, selfPeer)
 	}
@@ -328,16 +327,16 @@ func (s *InternetDiscoveryService) performDiscoveryRequest(url string, self Peer
 		log.Printf("Error marshaling node info: %v", err)
 		return
 	}
-	
+
 	// Send HTTP POST request to bootstrap node
 	req, err := http.NewRequest("POST", url, strings.NewReader(string(body)))
 	if err != nil {
 		log.Printf("Error creating HTTP request: %v", err)
 		return
 	}
-	
+
 	req.Header.Add("Content-Type", "application/json")
-	
+
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -345,7 +344,7 @@ func (s *InternetDiscoveryService) performDiscoveryRequest(url string, self Peer
 		return
 	}
 	defer resp.Body.Close()
-	
+
 	// Parse response
 	var peers []PeerInfo
 	decoder := json.NewDecoder(resp.Body)
@@ -353,17 +352,17 @@ func (s *InternetDiscoveryService) performDiscoveryRequest(url string, self Peer
 		log.Printf("Error decoding response from bootstrap node: %v", err)
 		return
 	}
-	
+
 	// Process discovered peers
 	for _, peer := range peers {
 		// Skip ourselves
 		if peer.ID == s.config.NodeID {
 			continue
 		}
-		
+
 		// Update our knowledge of this peer
 		s.updatePeer(peer)
-		
+
 		// Attempt to connect to the peer
 		go s.ConnectToPeer(peer)
 	}
@@ -375,52 +374,52 @@ func (s *InternetDiscoveryService) updatePeer(peer PeerInfo) {
 	nodeInfo := peer.NodeInfo
 	nodeInfo.LastSeen = time.Now()
 	nodeInfo.Available = true
-	
+
 	// Update routing table
 	bucket := s.getBucketForPeer(peer.PeerID)
-	
+
 	bucket.Mutex.Lock()
 	defer bucket.Mutex.Unlock()
-	
+
 	// Check if peer is already in bucket
 	for i, existingPeer := range bucket.Peers {
 		if existingPeer.ID == peer.ID {
 			// Update existing peer
 			bucket.Peers[i].LastSeen = time.Now()
 			bucket.Peers[i].Endpoints = peer.Endpoints
-			
+
 			// Move to the end of the bucket (most recently seen)
 			bucket.Peers = append(bucket.Peers[:i], bucket.Peers[i+1:]...)
 			bucket.Peers = append(bucket.Peers, existingPeer)
-			
+
 			// Update service node map
 			s.nodesMutex.Lock()
 			s.nodes[peer.ID] = nodeInfo
 			s.nodesMutex.Unlock()
-			
+
 			// Update endpoints
 			s.peerMutex.Lock()
 			s.peerEndpoints[peer.ID] = peer.Endpoints
 			s.peerMutex.Unlock()
-			
+
 			return
 		}
 	}
-	
+
 	// Add peer to bucket if not full
 	if len(bucket.Peers) < RoutingTableSize {
 		bucket.Peers = append(bucket.Peers, peer)
-		
+
 		// Update service node map
 		s.nodesMutex.Lock()
 		s.nodes[peer.ID] = nodeInfo
 		s.nodesMutex.Unlock()
-		
+
 		// Update endpoints
 		s.peerMutex.Lock()
 		s.peerEndpoints[peer.ID] = peer.Endpoints
 		s.peerMutex.Unlock()
-		
+
 		// Notify listeners
 		for _, listener := range s.listeners {
 			listener(EventNodeJoined, nodeInfo)
@@ -428,26 +427,26 @@ func (s *InternetDiscoveryService) updatePeer(peer PeerInfo) {
 	} else {
 		// Bucket is full, try to ping oldest peer
 		oldestPeer := bucket.Peers[0]
-		
+
 		// In a real implementation, we would ping the oldest peer
 		// and replace it if it doesn't respond
-		
+
 		// For simplicity, we just replace it here
 		bucket.Peers = bucket.Peers[1:]
 		bucket.Peers = append(bucket.Peers, peer)
-		
+
 		// Update service node map
 		s.nodesMutex.Lock()
 		delete(s.nodes, oldestPeer.ID)
 		s.nodes[peer.ID] = nodeInfo
 		s.nodesMutex.Unlock()
-		
+
 		// Update endpoints
 		s.peerMutex.Lock()
 		delete(s.peerEndpoints, oldestPeer.ID)
 		s.peerEndpoints[peer.ID] = peer.Endpoints
 		s.peerMutex.Unlock()
-		
+
 		// Notify listeners
 		for _, listener := range s.listeners {
 			listener(EventNodeLeft, s.nodes[oldestPeer.ID])
@@ -460,11 +459,11 @@ func (s *InternetDiscoveryService) updatePeer(peer PeerInfo) {
 func (s *InternetDiscoveryService) getBucketForPeer(peerID string) *RoutingTableBucket {
 	// Calculate distance between our peer ID and the target peer ID
 	// This is a simple XOR-based distance calculation for the Kademlia DHT
-	
+
 	// Convert hex string to byte array
 	peerIdBytes, _ := hex.DecodeString(peerID)
 	ourPeerIdBytes, _ := hex.DecodeString(s.peerID)
-	
+
 	// Find the first bit position where the two IDs differ
 	bucketIndex := 0
 	for i := 0; i < len(peerIdBytes) && i < len(ourPeerIdBytes); i++ {
@@ -473,7 +472,7 @@ func (s *InternetDiscoveryService) getBucketForPeer(peerID string) *RoutingTable
 			bucketIndex += 8
 			continue
 		}
-		
+
 		// Find the position of the highest bit set in xor
 		for j := 7; j >= 0; j-- {
 			if (xor & (1 << j)) != 0 {
@@ -483,35 +482,35 @@ func (s *InternetDiscoveryService) getBucketForPeer(peerID string) *RoutingTable
 		}
 		break
 	}
-	
+
 	if bucketIndex >= DistanceCalculationBits {
 		bucketIndex = DistanceCalculationBits - 1
 	}
-	
+
 	return &s.routingTable[bucketIndex]
 }
 
 // getRandomPeers returns a random selection of peers
 func (s *InternetDiscoveryService) getRandomPeers(count int) []PeerInfo {
 	var allPeers []PeerInfo
-	
+
 	// Collect peers from all buckets
 	for i := 0; i < DistanceCalculationBits; i++ {
 		bucket := &s.routingTable[i]
 		bucket.Mutex.RLock()
-		
+
 		for _, peer := range bucket.Peers {
 			allPeers = append(allPeers, peer)
 		}
-		
+
 		bucket.Mutex.RUnlock()
 	}
-	
+
 	// If we have fewer peers than requested, return all
 	if len(allPeers) <= count {
 		return allPeers
 	}
-	
+
 	// Shuffle peers and return the requested count
 	shufflePeers(allPeers)
 	return allPeers[:count]
@@ -521,7 +520,7 @@ func (s *InternetDiscoveryService) getRandomPeers(count int) []PeerInfo {
 func (s *InternetDiscoveryService) handlePeerConnection(id string, conn net.Conn) {
 	// Set a read deadline to avoid hanging forever
 	conn.SetReadDeadline(time.Now().Add(1 * time.Hour))
-	
+
 	buffer := make([]byte, 4096)
 	for {
 		n, err := conn.Read(buffer)
@@ -529,19 +528,19 @@ func (s *InternetDiscoveryService) handlePeerConnection(id string, conn net.Conn
 			log.Printf("Error reading from peer %s: %v", id, err)
 			break
 		}
-		
+
 		// Process message
 		// In a real implementation, this would parse and handle different message types
 		log.Printf("Received %d bytes from peer %s", n, id)
 	}
-	
+
 	// Close and clean up connection
 	conn.Close()
-	
+
 	s.connectionsMutex.Lock()
 	delete(s.peerConnections, id)
 	s.connectionsMutex.Unlock()
-	
+
 	log.Printf("Connection to peer %s closed", id)
 }
 
@@ -549,7 +548,7 @@ func (s *InternetDiscoveryService) handlePeerConnection(id string, conn net.Conn
 func (s *InternetDiscoveryService) maintenanceLoop() {
 	pingTicker := time.NewTicker(s.config.PingInterval)
 	defer pingTicker.Stop()
-	
+
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -569,27 +568,27 @@ func (s *InternetDiscoveryService) pingAllPeers() {
 		peers[id] = conn
 	}
 	s.connectionsMutex.RUnlock()
-	
+
 	for id, conn := range peers {
 		// Simple ping message (in a real implementation, this would be a structured message)
 		_, err := conn.Write([]byte("ping"))
 		if err != nil {
 			log.Printf("Error pinging peer %s: %v", id, err)
-			
+
 			// Close and remove the connection
 			conn.Close()
-			
+
 			s.connectionsMutex.Lock()
 			delete(s.peerConnections, id)
 			s.connectionsMutex.Unlock()
-			
+
 			// Mark node as unavailable
 			s.nodesMutex.Lock()
 			node, exists := s.nodes[id]
 			if exists {
 				node.Available = false
 				s.nodes[id] = node
-				
+
 				// Notify listeners
 				for _, listener := range s.listeners {
 					listener(EventNodeLeft, node)
@@ -604,7 +603,7 @@ func (s *InternetDiscoveryService) pingAllPeers() {
 func (s *InternetDiscoveryService) refreshRoutes() {
 	// TODO: Implement DHT routing table refresh
 	log.Printf("Refreshing routing tables")
-	
+
 	// In a real implementation, this would:
 	// 1. Find a random ID in each bucket's range
 	// 2. Perform a find node operation for each ID
@@ -622,15 +621,15 @@ func calculatePeerID(nodeID string) string {
 
 // shufflePeers randomly shuffles a slice of peers
 func shufflePeers(peers []PeerInfo) {
-	// Generate a random seed based on current time
-	seed := time.Now().UnixNano()
-	random := uuid.NewSHA1(uuid.NewRandomFromReader(nil), []byte(fmt.Sprintf("%d", seed)))
-	
-	// Fisher-Yates shuffle
+	// Fisher-Yates shuffle with crypto/rand for better randomness
 	for i := len(peers) - 1; i > 0; i-- {
-		// Generate a random index between 0 and i
-		j := int(random.ID()[0]) % (i + 1)
-		
+		// Generate random bytes
+		b := make([]byte, 8)
+		rand.Read(b)
+
+		// Convert to a number and get modulo
+		j := int(binary.BigEndian.Uint64(b) % uint64(i+1))
+
 		// Swap elements at indices i and j
 		peers[i], peers[j] = peers[j], peers[i]
 	}

@@ -35,22 +35,30 @@ This document outlines the roadmap and development plan for NovaCron. It provide
 **Focus**: Extending to multi-node support and building a distributed control plane.
 
 #### Planned Features
-- Node discovery and cluster formation
+- ✅ Node discovery and cluster formation
 - Distributed storage backends
-- Consensus-based leader election
+- ✅ Consensus-based leader election
 - Resource-aware scheduling
 - ✅ Enhanced migration protocols for WAN migrations
 - High-availability configurations
 - Multi-user support with RBAC
 
 #### Milestones
-1. Implement node discovery mechanism
-2. Develop cluster membership management
+1. ✅ Implement node discovery mechanism
+2. ✅ Develop cluster membership management
 3. Create distributed state storage
 4. Implement scheduler with resource awareness
-5. Enhance migration for cross-datacenter operations
+5. ✅ Enhance migration for cross-datacenter operations
 6. Add HA features for core services
 7. Implement user management and RBAC
+
+#### Phase 2 Progress (Q1 2025) - Distributed Control Plane
+- **Node Discovery and Cluster Formation**:
+  - ✅ Implemented flexible discovery service with multiple backends
+  - ✅ Added Kademlia-based DHT for efficient peer discovery
+  - ✅ Created Raft-based consensus mechanism for leader election
+  - ✅ Implemented cluster membership management with health checking
+  - ✅ Built adaptable cluster formation process for different environments
 
 ### Phase 3: Enterprise Features (Q3-Q4 2025)
 
