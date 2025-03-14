@@ -193,6 +193,39 @@ The system supports two replication modes:
 
 ## Implemented Enhancements
 
+### Data Deduplication
+
+The distributed storage system now includes block-level data deduplication capabilities:
+
+- **Multiple Deduplication Algorithms**: Fixed-size, variable-size, and content-defined chunking
+- **Cross-Volume Deduplication**: Identical blocks are stored only once across all volumes
+- **Content-Aware Chunking**: Intelligently identifies natural chunk boundaries for optimal deduplication
+- **Transparent Operation**: Deduplication happens automatically during writes with reconstruction during reads
+- **Reference Counting**: Tracks block usage for optimal space reclamation during deletion
+
+#### Configuration Options
+
+```go
+config := DefaultDistributedStorageConfig()
+config.DeduplicationConfig.Algorithm = deduplication.DedupContent
+config.DeduplicationConfig.BlockSize = 64 * 1024  // 64KB target block size
+config.DeduplicationConfig.InlineSmallBlocks = true
+```
+
+#### Storage Efficiency
+
+The system provides detailed deduplication statistics:
+
+```go
+// Get deduplication information for a volume
+stats := service.GetDeduplicationStats(volumeID)
+fmt.Printf("Original size: %d bytes\n", stats.OriginalSize)
+fmt.Printf("Deduplicated size: %d bytes\n", stats.DedupSize)
+fmt.Printf("Deduplication ratio: %.2f\n", stats.DedupRatio)
+fmt.Printf("Unique blocks: %d\n", stats.UniqueBlocks)
+fmt.Printf("Total blocks: %d\n", stats.TotalBlocks)
+```
+
 ### End-to-End Encryption
 
 The distributed storage system now includes robust end-to-end encryption capabilities:
@@ -257,6 +290,5 @@ fmt.Printf("Compression ratio: %.2f\n", shard.CompressionRatio)
 
 ## Future Enhancements
 
-1. **Deduplication**: Implement block-level deduplication across volumes
-2. **Dynamic Shard Sizes**: Adjust shard sizes based on access patterns
-3. **Tiered Storage**: Automatically move hot/cold data between different storage tiers
+1. **Dynamic Shard Sizes**: Adjust shard sizes based on access patterns
+2. **Tiered Storage**: Automatically move hot/cold data between different storage tiers
