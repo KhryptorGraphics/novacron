@@ -1,8 +1,11 @@
 module github.com/khryptorgraphics/novacron/backend/core
 
-go 1.24
+go 1.21
 
 require (
-	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/stretchr/testify v1.8.4
+	github.com/google/uuid v1.6.0
+	github.com/klauspost/compress v1.17.7
+	github.com/sirupsen/logrus v1.9.3
 )
+
+require golang.org/x/sys v0.15.0 // indirect
