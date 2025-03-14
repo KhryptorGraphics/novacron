@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/khryptorgraphics/novacron/backend/core/storage/compression"
+	"github.com/khryptorgraphics/novacron/backend/core/storage/deduplication"
 	"github.com/khryptorgraphics/novacron/backend/core/storage/encryption"
 )
 
@@ -62,6 +63,9 @@ type DistributedStorageConfig struct {
 	// Whether to enable encryption by default
 	DefaultEncryption bool `json:"default_encryption"`
 
+	// Whether to enable deduplication by default
+	DefaultDeduplication bool `json:"default_deduplication"`
+
 	// Whether to enable data sharding
 	EnableSharding bool `json:"enable_sharding"`
 
@@ -88,6 +92,9 @@ type DistributedStorageConfig struct {
 
 	// Encryption configuration
 	EncryptionConfig encryption.EncryptionConfig `json:"encryption_config"`
+
+	// Deduplication configuration
+	DeduplicationConfig deduplication.DedupConfig `json:"deduplication_config"`
 }
 
 // DefaultDistributedStorageConfig returns a default configuration
@@ -97,6 +104,7 @@ func DefaultDistributedStorageConfig() DistributedStorageConfig {
 		MaxCapacity:              0, // Unlimited
 		DefaultReplicationFactor: 3,
 		DefaultEncryption:        false,
+		DefaultDeduplication:     false,
 		EnableSharding:           true,
 		ShardSize:                64 * 1024 * 1024, // 64 MB
 		ConsistencyProtocol:      "eventual",
@@ -106,6 +114,7 @@ func DefaultDistributedStorageConfig() DistributedStorageConfig {
 		SynchronousReplication:   false,
 		CompressionConfig:        compression.DefaultCompressionConfig(),
 		EncryptionConfig:         encryption.DefaultEncryptionConfig(),
+		DeduplicationConfig:      deduplication.DefaultDedupConfig(),
 	}
 }
 
@@ -149,6 +158,12 @@ type VolumeShardInfo struct {
 
 	// Whether the data is encrypted
 	IsEncrypted bool `json:"is_encrypted"`
+
+	// Deduplication information if deduplicated
+	DedupFileInfo *deduplication.DedupFileInfo `json:"dedup_file_info,omitempty"`
+
+	// Whether the data is deduplicated
+	IsDeduplicated bool `json:"is_deduplicated"`
 }
 
 // DistributedVolumeInfo extends VolumeInfo with distributed-specific data
@@ -265,6 +280,15 @@ type DistributedStorageService struct {
 
 	// Encryptor for data encryption
 	encryptor *encryption.Encryptor
+
+	// Deduplicator for data deduplication
+	deduplicator *deduplication.Deduplicator
+
+	// Mutex for synchronizing access to per-volume deduplication info
+	dedupMutex sync.RWMutex
+
+	// Deduplication info per volume (volumeID -> DedupFileInfo)
+	volumeDedupInfo map[string]map[int]*deduplication.DedupFileInfo
 }
 
 // NewDistributedStorageService creates a new distributed storage service
@@ -283,6 +307,12 @@ func NewDistributedStorageService(
 		return nil, fmt.Errorf("failed to create encryptor: %w", err)
 	}
 
+	// Create deduplicator from config
+	deduplicator, err := deduplication.NewDeduplicator(config.DeduplicationConfig)
+	if err != nil && config.DeduplicationConfig.Algorithm != deduplication.DedupNone {
+		return nil, fmt.Errorf("failed to create deduplicator: %w", err)
+	}
+
 	service := &DistributedStorageService{
 		baseManager:       baseManager,
 		config:            config,
@@ -293,6 +323,8 @@ func NewDistributedStorageService(
 		cancel:            cancel,
 		compressor:        compressor,
 		encryptor:         encryptor,
+		deduplicator:      deduplicator,
+		volumeDedupInfo:   make(map[string]map[int]*deduplication.DedupFileInfo),
 	}
 
 	return service, nil
@@ -416,6 +448,7 @@ func (s *DistributedStorageService) CreateDistributedVolume(
 			EncryptionAlgorithm:  encryption.EncryptionNone,
 			EncryptionMode:       encryption.EncryptionModeGCM,
 			IsEncrypted:          false,
+			IsDeduplicated:       false,
 		}
 	}
 	distVolume.DistInfo.Shards = shards
@@ -543,7 +576,27 @@ func (s *DistributedStorageService) ReadShard(
 				log.Printf("Decompressed shard %d (compressed: %d bytes, original: %d bytes, ratio: %.2f)",
 					shardIndex, len(resultData), len(decompressedData), shard.CompressionRatio)
 
-				return decompressedData, nil
+				resultData = decompressedData
+			}
+
+			// If the shard is deduplicated, reconstruct the original data
+			if shard.IsDeduplicated && shard.DedupFileInfo != nil {
+				// If we have deduplication info, reconstruct the data
+				s.dedupMutex.RLock()
+				dedupInfo := shard.DedupFileInfo
+				s.dedupMutex.RUnlock()
+
+				reconstructedData, err := s.deduplicator.Reconstruct(dedupInfo)
+				if err != nil {
+					log.Printf("Failed to reconstruct deduplicated shard %d: %v", shardIndex, err)
+					lastErr = err
+					continue
+				}
+
+				log.Printf("Reconstructed deduplicated shard %d (deduplicated: %d bytes, original: %d bytes, ratio: %.2f)",
+					shardIndex, len(resultData), len(reconstructedData), dedupInfo.DedupRatio)
+
+				return reconstructedData, nil
 			}
 
 			return resultData, nil
@@ -582,9 +635,41 @@ func (s *DistributedStorageService) WriteShard(
 		return ErrShardNotFound
 	}
 
-	// Compress the data if needed
+	// Process data through the pipeline: original -> deduplicated -> compressed -> encrypted
 	originalSize := int64(len(data))
-	compressedData, err := s.compressor.CompressWithMetadata(data)
+	processedData := data
+
+	// Deduplicate the data if configured
+	if s.deduplicator != nil && s.config.DefaultDeduplication && s.config.DeduplicationConfig.Algorithm != deduplication.DedupNone {
+		// Deduplicate the data
+		dedupFileInfo, err := s.deduplicator.Deduplicate(data)
+		if err != nil {
+			return fmt.Errorf("failed to deduplicate data: %w", err)
+		}
+
+		// Update shard information with deduplication metadata
+		shard.IsDeduplicated = (dedupFileInfo.Algorithm != deduplication.DedupNone) && (dedupFileInfo.DedupRatio > 1.0)
+		shard.DedupFileInfo = dedupFileInfo
+
+		// Store the deduplication info for future reconstructions
+		s.dedupMutex.Lock()
+		if _, exists := s.volumeDedupInfo[volumeID]; !exists {
+			s.volumeDedupInfo[volumeID] = make(map[int]*deduplication.DedupFileInfo)
+		}
+		s.volumeDedupInfo[volumeID][shardIndex] = dedupFileInfo
+		s.dedupMutex.Unlock()
+
+		// For the next steps in the pipeline, we need to convert the dedup info into bytes
+		// In a real implementation, this would store only the metadata for reconstruction
+		// and the actual blocks would be stored separately in the deduplication store
+		// For now, we'll just use the original data for the next steps
+
+		log.Printf("Deduplicated shard %d (algorithm: %s, ratio: %.2f, unique blocks: %d)",
+			shardIndex, dedupFileInfo.Algorithm, dedupFileInfo.DedupRatio, len(dedupFileInfo.Blocks))
+	}
+
+	// Compress the data if needed
+	compressedData, err := s.compressor.CompressWithMetadata(processedData)
 	if err != nil {
 		return fmt.Errorf("failed to compress data: %w", err)
 	}
@@ -594,7 +679,7 @@ func (s *DistributedStorageService) WriteShard(
 	shard.OriginalSize = int64(compressedData.OriginalSize)
 	shard.CompressionRatio = compressedData.CompressionRatio
 
-	// Process data through the pipeline: original -> compressed -> encrypted
+	// Process data through compression and encryption
 	dataToWrite := compressedData.Data
 
 	// Encrypt the data if configured
@@ -736,7 +821,6 @@ func (s *DistributedStorageService) RebalanceVolume(
 	defer distVolume.mu.Unlock()
 
 	// Calculate target distribution
-	// In a real implementation, this would be more sophisticated
 	targetNodesPerShard := min(len(availableNodes), s.config.DefaultReplicationFactor)
 
 	// Rebalance each shard
@@ -1245,8 +1329,6 @@ func (s *DistributedStorageService) placeShardsByZone(
 
 	return nil
 }
-
-// Helper functions
 
 // getReplicationPolicy returns the replication policy based on configuration
 func (s *DistributedStorageService) getReplicationPolicy() string {
