@@ -36,7 +36,7 @@ This document outlines the roadmap and development plan for NovaCron. It provide
 
 #### Planned Features
 - ✅ Node discovery and cluster formation
-- Distributed storage backends
+- ✅ Distributed storage backends
 - ✅ Consensus-based leader election
 - Resource-aware scheduling
 - ✅ Enhanced migration protocols for WAN migrations
@@ -46,7 +46,7 @@ This document outlines the roadmap and development plan for NovaCron. It provide
 #### Milestones
 1. ✅ Implement node discovery mechanism
 2. ✅ Develop cluster membership management
-3. Create distributed state storage
+3. ✅ Create distributed state storage
 4. Implement scheduler with resource awareness
 5. ✅ Enhance migration for cross-datacenter operations
 6. Add HA features for core services
@@ -59,6 +59,13 @@ This document outlines the roadmap and development plan for NovaCron. It provide
   - ✅ Created Raft-based consensus mechanism for leader election
   - ✅ Implemented cluster membership management with health checking
   - ✅ Built adaptable cluster formation process for different environments
+
+- **Distributed Storage**:
+  - ✅ Implemented distributed volume management with sharding
+  - ✅ Added flexible replication strategies with configurable factors
+  - ✅ Created data healing and rebalancing capabilities
+  - ✅ Integrated multiple placement strategies (random, balanced, locality-aware, zone-aware)
+  - ✅ Built health monitoring and automatic recovery mechanisms
 
 ### Phase 3: Enterprise Features (Q3-Q4 2025)
 
