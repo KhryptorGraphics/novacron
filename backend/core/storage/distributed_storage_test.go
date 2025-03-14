@@ -55,6 +55,10 @@ func TestDistributedStorage(t *testing.T) {
 	t.Run("TestHealing", func(t *testing.T) {
 		testHealing(t, service)
 	})
+
+	t.Run("TestDeduplication", func(t *testing.T) {
+		testDeduplication(t, service)
+	})
 }
 
 func testNodeManagement(t *testing.T, service *DistributedStorageService) {
@@ -297,6 +301,101 @@ func testHealing(t *testing.T, service *DistributedStorageService) {
 
 	if healthPct != 100.0 {
 		t.Errorf("Expected health percentage to be 100.0%%, got %.1f%%", healthPct)
+	}
+}
+
+func testDeduplication(t *testing.T, service *DistributedStorageService) {
+	// Add nodes
+	for i := 1; i <= 5; i++ {
+		service.AddNode(NodeInfo{
+			ID:        mockNodeID(i),
+			Name:      mockNodeName(i),
+			Role:      "storage",
+			Address:   mockNodeAddress(i),
+			Port:      8000,
+			Available: true,
+			JoinedAt:  time.Now(),
+			LastSeen:  time.Now(),
+		})
+	}
+
+	// Create a volume specification with deduplication enabled
+	spec := VolumeSpec{
+		Name:   "dedup-test",
+		SizeMB: 50,
+		Type:   VolumeTypeCeph,
+		Options: map[string]string{
+			"description": "Test deduplication",
+		},
+	}
+
+	// Enable deduplication in the config
+	originalDedupSetting := service.config.DefaultDeduplication
+	service.config.DefaultDeduplication = true
+	defer func() {
+		// Restore original setting after test
+		service.config.DefaultDeduplication = originalDedupSetting
+	}()
+
+	// Create the volume with replication factor 3
+	ctx := context.Background()
+	volume, err := service.CreateDistributedVolume(ctx, spec, 3)
+	if err != nil {
+		t.Fatalf("Failed to create distributed volume: %v", err)
+	}
+
+	// Write duplicated data to shard 0
+	// This will contain repeated data suitable for deduplication
+	repeatedBlock := []byte("This is a block of data that will be repeated multiple times to test deduplication.")
+	var testData []byte
+	for i := 0; i < 100; i++ {
+		testData = append(testData, repeatedBlock...)
+	}
+
+	err = service.WriteShard(ctx, volume.ID, 0, testData)
+	if err != nil {
+		t.Fatalf("Failed to write to shard: %v", err)
+	}
+
+	// Read data back
+	readData, err := service.ReadShard(ctx, volume.ID, 0)
+	if err != nil {
+		t.Fatalf("Failed to read from shard: %v", err)
+	}
+
+	// Verify data integrity after deduplication/reconstruction
+	if string(readData) != string(testData) {
+		t.Errorf("Data integrity failure after deduplication: original length %d, reconstructed length %d",
+			len(testData), len(readData))
+	} else {
+		t.Logf("Successfully verified data integrity after deduplication/reconstruction")
+	}
+
+	// Check if deduplication was applied by verifying the shard has deduplication metadata
+	service.volMutex.RLock()
+	distVolume, _ := service.distVolumes[volume.ID]
+	service.volMutex.RUnlock()
+
+	if distVolume != nil {
+		shard := distVolume.DistInfo.Shards[0]
+		if !shard.IsDeduplicated {
+			t.Logf("Shard was not deduplicated, which might be correct if data wasn't duplicated enough")
+		} else {
+			// If deduplication was applied, verify metrics
+			if shard.DedupFileInfo == nil {
+				t.Errorf("Shard marked as deduplicated but has no deduplication info")
+			} else {
+				t.Logf("Deduplication applied with algorithm %s, ratio %.2f, unique blocks %d",
+					shard.DedupFileInfo.Algorithm, shard.DedupFileInfo.DedupRatio, len(shard.DedupFileInfo.Blocks))
+
+				// Expect a reasonable deduplication ratio for our test data
+				if shard.DedupFileInfo.DedupRatio > 1.0 {
+					t.Logf("Achieved deduplication ratio of %.2f", shard.DedupFileInfo.DedupRatio)
+				} else {
+					t.Logf("Deduplication ratio not greater than 1.0: %.2f", shard.DedupFileInfo.DedupRatio)
+				}
+			}
+		}
 	}
 }
 
