@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/khryptorgraphics/novacron/backend/core/storage/compression"
+	"github.com/khryptorgraphics/novacron/backend/core/storage/encryption"
 )
 
 // NodeInfo represents information about a storage node
@@ -84,6 +85,9 @@ type DistributedStorageConfig struct {
 
 	// Compression configuration
 	CompressionConfig compression.CompressionConfig `json:"compression_config"`
+
+	// Encryption configuration
+	EncryptionConfig encryption.EncryptionConfig `json:"encryption_config"`
 }
 
 // DefaultDistributedStorageConfig returns a default configuration
@@ -101,6 +105,7 @@ func DefaultDistributedStorageConfig() DistributedStorageConfig {
 		HealingInterval:          1 * time.Hour,
 		SynchronousReplication:   false,
 		CompressionConfig:        compression.DefaultCompressionConfig(),
+		EncryptionConfig:         encryption.DefaultEncryptionConfig(),
 	}
 }
 
@@ -135,6 +140,15 @@ type VolumeShardInfo struct {
 
 	// Compression ratio achieved
 	CompressionRatio float64 `json:"compression_ratio"`
+
+	// Encryption algorithm used (if any)
+	EncryptionAlgorithm encryption.EncryptionAlgorithm `json:"encryption_algorithm"`
+
+	// Encryption mode used (if any)
+	EncryptionMode encryption.EncryptionMode `json:"encryption_mode"`
+
+	// Whether the data is encrypted
+	IsEncrypted bool `json:"is_encrypted"`
 }
 
 // DistributedVolumeInfo extends VolumeInfo with distributed-specific data
@@ -248,6 +262,9 @@ type DistributedStorageService struct {
 
 	// Compressor for data compression
 	compressor *compression.Compressor
+
+	// Encryptor for data encryption
+	encryptor *encryption.Encryptor
 }
 
 // NewDistributedStorageService creates a new distributed storage service
@@ -260,6 +277,12 @@ func NewDistributedStorageService(
 	// Create compressor from config
 	compressor := compression.NewCompressor(config.CompressionConfig)
 
+	// Create encryptor from config
+	encryptor, err := encryption.NewEncryptor(config.EncryptionConfig)
+	if err != nil && config.EncryptionConfig.Algorithm != encryption.EncryptionNone {
+		return nil, fmt.Errorf("failed to create encryptor: %w", err)
+	}
+
 	service := &DistributedStorageService{
 		baseManager:       baseManager,
 		config:            config,
@@ -269,6 +292,7 @@ func NewDistributedStorageService(
 		ctx:               ctx,
 		cancel:            cancel,
 		compressor:        compressor,
+		encryptor:         encryptor,
 	}
 
 	return service, nil
@@ -389,6 +413,9 @@ func (s *DistributedStorageService) CreateDistributedVolume(
 			CompressionAlgorithm: compression.CompressionNone,
 			OriginalSize:         0,
 			CompressionRatio:     1.0,
+			EncryptionAlgorithm:  encryption.EncryptionNone,
+			EncryptionMode:       encryption.EncryptionModeGCM,
+			IsEncrypted:          false,
 		}
 	}
 	distVolume.DistInfo.Shards = shards
@@ -476,13 +503,37 @@ func (s *DistributedStorageService) ReadShard(
 		// In a real implementation, this would connect to the node and read the shard
 		// For now, simulate reading from the local filesystem
 		shardPath := filepath.Join(s.config.RootDir, volumeID, fmt.Sprintf("shard_%d", shardIndex))
-		compressedData, err := os.ReadFile(shardPath)
+		encryptedData, err := os.ReadFile(shardPath)
 		if err == nil {
 			log.Printf("Read shard %d from node %s", shardIndex, nodeID)
 
+			var resultData []byte = encryptedData
+
+			// If the shard is encrypted, decrypt it
+			if shard.IsEncrypted {
+				// Create encrypted data structure
+				encData := &encryption.EncryptedData{
+					Data:      encryptedData,
+					Algorithm: shard.EncryptionAlgorithm,
+					Mode:      shard.EncryptionMode,
+					// IV and other fields are stored in the data itself
+				}
+
+				decryptedData, err := s.encryptor.Decrypt(encData, volumeID)
+				if err != nil {
+					log.Printf("Failed to decrypt shard %d: %v", shardIndex, err)
+					lastErr = err
+					continue
+				}
+
+				log.Printf("Decrypted shard %d (algorithm: %s, mode: %s)",
+					shardIndex, shard.EncryptionAlgorithm, shard.EncryptionMode)
+				resultData = decryptedData
+			}
+
 			// If the shard is compressed, decompress it
 			if shard.CompressionAlgorithm != compression.CompressionNone {
-				decompressedData, err := s.compressor.Decompress(compressedData, shard.CompressionAlgorithm)
+				decompressedData, err := s.compressor.Decompress(resultData, shard.CompressionAlgorithm)
 				if err != nil {
 					log.Printf("Failed to decompress shard %d: %v", shardIndex, err)
 					lastErr = err
@@ -490,12 +541,12 @@ func (s *DistributedStorageService) ReadShard(
 				}
 
 				log.Printf("Decompressed shard %d (compressed: %d bytes, original: %d bytes, ratio: %.2f)",
-					shardIndex, len(compressedData), len(decompressedData), shard.CompressionRatio)
+					shardIndex, len(resultData), len(decompressedData), shard.CompressionRatio)
 
 				return decompressedData, nil
 			}
 
-			return compressedData, nil
+			return resultData, nil
 		}
 		lastErr = err
 	}
@@ -543,8 +594,30 @@ func (s *DistributedStorageService) WriteShard(
 	shard.OriginalSize = int64(compressedData.OriginalSize)
 	shard.CompressionRatio = compressedData.CompressionRatio
 
-	// Calculate checksum of compressed data
-	checksum := calculateChecksum(compressedData.Data)
+	// Process data through the pipeline: original -> compressed -> encrypted
+	dataToWrite := compressedData.Data
+
+	// Encrypt the data if configured
+	if s.encryptor != nil && s.config.DefaultEncryption && s.config.EncryptionConfig.Algorithm != encryption.EncryptionNone {
+		encryptedData, err := s.encryptor.Encrypt(dataToWrite, volumeID)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt data: %w", err)
+		}
+
+		// Update shard information with encryption metadata
+		shard.EncryptionAlgorithm = encryptedData.Algorithm
+		shard.EncryptionMode = encryptedData.Mode
+		shard.IsEncrypted = (encryptedData.Algorithm != encryption.EncryptionNone)
+
+		// Use the encrypted data for writing
+		dataToWrite = encryptedData.Data
+
+		log.Printf("Encrypted shard %d (algorithm: %s, mode: %s)",
+			shardIndex, encryptedData.Algorithm, encryptedData.Mode)
+	}
+
+	// Calculate checksum of final data
+	checksum := calculateChecksum(dataToWrite)
 	shard.Checksum = checksum
 
 	// Write to all replicas
@@ -558,15 +631,23 @@ func (s *DistributedStorageService) WriteShard(
 			lastErr = err
 			continue
 		}
-		if err := os.WriteFile(shardPath, compressedData.Data, 0644); err != nil {
+		if err := os.WriteFile(shardPath, dataToWrite, 0644); err != nil {
 			lastErr = err
 			continue
 		}
 
-		// Log compression ratio if using compression
-		if compressedData.Algorithm != compression.CompressionNone {
+		// Log operation details
+		if shard.IsEncrypted {
+			if compressedData.Algorithm != compression.CompressionNone {
+				log.Printf("Wrote shard %d to node %s (original: %d bytes, compressed: %d bytes, encrypted: %d bytes)",
+					shardIndex, nodeID, originalSize, len(compressedData.Data), len(dataToWrite))
+			} else {
+				log.Printf("Wrote shard %d to node %s (original: %d bytes, encrypted: %d bytes)",
+					shardIndex, nodeID, originalSize, len(dataToWrite))
+			}
+		} else if compressedData.Algorithm != compression.CompressionNone {
 			log.Printf("Wrote shard %d to node %s (compressed: %d → %d bytes, ratio: %.2f)",
-				shardIndex, nodeID, originalSize, len(compressedData.Data), compressedData.CompressionRatio)
+				shardIndex, nodeID, originalSize, len(dataToWrite), compressedData.CompressionRatio)
 		} else {
 			log.Printf("Wrote shard %d to node %s (uncompressed: %d bytes)",
 				shardIndex, nodeID, len(data))
