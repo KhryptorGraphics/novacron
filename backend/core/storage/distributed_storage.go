@@ -12,6 +12,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/khryptorgraphics/novacron/backend/core/storage/compression"
 )
 
 // NodeInfo represents information about a storage node
@@ -79,6 +81,9 @@ type DistributedStorageConfig struct {
 
 	// Whether to enable synchronous replication
 	SynchronousReplication bool `json:"synchronous_replication"`
+
+	// Compression configuration
+	CompressionConfig compression.CompressionConfig `json:"compression_config"`
 }
 
 // DefaultDistributedStorageConfig returns a default configuration
@@ -95,6 +100,7 @@ func DefaultDistributedStorageConfig() DistributedStorageConfig {
 		HealthCheckInterval:      1 * time.Minute,
 		HealingInterval:          1 * time.Hour,
 		SynchronousReplication:   false,
+		CompressionConfig:        compression.DefaultCompressionConfig(),
 	}
 }
 
@@ -120,6 +126,15 @@ type VolumeShardInfo struct {
 
 	// When the shard was last verified
 	LastVerified time.Time `json:"last_verified"`
+
+	// Compression algorithm used (if any)
+	CompressionAlgorithm compression.CompressionAlgorithm `json:"compression_algorithm"`
+
+	// Original uncompressed size
+	OriginalSize int64 `json:"original_size"`
+
+	// Compression ratio achieved
+	CompressionRatio float64 `json:"compression_ratio"`
 }
 
 // DistributedVolumeInfo extends VolumeInfo with distributed-specific data
@@ -230,6 +245,9 @@ type DistributedStorageService struct {
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// Compressor for data compression
+	compressor *compression.Compressor
 }
 
 // NewDistributedStorageService creates a new distributed storage service
@@ -239,6 +257,9 @@ func NewDistributedStorageService(
 ) (*DistributedStorageService, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Create compressor from config
+	compressor := compression.NewCompressor(config.CompressionConfig)
+
 	service := &DistributedStorageService{
 		baseManager:       baseManager,
 		config:            config,
@@ -247,6 +268,7 @@ func NewDistributedStorageService(
 		placementStrategy: ShardPlacementBalanced,
 		ctx:               ctx,
 		cancel:            cancel,
+		compressor:        compressor,
 	}
 
 	return service, nil
@@ -357,13 +379,16 @@ func (s *DistributedStorageService) CreateDistributedVolume(
 	shards := make([]VolumeShardInfo, distVolume.DistInfo.ShardCount)
 	for i := 0; i < distVolume.DistInfo.ShardCount; i++ {
 		shards[i] = VolumeShardInfo{
-			ID:           generateShardID(volume.ID, i),
-			Index:        i,
-			Size:         s.config.ShardSize,
-			Checksum:     "",
-			NodeIDs:      []string{},
-			NeedsHealing: false,
-			LastVerified: time.Now(),
+			ID:                   generateShardID(volume.ID, i),
+			Index:                i,
+			Size:                 s.config.ShardSize,
+			Checksum:             "",
+			NodeIDs:              []string{},
+			NeedsHealing:         false,
+			LastVerified:         time.Now(),
+			CompressionAlgorithm: compression.CompressionNone,
+			OriginalSize:         0,
+			CompressionRatio:     1.0,
 		}
 	}
 	distVolume.DistInfo.Shards = shards
@@ -451,10 +476,26 @@ func (s *DistributedStorageService) ReadShard(
 		// In a real implementation, this would connect to the node and read the shard
 		// For now, simulate reading from the local filesystem
 		shardPath := filepath.Join(s.config.RootDir, volumeID, fmt.Sprintf("shard_%d", shardIndex))
-		data, err := os.ReadFile(shardPath)
+		compressedData, err := os.ReadFile(shardPath)
 		if err == nil {
 			log.Printf("Read shard %d from node %s", shardIndex, nodeID)
-			return data, nil
+
+			// If the shard is compressed, decompress it
+			if shard.CompressionAlgorithm != compression.CompressionNone {
+				decompressedData, err := s.compressor.Decompress(compressedData, shard.CompressionAlgorithm)
+				if err != nil {
+					log.Printf("Failed to decompress shard %d: %v", shardIndex, err)
+					lastErr = err
+					continue
+				}
+
+				log.Printf("Decompressed shard %d (compressed: %d bytes, original: %d bytes, ratio: %.2f)",
+					shardIndex, len(compressedData), len(decompressedData), shard.CompressionRatio)
+
+				return decompressedData, nil
+			}
+
+			return compressedData, nil
 		}
 		lastErr = err
 	}
@@ -490,8 +531,20 @@ func (s *DistributedStorageService) WriteShard(
 		return ErrShardNotFound
 	}
 
-	// Calculate checksum
-	checksum := calculateChecksum(data)
+	// Compress the data if needed
+	originalSize := int64(len(data))
+	compressedData, err := s.compressor.CompressWithMetadata(data)
+	if err != nil {
+		return fmt.Errorf("failed to compress data: %w", err)
+	}
+
+	// Update shard information with compression metadata
+	shard.CompressionAlgorithm = compressedData.Algorithm
+	shard.OriginalSize = int64(compressedData.OriginalSize)
+	shard.CompressionRatio = compressedData.CompressionRatio
+
+	// Calculate checksum of compressed data
+	checksum := calculateChecksum(compressedData.Data)
 	shard.Checksum = checksum
 
 	// Write to all replicas
@@ -505,11 +558,20 @@ func (s *DistributedStorageService) WriteShard(
 			lastErr = err
 			continue
 		}
-		if err := os.WriteFile(shardPath, data, 0644); err != nil {
+		if err := os.WriteFile(shardPath, compressedData.Data, 0644); err != nil {
 			lastErr = err
 			continue
 		}
-		log.Printf("Wrote shard %d to node %s", shardIndex, nodeID)
+
+		// Log compression ratio if using compression
+		if compressedData.Algorithm != compression.CompressionNone {
+			log.Printf("Wrote shard %d to node %s (compressed: %d → %d bytes, ratio: %.2f)",
+				shardIndex, nodeID, originalSize, len(compressedData.Data), compressedData.CompressionRatio)
+		} else {
+			log.Printf("Wrote shard %d to node %s (uncompressed: %d bytes)",
+				shardIndex, nodeID, len(data))
+		}
+
 		successCount++
 
 		// For synchronous replication, break after first success
