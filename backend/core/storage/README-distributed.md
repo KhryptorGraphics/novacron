@@ -193,6 +193,34 @@ The system supports two replication modes:
 
 ## Implemented Enhancements
 
+### End-to-End Encryption
+
+The distributed storage system now includes robust end-to-end encryption capabilities:
+
+- **Multiple Encryption Algorithms**: Support for AES-256, AES-192, and AES-128
+- **Multiple Encryption Modes**: Support for GCM (authenticated), CBC, and CTR modes
+- **Volume-Specific Keys**: Each volume has a unique encryption key derived from the master key
+- **Transparent Operation**: Encryption and decryption happen automatically during reads and writes
+- **Key Verification**: Includes verification data to detect incorrect keys
+- **Size-Based Policy**: Option to only encrypt data above a configurable size threshold
+
+#### Configuration Options
+
+```go
+config := DefaultDistributedStorageConfig()
+config.EncryptionConfig.Algorithm = encryption.EncryptionAES256
+config.EncryptionConfig.Mode = encryption.EncryptionModeGCM
+config.EncryptionConfig.MasterKey = "your-secure-master-key"
+config.EncryptionConfig.MinSizeBytes = 1024  // Only encrypt data >= 1KB
+config.EncryptionConfig.IncludeVerification = true
+```
+
+#### Security Features
+
+- **Per-Volume Isolation**: Even with the same master key, each volume uses a different derived key
+- **Authenticated Encryption**: When using GCM mode, data integrity is automatically verified
+- **Defense in Depth**: Combined with network security and permissions, provides multiple security layers
+
 ### Data Compression
 
 The distributed storage system includes built-in data compression capabilities that significantly reduce storage requirements while maintaining data integrity:
@@ -229,7 +257,6 @@ fmt.Printf("Compression ratio: %.2f\n", shard.CompressionRatio)
 
 ## Future Enhancements
 
-1. **Enhanced Encryption**: Add end-to-end encryption for sensitive data
-2. **Deduplication**: Implement block-level deduplication across volumes
-3. **Dynamic Shard Sizes**: Adjust shard sizes based on access patterns
-4. **Tiered Storage**: Automatically move hot/cold data between different storage tiers
+1. **Deduplication**: Implement block-level deduplication across volumes
+2. **Dynamic Shard Sizes**: Adjust shard sizes based on access patterns
+3. **Tiered Storage**: Automatically move hot/cold data between different storage tiers
