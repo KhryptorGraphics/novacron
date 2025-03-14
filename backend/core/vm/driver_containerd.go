@@ -1,0 +1,467 @@
+package vm
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/containerd/containerd"
+	"github.com/containerd/containerd/cio"
+	"github.com/containerd/containerd/containers"
+	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/containerd/namespaces"
+	"github.com/containerd/containerd/oci"
+	"github.com/containerd/typeurl"
+	specs "github.com/opencontainers/runtime-spec/specs-go"
+)
+
+// ContainerdDriver implements the VMDriver interface for containerd-based VMs
+type ContainerdDriver struct {
+	nodeID      string
+	client      *containerd.Client
+	namespace   string
+	containers  map[string]containerd.Container
+	containerLock sync.RWMutex
+}
+
+// NewContainerdDriver creates a new containerd driver
+func NewContainerdDriver(nodeID string, address string, namespace string) (*ContainerdDriver, error) {
+	// Create containerd client
+	client, err := containerd.New(address)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to containerd: %w", err)
+	}
+	
+	return &ContainerdDriver{
+		nodeID:     nodeID,
+		client:     client,
+		namespace:  namespace,
+		containers: make(map[string]containerd.Container),
+	}, nil
+}
+
+// Create creates a new containerd container VM
+func (d *ContainerdDriver) Create(ctx context.Context, spec VMSpec) (string, error) {
+	log.Printf("Creating containerd VM with image %s", spec.Image)
+	
+	// Set namespace
+	ctx = namespaces.WithNamespace(ctx, d.namespace)
+	
+	// Generate a unique container ID
+	containerID := fmt.Sprintf("novacron-%s-%s", spec.Type, strconv.FormatInt(time.Now().UnixNano(), 16))
+	
+	// Pull the image
+	image, err := d.client.Pull(ctx, spec.Image, containerd.WithPullUnpack)
+	if err != nil {
+		return "", fmt.Errorf("failed to pull image %s: %w", spec.Image, err)
+	}
+	
+	// Create container spec
+	containerSpec := oci.WithDefaultSpec()
+	
+	// Add customizations based on VM spec
+	opts := []oci.SpecOpts{
+		containerSpec,
+		oci.WithImageConfig(image),
+	}
+	
+	// Add resource limits if specified
+	if spec.VCPU > 0 || spec.MemoryMB > 0 {
+		resources := &specs.LinuxResources{}
+		
+		// CPU limits
+		if spec.VCPU > 0 {
+			resources.CPU = &specs.LinuxCPU{
+				Quota:  int64(spec.VCPU * 100000),
+				Period: 100000,
+			}
+		}
+		
+		// Memory limits
+		if spec.MemoryMB > 0 {
+			resources.Memory = &specs.LinuxMemory{
+				Limit: int64(spec.MemoryMB * 1024 * 1024),
+			}
+		}
+		
+		opts = append(opts, oci.WithResources(resources))
+	}
+	
+	// Environment variables
+	if len(spec.Env) > 0 {
+		env := make([]string, 0, len(spec.Env))
+		for k, v := range spec.Env {
+			env = append(env, fmt.Sprintf("%s=%s", k, v))
+		}
+		opts = append(opts, oci.WithEnv(env))
+	}
+	
+	// Mounts for volumes
+	if len(spec.Volumes) > 0 {
+		mounts := make([]specs.Mount, 0, len(spec.Volumes))
+		for _, vol := range spec.Volumes {
+			options := []string{"rbind"}
+			if vol.ReadOnly {
+				options = append(options, "ro")
+			} else {
+				options = append(options, "rw")
+			}
+			
+			mounts = append(mounts, specs.Mount{
+				Source:      vol.VolumeID,
+				Destination: vol.Path,
+				Type:        "bind",
+				Options:     options,
+			})
+		}
+		opts = append(opts, oci.WithMounts(mounts))
+	}
+	
+	// Create container
+	container, err := d.client.NewContainer(
+		ctx,
+		containerID,
+		containerd.WithImage(image),
+		containerd.WithNewSpec(opts...),
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to create container: %w", err)
+	}
+	
+	// Store container reference
+	d.containerLock.Lock()
+	d.containers[containerID] = container
+	d.containerLock.Unlock()
+	
+	log.Printf("Created containerd VM %s", containerID)
+	return containerID, nil
+}
+
+// Start starts a containerd container VM
+func (d *ContainerdDriver) Start(ctx context.Context, vmID string) error {
+	log.Printf("Starting containerd VM %s", vmID)
+	
+	// Set namespace
+	ctx = namespaces.WithNamespace(ctx, d.namespace)
+	
+	// Get container
+	container, err := d.getContainer(ctx, vmID)
+	if err != nil {
+		return err
+	}
+	
+	// Check if container is already running
+	task, err := container.Task(ctx, nil)
+	if err == nil {
+		// Task exists, check if it's running
+		status, err := task.Status(ctx)
+		if err == nil && status.Status == containerd.Running {
+			// Already running
+			return nil
+		}
+		
+		// If task exists but is not running, try to restart it
+		if err == nil && status.Status != containerd.Unknown {
+			// Delete the existing task
+			_, err = task.Delete(ctx)
+			if err != nil {
+				log.Printf("Warning: Failed to delete existing task for container %s: %v", vmID, err)
+			}
+		}
+	} else if !errdefs.IsNotFound(err) {
+		return fmt.Errorf("failed to check container task: %w", err)
+	}
+	
+	// Create new task
+	task, err = container.NewTask(ctx, cio.NewCreator(
+		cio.WithStdio,
+		cio.WithLogFile(fmt.Sprintf("/tmp/novacron-%s.log", vmID)),
+	))
+	if err != nil {
+		return fmt.Errorf("failed to create task: %w", err)
+	}
+	
+	// Start the task
+	err = task.Start(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start task: %w", err)
+	}
+	
+	log.Printf("Started containerd VM %s with PID %d", vmID, task.Pid())
+	return nil
+}
+
+// Stop stops a containerd container VM
+func (d *ContainerdDriver) Stop(ctx context.Context, vmID string) error {
+	log.Printf("Stopping containerd VM %s", vmID)
+	
+	// Set namespace
+	ctx = namespaces.WithNamespace(ctx, d.namespace)
+	
+	// Get container
+	container, err := d.getContainer(ctx, vmID)
+	if err != nil {
+		return err
+	}
+	
+	// Get task
+	task, err := container.Task(ctx, nil)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			// No task, consider it stopped
+			return nil
+		}
+		return fmt.Errorf("failed to get task: %w", err)
+	}
+	
+	// Check status
+	status, err := task.Status(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get task status: %w", err)
+	}
+	
+	if status.Status == containerd.Stopped {
+		// Already stopped
+		return nil
+	}
+	
+	// Set a timeout for graceful stop
+	stopCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	
+	// Try graceful stop
+	exitCh, err := task.Wait(stopCtx)
+	if err != nil {
+		return fmt.Errorf("failed to wait for task: %w", err)
+	}
+	
+	// Send SIGTERM
+	if err := task.Kill(stopCtx, syscall.SIGTERM); err != nil {
+		log.Printf("Failed to send SIGTERM to task %s: %v", vmID, err)
+	}
+	
+	// Wait for exit or timeout
+	select {
+	case <-exitCh:
+		// Task exited
+	case <-stopCtx.Done():
+		// Timeout, force kill
+		if err := task.Kill(ctx, syscall.SIGKILL); err != nil {
+			log.Printf("Failed to force kill task %s: %v", vmID, err)
+		}
+	}
+	
+	// Delete the task
+	_, err = task.Delete(ctx)
+	if err != nil {
+		log.Printf("Warning: Failed to delete task for container %s: %v", vmID, err)
+	}
+	
+	log.Printf("Stopped containerd VM %s", vmID)
+	return nil
+}
+
+// Delete deletes a containerd container VM
+func (d *ContainerdDriver) Delete(ctx context.Context, vmID string) error {
+	log.Printf("Deleting containerd VM %s", vmID)
+	
+	// Set namespace
+	ctx = namespaces.WithNamespace(ctx, d.namespace)
+	
+	// Stop the container first
+	_ = d.Stop(ctx, vmID) // Ignore error, it might already be stopped
+	
+	// Get container
+	container, err := d.getContainer(ctx, vmID)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			// Container not found, remove from our map just in case
+			d.containerLock.Lock()
+			delete(d.containers, vmID)
+			d.containerLock.Unlock()
+			return nil
+		}
+		return err
+	}
+	
+	// Delete container
+	err = container.Delete(ctx, containerd.WithSnapshotCleanup)
+	if err != nil {
+		return fmt.Errorf("failed to delete container: %w", err)
+	}
+	
+	// Remove from our map
+	d.containerLock.Lock()
+	delete(d.containers, vmID)
+	d.containerLock.Unlock()
+	
+	log.Printf("Deleted containerd VM %s", vmID)
+	return nil
+}
+
+// GetStatus gets the status of a containerd container VM
+func (d *ContainerdDriver) GetStatus(ctx context.Context, vmID string) (VMState, error) {
+	// Set namespace
+	ctx = namespaces.WithNamespace(ctx, d.namespace)
+	
+	// Get container
+	container, err := d.getContainer(ctx, vmID)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return VMStateUnknown, fmt.Errorf("container %s not found", vmID)
+		}
+		return VMStateUnknown, err
+	}
+	
+	// Get task
+	task, err := container.Task(ctx, nil)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			// No task, consider it stopped
+			return VMStateStopped, nil
+		}
+		return VMStateUnknown, fmt.Errorf("failed to get task: %w", err)
+	}
+	
+	// Get status
+	status, err := task.Status(ctx)
+	if err != nil {
+		return VMStateUnknown, fmt.Errorf("failed to get task status: %w", err)
+	}
+	
+	// Map containerd status to VM state
+	switch status.Status {
+	case containerd.Running:
+		return VMStateRunning, nil
+	case containerd.Stopped:
+		return VMStateStopped, nil
+	case containerd.Paused:
+		return VMStatePaused, nil
+	case containerd.Pausing:
+		return VMStatePaused, nil
+	default:
+		return VMStateUnknown, nil
+	}
+}
+
+// GetInfo gets information about a containerd container VM
+func (d *ContainerdDriver) GetInfo(ctx context.Context, vmID string) (*VM, error) {
+	// Set namespace
+	ctx = namespaces.WithNamespace(ctx, d.namespace)
+	
+	// Get container
+	container, err := d.getContainer(ctx, vmID)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Get current status
+	status, err := d.GetStatus(ctx, vmID)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Get container info
+	info, err := container.Info(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get container info: %w", err)
+	}
+	
+	// Get spec from container info
+	var spec specs.Spec
+	if info.Spec != nil {
+		v, err := typeurl.UnmarshalAny(info.Spec)
+		if err == nil {
+			spec = *v.(*specs.Spec)
+		}
+	}
+	
+	// Create basic VM info
+	vm := &VM{
+		ID:        vmID,
+		Name:      vmID,
+		State:     status,
+		NodeID:    d.nodeID,
+		UpdatedAt: time.Now(),
+		Spec: VMSpec{
+			Type:  VMTypeContainerd,
+			Image: info.Image,
+		},
+	}
+	
+	// Add process info if running
+	if status == VMStateRunning {
+		task, err := container.Task(ctx, nil)
+		if err == nil {
+			pid := task.Pid()
+			startTime := time.Time{}
+			if info.CreatedAt != nil {
+				startTime = info.CreatedAt.AsTime()
+			}
+			
+			vm.ProcessInfo = VMProcessInfo{
+				PID:           int(pid),
+				StartTime:     startTime,
+				LastUpdatedAt: time.Now(),
+			}
+			
+			// Get metrics
+			metrics, err := task.Metrics(ctx)
+			if err == nil && metrics != nil {
+				// Process metrics (implementation dependent on the metrics format)
+				if data, err := typeurl.UnmarshalAny(metrics.Data); err == nil {
+					// This would depend on the metrics format provided by containerd
+					// In a real implementation, we would extract:
+					// - CPU usage
+					// - Memory usage
+					// - Network stats
+					// - etc.
+					
+					// For demonstration, we'll just log the metrics type
+					log.Printf("Metrics type for container %s: %T", vmID, data)
+				}
+			}
+		}
+	}
+	
+	return vm, nil
+}
+
+// Helper function to get a container by ID
+func (d *ContainerdDriver) getContainer(ctx context.Context, vmID string) (containerd.Container, error) {
+	// First check our cache
+	d.containerLock.RLock()
+	container, exists := d.containers[vmID]
+	d.containerLock.RUnlock()
+	
+	if exists {
+		return container, nil
+	}
+	
+	// Not in cache, try to get from containerd
+	container, err := d.client.LoadContainer(ctx, vmID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load container: %w", err)
+	}
+	
+	// Add to cache
+	d.containerLock.Lock()
+	d.containers[vmID] = container
+	d.containerLock.Unlock()
+	
+	return container, nil
+}
+
+// Close closes the containerd client connection
+func (d *ContainerdDriver) Close() error {
+	if d.client != nil {
+		return d.client.Close()
+	}
+	return nil
+}

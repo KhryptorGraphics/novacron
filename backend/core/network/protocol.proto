@@ -1,0 +1,412 @@
+syntax = "proto3";
+package novacron.network;
+
+option go_package = "github.com/novacron/novacron/backend/core/network";
+
+// Common message types
+
+// NodeInfo represents information about a node in the network
+message NodeInfo {
+  string id = 1;
+  string name = 2;
+  string role = 3;
+  string address = 4;
+  int32 port = 5;
+  map<string, string> tags = 6;
+  int64 joined_timestamp = 7;
+  int64 last_seen_timestamp = 8;
+  bool available = 9;
+  ResourceInfo resources = 10;
+}
+
+// ResourceInfo represents a node's resource information
+message ResourceInfo {
+  CpuInfo cpu = 1;
+  MemoryInfo memory = 2;
+  repeated DiskInfo disks = 3;
+  repeated NetworkInterfaceInfo network_interfaces = 4;
+  float load_average_1m = 5;
+  float load_average_5m = 6;
+  float load_average_15m = 7;
+}
+
+// CpuInfo represents CPU information
+message CpuInfo {
+  int32 cores = 1;
+  float utilization_percent = 2;
+  string model = 3;
+  string architecture = 4;
+  float clock_speed_mhz = 5;
+}
+
+// MemoryInfo represents memory information
+message MemoryInfo {
+  int64 total_bytes = 1;
+  int64 used_bytes = 2;
+  int64 free_bytes = 3;
+  float utilization_percent = 4;
+}
+
+// DiskInfo represents disk information
+message DiskInfo {
+  string device = 1;
+  string mount_point = 2;
+  int64 total_bytes = 3;
+  int64 used_bytes = 4;
+  int64 free_bytes = 5;
+  float utilization_percent = 6;
+  string filesystem_type = 7;
+}
+
+// NetworkInterfaceInfo represents network interface information
+message NetworkInterfaceInfo {
+  string name = 1;
+  repeated string addresses = 2;
+  int64 rx_bytes = 3;
+  int64 tx_bytes = 4;
+  int64 rx_packets = 5;
+  int64 tx_packets = 6;
+  int64 rx_errors = 7;
+  int64 tx_errors = 8;
+}
+
+// VmInfo represents VM information
+message VmInfo {
+  string id = 1;
+  string name = 2;
+  string owner = 3;
+  VmState state = 4;
+  string image = 5;
+  VmResources resources = 6;
+  repeated VmNetworkInterface network_interfaces = 7;
+  repeated VmVolume volumes = 8;
+  string node_id = 9;
+  int64 created_timestamp = 10;
+  int64 last_state_change_timestamp = 11;
+  map<string, string> tags = 12;
+}
+
+// VmState represents VM state
+enum VmState {
+  VM_STATE_UNKNOWN = 0;
+  VM_STATE_CREATING = 1;
+  VM_STATE_CREATED = 2;
+  VM_STATE_STARTING = 3;
+  VM_STATE_RUNNING = 4;
+  VM_STATE_STOPPING = 5;
+  VM_STATE_STOPPED = 6;
+  VM_STATE_RESTARTING = 7;
+  VM_STATE_MIGRATING = 8;
+  VM_STATE_DELETING = 9;
+  VM_STATE_DELETED = 10;
+  VM_STATE_ERROR = 11;
+}
+
+// VmResources represents VM resource allocation
+message VmResources {
+  int32 vcpus = 1;
+  int64 memory_mb = 2;
+  int64 disk_mb = 3;
+}
+
+// VmNetworkInterface represents a VM network interface
+message VmNetworkInterface {
+  string id = 1;
+  string mac_address = 2;
+  string ip_address = 3;
+  string network_id = 4;
+}
+
+// VmVolume represents a VM volume
+message VmVolume {
+  string id = 1;
+  string device = 2;
+  int64 size_mb = 3;
+  VolumeType type = 4;
+}
+
+// VolumeType represents a volume type
+enum VolumeType {
+  VOLUME_TYPE_UNKNOWN = 0;
+  VOLUME_TYPE_OS = 1;
+  VOLUME_TYPE_DATA = 2;
+  VOLUME_TYPE_EPHEMERAL = 3;
+}
+
+// Handshake messages
+
+// Handshake is sent when initiating a connection
+message Handshake {
+  string node_id = 1;
+  string protocol_version = 2;
+  string public_key = 3;
+  repeated string supported_features = 4;
+}
+
+// HandshakeResponse is sent in response to a handshake
+message HandshakeResponse {
+  string node_id = 1;
+  string protocol_version = 2;
+  string public_key = 3;
+  repeated string supported_features = 4;
+  bool accepted = 5;
+  string rejection_reason = 6;
+}
+
+// Node state messages
+
+// NodeStateRequest requests node state information
+message NodeStateRequest {
+  repeated string node_ids = 1;
+  bool include_resources = 2;
+}
+
+// NodeStateResponse responds with node state information
+message NodeStateResponse {
+  repeated NodeInfo nodes = 1;
+  repeated string unavailable_node_ids = 2;
+}
+
+// NodeStateUpdate is a push notification of node state change
+message NodeStateUpdate {
+  NodeInfo node = 1;
+  string update_type = 2; // "join", "leave", "update"
+}
+
+// VM operation messages
+
+// VmCreateRequest requests VM creation
+message VmCreateRequest {
+  string request_id = 1;
+  string name = 2;
+  string owner = 3;
+  string image = 4;
+  VmResources resources = 5;
+  repeated VmNetworkInterface network_interfaces = 6;
+  repeated VmVolume volumes = 7;
+  map<string, string> tags = 8;
+  map<string, string> parameters = 9;
+  string preferred_node_id = 10;
+}
+
+// VmCreateResponse responds to a VM creation request
+message VmCreateResponse {
+  string request_id = 1;
+  bool success = 2;
+  string error_message = 3;
+  VmInfo vm = 4;
+}
+
+// VmOperationRequest requests a VM operation
+message VmOperationRequest {
+  string request_id = 1;
+  string vm_id = 2;
+  VmOperation operation = 3;
+  map<string, string> parameters = 4;
+}
+
+// VmOperation represents a VM operation type
+enum VmOperation {
+  VM_OPERATION_UNKNOWN = 0;
+  VM_OPERATION_START = 1;
+  VM_OPERATION_STOP = 2;
+  VM_OPERATION_RESTART = 3;
+  VM_OPERATION_DELETE = 4;
+  VM_OPERATION_MIGRATE = 5;
+  VM_OPERATION_RESIZE = 6;
+  VM_OPERATION_SNAPSHOT = 7;
+}
+
+// VmOperationResponse responds to a VM operation request
+message VmOperationResponse {
+  string request_id = 1;
+  bool success = 2;
+  string error_message = 3;
+  VmInfo vm = 4;
+}
+
+// VmStateUpdate is a push notification of VM state change
+message VmStateUpdate {
+  VmInfo vm = 1;
+  VmState previous_state = 2;
+  VmState new_state = 3;
+}
+
+// Task distribution and scheduling
+
+// TaskDistribution distributes a task across nodes
+message TaskDistribution {
+  string task_id = 1;
+  string task_type = 2;
+  bytes task_data = 3;
+  map<string, string> parameters = 4;
+  repeated string target_node_ids = 5;
+  int64 timeout_ms = 6;
+  int64 expires_at = 7;
+  TaskPriority priority = 8;
+}
+
+// TaskPriority represents task priority levels
+enum TaskPriority {
+  TASK_PRIORITY_UNKNOWN = 0;
+  TASK_PRIORITY_LOW = 1;
+  TASK_PRIORITY_NORMAL = 2;
+  TASK_PRIORITY_HIGH = 3;
+  TASK_PRIORITY_CRITICAL = 4;
+}
+
+// TaskResult returns the result of a task
+message TaskResult {
+  string task_id = 1;
+  string node_id = 2;
+  bool success = 3;
+  string error_message = 4;
+  bytes result_data = 5;
+  int64 execution_time_ms = 6;
+}
+
+// Migration messages
+
+// MigrationInitiate initiates VM migration
+message MigrationInitiate {
+  string migration_id = 1;
+  string vm_id = 2;
+  string source_node_id = 3;
+  string destination_node_id = 4;
+  MigrationType type = 5;
+  int64 timeout_ms = 6;
+  map<string, string> parameters = 7;
+}
+
+// MigrationType represents migration types
+enum MigrationType {
+  MIGRATION_TYPE_UNKNOWN = 0;
+  MIGRATION_TYPE_COLD = 1;
+  MIGRATION_TYPE_LIVE = 2;
+}
+
+// MigrationData transfers VM data during migration
+message MigrationData {
+  string migration_id = 1;
+  string vm_id = 2;
+  bytes chunk_data = 3;
+  int32 chunk_index = 4;
+  int32 total_chunks = 5;
+  string chunk_type = 6; // "memory", "disk", "state", "metadata"
+}
+
+// MigrationStatus updates migration status
+message MigrationStatus {
+  string migration_id = 1;
+  string vm_id = 2;
+  MigrationState state = 3;
+  float progress_percent = 4;
+  string current_phase = 5;
+  string error_message = 6;
+}
+
+// MigrationState represents migration states
+enum MigrationState {
+  MIGRATION_STATE_UNKNOWN = 0;
+  MIGRATION_STATE_INITIATING = 1;
+  MIGRATION_STATE_TRANSFERRING = 2;
+  MIGRATION_STATE_FINALIZING = 3;
+  MIGRATION_STATE_COMPLETED = 4;
+  MIGRATION_STATE_FAILED = 5;
+  MIGRATION_STATE_CANCELED = 6;
+}
+
+// Network monitoring and metrics
+
+// MetricsRequest requests metrics data
+message MetricsRequest {
+  repeated string node_ids = 1;
+  repeated string vm_ids = 2;
+  repeated string metric_types = 3;
+  int64 start_time = 4;
+  int64 end_time = 5;
+  int32 resolution_seconds = 6;
+}
+
+// MetricsResponse responds with metrics data
+message MetricsResponse {
+  repeated NodeMetrics node_metrics = 1;
+  repeated VmMetrics vm_metrics = 2;
+}
+
+// NodeMetrics contains metrics for a node
+message NodeMetrics {
+  string node_id = 1;
+  repeated MetricPoint cpu_utilization = 2;
+  repeated MetricPoint memory_utilization = 3;
+  repeated MetricPoint network_rx_bytes = 4;
+  repeated MetricPoint network_tx_bytes = 5;
+  repeated MetricPoint disk_read_bytes = 6;
+  repeated MetricPoint disk_write_bytes = 7;
+  repeated MetricPoint load_average = 8;
+}
+
+// VmMetrics contains metrics for a VM
+message VmMetrics {
+  string vm_id = 1;
+  repeated MetricPoint cpu_utilization = 2;
+  repeated MetricPoint memory_utilization = 3;
+  repeated MetricPoint network_rx_bytes = 4;
+  repeated MetricPoint network_tx_bytes = 5;
+  repeated MetricPoint disk_read_bytes = 6;
+  repeated MetricPoint disk_write_bytes = 7;
+  repeated MetricPoint iops = 8;
+}
+
+// MetricPoint represents a single metric data point
+message MetricPoint {
+  int64 timestamp = 1;
+  double value = 2;
+}
+
+// Top level message envelope
+message MessageEnvelope {
+  string source_node_id = 1;
+  string destination_node_id = 2;
+  string message_id = 3;
+  int64 timestamp = 4;
+  string correlation_id = 5;
+  bool requires_response = 6;
+  bool is_response = 7;
+  uint32 flags = 8;
+  
+  oneof payload {
+    // Handshake and network management
+    Handshake handshake = 10;
+    HandshakeResponse handshake_response = 11;
+    
+    // Node state
+    NodeStateRequest node_state_request = 20;
+    NodeStateResponse node_state_response = 21;
+    NodeStateUpdate node_state_update = 22;
+    
+    // VM operations
+    VmCreateRequest vm_create_request = 30;
+    VmCreateResponse vm_create_response = 31;
+    VmOperationRequest vm_operation_request = 32;
+    VmOperationResponse vm_operation_response = 33;
+    VmStateUpdate vm_state_update = 34;
+    
+    // Task distribution
+    TaskDistribution task_distribution = 40;
+    TaskResult task_result = 41;
+    
+    // Migration
+    MigrationInitiate migration_initiate = 50;
+    MigrationData migration_data = 51;
+    MigrationStatus migration_status = 52;
+    
+    // Metrics
+    MetricsRequest metrics_request = 60;
+    MetricsResponse metrics_response = 61;
+    
+    // Generic message types
+    bytes raw_data = 90;
+    string text_message = 91;
+  }
+}
