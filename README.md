@@ -4,7 +4,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 NovaCron is a distributed virtual machine management system with advanced VM migration capabilities, designed for reliability, performance, and extensibility.
-If 50,000 people are running this software. Your running and os on a distributed processing platform consisting of 50,000 computers. 
+If 50,000 people are running this software. Your running an os on a distributed processing platform consisting of 50,000 computers. 
 
 ## Features
 
