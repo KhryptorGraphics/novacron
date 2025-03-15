@@ -247,7 +247,7 @@ The immediate priority is implementing the Resource-Aware Scheduler component, w
 - ✅ Implement Ceph integration
 - ✅ Create integration with NFS/SMB
 - ✅ Add support for object storage systems
-- 🔲 Implement automated tiering between storage types
+- ✅ Implement automated tiering between storage types
 
 #### 4.5 Network Overlays
 
