@@ -1,6 +1,7 @@
 package monitoring
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -10,702 +11,553 @@ import (
 type AlertSeverity string
 
 const (
-	// AlertSeverityCritical is a critical alert
-	AlertSeverityCritical AlertSeverity = "critical"
-
-	// AlertSeverityHigh is a high severity alert
-	AlertSeverityHigh AlertSeverity = "high"
-
-	// AlertSeverityMedium is a medium severity alert
-	AlertSeverityMedium AlertSeverity = "medium"
-
-	// AlertSeverityLow is a low severity alert
-	AlertSeverityLow AlertSeverity = "low"
-
-	// AlertSeverityInfo is an informational alert
+	// AlertSeverityInfo represents an informational alert
 	AlertSeverityInfo AlertSeverity = "info"
+
+	// AlertSeverityWarning represents a warning alert
+	AlertSeverityWarning AlertSeverity = "warning"
+
+	// AlertSeverityError represents an error alert
+	AlertSeverityError AlertSeverity = "error"
+
+	// AlertSeverityCritical represents a critical alert
+	AlertSeverityCritical AlertSeverity = "critical"
 )
 
-// AlertState represents the state of an alert
-type AlertState string
+// AlertStatus represents the status of an alert
+type AlertStatus string
 
 const (
-	// AlertStateFiring indicates the alert is active
-	AlertStateFiring AlertState = "firing"
+	// AlertStatusFiring indicates the alert is currently firing
+	AlertStatusFiring AlertStatus = "firing"
 
-	// AlertStateResolved indicates the alert has been resolved
-	AlertStateResolved AlertState = "resolved"
+	// AlertStatusResolved indicates the alert has been resolved
+	AlertStatusResolved AlertStatus = "resolved"
 
-	// AlertStateSuppressed indicates the alert is suppressed
-	AlertStateSuppressed AlertState = "suppressed"
+	// AlertStatusAcknowledged indicates the alert has been acknowledged
+	AlertStatusAcknowledged AlertStatus = "acknowledged"
 
-	// AlertStatePending indicates the alert is in a pending state
-	AlertStatePending AlertState = "pending"
+	// AlertStatusSuppressed indicates the alert is suppressed
+	AlertStatusSuppressed AlertStatus = "suppressed"
 )
 
-// AlertConditionType represents the type of an alert condition
-type AlertConditionType string
+// AlertType represents the type of alert
+type AlertType string
 
 const (
-	// ThresholdCondition is a condition based on a threshold
-	ThresholdCondition AlertConditionType = "threshold"
+	// AlertTypeThreshold represents a threshold-based alert
+	AlertTypeThreshold AlertType = "threshold"
 
-	// RateOfChangeCondition is a condition based on rate of change
-	RateOfChangeCondition AlertConditionType = "rate_of_change"
+	// AlertTypeRateOfChange represents a rate-of-change alert
+	AlertTypeRateOfChange AlertType = "rate_of_change"
 
-	// AbsenceCondition is a condition based on absence of data
-	AbsenceCondition AlertConditionType = "absence"
+	// AlertTypeAnomaly represents an anomaly detection alert
+	AlertTypeAnomaly AlertType = "anomaly"
 
-	// OutlierCondition is a condition based on statistical outliers
-	OutlierCondition AlertConditionType = "outlier"
-
-	// CompositeCondition is a condition based on multiple other conditions
-	CompositeCondition AlertConditionType = "composite"
+	// AlertTypeEvent represents an event-based alert
+	AlertTypeEvent AlertType = "event"
 )
 
-// ComparisonOperator represents a comparison operator
-type ComparisonOperator string
+// AlertConditionOperator represents comparison operators for alert conditions
+type AlertConditionOperator string
 
 const (
-	// GreaterThan is the greater than operator
-	GreaterThan ComparisonOperator = ">"
+	// AlertConditionOperatorEqual represents the equal operator
+	AlertConditionOperatorEqual AlertConditionOperator = "eq"
 
-	// GreaterThanOrEqual is the greater than or equal operator
-	GreaterThanOrEqual ComparisonOperator = ">="
+	// AlertConditionOperatorNotEqual represents the not equal operator
+	AlertConditionOperatorNotEqual AlertConditionOperator = "ne"
 
-	// LessThan is the less than operator
-	LessThan ComparisonOperator = "<"
+	// AlertConditionOperatorGreaterThan represents the greater than operator
+	AlertConditionOperatorGreaterThan AlertConditionOperator = "gt"
 
-	// LessThanOrEqual is the less than or equal operator
-	LessThanOrEqual ComparisonOperator = "<="
+	// AlertConditionOperatorGreaterThanOrEqual represents the greater than or equal operator
+	AlertConditionOperatorGreaterThanOrEqual AlertConditionOperator = "gte"
 
-	// Equal is the equal operator
-	Equal ComparisonOperator = "=="
+	// AlertConditionOperatorLessThan represents the less than operator
+	AlertConditionOperatorLessThan AlertConditionOperator = "lt"
 
-	// NotEqual is the not equal operator
-	NotEqual ComparisonOperator = "!="
+	// AlertConditionOperatorLessThanOrEqual represents the less than or equal operator
+	AlertConditionOperatorLessThanOrEqual AlertConditionOperator = "lte"
 )
 
-// LogicalOperator represents a logical operator
-type LogicalOperator string
-
-const (
-	// And is the logical AND operator
-	And LogicalOperator = "and"
-
-	// Or is the logical OR operator
-	Or LogicalOperator = "or"
-)
-
-// AlertCondition represents a condition for an alert
+// AlertCondition represents a condition for triggering an alert
 type AlertCondition struct {
-	// Type is the type of condition
-	Type AlertConditionType `json:"type"`
-
-	// MetricID is the ID of the metric
-	MetricID string `json:"metricId"`
+	// MetricName is the name of the metric to check
+	MetricName string `json:"metric_name"`
 
 	// Operator is the comparison operator
-	Operator ComparisonOperator `json:"operator,omitempty"`
+	Operator AlertConditionOperator `json:"operator"`
 
 	// Threshold is the threshold value
-	Threshold *float64 `json:"threshold,omitempty"`
+	Threshold float64 `json:"threshold"`
 
-	// Period is the period over which to evaluate
-	Period *time.Duration `json:"period,omitempty"`
+	// Duration is the duration the condition must be true for
+	Duration time.Duration `json:"duration"`
 
-	// EvaluationWindow is the number of evaluations for triggering
-	EvaluationWindow *int `json:"evaluationWindow,omitempty"`
-
-	// Conditions are sub-conditions for composite conditions
-	Conditions []AlertCondition `json:"conditions,omitempty"`
-
-	// LogicalOperator is the logical operator for composite conditions
-	LogicalOperator LogicalOperator `json:"logicalOperator,omitempty"`
+	// Tags to filter metrics by
+	Tags map[string]string `json:"tags,omitempty"`
 }
 
-// Alert represents an alert
+// Alert represents an alert definition
 type Alert struct {
-	// ID is the unique identifier for the alert
+	// ID is a unique identifier for the alert
 	ID string `json:"id"`
 
-	// Name is the human-readable name of the alert
+	// Name is a human-readable name for the alert
 	Name string `json:"name"`
 
-	// Description is a description of the alert
+	// Description describes the alert
 	Description string `json:"description"`
 
-	// Severity is the severity of the alert
+	// Severity indicates the severity of the alert
 	Severity AlertSeverity `json:"severity"`
 
-	// State is the state of the alert
-	State AlertState `json:"state"`
+	// Type indicates the type of alert
+	Type AlertType `json:"type"`
 
-	// Condition is the condition for the alert
+	// Condition defines when the alert should trigger
 	Condition AlertCondition `json:"condition"`
 
-	// Labels are the labels associated with the alert
-	Labels map[string]string `json:"labels"`
+	// Labels are additional metadata for the alert
+	Labels map[string]string `json:"labels,omitempty"`
 
-	// TenantID is the ID of the tenant this alert belongs to
-	TenantID string `json:"tenantId,omitempty"`
+	// Annotations are additional information for the alert
+	Annotations map[string]string `json:"annotations,omitempty"`
 
-	// ResourceID is the ID of the resource this alert is related to
-	ResourceID string `json:"resourceId,omitempty"`
+	// NotificationChannels are the channels to notify when the alert fires
+	NotificationChannels []string `json:"notification_channels,omitempty"`
 
-	// ResourceType is the type of the resource this alert is related to
-	ResourceType string `json:"resourceType,omitempty"`
+	// Enabled indicates whether the alert is enabled
+	Enabled bool `json:"enabled"`
 
-	// Tags are additional tags for the alert
-	Tags []string `json:"tags,omitempty"`
-
-	// FirstTriggeredAt is when the alert was first triggered
-	FirstTriggeredAt *time.Time `json:"firstTriggeredAt,omitempty"`
-
-	// LastTriggeredAt is when the alert was last triggered
-	LastTriggeredAt *time.Time `json:"lastTriggeredAt,omitempty"`
-
-	// LastUpdatedAt is when the alert was last updated
-	LastUpdatedAt time.Time `json:"lastUpdatedAt"`
-
-	// ResolvedAt is when the alert was resolved
-	ResolvedAt *time.Time `json:"resolvedAt,omitempty"`
-
-	// SuppressedAt is when the alert was suppressed
-	SuppressedAt *time.Time `json:"suppressedAt,omitempty"`
-
-	// SuppressedUntil is when the suppression expires
-	SuppressedUntil *time.Time `json:"suppressedUntil,omitempty"`
-
-	// SuppressedBy is who suppressed the alert
-	SuppressedBy string `json:"suppressedBy,omitempty"`
-
-	// TriggerCount is the number of times the alert was triggered
-	TriggerCount int `json:"triggerCount"`
-
-	// LastNotifiedAt is when the alert was last notified
-	LastNotifiedAt *time.Time `json:"lastNotifiedAt,omitempty"`
-
-	// NotificationSent indicates if a notification has been sent
-	NotificationSent bool `json:"notificationSent"`
-
-	// AutoResolve indicates if the alert should auto-resolve
-	AutoResolve bool `json:"autoResolve"`
-
-	// AutoResolveAfter is the duration after which to auto-resolve
-	AutoResolveAfter *time.Duration `json:"autoResolveAfter,omitempty"`
-
-	// runbook is a link to the runbook for this alert
-	Runbook string `json:"runbook,omitempty"`
-
-	// CurrentValue is the current value of the metric
-	CurrentValue *float64 `json:"currentValue,omitempty"`
-
-	// NotificationChannels are the channels to notify
-	NotificationChannels []string `json:"notificationChannels,omitempty"`
+	// Status is the current status of the alert
+	Status AlertStatus `json:"status"`
 }
 
-// AlertRegistry manages alerts
-type AlertRegistry struct {
+// AlertInstance represents an instance of a triggered alert
+type AlertInstance struct {
+	// Alert is the alert definition
+	Alert *Alert `json:"alert"`
+
+	// Value is the value that triggered the alert
+	Value float64 `json:"value"`
+
+	// StartTime is when the alert started firing
+	StartTime time.Time `json:"start_time"`
+
+	// EndTime is when the alert stopped firing (if resolved)
+	EndTime time.Time `json:"end_time,omitempty"`
+
+	// Status is the current status of the alert instance
+	Status AlertStatus `json:"status"`
+
+	// AcknowledgedBy is who acknowledged the alert
+	AcknowledgedBy string `json:"acknowledged_by,omitempty"`
+
+	// AcknowledgedTime is when the alert was acknowledged
+	AcknowledgedTime time.Time `json:"acknowledged_time,omitempty"`
+
+	// AcknowledgementComment is a comment about the acknowledgement
+	AcknowledgementComment string `json:"acknowledgement_comment,omitempty"`
+}
+
+// AlertManager manages alerts
+type AlertManager struct {
+	// Map of alert IDs to alert definitions
 	alerts      map[string]*Alert
 	alertsMutex sync.RWMutex
+
+	// Map of alert instance IDs to alert instances
+	instances      map[string]*AlertInstance
+	instancesMutex sync.RWMutex
+
+	// Notification manager for sending alerts
+	notificationManager *NotificationManager
+
+	// Parent metric collector for accessing metrics
+	metricCollector *DistributedMetricCollector
+
+	// Evaluation interval
+	evaluationInterval time.Duration
+
+	// Control channels
+	stopChan chan struct{}
+	running  bool
+	mutex    sync.Mutex
 }
 
-// NewAlertRegistry creates a new alert registry
-func NewAlertRegistry() *AlertRegistry {
-	return &AlertRegistry{
-		alerts: make(map[string]*Alert),
+// NewAlertManager creates a new alert manager
+func NewAlertManager(metricCollector *DistributedMetricCollector) *AlertManager {
+	return &AlertManager{
+		alerts:              make(map[string]*Alert),
+		instances:           make(map[string]*AlertInstance),
+		notificationManager: NewNotificationManager(),
+		metricCollector:     metricCollector,
+		evaluationInterval:  30 * time.Second,
+		stopChan:            make(chan struct{}),
+		running:             false,
 	}
 }
 
-// RegisterAlert registers an alert
-func (r *AlertRegistry) RegisterAlert(alert *Alert) error {
-	r.alertsMutex.Lock()
-	defer r.alertsMutex.Unlock()
+// Start starts the alert manager
+func (m *AlertManager) Start() error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
 
-	if _, exists := r.alerts[alert.ID]; exists {
-		return fmt.Errorf("alert already exists: %s", alert.ID)
+	if m.running {
+		return fmt.Errorf("alert manager already running")
 	}
 
-	alert.LastUpdatedAt = time.Now()
-	r.alerts[alert.ID] = alert
+	m.running = true
+	m.stopChan = make(chan struct{})
+
+	// Start the evaluation loop
+	go m.evaluationLoop()
+
 	return nil
 }
 
-// GetAlert gets an alert by ID
-func (r *AlertRegistry) GetAlert(id string) (*Alert, error) {
-	r.alertsMutex.RLock()
-	defer r.alertsMutex.RUnlock()
+// Stop stops the alert manager
+func (m *AlertManager) Stop() error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
 
-	alert, exists := r.alerts[id]
+	if !m.running {
+		return nil
+	}
+
+	m.running = false
+	close(m.stopChan)
+
+	return nil
+}
+
+// RegisterAlert registers an alert
+func (m *AlertManager) RegisterAlert(alert *Alert) error {
+	if alert.ID == "" {
+		return fmt.Errorf("alert ID cannot be empty")
+	}
+
+	m.alertsMutex.Lock()
+	defer m.alertsMutex.Unlock()
+
+	if _, exists := m.alerts[alert.ID]; exists {
+		return fmt.Errorf("alert with ID %s already exists", alert.ID)
+	}
+
+	m.alerts[alert.ID] = alert
+	return nil
+}
+
+// DeregisterAlert deregisters an alert
+func (m *AlertManager) DeregisterAlert(alertID string) bool {
+	m.alertsMutex.Lock()
+	defer m.alertsMutex.Unlock()
+
+	if _, exists := m.alerts[alertID]; !exists {
+		return false
+	}
+
+	delete(m.alerts, alertID)
+	return true
+}
+
+// GetAlert gets an alert by ID
+func (m *AlertManager) GetAlert(alertID string) (*Alert, error) {
+	m.alertsMutex.RLock()
+	defer m.alertsMutex.RUnlock()
+
+	alert, exists := m.alerts[alertID]
 	if !exists {
-		return nil, fmt.Errorf("alert not found: %s", id)
+		return nil, fmt.Errorf("alert with ID %s not found", alertID)
 	}
 
 	return alert, nil
 }
 
 // ListAlerts lists all alerts
-func (r *AlertRegistry) ListAlerts() []*Alert {
-	r.alertsMutex.RLock()
-	defer r.alertsMutex.RUnlock()
+func (m *AlertManager) ListAlerts() []*Alert {
+	m.alertsMutex.RLock()
+	defer m.alertsMutex.RUnlock()
 
-	alerts := make([]*Alert, 0, len(r.alerts))
-	for _, alert := range r.alerts {
+	alerts := make([]*Alert, 0, len(m.alerts))
+	for _, alert := range m.alerts {
 		alerts = append(alerts, alert)
 	}
 
 	return alerts
 }
 
-// RemoveAlert removes an alert
-func (r *AlertRegistry) RemoveAlert(id string) error {
-	r.alertsMutex.Lock()
-	defer r.alertsMutex.Unlock()
+// ListAlertInstances lists all alert instances
+func (m *AlertManager) ListAlertInstances() []*AlertInstance {
+	m.instancesMutex.RLock()
+	defer m.instancesMutex.RUnlock()
 
-	if _, exists := r.alerts[id]; !exists {
-		return fmt.Errorf("alert not found: %s", id)
+	instances := make([]*AlertInstance, 0, len(m.instances))
+	for _, instance := range m.instances {
+		instances = append(instances, instance)
 	}
 
-	delete(r.alerts, id)
-	return nil
+	return instances
 }
 
-// UpdateAlertState updates the state of an alert
-func (r *AlertRegistry) UpdateAlertState(id string, state AlertState, value *float64) error {
-	r.alertsMutex.Lock()
-	defer r.alertsMutex.Unlock()
+// AcknowledgeAlert acknowledges an alert instance
+func (m *AlertManager) AcknowledgeAlert(instanceID, acknowledgedBy, comment string) error {
+	m.instancesMutex.Lock()
+	defer m.instancesMutex.Unlock()
 
-	alert, exists := r.alerts[id]
+	instance, exists := m.instances[instanceID]
 	if !exists {
-		return fmt.Errorf("alert not found: %s", id)
+		return fmt.Errorf("alert instance with ID %s not found", instanceID)
 	}
 
-	now := time.Now()
-	alert.LastUpdatedAt = now
-	alert.CurrentValue = value
-
-	// State transition logic
-	switch state {
-	case AlertStateFiring:
-		if alert.State != AlertStateFiring {
-			if alert.FirstTriggeredAt == nil {
-				alert.FirstTriggeredAt = &now
-			}
-			alert.LastTriggeredAt = &now
-			alert.TriggerCount++
-			alert.NotificationSent = false
-		}
-	case AlertStateResolved:
-		alert.ResolvedAt = &now
-	case AlertStateSuppressed:
-		alert.SuppressedAt = &now
-	}
-
-	alert.State = state
+	instance.Status = AlertStatusAcknowledged
+	instance.AcknowledgedBy = acknowledgedBy
+	instance.AcknowledgedTime = time.Now()
+	instance.AcknowledgementComment = comment
 
 	return nil
 }
 
-// FilterAlerts filters alerts by criteria
-func (r *AlertRegistry) FilterAlerts(filter func(*Alert) bool) []*Alert {
-	r.alertsMutex.RLock()
-	defer r.alertsMutex.RUnlock()
-
-	filtered := make([]*Alert, 0)
-	for _, alert := range r.alerts {
-		if filter(alert) {
-			filtered = append(filtered, alert)
-		}
-	}
-
-	return filtered
-}
-
-// SupressAlert suppresses an alert
-func (r *AlertRegistry) SuppressAlert(id string, duration time.Duration, suppressedBy string) error {
-	r.alertsMutex.Lock()
-	defer r.alertsMutex.Unlock()
-
-	alert, exists := r.alerts[id]
-	if !exists {
-		return fmt.Errorf("alert not found: %s", id)
-	}
-
-	now := time.Now()
-	suppressUntil := now.Add(duration)
-
-	alert.SuppressedAt = &now
-	alert.SuppressedUntil = &suppressUntil
-	alert.SuppressedBy = suppressedBy
-	alert.State = AlertStateSuppressed
-	alert.LastUpdatedAt = now
-
-	return nil
-}
-
-// UpdateNotificationStatus updates the notification status of an alert
-func (r *AlertRegistry) UpdateNotificationStatus(id string, sent bool) error {
-	r.alertsMutex.Lock()
-	defer r.alertsMutex.Unlock()
-
-	alert, exists := r.alerts[id]
-	if !exists {
-		return fmt.Errorf("alert not found: %s", id)
-	}
-
-	alert.NotificationSent = sent
-	if sent {
-		now := time.Now()
-		alert.LastNotifiedAt = &now
-	}
-
-	return nil
-}
-
-// NewAlert creates a new alert
-func NewAlert(id, name, description string, severity AlertSeverity, condition AlertCondition) *Alert {
-	return &Alert{
-		ID:            id,
-		Name:          name,
-		Description:   description,
-		Severity:      severity,
-		Condition:     condition,
-		State:         AlertStatePending,
-		Labels:        make(map[string]string),
-		TriggerCount:  0,
-		LastUpdatedAt: time.Now(),
-		AutoResolve:   false,
-	}
-}
-
-// AlertManager manages alerting
-type AlertManager struct {
-	registry           *AlertRegistry
-	metricRegistry     *MetricRegistry
-	evaluationInterval time.Duration
-	notifiers          []AlertNotifier
-	stopChan           chan struct{}
-	wg                 sync.WaitGroup
-}
-
-// NewAlertManager creates a new alert manager
-func NewAlertManager(registry *AlertRegistry, metricRegistry *MetricRegistry, interval time.Duration) *AlertManager {
-	return &AlertManager{
-		registry:           registry,
-		metricRegistry:     metricRegistry,
-		evaluationInterval: interval,
-		notifiers:          make([]AlertNotifier, 0),
-		stopChan:           make(chan struct{}),
-	}
-}
-
-// Start starts the alert manager
-func (m *AlertManager) Start() error {
-	m.wg.Add(1)
-	go m.run()
-	return nil
-}
-
-// Stop stops the alert manager
-func (m *AlertManager) Stop() error {
-	close(m.stopChan)
-	m.wg.Wait()
-	return nil
-}
-
-// run is the main loop of the alert manager
-func (m *AlertManager) run() {
-	defer m.wg.Done()
-
+// evaluationLoop evaluates alerts at regular intervals
+func (m *AlertManager) evaluationLoop() {
 	ticker := time.NewTicker(m.evaluationInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-m.stopChan:
-			return
 		case <-ticker.C:
 			m.evaluateAlerts()
+		case <-m.stopChan:
+			return
 		}
 	}
 }
 
 // evaluateAlerts evaluates all alerts
 func (m *AlertManager) evaluateAlerts() {
-	alerts := m.registry.ListAlerts()
+	// Get a snapshot of the alerts to evaluate
+	m.alertsMutex.RLock()
+	alerts := make([]*Alert, 0, len(m.alerts))
+	for _, alert := range m.alerts {
+		if alert.Enabled {
+			alerts = append(alerts, alert)
+		}
+	}
+	m.alertsMutex.RUnlock()
+
+	// Evaluate each alert
 	for _, alert := range alerts {
-		go m.evaluateAlert(alert)
+		m.evaluateAlert(alert)
 	}
 }
 
-// evaluateAlert evaluates an alert
+// evaluateAlert evaluates a single alert
 func (m *AlertManager) evaluateAlert(alert *Alert) {
-	// Skip suppressed alerts
-	if alert.State == AlertStateSuppressed {
-		if alert.SuppressedUntil != nil && time.Now().After(*alert.SuppressedUntil) {
-			// Suppression expired
-			m.registry.UpdateAlertState(alert.ID, AlertStatePending, nil)
-		} else {
-			return
-		}
-	}
+	// Get the metric data for the alert
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	// Evaluate the condition
-	triggered, value, err := m.evaluateCondition(alert.Condition)
+	// Define the time range based on the condition duration
+	end := time.Now()
+	start := end.Add(-alert.Condition.Duration * 2) // Get enough data to evaluate the condition
+
+	series, err := m.metricCollector.GetMetric(ctx, alert.Condition.MetricName, alert.Condition.Tags, start, end)
 	if err != nil {
-		// Log error but don't change alert state
-		fmt.Printf("Error evaluating alert %s: %v\n", alert.ID, err)
+		fmt.Printf("failed to get metric data for alert %s: %v\n", alert.ID, err)
 		return
 	}
 
-	if triggered {
-		if alert.State != AlertStateFiring {
-			m.registry.UpdateAlertState(alert.ID, AlertStateFiring, value)
-			if !alert.NotificationSent {
-				m.sendNotification(alert)
+	// If no data, skip
+	if series == nil || len(series.Metrics) == 0 {
+		return
+	}
+
+	// Check if condition is met
+	conditionMet := false
+	latestValue := 0.0
+
+	// For threshold alerts, check all values in the duration window
+	durationStart := end.Add(-alert.Condition.Duration)
+	matchingValues := 0
+	totalValues := 0
+
+	// Find the latest value and count matching values in the duration window
+	for _, metric := range series.Metrics {
+		if metric.Timestamp.After(durationStart) {
+			totalValues++
+			if metric.Timestamp.After(time.Unix(0, 0)) && (latestValue == 0 || metric.Timestamp.After(time.Unix(0, 0))) {
+				latestValue = metric.Value
+			}
+
+			// Check if this data point meets the condition
+			if meetsCondition(metric.Value, alert.Condition.Threshold, alert.Condition.Operator) {
+				matchingValues++
 			}
 		}
+	}
+
+	// Determine if the condition is met over the required duration
+	if totalValues > 0 && matchingValues == totalValues {
+		conditionMet = true
+	}
+
+	// Handle the alert status change
+	instanceID := getAlertInstanceID(alert.ID, alert.Condition.MetricName, alert.Condition.Tags)
+
+	m.instancesMutex.Lock()
+	defer m.instancesMutex.Unlock()
+
+	instance, exists := m.instances[instanceID]
+
+	if conditionMet {
+		// Alert is firing
+		if !exists {
+			// New alert firing
+			instance = &AlertInstance{
+				Alert:     alert,
+				Value:     latestValue,
+				StartTime: time.Now(),
+				Status:    AlertStatusFiring,
+			}
+			m.instances[instanceID] = instance
+
+			// Send notification for new alert
+			m.sendAlertNotification(instance, true)
+		} else if instance.Status == AlertStatusResolved {
+			// Alert was resolved but is firing again
+			instance.Status = AlertStatusFiring
+			instance.StartTime = time.Now()
+			instance.EndTime = time.Time{}
+
+			// Send notification for re-firing alert
+			m.sendAlertNotification(instance, true)
+		}
+		// If already firing, do nothing
 	} else {
-		if alert.State == AlertStateFiring {
-			m.registry.UpdateAlertState(alert.ID, AlertStateResolved, value)
-		} else if alert.State == AlertStatePending {
-			// Still pending, no change
+		// Alert is not firing
+		if exists && instance.Status == AlertStatusFiring {
+			// Alert was firing but is now resolved
+			instance.Status = AlertStatusResolved
+			instance.EndTime = time.Now()
+
+			// Send notification for resolved alert
+			m.sendAlertNotification(instance, false)
 		}
 	}
 }
 
-// evaluateCondition evaluates an alert condition
-func (m *AlertManager) evaluateCondition(condition AlertCondition) (bool, *float64, error) {
-	switch condition.Type {
-	case ThresholdCondition:
-		return m.evaluateThresholdCondition(condition)
-	case CompositeCondition:
-		return m.evaluateCompositeCondition(condition)
-	case AbsenceCondition:
-		return m.evaluateAbsenceCondition(condition)
-	case RateOfChangeCondition:
-		return m.evaluateRateOfChangeCondition(condition)
-	default:
-		return false, nil, fmt.Errorf("unsupported condition type: %s", condition.Type)
+// sendAlertNotification sends a notification for an alert
+func (m *AlertManager) sendAlertNotification(instance *AlertInstance, firing bool) {
+	// If no notification channels configured, skip
+	if len(instance.Alert.NotificationChannels) == 0 {
+		return
+	}
+
+	// Create notification
+	title := instance.Alert.Name
+	message := instance.Alert.Description
+	if message == "" {
+		message = fmt.Sprintf("Alert %s is %s",
+			instance.Alert.Name,
+			instance.Status)
+	}
+
+	// Add details
+	details := make(map[string]interface{})
+	details["alertId"] = instance.Alert.ID
+	details["severity"] = instance.Alert.Severity
+	details["metric"] = instance.Alert.Condition.MetricName
+	details["value"] = instance.Value
+	details["threshold"] = instance.Alert.Condition.Threshold
+	details["operator"] = instance.Alert.Condition.Operator
+	details["status"] = instance.Status
+	details["startTime"] = instance.StartTime
+	if !instance.EndTime.IsZero() {
+		details["endTime"] = instance.EndTime
+	}
+
+	// Send to each configured channel
+	for _, channelID := range instance.Alert.NotificationChannels {
+		notification := NewNotification(
+			NotificationTypeAlert,
+			title,
+			message,
+			instance.Alert.Severity.String(),
+			details,
+		)
+
+		m.notificationManager.SendNotification(channelID, notification)
 	}
 }
 
-// evaluateThresholdCondition evaluates a threshold condition
-func (m *AlertManager) evaluateThresholdCondition(condition AlertCondition) (bool, *float64, error) {
-	if condition.Threshold == nil {
-		return false, nil, fmt.Errorf("threshold not set")
-	}
+// CheckMetric checks if a metric triggers any alerts
+func (m *AlertManager) CheckMetric(metric *Metric) {
+	// This is an optimization to check alerts immediately when a metric arrives
+	// instead of waiting for the next evaluation cycle
 
-	metric, err := m.metricRegistry.GetMetric(condition.MetricID)
-	if err != nil {
-		return false, nil, err
-	}
-
-	lastValue := metric.GetLastValue()
-	if lastValue == nil {
-		return false, nil, fmt.Errorf("no values for metric")
-	}
-
-	var period time.Duration
-	if condition.Period != nil {
-		period = *condition.Period
-	} else {
-		period = 5 * time.Minute // default period
-	}
-
-	var values []MetricValue
-	if period > 0 {
-		end := time.Now()
-		start := end.Add(-period)
-		values = metric.GetValues(start, end)
-	} else {
-		// Just use the most recent value
-		values = []MetricValue{*lastValue}
-	}
-
-	if len(values) == 0 {
-		return false, nil, fmt.Errorf("no values in period")
-	}
-
-	// Use the most recent value for the current value
-	currentValue := values[len(values)-1].Value
-	currentValuePtr := &currentValue
-
-	// For threshold conditions with evaluation windows, we need to check if the condition
-	// is met for a number of consecutive evaluations
-	evaluationWindow := 1
-	if condition.EvaluationWindow != nil {
-		evaluationWindow = *condition.EvaluationWindow
-	}
-
-	// If we don't have enough values, can't evaluate
-	if len(values) < evaluationWindow {
-		return false, currentValuePtr, nil
-	}
-
-	// Check if the condition is met for the evaluation window
-	for i := len(values) - evaluationWindow; i < len(values); i++ {
-		value := values[i].Value
-		triggered := compareValues(value, *condition.Threshold, condition.Operator)
-		if !triggered {
-			return false, currentValuePtr, nil
-		}
-	}
-
-	return true, currentValuePtr, nil
-}
-
-// evaluateCompositeCondition evaluates a composite condition
-func (m *AlertManager) evaluateCompositeCondition(condition AlertCondition) (bool, *float64, error) {
-	if len(condition.Conditions) == 0 {
-		return false, nil, fmt.Errorf("no sub-conditions")
-	}
-
-	// Evaluate each sub-condition
-	results := make([]bool, len(condition.Conditions))
-	for i, subCondition := range condition.Conditions {
-		triggered, _, err := m.evaluateCondition(subCondition)
-		if err != nil {
-			return false, nil, err
-		}
-		results[i] = triggered
-	}
-
-	// Combine results based on logical operator
-	var result bool
-	switch condition.LogicalOperator {
-	case And:
-		result = true
-		for _, r := range results {
-			if !r {
-				result = false
-				break
+	// Get all alerts for this metric
+	m.alertsMutex.RLock()
+	var matchingAlerts []*Alert
+	for _, alert := range m.alerts {
+		if alert.Enabled && alert.Condition.MetricName == metric.Name {
+			// Check if tags match
+			tagsMatch := true
+			for k, v := range alert.Condition.Tags {
+				if metric.Tags[k] != v {
+					tagsMatch = false
+					break
+				}
+			}
+			if tagsMatch {
+				matchingAlerts = append(matchingAlerts, alert)
 			}
 		}
-	case Or:
-		result = false
-		for _, r := range results {
-			if r {
-				result = true
-				break
+	}
+	m.alertsMutex.RUnlock()
+
+	// For each matching alert, check if this single metric value triggers the condition
+	for _, alert := range matchingAlerts {
+		// For threshold alerts, we can check immediately
+		if alert.Type == AlertTypeThreshold {
+			if meetsCondition(metric.Value, alert.Condition.Threshold, alert.Condition.Operator) {
+				// But we still need to check the duration, so we'll defer to the next evaluation cycle
+				// This just gives a hint that an evaluation should happen soon
+
+				// In a production system, we might implement a more sophisticated approach here,
+				// like scheduling an immediate evaluation for this specific alert
 			}
 		}
-	default:
-		return false, nil, fmt.Errorf("unsupported logical operator: %s", condition.LogicalOperator)
 	}
-
-	return result, nil, nil
 }
 
-// evaluateAbsenceCondition evaluates an absence condition
-func (m *AlertManager) evaluateAbsenceCondition(condition AlertCondition) (bool, *float64, error) {
-	metric, err := m.metricRegistry.GetMetric(condition.MetricID)
-	if err != nil {
-		return false, nil, err
-	}
-
-	lastValue := metric.GetLastValue()
-	if lastValue == nil {
-		return true, nil, nil // No values = absence condition met
-	}
-
-	var period time.Duration
-	if condition.Period != nil {
-		period = *condition.Period
-	} else {
-		period = 5 * time.Minute // default period
-	}
-
-	// Check if the last value is older than the period
-	if time.Since(lastValue.Timestamp) > period {
-		return true, nil, nil
-	}
-
-	return false, nil, nil
-}
-
-// evaluateRateOfChangeCondition evaluates a rate of change condition
-func (m *AlertManager) evaluateRateOfChangeCondition(condition AlertCondition) (bool, *float64, error) {
-	if condition.Threshold == nil {
-		return false, nil, fmt.Errorf("threshold not set")
-	}
-
-	metric, err := m.metricRegistry.GetMetric(condition.MetricID)
-	if err != nil {
-		return false, nil, err
-	}
-
-	var period time.Duration
-	if condition.Period != nil {
-		period = *condition.Period
-	} else {
-		period = 5 * time.Minute // default period
-	}
-
-	end := time.Now()
-	start := end.Add(-period)
-	values := metric.GetValues(start, end)
-
-	if len(values) < 2 {
-		return false, nil, fmt.Errorf("not enough values to calculate rate")
-	}
-
-	// Calculate rate of change
-	first := values[0]
-	last := values[len(values)-1]
-	timeDiff := last.Timestamp.Sub(first.Timestamp).Seconds()
-	if timeDiff == 0 {
-		return false, nil, fmt.Errorf("values have same timestamp")
-	}
-
-	rateOfChange := (last.Value - first.Value) / timeDiff
-	ratePtr := &rateOfChange
-
-	// Compare to threshold
-	return compareValues(rateOfChange, *condition.Threshold, condition.Operator), ratePtr, nil
-}
-
-// compareValues compares two values using an operator
-func compareValues(value, threshold float64, operator ComparisonOperator) bool {
+// meetsCondition checks if a value meets an alert condition
+func meetsCondition(value, threshold float64, operator AlertConditionOperator) bool {
 	switch operator {
-	case GreaterThan:
-		return value > threshold
-	case GreaterThanOrEqual:
-		return value >= threshold
-	case LessThan:
-		return value < threshold
-	case LessThanOrEqual:
-		return value <= threshold
-	case Equal:
+	case AlertConditionOperatorEqual:
 		return value == threshold
-	case NotEqual:
+	case AlertConditionOperatorNotEqual:
 		return value != threshold
+	case AlertConditionOperatorGreaterThan:
+		return value > threshold
+	case AlertConditionOperatorGreaterThanOrEqual:
+		return value >= threshold
+	case AlertConditionOperatorLessThan:
+		return value < threshold
+	case AlertConditionOperatorLessThanOrEqual:
+		return value <= threshold
 	default:
 		return false
 	}
 }
 
-// AddNotifier adds a notifier
-func (m *AlertManager) AddNotifier(notifier AlertNotifier) {
-	m.notifiers = append(m.notifiers, notifier)
+// getAlertInstanceID generates a unique ID for an alert instance
+func getAlertInstanceID(alertID, metricName string, tags map[string]string) string {
+	return fmt.Sprintf("%s:%s:%s", alertID, metricName, formatTags(tags))
 }
 
-// sendNotification sends a notification for an alert
-func (m *AlertManager) sendNotification(alert *Alert) {
-	for _, notifier := range m.notifiers {
-		err := notifier.Notify(alert)
-		if err != nil {
-			fmt.Printf("Error sending notification: %v\n", err)
-		}
-	}
-
-	// Update notification status
-	m.registry.UpdateNotificationStatus(alert.ID, true)
-}
-
-// AlertNotifier notifies about alerts
-type AlertNotifier interface {
-	// Notify notifies about an alert
-	Notify(alert *Alert) error
+// String returns the string representation of an AlertSeverity
+func (s AlertSeverity) String() string {
+	return string(s)
 }

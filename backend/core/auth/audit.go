@@ -1,301 +1,118 @@
 package auth
 
 import (
-	"fmt"
-	"sort"
-	"sync"
 	"time"
 )
 
-// AuditAction represents an auditable action
-type AuditAction string
-
-const (
-	// Common audit actions
-	AuditActionCreate    AuditAction = "create"
-	AuditActionRead      AuditAction = "read"
-	AuditActionUpdate    AuditAction = "update"
-	AuditActionDelete    AuditAction = "delete"
-	AuditActionLogin     AuditAction = "login"
-	AuditActionLogout    AuditAction = "logout"
-	AuditActionAccess    AuditAction = "access"
-	AuditActionAttempt   AuditAction = "attempt"
-	AuditActionApprove   AuditAction = "approve"
-	AuditActionReject    AuditAction = "reject"
-	AuditActionExecute   AuditAction = "execute"
-	AuditActionDisable   AuditAction = "disable"
-	AuditActionEnable    AuditAction = "enable"
-	AuditActionAssociate AuditAction = "associate"
-)
-
-// AuditOutcome represents the outcome of an auditable action
-type AuditOutcome string
-
-const (
-	// AuditOutcomeSuccess indicates the action was successful
-	AuditOutcomeSuccess AuditOutcome = "success"
-
-	// AuditOutcomeFailure indicates the action failed
-	AuditOutcomeFailure AuditOutcome = "failure"
-
-	// AuditOutcomeWarning indicates the action completed with warnings
-	AuditOutcomeWarning AuditOutcome = "warning"
-
-	// AuditOutcomeInfo indicates the action is informational
-	AuditOutcomeInfo AuditOutcome = "info"
-)
-
-// AuditSeverity represents the severity of an audit entry
-type AuditSeverity string
-
-const (
-	// AuditSeverityCritical indicates a critical severity
-	AuditSeverityCritical AuditSeverity = "critical"
-
-	// AuditSeverityHigh indicates a high severity
-	AuditSeverityHigh AuditSeverity = "high"
-
-	// AuditSeverityMedium indicates a medium severity
-	AuditSeverityMedium AuditSeverity = "medium"
-
-	// AuditSeverityLow indicates a low severity
-	AuditSeverityLow AuditSeverity = "low"
-
-	// AuditSeverityInfo indicates an informational severity
-	AuditSeverityInfo AuditSeverity = "info"
-)
-
-// AuditEntry represents an entry in the audit log
+// AuditEntry represents an audit log entry
 type AuditEntry struct {
-	// ID is the unique identifier for this audit entry
+	// ID is the unique identifier for this entry
 	ID string `json:"id"`
 
-	// Timestamp is when the entry was created
-	Timestamp time.Time `json:"timestamp"`
+	// UserID is the ID of the user who performed the action
+	UserID string `json:"userId"`
 
-	// Action is the action being audited
-	Action string `json:"action"`
+	// TenantID is the ID of the tenant context
+	TenantID string `json:"tenantId"`
 
-	// Outcome is the outcome of the action
-	Outcome AuditOutcome `json:"outcome,omitempty"`
+	// ResourceType is the type of resource accessed
+	ResourceType string `json:"resourceType"`
 
-	// Severity is the severity of the action
-	Severity AuditSeverity `json:"severity,omitempty"`
-
-	// Resource is the type of resource being audited
-	Resource string `json:"resource"`
-
-	// ResourceID is the ID of the resource being audited
+	// ResourceID is the ID of the resource accessed
 	ResourceID string `json:"resourceId"`
 
-	// Description is a human-readable description of the action
-	Description string `json:"description,omitempty"`
+	// Action is the action performed
+	Action string `json:"action"`
 
-	// UserID is the ID of the user who performed the action
-	UserID string `json:"userId,omitempty"`
+	// Success indicates if the action was successful
+	Success bool `json:"success"`
 
-	// UserName is the name of the user who performed the action
-	UserName string `json:"userName,omitempty"`
+	// Reason provides the reason for the decision (especially for denials)
+	Reason string `json:"reason"`
 
-	// TenantID is the ID of the tenant where the action occurred
-	TenantID string `json:"tenantId,omitempty"`
+	// Timestamp is when the action was performed
+	Timestamp time.Time `json:"timestamp"`
 
-	// ClientIP is the IP address of the client
-	ClientIP string `json:"clientIp,omitempty"`
+	// IPAddress is the IP address of the user
+	IPAddress string `json:"ipAddress"`
 
 	// UserAgent is the user agent of the client
-	UserAgent string `json:"userAgent,omitempty"`
+	UserAgent string `json:"userAgent"`
 
-	// RequestID is the ID of the request
-	RequestID string `json:"requestId,omitempty"`
-
-	// Metadata contains additional metadata
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	// AdditionalData contains additional information about the action
+	AdditionalData map[string]interface{} `json:"additionalData,omitempty"`
 }
 
-// AuditLogService defines the interface for audit logging services
-type AuditLogService interface {
-	// Log logs an audit entry
-	Log(entry AuditEntry) error
+// AuditService provides operations for audit logging
+type AuditService interface {
+	// LogAccess logs an access attempt
+	LogAccess(entry *AuditEntry) error
 
-	// Get gets an audit entry by ID
-	Get(id string) (*AuditEntry, error)
+	// GetAuditTrail gets the audit trail for a user or resource
+	GetAuditTrail(userID, tenantID, resourceType, resourceID string, startTime, endTime time.Time, limit, offset int) ([]*AuditEntry, error)
 
-	// Search searches for audit entries
-	Search(filter map[string]interface{}, limit, offset int) ([]*AuditEntry, error)
+	// GetUserActions gets all actions performed by a user
+	GetUserActions(userID string, startTime, endTime time.Time, limit, offset int) ([]*AuditEntry, error)
 
-	// Count counts audit entries based on filter
-	Count(filter map[string]interface{}) (int, error)
-
-	// Export exports audit entries to a specified format
-	Export(filter map[string]interface{}, format string) ([]byte, error)
+	// GetResourceActions gets all actions performed on a resource
+	GetResourceActions(resourceType, resourceID string, startTime, endTime time.Time, limit, offset int) ([]*AuditEntry, error)
 }
 
-// InMemoryAuditLogService is an in-memory implementation of AuditLogService
-type InMemoryAuditLogService struct {
-	entries      []*AuditEntry
-	entriesMutex sync.RWMutex
-	idCounter    int
+// InMemoryAuditService is an in-memory implementation of AuditService
+type InMemoryAuditService struct {
+	entries []*AuditEntry
 }
 
-// NewInMemoryAuditLogService creates a new in-memory audit log service
-func NewInMemoryAuditLogService() *InMemoryAuditLogService {
-	return &InMemoryAuditLogService{
-		entries:   make([]*AuditEntry, 0),
-		idCounter: 0,
+// NewInMemoryAuditService creates a new in-memory audit service
+func NewInMemoryAuditService() *InMemoryAuditService {
+	return &InMemoryAuditService{
+		entries: make([]*AuditEntry, 0),
 	}
 }
 
-// Log logs an audit entry
-func (s *InMemoryAuditLogService) Log(entry AuditEntry) error {
-	s.entriesMutex.Lock()
-	defer s.entriesMutex.Unlock()
-
-	// Set defaults if not provided
-	if entry.Timestamp.IsZero() {
-		entry.Timestamp = time.Now()
-	}
+// LogAccess logs an access attempt
+func (s *InMemoryAuditService) LogAccess(entry *AuditEntry) error {
 	if entry.ID == "" {
-		s.idCounter++
-		entry.ID = fmt.Sprintf("audit-%d", s.idCounter)
+		entry.ID = time.Now().Format(time.RFC3339Nano)
 	}
-	if entry.Outcome == "" {
-		entry.Outcome = AuditOutcomeSuccess
-	}
-	if entry.Severity == "" {
-		entry.Severity = AuditSeverityInfo
-	}
-
-	// Store a copy of the entry
-	entryCopy := entry
-	s.entries = append(s.entries, &entryCopy)
-
+	s.entries = append(s.entries, entry)
 	return nil
 }
 
-// Get gets an audit entry by ID
-func (s *InMemoryAuditLogService) Get(id string) (*AuditEntry, error) {
-	s.entriesMutex.RLock()
-	defer s.entriesMutex.RUnlock()
+// GetAuditTrail gets the audit trail for a user or resource
+func (s *InMemoryAuditService) GetAuditTrail(userID, tenantID, resourceType, resourceID string, startTime, endTime time.Time, limit, offset int) ([]*AuditEntry, error) {
+	var results []*AuditEntry
 
 	for _, entry := range s.entries {
-		if entry.ID == id {
-			// Return a copy of the entry
-			entryCopy := *entry
-			return &entryCopy, nil
+		if (userID == "" || entry.UserID == userID) &&
+			(tenantID == "" || entry.TenantID == tenantID) &&
+			(resourceType == "" || entry.ResourceType == resourceType) &&
+			(resourceID == "" || entry.ResourceID == resourceID) &&
+			(startTime.IsZero() || !entry.Timestamp.Before(startTime)) &&
+			(endTime.IsZero() || !entry.Timestamp.After(endTime)) {
+			results = append(results, entry)
 		}
 	}
-
-	return nil, fmt.Errorf("audit entry not found: %s", id)
-}
-
-// Search searches for audit entries
-func (s *InMemoryAuditLogService) Search(filter map[string]interface{}, limit, offset int) ([]*AuditEntry, error) {
-	s.entriesMutex.RLock()
-	defer s.entriesMutex.RUnlock()
-
-	// Apply filter
-	filtered := make([]*AuditEntry, 0)
-	for _, entry := range s.entries {
-		if matchesFilter(entry, filter) {
-			filtered = append(filtered, entry)
-		}
-	}
-
-	// Sort by timestamp (descending)
-	sort.Slice(filtered, func(i, j int) bool {
-		return filtered[i].Timestamp.After(filtered[j].Timestamp)
-	})
 
 	// Apply pagination
-	if offset >= len(filtered) {
+	if offset >= len(results) {
 		return []*AuditEntry{}, nil
 	}
+
 	end := offset + limit
-	if end > len(filtered) {
-		end = len(filtered)
-	}
-	result := filtered[offset:end]
-
-	// Return copies of the entries
-	copies := make([]*AuditEntry, len(result))
-	for i, entry := range result {
-		entryCopy := *entry
-		copies[i] = &entryCopy
+	if end > len(results) || limit <= 0 {
+		end = len(results)
 	}
 
-	return copies, nil
+	return results[offset:end], nil
 }
 
-// Count counts audit entries based on filter
-func (s *InMemoryAuditLogService) Count(filter map[string]interface{}) (int, error) {
-	s.entriesMutex.RLock()
-	defer s.entriesMutex.RUnlock()
-
-	count := 0
-	for _, entry := range s.entries {
-		if matchesFilter(entry, filter) {
-			count++
-		}
-	}
-
-	return count, nil
+// GetUserActions gets all actions performed by a user
+func (s *InMemoryAuditService) GetUserActions(userID string, startTime, endTime time.Time, limit, offset int) ([]*AuditEntry, error) {
+	return s.GetAuditTrail(userID, "", "", "", startTime, endTime, limit, offset)
 }
 
-// Export exports audit entries to a specified format
-func (s *InMemoryAuditLogService) Export(filter map[string]interface{}, format string) ([]byte, error) {
-	// Get all matching entries
-	entries, err := s.Search(filter, len(s.entries), 0)
-	if err != nil {
-		return nil, err
-	}
-
-	// In a real implementation, this would format the entries
-	// For now, just return a simple message
-	return []byte(fmt.Sprintf("Exported %d audit entries in %s format", len(entries), format)), nil
-}
-
-// matchesFilter checks if an entry matches a filter
-func matchesFilter(entry *AuditEntry, filter map[string]interface{}) bool {
-	for key, value := range filter {
-		switch key {
-		case "action":
-			if entry.Action != value.(string) {
-				return false
-			}
-		case "resource":
-			if entry.Resource != value.(string) {
-				return false
-			}
-		case "resourceId":
-			if entry.ResourceID != value.(string) {
-				return false
-			}
-		case "userId":
-			if entry.UserID != value.(string) {
-				return false
-			}
-		case "tenantId":
-			if entry.TenantID != value.(string) {
-				return false
-			}
-		case "outcome":
-			if entry.Outcome != value.(AuditOutcome) {
-				return false
-			}
-		case "severity":
-			if entry.Severity != value.(AuditSeverity) {
-				return false
-			}
-		case "fromTimestamp":
-			if entry.Timestamp.Before(value.(time.Time)) {
-				return false
-			}
-		case "toTimestamp":
-			if entry.Timestamp.After(value.(time.Time)) {
-				return false
-			}
-		}
-	}
-	return true
+// GetResourceActions gets all actions performed on a resource
+func (s *InMemoryAuditService) GetResourceActions(resourceType, resourceID string, startTime, endTime time.Time, limit, offset int) ([]*AuditEntry, error) {
+	return s.GetAuditTrail("", "", resourceType, resourceID, startTime, endTime, limit, offset)
 }
