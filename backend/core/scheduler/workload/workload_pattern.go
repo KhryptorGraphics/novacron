@@ -1,38 +1,14 @@
 package workload
 
 import (
-	"fmt"
 	"math"
-	"sort"
 	"time"
-)
-
-// PatternType represents the type of resource usage pattern
-type PatternType string
-
-// Pattern types
-const (
-	PatternTypeDiurnal    PatternType = "diurnal"     // Daily pattern
-	PatternTypeWeekly     PatternType = "weekly"      // Weekly pattern
-	PatternTypeMonthly    PatternType = "monthly"     // Monthly pattern
-	PatternTypeSporadic   PatternType = "sporadic"    // Irregular spikes
-	PatternTypeConstant   PatternType = "constant"    // Steady usage
-	PatternTypeGrowing    PatternType = "growing"     // Steadily increasing
-	PatternTypeDeclining  PatternType = "declining"   // Steadily decreasing
-	PatternTypeUnknown    PatternType = "unknown"     // Unknown pattern
-	PatternTypeBursty     PatternType = "bursty"      // Short periods of intensive activity
-	PatternTypeCyclical   PatternType = "cyclical"    // General repeating pattern
-	PatternTypeOnOff      PatternType = "on-off"      // Alternating between high and low usage
-	PatternTypeMultiModal PatternType = "multi-modal" // Multiple distinct usage levels
 )
 
 // WorkloadPattern represents a recognized pattern in resource usage
 type WorkloadPattern struct {
-	// PatternType identifies the kind of pattern
-	PatternType PatternType
-
-	// ResourceType is the type of resource this pattern applies to
-	ResourceType string
+	// PatternType identifies the kind of pattern (diurnal, weekly, etc.)
+	PatternType string
 
 	// CycleDuration is the duration of one pattern cycle
 	CycleDuration time.Duration
@@ -46,191 +22,444 @@ type WorkloadPattern struct {
 	// TroughTimestamps contains timestamps when troughs are expected
 	TroughTimestamps []time.Time
 
-	// Description is a human-readable description of the pattern
-	Description string
+	// ResourceType indicates which resource this pattern applies to (CPU, memory, etc.)
+	ResourceType string
 
-	// FirstDetected is when this pattern was first detected
-	FirstDetected time.Time
+	// PeakValues contains the expected peak values
+	PeakValues []float64
 
-	// LastConfirmed is when this pattern was last confirmed
-	LastConfirmed time.Time
-
-	// Parameters contains pattern-specific parameters
-	Parameters map[string]float64
+	// TroughValues contains the expected trough values
+	TroughValues []float64
 }
 
-// String returns a string representation of the pattern
-func (p *WorkloadPattern) String() string {
-	return fmt.Sprintf("%s pattern on %s (confidence: %.2f, cycle: %v)",
-		p.PatternType, p.ResourceType, p.ConfidenceScore, p.CycleDuration)
+// Pattern types
+const (
+	// PatternTypeDaily represents a daily pattern (24-hour cycle)
+	PatternTypeDaily = "daily"
+
+	// PatternTypeWeekly represents a weekly pattern (7-day cycle)
+	PatternTypeWeekly = "weekly"
+
+	// PatternTypeMonthly represents a monthly pattern
+	PatternTypeMonthly = "monthly"
+
+	// PatternTypeCustom represents a custom periodic pattern
+	PatternTypeCustom = "custom"
+
+	// PatternTypeDiurnal represents a day/night pattern
+	PatternTypeDiurnal = "diurnal"
+
+	// PatternTypeBursty represents a pattern with sudden bursts
+	PatternTypeBursty = "bursty"
+)
+
+// PatternDetector defines the interface for pattern detection algorithms
+type PatternDetector interface {
+	// DetectPatterns analyzes time series data to find patterns
+	DetectPatterns(timePoints []time.Time, values []float64) ([]WorkloadPattern, error)
+
+	// Name returns the name of the detector algorithm
+	Name() string
+
+	// Configure sets configuration options for the detector
+	Configure(options map[string]interface{}) error
 }
 
-// NextPeak predicts the next peak time after the given time
-func (p *WorkloadPattern) NextPeak(after time.Time) time.Time {
-	if len(p.PeakTimestamps) == 0 {
-		return time.Time{} // Zero time if no peaks
-	}
+// TimeSeriesData represents a time series of resource usage data
+type TimeSeriesData struct {
+	// ResourceType is the type of resource (CPU, memory, etc.)
+	ResourceType string
 
-	// Sort peaks if needed
-	if !sort.SliceIsSorted(p.PeakTimestamps, func(i, j int) bool {
-		return p.PeakTimestamps[i].Before(p.PeakTimestamps[j])
-	}) {
-		sort.Slice(p.PeakTimestamps, func(i, j int) bool {
-			return p.PeakTimestamps[i].Before(p.PeakTimestamps[j])
-		})
-	}
+	// Timestamps contains the sample timestamps
+	Timestamps []time.Time
 
-	// Find the next peak after the given time
-	for _, peak := range p.PeakTimestamps {
-		if peak.After(after) {
-			return peak
+	// Values contains the resource usage values
+	Values []float64
+}
+
+// PatternBasedPredictor uses detected patterns to predict future resource usage
+type PatternBasedPredictor struct {
+	// Patterns contains the detected workload patterns
+	Patterns []WorkloadPattern
+
+	// BaselineUsage is the average resource usage
+	BaselineUsage float64
+
+	// StdDeviation is the standard deviation of resource usage
+	StdDeviation float64
+}
+
+// PredictUsage predicts resource usage at a future time
+func (p *PatternBasedPredictor) PredictUsage(resourceType string, timestamp time.Time) (float64, float64, error) {
+	// Start with baseline
+	prediction := p.BaselineUsage
+	confidence := 0.5 // Default confidence
+
+	// Apply pattern adjustments
+	for _, pattern := range p.Patterns {
+		if pattern.ResourceType != resourceType {
+			continue
 		}
+
+		// Calculate position in the cycle
+		cyclePosition := getCyclePosition(timestamp, pattern)
+
+		// Find closest peak or trough
+		adjustment, patternConfidence := calculatePatternAdjustment(cyclePosition, pattern)
+
+		// Apply the adjustment weighted by pattern confidence
+		prediction += adjustment * pattern.ConfidenceScore
+
+		// Update overall confidence
+		confidence = (confidence + patternConfidence*pattern.ConfidenceScore) / 2
 	}
 
-	// If no future peak in the list, project based on cycle duration
-	if p.CycleDuration > 0 {
-		lastPeak := p.PeakTimestamps[len(p.PeakTimestamps)-1]
-		for {
-			lastPeak = lastPeak.Add(p.CycleDuration)
-			if lastPeak.After(after) {
-				return lastPeak
-			}
-		}
-	}
-
-	return time.Time{} // Zero time if can't predict
+	return prediction, confidence, nil
 }
 
-// NextTrough predicts the next trough time after the given time
-func (p *WorkloadPattern) NextTrough(after time.Time) time.Time {
-	if len(p.TroughTimestamps) == 0 {
-		return time.Time{} // Zero time if no troughs
-	}
+// getCyclePosition calculates the position within a pattern cycle
+func getCyclePosition(timestamp time.Time, pattern WorkloadPattern) float64 {
+	switch pattern.PatternType {
+	case PatternTypeDaily:
+		// Position in day (0.0 to 1.0)
+		midnight := time.Date(timestamp.Year(), timestamp.Month(), timestamp.Day(), 0, 0, 0, 0, timestamp.Location())
+		secondsInDay := 24 * 60 * 60
+		secondsSinceMidnight := timestamp.Sub(midnight).Seconds()
+		return secondsSinceMidnight / float64(secondsInDay)
 
-	// Sort troughs if needed
-	if !sort.SliceIsSorted(p.TroughTimestamps, func(i, j int) bool {
-		return p.TroughTimestamps[i].Before(p.TroughTimestamps[j])
-	}) {
-		sort.Slice(p.TroughTimestamps, func(i, j int) bool {
-			return p.TroughTimestamps[i].Before(p.TroughTimestamps[j])
-		})
-	}
+	case PatternTypeWeekly:
+		// Position in week (0.0 to 1.0)
+		dayOfWeek := float64(timestamp.Weekday())
+		hourOfDay := float64(timestamp.Hour())
+		return (dayOfWeek*24 + hourOfDay) / (7 * 24)
 
-	// Find the next trough after the given time
-	for _, trough := range p.TroughTimestamps {
-		if trough.After(after) {
-			return trough
-		}
-	}
+	case PatternTypeMonthly:
+		// Position in month (0.0 to 1.0)
+		dayOfMonth := float64(timestamp.Day() - 1) // 0-based
+		daysInMonth := float64(daysInMonth(timestamp.Year(), timestamp.Month()))
+		return dayOfMonth / daysInMonth
 
-	// If no future trough in the list, project based on cycle duration
-	if p.CycleDuration > 0 {
-		lastTrough := p.TroughTimestamps[len(p.TroughTimestamps)-1]
-		for {
-			lastTrough = lastTrough.Add(p.CycleDuration)
-			if lastTrough.After(after) {
-				return lastTrough
-			}
-		}
-	}
-
-	return time.Time{} // Zero time if can't predict
-}
-
-// IsActivePattern checks if the pattern is still relevant
-func (p *WorkloadPattern) IsActivePattern(now time.Time) bool {
-	// If the pattern was confirmed recently, it's still active
-	return now.Sub(p.LastConfirmed) < p.CycleDuration*3
-}
-
-// PredictUsage predicts resource usage at a specific time
-func (p *WorkloadPattern) PredictUsage(at time.Time) float64 {
-	if p.Parameters == nil || len(p.Parameters) == 0 {
-		return -1 // Can't predict without parameters
-	}
-
-	switch p.PatternType {
-	case PatternTypeDiurnal, PatternTypeWeekly, PatternTypeMonthly, PatternTypeCyclical:
-		return p.predictCyclicalUsage(at)
-	case PatternTypeConstant:
-		return p.Parameters["baseline"]
-	case PatternTypeGrowing:
-		return p.predictTrendUsage(at, true)
-	case PatternTypeDeclining:
-		return p.predictTrendUsage(at, false)
 	default:
-		return -1 // Can't predict for other pattern types
+		// For custom patterns, calculate based on duration
+		// Find a reference timestamp
+		refTime := pattern.PeakTimestamps[0]
+		if len(pattern.PeakTimestamps) == 0 && len(pattern.TroughTimestamps) > 0 {
+			refTime = pattern.TroughTimestamps[0]
+		}
+
+		// Calculate seconds since reference time
+		secondsSinceRef := timestamp.Sub(refTime).Seconds()
+
+		// Normalize to cycle duration and take modulo
+		cycleDurationSeconds := pattern.CycleDuration.Seconds()
+		return math.Mod(secondsSinceRef, cycleDurationSeconds) / cycleDurationSeconds
 	}
 }
 
-// predictCyclicalUsage predicts usage for cyclical patterns
-func (p *WorkloadPattern) predictCyclicalUsage(at time.Time) float64 {
-	baseline := p.Parameters["baseline"]
-	amplitude := p.Parameters["amplitude"]
-	periodSeconds := p.CycleDuration.Seconds()
+// calculatePatternAdjustment determines the adjustment based on cycle position
+func calculatePatternAdjustment(cyclePosition float64, pattern WorkloadPattern) (float64, float64) {
+	// Default values
+	adjustment := 0.0
+	confidence := 0.5
 
-	if periodSeconds <= 0 {
-		return baseline
+	// Convert peak and trough timestamps to cycle positions
+	peakPositions := make([]float64, len(pattern.PeakTimestamps))
+	for i, peakTime := range pattern.PeakTimestamps {
+		peakPositions[i] = getCyclePosition(peakTime, pattern)
 	}
 
-	// Find reference time (first peak, if available)
-	referenceTime := time.Time{}
-	if len(p.PeakTimestamps) > 0 {
-		referenceTime = p.PeakTimestamps[0]
-	} else if p.FirstDetected.Unix() > 0 {
-		referenceTime = p.FirstDetected
-	} else {
-		return baseline // Can't predict without reference
+	troughPositions := make([]float64, len(pattern.TroughTimestamps))
+	for i, troughTime := range pattern.TroughTimestamps {
+		troughPositions[i] = getCyclePosition(troughTime, pattern)
 	}
 
-	// Calculate phase within the cycle
-	secondsSinceReference := at.Sub(referenceTime).Seconds()
-	phase := math.Mod(secondsSinceReference, periodSeconds) / periodSeconds
+	// Find closest peak and trough
+	closestPeakDist := 1.0
+	closestPeakIdx := -1
+	for i, pos := range peakPositions {
+		dist := cyclicDistance(cyclePosition, pos)
+		if dist < closestPeakDist {
+			closestPeakDist = dist
+			closestPeakIdx = i
+		}
+	}
 
-	// Generate sinusoidal pattern (simplified model)
-	return baseline + amplitude*math.Sin(2*math.Pi*phase)
+	closestTroughDist := 1.0
+	closestTroughIdx := -1
+	for i, pos := range troughPositions {
+		dist := cyclicDistance(cyclePosition, pos)
+		if dist < closestTroughDist {
+			closestTroughDist = dist
+			closestTroughIdx = i
+		}
+	}
+
+	// Determine adjustment based on proximity to peaks and troughs
+	if closestPeakIdx >= 0 && closestTroughIdx >= 0 {
+		// We have both peaks and troughs to consider
+		if closestPeakDist < closestTroughDist {
+			// Closer to a peak
+			peakValue := 0.0
+			if closestPeakIdx < len(pattern.PeakValues) {
+				peakValue = pattern.PeakValues[closestPeakIdx]
+			}
+
+			// Adjustment scaled by distance (closer = stronger effect)
+			adjustment = peakValue * (1.0 - closestPeakDist)
+			confidence = 1.0 - closestPeakDist
+		} else {
+			// Closer to a trough
+			troughValue := 0.0
+			if closestTroughIdx < len(pattern.TroughValues) {
+				troughValue = pattern.TroughValues[closestTroughIdx]
+			}
+
+			// Adjustment scaled by distance (closer = stronger effect)
+			adjustment = troughValue * (1.0 - closestTroughDist)
+			confidence = 1.0 - closestTroughDist
+		}
+	} else if closestPeakIdx >= 0 {
+		// Only peaks available
+		peakValue := 0.0
+		if closestPeakIdx < len(pattern.PeakValues) {
+			peakValue = pattern.PeakValues[closestPeakIdx]
+		}
+
+		adjustment = peakValue * (1.0 - closestPeakDist)
+		confidence = 1.0 - closestPeakDist
+	} else if closestTroughIdx >= 0 {
+		// Only troughs available
+		troughValue := 0.0
+		if closestTroughIdx < len(pattern.TroughValues) {
+			troughValue = pattern.TroughValues[closestTroughIdx]
+		}
+
+		adjustment = troughValue * (1.0 - closestTroughDist)
+		confidence = 1.0 - closestTroughDist
+	}
+
+	return adjustment, confidence
 }
 
-// predictTrendUsage predicts usage for trending patterns
-func (p *WorkloadPattern) predictTrendUsage(at time.Time, isGrowing bool) float64 {
-	baseline := p.Parameters["baseline"]
-	slope := p.Parameters["slope"]
-	if !isGrowing {
-		slope = -slope // Negative slope for declining
+// cyclicDistance calculates distance between two positions in a cycle (0.0 to 1.0)
+func cyclicDistance(a, b float64) float64 {
+	// Ensure values are in range [0, 1]
+	a = a - float64(int(a))
+	if a < 0 {
+		a += 1.0
 	}
 
-	// Find reference time
-	referenceTime := p.FirstDetected
-	if referenceTime.Unix() <= 0 {
-		return baseline
+	b = b - float64(int(b))
+	if b < 0 {
+		b += 1.0
 	}
 
-	// Calculate time since reference in hours
-	hoursSinceReference := at.Sub(referenceTime).Hours()
+	// Direct distance
+	directDist := abs(a - b)
 
-	// Linear trend model
-	return baseline + slope*hoursSinceReference
+	// Cyclic distance (might be shorter to go the other way around the cycle)
+	return min(directDist, 1.0-directDist)
 }
 
-// EnhancedWorkloadProfile extends WorkloadProfile with advanced pattern recognition
-type EnhancedWorkloadProfile struct {
-	// Embed the basic WorkloadProfile
-	*WorkloadProfile
+// abs returns the absolute value of x
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
 
-	// RecognizedPatterns are patterns detected in the workload
-	RecognizedPatterns map[string]*WorkloadPattern
+// min returns the smaller of x or y
+func min(x, y float64) float64 {
+	if x < y {
+		return x
+	}
+	return y
+}
 
-	// PredictionModel contains parameters for usage prediction
-	PredictionModel map[string]interface{}
+// daysInMonth returns the number of days in the specified month
+func daysInMonth(year int, month time.Month) int {
+	// Jump to the first day of the next month, then back up one day
+	nextMonth := month + 1
+	nextYear := year
+	if nextMonth > 12 {
+		nextMonth = 1
+		nextYear++
+	}
 
-	// WorkloadStability indicates how stable this workload is (0-1)
-	WorkloadStability float64
+	firstOfNextMonth := time.Date(nextYear, nextMonth, 1, 0, 0, 0, 0, time.UTC)
+	lastDay := firstOfNextMonth.Add(-time.Hour * 24)
+	return lastDay.Day()
+}
 
-	// ResourceCorrelations maps pairs of resources to their correlation coefficient
-	ResourceCorrelations map[string]float64
+// WorkloadPatternAnalyzer analyzes VM resource usage to detect patterns
+type WorkloadPatternAnalyzer struct {
+	// TimeSeriesData for each resource type
+	data map[string]TimeSeriesData
 
-	// OptimalMigrationWindows suggests good times for migration
-	OptimalMigrationWindows []MigrationWindow
+	// Detected patterns for each resource type
+	patterns map[string][]WorkloadPattern
+
+	// Predictors for each resource type
+	predictors map[string]*PatternBasedPredictor
+
+	// Detectors contains the pattern detection algorithms
+	detectors []PatternDetector
+
+	// MinimumDataPoints is the minimum number of data points needed for analysis
+	MinimumDataPoints int
+}
+
+// NewWorkloadPatternAnalyzer creates a new workload pattern analyzer
+func NewWorkloadPatternAnalyzer() *WorkloadPatternAnalyzer {
+	return &WorkloadPatternAnalyzer{
+		data:              make(map[string]TimeSeriesData),
+		patterns:          make(map[string][]WorkloadPattern),
+		predictors:        make(map[string]*PatternBasedPredictor),
+		MinimumDataPoints: 24, // At least 24 data points by default
+	}
+}
+
+// AddDetector adds a pattern detection algorithm
+func (w *WorkloadPatternAnalyzer) AddDetector(detector PatternDetector) {
+	w.detectors = append(w.detectors, detector)
+}
+
+// AddDataPoint adds a single data point for a resource
+func (w *WorkloadPatternAnalyzer) AddDataPoint(resourceType string, timestamp time.Time, value float64) {
+	// Ensure the resource type exists in data map
+	if _, exists := w.data[resourceType]; !exists {
+		w.data[resourceType] = TimeSeriesData{
+			ResourceType: resourceType,
+			Timestamps:   make([]time.Time, 0),
+			Values:       make([]float64, 0),
+		}
+	}
+
+	// Add the data point
+	d := w.data[resourceType]
+	d.Timestamps = append(d.Timestamps, timestamp)
+	d.Values = append(d.Values, value)
+	w.data[resourceType] = d
+}
+
+// AnalyzePatterns analyzes the collected data to detect patterns
+func (w *WorkloadPatternAnalyzer) AnalyzePatterns() error {
+	// Process each resource type
+	for resourceType, timeSeries := range w.data {
+		// Skip if not enough data points
+		if len(timeSeries.Timestamps) < w.MinimumDataPoints {
+			continue
+		}
+
+		// Calculate baseline and standard deviation
+		baseline, stdDev := calculateBaseline(timeSeries.Values)
+
+		// Create predictor
+		predictor := &PatternBasedPredictor{
+			Patterns:      make([]WorkloadPattern, 0),
+			BaselineUsage: baseline,
+			StdDeviation:  stdDev,
+		}
+
+		// Run each detector
+		var detectedPatterns []WorkloadPattern
+		for _, detector := range w.detectors {
+			patterns, err := detector.DetectPatterns(timeSeries.Timestamps, timeSeries.Values)
+			if err != nil {
+				return err
+			}
+
+			// Set the resource type on each pattern
+			for i := range patterns {
+				patterns[i].ResourceType = resourceType
+			}
+
+			detectedPatterns = append(detectedPatterns, patterns...)
+		}
+
+		// Store detected patterns and predictor
+		w.patterns[resourceType] = detectedPatterns
+		predictor.Patterns = detectedPatterns
+		w.predictors[resourceType] = predictor
+	}
+
+	return nil
+}
+
+// GetPatterns returns detected patterns for a resource type
+func (w *WorkloadPatternAnalyzer) GetPatterns(resourceType string) []WorkloadPattern {
+	return w.patterns[resourceType]
+}
+
+// PredictUsage predicts future resource usage
+func (w *WorkloadPatternAnalyzer) PredictUsage(resourceType string, timestamp time.Time) (float64, float64, error) {
+	// Get predictor for this resource
+	predictor, exists := w.predictors[resourceType]
+	if !exists {
+		// Return baseline if no predictor exists
+		baseline := 0.0
+		if ts, exists := w.data[resourceType]; exists && len(ts.Values) > 0 {
+			baseline = average(ts.Values)
+		}
+		return baseline, 0.1, nil // Low confidence
+	}
+
+	// Use predictor to get prediction and confidence
+	return predictor.PredictUsage(resourceType, timestamp)
+}
+
+// calculateBaseline calculates the baseline (average) and standard deviation
+func calculateBaseline(values []float64) (float64, float64) {
+	if len(values) == 0 {
+		return 0, 0
+	}
+
+	// Calculate average
+	avg := average(values)
+
+	// Calculate standard deviation
+	sumSquaredDiff := 0.0
+	for _, v := range values {
+		diff := v - avg
+		sumSquaredDiff += diff * diff
+	}
+
+	stdDev := 0.0
+	if len(values) > 1 {
+		stdDev = sqrt(sumSquaredDiff / float64(len(values)-1))
+	}
+
+	return avg, stdDev
+}
+
+// average calculates the average of a slice of values
+func average(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+
+	sum := 0.0
+	for _, v := range values {
+		sum += v
+	}
+
+	return sum / float64(len(values))
+}
+
+// sqrt calculates the square root (simplified implementation)
+func sqrt(x float64) float64 {
+	// For simplicity, using a simple Newton's method
+	if x <= 0 {
+		return 0
+	}
+
+	z := x / 2.0
+	for i := 0; i < 10; i++ { // 10 iterations should be sufficient for convergence
+		z = z - (z*z-x)/(2*z)
+	}
+
+	return z
 }
 
 // MigrationWindow represents an optimal time window for migration
@@ -248,332 +477,56 @@ type MigrationWindow struct {
 	Reason string
 }
 
-// NewEnhancedProfile creates an enhanced profile from a basic profile
-func NewEnhancedProfile(baseProfile *WorkloadProfile) *EnhancedWorkloadProfile {
+// EnhancedWorkloadProfile represents a VM workload profile with advanced analysis
+type EnhancedWorkloadProfile struct {
+	// VMID is the VM identifier
+	VMID string
+
+	// ResourceProfiles contains resource usage profiles by resource type
+	ResourceProfiles map[string]*ResourceProfile
+
+	// RecognizedPatterns are patterns detected in the workload
+	RecognizedPatterns map[string][]WorkloadPattern
+
+	// WorkloadStability indicates how stable this workload is (0-1)
+	WorkloadStability float64
+
+	// LastUpdated is when this profile was last updated
+	LastUpdated time.Time
+
+	// SampleCount is the number of samples used to build this profile
+	SampleCount int
+}
+
+// ResourceProfile represents resource usage for a specific resource type
+type ResourceProfile struct {
+	// ResourceType is the type of resource (CPU, memory, etc.)
+	ResourceType string
+
+	// AverageUsage is the average resource usage
+	AverageUsage float64
+
+	// PeakUsage is the peak resource usage
+	PeakUsage float64
+
+	// MinimumUsage is the minimum resource usage
+	MinimumUsage float64
+
+	// StandardDeviation is the standard deviation of resource usage
+	StandardDeviation float64
+
+	// PredictionModel contains parameters for usage prediction
+	PredictionModel map[string]interface{}
+}
+
+// NewEnhancedProfile creates a new enhanced workload profile
+func NewEnhancedProfile(vmID string) *EnhancedWorkloadProfile {
 	return &EnhancedWorkloadProfile{
-		WorkloadProfile:         baseProfile,
-		RecognizedPatterns:      make(map[string]*WorkloadPattern),
-		PredictionModel:         make(map[string]interface{}),
-		WorkloadStability:       0.5, // Default value
-		ResourceCorrelations:    make(map[string]float64),
-		OptimalMigrationWindows: []MigrationWindow{},
+		VMID:               vmID,
+		ResourceProfiles:   make(map[string]*ResourceProfile),
+		RecognizedPatterns: make(map[string][]WorkloadPattern),
+		WorkloadStability:  0.5, // Default medium stability
+		LastUpdated:        time.Now(),
+		SampleCount:        0,
 	}
-}
-
-// PredictResourceUsage predicts resource usage at a future time
-func (p *EnhancedWorkloadProfile) PredictResourceUsage(resourceType string, at time.Time) float64 {
-	// First check if we have a pattern for this resource
-	pattern, exists := p.RecognizedPatterns[resourceType]
-	if exists && pattern.ConfidenceScore > 0.5 {
-		prediction := pattern.PredictUsage(at)
-		if prediction >= 0 {
-			return prediction
-		}
-	}
-
-	// Fall back to simple prediction from the base profile
-	if usage, exists := p.ResourceUsagePatterns[resourceType]; exists {
-		return usage.PredictedUsage
-	}
-
-	return -1 // Can't predict
-}
-
-// GetOptimalMigrationWindows gets optimal migration windows in a time range
-func (p *EnhancedWorkloadProfile) GetOptimalMigrationWindows(start, end time.Time) []MigrationWindow {
-	windows := make([]MigrationWindow, 0)
-
-	// Start with any pre-computed windows
-	for _, window := range p.OptimalMigrationWindows {
-		if window.StartTime.After(start) && window.EndTime.Before(end) {
-			windows = append(windows, window)
-		}
-	}
-
-	// If we don't have any pre-computed windows in the range, find some
-	if len(windows) == 0 {
-		windows = p.findMigrationWindows(start, end)
-	}
-
-	// Sort windows by quality (best first)
-	sort.Slice(windows, func(i, j int) bool {
-		return windows[i].Quality > windows[j].Quality
-	})
-
-	return windows
-}
-
-// findMigrationWindows identifies good migration windows
-func (p *EnhancedWorkloadProfile) findMigrationWindows(start, end time.Time) []MigrationWindow {
-	windows := make([]MigrationWindow, 0)
-
-	// Look for periods of low resource usage
-	for resourceType, pattern := range p.RecognizedPatterns {
-		if pattern.ConfidenceScore < 0.6 {
-			continue // Skip low-confidence patterns
-		}
-
-		// For each trough, create a window
-		current := start
-		for current.Before(end) {
-			trough := pattern.NextTrough(current)
-			if trough.IsZero() || trough.After(end) {
-				break
-			}
-
-			// Create a window around the trough
-			windowDuration := pattern.CycleDuration / 4
-			if windowDuration > 2*time.Hour {
-				windowDuration = 2 * time.Hour
-			}
-
-			window := MigrationWindow{
-				StartTime: trough.Add(-windowDuration / 2),
-				EndTime:   trough.Add(windowDuration / 2),
-				Quality:   pattern.ConfidenceScore * 0.8, // Scale by confidence
-				Reason:    fmt.Sprintf("Low %s usage expected", resourceType),
-			}
-
-			// Ensure window is within the requested range
-			if window.StartTime.Before(start) {
-				window.StartTime = start
-			}
-			if window.EndTime.After(end) {
-				window.EndTime = end
-			}
-
-			windows = append(windows, window)
-			current = trough.Add(pattern.CycleDuration / 2)
-		}
-	}
-
-	return windows
-}
-
-// CalculateWorkloadStability calculates overall workload stability
-func (p *EnhancedWorkloadProfile) CalculateWorkloadStability() {
-	if len(p.RecognizedPatterns) == 0 {
-		p.WorkloadStability = 0.3 // Default value for unknown stability
-		return
-	}
-
-	// Calculate weighted average of pattern confidence scores
-	totalWeight := 0.0
-	weightedSum := 0.0
-
-	for _, pattern := range p.RecognizedPatterns {
-		// Skip certain pattern types that don't indicate stability
-		if pattern.PatternType == PatternTypeSporadic || pattern.PatternType == PatternTypeUnknown {
-			continue
-		}
-
-		weight := 1.0
-		switch pattern.ResourceType {
-		case "cpu_usage":
-			weight = 1.5 // CPU is more important
-		case "memory_usage":
-			weight = 1.2 // Memory is important too
-		}
-
-		weightedSum += pattern.ConfidenceScore * weight
-		totalWeight += weight
-	}
-
-	if totalWeight > 0 {
-		p.WorkloadStability = weightedSum / totalWeight
-	} else {
-		p.WorkloadStability = 0.3
-	}
-}
-
-// IsStableWorkload determines if the workload is stable enough for prediction
-func (p *EnhancedWorkloadProfile) IsStableWorkload() bool {
-	return p.WorkloadStability >= 0.6
-}
-
-// DetectPatterns analyzes historical data to detect patterns
-// This would normally be a sophisticated algorithm, simplified here
-func (p *EnhancedWorkloadProfile) DetectPatterns() {
-	now := time.Now()
-
-	// Analyze each resource type
-	for resourceName, resourcePattern := range p.ResourceUsagePatterns {
-		// Skip if we don't have enough data points
-		if len(resourcePattern.UsagePattern) < 10 {
-			continue
-		}
-
-		// Convert map to slices for time series analysis
-		timestamps := make([]time.Time, 0, len(resourcePattern.UsagePattern))
-		values := make([]float64, 0, len(resourcePattern.UsagePattern))
-
-		for ts, val := range resourcePattern.UsagePattern {
-			timestamps = append(timestamps, ts)
-			values = append(values, val)
-		}
-
-		// Sort by timestamp
-		sort.Slice(timestamps, func(i, j int) bool {
-			return timestamps[i].Before(timestamps[j])
-		})
-		sort.Slice(values, func(i, j int) bool {
-			return timestamps[i].Before(timestamps[j])
-		})
-
-		// Calculate basic statistics
-		var sum, sumSquares float64
-		for _, val := range values {
-			sum += val
-			sumSquares += val * val
-		}
-
-		mean := sum / float64(len(values))
-		variance := (sumSquares / float64(len(values))) - (mean * mean)
-		stdDev := math.Sqrt(variance)
-
-		// Simple pattern detection - check variability
-		if stdDev < 5.0 {
-			// Low variability - likely constant workload
-			p.RecognizedPatterns[resourceName] = &WorkloadPattern{
-				PatternType:     PatternTypeConstant,
-				ResourceType:    resourceName,
-				CycleDuration:   24 * time.Hour, // Nominal value
-				ConfidenceScore: 0.9,
-				Description:     "Constant workload with low variability",
-				FirstDetected:   now,
-				LastConfirmed:   now,
-				Parameters: map[string]float64{
-					"baseline": mean,
-					"stddev":   stdDev,
-				},
-			}
-		} else {
-			// Check for basic daily pattern (simplified)
-			// In a real implementation, this would use proper time series analysis
-			isDailyPattern := false
-			if len(timestamps) >= 24 {
-				// Simple heuristic - check if there's a pattern in hourly averages
-				hourlyAverages := make([]float64, 24)
-				hourCounts := make([]int, 24)
-
-				for i, ts := range timestamps {
-					hour := ts.Hour()
-					hourlyAverages[hour] += values[i]
-					hourCounts[hour]++
-				}
-
-				// Normalize
-				hourlyVariation := 0.0
-				for i := 0; i < 24; i++ {
-					if hourCounts[i] > 0 {
-						hourlyAverages[i] /= float64(hourCounts[i])
-						hourlyVariation += math.Abs(hourlyAverages[i] - mean)
-					}
-				}
-
-				// If hourly variation is significant, it might be a daily pattern
-				if hourlyVariation > stdDev*3 {
-					isDailyPattern = true
-
-					// Find peak and trough hours
-					peakHour := 0
-					troughHour := 0
-					peakValue := hourlyAverages[0]
-					troughValue := hourlyAverages[0]
-
-					for i := 1; i < 24; i++ {
-						if hourlyAverages[i] > peakValue {
-							peakValue = hourlyAverages[i]
-							peakHour = i
-						}
-						if hourlyAverages[i] < troughValue {
-							troughValue = hourlyAverages[i]
-							troughHour = i
-						}
-					}
-
-					// Create peak and trough timestamps
-					peakTimestamps := make([]time.Time, 0)
-					troughTimestamps := make([]time.Time, 0)
-
-					// Use yesterday as reference
-					yesterday := now.AddDate(0, 0, -1)
-					peakTime := time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), peakHour, 0, 0, 0, yesterday.Location())
-					troughTime := time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), troughHour, 0, 0, 0, yesterday.Location())
-
-					peakTimestamps = append(peakTimestamps, peakTime)
-					troughTimestamps = append(troughTimestamps, troughTime)
-
-					p.RecognizedPatterns[resourceName] = &WorkloadPattern{
-						PatternType:      PatternTypeDiurnal,
-						ResourceType:     resourceName,
-						CycleDuration:    24 * time.Hour,
-						ConfidenceScore:  0.7,
-						PeakTimestamps:   peakTimestamps,
-						TroughTimestamps: troughTimestamps,
-						Description:      fmt.Sprintf("Daily pattern with peak at %d:00 and trough at %d:00", peakHour, troughHour),
-						FirstDetected:    now,
-						LastConfirmed:    now,
-						Parameters: map[string]float64{
-							"baseline":  mean,
-							"amplitude": (peakValue - troughValue) / 2,
-						},
-					}
-				}
-			}
-
-			// If not a daily pattern, check for other patterns
-			if !isDailyPattern {
-				// Check for growth or decline
-				if len(timestamps) >= 2 {
-					firstVal := values[0]
-					lastVal := values[len(values)-1]
-					duration := timestamps[len(timestamps)-1].Sub(timestamps[0])
-
-					// Calculate slope (change per hour)
-					slopePerHour := (lastVal - firstVal) / duration.Hours()
-
-					// If significant change over time
-					if math.Abs(slopePerHour) > 0.1*mean {
-						patternType := PatternTypeGrowing
-						if slopePerHour < 0 {
-							patternType = PatternTypeDeclining
-						}
-
-						p.RecognizedPatterns[resourceName] = &WorkloadPattern{
-							PatternType:     patternType,
-							ResourceType:    resourceName,
-							CycleDuration:   0, // Not applicable
-							ConfidenceScore: 0.6,
-							Description:     fmt.Sprintf("%s workload with rate %.2f per hour", patternType, math.Abs(slopePerHour)),
-							FirstDetected:   timestamps[0],
-							LastConfirmed:   now,
-							Parameters: map[string]float64{
-								"baseline": firstVal,
-								"slope":    slopePerHour,
-							},
-						}
-					} else {
-						// Default to sporadic if no other pattern detected
-						p.RecognizedPatterns[resourceName] = &WorkloadPattern{
-							PatternType:     PatternTypeSporadic,
-							ResourceType:    resourceName,
-							CycleDuration:   0, // Not applicable
-							ConfidenceScore: 0.5,
-							Description:     "Variable workload with no clear pattern",
-							FirstDetected:   now,
-							LastConfirmed:   now,
-							Parameters: map[string]float64{
-								"baseline": mean,
-								"stddev":   stdDev,
-							},
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// After detecting individual patterns, calculate overall stability
-	p.CalculateWorkloadStability()
 }

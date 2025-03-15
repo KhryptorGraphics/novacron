@@ -498,6 +498,35 @@ func (p *GCPProvider) GetPricing(ctx context.Context, resourceType string) (map[
 	}
 }
 
+// ListInstances is an adapter method that maps to GetInstances
+func (p *GCPProvider) ListInstances(ctx context.Context) ([]Instance, error) {
+	// Forward to the standard Provider interface method
+	return p.GetInstances(ctx, ListOptions{})
+}
+
+// GetInstanceMetrics retrieves metrics for a specific instance
+func (p *GCPProvider) GetInstanceMetrics(ctx context.Context, id string) (map[string]float64, error) {
+	if !p.initialized {
+		return nil, fmt.Errorf("GCP provider is not initialized")
+	}
+
+	// In a real implementation, this would fetch Cloud Monitoring metrics
+	// For now, return placeholder metrics
+	return map[string]float64{
+		"cpu/utilization":                0.38,         // 0-1 range
+		"memory/used_bytes":              4294967296.0, // 4 GB
+		"memory/total_bytes":             8589934592.0, // 8 GB
+		"disk/read_ops_count":            90.0,
+		"disk/write_ops_count":           45.0,
+		"disk/read_bytes_count":          1048576.0, // 1 MB/s
+		"disk/write_bytes_count":         524288.0,  // 0.5 MB/s
+		"network/received_bytes_count":   2097152.0, // 2 MB/s
+		"network/sent_bytes_count":       1048576.0, // 1 MB/s
+		"network/received_packets_count": 1400.0,
+		"network/sent_packets_count":     950.0,
+	}, nil
+}
+
 // Close closes the provider connection and releases resources
 func (p *GCPProvider) Close() error {
 	p.initialized = false

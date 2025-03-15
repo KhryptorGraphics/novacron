@@ -41,8 +41,8 @@ func (m *AWSVMManager) GetVMStats(
 	vmID string,
 	detailLevel monitoring.VMMetricDetailLevel,
 ) (*monitoring.VMStats, error) {
-	// Get instance details
-	instance, err := m.provider.GetInstance(ctx, vmID)
+	// Verify the instance exists
+	_, err := m.provider.GetInstance(ctx, vmID)
 	if err != nil {
 		return nil, fmt.Errorf("error getting AWS instance %s: %w", vmID, err)
 	}
@@ -150,8 +150,8 @@ func (m *AzureVMManager) GetVMStats(
 	vmID string,
 	detailLevel monitoring.VMMetricDetailLevel,
 ) (*monitoring.VMStats, error) {
-	// Get VM details
-	vm, err := m.provider.GetVirtualMachine(ctx, vmID)
+	// Verify the VM exists
+	_, err := m.provider.GetVirtualMachine(ctx, vmID)
 	if err != nil {
 		return nil, fmt.Errorf("error getting Azure VM %s: %w", vmID, err)
 	}
@@ -261,8 +261,8 @@ func (m *GCPVMManager) GetVMStats(
 	vmID string,
 	detailLevel monitoring.VMMetricDetailLevel,
 ) (*monitoring.VMStats, error) {
-	// Get instance details
-	instance, err := m.provider.GetInstance(ctx, vmID)
+	// Verify the instance exists
+	_, err := m.provider.GetInstance(ctx, vmID)
 	if err != nil {
 		return nil, fmt.Errorf("error getting GCP instance %s: %w", vmID, err)
 	}

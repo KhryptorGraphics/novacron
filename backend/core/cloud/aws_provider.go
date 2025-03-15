@@ -1495,6 +1495,34 @@ func (p *AWSProvider) GetPricing(ctx context.Context, resourceType string) (map[
 	}
 }
 
+// ListInstances is an adapter method that maps to GetInstances
+func (p *AWSProvider) ListInstances(ctx context.Context) ([]Instance, error) {
+	// Simply forward to the standard Provider interface method
+	return p.GetInstances(ctx, ListOptions{})
+}
+
+// GetInstanceMetrics retrieves metrics for a specific instance
+func (p *AWSProvider) GetInstanceMetrics(ctx context.Context, id string) (map[string]float64, error) {
+	if !p.initialized {
+		return nil, fmt.Errorf("AWS provider is not initialized")
+	}
+
+	// In a real implementation, this would fetch CloudWatch metrics
+	// For now, return placeholder metrics
+	return map[string]float64{
+		"CPUUtilization":    35.5,
+		"MemoryUtilization": 45.2,
+		"DiskReadOps":       105.0,
+		"DiskWriteOps":      52.0,
+		"DiskReadBytes":     1048576.0, // 1 MB/s
+		"DiskWriteBytes":    524288.0,  // 0.5 MB/s
+		"NetworkIn":         2097152.0, // 2 MB/s
+		"NetworkOut":        1048576.0, // 1 MB/s
+		"NetworkPacketsIn":  1500.0,
+		"NetworkPacketsOut": 1000.0,
+	}, nil
+}
+
 // Close closes the provider connection and releases resources
 func (p *AWSProvider) Close() error {
 	p.initialized = false
