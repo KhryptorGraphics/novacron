@@ -1,166 +1,182 @@
 # NovaCron Code Memory System
 
-This document describes the Code Memory system implemented using Qdrant vector database to store and search project files and documentation.
+The Code Memory system provides a vector database for storing, searching, and retrieving code snippets and documentation from throughout the NovaCron project. It uses Qdrant as the vector database and OpenAI's text-embedding-ada-002 model for generating semantic embeddings.
 
-## Overview
+## Components
 
-The Code Memory system provides the following capabilities:
+- **Qdrant Vector Database**: Stores code snippets with semantic embeddings
+- **OpenAI Integration**: Generates embeddings for code understanding
+- **Python Utilities**: For indexing, searching, and managing the code memory
+- **CI/CD Integration**: Keeps code memory up-to-date with the latest code
+- **Web Interface**: Provides an intuitive UI for exploring the code base
 
-1. **Semantic Code Search**: Search code and documentation using natural language queries
-2. **Project Knowledge Base**: Store project files in a queryable vector database
-3. **MCP Integration**: Use the Qdrant MCP server to query code memory from Claude
-4. **Context Retrieval**: Get context about project components for enhanced understanding
+## Setup
 
-## System Components
+### 1. Start Qdrant
 
-The system consists of the following components:
-
-- **Qdrant Database**: Vector database for storing and searching code embeddings
-- **Indexing Tools**: Python scripts for creating and populating the database
-- **Utility Library**: Functions for interacting with the Qdrant database
-- **MCP Integration**: Qdrant MCP server for Claude to use code memory
-- **Query Tools**: Tools for searching and retrieving information from code memory
-
-## Setup Instructions
-
-### 1. Start Qdrant Server
-
-Qdrant runs in a Docker container:
+Start the Qdrant server using Docker Compose:
 
 ```bash
 docker-compose -f qdrant-docker-compose.yml up -d
 ```
 
-### 2. Create Collection
+This will start Qdrant on port 6333 (API) and 6334 (web UI).
 
-The collection needs to be created before indexing files:
+### 2. Set OpenAI API Key
+
+Set your OpenAI API key as an environment variable:
+
+```bash
+# For Linux/macOS
+source set_openai_key.sh YOUR_API_KEY
+
+# For Windows PowerShell
+.\set_openai_key.ps1 YOUR_API_KEY
+
+# For Windows Command Prompt
+set_openai_key.py YOUR_API_KEY
+```
+
+Or create a `.env` file with:
+
+```
+OPENAI_API_KEY=your_api_key_here
+```
+
+### 3. Create Collection
+
+Create the vector collection in Qdrant:
 
 ```bash
 python create_collection.py
 ```
 
-This creates a collection named `novacron_files` with the appropriate vector size and indexes.
+### 4. Index Code Files
 
-### 3. Index Files
-
-The system provides two ways to index files:
-
-**Option 1: Using the Python indexer**
+Index the key project files:
 
 ```bash
 python index_key_files_mcp.py
 ```
 
-This indexes key project files like scheduler implementations, cloud providers, and documentation.
-
-**Option 2: Using the Go indexer**
+For more specific indexing needs, you can also use the Go-based indexer:
 
 ```bash
 cd tools/indexer
-go run main.go ../../
+go run main.go
 ```
 
-This recursively indexes all project files.
+## Usage
 
-## Using the Code Memory System
+### Command Line Usage
 
-### Searching Code Memory
-
-#### Direct Query (Python)
+Search for code directly from the command line:
 
 ```bash
-python qdrant_code_memory_demo.py -q "scheduler implementation"
+python qdrant_code_memory_demo.py -q "scheduler workload analysis"
 ```
 
-#### Module Information
+Or with file type filters:
 
 ```bash
-python qdrant_code_memory_demo.py -m scheduler
+python qdrant_code_memory_demo.py -q "constraint solving" -e go
 ```
 
-#### Using MCP
+### MCP Integration with Claude
 
-Claude can query the code memory directly using the Qdrant MCP server:
+The system integrates with Claude's MCP (Model Context Protocol) to provide code memory access directly from Claude.
 
-```
-What components are part of the scheduler in NovaCron?
-```
-
-## Code Memory APIs
-
-### Python API
-
-The `qdrant_mcp_utils.py` module provides functions for interacting with the code memory:
-
-- `query_code_memory(query, path_filter, ext_filter, limit)`: Search for code using natural language
-- `store_code_in_qdrant(file_path, content, metadata)`: Store code in the database
-
-### MCP API
-
-The Qdrant MCP server provides the following tools:
-
-- `qdrant-store`: Store information in the code memory
-- `qdrant-find`: Search the code memory with natural language queries
-
-## Architecture
+Example Claude prompt:
 
 ```
-┌────────────┐     ┌────────────┐     ┌────────────┐
-│ NovaCron   │     │ Index      │     │ Qdrant     │
-│ Project    │────▶│ Scripts    │────▶│ Database   │
-│ Files      │     │            │     │            │
-└────────────┘     └────────────┘     └────────────┘
-                                           │
-                                           ▼
-┌────────────┐     ┌────────────┐     ┌────────────┐
-│ Claude     │     │ Qdrant     │     │ Search     │
-│ Assistant  │◀───▶│ MCP Server │◀───▶│ API        │
-│            │     │            │     │            │
-└────────────┘     └────────────┘     └────────────┘
+Can you help me understand how the workload analyzer functions in NovaCron?
 ```
 
-## Indexed Content
+Claude can now use the `qdrant-find` MCP tool to search the code memory and provide relevant code snippets.
 
-The system currently has indexed:
+### Web Interface
 
-- Core scheduler components
-- Cloud provider implementations
-- Monitoring subsystem
-- Authentication and authorization
-- VM management
-- Storage interfaces
-- Network components
-- Project documentation
+You can use the web interface to explore the code memory system:
 
-## Future Enhancements
+1. Start the web server:
 
-Potential enhancements to the code memory system:
+```bash
+cd web_interface
+pip install flask
+python app.py
+```
 
-1. **Automated indexing**: Integrate with CI/CD to keep code memory up-to-date
-2. **Web interface**: Add a web-based search interface
-3. **Change tracking**: Track changes in code over time
-4. **Chunking strategies**: Improve how files are segmented for better context retrieval
-5. **Integration with issue tracking**: Link code memory with issue tracking systems
+2. Open your browser at http://localhost:5000
+
+The web interface lets you:
+- Search code with semantic understanding
+- Filter by file path or extension
+- View syntax-highlighted code snippets
+- See full file contents when needed
+- Browse statistics about indexed files
+
+## Automated Updates
+
+The code memory system is automatically updated through a GitHub Actions workflow that runs:
+- On every push to the main branch
+- On pull requests to main
+- Daily at midnight UTC
+- Manually when triggered
+
+The workflow:
+1. Starts a Qdrant instance
+2. Updates the collection with the latest code
+3. Generates a report with indexing statistics
+4. Uploads the report as an artifact
+
+You can view the workflow configuration in `.github/workflows/update-code-memory.yml`
+
+## Advanced Usage
+
+### Adding External Documentation
+
+To include external documentation, add it to the vector database:
+
+```python
+from qdrant_mcp_utils import store_code_in_qdrant
+
+store_code_in_qdrant(
+    "docs/external/design_patterns.md",
+    "# Design Patterns\n\nThis document describes...",
+    metadata={"source": "external", "category": "documentation"}
+)
+```
+
+### Customizing the Search
+
+You can customize how searches work by modifying the search parameters:
+
+```python
+from qdrant_mcp_utils import QdrantMemory
+
+memory = QdrantMemory()
+results = memory.search(
+    "virtual machine migration",
+    limit=20,
+    path_filter="backend/core/vm",
+    threshold=0.60  # Lower threshold for more results
+)
+```
+
+## Contributing
+
+To enhance the code memory system:
+
+1. Add new utility functions in `qdrant_mcp_utils.py`
+2. Update the indexing logic in `index_key_files_mcp.py`
+3. Improve the web interface in the `web_interface/` directory
+4. Update the CI/CD workflow in `.github/workflows/update-code-memory.yml`
 
 ## Troubleshooting
 
-### Collection Doesn't Exist
+If you encounter issues:
 
-If you encounter errors about the collection not existing:
-
-```
-Error: Collection 'novacron_files' does not exist.
-```
-
-Run `python create_collection.py` to create the collection.
-
-### OpenAI API Key Issues
-
-If embedding creation fails due to OpenAI API issues, the system will fall back to mock embeddings. Set the `OPENAI_API_KEY` environment variable to use real embeddings:
-
-```bash
-# For Windows
-python set_openai_key.py YOUR_API_KEY
-
-# For Linux/macOS
-source set_openai_key.sh YOUR_API_KEY
+1. Check Qdrant is running: `curl http://localhost:6333/healthz`
+2. Verify the collection exists: `curl http://localhost:6333/collections/novacron_files`
+3. Test with a simple query: `python test_qdrant_connection.py`
+4. Check for proper OpenAI API key configuration

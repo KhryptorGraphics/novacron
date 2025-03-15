@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NovaCron Code Memory</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/github.min.css">
+    <style>
+        .search-result {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            background-color: #f8f9fa;
+            border-left: 4px solid #0d6efd;
+        }
+        .file-path {
+            font-weight: bold;
+            color: #0d6efd;
+            word-break: break-all;
+        }
+        .score-badge {
+            font-size: 0.8rem;
+            background-color: #0d6efd;
+        }
+        pre code {
+            border-radius: 0.5rem;
+            font-size: 0.9rem;
+        }
+        .stats-box {
+            background-color: #f8f9fa;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        #loading {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="mb-4 text-center">NovaCron Code Memory</h1>
+        
+        <div class="row mb-4">
+            <div class="col-md-12 stats-box">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Database Stats</h5>
+                    <span id="vectors-count" class="badge bg-secondary">Loading...</span>
+                </div>
+                <div class="mt-2">
+                    <small>Indexed file types: <span id="file-types">Loading...</span></small>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Search Code Memory</h5>
+                        <form id="search-form">
+                            <div class="mb-3">
+                                <label for="query" class="form-label">Search Query</label>
+                                <input type="text" class="form-control" id="query" placeholder="Enter search query">
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label for="path-filter" class="form-label">Path Filter (optional)</label>
+                                    <input type="text" class="form-control" id="path-filter" placeholder="E.g. backend/core/scheduler">
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label for="ext-filter" class="form-label">Extension Filter (optional)</label>
+                                    <input type="text" class="form-control" id="ext-filter" placeholder="E.g. go, py, md">
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label for="limit" class="form-label">Result Limit</label>
+                                    <input type="number" class="form-control" id="limit" value="10" min="1" max="50">
+                                </div>
+                            </div>
+                            <div class="mb-3 form-check">
+                                <input type="checkbox" class="form-check-input" id="include-content">
+                                <label class="form-check-label" for="include-content">Include full file content</label>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Search</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="loading">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Searching code memory...</p>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-12">
+                <div id="results-container"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/lib/core.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/lib/languages/go.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/lib/languages/python.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/lib/languages/typescript.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/lib/languages/bash.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/lib/languages/markdown.min.js"></script>
+    
+    <script>
+        // Load stats on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadStats();
+            
+            // Set up event listeners
+            document.getElementById('search-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                performSearch();
+            });
+        });
+        
+        function loadStats() {
+            fetch('/stats')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('vectors-count').textContent = 
+                        `${data.vectors_count} files indexed`;
+                    document.getElementById('file-types').textContent = 
+                        data.file_types.join(', ');
+                })
+                .catch(error => {
+                    console.error('Error loading stats:', error);
+                    document.getElementById('vectors-count').textContent = 'Error loading stats';
+                    document.getElementById('file-types').textContent = 'Error loading file types';
+                });
+        }
+        
+        function performSearch() {
+            const query = document.getElementById('query').value.trim();
+            if (!query) {
+                alert('Please enter a search query');
+                return;
+            }
+            
+            const pathFilter = document.getElementById('path-filter').value.trim();
+            const extFilter = document.getElementById('ext-filter').value.trim();
+            const limit = document.getElementById('limit').value;
+            const includeContent = document.getElementById('include-content').checked;
+            
+            // Show loading indicator
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results-container').innerHTML = '';
+            
+            fetch('/search', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    query: query,
+                    path_filter: pathFilter,
+                    ext_filter: extFilter,
+                    limit: parseInt(limit),
+                    include_content: includeContent
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Search request failed');
+                }
+                return response.json();
+            })
+            .then(data => {
+                displayResults(data);
+            })
+            .catch(error => {
+                console.error('Error during search:', error);
+                document.getElementById('results-container').innerHTML = 
+                    `<div class="alert alert-danger">Error performing search: ${error.message}</div>`;
+            })
+            .finally(() => {
+                document.getElementById('loading').style.display = 'none';
+            });
+        }
+        
+        function displayResults(data) {
+            const resultsContainer = document.getElementById('results-container');
+            
+            if (data.results.length === 0) {
+                resultsContainer.innerHTML = '<div class="alert alert-warning">No results found</div>';
+                return;
+            }
+            
+            let html = `
+                <h3>Search Results</h3>
+                <p>Found ${data.results.length} results for query: "${data.stats.query}"</p>
+            `;
+            
+            data.results.forEach(result => {
+                // Determine language for syntax highlighting
+                let language = 'plaintext';
+                const ext = result.path.split('.').pop().toLowerCase();
+                if (['go'].includes(ext)) language = 'go';
+                else if (['py', 'python'].includes(ext)) language = 'python';
+                else if (['ts', 'tsx', 'js', 'jsx'].includes(ext)) language = 'typescript';
+                else if (['md', 'markdown'].includes(ext)) language = 'markdown';
+                else if (['sh', 'bash'].includes(ext)) language = 'bash';
+                
+                html += `
+                    <div class="search-result">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div class="file-path">${result.path}</div>
+                            <span class="badge score-badge">${result.score}% match</span>
+                        </div>
+                        <pre><code class="language-${language}">${escapeHtml(result.excerpt)}</code></pre>
+                        ${result.content ? `<details>
+                            <summary>View full content</summary>
+                            <pre><code class="language-${language}">${escapeHtml(result.content)}</code></pre>
+                        </details>` : ''}
+                    </div>
+                `;
+            });
+            
+            resultsContainer.innerHTML = html;
+            
+            // Apply syntax highlighting
+            document.querySelectorAll('pre code').forEach(block => {
+                hljs.highlightElement(block);
+            });
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
