@@ -1,4 +1,4 @@
-package main
+package legacymonitoring
 
 import (
 	"fmt"
@@ -9,9 +9,10 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/core/monitoring"
 )
 
-func main() {
-	fmt.Println("NovaCron Monitoring System Demo")
-	fmt.Println("===============================")
+// RunLegacyDemo runs the legacy monitoring demo
+func RunLegacyDemo() {
+	fmt.Println("NovaCron Monitoring System Demo (Legacy)")
+	fmt.Println("========================================")
 
 	// Create metric registry
 	registry := monitoring.NewMetricRegistry()
