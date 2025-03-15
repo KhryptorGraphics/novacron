@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -12,44 +13,104 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/core/storage"
 )
 
-// VM Telemetry Demo
-// This example demonstrates the use of the VM Telemetry Collector with a Mock VM Manager.
-// It shows how to integrate VM monitoring into the NovaCron system.
+// ANSI color constants
+const (
+	colorReset  = "\033[0m"
+	colorRed    = "\033[31m"
+	colorGreen  = "\033[32m"
+	colorYellow = "\033[33m"
+	colorBlue   = "\033[34m"
+	colorPurple = "\033[35m"
+	colorCyan   = "\033[36m"
+	colorWhite  = "\033[37m"
+	colorBold   = "\033[1m"
+)
 
 func main() {
-	fmt.Println("NovaCron VM Telemetry Monitoring Demo")
-	fmt.Println("======================================")
+	fmt.Printf("%s%sNovaCron VM Telemetry Example%s\n\n", colorBold, colorBlue, colorReset)
 
-	// Initialize storage for metrics
+	// Create context with cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Set up signal handling to gracefully shut down
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Printf("\n%sReceived shutdown signal. Gracefully shutting down...%s\n", colorYellow, colorReset)
+		cancel()
+	}()
+
+	// Create a metrics storage system
+	// In a real deployment, this would be a distributed storage solution
 	metricStorage := storage.NewInMemoryStorage()
 
-	// Initialize mock VM manager with predefined VMs
-	vmIDs := []string{
-		"vm-postgresql-db1",
-		"vm-redis-cache1",
-		"vm-web-server1",
-		"vm-web-server2",
-		"vm-batch-processor",
-	}
-	vmManager := monitoring.NewMockVMManager(vmIDs)
-
-	// Initialize distributed metric collector
+	// Create a distributed metric collector
 	collectorConfig := monitoring.DefaultDistributedMetricCollectorConfig()
-	collectorConfig.CollectionInterval = 5 * time.Second
-	collectorConfig.NodeID = "hypervisor-node1"
-	collectorConfig.ClusterID = "east-datacenter"
-	collectorConfig.Tags = map[string]string{
-		"environment": "production",
-		"service":     "vm-monitoring",
-		"datacenter":  "east-us-1",
-	}
-
-	// Create metric collector with storage
+	collectorConfig.NodeID = "local-test-node"
 	collector := monitoring.NewDistributedMetricCollector(collectorConfig, metricStorage)
 
-	// Initialize VM telemetry collector
-	vmTelemetryConfig := &monitoring.VMTelemetryCollectorConfig{
-		CollectionInterval: 10 * time.Second,
+	// Create mock VM manager with test VMs
+	mockVMs := []string{
+		"vm-01-webserver",
+		"vm-02-database",
+		"vm-03-cache",
+		"vm-04-batch",
+		"vm-05-analytics",
+	}
+	vmManager := monitoring.NewMockVMManager(mockVMs)
+
+	// Configure workload patterns for the mock VMs
+	patternConfig := &monitoring.MockVMPatternConfig{
+		CPUPatterns: map[string]monitoring.WorkloadPattern{
+			"vm-01-webserver": monitoring.NewVariablePattern(50, 30, 0.1),          // Web server: Medium load with spikes
+			"vm-02-database":  monitoring.NewStablePattern(65, 10),                 // Database: Stable higher load
+			"vm-03-cache":     monitoring.NewSpikyPattern(25, 90, 0.05, 0.01),      // Cache: Low with occasional spikes
+			"vm-04-batch":     monitoring.NewCyclicPattern(10, 95, 60*time.Second), // Batch: Cycles between low and high
+			"vm-05-analytics": monitoring.NewRandomPattern(40, 30),                 // Analytics: Moderate random load
+		},
+		MemoryPatterns: map[string]monitoring.WorkloadPattern{
+			"vm-01-webserver": monitoring.NewStablePattern(60, 5),                  // Web server: Stable memory
+			"vm-02-database":  monitoring.NewStablePattern(80, 3),                  // Database: High stable memory
+			"vm-03-cache":     monitoring.NewStablePattern(70, 2),                  // Cache: Fixed memory usage
+			"vm-04-batch":     monitoring.NewCyclicPattern(40, 85, 90*time.Second), // Batch: Memory grows and shrinks
+			"vm-05-analytics": monitoring.NewVariablePattern(65, 20, 0.08),         // Analytics: Variable memory
+		},
+		DiskPatterns: map[string]map[string]monitoring.WorkloadPattern{
+			"vm-01-webserver": {
+				"sda": monitoring.NewStablePattern(20, 3),          // OS disk: Low stable usage
+				"sdb": monitoring.NewVariablePattern(40, 15, 0.05), // Data disk: Variable
+			},
+			"vm-02-database": {
+				"sda": monitoring.NewStablePattern(30, 2),                   // OS disk: Low stable usage
+				"sdb": monitoring.NewVariablePattern(75, 10, 0.02),          // Data disk: High variable usage
+				"sdc": monitoring.NewCyclicPattern(50, 90, 300*time.Second), // Backup disk: Cycles with backups
+			},
+		},
+		NetworkPatterns: map[string]map[string]monitoring.WorkloadPattern{
+			"vm-01-webserver": {
+				"eth0": monitoring.NewVariablePattern(60, 25, 0.1), // Primary: Variable traffic
+			},
+			"vm-02-database": {
+				"eth0": monitoring.NewStablePattern(40, 15),             // Primary: Consistent traffic
+				"eth1": monitoring.NewSpikyPattern(10, 80, 0.01, 0.005), // Backup: Occasional backup traffic
+			},
+		},
+		IOPSPatterns: map[string]map[string]monitoring.WorkloadPattern{
+			"vm-02-database": {
+				"sdb": monitoring.NewSpikyPattern(100, 5000, 0.1, 0.05), // Database: Spiky IO pattern
+			},
+			"vm-04-batch": {
+				"sda": monitoring.NewCyclicPattern(50, 2000, 120*time.Second), // Batch: Cyclic IO pattern
+			},
+		},
+	}
+	vmManager.ConfigureWorkloadPatterns(patternConfig)
+
+	// Create VM telemetry collector configuration
+	telemetryConfig := &monitoring.VMTelemetryCollectorConfig{
+		CollectionInterval: 2 * time.Second, // Collect every 2 seconds for the demo
 		VMManager:          vmManager,
 		EnabledMetrics: monitoring.VMMetricTypes{
 			CPU:              true,
@@ -61,71 +122,263 @@ func main() {
 			ApplicationStats: false,
 			GuestMetrics:     false,
 		},
-		NodeID:      "hypervisor-node1",
-		DetailLevel: monitoring.DetailedMetrics,
 		Tags: map[string]string{
-			"collector_type": "vm_telemetry",
-			"version":        "1.0",
+			"environment": "demo",
+			"example":     "vm-telemetry",
 		},
+		NodeID:      "demo-node",
+		DetailLevel: monitoring.StandardMetrics,
 	}
 
-	vmTelemetryCollector := monitoring.NewVMTelemetryCollector(vmTelemetryConfig, collector)
+	// Create VM telemetry collector
+	vmTelemetryCollector := monitoring.NewVMTelemetryCollector(telemetryConfig, collector)
 
-	// Set up alerts
-	setupVMAlerts(collector)
+	// Setup real-time dashboard
+	dashboard := NewVMTelemetryDashboard(metricStorage, mockVMs)
 
-	// Set up analytics
-	analyticsConfig := monitoring.DefaultAnalyticsEngineConfig()
-	analyticsConfig.ProcessingInterval = 15 * time.Second
-	analytics := monitoring.NewAnalyticsEngine(analyticsConfig, collector)
-
-	// Console notifier for alerts
-	consoleNotifier := &ConsoleNotifier{}
-	collector.AlertManager().AddNotifier(consoleNotifier)
-
-	// Start all components
-	fmt.Println("Starting VM telemetry collection...")
-	collector.Start()
-	vmTelemetryCollector.Start()
-	analytics.Start()
-
-	// Print demo information
-	fmt.Println("\nDemo is running with the following components:")
-	fmt.Println("- Distributed Metric Collector")
-	fmt.Println("- VM Telemetry Collector")
-	fmt.Println("- Analytics Engine")
-	fmt.Println("- Mock VM Manager with 5 simulated VMs")
-	fmt.Println("- Alert Manager with Console Notifications")
-
-	fmt.Println("\nMonitored VMs:")
-	for i, vmID := range vmIDs {
-		fmt.Printf("  %d. %s\n", i+1, vmID)
+	// Start collectors
+	fmt.Printf("%sStarting VM telemetry collector...%s\n", colorGreen, colorReset)
+	err := vmTelemetryCollector.Start()
+	if err != nil {
+		fmt.Printf("%sError starting VM telemetry collector: %v%s\n", colorRed, err, colorReset)
+		return
 	}
 
-	fmt.Println("\nMetrics will be collected every 10 seconds.")
-	fmt.Println("Alerts will be triggered when metrics exceed thresholds.")
-	fmt.Println("\nPress Ctrl+C to stop the demo.")
+	// Start dashboard
+	fmt.Printf("%sStarting real-time VM telemetry dashboard...%s\n", colorGreen, colorReset)
+	dashboard.Start(ctx)
 
-	// Dashboard updater in a separate goroutine
-	stopChan := make(chan struct{})
-	go updateDashboard(collector, vmManager, stopChan)
+	// Setup alerts
+	setupAlerts(ctx, collector)
 
-	// Wait for termination signal
-	termChan := make(chan os.Signal, 1)
-	signal.Notify(termChan, syscall.SIGINT, syscall.SIGTERM)
-	<-termChan
+	// Wait for context cancellation
+	<-ctx.Done()
 
-	// Graceful shutdown
-	fmt.Println("\nShutting down...")
-	close(stopChan)
-	analytics.Stop()
-	vmTelemetryCollector.Stop()
-	collector.Stop()
-	fmt.Println("Demo stopped.")
+	// Cleanup
+	fmt.Printf("%sStopping VM telemetry collector...%s\n", colorYellow, colorReset)
+	err = vmTelemetryCollector.Stop()
+	if err != nil {
+		fmt.Printf("%sError stopping VM telemetry collector: %v%s\n", colorRed, err, colorReset)
+	}
+
+	fmt.Printf("%sExample complete!%s\n", colorGreen, colorReset)
 }
 
-// setupVMAlerts configures alerts for VM metrics
-func setupVMAlerts(collector *monitoring.DistributedMetricCollector) {
+// VMTelemetryDashboard provides a real-time dashboard for VM telemetry
+type VMTelemetryDashboard struct {
+	storage     *storage.InMemoryStorage
+	vmIDs       []string
+	stopCh      chan struct{}
+	refreshRate time.Duration
+	mutex       sync.Mutex
+}
+
+// NewVMTelemetryDashboard creates a new VM telemetry dashboard
+func NewVMTelemetryDashboard(metricStorage *storage.InMemoryStorage, vmIDs []string) *VMTelemetryDashboard {
+	return &VMTelemetryDashboard{
+		storage:     metricStorage,
+		vmIDs:       vmIDs,
+		stopCh:      make(chan struct{}),
+		refreshRate: 3 * time.Second,
+	}
+}
+
+// Start starts the dashboard refresh loop
+func (d *VMTelemetryDashboard) Start(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(d.refreshRate)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				d.refresh(ctx)
+			case <-ctx.Done():
+				return
+			case <-d.stopCh:
+				return
+			}
+		}
+	}()
+}
+
+// Stop stops the dashboard
+func (d *VMTelemetryDashboard) Stop() {
+	close(d.stopCh)
+}
+
+// refresh updates and renders the dashboard
+func (d *VMTelemetryDashboard) refresh(ctx context.Context) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
+	// Clear screen
+	fmt.Print("\033[H\033[2J") // ANSI escape codes to clear screen
+
+	// Dashboard header
+	fmt.Printf("%s%s[ NovaCron VM Telemetry Dashboard ]%s\n\n", colorBold, colorBlue, colorReset)
+	fmt.Printf("Time: %s\n\n", time.Now().Format("2006-01-02 15:04:05"))
+
+	// Loop through VMs and show metrics
+	totalCPU := 0.0
+	totalMemory := 0.0
+	vmCount := 0
+
+	// Create dashboard for each VM
+	for _, vmID := range d.vmIDs {
+		// CPU Usage
+		cpuMetrics, _ := d.getLatestMetrics(ctx, "vm.cpu.usage", vmID)
+		var cpuUsage float64
+		if len(cpuMetrics) > 0 {
+			cpuUsage = cpuMetrics[0].Value.(float64)
+			totalCPU += cpuUsage
+			vmCount++
+		}
+
+		// Memory Usage
+		memMetrics, _ := d.getLatestMetrics(ctx, "vm.memory.usage_percent", vmID)
+		var memUsage float64
+		if len(memMetrics) > 0 {
+			memUsage = memMetrics[0].Value.(float64)
+			totalMemory += memUsage
+		}
+
+		// Disk Usage
+		diskMetrics, _ := d.getLatestMetrics(ctx, "vm.disk.usage_percent", vmID)
+		var diskUsage string
+		if len(diskMetrics) > 0 {
+			diskUsage = fmt.Sprintf("%.1f%%", diskMetrics[0].Value.(float64))
+		} else {
+			diskUsage = "N/A"
+		}
+
+		// Network Traffic
+		rxMetrics, _ := d.getLatestMetrics(ctx, "vm.network.rx_bytes", vmID)
+		txMetrics, _ := d.getLatestMetrics(ctx, "vm.network.tx_bytes", vmID)
+		var networkUsage string
+		if len(rxMetrics) > 0 && len(txMetrics) > 0 {
+			rx := rxMetrics[0].Value.(float64)
+			tx := txMetrics[0].Value.(float64)
+			networkUsage = fmt.Sprintf("↓%.1f KB/s ↑%.1f KB/s", rx/1024, tx/1024)
+		} else {
+			networkUsage = "N/A"
+		}
+
+		// IOPs
+		var iopsUsage string
+		readIOPSMetrics, _ := d.getLatestMetrics(ctx, "vm.disk.read_iops", vmID)
+		writeIOPSMetrics, _ := d.getLatestMetrics(ctx, "vm.disk.write_iops", vmID)
+		if len(readIOPSMetrics) > 0 && len(writeIOPSMetrics) > 0 {
+			read := readIOPSMetrics[0].Value.(float64)
+			write := writeIOPSMetrics[0].Value.(float64)
+			iopsUsage = fmt.Sprintf("R:%.0f W:%.0f", read, write)
+		} else {
+			iopsUsage = "N/A"
+		}
+
+		// VM Status Line
+		fmt.Printf("%s%s[%s]%s ", colorBold, colorCyan, vmID, colorReset)
+
+		// Status indicators
+		cpuColor := getColorForUsage(cpuUsage)
+		memColor := getColorForUsage(memUsage)
+
+		// CPU Bar
+		fmt.Printf("CPU: %s%5.1f%% %s%s | ", cpuColor, cpuUsage, colorReset, getBarGraph(cpuUsage, 10))
+
+		// Memory Bar
+		fmt.Printf("MEM: %s%5.1f%% %s%s | ", memColor, memUsage, colorReset, getBarGraph(memUsage, 10))
+
+		// Disk Usage
+		fmt.Printf("Disk: %5s | ", diskUsage)
+
+		// Network Traffic
+		fmt.Printf("Net: %s | ", networkUsage)
+
+		// IOPs
+		fmt.Printf("IOPs: %s\n", iopsUsage)
+	}
+
+	// Show system summary
+	if vmCount > 0 {
+		avgCPU := totalCPU / float64(vmCount)
+		avgMem := totalMemory / float64(vmCount)
+
+		fmt.Printf("\n%s%sSystem Summary:%s\n", colorBold, colorPurple, colorReset)
+		fmt.Printf("Avg CPU: %s%5.1f%% %s%s | ", getColorForUsage(avgCPU), avgCPU, colorReset, getBarGraph(avgCPU, 20))
+		fmt.Printf("Avg Memory: %s%5.1f%% %s%s\n", getColorForUsage(avgMem), avgMem, colorReset, getBarGraph(avgMem, 20))
+	}
+
+	// Show alerts if any
+	fmt.Printf("\n%s%sRecent Alerts:%s\n", colorBold, colorYellow, colorReset)
+	alertMetrics, _ := d.getLatestMetrics(ctx, "vm.alert", "")
+	if len(alertMetrics) > 0 {
+		for i := 0; i < min(5, len(alertMetrics)); i++ {
+			metric := alertMetrics[i]
+			fmt.Printf("%s[%s] %s: %s%s\n",
+				colorRed,
+				metric.Timestamp.Format("15:04:05"),
+				metric.Tags["vm_id"],
+				metric.Tags["message"],
+				colorReset)
+		}
+	} else {
+		fmt.Printf("%sNo recent alerts%s\n", colorGreen, colorReset)
+	}
+
+	fmt.Printf("\n%sPress Ctrl+C to exit%s\n", colorYellow, colorReset)
+}
+
+// getLatestMetrics gets the latest metrics for a given name and VM ID
+func (d *VMTelemetryDashboard) getLatestMetrics(ctx context.Context, name string, vmID string) ([]*monitoring.Metric, error) {
+	now := time.Now()
+	past := now.Add(-10 * time.Minute)
+
+	var tags map[string]string
+	if vmID != "" {
+		tags = map[string]string{"vm_id": vmID}
+	}
+
+	metrics, err := d.storage.GetLatestMetrics(ctx, name, tags, past, now, 1)
+	if err != nil {
+		return nil, err
+	}
+
+	return metrics, nil
+}
+
+// getBarGraph returns a bar graph string for the given percentage
+func getBarGraph(percentage float64, length int) string {
+	// Calculate filled part
+	filledLength := int(percentage / 100.0 * float64(length))
+
+	// Create bar
+	bar := "["
+	for i := 0; i < length; i++ {
+		if i < filledLength {
+			bar += "█"
+		} else {
+			bar += " "
+		}
+	}
+	bar += "]"
+
+	return bar
+}
+
+// getColorForUsage returns a color based on usage percentage
+func getColorForUsage(percentage float64) string {
+	if percentage >= 90 {
+		return colorRed
+	} else if percentage >= 70 {
+		return colorYellow
+	} else {
+		return colorGreen
+	}
+}
+
+// setupAlerts creates and registers alert definitions
+func setupAlerts(ctx context.Context, collector *monitoring.DistributedMetricCollector) {
 	// High CPU Alert
 	cpuAlert := &monitoring.Alert{
 		ID:          "vm-high-cpu-usage",
@@ -137,210 +390,98 @@ func setupVMAlerts(collector *monitoring.DistributedMetricCollector) {
 			MetricName: "vm.cpu.usage",
 			Operator:   monitoring.AlertConditionOperatorGreaterThan,
 			Threshold:  90.0,
-			Duration:   1 * time.Minute,
-			Tags: map[string]string{
-				"component": "vm",
+			Duration:   10 * time.Second,
+		},
+		Actions: []monitoring.AlertAction{
+			{
+				Type: monitoring.AlertActionConsole,
+				Parameters: map[string]string{
+					"message": "High CPU Usage Detected",
+				},
+			},
+			{
+				Type: monitoring.AlertActionMetric,
+				Parameters: map[string]string{
+					"name":    "vm.alert",
+					"message": "High CPU Usage (>90%)",
+				},
 			},
 		},
-		NotificationChannels: []string{"console"},
-		Enabled:              true,
-		Status:               monitoring.AlertStatusResolved,
+		Enabled: true,
 	}
-	collector.RegisterAlert(cpuAlert)
 
 	// High Memory Alert
 	memoryAlert := &monitoring.Alert{
 		ID:          "vm-high-memory-usage",
 		Name:        "VM High Memory Usage",
 		Description: "VM memory usage is critically high",
-		Severity:    monitoring.AlertSeverityWarning,
+		Severity:    monitoring.AlertSeverityCritical,
 		Type:        monitoring.AlertTypeThreshold,
 		Condition: monitoring.AlertCondition{
 			MetricName: "vm.memory.usage_percent",
-			Operator:   monitoring.AlertConditionOperatorGreaterThanOrEqual,
-			Threshold:  90.0,
-			Duration:   30 * time.Second,
-			Tags: map[string]string{
-				"component": "vm",
+			Operator:   monitoring.AlertConditionOperatorGreaterThan,
+			Threshold:  85.0,
+			Duration:   15 * time.Second,
+		},
+		Actions: []monitoring.AlertAction{
+			{
+				Type: monitoring.AlertActionConsole,
+				Parameters: map[string]string{
+					"message": "High Memory Usage Detected",
+				},
+			},
+			{
+				Type: monitoring.AlertActionMetric,
+				Parameters: map[string]string{
+					"name":    "vm.alert",
+					"message": "High Memory Usage (>85%)",
+				},
 			},
 		},
-		NotificationChannels: []string{"console"},
-		Enabled:              true,
-		Status:               monitoring.AlertStatusResolved,
+		Enabled: true,
 	}
-	collector.RegisterAlert(memoryAlert)
 
 	// High Disk Usage Alert
 	diskAlert := &monitoring.Alert{
 		ID:          "vm-high-disk-usage",
 		Name:        "VM High Disk Usage",
 		Description: "VM disk usage is critically high",
-		Severity:    monitoring.AlertSeverityError,
+		Severity:    monitoring.AlertSeverityWarning,
 		Type:        monitoring.AlertTypeThreshold,
 		Condition: monitoring.AlertCondition{
 			MetricName: "vm.disk.usage_percent",
-			Operator:   monitoring.AlertConditionOperatorGreaterThanOrEqual,
-			Threshold:  90.0,
-			Duration:   2 * time.Minute,
-			Tags: map[string]string{
-				"component": "vm",
-				"disk_type": "system",
-			},
-		},
-		NotificationChannels: []string{"console"},
-		Enabled:              true,
-		Status:               monitoring.AlertStatusResolved,
-	}
-	collector.RegisterAlert(diskAlert)
-
-	// Network Throughput Alert
-	networkAlert := &monitoring.Alert{
-		ID:          "vm-high-network-usage",
-		Name:        "VM High Network Usage",
-		Description: "VM network usage is unusually high",
-		Severity:    monitoring.AlertSeverityWarning,
-		Type:        monitoring.AlertTypeThreshold,
-		Condition: monitoring.AlertCondition{
-			MetricName: "vm.network.rx_bytes",
 			Operator:   monitoring.AlertConditionOperatorGreaterThan,
-			Threshold:  100 * 1024 * 1024, // 100 MB/s
+			Threshold:  80.0,
 			Duration:   30 * time.Second,
-			Tags: map[string]string{
-				"component": "vm",
+		},
+		Actions: []monitoring.AlertAction{
+			{
+				Type: monitoring.AlertActionConsole,
+				Parameters: map[string]string{
+					"message": "High Disk Usage Detected",
+				},
+			},
+			{
+				Type: monitoring.AlertActionMetric,
+				Parameters: map[string]string{
+					"name":    "vm.alert",
+					"message": "High Disk Usage (>80%)",
+				},
 			},
 		},
-		NotificationChannels: []string{"console"},
-		Enabled:              true,
-		Status:               monitoring.AlertStatusResolved,
+		Enabled: true,
 	}
-	collector.RegisterAlert(networkAlert)
 
-	// Disk Latency Alert
-	diskLatencyAlert := &monitoring.Alert{
-		ID:          "vm-high-disk-latency",
-		Name:        "VM High Disk Latency",
-		Description: "VM disk latency is critically high",
-		Severity:    monitoring.AlertSeverityWarning,
-		Type:        monitoring.AlertTypeThreshold,
-		Condition: monitoring.AlertCondition{
-			MetricName: "vm.disk.write_latency",
-			Operator:   monitoring.AlertConditionOperatorGreaterThan,
-			Threshold:  50.0, // 50ms
-			Duration:   1 * time.Minute,
-			Tags: map[string]string{
-				"component": "vm",
-			},
-		},
-		NotificationChannels: []string{"console"},
-		Enabled:              true,
-		Status:               monitoring.AlertStatusResolved,
-	}
-	collector.RegisterAlert(diskLatencyAlert)
+	// Register alerts
+	collector.RegisterAlert(ctx, cpuAlert)
+	collector.RegisterAlert(ctx, memoryAlert)
+	collector.RegisterAlert(ctx, diskAlert)
 }
 
-// updateDashboard periodically prints a simple dashboard of VM stats
-func updateDashboard(collector *monitoring.DistributedMetricCollector, vmManager *monitoring.MockVMManager, stopChan <-chan struct{}) {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			clearScreen()
-			printDashboardHeader()
-
-			ctx := context.Background()
-			vmIDs, err := vmManager.GetVMs(ctx)
-			if err != nil {
-				fmt.Println("Error getting VM list:", err)
-				continue
-			}
-
-			// Get and display stats for each VM
-			for _, vmID := range vmIDs {
-				stats, err := vmManager.GetVMStats(ctx, vmID, monitoring.StandardMetrics)
-				if err != nil {
-					fmt.Printf("Error getting stats for VM %s: %v\n", vmID, err)
-					continue
-				}
-
-				printVMStats(vmID, stats)
-			}
-
-			// Sleep briefly to avoid screen flicker
-			time.Sleep(100 * time.Millisecond)
-		case <-stopChan:
-			return
-		}
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
 	}
-}
-
-// clearScreen clears the terminal screen
-func clearScreen() {
-	fmt.Print("\033[H\033[2J") // ANSI escape code to clear screen
-}
-
-// printDashboardHeader prints the dashboard header
-func printDashboardHeader() {
-	fmt.Println("╔══════════════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║                       NOVACRON VM MONITORING DASHBOARD                   ║")
-	fmt.Println("╚══════════════════════════════════════════════════════════════════════════╝")
-	fmt.Println()
-}
-
-// printVMStats prints stats for a single VM
-func printVMStats(vmID string, stats *monitoring.VMStats) {
-	// Print VM header
-	fmt.Printf("┌─────────────────────────── VM: %s ───────────────────────────┐\n", vmID)
-
-	// Print CPU stats
-	fmt.Printf("│ CPU: %.1f%% (Cores: %d, System: %.1f%%, User: %.1f%%, IOWait: %.1f%%)  │\n",
-		stats.CPU.Usage, stats.CPU.NumCPUs, stats.CPU.SystemTime, stats.CPU.UserTime, stats.CPU.IOWaitTime)
-
-	// Print Memory stats
-	fmt.Printf("│ Memory: %.1f%% (%.1f GB / %.1f GB) │\n",
-		stats.Memory.UsagePercent,
-		float64(stats.Memory.Used)/(1024*1024*1024),
-		float64(stats.Memory.Total)/(1024*1024*1024))
-
-	// Print Disk stats for each disk
-	for _, disk := range stats.Disks {
-		fmt.Printf("│ Disk (%s): %.1f%% used, R: %.0f IOPS/%.1f MB/s, W: %.0f IOPS/%.1f MB/s │\n",
-			disk.Path,
-			disk.UsagePercent,
-			disk.ReadIOPS,
-			disk.ReadThroughput/(1024*1024),
-			disk.WriteIOPS,
-			disk.WriteThroughput/(1024*1024))
-	}
-
-	// Print Network stats
-	for i, net := range stats.Networks {
-		if i < 2 { // Only show first 2 interfaces to keep display compact
-			fmt.Printf("│ Net (%s): Rx: %.1f MB/s, Tx: %.1f MB/s │\n",
-				net.Name,
-				net.RxBytes/(1024*1024),
-				net.TxBytes/(1024*1024))
-		}
-	}
-
-	// Print footer
-	fmt.Println("└────────────────────────────────────────────────────────────────────────┘")
-	fmt.Println()
-}
-
-// ConsoleNotifier implements a simple console-based notifier
-type ConsoleNotifier struct{}
-
-// Notify sends a notification message
-func (n *ConsoleNotifier) Notify(alert *monitoring.Alert) error {
-	fmt.Println("\n╔══════════════════════════ ALERT NOTIFICATION ═════════════════════════╗")
-	fmt.Printf("║ %s: %s\n", alert.Severity, alert.Name)
-	fmt.Printf("║ Description: %s\n", alert.Description)
-	fmt.Printf("║ State: %s\n", alert.State)
-	if alert.CurrentValue != nil {
-		fmt.Printf("║ Current Value: %.2f\n", *alert.CurrentValue)
-	}
-	fmt.Println("╚═════════════════════════════════════════════════════════════════════════╝")
-	return nil
+	return b
 }
