@@ -1,420 +1,201 @@
 package monitoring
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 )
 
-// MetricType represents the type of a metric
+// MetricType represents the type of metric
 type MetricType string
 
 const (
-	// CounterMetric is a metric that accumulates values
-	CounterMetric MetricType = "counter"
+	// MetricTypeGauge represents a gauge metric (a value that can go up and down)
+	MetricTypeGauge MetricType = "gauge"
 
-	// GaugeMetric is a metric that can go up and down
-	GaugeMetric MetricType = "gauge"
+	// MetricTypeCounter represents a counter metric (a value that only increases)
+	MetricTypeCounter MetricType = "counter"
 
-	// HistogramMetric is a metric that tracks value distribution
-	HistogramMetric MetricType = "histogram"
-
-	// TimerMetric is a specialized metric for timing operations
-	TimerMetric MetricType = "timer"
-
-	// StateMetric represents a metric with discrete states
-	StateMetric MetricType = "state"
+	// MetricTypeHistogram represents a histogram metric (distribution of values)
+	MetricTypeHistogram MetricType = "histogram"
 )
 
-// MetricValue represents the value of a metric
-type MetricValue struct {
-	// Timestamp is when the value was recorded
-	Timestamp time.Time `json:"timestamp"`
-
-	// Value is the metric value
-	Value float64 `json:"value"`
-
-	// Labels are additional labels for this specific value
-	Labels map[string]string `json:"labels,omitempty"`
-}
-
-// Metric represents a monitored metric
+// Metric represents a single metric data point
 type Metric struct {
-	// ID is the unique identifier for the metric
-	ID string `json:"id"`
-
-	// Name is the human-readable name of the metric
+	// Name of the metric
 	Name string `json:"name"`
 
-	// Description is a description of the metric
-	Description string `json:"description"`
-
-	// Type is the type of the metric
+	// Type of metric
 	Type MetricType `json:"type"`
 
-	// Unit is the unit of the metric (e.g., "seconds", "bytes")
+	// Value of the metric
+	Value float64 `json:"value"`
+
+	// Timestamp of the metric
+	Timestamp time.Time `json:"timestamp"`
+
+	// Tags associated with the metric
+	Tags map[string]string `json:"tags"`
+
+	// Unit of the metric (e.g., bytes, seconds, count)
 	Unit string `json:"unit,omitempty"`
 
-	// Labels are the labels associated with the metric
-	Labels map[string]string `json:"labels"`
-
-	// Source is the source of the metric
-	Source string `json:"source"`
-
-	// TenantID is the ID of the tenant this metric belongs to
-	TenantID string `json:"tenantId,omitempty"`
-
-	// ResourceID is the ID of the resource this metric is related to
-	ResourceID string `json:"resourceId,omitempty"`
-
-	// ResourceType is the type of the resource this metric is related to
-	ResourceType string `json:"resourceType,omitempty"`
-
-	// Tags are additional tags for the metric
-	Tags []string `json:"tags,omitempty"`
-
-	// Min is the minimum expected value (for anomaly detection)
-	Min *float64 `json:"min,omitempty"`
-
-	// Max is the maximum expected value (for anomaly detection)
-	Max *float64 `json:"max,omitempty"`
-
-	// WarningThreshold is the threshold for warning alerts
-	WarningThreshold *float64 `json:"warningThreshold,omitempty"`
-
-	// CriticalThreshold is the threshold for critical alerts
-	CriticalThreshold *float64 `json:"criticalThreshold,omitempty"`
-
-	// Values are the values of the metric
-	Values []MetricValue `json:"-"`
-
-	// isActive indicates if this metric is actively collected
-	isActive bool
-
-	// collectInterval is the interval at which this metric is collected
-	collectInterval time.Duration
-
-	// LastValue is the most recent value of the metric
-	LastValue *MetricValue `json:"lastValue,omitempty"`
-
-	// mutex protects the metric
-	mutex sync.RWMutex
-}
-
-// MetricRegistry keeps track of all metrics
-type MetricRegistry struct {
-	metrics     map[string]*Metric
-	metricMutex sync.RWMutex
-}
-
-// NewMetricRegistry creates a new metric registry
-func NewMetricRegistry() *MetricRegistry {
-	return &MetricRegistry{
-		metrics: make(map[string]*Metric),
-	}
-}
-
-// RegisterMetric registers a metric with the registry
-func (r *MetricRegistry) RegisterMetric(metric *Metric) error {
-	r.metricMutex.Lock()
-	defer r.metricMutex.Unlock()
-
-	if _, exists := r.metrics[metric.ID]; exists {
-		return fmt.Errorf("metric already exists: %s", metric.ID)
-	}
-
-	r.metrics[metric.ID] = metric
-	return nil
-}
-
-// GetMetric gets a metric by ID
-func (r *MetricRegistry) GetMetric(id string) (*Metric, error) {
-	r.metricMutex.RLock()
-	defer r.metricMutex.RUnlock()
-
-	metric, exists := r.metrics[id]
-	if !exists {
-		return nil, fmt.Errorf("metric not found: %s", id)
-	}
-
-	return metric, nil
-}
-
-// ListMetrics lists all metrics
-func (r *MetricRegistry) ListMetrics() []*Metric {
-	r.metricMutex.RLock()
-	defer r.metricMutex.RUnlock()
-
-	metrics := make([]*Metric, 0, len(r.metrics))
-	for _, metric := range r.metrics {
-		metrics = append(metrics, metric)
-	}
-
-	return metrics
-}
-
-// RemoveMetric removes a metric
-func (r *MetricRegistry) RemoveMetric(id string) error {
-	r.metricMutex.Lock()
-	defer r.metricMutex.Unlock()
-
-	if _, exists := r.metrics[id]; !exists {
-		return fmt.Errorf("metric not found: %s", id)
-	}
-
-	delete(r.metrics, id)
-	return nil
-}
-
-// FilterMetrics filters metrics by criteria
-func (r *MetricRegistry) FilterMetrics(filter func(*Metric) bool) []*Metric {
-	r.metricMutex.RLock()
-	defer r.metricMutex.RUnlock()
-
-	filtered := make([]*Metric, 0)
-	for _, metric := range r.metrics {
-		if filter(metric) {
-			filtered = append(filtered, metric)
-		}
-	}
-
-	return filtered
-}
-
-// RecordValue records a value for a metric
-func (m *Metric) RecordValue(value float64, labels map[string]string) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	now := time.Now()
-	mv := MetricValue{
-		Timestamp: now,
-		Value:     value,
-		Labels:    labels,
-	}
-
-	m.Values = append(m.Values, mv)
-	m.LastValue = &mv
-
-	// Limit the number of stored values (circular buffer)
-	if len(m.Values) > 1000 {
-		m.Values = m.Values[1:]
-	}
-}
-
-// GetValues gets the values for a metric within a time range
-func (m *Metric) GetValues(start, end time.Time) []MetricValue {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
-	if end.IsZero() {
-		end = time.Now()
-	}
-
-	values := make([]MetricValue, 0)
-	for _, v := range m.Values {
-		if (start.IsZero() || !v.Timestamp.Before(start)) && !v.Timestamp.After(end) {
-			values = append(values, v)
-		}
-	}
-
-	return values
-}
-
-// GetLastValue gets the last value of a metric
-func (m *Metric) GetLastValue() *MetricValue {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
-	if len(m.Values) == 0 {
-		return nil
-	}
-
-	return &m.Values[len(m.Values)-1]
+	// Source of the metric (e.g., node ID, component name)
+	Source string `json:"source,omitempty"`
 }
 
 // NewMetric creates a new metric
-func NewMetric(id, name, description string, metricType MetricType, source string) *Metric {
+func NewMetric(name string, metricType MetricType, value float64, tags map[string]string) *Metric {
 	return &Metric{
-		ID:          id,
-		Name:        name,
-		Description: description,
-		Type:        metricType,
-		Source:      source,
-		Labels:      make(map[string]string),
-		Values:      make([]MetricValue, 0),
-		isActive:    true,
+		Name:      name,
+		Type:      metricType,
+		Value:     value,
+		Timestamp: time.Now(),
+		Tags:      tags,
 	}
 }
 
-// NewCounterMetric creates a new counter metric
-func NewCounterMetric(id, name, description, source string) *Metric {
-	return NewMetric(id, name, description, CounterMetric, source)
-}
-
-// NewGaugeMetric creates a new gauge metric
-func NewGaugeMetric(id, name, description, source string) *Metric {
-	return NewMetric(id, name, description, GaugeMetric, source)
-}
-
-// NewHistogramMetric creates a new histogram metric
-func NewHistogramMetric(id, name, description, source string) *Metric {
-	return NewMetric(id, name, description, HistogramMetric, source)
-}
-
-// NewTimerMetric creates a new timer metric
-func NewTimerMetric(id, name, description, source string) *Metric {
-	metric := NewMetric(id, name, description, TimerMetric, source)
-	metric.Unit = "seconds"
-	return metric
-}
-
-// NewStateMetric creates a new state metric
-func NewStateMetric(id, name, description, source string) *Metric {
-	return NewMetric(id, name, description, StateMetric, source)
-}
-
-// SetWarningThreshold sets the warning threshold for a metric
-func (m *Metric) SetWarningThreshold(threshold float64) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	m.WarningThreshold = &threshold
-}
-
-// SetCriticalThreshold sets the critical threshold for a metric
-func (m *Metric) SetCriticalThreshold(threshold float64) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	m.CriticalThreshold = &threshold
-}
-
-// SetMinValue sets the minimum expected value for a metric
-func (m *Metric) SetMinValue(min float64) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	m.Min = &min
-}
-
-// SetMaxValue sets the maximum expected value for a metric
-func (m *Metric) SetMaxValue(max float64) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	m.Max = &max
-}
-
-// SetUnit sets the unit for a metric
-func (m *Metric) SetUnit(unit string) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
+// WithUnit sets the unit of the metric
+func (m *Metric) WithUnit(unit string) *Metric {
 	m.Unit = unit
+	return m
 }
 
-// AddTag adds a tag to a metric
-func (m *Metric) AddTag(tag string) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+// WithSource sets the source of the metric
+func (m *Metric) WithSource(source string) *Metric {
+	m.Source = source
+	return m
+}
 
-	for _, t := range m.Tags {
-		if t == tag {
-			return
+// WithTimestamp sets the timestamp of the metric
+func (m *Metric) WithTimestamp(timestamp time.Time) *Metric {
+	m.Timestamp = timestamp
+	return m
+}
+
+// MetricSeries represents a series of metrics with the same name and tags
+type MetricSeries struct {
+	// Name of the metric series
+	Name string `json:"name"`
+
+	// Tags associated with the metric series
+	Tags map[string]string `json:"tags"`
+
+	// Metrics in the series
+	Metrics []*Metric `json:"metrics"`
+}
+
+// NewMetricSeries creates a new metric series
+func NewMetricSeries(name string, tags map[string]string) *MetricSeries {
+	return &MetricSeries{
+		Name:    name,
+		Tags:    tags,
+		Metrics: make([]*Metric, 0),
+	}
+}
+
+// AddMetric adds a metric to the series
+func (s *MetricSeries) AddMetric(metric *Metric) {
+	s.Metrics = append(s.Metrics, metric)
+}
+
+// Covers checks if the series covers the given time range
+func (s *MetricSeries) Covers(start, end time.Time) bool {
+	if len(s.Metrics) == 0 {
+		return false
+	}
+
+	// Find earliest and latest timestamps
+	earliest := s.Metrics[0].Timestamp
+	latest := s.Metrics[0].Timestamp
+
+	for _, m := range s.Metrics {
+		if m.Timestamp.Before(earliest) {
+			earliest = m.Timestamp
+		}
+		if m.Timestamp.After(latest) {
+			latest = m.Timestamp
 		}
 	}
 
-	m.Tags = append(m.Tags, tag)
+	// Check if the series covers the time range
+	return !earliest.After(start) && !latest.Before(end)
 }
 
-// RemoveTag removes a tag from a metric
-func (m *Metric) RemoveTag(tag string) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+// Slice returns a subset of the series within the given time range
+func (s *MetricSeries) Slice(start, end time.Time) *MetricSeries {
+	result := NewMetricSeries(s.Name, s.Tags)
 
-	for i, t := range m.Tags {
-		if t == tag {
-			m.Tags = append(m.Tags[:i], m.Tags[i+1:]...)
-			return
+	for _, m := range s.Metrics {
+		if !m.Timestamp.Before(start) && !m.Timestamp.After(end) {
+			result.AddMetric(m)
 		}
 	}
+
+	return result
 }
 
-// AddLabel adds a label to a metric
-func (m *Metric) AddLabel(key, value string) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+// PruneOlderThan removes metrics older than the given time
+func (s *MetricSeries) PruneOlderThan(cutoff time.Time) {
+	if len(s.Metrics) == 0 {
+		return
+	}
 
-	m.Labels[key] = value
+	var newMetrics []*Metric
+	for _, m := range s.Metrics {
+		if !m.Timestamp.Before(cutoff) {
+			newMetrics = append(newMetrics, m)
+		}
+	}
+
+	s.Metrics = newMetrics
 }
 
-// RemoveLabel removes a label from a metric
-func (m *Metric) RemoveLabel(key string) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	delete(m.Labels, key)
+// Serialize serializes the metric series to JSON
+func (s *MetricSeries) Serialize() ([]byte, error) {
+	return json.Marshal(s)
 }
 
-// SetActive sets whether a metric is active
-func (m *Metric) SetActive(active bool) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	m.isActive = active
+// ParseMetricSeries parses a metric series from JSON
+func ParseMetricSeries(data []byte) (*MetricSeries, error) {
+	var series MetricSeries
+	err := json.Unmarshal(data, &series)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal metric series: %w", err)
+	}
+	return &series, nil
 }
 
-// IsActive checks if a metric is active
-func (m *Metric) IsActive() bool {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+// MetricQuery defines parameters for querying metrics
+type MetricQuery struct {
+	// Pattern is the name pattern to match (supports wildcards)
+	Pattern string `json:"pattern"`
 
-	return m.isActive
+	// Tags to filter by
+	Tags map[string]string `json:"tags"`
+
+	// Start time of the query range
+	Start time.Time `json:"start"`
+
+	// End time of the query range
+	End time.Time `json:"end"`
+
+	// Aggregation function to apply
+	Aggregation string `json:"aggregation,omitempty"`
+
+	// GroupBy defines how to group metrics
+	GroupBy []string `json:"group_by,omitempty"`
 }
 
-// SetCollectInterval sets the collection interval for a metric
-func (m *Metric) SetCollectInterval(interval time.Duration) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	m.collectInterval = interval
-}
-
-// GetCollectInterval gets the collection interval for a metric
-func (m *Metric) GetCollectInterval() time.Duration {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
-	return m.collectInterval
-}
-
-// MetricBatch represents a batch of metric values
-type MetricBatch struct {
-	// MetricID is the ID of the metric
-	MetricID string `json:"metricId"`
-
-	// Values are the values of the metric
-	Values []MetricValue `json:"values"`
-
-	// Timestamp is when the batch was created
-	Timestamp time.Time `json:"timestamp"`
-}
-
-// MetricCollector collects metrics from a source
+// MetricCollector is an interface for collecting metrics
 type MetricCollector interface {
+	// ID returns the ID of the collector
+	ID() string
+
 	// Collect collects metrics
-	Collect() ([]MetricBatch, error)
+	Collect(ctx context.Context) ([]*Metric, error)
 
-	// GetMetrics gets the metrics this collector provides
-	GetMetrics() []*Metric
-
-	// Start starts the collector
-	Start() error
-
-	// Stop stops the collector
-	Stop() error
-
-	// SetCollectInterval sets the collection interval
-	SetCollectInterval(interval time.Duration)
+	// Enabled returns whether the collector is enabled
+	Enabled() bool
 }

@@ -1,548 +1,354 @@
 package monitoring
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/smtp"
-	"strings"
 	"sync"
-	"text/template"
 	"time"
 )
 
-// NotificationChannel represents a notification channel
-type NotificationChannel string
+// NotificationType represents the type of notification
+type NotificationType string
 
 const (
-	// EmailChannel is the email notification channel
-	EmailChannel NotificationChannel = "email"
+	// NotificationTypeAlert is a notification for an alert
+	NotificationTypeAlert NotificationType = "alert"
 
-	// WebhookChannel is the webhook notification channel
-	WebhookChannel NotificationChannel = "webhook"
+	// NotificationTypeSystem is a notification for a system event
+	NotificationTypeSystem NotificationType = "system"
 
-	// SlackChannel is the Slack notification channel
-	SlackChannel NotificationChannel = "slack"
-
-	// TeamsChannel is the Microsoft Teams notification channel
-	TeamsChannel NotificationChannel = "teams"
-
-	// SMSChannel is the SMS notification channel
-	SMSChannel NotificationChannel = "sms"
-
-	// PagerDutyChannel is the PagerDuty notification channel
-	PagerDutyChannel NotificationChannel = "pagerduty"
-
-	// OpsGenieChannel is the OpsGenie notification channel
-	OpsGenieChannel NotificationChannel = "opsgenie"
+	// NotificationTypeInfo is an informational notification
+	NotificationTypeInfo NotificationType = "info"
 )
 
-// NotificationTemplate represents a notification template
-type NotificationTemplate struct {
-	// ID is the unique identifier for the template
-	ID string `json:"id"`
+// NotificationChannel represents a notification channel
+type NotificationChannel interface {
+	// ID returns the channel ID
+	ID() string
 
-	// Name is the human-readable name of the template
-	Name string `json:"name"`
+	// Send sends a notification
+	Send(notification *Notification) error
 
-	// Description is a description of the template
-	Description string `json:"description"`
+	// IsEnabled returns whether the channel is enabled
+	IsEnabled() bool
 
-	// TenantID is the ID of the tenant this template belongs to
-	TenantID string `json:"tenantId,omitempty"`
-
-	// Channel is the notification channel this template is for
-	Channel NotificationChannel `json:"channel"`
-
-	// Subject is the subject of the notification (for email)
-	Subject string `json:"subject,omitempty"`
-
-	// Body is the body of the notification
-	Body string `json:"body"`
-
-	// Format is the format of the notification (text, html, markdown)
-	Format string `json:"format"`
-
-	// Compiled is the compiled template
-	compiled *template.Template `json:"-"`
+	// Type returns the channel type
+	Type() string
 }
 
-// NotificationConfig represents the configuration for a notification channel
-type NotificationConfig struct {
-	// ID is the unique identifier for the configuration
-	ID string `json:"id"`
+// Notification represents a notification
+type Notification struct {
+	// Type is the notification type
+	Type NotificationType `json:"type"`
 
-	// Name is the human-readable name of the configuration
-	Name string `json:"name"`
+	// Title is the notification title
+	Title string `json:"title"`
 
-	// Channel is the notification channel
-	Channel NotificationChannel `json:"channel"`
+	// Message is the notification message
+	Message string `json:"message"`
 
-	// Enabled indicates if the channel is enabled
-	Enabled bool `json:"enabled"`
+	// Severity is the notification severity
+	Severity string `json:"severity,omitempty"`
 
-	// TenantID is the ID of the tenant this configuration belongs to
-	TenantID string `json:"tenantId,omitempty"`
+	// Timestamp is when the notification was created
+	Timestamp time.Time `json:"timestamp"`
 
-	// Settings contains channel-specific settings
-	Settings map[string]interface{} `json:"settings"`
+	// Details contains additional information
+	Details map[string]interface{} `json:"details,omitempty"`
 }
 
-// EmailNotifierSettings represents settings for the email notifier
-type EmailNotifierSettings struct {
-	// Server is the SMTP server
-	Server string `json:"server"`
-
-	// Port is the SMTP port
-	Port int `json:"port"`
-
-	// Username is the SMTP username
-	Username string `json:"username"`
-
-	// Password is the SMTP password
-	Password string `json:"password"`
-
-	// FromAddress is the sender address
-	FromAddress string `json:"fromAddress"`
-
-	// ToAddresses are the recipient addresses
-	ToAddresses []string `json:"toAddresses"`
-
-	// UseTLS indicates if TLS should be used
-	UseTLS bool `json:"useTLS"`
+// NewNotification creates a new notification
+func NewNotification(notificationType NotificationType, title, message, severity string, details map[string]interface{}) *Notification {
+	return &Notification{
+		Type:      notificationType,
+		Title:     title,
+		Message:   message,
+		Severity:  severity,
+		Timestamp: time.Now(),
+		Details:   details,
+	}
 }
 
-// WebhookNotifierSettings represents settings for the webhook notifier
-type WebhookNotifierSettings struct {
+// EmailChannel is a notification channel that sends emails
+type EmailChannel struct {
+	// ID of the channel
+	id string
+
+	// Enabled indicates whether the channel is enabled
+	enabled bool
+
+	// Recipients are the email recipients
+	recipients []string
+
+	// SmtpServer is the SMTP server
+	smtpServer string
+
+	// SmtpPort is the SMTP port
+	smtpPort int
+
+	// SmtpUsername is the SMTP username
+	smtpUsername string
+
+	// SmtpPassword is the SMTP password
+	smtpPassword string
+
+	// FromAddress is the sender email address
+	fromAddress string
+}
+
+// NewEmailChannel creates a new email channel
+func NewEmailChannel(id, smtpServer string, smtpPort int, smtpUsername, smtpPassword, fromAddress string, recipients []string) *EmailChannel {
+	return &EmailChannel{
+		id:           id,
+		enabled:      true,
+		recipients:   recipients,
+		smtpServer:   smtpServer,
+		smtpPort:     smtpPort,
+		smtpUsername: smtpUsername,
+		smtpPassword: smtpPassword,
+		fromAddress:  fromAddress,
+	}
+}
+
+// ID returns the channel ID
+func (c *EmailChannel) ID() string {
+	return c.id
+}
+
+// Send sends a notification via email
+func (c *EmailChannel) Send(notification *Notification) error {
+	if !c.enabled {
+		return fmt.Errorf("email channel disabled")
+	}
+
+	// In a real implementation, this would send an email
+	// For now, just log it
+	fmt.Printf("Email notification to %v: %s - %s\n", c.recipients, notification.Title, notification.Message)
+
+	return nil
+}
+
+// IsEnabled returns whether the channel is enabled
+func (c *EmailChannel) IsEnabled() bool {
+	return c.enabled
+}
+
+// Type returns the channel type
+func (c *EmailChannel) Type() string {
+	return "email"
+}
+
+// WebhookChannel is a notification channel that sends webhooks
+type WebhookChannel struct {
+	// ID of the channel
+	id string
+
+	// Enabled indicates whether the channel is enabled
+	enabled bool
+
 	// URL is the webhook URL
-	URL string `json:"url"`
+	url string
 
-	// Method is the HTTP method to use
-	Method string `json:"method"`
+	// Headers are HTTP headers to include
+	headers map[string]string
 
-	// Headers are the HTTP headers to include
-	Headers map[string]string `json:"headers"`
+	// Authentication is the authentication method
+	authentication string
 
-	// Timeout is the request timeout
-	Timeout time.Duration `json:"timeout"`
-
-	// RetryCount is the number of retries
-	RetryCount int `json:"retryCount"`
-
-	// BasicAuthUsername is the username for basic auth
-	BasicAuthUsername string `json:"basicAuthUsername,omitempty"`
-
-	// BasicAuthPassword is the password for basic auth
-	BasicAuthPassword string `json:"basicAuthPassword,omitempty"`
+	// AuthenticationToken is the authentication token
+	authenticationToken string
 }
 
-// NotificationManager manages notifications
+// NewWebhookChannel creates a new webhook channel
+func NewWebhookChannel(id, url string, headers map[string]string, authentication, authenticationToken string) *WebhookChannel {
+	return &WebhookChannel{
+		id:                  id,
+		enabled:             true,
+		url:                 url,
+		headers:             headers,
+		authentication:      authentication,
+		authenticationToken: authenticationToken,
+	}
+}
+
+// ID returns the channel ID
+func (c *WebhookChannel) ID() string {
+	return c.id
+}
+
+// Send sends a notification via webhook
+func (c *WebhookChannel) Send(notification *Notification) error {
+	if !c.enabled {
+		return fmt.Errorf("webhook channel disabled")
+	}
+
+	// In a real implementation, this would send a webhook
+	// For now, just log it
+	fmt.Printf("Webhook notification to %s: %s - %s\n", c.url, notification.Title, notification.Message)
+
+	return nil
+}
+
+// IsEnabled returns whether the channel is enabled
+func (c *WebhookChannel) IsEnabled() bool {
+	return c.enabled
+}
+
+// Type returns the channel type
+func (c *WebhookChannel) Type() string {
+	return "webhook"
+}
+
+// ConsoleChannel is a notification channel that logs to the console
+type ConsoleChannel struct {
+	// ID of the channel
+	id string
+
+	// Enabled indicates whether the channel is enabled
+	enabled bool
+}
+
+// NewConsoleChannel creates a new console channel
+func NewConsoleChannel(id string) *ConsoleChannel {
+	return &ConsoleChannel{
+		id:      id,
+		enabled: true,
+	}
+}
+
+// ID returns the channel ID
+func (c *ConsoleChannel) ID() string {
+	return c.id
+}
+
+// Send sends a notification to the console
+func (c *ConsoleChannel) Send(notification *Notification) error {
+	if !c.enabled {
+		return fmt.Errorf("console channel disabled")
+	}
+
+	// Log the notification
+	fmt.Printf("[%s] %s [%s]: %s\n",
+		notification.Type,
+		notification.Timestamp.Format(time.RFC3339),
+		notification.Severity,
+		notification.Title)
+	fmt.Printf("    %s\n", notification.Message)
+
+	return nil
+}
+
+// IsEnabled returns whether the channel is enabled
+func (c *ConsoleChannel) IsEnabled() bool {
+	return c.enabled
+}
+
+// Type returns the channel type
+func (c *ConsoleChannel) Type() string {
+	return "console"
+}
+
+// NotificationManager manages notification channels and sending notifications
 type NotificationManager struct {
-	templates map[string]*NotificationTemplate
-	configs   map[string]*NotificationConfig
-	notifiers map[NotificationChannel][]AlertNotifier
-	mutex     sync.RWMutex
+	// Channels is a map of channel IDs to channels
+	channels      map[string]NotificationChannel
+	channelsMutex sync.RWMutex
 }
 
 // NewNotificationManager creates a new notification manager
 func NewNotificationManager() *NotificationManager {
-	return &NotificationManager{
-		templates: make(map[string]*NotificationTemplate),
-		configs:   make(map[string]*NotificationConfig),
-		notifiers: make(map[NotificationChannel][]AlertNotifier),
+	manager := &NotificationManager{
+		channels: make(map[string]NotificationChannel),
 	}
+
+	// Add a default console channel
+	manager.RegisterChannel(NewConsoleChannel("default-console"))
+
+	return manager
 }
 
-// AddTemplate adds a notification template
-func (m *NotificationManager) AddTemplate(template *NotificationTemplate) error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+// RegisterChannel registers a notification channel
+func (m *NotificationManager) RegisterChannel(channel NotificationChannel) error {
+	m.channelsMutex.Lock()
+	defer m.channelsMutex.Unlock()
 
-	// Compile the template
-	compiled, err := compileTemplate(template.Body)
-	if err != nil {
-		return fmt.Errorf("failed to compile template: %w", err)
+	if _, exists := m.channels[channel.ID()]; exists {
+		return fmt.Errorf("channel with ID %s already exists", channel.ID())
 	}
-	template.compiled = compiled
 
-	m.templates[template.ID] = template
+	m.channels[channel.ID()] = channel
 	return nil
 }
 
-// GetTemplate gets a notification template by ID
-func (m *NotificationManager) GetTemplate(id string) (*NotificationTemplate, error) {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+// DeregisterChannel deregisters a notification channel
+func (m *NotificationManager) DeregisterChannel(channelID string) bool {
+	m.channelsMutex.Lock()
+	defer m.channelsMutex.Unlock()
 
-	template, exists := m.templates[id]
-	if !exists {
-		return nil, fmt.Errorf("template not found: %s", id)
+	if _, exists := m.channels[channelID]; !exists {
+		return false
 	}
 
-	return template, nil
+	delete(m.channels, channelID)
+	return true
 }
 
-// AddConfig adds a notification configuration
-func (m *NotificationManager) AddConfig(config *NotificationConfig) error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+// GetChannel gets a notification channel by ID
+func (m *NotificationManager) GetChannel(channelID string) (NotificationChannel, error) {
+	m.channelsMutex.RLock()
+	defer m.channelsMutex.RUnlock()
 
-	m.configs[config.ID] = config
-	return nil
-}
-
-// GetConfig gets a notification configuration by ID
-func (m *NotificationManager) GetConfig(id string) (*NotificationConfig, error) {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
-	config, exists := m.configs[id]
+	channel, exists := m.channels[channelID]
 	if !exists {
-		return nil, fmt.Errorf("configuration not found: %s", id)
+		return nil, fmt.Errorf("channel with ID %s not found", channelID)
 	}
 
-	return config, nil
+	return channel, nil
 }
 
-// SendNotification sends a notification
-func (m *NotificationManager) SendNotification(alert *Alert, templateID string) error {
-	// Get the template
-	template, err := m.GetTemplate(templateID)
+// ListChannels lists all notification channels
+func (m *NotificationManager) ListChannels() []NotificationChannel {
+	m.channelsMutex.RLock()
+	defer m.channelsMutex.RUnlock()
+
+	channels := make([]NotificationChannel, 0, len(m.channels))
+	for _, channel := range m.channels {
+		channels = append(channels, channel)
+	}
+
+	return channels
+}
+
+// SendNotification sends a notification to a channel
+func (m *NotificationManager) SendNotification(channelID string, notification *Notification) error {
+	// Get the channel
+	channel, err := m.GetChannel(channelID)
 	if err != nil {
 		return err
 	}
 
-	// Render the template
-	data := map[string]interface{}{
-		"Alert": alert,
-	}
-	renderedBody, err := renderTemplate(template.compiled, data)
-	if err != nil {
-		return fmt.Errorf("failed to render template: %w", err)
+	// Check if the channel is enabled
+	if !channel.IsEnabled() {
+		return fmt.Errorf("channel %s is disabled", channelID)
 	}
 
-	// Get the notifiers for this channel
-	m.mutex.RLock()
-	notifiers, exists := m.notifiers[template.Channel]
-	m.mutex.RUnlock()
+	// Send the notification
+	return channel.Send(notification)
+}
 
-	if !exists || len(notifiers) == 0 {
-		return fmt.Errorf("no notifiers for channel: %s", template.Channel)
-	}
+// BroadcastNotification sends a notification to all channels
+func (m *NotificationManager) BroadcastNotification(notification *Notification) map[string]error {
+	// Get all channels
+	channels := m.ListChannels()
 
-	// Send the notification through each notifier
-	var lastErr error
-	for _, notifier := range notifiers {
-		if customNotifier, ok := notifier.(CustomTemplateNotifier); ok {
-			err = customNotifier.NotifyWithTemplate(alert, renderedBody, template)
-		} else {
-			err = notifier.Notify(alert)
-		}
-
-		if err != nil {
-			lastErr = err
+	// Send to all channels
+	errors := make(map[string]error)
+	for _, channel := range channels {
+		if channel.IsEnabled() {
+			if err := channel.Send(notification); err != nil {
+				errors[channel.ID()] = err
+			}
 		}
 	}
 
-	return lastErr
-}
-
-// RegisterNotifier registers a notifier
-func (m *NotificationManager) RegisterNotifier(channel NotificationChannel, notifier AlertNotifier) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	if _, exists := m.notifiers[channel]; !exists {
-		m.notifiers[channel] = make([]AlertNotifier, 0)
-	}
-
-	m.notifiers[channel] = append(m.notifiers[channel], notifier)
-}
-
-// CreateEmailNotifier creates an email notifier
-func (m *NotificationManager) CreateEmailNotifier(configID string) error {
-	// Get the configuration
-	config, err := m.GetConfig(configID)
-	if err != nil {
-		return err
-	}
-
-	if config.Channel != EmailChannel {
-		return fmt.Errorf("configuration is not for email channel: %s", config.Channel)
-	}
-
-	// Parse settings
-	settings := &EmailNotifierSettings{}
-	settingsJSON, err := json.Marshal(config.Settings)
-	if err != nil {
-		return fmt.Errorf("failed to marshal settings: %w", err)
-	}
-	err = json.Unmarshal(settingsJSON, settings)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal settings: %w", err)
-	}
-
-	// Create and register the notifier
-	notifier := NewEmailNotifier(settings)
-	m.RegisterNotifier(EmailChannel, notifier)
-
-	return nil
-}
-
-// CreateWebhookNotifier creates a webhook notifier
-func (m *NotificationManager) CreateWebhookNotifier(configID string) error {
-	// Get the configuration
-	config, err := m.GetConfig(configID)
-	if err != nil {
-		return err
-	}
-
-	if config.Channel != WebhookChannel {
-		return fmt.Errorf("configuration is not for webhook channel: %s", config.Channel)
-	}
-
-	// Parse settings
-	settings := &WebhookNotifierSettings{}
-	settingsJSON, err := json.Marshal(config.Settings)
-	if err != nil {
-		return fmt.Errorf("failed to marshal settings: %w", err)
-	}
-	err = json.Unmarshal(settingsJSON, settings)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal settings: %w", err)
-	}
-
-	// Create and register the notifier
-	notifier := NewWebhookNotifier(settings)
-	m.RegisterNotifier(WebhookChannel, notifier)
-
-	return nil
-}
-
-// CustomTemplateNotifier is a notifier that supports custom templates
-type CustomTemplateNotifier interface {
-	AlertNotifier
-	NotifyWithTemplate(alert *Alert, renderedBody string, template *NotificationTemplate) error
-}
-
-// EmailNotifier sends notifications via email
-type EmailNotifier struct {
-	settings *EmailNotifierSettings
-}
-
-// NewEmailNotifier creates a new email notifier
-func NewEmailNotifier(settings *EmailNotifierSettings) *EmailNotifier {
-	return &EmailNotifier{
-		settings: settings,
-	}
-}
-
-// Notify sends a notification
-func (n *EmailNotifier) Notify(alert *Alert) error {
-	// Create a default message if no template is provided
-	subject := fmt.Sprintf("Alert: %s", alert.Name)
-	body := fmt.Sprintf("Alert: %s\nSeverity: %s\nDescription: %s\nState: %s\n",
-		alert.Name, alert.Severity, alert.Description, alert.State)
-
-	return n.sendEmail(subject, body)
-}
-
-// NotifyWithTemplate sends a notification with a template
-func (n *EmailNotifier) NotifyWithTemplate(alert *Alert, renderedBody string, template *NotificationTemplate) error {
-	// Use the template subject or a default
-	subject := template.Subject
-	if subject == "" {
-		subject = fmt.Sprintf("Alert: %s", alert.Name)
-	}
-
-	return n.sendEmail(subject, renderedBody)
-}
-
-// sendEmail sends an email
-func (n *EmailNotifier) sendEmail(subject, body string) error {
-	// Compose message
-	message := fmt.Sprintf("From: %s\r\n"+
-		"To: %s\r\n"+
-		"Subject: %s\r\n"+
-		"\r\n"+
-		"%s", n.settings.FromAddress, strings.Join(n.settings.ToAddresses, ","), subject, body)
-
-	// Set up authentication information.
-	auth := smtp.PlainAuth("", n.settings.Username, n.settings.Password, n.settings.Server)
-
-	// Connect to the server, authenticate, set the sender and recipient,
-	// and send the email
-	err := smtp.SendMail(
-		fmt.Sprintf("%s:%d", n.settings.Server, n.settings.Port),
-		auth,
-		n.settings.FromAddress,
-		n.settings.ToAddresses,
-		[]byte(message),
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to send email: %w", err)
-	}
-
-	return nil
-}
-
-// WebhookNotifier sends notifications via webhook
-type WebhookNotifier struct {
-	settings *WebhookNotifierSettings
-	client   *http.Client
-}
-
-// NewWebhookNotifier creates a new webhook notifier
-func NewWebhookNotifier(settings *WebhookNotifierSettings) *WebhookNotifier {
-	client := &http.Client{
-		Timeout: settings.Timeout,
-	}
-
-	return &WebhookNotifier{
-		settings: settings,
-		client:   client,
-	}
-}
-
-// Notify sends a notification
-func (n *WebhookNotifier) Notify(alert *Alert) error {
-	// Marshal the alert to JSON
-	alertBytes, err := json.Marshal(alert)
-	if err != nil {
-		return fmt.Errorf("failed to marshal alert: %w", err)
-	}
-
-	return n.sendWebhook(alertBytes)
-}
-
-// NotifyWithTemplate sends a notification with a template
-func (n *WebhookNotifier) NotifyWithTemplate(alert *Alert, renderedBody string, template *NotificationTemplate) error {
-	// For webhook, we might need to construct a specific payload format
-	// For simplicity, we'll just use the rendered template as is
-	return n.sendWebhook([]byte(renderedBody))
-}
-
-// sendWebhook sends a webhook
-func (n *WebhookNotifier) sendWebhook(payload []byte) error {
-	// Create request
-	method := n.settings.Method
-	if method == "" {
-		method = "POST"
-	}
-
-	req, err := http.NewRequest(method, n.settings.URL, bytes.NewBuffer(payload))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Set headers
-	req.Header.Set("Content-Type", "application/json")
-	for k, v := range n.settings.Headers {
-		req.Header.Set(k, v)
-	}
-
-	// Add basic auth if provided
-	if n.settings.BasicAuthUsername != "" && n.settings.BasicAuthPassword != "" {
-		req.SetBasicAuth(n.settings.BasicAuthUsername, n.settings.BasicAuthPassword)
-	}
-
-	// Make the request
-	resp, err := n.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send webhook: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Check response status
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("webhook request failed with status: %s", resp.Status)
-	}
-
-	return nil
-}
-
-// compileTemplate compiles a template
-func compileTemplate(body string) (*template.Template, error) {
-	tmpl, err := template.New("notification").Parse(body)
-	if err != nil {
-		return nil, err
-	}
-	return tmpl, nil
-}
-
-// renderTemplate renders a template
-func renderTemplate(tmpl *template.Template, data interface{}) (string, error) {
-	var buf bytes.Buffer
-	err := tmpl.Execute(&buf, data)
-	if err != nil {
-		return "", err
-	}
-	return buf.String(), nil
-}
-
-// DefaultEmailTemplate returns a default email template
-func DefaultEmailTemplate() *NotificationTemplate {
-	body := `
-Alert: {{.Alert.Name}}
-Severity: {{.Alert.Severity}}
-Status: {{.Alert.State}}
-Time: {{.Alert.LastUpdatedAt}}
-
-Description: {{.Alert.Description}}
-
-{{if .Alert.CurrentValue}}Current Value: {{.Alert.CurrentValue}}{{end}}
-
-Resource: {{.Alert.ResourceType}} ({{.Alert.ResourceID}})
-
-{{if .Alert.Runbook}}Runbook: {{.Alert.Runbook}}{{end}}
-`
-
-	template := &NotificationTemplate{
-		ID:          "default-email-template",
-		Name:        "Default Email Template",
-		Description: "Default template for email notifications",
-		Channel:     EmailChannel,
-		Subject:     "Alert: {{.Alert.Name}} - {{.Alert.Severity}}",
-		Body:        body,
-		Format:      "text",
-	}
-
-	// Pre-compile the template
-	compiled, _ := compileTemplate(body)
-	template.compiled = compiled
-
-	return template
-}
-
-// DefaultWebhookTemplate returns a default webhook template
-func DefaultWebhookTemplate() *NotificationTemplate {
-	body := `{
-  "alert": {
-    "id": "{{.Alert.ID}}",
-    "name": "{{.Alert.Name}}",
-    "description": "{{.Alert.Description}}",
-    "severity": "{{.Alert.Severity}}",
-    "state": "{{.Alert.State}}",
-    "resourceType": "{{.Alert.ResourceType}}",
-    "resourceId": "{{.Alert.ResourceID}}",
-    "timestamp": "{{.Alert.LastUpdatedAt}}"
-  }
-}`
-
-	template := &NotificationTemplate{
-		ID:          "default-webhook-template",
-		Name:        "Default Webhook Template",
-		Description: "Default template for webhook notifications",
-		Channel:     WebhookChannel,
-		Body:        body,
-		Format:      "json",
-	}
-
-	// Pre-compile the template
-	compiled, _ := compileTemplate(body)
-	template.compiled = compiled
-
-	return template
+	return errors
 }
