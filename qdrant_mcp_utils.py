@@ -48,6 +48,63 @@ class QdrantMemory:
         except Exception as e:
             print(f"Error checking Qdrant connection: {e}")
             return False
+    
+    def get_collections(self) -> List[str]:
+        """Get list of available collections."""
+        try:
+            response = requests.get(f"{self.base_url}/collections")
+            if response.status_code != 200:
+                print(f"Error getting collections: {response.status_code}")
+                return []
+            
+            collections_data = response.json()
+            return [c["name"] for c in collections_data.get("result", {}).get("collections", [])]
+        except Exception as e:
+            print(f"Error getting collections: {e}")
+            return []
+    
+    def get_collection_info(self) -> Dict[str, Any]:
+        """Get information about the current collection."""
+        try:
+            response = requests.get(f"{self.base_url}/collections/{self.collection}")
+            if response.status_code != 200:
+                print(f"Error getting collection info: {response.status_code}")
+                return {}
+            
+            return response.json().get("result", {})
+        except Exception as e:
+            print(f"Error getting collection info: {e}")
+            return {}
+            
+    def get_indexed_file_types(self) -> List[str]:
+        """Get list of file types/extensions that have been indexed."""
+        try:
+            # Get sample points to determine file types
+            response = requests.post(
+                f"{self.base_url}/collections/{self.collection}/points/scroll",
+                json={"limit": 100, "with_payload": True}
+            )
+            
+            if response.status_code != 200:
+                print(f"Error getting points: {response.status_code}")
+                return []
+            
+            points = response.json().get("result", {}).get("points", [])
+            extensions = set()
+            
+            for point in points:
+                if "payload" in point and "extension" in point["payload"]:
+                    ext = point["payload"]["extension"]
+                    if ext:
+                        # Remove dot prefix if present
+                        if ext.startswith("."):
+                            ext = ext[1:]
+                        extensions.add(ext)
+            
+            return list(extensions)
+        except Exception as e:
+            print(f"Error getting file types: {e}")
+            return []
 
     def get_embedding(self, text: str) -> List[float]:
         """Get embedding for text using OpenAI API or a mock if API key unavailable."""

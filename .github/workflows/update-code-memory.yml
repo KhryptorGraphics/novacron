@@ -1,0 +1,89 @@
+name: Update Code Memory
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'  # Run daily at midnight UTC
+
+jobs:
+  update-code-memory:
+    runs-on: ubuntu-latest
+    
+    services:
+      qdrant:
+        image: qdrant/qdrant
+        ports:
+          - 6333:6333
+          - 6334:6334
+        options: --health-cmd "curl -f http://localhost:6333/healthz" --health-interval 10s --health-timeout 5s --health-retries 5
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f code_memory_requirements.txt ]; then pip install -r code_memory_requirements.txt; fi
+          pip install requests numpy qdrant-client
+      
+      - name: Create collection
+        run: python create_collection.py
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      
+      - name: Index files
+        run: python index_key_files_mcp.py
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      
+      - name: Verify indexing
+        run: python test_qdrant_connection.py
+      
+      - name: Generate documentation report
+        run: |
+          python -c "
+          import sys
+          from datetime import datetime
+          from qdrant_mcp_utils import QdrantMemory
+          
+          memory = QdrantMemory()
+          collections = memory.get_collections()
+          
+          report = f\"\"\"# Code Memory Update Report
+          
+          ## Last Updated
+          {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}
+          
+          ## Collection Status
+          Collection name: {memory.collection}
+          Points count: {memory.get_collection_info().get('vectors_count', 'Unknown')}
+          
+          ## File Types Indexed
+          {', '.join(sorted(memory.get_indexed_file_types()))}
+          
+          ## Recent Changes
+          - Updated code memory with latest repository changes
+          - Re-indexed all key project files
+          - Generated fresh embeddings for search
+          \"\"\"
+          
+          with open('code_memory_report.md', 'w') as f:
+              f.write(report)
+          "
+          
+      - name: Upload report as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: code-memory-report
+          path: code_memory_report.md
