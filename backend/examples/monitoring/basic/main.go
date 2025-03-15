@@ -10,8 +10,8 @@ import (
 )
 
 func main() {
-	fmt.Println("NovaCron Monitoring System Demo")
-	fmt.Println("===============================")
+	fmt.Println("NovaCron Basic Monitoring System Demo")
+	fmt.Println("=====================================")
 
 	// Create metric registry
 	registry := monitoring.NewMetricRegistry()
