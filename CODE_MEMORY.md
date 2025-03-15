@@ -9,6 +9,7 @@ The Code Memory system provides a vector database for storing, searching, and re
 - **Python Utilities**: For indexing, searching, and managing the code memory
 - **CI/CD Integration**: Keeps code memory up-to-date with the latest code
 - **Web Interface**: Provides an intuitive UI for exploring the code base
+- **External Knowledge Integration**: Incorporates documentation and knowledge from GitHub, Stack Overflow, and Google Knowledge Graph
 
 ## Setup
 
@@ -22,9 +23,30 @@ docker-compose -f qdrant-docker-compose.yml up -d
 
 This will start Qdrant on port 6333 (API) and 6334 (web UI).
 
-### 2. Set OpenAI API Key
+### 2. Set Environment Variables
 
-Set your OpenAI API key as an environment variable:
+Copy the `.env.template` file to `.env` and fill in your API keys:
+
+```bash
+cp .env.template .env
+# Edit the .env file with your API keys
+```
+
+At minimum, you need to set your OpenAI API key:
+
+```
+OPENAI_API_KEY=your_api_key_here
+```
+
+For external knowledge integration, you may also want to set:
+
+```
+GITHUB_TOKEN=your_github_personal_access_token
+STACK_API_KEY=your_stack_exchange_api_key
+GOOGLE_API_KEY=your_google_api_key
+```
+
+Alternatively, you can use the provided scripts:
 
 ```bash
 # For Linux/macOS
@@ -37,13 +59,15 @@ source set_openai_key.sh YOUR_API_KEY
 set_openai_key.py YOUR_API_KEY
 ```
 
-Or create a `.env` file with:
+### 3. Install Requirements
 
-```
-OPENAI_API_KEY=your_api_key_here
+Install the required Python packages:
+
+```bash
+pip install -r code_memory_requirements.txt
 ```
 
-### 3. Create Collection
+### 4. Create Collection
 
 Create the vector collection in Qdrant:
 
@@ -51,7 +75,7 @@ Create the vector collection in Qdrant:
 python create_collection.py
 ```
 
-### 4. Index Code Files
+### 5. Index Code Files
 
 Index the key project files:
 
@@ -64,6 +88,27 @@ For more specific indexing needs, you can also use the Go-based indexer:
 ```bash
 cd tools/indexer
 go run main.go
+```
+
+### 6. (Optional) Index External Knowledge
+
+To enhance the code memory with external knowledge, use the `index_external_knowledge.py` script:
+
+```bash
+# Index all external sources (GitHub, Stack Overflow, Knowledge Graph)
+python index_external_knowledge.py --all
+
+# Only index specific GitHub repositories
+python index_external_knowledge.py --github openstack/nova kubernetes/kubernetes
+
+# Only index Stack Overflow with specific tags
+python index_external_knowledge.py --stackoverflow "vm migration" --tags virtualization,cloud
+```
+
+Run with `--help` to see all available options:
+
+```bash
+python index_external_knowledge.py --help
 ```
 
 ## Usage
@@ -115,6 +160,41 @@ The web interface lets you:
 - See full file contents when needed
 - Browse statistics about indexed files
 
+### Direct MCP Integration with Claude
+
+The system can be used directly through Claude's MCP (Model Context Protocol). This allows Claude to search and store code directly in Qdrant without going through the web interface:
+
+```
+# Claude can search the code repository with
+<use_mcp_tool>
+<server_name>github.com/qdrant/mcp-server-qdrant</server_name>
+<tool_name>qdrant-find</tool_name>
+<arguments>
+{
+  "query": "virtual machine migration implementation"
+}
+</arguments>
+</use_mcp_tool>
+```
+
+To index the entire repository into Qdrant via MCP, you can use the provided helper script:
+
+```bash
+python store_repo_in_qdrant_mcp.py
+```
+
+This script will:
+1. Scan all files in the repository
+2. Format them for storage in Qdrant
+3. Store each file using the `qdrant-store` MCP tool
+4. Track statistics on indexed file types
+
+You can also specify which files to include/exclude:
+
+```bash
+python store_repo_in_qdrant_mcp.py --include "*.go" "*.py" --exclude-dirs "vendor" "node_modules"
+```
+
 ## Automated Updates
 
 The code memory system is automatically updated through a GitHub Actions workflow that runs:
@@ -133,9 +213,53 @@ You can view the workflow configuration in `.github/workflows/update-code-memory
 
 ## Advanced Usage
 
-### Adding External Documentation
+### External Knowledge Integration
 
-To include external documentation, add it to the vector database:
+The system can be enhanced with external knowledge from:
+
+1. **GitHub repositories** - Documentation, README files, and code examples from relevant projects
+2. **Stack Overflow** - Questions and answers related to cloud orchestration, VM migration, etc.
+3. **Google Knowledge Graph** - Structured knowledge about technical concepts
+
+Example script to index multiple sources:
+
+```python
+from external_knowledge import index_related_content
+
+# Index content related to a specific topic
+index_related_content(
+    topic="cloud orchestration virtual machine migration",
+    technology_tags=["virtualization", "cloud", "vm-migration", "openstack"],
+    github_repos=[
+        "openstack/nova",
+        "kubernetes/kubernetes",
+        "moby/moby",
+        "qemu/qemu"
+    ],
+    limit_per_source=10
+)
+```
+
+You can also use the connectors directly for more control:
+
+```python
+from external_knowledge import GitHubConnector, ExternalKnowledgeIndexer
+
+# Initialize connectors
+github = GitHubConnector()  # Uses GITHUB_TOKEN from environment if available
+indexer = ExternalKnowledgeIndexer(github_connector=github)
+
+# Search for relevant repositories
+repos = github.search_repositories("cloud orchestration", limit=5)
+
+# Index documents from each repository
+for repo in repos:
+    indexer.index_github_repo_docs(repo["full_name"])
+```
+
+### Adding Custom Documentation
+
+To include custom external documentation, add it to the vector database:
 
 ```python
 from qdrant_mcp_utils import store_code_in_qdrant

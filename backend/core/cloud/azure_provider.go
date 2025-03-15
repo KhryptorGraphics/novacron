@@ -503,6 +503,39 @@ func (p *AzureProvider) GetPricing(ctx context.Context, resourceType string) (ma
 	}
 }
 
+// ListVirtualMachines is an adapter method that maps to GetInstances
+func (p *AzureProvider) ListVirtualMachines(ctx context.Context) ([]Instance, error) {
+	// Forward to the standard Provider interface method
+	return p.GetInstances(ctx, ListOptions{})
+}
+
+// GetVirtualMachine is an adapter method that maps to GetInstance
+func (p *AzureProvider) GetVirtualMachine(ctx context.Context, id string) (*Instance, error) {
+	// Forward to the standard Provider interface method
+	return p.GetInstance(ctx, id)
+}
+
+// GetVMMetrics retrieves metrics for a specific VM
+func (p *AzureProvider) GetVMMetrics(ctx context.Context, id string) (map[string]float64, error) {
+	if !p.initialized {
+		return nil, fmt.Errorf("Azure provider is not initialized")
+	}
+
+	// In a real implementation, this would fetch Azure Monitor metrics
+	// For now, return placeholder metrics
+	return map[string]float64{
+		"Percentage CPU":            42.3,
+		"Available Memory Bytes":    4294967296.0, // 4 GB
+		"VM Memory":                 8589934592.0, // 8 GB
+		"Disk Read Operations/Sec":  95.0,
+		"Disk Write Operations/Sec": 47.0,
+		"Disk Read Bytes/Sec":       1048576.0, // 1 MB/s
+		"Disk Write Bytes/Sec":      524288.0,  // 0.5 MB/s
+		"Network In Total":          2097152.0, // 2 MB/s
+		"Network Out Total":         1048576.0, // 1 MB/s
+	}, nil
+}
+
 // Close closes the provider connection and releases resources
 func (p *AzureProvider) Close() error {
 	p.initialized = false
