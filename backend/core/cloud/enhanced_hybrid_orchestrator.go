@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/novacron/backend/core/cloud/workload"
+	"github.com/khryptorgraphics/novacron/backend/core/cloud/workload"
 )
 
 // EnhancedHybridCloudOrchestrator is a workload-aware extension of the HybridCloudOrchestrator

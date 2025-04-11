@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/novacron/backend/core/monitoring"
+	"github.com/khryptorgraphics/novacron/backend/core/monitoring"
 )
 
 // MetricCollector collects metrics from the monitoring system
@@ -134,38 +134,38 @@ func (p *VMResourceCollector) Process(ctx *PipelineContext) error {
 	startTime := endTime.Add(-p.StartOffset)
 
 	// Prepare structure for VM resource data
-	vmResources := make(map[string]map[string][]monitoring.MetricValue)
+	vmResources := make(map[string]map[string][]*monitoring.Metric) // Changed MetricValue to *Metric
 
 	// For each VM, collect CPU, memory, disk, and network metrics
 	for _, vmID := range p.VMIDs {
-		vmData := make(map[string][]monitoring.MetricValue)
+		vmData := make(map[string][]*monitoring.Metric) // Changed MetricValue to *Metric
 
 		// Collect CPU metrics
 		cpuMetricID := fmt.Sprintf("vm.%s.cpu.usage", vmID)
-		cpuMetric, err := ctx.MetricRegistry.GetMetric(cpuMetricID)
+		cpuMetric, err := ctx.MetricRegistry.GetMetricSeries(cpuMetricID) // Assuming GetMetricSeries returns *MetricSeries
 		if err == nil {
-			vmData["cpu"] = cpuMetric.GetValues(startTime, endTime)
+			vmData["cpu"] = cpuMetric.Slice(startTime, endTime).Metrics // Get slice and extract Metrics
 		}
 
 		// Collect memory metrics
 		memMetricID := fmt.Sprintf("vm.%s.memory.usage", vmID)
-		memMetric, err := ctx.MetricRegistry.GetMetric(memMetricID)
+		memMetric, err := ctx.MetricRegistry.GetMetricSeries(memMetricID) // Assuming GetMetricSeries returns *MetricSeries
 		if err == nil {
-			vmData["memory"] = memMetric.GetValues(startTime, endTime)
+			vmData["memory"] = memMetric.Slice(startTime, endTime).Metrics // Get slice and extract Metrics
 		}
 
 		// Collect disk metrics
 		diskMetricID := fmt.Sprintf("vm.%s.disk.usage", vmID)
-		diskMetric, err := ctx.MetricRegistry.GetMetric(diskMetricID)
+		diskMetric, err := ctx.MetricRegistry.GetMetricSeries(diskMetricID) // Assuming GetMetricSeries returns *MetricSeries
 		if err == nil {
-			vmData["disk"] = diskMetric.GetValues(startTime, endTime)
+			vmData["disk"] = diskMetric.Slice(startTime, endTime).Metrics // Get slice and extract Metrics
 		}
 
 		// Collect network metrics
 		netMetricID := fmt.Sprintf("vm.%s.network.throughput", vmID)
-		netMetric, err := ctx.MetricRegistry.GetMetric(netMetricID)
+		netMetric, err := ctx.MetricRegistry.GetMetricSeries(netMetricID) // Assuming GetMetricSeries returns *MetricSeries
 		if err == nil {
-			vmData["network"] = netMetric.GetValues(startTime, endTime)
+			vmData["network"] = netMetric.Slice(startTime, endTime).Metrics // Get slice and extract Metrics
 		}
 
 		vmResources[vmID] = vmData
@@ -312,7 +312,7 @@ func (p *SystemLoadProcessor) GetMetadata() ProcessorMetadata {
 }
 
 // Helper function to aggregate metric values based on time resolution
-func aggregateMetricValues(values []monitoring.MetricValue, resolution time.Duration) []monitoring.MetricValue {
+func aggregateMetricValues(values []*monitoring.Metric, resolution time.Duration) []*monitoring.Metric { // Changed MetricValue to *Metric
 	if len(values) == 0 {
 		return values
 	}
@@ -326,7 +326,7 @@ func aggregateMetricValues(values []monitoring.MetricValue, resolution time.Dura
 	}
 
 	// Aggregate values in each bucket
-	result := make([]monitoring.MetricValue, 0, len(buckets))
+	result := make([]*monitoring.Metric, 0, len(buckets)) // Changed MetricValue to *Metric
 	for bucketTime, bucketValues := range buckets {
 		// Calculate average
 		sum := 0.0
@@ -335,12 +335,19 @@ func aggregateMetricValues(values []monitoring.MetricValue, resolution time.Dura
 		}
 		average := sum / float64(len(bucketValues))
 
-		// Create aggregated value
-		aggregatedValue := monitoring.MetricValue{
-			Timestamp: time.Unix(bucketTime, 0),
-			Value:     average,
+		// Create aggregated value (using the first metric's metadata as a base)
+		if len(values) > 0 {
+			aggregatedMetric := &monitoring.Metric{
+				Name:      values[0].Name, // Assuming all metrics in the slice have the same name/tags
+				Type:      values[0].Type,
+				Tags:      values[0].Tags,
+				Unit:      values[0].Unit,
+				Source:    values[0].Source,
+				Timestamp: time.Unix(bucketTime, 0),
+				Value:     average,
+			}
+			result = append(result, aggregatedMetric)
 		}
-		result = append(result, aggregatedValue)
 	}
 
 	return result

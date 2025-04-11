@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/novacron/novacron/backend/core/scheduler"
+	"github.com/khryptorgraphics/novacron/backend/core/scheduler"
 )
 
 // VMManager manages virtual machines
@@ -27,7 +27,7 @@ type VMManager struct {
 // NewVMManager creates a new VM manager
 func NewVMManager(config VMManagerConfig, sch *scheduler.Scheduler, driverFactory VMDriverFactory) *VMManager {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &VMManager{
 		config:        config,
 		vms:           make(map[string]*VM),
@@ -41,22 +41,22 @@ func NewVMManager(config VMManagerConfig, sch *scheduler.Scheduler, driverFactor
 // Start starts the VM manager
 func (m *VMManager) Start() error {
 	log.Println("Starting VM manager")
-	
+
 	// Start the update loop
 	go m.updateLoop()
-	
+
 	// Start the cleanup loop
 	go m.cleanupLoop()
-	
+
 	return nil
 }
 
 // Stop stops the VM manager
 func (m *VMManager) Stop() error {
 	log.Println("Stopping VM manager")
-	
+
 	m.cancel()
-	
+
 	return nil
 }
 
@@ -64,7 +64,7 @@ func (m *VMManager) Stop() error {
 func (m *VMManager) AddEventListener(listener VMManagerEventListener) {
 	m.eventMutex.Lock()
 	defer m.eventMutex.Unlock()
-	
+
 	m.eventListeners = append(m.eventListeners, listener)
 }
 
@@ -72,7 +72,7 @@ func (m *VMManager) AddEventListener(listener VMManagerEventListener) {
 func (m *VMManager) RemoveEventListener(listener VMManagerEventListener) {
 	m.eventMutex.Lock()
 	defer m.eventMutex.Unlock()
-	
+
 	for i, l := range m.eventListeners {
 		if fmt.Sprintf("%p", l) == fmt.Sprintf("%p", listener) {
 			m.eventListeners = append(m.eventListeners[:i], m.eventListeners[i+1:]...)
@@ -85,12 +85,12 @@ func (m *VMManager) RemoveEventListener(listener VMManagerEventListener) {
 func (m *VMManager) GetVM(vmID string) (*VM, error) {
 	m.vmsMutex.RLock()
 	defer m.vmsMutex.RUnlock()
-	
+
 	vm, exists := m.vms[vmID]
 	if !exists {
 		return nil, fmt.Errorf("VM %s not found", vmID)
 	}
-	
+
 	return vm, nil
 }
 
@@ -98,12 +98,12 @@ func (m *VMManager) GetVM(vmID string) (*VM, error) {
 func (m *VMManager) ListVMs() map[string]*VM {
 	m.vmsMutex.RLock()
 	defer m.vmsMutex.RUnlock()
-	
+
 	result := make(map[string]*VM, len(m.vms))
 	for id, vm := range m.vms {
 		result[id] = vm
 	}
-	
+
 	return result
 }
 
@@ -111,14 +111,14 @@ func (m *VMManager) ListVMs() map[string]*VM {
 func (m *VMManager) ListVMsByState(state VMState) []*VM {
 	m.vmsMutex.RLock()
 	defer m.vmsMutex.RUnlock()
-	
+
 	result := make([]*VM, 0)
 	for _, vm := range m.vms {
 		if vm.State == state {
 			result = append(result, vm)
 		}
 	}
-	
+
 	return result
 }
 
@@ -126,14 +126,14 @@ func (m *VMManager) ListVMsByState(state VMState) []*VM {
 func (m *VMManager) ListVMsByNode(nodeID string) []*VM {
 	m.vmsMutex.RLock()
 	defer m.vmsMutex.RUnlock()
-	
+
 	result := make([]*VM, 0)
 	for _, vm := range m.vms {
 		if vm.NodeID == nodeID {
 			result = append(result, vm)
 		}
 	}
-	
+
 	return result
 }
 
@@ -141,12 +141,12 @@ func (m *VMManager) ListVMsByNode(nodeID string) []*VM {
 func (m *VMManager) CountVMsByState() map[VMState]int {
 	m.vmsMutex.RLock()
 	defer m.vmsMutex.RUnlock()
-	
+
 	result := make(map[VMState]int)
 	for _, vm := range m.vms {
 		result[vm.State]++
 	}
-	
+
 	return result
 }
 
@@ -154,11 +154,11 @@ func (m *VMManager) CountVMsByState() map[VMState]int {
 func (m *VMManager) emitEvent(event VMEvent) {
 	m.eventMutex.RLock()
 	defer m.eventMutex.RUnlock()
-	
+
 	// Make a copy of the listeners to avoid blocking during event processing
 	listeners := make([]VMManagerEventListener, len(m.eventListeners))
 	copy(listeners, m.eventListeners)
-	
+
 	// Process events asynchronously
 	for _, listener := range listeners {
 		go func(l VMManagerEventListener, e VMEvent) {
@@ -167,13 +167,13 @@ func (m *VMManager) emitEvent(event VMEvent) {
 					log.Printf("Recovered from panic in event listener: %v", r)
 				}
 			}()
-			
+
 			l(e)
 		}(listener, event)
 	}
-	
+
 	// Log the event
-	log.Printf("VM event: type=%s, vm=%s, node=%s, message=%s", 
+	log.Printf("VM event: type=%s, vm=%s, node=%s, message=%s",
 		event.Type, event.VM.ID, event.NodeID, event.Message)
 }
 
@@ -181,7 +181,7 @@ func (m *VMManager) emitEvent(event VMEvent) {
 func (m *VMManager) updateLoop() {
 	ticker := time.NewTicker(m.config.UpdateInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -196,7 +196,7 @@ func (m *VMManager) updateLoop() {
 func (m *VMManager) cleanupLoop() {
 	ticker := time.NewTicker(m.config.CleanupInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -212,7 +212,7 @@ func (m *VMManager) getDriver(vmType VMType) (VMDriver, error) {
 	if m.driverFactory == nil {
 		return nil, errors.New("no driver factory configured")
 	}
-	
+
 	return m.driverFactory(vmType)
 }
 
@@ -230,7 +230,7 @@ func (m *VMManager) listAvailableVMTypes() []VMType {
 		VMTypeKVM,
 		VMTypeProcess,
 	}
-	
+
 	// Check which ones have working drivers
 	availableTypes := make([]VMType, 0)
 	for _, vmType := range standardTypes {
@@ -238,6 +238,6 @@ func (m *VMManager) listAvailableVMTypes() []VMType {
 			availableTypes = append(availableTypes, vmType)
 		}
 	}
-	
+
 	return availableTypes
 }

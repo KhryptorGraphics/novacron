@@ -12,11 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/yourusername/novacron/backend/core/hypervisor"
-	"github.com/yourusername/novacron/backend/core/network"
-	"github.com/yourusername/novacron/backend/core/scheduler"
-	"github.com/yourusername/novacron/backend/core/storage"
-	"github.com/yourusername/novacron/backend/core/vm"
+	"github.com/khryptorgraphics/novacron/backend/core/hypervisor"
+	"github.com/khryptorgraphics/novacron/backend/core/network"
+	"github.com/khryptorgraphics/novacron/backend/core/scheduler"
+	"github.com/khryptorgraphics/novacron/backend/core/storage"
+	"github.com/khryptorgraphics/novacron/backend/core/vm"
 )
 
 var (
@@ -167,106 +167,106 @@ func loadConfig(path string) (map[string]interface{}, error) {
 // initializeStorage initializes the storage manager
 func initializeStorage(ctx context.Context, config map[string]interface{}, dataDir string) (*storage.Manager, error) {
 	log.Println("Initializing storage manager")
-	
+
 	// Create necessary directories
 	volumesDir := filepath.Join(dataDir, "volumes")
 	if err := os.MkdirAll(volumesDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create volumes directory: %w", err)
 	}
-	
+
 	// In a real implementation, this would initialize the storage manager
 	// with the provided configuration.
 	manager := &storage.Manager{}
-	
+
 	// Start the storage manager
 	if err := manager.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start storage manager: %w", err)
 	}
-	
+
 	return manager, nil
 }
 
 // initializeNetwork initializes the network manager
 func initializeNetwork(ctx context.Context, config map[string]interface{}, nodeID string) (*network.Manager, error) {
 	log.Println("Initializing network manager")
-	
+
 	// In a real implementation, this would initialize the network manager
 	// with the provided configuration.
 	manager := &network.Manager{}
-	
+
 	// Start the network manager
 	if err := manager.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start network manager: %w", err)
 	}
-	
+
 	return manager, nil
 }
 
 // initializeHypervisor initializes the hypervisor
 func initializeHypervisor(ctx context.Context, config map[string]interface{}) (*hypervisor.Manager, error) {
 	log.Println("Initializing hypervisor manager")
-	
+
 	// In a real implementation, this would initialize the hypervisor
 	// with the provided configuration.
 	manager := &hypervisor.Manager{}
-	
+
 	// Start the hypervisor
 	if err := manager.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start hypervisor: %w", err)
 	}
-	
+
 	return manager, nil
 }
 
 // initializeVMManager initializes the VM manager
-func initializeVMManager(ctx context.Context, config map[string]interface{}, nodeID string, 
+func initializeVMManager(ctx context.Context, config map[string]interface{}, nodeID string,
 	hypervisorManager *hypervisor.Manager, storageManager *storage.Manager) (*vm.Manager, error) {
 	log.Println("Initializing VM manager")
-	
+
 	// Create VM data directory
 	vmDir := filepath.Join(*dataDir, "vms")
 	if err := os.MkdirAll(vmDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create VM directory: %w", err)
 	}
-	
+
 	// In a real implementation, this would initialize the VM manager
 	// with the provided configuration.
 	manager := &vm.Manager{}
-	
+
 	// Start the VM manager
 	if err := manager.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start VM manager: %w", err)
 	}
-	
+
 	return manager, nil
 }
 
 // initializeScheduler initializes the scheduler
 func initializeScheduler(ctx context.Context, config map[string]interface{}, vmManager *vm.Manager) (*scheduler.Scheduler, error) {
 	log.Println("Initializing scheduler")
-	
+
 	// In a real implementation, this would initialize the scheduler
 	// with the provided configuration.
 	scheduler := &scheduler.Scheduler{}
-	
+
 	// Start the scheduler
 	if err := scheduler.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start scheduler: %w", err)
 	}
-	
+
 	return scheduler, nil
 }
 
 // initializeMigrationManager initializes the migration manager
 func initializeMigrationManager(ctx context.Context, config map[string]interface{}, vmManager *vm.Manager, nodeID string) (*vm.MigrationManager, error) {
 	log.Println("Initializing migration manager")
-	
+
 	// Create migration data directory
 	migrationDir := filepath.Join(*dataDir, "migrations")
 	if err := os.MkdirAll(migrationDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create migration directory: %w", err)
 	}
-	
+
 	// Configure the migration manager
 	migrationConfig := vm.MigrationManagerConfig{
 		MigrationDir:            migrationDir,
@@ -275,35 +275,35 @@ func initializeMigrationManager(ctx context.Context, config map[string]interface
 		MaxConcurrentMigrations: 5,
 		MaxMigrationRecords:     100,
 	}
-	
+
 	// Create the migration manager
 	manager := vm.NewMigrationManager(migrationConfig, vmManager, nodeID)
-	
+
 	// Start the migration manager
 	if err := manager.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start migration manager: %w", err)
 	}
-	
+
 	return manager, nil
 }
 
 // initializeAPI initializes and starts the API server
 func initializeAPI(ctx context.Context, config map[string]interface{}, listenAddress string,
-	vmManager *vm.Manager, migrationManager *vm.MigrationManager, 
+	vmManager *vm.Manager, migrationManager *vm.MigrationManager,
 	schedulerService *scheduler.Scheduler, networkManager *network.Manager,
 	storageManager *storage.Manager) (*APIServer, error) {
-	
+
 	log.Printf("Starting API server on %s", listenAddress)
-	
+
 	// In a real implementation, this would start an HTTP server
 	// and register handlers for the various API endpoints.
 	apiServer := &APIServer{}
-	
+
 	// Start the API server
 	if err := apiServer.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start API server: %w", err)
 	}
-	
+
 	return apiServer, nil
 }
 
