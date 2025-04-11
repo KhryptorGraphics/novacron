@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/khryptorgraphics/novacron/backend/core/scheduler/policy"
+	"github.com/khryptorgraphics/novacron/backend/examples/policy/advanced"
 )
 
 // Using a comment to force a rebuild with the replace directive in go.mod
@@ -16,7 +18,7 @@ const highPerformanceGpuPolicy = `policy "high-performance-gpu" {
     id = "gpu-policy-001"
     type = "placement"
     description = "Prioritize GPU-intensive workloads on high-performance nodes"
-    
+
     metadata {
         version = "1.0"
         author = "System Admin"
@@ -30,51 +32,51 @@ const highPerformanceGpuPolicy = `policy "high-performance-gpu" {
             priority = 100
             weight = 10
             hard_constraint = true
-            
+
             when {
                 vm.labels["workload-type"] == "gpu" || vm.resource_requests["gpu"] > 0
             }
-            
+
             then {
                 filter "Node does not have GPU capability"
                 log "Checking GPU capability requirement" level="debug"
             }
         }
-        
+
         rule "prefer-high-gpu-capacity" {
             id = "rule-gpu-pref"
             description = "Prefer nodes with highest GPU capacity"
             priority = 90
             weight = 8
             hard_constraint = false
-            
+
             when {
                 candidateNode.capabilities["gpu"] == true
             }
-            
+
             then {
                 score candidateNode.resources["gpu.capacity"] * 10 "GPU capacity score"
                 log "Scoring node based on GPU capacity" level="debug"
             }
         }
-        
+
         rule "avoid-high-cpu-util" {
             id = "rule-cpu-util"
             description = "Avoid nodes with high CPU utilization"
             priority = 80
             weight = 5
             hard_constraint = false
-            
+
             when {
                 true
             }
-            
+
             then {
                 score -candidateNode.metrics["cpu.utilization"] * 5 "CPU utilization penalty"
             }
         }
     }
-    
+
     parameters {
         param "gpu_score_weight" {
             type = "float"
@@ -83,7 +85,7 @@ const highPerformanceGpuPolicy = `policy "high-performance-gpu" {
             min = 1.0
             max = 50.0
         }
-        
+
         param "cpu_penalty_weight" {
             type = "float"
             default = 5.0
@@ -91,7 +93,7 @@ const highPerformanceGpuPolicy = `policy "high-performance-gpu" {
             min = 0.0
             max = 20.0
         }
-        
+
         param "min_gpu_memory" {
             type = "int"
             default = 8
@@ -106,27 +108,27 @@ const highPerformanceGpuPolicy = `policy "high-performance-gpu" {
 const memoryAwarePolicy = `policy "memory-aware-placement" {
     type = "placement"
     description = "Place memory-intensive workloads efficiently"
-    
+
     rules {
         rule "check-memory-requirements" {
             priority = 100
             hard_constraint = true
-            
+
             when {
                 vm.resource_requests["memory"] > candidateNode.resources["memory.available"]
             }
-            
+
             then {
                 filter "Insufficient memory available"
                 log "Node has insufficient memory" level="info"
             }
         }
-        
+
         rule "prefer-memory-balanced" {
             when {
                 vm.resource_requests["memory"] > 0
             }
-            
+
             then {
                 score (candidateNode.resources["memory.available"] / vm.resource_requests["memory"]) * 5 "Memory balance score"
             }
@@ -138,41 +140,41 @@ const memoryAwarePolicy = `policy "memory-aware-placement" {
 const wanMigrationPolicy = `policy "wan-migration-optimizer" {
     type = "migration"
     description = "Optimize WAN migrations to reduce data transfer and downtime"
-    
+
     rules {
         rule "bandwidth-threshold" {
             hard_constraint = true
-            
+
             when {
                 sourceNode.metrics["network.bandwidth.to." + candidateNode.id] < $param.min_bandwidth
             }
-            
+
             then {
                 filter "Insufficient bandwidth for WAN migration"
             }
         }
-        
+
         rule "latency-score" {
             when {
                 true
             }
-            
+
             then {
                 score -sourceNode.metrics["network.latency.to." + candidateNode.id] * 10 "Latency penalty"
             }
         }
-        
+
         rule "data-transfer-cost" {
             when {
                 sourceNode.datacenter != candidateNode.datacenter
             }
-            
+
             then {
                 score -vm.metrics["disk.used"] * sourceNode.metrics["network.cost.to." + candidateNode.id] "Data transfer cost"
             }
         }
     }
-    
+
     parameters {
         param "min_bandwidth" {
             type = "float"
@@ -186,6 +188,17 @@ const wanMigrationPolicy = `policy "wan-migration-optimizer" {
 `
 
 func main() {
+	// Check if we should run the advanced policy example
+	if len(os.Args) > 1 && os.Args[1] == "advanced" {
+		advanced.RunAdvancedPolicyExample()
+		return
+	}
+
+	// Run the basic policy example
+	runBasicPolicyExample()
+}
+
+func runBasicPolicyExample() {
 	parser := policy.NewPolicyParser()
 
 	// Parse the high-performance GPU policy

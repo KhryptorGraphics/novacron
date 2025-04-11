@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"c:/10/novacron/backend/core/monitoring"
+	"github.com/khryptorgraphics/novacron/backend/core/monitoring" // Corrected import path
 )
 
 // AnalyticsEngine is the main analytics engine

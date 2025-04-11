@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/novacron/novacron/backend/core/vm"
+	"github.com/khryptorgraphics/novacron/backend/core/vm"
 )
 
 // State represents the current state of the hypervisor

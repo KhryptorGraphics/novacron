@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 )
 
 // AWSProvider implements the Provider interface for AWS services
@@ -78,41 +82,26 @@ func (p *AWSProvider) Initialize(config ProviderConfig) error {
 		return fmt.Errorf("missing required auth config: secret_access_key")
 	}
 
-	// In a real implementation, the AWS SDK initialization would look like this:
-	/*
-		cfg, err := awsConfig.LoadDefaultConfig(context.TODO(),
-			awsConfig.WithRegion(p.region),
-			awsConfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
-				config.AuthConfig["access_key_id"],
-				config.AuthConfig["secret_access_key"],
-				config.AuthConfig["session_token"],
-			)),
-			awsConfig.WithRetryMode(aws.RetryModeStandard),
-			awsConfig.WithRetryMaxAttempts(config.MaxRetries),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to load AWS configuration: %w", err)
-		}
+	// Initialize AWS SDK config and EC2 client
+	awsCreds := credentials.NewStaticCredentialsProvider(
+		config.AuthConfig["access_key_id"],
+		config.AuthConfig["secret_access_key"],
+		config.AuthConfig["session_token"],
+	)
+	awsCfg, err := awsconfig.LoadDefaultConfig(
+		context.TODO(),
+		awsconfig.WithRegion(p.region),
+		awsconfig.WithCredentialsProvider(awsCreds),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to load AWS configuration: %w", err)
+	}
 
-		// Create service clients
-		p.ec2Client = ec2.NewFromConfig(cfg)
-		p.s3Client = s3.NewFromConfig(cfg)
-		p.ebsClient = ec2.NewFromConfig(cfg) // EBS operations use EC2 API
-		p.vpcClient = ec2.NewFromConfig(cfg) // VPC operations use EC2 API
-		p.iamClient = iam.NewFromConfig(cfg)
-		p.pricingClient = pricing.NewFromConfig(cfg)
-	*/
-
-	// For now, we'll mock the clients and indicate they're initialized
-	p.ec2Client = struct{}{}
-	p.s3Client = struct{}{}
-	p.ebsClient = struct{}{}
-	p.vpcClient = struct{}{}
-	p.iamClient = struct{}{}
-	p.pricingClient = struct{}{}
+	p.ec2Client = ec2.NewFromConfig(awsCfg)
+	// TODO: Initialize other clients as needed (S3, IAM, etc.)
 
 	p.initialized = true
-	p.credentials = struct{}{} // Mock credentials
+	p.credentials = awsCreds
 	return nil
 }
 
