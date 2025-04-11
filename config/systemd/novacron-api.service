@@ -1,0 +1,16 @@
+[Unit]
+Description=NovaCron API Service
+After=network.target
+Wants=novacron-hypervisor.service
+
+[Service]
+User=novacron
+Group=novacron
+WorkingDirectory=/opt/novacron
+ExecStart=/usr/bin/python3 /opt/novacron/backend/services/api/main.py --config /etc/novacron/api.yaml
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONPATH=/opt/novacron
+
+[Install]
+WantedBy=multi-user.target
