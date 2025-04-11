@@ -1,0 +1,70 @@
+# NovaCron Hypervisor Production Configuration
+logLevel: info
+server:
+  host: 0.0.0.0
+  port: 9000
+node:
+  id: ${NODE_ID}
+  name: ${NODE_NAME}
+  cluster: ${CLUSTER_NAME}
+  region: ${REGION}
+  zone: ${ZONE}
+vm:
+  base_path: /var/lib/novacron/vms
+  max_vcpus: 64
+  max_memory_mb: 262144  # 256 GB
+  max_disk_mb: 10485760  # 10 TB
+  default_network: default
+storage:
+  images_path: /var/lib/novacron/images
+  volumes_path: /var/lib/novacron/volumes
+  backups_path: /var/lib/novacron/backups
+  temp_path: /var/lib/novacron/temp
+network:
+  bridges:
+    - name: br0
+      type: linux
+      interfaces: ["eth0"]
+    - name: br1
+      type: linux
+      interfaces: ["eth1"]
+  default_bridge: br0
+drivers:
+  kvm:
+    enabled: true
+    emulator: /usr/bin/qemu-system-x86_64
+    machine_type: q35
+    cpu_mode: host-passthrough
+    vnc_bind: 0.0.0.0
+    vnc_port_start: 5900
+    vnc_port_end: 6000
+  lxc:
+    enabled: true
+    lxc_path: /var/lib/lxc
+    templates_path: /usr/share/lxc/templates
+metrics:
+  enabled: true
+  prometheus_endpoint: /metrics
+logging:
+  file: /var/log/novacron/hypervisor.log
+  max_size_mb: 100
+  backup_count: 10
+  level: info
+images:
+  supported:
+    - name: "Ubuntu 20.04 LTS"
+      path: "/var/lib/novacron/images/ubuntu-20.04-server-cloudimg-amd64.qcow2"
+      driver: "kvm"
+      os_type: "linux"
+      os_variant: "ubuntu20.04"
+    - name: "Ubuntu 24.04 LTS"
+      path: "/var/lib/novacron/images/ubuntu-24.04-server-cloudimg-amd64.qcow2"
+      driver: "kvm"
+      os_type: "linux"
+      os_variant: "ubuntu24.04"
+      description: "Ubuntu 24.04 LTS (Noble Numbat)"
+    - name: "CentOS 8"
+      path: "/var/lib/novacron/images/centos-8-x86_64.qcow2"
+      driver: "kvm"
+      os_type: "linux"
+      os_variant: "centos8"

@@ -1,0 +1,15 @@
+[Unit]
+Description=NovaCron Ubuntu 24.04 VM Monitoring Service
+After=novacron-api.service
+Wants=novacron-api.service
+
+[Service]
+User=novacron
+Group=novacron
+WorkingDirectory=/opt/novacron
+ExecStart=/opt/novacron/scripts/monitor_ubuntu_24_04_vms.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

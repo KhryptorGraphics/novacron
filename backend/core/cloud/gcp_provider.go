@@ -229,8 +229,21 @@ func (p *GCPProvider) GetImageList(ctx context.Context, options ListOptions) ([]
 			MinDiskGB:    10,
 			SizeGB:       10,
 			Status:       "READY",
-			CreatedAt:    time.Now().Add(-120 * 24 * time.Hour),
-			Description:  "Ubuntu 20.04 LTS",
+			CreatedAt:    time.Now().Add(-60 * 24 * time.Hour),
+			Description:  "Ubuntu 20.04 LTS (Focal Fossa)",
+		},
+		{
+			ID:           "projects/ubuntu-os-cloud/global/images/ubuntu-2404-noble-v20240423",
+			Name:         "Ubuntu 24.04 LTS",
+			OS:           "Ubuntu",
+			Version:      "24.04",
+			Architecture: "x86_64",
+			Public:       true,
+			MinDiskGB:    10,
+			SizeGB:       10,
+			Status:       "READY",
+			CreatedAt:    time.Now().Add(-7 * 24 * time.Hour),
+			Description:  "Ubuntu 24.04 LTS (Noble Numbat)",
 		},
 	}, nil
 }

@@ -1,0 +1,59 @@
+# NovaCron API Production Configuration
+logLevel: info
+server:
+  host: 0.0.0.0
+  port: 8080
+hypervisor:
+  url: http://localhost:9000
+auth:
+  enabled: true
+  jwt_secret: ${JWT_SECRET}
+  token_expiry: 86400  # 24 hours
+cors:
+  allowed_origins:
+    - "https://dashboard.novacron.example.com"
+database:
+  type: postgres
+  host: ${DB_HOST}
+  port: 5432
+  name: ${DB_NAME}
+  user: ${DB_USER}
+  password: ${DB_PASSWORD}
+  ssl: true
+cache:
+  type: redis
+  host: ${REDIS_HOST}
+  port: 6379
+  password: ${REDIS_PASSWORD}
+  db: 0
+metrics:
+  enabled: true
+  prometheus_endpoint: /metrics
+logging:
+  file: /var/log/novacron/api.log
+  max_size_mb: 100
+  backup_count: 10
+  level: info
+images:
+  storage_path: /var/lib/novacron/images
+  supported_formats:
+    - qcow2
+    - raw
+    - vmdk
+  default_os_templates:
+    - name: "Ubuntu 20.04 LTS"
+      path: "/var/lib/novacron/images/ubuntu-20.04-server-cloudimg-amd64.qcow2"
+      os: "Ubuntu"
+      version: "20.04"
+      architecture: "x86_64"
+    - name: "Ubuntu 24.04 LTS"
+      path: "/var/lib/novacron/images/ubuntu-24.04-server-cloudimg-amd64.qcow2"
+      os: "Ubuntu"
+      version: "24.04"
+      architecture: "x86_64"
+      description: "Ubuntu 24.04 LTS (Noble Numbat)"
+    - name: "CentOS 8"
+      path: "/var/lib/novacron/images/centos-8-x86_64.qcow2"
+      os: "CentOS"
+      version: "8"
+      architecture: "x86_64"
