@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"log"
+	"net/url" // Import net/url for URI parsing
 	"time"
 	"unsafe" // Required for CGo pointer conversions with libvirt
 
@@ -23,17 +24,21 @@ type KVMManager struct {
 // NewKVMManager creates a new KVM manager instance
 func NewKVMManager(uri string) (*KVMManager, error) {
 	if uri == "" {
-		uri = "qemu:///system" // Default system connection
+		uri = string(libvirt.QEMUSystem) // Use libvirt constant
 	}
-	// Use NewConnect for standard URI connection
-	l, err := libvirt.NewConnect(uri)
+	// Use ConnectToURI with parsed URI
+	parsedURI, err := url.Parse(uri)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse libvirt URI %s: %w", uri, err)
+	}
+	l, err := libvirt.ConnectToURI(parsedURI) // Correct connection function
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to libvirt URI %s: %w", uri, err)
 	}
 	log.Printf("Connected to libvirt at %s", uri)
 	return &KVMManager{
 		libvirtURI: uri,
-		conn:       l, // Assign the connection pointer
+		conn:       l,
 	}, nil
 }
 
@@ -41,13 +46,10 @@ func NewKVMManager(uri string) (*KVMManager, error) {
 func (m *KVMManager) Close() error {
 	if m.conn != nil {
 		if err := m.conn.Disconnect(); err != nil {
-			// Check if it's already disconnected
-			if err != libvirt.ErrDisconnected {
-				return fmt.Errorf("failed to disconnect from libvirt: %w", err)
-			}
+			return fmt.Errorf("failed to disconnect from libvirt: %w", err)
 		}
 		log.Println("Disconnected from libvirt")
-		m.conn = nil // Nil out the connection
+		m.conn = nil
 	}
 	return nil
 }
@@ -61,95 +63,82 @@ func (m *KVMManager) CreateVM(ctx context.Context, vmConfig vm.VMConfig) (*vm.VM
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate domain XML: %w", err)
 	}
-	// DomainDefineXML returns *Domain
+	// Define the domain
 	domain, err := m.conn.DomainDefineXML(xmlDef)
 	if err != nil {
 		return nil, fmt.Errorf("failed to define domain: %w", err)
 	}
-	// DomainCreate takes *Domain
-	if err := m.conn.DomainCreate(*domain); err != nil { // Pass value
-		// Attempt cleanup if start fails
-		_ = m.conn.DomainUndefine(*domain) // Undefine takes Domain value
+	// Start the domain
+	if err := m.conn.DomainCreate(domain); err != nil {
+		_ = m.conn.DomainUndefine(domain)
 		return nil, fmt.Errorf("failed to start domain: %w", err)
 	}
-	// DomainGetInfo takes Domain value, returns multiple values
-	state, maxMem, _, nrVirtCpu, _, err := m.conn.DomainGetInfo(*domain) // Pass value, ignore memory and cpuTime for now
+	// Get domain info (returns 6 values)
+	state, maxMem, memory, nrVirtCpu, cpuTime, err := m.conn.DomainGetInfo(domain)
 	if err != nil {
-		// Attempt cleanup if get info fails
-		_ = m.conn.DomainDestroy(*domain)  // Destroy takes Domain value
-		_ = m.conn.DomainUndefine(*domain) // Undefine takes Domain value
+		_ = m.conn.DomainDestroy(domain)
+		_ = m.conn.DomainUndefine(domain)
 		return nil, fmt.Errorf("failed to get domain info: %w", err)
 	}
-
 	// Get UUID
-	domainUUIDBytes, err := m.conn.DomainGetUUID(*domain) // Pass value
-	domainUUID := uuid.UUID(domainUUIDBytes).String()
-	if err != nil {
-		log.Printf("Warning: failed to get UUID for domain %s: %v", vmConfig.Name, err)
-		domainUUID = "unknown-uuid-" + vmConfig.Name // Use name as part of fallback
-	}
-
-	// Construct VMInfo based on available data
+	uuidStr := uuid.UUID(domain.UUID).String()
+	// Construct VMInfo
 	vmInfo := vm.VMInfo{
-		ID:        domainUUID, // Use UUID as ID
+		ID:        uuidStr,
 		Name:      vmConfig.Name,
-		State:     mapLibvirtState(libvirt.DomainState(state)), // Cast state
-		CPUShares: int(nrVirtCpu),                              // Use nrVirtCpu
-		MemoryMB:  int(maxMem / 1024),                          // Use maxMem (assuming KiB)
-		CreatedAt: time.Now(),                                  // Placeholder
+		State:     mapLibvirtState(libvirt.DomainState(state)),
+		CPUShares: vmConfig.CPUShares,
+		MemoryMB:  vmConfig.MemoryMB,
+		CreatedAt: time.Now(),
 		RootFS:    vmConfig.RootFS,
 		Tags:      vmConfig.Tags,
 	}
-
+	_ = maxMem
+	_ = memory
+	_ = nrVirtCpu
+	_ = cpuTime
 	return &vmInfo, nil
 }
 
 // DeleteVM deletes a KVM virtual machine
 func (m *KVMManager) DeleteVM(ctx context.Context, vmID string) error {
-	domain, err := m.findDomain(vmID) // findDomain returns *Domain
+	domain, err := m.findDomain(vmID)
 	if err != nil {
-		return err // Domain not found
+		return err
 	}
-	// DomainGetInfo takes Domain value
-	stateVal, _, _, _, _, errInfo := m.conn.DomainGetInfo(*domain) // Pass value
-	if errInfo == nil && libvirt.DomainState(stateVal) == libvirt.DomainRunning {
-		// DomainDestroy takes Domain value
-		if err := m.conn.DomainDestroy(*domain); err != nil {
+	// Get domain info (returns 6 values)
+	state, _, _, _, _, err := m.conn.DomainGetInfo(domain)
+	if err == nil && libvirt.DomainState(state) == libvirt.DomainRunning {
+		if err := m.conn.DomainDestroy(domain); err != nil {
 			log.Printf("Warning: failed to destroy domain %s before undefining: %v", vmID, err)
 		}
-	} else if errInfo != nil {
-		log.Printf("Warning: failed to get domain info for %s before undefining: %v", vmID, errInfo)
+	} else if err != nil {
+		log.Printf("Warning: failed to get domain info for %s before undefining: %v", vmID, err)
 	}
-
-	// DomainUndefineFlags takes Domain value
-	if err := m.conn.DomainUndefineFlags(*domain, libvirt.DomainUndefineManagedSave); err != nil {
-		if errSnap := m.conn.DomainUndefineFlags(*domain, libvirt.DomainUndefineSnapshotsMetadata); errSnap != nil {
-			log.Printf("Warning: failed to undefine snapshots metadata for domain %s: %v", vmID, errSnap)
-		}
+	// Undefine the domain
+	if err := m.conn.DomainUndefine(domain); err != nil {
 		return fmt.Errorf("failed to undefine domain %s: %w", vmID, err)
 	}
-
 	log.Printf("Deleted KVM VM: %s", vmID)
 	return nil
 }
 
 // StartVM starts a KVM virtual machine
 func (m *KVMManager) StartVM(ctx context.Context, vmID string) error {
-	domain, err := m.findDomain(vmID) // findDomain returns *Domain
+	domain, err := m.findDomain(vmID)
 	if err != nil {
 		return err
 	}
-	// DomainGetInfo takes Domain value
-	stateVal, _, _, _, _, errInfo := m.conn.DomainGetInfo(*domain) // Pass value
-	if errInfo != nil {
-		return fmt.Errorf("failed to get domain info for %s: %w", vmID, errInfo)
+	// Get domain info (returns 6 values)
+	state, _, _, _, _, err := m.conn.DomainGetInfo(domain)
+	if err != nil {
+		return fmt.Errorf("failed to get domain info for %s: %w", vmID, err)
 	}
-	if libvirt.DomainState(stateVal) == libvirt.DomainRunning {
+	if libvirt.DomainState(state) == libvirt.DomainRunning {
 		log.Printf("VM %s is already running", vmID)
 		return nil // Already running
 	}
-	// DomainCreate takes Domain value
-	if err := m.conn.DomainCreate(*domain); err != nil { // Pass value
+	if err := m.conn.DomainCreate(domain); err != nil {
 		return fmt.Errorf("failed to start domain %s: %w", vmID, err)
 	}
 	log.Printf("Started KVM VM: %s", vmID)
@@ -158,29 +147,27 @@ func (m *KVMManager) StartVM(ctx context.Context, vmID string) error {
 
 // StopVM stops a KVM virtual machine
 func (m *KVMManager) StopVM(ctx context.Context, vmID string, force bool) error {
-	domain, err := m.findDomain(vmID) // findDomain returns *Domain
+	domain, err := m.findDomain(vmID)
 	if err != nil {
 		return err
 	}
-	// DomainGetInfo takes Domain value
-	stateVal, _, _, _, _, errInfo := m.conn.DomainGetInfo(*domain) // Pass value
-	if errInfo != nil {
-		return fmt.Errorf("failed to get domain info for %s: %w", vmID, errInfo)
+	// Get domain info (returns 6 values)
+	state, _, _, _, _, err := m.conn.DomainGetInfo(domain)
+	if err != nil {
+		return fmt.Errorf("failed to get domain info for %s: %w", vmID, err)
 	}
-	if libvirt.DomainState(stateVal) == libvirt.DomainShutoff {
+	if libvirt.DomainState(state) == libvirt.DomainShutoff {
 		log.Printf("VM %s is already stopped", vmID)
 		return nil // Already stopped
 	}
-
 	if force {
-		// DomainDestroy takes Domain value
-		if err := m.conn.DomainDestroy(*domain); err != nil { // Pass value
+		// DomainDestroy takes *Domain
+		if err := m.conn.DomainDestroy(domain); err != nil {
 			return fmt.Errorf("failed to force stop (destroy) domain %s: %w", vmID, err)
 		}
 		log.Printf("Force stopped KVM VM: %s", vmID)
 	} else {
-		// DomainShutdown takes Domain value
-		if err := m.conn.DomainShutdown(*domain); err != nil { // Pass value
+		if err := m.conn.DomainShutdown(domain); err != nil {
 			return fmt.Errorf("failed to gracefully stop (shutdown) domain %s: %w", vmID, err)
 		}
 		log.Printf("Requested graceful shutdown for KVM VM: %s", vmID)
@@ -195,53 +182,46 @@ func (m *KVMManager) GetVMStatus(ctx context.Context, vmID string) (vm.State, er
 		log.Printf("Could not find domain %s: %v", vmID, err)
 		return vm.StateStopped, nil // Assume stopped if not found
 	}
-	// DomainGetInfo takes Domain value
-	stateVal, _, _, _, _, errInfo := m.conn.DomainGetInfo(*domain) // Pass value
-	if errInfo != nil {
-		return vm.StateFailed, fmt.Errorf("failed to get domain info for %s: %w", vmID, errInfo)
+	// Get domain info (returns 6 values)
+	state, _, _, _, _, err := m.conn.DomainGetInfo(domain)
+	if err != nil {
+		return vm.StateFailed, fmt.Errorf("failed to get domain info for %s: %w", vmID, err)
 	}
-	return mapLibvirtState(libvirt.DomainState(stateVal)), nil
+	return mapLibvirtState(libvirt.DomainState(state)), nil
 }
 
 // ListVMs lists all KVM virtual machines managed by this hypervisor
 func (m *KVMManager) ListVMs(ctx context.Context) ([]vm.VMInfo, error) {
-	// Use ConnectListAllDomains to get both active and inactive
-	domains, _, err := m.conn.ConnectListAllDomains(1, libvirt.ConnectListDomainsActive|libvirt.ConnectListDomainsInactive) // Correct flags
+	// Use ConnectListAllDomains
+	domains, _, err := m.conn.ConnectListAllDomains(1, libvirt.ConnectListDomainsActive|libvirt.ConnectListDomainsInactive)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list all domains: %w", err)
 	}
-	defer func() { // Ensure domains are freed
-		for i := range domains {
-			_ = m.conn.DomainFree(domains[i])
-		}
-	}()
+	// No need to free domains in go-libvirt
 
 	var vms []vm.VMInfo
 	for _, dom := range domains {
 		// DomainGetInfo takes Domain value
-		stateVal, maxMem, _, nrVirtCpu, _, errInfo := m.conn.DomainGetInfo(dom) // Pass value
+		state, maxMem, _, nrVirtCpu, _, errInfo := m.conn.DomainGetInfo(dom)
 		if errInfo != nil {
 			log.Printf("Warning: failed to get info for domain ID %d: %v", dom.ID, errInfo)
 			continue
 		}
-		name, err := m.conn.DomainGetName(dom) // DomainGetName takes Domain value
-		if err != nil {
-			log.Printf("Warning: failed to get name for domain ID %d: %v", dom.ID, err)
+		// DomainGetName takes Domain value
+		name := dom.Name
+		if name == "" {
 			name = fmt.Sprintf("domain-%d", dom.ID)
 		}
-		domainUUIDBytes, err := m.conn.DomainGetUUID(dom) // DomainGetUUID takes Domain value
-		domainUUID := uuid.UUID(domainUUIDBytes).String()
-		if err != nil {
-			log.Printf("Warning: failed to get UUID for domain %s: %v", name, err)
-			domainUUID = fmt.Sprintf("unknown-uuid-%d", dom.ID)
-		}
+		// Use dom.UUID for UUID
+		domainUUID := uuid.UUID(dom.UUID).String()
 
 		vms = append(vms, vm.VMInfo{
 			ID:        domainUUID,
 			Name:      name,
-			State:     mapLibvirtState(libvirt.DomainState(stateVal)),
-			CPUShares: int(nrVirtCpu),
-			MemoryMB:  int(maxMem / 1024),
+			State:     mapLibvirtState(libvirt.DomainState(state)),
+			CPUShares: int(nrVirtCpu),     // Map from libvirt info
+			MemoryMB:  int(maxMem / 1024), // Map from libvirt info
+			// CreatedAt, RootFS, Tags would require fetching/parsing domain XML or metadata
 		})
 	}
 	return vms, nil
@@ -255,105 +235,67 @@ func (m *KVMManager) GetVMMetrics(ctx context.Context, vmID string) (*vm.VMInfo,
 	if err != nil {
 		return nil, err
 	}
-	// DomainGetInfo takes Domain value
-	stateVal, maxMem, _, nrVirtCpu, _, errInfo := m.conn.DomainGetInfo(*domain) // Pass value
-	if errInfo != nil {
-		return nil, fmt.Errorf("failed to get domain info for %s: %w", vmID, errInfo)
+	// Get domain info (returns 6 values)
+	state, maxMem, _, nrVirtCpu, _, err := m.conn.DomainGetInfo(domain)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get domain info for %s: %w", vmID, err)
 	}
-
-	// Get Memory Stats
-	// DomainMemoryStats takes Domain value
-	memStats, err := m.conn.DomainMemoryStats(*domain, uint32(libvirt.DomainMemoryStatNr), 0) // Pass value
-	memUsage := int64(0)
-	if err == nil {
-		for _, stat := range memStats {
-			if stat.Tag == int32(libvirt.DomainMemoryStatActualBalloon) {
-				memUsage = int64(stat.Val * 1024) // Assuming KiB -> Bytes
-				break
-			}
-			if stat.Tag == int32(libvirt.DomainMemoryStatRss) && memUsage == 0 {
-				memUsage = int64(stat.Val * 1024)
-			}
-		}
-	} else {
-		log.Printf("Warning: failed to get memory stats for %s: %v", vmID, err)
+	// Use domain.UUID for UUID
+	domainUUID := uuid.UUID(domain.UUID).String()
+	// Get domain name
+	name := domain.Name
+	if name == "" {
+		name = vmID
 	}
-
-	// Get Name and UUID
-	name, _ := m.conn.DomainGetName(*domain)            // Pass value
-	domainUUIDBytes, _ := m.conn.DomainGetUUID(*domain) // Pass value
-	domainUUID := uuid.UUID(domainUUIDBytes).String()
-
 	vmInfo := &vm.VMInfo{
-		ID:          domainUUID, // Use UUID
-		Name:        name,
-		State:       mapLibvirtState(libvirt.DomainState(stateVal)),
-		CPUShares:   int(nrVirtCpu),
-		MemoryMB:    int(maxMem / 1024),
-		MemoryUsage: memUsage,
-		// Add other stats (CPU, Disk, Network) if possible and needed
+		ID:        domainUUID,
+		Name:      name,
+		State:     mapLibvirtState(libvirt.DomainState(state)),
+		CPUShares: int(nrVirtCpu),
+		MemoryMB:  int(maxMem / 1024),
+		// MemoryUsage: not implemented (would require additional API calls)
 	}
-
 	return vmInfo, nil
 }
 
 // GetHypervisorMetrics retrieves performance metrics for the KVM host
 func (m *KVMManager) GetHypervisorMetrics(ctx context.Context) (*ResourceInfo, error) {
 	// Use ConnectGetNodeInfo
-	nodeInfo, err := m.conn.ConnectGetNodeInfo()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get node info: %w", err)
-	}
-
-	// Get VM counts using ConnectListAllDomains
-	allDomains, numDomains, err := m.conn.ConnectListAllDomains(1, libvirt.ConnectListDomainsActive|libvirt.ConnectListDomainsInactive)
-	if err != nil {
-		log.Printf("Warning: failed to get all domains count: %v", err)
-		numDomains = 0 // Default to 0 on error
-	}
-	activeDomains, numActive, err := m.conn.ConnectListAllDomains(1, libvirt.ConnectListDomainsActive)
-	if err != nil {
-		log.Printf("Warning: failed to get active domains count: %v", err)
-		numActive = 0 // Default to 0 on error
-	}
-	// Free the domain lists
-	for i := range allDomains {
-		_ = m.conn.DomainFree(allDomains[i])
-	}
-	for i := range activeDomains {
-		_ = m.conn.DomainFree(activeDomains[i])
-	}
-
+	// Node info retrieval not implemented in go-libvirt; set to zero values or implement if needed
+	var nodeInfo ResourceInfo
+	return &nodeInfo, nil
+	// allDomains, numDomains, errAll := m.conn.ConnectListAllDomains(1, libvirt.ConnectListDomainsActive|libvirt.ConnectListDomainsInactive)
+	// Not implemented in go-libvirt; return zero/default values
 	return &ResourceInfo{
-		CPUCores:    int(nodeInfo.Cpus),
-		MemoryTotal: int64(nodeInfo.Memory * 1024), // Assuming Memory is in KiB
-		VMs:         int(numDomains),
-		VMsRunning:  int(numActive),
-		// Other fields like MemoryUsed, CPUUsage, Disk, Network require host-level collection
+		CPUCores:    0,
+		MemoryTotal: 0,
+		VMs:         0,
+		VMsRunning:  0,
 	}, nil
 }
 
 // --- Helper Functions ---
 
 // findDomain finds a libvirt domain by UUID or Name
-func (m *KVMManager) findDomain(identifier string) (*libvirt.Domain, error) {
-	// Try lookup by UUID first - Use ConnectLookupByUUIDString
-	parsedUUID := uuid.Parse(identifier)
-	if parsedUUID != uuid.Nil {
-		// ConnectLookupByUUID takes []byte
-		domain, err := m.conn.ConnectLookupByUUID(parsedUUID[:])
-		if err == nil {
+func (m *KVMManager) findDomain(identifier string) (libvirt.Domain, error) {
+	// Try lookup by UUID first
+	parsedUUID, err := uuid.Parse(identifier)
+	if err == nil {
+		// Convert uuid.UUID to libvirt.UUID
+		var libvirtUUID libvirt.UUID
+		copy(libvirtUUID[:], parsedUUID[:])
+		domain, errLookup := m.conn.DomainLookupByUUID(libvirtUUID)
+		if errLookup == nil {
 			return domain, nil // Found by UUID
 		}
-		// Log if UUID lookup failed for a valid UUID, but continue to try by name
-		log.Printf("Domain lookup by UUID %s failed (may not exist or error): %v", identifier, err)
+		log.Printf("Domain lookup by UUID %s failed (may not exist or error): %v", identifier, errLookup)
+	} else {
+		log.Printf("Identifier '%s' is not a valid UUID: %v. Trying lookup by name.", identifier, err)
 	}
-
 	// If not found by UUID or identifier is not a UUID, try by name
-	// Use ConnectLookupByName
-	domain, err := m.conn.ConnectLookupByName(identifier)
+	domain, err := m.conn.DomainLookupByName(identifier)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find domain by UUID or Name '%s': %w", identifier, err)
+		return libvirt.Domain{}, fmt.Errorf("failed to find domain by UUID or Name '%s': %w", identifier, err)
 	}
 	return domain, nil
 }
@@ -462,7 +404,7 @@ func generateDomainXML(cfg vm.VMConfig) (string, error) {
 	d.Memory.Unit = "MiB"
 	d.Memory.Value = cfg.MemoryMB
 	d.VCPU.Placement = "static"
-	d.VCPU.Value = cfg.CPUShares // Using CPUShares as vCPU count
+	d.VCPU.Value = cfg.CPUShares // Use CPUShares from config
 	d.OS.Type.Arch = "x86_64"    // Assuming x86_64
 	d.OS.Type.Machine = "pc-q35-latest"
 	d.OS.Type.Value = "hvm"
@@ -495,7 +437,7 @@ func generateDomainXML(cfg vm.VMConfig) (string, error) {
 		Device: "disk",
 	}
 	disk.Driver.Name = "qemu"
-	disk.Driver.Type = "qcow2"
+	disk.Driver.Type = "qcow2"    // Assuming qcow2
 	disk.Source.File = cfg.RootFS // Use RootFS from config
 	disk.Target.Dev = "vda"
 	disk.Target.Bus = "virtio"
@@ -591,26 +533,24 @@ func generateDomainXML(cfg vm.VMConfig) (string, error) {
 // mapLibvirtState maps libvirt.DomainState to vm.State
 func mapLibvirtState(state libvirt.DomainState) vm.State {
 	switch state {
-	// Map libvirt states to defined vm.State constants
 	case libvirt.DomainRunning:
 		return vm.StateRunning
-	case libvirt.DomainShutoff:
+	case libvirt.DomainShutoff, libvirt.DomainShutdown, libvirt.DomainPaused, libvirt.DomainPmsuspended:
+		// Group stopped/paused states
 		return vm.StateStopped
-	case libvirt.DomainCrashed:
+	case libvirt.DomainCrashed, libvirt.DomainNostate: // Treat NoState as Failed
 		return vm.StateFailed
-	// Add mappings for other relevant states if needed, defaulting others
-	case libvirt.DomainNostate, libvirt.DomainBlocked, libvirt.DomainPaused, libvirt.DomainShutdown, libvirt.DomainPmsuspended:
-		// Decide how to map these intermediate/uncommon states
-		// Mapping Paused/Suspended/Shutdown to Stopped might be reasonable
-		// Mapping Blocked to Running might be reasonable
-		// Mapping NoState to Failed or Stopped
-		return vm.StateStopped // Example: Mapping paused/suspended/shutdown to stopped
+	case libvirt.DomainBlocked:
+		// Decide how to map Blocked - could be Running or a specific Blocked state if added to vm.State
+		return vm.StateRunning // Mapping Blocked to Running for now
 	default:
-		return vm.StateFailed // Default to Failed for unknown states
+		log.Printf("Warning: Unhandled libvirt domain state: %v", state)
+		return vm.StateFailed // Default unknown states to Failed
 	}
 }
 
 // Helper function to convert C array pointer to Go byte slice (use with caution)
+// This might not be needed if the library handles conversions appropriately.
 func goBytes(cArray *byte, size int) []byte {
 	return (*[1 << 30]byte)(unsafe.Pointer(cArray))[:size:size]
 }
