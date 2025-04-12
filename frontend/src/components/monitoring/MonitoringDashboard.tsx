@@ -14,45 +14,58 @@ import {
   ArcElement,
 } from 'chart.js';
 import { Line, Bar, Doughnut } from 'react-chartjs-2';
-import { format } from 'date-fns';
-import { 
-  Card, 
-  CardContent, 
-  CardDescription, 
-  CardFooter, 
-  CardHeader, 
-  CardTitle 
+import { format, addHours, subHours, subDays } from 'date-fns';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle
 } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
-import { 
-  AlertCircle, 
-  AlertTriangle, 
-  Clock, 
-  HardDrive, 
-  Info, 
-  Layers, 
-  RefreshCw, 
-  Server, 
-  Cpu, 
+import {
+  AlertCircle,
+  AlertTriangle,
+  Clock,
+  HardDrive,
+  Info,
+  Layers,
+  RefreshCw,
+  Server,
+  Cpu,
   MemoryStick,
   Network,
   Database,
-  Activity
+  Activity,
+  TrendingUp,
+  Zap,
+  BarChart3,
+  GitBranch
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { 
-  Table, 
-  TableBody, 
-  TableCaption, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from '@/components/ui/table';
+
+// Import new visualization components
+import {
+  HeatmapChart,
+  NetworkTopology,
+  PredictiveChart,
+  ResourceTreemap,
+  AlertCorrelation
+} from '@/components/visualizations';
 
 // Register Chart.js components
 ChartJS.register(
@@ -592,11 +605,12 @@ const MonitoringDashboard: React.FC = () => {
       </div>
 
       <Tabs defaultValue={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="vms">Virtual Machines</TabsTrigger>
           <TabsTrigger value="alerts">Alerts</TabsTrigger>
           <TabsTrigger value="analytics">Analytics</TabsTrigger>
+          <TabsTrigger value="advanced">Advanced Analytics</TabsTrigger>
         </TabsList>
         
         {/* Overview Tab */}
@@ -1100,6 +1114,267 @@ const MonitoringDashboard: React.FC = () => {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+        
+        {/* Advanced Analytics Tab */}
+        <TabsContent value="advanced" className="space-y-6">
+          <div className="grid gap-4 grid-cols-2">
+            {/* Predictive Analytics */}
+            <PredictiveChart
+              title="CPU Usage Forecast"
+              description="Predicted CPU usage based on historical patterns"
+              metricName="CPU Usage"
+              metricUnit="%"
+              historicalData={[
+                { timestamp: subHours(new Date(), 24).toISOString(), value: 45 },
+                { timestamp: subHours(new Date(), 23).toISOString(), value: 42 },
+                { timestamp: subHours(new Date(), 22).toISOString(), value: 47 },
+                { timestamp: subHours(new Date(), 21).toISOString(), value: 52 },
+                { timestamp: subHours(new Date(), 20).toISOString(), value: 58 },
+                { timestamp: subHours(new Date(), 19).toISOString(), value: 63 },
+                { timestamp: subHours(new Date(), 18).toISOString(), value: 68 },
+                { timestamp: subHours(new Date(), 17).toISOString(), value: 72 },
+                { timestamp: subHours(new Date(), 16).toISOString(), value: 75 },
+                { timestamp: subHours(new Date(), 15).toISOString(), value: 78 },
+                { timestamp: subHours(new Date(), 14).toISOString(), value: 76 },
+                { timestamp: subHours(new Date(), 13).toISOString(), value: 72 },
+                { timestamp: subHours(new Date(), 12).toISOString(), value: 68 },
+                { timestamp: subHours(new Date(), 11).toISOString(), value: 64 },
+                { timestamp: subHours(new Date(), 10).toISOString(), value: 60 },
+                { timestamp: subHours(new Date(), 9).toISOString(), value: 58 },
+                { timestamp: subHours(new Date(), 8).toISOString(), value: 55 },
+                { timestamp: subHours(new Date(), 7).toISOString(), value: 52 },
+                { timestamp: subHours(new Date(), 6).toISOString(), value: 48 },
+                { timestamp: subHours(new Date(), 5).toISOString(), value: 45 },
+                { timestamp: subHours(new Date(), 4).toISOString(), value: 42 },
+                { timestamp: subHours(new Date(), 3).toISOString(), value: 40 },
+                { timestamp: subHours(new Date(), 2).toISOString(), value: 38 },
+                { timestamp: subHours(new Date(), 1).toISOString(), value: 42 },
+              ]}
+              predictedData={[
+                { timestamp: new Date().toISOString(), value: 45, upperBound: 50, lowerBound: 40 },
+                { timestamp: addHours(new Date(), 1).toISOString(), value: 48, upperBound: 55, lowerBound: 41 },
+                { timestamp: addHours(new Date(), 2).toISOString(), value: 52, upperBound: 60, lowerBound: 44 },
+                { timestamp: addHours(new Date(), 3).toISOString(), value: 58, upperBound: 67, lowerBound: 49 },
+                { timestamp: addHours(new Date(), 4).toISOString(), value: 65, upperBound: 75, lowerBound: 55 },
+                { timestamp: addHours(new Date(), 5).toISOString(), value: 72, upperBound: 82, lowerBound: 62 },
+                { timestamp: addHours(new Date(), 6).toISOString(), value: 78, upperBound: 88, lowerBound: 68 },
+                { timestamp: addHours(new Date(), 7).toISOString(), value: 82, upperBound: 92, lowerBound: 72 },
+                { timestamp: addHours(new Date(), 8).toISOString(), value: 80, upperBound: 90, lowerBound: 70 },
+                { timestamp: addHours(new Date(), 9).toISOString(), value: 75, upperBound: 85, lowerBound: 65 },
+                { timestamp: addHours(new Date(), 10).toISOString(), value: 68, upperBound: 78, lowerBound: 58 },
+                { timestamp: addHours(new Date(), 11).toISOString(), value: 60, upperBound: 70, lowerBound: 50 },
+              ]}
+              anomalies={[
+                { timestamp: addHours(new Date(), 5).toISOString(), severity: 'medium', message: 'Unusual spike in CPU usage' }
+              ]}
+            />
+            
+            {/* Resource Utilization Treemap */}
+            <ResourceTreemap
+              title="Resource Utilization"
+              description="Hierarchical view of resource usage across the system"
+              data={{
+                id: 'root',
+                name: 'System',
+                value: 100,
+                children: [
+                  {
+                    id: 'compute',
+                    name: 'Compute',
+                    value: 65,
+                    children: [
+                      { id: 'vm-1', name: 'VM-1', value: 78 },
+                      { id: 'vm-2', name: 'VM-2', value: 45 },
+                      { id: 'vm-3', name: 'VM-3', value: 92 },
+                      { id: 'vm-4', name: 'VM-4', value: 58 },
+                      { id: 'vm-5', name: 'VM-5', value: 62 },
+                    ]
+                  },
+                  {
+                    id: 'storage',
+                    name: 'Storage',
+                    value: 72,
+                    children: [
+                      { id: 'storage-1', name: 'SSD-1', value: 85 },
+                      { id: 'storage-2', name: 'SSD-2', value: 65 },
+                      { id: 'storage-3', name: 'HDD-1', value: 45 },
+                    ]
+                  },
+                  {
+                    id: 'network',
+                    name: 'Network',
+                    value: 48,
+                    children: [
+                      { id: 'network-1', name: 'Switch-1', value: 52 },
+                      { id: 'network-2', name: 'Router-1', value: 38 },
+                      { id: 'network-3', name: 'Gateway', value: 65 },
+                    ]
+                  },
+                ]
+              }}
+              height={350}
+            />
+          </div>
+          
+          <div className="grid gap-4 grid-cols-2">
+            {/* Resource Usage Heatmap */}
+            <HeatmapChart
+              title="CPU Usage Patterns"
+              description="Heatmap showing CPU usage patterns across VMs over time"
+              data={[
+                { timestamp: '2025-04-11T00:00:00Z', resourceId: 'VM-1', value: 45 },
+                { timestamp: '2025-04-11T01:00:00Z', resourceId: 'VM-1', value: 48 },
+                { timestamp: '2025-04-11T02:00:00Z', resourceId: 'VM-1', value: 52 },
+                { timestamp: '2025-04-11T03:00:00Z', resourceId: 'VM-1', value: 58 },
+                { timestamp: '2025-04-11T04:00:00Z', resourceId: 'VM-1', value: 65 },
+                { timestamp: '2025-04-11T05:00:00Z', resourceId: 'VM-1', value: 72 },
+                { timestamp: '2025-04-11T06:00:00Z', resourceId: 'VM-1', value: 78 },
+                
+                { timestamp: '2025-04-11T00:00:00Z', resourceId: 'VM-2', value: 35 },
+                { timestamp: '2025-04-11T01:00:00Z', resourceId: 'VM-2', value: 38 },
+                { timestamp: '2025-04-11T02:00:00Z', resourceId: 'VM-2', value: 42 },
+                { timestamp: '2025-04-11T03:00:00Z', resourceId: 'VM-2', value: 48 },
+                { timestamp: '2025-04-11T04:00:00Z', resourceId: 'VM-2', value: 55 },
+                { timestamp: '2025-04-11T05:00:00Z', resourceId: 'VM-2', value: 62 },
+                { timestamp: '2025-04-11T06:00:00Z', resourceId: 'VM-2', value: 68 },
+                
+                { timestamp: '2025-04-11T00:00:00Z', resourceId: 'VM-3', value: 55 },
+                { timestamp: '2025-04-11T01:00:00Z', resourceId: 'VM-3', value: 58 },
+                { timestamp: '2025-04-11T02:00:00Z', resourceId: 'VM-3', value: 62 },
+                { timestamp: '2025-04-11T03:00:00Z', resourceId: 'VM-3', value: 68 },
+                { timestamp: '2025-04-11T04:00:00Z', resourceId: 'VM-3', value: 75 },
+                { timestamp: '2025-04-11T05:00:00Z', resourceId: 'VM-3', value: 82 },
+                { timestamp: '2025-04-11T06:00:00Z', resourceId: 'VM-3', value: 88 },
+                
+                { timestamp: '2025-04-11T00:00:00Z', resourceId: 'VM-4', value: 25 },
+                { timestamp: '2025-04-11T01:00:00Z', resourceId: 'VM-4', value: 28 },
+                { timestamp: '2025-04-11T02:00:00Z', resourceId: 'VM-4', value: 32 },
+                { timestamp: '2025-04-11T03:00:00Z', resourceId: 'VM-4', value: 38 },
+                { timestamp: '2025-04-11T04:00:00Z', resourceId: 'VM-4', value: 45 },
+                { timestamp: '2025-04-11T05:00:00Z', resourceId: 'VM-4', value: 52 },
+                { timestamp: '2025-04-11T06:00:00Z', resourceId: 'VM-4', value: 58 },
+                
+                { timestamp: '2025-04-11T00:00:00Z', resourceId: 'VM-5', value: 65 },
+                { timestamp: '2025-04-11T01:00:00Z', resourceId: 'VM-5', value: 68 },
+                { timestamp: '2025-04-11T02:00:00Z', resourceId: 'VM-5', value: 72 },
+                { timestamp: '2025-04-11T03:00:00Z', resourceId: 'VM-5', value: 78 },
+                { timestamp: '2025-04-11T04:00:00Z', resourceId: 'VM-5', value: 85 },
+                { timestamp: '2025-04-11T05:00:00Z', resourceId: 'VM-5', value: 92 },
+                { timestamp: '2025-04-11T06:00:00Z', resourceId: 'VM-5', value: 95 },
+              ]}
+            />
+            
+            {/* Network Topology */}
+            <NetworkTopology
+              title="System Topology"
+              description="Interactive visualization of system components and their relationships"
+              data={{
+                nodes: [
+                  { id: 'host-1', name: 'Host-1', type: 'host', status: 'healthy' },
+                  { id: 'vm-1', name: 'VM-1', type: 'vm', status: 'healthy' },
+                  { id: 'vm-2', name: 'VM-2', type: 'vm', status: 'warning' },
+                  { id: 'vm-3', name: 'VM-3', type: 'vm', status: 'healthy' },
+                  { id: 'vm-4', name: 'VM-4', type: 'vm', status: 'error' },
+                  { id: 'vm-5', name: 'VM-5', type: 'vm', status: 'healthy' },
+                  { id: 'storage-1', name: 'SSD-1', type: 'storage', status: 'healthy' },
+                  { id: 'storage-2', name: 'SSD-2', type: 'storage', status: 'healthy' },
+                  { id: 'network-1', name: 'Switch', type: 'network', status: 'healthy' },
+                ],
+                edges: [
+                  { source: 'host-1', target: 'vm-1', type: 'dependency' },
+                  { source: 'host-1', target: 'vm-2', type: 'dependency' },
+                  { source: 'host-1', target: 'vm-3', type: 'dependency' },
+                  { source: 'host-1', target: 'vm-4', type: 'dependency' },
+                  { source: 'host-1', target: 'vm-5', type: 'dependency' },
+                  { source: 'vm-1', target: 'storage-1', type: 'storage', metrics: { latency: 2.5 } },
+                  { source: 'vm-2', target: 'storage-1', type: 'storage', metrics: { latency: 3.2 } },
+                  { source: 'vm-3', target: 'storage-2', type: 'storage', metrics: { latency: 1.8 } },
+                  { source: 'vm-4', target: 'storage-2', type: 'storage', metrics: { latency: 4.5 } },
+                  { source: 'vm-5', target: 'storage-1', type: 'storage', metrics: { latency: 2.1 } },
+                  { source: 'vm-1', target: 'network-1', type: 'network', metrics: { bandwidth: 100 } },
+                  { source: 'vm-2', target: 'network-1', type: 'network', metrics: { bandwidth: 80 } },
+                  { source: 'vm-3', target: 'network-1', type: 'network', metrics: { bandwidth: 120 } },
+                  { source: 'vm-4', target: 'network-1', type: 'network', metrics: { bandwidth: 60 } },
+                  { source: 'vm-5', target: 'network-1', type: 'network', metrics: { bandwidth: 90 } },
+                ],
+              }}
+              height={350}
+            />
+          </div>
+          
+          {/* Alert Correlation */}
+          <AlertCorrelation
+            alerts={[
+              {
+                id: 'alert-1',
+                name: 'High CPU Usage',
+                description: 'VM-5 CPU usage exceeds 90%',
+                severity: 'warning',
+                status: 'firing',
+                startTime: new Date().toISOString(),
+                labels: { host: 'Host-1', vm: 'VM-5', metric: 'cpu' },
+                value: 95,
+                resource: 'VM-5',
+              },
+              {
+                id: 'alert-2',
+                name: 'Memory Pressure',
+                description: 'VM-5 memory usage exceeds 85%',
+                severity: 'warning',
+                status: 'firing',
+                startTime: subHours(new Date(), 1).toISOString(),
+                labels: { host: 'Host-1', vm: 'VM-5', metric: 'memory' },
+                value: 88,
+                resource: 'VM-5',
+              },
+              {
+                id: 'alert-3',
+                name: 'Disk I/O Saturation',
+                description: 'SSD-1 I/O operations exceeding threshold',
+                severity: 'error',
+                status: 'firing',
+                startTime: subHours(new Date(), 2).toISOString(),
+                labels: { storage: 'SSD-1', metric: 'iops' },
+                value: 95,
+                resource: 'SSD-1',
+              },
+              {
+                id: 'alert-4',
+                name: 'Network Latency',
+                description: 'Increased network latency detected',
+                severity: 'warning',
+                status: 'acknowledged',
+                startTime: subHours(new Date(), 3).toISOString(),
+                labels: { network: 'Switch-1', metric: 'latency' },
+                value: 120,
+                resource: 'Network',
+              },
+              {
+                id: 'alert-5',
+                name: 'VM Unresponsive',
+                description: 'VM-4 is not responding to health checks',
+                severity: 'critical',
+                status: 'firing',
+                startTime: subHours(new Date(), 1).toISOString(),
+                labels: { host: 'Host-1', vm: 'VM-4', metric: 'health' },
+                value: 0,
+                resource: 'VM-4',
+              },
+            ]}
+            relations={[
+              { source: 'alert-3', target: 'alert-1', type: 'causes', confidence: 0.85 },
+              { source: 'alert-3', target: 'alert-2', type: 'causes', confidence: 0.75 },
+              { source: 'alert-4', target: 'alert-3', type: 'correlates', confidence: 0.65 },
+              { source: 'alert-5', target: 'alert-4', type: 'correlates', confidence: 0.55 },
+            ]}
+            onAcknowledge={(id) => {
+              toast({
+                title: 'Alert Acknowledged',
+                description: `Alert ${id} has been acknowledged`,
+              });
+            }}
+          />
         </TabsContent>
       </Tabs>
     </div>
