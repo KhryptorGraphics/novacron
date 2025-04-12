@@ -111,91 +111,64 @@ func (p *AWSProvider) GetInstances(ctx context.Context, options ListOptions) ([]
 		return nil, fmt.Errorf("AWS provider is not initialized")
 	}
 
-	// In a real implementation, we would call AWS EC2 DescribeInstances API
-	// For example:
-	/*
-		input := &ec2.DescribeInstancesInput{}
-
-		// Apply filters if specified
-		if options.Filters != nil && len(options.Filters) > 0 {
-			input.Filters = make([]types.Filter, 0, len(options.Filters))
-			for k, v := range options.Filters {
-				input.Filters = append(input.Filters, types.Filter{
-					Name:   aws.String(k),
-					Values: []string{v},
-				})
-			}
-		}
-
-		// Apply pagination if specified
-		if options.Limit > 0 {
-			input.MaxResults = aws.Int32(int32(options.Limit))
-		}
-
-		result, err := p.ec2Client.DescribeInstances(ctx, input)
-		if err != nil {
-			return nil, fmt.Errorf("failed to describe EC2 instances: %w", err)
-		}
-
-		// Parse the response and convert to our Instance struct
-		instances := make([]Instance, 0)
-		for _, reservation := range result.Reservations {
-			for _, instance := range reservation.Instances {
-				// Convert instance to our Instance struct
-				// ...
-				instances = append(instances, convertedInstance)
-			}
-		}
-	*/
-
-	// For now, return a placeholder implementation
-	instances := []Instance{
-		{
-			ID:           "i-12345678",
-			Name:         "test-instance-1",
-			State:        "running",
-			CreatedAt:    time.Now().Add(-24 * time.Hour),
-			PublicIPs:    []string{"54.123.45.67"},
-			PrivateIPs:   []string{"10.0.1.10"},
-			InstanceType: "t3.medium",
-			Region:       "us-east-1",
-			Zone:         "us-east-1a",
-			ImageID:      "ami-12345678",
-			CPUCores:     2,
-			MemoryGB:     4,
-			DiskGB:       20,
-			Tags:         []string{"environment:test", "project:novacron"},
-			Metadata: map[string]string{
-				"aws:instance-id": "i-12345678",
-				"aws:vpc-id":      "vpc-12345678",
-			},
-		},
-		{
-			ID:           "i-87654321",
-			Name:         "test-instance-2",
-			State:        "stopped",
-			CreatedAt:    time.Now().Add(-48 * time.Hour),
-			PublicIPs:    []string{},
-			PrivateIPs:   []string{"10.0.1.11"},
-			InstanceType: "t3.large",
-			Region:       "us-east-1",
-			Zone:         "us-east-1b",
-			ImageID:      "ami-12345678",
-			CPUCores:     4,
-			MemoryGB:     8,
-			DiskGB:       40,
-			Tags:         []string{"environment:prod", "project:novacron"},
-			Metadata: map[string]string{
-				"aws:instance-id": "i-87654321",
-				"aws:vpc-id":      "vpc-12345678",
-			},
-		},
+	ec2Client, ok := p.ec2Client.(*ec2.Client)
+	if !ok {
+		return nil, fmt.Errorf("EC2 client is not initialized properly")
 	}
 
-	// Update cache
-	for i := range instances {
-		instance := instances[i]
-		p.instanceCache[instance.ID] = &instance
+	input := &ec2.DescribeInstancesInput{}
+	// TODO: Apply filters and pagination from options if needed
+
+	result, err := ec2Client.DescribeInstances(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe EC2 instances: %w", err)
+	}
+
+	instances := make([]Instance, 0)
+	for _, reservation := range result.Reservations {
+		for _, inst := range reservation.Instances {
+			instance := Instance{
+				ID:           aws.ToString(inst.InstanceId),
+				Name:         "", // Name tag extraction below
+				State:        string(inst.State.Name),
+				CreatedAt:    aws.ToTime(inst.LaunchTime),
+				PublicIPs:    []string{},
+				PrivateIPs:   []string{},
+				InstanceType: string(inst.InstanceType),
+				Region:       p.region,
+				Zone:         aws.ToString(inst.Placement.AvailabilityZone),
+				ImageID:      aws.ToString(inst.ImageId),
+				CPUCores:     int(inst.CpuOptions.CoreCount),
+				MemoryGB:     0, // Not directly available, can be looked up by instance type
+				DiskGB:       0, // Not directly available, can be looked up by block devices
+				Tags:         []string{},
+				Metadata:     map[string]string{},
+			}
+			// Extract Name tag and other tags
+			for _, tag := range inst.Tags {
+				if aws.ToString(tag.Key) == "Name" {
+					instance.Name = aws.ToString(tag.Value)
+				}
+				instance.Tags = append(instance.Tags, fmt.Sprintf("%s:%s", aws.ToString(tag.Key), aws.ToString(tag.Value)))
+			}
+			// Extract IPs
+			for _, ni := range inst.NetworkInterfaces {
+				for _, ip := range ni.PrivateIpAddresses {
+					instance.PrivateIPs = append(instance.PrivateIPs, aws.ToString(ip.PrivateIpAddress))
+					if ip.Association != nil && ip.Association.PublicIp != nil {
+						instance.PublicIPs = append(instance.PublicIPs, aws.ToString(ip.Association.PublicIp))
+					}
+				}
+			}
+			// Add instance ID and VPC ID to metadata
+			instance.Metadata["aws:instance-id"] = aws.ToString(inst.InstanceId)
+			if inst.VpcId != nil {
+				instance.Metadata["aws:vpc-id"] = aws.ToString(inst.VpcId)
+			}
+			// Add to cache
+			p.instanceCache[instance.ID] = &instance
+			instances = append(instances, instance)
+		}
 	}
 
 	return instances, nil
@@ -971,6 +944,33 @@ func (p *AWSProvider) CreateStorageVolume(ctx context.Context, specs StorageVolu
 
 	// Convert tag map to slice
 	if specs.Tags != nil {
+		for k, v := range specs.Tags {
+			volume.Tags = append(volume.Tags, fmt.Sprintf("%s:%s", k, v))
+		}
+	}
+
+	// Add to cache
+	p.volumeCache[volumeID] = volume
+
+	return volume, nil
+}
+
+// DeleteStorageVolume deletes a storage volume
+func (p *AWSProvider) DeleteStorageVolume(ctx context.Context, id string) error {
+	if !p.initialized {
+		return fmt.Errorf("AWS provider is not initialized")
+	}
+
+	// In a real implementation, we would call AWS EC2 DeleteVolume API
+	// For example:
+	/*
+		input := &ec2.DeleteVolumeInput{
+			VolumeId: aws.String(id),
+		}
+
+		_, err := p.ec2Client.DeleteVolume(ctx, input)
+		if err != nil {
+			return fmt.Errorf("failed to delete EBS volume: %w", err)
 		for k, v := range specs.Tags {
 			volume.Tags = append(volume.Tags, fmt.Sprintf("%s:%s", k, v))
 		}

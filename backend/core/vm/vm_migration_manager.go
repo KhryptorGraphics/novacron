@@ -6,42 +6,33 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
+	// Assuming NodeManager interface is defined elsewhere (e.g., node package or hypervisor package)
+	// Assuming MigrationStorage and MigrationExecutor interfaces are defined elsewhere
 )
 
-// MigrationManagerImpl implements the MigrationManager interface
+// MigrationManagerImpl implements the MigrationManager interface (defined in vm_types.go)
 type MigrationManagerImpl struct {
-	vmManager      VMManager
-	nodeManager    NodeManager
-	storage        MigrationStorage
-	executor       MigrationExecutor
-	activeMigrations map[string]*Migration
-	mu              sync.RWMutex
-	logger          *logrus.Logger
-}
-
-// NodeManager defines the interface for node management
-type NodeManager interface {
-	GetNode(nodeID string) (Node, error)
-	CheckNodeResources(nodeID string, resources ResourceRequirements) error
-}
-
-// VMManager defines the interface for VM management
-type VMManager interface {
-	GetVM(vmID string) (*VM, error)
-	CheckVMCanMigrate(vmID string) error
+	vmManager        *VMManager            // Use concrete type pointer
+	nodeManager      NodeManager           // Use interface type defined elsewhere
+	storage          MigrationStorage      // Use interface type defined elsewhere
+	executor         MigrationExecutor     // Use interface type defined elsewhere
+	activeMigrations map[string]*Migration // Assuming Migration type is defined elsewhere
+	mu               sync.RWMutex
+	logger           *logrus.Logger
 }
 
 // NewMigrationManager creates a new MigrationManager
-func NewMigrationManager(vmManager VMManager, nodeManager NodeManager, storage MigrationStorage, executor MigrationExecutor, logger *logrus.Logger) *MigrationManagerImpl {
+// Note: Signature needs to match the one potentially defined in vm_types.go
+// Using concrete *VMManager and interfaces for others
+func NewMigrationManagerImpl(vmManager *VMManager, nodeManager NodeManager, storage MigrationStorage, executor MigrationExecutor, logger *logrus.Logger) *MigrationManagerImpl {
 	return &MigrationManagerImpl{
-		vmManager:       vmManager,
-		nodeManager:     nodeManager,
-		storage:         storage,
-		executor:        executor,
+		vmManager:        vmManager,   // Assign concrete type
+		nodeManager:      nodeManager, // Assign interface
+		storage:          storage,
+		executor:         executor,
 		activeMigrations: make(map[string]*Migration),
-		logger:          logger,
+		logger:           logger,
 	}
 }
 
@@ -49,45 +40,45 @@ func NewMigrationManager(vmManager VMManager, nodeManager NodeManager, storage M
 func (m *MigrationManagerImpl) Migrate(vmID, targetNodeID string, options MigrationOptions) (*MigrationRecord, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// Get the VM
 	vm, err := m.vmManager.GetVM(vmID)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Check if the VM can be migrated
 	if err := m.vmManager.CheckVMCanMigrate(vmID); err != nil {
 		return nil, err
 	}
-	
+
 	// Check if there's already a migration in progress for this VM
 	for _, migration := range m.activeMigrations {
 		if migration.record.VMID == vmID && isActiveMigration(migration.record.State) {
 			return nil, fmt.Errorf("VM %s already has a migration in progress", vmID)
 		}
 	}
-	
+
 	// Get source node
 	sourceNode, err := m.nodeManager.GetNode(vm.NodeID)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Get target node
 	targetNode, err := m.nodeManager.GetNode(targetNodeID)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Check if target node has enough resources
 	if err := m.nodeManager.CheckNodeResources(targetNodeID, vm.Resources); err != nil {
 		return nil, err
 	}
-	
+
 	// Create migration record
 	record := NewMigrationRecord(vmID, vm.Name, sourceNode.GetID(), targetNodeID, options.Type)
-	
+
 	// Set configuration options
 	record.BandwidthLimit = options.BandwidthLimit
 	record.CompressionLevel = options.CompressionLevel
@@ -95,24 +86,24 @@ func (m *MigrationManagerImpl) Migrate(vmID, targetNodeID string, options Migrat
 	record.Priority = options.Priority
 	record.Force = options.Force
 	record.SkipVerification = options.SkipVerification
-	
+
 	// Save the record
 	if err := m.storage.SaveMigrationRecord(record); err != nil {
 		return nil, err
 	}
-	
+
 	// Create migration instance
 	migration := NewMigration(record, vm, sourceNode, targetNode, m, m.executor)
-	
+
 	// Add to active migrations
 	m.activeMigrations[record.ID] = migration
-	
+
 	// Start the migration
 	if err := migration.Start(); err != nil {
 		delete(m.activeMigrations, record.ID)
 		return nil, err
 	}
-	
+
 	return record, nil
 }
 
@@ -120,7 +111,7 @@ func (m *MigrationManagerImpl) Migrate(vmID, targetNodeID string, options Migrat
 func (m *MigrationManagerImpl) CancelMigration(migrationID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// Find the migration
 	migration, ok := m.activeMigrations[migrationID]
 	if !ok {
@@ -129,15 +120,15 @@ func (m *MigrationManagerImpl) CancelMigration(migrationID string) error {
 		if err != nil {
 			return err
 		}
-		
+
 		// Check if it's in a state that can't be cancelled
 		if !isActiveMigration(record.State) {
 			return fmt.Errorf("migration %s is in state %s and cannot be cancelled", migrationID, record.State)
 		}
-		
+
 		return fmt.Errorf("migration %s not found in active migrations", migrationID)
 	}
-	
+
 	// Cancel the migration
 	return migration.Cancel()
 }
@@ -146,18 +137,18 @@ func (m *MigrationManagerImpl) CancelMigration(migrationID string) error {
 func (m *MigrationManagerImpl) GetMigrationStatus(migrationID string) (*MigrationStatus, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	// Check active migrations
 	if migration, ok := m.activeMigrations[migrationID]; ok {
 		return migration.GetStatus(), nil
 	}
-	
+
 	// Check storage
 	record, err := m.storage.LoadMigrationRecord(migrationID)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Convert record to status
 	return &MigrationStatus{
 		ID:               record.ID,
@@ -181,13 +172,13 @@ func (m *MigrationManagerImpl) GetMigrationStatus(migrationID string) (*Migratio
 func (m *MigrationManagerImpl) ListMigrations() ([]*MigrationStatus, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	// Get all records from storage
 	records, err := m.storage.ListMigrationRecords()
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Convert records to statuses
 	statuses := make([]*MigrationStatus, 0, len(records))
 	for _, record := range records {
@@ -214,7 +205,7 @@ func (m *MigrationManagerImpl) ListMigrations() ([]*MigrationStatus, error) {
 			})
 		}
 	}
-	
+
 	return statuses, nil
 }
 
@@ -222,13 +213,13 @@ func (m *MigrationManagerImpl) ListMigrations() ([]*MigrationStatus, error) {
 func (m *MigrationManagerImpl) ListMigrationsForVM(vmID string) ([]*MigrationStatus, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	// Get all records for the VM from storage
 	records, err := m.storage.ListMigrationRecordsForVM(vmID)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Convert records to statuses
 	statuses := make([]*MigrationStatus, 0, len(records))
 	for _, record := range records {
@@ -255,7 +246,7 @@ func (m *MigrationManagerImpl) ListMigrationsForVM(vmID string) ([]*MigrationSta
 			})
 		}
 	}
-	
+
 	return statuses, nil
 }
 
@@ -263,7 +254,7 @@ func (m *MigrationManagerImpl) ListMigrationsForVM(vmID string) ([]*MigrationSta
 func (m *MigrationManagerImpl) SubscribeToMigrationEvents(migrationID string) (<-chan MigrationEvent, func(), error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	// Check if the migration exists
 	migration, ok := m.activeMigrations[migrationID]
 	if !ok {
@@ -272,37 +263,37 @@ func (m *MigrationManagerImpl) SubscribeToMigrationEvents(migrationID string) (<
 		if err != nil {
 			return nil, nil, err
 		}
-		
+
 		// If the migration is not active, return an empty channel
 		if !isActiveMigration(record.State) {
 			ch := make(chan MigrationEvent)
 			close(ch)
 			return ch, func() {}, nil
 		}
-		
+
 		return nil, nil, errors.New("migration not found in active migrations")
 	}
-	
+
 	// Get the event channel
 	eventCh := migration.Events()
-	
+
 	// Create a new channel for this subscriber
 	subscriberCh := make(chan MigrationEvent, 100)
-	
+
 	// Create a new goroutine to forward events
 	var once sync.Once
 	stopCh := make(chan struct{})
-	
+
 	go func() {
 		defer close(subscriberCh)
-		
+
 		for {
 			select {
 			case event, ok := <-eventCh:
 				if !ok {
 					return
 				}
-				
+
 				// Forward the event
 				select {
 				case subscriberCh <- event:
@@ -315,14 +306,14 @@ func (m *MigrationManagerImpl) SubscribeToMigrationEvents(migrationID string) (<
 			}
 		}
 	}()
-	
+
 	// Return the channel and a function to unsubscribe
 	unsubscribe := func() {
 		once.Do(func() {
 			close(stopCh)
 		})
 	}
-	
+
 	return subscriberCh, unsubscribe, nil
 }
 
@@ -345,7 +336,7 @@ func (m *MigrationManagerImpl) ListMigrationRecords() ([]*MigrationRecord, error
 func (m *MigrationManagerImpl) Cleanup() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	for id, migration := range m.activeMigrations {
 		status := migration.GetStatus()
 		if !isActiveMigration(status.State) {
@@ -360,7 +351,7 @@ func (m *MigrationManagerImpl) Start() {
 	go func() {
 		ticker := time.NewTicker(10 * time.Minute)
 		defer ticker.Stop()
-		
+
 		for range ticker.C {
 			m.Cleanup()
 		}
@@ -371,7 +362,7 @@ func (m *MigrationManagerImpl) Start() {
 func (m *MigrationManagerImpl) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// Cancel all active migrations
 	for _, migration := range m.activeMigrations {
 		_ = migration.Cancel()
