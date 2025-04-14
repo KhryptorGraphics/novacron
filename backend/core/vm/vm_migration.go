@@ -11,62 +11,11 @@ import (
 	"time"
 )
 
-// MigrationType represents the type of migration
-type MigrationType string
+// Using MigrationType from vm_types.go
 
-const (
-	// MigrationTypeCold represents a cold migration (VM is stopped before migration)
-	MigrationTypeCold MigrationType = "cold"
-	
-	// MigrationTypeWarm represents a warm migration (VM is suspended before migration)
-	MigrationTypeWarm MigrationType = "warm"
-	
-	// MigrationTypeLive represents a live migration (VM continues running during migration)
-	MigrationTypeLive MigrationType = "live"
-)
+// Using MigrationState from vm_types.go as MigrationStatus
 
-// MigrationStatus represents the status of a migration
-type MigrationStatus string
-
-const (
-	// MigrationStatusPending indicates the migration is pending
-	MigrationStatusPending MigrationStatus = "pending"
-	
-	// MigrationStatusInProgress indicates the migration is in progress
-	MigrationStatusInProgress MigrationStatus = "in_progress"
-	
-	// MigrationStatusCompleted indicates the migration completed successfully
-	MigrationStatusCompleted MigrationStatus = "completed"
-	
-	// MigrationStatusFailed indicates the migration failed
-	MigrationStatusFailed MigrationStatus = "failed"
-	
-	// MigrationStatusCanceled indicates the migration was canceled
-	MigrationStatusCanceled MigrationStatus = "canceled"
-	
-	// MigrationStatusRolledBack indicates the migration failed and was rolled back
-	MigrationStatusRolledBack MigrationStatus = "rolled_back"
-)
-
-// VMStatus represents the status of a VM
-type VMStatus string
-
-const (
-	// VMStatusRunning indicates the VM is running
-	VMStatusRunning VMStatus = "running"
-	
-	// VMStatusStopped indicates the VM is stopped
-	VMStatusStopped VMStatus = "stopped"
-	
-	// VMStatusSuspended indicates the VM is suspended
-	VMStatusSuspended VMStatus = "suspended"
-	
-	// VMStatusMigrating indicates the VM is being migrated
-	VMStatusMigrating VMStatus = "migrating"
-	
-	// VMStatusError indicates the VM is in an error state
-	VMStatusError VMStatus = "error"
-)
+// Using VMState from vm_types.go
 
 // VMSpec contains the specification for a VM
 type VMSpec struct {
@@ -97,23 +46,15 @@ type VMMigration struct {
 	Options           map[string]string
 }
 
-// VM represents a virtual machine managed by NovaCron
-type VM struct {
-	ID        string
-	Spec      VMSpec
-	Status    VMStatus
-	NodeID    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
+// Using VM struct from vm.go
 
 // VMMigrationManager manages VM migrations
 type VMMigrationManager struct {
-	nodeID    string
+	nodeID     string
 	storageDir string
-	vms       map[string]*VM
+	vms        map[string]*VM
 	migrations map[string]*VMMigration
-	mutex     sync.RWMutex
+	mutex      sync.RWMutex
 }
 
 // NewVMMigrationManager creates a new VMMigrationManager
@@ -132,31 +73,34 @@ func (m *VMMigrationManager) ExecuteMigration(ctx context.Context, migration *VM
 	if migration == nil {
 		return errors.New("migration cannot be nil")
 	}
-	
+
 	if migration.SourceNodeID != m.nodeID {
 		return fmt.Errorf("source node ID mismatch: expected %s, got %s", m.nodeID, migration.SourceNodeID)
 	}
-	
+
 	// Update migration status
 	migration.Status = MigrationStatusInProgress
 	migration.StartTime = time.Now()
 	migration.Progress = 0
-	
+
 	// Simulate VM setup before migration
-	sourceVM := &VM{
-		ID:        migration.VMID,
-		Spec:      migration.VMSpec,
-		Status:    VMStatusRunning,
-		NodeID:    m.nodeID,
-		CreatedAt: time.Now().Add(-24 * time.Hour), // Pretend it was created a day ago
-		UpdatedAt: time.Now(),
+	// In a real implementation, we would use the VM struct from vm.go
+	// For now, we'll just use a placeholder
+	config := VMConfig{
+		ID:      migration.VMID,
+		Name:    migration.VMID,
+		Command: "echo",
+		Args:    []string{"placeholder"},
 	}
-	
+	sourceVM, _ := NewVM(config)
+	sourceVM.SetState(StateRunning)
+	sourceVM.SetNodeID(m.nodeID)
+
 	// Store the VM in our manager
 	m.mutex.Lock()
-	m.vms[sourceVM.ID] = sourceVM
+	m.vms[sourceVM.ID()] = sourceVM
 	m.mutex.Unlock()
-	
+
 	// Execute migration based on type
 	var err error
 	switch migration.Type {
@@ -169,15 +113,15 @@ func (m *VMMigrationManager) ExecuteMigration(ctx context.Context, migration *VM
 	default:
 		err = fmt.Errorf("unsupported migration type: %s", migration.Type)
 	}
-	
+
 	// Update migration status
 	migration.EndTime = time.Now()
 	migration.UpdatedAt = time.Now()
-	
+
 	if err != nil {
 		migration.Status = MigrationStatusFailed
 		migration.Error = err.Error()
-		
+
 		// Perform rollback
 		rollbackErr := m.rollbackMigration(migration)
 		if rollbackErr != nil {
@@ -186,13 +130,13 @@ func (m *VMMigrationManager) ExecuteMigration(ctx context.Context, migration *VM
 		} else {
 			migration.Status = MigrationStatusRolledBack
 		}
-		
+
 		return err
 	}
-	
+
 	migration.Status = MigrationStatusCompleted
 	migration.Progress = 100
-	
+
 	return nil
 }
 
@@ -202,46 +146,46 @@ func (m *VMMigrationManager) executeColdMigration(ctx context.Context, migration
 	// 1. Stop the VM
 	// 2. Copy VM disk and state
 	// 3. Start VM on destination
-	
+
 	vmID := migration.VMID
-	
+
 	// Simulate stopping VM
 	m.mutex.Lock()
 	if vm, exists := m.vms[vmID]; exists {
-		vm.Status = VMStatusStopped
-		vm.UpdatedAt = time.Now()
+		vm.SetState(StateStopped)
 	}
 	m.mutex.Unlock()
-	
+
 	// Check for VM state file
 	stateFile := filepath.Join(m.storageDir, vmID+".state")
 	if _, err := os.Stat(stateFile); err != nil {
 		return fmt.Errorf("VM state file not found: %v", err)
 	}
-	
+
 	// Copy VM state to destination
 	destStateFile := filepath.Join(destManager.storageDir, vmID+".state")
-	if err := copyFile(stateFile, destStateFile); err != nil {
+	if err := copyVMFile(stateFile, destStateFile); err != nil {
 		return fmt.Errorf("failed to copy VM state: %v", err)
 	}
-	
+
 	// Simulate starting VM on destination
-	destVM := &VM{
-		ID:        vmID,
-		Spec:      migration.VMSpec,
-		Status:    VMStatusRunning,
-		NodeID:    destManager.nodeID,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	config := VMConfig{
+		ID:      vmID,
+		Name:    vmID,
+		Command: "echo",
+		Args:    []string{"placeholder"},
 	}
-	
+	destVM, _ := NewVM(config)
+	destVM.SetState(StateRunning)
+	destVM.SetNodeID(destManager.nodeID)
+
 	destManager.mutex.Lock()
-	destManager.vms[destVM.ID] = destVM
+	destManager.vms[destVM.ID()] = destVM
 	destManager.mutex.Unlock()
-	
+
 	// Update progress
 	migration.Progress = 100
-	
+
 	return nil
 }
 
@@ -251,57 +195,57 @@ func (m *VMMigrationManager) executeWarmMigration(ctx context.Context, migration
 	// 1. Suspend the VM
 	// 2. Copy VM disk, state, and memory
 	// 3. Resume VM on destination
-	
+
 	vmID := migration.VMID
-	
+
 	// Simulate suspending VM
 	m.mutex.Lock()
 	if vm, exists := m.vms[vmID]; exists {
-		vm.Status = VMStatusSuspended
-		vm.UpdatedAt = time.Now()
+		vm.SetState(StatePaused)
 	}
 	m.mutex.Unlock()
-	
+
 	// Check for VM state and memory files
 	stateFile := filepath.Join(m.storageDir, vmID+".state")
 	if _, err := os.Stat(stateFile); err != nil {
 		return fmt.Errorf("VM state file not found: %v", err)
 	}
-	
+
 	memFile := filepath.Join(m.storageDir, vmID+".memory")
 	if _, err := os.Stat(memFile); err != nil {
 		return fmt.Errorf("VM memory file not found: %v", err)
 	}
-	
+
 	// Copy VM state to destination
 	destStateFile := filepath.Join(destManager.storageDir, vmID+".state")
-	if err := copyFile(stateFile, destStateFile); err != nil {
+	if err := copyVMFile(stateFile, destStateFile); err != nil {
 		return fmt.Errorf("failed to copy VM state: %v", err)
 	}
-	
+
 	// Copy VM memory to destination
 	destMemFile := filepath.Join(destManager.storageDir, vmID+".memory")
-	if err := copyFile(memFile, destMemFile); err != nil {
+	if err := copyVMFile(memFile, destMemFile); err != nil {
 		return fmt.Errorf("failed to copy VM memory: %v", err)
 	}
-	
+
 	// Simulate resuming VM on destination
-	destVM := &VM{
-		ID:        vmID,
-		Spec:      migration.VMSpec,
-		Status:    VMStatusRunning,
-		NodeID:    destManager.nodeID,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	config := VMConfig{
+		ID:      vmID,
+		Name:    vmID,
+		Command: "echo",
+		Args:    []string{"placeholder"},
 	}
-	
+	destVM, _ := NewVM(config)
+	destVM.SetState(StateRunning)
+	destVM.SetNodeID(destManager.nodeID)
+
 	destManager.mutex.Lock()
-	destManager.vms[destVM.ID] = destVM
+	destManager.vms[destVM.ID()] = destVM
 	destManager.mutex.Unlock()
-	
+
 	// Update progress
 	migration.Progress = 100
-	
+
 	return nil
 }
 
@@ -312,23 +256,22 @@ func (m *VMMigrationManager) executeLiveMigration(ctx context.Context, migration
 	// 2. Iteratively copy memory pages
 	// 3. Brief pause to copy final state
 	// 4. Resume on destination
-	
+
 	vmID := migration.VMID
-	
+
 	// Determine number of iterations
 	iterations := 3
 	if val, ok := migration.Options["iterations"]; ok {
 		fmt.Sscanf(val, "%d", &iterations)
 	}
-	
+
 	// Simulate keeping VM running during migration
 	m.mutex.Lock()
 	if vm, exists := m.vms[vmID]; exists {
-		vm.Status = VMStatusMigrating
-		vm.UpdatedAt = time.Now()
+		vm.SetState(StateMigrating)
 	}
 	m.mutex.Unlock()
-	
+
 	// Perform iterative memory copying
 	for i := 1; i <= iterations; i++ {
 		// Check for memory iteration file
@@ -336,16 +279,16 @@ func (m *VMMigrationManager) executeLiveMigration(ctx context.Context, migration
 		if _, err := os.Stat(memIterFile); err != nil {
 			return fmt.Errorf("memory iteration file not found: %v", err)
 		}
-		
+
 		// Copy to destination
 		destMemIterFile := filepath.Join(destManager.storageDir, fmt.Sprintf("%s.memory.%c", vmID, '0'+i))
-		if err := copyFile(memIterFile, destMemIterFile); err != nil {
+		if err := copyVMFile(memIterFile, destMemIterFile); err != nil {
 			return fmt.Errorf("failed to copy memory iteration: %v", err)
 		}
-		
+
 		// Update progress
 		migration.Progress = float64(i) * 100 / float64(iterations+1)
-		
+
 		// Simulate time passing
 		select {
 		case <-ctx.Done():
@@ -354,18 +297,18 @@ func (m *VMMigrationManager) executeLiveMigration(ctx context.Context, migration
 			// Continue
 		}
 	}
-	
+
 	// Final state copy
 	stateFile := filepath.Join(m.storageDir, vmID+".state")
 	if _, err := os.Stat(stateFile); err != nil {
 		return fmt.Errorf("VM state file not found: %v", err)
 	}
-	
+
 	destStateFile := filepath.Join(destManager.storageDir, vmID+".state")
-	if err := copyFile(stateFile, destStateFile); err != nil {
+	if err := copyVMFile(stateFile, destStateFile); err != nil {
 		return fmt.Errorf("failed to copy VM state: %v", err)
 	}
-	
+
 	// Merge memory iterations into final memory state on destination
 	destMemFile := filepath.Join(destManager.storageDir, vmID+".memory")
 	destFile, err := os.Create(destMemFile)
@@ -373,42 +316,42 @@ func (m *VMMigrationManager) executeLiveMigration(ctx context.Context, migration
 		return fmt.Errorf("failed to create destination memory file: %v", err)
 	}
 	defer destFile.Close()
-	
+
 	// In a real implementation, we would merge memory pages intelligently
 	// For the test, just create an empty file
-	
+
 	// Simulate running VM on destination
-	destVM := &VM{
-		ID:        vmID,
-		Spec:      migration.VMSpec,
-		Status:    VMStatusRunning,
-		NodeID:    destManager.nodeID,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	config := VMConfig{
+		ID:      vmID,
+		Name:    vmID,
+		Command: "echo",
+		Args:    []string{"placeholder"},
 	}
-	
+	destVM, _ := NewVM(config)
+	destVM.SetState(StateRunning)
+	destVM.SetNodeID(destManager.nodeID)
+
 	destManager.mutex.Lock()
-	destManager.vms[destVM.ID] = destVM
+	destManager.vms[destVM.ID()] = destVM
 	destManager.mutex.Unlock()
-	
+
 	// Update progress
 	migration.Progress = 100
-	
+
 	return nil
 }
 
 // rollbackMigration rolls back a failed migration
 func (m *VMMigrationManager) rollbackMigration(migration *VMMigration) error {
 	vmID := migration.VMID
-	
+
 	// Restore VM status to running
 	m.mutex.Lock()
 	if vm, exists := m.vms[vmID]; exists {
-		vm.Status = VMStatusRunning
-		vm.UpdatedAt = time.Now()
+		vm.SetState(StateRunning)
 	}
 	m.mutex.Unlock()
-	
+
 	return nil
 }
 
@@ -416,36 +359,36 @@ func (m *VMMigrationManager) rollbackMigration(migration *VMMigration) error {
 func (m *VMMigrationManager) GetVM(vmID string) (*VM, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	
+
 	vm, exists := m.vms[vmID]
 	if !exists {
 		return nil, fmt.Errorf("VM %s not found", vmID)
 	}
-	
+
 	return vm, nil
 }
 
 // Helper function to copy files
-func copyFile(src, dst string) error {
+func copyVMFile(src, dst string) error {
 	// Create destination directory if it doesn't exist
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
-	
+
 	// Open source file
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer srcFile.Close()
-	
+
 	// Create destination file
 	dstFile, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
 	defer dstFile.Close()
-	
+
 	// Copy content
 	_, err = io.Copy(dstFile, srcFile)
 	return err
