@@ -198,31 +198,39 @@ func DefaultVMManagerConfig() VMManagerConfig {
 
 // VMManager manages virtual machines
 type VMManager struct {
-	config         VMManagerConfig
-	vms            map[string]*VM // Map VM ID to VM object
-	vmsMutex       sync.RWMutex
-	scheduler      *scheduler.Scheduler // Assuming scheduler type exists
-	driverFactory  VMDriverFactory
-	eventListeners []VMManagerEventListener
-	eventMutex     sync.RWMutex
-	ctx            context.Context
-	cancel         context.CancelFunc
-	// Add other necessary fields like nodeManager, migrationStorage etc. if needed
-	// nodeManager NodeManager // Example placeholder
-	// migrationStorage MigrationStorage // Example placeholder
+	config           VMManagerConfig
+	vms              map[string]*VM // Map VM ID to VM object
+	vmsMutex         sync.RWMutex
+	scheduler        *scheduler.Scheduler // Assuming scheduler type exists
+	driverFactory    VMDriverFactory
+	eventListeners   []VMManagerEventListener
+	eventMutex       sync.RWMutex
+	ctx              context.Context
+	cancel           context.CancelFunc
+	nodeID           string
+	storageDir       string
+	snapshotManager  *VMSnapshotManager
+	backupManager    *VMBackupManager
+	clusterManager   *VMClusterManager
+	networkManager   *VMNetworkManager
+	storageManager   *VMStorageManager
+	securityManager  *VMSecurityManager
+	healthManager    *VMHealthManager
+	monitor          *VMMonitor
+	metricsCollector *VMMetricsCollector
 }
 
 // NewVMManager creates a new VM manager
-func NewVMManager(config VMManagerConfig, sch *scheduler.Scheduler, driverFactory VMDriverFactory /* add other dependencies */) *VMManager {
+func NewVMManager(config VMManagerConfig, nodeID string, storageDir string, driverFactory VMDriverFactory) *VMManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &VMManager{
 		config:        config,
 		vms:           make(map[string]*VM),
-		scheduler:     sch,
 		driverFactory: driverFactory,
 		ctx:           ctx,
 		cancel:        cancel,
-		// Initialize other fields
+		nodeID:        nodeID,
+		storageDir:    storageDir,
 	}
 }
 

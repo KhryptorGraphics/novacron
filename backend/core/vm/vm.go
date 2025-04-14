@@ -17,12 +17,42 @@ import (
 type State string
 
 const (
+	// StateUnknown represents an unknown VM state
+	StateUnknown State = "unknown"
+
 	// StateCreated means the VM has been created but not started
 	StateCreated State = "created"
+
+	// StateCreating represents a VM that is being created
+	StateCreating State = "creating"
+
+	// StateProvisioning represents a VM that is being provisioned
+	StateProvisioning State = "provisioning"
+
 	// StateRunning means the VM is currently running
 	StateRunning State = "running"
+
 	// StateStopped means the VM has been stopped
 	StateStopped State = "stopped"
+
+	// StatePaused represents a paused VM
+	StatePaused State = "paused"
+
+	// StatePausing represents a VM that is being paused
+	StatePausing State = "pausing"
+
+	// StateResuming represents a VM that is being resumed
+	StateResuming State = "resuming"
+
+	// StateRestarting represents a VM that is being restarted
+	StateRestarting State = "restarting"
+
+	// StateDeleting represents a VM that is being deleted
+	StateDeleting State = "deleting"
+
+	// StateMigrating represents a VM that is being migrated
+	StateMigrating State = "migrating"
+
 	// StateFailed means the VM has failed to start or has crashed
 	StateFailed State = "failed"
 )
@@ -89,6 +119,11 @@ type VM struct {
 	ipAddress  string
 	statsLock  sync.RWMutex
 	stats      VMStats
+	// New fields for enhanced VM management
+	nodeID      string
+	resourceID  string
+	updatedAt   time.Time
+	processInfo VMProcessInfo
 }
 
 // VMStats holds runtime statistics for a VM
@@ -99,6 +134,8 @@ type VMStats struct {
 	NetworkRecv int64
 	LastUpdated time.Time
 }
+
+// VMProcessInfo is defined in vm_process_info.go
 
 // NewVM creates a new VM instance
 func NewVM(config VMConfig) (*VM, error) {
@@ -149,6 +186,14 @@ func (vm *VM) State() State {
 	vm.mutex.RLock()
 	defer vm.mutex.RUnlock()
 	return vm.state
+}
+
+// SetState sets the VM's state
+func (vm *VM) SetState(state State) {
+	vm.mutex.Lock()
+	defer vm.mutex.Unlock()
+	vm.state = state
+	vm.updatedAt = time.Now()
 }
 
 // IsRunning returns true if the VM is running
@@ -241,7 +286,7 @@ func (vm *VM) Stop() error {
 	// Send SIGTERM signal
 	if err := vm.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		log.Printf("Failed to send SIGTERM to VM %s: %v, will try SIGKILL", vm.ID(), err)
-		
+
 		// If SIGTERM fails, try SIGKILL
 		if err := vm.cmd.Process.Kill(); err != nil {
 			return fmt.Errorf("failed to kill VM: %w", err)
@@ -340,12 +385,91 @@ func (vm *VM) GetInfo() VMInfo {
 	return info
 }
 
+// GetNodeID returns the node ID
+func (vm *VM) GetNodeID() string {
+	vm.mutex.RLock()
+	defer vm.mutex.RUnlock()
+	return vm.nodeID
+}
+
+// NodeID returns the node ID (compatibility method)
+func (vm *VM) NodeID() string {
+	return vm.GetNodeID()
+}
+
+// GetResourceID returns the resource ID
+func (vm *VM) GetResourceID() string {
+	vm.mutex.RLock()
+	defer vm.mutex.RUnlock()
+	return vm.resourceID
+}
+
+// ResourceID returns the resource ID (compatibility method)
+func (vm *VM) ResourceID() string {
+	return vm.GetResourceID()
+}
+
+// GetUpdatedAt returns the last update time
+func (vm *VM) GetUpdatedAt() time.Time {
+	vm.mutex.RLock()
+	defer vm.mutex.RUnlock()
+	return vm.updatedAt
+}
+
+// UpdatedAt returns the last update time (compatibility method)
+func (vm *VM) UpdatedAt() time.Time {
+	return vm.GetUpdatedAt()
+}
+
+// GetProcessInfo returns the process information
+func (vm *VM) GetProcessInfo() VMProcessInfo {
+	vm.mutex.RLock()
+	defer vm.mutex.RUnlock()
+	return vm.processInfo
+}
+
+// ProcessInfo returns the process information (compatibility method)
+func (vm *VM) ProcessInfo() VMProcessInfo {
+	return vm.GetProcessInfo()
+}
+
+// SetNodeID sets the node ID
+func (vm *VM) SetNodeID(nodeID string) {
+	vm.mutex.Lock()
+	defer vm.mutex.Unlock()
+	vm.nodeID = nodeID
+	vm.updatedAt = time.Now()
+}
+
+// SetResourceID sets the resource ID
+func (vm *VM) SetResourceID(resourceID string) {
+	vm.mutex.Lock()
+	defer vm.mutex.Unlock()
+	vm.resourceID = resourceID
+	vm.updatedAt = time.Now()
+}
+
+// SetProcessInfo sets the process information
+func (vm *VM) SetProcessInfo(processInfo VMProcessInfo) {
+	vm.mutex.Lock()
+	defer vm.mutex.Unlock()
+	vm.processInfo = processInfo
+	vm.updatedAt = time.Now()
+}
+
+// SetUpdatedAt sets the updated time
+func (vm *VM) SetUpdatedAt(t time.Time) {
+	vm.mutex.Lock()
+	defer vm.mutex.Unlock()
+	vm.updatedAt = t
+}
+
 // Private methods
 
 func (vm *VM) setupCgroups() error {
 	// Create cgroup path
 	vm.cgroupPath = filepath.Join("/sys/fs/cgroup", "novacron", vm.config.ID)
-	
+
 	// In a full implementation, we would create cgroups for CPU, memory, etc.
 	// For now, we'll just log and return success
 	log.Printf("Set up cgroups for VM %s at %s", vm.ID(), vm.cgroupPath)
