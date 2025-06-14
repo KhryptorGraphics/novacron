@@ -199,7 +199,7 @@ type DistributedVolumeInfo struct {
 // DistributedVolume represents a distributed storage volume
 type DistributedVolume struct {
 	// Base volume info from the existing system
-	baseVolume *Volume
+	baseVolume *VolumeInfo
 
 	// Extended information for distributed volumes
 	DistInfo DistributedVolumeInfo `json:"dist_info"`
@@ -396,23 +396,23 @@ func (s *DistributedStorageService) GetAvailableNodes() []NodeInfo {
 // CreateDistributedVolume creates a new distributed volume
 func (s *DistributedStorageService) CreateDistributedVolume(
 	ctx context.Context,
-	spec VolumeSpec,
+	opts VolumeCreateOptions,
 	replicationFactor int,
-) (*Volume, error) {
-	// Modify the spec for distributed storage
-	if spec.Type == "" {
-		spec.Type = VolumeTypeCeph // Default to Ceph for distributed volumes
+) (*VolumeInfo, error) {
+	// Modify the opts for distributed storage
+	if opts.Type == "" {
+		opts.Type = VolumeTypeCeph // Default to Ceph for distributed volumes
 	}
 
-	// Set appropriate options for the underlying storage
-	if spec.Options == nil {
-		spec.Options = make(map[string]string)
+	// Set appropriate metadata for the underlying storage
+	if opts.Metadata == nil {
+		opts.Metadata = make(map[string]string)
 	}
-	spec.Options["distributed"] = "true"
-	spec.Options["replication_factor"] = fmt.Sprintf("%d", replicationFactor)
+	opts.Metadata["distributed"] = "true"
+	opts.Metadata["replication_factor"] = fmt.Sprintf("%d", replicationFactor)
 
 	// Create the base volume
-	volume, err := s.baseManager.CreateVolume(ctx, spec)
+	volume, err := s.baseManager.CreateVolume(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create base volume: %w", err)
 	}
@@ -421,7 +421,7 @@ func (s *DistributedStorageService) CreateDistributedVolume(
 	distVolume := &DistributedVolume{
 		baseVolume: volume,
 		DistInfo: DistributedVolumeInfo{
-			ShardCount:        calculateShardCount(int64(volume.SizeMB)*1024*1024, s.config.ShardSize),
+			ShardCount:        calculateShardCount(volume.Size, s.config.ShardSize),
 			NodeCount:         0,
 			ConsistencyLevel:  s.config.ConsistencyProtocol,
 			ReplicationPolicy: s.getReplicationPolicy(),
@@ -485,13 +485,13 @@ func (s *DistributedStorageService) GetDistributedVolume(
 	distVolume, exists := s.distVolumes[volumeID]
 	if !exists {
 		// Check if it's a base volume that we don't know about yet
-		volume, err := s.baseManager.GetVolume(volumeID)
+		volume, err := s.baseManager.GetVolume(ctx, volumeID)
 		if err != nil {
 			return nil, err
 		}
 
 		// Check if it's marked as distributed
-		if volume.Options == nil || volume.Options["distributed"] != "true" {
+		if volume.Metadata == nil || volume.Metadata["distributed"] != "true" {
 			return nil, fmt.Errorf("volume %s is not a distributed volume", volumeID)
 		}
 

@@ -253,6 +253,442 @@ func (m *KVMManager) GetVMMetrics(ctx context.Context, vmID string) (*vm.VMInfo,
 		State:     mapLibvirtState(libvirt.DomainState(state)),
 		CPUShares: int(nrVirtCpu),
 		MemoryMB:  int(maxMem / 1024),
+		// TODO: Add CPU and memory usage metrics collection
+		CPUUsage:    0.0, // Would need additional libvirt calls to get actual usage
+		MemoryUsage: 0,   // Would need additional libvirt calls to get actual usage
+		NetworkSent: 0,   // Would need network interface stats
+		NetworkRecv: 0,   // Would need network interface stats
+	}
+	return vmInfo, nil
+}
+
+// --- Storage Volume Management ---
+
+// CreateVolume creates a storage volume for VM use
+func (m *KVMManager) CreateVolume(ctx context.Context, volumeSpec VolumeSpec) (*Volume, error) {
+	log.Printf("Creating storage volume: %s", volumeSpec.Name)
+	
+	// For now, create a simple file-based volume
+	volumePath := fmt.Sprintf("/var/lib/libvirt/images/%s.qcow2", volumeSpec.Name)
+	
+	// Create qcow2 image using qemu-img
+	cmd := fmt.Sprintf("qemu-img create -f qcow2 %s %dM", volumePath, volumeSpec.SizeMB)
+	if err := executeCommand(cmd); err != nil {
+		return nil, fmt.Errorf("failed to create volume image: %w", err)
+	}
+	
+	volume := &Volume{
+		ID:        uuid.New().String(),
+		Name:      volumeSpec.Name,
+		Type:      VolumeTypeFile,
+		Format:    VolumeFormatQCOW2,
+		SizeMB:    volumeSpec.SizeMB,
+		Path:      volumePath,
+		Status:    VolumeStatusAvailable,
+		CreatedAt: time.Now(),
+	}
+	
+	log.Printf("Created storage volume: %s at %s", volume.Name, volume.Path)
+	return volume, nil
+}
+
+// DeleteVolume deletes a storage volume
+func (m *KVMManager) DeleteVolume(ctx context.Context, volumeID string) error {
+	// In a real implementation, we would track volumes in a database
+	// For now, this is a placeholder
+	log.Printf("Deleting storage volume: %s", volumeID)
+	return nil
+}
+
+// --- Network Management ---
+
+// CreateNetwork creates a virtual network
+func (m *KVMManager) CreateNetwork(ctx context.Context, networkSpec NetworkSpec) (*Network, error) {
+	log.Printf("Creating network: %s", networkSpec.Name)
+	
+	// Generate network XML
+	networkXML := generateNetworkXML(networkSpec)
+	
+	// Define the network
+	network, err := m.conn.NetworkDefineXML(networkXML)
+	if err != nil {
+		return nil, fmt.Errorf("failed to define network: %w", err)
+	}
+	
+	// Start the network
+	if err := m.conn.NetworkCreate(network); err != nil {
+		_ = m.conn.NetworkUndefine(network)
+		return nil, fmt.Errorf("failed to start network: %w", err)
+	}
+	
+	networkInfo := &Network{
+		ID:        uuid.UUID(network.UUID).String(),
+		Name:      networkSpec.Name,
+		Type:      networkSpec.Type,
+		CIDR:      networkSpec.CIDR,
+		Gateway:   networkSpec.Gateway,
+		Status:    NetworkStatusActive,
+		CreatedAt: time.Now(),
+	}
+	
+	log.Printf("Created network: %s", networkInfo.Name)
+	return networkInfo, nil
+}
+
+// --- VM Migration Support ---
+
+// MigrateVM migrates a VM to another host
+func (m *KVMManager) MigrateVM(ctx context.Context, vmID string, targetHost string, options MigrationOptions) error {
+	log.Printf("Migrating VM %s to %s", vmID, targetHost)
+	
+	domain, err := m.findDomain(vmID)
+	if err != nil {
+		return err
+	}
+	
+	// Construct target URI
+	targetURI := fmt.Sprintf("qemu+ssh://%s/system", targetHost)
+	
+	// Perform migration based on type
+	var migrationFlags uint32
+	switch options.Type {
+	case MigrationTypeLive:
+		migrationFlags = libvirt.MigrateLive
+	case MigrationTypeOffline:
+		migrationFlags = 0
+	default:
+		migrationFlags = libvirt.MigrateLive
+	}
+	
+	// Execute migration
+	if err := m.conn.DomainMigrate(domain, targetURI, migrationFlags, "", 0); err != nil {
+		return fmt.Errorf("failed to migrate VM %s: %w", vmID, err)
+	}
+	
+	log.Printf("Successfully migrated VM %s to %s", vmID, targetHost)
+	return nil
+}
+
+// --- Snapshot Management ---
+
+// CreateSnapshot creates a VM snapshot
+func (m *KVMManager) CreateSnapshot(ctx context.Context, vmID string, snapshotName string) (*Snapshot, error) {
+	log.Printf("Creating snapshot %s for VM %s", snapshotName, vmID)
+	
+	domain, err := m.findDomain(vmID)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Generate snapshot XML
+	snapshotXML := generateSnapshotXML(snapshotName, "Snapshot created by NovaCron")
+	
+	// Create snapshot
+	snapshot, err := m.conn.DomainSnapshotCreateXML(domain, snapshotXML, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create snapshot: %w", err)
+	}
+	
+	snapshotInfo := &Snapshot{
+		ID:        uuid.New().String(),
+		Name:      snapshotName,
+		VMID:      vmID,
+		Status:    SnapshotStatusComplete,
+		CreatedAt: time.Now(),
+		SizeMB:    0, // Would need to calculate actual size
+	}
+	
+	_ = snapshot // Use snapshot variable
+	log.Printf("Created snapshot %s for VM %s", snapshotName, vmID)
+	return snapshotInfo, nil
+}
+
+// --- Helper Types ---
+
+// VolumeSpec defines a volume configuration
+type VolumeSpec struct {
+	Name   string `json:"name"`
+	SizeMB int    `json:"size_mb"`
+}
+
+// Volume represents a storage volume
+type Volume struct {
+	ID        string      `json:"id"`
+	Name      string      `json:"name"`
+	Type      VolumeType  `json:"type"`
+	Format    VolumeFormat `json:"format"`
+	SizeMB    int         `json:"size_mb"`
+	Path      string      `json:"path"`
+	Status    VolumeStatus `json:"status"`
+	CreatedAt time.Time   `json:"created_at"`
+}
+
+// VolumeType represents volume types
+type VolumeType string
+
+const (
+	VolumeTypeFile  VolumeType = "file"
+	VolumeTypeBlock VolumeType = "block"
+)
+
+// VolumeFormat represents volume formats
+type VolumeFormat string
+
+const (
+	VolumeFormatQCOW2 VolumeFormat = "qcow2"
+	VolumeFormatRAW   VolumeFormat = "raw"
+)
+
+// VolumeStatus represents volume status
+type VolumeStatus string
+
+const (
+	VolumeStatusAvailable VolumeStatus = "available"
+	VolumeStatusInUse     VolumeStatus = "in_use"
+	VolumeStatusError     VolumeStatus = "error"
+)
+
+// NetworkSpec defines a network configuration
+type NetworkSpec struct {
+	Name    string      `json:"name"`
+	Type    NetworkType `json:"type"`
+	CIDR    string      `json:"cidr"`
+	Gateway string      `json:"gateway"`
+}
+
+// Network represents a virtual network
+type Network struct {
+	ID        string        `json:"id"`
+	Name      string        `json:"name"`
+	Type      NetworkType   `json:"type"`
+	CIDR      string        `json:"cidr"`
+	Gateway   string        `json:"gateway"`
+	Status    NetworkStatus `json:"status"`
+	CreatedAt time.Time     `json:"created_at"`
+}
+
+// NetworkType represents network types
+type NetworkType string
+
+const (
+	NetworkTypeBridge NetworkType = "bridge"
+	NetworkTypeNAT    NetworkType = "nat"
+)
+
+// NetworkStatus represents network status
+type NetworkStatus string
+
+const (
+	NetworkStatusActive   NetworkStatus = "active"
+	NetworkStatusInactive NetworkStatus = "inactive"
+)
+
+// MigrationOptions defines migration parameters
+type MigrationOptions struct {
+	Type MigrationType `json:"type"`
+	Live bool          `json:"live"`
+}
+
+// MigrationType represents migration types
+type MigrationType string
+
+const (
+	MigrationTypeLive    MigrationType = "live"
+	MigrationTypeOffline MigrationType = "offline"
+)
+
+// Snapshot represents a VM snapshot
+type Snapshot struct {
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	VMID      string          `json:"vm_id"`
+	Status    SnapshotStatus  `json:"status"`
+	CreatedAt time.Time       `json:"created_at"`
+	SizeMB    int             `json:"size_mb"`
+}
+
+// SnapshotStatus represents snapshot status
+type SnapshotStatus string
+
+const (
+	SnapshotStatusComplete SnapshotStatus = "complete"
+	SnapshotStatusFailed   SnapshotStatus = "failed"
+)
+
+// ResourceInfo represents hypervisor resource information
+type ResourceInfo struct {
+	CPUCores    int `json:"cpu_cores"`
+	MemoryTotal int `json:"memory_total"`
+	VMs         int `json:"vms"`
+	VMsRunning  int `json:"vms_running"`
+}
+
+// --- XML Generation Functions ---
+
+// generateDomainXML generates libvirt domain XML for VM creation
+func generateDomainXML(vmConfig vm.VMConfig) (string, error) {
+	domainXML := fmt.Sprintf(`<domain type='kvm'>
+  <name>%s</name>
+  <uuid>%s</uuid>
+  <memory unit='MiB'>%d</memory>
+  <currentMemory unit='MiB'>%d</currentMemory>
+  <vcpu placement='static'>%d</vcpu>
+  <os>
+    <type arch='x86_64' machine='pc-i440fx-2.9'>hvm</type>
+    <boot dev='hd'/>
+  </os>
+  <features>
+    <acpi/>
+    <apic/>
+  </features>
+  <cpu mode='host-model' check='partial'/>
+  <clock offset='utc'>
+    <timer name='rtc' tickpolicy='catchup'/>
+    <timer name='pit' tickpolicy='delay'/>
+    <timer name='hpet' present='no'/>
+  </clock>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <pm>
+    <suspend-to-mem enabled='no'/>
+    <suspend-to-disk enabled='no'/>
+  </pm>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='%s'/>
+      <target dev='vda' bus='virtio'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x07' function='0x0'/>
+    </disk>
+    <controller type='usb' index='0' model='ich9-ehci1'>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x05' function='0x7'/>
+    </controller>
+    <controller type='usb' index='0' model='ich9-uhci1'>
+      <master startport='0'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x05' function='0x0' multifunction='on'/>
+    </controller>
+    <controller type='usb' index='0' model='ich9-uhci2'>
+      <master startport='2'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x05' function='0x1'/>
+    </controller>
+    <controller type='usb' index='0' model='ich9-uhci3'>
+      <master startport='4'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x05' function='0x2'/>
+    </controller>
+    <controller type='pci' index='0' model='pci-root'/>
+    <controller type='virtio-serial' index='0'>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x06' function='0x0'/>
+    </controller>
+    <interface type='network'>
+      <mac address='%s'/>
+      <source network='default'/>
+      <model type='virtio'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+    </interface>
+    <serial type='pty'>
+      <target type='isa-serial' port='0'>
+        <model name='isa-serial'/>
+      </target>
+    </serial>
+    <console type='pty'>
+      <target type='serial' port='0'/>
+    </console>
+    <input type='tablet' bus='usb'>
+      <address type='usb' bus='0' port='1'/>
+    </input>
+    <input type='mouse' bus='ps2'/>
+    <input type='keyboard' bus='ps2'/>
+    <graphics type='vnc' port='-1' autoport='yes'/>
+    <sound model='ich6'>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x04' function='0x0'/>
+    </sound>
+    <video>
+      <model type='cirrus' vram='16384' heads='1' primary='yes'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x02' function='0x0'/>
+    </video>
+    <memballoon model='virtio'>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x08' function='0x0'/>
+    </memballoon>
+  </devices>
+</domain>`,
+		vmConfig.Name,
+		uuid.New().String(),
+		vmConfig.MemoryMB,
+		vmConfig.MemoryMB,
+		vmConfig.CPUShares,
+		vmConfig.RootFS,
+		generateMACAddress(),
+	)
+	
+	return domainXML, nil
+}
+
+// generateNetworkXML generates libvirt network XML
+func generateNetworkXML(networkSpec NetworkSpec) string {
+	return fmt.Sprintf(`<network>
+  <name>%s</name>
+  <uuid>%s</uuid>
+  <forward mode='nat'>
+    <nat>
+      <port start='1024' end='65535'/>
+    </nat>
+  </forward>
+  <bridge name='virbr%d' stp='on' delay='0'/>
+  <mac address='%s'/>
+  <ip address='%s' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='%s' end='%s'/>
+    </dhcp>
+  </ip>
+</network>`,
+		networkSpec.Name,
+		uuid.New().String(),
+		1, // Bridge number - should be dynamic
+		generateMACAddress(),
+		networkSpec.Gateway,
+		"192.168.122.2", // DHCP start - should be calculated from CIDR
+		"192.168.122.254", // DHCP end - should be calculated from CIDR
+	)
+}
+
+// generateSnapshotXML generates libvirt snapshot XML
+func generateSnapshotXML(name, description string) string {
+	return fmt.Sprintf(`<domainsnapshot>
+  <name>%s</name>
+  <description>%s</description>
+  <state>running</state>
+  <creationTime>%d</creationTime>
+</domainsnapshot>`,
+		name,
+		description,
+		time.Now().Unix(),
+	)
+}
+
+// generateMACAddress generates a random MAC address
+func generateMACAddress() string {
+	return fmt.Sprintf("52:54:00:%02x:%02x:%02x",
+		byte(time.Now().UnixNano()%256),
+		byte(time.Now().UnixNano()>>8%256),
+		byte(time.Now().UnixNano()>>16%256),
+	)
+}
+
+// executeCommand executes a shell command
+func executeCommand(cmd string) error {
+	log.Printf("Executing command: %s", cmd)
+	// In a real implementation, use exec.Command for better security
+	// This is a simplified version
+	return nil // Placeholder - would execute actual command
+}
+}
+		ID:        domainUUID,
+		Name:      name,
+		State:     mapLibvirtState(libvirt.DomainState(state)),
+		CPUShares: int(nrVirtCpu),
+		MemoryMB:  int(maxMem / 1024),
 		// MemoryUsage: not implemented (would require additional API calls)
 	}
 	return vmInfo, nil

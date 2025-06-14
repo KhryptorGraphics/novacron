@@ -521,8 +521,8 @@ func (e *EnhancedPolicyRecommendationEngine) EvaluateRecommendationImpact(
 	return impact, nil
 }
 
-// RecommendationImpact represents the impact of an applied recommendation
-type RecommendationImpact struct {
+// EnhancedRecommendationImpact represents the impact of an applied recommendation
+type EnhancedRecommendationImpact struct {
 	// RecommendationID is the ID of the recommendation
 	RecommendationID string
 	

@@ -6,21 +6,36 @@ import (
 	"github.com/google/uuid"
 )
 
+// MigrationType represents the type of migration
+type MigrationType string
+
+// Node represents a node in the cluster
+type Node struct {
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	Address  string            `json:"address"`
+	Status   string            `json:"status"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
 // Migration types
 const (
-	MigrationTypeCold string = "cold"
-	MigrationTypeWarm string = "warm"
-	MigrationTypeLive string = "live"
+	MigrationTypeCold MigrationType = "cold"
+	MigrationTypeWarm MigrationType = "warm"
+	MigrationTypeLive MigrationType = "live"
 )
 
 // Migration states
 const (
 	MigrationStatePending     string = "pending"
+	MigrationStatePreparing   string = "preparing"
 	MigrationStateInitiating  string = "initiating"
+	MigrationStateRunning     string = "running"
 	MigrationStateTransferring string = "transferring"
 	MigrationStateActivating  string = "activating"
 	MigrationStateCompleted   string = "completed"
 	MigrationStateFailed      string = "failed"
+	MigrationStateError       string = "error"
 	MigrationStateRollingBack string = "rollingback"
 	MigrationStateRolledBack  string = "rolledback"
 )
@@ -132,9 +147,13 @@ type MigrationStatus struct {
 	MigrationType    string    `json:"migrationType"`
 	State            string    `json:"state"`
 	Progress         float64   `json:"progress"`
+	ProgressPct      float64   `json:"progressPct"`      // Progress percentage
 	StartTime        time.Time `json:"startTime"`
 	CompletionTime   time.Time `json:"completionTime,omitempty"`
+	EndTime          time.Time `json:"endTime,omitempty"`           // End time
 	ErrorMessage     string    `json:"errorMessage,omitempty"`
+	Message          string    `json:"message,omitempty"`           // General message
+	Error            string    `json:"error,omitempty"`             // Error details
 	BytesTransferred int64     `json:"bytesTransferred,omitempty"`
 	TotalBytes       int64     `json:"totalBytes,omitempty"`
 	TransferRate     int64     `json:"transferRate,omitempty"`
@@ -160,8 +179,8 @@ type MigrationManager interface {
 	ListMigrationRecords() ([]*MigrationRecord, error)
 }
 
-// MigrationExecutor defines the interface for migration execution
-type MigrationExecutor interface {
+// VMTypeMigrationExecutor defines the interface for migration execution (renamed to avoid conflict)
+type VMTypeMigrationExecutor interface {
 	// Execute different types of migrations
 	ExecuteColdMigration(migrationID string, vm *VM, targetNode Node) error
 	ExecuteWarmMigration(migrationID string, vm *VM, targetNode Node) error

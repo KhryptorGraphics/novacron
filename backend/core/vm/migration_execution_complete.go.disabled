@@ -1,0 +1,719 @@
+package vm
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// MigrationExecutor handles the actual execution of VM migrations
+type MigrationExecutor struct {
+	vmManager      VMManagerInterface
+	nodeManager    NodeManagerInterface
+	storageManager StorageManagerInterface
+	networkManager NetworkManagerInterface
+	
+	// Migration state tracking
+	activeMigrations map[string]*MigrationState
+	migrationMutex   sync.RWMutex
+	
+	// Configuration
+	tempDir           string
+	maxConcurrentMigrations int
+	compressionEnabled      bool
+	encryptionEnabled       bool
+}
+
+// MigrationState tracks the state of an ongoing migration
+type MigrationState struct {
+	Migration     *Migration
+	StartTime     time.Time
+	Progress      int
+	Status        string
+	Error         error
+	TransferBytes int64
+	TotalBytes    int64
+	EstimatedETA  time.Duration
+}
+
+// NewMigrationExecutor creates a new migration executor
+func NewMigrationExecutor(vmManager VMManagerInterface, nodeManager NodeManagerInterface, 
+	storageManager StorageManagerInterface, networkManager NetworkManagerInterface) *MigrationExecutor {
+	
+	return &MigrationExecutor{
+		vmManager:               vmManager,
+		nodeManager:             nodeManager,
+		storageManager:          storageManager,
+		networkManager:          networkManager,
+		activeMigrations:        make(map[string]*MigrationState),
+		tempDir:                 "/tmp/novacron/migrations",
+		maxConcurrentMigrations: 3,
+		compressionEnabled:      true,
+		encryptionEnabled:       true,
+	}
+}
+
+// ExecuteColdMigration performs a complete cold migration
+func (e *MigrationExecutor) ExecuteColdMigration(ctx context.Context, migration *Migration) error {
+	e.migrationMutex.Lock()
+	if len(e.activeMigrations) >= e.maxConcurrentMigrations {
+		e.migrationMutex.Unlock()
+		return fmt.Errorf("maximum concurrent migrations (%d) exceeded", e.maxConcurrentMigrations)
+	}
+	
+	state := &MigrationState{
+		Migration: migration,
+		StartTime: time.Now(),
+		Progress:  0,
+		Status:    "Starting cold migration",
+	}
+	e.activeMigrations[migration.ID] = state
+	e.migrationMutex.Unlock()
+	
+	defer func() {
+		e.migrationMutex.Lock()
+		delete(e.activeMigrations, migration.ID)
+		e.migrationMutex.Unlock()
+	}()
+	
+	logger := log.New(os.Stdout, fmt.Sprintf("[ColdMigration %s] ", migration.ID), log.LstdFlags)
+	
+	// Phase 1: Pre-migration validation
+	logger.Printf("Starting cold migration validation")
+	if err := e.validateMigration(ctx, migration); err != nil {
+		state.Error = err
+		return fmt.Errorf("migration validation failed: %w", err)
+	}
+	e.updateProgress(state, 10, "Validation completed")
+	
+	// Phase 2: Stop VM
+	logger.Printf("Stopping VM %s", migration.VMID)
+	if err := e.stopVM(ctx, migration.VMID); err != nil {
+		state.Error = err
+		return fmt.Errorf("failed to stop VM: %w", err)
+	}
+	e.updateProgress(state, 20, "VM stopped successfully")
+	
+	// Phase 3: Create and transfer VM snapshot
+	logger.Printf("Creating VM snapshot")
+	snapshotPath, err := e.createVMSnapshot(ctx, migration.VMID)
+	if err != nil {
+		state.Error = err
+		return fmt.Errorf("failed to create VM snapshot: %w", err)
+	}
+	defer os.RemoveAll(snapshotPath)
+	e.updateProgress(state, 40, "VM snapshot created")
+	
+	// Phase 4: Transfer data to target node
+	logger.Printf("Transferring VM data to target node")
+	if err := e.transferVMData(ctx, snapshotPath, migration.TargetNodeID, state); err != nil {
+		state.Error = err
+		return fmt.Errorf("failed to transfer VM data: %w", err)
+	}
+	e.updateProgress(state, 70, "VM data transferred")
+	
+	// Phase 5: Create VM on target node
+	logger.Printf("Creating VM on target node")
+	if err := e.createVMOnTarget(ctx, migration, snapshotPath); err != nil {
+		state.Error = err
+		return fmt.Errorf("failed to create VM on target: %w", err)
+	}
+	e.updateProgress(state, 90, "VM created on target node")
+	
+	// Phase 6: Cleanup source VM
+	logger.Printf("Cleaning up source VM")
+	if err := e.cleanupSourceVM(ctx, migration.VMID); err != nil {
+		logger.Printf("Warning: failed to cleanup source VM: %v", err)
+		// Continue - this is not critical for migration success
+	}
+	
+	e.updateProgress(state, 100, "Cold migration completed successfully")
+	logger.Printf("Cold migration completed successfully")
+	
+	return nil
+}
+
+// ExecuteWarmMigration performs a warm migration with minimal downtime
+func (e *MigrationExecutor) ExecuteWarmMigration(ctx context.Context, migration *Migration) error {
+	e.migrationMutex.Lock()
+	if len(e.activeMigrations) >= e.maxConcurrentMigrations {
+		e.migrationMutex.Unlock()
+		return fmt.Errorf("maximum concurrent migrations (%d) exceeded", e.maxConcurrentMigrations)
+	}
+	
+	state := &MigrationState{
+		Migration: migration,
+		StartTime: time.Now(),
+		Progress:  0,
+		Status:    "Starting warm migration",
+	}
+	e.activeMigrations[migration.ID] = state
+	e.migrationMutex.Unlock()
+	
+	defer func() {
+		e.migrationMutex.Lock()
+		delete(e.activeMigrations, migration.ID)
+		e.migrationMutex.Unlock()
+	}()
+	
+	logger := log.New(os.Stdout, fmt.Sprintf("[WarmMigration %s] ", migration.ID), log.LstdFlags)
+	
+	// Phase 1: Pre-migration validation
+	logger.Printf("Starting warm migration validation")
+	if err := e.validateMigration(ctx, migration); err != nil {
+		state.Error = err
+		return fmt.Errorf("migration validation failed: %w", err)
+	}
+	e.updateProgress(state, 5, "Validation completed")
+	
+	// Phase 2: Pre-copy memory pages while VM is running
+	logger.Printf("Pre-copying memory pages")
+	if err := e.precopyMemory(ctx, migration.VMID, migration.TargetNodeID, state); err != nil {
+		state.Error = err
+		return fmt.Errorf("failed to pre-copy memory: %w", err)
+	}
+	e.updateProgress(state, 40, "Memory pre-copy completed")
+	
+	// Phase 3: Pause VM for final sync
+	logger.Printf("Pausing VM for final synchronization")
+	if err := e.pauseVM(ctx, migration.VMID); err != nil {
+		state.Error = err
+		return fmt.Errorf("failed to pause VM: %w", err)
+	}
+	e.updateProgress(state, 50, "VM paused")
+	
+	// Phase 4: Final memory and state sync
+	logger.Printf("Performing final memory synchronization")
+	if err := e.finalMemorySync(ctx, migration.VMID, migration.TargetNodeID); err != nil {
+		state.Error = err
+		// Try to resume VM on failure
+		e.resumeVM(ctx, migration.VMID)
+		return fmt.Errorf("failed to perform final sync: %w", err)
+	}
+	e.updateProgress(state, 70, "Final synchronization completed")
+	
+	// Phase 5: Start VM on target node
+	logger.Printf("Starting VM on target node")
+	if err := e.startVMOnTarget(ctx, migration); err != nil {
+		state.Error = err
+		// Try to resume VM on failure
+		e.resumeVM(ctx, migration.VMID)
+		return fmt.Errorf("failed to start VM on target: %w", err)
+	}
+	e.updateProgress(state, 85, "VM started on target node")
+	
+	// Phase 6: Verify VM health on target
+	logger.Printf("Verifying VM health on target")
+	if err := e.verifyVMHealth(ctx, migration.VMID, migration.TargetNodeID); err != nil {
+		state.Error = err
+		return fmt.Errorf("VM health verification failed: %w", err)
+	}
+	e.updateProgress(state, 95, "VM health verified")
+	
+	// Phase 7: Cleanup source VM
+	logger.Printf("Cleaning up source VM")
+	if err := e.cleanupSourceVM(ctx, migration.VMID); err != nil {
+		logger.Printf("Warning: failed to cleanup source VM: %v", err)
+	}
+	
+	e.updateProgress(state, 100, "Warm migration completed successfully")
+	logger.Printf("Warm migration completed successfully")
+	
+	return nil
+}
+
+// ExecuteLiveMigration performs a live migration with zero downtime
+func (e *MigrationExecutor) ExecuteLiveMigration(ctx context.Context, migration *Migration) error {
+	e.migrationMutex.Lock()
+	if len(e.activeMigrations) >= e.maxConcurrentMigrations {
+		e.migrationMutex.Unlock()
+		return fmt.Errorf("maximum concurrent migrations (%d) exceeded", e.maxConcurrentMigrations)
+	}
+	
+	state := &MigrationState{
+		Migration: migration,
+		StartTime: time.Now(),
+		Progress:  0,
+		Status:    "Starting live migration",
+	}
+	e.activeMigrations[migration.ID] = state
+	e.migrationMutex.Unlock()
+	
+	defer func() {
+		e.migrationMutex.Lock()
+		delete(e.activeMigrations, migration.ID)
+		e.migrationMutex.Unlock()
+	}()
+	
+	logger := log.New(os.Stdout, fmt.Sprintf("[LiveMigration %s] ", migration.ID), log.LstdFlags)
+	
+	// Phase 1: Pre-migration validation
+	logger.Printf("Starting live migration validation")
+	if err := e.validateMigration(ctx, migration); err != nil {
+		state.Error = err
+		return fmt.Errorf("migration validation failed: %w", err)
+	}
+	e.updateProgress(state, 5, "Validation completed")
+	
+	// Phase 2: Establish migration channel
+	logger.Printf("Establishing migration channel to target node")
+	migrationChannel, err := e.establishMigrationChannel(ctx, migration.TargetNodeID)
+	if err != nil {
+		state.Error = err
+		return fmt.Errorf("failed to establish migration channel: %w", err)
+	}
+	defer migrationChannel.Close()
+	e.updateProgress(state, 10, "Migration channel established")
+	
+	// Phase 3: Start iterative memory copying
+	logger.Printf("Starting iterative memory copying")
+	if err := e.iterativeMemoryCopy(ctx, migration.VMID, migrationChannel, state); err != nil {
+		state.Error = err
+		return fmt.Errorf("failed during iterative memory copy: %w", err)
+	}
+	e.updateProgress(state, 60, "Iterative memory copy completed")
+	
+	// Phase 4: Final switchover (very brief pause)
+	logger.Printf("Performing final switchover")
+	if err := e.finalSwitchover(ctx, migration, migrationChannel); err != nil {
+		state.Error = err
+		return fmt.Errorf("failed during final switchover: %w", err)
+	}
+	e.updateProgress(state, 85, "Switchover completed")
+	
+	// Phase 5: Verify VM health on target
+	logger.Printf("Verifying VM health on target")
+	if err := e.verifyVMHealth(ctx, migration.VMID, migration.TargetNodeID); err != nil {
+		state.Error = err
+		return fmt.Errorf("VM health verification failed: %w", err)
+	}
+	e.updateProgress(state, 95, "VM health verified")
+	
+	// Phase 6: Cleanup source VM
+	logger.Printf("Cleaning up source VM")
+	if err := e.cleanupSourceVM(ctx, migration.VMID); err != nil {
+		logger.Printf("Warning: failed to cleanup source VM: %v", err)
+	}
+	
+	e.updateProgress(state, 100, "Live migration completed successfully")
+	logger.Printf("Live migration completed successfully")
+	
+	return nil
+}
+
+// Helper methods for migration execution
+
+func (e *MigrationExecutor) validateMigration(ctx context.Context, migration *Migration) error {
+	// Validate source VM exists and is accessible
+	vm, err := e.vmManager.GetVM(migration.VMID)
+	if err != nil {
+		return fmt.Errorf("source VM not found: %w", err)
+	}
+	
+	// Validate target node exists and is accessible
+	targetNode, err := e.nodeManager.GetNode(migration.TargetNodeID)
+	if err != nil {
+		return fmt.Errorf("target node not found: %w", err)
+	}
+	
+	// Check target node has sufficient resources
+	if err := e.validateTargetResources(ctx, vm, targetNode); err != nil {
+		return fmt.Errorf("target node resource validation failed: %w", err)
+	}
+	
+	// Check network connectivity
+	if err := e.validateNetworkConnectivity(ctx, migration.TargetNodeID); err != nil {
+		return fmt.Errorf("network connectivity validation failed: %w", err)
+	}
+	
+	return nil
+}
+
+func (e *MigrationExecutor) stopVM(ctx context.Context, vmID string) error {
+	vm, err := e.vmManager.GetVM(vmID)
+	if err != nil {
+		return err
+	}
+	
+	if vm.State() == StateRunning {
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		
+		resp, err := e.vmManager.StopVM(ctx, vmID)
+		if err != nil {
+			return err
+		}
+		if !resp.Success {
+			return fmt.Errorf("failed to stop VM: %s", resp.Message)
+		}
+	}
+	
+	return nil
+}
+
+func (e *MigrationExecutor) pauseVM(ctx context.Context, vmID string) error {
+	vm, err := e.vmManager.GetVM(vmID)
+	if err != nil {
+		return err
+	}
+	
+	if vm.State() == StateRunning {
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		
+		resp, err := e.vmManager.PauseVM(ctx, vmID)
+		if err != nil {
+			return err
+		}
+		if !resp.Success {
+			return fmt.Errorf("failed to pause VM: %s", resp.Message)
+		}
+	}
+	
+	return nil
+}
+
+func (e *MigrationExecutor) resumeVM(ctx context.Context, vmID string) error {
+	vm, err := e.vmManager.GetVM(vmID)
+	if err != nil {
+		return err
+	}
+	
+	if vm.State() == StatePaused {
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		
+		resp, err := e.vmManager.ResumeVM(ctx, vmID)
+		if err != nil {
+			return err
+		}
+		if !resp.Success {
+			return fmt.Errorf("failed to resume VM: %s", resp.Message)
+		}
+	}
+	
+	return nil
+}
+
+func (e *MigrationExecutor) createVMSnapshot(ctx context.Context, vmID string) (string, error) {
+	// Create temporary directory for migration
+	migrationDir := filepath.Join(e.tempDir, fmt.Sprintf("migration-%s", uuid.New().String()))
+	if err := os.MkdirAll(migrationDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create migration directory: %w", err)
+	}
+	
+	vm, err := e.vmManager.GetVM(vmID)
+	if err != nil {
+		return "", err
+	}
+	
+	// Get VM configuration
+	config := vm.Config()
+	configPath := filepath.Join(migrationDir, "vm-config.json")
+	configData, err := json.Marshal(config)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal VM config: %w", err)
+	}
+	
+	if err := os.WriteFile(configPath, configData, 0644); err != nil {
+		return "", fmt.Errorf("failed to write VM config: %w", err)
+	}
+	
+	// Create disk snapshots
+	for _, disk := range config.Disks {
+		diskPath := filepath.Join(migrationDir, fmt.Sprintf("disk-%s.qcow2", disk.ID))
+		
+		// Use qemu-img to create a compressed snapshot
+		var cmd *exec.Cmd
+		if e.compressionEnabled {
+			cmd = exec.CommandContext(ctx, "qemu-img", "convert", "-f", "qcow2", "-O", "qcow2", "-c", disk.Path, diskPath)
+		} else {
+			cmd = exec.CommandContext(ctx, "qemu-img", "convert", "-f", "qcow2", "-O", "qcow2", disk.Path, diskPath)
+		}
+		
+		if err := cmd.Run(); err != nil {
+			return "", fmt.Errorf("failed to create disk snapshot for %s: %w", disk.ID, err)
+		}
+	}
+	
+	return migrationDir, nil
+}
+
+func (e *MigrationExecutor) transferVMData(ctx context.Context, snapshotPath, targetNodeID string, state *MigrationState) error {
+	targetNode, err := e.nodeManager.GetNode(targetNodeID)
+	if err != nil {
+		return err
+	}
+	
+	// Calculate total transfer size
+	totalSize, err := e.calculateDirectorySize(snapshotPath)
+	if err != nil {
+		return fmt.Errorf("failed to calculate transfer size: %w", err)
+	}
+	state.TotalBytes = totalSize
+	
+	// Create tar archive of migration data
+	archivePath := snapshotPath + ".tar"
+	if e.compressionEnabled {
+		archivePath += ".gz"
+	}
+	
+	if err := e.createArchive(snapshotPath, archivePath); err != nil {
+		return fmt.Errorf("failed to create archive: %w", err)
+	}
+	defer os.Remove(archivePath)
+	
+	// Transfer archive to target node
+	transferURL := fmt.Sprintf("http://%s:9000/api/v1/migration/receive", targetNode.Address)
+	if err := e.uploadFile(ctx, archivePath, transferURL, state); err != nil {
+		return fmt.Errorf("failed to transfer archive: %w", err)
+	}
+	
+	return nil
+}
+
+func (e *MigrationExecutor) precopyMemory(ctx context.Context, vmID, targetNodeID string, state *MigrationState) error {
+	// In a real implementation, this would:
+	// 1. Connect to the VM's memory management interface
+	// 2. Start copying memory pages to the target while VM is running
+	// 3. Track dirty pages and re-copy them
+	// 4. Continue until dirty page rate is low enough
+	
+	// For simulation, we'll just wait and update progress
+	iterations := 10
+	for i := 0; i < iterations; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			time.Sleep(500 * time.Millisecond)
+			progress := 20 + int(float64(i)/float64(iterations)*20) // 20-40% range
+			e.updateProgress(state, progress, fmt.Sprintf("Pre-copying memory (iteration %d/%d)", i+1, iterations))
+		}
+	}
+	
+	return nil
+}
+
+func (e *MigrationExecutor) finalMemorySync(ctx context.Context, vmID, targetNodeID string) error {
+	// In a real implementation, this would:
+	// 1. Copy remaining dirty memory pages
+	// 2. Copy CPU state and registers
+	// 3. Copy device state
+	// 4. Ensure complete state transfer
+	
+	// For simulation
+	time.Sleep(1 * time.Second)
+	return nil
+}
+
+func (e *MigrationExecutor) iterativeMemoryCopy(ctx context.Context, vmID string, channel *MigrationChannel, state *MigrationState) error {
+	// In a real implementation, this would:
+	// 1. Start continuous memory copying while VM runs
+	// 2. Track and re-copy dirty pages
+	// 3. Gradually reduce dirty page rate
+	// 4. Stop when ready for switchover
+	
+	iterations := 20
+	for i := 0; i < iterations; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			time.Sleep(250 * time.Millisecond)
+			progress := 10 + int(float64(i)/float64(iterations)*50) // 10-60% range
+			e.updateProgress(state, progress, fmt.Sprintf("Iterative memory copy (round %d/%d)", i+1, iterations))
+		}
+	}
+	
+	return nil
+}
+
+func (e *MigrationExecutor) finalSwitchover(ctx context.Context, migration *Migration, channel *MigrationChannel) error {
+	// Brief pause for final state transfer
+	if err := e.pauseVM(ctx, migration.VMID); err != nil {
+		return fmt.Errorf("failed to pause VM for switchover: %w", err)
+	}
+	
+	// Transfer final state
+	time.Sleep(100 * time.Millisecond)
+	
+	// Start VM on target
+	if err := e.startVMOnTarget(ctx, migration); err != nil {
+		return fmt.Errorf("failed to start VM on target: %w", err)
+	}
+	
+	return nil
+}
+
+func (e *MigrationExecutor) updateProgress(state *MigrationState, progress int, status string) {
+	e.migrationMutex.Lock()
+	defer e.migrationMutex.Unlock()
+	
+	state.Progress = progress
+	state.Status = status
+	
+	// Calculate ETA
+	if progress > 0 {
+		elapsed := time.Since(state.StartTime)
+		totalEstimated := time.Duration(float64(elapsed) * 100.0 / float64(progress))
+		state.EstimatedETA = totalEstimated - elapsed
+	}
+}
+
+// Additional helper methods...
+
+func (e *MigrationExecutor) calculateDirectorySize(dir string) (int64, error) {
+	var size int64
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			size += info.Size()
+		}
+		return nil
+	})
+	return size, err
+}
+
+func (e *MigrationExecutor) createArchive(sourceDir, archivePath string) error {
+	var cmd *exec.Cmd
+	if strings.HasSuffix(archivePath, ".gz") {
+		cmd = exec.Command("tar", "-czf", archivePath, "-C", filepath.Dir(sourceDir), filepath.Base(sourceDir))
+	} else {
+		cmd = exec.Command("tar", "-cf", archivePath, "-C", filepath.Dir(sourceDir), filepath.Base(sourceDir))
+	}
+	return cmd.Run()
+}
+
+func (e *MigrationExecutor) uploadFile(ctx context.Context, filePath, url string, state *MigrationState) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	
+	// Create progress reader
+	progressReader := &ProgressReader{
+		Reader: file,
+		OnProgress: func(transferred int64) {
+			e.migrationMutex.Lock()
+			state.TransferBytes = transferred
+			e.migrationMutex.Unlock()
+		},
+	}
+	
+	req, err := http.NewRequestWithContext(ctx, "POST", url, progressReader)
+	if err != nil {
+		return err
+	}
+	
+	client := &http.Client{Timeout: 30 * time.Minute}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("upload failed with status: %d", resp.StatusCode)
+	}
+	
+	return nil
+}
+
+// ProgressReader wraps an io.Reader to track progress
+type ProgressReader struct {
+	Reader     io.Reader
+	OnProgress func(int64)
+	total      int64
+}
+
+func (pr *ProgressReader) Read(p []byte) (int, error) {
+	n, err := pr.Reader.Read(p)
+	pr.total += int64(n)
+	if pr.OnProgress != nil {
+		pr.OnProgress(pr.total)
+	}
+	return n, err
+}
+
+// MigrationChannel represents a communication channel for live migration
+type MigrationChannel struct {
+	conn io.ReadWriteCloser
+}
+
+func (mc *MigrationChannel) Close() error {
+	return mc.conn.Close()
+}
+
+func (e *MigrationExecutor) establishMigrationChannel(ctx context.Context, targetNodeID string) (*MigrationChannel, error) {
+	// In a real implementation, this would establish a secure connection
+	// For simulation, we'll return a mock channel
+	return &MigrationChannel{}, nil
+}
+
+// Additional helper methods that need implementation based on your interfaces...
+func (e *MigrationExecutor) validateTargetResources(ctx context.Context, vm VM, targetNode Node) error {
+	// Implement resource validation logic
+	return nil
+}
+
+func (e *MigrationExecutor) validateNetworkConnectivity(ctx context.Context, targetNodeID string) error {
+	// Implement network connectivity check
+	return nil
+}
+
+func (e *MigrationExecutor) createVMOnTarget(ctx context.Context, migration *Migration, snapshotPath string) error {
+	// Implement VM creation on target node
+	return nil
+}
+
+func (e *MigrationExecutor) startVMOnTarget(ctx context.Context, migration *Migration) error {
+	// Implement VM startup on target node
+	return nil
+}
+
+func (e *MigrationExecutor) verifyVMHealth(ctx context.Context, vmID, targetNodeID string) error {
+	// Implement VM health verification
+	return nil
+}
+
+func (e *MigrationExecutor) cleanupSourceVM(ctx context.Context, vmID string) error {
+	// Implement source VM cleanup
+	return nil
+}
+
+// GetMigrationState returns the current state of a migration
+func (e *MigrationExecutor) GetMigrationState(migrationID string) (*MigrationState, bool) {
+	e.migrationMutex.RLock()
+	defer e.migrationMutex.RUnlock()
+	
+	state, exists := e.activeMigrations[migrationID]
+	return state, exists
+}
+
+// GetActiveMigrations returns all currently active migrations
+func (e *MigrationExecutor) GetActiveMigrations() map[string]*MigrationState {
+	e.migrationMutex.RLock()
+	defer e.migrationMutex.RUnlock()
+	
+	result := make(map[string]*MigrationState)
+	for id, state := range e.activeMigrations {
+		result[id] = state
+	}
+	return result
+}

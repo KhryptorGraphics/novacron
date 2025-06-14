@@ -5,9 +5,10 @@ import (
 	"log"
 	"sync"
 
-	"c10/novacron/backend/core/plugins/storage/ceph"
-	"c10/novacron/backend/core/plugins/storage/netfs"
-	"c10/novacron/backend/core/storage"
+	"github.com/khryptorgraphics/novacron/backend/core/plugins/storage/ceph"
+	"github.com/khryptorgraphics/novacron/backend/core/plugins/storage/netfs"
+	"github.com/khryptorgraphics/novacron/backend/core/plugins/storage/objectstorage"
+	"github.com/khryptorgraphics/novacron/backend/core/storage"
 )
 
 // StoragePluginRegistry maintains the registry of available storage plugins

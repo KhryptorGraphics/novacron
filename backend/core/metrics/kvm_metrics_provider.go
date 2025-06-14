@@ -156,6 +156,7 @@ func (p *KVMMetricsProvider) collectCPUMetrics(ctx context.Context, metrics *VMM
 	}
 	
 	// Calculate CPU usage if we have previous stats
+	now := time.Now()
 	if p.lastCPUStats != nil {
 		// Calculate time difference
 		timeDiff := now.Sub(p.lastCPUStats.Timestamp).Seconds()
@@ -273,6 +274,7 @@ func (p *KVMMetricsProvider) collectMemoryMetrics(ctx context.Context, metrics *
 // collectDiskMetrics collects disk metrics for a KVM VM
 func (p *KVMMetricsProvider) collectDiskMetrics(ctx context.Context, metrics *VMMetrics) error {
 	// Get disk usage from QMP if available
+	now := time.Now()
 	if p.socketPath != "" {
 		// Use QMP to get disk stats
 		// This is a simplified example - in a real implementation, you'd use a QMP client
@@ -329,6 +331,7 @@ func (p *KVMMetricsProvider) collectDiskMetrics(ctx context.Context, metrics *VM
 // collectNetworkMetrics collects network metrics for a KVM VM
 func (p *KVMMetricsProvider) collectNetworkMetrics(ctx context.Context, metrics *VMMetrics) error {
 	// Get network usage from QMP if available
+	now := time.Now()
 	if p.socketPath != "" {
 		// Use QMP to get network stats
 		// This is a simplified example - in a real implementation, you'd use a QMP client
@@ -420,6 +423,7 @@ func (p *KVMMetricsProvider) getQMPMemoryInfo(ctx context.Context) int64 {
 func (p *KVMMetricsProvider) getQMPDiskStats(ctx context.Context) map[string]*DiskStats {
 	// This is a simplified example - in a real implementation, you'd use a QMP client
 	// For now, we'll use socat to send a QMP command
+	now := time.Now()
 	
 	// First, send capabilities negotiation
 	capCmd := fmt.Sprintf("echo '{\"execute\": \"qmp_capabilities\"}' | socat - UNIX-CONNECT:%s", p.socketPath)
@@ -477,6 +481,7 @@ func (p *KVMMetricsProvider) getQMPDiskStats(ctx context.Context) map[string]*Di
 func (p *KVMMetricsProvider) getQMPNetStats(ctx context.Context) map[string]*NetStats {
 	// This is a simplified example - in a real implementation, you'd use a QMP client
 	// For now, we'll use socat to send a QMP command
+	now := time.Now()
 	
 	// First, send capabilities negotiation
 	capCmd := fmt.Sprintf("echo '{\"execute\": \"qmp_capabilities\"}' | socat - UNIX-CONNECT:%s", p.socketPath)

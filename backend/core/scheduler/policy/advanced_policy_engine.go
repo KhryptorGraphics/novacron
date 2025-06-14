@@ -44,7 +44,9 @@ func NewAdvancedPolicyEngine() *AdvancedPolicyEngine {
 	// Initialize components
 	engine.Simulator = NewPolicySimulator(baseEngine)
 	engine.RecommendationEngine = NewPolicyRecommendationEngine(baseEngine)
-	engine.VersionController = NewPolicyVersionController(baseEngine)
+	// Create a simple in-memory version store for now
+	versionStore := NewInMemoryPolicyVersionStore()
+	engine.VersionController = NewPolicyVersionController(baseEngine, versionStore)
 	engine.ConflictDetector = NewPolicyConflictDetector(baseEngine)
 	engine.ImpactAnalyzer = NewPolicyImpactAnalyzer(baseEngine)
 	

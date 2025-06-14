@@ -10,11 +10,20 @@ type WorkloadPattern struct {
 	// PatternType identifies the kind of pattern (diurnal, weekly, etc.)
 	PatternType string
 
+	// Type is an alias for PatternType for compatibility
+	Type string
+
 	// CycleDuration is the duration of one pattern cycle
 	CycleDuration time.Duration
 
+	// Duration is an alias for CycleDuration for compatibility
+	Duration time.Duration
+
 	// ConfidenceScore indicates how confident we are in this pattern (0-1)
 	ConfidenceScore float64
+
+	// Confidence is an alias for ConfidenceScore for compatibility
+	Confidence float64
 
 	// PeakTimestamps contains timestamps when peaks are expected
 	PeakTimestamps []time.Time
@@ -51,31 +60,15 @@ const (
 
 	// PatternTypeBursty represents a pattern with sudden bursts
 	PatternTypeBursty = "bursty"
+
+	// Additional pattern types for compatibility
+	SteadyPattern   = "steady"
+	BurstPattern    = "burst"
+	PeriodicPattern = "periodic"
+	GrowthPattern   = "growth"
+	DeclinePattern  = "decline"
 )
 
-// PatternDetector defines the interface for pattern detection algorithms
-type PatternDetector interface {
-	// DetectPatterns analyzes time series data to find patterns
-	DetectPatterns(timePoints []time.Time, values []float64) ([]WorkloadPattern, error)
-
-	// Name returns the name of the detector algorithm
-	Name() string
-
-	// Configure sets configuration options for the detector
-	Configure(options map[string]interface{}) error
-}
-
-// TimeSeriesData represents a time series of resource usage data
-type TimeSeriesData struct {
-	// ResourceType is the type of resource (CPU, memory, etc.)
-	ResourceType string
-
-	// Timestamps contains the sample timestamps
-	Timestamps []time.Time
-
-	// Values contains the resource usage values
-	Values []float64
-}
 
 // PatternBasedPredictor uses detected patterns to predict future resource usage
 type PatternBasedPredictor struct {
@@ -519,14 +512,3 @@ type ResourceProfile struct {
 	PredictionModel map[string]interface{}
 }
 
-// NewEnhancedProfile creates a new enhanced workload profile
-func NewEnhancedProfile(vmID string) *EnhancedWorkloadProfile {
-	return &EnhancedWorkloadProfile{
-		VMID:               vmID,
-		ResourceProfiles:   make(map[string]*ResourceProfile),
-		RecognizedPatterns: make(map[string][]WorkloadPattern),
-		WorkloadStability:  0.5, // Default medium stability
-		LastUpdated:        time.Now(),
-		SampleCount:        0,
-	}
-}

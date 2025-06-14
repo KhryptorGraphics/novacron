@@ -39,6 +39,40 @@ const (
 
 	// VolumeTypeEphemeral represents an ephemeral volume that is lost when the VM is stopped
 	VolumeTypeEphemeral VolumeType = "ephemeral"
+
+	// VolumeTypeLocal is a local volume (on the host filesystem)
+	VolumeTypeLocal VolumeType = "local"
+	
+	// VolumeTypeNFS is an NFS mounted volume
+	VolumeTypeNFS VolumeType = "nfs"
+	
+	// VolumeTypeCeph is a Ceph volume
+	VolumeTypeCeph VolumeType = "ceph"
+)
+
+// VolumeFormat defines the filesystem format
+type VolumeFormat string
+
+const (
+	// VolumeFormatExt4 is the ext4 filesystem
+	VolumeFormatExt4 VolumeFormat = "ext4"
+	
+	// VolumeFormatXFS is the XFS filesystem
+	VolumeFormatXFS VolumeFormat = "xfs"
+	
+	// VolumeFormatRAW is a raw block device (no filesystem)
+	VolumeFormatRAW VolumeFormat = "raw"
+)
+
+// VolumeStatus represents the status of a volume
+type VolumeStatus string
+
+const (
+	VolumeStatusCreating  VolumeStatus = "creating"
+	VolumeStatusAvailable VolumeStatus = "available"
+	VolumeStatusInUse     VolumeStatus = "in_use"
+	VolumeStatusDeleting  VolumeStatus = "deleting"
+	VolumeStatusError     VolumeStatus = "error"
 )
 
 // VolumeState represents the state of a volume
@@ -113,6 +147,28 @@ type VolumeInfo struct {
 	IOPSWrite int `json:"iops_write"`
 	MBpsRead  int `json:"mbps_read"`
 	MBpsWrite int `json:"mbps_write"`
+
+	// Additional fields for storage manager compatibility
+	Format   VolumeFormat `json:"format,omitempty"`   // Filesystem format
+	SizeMB   int          `json:"size_mb,omitempty"`  // Size in MB for backward compatibility
+	Path     string       `json:"path,omitempty"`     // Path to the volume file
+	Status   VolumeStatus `json:"status,omitempty"`   // Volume status for storage manager
+	Labels   map[string]string `json:"labels,omitempty"` // Volume labels
+	Snapshots []VolumeSnapshot `json:"snapshots,omitempty"` // Volume snapshots
+	LastUpdated time.Time `json:"last_updated,omitempty"` // Last update time
+	Available bool `json:"available,omitempty"` // Whether volume is available
+	UsedMB int `json:"used_mb,omitempty"` // Used space in MB
+}
+
+// VolumeSnapshot represents a volume snapshot
+type VolumeSnapshot struct {
+	ID         string            `json:"id"`
+	VolumeID   string            `json:"volume_id"`
+	Name       string            `json:"name"`
+	Description string           `json:"description,omitempty"`
+	CreatedAt  time.Time         `json:"created_at"`
+	Size       int64             `json:"size"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
 }
 
 // VolumeCreateOptions contains options for creating a volume
@@ -125,6 +181,9 @@ type VolumeCreateOptions struct {
 
 	// Size of the volume in bytes
 	Size int64 `json:"size"`
+
+	// Format of the volume (for filesystem volumes)
+	Format VolumeFormat `json:"format,omitempty"`
 
 	// Source for the volume (optional)
 	Source string `json:"source,omitempty"`
@@ -196,6 +255,12 @@ const (
 
 	// VolumeEventStateChanged indicates the volume state has changed
 	VolumeEventStateChanged VolumeEventType = "state_changed"
+
+	// VolumeEventSnapshoted is emitted when a volume snapshot is created
+	VolumeEventSnapshoted VolumeEventType = "snapshoted"
+	
+	// VolumeEventError is emitted on volume errors
+	VolumeEventError VolumeEventType = "error"
 )
 
 // VolumeEvent represents an event related to a volume
@@ -351,12 +416,116 @@ func (s *BaseStorageService) Stop() error {
 
 // CreateVolume creates a new volume
 func (s *BaseStorageService) CreateVolume(ctx context.Context, opts VolumeCreateOptions) (*VolumeInfo, error) {
-	return nil, ErrNotImplemented
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Validate options
+	if opts.Name == "" {
+		return nil, ErrInvalidVolumeName
+	}
+
+	// Generate unique volume ID
+	volumeID := generateVolumeID()
+
+	// Create volume info
+	volume := VolumeInfo{
+		ID:                volumeID,
+		Name:              opts.Name,
+		Type:              opts.Type,
+		State:             VolumeStateCreating,
+		Size:              opts.Size,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+		Metadata:          opts.Metadata,
+		Bootable:          opts.Bootable,
+		Encrypted:         opts.Encrypted,
+		ReplicationFactor: opts.ReplicationFactor,
+		NodeIDs:           opts.NodeIDs,
+	}
+
+	// If no type specified, use default
+	if volume.Type == "" {
+		volume.Type = s.config.DefaultVolumeType
+	}
+
+	// If no replication factor specified, use default
+	if volume.ReplicationFactor <= 0 {
+		volume.ReplicationFactor = s.config.DefaultReplicationFactor
+	}
+
+	// Store volume in memory
+	s.volumes[volumeID] = volume
+
+	// Create the actual volume asynchronously
+	go func() {
+		// Simulate volume creation
+		time.Sleep(2 * time.Second)
+
+		s.mu.Lock()
+		if vol, exists := s.volumes[volumeID]; exists {
+			vol.State = VolumeStateAvailable
+			vol.UpdatedAt = time.Now()
+			s.volumes[volumeID] = vol
+		}
+		s.mu.Unlock()
+
+		// Notify listeners
+		s.NotifyEvent(VolumeEvent{
+			Type:       VolumeEventCreated,
+			VolumeID:   volumeID,
+			VolumeName: opts.Name,
+			Data:       volume,
+			Timestamp:  time.Now(),
+		})
+	}()
+
+	return &volume, nil
 }
 
 // DeleteVolume deletes a volume
 func (s *BaseStorageService) DeleteVolume(ctx context.Context, volumeID string) error {
-	return ErrNotImplemented
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	volume, exists := s.volumes[volumeID]
+	if !exists {
+		return ErrVolumeNotFound
+	}
+
+	// Check if volume is in use
+	if volume.AttachedToVM != "" {
+		return ErrVolumeInUse
+	}
+
+	// Check if volume is already being deleted
+	if volume.State == VolumeStateDeleting {
+		return ErrInvalidOperation
+	}
+
+	// Update state to deleting
+	volume.State = VolumeStateDeleting
+	volume.UpdatedAt = time.Now()
+	s.volumes[volumeID] = volume
+
+	// Delete the volume asynchronously
+	go func() {
+		// Simulate volume deletion
+		time.Sleep(1 * time.Second)
+
+		s.mu.Lock()
+		delete(s.volumes, volumeID)
+		s.mu.Unlock()
+
+		// Notify listeners
+		s.NotifyEvent(VolumeEvent{
+			Type:       VolumeEventDeleted,
+			VolumeID:   volumeID,
+			VolumeName: volume.Name,
+			Timestamp:  time.Now(),
+		})
+	}()
+
+	return nil
 }
 
 // GetVolume returns information about a volume
@@ -389,27 +558,198 @@ func (s *BaseStorageService) ListVolumes(ctx context.Context) ([]VolumeInfo, err
 
 // AttachVolume attaches a volume to a VM
 func (s *BaseStorageService) AttachVolume(ctx context.Context, volumeID string, opts VolumeAttachOptions) error {
-	return ErrNotImplemented
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	volume, exists := s.volumes[volumeID]
+	if !exists {
+		return ErrVolumeNotFound
+	}
+
+	// Check if volume is available
+	if volume.State != VolumeStateAvailable {
+		return ErrInvalidOperation
+	}
+
+	// Check if already attached
+	if volume.AttachedToVM != "" {
+		return ErrVolumeInUse
+	}
+
+	// Update state to attaching
+	volume.State = VolumeStateAttaching
+	volume.UpdatedAt = time.Now()
+	s.volumes[volumeID] = volume
+
+	// Attach the volume asynchronously
+	go func() {
+		// Simulate attachment
+		time.Sleep(500 * time.Millisecond)
+
+		s.mu.Lock()
+		if vol, exists := s.volumes[volumeID]; exists {
+			vol.State = VolumeStateAttached
+			vol.AttachedToVM = opts.VMID
+			vol.UpdatedAt = time.Now()
+			s.volumes[volumeID] = vol
+		}
+		s.mu.Unlock()
+
+		// Notify listeners
+		s.NotifyEvent(VolumeEvent{
+			Type:       VolumeEventAttached,
+			VolumeID:   volumeID,
+			VolumeName: volume.Name,
+			Data:       opts,
+			Timestamp:  time.Now(),
+		})
+	}()
+
+	return nil
 }
 
 // DetachVolume detaches a volume from a VM
 func (s *BaseStorageService) DetachVolume(ctx context.Context, volumeID string, opts VolumeDetachOptions) error {
-	return ErrNotImplemented
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	volume, exists := s.volumes[volumeID]
+	if !exists {
+		return ErrVolumeNotFound
+	}
+
+	// Check if volume is attached
+	if volume.State != VolumeStateAttached {
+		return ErrInvalidOperation
+	}
+
+	// Update state to detaching
+	volume.State = VolumeStateDetaching
+	volume.UpdatedAt = time.Now()
+	s.volumes[volumeID] = volume
+
+	// Detach the volume asynchronously
+	go func() {
+		// Simulate detachment
+		time.Sleep(500 * time.Millisecond)
+
+		s.mu.Lock()
+		if vol, exists := s.volumes[volumeID]; exists {
+			vol.State = VolumeStateAvailable
+			vol.AttachedToVM = ""
+			vol.UpdatedAt = time.Now()
+			s.volumes[volumeID] = vol
+		}
+		s.mu.Unlock()
+
+		// Notify listeners
+		s.NotifyEvent(VolumeEvent{
+			Type:       VolumeEventDetached,
+			VolumeID:   volumeID,
+			VolumeName: volume.Name,
+			Data:       opts,
+			Timestamp:  time.Now(),
+		})
+	}()
+
+	return nil
 }
 
 // ResizeVolume resizes a volume
 func (s *BaseStorageService) ResizeVolume(ctx context.Context, volumeID string, opts VolumeResizeOptions) error {
-	return ErrNotImplemented
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	volume, exists := s.volumes[volumeID]
+	if !exists {
+		return ErrVolumeNotFound
+	}
+
+	// Check if volume is available or attached (can resize attached volumes in some cases)
+	if volume.State != VolumeStateAvailable && volume.State != VolumeStateAttached {
+		return ErrInvalidOperation
+	}
+
+	// Check if new size is larger
+	if opts.NewSize <= volume.Size {
+		return fmt.Errorf("new size must be larger than current size")
+	}
+
+	// Update volume size
+	oldSize := volume.Size
+	volume.Size = opts.NewSize
+	volume.UpdatedAt = time.Now()
+	s.volumes[volumeID] = volume
+
+	// Notify listeners
+	s.NotifyEvent(VolumeEvent{
+		Type:       VolumeEventResized,
+		VolumeID:   volumeID,
+		VolumeName: volume.Name,
+		Data: map[string]interface{}{
+			"old_size": oldSize,
+			"new_size": opts.NewSize,
+		},
+		Timestamp: time.Now(),
+	})
+
+	return nil
 }
 
 // OpenVolume opens a volume for reading/writing
 func (s *BaseStorageService) OpenVolume(ctx context.Context, volumeID string) (io.ReadWriteCloser, error) {
-	return nil, ErrNotImplemented
+	s.mu.RLock()
+	volume, exists := s.volumes[volumeID]
+	s.mu.RUnlock()
+
+	if !exists {
+		return nil, ErrVolumeNotFound
+	}
+
+	// Check if volume is available or attached
+	if volume.State != VolumeStateAvailable && volume.State != VolumeStateAttached {
+		return nil, ErrInvalidOperation
+	}
+
+	// In a real implementation, this would open the actual storage backend
+	// For now, return a simple in-memory buffer
+	return &volumeHandle{
+		volumeID: volumeID,
+		service:  s,
+		buffer:   make([]byte, volume.Size),
+	}, nil
 }
 
 // GetVolumeStats returns statistics for a volume
 func (s *BaseStorageService) GetVolumeStats(ctx context.Context, volumeID string) (map[string]interface{}, error) {
-	return nil, ErrNotImplemented
+	s.mu.RLock()
+	volume, exists := s.volumes[volumeID]
+	s.mu.RUnlock()
+
+	if !exists {
+		return nil, ErrVolumeNotFound
+	}
+
+	// Return volume statistics
+	stats := map[string]interface{}{
+		"id":                 volume.ID,
+		"name":               volume.Name,
+		"type":               volume.Type,
+		"state":              volume.State,
+		"size_bytes":         volume.Size,
+		"attached_to":        volume.AttachedToVM,
+		"created_at":         volume.CreatedAt,
+		"updated_at":         volume.UpdatedAt,
+		"encrypted":          volume.Encrypted,
+		"replication_factor": volume.ReplicationFactor,
+		"node_count":         len(volume.NodeIDs),
+		"iops_read":          volume.IOPSRead,
+		"iops_write":         volume.IOPSWrite,
+		"mbps_read":          volume.MBpsRead,
+		"mbps_write":         volume.MBpsWrite,
+	}
+
+	return stats, nil
 }
 
 // AddVolumeEventListener adds a listener for volume events
@@ -450,4 +790,41 @@ func (s *BaseStorageService) IsRunning() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.running
+}
+
+// volumeHandle implements io.ReadWriteCloser for volume access
+type volumeHandle struct {
+	volumeID string
+	service  *BaseStorageService
+	buffer   []byte
+	offset   int64
+}
+
+func (v *volumeHandle) Read(p []byte) (n int, err error) {
+	if v.offset >= int64(len(v.buffer)) {
+		return 0, io.EOF
+	}
+	n = copy(p, v.buffer[v.offset:])
+	v.offset += int64(n)
+	return n, nil
+}
+
+func (v *volumeHandle) Write(p []byte) (n int, err error) {
+	if v.offset >= int64(len(v.buffer)) {
+		return 0, io.ErrShortWrite
+	}
+	n = copy(v.buffer[v.offset:], p)
+	v.offset += int64(n)
+	return n, nil
+}
+
+func (v *volumeHandle) Close() error {
+	// In a real implementation, this would flush data to disk
+	return nil
+}
+
+// generateVolumeID generates a unique volume ID
+func generateVolumeID() string {
+	// In a real implementation, this would use a proper UUID library
+	return fmt.Sprintf("vol-%d-%d", time.Now().Unix(), time.Now().Nanosecond())
 }

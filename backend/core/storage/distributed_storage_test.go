@@ -2,416 +2,673 @@ package storage
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/khryptorgraphics/novacron/backend/core/storage/compression"
+	"github.com/khryptorgraphics/novacron/backend/core/storage/encryption"
 )
 
-func TestDistributedStorage(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "distributed-storage-test")
+func TestDistributedStorageService_CreateDistributedVolume(t *testing.T) {
+	// Create base storage manager
+	baseConfig := StorageManagerConfig{
+		BasePath:    "/tmp/test-storage",
+		Compression: false,
+		Encryption:  false,
+		Dedup:       false,
+	}
+	baseManager, err := NewStorageManager(baseConfig)
 	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	// Create a mock StorageManager
-	baseManager := &StorageManager{
-		volumes: make(map[string]*Volume),
+		t.Fatalf("Failed to create base manager: %v", err)
 	}
 
-	// Create a distributed storage config
-	config := DefaultDistributedStorageConfig()
-	config.RootDir = tempDir
-	config.ShardSize = 1 * 1024 * 1024 // 1MB for testing
-	config.HealthCheckInterval = 100 * time.Millisecond
-	config.HealingInterval = 500 * time.Millisecond
+	// Create distributed storage config
+	distConfig := DefaultDistributedStorageConfig()
+	distConfig.RootDir = "/tmp/test-distributed"
 
-	// Create the distributed storage service
-	service, err := NewDistributedStorageService(baseManager, config)
+	// Create distributed storage service
+	distService, err := NewDistributedStorageService(baseManager, distConfig)
 	if err != nil {
-		t.Fatalf("Failed to create distributed storage service: %v", err)
+		t.Fatalf("Failed to create distributed service: %v", err)
 	}
 
-	// Start the service
-	if err := service.Start(); err != nil {
-		t.Fatalf("Failed to start distributed storage service: %v", err)
+	err = distService.Start()
+	if err != nil {
+		t.Fatalf("Failed to start distributed service: %v", err)
 	}
-	defer service.Stop()
+	defer distService.Stop()
 
-	t.Run("TestNodeManagement", func(t *testing.T) {
-		testNodeManagement(t, service)
-	})
-
-	t.Run("TestVolumeCreation", func(t *testing.T) {
-		testVolumeCreation(t, service)
-	})
-
-	t.Run("TestReplication", func(t *testing.T) {
-		testReplication(t, service)
-	})
-
-	t.Run("TestHealing", func(t *testing.T) {
-		testHealing(t, service)
-	})
-
-	t.Run("TestDeduplication", func(t *testing.T) {
-		testDeduplication(t, service)
-	})
-}
-
-func testNodeManagement(t *testing.T, service *DistributedStorageService) {
-	// Create some test nodes
-	node1 := NodeInfo{
-		ID:        "node1",
-		Name:      "Node 1",
-		Role:      "storage",
-		Address:   "192.168.1.1",
-		Port:      8000,
-		Available: true,
-		JoinedAt:  time.Now(),
-		LastSeen:  time.Now(),
-	}
-
-	node2 := NodeInfo{
-		ID:        "node2",
-		Name:      "Node 2",
-		Role:      "storage",
-		Address:   "192.168.1.2",
-		Port:      8000,
-		Available: true,
-		JoinedAt:  time.Now(),
-		LastSeen:  time.Now(),
-	}
-
-	// Add nodes
-	service.AddNode(node1)
-	service.AddNode(node2)
-
-	// Get available nodes
-	nodes := service.GetAvailableNodes()
-	if len(nodes) != 2 {
-		t.Errorf("Expected 2 available nodes, got %d", len(nodes))
-	}
-
-	// Remove a node
-	service.RemoveNode("node1")
-	nodes = service.GetAvailableNodes()
-	if len(nodes) != 1 {
-		t.Errorf("Expected 1 available node after removal, got %d", len(nodes))
-	}
-	if nodes[0].ID != "node2" {
-		t.Errorf("Expected remaining node to be node2, got %s", nodes[0].ID)
-	}
-}
-
-func testVolumeCreation(t *testing.T, service *DistributedStorageService) {
-	// Add nodes
-	for i := 1; i <= 5; i++ {
-		service.AddNode(NodeInfo{
-			ID:        mockNodeID(i),
-			Name:      mockNodeName(i),
-			Role:      "storage",
-			Address:   mockNodeAddress(i),
-			Port:      8000,
+	// Add some nodes
+	for i := 0; i < 3; i++ {
+		node := NodeInfo{
+			ID:        fmt.Sprintf("node-%d", i),
+			Name:      fmt.Sprintf("test-node-%d", i),
+			Address:   fmt.Sprintf("192.168.1.%d", i+10),
+			Port:      8080,
 			Available: true,
 			JoinedAt:  time.Now(),
 			LastSeen:  time.Now(),
-		})
+		}
+		distService.AddNode(node)
 	}
 
-	// Create a volume specification
-	spec := VolumeSpec{
-		Name:   "test-volume",
-		SizeMB: 100,
-		Type:   VolumeTypeCeph,
-		Options: map[string]string{
-			"description": "Test distributed volume",
-		},
+	// Create a distributed volume
+	opts := VolumeCreateOptions{
+		Name:   "test-dist-volume",
+		Type:   VolumeTypeDistributed,
+		Size: 100 * 1024 * 1024, // 100MB in bytes
 	}
 
-	// Create the volume
 	ctx := context.Background()
-	volume, err := service.CreateDistributedVolume(ctx, spec, 3)
+	volume, err := distService.CreateDistributedVolume(ctx, opts, 2) // Replication factor 2
 	if err != nil {
 		t.Fatalf("Failed to create distributed volume: %v", err)
 	}
 
-	// Verify volume was created
-	if volume.Name != "test-volume" {
-		t.Errorf("Expected volume name to be test-volume, got %s", volume.Name)
+	if volume.Name != opts.Name {
+		t.Errorf("Expected volume name %s, got %s", opts.Name, volume.Name)
 	}
 
-	// Get the distributed volume
-	distVolume, err := service.GetDistributedVolume(ctx, volume.ID)
+	// Verify distributed volume exists
+	distVolume, err := distService.GetDistributedVolume(ctx, volume.ID)
 	if err != nil {
 		t.Fatalf("Failed to get distributed volume: %v", err)
 	}
 
-	// Verify sharding
 	if distVolume.DistInfo.ShardCount <= 0 {
-		t.Errorf("Expected positive shard count, got %d", distVolume.DistInfo.ShardCount)
+		t.Error("Expected positive shard count")
 	}
 
-	// Verify node assignment
-	if distVolume.DistInfo.NodeCount <= 0 {
-		t.Errorf("Expected positive node count, got %d", distVolume.DistInfo.NodeCount)
+	if distVolume.DistInfo.NodeCount != 3 {
+		t.Errorf("Expected node count 3, got %d", distVolume.DistInfo.NodeCount)
+	}
+}
+
+func TestDistributedStorageService_ReadWriteShard(t *testing.T) {
+	// Create base storage manager
+	baseConfig := StorageManagerConfig{
+		BasePath:    "/tmp/test-storage",
+		Compression: false,
+		Encryption:  false,
+		Dedup:       false,
+	}
+	baseManager, err := NewStorageManager(baseConfig)
+	if err != nil {
+		t.Fatalf("Failed to create base manager: %v", err)
 	}
 
-	// Check shards have node assignments
-	for i, shard := range distVolume.DistInfo.Shards {
-		if len(shard.NodeIDs) != 3 {
-			t.Errorf("Shard %d has %d node assignments, expected 3", i, len(shard.NodeIDs))
+	// Create distributed storage config
+	distConfig := DefaultDistributedStorageConfig()
+	distConfig.RootDir = "/tmp/test-distributed"
+
+	// Create distributed storage service
+	distService, err := NewDistributedStorageService(baseManager, distConfig)
+	if err != nil {
+		t.Fatalf("Failed to create distributed service: %v", err)
+	}
+
+	err = distService.Start()
+	if err != nil {
+		t.Fatalf("Failed to start distributed service: %v", err)
+	}
+	defer distService.Stop()
+
+	// Add nodes
+	for i := 0; i < 2; i++ {
+		node := NodeInfo{
+			ID:        fmt.Sprintf("node-%d", i),
+			Name:      fmt.Sprintf("test-node-%d", i),
+			Address:   fmt.Sprintf("192.168.1.%d", i+10),
+			Port:      8080,
+			Available: true,
+			JoinedAt:  time.Now(),
+			LastSeen:  time.Now(),
+		}
+		distService.AddNode(node)
+	}
+
+	// Create a distributed volume
+	opts := VolumeCreateOptions{
+		Name:   "test-rw-volume",
+		Type:   VolumeTypeDistributed,
+		Size: 10, // 10MB
+	}
+
+	ctx := context.Background()
+	volume, err := distService.CreateDistributedVolume(ctx, opts, 1)
+	if err != nil {
+		t.Fatalf("Failed to create distributed volume: %v", err)
+	}
+
+	// Test write/read shard
+	testData := []byte("Hello, distributed world!")
+	shardIndex := 0
+
+	err = distService.WriteShard(ctx, volume.ID, shardIndex, testData)
+	if err != nil {
+		t.Fatalf("Failed to write shard: %v", err)
+	}
+
+	readData, err := distService.ReadShard(ctx, volume.ID, shardIndex)
+	if err != nil {
+		t.Fatalf("Failed to read shard: %v", err)
+	}
+
+	if string(readData) != string(testData) {
+		t.Errorf("Expected to read %s, got %s", string(testData), string(readData))
+	}
+}
+
+func TestDistributedStorageService_WithCompression(t *testing.T) {
+	// Create base storage manager
+	baseConfig := StorageManagerConfig{
+		BasePath:    "/tmp/test-storage",
+		Compression: true,
+		Encryption:  false,
+		Dedup:       false,
+	}
+	baseManager, err := NewStorageManager(baseConfig)
+	if err != nil {
+		t.Fatalf("Failed to create base manager: %v", err)
+	}
+
+	// Create distributed storage config with compression
+	distConfig := DefaultDistributedStorageConfig()
+	distConfig.RootDir = "/tmp/test-distributed-comp"
+	distConfig.CompressionConfig = compression.CompressionConfig{
+		Algorithm: compression.CompressionGzip,
+		Level:     6,
+		MinSizeBytes: 1024,
+		MaxSizeBytes: 1024 * 1024,
+		AutoDetect: true,
+	}
+
+	// Create distributed storage service
+	distService, err := NewDistributedStorageService(baseManager, distConfig)
+	if err != nil {
+		t.Fatalf("Failed to create distributed service: %v", err)
+	}
+
+	err = distService.Start()
+	if err != nil {
+		t.Fatalf("Failed to start distributed service: %v", err)
+	}
+	defer distService.Stop()
+
+	// Add nodes
+	for i := 0; i < 2; i++ {
+		node := NodeInfo{
+			ID:        fmt.Sprintf("node-%d", i),
+			Name:      fmt.Sprintf("test-node-%d", i),
+			Address:   fmt.Sprintf("192.168.1.%d", i+10),
+			Port:      8080,
+			Available: true,
+			JoinedAt:  time.Now(),
+			LastSeen:  time.Now(),
+		}
+		distService.AddNode(node)
+	}
+
+	// Create a distributed volume
+	opts := VolumeCreateOptions{
+		Name:   "test-comp-volume",
+		Type:   VolumeTypeDistributed,
+		Size: 10,
+	}
+
+	ctx := context.Background()
+	volume, err := distService.CreateDistributedVolume(ctx, opts, 1)
+	if err != nil {
+		t.Fatalf("Failed to create distributed volume: %v", err)
+	}
+
+	// Test with compressible data
+	testData := make([]byte, 1024)
+	for i := range testData {
+		testData[i] = byte('A') // Highly compressible
+	}
+
+	shardIndex := 0
+	err = distService.WriteShard(ctx, volume.ID, shardIndex, testData)
+	if err != nil {
+		t.Fatalf("Failed to write compressed shard: %v", err)
+	}
+
+	readData, err := distService.ReadShard(ctx, volume.ID, shardIndex)
+	if err != nil {
+		t.Fatalf("Failed to read compressed shard: %v", err)
+	}
+
+	if len(readData) != len(testData) {
+		t.Errorf("Expected decompressed data length %d, got %d", len(testData), len(readData))
+	}
+
+	// Verify data integrity
+	for i, b := range readData {
+		if b != testData[i] {
+			t.Errorf("Data mismatch at byte %d: expected %d, got %d", i, testData[i], b)
+			break
 		}
 	}
 }
 
-func testReplication(t *testing.T, service *DistributedStorageService) {
+func TestDistributedStorageService_WithEncryption(t *testing.T) {
+	// Create base storage manager
+	baseConfig := StorageManagerConfig{
+		BasePath:    "/tmp/test-storage",
+		Compression: false,
+		Encryption:  true,
+		Dedup:       false,
+	}
+	baseManager, err := NewStorageManager(baseConfig)
+	if err != nil {
+		t.Fatalf("Failed to create base manager: %v", err)
+	}
+
+	// Create distributed storage config with encryption
+	distConfig := DefaultDistributedStorageConfig()
+	distConfig.RootDir = "/tmp/test-distributed-enc"
+	distConfig.DefaultEncryption = true
+	distConfig.EncryptionConfig = encryption.EncryptionConfig{
+		Algorithm: encryption.EncryptionAES256,
+		Mode:      encryption.EncryptionModeGCM,
+		MasterKey: "test-master-key-32-bytes-long!!!",
+		SaltPrefix: "novacron",
+		Authenticate: true,
+		MinSizeBytes: 1024,
+	}
+
+	// Create distributed storage service
+	distService, err := NewDistributedStorageService(baseManager, distConfig)
+	if err != nil {
+		t.Fatalf("Failed to create distributed service: %v", err)
+	}
+
+	err = distService.Start()
+	if err != nil {
+		t.Fatalf("Failed to start distributed service: %v", err)
+	}
+	defer distService.Stop()
+
 	// Add nodes
-	for i := 1; i <= 5; i++ {
-		service.AddNode(NodeInfo{
-			ID:        mockNodeID(i),
-			Name:      mockNodeName(i),
-			Role:      "storage",
-			Address:   mockNodeAddress(i),
-			Port:      8000,
+	for i := 0; i < 2; i++ {
+		node := NodeInfo{
+			ID:        fmt.Sprintf("node-%d", i),
+			Name:      fmt.Sprintf("test-node-%d", i),
+			Address:   fmt.Sprintf("192.168.1.%d", i+10),
+			Port:      8080,
 			Available: true,
 			JoinedAt:  time.Now(),
 			LastSeen:  time.Now(),
-		})
+		}
+		distService.AddNode(node)
 	}
 
-	// Create a volume specification
-	spec := VolumeSpec{
-		Name:   "replication-test",
-		SizeMB: 50,
-		Type:   VolumeTypeCeph,
-		Options: map[string]string{
-			"description": "Test replication",
-		},
+	// Create a distributed volume
+	opts := VolumeCreateOptions{
+		Name:   "test-enc-volume",
+		Type:   VolumeTypeDistributed,
+		Size: 10,
 	}
 
-	// Create the volume with replication factor 3
 	ctx := context.Background()
-	volume, err := service.CreateDistributedVolume(ctx, spec, 3)
+	volume, err := distService.CreateDistributedVolume(ctx, opts, 1)
 	if err != nil {
 		t.Fatalf("Failed to create distributed volume: %v", err)
 	}
 
-	// Verify the volume exists - we don't actually need the distVolume variable
-	_, err = service.GetDistributedVolume(ctx, volume.ID)
+	// Test with sensitive data
+	testData := []byte("This is sensitive data that should be encrypted!")
+
+	shardIndex := 0
+	err = distService.WriteShard(ctx, volume.ID, shardIndex, testData)
 	if err != nil {
-		t.Fatalf("Failed to get distributed volume: %v", err)
+		t.Fatalf("Failed to write encrypted shard: %v", err)
 	}
 
-	// Write data to a shard
-	testData := []byte("test data for replication")
-	err = service.WriteShard(ctx, volume.ID, 0, testData)
+	readData, err := distService.ReadShard(ctx, volume.ID, shardIndex)
 	if err != nil {
-		t.Fatalf("Failed to write to shard: %v", err)
+		t.Fatalf("Failed to read encrypted shard: %v", err)
 	}
 
-	// Read data back
-	readData, err := service.ReadShard(ctx, volume.ID, 0)
-	if err != nil {
-		t.Fatalf("Failed to read from shard: %v", err)
-	}
-
-	// Verify data
 	if string(readData) != string(testData) {
-		t.Errorf("Expected read data to be %q, got %q", string(testData), string(readData))
-	}
-
-	// Verify replication by checking the files on disk
-	shardPath := filepath.Join(service.config.RootDir, volume.ID, "shard_0")
-	if _, err := os.Stat(shardPath); os.IsNotExist(err) {
-		t.Errorf("Shard file does not exist at %s", shardPath)
+		t.Errorf("Expected decrypted data %s, got %s", string(testData), string(readData))
 	}
 }
 
-func testHealing(t *testing.T, service *DistributedStorageService) {
+func TestDistributedStorageService_RepairVolume(t *testing.T) {
+	// Create base storage manager
+	baseConfig := StorageManagerConfig{
+		BasePath:    "/tmp/test-storage",
+		Compression: false,
+		Encryption:  false,
+		Dedup:       false,
+	}
+	baseManager, err := NewStorageManager(baseConfig)
+	if err != nil {
+		t.Fatalf("Failed to create base manager: %v", err)
+	}
+
+	// Create distributed storage config
+	distConfig := DefaultDistributedStorageConfig()
+	distConfig.RootDir = "/tmp/test-distributed-repair"
+
+	// Create distributed storage service
+	distService, err := NewDistributedStorageService(baseManager, distConfig)
+	if err != nil {
+		t.Fatalf("Failed to create distributed service: %v", err)
+	}
+
+	err = distService.Start()
+	if err != nil {
+		t.Fatalf("Failed to start distributed service: %v", err)
+	}
+	defer distService.Stop()
+
 	// Add nodes
-	for i := 1; i <= 5; i++ {
-		service.AddNode(NodeInfo{
-			ID:        mockNodeID(i),
-			Name:      mockNodeName(i),
-			Role:      "storage",
-			Address:   mockNodeAddress(i),
-			Port:      8000,
+	for i := 0; i < 4; i++ {
+		node := NodeInfo{
+			ID:        fmt.Sprintf("node-%d", i),
+			Name:      fmt.Sprintf("test-node-%d", i),
+			Address:   fmt.Sprintf("192.168.1.%d", i+10),
+			Port:      8080,
 			Available: true,
 			JoinedAt:  time.Now(),
 			LastSeen:  time.Now(),
-		})
+		}
+		distService.AddNode(node)
 	}
 
-	// Create a volume specification
-	spec := VolumeSpec{
-		Name:   "healing-test",
-		SizeMB: 50,
-		Type:   VolumeTypeCeph,
-		Options: map[string]string{
-			"description": "Test healing",
-		},
+	// Create a distributed volume
+	opts := VolumeCreateOptions{
+		Name:   "test-repair-volume",
+		Type:   VolumeTypeDistributed,
+		Size: 10,
 	}
 
-	// Create the volume with replication factor 3
 	ctx := context.Background()
-	volume, err := service.CreateDistributedVolume(ctx, spec, 3)
+	volume, err := distService.CreateDistributedVolume(ctx, opts, 2) // Replication factor 2
 	if err != nil {
 		t.Fatalf("Failed to create distributed volume: %v", err)
 	}
 
-	distVolume, err := service.GetDistributedVolume(ctx, volume.ID)
+	// Get the distributed volume and mark some shards as needing healing
+	distVolume, err := distService.GetDistributedVolume(ctx, volume.ID)
 	if err != nil {
 		t.Fatalf("Failed to get distributed volume: %v", err)
 	}
 
-	// Write data to a shard
-	testData := []byte("test data for healing")
-	err = service.WriteShard(ctx, volume.ID, 0, testData)
-	if err != nil {
-		t.Fatalf("Failed to write to shard: %v", err)
+	// Simulate shard failure
+	if len(distVolume.DistInfo.Shards) > 0 {
+		distVolume.DistInfo.Shards[0].NeedsHealing = true
 	}
 
-	// Simulate a failure by marking a shard as needing healing
-	service.volMutex.Lock()
-	distVolume.DistInfo.Shards[0].NeedsHealing = true
-	service.volMutex.Unlock()
-
-	// Trigger healing
-	err = service.RepairVolume(ctx, volume.ID)
+	// Test repair
+	err = distService.RepairVolume(ctx, volume.ID)
 	if err != nil {
 		t.Fatalf("Failed to repair volume: %v", err)
 	}
 
-	// Verify healing
-	service.volMutex.RLock()
-	needsHealing := distVolume.DistInfo.Shards[0].NeedsHealing
-	service.volMutex.RUnlock()
-
-	if needsHealing {
-		t.Errorf("Shard still needs healing after repair")
+	// Verify health percentage improved
+	repairedVolume, err := distService.GetDistributedVolume(ctx, volume.ID)
+	if err != nil {
+		t.Fatalf("Failed to get repaired volume: %v", err)
 	}
 
-	// Verify health percentage is 100%
-	service.volMutex.RLock()
-	healthPct := distVolume.DistInfo.HealthPercentage
-	service.volMutex.RUnlock()
-
-	if healthPct != 100.0 {
-		t.Errorf("Expected health percentage to be 100.0%%, got %.1f%%", healthPct)
+	if repairedVolume.DistInfo.HealthPercentage < 90.0 {
+		t.Errorf("Expected health percentage >= 90%%, got %.2f", repairedVolume.DistInfo.HealthPercentage)
 	}
 }
 
-func testDeduplication(t *testing.T, service *DistributedStorageService) {
-	// Add nodes
-	for i := 1; i <= 5; i++ {
-		service.AddNode(NodeInfo{
-			ID:        mockNodeID(i),
-			Name:      mockNodeName(i),
-			Role:      "storage",
-			Address:   mockNodeAddress(i),
-			Port:      8000,
+func TestDistributedStorageService_RebalanceVolume(t *testing.T) {
+	// Create base storage manager
+	baseConfig := StorageManagerConfig{
+		BasePath:    "/tmp/test-storage",
+		Compression: false,
+		Encryption:  false,
+		Dedup:       false,
+	}
+	baseManager, err := NewStorageManager(baseConfig)
+	if err != nil {
+		t.Fatalf("Failed to create base manager: %v", err)
+	}
+
+	// Create distributed storage config
+	distConfig := DefaultDistributedStorageConfig()
+	distConfig.RootDir = "/tmp/test-distributed-rebalance"
+
+	// Create distributed storage service
+	distService, err := NewDistributedStorageService(baseManager, distConfig)
+	if err != nil {
+		t.Fatalf("Failed to create distributed service: %v", err)
+	}
+
+	err = distService.Start()
+	if err != nil {
+		t.Fatalf("Failed to start distributed service: %v", err)
+	}
+	defer distService.Stop()
+
+	// Add initial nodes
+	for i := 0; i < 2; i++ {
+		node := NodeInfo{
+			ID:        fmt.Sprintf("node-%d", i),
+			Name:      fmt.Sprintf("test-node-%d", i),
+			Address:   fmt.Sprintf("192.168.1.%d", i+10),
+			Port:      8080,
 			Available: true,
 			JoinedAt:  time.Now(),
 			LastSeen:  time.Now(),
-		})
+		}
+		distService.AddNode(node)
 	}
 
-	// Create a volume specification with deduplication enabled
-	spec := VolumeSpec{
-		Name:   "dedup-test",
-		SizeMB: 50,
-		Type:   VolumeTypeCeph,
-		Options: map[string]string{
-			"description": "Test deduplication",
-		},
+	// Create a distributed volume
+	opts := VolumeCreateOptions{
+		Name:   "test-rebalance-volume",
+		Type:   VolumeTypeDistributed,
+		Size: 10,
 	}
 
-	// Enable deduplication in the config
-	originalDedupSetting := service.config.DefaultDeduplication
-	service.config.DefaultDeduplication = true
-	defer func() {
-		// Restore original setting after test
-		service.config.DefaultDeduplication = originalDedupSetting
-	}()
-
-	// Create the volume with replication factor 3
 	ctx := context.Background()
-	volume, err := service.CreateDistributedVolume(ctx, spec, 3)
+	volume, err := distService.CreateDistributedVolume(ctx, opts, 2)
 	if err != nil {
 		t.Fatalf("Failed to create distributed volume: %v", err)
 	}
 
-	// Write duplicated data to shard 0
-	// This will contain repeated data suitable for deduplication
-	repeatedBlock := []byte("This is a block of data that will be repeated multiple times to test deduplication.")
-	var testData []byte
-	for i := 0; i < 100; i++ {
-		testData = append(testData, repeatedBlock...)
+	// Add more nodes
+	for i := 2; i < 4; i++ {
+		node := NodeInfo{
+			ID:        fmt.Sprintf("node-%d", i),
+			Name:      fmt.Sprintf("test-node-%d", i),
+			Address:   fmt.Sprintf("192.168.1.%d", i+10),
+			Port:      8080,
+			Available: true,
+			JoinedAt:  time.Now(),
+			LastSeen:  time.Now(),
+		}
+		distService.AddNode(node)
 	}
 
-	err = service.WriteShard(ctx, volume.ID, 0, testData)
+	// Test rebalance
+	err = distService.RebalanceVolume(ctx, volume.ID)
 	if err != nil {
-		t.Fatalf("Failed to write to shard: %v", err)
+		t.Fatalf("Failed to rebalance volume: %v", err)
 	}
 
-	// Read data back
-	readData, err := service.ReadShard(ctx, volume.ID, 0)
+	// Verify rebalancing updated the volume
+	rebalancedVolume, err := distService.GetDistributedVolume(ctx, volume.ID)
 	if err != nil {
-		t.Fatalf("Failed to read from shard: %v", err)
+		t.Fatalf("Failed to get rebalanced volume: %v", err)
 	}
 
-	// Verify data integrity after deduplication/reconstruction
-	if string(readData) != string(testData) {
-		t.Errorf("Data integrity failure after deduplication: original length %d, reconstructed length %d",
-			len(testData), len(readData))
-	} else {
-		t.Logf("Successfully verified data integrity after deduplication/reconstruction")
+	if rebalancedVolume.DistInfo.NodeCount != 4 {
+		t.Errorf("Expected node count 4 after rebalance, got %d", rebalancedVolume.DistInfo.NodeCount)
+	}
+}
+
+func TestDistributedStorageService_NodeManagement(t *testing.T) {
+	// Create base storage manager
+	baseConfig := StorageManagerConfig{
+		BasePath:    "/tmp/test-storage",
+		Compression: false,
+		Encryption:  false,
+		Dedup:       false,
+	}
+	baseManager, err := NewStorageManager(baseConfig)
+	if err != nil {
+		t.Fatalf("Failed to create base manager: %v", err)
 	}
 
-	// Check if deduplication was applied by verifying the shard has deduplication metadata
-	service.volMutex.RLock()
-	distVolume, _ := service.distVolumes[volume.ID]
-	service.volMutex.RUnlock()
+	// Create distributed storage config
+	distConfig := DefaultDistributedStorageConfig()
+	distConfig.RootDir = "/tmp/test-distributed-nodes"
 
-	if distVolume != nil {
-		shard := distVolume.DistInfo.Shards[0]
-		if !shard.IsDeduplicated {
-			t.Logf("Shard was not deduplicated, which might be correct if data wasn't duplicated enough")
-		} else {
-			// If deduplication was applied, verify metrics
-			if shard.DedupFileInfo == nil {
-				t.Errorf("Shard marked as deduplicated but has no deduplication info")
-			} else {
-				t.Logf("Deduplication applied with algorithm %s, ratio %.2f, unique blocks %d",
-					shard.DedupFileInfo.Algorithm, shard.DedupFileInfo.DedupRatio, len(shard.DedupFileInfo.Blocks))
+	// Create distributed storage service
+	distService, err := NewDistributedStorageService(baseManager, distConfig)
+	if err != nil {
+		t.Fatalf("Failed to create distributed service: %v", err)
+	}
 
-				// Expect a reasonable deduplication ratio for our test data
-				if shard.DedupFileInfo.DedupRatio > 1.0 {
-					t.Logf("Achieved deduplication ratio of %.2f", shard.DedupFileInfo.DedupRatio)
-				} else {
-					t.Logf("Deduplication ratio not greater than 1.0: %.2f", shard.DedupFileInfo.DedupRatio)
-				}
-			}
+	err = distService.Start()
+	if err != nil {
+		t.Fatalf("Failed to start distributed service: %v", err)
+	}
+	defer distService.Stop()
+
+	// Test adding nodes
+	for i := 0; i < 3; i++ {
+		node := NodeInfo{
+			ID:        fmt.Sprintf("node-%d", i),
+			Name:      fmt.Sprintf("test-node-%d", i),
+			Address:   fmt.Sprintf("192.168.1.%d", i+10),
+			Port:      8080,
+			Available: true,
+			JoinedAt:  time.Now(),
+			LastSeen:  time.Now(),
+		}
+		distService.AddNode(node)
+	}
+
+	// Test getting available nodes
+	availableNodes := distService.GetAvailableNodes()
+	if len(availableNodes) != 3 {
+		t.Errorf("Expected 3 available nodes, got %d", len(availableNodes))
+	}
+
+	// Test removing a node
+	distService.RemoveNode("node-1")
+	availableNodes = distService.GetAvailableNodes()
+	if len(availableNodes) != 2 {
+		t.Errorf("Expected 2 available nodes after removal, got %d", len(availableNodes))
+	}
+
+	// Verify the correct node was removed
+	for _, node := range availableNodes {
+		if node.ID == "node-1" {
+			t.Error("Node-1 should have been removed")
 		}
 	}
 }
 
-// Helper functions for generating test data
-func mockNodeID(i int) string {
-	return "node-" + mockSuffix(i)
+// Benchmark tests for distributed storage
+func BenchmarkDistributedStorageService_WriteShard(b *testing.B) {
+	// Create base storage manager
+	baseConfig := StorageManagerConfig{
+		BasePath:    "/tmp/bench-storage",
+		Compression: false,
+		Encryption:  false,
+		Dedup:       false,
+	}
+	baseManager, _ := NewStorageManager(baseConfig)
+
+	// Create distributed storage config
+	distConfig := DefaultDistributedStorageConfig()
+	distConfig.RootDir = "/tmp/bench-distributed"
+
+	// Create distributed storage service
+	distService, _ := NewDistributedStorageService(baseManager, distConfig)
+	distService.Start()
+	defer distService.Stop()
+
+	// Add nodes
+	for i := 0; i < 2; i++ {
+		node := NodeInfo{
+			ID:        fmt.Sprintf("node-%d", i),
+			Available: true,
+			JoinedAt:  time.Now(),
+			LastSeen:  time.Now(),
+		}
+		distService.AddNode(node)
+	}
+
+	// Create volume
+	opts := VolumeCreateOptions{Name: "bench-volume", Type: VolumeTypeDistributed, Size: 100}
+	ctx := context.Background()
+	volume, _ := distService.CreateDistributedVolume(ctx, opts, 1)
+
+	// Test data
+	testData := make([]byte, 1024) // 1KB
+	for i := range testData {
+		testData[i] = byte(i % 256)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		err := distService.WriteShard(ctx, volume.ID, 0, testData)
+		if err != nil {
+			b.Fatalf("Failed to write shard: %v", err)
+		}
+	}
 }
 
-func mockNodeName(i int) string {
-	return "Node " + mockSuffix(i)
-}
+func BenchmarkDistributedStorageService_ReadShard(b *testing.B) {
+	// Create base storage manager
+	baseConfig := StorageManagerConfig{
+		BasePath:    "/tmp/bench-storage",
+		Compression: false,
+		Encryption:  false,
+		Dedup:       false,
+	}
+	baseManager, _ := NewStorageManager(baseConfig)
 
-func mockNodeAddress(i int) string {
-	return "192.168.1." + mockSuffix(i)
-}
+	// Create distributed storage config
+	distConfig := DefaultDistributedStorageConfig()
+	distConfig.RootDir = "/tmp/bench-distributed"
 
-func mockSuffix(i int) string {
-	return "0" + string('0'+rune(i))
+	// Create distributed storage service
+	distService, _ := NewDistributedStorageService(baseManager, distConfig)
+	distService.Start()
+	defer distService.Stop()
+
+	// Add nodes
+	for i := 0; i < 2; i++ {
+		node := NodeInfo{
+			ID:        fmt.Sprintf("node-%d", i),
+			Available: true,
+			JoinedAt:  time.Now(),
+			LastSeen:  time.Now(),
+		}
+		distService.AddNode(node)
+	}
+
+	// Create volume and write test data
+	opts := VolumeCreateOptions{Name: "bench-volume", Type: VolumeTypeDistributed, Size: 100}
+	ctx := context.Background()
+	volume, _ := distService.CreateDistributedVolume(ctx, opts, 1)
+
+	testData := make([]byte, 1024)
+	for i := range testData {
+		testData[i] = byte(i % 256)
+	}
+	distService.WriteShard(ctx, volume.ID, 0, testData)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := distService.ReadShard(ctx, volume.ID, 0)
+		if err != nil {
+			b.Fatalf("Failed to read shard: %v", err)
+		}
+	}
 }

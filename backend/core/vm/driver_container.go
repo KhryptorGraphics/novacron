@@ -17,18 +17,23 @@ type ContainerDriver struct {
 }
 
 // NewContainerDriver creates a new container driver
-func NewContainerDriver(nodeID string) *ContainerDriver {
+func NewContainerDriver(config map[string]interface{}) (VMDriver, error) {
+	nodeID := ""
+	if id, ok := config["node_id"].(string); ok {
+		nodeID = id
+	}
+	
 	return &ContainerDriver{
 		nodeID: nodeID,
-	}
+	}, nil
 }
 
 // Create creates a new container VM
-func (d *ContainerDriver) Create(ctx context.Context, spec VMSpec) (string, error) {
-	log.Printf("Creating container VM with image %s", spec.Image)
+func (d *ContainerDriver) Create(ctx context.Context, config VMConfig) (string, error) {
+	log.Printf("Creating container VM %s", config.Name)
 	
-	// Generate a container name based on VM specs
-	containerName := fmt.Sprintf("novacron-%s-%s", spec.Type, strconv.FormatInt(time.Now().UnixNano(), 16))
+	// Generate a container name based on VM config
+	containerName := fmt.Sprintf("novacron-%s-%s", config.Name, strconv.FormatInt(time.Now().UnixNano(), 16))
 	
 	// Build the docker command to create a container
 	args := []string{
@@ -37,50 +42,46 @@ func (d *ContainerDriver) Create(ctx context.Context, spec VMSpec) (string, erro
 	}
 	
 	// Set resource limits
-	if spec.VCPU > 0 {
-		args = append(args, "--cpus", fmt.Sprintf("%d", spec.VCPU))
+	if config.CPUShares > 0 {
+		args = append(args, "--cpu-shares", fmt.Sprintf("%d", config.CPUShares))
 	}
 	
-	if spec.MemoryMB > 0 {
-		args = append(args, "--memory", fmt.Sprintf("%dm", spec.MemoryMB))
+	if config.MemoryMB > 0 {
+		args = append(args, "--memory", fmt.Sprintf("%dm", config.MemoryMB))
 	}
 	
 	// Set environment variables
-	for k, v := range spec.Env {
+	for k, v := range config.Env {
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
 	
-	// Set labels
-	for k, v := range spec.Labels {
+	// Set labels from tags
+	for k, v := range config.Tags {
 		args = append(args, "--label", fmt.Sprintf("%s=%s", k, v))
 	}
 	
 	// Mount volumes
-	for _, vol := range spec.Volumes {
-		mountOptions := "rw"
-		if vol.ReadOnly {
-			mountOptions = "ro"
-		}
-		args = append(args, "-v", fmt.Sprintf("%s:%s:%s", vol.VolumeID, vol.Path, mountOptions))
+	for _, mount := range config.Mounts {
+		args = append(args, "-v", fmt.Sprintf("%s:%s", mount.Source, mount.Target))
 	}
 	
 	// Configure network
-	if len(spec.Networks) > 0 {
-		for _, net := range spec.Networks {
-			args = append(args, "--network", net.NetworkID)
-			
-			if net.IPAddress != "" {
-				args = append(args, "--ip", net.IPAddress)
-			}
-			
-			if net.MACAddress != "" {
-				args = append(args, "--mac-address", net.MACAddress)
-			}
-		}
+	if config.NetworkID != "" {
+		args = append(args, "--network", config.NetworkID)
 	}
 	
-	// Add the image name as the last argument
-	args = append(args, spec.Image)
+	// Add the command as the last argument (assuming RootFS contains the image name)
+	image := config.RootFS
+	if image == "" {
+		image = "alpine:latest" // Default image
+	}
+	args = append(args, image)
+	
+	// Add the command if specified
+	if config.Command != "" {
+		args = append(args, config.Command)
+		args = append(args, config.Args...)
+	}
 	
 	// Run the command
 	cmd := exec.CommandContext(ctx, "docker", args...)
@@ -144,7 +145,7 @@ func (d *ContainerDriver) Delete(ctx context.Context, vmID string) error {
 }
 
 // GetStatus gets the status of a container VM
-func (d *ContainerDriver) GetStatus(ctx context.Context, vmID string) (VMState, error) {
+func (d *ContainerDriver) GetStatus(ctx context.Context, vmID string) (State, error) {
 	log.Printf("Getting status of container VM %s", vmID)
 	
 	cmd := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.State.Status}}", vmID)
@@ -152,32 +153,32 @@ func (d *ContainerDriver) GetStatus(ctx context.Context, vmID string) (VMState, 
 	
 	if err != nil {
 		if strings.Contains(string(output), "No such container") {
-			return VMStateUnknown, errors.New("container not found")
+			return StateUnknown, errors.New("container not found")
 		}
 		log.Printf("Failed to get status of container %s: %v, output: %s", vmID, err, string(output))
-		return VMStateUnknown, fmt.Errorf("failed to get container status: %w", err)
+		return StateUnknown, fmt.Errorf("failed to get container status: %w", err)
 	}
 	
 	status := strings.TrimSpace(string(output))
 	
 	switch status {
 	case "running":
-		return VMStateRunning, nil
+		return StateRunning, nil
 	case "exited":
-		return VMStateStopped, nil
+		return StateStopped, nil
 	case "created":
-		return VMStateStopped, nil
+		return StateStopped, nil
 	case "paused":
-		return VMStatePaused, nil
+		return StatePaused, nil
 	case "restarting":
-		return VMStateRestarting, nil
+		return StateRestarting, nil
 	default:
-		return VMStateUnknown, nil
+		return StateUnknown, nil
 	}
 }
 
 // GetInfo gets information about a container VM
-func (d *ContainerDriver) GetInfo(ctx context.Context, vmID string) (*VM, error) {
+func (d *ContainerDriver) GetInfo(ctx context.Context, vmID string) (*VMInfo, error) {
 	log.Printf("Getting info of container VM %s", vmID)
 	
 	// First check if the container exists
@@ -209,17 +210,17 @@ func (d *ContainerDriver) GetInfo(ctx context.Context, vmID string) (*VM, error)
 	}
 	
 	// Parse output (in a real implementation, we would parse the JSON properly)
-	// For now, we'll create a minimal VM object with the information
+	// For now, we'll create a minimal VMInfo object with the information
 	
-	vm := &VM{
-		ID:      vmID,
-		State:   status,
-		NodeID:  d.nodeID,
-		UpdatedAt: time.Now(),
+	vmInfo := &VMInfo{
+		ID:       vmID,
+		Name:     vmID, // Use container ID as name for now
+		State:    status,
+		CreatedAt: time.Now(),
 	}
 	
 	// Get container stats for more accurate resource usage
-	if status == VMStateRunning {
+	if status == StateRunning {
 		statsCmd := exec.CommandContext(ctx, "docker", "stats", "--no-stream", "--format", 
 			"{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}", vmID)
 		statsOutput, statsErr := statsCmd.CombinedOutput()
@@ -237,12 +238,9 @@ func (d *ContainerDriver) GetInfo(ctx context.Context, vmID string) (*VM, error)
 				memUsage := strings.TrimSpace(memParts[0])
 				memValue, _ := strconv.ParseFloat(strings.TrimSuffix(memUsage, "MiB"), 64)
 				
-				// Add process info
-				vm.ProcessInfo = VMProcessInfo{
-					CPUUsagePercent: cpuFloat,
-					MemoryUsageMB:   int(memValue),
-					LastUpdatedAt:   time.Now(),
-				}
+				// Add resource usage info
+				vmInfo.CPUUsage = cpuFloat
+				vmInfo.MemoryUsage = int64(memValue * 1024 * 1024) // Convert MiB to bytes
 				
 				// Parse network I/O (e.g., "648B / 648B")
 				// For a full implementation, we would parse these values properly
@@ -251,5 +249,120 @@ func (d *ContainerDriver) GetInfo(ctx context.Context, vmID string) (*VM, error)
 		}
 	}
 	
-	return vm, nil
+	return vmInfo, nil
+}
+
+// GetMetrics gets metrics for a container VM
+func (d *ContainerDriver) GetMetrics(ctx context.Context, vmID string) (*VMInfo, error) {
+	// For containers, metrics are the same as info for now
+	return d.GetInfo(ctx, vmID)
+}
+
+// ListVMs lists all container VMs
+func (d *ContainerDriver) ListVMs(ctx context.Context) ([]VMInfo, error) {
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "--format", "{{.ID}}|{{.Names}}|{{.Status}}")
+	output, err := cmd.CombinedOutput()
+	
+	if err != nil {
+		log.Printf("Failed to list containers: %v, output: %s", err, string(output))
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+	
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	var vms []VMInfo
+	
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		
+		parts := strings.Split(line, "|")
+		if len(parts) != 3 {
+			continue
+		}
+		
+		vmID := parts[0]
+		name := parts[1]
+		statusStr := parts[2]
+		
+		// Convert Docker status to VM state
+		var state State
+		if strings.Contains(statusStr, "Up") {
+			state = StateRunning
+		} else if strings.Contains(statusStr, "Exited") {
+			state = StateStopped
+		} else if strings.Contains(statusStr, "Created") {
+			state = StateCreated
+		} else {
+			state = StateUnknown
+		}
+		
+		vms = append(vms, VMInfo{
+			ID:    vmID,
+			Name:  name,
+			State: state,
+		})
+	}
+	
+	return vms, nil
+}
+
+// SupportsPause returns whether the driver supports pausing VMs
+func (d *ContainerDriver) SupportsPause() bool {
+	return true
+}
+
+// SupportsResume returns whether the driver supports resuming VMs
+func (d *ContainerDriver) SupportsResume() bool {
+	return true
+}
+
+// SupportsSnapshot returns whether the driver supports snapshots
+func (d *ContainerDriver) SupportsSnapshot() bool {
+	return false // Docker containers don't support native snapshots
+}
+
+// SupportsMigrate returns whether the driver supports migration
+func (d *ContainerDriver) SupportsMigrate() bool {
+	return false // Docker containers don't support live migration
+}
+
+// Pause pauses a container VM
+func (d *ContainerDriver) Pause(ctx context.Context, vmID string) error {
+	log.Printf("Pausing container VM %s", vmID)
+	
+	cmd := exec.CommandContext(ctx, "docker", "pause", vmID)
+	output, err := cmd.CombinedOutput()
+	
+	if err != nil {
+		log.Printf("Failed to pause container %s: %v, output: %s", vmID, err, string(output))
+		return fmt.Errorf("failed to pause container: %w", err)
+	}
+	
+	return nil
+}
+
+// Resume resumes a container VM
+func (d *ContainerDriver) Resume(ctx context.Context, vmID string) error {
+	log.Printf("Resuming container VM %s", vmID)
+	
+	cmd := exec.CommandContext(ctx, "docker", "unpause", vmID)
+	output, err := cmd.CombinedOutput()
+	
+	if err != nil {
+		log.Printf("Failed to resume container %s: %v, output: %s", vmID, err, string(output))
+		return fmt.Errorf("failed to resume container: %w", err)
+	}
+	
+	return nil
+}
+
+// Snapshot creates a snapshot of a container VM (not supported)
+func (d *ContainerDriver) Snapshot(ctx context.Context, vmID, name string, params map[string]string) (string, error) {
+	return "", errors.New("snapshots not supported for container driver")
+}
+
+// Migrate migrates a container VM (not supported)
+func (d *ContainerDriver) Migrate(ctx context.Context, vmID, target string, params map[string]string) error {
+	return errors.New("migration not supported for container driver")
 }

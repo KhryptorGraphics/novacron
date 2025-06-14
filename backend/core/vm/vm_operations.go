@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/khryptorgraphics/novacron/backend/core/scheduler"
+	// "github.com/khryptorgraphics/novacron/backend/core/scheduler" // Temporarily commented out for testing
 )
 
 // Assuming CreateVMRequest has fields like Name string, Spec VMConfig, Tags map[string]string, Owner string

@@ -81,6 +81,15 @@ type User struct {
 
 	// UpdatedBy is the ID of the user who last updated this user
 	UpdatedBy string `json:"updatedBy,omitempty"`
+	
+	// IsSystemUser indicates if this is a system user
+	IsSystemUser bool `json:"isSystemUser,omitempty"`
+	
+	// Roles contains the actual role objects (computed field)
+	Roles []*Role `json:"roles,omitempty"`
+	
+	// Tenants contains the tenants this user has access to (computed field)
+	Tenants []*Tenant `json:"tenants,omitempty"`
 }
 
 // UserService provides operations for managing users
@@ -404,4 +413,16 @@ func (s *UserMemoryStore) GetRoles(userID string) ([]*Role, error) {
 	}
 
 	return roles, nil
+}
+
+// User methods
+
+// IsActive returns true if the user is active
+func (u *User) IsActive() bool {
+	return u.Status == UserStatusActive
+}
+
+// IsSystem returns true if the user is a system user
+func (u *User) IsSystem() bool {
+	return u.IsSystemUser
 }
