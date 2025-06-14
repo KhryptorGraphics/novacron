@@ -299,7 +299,6 @@ func (s *MigrationScheduler) ScheduleMigrationWithPriority(
 	impact := s.estimateResourceImpact(vmID, migrationType)
 
 	// Calculate estimated start and end times
-	now := time.Now()
 	startTime := s.estimateStartTime(priority, impact)
 	endTime := startTime.Add(time.Duration(impact.DurationSec) * time.Second)
 

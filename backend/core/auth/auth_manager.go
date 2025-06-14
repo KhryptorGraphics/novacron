@@ -249,7 +249,7 @@ func (m *AuthManager) Authorize(req AuthorizationRequest) (*AuthorizationResult,
 	}
 
 	// Check if the user is active
-	if !user.IsActive {
+	if !user.IsActive() {
 		result := &AuthorizationResult{
 			Authorized: false,
 			Reason:     "User account is not active",
@@ -267,7 +267,7 @@ func (m *AuthManager) Authorize(req AuthorizationRequest) (*AuthorizationResult,
 	}
 
 	// Check if the user belongs to the tenant
-	if !isUserInTenant(user, tenantID) && tenantID != "" && !user.IsSystem {
+	if !isUserInTenant(user, tenantID) && tenantID != "" && !user.IsSystem() {
 		result := &AuthorizationResult{
 			Authorized: false,
 			Reason:     "User does not belong to the specified tenant",
@@ -279,7 +279,7 @@ func (m *AuthManager) Authorize(req AuthorizationRequest) (*AuthorizationResult,
 	}
 
 	// For system users, authorize everything
-	if user.IsSystem {
+	if user.IsSystem() {
 		result := &AuthorizationResult{
 			Authorized: true,
 			Reason:     "System user has full access",
@@ -294,13 +294,8 @@ func (m *AuthManager) Authorize(req AuthorizationRequest) (*AuthorizationResult,
 	authorized := false
 	reason := "No matching permissions found in user roles"
 
-	for _, roleID := range user.Roles {
-		// Get the role
-		role, err := m.getRole(roleID)
-		if err != nil {
-			log.Printf("Warning: Could not get role %s: %v", roleID, err)
-			continue
-		}
+	for _, role := range user.Roles {
+		// Role is already loaded, no need to fetch it again
 
 		// Skip roles for other tenants
 		if role.TenantID != "" && role.TenantID != tenantID {
@@ -308,9 +303,9 @@ func (m *AuthManager) Authorize(req AuthorizationRequest) (*AuthorizationResult,
 		}
 
 		// Check if the role has the required permission
-		hasPermission, err := m.roleService.HasPermission(roleID, string(req.ResourceType), string(req.Action))
+		hasPermission, err := m.roleService.HasPermission(role.ID, string(req.ResourceType), string(req.Action))
 		if err != nil {
-			log.Printf("Warning: Error checking permission for role %s: %v", roleID, err)
+			log.Printf("Warning: Error checking permission for role %s: %v", role.ID, err)
 			continue
 		}
 
@@ -365,12 +360,12 @@ func (m *AuthManager) GetUserPermissions(userID, tenantID string) (map[ResourceT
 	}
 
 	// Check if the user belongs to the tenant
-	if !isUserInTenant(user, tenantID) && tenantID != "" && !user.IsSystem {
+	if !isUserInTenant(user, tenantID) && tenantID != "" && !user.IsSystem() {
 		return nil, fmt.Errorf("user does not belong to the specified tenant")
 	}
 
 	// For system users, return all permissions
-	if user.IsSystem {
+	if user.IsSystem() {
 		return map[ResourceType][]AuthorizationType{
 			ResourceTypeVM:      {AuthorizationTypeCreate, AuthorizationTypeRead, AuthorizationTypeUpdate, AuthorizationTypeDelete, AuthorizationTypeExecute},
 			ResourceTypeNode:    {AuthorizationTypeCreate, AuthorizationTypeRead, AuthorizationTypeUpdate, AuthorizationTypeDelete, AuthorizationTypeExecute},
@@ -386,13 +381,8 @@ func (m *AuthManager) GetUserPermissions(userID, tenantID string) (map[ResourceT
 	// Collect all permissions from user roles
 	permissions := make(map[ResourceType][]AuthorizationType)
 
-	for _, roleID := range user.Roles {
-		// Get the role
-		role, err := m.getRole(roleID)
-		if err != nil {
-			log.Printf("Warning: Could not get role %s: %v", roleID, err)
-			continue
-		}
+	for _, role := range user.Roles {
+		// Role is already loaded, no need to fetch it again
 
 		// Skip roles for other tenants
 		if role.TenantID != "" && role.TenantID != tenantID {
@@ -514,7 +504,7 @@ func isUserInTenant(user *User, tenantID string) bool {
 	}
 
 	for _, userTenant := range user.Tenants {
-		if userTenant == tenantID {
+		if userTenant.ID == tenantID {
 			return true
 		}
 	}

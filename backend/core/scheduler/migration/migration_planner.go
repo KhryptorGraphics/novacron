@@ -317,10 +317,19 @@ func (p *MigrationPlanner) GetEnhancedProfile(vmID string) (*workload.EnhancedWo
 	}
 
 	// Create an enhanced profile from the base profile
-	enhancedProfile := workload.NewEnhancedProfile(baseProfile)
+	enhancedProfile := workload.NewEnhancedProfile(vmID)
 
-	// Analyze patterns
-	enhancedProfile.DetectPatterns()
+	// Initialize the enhanced profile with base profile data if available
+	if baseProfile != nil {
+		// Create a profile adapter from the base profile
+		adapter := &workload.WorkloadProfileAdapter{
+			VMID: vmID,
+			HistoryDuration: time.Hour * 24, // Default 24 hours
+			LastUpdated: time.Now(),
+			ResourceUsage: make(map[string]workload.ResourceUsageStats),
+		}
+		enhancedProfile.SetWorkloadProfile(adapter)
+	}
 
 	// Store the enhanced profile
 	p.profileMutex.Lock()
@@ -363,15 +372,9 @@ func (p *MigrationPlanner) PlanMigration(
 		// Find an optimal window
 		enhancedProfile, err := p.GetEnhancedProfile(vmID)
 		if err == nil && enhancedProfile.IsStableWorkload() {
-			// Look for windows in the next 24 hours
+			// For stable workloads, find a time during preferred hours
 			now := time.Now()
-			windows := enhancedProfile.GetOptimalMigrationWindows(now, now.Add(24*time.Hour))
-			if len(windows) > 0 {
-				window = convertToMigrationWindow(windows[0])
-			} else {
-				// If no optimal windows, find a time during preferred hours
-				window = p.findPreferredMigrationWindow(now, now.Add(p.config.LookAheadPeriod))
-			}
+			window = p.findPreferredMigrationWindow(now, now.Add(p.config.LookAheadPeriod))
 		} else {
 			// If no profile or unstable workload, use preferred hours
 			now := time.Now()

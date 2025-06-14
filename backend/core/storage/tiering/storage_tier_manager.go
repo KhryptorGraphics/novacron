@@ -398,12 +398,8 @@ func (tm *TierManager) refreshVolumeInfo() error {
 				tm.volumeUsage[volumeName] = stats
 			}
 
-			// Update size if available in the info
-			if sizeGBVal, ok := info["size_gb"]; ok {
-				if sizeGB, ok := sizeGBVal.(float64); ok {
-					stats.SizeGB = sizeGB
-				}
-			}
+			// Update size from VolumeInfo
+			stats.SizeGB = float64(info.Size) / (1024 * 1024 * 1024) // Convert bytes to GB
 
 			// Update metadata store
 			metadata, exists := tm.metadataStore.volumeMetadata[volumeName]
@@ -463,7 +459,8 @@ func (tm *TierManager) moveVolumeBetweenTiers(volumeName string, sourceTier, tar
 		targetVolumeName = storedName
 	} else {
 		// Create a new volume in the target tier
-		if err := target.Driver.CreateVolume(tm.ctx, targetVolumeName, int(tm.volumeUsage[volumeName].SizeGB)); err != nil {
+		sizeBytes := int64(tm.volumeUsage[volumeName].SizeGB * 1024 * 1024 * 1024) // Convert GB to bytes
+		if err := target.Driver.CreateVolume(tm.ctx, targetVolumeName, sizeBytes); err != nil {
 			return fmt.Errorf("failed to create target volume: %v", err)
 		}
 
@@ -492,17 +489,35 @@ func (tm *TierManager) moveVolumeBetweenTiers(volumeName string, sourceTier, tar
 
 // copyVolumeData copies data from one volume to another, potentially across different drivers
 func (tm *TierManager) copyVolumeData(sourceVolume, targetVolume string, sourceDriver, targetDriver storage.StorageDriver) error {
-	// Read data from source volume
-	reader, err := sourceDriver.ReadVolumeData(tm.ctx, sourceVolume, 0, 0) // Read entire volume
+	// Get source volume info to determine size
+	sourceInfo, err := sourceDriver.GetVolumeInfo(tm.ctx, sourceVolume)
 	if err != nil {
-		return fmt.Errorf("failed to read source volume: %v", err)
+		return fmt.Errorf("failed to get source volume info: %v", err)
 	}
-	defer reader.Close()
 
-	// Write data to target volume
-	_, err = targetDriver.WriteVolumeData(tm.ctx, targetVolume, 0, reader)
-	if err != nil {
-		return fmt.Errorf("failed to write to target volume: %v", err)
+	// Read data from source volume in chunks to avoid memory issues
+	const chunkSize = 64 * 1024 * 1024 // 64MB chunks
+	var offset int64 = 0
+
+	for offset < sourceInfo.Size {
+		readSize := chunkSize
+		if offset+int64(chunkSize) > sourceInfo.Size {
+			readSize = int(sourceInfo.Size - offset)
+		}
+
+		// Read chunk from source
+		data, err := sourceDriver.ReadVolume(tm.ctx, sourceVolume, offset, readSize)
+		if err != nil {
+			return fmt.Errorf("failed to read from source volume at offset %d: %v", offset, err)
+		}
+
+		// Write chunk to target
+		err = targetDriver.WriteVolume(tm.ctx, targetVolume, offset, data)
+		if err != nil {
+			return fmt.Errorf("failed to write to target volume at offset %d: %v", offset, err)
+		}
+
+		offset += int64(len(data))
 	}
 
 	return nil

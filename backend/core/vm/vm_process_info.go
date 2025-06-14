@@ -28,7 +28,7 @@ type ResourceUsage struct {
 }
 
 // getProcessResourceUsage gets resource usage for a process
-func getProcessResourceUsage(pid int) (*ResourceUsage, error) {
+func getVMProcessResourceUsage(pid int) (*ResourceUsage, error) {
 	// Get CPU and memory usage using ps
 	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "%cpu,%mem,rss,nlwp", "--no-headers")
 	output, err := cmd.Output()

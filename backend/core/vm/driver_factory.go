@@ -3,8 +3,8 @@ package vm
 import (
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
-	"syscall"
 )
 
 // VMDriverConfig contains configuration for VM drivers
@@ -48,7 +48,14 @@ func NewVMDriverFactory(config VMDriverConfig) VMDriverFactory {
 	drivers := make(map[VMType]VMDriver)
 	
 	// Return the factory function
-	return func(vmType VMType) (VMDriver, error) {
+	return func(vmConfig VMConfig) (VMDriver, error) {
+		// Determine VM type from config - for now use a default
+		vmType := VMTypeKVM // Default type
+		if vmConfig.Tags != nil {
+			if t, ok := vmConfig.Tags["vm_type"]; ok {
+				vmType = VMType(t)
+			}
+		}
 		// Check if we have already initialized this driver type
 		if driver, exists := drivers[vmType]; exists {
 			return driver, nil
@@ -61,11 +68,22 @@ func NewVMDriverFactory(config VMDriverConfig) VMDriverFactory {
 		switch vmType {
 		case VMTypeContainer:
 			log.Printf("Initializing container driver")
-			driver = NewContainerDriver(config.NodeID)
+			driverConfig := map[string]interface{}{
+				"node_id": config.NodeID,
+			}
+			driver, err = NewContainerDriver(driverConfig)
+			if err != nil {
+				return nil, fmt.Errorf("failed to initialize container driver: %w", err)
+			}
 			
 		case VMTypeContainerd:
 			log.Printf("Initializing containerd driver with namespace %s", config.ContainerdNamespace)
-			driver, err = NewContainerdDriver(config.NodeID, config.ContainerdAddress, config.ContainerdNamespace)
+			driverConfig := map[string]interface{}{
+				"node_id":   config.NodeID,
+				"address":   config.ContainerdAddress,
+				"namespace": config.ContainerdNamespace,
+			}
+			driver, err = NewContainerdDriver(driverConfig)
 			if err != nil {
 				return nil, fmt.Errorf("failed to initialize containerd driver: %w", err)
 			}
@@ -76,7 +94,15 @@ func NewVMDriverFactory(config VMDriverConfig) VMDriverFactory {
 			if err := makeDirectoryIfNotExists(config.VMBasePath); err != nil {
 				log.Printf("Warning: Failed to create VM base path %s: %v", config.VMBasePath, err)
 			}
-			driver = NewKVMDriver(config.NodeID, config.QEMUBinaryPath, config.VMBasePath)
+			driverConfig := map[string]interface{}{
+				"node_id":    config.NodeID,
+				"qemu_path":  config.QEMUBinaryPath,
+				"vm_path":    config.VMBasePath,
+			}
+			driver, err = NewKVMDriver(driverConfig)
+			if err != nil {
+				return nil, fmt.Errorf("failed to initialize KVM driver: %w", err)
+			}
 			
 		case VMTypeProcess:
 			log.Printf("Initializing process driver with base path %s", config.ProcessBasePath)
@@ -84,7 +110,8 @@ func NewVMDriverFactory(config VMDriverConfig) VMDriverFactory {
 			if err := makeDirectoryIfNotExists(config.ProcessBasePath); err != nil {
 				log.Printf("Warning: Failed to create process base path %s: %v", config.ProcessBasePath, err)
 			}
-			driver = NewProcessDriver(config.NodeID, config.ProcessBasePath)
+			// Process driver doesn't exist yet, return error for now
+			return nil, fmt.Errorf("process driver not implemented yet")
 			
 		default:
 			return nil, fmt.Errorf("unsupported VM type: %s", vmType)
@@ -100,36 +127,18 @@ func NewVMDriverFactory(config VMDriverConfig) VMDriverFactory {
 // Helper to create a directory if it doesn't exist
 func makeDirectoryIfNotExists(path string) error {
 	// Check if directory exists
-	if _, err := syscall.Stat(path); err == nil {
+	if _, err := os.Stat(path); err == nil {
 		return nil // Directory exists
-	} else if !isNotExistError(err) {
+	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("failed to check directory: %w", err)
 	}
 	
 	// Create all directories in the path
-	if err := syscall.Mkdir(path, 0755); err != nil {
-		if !isExistError(err) {
-			return fmt.Errorf("failed to create directory: %w", err)
-		}
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
 	}
 	
 	return nil
-}
-
-// Helper to check if error is "not exists"
-func isNotExistError(err error) bool {
-	if e, ok := err.(*syscall.Errno); ok {
-		return e.Error() == syscall.ENOENT.Error()
-	}
-	return false
-}
-
-// Helper to check if error is "exists"
-func isExistError(err error) bool {
-	if e, ok := err.(*syscall.Errno); ok {
-		return e.Error() == syscall.EEXIST.Error()
-	}
-	return false
 }
 
 // VMDriverManager manages VM drivers
@@ -149,14 +158,22 @@ func NewVMDriverManager(config VMDriverConfig) *VMDriverManager {
 }
 
 // GetDriver gets a driver for a VM type
-func (m *VMDriverManager) GetDriver(vmType VMType) (VMDriver, error) {
+func (m *VMDriverManager) GetDriver(vmConfig VMConfig) (VMDriver, error) {
+	// Determine VM type from config - for now use a default
+	vmType := VMTypeKVM // Default type
+	if vmConfig.Tags != nil {
+		if t, ok := vmConfig.Tags["vm_type"]; ok {
+			vmType = VMType(t)
+		}
+	}
+	
 	// Check if we have already initialized this driver
 	if driver, exists := m.drivers[vmType]; exists {
 		return driver, nil
 	}
 	
 	// Initialize the driver
-	driver, err := m.factory(vmType)
+	driver, err := m.factory(vmConfig)
 	if err != nil {
 		return nil, err
 	}

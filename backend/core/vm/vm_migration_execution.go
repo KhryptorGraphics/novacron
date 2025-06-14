@@ -19,7 +19,7 @@ type MigrationExecutorImpl struct {
 }
 
 // NewMigrationExecutor creates a new MigrationExecutor
-func NewMigrationExecutor(logger *logrus.Logger, storageDir string) (*MigrationExecutorImpl, error) {
+func NewVMMigrationExecutor(logger *logrus.Logger, storageDir string) (*MigrationExecutorImpl, error) {
 	// Ensure the storage directory exists
 	if err := os.MkdirAll(storageDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create migration storage directory: %w", err)
@@ -351,7 +351,7 @@ func (e *MigrationExecutorImpl) transferVMData(migrationID string, vm *VM, targe
 
 		// Copy disk to temporary location
 		logger.Infof("Copying disk %d to temporary location", i)
-		copiedBytes, err := copyFile(diskPath, tmpDiskPath)
+		copiedBytes, err := copyFileWithProgress(diskPath, tmpDiskPath)
 		if err != nil {
 			return fmt.Errorf("failed to copy disk to temporary location: %w", err)
 		}
@@ -411,7 +411,7 @@ func (e *MigrationExecutorImpl) transferVMMemoryState(migrationID string, vm *VM
 
 	// Copy memory state to temporary location
 	logger.Info("Copying memory state to temporary location")
-	copiedBytes, err := copyFile(memoryStatePath, tmpMemoryPath)
+	copiedBytes, err := copyFileWithProgress(memoryStatePath, tmpMemoryPath)
 	if err != nil {
 		return fmt.Errorf("failed to copy memory state to temporary location: %w", err)
 	}
@@ -464,7 +464,7 @@ func (e *MigrationExecutorImpl) transferVMMemoryDelta(migrationID string, vm *VM
 
 	// Copy memory delta to temporary location
 	logger.Info("Copying memory delta to temporary location")
-	copiedBytes, err := copyFile(memoryDeltaPath, tmpMemoryDeltaPath)
+	copiedBytes, err := copyFileWithProgress(memoryDeltaPath, tmpMemoryDeltaPath)
 	if err != nil {
 		return fmt.Errorf("failed to copy memory delta to temporary location: %w", err)
 	}
@@ -522,21 +522,7 @@ func (e *MigrationExecutorImpl) RollbackMigration(migrationID string, vm *VM, so
 // Helper functions
 
 // copyFile copies a file from src to dst, returns number of bytes copied
-func copyFile(src, dst string) (int64, error) {
-	sourceFile, err := os.Open(src)
-	if err != nil {
-		return 0, err
-	}
-	defer sourceFile.Close()
-
-	destFile, err := os.Create(dst)
-	if err != nil {
-		return 0, err
-	}
-	defer destFile.Close()
-
-	return io.Copy(destFile, sourceFile)
-}
+// copyFileWithProgress function moved to file_utils.go to avoid duplication
 
 // isDirtyRateAcceptable checks if the memory dirty rate is low enough to proceed
 func isDirtyRateAcceptable(vm *VM) bool {

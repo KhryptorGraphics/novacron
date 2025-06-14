@@ -323,7 +323,7 @@ func ValidatePassword(password, hashedPassword string) bool {
 		return false
 	}
 
-	salt, hash := parts[0], parts[1]
+	salt, _ := parts[0], parts[1]
 	expected := HashPassword(password, salt)
 	return expected == hashedPassword
 }

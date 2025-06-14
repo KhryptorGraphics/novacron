@@ -41,6 +41,10 @@ type AuditEntry struct {
 
 	// AdditionalData contains additional information about the action
 	AdditionalData map[string]interface{} `json:"additionalData,omitempty"`
+	
+	// Compatibility fields
+	Resource    string `json:"resource,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 // AuditService provides operations for audit logging
@@ -56,7 +60,13 @@ type AuditService interface {
 
 	// GetResourceActions gets all actions performed on a resource
 	GetResourceActions(resourceType, resourceID string, startTime, endTime time.Time, limit, offset int) ([]*AuditEntry, error)
+	
+	// Log method for compatibility
+	Log(entry AuditEntry) error
 }
+
+// AuditLogService is an alias for AuditService for compatibility
+type AuditLogService = AuditService
 
 // InMemoryAuditService is an in-memory implementation of AuditService
 type InMemoryAuditService struct {
@@ -115,4 +125,22 @@ func (s *InMemoryAuditService) GetUserActions(userID string, startTime, endTime 
 // GetResourceActions gets all actions performed on a resource
 func (s *InMemoryAuditService) GetResourceActions(resourceType, resourceID string, startTime, endTime time.Time, limit, offset int) ([]*AuditEntry, error) {
 	return s.GetAuditTrail("", "", resourceType, resourceID, startTime, endTime, limit, offset)
+}
+
+// Log logs an audit entry (compatibility method)
+func (s *InMemoryAuditService) Log(entry AuditEntry) error {
+	if entry.ID == "" {
+		entry.ID = time.Now().Format(time.RFC3339Nano)
+	}
+	if entry.Timestamp.IsZero() {
+		entry.Timestamp = time.Now()
+	}
+	// Map compatibility fields to proper fields
+	if entry.Resource != "" && entry.ResourceType == "" {
+		entry.ResourceType = entry.Resource
+	}
+	if entry.Description != "" && entry.Reason == "" {
+		entry.Reason = entry.Description
+	}
+	return s.LogAccess(&entry)
 }

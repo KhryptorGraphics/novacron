@@ -1,15 +1,136 @@
 package vm
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 )
 
-// NOTE: VMManager struct definition, NewVMManager function, VMManagerConfig,
-// VMDriverFactory, VMManagerEventListener are likely defined in vm_types.go or another central file.
-// Removing duplicate definitions from here.
+// VMManager manages virtual machines across different drivers
+type VMManager struct {
+	drivers       map[VMType]VMDriver
+	scheduler     VMScheduler
+	eventListeners []VMManagerEventListener
+	eventMutex    sync.RWMutex
+	vmCache       map[string]VMInfo
+	mutex         sync.RWMutex
+	ctx           context.Context
+	cancel        context.CancelFunc
+}
+
+// VMManagerConfig contains configuration for the VM manager
+type VMManagerConfig struct {
+	DefaultDriver VMType
+	Drivers       map[VMType]VMDriverConfig
+	Scheduler     VMSchedulerConfig
+}
+
+// VMDriverConfigLegacy contains legacy driver-specific configuration (use driver_factory.go VMDriverConfig instead)
+type VMDriverConfigLegacy struct {
+	Enabled bool
+	Config  map[string]interface{}
+}
+
+// VMSchedulerConfig contains scheduler configuration
+type VMSchedulerConfig struct {
+	Type   string
+	Config map[string]interface{}
+}
+
+// VMManagerEventListener defines the interface for VM event listeners
+type VMManagerEventListener interface {
+	OnVMEvent(event VMEvent)
+}
+
+// VMEvent, VMEventType and related constants are defined in vm_events.go to avoid duplication
+
+// NewVMManager creates a new VM manager instance
+func NewVMManager(config VMManagerConfig) (*VMManager, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	
+	manager := &VMManager{
+		drivers:        make(map[VMType]VMDriver),
+		eventListeners: make([]VMManagerEventListener, 0),
+		vmCache:        make(map[string]VMInfo),
+		ctx:            ctx,
+		cancel:         cancel,
+	}
+
+	// Initialize drivers based on config
+	for driverType, driverConfig := range config.Drivers {
+		if !driverConfig.Enabled {
+			continue
+		}
+
+		driver, err := createDriver(driverType, driverConfig.Config)
+		if err != nil {
+			log.Printf("Failed to create driver %s: %v", driverType, err)
+			continue
+		}
+
+		manager.drivers[driverType] = driver
+		log.Printf("Initialized driver: %s", driverType)
+	}
+
+	// Initialize scheduler if configured
+	if config.Scheduler.Type != "" {
+		scheduler, err := createScheduler(config.Scheduler)
+		if err != nil {
+			log.Printf("Failed to create scheduler: %v", err)
+		} else {
+			manager.scheduler = scheduler
+		}
+	}
+
+	return manager, nil
+}
+
+// createDriver creates a driver instance based on type and config
+func createDriver(driverType VMType, config map[string]interface{}) (VMDriver, error) {
+	switch driverType {
+	case VMTypeKVM:
+		uri, ok := config["uri"].(string)
+		if !ok {
+			uri = "qemu:///system" // Default KVM URI
+		}
+		return NewKVMDriver(uri)
+	case VMTypeContainer:
+		return NewContainerDriver(config)
+	case VMTypeContainerd:
+		return NewContainerdDriver(config)
+	default:
+		return nil, fmt.Errorf("unsupported driver type: %s", driverType)
+	}
+}
+
+// createScheduler creates a scheduler instance based on config
+func createScheduler(config VMSchedulerConfig) (VMScheduler, error) {
+	// For now, return a basic scheduler
+	// This can be expanded to support different scheduler types
+	return NewBasicScheduler(), nil
+}
+
+// emitEvent emits a VM event to all registered listeners
+func (m *VMManager) emitEvent(event VMEvent) {
+	m.eventMutex.RLock()
+	listeners := make([]VMManagerEventListener, len(m.eventListeners))
+	copy(listeners, m.eventListeners)
+	m.eventMutex.RUnlock()
+
+	for _, listener := range listeners {
+		go func(l VMManagerEventListener) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("VMManager: Event listener panicked: %v", r)
+				}
+			}()
+			l.OnVMEvent(event)
+		}(listener)
+	}
+}
 
 // Start starts the VM manager
 func (m *VMManager) Start() error { // Assuming m is *VMManager defined elsewhere
@@ -125,63 +246,8 @@ func (m *VMManager) CountVMsByState() map[VMState]int {
 	return result
 }
 
-// emitEvent emits an event to all registered listeners
-func (m *VMManager) emitEvent(event VMEvent) { // Assuming VMEvent is defined elsewhere
-	m.eventMutex.RLock()
-	defer m.eventMutex.RUnlock()
 
-	// Make a copy of the listeners to avoid blocking during event processing
-	listeners := make([]VMManagerEventListener, len(m.eventListeners))
-	copy(listeners, m.eventListeners)
 
-	// Process events asynchronously
-	for _, listener := range listeners {
-		go func(l VMManagerEventListener, e VMEvent) {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("Recovered from panic in event listener: %v", r)
-				}
-			}()
-
-			l(e)
-		}(listener, event)
-	}
-
-	// Log the event
-	// Corrected: Use methods to access VM fields within the event
-	log.Printf("VM event: type=%s, vm=%s, node=%s, message=%s",
-		event.Type, event.VM.ID(), event.NodeID, event.Message) // Use VM.ID()
-}
-
-// updateLoop periodically updates the status of VMs
-func (m *VMManager) updateLoop() {
-	ticker := time.NewTicker(m.config.UpdateInterval) // Assuming config is part of VMManager struct
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-m.ctx.Done(): // Assuming ctx is part of VMManager struct
-			return
-		case <-ticker.C:
-			m.updateVMs()
-		}
-	}
-}
-
-// cleanupLoop periodically cleans up expired VMs
-func (m *VMManager) cleanupLoop() {
-	ticker := time.NewTicker(m.config.CleanupInterval) // Assuming config is part of VMManager struct
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-m.ctx.Done():
-			return
-		case <-ticker.C:
-			m.cleanupVMs()
-		}
-	}
-}
 
 // getDriver gets a driver for a VM type
 func (m *VMManager) getDriver(config VMConfig) (VMDriver, error) { // Takes VMConfig now
@@ -222,17 +288,3 @@ func (m *VMManager) listAvailableVMTypes() []VMType { // Assuming VMType is defi
 	return availableTypes
 }
 
-// --- Internal methods to be implemented ---
-
-func (m *VMManager) updateVMs() {
-	// TODO: Implement logic to update VM statuses and metrics
-	log.Println("VMManager: Running updateVMs loop (implementation pending)")
-}
-
-func (m *VMManager) cleanupVMs() {
-	// TODO: Implement logic to clean up VMs marked for deletion or expired
-	log.Println("VMManager: Running cleanupVMs loop (implementation pending)")
-}
-
-// Note: Actual VMManager struct and NewVMManager function should be defined in vm_types.go
-// The methods below are defined here but operate on the VMManager type assumed to be defined elsewhere.

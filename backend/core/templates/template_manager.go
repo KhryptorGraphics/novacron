@@ -876,4 +876,8 @@ func (m *TemplateManager) CloneTemplate(sourceID, newID, newName, newVersion, ow
 		Type:                      sourceTemplate.Type,
 		State:                     DraftState, // New clones are drafts
 		Version:                   newVersion,
-		BaseImageID:               sourceTemplate.Base
+		BaseImageID:               sourceTemplate.BaseImageID,
+	}
+	
+	return newTemplate, nil
+}

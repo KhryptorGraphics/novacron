@@ -870,3 +870,89 @@ func (s *FileSystemVersionStore) DeleteVersion(ctx context.Context, policyID, ve
 
 	return nil
 }
+
+// InMemoryPolicyVersionStore is an in-memory implementation of PolicyVersionStore
+type InMemoryPolicyVersionStore struct {
+	versions map[string]map[string]*PolicyVersion // policyID -> versionID -> version
+	mutex    sync.RWMutex
+}
+
+// NewInMemoryPolicyVersionStore creates a new in-memory policy version store
+func NewInMemoryPolicyVersionStore() PolicyVersionStore {
+	return &InMemoryPolicyVersionStore{
+		versions: make(map[string]map[string]*PolicyVersion),
+	}
+}
+
+// SaveVersion saves a policy version
+func (s *InMemoryPolicyVersionStore) SaveVersion(ctx context.Context, version *PolicyVersion) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if s.versions[version.PolicyID] == nil {
+		s.versions[version.PolicyID] = make(map[string]*PolicyVersion)
+	}
+
+	s.versions[version.PolicyID][version.VersionID] = version
+	return nil
+}
+
+// GetVersion retrieves a policy version
+func (s *InMemoryPolicyVersionStore) GetVersion(ctx context.Context, policyID, versionID string) (*PolicyVersion, error) {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	policyVersions, exists := s.versions[policyID]
+	if !exists {
+		return nil, fmt.Errorf("policy not found: %s", policyID)
+	}
+
+	version, exists := policyVersions[versionID]
+	if !exists {
+		return nil, fmt.Errorf("version not found: %s for policy %s", versionID, policyID)
+	}
+
+	return version, nil
+}
+
+// ListVersions lists all versions for a policy
+func (s *InMemoryPolicyVersionStore) ListVersions(ctx context.Context, policyID string) ([]*PolicyVersion, error) {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	policyVersions, exists := s.versions[policyID]
+	if !exists {
+		return []*PolicyVersion{}, nil
+	}
+
+	versions := make([]*PolicyVersion, 0, len(policyVersions))
+	for _, version := range policyVersions {
+		versions = append(versions, version)
+	}
+
+	return versions, nil
+}
+
+// DeleteVersion deletes a version
+func (s *InMemoryPolicyVersionStore) DeleteVersion(ctx context.Context, policyID, versionID string) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	policyVersions, exists := s.versions[policyID]
+	if !exists {
+		return fmt.Errorf("policy not found: %s", policyID)
+	}
+
+	if _, exists := policyVersions[versionID]; !exists {
+		return fmt.Errorf("version not found: %s for policy %s", versionID, policyID)
+	}
+
+	delete(policyVersions, versionID)
+	
+	// Clean up empty policy maps
+	if len(policyVersions) == 0 {
+		delete(s.versions, policyID)
+	}
+
+	return nil
+}
