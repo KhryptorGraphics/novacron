@@ -1,10 +1,14 @@
 package analytics
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"math"
 	"sort"
 	"time"
+
+	"github.com/khryptorgraphics/novacron/backend/core/monitoring"
 )
 
 // TrendAnalyzer analyzes trends in metrics

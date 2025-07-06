@@ -14,7 +14,7 @@ import (
 )
 
 // ObjectStorageDriver implements the StorageDriver interface for object storage systems
-// like Amazon S3, OpenStack Swift, Google Cloud Storage, Azure Blob Storage, etc.
+// like OpenStack Swift and local object storage.
 type ObjectStorageDriver struct {
 	// Configuration
 	config ObjectStorageConfig
@@ -38,7 +38,7 @@ type ObjectStorageDriver struct {
 
 // ObjectStorageConfig contains configuration for object storage providers
 type ObjectStorageConfig struct {
-	// Provider type (s3, swift, gcs, azure)
+	// Provider type (swift, local)
 	Provider string
 
 	// Authentication credentials
@@ -62,8 +62,8 @@ type ObjectStorageConfig struct {
 	RequestTimeoutSec int
 	MaxRetries        int
 
-	// Enable path-style addressing for S3 (vs virtual-host style)
-	S3ForcePathStyle bool
+	// Force path-style addressing (vs virtual-host style)
+	ForcePathStyle bool
 
 	// Use SSL/TLS
 	UseSSL bool
@@ -96,13 +96,13 @@ type BucketInfo struct {
 // DefaultObjectStorageConfig returns a default configuration for S3-compatible storage
 func DefaultObjectStorageConfig() ObjectStorageConfig {
 	return ObjectStorageConfig{
-		Provider:          "s3",
-		Endpoint:          "s3.amazonaws.com",
+		Provider:          "local",
+		Endpoint:          "localhost:8080",
 		Region:            "us-east-1",
 		ConnectTimeoutSec: 30,
 		RequestTimeoutSec: 60,
 		MaxRetries:        3,
-		S3ForcePathStyle:  false,
+		ForcePathStyle:    false,
 		UseSSL:            true,
 		SkipSSLVerify:     false,
 	}
@@ -161,14 +161,6 @@ func (d *ObjectStorageDriver) Initialize() error {
 // authenticate performs provider-specific authentication
 func (d *ObjectStorageDriver) authenticate() error {
 	switch d.config.Provider {
-	case "s3":
-		// For S3, authentication is per-request using access/secret keys
-		// Just verify that we have the required credentials
-		if d.config.AccessKey == "" || d.config.SecretKey == "" {
-			return fmt.Errorf("S3 requires AccessKey and SecretKey")
-		}
-		return nil
-
 	case "swift":
 		// For Swift, we need to obtain an auth token
 		// In a real implementation, this would make a request to the auth endpoint
@@ -176,18 +168,8 @@ func (d *ObjectStorageDriver) authenticate() error {
 		d.authExpiry = time.Now().Add(24 * time.Hour)
 		return nil
 
-	case "gcs":
-		// For GCS, typically uses service account JSON or access/secret keys
-		if d.config.AccessKey == "" || d.config.SecretKey == "" {
-			return fmt.Errorf("GCS requires AccessKey and SecretKey")
-		}
-		return nil
-
-	case "azure":
-		// For Azure, authenticate with account name/key
-		if d.config.AccessKey == "" || d.config.SecretKey == "" {
-			return fmt.Errorf("Azure requires AccessKey (account name) and SecretKey (account key)")
-		}
+	case "local":
+		// For local storage, no authentication needed
 		return nil
 
 	default:
@@ -736,6 +718,6 @@ var ObjectStoragePluginInfo = struct {
 	Type:        "StorageDriver",
 	Name:        "object-storage",
 	Version:     "1.0.0",
-	Description: "Object storage driver for S3, Swift, GCS, and Azure Blob Storage",
+	Description: "Object storage driver for Swift and local object storage",
 	NewFunc:     NewObjectStorageDriver,
 }

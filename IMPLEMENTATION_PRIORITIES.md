@@ -9,15 +9,7 @@ Complete the core infrastructure components to enable full VM lifecycle manageme
 
 ### Key Tasks
 
-#### 1.1 AWS Provider (2 weeks)
-- Replace mock implementations with real AWS SDK calls in `aws_provider.go`
-- Implement proper error handling and retry logic for API calls
-- Add pagination support for listing resources
-- Implement resource tagging and metadata management
-- Add CloudWatch metrics collection integration
-- Develop comprehensive testing against AWS environments
-
-#### 1.2 KVM Manager (2 weeks)
+#### 1.1 KVM Manager (2 weeks)
 - Complete VM lifecycle methods in `kvm_manager.go`:
   - Implement `CreateVM` with XML definition generation
   - Implement `DeleteVM` with proper resource cleanup

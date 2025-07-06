@@ -3,13 +3,17 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/gorilla/handlers"
+	"github.com/gorilla/mux"
 	"github.com/khryptorgraphics/novacron/backend/core/vm"
 )
 
@@ -115,7 +119,15 @@ func main() {
 	metricsCollector.Start()
 
 	// Create HTTP server
-	// TODO: Implement HTTP server
+	server := createHTTPServer(*listenAddr, vmManager)
+	
+	// Start HTTP server in goroutine
+	go func() {
+		log.Printf("Starting HTTP server on %s", *listenAddr)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("HTTP server failed: %v", err)
+		}
+	}()
 
 	// Wait for interrupt signal
 	sigCh := make(chan os.Signal, 1)
@@ -138,7 +150,169 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// TODO: Shutdown HTTP server
+	// Shutdown HTTP server
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("HTTP server shutdown error: %v", err)
+	}
 
 	log.Println("Shutdown complete")
+}
+
+// createHTTPServer creates and configures the HTTP server
+func createHTTPServer(listenAddr string, vmManager *vm.VMManager) *http.Server {
+	router := mux.NewRouter()
+	
+	// API routes
+	api := router.PathPrefix("/api/v1").Subrouter()
+	
+	// VM management endpoints
+	api.HandleFunc("/vms", handleListVMs(vmManager)).Methods("GET")
+	api.HandleFunc("/vms", handleCreateVM(vmManager)).Methods("POST")
+	api.HandleFunc("/vms/{id}", handleGetVM(vmManager)).Methods("GET")
+	api.HandleFunc("/vms/{id}", handleDeleteVM(vmManager)).Methods("DELETE")
+	api.HandleFunc("/vms/{id}/start", handleStartVM(vmManager)).Methods("POST")
+	api.HandleFunc("/vms/{id}/stop", handleStopVM(vmManager)).Methods("POST")
+	api.HandleFunc("/vms/{id}/metrics", handleGetVMMetrics(vmManager)).Methods("GET")
+	
+	// Health check
+	api.HandleFunc("/health", handleHealth).Methods("GET")
+	
+	// Serve static files (frontend)
+	router.PathPrefix("/").Handler(http.FileServer(http.Dir("./frontend/dist/")))
+	
+	// CORS middleware
+	corsHandler := handlers.CORS(
+		handlers.AllowedOrigins([]string{"*"}),
+		handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}),
+		handlers.AllowedHeaders([]string{"*"}),
+	)(router)
+	
+	return &http.Server{
+		Addr:         listenAddr,
+		Handler:      corsHandler,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+}
+
+// HTTP handlers
+func handleListVMs(vmManager *vm.VMManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vms, err := vmManager.ListVMs(r.Context())
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to list VMs: %v", err), http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"vms": %d, "status": "success"}`, len(vms))
+	}
+}
+
+func handleCreateVM(vmManager *vm.VMManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Basic VM creation - would parse JSON body in real implementation
+		vmConfig := vm.VMConfig{
+			Name:      "test-vm",
+			CPUShares: 2,
+			MemoryMB:  2048,
+			RootFS:    "/var/lib/libvirt/images/test-vm.qcow2",
+		}
+		
+		vmInfo, err := vmManager.CreateVM(r.Context(), vmConfig)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to create VM: %v", err), http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"id": "%s", "name": "%s", "status": "created"}`, vmInfo.ID, vmInfo.Name)
+	}
+}
+
+func handleGetVM(vmManager *vm.VMManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		vmID := vars["id"]
+		
+		state, err := vmManager.GetVMStatus(r.Context(), vmID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get VM status: %v", err), http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"id": "%s", "state": "%s"}`, vmID, state)
+	}
+}
+
+func handleDeleteVM(vmManager *vm.VMManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		vmID := vars["id"]
+		
+		err := vmManager.DeleteVM(r.Context(), vmID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to delete VM: %v", err), http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"id": "%s", "status": "deleted"}`, vmID)
+	}
+}
+
+func handleStartVM(vmManager *vm.VMManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		vmID := vars["id"]
+		
+		err := vmManager.StartVM(r.Context(), vmID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to start VM: %v", err), http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"id": "%s", "status": "started"}`, vmID)
+	}
+}
+
+func handleStopVM(vmManager *vm.VMManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		vmID := vars["id"]
+		
+		err := vmManager.StopVM(r.Context(), vmID, false)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to stop VM: %v", err), http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"id": "%s", "status": "stopped"}`, vmID)
+	}
+}
+
+func handleGetVMMetrics(vmManager *vm.VMManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		vmID := vars["id"]
+		
+		metrics, err := vmManager.GetVMMetrics(r.Context(), vmID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get VM metrics: %v", err), http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"id": "%s", "cpu_usage": %.2f, "memory_usage": %d}`, 
+			vmID, metrics.CPUUsage, metrics.MemoryUsage)
+	}
+}
+
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"status": "healthy", "timestamp": "%s"}`, time.Now().Format(time.RFC3339))
 }

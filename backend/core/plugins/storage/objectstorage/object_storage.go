@@ -29,7 +29,7 @@ var ObjectStoragePluginInfo = PluginInfo{
 
 // ObjectStorageConfig contains configuration for the object storage driver
 type ObjectStorageConfig struct {
-	// Storage provider: s3, azure, gcs
+	// Storage provider: swift, local
 	Provider string `json:"provider"`
 
 	// Endpoint URL (for S3-compatible storage)
