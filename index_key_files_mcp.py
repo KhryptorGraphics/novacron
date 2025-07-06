@@ -38,9 +38,6 @@ def index_important_files():
         
         # Cloud providers
         "backend/core/cloud/provider_interface.go",
-        "backend/core/cloud/aws_provider.go",
-        "backend/core/cloud/azure_provider.go",
-        "backend/core/cloud/gcp_provider.go",
         
         # Monitoring
         "backend/core/monitoring/collectors.go",
