@@ -49,7 +49,7 @@ func (e *MigrationExecutorImpl) ExecuteColdMigration(migrationID string, vm *VM,
 
 	// Step 1: Stop the VM on the source node
 	logger.Info("Stopping VM on source node")
-	if vm.State == VMStateRunning {
+	if vm.State() == VMStateRunning {
 		if err := vm.Stop(); err != nil {
 			return fmt.Errorf("failed to stop VM on source node: %w", err)
 		}

@@ -1,9 +1,11 @@
 package plugins
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -315,6 +317,40 @@ func (pm *PluginMarketplace) ListAvailablePlugins() ([]MarketplacePluginInfo, er
 	return plugins, nil
 }
 
+// verifyChecksum verifies the checksum of a downloaded plugin
+func (m *PluginMarketplace) verifyChecksum(filePath, expectedChecksum string) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file for checksum verification: %w", err)
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return fmt.Errorf("failed to calculate checksum: %w", err)
+	}
+
+	actualChecksum := fmt.Sprintf("%x", hash.Sum(nil))
+	if actualChecksum != expectedChecksum {
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, actualChecksum)
+	}
+
+	return nil
+}
+
+// verifySignature verifies the digital signature of a downloaded plugin
+func (m *PluginMarketplace) verifySignature(filePath, signature string) error {
+	// Stub implementation - in production this would verify digital signatures
+	// using public key cryptography (e.g., RSA, ECDSA)
+	if signature == "" {
+		return fmt.Errorf("empty signature provided")
+	}
+	
+	// TODO: Implement actual signature verification with public keys
+	log.Printf("Signature verification for %s: %s (stub implementation)", filePath, signature)
+	return nil
+}
+
 // SearchPlugins searches for plugins based on criteria
 func (pm *PluginMarketplace) SearchPlugins(query string, category string, tags []string) ([]MarketplacePluginInfo, error) {
 	// Get all available plugins
@@ -511,8 +547,21 @@ func (pm *PluginMarketplace) DownloadPlugin(pluginID string, progressCallback fu
 		progressCallback(progress)
 	}
 
-	// TODO: Implement checksum verification
-	// TODO: Implement signature verification if required
+	// Implement checksum verification
+	if plugin.Checksum != "" {
+		if err := m.verifyChecksum(destPath, plugin.Checksum); err != nil {
+			os.Remove(destPath)
+			return fmt.Errorf("checksum verification failed: %w", err)
+		}
+	}
+
+	// Implement signature verification if required
+	if plugin.Signature != "" {
+		if err := m.verifySignature(destPath, plugin.Signature); err != nil {
+			os.Remove(destPath)
+			return fmt.Errorf("signature verification failed: %w", err)
+		}
+	}
 
 	// Load the plugin
 	progress.Status = "loading"

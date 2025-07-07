@@ -55,6 +55,16 @@ const (
 
 	// StateFailed means the VM has failed to start or has crashed
 	StateFailed State = "failed"
+	
+	// Legacy state constants for compatibility
+	VMStateError     = StateFailed
+	VMStateRunning   = StateRunning
+	VMStateDeleting  = StateDeleting
+	VMStateCreating  = StateCreating
+	VMStateMigrating = StateMigrating
+	VMStateSuspended = StatePaused
+	VMStatePaused    = StatePaused
+	VMStateStopped   = StateStopped
 )
 
 // VMConfig holds configuration for a VM
@@ -135,7 +145,19 @@ type VMStats struct {
 	LastUpdated time.Time
 }
 
-// VMProcessInfo is defined in vm_process_info.go
+// VMProcessInfo holds process information for a VM
+type VMProcessInfo struct {
+	PID              int
+	PPID             int
+	Command          string
+	Args             []string
+	StartTime        time.Time
+	CPUTime          time.Duration
+	MemoryRSS        int64
+	MemoryVSZ        int64
+	CPUUsagePercent  float64
+	MemoryUsageMB    int64
+}
 
 // NewVM creates a new VM instance
 func NewVM(config VMConfig) (*VM, error) {
@@ -545,4 +567,76 @@ func (vm *VM) collectStats() {
 	vm.statsLock.Lock()
 	defer vm.statsLock.Unlock()
 	vm.stats.LastUpdated = time.Now()
+}
+
+// SetStartedAt sets the started time
+func (vm *VM) SetStartedAt(t time.Time) {
+	vm.mutex.Lock()
+	defer vm.mutex.Unlock()
+	vm.startedAt = &t
+	vm.updatedAt = time.Now()
+}
+
+// Config returns the VM configuration
+func (vm *VM) Config() VMConfig {
+	vm.mutex.RLock()
+	defer vm.mutex.RUnlock()
+	return vm.config
+}
+
+// ErrorMessage returns the VM's error message
+func (vm *VM) ErrorMessage() string {
+	vm.mutex.RLock()
+	defer vm.mutex.RUnlock()
+	// Return empty string for now, can be extended with actual error field
+	return ""
+}
+
+// CreatedAt returns when the VM was created
+func (vm *VM) CreatedAt() time.Time {
+	vm.mutex.RLock()
+	defer vm.mutex.RUnlock()
+	return vm.createdAt
+}
+
+// Delete deletes the VM (stub implementation)
+func (vm *VM) Delete() error {
+	vm.mutex.Lock()
+	defer vm.mutex.Unlock()
+	vm.state = StateDeleting
+	// Stub implementation - would actually delete VM resources
+	return nil
+}
+
+// ResumeFromState resumes VM from a saved state (stub implementation)
+func (vm *VM) ResumeFromState(statePath string) error {
+	vm.mutex.Lock()
+	defer vm.mutex.Unlock()
+	vm.state = StateRunning
+	// Stub implementation - would actually resume VM from state
+	return nil
+}
+
+// GetDiskPaths returns the disk paths for the VM (stub implementation)
+func (vm *VM) GetDiskPaths() []string {
+	vm.mutex.RLock()
+	defer vm.mutex.RUnlock()
+	// Stub implementation - would return actual disk paths
+	return []string{"/var/lib/novacron/vms/" + vm.config.ID + "/disk.qcow2"}
+}
+
+// GetMemoryStatePath returns the memory state path for the VM (stub implementation)
+func (vm *VM) GetMemoryStatePath() string {
+	vm.mutex.RLock()
+	defer vm.mutex.RUnlock()
+	// Stub implementation - would return actual memory state path
+	return "/var/lib/novacron/vms/" + vm.config.ID + "/memory.state"
+}
+
+// GetMemoryDeltaPath returns the memory delta path for the VM (stub implementation)
+func (vm *VM) GetMemoryDeltaPath() string {
+	vm.mutex.RLock()
+	defer vm.mutex.RUnlock()
+	// Stub implementation - would return actual memory delta path
+	return "/var/lib/novacron/vms/" + vm.config.ID + "/memory.delta"
 }

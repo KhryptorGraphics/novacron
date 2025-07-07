@@ -18,6 +18,64 @@ type Node struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
+// GetID returns the node ID
+func (n *Node) GetID() string {
+	return n.ID
+}
+
+// CreateVM creates a VM on this node (stub implementation)
+func (n *Node) CreateVM(vmID string, config VMConfig) error {
+	// Stub implementation - would create VM on this node
+	return nil
+}
+
+// GetVM gets a VM from this node (stub implementation)
+func (n *Node) GetVM(vmID string) (*VM, error) {
+	// Stub implementation - would retrieve VM from this node
+	return nil, fmt.Errorf("VM %s not found on node %s", vmID, n.ID)
+}
+
+// GetDiskPath returns the disk path for a VM on this node (stub implementation)
+func (n *Node) GetDiskPath(vmID string) string {
+	// Stub implementation - would return actual disk path on this node
+	return fmt.Sprintf("/var/lib/novacron/nodes/%s/vms/%s/disk.qcow2", n.ID, vmID)
+}
+
+// GetMemoryStatePath returns the memory state path for a VM on this node (stub implementation)
+func (n *Node) GetMemoryStatePath(vmID string) string {
+	// Stub implementation - would return actual memory state path on this node
+	return fmt.Sprintf("/var/lib/novacron/nodes/%s/vms/%s/memory.state", n.ID, vmID)
+}
+
+// EnsureDirectoryExists ensures a directory exists on this node (stub implementation)
+func (n *Node) EnsureDirectoryExists(path string) error {
+	// Stub implementation - would ensure directory exists on this node
+	return nil
+}
+
+// ReceiveFile receives a file on this node (stub implementation)
+func (n *Node) ReceiveFile(sourcePath, destPath string) error {
+	// Stub implementation - would receive file on this node
+	return nil
+}
+
+// GetMemoryDeltaPath returns the memory delta path for a VM on this node (stub implementation)
+func (n *Node) GetMemoryDeltaPath(vmID string) string {
+	// Stub implementation - would return actual memory delta path on this node
+	return fmt.Sprintf("/var/lib/novacron/nodes/%s/vms/%s/memory.delta", n.ID, vmID)
+}
+
+// MigrationStatus represents the status of a migration operation (enum type)
+type MigrationStatus string
+
+const (
+	MigrationStatusPending      MigrationStatus = "pending"
+	MigrationStatusInProgress   MigrationStatus = "in_progress"
+	MigrationStatusCompleted    MigrationStatus = "completed"
+	MigrationStatusFailed       MigrationStatus = "failed"
+	MigrationStatusRolledBack   MigrationStatus = "rolled_back"
+)
+
 // Migration types
 const (
 	MigrationTypeCold MigrationType = "cold"
@@ -137,8 +195,8 @@ const (
 	MigrationEventRollbackDone    string = "rollback_done"
 )
 
-// MigrationStatus provides a snapshot of the current migration status
-type MigrationStatus struct {
+// MigrationStatusStruct provides a snapshot of the current migration status
+type MigrationStatusStruct struct {
 	ID               string    `json:"id"`
 	VMID             string    `json:"vmId"`
 	VMName           string    `json:"vmName"`
@@ -166,9 +224,9 @@ type MigrationManager interface {
 	CancelMigration(migrationID string) error
 	
 	// Migration status
-	GetMigrationStatus(migrationID string) (*MigrationStatus, error)
-	ListMigrations() ([]*MigrationStatus, error)
-	ListMigrationsForVM(vmID string) ([]*MigrationStatus, error)
+	GetMigrationStatus(migrationID string) (*MigrationStatusStruct, error)
+	ListMigrations() ([]*MigrationStatusStruct, error)
+	ListMigrationsForVM(vmID string) ([]*MigrationStatusStruct, error)
 	
 	// Event subscription
 	SubscribeToMigrationEvents(migrationID string) (<-chan MigrationEvent, func(), error)

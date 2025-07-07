@@ -970,7 +970,8 @@ func (s *DistributedStorageService) rebalanceForNode(nodeID string) {
 	// For each volume, check if it has data on the removed node
 	for _, volumeID := range volumeIDs {
 		// We use a separate context for each volume to avoid cancellation affecting others
-		ctx := context.TODO()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
 
 		// Get the volume
 		distVolume, err := s.GetDistributedVolume(ctx, volumeID)
@@ -1026,7 +1027,8 @@ func (s *DistributedStorageService) checkAllVolumesHealth() {
 
 	// Check each volume
 	for _, volumeID := range volumeIDs {
-		ctx := context.TODO()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
 		if err := s.checkVolumeHealth(ctx, volumeID); err != nil {
 			log.Printf("Error checking health of volume %s: %v", volumeID, err)
 		}
@@ -1110,7 +1112,8 @@ func (s *DistributedStorageService) healAllVolumes() {
 
 	// Check each volume
 	for _, volumeID := range volumeIDs {
-		ctx := context.TODO()
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+		defer cancel()
 
 		// Get the volume
 		distVolume, err := s.GetDistributedVolume(ctx, volumeID)

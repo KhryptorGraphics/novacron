@@ -136,6 +136,23 @@ func (s *VMScheduler) GetNode(nodeID string) (*NodeResourceInfo, error) {
 	return node, nil
 }
 
+// ResourceAllocation represents a resource allocation for a VM
+type ResourceAllocation struct {
+	VMID      string
+	NodeID    string
+	CPUCores  int
+	MemoryMB  int
+	DiskGB    int
+	RequestID string
+}
+
+// GetActiveAllocations returns all active resource allocations
+func (s *VMScheduler) GetActiveAllocations() map[string]ResourceAllocation {
+	// For now, return an empty map - this should be implemented based on actual allocation tracking
+	// In a real implementation, this would track active VM allocations
+	return make(map[string]ResourceAllocation)
+}
+
 // ListNodes returns all registered nodes
 func (s *VMScheduler) ListNodes() []*NodeResourceInfo {
 	s.nodesMutex.RLock()

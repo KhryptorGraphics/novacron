@@ -66,8 +66,10 @@ type NetworkManagerInterface interface {
 // Alias VMState to State for compatibility
 type VMState = State
 
+// Node represents a compute node in the cluster (defined here to avoid import cycles)
+// Note: This may conflict with vm_migration_types.go - use conditional compilation or merge definitions
+
 // These types are defined in other files to avoid duplication:
-// - Node (migration_manager.go)
 // - MigrationType (migration_manager.go) 
 // - VMConfig (vm.go)
 // - VMManagerConfig (vm_manager.go)
