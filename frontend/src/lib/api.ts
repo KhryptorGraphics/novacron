@@ -1,5 +1,5 @@
 // API service for NovaCron backend
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8090/api/v1';
 
 export interface VMInfo {
   id: string;

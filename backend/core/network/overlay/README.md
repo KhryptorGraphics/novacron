@@ -143,7 +143,7 @@ policy := overlay.NetworkPolicy{
             SourceSelector:      "role=web",
             DestinationSelector: "role=app",
             Protocol:            "tcp",
-            DestinationPortRange: "8080-8090",
+            DestinationPortRange: "8090-8100",
         },
         {
             Type:                "deny",

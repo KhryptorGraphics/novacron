@@ -189,7 +189,23 @@ func (m *VMClusterManager) DeleteCluster(ctx context.Context, clusterID string) 
 	
 	// Delete cluster members
 	for _, member := range cluster.Members {
-		if err := m.vmManager.DeleteVM(ctx, member.VMID); err != nil {
+		// Get the VM first
+		vm, err := m.vmManager.GetVM(member.VMID)
+		if err != nil {
+			log.Printf("Warning: Failed to get cluster member VM %s: %v", member.VMID, err)
+			continue
+		}
+		
+		// Get driver for the VM
+		driver, err := m.vmManager.getDriver(vm.config)
+		if err != nil {
+			log.Printf("Warning: Failed to get driver for VM %s: %v", member.VMID, err)
+			continue
+		}
+		
+		// Delete the VM
+		_, err = m.vmManager.deleteVM(context.Background(), vm, driver)
+		if err != nil {
 			log.Printf("Warning: Failed to delete cluster member VM %s: %v", member.VMID, err)
 		}
 	}
@@ -281,8 +297,31 @@ func (m *VMClusterManager) RemoveClusterMember(ctx context.Context, clusterID, v
 	cluster.UpdatedAt = time.Now()
 	m.clustersMutex.Unlock()
 	
+	// Get the VM first
+	vm, err := m.vmManager.GetVM(vmID)
+	if err != nil {
+		m.clustersMutex.Lock()
+		cluster.State = ClusterStateDegraded
+		cluster.UpdatedAt = time.Now()
+		cluster.Metadata["error"] = err.Error()
+		m.clustersMutex.Unlock()
+		return fmt.Errorf("failed to get VM %s: %w", vmID, err)
+	}
+	
+	// Get driver for the VM
+	driver, err := m.vmManager.getDriver(vm.config)
+	if err != nil {
+		m.clustersMutex.Lock()
+		cluster.State = ClusterStateDegraded
+		cluster.UpdatedAt = time.Now()
+		cluster.Metadata["error"] = err.Error()
+		m.clustersMutex.Unlock()
+		return fmt.Errorf("failed to get driver for VM %s: %w", vmID, err)
+	}
+	
 	// Delete the VM
-	if err := m.vmManager.DeleteVM(ctx, vmID); err != nil {
+	_, err = m.vmManager.deleteVM(ctx, vm, driver)
+	if err != nil {
 		m.clustersMutex.Lock()
 		cluster.State = ClusterStateDegraded
 		cluster.UpdatedAt = time.Now()
@@ -322,7 +361,31 @@ func (m *VMClusterManager) StartCluster(ctx context.Context, clusterID string) e
 	// Start master VMs first
 	for _, member := range cluster.Members {
 		if member.Role == ClusterRoleMaster {
-			if err := m.vmManager.StartVM(ctx, member.VMID); err != nil {
+			// Get the VM first
+			vm, err := m.vmManager.GetVM(member.VMID)
+			if err != nil {
+				m.clustersMutex.Lock()
+				cluster.State = ClusterStateDegraded
+				cluster.UpdatedAt = time.Now()
+				cluster.Metadata["error"] = err.Error()
+				m.clustersMutex.Unlock()
+				return fmt.Errorf("failed to get master VM %s: %w", member.VMID, err)
+			}
+			
+			// Get driver for the VM
+			driver, err := m.vmManager.getDriver(vm.config)
+			if err != nil {
+				m.clustersMutex.Lock()
+				cluster.State = ClusterStateDegraded
+				cluster.UpdatedAt = time.Now()
+				cluster.Metadata["error"] = err.Error()
+				m.clustersMutex.Unlock()
+				return fmt.Errorf("failed to get driver for VM %s: %w", member.VMID, err)
+			}
+			
+			// Start the VM
+			_, err = m.vmManager.startVM(ctx, vm, driver)
+			if err != nil {
 				m.clustersMutex.Lock()
 				cluster.State = ClusterStateDegraded
 				cluster.UpdatedAt = time.Now()
@@ -340,7 +403,31 @@ func (m *VMClusterManager) StartCluster(ctx context.Context, clusterID string) e
 	// Start worker VMs
 	for _, member := range cluster.Members {
 		if member.Role == ClusterRoleWorker {
-			if err := m.vmManager.StartVM(ctx, member.VMID); err != nil {
+			// Get the VM first
+			vm, err := m.vmManager.GetVM(member.VMID)
+			if err != nil {
+				m.clustersMutex.Lock()
+				cluster.State = ClusterStateDegraded
+				cluster.UpdatedAt = time.Now()
+				cluster.Metadata["error"] = err.Error()
+				m.clustersMutex.Unlock()
+				return fmt.Errorf("failed to get worker VM %s: %w", member.VMID, err)
+			}
+			
+			// Get driver for the VM
+			driver, err := m.vmManager.getDriver(vm.config)
+			if err != nil {
+				m.clustersMutex.Lock()
+				cluster.State = ClusterStateDegraded
+				cluster.UpdatedAt = time.Now()
+				cluster.Metadata["error"] = err.Error()
+				m.clustersMutex.Unlock()
+				return fmt.Errorf("failed to get driver for VM %s: %w", member.VMID, err)
+			}
+			
+			// Start the VM
+			_, err = m.vmManager.startVM(ctx, vm, driver)
+			if err != nil {
 				m.clustersMutex.Lock()
 				cluster.State = ClusterStateDegraded
 				cluster.UpdatedAt = time.Now()
@@ -384,7 +471,31 @@ func (m *VMClusterManager) StopCluster(ctx context.Context, clusterID string) er
 	// Stop worker VMs first
 	for _, member := range cluster.Members {
 		if member.Role == ClusterRoleWorker {
-			if err := m.vmManager.StopVM(ctx, member.VMID); err != nil {
+			// Get the VM first
+			vm, err := m.vmManager.GetVM(member.VMID)
+			if err != nil {
+				m.clustersMutex.Lock()
+				cluster.State = ClusterStateDegraded
+				cluster.UpdatedAt = time.Now()
+				cluster.Metadata["error"] = err.Error()
+				m.clustersMutex.Unlock()
+				return fmt.Errorf("failed to get worker VM %s: %w", member.VMID, err)
+			}
+			
+			// Get driver for the VM
+			driver, err := m.vmManager.getDriver(vm.config)
+			if err != nil {
+				m.clustersMutex.Lock()
+				cluster.State = ClusterStateDegraded
+				cluster.UpdatedAt = time.Now()
+				cluster.Metadata["error"] = err.Error()
+				m.clustersMutex.Unlock()
+				return fmt.Errorf("failed to get driver for VM %s: %w", member.VMID, err)
+			}
+			
+			// Stop the VM
+			_, err = m.vmManager.stopVM(ctx, vm, driver)
+			if err != nil {
 				m.clustersMutex.Lock()
 				cluster.State = ClusterStateDegraded
 				cluster.UpdatedAt = time.Now()
@@ -402,7 +513,31 @@ func (m *VMClusterManager) StopCluster(ctx context.Context, clusterID string) er
 	// Stop master VMs
 	for _, member := range cluster.Members {
 		if member.Role == ClusterRoleMaster {
-			if err := m.vmManager.StopVM(ctx, member.VMID); err != nil {
+			// Get the VM first
+			vm, err := m.vmManager.GetVM(member.VMID)
+			if err != nil {
+				m.clustersMutex.Lock()
+				cluster.State = ClusterStateDegraded
+				cluster.UpdatedAt = time.Now()
+				cluster.Metadata["error"] = err.Error()
+				m.clustersMutex.Unlock()
+				return fmt.Errorf("failed to get master VM %s: %w", member.VMID, err)
+			}
+			
+			// Get driver for the VM
+			driver, err := m.vmManager.getDriver(vm.config)
+			if err != nil {
+				m.clustersMutex.Lock()
+				cluster.State = ClusterStateDegraded
+				cluster.UpdatedAt = time.Now()
+				cluster.Metadata["error"] = err.Error()
+				m.clustersMutex.Unlock()
+				return fmt.Errorf("failed to get driver for VM %s: %w", member.VMID, err)
+			}
+			
+			// Stop the VM
+			_, err = m.vmManager.stopVM(ctx, vm, driver)
+			if err != nil {
 				m.clustersMutex.Lock()
 				cluster.State = ClusterStateDegraded
 				cluster.UpdatedAt = time.Now()
@@ -493,14 +628,26 @@ func (m *VMClusterManager) createClusterVM(ctx context.Context, cluster *VMClust
 	config.Tags["cluster_id"] = cluster.ID
 	config.Tags["cluster_role"] = string(role)
 	
-	// Create VM
-	vm, err := m.vmManager.CreateVM(ctx, config)
+	// Create VM - convert VMConfig to CreateVMRequest
+	req := CreateVMRequest{
+		Name: config.Name,
+		Spec: config,
+		Tags: config.Tags,
+	}
+	vm, err := m.vmManager.CreateVM(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VM: %w", err)
 	}
 	
+	// Get driver for starting the VM
+	driver, err := m.vmManager.getDriver(vm.config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get driver for VM %s: %w", vm.ID(), err)
+	}
+	
 	// Start VM
-	if err := m.vmManager.StartVM(ctx, vm.ID()); err != nil {
+	_, err = m.vmManager.startVM(ctx, vm, driver)
+	if err != nil {
 		return nil, fmt.Errorf("failed to start VM: %w", err)
 	}
 	

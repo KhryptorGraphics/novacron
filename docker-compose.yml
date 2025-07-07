@@ -31,7 +31,7 @@ services:
       NODE_ID: node1
       LOG_LEVEL: info
       STORAGE_PATH: /var/lib/novacron/vms
-      CLUSTER_ADDR: api:8080
+      CLUSTER_ADDR: api:8090
     volumes:
       - hypervisor_data:/var/lib/novacron/vms
       - /var/run/libvirt:/var/run/libvirt
@@ -55,13 +55,13 @@ services:
     restart: unless-stopped
     environment:
       LOG_LEVEL: info
-      API_PORT: 8080
+      API_PORT: 8090
       DB_URL: postgresql://postgres:postgres@postgres:5432/novacron
       AUTH_SECRET: ${AUTH_SECRET:-changeme_in_production}
       HYPERVISOR_ADDRS: hypervisor:9000
     ports:
-      - "8080:8080"  # REST API
-      - "8081:8081"  # WebSocket API
+      - "8090:8090"  # REST API
+      - "8091:8091"  # WebSocket API
     depends_on:
       postgres:
         condition: service_healthy
@@ -77,10 +77,10 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_URL: http://localhost:8080
-      NEXT_PUBLIC_WS_URL: ws://localhost:8081
+      NEXT_PUBLIC_API_URL: http://localhost:8090
+      NEXT_PUBLIC_WS_URL: ws://localhost:8091
     ports:
-      - "3000:3000"
+      - "8092:3000"
     depends_on:
       - api
     networks:

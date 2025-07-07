@@ -120,7 +120,7 @@ def load_config():
                 "port": 8090,
             },
             "hypervisor": {
-                "url": "http://localhost:8080",
+                "url": "http://localhost:8090",
             },
             "auth": {
                 "enabled": False,

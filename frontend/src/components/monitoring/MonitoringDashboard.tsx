@@ -120,8 +120,8 @@ interface TimeRangeOption {
 }
 
 // Constants
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8080/ws';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8090/api';
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8091/ws';
 
 const TIME_RANGES: TimeRangeOption[] = [
   { label: 'Last 15 minutes', value: '15m', seconds: 15 * 60 },

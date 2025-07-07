@@ -4,7 +4,7 @@
 set -e
 
 # Configuration
-API_ENDPOINT="http://localhost:8080"
+API_ENDPOINT="http://localhost:8090"
 VM_NAME="ubuntu-24-04-test-$(date +%s)"
 LOG_FILE="ubuntu-24-04-test-$(date +%Y%m%d-%H%M%S).log"
 

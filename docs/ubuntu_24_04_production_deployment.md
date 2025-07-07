@@ -20,7 +20,7 @@ Before deploying Ubuntu 24.04 support in production, ensure you have:
 
 3. Network connectivity:
    - Outbound internet access for downloading images
-   - Firewall rules allowing access to ports 8080 (API) and 9000 (Hypervisor)
+   - Firewall rules allowing access to ports 8090 (API) and 9000 (Hypervisor)
 
 4. User permissions:
    - Root or sudo access for installation
@@ -124,7 +124,7 @@ sudo systemctl start novacron-ubuntu-24-04-monitor.service
 
 1. Configure firewall rules:
    ```bash
-   sudo ufw allow 8080/tcp  # API
+   sudo ufw allow 8090/tcp  # API
    sudo ufw allow 9000/tcp  # Hypervisor
    sudo ufw enable
    ```

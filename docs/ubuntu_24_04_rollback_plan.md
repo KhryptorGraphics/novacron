@@ -29,7 +29,7 @@ Before initiating a rollback, perform the following checks:
 #!/bin/bash
 # Script to stop all Ubuntu 24.04 VMs
 
-API_ENDPOINT="http://localhost:8080"
+API_ENDPOINT="http://localhost:8090"
 
 # Get all VMs
 VM_LIST=$(curl -s "$API_ENDPOINT/api/v1/vms")
@@ -85,7 +85,7 @@ systemctl status novacron-api.service
 systemctl status novacron-hypervisor.service
 
 # Check if Ubuntu 24.04 is no longer in the templates
-curl -s http://localhost:8080/api/v1/templates | grep -i "ubuntu 24.04"
+curl -s http://localhost:8090/api/v1/templates | grep -i "ubuntu 24.04"
 ```
 
 ### Step 6: Notify Users

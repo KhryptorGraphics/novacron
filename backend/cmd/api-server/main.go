@@ -33,7 +33,7 @@ func main() {
 
 	// Add CORS middleware
 	corsHandler := handlers.CORS(
-		handlers.AllowedOrigins([]string{"http://localhost:3000", "http://localhost:3001"}),
+		handlers.AllowedOrigins([]string{"http://localhost:8092", "http://localhost:3001"}),
 		handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}),
 		handlers.AllowedHeaders([]string{"Content-Type", "Authorization"}),
 	)
@@ -80,7 +80,7 @@ func main() {
 
 	// Create HTTP server
 	server := &http.Server{
-		Addr:         ":8080",
+		Addr:         ":8090",
 		Handler:      corsHandler(router),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
@@ -89,7 +89,7 @@ func main() {
 
 	// Start server in a goroutine
 	go func() {
-		log.Println("API Server listening on :8080")
+		log.Println("API Server listening on :8090")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server failed to start: %v", err)
 		}

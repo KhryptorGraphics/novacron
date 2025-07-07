@@ -56,7 +56,7 @@ if [ -d "frontend/node_modules" ]; then
     FRONTEND_PID=$!
     cd ..
     
-    print_status "Frontend should be available at http://localhost:3000"
+    print_status "Frontend should be available at http://localhost:8092"
     print_status "Please open this URL in your browser to test the UI"
     print_status "You should be able to create a new VM with Ubuntu 24.04"
 else

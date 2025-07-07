@@ -45,7 +45,7 @@ make clean
 # Install dependencies
 cd frontend && npm install
 
-# Start development server (port 3000)
+# Start development server (port 8092)
 npm run dev
 
 # Build for production
@@ -70,16 +70,19 @@ docker-compose build
 # Start all services
 docker-compose up -d
 
+# Start development environment
+docker-compose -f docker-compose.dev.yml up -d
+
 # View logs
 docker-compose logs -f [service-name]
 
 # Services available:
-# - postgres (database)
-# - hypervisor (VM management)
-# - api (REST/WebSocket APIs)
-# - frontend (Web UI)
-# - prometheus (metrics)
-# - grafana (visualization)
+# - postgres (database, port 5432)
+# - hypervisor (VM management, port 9000)
+# - api (REST/WebSocket APIs, ports 8090/8091)
+# - frontend (Web UI, port 8092)
+# - prometheus (metrics, port 9090)
+# - grafana (visualization, port 3001)
 ```
 
 ## Architecture Overview
@@ -108,7 +111,7 @@ The frontend uses Next.js 13 with TypeScript and includes:
 
 ### Key Integration Points
 
-1. **API Communication**: Frontend connects to backend via REST API (port 8080) and WebSocket (port 8081)
+1. **API Communication**: Frontend connects to backend via REST API (port 8090) and WebSocket (port 8091)
 2. **VM Drivers**: Abstraction layer supporting multiple virtualization technologies
 3. **Storage Plugins**: Extensible storage backend system with registry
 4. **Policy Engine**: Flexible constraint-based scheduling system
@@ -146,9 +149,9 @@ WAN optimizations include compression, delta sync, and bandwidth throttling for 
 
 ### Service Ports
 
-- Frontend: 3000
-- API (REST): 8080
-- API (WebSocket): 8081
+- Frontend: 8092
+- API (REST): 8090
+- API (WebSocket): 8091
 - Prometheus: 9090
 - Grafana: 3001 (maps to internal 3000)
 - PostgreSQL: 5432 (internal)
@@ -160,3 +163,28 @@ WAN optimizations include compression, delta sync, and bandwidth throttling for 
 - **Storage**: klauspost/compress for compression
 - **Auth**: golang-jwt/jwt for JWT tokens
 - **Frontend**: Next.js, React Query, Tailwind CSS, Chart.js
+
+### Common Issues & Solutions
+
+- **KVM Connection Issues**: The API server can start without KVM for development. Check libvirt daemon status if needed.
+- **Docker Compose**: Use `-f docker-compose.dev.yml` for development with hot reloading
+- **Go Version**: Core backend uses Go 1.23+, Docker environment uses Go 1.19
+- **Frontend Port**: Development server runs on port 8092, not the default 3000
+
+### API Integration Points
+
+The system has two main API servers:
+1. **Main API Server** (`backend/cmd/api-server/main.go`): REST endpoints and WebSocket
+2. **Core Backend** (`backend/core/`): Business logic modules
+
+Frontend connects via:
+- REST API: `http://localhost:8090/api/*`
+- WebSocket: `ws://localhost:8091/ws/*`
+
+### Critical File Locations
+
+- **Main API Entry**: `backend/cmd/api-server/main.go`
+- **Core VM Logic**: `backend/core/vm/`
+- **Frontend Dashboard**: `frontend/src/components/monitoring/MonitoringDashboard.tsx`
+- **Docker Configs**: `docker-compose.yml` (production), `docker-compose.dev.yml` (development)
+- **Setup Scripts**: `scripts/setup.sh` (Linux/macOS), `scripts/setup.ps1` (Windows)

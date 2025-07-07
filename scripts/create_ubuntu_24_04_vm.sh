@@ -5,7 +5,7 @@ set -e
 
 # Configuration
 VM_NAME=${1:-"ubuntu-24-04-vm"}
-API_ENDPOINT=${NOVACRON_API:-"http://localhost:8080"}
+API_ENDPOINT=${NOVACRON_API:-"http://localhost:8090"}
 IMAGE_PATH="/var/lib/novacron/images/ubuntu-24.04-server-cloudimg-amd64.qcow2"
 
 echo "Creating Ubuntu 24.04 VM: $VM_NAME"

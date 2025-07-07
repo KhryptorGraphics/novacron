@@ -61,12 +61,12 @@ service := &servicemesh.Service{
     Name:      "payment-service",
     Type:      servicemesh.ServiceHTTP,
     VirtualIP: "10.0.0.1",
-    Port:      8080,
+    Port:      8090,
     Endpoints: []*servicemesh.ServiceEndpoint{
         {
             ID:      "payment-1",
             Address: "192.168.1.10",
-            Port:    8080,
+            Port:    8090,
             Weight:  100,
             Healthy: true,
             Labels: map[string]string{

@@ -87,7 +87,7 @@ Endpoint: "s3.amazonaws.com"
 ### After (local focus):
 ```go
 Provider: "local"
-Endpoint: "localhost:8080"
+Endpoint: "localhost:8090"
 ```
 
 ## Next Steps

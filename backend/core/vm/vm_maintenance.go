@@ -10,12 +10,12 @@ import (
 // updateVMs updates the status of all VMs
 func (m *VMManager) updateVMs() {
 	// Make a copy of the VMs to avoid holding the lock too long
-	m.vmsMutex.RLock()
-	vmIDs := make([]string, 0, len(m.vms))
-	for id := range m.vms {
+	m.mutex.RLock()
+	vmIDs := make([]string, 0, len(m.vmCache))
+	for id := range m.vmCache {
 		vmIDs = append(vmIDs, id)
 	}
-	m.vmsMutex.RUnlock()
+	m.mutex.RUnlock()
 	
 	// Update each VM in parallel with a limited number of workers
 	const maxWorkers = 5
@@ -42,24 +42,22 @@ func (m *VMManager) updateVMs() {
 // updateVMStatus updates the status of a single VM
 func (m *VMManager) updateVMStatus(vmID string) {
 	// Get the VM
-	m.vmsMutex.RLock()
-	vm, exists := m.vms[vmID]
-	m.vmsMutex.RUnlock()
-	
-	if !exists {
+	vm, err := m.GetVM(vmID)
+	if err != nil {
+		log.Printf("Failed to get VM %s: %v", vmID, err)
 		return
 	}
 	
 	// Skip VMs in transitional states
-	if vm.State == VMStateCreating || 
-		vm.State == VMStateDeleting || 
-		vm.State == VMStateRestarting ||
-		vm.State == VMStateMigrating {
+	if vm.State() == StateCreating || 
+		vm.State() == StateDeleting || 
+		vm.State() == StateRestarting ||
+		vm.State() == StateMigrating {
 		return
 	}
 	
 	// Get the VM driver
-	driver, err := m.driverFactory(vm.Spec.Type)
+	driver, err := m.getDriver(vm.config)
 	if err != nil {
 		log.Printf("Failed to get driver for VM %s: %v", vmID, err)
 		return
@@ -71,11 +69,12 @@ func (m *VMManager) updateVMStatus(vmID string) {
 		log.Printf("Failed to get status for VM %s: %v", vmID, err)
 		
 		// Mark as error if we can't get the status multiple times
-		m.vmsMutex.Lock()
-		if vm.ErrorMessage == "" {
-			vm.ErrorMessage = "Failed to get VM status"
+		m.mutex.Lock()
+		if vmInfo, exists := m.vmCache[vmID]; exists {
+			vmInfo.ErrorMessage = "Failed to get VM status"
+			m.vmCache[vmID] = vmInfo
 		}
-		m.vmsMutex.Unlock()
+		m.mutex.Unlock()
 		
 		return
 	}
@@ -87,45 +86,37 @@ func (m *VMManager) updateVMStatus(vmID string) {
 	}
 	
 	// Update the VM state if it changed
-	m.vmsMutex.Lock()
+	m.mutex.Lock()
 	
-	oldState := vm.State
+	oldState := vm.State()
 	if oldState != status {
-		vm.State = status
-		vm.UpdatedAt = time.Now()
+		vm.SetState(status)
 		
 		// Update timestamps based on state changes
-		if status == VMStateRunning && oldState != VMStateRunning {
-			vm.StartedAt = time.Now()
-		} else if status == VMStateStopped && oldState != VMStateStopped {
-			vm.StoppedAt = time.Now()
+		if status == StateRunning && oldState != StateRunning {
+			// Note: VM struct doesn't expose StartedAt directly, would need setter
+			log.Printf("VM %s transitioned to running state", vmID)
+		} else if status == StateStopped && oldState != StateStopped {
+			// Note: VM struct doesn't expose StoppedAt directly, would need setter
+			log.Printf("VM %s transitioned to stopped state", vmID)
 		}
 	}
 	
-	// Update VM info if available
+	// Update VM cache with latest info
 	if vmInfo != nil {
-		// Update network info
-		if len(vmInfo.NetworkInfo) > 0 {
-			vm.NetworkInfo = vmInfo.NetworkInfo
-		}
-		
-		// Update storage info
-		if len(vmInfo.StorageInfo) > 0 {
-			vm.StorageInfo = vmInfo.StorageInfo
-		}
-		
-		// Update process info
-		if vmInfo.ProcessInfo.PID > 0 {
-			vm.ProcessInfo = vmInfo.ProcessInfo
-		}
+		// Update the cache with the latest VM info
+		m.vmCache[vmID] = *vmInfo
 	}
 	
 	// Reset error state if it's now running
-	if status == VMStateRunning {
-		vm.ErrorMessage = ""
+	if status == StateRunning {
+		if vmCacheInfo, exists := m.vmCache[vmID]; exists && vmCacheInfo.ErrorMessage != "" {
+			vmCacheInfo.ErrorMessage = ""
+			m.vmCache[vmID] = vmCacheInfo
+		}
 	}
 	
-	m.vmsMutex.Unlock()
+	m.mutex.Unlock()
 	
 	// Emit event if state changed
 	if oldState != status {
@@ -133,11 +124,11 @@ func (m *VMManager) updateVMStatus(vmID string) {
 			Type:      VMEventUpdated,
 			VM:        *vm,
 			Timestamp: time.Now(),
-			NodeID:    vm.NodeID,
+			NodeID:    vm.NodeID(),
 			Message:   "VM state changed",
 		})
 		
-		log.Printf("VM %s state changed from %s to %s", vm.ID, oldState, status)
+		log.Printf("VM %s state changed from %s to %s", vm.ID(), oldState, status)
 	}
 }
 
@@ -146,50 +137,92 @@ func (m *VMManager) cleanupVMs() {
 	now := time.Now()
 	
 	// Find VMs to clean up
-	m.vmsMutex.Lock()
+	m.mutex.Lock()
+	vmIDs := make([]string, 0)
+	for vmID, vmInfo := range m.vmCache {
+		if vmInfo.State == StateDeleting {
+			vmIDs = append(vmIDs, vmID)
+		}
+	}
+	m.mutex.Unlock()
 	
-	for id, vm := range m.vms {
+	for _, vmID := range vmIDs {
 		// Handle VMs in deleting state
-		if vm.State == VMStateDeleting {
-			// If it's been in deleting state for too long, remove it from the map
-			if now.Sub(vm.UpdatedAt) > 10*time.Minute {
-				delete(m.vms, id)
-				log.Printf("Removed deleted VM %s from memory", id)
-			}
+		// Get VM info from cache
+		m.mutex.RLock()
+		vmInfo, exists := m.vmCache[vmID]
+		m.mutex.RUnlock()
+		
+		if !exists {
 			continue
 		}
 		
-		// Check for VMs with errors that need auto-recovery
-		if vm.State == VMStateError {
+		// If it's been in deleting state for too long, remove it from the map
+		if now.Sub(vmInfo.CreatedAt) > 10*time.Minute {
+			m.mutex.Lock()
+			delete(m.vmCache, vmID)
+			m.mutex.Unlock()
+			log.Printf("Removed deleted VM %s from memory", vmID)
+		}
+	}
+	
+	// Check for VMs with errors that need auto-recovery
+	m.mutex.RLock()
+	errorVMIDs := make([]string, 0)
+	for vmID, vmInfo := range m.vmCache {
+		if vmInfo.State == StateFailed {
+			errorVMIDs = append(errorVMIDs, vmID)
+		}
+	}
+	m.mutex.RUnlock()
+	
+	for _, vmID := range errorVMIDs {
+		m.mutex.RLock()
+		vmInfo, exists := m.vmCache[vmID]
+		m.mutex.RUnlock()
+		
+		if exists {
 			// Attempt to recover VMs that have been in error state for over 5 minutes
-			if now.Sub(vm.UpdatedAt) > 5*time.Minute {
-				go m.tryRecoverVM(id)
+			if now.Sub(vmInfo.CreatedAt) > 5*time.Minute {
+				go m.tryRecoverVM(vmID)
 			}
 		}
+	}
+	
+	// Check for resource leaks - VMs in creating/restarting state for too long
+	m.mutex.RLock()
+	stuckVMIDs := make([]string, 0)
+	for vmID, vmInfo := range m.vmCache {
+		if (vmInfo.State == StateCreating || vmInfo.State == StateRestarting) && 
+			now.Sub(vmInfo.CreatedAt) > 15*time.Minute {
+			stuckVMIDs = append(stuckVMIDs, vmID)
+		}
+	}
+	m.mutex.RUnlock()
+	
+	for _, vmID := range stuckVMIDs {
+		// Mark as error
+		m.mutex.Lock()
+		if vmInfo, exists := m.vmCache[vmID]; exists {
+			vmInfo.State = StateFailed
+			vmInfo.ErrorMessage = "Operation timed out"
+			m.vmCache[vmID] = vmInfo
+		}
+		m.mutex.Unlock()
 		
-		// Check for resource leaks - VMs in creating/restarting state for too long
-		if (vm.State == VMStateCreating || vm.State == VMStateRestarting) && 
-			now.Sub(vm.UpdatedAt) > 15*time.Minute {
-			
-			// Mark as error
-			vm.State = VMStateError
-			vm.ErrorMessage = "Operation timed out"
-			vm.UpdatedAt = now
-			
-			// Emit event
+		// Emit event for the timed out VM
+		if vm, err := m.GetVM(vmID); err == nil {
 			m.emitEvent(VMEvent{
 				Type:      VMEventError,
 				VM:        *vm,
 				Timestamp: now,
-				NodeID:    vm.NodeID,
-				Message:   "Operation timed out",
+				NodeID:    vm.NodeID(),
+				Message:   "VM operation timed out",
 			})
-			
-			log.Printf("VM %s operation timed out", id)
 		}
+		
+		log.Printf("VM %s operation timed out, marked as error", vmID)
 	}
-	
-	m.vmsMutex.Unlock()
 }
 
 // tryRecoverVM attempts to recover a VM from an error state

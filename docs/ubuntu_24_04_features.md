@@ -45,7 +45,7 @@ NovaCron provides comprehensive snapshot and backup capabilities for Ubuntu 24.0
 novacron vm snapshot create --vm-id <vm-id> --name "my-snapshot" --description "My first snapshot"
 
 # Using the API
-curl -X POST "http://localhost:8080/api/v1/vms/<vm-id>/snapshots" \
+curl -X POST "http://localhost:8090/api/v1/vms/<vm-id>/snapshots" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "my-snapshot",
@@ -64,7 +64,7 @@ curl -X POST "http://localhost:8080/api/v1/vms/<vm-id>/snapshots" \
 novacron vm snapshot restore --vm-id <vm-id> --snapshot-id <snapshot-id>
 
 # Using the API
-curl -X POST "http://localhost:8080/api/v1/vms/<vm-id>/snapshots/<snapshot-id>/restore"
+curl -X POST "http://localhost:8090/api/v1/vms/<vm-id>/snapshots/<snapshot-id>/restore"
 ```
 
 #### Creating a Full Backup
@@ -74,7 +74,7 @@ curl -X POST "http://localhost:8080/api/v1/vms/<vm-id>/snapshots/<snapshot-id>/r
 novacron vm backup create --vm-id <vm-id> --name "full-backup"
 
 # Using the API
-curl -X POST "http://localhost:8080/api/v1/vms/<vm-id>/backups" \
+curl -X POST "http://localhost:8090/api/v1/vms/<vm-id>/backups" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "full-backup",
@@ -112,7 +112,7 @@ NovaCron includes several pre-defined performance profiles for Ubuntu 24.04 VMs:
 novacron vm performance apply-profile --vm-id <vm-id> --profile "high-performance"
 
 # Using the API
-curl -X POST "http://localhost:8080/api/v1/vms/<vm-id>/performance/profile" \
+curl -X POST "http://localhost:8090/api/v1/vms/<vm-id>/performance/profile" \
   -H "Content-Type: application/json" \
   -d '{
     "profile": "high-performance"
@@ -126,7 +126,7 @@ curl -X POST "http://localhost:8080/api/v1/vms/<vm-id>/performance/profile" \
 novacron vm performance metrics --vm-id <vm-id>
 
 # Using the API
-curl -X GET "http://localhost:8080/api/v1/vms/<vm-id>/performance/metrics"
+curl -X GET "http://localhost:8090/api/v1/vms/<vm-id>/performance/metrics"
 ```
 
 ## Migration Support
@@ -150,7 +150,7 @@ NovaCron provides comprehensive migration support for Ubuntu 24.04 VMs, allowing
 novacron vm migrate --vm-id <vm-id> --target-node "node-2" --live
 
 # Using the API
-curl -X POST "http://localhost:8080/api/v1/vms/<vm-id>/migrate" \
+curl -X POST "http://localhost:8090/api/v1/vms/<vm-id>/migrate" \
   -H "Content-Type: application/json" \
   -d '{
     "target_node_id": "node-2",
@@ -170,7 +170,7 @@ curl -X POST "http://localhost:8080/api/v1/vms/<vm-id>/migrate" \
 novacron migration status --migration-id <migration-id>
 
 # Using the API
-curl -X GET "http://localhost:8080/api/v1/migrations/<migration-id>"
+curl -X GET "http://localhost:8090/api/v1/migrations/<migration-id>"
 ```
 
 ## Enhanced Cloud-Init Integration
@@ -205,7 +205,7 @@ novacron vm create --name "web-server" --image "ubuntu-24.04" \
   --template-vars '{"ssh_authorized_keys": ["ssh-rsa AAAA..."]}'
 
 # Using the API
-curl -X POST "http://localhost:8080/api/v1/vms" \
+curl -X POST "http://localhost:8090/api/v1/vms" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "web-server",
@@ -229,7 +229,7 @@ curl -X POST "http://localhost:8080/api/v1/vms" \
 novacron vm cloudinit status --vm-id <vm-id>
 
 # Using the API
-curl -X GET "http://localhost:8080/api/v1/vms/<vm-id>/cloudinit/status"
+curl -X GET "http://localhost:8090/api/v1/vms/<vm-id>/cloudinit/status"
 ```
 
 ## API Reference
