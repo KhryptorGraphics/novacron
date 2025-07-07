@@ -17,7 +17,7 @@ if [ ! -f /etc/novacron/config.yaml ]; then
 nodeId: ${NODE_ID:-node1}
 logLevel: ${LOG_LEVEL:-info}
 storagePath: ${STORAGE_PATH:-/var/lib/novacron/vms}
-clusterAddr: ${CLUSTER_ADDR:-novacron-api:8080}
+clusterAddr: ${CLUSTER_ADDR:-novacron-api:8090}
 api:
   host: 0.0.0.0
   port: 9000
@@ -77,7 +77,7 @@ echo "Starting NovaCron Hypervisor..."
 echo "Node ID: ${NODE_ID:-node1}"
 echo "Log Level: ${LOG_LEVEL:-info}"
 echo "Storage Path: ${STORAGE_PATH:-/var/lib/novacron/vms}"
-echo "Cluster Address: ${CLUSTER_ADDR:-novacron-api:8080}"
+echo "Cluster Address: ${CLUSTER_ADDR:-novacron-api:8090}"
 
 # Start the application
 exec "$@"

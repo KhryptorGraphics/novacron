@@ -21,7 +21,7 @@ func main() {
 	// Parse command line flags
 	nodeID := flag.String("node-id", "node-1", "Node ID")
 	storageDir := flag.String("storage-dir", "/var/lib/novacron", "Storage directory")
-	listenAddr := flag.String("listen", ":8080", "HTTP listen address")
+	listenAddr := flag.String("listen", ":8090", "HTTP listen address")
 	flag.Parse()
 
 	// Create storage directory if it doesn't exist

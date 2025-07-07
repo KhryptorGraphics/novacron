@@ -4,7 +4,7 @@
 set -e
 
 # Configuration
-API_ENDPOINT="http://localhost:8080"
+API_ENDPOINT="http://localhost:8090"
 IMAGE_PATH="/var/lib/novacron/images/ubuntu-24.04-server-cloudimg-amd64.qcow2"
 VM_NAME="ubuntu-24-04-test-$(date +%s)"
 LOG_FILE="test-results-$(date +%Y%m%d-%H%M%S).log"

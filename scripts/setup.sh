@@ -258,8 +258,8 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     
     echo
     echo "NovaCron services are starting!"
-    echo "Access the web interface at: http://localhost:3000"
-    echo "API is available at: http://localhost:8080"
+    echo "Access the web interface at: http://localhost:8092"
+    echo "API is available at: http://localhost:8090"
     echo "Grafana is available at: http://localhost:3001 (admin/admin)"
 else
     echo

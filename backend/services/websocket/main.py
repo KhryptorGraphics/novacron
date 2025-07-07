@@ -80,7 +80,7 @@ def load_config():
                 "port": 8091,
             },
             "hypervisor": {
-                "url": "http://localhost:8080",
+                "url": "http://localhost:8090",
                 "events_endpoint": "/events",
             },
             "auth": {

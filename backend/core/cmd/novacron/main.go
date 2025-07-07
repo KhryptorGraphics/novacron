@@ -25,7 +25,7 @@ var (
 	debugMode     = flag.Bool("debug", false, "Enable debug logging")
 	nodeID        = flag.String("node-id", "", "Node ID (defaults to hostname)")
 	dataDir       = flag.String("data-dir", "/var/lib/novacron", "Data directory")
-	listenAddress = flag.String("listen", "0.0.0.0:8080", "API listen address")
+	listenAddress = flag.String("listen", "0.0.0.0:8090", "API listen address")
 	version       = flag.Bool("version", false, "Print version information and exit")
 )
 

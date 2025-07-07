@@ -100,7 +100,7 @@ systemctl status novacron-api.service --no-pager
 
 print_status "Deployment complete!"
 print_status "Ubuntu 24.04 support is now available in NovaCron"
-print_status "You can access the API at http://localhost:8080"
+print_status "You can access the API at http://localhost:8090"
 print_status "You can access the hypervisor at http://localhost:9000"
 
 exit 0

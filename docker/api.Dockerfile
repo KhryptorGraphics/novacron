@@ -63,7 +63,7 @@ COPY backend/services/api /app/api
 COPY backend/services/common /app/common
 
 # Expose ports
-EXPOSE 8080
+EXPOSE 8090
 
 # Set user
 USER novacron
@@ -72,7 +72,7 @@ USER novacron
 ENV PATH="/venv/bin:$PATH" \
     PYTHONPATH="/app" \
     LOG_LEVEL=info \
-    API_PORT=8080
+    API_PORT=8090
 
 # Add entrypoint script
 COPY docker/api-entrypoint.sh /usr/local/bin/
@@ -82,7 +82,7 @@ USER novacron
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD wget -q -O /dev/null http://localhost:8080/api/health || exit 1
+    CMD wget -q -O /dev/null http://localhost:8090/api/health || exit 1
 
 # Set entrypoint
 ENTRYPOINT ["api-entrypoint.sh"]

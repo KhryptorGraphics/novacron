@@ -22,7 +22,7 @@ NovaCron is a sophisticated distributed virtual machine management platform with
 ./start_development.sh
 ```
 
-This will start both the backend API server (port 8080) and frontend development server (port 3000).
+This will start both the backend API server (port 8090) and frontend development server (port 8092).
 
 ### Docker Development
 ```bash
@@ -208,12 +208,25 @@ The system includes comprehensive monitoring:
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## 📚 Documentation
+
+### Core Documentation
+- **[Development Status](DEVELOPMENT_STATUS.md)** - Current project status and completion metrics
+- **[Implementation Plan](IMPLEMENTATION_PLAN.md)** - Comprehensive development roadmap
+- **[Feature Plans](FEATURE_IMPLEMENTATION_PLANS.md)** - Detailed feature implementation guides
+- **[Developer Guide](CLAUDE.md)** - Development instructions and architecture overview
+
+### Additional Resources
+- **[Technical Documentation](docs/)** - Detailed technical guides
+- **[Contributing Guide](docs/CONTRIBUTING.md)** - How to contribute to the project
+- **[Code Memory](CODE_MEMORY.md)** - Technical architecture and patterns
+
 ## 🆘 Support
 
 For support and questions:
-- Check the [documentation](docs/)
-- Review [implementation plans](IMPLEMENTATION_PRIORITIES.md)
-- Check [development status](DEVELOPMENT_STATUS_MASTER_REFERENCE.md)
+- Check the documentation above
+- Review implementation plans
+- Check development status
 
 ---
 

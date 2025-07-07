@@ -262,8 +262,8 @@ if ($StartContainers -eq "y" -or $StartContainers -eq "Y") {
     
     Write-Host ""
     Write-Host "NovaCron services are starting!"
-    Write-Host "Access the web interface at: http://localhost:3000"
-    Write-Host "API is available at: http://localhost:8080"
+    Write-Host "Access the web interface at: http://localhost:8092"
+    Write-Host "API is available at: http://localhost:8090"
     Write-Host "Grafana is available at: http://localhost:3001 (admin/admin)"
 } else {
     Write-Host ""

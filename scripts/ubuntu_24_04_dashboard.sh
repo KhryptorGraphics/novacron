@@ -2,7 +2,7 @@
 # Dashboard script for monitoring Ubuntu 24.04 VMs in NovaCron
 
 # Configuration
-API_ENDPOINT="http://localhost:8080"
+API_ENDPOINT="http://localhost:8090"
 REFRESH_INTERVAL=10  # seconds
 LOG_FILE="/var/log/novacron/ubuntu_24_04_dashboard.log"
 

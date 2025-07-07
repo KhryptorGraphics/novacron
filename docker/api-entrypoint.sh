@@ -11,7 +11,7 @@ if [ ! -f /etc/novacron/config.yaml ]; then
 logLevel: ${LOG_LEVEL:-info}
 api:
   host: 0.0.0.0
-  port: ${API_PORT:-8080}
+  port: ${API_PORT:-8090}
   tlsEnabled: false
 database:
   url: ${DB_URL:-postgresql://postgres:postgres@postgres:5432/novacron}
@@ -23,7 +23,7 @@ hypervisors:
 websocket:
   enabled: true
   host: 0.0.0.0
-  port: 8081
+  port: 8091
 metrics:
   enabled: true
   host: 0.0.0.0
@@ -79,7 +79,7 @@ done
 # Print startup message
 echo "Starting NovaCron API Service..."
 echo "Log Level: ${LOG_LEVEL:-info}"
-echo "API Port: ${API_PORT:-8080}"
+echo "API Port: ${API_PORT:-8090}"
 echo "Database URL: ${DB_URL:-postgresql://postgres:postgres@postgres:5432/novacron}"
 echo "Hypervisor Addresses: ${HYPERVISOR_ADDRS:-novacron-hypervisor:9000}"
 

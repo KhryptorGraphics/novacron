@@ -97,7 +97,7 @@ type BucketInfo struct {
 func DefaultObjectStorageConfig() ObjectStorageConfig {
 	return ObjectStorageConfig{
 		Provider:          "local",
-		Endpoint:          "localhost:8080",
+		Endpoint:          "localhost:8090",
 		Region:            "us-east-1",
 		ConnectTimeoutSec: 30,
 		RequestTimeoutSec: 60,

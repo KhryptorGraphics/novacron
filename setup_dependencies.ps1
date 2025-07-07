@@ -149,4 +149,4 @@ if ($goWorking -and $nodeWorking -and $npmWorking) {
 Write-Host "`n📚 Next Steps:" -ForegroundColor Blue
 Write-Host "   1. Restart PowerShell (or your computer if needed)" -ForegroundColor White
 Write-Host "   2. Run: .\start_development.ps1" -ForegroundColor White
-Write-Host "   3. Access the dashboard at http://localhost:3000" -ForegroundColor White
+Write-Host "   3. Access the dashboard at http://localhost:8092" -ForegroundColor White
