@@ -13,7 +13,7 @@ import (
 
 // Using MigrationType from vm_types.go
 
-// Using MigrationState from vm_types.go as MigrationStatus
+// Using MigrationStatus from vm_migration_types.go
 
 // Using VMState from vm_types.go
 

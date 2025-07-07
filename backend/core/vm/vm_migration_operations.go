@@ -71,9 +71,23 @@ func (o *MigrationOperations) listMigrations(w http.ResponseWriter, r *http.Requ
 
 	// List migrations, optionally filtered by VM ID
 	if vmID != "" {
-		migrations, err = o.migrationManager.ListMigrationsForVM(vmID)
+		migrationsStruct, err := o.migrationManager.ListMigrationsForVM(vmID)
+		if err != nil {
+			return nil, err
+		}
+		migrations = make([]*MigrationStatus, len(migrationsStruct))
+		for i, m := range migrationsStruct {
+			migrations[i] = (*MigrationStatus)(m)
+		}
 	} else {
-		migrations, err = o.migrationManager.ListMigrations()
+		migrationsStruct, err := o.migrationManager.ListMigrations()
+		if err != nil {
+			return nil, err
+		}
+		migrations = make([]*MigrationStatus, len(migrationsStruct))
+		for i, m := range migrationsStruct {
+			migrations[i] = (*MigrationStatus)(m)
+		}
 	}
 
 	if err != nil {

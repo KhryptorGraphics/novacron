@@ -307,7 +307,7 @@ func (vm *VM) CreateStorageSnapshot(ctx context.Context, storageManager *VMStora
 // Enhanced VM Manager with Storage Integration
 
 // CreateVMWithStorage creates a VM with initial storage volumes
-func (m *VMManagerFixed) CreateVMWithStorage(ctx context.Context, config VMConfig, storageManager *VMStorageManagerIntegration, bootSizeGB, dataSizeGB int) (*VM, error) {
+func (m *VMManager) CreateVMWithStorage(ctx context.Context, config VMConfig, storageManager *VMStorageManagerIntegration, bootSizeGB, dataSizeGB int) (*VM, error) {
 	// Create the VM first
 	vm, err := m.CreateVM(ctx, config)
 	if err != nil {
@@ -353,7 +353,7 @@ func (m *VMManagerFixed) CreateVMWithStorage(ctx context.Context, config VMConfi
 }
 
 // DeleteVMWithStorage deletes a VM and all its associated storage
-func (m *VMManagerFixed) DeleteVMWithStorage(ctx context.Context, vmID string, storageManager *VMStorageManagerIntegration) error {
+func (m *VMManager) DeleteVMWithStorage(ctx context.Context, vmID string, storageManager *VMStorageManagerIntegration) error {
 	// Delete storage volumes first
 	if err := storageManager.DeleteVMVolumes(ctx, vmID); err != nil {
 		log.Printf("Warning: Failed to delete some volumes for VM %s: %v", vmID, err)

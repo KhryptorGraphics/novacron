@@ -194,7 +194,7 @@ func (m *EncryptionManager) CreateAESKey(id, name string, keySize int) (*Encrypt
 		Name:     name,
 		Type:     AESEncryption,
 		Data:     key,
-		Created:  0, // TODO: Set current time
+		Created:  time.Now().Unix(),
 		Expires:  0, // No expiration
 		Metadata: make(map[string]string),
 	}
@@ -225,7 +225,7 @@ func (m *EncryptionManager) CreateRSAKey(id, name string, keySize int) (*Encrypt
 		Name:     name,
 		Type:     RSAEncryption,
 		RSAKey:   privateKey,
-		Created:  0, // TODO: Set current time
+		Created:  time.Now().Unix(),
 		Expires:  0, // No expiration
 		Metadata: make(map[string]string),
 	}

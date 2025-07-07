@@ -234,12 +234,12 @@ func (m *VMManager) tryRecoverVM(vmID string) {
 	vm, exists := m.vms[vmID]
 	m.vmsMutex.RUnlock()
 	
-	if !exists || vm.State != VMStateError {
+	if !exists || vm.State() != StateFailed {
 		return
 	}
 	
 	// Get the VM driver
-	driver, err := m.driverFactory(vm.Spec.Type)
+	driver, err := m.driverFactory(vm.Config())
 	if err != nil {
 		log.Printf("Failed to get driver for VM %s during recovery: %v", vmID, err)
 		return
@@ -261,10 +261,8 @@ func (m *VMManager) tryRecoverVM(vmID string) {
 	
 	// Update the VM state
 	m.vmsMutex.Lock()
-	vm.State = VMStateRunning
-	vm.ErrorMessage = ""
-	vm.UpdatedAt = time.Now()
-	vm.StartedAt = time.Now()
+	vm.SetState(StateRunning)
+	vm.SetStartedAt(time.Now())
 	m.vmsMutex.Unlock()
 	
 	// Emit recovered event
@@ -272,7 +270,7 @@ func (m *VMManager) tryRecoverVM(vmID string) {
 		Type:      VMEventStarted,
 		VM:        *vm,
 		Timestamp: time.Now(),
-		NodeID:    vm.NodeID,
+		NodeID:    vm.NodeID(),
 		Message:   "VM recovered from error state",
 	})
 	
@@ -287,18 +285,18 @@ func (m *VMManager) checkResources() {
 	// Check each VM has a corresponding allocation
 	m.vmsMutex.RLock()
 	for id, vm := range m.vms {
-		if vm.State == VMStateDeleting {
+		if vm.State() == StateDeleting {
 			continue
 		}
 		
-		if vm.ResourceID == "" {
+		if vm.ResourceID() == "" {
 			log.Printf("Warning: VM %s has no resource ID", id)
 			continue
 		}
 		
 		found := false
 		for _, alloc := range allocations {
-			if alloc.RequestID == vm.ResourceID {
+			if alloc.RequestID == vm.ResourceID() {
 				found = true
 				break
 			}
@@ -306,7 +304,7 @@ func (m *VMManager) checkResources() {
 		
 		if !found {
 			log.Printf("Warning: VM %s has resource ID %s but no active allocation", 
-				id, vm.ResourceID)
+				id, vm.ResourceID())
 		}
 	}
 	m.vmsMutex.RUnlock()
@@ -326,15 +324,15 @@ func (m *VMManager) RunHealthCheck() map[string]string {
 	
 	// Check each VM
 	for id, vm := range vms {
-		if vm.State == VMStateError {
-			results[id] = "UNHEALTHY: VM in error state: " + vm.ErrorMessage
-		} else if vm.State == VMStateCreating && time.Since(vm.CreatedAt) > 10*time.Minute {
+		if vm.State() == VMStateError {
+			results[id] = "UNHEALTHY: VM in error state: " + vm.ErrorMessage()
+		} else if vm.State() == VMStateCreating && time.Since(vm.CreatedAt()) > 10*time.Minute {
 			results[id] = "WARNING: VM stuck in creating state"
-		} else if vm.State == VMStateDeleting && time.Since(vm.UpdatedAt) > 10*time.Minute {
+		} else if vm.State() == VMStateDeleting && time.Since(vm.UpdatedAt()) > 10*time.Minute {
 			results[id] = "WARNING: VM stuck in deleting state"
-		} else if vm.State == VMStateRestarting && time.Since(vm.UpdatedAt) > 5*time.Minute {
+		} else if vm.State() == StateRestarting && time.Since(vm.UpdatedAt()) > 5*time.Minute {
 			results[id] = "WARNING: VM stuck in restarting state"
-		} else if vm.State == VMStateMigrating && time.Since(vm.UpdatedAt) > 15*time.Minute {
+		} else if vm.State() == VMStateMigrating && time.Since(vm.UpdatedAt()) > 15*time.Minute {
 			results[id] = "WARNING: VM stuck in migrating state"
 		} else {
 			results[id] = "HEALTHY"

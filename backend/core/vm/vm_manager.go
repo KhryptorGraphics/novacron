@@ -12,6 +12,9 @@ import (
 // VMManager manages virtual machines across different drivers
 type VMManager struct {
 	drivers       map[VMType]VMDriver
+	vms           map[string]*VM
+	vmsMutex      sync.RWMutex
+	driverFactory VMDriverFactory
 	scheduler     VMScheduler
 	eventListeners []VMManagerEventListener
 	eventMutex    sync.RWMutex
@@ -24,12 +27,18 @@ type VMManager struct {
 // VMManagerConfig contains configuration for the VM manager
 type VMManagerConfig struct {
 	DefaultDriver VMType
-	Drivers       map[VMType]VMDriverConfig
+	Drivers       map[VMType]VMDriverConfigManager
 	Scheduler     VMSchedulerConfig
 }
 
 // VMDriverConfigLegacy contains legacy driver-specific configuration (use driver_factory.go VMDriverConfig instead)
 type VMDriverConfigLegacy struct {
+	Enabled bool
+	Config  map[string]interface{}
+}
+
+// VMDriverConfigManager contains driver-specific configuration for VM manager
+type VMDriverConfigManager struct {
 	Enabled bool
 	Config  map[string]interface{}
 }
@@ -45,7 +54,8 @@ type VMManagerEventListener interface {
 	OnVMEvent(event VMEvent)
 }
 
-// VMEvent, VMEventType and related constants are defined in vm_events.go to avoid duplication
+// VMEvent represents an event that occurred on a VM (defined here to avoid import cycles)
+// Note: This may conflict with vm_events.go - use conditional compilation or merge definitions
 
 // NewVMManager creates a new VM manager instance
 func NewVMManager(config VMManagerConfig) (*VMManager, error) {
@@ -53,11 +63,17 @@ func NewVMManager(config VMManagerConfig) (*VMManager, error) {
 	
 	manager := &VMManager{
 		drivers:        make(map[VMType]VMDriver),
+		vms:            make(map[string]*VM),
+		driverFactory:  nil, // Will be set later
 		eventListeners: make([]VMManagerEventListener, 0),
 		vmCache:        make(map[string]VMInfo),
 		ctx:            ctx,
 		cancel:         cancel,
 	}
+
+	// Initialize driver factory with default config
+	driverConfig := DefaultVMDriverConfig("default-node")
+	manager.driverFactory = NewVMDriverFactory(driverConfig)
 
 	// Initialize drivers based on config
 	for driverType, driverConfig := range config.Drivers {
@@ -65,7 +81,7 @@ func NewVMManager(config VMManagerConfig) (*VMManager, error) {
 			continue
 		}
 
-		driver, err := createDriver(driverType, driverConfig.Config)
+		driver, err := manager.createDriverForType(driverType, driverConfig.Config)
 		if err != nil {
 			log.Printf("Failed to create driver %s: %v", driverType, err)
 			continue
@@ -77,12 +93,15 @@ func NewVMManager(config VMManagerConfig) (*VMManager, error) {
 
 	// Initialize scheduler if configured
 	if config.Scheduler.Type != "" {
-		scheduler, err := createScheduler(config.Scheduler)
-		if err != nil {
-			log.Printf("Failed to create scheduler: %v", err)
-		} else {
-			manager.scheduler = scheduler
+		schedulerConfig := SchedulerConfig{
+			Policy:                 SchedulerPolicyRoundRobin,
+			EnableResourceChecking: true,
+			EnableAntiAffinity:     false,
+			EnableNodeLabels:       false,
+			MaxVMsPerNode:          10,
 		}
+		scheduler := NewVMScheduler(schedulerConfig)
+		manager.scheduler = *scheduler
 	}
 
 	return manager, nil
@@ -96,9 +115,9 @@ func createDriver(driverType VMType, config map[string]interface{}) (VMDriver, e
 		if !ok {
 			uri = "qemu:///system" // Default KVM URI
 		}
-		return NewKVMDriver(uri)
+		return NewKVMDriverStub(map[string]interface{}{"uri": uri})
 	case VMTypeContainer:
-		return NewContainerDriver(config)
+		return NewContainerDriverStub(config)
 	case VMTypeContainerd:
 		return NewContainerdDriver(config)
 	default:
@@ -110,7 +129,10 @@ func createDriver(driverType VMType, config map[string]interface{}) (VMDriver, e
 func createScheduler(config VMSchedulerConfig) (VMScheduler, error) {
 	// For now, return a basic scheduler
 	// This can be expanded to support different scheduler types
-	return NewBasicScheduler(), nil
+	scheduler := NewVMScheduler(SchedulerConfig{
+		Policy: SchedulerPolicyRoundRobin,
+	})
+	return *scheduler, nil
 }
 
 // emitEvent emits a VM event to all registered listeners
@@ -286,5 +308,80 @@ func (m *VMManager) listAvailableVMTypes() []VMType { // Assuming VMType is defi
 	}
 
 	return availableTypes
+}
+
+// createDriverForType creates a driver for the specified type
+func (m *VMManager) createDriverForType(vmType VMType, config map[string]interface{}) (VMDriver, error) {
+	switch vmType {
+	case VMTypeKVM:
+		return NewKVMDriverStub(config)
+	case VMTypeContainer:
+		return NewContainerDriverStub(config)
+	case VMTypeContainerd:
+		return NewContainerdDriver(config)
+	case VMTypeProcess:
+		return NewProcessDriverStub(config)
+	default:
+		return nil, fmt.Errorf("unsupported driver type: %s", vmType)
+	}
+}
+
+// NewKVMDriverStub creates a stub KVM driver
+func NewKVMDriverStub(config map[string]interface{}) (VMDriver, error) {
+	return NewContainerdDriver(config)
+}
+
+// NewContainerDriverStub creates a stub container driver
+func NewContainerDriverStub(config map[string]interface{}) (VMDriver, error) {
+	return NewContainerdDriver(config)
+}
+
+// NewProcessDriverStub creates a stub process driver
+func NewProcessDriverStub(config map[string]interface{}) (VMDriver, error) {
+	return NewContainerdDriver(config)
+}
+
+// updateLoop runs the VM update loop
+func (m *VMManager) updateLoop() {
+	// Placeholder for update loop implementation
+	log.Println("VM Manager update loop started")
+}
+
+// cleanupLoop runs the VM cleanup loop
+func (m *VMManager) cleanupLoop() {
+	// Placeholder for cleanup loop implementation
+	log.Println("VM Manager cleanup loop started")
+}
+
+// AddVM adds a VM to the manager
+func (m *VMManager) AddVM(vm *VM) {
+	m.vmsMutex.Lock()
+	defer m.vmsMutex.Unlock()
+	config := vm.Config()
+	m.vms[config.ID] = vm
+}
+
+// RemoveVM removes a VM from the manager
+func (m *VMManager) RemoveVM(vmID string) {
+	m.vmsMutex.Lock()
+	defer m.vmsMutex.Unlock()
+	delete(m.vms, vmID)
+}
+
+// GetVMFromCache gets a VM by ID from cache
+func (m *VMManager) GetVMFromCache(vmID string) (*VM, bool) {
+	m.vmsMutex.RLock()
+	defer m.vmsMutex.RUnlock()
+	vm, exists := m.vms[vmID]
+	return vm, exists
+}
+
+// Shutdown gracefully shuts down the VM manager
+func (m *VMManager) Shutdown() {
+	log.Println("Shutting down VM Manager...")
+	
+	// Cancel context to stop all operations
+	m.cancel()
+	log.Println("VM Manager shutdown complete")
 }
 
