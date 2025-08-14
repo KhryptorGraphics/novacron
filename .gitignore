@@ -30,3 +30,6 @@ logs/
 
 # Mac OS
 .DS_Store
+
+# Crush agent ephemeral state
+.crush/
