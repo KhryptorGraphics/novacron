@@ -1,0 +1,234 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: novacron
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: novacron-config
+  namespace: novacron
+data:
+  DB_HOST: "novacron-mysql"
+  DB_PORT: "3306"
+  REDIS_URL: "redis://novacron-redis:6379"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: novacron-api
+  namespace: novacron
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: novacron-api
+  template:
+    metadata:
+      labels:
+        app: novacron-api
+    spec:
+      containers:
+      - name: api
+        image: novacron/api:latest
+        ports:
+        - containerPort: 8090
+        envFrom:
+        - configMapRef:
+            name: novacron-config
+        env:
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: novacron-secrets
+              key: db-user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: novacron-secrets
+              key: db-password
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: novacron-secrets
+              key: db-name
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8090
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8090
+          initialDelaySeconds: 15
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: novacron-api
+  namespace: novacron
+spec:
+  selector:
+    app: novacron-api
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8090
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: novacron-hypervisor
+  namespace: novacron
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: novacron-hypervisor
+  template:
+    metadata:
+      labels:
+        app: novacron-hypervisor
+    spec:
+      containers:
+      - name: hypervisor
+        image: novacron/hypervisor:latest
+        ports:
+        - containerPort: 8091
+        envFrom:
+        - configMapRef:
+            name: novacron-config
+        env:
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: novacron-secrets
+              key: db-user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: novacron-secrets
+              key: db-password
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: novacron-secrets
+              key: db-name
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run/docker.sock
+        - name: novacron-data
+          mountPath: /var/lib/novacron
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+      volumes:
+      - name: docker-sock
+        hostPath:
+          path: /var/run/docker.sock
+      - name: novacron-data
+        hostPath:
+          path: /var/lib/novacron
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: novacron-hypervisor
+  namespace: novacron
+spec:
+  selector:
+    app: novacron-hypervisor
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8091
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: novacron-frontend
+  namespace: novacron
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: novacron-frontend
+  template:
+    metadata:
+      labels:
+        app: novacron-frontend
+    spec:
+      containers:
+      - name: frontend
+        image: novacron/frontend:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NEXT_PUBLIC_API_URL
+          value: "http://novacron-api"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: novacron-frontend
+  namespace: novacron
+spec:
+  selector:
+    app: novacron-frontend
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: novacron-ingress
+  namespace: novacron
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - host: novacron.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: novacron-frontend
+            port:
+              number: 80
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: novacron-api
+            port:
+              number: 80

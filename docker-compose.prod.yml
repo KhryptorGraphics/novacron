@@ -1,0 +1,123 @@
+version: '3.8'
+
+services:
+  # NovaCron API Service
+  novacron-api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    ports:
+      - "8090:8090"
+    environment:
+      - DB_HOST=novacron-db
+      - DB_PORT=3306
+      - DB_USER=novacron
+      - DB_PASSWORD=novacron123
+      - DB_NAME=novacron
+      - REDIS_URL=redis://novacron-redis:6379
+    depends_on:
+      - novacron-db
+      - novacron-redis
+    restart: unless-stopped
+    networks:
+      - novacron-network
+
+  # NovaCron Hypervisor Service
+  novacron-hypervisor:
+    build:
+      context: .
+      dockerfile: docker/hypervisor.Dockerfile
+    ports:
+      - "8091:8091"
+    environment:
+      - DB_HOST=novacron-db
+      - DB_PORT=3306
+      - DB_USER=novacron
+      - DB_PASSWORD=novacron123
+      - DB_NAME=novacron
+    depends_on:
+      - novacron-db
+    restart: unless-stopped
+    networks:
+      - novacron-network
+    privileged: true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/novacron:/var/lib/novacron
+
+  # NovaCron Frontend
+  novacron-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://novacron-api:8090
+    depends_on:
+      - novacron-api
+    restart: unless-stopped
+    networks:
+      - novacron-network
+
+  # Database
+  novacron-db:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=root123
+      - MYSQL_DATABASE=novacron
+      - MYSQL_USER=novacron
+      - MYSQL_PASSWORD=novacron123
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    ports:
+      - "3306:3306"
+    restart: unless-stopped
+    networks:
+      - novacron-network
+
+  # Redis for job scheduling
+  novacron-redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - novacron-network
+
+  # Monitoring Stack
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    restart: unless-stopped
+    networks:
+      - novacron-network
+
+  grafana:
+    image: grafana/grafana-enterprise:10.0.3
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - novacron-network
+
+networks:
+  novacron-network:
+    driver: bridge
+
+volumes:
+  db_data:
+  prometheus_data:
+  grafana_data:
