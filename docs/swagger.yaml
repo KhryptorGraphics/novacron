@@ -1,0 +1,668 @@
+openapi: 3.0.0
+info:
+  title: NovaCron API
+  description: Distributed Cron Scheduler API
+  version: 1.0.0
+  contact:
+    name: NovaCron Team
+    email: team@novacron.io
+  license:
+    name: MIT
+    url: https://github.com/khryptorgraphics/novacron/blob/main/LICENSE
+
+servers:
+  - url: http://localhost:3000/api
+    description: Local development server
+  - url: https://novacron.example.com/api
+    description: Production server
+
+paths:
+  /jobs:
+    post:
+      summary: Create a new job
+      operationId: createJob
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobCreateRequest'
+      responses:
+        '201':
+          description: Job created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobResponse'
+        '400':
+          description: Invalid request data
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+    get:
+      summary: List jobs
+      operationId: listJobs
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: enabled
+          in: query
+          schema:
+            type: boolean
+        - name: schedule_type
+          in: query
+          schema:
+            type: string
+            enum: [cron, interval, once, webhook, event]
+      responses:
+        '200':
+          description: List of jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Job'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /jobs/{id}:
+    get:
+      summary: Get a job by ID
+      operationId: getJob
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobResponse'
+        '404':
+          description: Job not found
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+    put:
+      summary: Update a job
+      operationId: updateJob
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobUpdateRequest'
+      responses:
+        '200':
+          description: Job updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobResponse'
+        '400':
+          description: Invalid request data
+        '404':
+          description: Job not found
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+    delete:
+      summary: Delete a job
+      operationId: deleteJob
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job deleted successfully
+        '404':
+          description: Job not found
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /jobs/{id}/execute:
+    post:
+      summary: Execute a job immediately
+      operationId: executeJob
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job execution started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResponse'
+        '404':
+          description: Job not found
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /jobs/{id}/executions:
+    get:
+      summary: Get job executions
+      operationId: getJobExecutions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: List of job executions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Execution'
+        '404':
+          description: Job not found
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /workflows:
+    post:
+      summary: Create a new workflow
+      operationId: createWorkflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowCreateRequest'
+      responses:
+        '201':
+          description: Workflow created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowResponse'
+        '400':
+          description: Invalid request data
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+    get:
+      summary: List workflows
+      operationId: listWorkflows
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: List of workflows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Workflow'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /workflows/{id}:
+    get:
+      summary: Get a workflow by ID
+      operationId: getWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Workflow details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowResponse'
+        '404':
+          description: Workflow not found
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+    put:
+      summary: Update a workflow
+      operationId: updateWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowUpdateRequest'
+      responses:
+        '200':
+          description: Workflow updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowResponse'
+        '400':
+          description: Invalid request data
+        '404':
+          description: Workflow not found
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+    delete:
+      summary: Delete a workflow
+      operationId: deleteWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Workflow deleted successfully
+        '404':
+          description: Workflow not found
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+  /workflows/{id}/execute:
+    post:
+      summary: Execute a workflow
+      operationId: executeWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Workflow execution started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowExecutionResponse'
+        '404':
+          description: Workflow not found
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+
+components:
+  schemas:
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        schedule_type:
+          type: string
+          enum: [cron, interval, once, webhook, event]
+        schedule_config:
+          type: object
+          properties:
+            expression:
+              type: string
+            interval:
+              type: integer
+            webhook_url:
+              type: string
+            event_name:
+              type: string
+        timezone:
+          type: string
+        enabled:
+          type: boolean
+        priority:
+          type: integer
+          minimum: 1
+          maximum: 10
+        max_retries:
+          type: integer
+        timeout:
+          type: integer
+        handler:
+          type: string
+        metadata:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        next_run_at:
+          type: string
+          format: date-time
+        last_run_at:
+          type: string
+          format: date-time
+
+    JobCreateRequest:
+      type: object
+      required:
+        - name
+        - schedule_type
+        - schedule_config
+        - handler
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        schedule_type:
+          type: string
+          enum: [cron, interval, once, webhook, event]
+        schedule_config:
+          type: object
+        timezone:
+          type: string
+          default: UTC
+        enabled:
+          type: boolean
+          default: true
+        priority:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 5
+        max_retries:
+          type: integer
+          default: 3
+        timeout:
+          type: integer
+          default: 30000
+        handler:
+          type: string
+        metadata:
+          type: object
+
+    JobUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        schedule_type:
+          type: string
+          enum: [cron, interval, once, webhook, event]
+        schedule_config:
+          type: object
+        timezone:
+          type: string
+        enabled:
+          type: boolean
+        priority:
+          type: integer
+          minimum: 1
+          maximum: 10
+        max_retries:
+          type: integer
+        timeout:
+          type: integer
+        handler:
+          type: string
+        metadata:
+          type: object
+
+    JobResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Job'
+        message:
+          type: string
+
+    Execution:
+      type: object
+      properties:
+        id:
+          type: string
+        job_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed, retrying]
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        duration_ms:
+          type: integer
+        result:
+          type: object
+        error_message:
+          type: string
+        attempt_number:
+          type: integer
+        metadata:
+          type: object
+
+    ExecutionResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Execution'
+        message:
+          type: string
+
+    Workflow:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        definition:
+          type: object
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    WorkflowCreateRequest:
+      type: object
+      required:
+        - name
+        - definition
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        definition:
+          type: object
+        enabled:
+          type: boolean
+          default: true
+
+    WorkflowUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        definition:
+          type: object
+        enabled:
+          type: boolean
+
+    WorkflowResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Workflow'
+        message:
+          type: string
+
+    WorkflowExecution:
+      type: object
+      properties:
+        id:
+          type: string
+        workflow_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        duration_ms:
+          type: integer
+        result:
+          type: object
+        error_message:
+          type: string
+        metadata:
+          type: object
+
+    WorkflowExecutionResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/WorkflowExecution'
+        message:
+          type: string
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        pages:
+          type: integer
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - bearerAuth: []
