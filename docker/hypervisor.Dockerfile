@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.19-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git gcc musl-dev
@@ -8,16 +8,16 @@ RUN apk add --no-cache git gcc musl-dev
 WORKDIR /app
 
 # Copy go mod and sum files
-COPY backend/core/go.mod backend/core/go.sum ./
+COPY go.mod go.sum ./
 
 # Download dependencies
 RUN go mod download
 
-# Copy source code
-COPY backend/core ./
+# Copy backend directory
+COPY backend ./backend
 
 # Build the application
-RUN CGO_ENABLED=1 GOOS=linux go build -a -o novacron-hypervisor ./cmd/novacron
+RUN CGO_ENABLED=1 GOOS=linux go build -a -o novacron-hypervisor ./backend/core/cmd/novacron
 
 # Final stage
 FROM alpine:3.17

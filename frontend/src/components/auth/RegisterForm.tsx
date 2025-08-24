@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Icons } from "@/components/ui/icons";
+import { PasswordStrengthIndicator } from "./PasswordStrengthIndicator";
 
 interface RegisterFormProps {
   onSubmit: (firstName: string, lastName: string, email: string, password: string) => Promise<void>;
@@ -75,29 +77,31 @@ export function RegisterForm({ onSubmit, isLoading }: RegisterFormProps) {
       </div>
       <div className="grid gap-2 mt-4">
         <Label htmlFor="password">Password</Label>
-        <Input
+        <PasswordInput
           id="password"
           placeholder="••••••••"
-          type="password"
           autoComplete="new-password"
           disabled={isLoading}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
         />
+        <PasswordStrengthIndicator password={password} />
       </div>
       <div className="grid gap-2 mt-4">
         <Label htmlFor="confirmPassword">Confirm Password</Label>
-        <Input
+        <PasswordInput
           id="confirmPassword"
           placeholder="••••••••"
-          type="password"
           autoComplete="new-password"
           disabled={isLoading}
           value={confirmPassword}
           onChange={(e) => setConfirmPassword(e.target.value)}
           required
         />
+        {confirmPassword && password !== confirmPassword && (
+          <p className="text-sm text-red-600">Passwords do not match</p>
+        )}
       </div>
       <Button className="w-full mt-6" type="submit" disabled={isLoading}>
         {isLoading && (

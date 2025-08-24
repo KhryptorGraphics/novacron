@@ -11,6 +11,20 @@ import (
 	// "github.com/khryptorgraphics/novacron/backend/core/scheduler" // Temporarily commented out for testing
 )
 
+// VM operation constants
+const (
+	VMOperationStart     = "start"
+	VMOperationStop      = "stop"
+	VMOperationRestart   = "restart"
+	VMOperationDelete    = "delete"
+	VMOperationMigrate   = "migrate"
+	VMOperationPause     = "pause"
+	VMOperationResume    = "resume"
+	VMOperationSnapshot  = "snapshot"
+	VMOperationRestore   = "restore"
+	VMOperationClone     = "clone"
+)
+
 // Assuming CreateVMRequest has fields like Name string, Spec VMConfig, Tags map[string]string, Owner string
 // Assuming VMConfig has fields VCPU, MemoryMB, DiskMB (adjust if different)
 
@@ -34,83 +48,88 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 	}
 
 	// Create resource constraints using fields from VMConfig
-	constraints := []scheduler.ResourceConstraint{
-		{
-			Type:      scheduler.ResourceCPU,
-			MinAmount: float64(req.Spec.CPUShares), // Use CPUShares
-		},
-		{
-			Type:      scheduler.ResourceMemory,
-			MinAmount: float64(req.Spec.MemoryMB), // Use MemoryMB
-		},
-		// Disk constraint might need more info than just RootFS size
-		// {
-		// 	Type:      scheduler.ResourceDisk,
-		// 	MinAmount: float64(req.Spec.DiskMB), // Assuming DiskMB exists
-		// },
-	}
+	// TODO: Re-enable scheduler integration when scheduler package is available
+	// constraints := []scheduler.ResourceConstraint{
+	//	{
+	//		Type:      scheduler.ResourceCPU,
+	//		MinAmount: float64(req.Spec.CPUShares), // Use CPUShares
+	//	},
+	//	{
+	//		Type:      scheduler.ResourceMemory,
+	//		MinAmount: float64(req.Spec.MemoryMB), // Use MemoryMB
+	//	},
+	// }
 
 	// Request resources from the scheduler
-	resourceID, err := m.scheduler.RequestResources(constraints, 1, 1*time.Hour)
-	if err != nil {
-		return nil, fmt.Errorf("failed to request resources: %w", err)
-	}
+	// TODO: Re-enable scheduler integration when scheduler package is available
+	// resourceID, err := m.scheduler.RequestResources(constraints, 1, 1*time.Hour)
+	// if err != nil {
+	//	return nil, fmt.Errorf("failed to request resources: %w", err)
+	// }
 
 	// Create a task to distribute the VM
-	taskID, err := m.scheduler.DistributeTask(resourceID, 1)
-	if err != nil {
-		m.scheduler.CancelRequest(resourceID)
-		return nil, fmt.Errorf("failed to distribute task: %w", err)
-	}
+	// taskID, err := m.scheduler.DistributeTask(resourceID, 1)
+	// if err != nil {
+	//	m.scheduler.CancelRequest(resourceID)
+	//	return nil, fmt.Errorf("failed to distribute task: %w", err)
+	// }
 
 	// Wait for the task to be allocated
-	for {
-		status, err := m.scheduler.GetTaskStatus(taskID)
-		if err != nil {
-			m.scheduler.CancelRequest(resourceID)
-			return nil, fmt.Errorf("failed to get task status: %w", err)
-		}
+	// for {
+	//	status, err := m.scheduler.GetTaskStatus(taskID)
+	//	if err != nil {
+	//		// TODO: Re-enable when scheduler is available
+		// m.scheduler.CancelRequest(resourceID)
+	//		return nil, fmt.Errorf("failed to get task status: %w", err)
+	//	}
 
-		if status == scheduler.TaskAllocated {
-			break
-		}
+	//	if status == scheduler.TaskAllocated {
+	//		break
+	//	}
 
-		if status == scheduler.TaskFailed {
-			m.scheduler.CancelRequest(resourceID)
-			return nil, errors.New("task allocation failed")
-		}
+	//	if status == scheduler.TaskFailed {
+	//		// TODO: Re-enable when scheduler is available
+		// m.scheduler.CancelRequest(resourceID)
+	//		return nil, errors.New("task allocation failed")
+	// }
 
-		// Check for context cancellation
-		select {
-		case <-ctx.Done():
-			m.scheduler.CancelRequest(resourceID)
-			return nil, ctx.Err()
-		case <-time.After(100 * time.Millisecond):
-			// Continue waiting
-		}
-	}
+	//	// Check for context cancellation
+	//	select {
+	//	case <-ctx.Done():
+	//		// TODO: Re-enable when scheduler is available
+	//		// m.scheduler.CancelRequest(resourceID)
+	//		return nil, ctx.Err()
+	//	case <-time.After(100 * time.Millisecond):
+	//		// Continue waiting
+	//	}
+	// }
 
 	// Get the allocations
-	allocations := m.scheduler.GetActiveAllocations()
-	var allocation scheduler.ResourceAllocation
-	found := false
-	for _, a := range allocations {
-		if a.RequestID == resourceID {
-			allocation = a
-			found = true
-			break
-		}
-	}
+	// TODO: Re-enable when scheduler is available
+	// allocations := m.scheduler.GetActiveAllocations()
+	// var allocation scheduler.ResourceAllocation
+	// found := false
+	// for _, a := range allocations {
+	//	if a.RequestID == resourceID {
+	//		allocation = a
+	//		found = true
+	//		break
+	//	}
+	// }
 
+	// TODO: Skip scheduler check for now
+	found := true // Temporary fix
 	if !found {
-		m.scheduler.CancelRequest(resourceID)
+		// TODO: Re-enable when scheduler is available
+		// m.scheduler.CancelRequest(resourceID)
 		return nil, errors.New("allocation not found")
 	}
 
 	// Create the VM object using the constructor
 	vm, err := NewVM(req.Spec) // Pass the VMConfig spec
 	if err != nil {
-		m.scheduler.CancelRequest(resourceID)
+		// TODO: Re-enable when scheduler is available
+		// m.scheduler.CancelRequest(resourceID)
 		return nil, fmt.Errorf("failed to initialize VM object: %w", err)
 	}
 	// Set internal fields not handled by constructor (if any)
@@ -142,12 +161,13 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 			Type:      VMEventError,
 			VM:        *vm, // Pass the VM object
 			Timestamp: time.Now(),
-			NodeID:    allocation.NodeID, // Use nodeID from allocation
+			NodeID:    "node1", // TODO: Use nodeID from allocation when scheduler is available
 			Message:   fmt.Sprintf("Failed to create VM: %v", err),
 		})
 
 		// Cancel the resource request
-		m.scheduler.CancelRequest(resourceID)
+		// TODO: Re-enable when scheduler is available
+		// m.scheduler.CancelRequest(resourceID)
 
 		return vm, err
 	}
@@ -163,10 +183,10 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 		Type:      VMEventCreated,
 		VM:        *vm, // Pass the VM object
 		Timestamp: time.Now(),
-		NodeID:    allocation.NodeID, // Use nodeID from allocation
+		NodeID:    "node1", // TODO: Use nodeID from allocation when scheduler is available
 	})
 
-	log.Printf("Created VM %s of type %s on node %s", vm.ID(), vm.config.Command, allocation.NodeID) // Use methods and allocation nodeID
+	log.Printf("Created VM %s of type %s on node %s", vm.ID(), vm.config.Command, "node1") // TODO: Use allocation nodeID when scheduler is available
 
 	return vm, nil // Return the created VM object
 }
@@ -205,13 +225,31 @@ func (m *VMManager) PerformVMOperation(ctx context.Context, req VMOperationReque
 	case VMOperationDelete:
 		return m.deleteVM(ctx, vm, driver)
 	case VMOperationMigrate:
-		return m.migrateVM(ctx, vm, driver, req.Params)
+		// Convert params from map[string]interface{} to map[string]string
+		stringParams := make(map[string]string)
+		for k, v := range req.Params {
+			if str, ok := v.(string); ok {
+				stringParams[k] = str
+			} else {
+				stringParams[k] = fmt.Sprintf("%v", v)
+			}
+		}
+		return m.migrateVM(ctx, vm, driver, stringParams)
 	case VMOperationPause:
 		return m.pauseVM(ctx, vm, driver)
 	case VMOperationResume:
 		return m.resumeVM(ctx, vm, driver)
 	case VMOperationSnapshot:
-		return m.snapshotVM(ctx, vm, driver, req.Params)
+		// Convert params from map[string]interface{} to map[string]string
+		stringParams := make(map[string]string)
+		for k, v := range req.Params {
+			if str, ok := v.(string); ok {
+				stringParams[k] = str
+			} else {
+				stringParams[k] = fmt.Sprintf("%v", v)
+			}
+		}
+		return m.snapshotVM(ctx, vm, driver, stringParams)
 	default:
 		return &VMOperationResponse{
 			Success:      false,
@@ -601,7 +639,8 @@ func (m *VMManager) deleteVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 	// Clean up resources
 	// If VM has a resource allocation, release it
 	if vm.resourceID != "" {
-		m.scheduler.CancelRequest(vm.resourceID)
+		// TODO: Re-enable when scheduler is available
+		// m.scheduler.CancelRequest(vm.resourceID)
 	}
 
 	// Emit deleted event
@@ -723,4 +762,155 @@ func (m *VMManager) migrateVM(ctx context.Context, vm *VM, driver VMDriver, para
 			"completion_time": time.Now().Format(time.RFC3339),
 		},
 	}, nil
+}
+
+// Public API methods for external calls
+
+// StartVM starts a VM by ID
+func (m *VMManager) StartVM(ctx context.Context, vmID string) error {
+	vm, err := m.GetVM(vmID)
+	if err != nil {
+		return err
+	}
+	
+	driver, err := m.getDriverForVM(vm)
+	if err != nil {
+		return err
+	}
+	
+	response, err := m.startVM(ctx, vm, driver)
+	if err != nil {
+		return err
+	}
+	
+	if !response.Success {
+		return fmt.Errorf("failed to start VM: %s", response.ErrorMessage)
+	}
+	
+	return nil
+}
+
+// StopVM stops a VM by ID
+func (m *VMManager) StopVM(ctx context.Context, vmID string) error {
+	vm, err := m.GetVM(vmID)
+	if err != nil {
+		return err
+	}
+	
+	driver, err := m.getDriverForVM(vm)
+	if err != nil {
+		return err
+	}
+	
+	response, err := m.stopVM(ctx, vm, driver)
+	if err != nil {
+		return err
+	}
+	
+	if !response.Success {
+		return fmt.Errorf("failed to stop VM: %s", response.ErrorMessage)
+	}
+	
+	return nil
+}
+
+// RestartVM restarts a VM by ID
+func (m *VMManager) RestartVM(ctx context.Context, vmID string) error {
+	vm, err := m.GetVM(vmID)
+	if err != nil {
+		return err
+	}
+	
+	driver, err := m.getDriverForVM(vm)
+	if err != nil {
+		return err
+	}
+	
+	response, err := m.restartVM(ctx, vm, driver)
+	if err != nil {
+		return err
+	}
+	
+	if !response.Success {
+		return fmt.Errorf("failed to restart VM: %s", response.ErrorMessage)
+	}
+	
+	return nil
+}
+
+// PauseVM pauses a VM by ID
+func (m *VMManager) PauseVM(ctx context.Context, vmID string) error {
+	vm, err := m.GetVM(vmID)
+	if err != nil {
+		return err
+	}
+	
+	driver, err := m.getDriverForVM(vm)
+	if err != nil {
+		return err
+	}
+	
+	response, err := m.pauseVM(ctx, vm, driver)
+	if err != nil {
+		return err
+	}
+	
+	if !response.Success {
+		return fmt.Errorf("failed to pause VM: %s", response.ErrorMessage)
+	}
+	
+	return nil
+}
+
+// ResumeVM resumes a VM by ID
+func (m *VMManager) ResumeVM(ctx context.Context, vmID string) error {
+	vm, err := m.GetVM(vmID)
+	if err != nil {
+		return err
+	}
+	
+	driver, err := m.getDriverForVM(vm)
+	if err != nil {
+		return err
+	}
+	
+	response, err := m.resumeVM(ctx, vm, driver)
+	if err != nil {
+		return err
+	}
+	
+	if !response.Success {
+		return fmt.Errorf("failed to resume VM: %s", response.ErrorMessage)
+	}
+	
+	return nil
+}
+
+// DeleteVM deletes a VM by ID
+func (m *VMManager) DeleteVM(ctx context.Context, vmID string) error {
+	vm, err := m.GetVM(vmID)
+	if err != nil {
+		return err
+	}
+	
+	driver, err := m.getDriverForVM(vm)
+	if err != nil {
+		return err
+	}
+	
+	response, err := m.deleteVM(ctx, vm, driver)
+	if err != nil {
+		return err
+	}
+	
+	if !response.Success {
+		return fmt.Errorf("failed to delete VM: %s", response.ErrorMessage)
+	}
+	
+	return nil
+}
+
+// getDriverForVM gets the appropriate driver for a VM
+func (m *VMManager) getDriverForVM(vm *VM) (VMDriver, error) {
+	return m.getDriver(vm.config)
 }

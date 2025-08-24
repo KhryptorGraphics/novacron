@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -158,7 +159,7 @@ type MigrationOptions struct {
 // DefaultMigrationOptions returns the default migration options
 func DefaultMigrationOptions() MigrationOptions {
 	return MigrationOptions{
-		Type:             MigrationTypeCold,
+		Type:             string(MigrationTypeCold),
 		BandwidthLimit:   0, // Unlimited
 		CompressionLevel: 6,
 		MemoryIterations: 5,

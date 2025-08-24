@@ -1,158 +1,133 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { useToast } from "@/components/ui/use-toast";
-import { Icons } from "@/components/ui/icons";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { RegistrationWizard } from "@/components/auth/RegistrationWizard";
+import { RegistrationData } from "@/lib/validation";
 import { apiService } from "@/lib/api";
+import { useToast } from "@/components/ui/use-toast";
 
 export default function RegisterPage() {
+  const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
   const { toast } = useToast();
-  const [isLoading, setIsLoading] = useState(false);
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
 
-  async function onSubmit(event: React.SyntheticEvent) {
-    event.preventDefault();
-    
-    if (password !== confirmPassword) {
-      toast({
-        title: "Error",
-        description: "Passwords do not match.",
-        variant: "destructive",
-      });
-      return;
-    }
-
+  async function onComplete(data: RegistrationData) {
     setIsLoading(true);
-
+    
     try {
-      await apiService.register({ firstName, lastName, email, password });
-      
-      toast({
-        title: "Success",
-        description: "Account created successfully. You can now log in.",
+      // Call the API with the full registration data
+      await apiService.register({
+        firstName: data.firstName,
+        lastName: data.lastName,
+        email: data.email,
+        password: data.password,
+        accountType: data.accountType,
+        organizationName: data.organizationName,
+        organizationSize: data.organizationSize,
+        phone: data.phone,
+        enableTwoFactor: data.enableTwoFactor,
       });
       
-      // Redirect to login page
-      router.push("/auth/login");
+      // Success is handled by the wizard component
+      // (shows verification flow, then success animation, then redirects)
     } catch (error) {
+      console.error("Registration error:", error);
       toast({
-        title: "Error",
-        description: "Failed to create account. Please try again.",
+        title: "Registration Failed",
+        description: "Unable to create your account. Please try again.",
         variant: "destructive",
       });
+      throw error; // Re-throw to be handled by the wizard
     } finally {
       setIsLoading(false);
     }
   }
 
   return (
-    <div className="container flex h-screen w-screen flex-col items-center justify-center">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl text-center">Create an account</CardTitle>
-          <CardDescription className="text-center">
-            Enter your information to create your account
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          <form onSubmit={onSubmit}>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="firstName">First Name</Label>
-                <Input
-                  id="firstName"
-                  placeholder="John"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  disabled={isLoading}
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                  required
-                />
+    <div className="container relative min-h-screen flex-col items-center justify-center grid lg:max-w-none lg:grid-cols-2 lg:px-0">
+      <div className="relative hidden h-full flex-col bg-muted p-10 text-white dark:border-r lg:flex">
+        <div className="absolute inset-0 bg-gradient-to-b from-blue-900 to-black" />
+        <div className="relative z-20 flex items-center text-lg font-medium">
+          <div className="mr-2 h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center">
+            <span className="text-xl font-bold">N</span>
+          </div>
+          NovaCron
+        </div>
+        <div className="relative z-20 mt-auto space-y-6">
+          <div className="space-y-4">
+            <h2 className="text-3xl font-bold">Enterprise-Grade VM Management</h2>
+            <p className="text-lg text-gray-300">
+              Join thousands of organizations using NovaCron to manage their distributed infrastructure
+            </p>
+          </div>
+          
+          <div className="grid gap-4">
+            <div className="flex items-start gap-3">
+              <div className="mt-1 h-5 w-5 rounded-full bg-blue-500/20 flex items-center justify-center">
+                <span className="text-xs text-blue-400">✓</span>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="lastName">Last Name</Label>
-                <Input
-                  id="lastName"
-                  placeholder="Doe"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  disabled={isLoading}
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                  required
-                />
+              <div>
+                <h3 className="font-semibold">Automated VM Lifecycle</h3>
+                <p className="text-sm text-gray-400">Provision, monitor, and manage VMs at scale</p>
               </div>
             </div>
-            <div className="grid gap-2 mt-4">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                placeholder="name@example.com"
-                type="email"
-                autoCapitalize="none"
-                autoComplete="email"
-                autoCorrect="off"
-                disabled={isLoading}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
+            
+            <div className="flex items-start gap-3">
+              <div className="mt-1 h-5 w-5 rounded-full bg-blue-500/20 flex items-center justify-center">
+                <span className="text-xs text-blue-400">✓</span>
+              </div>
+              <div>
+                <h3 className="font-semibold">Live Migration</h3>
+                <p className="text-sm text-gray-400">Zero-downtime migrations with WAN optimization</p>
+              </div>
             </div>
-            <div className="grid gap-2 mt-4">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                placeholder="••••••••"
-                type="password"
-                autoComplete="new-password"
-                disabled={isLoading}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
+            
+            <div className="flex items-start gap-3">
+              <div className="mt-1 h-5 w-5 rounded-full bg-blue-500/20 flex items-center justify-center">
+                <span className="text-xs text-blue-400">✓</span>
+              </div>
+              <div>
+                <h3 className="font-semibold">Advanced Monitoring</h3>
+                <p className="text-sm text-gray-400">Real-time metrics with predictive analytics</p>
+              </div>
             </div>
-            <div className="grid gap-2 mt-4">
-              <Label htmlFor="confirmPassword">Confirm Password</Label>
-              <Input
-                id="confirmPassword"
-                placeholder="••••••••"
-                type="password"
-                autoComplete="new-password"
-                disabled={isLoading}
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-              />
-            </div>
-            <Button className="w-full mt-6" type="submit" disabled={isLoading}>
-              {isLoading && (
-                <Icons.spinner className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              Create Account
-            </Button>
-          </form>
-        </CardContent>
-        <CardFooter className="flex flex-col">
-          <div className="text-sm text-muted-foreground text-center">
-            Already have an account?{" "}
-            <Link href="/auth/login" className="hover:text-brand underline underline-offset-4">
-              Sign in
+          </div>
+          
+          <blockquote className="border-l-2 border-blue-500 pl-4 space-y-2">
+            <p className="text-lg italic">
+              "NovaCron has revolutionized how we manage our distributed infrastructure. The automation capabilities are unmatched."
+            </p>
+            <footer className="text-sm text-gray-400">— Sofia Davis, CTO at TechCorp</footer>
+          </blockquote>
+        </div>
+      </div>
+      
+      <div className="lg:p-8">
+        <div className="mx-auto flex w-full flex-col justify-center space-y-6">
+          <div className="flex justify-center mb-4">
+            <Link href="/" className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              Back to Home
             </Link>
           </div>
-        </CardFooter>
-      </Card>
+          
+          <RegistrationWizard onComplete={onComplete} />
+          
+          <p className="text-center text-sm text-muted-foreground mt-4">
+            Already have an account?{" "}
+            <Link
+              href="/auth/login"
+              className="font-medium text-blue-600 hover:text-blue-500 underline underline-offset-4"
+            >
+              Sign in instead
+            </Link>
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

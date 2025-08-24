@@ -122,60 +122,42 @@ func (c *SystemCollector) Collect() ([]MetricBatch, error) {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 
+	// Create a batch for this collection
+	batch := NewMetricBatch("system_collector")
+	
 	// For each metric, collect its value
 	for _, metric := range c.metrics {
-		batch := MetricBatch{
-			MetricID:  metric.ID,
-			Timestamp: c.lastCollection,
-			Values:    make([]MetricValue, 0, 1),
-		}
-
 		// Collect the appropriate metric value
-		switch metric.ID {
+		switch metric.Name {
 		case "system.memory.used":
 			value := float64(memStats.Alloc)
-			metric.RecordValue(value, nil)
-			batch.Values = append(batch.Values, MetricValue{
-				Timestamp: c.lastCollection,
-				Value:     value,
-			})
+			newMetric := NewMetric(metric.Name, MetricTypeGauge, value, nil)
+			batch.AddMetric(newMetric.WithSource("system_collector").WithUnit("bytes"))
 		case "system.memory.total":
 			value := float64(memStats.Sys)
-			metric.RecordValue(value, nil)
-			batch.Values = append(batch.Values, MetricValue{
-				Timestamp: c.lastCollection,
-				Value:     value,
-			})
+			newMetric := NewMetric(metric.Name, MetricTypeGauge, value, nil)
+			batch.AddMetric(newMetric.WithSource("system_collector").WithUnit("bytes"))
 		case "system.memory.heap.used":
 			value := float64(memStats.HeapAlloc)
-			metric.RecordValue(value, nil)
-			batch.Values = append(batch.Values, MetricValue{
-				Timestamp: c.lastCollection,
-				Value:     value,
-			})
+			newMetric := NewMetric(metric.Name, MetricTypeGauge, value, nil)
+			batch.AddMetric(newMetric.WithSource("system_collector").WithUnit("bytes"))
 		case "system.memory.heap.total":
 			value := float64(memStats.HeapSys)
-			metric.RecordValue(value, nil)
-			batch.Values = append(batch.Values, MetricValue{
-				Timestamp: c.lastCollection,
-				Value:     value,
-			})
+			newMetric := NewMetric(metric.Name, MetricTypeGauge, value, nil)
+			batch.AddMetric(newMetric.WithSource("system_collector").WithUnit("bytes"))
 		case "system.goroutines":
 			value := float64(runtime.NumGoroutine())
-			metric.RecordValue(value, nil)
-			batch.Values = append(batch.Values, MetricValue{
-				Timestamp: c.lastCollection,
-				Value:     value,
-			})
+			newMetric := NewMetric(metric.Name, MetricTypeGauge, value, nil)
+			batch.AddMetric(newMetric.WithSource("system_collector").WithUnit("count"))
 		case "system.cpu.count":
 			value := float64(runtime.NumCPU())
-			metric.RecordValue(value, nil)
-			batch.Values = append(batch.Values, MetricValue{
-				Timestamp: c.lastCollection,
-				Value:     value,
-			})
+			newMetric := NewMetric(metric.Name, MetricTypeGauge, value, nil)
+			batch.AddMetric(newMetric.WithSource("system_collector").WithUnit("count"))
 		}
-
+	}
+	
+	// Add the batch to the collection if it has metrics
+	if !batch.IsEmpty() {
 		batches = append(batches, batch)
 	}
 

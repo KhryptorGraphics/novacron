@@ -1,7 +1,7 @@
 package vm
 
 import (
-	"context"
+	// "context" // Currently unused
 	"fmt"
 	"log"
 	"os"
@@ -67,11 +67,8 @@ func (vm *VM) Pause() error {
 	return nil
 }
 
-// Resume resumes a paused VM
-func (vm *VM) Resume() error {
-	vm.mutex.Lock()
-	defer vm.mutex.Unlock()
-
+// ResumeInternal resumes a paused VM (internal use)
+func (vm *VM) ResumeInternal() error {
 	if vm.state != StatePaused {
 		return fmt.Errorf("VM is not paused")
 	}
@@ -92,11 +89,8 @@ func (vm *VM) Resume() error {
 	return nil
 }
 
-// Suspend suspends the VM to disk (hibernate)
-func (vm *VM) Suspend() error {
-	vm.mutex.Lock()
-	defer vm.mutex.Unlock()
-
+// SuspendInternal suspends the VM to disk (hibernate) - internal use
+func (vm *VM) SuspendInternal() error {
 	if vm.state != StateRunning {
 		return fmt.Errorf("VM is not running")
 	}

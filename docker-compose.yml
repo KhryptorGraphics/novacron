@@ -9,6 +9,8 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: novacron
+    ports:
+      - "11432:5432"  # External port >11111 as required
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

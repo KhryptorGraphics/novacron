@@ -16,6 +16,16 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// zstdReaderWrapper wraps zstd.Decoder to implement io.ReadCloser
+type zstdReaderWrapper struct {
+	*zstd.Decoder
+}
+
+func (w *zstdReaderWrapper) Close() error {
+	w.Decoder.Close()
+	return nil
+}
+
 // DeltaSyncConfig defines configuration for delta synchronization
 type DeltaSyncConfig struct {
 	// Block size for delta computation in KB
@@ -650,7 +660,8 @@ func (m *DeltaSyncManager) applyDelta(ctx context.Context, destPath, deltaPath, 
 			return fmt.Errorf("failed to create decompressor: %w", err)
 		}
 		defer decompressor.Close()
-		reader = decompressor
+		// Wrap decompressor to implement io.ReadCloser
+		reader = &zstdReaderWrapper{decompressor}
 	}
 
 	// Read delta header

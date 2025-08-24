@@ -89,11 +89,18 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 		Tags:       request.Tags,
 	}
 	
+	// Create VM request
+	createRequest := vm.CreateVMRequest{
+		Name: request.Name,
+		Spec: config,
+		Tags: request.Tags,
+	}
+	
 	// Create VM
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	
-	newVM, err := h.vmManager.CreateVM(ctx, config)
+	newVM, err := h.vmManager.CreateVM(ctx, createRequest)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -176,8 +183,8 @@ func (h *Handler) UpdateVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// Update VM
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	// Update VM (context not needed for simple field updates)
+	_, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	
 	// Update name if provided

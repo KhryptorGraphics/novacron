@@ -1,14 +1,21 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
-	"io"
+	// "io" // Currently unused
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
+)
+
+// Migration errors
+var (
+	ErrVMNotRunning      = errors.New("VM is not running")
+	ErrMigrationNotFound = errors.New("migration not found")
 )
 
 // MigrationExecutorImpl implements the MigrationExecutor interface
@@ -38,9 +45,9 @@ func (e *MigrationExecutorImpl) ExecuteColdMigration(migrationID string, vm *VM,
 
 	logger := e.logger.WithFields(logrus.Fields{
 		"migration_id":   migrationID,
-		"vm_id":          vm.ID,
-		"vm_name":        vm.Name,
-		"source_node":    vm.NodeID,
+		"vm_id":          vm.ID(),
+		"vm_name":        vm.Name(),
+		"source_node":    vm.NodeID(),
 		"target_node":    targetNode.GetID(),
 		"migration_type": MigrationTypeCold,
 	})
@@ -63,14 +70,14 @@ func (e *MigrationExecutorImpl) ExecuteColdMigration(migrationID string, vm *VM,
 
 	// Step 3: Create VM on target node
 	logger.Info("Creating VM on target node")
-	if err := targetNode.CreateVM(vm.ID, vm.GetConfig()); err != nil {
+	if err := targetNode.CreateVM(vm.ID(), vm.Config()); err != nil {
 		return fmt.Errorf("failed to create VM on target node: %w", err)
 	}
 
 	// Step 4: Start VM on target node if it was running before
-	if vm.State == VMStateRunning {
+	if vm.State() == VMStateRunning {
 		logger.Info("Starting VM on target node")
-		targetVM, err := targetNode.GetVM(vm.ID)
+		targetVM, err := targetNode.GetVM(vm.ID())
 		if err != nil {
 			return fmt.Errorf("failed to get VM on target node: %w", err)
 		}
@@ -81,14 +88,14 @@ func (e *MigrationExecutorImpl) ExecuteColdMigration(migrationID string, vm *VM,
 	}
 
 	// Step 5: Verify VM is running on target node if needed
-	if vm.State == VMStateRunning {
+	if vm.State() == VMStateRunning {
 		logger.Info("Verifying VM is running on target node")
-		targetVM, err := targetNode.GetVM(vm.ID)
+		targetVM, err := targetNode.GetVM(vm.ID())
 		if err != nil {
 			return fmt.Errorf("failed to get VM on target node: %w", err)
 		}
 
-		if targetVM.State != VMStateRunning {
+		if targetVM.State() != VMStateRunning {
 			return fmt.Errorf("VM is not running on target node after migration")
 		}
 	}
@@ -111,9 +118,9 @@ func (e *MigrationExecutorImpl) ExecuteWarmMigration(migrationID string, vm *VM,
 
 	logger := e.logger.WithFields(logrus.Fields{
 		"migration_id":   migrationID,
-		"vm_id":          vm.ID,
-		"vm_name":        vm.Name,
-		"source_node":    vm.NodeID,
+		"vm_id":          vm.ID(),
+		"vm_name":        vm.Name(),
+		"source_node":    vm.NodeID(),
 		"target_node":    targetNode.GetID(),
 		"migration_type": MigrationTypeWarm,
 	})
@@ -121,7 +128,7 @@ func (e *MigrationExecutorImpl) ExecuteWarmMigration(migrationID string, vm *VM,
 	logger.Info("Starting warm migration")
 
 	// Step 1: Check if VM is running
-	if vm.State != VMStateRunning {
+	if vm.State() != VMStateRunning {
 		return ErrVMNotRunning
 	}
 
@@ -153,7 +160,7 @@ func (e *MigrationExecutorImpl) ExecuteWarmMigration(migrationID string, vm *VM,
 
 	// Step 5: Create VM on target node
 	logger.Info("Creating VM on target node")
-	if err := targetNode.CreateVM(vm.ID, vm.GetConfig()); err != nil {
+	if err := targetNode.CreateVM(vm.ID(), vm.Config()); err != nil {
 		// Try to resume the VM on the source node if creation fails
 		if resumeErr := vm.Resume(); resumeErr != nil {
 			logger.WithError(resumeErr).Error("Failed to resume VM on source node after target creation failure")
@@ -163,7 +170,7 @@ func (e *MigrationExecutorImpl) ExecuteWarmMigration(migrationID string, vm *VM,
 
 	// Step 6: Resume VM on target node
 	logger.Info("Resuming VM on target node")
-	targetVM, err := targetNode.GetVM(vm.ID)
+	targetVM, err := targetNode.GetVM(vm.ID())
 	if err != nil {
 		// Try to resume the VM on the source node if getting the target VM fails
 		if resumeErr := vm.Resume(); resumeErr != nil {
@@ -172,7 +179,7 @@ func (e *MigrationExecutorImpl) ExecuteWarmMigration(migrationID string, vm *VM,
 		return fmt.Errorf("failed to get VM on target node: %w", err)
 	}
 
-	if err := targetVM.ResumeFromState(); err != nil {
+	if err := targetVM.ResumeFromState(""); err != nil {
 		// Try to resume the VM on the source node if resuming on the target fails
 		if resumeErr := vm.Resume(); resumeErr != nil {
 			logger.WithError(resumeErr).Error("Failed to resume VM on source node after target resume failure")
@@ -182,12 +189,12 @@ func (e *MigrationExecutorImpl) ExecuteWarmMigration(migrationID string, vm *VM,
 
 	// Step 7: Verify VM is running on target node
 	logger.Info("Verifying VM is running on target node")
-	targetVM, err = targetNode.GetVM(vm.ID)
+	targetVM, err = targetNode.GetVM(vm.ID())
 	if err != nil {
 		return fmt.Errorf("failed to get VM on target node: %w", err)
 	}
 
-	if targetVM.State != VMStateRunning {
+	if targetVM.State() != VMStateRunning {
 		// Try to resume the VM on the source node if verification fails
 		if resumeErr := vm.Resume(); resumeErr != nil {
 			logger.WithError(resumeErr).Error("Failed to resume VM on source node after verification failure")
@@ -213,9 +220,9 @@ func (e *MigrationExecutorImpl) ExecuteLiveMigration(migrationID string, vm *VM,
 
 	logger := e.logger.WithFields(logrus.Fields{
 		"migration_id":   migrationID,
-		"vm_id":          vm.ID,
-		"vm_name":        vm.Name,
-		"source_node":    vm.NodeID,
+		"vm_id":          vm.ID(),
+		"vm_name":        vm.Name(),
+		"source_node":    vm.NodeID(),
 		"target_node":    targetNode.GetID(),
 		"migration_type": MigrationTypeLive,
 	})
@@ -223,7 +230,7 @@ func (e *MigrationExecutorImpl) ExecuteLiveMigration(migrationID string, vm *VM,
 	logger.Info("Starting live migration")
 
 	// Step 1: Check if VM is running
-	if vm.State != VMStateRunning {
+	if vm.State() != VMStateRunning {
 		return ErrVMNotRunning
 	}
 
@@ -235,7 +242,7 @@ func (e *MigrationExecutorImpl) ExecuteLiveMigration(migrationID string, vm *VM,
 
 	// Step 3: Create VM on target node (but don't start it yet)
 	logger.Info("Creating VM on target node")
-	if err := targetNode.CreateVM(vm.ID, vm.GetConfig()); err != nil {
+	if err := targetNode.CreateVM(vm.ID(), vm.Config()); err != nil {
 		return fmt.Errorf("failed to create VM on target node: %w", err)
 	}
 
@@ -273,7 +280,7 @@ func (e *MigrationExecutorImpl) ExecuteLiveMigration(migrationID string, vm *VM,
 
 	// Step 7: Resume VM on target node
 	logger.Info("Resuming VM on target node")
-	targetVM, err := targetNode.GetVM(vm.ID)
+	targetVM, err := targetNode.GetVM(vm.ID())
 	if err != nil {
 		// Try to resume the VM on the source node if getting the target VM fails
 		if resumeErr := vm.Resume(); resumeErr != nil {
@@ -282,7 +289,7 @@ func (e *MigrationExecutorImpl) ExecuteLiveMigration(migrationID string, vm *VM,
 		return fmt.Errorf("failed to get VM on target node: %w", err)
 	}
 
-	if err := targetVM.ResumeFromState(); err != nil {
+	if err := targetVM.ResumeFromState(""); err != nil {
 		// Try to resume the VM on the source node if resuming on the target fails
 		if resumeErr := vm.Resume(); resumeErr != nil {
 			logger.WithError(resumeErr).Error("Failed to resume VM on source node after target resume failure")
@@ -292,12 +299,12 @@ func (e *MigrationExecutorImpl) ExecuteLiveMigration(migrationID string, vm *VM,
 
 	// Step 8: Verify VM is running on target node
 	logger.Info("Verifying VM is running on target node")
-	targetVM, err = targetNode.GetVM(vm.ID)
+	targetVM, err = targetNode.GetVM(vm.ID())
 	if err != nil {
 		return fmt.Errorf("failed to get VM on target node: %w", err)
 	}
 
-	if targetVM.State != VMStateRunning {
+	if targetVM.State() != VMStateRunning {
 		// Try to resume the VM on the source node if verification fails
 		if resumeErr := vm.Resume(); resumeErr != nil {
 			logger.WithError(resumeErr).Error("Failed to resume VM on source node after verification failure")
@@ -320,9 +327,9 @@ func (e *MigrationExecutorImpl) ExecuteLiveMigration(migrationID string, vm *VM,
 func (e *MigrationExecutorImpl) transferVMData(migrationID string, vm *VM, targetNode Node) error {
 	logger := e.logger.WithFields(logrus.Fields{
 		"migration_id": migrationID,
-		"vm_id":        vm.ID,
-		"vm_name":      vm.Name,
-		"source_node":  vm.NodeID,
+		"vm_id":        vm.ID(),
+		"vm_name":      vm.Name(),
+		"source_node":  vm.NodeID(),
 		"target_node":  targetNode.GetID(),
 	})
 
@@ -359,7 +366,7 @@ func (e *MigrationExecutorImpl) transferVMData(migrationID string, vm *VM, targe
 
 		// Transfer disk to target node
 		logger.Infof("Transferring disk %d to target node", i)
-		targetDiskPath := targetNode.GetDiskPath(vm.ID, i)
+		targetDiskPath := targetNode.GetDiskPath(vm.ID())
 		if err := targetNode.EnsureDirectoryExists(filepath.Dir(targetDiskPath)); err != nil {
 			return fmt.Errorf("failed to create directory on target node: %w", err)
 		}
@@ -386,9 +393,9 @@ func (e *MigrationExecutorImpl) transferVMData(migrationID string, vm *VM, targe
 func (e *MigrationExecutorImpl) transferVMMemoryState(migrationID string, vm *VM, targetNode Node) error {
 	logger := e.logger.WithFields(logrus.Fields{
 		"migration_id": migrationID,
-		"vm_id":        vm.ID,
-		"vm_name":      vm.Name,
-		"source_node":  vm.NodeID,
+		"vm_id":        vm.ID(),
+		"vm_name":      vm.Name(),
+		"source_node":  vm.NodeID(),
 		"target_node":  targetNode.GetID(),
 	})
 
@@ -418,7 +425,7 @@ func (e *MigrationExecutorImpl) transferVMMemoryState(migrationID string, vm *VM
 
 	// Transfer memory state to target node
 	logger.Info("Transferring memory state to target node")
-	targetMemoryPath := targetNode.GetMemoryStatePath(vm.ID)
+	targetMemoryPath := targetNode.GetMemoryStatePath(vm.ID())
 	if err := targetNode.EnsureDirectoryExists(filepath.Dir(targetMemoryPath)); err != nil {
 		return fmt.Errorf("failed to create directory on target node: %w", err)
 	}
@@ -438,9 +445,9 @@ func (e *MigrationExecutorImpl) transferVMMemoryState(migrationID string, vm *VM
 func (e *MigrationExecutorImpl) transferVMMemoryDelta(migrationID string, vm *VM, targetNode Node, iteration int) error {
 	logger := e.logger.WithFields(logrus.Fields{
 		"migration_id": migrationID,
-		"vm_id":        vm.ID,
-		"vm_name":      vm.Name,
-		"source_node":  vm.NodeID,
+		"vm_id":        vm.ID(),
+		"vm_name":      vm.Name(),
+		"source_node":  vm.NodeID(),
 		"target_node":  targetNode.GetID(),
 		"iteration":    iteration,
 	})
@@ -471,7 +478,7 @@ func (e *MigrationExecutorImpl) transferVMMemoryDelta(migrationID string, vm *VM
 
 	// Transfer memory delta to target node
 	logger.Info("Transferring memory delta to target node")
-	targetMemoryDeltaPath := targetNode.GetMemoryDeltaPath(vm.ID, iteration)
+	targetMemoryDeltaPath := targetNode.GetMemoryDeltaPath(vm.ID())
 	if err := targetNode.EnsureDirectoryExists(filepath.Dir(targetMemoryDeltaPath)); err != nil {
 		return fmt.Errorf("failed to create directory on target node: %w", err)
 	}
@@ -494,20 +501,20 @@ func (e *MigrationExecutorImpl) RollbackMigration(migrationID string, vm *VM, so
 
 	logger := e.logger.WithFields(logrus.Fields{
 		"migration_id": migrationID,
-		"vm_id":        vm.ID,
-		"vm_name":      vm.Name,
+		"vm_id":        vm.ID(),
+		"vm_name":      vm.Name(),
 		"source_node":  sourceNode.GetID(),
 	})
 
 	logger.Info("Rolling back migration")
 
 	// Resume VM on source node if it was suspended or paused
-	if vm.State == VMStateSuspended || vm.State == VMStatePaused {
+	if vm.State() == VMStateSuspended || vm.State() == VMStatePaused {
 		logger.Info("Resuming VM on source node")
 		if err := vm.Resume(); err != nil {
 			return fmt.Errorf("failed to resume VM on source node: %w", err)
 		}
-	} else if vm.State == VMStateStopped {
+	} else if vm.State() == VMStateStopped {
 		// Start VM on source node if it was running before migration
 		logger.Info("Starting VM on source node")
 		if err := vm.Start(); err != nil {
@@ -521,8 +528,7 @@ func (e *MigrationExecutorImpl) RollbackMigration(migrationID string, vm *VM, so
 
 // Helper functions
 
-// copyFile copies a file from src to dst, returns number of bytes copied
-// copyFileWithProgress function moved to file_utils.go to avoid duplication
+// copyFileWithProgress is defined in file_utils.go
 
 // isDirtyRateAcceptable checks if the memory dirty rate is low enough to proceed
 func isDirtyRateAcceptable(vm *VM) bool {

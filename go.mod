@@ -2,7 +2,7 @@ module github.com/khryptorgraphics/novacron
 
 go 1.23.0
 
-toolchain go1.24.4
+toolchain go1.24.6
 
 require (
 	github.com/digitalocean/go-libvirt v0.0.0-20250616175656-5843751af96c // indirect
@@ -14,7 +14,10 @@ require (
 
 replace github.com/khryptorgraphics/novacron/backend/core => ./backend/core
 
-require github.com/khryptorgraphics/novacron/backend/core v0.0.0-00010101000000-000000000000
+require (
+	github.com/khryptorgraphics/novacron/backend/core v0.0.0-00010101000000-000000000000
+	github.com/lib/pq v1.10.9
+)
 
 require (
 	github.com/felixge/httpsnoop v1.0.3 // indirect

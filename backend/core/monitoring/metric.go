@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -198,4 +199,156 @@ type MetricCollector interface {
 
 	// Enabled returns whether the collector is enabled
 	Enabled() bool
+}
+
+// MetricRegistry manages metrics in memory
+type MetricRegistry struct {
+	metrics map[string]*MetricSeries
+	mutex   sync.RWMutex
+}
+
+// NewMetricRegistry creates a new metric registry
+func NewMetricRegistry() *MetricRegistry {
+	return &MetricRegistry{
+		metrics: make(map[string]*MetricSeries),
+	}
+}
+
+// Register adds a metric to the registry
+func (r *MetricRegistry) Register(metric *Metric) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	
+	// Create a key from metric name and tags
+	key := r.createKey(metric.Name, metric.Tags)
+	
+	// Get or create series
+	series, exists := r.metrics[key]
+	if !exists {
+		series = NewMetricSeries(metric.Name, metric.Tags)
+		r.metrics[key] = series
+	}
+	
+	// Add metric to series
+	series.AddMetric(metric)
+}
+
+// Query queries metrics from the registry
+func (r *MetricRegistry) Query(query MetricQuery) ([]*MetricSeries, error) {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+	
+	var results []*MetricSeries
+	
+	for _, series := range r.metrics {
+		// Check if series matches query
+		if r.matches(series, query) {
+			// Return time-sliced series if applicable
+			sliced := series.Slice(query.Start, query.End)
+			if len(sliced.Metrics) > 0 {
+				results = append(results, sliced)
+			}
+		}
+	}
+	
+	return results, nil
+}
+
+// GetMetrics returns all metrics for a given name
+func (r *MetricRegistry) GetMetrics(name string) ([]*MetricSeries, error) {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+	
+	var results []*MetricSeries
+	for _, series := range r.metrics {
+		if series.Name == name {
+			results = append(results, series)
+		}
+	}
+	
+	return results, nil
+}
+
+// Cleanup removes metrics older than the specified duration
+func (r *MetricRegistry) Cleanup(maxAge time.Duration) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	
+	cutoff := time.Now().Add(-maxAge)
+	
+	// Prune old metrics from each series
+	for key, series := range r.metrics {
+		series.PruneOlderThan(cutoff)
+		
+		// Remove empty series
+		if len(series.Metrics) == 0 {
+			delete(r.metrics, key)
+		}
+	}
+}
+
+// createKey creates a unique key for a metric series
+func (r *MetricRegistry) createKey(name string, tags map[string]string) string {
+	key := name
+	
+	// Sort tags to ensure consistent keys
+	var tagKeys []string
+	for k := range tags {
+		tagKeys = append(tagKeys, k)
+	}
+	
+	// Simple deterministic key generation
+	for _, k := range tagKeys {
+		key += fmt.Sprintf(":%s=%s", k, tags[k])
+	}
+	
+	return key
+}
+
+// matches checks if a metric series matches a query
+func (r *MetricRegistry) matches(series *MetricSeries, query MetricQuery) bool {
+	// Check name pattern (simple exact match for now)
+	if query.Pattern != "" && series.Name != query.Pattern {
+		return false
+	}
+	
+	// Check tags
+	for k, v := range query.Tags {
+		if seriesValue, exists := series.Tags[k]; !exists || seriesValue != v {
+			return false
+		}
+	}
+	
+	return true
+}
+
+// MetricBatch represents a batch of metrics to be processed together
+type MetricBatch struct {
+	Metrics   []*Metric `json:"metrics"`
+	Timestamp time.Time `json:"timestamp"`
+	Source    string    `json:"source"`
+}
+
+// NewMetricBatch creates a new metric batch
+func NewMetricBatch(source string) *MetricBatch {
+	return &MetricBatch{
+		Metrics:   make([]*Metric, 0),
+		Timestamp: time.Now(),
+		Source:    source,
+	}
+}
+
+// AddMetric adds a metric to the batch
+func (b *MetricBatch) AddMetric(metric *Metric) {
+	b.Metrics = append(b.Metrics, metric)
+}
+
+// Size returns the number of metrics in the batch
+func (b *MetricBatch) Size() int {
+	return len(b.Metrics)
+}
+
+// IsEmpty returns true if the batch is empty
+func (b *MetricBatch) IsEmpty() bool {
+	return len(b.Metrics) == 0
 }
