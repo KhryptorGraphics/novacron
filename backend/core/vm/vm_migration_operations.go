@@ -66,28 +66,14 @@ func (o *MigrationOperations) listMigrations(w http.ResponseWriter, r *http.Requ
 	// Parse query parameters
 	vmID := r.URL.Query().Get("vm_id")
 
-	var migrations []*MigrationStatus
+	var migrations []*MigrationStatusStruct
 	var err error
 
 	// List migrations, optionally filtered by VM ID
 	if vmID != "" {
-		migrationsStruct, err := o.migrationManager.ListMigrationsForVM(vmID)
-		if err != nil {
-			return nil, err
-		}
-		migrations = make([]*MigrationStatus, len(migrationsStruct))
-		for i, m := range migrationsStruct {
-			migrations[i] = (*MigrationStatus)(m)
-		}
+		migrations, err = o.migrationManager.ListMigrationsForVM(vmID)
 	} else {
-		migrationsStruct, err := o.migrationManager.ListMigrations()
-		if err != nil {
-			return nil, err
-		}
-		migrations = make([]*MigrationStatus, len(migrationsStruct))
-		for i, m := range migrationsStruct {
-			migrations[i] = (*MigrationStatus)(m)
-		}
+		migrations, err = o.migrationManager.ListMigrations()
 	}
 
 	if err != nil {

@@ -261,7 +261,7 @@ func (m *KVMManager) GetVMMetrics(ctx context.Context, vmID string) (*vm.VMInfo,
 		CPUUsage:    m.getCPUUsage(domain),
 		MemoryUsage: m.getMemoryUsage(domain),
 		NetworkSent: m.getNetworkSent(domain),
-		NetworkRecv: m.getNetworkReceived(domain)
+		NetworkRecv: m.getNetworkReceived(domain),
 	}
 	return vmInfo, nil
 }
@@ -706,16 +706,6 @@ func executeCommand(cmd string) error {
 	
 	log.Printf("Command executed successfully: %s", cmd)
 	return nil
-}
-}
-		ID:        domainUUID,
-		Name:      name,
-		State:     mapLibvirtState(libvirt.DomainState(state)),
-		CPUShares: int(nrVirtCpu),
-		MemoryMB:  int(maxMem / 1024),
-		// MemoryUsage: not implemented (would require additional API calls)
-	}
-	return vmInfo, nil
 }
 
 // GetHypervisorMetrics retrieves performance metrics for the KVM host

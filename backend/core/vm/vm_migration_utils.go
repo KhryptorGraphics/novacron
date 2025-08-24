@@ -1,13 +1,13 @@
 package vm
 
 import (
-	"bytes"
+	// "bytes" // Currently unused
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
-	"io/ioutil"
+	// "io/ioutil" // Currently unused
 	"net"
 	"os"
 	"runtime"

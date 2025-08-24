@@ -6,7 +6,7 @@ import (
 	"log"
 	"sort"
 	"sync"
-	"time"
+	// "time" // Currently unused
 )
 
 // SchedulerPolicy represents a VM scheduling policy

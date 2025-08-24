@@ -1,5 +1,5 @@
 # Build stage for Go API
-FROM golang:1.19-alpine AS go-builder
+FROM golang:1.23-alpine AS go-builder
 
 # Install build dependencies
 RUN apk add --no-cache git gcc musl-dev
@@ -8,16 +8,16 @@ RUN apk add --no-cache git gcc musl-dev
 WORKDIR /app
 
 # Copy go mod and sum files
-COPY backend/core/go.mod backend/core/go.sum ./
+COPY go.mod go.sum ./
+
+# Copy backend directory first (needed for module replacement)
+COPY backend ./backend
 
 # Download dependencies
 RUN go mod download
 
-# Copy Go source code
-COPY backend/core ./
-
 # Build the API service
-RUN CGO_ENABLED=0 GOOS=linux go build -a -o novacron-api ./cmd/api
+RUN CGO_ENABLED=0 GOOS=linux go build -a -o novacron-api ./backend/cmd/api-server
 
 # Python build stage
 FROM python:3.9-slim AS py-builder

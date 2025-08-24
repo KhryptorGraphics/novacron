@@ -2,7 +2,7 @@ module github.com/khryptorgraphics/novacron/backend/core
 
 go 1.23.0
 
-toolchain go1.24.2
+toolchain go1.24.6
 
 require (
 	github.com/digitalocean/go-libvirt v0.0.0-20250317183548-13bf9b43b50b

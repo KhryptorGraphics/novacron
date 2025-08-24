@@ -2,7 +2,7 @@ package vm
 
 import (
 	"context"
-	"time"
+	// "time" // Currently unused
 )
 
 // VMType represents the type of VM

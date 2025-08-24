@@ -292,6 +292,91 @@ class APIService {
     return response.data;
   }
 
+    // Authentication
+  async register(userData: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    password: string;
+    accountType?: string;
+    organizationName?: string;
+    organizationSize?: string;
+    phone?: string;
+    enableTwoFactor?: boolean;
+  }): Promise<{
+    success: boolean;
+    user: {
+      id: string;
+      email: string;
+      firstName: string;
+      lastName: string;
+      accountType?: string;
+    };
+    token?: string;
+    requiresTwoFactor?: boolean;
+  }> {
+    return this.request<{
+      success: boolean;
+      user: {
+        id: string;
+        email: string;
+        firstName: string;
+        lastName: string;
+        accountType?: string;
+      };
+      token?: string;
+      requiresTwoFactor?: boolean;
+    }>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(userData),
+    });
+  }
+
+  async login(email: string, password: string): Promise<{
+    success: boolean;
+    user: {
+      id: string;
+      email: string;
+      firstName: string;
+      lastName: string;
+    };
+    token: string;
+    requiresTwoFactor?: boolean;
+  }> {
+    return this.request<{
+      success: boolean;
+      user: {
+        id: string;
+        email: string;
+        firstName: string;
+        lastName: string;
+      };
+      token: string;
+      requiresTwoFactor?: boolean;
+    }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+  }
+
+  async checkEmailAvailability(email: string): Promise<{ available: boolean }> {
+    return this.request<{ available: boolean }>(`/api/auth/check-email?email=${encodeURIComponent(email)}`);
+  }
+
+  async resendVerificationEmail(email: string): Promise<{ success: boolean }> {
+    return this.request<{ success: boolean }>('/api/auth/resend-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async verifyEmail(token: string): Promise<{ success: boolean }> {
+    return this.request<{ success: boolean }>('/api/auth/verify-email', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+  }
+
   // WebSocket connection for real-time updates
   createWebSocket(onMessage: (data: any) => void, onError?: (error: Event) => void): WebSocket | null {
     try {

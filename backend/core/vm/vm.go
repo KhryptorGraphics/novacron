@@ -69,18 +69,19 @@ const (
 
 // VMConfig holds configuration for a VM
 type VMConfig struct {
-	ID        string            `yaml:"id" json:"id"`
-	Name      string            `yaml:"name" json:"name"`
-	Command   string            `yaml:"command" json:"command"`
-	Args      []string          `yaml:"args" json:"args"`
-	CPUShares int               `yaml:"cpu_shares" json:"cpu_shares"`
-	MemoryMB  int               `yaml:"memory_mb" json:"memory_mb"`
-	RootFS    string            `yaml:"rootfs" json:"rootfs"`
-	Mounts    []Mount           `yaml:"mounts" json:"mounts"`
-	Env       map[string]string `yaml:"env" json:"env"`
-	NetworkID string            `yaml:"network_id" json:"network_id"`
-	WorkDir   string            `yaml:"work_dir" json:"work_dir"`
-	Tags      map[string]string `yaml:"tags" json:"tags"`
+	ID         string            `yaml:"id" json:"id"`
+	Name       string            `yaml:"name" json:"name"`
+	Command    string            `yaml:"command" json:"command"`
+	Args       []string          `yaml:"args" json:"args"`
+	CPUShares  int               `yaml:"cpu_shares" json:"cpu_shares"`
+	MemoryMB   int               `yaml:"memory_mb" json:"memory_mb"`
+	DiskSizeGB int               `yaml:"disk_size_gb" json:"disk_size_gb"`
+	RootFS     string            `yaml:"rootfs" json:"rootfs"`
+	Mounts     []Mount           `yaml:"mounts" json:"mounts"`
+	Env        map[string]string `yaml:"env" json:"env"`
+	NetworkID  string            `yaml:"network_id" json:"network_id"`
+	WorkDir    string            `yaml:"work_dir" json:"work_dir"`
+	Tags       map[string]string `yaml:"tags" json:"tags"`
 }
 
 // Mount represents a filesystem mount for a VM
@@ -599,6 +600,100 @@ func (vm *VM) CreatedAt() time.Time {
 	return vm.createdAt
 }
 
+// GetCreatedAt returns when the VM was created
+func (vm *VM) GetCreatedAt() time.Time {
+	return vm.CreatedAt()
+}
+
+// GetCommand returns the VM's command
+func (vm *VM) GetCommand() string {
+	vm.mutex.RLock()
+	defer vm.mutex.RUnlock()
+	return vm.config.Command
+}
+
+// GetArgs returns the VM's arguments
+func (vm *VM) GetArgs() []string {
+	vm.mutex.RLock()
+	defer vm.mutex.RUnlock()
+	return vm.config.Args
+}
+
+// GetCPUShares returns the VM's CPU shares
+func (vm *VM) GetCPUShares() int {
+	vm.mutex.RLock()
+	defer vm.mutex.RUnlock()
+	return vm.config.CPUShares
+}
+
+// GetMemoryMB returns the VM's memory in MB
+func (vm *VM) GetMemoryMB() int {
+	vm.mutex.RLock()
+	defer vm.mutex.RUnlock()
+	return vm.config.MemoryMB
+}
+
+// GetDiskSizeGB returns the VM's disk size in GB
+func (vm *VM) GetDiskSizeGB() int {
+	vm.mutex.RLock()
+	defer vm.mutex.RUnlock()
+	return vm.config.DiskSizeGB
+}
+
+// GetTags returns the VM's tags
+func (vm *VM) GetTags() map[string]string {
+	vm.mutex.RLock()
+	defer vm.mutex.RUnlock()
+	return vm.config.Tags
+}
+
+// GetStats returns the VM's statistics
+func (vm *VM) GetStats() VMStats {
+	vm.statsLock.RLock()
+	defer vm.statsLock.RUnlock()
+	return vm.stats
+}
+
+// SetName sets the VM's name
+func (vm *VM) SetName(name string) {
+	vm.mutex.Lock()
+	defer vm.mutex.Unlock()
+	vm.config.Name = name
+	vm.updatedAt = time.Now()
+}
+
+// SetCPUShares sets the VM's CPU shares
+func (vm *VM) SetCPUShares(cpuShares int) {
+	vm.mutex.Lock()
+	defer vm.mutex.Unlock()
+	vm.config.CPUShares = cpuShares
+	vm.updatedAt = time.Now()
+}
+
+// SetMemoryMB sets the VM's memory in MB
+func (vm *VM) SetMemoryMB(memoryMB int) {
+	vm.mutex.Lock()
+	defer vm.mutex.Unlock()
+	vm.config.MemoryMB = memoryMB
+	vm.updatedAt = time.Now()
+}
+
+// SetDiskSizeGB sets the VM's disk size in GB
+func (vm *VM) SetDiskSizeGB(diskSizeGB int) {
+	vm.mutex.Lock()
+	defer vm.mutex.Unlock()
+	vm.config.DiskSizeGB = diskSizeGB
+	vm.updatedAt = time.Now()
+}
+
+// SetTags sets the VM's tags
+func (vm *VM) SetTags(tags map[string]string) {
+	vm.mutex.Lock()
+	defer vm.mutex.Unlock()
+	vm.config.Tags = tags
+	vm.updatedAt = time.Now()
+}
+
 // Delete deletes the VM (stub implementation)
 func (vm *VM) Delete() error {
 	vm.mutex.Lock()
@@ -618,25 +713,49 @@ func (vm *VM) ResumeFromState(statePath string) error {
 }
 
 // GetDiskPaths returns the disk paths for the VM (stub implementation)
-func (vm *VM) GetDiskPaths() []string {
+func (vm *VM) GetDiskPaths() ([]string, error) {
 	vm.mutex.RLock()
 	defer vm.mutex.RUnlock()
 	// Stub implementation - would return actual disk paths
-	return []string{"/var/lib/novacron/vms/" + vm.config.ID + "/disk.qcow2"}
+	return []string{"/var/lib/novacron/vms/" + vm.config.ID + "/disk.qcow2"}, nil
 }
 
 // GetMemoryStatePath returns the memory state path for the VM (stub implementation)
-func (vm *VM) GetMemoryStatePath() string {
+func (vm *VM) GetMemoryStatePath() (string, error) {
 	vm.mutex.RLock()
 	defer vm.mutex.RUnlock()
 	// Stub implementation - would return actual memory state path
-	return "/var/lib/novacron/vms/" + vm.config.ID + "/memory.state"
+	return "/var/lib/novacron/vms/" + vm.config.ID + "/memory.state", nil
 }
 
 // GetMemoryDeltaPath returns the memory delta path for the VM (stub implementation)
-func (vm *VM) GetMemoryDeltaPath() string {
+func (vm *VM) GetMemoryDeltaPath(iteration int) (string, error) {
 	vm.mutex.RLock()
 	defer vm.mutex.RUnlock()
 	// Stub implementation - would return actual memory delta path
-	return "/var/lib/novacron/vms/" + vm.config.ID + "/memory.delta"
+	return "/var/lib/novacron/vms/" + vm.config.ID + "/memory.delta." + fmt.Sprintf("%d", iteration), nil
+}
+
+// Suspend suspends the VM (stub implementation)
+func (vm *VM) Suspend() error {
+	vm.mutex.Lock()
+	defer vm.mutex.Unlock()
+	if vm.state != StateRunning {
+		return fmt.Errorf("VM is not running")
+	}
+	vm.state = StatePaused
+	// Stub implementation - would actually suspend VM
+	return nil
+}
+
+// Resume resumes the VM (stub implementation)
+func (vm *VM) Resume() error {
+	vm.mutex.Lock()
+	defer vm.mutex.Unlock()
+	if vm.state != StatePaused && vm.state != VMStateSuspended {
+		return fmt.Errorf("VM is not suspended or paused")
+	}
+	vm.state = StateRunning
+	// Stub implementation - would actually resume VM
+	return nil
 }
