@@ -1,0 +1,51 @@
+[Unit]
+Description=NovaCron Hypervisor Service
+Documentation=https://github.com/khryptorgraphics/novacron
+After=network.target libvirtd.service
+Wants=libvirtd.service
+Requires=network.target
+
+[Service]
+Type=simple
+User=novacron
+Group=libvirt
+WorkingDirectory=/opt/novacron
+ExecStart=/opt/novacron/bin/hypervisor-service
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Environment variables
+Environment=LIBVIRT_URI=qemu:///system
+Environment=LOG_LEVEL=info
+Environment=STORAGE_PATH=/var/lib/novacron/vms
+EnvironmentFile=-/etc/novacron/environment
+
+# Security settings
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/novacron /var/log/novacron /var/lib/libvirt
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_DAC_OVERRIDE
+
+# AppArmor profile
+AppArmorProfile=novacron-hypervisor
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+MemoryMax=4G
+CPUQuota=400%
+
+# Restart settings
+Restart=always
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=3
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=novacron-hypervisor
+
+[Install]
+WantedBy=multi-user.target

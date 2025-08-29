@@ -94,7 +94,7 @@ func TestCompleteVMManagerIntegration(t *testing.T) {
 		// Test SetStartedAt
 		startTime := time.Now()
 		vm.SetStartedAt(startTime)
-		
+
 		// Verify UpdatedAt was updated
 		updatedAt := vm.GetUpdatedAt()
 		if updatedAt.Before(startTime) {
@@ -111,11 +111,11 @@ func TestCompleteVMManagerIntegration(t *testing.T) {
 	// Test 5: Test VM state management for maintenance scenarios
 	// Set one VM to failed state
 	createdVMs[0].SetState(StateFailed)
-	
+
 	// Verify we can identify failed VMs (simulating maintenance check)
 	failedVMs := 0
 	runningVMs := 0
-	
+
 	manager.vmsMutex.RLock()
 	for _, vm := range manager.vms {
 		switch vm.GetState() {
@@ -156,7 +156,7 @@ func TestCompleteVMManagerIntegration(t *testing.T) {
 
 	// Test 7: Test concurrent operations
 	done := make(chan bool, 2)
-	
+
 	go func() {
 		// Concurrent VM operations
 		for i := 0; i < 10; i++ {
@@ -413,7 +413,7 @@ func TestPerformanceOfFixes(t *testing.T) {
 
 	// Performance test: State transitions
 	start = time.Now()
-	
+
 	manager.vmsMutex.RLock()
 	for _, vm := range manager.vms {
 		vm.SetState(StateRunning)
@@ -425,7 +425,7 @@ func TestPerformanceOfFixes(t *testing.T) {
 
 	// Performance test: Scheduler operations
 	start = time.Now()
-	
+
 	for i := 0; i < 1000; i++ {
 		_ = manager.scheduler.GetActiveAllocations()
 	}
@@ -435,7 +435,7 @@ func TestPerformanceOfFixes(t *testing.T) {
 
 	// Cleanup
 	start = time.Now()
-	
+
 	for i := 0; i < numVMs; i++ {
 		manager.RemoveVM(fmt.Sprintf("perf-test-vm-%d", i))
 	}

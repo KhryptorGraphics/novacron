@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NovaCron - VM Management Platform</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2rem;
+            text-align: center;
+            backdrop-filter: blur(10px);
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 3rem;
+            font-weight: 300;
+        }
+        .header p {
+            margin: 0.5rem 0 0 0;
+            font-size: 1.2rem;
+            opacity: 0.8;
+        }
+        .main {
+            flex: 1;
+            padding: 3rem 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin: 2rem 0;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            padding: 2rem;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .card h3 {
+            margin: 0 0 1rem 0;
+            color: #fff;
+        }
+        .card p {
+            opacity: 0.9;
+            line-height: 1.6;
+        }
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 1rem 0;
+        }
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #4ade80;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .footer {
+            background: rgba(0, 0, 0, 0.2);
+            text-align: center;
+            padding: 2rem;
+            margin-top: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>NovaCron</h1>
+        <p>Distributed VM Management Platform</p>
+        <div class="status">
+            <div class="status-dot"></div>
+            <span>System Online</span>
+        </div>
+    </div>
+
+    <main class="main">
+        <div class="grid">
+            <div class="card">
+                <h3>🖥️ VM Management</h3>
+                <p>Advanced virtualization platform with support for KVM and container workloads. Manage virtual machines across distributed nodes with intelligent resource allocation.</p>
+            </div>
+
+            <div class="card">
+                <h3>🚀 Live Migration</h3>
+                <p>Seamless workload migration with minimal downtime. WAN-optimized transfers with compression, delta sync, and bandwidth throttling for efficient cross-datacenter operations.</p>
+            </div>
+
+            <div class="card">
+                <h3>📊 Resource Monitoring</h3>
+                <p>Real-time monitoring and analytics with Prometheus and Grafana integration. Track performance metrics, resource utilization, and system health across your infrastructure.</p>
+            </div>
+
+            <div class="card">
+                <h3>🔧 API Integration</h3>
+                <p>RESTful API with WebSocket support for real-time updates. Comprehensive authentication, RBAC, and multi-tenancy support for enterprise deployments.</p>
+                <div style="margin-top: 1rem;">
+                    <div>API Server: <a href="http://localhost:8090/health" style="color: #4ade80;">localhost:8090</a></div>
+                    <div>WebSocket: <a href="ws://localhost:8091" style="color: #4ade80;">localhost:8091</a></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>📈 Monitoring Stack</h3>
+                <p>Integrated monitoring with Prometheus metrics collection and Grafana dashboards for comprehensive system observability.</p>
+                <div style="margin-top: 1rem;">
+                    <div>Prometheus: <a href="http://localhost:9090" style="color: #4ade80;">localhost:9090</a></div>
+                    <div>Grafana: <a href="http://localhost:3001" style="color: #4ade80;">localhost:3001</a></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>🔒 Security & Auth</h3>
+                <p>JWT-based authentication with role-based access control. Input validation, rate limiting, and comprehensive security hardening for production deployments.</p>
+            </div>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <p>&copy; 2025 NovaCron - Distributed VM Management Platform</p>
+        <p>Deployment completed successfully ✨</p>
+    </footer>
+
+    <script>
+        // Simple health check display
+        async function checkHealth() {
+            try {
+                const response = await fetch('http://localhost:8090/health');
+                const status = response.ok ? 'Online' : 'Offline';
+                document.querySelector('.status span').textContent = `API Server ${status}`;
+            } catch (error) {
+                document.querySelector('.status span').textContent = 'API Server Offline';
+            }
+        }
+        
+        // Check health every 30 seconds
+        checkHealth();
+        setInterval(checkHealth, 30000);
+    </script>
+</body>
+</html>

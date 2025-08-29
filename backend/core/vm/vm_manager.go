@@ -11,17 +11,17 @@ import (
 
 // VMManager manages virtual machines across different drivers
 type VMManager struct {
-	drivers       map[VMType]VMDriver
-	vms           map[string]*VM
-	vmsMutex      sync.RWMutex
-	driverFactory VMDriverFactory
-	scheduler     VMScheduler
+	drivers        map[VMType]VMDriver
+	vms            map[string]*VM
+	vmsMutex       sync.RWMutex
+	driverFactory  VMDriverFactory
+	scheduler      VMScheduler
 	eventListeners []VMManagerEventListener
-	eventMutex    sync.RWMutex
-	vmCache       map[string]VMInfo
-	mutex         sync.RWMutex
-	ctx           context.Context
-	cancel        context.CancelFunc
+	eventMutex     sync.RWMutex
+	vmCache        map[string]VMInfo
+	mutex          sync.RWMutex
+	ctx            context.Context
+	cancel         context.CancelFunc
 }
 
 // VMManagerConfig contains configuration for the VM manager
@@ -60,7 +60,7 @@ type VMManagerEventListener interface {
 // NewVMManager creates a new VM manager instance
 func NewVMManager(config VMManagerConfig) (*VMManager, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	manager := &VMManager{
 		drivers:        make(map[VMType]VMDriver),
 		vms:            make(map[string]*VM),
@@ -268,9 +268,6 @@ func (m *VMManager) CountVMsByState() map[VMState]int {
 	return result
 }
 
-
-
-
 // getDriver gets a driver for a VM type
 func (m *VMManager) getDriver(config VMConfig) (VMDriver, error) { // Takes VMConfig now
 	if m.driverFactory == nil { // Assuming driverFactory is part of VMManager struct
@@ -379,9 +376,8 @@ func (m *VMManager) GetVMFromCache(vmID string) (*VM, bool) {
 // Shutdown gracefully shuts down the VM manager
 func (m *VMManager) Shutdown() {
 	log.Println("Shutting down VM Manager...")
-	
+
 	// Cancel context to stop all operations
 	m.cancel()
 	log.Println("VM Manager shutdown complete")
 }
-

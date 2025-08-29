@@ -93,7 +93,7 @@ func TestVMStateTransitions(t *testing.T) {
 
 		vm.SetState(transition.to)
 		if vm.GetState() != transition.to {
-			t.Errorf("Failed transition %s: expected %s, got %s", 
+			t.Errorf("Failed transition %s: expected %s, got %s",
 				transition.desc, transition.to, vm.GetState())
 		}
 	}

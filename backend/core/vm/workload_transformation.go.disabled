@@ -1,0 +1,1178 @@
+package vm
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// WorkloadTransformationEngine handles conversion between VM and container formats
+type WorkloadTransformationEngine struct {
+	config         *TransformationConfig
+	driverManager  *VMDriverManager
+	converters     map[string]*WorkloadConverter
+	validators     map[string]*WorkloadValidator
+	migrationQueue *TransformationQueue
+}
+
+// TransformationConfig holds configuration for workload transformation
+type TransformationConfig struct {
+	TempDir                string                 `json:"temp_dir"`
+	CompressionEnabled     bool                   `json:"compression_enabled"`
+	ParallelTransformations int                   `json:"parallel_transformations"`
+	MaxRetries             int                    `json:"max_retries"`
+	Timeout                time.Duration          `json:"timeout"`
+	ImageRegistry          string                 `json:"image_registry"`
+	StoragePools          map[string]string      `json:"storage_pools"`
+	NetworkPolicies       map[string]interface{} `json:"network_policies"`
+	SecurityPolicies      map[string]interface{} `json:"security_policies"`
+	ValidationEnabled     bool                   `json:"validation_enabled"`
+	RollbackEnabled       bool                   `json:"rollback_enabled"`
+}
+
+// WorkloadConverter handles conversion between specific workload types
+type WorkloadConverter struct {
+	Name           string                     `json:"name"`
+	SourceType     WorkloadType               `json:"source_type"`
+	TargetType     WorkloadType               `json:"target_type"`
+	Converter      func(*ConversionContext) error `json:"-"`
+	Preprocessors  []Preprocessor             `json:"preprocessors"`
+	Postprocessors []Postprocessor            `json:"postprocessors"`
+	SupportsLive   bool                       `json:"supports_live"`
+	MinDowntime    time.Duration              `json:"min_downtime"`
+	MaxDowntime    time.Duration              `json:"max_downtime"`
+}
+
+// WorkloadValidator validates workload transformations
+type WorkloadValidator struct {
+	Name      string                          `json:"name"`
+	WorkloadType WorkloadType                `json:"workload_type"`
+	Validator func(*ValidationContext) error `json:"-"`
+	Checks    []ValidationCheck              `json:"checks"`
+}
+
+// ConversionContext provides context for workload conversion
+type ConversionContext struct {
+	SourceWorkload    *Workload             `json:"source_workload"`
+	TargetWorkload    *Workload             `json:"target_workload"`
+	TransformationID  string                `json:"transformation_id"`
+	TempDir           string                `json:"temp_dir"`
+	Config            *TransformationConfig `json:"config"`
+	Metadata          map[string]interface{} `json:"metadata"`
+	Progress          *TransformationProgress `json:"progress"`
+	CancelFunc        context.CancelFunc    `json:"-"`
+}
+
+// ValidationContext provides context for workload validation
+type ValidationContext struct {
+	Workload      *Workload             `json:"workload"`
+	ValidationType string               `json:"validation_type"`
+	Config        *TransformationConfig `json:"config"`
+	Metadata      map[string]interface{} `json:"metadata"`
+	Results       []ValidationResult    `json:"results"`
+}
+
+// Workload represents a unified workload abstraction
+type Workload struct {
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name"`
+	Type          WorkloadType           `json:"type"`
+	State         State                  `json:"state"`
+	NodeID        string                 `json:"node_id"`
+	Config        *WorkloadConfig        `json:"config"`
+	Resources     *WorkloadResources     `json:"resources"`
+	Metadata      map[string]interface{} `json:"metadata"`
+	Labels        map[string]string      `json:"labels"`
+	Annotations   map[string]string      `json:"annotations"`
+	CreatedAt     time.Time              `json:"created_at"`
+	LastModified  time.Time              `json:"last_modified"`
+}
+
+// WorkloadConfig represents workload configuration
+type WorkloadConfig struct {
+	Image           string                 `json:"image"`
+	Command         []string               `json:"command"`
+	Args            []string               `json:"args"`
+	WorkingDir      string                 `json:"working_dir"`
+	Environment     map[string]string      `json:"environment"`
+	Mounts          []WorkloadMount        `json:"mounts"`
+	Networks        []NetworkConfig        `json:"networks"`
+	SecurityContext *SecurityContext       `json:"security_context"`
+	StartupProbe    *HealthProbe           `json:"startup_probe"`
+	ReadinessProbe  *HealthProbe           `json:"readiness_probe"`
+	LivenessProbe   *HealthProbe           `json:"liveness_probe"`
+	RestartPolicy   string                 `json:"restart_policy"`
+	Privileged      bool                   `json:"privileged"`
+	Capabilities    []string               `json:"capabilities"`
+}
+
+// WorkloadResources represents resource requirements and limits
+type WorkloadResources struct {
+	CPURequest      float64 `json:"cpu_request"`
+	CPULimit        float64 `json:"cpu_limit"`
+	MemoryRequest   int64   `json:"memory_request"`
+	MemoryLimit     int64   `json:"memory_limit"`
+	DiskRequest     int64   `json:"disk_request"`
+	DiskLimit       int64   `json:"disk_limit"`
+	NetworkRequest  int64   `json:"network_request"`
+	NetworkLimit    int64   `json:"network_limit"`
+	GPURequest      int     `json:"gpu_request"`
+	GPULimit        int     `json:"gpu_limit"`
+}
+
+// WorkloadMount represents a filesystem mount
+type WorkloadMount struct {
+	Name        string            `json:"name"`
+	Source      string            `json:"source"`
+	Destination string            `json:"destination"`
+	Type        string            `json:"type"` // bind, volume, tmpfs
+	Options     []string          `json:"options"`
+	ReadOnly    bool              `json:"read_only"`
+	Metadata    map[string]string `json:"metadata"`
+}
+
+// NetworkConfig represents network configuration
+type NetworkConfig struct {
+	Name      string            `json:"name"`
+	Type      string            `json:"type"`      // bridge, host, overlay, macvlan
+	Driver    string            `json:"driver"`
+	IPAM      *IPAMConfig       `json:"ipam"`
+	Options   map[string]string `json:"options"`
+	Labels    map[string]string `json:"labels"`
+	External  bool              `json:"external"`
+	Scope     string            `json:"scope"`     // local, global, swarm
+}
+
+// IPAMConfig represents IP address management configuration
+type IPAMConfig struct {
+	Driver  string                   `json:"driver"`
+	Configs []IPAMConfigEntry        `json:"configs"`
+	Options map[string]interface{}   `json:"options"`
+}
+
+// IPAMConfigEntry represents an IPAM configuration entry
+type IPAMConfigEntry struct {
+	Subnet  string `json:"subnet"`
+	Gateway string `json:"gateway"`
+	IPRange string `json:"ip_range"`
+}
+
+// SecurityContext represents security configuration
+type SecurityContext struct {
+	RunAsUser        *int64            `json:"run_as_user"`
+	RunAsGroup       *int64            `json:"run_as_group"`
+	RunAsNonRoot     *bool             `json:"run_as_non_root"`
+	ReadOnlyRootFS   *bool             `json:"read_only_root_fs"`
+	AllowPrivilegeEscalation *bool     `json:"allow_privilege_escalation"`
+	Capabilities     *Capabilities     `json:"capabilities"`
+	SeccompProfile   *SeccompProfile   `json:"seccomp_profile"`
+	AppArmorProfile  *AppArmorProfile  `json:"apparmor_profile"`
+	SELinuxOptions   *SELinuxOptions   `json:"selinux_options"`
+	SupplementalGroups []int64         `json:"supplemental_groups"`
+	FSGroup          *int64            `json:"fs_group"`
+}
+
+// Capabilities represents capability configuration
+type Capabilities struct {
+	Add  []string `json:"add"`
+	Drop []string `json:"drop"`
+}
+
+// SeccompProfile represents seccomp profile configuration
+type SeccompProfile struct {
+	Type             string `json:"type"` // RuntimeDefault, Localhost, Unconfined
+	LocalhostProfile string `json:"localhost_profile"`
+}
+
+// AppArmorProfile represents AppArmor profile configuration
+type AppArmorProfile struct {
+	Type             string `json:"type"` // RuntimeDefault, Localhost, Unconfined
+	LocalhostProfile string `json:"localhost_profile"`
+}
+
+// SELinuxOptions represents SELinux options
+type SELinuxOptions struct {
+	User  string `json:"user"`
+	Role  string `json:"role"`
+	Type  string `json:"type"`
+	Level string `json:"level"`
+}
+
+// HealthProbe represents health probe configuration
+type HealthProbe struct {
+	Handler             *ProbeHandler `json:"handler"`
+	InitialDelaySeconds int32         `json:"initial_delay_seconds"`
+	PeriodSeconds       int32         `json:"period_seconds"`
+	TimeoutSeconds      int32         `json:"timeout_seconds"`
+	SuccessThreshold    int32         `json:"success_threshold"`
+	FailureThreshold    int32         `json:"failure_threshold"`
+}
+
+// ProbeHandler represents health probe handler
+type ProbeHandler struct {
+	Exec      *ExecAction      `json:"exec"`
+	HTTPGet   *HTTPGetAction   `json:"http_get"`
+	TCPSocket *TCPSocketAction `json:"tcp_socket"`
+	GRPC      *GRPCAction      `json:"grpc"`
+}
+
+// ExecAction represents exec probe action
+type ExecAction struct {
+	Command []string `json:"command"`
+}
+
+// HTTPGetAction represents HTTP GET probe action
+type HTTPGetAction struct {
+	Path   string            `json:"path"`
+	Port   int32             `json:"port"`
+	Host   string            `json:"host"`
+	Scheme string            `json:"scheme"` // HTTP, HTTPS
+	Headers []HTTPHeader     `json:"headers"`
+}
+
+// HTTPHeader represents HTTP header
+type HTTPHeader struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// TCPSocketAction represents TCP socket probe action
+type TCPSocketAction struct {
+	Port int32  `json:"port"`
+	Host string `json:"host"`
+}
+
+// GRPCAction represents gRPC probe action
+type GRPCAction struct {
+	Port    int32  `json:"port"`
+	Service string `json:"service"`
+}
+
+// TransformationQueue manages transformation tasks
+type TransformationQueue struct {
+	queue    []*TransformationTask `json:"queue"`
+	active   map[string]*TransformationTask `json:"active"`
+	history  []*TransformationTask `json:"history"`
+	mutex    sync.RWMutex         `json:"-"`
+	maxActive int                 `json:"max_active"`
+}
+
+// TransformationTask represents a workload transformation task
+type TransformationTask struct {
+	ID               string                      `json:"id"`
+	SourceWorkloadID string                      `json:"source_workload_id"`
+	TargetWorkloadID string                      `json:"target_workload_id"`
+	SourceType       WorkloadType                `json:"source_type"`
+	TargetType       WorkloadType                `json:"target_type"`
+	Priority         int                         `json:"priority"`
+	Status           TransformationStatus        `json:"status"`
+	Progress         *TransformationProgress     `json:"progress"`
+	Config           *TransformationConfig       `json:"config"`
+	Metadata         map[string]interface{}      `json:"metadata"`
+	ScheduledAt      time.Time                   `json:"scheduled_at"`
+	StartedAt        *time.Time                  `json:"started_at"`
+	CompletedAt      *time.Time                  `json:"completed_at"`
+	Error            string                      `json:"error"`
+	RetryCount       int                         `json:"retry_count"`
+	MaxRetries       int                         `json:"max_retries"`
+}
+
+// TransformationStatus represents transformation task status
+type TransformationStatus string
+
+const (
+	TransformationStatusQueued     TransformationStatus = "queued"
+	TransformationStatusRunning    TransformationStatus = "running"
+	TransformationStatusCompleted  TransformationStatus = "completed"
+	TransformationStatusFailed     TransformationStatus = "failed"
+	TransformationStatusCancelled  TransformationStatus = "cancelled"
+	TransformationStatusRolledBack TransformationStatus = "rolled_back"
+)
+
+// TransformationProgress represents transformation progress
+type TransformationProgress struct {
+	Phase             string                     `json:"phase"`
+	Percentage        float64                    `json:"percentage"`
+	CurrentStep       string                     `json:"current_step"`
+	TotalSteps        int                        `json:"total_steps"`
+	CompletedSteps    int                        `json:"completed_steps"`
+	StartTime         time.Time                  `json:"start_time"`
+	EstimatedEndTime  *time.Time                 `json:"estimated_end_time"`
+	Message           string                     `json:"message"`
+	Details           map[string]interface{}     `json:"details"`
+	StepHistory       []TransformationStep       `json:"step_history"`
+}
+
+// TransformationStep represents a transformation step
+type TransformationStep struct {
+	Name        string                 `json:"name"`
+	Status      string                 `json:"status"`
+	StartTime   time.Time              `json:"start_time"`
+	EndTime     *time.Time             `json:"end_time"`
+	Duration    time.Duration          `json:"duration"`
+	Message     string                 `json:"message"`
+	Metadata    map[string]interface{} `json:"metadata"`
+	Error       string                 `json:"error"`
+}
+
+// Preprocessor represents a preprocessing step
+type Preprocessor interface {
+	Name() string
+	Process(ctx *ConversionContext) error
+}
+
+// Postprocessor represents a postprocessing step
+type Postprocessor interface {
+	Name() string
+	Process(ctx *ConversionContext) error
+}
+
+// ValidationCheck represents a validation check
+type ValidationCheck struct {
+	Name        string            `json:"name"`
+	Type        string            `json:"type"`        // resource, security, network, storage
+	Severity    string            `json:"severity"`    // info, warning, error, critical
+	Description string            `json:"description"`
+	Enabled     bool              `json:"enabled"`
+	Config      map[string]interface{} `json:"config"`
+}
+
+// ValidationResult represents a validation result
+type ValidationResult struct {
+	Check       string                 `json:"check"`
+	Status      string                 `json:"status"`      // pass, fail, skip
+	Message     string                 `json:"message"`
+	Details     map[string]interface{} `json:"details"`
+	Timestamp   time.Time              `json:"timestamp"`
+	Remediation string                 `json:"remediation"`
+}
+
+// NewWorkloadTransformationEngine creates a new workload transformation engine
+func NewWorkloadTransformationEngine(config *TransformationConfig, driverManager *VMDriverManager) *WorkloadTransformationEngine {
+	engine := &WorkloadTransformationEngine{
+		config:        config,
+		driverManager: driverManager,
+		converters:    make(map[string]*WorkloadConverter),
+		validators:    make(map[string]*WorkloadValidator),
+		migrationQueue: &TransformationQueue{
+			queue:     make([]*TransformationTask, 0),
+			active:    make(map[string]*TransformationTask),
+			history:   make([]*TransformationTask, 0),
+			maxActive: config.ParallelTransformations,
+		},
+	}
+
+	// Register built-in converters
+	engine.registerBuiltinConverters()
+
+	// Register built-in validators
+	engine.registerBuiltinValidators()
+
+	return engine
+}
+
+// registerBuiltinConverters registers built-in workload converters
+func (e *WorkloadTransformationEngine) registerBuiltinConverters() {
+	// VM to Kata Container converter
+	e.converters["vm-to-kata"] = &WorkloadConverter{
+		Name:       "VM to Kata Container",
+		SourceType: WorkloadTypeVM,
+		TargetType: WorkloadTypeKata,
+		Converter:  e.convertVMToKata,
+		SupportsLive: true,
+		MinDowntime: 5 * time.Second,
+		MaxDowntime: 30 * time.Second,
+	}
+
+	// Kata Container to VM converter
+	e.converters["kata-to-vm"] = &WorkloadConverter{
+		Name:       "Kata Container to VM",
+		SourceType: WorkloadTypeKata,
+		TargetType: WorkloadTypeVM,
+		Converter:  e.convertKataToVM,
+		SupportsLive: true,
+		MinDowntime: 10 * time.Second,
+		MaxDowntime: 60 * time.Second,
+	}
+
+	// Container to Kata Container converter
+	e.converters["container-to-kata"] = &WorkloadConverter{
+		Name:       "Container to Kata Container",
+		SourceType: WorkloadTypeContainer,
+		TargetType: WorkloadTypeKata,
+		Converter:  e.convertContainerToKata,
+		SupportsLive: false,
+		MinDowntime: 2 * time.Second,
+		MaxDowntime: 15 * time.Second,
+	}
+
+	// Kata Container to Container converter
+	e.converters["kata-to-container"] = &WorkloadConverter{
+		Name:       "Kata Container to Container",
+		SourceType: WorkloadTypeKata,
+		TargetType: WorkloadTypeContainer,
+		Converter:  e.convertKataToContainer,
+		SupportsLive: false,
+		MinDowntime: 1 * time.Second,
+		MaxDowntime: 10 * time.Second,
+	}
+}
+
+// registerBuiltinValidators registers built-in workload validators
+func (e *WorkloadTransformationEngine) registerBuiltinValidators() {
+	// Resource validator
+	e.validators["resource-validator"] = &WorkloadValidator{
+		Name:         "Resource Validator",
+		WorkloadType: "", // Apply to all types
+		Validator:    e.validateResources,
+		Checks: []ValidationCheck{
+			{Name: "cpu-limits", Type: "resource", Severity: "warning", Description: "Validate CPU resource limits", Enabled: true},
+			{Name: "memory-limits", Type: "resource", Severity: "error", Description: "Validate memory resource limits", Enabled: true},
+			{Name: "disk-space", Type: "resource", Severity: "warning", Description: "Validate disk space requirements", Enabled: true},
+		},
+	}
+
+	// Security validator
+	e.validators["security-validator"] = &WorkloadValidator{
+		Name:         "Security Validator",
+		WorkloadType: "", // Apply to all types
+		Validator:    e.validateSecurity,
+		Checks: []ValidationCheck{
+			{Name: "privileged-mode", Type: "security", Severity: "critical", Description: "Check for privileged mode usage", Enabled: true},
+			{Name: "capabilities", Type: "security", Severity: "warning", Description: "Validate capability requirements", Enabled: true},
+			{Name: "seccomp-profile", Type: "security", Severity: "info", Description: "Validate seccomp profile", Enabled: true},
+		},
+	}
+
+	// Network validator
+	e.validators["network-validator"] = &WorkloadValidator{
+		Name:         "Network Validator",
+		WorkloadType: "", // Apply to all types
+		Validator:    e.validateNetwork,
+		Checks: []ValidationCheck{
+			{Name: "network-policies", Type: "network", Severity: "warning", Description: "Validate network policies", Enabled: true},
+			{Name: "port-conflicts", Type: "network", Severity: "error", Description: "Check for port conflicts", Enabled: true},
+		},
+	}
+}
+
+// TransformWorkload transforms a workload from one type to another
+func (e *WorkloadTransformationEngine) TransformWorkload(ctx context.Context, sourceWorkloadID string, targetType WorkloadType, options map[string]interface{}) (*TransformationTask, error) {
+	log.Printf("Transforming workload %s to type %s", sourceWorkloadID, targetType)
+
+	// Get source workload
+	sourceWorkload, err := e.getWorkload(sourceWorkloadID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get source workload: %w", err)
+	}
+
+	// Check if transformation is needed
+	if sourceWorkload.Type == targetType {
+		return nil, fmt.Errorf("workload is already of type %s", targetType)
+	}
+
+	// Find appropriate converter
+	converterKey := fmt.Sprintf("%s-to-%s", sourceWorkload.Type, targetType)
+	converter, exists := e.converters[converterKey]
+	if !exists {
+		return nil, fmt.Errorf("no converter available for %s to %s", sourceWorkload.Type, targetType)
+	}
+
+	// Create transformation task
+	task := &TransformationTask{
+		ID:               fmt.Sprintf("transform-%s-%d", sourceWorkloadID, time.Now().UnixNano()),
+		SourceWorkloadID: sourceWorkloadID,
+		TargetWorkloadID: "", // Will be set after creation
+		SourceType:       sourceWorkload.Type,
+		TargetType:       targetType,
+		Priority:         5, // Normal priority
+		Status:           TransformationStatusQueued,
+		Progress:         &TransformationProgress{
+			Phase:          "queued",
+			Percentage:     0.0,
+			CurrentStep:    "waiting",
+			TotalSteps:     10, // Estimated
+			CompletedSteps: 0,
+			StartTime:      time.Now(),
+			Message:        "Task queued for processing",
+			Details:        make(map[string]interface{}),
+			StepHistory:    make([]TransformationStep, 0),
+		},
+		Config:      e.config,
+		Metadata:    options,
+		ScheduledAt: time.Now(),
+		MaxRetries:  e.config.MaxRetries,
+	}
+
+	// Add to queue
+	e.migrationQueue.mutex.Lock()
+	e.migrationQueue.queue = append(e.migrationQueue.queue, task)
+	e.migrationQueue.mutex.Unlock()
+
+	// Start processing if possible
+	go e.processTransformationQueue()
+
+	log.Printf("Transformation task %s queued for workload %s", task.ID, sourceWorkloadID)
+	return task, nil
+}
+
+// processTransformationQueue processes the transformation queue
+func (e *WorkloadTransformationEngine) processTransformationQueue() {
+	e.migrationQueue.mutex.Lock()
+	defer e.migrationQueue.mutex.Unlock()
+
+	// Check if we can process more tasks
+	if len(e.migrationQueue.active) >= e.migrationQueue.maxActive {
+		return
+	}
+
+	// Find next task to process
+	if len(e.migrationQueue.queue) == 0 {
+		return
+	}
+
+	// Get next task
+	task := e.migrationQueue.queue[0]
+	e.migrationQueue.queue = e.migrationQueue.queue[1:]
+	e.migrationQueue.active[task.ID] = task
+
+	// Process task asynchronously
+	go e.executeTransformation(task)
+}
+
+// executeTransformation executes a transformation task
+func (e *WorkloadTransformationEngine) executeTransformation(task *TransformationTask) {
+	ctx := context.Background()
+	log.Printf("Executing transformation task %s", task.ID)
+
+	// Update task status
+	task.Status = TransformationStatusRunning
+	now := time.Now()
+	task.StartedAt = &now
+	task.Progress.Phase = "running"
+
+	defer func() {
+		// Clean up active task
+		e.migrationQueue.mutex.Lock()
+		delete(e.migrationQueue.active, task.ID)
+		e.migrationQueue.history = append(e.migrationQueue.history, task)
+		e.migrationQueue.mutex.Unlock()
+
+		// Try to process next task
+		go e.processTransformationQueue()
+	}()
+
+	// Execute transformation steps
+	err := e.executeTransformationSteps(ctx, task)
+
+	completedTime := time.Now()
+	task.CompletedAt = &completedTime
+
+	if err != nil {
+		task.Status = TransformationStatusFailed
+		task.Error = err.Error()
+		task.Progress.Phase = "failed"
+		task.Progress.Message = fmt.Sprintf("Transformation failed: %s", err.Error())
+		log.Printf("Transformation task %s failed: %v", task.ID, err)
+	} else {
+		task.Status = TransformationStatusCompleted
+		task.Progress.Phase = "completed"
+		task.Progress.Percentage = 100.0
+		task.Progress.Message = "Transformation completed successfully"
+		log.Printf("Transformation task %s completed successfully", task.ID)
+	}
+}
+
+// executeTransformationSteps executes the transformation steps
+func (e *WorkloadTransformationEngine) executeTransformationSteps(ctx context.Context, task *TransformationTask) error {
+	// Step 1: Get source workload
+	e.updateProgress(task, "Getting source workload", 1, 10)
+	sourceWorkload, err := e.getWorkload(task.SourceWorkloadID)
+	if err != nil {
+		return fmt.Errorf("failed to get source workload: %w", err)
+	}
+
+	// Step 2: Validate source workload
+	e.updateProgress(task, "Validating source workload", 2, 10)
+	if e.config.ValidationEnabled {
+		if err := e.validateWorkload(sourceWorkload); err != nil {
+			return fmt.Errorf("source workload validation failed: %w", err)
+		}
+	}
+
+	// Step 3: Create transformation context
+	e.updateProgress(task, "Creating transformation context", 3, 10)
+	tempDir := filepath.Join(e.config.TempDir, task.ID)
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		return fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	ctx, cancelFunc := context.WithTimeout(ctx, e.config.Timeout)
+	defer cancelFunc()
+
+	conversionCtx := &ConversionContext{
+		SourceWorkload:   sourceWorkload,
+		TransformationID: task.ID,
+		TempDir:          tempDir,
+		Config:           e.config,
+		Metadata:         task.Metadata,
+		Progress:         task.Progress,
+		CancelFunc:       cancelFunc,
+	}
+
+	// Step 4: Find and execute converter
+	e.updateProgress(task, "Finding converter", 4, 10)
+	converterKey := fmt.Sprintf("%s-to-%s", task.SourceType, task.TargetType)
+	converter, exists := e.converters[converterKey]
+	if !exists {
+		return fmt.Errorf("no converter found for %s", converterKey)
+	}
+
+	// Step 5: Execute preprocessing
+	e.updateProgress(task, "Executing preprocessing", 5, 10)
+	for _, preprocessor := range converter.Preprocessors {
+		if err := preprocessor.Process(conversionCtx); err != nil {
+			return fmt.Errorf("preprocessing failed: %w", err)
+		}
+	}
+
+	// Step 6: Execute main conversion
+	e.updateProgress(task, "Executing conversion", 6, 10)
+	if err := converter.Converter(conversionCtx); err != nil {
+		return fmt.Errorf("conversion failed: %w", err)
+	}
+
+	// Step 7: Execute postprocessing
+	e.updateProgress(task, "Executing postprocessing", 7, 10)
+	for _, postprocessor := range converter.Postprocessors {
+		if err := postprocessor.Process(conversionCtx); err != nil {
+			return fmt.Errorf("postprocessing failed: %w", err)
+		}
+	}
+
+	// Step 8: Validate target workload
+	e.updateProgress(task, "Validating target workload", 8, 10)
+	if e.config.ValidationEnabled && conversionCtx.TargetWorkload != nil {
+		if err := e.validateWorkload(conversionCtx.TargetWorkload); err != nil {
+			return fmt.Errorf("target workload validation failed: %w", err)
+		}
+	}
+
+	// Step 9: Start target workload
+	e.updateProgress(task, "Starting target workload", 9, 10)
+	if conversionCtx.TargetWorkload != nil {
+		task.TargetWorkloadID = conversionCtx.TargetWorkload.ID
+		if err := e.startWorkload(conversionCtx.TargetWorkload); err != nil {
+			return fmt.Errorf("failed to start target workload: %w", err)
+		}
+	}
+
+	// Step 10: Clean up source workload (optional)
+	e.updateProgress(task, "Cleaning up", 10, 10)
+	if cleanup, ok := task.Metadata["cleanup_source"].(bool); ok && cleanup {
+		if err := e.stopAndDeleteWorkload(sourceWorkload); err != nil {
+			log.Printf("Warning: Failed to clean up source workload: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// updateProgress updates transformation progress
+func (e *WorkloadTransformationEngine) updateProgress(task *TransformationTask, step string, completed, total int) {
+	task.Progress.CurrentStep = step
+	task.Progress.CompletedSteps = completed
+	task.Progress.TotalSteps = total
+	task.Progress.Percentage = float64(completed) / float64(total) * 100.0
+	task.Progress.Message = step
+
+	stepRecord := TransformationStep{
+		Name:      step,
+		Status:    "completed",
+		StartTime: time.Now(),
+		Message:   step,
+		Metadata:  make(map[string]interface{}),
+	}
+	endTime := time.Now()
+	stepRecord.EndTime = &endTime
+	stepRecord.Duration = endTime.Sub(stepRecord.StartTime)
+
+	task.Progress.StepHistory = append(task.Progress.StepHistory, stepRecord)
+
+	log.Printf("Transformation %s: %s (%.1f%%)", task.ID, step, task.Progress.Percentage)
+}
+
+// convertVMToKata converts a VM to a Kata Container
+func (e *WorkloadTransformationEngine) convertVMToKata(ctx *ConversionContext) error {
+	log.Printf("Converting VM %s to Kata Container", ctx.SourceWorkload.ID)
+
+	// Create Kata container configuration based on VM config
+	kataConfig := e.createKataConfigFromVM(ctx.SourceWorkload)
+
+	// Create target workload
+	targetWorkload := &Workload{
+		ID:           fmt.Sprintf("kata-%s-%d", ctx.SourceWorkload.Name, time.Now().UnixNano()),
+		Name:         ctx.SourceWorkload.Name + "-kata",
+		Type:         WorkloadTypeKata,
+		State:        StateCreated,
+		NodeID:       ctx.SourceWorkload.NodeID,
+		Config:       kataConfig,
+		Resources:    ctx.SourceWorkload.Resources,
+		Metadata:     make(map[string]interface{}),
+		Labels:       ctx.SourceWorkload.Labels,
+		Annotations:  ctx.SourceWorkload.Annotations,
+		CreatedAt:    time.Now(),
+		LastModified: time.Now(),
+	}
+
+	// Add transformation metadata
+	targetWorkload.Metadata["source_vm_id"] = ctx.SourceWorkload.ID
+	targetWorkload.Metadata["transformation_type"] = "vm-to-kata"
+	targetWorkload.Metadata["transformation_time"] = time.Now().Format(time.RFC3339)
+
+	ctx.TargetWorkload = targetWorkload
+	return nil
+}
+
+// convertKataToVM converts a Kata Container to a VM
+func (e *WorkloadTransformationEngine) convertKataToVM(ctx *ConversionContext) error {
+	log.Printf("Converting Kata Container %s to VM", ctx.SourceWorkload.ID)
+
+	// Create VM configuration based on Kata container config
+	vmConfig := e.createVMConfigFromKata(ctx.SourceWorkload)
+
+	// Create target workload
+	targetWorkload := &Workload{
+		ID:           fmt.Sprintf("vm-%s-%d", ctx.SourceWorkload.Name, time.Now().UnixNano()),
+		Name:         ctx.SourceWorkload.Name + "-vm",
+		Type:         WorkloadTypeVM,
+		State:        StateCreated,
+		NodeID:       ctx.SourceWorkload.NodeID,
+		Config:       vmConfig,
+		Resources:    ctx.SourceWorkload.Resources,
+		Metadata:     make(map[string]interface{}),
+		Labels:       ctx.SourceWorkload.Labels,
+		Annotations:  ctx.SourceWorkload.Annotations,
+		CreatedAt:    time.Now(),
+		LastModified: time.Now(),
+	}
+
+	// Add transformation metadata
+	targetWorkload.Metadata["source_kata_id"] = ctx.SourceWorkload.ID
+	targetWorkload.Metadata["transformation_type"] = "kata-to-vm"
+	targetWorkload.Metadata["transformation_time"] = time.Now().Format(time.RFC3339)
+
+	ctx.TargetWorkload = targetWorkload
+	return nil
+}
+
+// convertContainerToKata converts a Container to a Kata Container
+func (e *WorkloadTransformationEngine) convertContainerToKata(ctx *ConversionContext) error {
+	log.Printf("Converting Container %s to Kata Container", ctx.SourceWorkload.ID)
+
+	// Enhanced security configuration for Kata
+	kataConfig := e.createKataConfigFromContainer(ctx.SourceWorkload)
+
+	// Create target workload
+	targetWorkload := &Workload{
+		ID:           fmt.Sprintf("kata-%s-%d", ctx.SourceWorkload.Name, time.Now().UnixNano()),
+		Name:         ctx.SourceWorkload.Name + "-kata",
+		Type:         WorkloadTypeKata,
+		State:        StateCreated,
+		NodeID:       ctx.SourceWorkload.NodeID,
+		Config:       kataConfig,
+		Resources:    ctx.SourceWorkload.Resources,
+		Metadata:     make(map[string]interface{}),
+		Labels:       ctx.SourceWorkload.Labels,
+		Annotations:  ctx.SourceWorkload.Annotations,
+		CreatedAt:    time.Now(),
+		LastModified: time.Now(),
+	}
+
+	// Add transformation metadata
+	targetWorkload.Metadata["source_container_id"] = ctx.SourceWorkload.ID
+	targetWorkload.Metadata["transformation_type"] = "container-to-kata"
+	targetWorkload.Metadata["transformation_time"] = time.Now().Format(time.RFC3339)
+
+	ctx.TargetWorkload = targetWorkload
+	return nil
+}
+
+// convertKataToContainer converts a Kata Container to a Container
+func (e *WorkloadTransformationEngine) convertKataToContainer(ctx *ConversionContext) error {
+	log.Printf("Converting Kata Container %s to Container", ctx.SourceWorkload.ID)
+
+	// Create container configuration from Kata config
+	containerConfig := e.createContainerConfigFromKata(ctx.SourceWorkload)
+
+	// Create target workload
+	targetWorkload := &Workload{
+		ID:           fmt.Sprintf("container-%s-%d", ctx.SourceWorkload.Name, time.Now().UnixNano()),
+		Name:         ctx.SourceWorkload.Name + "-container",
+		Type:         WorkloadTypeContainer,
+		State:        StateCreated,
+		NodeID:       ctx.SourceWorkload.NodeID,
+		Config:       containerConfig,
+		Resources:    ctx.SourceWorkload.Resources,
+		Metadata:     make(map[string]interface{}),
+		Labels:       ctx.SourceWorkload.Labels,
+		Annotations:  ctx.SourceWorkload.Annotations,
+		CreatedAt:    time.Now(),
+		LastModified: time.Now(),
+	}
+
+	// Add transformation metadata
+	targetWorkload.Metadata["source_kata_id"] = ctx.SourceWorkload.ID
+	targetWorkload.Metadata["transformation_type"] = "kata-to-container"
+	targetWorkload.Metadata["transformation_time"] = time.Now().Format(time.RFC3339)
+
+	ctx.TargetWorkload = targetWorkload
+	return nil
+}
+
+// Helper functions for configuration conversion
+func (e *WorkloadTransformationEngine) createKataConfigFromVM(vm *Workload) *WorkloadConfig {
+	return &WorkloadConfig{
+		Image:           vm.Config.Image,
+		Command:         vm.Config.Command,
+		Args:            vm.Config.Args,
+		WorkingDir:      vm.Config.WorkingDir,
+		Environment:     vm.Config.Environment,
+		Mounts:          vm.Config.Mounts,
+		Networks:        vm.Config.Networks,
+		SecurityContext: e.enhanceSecurityContextForKata(vm.Config.SecurityContext),
+		StartupProbe:    vm.Config.StartupProbe,
+		ReadinessProbe:  vm.Config.ReadinessProbe,
+		LivenessProbe:   vm.Config.LivenessProbe,
+		RestartPolicy:   vm.Config.RestartPolicy,
+		Privileged:      false, // Kata doesn't need privileged mode
+		Capabilities:    vm.Config.Capabilities,
+	}
+}
+
+func (e *WorkloadTransformationEngine) createVMConfigFromKata(kata *Workload) *WorkloadConfig {
+	return &WorkloadConfig{
+		Image:           kata.Config.Image,
+		Command:         kata.Config.Command,
+		Args:            kata.Config.Args,
+		WorkingDir:      kata.Config.WorkingDir,
+		Environment:     kata.Config.Environment,
+		Mounts:          kata.Config.Mounts,
+		Networks:        kata.Config.Networks,
+		SecurityContext: kata.Config.SecurityContext,
+		StartupProbe:    kata.Config.StartupProbe,
+		ReadinessProbe:  kata.Config.ReadinessProbe,
+		LivenessProbe:   kata.Config.LivenessProbe,
+		RestartPolicy:   kata.Config.RestartPolicy,
+		Privileged:      kata.Config.Privileged,
+		Capabilities:    kata.Config.Capabilities,
+	}
+}
+
+func (e *WorkloadTransformationEngine) createKataConfigFromContainer(container *Workload) *WorkloadConfig {
+	return &WorkloadConfig{
+		Image:           container.Config.Image,
+		Command:         container.Config.Command,
+		Args:            container.Config.Args,
+		WorkingDir:      container.Config.WorkingDir,
+		Environment:     container.Config.Environment,
+		Mounts:          container.Config.Mounts,
+		Networks:        container.Config.Networks,
+		SecurityContext: e.enhanceSecurityContextForKata(container.Config.SecurityContext),
+		StartupProbe:    container.Config.StartupProbe,
+		ReadinessProbe:  container.Config.ReadinessProbe,
+		LivenessProbe:   container.Config.LivenessProbe,
+		RestartPolicy:   container.Config.RestartPolicy,
+		Privileged:      false, // Kata provides VM-level isolation
+		Capabilities:    container.Config.Capabilities,
+	}
+}
+
+func (e *WorkloadTransformationEngine) createContainerConfigFromKata(kata *Workload) *WorkloadConfig {
+	return &WorkloadConfig{
+		Image:           kata.Config.Image,
+		Command:         kata.Config.Command,
+		Args:            kata.Config.Args,
+		WorkingDir:      kata.Config.WorkingDir,
+		Environment:     kata.Config.Environment,
+		Mounts:          kata.Config.Mounts,
+		Networks:        kata.Config.Networks,
+		SecurityContext: kata.Config.SecurityContext,
+		StartupProbe:    kata.Config.StartupProbe,
+		ReadinessProbe:  kata.Config.ReadinessProbe,
+		LivenessProbe:   kata.Config.LivenessProbe,
+		RestartPolicy:   kata.Config.RestartPolicy,
+		Privileged:      kata.Config.Privileged,
+		Capabilities:    kata.Config.Capabilities,
+	}
+}
+
+func (e *WorkloadTransformationEngine) enhanceSecurityContextForKata(original *SecurityContext) *SecurityContext {
+	if original == nil {
+		original = &SecurityContext{}
+	}
+
+	// Enhanced security for Kata containers
+	nonRoot := true
+	readOnlyRootFS := true
+	allowPrivilegeEscalation := false
+
+	return &SecurityContext{
+		RunAsUser:        original.RunAsUser,
+		RunAsGroup:       original.RunAsGroup,
+		RunAsNonRoot:     &nonRoot,
+		ReadOnlyRootFS:   &readOnlyRootFS,
+		AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+		Capabilities:     original.Capabilities,
+		SeccompProfile:   original.SeccompProfile,
+		AppArmorProfile:  original.AppArmorProfile,
+		SELinuxOptions:   original.SELinuxOptions,
+		SupplementalGroups: original.SupplementalGroups,
+		FSGroup:          original.FSGroup,
+	}
+}
+
+// Validation functions
+func (e *WorkloadTransformationEngine) validateWorkload(workload *Workload) error {
+	validationCtx := &ValidationContext{
+		Workload:       workload,
+		ValidationType: "pre-transformation",
+		Config:         e.config,
+		Metadata:       make(map[string]interface{}),
+		Results:        make([]ValidationResult, 0),
+	}
+
+	// Run all applicable validators
+	for _, validator := range e.validators {
+		// Skip if validator is specific to a different workload type
+		if validator.WorkloadType != "" && validator.WorkloadType != workload.Type {
+			continue
+		}
+
+		if err := validator.Validator(validationCtx); err != nil {
+			return fmt.Errorf("validation failed for %s: %w", validator.Name, err)
+		}
+	}
+
+	// Check for critical validation failures
+	for _, result := range validationCtx.Results {
+		if result.Status == "fail" && strings.Contains(result.Check, "critical") {
+			return fmt.Errorf("critical validation failure: %s", result.Message)
+		}
+	}
+
+	return nil
+}
+
+func (e *WorkloadTransformationEngine) validateResources(ctx *ValidationContext) error {
+	if ctx.Workload.Resources == nil {
+		return nil
+	}
+
+	resources := ctx.Workload.Resources
+
+	// Check CPU limits
+	if resources.CPULimit > 0 && resources.CPURequest > resources.CPULimit {
+		ctx.Results = append(ctx.Results, ValidationResult{
+			Check:       "cpu-limits",
+			Status:      "fail",
+			Message:     "CPU request exceeds CPU limit",
+			Timestamp:   time.Now(),
+			Remediation: "Adjust CPU request or increase CPU limit",
+		})
+	}
+
+	// Check Memory limits
+	if resources.MemoryLimit > 0 && resources.MemoryRequest > resources.MemoryLimit {
+		ctx.Results = append(ctx.Results, ValidationResult{
+			Check:       "memory-limits",
+			Status:      "fail",
+			Message:     "Memory request exceeds memory limit",
+			Timestamp:   time.Now(),
+			Remediation: "Adjust memory request or increase memory limit",
+		})
+	}
+
+	return nil
+}
+
+func (e *WorkloadTransformationEngine) validateSecurity(ctx *ValidationContext) error {
+	if ctx.Workload.Config == nil {
+		return nil
+	}
+
+	config := ctx.Workload.Config
+
+	// Check for privileged mode
+	if config.Privileged {
+		ctx.Results = append(ctx.Results, ValidationResult{
+			Check:       "privileged-mode",
+			Status:      "warn",
+			Message:     "Workload runs in privileged mode",
+			Timestamp:   time.Now(),
+			Remediation: "Consider using specific capabilities instead of privileged mode",
+		})
+	}
+
+	// Check capabilities
+	if len(config.Capabilities) > 5 {
+		ctx.Results = append(ctx.Results, ValidationResult{
+			Check:       "capabilities",
+			Status:      "warn",
+			Message:     fmt.Sprintf("Workload requests %d capabilities", len(config.Capabilities)),
+			Timestamp:   time.Now(),
+			Remediation: "Review and minimize required capabilities",
+		})
+	}
+
+	return nil
+}
+
+func (e *WorkloadTransformationEngine) validateNetwork(ctx *ValidationContext) error {
+	if ctx.Workload.Config == nil || len(ctx.Workload.Config.Networks) == 0 {
+		return nil
+	}
+
+	// Basic network validation
+	for _, network := range ctx.Workload.Config.Networks {
+		if network.Name == "" {
+			ctx.Results = append(ctx.Results, ValidationResult{
+				Check:       "network-policies",
+				Status:      "fail",
+				Message:     "Network configuration missing name",
+				Timestamp:   time.Now(),
+				Remediation: "Specify network name for all network configurations",
+			})
+		}
+	}
+
+	return nil
+}
+
+// Utility functions
+func (e *WorkloadTransformationEngine) getWorkload(workloadID string) (*Workload, error) {
+	// This would typically query a workload registry or database
+	// For now, return a mock workload
+	return &Workload{
+		ID:      workloadID,
+		Name:    "example-workload",
+		Type:    WorkloadTypeContainer,
+		State:   StateRunning,
+		NodeID:  "node-1",
+		Config:  &WorkloadConfig{},
+		Resources: &WorkloadResources{},
+		Metadata: make(map[string]interface{}),
+		Labels:   make(map[string]string),
+		Annotations: make(map[string]string),
+		CreatedAt: time.Now().Add(-1 * time.Hour),
+		LastModified: time.Now().Add(-30 * time.Minute),
+	}, nil
+}
+
+func (e *WorkloadTransformationEngine) startWorkload(workload *Workload) error {
+	// This would typically use the appropriate driver to start the workload
+	log.Printf("Starting workload %s of type %s", workload.ID, workload.Type)
+	return nil
+}
+
+func (e *WorkloadTransformationEngine) stopAndDeleteWorkload(workload *Workload) error {
+	// This would typically use the appropriate driver to stop and delete the workload
+	log.Printf("Stopping and deleting workload %s of type %s", workload.ID, workload.Type)
+	return nil
+}
+
+// GetTransformationStatus returns the status of a transformation task
+func (e *WorkloadTransformationEngine) GetTransformationStatus(taskID string) (*TransformationTask, error) {
+	e.migrationQueue.mutex.RLock()
+	defer e.migrationQueue.mutex.RUnlock()
+
+	// Check active tasks
+	if task, exists := e.migrationQueue.active[taskID]; exists {
+		return task, nil
+	}
+
+	// Check queued tasks
+	for _, task := range e.migrationQueue.queue {
+		if task.ID == taskID {
+			return task, nil
+		}
+	}
+
+	// Check history
+	for _, task := range e.migrationQueue.history {
+		if task.ID == taskID {
+			return task, nil
+		}
+	}
+
+	return nil, fmt.Errorf("transformation task %s not found", taskID)
+}
+
+// ListTransformationTasks returns a list of transformation tasks
+func (e *WorkloadTransformationEngine) ListTransformationTasks() ([]*TransformationTask, error) {
+	e.migrationQueue.mutex.RLock()
+	defer e.migrationQueue.mutex.RUnlock()
+
+	var tasks []*TransformationTask
+
+	// Add queued tasks
+	tasks = append(tasks, e.migrationQueue.queue...)
+
+	// Add active tasks
+	for _, task := range e.migrationQueue.active {
+		tasks = append(tasks, task)
+	}
+
+	// Add recent history (last 100 tasks)
+	historyCount := len(e.migrationQueue.history)
+	startIdx := 0
+	if historyCount > 100 {
+		startIdx = historyCount - 100
+	}
+	tasks = append(tasks, e.migrationQueue.history[startIdx:]...)
+
+	return tasks, nil
+}
+
+// CancelTransformation cancels a transformation task
+func (e *WorkloadTransformationEngine) CancelTransformation(taskID string) error {
+	e.migrationQueue.mutex.Lock()
+	defer e.migrationQueue.mutex.Unlock()
+
+	// Check if task is active
+	if task, exists := e.migrationQueue.active[taskID]; exists {
+		task.Status = TransformationStatusCancelled
+		task.Progress.Phase = "cancelled"
+		task.Progress.Message = "Transformation cancelled by user"
+		if task.Progress != nil {
+			conversionCtx := &ConversionContext{Progress: task.Progress}
+			if conversionCtx.CancelFunc != nil {
+				conversionCtx.CancelFunc()
+			}
+		}
+		return nil
+	}
+
+	// Check if task is queued
+	for i, task := range e.migrationQueue.queue {
+		if task.ID == taskID {
+			task.Status = TransformationStatusCancelled
+			task.Progress.Phase = "cancelled"
+			task.Progress.Message = "Transformation cancelled before execution"
+			// Remove from queue
+			e.migrationQueue.queue = append(e.migrationQueue.queue[:i], e.migrationQueue.queue[i+1:]...)
+			// Add to history
+			e.migrationQueue.history = append(e.migrationQueue.history, task)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("transformation task %s not found or cannot be cancelled", taskID)
+}

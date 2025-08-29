@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.12
 """
 NovaCron Code Memory Demo - Using Qdrant vector database to remember project details.
 

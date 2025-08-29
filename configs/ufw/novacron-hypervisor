@@ -1,0 +1,22 @@
+# UFW Application Profile for NovaCron Hypervisor Service
+# This profile provides secure network isolation for hypervisor communication
+
+[NovaCron Hypervisor]
+title=NovaCron VM Hypervisor
+description=Hypervisor service for VM management and orchestration
+ports=9000/tcp
+
+[NovaCron Hypervisor SSH]
+title=NovaCron Hypervisor SSH Management
+description=SSH access for hypervisor management
+ports=22/tcp
+
+[NovaCron Hypervisor VNC]
+title=NovaCron VM VNC Console Access
+description=VNC console access for VM management (port range)
+ports=5900:5999/tcp
+
+[NovaCron Hypervisor Migration]
+title=NovaCron VM Migration
+description=Live migration data transfer ports
+ports=49152:49215/tcp

@@ -54,14 +54,14 @@ func TestVMSchedulerGetActiveAllocationsIntegration(t *testing.T) {
 
 	// Register a test node
 	nodeInfo := &NodeResourceInfo{
-		NodeID:       "test-node-001",
-		CPUCores:     8,
-		MemoryMB:     8192,
-		DiskGB:       500,
-		Status:       "available",
-		CPUUsage:     0.1,
-		MemoryUsage:  0.2,
-		DiskUsage:    0.3,
+		NodeID:      "test-node-001",
+		CPUCores:    8,
+		MemoryMB:    8192,
+		DiskGB:      500,
+		Status:      "available",
+		CPUUsage:    0.1,
+		MemoryUsage: 0.2,
+		DiskUsage:   0.3,
 	}
 
 	err := scheduler.RegisterNode(nodeInfo)
@@ -102,7 +102,7 @@ func TestVMSchedulerGetActiveAllocationsIntegration(t *testing.T) {
 	}
 
 	if retrievedAllocation.VMID != testAllocation.VMID {
-		t.Errorf("Retrieved allocation VMID should be '%s', got '%s'", 
+		t.Errorf("Retrieved allocation VMID should be '%s', got '%s'",
 			testAllocation.VMID, retrievedAllocation.VMID)
 	}
 
@@ -160,24 +160,24 @@ func TestSchedulerNodeRegistration(t *testing.T) {
 	// Test registering multiple nodes
 	nodes := []*NodeResourceInfo{
 		{
-			NodeID:       "node-001",
-			CPUCores:     4,
-			MemoryMB:     4096,
-			DiskGB:       250,
-			Status:       "available",
-			CPUUsage:     0.1,
-			MemoryUsage:  0.2,
-			DiskUsage:    0.1,
+			NodeID:      "node-001",
+			CPUCores:    4,
+			MemoryMB:    4096,
+			DiskGB:      250,
+			Status:      "available",
+			CPUUsage:    0.1,
+			MemoryUsage: 0.2,
+			DiskUsage:   0.1,
 		},
 		{
-			NodeID:       "node-002",
-			CPUCores:     8,
-			MemoryMB:     8192,
-			DiskGB:       500,
-			Status:       "available",
-			CPUUsage:     0.2,
-			MemoryUsage:  0.3,
-			DiskUsage:    0.2,
+			NodeID:      "node-002",
+			CPUCores:    8,
+			MemoryMB:    8192,
+			DiskGB:      500,
+			Status:      "available",
+			CPUUsage:    0.2,
+			MemoryUsage: 0.3,
+			DiskUsage:   0.2,
 		},
 	}
 
@@ -197,7 +197,7 @@ func TestSchedulerNodeRegistration(t *testing.T) {
 		}
 
 		if retrievedNode.NodeID != node.NodeID {
-			t.Errorf("Retrieved node ID should be %s, got %s", 
+			t.Errorf("Retrieved node ID should be %s, got %s",
 				node.NodeID, retrievedNode.NodeID)
 		}
 	}
@@ -219,14 +219,14 @@ func TestSchedulerVMScheduling(t *testing.T) {
 
 	// Register a node
 	nodeInfo := &NodeResourceInfo{
-		NodeID:       "scheduler-test-node",
-		CPUCores:     8,
-		MemoryMB:     8192,
-		DiskGB:       500,
-		Status:       "available",
-		CPUUsage:     0.1,
-		MemoryUsage:  0.2,
-		DiskUsage:    0.1,
+		NodeID:      "scheduler-test-node",
+		CPUCores:    8,
+		MemoryMB:    8192,
+		DiskGB:      500,
+		Status:      "available",
+		CPUUsage:    0.1,
+		MemoryUsage: 0.2,
+		DiskUsage:   0.1,
 	}
 
 	err := scheduler.RegisterNode(nodeInfo)

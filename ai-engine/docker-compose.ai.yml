@@ -1,0 +1,151 @@
+version: '3.8'
+
+services:
+  # AI Operations Engine
+  ai-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: novacron/ai-engine:latest
+    restart: unless-stopped
+    environment:
+      # Environment
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DEBUG: ${DEBUG:-false}
+      
+      # Database connection
+      DB_URL: postgresql://postgres:postgres@postgres:5432/novacron
+      DB_POOL_SIZE: 20
+      DB_MAX_OVERFLOW: 10
+      
+      # Redis for caching
+      REDIS_URL: redis://redis:6379/0
+      
+      # ML Configuration
+      ML_MODEL_STORAGE_PATH: /var/lib/novacron/ai-models
+      ML_TRAIN_BATCH_SIZE: 1000
+      ML_INFERENCE_BATCH_SIZE: 100
+      ML_MODEL_UPDATE_INTERVAL: 3600
+      ML_FEATURE_WINDOW_SIZE: 24
+      ML_PREDICTION_HORIZON: 30
+      ML_MIN_SAMPLES_FOR_TRAINING: 1000
+      ML_FAILURE_PREDICTION_THRESHOLD: 0.7
+      ML_ANOMALY_DETECTION_THRESHOLD: 0.95
+      ML_DRIFT_DETECTION_THRESHOLD: 0.1
+      
+      # NovaCron API integration
+      NOVACRON_API_URL: http://api:8090
+      NOVACRON_WS_URL: ws://api:8091
+      NOVACRON_USERNAME: ai-engine
+      NOVACRON_PASSWORD: ${AI_ENGINE_PASSWORD:-changeme}
+      
+      # Monitoring
+      MONITORING_LOG_LEVEL: INFO
+      MONITORING_LOG_FORMAT: json
+      MONITORING_METRICS_PORT: 9100
+      MONITORING_HEALTH_CHECK_INTERVAL: 60
+      
+      # Security
+      SECURITY_SECRET_KEY: ${AI_ENGINE_SECRET:-changeme_in_production}
+      SECURITY_ENABLE_CORS: true
+      
+    ports:
+      - "8093:8093"  # AI Engine API
+      - "9100:9100"  # Prometheus metrics
+    
+    volumes:
+      - ai_models:/var/lib/novacron/ai-models
+      - ai_logs:/var/log/novacron-ai
+    
+    depends_on:
+      - postgres
+      - redis
+      - api
+    
+    networks:
+      - novacron-network
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8093/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Redis for caching and queuing
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - novacron-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # AI Engine Monitoring Dashboard (optional)
+  ai-dashboard:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${AI_GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+      GF_SERVER_ROOT_URL: http://localhost:3002
+    volumes:
+      - ./configs/ai-grafana/provisioning:/etc/grafana/provisioning
+      - ai_grafana_data:/var/lib/grafana
+    ports:
+      - "3002:3000"
+    depends_on:
+      - ai-engine
+    networks:
+      - novacron-network
+
+  # Jupyter notebook for ML development (development only)
+  ai-notebook:
+    image: jupyter/tensorflow-notebook:latest
+    restart: unless-stopped
+    environment:
+      JUPYTER_TOKEN: ${JUPYTER_TOKEN:-novacron}
+      JUPYTER_ENABLE_LAB: yes
+    volumes:
+      - ./notebooks:/home/jovyan/work
+      - ai_models:/home/jovyan/models
+      - ./ai_engine:/home/jovyan/ai_engine:ro
+    ports:
+      - "8888:8888"
+    networks:
+      - novacron-network
+    profiles:
+      - development
+    command: start-notebook.sh --NotebookApp.token='${JUPYTER_TOKEN:-novacron}'
+
+networks:
+  novacron-network:
+    external: true
+
+volumes:
+  ai_models:
+    driver: local
+  ai_logs:
+    driver: local
+  ai_grafana_data:
+    driver: local
+  redis_data:
+    driver: local

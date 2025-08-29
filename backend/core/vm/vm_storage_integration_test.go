@@ -12,7 +12,7 @@ func TestVMStorageIntegration(t *testing.T) {
 	// Create storage service
 	storageConfig := storage.DefaultStorageConfig()
 	storageService := storage.NewBaseStorageService(storageConfig)
-	
+
 	err := storageService.Start()
 	if err != nil {
 		t.Fatalf("Failed to start storage service: %v", err)
@@ -156,7 +156,7 @@ func TestVMStorageVolumeOperations(t *testing.T) {
 	// Create storage service
 	storageConfig := storage.DefaultStorageConfig()
 	storageService := storage.NewBaseStorageService(storageConfig)
-	
+
 	err := storageService.Start()
 	if err != nil {
 		t.Fatalf("Failed to start storage service: %v", err)
@@ -254,7 +254,7 @@ func TestVMStorageStatsAccuracy(t *testing.T) {
 	// Create storage service
 	storageConfig := storage.DefaultStorageConfig()
 	storageService := storage.NewBaseStorageService(storageConfig)
-	
+
 	err := storageService.Start()
 	if err != nil {
 		t.Fatalf("Failed to start storage service: %v", err)
@@ -296,7 +296,7 @@ func TestVMStorageStatsAccuracy(t *testing.T) {
 	expectedTotalGB := float64(0)
 	for _, vol := range volumes {
 		expectedTotalGB += float64(vol.sizeGB)
-		
+
 		if vol.vtype == "boot" {
 			_, err := storageManager.CreateBootVolume(ctx, vm.ID(), vm.Name(), vol.sizeGB)
 			if err != nil {

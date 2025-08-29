@@ -1,0 +1,174 @@
+# NovaCron Edge Agent Configuration
+# Lightweight edge computing agent for resource-constrained devices
+
+# Agent identification
+agent_id: "edge-agent-raspberry-pi-001"
+cluster_id: "manufacturing-floor-cluster"
+edge_region: "factory-east-wing"
+
+# Cloud connectivity configuration
+cloud_endpoint: "novacron-cloud.example.com:8090"
+cloud_token: "${NOVACRON_EDGE_TOKEN}"
+sync_interval: 30s
+
+# Local Redis cache configuration
+local_redis:
+  address: "localhost:6379"
+  password: "${REDIS_PASSWORD}"
+  db: 1
+
+# Resource limits for edge device
+resource_limits:
+  max_memory_mb: 1024    # 1GB RAM limit
+  max_cpu_cores: 2       # 2 CPU cores max
+  max_storage_gb: 10     # 10GB storage limit
+
+# Edge capabilities
+offline_mode: true        # Can operate without cloud connectivity
+ai_inference: true        # Enable local AI inference
+local_decisions: true     # Make autonomous decisions
+
+# Networking configuration
+health_port: 8080
+metrics_port: 8081
+edge_network: "edge0"
+
+# Performance tuning for resource-constrained devices
+performance:
+  # Memory optimization
+  max_cache_size_mb: 256
+  cache_ttl: 300s
+  gc_interval: 60s
+  
+  # CPU optimization
+  max_concurrent_tasks: 4
+  task_timeout: 30s
+  
+  # Network optimization
+  connection_pool_size: 10
+  request_timeout: 15s
+  retry_attempts: 3
+  
+  # Storage optimization
+  log_rotation_mb: 50
+  metrics_retention_hours: 24
+
+# Device-specific settings
+device:
+  type: "raspberry-pi-4"        # Device type for optimization
+  architecture: "arm64"         # CPU architecture
+  gpu_acceleration: false       # GPU availability
+  hardware_crypto: true        # Hardware crypto support
+
+# Edge workload management
+workloads:
+  # Container support
+  containers:
+    enabled: true
+    runtime: "containerd"
+    max_containers: 20
+    default_memory_mb: 128
+    default_cpu_shares: 1024
+  
+  # VM support (lightweight)
+  vms:
+    enabled: true
+    hypervisor: "firecracker"   # Lightweight microVMs
+    max_vms: 5
+    default_memory_mb: 256
+    default_vcpus: 1
+
+# Monitoring and telemetry
+monitoring:
+  # Metrics collection
+  enable_metrics: true
+  metrics_interval: 10s
+  detailed_metrics: false       # Disable for resource savings
+  
+  # Health checks
+  health_check_interval: 30s
+  health_timeout: 5s
+  
+  # Alerting thresholds
+  cpu_alert_threshold: 80
+  memory_alert_threshold: 85
+  disk_alert_threshold: 90
+  temperature_alert_threshold: 75
+
+# Security configuration
+security:
+  # Authentication
+  enable_tls: true
+  cert_path: "/etc/novacron/certs/"
+  
+  # Access control
+  enable_rbac: true
+  admin_users: ["edge-admin"]
+  
+  # Audit logging
+  enable_audit: true
+  audit_log_path: "/var/log/novacron/audit.log"
+
+# AI inference configuration
+ai_inference:
+  # Model management
+  model_cache_size_mb: 200
+  model_refresh_interval: 3600s
+  
+  # Inference settings
+  max_inference_requests: 10
+  inference_timeout: 5s
+  confidence_threshold: 0.7
+  
+  # Available models for edge inference
+  models:
+    - name: "workload-placement"
+      version: "v1.2"
+      size_mb: 45
+      accuracy: 0.89
+      
+    - name: "failure-prediction"
+      version: "v1.1"
+      size_mb: 32
+      accuracy: 0.94
+      
+    - name: "resource-optimization"
+      version: "v1.0"
+      size_mb: 28
+      accuracy: 0.82
+
+# Edge-specific policies
+policies:
+  # Resource allocation
+  resource_allocation:
+    cpu_overcommit_ratio: 1.5
+    memory_overcommit_ratio: 1.2
+    prioritize_local_workloads: true
+  
+  # Data management
+  data_management:
+    local_cache_priority: "high"
+    sync_batch_size: 100
+    compress_sync_data: true
+  
+  # Fault tolerance
+  fault_tolerance:
+    max_retry_attempts: 3
+    retry_backoff_ms: 1000
+    failover_timeout: 30s
+    
+# Logging configuration
+logging:
+  level: "info"                 # debug, info, warn, error
+  output: "file"                # file, stdout, syslog
+  file_path: "/var/log/novacron/edge-agent.log"
+  max_file_size_mb: 100
+  max_files: 3
+  enable_json: false            # Use text format for readability
+
+# Development and testing
+development:
+  enable_debug_endpoints: false
+  mock_cloud_connection: false
+  simulate_resource_constraints: false
+  test_mode: false

@@ -1,0 +1,22 @@
+# UFW Application Profile for NovaCron API Server
+# This profile secures API server endpoints with appropriate access controls
+
+[NovaCron API]
+title=NovaCron API Server
+description=REST API endpoints for VM management
+ports=8090/tcp
+
+[NovaCron WebSocket]
+title=NovaCron WebSocket API
+description=Real-time WebSocket communication
+ports=8091/tcp
+
+[NovaCron Frontend]
+title=NovaCron Web Frontend
+description=Web interface for VM management
+ports=8092/tcp
+
+[NovaCron Database]
+title=NovaCron PostgreSQL Database
+description=Database access for API server (external port)
+ports=11432/tcp

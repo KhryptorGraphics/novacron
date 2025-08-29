@@ -1,0 +1,56 @@
+[Unit]
+Description=NovaCron Storage Manager
+Documentation=https://github.com/khryptorgraphics/novacron
+After=zfs.target local-fs.target
+Wants=zfs.target
+Before=novacron-api.service novacron-hypervisor.service
+PartOf=novacron.target
+
+[Service]
+Type=notify
+User=novacron
+Group=storage
+WorkingDirectory=/opt/novacron
+ExecStartPre=/opt/novacron/bin/validate-storage-config
+ExecStartPre=/opt/novacron/bin/setup-zfs-datasets
+ExecStart=/opt/novacron/bin/novacron-storage-manager --config=/etc/novacron/storage.conf
+ExecReload=/bin/kill -USR1 $MAINPID
+ExecStop=/opt/novacron/bin/flush-storage-cache
+Restart=always
+RestartSec=10
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# Resource limits
+LimitNOFILE=65536
+MemoryLimit=4G
+CPUQuota=200%
+
+# Storage access capabilities
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_FOWNER CAP_CHOWN
+AmbientCapabilities=CAP_SYS_ADMIN
+
+# Security
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/novacron /mnt/novacron-storage /dev
+AppArmorProfile=novacron-storage
+
+# Environment
+Environment=ZFS_COMPRESSION=lz4
+Environment=ZFS_ENCRYPTION=aes-256-gcm
+Environment=DEDUPLICATION=on
+Environment=STORAGE_TIER_POLICY=auto
+EnvironmentFile=-/etc/novacron/storage.env
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=novacron-storage
+
+# Health monitoring
+WatchdogSec=30
+
+[Install]
+WantedBy=novacron.target

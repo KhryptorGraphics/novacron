@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.12
 """
 Script to set the OpenAI API key for Qdrant and code memory integration.
 This script will update both environment variables and the .env file.

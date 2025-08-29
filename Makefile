@@ -1,7 +1,8 @@
-# NovaCron Makefile
+# NovaCron Makefile - Comprehensive Testing Framework
 
-.PHONY: all test build clean docker-build docker-test
+.PHONY: all test build clean docker-build docker-test help
 
+# Default target
 all: build
 
 # Build all components
@@ -9,17 +10,426 @@ build:
 	@echo "Building NovaCron components..."
 	docker-compose build
 
-# Run tests in Docker
-test:
+# ============================================================================
+# Testing Targets - Core
+# ============================================================================
+
+# Run all tests
+test: test-unit test-integration test-benchmarks test-multicloud test-ml test-prefetching test-cache test-sdk test-e2e test-chaos
+	@echo "All tests completed"
+
+# Run tests in Docker (recommended - uses Go 1.19)
+test-docker:
 	@echo "Running tests in Docker..."
 	docker run --rm -v $(PWD):/app -w /app golang:1.19 go test ./backend/core/vm/...
 
-# Run Go tests without Docker (requires local Go installation)
+# Run Go tests locally (requires Go 1.23+)
 test-local:
 	@echo "Running Go tests locally..."
 	cd backend/core && go test -v ./vm/...
 
-# Clean build artifacts
+# ============================================================================
+# Unit Testing
+# ============================================================================
+
+test-unit:
+	@echo "Running unit tests..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 go test ./backend/core/vm/... -v -run "Test.*Fixed"
+
+test-unit-coverage:
+	@echo "Running unit tests with coverage..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go test ./backend/core/... -coverprofile=coverage.out -covermode=atomic
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report generated: coverage.html"
+
+test-unit-race:
+	@echo "Running unit tests with race detection..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go test ./backend/core/vm/... -race -v -run "Test.*Fixed"
+
+# ============================================================================
+# Integration Testing
+# ============================================================================
+
+test-integration:
+	@echo "Running integration tests..."
+	docker run --rm -v $(PWD):/app -w /app \
+		--network host \
+		-e DB_URL="postgresql://postgres:postgres@localhost:5432/novacron_test" \
+		-e REDIS_URL="redis://localhost:6379" \
+		golang:1.19 go test ./backend/tests/integration/... -v -timeout 10m
+
+test-integration-setup:
+	@echo "Setting up integration test environment..."
+	docker-compose -f docker-compose.test.yml up -d postgres redis
+	@echo "Waiting for services to be ready..."
+	@sleep 10
+
+test-integration-teardown:
+	@echo "Tearing down integration test environment..."
+	docker-compose -f docker-compose.test.yml down
+
+# ============================================================================
+# Multi-Cloud Testing
+# ============================================================================
+
+test-multicloud:
+	@echo "Running multi-cloud integration tests..."
+	docker run --rm -v $(PWD):/app -w /app \
+		-e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
+		-e AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
+		-e AZURE_CLIENT_ID="${AZURE_CLIENT_ID}" \
+		-e AZURE_CLIENT_SECRET="${AZURE_CLIENT_SECRET}" \
+		-e AZURE_TENANT_ID="${AZURE_TENANT_ID}" \
+		-e AZURE_SUBSCRIPTION_ID="${AZURE_SUBSCRIPTION_ID}" \
+		-e GCP_PROJECT_ID="${GCP_PROJECT_ID}" \
+		-e GCP_CREDENTIALS_PATH="/app/gcp-credentials.json" \
+		golang:1.19 go test ./backend/tests/multicloud/... -v -timeout 30m
+
+test-multicloud-unit:
+	@echo "Running multi-cloud unit tests..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go test ./backend/tests/multicloud/... -v -short
+
+test-multicloud-aws:
+	@echo "Running AWS-specific tests..."
+	docker run --rm -v $(PWD):/app -w /app \
+		-e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
+		-e AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
+		golang:1.19 go test ./backend/tests/multicloud/... -v -run "TestAWS.*" -timeout 20m
+
+test-multicloud-azure:
+	@echo "Running Azure-specific tests..."
+	docker run --rm -v $(PWD):/app -w /app \
+		-e AZURE_CLIENT_ID="${AZURE_CLIENT_ID}" \
+		-e AZURE_CLIENT_SECRET="${AZURE_CLIENT_SECRET}" \
+		-e AZURE_TENANT_ID="${AZURE_TENANT_ID}" \
+		-e AZURE_SUBSCRIPTION_ID="${AZURE_SUBSCRIPTION_ID}" \
+		golang:1.19 go test ./backend/tests/multicloud/... -v -run "TestAzure.*" -timeout 20m
+
+test-multicloud-gcp:
+	@echo "Running GCP-specific tests..."
+	docker run --rm -v $(PWD):/app -w /app \
+		-e GCP_PROJECT_ID="${GCP_PROJECT_ID}" \
+		-e GCP_CREDENTIALS_PATH="/app/gcp-credentials.json" \
+		golang:1.19 go test ./backend/tests/multicloud/... -v -run "TestGCP.*" -timeout 20m
+
+# ============================================================================
+# AI/ML Model Testing
+# ============================================================================
+
+test-ml:
+	@echo "Running AI/ML model tests..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go test ./backend/tests/ml/... -v -timeout 15m
+
+test-prefetching:
+	@echo "Running predictive prefetching tests..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go test ./backend/core/vm/predictive_prefetching_test.go ./backend/core/vm/predictive_prefetching.go ./backend/core/vm/vm.go ./backend/core/vm/vm_types_minimal.go ./backend/core/vm/vm_migration_types.go -v
+
+test-ml-accuracy:
+	@echo "Running ML model accuracy tests..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go test ./backend/tests/ml/... -v -run "TestModelAccuracy.*" -timeout 10m
+
+test-ml-performance:
+	@echo "Running ML model performance tests..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go test ./backend/tests/ml/... -v -run "TestPerformanceRegression.*" -timeout 10m
+
+test-ml-drift:
+	@echo "Running ML model drift detection tests..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go test ./backend/tests/ml/... -v -run "TestModelDrift.*" -timeout 5m
+
+# ============================================================================
+# Redis Cache Testing
+# ============================================================================
+
+test-cache:
+	@echo "Running Redis cache tests..."
+	docker run --rm -v $(PWD):/app -w /app \
+		--network host \
+		-e REDIS_URL="redis://localhost:6379" \
+		golang:1.19 go test ./backend/tests/cache/... -v -timeout 10m
+
+test-cache-performance:
+	@echo "Running Redis performance tests..."
+	docker run --rm -v $(PWD):/app -w /app \
+		--network host \
+		-e REDIS_URL="redis://localhost:6379" \
+		golang:1.19 go test ./backend/tests/cache/... -v -run "TestRedisCachePerformance.*" -timeout 15m
+
+test-cache-consistency:
+	@echo "Running Redis consistency tests..."
+	docker run --rm -v $(PWD):/app -w /app \
+		--network host \
+		-e REDIS_URL="redis://localhost:6379" \
+		golang:1.19 go test ./backend/tests/cache/... -v -run "TestCacheConsistency.*" -timeout 10m
+
+test-cache-chaos:
+	@echo "Running Redis chaos engineering tests..."
+	docker run --rm -v $(PWD):/app -w /app \
+		--network host \
+		-e REDIS_URL="redis://localhost:6379" \
+		golang:1.19 go test ./backend/tests/cache/... -v -run "TestRedisChaosEngineering.*" -timeout 20m
+
+# ============================================================================
+# SDK Testing
+# ============================================================================
+
+test-sdk:
+	@echo "Running cross-language SDK tests..."
+	docker run --rm -v $(PWD):/app -w /app \
+		--network host \
+		-e NOVACRON_API_URL="http://localhost:8090" \
+		-e NOVACRON_API_KEY="test-api-key" \
+		golang:1.19 go test ./backend/tests/sdk/... -v -timeout 20m
+
+test-sdk-go:
+	@echo "Running Go SDK tests..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go test ./backend/tests/sdk/... -v -run ".*_go" -timeout 10m
+
+test-sdk-python:
+	@echo "Running Python SDK tests..."
+	docker run --rm -v $(PWD):/app -w /app \
+		-v $(PWD)/sdk_tests:/tmp/sdk_tests \
+		python:3.9 python -m pytest /tmp/sdk_tests/python/ -v
+
+test-sdk-javascript:
+	@echo "Running JavaScript SDK tests..."
+	docker run --rm -v $(PWD):/app -w /app \
+		-v $(PWD)/sdk_tests:/tmp/sdk_tests \
+		node:16 npm test --prefix /tmp/sdk_tests/javascript/
+
+test-sdk-compatibility:
+	@echo "Running SDK compatibility tests..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go test ./backend/tests/sdk/... -v -run "TestCrossLanguageSDKCompatibility.*" -timeout 25m
+
+# ============================================================================
+# End-to-End Testing
+# ============================================================================
+
+test-e2e:
+	@echo "Running end-to-end tests..."
+	docker run --rm -v $(PWD):/app -w /app \
+		--network host \
+		-e NOVACRON_API_URL="http://localhost:8090" \
+		-e NOVACRON_UI_URL="http://localhost:8092" \
+		-e NOVACRON_API_KEY="test-api-key" \
+		golang:1.19 go test ./backend/tests/e2e/... -v -timeout 30m
+
+test-e2e-workflows:
+	@echo "Running E2E workflow tests..."
+	docker run --rm -v $(PWD):/app -w /app \
+		--network host \
+		-e NOVACRON_API_URL="http://localhost:8090" \
+		-e ENABLE_UI_TESTS="false" \
+		-e ENABLE_LOAD_TESTS="true" \
+		golang:1.19 go test ./backend/tests/e2e/... -v -run "TestComprehensiveWorkflows.*" -timeout 45m
+
+test-e2e-ui:
+	@echo "Running E2E UI tests..."
+	@echo "Note: UI tests require Selenium/WebDriver setup"
+	docker run --rm -v $(PWD):/app -w /app \
+		--network host \
+		-e NOVACRON_UI_URL="http://localhost:8092" \
+		-e ENABLE_UI_TESTS="true" \
+		golang:1.19 go test ./backend/tests/e2e/... -v -run ".*UI.*" -timeout 20m
+
+# ============================================================================
+# Chaos Engineering
+# ============================================================================
+
+test-chaos:
+	@echo "Running chaos engineering tests..."
+	docker run --rm -v $(PWD):/app -w /app \
+		--network host \
+		--privileged \
+		-e REDIS_URL="redis://localhost:6379" \
+		golang:1.19 go test ./backend/tests/chaos/... -v -timeout 25m
+
+test-chaos-redis:
+	@echo "Running Redis chaos tests..."
+	docker run --rm -v $(PWD):/app -w /app \
+		--network host \
+		-e REDIS_URL="redis://localhost:6379" \
+		golang:1.19 go test ./backend/tests/chaos/... -v -run "TestRedisClusterChaosEngineering.*" -timeout 20m
+
+test-chaos-advanced:
+	@echo "Running advanced chaos scenarios..."
+	docker run --rm -v $(PWD):/app -w /app \
+		--network host \
+		--privileged \
+		golang:1.19 go test ./backend/tests/chaos/... -v -run "TestAdvancedChaosScenarios.*" -timeout 30m
+
+# ============================================================================
+# Performance & Benchmark Testing
+# ============================================================================
+
+test-benchmarks:
+	@echo "Running performance benchmarks..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go test ./backend/tests/benchmarks/... -bench=. -v -timeout 15m
+
+test-benchmarks-vm:
+	@echo "Running VM benchmark tests..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go test ./backend/tests/benchmarks/... -bench=BenchmarkVM.* -v -timeout 10m
+
+test-benchmarks-scheduler:
+	@echo "Running scheduler benchmark tests..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go test ./backend/core/scheduler/policy/... -bench=. -v -timeout 10m
+
+test-performance:
+	@echo "Running comprehensive performance tests..."
+	$(MAKE) test-benchmarks
+	$(MAKE) test-cache-performance
+	$(MAKE) test-ml-performance
+
+# ============================================================================
+# Memory & Profiling
+# ============================================================================
+
+test-memory:
+	@echo "Running tests with memory profiling..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go test ./backend/core/vm/... -memprofile=mem.prof -v -run "Test.*Fixed"
+
+test-cpu-profile:
+	@echo "Running tests with CPU profiling..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go test ./backend/core/vm/... -cpuprofile=cpu.prof -v -run "Test.*Fixed"
+
+# ============================================================================
+# Code Quality & Security
+# ============================================================================
+
+lint-backend:
+	@echo "Linting backend code..."
+	docker run --rm -v $(PWD):/app -w /app golangci/golangci-lint:latest \
+		golangci-lint run ./backend/...
+
+security-scan:
+	@echo "Running security scan..."
+	docker run --rm -v $(PWD):/app -w /app securecodewarrior/gosec:latest \
+		gosec ./backend/...
+
+vulnerability-check:
+	@echo "Checking for known vulnerabilities..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go list -json -m all | docker run --rm -i sonatypecommunity/nancy:latest sleuth
+
+# ============================================================================
+# Test Environment Management
+# ============================================================================
+
+test-env-up:
+	@echo "Starting test environment..."
+	docker-compose -f docker-compose.test.yml up -d
+	@echo "Waiting for services to be ready..."
+	@sleep 15
+	@echo "Test environment ready"
+
+test-env-down:
+	@echo "Stopping test environment..."
+	docker-compose -f docker-compose.test.yml down -v
+
+test-env-logs:
+	@echo "Showing test environment logs..."
+	docker-compose -f docker-compose.test.yml logs -f
+
+test-env-reset:
+	@echo "Resetting test environment..."
+	$(MAKE) test-env-down
+	$(MAKE) test-env-up
+
+# ============================================================================
+# CI/CD Integration
+# ============================================================================
+
+ci-test:
+	@echo "Running CI test suite..."
+	$(MAKE) test-unit-coverage
+	$(MAKE) test-integration
+	$(MAKE) test-benchmarks
+
+ci-test-full:
+	@echo "Running full CI test suite..."
+	$(MAKE) test-env-up
+	$(MAKE) test-unit-coverage
+	$(MAKE) test-integration
+	$(MAKE) test-cache
+	$(MAKE) test-ml
+	$(MAKE) test-benchmarks
+	$(MAKE) test-env-down
+
+ci-quality:
+	@echo "Running CI quality checks..."
+	$(MAKE) lint-backend
+	$(MAKE) security-scan
+	$(MAKE) vulnerability-check
+
+# ============================================================================
+# Reporting & Metrics
+# ============================================================================
+
+test-report:
+	@echo "Generating comprehensive test report..."
+	@echo "Test Coverage: $(shell docker run --rm -v $(PWD):/app -w /app golang:1.19 go tool cover -func=coverage.out | tail -1 | awk '{print $$3}')"
+	@echo "See coverage.html for detailed coverage report"
+
+test-metrics:
+	@echo "Collecting test metrics..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go test ./backend/... -json > test-results.json
+	@echo "Test results saved to test-results.json"
+
+# ============================================================================
+# Documentation & Examples
+# ============================================================================
+
+test-docs:
+	@echo "Running documentation tests..."
+	@echo "Validating README examples..."
+	@echo "Checking test documentation consistency..."
+
+examples:
+	@echo "Running example applications..."
+	$(MAKE) run-example
+
+run-example:
+	@echo "Running VM migration example in Docker..."
+	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
+		go run ./backend/examples/vm_migration_example.go
+
+# ============================================================================
+# Docker & Deployment
+# ============================================================================
+
+docker-build:
+	@echo "Building Docker images..."
+	docker-compose build
+
+docker-test:
+	@echo "Running tests in Docker environment..."
+	docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit
+	docker-compose -f docker-compose.test.yml down
+
+docker-test-env:
+	@echo "Starting Docker test environment..."
+	docker-compose -f docker-compose.test.yml up -d
+
+# ============================================================================
+# Cleanup
+# ============================================================================
+
 clean:
 	@echo "Cleaning build artifacts..."
 	find . -name "*.o" -type f -delete
@@ -28,58 +438,68 @@ clean:
 	find . -name "*.exe" -type f -delete
 	find . -name "*.test" -type f -delete
 	find . -name "*.out" -type f -delete
+	find . -name "*.prof" -type f -delete
 
-# Build Docker images
-docker-build:
-	@echo "Building Docker images..."
-	docker-compose build
+clean-test:
+	@echo "Cleaning test artifacts..."
+	rm -f coverage.out coverage.html
+	rm -f test-results.json
+	rm -f *.prof
+	rm -rf sdk_tests/
 
-# Run the example in Docker
-run-example:
-	@echo "Running VM migration example in Docker..."
-	docker run --rm -v $(PWD):/app -w /app golang:1.19 go run ./backend/examples/vm_migration_example.go
+clean-all:
+	@echo "Cleaning everything..."
+	$(MAKE) clean
+	$(MAKE) clean-test
+	$(MAKE) test-env-down
+	docker system prune -f
 
-# Comprehensive testing targets
-test-all: test-unit test-integration test-benchmarks
-	@echo "All tests completed"
+# ============================================================================
+# Help & Information
+# ============================================================================
 
-test-unit:
-	@echo "Running unit tests..."
-	docker run --rm -v $(PWD):/app -w /app golang:1.19 go test ./backend/core/vm/... -v -run "Test.*Fixed"
+help:
+	@echo "NovaCron Testing Framework"
+	@echo "=========================="
+	@echo ""
+	@echo "Core Commands:"
+	@echo "  build              Build all components"
+	@echo "  test               Run all tests"
+	@echo "  test-env-up        Start test environment"
+	@echo "  test-env-down      Stop test environment"
+	@echo ""
+	@echo "Unit Testing:"
+	@echo "  test-unit          Run unit tests"
+	@echo "  test-unit-coverage Run unit tests with coverage"
+	@echo "  test-unit-race     Run unit tests with race detection"
+	@echo ""
+	@echo "Integration Testing:"
+	@echo "  test-integration   Run integration tests"
+	@echo "  test-multicloud    Run multi-cloud integration tests"
+	@echo "  test-ml            Run AI/ML model tests"
+	@echo "  test-cache         Run Redis cache tests"
+	@echo "  test-sdk           Run cross-language SDK tests"
+	@echo "  test-e2e           Run end-to-end tests"
+	@echo "  test-chaos         Run chaos engineering tests"
+	@echo ""
+	@echo "Performance Testing:"
+	@echo "  test-benchmarks    Run performance benchmarks"
+	@echo "  test-performance   Run comprehensive performance tests"
+	@echo ""
+	@echo "Quality & Security:"
+	@echo "  lint-backend       Lint Go code"
+	@echo "  security-scan      Run security scan"
+	@echo "  vulnerability-check Check for vulnerabilities"
+	@echo ""
+	@echo "CI/CD:"
+	@echo "  ci-test            Run CI test suite"
+	@echo "  ci-test-full       Run full CI test suite"
+	@echo "  ci-quality         Run CI quality checks"
+	@echo ""
+	@echo "Utilities:"
+	@echo "  clean              Clean build artifacts"
+	@echo "  clean-all          Clean everything"
+	@echo "  help               Show this help message"
 
-test-integration:
-	@echo "Running integration tests..."
-	docker run --rm -v $(PWD):/app -w /app \
-		-e DB_URL="postgresql://postgres:postgres@postgres:5432/novacron" \
-		golang:1.19 go test ./backend/tests/integration/... -v
-
-test-benchmarks:
-	@echo "Running performance benchmarks..."
-	docker run --rm -v $(PWD):/app -w /app golang:1.19 go test ./backend/tests/benchmarks/... -bench=. -v
-
-test-coverage:
-	@echo "Generating test coverage report..."
-	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
-		go test ./backend/core/... -coverprofile=coverage.out -covermode=atomic
-	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
-		go tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report generated: coverage.html"
-
-test-race:
-	@echo "Running tests with race detection..."
-	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
-		go test ./backend/core/vm/... -race -v -run "Test.*Fixed"
-
-test-memory:
-	@echo "Running tests with memory profiling..."
-	docker run --rm -v $(PWD):/app -w /app golang:1.19 \
-		go test ./backend/core/vm/... -memprofile=mem.prof -v -run "Test.*Fixed"
-
-lint-backend:
-	@echo "Linting backend code..."
-	docker run --rm -v $(PWD):/app -w /app golangci/golangci-lint:latest golangci-lint run ./backend/...
-
-security-scan:
-	@echo "Running security scan..."
-	docker run --rm -v $(PWD):/app -w /app securecodewarrior/gosec:latest gosec ./backend/...
-
+# Default help if no target specified
+.DEFAULT_GOAL := help

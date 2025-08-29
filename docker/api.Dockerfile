@@ -19,8 +19,8 @@ RUN go mod download
 # Build the API service
 RUN CGO_ENABLED=0 GOOS=linux go build -a -o novacron-api ./backend/cmd/api-server
 
-# Python build stage
-FROM python:3.9-slim AS py-builder
+# Python build stage - Ubuntu 24.04 Python 3.12
+FROM python:3.12-slim AS py-builder
 
 # Set working directory
 WORKDIR /app
@@ -33,16 +33,18 @@ RUN python -m venv /venv && \
     /venv/bin/pip install --no-cache-dir --upgrade pip && \
     /venv/bin/pip install --no-cache-dir -r requirements.txt
 
-# Final stage
-FROM python:3.9-slim
+# Final stage - Ubuntu 24.04 Python 3.12
+FROM python:3.12-slim
 
 # Set working directory
 WORKDIR /app
 
-# Install runtime dependencies
+# Install runtime dependencies for Python 3.12
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     wget \
+    python3.12-dev \
+    python3.12-venv \
     && rm -rf /var/lib/apt/lists/*
 
 # Create novacron user

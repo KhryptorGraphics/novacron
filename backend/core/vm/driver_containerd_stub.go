@@ -17,7 +17,7 @@ func NewContainerdDriver(config map[string]interface{}) (VMDriver, error) {
 	if id, ok := config["node_id"].(string); ok {
 		nodeID = id
 	}
-	
+
 	return &ContainerdDriverStub{
 		nodeID: nodeID,
 	}, nil

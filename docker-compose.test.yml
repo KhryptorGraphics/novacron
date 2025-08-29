@@ -1,0 +1,409 @@
+# Docker Compose configuration for comprehensive testing environment
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Database Services
+  # ============================================================================
+  postgres:
+    image: postgres:13-alpine
+    container_name: novacron-test-postgres
+    environment:
+      POSTGRES_DB: novacron_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./scripts/init-test-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # Redis Cache Cluster for Testing
+  # ============================================================================
+  redis-master:
+    image: redis:7-alpine
+    container_name: novacron-test-redis-master
+    command: redis-server --port 6379 --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_master_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  redis-replica-1:
+    image: redis:7-alpine
+    container_name: novacron-test-redis-replica-1
+    command: redis-server --port 6379 --replicaof redis-master 6379 --appendonly yes
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_replica1_data:/data
+    depends_on:
+      - redis-master
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  redis-replica-2:
+    image: redis:7-alpine
+    container_name: novacron-test-redis-replica-2
+    command: redis-server --port 6379 --replicaof redis-master 6379 --appendonly yes
+    ports:
+      - "6381:6379"
+    volumes:
+      - redis_replica2_data:/data
+    depends_on:
+      - redis-master
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ============================================================================
+  # Message Queue for Testing
+  # ============================================================================
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: novacron-test-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: novacron
+      RABBITMQ_DEFAULT_PASS: novacron123
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ============================================================================
+  # Monitoring Stack for Testing
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: novacron-test-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus-test.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - redis-master
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: novacron-test-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_INSTALL_PLUGINS=redis-datasource
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================================================
+  # NovaCron Application Services for Testing
+  # ============================================================================
+  api-server:
+    build:
+      context: .
+      dockerfile: docker/api-server.Dockerfile
+    container_name: novacron-test-api-server
+    environment:
+      - DB_URL=postgresql://postgres:postgres@postgres:5432/novacron_test?sslmode=disable
+      - REDIS_URL=redis://redis-master:6379
+      - API_PORT=8090
+      - WEBSOCKET_PORT=8091
+      - AUTH_SECRET=test-auth-secret-key-for-testing
+      - LOG_LEVEL=debug
+      - METRICS_ENABLED=true
+      - PROMETHEUS_PORT=9100
+      - TEST_MODE=true
+    ports:
+      - "8090:8090"
+      - "8091:8091"
+      - "9100:9100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    volumes:
+      - ./backend:/app
+      - api_logs:/var/log/novacron
+
+  hypervisor-service:
+    build:
+      context: .
+      dockerfile: docker/hypervisor.Dockerfile
+    container_name: novacron-test-hypervisor
+    environment:
+      - API_URL=http://api-server:8090
+      - REDIS_URL=redis://redis-master:6379
+      - HYPERVISOR_PORT=9000
+      - NODE_ID=test-node-1
+      - TEST_MODE=true
+      - MOCK_LIBVIRT=true
+    ports:
+      - "9000:9000"
+    depends_on:
+      api-server:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - hypervisor_data:/var/lib/novacron
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: novacron-test-frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8090
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8091
+      - NODE_ENV=test
+    ports:
+      - "8092:3000"
+    depends_on:
+      - api-server
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================================================
+  # Testing Utilities
+  # ============================================================================
+  test-runner:
+    build:
+      context: .
+      dockerfile: docker/test-runner.Dockerfile
+    container_name: novacron-test-runner
+    environment:
+      - DB_URL=postgresql://postgres:postgres@postgres:5432/novacron_test?sslmode=disable
+      - REDIS_URL=redis://redis-master:6379
+      - API_URL=http://api-server:8090
+      - UI_URL=http://frontend:3000
+      - TEST_TIMEOUT=30m
+      - GO_TEST_FLAGS=-v -race
+    volumes:
+      - ./backend:/app
+      - ./test-results:/test-results
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+      api-server:
+        condition: service_healthy
+    profiles:
+      - testing
+
+  chaos-engineering:
+    build:
+      context: .
+      dockerfile: docker/chaos.Dockerfile
+    container_name: novacron-chaos-engineer
+    privileged: true
+    environment:
+      - TARGET_SERVICES=redis-master,api-server,hypervisor-service
+      - CHAOS_DURATION=5m
+      - RECOVERY_TIMEOUT=2m
+    volumes:
+      - ./backend/tests/chaos:/chaos-tests
+      - ./chaos-results:/results
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - redis-master
+      - api-server
+      - hypervisor-service
+    profiles:
+      - chaos
+
+  load-tester:
+    image: grafana/k6:latest
+    container_name: novacron-load-tester
+    environment:
+      - API_URL=http://api-server:8090
+      - VUS=10
+      - DURATION=5m
+    volumes:
+      - ./tests/load:/scripts
+      - ./load-test-results:/results
+    depends_on:
+      - api-server
+    profiles:
+      - load-testing
+
+  # ============================================================================
+  # Security Testing
+  # ============================================================================
+  security-scanner:
+    image: owasp/zap2docker-stable:latest
+    container_name: novacron-security-scanner
+    command: zap-baseline.py -t http://api-server:8090 -J zap-report.json
+    volumes:
+      - ./security-results:/zap/wrk
+    depends_on:
+      - api-server
+    profiles:
+      - security
+
+  # ============================================================================
+  # Mock External Services for Testing
+  # ============================================================================
+  mock-aws-service:
+    image: localstack/localstack:latest
+    container_name: novacron-mock-aws
+    environment:
+      - SERVICES=ec2,s3,iam
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack_data:/tmp/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    profiles:
+      - multicloud
+
+  mock-cloud-metadata:
+    image: nginx:alpine
+    container_name: novacron-mock-metadata
+    volumes:
+      - ./tests/mocks/cloud-metadata:/usr/share/nginx/html:ro
+    ports:
+      - "8080:80"
+    profiles:
+      - multicloud
+
+  # ============================================================================
+  # ML Model Testing Environment
+  # ============================================================================
+  ml-test-environment:
+    build:
+      context: .
+      dockerfile: docker/ml-testing.Dockerfile
+    container_name: novacron-ml-tester
+    environment:
+      - MODEL_PATH=/models
+      - TEST_DATA_PATH=/test-data
+      - PYTHON_PATH=/app
+    volumes:
+      - ./models:/models:ro
+      - ./test-data/ml:/test-data:ro
+      - ./backend/tests/ml:/app
+      - ./ml-test-results:/results
+    profiles:
+      - ml-testing
+
+  # ============================================================================
+  # Network Testing & Simulation
+  # ============================================================================
+  network-simulator:
+    image: nicolaka/netshoot:latest
+    container_name: novacron-network-simulator
+    privileged: true
+    command: sleep infinity
+    volumes:
+      - ./tests/network:/scripts
+    profiles:
+      - network-testing
+
+# ============================================================================
+# Named Volumes
+# ============================================================================
+volumes:
+  postgres_test_data:
+    driver: local
+  redis_master_data:
+    driver: local
+  redis_replica1_data:
+    driver: local
+  redis_replica2_data:
+    driver: local
+  rabbitmq_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  api_logs:
+    driver: local
+  hypervisor_data:
+    driver: local
+  localstack_data:
+    driver: local
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  default:
+    name: novacron-test-network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ============================================================================
+# Profiles for Different Testing Scenarios
+# ============================================================================
+# Usage Examples:
+# docker-compose -f docker-compose.test.yml --profile testing up -d
+# docker-compose -f docker-compose.test.yml --profile chaos up chaos-engineering
+# docker-compose -f docker-compose.test.yml --profile load-testing up load-tester
+# docker-compose -f docker-compose.test.yml --profile security up security-scanner
+# docker-compose -f docker-compose.test.yml --profile multicloud up mock-aws-service
+# docker-compose -f docker-compose.test.yml --profile ml-testing up ml-test-environment

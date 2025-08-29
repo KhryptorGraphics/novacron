@@ -1,0 +1,455 @@
+version: '3.8'
+
+services:
+  # Redis Master
+  redis-master:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 6379
+      --bind 0.0.0.0
+      --protected-mode no
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --appendonly yes
+      --appendfsync everysec
+      --auto-aof-rewrite-percentage 100
+      --auto-aof-rewrite-min-size 64mb
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_master_data:/data
+      - ./configs/redis/redis-master.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - novacron-cache-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+  # Redis Slave 1
+  redis-slave-1:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 6380
+      --bind 0.0.0.0
+      --protected-mode no
+      --replicaof redis-master 6379
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly yes
+      --appendfsync everysec
+    ports:
+      - "6380:6380"
+    volumes:
+      - redis_slave_1_data:/data
+    networks:
+      - novacron-cache-network
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6380", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+  # Redis Slave 2
+  redis-slave-2:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 6381
+      --bind 0.0.0.0
+      --protected-mode no
+      --replicaof redis-master 6379
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly yes
+      --appendfsync everysec
+    ports:
+      - "6381:6381"
+    volumes:
+      - redis_slave_2_data:/data
+    networks:
+      - novacron-cache-network
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6381", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+  # Redis Sentinel 1
+  redis-sentinel-1:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    ports:
+      - "26379:26379"
+    volumes:
+      - ./configs/redis/sentinel-1.conf:/usr/local/etc/redis/sentinel.conf
+      - redis_sentinel_1_data:/data
+    networks:
+      - novacron-cache-network
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+
+  # Redis Sentinel 2
+  redis-sentinel-2:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    ports:
+      - "26380:26379"
+    volumes:
+      - ./configs/redis/sentinel-2.conf:/usr/local/etc/redis/sentinel.conf
+      - redis_sentinel_2_data:/data
+    networks:
+      - novacron-cache-network
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+
+  # Redis Sentinel 3
+  redis-sentinel-3:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    ports:
+      - "26381:26379"
+    volumes:
+      - ./configs/redis/sentinel-3.conf:/usr/local/etc/redis/sentinel.conf
+      - redis_sentinel_3_data:/data
+    networks:
+      - novacron-cache-network
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+
+  # Redis Cluster Node 1 (Alternative to Sentinel setup)
+  redis-cluster-1:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 7001
+      --cluster-enabled yes
+      --cluster-config-file nodes-7001.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "7001:7001"
+      - "17001:17001"  # Cluster bus port
+    volumes:
+      - redis_cluster_1_data:/data
+    networks:
+      - novacron-cache-network
+    profiles:
+      - cluster  # Only start with --profile cluster
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+  # Redis Cluster Node 2
+  redis-cluster-2:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 7002
+      --cluster-enabled yes
+      --cluster-config-file nodes-7002.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "7002:7002"
+      - "17002:17002"
+    volumes:
+      - redis_cluster_2_data:/data
+    networks:
+      - novacron-cache-network
+    profiles:
+      - cluster
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+  # Redis Cluster Node 3
+  redis-cluster-3:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 7003
+      --cluster-enabled yes
+      --cluster-config-file nodes-7003.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "7003:7003"
+      - "17003:17003"
+    volumes:
+      - redis_cluster_3_data:/data
+    networks:
+      - novacron-cache-network
+    profiles:
+      - cluster
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+  # Redis Cluster Node 4 (Replica for Node 1)
+  redis-cluster-4:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 7004
+      --cluster-enabled yes
+      --cluster-config-file nodes-7004.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "7004:7004"
+      - "17004:17004"
+    volumes:
+      - redis_cluster_4_data:/data
+    networks:
+      - novacron-cache-network
+    profiles:
+      - cluster
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+  # Redis Cluster Node 5 (Replica for Node 2)
+  redis-cluster-5:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 7005
+      --cluster-enabled yes
+      --cluster-config-file nodes-7005.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "7005:7005"
+      - "17005:17005"
+    volumes:
+      - redis_cluster_5_data:/data
+    networks:
+      - novacron-cache-network
+    profiles:
+      - cluster
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+  # Redis Cluster Node 6 (Replica for Node 3)
+  redis-cluster-6:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 7006
+      --cluster-enabled yes
+      --cluster-config-file nodes-7006.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "7006:7006"
+      - "17006:17006"
+    volumes:
+      - redis_cluster_6_data:/data
+    networks:
+      - novacron-cache-network
+    profiles:
+      - cluster
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+
+  # Redis Cluster Initializer (runs once to create cluster)
+  redis-cluster-init:
+    image: redis:7-alpine
+    networks:
+      - novacron-cache-network
+    profiles:
+      - cluster
+    depends_on:
+      - redis-cluster-1
+      - redis-cluster-2
+      - redis-cluster-3
+      - redis-cluster-4
+      - redis-cluster-5
+      - redis-cluster-6
+    command: >
+      sh -c "
+        sleep 30 &&
+        redis-cli --cluster create
+        redis-cluster-1:7001
+        redis-cluster-2:7002
+        redis-cluster-3:7003
+        redis-cluster-4:7004
+        redis-cluster-5:7005
+        redis-cluster-6:7006
+        --cluster-replicas 1
+        --cluster-yes
+      "
+    restart: "no"
+
+  # Redis Commander (Web UI for Redis management)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: |
+        master:redis-master:6379:0,
+        slave1:redis-slave-1:6380:0,
+        slave2:redis-slave-2:6381:0
+      REDIS_PASSWORD: ""
+      HTTP_USER: admin
+      HTTP_PASSWORD: ${REDIS_COMMANDER_PASSWORD:-admin}
+    ports:
+      - "8081:8081"
+    networks:
+      - novacron-cache-network
+    depends_on:
+      - redis-master
+      - redis-slave-1
+      - redis-slave-2
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
+  # Cache Monitoring and Metrics
+  cache-monitor:
+    build:
+      context: .
+      dockerfile: docker/cache-monitor.Dockerfile
+    image: novacron/cache-monitor:latest
+    restart: unless-stopped
+    environment:
+      REDIS_MASTER_ADDR: redis-master:6379
+      REDIS_SLAVE_ADDRS: redis-slave-1:6380,redis-slave-2:6381
+      SENTINEL_ADDRS: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
+      SENTINEL_MASTER_NAME: mymaster
+      METRICS_PORT: 9091
+      LOG_LEVEL: info
+    ports:
+      - "9091:9091"  # Metrics endpoint
+    networks:
+      - novacron-cache-network
+    depends_on:
+      - redis-master
+      - redis-sentinel-1
+      - redis-sentinel-2
+      - redis-sentinel-3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
+networks:
+  novacron-cache-network:
+    driver: bridge
+    name: novacron-cache
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  redis_master_data:
+  redis_slave_1_data:
+  redis_slave_2_data:
+  redis_sentinel_1_data:
+  redis_sentinel_2_data:
+  redis_sentinel_3_data:
+  redis_cluster_1_data:
+  redis_cluster_2_data:
+  redis_cluster_3_data:
+  redis_cluster_4_data:
+  redis_cluster_5_data:
+  redis_cluster_6_data:

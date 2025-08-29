@@ -224,7 +224,7 @@ func TestVMEventSystem(t *testing.T) {
 func TestDefaultConfigurations(t *testing.T) {
 	// Test default VM manager config
 	config := DefaultVMManagerConfig()
-	
+
 	if config.UpdateInterval <= 0 {
 		t.Error("Default update interval should be positive")
 	}

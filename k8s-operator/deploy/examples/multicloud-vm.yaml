@@ -1,0 +1,65 @@
+apiVersion: novacron.io/v1
+kind: MultiCloudVM
+metadata:
+  name: web-server-multicloud
+  namespace: default
+spec:
+  deploymentStrategy:
+    type: "active-passive"
+    primary: "aws-us-east"
+    secondary: ["azure-eastus", "gcp-us-central"]
+    failoverTriggers:
+    - type: "availability"
+      threshold: "95%"
+      duration: "5m"
+    - type: "performance"
+      threshold: "cpu:80%"
+      duration: "10m"
+  
+  providers:
+  - name: "aws-us-east"
+    region: "us-east-1"
+    credentialsSecret: "aws-credentials"
+    costTier: "standard"
+    availabilityZones: ["us-east-1a", "us-east-1b"]
+  
+  - name: "azure-eastus"
+    region: "eastus"
+    credentialsSecret: "azure-credentials"
+    costTier: "standard"
+  
+  - name: "gcp-us-central"
+    region: "us-central1"
+    credentialsSecret: "gcp-credentials"
+    costTier: "standard"
+  
+  vmTemplate:
+    name: "web-server-template"
+    namespace: "default"
+  
+  costOptimization:
+    useSpotInstances: true
+    maxCostPerHour: "0.50"
+    costBasedScaling: true
+    costAlerts:
+    - threshold: "10.00"
+      type: "daily"
+      frequency: "24h"
+      destination: "alerts@company.com"
+  
+  disasterRecovery:
+    enabled: true
+    rto: "15m"
+    rpo: "1h"
+    backupStrategy:
+      type: "incremental"
+      schedule: "0 */6 * * *"
+      retention: "7d"
+  
+  migrationPolicy:
+    type: "warm"
+    triggers:
+    - type: "cost"
+      threshold: "25%"
+    - type: "performance"
+      threshold: "cpu:90%"

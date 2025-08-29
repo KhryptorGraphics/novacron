@@ -1,3 +1,4 @@
+# NovaCron Docker Compose - Ubuntu 24.04 with Python 3.12 support
 version: '3.8'
 
 services:
@@ -48,6 +49,68 @@ services:
           cpus: '4'
           memory: 8G
 
+  # Redis Master for caching and AI Engine
+  redis-master:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --port 6379
+      --bind 0.0.0.0
+      --protected-mode no
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - novacron-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
+
+  # AI Engine service (Python 3.12)
+  ai-engine:
+    build:
+      context: .
+      dockerfile: ai-engine/Dockerfile
+    image: novacron/ai-engine:latest
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: info
+      PYTHON_VERSION: 3.12
+      REDIS_URL: redis://redis-master:6379
+      MODEL_PATH: /var/lib/novacron/ai-models
+    ports:
+      - "8093:8093"
+    volumes:
+      - ai_models:/var/lib/novacron/ai-models
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    networks:
+      - novacron-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8093/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+
   # API service
   api:
     build:
@@ -61,11 +124,22 @@ services:
       DB_URL: postgresql://postgres:postgres@postgres:5432/novacron
       AUTH_SECRET: ${AUTH_SECRET:-changeme_in_production}
       HYPERVISOR_ADDRS: hypervisor:9000
+      # Cache configuration
+      REDIS_ADDR: redis-master:6379
+      CACHE_ENABLED: true
+      CACHE_L1_ENABLED: true
+      CACHE_L2_ENABLED: true
+      CACHE_L3_ENABLED: false
+      CACHE_DEFAULT_TTL: 15m
+      CACHE_VM_STATE_TTL: 30s
+      CACHE_VM_METRICS_TTL: 15s
     ports:
       - "8090:8090"  # REST API
       - "8091:8091"  # WebSocket API
     depends_on:
       postgres:
+        condition: service_healthy
+      redis-master:
         condition: service_healthy
     networks:
       - novacron-network
@@ -133,3 +207,5 @@ volumes:
   hypervisor_data:
   prometheus_data:
   grafana_data:
+  redis_data:
+  ai_models:  # AI engine models storage

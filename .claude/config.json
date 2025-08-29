@@ -1,0 +1,77 @@
+{
+  "project": "NovaCron",
+  "description": "Distributed VM Management System with Advanced Migration Capabilities",
+  "version": "1.0.0",
+  "agents": {
+    "vm-manager": {
+      "description": "VM lifecycle management and operations",
+      "capabilities": ["create", "start", "stop", "migrate", "snapshot"],
+      "priority": "high"
+    },
+    "migration-coordinator": {
+      "description": "Handles VM migration strategies and WAN optimization",
+      "capabilities": ["cold-migration", "warm-migration", "live-migration", "wan-optimization"],
+      "priority": "high"
+    },
+    "container-orchestrator": {
+      "description": "Container management and Kubernetes integration",
+      "capabilities": ["deploy", "scale", "monitor", "rollback"],
+      "priority": "medium"
+    },
+    "cluster-manager": {
+      "description": "Distributed cluster coordination and node management",
+      "capabilities": ["node-discovery", "health-check", "load-balancing", "failover"],
+      "priority": "high"
+    },
+    "storage-optimizer": {
+      "description": "Storage management with compression and deduplication",
+      "capabilities": ["allocate", "compress", "deduplicate", "encrypt", "snapshot"],
+      "priority": "medium"
+    },
+    "network-controller": {
+      "description": "Overlay networking and protocol handling",
+      "capabilities": ["vxlan", "routing", "security-groups", "load-balancing"],
+      "priority": "medium"
+    },
+    "scheduler": {
+      "description": "Resource-aware and network-aware scheduling",
+      "capabilities": ["policy-engine", "constraint-solver", "resource-allocation", "affinity-rules"],
+      "priority": "high"
+    },
+    "monitoring-analyst": {
+      "description": "Telemetry collection and performance analysis",
+      "capabilities": ["metrics", "logs", "traces", "alerts", "dashboards"],
+      "priority": "medium"
+    },
+    "security-guardian": {
+      "description": "Security, authentication, and compliance",
+      "capabilities": ["rbac", "jwt", "audit", "compliance", "vulnerability-scanning"],
+      "priority": "high"
+    },
+    "devops-automator": {
+      "description": "CI/CD, deployment, and infrastructure automation",
+      "capabilities": ["build", "test", "deploy", "rollback", "infrastructure-as-code"],
+      "priority": "medium"
+    }
+  },
+  "integrations": {
+    "prometheus": true,
+    "grafana": true,
+    "postgresql": true,
+    "docker": true,
+    "kubernetes": false,
+    "libvirt": true
+  },
+  "environments": {
+    "development": {
+      "api_url": "http://localhost:8090",
+      "ws_url": "ws://localhost:8091",
+      "frontend_url": "http://localhost:8092"
+    },
+    "production": {
+      "api_url": "${API_URL}",
+      "ws_url": "${WS_URL}",
+      "frontend_url": "${FRONTEND_URL}"
+    }
+  }
+}

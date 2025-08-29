@@ -1,0 +1,94 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: novacron-operator
+  namespace: novacron-system
+  labels:
+    app: novacron-operator
+    component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: novacron-operator
+      component: metrics
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    scheme: http
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: novacron-operator-alerts
+  namespace: novacron-system
+  labels:
+    app: novacron-operator
+    component: monitoring
+spec:
+  groups:
+  - name: novacron-operator
+    rules:
+    - alert: NovaCronOperatorDown
+      expr: up{job="novacron-operator"} == 0
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "NovaCron Operator is down"
+        description: "NovaCron Operator has been down for more than 1 minute"
+    
+    - alert: NovaCronOperatorHighMemory
+      expr: container_memory_usage_bytes{pod=~"novacron-operator-.*"} / container_spec_memory_limit_bytes > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "NovaCron Operator high memory usage"
+        description: "NovaCron Operator memory usage is above 80% for 5 minutes"
+    
+    - alert: NovaCronOperatorHighCPU
+      expr: rate(container_cpu_usage_seconds_total{pod=~"novacron-operator-.*"}[5m]) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "NovaCron Operator high CPU usage"
+        description: "NovaCron Operator CPU usage is above 80% for 5 minutes"
+    
+    - alert: NovaCronVMCreationFailed
+      expr: increase(novacron_vm_creation_failures_total[5m]) > 3
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "High VM creation failure rate"
+        description: "More than 3 VM creation failures in the last 5 minutes"
+    
+    - alert: NovaCronMultiCloudVMFailure
+      expr: novacron_multicloud_vm_failed_deployments > 0
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "MultiCloud VM deployment failure"
+        description: "{{ $value }} MultiCloud VM deployments have failed"
+    
+    - alert: NovaCronAISchedulingAccuracyLow
+      expr: novacron_ai_scheduling_accuracy < 0.7
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "AI Scheduling accuracy is low"
+        description: "AI Scheduling accuracy is {{ $value | humanizePercentage }} which is below 70%"
+    
+    - alert: NovaCronCacheHitRateLow
+      expr: novacron_cache_hit_rate < 0.5
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Cache hit rate is low"
+        description: "Cache hit rate is {{ $value | humanizePercentage }} which is below 50%"

@@ -1,0 +1,157 @@
+# NovaCron LLM Engine AppArmor Profile
+# Ubuntu 24.04 LTS GPU and AI Workload Security
+#include <tunables/global>
+
+/opt/novacron/bin/novacron-llm-engine {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/python>
+  #include <abstractions/nvidia>
+  #include <abstractions/openssl>
+
+  capability sys_resource,
+  capability ipc_lock,
+  capability sys_nice,
+  
+  # Binary execution
+  /opt/novacron/bin/novacron-llm-engine mr,
+  /opt/novacron/bin/validate-gpu-resources rix,
+  /opt/novacron/bin/download-models-if-needed rix,
+  /opt/novacron/bin/cleanup-llm-shards rix,
+  
+  # GPU device access (NVIDIA)
+  /dev/nvidia* rw,
+  /dev/nvidiactl rw,
+  /dev/nvidia-modeset rw,
+  /dev/nvidia-uvm rw,
+  /dev/nvidia-uvm-tools rw,
+  /proc/driver/nvidia/** rw,
+  /proc/modules r,
+  
+  # GPU device access (AMD ROCm)
+  /dev/dri/** rw,
+  /dev/kfd rw,
+  /sys/class/drm/** r,
+  /sys/kernel/debug/dri/** r,
+  
+  # Intel GPU access
+  /dev/dri/renderD* rw,
+  /sys/class/drm/card*/device/** r,
+  
+  # Model storage and caching
+  /var/lib/novacron/models/** r,
+  /var/cache/huggingface/** rwk,
+  /var/cache/transformers/** rwk,
+  /var/cache/torch/** rwk,
+  /var/cache/pip/** rwk,
+  
+  # Shared memory for model sharding (405B parameter support)
+  /dev/shm/novacron-** rwk,
+  /dev/shm/torch_** rwk,
+  /dev/shm/transformers_** rwk,
+  /tmp/torch_** rwk,
+  /tmp/pytorch_** rwk,
+  /tmp/tensorflow_** rwk,
+  
+  # Configuration access
+  /etc/novacron/llm.conf r,
+  /opt/novacron/config/llm/** r,
+  
+  # Python runtime and libraries
+  /usr/bin/python3.* ix,
+  /usr/lib/python3.*/** mr,
+  /usr/local/lib/python3.*/** mr,
+  /opt/conda/** mr,
+  /opt/miniconda3/** mr,
+  
+  # CUDA libraries and runtime
+  /usr/local/cuda/** mr,
+  /usr/lib/x86_64-linux-gnu/libcuda* mr,
+  /usr/lib/x86_64-linux-gnu/libnvidia-* mr,
+  /usr/lib/x86_64-linux-gnu/libcudnn* mr,
+  /usr/lib/x86_64-linux-gnu/libcublas* mr,
+  /usr/lib/x86_64-linux-gnu/libcufft* mr,
+  /usr/lib/x86_64-linux-gnu/libcurand* mr,
+  /usr/lib/x86_64-linux-gnu/libcusparse* mr,
+  /usr/lib/x86_64-linux-gnu/libcusolver* mr,
+  
+  # ROCm libraries
+  /opt/rocm/** mr,
+  /usr/lib/x86_64-linux-gnu/librocm* mr,
+  /usr/lib/x86_64-linux-gnu/libhip* mr,
+  
+  # PyTorch and TensorFlow
+  /opt/pytorch/** mr,
+  /opt/tensorflow/** mr,
+  /usr/lib/python3.*/dist-packages/torch/** mr,
+  /usr/lib/python3.*/dist-packages/tensorflow/** mr,
+  /usr/local/lib/python3.*/site-packages/torch/** mr,
+  /usr/local/lib/python3.*/site-packages/tensorflow/** mr,
+  
+  # Hugging Face libraries
+  /usr/local/lib/python3.*/site-packages/transformers/** mr,
+  /usr/local/lib/python3.*/site-packages/tokenizers/** mr,
+  /usr/local/lib/python3.*/site-packages/datasets/** mr,
+  
+  # Network access for model downloads
+  network tcp,
+  network udp,
+  
+  # Logging
+  /var/log/novacron/llm.log w,
+  /var/log/novacron/llm.log.* w,
+  
+  # Systemd integration
+  /run/systemd/notify w,
+  
+  # Process and GPU monitoring
+  /proc/*/stat r,
+  /proc/*/status r,
+  /proc/*/cmdline r,
+  /proc/meminfo r,
+  /proc/cpuinfo r,
+  /sys/class/hwmon/** r,
+  /sys/devices/pci**/hwmon/** r,
+  
+  # Memory mapping for large models (405B parameters)
+  /proc/*/maps r,
+  /proc/*/smaps r,
+  /proc/sys/vm/max_map_count r,
+  /proc/sys/kernel/shm* rw,
+  
+  # Inter-process communication for model sharding
+  /tmp/multiprocessing-** rwk,
+  /var/tmp/multiprocessing-** rwk,
+  
+  # Dynamic libraries
+  /lib/x86_64-linux-gnu/** mr,
+  /usr/lib/x86_64-linux-gnu/** mr,
+  
+  # Environment and locale
+  /usr/share/locale/** r,
+  /usr/lib/locale/** r,
+  /usr/lib/x86_64-linux-gnu/gconv/** mr,
+  
+  # Deny access to sensitive system areas
+  deny /etc/shadow r,
+  deny /etc/gshadow r,
+  deny /home/** rwklx,
+  deny /root/** rwklx,
+  deny /boot/** rwklx,
+  
+  # Deny access to other service data
+  deny /var/lib/postgresql/** rwklx,
+  deny /var/lib/libvirt/** rwklx,
+  
+  # Signal handling for model management
+  signal send set=(term, kill, usr1, usr2, hup),
+  signal receive set=(term, kill, usr1, usr2, hup),
+  
+  # Child processes for distributed inference
+  /usr/bin/python3.* Px,
+  /opt/novacron/bin/llm-worker Px,
+  
+  # Model quantization tools
+  /usr/local/bin/quantize-model Px,
+  /opt/nvml/** mr,
+}

@@ -30,7 +30,7 @@ func TestVMMaintenanceCompilation(t *testing.T) {
 
 	// This test primarily verifies that the maintenance code compiles
 	// by creating a VM manager that uses the fixed maintenance methods
-	
+
 	// Create a test VM
 	vmConfig := VMConfig{
 		ID:        "maintenance-test-vm",
@@ -157,7 +157,7 @@ func TestVMRecoveryScenario(t *testing.T) {
 		}
 
 		if vm.GetState() != vmConfig.state {
-			t.Errorf("VM %s should be in state %s, got %s", 
+			t.Errorf("VM %s should be in state %s, got %s",
 				vmConfig.config.ID, vmConfig.state, vm.GetState())
 		}
 	}
@@ -225,10 +225,10 @@ func TestVMStateTransitionsInMaintenance(t *testing.T) {
 	for _, transition := range testTransitions {
 		// Set initial state
 		vm.SetState(transition.fromState)
-		
+
 		// Verify initial state
 		if vm.GetState() != transition.fromState {
-			t.Errorf("Failed to set initial state %s for transition: %s", 
+			t.Errorf("Failed to set initial state %s for transition: %s",
 				transition.fromState, transition.desc)
 			continue
 		}
@@ -242,7 +242,7 @@ func TestVMStateTransitionsInMaintenance(t *testing.T) {
 
 		// Verify final state
 		if vm.GetState() != transition.toState {
-			t.Errorf("Transition failed %s: expected %s, got %s", 
+			t.Errorf("Transition failed %s: expected %s, got %s",
 				transition.desc, transition.toState, vm.GetState())
 		}
 
@@ -309,7 +309,7 @@ func TestVMManagerConcurrentMaintenance(t *testing.T) {
 		go func(vmIndex int, testVM *VM) {
 			// Simulate maintenance operations
 			states := []State{StateRunning, StateFailed, StateRunning, StatePaused, StateRunning}
-			
+
 			for _, state := range states {
 				testVM.SetState(state)
 				time.Sleep(10 * time.Millisecond)
@@ -317,7 +317,7 @@ func TestVMManagerConcurrentMaintenance(t *testing.T) {
 
 			// Verify final state
 			if testVM.GetState() != StateRunning {
-				t.Errorf("VM %d should end in running state, got %s", 
+				t.Errorf("VM %d should end in running state, got %s",
 					vmIndex, testVM.GetState())
 			}
 
@@ -380,7 +380,7 @@ func TestMaintenanceResourceChecking(t *testing.T) {
 
 	// Create test VMs in different states
 	vmStates := []State{StateRunning, StateFailed, StateDeleting, StatePaused}
-	
+
 	for i, state := range vmStates {
 		vmConfig := VMConfig{
 			ID:        fmt.Sprintf("resource-check-vm-%d", i),

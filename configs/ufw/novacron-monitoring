@@ -1,0 +1,27 @@
+# UFW Application Profile for NovaCron Monitoring Stack
+# This profile secures monitoring and observability endpoints
+
+[NovaCron Prometheus]
+title=NovaCron Prometheus Metrics
+description=Prometheus metrics collection endpoint
+ports=9090/tcp
+
+[NovaCron Grafana]
+title=NovaCron Grafana Dashboard
+description=Monitoring dashboards and visualization
+ports=3001/tcp
+
+[NovaCron Redis]
+title=NovaCron Redis Cache
+description=Redis caching and AI engine backend
+ports=6379/tcp
+
+[NovaCron Node Exporter]
+title=NovaCron Node Exporter
+description=System metrics collection for monitoring
+ports=9100/tcp
+
+[NovaCron Alert Manager]
+title=NovaCron Alert Manager
+description=Alert routing and notification management
+ports=9093/tcp

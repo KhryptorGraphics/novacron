@@ -1,0 +1,64 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: novacron-operator-role
+rules:
+# Core NovaCron resources
+- apiGroups: ["novacron.io"]
+  resources: ["virtualmachines", "vmtemplates", "vmclusters"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["novacron.io"]
+  resources: ["virtualmachines/status", "vmtemplates/status", "vmclusters/status"]
+  verbs: ["get", "update", "patch"]
+- apiGroups: ["novacron.io"]
+  resources: ["virtualmachines/finalizers", "vmtemplates/finalizers", "vmclusters/finalizers"]
+  verbs: ["update"]
+
+# Enhanced multi-cloud resources
+- apiGroups: ["novacron.io"]
+  resources: ["multicloudvms", "federatedclusters"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["novacron.io"]
+  resources: ["multicloudvms/status", "federatedclusters/status"]
+  verbs: ["get", "update", "patch"]
+- apiGroups: ["novacron.io"]
+  resources: ["multicloudvms/finalizers", "federatedclusters/finalizers"]
+  verbs: ["update"]
+
+# AI and cache resources
+- apiGroups: ["novacron.io"]
+  resources: ["aischedulingpolicies", "cacheintegrations"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["novacron.io"]
+  resources: ["aischedulingpolicies/status", "cacheintegrations/status"]
+  verbs: ["get", "update", "patch"]
+- apiGroups: ["novacron.io"]
+  resources: ["aischedulingpolicies/finalizers", "cacheintegrations/finalizers"]
+  verbs: ["update"]
+
+# Core Kubernetes resources
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+
+# Extensions for monitoring and metrics
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["nodes", "pods"]
+  verbs: ["get", "list"]
+
+# Coordination for leader election
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

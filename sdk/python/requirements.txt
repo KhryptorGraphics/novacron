@@ -1,0 +1,14 @@
+# Core dependencies
+aiohttp>=3.8.0
+websockets>=10.0
+asyncio-throttle>=1.0.1
+
+# Date and time handling  
+python-dateutil>=2.8.0
+
+# Data validation and serialization
+pydantic>=1.9.0
+
+# Optional dependencies for enhanced functionality
+requests>=2.28.0  # For sync client fallback
+urllib3>=1.26.0   # HTTP client utilities

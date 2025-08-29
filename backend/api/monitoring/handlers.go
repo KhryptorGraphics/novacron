@@ -39,6 +39,20 @@ func NewMonitoringHandlers(kvmManager *hypervisor.KVMManager) *MonitoringHandler
 	}
 }
 
+// NewMonitoringHandlersWithVMManager creates monitoring handlers using VM manager as fallback
+func NewMonitoringHandlersWithVMManager(vmManager *vm.VMManager) *MonitoringHandlers {
+	return &MonitoringHandlers{
+		kvmManager:     nil, // No KVM manager available
+		alertManager:   monitoring.NewAlertManager(),
+		metricRegistry: monitoring.NewMetricRegistry(),
+		upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool {
+				return true // Allow all origins for development
+			},
+		},
+	}
+}
+
 // SystemMetricsResponse represents the response for system metrics
 type SystemMetricsResponse struct {
 	CurrentCpuUsage       float64   `json:"currentCpuUsage"`

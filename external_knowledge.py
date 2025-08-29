@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.12
 """
 External knowledge integration for the NovaCron Code Memory system.
 This module provides connectors to various external knowledge sources like

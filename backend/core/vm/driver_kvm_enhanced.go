@@ -25,17 +25,17 @@ type KVMDriverEnhanced struct {
 
 // KVMVMInfo stores information about a KVM VM
 type KVMVMInfo struct {
-	ID           string
-	Config       VMConfig
-	Process      *os.Process
-	PID          int
-	State        State
-	DiskPath     string
-	ConfigPath   string
-	MonitorPath  string
-	VNCPort      int
-	StartTime    time.Time
-	StoppedTime  *time.Time
+	ID          string
+	Config      VMConfig
+	Process     *os.Process
+	PID         int
+	State       State
+	DiskPath    string
+	ConfigPath  string
+	MonitorPath string
+	VNCPort     int
+	StartTime   time.Time
+	StoppedTime *time.Time
 }
 
 // NewKVMDriver creates a new KVM driver (main entry point)
@@ -44,7 +44,7 @@ func NewKVMDriver(config map[string]interface{}) (VMDriver, error) {
 	if path, ok := config["qemu_path"].(string); ok {
 		qemuPath = path
 	}
-	
+
 	return NewKVMDriverEnhanced(qemuPath)
 }
 
@@ -274,18 +274,18 @@ func (d *KVMDriverEnhanced) GetInfo(ctx context.Context, vmID string) (*VMInfo, 
 	}
 
 	info := &VMInfo{
-		ID:          vmInfo.ID,
-		Name:        vmInfo.Config.Name,
-		State:       vmInfo.State,
-		PID:         vmInfo.PID,
-		CPUShares:   vmInfo.Config.CPUShares,
-		MemoryMB:    vmInfo.Config.MemoryMB,
-		CreatedAt:   vmInfo.StartTime,
-		StartedAt:   &vmInfo.StartTime,
-		StoppedAt:   vmInfo.StoppedTime,
-		Tags:        vmInfo.Config.Tags,
-		NetworkID:   vmInfo.Config.NetworkID,
-		RootFS:      vmInfo.DiskPath,
+		ID:        vmInfo.ID,
+		Name:      vmInfo.Config.Name,
+		State:     vmInfo.State,
+		PID:       vmInfo.PID,
+		CPUShares: vmInfo.Config.CPUShares,
+		MemoryMB:  vmInfo.Config.MemoryMB,
+		CreatedAt: vmInfo.StartTime,
+		StartedAt: &vmInfo.StartTime,
+		StoppedAt: vmInfo.StoppedTime,
+		Tags:      vmInfo.Config.Tags,
+		NetworkID: vmInfo.Config.NetworkID,
+		RootFS:    vmInfo.DiskPath,
 	}
 
 	return info, nil
@@ -306,18 +306,18 @@ func (d *KVMDriverEnhanced) ListVMs(ctx context.Context) ([]VMInfo, error) {
 	vms := make([]VMInfo, 0, len(d.vms))
 	for _, vmInfo := range d.vms {
 		info := VMInfo{
-			ID:          vmInfo.ID,
-			Name:        vmInfo.Config.Name,
-			State:       vmInfo.State,
-			PID:         vmInfo.PID,
-			CPUShares:   vmInfo.Config.CPUShares,
-			MemoryMB:    vmInfo.Config.MemoryMB,
-			CreatedAt:   vmInfo.StartTime,
-			StartedAt:   &vmInfo.StartTime,
-			StoppedAt:   vmInfo.StoppedTime,
-			Tags:        vmInfo.Config.Tags,
-			NetworkID:   vmInfo.Config.NetworkID,
-			RootFS:      vmInfo.DiskPath,
+			ID:        vmInfo.ID,
+			Name:      vmInfo.Config.Name,
+			State:     vmInfo.State,
+			PID:       vmInfo.PID,
+			CPUShares: vmInfo.Config.CPUShares,
+			MemoryMB:  vmInfo.Config.MemoryMB,
+			CreatedAt: vmInfo.StartTime,
+			StartedAt: &vmInfo.StartTime,
+			StoppedAt: vmInfo.StoppedTime,
+			Tags:      vmInfo.Config.Tags,
+			NetworkID: vmInfo.Config.NetworkID,
+			RootFS:    vmInfo.DiskPath,
 		}
 		vms = append(vms, info)
 	}
@@ -326,10 +326,10 @@ func (d *KVMDriverEnhanced) ListVMs(ctx context.Context) ([]VMInfo, error) {
 }
 
 // Optional operation support
-func (d *KVMDriverEnhanced) SupportsPause() bool   { return true }
-func (d *KVMDriverEnhanced) SupportsResume() bool  { return true }
+func (d *KVMDriverEnhanced) SupportsPause() bool    { return true }
+func (d *KVMDriverEnhanced) SupportsResume() bool   { return true }
 func (d *KVMDriverEnhanced) SupportsSnapshot() bool { return true }
-func (d *KVMDriverEnhanced) SupportsMigrate() bool { return false }
+func (d *KVMDriverEnhanced) SupportsMigrate() bool  { return false }
 
 // Pause pauses a VM
 func (d *KVMDriverEnhanced) Pause(ctx context.Context, vmID string) error {
@@ -390,7 +390,7 @@ func (d *KVMDriverEnhanced) Snapshot(ctx context.Context, vmID, name string, par
 	}
 
 	snapshotID := fmt.Sprintf("%s-%s-%d", vmID, name, time.Now().Unix())
-	
+
 	// Create snapshot using qemu-img
 	cmd := exec.CommandContext(ctx, "qemu-img", "snapshot", "-c", snapshotID, vmInfo.DiskPath)
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -447,14 +447,14 @@ func (d *KVMDriverEnhanced) saveVMConfig(vmInfo *KVMVMInfo) error {
 
 func (d *KVMDriverEnhanced) monitorVM(vmID string, cmd *exec.Cmd) {
 	err := cmd.Wait()
-	
+
 	d.vmLock.Lock()
 	defer d.vmLock.Unlock()
-	
+
 	if vmInfo, exists := d.vms[vmID]; exists {
 		now := time.Now()
 		vmInfo.StoppedTime = &now
-		
+
 		if err != nil {
 			log.Printf("KVM VM %s exited with error: %v", vmID, err)
 			vmInfo.State = StateFailed
@@ -462,7 +462,7 @@ func (d *KVMDriverEnhanced) monitorVM(vmID string, cmd *exec.Cmd) {
 			log.Printf("KVM VM %s exited normally", vmID)
 			vmInfo.State = StateStopped
 		}
-		
+
 		vmInfo.Process = nil
 		vmInfo.PID = 0
 	}

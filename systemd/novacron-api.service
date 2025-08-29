@@ -1,0 +1,53 @@
+[Unit]
+Description=NovaCron API Server
+Documentation=https://github.com/khryptorgraphics/novacron
+After=network.target postgresql.service
+Wants=postgresql.service
+Requires=network.target
+
+[Service]
+Type=simple
+User=novacron
+Group=novacron
+WorkingDirectory=/opt/novacron
+ExecStart=/opt/novacron/bin/api-server
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Environment variables
+Environment=LOG_LEVEL=info
+Environment=LOG_FORMAT=json
+Environment=API_PORT=8090
+Environment=WS_PORT=8091
+Environment=STORAGE_PATH=/var/lib/novacron/vms
+EnvironmentFile=-/etc/novacron/environment
+
+# Security settings
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/novacron /var/log/novacron
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_DAC_READ_SEARCH
+
+# AppArmor profile
+AppArmorProfile=novacron-api
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+MemoryMax=2G
+CPUQuota=200%
+
+# Restart settings
+Restart=always
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=3
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=novacron-api
+
+[Install]
+WantedBy=multi-user.target

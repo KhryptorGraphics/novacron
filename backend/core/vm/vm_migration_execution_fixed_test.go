@@ -41,7 +41,7 @@ func TestVMMigrationExecutionFixed(t *testing.T) {
 
 	// Test migration preparation
 	migrationID := "test-migration-001"
-	
+
 	// Simulate migration steps
 	t.Run("PrepareMigration", func(t *testing.T) {
 		// In a real implementation, this would prepare the VM for migration

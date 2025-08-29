@@ -1,0 +1,62 @@
+[Unit]
+Description=NovaCron LLM Deployment Engine
+Documentation=https://github.com/khryptorgraphics/novacron
+After=novacron-api.service novacron-storage.service
+Requires=novacron-api.service
+PartOf=novacron.target
+
+[Service]
+Type=notify
+User=novacron
+Group=novacron
+WorkingDirectory=/opt/novacron
+ExecStartPre=/opt/novacron/bin/validate-gpu-resources
+ExecStartPre=/opt/novacron/bin/download-models-if-needed
+ExecStart=/opt/novacron/bin/novacron-llm-engine --config=/etc/novacron/llm.conf
+ExecReload=/bin/kill -USR1 $MAINPID
+ExecStop=/opt/novacron/bin/cleanup-llm-shards
+Restart=always
+RestartSec=30
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+# Resource limits for LLM workloads
+LimitNOFILE=131072
+LimitNPROC=65536
+MemoryLimit=32G
+CPUQuota=800%
+
+# GPU access for CUDA/ROCm
+DeviceAllow=/dev/nvidia* rw
+DeviceAllow=/dev/nvidiactl rw
+DeviceAllow=/dev/nvidia-modeset rw
+DeviceAllow=/dev/nvidia-uvm rw
+DeviceAllow=/dev/dri/* rw
+SupplementaryGroups=render video
+
+# Security
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/novacron/models /var/cache/huggingface /var/cache/transformers /dev/shm
+AppArmorProfile=novacron-llm-engine
+
+# Large model handling environment
+Environment=CUDA_VISIBLE_DEVICES=all
+Environment=HF_HOME=/var/cache/huggingface
+Environment=TRANSFORMERS_CACHE=/var/cache/transformers
+Environment=PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+Environment=MODEL_SHARDING_STRATEGY=pipeline
+Environment=MAX_MODEL_SIZE=405000000000
+EnvironmentFile=-/etc/novacron/llm.env
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=novacron-llm-engine
+
+# Health monitoring for LLM services
+WatchdogSec=120
+
+[Install]
+WantedBy=novacron.target

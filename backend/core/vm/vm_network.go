@@ -17,56 +17,56 @@ type NetworkType string
 const (
 	// NetworkTypeBridge represents a bridge network
 	NetworkTypeBridge NetworkType = "bridge"
-	
+
 	// NetworkTypeNAT represents a NAT network
 	NetworkTypeNAT NetworkType = "nat"
-	
+
 	// NetworkTypeHost represents a host-only network
 	NetworkTypeHost NetworkType = "host"
-	
+
 	// NetworkTypeIsolated represents an isolated network
 	NetworkTypeIsolated NetworkType = "isolated"
 )
 
 // VMNetwork represents a VM network
 type VMNetwork struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Type        NetworkType `json:"type"`
-	Subnet      string      `json:"subnet"`
-	Gateway     string      `json:"gateway"`
-	DHCP        bool        `json:"dhcp"`
-	DHCPRange   string      `json:"dhcp_range,omitempty"`
-	Bridge      string      `json:"bridge,omitempty"`
-	MTU         int         `json:"mtu"`
-	VLAN        int         `json:"vlan,omitempty"`
-	CreatedAt   time.Time   `json:"created_at"`
-	UpdatedAt   time.Time   `json:"updated_at"`
-	Tags        []string    `json:"tags,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Type      NetworkType       `json:"type"`
+	Subnet    string            `json:"subnet"`
+	Gateway   string            `json:"gateway"`
+	DHCP      bool              `json:"dhcp"`
+	DHCPRange string            `json:"dhcp_range,omitempty"`
+	Bridge    string            `json:"bridge,omitempty"`
+	MTU       int               `json:"mtu"`
+	VLAN      int               `json:"vlan,omitempty"`
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
+	Tags      []string          `json:"tags,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
 // VMNetworkInterface represents a VM network interface
 type VMNetworkInterface struct {
-	ID         string `json:"id"`
-	VMID       string `json:"vm_id"`
-	NetworkID  string `json:"network_id"`
-	MACAddress string `json:"mac_address"`
-	IPAddress  string `json:"ip_address,omitempty"`
-	Model      string `json:"model"`
-	MTU        int    `json:"mtu"`
-	Index      int    `json:"index"`
+	ID         string    `json:"id"`
+	VMID       string    `json:"vm_id"`
+	NetworkID  string    `json:"network_id"`
+	MACAddress string    `json:"mac_address"`
+	IPAddress  string    `json:"ip_address,omitempty"`
+	Model      string    `json:"model"`
+	MTU        int       `json:"mtu"`
+	Index      int       `json:"index"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // VMNetworkManager manages VM networks
 type VMNetworkManager struct {
-	networks     map[string]*VMNetwork
-	networksMutex sync.RWMutex
-	interfaces   map[string][]*VMNetworkInterface
+	networks        map[string]*VMNetwork
+	networksMutex   sync.RWMutex
+	interfaces      map[string][]*VMNetworkInterface
 	interfacesMutex sync.RWMutex
-	vmManager    *VMManager
+	vmManager       *VMManager
 }
 
 // NewVMNetworkManager creates a new VM network manager
@@ -87,59 +87,59 @@ func (m *VMNetworkManager) CreateNetwork(ctx context.Context, name string, netwo
 	default:
 		return nil, fmt.Errorf("invalid network type: %s", networkType)
 	}
-	
+
 	// Validate subnet
 	_, ipNet, err := net.ParseCIDR(subnet)
 	if err != nil {
 		return nil, fmt.Errorf("invalid subnet: %w", err)
 	}
-	
+
 	// Validate gateway
 	if gateway != "" {
 		gatewayIP := net.ParseIP(gateway)
 		if gatewayIP == nil {
 			return nil, fmt.Errorf("invalid gateway IP: %s", gateway)
 		}
-		
+
 		// Check if gateway is in subnet
 		if !ipNet.Contains(gatewayIP) {
 			return nil, fmt.Errorf("gateway %s is not in subnet %s", gateway, subnet)
 		}
 	}
-	
+
 	// Validate DHCP range
 	if dhcp && dhcpRange != "" {
 		parts := strings.Split(dhcpRange, "-")
 		if len(parts) != 2 {
 			return nil, fmt.Errorf("invalid DHCP range format: %s", dhcpRange)
 		}
-		
+
 		startIP := net.ParseIP(strings.TrimSpace(parts[0]))
 		endIP := net.ParseIP(strings.TrimSpace(parts[1]))
-		
+
 		if startIP == nil || endIP == nil {
 			return nil, fmt.Errorf("invalid DHCP range IPs: %s", dhcpRange)
 		}
-		
+
 		// Check if IPs are in subnet
 		if !ipNet.Contains(startIP) || !ipNet.Contains(endIP) {
 			return nil, fmt.Errorf("DHCP range %s is not in subnet %s", dhcpRange, subnet)
 		}
 	}
-	
+
 	// Validate bridge
 	if networkType == NetworkTypeBridge && bridge == "" {
 		return nil, fmt.Errorf("bridge name is required for bridge networks")
 	}
-	
+
 	// Validate MTU
 	if mtu < 576 || mtu > 9000 {
 		return nil, fmt.Errorf("invalid MTU: %d (must be between 576 and 9000)", mtu)
 	}
-	
+
 	// Generate network ID
 	networkID := fmt.Sprintf("net-%s", strings.ReplaceAll(name, " ", "-"))
-	
+
 	// Check if network already exists
 	m.networksMutex.RLock()
 	if _, exists := m.networks[networkID]; exists {
@@ -147,7 +147,7 @@ func (m *VMNetworkManager) CreateNetwork(ctx context.Context, name string, netwo
 		return nil, fmt.Errorf("network with ID %s already exists", networkID)
 	}
 	m.networksMutex.RUnlock()
-	
+
 	// Create network
 	network := &VMNetwork{
 		ID:        networkID,
@@ -165,19 +165,19 @@ func (m *VMNetworkManager) CreateNetwork(ctx context.Context, name string, netwo
 		Tags:      tags,
 		Metadata:  metadata,
 	}
-	
+
 	// Create network in the system
 	if err := m.createNetworkInSystem(ctx, network); err != nil {
 		return nil, fmt.Errorf("failed to create network in system: %w", err)
 	}
-	
+
 	// Store network
 	m.networksMutex.Lock()
 	m.networks[networkID] = network
 	m.networksMutex.Unlock()
-	
+
 	log.Printf("Created network %s (%s)", network.Name, network.ID)
-	
+
 	return network, nil
 }
 
@@ -185,12 +185,12 @@ func (m *VMNetworkManager) CreateNetwork(ctx context.Context, name string, netwo
 func (m *VMNetworkManager) GetNetwork(networkID string) (*VMNetwork, error) {
 	m.networksMutex.RLock()
 	defer m.networksMutex.RUnlock()
-	
+
 	network, exists := m.networks[networkID]
 	if !exists {
 		return nil, fmt.Errorf("network %s not found", networkID)
 	}
-	
+
 	return network, nil
 }
 
@@ -198,12 +198,12 @@ func (m *VMNetworkManager) GetNetwork(networkID string) (*VMNetwork, error) {
 func (m *VMNetworkManager) ListNetworks() []*VMNetwork {
 	m.networksMutex.RLock()
 	defer m.networksMutex.RUnlock()
-	
+
 	networks := make([]*VMNetwork, 0, len(m.networks))
 	for _, network := range m.networks {
 		networks = append(networks, network)
 	}
-	
+
 	return networks
 }
 
@@ -217,7 +217,7 @@ func (m *VMNetworkManager) DeleteNetwork(ctx context.Context, networkID string) 
 		return fmt.Errorf("network %s not found", networkID)
 	}
 	m.networksMutex.RUnlock()
-	
+
 	// Check if network is in use
 	m.interfacesMutex.RLock()
 	for vmID, interfaces := range m.interfaces {
@@ -229,19 +229,19 @@ func (m *VMNetworkManager) DeleteNetwork(ctx context.Context, networkID string) 
 		}
 	}
 	m.interfacesMutex.RUnlock()
-	
+
 	// Delete network from the system
 	if err := m.deleteNetworkFromSystem(ctx, network); err != nil {
 		return fmt.Errorf("failed to delete network from system: %w", err)
 	}
-	
+
 	// Remove network
 	m.networksMutex.Lock()
 	delete(m.networks, networkID)
 	m.networksMutex.Unlock()
-	
+
 	log.Printf("Deleted network %s (%s)", network.Name, network.ID)
-	
+
 	return nil
 }
 
@@ -252,7 +252,7 @@ func (m *VMNetworkManager) AttachNetworkInterface(ctx context.Context, vmID, net
 	if err != nil {
 		return nil, fmt.Errorf("failed to get VM: %w", err)
 	}
-	
+
 	// Get the network
 	m.networksMutex.RLock()
 	network, exists := m.networks[networkID]
@@ -261,7 +261,7 @@ func (m *VMNetworkManager) AttachNetworkInterface(ctx context.Context, vmID, net
 		return nil, fmt.Errorf("network %s not found", networkID)
 	}
 	m.networksMutex.RUnlock()
-	
+
 	// Validate MAC address
 	if macAddress == "" {
 		// Generate a random MAC address
@@ -273,44 +273,44 @@ func (m *VMNetworkManager) AttachNetworkInterface(ctx context.Context, vmID, net
 			return nil, fmt.Errorf("invalid MAC address: %w", err)
 		}
 	}
-	
+
 	// Validate IP address
 	if ipAddress != "" {
 		ip := net.ParseIP(ipAddress)
 		if ip == nil {
 			return nil, fmt.Errorf("invalid IP address: %s", ipAddress)
 		}
-		
+
 		// Check if IP is in subnet
 		_, ipNet, err := net.ParseCIDR(network.Subnet)
 		if err != nil {
 			return nil, fmt.Errorf("invalid subnet: %w", err)
 		}
-		
+
 		if !ipNet.Contains(ip) {
 			return nil, fmt.Errorf("IP address %s is not in subnet %s", ipAddress, network.Subnet)
 		}
 	}
-	
+
 	// Validate model
 	if model == "" {
 		model = "virtio"
 	}
-	
+
 	// Validate MTU
 	if mtu == 0 {
 		mtu = network.MTU
 	} else if mtu < 576 || mtu > 9000 {
 		return nil, fmt.Errorf("invalid MTU: %d (must be between 576 and 9000)", mtu)
 	}
-	
+
 	// Get existing interfaces for the VM
 	m.interfacesMutex.RLock()
 	interfaces, exists := m.interfaces[vmID]
 	if !exists {
 		interfaces = make([]*VMNetworkInterface, 0)
 	}
-	
+
 	// Check if VM already has an interface on this network
 	for _, iface := range interfaces {
 		if iface.NetworkID == networkID {
@@ -319,10 +319,10 @@ func (m *VMNetworkManager) AttachNetworkInterface(ctx context.Context, vmID, net
 		}
 	}
 	m.interfacesMutex.RUnlock()
-	
+
 	// Generate interface ID
 	interfaceID := fmt.Sprintf("%s-net%d", vmID, len(interfaces))
-	
+
 	// Create interface
 	iface := &VMNetworkInterface{
 		ID:         interfaceID,
@@ -336,19 +336,19 @@ func (m *VMNetworkManager) AttachNetworkInterface(ctx context.Context, vmID, net
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}
-	
+
 	// Attach interface to VM
 	if err := m.attachInterfaceToVM(ctx, vm, network, iface); err != nil {
 		return nil, fmt.Errorf("failed to attach interface to VM: %w", err)
 	}
-	
+
 	// Store interface
 	m.interfacesMutex.Lock()
 	m.interfaces[vmID] = append(interfaces, iface)
 	m.interfacesMutex.Unlock()
-	
+
 	log.Printf("Attached network interface %s to VM %s on network %s", iface.ID, vmID, networkID)
-	
+
 	return iface, nil
 }
 
@@ -359,7 +359,7 @@ func (m *VMNetworkManager) DetachNetworkInterface(ctx context.Context, vmID, int
 	if err != nil {
 		return fmt.Errorf("failed to get VM: %w", err)
 	}
-	
+
 	// Get the interface
 	m.interfacesMutex.RLock()
 	interfaces, exists := m.interfaces[vmID]
@@ -367,7 +367,7 @@ func (m *VMNetworkManager) DetachNetworkInterface(ctx context.Context, vmID, int
 		m.interfacesMutex.RUnlock()
 		return fmt.Errorf("VM %s has no network interfaces", vmID)
 	}
-	
+
 	var iface *VMNetworkInterface
 	var ifaceIndex int
 	for i, intf := range interfaces {
@@ -377,13 +377,13 @@ func (m *VMNetworkManager) DetachNetworkInterface(ctx context.Context, vmID, int
 			break
 		}
 	}
-	
+
 	if iface == nil {
 		m.interfacesMutex.RUnlock()
 		return fmt.Errorf("interface %s not found for VM %s", interfaceID, vmID)
 	}
 	m.interfacesMutex.RUnlock()
-	
+
 	// Get the network
 	m.networksMutex.RLock()
 	network, exists := m.networks[iface.NetworkID]
@@ -392,19 +392,19 @@ func (m *VMNetworkManager) DetachNetworkInterface(ctx context.Context, vmID, int
 		return fmt.Errorf("network %s not found", iface.NetworkID)
 	}
 	m.networksMutex.RUnlock()
-	
+
 	// Detach interface from VM
 	if err := m.detachInterfaceFromVM(ctx, vm, network, iface); err != nil {
 		return fmt.Errorf("failed to detach interface from VM: %w", err)
 	}
-	
+
 	// Remove interface
 	m.interfacesMutex.Lock()
 	m.interfaces[vmID] = append(interfaces[:ifaceIndex], interfaces[ifaceIndex+1:]...)
 	m.interfacesMutex.Unlock()
-	
+
 	log.Printf("Detached network interface %s from VM %s", interfaceID, vmID)
-	
+
 	return nil
 }
 
@@ -412,16 +412,16 @@ func (m *VMNetworkManager) DetachNetworkInterface(ctx context.Context, vmID, int
 func (m *VMNetworkManager) ListNetworkInterfaces(vmID string) ([]*VMNetworkInterface, error) {
 	m.interfacesMutex.RLock()
 	defer m.interfacesMutex.RUnlock()
-	
+
 	interfaces, exists := m.interfaces[vmID]
 	if !exists {
 		return make([]*VMNetworkInterface, 0), nil
 	}
-	
+
 	// Create a copy of the interfaces
 	result := make([]*VMNetworkInterface, len(interfaces))
 	copy(result, interfaces)
-	
+
 	return result, nil
 }
 
@@ -429,18 +429,18 @@ func (m *VMNetworkManager) ListNetworkInterfaces(vmID string) ([]*VMNetworkInter
 func (m *VMNetworkManager) GetNetworkInterface(vmID, interfaceID string) (*VMNetworkInterface, error) {
 	m.interfacesMutex.RLock()
 	defer m.interfacesMutex.RUnlock()
-	
+
 	interfaces, exists := m.interfaces[vmID]
 	if !exists {
 		return nil, fmt.Errorf("VM %s has no network interfaces", vmID)
 	}
-	
+
 	for _, iface := range interfaces {
 		if iface.ID == interfaceID {
 			return iface, nil
 		}
 	}
-	
+
 	return nil, fmt.Errorf("interface %s not found for VM %s", interfaceID, vmID)
 }
 
@@ -451,16 +451,16 @@ func (m *VMNetworkManager) UpdateNetworkInterface(ctx context.Context, vmID, int
 	if err != nil {
 		return nil, fmt.Errorf("failed to get VM: %w", err)
 	}
-	
+
 	// Get the interface
 	m.interfacesMutex.Lock()
 	defer m.interfacesMutex.Unlock()
-	
+
 	interfaces, exists := m.interfaces[vmID]
 	if !exists {
 		return nil, fmt.Errorf("VM %s has no network interfaces", vmID)
 	}
-	
+
 	var iface *VMNetworkInterface
 	for _, intf := range interfaces {
 		if intf.ID == interfaceID {
@@ -468,11 +468,11 @@ func (m *VMNetworkManager) UpdateNetworkInterface(ctx context.Context, vmID, int
 			break
 		}
 	}
-	
+
 	if iface == nil {
 		return nil, fmt.Errorf("interface %s not found for VM %s", interfaceID, vmID)
 	}
-	
+
 	// Get the network
 	m.networksMutex.RLock()
 	network, exists := m.networks[iface.NetworkID]
@@ -481,48 +481,48 @@ func (m *VMNetworkManager) UpdateNetworkInterface(ctx context.Context, vmID, int
 		return nil, fmt.Errorf("network %s not found", iface.NetworkID)
 	}
 	m.networksMutex.RUnlock()
-	
+
 	// Validate IP address
 	if ipAddress != "" && ipAddress != iface.IPAddress {
 		ip := net.ParseIP(ipAddress)
 		if ip == nil {
 			return nil, fmt.Errorf("invalid IP address: %s", ipAddress)
 		}
-		
+
 		// Check if IP is in subnet
 		_, ipNet, err := net.ParseCIDR(network.Subnet)
 		if err != nil {
 			return nil, fmt.Errorf("invalid subnet: %w", err)
 		}
-		
+
 		if !ipNet.Contains(ip) {
 			return nil, fmt.Errorf("IP address %s is not in subnet %s", ipAddress, network.Subnet)
 		}
-		
+
 		// Update IP address
 		iface.IPAddress = ipAddress
 	}
-	
+
 	// Validate MTU
 	if mtu != 0 && mtu != iface.MTU {
 		if mtu < 576 || mtu > 9000 {
 			return nil, fmt.Errorf("invalid MTU: %d (must be between 576 and 9000)", mtu)
 		}
-		
+
 		// Update MTU
 		iface.MTU = mtu
 	}
-	
+
 	// Update interface in the system
 	if err := m.updateInterfaceInVM(ctx, vm, network, iface); err != nil {
 		return nil, fmt.Errorf("failed to update interface in VM: %w", err)
 	}
-	
+
 	// Update timestamp
 	iface.UpdatedAt = time.Now()
-	
+
 	log.Printf("Updated network interface %s for VM %s", interfaceID, vmID)
-	
+
 	return iface, nil
 }
 
@@ -530,10 +530,10 @@ func (m *VMNetworkManager) UpdateNetworkInterface(ctx context.Context, vmID, int
 func (m *VMNetworkManager) createNetworkInSystem(ctx context.Context, network *VMNetwork) error {
 	// In a real implementation, this would create the network in the system
 	// For example, creating a bridge, configuring DHCP, etc.
-	
+
 	// For simplicity, we'll just log the operation
 	log.Printf("Creating network %s (%s) in system", network.Name, network.ID)
-	
+
 	// Simulate network creation based on type
 	switch network.Type {
 	case NetworkTypeBridge:
@@ -556,13 +556,13 @@ func (m *VMNetworkManager) createNetworkInSystem(ctx context.Context, network *V
 		// In a real implementation, this would set up an isolated network
 		log.Printf("Setting up isolated network %s", network.ID)
 	}
-	
+
 	// If DHCP is enabled, set up DHCP server
 	if network.DHCP {
 		log.Printf("Setting up DHCP server for network %s", network.ID)
 		// In a real implementation, this would set up a DHCP server
 	}
-	
+
 	return nil
 }
 
@@ -570,10 +570,10 @@ func (m *VMNetworkManager) createNetworkInSystem(ctx context.Context, network *V
 func (m *VMNetworkManager) deleteNetworkFromSystem(ctx context.Context, network *VMNetwork) error {
 	// In a real implementation, this would delete the network from the system
 	// For example, removing a bridge, stopping DHCP, etc.
-	
+
 	// For simplicity, we'll just log the operation
 	log.Printf("Deleting network %s (%s) from system", network.Name, network.ID)
-	
+
 	return nil
 }
 
@@ -581,10 +581,10 @@ func (m *VMNetworkManager) deleteNetworkFromSystem(ctx context.Context, network 
 func (m *VMNetworkManager) attachInterfaceToVM(ctx context.Context, vm *VM, network *VMNetwork, iface *VMNetworkInterface) error {
 	// In a real implementation, this would attach the interface to the VM
 	// For example, adding a network device to a QEMU/KVM VM
-	
+
 	// For simplicity, we'll just log the operation
 	log.Printf("Attaching interface %s to VM %s on network %s", iface.ID, vm.ID(), network.ID)
-	
+
 	return nil
 }
 
@@ -592,10 +592,10 @@ func (m *VMNetworkManager) attachInterfaceToVM(ctx context.Context, vm *VM, netw
 func (m *VMNetworkManager) detachInterfaceFromVM(ctx context.Context, vm *VM, network *VMNetwork, iface *VMNetworkInterface) error {
 	// In a real implementation, this would detach the interface from the VM
 	// For example, removing a network device from a QEMU/KVM VM
-	
+
 	// For simplicity, we'll just log the operation
 	log.Printf("Detaching interface %s from VM %s on network %s", iface.ID, vm.ID(), network.ID)
-	
+
 	return nil
 }
 
@@ -603,10 +603,10 @@ func (m *VMNetworkManager) detachInterfaceFromVM(ctx context.Context, vm *VM, ne
 func (m *VMNetworkManager) updateInterfaceInVM(ctx context.Context, vm *VM, network *VMNetwork, iface *VMNetworkInterface) error {
 	// In a real implementation, this would update the interface in the VM
 	// For example, changing the IP address or MTU of a network device
-	
+
 	// For simplicity, we'll just log the operation
 	log.Printf("Updating interface %s in VM %s on network %s", iface.ID, vm.ID(), network.ID)
-	
+
 	return nil
 }
 
@@ -617,11 +617,11 @@ func generateMACAddress() string {
 	mac := make([]byte, 6)
 	mac[0] = 0x52 // Locally administered, unicast
 	mac[1] = 0x54 // "T" for "Test"
-	
+
 	// Generate random bytes for the rest of the MAC address
 	for i := 2; i < 6; i++ {
 		mac[i] = byte(time.Now().UnixNano() >> uint((i-2)*8) & 0xff)
 	}
-	
+
 	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5])
 }

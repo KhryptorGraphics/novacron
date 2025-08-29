@@ -1,0 +1,242 @@
+{
+  "version": "1.0.0",
+  "project": "NovaCron",
+  "description": "Distributed VM Management System Agents",
+  "agents": [
+    {
+      "id": "vm-lifecycle-manager",
+      "name": "VM Lifecycle Manager",
+      "role": "primary",
+      "capabilities": [
+        "vm.create",
+        "vm.start",
+        "vm.stop",
+        "vm.delete",
+        "vm.snapshot",
+        "vm.restore"
+      ],
+      "commands": [
+        "/vm:manage",
+        "/vm:create",
+        "/vm:snapshot"
+      ],
+      "priority": 1,
+      "active": true
+    },
+    {
+      "id": "migration-coordinator",
+      "name": "Migration Coordinator",
+      "role": "specialist",
+      "capabilities": [
+        "migration.cold",
+        "migration.warm",
+        "migration.live",
+        "migration.wan_optimization",
+        "migration.validation"
+      ],
+      "commands": [
+        "/vm:migrate",
+        "/migration:status",
+        "/migration:optimize"
+      ],
+      "priority": 1,
+      "active": true
+    },
+    {
+      "id": "storage-optimizer",
+      "name": "Storage Optimizer",
+      "role": "specialist",
+      "capabilities": [
+        "storage.compress",
+        "storage.deduplicate",
+        "storage.encrypt",
+        "storage.snapshot",
+        "storage.analyze"
+      ],
+      "commands": [
+        "/storage:optimize",
+        "/storage:analyze",
+        "/storage:backup"
+      ],
+      "priority": 2,
+      "active": true
+    },
+    {
+      "id": "cluster-orchestrator",
+      "name": "Cluster Orchestrator",
+      "role": "coordinator",
+      "capabilities": [
+        "cluster.node_management",
+        "cluster.load_balancing",
+        "cluster.health_monitoring",
+        "cluster.failover",
+        "cluster.scaling"
+      ],
+      "commands": [
+        "/cluster:health",
+        "/cluster:scale",
+        "/cluster:balance"
+      ],
+      "priority": 1,
+      "active": true
+    },
+    {
+      "id": "container-manager",
+      "name": "Container Manager",
+      "role": "specialist",
+      "capabilities": [
+        "container.deploy",
+        "container.scale",
+        "container.update",
+        "container.rollback",
+        "container.monitor"
+      ],
+      "commands": [
+        "/container:deploy",
+        "/container:scale",
+        "/container:logs"
+      ],
+      "priority": 2,
+      "active": true
+    },
+    {
+      "id": "network-controller",
+      "name": "Network Controller",
+      "role": "specialist",
+      "capabilities": [
+        "network.vxlan",
+        "network.routing",
+        "network.security_groups",
+        "network.load_balancing",
+        "network.monitoring"
+      ],
+      "commands": [
+        "/network:configure",
+        "/network:security",
+        "/network:status"
+      ],
+      "priority": 2,
+      "active": true
+    },
+    {
+      "id": "performance-analyst",
+      "name": "Performance Analyst",
+      "role": "monitor",
+      "capabilities": [
+        "metrics.collection",
+        "metrics.analysis",
+        "performance.optimization",
+        "anomaly.detection",
+        "reporting.generation"
+      ],
+      "commands": [
+        "/monitoring:metrics",
+        "/monitoring:analyze",
+        "/monitoring:report"
+      ],
+      "priority": 2,
+      "active": true
+    },
+    {
+      "id": "scheduler",
+      "name": "Resource Scheduler",
+      "role": "planner",
+      "capabilities": [
+        "scheduling.policy_engine",
+        "scheduling.constraint_solving",
+        "scheduling.resource_allocation",
+        "scheduling.affinity_rules",
+        "scheduling.optimization"
+      ],
+      "commands": [
+        "/scheduler:plan",
+        "/scheduler:optimize",
+        "/scheduler:constraints"
+      ],
+      "priority": 1,
+      "active": true
+    },
+    {
+      "id": "security-guardian",
+      "name": "Security Guardian",
+      "role": "guardian",
+      "capabilities": [
+        "auth.jwt",
+        "auth.rbac",
+        "security.audit",
+        "security.compliance",
+        "security.vulnerability_scan"
+      ],
+      "commands": [
+        "/security:audit",
+        "/security:scan",
+        "/security:compliance"
+      ],
+      "priority": 1,
+      "active": true
+    },
+    {
+      "id": "devops-automator",
+      "name": "DevOps Automator",
+      "role": "automation",
+      "capabilities": [
+        "ci.build",
+        "ci.test",
+        "cd.deploy",
+        "cd.rollback",
+        "infrastructure.as_code"
+      ],
+      "commands": [
+        "/devops:build",
+        "/devops:deploy",
+        "/devops:test"
+      ],
+      "priority": 3,
+      "active": true
+    }
+  ],
+  "coordination": {
+    "mode": "distributed",
+    "communication": "event-driven",
+    "consensus": "raft",
+    "failover": "automatic"
+  },
+  "workflows": [
+    {
+      "name": "vm-migration-workflow",
+      "agents": ["vm-lifecycle-manager", "migration-coordinator", "storage-optimizer", "network-controller"],
+      "trigger": "/vm:migrate",
+      "steps": [
+        "validate-source",
+        "prepare-destination",
+        "optimize-transfer",
+        "execute-migration",
+        "verify-completion"
+      ]
+    },
+    {
+      "name": "cluster-scaling-workflow",
+      "agents": ["cluster-orchestrator", "scheduler", "performance-analyst"],
+      "trigger": "/cluster:scale",
+      "steps": [
+        "analyze-load",
+        "calculate-resources",
+        "provision-nodes",
+        "rebalance-workloads",
+        "monitor-stability"
+      ]
+    },
+    {
+      "name": "disaster-recovery-workflow",
+      "agents": ["cluster-orchestrator", "vm-lifecycle-manager", "storage-optimizer", "security-guardian"],
+      "trigger": "node-failure",
+      "steps": [
+        "detect-failure",
+        "isolate-node",
+        "migrate-vms",
+        "restore-services",
+        "audit-recovery"
+      ]
+    }
+  ]
+}
