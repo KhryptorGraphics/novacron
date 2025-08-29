@@ -1,0 +1,222 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: multicloudvms.novacron.io
+spec:
+  group: novacron.io
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - deploymentStrategy
+            - providers
+            - vmTemplate
+            properties:
+              deploymentStrategy:
+                type: object
+                required:
+                - type
+                - primary
+                properties:
+                  type:
+                    type: string
+                    enum: ["active-passive", "active-active", "burst", "cost-optimized"]
+                  primary:
+                    type: string
+                  secondary:
+                    type: array
+                    items:
+                      type: string
+                  failoverTriggers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        type:
+                          type: string
+                        threshold:
+                          type: string
+                        duration:
+                          type: string
+              providers:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - name
+                  - region
+                  - credentialsSecret
+                  properties:
+                    name:
+                      type: string
+                    region:
+                      type: string
+                    credentialsSecret:
+                      type: string
+                    config:
+                      type: object
+                      additionalProperties:
+                        type: string
+                    costTier:
+                      type: string
+                    availabilityZones:
+                      type: array
+                      items:
+                        type: string
+              vmTemplate:
+                type: object
+                required:
+                - name
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+              costOptimization:
+                type: object
+                properties:
+                  useSpotInstances:
+                    type: boolean
+                  maxCostPerHour:
+                    type: string
+                  costBasedScaling:
+                    type: boolean
+                  costAlerts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        threshold:
+                          type: string
+                        type:
+                          type: string
+                        frequency:
+                          type: string
+                        destination:
+                          type: string
+              disasterRecovery:
+                type: object
+                required:
+                - enabled
+                properties:
+                  enabled:
+                    type: boolean
+                  rto:
+                    type: string
+                  rpo:
+                    type: string
+                  backupStrategy:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      schedule:
+                        type: string
+                      retention:
+                        type: string
+              migrationPolicy:
+                type: object
+                properties:
+                  type:
+                    type: string
+                    enum: ["live", "warm", "cold"]
+                  triggers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        type:
+                          type: string
+                        threshold:
+                          type: string
+          status:
+            type: object
+            properties:
+              cloudDeployments:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    provider:
+                      type: string
+                    status:
+                      type: string
+                    instances:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                          status:
+                            type: string
+                          nodeId:
+                            type: string
+                          ip:
+                            type: string
+              primaryProvider:
+                type: string
+              totalCost:
+                type: object
+                properties:
+                  currency:
+                    type: string
+                  hourlyCost:
+                    type: number
+                  totalCost:
+                    type: number
+              health:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  availability:
+                    type: number
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                      enum: ["True", "False", "Unknown"]
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string
+              observedGeneration:
+                type: integer
+                format: int64
+    additionalPrinterColumns:
+    - name: Strategy
+      type: string
+      jsonPath: .spec.deploymentStrategy.type
+    - name: Primary
+      type: string
+      jsonPath: .status.primaryProvider
+    - name: Cost
+      type: string
+      jsonPath: .status.totalCost.hourlyCost
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+  scope: Namespaced
+  names:
+    plural: multicloudvms
+    singular: multicloudvm
+    kind: MultiCloudVM
+    shortNames:
+    - mcvm
+    - mcvms

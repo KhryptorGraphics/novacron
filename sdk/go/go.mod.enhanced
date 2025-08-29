@@ -1,0 +1,39 @@
+module github.com/khryptorgraphics/novacron-enhanced-sdk
+
+go 1.21
+
+require (
+	github.com/go-redis/redis/v8 v8.11.5
+	github.com/sony/gobreaker v0.5.0
+)
+
+require (
+	github.com/cespare/xxhash/v2 v2.2.0 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+)
+
+// Optional cloud provider SDKs
+require (
+	github.com/aws/aws-sdk-go-v2 v1.24.0 // AWS
+	github.com/Azure/azure-sdk-for-go v68.0.0+incompatible // Azure
+	cloud.google.com/go/compute v1.23.3 // GCP
+)
+
+// Optional monitoring and metrics
+require (
+	github.com/prometheus/client_golang v1.17.0
+	github.com/DataDog/datadog-go/v5 v5.3.0
+)
+
+// Optional performance enhancements
+require (
+	github.com/valyala/fastjson v1.6.4
+	github.com/klauspost/compress v1.17.4
+)
+
+// Development dependencies
+require (
+	github.com/stretchr/testify v1.8.4
+	github.com/golang/mock v1.6.0
+	github.com/golangci/golangci-lint v1.55.2
+)

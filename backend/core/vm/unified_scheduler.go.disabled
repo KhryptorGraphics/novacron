@@ -1,0 +1,953 @@
+package vm
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"sort"
+	"sync"
+	"time"
+)
+
+// WorkloadType represents the type of workload
+type WorkloadType string
+
+const (
+	WorkloadTypeVM        WorkloadType = "vm"
+	WorkloadTypeContainer WorkloadType = "container"
+	WorkloadTypeKata      WorkloadType = "kata"
+	WorkloadTypeHybrid    WorkloadType = "hybrid"
+)
+
+// WorkloadProfile represents performance and resource characteristics
+type WorkloadProfile struct {
+	Type                WorkloadType      `json:"type"`
+	CPUIntensive        bool              `json:"cpu_intensive"`
+	MemoryIntensive     bool              `json:"memory_intensive"`
+	IOIntensive         bool              `json:"io_intensive"`
+	NetworkIntensive    bool              `json:"network_intensive"`
+	SecurityRequirement string            `json:"security_requirement"` // low, medium, high, critical
+	IsolationLevel      string            `json:"isolation_level"`      // process, container, vm
+	LatencySensitive    bool              `json:"latency_sensitive"`
+	ScalabilityNeeds    string            `json:"scalability_needs"`    // horizontal, vertical, none
+	Attributes          map[string]string `json:"attributes"`
+}
+
+// UnifiedResourceInfo represents unified resource information for mixed workloads
+type UnifiedResourceInfo struct {
+	NodeResourceInfo                 // Embed base node info
+	VMCount            int           `json:"vm_count"`
+	ContainerCount     int           `json:"container_count"`
+	KataContainerCount int           `json:"kata_container_count"`
+	HybridWorkloads    int           `json:"hybrid_workloads"`
+	WorkloadMix        []WorkloadType `json:"workload_mix"`
+	PerformanceScore   float64       `json:"performance_score"`
+	EfficiencyRating   float64       `json:"efficiency_rating"`
+	SecurityLevel      string        `json:"security_level"`
+	OptimalWorkloadTypes []WorkloadType `json:"optimal_workload_types"`
+}
+
+// UnifiedSchedulerConfig represents configuration for unified scheduling
+type UnifiedSchedulerConfig struct {
+	SchedulerConfig                        // Embed base scheduler config
+	EnableIntelligentPlacement  bool       `json:"enable_intelligent_placement"`
+	EnableWorkloadTransformation bool      `json:"enable_workload_transformation"`
+	EnableLiveMigration         bool       `json:"enable_live_migration"`
+	EnableAutoScaling           bool       `json:"enable_auto_scaling"`
+	PerformanceThreshold        float64    `json:"performance_threshold"`
+	EfficiencyThreshold         float64    `json:"efficiency_threshold"`
+	SecurityPolicies           map[string]interface{} `json:"security_policies"`
+	PlacementStrategies        []string   `json:"placement_strategies"`
+	MigrationPolicies          map[string]string `json:"migration_policies"`
+}
+
+// UnifiedScheduler manages VM and container workloads with intelligent placement
+type UnifiedScheduler struct {
+	config           UnifiedSchedulerConfig
+	nodes            map[string]*UnifiedResourceInfo
+	nodesMutex       sync.RWMutex
+	workloadProfiles map[string]*WorkloadProfile
+	profilesMutex    sync.RWMutex
+	placementEngine  *PlacementEngine
+	migrationEngine  *MigrationEngine
+	performanceMonitor *PerformanceMonitor
+}
+
+// PlacementEngine handles intelligent workload placement
+type PlacementEngine struct {
+	ai            *AIPlacementEngine
+	policyEngine  *PolicyEngine
+	constraintSolver *ConstraintSolver
+}
+
+// AIPlacementEngine uses machine learning for optimal placement
+type AIPlacementEngine struct {
+	model           string
+	predictions     map[string]float64
+	learningEnabled bool
+}
+
+// PolicyEngine enforces placement policies
+type PolicyEngine struct {
+	policies map[string]interface{}
+	rules    []PlacementRule
+}
+
+// ConstraintSolver solves resource and placement constraints
+type ConstraintSolver struct {
+	constraints []Constraint
+	solver      string
+}
+
+// PlacementRule represents a placement rule
+type PlacementRule struct {
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Conditions  map[string]interface{} `json:"conditions"`
+	Actions     map[string]interface{} `json:"actions"`
+	Priority    int                    `json:"priority"`
+	Enabled     bool                   `json:"enabled"`
+}
+
+// Constraint represents a resource or placement constraint
+type Constraint struct {
+	Type     string                 `json:"type"`
+	Target   string                 `json:"target"`
+	Operator string                 `json:"operator"`
+	Value    interface{}            `json:"value"`
+	Metadata map[string]interface{} `json:"metadata"`
+}
+
+// MigrationEngine handles live migration between VM and container formats
+type MigrationEngine struct {
+	strategies     map[string]*MigrationStrategy
+	queueManager   *MigrationQueueManager
+	resourceTracker *ResourceTracker
+}
+
+// MigrationStrategy represents a migration strategy
+type MigrationStrategy struct {
+	Name                string    `json:"name"`
+	SourceType          WorkloadType `json:"source_type"`
+	TargetType          WorkloadType `json:"target_type"`
+	DowntimeTarget      time.Duration `json:"downtime_target"`
+	BandwidthRequirement float64  `json:"bandwidth_requirement"`
+	SupportsLiveMigration bool    `json:"supports_live_migration"`
+}
+
+// MigrationQueueManager manages migration queue and priorities
+type MigrationQueueManager struct {
+	queue     []*MigrationTask
+	queueMutex sync.RWMutex
+	active    map[string]*MigrationTask
+	activeMutex sync.RWMutex
+}
+
+// MigrationTask represents a migration task
+type MigrationTask struct {
+	ID               string                 `json:"id"`
+	WorkloadID       string                 `json:"workload_id"`
+	SourceNode       string                 `json:"source_node"`
+	TargetNode       string                 `json:"target_node"`
+	SourceType       WorkloadType           `json:"source_type"`
+	TargetType       WorkloadType           `json:"target_type"`
+	Priority         MigrationPriority      `json:"priority"`
+	ScheduledTime    time.Time              `json:"scheduled_time"`
+	Status           MigrationStatus        `json:"status"`
+	Progress         float64                `json:"progress"`
+	Metadata         map[string]interface{} `json:"metadata"`
+}
+
+// ResourceTracker tracks resource usage during migrations
+type ResourceTracker struct {
+	usageHistory map[string][]ResourceUsage
+	allocations  map[string]*ResourceAllocation
+	mutex        sync.RWMutex
+}
+
+// ResourceUsage represents resource usage at a point in time
+type ResourceUsage struct {
+	Timestamp time.Time `json:"timestamp"`
+	CPU       float64   `json:"cpu"`
+	Memory    int64     `json:"memory"`
+	Disk      int64     `json:"disk"`
+	Network   int64     `json:"network"`
+}
+
+// ResourceAllocation represents allocated resources
+type ResourceAllocation struct {
+	WorkloadID   string    `json:"workload_id"`
+	NodeID       string    `json:"node_id"`
+	AllocatedCPU float64   `json:"allocated_cpu"`
+	AllocatedMemory int64  `json:"allocated_memory"`
+	AllocatedDisk   int64  `json:"allocated_disk"`
+	StartTime    time.Time `json:"start_time"`
+}
+
+// PerformanceMonitor monitors workload performance and suggests optimizations
+type PerformanceMonitor struct {
+	metrics        map[string]*PerformanceMetrics
+	metricsMutex   sync.RWMutex
+	thresholds     map[string]float64
+	alerts         []*PerformanceAlert
+	optimizations  []*OptimizationSuggestion
+}
+
+// PerformanceMetrics represents performance metrics for a workload
+type PerformanceMetrics struct {
+	WorkloadID       string    `json:"workload_id"`
+	CPUUtilization   float64   `json:"cpu_utilization"`
+	MemoryUtilization float64  `json:"memory_utilization"`
+	DiskIOPS         int64     `json:"disk_iops"`
+	NetworkThroughput int64    `json:"network_throughput"`
+	Latency          time.Duration `json:"latency"`
+	Throughput       float64   `json:"throughput"`
+	LastUpdated      time.Time `json:"last_updated"`
+}
+
+// PerformanceAlert represents a performance alert
+type PerformanceAlert struct {
+	ID          string                 `json:"id"`
+	WorkloadID  string                 `json:"workload_id"`
+	NodeID      string                 `json:"node_id"`
+	Severity    string                 `json:"severity"`
+	Message     string                 `json:"message"`
+	Timestamp   time.Time              `json:"timestamp"`
+	Metadata    map[string]interface{} `json:"metadata"`
+	Resolved    bool                   `json:"resolved"`
+}
+
+// OptimizationSuggestion represents an optimization suggestion
+type OptimizationSuggestion struct {
+	ID                string                 `json:"id"`
+	WorkloadID        string                 `json:"workload_id"`
+	CurrentType       WorkloadType           `json:"current_type"`
+	SuggestedType     WorkloadType           `json:"suggested_type"`
+	ExpectedImprovement float64              `json:"expected_improvement"`
+	Reason            string                 `json:"reason"`
+	Priority          int                    `json:"priority"`
+	Metadata          map[string]interface{} `json:"metadata"`
+	CreatedAt         time.Time              `json:"created_at"`
+}
+
+// NewUnifiedScheduler creates a new unified scheduler with Phase 2 capabilities
+func NewUnifiedScheduler(config UnifiedSchedulerConfig) *UnifiedScheduler {
+	placementEngine := &PlacementEngine{
+		ai: &AIPlacementEngine{
+			model:           "novacron-placement-v2",
+			predictions:     make(map[string]float64),
+			learningEnabled: true,
+		},
+		policyEngine: &PolicyEngine{
+			policies: make(map[string]interface{}),
+			rules:    []PlacementRule{},
+		},
+		constraintSolver: &ConstraintSolver{
+			constraints: []Constraint{},
+			solver:      "linear-programming",
+		},
+	}
+
+	migrationEngine := &MigrationEngine{
+		strategies: map[string]*MigrationStrategy{
+			"vm-to-kata": {
+				Name:                  "VM to Kata Container",
+				SourceType:            WorkloadTypeVM,
+				TargetType:            WorkloadTypeKata,
+				DowntimeTarget:        5 * time.Second,
+				BandwidthRequirement:  1000.0, // Mbps
+				SupportsLiveMigration: true,
+			},
+			"kata-to-vm": {
+				Name:                  "Kata Container to VM",
+				SourceType:            WorkloadTypeKata,
+				TargetType:            WorkloadTypeVM,
+				DowntimeTarget:        10 * time.Second,
+				BandwidthRequirement:  500.0,
+				SupportsLiveMigration: true,
+			},
+			"container-to-kata": {
+				Name:                  "Container to Kata Container",
+				SourceType:            WorkloadTypeContainer,
+				TargetType:            WorkloadTypeKata,
+				DowntimeTarget:        3 * time.Second,
+				BandwidthRequirement:  200.0,
+				SupportsLiveMigration: false,
+			},
+		},
+		queueManager: &MigrationQueueManager{
+			queue:  make([]*MigrationTask, 0),
+			active: make(map[string]*MigrationTask),
+		},
+		resourceTracker: &ResourceTracker{
+			usageHistory: make(map[string][]ResourceUsage),
+			allocations:  make(map[string]*ResourceAllocation),
+		},
+	}
+
+	performanceMonitor := &PerformanceMonitor{
+		metrics:    make(map[string]*PerformanceMetrics),
+		thresholds: map[string]float64{
+			"cpu_threshold":      80.0,
+			"memory_threshold":   85.0,
+			"latency_threshold":  100.0, // ms
+		},
+		alerts:        make([]*PerformanceAlert, 0),
+		optimizations: make([]*OptimizationSuggestion, 0),
+	}
+
+	return &UnifiedScheduler{
+		config:             config,
+		nodes:              make(map[string]*UnifiedResourceInfo),
+		workloadProfiles:   make(map[string]*WorkloadProfile),
+		placementEngine:    placementEngine,
+		migrationEngine:    migrationEngine,
+		performanceMonitor: performanceMonitor,
+	}
+}
+
+// RegisterNode registers a node with enhanced resource information
+func (s *UnifiedScheduler) RegisterNode(nodeInfo *UnifiedResourceInfo) error {
+	s.nodesMutex.Lock()
+	defer s.nodesMutex.Unlock()
+
+	if _, exists := s.nodes[nodeInfo.NodeID]; exists {
+		return fmt.Errorf("node %s is already registered", nodeInfo.NodeID)
+	}
+
+	// Initialize node-specific workload counters
+	nodeInfo.VMCount = 0
+	nodeInfo.ContainerCount = 0
+	nodeInfo.KataContainerCount = 0
+	nodeInfo.HybridWorkloads = 0
+	nodeInfo.WorkloadMix = []WorkloadType{}
+	nodeInfo.PerformanceScore = 100.0
+	nodeInfo.EfficiencyRating = 95.0
+	nodeInfo.SecurityLevel = "medium"
+	nodeInfo.OptimalWorkloadTypes = []WorkloadType{WorkloadTypeVM, WorkloadTypeKata}
+
+	s.nodes[nodeInfo.NodeID] = nodeInfo
+	log.Printf("Registered unified node %s with enhanced capabilities", nodeInfo.NodeID)
+
+	return nil
+}
+
+// ScheduleWorkload schedules a workload using intelligent placement
+func (s *UnifiedScheduler) ScheduleWorkload(ctx context.Context, workloadSpec *WorkloadSpec) (*PlacementDecision, error) {
+	log.Printf("Scheduling workload %s with intelligent placement", workloadSpec.Name)
+
+	// Step 1: Analyze workload profile
+	profile, err := s.analyzeWorkloadProfile(workloadSpec)
+	if err != nil {
+		return nil, fmt.Errorf("failed to analyze workload profile: %w", err)
+	}
+
+	// Step 2: Get candidate nodes
+	candidates, err := s.getCandidateNodes(profile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get candidate nodes: %w", err)
+	}
+
+	// Step 3: Apply intelligent placement
+	placement, err := s.placementEngine.findOptimalPlacement(profile, candidates)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find optimal placement: %w", err)
+	}
+
+	// Step 4: Validate constraints
+	if err := s.validatePlacement(placement); err != nil {
+		return nil, fmt.Errorf("placement validation failed: %w", err)
+	}
+
+	// Step 5: Reserve resources
+	if err := s.reserveResources(placement); err != nil {
+		return nil, fmt.Errorf("failed to reserve resources: %w", err)
+	}
+
+	log.Printf("Successfully scheduled workload %s on node %s as %s", 
+		workloadSpec.Name, placement.NodeID, placement.WorkloadType)
+
+	return placement, nil
+}
+
+// WorkloadSpec represents a workload specification
+type WorkloadSpec struct {
+	Name            string                 `json:"name"`
+	Image           string                 `json:"image"`
+	CPURequest      float64                `json:"cpu_request"`
+	MemoryRequest   int64                  `json:"memory_request"`
+	DiskRequest     int64                  `json:"disk_request"`
+	NetworkRequest  int64                  `json:"network_request"`
+	SecurityLevel   string                 `json:"security_level"`
+	IsolationLevel  string                 `json:"isolation_level"`
+	PerformanceHints map[string]interface{} `json:"performance_hints"`
+	Constraints     []Constraint           `json:"constraints"`
+	Labels          map[string]string      `json:"labels"`
+	Annotations     map[string]string      `json:"annotations"`
+}
+
+// PlacementDecision represents a placement decision
+type PlacementDecision struct {
+	WorkloadID     string                 `json:"workload_id"`
+	NodeID         string                 `json:"node_id"`
+	WorkloadType   WorkloadType           `json:"workload_type"`
+	Confidence     float64                `json:"confidence"`
+	Reasoning      string                 `json:"reasoning"`
+	Alternatives   []string               `json:"alternatives"`
+	ResourcePlan   *ResourcePlan          `json:"resource_plan"`
+	Metadata       map[string]interface{} `json:"metadata"`
+	Timestamp      time.Time              `json:"timestamp"`
+}
+
+// ResourcePlan represents a resource allocation plan
+type ResourcePlan struct {
+	CPUAllocation    float64   `json:"cpu_allocation"`
+	MemoryAllocation int64     `json:"memory_allocation"`
+	DiskAllocation   int64     `json:"disk_allocation"`
+	NetworkBandwidth int64     `json:"network_bandwidth"`
+	StoragePath      string    `json:"storage_path"`
+	NetworkPolicies  []string  `json:"network_policies"`
+	SecurityPolicies []string  `json:"security_policies"`
+	QoSClass         string    `json:"qos_class"`
+	StartTime        time.Time `json:"start_time"`
+	Duration         time.Duration `json:"duration"`
+}
+
+// analyzeWorkloadProfile analyzes workload characteristics
+func (s *UnifiedScheduler) analyzeWorkloadProfile(spec *WorkloadSpec) (*WorkloadProfile, error) {
+	profile := &WorkloadProfile{
+		Attributes: make(map[string]string),
+	}
+
+	// Analyze resource requirements
+	if spec.CPURequest > 2.0 {
+		profile.CPUIntensive = true
+	}
+	if spec.MemoryRequest > 4*1024*1024*1024 { // 4GB
+		profile.MemoryIntensive = true
+	}
+	if spec.DiskRequest > 100*1024*1024*1024 { // 100GB
+		profile.IOIntensive = true
+	}
+	if spec.NetworkRequest > 1000*1024*1024 { // 1Gbps
+		profile.NetworkIntensive = true
+	}
+
+	// Determine security requirements
+	profile.SecurityRequirement = spec.SecurityLevel
+	if profile.SecurityRequirement == "" {
+		profile.SecurityRequirement = "medium"
+	}
+
+	// Determine isolation level
+	profile.IsolationLevel = spec.IsolationLevel
+	if profile.IsolationLevel == "" {
+		profile.IsolationLevel = "container"
+	}
+
+	// Determine optimal workload type
+	profile.Type = s.determineOptimalWorkloadType(profile)
+
+	// Check for latency sensitivity
+	if hints := spec.PerformanceHints; hints != nil {
+		if latency, ok := hints["latency_sensitive"].(bool); ok {
+			profile.LatencySensitive = latency
+		}
+		if scaling, ok := hints["scaling_needs"].(string); ok {
+			profile.ScalabilityNeeds = scaling
+		}
+	}
+
+	return profile, nil
+}
+
+// determineOptimalWorkloadType determines the best workload type based on profile
+func (s *UnifiedScheduler) determineOptimalWorkloadType(profile *WorkloadProfile) WorkloadType {
+	// High security requirements -> VM or Kata
+	if profile.SecurityRequirement == "high" || profile.SecurityRequirement == "critical" {
+		if profile.LatencySensitive {
+			return WorkloadTypeKata // Better performance than full VM
+		}
+		return WorkloadTypeVM
+	}
+
+	// VM isolation required
+	if profile.IsolationLevel == "vm" {
+		return WorkloadTypeVM
+	}
+
+	// Resource intensive workloads -> Kata (better isolation than containers)
+	if profile.CPUIntensive || profile.MemoryIntensive {
+		return WorkloadTypeKata
+	}
+
+	// Latency sensitive -> Kata (VM isolation with container performance)
+	if profile.LatencySensitive {
+		return WorkloadTypeKata
+	}
+
+	// Default to regular containers for lightweight workloads
+	return WorkloadTypeContainer
+}
+
+// getCandidateNodes gets nodes that can host the workload
+func (s *UnifiedScheduler) getCandidateNodes(profile *WorkloadProfile) ([]*UnifiedResourceInfo, error) {
+	s.nodesMutex.RLock()
+	defer s.nodesMutex.RUnlock()
+
+	var candidates []*UnifiedResourceInfo
+	for _, node := range s.nodes {
+		if s.nodeCanHost(node, profile) {
+			candidates = append(candidates, node)
+		}
+	}
+
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("no suitable nodes found for workload")
+	}
+
+	return candidates, nil
+}
+
+// nodeCanHost checks if a node can host the workload
+func (s *UnifiedScheduler) nodeCanHost(node *UnifiedResourceInfo, profile *WorkloadProfile) bool {
+	// Check if node supports the workload type
+	supported := false
+	for _, supportedType := range node.OptimalWorkloadTypes {
+		if supportedType == profile.Type {
+			supported = true
+			break
+		}
+	}
+	if !supported {
+		return false
+	}
+
+	// Check resource availability
+	if node.CPUUsagePercent > s.config.MaxCPUOvercommit {
+		return false
+	}
+	if node.MemoryUsagePercent > s.config.MaxMemoryOvercommit {
+		return false
+	}
+
+	// Check max VMs per node
+	totalWorkloads := node.VMCount + node.ContainerCount + node.KataContainerCount
+	if totalWorkloads >= s.config.MaxVMsPerNode {
+		return false
+	}
+
+	// Check security level compatibility
+	if profile.SecurityRequirement == "critical" && node.SecurityLevel != "high" {
+		return false
+	}
+
+	return true
+}
+
+// findOptimalPlacement finds the best placement using AI and constraints
+func (pe *PlacementEngine) findOptimalPlacement(profile *WorkloadProfile, candidates []*UnifiedResourceInfo) (*PlacementDecision, error) {
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("no candidate nodes available")
+	}
+
+	// Score each candidate node
+	type nodeScore struct {
+		node  *UnifiedResourceInfo
+		score float64
+	}
+
+	var scores []nodeScore
+	for _, node := range candidates {
+		score := pe.calculatePlacementScore(profile, node)
+		scores = append(scores, nodeScore{node: node, score: score})
+	}
+
+	// Sort by score (highest first)
+	sort.Slice(scores, func(i, j int) bool {
+		return scores[i].score > scores[j].score
+	})
+
+	// Select best node
+	bestNode := scores[0].node
+	confidence := scores[0].score / 100.0
+
+	// Create alternatives list
+	alternatives := make([]string, 0, min(3, len(scores)-1))
+	for i := 1; i < len(scores) && i < 4; i++ {
+		alternatives = append(alternatives, scores[i].node.NodeID)
+	}
+
+	placement := &PlacementDecision{
+		WorkloadID:   fmt.Sprintf("workload-%d", time.Now().UnixNano()),
+		NodeID:       bestNode.NodeID,
+		WorkloadType: profile.Type,
+		Confidence:   confidence,
+		Reasoning:    pe.generatePlacementReasoning(profile, bestNode),
+		Alternatives: alternatives,
+		ResourcePlan: &ResourcePlan{
+			QoSClass:  "guaranteed",
+			StartTime: time.Now().Add(30 * time.Second),
+			Duration:  0, // Indefinite
+		},
+		Metadata:  make(map[string]interface{}),
+		Timestamp: time.Now(),
+	}
+
+	return placement, nil
+}
+
+// calculatePlacementScore calculates a placement score for a node
+func (pe *PlacementEngine) calculatePlacementScore(profile *WorkloadProfile, node *UnifiedResourceInfo) float64 {
+	score := 100.0
+
+	// Resource utilization score (prefer balanced utilization)
+	cpuScore := 100.0 - abs(node.CPUUsagePercent-50.0)
+	memoryScore := 100.0 - abs(node.MemoryUsagePercent-50.0)
+	resourceScore := (cpuScore + memoryScore) / 2.0
+
+	// Performance score
+	performanceScore := node.PerformanceScore
+
+	// Efficiency score
+	efficiencyScore := node.EfficiencyRating
+
+	// Workload type compatibility score
+	typeScore := 0.0
+	for _, supportedType := range node.OptimalWorkloadTypes {
+		if supportedType == profile.Type {
+			typeScore = 100.0
+			break
+		}
+	}
+
+	// Security compatibility score
+	securityScore := 100.0
+	if profile.SecurityRequirement == "critical" && node.SecurityLevel != "high" {
+		securityScore = 0.0
+	} else if profile.SecurityRequirement == "high" && node.SecurityLevel == "low" {
+		securityScore = 50.0
+	}
+
+	// Calculate weighted average
+	score = (resourceScore*0.3 + performanceScore*0.2 + efficiencyScore*0.2 + 
+		typeScore*0.2 + securityScore*0.1)
+
+	return score
+}
+
+// generatePlacementReasoning generates human-readable reasoning
+func (pe *PlacementEngine) generatePlacementReasoning(profile *WorkloadProfile, node *UnifiedResourceInfo) string {
+	reasoning := fmt.Sprintf("Selected node %s for %s workload", node.NodeID, profile.Type)
+
+	if node.PerformanceScore > 90 {
+		reasoning += " (high performance node)"
+	}
+	if node.EfficiencyRating > 90 {
+		reasoning += " (high efficiency)"
+	}
+	if profile.SecurityRequirement == "high" || profile.SecurityRequirement == "critical" {
+		reasoning += " (meets security requirements)"
+	}
+	if profile.LatencySensitive {
+		reasoning += " (optimized for low latency)"
+	}
+
+	return reasoning
+}
+
+// validatePlacement validates a placement decision
+func (s *UnifiedScheduler) validatePlacement(placement *PlacementDecision) error {
+	s.nodesMutex.RLock()
+	node, exists := s.nodes[placement.NodeID]
+	s.nodesMutex.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("target node %s not found", placement.NodeID)
+	}
+
+	// Check if node still has capacity
+	totalWorkloads := node.VMCount + node.ContainerCount + node.KataContainerCount
+	if totalWorkloads >= s.config.MaxVMsPerNode {
+		return fmt.Errorf("node %s at capacity", placement.NodeID)
+	}
+
+	return nil
+}
+
+// reserveResources reserves resources for a placement
+func (s *UnifiedScheduler) reserveResources(placement *PlacementDecision) error {
+	s.nodesMutex.Lock()
+	defer s.nodesMutex.Unlock()
+
+	node := s.nodes[placement.NodeID]
+
+	// Update workload counters
+	switch placement.WorkloadType {
+	case WorkloadTypeVM:
+		node.VMCount++
+	case WorkloadTypeContainer:
+		node.ContainerCount++
+	case WorkloadTypeKata:
+		node.KataContainerCount++
+	case WorkloadTypeHybrid:
+		node.HybridWorkloads++
+	}
+
+	// Update workload mix
+	node.WorkloadMix = append(node.WorkloadMix, placement.WorkloadType)
+
+	return nil
+}
+
+// ScheduleLiveMigration schedules live migration between workload types
+func (s *UnifiedScheduler) ScheduleLiveMigration(ctx context.Context, workloadID string, targetType WorkloadType) (*MigrationTask, error) {
+	log.Printf("Scheduling live migration for workload %s to type %s", workloadID, targetType)
+
+	// Get current workload info
+	currentType, err := s.getWorkloadType(workloadID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current workload type: %w", err)
+	}
+
+	// Find migration strategy
+	strategyKey := fmt.Sprintf("%s-to-%s", currentType, targetType)
+	strategy, exists := s.migrationEngine.strategies[strategyKey]
+	if !exists {
+		return nil, fmt.Errorf("no migration strategy available for %s to %s", currentType, targetType)
+	}
+
+	// Create migration task
+	task := &MigrationTask{
+		ID:            fmt.Sprintf("mig-%s-%d", workloadID, time.Now().UnixNano()),
+		WorkloadID:    workloadID,
+		SourceType:    currentType,
+		TargetType:    targetType,
+		Priority:      MigrationPriorityNormal,
+		ScheduledTime: time.Now().Add(1 * time.Minute),
+		Status:        MigrationStatusPending,
+		Progress:      0.0,
+		Metadata:      make(map[string]interface{}),
+	}
+
+	// Add to migration queue
+	s.migrationEngine.queueManager.queueMutex.Lock()
+	s.migrationEngine.queueManager.queue = append(s.migrationEngine.queueManager.queue, task)
+	s.migrationEngine.queueManager.queueMutex.Unlock()
+
+	log.Printf("Migration task %s scheduled for %s", task.ID, task.ScheduledTime.Format(time.RFC3339))
+
+	return task, nil
+}
+
+// getWorkloadType determines the current type of a workload
+func (s *UnifiedScheduler) getWorkloadType(workloadID string) (WorkloadType, error) {
+	// This would typically query the workload registry
+	// For now, return a default
+	return WorkloadTypeContainer, nil
+}
+
+// GetPerformanceMetrics gets performance metrics for a workload
+func (s *UnifiedScheduler) GetPerformanceMetrics(workloadID string) (*PerformanceMetrics, error) {
+	s.performanceMonitor.metricsMutex.RLock()
+	defer s.performanceMonitor.metricsMutex.RUnlock()
+
+	metrics, exists := s.performanceMonitor.metrics[workloadID]
+	if !exists {
+		return nil, fmt.Errorf("no metrics found for workload %s", workloadID)
+	}
+
+	return metrics, nil
+}
+
+// UpdatePerformanceMetrics updates performance metrics for a workload
+func (s *UnifiedScheduler) UpdatePerformanceMetrics(workloadID string, metrics *PerformanceMetrics) error {
+	s.performanceMonitor.metricsMutex.Lock()
+	defer s.performanceMonitor.metricsMutex.Unlock()
+
+	metrics.LastUpdated = time.Now()
+	s.performanceMonitor.metrics[workloadID] = metrics
+
+	// Check for performance alerts
+	s.checkPerformanceAlerts(workloadID, metrics)
+
+	// Generate optimization suggestions
+	s.generateOptimizationSuggestions(workloadID, metrics)
+
+	return nil
+}
+
+// checkPerformanceAlerts checks for performance issues and creates alerts
+func (s *UnifiedScheduler) checkPerformanceAlerts(workloadID string, metrics *PerformanceMetrics) {
+	// Check CPU threshold
+	if metrics.CPUUtilization > s.performanceMonitor.thresholds["cpu_threshold"] {
+		alert := &PerformanceAlert{
+			ID:         fmt.Sprintf("alert-%s-%d", workloadID, time.Now().UnixNano()),
+			WorkloadID: workloadID,
+			Severity:   "warning",
+			Message:    fmt.Sprintf("High CPU utilization: %.2f%%", metrics.CPUUtilization),
+			Timestamp:  time.Now(),
+			Metadata:   map[string]interface{}{"cpu_utilization": metrics.CPUUtilization},
+			Resolved:   false,
+		}
+		s.performanceMonitor.alerts = append(s.performanceMonitor.alerts, alert)
+	}
+
+	// Check memory threshold
+	if metrics.MemoryUtilization > s.performanceMonitor.thresholds["memory_threshold"] {
+		alert := &PerformanceAlert{
+			ID:         fmt.Sprintf("alert-%s-%d", workloadID, time.Now().UnixNano()),
+			WorkloadID: workloadID,
+			Severity:   "warning",
+			Message:    fmt.Sprintf("High memory utilization: %.2f%%", metrics.MemoryUtilization),
+			Timestamp:  time.Now(),
+			Metadata:   map[string]interface{}{"memory_utilization": metrics.MemoryUtilization},
+			Resolved:   false,
+		}
+		s.performanceMonitor.alerts = append(s.performanceMonitor.alerts, alert)
+	}
+
+	// Check latency threshold
+	latencyMs := float64(metrics.Latency.Nanoseconds()) / 1e6
+	if latencyMs > s.performanceMonitor.thresholds["latency_threshold"] {
+		alert := &PerformanceAlert{
+			ID:         fmt.Sprintf("alert-%s-%d", workloadID, time.Now().UnixNano()),
+			WorkloadID: workloadID,
+			Severity:   "critical",
+			Message:    fmt.Sprintf("High latency: %.2fms", latencyMs),
+			Timestamp:  time.Now(),
+			Metadata:   map[string]interface{}{"latency_ms": latencyMs},
+			Resolved:   false,
+		}
+		s.performanceMonitor.alerts = append(s.performanceMonitor.alerts, alert)
+	}
+}
+
+// generateOptimizationSuggestions generates workload optimization suggestions
+func (s *UnifiedScheduler) generateOptimizationSuggestions(workloadID string, metrics *PerformanceMetrics) {
+	// Get current workload type
+	currentType, err := s.getWorkloadType(workloadID)
+	if err != nil {
+		return
+	}
+
+	// Suggest VM to Kata migration for resource-intensive workloads
+	if currentType == WorkloadTypeVM && 
+		(metrics.CPUUtilization < 30.0 && metrics.MemoryUtilization < 40.0) {
+		suggestion := &OptimizationSuggestion{
+			ID:                  fmt.Sprintf("opt-%s-%d", workloadID, time.Now().UnixNano()),
+			WorkloadID:          workloadID,
+			CurrentType:         currentType,
+			SuggestedType:       WorkloadTypeKata,
+			ExpectedImprovement: 25.0, // 25% efficiency improvement
+			Reason:              "Low resource utilization - Kata containers would be more efficient",
+			Priority:           3,
+			Metadata:           map[string]interface{}{"cpu_util": metrics.CPUUtilization, "mem_util": metrics.MemoryUtilization},
+			CreatedAt:          time.Now(),
+		}
+		s.performanceMonitor.optimizations = append(s.performanceMonitor.optimizations, suggestion)
+	}
+
+	// Suggest Container to Kata migration for high-security needs
+	if currentType == WorkloadTypeContainer && metrics.MemoryUtilization > 70.0 {
+		suggestion := &OptimizationSuggestion{
+			ID:                  fmt.Sprintf("opt-%s-%d", workloadID, time.Now().UnixNano()),
+			WorkloadID:          workloadID,
+			CurrentType:         currentType,
+			SuggestedType:       WorkloadTypeKata,
+			ExpectedImprovement: 15.0, // 15% security improvement
+			Reason:              "High resource usage - Kata containers provide better isolation",
+			Priority:           5,
+			Metadata:           map[string]interface{}{"mem_util": metrics.MemoryUtilization},
+			CreatedAt:          time.Now(),
+		}
+		s.performanceMonitor.optimizations = append(s.performanceMonitor.optimizations, suggestion)
+	}
+}
+
+// GetOptimizationSuggestions returns optimization suggestions for workloads
+func (s *UnifiedScheduler) GetOptimizationSuggestions(workloadID string) ([]*OptimizationSuggestion, error) {
+	var suggestions []*OptimizationSuggestion
+	for _, suggestion := range s.performanceMonitor.optimizations {
+		if suggestion.WorkloadID == workloadID {
+			suggestions = append(suggestions, suggestion)
+		}
+	}
+	return suggestions, nil
+}
+
+// GetClusterStatus returns overall cluster status with mixed workloads
+func (s *UnifiedScheduler) GetClusterStatus() *ClusterStatus {
+	s.nodesMutex.RLock()
+	defer s.nodesMutex.RUnlock()
+
+	status := &ClusterStatus{
+		TotalNodes:      len(s.nodes),
+		HealthyNodes:    0,
+		TotalVMs:        0,
+		TotalContainers: 0,
+		TotalKataContainers: 0,
+		TotalHybridWorkloads: 0,
+		AverageCPUUsage: 0.0,
+		AverageMemoryUsage: 0.0,
+		AveragePerformanceScore: 0.0,
+		WorkloadMix: make(map[WorkloadType]int),
+		LastUpdated: time.Now(),
+	}
+
+	for _, node := range s.nodes {
+		if node.Status == "healthy" {
+			status.HealthyNodes++
+		}
+		status.TotalVMs += node.VMCount
+		status.TotalContainers += node.ContainerCount
+		status.TotalKataContainers += node.KataContainerCount
+		status.TotalHybridWorkloads += node.HybridWorkloads
+		status.AverageCPUUsage += node.CPUUsagePercent
+		status.AverageMemoryUsage += node.MemoryUsagePercent
+		status.AveragePerformanceScore += node.PerformanceScore
+
+		// Count workload types
+		for _, workloadType := range node.WorkloadMix {
+			status.WorkloadMix[workloadType]++
+		}
+	}
+
+	if len(s.nodes) > 0 {
+		status.AverageCPUUsage /= float64(len(s.nodes))
+		status.AverageMemoryUsage /= float64(len(s.nodes))
+		status.AveragePerformanceScore /= float64(len(s.nodes))
+	}
+
+	return status
+}
+
+// ClusterStatus represents the overall cluster status
+type ClusterStatus struct {
+	TotalNodes               int                    `json:"total_nodes"`
+	HealthyNodes             int                    `json:"healthy_nodes"`
+	TotalVMs                 int                    `json:"total_vms"`
+	TotalContainers          int                    `json:"total_containers"`
+	TotalKataContainers      int                    `json:"total_kata_containers"`
+	TotalHybridWorkloads     int                    `json:"total_hybrid_workloads"`
+	AverageCPUUsage          float64                `json:"average_cpu_usage"`
+	AverageMemoryUsage       float64                `json:"average_memory_usage"`
+	AveragePerformanceScore  float64                `json:"average_performance_score"`
+	WorkloadMix              map[WorkloadType]int   `json:"workload_mix"`
+	LastUpdated              time.Time              `json:"last_updated"`
+}
+
+// Helper functions
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

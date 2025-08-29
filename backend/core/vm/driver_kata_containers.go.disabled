@@ -1,0 +1,684 @@
+package vm
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// KataContainersDriver implements secure container-VM convergence with Kata Containers
+// Provides VM-level isolation with container efficiency
+type KataContainersDriver struct {
+	nodeID          string
+	containerdAddr  string
+	namespace       string
+	kataRuntime     string
+	basePath        string
+	networkManager  *KataNetworkManager
+	securityManager *KataSecurityManager
+	migrationEngine *KataMigrationEngine
+}
+
+// KataRuntimeConfig holds Kata Containers runtime configuration
+type KataRuntimeConfig struct {
+	HypervisorType    string            `json:"hypervisor_type"`    // qemu, cloud-hypervisor, firecracker
+	MemorySize        string            `json:"memory_size"`        // VM memory allocation
+	CPUs              string            `json:"cpus"`               // VM CPU allocation
+	KernelPath        string            `json:"kernel_path"`        // Custom kernel path
+	InitrdPath        string            `json:"initrd_path"`        // Custom initrd path
+	SecurityPolicies  map[string]string `json:"security_policies"`  // Security constraints
+	NetworkingMode    string            `json:"networking_mode"`    // bridge, host, none
+	StorageDriver     string            `json:"storage_driver"`     // overlayfs, devicemapper
+	EnableDebug       bool              `json:"enable_debug"`       // Debug mode
+	EnableLiveMigration bool            `json:"enable_live_migration"` // Live migration support
+}
+
+// KataNetworkManager handles networking for Kata Containers
+type KataNetworkManager struct {
+	CNIPlugins    []string          `json:"cni_plugins"`
+	Networks      map[string]string `json:"networks"`
+	BridgeConfigs map[string]string `json:"bridge_configs"`
+}
+
+// KataSecurityManager handles security policies for Kata Containers
+type KataSecurityManager struct {
+	Policies       map[string]interface{} `json:"policies"`
+	TrustedImages  []string               `json:"trusted_images"`
+	SeccompProfile string                 `json:"seccomp_profile"`
+	AppArmorProfile string                `json:"apparmor_profile"`
+}
+
+// KataMigrationEngine handles migration between VMs and containers
+type KataMigrationEngine struct {
+	CheckpointPath string `json:"checkpoint_path"`
+	RestorePath    string `json:"restore_path"`
+	EnableCRIU     bool   `json:"enable_criu"`
+	CompressionEnabled bool `json:"compression_enabled"`
+}
+
+// NewKataContainersDriver creates a new Kata Containers driver with Phase 2 capabilities
+func NewKataContainersDriver(config map[string]interface{}) (VMDriver, error) {
+	nodeID := ""
+	if id, ok := config["node_id"].(string); ok {
+		nodeID = id
+	}
+
+	containerdAddr := "/run/containerd/containerd.sock"
+	if addr, ok := config["containerd_address"].(string); ok {
+		containerdAddr = addr
+	}
+
+	namespace := "kata-system"
+	if ns, ok := config["namespace"].(string); ok {
+		namespace = ns
+	}
+
+	kataRuntime := "io.containerd.kata.v2"
+	if runtime, ok := config["kata_runtime"].(string); ok {
+		kataRuntime = runtime
+	}
+
+	basePath := "/var/lib/novacron/kata"
+	if path, ok := config["base_path"].(string); ok {
+		basePath = path
+	}
+
+	// Initialize network manager
+	networkManager := &KataNetworkManager{
+		CNIPlugins:    []string{"bridge", "portmap", "firewall", "tuning"},
+		Networks:      make(map[string]string),
+		BridgeConfigs: make(map[string]string),
+	}
+
+	// Initialize security manager
+	securityManager := &KataSecurityManager{
+		Policies:        make(map[string]interface{}),
+		TrustedImages:   []string{},
+		SeccompProfile:  "/etc/kata-containers/seccomp.json",
+		AppArmorProfile: "kata_default",
+	}
+
+	// Initialize migration engine
+	migrationEngine := &KataMigrationEngine{
+		CheckpointPath:     filepath.Join(basePath, "checkpoints"),
+		RestorePath:        filepath.Join(basePath, "restore"),
+		EnableCRIU:         true,
+		CompressionEnabled: true,
+	}
+
+	// Create base directories
+	if err := os.MkdirAll(basePath, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create base path: %w", err)
+	}
+	if err := os.MkdirAll(migrationEngine.CheckpointPath, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create checkpoint path: %w", err)
+	}
+	if err := os.MkdirAll(migrationEngine.RestorePath, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create restore path: %w", err)
+	}
+
+	log.Printf("Initialized Kata Containers driver for node %s with runtime %s", nodeID, kataRuntime)
+
+	return &KataContainersDriver{
+		nodeID:          nodeID,
+		containerdAddr:  containerdAddr,
+		namespace:       namespace,
+		kataRuntime:     kataRuntime,
+		basePath:        basePath,
+		networkManager:  networkManager,
+		securityManager: securityManager,
+		migrationEngine: migrationEngine,
+	}, nil
+}
+
+// Create creates a new Kata Container with VM-level isolation
+func (d *KataContainersDriver) Create(ctx context.Context, config VMConfig) (string, error) {
+	log.Printf("Creating Kata Container VM %s with enhanced security", config.Name)
+
+	// Generate unique container ID
+	containerID := fmt.Sprintf("kata-vm-%s-%d", config.Name, time.Now().UnixNano())
+
+	// Build runtime configuration
+	kataConfig := d.buildKataRuntimeConfig(config)
+	configPath := filepath.Join(d.basePath, containerID, "config.json")
+
+	// Create container directory
+	containerDir := filepath.Join(d.basePath, containerID)
+	if err := os.MkdirAll(containerDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create container directory: %w", err)
+	}
+
+	// Write Kata configuration
+	configData, err := json.MarshalIndent(kataConfig, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal Kata config: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, configData, 0644); err != nil {
+		return "", fmt.Errorf("failed to write Kata config: %w", err)
+	}
+
+	// Build container creation command with containerd/Kata runtime
+	args := []string{
+		"--address", d.containerdAddr,
+		"--namespace", d.namespace,
+		"container", "create",
+		"--runtime", d.kataRuntime,
+		"--config", configPath,
+	}
+
+	// Set resource limits with VM isolation
+	if config.CPUShares > 0 {
+		args = append(args, "--cpu-quota", fmt.Sprintf("%d", config.CPUShares*100))
+		args = append(args, "--cpu-period", "100000")
+	}
+
+	if config.MemoryMB > 0 {
+		args = append(args, "--memory", fmt.Sprintf("%dm", config.MemoryMB))
+	}
+
+	// Configure security policies
+	if d.securityManager.SeccompProfile != "" {
+		args = append(args, "--seccomp-profile", d.securityManager.SeccompProfile)
+	}
+
+	// Configure networking
+	if config.NetworkID != "" {
+		args = append(args, "--net-ns-path", config.NetworkID)
+	}
+
+	// Set image
+	image := config.RootFS
+	if image == "" {
+		image = "docker.io/library/alpine:latest"
+	}
+	args = append(args, image, containerID)
+
+	// Execute container creation
+	cmd := exec.CommandContext(ctx, "ctr", args...)
+	cmd.Dir = containerDir
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		log.Printf("Failed to create Kata container: %v, output: %s", err, string(output))
+		return "", fmt.Errorf("failed to create Kata container: %w", err)
+	}
+
+	log.Printf("Successfully created Kata Container VM %s with ID %s", config.Name, containerID)
+	return containerID, nil
+}
+
+// buildKataRuntimeConfig constructs Kata runtime configuration
+func (d *KataContainersDriver) buildKataRuntimeConfig(config VMConfig) KataRuntimeConfig {
+	return KataRuntimeConfig{
+		HypervisorType:      "qemu",
+		MemorySize:          fmt.Sprintf("%dM", config.MemoryMB),
+		CPUs:               fmt.Sprintf("%d", max(1, config.CPUShares/100)),
+		KernelPath:          "/opt/kata/share/kata-containers/vmlinux.container",
+		InitrdPath:          "/opt/kata/share/kata-containers/kata-containers-initrd.img",
+		SecurityPolicies:    make(map[string]string),
+		NetworkingMode:      "bridge",
+		StorageDriver:       "overlayfs",
+		EnableDebug:         false,
+		EnableLiveMigration: true,
+	}
+}
+
+// Start starts a Kata Container VM
+func (d *KataContainersDriver) Start(ctx context.Context, vmID string) error {
+	log.Printf("Starting Kata Container VM %s", vmID)
+
+	cmd := exec.CommandContext(ctx, "ctr",
+		"--address", d.containerdAddr,
+		"--namespace", d.namespace,
+		"task", "start", vmID)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Failed to start Kata container %s: %v, output: %s", vmID, err, string(output))
+		return fmt.Errorf("failed to start Kata container: %w", err)
+	}
+
+	return nil
+}
+
+// Stop stops a Kata Container VM
+func (d *KataContainersDriver) Stop(ctx context.Context, vmID string) error {
+	log.Printf("Stopping Kata Container VM %s", vmID)
+
+	cmd := exec.CommandContext(ctx, "ctr",
+		"--address", d.containerdAddr,
+		"--namespace", d.namespace,
+		"task", "kill", "--signal", "SIGTERM", vmID)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Failed to stop Kata container %s: %v, output: %s", vmID, err, string(output))
+		return fmt.Errorf("failed to stop Kata container: %w", err)
+	}
+
+	return nil
+}
+
+// Delete deletes a Kata Container VM
+func (d *KataContainersDriver) Delete(ctx context.Context, vmID string) error {
+	log.Printf("Deleting Kata Container VM %s", vmID)
+
+	// Stop the container first
+	_ = d.Stop(ctx, vmID)
+
+	// Delete the task
+	cmd := exec.CommandContext(ctx, "ctr",
+		"--address", d.containerdAddr,
+		"--namespace", d.namespace,
+		"task", "delete", vmID)
+	output, _ := cmd.CombinedOutput()
+
+	// Delete the container
+	cmd = exec.CommandContext(ctx, "ctr",
+		"--address", d.containerdAddr,
+		"--namespace", d.namespace,
+		"container", "delete", vmID)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		log.Printf("Failed to delete Kata container %s: %v, output: %s", vmID, err, string(output))
+		return fmt.Errorf("failed to delete Kata container: %w", err)
+	}
+
+	// Clean up container directory
+	containerDir := filepath.Join(d.basePath, vmID)
+	if err := os.RemoveAll(containerDir); err != nil {
+		log.Printf("Warning: Failed to clean up container directory %s: %v", containerDir, err)
+	}
+
+	return nil
+}
+
+// GetStatus gets the status of a Kata Container VM
+func (d *KataContainersDriver) GetStatus(ctx context.Context, vmID string) (State, error) {
+	cmd := exec.CommandContext(ctx, "ctr",
+		"--address", d.containerdAddr,
+		"--namespace", d.namespace,
+		"task", "list", "-q")
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return StateUnknown, fmt.Errorf("failed to list tasks: %w", err)
+	}
+
+	tasks := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, task := range tasks {
+		if strings.HasPrefix(task, vmID) {
+			parts := strings.Fields(task)
+			if len(parts) >= 2 {
+				switch parts[1] {
+				case "RUNNING":
+					return StateRunning, nil
+				case "STOPPED":
+					return StateStopped, nil
+				case "PAUSED":
+					return StatePaused, nil
+				default:
+					return StateUnknown, nil
+				}
+			}
+		}
+	}
+
+	return StateUnknown, fmt.Errorf("task not found")
+}
+
+// GetInfo gets information about a Kata Container VM
+func (d *KataContainersDriver) GetInfo(ctx context.Context, vmID string) (*VMInfo, error) {
+	status, err := d.GetStatus(ctx, vmID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get detailed container information
+	cmd := exec.CommandContext(ctx, "ctr",
+		"--address", d.containerdAddr,
+		"--namespace", d.namespace,
+		"container", "info", vmID)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get container info: %w", err)
+	}
+
+	vmInfo := &VMInfo{
+		ID:        vmID,
+		Name:      vmID,
+		State:     status,
+		CreatedAt: time.Now(),
+		NodeID:    d.nodeID,
+	}
+
+	// Parse resource usage from output
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "memory") {
+			// Parse memory usage
+			fields := strings.Fields(line)
+			for i, field := range fields {
+				if field == "memory" && i+1 < len(fields) {
+					if memBytes, parseErr := strconv.ParseInt(fields[i+1], 10, 64); parseErr == nil {
+						vmInfo.MemoryUsage = memBytes
+					}
+				}
+			}
+		}
+	}
+
+	return vmInfo, nil
+}
+
+// GetMetrics gets metrics for a Kata Container VM
+func (d *KataContainersDriver) GetMetrics(ctx context.Context, vmID string) (*VMInfo, error) {
+	return d.GetInfo(ctx, vmID)
+}
+
+// ListVMs lists all Kata Container VMs
+func (d *KataContainersDriver) ListVMs(ctx context.Context) ([]VMInfo, error) {
+	cmd := exec.CommandContext(ctx, "ctr",
+		"--address", d.containerdAddr,
+		"--namespace", d.namespace,
+		"container", "list", "-q")
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	containerIDs := strings.Split(strings.TrimSpace(string(output)), "\n")
+	var vms []VMInfo
+
+	for _, containerID := range containerIDs {
+		if containerID == "" {
+			continue
+		}
+
+		status, err := d.GetStatus(ctx, containerID)
+		if err != nil {
+			status = StateUnknown
+		}
+
+		vms = append(vms, VMInfo{
+			ID:     containerID,
+			Name:   containerID,
+			State:  status,
+			NodeID: d.nodeID,
+		})
+	}
+
+	return vms, nil
+}
+
+// SupportsPause returns whether the driver supports pausing VMs
+func (d *KataContainersDriver) SupportsPause() bool {
+	return true
+}
+
+// SupportsResume returns whether the driver supports resuming VMs
+func (d *KataContainersDriver) SupportsResume() bool {
+	return true
+}
+
+// SupportsSnapshot returns whether the driver supports snapshots
+func (d *KataContainersDriver) SupportsSnapshot() bool {
+	return true // Kata supports CRIU-based snapshots
+}
+
+// SupportsMigrate returns whether the driver supports migration
+func (d *KataContainersDriver) SupportsMigrate() bool {
+	return true // Phase 2: Live migration support
+}
+
+// Pause pauses a Kata Container VM
+func (d *KataContainersDriver) Pause(ctx context.Context, vmID string) error {
+	log.Printf("Pausing Kata Container VM %s", vmID)
+
+	cmd := exec.CommandContext(ctx, "ctr",
+		"--address", d.containerdAddr,
+		"--namespace", d.namespace,
+		"task", "pause", vmID)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Failed to pause Kata container %s: %v, output: %s", vmID, err, string(output))
+		return fmt.Errorf("failed to pause Kata container: %w", err)
+	}
+
+	return nil
+}
+
+// Resume resumes a Kata Container VM
+func (d *KataContainersDriver) Resume(ctx context.Context, vmID string) error {
+	log.Printf("Resuming Kata Container VM %s", vmID)
+
+	cmd := exec.CommandContext(ctx, "ctr",
+		"--address", d.containerdAddr,
+		"--namespace", d.namespace,
+		"task", "resume", vmID)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Failed to resume Kata container %s: %v, output: %s", vmID, err, string(output))
+		return fmt.Errorf("failed to resume Kata container: %w", err)
+	}
+
+	return nil
+}
+
+// Snapshot creates a snapshot of a Kata Container VM using CRIU
+func (d *KataContainersDriver) Snapshot(ctx context.Context, vmID, name string, params map[string]string) (string, error) {
+	log.Printf("Creating snapshot %s for Kata Container VM %s", name, vmID)
+
+	if !d.migrationEngine.EnableCRIU {
+		return "", fmt.Errorf("CRIU not enabled for snapshots")
+	}
+
+	snapshotPath := filepath.Join(d.migrationEngine.CheckpointPath, vmID, name)
+	if err := os.MkdirAll(snapshotPath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create snapshot directory: %w", err)
+	}
+
+	// Use CRIU to checkpoint the container
+	args := []string{
+		"--address", d.containerdAddr,
+		"--namespace", d.namespace,
+		"task", "checkpoint",
+		"--path", snapshotPath,
+	}
+
+	if d.migrationEngine.CompressionEnabled {
+		args = append(args, "--compress")
+	}
+
+	args = append(args, vmID)
+
+	cmd := exec.CommandContext(ctx, "ctr", args...)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		log.Printf("Failed to create snapshot: %v, output: %s", err, string(output))
+		return "", fmt.Errorf("failed to create snapshot: %w", err)
+	}
+
+	return snapshotPath, nil
+}
+
+// Migrate migrates a Kata Container VM with live migration support
+func (d *KataContainersDriver) Migrate(ctx context.Context, vmID, target string, params map[string]string) error {
+	log.Printf("Initiating live migration of Kata Container VM %s to %s", vmID, target)
+
+	// Phase 2: Implement live migration with minimal downtime
+	migrationID := fmt.Sprintf("mig-%s-%d", vmID, time.Now().UnixNano())
+	checkpointPath := filepath.Join(d.migrationEngine.CheckpointPath, migrationID)
+
+	if err := os.MkdirAll(checkpointPath, 0755); err != nil {
+		return fmt.Errorf("failed to create checkpoint directory: %w", err)
+	}
+
+	// Step 1: Create checkpoint
+	log.Printf("Creating checkpoint for migration %s", migrationID)
+	_, err := d.Snapshot(ctx, vmID, migrationID, params)
+	if err != nil {
+		return fmt.Errorf("failed to create migration checkpoint: %w", err)
+	}
+
+	// Step 2: Transfer checkpoint to target node
+	log.Printf("Transferring checkpoint to target node %s", target)
+	if err := d.transferCheckpoint(ctx, checkpointPath, target, migrationID); err != nil {
+		return fmt.Errorf("failed to transfer checkpoint: %w", err)
+	}
+
+	// Step 3: Stop source container
+	if err := d.Stop(ctx, vmID); err != nil {
+		return fmt.Errorf("failed to stop source container: %w", err)
+	}
+
+	// Step 4: Signal target node to restore container
+	if err := d.signalRestore(ctx, target, vmID, migrationID); err != nil {
+		return fmt.Errorf("failed to restore on target: %w", err)
+	}
+
+	// Step 5: Clean up source
+	if err := d.Delete(ctx, vmID); err != nil {
+		log.Printf("Warning: Failed to clean up source container: %v", err)
+	}
+
+	log.Printf("Successfully migrated Kata Container VM %s to %s", vmID, target)
+	return nil
+}
+
+// transferCheckpoint transfers checkpoint data to target node
+func (d *KataContainersDriver) transferCheckpoint(ctx context.Context, checkpointPath, target, migrationID string) error {
+	// In a real implementation, this would use secure network transfer
+	// For now, simulate with rsync or similar
+	cmd := exec.CommandContext(ctx, "rsync", "-avz", checkpointPath+"/", fmt.Sprintf("%s:/tmp/novacron-migration/%s/", target, migrationID))
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		log.Printf("Failed to transfer checkpoint: %v, output: %s", err, string(output))
+		return fmt.Errorf("checkpoint transfer failed: %w", err)
+	}
+
+	return nil
+}
+
+// signalRestore signals target node to restore container from checkpoint
+func (d *KataContainersDriver) signalRestore(ctx context.Context, target, vmID, migrationID string) error {
+	// In a real implementation, this would use cluster API or message queue
+	// For now, simulate with SSH command
+	cmd := exec.CommandContext(ctx, "ssh", target, fmt.Sprintf("novacron-restore-kata %s %s", vmID, migrationID))
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		log.Printf("Failed to signal restore: %v, output: %s", err, string(output))
+		return fmt.Errorf("restore signaling failed: %w", err)
+	}
+
+	return nil
+}
+
+// RestoreFromCheckpoint restores a container from checkpoint (target node)
+func (d *KataContainersDriver) RestoreFromCheckpoint(ctx context.Context, vmID, checkpointPath string) error {
+	log.Printf("Restoring Kata Container VM %s from checkpoint %s", vmID, checkpointPath)
+
+	cmd := exec.CommandContext(ctx, "ctr",
+		"--address", d.containerdAddr,
+		"--namespace", d.namespace,
+		"task", "restore",
+		"--checkpoint-path", checkpointPath,
+		vmID)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Failed to restore from checkpoint: %v, output: %s", err, string(output))
+		return fmt.Errorf("failed to restore container: %w", err)
+	}
+
+	return nil
+}
+
+// TransformToContainer converts a VM to a Kata Container (Phase 2 convergence)
+func (d *KataContainersDriver) TransformToContainer(ctx context.Context, sourceVM *VM) (*VM, error) {
+	log.Printf("Transforming VM %s to Kata Container", sourceVM.ID)
+
+	// Extract VM configuration
+	containerConfig := VMConfig{
+		Name:       sourceVM.Name + "-kata",
+		CPUShares:  sourceVM.Config.CPUShares,
+		MemoryMB:   sourceVM.Config.MemoryMB,
+		DiskSizeGB: sourceVM.Config.DiskSizeGB,
+		RootFS:     sourceVM.Config.RootFS,
+		Mounts:     sourceVM.Config.Mounts,
+		Env:        sourceVM.Config.Env,
+		NetworkID:  sourceVM.Config.NetworkID,
+		Tags:       make(map[string]string),
+	}
+
+	// Mark as Kata container
+	containerConfig.Tags["vm_type"] = "kata-containers"
+	containerConfig.Tags["source_vm"] = sourceVM.ID
+	containerConfig.Tags["transformation"] = "vm-to-container"
+
+	// Create new Kata container
+	containerID, err := d.Create(ctx, containerConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Kata container: %w", err)
+	}
+
+	// Create new VM object
+	newVM := &VM{
+		ID:     containerID,
+		Name:   containerConfig.Name,
+		State:  StateCreated,
+		Config: containerConfig,
+		NodeID: d.nodeID,
+	}
+
+	return newVM, nil
+}
+
+// GetHypervisorMetrics returns hypervisor-specific metrics for Kata containers
+func (d *KataContainersDriver) GetHypervisorMetrics(ctx context.Context, vmID string) (map[string]interface{}, error) {
+	metrics := make(map[string]interface{})
+
+	// Get VM-level metrics from Kata hypervisor
+	cmd := exec.CommandContext(ctx, "kata-runtime", "kata-env")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return metrics, fmt.Errorf("failed to get kata environment: %w", err)
+	}
+
+	// Parse kata-env output for hypervisor metrics
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "Hypervisor") {
+			parts := strings.Split(line, ":")
+			if len(parts) == 2 {
+				metrics["hypervisor_type"] = strings.TrimSpace(parts[1])
+			}
+		}
+	}
+
+	return metrics, nil
+}
+
+// Helper function for max
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}

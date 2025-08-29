@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.12
 """
 Code Memory - Search and Query Project Files
 This utility allows you to search and understand code across the NovaCron project.

@@ -89,6 +89,12 @@ const navigationItems = [
     icon: Settings,
     description: "System settings"
   },
+  { 
+    name: "Admin", 
+    href: "/admin", 
+    icon: Shield,
+    description: "Admin panel"
+  },
 ];
 
 export function MobileNavigation({ user, onLogout }: MobileNavigationProps) {

@@ -13,16 +13,16 @@ import (
 
 // VM operation constants
 const (
-	VMOperationStart     = "start"
-	VMOperationStop      = "stop"
-	VMOperationRestart   = "restart"
-	VMOperationDelete    = "delete"
-	VMOperationMigrate   = "migrate"
-	VMOperationPause     = "pause"
-	VMOperationResume    = "resume"
-	VMOperationSnapshot  = "snapshot"
-	VMOperationRestore   = "restore"
-	VMOperationClone     = "clone"
+	VMOperationStart    = "start"
+	VMOperationStop     = "stop"
+	VMOperationRestart  = "restart"
+	VMOperationDelete   = "delete"
+	VMOperationMigrate  = "migrate"
+	VMOperationPause    = "pause"
+	VMOperationResume   = "resume"
+	VMOperationSnapshot = "snapshot"
+	VMOperationRestore  = "restore"
+	VMOperationClone    = "clone"
 )
 
 // Assuming CreateVMRequest has fields like Name string, Spec VMConfig, Tags map[string]string, Owner string
@@ -79,7 +79,7 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 	//	status, err := m.scheduler.GetTaskStatus(taskID)
 	//	if err != nil {
 	//		// TODO: Re-enable when scheduler is available
-		// m.scheduler.CancelRequest(resourceID)
+	// m.scheduler.CancelRequest(resourceID)
 	//		return nil, fmt.Errorf("failed to get task status: %w", err)
 	//	}
 
@@ -89,7 +89,7 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 
 	//	if status == scheduler.TaskFailed {
 	//		// TODO: Re-enable when scheduler is available
-		// m.scheduler.CancelRequest(resourceID)
+	// m.scheduler.CancelRequest(resourceID)
 	//		return nil, errors.New("task allocation failed")
 	// }
 
@@ -772,21 +772,21 @@ func (m *VMManager) StartVM(ctx context.Context, vmID string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	driver, err := m.getDriverForVM(vm)
 	if err != nil {
 		return err
 	}
-	
+
 	response, err := m.startVM(ctx, vm, driver)
 	if err != nil {
 		return err
 	}
-	
+
 	if !response.Success {
 		return fmt.Errorf("failed to start VM: %s", response.ErrorMessage)
 	}
-	
+
 	return nil
 }
 
@@ -796,21 +796,21 @@ func (m *VMManager) StopVM(ctx context.Context, vmID string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	driver, err := m.getDriverForVM(vm)
 	if err != nil {
 		return err
 	}
-	
+
 	response, err := m.stopVM(ctx, vm, driver)
 	if err != nil {
 		return err
 	}
-	
+
 	if !response.Success {
 		return fmt.Errorf("failed to stop VM: %s", response.ErrorMessage)
 	}
-	
+
 	return nil
 }
 
@@ -820,21 +820,21 @@ func (m *VMManager) RestartVM(ctx context.Context, vmID string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	driver, err := m.getDriverForVM(vm)
 	if err != nil {
 		return err
 	}
-	
+
 	response, err := m.restartVM(ctx, vm, driver)
 	if err != nil {
 		return err
 	}
-	
+
 	if !response.Success {
 		return fmt.Errorf("failed to restart VM: %s", response.ErrorMessage)
 	}
-	
+
 	return nil
 }
 
@@ -844,21 +844,21 @@ func (m *VMManager) PauseVM(ctx context.Context, vmID string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	driver, err := m.getDriverForVM(vm)
 	if err != nil {
 		return err
 	}
-	
+
 	response, err := m.pauseVM(ctx, vm, driver)
 	if err != nil {
 		return err
 	}
-	
+
 	if !response.Success {
 		return fmt.Errorf("failed to pause VM: %s", response.ErrorMessage)
 	}
-	
+
 	return nil
 }
 
@@ -868,21 +868,21 @@ func (m *VMManager) ResumeVM(ctx context.Context, vmID string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	driver, err := m.getDriverForVM(vm)
 	if err != nil {
 		return err
 	}
-	
+
 	response, err := m.resumeVM(ctx, vm, driver)
 	if err != nil {
 		return err
 	}
-	
+
 	if !response.Success {
 		return fmt.Errorf("failed to resume VM: %s", response.ErrorMessage)
 	}
-	
+
 	return nil
 }
 
@@ -892,21 +892,21 @@ func (m *VMManager) DeleteVM(ctx context.Context, vmID string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	driver, err := m.getDriverForVM(vm)
 	if err != nil {
 		return err
 	}
-	
+
 	response, err := m.deleteVM(ctx, vm, driver)
 	if err != nil {
 		return err
 	}
-	
+
 	if !response.Success {
 		return fmt.Errorf("failed to delete VM: %s", response.ErrorMessage)
 	}
-	
+
 	return nil
 }
 

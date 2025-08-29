@@ -1,11 +1,11 @@
 package vm
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"fmt"
 )
 
 // copyFile copies a file from src to dst using simple read/write
@@ -14,13 +14,13 @@ func copyFile(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
-	
+
 	// Read source file
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	
+
 	// Write destination file
 	return os.WriteFile(dst, data, 0644)
 }

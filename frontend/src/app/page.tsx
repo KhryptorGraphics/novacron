@@ -86,6 +86,12 @@ export default function HomePage() {
               >
                 Get Started
               </button>
+              <button
+                onClick={() => router.push("/admin")}
+                className="px-8 py-3 text-lg font-medium bg-red-600 hover:bg-red-700 transition-colors rounded-md shadow-lg hover:shadow-xl"
+              >
+                Admin Panel
+              </button>
               <a
                 href="https://github.com/novacron/novacron"
                 target="_blank"

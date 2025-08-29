@@ -1,0 +1,336 @@
+# NovaCron Hierarchical Network Topology Configuration
+# Ubuntu 24.04 Edge-First Global Deployment
+
+network_topology:
+  # Global configuration
+  version: "2.0"
+  deployment_model: "edge_first"
+  optimization_target: "9.39x_speedup"
+  
+  # Tier 1: Global Backbone Infrastructure
+  global_backbone:
+    bandwidth: 100000  # 100 Gbps backbone
+    redundancy: "active_active"
+    regions:
+      us_east:
+        name: "US East (Virginia)"
+        bandwidth: 40000  # 40 Gbps
+        latency: 5        # ms
+        availability_zone: "us-east-1"
+        edge_clusters:
+          - "cluster-us-east-1a"
+          - "cluster-us-east-1b" 
+          - "cluster-us-east-1c"
+        coordinates:
+          lat: 39.0458
+          lon: -77.5074
+          
+      us_west:
+        name: "US West (California)"
+        bandwidth: 40000
+        latency: 8
+        availability_zone: "us-west-2"
+        edge_clusters:
+          - "cluster-us-west-2a"
+          - "cluster-us-west-2b"
+        coordinates:
+          lat: 37.7749
+          lon: -122.4194
+          
+      eu_west:
+        name: "EU West (Ireland)"
+        bandwidth: 40000
+        latency: 12
+        availability_zone: "eu-west-1"
+        edge_clusters:
+          - "cluster-eu-west-1a"
+          - "cluster-eu-west-1b"
+        coordinates:
+          lat: 53.3498
+          lon: -6.2603
+          
+      apac_south:
+        name: "APAC South (Singapore)"
+        bandwidth: 40000
+        latency: 15
+        availability_zone: "ap-southeast-1"
+        edge_clusters:
+          - "cluster-ap-se-1a"
+          - "cluster-ap-se-1b"
+        coordinates:
+          lat: 1.3521
+          lon: 103.8198
+
+  # Tier 2: Regional Edge Networks
+  regional_networks:
+    us_east:
+      bandwidth: 10000   # 10 Gbps regional
+      protocol: "adaptive_tcp"
+      compression: "content_aware"
+      delta_sync: true
+      nodes:
+        - id: "node-us-east-1"
+          type: "edge_primary"
+          bandwidth: 2500
+          cpu_cores: 64
+          memory_gb: 256
+          gpu_count: 8
+          storage_tb: 50
+          llm_support: true
+          model_capacity: "405B"
+          
+        - id: "node-us-east-2" 
+          type: "edge_secondary"
+          bandwidth: 2500
+          cpu_cores: 32
+          memory_gb: 128
+          gpu_count: 4
+          storage_tb: 25
+          llm_support: true
+          model_capacity: "70B"
+          
+        - id: "node-us-east-3"
+          type: "edge_worker"
+          bandwidth: 1000
+          cpu_cores: 16
+          memory_gb: 64
+          storage_tb: 10
+          
+    eu_west:
+      bandwidth: 10000
+      protocol: "adaptive_tcp"
+      compression: "content_aware" 
+      delta_sync: true
+      nodes:
+        - id: "node-eu-west-1"
+          type: "edge_primary"
+          bandwidth: 2500
+          cpu_cores: 64
+          memory_gb: 256
+          gpu_count: 8
+          storage_tb: 50
+          llm_support: true
+          model_capacity: "405B"
+          
+        - id: "node-eu-west-2"
+          type: "edge_secondary"
+          bandwidth: 2500
+          cpu_cores: 32
+          memory_gb: 128
+          gpu_count: 4
+          storage_tb: 25
+          llm_support: true
+          model_capacity: "70B"
+
+  # Tier 3: Local Clusters  
+  local_clusters:
+    cluster_us_east_1a:
+      region: "us_east"
+      availability_zone: "us-east-1a"
+      bandwidth: 1000    # 1 Gbps local
+      latency: 1         # ms
+      nodes: 8
+      vm_capacity: 500
+      storage_type: "nvme_ssd"
+      redundancy: "raid10"
+      
+    cluster_us_east_1b:
+      region: "us_east"
+      availability_zone: "us-east-1b"
+      bandwidth: 1000
+      latency: 1
+      nodes: 8
+      vm_capacity: 500
+      storage_type: "nvme_ssd"
+      redundancy: "raid10"
+
+  # Network Optimization Configuration
+  optimization:
+    adaptive_bandwidth:
+      enabled: true
+      probe_interval: "30s"
+      adjustment_factor: 0.1
+      max_utilization: 0.85
+      speedup_target: 9.39
+      algorithms:
+        - name: "tcp_bbr"
+          priority: 1
+        - name: "tcp_cubic" 
+          priority: 2
+        - name: "tcp_reno"
+          priority: 3
+          
+    content_aware_compression:
+      enabled: true
+      cpu_threshold: 70  # Percentage
+      algorithms:
+        vm_memory:
+          name: "zstd"
+          level: 6
+          ratio: 3.2
+        vm_disk:
+          name: "lz4"
+          level: 1  
+          ratio: 2.1
+        logs:
+          name: "gzip"
+          level: 6
+          ratio: 5.8
+        binary:
+          name: "brotli"
+          level: 4
+          ratio: 2.8
+          
+    delta_synchronization:
+      enabled: true
+      block_size: "64KB"
+      hash_algorithm: "xxhash"
+      cache_size: "1GB"
+      effectiveness_threshold: 0.3  # 30% change threshold
+      
+    qos_policies:
+      vm_migration:
+        priority: 7
+        bandwidth_reservation: "50%"
+        latency_sla: "10ms"
+        
+      llm_inference:
+        priority: 6
+        bandwidth_reservation: "30%"
+        latency_sla: "50ms"
+        
+      api_traffic:
+        priority: 5
+        bandwidth_reservation: "15%"
+        latency_sla: "100ms"
+        
+      monitoring:
+        priority: 3
+        bandwidth_reservation: "3%"
+        latency_sla: "500ms"
+        
+      backup:
+        priority: 1
+        bandwidth_reservation: "2%"
+        latency_sla: "5000ms"
+
+  # Security and Isolation
+  security:
+    network_segmentation:
+      enabled: true
+      vxlan_networks:
+        management:
+          vni: 1000
+          subnet: "10.0.0.0/16"
+          
+        vm_traffic:
+          vni: 2000
+          subnet: "10.1.0.0/16"
+          
+        storage:
+          vni: 3000
+          subnet: "10.2.0.0/16"
+          
+        llm_inference:
+          vni: 4000
+          subnet: "10.3.0.0/16"
+          
+    encryption:
+      transit: "tls_1.3"
+      ipsec: "aes_256_gcm"
+      wireguard: true
+      
+    firewall:
+      default_policy: "deny"
+      zones:
+        public:
+          interfaces: ["eth0"]
+          services: ["ssh", "https"]
+          
+        internal:
+          interfaces: ["eth1"]
+          services: ["novacron-api", "libvirt"]
+          
+        storage:
+          interfaces: ["eth2"] 
+          services: ["zfs", "nfs"]
+
+  # Monitoring and Telemetry
+  monitoring:
+    metrics_collection:
+      enabled: true
+      interval: "15s"
+      retention: "30d"
+      
+    network_metrics:
+      - bandwidth_utilization
+      - packet_loss_rate
+      - latency_percentiles
+      - compression_ratio
+      - delta_sync_effectiveness
+      - qos_policy_violations
+      
+    alerts:
+      bandwidth_high:
+        threshold: 90  # Percentage
+        duration: "5m"
+        severity: "warning"
+        
+      packet_loss:
+        threshold: 1   # Percentage  
+        duration: "2m"
+        severity: "critical"
+        
+      latency_high:
+        threshold: 100 # Milliseconds
+        duration: "1m"
+        severity: "warning"
+        
+      compression_low:
+        threshold: 1.5 # Ratio
+        duration: "10m"
+        severity: "info"
+
+  # Edge Computing Configuration
+  edge_computing:
+    llm_deployment:
+      model_sharding:
+        strategy: "pipeline"
+        max_shard_size: "50GB"
+        replication_factor: 2
+        
+      inference_optimization:
+        quantization: "8bit"
+        batch_size: 32
+        cache_size: "10GB"
+        prefill_chunking: true
+        
+    vm_migration_optimization:
+      live_migration:
+        memory_precopy: true
+        parallel_streams: 4
+        compression_level: 6
+        
+      wan_optimization:
+        delta_sync: true
+        deduplication: true
+        bandwidth_shaping: true
+        
+  # Disaster Recovery
+  disaster_recovery:
+    replication:
+      enabled: true
+      mode: "asynchronous"
+      rpo: "15m"  # Recovery Point Objective
+      rto: "5m"   # Recovery Time Objective
+      
+    failover:
+      automatic: true
+      health_check_interval: "30s"
+      failover_threshold: 3
+      
+    backup:
+      frequency: "daily"
+      retention: "30d"
+      encryption: "aes_256"
+      compression: "zstd"

@@ -11,18 +11,18 @@ import (
 type VMDriverConfig struct {
 	// Node ID
 	NodeID string
-	
+
 	// Container driver config
 	DockerPath string
-	
+
 	// Containerd driver config
-	ContainerdAddress string
+	ContainerdAddress   string
 	ContainerdNamespace string
-	
+
 	// KVM driver config
-	QEMUBinaryPath string 
+	QEMUBinaryPath string
 	VMBasePath     string
-	
+
 	// Process driver config
 	ProcessBasePath string
 }
@@ -30,23 +30,23 @@ type VMDriverConfig struct {
 // DefaultVMDriverConfig returns a default VM driver configuration
 func DefaultVMDriverConfig(nodeID string) VMDriverConfig {
 	return VMDriverConfig{
-		NodeID:               nodeID,
-		DockerPath:           "docker",
-		ContainerdAddress:    "/run/containerd/containerd.sock",
-		ContainerdNamespace:  "novacron",
-		QEMUBinaryPath:       "qemu-system-x86_64",
-		VMBasePath:           "/var/lib/novacron/vms",
-		ProcessBasePath:      "/var/lib/novacron/processes",
+		NodeID:              nodeID,
+		DockerPath:          "docker",
+		ContainerdAddress:   "/run/containerd/containerd.sock",
+		ContainerdNamespace: "novacron",
+		QEMUBinaryPath:      "qemu-system-x86_64",
+		VMBasePath:          "/var/lib/novacron/vms",
+		ProcessBasePath:     "/var/lib/novacron/processes",
 	}
 }
 
 // NewVMDriverFactory creates a new VM driver factory
 func NewVMDriverFactory(config VMDriverConfig) VMDriverFactory {
 	log.Printf("Creating VM driver factory with node ID %s", config.NodeID)
-	
+
 	// Create a cache of initialized drivers
 	drivers := make(map[VMType]VMDriver)
-	
+
 	// Return the factory function
 	return func(vmConfig VMConfig) (VMDriver, error) {
 		// Determine VM type from config - for now use a default
@@ -60,11 +60,11 @@ func NewVMDriverFactory(config VMDriverConfig) VMDriverFactory {
 		if driver, exists := drivers[vmType]; exists {
 			return driver, nil
 		}
-		
+
 		// Initialize the appropriate driver based on type
 		var driver VMDriver
 		var err error
-		
+
 		switch vmType {
 		case VMTypeContainer:
 			log.Printf("Initializing container driver")
@@ -75,7 +75,7 @@ func NewVMDriverFactory(config VMDriverConfig) VMDriverFactory {
 			if err != nil {
 				return nil, fmt.Errorf("failed to initialize container driver: %w", err)
 			}
-			
+
 		case VMTypeContainerd:
 			log.Printf("Initializing containerd driver with namespace %s", config.ContainerdNamespace)
 			driverConfig := map[string]interface{}{
@@ -83,11 +83,16 @@ func NewVMDriverFactory(config VMDriverConfig) VMDriverFactory {
 				"address":   config.ContainerdAddress,
 				"namespace": config.ContainerdNamespace,
 			}
+			// Use the full containerd implementation instead of stub
 			driver, err = NewContainerdDriver(driverConfig)
 			if err != nil {
 				return nil, fmt.Errorf("failed to initialize containerd driver: %w", err)
 			}
-			
+
+		case VMTypeKataContainers:
+			// Kata driver temporarily disabled
+			return nil, fmt.Errorf("kata driver is not available in this build")
+
 		case VMTypeKVM:
 			log.Printf("Initializing KVM driver with base path %s", config.VMBasePath)
 			// Create the base path if it doesn't exist
@@ -95,31 +100,37 @@ func NewVMDriverFactory(config VMDriverConfig) VMDriverFactory {
 				log.Printf("Warning: Failed to create VM base path %s: %v", config.VMBasePath, err)
 			}
 			driverConfig := map[string]interface{}{
-				"node_id":    config.NodeID,
-				"qemu_path":  config.QEMUBinaryPath,
-				"vm_path":    config.VMBasePath,
+				"node_id":   config.NodeID,
+				"qemu_path": config.QEMUBinaryPath,
+				"vm_path":   config.VMBasePath,
 			}
 			driver, err = NewKVMDriver(driverConfig)
 			if err != nil {
 				return nil, fmt.Errorf("failed to initialize KVM driver: %w", err)
 			}
-			
+
 		case VMTypeProcess:
 			log.Printf("Initializing process driver with base path %s", config.ProcessBasePath)
 			// Create the base path if it doesn't exist
 			if err := makeDirectoryIfNotExists(config.ProcessBasePath); err != nil {
 				log.Printf("Warning: Failed to create process base path %s: %v", config.ProcessBasePath, err)
 			}
-			// Process driver doesn't exist yet, return error for now
-			return nil, fmt.Errorf("process driver not implemented yet")
-			
+			// Process driver implementation coming soon
+			driver, err = NewProcessDriver(map[string]interface{}{
+				"node_id":   config.NodeID,
+				"base_path": config.ProcessBasePath,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to initialize process driver: %w", err)
+			}
+
 		default:
 			return nil, fmt.Errorf("unsupported VM type: %s", vmType)
 		}
-		
+
 		// Cache the driver for future use
 		drivers[vmType] = driver
-		
+
 		return driver, nil
 	}
 }
@@ -132,12 +143,12 @@ func makeDirectoryIfNotExists(path string) error {
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("failed to check directory: %w", err)
 	}
-	
+
 	// Create all directories in the path
 	if err := os.MkdirAll(path, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -166,21 +177,21 @@ func (m *VMDriverManager) GetDriver(vmConfig VMConfig) (VMDriver, error) {
 			vmType = VMType(t)
 		}
 	}
-	
+
 	// Check if we have already initialized this driver
 	if driver, exists := m.drivers[vmType]; exists {
 		return driver, nil
 	}
-	
+
 	// Initialize the driver
 	driver, err := m.factory(vmConfig)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Cache the driver
 	m.drivers[vmType] = driver
-	
+
 	return driver, nil
 }
 
@@ -200,7 +211,13 @@ func (m *VMDriverManager) ListSupportedTypes() []VMType {
 	return []VMType{
 		VMTypeContainer,
 		VMTypeContainerd,
+		VMTypeKataContainers,
 		VMTypeKVM,
 		VMTypeProcess,
 	}
+}
+
+// NewProcessDriver creates a new process driver (stub for now)
+func NewProcessDriver(config map[string]interface{}) (VMDriver, error) {
+	return nil, fmt.Errorf("process driver not yet implemented - planned for future release")
 }

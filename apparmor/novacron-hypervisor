@@ -1,0 +1,145 @@
+# NovaCron Hypervisor AppArmor Profile
+# Ubuntu 24.04 LTS VM Management Security
+#include <tunables/global>
+
+/opt/novacron/bin/novacron-hypervisor {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/libvirt-qemu>
+  #include <abstractions/openssl>
+
+  capability sys_admin,
+  capability net_admin,
+  capability sys_rawio,
+  capability setuid,
+  capability setgid,
+  capability fowner,
+  capability chown,
+  capability dac_override,
+  capability sys_resource,
+
+  # Binary execution
+  /opt/novacron/bin/novacron-hypervisor mr,
+  /opt/novacron/bin/setup-hypervisor rix,
+  /opt/novacron/bin/cleanup-hypervisor rix,
+  
+  # VM disk access with encryption support
+  /var/lib/novacron/vms/** rwk,
+  /var/lib/libvirt/images/** rwk,
+  /mnt/novacron-storage/** rwk,
+  
+  # KVM and virtualization device access
+  /dev/kvm rw,
+  /dev/vhost-net rw,
+  /dev/net/tun rw,
+  /dev/vfio/* rw,
+  /dev/hugepages/** rw,
+  
+  # Libvirt socket and runtime access
+  /var/run/libvirt/libvirt-sock rw,
+  /var/run/libvirt/** rw,
+  /var/lib/libvirt/qemu/** rwk,
+  /var/lib/libvirt/dnsmasq/** rwk,
+  /var/cache/libvirt/** rwk,
+  
+  # Network configuration and bridges
+  /sys/class/net/** rw,
+  /sys/devices/virtual/net/** rw,
+  /proc/sys/net/** rw,
+  /etc/netplan/** r,
+  /run/systemd/network/** rw,
+  
+  # Memory management for VMs
+  /proc/*/oom_score_adj rw,
+  /proc/*/oom_adj rw,
+  /sys/kernel/mm/transparent_hugepage/** rw,
+  /sys/kernel/mm/hugepages/** rw,
+  /proc/sys/vm/** rw,
+  
+  # CPU and performance management
+  /sys/devices/system/cpu/** rw,
+  /sys/fs/cgroup/** rw,
+  /proc/*/cpuset rw,
+  
+  # QEMU and virtualization binaries
+  /usr/bin/qemu-system-x86_64 Px,
+  /usr/bin/qemu-system-aarch64 Px,
+  /usr/bin/qemu-img Px,
+  /usr/bin/qemu-nbd Px,
+  /usr/bin/virsh Px,
+  /usr/libexec/qemu-bridge-helper Px,
+  /usr/lib/qemu/** Px,
+  
+  # OVMF and UEFI firmware
+  /usr/share/OVMF/** r,
+  /usr/share/qemu/** r,
+  /usr/share/seabios/** r,
+  
+  # Storage and filesystem tools
+  /usr/bin/zfs Px,
+  /usr/sbin/zpool Px,
+  /usr/bin/cryptsetup Px,
+  /usr/sbin/dmsetup Px,
+  
+  # Logging and monitoring
+  /var/log/novacron/hypervisor.log w,
+  /var/log/libvirt/** rw,
+  
+  # Configuration access
+  /etc/novacron/** r,
+  /etc/libvirt/** r,
+  
+  # Systemd integration
+  /run/systemd/notify w,
+  
+  # Process and system monitoring
+  /proc/*/stat r,
+  /proc/*/status r,
+  /proc/*/cmdline r,
+  /proc/meminfo r,
+  /proc/cpuinfo r,
+  /proc/version r,
+  /proc/uptime r,
+  /sys/class/dmi/id/** r,
+  
+  # PCI device access for GPU passthrough
+  /sys/bus/pci/devices/** r,
+  /sys/bus/pci/drivers/** rw,
+  /dev/vfio/** rw,
+  
+  # IOMMU for device isolation
+  /sys/kernel/iommu_groups/** r,
+  /sys/class/iommu/** r,
+  
+  # Temporary files for VM operations
+  /tmp/libvirt_qemu/** rwk,
+  /var/tmp/novacron-vm-** rwk,
+  
+  # Dynamic libraries
+  /lib/x86_64-linux-gnu/** mr,
+  /usr/lib/x86_64-linux-gnu/** mr,
+  /usr/lib/qemu/** mr,
+  
+  # Migration support
+  /var/lib/novacron/migration/** rwk,
+  /tmp/novacron-migration-** rwk,
+  
+  # Deny access to sensitive areas not needed
+  deny /home/** rwklx,
+  deny /root/.ssh/** rwklx,
+  deny /etc/shadow r,
+  deny /etc/gshadow r,
+  
+  # Allow necessary system calls for VM management
+  mount,
+  umount,
+  pivot_root,
+  
+  # Signal handling for VM lifecycle
+  signal send set=(term, kill, usr1, usr2, hup, stop, cont),
+  signal receive set=(term, kill, usr1, usr2, hup, stop, cont),
+  
+  # Network namespace operations
+  network netlink raw,
+  network packet raw,
+}

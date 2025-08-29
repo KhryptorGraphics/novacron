@@ -1,0 +1,229 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "NovaCron Enhanced Operator",
+    "tags": ["novacron", "kubernetes", "multi-cloud", "ai"],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Operator Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up{job=\"novacron-operator\"}",
+            "legendFormat": "Operator Status"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "options": {
+                  "0": {
+                    "text": "DOWN",
+                    "color": "red"
+                  },
+                  "1": {
+                    "text": "UP", 
+                    "color": "green"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "VirtualMachines by Status",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "count by (status) (novacron_vm_status)",
+            "legendFormat": "{{ status }}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "MultiCloud VM Deployments",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum by (provider) (novacron_multicloud_vm_deployments)",
+            "legendFormat": "{{ provider }}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "AI Scheduling Accuracy",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "novacron_ai_scheduling_accuracy",
+            "legendFormat": "Accuracy"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "min": 0,
+            "max": 1,
+            "unit": "percentunit",
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 0.7},
+                {"color": "green", "value": 0.85}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 16}
+      },
+      {
+        "id": 5,
+        "title": "Cache Hit Rate",
+        "type": "gauge", 
+        "targets": [
+          {
+            "expr": "novacron_cache_hit_rate",
+            "legendFormat": "Hit Rate"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "min": 0,
+            "max": 1,
+            "unit": "percentunit",
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 0.5},
+                {"color": "green", "value": 0.8}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 16}
+      },
+      {
+        "id": 6,
+        "title": "Total Cost Across Providers",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(novacron_multicloud_vm_cost_hourly)",
+            "legendFormat": "Hourly Cost"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 50},
+                {"color": "red", "value": 100}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 16}
+      },
+      {
+        "id": 7,
+        "title": "Operator Resource Usage",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(container_cpu_usage_seconds_total{pod=~\"novacron-operator-.*\"}[5m]) * 100",
+            "legendFormat": "CPU %"
+          },
+          {
+            "expr": "container_memory_usage_bytes{pod=~\"novacron-operator-.*\"} / 1024 / 1024",
+            "legendFormat": "Memory MB"
+          }
+        ],
+        "yAxes": [
+          {"label": "CPU %", "max": 100},
+          {"label": "Memory MB"}
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}
+      },
+      {
+        "id": 8,
+        "title": "Reconciliation Rate",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(controller_runtime_reconcile_total[5m])",
+            "legendFormat": "{{ controller }} reconciles/sec"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}
+      },
+      {
+        "id": 9,
+        "title": "Error Rate by Controller",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(controller_runtime_reconcile_errors_total[5m])",
+            "legendFormat": "{{ controller }} errors/sec"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 32}
+      },
+      {
+        "id": 10,
+        "title": "AI Model Training Progress",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "novacron_ai_model_training_progress",
+            "legendFormat": "{{ model_id }}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "min": 0,
+            "max": 1,
+            "unit": "percentunit"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 40}
+      },
+      {
+        "id": 11,
+        "title": "Cache Memory Usage",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "novacron_cache_memory_used_bytes / novacron_cache_memory_total_bytes",
+            "legendFormat": "{{ cache_id }}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "min": 0,
+            "max": 1,
+            "unit": "percentunit"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 40}
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "30s"
+  }
+}

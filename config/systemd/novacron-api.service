@@ -7,10 +7,11 @@ Wants=novacron-hypervisor.service
 User=novacron
 Group=novacron
 WorkingDirectory=/opt/novacron
-ExecStart=/usr/bin/python3 /opt/novacron/backend/services/api/main.py --config /etc/novacron/api.yaml
+ExecStart=/usr/bin/python3.12 /opt/novacron/backend/services/api/main.py --config /etc/novacron/api.yaml
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONPATH=/opt/novacron
+Environment=PYTHON_VERSION=3.12
 
 [Install]
 WantedBy=multi-user.target

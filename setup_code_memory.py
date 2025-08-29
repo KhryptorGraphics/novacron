@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.12
 """
 Initialize Qdrant and index project files for code memory.
 This script:

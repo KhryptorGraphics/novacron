@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.12
 """
 Script to store the NovaCron repository files in Qdrant using the MCP (Model Context Protocol).
 This script indexes files from the repository into the Qdrant vector database directly using

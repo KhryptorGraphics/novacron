@@ -145,7 +145,7 @@ func TestVMAccessorMethods(t *testing.T) {
 	time.Sleep(10 * time.Millisecond) // Small delay to ensure time difference
 	vm.SetState(StatePaused)
 	afterUpdate := vm.GetUpdatedAt()
-	
+
 	if !afterUpdate.After(beforeUpdate) {
 		t.Error("UpdatedAt should be updated when state changes")
 	}
@@ -153,7 +153,7 @@ func TestVMAccessorMethods(t *testing.T) {
 	// Test SetStartedAt
 	startTime := time.Now()
 	vm.SetStartedAt(startTime)
-	
+
 	// Verify the started time was set (we can't directly access startedAt, but we can verify it was called)
 	updatedAtAfterStart := vm.GetUpdatedAt()
 	if !updatedAtAfterStart.After(afterUpdate) {
@@ -234,7 +234,7 @@ func TestVMMaintenanceRecovery(t *testing.T) {
 	// Test that we can call recoverVM without compilation errors
 	// Note: This is primarily a compilation test since recoverVM is private
 	// In a real scenario, this would be called internally by the maintenance system
-	
+
 	// Verify VM is in failed state
 	retrievedVM, exists := manager.GetVM(vmConfig.ID)
 	if !exists {

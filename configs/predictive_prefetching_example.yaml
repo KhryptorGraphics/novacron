@@ -1,0 +1,84 @@
+# NovaCron Predictive Prefetching Configuration Example
+# This file demonstrates how to configure AI-driven predictive prefetching for VM migrations
+
+# VM Configuration with Predictive Prefetching
+vm:
+  id: "web-server-001"
+  name: "Production Web Server"
+  memory_mb: 8192
+  cpu_shares: 4
+  disk_size_gb: 100
+  
+  # AI-driven predictive prefetching configuration
+  predictive_prefetching:
+    enabled: true                        # Enable/disable predictive prefetching
+    prediction_accuracy: 0.85            # Target prediction accuracy (85%)
+    max_cache_size: 1073741824          # Maximum cache size (1GB in bytes)
+    prediction_latency_ms: 10           # Maximum prediction latency (10ms)
+    model_type: "neural_network"        # AI model type
+    training_data_size: 100000          # Maximum training samples to retain
+    continuous_learning: true           # Enable continuous model training
+    prefetch_ahead_time: "5m"           # How far ahead to prefetch data
+    
+    # AI model-specific configuration
+    ai_model_config:
+      learning_rate: "0.001"            # Neural network learning rate
+      batch_size: "32"                  # Training batch size
+      epochs: "100"                     # Training epochs
+      hidden_layers: "128,64"           # Hidden layer sizes
+      activation: "relu"                # Activation function
+
+# Migration Configuration
+migration:
+  # Predictive prefetching policies by migration type
+  policies:
+    cold:
+      max_prefetch_items: 1000
+      max_prefetch_size: 104857600      # 100MB
+      min_confidence_threshold: 0.85
+      prefetch_ahead_time: "5m"
+    
+    warm:
+      max_prefetch_items: 1500
+      max_prefetch_size: 157286400      # 150MB
+      min_confidence_threshold: 0.80
+      prefetch_ahead_time: "7m"
+    
+    live:
+      max_prefetch_items: 2000
+      max_prefetch_size: 209715200      # 200MB
+      min_confidence_threshold: 0.75
+      prefetch_ahead_time: "10m"
+
+# Performance Targets
+targets:
+  prediction_accuracy: 0.85             # 85% accuracy target
+  cache_hit_improvement: 0.30           # 30% cache hit ratio improvement
+  migration_speed_boost: 2.0            # 2x migration speed improvement
+  prediction_latency_ms: 10             # 10ms max prediction latency
+  false_positive_rate: 0.10             # 10% max false positive rate
+
+# Monitoring and Alerting
+monitoring:
+  metrics_enabled: true                 # Enable metrics collection
+  alert_on_target_miss: true           # Alert when targets are not met
+  metrics_retention_days: 30           # Keep metrics for 30 days
+  
+  # Alert thresholds
+  alerts:
+    accuracy_threshold: 0.80            # Alert if accuracy drops below 80%
+    latency_threshold_ms: 20            # Alert if latency exceeds 20ms
+    cache_improvement_threshold: 0.20   # Alert if improvement below 20%
+
+# Example usage in VM migration API call:
+# POST /api/v1/migrations
+# {
+#   "vm_id": "web-server-001",
+#   "target_node": "node-2",
+#   "type": "live",
+#   "predictive_prefetching": {
+#     "enabled": true,
+#     "prediction_accuracy": 0.85,
+#     "max_cache_size": 1073741824
+#   }
+# }

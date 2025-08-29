@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.12
 """
 Create a collection in Qdrant for storing the project files.
 This script:

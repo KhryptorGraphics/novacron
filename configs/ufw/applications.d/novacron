@@ -1,0 +1,139 @@
+# UFW Application Profile for NovaCron Distributed VM Management System
+# Comprehensive profile covering all NovaCron services and security requirements
+# Version: 1.0 - Production ready with security hardening
+
+[NovaCron API]
+title=NovaCron API Server
+description=REST API endpoints for VM management and system orchestration
+ports=8090/tcp
+
+[NovaCron WebSocket]
+title=NovaCron WebSocket API
+description=Real-time WebSocket communication for live updates
+ports=8091/tcp
+
+[NovaCron Frontend]
+title=NovaCron Web Frontend
+description=Web interface for VM management and monitoring
+ports=8092/tcp
+
+[NovaCron AI Engine]
+title=NovaCron AI Engine
+description=AI/ML engine for intelligent VM optimization and predictive analytics
+ports=8093/tcp
+
+[NovaCron Hypervisor]
+title=NovaCron VM Hypervisor
+description=Hypervisor service for VM management and orchestration
+ports=9000/tcp
+
+[NovaCron Database]
+title=NovaCron PostgreSQL Database
+description=Database access for API server (external port)
+ports=11432/tcp
+
+[NovaCron Prometheus]
+title=NovaCron Prometheus Metrics
+description=Prometheus metrics collection and time-series database
+ports=9090/tcp
+
+[NovaCron Grafana]
+title=NovaCron Grafana Dashboard
+description=Monitoring dashboards and data visualization
+ports=3001/tcp
+
+[NovaCron Redis]
+title=NovaCron Redis Cache
+description=Redis caching system and AI engine backend
+ports=6379/tcp
+
+[NovaCron Node Exporter]
+title=NovaCron Node Exporter
+description=System metrics collection for monitoring stack
+ports=9100/tcp
+
+[NovaCron Alert Manager]
+title=NovaCron Alert Manager
+description=Alert routing and notification management
+ports=9093/tcp
+
+[NovaCron SSH]
+title=NovaCron SSH Management
+description=SSH access for system administration
+ports=22/tcp
+
+[NovaCron VNC]
+title=NovaCron VM VNC Console
+description=VNC console access for VM management
+ports=5900:5999/tcp
+
+[NovaCron Migration]
+title=NovaCron VM Migration
+description=Live migration data transfer and synchronization
+ports=49152:49215/tcp
+
+[NovaCron Cluster]
+title=NovaCron Cluster Communication
+description=Inter-node cluster communication and coordination
+ports=7946/tcp|7946/udp
+
+[NovaCron HTTPS]
+title=NovaCron HTTPS Web
+description=Secure HTTPS access for web services
+ports=443/tcp
+
+[NovaCron HTTP]
+title=NovaCron HTTP Web
+description=HTTP access for web services (redirect to HTTPS)
+ports=80/tcp
+
+[NovaCron DNS]
+title=NovaCron DNS Service
+description=DNS resolution for service discovery
+ports=53/tcp|53/udp
+
+[NovaCron SNMP]
+title=NovaCron SNMP Monitoring
+description=SNMP monitoring and network management
+ports=161/udp
+
+[NovaCron Syslog]
+title=NovaCron Syslog
+description=Centralized logging and audit trail
+ports=514/udp
+
+# Security-focused service profiles
+[NovaCron Security Web]
+title=NovaCron Web Services (Security Bundle)
+description=Combined HTTP/HTTPS access for web interfaces
+ports=80,443/tcp
+
+[NovaCron Core Services]
+title=NovaCron Core Infrastructure
+description=Essential services (API, WebSocket, Frontend)
+ports=8090,8091,8092/tcp
+
+[NovaCron Monitoring Stack]
+title=NovaCron Complete Monitoring
+description=Full monitoring stack (Prometheus, Grafana, Node Exporter)
+ports=3001,9090,9100/tcp
+
+[NovaCron Data Layer]
+title=NovaCron Data Services
+description=Database and caching layer
+ports=6379,11432/tcp
+
+[NovaCron Management]
+title=NovaCron System Management
+description=SSH and administrative access
+ports=22/tcp
+
+[NovaCron Virtualization]
+title=NovaCron VM Infrastructure
+description=Hypervisor and VNC console access
+ports=5900:5999,9000/tcp
+
+[NovaCron Full Stack]
+title=NovaCron Complete System
+description=All NovaCron services for development/testing
+ports=22,80,443,3001,5900:5999,6379,8090:8093,9000,9090,9100,11432,49152:49215/tcp|53,7946/udp

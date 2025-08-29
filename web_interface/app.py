@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.12
 """
 Web interface for the NovaCron Code Memory system.
 This is a simple Flask application that allows searching the code memory database.

@@ -1,0 +1,137 @@
+{
+  "env": {
+    "NOVACRON_ENV": "development",
+    "CLAUDE_FLOW_AUTO_COMMIT": "false",
+    "CLAUDE_FLOW_AUTO_PUSH": "false",
+    "CLAUDE_FLOW_HOOKS_ENABLED": "true",
+    "CLAUDE_FLOW_TELEMETRY_ENABLED": "true",
+    "CLAUDE_FLOW_REMOTE_EXECUTION": "true",
+    "CLAUDE_FLOW_GITHUB_INTEGRATION": "true",
+    "CLAUDE_FLOW_VM_OPERATIONS": "true",
+    "CLAUDE_FLOW_MIGRATION_ENABLED": "true"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npx claude-flow *)",
+      "Bash(make *)",
+      "Bash(go test *)",
+      "Bash(go run *)",
+      "Bash(go build *)",
+      "Bash(docker *)",
+      "Bash(docker-compose *)",
+      "Bash(npm run *)",
+      "Bash(npm test *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push)",
+      "Bash(gh *)",
+      "Bash(kubectl *)",
+      "Bash(virsh *)",
+      "Bash(pwd)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(which *)"
+    ],
+    "deny": [
+      "Bash(rm -rf /)",
+      "Bash(curl * | bash)",
+      "Bash(wget * | sh)",
+      "Bash(eval *)",
+      "Bash(sudo rm -rf *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '[NovaCron Hook] Command validation for safety and resource preparation'"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '[NovaCron Hook] Code quality check before file modification'"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash(go test *)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '[NovaCron Hook] Test results analyzed and logged'"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(docker *)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '[NovaCron Hook] Container operation completed'"
+          }
+        ]
+      }
+    ]
+  },
+  "workflows": {
+    "vm-migration": {
+      "description": "Automated VM migration workflow",
+      "steps": [
+        "validate-source",
+        "prepare-destination",
+        "snapshot-vm",
+        "transfer-data",
+        "verify-migration",
+        "cleanup"
+      ]
+    },
+    "cluster-deployment": {
+      "description": "Deploy and configure cluster nodes",
+      "steps": [
+        "provision-nodes",
+        "configure-networking",
+        "install-hypervisor",
+        "join-cluster",
+        "verify-health"
+      ]
+    },
+    "performance-optimization": {
+      "description": "Optimize system performance",
+      "steps": [
+        "collect-metrics",
+        "analyze-bottlenecks",
+        "apply-optimizations",
+        "validate-improvements"
+      ]
+    }
+  },
+  "commands": {
+    "prefix": "/",
+    "categories": [
+      "vm",
+      "container",
+      "migration",
+      "cluster",
+      "monitoring",
+      "storage",
+      "network",
+      "scheduler",
+      "devops",
+      "testing"
+    ]
+  }
+}

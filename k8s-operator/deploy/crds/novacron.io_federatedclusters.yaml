@@ -1,0 +1,214 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: federatedclusters.novacron.io
+spec:
+  group: novacron.io
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - members
+            - federation
+            properties:
+              members:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - name
+                  - provider
+                  - endpoint
+                  - credentialsSecret
+                  properties:
+                    name:
+                      type: string
+                    provider:
+                      type: string
+                    endpoint:
+                      type: string
+                    credentialsSecret:
+                      type: string
+                    weight:
+                      type: integer
+                      format: int32
+                    capacity:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                        memory:
+                          type: string
+                        storage:
+                          type: string
+                        gpu:
+                          type: string
+              federation:
+                type: object
+                required:
+                - strategy
+                properties:
+                  strategy:
+                    type: string
+                  consensus:
+                    type: string
+                  heartbeatInterval:
+                    type: string
+                  failureTimeout:
+                    type: string
+              loadBalancing:
+                type: object
+                properties:
+                  algorithm:
+                    type: string
+                  weights:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                      format: int32
+                  config:
+                    type: object
+                    additionalProperties:
+                      type: string
+              dataReplication:
+                type: object
+                properties:
+                  strategy:
+                    type: string
+                  replicas:
+                    type: integer
+                    format: int32
+                  consistency:
+                    type: string
+                  regions:
+                    type: array
+                    items:
+                      type: string
+              networkPolicy:
+                type: object
+                properties:
+                  encryption:
+                    type: boolean
+                  qosPolicy:
+                    type: object
+                    properties:
+                      priorityClass:
+                        type: string
+                  firewall:
+                    type: object
+                    properties:
+                      ingressRules:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            port:
+                              type: integer
+                              format: int32
+                            protocol:
+                              type: string
+                            source:
+                              type: string
+                      egressRules:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            port:
+                              type: integer
+                              format: int32
+                            protocol:
+                              type: string
+                            source:
+                              type: string
+          status:
+            type: object
+            properties:
+              memberStatus:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    status:
+                      type: string
+                    currentWorkload:
+                      type: integer
+                      format: int32
+                    lastHeartbeat:
+                      type: string
+                      format: date-time
+              activeMembers:
+                type: integer
+                format: int32
+              totalCapacity:
+                type: object
+                properties:
+                  cpu:
+                    type: string
+                  memory:
+                    type: string
+                  storage:
+                    type: string
+                  gpu:
+                    type: string
+              federationHealth:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  consensus:
+                    type: string
+                  networkHealth:
+                    type: string
+                  syncStatus:
+                    type: string
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                      enum: ["True", "False", "Unknown"]
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string
+              observedGeneration:
+                type: integer
+                format: int64
+    additionalPrinterColumns:
+    - name: Strategy
+      type: string
+      jsonPath: .spec.federation.strategy
+    - name: Members
+      type: integer
+      jsonPath: .status.activeMembers
+    - name: Health
+      type: string
+      jsonPath: .status.federationHealth.status
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+  scope: Namespaced
+  names:
+    plural: federatedclusters
+    singular: federatedcluster
+    kind: FederatedCluster
+    shortNames:
+    - fedcluster
+    - fedclusters

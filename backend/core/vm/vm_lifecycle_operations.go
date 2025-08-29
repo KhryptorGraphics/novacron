@@ -20,7 +20,7 @@ func (vm *VM) Reboot() error {
 	}
 
 	log.Printf("Rebooting VM %s (%s)", vm.Name(), vm.ID())
-	
+
 	// Set state to restarting
 	vm.state = StateRestarting
 
@@ -134,11 +134,11 @@ func (vm *VM) Clone(newName string) (*VM, error) {
 	// Copy arrays and maps
 	copy(newConfig.Args, config.Args)
 	copy(newConfig.Mounts, config.Mounts)
-	
+
 	for k, v := range config.Env {
 		newConfig.Env[k] = v
 	}
-	
+
 	for k, v := range config.Tags {
 		newConfig.Tags[k] = v
 	}
@@ -153,7 +153,7 @@ func (vm *VM) Clone(newName string) (*VM, error) {
 		return nil, fmt.Errorf("failed to create cloned VM: %w", err)
 	}
 
-	log.Printf("Successfully cloned VM %s (%s) to %s (%s)", 
+	log.Printf("Successfully cloned VM %s (%s) to %s (%s)",
 		vm.Name(), vm.ID(), clonedVM.Name(), clonedVM.ID())
 
 	return clonedVM, nil
@@ -181,7 +181,7 @@ func (vm *VM) UpdateResourceLimits(cpuShares int, memoryMB int) error {
 	if cpuShares > 0 {
 		vm.config.CPUShares = cpuShares
 	}
-	
+
 	if memoryMB > 0 {
 		vm.config.MemoryMB = memoryMB
 	}
@@ -189,7 +189,7 @@ func (vm *VM) UpdateResourceLimits(cpuShares int, memoryMB int) error {
 	vm.updatedAt = time.Now()
 
 	// In a real implementation, we would update cgroup limits here
-	log.Printf("Updated resource limits for VM %s: CPU=%d, Memory=%dMB", 
+	log.Printf("Updated resource limits for VM %s: CPU=%d, Memory=%dMB",
 		vm.ID(), vm.config.CPUShares, vm.config.MemoryMB)
 
 	return nil
@@ -237,14 +237,14 @@ func (vm *VM) GetProcessStats() (VMProcessStats, error) {
 	// In a real implementation, we would read from /proc/[pid]/stat
 	// For now, return basic information
 	stats := VMProcessStats{
-		PID:         vm.pid,
-		State:       string(vm.state),
-		CPUTime:     0, // Would be read from /proc/[pid]/stat
-		MemoryRSS:   0, // Would be read from /proc/[pid]/status
-		MemoryVSZ:   0, // Would be read from /proc/[pid]/status
-		OpenFiles:   0, // Would be read from /proc/[pid]/fd/
-		Threads:     1, // Would be read from /proc/[pid]/status
-		StartTime:   vm.createdAt,
+		PID:       vm.pid,
+		State:     string(vm.state),
+		CPUTime:   0, // Would be read from /proc/[pid]/stat
+		MemoryRSS: 0, // Would be read from /proc/[pid]/status
+		MemoryVSZ: 0, // Would be read from /proc/[pid]/status
+		OpenFiles: 0, // Would be read from /proc/[pid]/fd/
+		Threads:   1, // Would be read from /proc/[pid]/status
+		StartTime: vm.createdAt,
 	}
 
 	return stats, nil
@@ -397,12 +397,12 @@ type VMResourceUsage struct {
 
 // VMProcessStats contains detailed process statistics
 type VMProcessStats struct {
-	PID         int       `json:"pid"`
-	State       string    `json:"state"`
-	CPUTime     int64     `json:"cpu_time_ms"`
-	MemoryRSS   int64     `json:"memory_rss_bytes"`
-	MemoryVSZ   int64     `json:"memory_vsz_bytes"`
-	OpenFiles   int       `json:"open_files"`
-	Threads     int       `json:"threads"`
-	StartTime   time.Time `json:"start_time"`
+	PID       int       `json:"pid"`
+	State     string    `json:"state"`
+	CPUTime   int64     `json:"cpu_time_ms"`
+	MemoryRSS int64     `json:"memory_rss_bytes"`
+	MemoryVSZ int64     `json:"memory_vsz_bytes"`
+	OpenFiles int       `json:"open_files"`
+	Threads   int       `json:"threads"`
+	StartTime time.Time `json:"start_time"`
 }

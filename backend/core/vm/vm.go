@@ -55,7 +55,7 @@ const (
 
 	// StateFailed means the VM has failed to start or has crashed
 	StateFailed State = "failed"
-	
+
 	// Legacy state constants for compatibility
 	VMStateError     = StateFailed
 	VMStateRunning   = StateRunning
@@ -69,19 +69,54 @@ const (
 
 // VMConfig holds configuration for a VM
 type VMConfig struct {
-	ID         string            `yaml:"id" json:"id"`
-	Name       string            `yaml:"name" json:"name"`
-	Command    string            `yaml:"command" json:"command"`
-	Args       []string          `yaml:"args" json:"args"`
-	CPUShares  int               `yaml:"cpu_shares" json:"cpu_shares"`
-	MemoryMB   int               `yaml:"memory_mb" json:"memory_mb"`
-	DiskSizeGB int               `yaml:"disk_size_gb" json:"disk_size_gb"`
-	RootFS     string            `yaml:"rootfs" json:"rootfs"`
-	Mounts     []Mount           `yaml:"mounts" json:"mounts"`
-	Env        map[string]string `yaml:"env" json:"env"`
-	NetworkID  string            `yaml:"network_id" json:"network_id"`
-	WorkDir    string            `yaml:"work_dir" json:"work_dir"`
-	Tags       map[string]string `yaml:"tags" json:"tags"`
+	ID                      string                           `yaml:"id" json:"id"`
+	Name                    string                           `yaml:"name" json:"name"`
+	Command                 string                           `yaml:"command" json:"command"`
+	Args                    []string                         `yaml:"args" json:"args"`
+	CPUShares               int                              `yaml:"cpu_shares" json:"cpu_shares"`
+	MemoryMB                int                              `yaml:"memory_mb" json:"memory_mb"`
+	DiskSizeGB              int                              `yaml:"disk_size_gb" json:"disk_size_gb"`
+	RootFS                  string                           `yaml:"rootfs" json:"rootfs"`
+	Mounts                  []Mount                          `yaml:"mounts" json:"mounts"`
+	Env                     map[string]string                `yaml:"env" json:"env"`
+	NetworkID               string                           `yaml:"network_id" json:"network_id"`
+	WorkDir                 string                           `yaml:"work_dir" json:"work_dir"`
+	Tags                    map[string]string                `yaml:"tags" json:"tags"`
+	PredictivePrefetching   *PredictivePrefetchingConfig     `yaml:"predictive_prefetching,omitempty" json:"predictive_prefetching,omitempty"`
+}
+
+// PredictivePrefetchingConfig configures AI-driven predictive prefetching for VM migrations
+type PredictivePrefetchingConfig struct {
+	Enabled                bool              `yaml:"enabled" json:"enabled"`
+	PredictionAccuracy     float64           `yaml:"prediction_accuracy" json:"prediction_accuracy"`         // Target accuracy (default: 0.85)
+	MaxCacheSize           int64             `yaml:"max_cache_size" json:"max_cache_size"`                   // Max cache size in bytes
+	PredictionLatencyMs    int64             `yaml:"prediction_latency_ms" json:"prediction_latency_ms"`     // Max prediction latency in ms
+	ModelType              string            `yaml:"model_type" json:"model_type"`                           // "neural_network", "random_forest", etc.
+	TrainingDataSize       int64             `yaml:"training_data_size" json:"training_data_size"`           // Max training samples to retain
+	ContinuousLearning     bool              `yaml:"continuous_learning" json:"continuous_learning"`         // Enable continuous model training
+	PrefetchAheadTime      string            `yaml:"prefetch_ahead_time" json:"prefetch_ahead_time"`         // How far ahead to prefetch (e.g., "5m")
+	AIModelConfig          map[string]string `yaml:"ai_model_config,omitempty" json:"ai_model_config,omitempty"` // Model-specific configuration
+}
+
+// DefaultPredictivePrefetchingConfig returns default configuration for predictive prefetching
+func DefaultPredictivePrefetchingConfig() *PredictivePrefetchingConfig {
+	return &PredictivePrefetchingConfig{
+		Enabled:                true,
+		PredictionAccuracy:     TARGET_PREDICTION_ACCURACY,    // 0.85
+		MaxCacheSize:           1024 * 1024 * 1024,            // 1GB
+		PredictionLatencyMs:    TARGET_PREDICTION_LATENCY_MS,  // 10ms
+		ModelType:              "neural_network",
+		TrainingDataSize:       100000,                        // 100k samples
+		ContinuousLearning:     true,
+		PrefetchAheadTime:      "5m",
+		AIModelConfig: map[string]string{
+			"learning_rate":    "0.001",
+			"batch_size":       "32",
+			"epochs":          "100",
+			"hidden_layers":   "128,64",
+			"activation":      "relu",
+		},
+	}
 }
 
 // Mount represents a filesystem mount for a VM
@@ -148,16 +183,16 @@ type VMStats struct {
 
 // VMProcessInfo holds process information for a VM
 type VMProcessInfo struct {
-	PID              int
-	PPID             int
-	Command          string
-	Args             []string
-	StartTime        time.Time
-	CPUTime          time.Duration
-	MemoryRSS        int64
-	MemoryVSZ        int64
-	CPUUsagePercent  float64
-	MemoryUsageMB    int64
+	PID             int
+	PPID            int
+	Command         string
+	Args            []string
+	StartTime       time.Time
+	CPUTime         time.Duration
+	MemoryRSS       int64
+	MemoryVSZ       int64
+	CPUUsagePercent float64
+	MemoryUsageMB   int64
 }
 
 // NewVM creates a new VM instance

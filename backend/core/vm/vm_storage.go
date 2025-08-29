@@ -21,13 +21,13 @@ type StorageType string
 const (
 	// StorageTypeLocal represents local storage
 	StorageTypeLocal StorageType = "local"
-	
+
 	// StorageTypeNFS represents NFS storage
 	StorageTypeNFS StorageType = "nfs"
-	
+
 	// StorageTypeCeph represents Ceph storage
 	StorageTypeCeph StorageType = "ceph"
-	
+
 	// StorageTypeISCSI represents iSCSI storage
 	StorageTypeISCSI StorageType = "iscsi"
 )
@@ -38,44 +38,44 @@ type StorageFormat string
 const (
 	// StorageFormatRaw represents raw storage format
 	StorageFormatRaw StorageFormat = "raw"
-	
+
 	// StorageFormatQCOW2 represents QCOW2 storage format
 	StorageFormatQCOW2 StorageFormat = "qcow2"
-	
+
 	// StorageFormatVMDK represents VMDK storage format
 	StorageFormatVMDK StorageFormat = "vmdk"
-	
+
 	// StorageFormatVHD represents VHD storage format
 	StorageFormatVHD StorageFormat = "vhd"
 )
 
 // StoragePool represents a storage pool
 type StoragePool struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Type        StorageType `json:"type"`
-	Path        string      `json:"path"`
-	TotalSpace  int64       `json:"total_space"`
-	UsedSpace   int64       `json:"used_space"`
-	CreatedAt   time.Time   `json:"created_at"`
-	UpdatedAt   time.Time   `json:"updated_at"`
-	Tags        []string    `json:"tags,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
+	ID         string            `json:"id"`
+	Name       string            `json:"name"`
+	Type       StorageType       `json:"type"`
+	Path       string            `json:"path"`
+	TotalSpace int64             `json:"total_space"`
+	UsedSpace  int64             `json:"used_space"`
+	CreatedAt  time.Time         `json:"created_at"`
+	UpdatedAt  time.Time         `json:"updated_at"`
+	Tags       []string          `json:"tags,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
 }
 
 // StorageVolume represents a storage volume
 type StorageVolume struct {
-	ID          string        `json:"id"`
-	Name        string        `json:"name"`
-	PoolID      string        `json:"pool_id"`
-	Format      StorageFormat `json:"format"`
-	Capacity    int64         `json:"capacity"`
-	Allocation  int64         `json:"allocation"`
-	Path        string        `json:"path"`
-	CreatedAt   time.Time     `json:"created_at"`
-	UpdatedAt   time.Time     `json:"updated_at"`
-	Tags        []string      `json:"tags,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
+	ID         string            `json:"id"`
+	Name       string            `json:"name"`
+	PoolID     string            `json:"pool_id"`
+	Format     StorageFormat     `json:"format"`
+	Capacity   int64             `json:"capacity"`
+	Allocation int64             `json:"allocation"`
+	Path       string            `json:"path"`
+	CreatedAt  time.Time         `json:"created_at"`
+	UpdatedAt  time.Time         `json:"updated_at"`
+	Tags       []string          `json:"tags,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
 }
 
 // VMStorageManager manages VM storage
@@ -105,12 +105,12 @@ func (m *VMStorageManager) CreateStoragePool(ctx context.Context, name string, s
 	default:
 		return nil, fmt.Errorf("invalid storage type: %s", storageType)
 	}
-	
+
 	// Validate path
 	if path == "" {
 		return nil, fmt.Errorf("path is required")
 	}
-	
+
 	// For local storage, check if path exists
 	if storageType == StorageTypeLocal {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -120,10 +120,10 @@ func (m *VMStorageManager) CreateStoragePool(ctx context.Context, name string, s
 			}
 		}
 	}
-	
+
 	// Generate pool ID
 	poolID := fmt.Sprintf("pool-%s", strings.ReplaceAll(name, " ", "-"))
-	
+
 	// Check if pool already exists
 	m.poolsMutex.RLock()
 	if _, exists := m.pools[poolID]; exists {
@@ -131,7 +131,7 @@ func (m *VMStorageManager) CreateStoragePool(ctx context.Context, name string, s
 		return nil, fmt.Errorf("storage pool with ID %s already exists", poolID)
 	}
 	m.poolsMutex.RUnlock()
-	
+
 	// Get storage space information
 	var totalSpace, usedSpace int64
 	if storageType == StorageTypeLocal {
@@ -152,7 +152,7 @@ func (m *VMStorageManager) CreateStoragePool(ctx context.Context, name string, s
 			}
 		}
 	}
-	
+
 	// Create pool
 	pool := &StoragePool{
 		ID:         poolID,
@@ -166,19 +166,19 @@ func (m *VMStorageManager) CreateStoragePool(ctx context.Context, name string, s
 		Tags:       tags,
 		Metadata:   metadata,
 	}
-	
+
 	// Create pool in the system
 	if err := m.createPoolInSystem(ctx, pool); err != nil {
 		return nil, fmt.Errorf("failed to create storage pool in system: %w", err)
 	}
-	
+
 	// Store pool
 	m.poolsMutex.Lock()
 	m.pools[poolID] = pool
 	m.poolsMutex.Unlock()
-	
+
 	log.Printf("Created storage pool %s (%s)", pool.Name, pool.ID)
-	
+
 	return pool, nil
 }
 
@@ -186,12 +186,12 @@ func (m *VMStorageManager) CreateStoragePool(ctx context.Context, name string, s
 func (m *VMStorageManager) GetStoragePool(poolID string) (*StoragePool, error) {
 	m.poolsMutex.RLock()
 	defer m.poolsMutex.RUnlock()
-	
+
 	pool, exists := m.pools[poolID]
 	if !exists {
 		return nil, fmt.Errorf("storage pool %s not found", poolID)
 	}
-	
+
 	return pool, nil
 }
 
@@ -199,12 +199,12 @@ func (m *VMStorageManager) GetStoragePool(poolID string) (*StoragePool, error) {
 func (m *VMStorageManager) ListStoragePools() []*StoragePool {
 	m.poolsMutex.RLock()
 	defer m.poolsMutex.RUnlock()
-	
+
 	pools := make([]*StoragePool, 0, len(m.pools))
 	for _, pool := range m.pools {
 		pools = append(pools, pool)
 	}
-	
+
 	return pools
 }
 
@@ -218,7 +218,7 @@ func (m *VMStorageManager) DeleteStoragePool(ctx context.Context, poolID string)
 		return fmt.Errorf("storage pool %s not found", poolID)
 	}
 	m.poolsMutex.RUnlock()
-	
+
 	// Check if pool has volumes
 	m.volumesMutex.RLock()
 	for _, volume := range m.volumes {
@@ -228,19 +228,19 @@ func (m *VMStorageManager) DeleteStoragePool(ctx context.Context, poolID string)
 		}
 	}
 	m.volumesMutex.RUnlock()
-	
+
 	// Delete pool from the system
 	if err := m.deletePoolFromSystem(ctx, pool); err != nil {
 		return fmt.Errorf("failed to delete storage pool from system: %w", err)
 	}
-	
+
 	// Remove pool
 	m.poolsMutex.Lock()
 	delete(m.pools, poolID)
 	m.poolsMutex.Unlock()
-	
+
 	log.Printf("Deleted storage pool %s (%s)", pool.Name, pool.ID)
-	
+
 	return nil
 }
 
@@ -254,7 +254,7 @@ func (m *VMStorageManager) CreateStorageVolume(ctx context.Context, name string,
 		return nil, fmt.Errorf("storage pool %s not found", poolID)
 	}
 	m.poolsMutex.RUnlock()
-	
+
 	// Validate format
 	switch format {
 	case StorageFormatRaw, StorageFormatQCOW2, StorageFormatVMDK, StorageFormatVHD:
@@ -262,20 +262,20 @@ func (m *VMStorageManager) CreateStorageVolume(ctx context.Context, name string,
 	default:
 		return nil, fmt.Errorf("invalid storage format: %s", format)
 	}
-	
+
 	// Validate capacity
 	if capacity <= 0 {
 		return nil, fmt.Errorf("capacity must be greater than 0")
 	}
-	
+
 	// Check if there's enough space in the pool
 	if pool.TotalSpace > 0 && pool.UsedSpace+capacity > pool.TotalSpace {
 		return nil, fmt.Errorf("not enough space in storage pool %s", poolID)
 	}
-	
+
 	// Generate volume ID
 	volumeID := uuid.New().String()
-	
+
 	// Generate volume path
 	var volumePath string
 	switch pool.Type {
@@ -288,7 +288,7 @@ func (m *VMStorageManager) CreateStorageVolume(ctx context.Context, name string,
 	case StorageTypeISCSI:
 		volumePath = fmt.Sprintf("iscsi:%s/%s", pool.Name, volumeID)
 	}
-	
+
 	// Create volume
 	volume := &StorageVolume{
 		ID:         volumeID,
@@ -303,25 +303,25 @@ func (m *VMStorageManager) CreateStorageVolume(ctx context.Context, name string,
 		Tags:       tags,
 		Metadata:   metadata,
 	}
-	
+
 	// Create volume in the system
 	if err := m.createVolumeInSystem(ctx, pool, volume); err != nil {
 		return nil, fmt.Errorf("failed to create storage volume in system: %w", err)
 	}
-	
+
 	// Store volume
 	m.volumesMutex.Lock()
 	m.volumes[volumeID] = volume
 	m.volumesMutex.Unlock()
-	
+
 	// Update pool used space
 	m.poolsMutex.Lock()
 	pool.UsedSpace += capacity
 	pool.UpdatedAt = time.Now()
 	m.poolsMutex.Unlock()
-	
+
 	log.Printf("Created storage volume %s (%s) in pool %s", volume.Name, volume.ID, pool.Name)
-	
+
 	return volume, nil
 }
 
@@ -329,12 +329,12 @@ func (m *VMStorageManager) CreateStorageVolume(ctx context.Context, name string,
 func (m *VMStorageManager) GetStorageVolume(volumeID string) (*StorageVolume, error) {
 	m.volumesMutex.RLock()
 	defer m.volumesMutex.RUnlock()
-	
+
 	volume, exists := m.volumes[volumeID]
 	if !exists {
 		return nil, fmt.Errorf("storage volume %s not found", volumeID)
 	}
-	
+
 	return volume, nil
 }
 
@@ -342,12 +342,12 @@ func (m *VMStorageManager) GetStorageVolume(volumeID string) (*StorageVolume, er
 func (m *VMStorageManager) ListStorageVolumes() []*StorageVolume {
 	m.volumesMutex.RLock()
 	defer m.volumesMutex.RUnlock()
-	
+
 	volumes := make([]*StorageVolume, 0, len(m.volumes))
 	for _, volume := range m.volumes {
 		volumes = append(volumes, volume)
 	}
-	
+
 	return volumes
 }
 
@@ -355,14 +355,14 @@ func (m *VMStorageManager) ListStorageVolumes() []*StorageVolume {
 func (m *VMStorageManager) ListStorageVolumesInPool(poolID string) []*StorageVolume {
 	m.volumesMutex.RLock()
 	defer m.volumesMutex.RUnlock()
-	
+
 	volumes := make([]*StorageVolume, 0)
 	for _, volume := range m.volumes {
 		if volume.PoolID == poolID {
 			volumes = append(volumes, volume)
 		}
 	}
-	
+
 	return volumes
 }
 
@@ -376,7 +376,7 @@ func (m *VMStorageManager) DeleteStorageVolume(ctx context.Context, volumeID str
 		return fmt.Errorf("storage volume %s not found", volumeID)
 	}
 	m.volumesMutex.RUnlock()
-	
+
 	// Get the pool
 	m.poolsMutex.RLock()
 	pool, exists := m.pools[volume.PoolID]
@@ -385,17 +385,17 @@ func (m *VMStorageManager) DeleteStorageVolume(ctx context.Context, volumeID str
 		return fmt.Errorf("storage pool %s not found", volume.PoolID)
 	}
 	m.poolsMutex.RUnlock()
-	
+
 	// Delete volume from the system
 	if err := m.deleteVolumeFromSystem(ctx, pool, volume); err != nil {
 		return fmt.Errorf("failed to delete storage volume from system: %w", err)
 	}
-	
+
 	// Remove volume
 	m.volumesMutex.Lock()
 	delete(m.volumes, volumeID)
 	m.volumesMutex.Unlock()
-	
+
 	// Update pool used space
 	m.poolsMutex.Lock()
 	pool.UsedSpace -= volume.Capacity
@@ -404,9 +404,9 @@ func (m *VMStorageManager) DeleteStorageVolume(ctx context.Context, volumeID str
 	}
 	pool.UpdatedAt = time.Now()
 	m.poolsMutex.Unlock()
-	
+
 	log.Printf("Deleted storage volume %s (%s) from pool %s", volume.Name, volume.ID, pool.Name)
-	
+
 	return nil
 }
 
@@ -420,7 +420,7 @@ func (m *VMStorageManager) ResizeStorageVolume(ctx context.Context, volumeID str
 		return nil, fmt.Errorf("storage volume %s not found", volumeID)
 	}
 	m.volumesMutex.RUnlock()
-	
+
 	// Get the pool
 	m.poolsMutex.RLock()
 	pool, exists := m.pools[volume.PoolID]
@@ -429,17 +429,17 @@ func (m *VMStorageManager) ResizeStorageVolume(ctx context.Context, volumeID str
 		return nil, fmt.Errorf("storage pool %s not found", volume.PoolID)
 	}
 	m.poolsMutex.RUnlock()
-	
+
 	// Validate new capacity
 	if newCapacity <= 0 {
 		return nil, fmt.Errorf("new capacity must be greater than 0")
 	}
-	
+
 	// Check if new capacity is smaller than current allocation
 	if newCapacity < volume.Allocation {
 		return nil, fmt.Errorf("new capacity cannot be smaller than current allocation")
 	}
-	
+
 	// Check if there's enough space in the pool for the increase
 	capacityDiff := newCapacity - volume.Capacity
 	if capacityDiff > 0 {
@@ -450,27 +450,27 @@ func (m *VMStorageManager) ResizeStorageVolume(ctx context.Context, volumeID str
 		}
 		m.poolsMutex.RUnlock()
 	}
-	
+
 	// Resize volume in the system
 	if err := m.resizeVolumeInSystem(ctx, pool, volume, newCapacity); err != nil {
 		return nil, fmt.Errorf("failed to resize storage volume in system: %w", err)
 	}
-	
+
 	// Update volume
 	m.volumesMutex.Lock()
 	oldCapacity := volume.Capacity
 	volume.Capacity = newCapacity
 	volume.UpdatedAt = time.Now()
 	m.volumesMutex.Unlock()
-	
+
 	// Update pool used space
 	m.poolsMutex.Lock()
 	pool.UsedSpace += (newCapacity - oldCapacity)
 	pool.UpdatedAt = time.Now()
 	m.poolsMutex.Unlock()
-	
+
 	log.Printf("Resized storage volume %s (%s) from %d to %d bytes", volume.Name, volume.ID, oldCapacity, newCapacity)
-	
+
 	return volume, nil
 }
 
@@ -484,7 +484,7 @@ func (m *VMStorageManager) CloneStorageVolume(ctx context.Context, sourceVolumeI
 		return nil, fmt.Errorf("source storage volume %s not found", sourceVolumeID)
 	}
 	m.volumesMutex.RUnlock()
-	
+
 	// Get the pool
 	m.poolsMutex.RLock()
 	pool, exists := m.pools[sourceVolume.PoolID]
@@ -493,15 +493,15 @@ func (m *VMStorageManager) CloneStorageVolume(ctx context.Context, sourceVolumeI
 		return nil, fmt.Errorf("storage pool %s not found", sourceVolume.PoolID)
 	}
 	m.poolsMutex.RUnlock()
-	
+
 	// Check if there's enough space in the pool
 	if pool.TotalSpace > 0 && pool.UsedSpace+sourceVolume.Capacity > pool.TotalSpace {
 		return nil, fmt.Errorf("not enough space in storage pool %s", sourceVolume.PoolID)
 	}
-	
+
 	// Generate volume ID
 	volumeID := uuid.New().String()
-	
+
 	// Generate volume path
 	var volumePath string
 	switch pool.Type {
@@ -514,7 +514,7 @@ func (m *VMStorageManager) CloneStorageVolume(ctx context.Context, sourceVolumeI
 	case StorageTypeISCSI:
 		volumePath = fmt.Sprintf("iscsi:%s/%s", pool.Name, volumeID)
 	}
-	
+
 	// Create volume
 	volume := &StorageVolume{
 		ID:         volumeID,
@@ -529,25 +529,25 @@ func (m *VMStorageManager) CloneStorageVolume(ctx context.Context, sourceVolumeI
 		Tags:       tags,
 		Metadata:   metadata,
 	}
-	
+
 	// Clone volume in the system
 	if err := m.cloneVolumeInSystem(ctx, pool, sourceVolume, volume); err != nil {
 		return nil, fmt.Errorf("failed to clone storage volume in system: %w", err)
 	}
-	
+
 	// Store volume
 	m.volumesMutex.Lock()
 	m.volumes[volumeID] = volume
 	m.volumesMutex.Unlock()
-	
+
 	// Update pool used space
 	m.poolsMutex.Lock()
 	pool.UsedSpace += volume.Capacity
 	pool.UpdatedAt = time.Now()
 	m.poolsMutex.Unlock()
-	
+
 	log.Printf("Cloned storage volume %s (%s) to %s (%s)", sourceVolume.Name, sourceVolume.ID, volume.Name, volume.ID)
-	
+
 	return volume, nil
 }
 
@@ -555,10 +555,10 @@ func (m *VMStorageManager) CloneStorageVolume(ctx context.Context, sourceVolumeI
 func (m *VMStorageManager) createPoolInSystem(ctx context.Context, pool *StoragePool) error {
 	// In a real implementation, this would create the storage pool in the system
 	// For example, creating a directory, setting up NFS, etc.
-	
+
 	// For simplicity, we'll just log the operation
 	log.Printf("Creating storage pool %s (%s) in system", pool.Name, pool.ID)
-	
+
 	// For local storage, create the directory if it doesn't exist
 	if pool.Type == StorageTypeLocal {
 		if _, err := os.Stat(pool.Path); os.IsNotExist(err) {
@@ -567,7 +567,7 @@ func (m *VMStorageManager) createPoolInSystem(ctx context.Context, pool *Storage
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -575,10 +575,10 @@ func (m *VMStorageManager) createPoolInSystem(ctx context.Context, pool *Storage
 func (m *VMStorageManager) deletePoolFromSystem(ctx context.Context, pool *StoragePool) error {
 	// In a real implementation, this would delete the storage pool from the system
 	// For example, removing a directory, unmounting NFS, etc.
-	
+
 	// For simplicity, we'll just log the operation
 	log.Printf("Deleting storage pool %s (%s) from system", pool.Name, pool.ID)
-	
+
 	return nil
 }
 
@@ -586,10 +586,10 @@ func (m *VMStorageManager) deletePoolFromSystem(ctx context.Context, pool *Stora
 func (m *VMStorageManager) createVolumeInSystem(ctx context.Context, pool *StoragePool, volume *StorageVolume) error {
 	// In a real implementation, this would create the storage volume in the system
 	// For example, creating a file, setting up RBD, etc.
-	
+
 	// For simplicity, we'll just log the operation
 	log.Printf("Creating storage volume %s (%s) in system", volume.Name, volume.ID)
-	
+
 	// For local storage, create the volume file
 	if pool.Type == StorageTypeLocal {
 		// Create the volume file based on format
@@ -620,7 +620,7 @@ func (m *VMStorageManager) createVolumeInSystem(ctx context.Context, pool *Stora
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -628,17 +628,17 @@ func (m *VMStorageManager) createVolumeInSystem(ctx context.Context, pool *Stora
 func (m *VMStorageManager) deleteVolumeFromSystem(ctx context.Context, pool *StoragePool, volume *StorageVolume) error {
 	// In a real implementation, this would delete the storage volume from the system
 	// For example, removing a file, deleting RBD, etc.
-	
+
 	// For simplicity, we'll just log the operation
 	log.Printf("Deleting storage volume %s (%s) from system", volume.Name, volume.ID)
-	
+
 	// For local storage, delete the volume file
 	if pool.Type == StorageTypeLocal {
 		if err := os.Remove(volume.Path); err != nil {
 			return fmt.Errorf("failed to delete volume file: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -646,10 +646,10 @@ func (m *VMStorageManager) deleteVolumeFromSystem(ctx context.Context, pool *Sto
 func (m *VMStorageManager) resizeVolumeInSystem(ctx context.Context, pool *StoragePool, volume *StorageVolume, newCapacity int64) error {
 	// In a real implementation, this would resize the storage volume in the system
 	// For example, resizing a file, resizing RBD, etc.
-	
+
 	// For simplicity, we'll just log the operation
 	log.Printf("Resizing storage volume %s (%s) in system", volume.Name, volume.ID)
-	
+
 	// For local storage, resize the volume file
 	if pool.Type == StorageTypeLocal {
 		// Resize the volume file based on format
@@ -668,7 +668,7 @@ func (m *VMStorageManager) resizeVolumeInSystem(ctx context.Context, pool *Stora
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -676,10 +676,10 @@ func (m *VMStorageManager) resizeVolumeInSystem(ctx context.Context, pool *Stora
 func (m *VMStorageManager) cloneVolumeInSystem(ctx context.Context, pool *StoragePool, sourceVolume, targetVolume *StorageVolume) error {
 	// In a real implementation, this would clone the storage volume in the system
 	// For example, copying a file, cloning RBD, etc.
-	
+
 	// For simplicity, we'll just log the operation
 	log.Printf("Cloning storage volume %s (%s) to %s (%s) in system", sourceVolume.Name, sourceVolume.ID, targetVolume.Name, targetVolume.ID)
-	
+
 	// For local storage, clone the volume file
 	if pool.Type == StorageTypeLocal {
 		// Clone the volume file based on format
@@ -698,6 +698,6 @@ func (m *VMStorageManager) cloneVolumeInSystem(ctx context.Context, pool *Storag
 			}
 		}
 	}
-	
+
 	return nil
 }

@@ -31,10 +31,10 @@ func (vsm *VMStorageManagerIntegration) CreateBootVolume(ctx context.Context, vm
 		Size:   int64(sizeGB) * 1024 * 1024 * 1024, // Convert GB to bytes
 		Format: storage.VolumeFormatExt4,
 		Metadata: map[string]string{
-			"vm_id":      vmID,
-			"vm_name":    vmName,
+			"vm_id":       vmID,
+			"vm_name":     vmName,
 			"volume_type": "boot",
-			"bootable":   "true",
+			"bootable":    "true",
 		},
 	}
 
@@ -192,11 +192,11 @@ func (vsm *VMStorageManagerIntegration) CreateVMSnapshot(ctx context.Context, vm
 
 	for _, volume := range volumes {
 		// TODO: Implement CreateSnapshot method in storage service
-		// snapshotID, err := vsm.storageService.CreateSnapshot(ctx, volume.ID, 
-		//	fmt.Sprintf("%s-%s", snapshotName, volume.Name), 
+		// snapshotID, err := vsm.storageService.CreateSnapshot(ctx, volume.ID,
+		//	fmt.Sprintf("%s-%s", snapshotName, volume.Name),
 		//	fmt.Sprintf("Snapshot of volume %s for VM %s", volume.Name, vmID))
 		snapshotID, err := "", fmt.Errorf("snapshot not implemented")
-		
+
 		if err != nil {
 			log.Printf("Warning: Failed to create snapshot for volume %s: %v", volume.ID, err)
 			lastErr = err
@@ -221,11 +221,11 @@ func (vsm *VMStorageManagerIntegration) GetVMStorageStats(ctx context.Context, v
 	}
 
 	stats := VMStorageStats{
-		VMID:         vmID,
-		VolumeCount:  len(volumes),
-		TotalSizeGB:  0,
-		UsedSizeGB:   0,
-		VolumeStats:  make([]VolumeStorageStats, 0, len(volumes)),
+		VMID:        vmID,
+		VolumeCount: len(volumes),
+		TotalSizeGB: 0,
+		UsedSizeGB:  0,
+		VolumeStats: make([]VolumeStorageStats, 0, len(volumes)),
 	}
 
 	for _, volume := range volumes {
@@ -260,11 +260,11 @@ func (vsm *VMStorageManagerIntegration) GetVMStorageStats(ctx context.Context, v
 
 // VMStorageStats contains storage statistics for a VM
 type VMStorageStats struct {
-	VMID         string                `json:"vm_id"`
-	VolumeCount  int                   `json:"volume_count"`
-	TotalSizeGB  float64               `json:"total_size_gb"`
-	UsedSizeGB   float64               `json:"used_size_gb"`
-	VolumeStats  []VolumeStorageStats  `json:"volume_stats"`
+	VMID        string               `json:"vm_id"`
+	VolumeCount int                  `json:"volume_count"`
+	TotalSizeGB float64              `json:"total_size_gb"`
+	UsedSizeGB  float64              `json:"used_size_gb"`
+	VolumeStats []VolumeStorageStats `json:"volume_stats"`
 }
 
 // VolumeStorageStats contains statistics for a single volume
@@ -328,7 +328,7 @@ func (m *VMManager) CreateVMWithStorage(ctx context.Context, config VMConfig, st
 		if err != nil {
 			// Clean up VM if storage creation fails
 			// TODO: Fix method name when deleteVM is made public or provide proper cleanup
-		// m.deleteVM(ctx, vm.ID())
+			// m.deleteVM(ctx, vm.ID())
 			return nil, fmt.Errorf("failed to create boot volume: %w", err)
 		}
 
@@ -337,7 +337,7 @@ func (m *VMManager) CreateVMWithStorage(ctx context.Context, config VMConfig, st
 			// Clean up
 			storageManager.storageService.DeleteVolume(ctx, bootVolume.ID)
 			// TODO: Fix method name when deleteVM is made public or provide proper cleanup
-		// m.deleteVM(ctx, vm.ID())
+			// m.deleteVM(ctx, vm.ID())
 			return nil, fmt.Errorf("failed to attach boot volume: %w", err)
 		}
 

@@ -1,0 +1,663 @@
+# Comprehensive Testing Pipeline for NovaCron Phase 1
+name: Comprehensive Testing Pipeline
+
+on:
+  push:
+    branches: [ main, develop, feature/* ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run comprehensive tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  GO_VERSION: '1.19'
+  NODE_VERSION: '18'
+  PYTHON_VERSION: '3.12'
+  JAVA_VERSION: '11'
+
+jobs:
+  # ============================================================================
+  # Unit Testing Matrix
+  # ============================================================================
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        test-suite: [core, vm, scheduler, storage, monitoring, auth]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Run unit tests with coverage
+      run: |
+        cd backend/core
+        go test -v -race -coverprofile=coverage-${{ matrix.test-suite }}.out \
+          -covermode=atomic ./$(echo ${{ matrix.test-suite }})...
+        go tool cover -html=coverage-${{ matrix.test-suite }}.out \
+          -o coverage-${{ matrix.test-suite }}.html
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        files: ./backend/core/coverage-${{ matrix.test-suite }}.out
+        flags: unit-${{ matrix.test-suite }}
+
+    - name: Upload coverage artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverage-${{ matrix.test-suite }}
+        path: |
+          backend/core/coverage-${{ matrix.test-suite }}.out
+          backend/core/coverage-${{ matrix.test-suite }}.html
+
+  # ============================================================================
+  # Multi-Cloud Integration Testing
+  # ============================================================================
+  multicloud-tests:
+    name: Multi-Cloud Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || contains(github.event.head_commit.message, '[multicloud]')
+    strategy:
+      matrix:
+        cloud: [aws, azure, gcp]
+      fail-fast: false
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Setup cloud credentials
+      run: |
+        case "${{ matrix.cloud }}" in
+          aws)
+            echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+            echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> $GITHUB_ENV
+            echo "AWS_DEFAULT_REGION=us-west-2" >> $GITHUB_ENV
+            ;;
+          azure)
+            echo "AZURE_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}" >> $GITHUB_ENV
+            echo "AZURE_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET }}" >> $GITHUB_ENV
+            echo "AZURE_TENANT_ID=${{ secrets.AZURE_TENANT_ID }}" >> $GITHUB_ENV
+            echo "AZURE_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID }}" >> $GITHUB_ENV
+            ;;
+          gcp)
+            echo '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}' > gcp-credentials.json
+            echo "GCP_CREDENTIALS_PATH=gcp-credentials.json" >> $GITHUB_ENV
+            echo "GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}" >> $GITHUB_ENV
+            ;;
+        esac
+
+    - name: Run multi-cloud tests
+      run: |
+        cd backend/tests/multicloud
+        go test -v -timeout 30m -run "Test${{ matrix.cloud | title }}.*" ./...
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: multicloud-results-${{ matrix.cloud }}
+        path: backend/tests/multicloud/test-results-*.json
+
+  # ============================================================================
+  # AI/ML Model Testing
+  # ============================================================================
+  ml-model-tests:
+    name: ML Model Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Setup test data
+      run: |
+        # Download ML test datasets
+        mkdir -p test-data/ml
+        # In real implementation, would download actual ML test data
+        echo "Setting up ML test data"
+
+    - name: Run ML model validation tests
+      run: |
+        cd backend/tests/ml
+        go test -v -timeout 15m -run "TestModelValidation.*" ./...
+
+    - name: Run ML performance tests
+      run: |
+        cd backend/tests/ml
+        go test -v -timeout 10m -run "TestPerformanceRegression.*" ./...
+
+    - name: Run ML accuracy tests
+      run: |
+        cd backend/tests/ml
+        go test -v -timeout 10m -run "TestModelAccuracy.*" ./...
+
+    - name: Generate ML metrics report
+      run: |
+        cd backend/tests/ml
+        # Generate comprehensive ML testing report
+        echo "Generating ML metrics report"
+        # go run ./cmd/model-metrics-reporter/main.go > ml-metrics.json
+
+    - name: Upload ML test results
+      uses: actions/upload-artifact@v3
+      with:
+        name: ml-test-results
+        path: |
+          backend/tests/ml/ml-metrics.json
+          backend/tests/ml/test-results.json
+
+  # ============================================================================
+  # Redis Cache Testing
+  # ============================================================================
+  cache-tests:
+    name: Redis Cache Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=3
+      
+      redis-cluster:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+        options: --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Wait for Redis
+      run: |
+        until redis-cli -h localhost -p 6379 ping; do
+          echo "Waiting for Redis..."
+          sleep 2
+        done
+
+    - name: Run Redis performance tests
+      env:
+        REDIS_URL: redis://localhost:6379
+      run: |
+        cd backend/tests/cache
+        go test -v -timeout 15m -run "TestRedisCachePerformance.*" ./...
+
+    - name: Run Redis consistency tests
+      env:
+        REDIS_URL: redis://localhost:6379
+      run: |
+        cd backend/tests/cache
+        go test -v -timeout 10m -run "TestCacheConsistency.*" ./...
+
+    - name: Run Redis failover tests
+      env:
+        REDIS_URL: redis://localhost:6379
+      run: |
+        cd backend/tests/cache
+        go test -v -timeout 10m -run "TestFailoverScenario.*" ./...
+
+    - name: Upload cache test results
+      uses: actions/upload-artifact@v3
+      with:
+        name: cache-test-results
+        path: backend/tests/cache/test-results.json
+
+  # ============================================================================
+  # Cross-Language SDK Testing
+  # ============================================================================
+  sdk-tests:
+    name: SDK Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        language: [go, python, javascript]
+      fail-fast: false
+
+    services:
+      api-server:
+        image: novacron/api-server:test
+        ports:
+          - 8090:8090
+        env:
+          API_KEY: test-api-key
+        options: --health-cmd="curl -f http://localhost:8090/health || exit 1" --health-interval=10s
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Setup Node.js
+      if: matrix.language == 'javascript'
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Setup Python
+      if: matrix.language == 'python'
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}  # Python 3.12 for Ubuntu 24.04
+
+    - name: Install language-specific dependencies
+      run: |
+        case "${{ matrix.language }}" in
+          python)
+            pip install pytest requests
+            ;;
+          javascript)
+            npm install -g jest axios
+            ;;
+        esac
+
+    - name: Run SDK tests
+      env:
+        NOVACRON_API_URL: http://localhost:8090
+        NOVACRON_API_KEY: test-api-key
+      run: |
+        cd backend/tests/sdk
+        go test -v -timeout 20m -run ".*${{ matrix.language }}" ./...
+
+    - name: Upload SDK test results
+      uses: actions/upload-artifact@v3
+      with:
+        name: sdk-test-results-${{ matrix.language }}
+        path: backend/tests/sdk/test-results-${{ matrix.language }}.json
+
+  # ============================================================================
+  # End-to-End Testing
+  # ============================================================================
+  e2e-tests:
+    name: End-to-End Tests
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || contains(github.event.head_commit.message, '[e2e]')
+
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: novacron_test
+        ports:
+          - 5432:5432
+        options: --health-cmd="pg_isready" --health-interval=10s --health-timeout=5s --health-retries=5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Start NovaCron services
+      run: |
+        docker-compose -f docker-compose.test.yml up -d api-server frontend
+        sleep 30  # Wait for services to be ready
+
+    - name: Run E2E workflow tests
+      env:
+        NOVACRON_API_URL: http://localhost:8090
+        NOVACRON_UI_URL: http://localhost:8092
+        NOVACRON_API_KEY: test-api-key
+        ENABLE_UI_TESTS: false
+        ENABLE_LOAD_TESTS: true
+      run: |
+        cd backend/tests/e2e
+        go test -v -timeout 45m -run "TestComprehensiveWorkflows.*" ./...
+
+    - name: Run E2E API integration tests
+      env:
+        NOVACRON_API_URL: http://localhost:8090
+        NOVACRON_API_KEY: test-api-key
+      run: |
+        cd backend/tests/e2e
+        go test -v -timeout 30m -run "Test.*API.*" ./...
+
+    - name: Collect service logs
+      if: always()
+      run: |
+        docker-compose -f docker-compose.test.yml logs > e2e-service-logs.txt
+
+    - name: Upload E2E test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: e2e-test-results
+        path: |
+          backend/tests/e2e/test-results.json
+          e2e-service-logs.txt
+
+  # ============================================================================
+  # Chaos Engineering
+  # ============================================================================
+  chaos-tests:
+    name: Chaos Engineering
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || contains(github.event.head_commit.message, '[chaos]')
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+      
+      redis-2:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Install chaos engineering tools
+      run: |
+        # Install network manipulation tools
+        sudo apt-get update
+        sudo apt-get install -y iproute2 iptables
+
+    - name: Run Redis chaos tests
+      env:
+        REDIS_URL: redis://localhost:6379
+      run: |
+        cd backend/tests/chaos
+        sudo go test -v -timeout 20m -run "TestRedisClusterChaosEngineering.*" ./...
+
+    - name: Run advanced chaos scenarios
+      env:
+        REDIS_URL: redis://localhost:6379
+      run: |
+        cd backend/tests/chaos
+        sudo go test -v -timeout 30m -run "TestAdvancedChaosScenarios.*" ./...
+
+    - name: Generate chaos engineering report
+      run: |
+        cd backend/tests/chaos
+        # Generate comprehensive chaos engineering report
+        echo "Generating chaos engineering report"
+
+    - name: Upload chaos test results
+      uses: actions/upload-artifact@v3
+      with:
+        name: chaos-test-results
+        path: backend/tests/chaos/chaos-report.json
+
+  # ============================================================================
+  # Performance Benchmarking
+  # ============================================================================
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Run VM benchmarks
+      run: |
+        cd backend/tests/benchmarks
+        go test -bench=BenchmarkVM.* -benchtime=30s -benchmem ./... > vm-benchmarks.txt
+
+    - name: Run scheduler benchmarks
+      run: |
+        cd backend/core/scheduler/policy
+        go test -bench=. -benchtime=30s -benchmem ./... > scheduler-benchmarks.txt
+
+    - name: Run storage benchmarks
+      run: |
+        cd backend/core/storage
+        go test -bench=. -benchtime=30s -benchmem ./... > storage-benchmarks.txt
+
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v3
+      with:
+        name: benchmark-results
+        path: |
+          backend/tests/benchmarks/vm-benchmarks.txt
+          backend/core/scheduler/policy/scheduler-benchmarks.txt
+          backend/core/storage/storage-benchmarks.txt
+
+  # ============================================================================
+  # Security & Quality
+  # ============================================================================
+  security-tests:
+    name: Security & Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v3
+      with:
+        version: latest
+        working-directory: backend
+
+    - name: Run gosec security scanner
+      uses: securecodewarrior/github-action-gosec@master
+      with:
+        args: './backend/...'
+
+    - name: Run Nancy vulnerability check
+      run: |
+        go list -json -m all | docker run --rm -i sonatypecommunity/nancy:latest sleuth
+
+    - name: Run Snyk security scan
+      if: github.event_name != 'pull_request'
+      uses: snyk/actions/golang@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --severity-threshold=high
+
+  # ============================================================================
+  # Integration Test Summary
+  # ============================================================================
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [unit-tests, cache-tests, performance-tests, security-tests]
+    if: always()
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+
+    - name: Generate comprehensive test report
+      run: |
+        echo "# NovaCron Comprehensive Test Report" > test-summary.md
+        echo "Generated on: $(date)" >> test-summary.md
+        echo "" >> test-summary.md
+        
+        # Unit test coverage summary
+        echo "## Unit Test Coverage" >> test-summary.md
+        for coverage_file in coverage-*/coverage-*.out; do
+          if [ -f "$coverage_file" ]; then
+            echo "- $(basename $coverage_file): $(go tool cover -func=$coverage_file | tail -1 | awk '{print $3}')" >> test-summary.md
+          fi
+        done
+        
+        echo "" >> test-summary.md
+        echo "## Test Status Summary" >> test-summary.md
+        echo "- Unit Tests: ${{ needs.unit-tests.result }}" >> test-summary.md
+        echo "- Cache Tests: ${{ needs.cache-tests.result }}" >> test-summary.md
+        echo "- Performance Tests: ${{ needs.performance-tests.result }}" >> test-summary.md
+        echo "- Security Tests: ${{ needs.security-tests.result }}" >> test-summary.md
+        
+        echo "" >> test-summary.md
+        echo "## Recommendations" >> test-summary.md
+        if [[ "${{ needs.unit-tests.result }}" != "success" ]]; then
+          echo "- ❌ Unit tests failed - requires immediate attention" >> test-summary.md
+        fi
+        if [[ "${{ needs.cache-tests.result }}" != "success" ]]; then
+          echo "- ⚠️ Cache tests failed - check Redis cluster configuration" >> test-summary.md
+        fi
+        if [[ "${{ needs.performance-tests.result }}" != "success" ]]; then
+          echo "- ⚠️ Performance tests failed - investigate performance regressions" >> test-summary.md
+        fi
+        if [[ "${{ needs.security-tests.result }}" != "success" ]]; then
+          echo "- 🔒 Security tests failed - address security vulnerabilities" >> test-summary.md
+        fi
+
+    - name: Upload test summary
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-summary
+        path: test-summary.md
+
+    - name: Comment PR with test summary
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const summary = fs.readFileSync('test-summary.md', 'utf8');
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: summary
+          });
+
+  # ============================================================================
+  # Nightly Full Test Suite
+  # ============================================================================
+  nightly-full-tests:
+    name: Nightly Full Test Suite
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    needs: [unit-tests, multicloud-tests, ml-model-tests, cache-tests, sdk-tests, e2e-tests, chaos-tests]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Generate nightly test report
+      run: |
+        echo "# NovaCron Nightly Test Report - $(date)" > nightly-report.md
+        echo "" >> nightly-report.md
+        echo "## Test Results Summary" >> nightly-report.md
+        echo "- Unit Tests: ${{ needs.unit-tests.result }}" >> nightly-report.md
+        echo "- Multi-Cloud Tests: ${{ needs.multicloud-tests.result }}" >> nightly-report.md
+        echo "- ML Model Tests: ${{ needs.ml-model-tests.result }}" >> nightly-report.md
+        echo "- Cache Tests: ${{ needs.cache-tests.result }}" >> nightly-report.md
+        echo "- SDK Tests: ${{ needs.sdk-tests.result }}" >> nightly-report.md
+        echo "- E2E Tests: ${{ needs.e2e-tests.result }}" >> nightly-report.md
+        echo "- Chaos Tests: ${{ needs.chaos-tests.result }}" >> nightly-report.md
+        
+        # Calculate overall success rate
+        total=7
+        success=0
+        [[ "${{ needs.unit-tests.result }}" == "success" ]] && ((success++))
+        [[ "${{ needs.multicloud-tests.result }}" == "success" ]] && ((success++))
+        [[ "${{ needs.ml-model-tests.result }}" == "success" ]] && ((success++))
+        [[ "${{ needs.cache-tests.result }}" == "success" ]] && ((success++))
+        [[ "${{ needs.sdk-tests.result }}" == "success" ]] && ((success++))
+        [[ "${{ needs.e2e-tests.result }}" == "success" ]] && ((success++))
+        [[ "${{ needs.chaos-tests.result }}" == "success" ]] && ((success++))
+        
+        percentage=$((success * 100 / total))
+        echo "" >> nightly-report.md
+        echo "## Overall Success Rate: ${percentage}% (${success}/${total})" >> nightly-report.md
+
+    - name: Send Slack notification
+      if: always()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: custom
+        custom_payload: |
+          {
+            text: "NovaCron Nightly Test Results",
+            attachments: [{
+              color: '${{ needs.unit-tests.result == 'success' && needs.cache-tests.result == 'success' && 'good' || 'danger' }}',
+              fields: [{
+                title: 'Test Suite Results',
+                value: 'Unit: ${{ needs.unit-tests.result }}\nCache: ${{ needs.cache-tests.result }}\nE2E: ${{ needs.e2e-tests.result }}\nChaos: ${{ needs.chaos-tests.result }}',
+                short: true
+              }]
+            }]
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+# ============================================================================
+# Workflow Dispatch for Manual Testing
+# ============================================================================
+  manual-test-dispatch:
+    name: Manual Test Execution
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Manual test execution placeholder
+      run: |
+        echo "Manual test execution triggered"
+        echo "Available test suites: unit, integration, multicloud, ml, cache, sdk, e2e, chaos"

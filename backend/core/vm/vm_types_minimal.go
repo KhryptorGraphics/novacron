@@ -9,10 +9,11 @@ import (
 type VMType string
 
 const (
-	VMTypeKVM       VMType = "kvm"
-	VMTypeContainer VMType = "container"
-	VMTypeContainerd VMType = "containerd"
-	VMTypeProcess   VMType = "process"
+	VMTypeKVM            VMType = "kvm"
+	VMTypeContainer      VMType = "container"
+	VMTypeContainerd     VMType = "containerd"
+	VMTypeKataContainers VMType = "kata-containers"
+	VMTypeProcess        VMType = "process"
 )
 
 // VMDriverFactory is a function that creates a VM driver
@@ -70,7 +71,7 @@ type VMState = State
 // Note: This may conflict with vm_migration_types.go - use conditional compilation or merge definitions
 
 // These types are defined in other files to avoid duplication:
-// - MigrationType (migration_manager.go) 
+// - MigrationType (migration_manager.go)
 // - VMConfig (vm.go)
 // - VMManagerConfig (vm_manager.go)
 // - VMSchedulerConfig (vm_manager.go)

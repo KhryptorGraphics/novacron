@@ -113,15 +113,15 @@ func (o *MigrationOperations) getMigration(w http.ResponseWriter, r *http.Reques
 func (o *MigrationOperations) createMigration(w http.ResponseWriter, r *http.Request) {
 	// Parse request body
 	var req struct {
-		VMID        string          `json:"vmId"`
-		TargetNode  string          `json:"targetNode"`
-		Type        string          `json:"type,omitempty"`
-		BandwidthLimit int64        `json:"bandwidthLimit,omitempty"`
-		Compression int             `json:"compression,omitempty"`
-		Iterations  int             `json:"iterations,omitempty"`
-		Priority    int             `json:"priority,omitempty"`
-		Force       bool            `json:"force,omitempty"`
-		SkipVerify  bool            `json:"skipVerify,omitempty"`
+		VMID           string `json:"vmId"`
+		TargetNode     string `json:"targetNode"`
+		Type           string `json:"type,omitempty"`
+		BandwidthLimit int64  `json:"bandwidthLimit,omitempty"`
+		Compression    int    `json:"compression,omitempty"`
+		Iterations     int    `json:"iterations,omitempty"`
+		Priority       int    `json:"priority,omitempty"`
+		Force          bool   `json:"force,omitempty"`
+		SkipVerify     bool   `json:"skipVerify,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -289,10 +289,13 @@ func newWebSocketUpgrader() *mockWebSocketUpgrader {
 
 // Mock WebSocket types for compilation
 type mockWebSocketUpgrader struct{}
+
 func (u *mockWebSocketUpgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeader http.Header) (*mockWebSocketConn, error) {
 	return &mockWebSocketConn{}, nil
 }
+
 type mockWebSocketConn struct{}
-func (c *mockWebSocketConn) WriteMessage(messageType int, data []byte) error { return nil }
+
+func (c *mockWebSocketConn) WriteMessage(messageType int, data []byte) error     { return nil }
 func (c *mockWebSocketConn) ReadMessage() (messageType int, p []byte, err error) { return 0, nil, nil }
-func (c *mockWebSocketConn) Close() error { return nil }
+func (c *mockWebSocketConn) Close() error                                        { return nil }

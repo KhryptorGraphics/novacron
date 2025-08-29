@@ -1,0 +1,71 @@
+apiVersion: novacron.io/v1
+kind: AISchedulingPolicy
+metadata:
+  name: cost-performance-optimizer
+  namespace: default
+spec:
+  modelConfig:
+    modelType: "neural-network"
+    version: "1.0"
+    trainingConfig:
+      datasetSize: 10000
+      validationSplit: 0.2
+      epochs: 100
+      features:
+      - "cpu_utilization"
+      - "memory_utilization"
+      - "network_latency"
+      - "cost_per_hour"
+      - "availability_zone"
+      hyperparameters:
+        learning_rate: 0.001
+        batch_size: 32
+        hidden_layers: [128, 64, 32]
+  
+  objectives:
+  - type: "cost"
+    weight: 0.4
+    target:
+      max_hourly_cost: 1.00
+  - type: "performance"
+    weight: 0.3
+    target:
+      min_cpu_score: 0.8
+      max_latency_ms: 100
+  - type: "availability"
+    weight: 0.3
+    target:
+      min_uptime: 0.999
+  
+  dataSources:
+  - type: "prometheus"
+    connection:
+      url: "http://prometheus:9090"
+      timeout: "30s"
+    metrics:
+    - "node_cpu_seconds_total"
+    - "node_memory_MemTotal_bytes"
+    - "node_network_receive_bytes_total"
+    interval: "30s"
+  
+  - type: "cloudwatch"
+    connection:
+      region: "us-east-1"
+      access_key_id_secret: "aws-credentials"
+      secret_access_key_secret: "aws-credentials"
+    metrics:
+    - "CPUUtilization"
+    - "NetworkIn"
+    - "NetworkOut"
+    interval: "1m"
+  
+  predictionWindow:
+    shortTerm: "1h"
+    longTerm: "24h"
+    granularity: "5m"
+  
+  learningConfig:
+    onlineLearning: true
+    learningRate: 0.0001
+    batchSize: 16
+    retrainingInterval: "24h"

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.12
 """
 NovaBay Code Memory - Simple utilities for accessing and working with the code memory system.
 This module provides a simplified interface for working with the code memory system from Python.

@@ -70,11 +70,11 @@ func (n *Node) GetMemoryDeltaPath(vmID string) string {
 type MigrationStatus string
 
 const (
-	MigrationStatusPending      MigrationStatus = "pending"
-	MigrationStatusInProgress   MigrationStatus = "in_progress"
-	MigrationStatusCompleted    MigrationStatus = "completed"
-	MigrationStatusFailed       MigrationStatus = "failed"
-	MigrationStatusRolledBack   MigrationStatus = "rolled_back"
+	MigrationStatusPending    MigrationStatus = "pending"
+	MigrationStatusInProgress MigrationStatus = "in_progress"
+	MigrationStatusCompleted  MigrationStatus = "completed"
+	MigrationStatusFailed     MigrationStatus = "failed"
+	MigrationStatusRolledBack MigrationStatus = "rolled_back"
 )
 
 // Migration types
@@ -86,17 +86,17 @@ const (
 
 // Migration states
 const (
-	MigrationStatePending     string = "pending"
-	MigrationStatePreparing   string = "preparing"
-	MigrationStateInitiating  string = "initiating"
-	MigrationStateRunning     string = "running"
+	MigrationStatePending      string = "pending"
+	MigrationStatePreparing    string = "preparing"
+	MigrationStateInitiating   string = "initiating"
+	MigrationStateRunning      string = "running"
 	MigrationStateTransferring string = "transferring"
-	MigrationStateActivating  string = "activating"
-	MigrationStateCompleted   string = "completed"
-	MigrationStateFailed      string = "failed"
-	MigrationStateError       string = "error"
-	MigrationStateRollingBack string = "rollingback"
-	MigrationStateRolledBack  string = "rolledback"
+	MigrationStateActivating   string = "activating"
+	MigrationStateCompleted    string = "completed"
+	MigrationStateFailed       string = "failed"
+	MigrationStateError        string = "error"
+	MigrationStateRollingBack  string = "rollingback"
+	MigrationStateRolledBack   string = "rolledback"
 )
 
 // MigrationRecord represents the persistent record of a VM migration
@@ -112,22 +112,22 @@ type MigrationRecord struct {
 	StartTime      time.Time `json:"startTime"`
 	CompletionTime time.Time `json:"completionTime,omitempty"`
 	ErrorMessage   string    `json:"errorMessage,omitempty"`
-	
+
 	// Performance metrics and details
-	TransferRate      int64 `json:"transferRate,omitempty"`      // Bytes per second
-	BytesTransferred  int64 `json:"bytesTransferred,omitempty"`  // Total bytes transferred so far
-	TotalBytes        int64 `json:"totalBytes,omitempty"`        // Total bytes to transfer
-	DowntimeMs        int64 `json:"downtimeMs,omitempty"`        // Downtime in milliseconds
-	TransferTimeMs    int64 `json:"transferTimeMs,omitempty"`    // Transfer time in milliseconds
-	ActivationTimeMs  int64 `json:"activationTimeMs,omitempty"`  // Activation time in milliseconds
-	
+	TransferRate     int64 `json:"transferRate,omitempty"`     // Bytes per second
+	BytesTransferred int64 `json:"bytesTransferred,omitempty"` // Total bytes transferred so far
+	TotalBytes       int64 `json:"totalBytes,omitempty"`       // Total bytes to transfer
+	DowntimeMs       int64 `json:"downtimeMs,omitempty"`       // Downtime in milliseconds
+	TransferTimeMs   int64 `json:"transferTimeMs,omitempty"`   // Transfer time in milliseconds
+	ActivationTimeMs int64 `json:"activationTimeMs,omitempty"` // Activation time in milliseconds
+
 	// Configuration options
-	BandwidthLimit   int64  `json:"bandwidthLimit,omitempty"`   // Bandwidth limit in bytes per second
-	CompressionLevel int    `json:"compressionLevel,omitempty"` // Compression level (0-9)
-	MemoryIterations int    `json:"memoryIterations,omitempty"` // Number of memory iterations for live migration
-	Priority         int    `json:"priority,omitempty"`         // Migration priority (higher numbers = higher priority)
-	Force            bool   `json:"force,omitempty"`            // Force migration despite warnings
-	SkipVerification bool   `json:"skipVerification,omitempty"` // Skip VM verification after migration
+	BandwidthLimit   int64 `json:"bandwidthLimit,omitempty"`   // Bandwidth limit in bytes per second
+	CompressionLevel int   `json:"compressionLevel,omitempty"` // Compression level (0-9)
+	MemoryIterations int   `json:"memoryIterations,omitempty"` // Number of memory iterations for live migration
+	Priority         int   `json:"priority,omitempty"`         // Migration priority (higher numbers = higher priority)
+	Force            bool  `json:"force,omitempty"`            // Force migration despite warnings
+	SkipVerification bool  `json:"skipVerification,omitempty"` // Skip VM verification after migration
 }
 
 // NewMigrationRecord creates a new migration record with default values
@@ -183,17 +183,17 @@ type MigrationEvent struct {
 
 // MigrationEventTypes define the different types of migration events
 const (
-	MigrationEventInitiated       string = "migration_initiated"
-	MigrationEventStarted         string = "migration_started"
-	MigrationEventProgress        string = "migration_progress"
-	MigrationEventTransferStarted string = "transfer_started"
-	MigrationEventTransferDone    string = "transfer_done"
+	MigrationEventInitiated         string = "migration_initiated"
+	MigrationEventStarted           string = "migration_started"
+	MigrationEventProgress          string = "migration_progress"
+	MigrationEventTransferStarted   string = "transfer_started"
+	MigrationEventTransferDone      string = "transfer_done"
 	MigrationEventActivationStarted string = "activation_started"
-	MigrationEventActivationDone  string = "activation_done"
-	MigrationEventCompleted       string = "migration_completed"
-	MigrationEventFailed          string = "migration_failed"
-	MigrationEventRollbackStarted string = "rollback_started"
-	MigrationEventRollbackDone    string = "rollback_done"
+	MigrationEventActivationDone    string = "activation_done"
+	MigrationEventCompleted         string = "migration_completed"
+	MigrationEventFailed            string = "migration_failed"
+	MigrationEventRollbackStarted   string = "rollback_started"
+	MigrationEventRollbackDone      string = "rollback_done"
 )
 
 // MigrationStatusStruct provides a snapshot of the current migration status
@@ -206,13 +206,13 @@ type MigrationStatusStruct struct {
 	MigrationType    string    `json:"migrationType"`
 	State            string    `json:"state"`
 	Progress         float64   `json:"progress"`
-	ProgressPct      float64   `json:"progressPct"`      // Progress percentage
+	ProgressPct      float64   `json:"progressPct"` // Progress percentage
 	StartTime        time.Time `json:"startTime"`
 	CompletionTime   time.Time `json:"completionTime,omitempty"`
-	EndTime          time.Time `json:"endTime,omitempty"`           // End time
+	EndTime          time.Time `json:"endTime,omitempty"` // End time
 	ErrorMessage     string    `json:"errorMessage,omitempty"`
-	Message          string    `json:"message,omitempty"`           // General message
-	Error            string    `json:"error,omitempty"`             // Error details
+	Message          string    `json:"message,omitempty"` // General message
+	Error            string    `json:"error,omitempty"`   // Error details
 	BytesTransferred int64     `json:"bytesTransferred,omitempty"`
 	TotalBytes       int64     `json:"totalBytes,omitempty"`
 	TransferRate     int64     `json:"transferRate,omitempty"`
@@ -223,15 +223,15 @@ type MigrationManager interface {
 	// Migration operations
 	Migrate(vmID, targetNodeID string, options MigrationOptions) (*MigrationRecord, error)
 	CancelMigration(migrationID string) error
-	
+
 	// Migration status
 	GetMigrationStatus(migrationID string) (*MigrationStatusStruct, error)
 	ListMigrations() ([]*MigrationStatusStruct, error)
 	ListMigrationsForVM(vmID string) ([]*MigrationStatusStruct, error)
-	
+
 	// Event subscription
 	SubscribeToMigrationEvents(migrationID string) (<-chan MigrationEvent, func(), error)
-	
+
 	// Storage
 	SaveMigrationRecord(record *MigrationRecord) error
 	LoadMigrationRecord(migrationID string) (*MigrationRecord, error)
@@ -244,7 +244,7 @@ type VMTypeMigrationExecutor interface {
 	ExecuteColdMigration(migrationID string, vm *VM, targetNode Node) error
 	ExecuteWarmMigration(migrationID string, vm *VM, targetNode Node) error
 	ExecuteLiveMigration(migrationID string, vm *VM, targetNode Node) error
-	
+
 	// Rollback migrations
 	RollbackMigration(migrationID string, vm *VM, sourceNode Node) error
 }

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.12
 """
 Test script for demonstrating Qdrant MCP integration with Claude.
 This script doesn't actually perform the MCP operations (as those are executed

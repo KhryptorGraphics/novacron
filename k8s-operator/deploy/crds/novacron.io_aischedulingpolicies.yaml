@@ -1,0 +1,232 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: aischedulingpolicies.novacron.io
+spec:
+  group: novacron.io
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - modelConfig
+            - objectives
+            properties:
+              modelConfig:
+                type: object
+                required:
+                - modelType
+                properties:
+                  modelType:
+                    type: string
+                    enum: ["neural-network", "decision-tree", "reinforcement-learning", "gradient-boosting"]
+                  version:
+                    type: string
+                  trainingConfig:
+                    type: object
+                    properties:
+                      datasetSize:
+                        type: integer
+                        format: int64
+                      validationSplit:
+                        type: number
+                      epochs:
+                        type: integer
+                        format: int32
+                      features:
+                        type: array
+                        items:
+                          type: string
+                  parameters:
+                    type: object
+                    additionalProperties: true
+              objectives:
+                type: array
+                minItems: 1
+                items:
+                  type: object
+                  required:
+                  - type
+                  - weight
+                  properties:
+                    type:
+                      type: string
+                      enum: ["cost", "performance", "availability", "energy", "latency"]
+                    weight:
+                      type: number
+                      minimum: 0.0
+                      maximum: 1.0
+                    target:
+                      type: object
+                      additionalProperties: true
+                    constraints:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          operator:
+                            type: string
+                          value:
+                            type: object
+                            additionalProperties: true
+                          weight:
+                            type: number
+              dataSources:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - type
+                  - connection
+                  - metrics
+                  properties:
+                    type:
+                      type: string
+                      enum: ["prometheus", "influxdb", "cloudwatch", "datadog"]
+                    connection:
+                      type: object
+                      additionalProperties:
+                        type: string
+                    metrics:
+                      type: array
+                      items:
+                        type: string
+                    interval:
+                      type: string
+              predictionWindow:
+                type: object
+                properties:
+                  shortTerm:
+                    type: string
+                  longTerm:
+                    type: string
+                  granularity:
+                    type: string
+              learningConfig:
+                type: object
+                properties:
+                  onlineLearning:
+                    type: boolean
+                  learningRate:
+                    type: number
+                  batchSize:
+                    type: integer
+                    format: int32
+                  retrainingInterval:
+                    type: string
+          status:
+            type: object
+            properties:
+              modelStatus:
+                type: object
+                properties:
+                  state:
+                    type: string
+                    enum: ["training", "ready", "error", "updating"]
+                  accuracy:
+                    type: number
+                  lastTraining:
+                    type: string
+                    format: date-time
+                  trainingProgress:
+                    type: number
+              accuracyMetrics:
+                type: object
+                properties:
+                  shortTermAccuracy:
+                    type: number
+                  longTermAccuracy:
+                    type: number
+                  accuracyByObjective:
+                    type: object
+                    additionalProperties:
+                      type: number
+              recentDecisions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    timestamp:
+                      type: string
+                      format: date-time
+                    workloadId:
+                      type: string
+                    placement:
+                      type: object
+                      properties:
+                        target:
+                          type: string
+                        provider:
+                          type: string
+                        resources:
+                          type: object
+                          properties:
+                            cpu:
+                              type: string
+                            memory:
+                              type: string
+                            storage:
+                              type: string
+                    confidence:
+                      type: number
+                    reasoning:
+                      type: string
+              learningProgress:
+                type: object
+                properties:
+                  iterations:
+                    type: integer
+                    format: int64
+                  loss:
+                    type: number
+                  validationAccuracy:
+                    type: number
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                      enum: ["True", "False", "Unknown"]
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string
+              observedGeneration:
+                type: integer
+                format: int64
+    additionalPrinterColumns:
+    - name: Model
+      type: string
+      jsonPath: .spec.modelConfig.modelType
+    - name: Status
+      type: string
+      jsonPath: .status.modelStatus.state
+    - name: Accuracy
+      type: string
+      jsonPath: .status.accuracyMetrics.shortTermAccuracy
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+  scope: Namespaced
+  names:
+    plural: aischedulingpolicies
+    singular: aischedulingpolicy
+    kind: AISchedulingPolicy
+    shortNames:
+    - aipolicy
+    - aipolicies

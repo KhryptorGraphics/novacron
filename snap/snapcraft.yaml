@@ -1,0 +1,190 @@
+name: novacron
+version: '1.0.0'
+summary: Distributed VM Management System
+description: |
+  NovaCron is a distributed virtual machine management system with advanced 
+  migration capabilities. It provides a robust platform for managing 
+  virtualized workloads across distributed nodes, with efficient WAN-optimized 
+  transfers, multi-driver support (KVM, containers), and resource-aware scheduling.
+
+grade: stable
+confinement: strict
+base: core24
+
+# Python 3.12 environment for Ubuntu 24.04
+components:
+  python:
+    after: [ai-engine]
+    plugin: nil
+    stage-packages:
+      - python3.12
+      - python3.12-venv
+      - python3.12-dev
+    override-stage: |
+      craftctl default
+      # Ensure Python 3.12 is the default
+      ln -sf /usr/bin/python3.12 $CRAFT_STAGE/usr/bin/python3
+      ln -sf /usr/bin/python3.12 $CRAFT_STAGE/usr/bin/python
+
+architectures:
+  - build-on: amd64
+    run-on: amd64
+
+apps:
+  api-server:
+    command: bin/api-server-production
+    daemon: simple
+    restart-condition: always
+    environment:
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+    plugs:
+      - network
+      - network-bind
+      - home
+      - removable-media
+      - process-control
+      - system-observe
+    after:
+      - postgresql
+
+  web-ui:
+    command: bin/start-frontend.sh
+    daemon: simple
+    restart-condition: always
+    plugs:
+      - network
+      - network-bind
+    after:
+      - api-server
+
+slots:
+  novacron-api:
+    interface: content
+    content: novacron-api
+    read:
+      - $SNAP_DATA/api
+
+parts:
+  ai-engine:
+    plugin: python
+    source: ai-engine/
+    source-type: local
+    python-requirements:
+      - requirements.txt
+    python-packages:
+      - wheel
+    build-environment:
+      - PYTHONPATH: $CRAFT_PART_INSTALL/lib/python3.12/site-packages
+    stage-packages:
+      - python3.12
+      - python3.12-venv
+      - python3.12-dev
+      - libpython3.12
+    override-build: |
+      craftctl default
+      # Install AI engine with Python 3.12
+      python3.12 -m pip install -e .
+      
+  api-server:
+    plugin: go
+    source: .
+    source-type: local
+    build-snaps: [go/1.23/stable]
+    go-buildtags: [netgo]
+    go-ldflags: |
+      -s -w
+      -X main.version=$SNAPCRAFT_PROJECT_VERSION
+    build-environment:
+      - CGO_ENABLED: 0
+      - GOOS: linux
+    override-build: |
+      craftctl default
+      # Build the production API server
+      cd $CRAFT_PART_SRC
+      go build -o $CRAFT_PART_INSTALL/bin/api-server-production \
+        -ldflags "-s -w -X main.version=$SNAPCRAFT_PROJECT_VERSION" \
+        ./backend/cmd/api-server/main_production.go
+
+  database:
+    plugin: nil
+    stage-packages:
+      - postgresql-14
+      - postgresql-client-14
+    override-stage: |
+      craftctl default
+      # Configure PostgreSQL for snap environment
+      mkdir -p $CRAFT_STAGE/etc/postgresql
+      cat > $CRAFT_STAGE/etc/postgresql/postgresql.conf << EOF
+      # NovaCron PostgreSQL configuration for snap
+      data_directory = '$SNAP_DATA/postgresql'
+      hba_file = '$SNAP_DATA/postgresql/pg_hba.conf'
+      ident_file = '$SNAP_DATA/postgresql/pg_ident.conf'
+      port = 5432
+      listen_addresses = 'localhost'
+      unix_socket_directories = '$SNAP_DATA/postgresql'
+      log_destination = 'stderr'
+      logging_collector = on
+      log_directory = '$SNAP_DATA/logs'
+      shared_preload_libraries = ''
+      max_connections = 100
+      shared_buffers = 128MB
+      EOF
+
+  scripts:
+    plugin: dump
+    source: scripts/
+    source-type: local
+    organize:
+      '*': bin/
+
+  frontend:
+    plugin: npm
+    npm-include-node: true
+    npm-node-version: "20.11.0"
+    source: frontend/
+    source-type: local
+    build-environment:
+      - NEXT_TELEMETRY_DISABLED: 1
+      - NODE_ENV: production
+    override-build: |
+      craftctl default
+      # Build the Next.js application
+      npm run build
+      # Create startup script
+      mkdir -p $CRAFT_PART_INSTALL/bin
+      cat > $CRAFT_PART_INSTALL/bin/start-frontend.sh << 'EOF'
+      #!/bin/bash
+      cd $SNAP/lib/node_modules/novacron-frontend
+      exec npm start
+      EOF
+      chmod +x $CRAFT_PART_INSTALL/bin/start-frontend.sh
+
+  config:
+    plugin: dump
+    source: configs/
+    source-type: local
+    organize:
+      '*': etc/novacron/
+
+plugs:
+  postgresql:
+    interface: content
+    content: postgresql
+    target: $SNAP_DATA/postgresql-content
+
+hooks:
+  install:
+    plugs: [network, network-bind]
+  configure:
+    plugs: [network, network-bind]
+  connect-plug-postgresql:
+    plugs: [network, network-bind]
+
+layout:
+  /var/lib/novacron:
+    bind: $SNAP_DATA/lib
+  /var/log/novacron:
+    bind: $SNAP_DATA/logs
+  /etc/novacron:
+    bind: $SNAP/etc/novacron

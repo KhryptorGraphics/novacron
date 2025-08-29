@@ -28,10 +28,10 @@ type KVMMetricsProvider struct {
 
 // CPUStats holds CPU statistics for calculating usage
 type CPUStats struct {
-	Timestamp time.Time
-	UserTime  int64
+	Timestamp  time.Time
+	UserTime   int64
 	SystemTime int64
-	TotalTime int64
+	TotalTime  int64
 }
 
 // NetStats holds network statistics for calculating rates
@@ -45,12 +45,12 @@ type NetStats struct {
 
 // DiskStats holds disk statistics for calculating rates
 type DiskStats struct {
-	Timestamp time.Time
-	ReadBytes int64
+	Timestamp  time.Time
+	ReadBytes  int64
 	WriteBytes int64
-	ReadOps   int64
-	WriteOps  int64
-	IOTimeMs  int64
+	ReadOps    int64
+	WriteOps   int64
+	IOTimeMs   int64
 }
 
 // NewKVMMetricsProvider creates a new KVM metrics provider
@@ -81,9 +81,9 @@ func (p *KVMMetricsProvider) Close() error {
 func (p *KVMMetricsProvider) GetMetrics(ctx context.Context) (*VMMetrics, error) {
 	p.statsMutex.Lock()
 	defer p.statsMutex.Unlock()
-	
+
 	now := time.Now()
-	
+
 	// Create metrics object
 	metrics := &VMMetrics{
 		VMID:      p.vmID,
@@ -93,34 +93,34 @@ func (p *KVMMetricsProvider) GetMetrics(ctx context.Context) (*VMMetrics, error)
 		Network:   make(map[string]NetMetrics),
 		Labels:    make(map[string]string),
 	}
-	
+
 	// Add basic labels
 	metrics.Labels["vm_type"] = "kvm"
 	metrics.Labels["pid"] = strconv.Itoa(p.pid)
-	
+
 	// Collect CPU metrics
 	if err := p.collectCPUMetrics(ctx, metrics); err != nil {
 		log.Printf("Warning: Failed to collect CPU metrics for VM %s: %v", p.vmID, err)
 	}
-	
+
 	// Collect memory metrics
 	if err := p.collectMemoryMetrics(ctx, metrics); err != nil {
 		log.Printf("Warning: Failed to collect memory metrics for VM %s: %v", p.vmID, err)
 	}
-	
+
 	// Collect disk metrics
 	if err := p.collectDiskMetrics(ctx, metrics); err != nil {
 		log.Printf("Warning: Failed to collect disk metrics for VM %s: %v", p.vmID, err)
 	}
-	
+
 	// Collect network metrics
 	if err := p.collectNetworkMetrics(ctx, metrics); err != nil {
 		log.Printf("Warning: Failed to collect network metrics for VM %s: %v", p.vmID, err)
 	}
-	
+
 	// Update last collection time
 	p.lastCollection = now
-	
+
 	return metrics, nil
 }
 
@@ -132,18 +132,18 @@ func (p *KVMMetricsProvider) collectCPUMetrics(ctx context.Context, metrics *VMM
 	if err != nil {
 		return fmt.Errorf("failed to get CPU stats: %w", err)
 	}
-	
+
 	// Parse the output
 	fields := strings.Fields(string(output))
 	if len(fields) < 17 {
 		return fmt.Errorf("unexpected format in /proc/%d/stat", p.pid)
 	}
-	
+
 	// Extract CPU times
 	userTime, _ := strconv.ParseInt(fields[13], 10, 64)
 	systemTime, _ := strconv.ParseInt(fields[14], 10, 64)
 	totalTime := userTime + systemTime
-	
+
 	// Get number of cores
 	cmd = exec.CommandContext(ctx, "grep", "-c", "processor", "/proc/cpuinfo")
 	output, err = cmd.Output()
@@ -154,7 +154,7 @@ func (p *KVMMetricsProvider) collectCPUMetrics(ctx context.Context, metrics *VMM
 	if cores == 0 {
 		cores = 1 // Default to 1 if we can't determine
 	}
-	
+
 	// Calculate CPU usage if we have previous stats
 	now := time.Now()
 	if p.lastCPUStats != nil {
@@ -165,14 +165,14 @@ func (p *KVMMetricsProvider) collectCPUMetrics(ctx context.Context, metrics *VMM
 			userDiff := float64(userTime - p.lastCPUStats.UserTime)
 			systemDiff := float64(systemTime - p.lastCPUStats.SystemTime)
 			totalDiff := float64(totalTime - p.lastCPUStats.TotalTime)
-			
+
 			// Calculate percentages
 			metrics.CPU.UserPercent = (userDiff / timeDiff) / float64(cores) * 100
 			metrics.CPU.SystemPercent = (systemDiff / timeDiff) / float64(cores) * 100
 			metrics.CPU.UsagePercent = (totalDiff / timeDiff) / float64(cores) * 100
 		}
 	}
-	
+
 	// Update last CPU stats
 	p.lastCPUStats = &CPUStats{
 		Timestamp:  now,
@@ -180,10 +180,10 @@ func (p *KVMMetricsProvider) collectCPUMetrics(ctx context.Context, metrics *VMM
 		SystemTime: systemTime,
 		TotalTime:  totalTime,
 	}
-	
+
 	// Set cores
 	metrics.CPU.Cores = cores
-	
+
 	// Get CPU throttling information if available and detail level is high
 	if p.detailLevel == "detailed" {
 		// This would typically come from cgroups
@@ -191,7 +191,7 @@ func (p *KVMMetricsProvider) collectCPUMetrics(ctx context.Context, metrics *VMM
 		metrics.CPU.ThrottledPeriods = 0
 		metrics.CPU.ThrottledTime = 0
 	}
-	
+
 	return nil
 }
 
@@ -203,11 +203,11 @@ func (p *KVMMetricsProvider) collectMemoryMetrics(ctx context.Context, metrics *
 	if err != nil {
 		return fmt.Errorf("failed to get memory stats: %w", err)
 	}
-	
+
 	// Parse the output
 	lines := strings.Split(string(output), "\n")
 	var vmRSS, vmSwap int64
-	
+
 	for _, line := range lines {
 		if strings.HasPrefix(line, "VmRSS:") {
 			fields := strings.Fields(line)
@@ -223,7 +223,7 @@ func (p *KVMMetricsProvider) collectMemoryMetrics(ctx context.Context, metrics *
 			}
 		}
 	}
-	
+
 	// Get total memory from QMP if available
 	var totalMemory int64
 	if p.socketPath != "" {
@@ -231,7 +231,7 @@ func (p *KVMMetricsProvider) collectMemoryMetrics(ctx context.Context, metrics *
 		// This is a simplified example - in a real implementation, you'd use a QMP client
 		totalMemory = p.getQMPMemoryInfo(ctx)
 	}
-	
+
 	// If we couldn't get total memory from QMP, try to get it from /proc/{pid}/cmdline
 	if totalMemory == 0 {
 		cmd = exec.CommandContext(ctx, "cat", fmt.Sprintf("/proc/%d/cmdline", p.pid))
@@ -248,18 +248,18 @@ func (p *KVMMetricsProvider) collectMemoryMetrics(ctx context.Context, metrics *
 			}
 		}
 	}
-	
+
 	// Set memory metrics
 	metrics.Memory.RSSBytes = vmRSS
 	metrics.Memory.SwapBytes = vmSwap
 	metrics.Memory.UsedBytes = vmRSS
 	metrics.Memory.TotalBytes = totalMemory
-	
+
 	// Calculate percentages
 	if totalMemory > 0 {
 		metrics.Memory.UsagePercent = float64(vmRSS) / float64(totalMemory) * 100
 	}
-	
+
 	// Get page faults if detail level is high
 	if p.detailLevel == "detailed" {
 		// This would typically come from /proc/{pid}/stat
@@ -267,7 +267,7 @@ func (p *KVMMetricsProvider) collectMemoryMetrics(ctx context.Context, metrics *
 		metrics.Memory.MajorPageFaults = 0
 		metrics.Memory.MinorPageFaults = 0
 	}
-	
+
 	return nil
 }
 
@@ -278,7 +278,7 @@ func (p *KVMMetricsProvider) collectDiskMetrics(ctx context.Context, metrics *VM
 		// Use QMP to get disk stats
 		// This is a simplified example - in a real implementation, you'd use a QMP client
 		diskStats := p.getQMPDiskStats(ctx)
-		
+
 		now := time.Now()
 		for device, stats := range diskStats {
 			// Create disk metrics
@@ -290,7 +290,7 @@ func (p *KVMMetricsProvider) collectDiskMetrics(ctx context.Context, metrics *VM
 				WriteOps:   stats.WriteOps,
 				IOTimeMs:   stats.IOTimeMs,
 			}
-			
+
 			// Calculate rates if we have previous stats
 			lastStats, exists := p.lastDiskStats[device]
 			if exists {
@@ -300,7 +300,7 @@ func (p *KVMMetricsProvider) collectDiskMetrics(ctx context.Context, metrics *VM
 					// Calculate read/write rates
 					readBytesRate := float64(stats.ReadBytes-lastStats.ReadBytes) / timeDiff
 					writeBytesRate := float64(stats.WriteBytes-lastStats.WriteBytes) / timeDiff
-					
+
 					// Add rates to annotations
 					if metrics.Annotations == nil {
 						metrics.Annotations = make(map[string]string)
@@ -309,7 +309,7 @@ func (p *KVMMetricsProvider) collectDiskMetrics(ctx context.Context, metrics *VM
 					metrics.Annotations[fmt.Sprintf("disk.%s.write_bytes_per_sec", device)] = fmt.Sprintf("%.2f", writeBytesRate)
 				}
 			}
-			
+
 			// Update last disk stats
 			p.lastDiskStats[device] = &DiskStats{
 				Timestamp:  now,
@@ -319,12 +319,12 @@ func (p *KVMMetricsProvider) collectDiskMetrics(ctx context.Context, metrics *VM
 				WriteOps:   stats.WriteOps,
 				IOTimeMs:   stats.IOTimeMs,
 			}
-			
+
 			// Add disk metrics
 			metrics.Disk[device] = diskMetrics
 		}
 	}
-	
+
 	return nil
 }
 
@@ -335,7 +335,7 @@ func (p *KVMMetricsProvider) collectNetworkMetrics(ctx context.Context, metrics 
 		// Use QMP to get network stats
 		// This is a simplified example - in a real implementation, you'd use a QMP client
 		netStats := p.getQMPNetStats(ctx)
-		
+
 		now := time.Now()
 		for iface, stats := range netStats {
 			// Create network metrics
@@ -346,7 +346,7 @@ func (p *KVMMetricsProvider) collectNetworkMetrics(ctx context.Context, metrics 
 				RxPackets: stats.RxPackets,
 				TxPackets: stats.TxPackets,
 			}
-			
+
 			// Calculate rates if we have previous stats
 			lastStats, exists := p.lastNetStats[iface]
 			if exists {
@@ -356,13 +356,13 @@ func (p *KVMMetricsProvider) collectNetworkMetrics(ctx context.Context, metrics 
 					// Calculate rx/tx rates
 					rxBytesRate := float64(stats.RxBytes-lastStats.RxBytes) / timeDiff
 					txBytesRate := float64(stats.TxBytes-lastStats.TxBytes) / timeDiff
-					
+
 					// Add rates to metrics
 					netMetrics.RxBytesPerSec = rxBytesRate
 					netMetrics.TxBytesPerSec = txBytesRate
 				}
 			}
-			
+
 			// Update last network stats
 			p.lastNetStats[iface] = &NetStats{
 				Timestamp: now,
@@ -371,12 +371,12 @@ func (p *KVMMetricsProvider) collectNetworkMetrics(ctx context.Context, metrics 
 				RxPackets: stats.RxPackets,
 				TxPackets: stats.TxPackets,
 			}
-			
+
 			// Add network metrics
 			metrics.Network[iface] = netMetrics
 		}
 	}
-	
+
 	return nil
 }
 
@@ -384,7 +384,7 @@ func (p *KVMMetricsProvider) collectNetworkMetrics(ctx context.Context, metrics 
 func (p *KVMMetricsProvider) getQMPMemoryInfo(ctx context.Context) int64 {
 	// This is a simplified example - in a real implementation, you'd use a QMP client
 	// For now, we'll use socat to send a QMP command
-	
+
 	// First, send capabilities negotiation
 	capCmd := fmt.Sprintf("echo '{\"execute\": \"qmp_capabilities\"}' | socat - UNIX-CONNECT:%s", p.socketPath)
 	cmd := exec.CommandContext(ctx, "bash", "-c", capCmd)
@@ -392,7 +392,7 @@ func (p *KVMMetricsProvider) getQMPMemoryInfo(ctx context.Context) int64 {
 		log.Printf("Warning: Failed to negotiate QMP capabilities: %v", err)
 		return 0
 	}
-	
+
 	// Then send query-memory-size command
 	queryCmd := fmt.Sprintf("echo '{\"execute\": \"query-memory-size\"}' | socat - UNIX-CONNECT:%s", p.socketPath)
 	cmd = exec.CommandContext(ctx, "bash", "-c", queryCmd)
@@ -401,7 +401,7 @@ func (p *KVMMetricsProvider) getQMPMemoryInfo(ctx context.Context) int64 {
 		log.Printf("Warning: Failed to query memory size: %v", err)
 		return 0
 	}
-	
+
 	// Parse the output
 	var response struct {
 		Return struct {
@@ -410,12 +410,12 @@ func (p *KVMMetricsProvider) getQMPMemoryInfo(ctx context.Context) int64 {
 			} `json:"base"`
 		} `json:"return"`
 	}
-	
+
 	if err := json.Unmarshal(output, &response); err != nil {
 		log.Printf("Warning: Failed to parse memory size response: %v", err)
 		return 0
 	}
-	
+
 	return response.Return.Base.Size
 }
 
@@ -423,7 +423,7 @@ func (p *KVMMetricsProvider) getQMPMemoryInfo(ctx context.Context) int64 {
 func (p *KVMMetricsProvider) getQMPDiskStats(ctx context.Context) map[string]*DiskStats {
 	// This is a simplified example - in a real implementation, you'd use a QMP client
 	// For now, we'll use socat to send a QMP command
-	
+
 	// First, send capabilities negotiation
 	capCmd := fmt.Sprintf("echo '{\"execute\": \"qmp_capabilities\"}' | socat - UNIX-CONNECT:%s", p.socketPath)
 	cmd := exec.CommandContext(ctx, "bash", "-c", capCmd)
@@ -431,7 +431,7 @@ func (p *KVMMetricsProvider) getQMPDiskStats(ctx context.Context) map[string]*Di
 		log.Printf("Warning: Failed to negotiate QMP capabilities: %v", err)
 		return nil
 	}
-	
+
 	// Then send query-block command
 	queryCmd := fmt.Sprintf("echo '{\"execute\": \"query-block\"}' | socat - UNIX-CONNECT:%s", p.socketPath)
 	cmd = exec.CommandContext(ctx, "bash", "-c", queryCmd)
@@ -440,7 +440,7 @@ func (p *KVMMetricsProvider) getQMPDiskStats(ctx context.Context) map[string]*Di
 		log.Printf("Warning: Failed to query block devices: %v", err)
 		return nil
 	}
-	
+
 	// Parse the output
 	var response struct {
 		Return []struct {
@@ -453,16 +453,16 @@ func (p *KVMMetricsProvider) getQMPDiskStats(ctx context.Context) map[string]*Di
 			} `json:"stats"`
 		} `json:"return"`
 	}
-	
+
 	if err := json.Unmarshal(output, &response); err != nil {
 		log.Printf("Warning: Failed to parse block device response: %v", err)
 		return nil
 	}
-	
+
 	// Create disk stats map
 	stats := make(map[string]*DiskStats)
 	now := time.Now()
-	
+
 	for _, block := range response.Return {
 		stats[block.Device] = &DiskStats{
 			Timestamp:  now,
@@ -473,7 +473,7 @@ func (p *KVMMetricsProvider) getQMPDiskStats(ctx context.Context) map[string]*Di
 			IOTimeMs:   0, // Not available from QMP
 		}
 	}
-	
+
 	return stats
 }
 
@@ -481,7 +481,7 @@ func (p *KVMMetricsProvider) getQMPDiskStats(ctx context.Context) map[string]*Di
 func (p *KVMMetricsProvider) getQMPNetStats(ctx context.Context) map[string]*NetStats {
 	// This is a simplified example - in a real implementation, you'd use a QMP client
 	// For now, we'll use socat to send a QMP command
-	
+
 	// First, send capabilities negotiation
 	capCmd := fmt.Sprintf("echo '{\"execute\": \"qmp_capabilities\"}' | socat - UNIX-CONNECT:%s", p.socketPath)
 	cmd := exec.CommandContext(ctx, "bash", "-c", capCmd)
@@ -489,7 +489,7 @@ func (p *KVMMetricsProvider) getQMPNetStats(ctx context.Context) map[string]*Net
 		log.Printf("Warning: Failed to negotiate QMP capabilities: %v", err)
 		return nil
 	}
-	
+
 	// Then send query-netdev command
 	queryCmd := fmt.Sprintf("echo '{\"execute\": \"query-netdev\"}' | socat - UNIX-CONNECT:%s", p.socketPath)
 	cmd = exec.CommandContext(ctx, "bash", "-c", queryCmd)
@@ -498,7 +498,7 @@ func (p *KVMMetricsProvider) getQMPNetStats(ctx context.Context) map[string]*Net
 		log.Printf("Warning: Failed to query network devices: %v", err)
 		return nil
 	}
-	
+
 	// Parse the output
 	var response struct {
 		Return []struct {
@@ -511,16 +511,16 @@ func (p *KVMMetricsProvider) getQMPNetStats(ctx context.Context) map[string]*Net
 			} `json:"stats"`
 		} `json:"return"`
 	}
-	
+
 	if err := json.Unmarshal(output, &response); err != nil {
 		log.Printf("Warning: Failed to parse network device response: %v", err)
 		return nil
 	}
-	
+
 	// Create network stats map
 	stats := make(map[string]*NetStats)
 	now := time.Now()
-	
+
 	for _, netdev := range response.Return {
 		stats[netdev.ID] = &NetStats{
 			Timestamp: now,
@@ -530,6 +530,6 @@ func (p *KVMMetricsProvider) getQMPNetStats(ctx context.Context) map[string]*Net
 			TxPackets: netdev.Stats.TxPackets,
 		}
 	}
-	
+
 	return stats
 }

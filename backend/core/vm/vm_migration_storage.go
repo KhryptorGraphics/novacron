@@ -13,16 +13,16 @@ import (
 type MigrationStorage interface {
 	// SaveMigrationRecord persists a migration record
 	SaveMigrationRecord(record *MigrationRecord) error
-	
+
 	// LoadMigrationRecord retrieves a migration record by ID
 	LoadMigrationRecord(migrationID string) (*MigrationRecord, error)
-	
+
 	// ListMigrationRecords retrieves all migration records
 	ListMigrationRecords() ([]*MigrationRecord, error)
-	
+
 	// ListMigrationRecordsForVM retrieves all migration records for a specific VM
 	ListMigrationRecordsForVM(vmID string) ([]*MigrationRecord, error)
-	
+
 	// DeleteMigrationRecord removes a migration record
 	DeleteMigrationRecord(migrationID string) error
 }
@@ -39,7 +39,7 @@ func NewFileMigrationStorage(storageDir string) (*FileMigrationStorage, error) {
 	if err := os.MkdirAll(storageDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create storage directory: %w", err)
 	}
-	
+
 	return &FileMigrationStorage{
 		storageDir: storageDir,
 	}, nil
@@ -49,19 +49,19 @@ func NewFileMigrationStorage(storageDir string) (*FileMigrationStorage, error) {
 func (s *FileMigrationStorage) SaveMigrationRecord(record *MigrationRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	// Marshal the record to JSON
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal migration record: %w", err)
 	}
-	
+
 	// Write to file
 	filename := filepath.Join(s.storageDir, fmt.Sprintf("migration_%s.json", record.ID))
 	if err := ioutil.WriteFile(filename, data, 0644); err != nil {
 		return fmt.Errorf("failed to write migration record to file: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -69,7 +69,7 @@ func (s *FileMigrationStorage) SaveMigrationRecord(record *MigrationRecord) erro
 func (s *FileMigrationStorage) LoadMigrationRecord(migrationID string) (*MigrationRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	// Read from file
 	filename := filepath.Join(s.storageDir, fmt.Sprintf("migration_%s.json", migrationID))
 	data, err := ioutil.ReadFile(filename)
@@ -79,13 +79,13 @@ func (s *FileMigrationStorage) LoadMigrationRecord(migrationID string) (*Migrati
 		}
 		return nil, fmt.Errorf("failed to read migration record from file: %w", err)
 	}
-	
+
 	// Unmarshal the record
 	record := &MigrationRecord{}
 	if err := json.Unmarshal(data, record); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal migration record: %w", err)
 	}
-	
+
 	return record, nil
 }
 
@@ -93,14 +93,14 @@ func (s *FileMigrationStorage) LoadMigrationRecord(migrationID string) (*Migrati
 func (s *FileMigrationStorage) ListMigrationRecords() ([]*MigrationRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	// Find all migration record files
 	pattern := filepath.Join(s.storageDir, "migration_*.json")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list migration records: %w", err)
 	}
-	
+
 	// Load each record
 	records := make([]*MigrationRecord, 0, len(matches))
 	for _, filename := range matches {
@@ -108,15 +108,15 @@ func (s *FileMigrationStorage) ListMigrationRecords() ([]*MigrationRecord, error
 		if err != nil {
 			continue // Skip files that can't be read
 		}
-		
+
 		record := &MigrationRecord{}
 		if err := json.Unmarshal(data, record); err != nil {
 			continue // Skip files that can't be unmarshaled
 		}
-		
+
 		records = append(records, record)
 	}
-	
+
 	return records, nil
 }
 
@@ -124,13 +124,13 @@ func (s *FileMigrationStorage) ListMigrationRecords() ([]*MigrationRecord, error
 func (s *FileMigrationStorage) ListMigrationRecordsForVM(vmID string) ([]*MigrationRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	// Get all records
 	allRecords, err := s.ListMigrationRecords()
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Filter records for the specified VM
 	vmRecords := make([]*MigrationRecord, 0)
 	for _, record := range allRecords {
@@ -138,7 +138,7 @@ func (s *FileMigrationStorage) ListMigrationRecordsForVM(vmID string) ([]*Migrat
 			vmRecords = append(vmRecords, record)
 		}
 	}
-	
+
 	return vmRecords, nil
 }
 
@@ -146,7 +146,7 @@ func (s *FileMigrationStorage) ListMigrationRecordsForVM(vmID string) ([]*Migrat
 func (s *FileMigrationStorage) DeleteMigrationRecord(migrationID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	// Delete the file
 	filename := filepath.Join(s.storageDir, fmt.Sprintf("migration_%s.json", migrationID))
 	if err := os.Remove(filename); err != nil {
@@ -155,7 +155,7 @@ func (s *FileMigrationStorage) DeleteMigrationRecord(migrationID string) error {
 		}
 		return fmt.Errorf("failed to delete migration record: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -176,11 +176,11 @@ func NewInMemoryMigrationStorage() *InMemoryMigrationStorage {
 func (s *InMemoryMigrationStorage) SaveMigrationRecord(record *MigrationRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	// Make a copy of the record
 	recordCopy := *record
 	s.records[record.ID] = &recordCopy
-	
+
 	return nil
 }
 
@@ -188,12 +188,12 @@ func (s *InMemoryMigrationStorage) SaveMigrationRecord(record *MigrationRecord) 
 func (s *InMemoryMigrationStorage) LoadMigrationRecord(migrationID string) (*MigrationRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	record, ok := s.records[migrationID]
 	if !ok {
 		return nil, ErrMigrationNotFound
 	}
-	
+
 	// Make a copy of the record
 	recordCopy := *record
 	return &recordCopy, nil
@@ -203,13 +203,13 @@ func (s *InMemoryMigrationStorage) LoadMigrationRecord(migrationID string) (*Mig
 func (s *InMemoryMigrationStorage) ListMigrationRecords() ([]*MigrationRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	records := make([]*MigrationRecord, 0, len(s.records))
 	for _, record := range s.records {
 		recordCopy := *record
 		records = append(records, &recordCopy)
 	}
-	
+
 	return records, nil
 }
 
@@ -217,7 +217,7 @@ func (s *InMemoryMigrationStorage) ListMigrationRecords() ([]*MigrationRecord, e
 func (s *InMemoryMigrationStorage) ListMigrationRecordsForVM(vmID string) ([]*MigrationRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	records := make([]*MigrationRecord, 0)
 	for _, record := range s.records {
 		if record.VMID == vmID {
@@ -225,7 +225,7 @@ func (s *InMemoryMigrationStorage) ListMigrationRecordsForVM(vmID string) ([]*Mi
 			records = append(records, &recordCopy)
 		}
 	}
-	
+
 	return records, nil
 }
 
@@ -233,11 +233,11 @@ func (s *InMemoryMigrationStorage) ListMigrationRecordsForVM(vmID string) ([]*Mi
 func (s *InMemoryMigrationStorage) DeleteMigrationRecord(migrationID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	if _, ok := s.records[migrationID]; !ok {
 		return ErrMigrationNotFound
 	}
-	
+
 	delete(s.records, migrationID)
 	return nil
 }

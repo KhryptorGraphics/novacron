@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.12
 """
 Command-line tool for indexing external knowledge sources into the NovaCron code memory system.
 This script provides a convenient way to fetch and index knowledge from GitHub, Stack Overflow,

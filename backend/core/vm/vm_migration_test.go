@@ -25,9 +25,9 @@ func TestColdMigration(t *testing.T) {
 	// Create mock VM info
 	vmID := "test-vm-cold"
 	vmSpec := VMSpec{
-		ID:      vmID,
-		Name:    "TestVM",
-		VCPU:    2,
+		ID:       vmID,
+		Name:     "TestVM",
+		VCPU:     2,
 		MemoryMB: 1024,
 		DiskMB:   5120,
 		Image:    "test-image",
@@ -49,14 +49,14 @@ func TestColdMigration(t *testing.T) {
 	defer cancel()
 
 	migration := &VMMigration{
-		ID:              "migration-" + vmID,
-		VMID:            vmID,
-		SourceNodeID:    "source-node",
+		ID:                "migration-" + vmID,
+		VMID:              vmID,
+		SourceNodeID:      "source-node",
 		DestinationNodeID: "dest-node",
-		Type:            MigrationTypeCold,
-		Status:          MigrationStatusPending,
-		VMSpec:          vmSpec,
-		CreatedAt:       time.Now(),
+		Type:              MigrationTypeCold,
+		Status:            MigrationStatusPending,
+		VMSpec:            vmSpec,
+		CreatedAt:         time.Now(),
 	}
 
 	// Execute migration
@@ -99,9 +99,9 @@ func TestWarmMigration(t *testing.T) {
 	// Create mock VM info
 	vmID := "test-vm-warm"
 	vmSpec := VMSpec{
-		ID:      vmID,
-		Name:    "TestVM",
-		VCPU:    2,
+		ID:       vmID,
+		Name:     "TestVM",
+		VCPU:     2,
 		MemoryMB: 1024,
 		DiskMB:   5120,
 		Image:    "test-image",
@@ -129,14 +129,14 @@ func TestWarmMigration(t *testing.T) {
 	defer cancel()
 
 	migration := &VMMigration{
-		ID:              "migration-" + vmID,
-		VMID:            vmID,
-		SourceNodeID:    "source-node",
+		ID:                "migration-" + vmID,
+		VMID:              vmID,
+		SourceNodeID:      "source-node",
 		DestinationNodeID: "dest-node",
-		Type:            MigrationTypeWarm,
-		Status:          MigrationStatusPending,
-		VMSpec:          vmSpec,
-		CreatedAt:       time.Now(),
+		Type:              MigrationTypeWarm,
+		Status:            MigrationStatusPending,
+		VMSpec:            vmSpec,
+		CreatedAt:         time.Now(),
 	}
 
 	// Execute migration
@@ -189,9 +189,9 @@ func TestLiveMigration(t *testing.T) {
 	// Create mock VM info
 	vmID := "test-vm-live"
 	vmSpec := VMSpec{
-		ID:      vmID,
-		Name:    "TestVM",
-		VCPU:    2,
+		ID:       vmID,
+		Name:     "TestVM",
+		VCPU:     2,
 		MemoryMB: 1024,
 		DiskMB:   5120,
 		Image:    "test-image",
@@ -221,14 +221,14 @@ func TestLiveMigration(t *testing.T) {
 	defer cancel()
 
 	migration := &VMMigration{
-		ID:              "migration-" + vmID,
-		VMID:            vmID,
-		SourceNodeID:    "source-node",
+		ID:                "migration-" + vmID,
+		VMID:              vmID,
+		SourceNodeID:      "source-node",
 		DestinationNodeID: "dest-node",
-		Type:            MigrationTypeLive,
-		Status:          MigrationStatusPending,
-		VMSpec:          vmSpec,
-		CreatedAt:       time.Now(),
+		Type:              MigrationTypeLive,
+		Status:            MigrationStatusPending,
+		VMSpec:            vmSpec,
+		CreatedAt:         time.Now(),
 		Options: map[string]string{
 			"iterations": "3",
 		},
@@ -278,9 +278,9 @@ func TestMigrationRollback(t *testing.T) {
 	// Create mock VM info
 	vmID := "test-vm-rollback"
 	vmSpec := VMSpec{
-		ID:      vmID,
-		Name:    "TestVM",
-		VCPU:    2,
+		ID:       vmID,
+		Name:     "TestVM",
+		VCPU:     2,
 		MemoryMB: 1024,
 		DiskMB:   5120,
 		Image:    "test-image",
@@ -296,7 +296,7 @@ func TestMigrationRollback(t *testing.T) {
 	// Create source migration manager but provide an invalid destination
 	// to force a migration failure
 	sourceManager := NewVMMigrationManager("source-node", sourceDir)
-	
+
 	// Use an invalid destination manager that will cause the migration to fail
 	invalidDestManager := NewVMMigrationManager("dest-node", "/invalid/path/that/doesnt/exist")
 
@@ -305,14 +305,14 @@ func TestMigrationRollback(t *testing.T) {
 	defer cancel()
 
 	migration := &VMMigration{
-		ID:              "migration-" + vmID,
-		VMID:            vmID,
-		SourceNodeID:    "source-node",
+		ID:                "migration-" + vmID,
+		VMID:              vmID,
+		SourceNodeID:      "source-node",
 		DestinationNodeID: "dest-node",
-		Type:            MigrationTypeCold,
-		Status:          MigrationStatusPending,
-		VMSpec:          vmSpec,
-		CreatedAt:       time.Now(),
+		Type:              MigrationTypeCold,
+		Status:            MigrationStatusPending,
+		VMSpec:            vmSpec,
+		CreatedAt:         time.Now(),
 	}
 
 	// Execute migration which should fail and roll back
