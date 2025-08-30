@@ -9,7 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies optimized for Python 3.12
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
@@ -17,8 +17,6 @@ RUN apt-get update && apt-get install -y \
     libhdf5-dev \
     pkg-config \
     curl \
-    python3.12-dev \
-    python3.12-venv \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user

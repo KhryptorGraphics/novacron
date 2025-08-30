@@ -1,0 +1,24 @@
+FROM golang:1.19-alpine
+
+# Install required packages
+RUN apk add --no-cache \
+    postgresql-client \
+    bash \
+    make
+
+# Install golang-migrate
+RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+
+# Set working directory
+WORKDIR /app
+
+# Copy migration files and scripts
+COPY migrations/ ./migrations/
+COPY scripts/ ./scripts/
+COPY seeds/ ./seeds/
+
+# Make scripts executable
+RUN chmod +x ./scripts/*.sh
+
+# Default command
+CMD ["./scripts/migrate.sh", "up"]

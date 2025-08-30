@@ -237,6 +237,15 @@ type PolicyParameter struct {
 
 	// Constraints define valid values
 	Constraints map[string]interface{}
+	
+	// MinValue is the minimum allowed value (for numeric types)
+	MinValue interface{}
+	
+	// MaxValue is the maximum allowed value (for numeric types)
+	MaxValue interface{}
+	
+	// AllowedValues is the list of allowed values (for enum types)
+	AllowedValues []interface{}
 }
 
 // PolicyConfiguration represents a specific configuration of a policy

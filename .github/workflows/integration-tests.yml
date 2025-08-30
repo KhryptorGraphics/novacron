@@ -1,0 +1,304 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/**'
+      - 'tests/integration/**'
+      - 'docker-compose.test.yml'
+      - '.github/workflows/integration-tests.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/**'
+      - 'tests/integration/**'
+      - 'docker-compose.test.yml'
+      - '.github/workflows/integration-tests.yml'
+
+env:
+  GO_VERSION: '1.21'
+  DOCKER_BUILDKIT: 1
+  COMPOSE_DOCKER_CLI_BUILD: 1
+
+jobs:
+  # Job for basic integration tests
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: novacron_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Wait for services
+      run: |
+        echo "Waiting for PostgreSQL..."
+        until pg_isready -h localhost -p 5432 -U postgres; do sleep 1; done
+        echo "Waiting for Redis..."
+        until redis-cli -h localhost -p 6379 ping; do sleep 1; done
+        echo "Services are ready"
+
+    - name: Setup test database
+      run: |
+        PGPASSWORD=postgres createdb -h localhost -U postgres novacron_test || true
+      env:
+        PGPASSWORD: postgres
+
+    - name: Build test dependencies
+      working-directory: tests/integration
+      run: |
+        go mod download
+        go mod verify
+
+    - name: Run integration tests
+      working-directory: tests/integration
+      env:
+        DB_URL: postgresql://postgres:postgres@localhost:5432/novacron_test
+        REDIS_URL: redis://localhost:6379
+        NOVACRON_API_URL: http://localhost:8090
+        NOVACRON_WS_URL: ws://localhost:8091/ws
+        NOVACRON_UI_URL: http://localhost:8092
+        TEST_TIMEOUT: 30m
+        SKIP_SLOW_TESTS: true
+      run: |
+        make test-short
+
+    - name: Generate coverage report
+      if: success()
+      working-directory: tests/integration
+      env:
+        DB_URL: postgresql://postgres:postgres@localhost:5432/novacron_test
+        REDIS_URL: redis://localhost:6379
+        NOVACRON_API_URL: http://localhost:8090
+      run: |
+        make test-coverage
+
+    - name: Upload coverage reports
+      if: success()
+      uses: codecov/codecov-action@v3
+      with:
+        file: tests/integration/integration-coverage.out
+        flags: integration
+        name: integration-tests
+
+  # Job for comprehensive end-to-end tests
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'e2e-tests')
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build test environment
+      run: |
+        docker-compose -f docker-compose.test.yml build
+
+    - name: Start test services
+      run: |
+        docker-compose -f docker-compose.test.yml up -d
+        echo "Waiting for services to be ready..."
+        sleep 45
+
+    - name: Wait for API health
+      run: |
+        timeout 300 bash -c 'until curl -f http://localhost:8090/health; do sleep 5; done'
+
+    - name: Run end-to-end tests
+      working-directory: tests/integration
+      env:
+        DB_URL: postgresql://postgres:postgres@localhost:5433/novacron_test
+        REDIS_URL: redis://localhost:6380
+        NOVACRON_API_URL: http://localhost:8090
+        NOVACRON_WS_URL: ws://localhost:8091/ws
+        NOVACRON_UI_URL: http://localhost:8092
+        TEST_TIMEOUT: 45m
+      run: |
+        go mod download
+        make test-e2e
+
+    - name: Collect logs on failure
+      if: failure()
+      run: |
+        mkdir -p logs
+        docker-compose -f docker-compose.test.yml logs > logs/docker-compose.log
+        docker ps -a > logs/containers.log
+
+    - name: Upload logs
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-logs
+        path: logs/
+
+    - name: Clean up
+      if: always()
+      run: |
+        docker-compose -f docker-compose.test.yml down -v
+
+  # Job for performance benchmarks
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: novacron_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Setup test database
+      run: |
+        PGPASSWORD=postgres createdb -h localhost -U postgres novacron_test || true
+      env:
+        PGPASSWORD: postgres
+
+    - name: Run performance tests
+      working-directory: tests/integration
+      env:
+        DB_URL: postgresql://postgres:postgres@localhost:5432/novacron_test
+        REDIS_URL: redis://localhost:6379
+        NOVACRON_API_URL: http://localhost:8090
+        TEST_TIMEOUT: 20m
+      run: |
+        go mod download
+        make test-performance
+
+    - name: Upload performance results
+      if: success()
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-results
+        path: tests/integration/performance-*.log
+
+  # Job for testing against multiple Go versions
+  compatibility-tests:
+    name: Go Compatibility Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'pull_request'
+    
+    strategy:
+      matrix:
+        go-version: ['1.20', '1.21', '1.22']
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: novacron_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go ${{ matrix.go-version }}
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ matrix.go-version }}
+
+    - name: Setup test database
+      run: |
+        PGPASSWORD=postgres createdb -h localhost -U postgres novacron_test || true
+      env:
+        PGPASSWORD: postgres
+
+    - name: Run compatibility tests
+      working-directory: tests/integration
+      env:
+        DB_URL: postgresql://postgres:postgres@localhost:5432/novacron_test
+        SKIP_SLOW_TESTS: true
+      run: |
+        go mod download
+        make test-short

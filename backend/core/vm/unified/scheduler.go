@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"novacron/backend/core/vm"
-	"novacron/backend/core/vm/kata"
+	"github.com/khryptorgraphics/novacron/backend/core/vm"
+	"github.com/khryptorgraphics/novacron/backend/core/vm/kata"
 )
 
 // UnifiedScheduler manages scheduling for both VMs and containers

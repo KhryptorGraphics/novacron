@@ -1,0 +1,132 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: orchestration-engine
+  namespace: novacron-orchestration
+  labels:
+    app.kubernetes.io/name: novacron-orchestration
+    app.kubernetes.io/component: orchestration-engine
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: https
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: metrics
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: novacron-orchestration
+    app.kubernetes.io/component: orchestration-engine
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orchestration-engine-headless
+  namespace: novacron-orchestration
+  labels:
+    app.kubernetes.io/name: novacron-orchestration
+    app.kubernetes.io/component: orchestration-engine
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: https
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: metrics
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: novacron-orchestration
+    app.kubernetes.io/component: orchestration-engine
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ml-training-service
+  namespace: novacron-orchestration
+  labels:
+    app.kubernetes.io/name: novacron-orchestration
+    app.kubernetes.io/component: ml-training
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+  - name: metrics
+    port: 9090
+    targetPort: metrics
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: novacron-orchestration
+    app.kubernetes.io/component: ml-training
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: orchestration-ingress
+  namespace: novacron-orchestration
+  labels:
+    app.kubernetes.io/name: novacron-orchestration
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/rate-limit-rps: "100"
+    nginx.ingress.kubernetes.io/rate-limit-connections: "50"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+  - hosts:
+    - orchestration.novacron.local
+    - orchestration-api.novacron.local
+    secretName: orchestration-tls-cert
+  rules:
+  - host: orchestration.novacron.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: orchestration-engine
+            port:
+              number: 80
+  - host: orchestration-api.novacron.local
+    http:
+      paths:
+      - path: /api/orchestration
+        pathType: Prefix
+        backend:
+          service:
+            name: orchestration-engine
+            port:
+              number: 80

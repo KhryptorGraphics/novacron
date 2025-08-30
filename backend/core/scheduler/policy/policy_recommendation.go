@@ -96,6 +96,9 @@ type PolicyRecommendation struct {
 
 	// AppliedAt records when this recommendation was applied
 	AppliedAt time.Time
+	
+	// ExpectedImprovementScore indicates the expected improvement score (0-100)
+	ExpectedImprovementScore float64
 }
 
 // RecommendationCategory indicates the type of policy recommendation

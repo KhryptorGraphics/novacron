@@ -1,0 +1,152 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orchestration-config
+  namespace: novacron-orchestration
+  labels:
+    app.kubernetes.io/name: novacron-orchestration
+    app.kubernetes.io/component: config
+data:
+  orchestration.yaml: |
+    server:
+      port: 8080
+      https_port: 8443
+      metrics_port: 9090
+      read_timeout: 30s
+      write_timeout: 30s
+      idle_timeout: 60s
+      max_header_size: 1MB
+    
+    orchestration:
+      engine_type: default
+      policy_storage: kubernetes
+      event_bus: nats
+      placement_strategy: balanced
+      max_concurrent_decisions: 100
+      decision_timeout: 30s
+      policy_update_interval: 30s
+    
+    ml_models:
+      storage_path: /var/lib/novacron/ml-models
+      training_enabled: true
+      benchmark_enabled: true
+      model_retention_days: 90
+      max_model_versions: 10
+      training_resources:
+        cpu_limit: 4000m
+        memory_limit: 8Gi
+        gpu_limit: 1
+      inference_resources:
+        cpu_limit: 2000m
+        memory_limit: 4Gi
+    
+    storage:
+      type: postgresql
+      connection_pool_size: 20
+      max_idle_connections: 10
+      connection_max_lifetime: 5m
+    
+    cache:
+      type: redis
+      ttl: 300s
+      max_size: 1000
+    
+    monitoring:
+      metrics_enabled: true
+      tracing_enabled: true
+      logging_level: info
+      prometheus_metrics: true
+      jaeger_tracing: true
+    
+    security:
+      tls_enabled: true
+      jwt_enabled: true
+      rbac_enabled: true
+      rate_limiting: true
+      cors_enabled: true
+      
+    features:
+      placement_predictor: true
+      scaling_predictor: true
+      resource_predictor: true
+      failure_predictor: true
+      chaos_engineering: false # Disabled by default
+      a_b_testing: true
+      
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ml-config
+  namespace: novacron-orchestration
+  labels:
+    app.kubernetes.io/name: novacron-orchestration
+    app.kubernetes.io/component: ml-config
+data:
+  ml-config.json: |
+    {
+      "default_training_config": {
+        "placement_predictor": {
+          "model_type": "placement_predictor",
+          "validation_split": 0.2,
+          "test_split": 0.1,
+          "batch_size": 64,
+          "learning_rate": 0.01,
+          "epochs": 100,
+          "early_stopping_rounds": 10,
+          "hyperparameter_tuning": true,
+          "cross_validation_folds": 5
+        },
+        "scaling_predictor": {
+          "model_type": "scaling_predictor",
+          "validation_split": 0.2,
+          "test_split": 0.1,
+          "batch_size": 32,
+          "learning_rate": 0.005,
+          "epochs": 150,
+          "early_stopping_rounds": 15,
+          "hyperparameter_tuning": true,
+          "cross_validation_folds": 5
+        }
+      },
+      "model_storage_path": "/var/lib/novacron/ml-models",
+      "model_retention_days": 90,
+      "max_model_versions": 10,
+      "benchmark_schedule": "0 2 * * *",
+      "performance_thresholds": {
+        "min_accuracy": 0.85,
+        "max_latency_ms": 100,
+        "min_throughput_rps": 100,
+        "max_memory_usage_mb": 512,
+        "min_confidence_score": 0.7,
+        "max_error_rate": 0.05
+      },
+      "retraining_triggers": {
+        "accuracy_drop": 0.05,
+        "data_drift_threshold": 0.1,
+        "time_since_last_training": "168h",
+        "new_data_samples": 1000,
+        "performance_degradation": 0.1
+      },
+      "ab_testing_config": {
+        "enabled": true,
+        "traffic_split_percent": 10,
+        "min_test_duration": "24h",
+        "max_test_duration": "168h",
+        "significance_level": 0.05,
+        "min_sample_size": 1000
+      },
+      "training_resource_limits": {
+        "max_cpu_cores": 8,
+        "max_memory_gb": 16,
+        "max_gpus": 2,
+        "max_training_time_hours": 12,
+        "max_disk_space_gb": 100
+      },
+      "inference_resource_limits": {
+        "max_cpu_cores": 4,
+        "max_memory_gb": 8,
+        "max_gpus": 1,
+        "max_disk_space_gb": 10
+      }
+    }

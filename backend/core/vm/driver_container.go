@@ -366,3 +366,99 @@ func (d *ContainerDriver) Snapshot(ctx context.Context, vmID, name string, param
 func (d *ContainerDriver) Migrate(ctx context.Context, vmID, target string, params map[string]string) error {
 	return errors.New("migration not supported for container driver")
 }
+
+// SupportsLiveMigration returns whether the driver supports live migration
+func (d *ContainerDriver) SupportsLiveMigration() bool {
+	return false
+}
+
+// SupportsHotPlug returns whether the driver supports hot-plugging devices
+func (d *ContainerDriver) SupportsHotPlug() bool {
+	return false
+}
+
+// SupportsGPUPassthrough returns whether the driver supports GPU passthrough
+func (d *ContainerDriver) SupportsGPUPassthrough() bool {
+	return false
+}
+
+// SupportsSRIOV returns whether the driver supports SR-IOV
+func (d *ContainerDriver) SupportsSRIOV() bool {
+	return false
+}
+
+// SupportsNUMA returns whether the driver supports NUMA configuration
+func (d *ContainerDriver) SupportsNUMA() bool {
+	return false
+}
+
+// GetCapabilities returns the capabilities of the container driver
+func (d *ContainerDriver) GetCapabilities(ctx context.Context) (*HypervisorCapabilities, error) {
+	return &HypervisorCapabilities{
+		Type:                   VMTypeContainer,
+		Version:               "1.0.0",
+		SupportsPause:         d.SupportsPause(),
+		SupportsResume:        d.SupportsResume(),
+		SupportsSnapshot:      d.SupportsSnapshot(),
+		SupportsMigrate:       d.SupportsMigrate(),
+		SupportsLiveMigration: d.SupportsLiveMigration(),
+		SupportsHotPlug:       d.SupportsHotPlug(),
+		SupportsGPUPassthrough: d.SupportsGPUPassthrough(),
+		SupportsSRIOV:         d.SupportsSRIOV(),
+		SupportsNUMA:          d.SupportsNUMA(),
+		MaxVCPUs:              1024,
+		MaxMemoryMB:           1024 * 1024, // 1TB
+		SupportedFeatures:     []string{"containers", "docker"},
+		HardwareExtensions:    []string{},
+	}, nil
+}
+
+// GetHypervisorInfo returns information about the container runtime
+func (d *ContainerDriver) GetHypervisorInfo(ctx context.Context) (*HypervisorInfo, error) {
+	capabilities, err := d.GetCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return &HypervisorInfo{
+		Type:            VMTypeContainer,
+		Version:         "Docker",
+		ConnectionURI:   "unix:///var/run/docker.sock",
+		Hostname:        "localhost",
+		CPUModel:        "Container",
+		CPUCores:        8,  // Default
+		MemoryMB:        8192, // Default 8GB
+		Virtualization:  "Container",
+		IOMMUEnabled:    false,
+		NUMANodes:       1,
+		GPUDevices:      []GPUDevice{},
+		NetworkDevices:  []NetworkDevice{},
+		StorageDevices:  []StorageDevice{},
+		ActiveVMs:       0,
+		Capabilities:    capabilities,
+		Metadata:        map[string]interface{}{
+			"runtime": "docker",
+			"driver":  "container",
+		},
+	}, nil
+}
+
+// HotPlugDevice hot-plugs a device (not supported for containers)
+func (d *ContainerDriver) HotPlugDevice(ctx context.Context, vmID string, device *DeviceConfig) error {
+	return errors.New("hot-plug not supported for container driver")
+}
+
+// HotUnplugDevice hot-unplugs a device (not supported for containers)
+func (d *ContainerDriver) HotUnplugDevice(ctx context.Context, vmID string, deviceID string) error {
+	return errors.New("hot-unplug not supported for container driver")
+}
+
+// ConfigureCPUPinning configures CPU pinning (not supported for containers)
+func (d *ContainerDriver) ConfigureCPUPinning(ctx context.Context, vmID string, pinning *CPUPinningConfig) error {
+	return errors.New("CPU pinning not supported for container driver")
+}
+
+// ConfigureNUMA configures NUMA topology (not supported for containers)
+func (d *ContainerDriver) ConfigureNUMA(ctx context.Context, vmID string, topology *NUMATopology) error {
+	return errors.New("NUMA configuration not supported for container driver")
+}

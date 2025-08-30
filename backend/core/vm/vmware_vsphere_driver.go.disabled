@@ -1,0 +1,769 @@
+package vm
+
+import (
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/vmware/govmomi"
+	"github.com/vmware/govmomi/find"
+	"github.com/vmware/govmomi/object"
+	"github.com/vmware/govmomi/property"
+	"github.com/vmware/govmomi/session"
+	"github.com/vmware/govmomi/vim25"
+	"github.com/vmware/govmomi/vim25/mo"
+	"github.com/vmware/govmomi/vim25/soap"
+	"github.com/vmware/govmomi/vim25/types"
+)
+
+// VSphereDriver implements VMDriver interface for VMware vSphere
+type VSphereDriver struct {
+	client       *govmomi.Client
+	finder       *find.Finder
+	datacenter   *object.Datacenter
+	config       VSphereConfig
+	vms          map[string]*VSphereVMInfo
+	vmLock       sync.RWMutex
+	ctx          context.Context
+	cancel       context.CancelFunc
+}
+
+// VSphereConfig holds vSphere connection configuration
+type VSphereConfig struct {
+	URL        string `json:"url"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	Datacenter string `json:"datacenter"`
+	Datastore  string `json:"datastore"`
+	Network    string `json:"network"`
+	Insecure   bool   `json:"insecure"`
+}
+
+// VSphereVMInfo stores information about a vSphere VM
+type VSphereVMInfo struct {
+	ID            string
+	Config        VMConfig
+	ManagedObject *object.VirtualMachine
+	State         State
+	CreatedAt     time.Time
+	StartedAt     *time.Time
+	StoppedAt     *time.Time
+	ResourcePool  *object.ResourcePool
+	Datastore     *object.Datastore
+	Network       *object.Network
+}
+
+// NewVSphereDriver creates a new vSphere driver
+func NewVSphereDriver(config map[string]interface{}) (VMDriver, error) {
+	// Parse configuration
+	configData, err := json.Marshal(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal vSphere config: %w", err)
+	}
+
+	var vsConfig VSphereConfig
+	if err := json.Unmarshal(configData, &vsConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse vSphere config: %w", err)
+	}
+
+	// Validate required fields
+	if vsConfig.URL == "" {
+		return nil, fmt.Errorf("vSphere URL is required")
+	}
+	if vsConfig.Username == "" {
+		return nil, fmt.Errorf("vSphere username is required")
+	}
+	if vsConfig.Password == "" {
+		return nil, fmt.Errorf("vSphere password is required")
+	}
+
+	// Set defaults
+	if vsConfig.Datacenter == "" {
+		vsConfig.Datacenter = "Datacenter"
+	}
+	if vsConfig.Datastore == "" {
+		vsConfig.Datastore = "datastore1"
+	}
+	if vsConfig.Network == "" {
+		vsConfig.Network = "VM Network"
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	
+	driver := &VSphereDriver{
+		config: vsConfig,
+		vms:    make(map[string]*VSphereVMInfo),
+		ctx:    ctx,
+		cancel: cancel,
+	}
+
+	// Connect to vSphere
+	if err := driver.connect(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to connect to vSphere: %w", err)
+	}
+
+	log.Printf("Connected to vSphere at %s", vsConfig.URL)
+	return driver, nil
+}
+
+// connect establishes connection to vSphere
+func (d *VSphereDriver) connect() error {
+	// Parse URL
+	u, err := soap.ParseURL(d.config.URL)
+	if err != nil {
+		return fmt.Errorf("failed to parse vSphere URL: %w", err)
+	}
+
+	// Set credentials
+	u.User = url.UserPassword(d.config.Username, d.config.Password)
+
+	// Create client
+	soapClient := soap.NewClient(u, d.config.Insecure)
+	if d.config.Insecure {
+		soapClient.DefaultTransport().TlsConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+
+	vimClient, err := vim25.NewClient(d.ctx, soapClient)
+	if err != nil {
+		return fmt.Errorf("failed to create VIM client: %w", err)
+	}
+
+	d.client = &govmomi.Client{
+		Client:         vimClient,
+		SessionManager: session.NewManager(vimClient),
+	}
+
+	// Login
+	if err := d.client.Login(d.ctx, u.User); err != nil {
+		return fmt.Errorf("failed to login to vSphere: %w", err)
+	}
+
+	// Initialize finder
+	d.finder = find.NewFinder(d.client.Client, true)
+
+	// Find datacenter
+	datacenter, err := d.finder.Datacenter(d.ctx, d.config.Datacenter)
+	if err != nil {
+		return fmt.Errorf("failed to find datacenter %s: %w", d.config.Datacenter, err)
+	}
+	d.datacenter = datacenter
+	d.finder.SetDatacenter(datacenter)
+
+	return nil
+}
+
+// Create creates a new VM in vSphere
+func (d *VSphereDriver) Create(ctx context.Context, config VMConfig) (string, error) {
+	d.vmLock.Lock()
+	defer d.vmLock.Unlock()
+
+	vmID := config.ID
+	if vmID == "" {
+		vmID = fmt.Sprintf("novacron-vm-%d", time.Now().UnixNano())
+	}
+
+	log.Printf("Creating vSphere VM %s (%s)", config.Name, vmID)
+
+	// Find resource pool
+	resourcePool, err := d.finder.ResourcePool(ctx, "*/Resources")
+	if err != nil {
+		return "", fmt.Errorf("failed to find resource pool: %w", err)
+	}
+
+	// Find datastore
+	datastore, err := d.finder.Datastore(ctx, d.config.Datastore)
+	if err != nil {
+		return "", fmt.Errorf("failed to find datastore: %w", err)
+	}
+
+	// Find network
+	network, err := d.finder.Network(ctx, d.config.Network)
+	if err != nil {
+		return "", fmt.Errorf("failed to find network: %w", err)
+	}
+
+	// Create VM specification
+	spec := d.buildVMSpec(config, datastore, network)
+
+	// Find folder (use root VM folder)
+	folder, err := d.finder.Folder(ctx, "/"+d.config.Datacenter+"/vm")
+	if err != nil {
+		return "", fmt.Errorf("failed to find VM folder: %w", err)
+	}
+
+	// Create VM
+	task, err := folder.CreateVM(ctx, *spec, resourcePool, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create VM task: %w", err)
+	}
+
+	// Wait for completion
+	info, err := task.WaitForResult(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create VM: %w", err)
+	}
+
+	// Get created VM reference
+	vmRef := info.Result.(types.ManagedObjectReference)
+	vm := object.NewVirtualMachine(d.client.Client, vmRef)
+
+	// Store VM info
+	vmInfo := &VSphereVMInfo{
+		ID:            vmID,
+		Config:        config,
+		ManagedObject: vm,
+		State:         StateCreated,
+		CreatedAt:     time.Now(),
+		ResourcePool:  resourcePool,
+		Datastore:     datastore,
+		Network:       network,
+	}
+
+	d.vms[vmID] = vmInfo
+
+	log.Printf("Created vSphere VM %s", vmID)
+	return vmID, nil
+}
+
+// buildVMSpec creates a VM configuration specification
+func (d *VSphereDriver) buildVMSpec(config VMConfig, datastore *object.Datastore, network object.NetworkReference) *types.VirtualMachineConfigSpec {
+	// Set defaults
+	memoryMB := int64(config.MemoryMB)
+	if memoryMB == 0 {
+		memoryMB = 1024 // 1GB default
+	}
+
+	numCPUs := int32(config.CPUShares)
+	if numCPUs == 0 {
+		numCPUs = 1
+	}
+
+	diskSizeKB := int64(config.DiskSizeGB * 1024 * 1024)
+	if diskSizeKB == 0 {
+		diskSizeKB = 20 * 1024 * 1024 // 20GB default
+	}
+
+	// Network device
+	networkDevice := &types.VirtualVmxnet3{
+		VirtualVmxnet: types.VirtualVmxnet{
+			VirtualEthernetCard: types.VirtualEthernetCard{
+				VirtualDevice: types.VirtualDevice{
+					Key: 4000,
+					DeviceInfo: &types.Description{
+						Label:   "Network adapter 1",
+						Summary: "VM Network",
+					},
+					Backing: &types.VirtualEthernetCardNetworkBackingInfo{
+						VirtualDeviceDeviceBackingInfo: types.VirtualDeviceDeviceBackingInfo{
+							DeviceName: network.GetInventoryPath(),
+						},
+					},
+				},
+				AddressType: string(types.VirtualEthernetCardMacTypeGenerated),
+			},
+		},
+	}
+
+	// Disk controller
+	scsiController := &types.VirtualLsiLogicController{
+		VirtualSCSIController: types.VirtualSCSIController{
+			VirtualController: types.VirtualController{
+				VirtualDevice: types.VirtualDevice{
+					Key: 1000,
+					DeviceInfo: &types.Description{
+						Label:   "SCSI controller 0",
+						Summary: "LSI Logic",
+					},
+				},
+			},
+		},
+	}
+
+	// Disk device
+	diskDevice := &types.VirtualDisk{
+		VirtualDevice: types.VirtualDevice{
+			Key: 2000,
+			DeviceInfo: &types.Description{
+				Label:   "Hard disk 1",
+				Summary: fmt.Sprintf("%d KB", diskSizeKB),
+			},
+			Backing: &types.VirtualDiskFlatVer2BackingInfo{
+				VirtualDeviceFileBackingInfo: types.VirtualDeviceFileBackingInfo{
+					FileName:  fmt.Sprintf("[%s] %s/%s.vmdk", datastore.Name(), config.Name, config.Name),
+					Datastore: &datastore.Reference(),
+				},
+				DiskMode:        string(types.VirtualDiskModePersistent),
+				ThinProvisioned: types.NewBool(true),
+			},
+			ControllerKey: 1000,
+			UnitNumber:    types.NewInt32(0),
+		},
+		CapacityInKB: diskSizeKB,
+	}
+
+	// VM specification
+	spec := &types.VirtualMachineConfigSpec{
+		Name:     config.Name,
+		GuestId:  "ubuntu64Guest", // Default to Ubuntu 64-bit
+		Files:    &types.VirtualMachineFileInfo{VmPathName: fmt.Sprintf("[%s]", datastore.Name())},
+		NumCPUs:  numCPUs,
+		MemoryMB: memoryMB,
+		DeviceChange: []types.BaseVirtualDeviceConfigSpec{
+			&types.VirtualDeviceConfigSpec{
+				Operation: types.VirtualDeviceConfigSpecOperationAdd,
+				Device:    scsiController,
+			},
+			&types.VirtualDeviceConfigSpec{
+				Operation: types.VirtualDeviceConfigSpecOperationAdd,
+				Device:    diskDevice,
+			},
+			&types.VirtualDeviceConfigSpec{
+				Operation: types.VirtualDeviceConfigSpecOperationAdd,
+				Device:    networkDevice,
+			},
+		},
+	}
+
+	// Add advanced configuration
+	spec.ExtraConfig = []types.BaseOptionValue{
+		&types.OptionValue{Key: "tools.syncTime", Value: "1"},
+		&types.OptionValue{Key: "tools.upgrade.policy", Value: "upgradeAtPowerCycle"},
+	}
+
+	// Add annotations
+	if config.Tags != nil {
+		annotations := make([]string, 0)
+		for k, v := range config.Tags {
+			annotations = append(annotations, fmt.Sprintf("%s=%s", k, v))
+		}
+		spec.Annotation = strings.Join(annotations, ";")
+	}
+
+	return spec
+}
+
+// Start powers on a vSphere VM
+func (d *VSphereDriver) Start(ctx context.Context, vmID string) error {
+	d.vmLock.Lock()
+	defer d.vmLock.Unlock()
+
+	vmInfo, exists := d.vms[vmID]
+	if !exists {
+		return fmt.Errorf("VM %s not found", vmID)
+	}
+
+	if vmInfo.State == StateRunning {
+		return fmt.Errorf("VM %s is already running", vmID)
+	}
+
+	log.Printf("Starting vSphere VM %s", vmID)
+
+	// Power on VM
+	task, err := vmInfo.ManagedObject.PowerOn(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to power on VM: %w", err)
+	}
+
+	// Wait for power on to complete
+	if err := task.Wait(ctx); err != nil {
+		return fmt.Errorf("failed to wait for power on: %w", err)
+	}
+
+	vmInfo.State = StateRunning
+	now := time.Now()
+	vmInfo.StartedAt = &now
+
+	log.Printf("Started vSphere VM %s", vmID)
+	return nil
+}
+
+// Stop powers off a vSphere VM
+func (d *VSphereDriver) Stop(ctx context.Context, vmID string) error {
+	d.vmLock.Lock()
+	defer d.vmLock.Unlock()
+
+	vmInfo, exists := d.vms[vmID]
+	if !exists {
+		return fmt.Errorf("VM %s not found", vmID)
+	}
+
+	if vmInfo.State != StateRunning {
+		return fmt.Errorf("VM %s is not running", vmID)
+	}
+
+	log.Printf("Stopping vSphere VM %s", vmID)
+
+	// Try graceful shutdown first
+	if err := vmInfo.ManagedObject.ShutdownGuest(ctx); err != nil {
+		log.Printf("Graceful shutdown failed, forcing power off: %v", err)
+		
+		// Force power off
+		task, err := vmInfo.ManagedObject.PowerOff(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to power off VM: %w", err)
+		}
+
+		if err := task.Wait(ctx); err != nil {
+			return fmt.Errorf("failed to wait for power off: %w", err)
+		}
+	}
+
+	vmInfo.State = StateStopped
+	now := time.Now()
+	vmInfo.StoppedAt = &now
+
+	log.Printf("Stopped vSphere VM %s", vmID)
+	return nil
+}
+
+// Delete removes a vSphere VM
+func (d *VSphereDriver) Delete(ctx context.Context, vmID string) error {
+	d.vmLock.Lock()
+	defer d.vmLock.Unlock()
+
+	vmInfo, exists := d.vms[vmID]
+	if !exists {
+		return fmt.Errorf("VM %s not found", vmID)
+	}
+
+	log.Printf("Deleting vSphere VM %s", vmID)
+
+	// Power off if running
+	if vmInfo.State == StateRunning {
+		task, err := vmInfo.ManagedObject.PowerOff(ctx)
+		if err != nil {
+			log.Printf("Warning: Failed to power off VM before deletion: %v", err)
+		} else {
+			task.Wait(ctx)
+		}
+	}
+
+	// Destroy VM
+	task, err := vmInfo.ManagedObject.Destroy(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to destroy VM: %w", err)
+	}
+
+	if err := task.Wait(ctx); err != nil {
+		return fmt.Errorf("failed to wait for VM destruction: %w", err)
+	}
+
+	delete(d.vms, vmID)
+
+	log.Printf("Deleted vSphere VM %s", vmID)
+	return nil
+}
+
+// GetStatus returns the power state of a vSphere VM
+func (d *VSphereDriver) GetStatus(ctx context.Context, vmID string) (VMState, error) {
+	d.vmLock.RLock()
+	defer d.vmLock.RUnlock()
+
+	vmInfo, exists := d.vms[vmID]
+	if !exists {
+		return StateUnknown, fmt.Errorf("VM %s not found", vmID)
+	}
+
+	// Get current power state from vSphere
+	var vm mo.VirtualMachine
+	if err := vmInfo.ManagedObject.Properties(ctx, vmInfo.ManagedObject.Reference(), []string{"runtime.powerState"}, &vm); err != nil {
+		return StateUnknown, fmt.Errorf("failed to get VM power state: %w", err)
+	}
+
+	// Convert vSphere power state to our state
+	switch vm.Runtime.PowerState {
+	case types.VirtualMachinePowerStatePoweredOn:
+		vmInfo.State = StateRunning
+	case types.VirtualMachinePowerStatePoweredOff:
+		vmInfo.State = StateStopped
+	case types.VirtualMachinePowerStateSuspended:
+		vmInfo.State = StatePaused
+	default:
+		vmInfo.State = StateUnknown
+	}
+
+	return VMState(vmInfo.State), nil
+}
+
+// GetInfo returns information about a vSphere VM
+func (d *VSphereDriver) GetInfo(ctx context.Context, vmID string) (*VMInfo, error) {
+	d.vmLock.RLock()
+	defer d.vmLock.RUnlock()
+
+	vmInfo, exists := d.vms[vmID]
+	if !exists {
+		return nil, fmt.Errorf("VM %s not found", vmID)
+	}
+
+	// Get VM properties from vSphere
+	var vm mo.VirtualMachine
+	pc := property.DefaultCollector(d.client.Client)
+	if err := pc.RetrieveOne(ctx, vmInfo.ManagedObject.Reference(), []string{
+		"runtime.powerState",
+		"runtime.host",
+		"config.hardware.memoryMB",
+		"config.hardware.numCPU",
+		"guest.ipAddress",
+		"summary.quickStats",
+	}, &vm); err != nil {
+		return nil, fmt.Errorf("failed to get VM properties: %w", err)
+	}
+
+	// Update state based on current power state
+	switch vm.Runtime.PowerState {
+	case types.VirtualMachinePowerStatePoweredOn:
+		vmInfo.State = StateRunning
+	case types.VirtualMachinePowerStatePoweredOff:
+		vmInfo.State = StateStopped
+	case types.VirtualMachinePowerStateSuspended:
+		vmInfo.State = StatePaused
+	}
+
+	info := &VMInfo{
+		ID:        vmInfo.ID,
+		Name:      vmInfo.Config.Name,
+		State:     vmInfo.State,
+		CPUShares: int(vm.Config.Hardware.NumCPU),
+		MemoryMB:  int(vm.Config.Hardware.MemoryMB),
+		CreatedAt: vmInfo.CreatedAt,
+		StartedAt: vmInfo.StartedAt,
+		StoppedAt: vmInfo.StoppedAt,
+		Tags:      vmInfo.Config.Tags,
+		NetworkID: vmInfo.Config.NetworkID,
+	}
+
+	// Add runtime statistics if available
+	if vm.Summary.QuickStats != nil {
+		info.CPUUsage = float64(vm.Summary.QuickStats.OverallCpuUsage)
+		info.MemoryUsage = int64(vm.Summary.QuickStats.GuestMemoryUsage) * 1024 * 1024 // Convert MB to bytes
+	}
+
+	// Add IP address if available
+	if vm.Guest != nil && vm.Guest.IpAddress != "" {
+		info.IPAddress = vm.Guest.IpAddress
+	}
+
+	return info, nil
+}
+
+// GetMetrics returns performance metrics for a vSphere VM
+func (d *VSphereDriver) GetMetrics(ctx context.Context, vmID string) (*VMInfo, error) {
+	// For now, return the same as GetInfo
+	// In a full implementation, this would query performance counters
+	return d.GetInfo(ctx, vmID)
+}
+
+// ListVMs returns a list of all managed vSphere VMs
+func (d *VSphereDriver) ListVMs(ctx context.Context) ([]VMInfo, error) {
+	d.vmLock.RLock()
+	defer d.vmLock.RUnlock()
+
+	vms := make([]VMInfo, 0, len(d.vms))
+	for _, vmInfo := range d.vms {
+		info, err := d.GetInfo(ctx, vmInfo.ID)
+		if err != nil {
+			log.Printf("Warning: Failed to get info for VM %s: %v", vmInfo.ID, err)
+			continue
+		}
+		vms = append(vms, *info)
+	}
+
+	return vms, nil
+}
+
+// Capability checks
+func (d *VSphereDriver) SupportsPause() bool     { return true }
+func (d *VSphereDriver) SupportsResume() bool    { return true }
+func (d *VSphereDriver) SupportsSnapshot() bool  { return true }
+func (d *VSphereDriver) SupportsMigrate() bool   { return true }
+
+// Pause suspends a vSphere VM
+func (d *VSphereDriver) Pause(ctx context.Context, vmID string) error {
+	d.vmLock.Lock()
+	defer d.vmLock.Unlock()
+
+	vmInfo, exists := d.vms[vmID]
+	if !exists {
+		return fmt.Errorf("VM %s not found", vmID)
+	}
+
+	if vmInfo.State != StateRunning {
+		return fmt.Errorf("VM %s is not running", vmID)
+	}
+
+	log.Printf("Suspending vSphere VM %s", vmID)
+
+	// Suspend VM
+	task, err := vmInfo.ManagedObject.Suspend(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to suspend VM: %w", err)
+	}
+
+	if err := task.Wait(ctx); err != nil {
+		return fmt.Errorf("failed to wait for VM suspension: %w", err)
+	}
+
+	vmInfo.State = StatePaused
+	log.Printf("Suspended vSphere VM %s", vmID)
+	return nil
+}
+
+// Resume powers on a suspended vSphere VM
+func (d *VSphereDriver) Resume(ctx context.Context, vmID string) error {
+	d.vmLock.Lock()
+	defer d.vmLock.Unlock()
+
+	vmInfo, exists := d.vms[vmID]
+	if !exists {
+		return fmt.Errorf("VM %s not found", vmID)
+	}
+
+	if vmInfo.State != StatePaused {
+		return fmt.Errorf("VM %s is not suspended", vmID)
+	}
+
+	log.Printf("Resuming vSphere VM %s", vmID)
+
+	// Power on suspended VM
+	task, err := vmInfo.ManagedObject.PowerOn(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to resume VM: %w", err)
+	}
+
+	if err := task.Wait(ctx); err != nil {
+		return fmt.Errorf("failed to wait for VM resume: %w", err)
+	}
+
+	vmInfo.State = StateRunning
+	log.Printf("Resumed vSphere VM %s", vmID)
+	return nil
+}
+
+// Snapshot creates a snapshot of a vSphere VM
+func (d *VSphereDriver) Snapshot(ctx context.Context, vmID, name string, params map[string]string) (string, error) {
+	d.vmLock.RLock()
+	defer d.vmLock.RUnlock()
+
+	vmInfo, exists := d.vms[vmID]
+	if !exists {
+		return "", fmt.Errorf("VM %s not found", vmID)
+	}
+
+	description := fmt.Sprintf("Snapshot created by NovaCron at %s", time.Now().Format(time.RFC3339))
+	if desc, ok := params["description"]; ok {
+		description = desc
+	}
+
+	includeMemory := true
+	if mem, ok := params["memory"]; ok {
+		includeMemory = mem == "true"
+	}
+
+	log.Printf("Creating snapshot %s for vSphere VM %s", name, vmID)
+
+	// Create snapshot
+	task, err := vmInfo.ManagedObject.CreateSnapshot(ctx, name, description, includeMemory, false)
+	if err != nil {
+		return "", fmt.Errorf("failed to create snapshot: %w", err)
+	}
+
+	info, err := task.WaitForResult(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to wait for snapshot creation: %w", err)
+	}
+
+	// Get snapshot reference
+	snapshotRef := info.Result.(types.ManagedObjectReference)
+	snapshotID := snapshotRef.Value
+
+	log.Printf("Created snapshot %s (%s) for vSphere VM %s", name, snapshotID, vmID)
+	return snapshotID, nil
+}
+
+// Migrate migrates a vSphere VM using vMotion
+func (d *VSphereDriver) Migrate(ctx context.Context, vmID, target string, params map[string]string) error {
+	d.vmLock.Lock()
+	defer d.vmLock.Unlock()
+
+	vmInfo, exists := d.vms[vmID]
+	if !exists {
+		return fmt.Errorf("VM %s not found", vmID)
+	}
+
+	log.Printf("Migrating vSphere VM %s to %s", vmID, target)
+
+	// Find target host
+	targetHost, err := d.finder.HostSystem(ctx, target)
+	if err != nil {
+		return fmt.Errorf("failed to find target host %s: %w", target, err)
+	}
+
+	// Create migration spec
+	spec := types.VirtualMachineRelocateSpec{
+		Host: types.NewReference(targetHost.Reference()),
+	}
+
+	// Check for datastore migration
+	if datastore, ok := params["datastore"]; ok {
+		targetDatastore, err := d.finder.Datastore(ctx, datastore)
+		if err != nil {
+			return fmt.Errorf("failed to find target datastore %s: %w", datastore, err)
+		}
+		spec.Datastore = types.NewReference(targetDatastore.Reference())
+	}
+
+	// Check for resource pool migration
+	if resourcePool, ok := params["resource_pool"]; ok {
+		targetRP, err := d.finder.ResourcePool(ctx, resourcePool)
+		if err != nil {
+			return fmt.Errorf("failed to find target resource pool %s: %w", resourcePool, err)
+		}
+		spec.Pool = types.NewReference(targetRP.Reference())
+	}
+
+	// Perform migration
+	task, err := vmInfo.ManagedObject.Relocate(ctx, spec, types.VirtualMachineMovePriorityDefaultPriority)
+	if err != nil {
+		return fmt.Errorf("failed to start migration: %w", err)
+	}
+
+	if err := task.Wait(ctx); err != nil {
+		return fmt.Errorf("migration failed: %w", err)
+	}
+
+	log.Printf("Successfully migrated vSphere VM %s to %s", vmID, target)
+	return nil
+}
+
+// Close closes the vSphere connection
+func (d *VSphereDriver) Close() error {
+	if d.client != nil {
+		d.client.Logout(d.ctx)
+	}
+	if d.cancel != nil {
+		d.cancel()
+	}
+	return nil
+}
+
+// GetDatastores returns available datastores
+func (d *VSphereDriver) GetDatastores(ctx context.Context) ([]*object.Datastore, error) {
+	return d.finder.DatastoreList(ctx, "*")
+}
+
+// GetNetworks returns available networks
+func (d *VSphereDriver) GetNetworks(ctx context.Context) ([]object.NetworkReference, error) {
+	return d.finder.NetworkList(ctx, "*")
+}
+
+// GetHosts returns available hosts
+func (d *VSphereDriver) GetHosts(ctx context.Context) ([]*object.HostSystem, error) {
+	return d.finder.HostSystemList(ctx, "*")
+}

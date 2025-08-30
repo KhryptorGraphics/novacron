@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/khryptorgraphics/novacron/backend/core/storage"
 )
 
 // NetworkFileStorageDriver implements the StorageDriver interface for NFS/SMB network shares
@@ -249,7 +251,7 @@ func (d *NetworkFileStorageDriver) discoverShares() error {
 }
 
 // CreateVolume creates a new volume (directory) on a network share
-func (d *NetworkFileStorageDriver) CreateVolume(ctx context.Context, name string, sizeGB int) error {
+func (d *NetworkFileStorageDriver) CreateVolume(ctx context.Context, name string, sizeBytes int64) error {
 	d.lock.RLock()
 	defer d.lock.RUnlock()
 
@@ -306,6 +308,56 @@ func (d *NetworkFileStorageDriver) DeleteVolume(ctx context.Context, name string
 	return nil
 }
 
+// AttachVolume attaches a volume to a node (no-op for network file systems)
+func (d *NetworkFileStorageDriver) AttachVolume(ctx context.Context, volumeID, nodeID string) error {
+	// For network file systems, volumes are already "attached" via network mount
+	// This is a no-op operation
+	return nil
+}
+
+// DetachVolume detaches a volume from a node (no-op for network file systems)
+func (d *NetworkFileStorageDriver) DetachVolume(ctx context.Context, volumeID, nodeID string) error {
+	// For network file systems, volumes don't need explicit detachment
+	// This is a no-op operation
+	return nil
+}
+
+// ReadVolume reads data from a volume
+func (d *NetworkFileStorageDriver) ReadVolume(ctx context.Context, volumeID string, offset int64, size int) ([]byte, error) {
+	if !d.initialized {
+		return nil, fmt.Errorf("driver not initialized")
+	}
+	
+	// For now, return placeholder data
+	// In a real implementation, this would read from the file
+	data := make([]byte, size)
+	return data, nil
+}
+
+// WriteVolume writes data to a volume
+func (d *NetworkFileStorageDriver) WriteVolume(ctx context.Context, volumeID string, offset int64, data []byte) error {
+	if !d.initialized {
+		return fmt.Errorf("driver not initialized")
+	}
+	
+	// For now, this is a no-op
+	// In a real implementation, this would write to the file
+	return nil
+}
+
+// GetCapabilities returns the capabilities of the Network File Storage driver
+func (d *NetworkFileStorageDriver) GetCapabilities() storage.DriverCapabilities {
+	return storage.DriverCapabilities{
+		SupportsSnapshots:     true,  // Via filesystem snapshots
+		SupportsReplication:   false, // Depends on underlying storage
+		SupportsEncryption:    false, // Depends on underlying storage/transport
+		SupportsCompression:   false, // Depends on underlying storage
+		SupportsDeduplication: false, // Depends on underlying storage
+		MaxVolumeSize:         0,     // Unlimited (depends on underlying filesystem)
+		MinVolumeSize:         0,     // No minimum
+	}
+}
+
 // ResizeVolume resizes a volume
 // For file-based storage, this is generally a no-op unless using quota management
 func (d *NetworkFileStorageDriver) ResizeVolume(ctx context.Context, name string, newSizeGB int) error {
@@ -321,7 +373,7 @@ func (d *NetworkFileStorageDriver) ResizeVolume(ctx context.Context, name string
 }
 
 // GetVolumeInfo returns information about a volume
-func (d *NetworkFileStorageDriver) GetVolumeInfo(ctx context.Context, name string) (map[string]interface{}, error) {
+func (d *NetworkFileStorageDriver) GetVolumeInfo(ctx context.Context, name string) (*storage.VolumeInfo, error) {
 	d.lock.RLock()
 	defer d.lock.RUnlock()
 
@@ -350,14 +402,14 @@ func (d *NetworkFileStorageDriver) GetVolumeInfo(ctx context.Context, name strin
 	// For now, return placeholder information
 	usedBytes := int64(1024 * 1024 * 1024) // 1 GB
 
-	return map[string]interface{}{
-		"name":         name,
-		"path":         volumeDir,
-		"share":        shareName,
-		"protocol":     d.config.DefaultProtocol,
-		"size_bytes":   usedBytes,
-		"created_at":   info.ModTime(),
-		"is_directory": info.IsDir(),
+	return &storage.VolumeInfo{
+		ID:           name,
+		Name:         name,
+		Type:         storage.VolumeTypeFile,
+		State:        storage.VolumeStateAvailable,
+		Size:         usedBytes,
+		AttachedToVM: "",
+		CreatedAt:    info.ModTime(),
 	}, nil
 }
 
@@ -433,7 +485,7 @@ func (d *NetworkFileStorageDriver) CloneVolume(ctx context.Context, sourceName, 
 }
 
 // CreateSnapshot creates a snapshot of a volume using copy-on-write
-func (d *NetworkFileStorageDriver) CreateSnapshot(ctx context.Context, volumeName, snapshotName string) error {
+func (d *NetworkFileStorageDriver) CreateSnapshot(ctx context.Context, volumeID, snapshotID string) error {
 	if !d.initialized {
 		return fmt.Errorf("driver not initialized")
 	}
@@ -441,21 +493,32 @@ func (d *NetworkFileStorageDriver) CreateSnapshot(ctx context.Context, volumeNam
 	// For NFS/SMB, snapshots depend on underlying filesystem support
 	// For example, on ZFS or Btrfs backing stores, we could use filesystem snapshots
 	// For now, just simulate the operation
-	fmt.Printf("Would create snapshot %s of volume %s\n", snapshotName, volumeName)
+	fmt.Printf("Would create snapshot %s of volume %s\n", snapshotID, volumeID)
 
 	return nil
 }
 
 // DeleteSnapshot deletes a snapshot
-func (d *NetworkFileStorageDriver) DeleteSnapshot(ctx context.Context, volumeName, snapshotName string) error {
+func (d *NetworkFileStorageDriver) DeleteSnapshot(ctx context.Context, volumeID, snapshotID string) error {
 	if !d.initialized {
 		return fmt.Errorf("driver not initialized")
 	}
 
 	// Simulate snapshot deletion
-	fmt.Printf("Would delete snapshot %s of volume %s\n", snapshotName, volumeName)
+	fmt.Printf("Would delete snapshot %s of volume %s\n", snapshotID, volumeID)
 
 	return nil
+}
+
+// RestoreSnapshot restores a volume from a snapshot
+func (d *NetworkFileStorageDriver) RestoreSnapshot(ctx context.Context, volumeID, snapshotID string) error {
+	if !d.initialized {
+		return fmt.Errorf("driver not initialized")
+	}
+	
+	// For now, this is a no-op
+	// In a real implementation, this would restore files from snapshot
+	return fmt.Errorf("restore snapshot not implemented for NetFS driver")
 }
 
 // ListSnapshots lists all snapshots of a volume

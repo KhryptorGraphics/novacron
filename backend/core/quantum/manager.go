@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"novacron/backend/core/vm"
+	"github.com/khryptorgraphics/novacron/backend/core/vm"
 )
 
 // QuantumManager handles quantum-ready operations and post-quantum security

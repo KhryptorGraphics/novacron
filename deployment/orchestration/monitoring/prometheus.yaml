@@ -1,0 +1,245 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: orchestration-engine
+  namespace: novacron-orchestration
+  labels:
+    app.kubernetes.io/name: novacron-orchestration
+    app.kubernetes.io/component: orchestration-engine
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: novacron-orchestration
+      app.kubernetes.io/component: orchestration-engine
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    scrapeTimeout: 10s
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - sourceLabels: [__meta_kubernetes_pod_node_name]
+      targetLabel: node
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ml-training-service
+  namespace: novacron-orchestration
+  labels:
+    app.kubernetes.io/name: novacron-orchestration
+    app.kubernetes.io/component: ml-training
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: novacron-orchestration
+      app.kubernetes.io/component: ml-training
+  endpoints:
+  - port: metrics
+    interval: 60s
+    path: /metrics
+    scrapeTimeout: 15s
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: orchestration-alerts
+  namespace: novacron-orchestration
+  labels:
+    app.kubernetes.io/name: novacron-orchestration
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+  - name: orchestration.engine
+    interval: 30s
+    rules:
+    - alert: OrchestrationEngineDown
+      expr: up{job="orchestration-engine"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        component: orchestration-engine
+      annotations:
+        summary: "Orchestration engine is down"
+        description: "Orchestration engine {{ $labels.instance }} has been down for more than 1 minute"
+        runbook_url: "https://docs.novacron.local/runbooks/orchestration/engine-down"
+
+    - alert: OrchestrationHighLatency
+      expr: histogram_quantile(0.95, rate(orchestration_decision_duration_seconds_bucket[5m])) > 1
+      for: 2m
+      labels:
+        severity: warning
+        component: orchestration-engine
+      annotations:
+        summary: "High orchestration decision latency"
+        description: "95th percentile latency is {{ $value }}s for {{ $labels.instance }}"
+        runbook_url: "https://docs.novacron.local/runbooks/orchestration/high-latency"
+
+    - alert: OrchestrationHighErrorRate
+      expr: rate(orchestration_decisions_failed_total[5m]) / rate(orchestration_decisions_total[5m]) > 0.05
+      for: 2m
+      labels:
+        severity: critical
+        component: orchestration-engine
+      annotations:
+        summary: "High orchestration error rate"
+        description: "Error rate is {{ $value | humanizePercentage }} for {{ $labels.instance }}"
+        runbook_url: "https://docs.novacron.local/runbooks/orchestration/high-error-rate"
+
+    - alert: OrchestrationLowThroughput
+      expr: rate(orchestration_decisions_total[5m]) < 1
+      for: 5m
+      labels:
+        severity: warning
+        component: orchestration-engine
+      annotations:
+        summary: "Low orchestration throughput"
+        description: "Decision rate is {{ $value }} decisions/sec for {{ $labels.instance }}"
+        runbook_url: "https://docs.novacron.local/runbooks/orchestration/low-throughput"
+
+    - alert: OrchestrationHighMemoryUsage
+      expr: process_resident_memory_bytes{job="orchestration-engine"} / (1024*1024*1024) > 8
+      for: 5m
+      labels:
+        severity: warning
+        component: orchestration-engine
+      annotations:
+        summary: "High memory usage in orchestration engine"
+        description: "Memory usage is {{ $value }}GB for {{ $labels.instance }}"
+        runbook_url: "https://docs.novacron.local/runbooks/orchestration/high-memory"
+
+    - alert: OrchestrationHighCPUUsage
+      expr: rate(process_cpu_seconds_total{job="orchestration-engine"}[5m]) > 1.5
+      for: 5m
+      labels:
+        severity: warning
+        component: orchestration-engine
+      annotations:
+        summary: "High CPU usage in orchestration engine"
+        description: "CPU usage is {{ $value | humanizePercentage }} for {{ $labels.instance }}"
+        runbook_url: "https://docs.novacron.local/runbooks/orchestration/high-cpu"
+
+  - name: orchestration.ml
+    interval: 60s
+    rules:
+    - alert: MLModelAccuracyDrop
+      expr: ml_model_accuracy < 0.8
+      for: 10m
+      labels:
+        severity: warning
+        component: ml-models
+      annotations:
+        summary: "ML model accuracy drop"
+        description: "Model {{ $labels.model_type }} accuracy is {{ $value }} (< 80%)"
+        runbook_url: "https://docs.novacron.local/runbooks/ml/accuracy-drop"
+
+    - alert: MLModelTrainingFailed
+      expr: increase(ml_training_failures_total[1h]) > 0
+      for: 0m
+      labels:
+        severity: critical
+        component: ml-training
+      annotations:
+        summary: "ML model training failed"
+        description: "Training failed for model {{ $labels.model_type }}"
+        runbook_url: "https://docs.novacron.local/runbooks/ml/training-failed"
+
+    - alert: MLModelHighInferenceLatency
+      expr: histogram_quantile(0.95, rate(ml_inference_duration_seconds_bucket[5m])) > 0.1
+      for: 5m
+      labels:
+        severity: warning
+        component: ml-inference
+      annotations:
+        summary: "High ML inference latency"
+        description: "95th percentile inference latency is {{ $value }}s for model {{ $labels.model_type }}"
+        runbook_url: "https://docs.novacron.local/runbooks/ml/high-inference-latency"
+
+    - alert: MLDataDriftDetected
+      expr: ml_data_drift_score > 0.3
+      for: 0m
+      labels:
+        severity: warning
+        component: ml-models
+      annotations:
+        summary: "ML data drift detected"
+        description: "Data drift score is {{ $value }} for model {{ $labels.model_type }}"
+        runbook_url: "https://docs.novacron.local/runbooks/ml/data-drift"
+
+  - name: orchestration.policies
+    interval: 60s
+    rules:
+    - alert: OrchestrationPolicyViolation
+      expr: increase(orchestration_policy_violations_total[5m]) > 0
+      for: 0m
+      labels:
+        severity: warning
+        component: orchestration-policies
+      annotations:
+        summary: "Orchestration policy violation"
+        description: "Policy {{ $labels.policy_id }} has been violated {{ $value }} times"
+        runbook_url: "https://docs.novacron.local/runbooks/orchestration/policy-violation"
+
+    - alert: OrchestrationNoPoliciesActive
+      expr: orchestration_active_policies == 0
+      for: 5m
+      labels:
+        severity: critical
+        component: orchestration-policies
+      annotations:
+        summary: "No orchestration policies active"
+        description: "No policies are currently active in the orchestration engine"
+        runbook_url: "https://docs.novacron.local/runbooks/orchestration/no-policies"
+
+    - alert: OrchestrationPolicyConflict
+      expr: increase(orchestration_policy_conflicts_total[5m]) > 0
+      for: 0m
+      labels:
+        severity: warning
+        component: orchestration-policies
+      annotations:
+        summary: "Orchestration policy conflict detected"
+        description: "Policy conflicts detected between {{ $labels.policy_a }} and {{ $labels.policy_b }}"
+        runbook_url: "https://docs.novacron.local/runbooks/orchestration/policy-conflict"
+
+  - name: orchestration.scaling
+    interval: 30s
+    rules:
+    - alert: OrchestrationScalingStuck
+      expr: time() - orchestration_last_scaling_decision_timestamp > 3600
+      for: 0m
+      labels:
+        severity: warning
+        component: orchestration-scaling
+      annotations:
+        summary: "Orchestration scaling decisions stuck"
+        description: "No scaling decisions made in the last hour"
+        runbook_url: "https://docs.novacron.local/runbooks/orchestration/scaling-stuck"
+
+    - alert: OrchestrationExcessiveScaling
+      expr: rate(orchestration_scaling_events_total[5m]) > 0.5
+      for: 5m
+      labels:
+        severity: warning
+        component: orchestration-scaling
+      annotations:
+        summary: "Excessive scaling activity"
+        description: "Scaling rate is {{ $value }} events/sec, may indicate thrashing"
+        runbook_url: "https://docs.novacron.local/runbooks/orchestration/excessive-scaling"
+
+    - alert: OrchestrationScalingFailure
+      expr: rate(orchestration_scaling_failures_total[5m]) > 0.1
+      for: 2m
+      labels:
+        severity: critical
+        component: orchestration-scaling
+      annotations:
+        summary: "High orchestration scaling failure rate"
+        description: "Scaling failure rate is {{ $value }} failures/sec"
+        runbook_url: "https://docs.novacron.local/runbooks/orchestration/scaling-failures"

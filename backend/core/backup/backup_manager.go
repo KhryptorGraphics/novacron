@@ -8,19 +8,7 @@ import (
 	"time"
 )
 
-// BackupType represents the type of backup
-type BackupType string
-
-const (
-	// FullBackup represents a full backup
-	FullBackup BackupType = "full"
-
-	// IncrementalBackup represents an incremental backup
-	IncrementalBackup BackupType = "incremental"
-
-	// DifferentialBackup represents a differential backup
-	DifferentialBackup BackupType = "differential"
-)
+// BackupType is defined in types.go
 
 // BackupState represents the state of a backup
 type BackupState string

@@ -5,7 +5,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/khryptorgraphics/novacron/backend/core/plugins/storage/ceph"
+	cephstorage "github.com/khryptorgraphics/novacron/backend/core/plugins/storage/ceph"
 	"github.com/khryptorgraphics/novacron/backend/core/plugins/storage/netfs"
 	"github.com/khryptorgraphics/novacron/backend/core/plugins/storage/objectstorage"
 	"github.com/khryptorgraphics/novacron/backend/core/storage"
@@ -40,7 +40,7 @@ func InitializeRegistry() error {
 	}
 
 	// Register Ceph storage driver
-	Registry.plugins["StorageDriver"][ceph.CephPluginInfo.Name] = ceph.CephPluginInfo
+	Registry.plugins["StorageDriver"][cephstorage.CephPluginInfo.Name] = cephstorage.CephPluginInfo
 
 	// Register Network File System storage driver
 	Registry.plugins["StorageDriver"][netfs.NetworkFSPluginInfo.Name] = netfs.NetworkFSPluginInfo
@@ -91,24 +91,27 @@ func (r *StoragePluginRegistry) ListStoragePlugins() []string {
 // registerStorageDriverFactories registers the storage driver factories with the core storage system
 func registerStorageDriverFactories() {
 	// Register Ceph storage driver factory
-	storage.RegisterDriver(ceph.CephPluginInfo.Name, func(config map[string]interface{}) (storage.StorageDriver, error) {
+	storage.RegisterDriver(cephstorage.CephPluginInfo.Name, func(config map[string]interface{}) (storage.StorageDriver, error) {
 		// Convert generic config to Ceph-specific config
-		cephConfig := ceph.DefaultCephConfig()
+		cephConfig := cephstorage.DefaultCephConfig()
 
 		// Apply configuration overrides if provided
-		if monHosts, ok := config["mon_hosts"].([]string); ok {
-			cephConfig.MonHosts = monHosts
+		if monitors, ok := config["monitors"].([]string); ok {
+			cephConfig.Monitors = monitors
 		}
-		if pool, ok := config["pool"].(string); ok {
-			cephConfig.Pool = pool
+		if pool, ok := config["default_pool"].(string); ok {
+			cephConfig.DefaultPool = pool
 		}
-		if user, ok := config["user"].(string); ok {
-			cephConfig.User = user
+		if username, ok := config["username"].(string); ok {
+			cephConfig.Username = username
+		}
+		if clusterName, ok := config["cluster_name"].(string); ok {
+			cephConfig.ClusterName = clusterName
 		}
 		// Additional config parameters would be handled similarly
 
 		// Create and return the driver
-		return ceph.NewCephStorageDriver(cephConfig), nil
+		return cephstorage.NewCephStorageDriver(cephConfig), nil
 	})
 
 	// Register Network File System storage driver factory

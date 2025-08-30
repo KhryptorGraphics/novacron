@@ -10,11 +10,11 @@ WORKDIR /app
 # Copy go mod and sum files
 COPY go.mod go.sum ./
 
+# Copy backend directory (needed for local replace directives)
+COPY backend ./backend
+
 # Download dependencies
 RUN go mod download
-
-# Copy backend directory
-COPY backend ./backend
 
 # Build the application
 RUN CGO_ENABLED=1 GOOS=linux go build -a -o novacron-hypervisor ./backend/core/cmd/novacron

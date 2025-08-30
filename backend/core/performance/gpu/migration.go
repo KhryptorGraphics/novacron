@@ -10,7 +10,7 @@ import (
 	"time"
 	"unsafe"
 
-	"novacron/backend/core/vm"
+	"github.com/khryptorgraphics/novacron/backend/core/vm"
 )
 
 /*

@@ -505,3 +505,99 @@ func (d *KVMDriverEnhanced) stopVMInternal(vmInfo *KVMVMInfo) error {
 
 	return nil
 }
+
+// SupportsLiveMigration returns whether the driver supports live migration
+func (d *KVMDriverEnhanced) SupportsLiveMigration() bool {
+	return false // Not implemented yet
+}
+
+// SupportsHotPlug returns whether the driver supports hot-plugging devices
+func (d *KVMDriverEnhanced) SupportsHotPlug() bool {
+	return false // Not implemented yet
+}
+
+// SupportsGPUPassthrough returns whether the driver supports GPU passthrough
+func (d *KVMDriverEnhanced) SupportsGPUPassthrough() bool {
+	return false // Not implemented yet
+}
+
+// SupportsSRIOV returns whether the driver supports SR-IOV
+func (d *KVMDriverEnhanced) SupportsSRIOV() bool {
+	return false // Not implemented yet
+}
+
+// SupportsNUMA returns whether the driver supports NUMA configuration
+func (d *KVMDriverEnhanced) SupportsNUMA() bool {
+	return false // Not implemented yet
+}
+
+// GetCapabilities returns the capabilities of the KVM driver
+func (d *KVMDriverEnhanced) GetCapabilities(ctx context.Context) (*HypervisorCapabilities, error) {
+	return &HypervisorCapabilities{
+		Type:                   VMTypeKVM,
+		Version:               "QEMU/KVM",
+		SupportsPause:         d.SupportsPause(),
+		SupportsResume:        d.SupportsResume(),
+		SupportsSnapshot:      d.SupportsSnapshot(),
+		SupportsMigrate:       d.SupportsMigrate(),
+		SupportsLiveMigration: d.SupportsLiveMigration(),
+		SupportsHotPlug:       d.SupportsHotPlug(),
+		SupportsGPUPassthrough: d.SupportsGPUPassthrough(),
+		SupportsSRIOV:         d.SupportsSRIOV(),
+		SupportsNUMA:          d.SupportsNUMA(),
+		MaxVCPUs:              256,
+		MaxMemoryMB:           1024 * 1024, // 1TB
+		SupportedFeatures:     []string{"kvm", "qemu", "x86_64"},
+		HardwareExtensions:    []string{"vmx", "svm"},
+	}, nil
+}
+
+// GetHypervisorInfo returns information about the KVM hypervisor
+func (d *KVMDriverEnhanced) GetHypervisorInfo(ctx context.Context) (*HypervisorInfo, error) {
+	capabilities, err := d.GetCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return &HypervisorInfo{
+		Type:            VMTypeKVM,
+		Version:         "QEMU/KVM",
+		ConnectionURI:   "qemu:///system",
+		Hostname:        "localhost",
+		CPUModel:        "host",
+		CPUCores:        8,  // Default
+		MemoryMB:        8192, // Default 8GB
+		Virtualization:  "KVM",
+		IOMMUEnabled:    false,
+		NUMANodes:       1,
+		GPUDevices:      []GPUDevice{},
+		NetworkDevices:  []NetworkDevice{},
+		StorageDevices:  []StorageDevice{},
+		ActiveVMs:       len(d.vms),
+		Capabilities:    capabilities,
+		Metadata:        map[string]interface{}{
+			"qemu_path": d.qemuBinaryPath,
+			"base_path": d.vmBasePath,
+		},
+	}, nil
+}
+
+// HotPlugDevice hot-plugs a device (not implemented yet)
+func (d *KVMDriverEnhanced) HotPlugDevice(ctx context.Context, vmID string, device *DeviceConfig) error {
+	return fmt.Errorf("hot-plug not implemented for KVM driver")
+}
+
+// HotUnplugDevice hot-unplugs a device (not implemented yet)
+func (d *KVMDriverEnhanced) HotUnplugDevice(ctx context.Context, vmID string, deviceID string) error {
+	return fmt.Errorf("hot-unplug not implemented for KVM driver")
+}
+
+// ConfigureCPUPinning configures CPU pinning (not implemented yet)
+func (d *KVMDriverEnhanced) ConfigureCPUPinning(ctx context.Context, vmID string, pinning *CPUPinningConfig) error {
+	return fmt.Errorf("CPU pinning not implemented for KVM driver")
+}
+
+// ConfigureNUMA configures NUMA topology (not implemented yet)
+func (d *KVMDriverEnhanced) ConfigureNUMA(ctx context.Context, vmID string, topology *NUMATopology) error {
+	return fmt.Errorf("NUMA configuration not implemented for KVM driver")
+}

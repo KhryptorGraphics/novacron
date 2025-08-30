@@ -16,7 +16,7 @@ import (
 	"github.com/containerd/containerd/oci"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	
-	"novacron/backend/core/vm"
+	"github.com/khryptorgraphics/novacron/backend/core/vm"
 )
 
 // KataDriver implements the VM driver interface for Kata Containers

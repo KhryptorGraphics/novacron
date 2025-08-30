@@ -1,6 +1,7 @@
 // This example is currently non-functional due to missing SDK types
 // It demonstrates the intended API design but requires implementation
-// package main
+
+package main
 
 /*
 import (
@@ -13,10 +14,8 @@ import (
 
 	"github.com/khryptorgraphics/novacron/backend/core/vm"
 )
-*/
 
-/*
-Federated Migration Manager Example
+// Federated Migration Manager Example
 
 This Go example demonstrates advanced features of the Enhanced NovaCron Go SDK:
 - Cross-cloud federated migration orchestration
@@ -26,7 +25,6 @@ This Go example demonstrates advanced features of the Enhanced NovaCron Go SDK:
 - Cost-aware migration decisions
 - Batch migration operations with concurrency control
 - Performance monitoring and circuit breaker integration
-*/
 
 // MigrationPlan represents a comprehensive migration plan
 type MigrationPlan struct {

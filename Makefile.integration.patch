@@ -1,0 +1,105 @@
+# Comprehensive Integration Testing Section - Insert after line 154
+
+# ============================================================================
+# Comprehensive Integration Testing
+# ============================================================================
+
+# New comprehensive integration test suite
+test-integration-comprehensive:
+	@echo "Running comprehensive integration test suite..."
+	@$(MAKE) test-integration-setup
+	@echo "Waiting for all services to be ready..."
+	@sleep 30
+	@echo "Running test suites..."
+	@cd tests/integration && $(MAKE) test
+	@$(MAKE) test-integration-teardown
+
+# Individual test suites
+test-integration-vm-lifecycle:
+	@echo "Running VM lifecycle integration tests..."
+	@cd tests/integration && DB_URL="$(DB_TEST_URL)" NOVACRON_API_URL="http://localhost:8090" \
+		go test -v -timeout 30m -run TestVMLifecycleTestSuite
+
+test-integration-auth:
+	@echo "Running authentication integration tests..."
+	@cd tests/integration && DB_URL="$(DB_TEST_URL)" NOVACRON_API_URL="http://localhost:8090" \
+		go test -v -timeout 20m -run TestAuthTestSuite
+
+test-integration-storage:
+	@echo "Running storage integration tests..."
+	@cd tests/integration && DB_URL="$(DB_TEST_URL)" NOVACRON_API_URL="http://localhost:8090" \
+		go test -v -timeout 25m -run TestStorageTestSuite
+
+test-integration-consensus:
+	@echo "Running consensus integration tests..."
+	@cd tests/integration && DB_URL="$(DB_TEST_URL)" NOVACRON_API_URL="http://localhost:8090" \
+		go test -v -timeout 20m -run TestConsensusTestSuite
+
+test-integration-performance:
+	@echo "Running performance integration tests..."
+	@cd tests/integration && DB_URL="$(DB_TEST_URL)" NOVACRON_API_URL="http://localhost:8090" \
+		go test -v -timeout 45m -run TestPerformanceTestSuite
+
+test-integration-e2e:
+	@echo "Running end-to-end integration tests..."
+	@cd tests/integration && \
+		DB_URL="$(DB_TEST_URL)" \
+		NOVACRON_API_URL="http://localhost:8090" \
+		NOVACRON_WS_URL="ws://localhost:8091/ws" \
+		NOVACRON_UI_URL="http://localhost:8092" \
+		go test -v -timeout 60m -run TestE2ETestSuite
+
+# Integration test with coverage
+test-integration-coverage:
+	@echo "Running integration tests with coverage..."
+	@$(MAKE) test-integration-setup
+	@sleep 30
+	@cd tests/integration && \
+		DB_URL="$(DB_TEST_URL)" \
+		NOVACRON_API_URL="http://localhost:8090" \
+		go test -v -timeout 45m -coverprofile=integration-coverage.out ./...
+	@cd tests/integration && go tool cover -html=integration-coverage.out -o integration-coverage.html
+	@echo "Integration test coverage report: tests/integration/integration-coverage.html"
+	@$(MAKE) test-integration-teardown
+
+# Integration test in Docker environment
+test-integration-docker:
+	@echo "Running integration tests in Docker environment..."
+	@docker-compose -f docker-compose.test.yml up -d
+	@echo "Waiting for services to be ready..."
+	@sleep 45
+	@docker run --rm \
+		-v $(PWD):/app \
+		-w /app/tests/integration \
+		--network host \
+		-e DB_URL="postgresql://postgres:postgres@localhost:5433/novacron_test" \
+		-e REDIS_URL="redis://localhost:6380" \
+		-e NOVACRON_API_URL="http://localhost:8090" \
+		-e NOVACRON_WS_URL="ws://localhost:8091/ws" \
+		-e NOVACRON_UI_URL="http://localhost:8092" \
+		golang:1.21 \
+		make test
+	@docker-compose -f docker-compose.test.yml down
+
+# Quick integration smoke tests
+test-integration-smoke:
+	@echo "Running integration smoke tests..."
+	@$(MAKE) test-integration-setup
+	@sleep 20
+	@cd tests/integration && \
+		DB_URL="$(DB_TEST_URL)" \
+		NOVACRON_API_URL="http://localhost:8090" \
+		go test -v -timeout 10m -short ./...
+	@$(MAKE) test-integration-teardown
+
+# Integration test debugging
+test-integration-debug:
+	@echo "Running integration tests with debug output..."
+	@$(MAKE) test-integration-setup
+	@sleep 30
+	@cd tests/integration && \
+		DB_URL="$(DB_TEST_URL)" \
+		NOVACRON_API_URL="http://localhost:8090" \
+		DEBUG_MODE=true \
+		go test -v -timeout 30m ./... -args -debug
+	@$(MAKE) test-integration-teardown
