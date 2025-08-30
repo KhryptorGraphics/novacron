@@ -11,6 +11,88 @@ build:
 	docker-compose build
 
 # ============================================================================
+# Database Management
+# ============================================================================
+
+# Database URL configuration
+DB_URL ?= postgres://postgres:postgres@localhost:5432/novacron?sslmode=disable
+DB_TEST_URL ?= postgres://postgres:postgres@localhost:5432/novacron_test?sslmode=disable
+
+# Run database migrations up
+db-migrate:
+	@echo "Running database migrations..."
+	@cd database && DB_URL="$(DB_URL)" ./scripts/migrate.sh up
+
+# Rollback last migration
+db-rollback:
+	@echo "Rolling back last migration..."
+	@cd database && DB_URL="$(DB_URL)" ./scripts/migrate.sh down
+
+# Create a new migration
+db-migrate-create:
+	@read -p "Enter migration name: " name; \
+	cd database && ./scripts/migrate.sh create $$name
+
+# Show current migration version
+db-version:
+	@cd database && DB_URL="$(DB_URL)" ./scripts/migrate.sh version
+
+# Show migration status
+db-status:
+	@cd database && DB_URL="$(DB_URL)" ./scripts/migrate.sh status
+
+# Seed database with development data
+db-seed:
+	@echo "Seeding database with development data..."
+	@cd database && DB_URL="$(DB_URL)" ./scripts/seed.sh seed
+
+# Clean seed data
+db-clean:
+	@echo "Cleaning seed data..."
+	@cd database && DB_URL="$(DB_URL)" ./scripts/seed.sh clean
+
+# Reset database (drop, migrate, seed)
+db-reset:
+	@echo "Resetting database..."
+	@cd database && DB_URL="$(DB_URL)" ./scripts/migrate.sh drop
+	@$(MAKE) db-migrate
+	@$(MAKE) db-seed
+
+# Setup test database
+db-test-setup:
+	@echo "Setting up test database..."
+	@cd database && DB_URL="$(DB_TEST_URL)" ./scripts/migrate.sh up
+	@cd database && DB_URL="$(DB_TEST_URL)" ./scripts/seed.sh seed
+
+# Clean test database
+db-test-clean:
+	@echo "Cleaning test database..."
+	@cd database && DB_URL="$(DB_TEST_URL)" ./scripts/migrate.sh drop
+
+# Validate migration files
+db-validate:
+	@echo "Validating migration files..."
+	@cd database && ./scripts/migrate.sh validate
+
+# Database console
+db-console:
+	@echo "Opening database console..."
+	@psql "$(DB_URL)"
+
+# Backup database
+db-backup:
+	@echo "Backing up database..."
+	@mkdir -p backups
+	@pg_dump "$(DB_URL)" > backups/novacron_$$(date +%Y%m%d_%H%M%S).sql
+	@echo "Backup saved to backups/novacron_$$(date +%Y%m%d_%H%M%S).sql"
+
+# Restore database from backup
+db-restore:
+	@read -p "Enter backup file path: " file; \
+	echo "Restoring database from $$file..."; \
+	psql "$(DB_URL)" < $$file
+
+# ============================================================================
 # Testing Targets - Core
 # ============================================================================
 

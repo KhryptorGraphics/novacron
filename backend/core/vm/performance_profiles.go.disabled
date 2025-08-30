@@ -1,0 +1,764 @@
+package vm
+
+import (
+	"fmt"
+	"log"
+	"runtime"
+	"sync"
+)
+
+// PerformanceProfile defines optimization settings for different workload types
+type PerformanceProfile struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	CPUConfig   CPUPerformanceConfig   `json:"cpu_config"`
+	MemoryConfig MemoryPerformanceConfig `json:"memory_config"`
+	IOConfig    IOPerformanceConfig    `json:"io_config"`
+	NetworkConfig NetworkPerformanceConfig `json:"network_config"`
+	NUMAConfig  NUMAPerformanceConfig  `json:"numa_config"`
+	Tags        map[string]string      `json:"tags"`
+}
+
+// CPUPerformanceConfig defines CPU optimization settings
+type CPUPerformanceConfig struct {
+	Governor       string            `json:"governor"`        // performance, powersave, ondemand
+	Topology       CPUTopology       `json:"topology"`
+	Affinity       []int            `json:"affinity"`        // CPU cores to bind to
+	IsolatedCores  []int            `json:"isolated_cores"`  // Cores to isolate from host
+	Features       []string         `json:"features"`        // CPU features to enable/disable
+	CachePolicy    string           `json:"cache_policy"`    // cache allocation policy
+	TurboBoost     bool             `json:"turbo_boost"`     // Intel Turbo Boost / AMD Boost
+	HyperThreading bool             `json:"hyperthreading"`  // SMT control
+	Priority       int              `json:"priority"`        // CPU scheduling priority
+}
+
+// CPUTopology defines virtual CPU topology
+type CPUTopology struct {
+	Sockets int `json:"sockets"`
+	Cores   int `json:"cores"`
+	Threads int `json:"threads"`
+}
+
+// MemoryPerformanceConfig defines memory optimization settings
+type MemoryPerformanceConfig struct {
+	HugePages      HugePagesConfig      `json:"huge_pages"`
+	Ballooning     BallooningConfig     `json:"ballooning"`
+	KSM            KSMConfig           `json:"ksm"`           // Kernel Same-page Merging
+	Swappiness     int                 `json:"swappiness"`    // VM swappiness (0-100)
+	DirtyRatio     int                 `json:"dirty_ratio"`   // Dirty page writeback ratio
+	Prefetch       string              `json:"prefetch"`      // Memory prefetch strategy
+	Allocation     string              `json:"allocation"`    // Memory allocation policy
+	Overcommit     OvercommitConfig    `json:"overcommit"`
+}
+
+// HugePagesConfig defines huge pages configuration
+type HugePagesConfig struct {
+	Enabled   bool   `json:"enabled"`
+	Size      string `json:"size"`      // 2MB, 1GB
+	Pages     int    `json:"pages"`     // Number of huge pages
+	PreAlloc  bool   `json:"prealloc"`  // Pre-allocate at VM start
+}
+
+// BallooningConfig defines memory ballooning settings
+type BallooningConfig struct {
+	Enabled    bool `json:"enabled"`
+	Target     int64 `json:"target"`     // Target memory size in MB
+	MinSize    int64 `json:"min_size"`   // Minimum memory size
+	MaxSize    int64 `json:"max_size"`   // Maximum memory size
+	Interval   int   `json:"interval"`   // Ballooning check interval (seconds)
+}
+
+// KSMConfig defines Kernel Same-page Merging settings
+type KSMConfig struct {
+	Enabled       bool `json:"enabled"`
+	ScanInterval  int  `json:"scan_interval"`  // Pages to scan per interval
+	SleepTime     int  `json:"sleep_time"`     // Sleep time between scans (ms)
+	MergePriority int  `json:"merge_priority"` // Priority for page merging
+}
+
+// OvercommitConfig defines memory overcommit settings
+type OvercommitConfig struct {
+	Ratio    float64 `json:"ratio"`    // Overcommit ratio (1.0 = no overcommit)
+	Strategy string  `json:"strategy"` // conservative, moderate, aggressive
+}
+
+// IOPerformanceConfig defines I/O optimization settings
+type IOPerformanceConfig struct {
+	Scheduler     string              `json:"scheduler"`      // I/O scheduler (noop, cfq, deadline)
+	QueueDepth    int                 `json:"queue_depth"`    // I/O queue depth
+	ReadAhead     int                 `json:"read_ahead"`     // Read-ahead size in KB
+	Cache         string              `json:"cache"`          // Cache mode (none, writethrough, writeback)
+	AIO           string              `json:"aio"`           // Async I/O (threads, native)
+	Throttling    IOThrottlingConfig  `json:"throttling"`
+	Multiqueue    bool               `json:"multiqueue"`     // Multi-queue block I/O
+	DiscardMode   string             `json:"discard_mode"`   // Discard/TRIM support
+}
+
+// IOThrottlingConfig defines I/O throttling settings
+type IOThrottlingConfig struct {
+	ReadBPS   int64 `json:"read_bps"`   // Read bytes per second limit
+	WriteBPS  int64 `json:"write_bps"`  // Write bytes per second limit
+	ReadIOPS  int64 `json:"read_iops"`  // Read IOPS limit
+	WriteIOPS int64 `json:"write_iops"` // Write IOPS limit
+}
+
+// NetworkPerformanceConfig defines network optimization settings
+type NetworkPerformanceConfig struct {
+	Driver      string                 `json:"driver"`       // virtio, e1000, vmxnet3
+	Queues      int                   `json:"queues"`       // Multi-queue networking
+	Offload     NetworkOffloadConfig  `json:"offload"`      // Offload features
+	Bandwidth   NetworkBandwidthConfig `json:"bandwidth"`    // Bandwidth limiting
+	Buffer      NetworkBufferConfig   `json:"buffer"`       // Buffer settings
+	Latency     string                `json:"latency"`      // low, normal, high
+	SRIOV       bool                  `json:"sriov"`        // SR-IOV support
+}
+
+// NetworkOffloadConfig defines network offload features
+type NetworkOffloadConfig struct {
+	TCP       bool `json:"tcp"`        // TCP checksum offload
+	UDP       bool `json:"udp"`        // UDP checksum offload
+	GSO       bool `json:"gso"`        // Generic Segmentation Offload
+	TSO       bool `json:"tso"`        // TCP Segmentation Offload
+	LRO       bool `json:"lro"`        // Large Receive Offload
+	RSS       bool `json:"rss"`        // Receive Side Scaling
+}
+
+// NetworkBandwidthConfig defines network bandwidth limits
+type NetworkBandwidthConfig struct {
+	Ingress int64 `json:"ingress"` // Ingress bandwidth in Kbps
+	Egress  int64 `json:"egress"`  // Egress bandwidth in Kbps
+	Burst   int64 `json:"burst"`   // Burst size in KB
+}
+
+// NetworkBufferConfig defines network buffer settings
+type NetworkBufferConfig struct {
+	RxBuffer int `json:"rx_buffer"` // Receive buffer size
+	TxBuffer int `json:"tx_buffer"` // Transmit buffer size
+	RingSize int `json:"ring_size"` // Ring buffer size
+}
+
+// NUMAPerformanceConfig defines NUMA-aware performance settings
+type NUMAPerformanceConfig struct {
+	Enabled       bool              `json:"enabled"`
+	Policy        string           `json:"policy"`         // strict, preferred, interleave
+	NodeBinding   []int            `json:"node_binding"`   // NUMA nodes to bind to
+	MemoryPolicy  string           `json:"memory_policy"`  // bind, preferred, interleave
+	CPUBinding    map[int][]int    `json:"cpu_binding"`    // Node to CPU mapping
+	MemoryBinding map[int]int64    `json:"memory_binding"` // Node to memory mapping (MB)
+	Distance      [][]int          `json:"distance"`       // NUMA distance matrix
+	Balancing     NUMABalancingConfig `json:"balancing"`
+}
+
+// NUMABalancingConfig defines NUMA balancing settings
+type NUMABalancingConfig struct {
+	Enabled         bool `json:"enabled"`
+	ScanDelay       int  `json:"scan_delay"`       // Scan delay in ms
+	ScanPeriod      int  `json:"scan_period"`      // Scan period in ms
+	MigrationCost   int  `json:"migration_cost"`   // Page migration cost
+	FaultThreshold  int  `json:"fault_threshold"`  // Fault threshold for migration
+}
+
+// PerformanceProfileManager manages performance profiles
+type PerformanceProfileManager struct {
+	profiles map[string]*PerformanceProfile
+	numa     *NUMATopology
+	mu       sync.RWMutex
+}
+
+// NewPerformanceProfileManager creates a new performance profile manager
+func NewPerformanceProfileManager() *PerformanceProfileManager {
+	manager := &PerformanceProfileManager{
+		profiles: make(map[string]*PerformanceProfile),
+	}
+	
+	// Initialize with built-in profiles
+	manager.initBuiltinProfiles()
+	
+	// Discover NUMA topology
+	numa, err := DiscoverNUMATopology()
+	if err != nil {
+		log.Printf("Warning: Failed to discover NUMA topology: %v", err)
+	} else {
+		manager.numa = numa
+	}
+	
+	return manager
+}
+
+// initBuiltinProfiles initializes built-in performance profiles
+func (pm *PerformanceProfileManager) initBuiltinProfiles() {
+	// High Performance Profile
+	pm.profiles["high-performance"] = &PerformanceProfile{
+		Name:        "high-performance",
+		Description: "Maximum performance for CPU-intensive workloads",
+		CPUConfig: CPUPerformanceConfig{
+			Governor:       "performance",
+			TurboBoost:     true,
+			HyperThreading: true,
+			Priority:       -10, // High priority
+			CachePolicy:    "exclusive",
+		},
+		MemoryConfig: MemoryPerformanceConfig{
+			HugePages: HugePagesConfig{
+				Enabled:  true,
+				Size:     "2MB",
+				PreAlloc: true,
+			},
+			Ballooning: BallooningConfig{
+				Enabled: false, // Disable for consistent performance
+			},
+			KSM: KSMConfig{
+				Enabled: false, // Disable to avoid overhead
+			},
+			Swappiness: 1, // Minimal swapping
+			DirtyRatio: 5, // Aggressive writeback
+			Prefetch:   "aggressive",
+			Allocation: "strict",
+		},
+		IOConfig: IOPerformanceConfig{
+			Scheduler:   "noop",
+			QueueDepth:  32,
+			ReadAhead:   8192,
+			Cache:       "writeback",
+			AIO:         "native",
+			Multiqueue:  true,
+			DiscardMode: "unmap",
+		},
+		NetworkConfig: NetworkPerformanceConfig{
+			Driver:  "virtio",
+			Queues:  runtime.NumCPU(),
+			Latency: "low",
+			Offload: NetworkOffloadConfig{
+				TCP: true,
+				UDP: true,
+				GSO: true,
+				TSO: true,
+				RSS: true,
+			},
+		},
+		NUMAConfig: NUMAPerformanceConfig{
+			Enabled:      true,
+			Policy:       "strict",
+			MemoryPolicy: "bind",
+		},
+		Tags: map[string]string{
+			"workload":    "compute-intensive",
+			"priority":    "high",
+			"overcommit":  "disabled",
+		},
+	}
+
+	// Balanced Profile
+	pm.profiles["balanced"] = &PerformanceProfile{
+		Name:        "balanced",
+		Description: "Balanced performance and resource efficiency",
+		CPUConfig: CPUPerformanceConfig{
+			Governor:       "ondemand",
+			TurboBoost:     true,
+			HyperThreading: true,
+			Priority:       0,
+			CachePolicy:    "shared",
+		},
+		MemoryConfig: MemoryPerformanceConfig{
+			HugePages: HugePagesConfig{
+				Enabled: false, // Let system decide
+			},
+			Ballooning: BallooningConfig{
+				Enabled:  true,
+				Interval: 30,
+			},
+			KSM: KSMConfig{
+				Enabled:       true,
+				ScanInterval:  1000,
+				SleepTime:     20,
+				MergePriority: 0,
+			},
+			Swappiness: 60, // Default swappiness
+			DirtyRatio: 20,
+			Prefetch:   "moderate",
+			Allocation: "preferred",
+			Overcommit: OvercommitConfig{
+				Ratio:    1.2,
+				Strategy: "moderate",
+			},
+		},
+		IOConfig: IOPerformanceConfig{
+			Scheduler:   "cfq",
+			QueueDepth:  16,
+			ReadAhead:   4096,
+			Cache:       "writethrough",
+			AIO:         "threads",
+			Multiqueue:  false,
+			DiscardMode: "ignore",
+		},
+		NetworkConfig: NetworkPerformanceConfig{
+			Driver:  "virtio",
+			Queues:  2,
+			Latency: "normal",
+			Offload: NetworkOffloadConfig{
+				TCP: true,
+				UDP: true,
+				GSO: true,
+				TSO: false,
+				RSS: false,
+			},
+		},
+		NUMAConfig: NUMAPerformanceConfig{
+			Enabled:      true,
+			Policy:       "preferred",
+			MemoryPolicy: "preferred",
+		},
+		Tags: map[string]string{
+			"workload":   "general",
+			"priority":   "normal",
+			"overcommit": "moderate",
+		},
+	}
+
+	// Power Efficient Profile
+	pm.profiles["power-efficient"] = &PerformanceProfile{
+		Name:        "power-efficient",
+		Description: "Optimized for power savings and resource efficiency",
+		CPUConfig: CPUPerformanceConfig{
+			Governor:       "powersave",
+			TurboBoost:     false,
+			HyperThreading: false, // Reduce power consumption
+			Priority:       10,    // Lower priority
+			CachePolicy:    "shared",
+		},
+		MemoryConfig: MemoryPerformanceConfig{
+			HugePages: HugePagesConfig{
+				Enabled: false,
+			},
+			Ballooning: BallooningConfig{
+				Enabled:  true,
+				Interval: 10, // More aggressive ballooning
+			},
+			KSM: KSMConfig{
+				Enabled:       true,
+				ScanInterval:  2000, // More aggressive KSM
+				SleepTime:     10,
+				MergePriority: 1,
+			},
+			Swappiness: 100, // Aggressive swapping
+			DirtyRatio: 40,  // Less aggressive writeback
+			Prefetch:   "conservative",
+			Allocation: "interleave",
+			Overcommit: OvercommitConfig{
+				Ratio:    2.0,
+				Strategy: "aggressive",
+			},
+		},
+		IOConfig: IOPerformanceConfig{
+			Scheduler:   "deadline",
+			QueueDepth:  8,
+			ReadAhead:   2048,
+			Cache:       "none",
+			AIO:         "threads",
+			Multiqueue:  false,
+			DiscardMode: "unmap",
+		},
+		NetworkConfig: NetworkPerformanceConfig{
+			Driver:  "virtio",
+			Queues:  1,
+			Latency: "high", // Accept higher latency for power savings
+			Offload: NetworkOffloadConfig{
+				TCP: false, // Disable offloads to save power
+				UDP: false,
+				GSO: false,
+				TSO: false,
+				RSS: false,
+			},
+		},
+		NUMAConfig: NUMAPerformanceConfig{
+			Enabled:      false, // Disable for power savings
+			Policy:       "interleave",
+			MemoryPolicy: "interleave",
+		},
+		Tags: map[string]string{
+			"workload":   "background",
+			"priority":   "low",
+			"overcommit": "aggressive",
+			"power":      "efficient",
+		},
+	}
+
+	// Latency Sensitive Profile
+	pm.profiles["latency-sensitive"] = &PerformanceProfile{
+		Name:        "latency-sensitive",
+		Description: "Optimized for low-latency applications",
+		CPUConfig: CPUPerformanceConfig{
+			Governor:       "performance",
+			TurboBoost:     true,
+			HyperThreading: false, // Reduce latency variance
+			Priority:       -20,   // Highest priority
+			CachePolicy:    "exclusive",
+		},
+		MemoryConfig: MemoryPerformanceConfig{
+			HugePages: HugePagesConfig{
+				Enabled:  true,
+				Size:     "1GB", // Larger pages for lower TLB misses
+				PreAlloc: true,
+			},
+			Ballooning: BallooningConfig{
+				Enabled: false, // Disable for consistent latency
+			},
+			KSM: KSMConfig{
+				Enabled: false, // Disable to avoid latency spikes
+			},
+			Swappiness: 0, // No swapping
+			DirtyRatio: 1, // Immediate writeback
+			Prefetch:   "aggressive",
+			Allocation: "strict",
+		},
+		IOConfig: IOPerformanceConfig{
+			Scheduler:   "noop",
+			QueueDepth:  1, // Minimize queuing delay
+			ReadAhead:   512,
+			Cache:       "none", // Direct I/O
+			AIO:         "native",
+			Multiqueue:  true,
+			DiscardMode: "unmap",
+		},
+		NetworkConfig: NetworkPerformanceConfig{
+			Driver:  "virtio",
+			Queues:  1, // Single queue to avoid reordering
+			Latency: "low",
+			Offload: NetworkOffloadConfig{
+				TCP: false, // Disable offloads for consistent latency
+				UDP: false,
+				GSO: false,
+				TSO: false,
+				RSS: false,
+			},
+		},
+		NUMAConfig: NUMAPerformanceConfig{
+			Enabled:      true,
+			Policy:       "strict",
+			MemoryPolicy: "bind",
+			Balancing: NUMABalancingConfig{
+				Enabled: false, // Disable to avoid migration overhead
+			},
+		},
+		Tags: map[string]string{
+			"workload":   "realtime",
+			"priority":   "critical",
+			"overcommit": "disabled",
+			"latency":    "sensitive",
+		},
+	}
+}
+
+// GetProfile retrieves a performance profile by name
+func (pm *PerformanceProfileManager) GetProfile(name string) (*PerformanceProfile, error) {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	
+	profile, exists := pm.profiles[name]
+	if !exists {
+		return nil, fmt.Errorf("performance profile '%s' not found", name)
+	}
+	
+	return profile, nil
+}
+
+// ListProfiles returns all available performance profiles
+func (pm *PerformanceProfileManager) ListProfiles() map[string]*PerformanceProfile {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	
+	profiles := make(map[string]*PerformanceProfile)
+	for name, profile := range pm.profiles {
+		profiles[name] = profile
+	}
+	
+	return profiles
+}
+
+// RegisterProfile registers a custom performance profile
+func (pm *PerformanceProfileManager) RegisterProfile(profile *PerformanceProfile) error {
+	if profile.Name == "" {
+		return fmt.Errorf("profile name cannot be empty")
+	}
+	
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	
+	pm.profiles[profile.Name] = profile
+	log.Printf("Registered performance profile: %s", profile.Name)
+	
+	return nil
+}
+
+// ApplyProfile applies a performance profile to a VM configuration
+func (pm *PerformanceProfileManager) ApplyProfile(vmConfig *VMConfig, profileName string) error {
+	profile, err := pm.GetProfile(profileName)
+	if err != nil {
+		return fmt.Errorf("failed to get profile: %w", err)
+	}
+	
+	log.Printf("Applying performance profile '%s' to VM %s", profileName, vmConfig.Name)
+	
+	// Apply CPU configuration
+	if err := pm.applyCPUConfig(vmConfig, &profile.CPUConfig); err != nil {
+		return fmt.Errorf("failed to apply CPU config: %w", err)
+	}
+	
+	// Apply memory configuration
+	if err := pm.applyMemoryConfig(vmConfig, &profile.MemoryConfig); err != nil {
+		return fmt.Errorf("failed to apply memory config: %w", err)
+	}
+	
+	// Apply NUMA configuration if available
+	if profile.NUMAConfig.Enabled && pm.numa != nil {
+		if err := pm.applyNUMAConfig(vmConfig, &profile.NUMAConfig); err != nil {
+			log.Printf("Warning: Failed to apply NUMA config: %v", err)
+		}
+	}
+	
+	// Store profile reference in VM metadata
+	if vmConfig.Tags == nil {
+		vmConfig.Tags = make(map[string]string)
+	}
+	vmConfig.Tags["performance_profile"] = profileName
+	
+	// Copy profile tags to VM tags
+	for key, value := range profile.Tags {
+		vmConfig.Tags["profile_"+key] = value
+	}
+	
+	return nil
+}
+
+// applyCPUConfig applies CPU performance configuration
+func (pm *PerformanceProfileManager) applyCPUConfig(vmConfig *VMConfig, config *CPUPerformanceConfig) error {
+	// Set CPU topology
+	vmConfig.CPU = config.Topology.Sockets * config.Topology.Cores * config.Topology.Threads
+	
+	// Apply CPU affinity if specified
+	if len(config.Affinity) > 0 {
+		if vmConfig.Tags == nil {
+			vmConfig.Tags = make(map[string]string)
+		}
+		vmConfig.Tags["cpu_affinity"] = fmt.Sprintf("%v", config.Affinity)
+	}
+	
+	// Apply isolated cores
+	if len(config.IsolatedCores) > 0 {
+		vmConfig.Tags["isolated_cores"] = fmt.Sprintf("%v", config.IsolatedCores)
+	}
+	
+	// Store CPU configuration
+	vmConfig.Tags["cpu_governor"] = config.Governor
+	vmConfig.Tags["turbo_boost"] = fmt.Sprintf("%t", config.TurboBoost)
+	vmConfig.Tags["hyperthreading"] = fmt.Sprintf("%t", config.HyperThreading)
+	vmConfig.Tags["cpu_priority"] = fmt.Sprintf("%d", config.Priority)
+	vmConfig.Tags["cache_policy"] = config.CachePolicy
+	
+	return nil
+}
+
+// applyMemoryConfig applies memory performance configuration
+func (pm *PerformanceProfileManager) applyMemoryConfig(vmConfig *VMConfig, config *MemoryPerformanceConfig) error {
+	// Apply huge pages configuration
+	if config.HugePages.Enabled {
+		vmConfig.Tags["hugepages"] = "enabled"
+		vmConfig.Tags["hugepage_size"] = config.HugePages.Size
+		vmConfig.Tags["hugepage_prealloc"] = fmt.Sprintf("%t", config.HugePages.PreAlloc)
+	}
+	
+	// Apply ballooning configuration
+	vmConfig.Tags["ballooning"] = fmt.Sprintf("%t", config.Ballooning.Enabled)
+	if config.Ballooning.Enabled {
+		vmConfig.Tags["balloon_target"] = fmt.Sprintf("%d", config.Ballooning.Target)
+		vmConfig.Tags["balloon_interval"] = fmt.Sprintf("%d", config.Ballooning.Interval)
+	}
+	
+	// Apply KSM configuration
+	vmConfig.Tags["ksm"] = fmt.Sprintf("%t", config.KSM.Enabled)
+	if config.KSM.Enabled {
+		vmConfig.Tags["ksm_scan_interval"] = fmt.Sprintf("%d", config.KSM.ScanInterval)
+		vmConfig.Tags["ksm_sleep_time"] = fmt.Sprintf("%d", config.KSM.SleepTime)
+	}
+	
+	// Store memory configuration
+	vmConfig.Tags["swappiness"] = fmt.Sprintf("%d", config.Swappiness)
+	vmConfig.Tags["dirty_ratio"] = fmt.Sprintf("%d", config.DirtyRatio)
+	vmConfig.Tags["memory_prefetch"] = config.Prefetch
+	vmConfig.Tags["memory_allocation"] = config.Allocation
+	vmConfig.Tags["overcommit_ratio"] = fmt.Sprintf("%.2f", config.Overcommit.Ratio)
+	vmConfig.Tags["overcommit_strategy"] = config.Overcommit.Strategy
+	
+	return nil
+}
+
+// applyNUMAConfig applies NUMA performance configuration
+func (pm *PerformanceProfileManager) applyNUMAConfig(vmConfig *VMConfig, config *NUMAPerformanceConfig) error {
+	if pm.numa == nil {
+		return fmt.Errorf("NUMA topology not available")
+	}
+	
+	// Apply NUMA policy
+	vmConfig.Tags["numa_policy"] = config.Policy
+	vmConfig.Tags["numa_memory_policy"] = config.MemoryPolicy
+	
+	// Apply node binding if specified
+	if len(config.NodeBinding) > 0 {
+		// Validate node binding
+		for _, node := range config.NodeBinding {
+			if node >= len(pm.numa.Nodes) {
+				return fmt.Errorf("NUMA node %d does not exist", node)
+			}
+		}
+		vmConfig.Tags["numa_nodes"] = fmt.Sprintf("%v", config.NodeBinding)
+	}
+	
+	// Apply CPU binding
+	if len(config.CPUBinding) > 0 {
+		vmConfig.Tags["numa_cpu_binding"] = fmt.Sprintf("%v", config.CPUBinding)
+	}
+	
+	// Apply memory binding
+	if len(config.MemoryBinding) > 0 {
+		vmConfig.Tags["numa_memory_binding"] = fmt.Sprintf("%v", config.MemoryBinding)
+	}
+	
+	// Apply NUMA balancing configuration
+	vmConfig.Tags["numa_balancing"] = fmt.Sprintf("%t", config.Balancing.Enabled)
+	if config.Balancing.Enabled {
+		vmConfig.Tags["numa_scan_delay"] = fmt.Sprintf("%d", config.Balancing.ScanDelay)
+		vmConfig.Tags["numa_scan_period"] = fmt.Sprintf("%d", config.Balancing.ScanPeriod)
+	}
+	
+	return nil
+}
+
+// OptimizeForWorkload automatically selects and applies the best profile for a workload type
+func (pm *PerformanceProfileManager) OptimizeForWorkload(vmConfig *VMConfig, workloadType string) error {
+	var profileName string
+	
+	switch workloadType {
+	case "compute", "cpu-intensive", "hpc":
+		profileName = "high-performance"
+	case "database", "memory-intensive":
+		profileName = "high-performance"
+	case "web", "application", "general":
+		profileName = "balanced"
+	case "background", "batch", "development":
+		profileName = "power-efficient"
+	case "realtime", "gaming", "trading":
+		profileName = "latency-sensitive"
+	default:
+		profileName = "balanced"
+		log.Printf("Unknown workload type '%s', using balanced profile", workloadType)
+	}
+	
+	return pm.ApplyProfile(vmConfig, profileName)
+}
+
+// GetNUMARecommendations provides NUMA placement recommendations for a VM
+func (pm *PerformanceProfileManager) GetNUMARecommendations(vmConfig *VMConfig) (*NUMARecommendation, error) {
+	if pm.numa == nil {
+		return nil, fmt.Errorf("NUMA topology not available")
+	}
+	
+	recommendation := &NUMARecommendation{
+		VMConfig: vmConfig,
+		Topology: pm.numa,
+	}
+	
+	// Calculate optimal NUMA placement
+	if err := pm.calculateNUMAPlacement(recommendation); err != nil {
+		return nil, fmt.Errorf("failed to calculate NUMA placement: %w", err)
+	}
+	
+	return recommendation, nil
+}
+
+// NUMARecommendation contains NUMA placement recommendations
+type NUMARecommendation struct {
+	VMConfig           *VMConfig      `json:"vm_config"`
+	Topology          *NUMATopology  `json:"topology"`
+	RecommendedNodes  []int          `json:"recommended_nodes"`
+	CPUAllocation     map[int][]int  `json:"cpu_allocation"`    // Node -> CPU list
+	MemoryAllocation  map[int]int64  `json:"memory_allocation"` // Node -> Memory (MB)
+	LocalityScore     float64        `json:"locality_score"`    // 0.0-1.0
+	Rationale         string         `json:"rationale"`
+}
+
+// calculateNUMAPlacement calculates optimal NUMA node placement
+func (pm *PerformanceProfileManager) calculateNUMAPlacement(rec *NUMARecommendation) error {
+	vmConfig := rec.VMConfig
+	topology := rec.Topology
+	
+	// Simple placement algorithm - prefer single node if possible
+	requiredMemory := vmConfig.Memory
+	requiredCPUs := vmConfig.CPU
+	
+	// Try to fit VM on a single NUMA node
+	for i, node := range topology.Nodes {
+		if node.Memory >= requiredMemory && len(node.CPUs) >= requiredCPUs {
+			rec.RecommendedNodes = []int{i}
+			rec.CPUAllocation = map[int][]int{
+				i: node.CPUs[:requiredCPUs],
+			}
+			rec.MemoryAllocation = map[int]int64{
+				i: requiredMemory,
+			}
+			rec.LocalityScore = 1.0
+			rec.Rationale = fmt.Sprintf("VM fits entirely on NUMA node %d for optimal locality", i)
+			return nil
+		}
+	}
+	
+	// If single node doesn't work, try dual-node placement
+	if len(topology.Nodes) >= 2 {
+		memoryPerNode := requiredMemory / 2
+		cpusPerNode := requiredCPUs / 2
+		
+		bestNodes := []int{0, 1}
+		bestDistance := topology.Distance[0][1]
+		
+		// Find two nodes with minimum distance
+		for i := 0; i < len(topology.Nodes); i++ {
+			for j := i + 1; j < len(topology.Nodes); j++ {
+				distance := topology.Distance[i][j]
+				if distance < bestDistance &&
+					topology.Nodes[i].Memory >= memoryPerNode && len(topology.Nodes[i].CPUs) >= cpusPerNode &&
+					topology.Nodes[j].Memory >= memoryPerNode && len(topology.Nodes[j].CPUs) >= cpusPerNode {
+					bestNodes = []int{i, j}
+					bestDistance = distance
+				}
+			}
+		}
+		
+		rec.RecommendedNodes = bestNodes
+		rec.CPUAllocation = map[int][]int{
+			bestNodes[0]: topology.Nodes[bestNodes[0]].CPUs[:cpusPerNode],
+			bestNodes[1]: topology.Nodes[bestNodes[1]].CPUs[:cpusPerNode],
+		}
+		rec.MemoryAllocation = map[int]int64{
+			bestNodes[0]: memoryPerNode,
+			bestNodes[1]: memoryPerNode,
+		}
+		rec.LocalityScore = 1.0 / float64(bestDistance)
+		rec.Rationale = fmt.Sprintf("VM split across NUMA nodes %v with distance %d for best locality", bestNodes, bestDistance)
+		return nil
+	}
+	
+	// Fallback: use all available nodes
+	rec.RecommendedNodes = make([]int, len(topology.Nodes))
+	rec.CPUAllocation = make(map[int][]int)
+	rec.MemoryAllocation = make(map[int]int64)
+	
+	for i, node := range topology.Nodes {
+		rec.RecommendedNodes[i] = i
+		rec.CPUAllocation[i] = node.CPUs
+		rec.MemoryAllocation[i] = node.Memory
+	}
+	
+	rec.LocalityScore = 0.5 // Medium locality
+	rec.Rationale = "VM distributed across all NUMA nodes due to resource constraints"
+	
+	return nil
+}

@@ -39,12 +39,10 @@ FROM python:3.12-slim
 # Set working directory
 WORKDIR /app
 
-# Install runtime dependencies for Python 3.12
+# Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     wget \
-    python3.12-dev \
-    python3.12-venv \
     && rm -rf /var/lib/apt/lists/*
 
 # Create novacron user

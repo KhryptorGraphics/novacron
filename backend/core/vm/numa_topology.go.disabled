@@ -1,0 +1,587 @@
+package vm
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+)
+
+// NUMATopology and NUMANode types are defined in vm_types_minimal.go
+// This file contains the implementation methods for NUMA topology management
+
+// HugePagesNodeConfig represents huge pages configuration for a NUMA node
+type HugePagesNodeConfig struct {
+	Size2MB   *HugePagesInfo `json:"size_2mb,omitempty"`
+	Size1GB   *HugePagesInfo `json:"size_1gb,omitempty"`
+	TotalFree int64         `json:"total_free"`
+	TotalUsed int64         `json:"total_used"`
+}
+
+// HugePagesInfo contains huge pages information
+type HugePagesInfo struct {
+	Total     int64 `json:"total"`
+	Free      int64 `json:"free"`
+	Reserved  int64 `json:"reserved"`
+	Surplus   int64 `json:"surplus"`
+}
+
+// NUMAManager manages NUMA topology and operations
+type NUMAManager struct {
+	topology *NUMATopology
+	sysfsPath string
+	mu       sync.RWMutex
+}
+
+// NewNUMAManager creates a new NUMA manager
+func NewNUMAManager() *NUMAManager {
+	return &NUMAManager{
+		sysfsPath: "/sys/devices/system/node",
+	}
+}
+
+// DiscoverNUMATopology discovers the system NUMA topology
+func DiscoverNUMATopology() (*NUMATopology, error) {
+	manager := NewNUMAManager()
+	if err := manager.DiscoverTopology(); err != nil {
+		return nil, err
+	}
+	return manager.topology, nil
+}
+
+// DiscoverTopology discovers NUMA topology from sysfs
+func (nm *NUMAManager) DiscoverTopology() error {
+	nm.mu.Lock()
+	defer nm.mu.Unlock()
+	
+	topology := &NUMATopology{
+		Nodes: make([]NUMANode, 0),
+	}
+	
+	// Check if NUMA is available
+	if _, err := os.Stat(nm.sysfsPath); os.IsNotExist(err) {
+		// No NUMA support, create single node
+		node, err := nm.createSingleNode()
+		if err != nil {
+			return fmt.Errorf("failed to create single node: %w", err)
+		}
+		topology.Nodes = append(topology.Nodes, *node)
+		topology.Distance = [][]int{{0}}
+		nm.topology = topology
+		return nil
+	}
+	
+	// Discover NUMA nodes
+	nodeFiles, err := filepath.Glob(filepath.Join(nm.sysfsPath, "node*"))
+	if err != nil {
+		return fmt.Errorf("failed to glob node files: %w", err)
+	}
+	
+	for _, nodeFile := range nodeFiles {
+		node, err := nm.parseNUMANode(nodeFile)
+		if err != nil {
+			return fmt.Errorf("failed to parse NUMA node %s: %w", nodeFile, err)
+		}
+		topology.Nodes = append(topology.Nodes, *node)
+	}
+	
+	// Build distance matrix
+	if err := nm.buildDistanceMatrix(topology); err != nil {
+		return fmt.Errorf("failed to build distance matrix: %w", err)
+	}
+	
+	// Discover huge pages configuration
+	if err := nm.discoverHugePages(topology); err != nil {
+		// Log warning but don't fail
+		fmt.Printf("Warning: Failed to discover huge pages configuration: %v\n", err)
+	}
+	
+	nm.topology = topology
+	return nil
+}
+
+// parseNUMANode parses a single NUMA node from sysfs
+func (nm *NUMAManager) parseNUMANode(nodePath string) (*NUMANode, error) {
+	// Extract node ID from path
+	nodeIDStr := strings.TrimPrefix(filepath.Base(nodePath), "node")
+	nodeID, err := strconv.Atoi(nodeIDStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse node ID: %w", err)
+	}
+	
+	node := &NUMANode{
+		ID:       nodeID,
+		Distance: make(map[int]int),
+	}
+	
+	// Parse CPUs
+	cpusFile := filepath.Join(nodePath, "cpulist")
+	if cpus, err := nm.parseCPUList(cpusFile); err == nil {
+		node.CPUs = cpus
+	} else {
+		return nil, fmt.Errorf("failed to parse CPU list: %w", err)
+	}
+	
+	// Parse memory information
+	meminfoFile := filepath.Join(nodePath, "meminfo")
+	if memory, available, err := nm.parseMemInfo(meminfoFile); err == nil {
+		node.Memory = memory
+		node.Available = available
+	} else {
+		return nil, fmt.Errorf("failed to parse memory info: %w", err)
+	}
+	
+	return node, nil
+}
+
+// parseCPUList parses CPU list from cpulist file
+func (nm *NUMAManager) parseCPUList(cpuListFile string) ([]int, error) {
+	content, err := os.ReadFile(cpuListFile)
+	if err != nil {
+		return nil, err
+	}
+	
+	cpuListStr := strings.TrimSpace(string(content))
+	if cpuListStr == "" {
+		return []int{}, nil
+	}
+	
+	var cpus []int
+	parts := strings.Split(cpuListStr, ",")
+	
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if strings.Contains(part, "-") {
+			// Range like "0-3"
+			rangeParts := strings.Split(part, "-")
+			if len(rangeParts) != 2 {
+				continue
+			}
+			start, err1 := strconv.Atoi(rangeParts[0])
+			end, err2 := strconv.Atoi(rangeParts[1])
+			if err1 != nil || err2 != nil {
+				continue
+			}
+			for i := start; i <= end; i++ {
+				cpus = append(cpus, i)
+			}
+		} else {
+			// Single CPU
+			if cpu, err := strconv.Atoi(part); err == nil {
+				cpus = append(cpus, cpu)
+			}
+		}
+	}
+	
+	return cpus, nil
+}
+
+// parseMemInfo parses memory information from meminfo file
+func (nm *NUMAManager) parseMemInfo(meminfoFile string) (int64, int64, error) {
+	file, err := os.Open(meminfoFile)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer file.Close()
+	
+	var totalMemory, availableMemory int64
+	
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "Node") && strings.Contains(line, "MemTotal:") {
+			parts := strings.Fields(line)
+			if len(parts) >= 4 {
+				if mem, err := strconv.ParseInt(parts[3], 10, 64); err == nil {
+					totalMemory = mem / 1024 // Convert from KB to MB
+				}
+			}
+		} else if strings.HasPrefix(line, "Node") && strings.Contains(line, "MemFree:") {
+			parts := strings.Fields(line)
+			if len(parts) >= 4 {
+				if mem, err := strconv.ParseInt(parts[3], 10, 64); err == nil {
+					availableMemory = mem / 1024 // Convert from KB to MB
+				}
+			}
+		}
+	}
+	
+	return totalMemory, availableMemory, scanner.Err()
+}
+
+// buildDistanceMatrix builds the NUMA distance matrix
+func (nm *NUMAManager) buildDistanceMatrix(topology *NUMATopology) error {
+	nodeCount := len(topology.Nodes)
+	topology.Distance = make([][]int, nodeCount)
+	
+	for i := range topology.Distance {
+		topology.Distance[i] = make([]int, nodeCount)
+	}
+	
+	for i, node := range topology.Nodes {
+		distanceFile := filepath.Join(nm.sysfsPath, fmt.Sprintf("node%d", node.ID), "distance")
+		distances, err := nm.parseDistanceFile(distanceFile)
+		if err != nil {
+			// Fallback: use default distances
+			for j := range topology.Distance[i] {
+				if i == j {
+					topology.Distance[i][j] = 10 // Self distance
+				} else {
+					topology.Distance[i][j] = 20 // Inter-node distance
+				}
+			}
+			continue
+		}
+		
+		// Map distances to topology matrix
+		for j, distance := range distances {
+			if j < nodeCount {
+				topology.Distance[i][j] = distance
+				topology.Nodes[i].Distance[j] = distance
+			}
+		}
+	}
+	
+	return nil
+}
+
+// parseDistanceFile parses NUMA distance file
+func (nm *NUMAManager) parseDistanceFile(distanceFile string) ([]int, error) {
+	content, err := os.ReadFile(distanceFile)
+	if err != nil {
+		return nil, err
+	}
+	
+	distanceStr := strings.TrimSpace(string(content))
+	distanceParts := strings.Fields(distanceStr)
+	
+	distances := make([]int, len(distanceParts))
+	for i, part := range distanceParts {
+		if distance, err := strconv.Atoi(part); err == nil {
+			distances[i] = distance
+		} else {
+			distances[i] = 20 // Default distance
+		}
+	}
+	
+	return distances, nil
+}
+
+// discoverHugePages discovers huge pages configuration for each node
+func (nm *NUMAManager) discoverHugePages(topology *NUMATopology) error {
+	for _, node := range topology.Nodes {
+		hugepagesPath := filepath.Join(nm.sysfsPath, fmt.Sprintf("node%d", node.ID), "hugepages")
+		
+		config := &HugePagesNodeConfig{}
+		
+		// Check for 2MB huge pages
+		if info, err := nm.parseHugePagesInfo(filepath.Join(hugepagesPath, "hugepages-2048kB")); err == nil {
+			config.Size2MB = info
+		}
+		
+		// Check for 1GB huge pages
+		if info, err := nm.parseHugePagesInfo(filepath.Join(hugepagesPath, "hugepages-1048576kB")); err == nil {
+			config.Size1GB = info
+		}
+		
+		// Calculate totals
+		if config.Size2MB != nil {
+			config.TotalFree += config.Size2MB.Free * 2 // 2MB pages
+			config.TotalUsed += (config.Size2MB.Total - config.Size2MB.Free) * 2
+		}
+		if config.Size1GB != nil {
+			config.TotalFree += config.Size1GB.Free * 1024 // 1GB pages
+			config.TotalUsed += (config.Size1GB.Total - config.Size1GB.Free) * 1024
+		}
+		
+		node.HugePagesConfig = config
+	}
+	
+	return nil
+}
+
+// parseHugePagesInfo parses huge pages information from sysfs
+func (nm *NUMAManager) parseHugePagesInfo(hugepagesPath string) (*HugePagesInfo, error) {
+	if _, err := os.Stat(hugepagesPath); os.IsNotExist(err) {
+		return nil, err
+	}
+	
+	info := &HugePagesInfo{}
+	
+	// Parse nr_hugepages (total)
+	if content, err := os.ReadFile(filepath.Join(hugepagesPath, "nr_hugepages")); err == nil {
+		if total, err := strconv.ParseInt(strings.TrimSpace(string(content)), 10, 64); err == nil {
+			info.Total = total
+		}
+	}
+	
+	// Parse free_hugepages
+	if content, err := os.ReadFile(filepath.Join(hugepagesPath, "free_hugepages")); err == nil {
+		if free, err := strconv.ParseInt(strings.TrimSpace(string(content)), 10, 64); err == nil {
+			info.Free = free
+		}
+	}
+	
+	// Parse resv_hugepages (reserved)
+	if content, err := os.ReadFile(filepath.Join(hugepagesPath, "resv_hugepages")); err == nil {
+		if reserved, err := strconv.ParseInt(strings.TrimSpace(string(content)), 10, 64); err == nil {
+			info.Reserved = reserved
+		}
+	}
+	
+	// Parse surplus_hugepages
+	if content, err := os.ReadFile(filepath.Join(hugepagesPath, "surplus_hugepages")); err == nil {
+		if surplus, err := strconv.ParseInt(strings.TrimSpace(string(content)), 10, 64); err == nil {
+			info.Surplus = surplus
+		}
+	}
+	
+	return info, nil
+}
+
+// createSingleNode creates a single NUMA node for non-NUMA systems
+func (nm *NUMAManager) createSingleNode() (*NUMANode, error) {
+	node := &NUMANode{
+		ID:       0,
+		Distance: map[int]int{0: 10},
+	}
+	
+	// Get CPU count from /proc/cpuinfo
+	cpus, err := nm.getCPUCount()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get CPU count: %w", err)
+	}
+	
+	node.CPUs = make([]int, cpus)
+	for i := 0; i < cpus; i++ {
+		node.CPUs[i] = i
+	}
+	
+	// Get memory info from /proc/meminfo
+	totalMemory, availableMemory, err := nm.getSystemMemory()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get system memory: %w", err)
+	}
+	
+	node.Memory = totalMemory
+	node.Available = availableMemory
+	
+	return node, nil
+}
+
+// getCPUCount gets the CPU count from /proc/cpuinfo
+func (nm *NUMAManager) getCPUCount() (int, error) {
+	content, err := os.ReadFile("/proc/cpuinfo")
+	if err != nil {
+		return 0, err
+	}
+	
+	lines := strings.Split(string(content), "\n")
+	cpuCount := 0
+	
+	for _, line := range lines {
+		if strings.HasPrefix(line, "processor") {
+			cpuCount++
+		}
+	}
+	
+	if cpuCount == 0 {
+		return 1, nil // Default to 1 CPU if detection fails
+	}
+	
+	return cpuCount, nil
+}
+
+// getSystemMemory gets system memory from /proc/meminfo
+func (nm *NUMAManager) getSystemMemory() (int64, int64, error) {
+	file, err := os.Open("/proc/meminfo")
+	if err != nil {
+		return 0, 0, err
+	}
+	defer file.Close()
+	
+	var totalMemory, availableMemory int64
+	
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "MemTotal:") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				if mem, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+					totalMemory = mem / 1024 // Convert from KB to MB
+				}
+			}
+		} else if strings.HasPrefix(line, "MemAvailable:") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				if mem, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+					availableMemory = mem / 1024 // Convert from KB to MB
+				}
+			}
+		}
+	}
+	
+	return totalMemory, availableMemory, scanner.Err()
+}
+
+// GetTopology returns the current NUMA topology
+func (nm *NUMAManager) GetTopology() *NUMATopology {
+	nm.mu.RLock()
+	defer nm.mu.RUnlock()
+	return nm.topology
+}
+
+// AllocateMemory attempts to allocate memory on specific NUMA nodes
+func (nm *NUMAManager) AllocateMemory(nodes []int, size int64) error {
+	nm.mu.Lock()
+	defer nm.mu.Unlock()
+	
+	if nm.topology == nil {
+		return fmt.Errorf("NUMA topology not initialized")
+	}
+	
+	// Check if requested nodes exist and have sufficient memory
+	for _, nodeID := range nodes {
+		if nodeID >= len(nm.topology.Nodes) {
+			return fmt.Errorf("NUMA node %d does not exist", nodeID)
+		}
+		
+		node := nm.topology.Nodes[nodeID]
+		if node.Available < size/int64(len(nodes)) {
+			return fmt.Errorf("insufficient memory on NUMA node %d", nodeID)
+		}
+	}
+	
+	// Allocate memory (update available memory)
+	sizePerNode := size / int64(len(nodes))
+	for _, nodeID := range nodes {
+		nm.topology.Nodes[nodeID].Available -= sizePerNode
+	}
+	
+	return nil
+}
+
+// ReleaseMemory releases memory allocation on specific NUMA nodes
+func (nm *NUMAManager) ReleaseMemory(nodes []int, size int64) error {
+	nm.mu.Lock()
+	defer nm.mu.Unlock()
+	
+	if nm.topology == nil {
+		return fmt.Errorf("NUMA topology not initialized")
+	}
+	
+	// Release memory (update available memory)
+	sizePerNode := size / int64(len(nodes))
+	for _, nodeID := range nodes {
+		if nodeID < len(nm.topology.Nodes) {
+			nm.topology.Nodes[nodeID].Available += sizePerNode
+			// Don't exceed total memory
+			if nm.topology.Nodes[nodeID].Available > nm.topology.Nodes[nodeID].Memory {
+				nm.topology.Nodes[nodeID].Available = nm.topology.Nodes[nodeID].Memory
+			}
+		}
+	}
+	
+	return nil
+}
+
+// GetOptimalNodes returns the optimal NUMA nodes for a given memory requirement
+func (nm *NUMAManager) GetOptimalNodes(memoryRequirement int64, cpuRequirement int) ([]int, error) {
+	nm.mu.RLock()
+	defer nm.mu.RUnlock()
+	
+	if nm.topology == nil {
+		return nil, fmt.Errorf("NUMA topology not initialized")
+	}
+	
+	// Try to find a single node that can accommodate the request
+	for i, node := range nm.topology.Nodes {
+		if node.Available >= memoryRequirement && len(node.CPUs) >= cpuRequirement {
+			return []int{i}, nil
+		}
+	}
+	
+	// If single node doesn't work, find minimal set of nodes
+	var selectedNodes []int
+	var totalMemory int64
+	var totalCPUs int
+	
+	// Sort nodes by available memory (descending)
+	nodeIndices := make([]int, len(nm.topology.Nodes))
+	for i := range nodeIndices {
+		nodeIndices[i] = i
+	}
+	
+	// Simple selection: pick nodes until requirements are met
+	for _, nodeID := range nodeIndices {
+		node := nm.topology.Nodes[nodeID]
+		if node.Available > 0 && len(node.CPUs) > 0 {
+			selectedNodes = append(selectedNodes, nodeID)
+			totalMemory += node.Available
+			totalCPUs += len(node.CPUs)
+			
+			if totalMemory >= memoryRequirement && totalCPUs >= cpuRequirement {
+				break
+			}
+		}
+	}
+	
+	if totalMemory < memoryRequirement || totalCPUs < cpuRequirement {
+		return nil, fmt.Errorf("insufficient resources across all NUMA nodes")
+	}
+	
+	return selectedNodes, nil
+}
+
+// RefreshTopology refreshes the NUMA topology information
+func (nm *NUMAManager) RefreshTopology() error {
+	return nm.DiscoverTopology()
+}
+
+// GetNodeDistance returns the distance between two NUMA nodes
+func (nm *NUMAManager) GetNodeDistance(nodeA, nodeB int) (int, error) {
+	nm.mu.RLock()
+	defer nm.mu.RUnlock()
+	
+	if nm.topology == nil {
+		return 0, fmt.Errorf("NUMA topology not initialized")
+	}
+	
+	if nodeA >= len(nm.topology.Nodes) || nodeB >= len(nm.topology.Nodes) {
+		return 0, fmt.Errorf("invalid NUMA node IDs")
+	}
+	
+	if nodeA >= len(nm.topology.Distance) || nodeB >= len(nm.topology.Distance[nodeA]) {
+		return 0, fmt.Errorf("distance information not available")
+	}
+	
+	return nm.topology.Distance[nodeA][nodeB], nil
+}
+
+// ConfigureHugePages configures huge pages for a NUMA node
+func (nm *NUMAManager) ConfigureHugePages(nodeID int, size string, count int64) error {
+	if nm.topology == nil {
+		return fmt.Errorf("NUMA topology not initialized")
+	}
+	
+	if nodeID >= len(nm.topology.Nodes) {
+		return fmt.Errorf("NUMA node %d does not exist", nodeID)
+	}
+	
+	var hugepagesFile string
+	switch size {
+	case "2MB":
+		hugepagesFile = fmt.Sprintf("/sys/devices/system/node/node%d/hugepages/hugepages-2048kB/nr_hugepages", nodeID)
+	case "1GB":
+		hugepagesFile = fmt.Sprintf("/sys/devices/system/node/node%d/hugepages/hugepages-1048576kB/nr_hugepages", nodeID)
+	default:
+		return fmt.Errorf("unsupported huge page size: %s", size)
+	}
+	
+	// Write the count to the hugepages file
+	return os.WriteFile(hugepagesFile, []byte(fmt.Sprintf("%d\n", count)), 0644)
+}

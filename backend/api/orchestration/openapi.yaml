@@ -1,0 +1,1290 @@
+openapi: 3.0.3
+info:
+  title: NovaCron Orchestration API
+  description: |
+    Advanced orchestration API for the NovaCron distributed VM management system.
+    Provides endpoints for placement decisions, auto-scaling, self-healing, and policy management.
+  version: 1.0.0
+  contact:
+    name: NovaCron Development Team
+    email: dev@novacron.io
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8090/api
+    description: Development server
+  - url: https://api.novacron.io
+    description: Production server
+
+paths:
+  # Orchestration Engine
+  /orchestration/status:
+    get:
+      summary: Get orchestration engine status
+      description: Returns the current status and metrics of the orchestration engine
+      tags:
+        - Orchestration Engine
+      responses:
+        '200':
+          description: Orchestration engine status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngineStatus'
+
+  # Placement
+  /orchestration/placement:
+    post:
+      summary: Create placement request
+      description: Request a placement decision for a virtual machine
+      tags:
+        - Placement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlacementRequest'
+      responses:
+        '200':
+          description: Placement decision created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlacementDecision'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /orchestration/placement/{id}:
+    get:
+      summary: Get placement decision
+      description: Retrieve a placement decision by ID
+      tags:
+        - Placement
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Placement decision ID
+      responses:
+        '200':
+          description: Placement decision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlacementDecision'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
+
+  # Auto-scaling
+  /orchestration/autoscaling/status:
+    get:
+      summary: Get auto-scaling status
+      description: Returns the current status of the auto-scaling system
+      tags:
+        - Auto-scaling
+      responses:
+        '200':
+          description: Auto-scaling status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoScalingStatus'
+
+  /orchestration/autoscaling/targets:
+    get:
+      summary: List auto-scaling targets
+      description: Returns all auto-scaling targets
+      tags:
+        - Auto-scaling
+      responses:
+        '200':
+          description: List of auto-scaling targets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  targets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AutoScalingTarget'
+                  count:
+                    type: integer
+    post:
+      summary: Create auto-scaling target
+      description: Register a new target for auto-scaling
+      tags:
+        - Auto-scaling
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutoScalingTarget'
+      responses:
+        '201':
+          description: Auto-scaling target created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoScalingTarget'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /orchestration/autoscaling/targets/{id}:
+    get:
+      summary: Get auto-scaling target
+      description: Retrieve an auto-scaling target by ID
+      tags:
+        - Auto-scaling
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Target ID
+      responses:
+        '200':
+          description: Auto-scaling target
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoScalingTarget'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      summary: Update auto-scaling target
+      description: Update an existing auto-scaling target
+      tags:
+        - Auto-scaling
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Target ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutoScalingTarget'
+      responses:
+        '200':
+          description: Auto-scaling target updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoScalingTarget'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      summary: Delete auto-scaling target
+      description: Remove an auto-scaling target
+      tags:
+        - Auto-scaling
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Target ID
+      responses:
+        '204':
+          description: Auto-scaling target deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /orchestration/autoscaling/targets/{id}/decision:
+    get:
+      summary: Get scaling decision
+      description: Get the current scaling decision for a target
+      tags:
+        - Auto-scaling
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Target ID
+      responses:
+        '200':
+          description: Scaling decision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScalingDecision'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /orchestration/autoscaling/targets/{id}/prediction:
+    get:
+      summary: Get scaling prediction
+      description: Get resource usage prediction for a target
+      tags:
+        - Auto-scaling
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Target ID
+        - name: horizon
+          in: query
+          schema:
+            type: integer
+            default: 30
+            minimum: 1
+            maximum: 1440
+          description: Prediction horizon in minutes
+      responses:
+        '200':
+          description: Resource prediction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResourcePrediction'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # Healing
+  /orchestration/healing/status:
+    get:
+      summary: Get healing status
+      description: Returns the current status of the self-healing system
+      tags:
+        - Healing
+      responses:
+        '200':
+          description: Healing status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealingStatus'
+
+  /orchestration/healing/targets:
+    get:
+      summary: List healing targets
+      description: Returns all healing targets
+      tags:
+        - Healing
+      responses:
+        '200':
+          description: List of healing targets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  targets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HealingTarget'
+                  count:
+                    type: integer
+    post:
+      summary: Create healing target
+      description: Register a new target for self-healing
+      tags:
+        - Healing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HealingTarget'
+      responses:
+        '201':
+          description: Healing target created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealingTarget'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /orchestration/healing/targets/{id}/health:
+    get:
+      summary: Get target health
+      description: Get the current health status of a target
+      tags:
+        - Healing
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Target ID
+      responses:
+        '200':
+          description: Target health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /orchestration/healing/targets/{id}/heal:
+    post:
+      summary: Trigger healing
+      description: Manually trigger healing for a target
+      tags:
+        - Healing
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Target ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Reason for triggering healing
+              required:
+                - reason
+      responses:
+        '200':
+          description: Healing triggered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealingDecision'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /orchestration/healing/targets/{id}/history:
+    get:
+      summary: Get healing history
+      description: Get the healing history for a target
+      tags:
+        - Healing
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Target ID
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+          description: Maximum number of history entries
+      responses:
+        '200':
+          description: Healing history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  history:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HealingDecision'
+                  count:
+                    type: integer
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # Policies
+  /orchestration/policies:
+    get:
+      summary: List policies
+      description: Returns all orchestration policies
+      tags:
+        - Policies
+      parameters:
+        - name: namespace
+          in: query
+          schema:
+            type: string
+          description: Filter by namespace
+        - name: enabled
+          in: query
+          schema:
+            type: boolean
+          description: Filter by enabled status
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 1000
+          description: Maximum number of policies
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+          description: Number of policies to skip
+      responses:
+        '200':
+          description: List of policies
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  policies:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OrchestrationPolicy'
+                  count:
+                    type: integer
+    post:
+      summary: Create policy
+      description: Create a new orchestration policy
+      tags:
+        - Policies
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrchestrationPolicy'
+      responses:
+        '201':
+          description: Policy created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationPolicy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /orchestration/policies/{id}:
+    get:
+      summary: Get policy
+      description: Retrieve a policy by ID
+      tags:
+        - Policies
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Policy ID
+      responses:
+        '200':
+          description: Policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationPolicy'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      summary: Update policy
+      description: Update an existing policy
+      tags:
+        - Policies
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Policy ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrchestrationPolicy'
+      responses:
+        '200':
+          description: Policy updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationPolicy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      summary: Delete policy
+      description: Delete a policy
+      tags:
+        - Policies
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Policy ID
+      responses:
+        '204':
+          description: Policy deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /orchestration/policies/{id}/evaluate:
+    post:
+      summary: Evaluate policy
+      description: Evaluate a specific policy against a context
+      tags:
+        - Policies
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Policy ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolicyEvaluationContext'
+      responses:
+        '200':
+          description: Policy evaluation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyEvaluationResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /orchestration/policies/evaluate-all:
+    post:
+      summary: Evaluate all policies
+      description: Evaluate all applicable policies against a context
+      tags:
+        - Policies
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolicyEvaluationContext'
+      responses:
+        '200':
+          description: Policy evaluation results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PolicyEvaluationResult'
+                  count:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  schemas:
+    # Common schemas
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+        status:
+          type: integer
+          description: HTTP status code
+        timestamp:
+          type: string
+          format: date-time
+          description: Error timestamp
+        details:
+          type: string
+          description: Additional error details
+      required:
+        - error
+        - status
+        - timestamp
+
+    # Orchestration Engine
+    EngineStatus:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [starting, running, stopping, stopped, error]
+        start_time:
+          type: string
+          format: date-time
+        active_policies:
+          type: integer
+        events_processed:
+          type: integer
+          format: int64
+        metrics:
+          type: object
+          additionalProperties: true
+
+    # Placement
+    PlacementRequest:
+      type: object
+      properties:
+        vm_id:
+          type: string
+        vm_spec:
+          $ref: '#/components/schemas/VMSpec'
+        strategy:
+          $ref: '#/components/schemas/PlacementStrategy'
+        constraints:
+          type: array
+          items:
+            $ref: '#/components/schemas/Constraint'
+      required:
+        - vm_id
+        - vm_spec
+        - strategy
+
+    VMSpec:
+      type: object
+      properties:
+        cpu_cores:
+          type: integer
+        memory_mb:
+          type: integer
+        disk_gb:
+          type: integer
+        network_requirements:
+          type: array
+          items:
+            type: string
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+
+    PlacementStrategy:
+      type: object
+      properties:
+        name:
+          type: string
+          enum: [bin_packing, load_balancing, spread, affinity]
+        parameters:
+          type: object
+          additionalProperties: true
+
+    PlacementDecision:
+      type: object
+      properties:
+        request_id:
+          type: string
+        vm_id:
+          type: string
+        selected_node:
+          type: string
+        score:
+          type: number
+        confidence:
+          type: number
+        explanation:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    Constraint:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [affinity, anti_affinity, resource_limit, network_latency, compliance, cost, availability]
+        enforcement:
+          type: string
+          enum: [hard, soft, preferred]
+        parameters:
+          type: object
+          additionalProperties: true
+        weight:
+          type: number
+
+    # Auto-scaling
+    AutoScalingStatus:
+      type: object
+      properties:
+        running:
+          type: boolean
+        targets_count:
+          type: integer
+        decisions_count:
+          type: integer
+          format: int64
+        predictions_count:
+          type: integer
+          format: int64
+        last_decision_time:
+          type: string
+          format: date-time
+        uptime:
+          type: string
+
+    AutoScalingTarget:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        enabled:
+          type: boolean
+        thresholds:
+          $ref: '#/components/schemas/ScalingThresholds'
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - type
+        - enabled
+
+    ScalingThresholds:
+      type: object
+      properties:
+        cpu_scale_up_threshold:
+          type: number
+        cpu_scale_down_threshold:
+          type: number
+        memory_scale_up_threshold:
+          type: number
+        memory_scale_down_threshold:
+          type: number
+        min_replicas:
+          type: integer
+        max_replicas:
+          type: integer
+        cooldown_period:
+          type: string
+        prediction_weight:
+          type: number
+
+    ScalingDecision:
+      type: object
+      properties:
+        target_id:
+          type: string
+        decision_time:
+          type: string
+          format: date-time
+        action:
+          type: string
+          enum: [scale_up, scale_down, no_action]
+        current_scale:
+          type: integer
+        target_scale:
+          type: integer
+        reason:
+          type: string
+        confidence:
+          type: number
+        cooldown_until:
+          type: string
+          format: date-time
+
+    ResourcePrediction:
+      type: object
+      properties:
+        target_id:
+          type: string
+        prediction_time:
+          type: string
+          format: date-time
+        horizon_minutes:
+          type: integer
+        predicted_cpu:
+          type: number
+        predicted_memory:
+          type: number
+        predicted_load:
+          type: number
+        confidence:
+          type: number
+        trend_direction:
+          type: string
+          enum: [increasing, decreasing, stable, volatile]
+        seasonal_factor:
+          type: number
+        anomaly_score:
+          type: number
+
+    # Healing
+    HealingStatus:
+      type: object
+      properties:
+        running:
+          type: boolean
+        targets_count:
+          type: integer
+        active_healings:
+          type: integer
+        healing_attempts:
+          type: integer
+          format: int64
+        successful_healing:
+          type: integer
+          format: int64
+        failed_healing:
+          type: integer
+          format: int64
+        success_rate:
+          type: number
+        monitoring_interval:
+          type: string
+
+    HealingTarget:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [vm, node, service, cluster]
+        name:
+          type: string
+        enabled:
+          type: boolean
+        health_check_config:
+          $ref: '#/components/schemas/HealthCheckConfig'
+        recovery_config:
+          $ref: '#/components/schemas/RecoveryConfig'
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - type
+        - name
+        - enabled
+
+    HealthCheckConfig:
+      type: object
+      properties:
+        interval:
+          type: string
+        timeout:
+          type: string
+        healthy_threshold:
+          type: integer
+        unhealthy_threshold:
+          type: integer
+        failure_threshold:
+          type: integer
+        check_type:
+          type: string
+          enum: [http, tcp, ping, custom, metrics]
+        check_parameters:
+          type: object
+          additionalProperties: true
+
+    RecoveryConfig:
+      type: object
+      properties:
+        enable_auto_recovery:
+          type: boolean
+        max_recovery_attempts:
+          type: integer
+        recovery_timeout:
+          type: string
+        backoff_strategy:
+          type: string
+          enum: [fixed, exponential, linear]
+        preferred_strategies:
+          type: array
+          items:
+            type: string
+        fallback_strategies:
+          type: array
+          items:
+            type: string
+
+    HealthStatus:
+      type: object
+      properties:
+        target_id:
+          type: string
+        healthy:
+          type: boolean
+        health_score:
+          type: number
+        last_check_time:
+          type: string
+          format: date-time
+        consecutive_failures:
+          type: integer
+        consecutive_success:
+          type: integer
+        uptime_percentage:
+          type: number
+        failure_reason:
+          type: string
+        recovery_status:
+          $ref: '#/components/schemas/RecoveryStatus'
+
+    RecoveryStatus:
+      type: object
+      properties:
+        in_progress:
+          type: boolean
+        current_strategy:
+          type: string
+        attempts:
+          type: integer
+        max_attempts:
+          type: integer
+        last_attempt_time:
+          type: string
+          format: date-time
+        last_attempt_result:
+          type: string
+
+    HealingDecision:
+      type: object
+      properties:
+        id:
+          type: string
+        target_id:
+          type: string
+        decision_time:
+          type: string
+          format: date-time
+        strategy:
+          type: string
+        estimated_time:
+          type: string
+        confidence:
+          type: number
+        reason:
+          type: string
+        status:
+          type: string
+          enum: [pending, executing, successful, failed, cancelled]
+
+    # Policies
+    OrchestrationPolicy:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        version:
+          type: string
+        namespace:
+          type: string
+        enabled:
+          type: boolean
+        priority:
+          type: integer
+        selector:
+          $ref: '#/components/schemas/PolicySelector'
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/PolicyRule'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+      required:
+        - name
+        - enabled
+        - rules
+
+    PolicySelector:
+      type: object
+      properties:
+        match_labels:
+          type: object
+          additionalProperties:
+            type: string
+        match_tags:
+          type: object
+          additionalProperties:
+            type: string
+        resource_types:
+          type: array
+          items:
+            type: string
+            enum: [vm, node, service, cluster, "*"]
+        namespaces:
+          type: array
+          items:
+            type: string
+        cel_expression:
+          type: string
+
+    PolicyRule:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [placement, autoscaling, healing, loadbalance, security, compliance, resource, network, scheduling, custom]
+        priority:
+          type: integer
+        enabled:
+          type: boolean
+        conditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuleCondition'
+        actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuleAction'
+      required:
+        - name
+        - type
+        - enabled
+        - actions
+
+    RuleCondition:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [metric, resource, time, event, label, tag, state, custom, cel]
+        field:
+          type: string
+        operator:
+          type: string
+          enum: [eq, ne, gt, gte, lt, lte, in, not_in, contains, not_contains, matches, not_matches, exists, not_exists]
+        value:
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+        cel_expression:
+          type: string
+
+    RuleAction:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [scale, migrate, restart, stop, start, alert, webhook, schedule, quarantine, optimize, log, email, slack, custom]
+        target:
+          type: string
+        parameters:
+          type: object
+          additionalProperties: true
+        timeout:
+          type: string
+        retries:
+          type: integer
+      required:
+        - type
+
+    PolicyEvaluationContext:
+      type: object
+      properties:
+        request_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        resource_type:
+          type: string
+          enum: [vm, node, service, cluster]
+        resource_id:
+          type: string
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        tags:
+          type: object
+          additionalProperties:
+            type: string
+        metrics:
+          type: object
+          additionalProperties:
+            type: number
+        attributes:
+          type: object
+          additionalProperties: true
+        event_type:
+          type: string
+        event_data:
+          type: object
+          additionalProperties: true
+        namespace:
+          type: string
+        user:
+          type: string
+      required:
+        - resource_type
+        - resource_id
+
+    PolicyEvaluationResult:
+      type: object
+      properties:
+        policy_id:
+          type: string
+        policy_name:
+          type: string
+        matched:
+          type: boolean
+        score:
+          type: number
+        confidence:
+          type: number
+        explanation:
+          type: string
+        evaluated_at:
+          type: string
+          format: date-time
+        duration:
+          type: string
+        actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecommendedAction'
+
+    RecommendedAction:
+      type: object
+      properties:
+        type:
+          type: string
+        priority:
+          type: integer
+        target:
+          type: string
+        parameters:
+          type: object
+          additionalProperties: true
+        confidence:
+          type: number
+        explanation:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotImplemented:
+      description: Not implemented
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Orchestration Engine
+    description: Core orchestration engine operations
+  - name: Placement
+    description: VM placement and scheduling
+  - name: Auto-scaling
+    description: Predictive auto-scaling operations
+  - name: Healing
+    description: Self-healing and failure recovery
+  - name: Policies
+    description: Declarative policy management

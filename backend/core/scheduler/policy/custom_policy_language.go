@@ -7,6 +7,21 @@ import (
 	"time"
 )
 
+// Action represents a policy action that can be executed
+type Action struct {
+	// Type is the action type (e.g., "score", "reject", "modify")
+	Type string
+	
+	// Target is the target of the action
+	Target string
+	
+	// Value is the action value
+	Value interface{}
+	
+	// Description is a human-readable description
+	Description string
+}
+
 // CustomPolicyLanguageParser extends the basic PolicyParser with advanced features
 // for parsing policies written in the custom policy language
 type CustomPolicyLanguageParser struct {

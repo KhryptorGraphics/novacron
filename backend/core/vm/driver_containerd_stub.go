@@ -102,3 +102,58 @@ func (d *ContainerdDriverStub) Snapshot(ctx context.Context, vmID, name string, 
 func (d *ContainerdDriverStub) Migrate(ctx context.Context, vmID, target string, params map[string]string) error {
 	return errors.New("containerd driver not implemented")
 }
+
+// SupportsLiveMigration returns whether the driver supports live migration
+func (d *ContainerdDriverStub) SupportsLiveMigration() bool {
+	return false
+}
+
+// SupportsHotPlug returns whether the driver supports hot-plugging devices
+func (d *ContainerdDriverStub) SupportsHotPlug() bool {
+	return false
+}
+
+// SupportsGPUPassthrough returns whether the driver supports GPU passthrough
+func (d *ContainerdDriverStub) SupportsGPUPassthrough() bool {
+	return false
+}
+
+// SupportsSRIOV returns whether the driver supports SR-IOV
+func (d *ContainerdDriverStub) SupportsSRIOV() bool {
+	return false
+}
+
+// SupportsNUMA returns whether the driver supports NUMA configuration
+func (d *ContainerdDriverStub) SupportsNUMA() bool {
+	return false
+}
+
+// GetCapabilities returns the capabilities of the containerd driver (stub)
+func (d *ContainerdDriverStub) GetCapabilities(ctx context.Context) (*HypervisorCapabilities, error) {
+	return nil, errors.New("containerd driver not implemented")
+}
+
+// GetHypervisorInfo returns information about the containerd runtime (stub)
+func (d *ContainerdDriverStub) GetHypervisorInfo(ctx context.Context) (*HypervisorInfo, error) {
+	return nil, errors.New("containerd driver not implemented")
+}
+
+// HotPlugDevice hot-plugs a device (stub)
+func (d *ContainerdDriverStub) HotPlugDevice(ctx context.Context, vmID string, device *DeviceConfig) error {
+	return errors.New("containerd driver not implemented")
+}
+
+// HotUnplugDevice hot-unplugs a device (stub)
+func (d *ContainerdDriverStub) HotUnplugDevice(ctx context.Context, vmID string, deviceID string) error {
+	return errors.New("containerd driver not implemented")
+}
+
+// ConfigureCPUPinning configures CPU pinning (stub)
+func (d *ContainerdDriverStub) ConfigureCPUPinning(ctx context.Context, vmID string, pinning *CPUPinningConfig) error {
+	return errors.New("containerd driver not implemented")
+}
+
+// ConfigureNUMA configures NUMA topology (stub)
+func (d *ContainerdDriverStub) ConfigureNUMA(ctx context.Context, vmID string, topology *NUMATopology) error {
+	return errors.New("containerd driver not implemented")
+}

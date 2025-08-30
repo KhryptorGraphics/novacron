@@ -1,0 +1,328 @@
+# NovaCron GraphQL Schema
+
+scalar Time
+
+# Enums
+
+enum VMState {
+  STOPPED
+  STARTING
+  RUNNING
+  STOPPING
+  MIGRATING
+  ERROR
+}
+
+enum StorageTier {
+  HOT
+  WARM
+  COLD
+  ARCHIVE
+}
+
+enum NodeState {
+  HEALTHY
+  DEGRADED
+  UNHEALTHY
+  OFFLINE
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+enum MigrationType {
+  COLD
+  WARM
+  LIVE
+}
+
+# Types
+
+type VM {
+  id: ID!
+  name: String!
+  state: VMState!
+  cpu: Int!
+  memory: Int!
+  disk: Int!
+  image: String!
+  host: String!
+  ipAddress: String
+  createdAt: Time!
+  updatedAt: Time!
+  metrics: VMMetrics
+  snapshots: [Snapshot!]
+}
+
+type VMMetrics {
+  cpuUsage: Float!
+  memoryUsage: Float!
+  diskIO: Float!
+  networkIO: Float!
+  timestamp: Time!
+}
+
+type Snapshot {
+  id: ID!
+  vmId: ID!
+  name: String!
+  description: String
+  size: Int!
+  createdAt: Time!
+}
+
+type StorageVolume {
+  id: ID!
+  name: String!
+  size: Int!
+  tier: StorageTier!
+  vmId: ID
+  createdAt: Time!
+  updatedAt: Time!
+  accessPattern: AccessPattern
+}
+
+type AccessPattern {
+  temperature: String!
+  accessRate: Float!
+  lastAccessed: Time!
+  predictedTier: StorageTier!
+}
+
+type StorageTierInfo {
+  tier: StorageTier!
+  capacity: Int!
+  used: Int!
+  available: Int!
+  volumeCount: Int!
+  performance: Float!
+  cost: Float!
+}
+
+type Node {
+  id: ID!
+  address: String!
+  state: NodeState!
+  isLeader: Boolean!
+  cpu: Int!
+  memory: Int!
+  disk: Int!
+  vmCount: Int!
+  metrics: NodeMetrics
+}
+
+type NodeMetrics {
+  cpuUsage: Float!
+  memoryUsage: Float!
+  diskUsage: Float!
+  networkLatency: Float!
+  requestRate: Float!
+  errorRate: Float!
+  timestamp: Time!
+}
+
+type ClusterStatus {
+  healthy: Boolean!
+  totalNodes: Int!
+  healthyNodes: Int!
+  hasQuorum: Boolean!
+  leader: Node
+  lastElection: Time
+}
+
+type Migration {
+  id: ID!
+  vmId: ID!
+  sourceHost: String!
+  targetHost: String!
+  type: MigrationType!
+  status: String!
+  progress: Float!
+  startedAt: Time!
+  completedAt: Time
+  bytesTransferred: Int!
+  totalBytes: Int!
+}
+
+type Alert {
+  id: ID!
+  severity: AlertSeverity!
+  message: String!
+  source: String!
+  timestamp: Time!
+  acknowledged: Boolean!
+  acknowledgedBy: String
+  acknowledgedAt: Time
+}
+
+type Event {
+  id: ID!
+  type: String!
+  message: String!
+  source: String!
+  timestamp: Time!
+  details: String
+}
+
+type SystemMetrics {
+  cpu: CPUMetrics!
+  memory: MemoryMetrics!
+  disk: DiskMetrics!
+  network: NetworkMetrics!
+  timestamp: Time!
+}
+
+type CPUMetrics {
+  usage: Float!
+  cores: Int!
+  loadAvg: [Float!]!
+}
+
+type MemoryMetrics {
+  total: Int!
+  used: Int!
+  free: Int!
+  cached: Int!
+  available: Int!
+}
+
+type DiskMetrics {
+  total: Int!
+  used: Int!
+  free: Int!
+}
+
+type NetworkMetrics {
+  bytesIn: Int!
+  bytesOut: Int!
+  packetsIn: Int!
+  packetsOut: Int!
+}
+
+# Inputs
+
+input CreateVMInput {
+  name: String!
+  cpu: Int!
+  memory: Int!
+  disk: Int!
+  image: String!
+}
+
+input UpdateVMInput {
+  name: String
+  cpu: Int
+  memory: Int
+  disk: Int
+}
+
+input MigrateVMInput {
+  targetHost: String!
+  live: Boolean!
+}
+
+input CreateVolumeInput {
+  name: String!
+  size: Int!
+  tier: StorageTier!
+  vmId: ID
+}
+
+input CreateSnapshotInput {
+  name: String!
+  description: String
+}
+
+input TimeRangeInput {
+  from: Time!
+  to: Time!
+}
+
+input PaginationInput {
+  page: Int
+  pageSize: Int
+}
+
+# Queries
+
+type Query {
+  # VM queries
+  vms(pagination: PaginationInput): [VM!]!
+  vm(id: ID!): VM
+  vmMetrics(id: ID!, range: TimeRangeInput): [VMMetrics!]!
+  
+  # Storage queries
+  volumes(pagination: PaginationInput): [StorageVolume!]!
+  volume(id: ID!): StorageVolume
+  storageTiers: [StorageTierInfo!]!
+  
+  # Cluster queries
+  nodes: [Node!]!
+  node(id: ID!): Node
+  clusterStatus: ClusterStatus!
+  
+  # Migration queries
+  migrations(active: Boolean): [Migration!]!
+  migration(id: ID!): Migration
+  
+  # Monitoring queries
+  systemMetrics(range: TimeRangeInput): [SystemMetrics!]!
+  alerts(severity: AlertSeverity, acknowledged: Boolean): [Alert!]!
+  events(limit: Int): [Event!]!
+}
+
+# Mutations
+
+type Mutation {
+  # VM mutations
+  createVM(input: CreateVMInput!): VM!
+  updateVM(id: ID!, input: UpdateVMInput!): VM!
+  deleteVM(id: ID!): Boolean!
+  startVM(id: ID!): VM!
+  stopVM(id: ID!): VM!
+  restartVM(id: ID!): VM!
+  migrateVM(id: ID!, input: MigrateVMInput!): Migration!
+  createSnapshot(vmId: ID!, input: CreateSnapshotInput!): Snapshot!
+  restoreSnapshot(snapshotId: ID!): VM!
+  
+  # Storage mutations
+  createVolume(input: CreateVolumeInput!): StorageVolume!
+  deleteVolume(id: ID!): Boolean!
+  changeVolumeTier(id: ID!, tier: StorageTier!): StorageVolume!
+  attachVolume(volumeId: ID!, vmId: ID!): StorageVolume!
+  detachVolume(volumeId: ID!): StorageVolume!
+  
+  # Alert mutations
+  acknowledgeAlert(id: ID!): Alert!
+  dismissAlert(id: ID!): Boolean!
+  
+  # Node mutations
+  addNode(address: String!): Node!
+  removeNode(id: ID!): Boolean!
+  drainNode(id: ID!): Boolean!
+}
+
+# Subscriptions
+
+type Subscription {
+  # VM subscriptions
+  vmStateChanged(vmId: ID): VM!
+  vmMetricsUpdated(vmId: ID!): VMMetrics!
+  
+  # Migration subscriptions
+  migrationProgress(migrationId: ID!): Migration!
+  
+  # Alert subscriptions
+  newAlert: Alert!
+  
+  # Event subscriptions
+  systemEvent(type: String): Event!
+  
+  # Metrics subscriptions
+  systemMetricsUpdated: SystemMetrics!
+  nodeMetricsUpdated(nodeId: ID): NodeMetrics!
+}

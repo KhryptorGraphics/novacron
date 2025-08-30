@@ -173,10 +173,10 @@ type CacheEntry struct {
 
 // Performance targets for predictive prefetching
 const (
-	TARGET_PREDICTION_ACCURACY    = 0.85  // 85% accuracy
+	// TARGET_PREDICTION_ACCURACY is defined in vm.go
+	// TARGET_PREDICTION_LATENCY_MS is defined in vm.go
 	TARGET_CACHE_HIT_IMPROVEMENT = 0.3    // 30% improvement in cache hit ratio
 	TARGET_MIGRATION_SPEED_BOOST = 2.0    // 2x migration speed improvement
-	TARGET_PREDICTION_LATENCY_MS = 10     // 10ms max prediction latency
 	TARGET_FALSE_POSITIVE_RATE   = 0.1    // 10% max false positive rate
 )
 

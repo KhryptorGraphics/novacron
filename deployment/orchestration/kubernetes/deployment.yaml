@@ -1,0 +1,307 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orchestration-engine
+  namespace: novacron-orchestration
+  labels:
+    app.kubernetes.io/name: novacron-orchestration
+    app.kubernetes.io/component: orchestration-engine
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: novacron-orchestration
+      app.kubernetes.io/component: orchestration-engine
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: novacron-orchestration
+        app.kubernetes.io/component: orchestration-engine
+        app.kubernetes.io/version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: orchestration-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: orchestration-engine
+        image: novacron/orchestration:1.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: https
+          containerPort: 8443
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        env:
+        - name: ORCHESTRATION_CONFIG_PATH
+          value: /etc/config/orchestration.yaml
+        - name: ML_CONFIG_PATH
+          value: /etc/ml-config/ml-config.json
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: orchestration-secrets
+              key: database_url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: orchestration-secrets
+              key: redis_url
+        - name: NATS_URL
+          valueFrom:
+            secretKeyRef:
+              name: orchestration-secrets
+              key: nats_url
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: orchestration-secrets
+              key: jwt_secret
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /startup
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 30
+        volumeMounts:
+        - name: config
+          mountPath: /etc/config
+          readOnly: true
+        - name: ml-config
+          mountPath: /etc/ml-config
+          readOnly: true
+        - name: ml-models
+          mountPath: /var/lib/novacron/ml-models
+        - name: orchestration-data
+          mountPath: /var/lib/novacron/orchestration
+        - name: logs
+          mountPath: /var/log/novacron
+        - name: tls-certs
+          mountPath: /etc/tls
+          readOnly: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: config
+        configMap:
+          name: orchestration-config
+      - name: ml-config
+        configMap:
+          name: ml-config
+      - name: ml-models
+        persistentVolumeClaim:
+          claimName: ml-models-pvc
+      - name: orchestration-data
+        persistentVolumeClaim:
+          claimName: orchestration-data-pvc
+      - name: logs
+        emptyDir: {}
+      - name: tls-certs
+        secret:
+          secretName: orchestration-tls
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      tolerations:
+      - key: "novacron.io/orchestration"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values:
+                  - orchestration-engine
+              topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: node-role.kubernetes.io/worker
+                operator: Exists
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-training-service
+  namespace: novacron-orchestration
+  labels:
+    app.kubernetes.io/name: novacron-orchestration
+    app.kubernetes.io/component: ml-training
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: novacron-orchestration
+      app.kubernetes.io/component: ml-training
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: novacron-orchestration
+        app.kubernetes.io/component: ml-training
+        app.kubernetes.io/version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: orchestration-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: ml-training
+        image: novacron/orchestration:1.0.0
+        imagePullPolicy: IfNotPresent
+        command: ["./orchestration-service"]
+        args: ["--mode=ml-training"]
+        ports:
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        env:
+        - name: ML_CONFIG_PATH
+          value: /etc/ml-config/ml-config.json
+        - name: MODEL_STORAGE_PATH
+          value: /var/lib/novacron/ml-models
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: orchestration-secrets
+              key: database_url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: orchestration-secrets
+              key: redis_url
+        resources:
+          requests:
+            cpu: 2000m
+            memory: 4Gi
+          limits:
+            cpu: 8000m
+            memory: 16Gi
+            nvidia.com/gpu: 1
+        volumeMounts:
+        - name: ml-config
+          mountPath: /etc/ml-config
+          readOnly: true
+        - name: ml-models
+          mountPath: /var/lib/novacron/ml-models
+        - name: training-data
+          mountPath: /var/lib/novacron/training-data
+        - name: logs
+          mountPath: /var/log/novacron
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: ml-config
+        configMap:
+          name: ml-config
+      - name: ml-models
+        persistentVolumeClaim:
+          claimName: ml-models-pvc
+      - name: training-data
+        persistentVolumeClaim:
+          claimName: training-data-pvc
+      - name: logs
+        emptyDir: {}
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        accelerator: nvidia-tesla-v100
+      tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "novacron.io/ml-training"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"

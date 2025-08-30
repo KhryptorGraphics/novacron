@@ -1,0 +1,18 @@
+{
+  "/_not-found": "app/_not-found.js",
+  "/analytics/page": "app/analytics/page.js",
+  "/dashboard/page": "app/dashboard/page.js",
+  "/monitoring/page": "app/monitoring/page.js",
+  "/page": "app/page.js",
+  "/network/page": "app/network/page.js",
+  "/security/page": "app/security/page.js",
+  "/settings/page": "app/settings/page.js",
+  "/users/page": "app/users/page.js",
+  "/storage/page": "app/storage/page.js",
+  "/vms/page": "app/vms/page.js",
+  "/admin/page": "app/admin/page.js",
+  "/auth/login/page": "app/auth/login/page.js",
+  "/auth/setup-2fa/page": "app/auth/setup-2fa/page.js",
+  "/auth/forgot-password/page": "app/auth/forgot-password/page.js",
+  "/auth/register/page": "app/auth/register/page.js"
+}

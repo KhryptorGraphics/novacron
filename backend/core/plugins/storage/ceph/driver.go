@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/khryptorgraphics/novacron/backend/core/storage"
 )
 
 // CephStorageDriver implements the StorageDriver interface for Ceph storage
@@ -120,7 +122,7 @@ func (d *CephStorageDriver) Shutdown() error {
 }
 
 // CreateVolume creates a new volume
-func (d *CephStorageDriver) CreateVolume(ctx context.Context, name string, sizeGB int) error {
+func (d *CephStorageDriver) CreateVolume(ctx context.Context, name string, sizeBytes int64) error {
 	if !d.initialized {
 		return fmt.Errorf("driver not initialized")
 	}
@@ -161,6 +163,64 @@ func (d *CephStorageDriver) DeleteVolume(ctx context.Context, name string) error
 	return nil
 }
 
+// AttachVolume attaches a volume to a node
+func (d *CephStorageDriver) AttachVolume(ctx context.Context, volumeID, nodeID string) error {
+	if !d.initialized {
+		return fmt.Errorf("driver not initialized")
+	}
+	
+	// For Ceph RBD, this would map the RBD image to the node
+	// Simplified implementation - in reality would use librbd
+	return fmt.Errorf("attach volume not implemented for Ceph driver")
+}
+
+// DetachVolume detaches a volume from a node
+func (d *CephStorageDriver) DetachVolume(ctx context.Context, volumeID, nodeID string) error {
+	if !d.initialized {
+		return fmt.Errorf("driver not initialized")
+	}
+	
+	// For Ceph RBD, this would unmap the RBD image from the node
+	// Simplified implementation - in reality would use librbd
+	return fmt.Errorf("detach volume not implemented for Ceph driver")
+}
+
+// ReadVolume reads data from a volume
+func (d *CephStorageDriver) ReadVolume(ctx context.Context, volumeID string, offset int64, size int) ([]byte, error) {
+	if !d.initialized {
+		return nil, fmt.Errorf("driver not initialized")
+	}
+	
+	// For now, return placeholder data
+	// In a real implementation, this would read from the RBD image
+	data := make([]byte, size)
+	return data, nil
+}
+
+// WriteVolume writes data to a volume
+func (d *CephStorageDriver) WriteVolume(ctx context.Context, volumeID string, offset int64, data []byte) error {
+	if !d.initialized {
+		return fmt.Errorf("driver not initialized")
+	}
+	
+	// For now, this is a no-op
+	// In a real implementation, this would write to the RBD image
+	return nil
+}
+
+// GetCapabilities returns the capabilities of the Ceph driver
+func (d *CephStorageDriver) GetCapabilities() storage.DriverCapabilities {
+	return storage.DriverCapabilities{
+		SupportsSnapshots:     true,
+		SupportsReplication:   true,
+		SupportsEncryption:    true,
+		SupportsCompression:   true,
+		SupportsDeduplication: false, // RBD doesn't natively support dedup
+		MaxVolumeSize:         0,     // Unlimited
+		MinVolumeSize:         1024,  // 1KB minimum
+	}
+}
+
 // ResizeVolume resizes a volume
 func (d *CephStorageDriver) ResizeVolume(ctx context.Context, name string, newSizeGB int) error {
 	if !d.initialized {
@@ -188,7 +248,7 @@ func (d *CephStorageDriver) ResizeVolume(ctx context.Context, name string, newSi
 }
 
 // GetVolumeInfo returns information about a volume
-func (d *CephStorageDriver) GetVolumeInfo(ctx context.Context, name string) (map[string]interface{}, error) {
+func (d *CephStorageDriver) GetVolumeInfo(ctx context.Context, name string) (*storage.VolumeInfo, error) {
 	if !d.initialized {
 		return nil, fmt.Errorf("driver not initialized")
 	}
@@ -217,12 +277,14 @@ func (d *CephStorageDriver) GetVolumeInfo(ctx context.Context, name string) (map
 	// }
 
 	// For now, return placeholder information
-	return map[string]interface{}{
-		"name":       name,
-		"size_bytes": int64(10) * 1024 * 1024 * 1024,
-		"pool":       d.config.DefaultPool,
-		"features":   []string{"layering", "exclusive-lock", "object-map", "fast-diff", "deep-flatten"},
-		"created_at": time.Now().Add(-24 * time.Hour),
+	return &storage.VolumeInfo{
+		ID:           name,
+		Name:         name,
+		Type:         storage.VolumeTypeBlock,
+		State:        storage.VolumeStateAvailable,
+		Size:         int64(10) * 1024 * 1024 * 1024, // 10GB
+		AttachedToVM: "",
+		CreatedAt:    time.Now().Add(-24 * time.Hour),
 	}, nil
 }
 
@@ -288,7 +350,7 @@ func (d *CephStorageDriver) CloneVolume(ctx context.Context, sourceName, destNam
 }
 
 // CreateSnapshot creates a snapshot of a volume
-func (d *CephStorageDriver) CreateSnapshot(ctx context.Context, volumeName, snapshotName string) error {
+func (d *CephStorageDriver) CreateSnapshot(ctx context.Context, volumeID, snapshotID string) error {
 	if !d.initialized {
 		return fmt.Errorf("driver not initialized")
 	}
@@ -314,7 +376,7 @@ func (d *CephStorageDriver) CreateSnapshot(ctx context.Context, volumeName, snap
 }
 
 // DeleteSnapshot deletes a snapshot of a volume
-func (d *CephStorageDriver) DeleteSnapshot(ctx context.Context, volumeName, snapshotName string) error {
+func (d *CephStorageDriver) DeleteSnapshot(ctx context.Context, volumeID, snapshotID string) error {
 	if !d.initialized {
 		return fmt.Errorf("driver not initialized")
 	}
@@ -349,6 +411,17 @@ func (d *CephStorageDriver) DeleteSnapshot(ctx context.Context, volumeName, snap
 	// }
 
 	return nil
+}
+
+// RestoreSnapshot restores a volume from a snapshot
+func (d *CephStorageDriver) RestoreSnapshot(ctx context.Context, volumeID, snapshotID string) error {
+	if !d.initialized {
+		return fmt.Errorf("driver not initialized")
+	}
+	
+	// In a real implementation, this would restore an RBD image from a snapshot
+	// This is a complex operation involving cloning or rolling back
+	return fmt.Errorf("restore snapshot not implemented for Ceph driver")
 }
 
 // ListSnapshots lists all snapshots of a volume

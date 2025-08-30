@@ -77,7 +77,11 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    "jest.setup.js"
+    "jest.setup.js",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/**/*.spec.ts",
+    "src/**/*.spec.tsx"
   ],
   "exclude": [
     "node_modules",
@@ -85,11 +89,7 @@
     "out",
     "dist",
     "cypress",
-    "coverage",
-    "**/*.test.ts",
-    "**/*.test.tsx",
-    "**/*.spec.ts",
-    "**/*.spec.tsx"
+    "coverage"
   ],
   "ts-node": {
     "compilerOptions": {

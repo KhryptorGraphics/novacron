@@ -1,0 +1,695 @@
+package vm
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"testing"
+	"time"
+)
+
+// VMwareIntegrationTest provides comprehensive testing for VMware vSphere integration
+type VMwareIntegrationTest struct {
+	driver         VMDriver
+	config         VSphereConfig
+	hasVSphere     bool
+	testDatacenter string
+	testDatastore  string
+	testNetwork    string
+	testHost       string
+}
+
+// NewVMwareIntegrationTest creates a new VMware integration test suite
+func NewVMwareIntegrationTest(t *testing.T) *VMwareIntegrationTest {
+	test := &VMwareIntegrationTest{}
+
+	// Load vSphere configuration from environment variables
+	test.config = VSphereConfig{
+		URL:        os.Getenv("VSPHERE_URL"),
+		Username:   os.Getenv("VSPHERE_USERNAME"),
+		Password:   os.Getenv("VSPHERE_PASSWORD"),
+		Datacenter: os.Getenv("VSPHERE_DATACENTER"),
+		Datastore:  os.Getenv("VSPHERE_DATASTORE"),
+		Network:    os.Getenv("VSPHERE_NETWORK"),
+		Insecure:   os.Getenv("VSPHERE_INSECURE") == "true",
+	}
+
+	// Set defaults
+	if test.config.Datacenter == "" {
+		test.config.Datacenter = "Datacenter"
+	}
+	if test.config.Datastore == "" {
+		test.config.Datastore = "datastore1"
+	}
+	if test.config.Network == "" {
+		test.config.Network = "VM Network"
+	}
+
+	// Check if vSphere connection is configured
+	if test.config.URL == "" || test.config.Username == "" || test.config.Password == "" {
+		t.Skip("vSphere credentials not configured. Set VSPHERE_URL, VSPHERE_USERNAME, VSPHERE_PASSWORD")
+		return test
+	}
+
+	// Create driver configuration
+	driverConfig := map[string]interface{}{
+		"url":        test.config.URL,
+		"username":   test.config.Username,
+		"password":   test.config.Password,
+		"datacenter": test.config.Datacenter,
+		"datastore":  test.config.Datastore,
+		"network":    test.config.Network,
+		"insecure":   test.config.Insecure,
+	}
+
+	// Initialize vSphere driver
+	driver, err := NewVSphereDriver(driverConfig)
+	if err != nil {
+		t.Logf("Warning: Failed to create vSphere driver: %v", err)
+		return test
+	}
+
+	test.driver = driver
+	test.hasVSphere = true
+
+	return test
+}
+
+// Cleanup performs cleanup of test resources
+func (v *VMwareIntegrationTest) Cleanup() {
+	if v.driver != nil {
+		if closer, ok := v.driver.(interface{ Close() error }); ok {
+			closer.Close()
+		}
+	}
+}
+
+// TestVSphereDriverCreation tests vSphere driver initialization
+func (v *VMwareIntegrationTest) TestVSphereDriverCreation(t *testing.T) {
+	if !v.hasVSphere {
+		t.Skip("vSphere not configured")
+	}
+
+	t.Run("ValidConfiguration", func(t *testing.T) {
+		if v.driver == nil {
+			t.Error("vSphere driver should not be nil")
+		}
+
+		// Test capability checks
+		t.Logf("Pause support: %v", v.driver.SupportsPause())
+		t.Logf("Resume support: %v", v.driver.SupportsResume())
+		t.Logf("Snapshot support: %v", v.driver.SupportsSnapshot())
+		t.Logf("Migration support: %v", v.driver.SupportsMigrate())
+	})
+}
+
+// TestVSphereConnection tests connection to vSphere
+func (v *VMwareIntegrationTest) TestVSphereConnection(t *testing.T) {
+	if !v.hasVSphere || v.driver == nil {
+		t.Skip("vSphere not available")
+	}
+
+	t.Run("ConnectionTest", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Try to list VMs to test connection
+		_, err := v.driver.ListVMs(ctx)
+		if err != nil {
+			t.Errorf("Failed to list VMs (connection test): %v", err)
+		} else {
+			t.Log("Successfully connected to vSphere")
+		}
+	})
+}
+
+// TestVSphereVMLifecycle tests complete VM lifecycle
+func (v *VMwareIntegrationTest) TestVSphereVMLifecycle(t *testing.T) {
+	if !v.hasVSphere || v.driver == nil {
+		t.Skip("vSphere not available")
+	}
+
+	ctx := context.Background()
+	config := VMConfig{
+		ID:         "test-vsphere-vm-lifecycle",
+		Name:       "Test vSphere VM Lifecycle",
+		CPUShares:  2,
+		MemoryMB:   1024,
+		DiskSizeGB: 10,
+		Tags: map[string]string{
+			"test":        "lifecycle",
+			"environment": "test",
+		},
+	}
+
+	t.Run("CreateVM", func(t *testing.T) {
+		vmID, err := v.driver.Create(ctx, config)
+		if err != nil {
+			t.Fatalf("Failed to create vSphere VM: %v", err)
+		}
+
+		// Store VM ID for cleanup
+		config.ID = vmID
+
+		// Verify VM was created
+		status, err := v.driver.GetStatus(ctx, vmID)
+		if err != nil {
+			t.Errorf("Failed to get VM status after creation: %v", err)
+		} else if status != StateCreated && status != StateStopped {
+			t.Logf("VM state after creation: %v", status)
+		}
+
+		// Get VM info
+		info, err := v.driver.GetInfo(ctx, vmID)
+		if err != nil {
+			t.Errorf("Failed to get VM info: %v", err)
+		} else {
+			if info.ID != vmID {
+				t.Errorf("Expected VM ID %s, got %s", vmID, info.ID)
+			}
+			if info.Name != config.Name {
+				t.Errorf("Expected VM name %s, got %s", config.Name, info.Name)
+			}
+			if info.CPUShares != config.CPUShares {
+				t.Errorf("Expected CPU shares %d, got %d", config.CPUShares, info.CPUShares)
+			}
+			if info.MemoryMB != config.MemoryMB {
+				t.Errorf("Expected memory %d MB, got %d MB", config.MemoryMB, info.MemoryMB)
+			}
+		}
+	})
+
+	t.Run("StartVM", func(t *testing.T) {
+		if config.ID == "" {
+			t.Skip("VM not created")
+		}
+
+		if err := v.driver.Start(ctx, config.ID); err != nil {
+			t.Errorf("Failed to start vSphere VM: %v", err)
+		} else {
+			// Wait for VM to be running
+			if err := v.waitForState(ctx, config.ID, StateRunning, 5*time.Minute); err != nil {
+				t.Errorf("VM failed to reach running state: %v", err)
+			}
+		}
+	})
+
+	t.Run("VMMetrics", func(t *testing.T) {
+		if config.ID == "" {
+			t.Skip("VM not created")
+		}
+
+		metrics, err := v.driver.GetMetrics(ctx, config.ID)
+		if err != nil {
+			t.Errorf("Failed to get VM metrics: %v", err)
+		} else if metrics != nil {
+			t.Logf("VM metrics: CPU=%.2f, Memory=%d MB", 
+				metrics.CPUUsage, metrics.MemoryUsage/(1024*1024))
+		}
+	})
+
+	t.Run("StopVM", func(t *testing.T) {
+		if config.ID == "" {
+			t.Skip("VM not created")
+		}
+
+		if err := v.driver.Stop(ctx, config.ID); err != nil {
+			t.Errorf("Failed to stop vSphere VM: %v", err)
+		} else {
+			// Wait for VM to be stopped
+			if err := v.waitForState(ctx, config.ID, StateStopped, 2*time.Minute); err != nil {
+				t.Errorf("VM failed to reach stopped state: %v", err)
+			}
+		}
+	})
+
+	t.Run("DeleteVM", func(t *testing.T) {
+		if config.ID == "" {
+			t.Skip("VM not created")
+		}
+
+		if err := v.driver.Delete(ctx, config.ID); err != nil {
+			t.Errorf("Failed to delete vSphere VM: %v", err)
+		}
+
+		// Verify VM was deleted
+		if _, err := v.driver.GetStatus(ctx, config.ID); err == nil {
+			t.Error("Expected error when getting status of deleted VM")
+		}
+	})
+}
+
+// TestVSpherePauseResume tests VM suspend/resume functionality
+func (v *VMwareIntegrationTest) TestVSpherePauseResume(t *testing.T) {
+	if !v.hasVSphere || v.driver == nil {
+		t.Skip("vSphere not available")
+	}
+
+	if !v.driver.SupportsPause() || !v.driver.SupportsResume() {
+		t.Skip("Driver doesn't support pause/resume")
+	}
+
+	ctx := context.Background()
+	config := VMConfig{
+		ID:         "test-vsphere-vm-pause-resume",
+		Name:       "Test vSphere VM Pause Resume",
+		CPUShares:  1,
+		MemoryMB:   512,
+		DiskSizeGB: 5,
+	}
+
+	t.Run("PauseResumeSequence", func(t *testing.T) {
+		// Create and start VM
+		vmID, err := v.driver.Create(ctx, config)
+		if err != nil {
+			t.Fatalf("Failed to create VM: %v", err)
+		}
+		defer v.driver.Delete(ctx, vmID)
+
+		if err := v.driver.Start(ctx, vmID); err != nil {
+			t.Fatalf("Failed to start VM: %v", err)
+		}
+
+		// Wait for running state
+		if err := v.waitForState(ctx, vmID, StateRunning, 5*time.Minute); err != nil {
+			t.Fatalf("VM failed to reach running state: %v", err)
+		}
+
+		// Suspend VM
+		if err := v.driver.Pause(ctx, vmID); err != nil {
+			t.Errorf("Failed to suspend VM: %v", err)
+		} else {
+			// Wait for suspended state
+			if err := v.waitForState(ctx, vmID, StatePaused, 1*time.Minute); err != nil {
+				t.Errorf("VM failed to reach suspended state: %v", err)
+			}
+		}
+
+		// Resume VM
+		if err := v.driver.Resume(ctx, vmID); err != nil {
+			t.Errorf("Failed to resume VM: %v", err)
+		} else {
+			// Wait for running state
+			if err := v.waitForState(ctx, vmID, StateRunning, 2*time.Minute); err != nil {
+				t.Errorf("VM failed to return to running state: %v", err)
+			}
+		}
+	})
+}
+
+// TestVSphereSnapshot tests snapshot functionality
+func (v *VMwareIntegrationTest) TestVSphereSnapshot(t *testing.T) {
+	if !v.hasVSphere || v.driver == nil {
+		t.Skip("vSphere not available")
+	}
+
+	if !v.driver.SupportsSnapshot() {
+		t.Skip("Driver doesn't support snapshots")
+	}
+
+	ctx := context.Background()
+	config := VMConfig{
+		ID:         "test-vsphere-vm-snapshot",
+		Name:       "Test vSphere VM Snapshot",
+		CPUShares:  1,
+		MemoryMB:   512,
+		DiskSizeGB: 5,
+	}
+
+	t.Run("SnapshotCreation", func(t *testing.T) {
+		// Create VM
+		vmID, err := v.driver.Create(ctx, config)
+		if err != nil {
+			t.Fatalf("Failed to create VM: %v", err)
+		}
+		defer v.driver.Delete(ctx, vmID)
+
+		// Start VM
+		if err := v.driver.Start(ctx, vmID); err != nil {
+			t.Fatalf("Failed to start VM: %v", err)
+		}
+
+		// Wait for running state
+		if err := v.waitForState(ctx, vmID, StateRunning, 5*time.Minute); err != nil {
+			t.Fatalf("VM failed to reach running state: %v", err)
+		}
+
+		// Create snapshot
+		snapshotParams := map[string]string{
+			"description": "Test snapshot created by integration test",
+			"memory":      "true",
+		}
+
+		snapshotID, err := v.driver.Snapshot(ctx, vmID, "test-snapshot", snapshotParams)
+		if err != nil {
+			t.Errorf("Failed to create snapshot: %v", err)
+		} else if snapshotID == "" {
+			t.Error("Snapshot ID should not be empty")
+		} else {
+			t.Logf("Created snapshot: %s", snapshotID)
+		}
+	})
+}
+
+// TestVSphereResourceAllocation tests resource allocation and limits
+func (v *VMwareIntegrationTest) TestVSphereResourceAllocation(t *testing.T) {
+	if !v.hasVSphere || v.driver == nil {
+		t.Skip("vSphere not available")
+	}
+
+	ctx := context.Background()
+
+	t.Run("ResourceConfiguration", func(t *testing.T) {
+		configs := []VMConfig{
+			{
+				ID:         "test-vsphere-small-vm",
+				Name:       "Small vSphere VM",
+				CPUShares:  1,
+				MemoryMB:   256,
+				DiskSizeGB: 5,
+			},
+			{
+				ID:         "test-vsphere-large-vm", 
+				Name:       "Large vSphere VM",
+				CPUShares:  4,
+				MemoryMB:   2048,
+				DiskSizeGB: 20,
+			},
+		}
+
+		var vmIDs []string
+		for _, config := range configs {
+			vmID, err := v.driver.Create(ctx, config)
+			if err != nil {
+				t.Errorf("Failed to create VM %s: %v", config.Name, err)
+				continue
+			}
+			vmIDs = append(vmIDs, vmID)
+
+			// Verify resource allocation
+			info, err := v.driver.GetInfo(ctx, vmID)
+			if err != nil {
+				t.Errorf("Failed to get info for VM %s: %v", vmID, err)
+			} else {
+				if info.CPUShares != config.CPUShares {
+					t.Errorf("Expected CPU shares %d, got %d", config.CPUShares, info.CPUShares)
+				}
+				if info.MemoryMB != config.MemoryMB {
+					t.Errorf("Expected memory %d MB, got %d MB", config.MemoryMB, info.MemoryMB)
+				}
+			}
+		}
+
+		// Cleanup
+		for _, vmID := range vmIDs {
+			v.driver.Delete(ctx, vmID)
+		}
+	})
+}
+
+// TestVSphereMigration tests vMotion functionality
+func (v *VMwareIntegrationTest) TestVSphereMigration(t *testing.T) {
+	if !v.hasVSphere || v.driver == nil {
+		t.Skip("vSphere not available")
+	}
+
+	if !v.driver.SupportsMigrate() {
+		t.Skip("Driver doesn't support migration")
+	}
+
+	// This test requires multiple hosts in the cluster
+	targetHost := os.Getenv("VSPHERE_TARGET_HOST")
+	if targetHost == "" {
+		t.Skip("Target host not configured (set VSPHERE_TARGET_HOST)")
+	}
+
+	ctx := context.Background()
+	config := VMConfig{
+		ID:         "test-vsphere-vm-migration",
+		Name:       "Test vSphere VM Migration",
+		CPUShares:  1,
+		MemoryMB:   512,
+		DiskSizeGB: 5,
+	}
+
+	t.Run("VMotionMigration", func(t *testing.T) {
+		// Create and start VM
+		vmID, err := v.driver.Create(ctx, config)
+		if err != nil {
+			t.Fatalf("Failed to create VM: %v", err)
+		}
+		defer v.driver.Delete(ctx, vmID)
+
+		if err := v.driver.Start(ctx, vmID); err != nil {
+			t.Fatalf("Failed to start VM: %v", err)
+		}
+
+		// Wait for running state
+		if err := v.waitForState(ctx, vmID, StateRunning, 5*time.Minute); err != nil {
+			t.Fatalf("VM failed to reach running state: %v", err)
+		}
+
+		// Migrate VM
+		migrationParams := map[string]string{
+			"priority": "high",
+		}
+
+		if err := v.driver.Migrate(ctx, vmID, targetHost, migrationParams); err != nil {
+			t.Errorf("Failed to migrate VM: %v", err)
+		} else {
+			t.Logf("Successfully migrated VM %s to %s", vmID, targetHost)
+		}
+	})
+}
+
+// TestVSphereErrorHandling tests error scenarios
+func (v *VMwareIntegrationTest) TestVSphereErrorHandling(t *testing.T) {
+	if !v.hasVSphere || v.driver == nil {
+		t.Skip("vSphere not available")
+	}
+
+	ctx := context.Background()
+
+	t.Run("NonExistentVM", func(t *testing.T) {
+		nonExistentID := "non-existent-vsphere-vm"
+
+		if _, err := v.driver.GetStatus(ctx, nonExistentID); err == nil {
+			t.Error("Expected error when getting status of non-existent VM")
+		}
+
+		if err := v.driver.Start(ctx, nonExistentID); err == nil {
+			t.Error("Expected error when starting non-existent VM")
+		}
+
+		if err := v.driver.Stop(ctx, nonExistentID); err == nil {
+			t.Error("Expected error when stopping non-existent VM")
+		}
+
+		if err := v.driver.Delete(ctx, nonExistentID); err == nil {
+			t.Error("Expected error when deleting non-existent VM")
+		}
+	})
+
+	t.Run("InvalidConfiguration", func(t *testing.T) {
+		invalidConfig := VMConfig{
+			Name:       "", // Invalid: empty name
+			CPUShares:  0,  // Invalid: zero CPU
+			MemoryMB:   0,  // Invalid: zero memory
+		}
+
+		if _, err := v.driver.Create(ctx, invalidConfig); err == nil {
+			t.Error("Expected error when creating VM with invalid configuration")
+		}
+	})
+}
+
+// TestVSphereListOperations tests VM listing functionality
+func (v *VMwareIntegrationTest) TestVSphereListOperations(t *testing.T) {
+	if !v.hasVSphere || v.driver == nil {
+		t.Skip("vSphere not available")
+	}
+
+	ctx := context.Background()
+
+	t.Run("ListVMs", func(t *testing.T) {
+		// Get initial VM count
+		initialVMs, err := v.driver.ListVMs(ctx)
+		if err != nil {
+			t.Fatalf("Failed to list VMs initially: %v", err)
+		}
+		initialCount := len(initialVMs)
+		t.Logf("Initial VM count: %d", initialCount)
+
+		// Create test VM
+		config := VMConfig{
+			ID:         "test-vsphere-list-vm",
+			Name:       "Test vSphere List VM",
+			CPUShares:  1,
+			MemoryMB:   256,
+			DiskSizeGB: 5,
+		}
+
+		vmID, err := v.driver.Create(ctx, config)
+		if err != nil {
+			t.Fatalf("Failed to create VM: %v", err)
+		}
+		defer v.driver.Delete(ctx, vmID)
+
+		// List VMs again
+		vms, err := v.driver.ListVMs(ctx)
+		if err != nil {
+			t.Errorf("Failed to list VMs: %v", err)
+		} else {
+			newCount := len(vms)
+			t.Logf("VM count after creation: %d", newCount)
+
+			if newCount != initialCount+1 {
+				t.Errorf("Expected %d VMs, got %d", initialCount+1, newCount)
+			}
+
+			// Check if our VM is in the list
+			found := false
+			for _, vm := range vms {
+				if vm.ID == vmID {
+					found = true
+					if vm.Name != config.Name {
+						t.Errorf("Expected VM name %s, got %s", config.Name, vm.Name)
+					}
+					break
+				}
+			}
+
+			if !found {
+				t.Errorf("Created VM %s not found in VM list", vmID)
+			}
+		}
+	})
+}
+
+// TestVSpherePerformanceBenchmarks runs performance benchmarks
+func (v *VMwareIntegrationTest) TestVSpherePerformanceBenchmarks(t *testing.T) {
+	if !v.hasVSphere || v.driver == nil {
+		t.Skip("vSphere not available")
+	}
+
+	ctx := context.Background()
+
+	t.Run("VMCreationBenchmark", func(t *testing.T) {
+		const numVMs = 3 // Keep low to avoid overwhelming vSphere
+		configs := make([]VMConfig, numVMs)
+		
+		for i := 0; i < numVMs; i++ {
+			configs[i] = VMConfig{
+				ID:         fmt.Sprintf("bench-vsphere-vm-%d", i),
+				Name:       fmt.Sprintf("Benchmark vSphere VM %d", i),
+				CPUShares:  1,
+				MemoryMB:   256,
+				DiskSizeGB: 5,
+			}
+		}
+
+		start := time.Now()
+		var vmIDs []string
+
+		for _, config := range configs {
+			vmID, err := v.driver.Create(ctx, config)
+			if err != nil {
+				t.Errorf("Failed to create VM %s: %v", config.Name, err)
+				continue
+			}
+			vmIDs = append(vmIDs, vmID)
+		}
+
+		creationTime := time.Since(start)
+		avgCreationTime := creationTime / time.Duration(len(vmIDs))
+
+		t.Logf("Created %d vSphere VMs in %v (avg: %v per VM)", 
+			len(vmIDs), creationTime, avgCreationTime)
+
+		// Cleanup
+		for _, vmID := range vmIDs {
+			v.driver.Delete(ctx, vmID)
+		}
+	})
+}
+
+// waitForState waits for a VM to reach a specific state within the timeout
+func (v *VMwareIntegrationTest) waitForState(ctx context.Context, vmID string, expectedState State, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		status, err := v.driver.GetStatus(ctx, vmID)
+		if err != nil {
+			return fmt.Errorf("failed to get VM status: %w", err)
+		}
+
+		if status == expectedState {
+			return nil
+		}
+
+		// Check for failed state
+		if status == StateFailed {
+			return fmt.Errorf("VM entered failed state while waiting for %s", expectedState)
+		}
+
+		time.Sleep(5 * time.Second)
+	}
+
+	return fmt.Errorf("timeout waiting for VM to reach state %s", expectedState)
+}
+
+// RunAllVMwareTests executes all VMware integration tests
+func (v *VMwareIntegrationTest) RunAllVMwareTests(t *testing.T) {
+	defer v.Cleanup()
+
+	t.Run("VSphereDriverCreation", v.TestVSphereDriverCreation)
+	t.Run("VSphereConnection", v.TestVSphereConnection)
+	t.Run("VSphereVMLifecycle", v.TestVSphereVMLifecycle)
+	t.Run("VSpherePauseResume", v.TestVSpherePauseResume)
+	t.Run("VSphereSnapshot", v.TestVSphereSnapshot)
+	t.Run("VSphereResourceAllocation", v.TestVSphereResourceAllocation)
+	t.Run("VSphereMigration", v.TestVSphereMigration)
+	t.Run("VSphereErrorHandling", v.TestVSphereErrorHandling)
+	t.Run("VSphereListOperations", v.TestVSphereListOperations)
+	t.Run("VSpherePerformanceBenchmarks", v.TestVSpherePerformanceBenchmarks)
+}
+
+// Integration test entry point
+func TestVMwareIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping VMware integration tests in short mode")
+	}
+
+	vmwareTest := NewVMwareIntegrationTest(t)
+	vmwareTest.RunAllVMwareTests(t)
+}
+
+// Benchmark tests
+func BenchmarkVSphereVMCreation(b *testing.B) {
+	vmwareTest := NewVMwareIntegrationTest(nil)
+	defer vmwareTest.Cleanup()
+
+	if !vmwareTest.hasVSphere || vmwareTest.driver == nil {
+		b.Skip("vSphere not available")
+	}
+
+	ctx := context.Background()
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		config := VMConfig{
+			ID:         fmt.Sprintf("bench-vsphere-vm-%d", i),
+			Name:       fmt.Sprintf("Benchmark vSphere VM %d", i),
+			CPUShares:  1,
+			MemoryMB:   256,
+			DiskSizeGB: 5,
+		}
+
+		vmID, err := vmwareTest.driver.Create(ctx, config)
+		if err != nil {
+			b.Errorf("Failed to create VM: %v", err)
+			continue
+		}
+
+		// Clean up immediately to avoid resource exhaustion
+		vmwareTest.driver.Delete(ctx, vmID)
+	}
+}

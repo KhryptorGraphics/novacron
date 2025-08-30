@@ -13,6 +13,12 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	// Predictive prefetching targets
+	TARGET_PREDICTION_ACCURACY   = 0.85 // 85% accuracy
+	TARGET_PREDICTION_LATENCY_MS = 10   // 10ms max prediction latency
+)
+
 // State represents the current state of a VM
 type State string
 

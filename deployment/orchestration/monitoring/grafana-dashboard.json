@@ -1,0 +1,558 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "NovaCron Orchestration Dashboard",
+    "description": "Comprehensive monitoring dashboard for NovaCron orchestration system",
+    "tags": ["novacron", "orchestration", "ml", "vm-management"],
+    "timezone": "browser",
+    "schemaVersion": 30,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h", "2h", "1d"]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Orchestration Engine Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up{job=\"orchestration-engine\"}",
+            "refId": "A",
+            "legendFormat": "Engine Status"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "type": "value",
+                "value": "0",
+                "text": "DOWN"
+              },
+              {
+                "type": "value", 
+                "value": "1",
+                "text": "UP"
+              }
+            ],
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "red",
+                  "value": 0
+                },
+                {
+                  "color": "green",
+                  "value": 1
+                }
+              ]
+            },
+            "unit": "none"
+          }
+        },
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "Decision Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(orchestration_decisions_total[5m])",
+            "refId": "A",
+            "legendFormat": "Decisions/sec"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "red",
+                  "value": 0
+                },
+                {
+                  "color": "yellow",
+                  "value": 1
+                },
+                {
+                  "color": "green",
+                  "value": 5
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        }
+      },
+      {
+        "id": 3,
+        "title": "Active Policies",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "orchestration_active_policies",
+            "refId": "A",
+            "legendFormat": "Active Policies"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "red",
+                  "value": 0
+                },
+                {
+                  "color": "green",
+                  "value": 1
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 12,
+          "y": 0
+        }
+      },
+      {
+        "id": 4,
+        "title": "ML Model Accuracy",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "avg(ml_model_accuracy)",
+            "refId": "A",
+            "legendFormat": "Average Accuracy"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "min": 0,
+            "max": 1,
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "red",
+                  "value": 0
+                },
+                {
+                  "color": "yellow",
+                  "value": 0.8
+                },
+                {
+                  "color": "green",
+                  "value": 0.9
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 18,
+          "y": 0
+        }
+      },
+      {
+        "id": 5,
+        "title": "Decision Latency",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(orchestration_decision_duration_seconds_bucket[5m]))",
+            "refId": "A",
+            "legendFormat": "p50"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(orchestration_decision_duration_seconds_bucket[5m]))",
+            "refId": "B",
+            "legendFormat": "p95"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(orchestration_decision_duration_seconds_bucket[5m]))",
+            "refId": "C",
+            "legendFormat": "p99"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Seconds",
+            "min": 0
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 4
+        }
+      },
+      {
+        "id": 6,
+        "title": "Decision Types",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "increase(orchestration_decisions_total[1h])",
+            "refId": "A",
+            "legendFormat": "{{ decision_type }}"
+          }
+        ],
+        "options": {
+          "pieType": "pie",
+          "legend": {
+            "displayMode": "list",
+            "placement": "right"
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 4
+        }
+      },
+      {
+        "id": 7,
+        "title": "Resource Utilization",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "process_resident_memory_bytes{job=\"orchestration-engine\"} / (1024*1024*1024)",
+            "refId": "A",
+            "legendFormat": "Memory (GB) - {{ instance }}"
+          },
+          {
+            "expr": "rate(process_cpu_seconds_total{job=\"orchestration-engine\"}[5m]) * 100",
+            "refId": "B",
+            "legendFormat": "CPU (%) - {{ instance }}"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Usage",
+            "min": 0
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 12
+        }
+      },
+      {
+        "id": 8,
+        "title": "ML Model Performance",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "ml_model_accuracy",
+            "refId": "A",
+            "legendFormat": "Accuracy - {{ model_type }}"
+          },
+          {
+            "expr": "ml_model_throughput",
+            "refId": "B",
+            "legendFormat": "Throughput - {{ model_type }}"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Performance",
+            "min": 0,
+            "max": 1
+          },
+          {
+            "label": "Throughput (req/s)",
+            "min": 0
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 12
+        }
+      },
+      {
+        "id": 9,
+        "title": "Scaling Events",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(orchestration_scaling_events_total{action=\"scale_up\"}[5m])",
+            "refId": "A",
+            "legendFormat": "Scale Up"
+          },
+          {
+            "expr": "rate(orchestration_scaling_events_total{action=\"scale_down\"}[5m])",
+            "refId": "B",
+            "legendFormat": "Scale Down"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Events/sec",
+            "min": 0
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 20
+        }
+      },
+      {
+        "id": 10,
+        "title": "Policy Violations",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "increase(orchestration_policy_violations_total[5m])",
+            "refId": "A",
+            "legendFormat": "Violations - {{ policy_id }}"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Violations",
+            "min": 0
+          }
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {
+                "params": [0],
+                "type": "gt"
+              },
+              "operator": {
+                "type": "and"
+              },
+              "query": {
+                "params": ["A", "5m", "now"]
+              },
+              "reducer": {
+                "params": [],
+                "type": "last"
+              },
+              "type": "query"
+            }
+          ],
+          "executionErrorState": "alerting",
+          "for": "2m",
+          "frequency": "30s",
+          "handler": 1,
+          "name": "Policy Violations Alert",
+          "noDataState": "no_data",
+          "notifications": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 20
+        }
+      },
+      {
+        "id": 11,
+        "title": "Error Rates",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(orchestration_decisions_failed_total[5m]) / rate(orchestration_decisions_total[5m])",
+            "refId": "A",
+            "legendFormat": "Decision Error Rate"
+          },
+          {
+            "expr": "rate(orchestration_scaling_failures_total[5m]) / rate(orchestration_scaling_events_total[5m])",
+            "refId": "B",
+            "legendFormat": "Scaling Error Rate"
+          },
+          {
+            "expr": "rate(ml_inference_failures_total[5m]) / rate(ml_inference_total[5m])",
+            "refId": "C",
+            "legendFormat": "ML Inference Error Rate"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Error Rate",
+            "min": 0,
+            "max": 1,
+            "unit": "percentunit"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 28
+        }
+      },
+      {
+        "id": 12,
+        "title": "VM Placement Success Rate",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "rate(orchestration_placement_success_total[5m]) / rate(orchestration_placement_total[5m])",
+            "refId": "A"
+          }
+        ],
+        "valueMaps": [],
+        "mappingTypes": [],
+        "rangeMaps": [],
+        "mappingType": 1,
+        "nullPointMode": "connected",
+        "valueName": "current",
+        "prefixFontSize": "50%",
+        "valueFontSize": "80%",
+        "postfixFontSize": "50%",
+        "thresholds": "0.8,0.9",
+        "colorBackground": true,
+        "colorValue": false,
+        "colors": ["rgba(245, 54, 54, 0.9)", "rgba(237, 129, 40, 0.89)", "rgba(50, 172, 45, 0.97)"],
+        "sparkline": {
+          "show": true,
+          "full": false,
+          "lineColor": "rgb(31, 120, 193)",
+          "fillColor": "rgba(31, 118, 189, 0.18)"
+        },
+        "gauge": {
+          "show": false,
+          "minValue": 0,
+          "maxValue": 1,
+          "thresholdMarkers": true,
+          "thresholdLabels": false
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 36
+        },
+        "format": "percentunit"
+      },
+      {
+        "id": 13,
+        "title": "Top 10 Most Active Policies",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "topk(10, increase(orchestration_policy_executions_total[1h]))",
+            "refId": "A",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "options": {
+          "showHeader": true
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 36
+        },
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "Time": true
+              },
+              "indexByName": {},
+              "renameByName": {
+                "policy_id": "Policy ID",
+                "policy_name": "Policy Name", 
+                "Value": "Executions"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "instance",
+          "type": "query",
+          "query": "label_values(up{job=\"orchestration-engine\"}, instance)",
+          "refresh": 1,
+          "includeAll": true,
+          "allValue": null,
+          "multi": true,
+          "options": [],
+          "current": {
+            "selected": false,
+            "text": "All",
+            "value": "$__all"
+          }
+        },
+        {
+          "name": "model_type",
+          "type": "query", 
+          "query": "label_values(ml_model_accuracy, model_type)",
+          "refresh": 1,
+          "includeAll": true,
+          "allValue": null,
+          "multi": true,
+          "options": [],
+          "current": {
+            "selected": false,
+            "text": "All",
+            "value": "$__all"
+          }
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "datasource": "prometheus",
+          "enable": true,
+          "expr": "changes(process_start_time_seconds{job=\"orchestration-engine\"}[1m])",
+          "iconColor": "blue",
+          "titleFormat": "Deployment"
+        },
+        {
+          "name": "Policy Updates",
+          "datasource": "prometheus", 
+          "enable": true,
+          "expr": "changes(orchestration_policy_last_update_timestamp[1m])",
+          "iconColor": "green",
+          "titleFormat": "Policy Update"
+        }
+      ]
+    }
+  }
+}

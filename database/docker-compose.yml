@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:14-alpine
+    container_name: novacron-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: novacron
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=en_US.utf8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations/000001_init_schema.up.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - novacron-net
+
+  postgres-test:
+    image: postgres:14-alpine
+    container_name: novacron-db-test
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: novacron_test
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=en_US.utf8"
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - novacron-net
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.migrate
+    container_name: novacron-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: "postgres://postgres:postgres@postgres:5432/novacron?sslmode=disable"
+    volumes:
+      - ./migrations:/app/migrations:ro
+      - ./scripts:/app/scripts:ro
+    command: ["./scripts/migrate.sh", "up"]
+    networks:
+      - novacron-net
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: novacron-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@novacron.io
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - novacron-net
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
+    driver: local
+  postgres_test_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  novacron-net:
+    driver: bridge

@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: novacron-orchestration
+  labels:
+    name: novacron-orchestration
+    component: orchestration
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: orchestration
+    app.kubernetes.io/part-of: novacron-platform

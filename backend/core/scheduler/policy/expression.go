@@ -17,6 +17,9 @@ type Expression interface {
 type ExpressionCompiler interface {
 	// Compile compiles a string expression into an Expression object
 	Compile(expr string) (Expression, error)
+	
+	// CompileExpression is an alias for Compile for backward compatibility
+	CompileExpression(expr string) (Expression, error)
 }
 
 // DefaultExpressionCompiler implements a simple expression compiler
@@ -26,6 +29,11 @@ type DefaultExpressionCompiler struct{}
 func (c *DefaultExpressionCompiler) Compile(expr string) (Expression, error) {
 	// For simplicity in this example, we're using the mock implementation
 	return c.CompileMock(expr)
+}
+
+// CompileExpression is an alias for Compile for backward compatibility
+func (c *DefaultExpressionCompiler) CompileExpression(expr string) (Expression, error) {
+	return c.Compile(expr)
 }
 
 // ExpressionEvaluator evaluates policy expressions

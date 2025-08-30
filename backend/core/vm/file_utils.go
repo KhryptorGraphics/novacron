@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 )
 
-// copyFile copies a file from src to dst using simple read/write
-func copyFile(src, dst string) error {
+// copyFileSimple copies a file from src to dst using simple read/write
+func copyFileSimple(src, dst string) error {
 	// Create destination directory if it doesn't exist
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
