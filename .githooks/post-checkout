@@ -1,0 +1,7 @@
+#!/bin/bash
+# Automatically reassemble files after checkout
+if [ -f "scripts/reassemble-files.sh" ] && [ -d ".splits" ]; then
+    echo "📦 Reassembling large files after checkout..."
+    ./scripts/reassemble-files.sh
+    rm -rf .splits
+fi

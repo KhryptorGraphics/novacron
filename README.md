@@ -6,14 +6,34 @@ NovaCron is a sophisticated distributed virtual machine management platform with
 
 ## 🚀 Quick Start
 
-### Important: Large Files
-This repository contains split large files that need to be reassembled after cloning:
+### Step 1: Clone and Setup (One Command!)
 
 ```bash
-# After cloning, run:
-./scripts/post-clone-setup.sh
+git clone https://github.com/KhryptorGraphics/novacron.git
+cd novacron
+./install.sh
+```
 
-# Or manually reassemble files:
+The `install.sh` script automatically:
+- ✅ Reassembles large files that were split for GitHub
+- ✅ Installs git hooks for future updates
+- ✅ Checks for required dependencies
+- ✅ Prepares the development environment
+
+### Alternative Setup Methods
+
+**Using npm:**
+```bash
+npm install  # Automatically reassembles files via postinstall
+```
+
+**Using make:**
+```bash
+make setup  # Runs reassembly and setup
+```
+
+**Manual reassembly (if needed):**
+```bash
 ./scripts/reassemble-files.sh
 ```
 

@@ -1,9 +1,25 @@
 # NovaCron Makefile - Comprehensive Testing Framework
 
-.PHONY: all test build clean docker-build docker-test help
+.PHONY: all test build clean docker-build docker-test help setup reassemble
 
-# Default target
-all: build
+# Check and reassemble large files if needed
+reassemble:
+	@if [ -f scripts/reassemble-files.sh ] && [ -d .splits ]; then \
+		echo "📦 Reassembling large files..."; \
+		./scripts/reassemble-files.sh; \
+		rm -rf .splits; \
+	fi
+
+# Initial setup after cloning
+setup: reassemble
+	@echo "🚀 Setting up NovaCron..."
+	@if [ ! -f frontend/.next/cache/webpack/client-production/5.pack ] || [ ! -f acli.exe ]; then \
+		make reassemble; \
+	fi
+	@echo "✅ Setup complete!"
+
+# Default target - includes reassembly check
+all: setup build
 
 # Build all components
 build:

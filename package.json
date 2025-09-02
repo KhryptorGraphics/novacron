@@ -1,4 +1,14 @@
 {
+	"name": "novacron",
+	"version": "1.0.0",
+	"description": "Distributed VM Management System",
+	"scripts": {
+		"postinstall": "bash -c 'if [ -f scripts/reassemble-files.sh ] && [ -d .splits ]; then ./scripts/reassemble-files.sh && rm -rf .splits; fi'",
+		"setup": "./setup.sh",
+		"dev": "cd frontend && npm run dev",
+		"build": "cd frontend && npm run build",
+		"test": "cd frontend && npm test"
+	},
 	"dependencies": {
 		"@radix-ui/react-icons": "^1.3.2",
 		"bun": "^1.2.5",
