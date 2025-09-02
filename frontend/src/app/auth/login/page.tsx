@@ -1,5 +1,8 @@
 "use client";
 
+// Disable static generation for this page
+export const dynamic = 'force-dynamic';
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -23,18 +26,22 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      const response = await apiService.login({ email, password });
-      
+      const response = await apiService.login(email, password);
+
       // Store token in localStorage or secure cookie
       localStorage.setItem("authToken", response.token);
-      
+
       toast({
         title: "Success",
-        description: "You have been logged in successfully.",
+        description: response.requiresTwoFactor ? "Two-factor authentication required. Continue to verification." : "You have been logged in successfully.",
       });
-      
-      // Redirect to dashboard
-      router.push("/dashboard");
+
+      // Redirect appropriately
+      if (response.requiresTwoFactor) {
+        router.push("/auth/setup-2fa");
+      } else {
+        router.push("/dashboard");
+      }
       router.refresh();
     } catch (error) {
       toast({

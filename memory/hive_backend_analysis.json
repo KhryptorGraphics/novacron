@@ -1,0 +1,172 @@
+{
+  "analysis_id": "hive-backend-2024-08-31",
+  "timestamp": "2024-08-31T00:00:00Z",
+  "agent": "backend_analysis_agent",
+  "scope": "novacron_backend_compilation_errors",
+  "summary": {
+    "total_issues": 23,
+    "critical_issues": 8,
+    "high_priority": 12,
+    "medium_priority": 3,
+    "affected_modules": ["hypervisor", "auth", "monitoring"],
+    "estimated_fix_time": "40-50 hours",
+    "compilation_status": "blocked"
+  },
+  "issues_by_module": {
+    "hypervisor": {
+      "file": "core/hypervisor/kvm_manager.go",
+      "critical_issues": [
+        {
+          "line": 262,
+          "type": "type_mismatch",
+          "description": "int to int64 conversion needed for memory usage",
+          "fix": "Cast return value to int64"
+        },
+        {
+          "lines": "367-375",
+          "type": "undefined_method",
+          "description": "DomainMigrate method undefined, libvirt.MigrateLive type issues",
+          "fix": "Use DomainMigrateToURI and correct migration flags"
+        },
+        {
+          "line": 530,
+          "type": "duplicate_declaration",
+          "description": "ResourceInfo redeclared",
+          "fix": "Remove duplicate type definition"
+        },
+        {
+          "line": 773,
+          "type": "duplicate_declaration", 
+          "description": "generateDomainXML redeclared",
+          "fix": "Consolidate function definitions"
+        }
+      ]
+    },
+    "auth": {
+      "files": ["encryption_service.go", "jwt_service.go", "oauth2_service.go", "password_security.go"],
+      "critical_issues": [
+        {
+          "file": "encryption_service.go",
+          "line": 530,
+          "type": "missing_import",
+          "description": "strings package not imported",
+          "fix": "Add 'strings' to imports"
+        },
+        {
+          "file": "jwt_service.go", 
+          "lines": "168,173",
+          "type": "undefined_method",
+          "description": "VerifyAudience and VerifyIssuer methods undefined",
+          "fix": "Update JWT library usage or implement manual validation"
+        },
+        {
+          "file": "oauth2_service.go",
+          "lines": "255,260", 
+          "type": "undefined_method",
+          "description": "Same VerifyAudience/VerifyIssuer issues",
+          "fix": "Consistent with jwt_service.go fixes"
+        },
+        {
+          "file": "password_security.go",
+          "line": 401,
+          "type": "type_mismatch",
+          "description": "containsPersonalInfo parameter type issues",
+          "fix": "Correct function signature and parameter types"
+        }
+      ]
+    },
+    "monitoring": {
+      "files": ["prometheus/integration.go", "tracing/opentelemetry.go"],
+      "critical_issues": [
+        {
+          "file": "prometheus/integration.go",
+          "line": 371,
+          "type": "undefined_method", 
+          "description": "model.LabelValues.Strings() method undefined",
+          "fix": "Manual conversion from LabelValue slice to string slice"
+        },
+        {
+          "file": "tracing/opentelemetry.go",
+          "line": 125,
+          "type": "unknown_field",
+          "description": "Operation field unknown in struct",
+          "fix": "Verify struct definition and field names"
+        }
+      ]
+    }
+  },
+  "dependency_issues": {
+    "libvirt": {
+      "package": "github.com/digitalocean/go-libvirt",
+      "issue": "API method changes",
+      "recommendation": "Update to latest version and fix API calls"
+    },
+    "jwt": {
+      "package": "github.com/golang-jwt/jwt/v5",
+      "issue": "Method signature changes",
+      "recommendation": "Update method calls to match v5 API"
+    },
+    "prometheus": {
+      "package": "github.com/prometheus/common/model",
+      "issue": "Type method availability",
+      "recommendation": "Implement manual type conversions"
+    }
+  },
+  "fix_priority_sequence": [
+    {
+      "phase": 1,
+      "priority": "critical", 
+      "tasks": [
+        "Fix libvirt API method calls in kvm_manager.go",
+        "Resolve JWT authentication method issues",
+        "Add missing imports to auth modules",
+        "Fix critical type mismatches"
+      ],
+      "estimated_time": "24-32 hours"
+    },
+    {
+      "phase": 2,
+      "priority": "high",
+      "tasks": [
+        "Complete authentication module fixes",
+        "Resolve monitoring integration issues", 
+        "Update dependency versions",
+        "Fix duplicate declarations"
+      ],
+      "estimated_time": "16-20 hours"
+    },
+    {
+      "phase": 3,
+      "priority": "validation",
+      "tasks": [
+        "Unit test all fixed modules",
+        "Integration testing",
+        "Performance validation",
+        "Documentation updates"
+      ],
+      "estimated_time": "12-16 hours"
+    }
+  ],
+  "code_snippets": {
+    "jwt_fix_example": "// Replace broken method calls\nif !j.validateAudience(claims.Audience, j.config.Audience) {\n    return nil, fmt.Errorf(\"invalid audience\")\n}",
+    "libvirt_fix_example": "// Use correct libvirt migration method\nreturn m.conn.DomainMigrateToURI(domain, targetURI, flags, \"\", 0)",
+    "prometheus_fix_example": "// Manual LabelValue to string conversion\nstringValues := make([]string, len(labelValues))\nfor i, v := range labelValues {\n    stringValues[i] = string(v)\n}"
+  },
+  "testing_strategy": {
+    "unit_tests": ["auth module validation", "hypervisor mock testing", "monitoring data collection"],
+    "integration_tests": ["VM lifecycle operations", "authentication flow", "metrics collection"],
+    "validation_criteria": ["successful compilation", "all tests passing", "no regression issues"]
+  },
+  "recommendations": {
+    "immediate": [
+      "Focus on libvirt and JWT fixes first",
+      "Update dependencies systematically", 
+      "Test each fix incrementally"
+    ],
+    "strategic": [
+      "Implement dependency version management",
+      "Add automated compilation testing",
+      "Establish code quality gates"
+    ]
+  }
+}

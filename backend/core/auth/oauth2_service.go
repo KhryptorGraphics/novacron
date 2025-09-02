@@ -44,14 +44,14 @@ type OAuth2Config struct {
 
 // OAuth2State represents OAuth2 state for CSRF protection
 type OAuth2State struct {
-	State      string    `json:"state"`
-	Nonce      string    `json:"nonce,omitempty"`
-	CodeChallenge string `json:"code_challenge,omitempty"`
-	CodeVerifier  string `json:"code_verifier,omitempty"`
-	TenantID   string    `json:"tenant_id,omitempty"`
-	RedirectTo string    `json:"redirect_to,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	ExpiresAt  time.Time `json:"expires_at"`
+	State         string    `json:"state"`
+	Nonce         string    `json:"nonce,omitempty"`
+	CodeChallenge string    `json:"code_challenge,omitempty"`
+	CodeVerifier  string    `json:"code_verifier,omitempty"`
+	TenantID      string    `json:"tenant_id,omitempty"`
+	RedirectTo    string    `json:"redirect_to,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	ExpiresAt     time.Time `json:"expires_at"`
 }
 
 // OAuth2Token represents an OAuth2 access token response
@@ -66,15 +66,15 @@ type OAuth2Token struct {
 
 // UserInfo represents user information from OAuth2 provider
 type UserInfo struct {
-	ID            string `json:"id"`
-	Email         string `json:"email"`
-	EmailVerified bool   `json:"email_verified"`
-	Name          string `json:"name"`
-	GivenName     string `json:"given_name"`
-	FamilyName    string `json:"family_name"`
-	Picture       string `json:"picture"`
-	Locale        string `json:"locale"`
-	Provider      string `json:"provider"`
+	ID            string                 `json:"id"`
+	Email         string                 `json:"email"`
+	EmailVerified bool                   `json:"email_verified"`
+	Name          string                 `json:"name"`
+	GivenName     string                 `json:"given_name"`
+	FamilyName    string                 `json:"family_name"`
+	Picture       string                 `json:"picture"`
+	Locale        string                 `json:"locale"`
+	Provider      string                 `json:"provider"`
 	RawClaims     map[string]interface{} `json:"raw_claims,omitempty"`
 }
 
@@ -94,8 +94,8 @@ type IDTokenClaims struct {
 
 // OAuth2Service handles OAuth2/OIDC authentication
 type OAuth2Service struct {
-	config    OAuth2Config
-	states    map[string]*OAuth2State
+	config     OAuth2Config
+	states     map[string]*OAuth2State
 	httpClient *http.Client
 	jwtService *JWTService
 }
@@ -110,8 +110,8 @@ func NewOAuth2Service(config OAuth2Config, jwtService *JWTService) *OAuth2Servic
 	}
 
 	return &OAuth2Service{
-		config:  config,
-		states:  make(map[string]*OAuth2State),
+		config: config,
+		states: make(map[string]*OAuth2State),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -252,12 +252,19 @@ func (o *OAuth2Service) ValidateIDToken(idToken, nonce string) (*IDTokenClaims, 
 	}
 
 	// Validate issuer
-	if o.config.Issuer != "" && !claims.VerifyIssuer(o.config.Issuer, true) {
+	if o.config.Issuer != "" && claims.Issuer != o.config.Issuer {
 		return nil, fmt.Errorf("invalid issuer: %s", claims.Issuer)
 	}
 
 	// Validate audience (client ID)
-	if !claims.VerifyAudience(o.config.ClientID, true) {
+	validAudience := false
+	for _, aud := range claims.Audience {
+		if aud == o.config.ClientID {
+			validAudience = true
+			break
+		}
+	}
+	if !validAudience {
 		return nil, fmt.Errorf("invalid audience")
 	}
 
@@ -354,9 +361,9 @@ func (o *OAuth2Service) CreateUserFromOAuth2(userInfo *UserInfo, tenantID string
 
 	now := time.Now()
 	user := &User{
-		ID:       fmt.Sprintf("%s-%s", userInfo.Provider, userInfo.ID),
-		Username: userInfo.Email,
-		Email:    userInfo.Email,
+		ID:        fmt.Sprintf("%s-%s", userInfo.Provider, userInfo.ID),
+		Username:  userInfo.Email,
+		Email:     userInfo.Email,
 		FirstName: userInfo.GivenName,
 		LastName:  userInfo.FamilyName,
 		Status:    UserStatusActive,

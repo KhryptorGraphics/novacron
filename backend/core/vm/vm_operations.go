@@ -267,31 +267,15 @@ func (m *VMManager) startVM(ctx context.Context, vm *VM, driver VMDriver) (*VMOp
 		return &VMOperationResponse{Success: false, ErrorMessage: fmt.Sprintf("VM %s is in state %s, cannot start", vm.ID(), vm.State())}, nil
 	}
 
-	// Call the VM's own Start method which handles internal state
-	err := vm.Start() // Use the VM's Start method
-	if err != nil {
-		// State should be updated to Failed within vm.Start() if it fails
+	// Use driver to start in core mode; update state
+	if err := driver.Start(ctx, vm.ID()); err != nil {
 		errorMessage := fmt.Sprintf("Failed to start VM: %v", err)
-		m.emitEvent(VMEvent{
-			Type:      VMEventError,
-			VM:        *vm,
-			Timestamp: time.Now(),
-			NodeID:    vm.NodeID(), // Assuming NodeID method exists or get from config/internal state
-			Message:   errorMessage,
-		})
+		m.emitEvent(VMEvent{Type: VMEventError, VM: *vm, Timestamp: time.Now(), NodeID: vm.NodeID(), Message: errorMessage})
 		return &VMOperationResponse{Success: false, ErrorMessage: errorMessage, VM: vm}, err
 	}
-
-	// Emit started event (VM's Start method might already do this)
-	m.emitEvent(VMEvent{
-		Type:      VMEventStarted,
-		VM:        *vm,
-		Timestamp: time.Now(),
-		NodeID:    vm.NodeID(), // Assuming NodeID method exists
-	})
-
+	vm.SetState(StateRunning)
+	m.emitEvent(VMEvent{Type: VMEventStarted, VM: *vm, Timestamp: time.Now(), NodeID: vm.NodeID()})
 	log.Printf("Started VM %s on node %s", vm.ID(), vm.NodeID())
-
 	return &VMOperationResponse{Success: true, VM: vm}, nil
 }
 
@@ -304,31 +288,15 @@ func (m *VMManager) stopVM(ctx context.Context, vm *VM, driver VMDriver) (*VMOpe
 		return &VMOperationResponse{Success: false, ErrorMessage: fmt.Sprintf("VM %s is in state %s, cannot stop", vm.ID(), vm.State())}, nil
 	}
 
-	// Call the VM's own Stop method
-	err := vm.Stop() // Use the VM's Stop method
-	if err != nil {
-		// State should be updated within vm.Stop() if it fails
+	// Use driver to stop in core mode; update state
+	if err := driver.Stop(ctx, vm.ID()); err != nil {
 		errorMessage := fmt.Sprintf("Failed to stop VM: %v", err)
-		m.emitEvent(VMEvent{
-			Type:      VMEventError,
-			VM:        *vm,
-			Timestamp: time.Now(),
-			NodeID:    vm.NodeID(), // Assuming NodeID method exists
-			Message:   errorMessage,
-		})
+		m.emitEvent(VMEvent{Type: VMEventError, VM: *vm, Timestamp: time.Now(), NodeID: vm.NodeID(), Message: errorMessage})
 		return &VMOperationResponse{Success: false, ErrorMessage: errorMessage, VM: vm}, err
 	}
-
-	// Emit stopped event (VM's Stop method might already do this)
-	m.emitEvent(VMEvent{
-		Type:      VMEventStopped,
-		VM:        *vm,
-		Timestamp: time.Now(),
-		NodeID:    vm.NodeID(), // Assuming NodeID method exists
-	})
-
+	vm.SetState(StateStopped)
+	m.emitEvent(VMEvent{Type: VMEventStopped, VM: *vm, Timestamp: time.Now(), NodeID: vm.NodeID()})
 	log.Printf("Stopped VM %s on node %s", vm.ID(), vm.NodeID())
-
 	return &VMOperationResponse{Success: true, VM: vm}, nil
 }
 

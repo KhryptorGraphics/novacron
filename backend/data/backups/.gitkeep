@@ -1,0 +1,10 @@
+# Backup Storage Directory
+
+This directory is used by the NovaCron Advanced Backup System to store:
+- VM backups and incremental backup chains
+- CBT (Changed Block Tracking) metadata
+- Deduplication chunks and indexes
+- Backup manifests and metadata
+- Restoration temporary files
+
+The backup system automatically manages this directory structure.

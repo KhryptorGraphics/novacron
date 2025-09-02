@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
-	// "time" // Currently unused
+	"time"
 )
 
 // VMManager manages virtual machines across different drivers
@@ -26,9 +26,13 @@ type VMManager struct {
 
 // VMManagerConfig contains configuration for the VM manager
 type VMManagerConfig struct {
-	DefaultDriver VMType
-	Drivers       map[VMType]VMDriverConfigManager
-	Scheduler     VMSchedulerConfig
+	DefaultDriver   VMType                           `yaml:"default_driver"`
+	Drivers         map[VMType]VMDriverConfigManager `yaml:"drivers"`
+	Scheduler       VMSchedulerConfig                `yaml:"scheduler"`
+	UpdateInterval  time.Duration                    `yaml:"update_interval"`
+	CleanupInterval time.Duration                    `yaml:"cleanup_interval"`
+	DefaultVMType   VMType                           `yaml:"default_vm_type"`
+	RetentionPeriod time.Duration                    `yaml:"retention_period"`
 }
 
 // VMDriverConfigLegacy contains legacy driver-specific configuration (use driver_factory.go VMDriverConfig instead)
@@ -277,6 +281,12 @@ func (m *VMManager) getDriver(config VMConfig) (VMDriver, error) { // Takes VMCo
 	return m.driverFactory(config) // Pass config
 }
 
+
+// GetDriverForConfig is an exported helper to obtain a driver for a VM config
+func (m *VMManager) GetDriverForConfig(config VMConfig) (VMDriver, error) {
+	return m.getDriver(config)
+}
+
 // checkDriverAvailability checks if a driver is available for a VM type
 func (m *VMManager) checkDriverAvailability(config VMConfig) error { // Takes VMConfig now
 	_, err := m.getDriver(config)
@@ -311,7 +321,7 @@ func (m *VMManager) listAvailableVMTypes() []VMType { // Assuming VMType is defi
 func (m *VMManager) createDriverForType(vmType VMType, config map[string]interface{}) (VMDriver, error) {
 	switch vmType {
 	case VMTypeKVM:
-		return NewKVMDriverStub(config)
+		return NewCoreStubDriver(config)
 	case VMTypeContainer:
 		return NewContainerDriverStub(config)
 	case VMTypeContainerd:
@@ -381,3 +391,64 @@ func (m *VMManager) Shutdown() {
 	m.cancel()
 	log.Println("VM Manager shutdown complete")
 }
+
+// Missing methods expected by API packages
+
+// ListMigrations returns list of VM migrations
+func (m *VMManager) ListMigrations(ctx context.Context) ([]*Migration, error) {
+	// Stub implementation - return empty list for now
+	return []*Migration{}, nil
+}
+
+// GetVMStatus returns status of a VM
+func (m *VMManager) GetVMStatus(ctx context.Context, vmID string) (*VMStatus, error) {
+	// Stub implementation
+	return &VMStatus{
+		VMID:   vmID,
+		Status: "unknown",
+	}, nil
+}
+
+// GetVMMetrics returns metrics for a VM
+func (m *VMManager) GetVMMetrics(ctx context.Context, vmID string) (*VMMetrics, error) {
+	// Stub implementation  
+	return &VMMetrics{
+		VMID: vmID,
+	}, nil
+}
+
+// DefaultVMManagerConfig returns a default VM manager configuration
+func DefaultVMManagerConfig() VMManagerConfig {
+	return VMManagerConfig{
+		DefaultDriver:   VMTypeKVM,
+		Drivers:         make(map[VMType]VMDriverConfigManager),
+		UpdateInterval:  30 * time.Second,
+		CleanupInterval: 5 * time.Minute,
+		DefaultVMType:   VMTypeKVM,
+		RetentionPeriod: 24 * time.Hour,
+		Scheduler: VMSchedulerConfig{
+			Type:   "round-robin",
+			Config: make(map[string]interface{}),
+		},
+	}
+}
+
+// Migration represents a VM migration
+type Migration struct {
+	ID         string `json:"id"`
+	VMID       string `json:"vm_id"`
+	SourceNode string `json:"source_node"`
+	TargetNode string `json:"target_node"`
+	Status     string `json:"status"`
+	Progress   int    `json:"progress"`
+}
+
+// VMStatus represents VM status information
+type VMStatus struct {
+	VMID   string `json:"vm_id"`
+	Status string `json:"status"`
+	CPU    int    `json:"cpu"`
+	Memory int64  `json:"memory"`
+}
+
+// Note: VMMetrics is defined in vm_metrics.go to avoid duplication

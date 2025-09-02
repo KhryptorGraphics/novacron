@@ -1,6 +1,11 @@
 "use client";
 
+// Disable static generation for this page
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useToast } from "@/components/ui/use-toast";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { SkipToMain } from "@/components/accessibility/a11y-components";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
@@ -37,6 +42,7 @@ import { SecurityDashboard } from "@/components/admin/SecurityDashboard";
 import { AdminMetrics } from "@/components/admin/AdminMetrics";
 import { AuditLogs } from "@/components/admin/AuditLogs";
 import { RolePermissionManager } from "@/components/admin/RolePermissionManager";
+import { RealTimeDashboard } from "@/components/admin/RealTimeDashboard";
 
 export default function AdminDashboard() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -57,7 +63,15 @@ export default function AdminDashboard() {
     email: "admin@novacron.io",
     role: "admin"
   };
-  
+
+  const router = useRouter();
+  const { toast } = useToast();
+  const handleLogout = () => {
+    try { localStorage.removeItem("authToken"); } catch {}
+    toast({ title: "Logged out" });
+    router.push("/auth/login");
+  };
+
   // Simulate data loading
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -89,6 +103,16 @@ export default function AdminDashboard() {
       content: (
         <FadeIn>
           <AdminMetrics />
+        </FadeIn>
+      )
+    },
+    {
+      id: "realtime",
+      label: "Real-time Monitor",
+      icon: <Activity className="h-4 w-4" />,
+      content: (
+        <FadeIn delay={0.1}>
+          <RealTimeDashboard />
         </FadeIn>
       )
     },
@@ -162,8 +186,8 @@ export default function AdminDashboard() {
         <SkipToMain />
         
         {/* Mobile Navigation */}
-        <MobileNavigation user={user} onLogout={() => console.log("Logout")} />
-        
+        <MobileNavigation user={user} onLogout={handleLogout} />
+
         {/* Desktop Sidebar */}
         <DesktopSidebar 
           user={user} 
@@ -225,7 +249,7 @@ export default function AdminDashboard() {
             >
               <LazyTabs
                 tabs={adminTabs}
-                defaultTab="overview"
+                defaultTab="realtime"
                 className="w-full"
               />
             </LoadingStates>

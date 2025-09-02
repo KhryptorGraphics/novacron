@@ -1,5 +1,8 @@
 "use client";
 
+// Disable static generation for this page
+export const dynamic = 'force-dynamic';
+
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -23,9 +26,9 @@ export default function Setup2FAPage() {
   // Demo QR code and secret - in production this would come from the server
   const qrCodeUrl = "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=otpauth://totp/NovaCron:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=NovaCron";
   const backupCodes = [
-    "1a2b-3c4d", "5e6f-7g8h", "9i0j-1k2l", 
+    "1a2b-3c4d", "5e6f-7g8h", "9i0j-1k2l",
     "3m4n-5o6p", "7q8r-9s0t", "1u2v-3w4x"
-  ];
+  ] || [];
 
   const handleSkip = () => {
     router.push("/dashboard");
@@ -33,8 +36,8 @@ export default function Setup2FAPage() {
 
   const handleVerifyCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!verificationCode || verificationCode.length !== 6) {
+
+    if (!verificationCode || typeof verificationCode !== 'string' || verificationCode.length !== 6) {
       setError("Please enter a 6-digit verification code");
       return;
     }
@@ -45,9 +48,9 @@ export default function Setup2FAPage() {
     try {
       // Simulate API call for verification
       await new Promise(resolve => setTimeout(resolve, 1000));
-      
+
       // For demo, accept any 6-digit code
-      if (verificationCode.length === 6) {
+      if (verificationCode && verificationCode.length === 6) {
         setStep('complete');
         toast({
           title: "Two-Factor Authentication Enabled",
@@ -57,9 +60,15 @@ export default function Setup2FAPage() {
         throw new Error("Invalid code");
       }
     } catch (error) {
-      setError("Invalid verification code. Please try again.");
+      const errorMessage = error instanceof Error ? error.message : "Invalid verification code. Please try again.";
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
+      // If a verification API exists, call it here instead of the demo timeout.
+      // Example (uncomment and adjust if available):
+      // const res = await apiService.verifyTwoFactor(verificationCode);
+      // if (!res.success) throw new Error(res.message || "Verification failed");
+
     }
   };
 
@@ -112,8 +121,8 @@ export default function Setup2FAPage() {
                   <h3 className="font-semibold">2. Scan the QR code</h3>
                   <div className="flex justify-center">
                     <div className="p-4 bg-white rounded-lg shadow-sm border">
-                      <img 
-                        src={qrCodeUrl} 
+                      <img
+                        src={qrCodeUrl}
                         alt="QR Code for 2FA setup"
                         className="w-48 h-48"
                       />
@@ -130,11 +139,15 @@ export default function Setup2FAPage() {
                     Store these codes safely. You can use them to access your account if you lose your phone.
                   </p>
                   <div className="grid grid-cols-2 gap-2 max-w-xs mx-auto">
-                    {backupCodes.map((code, index) => (
+                    {Array.isArray(backupCodes) && backupCodes.length > 0 ? backupCodes.map((code, index) => (
                       <code key={index} className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-sm">
-                        {code}
+                        {code || ''}
                       </code>
-                    ))}
+                    )) : (
+                      <div className="col-span-2 text-center text-muted-foreground text-sm">
+                        No backup codes available
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

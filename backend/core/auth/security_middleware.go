@@ -2,12 +2,10 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,27 +14,27 @@ import (
 // SecurityConfig defines security middleware configuration
 type SecurityConfig struct {
 	// RateLimiting configuration
-	RateLimitEnabled     bool
-	RateLimitRequests    int           // Requests per window
-	RateLimitWindow      time.Duration // Time window
-	RateLimitBurstSize   int           // Burst allowance
-	RateLimitByIP        bool          // Rate limit by IP
-	RateLimitByUser      bool          // Rate limit by user
-	RateLimitByTenant    bool          // Rate limit by tenant
+	RateLimitEnabled   bool
+	RateLimitRequests  int           // Requests per window
+	RateLimitWindow    time.Duration // Time window
+	RateLimitBurstSize int           // Burst allowance
+	RateLimitByIP      bool          // Rate limit by IP
+	RateLimitByUser    bool          // Rate limit by user
+	RateLimitByTenant  bool          // Rate limit by tenant
 
 	// Input validation
 	InputValidationEnabled bool
-	MaxRequestSize        int64 // Maximum request body size
-	AllowedContentTypes   []string
-	SQLInjectionCheck     bool
-	XSSProtection         bool
-	CSRFProtection        bool
+	MaxRequestSize         int64 // Maximum request body size
+	AllowedContentTypes    []string
+	SQLInjectionCheck      bool
+	XSSProtection          bool
+	CSRFProtection         bool
 
 	// Security headers
 	SecurityHeadersEnabled bool
-	HSTSMaxAge            int
-	ContentSecurityPolicy string
-	ReferrerPolicy        string
+	HSTSMaxAge             int
+	ContentSecurityPolicy  string
+	ReferrerPolicy         string
 
 	// IP restrictions
 	IPWhitelistEnabled bool
@@ -45,7 +43,7 @@ type SecurityConfig struct {
 	IPBlacklist        []string // CIDR blocks
 
 	// Geolocation restrictions
-	GeoBlockEnabled bool
+	GeoBlockEnabled  bool
 	AllowedCountries []string
 	BlockedCountries []string
 
@@ -61,10 +59,10 @@ type SecurityConfig struct {
 
 // RateLimitEntry represents a rate limiting entry
 type RateLimitEntry struct {
-	Count      int
-	Window     time.Time
-	LastAccess time.Time
-	Blocked    bool
+	Count        int
+	Window       time.Time
+	LastAccess   time.Time
+	Blocked      bool
 	BlockedUntil time.Time
 }
 
@@ -83,16 +81,16 @@ type SecurityContext struct {
 
 // SecurityMiddleware provides comprehensive API security
 type SecurityMiddleware struct {
-	config       SecurityConfig
-	rateLimits   map[string]*RateLimitEntry
-	mu           sync.RWMutex
+	config               SecurityConfig
+	rateLimits           map[string]*RateLimitEntry
+	mu                   sync.RWMutex
 	sqlInjectionPatterns []*regexp.Regexp
-	xssPatterns         []*regexp.Regexp
-	botPatterns         []*regexp.Regexp
-	ipWhitelist         []*net.IPNet
-	ipBlacklist         []*net.IPNet
-	auditService        AuditService
-	encryptionService   *EncryptionService
+	xssPatterns          []*regexp.Regexp
+	botPatterns          []*regexp.Regexp
+	ipWhitelist          []*net.IPNet
+	ipBlacklist          []*net.IPNet
+	auditService         AuditService
+	encryptionService    *EncryptionService
 }
 
 // NewSecurityMiddleware creates a new security middleware
@@ -188,7 +186,7 @@ func (s *SecurityMiddleware) Middleware(authService AuthService) func(http.Handl
 					secCtx.UserID = session.UserID
 					secCtx.TenantID = session.TenantID
 					secCtx.SessionID = session.ID
-					
+
 					// Get user permissions
 					if roles, err := authService.GetUserRoles(session.UserID); err == nil {
 						for _, role := range roles {
@@ -647,8 +645,8 @@ func DefaultSecurityConfig() SecurityConfig {
 			"openvas",
 			"nmap",
 		},
-		HoneypotEnabled: true,
-		AuditLogging:    true,
+		HoneypotEnabled:  true,
+		AuditLogging:     true,
 		LogSensitiveData: false,
 	}
 }

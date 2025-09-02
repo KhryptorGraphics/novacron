@@ -11,6 +11,66 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration/placement"
 )
 
+// Local types and interfaces to support healing/evacuation without new deps
+// NodeStatus tracks node health seen by the orchestration engine
+type NodeStatus struct {
+	ID         string
+	Healthy    bool
+	LastChange time.Time
+	Reason     string
+}
+
+// EvacuationHandler defines a minimal interface the engine can call to evacuate a node
+// Implementations can live in higher layers and be injected at startup
+type EvacuationHandler interface {
+	EvacuateNode(ctx context.Context, nodeID string) error
+}
+
+// Lightweight helpers for numeric extraction from event payloads
+func toFloat64(v interface{}) float64 {
+	switch t := v.(type) {
+	case float64:
+		return t
+	case float32:
+		return float64(t)
+	case int:
+		return float64(t)
+	case int32:
+		return float64(t)
+	case int64:
+		return float64(t)
+	case uint32:
+		return float64(t)
+	case uint64:
+		return float64(t)
+	default:
+		return 0
+	}
+}
+
+func toInt(v interface{}) int {
+	switch t := v.(type) {
+	case int:
+		return t
+	case int32:
+		return int(t)
+
+	case int64:
+		return int(t)
+	case uint32:
+		return int(t)
+	case uint64:
+		return int(t)
+	case float64:
+		return int(t)
+	case float32:
+		return int(t)
+	default:
+		return 0
+	}
+}
+
+
 // DefaultOrchestrationEngine implements the main orchestration engine
 type DefaultOrchestrationEngine struct {
 	mu              sync.RWMutex
@@ -20,12 +80,17 @@ type DefaultOrchestrationEngine struct {
 	eventBus        events.EventBus
 	placementEngine placement.PlacementEngine
 	logger          *logrus.Logger
-	
+
 	// Metrics
 	eventsProcessed uint64
 	decisionsCount  uint64
 	metrics         map[string]interface{}
-	
+
+	// Node tracking and healing hooks
+	nodeStatuses    map[string]NodeStatus
+	lastNodeEvents  map[string]time.Time
+	evacuationHandler EvacuationHandler
+
 	// Context for lifecycle management
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -34,18 +99,66 @@ type DefaultOrchestrationEngine struct {
 // NewDefaultOrchestrationEngine creates a new orchestration engine
 func NewDefaultOrchestrationEngine(logger *logrus.Logger) *DefaultOrchestrationEngine {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &DefaultOrchestrationEngine{
-		state:           EngineStateStopped,
-		policies:        make(map[string]*OrchestrationPolicy),
-		eventBus:        events.NewNATSEventBus(logger),
-		placementEngine: placement.NewDefaultPlacementEngine(logger),
-		logger:          logger,
-		metrics:         make(map[string]interface{}),
-		ctx:             ctx,
-		cancel:          cancel,
+		state:             EngineStateStopped,
+		policies:          make(map[string]*OrchestrationPolicy),
+		eventBus:          events.NewNoopEventBus(),
+		placementEngine:   placement.NewDefaultPlacementEngine(logger),
+		logger:            logger,
+		metrics:           make(map[string]interface{}),
+		nodeStatuses:      make(map[string]NodeStatus),
+		lastNodeEvents:    make(map[string]time.Time),
+		evacuationHandler: nil,
+		ctx:               ctx,
+		cancel:            cancel,
 	}
 }
+
+// Placement exposes the placement engine for adapter wiring
+func (e *DefaultOrchestrationEngine) Placement() placement.PlacementEngine {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.placementEngine
+}
+
+
+// EventBus exposes the event bus for consumers like WebSocket manager
+func (e *DefaultOrchestrationEngine) EventBus() events.EventBus {
+	e.mu.RLock(); defer e.mu.RUnlock()
+	return e.eventBus
+}
+
+
+
+// EvacuateNode invokes the configured evacuation handler for the node
+func (e *DefaultOrchestrationEngine) EvacuateNode(ctx context.Context, nodeID string) error {
+	e.mu.RLock()
+	h := e.evacuationHandler
+	e.mu.RUnlock()
+	if h == nil {
+		return fmt.Errorf("no evacuation handler configured")
+	}
+	return h.EvacuateNode(ctx, nodeID)
+}
+
+// SetEvacuationHandler configures the handler used to evacuate VMs from failed nodes
+func (e *DefaultOrchestrationEngine) SetEvacuationHandler(h EvacuationHandler) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.evacuationHandler = h
+}
+
+// GetNodeStatuses returns a snapshot of tracked node statuses
+func (e *DefaultOrchestrationEngine) GetNodeStatuses() map[string]NodeStatus {
+	e.mu.RLock(); defer e.mu.RUnlock()
+	out := make(map[string]NodeStatus, len(e.nodeStatuses))
+	for k, v := range e.nodeStatuses { out[k] = v }
+	return out
+}
+
+
 
 // Start begins orchestration operations
 func (e *DefaultOrchestrationEngine) Start(ctx context.Context) error {
@@ -78,18 +191,18 @@ func (e *DefaultOrchestrationEngine) Start(ctx context.Context) error {
 
 	// Subscribe to orchestration events
 	eventHandler := events.NewCompositeEventHandler("orchestration-main", e.logger)
-	
+
 	// Add handlers for different event types
 	eventHandler.AddHandler(
 		[]events.EventType{events.EventTypeVMCreated, events.EventTypeVMStarted, events.EventTypeVMStopped},
 		events.NewEventHandlerFunc("vm-events", "VM Event Handler", e.handleVMEvent),
 	)
-	
+
 	eventHandler.AddHandler(
 		[]events.EventType{events.EventTypeNodeMetrics, events.EventTypeNodeFailure},
 		events.NewEventHandlerFunc("node-events", "Node Event Handler", e.handleNodeEvent),
 	)
-	
+
 	eventHandler.AddHandler(
 		[]events.EventType{events.EventTypeScalingTriggered},
 		events.NewEventHandlerFunc("scaling-events", "Scaling Event Handler", e.handleScalingEvent),
@@ -169,7 +282,7 @@ func (e *DefaultOrchestrationEngine) RegisterPolicy(policy *OrchestrationPolicy)
 	defer e.mu.Unlock()
 
 	e.policies[policy.ID] = policy
-	
+
 	e.logger.WithFields(logrus.Fields{
 		"policy_id":   policy.ID,
 		"policy_name": policy.Name,
@@ -212,7 +325,7 @@ func (e *DefaultOrchestrationEngine) UnregisterPolicy(policyID string) error {
 	}
 
 	delete(e.policies, policyID)
-	
+
 	e.logger.WithField("policy_id", policyID).Info("Policy unregistered")
 
 	// Publish policy update event
@@ -325,7 +438,7 @@ func (e *DefaultOrchestrationEngine) performPeriodicProcessing() {
 	e.mu.Lock()
 	e.metrics["last_processed_at"] = time.Now()
 	e.metrics["uptime_seconds"] = time.Since(e.startTime).Seconds()
-	
+
 	// Add event bus metrics
 	busMetrics := e.eventBus.GetMetrics()
 	e.metrics["events_published"] = busMetrics.EventsPublished
@@ -422,18 +535,73 @@ func (e *DefaultOrchestrationEngine) handleVMStopped(ctx context.Context, event 
 
 func (e *DefaultOrchestrationEngine) handleNodeFailure(ctx context.Context, event *events.OrchestrationEvent) error {
 	nodeID := event.Data["node_id"]
+
+	// Update node status and publish healing trigger
+	if nid, ok := event.Data["node_id"].(string); ok && nid != "" {
+		// mark unhealthy
+		e.mu.Lock()
+		e.nodeStatuses[nid] = NodeStatus{ID: nid, Healthy: false, LastChange: time.Now(), Reason: "failure_event"}
+		e.lastNodeEvents[nid] = time.Now()
+		e.mu.Unlock()
+		// publish healing event
+		healEvent := &events.OrchestrationEvent{
+			Type:      events.EventTypeHealingTriggered,
+			Source:    "orchestration-engine",
+			Timestamp: time.Now(),
+			Data: map[string]interface{}{"node_id": nid, "cause": "node.failure"},
+			Priority: events.PriorityHigh,
+		}
+		if err := e.eventBus.Publish(ctx, healEvent); err != nil {
+			e.logger.WithError(err).Error("Failed to publish healing event")
+		}
+		// best-effort evacuation using optional handler
+		if e.evacuationHandler != nil {
+			go func(target string) {
+				if err := e.evacuationHandler.EvacuateNode(context.Background(), target); err != nil {
+					e.logger.WithError(err).WithField("node_id", target).Error("Node evacuation failed")
+				} else {
+					e.logger.WithField("node_id", target).Info("Node evacuation initiated")
+				}
+			}(nid)
+		}
+	}
+
 	e.logger.WithField("node_id", nodeID).Warn("Node failure detected")
-	
+
 	// TODO: Implement node failure handling:
 	// - Migrate VMs from failed node
 	// - Update node status
 	// - Trigger healing policies
-	
+
 	return nil
 }
 
 func (e *DefaultOrchestrationEngine) handleNodeMetrics(ctx context.Context, event *events.OrchestrationEvent) error {
-	// TODO: Process node metrics for optimization decisions
+	// Ingest node metrics into engine metrics map for later policy evaluation
+	nodeID, _ := event.Data["node_id"].(string)
+	if nodeID == "" {
+		return nil
+	}
+	cpu := toFloat64(event.Data["cpu_utilization"]) // percent
+	mem := toFloat64(event.Data["memory_utilization"]) // percent
+	disk := toFloat64(event.Data["disk_utilization"]) // percent
+	net := toFloat64(event.Data["network_utilization"]) // percent
+	activeVMs := toInt(event.Data["active_vms"])
+	healthy := true
+	if h, ok := event.Data["healthy"].(bool); ok {
+		healthy = h
+	}
+
+	e.mu.Lock()
+	e.metrics[fmt.Sprintf("nodes.%s.cpu_utilization", nodeID)] = cpu
+	e.metrics[fmt.Sprintf("nodes.%s.memory_utilization", nodeID)] = mem
+	e.metrics[fmt.Sprintf("nodes.%s.disk_utilization", nodeID)] = disk
+	e.metrics[fmt.Sprintf("nodes.%s.network_utilization", nodeID)] = net
+	e.metrics[fmt.Sprintf("nodes.%s.active_vms", nodeID)] = activeVMs
+	e.nodeStatuses[nodeID] = NodeStatus{ID: nodeID, Healthy: healthy, LastChange: time.Now()}
+	e.lastNodeEvents[nodeID] = time.Now()
+	e.mu.Unlock()
+
 	return nil
 }
 
@@ -441,13 +609,13 @@ func (e *DefaultOrchestrationEngine) handleNodeMetrics(ctx context.Context, even
 
 func (e *DefaultOrchestrationEngine) getRelevantConstraints(labels map[string]string) []placement.Constraint {
 	var constraints []placement.Constraint
-	
+
 	// Apply constraints from active policies based on label selectors
 	for _, policy := range e.policies {
 		if !policy.Enabled {
 			continue
 		}
-		
+
 		if e.policyApplies(policy, labels) {
 			for _, rule := range policy.Rules {
 				if rule.Type == RuleTypePlacement && rule.Enabled {
@@ -463,19 +631,19 @@ func (e *DefaultOrchestrationEngine) getRelevantConstraints(labels map[string]st
 			}
 		}
 	}
-	
+
 	return constraints
 }
 
 func (e *DefaultOrchestrationEngine) getRelevantPreferences(labels map[string]string) []placement.Preference {
 	var preferences []placement.Preference
-	
+
 	// Apply preferences from active policies
 	for _, policy := range e.policies {
 		if !policy.Enabled {
 			continue
 		}
-		
+
 		if e.policyApplies(policy, labels) {
 			// Convert policy rules to preferences
 			// This is simplified
@@ -485,7 +653,7 @@ func (e *DefaultOrchestrationEngine) getRelevantPreferences(labels map[string]st
 			})
 		}
 	}
-	
+
 	return preferences
 }
 
@@ -496,13 +664,13 @@ func (e *DefaultOrchestrationEngine) policyApplies(policy *OrchestrationPolicy, 
 			return false
 		}
 	}
-	
+
 	for key, value := range policy.Selector.Tags {
 		if labels[key] != value {
 			return false
 		}
 	}
-	
+
 	return true
 }
 

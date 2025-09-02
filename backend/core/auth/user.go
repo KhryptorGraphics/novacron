@@ -81,13 +81,13 @@ type User struct {
 
 	// UpdatedBy is the ID of the user who last updated this user
 	UpdatedBy string `json:"updatedBy,omitempty"`
-	
+
 	// IsSystemUser indicates if this is a system user
 	IsSystemUser bool `json:"isSystemUser,omitempty"`
-	
+
 	// Roles contains the actual role objects (computed field)
 	Roles []*Role `json:"roles,omitempty"`
-	
+
 	// Tenants contains the tenants this user has access to (computed field)
 	Tenants []*Tenant `json:"tenants,omitempty"`
 }

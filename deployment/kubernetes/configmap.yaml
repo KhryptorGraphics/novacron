@@ -1,0 +1,428 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: novacron-app-config
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: config
+data:
+  # Application Configuration
+  app.yaml: |
+    server:
+      api:
+        host: "0.0.0.0"
+        port: "8091"
+        read_timeout: "30s"
+        write_timeout: "30s"
+        idle_timeout: "60s"
+        shutdown_timeout: "30s"
+      websocket:
+        host: "0.0.0.0"
+        port: "8093"
+        ping_period: "54s"
+        pong_wait: "60s"
+      metrics:
+        host: "0.0.0.0"
+        port: "9090"
+        enabled: true
+
+    application:
+      name: "NovaCron"
+      version: "1.0.0"
+      environment: "production"
+      debug: false
+
+    logging:
+      level: "INFO"
+      format: "json"
+      structured: true
+      audit:
+        enabled: true
+        level: "INFO"
+
+    vm_management:
+      defaults:
+        cpu_cores: 2
+        memory_mb: 2048
+        disk_size_gb: 20
+      limits:
+        max_cpu_cores: 32
+        max_memory_gb: 128
+        max_disk_size_gb: 2048
+
+    monitoring:
+      metrics:
+        collection_interval: "30s"
+        prometheus:
+          enabled: true
+          namespace: "novacron"
+      health:
+        startup_timeout: "60s"
+        liveness_timeout: "10s"
+        readiness_timeout: "5s"
+
+  # Security Configuration
+  security.yaml: |
+    tls:
+      enabled: true
+      cert_file: "/etc/certs/tls.crt"
+      key_file: "/etc/certs/tls.key"
+      ca_file: "/etc/certs/ca.crt"
+      min_version: "1.2"
+
+    auth:
+      jwt:
+        algorithm: "HS256"
+        expiration: "8h"
+        issuer: "novacron"
+      password_policy:
+        min_length: 12
+        require_uppercase: true
+        require_lowercase: true
+        require_numbers: true
+        require_special_chars: true
+      lockout:
+        max_attempts: 5
+        lockout_duration: "15m"
+
+    rate_limiting:
+      enabled: true
+      global:
+        requests_per_minute: 1000
+        burst: 100
+      per_ip:
+        requests_per_minute: 60
+        burst: 10
+
+    cors:
+      enabled: true
+      allowed_origins:
+        - "https://*.novacron.local"
+      allowed_methods:
+        - "GET"
+        - "POST"
+        - "PUT"
+        - "DELETE"
+        - "OPTIONS"
+      allow_credentials: true
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: novacron-postgres-config
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+data:
+  postgresql.conf: |
+    # PostgreSQL Configuration for NovaCron Production
+    
+    # Connection Settings
+    listen_addresses = '*'
+    port = 5432
+    max_connections = 100
+    
+    # Memory Settings
+    shared_buffers = 256MB
+    work_mem = 4MB
+    maintenance_work_mem = 64MB
+    effective_cache_size = 1GB
+    
+    # WAL Settings
+    wal_level = replica
+    max_wal_senders = 3
+    checkpoint_timeout = 5min
+    checkpoint_completion_target = 0.7
+    
+    # Security Settings
+    ssl = on
+    ssl_cert_file = '/etc/ssl/certs/server.crt'
+    ssl_key_file = '/etc/ssl/certs/server.key'
+    ssl_ca_file = '/etc/ssl/certs/ca.crt'
+    ssl_prefer_server_ciphers = on
+    password_encryption = scram-sha-256
+    
+    # Logging
+    log_destination = 'stderr'
+    logging_collector = on
+    log_directory = '/var/log/postgresql'
+    log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
+    log_rotation_size = 100MB
+    log_rotation_age = 1d
+    log_min_duration_statement = 1000
+    log_line_prefix = '%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '
+    log_statement = 'ddl'
+    
+    # Performance
+    random_page_cost = 1.1
+    seq_page_cost = 1.0
+    cpu_tuple_cost = 0.01
+    cpu_index_tuple_cost = 0.005
+    cpu_operator_cost = 0.0025
+    
+  pg_hba.conf: |
+    # PostgreSQL Client Authentication Configuration
+    # TYPE  DATABASE        USER            ADDRESS                 METHOD
+    
+    # Local connections
+    local   all             all                                     scram-sha-256
+    
+    # IPv4 local connections
+    host    all             all             127.0.0.1/32            scram-sha-256
+    
+    # IPv4 connections from pods
+    host    all             all             10.0.0.0/8              scram-sha-256
+    host    all             all             172.16.0.0/12           scram-sha-256
+    host    all             all             192.168.0.0/16          scram-sha-256
+    
+    # Replication connections
+    host    replication     all             10.0.0.0/8              scram-sha-256
+    host    replication     all             172.16.0.0/12           scram-sha-256
+    host    replication     all             192.168.0.0/16          scram-sha-256
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: novacron-nginx-config
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: nginx
+    app.kubernetes.io/component: frontend
+data:
+  nginx.conf: |
+    user nginx;
+    worker_processes auto;
+    error_log /var/log/nginx/error.log warn;
+    pid /var/run/nginx.pid;
+
+    events {
+        worker_connections 1024;
+        use epoll;
+        multi_accept on;
+    }
+
+    http {
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+
+        # Security Headers
+        add_header X-Frame-Options DENY always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+        add_header Referrer-Policy strict-origin-when-cross-origin always;
+
+        # Logging
+        log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                        '$status $body_bytes_sent "$http_referer" '
+                        '"$http_user_agent" "$http_x_forwarded_for"';
+        access_log /var/log/nginx/access.log main;
+
+        # Performance
+        sendfile on;
+        tcp_nopush on;
+        tcp_nodelay on;
+        keepalive_timeout 65;
+        types_hash_max_size 2048;
+        client_max_body_size 100m;
+
+        # Gzip
+        gzip on;
+        gzip_vary on;
+        gzip_min_length 1024;
+        gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+
+        # Rate limiting
+        limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
+        limit_req_zone $binary_remote_addr zone=auth:10m rate=5r/s;
+
+        # Upstream servers
+        upstream api-server {
+            server novacron-api:8091;
+            keepalive 32;
+        }
+
+        upstream websocket-server {
+            server novacron-api:8093;
+        }
+
+        include /etc/nginx/conf.d/*.conf;
+    }
+
+  default.conf: |
+    server {
+        listen 80;
+        server_name _;
+        return 301 https://$host$request_uri;
+    }
+
+    server {
+        listen 443 ssl http2;
+        server_name _;
+        
+        # SSL Configuration
+        ssl_certificate /etc/ssl/certs/tls.crt;
+        ssl_certificate_key /etc/ssl/certs/tls.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
+        ssl_prefer_server_ciphers off;
+        ssl_session_cache shared:SSL:10m;
+        ssl_session_timeout 10m;
+
+        # Frontend static files
+        location / {
+            root /usr/share/nginx/html;
+            try_files $uri $uri/ /index.html;
+            
+            # Cache static assets
+            location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+                expires 1y;
+                add_header Cache-Control "public, immutable";
+            }
+        }
+
+        # API endpoints
+        location /api/ {
+            limit_req zone=api burst=20 nodelay;
+            
+            proxy_pass http://api-server;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            
+            proxy_connect_timeout 30s;
+            proxy_send_timeout 30s;
+            proxy_read_timeout 30s;
+        }
+
+        # Authentication endpoints with stricter rate limiting
+        location ~ ^/(auth|login|register) {
+            limit_req zone=auth burst=5 nodelay;
+            
+            proxy_pass http://api-server;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # WebSocket endpoints
+        location /ws/ {
+            proxy_pass http://websocket-server;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            
+            proxy_connect_timeout 7d;
+            proxy_send_timeout 7d;
+            proxy_read_timeout 7d;
+        }
+
+        # Health check
+        location /health {
+            access_log off;
+            return 200 "healthy\n";
+            add_header Content-Type text/plain;
+        }
+    }
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: novacron-prometheus-config
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/component: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 30s
+      evaluation_interval: 30s
+
+    rule_files:
+      - "/etc/prometheus/rules/*.yml"
+
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets:
+              - alertmanager:9093
+
+    scrape_configs:
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+
+      - job_name: 'novacron-api'
+        static_configs:
+          - targets: ['novacron-api:9090']
+        metrics_path: '/metrics'
+        scrape_interval: 30s
+
+      - job_name: 'postgres'
+        static_configs:
+          - targets: ['postgres-exporter:9187']
+
+      - job_name: 'redis'
+        static_configs:
+          - targets: ['redis-exporter:9121']
+
+      - job_name: 'node-exporter'
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - source_labels: [__address__]
+            regex: '(.*):(.*)'
+            target_label: __address__
+            replacement: '${1}:9100'
+
+  alert-rules.yml: |
+    groups:
+      - name: novacron.rules
+        rules:
+          - alert: HighCPUUsage
+            expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])) * 100) > 80
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High CPU usage detected"
+              description: "CPU usage is above 80% for more than 5 minutes"
+
+          - alert: HighMemoryUsage
+            expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High memory usage detected"
+              description: "Memory usage is above 85% for more than 5 minutes"
+
+          - alert: DatabaseDown
+            expr: up{job="postgres"} == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "PostgreSQL database is down"
+              description: "PostgreSQL database has been down for more than 1 minute"
+
+          - alert: APIServerDown
+            expr: up{job="novacron-api"} == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "NovaCron API server is down"
+              description: "NovaCron API server has been down for more than 1 minute"

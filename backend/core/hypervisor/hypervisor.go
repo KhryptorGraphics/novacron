@@ -184,10 +184,12 @@ func (h *Hypervisor) Stop() error {
 	var wg sync.WaitGroup
 	for _, vm := range vms {
 		wg.Add(1)
-		go func(v *vm.VM) {
+		go func(v interface{}) {
 			defer wg.Done()
-			if err := v.Stop(); err != nil {
-				log.Printf("Error stopping VM %s: %v", v.ID(), err)
+			if vmPtr, ok := v.(*vm.VM); ok {
+				if err := vmPtr.Stop(); err != nil {
+					log.Printf("Error stopping VM %s: %v", vmPtr.ID(), err)
+				}
 			}
 		}(vm)
 	}

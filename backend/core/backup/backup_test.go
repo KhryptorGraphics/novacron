@@ -2,6 +2,10 @@ package backup
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -597,6 +601,474 @@ func (m *MockBackupProvider) GetBackup(ctx context.Context, backupID string) (*B
 
 func (m *MockBackupProvider) ValidateBackup(ctx context.Context, backupID string) error {
 	return nil
+}
+
+// Enhanced tests for advanced backup components
+
+// TestCBTAdvancedOperations tests advanced CBT functionality
+func TestCBTAdvancedOperations(t *testing.T) {
+	tmpDir := t.TempDir()
+	vmID := "test-vm-advanced"
+	vmSize := int64(1024 * 1024) // 1MB
+	
+	// Create CBT tracker
+	tracker := NewCBTTracker(vmID, tmpDir)
+	err := tracker.Initialize(vmSize)
+	if err != nil {
+		t.Fatalf("Failed to initialize CBT tracker: %v", err)
+	}
+	
+	// Test block size and total blocks
+	if tracker.BlockSize() != DefaultBlockSize {
+		t.Errorf("Expected block size %d, got %d", DefaultBlockSize, tracker.BlockSize())
+	}
+	
+	expectedBlocks := (vmSize + DefaultBlockSize - 1) / DefaultBlockSize
+	if tracker.TotalBlocks() != expectedBlocks {
+		t.Errorf("Expected %d blocks, got %d", expectedBlocks, tracker.TotalBlocks())
+	}
+	
+	// Test block change tracking
+	blockData := make([]byte, DefaultBlockSize)
+	for i := range blockData {
+		blockData[i] = byte(i % 256)
+	}
+	
+	// Track changed block
+	err = tracker.MarkBlockChanged(0, blockData)
+	if err != nil {
+		t.Fatalf("Failed to mark block changed: %v", err)
+	}
+	
+	// Get changed blocks
+	changedBlocks := tracker.GetChangedBlocksSince(time.Now().Add(-time.Hour))
+	if len(changedBlocks) == 0 {
+		t.Error("Expected at least one changed block")
+	}
+	
+	// Test CBT reset
+	err = tracker.ResetChangedBlocks()
+	if err != nil {
+		t.Fatalf("Failed to reset changed blocks: %v", err)
+	}
+	
+	changedBlocks = tracker.GetChangedBlocksSince(time.Now().Add(-time.Hour))
+	if len(changedBlocks) != 0 {
+		t.Error("Expected no changed blocks after reset")
+	}
+}
+
+// TestIncrementalBackupAdvanced tests advanced incremental backup functionality
+func TestIncrementalBackupAdvanced(t *testing.T) {
+	tmpDir := t.TempDir()
+	vmID := "test-vm-incremental"
+	vmPath := filepath.Join(tmpDir, "vm-disk.img")
+	
+	// Create test VM disk file
+	vmData := make([]byte, 1024*1024) // 1MB
+	for i := range vmData {
+		vmData[i] = byte(i % 256)
+	}
+	err := os.WriteFile(vmPath, vmData, 0644)
+	if err != nil {
+		t.Fatalf("Failed to create test VM disk: %v", err)
+	}
+	
+	// Create backup manager
+	backupManager := NewIncrementalBackupManager(
+		tmpDir,
+		NewDeduplicationEngine(tmpDir),
+		DefaultCompressionLevel,
+	)
+	
+	// Initialize CBT
+	tracker, err := backupManager.InitializeCBT(vmID, int64(len(vmData)))
+	if err != nil {
+		t.Fatalf("Failed to initialize CBT: %v", err)
+	}
+	
+	// Create full backup
+	fullManifest, err := backupManager.CreateIncrementalBackup(context.Background(), vmID, vmPath, FullBackup)
+	if err != nil {
+		t.Fatalf("Failed to create full backup: %v", err)
+	}
+	
+	if fullManifest.Type != FullBackup {
+		t.Errorf("Expected full backup, got %s", fullManifest.Type)
+	}
+	
+	if fullManifest.BlockCount == 0 {
+		t.Error("Expected block count > 0 for full backup")
+	}
+	
+	// Modify VM data and create incremental backup
+	for i := 0; i < 100; i++ {
+		vmData[i] = byte((i + 100) % 256)
+	}
+	err = os.WriteFile(vmPath, vmData, 0644)
+	if err != nil {
+		t.Fatalf("Failed to update VM disk: %v", err)
+	}
+	
+	// Mark some blocks as changed
+	changedData := vmData[:DefaultBlockSize]
+	err = tracker.MarkBlockChanged(0, changedData)
+	if err != nil {
+		t.Fatalf("Failed to mark block changed: %v", err)
+	}
+	
+	// Create incremental backup
+	incrManifest, err := backupManager.CreateIncrementalBackup(context.Background(), vmID, vmPath, IncrementalBackup)
+	if err != nil {
+		t.Fatalf("Failed to create incremental backup: %v", err)
+	}
+	
+	if incrManifest.Type != IncrementalBackup {
+		t.Errorf("Expected incremental backup, got %s", incrManifest.Type)
+	}
+	
+	if incrManifest.ParentID != fullManifest.BackupID {
+		t.Errorf("Expected parent ID %s, got %s", fullManifest.BackupID, incrManifest.ParentID)
+	}
+	
+	if incrManifest.ChangedBlocks == 0 {
+		t.Error("Expected changed blocks > 0 for incremental backup")
+	}
+	
+	// Verify compression ratio
+	if incrManifest.Size > 0 && incrManifest.CompressedSize >= incrManifest.Size {
+		t.Errorf("Expected compression, got size %d, compressed %d", incrManifest.Size, incrManifest.CompressedSize)
+	}
+	
+	// Test backup listing
+	backupList, err := backupManager.ListBackups(vmID)
+	if err != nil {
+		t.Fatalf("Failed to list backups: %v", err)
+	}
+	
+	if len(backupList) != 2 {
+		t.Errorf("Expected 2 backups, got %d", len(backupList))
+	}
+}
+
+// TestDeduplicationEngine tests advanced deduplication functionality
+func TestDeduplicationEngine(t *testing.T) {
+	tmpDir := t.TempDir()
+	engine := NewDeduplicationEngine(tmpDir)
+	
+	// Test chunk processing with duplicate data
+	data1 := make([]byte, 8192) // 8KB
+	for i := range data1 {
+		data1[i] = byte(i % 256)
+	}
+	
+	// Process first chunk
+	chunks1, err := engine.ProcessData(data1)
+	if err != nil {
+		t.Fatalf("Failed to process data: %v", err)
+	}
+	
+	if len(chunks1) == 0 {
+		t.Error("Expected at least one chunk")
+	}
+	
+	// Process same data again (should deduplicate)
+	chunks2, err := engine.ProcessData(data1)
+	if err != nil {
+		t.Fatalf("Failed to process duplicate data: %v", err)
+	}
+	
+	// Verify deduplication
+	for i, chunk := range chunks2 {
+		if chunk.Hash != chunks1[i].Hash {
+			t.Errorf("Expected same hash for duplicate chunk %d", i)
+		}
+		if !chunk.IsDuplicate {
+			t.Errorf("Expected chunk %d to be marked as duplicate", i)
+		}
+	}
+	
+	// Test data reconstruction
+	reconstructed, err := engine.ReconstructData(chunks1)
+	if err != nil {
+		t.Fatalf("Failed to reconstruct data: %v", err)
+	}
+	
+	if len(reconstructed) != len(data1) {
+		t.Errorf("Expected reconstructed length %d, got %d", len(data1), len(reconstructed))
+	}
+	
+	// Verify data integrity
+	originalHash := sha256.Sum256(data1)
+	reconstructedHash := sha256.Sum256(reconstructed)
+	if originalHash != reconstructedHash {
+		t.Error("Reconstructed data does not match original")
+	}
+	
+	// Test deduplication statistics
+	stats := engine.GetStatistics()
+	if stats.TotalChunks == 0 {
+		t.Error("Expected total chunks > 0")
+	}
+	if stats.UniqueChunks == 0 {
+		t.Error("Expected unique chunks > 0")
+	}
+	if stats.DuplicateChunks == 0 {
+		t.Error("Expected duplicate chunks > 0")
+	}
+}
+
+// TestRetentionManagerAdvanced tests advanced retention functionality
+func TestRetentionManagerAdvanced(t *testing.T) {
+	tmpDir := t.TempDir()
+	retentionManager := NewRetentionManager(tmpDir)
+	
+	// Create GFS retention policy
+	gfsPolicy := &RetentionPolicy{
+		ID:          "gfs-policy-1",
+		Name:        "30-Day GFS Policy",
+		Description: "Grandfather-Father-Son retention for 30 days",
+		Rules: &RetentionRules{
+			MaxAge:     30 * 24 * time.Hour, // 30 days
+			MaxCount:   100,
+			MinReplicas: 1,
+		},
+		GFSConfig: &GFSConfig{
+			DailyRetention:   7,  // Keep 7 daily
+			WeeklyRetention:  4,  // Keep 4 weekly
+			MonthlyRetention: 12, // Keep 12 monthly
+			YearlyRetention:  7,  // Keep 7 yearly
+		},
+		Enabled: true,
+	}
+	
+	err := retentionManager.CreatePolicy(gfsPolicy)
+	if err != nil {
+		t.Fatalf("Failed to create GFS policy: %v", err)
+	}
+	
+	// Test policy retrieval
+	retrievedPolicy, err := retentionManager.GetPolicy(gfsPolicy.ID)
+	if err != nil {
+		t.Fatalf("Failed to retrieve policy: %v", err)
+	}
+	
+	if retrievedPolicy.ID != gfsPolicy.ID {
+		t.Errorf("Expected policy ID %s, got %s", gfsPolicy.ID, retrievedPolicy.ID)
+	}
+	
+	// Create test backups with different ages
+	vmID := "test-vm-retention"
+	now := time.Now()
+	testBackups := []*BackupItem{
+		{BackupID: "backup-1", CreatedAt: now.AddDate(0, 0, -1), Type: "daily"},   // 1 day old
+		{BackupID: "backup-2", CreatedAt: now.AddDate(0, 0, -8), Type: "weekly"},  // 8 days old
+		{BackupID: "backup-3", CreatedAt: now.AddDate(0, 0, -35), Type: "monthly"}, // 35 days old
+		{BackupID: "backup-4", CreatedAt: now.AddDate(0, 0, -400), Type: "yearly"}, // 400 days old
+	}
+	
+	// Apply GFS retention
+	toKeep, toDelete := retentionManager.ApplyGFSRetention(testBackups, gfsPolicy.GFSConfig)
+	
+	// Verify retention logic
+	if len(toKeep) == 0 {
+		t.Error("Expected some backups to be kept")
+	}
+	if len(toDelete) == 0 {
+		t.Error("Expected some backups to be deleted")
+	}
+	
+	// Test retention job creation
+	retentionJob, err := retentionManager.ApplyRetention(vmID, gfsPolicy.ID)
+	if err != nil {
+		t.Fatalf("Failed to apply retention: %v", err)
+	}
+	
+	if retentionJob.PolicyID != gfsPolicy.ID {
+		t.Errorf("Expected policy ID %s, got %s", gfsPolicy.ID, retentionJob.PolicyID)
+	}
+	
+	// Test policy update
+	gfsPolicy.Description = "Updated GFS Policy"
+	err = retentionManager.UpdatePolicy(gfsPolicy)
+	if err != nil {
+		t.Fatalf("Failed to update policy: %v", err)
+	}
+	
+	// Verify update
+	updatedPolicy, err := retentionManager.GetPolicy(gfsPolicy.ID)
+	if err != nil {
+		t.Fatalf("Failed to retrieve updated policy: %v", err)
+	}
+	
+	if updatedPolicy.Description != "Updated GFS Policy" {
+		t.Errorf("Expected updated description, got %s", updatedPolicy.Description)
+	}
+}
+
+// TestRestoreManagerAdvanced tests advanced restore functionality
+func TestRestoreManagerAdvanced(t *testing.T) {
+	tmpDir := t.TempDir()
+	restoreManager := NewRestoreManager(tmpDir, 4) // 4 worker threads
+	
+	vmID := "test-vm-restore"
+	backupID := "test-backup-restore"
+	targetPath := filepath.Join(tmpDir, "restore-target")
+	
+	// Create restore request
+	restoreReq := &RestoreRequest{
+		VMID:        vmID,
+		BackupID:    backupID,
+		RestoreType: "full",
+		TargetPath:  targetPath,
+		Options: RestoreOptions{
+			VerifyRestore:       true,
+			OverwriteExisting:   true,
+			EnableDecompression: true,
+			CreateTargetDir:     true,
+		},
+		Metadata: map[string]string{"test": "restore"},
+	}
+	
+	// Create restore operation
+	operation, err := restoreManager.CreateRestoreOperation(restoreReq)
+	if err != nil {
+		t.Fatalf("Failed to create restore operation: %v", err)
+	}
+	
+	if operation.VMID != vmID {
+		t.Errorf("Expected VM ID %s, got %s", vmID, operation.VMID)
+	}
+	if operation.BackupID != backupID {
+		t.Errorf("Expected backup ID %s, got %s", backupID, operation.BackupID)
+	}
+	
+	// Test restore operation retrieval
+	retrievedOp, err := restoreManager.GetRestoreOperation(operation.ID)
+	if err != nil {
+		t.Fatalf("Failed to retrieve restore operation: %v", err)
+	}
+	
+	if retrievedOp.ID != operation.ID {
+		t.Errorf("Expected operation ID %s, got %s", operation.ID, retrievedOp.ID)
+	}
+	
+	// Test point-in-time restore
+	pointInTime := time.Now().Add(-24 * time.Hour) // 24 hours ago
+	pitOperation, err := restoreManager.RestoreFromPointInTime(vmID, pointInTime, targetPath)
+	if err != nil {
+		// This may fail due to missing backups, but we test the interface
+		t.Logf("Point-in-time restore failed as expected: %v", err)
+	} else {
+		if pitOperation.VMID != vmID {
+			t.Errorf("Expected VM ID %s for PIT restore, got %s", vmID, pitOperation.VMID)
+		}
+	}
+	
+	// Test restore validation
+	validationResult, err := restoreManager.ValidateRestore(operation.ID)
+	if err != nil {
+		// This may fail due to missing actual restore data
+		t.Logf("Restore validation failed as expected: %v", err)
+	} else {
+		if validationResult.OperationID != operation.ID {
+			t.Errorf("Expected operation ID %s, got %s", operation.ID, validationResult.OperationID)
+		}
+	}
+	
+	// Test recovery testing
+	testResult, err := restoreManager.TestRecovery(backupID, "basic")
+	if err != nil {
+		// This may fail due to missing backup data
+		t.Logf("Recovery test failed as expected: %v", err)
+	} else {
+		if testResult.BackupID != backupID {
+			t.Errorf("Expected backup ID %s, got %s", backupID, testResult.BackupID)
+		}
+	}
+	
+	// Test operation cancellation
+	err = restoreManager.CancelRestoreOperation(operation.ID)
+	if err != nil {
+		t.Fatalf("Failed to cancel restore operation: %v", err)
+	}
+	
+	// Verify cancellation
+	cancelledOp, err := restoreManager.GetRestoreOperation(operation.ID)
+	if err != nil {
+		t.Fatalf("Failed to retrieve cancelled operation: %v", err)
+	}
+	
+	if cancelledOp.Status != "cancelled" {
+		t.Errorf("Expected cancelled status, got %s", cancelledOp.Status)
+	}
+}
+
+// Performance benchmarks
+
+// BenchmarkCBTBlockTracking benchmarks CBT block change tracking
+func BenchmarkCBTBlockTracking(b *testing.B) {
+	tmpDir := b.TempDir()
+	vmID := "bench-vm-cbt"
+	vmSize := int64(1024 * 1024 * 1024) // 1GB
+	
+	tracker := NewCBTTracker(vmID, tmpDir)
+	err := tracker.Initialize(vmSize)
+	if err != nil {
+		b.Fatalf("Failed to initialize CBT tracker: %v", err)
+	}
+	
+	blockData := make([]byte, DefaultBlockSize)
+	for i := range blockData {
+		blockData[i] = byte(i % 256)
+	}
+	
+	b.ResetTimer()
+	
+	for i := 0; i < b.N; i++ {
+		blockIndex := int64(i % int(tracker.TotalBlocks()))
+		tracker.MarkBlockChanged(blockIndex, blockData)
+	}
+}
+
+// BenchmarkDeduplication benchmarks deduplication processing
+func BenchmarkDeduplication(b *testing.B) {
+	tmpDir := b.TempDir()
+	engine := NewDeduplicationEngine(tmpDir)
+	
+	// Create test data with patterns that should deduplicate
+	data := make([]byte, 64*1024) // 64KB
+	pattern := []byte{0xAA, 0xBB, 0xCC, 0xDD}
+	for i := 0; i < len(data); i += len(pattern) {
+		copy(data[i:], pattern)
+	}
+	
+	b.ResetTimer()
+	
+	for i := 0; i < b.N; i++ {
+		_, err := engine.ProcessData(data)
+		if err != nil {
+			b.Fatalf("Failed to process data: %v", err)
+		}
+	}
+}
+
+// BenchmarkCompressionPerformance benchmarks compression performance
+func BenchmarkCompressionPerformance(b *testing.B) {
+	// Create compressible test data
+	data := make([]byte, 1024*1024) // 1MB
+	for i := range data {
+		data[i] = byte(i % 16) // Repeating pattern for good compression
+	}
+	
+	b.ResetTimer()
+	
+	for i := 0; i < b.N; i++ {
+		compressed := CompressData(data, DefaultCompressionLevel)
+		if len(compressed) >= len(data) {
+			b.Errorf("Compression failed, got size %d >= original %d", len(compressed), len(data))
+		}
+	}
 }
 
 // Mock services for integration testing

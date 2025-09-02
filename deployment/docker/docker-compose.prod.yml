@@ -1,0 +1,546 @@
+version: '3.8'
+
+# NovaCron Production Docker Compose Configuration
+# Version: 1.0.0
+# Description: Production-ready containerized deployment with security hardening
+
+networks:
+  novacron-internal:
+    driver: bridge
+    internal: false
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+  
+  novacron-db:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+
+volumes:
+  postgres-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR}/postgres
+  
+  vm-storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR}/vms
+  
+  backup-storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${BACKUP_DIR}
+  
+  cert-storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${CERT_DIR}
+  
+  logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LOG_DIR}
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: novacron-postgres
+    restart: unless-stopped
+    
+    # Security Configuration
+    user: "999:999"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+    
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - cert-storage:/etc/ssl/certs:ro
+      - logs:/var/log/postgresql
+    
+    networks:
+      - novacron-db
+    
+    ports:
+      - "127.0.0.1:5432:5432"
+    
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c hba_file=/etc/postgresql/pg_hba.conf
+      -c ssl=on
+      -c ssl_cert_file=/etc/ssl/certs/server.crt
+      -c ssl_key_file=/etc/ssl/certs/server.key
+      -c ssl_ca_file=/etc/ssl/certs/ca.crt
+    
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 1G
+          cpus: '1'
+
+  # Redis Cache (Optional)
+  redis:
+    image: redis:7-alpine
+    container_name: novacron-redis
+    restart: unless-stopped
+    
+    user: "999:999"
+    read_only: true
+    tmpfs:
+      - /tmp
+    
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    
+    volumes:
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - cert-storage:/etc/ssl/certs:ro
+    
+    networks:
+      - novacron-internal
+    
+    ports:
+      - "127.0.0.1:6379:6379"
+    
+    command: >
+      redis-server /usr/local/etc/redis/redis.conf
+      --requirepass ${REDIS_PASSWORD}
+      --tls-port 6380
+      --tls-cert-file /etc/ssl/certs/redis-server.crt
+      --tls-key-file /etc/ssl/certs/redis-server.key
+      --tls-ca-cert-file /etc/ssl/certs/ca.crt
+    
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  # NovaCron API Server
+  api-server:
+    build:
+      context: ../../
+      dockerfile: deployment/docker/Dockerfile.api
+      args:
+        GO_VERSION: 1.21
+        ALPINE_VERSION: 3.18
+    
+    image: novacron/api-server:${VERSION:-latest}
+    container_name: novacron-api
+    restart: unless-stopped
+    
+    # Security Configuration
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    
+    environment:
+      # Application Configuration
+      ENVIRONMENT: production
+      DEBUG: "false"
+      API_PORT: "8091"
+      WS_PORT: "8093"
+      METRICS_PORT: "9090"
+      
+      # Database Configuration
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      
+      # Redis Configuration
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      
+      # Security Configuration
+      JWT_SECRET: ${JWT_SECRET}
+      API_ENCRYPTION_KEY: ${API_ENCRYPTION_KEY}
+      
+      # TLS Configuration
+      TLS_CERT_FILE: /etc/ssl/certs/server.crt
+      TLS_KEY_FILE: /etc/ssl/certs/server.key
+      TLS_CA_FILE: /etc/ssl/certs/ca.crt
+      
+      # Storage Paths
+      VM_STORAGE_PATH: /var/lib/novacron/vms
+      BACKUP_STORAGE_PATH: /var/lib/novacron/backups
+      
+      # External Services
+      DOMAIN_NAME: ${DOMAIN_NAME}
+      SECURITY_WEBHOOK_URL: ${SECURITY_WEBHOOK_URL}
+    
+    volumes:
+      - vm-storage:/var/lib/novacron/vms
+      - backup-storage:/var/lib/novacron/backups
+      - cert-storage:/etc/ssl/certs:ro
+      - logs:/var/log/novacron
+      - /var/run/libvirt:/var/run/libvirt:ro
+    
+    networks:
+      - novacron-internal
+      - novacron-db
+    
+    ports:
+      - "${API_PORT:-8091}:8091"
+      - "${WS_PORT:-8093}:8093"
+      - "127.0.0.1:9090:9090" # Metrics port (internal only)
+    
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-k", "https://localhost:8091/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4'
+        reservations:
+          memory: 2G
+          cpus: '2'
+
+  # Web Frontend (Nginx)
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: ../deployment/docker/Dockerfile.frontend
+      args:
+        NODE_VERSION: 18
+        NGINX_VERSION: 1.24-alpine
+    
+    image: novacron/frontend:${VERSION:-latest}
+    container_name: novacron-frontend
+    restart: unless-stopped
+    
+    # Security Configuration
+    user: "101:101" # nginx user
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - NET_BIND_SERVICE
+    
+    environment:
+      API_URL: "https://api.${DOMAIN_NAME}"
+      WS_URL: "wss://api.${DOMAIN_NAME}/ws"
+    
+    volumes:
+      - cert-storage:/etc/ssl/certs:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - logs:/var/log/nginx
+    
+    networks:
+      - novacron-internal
+    
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    
+    depends_on:
+      - api-server
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1'
+        reservations:
+          memory: 256M
+          cpus: '0.5'
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: novacron-prometheus
+    restart: unless-stopped
+    
+    user: "65534:65534"
+    read_only: true
+    tmpfs:
+      - /tmp
+    
+    environment:
+      - PROMETHEUS_RETENTION_TIME=30d
+    
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - ${DATA_DIR}/prometheus:/prometheus
+    
+    networks:
+      - novacron-internal
+    
+    ports:
+      - "127.0.0.1:9091:9090"
+    
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 1G
+          cpus: '1'
+
+  # Grafana Dashboard
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: novacron-grafana
+    restart: unless-stopped
+    
+    user: "472:472"
+    read_only: true
+    tmpfs:
+      - /tmp
+    
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SECURITY_SECRET_KEY: ${GRAFANA_SECRET_KEY}
+      GF_SERVER_ROOT_URL: https://grafana.${DOMAIN_NAME}
+      GF_DATABASE_TYPE: postgres
+      GF_DATABASE_HOST: postgres:5432
+      GF_DATABASE_NAME: grafana
+      GF_DATABASE_USER: ${GRAFANA_DB_USER}
+      GF_DATABASE_PASSWORD: ${GRAFANA_DB_PASSWORD}
+      GF_DATABASE_SSL_MODE: require
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    
+    volumes:
+      - ${DATA_DIR}/grafana:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    
+    networks:
+      - novacron-internal
+      - novacron-db
+    
+    ports:
+      - "127.0.0.1:3000:3000"
+    
+    depends_on:
+      - prometheus
+      - postgres
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+  # Log Aggregation (Optional)
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: novacron-loki
+    restart: unless-stopped
+    profiles:
+      - logging
+    
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp
+    
+    volumes:
+      - ./loki/loki.yml:/etc/loki/local-config.yaml:ro
+      - ${DATA_DIR}/loki:/loki
+    
+    networks:
+      - novacron-internal
+    
+    ports:
+      - "127.0.0.1:3100:3100"
+    
+    command: -config.file=/etc/loki/local-config.yaml
+    
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+  # Backup Service
+  backup:
+    build:
+      context: ../../
+      dockerfile: deployment/docker/Dockerfile.backup
+    
+    image: novacron/backup:${VERSION:-latest}
+    container_name: novacron-backup
+    restart: unless-stopped
+    
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    
+    environment:
+      BACKUP_SCHEDULE: "0 2 * * *" # Daily at 2 AM
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      BACKUP_RETENTION_DAYS: "30"
+      S3_BUCKET: ${BACKUP_S3_BUCKET}
+      AWS_REGION: ${AWS_REGION}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+    
+    volumes:
+      - backup-storage:/backups
+      - vm-storage:/var/lib/novacron/vms:ro
+      - postgres-data:/var/lib/postgresql/data:ro
+    
+    networks:
+      - novacron-db
+    
+    depends_on:
+      - postgres
+    
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+# Health check service
+  healthcheck:
+    image: alpine:3.18
+    container_name: novacron-healthcheck
+    restart: unless-stopped
+    
+    user: "1000:1000"
+    
+    environment:
+      CHECK_INTERVAL: "60"
+      WEBHOOK_URL: ${HEALTH_WEBHOOK_URL}
+    
+    volumes:
+      - ./scripts/healthcheck.sh:/healthcheck.sh:ro
+    
+    networks:
+      - novacron-internal
+    
+    command: /healthcheck.sh
+    
+    depends_on:
+      - api-server
+      - postgres
+    
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.1'

@@ -6,7 +6,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -17,6 +16,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/chacha20poly1305"
@@ -47,24 +47,24 @@ type EncryptionConfig struct {
 
 // EncryptionKey represents an encryption key with metadata
 type EncryptionKey struct {
-	ID        string    `json:"id"`
-	KeyData   []byte    `json:"key_data"`
-	Algorithm string    `json:"algorithm"`
-	CreatedAt time.Time `json:"created_at"`
-	ExpiresAt time.Time `json:"expires_at"`
-	UsageCount int64    `json:"usage_count"`
-	MaxUsage  int64     `json:"max_usage"`
-	Active    bool      `json:"active"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	ID         string                 `json:"id"`
+	KeyData    []byte                 `json:"key_data"`
+	Algorithm  string                 `json:"algorithm"`
+	CreatedAt  time.Time              `json:"created_at"`
+	ExpiresAt  time.Time              `json:"expires_at"`
+	UsageCount int64                  `json:"usage_count"`
+	MaxUsage   int64                  `json:"max_usage"`
+	Active     bool                   `json:"active"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // EncryptedData represents encrypted data with metadata
 type EncryptedData struct {
-	Data      string    `json:"data"`
-	KeyID     string    `json:"key_id"`
-	Algorithm string    `json:"algorithm"`
-	Nonce     string    `json:"nonce"`
-	CreatedAt time.Time `json:"created_at"`
+	Data      string                 `json:"data"`
+	KeyID     string                 `json:"key_id"`
+	Algorithm string                 `json:"algorithm"`
+	Nonce     string                 `json:"nonce"`
+	CreatedAt time.Time              `json:"created_at"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
@@ -399,13 +399,13 @@ func (e *EncryptionService) RotateKeys() error {
 		if now.After(key.ExpiresAt) || key.UsageCount >= key.MaxUsage {
 			// Deactivate old key
 			key.Active = false
-			
+
 			// Generate new key
 			newKey, err := e.GenerateKey(key.Algorithm)
 			if err != nil {
 				return fmt.Errorf("failed to rotate key %s: %w", keyID, err)
 			}
-			
+
 			// Copy metadata
 			newKey.Metadata = key.Metadata
 		}
@@ -545,14 +545,14 @@ func splitString(s, delimiter string, limit int) []string {
 // DefaultEncryptionConfig returns secure default encryption configuration
 func DefaultEncryptionConfig() EncryptionConfig {
 	return EncryptionConfig{
-		DefaultAlgorithm:              "AES-256-GCM",
-		KeyDerivationFunction:         "scrypt",
-		KeyRotationInterval:           30 * 24 * time.Hour,
-		KeySize:                       32,
-		ScryptN:                       32768,
-		ScryptR:                       8,
-		ScryptP:                       1,
-		CertificateValidityPeriod:     365 * 24 * time.Hour,
-		KeyUsageRotationPeriod:        7 * 24 * time.Hour,
+		DefaultAlgorithm:          "AES-256-GCM",
+		KeyDerivationFunction:     "scrypt",
+		KeyRotationInterval:       30 * 24 * time.Hour,
+		KeySize:                   32,
+		ScryptN:                   32768,
+		ScryptR:                   8,
+		ScryptP:                   1,
+		CertificateValidityPeriod: 365 * 24 * time.Hour,
+		KeyUsageRotationPeriod:    7 * 24 * time.Hour,
 	}
 }

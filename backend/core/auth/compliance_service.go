@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 )
@@ -52,21 +51,21 @@ type ComplianceControl struct {
 
 // ComplianceAssessment represents a compliance assessment result
 type ComplianceAssessment struct {
-	ID             string                      `json:"id"`
-	Framework      ComplianceFramework         `json:"framework"`
-	TenantID       string                      `json:"tenant_id,omitempty"`
-	AssessorID     string                      `json:"assessor_id"`
-	StartDate      time.Time                   `json:"start_date"`
-	EndDate        time.Time                   `json:"end_date"`
-	Status         ComplianceStatus            `json:"status"`
-	OverallScore   float64                     `json:"overall_score"`
-	ControlResults map[string]*ControlResult   `json:"control_results"`
-	Findings       []ComplianceFinding         `json:"findings"`
+	ID              string                     `json:"id"`
+	Framework       ComplianceFramework        `json:"framework"`
+	TenantID        string                     `json:"tenant_id,omitempty"`
+	AssessorID      string                     `json:"assessor_id"`
+	StartDate       time.Time                  `json:"start_date"`
+	EndDate         time.Time                  `json:"end_date"`
+	Status          ComplianceStatus           `json:"status"`
+	OverallScore    float64                    `json:"overall_score"`
+	ControlResults  map[string]*ControlResult  `json:"control_results"`
+	Findings        []ComplianceFinding        `json:"findings"`
 	Recommendations []ComplianceRecommendation `json:"recommendations"`
-	Evidence       []ComplianceEvidence        `json:"evidence"`
-	Metadata       map[string]interface{}      `json:"metadata,omitempty"`
-	CreatedAt      time.Time                   `json:"created_at"`
-	UpdatedAt      time.Time                   `json:"updated_at"`
+	Evidence        []ComplianceEvidence       `json:"evidence"`
+	Metadata        map[string]interface{}     `json:"metadata,omitempty"`
+	CreatedAt       time.Time                  `json:"created_at"`
+	UpdatedAt       time.Time                  `json:"updated_at"`
 }
 
 // ControlResult represents the result of testing a specific control
@@ -134,30 +133,30 @@ type ComplianceEvidence struct {
 
 // CompliancePolicy represents a compliance policy
 type CompliancePolicy struct {
-	ID          string              `json:"id"`
-	Framework   ComplianceFramework `json:"framework"`
-	Name        string              `json:"name"`
-	Description string              `json:"description"`
-	Owner       string              `json:"owner"`
-	Approver    string              `json:"approver,omitempty"`
-	Version     string              `json:"version"`
-	EffectiveDate time.Time         `json:"effective_date"`
-	ReviewDate  time.Time           `json:"review_date"`
-	Content     string              `json:"content"`
-	Controls    []string            `json:"controls"`
-	Status      string              `json:"status"` // draft, active, archived
-	CreatedAt   time.Time           `json:"created_at"`
-	UpdatedAt   time.Time           `json:"updated_at"`
+	ID            string              `json:"id"`
+	Framework     ComplianceFramework `json:"framework"`
+	Name          string              `json:"name"`
+	Description   string              `json:"description"`
+	Owner         string              `json:"owner"`
+	Approver      string              `json:"approver,omitempty"`
+	Version       string              `json:"version"`
+	EffectiveDate time.Time           `json:"effective_date"`
+	ReviewDate    time.Time           `json:"review_date"`
+	Content       string              `json:"content"`
+	Controls      []string            `json:"controls"`
+	Status        string              `json:"status"` // draft, active, archived
+	CreatedAt     time.Time           `json:"created_at"`
+	UpdatedAt     time.Time           `json:"updated_at"`
 }
 
 // ComplianceService provides compliance validation and management
 type ComplianceService struct {
-	controls    map[string]*ComplianceControl
-	assessments map[string]*ComplianceAssessment
-	policies    map[string]*CompliancePolicy
-	mu          sync.RWMutex
+	controls     map[string]*ComplianceControl
+	assessments  map[string]*ComplianceAssessment
+	policies     map[string]*CompliancePolicy
+	mu           sync.RWMutex
 	auditService AuditService
-	encryption  *EncryptionService
+	encryption   *EncryptionService
 }
 
 // NewComplianceService creates a new compliance service
@@ -179,19 +178,19 @@ func NewComplianceService(auditService AuditService, encryptionService *Encrypti
 // CreateAssessment creates a new compliance assessment
 func (c *ComplianceService) CreateAssessment(framework ComplianceFramework, tenantID, assessorID string) (*ComplianceAssessment, error) {
 	assessment := &ComplianceAssessment{
-		ID:             c.generateID(),
-		Framework:      framework,
-		TenantID:       tenantID,
-		AssessorID:     assessorID,
-		StartDate:      time.Now(),
-		Status:         NotTested,
-		ControlResults: make(map[string]*ControlResult),
-		Findings:       make([]ComplianceFinding, 0),
+		ID:              c.generateID(),
+		Framework:       framework,
+		TenantID:        tenantID,
+		AssessorID:      assessorID,
+		StartDate:       time.Now(),
+		Status:          NotTested,
+		ControlResults:  make(map[string]*ControlResult),
+		Findings:        make([]ComplianceFinding, 0),
 		Recommendations: make([]ComplianceRecommendation, 0),
-		Evidence:       make([]ComplianceEvidence, 0),
-		Metadata:       make(map[string]interface{}),
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
+		Evidence:        make([]ComplianceEvidence, 0),
+		Metadata:        make(map[string]interface{}),
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
 
 	// Initialize control results for framework
@@ -1059,7 +1058,7 @@ func (c *ComplianceService) updateAssessmentStatus(assessment *ComplianceAssessm
 
 	if testedControls > 0 {
 		assessment.OverallScore = totalScore / float64(testedControls)
-		
+
 		if assessment.OverallScore >= 90 {
 			assessment.Status = Compliant
 		} else if assessment.OverallScore >= 70 {
@@ -1229,14 +1228,14 @@ func (c *ComplianceService) generateSummary(assessment *ComplianceAssessment) ma
 	}
 
 	return map[string]interface{}{
-		"total_controls":        totalControls,
-		"tested_controls":       testedControls,
-		"compliant_controls":    compliantControls,
+		"total_controls":         totalControls,
+		"tested_controls":        testedControls,
+		"compliant_controls":     compliantControls,
 		"non_compliant_controls": nonCompliantControls,
-		"partial_controls":      partialControls,
-		"overall_score":         assessment.OverallScore,
-		"status":                assessment.Status,
-		"total_findings":        len(assessment.Findings),
-		"recommendations":       len(assessment.Recommendations),
+		"partial_controls":       partialControls,
+		"overall_score":          assessment.OverallScore,
+		"status":                 assessment.Status,
+		"total_findings":         len(assessment.Findings),
+		"recommendations":        len(assessment.Recommendations),
 	}
 }

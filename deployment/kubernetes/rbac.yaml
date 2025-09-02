@@ -1,0 +1,437 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: novacron-api
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: api
+automountServiceAccountToken: true
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: novacron
+  name: novacron-api-role
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: api
+rules:
+  # ConfigMap access for configuration
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  
+  # Secret access for certificates and credentials
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+    resourceNames:
+      - "novacron-app-secrets"
+      - "novacron-db-secrets"
+      - "novacron-tls-certs"
+      - "novacron-aws-secrets"
+  
+  # Pod access for health checks and metrics
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  
+  # Service access for service discovery
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+  
+  # Events access for audit logging
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: novacron-api-rolebinding
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: api
+subjects:
+  - kind: ServiceAccount
+    name: novacron-api
+    namespace: novacron
+roleRef:
+  kind: Role
+  name: novacron-api-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Service Account for Prometheus
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/component: monitoring
+automountServiceAccountToken: true
+
+---
+# Cluster Role for Prometheus (needs cluster-wide access for monitoring)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus-cluster-role
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/component: monitoring
+rules:
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - nodes/proxy
+      - nodes/metrics
+      - services
+      - endpoints
+      - pods
+      - ingresses
+      - configmaps
+    verbs: ["get", "list", "watch"]
+  
+  - apiGroups: ["extensions", "networking.k8s.io"]
+    resources:
+      - ingresses
+    verbs: ["get", "list", "watch"]
+  
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - daemonsets
+      - replicasets
+      - statefulsets
+    verbs: ["get", "list", "watch"]
+  
+  - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-cluster-rolebinding
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/component: monitoring
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: novacron
+roleRef:
+  kind: ClusterRole
+  name: prometheus-cluster-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Service Account for backup operations
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: novacron-backup
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: backup
+automountServiceAccountToken: true
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: novacron
+  name: novacron-backup-role
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: backup
+rules:
+  # Secret access for database credentials and AWS keys
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+    resourceNames:
+      - "novacron-db-secrets"
+      - "novacron-aws-secrets"
+  
+  # ConfigMap access for backup configuration
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  
+  # PVC access for backup storage
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+  
+  # Pod access for backup job management
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  
+  # Job access for backup job management
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: novacron-backup-rolebinding
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: backup
+subjects:
+  - kind: ServiceAccount
+    name: novacron-backup
+    namespace: novacron
+roleRef:
+  kind: Role
+  name: novacron-backup-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Service Account for monitoring and log collection
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: novacron-monitoring
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: monitoring
+automountServiceAccountToken: true
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: novacron
+  name: novacron-monitoring-role
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: monitoring
+rules:
+  # Pod access for log collection
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  
+  # Service access for service discovery
+  - apiGroups: [""]
+    resources: ["services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  
+  # ConfigMap access for configuration
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  
+  # Secret access for monitoring credentials
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+    resourceNames:
+      - "novacron-monitoring-secrets"
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: novacron-monitoring-rolebinding
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: monitoring
+subjects:
+  - kind: ServiceAccount
+    name: novacron-monitoring
+    namespace: novacron
+roleRef:
+  kind: Role
+  name: novacron-monitoring-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Pod Security Policy binding (if PSP is enabled)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: novacron
+  name: novacron-psp-role
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: security
+rules:
+  - apiGroups: ["policy"]
+    resources: ["podsecuritypolicies"]
+    verbs: ["use"]
+    resourceNames:
+      - "novacron-psp"
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: novacron-psp-rolebinding
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: security
+subjects:
+  - kind: ServiceAccount
+    name: novacron-api
+    namespace: novacron
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: novacron
+  - kind: ServiceAccount
+    name: novacron-backup
+    namespace: novacron
+  - kind: ServiceAccount
+    name: novacron-monitoring
+    namespace: novacron
+roleRef:
+  kind: Role
+  name: novacron-psp-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Network Policy for additional security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: novacron-api-netpol
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: novacron
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow traffic from frontend
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: frontend
+      ports:
+        - protocol: TCP
+          port: 8091
+        - protocol: TCP
+          port: 8093
+    
+    # Allow traffic from ingress controller
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8091
+        - protocol: TCP
+          port: 8093
+    
+    # Allow monitoring
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: monitoring
+      ports:
+        - protocol: TCP
+          port: 9090
+  
+  egress:
+    # Allow DNS
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    
+    # Allow database access
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: database
+      ports:
+        - protocol: TCP
+          port: 5432
+    
+    # Allow HTTPS for external services
+    - to: []
+      ports:
+        - protocol: TCP
+          port: 443
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: novacron-db-netpol
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/component: database
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only allow API server access
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: novacron
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 5432
+    
+    # Allow backup service access
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: backup
+      ports:
+        - protocol: TCP
+          port: 5432
+    
+    # Allow monitoring access
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: monitoring
+      ports:
+        - protocol: TCP
+          port: 5432
+  
+  egress:
+    # Allow DNS
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

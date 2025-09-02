@@ -96,10 +96,32 @@ class AuthService {
   }
 
   // Get current user from token
-  getCurrentUser() {
-    // In a real implementation, you would decode the JWT token
-    // For now, we'll return null to indicate no user is logged in
-    return null;
+  getCurrentUser(): UserResponse | null {
+    const token = this.getToken();
+    if (!token) return null;
+    
+    try {
+      // In a real implementation, you would decode the JWT token
+      // For now, we'll try to get user data from localStorage or return demo user
+      if (typeof window !== 'undefined') {
+        const storedUser = localStorage.getItem('authUser');
+        if (storedUser) {
+          return JSON.parse(storedUser);
+        }
+      }
+      
+      // Fallback demo user - in production this should decode the JWT
+      return {
+        id: "user-123",
+        email: "user@example.com", 
+        firstName: "Demo",
+        lastName: "User",
+        status: "active"
+      };
+    } catch (error) {
+      console.error('Error getting current user:', error);
+      return null;
+    }
   }
 
   // Check if user is authenticated
@@ -116,17 +138,21 @@ class AuthService {
     return null;
   }
 
-  // Set auth token
-  setToken(token: string) {
+  // Set auth token and user data
+  setToken(token: string, user?: UserResponse) {
     if (typeof window !== 'undefined') {
       localStorage.setItem('authToken', token);
+      if (user) {
+        localStorage.setItem('authUser', JSON.stringify(user));
+      }
     }
   }
 
-  // Remove auth token
+  // Remove auth token and user data
   removeToken() {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('authToken');
+      localStorage.removeItem('authUser');
     }
   }
 

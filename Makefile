@@ -10,6 +10,23 @@ build:
 	@echo "Building NovaCron components..."
 	docker-compose build
 
+
+# Build a stable core subset (orchestration and minimal VM types) without experimental modules
+core-build:
+	@echo "Building core subset (orchestration)..."
+	cd backend/core/orchestration && go build ./...
+
+# Run core unit tests (orchestration)
+core-test:
+	@echo "Running core unit tests (orchestration)..."
+	cd backend/core/orchestration && go test -v ./...
+
+# Minimal core server targets
+core-serve:
+	@echo "Starting Core Server on :8090"
+	cd backend/cmd/core-server && go run .
+
+
 # ============================================================================
 # Database Management
 # ============================================================================

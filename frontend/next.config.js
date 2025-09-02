@@ -1,5 +1,13 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Disable static optimization to avoid null pointer errors during build
+  experimental: {
+    appDir: true,
+    // Disable static optimization
+    staticPageGenerationTimeout: 0,
+    dynamicIO: false,
+  },
+
   // Compiler optimizations
   compiler: {
     // Remove console statements in production

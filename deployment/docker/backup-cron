@@ -1,0 +1,15 @@
+# NovaCron Backup Cron Configuration
+# Daily database backup at 2:00 AM UTC
+
+# Environment variables for cron
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+SHELL=/bin/bash
+
+# Daily database backup
+0 2 * * * /scripts/backup-database.sh >> /var/log/backup/backup-service.log 2>&1
+
+# Weekly cleanup (Sundays at 3:00 AM)
+0 3 * * 0 find /backups -name "novacron_backup_*" -mtime +30 -delete >> /var/log/backup/backup-service.log 2>&1
+
+# Health check update every 5 minutes
+*/5 * * * * echo "$(date -Iseconds)" > /tmp/backup-health

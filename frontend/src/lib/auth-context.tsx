@@ -30,50 +30,86 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Check if user is already authenticated
-    const storedToken = authService.getToken();
-    if (storedToken) {
-      setToken(storedToken);
-      // In a real implementation, you would fetch user data from the token or API
-      // For now, we'll set a basic user object
-      setUser({
-        id: "user-123",
-        email: "user@example.com",
-        firstName: "John",
-        lastName: "Doe",
-        status: "active"
-      });
-    }
-    setIsLoading(false);
+    const initAuth = async () => {
+      try {
+        // Check if user is already authenticated
+        const storedToken = authService.getToken();
+        if (storedToken) {
+          setToken(storedToken);
+          // Try to get current user data
+          const currentUser = authService.getCurrentUser();
+          if (currentUser) {
+            setUser(currentUser);
+          } else {
+            // Fallback user object for demo purposes
+            setUser({
+              id: "user-123",
+              email: "user@example.com",
+              firstName: "John",
+              lastName: "Doe",
+              status: "active"
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Failed to initialize auth:', error);
+        // Clear invalid token
+        authService.removeToken();
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    initAuth();
   }, []);
 
   const login = async (email: string, password: string) => {
+    if (!email || !password) {
+      throw new Error('Email and password are required');
+    }
+    
     try {
       const response = await authService.login({ email, password });
-      setToken(response.token);
-      setUser(response.user);
-      authService.setToken(response.token);
+      if (response?.token && response?.user) {
+        setToken(response.token);
+        setUser(response.user);
+        authService.setToken(response.token, response.user);
+      } else {
+        throw new Error('Invalid response from login service');
+      }
     } catch (error) {
+      console.error('Login failed:', error);
       throw error;
     }
   };
 
   const register = async (firstName: string, lastName: string, email: string, password: string) => {
+    if (!firstName || !lastName || !email || !password) {
+      throw new Error('All fields are required for registration');
+    }
+    
     try {
-      await authService.register({ firstName, lastName, email, password });
+      const response = await authService.register({ firstName, lastName, email, password });
       // After registration, user needs to log in
+      return response;
     } catch (error) {
+      console.error('Registration failed:', error);
       throw error;
     }
   };
 
   const logout = () => {
-    authService.logout();
-    setToken(null);
-    setUser(null);
+    try {
+      authService.logout();
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      setToken(null);
+      setUser(null);
+    }
   };
 
-  const isAuthenticated = !!token;
+  const isAuthenticated = !!(token && user);
 
   const value = {
     user,

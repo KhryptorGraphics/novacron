@@ -1,0 +1,4 @@
+github.com/gorilla/mux v1.8.1 h1:TuBL49tXwgrFYWhqrNgrUNEY92u81SPhu7sTdzQEiWY=
+github.com/gorilla/mux v1.8.1/go.mod h1:AKf9I4AEqPTmMytcMc0KkNouC66V3BtZ4qD5fmWSiMQ=
+github.com/khryptorgraphics/novacron/backend/core/backup v0.0.0-20250830173050-fe55263834f3 h1:AdtHMN06TgSS2RHsj9aRToigmseaAkV2v9Zo25lMqPc=
+github.com/khryptorgraphics/novacron/backend/core/backup v0.0.0-20250830173050-fe55263834f3/go.mod h1:rGm2FbT0LTpBhNYnXwHjbghjk/LG6Wp0aX8hh6brlls=

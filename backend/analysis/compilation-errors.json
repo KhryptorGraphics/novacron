@@ -1,0 +1,226 @@
+{
+  "analysis_timestamp": "2025-09-01T14:05:00Z",
+  "total_errors": 34,
+  "critical_blocking_errors": 12,
+  "error_categories": {
+    "multiple_main_functions": {
+      "severity": "CRITICAL",
+      "blocking": true,
+      "count": 9,
+      "description": "Multiple main functions in same package causing compilation conflicts",
+      "affected_files": [
+        "backend/cmd/api-server/main.go",
+        "backend/cmd/api-server/main_enhanced.go", 
+        "backend/cmd/api-server/main_improved.go",
+        "backend/cmd/api-server/main_multicloud.go",
+        "backend/cmd/api-server/main_production.go", 
+        "backend/cmd/api-server/main_real_backend.go",
+        "backend/cmd/api-server/main_secure.go",
+        "backend/cmd/api-server/main_working.go",
+        "backend/cmd/api-server/simple-api.go"
+      ],
+      "fix_priority": 1,
+      "estimated_fix_time": "2 hours"
+    },
+    "type_mismatches": {
+      "severity": "HIGH", 
+      "blocking": true,
+      "count": 8,
+      "description": "Interface implementation mismatches and struct type conflicts",
+      "errors": [
+        {
+          "file": "backend/core/backup/monitoring_system.go:532",
+          "error": "cannot use NewRPOMonitorV2() as *RPOMonitor value",
+          "type": "interface_mismatch"
+        },
+        {
+          "file": "backend/core/backup/monitoring_system.go:533", 
+          "error": "cannot use NewRTOMonitorV2() as *RTOMonitor value",
+          "type": "interface_mismatch"
+        },
+        {
+          "file": "backend/core/backup/monitoring_system.go:794",
+          "error": "cannot use map[string]*HealthStatus as map[string]*ComponentHealthStatus",
+          "type": "type_conversion"
+        },
+        {
+          "file": "backend/core/backup/monitoring_system.go:795",
+          "error": "cannot use []*Alert as []*BackupAlert value",
+          "type": "type_conversion"
+        },
+        {
+          "file": "backend/core/hypervisor/hypervisor.go:189",
+          "error": "vm.VM is not a type", 
+          "type": "undefined_type"
+        },
+        {
+          "file": "backend/api/admin/config.go:160",
+          "error": "assignment mismatch: 1 variable but h.createConfigBackup returns 2 values",
+          "type": "return_value_mismatch"
+        },
+        {
+          "file": "backend/core/monitoring/collectors.go:285",
+          "error": "unknown field MetricID in struct literal of type MetricBatch",
+          "type": "struct_field_mismatch"
+        },
+        {
+          "file": "backend/core/monitoring/collectors.go:289",
+          "error": "cannot use batch as *MetricBatch value in argument",
+          "type": "pointer_type_mismatch"
+        }
+      ],
+      "fix_priority": 2,
+      "estimated_fix_time": "4 hours"
+    },
+    "undefined_references": {
+      "severity": "HIGH",
+      "blocking": true, 
+      "count": 9,
+      "description": "Undefined types, functions, and constants",
+      "errors": [
+        {
+          "file": "backend/core/backup/replication_system.go:786",
+          "error": "undefined: JobStatusQueued",
+          "type": "undefined_constant"
+        },
+        {
+          "file": "backend/core/security/encryption.go:197",
+          "error": "undefined: time", 
+          "type": "missing_import"
+        },
+        {
+          "file": "backend/core/security/encryption.go:228", 
+          "error": "undefined: time",
+          "type": "missing_import"
+        },
+        {
+          "file": "backend/core/security/example_integration.go:127",
+          "error": "undefined: strings",
+          "type": "missing_import"
+        },
+        {
+          "file": "backend/core/security/vault.go:300",
+          "error": "undefined: api.Bool", 
+          "type": "undefined_function"
+        },
+        {
+          "file": "backend/core/backup/monitoring_system.go:546",
+          "error": "bms.rpoMonitor.Start undefined",
+          "type": "undefined_method"
+        },
+        {
+          "file": "backend/core/backup/monitoring_system.go:547",
+          "error": "bms.rtoMonitor.Start undefined", 
+          "type": "undefined_method"
+        },
+        {
+          "file": "backend/core/backup/monitoring_system.go:564",
+          "error": "bms.rpoMonitor.GetRPOStatus undefined",
+          "type": "undefined_method"
+        },
+        {
+          "file": "backend/core/backup/monitoring_system.go:569",
+          "error": "bms.rtoMonitor.GetRTOStatus undefined",
+          "type": "undefined_method"
+        }
+      ],
+      "fix_priority": 2,
+      "estimated_fix_time": "3 hours"
+    },
+    "import_conflicts": {
+      "severity": "MEDIUM",
+      "blocking": false,
+      "count": 8,
+      "description": "Unused imports and package redeclarations",
+      "errors": [
+        {
+          "file": "backend/core/migration/monitor.go:5",
+          "error": "encoding/json imported and not used",
+          "type": "unused_import"
+        },
+        {
+          "file": "backend/core/migration/orchestrator.go:5", 
+          "error": "encoding/binary imported and not used",
+          "type": "unused_import"
+        },
+        {
+          "file": "backend/core/migration/orchestrator.go:8",
+          "error": "io imported and not used", 
+          "type": "unused_import"
+        },
+        {
+          "file": "backend/core/migration/rollback.go:8",
+          "error": "io imported and not used",
+          "type": "unused_import"
+        },
+        {
+          "file": "backend/api/admin/database.go:8",
+          "error": "strconv imported and not used",
+          "type": "unused_import"
+        },
+        {
+          "file": "backend/core/security/vault.go:5",
+          "error": "encoding/json imported and not used",
+          "type": "unused_import"
+        },
+        {
+          "file": "backend/core/security/utils.go:12",
+          "error": "net/url imported and not used",
+          "type": "unused_import"
+        },
+        {
+          "file": "backend/core/monitoring/unified.go:12",
+          "error": "prometheus redeclared in this block",
+          "type": "import_redeclaration"
+        }
+      ],
+      "fix_priority": 3,
+      "estimated_fix_time": "1 hour"
+    }
+  },
+  "dependency_issues": {
+    "external_modules": [
+      {
+        "module": "github.com/khryptorgraphics/novacron/backend/core/backup@v0.0.0-20250830173050-fe55263834f3", 
+        "issues": "Version mismatch causing interface incompatibilities",
+        "severity": "HIGH"
+      }
+    ],
+    "import_cycles": "None detected",
+    "missing_dependencies": []
+  },
+  "compilation_status_by_package": {
+    "cmd/api-server": "FAILED - Multiple main functions",
+    "cmd/core-server": "FAILED - Dependency errors", 
+    "core/backup": "FAILED - Type mismatches and undefined references",
+    "core/security": "FAILED - Missing imports and undefined types",
+    "core/monitoring": "FAILED - Import conflicts and struct mismatches", 
+    "core/migration": "FAILED - Unused imports",
+    "api/admin": "FAILED - Assignment mismatch"
+  },
+  "fix_recommendations": {
+    "immediate_actions": [
+      "1. Consolidate cmd/api-server to single main.go file",
+      "2. Fix backup module interface implementations", 
+      "3. Add missing imports (time, strings) to security module",
+      "4. Resolve monitoring module prometheus import conflicts"
+    ],
+    "architectural_changes": [
+      "1. Create separate build targets for different api-server variants", 
+      "2. Update backup module interfaces to match V2 implementations",
+      "3. Standardize monitoring metric collection patterns"
+    ],
+    "cleanup_tasks": [
+      "1. Remove unused imports across all modules",
+      "2. Consolidate duplicate main functions into build variants", 
+      "3. Update external module versions for compatibility"
+    ]
+  },
+  "estimated_total_fix_time": "10-12 hours",
+  "blocking_packages": [
+    "cmd/api-server",
+    "core/backup", 
+    "core/security",
+    "core/monitoring"
+  ]
+}

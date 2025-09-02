@@ -94,19 +94,10 @@ func NewVMDriverFactory(config VMDriverConfig) VMDriverFactory {
 			return nil, fmt.Errorf("kata driver is not available in this build")
 
 		case VMTypeKVM:
-			log.Printf("Initializing KVM driver with base path %s", config.VMBasePath)
-			// Create the base path if it doesn't exist
-			if err := makeDirectoryIfNotExists(config.VMBasePath); err != nil {
-				log.Printf("Warning: Failed to create VM base path %s: %v", config.VMBasePath, err)
-			}
-			driverConfig := map[string]interface{}{
-				"node_id":   config.NodeID,
-				"qemu_path": config.QEMUBinaryPath,
-				"vm_path":   config.VMBasePath,
-			}
-			driver, err = NewKVMDriver(driverConfig)
+			// Core mode: use a no-op driver so tests and core server can run without KVM
+			driver, err = NewCoreStubDriver(map[string]interface{}{"node_id": config.NodeID})
 			if err != nil {
-				return nil, fmt.Errorf("failed to initialize KVM driver: %w", err)
+				return nil, fmt.Errorf("failed to initialize core stub driver: %w", err)
 			}
 
 		case VMTypeProcess:

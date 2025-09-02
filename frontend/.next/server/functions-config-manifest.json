@@ -1,0 +1,1 @@
+{"version":1,"functions":{"/admin":{},"/analytics":{},"/auth/forgot-password":{},"/auth/login":{},"/auth/register":{},"/auth/setup-2fa":{},"/core/vms/[id]":{},"/core/vms":{},"/dashboard":{},"/monitoring":{},"/network":{},"/":{},"/security":{},"/settings":{},"/storage":{},"/users":{},"/vms":{}}}

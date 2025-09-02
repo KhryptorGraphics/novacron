@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
+
+// Disable static generation for this page
+export const dynamic = 'force-dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -545,7 +548,7 @@ export default function AnalyticsPage() {
                     { name: "web-server-01", usage: 89, percentage: 25 },
                     { name: "backup-server", usage: 67, percentage: 19 },
                     { name: "dev-environment", usage: 34, percentage: 11 }
-                  ].map((vm, index) => (
+                  ].filter(vm => vm && vm.name).map((vm, index) => (
                     <div key={index} className="flex items-center justify-between">
                       <span className="text-sm font-medium">{vm.name}</span>
                       <div className="flex items-center space-x-2">

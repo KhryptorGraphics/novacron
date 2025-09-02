@@ -1,20 +1,28 @@
+//go:build !experimental
+
 package orchestration
+
 
 import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"fmt"
+
 	"time"
+
+	"sync"
 
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
-	"github.com/khryptorgraphics/novacron/backend/core/orchestration/events"
+	events "github.com/khryptorgraphics/novacron/backend/core/orchestration/events"
 )
 
 // WebSocketManager manages WebSocket connections for real-time orchestration events
 type WebSocketManager struct {
 	logger        *logrus.Logger
 	eventBus      events.EventBus
+
 	upgrader      websocket.Upgrader
 	clients       map[*WebSocketClient]bool
 	clientsMutex  sync.RWMutex
@@ -25,7 +33,6 @@ type WebSocketManager struct {
 	cancel        context.CancelFunc
 }
 
-import "sync"
 
 // WebSocketClient represents a connected WebSocket client
 type WebSocketClient struct {
@@ -56,7 +63,7 @@ type WebSocketMessage struct {
 // NewWebSocketManager creates a new WebSocket manager
 func NewWebSocketManager(logger *logrus.Logger, eventBus events.EventBus) *WebSocketManager {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &WebSocketManager{
 		logger:     logger,
 		eventBus:   eventBus,
@@ -83,7 +90,7 @@ func (wsm *WebSocketManager) Start() error {
 
 	// Subscribe to orchestration events
 	eventHandler := events.NewEventHandlerFunc("websocket-manager", "WebSocket Event Handler", wsm.handleOrchestrationEvent)
-	
+
 	_, err := wsm.eventBus.SubscribeToAll(wsm.ctx, eventHandler)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to events: %w", err)
@@ -96,20 +103,19 @@ func (wsm *WebSocketManager) Start() error {
 	return nil
 }
 
-import "fmt"
 
 // Stop stops the WebSocket manager
 func (wsm *WebSocketManager) Stop() error {
 	wsm.logger.Info("Stopping WebSocket manager")
 	wsm.cancel()
-	
+
 	// Close all client connections
 	wsm.clientsMutex.Lock()
 	for client := range wsm.clients {
 		client.conn.Close()
 	}
 	wsm.clientsMutex.Unlock()
-	
+
 	wsm.logger.Info("WebSocket manager stopped")
 	return nil
 }
@@ -144,7 +150,7 @@ func (wsm *WebSocketManager) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 func (wsm *WebSocketManager) GetStats() map[string]interface{} {
 	wsm.clientsMutex.RLock()
 	defer wsm.clientsMutex.RUnlock()
-	
+
 	return map[string]interface{}{
 		"connected_clients": len(wsm.clients),
 		"timestamp":        time.Now(),
@@ -166,7 +172,7 @@ func (wsm *WebSocketManager) run() {
 			wsm.clientsMutex.Lock()
 			wsm.clients[client] = true
 			wsm.clientsMutex.Unlock()
-			
+
 			// Send welcome message
 			welcome := WebSocketMessage{
 				Type:      "connected",
@@ -182,7 +188,7 @@ func (wsm *WebSocketManager) run() {
 				close(client.send)
 			}
 			wsm.clientsMutex.Unlock()
-			
+
 			wsm.logger.WithField("client_id", client.id).Info("WebSocket client disconnected")
 
 		case message := <-wsm.broadcast:
@@ -249,7 +255,7 @@ func (wsm *WebSocketManager) pingClients() {
 
 	wsm.clientsMutex.RLock()
 	staleClients := make([]*WebSocketClient, 0)
-	
+
 	for client := range wsm.clients {
 		// Check for stale connections (no pong response in 2 minutes)
 		if time.Since(client.lastPing) > 2*time.Minute {
@@ -388,25 +394,25 @@ func (c *WebSocketClient) handleSubscribe(message map[string]interface{}) error 
 	}
 
 	c.filters = &filters
-	
+
 	response := WebSocketMessage{
 		Type:      "subscribed",
 		Data:      map[string]interface{}{"filters": filters},
 		Timestamp: time.Now(),
 	}
-	
+
 	c.sendMessage(response)
 	return nil
 }
 
 func (c *WebSocketClient) handleUnsubscribe(message map[string]interface{}) error {
 	c.filters = &EventFilters{}
-	
+
 	response := WebSocketMessage{
 		Type:      "unsubscribed",
 		Timestamp: time.Now(),
 	}
-	
+
 	c.sendMessage(response)
 	return nil
 }

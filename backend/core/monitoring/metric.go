@@ -57,6 +57,23 @@ func NewMetric(name string, metricType MetricType, value float64, tags map[strin
 	}
 }
 
+// NewGaugeMetric creates a new gauge metric
+func NewGaugeMetric(name, displayName, description string, category string) *Metric {
+	tags := map[string]string{
+		"display_name": displayName,
+		"description":  description,
+		"category":     category,
+	}
+	return NewMetric(name, MetricTypeGauge, 0, tags)
+}
+
+// MetricValue represents a metric value with metadata
+type MetricValue struct {
+	Value     float64
+	Timestamp time.Time
+	Tags      map[string]string
+}
+
 // WithUnit sets the unit of the metric
 func (m *Metric) WithUnit(unit string) *Metric {
 	m.Unit = unit
@@ -231,6 +248,11 @@ func (r *MetricRegistry) Register(metric *Metric) {
 	
 	// Add metric to series
 	series.AddMetric(metric)
+}
+
+// RegisterMetric is an alias for Register to match the expected interface
+func (r *MetricRegistry) RegisterMetric(metric *Metric) {
+	r.Register(metric)
 }
 
 // Query queries metrics from the registry

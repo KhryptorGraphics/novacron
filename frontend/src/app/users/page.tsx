@@ -1,6 +1,9 @@
 "use client";
 
 import { useState } from "react";
+
+// Disable static generation for this page
+export const dynamic = 'force-dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -111,16 +114,17 @@ export default function UsersPage() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
 
-  // Filter users
-  const filteredUsers = users.filter(user => {
-    const matchesSearch = user.firstName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         user.lastName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         user.email.toLowerCase().includes(searchQuery.toLowerCase());
+  // Filter users with null checks
+  const filteredUsers = Array.isArray(users) ? users.filter(user => {
+    if (!user || typeof user !== 'object') return false;
+    const matchesSearch = (user.firstName?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+                         (user.lastName?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+                         (user.email?.toLowerCase() || '').includes(searchQuery.toLowerCase());
     const matchesRole = roleFilter === "all" || user.role === roleFilter;
     const matchesStatus = statusFilter === "all" || user.status === statusFilter;
     
     return matchesSearch && matchesRole && matchesStatus;
-  });
+  }) : [];
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -152,10 +156,10 @@ export default function UsersPage() {
   };
 
   const userStats = {
-    totalUsers: users.length,
-    activeUsers: users.filter(u => u.status === "active").length,
-    pendingUsers: users.filter(u => u.status === "pending").length,
-    adminUsers: users.filter(u => u.role === "admin").length
+    totalUsers: Array.isArray(users) ? users.length : 0,
+    activeUsers: Array.isArray(users) ? users.filter(u => u?.status === "active").length : 0,
+    pendingUsers: Array.isArray(users) ? users.filter(u => u?.status === "pending").length : 0,
+    adminUsers: Array.isArray(users) ? users.filter(u => u?.role === "admin").length : 0
   };
 
   const handleUserAction = (userId: string, action: string) => {
@@ -231,7 +235,7 @@ export default function UsersPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {users.filter(u => u.twoFactorEnabled).length}
+              {Array.isArray(users) ? users.filter(u => u?.twoFactorEnabled).length : 0}
             </div>
             <p className="text-xs text-muted-foreground">
               Enhanced security
@@ -298,16 +302,18 @@ export default function UsersPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredUsers.map((user) => (
+            {Array.isArray(filteredUsers) && filteredUsers.length > 0 ? filteredUsers.map((user) => {
+              if (!user || !user.id) return null;
+              return (
               <TableRow key={user.id}>
                 <TableCell>
                   <div className="flex items-center space-x-3">
                     <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-semibold">
-                      {user.firstName.charAt(0)}{user.lastName.charAt(0)}
+                      {(user.firstName || '').charAt(0)}{(user.lastName || '').charAt(0)}
                     </div>
                     <div>
-                      <div className="font-medium">{user.firstName} {user.lastName}</div>
-                      <div className="text-sm text-muted-foreground">{user.email}</div>
+                      <div className="font-medium">{user.firstName || ''} {user.lastName || ''}</div>
+                      <div className="text-sm text-muted-foreground">{user.email || ''}</div>
                     </div>
                   </div>
                 </TableCell>
@@ -323,7 +329,7 @@ export default function UsersPage() {
                     <span className="ml-1 capitalize">{user.status}</span>
                   </Badge>
                 </TableCell>
-                <TableCell>{user.department}</TableCell>
+                <TableCell>{user.department || 'N/A'}</TableCell>
                 <TableCell className="text-sm">
                   {user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : "Never"}
                 </TableCell>
@@ -376,7 +382,14 @@ export default function UsersPage() {
                   </DropdownMenu>
                 </TableCell>
               </TableRow>
-            ))}
+              );
+            }) : (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                  No users found
+                </TableCell>
+              </TableRow>
+            )}
           </TableBody>
         </Table>
       </Card>
@@ -418,9 +431,9 @@ export default function UsersPage() {
                   {userRoles.map(role => (
                     <SelectItem key={role.id} value={role.id}>
                       <div className="flex flex-col">
-                        <span>{role.name}</span>
+                        <span>{role.name || ''}</span>
                         <span className="text-xs text-muted-foreground">
-                          {role.description}
+                          {role.description || ''}
                         </span>
                       </div>
                     </SelectItem>

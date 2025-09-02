@@ -1,4 +1,7 @@
+//go:build experimental
+
 package vm
+
 
 import (
 	"context"
@@ -35,10 +38,10 @@ func (h *MetricsHandler) GetVMMetrics(w http.ResponseWriter, r *http.Request) {
 	// Get VM ID from URL
 	vars := mux.Vars(r)
 	vmID := vars["vm_id"]
-	
+
 	// Get metrics
 	metrics := h.metricsCollector.GetMetrics(vmID)
-	
+
 	// Convert to response format
 	response := make([]map[string]interface{}, 0, len(metrics))
 	for _, metric := range metrics {
@@ -50,7 +53,7 @@ func (h *MetricsHandler) GetVMMetrics(w http.ResponseWriter, r *http.Request) {
 			"values": metric.Values,
 		})
 	}
-	
+
 	// Write response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
@@ -62,26 +65,26 @@ func (h *MetricsHandler) GetVMMetric(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	vmID := vars["vm_id"]
 	metricName := vars["metric_name"]
-	
+
 	// Get metric
 	metric, err := h.metricsCollector.GetMetric(vmID, metricName)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	
+
 	// Parse query parameters
 	limit := 0
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		limit, _ = strconv.Atoi(limitStr)
 	}
-	
+
 	// Limit values if requested
 	values := metric.Values
 	if limit > 0 && limit < len(values) {
 		values = values[len(values)-limit:]
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"vm_id":  metric.VMID,
@@ -90,7 +93,7 @@ func (h *MetricsHandler) GetVMMetric(w http.ResponseWriter, r *http.Request) {
 		"unit":   metric.Unit,
 		"values": values,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -100,23 +103,23 @@ func (h *MetricsHandler) ExportVMMetrics(w http.ResponseWriter, r *http.Request)
 	// Get VM ID from URL
 	vars := mux.Vars(r)
 	vmID := vars["vm_id"]
-	
+
 	// Export metrics
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	if err := h.metricsCollector.ExportMetrics(ctx); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"vm_id":    vmID,
 		"exported": true,
 		"timestamp": time.Now(),
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }

@@ -368,7 +368,12 @@ func (p *PrometheusIntegration) GetLabelValues(ctx context.Context, labelName st
 		log.Printf("Label values warnings: %v", warnings)
 	}
 
-	return model.LabelValues(labelValues).Strings(), nil
+	// Convert model.LabelValues to []string
+	result := make([]string, len(labelValues))
+	for i, lv := range labelValues {
+		result[i] = string(lv)
+	}
+	return result, nil
 }
 
 // GetTargets retrieves Prometheus targets
@@ -532,11 +537,23 @@ func (p *PrometheusIntegration) handleFederation(w http.ResponseWriter, r *http.
 				}
 				
 				var value float64
-				switch mf.GetType() {
-				case prometheus.CounterValue:
-					value = m.GetCounter().GetValue()
-				case prometheus.GaugeValue:
-					value = m.GetGauge().GetValue()
+				switch mf.GetType().String() {
+				case "COUNTER":
+					if m.GetCounter() != nil {
+						value = m.GetCounter().GetValue()
+					}
+				case "GAUGE":
+					if m.GetGauge() != nil {
+						value = m.GetGauge().GetValue()
+					}
+				case "HISTOGRAM":
+					if m.GetHistogram() != nil {
+						value = float64(m.GetHistogram().GetSampleCount())
+					}
+				case "SUMMARY":
+					if m.GetSummary() != nil {
+						value = float64(m.GetSummary().GetSampleCount())
+					}
 				}
 				
 				timestamp := ""

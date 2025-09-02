@@ -1,0 +1,53 @@
+# NovaCron Backup Service Dockerfile
+# Comprehensive backup solution with cloud integration
+
+FROM alpine:3.18
+
+# Install required packages
+RUN apk add --no-cache \
+    postgresql-client \
+    aws-cli \
+    curl \
+    bash \
+    gzip \
+    gnupg \
+    coreutils \
+    findutils \
+    tar \
+    ca-certificates \
+    tzdata \
+    && rm -rf /var/cache/apk/*
+
+# Create non-root user
+RUN addgroup -g 1000 backup \
+    && adduser -u 1000 -G backup -s /bin/bash -D backup
+
+# Create required directories
+RUN mkdir -p /backups /scripts /var/log/backup \
+    && chown -R backup:backup /backups /scripts /var/log/backup
+
+# Copy backup scripts
+COPY scripts/backup/ /scripts/
+COPY deployment/docker/backup-entrypoint.sh /scripts/
+
+# Set permissions
+RUN chmod +x /scripts/*.sh
+
+# Copy cron configuration
+COPY deployment/docker/backup-cron /etc/crontabs/backup
+
+# Set up cron for backup user
+RUN chown backup:backup /etc/crontabs/backup
+
+# Switch to backup user
+USER backup
+
+# Set working directory
+WORKDIR /scripts
+
+# Health check
+HEALTHCHECK --interval=300s --timeout=30s --start-period=60s --retries=3 \
+    CMD [ -f /tmp/backup-health ] || exit 1
+
+# Default command
+CMD ["./backup-entrypoint.sh"]

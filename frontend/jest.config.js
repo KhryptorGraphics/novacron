@@ -14,9 +14,12 @@ const customJestConfig = {
   // Setup files
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   
-  // Module name mapping for absolute imports
+  // Module name mapping for absolute imports and static assets
   moduleNameMapping: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    '\\\\.(css|less|scss|sass)$': 'identity-obj-proxy',
+    '\\\\.(jpg|jpeg|png|gif|eot|otf|webp|svg|ttf|woff|woff2|mp4|webm|wav|mp3|m4a|aac|oga)$':
+      '<rootDir>/__mocks__/fileMock.js',
   },
   
   // Test patterns
@@ -71,13 +74,7 @@ const customJestConfig = {
     '^.+\\.module\\.(css|sass|scss)$',
   ],
   
-  // Mock static assets
-  moduleNameMapping: {
-    '^@/(.*)$': '<rootDir>/src/$1',
-    '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
-    '\\.(jpg|jpeg|png|gif|eot|otf|webp|svg|ttf|woff|woff2|mp4|webm|wav|mp3|m4a|aac|oga)$':
-      '<rootDir>/__mocks__/fileMock.js',
-  },
+  // Duplicate moduleNameMapping removed
   
   // Global test setup
   globals: {
@@ -101,11 +98,11 @@ const customJestConfig = {
   // Error handling
   errorOnDeprecated: true,
   
-  // Watch plugins for development
-  watchPlugins: [
-    'jest-watch-typeahead/filename',
-    'jest-watch-typeahead/testname',
-  ],
+  // Watch plugins for development (commented out due to optional dependencies)
+  // watchPlugins: [
+  //   'jest-watch-typeahead/filename',
+  //   'jest-watch-typeahead/testname',
+  // ],
 }
 
 // Export Jest config with Next.js defaults merged

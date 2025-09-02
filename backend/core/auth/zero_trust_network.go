@@ -3,10 +3,8 @@ package auth
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"net"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -14,33 +12,33 @@ import (
 
 // NetworkPolicy defines a zero-trust network policy
 type NetworkPolicy struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	Enabled     bool                   `json:"enabled"`
-	Priority    int                    `json:"priority"` // Higher priority = evaluated first
-	Source      NetworkPolicySelector  `json:"source"`
-	Destination NetworkPolicySelector  `json:"destination"`
-	Action      NetworkPolicyAction    `json:"action"`
-	Protocols   []NetworkProtocol      `json:"protocols"`
+	ID          string                   `json:"id"`
+	Name        string                   `json:"name"`
+	Description string                   `json:"description,omitempty"`
+	Enabled     bool                     `json:"enabled"`
+	Priority    int                      `json:"priority"` // Higher priority = evaluated first
+	Source      NetworkPolicySelector    `json:"source"`
+	Destination NetworkPolicySelector    `json:"destination"`
+	Action      NetworkPolicyAction      `json:"action"`
+	Protocols   []NetworkProtocol        `json:"protocols"`
 	Conditions  []NetworkPolicyCondition `json:"conditions,omitempty"`
-	Metrics     NetworkPolicyMetrics   `json:"metrics,omitempty"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
-	CreatedBy   string                 `json:"created_by,omitempty"`
+	Metrics     NetworkPolicyMetrics     `json:"metrics,omitempty"`
+	CreatedAt   time.Time                `json:"created_at"`
+	UpdatedAt   time.Time                `json:"updated_at"`
+	CreatedBy   string                   `json:"created_by,omitempty"`
 }
 
 // NetworkPolicySelector defines network policy selectors
 type NetworkPolicySelector struct {
-	TenantIDs    []string          `json:"tenant_ids,omitempty"`
-	UserIDs      []string          `json:"user_ids,omitempty"`
-	Roles        []string          `json:"roles,omitempty"`
-	Services     []string          `json:"services,omitempty"`
-	Namespaces   []string          `json:"namespaces,omitempty"`
-	IPRanges     []string          `json:"ip_ranges,omitempty"`
-	Domains      []string          `json:"domains,omitempty"`
-	Labels       map[string]string `json:"labels,omitempty"`
-	Any          bool              `json:"any,omitempty"`
+	TenantIDs  []string          `json:"tenant_ids,omitempty"`
+	UserIDs    []string          `json:"user_ids,omitempty"`
+	Roles      []string          `json:"roles,omitempty"`
+	Services   []string          `json:"services,omitempty"`
+	Namespaces []string          `json:"namespaces,omitempty"`
+	IPRanges   []string          `json:"ip_ranges,omitempty"`
+	Domains    []string          `json:"domains,omitempty"`
+	Labels     map[string]string `json:"labels,omitempty"`
+	Any        bool              `json:"any,omitempty"`
 }
 
 // NetworkPolicyAction defines policy actions
@@ -57,8 +55,8 @@ const (
 
 // NetworkProtocol defines allowed network protocols
 type NetworkProtocol struct {
-	Protocol string `json:"protocol"` // TCP, UDP, HTTP, HTTPS, gRPC
-	Ports    []int  `json:"ports,omitempty"`
+	Protocol   string      `json:"protocol"` // TCP, UDP, HTTP, HTTPS, gRPC
+	Ports      []int       `json:"ports,omitempty"`
 	PortRanges []PortRange `json:"port_ranges,omitempty"`
 }
 
@@ -70,18 +68,18 @@ type PortRange struct {
 
 // NetworkPolicyCondition defines additional policy conditions
 type NetworkPolicyCondition struct {
-	Type      string      `json:"type"` // time, geo, device_trust, etc.
-	Operator  string      `json:"operator"` // equals, not_equals, in, not_in, etc.
-	Value     interface{} `json:"value"`
+	Type     string      `json:"type"`     // time, geo, device_trust, etc.
+	Operator string      `json:"operator"` // equals, not_equals, in, not_in, etc.
+	Value    interface{} `json:"value"`
 }
 
 // NetworkPolicyMetrics tracks policy usage
 type NetworkPolicyMetrics struct {
-	Connections  int64     `json:"connections"`
-	BytesTransferred int64 `json:"bytes_transferred"`
-	Violations   int64     `json:"violations"`
-	LastAccess   time.Time `json:"last_access"`
-	LastViolation time.Time `json:"last_violation"`
+	Connections      int64     `json:"connections"`
+	BytesTransferred int64     `json:"bytes_transferred"`
+	Violations       int64     `json:"violations"`
+	LastAccess       time.Time `json:"last_access"`
+	LastViolation    time.Time `json:"last_violation"`
 }
 
 // NetworkConnection represents a network connection
@@ -108,30 +106,30 @@ type NetworkConnection struct {
 
 // DeviceTrust represents device trust information
 type DeviceTrust struct {
-	DeviceID      string            `json:"device_id"`
-	UserID        string            `json:"user_id"`
-	TenantID      string            `json:"tenant_id"`
-	DeviceType    string            `json:"device_type"`
-	OS            string            `json:"os"`
-	TrustLevel    int               `json:"trust_level"` // 0-100
-	Compliance    DeviceCompliance  `json:"compliance"`
-	Certificates  []string          `json:"certificates,omitempty"`
-	Fingerprint   string            `json:"fingerprint"`
-	LastSeen      time.Time         `json:"last_seen"`
-	RegisteredAt  time.Time         `json:"registered_at"`
-	Attributes    map[string]string `json:"attributes,omitempty"`
+	DeviceID     string            `json:"device_id"`
+	UserID       string            `json:"user_id"`
+	TenantID     string            `json:"tenant_id"`
+	DeviceType   string            `json:"device_type"`
+	OS           string            `json:"os"`
+	TrustLevel   int               `json:"trust_level"` // 0-100
+	Compliance   DeviceCompliance  `json:"compliance"`
+	Certificates []string          `json:"certificates,omitempty"`
+	Fingerprint  string            `json:"fingerprint"`
+	LastSeen     time.Time         `json:"last_seen"`
+	RegisteredAt time.Time         `json:"registered_at"`
+	Attributes   map[string]string `json:"attributes,omitempty"`
 }
 
 // DeviceCompliance represents device compliance status
 type DeviceCompliance struct {
-	Antivirus         bool      `json:"antivirus"`
-	Firewall          bool      `json:"firewall"`
-	Encryption        bool      `json:"encryption"`
-	OSUpdated         bool      `json:"os_updated"`
-	ScreenLock        bool      `json:"screen_lock"`
-	Jailbroken        bool      `json:"jailbroken"`
-	ComplianceScore   int       `json:"compliance_score"`
-	LastCheck         time.Time `json:"last_check"`
+	Antivirus       bool      `json:"antivirus"`
+	Firewall        bool      `json:"firewall"`
+	Encryption      bool      `json:"encryption"`
+	OSUpdated       bool      `json:"os_updated"`
+	ScreenLock      bool      `json:"screen_lock"`
+	Jailbroken      bool      `json:"jailbroken"`
+	ComplianceScore int       `json:"compliance_score"`
+	LastCheck       time.Time `json:"last_check"`
 }
 
 // Microsegment represents a network microsegment

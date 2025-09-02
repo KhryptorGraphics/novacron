@@ -639,6 +639,5 @@ func (t *TracingIntegration) NewNetworkOperationSpan(ctx context.Context, protoc
 		NovaCronSpan: baseSpan,
 		Protocol:     protocol,
 		Bandwidth:    bandwidth,
-		Operation:    operation,
 	}
 }

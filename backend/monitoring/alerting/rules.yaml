@@ -1,0 +1,390 @@
+# NovaCron Alerting Rules for 99.9% Uptime SLA
+# These rules define when alerts should fire based on metrics
+
+groups:
+  # SLA Monitoring Rules - Core business requirements
+  - name: sla_monitoring
+    interval: 15s
+    rules:
+      # Response Time SLA: <1s target
+      - alert: ResponseTimeSLAViolation
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="novacron"}[5m])) > 1.0
+        for: 2m
+        labels:
+          severity: warning
+          service: gateway
+          sla_type: response_time
+        annotations:
+          summary: "Response time SLA violation"
+          description: "95th percentile response time ({{ $value }}s) exceeds SLA target of 1 second"
+          current_value: "{{ $value }}s"
+          threshold: "1.0s"
+          impact: "User experience degradation"
+          runbook_url: "https://runbooks.novacron.local/response-time-sla"
+
+      # Critical Response Time: >2s
+      - alert: ResponseTimeCritical
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="novacron"}[5m])) > 2.0
+        for: 1m
+        labels:
+          severity: critical
+          service: gateway
+          sla_type: response_time
+        annotations:
+          summary: "Critical response time violation"
+          description: "95th percentile response time ({{ $value }}s) is critically high"
+          current_value: "{{ $value }}s"
+          threshold: "2.0s"
+          impact: "Severe user experience impact"
+          runbook_url: "https://runbooks.novacron.local/response-time-critical"
+
+      # Uptime SLA: >99.9% target
+      - alert: UptimeSLAViolation
+        expr: avg(up{job="novacron"}) * 100 < 99.9
+        for: 1m
+        labels:
+          severity: critical
+          service: system
+          sla_type: uptime
+        annotations:
+          summary: "Uptime SLA violation"
+          description: "System uptime ({{ $value }}%) below SLA target of 99.9%"
+          current_value: "{{ $value }}%"
+          threshold: "99.9%"
+          impact: "Service availability impact"
+          runbook_url: "https://runbooks.novacron.local/uptime-sla"
+
+      # Error Rate SLA: <0.1% target
+      - alert: ErrorRateSLAViolation
+        expr: (sum(rate(http_requests_total{job="novacron",status=~"5.."}[5m])) / sum(rate(http_requests_total{job="novacron"}[5m]))) * 100 > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: gateway
+          sla_type: error_rate
+        annotations:
+          summary: "Error rate SLA violation"
+          description: "Error rate ({{ $value }}%) exceeds SLA target of 0.1%"
+          current_value: "{{ $value }}%"
+          threshold: "0.1%"
+          impact: "Service reliability impact"
+          runbook_url: "https://runbooks.novacron.local/error-rate-sla"
+
+      # Critical Error Rate: >1%
+      - alert: ErrorRateCritical
+        expr: (sum(rate(http_requests_total{job="novacron",status=~"5.."}[5m])) / sum(rate(http_requests_total{job="novacron"}[5m]))) * 100 > 1.0
+        for: 1m
+        labels:
+          severity: critical
+          service: gateway
+          sla_type: error_rate
+        annotations:
+          summary: "Critical error rate"
+          description: "Error rate ({{ $value }}%) is critically high"
+          current_value: "{{ $value }}%"
+          threshold: "1.0%"
+          impact: "Major service degradation"
+          runbook_url: "https://runbooks.novacron.local/error-rate-critical"
+
+      # Throughput SLA: >1000 RPS target
+      - alert: ThroughputBelowSLA
+        expr: sum(rate(http_requests_total{job="novacron"}[5m])) < 1000
+        for: 5m
+        labels:
+          severity: warning
+          service: gateway
+          sla_type: throughput
+        annotations:
+          summary: "Throughput below SLA target"
+          description: "Request throughput ({{ $value }} RPS) below SLA target of 1000 RPS"
+          current_value: "{{ $value }} RPS"
+          threshold: "1000 RPS"
+          impact: "Performance capacity concern"
+          runbook_url: "https://runbooks.novacron.local/throughput-sla"
+
+  # System Health Monitoring
+  - name: system_health
+    interval: 30s
+    rules:
+      # Service Down
+      - alert: ServiceDown
+        expr: up{job="novacron"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: "{{ $labels.job }}"
+        annotations:
+          summary: "Service {{ $labels.instance }} is down"
+          description: "Service {{ $labels.job }} on {{ $labels.instance }} has been down for more than 1 minute"
+          runbook_url: "https://runbooks.novacron.local/service-down"
+
+      # High CPU Usage
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 80% for more than 5 minutes on {{ $labels.instance }}"
+          current_value: "{{ $value }}%"
+          threshold: "80%"
+
+      # Critical CPU Usage
+      - alert: CriticalCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 95
+        for: 2m
+        labels:
+          severity: critical
+          service: system
+        annotations:
+          summary: "Critical CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 95% for more than 2 minutes on {{ $labels.instance }}"
+          current_value: "{{ $value }}%"
+          threshold: "95%"
+
+      # High Memory Usage
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 80% for more than 5 minutes on {{ $labels.instance }}"
+          current_value: "{{ $value }}%"
+          threshold: "80%"
+
+      # Critical Memory Usage
+      - alert: CriticalMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+          service: system
+        annotations:
+          summary: "Critical memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 95% for more than 2 minutes on {{ $labels.instance }}"
+          current_value: "{{ $value }}%"
+          threshold: "95%"
+
+      # High Disk Usage
+      - alert: HighDiskUsage
+        expr: (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High disk usage on {{ $labels.instance }}"
+          description: "Disk usage is above 80% for {{ $labels.mountpoint }} on {{ $labels.instance }}"
+          current_value: "{{ $value }}%"
+          threshold: "80%"
+
+      # Critical Disk Usage
+      - alert: CriticalDiskUsage
+        expr: (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+          service: system
+        annotations:
+          summary: "Critical disk usage on {{ $labels.instance }}"
+          description: "Disk usage is above 95% for {{ $labels.mountpoint }} on {{ $labels.instance }}"
+          current_value: "{{ $value }}%"
+          threshold: "95%"
+
+  # VM Management Monitoring
+  - name: vm_management
+    interval: 30s
+    rules:
+      # VM Migration Failures
+      - alert: HighVMMigrationFailureRate
+        expr: (sum(rate(vm_migrations_total{status="failed"}[5m])) / sum(rate(vm_migrations_total[5m]))) * 100 > 5
+        for: 3m
+        labels:
+          severity: warning
+          service: vm-service
+        annotations:
+          summary: "High VM migration failure rate"
+          description: "VM migration failure rate ({{ $value }}%) is above 5%"
+          current_value: "{{ $value }}%"
+          threshold: "5%"
+
+      # VM Migration Taking Too Long
+      - alert: SlowVMMigration
+        expr: histogram_quantile(0.95, rate(vm_migration_duration_seconds_bucket[5m])) > 300
+        for: 2m
+        labels:
+          severity: warning
+          service: vm-service
+        annotations:
+          summary: "VM migrations taking too long"
+          description: "95th percentile VM migration time ({{ $value }}s) exceeds 5 minutes"
+          current_value: "{{ $value }}s"
+          threshold: "300s"
+
+      # No VM Activity
+      - alert: NoVMActivity
+        expr: sum(rate(vm_operations_total[5m])) == 0
+        for: 10m
+        labels:
+          severity: warning
+          service: vm-service
+        annotations:
+          summary: "No VM activity detected"
+          description: "No VM operations have been detected for the last 10 minutes"
+
+  # ML/Orchestration Monitoring
+  - name: ml_orchestration
+    interval: 60s
+    rules:
+      # ML Model Accuracy Drop
+      - alert: MLModelAccuracyDrop
+        expr: ml_model_accuracy{model_type="placement_predictor"} < 0.7
+        for: 5m
+        labels:
+          severity: warning
+          service: ml-service
+        annotations:
+          summary: "ML model accuracy dropped"
+          description: "{{ $labels.model_type }} model accuracy ({{ $value }}) dropped below 70%"
+          current_value: "{{ $value }}"
+          threshold: "0.7"
+
+      # ML Prediction Latency
+      - alert: MLPredictionLatency
+        expr: histogram_quantile(0.95, rate(ml_prediction_duration_seconds_bucket[5m])) > 0.5
+        for: 3m
+        labels:
+          severity: warning
+          service: ml-service
+        annotations:
+          summary: "ML prediction latency high"
+          description: "95th percentile ML prediction time ({{ $value }}s) exceeds 500ms"
+          current_value: "{{ $value }}s"
+          threshold: "0.5s"
+
+      # Orchestration Decision Failures
+      - alert: OrchestrationDecisionFailures
+        expr: (sum(rate(orchestration_decisions_total{status="failed"}[5m])) / sum(rate(orchestration_decisions_total[5m]))) * 100 > 1
+        for: 2m
+        labels:
+          severity: warning
+          service: orchestration-service
+        annotations:
+          summary: "High orchestration decision failure rate"
+          description: "Orchestration decision failure rate ({{ $value }}%) exceeds 1%"
+          current_value: "{{ $value }}%"
+          threshold: "1%"
+
+  # Federation Monitoring
+  - name: federation
+    interval: 60s
+    rules:
+      # Cluster Connectivity
+      - alert: FederationClusterDown
+        expr: federation_cluster_healthy == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: federation-service
+        annotations:
+          summary: "Federation cluster {{ $labels.cluster }} is down"
+          description: "Federation cluster {{ $labels.cluster }} is unreachable"
+
+      # Cross-Cluster Latency
+      - alert: HighCrossClusterLatency
+        expr: histogram_quantile(0.95, rate(federation_request_duration_seconds_bucket[5m])) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          service: federation-service
+        annotations:
+          summary: "High cross-cluster latency"
+          description: "95th percentile cross-cluster latency ({{ $value }}s) exceeds 1 second"
+          current_value: "{{ $value }}s"
+          threshold: "1.0s"
+
+  # Backup System Monitoring
+  - name: backup_system
+    interval: 300s # Check every 5 minutes
+    rules:
+      # Backup Failures
+      - alert: BackupFailureRate
+        expr: (sum(rate(backup_operations_total{status="failed"}[1h])) / sum(rate(backup_operations_total[1h]))) * 100 > 5
+        for: 10m
+        labels:
+          severity: warning
+          service: backup-service
+        annotations:
+          summary: "High backup failure rate"
+          description: "Backup failure rate ({{ $value }}%) exceeds 5% over the last hour"
+          current_value: "{{ $value }}%"
+          threshold: "5%"
+
+      # Backup Storage Full
+      - alert: BackupStorageFull
+        expr: backup_storage_usage_bytes / backup_storage_capacity_bytes * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+          service: backup-service
+        annotations:
+          summary: "Backup storage nearly full"
+          description: "Backup storage usage ({{ $value }}%) exceeds 90% capacity"
+          current_value: "{{ $value }}%"
+          threshold: "90%"
+
+      # No Recent Backups
+      - alert: NoRecentBackups
+        expr: time() - backup_last_successful_timestamp > 86400 # 24 hours
+        for: 1m
+        labels:
+          severity: critical
+          service: backup-service
+        annotations:
+          summary: "No recent successful backups"
+          description: "No successful backup completed in the last 24 hours"
+          threshold: "24 hours"
+
+  # Monitoring System Health
+  - name: monitoring_health
+    interval: 60s
+    rules:
+      # Prometheus Target Down
+      - alert: PrometheusTargetDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: monitoring
+        annotations:
+          summary: "Prometheus target {{ $labels.instance }} is down"
+          description: "Prometheus target {{ $labels.job }}/{{ $labels.instance }} has been down for more than 1 minute"
+
+      # High Metrics Ingestion Rate
+      - alert: HighMetricsIngestionRate
+        expr: rate(prometheus_tsdb_symbol_table_size_bytes[5m]) > 10000000 # 10MB/s
+        for: 5m
+        labels:
+          severity: warning
+          service: monitoring
+        annotations:
+          summary: "High metrics ingestion rate"
+          description: "Prometheus metrics ingestion rate is high: {{ $value }} bytes/second"
+
+      # Monitoring Storage Usage
+      - alert: MonitoringStorageHigh
+        expr: (prometheus_tsdb_storage_bytes / prometheus_tsdb_storage_bytes_total) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: monitoring
+        annotations:
+          summary: "Monitoring storage usage high"
+          description: "Prometheus storage usage ({{ $value }}%) exceeds 80%"
+          current_value: "{{ $value }}%"
+          threshold: "80%"

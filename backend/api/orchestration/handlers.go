@@ -1,4 +1,7 @@
+//go:build experimental
+
 package orchestration
+
 
 import (
 	"encoding/json"
@@ -49,11 +52,11 @@ func NewOrchestrationAPI(
 func (api *OrchestrationAPI) RegisterRoutes(router *mux.Router) {
 	// Orchestration engine routes
 	router.HandleFunc("/orchestration/status", api.GetOrchestrationStatus).Methods("GET")
-	
+
 	// Placement routes
 	router.HandleFunc("/orchestration/placement", api.CreatePlacementRequest).Methods("POST")
 	router.HandleFunc("/orchestration/placement/{id}", api.GetPlacementDecision).Methods("GET")
-	
+
 	// Auto-scaling routes
 	router.HandleFunc("/orchestration/autoscaling/status", api.GetAutoScalingStatus).Methods("GET")
 	router.HandleFunc("/orchestration/autoscaling/targets", api.ListAutoScalingTargets).Methods("GET")
@@ -63,7 +66,7 @@ func (api *OrchestrationAPI) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/orchestration/autoscaling/targets/{id}", api.DeleteAutoScalingTarget).Methods("DELETE")
 	router.HandleFunc("/orchestration/autoscaling/targets/{id}/decision", api.GetScalingDecision).Methods("GET")
 	router.HandleFunc("/orchestration/autoscaling/targets/{id}/prediction", api.GetScalingPrediction).Methods("GET")
-	
+
 	// Healing routes
 	router.HandleFunc("/orchestration/healing/status", api.GetHealingStatus).Methods("GET")
 	router.HandleFunc("/orchestration/healing/targets", api.ListHealingTargets).Methods("GET")
@@ -74,7 +77,7 @@ func (api *OrchestrationAPI) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/orchestration/healing/targets/{id}/health", api.GetTargetHealth).Methods("GET")
 	router.HandleFunc("/orchestration/healing/targets/{id}/heal", api.TriggerHealing).Methods("POST")
 	router.HandleFunc("/orchestration/healing/targets/{id}/history", api.GetHealingHistory).Methods("GET")
-	
+
 	// Policy routes
 	router.HandleFunc("/orchestration/policies", api.ListPolicies).Methods("GET")
 	router.HandleFunc("/orchestration/policies", api.CreatePolicy).Methods("POST")
@@ -134,13 +137,13 @@ func (api *OrchestrationAPI) GetAutoScalingStatus(w http.ResponseWriter, r *http
 // ListAutoScalingTargets lists all auto-scaling targets
 func (api *OrchestrationAPI) ListAutoScalingTargets(w http.ResponseWriter, r *http.Request) {
 	targets := api.autoScaler.GetTargets()
-	
+
 	// Convert map to slice for JSON response
 	targetList := make([]*autoscaling.AutoScalerTarget, 0, len(targets))
 	for _, target := range targets {
 		targetList = append(targetList, target)
 	}
-	
+
 	api.writeJSONResponse(w, http.StatusOK, map[string]interface{}{
 		"targets": targetList,
 		"count":   len(targetList),
@@ -266,13 +269,13 @@ func (api *OrchestrationAPI) GetHealingStatus(w http.ResponseWriter, r *http.Req
 // ListHealingTargets lists all healing targets
 func (api *OrchestrationAPI) ListHealingTargets(w http.ResponseWriter, r *http.Request) {
 	targets := api.healingController.GetTargets()
-	
+
 	// Convert map to slice for JSON response
 	targetList := make([]*healing.HealingTarget, 0, len(targets))
 	for _, target := range targets {
 		targetList = append(targetList, target)
 	}
-	
+
 	api.writeJSONResponse(w, http.StatusOK, map[string]interface{}{
 		"targets": targetList,
 		"count":   len(targetList),
@@ -373,7 +376,7 @@ func (api *OrchestrationAPI) TriggerHealing(w http.ResponseWriter, r *http.Reque
 	var request struct {
 		Reason string `json:"reason"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		api.writeErrorResponse(w, http.StatusBadRequest, "Invalid request body", err)
 		return
@@ -418,12 +421,12 @@ func (api *OrchestrationAPI) GetHealingHistory(w http.ResponseWriter, r *http.Re
 // ListPolicies lists all orchestration policies
 func (api *OrchestrationAPI) ListPolicies(w http.ResponseWriter, r *http.Request) {
 	filter := &policy.PolicyFilter{}
-	
+
 	// Parse query parameters
 	if namespace := r.URL.Query().Get("namespace"); namespace != "" {
 		filter.Namespace = namespace
 	}
-	
+
 	if enabledStr := r.URL.Query().Get("enabled"); enabledStr != "" {
 		if enabled, err := strconv.ParseBool(enabledStr); err == nil {
 			filter.Enabled = &enabled
@@ -583,7 +586,7 @@ func (api *OrchestrationAPI) ValidatePolicy(w http.ResponseWriter, r *http.Reque
 func (api *OrchestrationAPI) writeJSONResponse(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	
+
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		api.logger.WithError(err).Error("Failed to encode JSON response")
 	}

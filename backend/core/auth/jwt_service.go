@@ -33,13 +33,13 @@ type JWTConfiguration struct {
 // JWTClaims defines custom JWT claims
 type JWTClaims struct {
 	jwt.RegisteredClaims
-	UserID     string            `json:"user_id"`
-	TenantID   string            `json:"tenant_id"`
-	Roles      []string          `json:"roles"`
-	Permissions []string         `json:"permissions"`
-	TokenType  string            `json:"token_type"` // "access" or "refresh"
-	SessionID  string            `json:"session_id"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	UserID      string                 `json:"user_id"`
+	TenantID    string                 `json:"tenant_id"`
+	Roles       []string               `json:"roles"`
+	Permissions []string               `json:"permissions"`
+	TokenType   string                 `json:"token_type"` // "access" or "refresh"
+	SessionID   string                 `json:"session_id"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // TokenPair represents access and refresh tokens
@@ -79,7 +79,7 @@ func NewJWTService(config JWTConfiguration) *JWTService {
 // GenerateTokenPair generates access and refresh tokens
 func (j *JWTService) GenerateTokenPair(userID, tenantID string, roles []string, permissions []string, sessionID string, metadata map[string]interface{}) (*TokenPair, error) {
 	now := time.Now()
-	
+
 	// Generate access token
 	accessClaims := JWTClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -165,12 +165,12 @@ func (j *JWTService) ValidateToken(tokenString string) (*JWTClaims, error) {
 	}
 
 	// Validate audience
-	if !claims.VerifyAudience(j.config.Audience, true) {
+	if claims.Audience == nil || len(claims.Audience) == 0 || claims.Audience[0] != j.config.Audience {
 		return nil, fmt.Errorf("invalid audience")
 	}
 
 	// Validate issuer
-	if !claims.VerifyIssuer(j.config.Issuer, true) {
+	if claims.Issuer != j.config.Issuer {
 		return nil, fmt.Errorf("invalid issuer")
 	}
 
@@ -236,10 +236,7 @@ func GenerateRSAKeys(keySize int) (*rsa.PrivateKey, *rsa.PublicKey, error) {
 
 // ExportRSAPrivateKeyToPEM exports RSA private key to PEM format
 func ExportRSAPrivateKeyToPEM(privateKey *rsa.PrivateKey) ([]byte, error) {
-	privateKeyBytes, err := x509.MarshalPKCS1PrivateKey(privateKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal private key: %w", err)
-	}
+	privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey)
 
 	privateKeyBlock := &pem.Block{
 		Type:  "RSA PRIVATE KEY",

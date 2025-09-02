@@ -39,7 +39,7 @@ func AdvancedOrchestrationDemo(logger *logrus.Logger) error {
 
 	// 3. Initialize Auto-Scaling
 	autoScaler := autoscaling.NewDefaultAutoScaler(logger, eventBus)
-	
+
 	// Add auto-scaling target
 	autoScalingTarget := &autoscaling.AutoScalerTarget{
 		ID:      "web-service",
@@ -56,7 +56,7 @@ func AdvancedOrchestrationDemo(logger *logrus.Logger) error {
 			PredictionWeight:         0.3,
 		},
 	}
-	
+
 	if err := autoScaler.AddTarget(autoScalingTarget); err != nil {
 		return fmt.Errorf("failed to add auto-scaling target: %w", err)
 	}
@@ -68,7 +68,7 @@ func AdvancedOrchestrationDemo(logger *logrus.Logger) error {
 
 	// 4. Initialize Self-Healing
 	healingController := healing.NewDefaultHealingController(logger, eventBus)
-	
+
 	// Add healing target
 	healingTarget := &healing.HealingTarget{
 		ID:      "database-cluster",
@@ -90,7 +90,7 @@ func AdvancedOrchestrationDemo(logger *logrus.Logger) error {
 			BackoffStrategy:     healing.BackoffExponential,
 		},
 	}
-	
+
 	if err := healingController.RegisterTarget(healingTarget); err != nil {
 		return fmt.Errorf("failed to register healing target: %w", err)
 	}
@@ -102,7 +102,7 @@ func AdvancedOrchestrationDemo(logger *logrus.Logger) error {
 
 	// 5. Initialize Policy Engine
 	policyEngine := policy.NewDefaultPolicyEngine(logger, eventBus)
-	
+
 	// Create sample policies
 	placementPolicy := &policy.OrchestrationPolicy{
 		Name:        "High Availability Placement",
@@ -186,7 +186,24 @@ func AdvancedOrchestrationDemo(logger *logrus.Logger) error {
 
 	// 6. Initialize Main Orchestration Engine
 	orchestrationEngine := NewDefaultOrchestrationEngine(logger)
-	
+	// Inject a default evacuation handler with minimal adapters
+	listFn := func(nodeID string) ([]string, error) {
+		// Example only: integrate with your VM manager in real usage
+		return []string{"vm-1", "vm-2"}, nil
+	}
+	selectFn := func(vmID string, sourceNodeID string) (string, error) {
+		// Example only: choose a dummy target; in production, use placementEngine
+		if sourceNodeID == "nodeA" { return "nodeB", nil }
+		return "nodeA", nil
+	}
+	migrateFn := func(ctx context.Context, vmID, targetNodeID string) error {
+		// Example only: call into migration manager/driver in real usage
+		logger.WithFields(logrus.Fields{"vm_id": vmID, "target": targetNodeID}).Info("Mock migrate invoked")
+		return nil
+	}
+	orchestrationEngine.SetEvacuationHandler(NewDefaultEvacuationHandler(listFn, selectFn, migrateFn, logger))
+
+
 	// Register policies with orchestration engine
 	for _, pol := range []*OrchestrationPolicy{
 		{
@@ -298,7 +315,7 @@ func AdvancedOrchestrationDemo(logger *logrus.Logger) error {
 
 	// 8. Show system status
 	logger.Info("=== System Status ===")
-	
+
 	engineStatus := orchestrationEngine.GetStatus()
 	logger.WithFields(logrus.Fields{
 		"state":            engineStatus.State,
@@ -332,19 +349,19 @@ func AdvancedOrchestrationDemo(logger *logrus.Logger) error {
 
 	// 9. Cleanup
 	logger.Info("=== Cleaning Up ===")
-	
+
 	if err := autoScaler.StopMonitoring(); err != nil {
 		logger.WithError(err).Error("Failed to stop auto-scaling")
 	}
-	
+
 	if err := healingController.StopMonitoring(); err != nil {
 		logger.WithError(err).Error("Failed to stop healing controller")
 	}
-	
+
 	if err := orchestrationEngine.Stop(ctx); err != nil {
 		logger.WithError(err).Error("Failed to stop orchestration engine")
 	}
-	
+
 	if err := eventBus.Disconnect(); err != nil {
 		logger.WithError(err).Error("Failed to disconnect event bus")
 	}

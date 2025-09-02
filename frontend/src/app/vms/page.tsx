@@ -1,5 +1,8 @@
 "use client";
 
+// Disable static generation for this page
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,14 +12,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import { 
-  Server, 
-  Play, 
-  Pause, 
-  Square, 
-  RotateCw, 
-  Settings, 
-  Monitor, 
+import {
+  Server,
+  Play,
+  Pause,
+  Square,
+  RotateCw,
+  Settings,
+  Monitor,
   HardDrive,
   Cpu,
   MemoryStick,
@@ -55,7 +58,7 @@ const mockVMs = [
     created: "2024-01-15T10:30:00Z"
   },
   {
-    id: "vm-002", 
+    id: "vm-002",
     name: "database-primary",
     status: "running",
     os: "CentOS 8",
@@ -64,14 +67,14 @@ const mockVMs = [
     disk: { total: 500, used: 280, usage: 56 },
     network: { rx: 45.1, tx: 67.3 },
     uptime: "12d 8h 15m",
-    host: "node-02", 
+    host: "node-02",
     ip: "192.168.1.11",
     created: "2024-01-10T14:22:00Z"
   },
   {
     id: "vm-003",
     name: "dev-environment",
-    status: "stopped", 
+    status: "stopped",
     os: "Ubuntu 20.04 LTS",
     cpu: { cores: 2, usage: 0 },
     memory: { total: 4, used: 0, usage: 0 },
@@ -98,9 +101,9 @@ const mockVMs = [
   }
 ];
 
-export default function VMsPage() {
-  const [vms, setVMs] = useState(mockVMs);
-  const [filteredVMs, setFilteredVMs] = useState(mockVMs);
+  // Core-mode scaffolding state to keep legacy UI stable
+  const [vms, setVMs] = useState<any[]>(mockVMs || []);
+  const [filteredVMs, setFilteredVMs] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [hostFilter, setHostFilter] = useState("all");
@@ -109,27 +112,36 @@ export default function VMsPage() {
   const [showMigrationDialog, setShowMigrationDialog] = useState(false);
   const [migrationVM, setMigrationVM] = useState<string | null>(null);
 
-  // Filter VMs based on search and filters
+import { useVMs } from "@/lib/api/hooks/useVMs";
+import { connectEvents } from "@/lib/ws/client";
+import type { VM } from "@/lib/api/types";
+
+export default function VMsPage() {
+  const [q, setQ] = useState("");
+  const [stateFilter, setStateFilter] = useState<string>("");
+  const [welcome, setWelcome] = useState<any>(null);
+  const { items, pagination, isLoading, error } = useVMs({ page: 1, pageSize: 10, q, state: stateFilter || undefined });
+
   useEffect(() => {
-    let filtered = vms.filter(vm => {
-      const matchesSearch = vm.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           vm.os.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           vm.ip.includes(searchQuery);
-      const matchesStatus = statusFilter === "all" || vm.status === statusFilter;
-      const matchesHost = hostFilter === "all" || vm.host === hostFilter;
-      
-      return matchesSearch && matchesStatus && matchesHost;
-    });
-    
-    setFilteredVMs(filtered);
-  }, [vms, searchQuery, statusFilter, hostFilter]);
+    try {
+      const ws = connectEvents((msg) => setWelcome(msg));
+      return () => {
+        try {
+          ws.close();
+        } catch (error) {
+          console.warn('Error closing WebSocket:', error);
+        }
+      };
+    } catch (error) {
+      console.warn('Error connecting to WebSocket:', error);
+    }
+  }, []);
 
   const getStatusColor = (status: string) => {
     switch (status) {
       case "running": return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
       case "stopped": return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400";
-      case "error": return "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400";
-      case "starting": return "bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400";
+      case "paused": return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400";
       default: return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400";
     }
   };
@@ -144,12 +156,29 @@ export default function VMsPage() {
     }
   };
 
+  // Filter legacy list
+  useEffect(() => {
+    if (!Array.isArray(vms)) {
+      setFilteredVMs([]);
+      return;
+    }
+    const filtered = vms.filter((vm) => {
+      if (!vm) return false;
+      const matchesSearch = vm.name?.toLowerCase?.().includes(searchQuery.toLowerCase()) || vm.ip?.includes(searchQuery);
+      const matchesStatus = statusFilter === "all" || vm.status === statusFilter;
+      const matchesHost = hostFilter === "all" || vm.host === hostFilter;
+      return matchesSearch && matchesStatus && matchesHost;
+    });
+    setFilteredVMs(filtered);
+  }, [vms, searchQuery, statusFilter, hostFilter]);
+
+
   const handleVMAction = (vmId: string, action: string) => {
     // Mock VM action - replace with API call
     console.log(`Performing ${action} on VM ${vmId}`);
     // Update VM status locally for demo
-    setVMs(prev => prev.map(vm => 
-      vm.id === vmId 
+    setVMs(prev => prev.map(vm =>
+      vm.id === vmId
         ? { ...vm, status: action === "start" ? "starting" : action === "stop" ? "stopped" : vm.status }
         : vm
     ));
@@ -161,17 +190,17 @@ export default function VMsPage() {
   };
 
   const vmStats = {
-    total: vms.length,
-    running: vms.filter(vm => vm.status === "running").length,
-    stopped: vms.filter(vm => vm.status === "stopped").length,
-    error: vms.filter(vm => vm.status === "error").length
+    total: Array.isArray(vms) ? vms.length : 0,
+    running: Array.isArray(vms) ? vms.filter(vm => vm?.status === "running").length : 0,
+    stopped: Array.isArray(vms) ? vms.filter(vm => vm?.status === "stopped").length : 0,
+    error: Array.isArray(vms) ? vms.filter(vm => vm?.status === "error").length : 0
   };
 
-  const totalResources = vms.reduce((acc, vm) => ({
-    cpu: acc.cpu + vm.cpu.cores,
-    memory: acc.memory + vm.memory.total,
-    disk: acc.disk + vm.disk.total
-  }), { cpu: 0, memory: 0, disk: 0 });
+  const totalResources = Array.isArray(vms) ? vms.reduce((acc, vm) => ({
+    cpu: acc.cpu + (vm?.cpu?.cores || 0),
+    memory: acc.memory + (vm?.memory?.total || 0),
+    disk: acc.disk + (vm?.disk?.total || 0)
+  }), { cpu: 0, memory: 0, disk: 0 }) : { cpu: 0, memory: 0, disk: 0 };
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -198,12 +227,75 @@ export default function VMsPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{vmStats.total}</div>
+
+      {/* Core-mode list from API */}
+      <Card>
+        <CardHeader>
+          <CardTitle>VMs (Core API)</CardTitle>
+          <CardDescription>
+            {isLoading ? "Loading..." : error ? "Error loading" : `${items.length} items`}
+            {welcome ? ` — WS welcome: ${JSON.stringify(welcome)}` : null}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-2 mb-3">
+            <Input placeholder="Search (q)" value={q} onChange={(e)=>setQ(e.target.value)} className="w-64" />
+            <Select value={stateFilter} onValueChange={setStateFilter}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="State" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All</SelectItem>
+                <SelectItem value="running">Running</SelectItem>
+                <SelectItem value="stopped">Stopped</SelectItem>
+                <SelectItem value="paused">Paused</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>ID</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>State</TableHead>
+                <TableHead>Node</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead>Updated</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {Array.isArray(items) ? items.map((vm: any) => (
+                <TableRow key={vm?.id || Math.random()}>
+                  <TableCell className="font-mono text-xs">{vm?.id || "-"}</TableCell>
+                  <TableCell>{vm?.name || "-"}</TableCell>
+                  <TableCell><Badge className={getStatusColor(vm?.state || "unknown")}>{vm?.state || "unknown"}</Badge></TableCell>
+                  <TableCell>{vm?.node_id ?? "-"}</TableCell>
+                  <TableCell>{vm?.created_at || "-"}</TableCell>
+                  <TableCell>{vm?.updated_at || "-"}</TableCell>
+                </TableRow>
+              )) : (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                    {isLoading ? "Loading VMs..." : error ? "Error loading VMs" : "No VMs found"}
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+
+          <div className="text-sm text-muted-foreground mt-3">
+            page={pagination?.page ?? "-"} pageSize={pagination?.pageSize ?? "-"} total={pagination?.total ?? "-"} totalPages={pagination?.totalPages ?? "-"}
+          </div>
+        </CardContent>
+      </Card>
+
             <p className="text-xs text-muted-foreground">
               {vmStats.running} running, {vmStats.stopped} stopped
             </p>
           </CardContent>
         </Card>
-        
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total CPU Cores</CardTitle>
@@ -216,7 +308,7 @@ export default function VMsPage() {
             </p>
           </CardContent>
         </Card>
-        
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Memory</CardTitle>
@@ -229,7 +321,7 @@ export default function VMsPage() {
             </p>
           </CardContent>
         </Card>
-        
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Storage</CardTitle>
@@ -289,21 +381,25 @@ export default function VMsPage() {
           <TabsTrigger value="grid">Grid View</TabsTrigger>
           <TabsTrigger value="table">Table View</TabsTrigger>
         </TabsList>
-        
+
         <TabsContent value="grid" className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {filteredVMs.map((vm) => (
+            {Array.isArray(filteredVMs) && filteredVMs.length > 0 ? filteredVMs.map((vm) => (
               <VMDetailsCard
-                key={vm.id}
+                key={vm?.id || Math.random()}
                 vm={vm}
                 onAction={handleVMAction}
                 onMigration={handleMigration}
                 onSelect={setSelectedVM}
               />
-            ))}
+            )) : (
+              <div className="col-span-full text-center text-muted-foreground py-8">
+                No VMs found
+              </div>
+            )}
           </div>
         </TabsContent>
-        
+
         <TabsContent value="table" className="space-y-4">
           <Card>
             <Table>
@@ -321,90 +417,96 @@ export default function VMsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredVMs.map((vm) => (
-                  <TableRow key={vm.id}>
-                    <TableCell className="font-medium">{vm.name}</TableCell>
+                {Array.isArray(filteredVMs) && filteredVMs.length > 0 ? filteredVMs.map((vm) => (
+                  <TableRow key={vm?.id || Math.random()}>
+                    <TableCell className="font-medium">{vm?.name || "-"}</TableCell>
                     <TableCell>
-                      <Badge className={getStatusColor(vm.status)}>
-                        {getStatusIcon(vm.status)}
-                        <span className="ml-1 capitalize">{vm.status}</span>
+                      <Badge className={getStatusColor(vm?.status || "unknown")}>
+                        {getStatusIcon(vm?.status || "unknown")}
+                        <span className="ml-1 capitalize">{vm?.status || "unknown"}</span>
                       </Badge>
                     </TableCell>
-                    <TableCell>{vm.os}</TableCell>
-                    <TableCell>{vm.host}</TableCell>
+                    <TableCell>{vm?.os || "-"}</TableCell>
+                    <TableCell>{vm?.host || "-"}</TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-2">
-                        <span className="text-sm">{vm.cpu.cores} cores</span>
+                        <span className="text-sm">{vm?.cpu?.cores || 0} cores</span>
                         <div className="w-16">
-                          <Progress value={vm.cpu.usage} className="h-1" />
+                          <Progress value={vm?.cpu?.usage || 0} className="h-1" />
                         </div>
                         <span className="text-xs text-muted-foreground">
-                          {vm.cpu.usage}%
+                          {vm?.cpu?.usage || 0}%
                         </span>
                       </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-2">
-                        <span className="text-sm">{vm.memory.total} GB</span>
+                        <span className="text-sm">{vm?.memory?.total || 0} GB</span>
                         <div className="w-16">
-                          <Progress value={vm.memory.usage} className="h-1" />
+                          <Progress value={vm?.memory?.usage || 0} className="h-1" />
                         </div>
                         <span className="text-xs text-muted-foreground">
-                          {vm.memory.usage}%
+                          {vm?.memory?.usage || 0}%
                         </span>
                       </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-2">
-                        <span className="text-sm">{vm.disk.total} GB</span>
+                        <span className="text-sm">{vm?.disk?.total || 0} GB</span>
                         <div className="w-16">
-                          <Progress value={vm.disk.usage} className="h-1" />
+                          <Progress value={vm?.disk?.usage || 0} className="h-1" />
                         </div>
                         <span className="text-xs text-muted-foreground">
-                          {vm.disk.usage}%
+                          {vm?.disk?.usage || 0}%
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell>{vm.ip}</TableCell>
+                    <TableCell>{vm?.ip || "-"}</TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-1">
-                        {vm.status === "running" ? (
+                        {vm?.status === "running" ? (
                           <>
-                            <Button 
-                              variant="ghost" 
+                            <Button
+                              variant="ghost"
                               size="sm"
-                              onClick={() => handleVMAction(vm.id, "stop")}
+                              onClick={() => handleVMAction(vm?.id || "", "stop")}
                             >
                               <Square className="h-4 w-4" />
                             </Button>
-                            <Button 
-                              variant="ghost" 
+                            <Button
+                              variant="ghost"
                               size="sm"
-                              onClick={() => handleVMAction(vm.id, "restart")}
+                              onClick={() => handleVMAction(vm?.id || "", "restart")}
                             >
                               <RotateCw className="h-4 w-4" />
                             </Button>
                           </>
                         ) : (
-                          <Button 
-                            variant="ghost" 
+                          <Button
+                            variant="ghost"
                             size="sm"
-                            onClick={() => handleVMAction(vm.id, "start")}
+                            onClick={() => handleVMAction(vm?.id || "", "start")}
                           >
                             <Play className="h-4 w-4" />
                           </Button>
                         )}
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           size="sm"
-                          onClick={() => handleMigration(vm.id)}
+                          onClick={() => handleMigration(vm?.id || "")}
                         >
                           <ArrowRight className="h-4 w-4" />
                         </Button>
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                )) : (
+                  <TableRow>
+                    <TableCell colSpan={9} className="text-center text-muted-foreground">
+                      No VMs found
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </Card>
@@ -412,11 +514,11 @@ export default function VMsPage() {
       </Tabs>
 
       {/* Dialogs */}
-      <VMCreateDialog 
-        open={showCreateDialog} 
+      <VMCreateDialog
+        open={showCreateDialog}
         onOpenChange={setShowCreateDialog}
       />
-      
+
       <VMMigrationDialog
         open={showMigrationDialog}
         onOpenChange={setShowMigrationDialog}

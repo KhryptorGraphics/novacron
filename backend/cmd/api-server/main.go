@@ -24,6 +24,10 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/pkg/config"
 	"github.com/khryptorgraphics/novacron/backend/pkg/logger"
 	"github.com/khryptorgraphics/novacron/backend/pkg/middleware"
+	api_orch "github.com/khryptorgraphics/novacron/backend/api/orchestration"
+	"github.com/khryptorgraphics/novacron/backend/core/orchestration"
+	"github.com/sirupsen/logrus"
+
 )
 
 func main() {
@@ -120,6 +124,23 @@ func main() {
 		// Register mock VM handlers for development
 		registerMockVMHandlers(apiRouter.PathPrefix("/vm").Subrouter())
 	}
+
+	// Initialize orchestration engine (core-only mode)
+	orchLogger := appLogger.StandardLogger()
+	orchEngine := orchestration.NewDefaultOrchestrationEngine(orchLogger)
+	// Compose adapters using the VM manager and engine's placement engine
+	if vmManager != nil {
+		adapters := &orchestration.OrchestrationAdapters{VMManager: vmManager, PlacementEngine: orchEngine.Placement()}
+		// Build default evacuation handler
+		evacHandler := orchestration.NewDefaultEvacuationHandler(adapters.ListVMsByNodeAdapter, adapters.SelectTargetAdapter, adapters.MigrateAdapter, orchLogger)
+		orchEngine.SetEvacuationHandler(evacHandler)
+	}
+
+
+	// WebSocket orchestration events route (core-compatible)
+	wsManager := api_orch.NewWebSocketManager(logrus.New(), orchEngine.EventBus())
+	router.HandleFunc("/ws/events/v1", wsManager.HandleWebSocket)
+
 
 	// Register monitoring routes
 	if kvmManager != nil {
@@ -453,12 +474,12 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 				"tenant_id": user.TenantID,
 			},
 		}
-		
+
 		// Add role information if available
 		if len(user.Roles) > 0 {
 			response["user"].(map[string]interface{})["role"] = user.Roles[0].Name
 		}
-		
+
 		json.NewEncoder(w).Encode(response)
 	}).Methods("POST")
 
@@ -496,12 +517,12 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 				"tenant_id": user.TenantID,
 			},
 		}
-		
+
 		// Add role information if available
 		if len(user.Roles) > 0 {
 			response["user"].(map[string]interface{})["role"] = user.Roles[0].Name
 		}
-		
+
 		json.NewEncoder(w).Encode(response)
 	}).Methods("POST")
 
@@ -604,7 +625,7 @@ func registerMockHandlers(router *mux.Router) {
 				"status": "running"
 			},
 			{
-				"vmId": "vm-002", 
+				"vmId": "vm-002",
 				"name": "database-01",
 				"cpuUsage": 92.1,
 				"memoryUsage": 88.7,
@@ -778,7 +799,7 @@ func apiInfoHandler() http.HandlerFunc {
 			},
 			"documentation": "/api/docs",
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(response)
