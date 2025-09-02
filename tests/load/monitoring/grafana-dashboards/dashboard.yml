@@ -1,0 +1,13 @@
+# Grafana dashboard provisioning for load testing
+apiVersion: 1
+
+providers:
+  - name: 'novacron-load-testing'
+    orgId: 1
+    folder: 'NovaCron Load Testing'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

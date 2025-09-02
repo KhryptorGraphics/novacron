@@ -1,0 +1,277 @@
+global:
+  smtp_smarthost: 'smtp.company.com:587'
+  smtp_from: 'novacron-alerts@company.com'
+  smtp_auth_username: 'novacron-alerts@company.com'
+  smtp_auth_password: '${SMTP_PASSWORD}'
+  
+  # Global alert inhibition rules
+  resolve_timeout: 5m
+  
+# Inhibit rules prevent sending notifications for lower severity alerts
+# when higher severity alerts are already firing
+inhibit_rules:
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
+    equal: ['alertname', 'cluster', 'service']
+
+  - source_matchers:
+      - alertname = "NovaCronServiceDown"
+    target_matchers:
+      - component = "api"
+    equal: ['instance']
+
+# Route configuration
+route:
+  group_by: ['alertname', 'cluster', 'component']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 12h
+  receiver: 'default-receiver'
+  routes:
+    # Critical alerts - immediate notification
+    - matchers:
+        - severity = "critical"
+      receiver: 'critical-alerts'
+      group_wait: 10s
+      group_interval: 2m
+      repeat_interval: 5m
+      routes:
+        # SLA breaches go to executives
+        - matchers:
+            - component = "sla"
+          receiver: 'sla-breach-alerts'
+          
+        # Service down alerts
+        - matchers:
+            - alertname = "NovaCronServiceDown"
+          receiver: 'service-down-alerts'
+          
+        # Capacity issues
+        - matchers:
+            - component = "capacity"
+          receiver: 'capacity-alerts'
+
+    # VM-specific alerts
+    - matchers:
+        - component =~ "vm.*"
+      receiver: 'vm-team'
+      group_by: ['alertname', 'node_id', 'vm_id']
+      
+    # Storage alerts
+    - matchers:
+        - component = "storage"
+      receiver: 'storage-team'
+      
+    # Network alerts
+    - matchers:
+        - component = "network"
+      receiver: 'network-team'
+      
+    # Security alerts
+    - matchers:
+        - component = "security"
+      receiver: 'security-team'
+      
+    # Migration alerts
+    - matchers:
+        - component = "migration"
+      receiver: 'vm-team'
+      
+    # Warning alerts - less frequent
+    - matchers:
+        - severity = "warning"
+      receiver: 'warning-alerts'
+      group_interval: 10m
+      repeat_interval: 24h
+
+# Receivers configuration
+receivers:
+  - name: 'default-receiver'
+    email_configs:
+      - to: 'ops-team@company.com'
+        subject: '[NovaCron] {{ .Status | toUpper }} - {{ .GroupLabels.SortedPairs.Values | join " " }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Component: {{ .Labels.component }}
+          {{ if .Labels.runbook_url }}Runbook: {{ .Labels.runbook_url }}{{ end }}
+          {{ if .Labels.dashboard }}Dashboard: {{ .Labels.dashboard }}{{ end }}
+          {{ end }}
+
+  - name: 'critical-alerts'
+    email_configs:
+      - to: 'ops-critical@company.com, on-call@company.com'
+        subject: '[NovaCron CRITICAL] {{ .GroupLabels.SortedPairs.Values | join " " }}'
+        body: |
+          🚨 CRITICAL ALERT 🚨
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Component: {{ .Labels.component }}
+          Instance: {{ .Labels.instance }}
+          Started: {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
+          {{ if .Labels.runbook_url }}
+          📖 Runbook: {{ .Labels.runbook_url }}
+          {{ end }}
+          {{ if .Labels.dashboard }}
+          📊 Dashboard: {{ .Labels.dashboard }}
+          {{ end }}
+          {{ end }}
+          
+          Please acknowledge this alert immediately.
+        headers:
+          Priority: 'urgent'
+    
+    # PagerDuty integration for critical alerts
+    pagerduty_configs:
+      - routing_key: '${PAGERDUTY_INTEGRATION_KEY}'
+        severity: 'critical'
+        description: '{{ .GroupLabels.SortedPairs.Values | join " " }}'
+        details:
+          component: '{{ .GroupLabels.component }}'
+          severity: '{{ .GroupLabels.severity }}'
+          cluster: '{{ .GroupLabels.cluster }}'
+          
+    # Slack integration for critical alerts
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#ops-critical'
+        username: 'NovaCron Alerts'
+        icon_emoji: ':rotating_light:'
+        title: 'Critical Alert: {{ .GroupLabels.SortedPairs.Values | join " " }}'
+        text: |
+          {{ range .Alerts }}
+          🚨 *{{ .Annotations.summary }}*
+          
+          *Description:* {{ .Annotations.description }}
+          *Component:* {{ .Labels.component }}
+          *Instance:* {{ .Labels.instance }}
+          *Started:* {{ .StartsAt.Format "15:04:05 UTC" }}
+          {{ if .Labels.runbook_url }}
+          📖 <{{ .Labels.runbook_url }}|Runbook>
+          {{ end }}
+          {{ if .Labels.dashboard }}
+          📊 <{{ .Labels.dashboard }}|Dashboard>
+          {{ end }}
+          {{ end }}
+
+  - name: 'sla-breach-alerts'
+    email_configs:
+      - to: 'executives@company.com, product-team@company.com, ops-team@company.com'
+        subject: '[NovaCron SLA BREACH] {{ .GroupLabels.sla_type | title }} SLA Violated'
+        body: |
+          ⚠️ SLA BREACH ALERT ⚠️
+          
+          {{ range .Alerts }}
+          SLA Type: {{ .Labels.sla_type | title }}
+          Current Value: {{ .Annotations.description }}
+          Impact: {{ .Annotations.impact }}
+          
+          This requires IMMEDIATE attention as it affects customer SLA compliance.
+          {{ end }}
+        headers:
+          Priority: 'urgent'
+          Importance: 'high'
+
+  - name: 'service-down-alerts'
+    email_configs:
+      - to: 'ops-team@company.com, dev-team@company.com'
+        subject: '[NovaCron SERVICE DOWN] {{ .GroupLabels.job }}'
+        body: |
+          🔴 SERVICE DOWN
+          
+          {{ range .Alerts }}
+          Service: {{ .Labels.job }}
+          Instance: {{ .Labels.instance }}
+          Duration: {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
+          {{ if .Labels.runbook_url }}
+          Runbook: {{ .Labels.runbook_url }}
+          {{ end }}
+          {{ end }}
+          
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#ops-alerts'
+        username: 'NovaCron Alerts'
+        icon_emoji: ':red_circle:'
+        title: 'Service Down: {{ .GroupLabels.job }}'
+        text: |
+          {{ range .Alerts }}
+          🔴 Service {{ .Labels.job }} on {{ .Labels.instance }} is DOWN
+          Duration: {{ .StartsAt.Format "15:04:05 UTC" }}
+          {{ end }}
+
+  - name: 'vm-team'
+    email_configs:
+      - to: 'vm-team@company.com'
+        subject: '[NovaCron VM] {{ .GroupLabels.SortedPairs.Values | join " " }}'
+        body: |
+          VM Alert Details:
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          VM ID: {{ .Labels.vm_id }}
+          Node: {{ .Labels.node_id }}
+          {{ if .Labels.dashboard }}
+          Dashboard: {{ .Labels.dashboard }}
+          {{ end }}
+          {{ end }}
+
+  - name: 'storage-team'
+    email_configs:
+      - to: 'storage-team@company.com'
+        subject: '[NovaCron Storage] {{ .GroupLabels.SortedPairs.Values | join " " }}'
+
+  - name: 'network-team'
+    email_configs:
+      - to: 'network-team@company.com'
+        subject: '[NovaCron Network] {{ .GroupLabels.SortedPairs.Values | join " " }}'
+
+  - name: 'security-team'
+    email_configs:
+      - to: 'security-team@company.com'
+        subject: '[NovaCron Security] {{ .GroupLabels.SortedPairs.Values | join " " }}'
+    slack_configs:
+      - api_url: '${SECURITY_SLACK_WEBHOOK_URL}'
+        channel: '#security-alerts'
+        username: 'NovaCron Security'
+        icon_emoji: ':shield:'
+
+  - name: 'capacity-alerts'
+    email_configs:
+      - to: 'ops-team@company.com, capacity-planning@company.com'
+        subject: '[NovaCron Capacity] Capacity Planning Alert'
+        body: |
+          Capacity Planning Alert:
+          
+          {{ range .Alerts }}
+          {{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          
+          Dashboard: {{ .Labels.dashboard }}
+          {{ end }}
+          
+          Please review capacity and plan for scaling.
+
+  - name: 'warning-alerts'
+    email_configs:
+      - to: 'ops-team@company.com'
+        subject: '[NovaCron Warning] {{ .GroupLabels.SortedPairs.Values | join " " }}'
+        body: |
+          Warning Alert:
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Component: {{ .Labels.component }}
+          {{ end }}
+
+# Templates for custom notification formats
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'

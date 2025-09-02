@@ -1,0 +1,201 @@
+# Test runner Dockerfile for NovaCron integration tests
+FROM golang:1.23-alpine AS test-runner
+
+# Install system dependencies
+RUN apk add --no-cache \
+    git \
+    make \
+    curl \
+    postgresql-client \
+    docker-cli \
+    bash \
+    jq \
+    ca-certificates
+
+# Set working directory
+WORKDIR /app
+
+# Copy Go modules files first for better caching
+COPY go.mod go.sum ./
+COPY backend/go.mod backend/go.sum ./backend/
+
+# Download dependencies
+RUN go mod download
+RUN cd backend && go mod download
+
+# Install test and coverage tools
+RUN go install github.com/jstemmer/go-junit-report/v2@latest
+RUN go install golang.org/x/tools/cmd/cover@latest
+RUN go install github.com/axw/gocov/gocov@latest
+RUN go install github.com/AlekSi/gocov-xml@latest
+RUN go install github.com/mattn/goveralls@latest
+
+# Copy the entire project
+COPY . .
+
+# Create necessary directories
+RUN mkdir -p /app/coverage \
+    /app/test-results \
+    /tmp/novacron-test-storage
+
+# Set permissions
+RUN chmod -R 755 /app
+
+# Create test script
+RUN cat > /app/run-tests.sh << 'EOF'
+#!/bin/bash
+set -e
+
+echo "Starting NovaCron Integration Tests..."
+
+# Wait for dependencies
+echo "Waiting for database to be ready..."
+until pg_isready -h postgres-test -p 5432 -U postgres -d novacron_test; do
+  echo "Database not ready, waiting..."
+  sleep 2
+done
+
+echo "Database is ready!"
+
+# Set up test environment
+export CGO_ENABLED=0
+export GO_ENV=test
+
+# Change to backend directory
+cd /app/backend
+
+echo "Running integration tests with coverage..."
+
+# Run tests with coverage
+go test -v \
+  -race \
+  -timeout=30m \
+  -coverprofile=/app/coverage/coverage.out \
+  -covermode=atomic \
+  -coverpkg=./... \
+  ./tests/integration/... \
+  | tee /app/test-results/integration-tests.log
+
+# Generate coverage reports
+echo "Generating coverage reports..."
+go tool cover -html=/app/coverage/coverage.out -o /app/coverage/coverage.html
+go tool cover -func=/app/coverage/coverage.out > /app/coverage/coverage-summary.txt
+
+# Generate JUnit XML report
+echo "Generating JUnit XML report..."
+cat /app/test-results/integration-tests.log | go-junit-report -set-exit-code > /app/test-results/junit-report.xml
+
+# Generate additional coverage formats
+gocov convert /app/coverage/coverage.out > /app/coverage/coverage.json
+gocov-xml < /app/coverage/coverage.json > /app/coverage/coverage.xml
+
+echo "Tests completed successfully!"
+echo "Results available in:"
+echo "  - Test log: /app/test-results/integration-tests.log"
+echo "  - JUnit XML: /app/test-results/junit-report.xml" 
+echo "  - Coverage HTML: /app/coverage/coverage.html"
+echo "  - Coverage Summary: /app/coverage/coverage-summary.txt"
+echo "  - Coverage JSON: /app/coverage/coverage.json"
+echo "  - Coverage XML: /app/coverage/coverage.xml"
+EOF
+
+RUN chmod +x /app/run-tests.sh
+
+# Create quick test script
+RUN cat > /app/quick-test.sh << 'EOF'
+#!/bin/bash
+set -e
+
+echo "Running quick integration tests..."
+
+cd /app/backend
+
+# Run tests without coverage for faster execution
+go test -v -timeout=10m ./tests/integration/... -short
+
+echo "Quick tests completed!"
+EOF
+
+RUN chmod +x /app/quick-test.sh
+
+# Create specific test runner scripts
+RUN cat > /app/test-auth.sh << 'EOF'
+#!/bin/bash
+set -e
+cd /app/backend
+echo "Running authentication tests..."
+go test -v -timeout=5m ./tests/integration/auth/...
+EOF
+
+RUN cat > /app/test-vm.sh << 'EOF'
+#!/bin/bash
+set -e
+cd /app/backend
+echo "Running VM lifecycle tests..."
+go test -v -timeout=5m ./tests/integration/vm/...
+EOF
+
+RUN cat > /app/test-api.sh << 'EOF'
+#!/bin/bash
+set -e
+cd /app/backend
+echo "Running API endpoint tests..."
+go test -v -timeout=5m ./tests/integration/api/...
+EOF
+
+RUN cat > /app/test-websocket.sh << 'EOF'
+#!/bin/bash
+set -e
+cd /app/backend
+echo "Running WebSocket tests..."
+go test -v -timeout=5m ./tests/integration/websocket/...
+EOF
+
+RUN chmod +x /app/test-*.sh
+
+# Create cleanup script
+RUN cat > /app/cleanup-test-data.sh << 'EOF'
+#!/bin/bash
+set -e
+
+echo "Cleaning up test data..."
+
+# Clean test database
+export PGPASSWORD=password
+psql -h postgres-test -U postgres -d novacron_test -c "
+DELETE FROM vm_metrics WHERE vm_id LIKE 'test-%';
+DELETE FROM vms WHERE id LIKE 'test-%' OR name LIKE '%test%';  
+DELETE FROM users WHERE username LIKE '%test%' OR email LIKE '%test%';
+"
+
+echo "Test data cleaned up successfully!"
+EOF
+
+RUN chmod +x /app/cleanup-test-data.sh
+
+# Copy coverage report script
+COPY scripts/coverage-report.sh /app/coverage-report.sh
+RUN chmod +x /app/coverage-report.sh
+
+# Create benchmark script
+RUN cat > /app/benchmark.sh << 'EOF'
+#!/bin/bash
+set -e
+
+echo "Running performance benchmarks..."
+
+cd /app/backend
+
+# Run benchmarks
+go test -v -bench=. -benchmem -timeout=30m ./tests/integration/... > /app/test-results/benchmark-results.txt
+
+echo "Benchmarks completed! Results in /app/test-results/benchmark-results.txt"
+EOF
+
+RUN chmod +x /app/benchmark.sh
+
+# Expose ports for test services
+EXPOSE 8080 8081
+
+# Default command
+CMD ["/app/run-tests.sh"]

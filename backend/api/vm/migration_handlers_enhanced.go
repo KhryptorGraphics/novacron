@@ -103,17 +103,22 @@ func (h *EnhancedMigrationHandler) ListMigrations(w http.ResponseWriter, r *http
 	vmID := r.URL.Query().Get("vm_id")
 	
 	// Get migrations from VM manager
-	migrations := h.vmManager.ListMigrations()
+	ctx := r.Context()
+	migrations, err := h.vmManager.ListMigrations(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "MIGRATION_ERROR", err.Error())
+		return
+	}
 	
 	// Filter migrations
 	filtered := make([]interface{}, 0)
 	for _, m := range migrations {
 		include := true
 		
-		if status != "" && m.State != status {
+		if status != "" && m.Status != status {
 			include = false
 		}
-		if nodeID != "" && m.SourceNodeID != nodeID && m.DestNodeID != nodeID {
+		if nodeID != "" && m.SourceNode != nodeID && m.TargetNode != nodeID {
 			include = false
 		}
 		if vmID != "" && m.VMID != vmID {
@@ -130,12 +135,10 @@ func (h *EnhancedMigrationHandler) ListMigrations(w http.ResponseWriter, r *http
 				filtered = append(filtered, map[string]interface{}{
 					"id":               m.ID,
 					"vm_id":            m.VMID,
-					"source_node_id":   m.SourceNodeID,
-					"destination_node_id": m.DestNodeID,
-					"type":             m.Type,
-					"state":            m.State,
-					"created_at":       m.CreatedAt,
-					"updated_at":       m.UpdatedAt,
+					"source_node_id":   m.SourceNode,
+					"destination_node_id": m.TargetNode,
+					"status":           m.Status,
+					"progress":         m.Progress,
 				})
 			}
 		}
@@ -166,18 +169,18 @@ func (h *EnhancedMigrationHandler) CreateMigration(w http.ResponseWriter, r *htt
 		return
 	}
 	
-	// Validate migration type
-	var migrationType migration.MigrationType
-	switch request.Type {
-	case "live":
-		migrationType = migration.MigrationTypeLive
-	case "pre-copy":
-		migrationType = migration.MigrationTypePreCopy
-	case "post-copy":
-		migrationType = migration.MigrationTypePostCopy
-	case "hybrid":
-		migrationType = migration.MigrationTypeHybrid
-	default:
+	// Validate migration type - commented out for now
+	// var migrationType migration.MigrationType
+	// Validate migration type - simplified for now
+	validTypes := []string{"live", "pre-copy", "post-copy", "hybrid"}
+	validType := false
+	for _, vt := range validTypes {
+		if request.Type == vt {
+			validType = true
+			break
+		}
+	}
+	if !validType {
 		http.Error(w, "Invalid migration type", http.StatusBadRequest)
 		return
 	}

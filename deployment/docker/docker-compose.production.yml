@@ -1,0 +1,548 @@
+version: '3.8'
+
+# NovaCron Production Docker Compose
+# Secure, scalable production deployment with proper secrets management
+
+services:
+  # PostgreSQL with production configuration
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER_FILE: /run/secrets/postgres_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_DB: ${POSTGRES_DB:-novacron}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./configs/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./configs/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    secrets:
+      - postgres_user
+      - postgres_password
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $(cat /run/secrets/postgres_user) -d ${POSTGRES_DB:-novacron}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 512M
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+  # Redis Cluster for high availability
+  redis-master:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass $(cat /run/secrets/redis_password)
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --tcp-keepalive 300
+      --timeout 300
+    volumes:
+      - redis_master_data:/data
+      - ./configs/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    secrets:
+      - redis_password
+    networks:
+      - cache
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "$(cat /run/secrets/redis_password)", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  redis-replica:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --replicaof redis-master 6379
+      --masterauth $(cat /run/secrets/redis_password)
+      --requirepass $(cat /run/secrets/redis_password)
+      --appendonly yes
+    volumes:
+      - redis_replica_data:/data
+    secrets:
+      - redis_password
+    depends_on:
+      - redis-master
+    networks:
+      - cache
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "$(cat /run/secrets/redis_password)", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # API Server with enhanced security
+  api:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_PREFIX:-novacron}/api-server:${TAG:-latest}
+    restart: unless-stopped
+    environment:
+      # Server configuration
+      API_PORT: 8090
+      WS_PORT: 8091
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: json
+      
+      # Database configuration
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-novacron}
+      DB_USER_FILE: /run/secrets/postgres_user
+      DB_PASSWORD_FILE: /run/secrets/postgres_password
+      DB_SSLMODE: require
+      DB_MAX_CONNECTIONS: 50
+      DB_CONN_MAX_LIFETIME: 300s
+      
+      # Authentication
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
+      JWT_EXPIRY: 24h
+      SESSION_TIMEOUT: 30m
+      
+      # Cache configuration
+      REDIS_MASTER_ADDR: redis-master:6379
+      REDIS_REPLICA_ADDRS: redis-replica:6379
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      CACHE_TTL: 15m
+      
+      # Security
+      CORS_ALLOWED_ORIGINS: https://${DOMAIN_NAME:-novacron.local}
+      CSRF_ENABLED: true
+      RATE_LIMIT_ENABLED: true
+      RATE_LIMIT_REQUESTS: 100
+      RATE_LIMIT_WINDOW: 60s
+      
+      # Monitoring
+      METRICS_ENABLED: true
+      TRACING_ENABLED: true
+      JAEGER_ENDPOINT: http://jaeger:14268/api/traces
+      
+    volumes:
+      - api_logs:/var/log/novacron
+      - api_uploads:/var/lib/novacron/uploads
+    secrets:
+      - postgres_user
+      - postgres_password
+      - jwt_secret
+      - redis_password
+      - source: ssl_cert
+        target: /etc/ssl/certs/novacron.crt
+      - source: ssl_key
+        target: /etc/ssl/private/novacron.key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+      - database
+      - cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "https://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "10"
+    deploy:
+      replicas: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+      placement:
+        preferences:
+          - spread: node.id
+
+  # Frontend with Nginx
+  frontend:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_PREFIX:-novacron}/frontend:${TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NGINX_HOST: ${DOMAIN_NAME:-novacron.local}
+      NGINX_PORT: 443
+      SSL_CERT: /etc/ssl/certs/novacron.crt
+      SSL_KEY: /etc/ssl/private/novacron.key
+      API_UPSTREAM: api:8090
+      GZIP_ENABLED: true
+      BROTLI_ENABLED: true
+    volumes:
+      - frontend_cache:/var/cache/nginx
+      - frontend_logs:/var/log/nginx
+    secrets:
+      - source: ssl_cert
+        target: /etc/ssl/certs/novacron.crt
+      - source: ssl_key
+        target: /etc/ssl/private/novacron.key
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - api
+    networks:
+      - frontend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=10GB'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--log.level=info'
+    volumes:
+      - prometheus_data:/prometheus
+      - ./configs/prometheus:/etc/prometheus:ro
+    networks:
+      - monitoring
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+      placement:
+        constraints:
+          - node.role == manager
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER__FILE: /run/secrets/grafana_admin_user
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_SECURITY_SECRET_KEY__FILE: /run/secrets/grafana_secret_key
+      GF_USERS_ALLOW_SIGN_UP: false
+      GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: false
+      GF_INSTALL_PLUGINS: grafana-piechart-panel,grafana-worldmap-panel
+      GF_LOG_LEVEL: info
+      GF_SERVER_PROTOCOL: https
+      GF_SERVER_CERT_FILE: /etc/ssl/certs/novacron.crt
+      GF_SERVER_CERT_KEY: /etc/ssl/private/novacron.key
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
+    secrets:
+      - grafana_admin_user
+      - grafana_admin_password
+      - grafana_secret_key
+      - source: ssl_cert
+        target: /etc/ssl/certs/novacron.crt
+      - source: ssl_key
+        target: /etc/ssl/private/novacron.key
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring
+      - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -k -f https://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    user: "472:472"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Jaeger for distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    restart: unless-stopped
+    environment:
+      COLLECTOR_ZIPKIN_HTTP_PORT: 9411
+      SPAN_STORAGE_TYPE: elasticsearch
+      ES_SERVER_URLS: http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    networks:
+      - monitoring
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # Elasticsearch for logs and traces
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.security.enabled=false
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Backup service
+  backup:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_PREFIX:-novacron}/backup:${TAG:-latest}
+    restart: unless-stopped
+    environment:
+      BACKUP_SCHEDULE: "0 2 * * *"  # Daily at 2 AM
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-novacron}
+      DB_USER_FILE: /run/secrets/postgres_user
+      DB_PASSWORD_FILE: /run/secrets/postgres_password
+      BACKUP_RETENTION_DAYS: 30
+      S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      S3_REGION: ${BACKUP_S3_REGION:-us-east-1}
+    volumes:
+      - backup_data:/var/lib/backup
+      - postgres_data:/var/lib/postgresql/data:ro
+    secrets:
+      - postgres_user
+      - postgres_password
+      - aws_access_key
+      - aws_secret_key
+    depends_on:
+      - postgres
+    networks:
+      - database
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+      placement:
+        constraints:
+          - node.role == manager
+
+# Networks for service isolation
+networks:
+  frontend:
+    driver: overlay
+    attachable: true
+  backend:
+    driver: overlay
+    attachable: true
+  database:
+    driver: overlay
+    internal: true
+  cache:
+    driver: overlay
+    internal: true
+  monitoring:
+    driver: overlay
+    attachable: true
+
+# Persistent volumes
+volumes:
+  postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/novacron/data/postgres
+  redis_master_data:
+    driver: local
+  redis_replica_data:
+    driver: local
+  prometheus_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/novacron/data/prometheus
+  grafana_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/novacron/data/grafana
+  elasticsearch_data:
+    driver: local
+  backup_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/novacron/backups
+  api_logs:
+    driver: local
+  api_uploads:
+    driver: local
+  frontend_cache:
+    driver: local
+  frontend_logs:
+    driver: local
+
+# Docker secrets for secure credential management
+secrets:
+  postgres_user:
+    external: true
+  postgres_password:
+    external: true
+  jwt_secret:
+    external: true
+  redis_password:
+    external: true
+  grafana_admin_user:
+    external: true
+  grafana_admin_password:
+    external: true
+  grafana_secret_key:
+    external: true
+  ssl_cert:
+    external: true
+  ssl_key:
+    external: true
+  aws_access_key:
+    external: true
+  aws_secret_key:
+    external: true
+
+# Configuration for Docker Swarm deployment
+configs:
+  prometheus_config:
+    file: ./configs/prometheus/prometheus.yml
+  grafana_provisioning:
+    file: ./configs/grafana/provisioning/datasources/prometheus.yml
+  nginx_config:
+    file: ./configs/nginx/nginx.conf

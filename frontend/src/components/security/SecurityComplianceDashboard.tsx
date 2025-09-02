@@ -493,7 +493,7 @@ const SecurityComplianceDashboard: React.FC = () => {
                       fill="#8884d8"
                       dataKey="value"
                     >
-                      {vulnerabilityDistribution.map((entry, index) => (
+                      {(vulnerabilityDistribution || []).map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
@@ -534,7 +534,7 @@ const SecurityComplianceDashboard: React.FC = () => {
             <CardContent>
               <ScrollArea className="h-[300px]">
                 <div className="space-y-4">
-                  {securityEvents.slice(0, 5).map((event) => (
+                  {(securityEvents || []).slice(0, 5).map((event) => (
                     <div key={event.id} className="flex items-start space-x-4 p-4 rounded-lg border">
                       <div className="mt-1">{getStatusIcon(event.result)}</div>
                       <div className="flex-1 space-y-1">
@@ -597,7 +597,7 @@ const SecurityComplianceDashboard: React.FC = () => {
 
               <ScrollArea className="h-[500px]">
                 <div className="space-y-2">
-                  {securityEvents.map((event) => (
+                  {(securityEvents || []).map((event) => (
                     <div key={event.id} className="p-4 border rounded-lg hover:bg-accent/50 transition-colors">
                       <div className="flex items-start justify-between">
                         <div className="space-y-1">
@@ -639,7 +639,7 @@ const SecurityComplianceDashboard: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {complianceRequirements.map((req) => (
+                {(complianceRequirements || []).map((req) => (
                   <div key={req.id} className="p-4 border rounded-lg">
                     <div className="flex items-start justify-between">
                       <div className="space-y-1 flex-1">
@@ -663,7 +663,7 @@ const SecurityComplianceDashboard: React.FC = () => {
                             <AlertTitle>Remediation Required</AlertTitle>
                             <AlertDescription>
                               <ul className="list-disc list-inside mt-2">
-                                {req.remediationSteps.map((step, idx) => (
+                                {(req.remediationSteps || []).map((step, idx) => (
                                   <li key={idx}>{step}</li>
                                 ))}
                               </ul>
@@ -672,7 +672,7 @@ const SecurityComplianceDashboard: React.FC = () => {
                         )}
                         {req.evidence && (
                           <div className="flex gap-2 mt-2">
-                            {req.evidence.map((file, idx) => (
+                            {(req.evidence || []).map((file, idx) => (
                               <Badge key={idx} variant="secondary">
                                 <FileText className="h-3 w-3 mr-1" />
                                 {file}
@@ -728,7 +728,7 @@ const SecurityComplianceDashboard: React.FC = () => {
 
               {/* Scan Results */}
               <div className="space-y-4">
-                {vulnerabilityScans.map((scan) => (
+                {(vulnerabilityScans || []).map((scan) => (
                   <div key={scan.id} className="border rounded-lg p-4">
                     <div className="flex items-center justify-between mb-4">
                       <div>
@@ -768,7 +768,7 @@ const SecurityComplianceDashboard: React.FC = () => {
                     {scan.findings && scan.findings.length > 0 && (
                       <div className="space-y-2">
                         <h5 className="text-sm font-medium">Top Findings:</h5>
-                        {scan.findings.slice(0, 3).map((finding) => (
+                        {(scan.findings || []).slice(0, 3).map((finding) => (
                           <div key={finding.id} className="p-3 bg-accent/50 rounded-lg">
                             <div className="flex items-start justify-between">
                               <div className="space-y-1">
@@ -812,7 +812,7 @@ const SecurityComplianceDashboard: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {accessControls.map((control) => (
+                {(accessControls || []).map((control) => (
                   <div key={control.id} className="border rounded-lg p-4">
                     <div className="flex items-center justify-between mb-4">
                       <div>
@@ -838,7 +838,7 @@ const SecurityComplianceDashboard: React.FC = () => {
 
                     <div className="space-y-2">
                       <h5 className="text-sm font-medium">Rules:</h5>
-                      {control.rules.map((rule) => (
+                      {(control.rules || []).map((rule) => (
                         <div key={rule.id} className="flex items-center gap-2 text-sm p-2 bg-accent/50 rounded">
                           <Badge variant={rule.effect === 'allow' ? 'default' : 'destructive'}>
                             {rule.effect}

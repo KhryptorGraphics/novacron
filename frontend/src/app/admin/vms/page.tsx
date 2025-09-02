@@ -1,5 +1,8 @@
 "use client";
 
+// Disable static generation for this page
+export const dynamic = 'force-dynamic';
+
 import { useState } from "react";
 import { useVmTemplates, useCreateVmTemplate, useDeleteVmTemplate } from "@/lib/api/hooks/useAdmin";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";

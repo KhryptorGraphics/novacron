@@ -1,0 +1,197 @@
+groups:
+  - name: novacron.alerts
+    interval: 30s
+    rules:
+      # High-level Service Availability Alerts
+      - alert: NovaCronServiceDown
+        expr: up{job=~"novacron.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: core
+        annotations:
+          summary: "NovaCron service {{ $labels.job }} is down"
+          description: "NovaCron service {{ $labels.job }} on instance {{ $labels.instance }} has been down for more than 1 minute."
+          runbook_url: "https://docs.novacron.io/runbooks/service-down"
+
+      - alert: NovaCronAPIHighErrorRate
+        expr: rate(http_requests_total{job="novacron-api",status=~"5.."}[5m]) / rate(http_requests_total{job="novacron-api"}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High error rate on NovaCron API"
+          description: "NovaCron API error rate is {{ printf \"%.2f\" $value }}% (> 10%) for the last 5 minutes"
+          dashboard: "https://grafana.example.com/d/novacron-api"
+
+      - alert: NovaCronAPIHighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="novacron-api"}[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High latency on NovaCron API"
+          description: "NovaCron API 95th percentile latency is {{ printf \"%.2f\" $value }}s (> 2s)"
+
+      # VM Management Alerts
+      - alert: VMCreationFailureRate
+        expr: rate(novacron_vm_operations_total{operation="create",status="failure"}[10m]) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+          component: vm-manager
+        annotations:
+          summary: "High VM creation failure rate"
+          description: "VM creation failure rate is {{ printf \"%.2f\" $value }} failures/min"
+
+      - alert: VMHighCPUUsage
+        expr: avg by (vm_id, node_id) (novacron_vm_cpu_usage_percent) > 90
+        for: 10m
+        labels:
+          severity: warning
+          component: vm
+        annotations:
+          summary: "VM {{ $labels.vm_id }} high CPU usage"
+          description: "VM {{ $labels.vm_id }} on node {{ $labels.node_id }} has CPU usage {{ printf \"%.2f\" $value }}% (> 90%)"
+          dashboard: "https://grafana.example.com/d/novacron-vm-details?var-vm_id={{ $labels.vm_id }}"
+
+      - alert: VMHighMemoryUsage
+        expr: (novacron_vm_memory_usage_bytes / novacron_vm_memory_total_bytes) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+          component: vm
+        annotations:
+          summary: "VM {{ $labels.vm_id }} high memory usage"
+          description: "VM {{ $labels.vm_id }} memory usage is {{ printf \"%.2f\" $value }}% (> 90%)"
+
+      # Migration Alerts
+      - alert: VMigrationFailureRate
+        expr: rate(novacron_vm_migrations_total{status="failure"}[30m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: migration
+        annotations:
+          summary: "High VM migration failure rate"
+          description: "VM migration failure rate is {{ printf \"%.4f\" $value }} failures/min (> 0.05/min)"
+          runbook_url: "https://docs.novacron.io/runbooks/migration-failures"
+
+      - alert: VMigrationDurationHigh
+        expr: histogram_quantile(0.95, rate(novacron_vm_migration_duration_seconds_bucket[10m])) > 300
+        for: 5m
+        labels:
+          severity: warning
+          component: migration
+        annotations:
+          summary: "VM migration taking too long"
+          description: "95th percentile VM migration duration is {{ printf \"%.0f\" $value }}s (> 300s)"
+
+      # Resource Exhaustion Alerts
+      - alert: NodeCPUExhaustion
+        expr: (100 - (avg by (node_id) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 95
+        for: 10m
+        labels:
+          severity: critical
+          component: node
+        annotations:
+          summary: "Node {{ $labels.node_id }} CPU exhaustion"
+          description: "Node {{ $labels.node_id }} CPU usage is {{ printf \"%.2f\" $value }}% (> 95%)"
+
+      - alert: NodeMemoryExhaustion
+        expr: ((node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes) * 100 > 95
+        for: 10m
+        labels:
+          severity: critical
+          component: node
+        annotations:
+          summary: "Node {{ $labels.node_id }} memory exhaustion"
+          description: "Node {{ $labels.node_id }} memory usage is {{ printf \"%.2f\" $value }}% (> 95%)"
+
+      # Cluster Health Alerts
+      - alert: NovaCronClusterUnhealthy
+        expr: count(up{job=~"novacron.*"} == 1) / count(up{job=~"novacron.*"}) < 0.8
+        for: 2m
+        labels:
+          severity: critical
+          component: cluster
+        annotations:
+          summary: "NovaCron cluster is unhealthy"
+          description: "Only {{ printf \"%.0f\" $value }}% of NovaCron services are healthy (< 80%)"
+
+      - alert: PrometheusTargetDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: "Prometheus target {{ $labels.instance }} is down"
+          description: "{{ $labels.job }} target {{ $labels.instance }} has been down for more than 5 minutes"
+
+  - name: novacron.sla
+    interval: 60s
+    rules:
+      # SLA Tracking Rules
+      - record: novacron:sla:availability_1h
+        expr: avg_over_time(up{job=~"novacron.*"}[1h])
+
+      - record: novacron:sla:availability_24h
+        expr: avg_over_time(up{job=~"novacron.*"}[24h])
+
+      - record: novacron:sla:error_rate_1h
+        expr: rate(http_requests_total{job="novacron-api",status=~"5.."}[1h]) / rate(http_requests_total{job="novacron-api"}[1h])
+
+      - record: novacron:sla:latency_p95_1h
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="novacron-api"}[1h]))
+
+      # SLA Breach Alerts
+      - alert: NovaCronSLAAvailabilityBreach
+        expr: novacron:sla:availability_24h < 0.999
+        for: 0s
+        labels:
+          severity: critical
+          component: sla
+          sla_type: availability
+        annotations:
+          summary: "NovaCron SLA availability breach"
+          description: "24h availability is {{ printf \"%.4f\" $value }} (< 99.9%)"
+          impact: "Customer SLA breach - immediate attention required"
+
+      - alert: NovaCronSLALatencyBreach
+        expr: novacron:sla:latency_p95_1h > 1
+        for: 15m
+        labels:
+          severity: warning
+          component: sla
+          sla_type: latency
+        annotations:
+          summary: "NovaCron SLA latency breach"
+          description: "1h P95 latency is {{ printf \"%.2f\" $value }}s (> 1s)"
+
+  - name: novacron.capacity
+    interval: 300s
+    rules:
+      # Capacity Planning Rules
+      - record: novacron:capacity:cpu_utilization
+        expr: avg(100 - (avg by (node_id) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100))
+
+      - record: novacron:capacity:memory_utilization
+        expr: avg(((node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes) * 100)
+
+      - record: novacron:capacity:storage_utilization
+        expr: avg((node_filesystem_size_bytes{mountpoint="/"} - node_filesystem_avail_bytes{mountpoint="/"}) / node_filesystem_size_bytes{mountpoint="/"} * 100)
+
+      # Capacity Alerts
+      - alert: NovaCronCapacityWarning
+        expr: novacron:capacity:cpu_utilization > 80 or novacron:capacity:memory_utilization > 80
+        for: 30m
+        labels:
+          severity: warning
+          component: capacity
+        annotations:
+          summary: "NovaCron cluster approaching capacity limits"
+          description: "Cluster CPU: {{ printf \"%.1f\" (query \"novacron:capacity:cpu_utilization\") }}%, Memory: {{ printf \"%.1f\" (query \"novacron:capacity:memory_utilization\") }}%"
+          dashboard: "https://grafana.example.com/d/novacron-capacity"

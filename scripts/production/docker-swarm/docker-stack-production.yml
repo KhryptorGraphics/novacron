@@ -1,0 +1,544 @@
+# NovaCron Production Docker Swarm Stack
+# High-Availability Production Deployment with ports above 15555
+version: '3.8'
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-healthcheck: &default-healthcheck
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 60s
+
+networks:
+  novacron-prod:
+    driver: overlay
+    attachable: true
+  monitoring:
+    driver: overlay
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  traefik_certs:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+secrets:
+  db_password:
+    external: true
+  redis_password:
+    external: true
+  auth_secret:
+    external: true
+
+services:
+  # Reverse Proxy and Load Balancer
+  traefik:
+    image: traefik:v3.0
+    command:
+      - "--api.dashboard=false"
+      - "--providers.docker.swarmmode=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:15556"
+      - "--entrypoints.websecure.address=:15557"
+      - "--entrypoints.api.address=:15558"
+      - "--entrypoints.websocket.address=:15559"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@novacron.com}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--global.sendAnonymousUsage=false"
+      - "--log.level=INFO"
+      - "--accesslog=true"
+      - "--metrics.prometheus=true"
+    ports:
+      - target: 15556
+        published: 15556
+        protocol: tcp
+        mode: ingress
+      - target: 15557
+        published: 15557
+        protocol: tcp
+        mode: ingress
+      - target: 15558
+        published: 15558
+        protocol: tcp
+        mode: ingress
+      - target: 15559
+        published: 15559
+        protocol: tcp
+        mode: ingress
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_certs:/letsencrypt
+    networks:
+      - novacron-prod
+      - monitoring
+    deploy:
+      mode: replicated
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.2'
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    logging: *default-logging
+
+  # PostgreSQL Database with High Availability
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: novacron
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: novacron_prod
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+      POSTGRES_HOST_AUTH_METHOD: "scram-sha-256"
+      POSTGRES_SHARED_PRELOAD_LIBRARIES: "pg_stat_statements"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - novacron-prod
+    secrets:
+      - db_password
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.storage == true
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+      update_config:
+        parallelism: 1
+        delay: 60s
+        failure_action: rollback
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U novacron -d novacron_prod"]
+      <<: *default-healthcheck
+    logging: *default-logging
+
+  # Redis for Caching and Session Management
+  redis:
+    image: redis:7-alpine
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --port 15560
+      --bind 0.0.0.0
+      --protected-mode yes
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - novacron-prod
+    secrets:
+      - redis_password
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.cache == true
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "15560", "--no-auth-warning", "-a", "${REDIS_PASSWORD}", "ping"]
+      <<: *default-healthcheck
+    logging: *default-logging
+
+  # NovaCron API Server
+  api:
+    image: novacron/api:latest
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+      API_PORT: 15561
+      WS_PORT: 15562
+      DB_URL: postgresql://novacron:${DB_PASSWORD}@postgres:5432/novacron_prod
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:15560
+      AUTH_SECRET_FILE: /run/secrets/auth_secret
+      TLS_ENABLED: "true"
+      TLS_CERT_FILE: /etc/ssl/certs/api.crt
+      TLS_KEY_FILE: /etc/ssl/private/api.key
+      CORS_ORIGINS: "https://${DOMAIN:-localhost:15557}"
+      RATE_LIMIT_REQUESTS: "1000"
+      RATE_LIMIT_WINDOW: "60s"
+      VM_MAX_CONCURRENT: "100"
+      FEDERATION_ENABLED: "true"
+      MONITORING_ENABLED: "true"
+    ports:
+      - target: 15561
+        published: 15561
+        protocol: tcp
+        mode: ingress
+      - target: 15562
+        published: 15562
+        protocol: tcp
+        mode: ingress
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - novacron-prod
+      - monitoring
+    secrets:
+      - auth_secret
+    volumes:
+      - /var/log/novacron:/var/log/novacron
+    deploy:
+      mode: replicated
+      replicas: 3
+      placement:
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+        monitor: 60s
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:15561/health"]
+      <<: *default-healthcheck
+    logging: *default-logging
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=PathPrefix(`/api`)"
+      - "traefik.http.routers.api.entrypoints=api"
+      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.api.loadbalancer.server.port=15561"
+      - "traefik.http.routers.websocket.rule=PathPrefix(`/ws`)"
+      - "traefik.http.routers.websocket.entrypoints=websocket"
+      - "traefik.http.services.websocket.loadbalancer.server.port=15562"
+
+  # NovaCron Frontend
+  frontend:
+    image: novacron/frontend:latest
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: "https://${DOMAIN:-localhost:15557}/api"
+      NEXT_PUBLIC_WS_URL: "wss://${DOMAIN:-localhost:15559}/ws"
+      PORT: 15563
+      HOSTNAME: "0.0.0.0"
+    depends_on:
+      - api
+    networks:
+      - novacron-prod
+    deploy:
+      mode: replicated
+      replicas: 2
+      placement:
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:15563/health"]
+      <<: *default-healthcheck
+    logging: *default-logging
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.frontend.loadbalancer.server.port=15563"
+      - "traefik.http.routers.frontend-redirect.rule=Host(`${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.frontend-redirect.entrypoints=web"
+      - "traefik.http.routers.frontend-redirect.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=10GB'
+      - '--web.enable-lifecycle'
+      - '--web.external-url=http://${DOMAIN:-localhost:15564}'
+      - '--web.listen-address=0.0.0.0:15564'
+    ports:
+      - target: 15564
+        published: 15564
+        protocol: tcp
+        mode: ingress
+    volumes:
+      - prometheus_data:/prometheus
+      - ./monitoring/prometheus:/etc/prometheus
+    networks:
+      - monitoring
+      - novacron-prod
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.monitoring == true
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:15564/-/healthy"]
+      <<: *default-healthcheck
+    logging: *default-logging
+
+  # Grafana Visualization
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin123}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_HTTP_PORT: "15565"
+      GF_SERVER_ROOT_URL: "https://${DOMAIN:-localhost:15557}/grafana"
+      GF_DATABASE_TYPE: "postgres"
+      GF_DATABASE_HOST: "postgres:5432"
+      GF_DATABASE_NAME: "grafana"
+      GF_DATABASE_USER: "grafana"
+      GF_DATABASE_PASSWORD: "${DB_PASSWORD}"
+    ports:
+      - target: 15565
+        published: 15565
+        protocol: tcp
+        mode: ingress
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana:/etc/grafana/provisioning
+    depends_on:
+      - postgres
+      - prometheus
+    networks:
+      - monitoring
+      - novacron-prod
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.monitoring == true
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:15565/api/health || exit 1"]
+      <<: *default-healthcheck
+    logging: *default-logging
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=PathPrefix(`/grafana`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
+      - "traefik.http.services.grafana.loadbalancer.server.port=15565"
+
+  # Alertmanager for Alert Handling
+  alertmanager:
+    image: prom/alertmanager:latest
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://${DOMAIN:-localhost:15566}'
+      - '--web.listen-address=0.0.0.0:15566'
+      - '--cluster.listen-address=0.0.0.0:15567'
+    ports:
+      - target: 15566
+        published: 15566
+        protocol: tcp
+        mode: ingress
+    volumes:
+      - ./monitoring/alertmanager:/etc/alertmanager
+    networks:
+      - monitoring
+    deploy:
+      mode: replicated
+      replicas: 2
+      placement:
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:15566/-/healthy"]
+      <<: *default-healthcheck
+    logging: *default-logging
+
+  # Hypervisor Manager (VM Operations)
+  hypervisor:
+    image: novacron/hypervisor:latest
+    privileged: true
+    environment:
+      HYPERVISOR_TYPE: "kvm"
+      HYPERVISOR_PORT: "15568"
+      API_ENDPOINT: "https://api:15561"
+      LOG_LEVEL: "info"
+      MAX_VMS: "100"
+      STORAGE_BACKEND: "ceph"
+      NETWORK_BACKEND: "ovn"
+    ports:
+      - target: 15568
+        published: 15568
+        protocol: tcp
+        mode: ingress
+    volumes:
+      - /var/lib/libvirt:/var/lib/libvirt
+      - /var/run/libvirt:/var/run/libvirt
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+      - /dev:/dev
+    depends_on:
+      - api
+    networks:
+      - novacron-prod
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.labels.hypervisor == true
+      resources:
+        limits:
+          memory: 8G
+          cpus: '4.0'
+        reservations:
+          memory: 4G
+          cpus: '2.0'
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:15568/health"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+    logging: *default-logging
+
+  # AI Engine for Predictive Management
+  ai-engine:
+    image: novacron/ai-engine:latest
+    environment:
+      PYTHON_ENV: "production"
+      AI_PORT: "15569"
+      API_ENDPOINT: "https://api:15561"
+      MODEL_CACHE_SIZE: "2GB"
+      PREDICTION_INTERVAL: "60s"
+      ML_MODELS_PATH: "/app/models"
+    ports:
+      - target: 15569
+        published: 15569
+        protocol: tcp
+        mode: ingress
+    depends_on:
+      - api
+      - redis
+    networks:
+      - novacron-prod
+    deploy:
+      mode: replicated
+      replicas: 2
+      placement:
+        constraints:
+          - node.labels.gpu == true
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+      restart_policy:
+        condition: on-failure
+        delay: 15s
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:15569/health"]
+      <<: *default-healthcheck
+    logging: *default-logging

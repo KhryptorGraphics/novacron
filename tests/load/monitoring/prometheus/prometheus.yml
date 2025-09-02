@@ -1,0 +1,187 @@
+# Prometheus configuration for NovaCron load testing
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+  external_labels:
+    cluster: 'novacron-load-test'
+    environment: 'test'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Load alerting rules
+rule_files:
+  - "/etc/prometheus/rules/*.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Node exporter for system metrics
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 5s
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'load-test-host'
+
+  # NovaCron API servers
+  - job_name: 'novacron-api'
+    static_configs:
+      - targets: 
+          - 'localhost:8080'
+          - 'api:8080'
+    metrics_path: /api/metrics
+    scrape_interval: 5s
+    scrape_timeout: 4s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: service
+        replacement: 'novacron-api'
+
+  # K6 metrics during load testing
+  - job_name: 'k6-metrics'
+    static_configs:
+      - targets: ['localhost:6565']
+    metrics_path: /metrics
+    scrape_interval: 1s
+    honor_labels: true
+
+  # InfluxDB metrics
+  - job_name: 'influxdb'
+    static_configs:
+      - targets: ['influxdb:8086']
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  # Database metrics (PostgreSQL)
+  - job_name: 'postgres-exporter'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 10s
+
+  # Redis metrics
+  - job_name: 'redis-exporter'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 10s
+
+  # Custom application metrics
+  - job_name: 'novacron-custom-metrics'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: /api/monitoring/prometheus
+    scrape_interval: 5s
+    params:
+      format: ['prometheus']
+
+  # WebSocket metrics
+  - job_name: 'websocket-metrics'
+    static_configs:
+      - targets: ['localhost:8080']
+    metrics_path: /api/websocket/metrics
+    scrape_interval: 5s
+
+  # VM management metrics
+  - job_name: 'vm-metrics'
+    static_configs:
+      - targets: ['localhost:8080']
+    metrics_path: /api/vms/metrics
+    scrape_interval: 10s
+
+  # Federation metrics
+  - job_name: 'federation-metrics'
+    static_configs:
+      - targets: ['localhost:8080']
+    metrics_path: /api/federation/metrics
+    scrape_interval: 10s
+
+  # Load balancer metrics (if using nginx/haproxy)
+  - job_name: 'nginx-exporter'
+    static_configs:
+      - targets: ['nginx-exporter:9113']
+    scrape_interval: 10s
+
+  # Docker container metrics
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 10s
+
+# Remote write configuration for long-term storage
+remote_write:
+  - url: "http://influxdb:8086/api/v1/prom/write?db=prometheus"
+    queue_config:
+      max_samples_per_send: 1000
+      max_shards: 200
+      capacity: 2500
+
+# Storage configuration
+storage:
+  tsdb:
+    retention.time: 7d
+    retention.size: 5GB
+    wal-compression: true
+
+# Recording rules for performance optimization
+recording_rules:
+  - name: novacron_aggregations
+    rules:
+      # API performance aggregations
+      - record: novacron:http_request_duration_seconds:p95
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+        labels:
+          quantile: "0.95"
+
+      - record: novacron:http_request_duration_seconds:p99
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))
+        labels:
+          quantile: "0.99"
+
+      - record: novacron:http_requests_per_second
+        expr: rate(http_requests_total[5m])
+
+      - record: novacron:http_error_rate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])
+
+      # System resource aggregations
+      - record: novacron:cpu_usage_percent
+        expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+
+      - record: novacron:memory_usage_percent
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
+
+      - record: novacron:disk_usage_percent
+        expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100
+
+      # Load test aggregations
+      - record: k6:request_rate
+        expr: rate(k6_http_reqs_total[1m])
+
+      - record: k6:error_rate
+        expr: rate(k6_http_req_failed_total[1m]) / rate(k6_http_reqs_total[1m])
+
+      - record: k6:response_time_p95
+        expr: histogram_quantile(0.95, rate(k6_http_req_duration_bucket[1m]))
+
+# Performance tuning
+performance:
+  # Query optimization
+  query:
+    max_concurrency: 20
+    timeout: 2m
+
+  # Storage optimization
+  storage:
+    exemplars:
+      max_exemplars: 100000

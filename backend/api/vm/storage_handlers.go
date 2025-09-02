@@ -26,6 +26,12 @@ func NewStorageHandler(storageManager *vm.VMStorageManager) *StorageHandler {
 	}
 }
 
+// RegisterStorageRoutes registers storage API routes with a VM storage manager
+func RegisterStorageRoutes(router *mux.Router, vmStorageManager *vm.VMStorageManager) {
+	h := &StorageHandler{vmStorageManager: vmStorageManager}
+	h.RegisterRoutes(router)
+}
+
 // RegisterRoutes registers VM storage API routes
 func (h *StorageHandler) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/storage/pools", h.ListStoragePools).Methods("GET")
@@ -38,6 +44,9 @@ func (h *StorageHandler) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/storage/volumes/{id}", h.DeleteStorageVolume).Methods("DELETE")
 	router.HandleFunc("/storage/volumes/{id}/resize", h.ResizeStorageVolume).Methods("POST")
 	router.HandleFunc("/storage/volumes/{id}/clone", h.CloneStorageVolume).Methods("POST")
+	router.HandleFunc("/storage/volumes/{id}/attach", h.AttachVolume).Methods("POST")
+	router.HandleFunc("/storage/volumes/{id}/detach", h.DetachVolume).Methods("POST")
+	router.HandleFunc("/storage/metrics", h.GetStorageMetrics).Methods("GET")
 }
 
 // ListStoragePools handles GET /storage/pools
@@ -420,3 +429,86 @@ func (h *StorageHandler) CloneStorageVolume(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(response)
 }
+
+// AttachVolume handles POST /storage/volumes/{id}/attach
+func (h *StorageHandler) AttachVolume(w http.ResponseWriter, r *http.Request) {
+	// Get volume ID from URL
+	vars := mux.Vars(r)
+	volumeID := vars["id"]
+
+	// Parse request
+	var request struct {
+		VMID     string `json:"vm_id"`
+		Device   string `json:"device"`
+		ReadOnly bool   `json:"read_only"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Attach volume
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	if err := h.storageManager.AttachVolumeToVM(ctx, volumeID, request.VMID, request.Device, request.ReadOnly); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return success
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "attached"})
+}
+
+// DetachVolume handles POST /storage/volumes/{id}/detach
+func (h *StorageHandler) DetachVolume(w http.ResponseWriter, r *http.Request) {
+	// Get volume ID from URL
+	vars := mux.Vars(r)
+	volumeID := vars["id"]
+
+	// Parse request
+	var request struct {
+		VMID  string `json:"vm_id"`
+		Force bool   `json:"force"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Detach volume
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	if err := h.storageManager.DetachVolumeFromVM(ctx, volumeID, request.VMID, request.Force); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return success
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "detached"})
+}
+
+// GetStorageMetrics handles GET /storage/metrics
+func (h *StorageHandler) GetStorageMetrics(w http.ResponseWriter, r *http.Request) {
+	// Get metrics
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	metrics, err := h.storageManager.GetStorageMetrics(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Write response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(metrics)
+}
+

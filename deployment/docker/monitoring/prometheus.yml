@@ -1,0 +1,54 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alert_rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 5s
+
+  - job_name: 'novacron-api'
+    static_configs:
+      - targets: ['mock-api:3000']
+    scrape_interval: 15s
+    metrics_path: '/metrics'
+    scrape_timeout: 10s
+
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+    scrape_interval: 30s
+
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+    scrape_interval: 30s
+
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['localhost:9100']
+    scrape_interval: 15s
+
+  # Mock metrics for demonstration
+  - job_name: 'novacron-hypervisors'
+    static_configs:
+      - targets: ['hypervisor-01:9100', 'hypervisor-02:9100', 'hypervisor-03:9100']
+        labels:
+          region: 'datacenter-1'
+    scrape_interval: 15s
+
+  - job_name: 'novacron-vms'
+    static_configs:
+      - targets: ['vm-web-01:9100', 'vm-web-02:9100', 'vm-db-01:9100']
+        labels:
+          environment: 'production'
+    scrape_interval: 15s

@@ -2,13 +2,11 @@ package vm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"time"
 
 	"github.com/google/uuid"
-	// "github.com/khryptorgraphics/novacron/backend/core/scheduler" // Temporarily commented out for testing
 )
 
 // VM operation constants
@@ -47,94 +45,29 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 		return nil, fmt.Errorf("failed to get VM driver: %w", err)
 	}
 
-	// Create resource constraints using fields from VMConfig
-	// TODO: Re-enable scheduler integration when scheduler package is available
-	// constraints := []scheduler.ResourceConstraint{
-	//	{
-	//		Type:      scheduler.ResourceCPU,
-	//		MinAmount: float64(req.Spec.CPUShares), // Use CPUShares
-	//	},
-	//	{
-	//		Type:      scheduler.ResourceMemory,
-	//		MinAmount: float64(req.Spec.MemoryMB), // Use MemoryMB
-	//	},
-	// }
-
-	// Request resources from the scheduler
-	// TODO: Re-enable scheduler integration when scheduler package is available
-	// resourceID, err := m.scheduler.RequestResources(constraints, 1, 1*time.Hour)
-	// if err != nil {
-	//	return nil, fmt.Errorf("failed to request resources: %w", err)
-	// }
-
-	// Create a task to distribute the VM
-	// taskID, err := m.scheduler.DistributeTask(resourceID, 1)
-	// if err != nil {
-	//	m.scheduler.CancelRequest(resourceID)
-	//	return nil, fmt.Errorf("failed to distribute task: %w", err)
-	// }
-
-	// Wait for the task to be allocated
-	// for {
-	//	status, err := m.scheduler.GetTaskStatus(taskID)
-	//	if err != nil {
-	//		// TODO: Re-enable when scheduler is available
-	// m.scheduler.CancelRequest(resourceID)
-	//		return nil, fmt.Errorf("failed to get task status: %w", err)
-	//	}
-
-	//	if status == scheduler.TaskAllocated {
-	//		break
-	//	}
-
-	//	if status == scheduler.TaskFailed {
-	//		// TODO: Re-enable when scheduler is available
-	// m.scheduler.CancelRequest(resourceID)
-	//		return nil, errors.New("task allocation failed")
-	// }
-
-	//	// Check for context cancellation
-	//	select {
-	//	case <-ctx.Done():
-	//		// TODO: Re-enable when scheduler is available
-	//		// m.scheduler.CancelRequest(resourceID)
-	//		return nil, ctx.Err()
-	//	case <-time.After(100 * time.Millisecond):
-	//		// Continue waiting
-	//	}
-	// }
-
-	// Get the allocations
-	// TODO: Re-enable when scheduler is available
-	// allocations := m.scheduler.GetActiveAllocations()
-	// var allocation scheduler.ResourceAllocation
-	// found := false
-	// for _, a := range allocations {
-	//	if a.RequestID == resourceID {
-	//		allocation = a
-	//		found = true
-	//		break
-	//	}
-	// }
-
-	// TODO: Skip scheduler check for now
-	found := true // Temporary fix
-	if !found {
-		// TODO: Re-enable when scheduler is available
-		// m.scheduler.CancelRequest(resourceID)
-		return nil, errors.New("allocation not found")
+	// Create VM specification for node selection
+	vmSpec := VMRequirements{
+		CPU:    req.Spec.CPUShares,
+		Memory: req.Spec.MemoryMB,
+		Disk:   req.Spec.DiskSizeGB,
 	}
+
+	// Select a node using the scheduler
+	selectedNode, err := m.selectNodeForVM(&vmSpec)
+	if err != nil {
+		return nil, fmt.Errorf("failed to select node: %w", err)
+	}
+
+	// Node allocation successful
+	log.Printf("Selected node %s for VM %s", selectedNode, vmID)
 
 	// Create the VM object using the constructor
 	vm, err := NewVM(req.Spec) // Pass the VMConfig spec
 	if err != nil {
-		// TODO: Re-enable when scheduler is available
-		// m.scheduler.CancelRequest(resourceID)
 		return nil, fmt.Errorf("failed to initialize VM object: %w", err)
 	}
 	// Set internal fields not handled by constructor (if any)
-	// vm.nodeID = allocation.NodeID // Assuming nodeID is internal
-	// vm.resourceID = resourceID // Assuming resourceID is internal
+	// vm.nodeID = selectedNode // Would set if VM has nodeID field
 	// vm.owner = req.Owner // Assuming owner is internal
 
 	// Set initial state via method if available, otherwise internal (carefully)
@@ -161,13 +94,9 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 			Type:      VMEventError,
 			VM:        *vm, // Pass the VM object
 			Timestamp: time.Now(),
-			NodeID:    "node1", // TODO: Use nodeID from allocation when scheduler is available
+			NodeID:    selectedNode,
 			Message:   fmt.Sprintf("Failed to create VM: %v", err),
 		})
-
-		// Cancel the resource request
-		// TODO: Re-enable when scheduler is available
-		// m.scheduler.CancelRequest(resourceID)
 
 		return vm, err
 	}
@@ -183,10 +112,10 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 		Type:      VMEventCreated,
 		VM:        *vm, // Pass the VM object
 		Timestamp: time.Now(),
-		NodeID:    "node1", // TODO: Use nodeID from allocation when scheduler is available
+		NodeID:    selectedNode,
 	})
 
-	log.Printf("Created VM %s of type %s on node %s", vm.ID(), vm.config.Command, "node1") // TODO: Use allocation nodeID when scheduler is available
+	log.Printf("Created VM %s of type %s on node %s", vm.ID(), vm.config.Command, selectedNode)
 
 	return vm, nil // Return the created VM object
 }

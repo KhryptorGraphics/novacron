@@ -1,0 +1,505 @@
+version: '3.8'
+
+networks:
+  monitoring:
+    driver: bridge
+  novacron:
+    external: true
+
+volumes:
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+  elasticsearch-data:
+    driver: local
+  jaeger-data:
+    driver: local
+  alertmanager-data:
+    driver: local
+  fluentd-buffer:
+    driver: local
+
+services:
+  # Prometheus - Metrics Collection and Storage
+  prometheus:
+    image: prom/prometheus:v2.40.0
+    container_name: novacron-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus-data:/prometheus
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+      - '--storage.tsdb.retention.size=100GB'
+      - '--storage.tsdb.wal-compression'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--query.max-concurrency=20'
+      - '--query.max-samples=50000000'
+    networks:
+      - monitoring
+      - novacron
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    environment:
+      - PROMETHEUS_RETENTION_TIME=7d
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+          cpus: '4'
+        reservations:
+          memory: 8G
+          cpus: '2'
+
+  # Alertmanager - Alert Management and Routing
+  alertmanager:
+    image: prom/alertmanager:v0.25.0
+    container_name: novacron-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - alertmanager-data:/alertmanager
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager/templates:/etc/alertmanager/templates:ro
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+      - '--cluster.listen-address=0.0.0.0:9094'
+      - '--log.level=info'
+    networks:
+      - monitoring
+    restart: unless-stopped
+    environment:
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - PAGERDUTY_INTEGRATION_KEY=${PAGERDUTY_INTEGRATION_KEY}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Grafana - Visualization and Dashboards
+  grafana:
+    image: grafana/grafana:9.3.0
+    container_name: novacron-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_DOMAIN=localhost
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_DATABASE_TYPE=sqlite3
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel,grafana-clock-panel
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
+    networks:
+      - monitoring
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - prometheus
+
+  # Elasticsearch - Log Storage
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.5.0
+    container_name: novacron-elasticsearch
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    environment:
+      - node.name=elasticsearch
+      - cluster.name=novacron-logging
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=false
+      - xpack.monitoring.enabled=true
+      - "ES_JAVA_OPTS=-Xms4g -Xmx4g"
+      - path.repo=/usr/share/elasticsearch/backup
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    networks:
+      - monitoring
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: '4'
+        reservations:
+          memory: 4G
+          cpus: '2'
+
+  # Kibana - Log Analysis and Visualization
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.5.0
+    container_name: novacron-kibana
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_NAME=kibana
+      - SERVER_HOST=0.0.0.0
+      - XPACK_MONITORING_ENABLED=true
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5601/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Fluentd - Log Collection and Processing
+  fluentd:
+    image: fluent/fluentd:v1.15-debian-1
+    container_name: novacron-fluentd
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+      - "24231:24231" # Metrics endpoint
+    volumes:
+      - ./logging/fluentd.conf:/fluentd/etc/fluent.conf:ro
+      - fluentd-buffer:/var/log/fluentd
+      - /var/log/novacron:/var/log/novacron:ro
+      - /var/log/journal:/var/log/journal:ro
+    environment:
+      - FLUENTD_CONF=fluent.conf
+      - FLUENTD_SYSTEMD_CONF=disable
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+    networks:
+      - monitoring
+      - novacron
+    restart: unless-stopped
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:24231/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Jaeger - Distributed Tracing
+  jaeger-all-in-one:
+    image: jaegertracing/all-in-one:1.40
+    container_name: novacron-jaeger
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "14268:14268" # HTTP collector
+      - "14250:14250" # gRPC collector
+      - "6831:6831/udp" # Agent UDP
+      - "6832:6832/udp" # Agent UDP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - SPAN_STORAGE_TYPE=elasticsearch
+      - ES_SERVER_URLS=http://elasticsearch:9200
+      - ES_INDEX_PREFIX=jaeger
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:16686"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Node Exporter - System Metrics
+  node-exporter:
+    image: prom/node-exporter:v1.5.0
+    container_name: novacron-node-exporter
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--collector.netdev.device-exclude=^lo$$'
+      - '--collector.diskstats.device-exclude=^(ram|loop|fd|(h|s|v)d[a-z]|nvme\\d+n\\d+p)\\d+$$'
+    networks:
+      - monitoring
+    restart: unless-stopped
+    pid: host
+    deploy:
+      mode: global
+
+  # cAdvisor - Container Metrics
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.46.0
+    container_name: novacron-cadvisor
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    networks:
+      - monitoring
+    restart: unless-stopped
+    privileged: true
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Blackbox Exporter - External Service Monitoring
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.23.0
+    container_name: novacron-blackbox-exporter
+    ports:
+      - "9115:9115"
+    volumes:
+      - ./blackbox/blackbox.yml:/config/blackbox.yml:ro
+    command:
+      - '--config.file=/config/blackbox.yml'
+    networks:
+      - monitoring
+      - novacron
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9115"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Exporter - Redis Metrics
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.45.0
+    container_name: novacron-redis-exporter
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://novacron-redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    networks:
+      - monitoring
+      - novacron
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9121/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Postgres Exporter - PostgreSQL Metrics
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.11.1
+    container_name: novacron-postgres-exporter
+    ports:
+      - "9187:9187"
+    environment:
+      - DATA_SOURCE_NAME=postgresql://novacron:${POSTGRES_PASSWORD}@postgres:5432/novacron?sslmode=disable
+      - PG_EXPORTER_EXTEND_QUERY_PATH=/etc/postgres_exporter/queries.yaml
+    volumes:
+      - ./postgres-exporter/queries.yaml:/etc/postgres_exporter/queries.yaml:ro
+    networks:
+      - monitoring
+      - novacron
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9187/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Libvirt Exporter - VM Metrics from Hypervisors
+  libvirt-exporter:
+    image: kumina/libvirt-exporter:v0.3.0
+    container_name: novacron-libvirt-exporter
+    ports:
+      - "9177:9177"
+    volumes:
+      - /var/run/libvirt/libvirt-sock:/var/run/libvirt/libvirt-sock
+    environment:
+      - LIBVIRT_URI=qemu:///system
+    networks:
+      - monitoring
+    restart: unless-stopped
+    privileged: true
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9177/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Thanos Sidecar - Long-term Storage
+  thanos-sidecar:
+    image: thanosio/thanos:v0.30.0
+    container_name: novacron-thanos-sidecar
+    command:
+      - sidecar
+      - --tsdb.path=/prometheus
+      - --prometheus.url=http://prometheus:9090
+      - --grpc-address=0.0.0.0:10901
+      - --http-address=0.0.0.0:10902
+      - --objstore.config-file=/etc/thanos/storage.yml
+    ports:
+      - "10901:10901"
+      - "10902:10902"
+    volumes:
+      - prometheus-data:/prometheus
+      - ./thanos/storage.yml:/etc/thanos/storage.yml:ro
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  # Thanos Query - Unified Query Interface
+  thanos-query:
+    image: thanosio/thanos:v0.30.0
+    container_name: novacron-thanos-query
+    command:
+      - query
+      - --http-address=0.0.0.0:19192
+      - --grpc-address=0.0.0.0:19191
+      - --store=thanos-sidecar:10901
+      - --store=thanos-store:10901
+    ports:
+      - "19192:19192"
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - thanos-sidecar
+
+  # Incident Response Automation
+  incident-responder:
+    build:
+      context: ./incident-response
+      dockerfile: Dockerfile
+    container_name: novacron-incident-responder
+    volumes:
+      - ./incident-response/incident-response-workflow.yaml:/etc/incident-responder/workflows.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - PROMETHEUS_URL=http://prometheus:9090
+      - ALERTMANAGER_URL=http://alertmanager:9093
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - PAGERDUTY_API_KEY=${PAGERDUTY_API_KEY}
+      - JIRA_URL=${JIRA_URL}
+      - JIRA_USERNAME=${JIRA_USERNAME}
+      - JIRA_TOKEN=${JIRA_TOKEN}
+    networks:
+      - monitoring
+      - novacron
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - alertmanager
+
+  # Monitoring Dashboard
+  monitoring-dashboard:
+    image: nginx:1.23-alpine
+    container_name: novacron-monitoring-dashboard
+    ports:
+      - "8090:80"
+    volumes:
+      - ./dashboard/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./dashboard/html:/usr/share/nginx/html:ro
+    networks:
+      - monitoring
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# Health check service to monitor the monitoring stack
+  monitoring-healthcheck:
+    image: curlimages/curl:7.87.0
+    container_name: novacron-monitoring-healthcheck
+    command: |
+      sh -c '
+        while true; do
+          echo "Checking monitoring stack health..."
+          
+          # Check Prometheus
+          if curl -f http://prometheus:9090/-/healthy > /dev/null 2>&1; then
+            echo "✅ Prometheus healthy"
+          else
+            echo "❌ Prometheus unhealthy"
+          fi
+          
+          # Check Alertmanager
+          if curl -f http://alertmanager:9093/-/healthy > /dev/null 2>&1; then
+            echo "✅ Alertmanager healthy"
+          else
+            echo "❌ Alertmanager unhealthy"
+          fi
+          
+          # Check Grafana
+          if curl -f http://grafana:3000/api/health > /dev/null 2>&1; then
+            echo "✅ Grafana healthy"
+          else
+            echo "❌ Grafana unhealthy"
+          fi
+          
+          # Check Elasticsearch
+          if curl -f http://elasticsearch:9200/_cluster/health > /dev/null 2>&1; then
+            echo "✅ Elasticsearch healthy"
+          else
+            echo "❌ Elasticsearch unhealthy"
+          fi
+          
+          echo "Health check complete. Next check in 60 seconds..."
+          sleep 60
+        done
+      '
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - alertmanager
+      - grafana
+      - elasticsearch

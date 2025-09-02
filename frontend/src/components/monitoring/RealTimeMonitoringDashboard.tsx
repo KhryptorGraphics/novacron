@@ -304,23 +304,23 @@ const RealTimeMonitoringDashboard: React.FC = () => {
     }
   };
 
-  const filteredAlerts = alerts.filter(alert => {
+  const filteredAlerts = (alerts || []).filter(alert => {
     if (alertFilter === 'all') return true;
     if (alertFilter === 'unacknowledged') return !alert.acknowledged;
     return alert.severity === alertFilter;
   });
 
   // Prepare chart data
-  const chartData = metrics[0]?.history.map((point, index) => ({
+  const chartData = (metrics[0]?.history || []).map((point, index) => ({
     time: new Date(point.timestamp).toLocaleTimeString('en-US', { 
       hour: '2-digit', 
       minute: '2-digit' 
     }),
-    cpu: metrics[0]?.history[index]?.value || 0,
-    memory: metrics[1]?.history[index]?.value || 0,
-    disk: (metrics[2]?.history[index]?.value || 0) / 5,
-    network: (metrics[3]?.history[index]?.value || 0) / 20
-  })) || [];
+    cpu: metrics[0]?.history?.[index]?.value || 0,
+    memory: metrics[1]?.history?.[index]?.value || 0,
+    disk: (metrics[2]?.history?.[index]?.value || 0) / 5,
+    network: (metrics[3]?.history?.[index]?.value || 0) / 20
+  }));
 
   const radarData = [
     { metric: 'CPU', value: metrics[0]?.value || 0 },
@@ -380,7 +380,7 @@ const RealTimeMonitoringDashboard: React.FC = () => {
 
       {/* Quick Stats */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        {metrics.map((metric) => (
+        {(metrics || []).map((metric) => (
           <Card key={metric.id}>
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-2">
@@ -460,7 +460,7 @@ const RealTimeMonitoringDashboard: React.FC = () => {
               
               {selectedMetricView === 'grid' && (
                 <div className="grid grid-cols-2 gap-4">
-                  {metrics.slice(0, 4).map((metric) => (
+                  {(metrics || []).slice(0, 4).map((metric) => (
                     <div key={metric.id} className="space-y-2">
                       <div className="flex justify-between items-center">
                         <span className="text-sm font-medium">{metric.name}</span>
@@ -495,7 +495,7 @@ const RealTimeMonitoringDashboard: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {healthChecks.map((check) => (
+                {(healthChecks || []).map((check) => (
                   <div key={check.service} className="flex items-center justify-between p-3 border rounded-lg">
                     <div className="flex items-center gap-3">
                       <div className={`p-2 rounded-full ${
@@ -575,7 +575,7 @@ const RealTimeMonitoringDashboard: React.FC = () => {
                             </div>
                             {alert.actions && (
                               <div className="flex gap-2 mt-2">
-                                {alert.actions.map((action) => (
+                                {(alert.actions || []).map((action) => (
                                   <Button
                                     key={action.action}
                                     size="sm"
@@ -593,7 +593,7 @@ const RealTimeMonitoringDashboard: React.FC = () => {
                             variant="ghost"
                             className="h-6 w-6"
                             onClick={() => {
-                              setAlerts(prev => prev.map(a => 
+                              setAlerts(prev => (prev || []).map(a => 
                                 a.id === alert.id ? { ...a, acknowledged: true } : a
                               ));
                             }}

@@ -1,0 +1,150 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: novacron-postgres
+    ports:
+      - "15555:5432"
+    environment:
+      POSTGRES_DB: novacron
+      POSTGRES_USER: novacron
+      POSTGRES_PASSWORD: novacron123
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    networks:
+      - novacron-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U novacron"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: novacron-redis
+    ports:
+      - "15560:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - novacron-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Mock API Service
+  mock-api:
+    build:
+      context: ./mock-services
+      dockerfile: Dockerfile.api
+    container_name: novacron-mock-api
+    ports:
+      - "15561:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://novacron:novacron123@postgres:5432/novacron
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=mock-jwt-secret-key
+      - PORT=3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - novacron-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+
+  # Mock Frontend Service
+  mock-frontend:
+    build:
+      context: ./mock-services
+      dockerfile: Dockerfile.frontend
+    container_name: novacron-mock-frontend
+    ports:
+      - "15566:80"
+    environment:
+      - API_BASE_URL=http://mock-api:3000
+    depends_on:
+      mock-api:
+        condition: service_healthy
+    networks:
+      - novacron-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: novacron-prometheus
+    ports:
+      - "15564:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - novacron-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+
+  # Grafana Dashboard
+  grafana:
+    image: grafana/grafana:latest
+    container_name: novacron-grafana
+    ports:
+      - "15565:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks:
+      - novacron-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  novacron-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16

@@ -1,0 +1,456 @@
+name: NovaCron Load Testing Pipeline
+
+on:
+  # Scheduled load testing
+  schedule:
+    - cron: '0 2 * * 1'  # Monday 2 AM UTC
+    - cron: '0 14 * * 5' # Friday 2 PM UTC
+  
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      
+      test_type:
+        description: 'Test type to run'
+        required: true
+        default: 'comprehensive'
+        type: choice
+        options:
+          - quick
+          - comprehensive
+          - benchmark
+          - stress
+          - soak
+      
+      concurrent_users:
+        description: 'Number of concurrent users'
+        required: false
+        default: '1000'
+        type: string
+      
+      duration:
+        description: 'Test duration (e.g., 10m, 1h)'
+        required: false
+        default: '10m'
+        type: string
+
+  # Pull request trigger for performance regression testing
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'backend/api/**'
+      - 'backend/core/**'
+      - 'backend/cmd/**'
+
+env:
+  K6_VERSION: 'v0.47.0'
+  NODE_VERSION: '18'
+
+jobs:
+  # Validate environment and setup
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.config.outputs.environment }}
+      test_type: ${{ steps.config.outputs.test_type }}
+      api_target: ${{ steps.config.outputs.api_target }}
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Configure test parameters
+        id: config
+        run: |
+          # Determine environment and parameters
+          ENV="${{ github.event.inputs.environment || 'staging' }}"
+          TEST_TYPE="${{ github.event.inputs.test_type || 'comprehensive' }}"
+          
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          echo "test_type=$TEST_TYPE" >> $GITHUB_OUTPUT
+          
+          # Set API target based on environment
+          case $ENV in
+            staging)
+              echo "api_target=https://staging.novacron.com" >> $GITHUB_OUTPUT
+              ;;
+            production)
+              echo "api_target=https://api.novacron.com" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "api_target=http://localhost:8080" >> $GITHUB_OUTPUT
+              ;;
+          esac
+          
+      - name: Validate target environment
+        run: |
+          API_TARGET="${{ steps.config.outputs.api_target }}"
+          echo "Validating $API_TARGET..."
+          
+          # Check if API is accessible
+          if curl -s --connect-timeout 30 --fail "$API_TARGET/api/cluster/health"; then
+            echo "✓ API is accessible and healthy"
+          else
+            echo "✗ API is not accessible or unhealthy"
+            exit 1
+          fi
+
+  # Setup monitoring infrastructure
+  setup-monitoring:
+    runs-on: ubuntu-latest
+    needs: validate
+    if: needs.validate.outputs.test_type != 'quick'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup monitoring stack
+        run: |
+          cd tests/load
+          
+          # Start monitoring services
+          docker-compose -f docker-compose.monitoring.yml up -d
+          
+          # Wait for services to be ready
+          echo "Waiting for monitoring services..."
+          sleep 60
+          
+          # Verify monitoring services
+          curl -f http://localhost:9090/-/healthy || exit 1
+          curl -f http://localhost:3000/api/health || exit 1
+          
+          echo "✓ Monitoring stack is ready"
+
+  # Quick load test for PR validation
+  quick-test:
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'pull_request' || needs.validate.outputs.test_type == 'quick'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: tests/load/package.json
+          
+      - name: Install k6
+        run: |
+          curl -s https://github.com/grafana/k6/releases/download/${{ env.K6_VERSION }}/k6-${{ env.K6_VERSION }}-linux-amd64.tar.gz | tar xz
+          sudo mv k6-${{ env.K6_VERSION }}-linux-amd64/k6 /usr/local/bin/
+          k6 version
+          
+      - name: Install dependencies
+        run: |
+          cd tests/load
+          npm ci
+          
+      - name: Run quick validation tests
+        run: |
+          cd tests/load
+          export ENVIRONMENT="${{ needs.validate.outputs.environment }}"
+          export API_TARGET="${{ needs.validate.outputs.api_target }}"
+          
+          # Run reduced load tests for PR validation
+          make test-quick CONCURRENT_USERS=50 TEST_DURATION=2m
+          
+      - name: Generate quick report
+        run: |
+          cd tests/load
+          make report
+          
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-test-results
+          path: tests/load/reports/
+          retention-days: 7
+
+  # Comprehensive load testing
+  comprehensive-test:
+    runs-on: ubuntu-latest
+    needs: [validate, setup-monitoring]
+    if: needs.validate.outputs.test_type == 'comprehensive' || needs.validate.outputs.test_type == 'benchmark'
+    
+    strategy:
+      matrix:
+        test_scenario:
+          - api-load-test
+          - vm-management-test
+          - websocket-stress-test
+          - database-performance-test
+          - federation-load-test
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: tests/load/package.json
+          
+      - name: Install k6
+        run: |
+          curl -s https://github.com/grafana/k6/releases/download/${{ env.K6_VERSION }}/k6-${{ env.K6_VERSION }}-linux-amd64.tar.gz | tar xz
+          sudo mv k6-${{ env.K6_VERSION }}-linux-amd64/k6 /usr/local/bin/
+          
+      - name: Install dependencies
+        run: |
+          cd tests/load
+          npm ci
+          
+      - name: Run ${{ matrix.test_scenario }}
+        run: |
+          cd tests/load
+          export ENVIRONMENT="${{ needs.validate.outputs.environment }}"
+          export API_TARGET="${{ needs.validate.outputs.api_target }}"
+          export CONCURRENT_USERS="${{ github.event.inputs.concurrent_users || '1000' }}"
+          export TEST_DURATION="${{ github.event.inputs.duration || '10m' }}"
+          
+          # Run specific test scenario
+          k6 run \
+            --out json=reports/${{ matrix.test_scenario }}-results.json \
+            --quiet \
+            scenarios/${{ matrix.test_scenario }}.js
+            
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.test_scenario }}-results
+          path: tests/load/reports/${{ matrix.test_scenario }}-results.json
+          retention-days: 30
+
+  # Stress testing (high load scenarios)
+  stress-test:
+    runs-on: ubuntu-latest
+    needs: [validate, setup-monitoring]
+    if: needs.validate.outputs.test_type == 'stress'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js and k6
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          
+      - name: Install k6
+        run: |
+          curl -s https://github.com/grafana/k6/releases/download/${{ env.K6_VERSION }}/k6-${{ env.K6_VERSION }}-linux-amd64.tar.gz | tar xz
+          sudo mv k6-${{ env.K6_VERSION }}-linux-amd64/k6 /usr/local/bin/
+          
+      - name: Install dependencies
+        run: |
+          cd tests/load
+          npm ci
+          
+      - name: Run stress tests
+        run: |
+          cd tests/load
+          export ENVIRONMENT="${{ needs.validate.outputs.environment }}"
+          export API_TARGET="${{ needs.validate.outputs.api_target }}"
+          
+          # Run progressive stress test
+          make stress
+          
+      - name: Upload stress test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-test-results
+          path: tests/load/reports/
+          retention-days: 30
+
+  # Generate comprehensive reports
+  generate-reports:
+    runs-on: ubuntu-latest
+    needs: [comprehensive-test]
+    if: always() && (needs.comprehensive-test.result == 'success' || needs.comprehensive-test.result == 'failure')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          
+      - name: Download all test results
+        uses: actions/download-artifact@v4
+        with:
+          path: tests/load/reports/
+          pattern: '*-results'
+          merge-multiple: true
+          
+      - name: Install dependencies
+        run: |
+          cd tests/load
+          npm ci
+          
+      - name: Generate comprehensive report
+        run: |
+          cd tests/load
+          node scripts/generate-report.js
+          
+      - name: Upload comprehensive reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: comprehensive-load-test-reports
+          path: tests/load/reports/
+          retention-days: 90
+          
+      - name: Publish performance summary
+        run: |
+          cd tests/load/reports
+          
+          # Create GitHub Actions summary
+          {
+            echo "# NovaCron Load Test Results"
+            echo ""
+            echo "**Environment:** ${{ needs.validate.outputs.environment }}"
+            echo "**Test Type:** ${{ needs.validate.outputs.test_type }}"
+            echo "**Date:** $(date '+%Y-%m-%d %H:%M:%S UTC')"
+            echo ""
+            
+            # Extract key metrics from reports (if available)
+            if [ -f "load-test-summary-*.md" ]; then
+              cat load-test-summary-*.md
+            else
+              echo "Detailed results available in artifacts."
+            fi
+          } >> $GITHUB_STEP_SUMMARY
+
+  # Performance regression analysis for PRs  
+  performance-regression:
+    runs-on: ubuntu-latest
+    needs: [quick-test]
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Download test results
+        uses: actions/download-artifact@v4
+        with:
+          name: quick-test-results
+          path: tests/load/reports/
+          
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          
+      - name: Analyze performance regression
+        run: |
+          cd tests/load
+          npm ci
+          
+          # Create performance regression analysis
+          node -e "
+          const fs = require('fs');
+          const results = JSON.parse(fs.readFileSync('reports/quick-test-results.json', 'utf8'));
+          
+          // Extract key performance metrics
+          const metrics = {
+            responseTime: results.root_group?.http_req_duration?.avg || 0,
+            errorRate: results.root_group?.http_req_failed?.rate || 0,
+            throughput: results.root_group?.http_reqs?.count || 0
+          };
+          
+          // Performance regression thresholds for PRs
+          const thresholds = {
+            responseTime: 1000, // 1 second max for PR tests
+            errorRate: 0.05,    // 5% max error rate
+            throughput: 100     // Minimum 100 requests
+          };
+          
+          let hasRegression = false;
+          let analysis = '# Performance Analysis\\n\\n';
+          
+          Object.entries(metrics).forEach(([metric, value]) => {
+            const threshold = thresholds[metric];
+            const status = value <= threshold ? '✅' : '❌';
+            
+            if (value > threshold) hasRegression = true;
+            
+            analysis += \`- **\${metric}**: \${value} \${status} (threshold: \${threshold})\\n\`;
+          });
+          
+          if (hasRegression) {
+            analysis += '\\n⚠️ **Performance regression detected!**\\n';
+            process.exit(1);
+          } else {
+            analysis += '\\n✅ **No performance regression detected**\\n';
+          }
+          
+          fs.writeFileSync('performance-analysis.md', analysis);
+          console.log(analysis);
+          "
+          
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const analysis = fs.readFileSync('tests/load/performance-analysis.md', 'utf8');
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: analysis
+            });
+
+  # Cleanup after testing
+  cleanup:
+    runs-on: ubuntu-latest
+    needs: [comprehensive-test, generate-reports]
+    if: always()
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          
+      - name: Install dependencies
+        run: |
+          cd tests/load
+          npm ci
+          
+      - name: Cleanup test artifacts
+        run: |
+          cd tests/load
+          export ENVIRONMENT="${{ needs.validate.outputs.environment }}"
+          
+          # Cleanup test data from target environment
+          node scripts/cleanup-test-data.js
+          
+      - name: Stop monitoring stack
+        run: |
+          cd tests/load
+          docker-compose -f docker-compose.monitoring.yml down -v || true

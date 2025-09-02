@@ -6,6 +6,10 @@ interface WebSocketOptions {
   reconnectAttempts?: number;
   heartbeat?: boolean;
   heartbeatInterval?: number;
+  // Security options
+  authToken?: string;
+  requireAuth?: boolean;
+  protocols?: string[];
 }
 
 interface WebSocketState<T = any> {
@@ -64,9 +68,27 @@ export function useWebSocket<T = any>(
       // Construct full WebSocket URL
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = window.location.host;
-      const fullUrl = url.startsWith('/') ? `${protocol}//${host}${url}` : url;
+      let fullUrl = url.startsWith('/') ? `${protocol}//${host}${url}` : url;
       
-      ws.current = new WebSocket(fullUrl);
+      // Add auth token to URL if provided (less secure, but sometimes necessary)
+      if (options.authToken && !options.protocols) {
+        const separator = fullUrl.includes('?') ? '&' : '?';
+        fullUrl = `${fullUrl}${separator}token=${encodeURIComponent(options.authToken)}`;
+      }
+      
+      // Create WebSocket with security protocols if provided
+      const protocols: string[] = [];
+      if (options.protocols) {
+        protocols.push(...options.protocols);
+      }
+      if (options.authToken && !options.protocols) {
+        // Use Sec-WebSocket-Protocol for token (more secure than URL)
+        protocols.push(`access_token.${options.authToken}`);
+      }
+      
+      ws.current = protocols.length > 0 
+        ? new WebSocket(fullUrl, protocols)
+        : new WebSocket(fullUrl);
 
       ws.current.onopen = () => {
         setIsConnected(true);
@@ -146,34 +168,86 @@ export function useWebSocket<T = any>(
   };
 }
 
-// Specialized hooks for different WebSocket endpoints
+// Helper to get auth token from localStorage or context
+function getAuthToken(): string | undefined {
+  try {
+    // Try to get from localStorage first
+    const token = localStorage.getItem('auth_token') || localStorage.getItem('access_token');
+    if (token) return token;
+    
+    // Try to get from cookie
+    const cookies = document.cookie.split(';');
+    for (const cookie of cookies) {
+      const [name, value] = cookie.trim().split('=');
+      if (name === 'auth_token' || name === 'access_token') {
+        return decodeURIComponent(value);
+      }
+    }
+  } catch (error) {
+    console.warn('Failed to get auth token:', error);
+  }
+  return undefined;
+}
+
+// Specialized hooks for different WebSocket endpoints with authentication
 export function useMonitoringWebSocket() {
+  const authToken = getAuthToken();
   return useWebSocket('/api/ws/monitoring', {
     heartbeatInterval: 20000,
+    authToken,
+    requireAuth: true,
+    protocols: authToken ? [`access_token.${authToken}`] : undefined,
   });
 }
 
 export function useVMWebSocket(vmId?: string) {
+  const authToken = getAuthToken();
   return useWebSocket(vmId ? `/api/ws/vms/${vmId}` : '/api/ws/vms', {
     heartbeatInterval: 15000,
+    authToken,
+    requireAuth: true,
+    protocols: authToken ? [`access_token.${authToken}`] : undefined,
   });
 }
 
 export function useNetworkWebSocket() {
+  const authToken = getAuthToken();
   return useWebSocket('/api/ws/network', {
     heartbeatInterval: 25000,
+    authToken,
+    requireAuth: true,
+    protocols: authToken ? [`access_token.${authToken}`] : undefined,
   });
 }
 
 export function useStorageWebSocket() {
+  const authToken = getAuthToken();
   return useWebSocket('/api/ws/storage', {
     heartbeatInterval: 30000,
+    authToken,
+    requireAuth: true,
+    protocols: authToken ? [`access_token.${authToken}`] : undefined,
   });
 }
 
 export function useSecurityWebSocket() {
+  const authToken = getAuthToken();
   return useWebSocket('/api/ws/security', {
     heartbeatInterval: 10000,
     reconnectAttempts: 10, // More attempts for security monitoring
+    authToken,
+    requireAuth: true,
+    protocols: authToken ? [`access_token.${authToken}`] : undefined,
+  });
+}
+
+// Orchestration WebSocket for real-time events
+export function useOrchestrationWebSocket() {
+  const authToken = getAuthToken();
+  return useWebSocket('/api/ws/orchestration', {
+    heartbeatInterval: 20000,
+    authToken,
+    requireAuth: true,
+    protocols: authToken ? [`access_token.${authToken}`] : undefined,
   });
 }

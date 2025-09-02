@@ -21,12 +21,14 @@ import (
 
 // OrchestrationAPI provides HTTP handlers for orchestration endpoints
 type OrchestrationAPI struct {
-	logger          *logrus.Logger
-	engine          orchestration.OrchestrationEngine
-	autoScaler      autoscaling.AutoScaler
+	logger            *logrus.Logger
+	engine            orchestration.OrchestrationEngine
+	autoScaler        autoscaling.AutoScaler
 	healingController healing.HealingController
-	policyEngine    policy.PolicyEngine
-	placementEngine placement.PlacementEngine
+	policyEngine      policy.PolicyEngine
+	placementEngine   placement.PlacementEngine
+	// WebSocket manager for real-time events (optional)
+	webSocketManager  *WebSocketManager
 }
 
 // NewOrchestrationAPI creates a new orchestration API handler
@@ -39,12 +41,33 @@ func NewOrchestrationAPI(
 	placementEngine placement.PlacementEngine,
 ) *OrchestrationAPI {
 	return &OrchestrationAPI{
-		logger:          logger,
-		engine:          engine,
-		autoScaler:      autoScaler,
+		logger:            logger,
+		engine:            engine,
+		autoScaler:        autoScaler,
 		healingController: healingController,
-		policyEngine:    policyEngine,
-		placementEngine: placementEngine,
+		policyEngine:      policyEngine,
+		placementEngine:   placementEngine,
+	}
+}
+
+// NewOrchestrationAPIWithWebSocket creates orchestration API with WebSocket support
+func NewOrchestrationAPIWithWebSocket(
+	logger *logrus.Logger,
+	engine orchestration.OrchestrationEngine,
+	autoScaler autoscaling.AutoScaler,
+	healingController healing.HealingController,
+	policyEngine policy.PolicyEngine,
+	placementEngine placement.PlacementEngine,
+	webSocketManager *WebSocketManager,
+) *OrchestrationAPI {
+	return &OrchestrationAPI{
+		logger:            logger,
+		engine:            engine,
+		autoScaler:        autoScaler,
+		healingController: healingController,
+		policyEngine:      policyEngine,
+		placementEngine:   placementEngine,
+		webSocketManager:  webSocketManager,
 	}
 }
 
@@ -52,6 +75,12 @@ func NewOrchestrationAPI(
 func (api *OrchestrationAPI) RegisterRoutes(router *mux.Router) {
 	// Orchestration engine routes
 	router.HandleFunc("/orchestration/status", api.GetOrchestrationStatus).Methods("GET")
+
+	// WebSocket routes (if WebSocket manager is available)
+	if api.webSocketManager != nil {
+		router.HandleFunc("/ws/orchestration", api.HandleWebSocketConnection).Methods("GET")
+		router.HandleFunc("/orchestration/websocket/stats", api.GetWebSocketStats).Methods("GET")
+	}
 
 	// Placement routes
 	router.HandleFunc("/orchestration/placement", api.CreatePlacementRequest).Methods("POST")
@@ -611,4 +640,27 @@ func (api *OrchestrationAPI) writeErrorResponse(w http.ResponseWriter, status in
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(response)
+}
+
+// WebSocket Handlers
+
+// HandleWebSocketConnection handles secure WebSocket connections
+func (api *OrchestrationAPI) HandleWebSocketConnection(w http.ResponseWriter, r *http.Request) {
+	if api.webSocketManager == nil {
+		api.writeErrorResponse(w, http.StatusServiceUnavailable, "WebSocket service not available", nil)
+		return
+	}
+
+	api.webSocketManager.HandleWebSocket(w, r)
+}
+
+// GetWebSocketStats returns WebSocket connection statistics
+func (api *OrchestrationAPI) GetWebSocketStats(w http.ResponseWriter, r *http.Request) {
+	if api.webSocketManager == nil {
+		api.writeErrorResponse(w, http.StatusServiceUnavailable, "WebSocket service not available", nil)
+		return
+	}
+
+	stats := api.webSocketManager.GetStats()
+	api.writeJSONResponse(w, http.StatusOK, stats)
 }

@@ -216,6 +216,12 @@ type MetricCollector interface {
 
 	// Enabled returns whether the collector is enabled
 	Enabled() bool
+
+	// Start starts the collector
+	Start() error
+
+	// Stop stops the collector
+	Stop() error
 }
 
 // MetricRegistry manages metrics in memory
@@ -373,4 +379,55 @@ func (b *MetricBatch) Size() int {
 // IsEmpty returns true if the batch is empty
 func (b *MetricBatch) IsEmpty() bool {
 	return len(b.Metrics) == 0
+}
+
+// ListMetrics returns all metrics in the registry
+func (r *MetricRegistry) ListMetrics() []*Metric {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+	
+	metrics := make([]*Metric, 0, len(r.metrics))
+	for _, series := range r.metrics {
+		if len(series.Metrics) > 0 {
+			// Return the most recent metric
+			latestMetric := series.Metrics[len(series.Metrics)-1]
+			metrics = append(metrics, &Metric{
+				Name:      latestMetric.Name,
+				Type:      latestMetric.Type,
+				Value:     latestMetric.Value,
+				Timestamp: latestMetric.Timestamp,
+				Tags:      latestMetric.Tags,
+				Unit:      latestMetric.Unit,
+				Source:    latestMetric.Source,
+			})
+		}
+	}
+	return metrics
+}
+
+// GetMetric retrieves a metric by ID
+func (r *MetricRegistry) GetMetric(metricID string) (*Metric, error) {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+	
+	series, exists := r.metrics[metricID]
+	if !exists {
+		return nil, fmt.Errorf("metric %s not found", metricID)
+	}
+	
+	if len(series.Metrics) == 0 {
+		return nil, fmt.Errorf("no data points for metric %s", metricID)
+	}
+	
+	// Return the most recent metric
+	latestMetric := series.Metrics[len(series.Metrics)-1]
+	return &Metric{
+		Name:      latestMetric.Name,
+		Type:      latestMetric.Type,
+		Value:     latestMetric.Value,
+		Timestamp: latestMetric.Timestamp,
+		Tags:      latestMetric.Tags,
+		Unit:      latestMetric.Unit,
+		Source:    latestMetric.Source,
+	}, nil
 }

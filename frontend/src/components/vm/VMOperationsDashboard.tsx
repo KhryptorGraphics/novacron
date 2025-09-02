@@ -202,7 +202,7 @@ const VMOperationsDashboard: React.FC = () => {
       });
       if (response.ok) {
         // Update VM status optimistically
-        setVms(prev => prev.map(v => 
+        setVms(prev => (prev || []).map(v => 
           v.id === vm.id 
             ? { ...v, status: action === 'start' ? 'running' : action === 'stop' ? 'stopped' : v.status }
             : v
@@ -225,7 +225,7 @@ const VMOperationsDashboard: React.FC = () => {
         body: JSON.stringify({ targetHost: targetId })
       });
       if (response.ok) {
-        setVms(prev => prev.map(v => 
+        setVms(prev => (prev || []).map(v => 
           v.id === vm.id ? { ...v, status: 'migrating' } : v
         ));
       }
@@ -395,7 +395,7 @@ const VMOperationsDashboard: React.FC = () => {
               <CardDescription>Manage and monitor your VM fleet</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {filteredVms.map((vm) => (
+              {(filteredVms || []).map((vm) => (
                 <div
                   key={vm.id}
                   className={`border rounded-lg p-4 hover:bg-accent cursor-pointer transition-colors ${
@@ -460,7 +460,7 @@ const VMOperationsDashboard: React.FC = () => {
                       </div>
                       
                       <div className="flex gap-1">
-                        {vm.tags.map((tag) => (
+                        {(vm.tags || []).map((tag) => (
                           <Badge key={tag} variant="secondary" className="text-xs">
                             {tag}
                           </Badge>
@@ -676,7 +676,7 @@ const VMOperationsDashboard: React.FC = () => {
                         dataKey="value"
                         label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                       >
-                        {resourceDistribution.map((entry, index) => (
+                        {(resourceDistribution || []).map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.fill} />
                         ))}
                       </Pie>
@@ -720,7 +720,7 @@ const VMOperationsDashboard: React.FC = () => {
                     <SelectValue placeholder="Select target host" />
                   </SelectTrigger>
                   <SelectContent>
-                    {migrationTargets.map((target) => (
+                    {(migrationTargets || []).map((target) => (
                       <SelectItem key={target.id} value={target.id}>
                         <div className="flex items-center justify-between w-full">
                           <span>{target.name}</span>

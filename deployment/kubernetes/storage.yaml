@@ -1,0 +1,207 @@
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: novacron-ssd
+  labels:
+    app.kubernetes.io/name: novacron-storage
+    app.kubernetes.io/part-of: novacron
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  type: gp3
+  fsType: ext4
+allowVolumeExpansion: true
+---
+# PostgreSQL Persistent Volume
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: postgres-pv
+  labels:
+    app.kubernetes.io/name: postgres-storage
+    app.kubernetes.io/part-of: novacron
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: novacron-ssd
+  hostPath:
+    path: /opt/novacron/data/postgres
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - postgres-node
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: novacron
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: novacron-ssd
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres-storage
+---
+# Redis Persistent Volume
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: redis-pv
+  labels:
+    app.kubernetes.io/name: redis-storage
+    app.kubernetes.io/part-of: novacron
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: novacron-ssd
+  hostPath:
+    path: /opt/novacron/data/redis
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/part-of: novacron
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: novacron-ssd
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis-storage
+---
+# Prometheus Persistent Volume
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: prometheus-pv
+  labels:
+    app.kubernetes.io/name: prometheus-storage
+    app.kubernetes.io/part-of: novacron
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: novacron-ssd
+  hostPath:
+    path: /opt/novacron/data/prometheus
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-pvc
+  namespace: novacron-monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/part-of: novacron
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: novacron-ssd
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus-storage
+---
+# Grafana Persistent Volume
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: grafana-pv
+  labels:
+    app.kubernetes.io/name: grafana-storage
+    app.kubernetes.io/part-of: novacron
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: novacron-ssd
+  hostPath:
+    path: /opt/novacron/data/grafana
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-pvc
+  namespace: novacron-monitoring
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/part-of: novacron
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: novacron-ssd
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: grafana-storage
+---
+# Backup Storage
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: backup-pv
+  labels:
+    app.kubernetes.io/name: backup-storage
+    app.kubernetes.io/part-of: novacron
+spec:
+  capacity:
+    storage: 200Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: novacron-ssd
+  hostPath:
+    path: /opt/novacron/backups
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-pvc
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: backup
+    app.kubernetes.io/part-of: novacron
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 200Gi
+  storageClassName: novacron-ssd
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: backup-storage

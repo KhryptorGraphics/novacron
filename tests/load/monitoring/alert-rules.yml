@@ -1,0 +1,253 @@
+# Prometheus alerting rules for NovaCron load testing
+groups:
+  - name: novacron_load_test_alerts
+    rules:
+      # API Performance Alerts
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, rate(novacron_http_request_duration_seconds_bucket[5m])) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+          component: api
+          test_type: load
+        annotations:
+          summary: "High API latency detected during load test"
+          description: "95th percentile API response time is {{ $value }}s, exceeding 500ms threshold"
+
+      - alert: HighErrorRate
+        expr: rate(novacron_http_requests_total{status=~"5.."}[5m]) / rate(novacron_http_requests_total[5m]) > 0.01
+        for: 1m
+        labels:
+          severity: critical
+          component: api
+          test_type: load
+        annotations:
+          summary: "High error rate detected during load test"
+          description: "API error rate is {{ $value | humanizePercentage }}, exceeding 1% threshold"
+
+      - alert: APIRequestRateDrop
+        expr: rate(novacron_http_requests_total[5m]) < 10
+        for: 3m
+        labels:
+          severity: warning
+          component: api
+          test_type: load
+        annotations:
+          summary: "API request rate dropped significantly"
+          description: "API request rate is {{ $value }} req/s, below expected load test rate"
+
+      # VM Operations Alerts
+      - alert: VMCreationLatency
+        expr: histogram_quantile(0.95, rate(novacron_vm_creation_duration_seconds_bucket[5m])) > 30
+        for: 2m
+        labels:
+          severity: warning
+          component: vm
+          test_type: load
+        annotations:
+          summary: "VM creation taking too long"
+          description: "95th percentile VM creation time is {{ $value }}s, exceeding 30s threshold"
+
+      - alert: VMOperationFailures
+        expr: rate(novacron_vm_operations_total{status="failed"}[5m]) / rate(novacron_vm_operations_total[5m]) > 0.05
+        for: 1m
+        labels:
+          severity: critical
+          component: vm
+          test_type: load
+        annotations:
+          summary: "High VM operation failure rate"
+          description: "VM operation failure rate is {{ $value | humanizePercentage }}, exceeding 5% threshold"
+
+      - alert: TooManyActiveVMs
+        expr: novacron_vms_active > 1500
+        for: 1m
+        labels:
+          severity: warning
+          component: vm
+          test_type: load
+        annotations:
+          summary: "High number of active VMs"
+          description: "{{ $value }} VMs are currently active, approaching capacity limits"
+
+      # WebSocket Alerts
+      - alert: WebSocketConnectionFailures
+        expr: rate(novacron_websocket_connection_failures_total[5m]) > 5
+        for: 1m
+        labels:
+          severity: warning
+          component: websocket
+          test_type: load
+        annotations:
+          summary: "WebSocket connection failures increasing"
+          description: "{{ $value }} WebSocket connection failures per second"
+
+      - alert: WebSocketMessageQueueBacklog
+        expr: novacron_websocket_message_queue_size > 1000
+        for: 2m
+        labels:
+          severity: warning
+          component: websocket
+          test_type: load
+        annotations:
+          summary: "WebSocket message queue backlog"
+          description: "{{ $value }} messages queued, indicating processing delays"
+
+      # Database Alerts
+      - alert: DatabaseQueryLatency
+        expr: histogram_quantile(0.95, rate(novacron_database_query_duration_seconds_bucket[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: database
+          test_type: load
+        annotations:
+          summary: "High database query latency"
+          description: "95th percentile database query time is {{ $value }}s, exceeding 100ms threshold"
+
+      - alert: DatabaseConnectionPoolExhaustion
+        expr: novacron_database_connections_active / novacron_database_connections_max > 0.9
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+          test_type: load
+        annotations:
+          summary: "Database connection pool near exhaustion"
+          description: "{{ $value | humanizePercentage }} of database connections in use"
+
+      - alert: DatabaseLockWaitTime
+        expr: rate(novacron_database_lock_wait_seconds_total[5m]) > 1
+        for: 2m
+        labels:
+          severity: warning
+          component: database
+          test_type: load
+        annotations:
+          summary: "High database lock wait time"
+          description: "Database operations waiting {{ $value }}s on average for locks"
+
+      # System Resource Alerts
+      - alert: HighCPUUsage
+        expr: 100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 3m
+        labels:
+          severity: warning
+          component: system
+          test_type: load
+        annotations:
+          summary: "High CPU usage during load test"
+          description: "CPU usage is {{ $value }}%, may impact test reliability"
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 2m
+        labels:
+          severity: critical
+          component: system
+          test_type: load
+        annotations:
+          summary: "High memory usage during load test"
+          description: "Memory usage is {{ $value }}%, risk of out-of-memory conditions"
+
+      - alert: HighDiskUsage
+        expr: 100 - ((node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100) > 90
+        for: 5m
+        labels:
+          severity: critical
+          component: system
+          test_type: load
+        annotations:
+          summary: "High disk usage during load test"
+          description: "Disk usage is {{ $value }}%, may cause test failures"
+
+      # Federation Alerts
+      - alert: FederationNodeDisconnected
+        expr: novacron_federation_nodes_connected < 2
+        for: 1m
+        labels:
+          severity: critical
+          component: federation
+          test_type: load
+        annotations:
+          summary: "Federation cluster has insufficient nodes"
+          description: "Only {{ $value }} federation nodes connected, minimum 2 required"
+
+      - alert: FederationSyncLatency
+        expr: histogram_quantile(0.95, rate(novacron_federation_sync_duration_seconds_bucket[5m])) > 2
+        for: 2m
+        labels:
+          severity: warning
+          component: federation
+          test_type: load
+        annotations:
+          summary: "High federation synchronization latency"
+          description: "Federation sync P95 latency is {{ $value }}s, exceeding 2s threshold"
+
+      # Load Test Specific Alerts
+      - alert: LoadTestStalled
+        expr: rate(k6_iterations[5m]) == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: load_test
+          test_type: load
+        annotations:
+          summary: "Load test appears to have stalled"
+          description: "No k6 iterations recorded in the last 5 minutes"
+
+      - alert: UnexpectedTestTermination
+        expr: absent(k6_vus) and absent_over_time(k6_vus[5m])
+        for: 1m
+        labels:
+          severity: critical
+          component: load_test
+          test_type: load
+        annotations:
+          summary: "Load test terminated unexpectedly"
+          description: "K6 metrics are no longer being reported"
+
+      # Performance Degradation Alerts
+      - alert: PerformanceDegradation
+        expr: |
+          (
+            histogram_quantile(0.95, rate(novacron_http_request_duration_seconds_bucket[5m])) /
+            histogram_quantile(0.95, rate(novacron_http_request_duration_seconds_bucket[5m] offset 10m))
+          ) > 1.5
+        for: 3m
+        labels:
+          severity: warning
+          component: performance
+          test_type: load
+        annotations:
+          summary: "Performance degradation detected"
+          description: "Response times increased by {{ $value | humanizePercentage }} compared to 10 minutes ago"
+
+      # Resource Exhaustion Alerts
+      - alert: MemoryLeakSuspected
+        expr: |
+          (
+            (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) -
+            (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes offset 1h))
+          ) * 100 > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+          test_type: load
+        annotations:
+          summary: "Potential memory leak detected"
+          description: "Memory usage increased by {{ $value }}% in the last hour"
+
+      - alert: ConnectionPoolLeakage
+        expr: |
+          novacron_database_connections_active - 
+          novacron_database_connections_active offset 30m > 50
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+          test_type: load
+        annotations:
+          summary: "Database connection pool may be leaking"
+          description: "{{ $value }} more database connections than 30 minutes ago"

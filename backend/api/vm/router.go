@@ -20,11 +20,11 @@ type Router struct {
 
 // NewRouter creates a new VM router with all handlers
 func NewRouter(
-	vmManager vm.VMManager,
+	vmManager *vm.VMManager,
 	migrationManager vm.MigrationManager,
-	snapshotManager vm.SnapshotManager,
+	snapshotManager *vm.VMSnapshotManager,
 	metricsCollector vm.MetricsCollector,
-	healthChecker vm.HealthChecker,
+	healthChecker vm.HealthCheckerInterface,
 	clusterManager vm.ClusterManager,
 ) *Router {
 	return &Router{
@@ -41,7 +41,7 @@ func NewRouter(
 func (r *Router) RegisterRoutes(router *mux.Router, auth middleware.AuthMiddleware) {
 	// Apply authentication middleware to all routes
 	api := router.PathPrefix("/api/v1").Subrouter()
-	api.Use(auth.Authenticate)
+	// Note: auth middleware will be applied at server level
 
 	// VM Core Operations
 	r.registerVMRoutes(api)
@@ -202,15 +202,15 @@ func (r *Router) registerSnapshotRoutes(router *mux.Router) {
 		Methods(http.MethodPost).
 		Name("RestoreSnapshot")
 
-	// Export snapshot
-	router.HandleFunc("/snapshots/{snapshot_id}/export", r.snapshotHandler.ExportSnapshot).
-		Methods(http.MethodPost).
-		Name("ExportSnapshot")
+	// Export snapshot - commented out until implemented
+	// router.HandleFunc("/snapshots/{snapshot_id}/export", r.snapshotHandler.ExportSnapshot).
+	//	Methods(http.MethodPost).
+	//	Name("ExportSnapshot")
 
-	// Import snapshot
-	router.HandleFunc("/snapshots/import", r.snapshotHandler.ImportSnapshot).
-		Methods(http.MethodPost).
-		Name("ImportSnapshot")
+	// Import snapshot - commented out until implemented
+	// router.HandleFunc("/snapshots/import", r.snapshotHandler.ImportSnapshot).
+	//	Methods(http.MethodPost).
+	//	Name("ImportSnapshot")
 }
 
 // registerMetricsRoutes registers metrics routes

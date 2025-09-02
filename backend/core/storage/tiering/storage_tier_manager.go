@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -188,7 +189,13 @@ func (tm *TierManager) Initialize() error {
 
 	// Initialize each driver if not already initialized
 	for _, tier := range tm.tiers {
-		if err := tier.Driver.Initialize(); err != nil {
+		// Check if driver implements the StorageDriver interface properly
+		if tier.Driver == nil {
+			return fmt.Errorf("tier %s has nil driver", tier.Name)
+		}
+
+		// Try to initialize the driver, but don't fail if it's already initialized
+		if err := tier.Driver.Initialize(); err != nil && !strings.Contains(err.Error(), "already initialized") {
 			return fmt.Errorf("failed to initialize tier %s: %v", tier.Name, err)
 		}
 	}

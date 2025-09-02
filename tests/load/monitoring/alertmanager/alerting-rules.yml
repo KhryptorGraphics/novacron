@@ -1,0 +1,506 @@
+# Prometheus alerting rules for NovaCron load testing
+groups:
+  - name: novacron_performance_alerts
+    rules:
+      # High response time alerts
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) * 1000 > 1000
+        for: 2m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API response time detected"
+          description: "95th percentile response time is {{ $value }}ms, exceeding 1000ms threshold"
+          runbook_url: "https://docs.novacron.com/runbooks/high-response-time"
+
+      - alert: CriticalResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) * 1000 > 2000
+        for: 1m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Critical API response time detected"
+          description: "95th percentile response time is {{ $value }}ms, exceeding 2000ms critical threshold"
+          runbook_url: "https://docs.novacron.com/runbooks/critical-response-time"
+
+      # High error rate alerts
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) * 100 > 1
+        for: 2m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API error rate detected"
+          description: "Error rate is {{ $value }}%, exceeding 1% threshold"
+          runbook_url: "https://docs.novacron.com/runbooks/high-error-rate"
+
+      - alert: CriticalErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) * 100 > 5
+        for: 1m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Critical API error rate detected"
+          description: "Error rate is {{ $value }}%, exceeding 5% critical threshold"
+          runbook_url: "https://docs.novacron.com/runbooks/critical-error-rate"
+
+      # Low throughput alerts
+      - alert: LowThroughput
+        expr: rate(http_requests_total[5m]) < 100
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "Low API throughput detected"
+          description: "Request rate is {{ $value }} requests/sec, below 100/sec threshold"
+          runbook_url: "https://docs.novacron.com/runbooks/low-throughput"
+
+      # System resource alerts
+      - alert: HighCPUUsage
+        expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 3m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is {{ $value }}% on {{ $labels.instance }}"
+          runbook_url: "https://docs.novacron.com/runbooks/high-cpu"
+
+      - alert: CriticalCPUUsage
+        expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 95
+        for: 1m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Critical CPU usage detected"
+          description: "CPU usage is {{ $value }}% on {{ $labels.instance }}"
+          runbook_url: "https://docs.novacron.com/runbooks/critical-cpu"
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 3m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is {{ $value }}% on {{ $labels.instance }}"
+          runbook_url: "https://docs.novacron.com/runbooks/high-memory"
+
+      - alert: CriticalMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 95
+        for: 1m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Critical memory usage detected"
+          description: "Memory usage is {{ $value }}% on {{ $labels.instance }}"
+          runbook_url: "https://docs.novacron.com/runbooks/critical-memory"
+
+      # Load testing specific alerts
+      - alert: LoadTestHighLatency
+        expr: k6_http_req_duration{quantile="0.95"} > 2000
+        for: 1m
+        labels:
+          severity: warning
+          component: load_test
+        annotations:
+          summary: "Load test showing high latency"
+          description: "K6 test {{ $labels.test_name }} showing P95 latency of {{ $value }}ms"
+
+      - alert: LoadTestHighErrorRate
+        expr: k6_http_req_failed_rate > 0.05
+        for: 30s
+        labels:
+          severity: critical
+          component: load_test
+        annotations:
+          summary: "Load test showing high error rate"
+          description: "K6 test {{ $labels.test_name }} showing {{ $value }} error rate"
+
+      # VM management alerts
+      - alert: VMCreationFailures
+        expr: rate(vm_creation_failures_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: vm_management
+        annotations:
+          summary: "High VM creation failure rate"
+          description: "VM creation failures at {{ $value }} failures/sec"
+          runbook_url: "https://docs.novacron.com/runbooks/vm-creation-failures"
+
+      - alert: VMResourceExhaustion
+        expr: vm_resource_pool_utilization > 0.9
+        for: 1m
+        labels:
+          severity: critical
+          component: vm_management
+        annotations:
+          summary: "VM resource pool nearly exhausted"
+          description: "VM resource utilization at {{ $value }}%"
+          runbook_url: "https://docs.novacron.com/runbooks/vm-resource-exhaustion"
+
+      # Database performance alerts
+      - alert: SlowDatabaseQueries
+        expr: histogram_quantile(0.95, rate(database_query_duration_seconds_bucket[5m])) > 1
+        for: 3m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Slow database queries detected"
+          description: "95th percentile query time is {{ $value }}s"
+          runbook_url: "https://docs.novacron.com/runbooks/slow-queries"
+
+      - alert: DatabaseConnectionPool
+        expr: database_connection_pool_utilization > 0.8
+        for: 2m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "High database connection pool utilization"
+          description: "Connection pool utilization at {{ $value }}%"
+          runbook_url: "https://docs.novacron.com/runbooks/connection-pool"
+
+      # WebSocket alerts
+      - alert: WebSocketConnectionFailures
+        expr: rate(websocket_connection_failures_total[5m]) > 10
+        for: 1m
+        labels:
+          severity: warning
+          component: websocket
+        annotations:
+          summary: "High WebSocket connection failure rate"
+          description: "WebSocket connection failures at {{ $value }} failures/sec"
+
+      - alert: WebSocketHighLatency
+        expr: websocket_message_latency_seconds > 0.5
+        for: 2m
+        labels:
+          severity: warning
+          component: websocket
+        annotations:
+          summary: "High WebSocket message latency"
+          description: "WebSocket message latency is {{ $value }}s"
+
+      # Federation alerts
+      - alert: FederationSyncFailures
+        expr: rate(federation_sync_failures_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: federation
+        annotations:
+          summary: "Federation synchronization failures"
+          description: "Federation sync failures at {{ $value }} failures/sec"
+
+      - alert: FederationHighLatency
+        expr: federation_operation_duration_seconds > 5
+        for: 1m
+        labels:
+          severity: warning
+          component: federation
+        annotations:
+          summary: "High federation operation latency"
+          description: "Federation operations taking {{ $value }}s"
+
+  - name: novacron_load_test_alerts
+    rules:
+      # K6 specific metrics and alerts
+      - alert: K6TestFailure
+        expr: k6_test_status != 1
+        for: 0s
+        labels:
+          severity: critical
+          component: load_test
+        annotations:
+          summary: "K6 load test failed"
+          description: "K6 test {{ $labels.test_name }} has failed"
+
+      - alert: K6HighVUs
+        expr: k6_vus > 1000
+        for: 30s
+        labels:
+          severity: info
+          component: load_test
+        annotations:
+          summary: "K6 test running with high virtual users"
+          description: "K6 test {{ $labels.test_name }} running with {{ $value }} virtual users"
+
+      - alert: K6LongRunningTest
+        expr: time() - k6_test_start_time > 3600
+        for: 0s
+        labels:
+          severity: info
+          component: load_test
+        annotations:
+          summary: "K6 test running for over 1 hour"
+          description: "K6 test {{ $labels.test_name }} has been running for over 1 hour"
+
+  - name: novacron_capacity_planning
+    rules:
+      # Capacity planning and auto-scaling alerts
+      - alert: NearCapacityLimit
+        expr: |
+          (
+            rate(http_requests_total[5m]) / 
+            (
+              avg(rate(http_requests_total[5m])) by (instance) * 
+              count(up{job="novacron-api"})
+            )
+          ) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          component: capacity
+        annotations:
+          summary: "Approaching capacity limits"
+          description: "Current load is {{ $value }} of estimated capacity"
+          runbook_url: "https://docs.novacron.com/runbooks/capacity-planning"
+
+      - alert: ScaleUpRecommended
+        expr: |
+          (
+            histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[10m])) > 0.5
+            and
+            rate(http_requests_total[10m]) > 200
+          )
+        for: 5m
+        labels:
+          severity: info
+          component: capacity
+        annotations:
+          summary: "Scale up recommended"
+          description: "High load with degraded performance suggests scaling up"
+          runbook_url: "https://docs.novacron.com/runbooks/scale-up"
+
+      - alert: ScaleDownOpportunity
+        expr: |
+          (
+            histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[30m])) < 0.1
+            and
+            rate(http_requests_total[30m]) < 50
+            and
+            count(up{job="novacron-api"}) > 2
+          )
+        for: 15m
+        labels:
+          severity: info
+          component: capacity
+        annotations:
+          summary: "Scale down opportunity"
+          description: "Low load with excellent performance suggests scaling down opportunity"
+          runbook_url: "https://docs.novacron.com/runbooks/scale-down"
+
+  - name: novacron_slo_violations
+    rules:
+      # Service Level Objective (SLO) violations
+      - alert: SLOResponseTimeViolation
+        expr: |
+          (
+            histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[10m])) * 1000 > 500
+          ) * 100
+        for: 5m
+        labels:
+          severity: warning
+          component: slo
+        annotations:
+          summary: "SLO violation: Response time"
+          description: "95th percentile response time exceeds 500ms SLO target"
+          runbook_url: "https://docs.novacron.com/runbooks/slo-response-time"
+
+      - alert: SLOAvailabilityViolation
+        expr: |
+          (
+            1 - (
+              rate(http_requests_total{status!~"5.."}[10m]) / 
+              rate(http_requests_total[10m])
+            )
+          ) * 100 > 0.5
+        for: 2m
+        labels:
+          severity: critical
+          component: slo
+        annotations:
+          summary: "SLO violation: Availability"
+          description: "Availability below 99.5% SLO target, current: {{ $value }}%"
+          runbook_url: "https://docs.novacron.com/runbooks/slo-availability"
+
+      - alert: SLOThroughputViolation
+        expr: rate(http_requests_total[10m]) < 100
+        for: 5m
+        labels:
+          severity: warning
+          component: slo
+        annotations:
+          summary: "SLO violation: Throughput"
+          description: "Request rate {{ $value }} requests/sec below 100/sec SLO target"
+          runbook_url: "https://docs.novacron.com/runbooks/slo-throughput"
+
+  - name: novacron_predictive_alerts
+    rules:
+      # Predictive alerts based on trends
+      - alert: ResponseTimeTrendIncreasing
+        expr: |
+          predict_linear(
+            histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))[30m:1m], 
+            3600
+          ) * 1000 > 1500
+        for: 10m
+        labels:
+          severity: info
+          component: predictive
+        annotations:
+          summary: "Response time trend indicates future performance issues"
+          description: "Response time trending upward, predicted to reach {{ $value }}ms in 1 hour"
+          runbook_url: "https://docs.novacron.com/runbooks/predictive-performance"
+
+      - alert: ThroughputTrendDecreasing
+        expr: |
+          predict_linear(
+            rate(http_requests_total[5m])[30m:1m], 
+            3600
+          ) < 50
+        for: 10m
+        labels:
+          severity: info
+          component: predictive
+        annotations:
+          summary: "Throughput trend indicates capacity issues"
+          description: "Throughput trending downward, predicted {{ $value }} requests/sec in 1 hour"
+          runbook_url: "https://docs.novacron.com/runbooks/predictive-capacity"
+
+      # Resource exhaustion predictions
+      - alert: MemoryExhaustionPredicted
+        expr: |
+          predict_linear(
+            (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))[30m:1m], 
+            7200
+          ) > 0.95
+        for: 10m
+        labels:
+          severity: warning
+          component: predictive
+        annotations:
+          summary: "Memory exhaustion predicted"
+          description: "Memory usage trending upward, exhaustion predicted in ~2 hours"
+          runbook_url: "https://docs.novacron.com/runbooks/memory-exhaustion"
+
+  - name: novacron_business_impact
+    rules:
+      # Business impact alerts
+      - alert: UserExperienceDegraded
+        expr: |
+          (
+            histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{endpoint=~".*/dashboard|.*/login|.*/vms"}[5m])) * 1000 > 800
+          )
+        for: 3m
+        labels:
+          severity: warning
+          component: user_experience
+        annotations:
+          summary: "User experience degraded"
+          description: "Key user-facing endpoints showing degraded performance"
+          runbook_url: "https://docs.novacron.com/runbooks/user-experience"
+
+      - alert: APIRateLimitApproached
+        expr: rate(http_requests_total[1m]) > 800
+        for: 2m
+        labels:
+          severity: warning
+          component: rate_limiting
+        annotations:
+          summary: "Approaching API rate limits"
+          description: "Request rate {{ $value }}/sec approaching configured limits"
+          runbook_url: "https://docs.novacron.com/runbooks/rate-limits"
+
+      - alert: VMCreationBacklog
+        expr: vm_creation_queue_size > 100
+        for: 2m
+        labels:
+          severity: warning
+          component: vm_management
+        annotations:
+          summary: "VM creation backlog detected"
+          description: "{{ $value }} VMs queued for creation"
+          runbook_url: "https://docs.novacron.com/runbooks/vm-backlog"
+
+  - name: novacron_custom_metrics
+    rules:
+      # Custom application metrics
+      - alert: WebSocketConnectionDrop
+        expr: rate(websocket_connections_closed_total[5m]) > rate(websocket_connections_opened_total[5m]) * 1.5
+        for: 2m
+        labels:
+          severity: warning
+          component: websocket
+        annotations:
+          summary: "High WebSocket connection drop rate"
+          description: "WebSocket connections closing faster than opening"
+
+      - alert: DatabaseQueryQueueBacklog
+        expr: database_query_queue_size > 50
+        for: 1m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database query queue backlog"
+          description: "{{ $value }} queries queued for execution"
+
+      - alert: FederationClusterUnhealthy
+        expr: federation_cluster_health_score < 0.8
+        for: 2m
+        labels:
+          severity: critical
+          component: federation
+        annotations:
+          summary: "Federation cluster health degraded"
+          description: "Cluster health score: {{ $value }}"
+
+  - name: novacron_load_test_completion
+    rules:
+      # Load test completion and result alerts
+      - alert: LoadTestCompleted
+        expr: increase(k6_test_completed_total[1m]) > 0
+        for: 0s
+        labels:
+          severity: info
+          component: load_test
+        annotations:
+          summary: "Load test completed"
+          description: "K6 test {{ $labels.test_name }} has completed"
+
+      - alert: LoadTestPerformanceRegression
+        expr: |
+          (
+            k6_http_req_duration{quantile="0.95"} / 
+            ignoring(test_run) k6_http_req_duration{quantile="0.95", test_run="baseline"}
+          ) > 1.15
+        for: 0s
+        labels:
+          severity: warning
+          component: regression
+        annotations:
+          summary: "Performance regression detected in load test"
+          description: "Current test showing {{ $value }}x baseline response time"
+
+      - alert: LoadTestCapacityReached
+        expr: k6_http_req_failed_rate > 0.01 and k6_vus > 500
+        for: 1m
+        labels:
+          severity: info
+          component: capacity
+        annotations:
+          summary: "Load test indicates capacity limits"
+          description: "Error rate increasing under load, capacity limit may be reached"

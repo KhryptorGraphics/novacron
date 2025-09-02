@@ -1,0 +1,288 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "NovaCron Load Testing Dashboard",
+    "tags": ["novacron", "load-testing", "performance"],
+    "timezone": "browser",
+    "refresh": "5s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "API Request Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(novacron_http_requests_total[5m])",
+            "legendFormat": "Requests/sec"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 50 },
+                { "color": "red", "value": 100 }
+              ]
+            },
+            "unit": "reqps"
+          }
+        },
+        "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 }
+      },
+      {
+        "id": 2,
+        "title": "API Response Time",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(novacron_http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "P50"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(novacron_http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "P95"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(novacron_http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "P99"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "palette-classic" },
+            "unit": "s"
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 6, "y": 0 }
+      },
+      {
+        "id": 3,
+        "title": "Error Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(novacron_http_requests_total{status=~\"5..\"}[5m]) / rate(novacron_http_requests_total[5m]) * 100",
+            "legendFormat": "Error Rate %"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 1 },
+                { "color": "red", "value": 5 }
+              ]
+            },
+            "unit": "percent"
+          }
+        },
+        "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 }
+      },
+      {
+        "id": 4,
+        "title": "VM Operations",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(novacron_vm_operations_total[5m])",
+            "legendFormat": "VM Ops/sec"
+          },
+          {
+            "expr": "novacron_vms_active",
+            "legendFormat": "Active VMs"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "palette-classic" },
+            "unit": "short"
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
+      },
+      {
+        "id": 5,
+        "title": "WebSocket Connections",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "novacron_websocket_connections_active",
+            "legendFormat": "Active Connections"
+          },
+          {
+            "expr": "rate(novacron_websocket_messages_sent_total[5m])",
+            "legendFormat": "Messages/sec"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "palette-classic" },
+            "unit": "short"
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 }
+      },
+      {
+        "id": 6,
+        "title": "System Resources",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+            "legendFormat": "CPU Usage %"
+          },
+          {
+            "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
+            "legendFormat": "Memory Usage %"
+          },
+          {
+            "expr": "100 - ((node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"}) * 100)",
+            "legendFormat": "Disk Usage %"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "palette-classic" },
+            "unit": "percent",
+            "max": 100,
+            "min": 0
+          }
+        },
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 }
+      },
+      {
+        "id": 7,
+        "title": "Database Performance",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(novacron_database_queries_total[5m])",
+            "legendFormat": "Queries/sec"
+          },
+          {
+            "expr": "novacron_database_connections_active",
+            "legendFormat": "Active Connections"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(novacron_database_query_duration_seconds_bucket[5m]))",
+            "legendFormat": "Query Time P95"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "palette-classic" },
+            "unit": "short"
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 }
+      },
+      {
+        "id": 8,
+        "title": "Federation Health",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "novacron_federation_nodes_connected",
+            "legendFormat": "Connected Nodes"
+          },
+          {
+            "expr": "rate(novacron_federation_sync_operations_total[5m])",
+            "legendFormat": "Sync Ops/sec"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(novacron_federation_sync_duration_seconds_bucket[5m]))",
+            "legendFormat": "Sync Time P95"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "palette-classic" },
+            "unit": "short"
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 }
+      },
+      {
+        "id": 9,
+        "title": "Load Test Progress",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "k6_http_reqs",
+            "legendFormat": "HTTP Requests",
+            "format": "table"
+          },
+          {
+            "expr": "k6_vus",
+            "legendFormat": "Virtual Users",
+            "format": "table"
+          },
+          {
+            "expr": "k6_iterations",
+            "legendFormat": "Iterations",
+            "format": "table"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "palette-classic" }
+          }
+        },
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 }
+      },
+      {
+        "id": 10,
+        "title": "Test Scenario Status",
+        "type": "logs",
+        "targets": [
+          {
+            "expr": "{job=\"k6\"} |= \"scenario\"",
+            "legendFormat": "K6 Logs"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 40 }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "environment",
+          "type": "constant",
+          "current": {
+            "value": "$ENVIRONMENT"
+          }
+        },
+        {
+          "name": "test_session",
+          "type": "constant", 
+          "current": {
+            "value": "$TEST_SESSION_ID"
+          }
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Load Test Events",
+          "datasource": "Prometheus",
+          "expr": "changes(novacron_load_test_phase[1m])",
+          "titleFormat": "Test Phase Change",
+          "textFormat": "Load test phase changed"
+        }
+      ]
+    }
+  }
+}

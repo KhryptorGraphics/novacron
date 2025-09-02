@@ -1,0 +1,138 @@
+# Prometheus configuration for NovaCron load testing
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'novacron-load-test'
+    environment: '${ENVIRONMENT:-local}'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - localhost:9093
+
+# Load alerting rules
+rule_files:
+  - "alert-rules.yml"
+
+# Scrape configurations for load testing
+scrape_configs:
+  # NovaCron API server metrics
+  - job_name: 'novacron-api'
+    static_configs:
+      - targets: ['localhost:8080']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    honor_labels: true
+    params:
+      format: ['prometheus']
+
+  # K6 load testing metrics
+  - job_name: 'k6-load-tests'
+    static_configs:
+      - targets: ['localhost:6565']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    scrape_timeout: 3s
+
+  # Node exporter for system metrics during load testing
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['localhost:9100']
+    scrape_interval: 10s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'load-test-node'
+
+  # Database metrics (if PostgreSQL exporter is available)
+  - job_name: 'postgres-exporter'
+    static_configs:
+      - targets: ['localhost:9187']
+    scrape_interval: 15s
+
+  # Go application metrics from NovaCron backend
+  - job_name: 'novacron-backend'
+    static_configs:
+      - targets: ['localhost:8080']
+    metrics_path: '/debug/vars'
+    scrape_interval: 30s
+
+  # WebSocket metrics
+  - job_name: 'novacron-websocket'
+    static_configs:
+      - targets: ['localhost:8080']
+    metrics_path: '/ws/metrics/prometheus'
+    scrape_interval: 15s
+
+  # Federation cluster metrics
+  - job_name: 'novacron-federation'
+    static_configs:
+      - targets: 
+        - 'us-east.novacron.com:8080'
+        - 'us-west.novacron.com:8080'
+        - 'eu-central.novacron.com:8080'
+    metrics_path: '/federation/metrics'
+    scrape_interval: 30s
+    honor_labels: true
+
+  # Custom load test metrics
+  - job_name: 'load-test-custom'
+    file_sd_configs:
+      - files:
+        - 'targets/*.json'
+        refresh_interval: 30s
+
+# Remote write configuration for long-term storage
+remote_write:
+  - url: "http://localhost:8086/api/v1/prom/write?db=k6"
+    queue_config:
+      max_samples_per_send: 1000
+      max_shards: 10
+      capacity: 10000
+
+# Storage configuration
+storage:
+  tsdb:
+    retention.time: 7d
+    retention.size: 10GB
+    wal-compression: true
+
+# Load testing specific configuration
+recording_rules:
+  - name: "load_test_rules"
+    interval: 30s
+    rules:
+      - record: "novacron:api_request_rate"
+        expr: "rate(novacron_http_requests_total[5m])"
+        labels:
+          component: "api"
+          
+      - record: "novacron:vm_operation_rate"
+        expr: "rate(novacron_vm_operations_total[5m])"
+        labels:
+          component: "vm"
+          
+      - record: "novacron:websocket_connection_rate"
+        expr: "rate(novacron_websocket_connections_total[5m])"
+        labels:
+          component: "websocket"
+          
+      - record: "novacron:database_query_rate"
+        expr: "rate(novacron_database_queries_total[5m])"
+        labels:
+          component: "database"
+
+      - record: "novacron:error_rate_by_endpoint"
+        expr: "rate(novacron_http_requests_total{status=~\"5..\"}[5m]) / rate(novacron_http_requests_total[5m])"
+        labels:
+          component: "api"
+
+      - record: "novacron:response_time_percentiles"
+        expr: "histogram_quantile(0.95, rate(novacron_http_request_duration_seconds_bucket[5m]))"
+        labels:
+          component: "api"
+          percentile: "95"

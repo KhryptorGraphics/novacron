@@ -302,7 +302,7 @@ const StorageManagementUI: React.FC = () => {
   };
 
   // Chart data
-  const storageDistribution = pools.map(pool => ({
+  const storageDistribution = (pools || []).map(pool => ({
     name: pool.name,
     value: pool.usedSize,
     total: pool.totalSize,
@@ -430,7 +430,7 @@ const StorageManagementUI: React.FC = () => {
                   <CardDescription>Manage storage volumes and their configurations</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {volumes.map((volume) => (
+                  {(volumes || []).map((volume) => (
                     <div
                       key={volume.id}
                       className={`border rounded-lg p-4 hover:bg-accent cursor-pointer transition-colors ${
@@ -592,7 +592,7 @@ const StorageManagementUI: React.FC = () => {
 
         <TabsContent value="pools" className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {pools.map((pool) => (
+            {(pools || []).map((pool) => (
               <Card key={pool.id}>
                 <CardHeader>
                   <div className="flex justify-between items-start">
@@ -631,7 +631,7 @@ const StorageManagementUI: React.FC = () => {
                     <div>
                       <h4 className="text-sm font-semibold mb-2">Storage Devices</h4>
                       <div className="space-y-1">
-                        {pool.devices.map((device) => (
+                        {(pool.devices || []).map((device) => (
                           <div key={device.name} className="flex items-center justify-between text-sm">
                             <span className="font-mono">{device.name}</span>
                             <div className="flex items-center gap-2">
@@ -670,7 +670,7 @@ const StorageManagementUI: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {snapshots.map((snapshot) => (
+                {(snapshots || []).map((snapshot) => (
                   <div key={snapshot.id} className="flex items-center justify-between p-4 border rounded-lg">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
@@ -728,7 +728,7 @@ const StorageManagementUI: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {backupJobs.map((job) => (
+                {(backupJobs || []).map((job) => (
                   <div key={job.id} className="border rounded-lg p-4">
                     <div className="flex items-start justify-between">
                       <div className="space-y-2">

@@ -2,10 +2,7 @@
 const nextConfig = {
   // Disable static optimization to avoid null pointer errors during build
   experimental: {
-    appDir: true,
-    // Disable static optimization
-    staticPageGenerationTimeout: 0,
-    dynamicIO: false,
+    // Remove deprecated options for Next.js 13.5+
   },
 
   // Compiler optimizations
@@ -57,6 +54,9 @@ const nextConfig = {
     // Warning: This allows production builds to complete even with TypeScript errors
     ignoreBuildErrors: true,
   },
+
+  // Output configuration
+  output: 'standalone',
 };
 
 module.exports = nextConfig;

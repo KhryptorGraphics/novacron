@@ -345,7 +345,7 @@ const NetworkConfigurationPanel: React.FC = () => {
   };
 
   const handleToggleRule = (ruleId: string) => {
-    setFirewallRules(prev => prev.map(rule => 
+    setFirewallRules(prev => (prev || []).map(rule => 
       rule.id === ruleId ? { ...rule, enabled: !rule.enabled } : rule
     ));
   };
@@ -447,7 +447,7 @@ const NetworkConfigurationPanel: React.FC = () => {
                   <CardDescription>Configure and manage virtual network segments</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {networks.map((network) => (
+                  {(networks || []).map((network) => (
                     <div
                       key={network.id}
                       className={`border rounded-lg p-4 hover:bg-accent cursor-pointer transition-colors ${
@@ -494,7 +494,7 @@ const NetworkConfigurationPanel: React.FC = () => {
                           <div className="space-y-2">
                             <p className="text-sm font-medium">Subnets</p>
                             <div className="space-y-1">
-                              {network.subnets.map((subnet) => (
+                              {(network.subnets || []).map((subnet) => (
                                 <div key={subnet.id} className="flex items-center justify-between text-sm p-2 bg-muted rounded">
                                   <span className="font-mono">{subnet.name}</span>
                                   <span className="text-muted-foreground">{subnet.cidr}</span>
@@ -540,7 +540,7 @@ const NetworkConfigurationPanel: React.FC = () => {
                       <div>
                         <p className="text-sm text-muted-foreground mb-1">DNS Servers</p>
                         <div className="space-y-1">
-                          {selectedNetwork.dns.map((dns, index) => (
+                          {(selectedNetwork?.dns || []).map((dns, index) => (
                             <div key={index} className="text-sm font-mono bg-muted p-1 rounded">
                               {dns}
                             </div>
@@ -652,7 +652,7 @@ const NetworkConfigurationPanel: React.FC = () => {
 
         <TabsContent value="loadbalancer" className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {loadBalancers.map((lb) => (
+            {(loadBalancers || []).map((lb) => (
               <Card key={lb.id}>
                 <CardHeader>
                   <div className="flex justify-between items-start">
@@ -682,7 +682,7 @@ const NetworkConfigurationPanel: React.FC = () => {
                   <div>
                     <h4 className="text-sm font-semibold mb-2">Backend Servers</h4>
                     <div className="space-y-2">
-                      {lb.backends.map((backend) => (
+                      {(lb.backends || []).map((backend) => (
                         <div key={backend.id} className="flex items-center justify-between p-2 border rounded">
                           <div className="flex items-center gap-2">
                             <div className={`h-2 w-2 rounded-full ${
@@ -790,7 +790,7 @@ const NetworkConfigurationPanel: React.FC = () => {
                       <div className="w-1 h-8 bg-border" />
                     </div>
                     <div className="flex justify-center gap-8">
-                      {networks.slice(0, 3).map((network) => (
+                      {(networks || []).slice(0, 3).map((network) => (
                         <div key={network.id} className="flex flex-col items-center gap-2">
                           <div className="flex items-center gap-2 p-3 bg-green-50 border-2 border-green-200 rounded-lg">
                             <Network className="h-5 w-5 text-green-600" />
@@ -839,7 +839,7 @@ const NetworkConfigurationPanel: React.FC = () => {
                 </div>
 
                 <div className="space-y-2">
-                  {networkFlows.map((flow, index) => (
+                  {(networkFlows || []).map((flow, index) => (
                     <div key={index} className="flex items-center justify-between p-3 border rounded-lg">
                       <div className="flex items-center gap-4 flex-1">
                         <Activity className="h-4 w-4 text-muted-foreground" />

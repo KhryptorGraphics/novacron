@@ -1,0 +1,627 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "NovaCron Load Testing Dashboard",
+    "tags": ["novacron", "load-testing", "performance"],
+    "timezone": "browser",
+    "refresh": "5s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Test Overview",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "k6_vus",
+            "legendFormat": "Virtual Users",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(k6_http_reqs_total[1m])",
+            "legendFormat": "Requests/sec",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(k6_http_req_failed_total[1m]) / rate(k6_http_reqs_total[1m]) * 100",
+            "legendFormat": "Error Rate %",
+            "refId": "C"
+          },
+          {
+            "expr": "k6_http_req_duration{quantile=\"0.95\"} * 1000",
+            "legendFormat": "P95 Response Time (ms)",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {
+              "displayMode": "list",
+              "orientation": "horizontal"
+            },
+            "mappings": [],
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 500},
+                {"color": "red", "value": 1000}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Response Time Distribution",
+        "type": "timeseries",
+        "gridPos": {"h": 9, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "k6_http_req_duration{quantile=\"0.50\"} * 1000",
+            "legendFormat": "P50",
+            "refId": "A"
+          },
+          {
+            "expr": "k6_http_req_duration{quantile=\"0.95\"} * 1000",
+            "legendFormat": "P95",
+            "refId": "B"
+          },
+          {
+            "expr": "k6_http_req_duration{quantile=\"0.99\"} * 1000",
+            "legendFormat": "P99",
+            "refId": "C"
+          },
+          {
+            "expr": "avg(k6_http_req_duration) * 1000",
+            "legendFormat": "Average",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "ms",
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "smooth",
+              "pointSize": 2,
+              "fillOpacity": 10
+            }
+          }
+        },
+        "options": {
+          "tooltip": {"mode": "single"},
+          "legend": {"displayMode": "list", "placement": "bottom"}
+        }
+      },
+      {
+        "id": 3,
+        "title": "Request Rate & Error Rate",
+        "type": "timeseries",
+        "gridPos": {"h": 9, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "rate(k6_http_reqs_total[1m])",
+            "legendFormat": "Request Rate (req/s)",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(k6_http_req_failed_total[1m]) / rate(k6_http_reqs_total[1m]) * 100",
+            "legendFormat": "Error Rate (%)",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "smooth",
+              "axisPlacement": "auto"
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "Error Rate (%)"},
+              "properties": [
+                {"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}},
+                {"id": "custom.axisPlacement", "value": "right"},
+                {"id": "unit", "value": "percent"}
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": 4,
+        "title": "System Resources",
+        "type": "timeseries",
+        "gridPos": {"h": 9, "w": 12, "x": 0, "y": 17},
+        "targets": [
+          {
+            "expr": "100 - (avg by (instance) (irate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+            "legendFormat": "CPU Usage %",
+            "refId": "A"
+          },
+          {
+            "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
+            "legendFormat": "Memory Usage %",
+            "refId": "B"
+          },
+          {
+            "expr": "avg(node_load1)",
+            "legendFormat": "Load Average (1m)",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "percent",
+            "max": 100,
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 20
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Virtual Users Timeline",
+        "type": "timeseries",
+        "gridPos": {"h": 9, "w": 12, "x": 12, "y": 17},
+        "targets": [
+          {
+            "expr": "k6_vus",
+            "legendFormat": "Active VUs",
+            "refId": "A"
+          },
+          {
+            "expr": "k6_vus_max",
+            "legendFormat": "Max VUs",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "short",
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 30
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "API Endpoint Performance",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 26},
+        "targets": [
+          {
+            "expr": "avg by (endpoint) (k6_http_req_duration{quantile=\"0.95\"}) * 1000",
+            "legendFormat": "P95 Response Time",
+            "refId": "A",
+            "format": "table",
+            "instant": true
+          },
+          {
+            "expr": "rate(k6_http_reqs_total[5m]) by (endpoint)",
+            "legendFormat": "Request Rate",
+            "refId": "B",
+            "format": "table",
+            "instant": true
+          },
+          {
+            "expr": "rate(k6_http_req_failed_total[5m]) / rate(k6_http_reqs_total[5m]) * 100 by (endpoint)",
+            "legendFormat": "Error Rate",
+            "refId": "C",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "transformations": [
+          {
+            "id": "merge",
+            "options": {}
+          },
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {"Time": true},
+              "indexByName": {},
+              "renameByName": {}
+            }
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Network I/O",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 26},
+        "targets": [
+          {
+            "expr": "rate(node_network_receive_bytes_total[5m]) * 8",
+            "legendFormat": "Network In (bps)",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(node_network_transmit_bytes_total[5m]) * 8",
+            "legendFormat": "Network Out (bps)",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "bps",
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 20
+            }
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Database Performance",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 34},
+        "targets": [
+          {
+            "expr": "rate(pg_stat_database_tup_inserted[5m])",
+            "legendFormat": "Inserts/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(pg_stat_database_tup_updated[5m])",
+            "legendFormat": "Updates/sec",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(pg_stat_database_tup_deleted[5m])",
+            "legendFormat": "Deletes/sec",
+            "refId": "C"
+          },
+          {
+            "expr": "pg_stat_activity_count",
+            "legendFormat": "Active Connections",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "ops",
+            "custom": {
+              "drawStyle": "line"
+            }
+          }
+        }
+      },
+      {
+        "id": 9,
+        "title": "WebSocket Connections",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 34},
+        "targets": [
+          {
+            "expr": "websocket_connections_active",
+            "legendFormat": "Active Connections",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(websocket_connections_opened_total[1m])",
+            "legendFormat": "Connections Opened/sec",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(websocket_connections_closed_total[1m])",
+            "legendFormat": "Connections Closed/sec",
+            "refId": "C"
+          },
+          {
+            "expr": "rate(websocket_messages_sent_total[1m])",
+            "legendFormat": "Messages Sent/sec",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "short",
+            "custom": {
+              "drawStyle": "line"
+            }
+          }
+        }
+      },
+      {
+        "id": 10,
+        "title": "VM Operations Performance",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 42},
+        "targets": [
+          {
+            "expr": "rate(vm_operations_total{operation=\"create\"}[5m])",
+            "legendFormat": "VM Creates/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(vm_operations_total{operation=\"start\"}[5m])",
+            "legendFormat": "VM Starts/sec",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(vm_operations_total{operation=\"stop\"}[5m])",
+            "legendFormat": "VM Stops/sec",
+            "refId": "C"
+          },
+          {
+            "expr": "rate(vm_operations_total{operation=\"delete\"}[5m])",
+            "legendFormat": "VM Deletes/sec",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "ops",
+            "custom": {
+              "drawStyle": "line"
+            }
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Federation Health",
+        "type": "gauge",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 42},
+        "targets": [
+          {
+            "expr": "federation_cluster_health_score",
+            "legendFormat": "Cluster Health Score",
+            "refId": "A"
+          },
+          {
+            "expr": "count(federation_node_status == 1)",
+            "legendFormat": "Healthy Nodes",
+            "refId": "B"
+          },
+          {
+            "expr": "avg(federation_sync_latency_seconds) * 1000",
+            "legendFormat": "Sync Latency (ms)",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 0.7},
+                {"color": "green", "value": 0.9}
+              ]
+            },
+            "min": 0,
+            "max": 1
+          }
+        },
+        "options": {
+          "orientation": "auto",
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "showThresholdLabels": false,
+          "showThresholdMarkers": true
+        }
+      },
+      {
+        "id": 12,
+        "title": "Load Test Progress",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 50},
+        "targets": [
+          {
+            "expr": "k6_iterations_total",
+            "legendFormat": "Total Iterations",
+            "refId": "A"
+          },
+          {
+            "expr": "k6_data_sent_total",
+            "legendFormat": "Data Sent (bytes)",
+            "refId": "B"
+          },
+          {
+            "expr": "k6_data_received_total",
+            "legendFormat": "Data Received (bytes)",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 10
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byRegexp", "options": "/Data.*/"},
+              "properties": [
+                {"id": "unit", "value": "bytes"},
+                {"id": "custom.axisPlacement", "value": "right"}
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": 13,
+        "title": "Performance Thresholds",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 58},
+        "targets": [
+          {
+            "expr": "label_replace(k6_http_req_duration{quantile=\"0.95\"} * 1000 > 500, \"status\", \"warning\", \"\", \"\")",
+            "legendFormat": "Response Time Threshold",
+            "refId": "A",
+            "format": "table",
+            "instant": true
+          },
+          {
+            "expr": "label_replace(rate(k6_http_req_failed_total[5m]) / rate(k6_http_reqs_total[5m]) > 0.01, \"status\", \"error\", \"\", \"\")",
+            "legendFormat": "Error Rate Threshold",
+            "refId": "B",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "transformations": [
+          {
+            "id": "merge",
+            "options": {}
+          }
+        ]
+      },
+      {
+        "id": 14,
+        "title": "Alert Status",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 58},
+        "targets": [
+          {
+            "expr": "ALERTS{alertstate=\"firing\", severity=\"critical\"}",
+            "legendFormat": "Critical Alerts",
+            "refId": "A"
+          },
+          {
+            "expr": "ALERTS{alertstate=\"firing\", severity=\"warning\"}",
+            "legendFormat": "Warning Alerts",
+            "refId": "B"
+          },
+          {
+            "expr": "ALERTS{alertstate=\"pending\"}",
+            "legendFormat": "Pending Alerts",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 1},
+                {"color": "red", "value": 3}
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h", "2h", "1d"]
+    },
+    "templating": {
+      "list": [
+        {
+          "current": {
+            "selected": false,
+            "text": "All",
+            "value": "$__all"
+          },
+          "hide": 0,
+          "includeAll": true,
+          "label": "Test Scenario",
+          "multi": false,
+          "name": "scenario",
+          "options": [],
+          "query": "label_values(k6_http_reqs_total, scenario)",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "sort": 0,
+          "tagValuesQuery": "",
+          "tagsQuery": "",
+          "type": "query",
+          "useTags": false
+        },
+        {
+          "current": {
+            "selected": false,
+            "text": "All",
+            "value": "$__all"
+          },
+          "hide": 0,
+          "includeAll": true,
+          "label": "Instance",
+          "multi": false,
+          "name": "instance",
+          "options": [],
+          "query": "label_values(up, instance)",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "sort": 0,
+          "type": "query"
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": "-- Grafana --",
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        },
+        {
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "ALERTS{alertstate=\"firing\"}",
+          "iconColor": "red",
+          "name": "Alerts",
+          "titleFormat": "{{ $labels.alertname }}",
+          "textFormat": "{{ $labels.summary }}"
+        }
+      ]
+    },
+    "links": [
+      {
+        "icon": "external link",
+        "tags": ["k6"],
+        "title": "K6 Documentation",
+        "type": "link",
+        "url": "https://k6.io/docs/"
+      },
+      {
+        "icon": "dashboard",
+        "tags": ["novacron"],
+        "title": "NovaCron System Dashboard",
+        "type": "dashboards"
+      }
+    ],
+    "version": 1
+  }
+}

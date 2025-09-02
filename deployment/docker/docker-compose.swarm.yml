@@ -1,0 +1,605 @@
+version: '3.8'
+
+# NovaCron Docker Swarm Production Deployment
+# Optimized for multi-node clustering with high availability
+
+services:
+  # PostgreSQL with HA configuration
+  postgres:
+    image: postgres:15-alpine
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+        preferences:
+          - spread: node.labels.zone
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 1G
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+        order: stop-first
+    environment:
+      POSTGRES_USER_FILE: /run/secrets/postgres_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_DB: ${POSTGRES_DB:-novacron}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - type: bind
+        source: ./configs/postgres
+        target: /etc/postgresql
+        read_only: true
+    secrets:
+      - postgres_user
+      - postgres_password
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $(cat /run/secrets/postgres_user) -d ${POSTGRES_DB:-novacron}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Redis Sentinel for HA
+  redis-master:
+    image: redis:7-alpine
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    command: >
+      redis-server
+      --requirepass-file /run/secrets/redis_password
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --maxmemory 1.5gb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_master_data:/data
+    secrets:
+      - redis_password
+    networks:
+      - cache
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "$(cat /run/secrets/redis_password)", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis-replica:
+    image: redis:7-alpine
+    deploy:
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == worker
+        preferences:
+          - spread: node.id
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    command: >
+      redis-server
+      --replicaof redis-master 6379
+      --masterauth-file /run/secrets/redis_password
+      --requirepass-file /run/secrets/redis_password
+      --appendonly yes
+    volumes:
+      - redis_replica_data:/data
+    secrets:
+      - redis_password
+    depends_on:
+      - redis-master
+    networks:
+      - cache
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "$(cat /run/secrets/redis_password)", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Server with load balancing
+  api:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_PREFIX:-novacron}/api-server:${TAG:-latest}
+    deploy:
+      replicas: 3
+      placement:
+        preferences:
+          - spread: node.id
+        constraints:
+          - node.role != manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: start-first
+        monitor: 60s
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: pause
+        monitor: 60s
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.api.rule=PathPrefix(`/api`)"
+        - "traefik.http.routers.api.tls=true"
+        - "traefik.http.services.api.loadbalancer.server.port=8090"
+        - "traefik.http.services.api.loadbalancer.healthcheck.path=/health"
+        - "traefik.http.services.api.loadbalancer.healthcheck.interval=10s"
+    environment:
+      # Server configuration
+      API_PORT: 8090
+      WS_PORT: 8091
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: json
+      
+      # Database configuration
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-novacron}
+      DB_USER_FILE: /run/secrets/postgres_user
+      DB_PASSWORD_FILE: /run/secrets/postgres_password
+      DB_SSLMODE: require
+      DB_MAX_CONNECTIONS: 50
+      DB_CONN_MAX_LIFETIME: 300s
+      
+      # Authentication
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
+      JWT_EXPIRY: 12h
+      SESSION_TIMEOUT: 15m
+      
+      # Cache configuration
+      REDIS_MASTER_ADDR: redis-master:6379
+      REDIS_REPLICA_ADDRS: redis-replica:6379
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      CACHE_TTL: 15m
+      
+      # Security
+      CORS_ALLOWED_ORIGINS: https://${DOMAIN_NAME:-novacron.local}
+      CSRF_ENABLED: true
+      RATE_LIMIT_ENABLED: true
+      RATE_LIMIT_REQUESTS: 100
+      RATE_LIMIT_WINDOW: 60s
+      
+      # Monitoring
+      METRICS_ENABLED: true
+      TRACING_ENABLED: true
+    volumes:
+      - api_logs:/var/log/novacron
+    secrets:
+      - postgres_user
+      - postgres_password
+      - jwt_secret
+      - redis_password
+    depends_on:
+      - postgres
+      - redis-master
+    networks:
+      - frontend
+      - backend
+      - database
+      - cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "10"
+
+  # Frontend with CDN integration
+  frontend:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_PREFIX:-novacron}/frontend:${TAG:-latest}
+    deploy:
+      replicas: 2
+      placement:
+        preferences:
+          - spread: node.id
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+        - "traefik.http.routers.frontend.priority=1"
+        - "traefik.http.routers.frontend.tls=true"
+        - "traefik.http.services.frontend.loadbalancer.server.port=80"
+    environment:
+      NGINX_HOST: ${DOMAIN_NAME:-novacron.local}
+      API_UPSTREAM: api:8090
+    volumes:
+      - frontend_cache:/var/cache/nginx
+    depends_on:
+      - api
+    networks:
+      - frontend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # Traefik Load Balancer
+  traefik:
+    image: traefik:v2.10
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.swarmMode=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=${SSL_EMAIL:-admin@novacron.local}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--global.checkNewVersion=false"
+      - "--global.sendAnonymousUsage=false"
+      - "--log.level=INFO"
+      - "--accesslog=true"
+      - "--metrics.prometheus=true"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_data:/letsencrypt
+    networks:
+      - frontend
+      - monitoring
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.${DOMAIN_NAME:-novacron.local}`)"
+      - "traefik.http.routers.traefik.tls=true"
+      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
+      - "traefik.http.services.traefik.loadbalancer.server.port=8080"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Prometheus for monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=10GB'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    volumes:
+      - prometheus_data:/prometheus
+      - type: bind
+        source: ./configs/prometheus
+        target: /etc/prometheus
+        read_only: true
+    networks:
+      - monitoring
+      - backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.${DOMAIN_NAME:-novacron.local}`)"
+      - "traefik.http.routers.prometheus.tls=true"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    environment:
+      GF_SECURITY_ADMIN_USER__FILE: /run/secrets/grafana_admin_user
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_SECURITY_SECRET_KEY__FILE: /run/secrets/grafana_secret_key
+      GF_USERS_ALLOW_SIGN_UP: false
+      GF_SERVER_DOMAIN: grafana.${DOMAIN_NAME:-novacron.local}
+      GF_SERVER_ROOT_URL: https://grafana.${DOMAIN_NAME:-novacron.local}
+      GF_INSTALL_PLUGINS: grafana-piechart-panel,grafana-worldmap-panel
+      GF_LOG_LEVEL: info
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - type: bind
+        source: ./configs/grafana/provisioning
+        target: /etc/grafana/provisioning
+        read_only: true
+    secrets:
+      - grafana_admin_user
+      - grafana_admin_password
+      - grafana_secret_key
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring
+      - frontend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN_NAME:-novacron.local}`)"
+      - "traefik.http.routers.grafana.tls=true"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    user: "472:472"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Backup Service
+  backup:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_PREFIX:-novacron}/backup:${TAG:-latest}
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    environment:
+      BACKUP_SCHEDULE: "0 2 * * *"
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-novacron}
+      DB_USER_FILE: /run/secrets/postgres_user
+      DB_PASSWORD_FILE: /run/secrets/postgres_password
+      BACKUP_RETENTION_DAYS: 30
+      S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      S3_REGION: ${BACKUP_S3_REGION:-us-east-1}
+    volumes:
+      - backup_data:/var/lib/backup
+    secrets:
+      - postgres_user
+      - postgres_password
+      - aws_access_key
+      - aws_secret_key
+    depends_on:
+      - postgres
+    networks:
+      - database
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+# Overlay networks for service isolation
+networks:
+  frontend:
+    driver: overlay
+    attachable: true
+    driver_opts:
+      encrypted: "true"
+  backend:
+    driver: overlay
+    attachable: true
+    driver_opts:
+      encrypted: "true"
+  database:
+    driver: overlay
+    internal: true
+    driver_opts:
+      encrypted: "true"
+  cache:
+    driver: overlay
+    internal: true
+    driver_opts:
+      encrypted: "true"
+  monitoring:
+    driver: overlay
+    attachable: true
+    driver_opts:
+      encrypted: "true"
+
+# Named volumes for data persistence
+volumes:
+  postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/novacron/data/postgres
+  redis_master_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/novacron/data/redis-master
+  redis_replica_data:
+    driver: local
+  prometheus_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/novacron/data/prometheus
+  grafana_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/novacron/data/grafana
+  backup_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/novacron/backups
+  traefik_data:
+    driver: local
+  api_logs:
+    driver: local
+  frontend_cache:
+    driver: local
+
+# External secrets (created separately)
+secrets:
+  postgres_user:
+    external: true
+  postgres_password:
+    external: true
+  jwt_secret:
+    external: true
+  redis_password:
+    external: true
+  grafana_admin_user:
+    external: true
+  grafana_admin_password:
+    external: true
+  grafana_secret_key:
+    external: true
+  aws_access_key:
+    external: true
+  aws_secret_key:
+    external: true

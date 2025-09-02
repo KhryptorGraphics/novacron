@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NovaCron - VM Management Platform</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-blue-900 text-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <i class="fas fa-server text-2xl mr-3"></i>
+                    <span class="font-bold text-xl">NovaCron</span>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span id="user-info" class="text-sm">Guest</span>
+                    <button id="login-btn" class="bg-blue-700 px-4 py-2 rounded hover:bg-blue-600">Login</button>
+                    <button id="logout-btn" class="bg-red-600 px-4 py-2 rounded hover:bg-red-500 hidden">Logout</button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div id="main-content" class="hidden">
+        <!-- Dashboard Stats -->
+        <div class="max-w-7xl mx-auto p-6">
+            <h1 class="text-3xl font-bold text-gray-800 mb-6">Dashboard</h1>
+            
+            <!-- Stats Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center">
+                        <div class="p-3 rounded-full bg-blue-500 text-white">
+                            <i class="fas fa-server"></i>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-600">Total VMs</p>
+                            <p id="total-vms" class="text-2xl font-bold text-gray-900">-</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center">
+                        <div class="p-3 rounded-full bg-green-500 text-white">
+                            <i class="fas fa-play-circle"></i>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-600">Running</p>
+                            <p id="running-vms" class="text-2xl font-bold text-green-600">-</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center">
+                        <div class="p-3 rounded-full bg-yellow-500 text-white">
+                            <i class="fas fa-pause-circle"></i>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-600">Stopped</p>
+                            <p id="stopped-vms" class="text-2xl font-bold text-yellow-600">-</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center">
+                        <div class="p-3 rounded-full bg-purple-500 text-white">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-600">Users</p>
+                            <p id="total-users" class="text-2xl font-bold text-purple-600">-</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- System Metrics -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-lg font-semibold mb-4">System Resources</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="text-sm text-gray-600">CPU Usage</span>
+                                <span id="cpu-usage" class="text-sm font-medium">-%</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-2">
+                                <div id="cpu-bar" class="bg-blue-600 h-2 rounded-full" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="text-sm text-gray-600">Memory Usage</span>
+                                <span id="memory-usage" class="text-sm font-medium">-%</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-2">
+                                <div id="memory-bar" class="bg-green-600 h-2 rounded-full" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="text-sm text-gray-600">Disk Usage</span>
+                                <span id="disk-usage" class="text-sm font-medium">-%</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-2">
+                                <div id="disk-bar" class="bg-yellow-600 h-2 rounded-full" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-lg font-semibold mb-4">VM Status Distribution</h3>
+                    <canvas id="vm-status-chart" width="400" height="200"></canvas>
+                </div>
+            </div>
+            
+            <!-- VM Management -->
+            <div class="bg-white rounded-lg shadow">
+                <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                    <h3 class="text-lg font-semibold">Virtual Machines</h3>
+                    <button id="create-vm-btn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                        <i class="fas fa-plus mr-2"></i>Create VM
+                    </button>
+                </div>
+                
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">CPU</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Memory</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Host</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="vm-table-body" class="bg-white divide-y divide-gray-200">
+                            <!-- VMs will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="login-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center">
+        <div class="bg-white rounded-lg p-8 max-w-md w-full mx-4">
+            <h2 class="text-2xl font-bold mb-6 text-center">Login to NovaCron</h2>
+            <form id="login-form">
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Username</label>
+                    <input type="text" id="username" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-blue-500" required>
+                </div>
+                <div class="mb-6">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Password</label>
+                    <input type="password" id="password" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-blue-500" required>
+                </div>
+                <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700">Login</button>
+            </form>
+            <div class="mt-4 p-4 bg-gray-100 rounded text-sm">
+                <p class="font-semibold">Demo Accounts:</p>
+                <p>admin / admin (Admin)</p>
+                <p>operator1 / password (Operator)</p>
+                <p>user1 / password (User)</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create VM Modal -->
+    <div id="create-vm-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center">
+        <div class="bg-white rounded-lg p-8 max-w-md w-full mx-4">
+            <h2 class="text-2xl font-bold mb-6">Create Virtual Machine</h2>
+            <form id="create-vm-form">
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Name</label>
+                    <input type="text" id="vm-name" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-blue-500" required>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">CPU Cores</label>
+                    <select id="vm-cpu" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-blue-500">
+                        <option value="1">1 Core</option>
+                        <option value="2">2 Cores</option>
+                        <option value="4">4 Cores</option>
+                        <option value="8">8 Cores</option>
+                    </select>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Memory (MB)</label>
+                    <select id="vm-memory" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-blue-500">
+                        <option value="1024">1 GB</option>
+                        <option value="2048">2 GB</option>
+                        <option value="4096">4 GB</option>
+                        <option value="8192">8 GB</option>
+                    </select>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Disk (GB)</label>
+                    <select id="vm-disk" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-blue-500">
+                        <option value="20">20 GB</option>
+                        <option value="40">40 GB</option>
+                        <option value="80">80 GB</option>
+                        <option value="160">160 GB</option>
+                    </select>
+                </div>
+                <div class="mb-6">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">OS Type</label>
+                    <select id="vm-os" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-blue-500">
+                        <option value="Ubuntu 22.04 LTS">Ubuntu 22.04 LTS</option>
+                        <option value="CentOS 8">CentOS 8</option>
+                        <option value="Windows Server 2022">Windows Server 2022</option>
+                        <option value="Debian 11">Debian 11</option>
+                    </select>
+                </div>
+                <div class="flex space-x-4">
+                    <button type="button" id="cancel-vm-btn" class="flex-1 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400">Cancel</button>
+                    <button type="submit" class="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700">Create</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Real-time status indicator -->
+    <div id="status-indicator" class="fixed bottom-4 right-4 bg-gray-800 text-white px-4 py-2 rounded-lg shadow-lg">
+        <i class="fas fa-circle text-red-500 mr-2"></i>
+        <span>Connecting...</span>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { storageApi, type StoragePool, type StorageVolume, type StorageMetrics } from "@/lib/api/storage";
 
 // Disable static generation for this page
 export const dynamic = 'force-dynamic';
@@ -32,116 +33,85 @@ import {
 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-// Mock storage data
-const mockStoragePools = [
-  {
-    id: "pool-01",
-    name: "Primary SSD Pool",
-    type: "ssd",
-    status: "healthy",
-    totalSize: 2000,
-    usedSize: 850,
-    availableSize: 1150,
-    usage: 42.5,
-    nodes: ["node-01", "node-02"],
-    redundancy: "raid10",
-    iops: 15000,
-    throughput: 2.5,
-    vmsCount: 12
-  },
-  {
-    id: "pool-02", 
-    name: "Backup HDD Pool",
-    type: "hdd",
-    status: "healthy",
-    totalSize: 8000,
-    usedSize: 3200,
-    availableSize: 4800,
-    usage: 40,
-    nodes: ["node-03", "node-04"],
-    redundancy: "raid6",
-    iops: 500,
-    throughput: 0.8,
-    vmsCount: 8
-  },
-  {
-    id: "pool-03",
-    name: "Archive Storage",
-    type: "hdd",
-    status: "warning",
-    totalSize: 12000,
-    usedSize: 9600,
-    availableSize: 2400,
-    usage: 80,
-    nodes: ["node-05"],
-    redundancy: "raid5",
-    iops: 200,
-    throughput: 0.5,
-    vmsCount: 3
-  }
-];
+// Extended types for UI-specific data
+interface ExtendedStoragePool extends StoragePool {
+  usage: number;
+  nodes: string[];
+  redundancy: string;
+  iops: number;
+  throughput: number;
+  vmsCount: number;
+  status: string;
+}
 
-const mockStorageVolumes = [
-  {
-    id: "vol-001",
-    name: "web-server-01-disk",
-    vmId: "vm-001",
-    vmName: "web-server-01",
-    pool: "pool-01",
-    size: 100,
-    used: 32,
-    usage: 32,
-    type: "system",
-    status: "active",
-    created: "2024-01-15T10:30:00Z"
-  },
-  {
-    id: "vol-002",
-    name: "database-primary-disk",
-    vmId: "vm-002", 
-    vmName: "database-primary",
-    pool: "pool-01",
-    size: 500,
-    used: 280,
-    usage: 56,
-    type: "system",
-    status: "active",
-    created: "2024-01-10T14:22:00Z"
-  },
-  {
-    id: "vol-003",
-    name: "backup-volume-01",
-    vmId: "vm-004",
-    vmName: "backup-server",
-    pool: "pool-02",
-    size: 1000,
-    used: 450,
-    usage: 45,
-    type: "data",
-    status: "active",
-    created: "2024-01-08T16:45:00Z"
-  },
-  {
-    id: "vol-004",
-    name: "archived-data",
-    vmId: null,
-    vmName: null,
-    pool: "pool-03",
-    size: 2000,
-    used: 1800,
-    usage: 90,
-    type: "archive",
-    status: "mounted",
-    created: "2023-12-01T09:00:00Z"
-  }
-];
+interface ExtendedStorageVolume extends Omit<StorageVolume, 'pool_id'> {
+  pool_id: string;
+  vmName?: string;
+  used: number;
+  usage: number;
+  type: string;
+  status: string;
+}
 
 export default function StoragePage() {
-  const [storagePools, setStoragePools] = useState(mockStoragePools);
-  const [storageVolumes, setStorageVolumes] = useState(mockStorageVolumes);
+  const [storagePools, setStoragePools] = useState<ExtendedStoragePool[]>([]);
+  const [storageVolumes, setStorageVolumes] = useState<ExtendedStorageVolume[]>([]);
+  const [storageMetrics, setStorageMetrics] = useState<StorageMetrics | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [poolFilter, setPoolFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
+
+  // Load storage data from API
+  useEffect(() => {
+    const loadStorageData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        // Load pools, volumes, and metrics in parallel
+        const [pools, volumes, metrics] = await Promise.all([
+          storageApi.getStoragePools(),
+          storageApi.getStorageVolumes(),
+          storageApi.getStorageMetrics()
+        ]);
+        
+        // Transform pools to include UI-specific data
+        const extendedPools: ExtendedStoragePool[] = pools.map(pool => ({
+          ...pool,
+          usage: storageApi.formatUsagePercentage(pool.used_space, pool.total_space),
+          nodes: pool.metadata?.nodes ? pool.metadata.nodes.split(',') : ['node-01'],
+          redundancy: pool.metadata?.redundancy || 'raid1',
+          iops: parseInt(pool.metadata?.iops || '1000'),
+          throughput: parseFloat(pool.metadata?.throughput || '1.0'),
+          vmsCount: parseInt(pool.metadata?.vms_count || '0'),
+          status: pool.metadata?.status || 'healthy'
+        }));
+        
+        // Transform volumes to include UI-specific data
+        const extendedVolumes: ExtendedStorageVolume[] = volumes.map(volume => ({
+          ...volume,
+          vmName: volume.metadata?.vm_name || undefined,
+          used: volume.allocation,
+          usage: storageApi.formatUsagePercentage(volume.allocation, volume.capacity),
+          type: volume.metadata?.type || 'system',
+          status: volume.metadata?.status || 'active'
+        }));
+        
+        setStoragePools(extendedPools);
+        setStorageVolumes(extendedVolumes);
+        setStorageMetrics(metrics);
+      } catch (err) {
+        console.error('Failed to load storage data:', err);
+        setError('Failed to load storage data. Please try again later.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadStorageData();
+  }, []);
 
   // Filter volumes based on search and filters
   const filteredVolumes = Array.isArray(storageVolumes) ? storageVolumes.filter(volume => {
@@ -153,6 +123,45 @@ export default function StoragePage() {
     
     return matchesSearch && matchesPool && matchesType;
   }) : [];
+
+  // Filter volumes based on search and filters
+  const filteredVolumesByPool = filteredVolumes.filter(volume => {
+    const matchesPool = poolFilter === "all" || volume.pool_id === poolFilter;
+    return matchesPool;
+  });
+
+  // Handler functions for actions
+  const handleCreatePool = async () => {
+    // TODO: Implement create pool dialog
+    console.log('Create pool clicked');
+  };
+
+  const handleCreateVolume = async () => {
+    // TODO: Implement create volume dialog
+    console.log('Create volume clicked');
+  };
+
+  const handleDeleteVolume = async (volumeId: string) => {
+    if (confirm('Are you sure you want to delete this volume?')) {
+      try {
+        await storageApi.deleteStorageVolume(volumeId);
+        // Refresh volumes
+        const volumes = await storageApi.getStorageVolumes();
+        const extendedVolumes: ExtendedStorageVolume[] = volumes.map(volume => ({
+          ...volume,
+          vmName: volume.metadata?.vm_name || undefined,
+          used: volume.allocation,
+          usage: storageApi.formatUsagePercentage(volume.allocation, volume.capacity),
+          type: volume.metadata?.type || 'system',
+          status: volume.metadata?.status || 'active'
+        }));
+        setStorageVolumes(extendedVolumes);
+      } catch (err) {
+        console.error('Failed to delete volume:', err);
+        alert('Failed to delete volume. Please try again.');
+      }
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -191,22 +200,60 @@ export default function StoragePage() {
   };
 
   const formatBytes = (bytes: number) => {
-    if (bytes === 0) return '0 GB';
-    const k = 1000;
-    const sizes = ['GB', 'TB', 'PB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return storageApi.formatBytes(bytes);
   };
 
-  const totalStats = {
-    totalStorage: storagePools.reduce((acc, pool) => acc + pool.totalSize, 0),
-    usedStorage: storagePools.reduce((acc, pool) => acc + pool.usedSize, 0),
-    availableStorage: storagePools.reduce((acc, pool) => acc + pool.availableSize, 0),
+  const totalStats = storageMetrics ? {
+    totalStorage: storageMetrics.total_capacity_bytes,
+    usedStorage: storageMetrics.used_capacity_bytes,
+    availableStorage: storageMetrics.available_capacity_bytes,
+    totalVolumes: storageMetrics.total_volumes,
+    activeVolumes: storageMetrics.active_volumes
+  } : {
+    totalStorage: storagePools.reduce((acc, pool) => acc + pool.total_space, 0),
+    usedStorage: storagePools.reduce((acc, pool) => acc + pool.used_space, 0),
+    availableStorage: storagePools.reduce((acc, pool) => acc + (pool.total_space - pool.used_space), 0),
     totalVolumes: storageVolumes.length,
     activeVolumes: storageVolumes.filter(vol => vol.status === "active").length
   };
 
-  const overallUsage = (totalStats.usedStorage / totalStats.totalStorage) * 100;
+  const overallUsage = totalStats.totalStorage > 0 ? (totalStats.usedStorage / totalStats.totalStorage) * 100 : 0;
+
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="flex justify-center items-center min-h-[400px]">
+          <div className="text-center">
+            <Activity className="h-8 w-8 animate-spin mx-auto mb-4" />
+            <p className="text-muted-foreground">Loading storage data...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div className="container mx-auto p-6">
+        <Card className="max-w-md mx-auto mt-20">
+          <CardHeader>
+            <CardTitle className="flex items-center text-red-600">
+              <AlertCircle className="h-5 w-5 mr-2" />
+              Error Loading Storage Data
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground mb-4">{error}</p>
+            <Button onClick={() => window.location.reload()} className="w-full">
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -217,11 +264,11 @@ export default function StoragePage() {
           <p className="text-muted-foreground">Monitor and manage your storage infrastructure</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline">
+          <Button variant="outline" onClick={() => handleCreateVolume()}>
             <Plus className="h-4 w-4 mr-2" />
             Add Volume
           </Button>
-          <Button>
+          <Button onClick={() => handleCreatePool()}>
             <Plus className="h-4 w-4 mr-2" />
             Create Pool
           </Button>
@@ -331,8 +378,8 @@ export default function StoragePage() {
                     </div>
                     <Progress value={pool.usage} className="h-2" />
                     <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>{formatBytes(pool.usedSize)} used</span>
-                      <span>{formatBytes(pool.totalSize)} total</span>
+                      <span>{formatBytes(pool.used_space)} used</span>
+                      <span>{formatBytes(pool.total_space)} total</span>
                     </div>
                   </div>
                   
@@ -441,9 +488,9 @@ export default function StoragePage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      {storagePools.find(p => p.id === volume.pool)?.name}
+                      {storagePools.find(p => p.id === volume.pool_id)?.name}
                     </TableCell>
-                    <TableCell>{formatBytes(volume.size)}</TableCell>
+                    <TableCell>{formatBytes(volume.capacity)}</TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-2">
                         <div className="w-16">
@@ -473,7 +520,12 @@ export default function StoragePage() {
                         <Button variant="ghost" size="sm">
                           <Download className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="sm" className="text-red-600">
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="text-red-600"
+                          onClick={() => handleDeleteVolume(volume.id)}
+                        >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>

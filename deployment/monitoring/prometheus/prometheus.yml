@@ -1,0 +1,176 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'novacron-production'
+    region: 'us-west-2'
+
+rule_files:
+  - "rules/novacron_alerts.yml"
+  - "rules/vm_alerts.yml" 
+  - "rules/storage_alerts.yml"
+  - "rules/network_alerts.yml"
+  - "rules/security_alerts.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+scrape_configs:
+  # NovaCron Core Services
+  - job_name: 'novacron-api'
+    static_configs:
+      - targets: ['novacron-api:9091']
+    metrics_path: /metrics
+    scrape_interval: 5s
+    scrape_timeout: 10s
+    honor_labels: true
+    params:
+      format: ['prometheus']
+
+  - job_name: 'novacron-vm-manager'
+    static_configs:
+      - targets: ['vm-manager:9092']
+    metrics_path: /metrics
+    scrape_interval: 5s
+
+  - job_name: 'novacron-storage'
+    static_configs:
+      - targets: ['storage-manager:9093']
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  - job_name: 'novacron-network'
+    static_configs:
+      - targets: ['network-manager:9094']
+    metrics_path: /metrics
+    scrape_interval: 5s
+
+  # System Monitoring
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: 
+        - 'node-exporter-1:9100'
+        - 'node-exporter-2:9100'
+        - 'node-exporter-3:9100'
+    scrape_interval: 15s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '([^:]+):\d+'
+
+  - job_name: 'libvirt-exporter'
+    static_configs:
+      - targets:
+        - 'libvirt-exporter-1:9177'
+        - 'libvirt-exporter-2:9177'
+        - 'libvirt-exporter-3:9177'
+    scrape_interval: 10s
+    metrics_path: /metrics
+
+  # Database Monitoring
+  - job_name: 'postgres-exporter'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 30s
+
+  - job_name: 'redis-exporter'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 15s
+
+  # Container Monitoring
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets:
+        - 'cadvisor-1:8080'
+        - 'cadvisor-2:8080'
+        - 'cadvisor-3:8080'
+    scrape_interval: 10s
+    metrics_path: /metrics
+
+  # Load Balancer Monitoring
+  - job_name: 'haproxy-exporter'
+    static_configs:
+      - targets: ['haproxy-exporter:8404']
+    scrape_interval: 15s
+
+  # Kubernetes Monitoring (if applicable)
+  - job_name: 'kubernetes-apiservers'
+    kubernetes_sd_configs:
+    - role: endpoints
+      namespaces:
+        names:
+        - default
+        - kube-system
+        - novacron
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      insecure_skip_verify: true
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+    - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+      action: keep
+      regex: default;kubernetes;https
+
+  # Blackbox Monitoring
+  - job_name: 'blackbox'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+        - http://novacron-api:8080/health
+        - http://vm-manager:8081/health
+        - http://storage-manager:8082/health
+        - http://network-manager:8083/health
+        - https://novacron.example.com/api/health
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # Custom Application Metrics
+  - job_name: 'novacron-federation'
+    scrape_interval: 15s
+    honor_labels: true
+    metrics_path: '/federate'
+    params:
+      'match[]':
+        - '{job=~"novacron.*"}'
+        - '{__name__=~"novacron_.*"}'
+        - '{__name__=~"vm_.*"}'
+        - '{__name__=~"storage_.*"}'
+        - '{__name__=~"network_.*"}'
+    static_configs:
+      - targets:
+        - 'prometheus-cluster-1:9090'
+        - 'prometheus-cluster-2:9090'
+
+# Remote Write Configuration for Long-term Storage
+remote_write:
+  - url: "http://thanos-receive:19291/api/v1/receive"
+    queue_config:
+      max_samples_per_send: 10000
+      max_shards: 200
+      capacity: 2500
+    write_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'go_.*|process_.*|prometheus_.*'
+        action: drop
+
+# Storage Configuration
+storage:
+  tsdb:
+    path: /prometheus/data
+    retention.time: 7d
+    retention.size: 100GB
+    min-block-duration: 2h
+    max-block-duration: 25h
+    wal-compression: true

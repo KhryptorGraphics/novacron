@@ -1,0 +1,229 @@
+groups:
+- name: novacron.rules
+  rules:
+  
+  # Service Availability Alerts
+  - alert: ServiceDown
+    expr: up == 0
+    for: 1m
+    labels:
+      severity: critical
+      service: "{{ $labels.job }}"
+    annotations:
+      summary: "Service {{ $labels.job }} is down"
+      description: "{{ $labels.job }} has been down for more than 1 minute."
+
+  - alert: APIHighErrorRate
+    expr: (rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])) * 100 > 5
+    for: 2m
+    labels:
+      severity: critical
+      service: api
+    annotations:
+      summary: "High API error rate detected"
+      description: "API error rate is {{ $value }}% for the last 5 minutes."
+
+  - alert: APIResponseTimeHigh
+    expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+    for: 5m
+    labels:
+      severity: warning
+      service: api
+    annotations:
+      summary: "API response time is high"
+      description: "95th percentile response time is {{ $value }}s for the last 5 minutes."
+
+  # Resource Usage Alerts
+  - alert: HighCPUUsage
+    expr: (100 - (avg by (instance) (rate(cpu_seconds_total{mode="idle"}[5m])) * 100)) > 80
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High CPU usage detected"
+      description: "CPU usage is {{ $value }}% on {{ $labels.instance }}"
+
+  - alert: HighMemoryUsage
+    expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High memory usage detected"
+      description: "Memory usage is {{ $value }}% on {{ $labels.instance }}"
+
+  - alert: DiskSpaceLow
+    expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100 > 90
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Disk space is running low"
+      description: "Disk usage is {{ $value }}% on {{ $labels.instance }} ({{ $labels.mountpoint }})"
+
+  # Database Alerts
+  - alert: PostgreSQLDown
+    expr: up{job="postgres"} == 0
+    for: 1m
+    labels:
+      severity: critical
+      service: database
+    annotations:
+      summary: "PostgreSQL is down"
+      description: "PostgreSQL database has been down for more than 1 minute."
+
+  - alert: PostgreSQLConnectionsHigh
+    expr: sum(pg_stat_activity_count) > 80
+    for: 5m
+    labels:
+      severity: warning
+      service: database
+    annotations:
+      summary: "High number of PostgreSQL connections"
+      description: "PostgreSQL has {{ $value }} active connections."
+
+  - alert: PostgreSQLReplicationLag
+    expr: (pg_stat_replication_lag_bytes / 1024 / 1024) > 100
+    for: 5m
+    labels:
+      severity: warning
+      service: database
+    annotations:
+      summary: "PostgreSQL replication lag is high"
+      description: "Replication lag is {{ $value }}MB for replica {{ $labels.client_addr }}"
+
+  # Redis Alerts
+  - alert: RedisDown
+    expr: up{job="redis"} == 0
+    for: 1m
+    labels:
+      severity: critical
+      service: redis
+    annotations:
+      summary: "Redis is down"
+      description: "Redis cache server has been down for more than 1 minute."
+
+  - alert: RedisMemoryHigh
+    expr: (redis_memory_used_bytes / redis_memory_max_bytes) * 100 > 90
+    for: 5m
+    labels:
+      severity: warning
+      service: redis
+    annotations:
+      summary: "Redis memory usage is high"
+      description: "Redis memory usage is {{ $value }}%"
+
+  - alert: RedisConnectionsHigh
+    expr: redis_connected_clients > 100
+    for: 5m
+    labels:
+      severity: warning
+      service: redis
+    annotations:
+      summary: "High number of Redis connections"
+      description: "Redis has {{ $value }} connected clients."
+
+  # Application-specific Alerts
+  - alert: VMOperationsFailing
+    expr: rate(vm_operations_failed_total[5m]) > 0.1
+    for: 2m
+    labels:
+      severity: warning
+      service: api
+    annotations:
+      summary: "VM operations are failing"
+      description: "VM operations failure rate is {{ $value }} failures/sec"
+
+  - alert: AuthenticationFailuresHigh
+    expr: rate(auth_failures_total[5m]) > 1
+    for: 5m
+    labels:
+      severity: warning
+      service: security
+    annotations:
+      summary: "High number of authentication failures"
+      description: "Authentication failure rate is {{ $value }} failures/sec"
+
+  - alert: WebSocketConnectionsDropping
+    expr: rate(websocket_connections_closed_total[5m]) > rate(websocket_connections_opened_total[5m])
+    for: 5m
+    labels:
+      severity: warning
+      service: api
+    annotations:
+      summary: "WebSocket connections are dropping"
+      description: "WebSocket disconnect rate exceeds connect rate"
+
+  # Security Alerts
+  - alert: SuspiciousActivity
+    expr: rate(http_requests_total{status="401"}[5m]) > 10
+    for: 2m
+    labels:
+      severity: warning
+      service: security
+    annotations:
+      summary: "Suspicious authentication activity detected"
+      description: "High rate of 401 responses: {{ $value }} req/sec"
+
+  - alert: TooManyRequests
+    expr: rate(http_requests_total[1m]) > 1000
+    for: 2m
+    labels:
+      severity: warning
+      service: security
+    annotations:
+      summary: "Unusually high request rate detected"
+      description: "Request rate is {{ $value }} req/sec, possible DDoS attack"
+
+  # Certificate Alerts
+  - alert: SSLCertificateExpiringSoon
+    expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 30
+    for: 1h
+    labels:
+      severity: warning
+      service: security
+    annotations:
+      summary: "SSL certificate expiring soon"
+      description: "SSL certificate for {{ $labels.instance }} expires in {{ $value }} days"
+
+  - alert: SSLCertificateExpired
+    expr: probe_ssl_earliest_cert_expiry - time() < 0
+    for: 1m
+    labels:
+      severity: critical
+      service: security
+    annotations:
+      summary: "SSL certificate has expired"
+      description: "SSL certificate for {{ $labels.instance }} has expired"
+
+  # Backup Alerts
+  - alert: BackupFailed
+    expr: time() - backup_last_success_timestamp > 86400
+    for: 1h
+    labels:
+      severity: critical
+      service: backup
+    annotations:
+      summary: "Database backup has failed"
+      description: "No successful backup completed in the last 24 hours"
+
+  # Performance Alerts
+  - alert: SlowQueryDetected
+    expr: rate(pg_stat_statements_mean_time_ms[5m]) > 1000
+    for: 5m
+    labels:
+      severity: warning
+      service: database
+    annotations:
+      summary: "Slow database queries detected"
+      description: "Average query time is {{ $value }}ms"
+
+  - alert: HighQueueDepth
+    expr: vm_operation_queue_depth > 100
+    for: 5m
+    labels:
+      severity: warning
+      service: api
+    annotations:
+      summary: "High VM operation queue depth"
+      description: "VM operation queue depth is {{ $value }}"

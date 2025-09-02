@@ -4,10 +4,49 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os/exec"
+	"sync"
 	"time"
-
-	"github.com/khryptorgraphics/novacron/backend/core/storage"
 )
+
+// Local type definitions to avoid import cycle
+type VolumeType string
+type VolumeState string
+type VolumeFormat string
+
+const (
+	VolumeTypeBlock VolumeType = "block"
+	VolumeStateAvailable VolumeState = "available"
+	VolumeStateAttached VolumeState = "attached"
+	VolumeFormatRaw VolumeFormat = "raw"
+)
+
+type VolumeInfo struct {
+	ID                string            `json:"id"`
+	Name              string            `json:"name"`
+	Type              VolumeType        `json:"type"`
+	State             VolumeState       `json:"state"`
+	Size              int64             `json:"size"`
+	Path              string            `json:"path"`
+	Format            VolumeFormat      `json:"format"`
+	CreatedAt         time.Time         `json:"created_at"`
+	UpdatedAt         time.Time         `json:"updated_at"`
+	AttachedToVM      string            `json:"attached_to_vm,omitempty"`
+	Metadata          map[string]string `json:"metadata"`
+	Bootable          bool              `json:"bootable"`
+	Encrypted         bool              `json:"encrypted"`
+	ReplicationFactor int               `json:"replication_factor"`
+}
+
+type DriverCapabilities struct {
+	SupportsSnapshots     bool  `json:"supports_snapshots"`
+	SupportsReplication   bool  `json:"supports_replication"`
+	SupportsEncryption    bool  `json:"supports_encryption"`
+	SupportsCompression   bool  `json:"supports_compression"`
+	SupportsDeduplication bool  `json:"supports_deduplication"`
+	MaxVolumeSize         int64 `json:"max_volume_size"`
+	MinVolumeSize         int64 `json:"min_volume_size"`
+}
 
 // CephStorageDriver implements the StorageDriver interface for Ceph storage
 type CephStorageDriver struct {
@@ -20,6 +59,16 @@ type CephStorageDriver struct {
 
 	// Initialized state
 	initialized bool
+
+	// Mutex for thread safety
+	mu sync.RWMutex
+
+	// Volume cache
+	volumeCache map[string]*VolumeInfo
+
+	// Metrics cache
+	metricsCache map[string]interface{}
+	lastMetricsUpdate time.Time
 }
 
 // CephConfig contains configuration for the Ceph storage driver
@@ -72,6 +121,8 @@ func NewCephStorageDriver(config CephConfig) *CephStorageDriver {
 	return &CephStorageDriver{
 		config:      config,
 		initialized: false,
+		volumeCache: make(map[string]*VolumeInfo),
+		metricsCache: make(map[string]interface{}),
 	}
 }
 
@@ -82,25 +133,26 @@ func (d *CephStorageDriver) Name() string {
 
 // Initialize initializes the driver
 func (d *CephStorageDriver) Initialize() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	if d.initialized {
 		return fmt.Errorf("driver already initialized")
 	}
 
-	// In a real implementation, this would initialize the Ceph client
-	// conn, err := rados.NewConn()
-	// if err != nil {
-	//     return fmt.Errorf("failed to create Ceph connection: %v", err)
-	// }
-	//
-	// conn.SetConfigOption("mon_host", strings.Join(d.config.Monitors, ","))
-	// conn.SetConfigOption("key", d.config.Key)
-	// conn.SetConfigOption("client_mount_timeout", fmt.Sprintf("%d", d.config.ConnectionTimeoutSec))
-	//
-	// if err := conn.Connect(); err != nil {
-	//     return fmt.Errorf("failed to connect to Ceph cluster: %v", err)
-	// }
-	//
-	// d.client = conn
+	// Initialize volume cache
+	d.volumeCache = make(map[string]*VolumeInfo)
+	d.metricsCache = make(map[string]interface{})
+
+	// Test connection to Ceph cluster using RBD CLI
+	if err := d.testConnection(); err != nil {
+		return fmt.Errorf("failed to connect to Ceph cluster: %v", err)
+	}
+
+	// Initialize default pool if it doesn't exist
+	if err := d.createPoolIfNotExists(d.config.DefaultPool); err != nil {
+		return fmt.Errorf("failed to initialize default pool: %v", err)
+	}
 
 	d.initialized = true
 	return nil
@@ -123,66 +175,132 @@ func (d *CephStorageDriver) Shutdown() error {
 
 // CreateVolume creates a new volume
 func (d *CephStorageDriver) CreateVolume(ctx context.Context, name string, sizeBytes int64) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	if !d.initialized {
 		return fmt.Errorf("driver not initialized")
 	}
 
-	// In a real implementation, this would create a new RBD image
-	// ioctx, err := d.client.OpenIOContext(d.config.DefaultPool)
-	// if err != nil {
-	//     return fmt.Errorf("failed to open IO context: %v", err)
-	// }
-	// defer ioctx.Destroy()
-	//
-	// rbd := rbd.GetImage(ioctx, name)
-	// if err := rbd.Create(uint64(sizeGB) * 1024 * 1024 * 1024, 22); err != nil {
-	//     return fmt.Errorf("failed to create RBD image: %v", err)
-	// }
+	// Convert bytes to MB for RBD
+	sizeMB := sizeBytes / (1024 * 1024)
+	if sizeMB < 1 {
+		sizeMB = 1
+	}
 
+	// Create RBD image using CLI command
+	cmd := exec.CommandContext(ctx, "rbd", "create", 
+		"--size", fmt.Sprintf("%d", sizeMB),
+		"--pool", d.config.DefaultPool,
+		"--image-format", "2",
+		"--image-feature", "layering,exclusive-lock,object-map,fast-diff,deep-flatten",
+		name)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to create RBD image %s: %v (output: %s)", name, err, string(output))
+	}
+
+	// Cache the volume info
+	volumeInfo := &VolumeInfo{
+		ID:           name,
+		Name:         name,
+		Type:         VolumeTypeBlock,
+		State:        VolumeStateAvailable,
+		Size:         sizeBytes,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+		Metadata:     make(map[string]string),
+		Bootable:     false,
+		Encrypted:    false,
+		ReplicationFactor: 3, // Default Ceph replication
+	}
+
+	d.volumeCache[name] = volumeInfo
 	return nil
 }
 
 // DeleteVolume deletes a volume
 func (d *CephStorageDriver) DeleteVolume(ctx context.Context, name string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	if !d.initialized {
 		return fmt.Errorf("driver not initialized")
 	}
 
-	// In a real implementation, this would delete an RBD image
-	// ioctx, err := d.client.OpenIOContext(d.config.DefaultPool)
-	// if err != nil {
-	//     return fmt.Errorf("failed to open IO context: %v", err)
-	// }
-	// defer ioctx.Destroy()
-	//
-	// rbd := rbd.GetImage(ioctx, name)
-	// if err := rbd.Remove(); err != nil {
-	//     return fmt.Errorf("failed to delete RBD image: %v", err)
-	// }
+	// Delete RBD image using CLI command
+	cmd := exec.CommandContext(ctx, "rbd", "rm",
+		"--pool", d.config.DefaultPool,
+		name)
 
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to delete RBD image %s: %v (output: %s)", name, err, string(output))
+	}
+
+	// Remove from cache
+	delete(d.volumeCache, name)
 	return nil
 }
 
 // AttachVolume attaches a volume to a node
 func (d *CephStorageDriver) AttachVolume(ctx context.Context, volumeID, nodeID string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	if !d.initialized {
 		return fmt.Errorf("driver not initialized")
 	}
 	
-	// For Ceph RBD, this would map the RBD image to the node
-	// Simplified implementation - in reality would use librbd
-	return fmt.Errorf("attach volume not implemented for Ceph driver")
+	// Map RBD image using CLI command
+	// This creates a device like /dev/rbd0
+	cmd := exec.CommandContext(ctx, "rbd", "map",
+		"--pool", d.config.DefaultPool,
+		volumeID)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to map RBD image %s: %v (output: %s)", volumeID, err, string(output))
+	}
+
+	// Update volume state
+	if vol, exists := d.volumeCache[volumeID]; exists {
+		vol.State = VolumeStateAttached
+		vol.AttachedToVM = nodeID
+		vol.UpdatedAt = time.Now()
+	}
+
+	return nil
 }
 
 // DetachVolume detaches a volume from a node
 func (d *CephStorageDriver) DetachVolume(ctx context.Context, volumeID, nodeID string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	if !d.initialized {
 		return fmt.Errorf("driver not initialized")
 	}
 	
-	// For Ceph RBD, this would unmap the RBD image from the node
-	// Simplified implementation - in reality would use librbd
-	return fmt.Errorf("detach volume not implemented for Ceph driver")
+	// Unmap RBD image using CLI command
+	cmd := exec.CommandContext(ctx, "rbd", "unmap",
+		"--pool", d.config.DefaultPool,
+		volumeID)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to unmap RBD image %s: %v (output: %s)", volumeID, err, string(output))
+	}
+
+	// Update volume state
+	if vol, exists := d.volumeCache[volumeID]; exists {
+		vol.State = VolumeStateAvailable
+		vol.AttachedToVM = ""
+		vol.UpdatedAt = time.Now()
+	}
+
+	return nil
 }
 
 // ReadVolume reads data from a volume
@@ -209,8 +327,8 @@ func (d *CephStorageDriver) WriteVolume(ctx context.Context, volumeID string, of
 }
 
 // GetCapabilities returns the capabilities of the Ceph driver
-func (d *CephStorageDriver) GetCapabilities() storage.DriverCapabilities {
-	return storage.DriverCapabilities{
+func (d *CephStorageDriver) GetCapabilities() DriverCapabilities {
+	return DriverCapabilities{
 		SupportsSnapshots:     true,
 		SupportsReplication:   true,
 		SupportsEncryption:    true,
@@ -248,7 +366,7 @@ func (d *CephStorageDriver) ResizeVolume(ctx context.Context, name string, newSi
 }
 
 // GetVolumeInfo returns information about a volume
-func (d *CephStorageDriver) GetVolumeInfo(ctx context.Context, name string) (*storage.VolumeInfo, error) {
+func (d *CephStorageDriver) GetVolumeInfo(ctx context.Context, name string) (*VolumeInfo, error) {
 	if !d.initialized {
 		return nil, fmt.Errorf("driver not initialized")
 	}
@@ -277,11 +395,11 @@ func (d *CephStorageDriver) GetVolumeInfo(ctx context.Context, name string) (*st
 	// }
 
 	// For now, return placeholder information
-	return &storage.VolumeInfo{
+	return &VolumeInfo{
 		ID:           name,
 		Name:         name,
-		Type:         storage.VolumeTypeBlock,
-		State:        storage.VolumeStateAvailable,
+		Type:         VolumeTypeBlock,
+		State:        VolumeStateAvailable,
 		Size:         int64(10) * 1024 * 1024 * 1024, // 10GB
 		AttachedToVM: "",
 		CreatedAt:    time.Now().Add(-24 * time.Hour),

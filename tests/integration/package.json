@@ -1,0 +1,26 @@
+{
+  "name": "novacron-integration-tests",
+  "version": "1.0.0",
+  "description": "Integration validation tests for NovaCron",
+  "main": "frontend_backend_validation.js",
+  "scripts": {
+    "test": "node frontend_backend_validation.js",
+    "test:headless": "HEADLESS=true node frontend_backend_validation.js",
+    "test:debug": "HEADLESS=false node frontend_backend_validation.js",
+    "validate": "../run_integration_validation.sh"
+  },
+  "dependencies": {
+    "puppeteer": "^22.0.0",
+    "ws": "^8.14.0",
+    "node-fetch": "^2.6.7"
+  },
+  "devDependencies": {},
+  "keywords": [
+    "integration",
+    "testing",
+    "validation",
+    "novacron"
+  ],
+  "author": "NovaCron Team",
+  "license": "MIT"
+}

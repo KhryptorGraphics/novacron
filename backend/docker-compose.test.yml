@@ -1,0 +1,246 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database for integration tests
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: novacron-test-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: novacron_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./tests/integration/sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d novacron_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - test-network
+
+  # Redis for caching and session management (if needed)
+  redis-test:
+    image: redis:7-alpine
+    container_name: novacron-test-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    command: redis-server --appendonly yes --requirepass testredispass
+    volumes:
+      - redis_test_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "testredispass", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - test-network
+
+  # Test runner container
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: novacron-test-runner
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    environment:
+      # Database configuration
+      TEST_DB_URL: "postgres://postgres:password@postgres-test:5432/novacron_test?sslmode=disable"
+      DB_HOST: postgres-test
+      DB_PORT: 5432
+      DB_NAME: novacron_test
+      DB_USER: postgres
+      DB_PASSWORD: password
+      
+      # Redis configuration
+      REDIS_URL: "redis://:testredispass@redis-test:6379/0"
+      
+      # Test configuration
+      GO_ENV: test
+      JWT_SECRET: test-jwt-secret-key-for-integration-tests
+      LOG_LEVEL: debug
+      
+      # API configuration
+      API_PORT: 8080
+      WS_PORT: 8081
+      
+      # VM configuration
+      VM_STORAGE_PATH: /tmp/novacron-test-storage
+      
+      # Integration test specific
+      INTEGRATION_TESTS: true
+      TEST_TIMEOUT: 30m
+      TEST_PARALLEL: 4
+      
+      # Coverage configuration
+      COVERAGE_DIR: /app/coverage
+      COVERAGE_PROFILE: coverage.out
+    volumes:
+      - .:/app
+      - /var/run/docker.sock:/var/run/docker.sock  # For docker-in-docker if needed
+      - test_coverage:/app/coverage
+      - test_storage:/tmp/novacron-test-storage
+    working_dir: /app/backend
+    command: ["tail", "-f", "/dev/null"]  # Keep container running for manual test execution
+    networks:
+      - test-network
+
+  # Mock external services for federation testing
+  mock-aws:
+    image: localstack/localstack:latest
+    container_name: novacron-test-localstack
+    restart: unless-stopped
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=ec2,s3,iam
+      - DEBUG=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - test-network
+
+  # MinIO for S3-compatible storage testing
+  minio-test:
+    image: minio/minio:latest
+    container_name: novacron-test-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - test-network
+
+  # Prometheus for monitoring tests
+  prometheus-test:
+    image: prom/prometheus:latest
+    container_name: novacron-test-prometheus
+    restart: unless-stopped
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./tests/integration/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - test-network
+
+  # Jaeger for distributed tracing tests
+  jaeger-test:
+    image: jaegertracing/all-in-one:latest
+    container_name: novacron-test-jaeger
+    restart: unless-stopped
+    ports:
+      - "16686:16686"
+      - "14268:14268"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - test-network
+
+  # Test database migrations runner
+  migrate:
+    image: migrate/migrate:latest
+    container_name: novacron-test-migrate
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations
+    command: [
+      "-path", "/migrations",
+      "-database", "postgres://postgres:password@postgres-test:5432/novacron_test?sslmode=disable",
+      "up"
+    ]
+    networks:
+      - test-network
+
+  # Integration test orchestrator
+  test-orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.test-orchestrator
+    container_name: novacron-test-orchestrator
+    depends_on:
+      - postgres-test
+      - redis-test
+      - mock-aws
+      - minio-test
+    environment:
+      TEST_DB_URL: "postgres://postgres:password@postgres-test:5432/novacron_test?sslmode=disable"
+      REDIS_URL: "redis://:testredispass@redis-test:6379/0"
+      LOCALSTACK_URL: "http://mock-aws:4566"
+      MINIO_URL: "http://minio-test:9000"
+      PROMETHEUS_URL: "http://prometheus-test:9090"
+      JAEGER_URL: "http://jaeger-test:14268"
+    volumes:
+      - .:/app
+      - test_results:/app/test-results
+      - test_coverage:/app/coverage
+    working_dir: /app
+    profiles:
+      - orchestrated-tests
+    networks:
+      - test-network
+
+volumes:
+  postgres_test_data:
+    driver: local
+  redis_test_data:
+    driver: local
+  minio_data:
+    driver: local
+  localstack_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  test_coverage:
+    driver: local
+  test_storage:
+    driver: local
+  test_results:
+    driver: local
+
+networks:
+  test-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16

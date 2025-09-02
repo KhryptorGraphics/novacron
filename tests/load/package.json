@@ -1,0 +1,39 @@
+{
+  "name": "novacron-load-tests",
+  "version": "1.0.0",
+  "description": "Comprehensive load testing infrastructure for NovaCron platform",
+  "scripts": {
+    "test:load": "k6 run scenarios/api-load-test.js",
+    "test:vm": "k6 run scenarios/vm-management-test.js", 
+    "test:websocket": "k6 run scenarios/websocket-stress-test.js",
+    "test:database": "k6 run scenarios/database-performance-test.js",
+    "test:federation": "k6 run scenarios/federation-load-test.js",
+    "test:all": "npm run test:load && npm run test:vm && npm run test:websocket && npm run test:database && npm run test:federation",
+    "test:benchmark": "k6 run --out json=reports/benchmark-results.json scenarios/benchmark-suite.js",
+    "test:stress": "k6 run --vus 2000 --duration 10m scenarios/stress-test.js",
+    "test:soak": "k6 run --vus 100 --duration 2h scenarios/soak-test.js",
+    "report": "node scripts/generate-report.js",
+    "monitor": "node scripts/start-monitoring.js",
+    "cleanup": "node scripts/cleanup-test-data.js"
+  },
+  "devDependencies": {
+    "k6": "^0.47.0"
+  },
+  "dependencies": {
+    "ws": "^8.14.2",
+    "node-fetch": "^3.3.2",
+    "pg": "^8.11.3",
+    "prometheus-query": "^3.2.1",
+    "chart.js": "^4.4.0",
+    "html-pdf": "^3.0.1"
+  },
+  "keywords": [
+    "load-testing",
+    "performance",
+    "k6",
+    "novacron",
+    "scalability"
+  ],
+  "author": "NovaCron Team",
+  "license": "MIT"
+}

@@ -1,0 +1,384 @@
+# NovaCron Incident Response Workflow Configuration
+# This defines automated incident response workflows for different alert types
+
+workflows:
+  # Critical Service Down Workflow
+  - name: service_down_response
+    trigger:
+      alertname: "NovaCronServiceDown"
+      severity: "critical"
+    
+    steps:
+      - name: immediate_notification
+        type: notification
+        config:
+          channels: ["pagerduty", "slack-critical", "sms"]
+          message: "🚨 CRITICAL: {{ .Labels.job }} service is DOWN on {{ .Labels.instance }}"
+          escalation_policy: "immediate"
+        
+      - name: automated_restart
+        type: automation
+        condition: "{{ .Annotations.auto_restart }} == 'true'"
+        config:
+          action: "restart_service"
+          parameters:
+            service: "{{ .Labels.job }}"
+            instance: "{{ .Labels.instance }}"
+            max_attempts: 3
+            backoff: "exponential"
+        
+      - name: health_check_verification
+        type: validation
+        depends_on: ["automated_restart"]
+        config:
+          endpoint: "http://{{ .Labels.instance }}/health"
+          timeout: "30s"
+          expected_status: 200
+          retry_count: 5
+          retry_interval: "10s"
+        
+      - name: escalation
+        type: notification
+        condition: "{{ .Steps.health_check_verification.success }} == false"
+        config:
+          channels: ["pagerduty-escalate", "executive-alerts"]
+          message: "⚠️ ESCALATION: Service restart failed for {{ .Labels.job }}"
+          
+      - name: create_incident
+        type: incident_management
+        config:
+          system: "pagerduty"
+          title: "Service Down: {{ .Labels.job }}"
+          description: "{{ .Annotations.description }}"
+          priority: "high"
+          assigned_to: "sre-team"
+
+  # High Error Rate Response
+  - name: high_error_rate_response
+    trigger:
+      alertname: "NovaCronAPIHighErrorRate"
+      severity: "warning"
+    
+    steps:
+      - name: log_analysis
+        type: automation
+        config:
+          action: "analyze_logs"
+          parameters:
+            timeframe: "15m"
+            service: "{{ .Labels.job }}"
+            error_threshold: 10
+            log_sources: ["elasticsearch"]
+        
+      - name: metric_collection
+        type: automation
+        parallel: true
+        config:
+          action: "collect_metrics"
+          parameters:
+            metrics:
+              - "response_time_p95"
+              - "cpu_usage"
+              - "memory_usage"
+              - "active_connections"
+            timeframe: "30m"
+        
+      - name: dependency_check
+        type: automation
+        parallel: true
+        config:
+          action: "check_dependencies"
+          parameters:
+            services: ["database", "redis", "storage"]
+            health_endpoints: true
+        
+      - name: automated_scaling
+        type: automation
+        condition: "{{ .Steps.metric_collection.results.cpu_usage }} > 80"
+        config:
+          action: "scale_service"
+          parameters:
+            service: "{{ .Labels.job }}"
+            scale_factor: 1.5
+            max_instances: 10
+        
+      - name: team_notification
+        type: notification
+        depends_on: ["log_analysis", "metric_collection", "dependency_check"]
+        config:
+          channels: ["slack-ops"]
+          message: |
+            🔍 **Error Rate Investigation Results**
+            Service: {{ .Labels.job }}
+            Error Analysis: {{ .Steps.log_analysis.summary }}
+            Dependencies: {{ .Steps.dependency_check.status }}
+            Scaling Action: {{ if .Steps.automated_scaling.executed }}Applied{{ else }}Not needed{{ end }}
+
+  # VM Migration Failure Response
+  - name: migration_failure_response
+    trigger:
+      alertname: "VMigrationFailureRate"
+      severity: "critical"
+    
+    steps:
+      - name: pause_migrations
+        type: automation
+        config:
+          action: "pause_vm_migrations"
+          parameters:
+            duration: "30m"
+            reason: "high_failure_rate"
+        
+      - name: analyze_failed_migrations
+        type: automation
+        config:
+          action: "query_failed_migrations"
+          parameters:
+            timeframe: "1h"
+            include_logs: true
+            include_metrics: true
+        
+      - name: resource_check
+        type: automation
+        config:
+          action: "check_node_resources"
+          parameters:
+            check_types: ["cpu", "memory", "storage", "network"]
+            threshold_warnings: true
+        
+      - name: vm_team_alert
+        type: notification
+        config:
+          channels: ["slack-vm-team", "email-vm-team"]
+          message: |
+            🚨 **VM Migration Failures Detected**
+            
+            **Status**: Migrations temporarily paused
+            **Failure Analysis**: {{ .Steps.analyze_failed_migrations.summary }}
+            **Resource Status**: {{ .Steps.resource_check.summary }}
+            
+            **Action Required**: Manual investigation needed
+        
+      - name: create_runbook_ticket
+        type: incident_management
+        config:
+          system: "jira"
+          project: "OPS"
+          issue_type: "Incident"
+          title: "VM Migration Failure Investigation"
+          description: |
+            Automated response to high VM migration failure rate.
+            
+            Investigation Results:
+            {{ .Steps.analyze_failed_migrations.details }}
+            
+            Resource Check:
+            {{ .Steps.resource_check.details }}
+          labels: ["migration", "automated-response", "critical"]
+
+  # SLA Breach Response
+  - name: sla_breach_response
+    trigger:
+      component: "sla"
+      severity: "critical"
+    
+    steps:
+      - name: executive_notification
+        type: notification
+        config:
+          channels: ["executive-alerts", "pagerduty-executives"]
+          message: |
+            🚨 **SLA BREACH ALERT**
+            
+            SLA Type: {{ .Labels.sla_type }}
+            Current Value: {{ .Annotations.description }}
+            Impact: Customer SLA violation
+            
+            Immediate escalation required.
+        
+      - name: customer_impact_assessment
+        type: automation
+        config:
+          action: "assess_customer_impact"
+          parameters:
+            sla_type: "{{ .Labels.sla_type }}"
+            affected_services: ["api", "vm-manager"]
+        
+      - name: emergency_scaling
+        type: automation
+        condition: "{{ .Labels.sla_type }} == 'latency'"
+        config:
+          action: "emergency_scale"
+          parameters:
+            services: ["novacron-api"]
+            scale_factor: 2.0
+            priority: "emergency"
+        
+      - name: status_page_update
+        type: automation
+        config:
+          action: "update_status_page"
+          parameters:
+            status: "major_outage"
+            message: "Investigating service degradation affecting response times"
+            affected_components: ["API", "VM Management"]
+        
+      - name: war_room_setup
+        type: incident_management
+        config:
+          action: "create_war_room"
+          participants: ["sre-team", "engineering-leads", "product-manager"]
+          bridge_number: "+1-xxx-xxx-xxxx"
+          slack_channel: "#incident-war-room"
+
+  # Capacity Warning Response
+  - name: capacity_warning_response
+    trigger:
+      alertname: "NovaCronCapacityWarning"
+      severity: "warning"
+    
+    steps:
+      - name: capacity_analysis
+        type: automation
+        config:
+          action: "analyze_capacity_trends"
+          parameters:
+            timeframe: "7d"
+            resources: ["cpu", "memory", "storage"]
+            forecast_days: 7
+        
+      - name: auto_scaling_evaluation
+        type: automation
+        config:
+          action: "evaluate_scaling_options"
+          parameters:
+            current_capacity: "{{ .Annotations.description }}"
+            scaling_policies: true
+        
+      - name: capacity_team_notification
+        type: notification
+        config:
+          channels: ["slack-capacity-planning", "email-ops"]
+          message: |
+            📊 **Capacity Planning Alert**
+            
+            Current Status: {{ .Annotations.description }}
+            Trend Analysis: {{ .Steps.capacity_analysis.trend }}
+            Scaling Recommendation: {{ .Steps.auto_scaling_evaluation.recommendation }}
+            
+            Review capacity planning dashboard: {{ .Labels.dashboard }}
+        
+      - name: schedule_capacity_review
+        type: automation
+        config:
+          action: "schedule_meeting"
+          parameters:
+            meeting_type: "capacity_review"
+            duration: "30m"
+            participants: ["ops-team", "capacity-planning"]
+            agenda: "Review capacity trends and scaling plans"
+
+  # Security Incident Response
+  - name: security_incident_response
+    trigger:
+      component: "security"
+      severity: "critical"
+    
+    steps:
+      - name: security_team_alert
+        type: notification
+        config:
+          channels: ["security-pager", "slack-security", "sms-security-lead"]
+          message: |
+            🛡️ **SECURITY INCIDENT**
+            
+            Type: {{ .Labels.violation_type }}
+            Severity: {{ .Labels.severity }}
+            Details: {{ .Annotations.description }}
+            
+            Immediate security team response required.
+        
+      - name: isolate_affected_systems
+        type: automation
+        condition: "{{ .Labels.violation_type }} == 'intrusion'"
+        config:
+          action: "isolate_systems"
+          parameters:
+            affected_instances: ["{{ .Labels.instance }}"]
+            isolation_type: "network"
+        
+      - name: forensic_data_collection
+        type: automation
+        config:
+          action: "collect_forensic_data"
+          parameters:
+            timeframe: "2h"
+            data_types: ["logs", "network_flows", "system_state"]
+            preserve_evidence: true
+        
+      - name: create_security_incident
+        type: incident_management
+        config:
+          system: "security_portal"
+          classification: "security_incident"
+          severity: "{{ .Labels.severity }}"
+          title: "Security Violation: {{ .Labels.violation_type }}"
+          initial_response_team: ["security", "sre"]
+
+# Global Configuration
+global_config:
+  # Default timeouts
+  step_timeout: "5m"
+  workflow_timeout: "30m"
+  
+  # Retry configuration
+  default_retry_count: 3
+  default_retry_interval: "30s"
+  
+  # Notification channels
+  notification_channels:
+    pagerduty:
+      integration_key: "${PAGERDUTY_INTEGRATION_KEY}"
+      severity_mapping:
+        critical: "critical"
+        warning: "warning"
+    
+    slack-critical:
+      webhook_url: "${SLACK_CRITICAL_WEBHOOK}"
+      channel: "#ops-critical"
+    
+    slack-ops:
+      webhook_url: "${SLACK_OPS_WEBHOOK}"
+      channel: "#ops-alerts"
+    
+    executive-alerts:
+      type: "email"
+      recipients: ["ceo@company.com", "cto@company.com", "ops-director@company.com"]
+    
+    sms:
+      provider: "twilio"
+      numbers: ["${ON_CALL_PHONE_1}", "${ON_CALL_PHONE_2}"]
+  
+  # Integration endpoints
+  integrations:
+    jira:
+      url: "${JIRA_URL}"
+      username: "${JIRA_USERNAME}"
+      token: "${JIRA_TOKEN}"
+      project: "OPS"
+    
+    elasticsearch:
+      url: "${ELASTICSEARCH_URL}"
+      username: "${ELASTIC_USERNAME}"
+      password: "${ELASTIC_PASSWORD}"
+    
+    status_page:
+      api_key: "${STATUS_PAGE_API_KEY}"
+      page_id: "${STATUS_PAGE_ID}"
+  
+  # Automation scripts location
+  automation_scripts:
+    base_path: "/opt/novacron/automation"
+    environment:
+      KUBECONFIG: "/etc/kubernetes/admin.conf"
+      PROMETHEUS_URL: "http://prometheus:9090"

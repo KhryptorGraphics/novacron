@@ -1,0 +1,163 @@
+# Alertmanager configuration for NovaCron load testing
+global:
+  smtp_smarthost: 'localhost:587'
+  smtp_from: 'alerts@novacron.com'
+  smtp_auth_username: 'alerts@novacron.com'
+  smtp_auth_password: 'password'
+
+# Routing rules for load test alerts
+route:
+  group_by: ['alertname', 'severity', 'component']
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 1h
+  receiver: 'load-test-team'
+  
+  routes:
+    # Critical alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 5s
+      repeat_interval: 15m
+      
+    # Performance alerts - grouped notifications
+    - match:
+        component: api
+      receiver: 'api-team'
+      group_interval: 2m
+      
+    # VM operation alerts
+    - match:
+        component: vm
+      receiver: 'vm-team'
+      group_interval: 5m
+      
+    # Database alerts  
+    - match:
+        component: database
+      receiver: 'database-team'
+      group_interval: 2m
+      
+    # System resource alerts
+    - match:
+        component: system
+      receiver: 'infrastructure-team'
+      group_interval: 10m
+
+# Alert receivers
+receivers:
+  - name: 'load-test-team'
+    email_configs:
+      - to: 'load-test-team@novacron.com'
+        subject: '[NovaCron Load Test] {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Component: {{ .Labels.component }}
+          Environment: {{ .Labels.environment }}
+          Started: {{ .StartsAt }}
+          {{ end }}
+
+  - name: 'critical-alerts'
+    email_configs:
+      - to: 'critical-alerts@novacron.com'
+        subject: '[CRITICAL] NovaCron Load Test Alert'
+        body: |
+          🚨 CRITICAL ALERT DURING LOAD TEST 🚨
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Component: {{ .Labels.component }}
+          Environment: {{ .Labels.environment }}
+          Started: {{ .StartsAt }}
+          
+          Immediate action required!
+          {{ end }}
+    
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#load-test-alerts'
+        title: 'Critical Load Test Alert'
+        text: |
+          🚨 Critical alert during load testing:
+          {{ range .Alerts }}
+          *{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          Component: {{ .Labels.component }}
+          {{ end }}
+
+  - name: 'api-team'
+    email_configs:
+      - to: 'api-team@novacron.com'
+        subject: '[API] Load Test Performance Alert'
+        body: |
+          API Performance Alert during load testing:
+          
+          {{ range .Alerts }}
+          {{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          {{ end }}
+
+  - name: 'vm-team'
+    email_configs:
+      - to: 'vm-team@novacron.com'
+        subject: '[VM] Load Test Operations Alert'
+        body: |
+          VM Operations Alert during load testing:
+          
+          {{ range .Alerts }}
+          {{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          {{ end }}
+
+  - name: 'database-team'
+    email_configs:
+      - to: 'database-team@novacron.com'
+        subject: '[Database] Load Test Performance Alert'
+        body: |
+          Database Performance Alert during load testing:
+          
+          {{ range .Alerts }}
+          {{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          {{ end }}
+
+  - name: 'infrastructure-team'
+    email_configs:
+      - to: 'infrastructure-team@novacron.com'
+        subject: '[Infrastructure] Load Test System Alert'
+        body: |
+          System Resource Alert during load testing:
+          
+          {{ range .Alerts }}
+          {{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          {{ end }}
+
+# Inhibition rules to avoid alert spam
+inhibit_rules:
+  # If system is overloaded, don't alert on individual components
+  - source_match:
+      alertname: HighCPUUsage
+    target_match:
+      component: api
+    equal: ['environment']
+    
+  - source_match:
+      alertname: HighMemoryUsage
+    target_match:
+      component: vm
+    equal: ['environment']
+    
+  # If API is down, don't alert on individual endpoints
+  - source_match:
+      severity: critical
+      component: api
+    target_match:
+      component: api
+      severity: warning
+    equal: ['environment']
