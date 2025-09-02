@@ -24,19 +24,19 @@ type UpdateVMRequest struct {
 	Disk   *int64  `json:"disk,omitempty"`
 }
 
-func (r *UpdateVMRequest) toVMConfig() *vm.Config {
-	config := &vm.Config{}
+func (r *UpdateVMRequest) toVMConfig() *vm.VMConfig {
+	config := &vm.VMConfig{}
 	if r.Name != nil {
 		config.Name = *r.Name
 	}
 	if r.CPU != nil {
-		config.CPU = *r.CPU
+		config.CPUShares = *r.CPU
 	}
 	if r.Memory != nil {
-		config.Memory = *r.Memory
+		config.MemoryMB = int(*r.Memory)
 	}
 	if r.Disk != nil {
-		config.Disk = *r.Disk
+		config.DiskSizeGB = int(*r.Disk)
 	}
 	return config
 }

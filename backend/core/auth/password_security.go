@@ -55,10 +55,10 @@ type PasswordSecurityConfig struct {
 
 // PasswordHash represents a password hash with metadata
 type PasswordHash struct {
-	Hash      string    `json:"hash"`
-	Salt      string    `json:"salt"`
-	Algorithm string    `json:"algorithm"`
-	CreatedAt time.Time `json:"created_at"`
+	Hash      string                 `json:"hash"`
+	Salt      string                 `json:"salt"`
+	Algorithm string                 `json:"algorithm"`
+	CreatedAt time.Time              `json:"created_at"`
 	Params    map[string]interface{} `json:"params,omitempty"`
 }
 
@@ -72,9 +72,9 @@ type PasswordHistory struct {
 
 // PasswordSecurityService handles secure password operations
 type PasswordSecurityService struct {
-	config         PasswordSecurityConfig
+	config          PasswordSecurityConfig
 	commonPasswords map[string]bool
-	history        map[string]*PasswordHistory
+	history         map[string]*PasswordHistory
 }
 
 // NewPasswordSecurityService creates a new password security service
@@ -358,7 +358,7 @@ func (p *PasswordSecurityService) GenerateSecurePassword() (string, error) {
 		}
 
 		passwordStr := string(password)
-		
+
 		// Validate generated password
 		if err := p.ValidatePassword(passwordStr, nil); err == nil {
 			return passwordStr, nil
@@ -398,7 +398,7 @@ func (p *PasswordSecurityService) isCommonPassword(password string) bool {
 }
 
 // containsPersonalInfo checks if password contains user's personal information
-func (p *PasswordSecurityService) containsPersonalInfo(password, user *User) bool {
+func (p *PasswordSecurityService) containsPersonalInfo(password string, user *User) bool {
 	passwordLower := strings.ToLower(password)
 
 	// Check username

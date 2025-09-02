@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
+
+// Disable static generation for this page
+export const dynamic = 'force-dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -141,14 +144,15 @@ export default function StoragePage() {
   const [typeFilter, setTypeFilter] = useState("all");
 
   // Filter volumes based on search and filters
-  const filteredVolumes = storageVolumes.filter(volume => {
-    const matchesSearch = volume.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+  const filteredVolumes = Array.isArray(storageVolumes) ? storageVolumes.filter(volume => {
+    if (!volume) return false;
+    const matchesSearch = (volume.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
                          (volume.vmName && volume.vmName.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesPool = poolFilter === "all" || volume.pool === poolFilter;
     const matchesType = typeFilter === "all" || volume.type === typeFilter;
     
     return matchesSearch && matchesPool && matchesType;
-  });
+  }) : [];
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -294,7 +298,7 @@ export default function StoragePage() {
         
         <TabsContent value="pools" className="space-y-4">
           <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-2">
-            {storagePools.map((pool) => (
+            {Array.isArray(storagePools) && storagePools.map((pool) => (
               <Card key={pool.id} className="hover:shadow-md transition-shadow">
                 <CardHeader>
                   <div className="flex items-center justify-between">
@@ -390,7 +394,7 @@ export default function StoragePage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Pools</SelectItem>
-                    {storagePools.map(pool => (
+                    {Array.isArray(storagePools) && storagePools.map(pool => (
                       <SelectItem key={pool.id} value={pool.id}>{pool.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -426,7 +430,7 @@ export default function StoragePage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredVolumes.map((volume) => (
+                {Array.isArray(filteredVolumes) && filteredVolumes.map((volume) => (
                   <TableRow key={volume.id}>
                     <TableCell className="font-medium">{volume.name}</TableCell>
                     <TableCell>
@@ -490,7 +494,7 @@ export default function StoragePage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {storagePools.map(pool => (
+                  {Array.isArray(storagePools) && storagePools.map(pool => (
                     <div key={pool.id} className="flex items-center justify-between">
                       <span className="text-sm font-medium">{pool.name}</span>
                       <div className="flex items-center space-x-2">
@@ -517,7 +521,7 @@ export default function StoragePage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {storagePools.map(pool => (
+                  {Array.isArray(storagePools) && storagePools.map(pool => (
                     <div key={pool.id} className="flex items-center justify-between">
                       <span className="text-sm font-medium">{pool.name}</span>
                       <div className="flex items-center space-x-2">

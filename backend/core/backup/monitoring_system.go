@@ -10,10 +10,10 @@ import (
 // BackupMonitoringSystem provides comprehensive monitoring for backup and disaster recovery operations
 type BackupMonitoringSystem struct {
 	// rpoMonitor monitors Recovery Point Objectives
-	rpoMonitor *RPOMonitor
+	rpoMonitor *RPOMonitorV2
 	
 	// rtoMonitor monitors Recovery Time Objectives
-	rtoMonitor *RTOMonitor
+	rtoMonitor *RTOMonitorV2
 	
 	// performanceMonitor tracks backup performance metrics
 	performanceMonitor *PerformanceMonitor
@@ -791,8 +791,8 @@ func (hc *HealthChecker) Start(ctx context.Context) {
 func (hc *HealthChecker) GetSystemHealth(ctx context.Context) (*SystemHealthStatus, error) {
 	return &SystemHealthStatus{
 		OverallStatus:    HealthStatusHealthy,
-		ComponentHealth:  make(map[string]*HealthStatus),
-		ActiveAlerts:     make([]*Alert, 0),
+		ComponentHealth:  make(map[string]*ComponentHealthStatus),
+		ActiveAlerts:     make([]*BackupAlert, 0),
 		PerformanceScore: 95.0,
 		AvailabilityScore: 99.9,
 		LastUpdate:       time.Now(),

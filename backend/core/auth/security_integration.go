@@ -11,28 +11,28 @@ import (
 
 // SecurityConfiguration holds all security service configurations
 type SecurityConfiguration struct {
-	JWT                  JWTConfiguration
-	PasswordSecurity     PasswordSecurityConfig
-	Encryption          EncryptionConfig
-	SecurityMiddleware  SecurityConfig
-	OAuth2              map[string]OAuth2Config // Provider name -> config
-	Compliance          bool
-	ZeroTrust           bool
-	AuditLogging        bool
+	JWT                JWTConfiguration
+	PasswordSecurity   PasswordSecurityConfig
+	Encryption         EncryptionConfig
+	SecurityMiddleware SecurityConfig
+	OAuth2             map[string]OAuth2Config // Provider name -> config
+	Compliance         bool
+	ZeroTrust          bool
+	AuditLogging       bool
 }
 
 // SecurityManager manages all security services
 type SecurityManager struct {
-	jwtService           *JWTService
-	passwordService      *PasswordSecurityService
-	encryptionService    *EncryptionService
-	securityMiddleware   *SecurityMiddleware
-	oauth2Services       map[string]*OAuth2Service
-	complianceService    *ComplianceService
-	ztNetworkService     *ZeroTrustNetworkService
-	authService          AuthService
-	auditService         AuditService
-	config               SecurityConfiguration
+	jwtService         *JWTService
+	passwordService    *PasswordSecurityService
+	encryptionService  *EncryptionService
+	securityMiddleware *SecurityMiddleware
+	oauth2Services     map[string]*OAuth2Service
+	complianceService  *ComplianceService
+	ztNetworkService   *ZeroTrustNetworkService
+	authService        AuthService
+	auditService       AuditService
+	config             SecurityConfiguration
 }
 
 // NewSecurityManager creates a new security manager with all services
@@ -68,7 +68,7 @@ func NewSecurityManager(config SecurityConfiguration, authService AuthService) (
 	var ztNetworkService *ZeroTrustNetworkService
 	if config.ZeroTrust {
 		ztNetworkService = NewZeroTrustNetworkService(auditService, encryptionService)
-		
+
 		// Set up default network policies
 		if err := setupDefaultNetworkPolicies(ztNetworkService); err != nil {
 			return nil, fmt.Errorf("failed to setup default network policies: %w", err)
@@ -485,14 +485,14 @@ func DefaultSecurityConfiguration() (SecurityConfiguration, error) {
 	oauth2Configs := GetProviderConfigs()
 
 	return SecurityConfiguration{
-		JWT:                  jwtConfig,
-		PasswordSecurity:     DefaultPasswordSecurityConfig(),
-		Encryption:          DefaultEncryptionConfig(),
-		SecurityMiddleware:  DefaultSecurityConfig(),
-		OAuth2:              oauth2Configs,
-		Compliance:          true,
-		ZeroTrust:           true,
-		AuditLogging:        true,
+		JWT:                jwtConfig,
+		PasswordSecurity:   DefaultPasswordSecurityConfig(),
+		Encryption:         DefaultEncryptionConfig(),
+		SecurityMiddleware: DefaultSecurityConfig(),
+		OAuth2:             oauth2Configs,
+		Compliance:         true,
+		ZeroTrust:          true,
+		AuditLogging:       true,
 	}, nil
 }
 
@@ -604,13 +604,13 @@ func (sm *SecurityManager) LogSecurityEvent(userID, tenantID, resourceType, reso
 	}
 
 	entry := &AuditEntry{
-		UserID:       userID,
-		TenantID:     tenantID,
-		ResourceType: resourceType,
-		ResourceID:   resourceID,
-		Action:       action,
-		Success:      success,
-		Timestamp:    time.Now(),
+		UserID:         userID,
+		TenantID:       tenantID,
+		ResourceType:   resourceType,
+		ResourceID:     resourceID,
+		Action:         action,
+		Success:        success,
+		Timestamp:      time.Now(),
 		AdditionalData: details,
 	}
 

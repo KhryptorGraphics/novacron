@@ -1,5 +1,8 @@
 "use client";
 
+// Disable static generation for this page
+export const dynamic = 'force-dynamic';
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";

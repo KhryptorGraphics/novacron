@@ -2,9 +2,7 @@ package prometheus
 
 import (
 	"context"
-	"fmt"
 	"log"
-	"strconv"
 	"sync"
 	"time"
 

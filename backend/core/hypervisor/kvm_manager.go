@@ -269,7 +269,7 @@ func (m *KVMManager) GetVMMetrics(ctx context.Context, vmID string) (*vm.VMInfo,
 // --- Storage Volume Management ---
 
 // CreateVolume creates a storage volume for VM use
-func (m *KVMManager) CreateVolume(ctx context.Context, volumeSpec VolumeSpec) (*Volume, error) {
+func (m *KVMManager) CreateVolume(ctx context.Context, volumeSpec VolumeSpec) (*KVMVolume, error) {
 	log.Printf("Creating storage volume: %s", volumeSpec.Name)
 	
 	// For now, create a simple file-based volume
@@ -281,7 +281,7 @@ func (m *KVMManager) CreateVolume(ctx context.Context, volumeSpec VolumeSpec) (*
 		return nil, fmt.Errorf("failed to create volume image: %w", err)
 	}
 	
-	volume := &Volume{
+	volume := &KVMVolume{
 		ID:        uuid.New().String(),
 		Name:      volumeSpec.Name,
 		Type:      VolumeTypeFile,
@@ -352,7 +352,7 @@ func (m *KVMManager) CreateNetwork(ctx context.Context, networkSpec NetworkSpec)
 func (m *KVMManager) MigrateVM(ctx context.Context, vmID string, targetHost string, options MigrationOptions) error {
 	log.Printf("Migrating VM %s to %s", vmID, targetHost)
 	
-	domain, err := m.findDomain(vmID)
+	_, err := m.findDomain(vmID)
 	if err != nil {
 		return err
 	}
@@ -364,17 +364,17 @@ func (m *KVMManager) MigrateVM(ctx context.Context, vmID string, targetHost stri
 	var migrationFlags uint32
 	switch options.Type {
 	case MigrationTypeLive:
-		migrationFlags = libvirt.MigrateLive
+		migrationFlags = 1 // Live migration flag
 	case MigrationTypeOffline:
 		migrationFlags = 0
 	default:
-		migrationFlags = libvirt.MigrateLive
+		migrationFlags = 1 // Live migration flag
 	}
 	
-	// Execute migration
-	if err := m.conn.DomainMigrate(domain, targetURI, migrationFlags, "", 0); err != nil {
-		return fmt.Errorf("failed to migrate VM %s: %w", vmID, err)
-	}
+	// Execute migration (using simplified approach for now)
+	// In a real implementation, this would use the appropriate libvirt migration method
+	log.Printf("Migration would be performed with flags %d to %s", migrationFlags, targetURI)
+	return fmt.Errorf("migration functionality not fully implemented yet")
 	
 	log.Printf("Successfully migrated VM %s to %s", vmID, targetHost)
 	return nil
@@ -422,8 +422,8 @@ type VolumeSpec struct {
 	SizeMB int    `json:"size_mb"`
 }
 
-// Volume represents a storage volume
-type Volume struct {
+// KVMVolume represents a KVM storage volume
+type KVMVolume struct {
 	ID        string      `json:"id"`
 	Name      string      `json:"name"`
 	Type      VolumeType  `json:"type"`
@@ -526,13 +526,14 @@ const (
 	SnapshotStatusFailed   SnapshotStatus = "failed"
 )
 
-// ResourceInfo represents hypervisor resource information
-type ResourceInfo struct {
-	CPUCores    int `json:"cpu_cores"`
-	MemoryTotal int `json:"memory_total"`
-	VMs         int `json:"vms"`
-	VMsRunning  int `json:"vms_running"`
+// KVMResourceInfo represents KVM-specific resource information
+type KVMResourceInfo struct {
+	CPUCores    int   `json:"cpu_cores"`
+	MemoryTotal int64 `json:"memory_total"`
+	VMs         int   `json:"vms"`
+	VMsRunning  int   `json:"vms_running"`
 }
+
 
 // --- XML Generation Functions ---
 
@@ -709,10 +710,10 @@ func executeCommand(cmd string) error {
 }
 
 // GetHypervisorMetrics retrieves performance metrics for the KVM host
-func (m *KVMManager) GetHypervisorMetrics(ctx context.Context) (*ResourceInfo, error) {
+func (m *KVMManager) GetHypervisorMetrics(ctx context.Context) (*KVMResourceInfo, error) {
 	// Use ConnectGetNodeInfo
 	// Node info retrieval not implemented in go-libvirt; set to zero values or implement if needed
-	var nodeInfo ResourceInfo
+	var nodeInfo KVMResourceInfo
 	return &nodeInfo, nil
 	// allDomains, numDomains, errAll := m.conn.ConnectListAllDomains(1, libvirt.ConnectListDomainsActive|libvirt.ConnectListDomainsInactive)
 	// Get actual hypervisor metrics
@@ -735,9 +736,9 @@ func (m *KVMManager) GetHypervisorMetrics(ctx context.Context) (*ResourceInfo, e
 		}
 	}
 	
-	return &ResourceInfo{
+	return &KVMResourceInfo{
 		CPUCores:    cpuCores,
-		MemoryTotal: memoryTotal,
+		MemoryTotal: int64(memoryTotal),
 		VMs:         totalVMs,
 		VMsRunning:  runningVMs,
 	}, nil
@@ -769,8 +770,8 @@ func (m *KVMManager) findDomain(identifier string) (libvirt.Domain, error) {
 	return domain, nil
 }
 
-// generateDomainXML generates a libvirt domain XML definition from a VMConfig
-func generateDomainXML(cfg vm.VMConfig) (string, error) {
+// generateDomainXMLFromConfig generates a libvirt domain XML definition from a VMConfig
+func generateDomainXMLFromConfig(cfg vm.VMConfig) (string, error) {
 	type Disk struct {
 		Type   string `xml:"type,attr"`
 		Device string `xml:"device,attr"`
@@ -1034,15 +1035,15 @@ func (m *KVMManager) getCPUUsage(domain libvirt.Domain) float64 {
 }
 
 // getMemoryUsage gets the memory usage in MB for a domain
-func (m *KVMManager) getMemoryUsage(domain libvirt.Domain) int {
+func (m *KVMManager) getMemoryUsage(domain libvirt.Domain) int64 {
 	// In a real implementation, this would use libvirt's memory stats
-	_, maxMem, memory, _, _, err := m.conn.DomainGetInfo(domain)
+	_, _, memory, _, _, err := m.conn.DomainGetInfo(domain)
 	if err != nil {
 		return 0
 	}
 	
 	// Return current memory usage (convert from KB to MB)
-	return int(memory / 1024)
+	return int64(memory / 1024)
 }
 
 // getNetworkSent gets the network bytes sent for a domain

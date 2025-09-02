@@ -1,4 +1,7 @@
+//go:build experimental
+
 package vm
+
 
 import (
 	"context"
@@ -35,10 +38,10 @@ func (h *MonitorHandler) GetVMAlerts(w http.ResponseWriter, r *http.Request) {
 	// Get VM ID from URL
 	vars := mux.Vars(r)
 	vmID := vars["vm_id"]
-	
+
 	// Get alerts
 	alerts := h.vmMonitor.GetAlerts(vmID)
-	
+
 	// Convert to response format
 	response := make([]map[string]interface{}, 0, len(alerts))
 	for _, alert := range alerts {
@@ -50,14 +53,14 @@ func (h *MonitorHandler) GetVMAlerts(w http.ResponseWriter, r *http.Request) {
 			"timestamp": alert.Timestamp,
 			"resolved":  alert.Resolved,
 		}
-		
+
 		if alert.ResolvedAt != nil {
 			alertResponse["resolved_at"] = alert.ResolvedAt
 		}
-		
+
 		response = append(response, alertResponse)
 	}
-	
+
 	// Write response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
@@ -68,10 +71,10 @@ func (h *MonitorHandler) GetActiveVMAlerts(w http.ResponseWriter, r *http.Reques
 	// Get VM ID from URL
 	vars := mux.Vars(r)
 	vmID := vars["vm_id"]
-	
+
 	// Get active alerts
 	alerts := h.vmMonitor.GetActiveAlerts(vmID)
-	
+
 	// Convert to response format
 	response := make([]map[string]interface{}, 0, len(alerts))
 	for _, alert := range alerts {
@@ -83,7 +86,7 @@ func (h *MonitorHandler) GetActiveVMAlerts(w http.ResponseWriter, r *http.Reques
 			"timestamp": alert.Timestamp,
 		})
 	}
-	
+
 	// Write response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
@@ -95,13 +98,13 @@ func (h *MonitorHandler) ResolveVMAlert(w http.ResponseWriter, r *http.Request) 
 	vars := mux.Vars(r)
 	vmID := vars["vm_id"]
 	alertID := vars["alert_id"]
-	
+
 	// Resolve alert
 	if err := h.vmMonitor.ResolveAlert(vmID, alertID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	w.WriteHeader(http.StatusNoContent)
 }

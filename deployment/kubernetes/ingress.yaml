@@ -1,0 +1,284 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: novacron-ingress
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: ingress
+  annotations:
+    # Ingress Controller Annotations
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    
+    # Security Annotations
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://*.novacron.local"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "Authorization, Content-Type, X-CSRF-Token"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+    
+    # Rate Limiting
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    nginx.ingress.kubernetes.io/rate-limit-connections: "10"
+    
+    # Specific rate limits for auth endpoints
+    nginx.ingress.kubernetes.io/limit-rps: "5"
+    nginx.ingress.kubernetes.io/limit-connections: "3"
+    
+    # Security Headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header X-Frame-Options DENY always;
+      add_header X-Content-Type-Options nosniff always;
+      add_header X-XSS-Protection "1; mode=block" always;
+      add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+      add_header Referrer-Policy strict-origin-when-cross-origin always;
+      add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' wss: ws:;" always;
+    
+    # SSL Configuration
+    nginx.ingress.kubernetes.io/ssl-protocols: "TLSv1.2 TLSv1.3"
+    nginx.ingress.kubernetes.io/ssl-ciphers: "ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384"
+    
+    # Performance
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    
+    # Load Balancing
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$remote_addr"
+    nginx.ingress.kubernetes.io/session-affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "novacron-server"
+    nginx.ingress.kubernetes.io/session-cookie-expires: "86400"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "86400"
+    
+    # Certificate Management
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    cert-manager.io/acme-challenge-type: http01
+spec:
+  tls:
+    - hosts:
+        - novacron.local
+        - api.novacron.local
+        - admin.novacron.local
+      secretName: novacron-tls-cert
+  rules:
+    # Main Application
+    - host: novacron.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: novacron-frontend
+                port:
+                  number: 80
+          
+          # API endpoints
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: novacron-api
+                port:
+                  number: 8091
+          
+          # WebSocket endpoints
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: novacron-api
+                port:
+                  number: 8093
+    
+    # API Subdomain
+    - host: api.novacron.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: novacron-api
+                port:
+                  number: 8091
+          
+          # WebSocket on API subdomain
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: novacron-api
+                port:
+                  number: 8093
+    
+    # Admin Interface
+    - host: admin.novacron.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: novacron-frontend
+                port:
+                  number: 80
+
+---
+# WebSocket Ingress (separate for better control)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: novacron-websocket-ingress
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: websocket-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    
+    # WebSocket specific settings
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/connection-proxy-header: "keep-alive"
+    nginx.ingress.kubernetes.io/upgrade-header: "websocket"
+    nginx.ingress.kubernetes.io/websocket-services: "novacron-api"
+    
+    # Rate limiting for WebSocket connections
+    nginx.ingress.kubernetes.io/limit-connections: "50"
+    nginx.ingress.kubernetes.io/limit-rate-after: "1000"
+    nginx.ingress.kubernetes.io/limit-rate: "100k"
+    
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+    - hosts:
+        - ws.novacron.local
+      secretName: novacron-ws-tls-cert
+  rules:
+    - host: ws.novacron.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: novacron-api
+                port:
+                  number: 8093
+
+---
+# Monitoring Ingress (Internal Access Only)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: novacron-monitoring-ingress
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: monitoring-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx-internal
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    
+    # IP Whitelisting for internal access
+    nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+    
+    # Authentication
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: monitoring-basic-auth
+    nginx.ingress.kubernetes.io/auth-realm: "NovaCron Monitoring - Authentication Required"
+    
+    cert-manager.io/cluster-issuer: "internal-ca-issuer"
+spec:
+  tls:
+    - hosts:
+        - prometheus.novacron.local
+        - grafana.novacron.local
+      secretName: novacron-monitoring-tls-cert
+  rules:
+    # Prometheus
+    - host: prometheus.novacron.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: prometheus
+                port:
+                  number: 9090
+    
+    # Grafana
+    - host: grafana.novacron.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port:
+                  number: 3000
+
+---
+# Basic Auth Secret for Monitoring
+apiVersion: v1
+kind: Secret
+metadata:
+  name: monitoring-basic-auth
+  namespace: novacron
+  labels:
+    app.kubernetes.io/name: novacron
+    app.kubernetes.io/component: monitoring-auth
+type: Opaque
+data:
+  # htpasswd generated: admin:$apr1$8rWeSVVz$Qy8P8W4VKqjUeVNs4YsjE.
+  # Default: admin/monitor123 (change in production!)
+  auth: YWRtaW46JGFwcjEkOHJXZVNWVnokUXk4UDhXNFZLcWpVZVZOczRZc2pFLgo=
+
+---
+# Middleware for additional security (if using Traefik)
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: novacron-security-headers
+  namespace: novacron
+spec:
+  headers:
+    customRequestHeaders:
+      X-Forwarded-Proto: "https"
+    customResponseHeaders:
+      X-Frame-Options: "DENY"
+      X-Content-Type-Options: "nosniff"
+      X-XSS-Protection: "1; mode=block"
+      Strict-Transport-Security: "max-age=31536000; includeSubDomains; preload"
+      Referrer-Policy: "strict-origin-when-cross-origin"
+      Content-Security-Policy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' wss: ws:;"
+    frameDeny: true
+    browserXssFilter: true
+    contentTypeNosniff: true
+    forceSTSHeader: true
+    stsIncludeSubdomains: true
+    stsPreload: true
+    stsSeconds: 31536000
+
+---
+# Rate limiting middleware (Traefik)
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: novacron-rate-limit
+  namespace: novacron
+spec:
+  rateLimit:
+    average: 100
+    burst: 200
+    period: 1m

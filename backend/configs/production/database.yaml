@@ -1,0 +1,260 @@
+# NovaCron Production Database Configuration
+# Version: 1.0.0
+# Description: Enterprise database configuration with security and performance optimization
+
+# Primary Database Connection
+database:
+  primary:
+    driver: "postgres"
+    host: "${DB_HOST}"
+    port: "${DB_PORT:-5432}"
+    name: "${DB_NAME}"
+    user: "${DB_USER}"
+    password: "${DB_PASSWORD}"
+    
+    # SSL Configuration
+    ssl:
+      enabled: true
+      mode: "require" # require, verify-ca, verify-full
+      cert: "/etc/novacron/certs/db-client.crt"
+      key: "/etc/novacron/certs/db-client.key"
+      ca: "/etc/novacron/certs/db-ca.crt"
+      
+    # Connection Pool Settings
+    pool:
+      max_open_connections: 25
+      max_idle_connections: 10
+      connection_max_lifetime: "1h"
+      connection_max_idle_time: "10m"
+      
+    # Connection Timeouts
+    timeouts:
+      connection: "10s"
+      query: "30s"
+      idle_in_transaction: "5m"
+      
+    # Advanced Settings
+    options:
+      application_name: "novacron-api"
+      search_path: "novacron,public"
+      timezone: "UTC"
+      
+# Read Replica Configuration (for scaling)
+read_replica:
+  enabled: false
+  host: "${DB_READ_HOST}"
+  port: "${DB_READ_PORT:-5432}"
+  name: "${DB_NAME}"
+  user: "${DB_READ_USER}"
+  password: "${DB_READ_PASSWORD}"
+  
+  # Connection Pool Settings for Read Replica
+  pool:
+    max_open_connections: 15
+    max_idle_connections: 5
+    connection_max_lifetime: "30m"
+    connection_max_idle_time: "5m"
+    
+  # SSL Configuration (same as primary)
+  ssl:
+    enabled: true
+    mode: "require"
+    cert: "/etc/novacron/certs/db-client.crt"
+    key: "/etc/novacron/certs/db-client.key"
+    ca: "/etc/novacron/certs/db-ca.crt"
+
+# Database Security
+security:
+  # Row Level Security
+  rls:
+    enabled: true
+    enforce_tenant_isolation: true
+    
+  # Query Security
+  prepared_statements: true
+  sql_injection_protection: true
+  query_logging: true
+  slow_query_threshold: "1s"
+  
+  # Data Encryption
+  encryption:
+    at_rest: true
+    key_rotation: "90d"
+    sensitive_fields:
+      - "password_hash"
+      - "api_key_hash"
+      - "session_token_hash"
+      - "mfa_secret"
+
+# Performance Optimization
+performance:
+  # Query Optimization
+  statement_timeout: "30s"
+  lock_timeout: "10s"
+  work_mem: "4MB"
+  shared_buffers: "256MB"
+  effective_cache_size: "1GB"
+  
+  # Index Maintenance
+  auto_vacuum: true
+  auto_analyze: true
+  vacuum_scale_factor: 0.1
+  analyze_scale_factor: 0.05
+  
+  # Connection Optimization
+  max_connections: 100
+  tcp_keepalives_idle: 300
+  tcp_keepalives_interval: 30
+  tcp_keepalives_count: 3
+
+# Backup Configuration
+backup:
+  enabled: true
+  schedule: "0 2 * * *" # Daily at 2 AM
+  retention_days: 30
+  compression: true
+  encryption: true
+  
+  # Backup Storage
+  storage:
+    type: "s3" # or "local", "azure", "gcs"
+    bucket: "${BACKUP_S3_BUCKET}"
+    region: "${AWS_REGION}"
+    path: "novacron/database/"
+    
+  # Point-in-time Recovery
+  wal_archiving:
+    enabled: true
+    archive_mode: "on"
+    archive_command: "aws s3 cp %p s3://${BACKUP_S3_BUCKET}/novacron/wal/%f"
+    
+# Monitoring and Alerting
+monitoring:
+  # Connection Monitoring
+  connection_health_check: "SELECT 1"
+  health_check_interval: "30s"
+  
+  # Performance Monitoring
+  slow_query_log: true
+  query_stats_collection: true
+  lock_monitoring: true
+  
+  # Metrics Collection
+  metrics:
+    enabled: true
+    interval: "30s"
+    collectors:
+      - "connections"
+      - "locks"
+      - "queries"
+      - "replication"
+      - "tables"
+      - "indexes"
+      
+  # Alerting Thresholds
+  alerts:
+    connection_usage_threshold: 80 # percentage
+    slow_query_threshold: "5s"
+    lock_wait_threshold: "30s"
+    replication_lag_threshold: "10s"
+    disk_usage_threshold: 85 # percentage
+    
+# Migration Settings
+migrations:
+  enabled: true
+  auto_migrate: false # Set to false for production safety
+  migration_timeout: "5m"
+  rollback_on_failure: true
+  
+  # Migration Lock
+  lock_table: "schema_migrations_lock"
+  lock_timeout: "10m"
+  
+# Data Retention Policies
+retention:
+  audit_logs: "365d"
+  vm_metrics: "90d"
+  node_metrics: "90d"
+  user_sessions: "7d"
+  old_backups: "30d"
+  
+  # Cleanup Schedules
+  cleanup_schedule:
+    audit_logs: "0 1 * * 0" # Weekly on Sunday at 1 AM
+    metrics: "0 3 * * 0" # Weekly on Sunday at 3 AM
+    sessions: "0 */4 * * *" # Every 4 hours
+
+# High Availability
+high_availability:
+  # Failover Settings
+  primary_health_check: "SELECT pg_is_in_recovery()"
+  failover_timeout: "30s"
+  automatic_failover: false # Manual failover recommended for production
+  
+  # Replication Monitoring
+  replication_lag_alert: "10s"
+  sync_standby_required: true
+
+# Environment-specific Overrides
+environments:
+  production:
+    log_level: "WARN"
+    log_statement: "ddl" # Log only DDL statements
+    auto_explain:
+      enabled: true
+      min_duration: "1s"
+      log_analyze: true
+      
+  staging:
+    log_level: "INFO"
+    log_statement: "mod" # Log all modifications
+    
+  development:
+    log_level: "DEBUG"
+    log_statement: "all"
+    auto_explain:
+      enabled: true
+      min_duration: "100ms"
+
+# Connection Examples for Different Use Cases
+connection_examples:
+  application_server: |
+    postgres://user:pass@host:5432/dbname?sslmode=require&application_name=novacron-api&pool_max_conns=25
+  
+  migration_tool: |
+    postgres://user:pass@host:5432/dbname?sslmode=require&application_name=novacron-migrate&statement_timeout=300s
+  
+  monitoring_tool: |
+    postgres://readonly:pass@host:5432/dbname?sslmode=require&application_name=novacron-monitor&default_transaction_isolation=repeatable%20read
+
+# Database Schema Validation
+schema_validation:
+  enabled: true
+  check_on_startup: true
+  required_extensions:
+    - "uuid-ossp"
+    - "pgcrypto"
+    - "btree_gist"
+    - "pg_trgm"
+    
+  required_tables:
+    - "users"
+    - "vms"
+    - "compute_nodes"
+    - "audit_log"
+    - "schema_migrations"
+    
+# Disaster Recovery
+disaster_recovery:
+  rpo_target: "1h" # Recovery Point Objective
+  rto_target: "4h" # Recovery Time Objective
+  
+  backup_verification:
+    enabled: true
+    schedule: "0 6 * * 0" # Weekly backup restoration test
+    
+  geographic_replication:
+    enabled: false
+    standby_regions:
+      - "us-west-2"
+      - "eu-west-1"

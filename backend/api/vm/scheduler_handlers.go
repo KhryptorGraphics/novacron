@@ -1,4 +1,7 @@
+//go:build experimental
+
 package vm
+
 
 import (
 	"context"
@@ -38,7 +41,7 @@ func (h *SchedulerHandler) RegisterRoutes(router *mux.Router) {
 func (h *SchedulerHandler) ListNodes(w http.ResponseWriter, r *http.Request) {
 	// Get nodes
 	nodes := h.scheduler.ListNodes()
-	
+
 	// Convert to response format
 	response := make([]map[string]interface{}, 0, len(nodes))
 	for _, node := range nodes {
@@ -58,7 +61,7 @@ func (h *SchedulerHandler) ListNodes(w http.ResponseWriter, r *http.Request) {
 			"labels":               node.Labels,
 		})
 	}
-	
+
 	// Write response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
@@ -75,12 +78,12 @@ func (h *SchedulerHandler) RegisterNode(w http.ResponseWriter, r *http.Request) 
 		Status            string            `json:"status"`
 		Labels            map[string]string `json:"labels"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Create node info
 	nodeInfo := &vm.NodeResourceInfo{
 		NodeID:            request.NodeID,
@@ -97,13 +100,13 @@ func (h *SchedulerHandler) RegisterNode(w http.ResponseWriter, r *http.Request) 
 		Status:            request.Status,
 		Labels:            request.Labels,
 	}
-	
+
 	// Register node
 	if err := h.scheduler.RegisterNode(nodeInfo); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"node_id":              nodeInfo.NodeID,
@@ -120,7 +123,7 @@ func (h *SchedulerHandler) RegisterNode(w http.ResponseWriter, r *http.Request) 
 		"status":               nodeInfo.Status,
 		"labels":               nodeInfo.Labels,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(response)
@@ -131,14 +134,14 @@ func (h *SchedulerHandler) GetNode(w http.ResponseWriter, r *http.Request) {
 	// Get node ID from URL
 	vars := mux.Vars(r)
 	nodeID := vars["id"]
-	
+
 	// Get node
 	node, err := h.scheduler.GetNode(nodeID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"node_id":              node.NodeID,
@@ -155,7 +158,7 @@ func (h *SchedulerHandler) GetNode(w http.ResponseWriter, r *http.Request) {
 		"status":               node.Status,
 		"labels":               node.Labels,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -165,7 +168,7 @@ func (h *SchedulerHandler) UpdateNode(w http.ResponseWriter, r *http.Request) {
 	// Get node ID from URL
 	vars := mux.Vars(r)
 	nodeID := vars["id"]
-	
+
 	// Parse request
 	var request struct {
 		TotalCPU          int               `json:"total_cpu"`
@@ -174,37 +177,37 @@ func (h *SchedulerHandler) UpdateNode(w http.ResponseWriter, r *http.Request) {
 		Status            string            `json:"status"`
 		Labels            map[string]string `json:"labels"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Get current node info
 	node, err := h.scheduler.GetNode(nodeID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	
+
 	// Update node info
 	node.TotalCPU = request.TotalCPU
 	node.TotalMemoryMB = request.TotalMemoryMB
 	node.TotalDiskGB = request.TotalDiskGB
 	node.Status = request.Status
 	node.Labels = request.Labels
-	
+
 	// Update usage percentages
 	node.CPUUsagePercent = float64(node.UsedCPU) / float64(node.TotalCPU) * 100
 	node.MemoryUsagePercent = float64(node.UsedMemoryMB) / float64(node.TotalMemoryMB) * 100
 	node.DiskUsagePercent = float64(node.UsedDiskGB) / float64(node.TotalDiskGB) * 100
-	
+
 	// Update node
 	if err := h.scheduler.UpdateNode(node); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"node_id":              node.NodeID,
@@ -221,7 +224,7 @@ func (h *SchedulerHandler) UpdateNode(w http.ResponseWriter, r *http.Request) {
 		"status":               node.Status,
 		"labels":               node.Labels,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -231,13 +234,13 @@ func (h *SchedulerHandler) UnregisterNode(w http.ResponseWriter, r *http.Request
 	// Get node ID from URL
 	vars := mux.Vars(r)
 	nodeID := vars["id"]
-	
+
 	// Unregister node
 	if err := h.scheduler.UnregisterNode(nodeID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -247,36 +250,36 @@ func (h *SchedulerHandler) ScheduleVM(w http.ResponseWriter, r *http.Request) {
 	// Get VM ID from URL
 	vars := mux.Vars(r)
 	vmID := vars["vm_id"]
-	
+
 	// Get VM
 	vm, err := h.vmManager.GetVM(vmID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	
+
 	// Schedule VM
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	nodeID, err := h.scheduler.ScheduleVM(ctx, vm)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Reserve resources
 	if err := h.scheduler.ReserveResources(nodeID, vm); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"vm_id":   vmID,
 		"node_id": nodeID,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }

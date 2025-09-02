@@ -1,23 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(find:*)",
-      "Bash(rm:*)",
-      "Bash(ls:*)",
-      "Bash(true)",
-      "Bash(git push:*)",
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(claude-flow --version)",
-      "Bash(claude-flow hive-mind spawn:*)",
-      "Bash(claude-flow hive-mind:*)",
-      "Bash(python3.12:*)",
-      "Bash(go mod:*)",
-      "Bash(go build:*)",
-      "Bash(go test:*)",
-      "Bash(chmod:*)",
-      "Bash(claude mcp add:*)",
-      "Bash(npx -y @smithery/cli install triplewhale --client claude)"
+      "mcp__ruv-swarm",
+      "mcp__claude-flow"
     ],
     "deny": []
   }

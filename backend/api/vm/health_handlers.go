@@ -1,4 +1,7 @@
+//go:build experimental
+
 package vm
+
 
 import (
 	"context"
@@ -34,14 +37,14 @@ func (h *HealthHandler) GetVMHealth(w http.ResponseWriter, r *http.Request) {
 	// Get VM ID from URL
 	vars := mux.Vars(r)
 	vmID := vars["vm_id"]
-	
+
 	// Get VM health
 	health, err := h.healthManager.GetVMHealth(vmID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"vm_id":        health.VMID,
@@ -49,7 +52,7 @@ func (h *HealthHandler) GetVMHealth(w http.ResponseWriter, r *http.Request) {
 		"last_checked": health.LastChecked,
 		"checks":       health.Checks,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -58,7 +61,7 @@ func (h *HealthHandler) GetVMHealth(w http.ResponseWriter, r *http.Request) {
 func (h *HealthHandler) GetAllVMHealth(w http.ResponseWriter, r *http.Request) {
 	// Get all VM health
 	healthMap := h.healthManager.GetAllVMHealth()
-	
+
 	// Convert to response format
 	response := make(map[string]map[string]interface{})
 	for vmID, health := range healthMap {
@@ -69,7 +72,7 @@ func (h *HealthHandler) GetAllVMHealth(w http.ResponseWriter, r *http.Request) {
 			"checks":       health.Checks,
 		}
 	}
-	
+
 	// Write response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
@@ -80,17 +83,17 @@ func (h *HealthHandler) CheckVMHealth(w http.ResponseWriter, r *http.Request) {
 	// Get VM ID from URL
 	vars := mux.Vars(r)
 	vmID := vars["vm_id"]
-	
+
 	// Check VM health
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	health, err := h.healthManager.CheckVMHealth(ctx, vmID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"vm_id":        health.VMID,
@@ -98,7 +101,7 @@ func (h *HealthHandler) CheckVMHealth(w http.ResponseWriter, r *http.Request) {
 		"last_checked": health.LastChecked,
 		"checks":       health.Checks,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }

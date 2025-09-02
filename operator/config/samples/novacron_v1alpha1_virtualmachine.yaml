@@ -1,0 +1,56 @@
+apiVersion: novacron.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: example-vm
+  namespace: default
+spec:
+  running: true
+  template:
+    metadata:
+      labels:
+        app: web-server
+        tier: frontend
+    spec:
+      resources:
+        cpu: 2
+        memory: 4Gi
+        disk: 50Gi
+      image:
+        source: "marketplace://ubuntu-22.04-lts"
+        pullPolicy: IfNotPresent
+      networks:
+        - name: default
+          type: bridge
+          ipv4:
+            method: dhcp
+      volumes:
+        - name: data-volume
+          size: 100Gi
+          storageClass: fast-ssd
+          accessMode: ReadWriteOnce
+      userData: |
+        #cloud-config
+        users:
+          - name: admin
+            ssh_authorized_keys:
+              - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC...
+        packages:
+          - nginx
+          - docker.io
+        runcmd:
+          - systemctl start nginx
+          - systemctl enable nginx
+      nodeSelector:
+        node.novacron.io/type: compute
+  migrationPolicy:
+    allowLiveMigration: true
+    compression: true
+    encrypted: false
+    bandwidth: "1Gbps"
+  snapshotPolicy:
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    retention: 7
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1

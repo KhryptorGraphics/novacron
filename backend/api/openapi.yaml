@@ -1,0 +1,815 @@
+openapi: 3.0.3
+info:
+  title: NovaCron VM Management API
+  description: Distributed virtual machine management platform API
+  version: 1.0.0
+  contact:
+    name: NovaCron Team
+    email: support@novacron.io
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Development server
+  - url: https://api.novacron.io/v1
+    description: Production server
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: VMs
+    description: Virtual machine management
+  - name: Migration
+    description: VM migration operations
+  - name: Storage
+    description: Storage management
+  - name: Network
+    description: Network configuration
+  - name: Monitoring
+    description: Metrics and monitoring
+  - name: Auth
+    description: Authentication and authorization
+  - name: Backup
+    description: Backup and recovery
+
+paths:
+  /auth/login:
+    post:
+      tags:
+        - Auth
+      summary: Authenticate user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Successful authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/refresh:
+    post:
+      tags:
+        - Auth
+      summary: Refresh access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /vms:
+    get:
+      tags:
+        - VMs
+      summary: List virtual machines
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/VMStatus'
+        - name: hypervisor_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of VMs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/VM'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+    
+    post:
+      tags:
+        - VMs
+      summary: Create virtual machine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVMRequest'
+      responses:
+        '201':
+          description: VM created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VM'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /vms/{vm_id}:
+    get:
+      tags:
+        - VMs
+      summary: Get VM details
+      parameters:
+        - $ref: '#/components/parameters/VMIDParam'
+      responses:
+        '200':
+          description: VM details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VM'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    put:
+      tags:
+        - VMs
+      summary: Update VM configuration
+      parameters:
+        - $ref: '#/components/parameters/VMIDParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateVMRequest'
+      responses:
+        '200':
+          description: VM updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VM'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    delete:
+      tags:
+        - VMs
+      summary: Delete VM
+      parameters:
+        - $ref: '#/components/parameters/VMIDParam'
+      responses:
+        '204':
+          description: VM deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /vms/{vm_id}/start:
+    post:
+      tags:
+        - VMs
+      summary: Start VM
+      parameters:
+        - $ref: '#/components/parameters/VMIDParam'
+      responses:
+        '200':
+          description: VM started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VMOperation'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /vms/{vm_id}/stop:
+    post:
+      tags:
+        - VMs
+      summary: Stop VM
+      parameters:
+        - $ref: '#/components/parameters/VMIDParam'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: VM stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VMOperation'
+
+  /vms/{vm_id}/migrate:
+    post:
+      tags:
+        - Migration
+      summary: Migrate VM to another host
+      parameters:
+        - $ref: '#/components/parameters/VMIDParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MigrateVMRequest'
+      responses:
+        '202':
+          description: Migration started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Migration'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /migrations/{migration_id}:
+    get:
+      tags:
+        - Migration
+      summary: Get migration status
+      parameters:
+        - name: migration_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Migration status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Migration'
+
+  /vms/{vm_id}/snapshots:
+    get:
+      tags:
+        - Backup
+      summary: List VM snapshots
+      parameters:
+        - $ref: '#/components/parameters/VMIDParam'
+      responses:
+        '200':
+          description: List of snapshots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Snapshot'
+    
+    post:
+      tags:
+        - Backup
+      summary: Create VM snapshot
+      parameters:
+        - $ref: '#/components/parameters/VMIDParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSnapshotRequest'
+      responses:
+        '201':
+          description: Snapshot created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Snapshot'
+
+  /storage/volumes:
+    get:
+      tags:
+        - Storage
+      summary: List storage volumes
+      responses:
+        '200':
+          description: List of volumes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StorageVolume'
+    
+    post:
+      tags:
+        - Storage
+      summary: Create storage volume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVolumeRequest'
+      responses:
+        '201':
+          description: Volume created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageVolume'
+
+  /metrics:
+    get:
+      tags:
+        - Monitoring
+      summary: Get system metrics
+      parameters:
+        - name: resource_type
+          in: query
+          schema:
+            type: string
+            enum: [vm, hypervisor, storage, network]
+        - name: resource_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: metric_name
+          in: query
+          schema:
+            type: string
+        - name: start_time
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: end_time
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Metrics data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Metric'
+
+  /health:
+    get:
+      tags:
+        - Monitoring
+      summary: Health check
+      security: []
+      responses:
+        '200':
+          description: System healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    VMIDParam:
+      name: vm_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    
+    PageParam:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    
+    LimitParam:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  schemas:
+    VMStatus:
+      type: string
+      enum:
+        - running
+        - stopped
+        - suspended
+        - migrating
+        - error
+
+    VM:
+      type: object
+      required:
+        - id
+        - name
+        - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          $ref: '#/components/schemas/VMStatus'
+        hypervisor_id:
+          type: string
+          format: uuid
+        resources:
+          type: object
+          properties:
+            cpu:
+              type: integer
+            memory:
+              type: integer
+              description: Memory in MB
+            disk:
+              type: integer
+              description: Disk in GB
+        ip_address:
+          type: string
+          format: ipv4
+        mac_address:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateVMRequest:
+      type: object
+      required:
+        - name
+        - resources
+      properties:
+        name:
+          type: string
+        hypervisor_id:
+          type: string
+          format: uuid
+        resources:
+          type: object
+          required:
+            - cpu
+            - memory
+            - disk
+          properties:
+            cpu:
+              type: integer
+              minimum: 1
+            memory:
+              type: integer
+              minimum: 512
+            disk:
+              type: integer
+              minimum: 10
+        network:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [bridge, nat, host, internal]
+            vlan_id:
+              type: integer
+        metadata:
+          type: object
+
+    UpdateVMRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        resources:
+          type: object
+          properties:
+            cpu:
+              type: integer
+            memory:
+              type: integer
+        metadata:
+          type: object
+
+    MigrateVMRequest:
+      type: object
+      required:
+        - target_host
+      properties:
+        target_host:
+          type: string
+          format: uuid
+        live:
+          type: boolean
+          default: true
+        priority:
+          type: string
+          enum: [low, normal, high]
+          default: normal
+
+    Migration:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        vm_id:
+          type: string
+          format: uuid
+        source_host:
+          type: string
+          format: uuid
+        target_host:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, preparing, transferring, completing, completed, failed, cancelled]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        error_message:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+
+    VMOperation:
+      type: object
+      properties:
+        operation:
+          type: string
+        status:
+          type: string
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    Snapshot:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        vm_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [creating, available, deleting, error]
+        created_at:
+          type: string
+          format: date-time
+
+    CreateSnapshotRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+
+    StorageVolume:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        size_gb:
+          type: integer
+        type:
+          type: string
+          enum: [ssd, hdd, network]
+        status:
+          type: string
+          enum: [available, attached, error]
+        vm_id:
+          type: string
+          format: uuid
+        hypervisor_id:
+          type: string
+          format: uuid
+
+    CreateVolumeRequest:
+      type: object
+      required:
+        - name
+        - size_gb
+        - type
+      properties:
+        name:
+          type: string
+        size_gb:
+          type: integer
+          minimum: 1
+        type:
+          type: string
+          enum: [ssd, hdd, network]
+
+    Metric:
+      type: object
+      properties:
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+          format: uuid
+        metric_name:
+          type: string
+        metric_value:
+          type: number
+        labels:
+          type: object
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        version:
+          type: string
+        uptime:
+          type: integer
+        services:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+              message:
+                type: string
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    RefreshRequest:
+      type: object
+      required:
+        - refresh_token
+      properties:
+        refresh_token:
+          type: string
+
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_in:
+          type: integer
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+            email:
+              type: string
+            name:
+              type: string
+            roles:
+              type: array
+              items:
+                type: string
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        total_pages:
+          type: integer
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+        request_id:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

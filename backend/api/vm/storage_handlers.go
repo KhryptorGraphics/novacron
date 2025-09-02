@@ -1,4 +1,7 @@
+//go:build experimental
+
 package vm
+
 
 import (
 	"context"
@@ -41,7 +44,7 @@ func (h *StorageHandler) RegisterRoutes(router *mux.Router) {
 func (h *StorageHandler) ListStoragePools(w http.ResponseWriter, r *http.Request) {
 	// Get pools
 	pools := h.storageManager.ListStoragePools()
-	
+
 	// Convert to response format
 	response := make([]map[string]interface{}, 0, len(pools))
 	for _, pool := range pools {
@@ -58,7 +61,7 @@ func (h *StorageHandler) ListStoragePools(w http.ResponseWriter, r *http.Request
 			"metadata":    pool.Metadata,
 		})
 	}
-	
+
 	// Write response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
@@ -74,12 +77,12 @@ func (h *StorageHandler) CreateStoragePool(w http.ResponseWriter, r *http.Reques
 		Tags       []string          `json:"tags"`
 		Metadata   map[string]string `json:"metadata"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Validate storage type
 	var storageType vm.StorageType
 	switch request.Type {
@@ -95,17 +98,17 @@ func (h *StorageHandler) CreateStoragePool(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Invalid storage type. Must be 'local', 'nfs', 'ceph', or 'iscsi'.", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Create pool
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	pool, err := h.storageManager.CreateStoragePool(ctx, request.Name, storageType, request.Path, request.Tags, request.Metadata)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"id":          pool.ID,
@@ -119,7 +122,7 @@ func (h *StorageHandler) CreateStoragePool(w http.ResponseWriter, r *http.Reques
 		"tags":        pool.Tags,
 		"metadata":    pool.Metadata,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(response)
@@ -130,14 +133,14 @@ func (h *StorageHandler) GetStoragePool(w http.ResponseWriter, r *http.Request) 
 	// Get pool ID from URL
 	vars := mux.Vars(r)
 	poolID := vars["id"]
-	
+
 	// Get pool
 	pool, err := h.storageManager.GetStoragePool(poolID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"id":          pool.ID,
@@ -151,7 +154,7 @@ func (h *StorageHandler) GetStoragePool(w http.ResponseWriter, r *http.Request) 
 		"tags":        pool.Tags,
 		"metadata":    pool.Metadata,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -161,16 +164,16 @@ func (h *StorageHandler) DeleteStoragePool(w http.ResponseWriter, r *http.Reques
 	// Get pool ID from URL
 	vars := mux.Vars(r)
 	poolID := vars["id"]
-	
+
 	// Delete pool
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	if err := h.storageManager.DeleteStoragePool(ctx, poolID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -179,7 +182,7 @@ func (h *StorageHandler) DeleteStoragePool(w http.ResponseWriter, r *http.Reques
 func (h *StorageHandler) ListStorageVolumes(w http.ResponseWriter, r *http.Request) {
 	// Get pool ID from query parameters
 	poolID := r.URL.Query().Get("pool_id")
-	
+
 	// Get volumes
 	var volumes []*vm.StorageVolume
 	if poolID != "" {
@@ -187,7 +190,7 @@ func (h *StorageHandler) ListStorageVolumes(w http.ResponseWriter, r *http.Reque
 	} else {
 		volumes = h.storageManager.ListStorageVolumes()
 	}
-	
+
 	// Convert to response format
 	response := make([]map[string]interface{}, 0, len(volumes))
 	for _, volume := range volumes {
@@ -205,7 +208,7 @@ func (h *StorageHandler) ListStorageVolumes(w http.ResponseWriter, r *http.Reque
 			"metadata":   volume.Metadata,
 		})
 	}
-	
+
 	// Write response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
@@ -222,12 +225,12 @@ func (h *StorageHandler) CreateStorageVolume(w http.ResponseWriter, r *http.Requ
 		Tags       []string          `json:"tags"`
 		Metadata   map[string]string `json:"metadata"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Validate format
 	var format vm.StorageFormat
 	switch request.Format {
@@ -243,17 +246,17 @@ func (h *StorageHandler) CreateStorageVolume(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Invalid storage format. Must be 'raw', 'qcow2', 'vmdk', or 'vhd'.", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Create volume
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	volume, err := h.storageManager.CreateStorageVolume(ctx, request.Name, request.PoolID, format, request.Capacity, request.Tags, request.Metadata)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"id":         volume.ID,
@@ -268,7 +271,7 @@ func (h *StorageHandler) CreateStorageVolume(w http.ResponseWriter, r *http.Requ
 		"tags":       volume.Tags,
 		"metadata":   volume.Metadata,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(response)
@@ -279,14 +282,14 @@ func (h *StorageHandler) GetStorageVolume(w http.ResponseWriter, r *http.Request
 	// Get volume ID from URL
 	vars := mux.Vars(r)
 	volumeID := vars["id"]
-	
+
 	// Get volume
 	volume, err := h.storageManager.GetStorageVolume(volumeID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"id":         volume.ID,
@@ -301,7 +304,7 @@ func (h *StorageHandler) GetStorageVolume(w http.ResponseWriter, r *http.Request
 		"tags":       volume.Tags,
 		"metadata":   volume.Metadata,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -311,16 +314,16 @@ func (h *StorageHandler) DeleteStorageVolume(w http.ResponseWriter, r *http.Requ
 	// Get volume ID from URL
 	vars := mux.Vars(r)
 	volumeID := vars["id"]
-	
+
 	// Delete volume
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	if err := h.storageManager.DeleteStorageVolume(ctx, volumeID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -330,27 +333,27 @@ func (h *StorageHandler) ResizeStorageVolume(w http.ResponseWriter, r *http.Requ
 	// Get volume ID from URL
 	vars := mux.Vars(r)
 	volumeID := vars["id"]
-	
+
 	// Parse request
 	var request struct {
 		NewCapacity int64 `json:"new_capacity"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Resize volume
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	volume, err := h.storageManager.ResizeStorageVolume(ctx, volumeID, request.NewCapacity)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"id":         volume.ID,
@@ -365,7 +368,7 @@ func (h *StorageHandler) ResizeStorageVolume(w http.ResponseWriter, r *http.Requ
 		"tags":       volume.Tags,
 		"metadata":   volume.Metadata,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -375,29 +378,29 @@ func (h *StorageHandler) CloneStorageVolume(w http.ResponseWriter, r *http.Reque
 	// Get volume ID from URL
 	vars := mux.Vars(r)
 	volumeID := vars["id"]
-	
+
 	// Parse request
 	var request struct {
 		Name     string            `json:"name"`
 		Tags     []string          `json:"tags"`
 		Metadata map[string]string `json:"metadata"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Clone volume
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	volume, err := h.storageManager.CloneStorageVolume(ctx, volumeID, request.Name, request.Tags, request.Metadata)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"id":         volume.ID,
@@ -412,7 +415,7 @@ func (h *StorageHandler) CloneStorageVolume(w http.ResponseWriter, r *http.Reque
 		"tags":       volume.Tags,
 		"metadata":   volume.Metadata,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(response)

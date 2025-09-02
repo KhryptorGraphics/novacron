@@ -1,0 +1,95 @@
+# NovaCron API Server Production Dockerfile
+# Multi-stage build for security and optimization
+
+# Build stage
+FROM golang:1.21-alpine AS builder
+
+# Build arguments
+ARG VERSION=dev
+ARG COMMIT_SHA=unknown
+ARG BUILD_DATE=unknown
+
+# Install build dependencies
+RUN apk add --no-cache \
+    git \
+    ca-certificates \
+    tzdata \
+    gcc \
+    musl-dev
+
+# Set working directory
+WORKDIR /build
+
+# Copy go modules files first for better caching
+COPY go.mod go.sum ./
+COPY backend/core/go.mod backend/core/go.sum ./backend/core/
+COPY backend/core/orchestration/go.mod backend/core/orchestration/go.sum ./backend/core/orchestration/
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s \
+    -X 'main.Version=${VERSION}' \
+    -X 'main.CommitSHA=${COMMIT_SHA}' \
+    -X 'main.BuildDate=${BUILD_DATE}'" \
+    -a -installsuffix cgo \
+    -o /build/novacron-api \
+    ./backend/cmd/api-server
+
+# Build migration tool
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s" \
+    -a -installsuffix cgo \
+    -o /build/migrate \
+    ./backend/cmd/migrate
+
+# Production stage
+FROM alpine:3.18
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    postgresql-client \
+    curl \
+    && rm -rf /var/cache/apk/*
+
+# Create non-root user
+RUN addgroup -g 1000 novacron \
+    && adduser -u 1000 -G novacron -s /bin/sh -D novacron
+
+# Create required directories
+RUN mkdir -p /app /var/lib/novacron /var/log/novacron \
+    && chown -R novacron:novacron /app /var/lib/novacron /var/log/novacron
+
+# Copy built binaries
+COPY --from=builder /build/novacron-api /app/
+COPY --from=builder /build/migrate /app/
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Copy migration files
+COPY backend/migrations /app/migrations/
+
+# Set permissions
+RUN chmod +x /app/novacron-api /app/migrate /app/migrations/run_migrations.sh
+
+# Switch to non-root user
+USER novacron
+
+# Set working directory
+WORKDIR /app
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8091/health || exit 1
+
+# Expose ports
+EXPOSE 8091 8093 9090
+
+# Default command
+CMD ["./novacron-api"]

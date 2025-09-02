@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useToast } from "@/components/ui/use-toast";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { SkipToMain } from "@/components/accessibility/a11y-components";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
@@ -62,7 +64,15 @@ export default function UnifiedDashboard() {
     name: "Admin User",
     email: "admin@novacron.io",
   };
-  
+
+  const router = useRouter();
+  const { toast } = useToast();
+  const handleLogout = () => {
+    try { localStorage.removeItem("authToken"); } catch {}
+    toast({ title: "Logged out" });
+    router.push("/auth/login");
+  };
+
   // Simulate data loading
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -232,8 +242,8 @@ export default function UnifiedDashboard() {
         <SkipToMain />
         
         {/* Mobile Navigation */}
-        <MobileNavigation user={user} onLogout={() => console.log("Logout")} />
-        
+        <MobileNavigation user={user} onLogout={handleLogout} />
+
         {/* Desktop Sidebar */}
         <DesktopSidebar 
           user={user} 

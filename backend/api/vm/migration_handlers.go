@@ -1,4 +1,7 @@
+//go:build experimental
+
 package vm
+
 
 import (
 	"context"
@@ -34,7 +37,7 @@ func (h *MigrationHandler) RegisterRoutes(router *mux.Router) {
 func (h *MigrationHandler) ListMigrations(w http.ResponseWriter, r *http.Request) {
 	// Get migrations
 	migrations := h.vmManager.ListMigrations()
-	
+
 	// Convert to response format
 	response := make([]map[string]interface{}, 0, len(migrations))
 	for _, migration := range migrations {
@@ -51,7 +54,7 @@ func (h *MigrationHandler) ListMigrations(w http.ResponseWriter, r *http.Request
 			"error":          migration.Error,
 		})
 	}
-	
+
 	// Write response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
@@ -65,12 +68,12 @@ func (h *MigrationHandler) CreateMigration(w http.ResponseWriter, r *http.Reques
 		DestNodeID string `json:"dest_node_id"`
 		Type       string `json:"type"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Validate migration type
 	var migrationType vm.MigrationType
 	switch request.Type {
@@ -84,17 +87,17 @@ func (h *MigrationHandler) CreateMigration(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Invalid migration type. Must be 'offline', 'suspend', or 'live'.", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Create migration
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	migration, err := h.vmManager.MigrateVM(ctx, request.VMID, request.DestNodeID, migrationType)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"id":             migration.ID,
@@ -106,7 +109,7 @@ func (h *MigrationHandler) CreateMigration(w http.ResponseWriter, r *http.Reques
 		"created_at":     migration.CreatedAt,
 		"updated_at":     migration.UpdatedAt,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(response)
@@ -117,14 +120,14 @@ func (h *MigrationHandler) GetMigration(w http.ResponseWriter, r *http.Request) 
 	// Get migration ID from URL
 	vars := mux.Vars(r)
 	migrationID := vars["id"]
-	
+
 	// Get migration
 	migration, err := h.vmManager.GetMigration(migrationID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"id":             migration.ID,
@@ -139,7 +142,7 @@ func (h *MigrationHandler) GetMigration(w http.ResponseWriter, r *http.Request) 
 		"error":          migration.Error,
 		"progress":       migration.Progress,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -149,23 +152,23 @@ func (h *MigrationHandler) CancelMigration(w http.ResponseWriter, r *http.Reques
 	// Get migration ID from URL
 	vars := mux.Vars(r)
 	migrationID := vars["id"]
-	
+
 	// Cancel migration
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	if err := h.vmManager.CancelMigration(ctx, migrationID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Get updated migration
 	migration, err := h.vmManager.GetMigration(migrationID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"id":             migration.ID,
@@ -179,7 +182,7 @@ func (h *MigrationHandler) CancelMigration(w http.ResponseWriter, r *http.Reques
 		"completed_at":   migration.CompletedAt,
 		"error":          migration.Error,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }

@@ -1,0 +1,516 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "novacron-ml-analytics",
+    "title": "NovaCron ML Analytics Dashboard",
+    "tags": ["ml", "analytics", "predictions", "anomaly"],
+    "timezone": "browser",
+    "schemaVersion": 30,
+    "version": 1,
+    "refresh": "10s",
+    "panels": [
+      {
+        "id": 1,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "type": "graph",
+        "title": "Resource Usage Predictions",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "ml_predicted_cpu_usage",
+            "legendFormat": "Predicted CPU",
+            "refId": "A"
+          },
+          {
+            "expr": "ml_predicted_memory_usage",
+            "legendFormat": "Predicted Memory",
+            "refId": "B"
+          },
+          {
+            "expr": "ml_actual_cpu_usage",
+            "legendFormat": "Actual CPU",
+            "refId": "C"
+          },
+          {
+            "expr": "ml_actual_memory_usage",
+            "legendFormat": "Actual Memory",
+            "refId": "D"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "percent",
+            "label": "Usage %",
+            "min": 0,
+            "max": 100
+          }
+        ],
+        "lines": true,
+        "linewidth": 2,
+        "fill": 1,
+        "fillGradient": 3,
+        "tooltip": {
+          "shared": true,
+          "value_type": "individual"
+        }
+      },
+      {
+        "id": 2,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "type": "graph",
+        "title": "Anomaly Detection Scores",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "ml_anomaly_score",
+            "legendFormat": "{{vm_id}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "none",
+            "label": "Anomaly Score",
+            "min": 0,
+            "max": 1
+          }
+        ],
+        "thresholds": [
+          {
+            "value": 0.7,
+            "color": "red",
+            "fill": true,
+            "line": true
+          }
+        ],
+        "alert": {
+          "name": "High Anomaly Score",
+          "conditions": [
+            {
+              "evaluator": {
+                "params": [0.7],
+                "type": "gt"
+              },
+              "operator": {
+                "type": "and"
+              },
+              "query": {
+                "params": ["A", "5m", "now"]
+              },
+              "reducer": {
+                "params": [],
+                "type": "avg"
+              },
+              "type": "query"
+            }
+          ],
+          "frequency": "60s",
+          "handler": 1,
+          "message": "Anomaly detected in VM",
+          "noDataState": "no_data",
+          "notifications": []
+        }
+      },
+      {
+        "id": 3,
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8},
+        "type": "stat",
+        "title": "Model Accuracy",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "ml_model_accuracy",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 0.7},
+                {"color": "green", "value": 0.85}
+              ]
+            },
+            "unit": "percentunit"
+          }
+        },
+        "options": {
+          "orientation": "horizontal",
+          "reduceOptions": {
+            "values": false,
+            "fields": "",
+            "calcs": ["lastNotNull"]
+          },
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        }
+      },
+      {
+        "id": 4,
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8},
+        "type": "gauge",
+        "title": "Prediction Latency",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, ml_prediction_latency_seconds_bucket)",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 0.25},
+                {"color": "red", "value": 0.5}
+              ]
+            },
+            "unit": "s",
+            "min": 0,
+            "max": 1
+          }
+        },
+        "options": {
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        }
+      },
+      {
+        "id": 5,
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8},
+        "type": "piechart",
+        "title": "Anomaly Types Distribution",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "sum by (type) (ml_anomaly_by_type)",
+            "refId": "A"
+          }
+        ],
+        "pieType": "donut",
+        "legendDisplayMode": "table",
+        "legendPlacement": "right",
+        "legendValues": ["value", "percent"],
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      {
+        "id": 6,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+        "type": "graph",
+        "title": "Performance Predictions",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "ml_predicted_throughput",
+            "legendFormat": "Predicted Throughput",
+            "refId": "A"
+          },
+          {
+            "expr": "ml_predicted_latency",
+            "legendFormat": "Predicted Latency",
+            "refId": "B"
+          },
+          {
+            "expr": "ml_predicted_iops",
+            "legendFormat": "Predicted IOPS",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ops",
+            "label": "Operations/sec",
+            "min": 0
+          },
+          {
+            "format": "ms",
+            "label": "Latency (ms)"
+          }
+        ],
+        "seriesOverrides": [
+          {
+            "alias": "Predicted Latency",
+            "yaxis": 2
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+        "type": "heatmap",
+        "title": "Bottleneck Detection Heatmap",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "ml_bottlenecks_by_vm",
+            "format": "heatmap",
+            "refId": "A"
+          }
+        ],
+        "dataFormat": "timeseries",
+        "color": {
+          "mode": "spectrum",
+          "scheme": "RdYlGn",
+          "reverse": true
+        },
+        "yAxis": {
+          "format": "short",
+          "decimals": 0
+        },
+        "tooltip": {
+          "show": true,
+          "showHistogram": false
+        }
+      },
+      {
+        "id": 8,
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+        "type": "table",
+        "title": "Migration Recommendations",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "ml_migration_recommendations",
+            "format": "table",
+            "instant": true,
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "auto",
+              "displayMode": "auto"
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "Score"},
+              "properties": [
+                {
+                  "id": "custom.displayMode",
+                  "value": "gradient-gauge"
+                },
+                {
+                  "id": "thresholds",
+                  "value": {
+                    "mode": "absolute",
+                    "steps": [
+                      {"color": "red", "value": 0},
+                      {"color": "yellow", "value": 0.5},
+                      {"color": "green", "value": 0.8}
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {},
+              "indexByName": {
+                "vm_id": 0,
+                "source_node": 1,
+                "target_node": 2,
+                "optimal_window": 3,
+                "expected_benefit": 4,
+                "risk_level": 5
+              },
+              "renameByName": {
+                "vm_id": "VM ID",
+                "source_node": "Source",
+                "target_node": "Target",
+                "optimal_window": "Window",
+                "expected_benefit": "Benefit",
+                "risk_level": "Risk"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "gridPos": {"h": 6, "w": 8, "x": 0, "y": 32},
+        "type": "stat",
+        "title": "Total Predictions",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "sum(ml_predictions_total)",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "blue", "value": 0}
+              ]
+            },
+            "unit": "short"
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area",
+          "justifyMode": "center",
+          "orientation": "horizontal",
+          "reduceOptions": {
+            "values": false,
+            "fields": "",
+            "calcs": ["lastNotNull"]
+          },
+          "textMode": "value_and_name"
+        }
+      },
+      {
+        "id": 10,
+        "gridPos": {"h": 6, "w": 8, "x": 8, "y": 32},
+        "type": "stat",
+        "title": "Anomalies Detected",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "ml_anomalies_detected_total",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 10},
+                {"color": "red", "value": 50}
+              ]
+            },
+            "unit": "short"
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area",
+          "justifyMode": "center",
+          "orientation": "horizontal",
+          "reduceOptions": {
+            "values": false,
+            "fields": "",
+            "calcs": ["lastNotNull"]
+          },
+          "textMode": "value_and_name"
+        }
+      },
+      {
+        "id": 11,
+        "gridPos": {"h": 6, "w": 8, "x": 16, "y": 32},
+        "type": "stat",
+        "title": "Bottlenecks Identified",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "ml_bottlenecks_identified_total",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 5},
+                {"color": "red", "value": 20}
+              ]
+            },
+            "unit": "short"
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area",
+          "justifyMode": "center",
+          "orientation": "horizontal",
+          "reduceOptions": {
+            "values": false,
+            "fields": "",
+            "calcs": ["lastNotNull"]
+          },
+          "textMode": "value_and_name"
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "vm_id",
+          "type": "query",
+          "datasource": "Prometheus",
+          "query": "label_values(ml_predictions_total, vm_id)",
+          "refresh": 1,
+          "multi": true,
+          "includeAll": true
+        },
+        {
+          "name": "model_type",
+          "type": "custom",
+          "options": [
+            {"text": "All", "value": "all"},
+            {"text": "Predictor", "value": "predictor"},
+            {"text": "Anomaly", "value": "anomaly"},
+            {"text": "Performance", "value": "performance"}
+          ],
+          "current": {
+            "text": "All",
+            "value": "all"
+          }
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "ml_anomaly_score > 0.7",
+          "iconColor": "red",
+          "name": "Anomaly Detected",
+          "tagKeys": "vm_id,type",
+          "textFormat": "Anomaly detected in {{vm_id}}"
+        },
+        {
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "ml_migration_triggered",
+          "iconColor": "blue",
+          "name": "Migration Triggered",
+          "tagKeys": "vm_id,target",
+          "textFormat": "Migration initiated for {{vm_id}}"
+        }
+      ]
+    },
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": ["5s", "10s", "30s", "1m", "5m"],
+      "time_options": ["5m", "15m", "1h", "6h", "12h", "24h", "2d", "7d"]
+    }
+  }
+}

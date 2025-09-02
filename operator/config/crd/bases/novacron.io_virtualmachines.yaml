@@ -1,0 +1,489 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.13.0
+  name: virtualmachines.novacron.io
+spec:
+  group: novacron.io
+  names:
+    kind: VirtualMachine
+    listKind: VirtualMachineList
+    plural: virtualmachines
+    shortNames:
+    - vm
+    - vms
+    singular: virtualmachine
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: VM phase
+      jsonPath: .status.phase
+      name: Phase
+      type: string
+    - description: Node name
+      jsonPath: .status.nodeName
+      name: Node
+      type: string
+    - description: IP address
+      jsonPath: .status.ipAddresses[0]
+      name: IP
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: VirtualMachine is the Schema for the virtualmachines API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: VirtualMachineSpec defines the desired state of VirtualMachine
+            properties:
+              migrationPolicy:
+                description: MigrationPolicy defines the migration behavior
+                properties:
+                  allowLiveMigration:
+                    description: AllowLiveMigration enables live migration
+                    type: boolean
+                  bandwidth:
+                    description: Bandwidth limit for migration
+                    type: string
+                  compression:
+                    description: Compression enables compression during migration
+                    type: boolean
+                  encrypted:
+                    description: Encrypted enables encryption during migration
+                    type: boolean
+                type: object
+              running:
+                description: Running controls whether the VM should be running
+                type: boolean
+              snapshotPolicy:
+                description: SnapshotPolicy defines the snapshot behavior
+                properties:
+                  retention:
+                    description: Retention count
+                    format: int32
+                    type: integer
+                  schedule:
+                    description: Schedule in cron format
+                    type: string
+                type: object
+              template:
+                description: Template defines the VM template
+                properties:
+                  metadata:
+                    description: Metadata for the VM
+                    properties:
+                      annotations:
+                        additionalProperties:
+                          type: string
+                        description: Annotations to apply to the VM
+                        type: object
+                      labels:
+                        additionalProperties:
+                          type: string
+                        description: Labels to apply to the VM
+                        type: object
+                    type: object
+                  spec:
+                    description: Spec defines the VM specifications
+                    properties:
+                      affinity:
+                        description: Affinity rules
+                        type: object
+                      devices:
+                        description: Devices defines hardware devices (GPU, etc)
+                        items:
+                          description: Device defines a hardware device
+                          properties:
+                            count:
+                              description: Count of devices
+                              format: int32
+                              type: integer
+                            model:
+                              description: Model of the device
+                              type: string
+                            type:
+                              description: Type of device (gpu, fpga, etc)
+                              type: string
+                            vendor:
+                              description: Vendor of the device
+                              type: string
+                          required:
+                          - type
+                          type: object
+                        type: array
+                      image:
+                        description: Image defines the VM image
+                        properties:
+                          pullPolicy:
+                            description: PullPolicy defines when to pull the image
+                            type: string
+                          source:
+                            description: Source of the image (URL, marketplace, PVC, etc)
+                            type: string
+                        required:
+                        - source
+                        type: object
+                      lifecycle:
+                        description: Lifecycle hooks
+                        properties:
+                          preStart:
+                            description: PreStart hook
+                            properties:
+                              exec:
+                                description: Exec command
+                                properties:
+                                  command:
+                                    description: Command to execute
+                                    items:
+                                      type: string
+                                    type: array
+                                required:
+                                - command
+                                type: object
+                              httpGet:
+                                description: HTTP GET action
+                                properties:
+                                  host:
+                                    description: Host (defaults to VM IP)
+                                    type: string
+                                  path:
+                                    description: Path to GET
+                                    type: string
+                                  port:
+                                    description: Port to connect to
+                                    format: int32
+                                    type: integer
+                                  scheme:
+                                    description: Scheme (HTTP or HTTPS)
+                                    type: string
+                                required:
+                                - path
+                                - port
+                                type: object
+                              timeoutSeconds:
+                                description: Timeout in seconds
+                                format: int32
+                                type: integer
+                            type: object
+                          preStop:
+                            description: PreStop hook
+                            properties:
+                              exec:
+                                description: Exec command
+                                properties:
+                                  command:
+                                    description: Command to execute
+                                    items:
+                                      type: string
+                                    type: array
+                                required:
+                                - command
+                                type: object
+                              httpGet:
+                                description: HTTP GET action
+                                properties:
+                                  host:
+                                    description: Host (defaults to VM IP)
+                                    type: string
+                                  path:
+                                    description: Path to GET
+                                    type: string
+                                  port:
+                                    description: Port to connect to
+                                    format: int32
+                                    type: integer
+                                  scheme:
+                                    description: Scheme (HTTP or HTTPS)
+                                    type: string
+                                required:
+                                - path
+                                - port
+                                type: object
+                              timeoutSeconds:
+                                description: Timeout in seconds
+                                format: int32
+                                type: integer
+                            type: object
+                        type: object
+                      networks:
+                        description: Networks defines network configuration
+                        items:
+                          description: NetworkInterface defines a network interface
+                          properties:
+                            ipv4:
+                              description: IPv4 configuration
+                              properties:
+                                address:
+                                  description: Address (for static method)
+                                  type: string
+                                dns:
+                                  description: DNS servers
+                                  items:
+                                    type: string
+                                  type: array
+                                gateway:
+                                  description: Gateway (for static method)
+                                  type: string
+                                method:
+                                  description: Method (dhcp, static)
+                                  type: string
+                              required:
+                              - method
+                              type: object
+                            ipv6:
+                              description: IPv6 configuration
+                              properties:
+                                address:
+                                  description: Address (for static method)
+                                  type: string
+                                dns:
+                                  description: DNS servers
+                                  items:
+                                    type: string
+                                  type: array
+                                gateway:
+                                  description: Gateway (for static method)
+                                  type: string
+                                method:
+                                  description: Method (dhcp, static)
+                                  type: string
+                              required:
+                              - method
+                              type: object
+                            name:
+                              description: Name of the network
+                              type: string
+                            type:
+                              description: Type of network (bridge, ovs, sr-iov, macvlan)
+                              type: string
+                          required:
+                          - name
+                          - type
+                          type: object
+                        type: array
+                      nodeSelector:
+                        additionalProperties:
+                          type: string
+                        description: NodeSelector for placement constraints
+                        type: object
+                      resources:
+                        description: Resources defines compute resources
+                        properties:
+                          cpu:
+                            description: CPU cores
+                            format: int32
+                            type: integer
+                          disk:
+                            description: Disk size
+                            type: string
+                          memory:
+                            description: Memory amount
+                            type: string
+                        required:
+                        - cpu
+                        - disk
+                        - memory
+                        type: object
+                      userData:
+                        description: UserData for cloud-init
+                        type: string
+                      volumes:
+                        description: Volumes defines storage volumes
+                        items:
+                          description: Volume defines a storage volume
+                          properties:
+                            accessMode:
+                              description: AccessMode (ReadWriteOnce, ReadWriteMany, etc)
+                              type: string
+                            name:
+                              description: Name of the volume
+                              type: string
+                            size:
+                              description: Size of the volume
+                              type: string
+                            storageClass:
+                              description: StorageClass to use
+                              type: string
+                          required:
+                          - name
+                          - size
+                          type: object
+                        type: array
+                    required:
+                    - image
+                    - resources
+                    type: object
+                required:
+                - spec
+                type: object
+              updateStrategy:
+                description: UpdateStrategy defines how updates are applied
+                properties:
+                  rollingUpdate:
+                    description: RollingUpdate configuration
+                    properties:
+                      maxUnavailable:
+                        description: MaxUnavailable VMs during update
+                        format: int32
+                        type: integer
+                    type: object
+                  type:
+                    description: Type (RollingUpdate or Recreate)
+                    type: string
+                required:
+                - type
+                type: object
+            required:
+            - template
+            type: object
+          status:
+            description: VirtualMachineStatus defines the observed state of VirtualMachine
+            properties:
+              conditions:
+                description: Conditions represent the latest available observations
+                items:
+                  description: VMCondition describes the state of a VM at a certain point
+                  properties:
+                    lastProbeTime:
+                      description: LastProbeTime is the last time the condition was probed
+                      format: date-time
+                      type: string
+                    lastTransitionTime:
+                      description: LastTransitionTime is the last time the condition transitioned
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message is a human-readable message
+                      type: string
+                    reason:
+                      description: Reason for the condition's last transition
+                      type: string
+                    status:
+                      description: Status of the condition (True, False, Unknown)
+                      type: string
+                    type:
+                      description: Type of condition
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              ipAddresses:
+                description: IPAddresses assigned to the VM
+                items:
+                  type: string
+                type: array
+              lastUpdated:
+                description: LastUpdated timestamp
+                format: date-time
+                type: string
+              migration:
+                description: Migration status
+                properties:
+                  progress:
+                    description: Progress percentage
+                    format: int32
+                    type: integer
+                  startTime:
+                    description: StartTime of migration
+                    format: date-time
+                    type: string
+                  state:
+                    description: State of migration
+                    type: string
+                  targetNode:
+                    description: TargetNode for migration
+                    type: string
+                type: object
+              nodeName:
+                description: NodeName where the VM is running
+                type: string
+              phase:
+                description: Phase of the VM (Pending, Running, Migrating, Stopped, Failed)
+                type: string
+              resources:
+                description: Resources usage
+                properties:
+                  cpu:
+                    description: CPU usage
+                    properties:
+                      available:
+                        description: Available amount
+                        type: string
+                      percentage:
+                        description: Percentage used
+                        type: number
+                      used:
+                        description: Used amount
+                        type: string
+                    type: object
+                  disk:
+                    description: Disk usage
+                    properties:
+                      available:
+                        description: Available amount
+                        type: string
+                      percentage:
+                        description: Percentage used
+                        type: number
+                      used:
+                        description: Used amount
+                        type: string
+                    type: object
+                  memory:
+                    description: Memory usage
+                    properties:
+                      available:
+                        description: Available amount
+                        type: string
+                      percentage:
+                        description: Percentage used
+                        type: number
+                      used:
+                        description: Used amount
+                        type: string
+                    type: object
+                type: object
+              snapshots:
+                description: Snapshots list
+                items:
+                  description: SnapshotStatus defines snapshot status
+                  properties:
+                    createdAt:
+                      description: CreatedAt timestamp
+                      format: date-time
+                      type: string
+                    name:
+                      description: Name of the snapshot
+                      type: string
+                    size:
+                      description: Size of the snapshot
+                      type: string
+                  required:
+                  - createdAt
+                  - name
+                  type: object
+                type: array
+              vmID:
+                description: VMID is the underlying VM identifier
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

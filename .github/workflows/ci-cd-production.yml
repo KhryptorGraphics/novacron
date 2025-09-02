@@ -1,0 +1,540 @@
+name: NovaCron Production CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_API: ${{ github.repository }}/api-server
+  IMAGE_NAME_FRONTEND: ${{ github.repository }}/frontend
+  IMAGE_NAME_BACKUP: ${{ github.repository }}/backup
+
+jobs:
+  # Security Scanning and Code Quality
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run Gosec Security Scanner
+        uses: securecodewarrior/github-action-gosec@master
+        with:
+          args: '-fmt sarif -out gosec-results.sarif ./...'
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: gosec-results.sarif
+
+      - name: Run Go Vulnerability Check
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v3
+        if: github.event_name == 'pull_request'
+
+      - name: SAST with CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: go, javascript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v2
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+
+  # Backend Testing
+  backend-tests:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+
+      - name: Install dependencies
+        run: |
+          go mod download
+          go mod verify
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: postgres://test_user:test_password@localhost:5432/test_db?sslmode=disable
+        run: |
+          cd backend/migrations
+          chmod +x run_migrations.sh
+          ./run_migrations.sh migrate
+
+      - name: Run unit tests
+        env:
+          DATABASE_URL: postgres://test_user:test_password@localhost:5432/test_db?sslmode=disable
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test_secret_key_for_testing_only
+        run: |
+          go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Generate coverage report
+        run: |
+          go tool cover -html=coverage.out -o coverage.html
+          go tool cover -func=coverage.out
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.out
+          fail_ci_if_error: false
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgres://test_user:test_password@localhost:5432/test_db?sslmode=disable
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test_secret_key_for_testing_only
+        run: |
+          go test -tags=integration -v ./tests/integration/...
+
+      - name: Run benchmark tests
+        run: |
+          go test -bench=. -benchmem ./...
+
+  # Frontend Testing
+  frontend-tests:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run Prettier check
+        run: npm run format:check
+
+      - name: Run type checking
+        run: npm run typecheck
+
+      - name: Run unit tests
+        run: npm run test:ci
+
+      - name: Run E2E tests
+        run: |
+          npx playwright install --with-deps
+          npm run test:e2e
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: frontend-test-results
+          path: |
+            frontend/coverage/
+            frontend/playwright-report/
+            frontend/test-results/
+
+  # Build and Push Images
+  build-images:
+    name: Build and Push Images
+    runs-on: ubuntu-latest
+    needs: [security-scan, backend-tests, frontend-tests]
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      api-image: ${{ steps.api-meta.outputs.tags }}
+      frontend-image: ${{ steps.frontend-meta.outputs.tags }}
+      backup-image: ${{ steps.backup-meta.outputs.tags }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract API metadata
+        id: api-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_API }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deployment/docker/Dockerfile.api
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.api-meta.outputs.tags }}
+          labels: ${{ steps.api-meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT_SHA=${{ github.sha }}
+            BUILD_DATE=${{ github.run_id }}
+
+      - name: Extract Frontend metadata
+        id: frontend-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: frontend
+          file: deployment/docker/Dockerfile.frontend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.frontend-meta.outputs.tags }}
+          labels: ${{ steps.frontend-meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract Backup metadata
+        id: backup-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKUP }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Backup image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deployment/docker/Dockerfile.backup
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.backup-meta.outputs.tags }}
+          labels: ${{ steps.backup-meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Container Security Scanning
+  container-security:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    needs: [build-images]
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    strategy:
+      matrix:
+        image:
+          - api-server
+          - frontend
+          - backup
+    steps:
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:latest
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Snyk Container Security scan
+        uses: snyk/actions/docker@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          image: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:latest
+          args: --severity-threshold=high --file=deployment/docker/Dockerfile.${{ matrix.image }}
+
+  # Staging Deployment
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build-images]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: staging
+      url: https://staging.novacron.local
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure kubectl for staging
+        run: |
+          echo "${{ secrets.STAGING_KUBECONFIG }}" | base64 -d > kubeconfig
+          export KUBECONFIG=kubeconfig
+
+      - name: Deploy to staging
+        run: |
+          # Update image tags in Kubernetes manifests
+          sed -i "s|image: novacron/api-server:.*|image: ${{ needs.build-images.outputs.api-image }}|g" deployment/kubernetes/deployments.yaml
+          sed -i "s|image: novacron/frontend:.*|image: ${{ needs.build-images.outputs.frontend-image }}|g" deployment/kubernetes/deployments.yaml
+          
+          # Apply Kubernetes manifests
+          kubectl apply -f deployment/kubernetes/namespace.yaml
+          kubectl apply -f deployment/kubernetes/secrets.yaml
+          kubectl apply -f deployment/kubernetes/configmap.yaml
+          kubectl apply -f deployment/kubernetes/rbac.yaml
+          kubectl apply -f deployment/kubernetes/deployments.yaml
+          kubectl apply -f deployment/kubernetes/services.yaml
+          kubectl apply -f deployment/kubernetes/ingress.yaml
+          
+          # Wait for deployment to be ready
+          kubectl rollout status deployment/novacron-api -n novacron --timeout=600s
+          kubectl rollout status deployment/novacron-frontend -n novacron --timeout=600s
+
+      - name: Run smoke tests
+        run: |
+          # Wait for services to be ready
+          sleep 30
+          
+          # Basic health check
+          curl -f https://staging.novacron.local/health || exit 1
+          curl -f https://staging.novacron.local/api/info || exit 1
+          
+          # Run comprehensive smoke tests
+          ./scripts/smoke-tests.sh staging
+
+  # Production Deployment
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, container-security]
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: production
+      url: https://novacron.local
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure kubectl for production
+        run: |
+          echo "${{ secrets.PRODUCTION_KUBECONFIG }}" | base64 -d > kubeconfig
+          export KUBECONFIG=kubeconfig
+
+      - name: Pre-deployment backup
+        run: |
+          # Trigger database backup before deployment
+          kubectl create job --from=cronjob/novacron-backup backup-pre-deploy-$(date +%s) -n novacron
+          
+          # Wait for backup to complete
+          kubectl wait --for=condition=complete --timeout=1800s job/backup-pre-deploy-* -n novacron
+
+      - name: Deploy to production with blue-green strategy
+        run: |
+          # Update image tags
+          sed -i "s|image: novacron/api-server:.*|image: ${{ needs.build-images.outputs.api-image }}|g" deployment/kubernetes/deployments.yaml
+          sed -i "s|image: novacron/frontend:.*|image: ${{ needs.build-images.outputs.frontend-image }}|g" deployment/kubernetes/deployments.yaml
+          
+          # Create temporary green deployment
+          sed 's/name: novacron-api/name: novacron-api-green/g' deployment/kubernetes/deployments.yaml > green-deployment.yaml
+          
+          # Deploy green version
+          kubectl apply -f green-deployment.yaml
+          
+          # Wait for green deployment to be ready
+          kubectl rollout status deployment/novacron-api-green -n novacron --timeout=600s
+          
+          # Run health checks on green deployment
+          kubectl port-forward deployment/novacron-api-green 8091:8091 -n novacron &
+          sleep 10
+          curl -f http://localhost:8091/health || exit 1
+          
+          # Switch traffic to green (update service selector)
+          kubectl patch service novacron-api -n novacron -p '{"spec":{"selector":{"app.kubernetes.io/name":"novacron-api-green"}}}'
+          
+          # Wait and verify
+          sleep 30
+          curl -f https://novacron.local/health || (kubectl patch service novacron-api -n novacron -p '{"spec":{"selector":{"app.kubernetes.io/name":"novacron-api"}}}' && exit 1)
+          
+          # Clean up old blue deployment
+          kubectl delete deployment novacron-api -n novacron
+          
+          # Rename green to blue for next deployment
+          kubectl patch deployment novacron-api-green -n novacron -p '{"metadata":{"name":"novacron-api"}}'
+
+      - name: Post-deployment verification
+        run: |
+          # Run comprehensive health checks
+          ./scripts/health-check.sh production
+          
+          # Run performance tests
+          ./scripts/performance-test.sh production
+          
+          # Verify all services are running
+          kubectl get pods -n novacron
+          kubectl get services -n novacron
+
+      - name: Notify deployment success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: success
+          text: 'NovaCron ${{ github.ref_name }} deployed to production successfully! 🚀'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: NovaCron ${{ github.ref_name }}
+          body: |
+            ## Changes in this Release
+            - Automated production deployment
+            - Security scanned container images
+            - Full test coverage
+            
+            ## Container Images
+            - API Server: ${{ needs.build-images.outputs.api-image }}
+            - Frontend: ${{ needs.build-images.outputs.frontend-image }}
+            - Backup Service: ${{ needs.build-images.outputs.backup-image }}
+          draft: false
+          prerelease: false
+
+  # Cleanup
+  cleanup:
+    name: Cleanup
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: always()
+    steps:
+      - name: Clean up old container images
+        run: |
+          # Keep only the latest 10 images
+          echo "Container image cleanup would run here"
+          # This would typically be handled by a separate scheduled job
+
+# Error handling and notifications
+  notify-failure:
+    name: Notify Failure
+    runs-on: ubuntu-latest
+    needs: [security-scan, backend-tests, frontend-tests, build-images, deploy-staging, deploy-production]
+    if: failure()
+    steps:
+      - name: Notify deployment failure
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          text: 'NovaCron deployment failed! Check the workflow for details.'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -3,10 +3,8 @@ package ml
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
-	"sort"
 	"sync"
 	"time"
 
@@ -153,7 +151,7 @@ func (mt *ModelTrainer) TrainModel(ctx context.Context, config TrainingConfig) (
 		valLoss, valAccuracy := mt.validateModel(model, valData)
 
 		// Record metrics
-		metrics := TrainingMetrics{
+		_ = TrainingMetrics{
 			Epoch:             epoch,
 			TrainingLoss:      trainLoss,
 			ValidationLoss:    valLoss,

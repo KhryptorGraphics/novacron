@@ -783,7 +783,7 @@ func (rm *ReplicationManager) StartReplication(ctx context.Context, backupID, po
 		ID:              generateReplicationJobID(),
 		PolicyID:        policyID,
 		SourceBackupID:  backupID,
-		Status:          JobStatusQueued,
+		Status:          ReplicationJobStatusQueued,
 		StartedAt:       time.Now(),
 		TargetStatuses:  make(map[string]*TargetStatus),
 		Errors:          make([]*ReplicationError, 0),
@@ -800,7 +800,7 @@ func (rm *ReplicationManager) StartReplication(ctx context.Context, backupID, po
 		job.TargetIDs = append(job.TargetIDs, target.ID)
 		job.TargetStatuses[target.ID] = &TargetStatus{
 			TargetID:   target.ID,
-			Status:     JobStatusQueued,
+			Status:     ReplicationJobStatusQueued,
 			Progress:   0.0,
 			LastUpdate: time.Now(),
 		}

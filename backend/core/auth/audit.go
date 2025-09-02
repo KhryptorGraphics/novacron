@@ -41,7 +41,7 @@ type AuditEntry struct {
 
 	// AdditionalData contains additional information about the action
 	AdditionalData map[string]interface{} `json:"additionalData,omitempty"`
-	
+
 	// Compatibility fields
 	Resource    string `json:"resource,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -60,7 +60,7 @@ type AuditService interface {
 
 	// GetResourceActions gets all actions performed on a resource
 	GetResourceActions(resourceType, resourceID string, startTime, endTime time.Time, limit, offset int) ([]*AuditEntry, error)
-	
+
 	// Log method for compatibility
 	Log(entry AuditEntry) error
 }

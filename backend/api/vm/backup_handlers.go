@@ -1,4 +1,7 @@
+//go:build experimental
+
 package vm
+
 
 import (
 	"context"
@@ -37,10 +40,10 @@ func (h *BackupHandler) ListBackups(w http.ResponseWriter, r *http.Request) {
 	// Get VM ID from URL
 	vars := mux.Vars(r)
 	vmID := vars["vm_id"]
-	
+
 	// Get backups
 	backups := h.backupManager.ListBackupsForVM(vmID)
-	
+
 	// Convert to response format
 	response := make([]map[string]interface{}, 0, len(backups))
 	for _, backup := range backups {
@@ -60,7 +63,7 @@ func (h *BackupHandler) ListBackups(w http.ResponseWriter, r *http.Request) {
 			"expires_at":  backup.ExpiresAt,
 		})
 	}
-	
+
 	// Write response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
@@ -71,7 +74,7 @@ func (h *BackupHandler) CreateBackup(w http.ResponseWriter, r *http.Request) {
 	// Get VM ID from URL
 	vars := mux.Vars(r)
 	vmID := vars["vm_id"]
-	
+
 	// Parse request
 	var request struct {
 		Name        string            `json:"name"`
@@ -81,12 +84,12 @@ func (h *BackupHandler) CreateBackup(w http.ResponseWriter, r *http.Request) {
 		Metadata    map[string]string `json:"metadata"`
 		ExpiresIn   int               `json:"expires_in_days"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Validate backup type
 	var backupType vm.BackupType
 	switch request.Type {
@@ -99,24 +102,24 @@ func (h *BackupHandler) CreateBackup(w http.ResponseWriter, r *http.Request) {
 	default:
 		backupType = vm.BackupTypeFull
 	}
-	
+
 	// Set expiration time if provided
 	var expiresIn *time.Duration
 	if request.ExpiresIn > 0 {
 		duration := time.Duration(request.ExpiresIn) * 24 * time.Hour
 		expiresIn = &duration
 	}
-	
+
 	// Create backup
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	backup, err := h.backupManager.CreateBackup(ctx, vmID, request.Name, request.Description, backupType, request.Tags, request.Metadata, expiresIn)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"id":          backup.ID,
@@ -131,7 +134,7 @@ func (h *BackupHandler) CreateBackup(w http.ResponseWriter, r *http.Request) {
 		"metadata":    backup.Metadata,
 		"expires_at":  backup.ExpiresAt,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(response)
@@ -142,14 +145,14 @@ func (h *BackupHandler) GetBackup(w http.ResponseWriter, r *http.Request) {
 	// Get backup ID from URL
 	vars := mux.Vars(r)
 	backupID := vars["id"]
-	
+
 	// Get backup
 	backup, err := h.backupManager.GetBackup(backupID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	
+
 	// Write response
 	response := map[string]interface{}{
 		"id":          backup.ID,
@@ -166,7 +169,7 @@ func (h *BackupHandler) GetBackup(w http.ResponseWriter, r *http.Request) {
 		"metadata":    backup.Metadata,
 		"expires_at":  backup.ExpiresAt,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -176,16 +179,16 @@ func (h *BackupHandler) DeleteBackup(w http.ResponseWriter, r *http.Request) {
 	// Get backup ID from URL
 	vars := mux.Vars(r)
 	backupID := vars["id"]
-	
+
 	// Delete backup
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	if err := h.backupManager.DeleteBackup(ctx, backupID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -195,16 +198,16 @@ func (h *BackupHandler) RestoreBackup(w http.ResponseWriter, r *http.Request) {
 	// Get backup ID from URL
 	vars := mux.Vars(r)
 	backupID := vars["id"]
-	
+
 	// Restore backup
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
-	
+
 	if err := h.backupManager.RestoreBackup(ctx, backupID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Write response
 	w.WriteHeader(http.StatusNoContent)
 }

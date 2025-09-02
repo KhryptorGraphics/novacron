@@ -111,11 +111,11 @@ func (c *SystemCollector) SetCollectInterval(interval time.Duration) {
 }
 
 // Collect collects metrics
-func (c *SystemCollector) Collect() ([]MetricBatch, error) {
+func (c *SystemCollector) Collect() ([]*MetricBatch, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	batches := make([]MetricBatch, 0, len(c.metrics))
+	batches := make([]*MetricBatch, 0, len(c.metrics))
 	c.lastCollection = time.Now()
 
 	// Collect memory metrics
@@ -168,44 +168,32 @@ func (c *SystemCollector) Collect() ([]MetricBatch, error) {
 func (c *SystemCollector) registerMetrics() error {
 	// Create memory metrics
 	memUsed := NewGaugeMetric("system.memory.used", "System Memory Used", "Amount of memory currently in use", "system")
-	memUsed.SetUnit("bytes")
+	memUsed = memUsed.WithUnit("bytes")
 	c.metrics = append(c.metrics, memUsed)
-	if err := c.registry.RegisterMetric(memUsed); err != nil {
-		return err
-	}
+	c.registry.RegisterMetric(memUsed)
 
 	memTotal := NewGaugeMetric("system.memory.total", "System Memory Total", "Total system memory", "system")
-	memTotal.SetUnit("bytes")
+	memTotal = memTotal.WithUnit("bytes")
 	c.metrics = append(c.metrics, memTotal)
-	if err := c.registry.RegisterMetric(memTotal); err != nil {
-		return err
-	}
+	c.registry.RegisterMetric(memTotal)
 
 	heapUsed := NewGaugeMetric("system.memory.heap.used", "Heap Memory Used", "Amount of heap memory currently in use", "system")
-	heapUsed.SetUnit("bytes")
+	heapUsed = heapUsed.WithUnit("bytes")
 	c.metrics = append(c.metrics, heapUsed)
-	if err := c.registry.RegisterMetric(heapUsed); err != nil {
-		return err
-	}
+	c.registry.RegisterMetric(heapUsed)
 
 	heapTotal := NewGaugeMetric("system.memory.heap.total", "Heap Memory Total", "Total heap memory", "system")
-	heapTotal.SetUnit("bytes")
+	heapTotal = heapTotal.WithUnit("bytes")
 	c.metrics = append(c.metrics, heapTotal)
-	if err := c.registry.RegisterMetric(heapTotal); err != nil {
-		return err
-	}
+	c.registry.RegisterMetric(heapTotal)
 
 	goroutines := NewGaugeMetric("system.goroutines", "Goroutines", "Number of goroutines", "system")
 	c.metrics = append(c.metrics, goroutines)
-	if err := c.registry.RegisterMetric(goroutines); err != nil {
-		return err
-	}
+	c.registry.RegisterMetric(goroutines)
 
 	cpuCount := NewGaugeMetric("system.cpu.count", "CPU Count", "Number of CPUs", "system")
 	c.metrics = append(c.metrics, cpuCount)
-	if err := c.registry.RegisterMetric(cpuCount); err != nil {
-		return err
-	}
+	c.registry.RegisterMetric(cpuCount)
 
 	return nil
 }
@@ -283,11 +271,11 @@ func (c *VirtualMachineCollector) SetCollectInterval(interval time.Duration) {
 }
 
 // Collect collects VM metrics
-func (c *VirtualMachineCollector) Collect() ([]MetricBatch, error) {
+func (c *VirtualMachineCollector) Collect() ([]*MetricBatch, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	batches := make([]MetricBatch, 0, len(c.metrics))
+	batches := make([]*MetricBatch, 0, len(c.metrics))
 	c.lastCollection = time.Now()
 
 	// In a real implementation, this would collect actual VM metrics

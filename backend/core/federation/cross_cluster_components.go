@@ -9,7 +9,7 @@ import (
 // CrossClusterCommunication handles communication between clusters
 type CrossClusterCommunication struct {
 	// manager is the federation manager
-	manager *FederationManager
+	manager FederationManager
 
 	// messageQueue holds pending messages to send
 	messageQueue []CrossClusterMessage
@@ -67,7 +67,7 @@ type CrossClusterMessage struct {
 }
 
 // NewCrossClusterCommunication creates a new cross-cluster communication component
-func NewCrossClusterCommunication(manager *FederationManager) *CrossClusterCommunication {
+func NewCrossClusterCommunication(manager FederationManager) *CrossClusterCommunication {
 	return &CrossClusterCommunication{
 		manager:        manager,
 		messageQueue:   make([]CrossClusterMessage, 0),
@@ -182,7 +182,7 @@ func (c *CrossClusterCommunication) NotifyClusterRemoved(clusterID string) {
 // CrossClusterMigration handles VM migration between clusters
 type CrossClusterMigration struct {
 	// manager is the federation manager
-	manager *FederationManager
+	manager FederationManager
 
 	// migrationJobs tracks ongoing migration jobs
 	migrationJobs map[string]*MigrationJob
@@ -234,7 +234,7 @@ type MigrationJob struct {
 }
 
 // NewCrossClusterMigration creates a new cross-cluster migration component
-func NewCrossClusterMigration(manager *FederationManager) *CrossClusterMigration {
+func NewCrossClusterMigration(manager FederationManager) *CrossClusterMigration {
 	return &CrossClusterMigration{
 		manager:       manager,
 		migrationJobs: make(map[string]*MigrationJob),
@@ -446,7 +446,7 @@ func (m *CrossClusterMigration) NotifyMigrationProgress(jobID string, progress i
 // ResourceSharing manages resource sharing between clusters
 type ResourceSharing struct {
 	// manager is the federation manager
-	manager *FederationManager
+	manager FederationManager
 
 	// clusterUsage tracks resource usage per cluster
 	clusterUsage map[string]*ClusterResourceUsage
@@ -483,7 +483,7 @@ type ClusterResourceUsage struct {
 }
 
 // NewResourceSharing creates a new resource sharing component
-func NewResourceSharing(manager *FederationManager) *ResourceSharing {
+func NewResourceSharing(manager FederationManager) *ResourceSharing {
 	return &ResourceSharing{
 		manager:      manager,
 		clusterUsage: make(map[string]*ClusterResourceUsage),

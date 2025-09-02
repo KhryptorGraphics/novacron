@@ -5,12 +5,12 @@ import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { 
-  Menu, 
-  X, 
-  Home, 
-  Server, 
-  Activity, 
+import {
+  Menu,
+  X,
+  Home,
+  Server,
+  Activity,
   Settings,
   Database,
   Network,
@@ -35,67 +35,74 @@ interface MobileNavigationProps {
 }
 
 const navigationItems = [
-  { 
-    name: "Dashboard", 
-    href: "/dashboard", 
+  {
+    name: "Dashboard",
+    href: "/dashboard",
     icon: Home,
     description: "Overview and metrics"
   },
-  { 
-    name: "VMs", 
-    href: "/vms", 
+  {
+    name: "VMs",
+    href: "/vms",
     icon: Server,
     description: "Virtual machine management"
   },
-  { 
-    name: "Monitoring", 
-    href: "/monitoring", 
+  {
+    name: "Core VMs",
+    href: "/core/vms",
+    icon: Server,
+    description: "Core-mode VM list"
+  },
+  {
+    name: "Monitoring",
+    href: "/monitoring",
     icon: Activity,
     description: "Real-time system monitoring"
   },
-  { 
-    name: "Storage", 
-    href: "/storage", 
+  {
+    name: "Storage",
+    href: "/storage",
     icon: Database,
     description: "Storage management"
   },
-  { 
-    name: "Network", 
-    href: "/network", 
+  {
+    name: "Network",
+    href: "/network",
     icon: Network,
     description: "Network configuration"
   },
-  { 
-    name: "Security", 
-    href: "/security", 
+  {
+    name: "Security",
+    href: "/security",
     icon: Shield,
     description: "Security settings"
   },
-  { 
-    name: "Analytics", 
-    href: "/analytics", 
+  {
+    name: "Analytics",
+    href: "/analytics",
     icon: BarChart3,
     description: "Performance analytics"
   },
-  { 
-    name: "Users", 
-    href: "/users", 
+  {
+    name: "Users",
+    href: "/users",
     icon: Users,
     description: "User management"
   },
-  { 
-    name: "Settings", 
-    href: "/settings", 
+  {
+    name: "Settings",
+    href: "/settings",
     icon: Settings,
     description: "System settings"
   },
-  { 
-    name: "Admin", 
-    href: "/admin", 
+  {
+    name: "Admin",
+    href: "/admin",
     icon: Shield,
     description: "Admin panel"
   },
 ];
+
 
 export function MobileNavigation({ user, onLogout }: MobileNavigationProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -145,7 +152,7 @@ export function MobileNavigation({ user, onLogout }: MobileNavigationProps) {
             <Menu className="h-6 w-6" />
           )}
         </Button>
-        
+
         <div className="flex flex-1 items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center">
@@ -153,7 +160,7 @@ export function MobileNavigation({ user, onLogout }: MobileNavigationProps) {
             </div>
             <span className="font-semibold text-lg">NovaCron</span>
           </Link>
-          
+
           <Button
             variant="ghost"
             size="icon"
@@ -182,7 +189,7 @@ export function MobileNavigation({ user, onLogout }: MobileNavigationProps) {
               className="fixed inset-0 z-40 bg-black/50 lg:hidden"
               onClick={() => setIsOpen(false)}
             />
-            
+
             {/* Slide-out Panel */}
             <motion.div
               initial={{ x: "-100%" }}
@@ -210,7 +217,7 @@ export function MobileNavigation({ user, onLogout }: MobileNavigationProps) {
                     <X className="h-5 w-5" />
                   </Button>
                 </div>
-                
+
                 {/* User Info */}
                 {user && (
                   <div className="border-b px-4 py-4 dark:border-gray-800">
@@ -227,14 +234,14 @@ export function MobileNavigation({ user, onLogout }: MobileNavigationProps) {
                     </div>
                   </div>
                 )}
-                
+
                 {/* Navigation Items */}
                 <nav className="flex-1 overflow-y-auto px-2 py-4">
                   <div className="space-y-1">
                     {navigationItems.map((item) => {
                       const Icon = item.icon;
                       const isActive = pathname === item.href;
-                      
+
                       return (
                         <Link
                           key={item.name}
@@ -262,7 +269,7 @@ export function MobileNavigation({ user, onLogout }: MobileNavigationProps) {
                     })}
                   </div>
                 </nav>
-                
+
                 {/* Footer Actions */}
                 <div className="border-t px-4 py-4 dark:border-gray-800">
                   <div className="space-y-2">
@@ -283,7 +290,7 @@ export function MobileNavigation({ user, onLogout }: MobileNavigationProps) {
                         </>
                       )}
                     </Button>
-                    
+
                     {onLogout && (
                       <Button
                         variant="ghost"
@@ -307,7 +314,7 @@ export function MobileNavigation({ user, onLogout }: MobileNavigationProps) {
         {navigationItems.slice(0, 5).map((item) => {
           const Icon = item.icon;
           const isActive = pathname === item.href;
-          
+
           return (
             <Link
               key={item.name}
@@ -341,13 +348,13 @@ interface DesktopSidebarProps {
   onCollapse?: (collapsed: boolean) => void;
 }
 
-export function DesktopSidebar({ 
-  user, 
+export function DesktopSidebar({
+  user,
   collapsed = false,
-  onCollapse 
+  onCollapse
 }: DesktopSidebarProps) {
   const pathname = usePathname();
-  
+
   return (
     <aside className={cn(
       "hidden lg:flex lg:flex-col",
@@ -366,7 +373,7 @@ export function DesktopSidebar({
             <span className="font-semibold text-lg">NovaCron</span>
           )}
         </Link>
-        
+
         <Button
           variant="ghost"
           size="icon"
@@ -377,14 +384,14 @@ export function DesktopSidebar({
           <Menu className="h-4 w-4" />
         </Button>
       </div>
-      
+
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-2 py-4">
         <div className="space-y-1">
           {navigationItems.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
-            
+
             return (
               <Link
                 key={item.name}
@@ -413,7 +420,7 @@ export function DesktopSidebar({
           })}
         </div>
       </nav>
-      
+
       {/* User section */}
       {user && !collapsed && (
         <div className="border-t px-4 py-4 dark:border-gray-800">

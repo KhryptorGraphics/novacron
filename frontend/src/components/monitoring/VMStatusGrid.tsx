@@ -199,42 +199,45 @@ export function VMStatusGrid({ vms, onVMAction, loading = false }: VMStatusGridP
   ];
   
   // Mobile card renderer
-  const renderMobileCard = (vm: VM) => (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Server className="h-5 w-5 text-gray-500" />
-          <span className="font-semibold">{vm.name}</span>
+  const renderMobileCard = (vm: VM) => {
+    if (!vm) return null;
+    
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Server className="h-5 w-5 text-gray-500" />
+            <span className="font-semibold">{vm.name || 'Unknown'}</span>
+          </div>
+          <Badge className={getStatusColor(vm.status || 'stopped')}>
+            <span className="flex items-center gap-1">
+              {getStatusIcon(vm.status || 'stopped')}
+              {vm.status || 'stopped'}
+            </span>
+          </Badge>
         </div>
-        <Badge className={getStatusColor(vm.status)}>
-          <span className="flex items-center gap-1">
-            {getStatusIcon(vm.status)}
-            {vm.status}
-          </span>
-        </Badge>
-      </div>
       
       <div className="grid grid-cols-3 gap-2 text-sm">
         <div className="text-center">
           <p className="text-gray-500 dark:text-gray-400">CPU</p>
-          <p className="font-semibold">{vm.cpu}%</p>
+          <p className="font-semibold">{vm.cpu || 0}%</p>
         </div>
         <div className="text-center">
           <p className="text-gray-500 dark:text-gray-400">Memory</p>
-          <p className="font-semibold">{vm.memory}%</p>
+          <p className="font-semibold">{vm.memory || 0}%</p>
         </div>
         <div className="text-center">
           <p className="text-gray-500 dark:text-gray-400">Disk</p>
-          <p className="font-semibold">{vm.disk}%</p>
+          <p className="font-semibold">{vm.disk || 0}%</p>
         </div>
       </div>
       
       <div className="flex items-center justify-between text-sm">
         <span className="text-gray-500 dark:text-gray-400">
-          Host: {vm.host}
+          Host: {vm.host || 'Unknown'}
         </span>
         <span className="text-gray-500 dark:text-gray-400">
-          Uptime: {vm.uptime}
+          Uptime: {vm.uptime || 'N/A'}
         </span>
       </div>
       
@@ -280,7 +283,8 @@ export function VMStatusGrid({ vms, onVMAction, loading = false }: VMStatusGridP
         </Button>
       </div>
     </div>
-  );
+    );
+  };
   
   if (viewMode === "table") {
     return (
@@ -306,7 +310,7 @@ export function VMStatusGrid({ vms, onVMAction, loading = false }: VMStatusGridP
         </CardHeader>
         <CardContent>
           <ResponsiveDataTable
-            data={vms}
+            data={Array.isArray(vms) ? vms : []}
             columns={columns}
             mobileCard={renderMobileCard}
             onRowClick={(vm) => handleSelectVM(vm.id)}
@@ -340,15 +344,22 @@ export function VMStatusGrid({ vms, onVMAction, loading = false }: VMStatusGridP
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {vms.map((vm) => (
-            <div
-              key={vm.id}
-              className="p-4 rounded-lg border bg-white dark:bg-gray-800 dark:border-gray-700 hover:shadow-md transition-shadow cursor-pointer"
-              onClick={() => handleSelectVM(vm.id)}
-            >
-              {renderMobileCard(vm)}
+          {Array.isArray(vms) && vms.length > 0 ? vms.map((vm) => {
+            if (!vm || !vm.id) return null;
+            return (
+              <div
+                key={vm.id}
+                className="p-4 rounded-lg border bg-white dark:bg-gray-800 dark:border-gray-700 hover:shadow-md transition-shadow cursor-pointer"
+                onClick={() => handleSelectVM(vm.id)}
+              >
+                {renderMobileCard(vm)}
+              </div>
+            );
+          }) : (
+            <div className="col-span-full text-center py-8 text-muted-foreground">
+              No virtual machines found
             </div>
-          ))}
+          )}
         </div>
       </CardContent>
     </Card>
