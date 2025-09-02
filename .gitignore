@@ -63,3 +63,10 @@ claude-flow
 claude-flow.bat
 claude-flow.ps1
 hive-mind-prompt-*.txt
+
+# Large files (split for GitHub)
+frontend/.next/cache/webpack/client-production/5.pack
+acli.exe
+
+# Don't ignore the split files
+!.splits/

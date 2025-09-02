@@ -6,6 +6,17 @@ NovaCron is a sophisticated distributed virtual machine management platform with
 
 ## 🚀 Quick Start
 
+### Important: Large Files
+This repository contains split large files that need to be reassembled after cloning:
+
+```bash
+# After cloning, run:
+./scripts/post-clone-setup.sh
+
+# Or manually reassemble files:
+./scripts/reassemble-files.sh
+```
+
 ### Prerequisites
 - Go 1.21 or later
 - Node.js 18 or later

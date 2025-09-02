@@ -1,68 +1,48 @@
 #!/bin/bash
-# Script to reassemble split files after cloning from GitHub
 
-set -e
+# Script to reassemble split files after cloning repository
+# This should be run automatically after git clone
 
-echo "==================================="
-echo "Reassembling Split Files"
-echo "==================================="
+echo "🔄 Reassembling large files..."
 
-SPLIT_DIR=".github/split-files"
-
-# Check if split directory exists
-if [ ! -d "$SPLIT_DIR" ]; then
-    echo "No split files found. Repository appears complete."
+# Check if splits directory exists
+if [ ! -d ".splits" ]; then
+    echo "ℹ️ No split files found. Repository is ready to use."
     exit 0
 fi
 
-# Function to reassemble a file
-reassemble_file() {
-    local metadata_file="$1"
-    local base_path="${metadata_file%.metadata}"
-    local relative_path=$(grep "^original_path:" "$metadata_file" | cut -d' ' -f2)
-    local original_size=$(grep "^original_size:" "$metadata_file" | cut -d' ' -f2)
-    local expected_md5=$(grep "^md5sum:" "$metadata_file" | cut -d' ' -f2)
+# Find all .original files and reassemble them
+find .splits -name "*.original" | while read original_file; do
+    # Get the target path
+    target_path=$(cat "$original_file")
+    base_name=$(basename "$target_path")
+    dir_name=$(dirname "$original_file")
     
-    echo "Reassembling: $relative_path"
+    echo "🔧 Reassembling $target_path..."
     
-    # Create directory if it doesn't exist
-    local target_dir=$(dirname "$relative_path")
-    mkdir -p "$target_dir"
+    # Create target directory if it doesn't exist
+    mkdir -p "$(dirname "$target_path")"
     
-    # Combine all parts
-    cat "${base_path}.part"* > "$relative_path"
+    # Concatenate all part files
+    cat "$dir_name/${base_name}.part-"* > "$target_path"
     
-    # Verify size
-    local actual_size=$(stat -c%s "$relative_path" 2>/dev/null || stat -f%z "$relative_path" 2>/dev/null)
-    if [ "$actual_size" != "$original_size" ]; then
-        echo "⚠️  Warning: Size mismatch for $relative_path (expected: $original_size, got: $actual_size)"
-    fi
-    
-    # Verify MD5 if md5sum is available
-    if command -v md5sum &> /dev/null; then
-        local actual_md5=$(md5sum "$relative_path" | cut -d' ' -f1)
-        if [ "$actual_md5" != "$expected_md5" ]; then
-            echo "⚠️  Warning: MD5 mismatch for $relative_path"
+    # Verify MD5 checksum if available
+    if [ -f "$dir_name/${base_name}.md5" ]; then
+        echo "🔍 Verifying checksum..."
+        original_md5=$(cat "$dir_name/${base_name}.md5" | awk '{print $1}')
+        new_md5=$(md5sum "$target_path" | awk '{print $1}')
+        
+        if [ "$original_md5" = "$new_md5" ]; then
+            echo "✅ Checksum verified for $target_path"
         else
-            echo "✓ MD5 verified"
+            echo "❌ Checksum mismatch for $target_path!"
+            echo "   Expected: $original_md5"
+            echo "   Got: $new_md5"
         fi
     fi
-    
-    echo "✓ Reassembled: $relative_path"
-}
-
-# Process all metadata files
-find "$SPLIT_DIR" -name "*.metadata" | while read metadata_file; do
-    reassemble_file "$metadata_file"
 done
 
+echo "✨ Reassembly complete!"
 echo ""
-echo "==================================="
-echo "File Reassembly Complete!"
-echo "==================================="
-echo ""
-echo "All split files have been reassembled."
-echo "You can now run the application normally."
-echo ""
-echo "Optional: Remove split files to save space:"
-echo "  rm -rf $SPLIT_DIR"
+echo "📝 You can now safely remove the .splits directory if desired:"
+echo "   rm -rf .splits"
