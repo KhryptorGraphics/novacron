@@ -1,7 +1,10 @@
 "use client";
 
-import ComprehensiveDashboard from "./page-updated";
+// Disable static generation for this page
+export const dynamic = 'force-dynamic';
+
+import UnifiedDashboard from "@/components/dashboard/UnifiedDashboard";
 
 export default function DashboardPage() {
-  return <ComprehensiveDashboard />;
+  return <UnifiedDashboard />;
 }
