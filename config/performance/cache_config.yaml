@@ -1,0 +1,308 @@
+# NovaCron Multi-Tier Cache Configuration
+# Optimized for ML workloads and high-performance computing
+
+cache:
+  # Global settings
+  enabled: true
+  mode: multi_tier  # single_tier, multi_tier, distributed
+  coherence_protocol: mesi  # mesi, moesi, dragon
+  
+  # L1 In-Memory Cache Configuration
+  l1:
+    enabled: true
+    max_size_mb: 1024
+    max_entries: 1000000
+    ttl_seconds: 600
+    eviction_policy: adaptive_lru  # lru, lfu, adaptive_lru, ml_optimized
+    
+    # Sharding configuration
+    shards: 1024
+    shard_strategy: hash  # hash, range, consistent_hash
+    
+    # Performance tuning
+    gc_interval_seconds: 300
+    compression: true
+    compression_threshold_bytes: 1024
+    
+  # L2 Redis Cache Configuration
+  l2:
+    enabled: true
+    max_size_mb: 10240
+    
+    # Redis connection
+    redis:
+      host: localhost
+      port: 6379
+      password: ""
+      db: 0
+      pool_size: 100
+      max_retries: 3
+      timeout_ms: 5000
+      
+    # Cluster configuration
+    cluster:
+      enabled: false
+      nodes:
+        - "redis-1:6379"
+        - "redis-2:6379"
+        - "redis-3:6379"
+      
+    # Persistence
+    persistence:
+      enabled: true
+      strategy: rdb_aof  # rdb, aof, rdb_aof
+      save_intervals:
+        - "900 1"     # 15 min if at least 1 key changed
+        - "300 10"    # 5 min if at least 10 keys changed
+        - "60 10000"  # 1 min if at least 10000 keys changed
+        
+  # L3 Distributed Cache Configuration
+  l3:
+    enabled: true
+    max_size_mb: 102400
+    
+    # Consul configuration
+    consul:
+      address: "consul:8500"
+      datacenter: dc1
+      token: ""
+      
+    # Distributed settings
+    replication_factor: 3
+    consistency_level: quorum  # eventual, quorum, strong
+    partition_tolerance: true
+    
+    # Network optimization
+    batch_size: 100
+    parallel_requests: 10
+    timeout_ms: 10000
+    
+# Machine Learning Optimization
+ml_optimization:
+  enabled: true
+  
+  # Model configuration
+  model:
+    type: neural_network  # neural_network, random_forest, gradient_boost
+    layers: [64, 128, 64, 32, 1]
+    learning_rate: 0.001
+    batch_size: 32
+    update_frequency_seconds: 300
+    
+  # Feature engineering
+  features:
+    - access_frequency
+    - recency_score
+    - data_size
+    - computation_cost
+    - network_distance
+    - time_of_day
+    - workload_type
+    
+  # Training configuration
+  training:
+    online_learning: true
+    offline_training_interval_hours: 24
+    validation_split: 0.2
+    early_stopping_patience: 10
+    
+  # Prediction settings
+  prediction:
+    confidence_threshold: 0.8
+    prediction_horizon_seconds: 600
+    ensemble_models: true
+    
+# Cache Warming Strategy
+cache_warming:
+  enabled: true
+  
+  # Predictive warming
+  predictive:
+    enabled: true
+    model: prophet  # arima, lstm, prophet
+    lookback_window_hours: 168
+    prediction_accuracy_threshold: 0.85
+    
+  # Scheduled warming
+  scheduled:
+    enabled: true
+    schedules:
+      - name: "morning_peak"
+        cron: "0 7 * * 1-5"
+        keys_pattern: "user:*:profile"
+        tier: l1
+        
+      - name: "batch_processing"
+        cron: "0 2 * * *"
+        keys_pattern: "batch:*"
+        tier: l2
+        
+  # Pattern-based warming
+  pattern_based:
+    enabled: true
+    detection_window_minutes: 60
+    min_pattern_frequency: 10
+    auto_learn: true
+    
+# Eviction Policies
+eviction:
+  # Adaptive eviction
+  adaptive:
+    enabled: true
+    
+    # Weight factors
+    weights:
+      recency: 0.3
+      frequency: 0.3
+      size: 0.1
+      cost: 0.15
+      prediction: 0.15
+      
+    # Decay settings
+    decay_factor: 0.95
+    decay_interval_seconds: 3600
+    
+  # Cost-aware eviction
+  cost_aware:
+    enabled: true
+    computation_cost_weight: 0.4
+    storage_cost_weight: 0.3
+    network_cost_weight: 0.3
+    
+  # ML-enhanced eviction
+  ml_enhanced:
+    enabled: true
+    model: gradient_boost
+    feature_importance_threshold: 0.1
+    retraining_interval_hours: 6
+    
+# Monitoring and Metrics
+monitoring:
+  enabled: true
+  
+  # Prometheus metrics
+  prometheus:
+    enabled: true
+    port: 9090
+    path: /metrics
+    
+  # Metrics to track
+  metrics:
+    - hit_rate
+    - miss_rate
+    - eviction_rate
+    - latency_p50
+    - latency_p95
+    - latency_p99
+    - cache_size
+    - memory_usage
+    - prediction_accuracy
+    - cost_per_operation
+    
+  # Alerting thresholds
+  alerts:
+    hit_rate_min: 0.7
+    latency_p99_max_ms: 100
+    memory_usage_max_percent: 85
+    coherence_errors_max_per_minute: 10
+    
+# A/B Testing Configuration
+ab_testing:
+  enabled: true
+  
+  experiments:
+    - name: "eviction_policy_test"
+      type: eviction_policy
+      variants:
+        - name: control
+          policy: lru
+          traffic_percent: 50
+        - name: treatment
+          policy: ml_optimized
+          traffic_percent: 50
+      duration_hours: 168
+      metrics: [hit_rate, eviction_rate, cost]
+      
+    - name: "cache_tier_test"
+      type: tier_placement
+      variants:
+        - name: control
+          strategy: size_based
+          traffic_percent: 50
+        - name: treatment
+          strategy: ml_predicted
+          traffic_percent: 50
+      duration_hours: 72
+      metrics: [latency, hit_rate, cost]
+      
+# Self-Tuning Configuration
+self_tuning:
+  enabled: true
+  
+  # Reinforcement learning
+  rl_optimization:
+    enabled: true
+    algorithm: ppo  # ppo, a2c, dqn
+    reward_function: weighted_composite
+    
+    # Reward components
+    rewards:
+      hit_rate_weight: 0.4
+      latency_weight: 0.3
+      cost_weight: 0.2
+      stability_weight: 0.1
+      
+    # Training settings
+    episodes: 1000
+    steps_per_episode: 100
+    exploration_rate: 0.1
+    
+  # Automated tuning
+  auto_tuning:
+    enabled: true
+    parameters:
+      - name: cache_size
+        min: 512
+        max: 4096
+        step: 256
+      - name: eviction_threshold
+        min: 0.6
+        max: 0.9
+        step: 0.05
+      - name: ttl_multiplier
+        min: 0.5
+        max: 2.0
+        step: 0.1
+        
+    optimization_interval_hours: 24
+    rollback_on_regression: true
+    
+# Workload-Specific Configurations
+workload_profiles:
+  batch:
+    l1_size_mb: 512
+    l2_size_mb: 5120
+    l3_size_mb: 51200
+    ttl_multiplier: 2.0
+    prefetch_aggressive: true
+    
+  streaming:
+    l1_size_mb: 2048
+    l2_size_mb: 10240
+    l3_size_mb: 20480
+    ttl_multiplier: 0.5
+    write_through: true
+    
+  interactive:
+    l1_size_mb: 1024
+    l2_size_mb: 8192
+    l3_size_mb: 40960
+    ttl_multiplier: 1.0
+    read_through: true
+    
+  ml_training:
+    l1_size_mb: 4096
+    l2_size_mb: 20480
+    l3_size_mb: 204800
+    ttl_multiplier: 0.3
+    gpu_cache_enabled: true

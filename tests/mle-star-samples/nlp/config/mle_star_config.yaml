@@ -1,0 +1,281 @@
+# MLE-Star Configuration for NLP Project
+# Sentiment Analysis with BERT
+
+project:
+  name: "BERT Sentiment Analysis"
+  type: "nlp"
+  task: "binary_classification"
+  framework: "transformers_pytorch"
+  version: "1.0.0"
+
+# MLE-Star 7-Stage Workflow Configuration
+mle_star_workflow:
+  stages:
+    1_situation_analysis:
+      description: "Analyze text data characteristics and NLP challenges"
+      outputs:
+        - text_statistics
+        - sentiment_distribution
+        - preprocessing_requirements
+      duration_estimate: "20 minutes"
+      
+    2_task_definition:
+      description: "Define sentiment classification objectives"
+      outputs:
+        - task_specification
+        - success_metrics
+        - model_constraints
+      dependencies: ["1_situation_analysis"]
+      duration_estimate: "15 minutes"
+      
+    3_action_planning:
+      description: "Design BERT-based architecture and training strategy"
+      outputs:
+        - model_architecture
+        - tokenization_strategy
+        - fine_tuning_plan
+      dependencies: ["2_task_definition"]
+      duration_estimate: "30 minutes"
+      
+    4_implementation:
+      description: "Fine-tune BERT model for sentiment analysis"
+      outputs:
+        - fine_tuned_model
+        - training_history
+        - model_checkpoints
+      dependencies: ["3_action_planning"]
+      duration_estimate: "1-3 hours"
+      
+    5_results_evaluation:
+      description: "Comprehensive evaluation of sentiment model"
+      outputs:
+        - performance_metrics
+        - classification_report
+        - error_analysis
+      dependencies: ["4_implementation"]
+      duration_estimate: "20 minutes"
+      
+    6_refinement:
+      description: "Model optimization and hyperparameter tuning"
+      outputs:
+        - optimized_model
+        - learning_rate_analysis
+        - sequence_length_optimization
+      dependencies: ["5_results_evaluation"]
+      duration_estimate: "1-2 hours"
+      
+    7_deployment_prep:
+      description: "Prepare model for production text classification"
+      outputs:
+        - model_artifacts
+        - inference_pipeline
+        - api_documentation
+      dependencies: ["6_refinement"]
+      duration_estimate: "30 minutes"
+
+# Data Configuration
+data:
+  dataset: "IMDB Movie Reviews (or synthetic)"
+  task_type: "binary_sentiment_classification"
+  classes: 2
+  class_names: ["negative", "positive"]
+  total_samples: 2000  # For synthetic dataset
+  train_split: 0.7
+  val_split: 0.1
+  test_split: 0.2
+  
+  text_characteristics:
+    avg_length: 200
+    max_length: 512
+    vocabulary_size: "~30000"
+    
+  preprocessing:
+    tokenizer: "bert-base-uncased"
+    max_sequence_length: 256
+    truncation: true
+    padding: "max_length"
+    
+    text_cleaning:
+      lowercase: true
+      remove_urls: true
+      remove_mentions: true
+      remove_hashtags: true
+      preserve_punctuation: true  # Important for BERT
+      preserve_stopwords: true    # Important for context
+
+# Model Configuration
+model:
+  architecture: "BERT for Sequence Classification"
+  base_model: "bert-base-uncased"
+  type: "SentimentBERT"
+  
+  parameters:
+    num_classes: 2
+    dropout_rate: 0.3
+    freeze_bert: false  # Allow fine-tuning
+    
+  components:
+    - BERT encoder (12 layers)
+    - Pooler output
+    - Dropout layer
+    - Linear classifier
+    
+  model_size: "~110M parameters"
+  
+  alternatives:
+    - model_name: "roberta-base"
+      description: "RoBERTa for comparison"
+    - model_name: "distilbert-base-uncased"
+      description: "Lighter alternative"
+
+# Training Configuration
+training:
+  optimizer:
+    type: "AdamW"
+    learning_rate: 2e-5
+    weight_decay: 0.01
+    eps: 1e-8
+    
+  scheduler:
+    type: "linear_with_warmup"
+    warmup_steps: "10%"
+    
+  hyperparameters:
+    batch_size: 16
+    epochs: 5
+    max_grad_norm: 1.0  # Gradient clipping
+    early_stopping: true
+    patience: 2
+    
+  hardware:
+    device: "cuda_if_available"
+    mixed_precision: false
+    gradient_checkpointing: false
+
+# Evaluation Metrics
+evaluation:
+  primary_metrics:
+    - accuracy
+  
+  secondary_metrics:
+    - precision_weighted
+    - recall_weighted
+    - f1_score_weighted
+    - roc_auc
+    
+  targets:
+    accuracy: 0.90
+    f1_score: 0.90
+    roc_auc: 0.95
+    training_time: "<3 hours"
+    inference_time: "<200ms per sample"
+    
+  analysis:
+    - classification_report
+    - confusion_matrix
+    - per_class_metrics
+    - misclassification_examples
+    - attention_visualization
+
+# Experiment Tracking
+logging:
+  tensorboard:
+    enabled: true
+    log_dir: "models/nlp_experiments"
+    
+  wandb:
+    enabled: false
+    project: "bert-sentiment"
+    
+  checkpoints:
+    save_best: true
+    save_latest: true
+    monitor_metric: "val_accuracy"
+    
+  artifacts:
+    - training_curves
+    - classification_report
+    - sample_predictions
+    - model_weights
+    - tokenizer
+
+# Performance Expectations
+performance_targets:
+  accuracy: 0.90       # Target 90% accuracy
+  f1_score: 0.90       # Target F1-score
+  training_time: "3 hours"  # Maximum training time
+  inference_speed: "200ms"  # Per sample
+  model_size: "440MB"   # BERT model size
+  memory_usage: "8GB"   # Peak memory during training
+
+# Deployment Configuration
+deployment:
+  model_format: "huggingface_transformers"
+  optimization:
+    - quantization: false
+    - distillation: false
+    - onnx_export: true
+    
+  serving:
+    framework: "fastapi"
+    batch_size: 1
+    timeout: 30
+    
+  api_endpoints:
+    - "/predict": "Single text classification"
+    - "/predict_batch": "Batch text classification"
+    - "/health": "Service health check"
+    
+  monitoring:
+    - accuracy_monitoring
+    - latency_tracking
+    - throughput_measurement
+    - error_rate
+
+# Quality Gates
+quality_gates:
+  stage_4_implementation:
+    min_val_accuracy: 0.85
+    max_training_time: "4 hours"
+    
+  stage_5_evaluation:
+    min_test_accuracy: 0.87
+    min_f1_score: 0.85
+    max_inference_time: "300ms"
+    
+  stage_7_deployment:
+    model_size_limit: "500MB"
+    memory_limit: "10GB"
+
+# Error Handling
+error_handling:
+  training_failures:
+    - reduce_batch_size
+    - lower_learning_rate
+    - increase_warmup_steps
+    
+  memory_issues:
+    - gradient_checkpointing
+    - smaller_batch_size
+    - sequence_length_reduction
+    
+  convergence_issues:
+    - learning_rate_scheduling
+    - different_optimizer
+    - data_augmentation
+
+# Text-specific Considerations
+text_processing:
+  tokenization:
+    strategy: "subword_tokenization"
+    vocab_size: 30522  # BERT vocab size
+    special_tokens: ["[CLS]", "[SEP]", "[PAD]", "[UNK]", "[MASK]"]
+    
+  attention:
+    heads: 12
+    max_attention_span: 512
+    
+  embeddings:
+    dimension: 768
+    positional_embeddings: true
+    segment_embeddings: true

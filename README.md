@@ -1,235 +1,223 @@
-In Development 
+# ml-experiment
 
-# NovaCron - Distributed VM Management System
+A machine learning project following the MLE-Star methodology (Model design, Learning pipeline, Evaluation, Systematic testing, Training optimization, Analysis validation, Refinement deployment).
 
-NovaCron is a sophisticated distributed virtual machine management platform with advanced migration capabilities, real-time monitoring, and intelligent resource scheduling.
+## Project Structure
 
-## 🚀 Quick Start
-
-### Prerequisites
-- Go 1.21 or later
-- Node.js 18 or later
-- npm or yarn
-- libvirt (for KVM support)
-
-### Development Environment
-
-**Windows:**
-```powershell
-.\start_development.ps1
+```
+ml-experiment/
+├── data/                    # Data storage
+│   ├── raw/                # Original, immutable data
+│   ├── processed/          # Cleaned and processed data
+│   └── external/           # Third-party datasets
+├── models/                 # Trained models and artifacts
+├── notebooks/              # Jupyter notebooks for exploration
+│   ├── 01_model_design.ipynb
+│   ├── 02_training_pipeline.ipynb
+│   ├── 03_model_evaluation.ipynb
+│   ├── 04_hyperparameter_tuning.ipynb
+│   ├── 05_model_analysis.ipynb
+│   └── 06_deployment.ipynb
+├── src/                    # Source code
+│   ├── data/              # Data processing modules
+│   ├── features/          # Feature engineering
+│   ├── models/            # Model definitions and training
+│   ├── visualization/     # Visualization utilities
+│   └── api/               # API endpoints for serving
+├── tests/                  # Unit tests
+├── configs/                # Configuration files
+├── outputs/                # Generated outputs
+│   ├── models/            # Saved models
+│   ├── figures/           # Generated plots
+│   └── reports/           # Analysis reports
+├── requirements.txt        # Python dependencies
+├── config.yaml            # Main configuration
+└── README.md              # This file
 ```
 
-**Linux/macOS:**
+## MLE-Star Methodology
+
+### 1. Model Design (M)
+- Define problem statement and success metrics
+- Select appropriate ML algorithms and architectures
+- Design model architecture and components
+
+### 2. Learning Pipeline (L)
+- Implement data preprocessing and feature engineering
+- Create training and validation pipelines
+- Set up data loaders and transformation pipelines
+
+### 3. Evaluation (E)
+- Define evaluation metrics and validation strategies
+- Implement comprehensive model evaluation
+- Create performance monitoring and reporting
+
+### 4. Systematic Testing (S)
+- Implement unit tests for all components
+- Create integration tests for pipelines
+- Add data validation and model testing
+
+### 5. Training Optimization (T)
+- Implement hyperparameter tuning
+- Optimize training procedures and schedules
+- Add model selection and ensemble methods
+
+### 6. Analysis Validation (A)
+- Perform model interpretability analysis
+- Validate model assumptions and behavior
+- Generate comprehensive analysis reports
+
+### 7. Refinement Deployment (R)
+- Refine model based on analysis results
+- Prepare model for deployment
+- Create deployment infrastructure and monitoring
+
+## Getting Started
+
+1. **Install Dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Configure Project**
+   Edit `configs/config.yaml` with your specific settings.
+
+3. **Run MLE-Star Workflow**
+   ```bash
+   # Initialize project (already done)
+   claude-flow automation mle-star status
+   
+   # Run individual stages
+   claude-flow automation mle-star stage model_design
+   claude-flow automation mle-star stage learning_pipeline
+   
+   # Or run complete workflow
+   claude-flow automation mle-star run
+   ```
+
+## ML Framework: pytorch
+
+This project is configured to use **pytorch** as the primary ML framework.
+
+### Framework-Specific Setup
+
+{{#if (eq mlFramework "pytorch")}}
+**PyTorch Configuration:**
+- Version: 1.9.0+
+- GPU Support: Available if CUDA is installed
+- Key Components: torch, torchvision, torch.nn, torch.optim
+
+```python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+```
+{{/if}}
+
+{{#if (eq mlFramework "tensorflow")}}
+**TensorFlow Configuration:**
+- Version: 2.6.0+
+- GPU Support: Available if CUDA is installed
+- Key Components: tf.keras, tf.data, tf.nn
+
+```python
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+```
+{{/if}}
+
+{{#if (eq mlFramework "scikit-learn")}}
+**Scikit-Learn Configuration:**
+- Version: 1.0.0+
+- CPU-optimized machine learning
+- Key Components: sklearn.model_selection, sklearn.metrics
+
+```python
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
+from sklearn.ensemble import RandomForestClassifier
+```
+{{/if}}
+
+## Usage Examples
+
+### Running Individual Stages
 ```bash
-./start_development.sh
+# Model design stage
+claude-flow automation mle-star stage model_design --framework pytorch
+
+# Training pipeline stage
+claude-flow automation mle-star stage learning_pipeline
+
+# Model evaluation
+claude-flow automation mle-star stage evaluation_setup
 ```
 
-This will start both the backend API server (port 8090) and frontend development server (port 8092).
-
-### Docker Development
+### Complete Workflow
 ```bash
-docker-compose -f docker-compose.dev.yml up
+# Run all stages
+claude-flow automation mle-star run --continue-on-error
+
+# Check status
+claude-flow automation mle-star status
+
+# Validate environment
+claude-flow automation mle-star validate
 ```
 
-## 📊 Current Features
-
-### ✅ Completed Components
-
-#### Core Backend Infrastructure
-- **VM Lifecycle Management**: Complete KVM integration with libvirt
-- **Advanced Monitoring**: Real-time metrics collection and alerting
-- **Distributed Architecture**: Multi-node support with consensus
-- **Resource-Aware Scheduling**: Intelligent VM placement
-- **Multi-Tenancy & RBAC**: Secure tenant isolation
-- **Storage Management**: Distributed storage with replication
-- **Network-Aware Scheduling**: Topology-aware VM placement
-
-#### Frontend Dashboard
-- **Modern React UI**: Built with Next.js and TypeScript
-- **Real-time Monitoring**: WebSocket-based live updates
-- **Advanced Visualizations**: Charts, heatmaps, network topology
-- **Responsive Design**: Mobile-friendly interface
-- **Multiple Dashboard Views**: Overview, VMs, Alerts, Analytics
-
-#### VM Management
-- **Template System**: Create and deploy from templates
-- **VM Cloning**: Full VM duplication capabilities
-- **Snapshot Management**: Point-in-time VM snapshots
-- **Migration Support**: Live and offline VM migration
-- **Storage Volumes**: Dynamic volume management
-
-### 🔧 API Endpoints
-
-The backend provides a comprehensive REST API:
-
-```
-GET  /health                           # Health check
-GET  /api/info                         # API information
-GET  /api/monitoring/metrics           # System metrics
-GET  /api/monitoring/vms               # VM metrics
-GET  /api/monitoring/alerts            # Active alerts
-POST /api/monitoring/alerts/{id}/acknowledge  # Acknowledge alert
-WS   /ws/monitoring                    # Real-time updates
-```
-
-## 🏗️ Architecture
-
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Frontend      │    │   Backend API   │    │   KVM Manager   │
-│   (React/Next)  │◄──►│   (Go/Gorilla)  │◄──►│   (libvirt)     │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         │                       ▼                       ▼
-         │              ┌─────────────────┐    ┌─────────────────┐
-         │              │   Monitoring    │    │   Storage       │
-         │              │   & Alerting    │    │   Management    │
-         │              └─────────────────┘    └─────────────────┘
-         │
-         ▼
-┌─────────────────┐
-│   WebSocket     │
-│   Real-time     │
-│   Updates       │
-└─────────────────┘
-```
-
-## 📁 Project Structure
-
-```
-novacron/
-├── backend/
-│   ├── api/                    # HTTP handlers and routes
-│   │   ├── monitoring/         # Monitoring endpoints
-│   │   └── vm/                 # VM management endpoints
-│   ├── core/                   # Core business logic
-│   │   ├── hypervisor/         # KVM manager implementation
-│   │   ├── monitoring/         # Metrics and alerting
-│   │   ├── vm/                 # VM lifecycle management
-│   │   ├── storage/            # Storage subsystem
-│   │   ├── network/            # Network management
-│   │   └── scheduler/          # Resource scheduling
-│   ├── cmd/
-│   │   └── api-server/         # Main API server
-│   └── examples/               # Example implementations
-├── frontend/
-│   ├── src/
-│   │   ├── app/                # Next.js app router
-│   │   ├── components/         # React components
-│   │   │   ├── dashboard/      # Dashboard components
-│   │   │   ├── monitoring/     # Monitoring dashboard
-│   │   │   ├── ui/             # UI components
-│   │   │   └── visualizations/ # Advanced charts
-│   │   └── lib/                # Utilities
-│   ├── package.json
-│   └── tsconfig.json
-├── docker/                     # Docker configurations
-├── config/                     # Configuration files
-├── scripts/                    # Deployment scripts
-└── docs/                       # Documentation
-```
-
-## 🎯 Next Development Steps
-
-### Immediate Priorities (Next 2 weeks)
-
-1. **Complete Backend Integration**
-   - Fix any remaining import issues
-   - Implement missing monitoring components
-   - Add authentication middleware
-
-2. **Production Deployment**
-   - Finalize Docker configurations
-   - Set up CI/CD pipeline
-   - Create production deployment scripts
-
-3. **Testing & Documentation**
-   - Add comprehensive unit tests
-   - Create API documentation
-   - Write deployment guides
-
-### Medium-term Goals (1-2 months)
-
-1. **Cloud Provider Integration**
-   - AWS EC2 integration
-   - Azure VM integration
-   - Multi-cloud orchestration
-
-2. **Advanced Features**
-   - Machine learning analytics
-   - Predictive scaling
-   - Advanced migration algorithms
-
-3. **Enterprise Features**
-   - LDAP/AD integration
-   - Advanced RBAC
-   - Audit logging
-
-## 🔧 Development Commands
-
+### Deployment
 ```bash
-# Backend development
-cd backend/cmd/api-server
-go run main.go
+# Deploy as API
+claude-flow automation mle-star deploy --service api
 
-# Frontend development
-cd frontend
-npm run dev
-
-# Build for production
-go build -o novacron-api backend/cmd/api-server/main.go
-cd frontend && npm run build
-
-# Run tests
-go test ./...
-cd frontend && npm test
-
-# Docker development
-docker-compose -f docker-compose.dev.yml up --build
+# Deploy with Docker
+claude-flow automation mle-star deploy --service docker
 ```
 
-## 📊 Monitoring & Observability
+## Configuration
 
-The system includes comprehensive monitoring:
+The main configuration is in `configs/config.yaml`. Key settings include:
 
-- **Real-time Metrics**: CPU, memory, disk, network usage
-- **Alert Management**: Configurable thresholds and notifications
-- **Performance Analytics**: Historical trends and predictions
-- **Health Checks**: Automated system health monitoring
-- **WebSocket Updates**: Live dashboard updates
+- **Data paths**: Input and output data directories
+- **Model parameters**: Architecture and hyperparameters
+- **Training settings**: Batch size, epochs, learning rate
+- **Evaluation metrics**: Performance measurement criteria
 
-## 🤝 Contributing
+## Development Workflow
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
+1. **Data Exploration** → `notebooks/01_model_design.ipynb`
+2. **Pipeline Development** → `notebooks/02_training_pipeline.ipynb`
+3. **Model Training** → `src/models/train.py`
+4. **Evaluation** → `notebooks/03_model_evaluation.ipynb`
+5. **Optimization** → `notebooks/04_hyperparameter_tuning.ipynb`
+6. **Analysis** → `notebooks/05_model_analysis.ipynb`
+7. **Deployment** → `notebooks/06_deployment.ipynb`
 
-## 📄 License
+## Testing
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Run tests with:
+```bash
+pytest tests/
+```
 
-## 📚 Documentation
+Generate coverage report:
+```bash
+pytest --cov=src tests/
+```
 
-### Core Documentation
-- **[Development Status](DEVELOPMENT_STATUS.md)** - Current project status and completion metrics
-- **[Implementation Plan](IMPLEMENTATION_PLAN.md)** - Comprehensive development roadmap
-- **[Feature Plans](FEATURE_IMPLEMENTATION_PLANS.md)** - Detailed feature implementation guides
-- **[Developer Guide](CLAUDE.md)** - Development instructions and architecture overview
+## Contributing
 
-### Additional Resources
-- **[Technical Documentation](docs/)** - Detailed technical guides
-- **[Contributing Guide](docs/CONTRIBUTING.md)** - How to contribute to the project
-- **[Code Memory](CODE_MEMORY.md)** - Technical architecture and patterns
+1. Follow MLE-Star methodology for all changes
+2. Add tests for new functionality
+3. Update documentation
+4. Run validation before submitting
 
-## 🆘 Support
+## License
 
-For support and questions:
-- Check the documentation above
-- Review implementation plans
-- Check development status
+[Specify your license here]
 
 ---
 
-**Current Status**: ~85% complete - Production-ready core functionality with advanced monitoring dashboard. Ready for deployment and testing.
+Generated with MLE-Star methodology for systematic ML development.

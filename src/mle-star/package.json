@@ -1,0 +1,141 @@
+{
+  "name": "mle-star-workflow",
+  "version": "1.0.0",
+  "description": "MLE-Star Workflow for Claude-Flow Automation - Machine Learning Engineering with Systematic Training, Analysis, and Refinement",
+  "main": "index.js",
+  "bin": {
+    "mle-star": "./cli.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "mocha tests/**/*.test.js --timeout 30000",
+    "test:integration": "mocha tests/test_mle_star_workflow.js --timeout 60000",
+    "lint": "eslint . --ext .js",
+    "format": "prettier --write .",
+    "validate": "node -e \"console.log('Validating MLE-Star workflow...'); require('./index.js')\"",
+    "build": "echo 'No build step required for Node.js'",
+    "dev": "nodemon index.js",
+    "docs": "jsdoc -c jsdoc.conf.json",
+    "coverage": "nyc mocha tests/**/*.test.js"
+  },
+  "keywords": [
+    "machine-learning",
+    "ml-engineering",
+    "mle-star",
+    "claude-flow",
+    "automation",
+    "pytorch",
+    "tensorflow",
+    "scikit-learn",
+    "mlops",
+    "workflow",
+    "systematic",
+    "templates",
+    "jupyter",
+    "data-science"
+  ],
+  "author": {
+    "name": "Claude-Flow Team",
+    "email": "team@claude-flow.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/claude-flow.git",
+    "directory": "src/mle-star"
+  },
+  "bugs": {
+    "url": "https://github.com/ruvnet/claude-flow/issues"
+  },
+  "homepage": "https://github.com/ruvnet/claude-flow/tree/main/src/mle-star#readme",
+  "engines": {
+    "node": ">=14.0.0",
+    "npm": ">=6.0.0"
+  },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "cli-table3": "^0.6.5",
+    "commander": "^11.1.0",
+    "fs-extra": "^11.3.1",
+    "inquirer": "^9.3.7",
+    "ora": "^5.4.1",
+    "progress": "^2.0.3",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "chai": "^4.3.7",
+    "eslint": "^8.44.0",
+    "jsdoc": "^4.0.2",
+    "mocha": "^10.2.0",
+    "nodemon": "^3.0.1",
+    "nyc": "^15.1.0",
+    "prettier": "^3.0.0",
+    "sinon": "^15.2.0",
+    "supertest": "^6.3.3"
+  },
+  "peerDependencies": {
+    "claude-flow": ">=2.0.0-alpha"
+  },
+  "files": [
+    "index.js",
+    "commands.js",
+    "cli.js",
+    "templates/",
+    "README.md",
+    "package.json"
+  ],
+  "preferGlobal": false,
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "config": {
+    "default_framework": "pytorch",
+    "supported_frameworks": [
+      "pytorch",
+      "tensorflow",
+      "scikit-learn"
+    ],
+    "template_version": "1.0.0"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/ruvnet"
+  },
+  "nyc": {
+    "exclude": [
+      "tests/**",
+      "coverage/**",
+      "templates/**"
+    ]
+  },
+  "eslintConfig": {
+    "env": {
+      "node": true,
+      "es2021": true,
+      "mocha": true
+    },
+    "extends": "eslint:recommended",
+    "parserOptions": {
+      "ecmaVersion": 12,
+      "sourceType": "module"
+    },
+    "rules": {
+      "no-console": "warn",
+      "no-unused-vars": "error",
+      "no-undef": "error"
+    }
+  },
+  "prettier": {
+    "semi": true,
+    "trailingComma": "es5",
+    "singleQuote": true,
+    "printWidth": 80,
+    "tabWidth": 2
+  }
+}

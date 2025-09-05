@@ -1,0 +1,237 @@
+groups:
+  - name: ml-pipeline.rules
+    rules:
+      # ML Pipeline Service Down
+      - alert: MLPipelineDown
+        expr: up{job=~"ml-pipeline|mle-star-engine"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          component: ml-pipeline
+        annotations:
+          summary: "ML Pipeline service {{ $labels.job }} is down"
+          description: "{{ $labels.job }} has been down for more than 30 seconds."
+
+      # Model Training Failure
+      - alert: ModelTrainingFailure
+        expr: increase(ml_training_failures_total[10m]) > 2
+        for: 1m
+        labels:
+          severity: critical
+          component: ml-training
+        annotations:
+          summary: "Model training failures detected"
+          description: "{{ $value }} model training failures in the last 10 minutes for model {{ $labels.model_name }}."
+
+      # High Model Training Time
+      - alert: HighModelTrainingTime
+        expr: histogram_quantile(0.95, rate(ml_training_duration_seconds_bucket[30m])) > 7200
+        for: 5m
+        labels:
+          severity: warning
+          component: ml-training
+        annotations:
+          summary: "High model training time"
+          description: "95th percentile training time is above 2 hours for model {{ $labels.model_name }}. Current value: {{ $value | humanizeDuration }}"
+
+      # Model Inference Latency
+      - alert: HighInferenceLatency
+        expr: histogram_quantile(0.95, rate(ml_inference_duration_seconds_bucket[5m])) > 1
+        for: 2m
+        labels:
+          severity: warning
+          component: ml-inference
+        annotations:
+          summary: "High model inference latency"
+          description: "95th percentile inference latency is above 1 second for model {{ $labels.model_name }}. Current value: {{ $value }}s"
+
+      # Critical Model Inference Latency
+      - alert: CriticalInferenceLatency
+        expr: histogram_quantile(0.95, rate(ml_inference_duration_seconds_bucket[5m])) > 5
+        for: 1m
+        labels:
+          severity: critical
+          component: ml-inference
+        annotations:
+          summary: "Critical model inference latency"
+          description: "95th percentile inference latency is above 5 seconds for model {{ $labels.model_name }}. Current value: {{ $value }}s"
+
+      # Model Performance Degradation
+      - alert: ModelPerformanceDegradation
+        expr: ml_model_accuracy < 0.85
+        for: 5m
+        labels:
+          severity: warning
+          component: ml-model
+        annotations:
+          summary: "Model performance degradation detected"
+          description: "Model {{ $labels.model_name }} accuracy has dropped below 85%. Current accuracy: {{ $value }}"
+
+      # Critical Model Performance Degradation
+      - alert: CriticalModelPerformanceDegradation
+        expr: ml_model_accuracy < 0.70
+        for: 2m
+        labels:
+          severity: critical
+          component: ml-model
+        annotations:
+          summary: "Critical model performance degradation"
+          description: "Model {{ $labels.model_name }} accuracy has dropped below 70%. Current accuracy: {{ $value }}"
+
+      # Data Drift Detection
+      - alert: DataDriftDetected
+        expr: ml_data_drift_score > 0.3
+        for: 5m
+        labels:
+          severity: warning
+          component: data-quality
+        annotations:
+          summary: "Data drift detected for model {{ $labels.model_name }}"
+          description: "Data drift score is above 0.3 for model {{ $labels.model_name }}. Current score: {{ $value }}"
+
+      # Critical Data Drift
+      - alert: CriticalDataDrift
+        expr: ml_data_drift_score > 0.5
+        for: 2m
+        labels:
+          severity: critical
+          component: data-quality
+        annotations:
+          summary: "Critical data drift detected"
+          description: "Data drift score is above 0.5 for model {{ $labels.model_name }}. Model may need retraining. Current score: {{ $value }}"
+
+      # Feature Store Issues
+      - alert: FeatureStoreDown
+        expr: up{job="feature-store"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          component: feature-store
+        annotations:
+          summary: "Feature store is down"
+          description: "Feature store has been down for more than 30 seconds."
+
+      - alert: FeatureComputationFailure
+        expr: increase(feature_computation_failures_total[10m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+          component: feature-store
+        annotations:
+          summary: "Feature computation failures detected"
+          description: "{{ $value }} feature computation failures in the last 10 minutes."
+
+      # MLE-Star Workflow Alerts
+      - alert: MLEStarWorkflowFailure
+        expr: increase(mle_star_workflow_failures_total[15m]) > 1
+        for: 1m
+        labels:
+          severity: critical
+          component: mle-star
+        annotations:
+          summary: "MLE-Star workflow failure"
+          description: "MLE-Star workflow {{ $labels.workflow_name }} failed. Stage: {{ $labels.stage }}"
+
+      - alert: MLEStarStageTimeout
+        expr: mle_star_stage_duration_seconds > 3600
+        for: 1m
+        labels:
+          severity: warning
+          component: mle-star
+        annotations:
+          summary: "MLE-Star stage timeout"
+          description: "MLE-Star stage {{ $labels.stage }} in workflow {{ $labels.workflow_name }} has been running for more than 1 hour."
+
+      # GPU Resource Alerts
+      - alert: HighGPUUtilization
+        expr: gpu_utilization_percent > 90
+        for: 10m
+        labels:
+          severity: warning
+          component: gpu
+        annotations:
+          summary: "High GPU utilization"
+          description: "GPU {{ $labels.gpu_id }} utilization is above 90% for more than 10 minutes. Current value: {{ $value }}%"
+
+      - alert: GPUMemoryHigh
+        expr: (gpu_memory_used_bytes / gpu_memory_total_bytes) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          component: gpu
+        annotations:
+          summary: "High GPU memory usage"
+          description: "GPU {{ $labels.gpu_id }} memory usage is above 85%. Current value: {{ $value }}%"
+
+      - alert: GPUTemperatureHigh
+        expr: gpu_temperature_celsius > 80
+        for: 2m
+        labels:
+          severity: critical
+          component: gpu
+        annotations:
+          summary: "High GPU temperature"
+          description: "GPU {{ $labels.gpu_id }} temperature is above 80°C. Current value: {{ $value }}°C"
+
+      # Model Registry Alerts
+      - alert: ModelRegistryDown
+        expr: up{job="model-registry"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          component: model-registry
+        annotations:
+          summary: "Model registry is down"
+          description: "Model registry has been down for more than 30 seconds."
+
+      - alert: ModelVersionMismatch
+        expr: increase(model_version_mismatch_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          component: model-registry
+        annotations:
+          summary: "Model version mismatch detected"
+          description: "Model version mismatch detected for model {{ $labels.model_name }}. Expected: {{ $labels.expected_version }}, Got: {{ $labels.actual_version }}"
+
+      # Data Pipeline Alerts
+      - alert: DataPipelineFailure
+        expr: increase(data_pipeline_failures_total[15m]) > 2
+        for: 2m
+        labels:
+          severity: critical
+          component: data-pipeline
+        annotations:
+          summary: "Data pipeline failures detected"
+          description: "{{ $value }} data pipeline failures in the last 15 minutes for pipeline {{ $labels.pipeline_name }}."
+
+      - alert: DataQualityIssue
+        expr: data_quality_score < 0.8
+        for: 5m
+        labels:
+          severity: warning
+          component: data-quality
+        annotations:
+          summary: "Data quality issue detected"
+          description: "Data quality score is below 0.8 for dataset {{ $labels.dataset_name }}. Current score: {{ $value }}"
+
+      # Experiment Tracking Alerts
+      - alert: ExperimentTrackingDown
+        expr: up{job="experiment-tracking"} == 0
+        for: 30s
+        labels:
+          severity: warning
+          component: experiment-tracking
+        annotations:
+          summary: "Experiment tracking service is down"
+          description: "Experiment tracking service has been down for more than 30 seconds."
+
+      - alert: HighExperimentFailureRate
+        expr: (rate(experiment_failures_total[10m]) / rate(experiment_runs_total[10m])) * 100 > 20
+        for: 5m
+        labels:
+          severity: warning
+          component: experiment-tracking
+        annotations:
+          summary: "High experiment failure rate"
+          description: "Experiment failure rate is above 20%. Current rate: {{ $value }}%"

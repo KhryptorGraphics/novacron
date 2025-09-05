@@ -1,0 +1,477 @@
+# Database Performance Continuous Monitoring Configuration
+# Comprehensive monitoring strategy for ongoing performance validation
+
+monitoring:
+  strategy: "continuous"
+  version: "1.0.0"
+  enabled: true
+  
+  # Collection intervals
+  intervals:
+    realtime_metrics: 5s        # Real-time dashboard updates
+    performance_snapshots: 1m   # Performance metric collection
+    trend_analysis: 5m          # Performance trend calculations
+    health_checks: 30s          # System health validation
+    alert_evaluation: 10s       # Alert condition checking
+    
+  # Data retention policies
+  retention:
+    realtime_data: 4h           # Real-time metrics retention
+    hourly_aggregates: 7d       # Hourly performance summaries
+    daily_summaries: 30d        # Daily performance reports
+    monthly_reports: 12m        # Monthly trend analysis
+    alert_history: 90d          # Alert and incident history
+
+# Performance Metrics Configuration
+metrics:
+  # Query Performance Metrics
+  query_performance:
+    enabled: true
+    track_slow_queries: true
+    slow_query_threshold: 1000ms
+    track_percentiles: [50, 75, 90, 95, 99, 99.9]
+    sample_rate: 1.0            # 100% sampling for production
+    
+    metrics:
+      - name: "query_response_time"
+        type: "histogram"
+        unit: "milliseconds"
+        description: "Query response time distribution"
+        
+      - name: "queries_per_second"
+        type: "counter"
+        unit: "queries/sec"
+        description: "Database query throughput"
+        
+      - name: "query_error_rate"
+        type: "gauge"
+        unit: "percentage"
+        description: "Query error rate percentage"
+        
+      - name: "active_connections"
+        type: "gauge"
+        unit: "count"
+        description: "Active database connections"
+
+  # System Resource Metrics
+  system_resources:
+    enabled: true
+    collect_os_metrics: true
+    collect_process_metrics: true
+    
+    metrics:
+      - name: "cpu_usage"
+        type: "gauge"
+        unit: "percentage"
+        description: "CPU utilization percentage"
+        
+      - name: "memory_usage"
+        type: "gauge"
+        unit: "bytes"
+        description: "Memory consumption"
+        
+      - name: "disk_io_rate"
+        type: "gauge"
+        unit: "bytes/sec"
+        description: "Disk I/O operations rate"
+        
+      - name: "network_io_rate"
+        type: "gauge"
+        unit: "bytes/sec"
+        description: "Network I/O rate"
+
+  # Database-Specific Metrics
+  database_internals:
+    enabled: true
+    vendor_specific: true
+    
+    postgresql:
+      metrics:
+        - name: "buffer_cache_hit_ratio"
+          type: "gauge"
+          unit: "percentage"
+          query: "SELECT round(100.0 * sum(blks_hit) / (sum(blks_hit) + sum(blks_read)), 2) FROM pg_stat_database"
+          
+        - name: "connection_pool_utilization"
+          type: "gauge"
+          unit: "percentage"
+          query: "SELECT (active::float / max_conn) * 100 FROM pg_stat_activity, (SELECT setting::int as max_conn FROM pg_settings WHERE name = 'max_connections') s"
+          
+        - name: "lock_waits"
+          type: "counter"
+          unit: "count"
+          query: "SELECT count(*) FROM pg_locks WHERE NOT granted"
+          
+        - name: "index_usage"
+          type: "gauge"
+          unit: "percentage"
+          query: "SELECT round(100.0 * sum(idx_scan) / (sum(seq_scan) + sum(idx_scan)), 2) FROM pg_stat_user_tables"
+
+    mysql:
+      metrics:
+        - name: "query_cache_hit_rate"
+          type: "gauge"
+          unit: "percentage"
+          query: "SELECT (Qcache_hits / (Qcache_hits + Qcache_inserts)) * 100 FROM INFORMATION_SCHEMA.SESSION_STATUS"
+          
+        - name: "innodb_buffer_pool_hit_rate"
+          type: "gauge"
+          unit: "percentage"
+          query: "SELECT (1 - (Innodb_buffer_pool_reads / Innodb_buffer_pool_read_requests)) * 100"
+
+# Alerting Configuration
+alerting:
+  enabled: true
+  
+  # Alert thresholds
+  thresholds:
+    # Performance thresholds
+    response_time:
+      warning: 500ms
+      critical: 2000ms
+      
+    throughput:
+      warning_min: 50          # queries/sec
+      critical_min: 20
+      
+    error_rate:
+      warning: 2.0             # percentage
+      critical: 5.0
+      
+    # Resource thresholds
+    cpu_usage:
+      warning: 70              # percentage
+      critical: 85
+      
+    memory_usage:
+      warning: 75              # percentage
+      critical: 90
+      
+    disk_space:
+      warning: 80              # percentage
+      critical: 95
+      
+    # Database-specific thresholds
+    connection_pool:
+      warning: 70              # percentage utilization
+      critical: 85
+      
+    cache_hit_ratio:
+      warning_min: 90          # percentage
+      critical_min: 80
+      
+    lock_waits:
+      warning: 10              # concurrent locks
+      critical: 25
+
+  # Alert routing
+  notifications:
+    channels:
+      - name: "performance_team"
+        type: "email"
+        recipients: ["performance@company.com"]
+        severity: ["warning", "critical"]
+        
+      - name: "oncall_sms"
+        type: "sms"
+        recipients: ["+1234567890"]
+        severity: ["critical"]
+        
+      - name: "slack_alerts"
+        type: "slack"
+        webhook: "${SLACK_WEBHOOK_URL}"
+        channel: "#database-alerts"
+        severity: ["warning", "critical"]
+        
+      - name: "pagerduty"
+        type: "pagerduty"
+        service_key: "${PAGERDUTY_SERVICE_KEY}"
+        severity: ["critical"]
+
+  # Alert conditions
+  conditions:
+    - name: "high_response_time"
+      description: "Average response time exceeds threshold"
+      metric: "query_response_time"
+      aggregation: "avg"
+      period: "5m"
+      condition: ">"
+      threshold: 1000
+      severity: "warning"
+      
+    - name: "critical_response_time"
+      description: "Response time critically high"
+      metric: "query_response_time"
+      aggregation: "avg"
+      period: "2m"
+      condition: ">"
+      threshold: 2000
+      severity: "critical"
+      
+    - name: "high_error_rate"
+      description: "Query error rate exceeds threshold"
+      metric: "query_error_rate"
+      aggregation: "avg"
+      period: "3m"
+      condition: ">"
+      threshold: 5.0
+      severity: "critical"
+      
+    - name: "low_throughput"
+      description: "Query throughput below minimum"
+      metric: "queries_per_second"
+      aggregation: "avg"
+      period: "5m"
+      condition: "<"
+      threshold: 20
+      severity: "critical"
+      
+    - name: "connection_pool_exhaustion"
+      description: "Connection pool utilization high"
+      metric: "connection_pool_utilization"
+      aggregation: "max"
+      period: "1m"
+      condition: ">"
+      threshold: 85
+      severity: "warning"
+
+# Performance Regression Detection
+regression_detection:
+  enabled: true
+  
+  # Baseline establishment
+  baseline:
+    method: "rolling_average"    # rolling_average, fixed_period, percentile
+    period: "7d"                 # Period for baseline calculation
+    minimum_samples: 100         # Minimum data points required
+    update_frequency: "daily"    # How often to update baseline
+    
+  # Detection parameters
+  detection:
+    sensitivity: "medium"        # low, medium, high
+    min_change_threshold: 10     # Minimum % change to consider
+    statistical_confidence: 95   # Statistical confidence level
+    consecutive_violations: 3    # Consecutive violations before alerting
+    
+  # Regression types to detect
+  regression_types:
+    - metric: "query_response_time"
+      direction: "increase"      # increase = bad, decrease = good
+      threshold: 15              # % change threshold
+      severity: "warning"
+      
+    - metric: "queries_per_second"
+      direction: "decrease"
+      threshold: 20
+      severity: "warning"
+      
+    - metric: "query_error_rate"
+      direction: "increase"
+      threshold: 50              # % relative increase
+      severity: "critical"
+      
+    - metric: "cpu_usage"
+      direction: "increase"
+      threshold: 25
+      severity: "warning"
+
+# Dashboard Configuration
+dashboards:
+  enabled: true
+  
+  # Real-time dashboard
+  realtime:
+    enabled: true
+    refresh_interval: 5s
+    auto_refresh: true
+    
+    panels:
+      - title: "Key Performance Indicators"
+        type: "metrics"
+        metrics: ["query_response_time", "queries_per_second", "query_error_rate"]
+        
+      - title: "Response Time Trends"
+        type: "timeseries"
+        metrics: ["query_response_time"]
+        timerange: "1h"
+        
+      - title: "Throughput Analysis"
+        type: "timeseries"
+        metrics: ["queries_per_second"]
+        timerange: "1h"
+        
+      - title: "System Resources"
+        type: "gauge"
+        metrics: ["cpu_usage", "memory_usage", "disk_io_rate"]
+        
+      - title: "Database Health"
+        type: "status"
+        metrics: ["buffer_cache_hit_ratio", "connection_pool_utilization"]
+
+  # Executive dashboard
+  executive:
+    enabled: true
+    refresh_interval: 1m
+    
+    panels:
+      - title: "Performance Summary"
+        type: "summary"
+        timerange: "24h"
+        
+      - title: "SLA Compliance"
+        type: "sla"
+        sla_targets:
+          response_time_p95: 100ms
+          availability: 99.9
+          error_rate: 0.1
+          
+      - title: "Trend Analysis"
+        type: "trends"
+        timerange: "7d"
+        compare_to: "previous_period"
+
+# Automated Actions
+automation:
+  enabled: true
+  
+  # Auto-scaling triggers
+  scaling:
+    enabled: false              # Disabled by default for safety
+    
+    triggers:
+      - name: "cpu_scale_up"
+        condition: "cpu_usage > 80 for 5m"
+        action: "scale_up"
+        cooldown: "10m"
+        
+      - name: "memory_scale_up"
+        condition: "memory_usage > 85 for 3m"
+        action: "scale_up"
+        cooldown: "15m"
+
+  # Performance optimization
+  optimization:
+    enabled: true
+    
+    actions:
+      - name: "cache_warming"
+        trigger: "cache_hit_ratio < 80"
+        action: "warm_cache"
+        schedule: "daily"
+        
+      - name: "index_maintenance"
+        trigger: "index_usage < 70"
+        action: "analyze_indexes"
+        schedule: "weekly"
+        
+      - name: "connection_pool_tuning"
+        trigger: "connection_pool_utilization > 90"
+        action: "tune_pool_size"
+        approval_required: true
+
+# Reporting Configuration
+reporting:
+  enabled: true
+  
+  # Scheduled reports
+  scheduled_reports:
+    - name: "daily_performance_summary"
+      frequency: "daily"
+      time: "08:00"
+      recipients: ["performance@company.com"]
+      format: "html"
+      
+    - name: "weekly_trend_analysis"
+      frequency: "weekly"
+      day: "monday"
+      time: "09:00"
+      recipients: ["management@company.com"]
+      format: "pdf"
+      
+    - name: "monthly_capacity_planning"
+      frequency: "monthly"
+      day: 1
+      time: "10:00"
+      recipients: ["architecture@company.com"]
+      format: "detailed_analysis"
+
+  # Report templates
+  templates:
+    daily_summary:
+      sections:
+        - key_metrics
+        - performance_trends
+        - alerts_summary
+        - recommendations
+        
+    weekly_analysis:
+      sections:
+        - executive_summary
+        - performance_comparison
+        - capacity_utilization
+        - optimization_opportunities
+        
+    monthly_planning:
+      sections:
+        - growth_analysis
+        - capacity_forecast
+        - infrastructure_recommendations
+        - budget_implications
+
+# Integration Configuration
+integrations:
+  # Monitoring systems
+  prometheus:
+    enabled: true
+    endpoint: "http://prometheus:9090"
+    scrape_interval: 15s
+    
+  grafana:
+    enabled: true
+    endpoint: "http://grafana:3000"
+    dashboard_import: true
+    
+  # APM tools
+  newrelic:
+    enabled: false
+    license_key: "${NEWRELIC_LICENSE_KEY}"
+    
+  datadog:
+    enabled: false
+    api_key: "${DATADOG_API_KEY}"
+    
+  # Log aggregation
+  elasticsearch:
+    enabled: true
+    endpoint: "http://elasticsearch:9200"
+    index_pattern: "database-performance-*"
+    
+  # Incident management
+  pagerduty:
+    enabled: true
+    service_key: "${PAGERDUTY_SERVICE_KEY}"
+    
+  jira:
+    enabled: true
+    endpoint: "${JIRA_ENDPOINT}"
+    project_key: "DBPERF"
+    
+# Security and Compliance
+security:
+  # Data privacy
+  data_privacy:
+    anonymize_queries: true
+    mask_sensitive_data: true
+    retention_compliance: "GDPR"
+    
+  # Access control
+  access_control:
+    authentication: "required"
+    authorization: "role_based"
+    audit_logging: true
+    
+  # Encryption
+  encryption:
+    metrics_at_rest: true
+    metrics_in_transit: true
+    dashboard_ssl: true

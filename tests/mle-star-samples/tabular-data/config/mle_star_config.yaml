@@ -1,0 +1,359 @@
+# MLE-Star Configuration for Tabular Data Project
+# Ensemble Learning for Classification/Regression
+
+project:
+  name: "Tabular Data Ensemble Learning"
+  type: "tabular_data"
+  task: "classification_regression"
+  framework: "scikit_learn_xgboost_lightgbm"
+  version: "1.0.0"
+
+# MLE-Star 7-Stage Workflow Configuration
+mle_star_workflow:
+  stages:
+    1_situation_analysis:
+      description: "Analyze tabular dataset characteristics and challenges"
+      outputs:
+        - data_quality_assessment
+        - feature_type_analysis
+        - target_distribution_analysis
+      duration_estimate: "30 minutes"
+      
+    2_task_definition:
+      description: "Define ML task and ensemble strategy"
+      outputs:
+        - task_specification
+        - ensemble_strategy
+        - success_metrics
+      dependencies: ["1_situation_analysis"]
+      duration_estimate: "20 minutes"
+      
+    3_action_planning:
+      description: "Design preprocessing pipeline and ensemble architecture"
+      outputs:
+        - preprocessing_pipeline
+        - ensemble_architecture
+        - evaluation_strategy
+      dependencies: ["2_task_definition"]
+      duration_estimate: "45 minutes"
+      
+    4_implementation:
+      description: "Implement preprocessing and train ensemble models"
+      outputs:
+        - trained_ensemble
+        - base_model_evaluations
+        - feature_importance
+      dependencies: ["3_action_planning"]
+      duration_estimate: "1-2 hours"
+      
+    5_results_evaluation:
+      description: "Comprehensive ensemble evaluation and analysis"
+      outputs:
+        - performance_metrics
+        - model_comparison
+        - feature_analysis
+      dependencies: ["4_implementation"]
+      duration_estimate: "30 minutes"
+      
+    6_refinement:
+      description: "Hyperparameter tuning and model optimization"
+      outputs:
+        - optimized_ensemble
+        - hyperparameter_analysis
+        - cross_validation_results
+      dependencies: ["5_results_evaluation"]
+      duration_estimate: "2-3 hours"
+      
+    7_deployment_prep:
+      description: "Prepare ensemble for production deployment"
+      outputs:
+        - model_artifacts
+        - inference_pipeline
+        - monitoring_setup
+      dependencies: ["6_refinement"]
+      duration_estimate: "45 minutes"
+
+# Data Configuration
+data:
+  synthetic_dataset:
+    classification:
+      samples: 1000
+      features: 9
+      classes: 2
+      class_names: ["rejected", "approved"]
+      
+    regression:
+      samples: 1000
+      features: 9
+      target: "price"
+      target_range: [50000, 1000000]
+      
+  feature_types:
+    numerical: ["age", "income", "education_years", "experience", "credit_score", "debt_ratio"]
+    categorical: ["city", "education_level", "employment_type"]
+    
+  data_quality:
+    missing_value_rate: 0.05
+    outlier_rate: "5-10%"
+    duplicate_rate: 0.01
+    
+  preprocessing_requirements:
+    - missing_value_imputation
+    - categorical_encoding
+    - feature_scaling
+    - outlier_handling
+    - feature_engineering
+
+# Model Configuration
+model:
+  ensemble_type: "voting_and_stacking"
+  
+  base_models:
+    random_forest:
+      type: "RandomForestClassifier/Regressor"
+      n_estimators: 100
+      max_depth: 10
+      
+    xgboost:
+      type: "XGBClassifier/Regressor"
+      n_estimators: 100
+      max_depth: 6
+      learning_rate: 0.1
+      
+    lightgbm:
+      type: "LGBMClassifier/Regressor"
+      n_estimators: 100
+      max_depth: 6
+      learning_rate: 0.1
+      
+    gradient_boosting:
+      type: "GradientBoostingClassifier/Regressor"
+      n_estimators: 100
+      max_depth: 6
+      learning_rate: 0.1
+      
+    linear_models:
+      classification: "LogisticRegression"
+      regression: "LinearRegression, Ridge, Lasso"
+      
+    svm:
+      classification: "SVC with probability=True"
+      regression: "SVR"
+  
+  ensemble_methods:
+    voting:
+      type: "soft_voting (classification) / averaging (regression)"
+      base_models: "top 3 performing models"
+      
+    stacking:
+      base_models: ["RandomForest", "XGBoost", "LightGBM"]
+      meta_learner:
+        classification: "LogisticRegression"
+        regression: "Ridge"
+      cv_folds: 5
+
+# Preprocessing Configuration
+preprocessing:
+  missing_values:
+    numerical: "median_imputation"
+    categorical: "most_frequent_imputation"
+    
+  categorical_encoding:
+    low_cardinality: "one_hot_encoding"
+    high_cardinality: "target_encoding"
+    threshold: 10
+    
+  feature_scaling:
+    method: "robust_scaler"  # Robust to outliers
+    
+  feature_engineering:
+    polynomial_features:
+      degree: 2
+      interaction_only: true
+      top_features: 3
+      
+  feature_selection:
+    method: "selectfrommodel_random_forest"
+    threshold: "median"
+    min_features: 5
+
+# Training Configuration
+training:
+  cross_validation:
+    classification:
+      type: "StratifiedKFold"
+      folds: 5
+      
+    regression:
+      type: "KFold"
+      folds: 5
+      
+  hyperparameter_tuning:
+    method: "grid_search"  # or "random_search"
+    cv_folds: 3
+    
+  model_selection:
+    metric:
+      classification: "accuracy"
+      regression: "r2_score"
+    
+  ensemble_training:
+    voting_ensemble: "train on top 3 base models"
+    stacking_ensemble: "use cross-validation predictions"
+
+# Evaluation Metrics
+evaluation:
+  classification:
+    primary_metrics: ["accuracy"]
+    secondary_metrics: ["precision_weighted", "recall_weighted", "f1_score_weighted", "roc_auc"]
+    
+  regression:
+    primary_metrics: ["r2_score"]
+    secondary_metrics: ["mse", "rmse", "mae"]
+    
+  targets:
+    classification:
+      accuracy: 0.85
+      f1_score: 0.85
+      
+    regression:
+      r2_score: 0.80
+      rmse: "<20% of target range"
+      
+  analysis:
+    - model_comparison
+    - feature_importance
+    - cross_validation_scores
+    - learning_curves
+    - prediction_vs_actual (regression)
+    - confusion_matrix (classification)
+
+# Experiment Tracking
+logging:
+  mlflow:
+    enabled: false
+    experiment_name: "tabular_ensemble"
+    
+  artifacts:
+    - model_comparison_plots
+    - feature_importance_plots
+    - cross_validation_results
+    - trained_models
+    - preprocessing_pipeline
+
+# Performance Expectations
+performance_targets:
+  classification:
+    accuracy: 0.85
+    training_time: "30 minutes"
+    inference_speed: "<100ms per sample"
+    
+  regression:
+    r2_score: 0.80
+    training_time: "30 minutes"
+    inference_speed: "<100ms per sample"
+    
+  general:
+    model_size: "<100MB"
+    memory_usage: "<4GB"
+
+# Deployment Configuration
+deployment:
+  model_format: "joblib_pickle"
+  
+  optimization:
+    - feature_selection
+    - model_compression
+    - prediction_caching
+    
+  serving:
+    framework: "fastapi"
+    batch_prediction: true
+    
+  api_endpoints:
+    - "/predict": "Single sample prediction"
+    - "/predict_batch": "Batch predictions"
+    - "/feature_importance": "Get feature importance"
+    - "/model_info": "Model metadata"
+    - "/health": "Service health"
+    
+  monitoring:
+    - prediction_distribution_monitoring
+    - feature_drift_detection
+    - model_performance_tracking
+    - latency_monitoring
+
+# Quality Gates
+quality_gates:
+  stage_4_implementation:
+    min_cv_score:
+      classification: 0.80
+      regression: 0.75
+    max_training_time: "45 minutes"
+    
+  stage_5_evaluation:
+    min_test_score:
+      classification: 0.82
+      regression: 0.77
+    max_inference_time: "200ms"
+    
+  stage_7_deployment:
+    model_size_limit: "200MB"
+    memory_limit: "6GB"
+
+# Error Handling
+error_handling:
+  data_issues:
+    - handle_missing_values
+    - outlier_detection_treatment
+    - categorical_encoding_fallback
+    
+  training_failures:
+    - reduce_model_complexity
+    - feature_selection
+    - simpler_ensemble_strategy
+    
+  memory_issues:
+    - batch_processing
+    - feature_reduction
+    - simpler_models
+    
+  convergence_issues:
+    - hyperparameter_adjustment
+    - different_algorithms
+    - data_preprocessing_review
+
+# Feature Engineering
+feature_engineering:
+  automatic_features:
+    - polynomial_interactions
+    - statistical_features
+    - binning_numerical
+    - frequency_encoding
+    
+  domain_specific:
+    - ratio_features
+    - aggregation_features
+    - temporal_features (if applicable)
+    
+  selection_criteria:
+    - importance_threshold
+    - correlation_threshold: 0.95
+    - variance_threshold: 0.01
+
+# Model Interpretability
+interpretability:
+  feature_importance:
+    - permutation_importance
+    - shap_values
+    - tree_based_importance
+    
+  model_explanation:
+    - partial_dependence_plots
+    - feature_interaction_analysis
+    - model_specific_explanations
+    
+  global_explanations:
+    - feature_ranking
+    - model_behavior_analysis
+    - prediction_distribution

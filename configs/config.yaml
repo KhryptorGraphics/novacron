@@ -1,0 +1,168 @@
+# MLE-Star Configuration Template
+# Project: ml-experiment
+# Framework: pytorch
+
+experiment:
+  name: "ml-experiment"
+  version: "1.0.0"
+  description: "Machine Learning experiment using MLE-Star methodology"
+  author: "{{author}}"
+  created_date: "{{date}}"
+
+# Data Configuration
+data:
+  raw_data_path: "./data/raw/"
+  processed_data_path: "./data/processed/"
+  external_data_path: "./data/external/"
+  
+  # Data splitting
+  train_split: 0.7
+  validation_split: 0.2
+  test_split: 0.1
+  
+  # Data processing
+  random_seed: 42
+  shuffle: true
+  stratify: true
+
+# Model Configuration
+model:
+  framework: "pytorch"
+  type: "{{modelType}}"
+  architecture: "{{architecture}}"
+  
+  # Model parameters
+  input_shape: null
+  output_classes: null
+  hidden_layers: [128, 64, 32]
+  activation: "relu"
+  dropout_rate: 0.2
+  
+  # Save/Load
+  model_save_path: "./outputs/models/"
+  checkpoint_path: "./outputs/checkpoints/"
+  save_best_only: true
+
+# Training Configuration
+training:
+  batch_size: 32
+  epochs: 100
+  learning_rate: 0.001
+  optimizer: "adam"
+  loss_function: "binary_crossentropy"
+  
+  # Learning rate scheduling
+  lr_scheduler:
+    type: "step"
+    step_size: 30
+    gamma: 0.1
+  
+  # Early stopping
+  early_stopping:
+    enabled: true
+    patience: 10
+    monitor: "val_loss"
+    restore_best_weights: true
+
+# Evaluation Configuration
+evaluation:
+  metrics:
+    - "accuracy"
+    - "precision"
+    - "recall"
+    - "f1_score"
+    - "auc"
+  
+  cross_validation:
+    enabled: true
+    folds: 5
+    stratified: true
+  
+  # Evaluation output
+  confusion_matrix: true
+  classification_report: true
+  roc_curve: true
+
+# Hyperparameter Tuning
+hyperparameter_tuning:
+  enabled: false
+  method: "optuna"  # optuna, grid_search, random_search
+  n_trials: 100
+  
+  # Search space
+  search_space:
+    learning_rate: [0.0001, 0.01]
+    batch_size: [16, 32, 64]
+    hidden_layers: [[64], [128, 64], [256, 128, 64]]
+
+# Logging and Monitoring
+logging:
+  level: "INFO"
+  save_logs: true
+  log_dir: "./logs/"
+  
+  # Experiment tracking
+  mlflow:
+    enabled: false
+    tracking_uri: "./mlruns/"
+    experiment_name: "ml-experiment"
+  
+  wandb:
+    enabled: false
+    project: "ml-experiment"
+    entity: null
+
+# Visualization
+visualization:
+  save_plots: true
+  plot_dir: "./outputs/figures/"
+  
+  # Plot settings
+  figure_size: [10, 8]
+  dpi: 300
+  style: "seaborn"
+  
+  # Training plots
+  plot_training_history: true
+  plot_confusion_matrix: true
+  plot_feature_importance: true
+
+# Deployment Configuration
+deployment:
+  api:
+    enabled: false
+    host: "0.0.0.0"
+    port: 8000
+    
+  docker:
+    enabled: false
+    base_image: "python:3.9-slim"
+    
+  batch_inference:
+    enabled: false
+    input_path: "./data/inference/"
+    output_path: "./outputs/predictions/"
+
+# Environment Settings
+environment:
+  python_version: "3.9+"
+  cuda_available: false
+  
+  # Resource limits
+  max_memory_gb: 8
+  max_cpu_cores: 4
+  
+  # Reproducibility
+  set_random_seed: true
+  deterministic: false
+
+# File Paths
+paths:
+  project_root: "./"
+  data_root: "./data/"
+  model_root: "./models/"
+  output_root: "./outputs/"
+  config_root: "./configs/"
+  notebook_root: "./notebooks/"
+  src_root: "./src/"
+  test_root: "./tests/"
