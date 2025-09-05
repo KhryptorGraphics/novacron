@@ -1,0 +1,743 @@
+# NovaCron MLE-Star Configuration Template
+# Complete 7-Stage ML Workflow Configuration
+# Version: 2.0.0
+# Last Updated: 2024-01-15
+
+# =============================================================================
+# PROJECT INFORMATION
+# =============================================================================
+project:
+  name: "ml-project-template"
+  version: "1.0.0"
+  description: "Template for ML projects using MLE-Star methodology"
+  team: "data-science"
+  owner: "team-lead@company.com"
+  
+  # Project categorization for resource allocation
+  category: "computer_vision"  # Options: nlp, computer_vision, tabular, multi_modal, time_series
+  priority: "medium"           # Options: low, medium, high, critical
+  environment: "development"   # Options: development, staging, production
+  
+  # Business context
+  business_value: "high"       # Options: low, medium, high, critical
+  compliance_requirements: [] # e.g., ["gdpr", "hipaa", "sox"]
+  budget_allocation: "$1000"   # Monthly budget limit
+
+# =============================================================================
+# MLE-STAR 7-STAGE WORKFLOW CONFIGURATION
+# =============================================================================
+mle_star_workflow:
+  # Global workflow settings
+  parallel_execution: true
+  auto_progression: true      # Automatically proceed to next stage on success
+  failure_handling: "pause"   # Options: pause, retry, rollback
+  
+  stages:
+    # -------------------------------------------------------------------------
+    # STAGE 1: SITUATION ANALYSIS
+    # -------------------------------------------------------------------------
+    1_situation_analysis:
+      enabled: true
+      description: "Analyze dataset characteristics and problem complexity"
+      timeout: "45 minutes"
+      
+      # Stage-specific configuration
+      config:
+        data_analysis:
+          sample_size: 10000          # Max samples for analysis
+          statistical_tests: true     # Enable statistical analysis
+          visualization_limit: 20     # Max visualizations to generate
+          
+        problem_assessment:
+          complexity_metrics: true    # Calculate problem complexity
+          baseline_models: ["random", "simple_heuristic"]
+          feasibility_analysis: true  # Assess project feasibility
+          
+      # Expected outputs
+      outputs:
+        - "data/situation_analysis.json"
+        - "data/data_quality_report.html"
+        - "docs/problem_assessment.md"
+        - "visualizations/data_exploration/"
+        
+      # Quality gates
+      quality_gates:
+        min_data_quality_score: 0.7
+        max_missing_values_ratio: 0.3
+        required_analyses: ["distribution", "correlation", "outliers"]
+        
+      # Dependencies (none for first stage)
+      dependencies: []
+      
+    # -------------------------------------------------------------------------
+    # STAGE 2: TASK DEFINITION  
+    # -------------------------------------------------------------------------
+    2_task_definition:
+      enabled: true
+      description: "Define specific ML objectives and success metrics"
+      timeout: "30 minutes"
+      
+      config:
+        objective_setting:
+          problem_type: "classification"  # Options: classification, regression, clustering, generation
+          target_variable: "class_label"
+          evaluation_approach: "holdout" # Options: holdout, cross_validation, time_series_split
+          
+        success_metrics:
+          primary_metric: "accuracy"
+          target_value: 0.85
+          secondary_metrics:
+            - name: "precision_weighted"
+              target: 0.83
+            - name: "recall_weighted" 
+              target: 0.83
+            - name: "f1_score_weighted"
+              target: 0.83
+              
+        constraints:
+          training_time: "< 4 hours"
+          model_size: "< 50MB"
+          inference_latency: "< 100ms"
+          memory_usage: "< 8GB"
+          cost_budget: "$100"
+          
+        quality_requirements:
+          min_validation_accuracy: 0.75
+          max_overfitting_gap: 0.05
+          interpretability_level: "medium"  # Options: low, medium, high
+          fairness_requirements: true
+          
+      outputs:
+        - "config/task_specification.json"
+        - "docs/success_criteria.md"
+        - "config/evaluation_plan.yaml"
+        
+      quality_gates:
+        feasibility_check: true
+        stakeholder_approval: false  # Set to true for production projects
+        technical_review: true
+        
+      dependencies: ["1_situation_analysis"]
+      
+    # -------------------------------------------------------------------------
+    # STAGE 3: ACTION PLANNING
+    # -------------------------------------------------------------------------  
+    3_action_planning:
+      enabled: true
+      description: "Design model architecture and training strategy"
+      timeout: "60 minutes"
+      
+      config:
+        architecture_design:
+          model_type: "cnn"  # Options: cnn, rnn, transformer, ensemble, custom
+          framework: "pytorch"  # Options: pytorch, tensorflow, sklearn, custom
+          
+          # Architecture-specific parameters
+          architecture_params:
+            base_architecture: "resnet"
+            num_layers: 18
+            dropout_rate: 0.5
+            activation: "relu"
+            batch_normalization: true
+            
+        training_strategy:
+          optimizer:
+            type: "adam"
+            learning_rate: 0.001
+            weight_decay: 0.0001
+            
+          scheduler:
+            type: "cosine_annealing"
+            T_max: 100
+            eta_min: 0.00001
+            
+          regularization:
+            dropout: 0.5
+            early_stopping: true
+            early_stopping_patience: 10
+            
+          data_augmentation:
+            enabled: true
+            techniques:
+              - name: "random_crop"
+                params: {size: 32, padding: 4}
+              - name: "random_horizontal_flip"  
+                params: {p: 0.5}
+              - name: "color_jitter"
+                params: {brightness: 0.2, contrast: 0.2}
+                
+        evaluation_strategy:
+          validation_split: 0.2
+          test_split: 0.2
+          stratification: true
+          cross_validation_folds: 5
+          
+      outputs:
+        - "config/model_architecture.json"
+        - "config/training_config.yaml"
+        - "docs/architecture_documentation.md"
+        - "config/evaluation_config.yaml"
+        
+      quality_gates:
+        architecture_validation: true
+        resource_requirements_check: true
+        timeline_feasibility: true
+        
+      dependencies: ["2_task_definition"]
+      
+    # -------------------------------------------------------------------------
+    # STAGE 4: IMPLEMENTATION
+    # -------------------------------------------------------------------------
+    4_implementation:
+      enabled: true
+      description: "Implement and execute model training pipeline"
+      timeout: "6 hours"  # Extended for actual training
+      
+      config:
+        training_execution:
+          batch_size: 128
+          epochs: 100
+          num_workers: 4
+          pin_memory: true
+          
+          # Hardware configuration
+          device: "auto"  # auto, cpu, cuda, mps
+          mixed_precision: true
+          distributed_training: false
+          
+          # Monitoring and checkpointing
+          checkpoint_frequency: 10  # epochs
+          log_frequency: 100        # steps
+          validation_frequency: 1   # epochs
+          
+        experiment_tracking:
+          enabled: true
+          backend: "tensorboard"  # Options: tensorboard, mlflow, wandb
+          log_hyperparameters: true
+          log_gradients: false
+          log_model_topology: true
+          
+        resource_management:
+          auto_scaling: true
+          resource_limits:
+            cpu: "8 cores"
+            memory: "32GB"
+            gpu: "1x V100"
+            storage: "100GB"
+            
+      outputs:
+        - "models/trained_model.pt"
+        - "models/training_history.json"
+        - "models/checkpoints/"
+        - "logs/training_logs/"
+        - "models/model_metadata.json"
+        
+      quality_gates:
+        training_convergence: true
+        min_validation_accuracy: 0.75
+        max_training_time: "8 hours"
+        resource_budget_compliance: true
+        
+      dependencies: ["3_action_planning"]
+      
+    # -------------------------------------------------------------------------
+    # STAGE 5: RESULTS EVALUATION
+    # -------------------------------------------------------------------------
+    5_results_evaluation:
+      enabled: true
+      description: "Comprehensive model evaluation and analysis"
+      timeout: "45 minutes"
+      
+      config:
+        evaluation_metrics:
+          classification_metrics:
+            - accuracy
+            - precision_macro
+            - precision_weighted
+            - recall_macro
+            - recall_weighted  
+            - f1_macro
+            - f1_weighted
+            - auc_roc
+            - confusion_matrix
+            
+          performance_metrics:
+            - inference_time
+            - memory_usage
+            - model_size
+            - flops_count
+            
+        analysis_depth:
+          per_class_analysis: true
+          error_analysis: true
+          feature_importance: true
+          attention_analysis: false  # Set true for attention models
+          adversarial_robustness: false
+          
+        visualization:
+          confusion_matrix: true
+          learning_curves: true
+          precision_recall_curves: true
+          roc_curves: true
+          error_distributions: true
+          
+      outputs:
+        - "models/evaluation_results.json"
+        - "reports/evaluation_report.html"
+        - "visualizations/evaluation_plots/"
+        - "models/confusion_matrix.png"
+        - "reports/error_analysis.md"
+        
+      quality_gates:
+        target_metric_achievement: true
+        comprehensive_analysis: true
+        stakeholder_review: false
+        
+      dependencies: ["4_implementation"]
+      
+    # -------------------------------------------------------------------------
+    # STAGE 6: REFINEMENT
+    # -------------------------------------------------------------------------
+    6_refinement:
+      enabled: true
+      description: "Model optimization and improvement"
+      timeout: "4 hours"
+      
+      config:
+        optimization_strategies:
+          hyperparameter_tuning:
+            enabled: true
+            method: "optuna"  # Options: grid_search, random_search, optuna, hyperopt
+            trials: 50
+            optimization_direction: "maximize"
+            
+            search_space:
+              learning_rate:
+                type: "float"
+                low: 0.0001
+                high: 0.01
+                log: true
+              batch_size:
+                type: "categorical"
+                choices: [64, 128, 256, 512]
+              dropout_rate:
+                type: "float" 
+                low: 0.3
+                high: 0.7
+                
+          architecture_optimization:
+            neural_architecture_search: false
+            pruning: false
+            quantization: false
+            knowledge_distillation: false
+            
+          data_optimization:
+            augmentation_tuning: true
+            active_learning: false
+            synthetic_data_generation: false
+            
+        improvement_targets:
+          primary_metric_improvement: 0.02  # Target 2% improvement
+          efficiency_improvement: 0.1       # 10% faster inference
+          size_reduction: 0.2               # 20% smaller model
+          
+      outputs:
+        - "models/optimized_model.pt"
+        - "config/best_hyperparameters.json"
+        - "reports/optimization_report.html"
+        - "models/optimization_history.json"
+        
+      quality_gates:
+        improvement_validation: true
+        performance_regression_check: true
+        resource_efficiency_check: true
+        
+      dependencies: ["5_results_evaluation"]
+      
+    # -------------------------------------------------------------------------
+    # STAGE 7: DEPLOYMENT PREPARATION
+    # -------------------------------------------------------------------------
+    7_deployment_preparation:
+      enabled: true
+      description: "Prepare model for production deployment"
+      timeout: "60 minutes"
+      
+      config:
+        model_optimization:
+          format_conversion:
+            torchscript: true
+            onnx: true
+            tensorrt: false
+            
+          optimization_techniques:
+            quantization: false
+            pruning: false
+            compiler_optimization: true
+            
+        deployment_artifacts:
+          inference_service: true
+          containerization: true
+          api_documentation: true
+          monitoring_setup: true
+          
+        production_validation:
+          performance_benchmarking: true
+          load_testing: true
+          integration_testing: true
+          security_scanning: true
+          
+        documentation:
+          model_card: true
+          api_documentation: true
+          deployment_guide: true
+          monitoring_runbook: true
+          
+      outputs:
+        - "deployment/model_artifacts/"
+        - "deployment/inference_service/"
+        - "deployment/docker/"
+        - "docs/deployment_guide.md"
+        - "docs/model_card.md"
+        - "deployment/monitoring_config.yaml"
+        
+      quality_gates:
+        performance_benchmarks: true
+        security_validation: true
+        documentation_completeness: true
+        production_readiness_checklist: true
+        
+      dependencies: ["6_refinement"]
+
+# =============================================================================
+# DATA CONFIGURATION
+# =============================================================================
+data:
+  # Dataset information
+  dataset_name: "custom_dataset"
+  dataset_version: "v1.0"
+  data_source: "local"  # Options: local, s3, gcs, azure_blob, url
+  
+  # Data paths
+  paths:
+    raw_data: "data/raw/"
+    processed_data: "data/processed/"
+    train_data: "data/train/"
+    val_data: "data/val/"
+    test_data: "data/test/"
+    
+  # Data preprocessing
+  preprocessing:
+    normalization:
+      enabled: true
+      method: "standardization"  # Options: standardization, min_max, robust
+      per_feature: true
+      
+    encoding:
+      categorical_encoding: "one_hot"  # Options: one_hot, label, target, binary
+      text_encoding: "tfidf"          # Options: tfidf, word2vec, bert
+      
+    feature_engineering:
+      polynomial_features: false
+      feature_selection: true
+      feature_selection_method: "mutual_info"
+      max_features: 1000
+      
+  # Data validation
+  validation:
+    schema_validation: true
+    data_drift_detection: true
+    outlier_detection: true
+    missing_value_strategy: "impute"  # Options: drop, impute, flag
+    
+  # Data augmentation (for training)
+  augmentation:
+    enabled: true
+    probability: 0.5
+    techniques: []  # Filled in stage 3 planning
+
+# =============================================================================
+# MODEL CONFIGURATION
+# =============================================================================
+model:
+  # Model architecture (filled during planning stage)
+  architecture: null
+  parameters: {}
+  
+  # Model versioning
+  versioning:
+    enabled: true
+    version_format: "semantic"  # Options: semantic, timestamp, hash
+    auto_increment: true
+    
+  # Model registry
+  registry:
+    enabled: true
+    backend: "local"  # Options: local, mlflow, wandb, custom
+    metadata_tracking: true
+    
+  # Model validation
+  validation:
+    cross_validation: true
+    holdout_validation: true
+    temporal_validation: false  # For time series
+    
+# =============================================================================
+# TRAINING CONFIGURATION  
+# =============================================================================
+training:
+  # Hardware configuration
+  hardware:
+    device_preference: "auto"  # auto, cpu, cuda, mps
+    num_gpus: 1
+    cpu_cores: 8
+    memory_limit: "32GB"
+    
+  # Training parameters (base values, can be overridden in planning)
+  hyperparameters:
+    batch_size: 128
+    epochs: 100
+    learning_rate: 0.001
+    
+  # Advanced training features
+  advanced:
+    mixed_precision: true
+    gradient_accumulation: false
+    gradient_clipping: true
+    gradient_clipping_value: 1.0
+    
+  # Distributed training
+  distributed:
+    enabled: false
+    backend: "nccl"  # Options: nccl, gloo, mpi
+    world_size: 1
+    
+  # Reproducibility
+  reproducibility:
+    seed: 42
+    deterministic: true
+    benchmark: false
+
+# =============================================================================
+# EVALUATION CONFIGURATION
+# =============================================================================
+evaluation:
+  # Metrics configuration
+  metrics:
+    primary_metric: "accuracy"
+    secondary_metrics: []  # Filled during task definition
+    
+  # Evaluation settings
+  settings:
+    test_size: 0.2
+    validation_size: 0.2
+    stratify: true
+    
+  # Analysis options
+  analysis:
+    statistical_significance: true
+    confidence_intervals: true
+    error_analysis: true
+    bias_analysis: true
+    
+# =============================================================================
+# DEPLOYMENT CONFIGURATION
+# =============================================================================
+deployment:
+  # Target environment
+  target:
+    environment: "staging"  # Options: development, staging, production
+    platform: "kubernetes"  # Options: kubernetes, docker, lambda, vertex_ai
+    
+  # API configuration
+  api:
+    framework: "fastapi"  # Options: fastapi, flask, django, custom
+    authentication: true
+    rate_limiting: true
+    
+  # Monitoring
+  monitoring:
+    metrics_collection: true
+    logging_level: "INFO"
+    alerts: true
+    
+  # Scaling
+  scaling:
+    auto_scaling: true
+    min_replicas: 1
+    max_replicas: 10
+    target_cpu_utilization: 70
+
+# =============================================================================
+# RESOURCE MANAGEMENT
+# =============================================================================
+resources:
+  # Compute resources
+  compute:
+    instance_type: "ml.m5.2xlarge"  # AWS instance type or equivalent
+    min_instances: 1
+    max_instances: 5
+    
+    # Spot instance configuration
+    spot_instances:
+      enabled: true
+      max_price: 0.50  # USD per hour
+      fallback_to_on_demand: true
+      
+  # Storage resources  
+  storage:
+    data_volume_size: "100GB"
+    model_storage_size: "50GB"
+    backup_enabled: true
+    encryption_enabled: true
+    
+  # Network resources
+  network:
+    bandwidth_requirement: "1Gbps"
+    vpc_configuration: "default"
+    security_groups: ["ml-training", "data-access"]
+
+# =============================================================================
+# COST MANAGEMENT
+# =============================================================================
+cost_management:
+  # Budget settings
+  budget:
+    monthly_limit: "$1000"
+    daily_limit: "$50" 
+    alert_threshold: 0.8  # Alert at 80% of budget
+    
+  # Optimization settings
+  optimization:
+    target: "cost_performance_balance"  # Options: cost, performance, cost_performance_balance
+    spot_instance_preference: 0.7      # 70% spot instances
+    auto_shutdown_idle: true
+    idle_timeout: "30 minutes"
+    
+  # Cost allocation
+  allocation:
+    project_code: "ML-2024-001"
+    cost_center: "data-science"
+    team: "ml-platform"
+
+# =============================================================================
+# MONITORING AND LOGGING
+# =============================================================================
+monitoring:
+  # Experiment tracking
+  experiment_tracking:
+    enabled: true
+    backend: "tensorboard"  # Options: tensorboard, mlflow, wandb, neptune
+    
+  # System monitoring  
+  system_monitoring:
+    enabled: true
+    metrics: ["cpu", "memory", "gpu", "disk", "network"]
+    collection_interval: "30s"
+    
+  # Alerting
+  alerting:
+    enabled: true
+    channels: ["email", "slack"]
+    conditions:
+      - metric: "training_accuracy"
+        condition: "< 0.7"
+        severity: "warning"
+      - metric: "cost_per_hour" 
+        condition: "> 10"
+        severity: "critical"
+        
+# =============================================================================
+# SECURITY AND COMPLIANCE
+# =============================================================================
+security:
+  # Access control
+  access_control:
+    authentication: "sso"  # Options: local, sso, api_key
+    authorization: "rbac"  # Options: rbac, abac
+    
+  # Data protection
+  data_protection:
+    encryption_at_rest: true
+    encryption_in_transit: true
+    data_anonymization: false
+    
+  # Compliance
+  compliance:
+    frameworks: []  # e.g., ["gdpr", "hipaa"]
+    audit_logging: true
+    data_lineage_tracking: true
+    
+# =============================================================================
+# INTEGRATION SETTINGS
+# =============================================================================
+integrations:
+  # Version control
+  version_control:
+    system: "git"
+    repository: ""
+    branch: "main"
+    
+  # CI/CD integration
+  cicd:
+    enabled: false
+    platform: "github_actions"  # Options: github_actions, jenkins, gitlab_ci
+    
+  # External services
+  external_services:
+    data_warehouse: null
+    feature_store: null
+    model_registry: null
+    
+# =============================================================================
+# ENVIRONMENT-SPECIFIC OVERRIDES
+# =============================================================================
+environments:
+  development:
+    resources:
+      compute:
+        instance_type: "ml.t3.medium"
+        max_instances: 2
+    cost_management:
+      monthly_limit: "$100"
+      
+  staging:
+    deployment:
+      target:
+        environment: "staging"
+    monitoring:
+      alerting:
+        enabled: false
+        
+  production:
+    resources:
+      compute:
+        instance_type: "ml.c5.4xlarge"
+        max_instances: 20
+    security:
+      compliance:
+        frameworks: ["gdpr", "sox"]
+    monitoring:
+      alerting:
+        enabled: true
+        severity_threshold: "warning"
+
+# =============================================================================
+# CUSTOM EXTENSIONS
+# =============================================================================
+custom:
+  # Custom hooks for extending functionality
+  hooks:
+    pre_stage_hooks: {}   # Commands to run before each stage
+    post_stage_hooks: {}  # Commands to run after each stage
+    
+  # Custom metrics and KPIs
+  custom_metrics: {}
+  
+  # Custom integrations
+  custom_integrations: {}
+  
+  # Organization-specific settings
+  organization:
+    name: "Your Organization"
+    department: "Data Science"
+    contact: "admin@yourorg.com"

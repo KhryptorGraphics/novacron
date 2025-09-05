@@ -1,0 +1,317 @@
+global:
+  # SMTP configuration for email alerts
+  smtp_smarthost: 'smtp.gmail.com:587'
+  smtp_from: 'alerts@novacron.com'
+  smtp_auth_username: 'alerts@novacron.com'
+  smtp_auth_password: 'your-app-password'
+  smtp_require_tls: true
+
+  # Slack webhook URL for notifications
+  slack_api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+
+  # PagerDuty integration key
+  pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
+
+# Inhibit rules to suppress certain alerts when others are firing
+inhibit_rules:
+  # Suppress warning alerts when critical alerts are firing for the same service
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance', 'job']
+
+  # Suppress node alerts when the entire node is down
+  - source_match:
+      alertname: 'NodeDown'
+    target_match_re:
+      alertname: '^(HighCPUUsage|HighMemoryUsage|HighDiskUsage)$'
+    equal: ['instance']
+
+  # Suppress application alerts when the service is down
+  - source_match:
+      alertname: 'ApplicationDown'
+    target_match_re:
+      alertname: '^(HighResponseTime|HighErrorRate)$'
+    equal: ['job']
+
+# Route tree for alert routing
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'default-receiver'
+
+  routes:
+    # Critical alerts - immediate notification via all channels
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 5s
+      repeat_interval: 30m
+
+    # Infrastructure alerts
+    - match:
+        component: infrastructure
+      receiver: 'infrastructure-team'
+      group_by: ['alertname', 'instance']
+      group_interval: 5m
+
+    # Application alerts
+    - match:
+        component: application
+      receiver: 'application-team'
+      group_by: ['alertname', 'job']
+      group_interval: 5m
+
+    # ML Pipeline alerts
+    - match:
+        component: ml-pipeline
+      receiver: 'ml-ops-team'
+      group_by: ['alertname', 'model_name', 'pipeline_name']
+      group_interval: 10m
+
+    # Database alerts
+    - match:
+        component: database
+      receiver: 'database-team'
+      group_by: ['alertname', 'instance']
+      group_interval: 5m
+
+    # Security alerts
+    - match:
+        component: security
+      receiver: 'security-team'
+      group_wait: 5s
+      repeat_interval: 15m
+
+    # During maintenance windows, suppress non-critical alerts
+    - match:
+        severity: warning
+      receiver: 'maintenance-suppressed'
+      active_time_intervals:
+        - maintenance_window
+
+# Receivers define how to send notifications
+receivers:
+  # Default receiver for unmatched alerts
+  - name: 'default-receiver'
+    email_configs:
+      - to: 'ops@novacron.com'
+        subject: '[NovaCron] Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Labels: {{ range .Labels.SortedPairs }}{{ .Name }}={{ .Value }} {{ end }}
+          {{ end }}
+
+  # Critical alerts - all channels
+  - name: 'critical-alerts'
+    email_configs:
+      - to: 'critical@novacron.com,oncall@novacron.com'
+        subject: '🚨 [CRITICAL] NovaCron Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          CRITICAL ALERT FIRED
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Component: {{ .Labels.component }}
+          Started: {{ .StartsAt }}
+          
+          Labels: {{ range .Labels.SortedPairs }}{{ .Name }}={{ .Value }} {{ end }}
+          {{ end }}
+
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#critical-alerts'
+        title: '🚨 Critical Alert: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          Severity: `{{ .Labels.severity }}`
+          Component: `{{ .Labels.component }}`
+          {{ end }}
+        send_resolved: true
+
+    pagerduty_configs:
+      - routing_key: 'your-pagerduty-integration-key'
+        description: '{{ .GroupLabels.alertname }}: {{ .CommonAnnotations.summary }}'
+        details:
+          firing: '{{ .Alerts.Firing | len }}'
+          resolved: '{{ .Alerts.Resolved | len }}'
+          component: '{{ .CommonLabels.component }}'
+          severity: '{{ .CommonLabels.severity }}'
+
+  # Infrastructure team alerts
+  - name: 'infrastructure-team'
+    email_configs:
+      - to: 'infra@novacron.com'
+        subject: '[Infrastructure] {{ .GroupLabels.alertname }} on {{ .GroupLabels.instance }}'
+        body: |
+          Infrastructure Alert
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Instance: {{ .Labels.instance }}
+          Started: {{ .StartsAt }}
+          {{ end }}
+
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#infrastructure'
+        title: '🖥️ Infrastructure: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Instance:* `{{ .Labels.instance }}`
+          *Issue:* {{ .Annotations.summary }}
+          *Details:* {{ .Annotations.description }}
+          {{ end }}
+
+  # Application team alerts
+  - name: 'application-team'
+    email_configs:
+      - to: 'app-team@novacron.com'
+        subject: '[Application] {{ .GroupLabels.alertname }} - {{ .GroupLabels.job }}'
+        body: |
+          Application Alert
+          
+          {{ range .Alerts }}
+          Service: {{ .Labels.job }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Started: {{ .StartsAt }}
+          {{ end }}
+
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#application-alerts'
+        title: '🔧 Application: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Service:* `{{ .Labels.job }}`
+          *Issue:* {{ .Annotations.summary }}
+          *Details:* {{ .Annotations.description }}
+          {{ end }}
+
+  # ML Operations team alerts
+  - name: 'ml-ops-team'
+    email_configs:
+      - to: 'ml-ops@novacron.com'
+        subject: '[ML Pipeline] {{ .GroupLabels.alertname }}'
+        body: |
+          ML Pipeline Alert
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Model: {{ .Labels.model_name }}
+          Pipeline: {{ .Labels.pipeline_name }}
+          Component: {{ .Labels.component }}
+          Started: {{ .StartsAt }}
+          {{ end }}
+
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#ml-ops'
+        title: '🤖 ML Pipeline: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Model:* `{{ .Labels.model_name | default "N/A" }}`
+          *Pipeline:* `{{ .Labels.pipeline_name | default "N/A" }}`
+          *Issue:* {{ .Annotations.summary }}
+          *Details:* {{ .Annotations.description }}
+          {{ end }}
+
+    # Teams webhook for ML team
+    webhook_configs:
+      - url: 'https://yourorg.webhook.office.com/webhookb2/YOUR-TEAMS-WEBHOOK'
+        send_resolved: true
+        title: 'ML Pipeline Alert: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          **Alert:** {{ .Annotations.summary }}
+          **Description:** {{ .Annotations.description }}
+          **Model:** {{ .Labels.model_name | default "N/A" }}
+          **Component:** {{ .Labels.component }}
+          **Severity:** {{ .Labels.severity }}
+          {{ end }}
+
+  # Database team alerts
+  - name: 'database-team'
+    email_configs:
+      - to: 'dba@novacron.com'
+        subject: '[Database] {{ .GroupLabels.alertname }}'
+        body: |
+          Database Alert
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Instance: {{ .Labels.instance }}
+          Started: {{ .StartsAt }}
+          {{ end }}
+
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#database'
+        title: '🗄️ Database: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Instance:* `{{ .Labels.instance }}`
+          *Issue:* {{ .Annotations.summary }}
+          *Details:* {{ .Annotations.description }}
+          {{ end }}
+
+  # Security team alerts
+  - name: 'security-team'
+    email_configs:
+      - to: 'security@novacron.com'
+        subject: '🔒 [SECURITY] {{ .GroupLabels.alertname }}'
+        body: |
+          SECURITY ALERT
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Component: {{ .Labels.component }}
+          Started: {{ .StartsAt }}
+          
+          This requires immediate attention.
+          {{ end }}
+
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#security-alerts'
+        title: '🔒 Security Alert: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *SECURITY ALERT*
+          {{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          *Component:* `{{ .Labels.component }}`
+          {{ end }}
+
+  # Suppressed alerts during maintenance
+  - name: 'maintenance-suppressed'
+    # No notification configs - alerts are suppressed
+
+# Time intervals for alert suppression
+time_intervals:
+  - name: maintenance_window
+    time_intervals:
+      # Suppress during scheduled maintenance (example: Sundays 2-4 AM UTC)
+      - times:
+        - start_time: '02:00'
+          end_time: '04:00'
+        weekdays: ['sunday']
+      # Add more maintenance windows as needed
+
+# Templates for custom alert formatting
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'

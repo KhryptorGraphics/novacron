@@ -1,0 +1,119 @@
+{
+  "project_structure_analysis": {
+    "backend_go_modules": [
+      "/home/kp/novacron/go.mod",
+      "/home/kp/novacron/cli/go.mod", 
+      "/home/kp/novacron/k8s-operator/go.mod",
+      "/home/kp/novacron/database/go.mod",
+      "/home/kp/novacron/operator/go.mod"
+    ],
+    "frontend_js_modules": [
+      "/home/kp/novacron/frontend",
+      "/home/kp/novacron/ai-engine"
+    ],
+    "existing_test_directories": [
+      "/home/kp/novacron/tests",
+      "/home/kp/novacron/backend/tests", 
+      "/home/kp/novacron/frontend/src/__tests__",
+      "/home/kp/novacron/frontend/tests"
+    ]
+  },
+  "coverage_gaps_identified": {
+    "backend_go": {
+      "missing_unit_tests": [
+        "backend/core/**/*.go",
+        "backend/api/**/*.go",
+        "backend/pkg/**/*.go",
+        "backend/services/**/*.go",
+        "adapters/pkg/**/*.go",
+        "cli/pkg/**/*.go"
+      ],
+      "missing_integration_tests": [
+        "API endpoints",
+        "Database operations", 
+        "External service integrations",
+        "Authentication flows"
+      ],
+      "current_coverage": "~15%"
+    },
+    "frontend_js": {
+      "missing_unit_tests": [
+        "Component testing",
+        "Hook testing",
+        "Utility functions",
+        "State management"
+      ],
+      "missing_integration_tests": [
+        "Component interactions",
+        "API integration",
+        "Form workflows",
+        "Navigation flows"
+      ],
+      "current_coverage": "~25%"
+    },
+    "e2e_tests": {
+      "missing_scenarios": [
+        "Complete user workflows",
+        "Cross-browser testing",
+        "Performance testing",
+        "Accessibility testing"
+      ],
+      "current_coverage": "~10%"
+    }
+  },
+  "test_frameworks_required": {
+    "go_backend": {
+      "unit_tests": "Go testing package + testify",
+      "integration_tests": "Go testing + docker-compose",
+      "benchmarks": "Go benchmark testing",
+      "mocks": "gomock/mockgen"
+    },
+    "js_frontend": {
+      "unit_tests": "Jest + React Testing Library",
+      "integration_tests": "Jest + jsdom",
+      "e2e_tests": "Puppeteer/Playwright",
+      "visual_tests": "Percy/Chromatic"
+    },
+    "performance": {
+      "load_testing": "k6",
+      "profiling": "pprof (Go) + DevTools (JS)",
+      "monitoring": "Prometheus metrics"
+    },
+    "mutation_testing": {
+      "go": "go-mutesting",
+      "js": "Stryker"
+    }
+  },
+  "priority_test_areas": [
+    {
+      "area": "Authentication & Authorization",
+      "priority": "critical",
+      "coverage_target": "100%",
+      "test_types": ["unit", "integration", "e2e", "security"]
+    },
+    {
+      "area": "VM Management APIs", 
+      "priority": "critical",
+      "coverage_target": "100%",
+      "test_types": ["unit", "integration", "performance"]
+    },
+    {
+      "area": "Data Storage & Retrieval",
+      "priority": "high",
+      "coverage_target": "95%", 
+      "test_types": ["unit", "integration", "performance"]
+    },
+    {
+      "area": "Frontend Components",
+      "priority": "high",
+      "coverage_target": "90%",
+      "test_types": ["unit", "integration", "accessibility"]
+    },
+    {
+      "area": "Orchestration Engine",
+      "priority": "critical",
+      "coverage_target": "100%",
+      "test_types": ["unit", "integration", "chaos"]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: novacron-monitoring
+  labels:
+    app.kubernetes.io/name: novacron-monitoring
+    app.kubernetes.io/part-of: novacron
+    monitoring: "true"
+  annotations:
+    description: "NovaCron monitoring and observability stack"

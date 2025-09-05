@@ -1,0 +1,244 @@
+# Go Mutation Testing Configuration
+# Used with go-mutesting tool
+
+# Packages to test with mutation
+packages:
+  - "./backend/core/auth"
+  - "./backend/core/vm"
+  - "./backend/core/cache"
+  - "./backend/api/rest"
+  - "./backend/pkg/logger"
+
+# Files to exclude from mutation testing
+exclude:
+  patterns:
+    - "*_test.go"
+    - "*.pb.go"           # Generated protobuf files
+    - "mock_*.go"         # Mock files
+    - "*_mock.go"         # Mock files
+    - "testdata/"         # Test data directories
+    - "vendor/"           # Vendor dependencies
+    - ".gen.go"           # Generated files
+    - "migration*.go"     # Database migrations
+
+# Mutation operators to use
+mutations:
+  arithmetic:
+    enabled: true
+    operators: ["+", "-", "*", "/", "%"]
+  
+  relational:
+    enabled: true
+    operators: ["<", ">", "<=", ">=", "==", "!="]
+  
+  logical:
+    enabled: true
+    operators: ["&&", "||", "!"]
+  
+  bitwise:
+    enabled: true
+    operators: ["&", "|", "^", "<<", ">>"]
+  
+  assignment:
+    enabled: true
+    operators: ["+=", "-=", "*=", "/=", "%="]
+  
+  unary:
+    enabled: true
+    operators: ["++", "--", "+", "-"]
+  
+  conditional:
+    enabled: true
+    # Modifies if/else conditions
+  
+  statement:
+    enabled: true
+    # Removes/modifies statements
+  
+  literal:
+    enabled: false  # Disabled to avoid string/number literal changes
+  
+  function_call:
+    enabled: true
+    # Modifies function calls
+
+# Test execution configuration
+testing:
+  timeout: "30s"        # Timeout per test execution
+  parallel: true        # Run tests in parallel
+  max_workers: 4        # Maximum parallel workers
+  
+  # Test command to execute
+  test_command: "go test"
+  
+  # Additional test flags
+  test_flags:
+    - "-v"
+    - "-race"
+    - "-short"
+    - "-count=1"
+  
+  # Coverage requirements for mutation testing
+  coverage_threshold: 0.8  # 80% line coverage required
+  
+  # Test result evaluation
+  fail_fast: false     # Continue after first mutation kill
+  
+# Reporting configuration
+reporting:
+  output_dir: "reports/mutation/go"
+  
+  formats:
+    - "html"           # HTML report
+    - "json"           # JSON report for CI
+    - "text"           # Text summary
+    - "junit"          # JUnit XML for CI integration
+  
+  # Report details
+  include_source: true  # Include mutated source code in reports
+  show_killed: true     # Show killed mutations
+  show_survived: true   # Show survived mutations
+  show_skipped: false   # Don't show skipped mutations
+  
+  # Mutation score thresholds
+  thresholds:
+    excellent: 95     # Excellent mutation score (95%+)
+    good: 85          # Good mutation score (85%+) 
+    acceptable: 75    # Acceptable mutation score (75%+)
+    poor: 60          # Poor mutation score (60%+)
+    failing: 50       # Failing threshold (<50%)
+
+# Quality gates
+quality_gates:
+  # Minimum mutation score to pass
+  min_mutation_score: 75
+  
+  # Maximum allowed survivors for critical packages
+  max_survivors:
+    critical_packages: 5
+    normal_packages: 10
+  
+  # Performance limits
+  max_execution_time: "30m"  # Maximum total execution time
+  max_memory_usage: "2GB"    # Maximum memory usage
+  
+# Advanced configuration
+advanced:
+  # Mutation strategies
+  strategies:
+    - "first-order"    # Only first-order mutations
+    # - "higher-order" # Higher-order mutations (disabled for performance)
+  
+  # Code analysis
+  static_analysis:
+    enabled: true
+    # Skip mutations in unreachable code
+    skip_unreachable: true
+    # Skip mutations in error handling paths only
+    skip_error_paths: false
+  
+  # Performance optimizations
+  optimizations:
+    # Use cached test results when possible
+    cache_test_results: true
+    # Skip equivalent mutations
+    skip_equivalent: true
+    # Use incremental mutation testing
+    incremental: true
+  
+  # Debugging
+  debug:
+    verbose: false
+    save_mutants: false     # Don't save mutant source files
+    log_level: "info"
+
+# Integration with CI/CD
+ci_integration:
+  # Git integration
+  git:
+    # Only test mutations in changed files
+    only_changed_files: true
+    # Compare against specific branch
+    base_branch: "main"
+  
+  # Parallel execution in CI
+  parallel_ci:
+    enabled: true
+    # Split mutations across CI jobs
+    split_strategy: "by_package"
+    job_count: 4
+  
+  # Results storage
+  results:
+    # Store results for trend analysis
+    store_results: true
+    storage_path: "mutation-results/"
+    
+    # Compare with previous runs
+    compare_with_baseline: true
+    baseline_file: "mutation-baseline.json"
+
+# Package-specific configuration
+package_config:
+  # Critical packages with stricter requirements
+  "backend/core/auth":
+    min_mutation_score: 90
+    timeout: "45s"
+    mutations:
+      literal: false      # Don't mutate literals in auth code
+      statement: false    # Don't remove statements in critical auth logic
+  
+  "backend/core/vm":
+    min_mutation_score: 85
+    timeout: "60s"        # VM operations may take longer
+  
+  "backend/api/rest":
+    min_mutation_score: 80
+    mutations:
+      function_call: false # Don't modify API function calls
+  
+  # Less critical packages
+  "backend/pkg/logger":
+    min_mutation_score: 70
+    mutations:
+      literal: true       # Allow literal mutations in logger
+
+# Custom mutation rules
+custom_rules:
+  # Skip mutations in specific functions
+  skip_functions:
+    - "init"              # Skip init functions
+    - "main"              # Skip main functions
+    - "TestMain"          # Skip test main functions
+  
+  # Skip mutations in specific code patterns
+  skip_patterns:
+    - "panic\\("          # Don't mutate panic calls
+    - "log\\."            # Don't mutate logging calls
+    - "fmt\\.Print"       # Don't mutate print statements
+  
+  # Only mutate specific types of code
+  focus_patterns:
+    - "business logic"    # Focus on business logic
+    - "validation"        # Focus on validation logic
+    - "calculation"       # Focus on calculations
+
+# Performance monitoring
+performance:
+  # Monitor resource usage during mutation testing
+  monitor_resources: true
+  
+  # Resource limits
+  limits:
+    max_cpu_percent: 80
+    max_memory_mb: 4096
+    max_disk_io_mb: 1024
+  
+  # Performance metrics to collect
+  metrics:
+    - "execution_time"
+    - "memory_usage" 
+    - "cpu_usage"
+    - "disk_io"
+    - "test_count"
+    - "mutation_count"

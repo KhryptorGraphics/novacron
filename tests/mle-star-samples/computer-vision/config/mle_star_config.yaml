@@ -1,0 +1,239 @@
+# MLE-Star Configuration for Computer Vision Project
+# CIFAR-10 Image Classification with CNN
+
+project:
+  name: "CIFAR-10 Image Classification"
+  type: "computer_vision"
+  task: "multiclass_classification"
+  framework: "pytorch"
+  version: "1.0.0"
+
+# MLE-Star 7-Stage Workflow Configuration
+mle_star_workflow:
+  stages:
+    1_situation_analysis:
+      description: "Analyze CIFAR-10 dataset characteristics and challenges"
+      outputs:
+        - data_statistics
+        - problem_complexity_assessment
+        - recommended_approaches
+      duration_estimate: "30 minutes"
+      
+    2_task_definition:
+      description: "Define specific ML objectives and success metrics"
+      outputs:
+        - task_specification
+        - success_metrics
+        - model_constraints
+      dependencies: ["1_situation_analysis"]
+      duration_estimate: "15 minutes"
+      
+    3_action_planning:
+      description: "Design model architecture and training strategy"
+      outputs:
+        - model_architecture
+        - training_pipeline
+        - evaluation_strategy
+      dependencies: ["2_task_definition"]
+      duration_estimate: "45 minutes"
+      
+    4_implementation:
+      description: "Implement and train CNN model"
+      outputs:
+        - trained_model
+        - training_history
+        - model_checkpoints
+      dependencies: ["3_action_planning"]
+      duration_estimate: "2-4 hours"
+      
+    5_results_evaluation:
+      description: "Comprehensive model evaluation and analysis"
+      outputs:
+        - performance_metrics
+        - confusion_matrix
+        - error_analysis
+      dependencies: ["4_implementation"]
+      duration_estimate: "30 minutes"
+      
+    6_refinement:
+      description: "Model optimization and improvement"
+      outputs:
+        - optimized_model
+        - ablation_study_results
+        - hyperparameter_tuning_results
+      dependencies: ["5_results_evaluation"]
+      duration_estimate: "1-2 hours"
+      
+    7_deployment_prep:
+      description: "Prepare model for production deployment"
+      outputs:
+        - model_artifacts
+        - inference_pipeline
+        - deployment_documentation
+      dependencies: ["6_refinement"]
+      duration_estimate: "45 minutes"
+
+# Data Configuration
+data:
+  dataset: "CIFAR-10"
+  classes: 10
+  class_names: ["plane", "car", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck"]
+  image_size: [32, 32, 3]
+  train_samples: 50000
+  test_samples: 10000
+  validation_split: 0.2
+  
+  preprocessing:
+    normalization:
+      mean: [0.4914, 0.4822, 0.4465]
+      std: [0.2023, 0.1994, 0.2010]
+    
+    augmentation:
+      train:
+        - RandomCrop: {size: 32, padding: 4}
+        - RandomHorizontalFlip: {p: 0.5}
+        - ColorJitter: {brightness: 0.2, contrast: 0.2, saturation: 0.2, hue: 0.1}
+      validation:
+        - none
+      test:
+        - none
+
+# Model Configuration
+model:
+  architecture: "ResNet-inspired CNN"
+  type: "CIFAR10CNN"
+  parameters:
+    num_classes: 10
+    dropout_rate: 0.5
+    
+  components:
+    - Initial convolution layer (3 -> 64 channels)
+    - 4 residual blocks with increasing channels
+    - Global average pooling
+    - Dropout and linear classifier
+    
+  estimated_params: "~2M parameters"
+
+# Training Configuration
+training:
+  optimizer:
+    type: "Adam"
+    learning_rate: 0.001
+    weight_decay: 0.0001
+    
+  scheduler:
+    type: "CosineAnnealingLR"
+    T_max: 100
+    
+  hyperparameters:
+    batch_size: 128
+    epochs: 100
+    early_stopping: true
+    patience: 10
+    
+  hardware:
+    device: "cuda_if_available"
+    num_workers: 4
+    pin_memory: true
+
+# Evaluation Metrics
+evaluation:
+  primary_metrics:
+    - accuracy
+  
+  secondary_metrics:
+    - precision_weighted
+    - recall_weighted
+    - f1_score_weighted
+    - per_class_accuracy
+    - top_k_accuracy: {k: 3}
+    
+  targets:
+    accuracy: 0.85
+    training_time: "<4 hours"
+    inference_time: "<50ms per sample"
+    
+  analysis:
+    - confusion_matrix
+    - per_class_metrics
+    - misclassification_analysis
+    - feature_visualization
+
+# Experiment Tracking
+logging:
+  tensorboard:
+    enabled: true
+    log_dir: "models/experiments"
+    
+  mlflow:
+    enabled: false
+    experiment_name: "CIFAR10_CNN"
+    
+  checkpoints:
+    save_best: true
+    save_latest: true
+    monitor_metric: "val_accuracy"
+    
+  artifacts:
+    - training_curves
+    - confusion_matrix
+    - sample_predictions
+    - model_weights
+
+# Performance Expectations
+performance_targets:
+  accuracy: 0.85  # Target 85% accuracy
+  training_time: "4 hours"  # Maximum training time
+  inference_speed: "50ms"   # Per sample inference time
+  model_size: "50MB"        # Maximum model size
+  memory_usage: "2GB"       # Peak memory during training
+
+# Deployment Configuration
+deployment:
+  model_format: "pytorch_jit"
+  optimization:
+    - quantization: false
+    - pruning: false
+    - onnx_export: true
+    
+  serving:
+    framework: "torchserve"
+    batch_size: 1
+    timeout: 30
+    
+  monitoring:
+    - accuracy_monitoring
+    - latency_tracking
+    - memory_usage
+    - error_rate
+
+# Quality Gates
+quality_gates:
+  stage_4_implementation:
+    min_val_accuracy: 0.75
+    max_training_time: "6 hours"
+    
+  stage_5_evaluation:
+    min_test_accuracy: 0.80
+    max_inference_time: "100ms"
+    
+  stage_7_deployment:
+    model_size_limit: "100MB"
+    memory_limit: "4GB"
+
+# Error Handling
+error_handling:
+  training_failures:
+    - reduce_batch_size
+    - lower_learning_rate
+    - simplify_model
+    
+  memory_issues:
+    - gradient_checkpointing
+    - mixed_precision
+    - smaller_batch_size
+    
+  convergence_issues:
+    - learning_rate_scheduling
+    - data_augmentation_tuning
+    - architecture_modifications

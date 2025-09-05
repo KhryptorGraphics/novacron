@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MLE-Star Workflow Simulator - Interactive Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .workflow-container {
+            display: flex;
+            min-height: 80vh;
+        }
+
+        .stage-selector {
+            width: 300px;
+            background: #f8f9fa;
+            border-right: 2px solid #e9ecef;
+            padding: 20px;
+        }
+
+        .stage-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+        }
+
+        .stage-item:hover {
+            background: #e3f2fd;
+            transform: translateX(5px);
+        }
+
+        .stage-item.active {
+            background: #2196f3;
+            color: white;
+            border-color: #1976d2;
+        }
+
+        .stage-item.completed {
+            background: #4caf50;
+            color: white;
+        }
+
+        .stage-number {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #ddd;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 15px;
+        }
+
+        .stage-item.active .stage-number {
+            background: white;
+            color: #2196f3;
+        }
+
+        .stage-item.completed .stage-number {
+            background: white;
+            color: #4caf50;
+        }
+
+        .stage-content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+            max-height: 80vh;
+        }
+
+        .stage-title {
+            font-size: 2.2em;
+            margin-bottom: 15px;
+            color: #2c3e50;
+        }
+
+        .stage-description {
+            font-size: 1.1em;
+            color: #666;
+            margin-bottom: 25px;
+            line-height: 1.6;
+        }
+
+        .interactive-panel {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 25px;
+            border-left: 4px solid #2196f3;
+        }
+
+        .code-block {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-family: 'Monaco', 'Consolas', monospace;
+            overflow-x: auto;
+            position: relative;
+        }
+
+        .code-block::before {
+            content: "Python";
+            position: absolute;
+            top: 5px;
+            right: 10px;
+            font-size: 0.8em;
+            color: #95a5a6;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .metric-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            text-align: center;
+            transition: transform 0.2s ease;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #2196f3;
+        }
+
+        .metric-label {
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+
+        .btn-primary {
+            background: #2196f3;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #1976d2;
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #545b62;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #2196f3, #21cbf3);
+            width: 0%;
+            transition: width 0.5s ease;
+            position: relative;
+        }
+
+        .progress-fill::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            animation: shimmer 2s infinite;
+        }
+
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        .visualization {
+            height: 300px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 20px 0;
+            border: 2px dashed #ddd;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .chart-placeholder {
+            text-align: center;
+            color: #666;
+        }
+
+        .data-flow {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px;
+            background: linear-gradient(90deg, #f8f9fa, #e9ecef, #f8f9fa);
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+
+        .data-node {
+            padding: 15px 20px;
+            background: white;
+            border-radius: 8px;
+            border: 2px solid #2196f3;
+            font-weight: bold;
+            position: relative;
+        }
+
+        .data-arrow {
+            font-size: 1.5em;
+            color: #2196f3;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 50%, 100% { opacity: 1; }
+            25%, 75% { opacity: 0.5; }
+        }
+
+        .tooltip {
+            position: absolute;
+            background: #2c3e50;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+            z-index: 1000;
+        }
+
+        .has-tooltip:hover .tooltip {
+            opacity: 1;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border-left: 4px solid;
+        }
+
+        .alert-info {
+            background: #e3f2fd;
+            border-color: #2196f3;
+            color: #1565c0;
+        }
+
+        .alert-success {
+            background: #e8f5e8;
+            border-color: #4caf50;
+            color: #2e7d32;
+        }
+
+        .alert-warning {
+            background: #fff3cd;
+            border-color: #ff9800;
+            color: #ef6c00;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #2196f3;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+            .workflow-container {
+                flex-direction: column;
+            }
+
+            .stage-selector {
+                width: 100%;
+                padding: 15px;
+            }
+
+            .stage-content {
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 2em;
+            }
+
+            .metrics-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 MLE-Star Workflow Simulator</h1>
+            <p>Interactive demonstration of the 7-stage machine learning development methodology</p>
+        </div>
+
+        <div class="workflow-container">
+            <div class="stage-selector">
+                <div class="stage-item active" data-stage="1">
+                    <div class="stage-number">1</div>
+                    <div>
+                        <strong>Situation Analysis</strong>
+                        <br><small>Understanding data & problems</small>
+                    </div>
+                </div>
+
+                <div class="stage-item" data-stage="2">
+                    <div class="stage-number">2</div>
+                    <div>
+                        <strong>Task Definition</strong>
+                        <br><small>Setting objectives & metrics</small>
+                    </div>
+                </div>
+
+                <div class="stage-item" data-stage="3">
+                    <div class="stage-number">3</div>
+                    <div>
+                        <strong>Action Planning</strong>
+                        <br><small>Architecture & strategy</small>
+                    </div>
+                </div>
+
+                <div class="stage-item" data-stage="4">
+                    <div class="stage-number">4</div>
+                    <div>
+                        <strong>Implementation</strong>
+                        <br><small>Training & development</small>
+                    </div>
+                </div>
+
+                <div class="stage-item" data-stage="5">
+                    <div class="stage-number">5</div>
+                    <div>
+                        <strong>Results Evaluation</strong>
+                        <br><small>Performance assessment</small>
+                    </div>
+                </div>
+
+                <div class="stage-item" data-stage="6">
+                    <div class="stage-number">6</div>
+                    <div>
+                        <strong>Refinement</strong>
+                        <br><small>Optimization & tuning</small>
+                    </div>
+                </div>
+
+                <div class="stage-item" data-stage="7">
+                    <div class="stage-number">7</div>
+                    <div>
+                        <strong>Deployment Prep</strong>
+                        <br><small>Production readiness</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stage-content">
+                <!-- Stage 1: Situation Analysis -->
+                <div id="stage-1" class="stage">
+                    <h2 class="stage-title">🔍 Stage 1: Situation Analysis</h2>
+                    <p class="stage-description">
+                        In this stage, we thoroughly analyze our dataset and problem domain to understand 
+                        the challenges and opportunities ahead. Let's explore the CIFAR-10 dataset characteristics.
+                    </p>
+
+                    <div class="interactive-panel">
+                        <h3>📊 Dataset Exploration</h3>
+                        <div class="data-flow">
+                            <div class="data-node">Raw Data</div>
+                            <div class="data-arrow">→</div>
+                            <div class="data-node">Analysis</div>
+                            <div class="data-arrow">→</div>
+                            <div class="data-node">Insights</div>
+                        </div>
+
+                        <div class="code-block">
+# Analyze CIFAR-10 dataset characteristics
+dataset_stats = {
+    "total_samples": 60000,
+    "classes": 10,
+    "image_size": "32x32x3",
+    "class_distribution": "balanced",
+    "data_quality": "high"
+}
+
+# Key challenges identified
+challenges = [
+    "Small image resolution (32x32)",
+    "Inter-class similarity (cat vs dog)",
+    "Limited training data per class",
+    "Need for data augmentation"
+]</div>
+
+                        <div class="metrics-grid">
+                            <div class="metric-card">
+                                <div class="metric-value">60,000</div>
+                                <div class="metric-label">Total Samples</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">10</div>
+                                <div class="metric-label">Classes</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">32×32</div>
+                                <div class="metric-label">Image Size</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">6,000</div>
+                                <div class="metric-label">Per Class</div>
+                            </div>
+                        </div>
+
+                        <div class="visualization">
+                            <div class="chart-placeholder">
+                                <h4>📈 Class Distribution Visualization</h4>
+                                <p>Interactive chart showing balanced distribution across 10 classes</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info">
+                        <strong>Key Insight:</strong> CIFAR-10 presents classic computer vision challenges with small images 
+                        requiring careful preprocessing and augmentation strategies.
+                    </div>
+
+                    <div class="action-buttons">
+                        <button class="btn btn-primary" onclick="runAnalysis()">
+                            <span id="analysis-btn-text">🔍 Run Analysis</span>
+                        </button>
+                        <button class="btn btn-secondary" onclick="showDetails(1)">📋 View Details</button>
+                        <button class="btn btn-success" onclick="completeStage(1)">✅ Complete Stage</button>
+                    </div>
+                </div>
+
+                <!-- Stage 2: Task Definition -->
+                <div id="stage-2" class="stage hidden">
+                    <h2 class="stage-title">🎯 Stage 2: Task Definition</h2>
+                    <p class="stage-description">
+                        Transform our understanding into specific ML objectives with clear success metrics 
+                        and realistic constraints based on business requirements.
+                    </p>
+
+                    <div class="interactive-panel">
+                        <h3>📋 Task Specification</h3>
+                        
+                        <div class="code-block">
+# Define ML task objectives and constraints
+task_definition = {
+    "problem_type": "multiclass_classification",
+    "target_metric": "accuracy",
+    "success_threshold": 0.85,
+    "constraints": {
+        "training_time": "< 4 hours",
+        "model_size": "< 50MB",
+        "inference_time": "< 100ms"
+    },
+    "quality_gates": {
+        "min_validation_accuracy": 0.75,
+        "max_overfitting_gap": 0.05
+    }
+}</div>
+
+                        <div class="metrics-grid">
+                            <div class="metric-card">
+                                <div class="metric-value">85%</div>
+                                <div class="metric-label">Target Accuracy</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">4h</div>
+                                <div class="metric-label">Max Training Time</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">50MB</div>
+                                <div class="metric-label">Max Model Size</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">100ms</div>
+                                <div class="metric-label">Max Inference</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info">
+                        <strong>Success Criteria:</strong> Clear, measurable objectives enable objective evaluation 
+                        and prevent scope creep during development.
+                    </div>
+
+                    <div class="action-buttons">
+                        <button class="btn btn-primary" onclick="validateTask()">🔍 Validate Task</button>
+                        <button class="btn btn-secondary" onclick="editConstraints()">⚙️ Edit Constraints</button>
+                        <button class="btn btn-success" onclick="completeStage(2)">✅ Complete Stage</button>
+                    </div>
+                </div>
+
+                <!-- Stage 3: Action Planning -->
+                <div id="stage-3" class="stage hidden">
+                    <h2 class="stage-title">📐 Stage 3: Action Planning</h2>
+                    <p class="stage-description">
+                        Design the model architecture and training strategy based on our analysis and requirements. 
+                        This becomes our implementation blueprint.
+                    </p>
+
+                    <div class="interactive-panel">
+                        <h3>🏗️ Architecture Design</h3>
+                        
+                        <div class="visualization">
+                            <div class="chart-placeholder">
+                                <h4>🧠 CNN Architecture Diagram</h4>
+                                <p>Interactive visualization of ResNet-inspired architecture with residual blocks</p>
+                            </div>
+                        </div>
+
+                        <div class="code-block">
+# CNN Architecture with Residual Blocks
+architecture = {
+    "input_layer": "Conv2d(3, 64, kernel_size=3)",
+    "residual_blocks": [
+        "ResBlock(64, 64) x2",
+        "ResBlock(64, 128) x2", 
+        "ResBlock(128, 256) x2"
+    ],
+    "classifier": "GlobalAvgPool → Dropout(0.5) → Linear(256, 10)",
+    "estimated_params": "~2M parameters"
+}
+
+# Training Strategy
+training_strategy = {
+    "optimizer": "Adam(lr=0.001, weight_decay=1e-4)",
+    "scheduler": "CosineAnnealingLR",
+    "data_augmentation": ["RandomCrop", "RandomFlip", "ColorJitter"],
+    "batch_size": 128,
+    "epochs": 100
+}</div>
+
+                        <div class="data-flow">
+                            <div class="data-node">Input 32×32×3</div>
+                            <div class="data-arrow">→</div>
+                            <div class="data-node">Conv Layers</div>
+                            <div class="data-arrow">→</div>
+                            <div class="data-node">Residual Blocks</div>
+                            <div class="data-arrow">→</div>
+                            <div class="data-node">Classifier</div>
+                            <div class="data-arrow">→</div>
+                            <div class="data-node">10 Classes</div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-success">
+                        <strong>Architecture Benefits:</strong> Residual connections help with vanishing gradients, 
+                        while data augmentation improves generalization on small images.
+                    </div>
+
+                    <div class="action-buttons">
+                        <button class="btn btn-primary" onclick="designArchitecture()">🏗️ Design Architecture</button>
+                        <button class="btn btn-secondary" onclick="validateArchitecture()">🔍 Validate Design</button>
+                        <button class="btn btn-success" onclick="completeStage(3)">✅ Complete Stage</button>
+                    </div>
+                </div>
+
+                <!-- Stage 4: Implementation -->
+                <div id="stage-4" class="stage hidden">
+                    <h2 class="stage-title">⚡ Stage 4: Implementation</h2>
+                    <p class="stage-description">
+                        Execute the training pipeline with comprehensive monitoring and automatic checkpointing. 
+                        Watch as our model learns to classify images with increasing accuracy.
+                    </p>
+
+                    <div class="interactive-panel">
+                        <h3>🚂 Training Progress</h3>
+                        
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="training-progress" style="width: 0%"></div>
+                        </div>
+                        
+                        <div class="metrics-grid">
+                            <div class="metric-card">
+                                <div class="metric-value" id="current-epoch">0</div>
+                                <div class="metric-label">Current Epoch</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value" id="train-accuracy">0.00%</div>
+                                <div class="metric-label">Training Accuracy</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value" id="val-accuracy">0.00%</div>
+                                <div class="metric-label">Validation Accuracy</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value" id="train-loss">0.000</div>
+                                <div class="metric-label">Training Loss</div>
+                            </div>
+                        </div>
+
+                        <div class="visualization">
+                            <div class="chart-placeholder">
+                                <h4>📈 Live Training Curves</h4>
+                                <p>Real-time accuracy and loss visualization with TensorBoard integration</p>
+                            </div>
+                        </div>
+
+                        <div class="code-block">
+# Training Loop with Monitoring
+for epoch in range(100):
+    model.train()
+    train_loss, train_acc = train_epoch(model, train_loader, optimizer)
+    
+    model.eval()
+    val_loss, val_acc = validate_epoch(model, val_loader)
+    
+    # Checkpoint best model
+    if val_acc > best_acc:
+        save_checkpoint(model, epoch, val_acc)
+        
+    # Early stopping check
+    scheduler.step()
+    
+    # Log metrics to TensorBoard
+    writer.add_scalars('Accuracy', {
+        'train': train_acc,
+        'val': val_acc
+    }, epoch)</div>
+                    </div>
+
+                    <div id="training-alerts" class="alert alert-info">
+                        <strong>Training Status:</strong> Ready to begin training. Click "Start Training" to begin the process.
+                    </div>
+
+                    <div class="action-buttons">
+                        <button class="btn btn-primary" onclick="startTraining()" id="training-btn">
+                            🚂 Start Training
+                        </button>
+                        <button class="btn btn-secondary" onclick="pauseTraining()" disabled>⏸️ Pause</button>
+                        <button class="btn btn-secondary" onclick="viewLogs()">📊 View Logs</button>
+                        <button class="btn btn-success" onclick="completeStage(4)" disabled id="complete-training-btn">✅ Complete Stage</button>
+                    </div>
+                </div>
+
+                <!-- Stage 5: Results Evaluation -->
+                <div id="stage-5" class="stage hidden">
+                    <h2 class="stage-title">📊 Stage 5: Results Evaluation</h2>
+                    <p class="stage-description">
+                        Comprehensive evaluation of our trained model including accuracy metrics, confusion matrix analysis, 
+                        and error case examination to understand model behavior.
+                    </p>
+
+                    <div class="interactive-panel">
+                        <h3>📈 Model Performance Analysis</h3>
+                        
+                        <div class="metrics-grid">
+                            <div class="metric-card">
+                                <div class="metric-value">87.3%</div>
+                                <div class="metric-label">Overall Accuracy</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">0.871</div>
+                                <div class="metric-label">Weighted F1-Score</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">2.3h</div>
+                                <div class="metric-label">Training Time</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">42MB</div>
+                                <div class="metric-label">Model Size</div>
+                            </div>
+                        </div>
+
+                        <div class="visualization">
+                            <div class="chart-placeholder">
+                                <h4>🎯 Confusion Matrix & Per-Class Analysis</h4>
+                                <p>Interactive heatmap showing classification performance across all 10 classes</p>
+                            </div>
+                        </div>
+
+                        <div class="code-block">
+# Comprehensive Model Evaluation
+evaluation_results = {
+    "overall_accuracy": 0.873,
+    "per_class_metrics": {
+        "airplane": {"precision": 0.89, "recall": 0.86, "f1": 0.87},
+        "automobile": {"precision": 0.94, "recall": 0.91, "f1": 0.92},
+        "bird": {"precision": 0.81, "recall": 0.79, "f1": 0.80},
+        "cat": {"precision": 0.74, "recall": 0.78, "f1": 0.76},
+        "deer": {"precision": 0.86, "recall": 0.83, "f1": 0.84},
+        # ... remaining classes
+    },
+    "confusion_pairs": [
+        ("cat", "dog", 0.15),  # 15% confusion rate
+        ("bird", "airplane", 0.12),
+        ("truck", "automobile", 0.08)
+    ]
+}</div>
+                    </div>
+
+                    <div class="alert alert-success">
+                        <strong>🎉 Success:</strong> Model achieved 87.3% accuracy, exceeding our 85% target! 
+                        Training completed in 2.3 hours with a 42MB model size.
+                    </div>
+
+                    <div class="alert alert-warning">
+                        <strong>⚠️ Areas for Improvement:</strong> Cat/dog confusion (15%) and bird/airplane confusion (12%) 
+                        suggest need for better feature learning in these classes.
+                    </div>
+
+                    <div class="action-buttons">
+                        <button class="btn btn-primary" onclick="runEvaluation()">📊 Run Full Evaluation</button>
+                        <button class="btn btn-secondary" onclick="analyzeErrors()">🔍 Analyze Errors</button>
+                        <button class="btn btn-secondary" onclick="generateReport()">📄 Generate Report</button>
+                        <button class="btn btn-success" onclick="completeStage(5)">✅ Complete Stage</button>
+                    </div>
+                </div>
+
+                <!-- Stage 6: Refinement -->
+                <div id="stage-6" class="stage hidden">
+                    <h2 class="stage-title">🔧 Stage 6: Refinement</h2>
+                    <p class="stage-description">
+                        Systematic optimization based on evaluation insights. We'll tune hyperparameters, 
+                        improve data augmentation, and enhance the model architecture for better performance.
+                    </p>
+
+                    <div class="interactive-panel">
+                        <h3>⚙️ Hyperparameter Optimization</h3>
+                        
+                        <div class="visualization">
+                            <div class="chart-placeholder">
+                                <h4>🎛️ Hyperparameter Search Results</h4>
+                                <p>Interactive visualization of optimization trials using Optuna</p>
+                            </div>
+                        </div>
+
+                        <div class="code-block">
+# Hyperparameter Optimization with Optuna
+def objective(trial):
+    # Suggest hyperparameters
+    lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
+    batch_size = trial.suggest_categorical('batch_size', [64, 128, 256])
+    dropout_rate = trial.suggest_float('dropout_rate', 0.3, 0.7)
+    
+    # Train model with suggested hyperparameters
+    model = create_model(dropout_rate=dropout_rate)
+    accuracy = train_and_evaluate(model, lr, batch_size)
+    
+    return accuracy
+
+# Run optimization
+study = optuna.create_study(direction='maximize')
+study.optimize(objective, n_trials=50)
+
+best_params = study.best_params
+print(f"Best accuracy: {study.best_value:.3f}")
+print(f"Best params: {best_params}")</code></div>
+
+                        <div class="metrics-grid">
+                            <div class="metric-card">
+                                <div class="metric-value">89.2%</div>
+                                <div class="metric-label">Optimized Accuracy</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">0.0003</div>
+                                <div class="metric-label">Best Learning Rate</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">256</div>
+                                <div class="metric-label">Optimal Batch Size</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">0.4</div>
+                                <div class="metric-label">Best Dropout Rate</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-success">
+                        <strong>🚀 Improvement Achieved:</strong> Hyperparameter optimization increased accuracy 
+                        from 87.3% to 89.2% (+1.9% improvement) while maintaining training time under 4 hours.
+                    </div>
+
+                    <div class="action-buttons">
+                        <button class="btn btn-primary" onclick="optimizeHyperparameters()">⚙️ Optimize Parameters</button>
+                        <button class="btn btn-secondary" onclick="improveAugmentation()">🎨 Enhance Augmentation</button>
+                        <button class="btn btn-secondary" onclick="architectureModifications()">🏗️ Modify Architecture</button>
+                        <button class="btn btn-success" onclick="completeStage(6)">✅ Complete Stage</button>
+                    </div>
+                </div>
+
+                <!-- Stage 7: Deployment Preparation -->
+                <div id="stage-7" class="stage hidden">
+                    <h2 class="stage-title">🚀 Stage 7: Deployment Preparation</h2>
+                    <p class="stage-description">
+                        Prepare the optimized model for production deployment with proper serialization, 
+                        optimization, and comprehensive documentation for seamless integration.
+                    </p>
+
+                    <div class="interactive-panel">
+                        <h3>📦 Production Model Package</h3>
+                        
+                        <div class="code-block">
+# Model Optimization for Production
+import torch.jit
+
+# Convert to TorchScript for deployment
+model_scripted = torch.jit.script(optimized_model)
+model_scripted.save('cifar10_production.pt')
+
+# ONNX Export for Interoperability  
+torch.onnx.export(optimized_model, dummy_input, 'cifar10_model.onnx',
+                  input_names=['image'], output_names=['predictions'],
+                  dynamic_axes={'image': {0: 'batch_size'}})
+
+# Performance Benchmarking
+benchmark_results = {
+    "inference_latency": "35ms",  # < 100ms target ✓
+    "throughput": "145 req/sec",
+    "memory_usage": "256MB",
+    "model_size": "38MB"  # < 50MB target ✓
+}</code></div>
+
+                        <div class="data-flow">
+                            <div class="data-node">Trained Model</div>
+                            <div class="data-arrow">→</div>
+                            <div class="data-node">Optimization</div>
+                            <div class="data-arrow">→</div>
+                            <div class="data-node">Serialization</div>
+                            <div class="data-arrow">→</div>
+                            <div class="data-node">Testing</div>
+                            <div class="data-arrow">→</div>
+                            <div class="data-node">Production Ready</div>
+                        </div>
+
+                        <div class="metrics-grid">
+                            <div class="metric-card">
+                                <div class="metric-value">35ms</div>
+                                <div class="metric-label">Inference Latency</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">145</div>
+                                <div class="metric-label">Requests/Second</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">38MB</div>
+                                <div class="metric-label">Final Model Size</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">256MB</div>
+                                <div class="metric-label">Memory Usage</div>
+                            </div>
+                        </div>
+
+                        <div class="visualization">
+                            <div class="chart-placeholder">
+                                <h4>📋 Deployment Checklist</h4>
+                                <p>✅ Model optimized and serialized<br>
+                                   ✅ Performance benchmarked<br>
+                                   ✅ API documentation generated<br>
+                                   ✅ Monitoring setup configured<br>
+                                   ✅ Deployment package ready</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-success">
+                        <strong>🎯 Deployment Ready:</strong> Model meets all performance targets with 35ms inference latency, 
+                        89.2% accuracy, and comprehensive production documentation.
+                    </div>
+
+                    <div class="action-buttons">
+                        <button class="btn btn-primary" onclick="optimizeForProduction()">⚡ Optimize Model</button>
+                        <button class="btn btn-secondary" onclick="generateDocumentation()">📚 Generate Docs</button>
+                        <button class="btn btn-secondary" onclick="benchmarkPerformance()">📊 Benchmark</button>
+                        <button class="btn btn-success" onclick="completeStage(7)">🎉 Complete Workflow</button>
+                    </div>
+                </div>
+
+                <!-- Overall Progress -->
+                <div class="progress-bar" style="margin-top: 30px;">
+                    <div class="progress-fill" id="overall-progress" style="width: 14.3%"></div>
+                </div>
+                <div style="text-align: center; margin-top: 10px; color: #666;">
+                    Overall Progress: <span id="progress-text">Stage 1 of 7 (14%)</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentStage = 1;
+        let completedStages = [];
+        let trainingInterval;
+        let trainingProgress = 0;
+
+        // Stage navigation
+        document.querySelectorAll('.stage-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const stageNum = parseInt(item.dataset.stage);
+                if (stageNum <= currentStage || completedStages.includes(stageNum)) {
+                    showStage(stageNum);
+                }
+            });
+        });
+
+        function showStage(stageNum) {
+            // Hide all stages
+            document.querySelectorAll('.stage').forEach(stage => {
+                stage.classList.add('hidden');
+            });
+
+            // Show selected stage
+            document.getElementById(`stage-${stageNum}`).classList.remove('hidden');
+
+            // Update stage selector
+            document.querySelectorAll('.stage-item').forEach(item => {
+                item.classList.remove('active');
+                if (parseInt(item.dataset.stage) === stageNum) {
+                    item.classList.add('active');
+                }
+            });
+
+            currentStage = stageNum;
+            updateProgress();
+        }
+
+        function completeStage(stageNum) {
+            if (!completedStages.includes(stageNum)) {
+                completedStages.push(stageNum);
+                
+                // Mark stage as completed
+                document.querySelector(`[data-stage="${stageNum}"]`).classList.add('completed');
+                
+                // Move to next stage if available
+                if (stageNum < 7) {
+                    setTimeout(() => {
+                        showStage(stageNum + 1);
+                    }, 1000);
+                } else {
+                    // All stages completed
+                    showCompletionCelebration();
+                }
+            }
+            updateProgress();
+        }
+
+        function updateProgress() {
+            const progress = (completedStages.length / 7) * 100;
+            document.getElementById('overall-progress').style.width = progress + '%';
+            document.getElementById('progress-text').textContent = 
+                `Stage ${currentStage} of 7 (${Math.round(progress)}%)`;
+        }
+
+        // Stage-specific functions
+        function runAnalysis() {
+            const btn = document.getElementById('analysis-btn-text');
+            btn.innerHTML = '<span class="loading-spinner"></span> Analyzing...';
+            
+            setTimeout(() => {
+                btn.textContent = '✅ Analysis Complete';
+                document.querySelector('#stage-1 .alert').classList.remove('alert-info');
+                document.querySelector('#stage-1 .alert').classList.add('alert-success');
+                document.querySelector('#stage-1 .alert strong').textContent = 'Analysis Complete:';
+            }, 3000);
+        }
+
+        function validateTask() {
+            showAlert('Task validation complete. All constraints are feasible and metrics are well-defined.', 'success');
+        }
+
+        function designArchitecture() {
+            showAlert('CNN architecture designed successfully. ResNet-inspired design with ~2M parameters.', 'success');
+        }
+
+        function startTraining() {
+            const btn = document.getElementById('training-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading-spinner"></span> Training...';
+            
+            trainingProgress = 0;
+            let epoch = 0;
+            
+            trainingInterval = setInterval(() => {
+                epoch++;
+                trainingProgress = (epoch / 100) * 100;
+                
+                // Update metrics
+                document.getElementById('training-progress').style.width = trainingProgress + '%';
+                document.getElementById('current-epoch').textContent = epoch;
+                
+                // Simulate realistic training metrics
+                const trainAcc = Math.min(95, 40 + (epoch * 0.6) + Math.random() * 5);
+                const valAcc = Math.min(89, 35 + (epoch * 0.5) + Math.random() * 3);
+                const trainLoss = Math.max(0.1, 2.5 - (epoch * 0.02) + Math.random() * 0.1);
+                
+                document.getElementById('train-accuracy').textContent = trainAcc.toFixed(1) + '%';
+                document.getElementById('val-accuracy').textContent = valAcc.toFixed(1) + '%';
+                document.getElementById('train-loss').textContent = trainLoss.toFixed(3);
+                
+                // Update alerts
+                document.getElementById('training-alerts').innerHTML = 
+                    `<strong>Training Progress:</strong> Epoch ${epoch}/100 - Validation accuracy: ${valAcc.toFixed(1)}%`;
+                
+                if (epoch >= 100 || trainingProgress >= 100) {
+                    clearInterval(trainingInterval);
+                    btn.textContent = '✅ Training Complete';
+                    document.getElementById('complete-training-btn').disabled = false;
+                    document.getElementById('training-alerts').classList.remove('alert-info');
+                    document.getElementById('training-alerts').classList.add('alert-success');
+                    document.getElementById('training-alerts').innerHTML = 
+                        '<strong>🎉 Training Complete:</strong> Model achieved 87.3% validation accuracy in 2.3 hours!';
+                }
+            }, 100); // Fast simulation
+        }
+
+        function pauseTraining() {
+            if (trainingInterval) {
+                clearInterval(trainingInterval);
+                document.getElementById('training-btn').disabled = false;
+                document.getElementById('training-btn').textContent = '▶️ Resume Training';
+            }
+        }
+
+        function runEvaluation() {
+            showAlert('Comprehensive evaluation complete. Model achieved 87.3% accuracy with detailed per-class analysis.', 'success');
+        }
+
+        function optimizeHyperparameters() {
+            showAlert('Hyperparameter optimization complete. Accuracy improved to 89.2% with optimal learning rate 0.0003.', 'success');
+        }
+
+        function optimizeForProduction() {
+            showAlert('Model optimized for production. TorchScript compilation complete with 35ms inference latency.', 'success');
+        }
+
+        function showCompletionCelebration() {
+            const celebration = document.createElement('div');
+            celebration.innerHTML = `
+                <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); 
+                     display: flex; align-items: center; justify-content: center; z-index: 10000;">
+                    <div style="background: white; padding: 40px; border-radius: 20px; text-align: center; max-width: 500px;">
+                        <h2 style="color: #4caf50; margin-bottom: 20px;">🎉 Congratulations!</h2>
+                        <p style="font-size: 1.2em; margin-bottom: 20px;">
+                            You've successfully completed the entire MLE-Star workflow!
+                        </p>
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                            <strong>Final Results:</strong><br>
+                            ✅ 89.2% Accuracy (Target: 85%)<br>
+                            ✅ 2.3 hour Training (Limit: 4 hours)<br>
+                            ✅ 38MB Model Size (Limit: 50MB)<br>
+                            ✅ 35ms Inference (Limit: 100ms)
+                        </div>
+                        <button onclick="this.parentElement.parentElement.remove()" 
+                                style="padding: 12px 24px; background: #4caf50; color: white; 
+                                       border: none; border-radius: 25px; cursor: pointer;">
+                            🚀 Explore More Labs
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(celebration);
+        }
+
+        function showAlert(message, type = 'info') {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type}`;
+            alertDiv.innerHTML = `<strong>${type === 'success' ? '✅' : 'ℹ️'}</strong> ${message}`;
+            
+            // Insert after current stage title
+            const currentStageDiv = document.querySelector('.stage:not(.hidden)');
+            const title = currentStageDiv.querySelector('.stage-title');
+            title.insertAdjacentElement('afterend', alertDiv);
+            
+            // Remove after 5 seconds
+            setTimeout(() => alertDiv.remove(), 5000);
+        }
+
+        // Additional interactive functions
+        function showDetails(stage) { showAlert(`Detailed information for Stage ${stage} opened in new window.`); }
+        function editConstraints() { showAlert('Constraint editor opened. Modify success metrics and resource limits.'); }
+        function validateArchitecture() { showAlert('Architecture validation passed. Model complexity and parameter count are optimal.'); }
+        function viewLogs() { showAlert('TensorBoard logs opened. Monitor training curves and system metrics.'); }
+        function analyzeErrors() { showAlert('Error analysis complete. Main confusion between cat/dog (15%) and bird/airplane (12%).'); }
+        function generateReport() { showAlert('Comprehensive evaluation report generated with visualizations and insights.'); }
+        function improveAugmentation() { showAlert('Enhanced data augmentation strategy implemented with mixup and cutmix.'); }
+        function architectureModifications() { showAlert('Architecture enhanced with attention mechanisms and improved residual blocks.'); }
+        function generateDocumentation() { showAlert('API documentation and deployment guide generated successfully.'); }
+        function benchmarkPerformance() { showAlert('Performance benchmarking complete. All latency and throughput targets met.'); }
+
+        // Initialize
+        updateProgress();
+    </script>
+</body>
+</html>

@@ -1,0 +1,48 @@
+{
+  "name": "iris-classification-sample",
+  "type": "classification",
+  "framework": "pytorch",
+  "dataset": {
+    "name": "iris",
+    "source": "sklearn.datasets",
+    "target": "species",
+    "features": ["sepal_length", "sepal_width", "petal_length", "petal_width"],
+    "classes": ["setosa", "versicolor", "virginica"]
+  },
+  "model": {
+    "architecture": "neural_network",
+    "layers": [
+      {"type": "linear", "input_size": 4, "output_size": 16},
+      {"type": "relu"},
+      {"type": "linear", "input_size": 16, "output_size": 8},
+      {"type": "relu"},
+      {"type": "linear", "input_size": 8, "output_size": 3},
+      {"type": "softmax"}
+    ]
+  },
+  "training": {
+    "optimizer": "adam",
+    "learning_rate": 0.001,
+    "loss_function": "cross_entropy",
+    "epochs": 100,
+    "batch_size": 32,
+    "validation_split": 0.2
+  },
+  "evaluation": {
+    "metrics": ["accuracy", "precision", "recall", "f1_score"],
+    "test_split": 0.2
+  },
+  "deployment": {
+    "environment": "staging",
+    "scaling": {
+      "min_replicas": 1,
+      "max_replicas": 3,
+      "cpu_threshold": 70
+    }
+  },
+  "requirements": {
+    "accuracy": 0.95,
+    "latency": 100,
+    "throughput": 1000
+  }
+}

@@ -1,0 +1,187 @@
+modules:
+  http_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      valid_status_codes: [200, 201, 202, 204]
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      follow_redirects: true
+      preferred_ip_protocol: "ip4"
+      headers:
+        User-Agent: "NovaCron-Blackbox-Exporter/1.0"
+      
+  http_post_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        User-Agent: "NovaCron-Blackbox-Exporter/1.0"
+      body: '{"health": "check"}'
+      valid_status_codes: [200, 201, 202]
+      
+  tcp_connect:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      preferred_ip_protocol: "ip4"
+      
+  pop3s_banner:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      query_response:
+        - expect: "^+OK"
+      tls: true
+      tls_config:
+        insecure_skip_verify: false
+        
+  ssh_banner:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      query_response:
+        - expect: "^SSH-2.0-"
+      
+  irc_banner:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      query_response:
+        - send: "NICK prober"
+        - send: "USER prober prober prober :prober"
+        - expect: "PING :([^ ]+)"
+          send: "PONG \\1"
+        - expect: "^:[^ ]+ 001"
+        
+  icmp:
+    prober: icmp
+    timeout: 5s
+    icmp:
+      preferred_ip_protocol: "ip4"
+      
+  # Custom modules for NovaCron services
+  novacron_api_health:
+    prober: http
+    timeout: 10s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      headers:
+        Accept: "application/json"
+        User-Agent: "NovaCron-Health-Check/1.0"
+      body_size_limit: 1024
+      fail_if_body_not_matches_regexp:
+        - "\"status\":\\s*\"healthy\""
+        
+  novacron_api_metrics:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      headers:
+        Accept: "text/plain"
+      fail_if_body_not_matches_regexp:
+        - "^# HELP"
+        
+  database_tcp:
+    prober: tcp
+    timeout: 3s
+    tcp:
+      preferred_ip_protocol: "ip4"
+      query_response:
+        - send: ""
+        - expect: "^\\x00\\x00\\x00"
+        
+  redis_tcp:
+    prober: tcp
+    timeout: 3s
+    tcp:
+      preferred_ip_protocol: "ip4"
+      query_response:
+        - send: "*1\r\n$4\r\nPING\r\n"
+        - expect: "^\\+PONG"
+        
+  elasticsearch_http:
+    prober: http
+    timeout: 10s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      headers:
+        Accept: "application/json"
+      fail_if_body_not_matches_regexp:
+        - "\"cluster_name\""
+        - "\"status\"\\s*:\\s*\"(green|yellow)\""
+        
+  ml_model_health:
+    prober: http
+    timeout: 30s
+    http:
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body: '{"model": "health_check", "data": [[1, 2, 3, 4]]}'
+      valid_status_codes: [200, 201]
+      fail_if_body_not_matches_regexp:
+        - "\"prediction\""
+        
+  mle_star_workflow_health:
+    prober: http
+    timeout: 15s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      headers:
+        Accept: "application/json"
+      fail_if_body_not_matches_regexp:
+        - "\"workflows\"\\s*:"
+        - "\"active\""
+        
+  grpc_health:
+    prober: grpc
+    timeout: 5s
+    grpc:
+      service: "grpc.health.v1.Health"
+      tls: false
+      
+  dns_google:
+    prober: dns
+    timeout: 5s
+    dns:
+      query_name: "google.com"
+      query_type: "A"
+      valid_rcodes:
+        - NOERROR
+      validate_answer_rrs:
+        fail_if_matches_regexp:
+          - ".*127.0.0.1"
+        fail_if_not_matches_regexp:
+          - "google.com.\t300\tIN\tA\t.*"
+          
+  dns_soa:
+    prober: dns
+    timeout: 5s
+    dns:
+      query_name: "novacron.com"
+      query_type: "SOA"
+      
+  tls_connect:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      tls: true
+      tls_config:
+        insecure_skip_verify: false
+        
+  tls_connect_insecure:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      tls: true
+      tls_config:
+        insecure_skip_verify: true

@@ -1,0 +1,159 @@
+version: '3.8'
+
+services:
+  # Database services
+  postgres-test:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: novacron_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./sql/init-test.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis-test:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_test_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # NovaCron services
+  novacron-api-test:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: development
+    environment:
+      - NODE_ENV=test
+      - DB_URL=postgresql://postgres:postgres@postgres-test:5432/novacron_test
+      - REDIS_URL=redis://redis-test:6379
+      - PORT=8090
+      - LOG_LEVEL=debug
+    ports:
+      - "8091:8090"
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app/backend
+      - ./config:/app/config
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  novacron-frontend-test:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    environment:
+      - NODE_ENV=test
+      - NEXT_PUBLIC_API_URL=http://novacron-api-test:8090
+      - PORT=8092
+    ports:
+      - "8093:8092"
+    depends_on:
+      - novacron-api-test
+    volumes:
+      - ./frontend:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8092"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MLE-Star services
+  jupyter-hub-test:
+    image: jupyterhub/jupyterhub:latest
+    environment:
+      - JUPYTERHUB_CRYPT_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./config/jupyterhub:/srv/jupyterhub
+      - jupyter_test_data:/home
+    command: jupyterhub --config /srv/jupyterhub/jupyterhub_config.py
+
+  minio-test:
+    image: minio/minio:latest
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    ports:
+      - "9001:9000"
+      - "9091:9090"
+    volumes:
+      - minio_test_data:/data
+    command: server /data --console-address ":9090"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Load balancer for testing
+  nginx-test:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./config/nginx/test.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - novacron-api-test
+      - novacron-frontend-test
+
+  # Monitoring services
+  prometheus-test:
+    image: prom/prometheus:latest
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./config/prometheus/test.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_test_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+
+  grafana-test:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_test_data:/var/lib/grafana
+      - ./config/grafana/test-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+
+volumes:
+  postgres_test_data:
+  redis_test_data:
+  jupyter_test_data:
+  minio_test_data:
+  prometheus_test_data:
+  grafana_test_data:
+
+networks:
+  default:
+    driver: bridge

@@ -1,0 +1,478 @@
+# NovaCron Auto-Scaling Configuration
+# Advanced ML-driven auto-scaling with multi-dimensional optimization
+
+autoscaling:
+  # Global settings
+  enabled: true
+  mode: predictive  # reactive, predictive, hybrid
+  decision_interval_seconds: 30
+  
+  # Scaling boundaries
+  boundaries:
+    min_replicas: 2
+    max_replicas: 100
+    max_scale_up_rate: 10
+    max_scale_down_rate: 5
+    
+  # Cooldown periods
+  cooldowns:
+    scale_up_seconds: 180
+    scale_down_seconds: 300
+    failure_backoff_seconds: 60
+    
+  # Stabilization windows
+  stabilization:
+    scale_up_window_seconds: 60
+    scale_down_window_seconds: 300
+    flapping_threshold: 3
+    hysteresis_percent: 10
+    
+# Multi-Metric Scaling Configuration
+metrics:
+  # CPU metrics
+  cpu:
+    enabled: true
+    target_percent: 70
+    weight: 0.3
+    aggregation: average  # average, max, percentile
+    percentile: 95
+    
+  # Memory metrics
+  memory:
+    enabled: true
+    target_percent: 80
+    weight: 0.25
+    aggregation: average
+    
+  # Custom metrics
+  custom:
+    - name: request_rate
+      enabled: true
+      source: prometheus
+      query: "rate(http_requests_total[5m])"
+      target_value: 1000
+      weight: 0.2
+      aggregation: sum
+      
+    - name: response_time_p99
+      enabled: true
+      source: istio
+      query: "histogram_quantile(0.99, http_request_duration_seconds)"
+      target_value: 0.5
+      weight: 0.15
+      aggregation: max
+      
+    - name: queue_depth
+      enabled: true
+      source: application
+      endpoint: "/metrics/queue"
+      target_value: 100
+      weight: 0.1
+      aggregation: average
+      
+    - name: error_rate
+      enabled: true
+      source: prometheus
+      query: "rate(http_requests_failed[5m])/rate(http_requests_total[5m])"
+      target_value: 0.01
+      weight: 0.1
+      aggregation: average
+      critical_threshold: 0.05
+      
+  # Composite metrics
+  composite:
+    - name: service_health
+      formula: "(1 - error_rate) * (1 - response_time_p99/1.0) * (cpu_available/100)"
+      target_value: 0.8
+      weight: 0.3
+      
+    - name: cost_efficiency
+      formula: "throughput / (replicas * instance_cost)"
+      target_value: 100
+      weight: 0.2
+      
+# Predictive Scaling Configuration
+predictive_scaling:
+  enabled: true
+  
+  # Time series models
+  models:
+    arima:
+      enabled: true
+      order: [2, 1, 2]  # (p, d, q)
+      seasonal_order: [1, 1, 1, 24]  # (P, D, Q, s)
+      confidence_level: 0.95
+      weight: 0.3
+      
+    lstm:
+      enabled: true
+      sequence_length: 24
+      hidden_units: 128
+      layers: 3
+      dropout: 0.2
+      weight: 0.4
+      
+    prophet:
+      enabled: true
+      changepoint_prior_scale: 0.05
+      seasonality_mode: multiplicative
+      yearly_seasonality: false
+      weekly_seasonality: true
+      daily_seasonality: true
+      weight: 0.3
+      
+  # Ensemble configuration
+  ensemble:
+    method: weighted_average  # weighted_average, stacking, voting
+    confidence_threshold: 0.8
+    fallback_to_reactive: true
+    
+  # Prediction settings
+  prediction:
+    horizon_minutes: 30
+    update_frequency_minutes: 5
+    min_history_hours: 24
+    feature_engineering: true
+    
+  # Online learning
+  online_learning:
+    enabled: true
+    batch_size: 100
+    learning_rate: 0.001
+    validation_split: 0.2
+    retraining_trigger_error_percent: 10
+    
+# Control System Configuration
+control_systems:
+  # PID Controller
+  pid:
+    enabled: true
+    kp: 0.5  # Proportional gain
+    ki: 0.1  # Integral gain
+    kd: 0.05 # Derivative gain
+    
+    # Anti-windup
+    integral_limit: 10.0
+    derivative_filter: 0.1
+    
+    # Setpoint weighting
+    setpoint_weight: 0.5
+    
+  # Model Predictive Control
+  mpc:
+    enabled: true
+    prediction_horizon: 10
+    control_horizon: 3
+    
+    # Constraints
+    constraints:
+      max_change_per_step: 5
+      terminal_weight: 10.0
+      
+    # Cost function weights
+    weights:
+      tracking_error: 0.6
+      control_effort: 0.3
+      constraint_violation: 0.1
+      
+# Cost Optimization
+cost_optimization:
+  enabled: true
+  
+  # Budget constraints
+  budget:
+    max_hourly_cost: 1000
+    max_daily_cost: 20000
+    max_monthly_cost: 500000
+    
+  # Instance pricing (per hour)
+  instance_costs:
+    on_demand:
+      small: 0.10
+      medium: 0.20
+      large: 0.40
+      xlarge: 0.80
+      
+    spot:
+      small: 0.03
+      medium: 0.06
+      large: 0.12
+      xlarge: 0.24
+      
+    reserved:
+      small: 0.07
+      medium: 0.14
+      large: 0.28
+      xlarge: 0.56
+      
+  # Spot instance strategy
+  spot_instances:
+    enabled: true
+    max_percentage: 70
+    bid_strategy: adaptive  # fixed, adaptive, ml_optimized
+    max_bid_multiplier: 1.5
+    diversification: true
+    
+    # Interruption handling
+    interruption_handling:
+      grace_period_seconds: 120
+      checkpoint_enabled: true
+      fallback_to_on_demand: true
+      
+  # Reserved instance optimization
+  reserved_instances:
+    enabled: true
+    min_utilization_percent: 70
+    purchase_strategy: predictive
+    term_months: 12
+    
+# Workload-Specific Policies
+workload_policies:
+  # Batch processing
+  batch:
+    scaling_strategy: aggressive
+    target_cpu: 80
+    target_memory: 85
+    scale_up_threshold: 70
+    scale_down_threshold: 30
+    prefer_spot: true
+    gpu_aware: false
+    
+  # Streaming
+  streaming:
+    scaling_strategy: steady
+    target_cpu: 60
+    target_memory: 70
+    scale_up_threshold: 65
+    scale_down_threshold: 40
+    buffer_capacity: true
+    maintain_minimum: 3
+    
+  # Interactive/Web
+  interactive:
+    scaling_strategy: responsive
+    target_cpu: 40
+    target_memory: 60
+    target_latency_ms: 100
+    scale_up_threshold: 50
+    scale_down_threshold: 30
+    prefer_on_demand: true
+    geographic_distribution: true
+    
+  # ML Training
+  ml_training:
+    scaling_strategy: gpu_optimized
+    target_gpu_utilization: 90
+    target_memory: 85
+    batch_size_aware: true
+    checkpoint_frequency_minutes: 30
+    prefer_spot: true
+    gpu_type: "v100"
+    
+# Kubernetes Integration
+kubernetes:
+  # Horizontal Pod Autoscaler (HPA)
+  hpa:
+    enabled: true
+    api_version: autoscaling/v2
+    
+    # Behavior policies
+    behavior:
+      scale_up:
+        stabilization_window_seconds: 60
+        select_policy: Max
+        policies:
+          - type: Percent
+            value: 100
+            period_seconds: 60
+          - type: Pods
+            value: 4
+            period_seconds: 60
+            
+      scale_down:
+        stabilization_window_seconds: 300
+        select_policy: Min
+        policies:
+          - type: Percent
+            value: 50
+            period_seconds: 300
+          - type: Pods
+            value: 2
+            period_seconds: 300
+            
+  # Vertical Pod Autoscaler (VPA)
+  vpa:
+    enabled: true
+    update_mode: Auto  # Off, Initial, Recreate, Auto
+    
+    # Resource policies
+    resource_policy:
+      container_policies:
+        - container_name: "*"
+          min_allowed:
+            cpu: 100m
+            memory: 128Mi
+          max_allowed:
+            cpu: 2
+            memory: 4Gi
+          control_mode: RequestsAndLimits
+          
+    # Recommendation settings
+    recommendation:
+      target_cpu_percentile: 90
+      target_memory_percentile: 90
+      safety_margin_fraction: 0.15
+      
+  # Cluster Autoscaler (CA)
+  cluster_autoscaler:
+    enabled: true
+    
+    # Node groups
+    node_groups:
+      - name: general
+        min_size: 2
+        max_size: 50
+        instance_types: ["t3.medium", "t3.large"]
+        
+      - name: compute
+        min_size: 0
+        max_size: 20
+        instance_types: ["c5.xlarge", "c5.2xlarge"]
+        taints:
+          - key: workload
+            value: compute
+            effect: NoSchedule
+            
+      - name: gpu
+        min_size: 0
+        max_size: 10
+        instance_types: ["p3.2xlarge", "p3.8xlarge"]
+        taints:
+          - key: nvidia.com/gpu
+            value: true
+            effect: NoSchedule
+            
+    # Scaling options
+    options:
+      scale_down_enabled: true
+      scale_down_delay_after_add: 10m
+      scale_down_unneeded_time: 10m
+      scale_down_utilization_threshold: 0.5
+      max_node_provision_time: 15m
+      expander: least-waste  # least-waste, most-pods, priority, spot
+      
+# A/B Testing for Scaling Strategies
+ab_testing:
+  enabled: true
+  
+  experiments:
+    - name: prediction_model_test
+      variants:
+        - name: control
+          model: arima
+          traffic_percent: 33
+        - name: lstm_variant
+          model: lstm
+          traffic_percent: 33
+        - name: prophet_variant
+          model: prophet
+          traffic_percent: 34
+      duration_hours: 168
+      metrics: [prediction_accuracy, scaling_accuracy, cost]
+      
+    - name: controller_test
+      variants:
+        - name: pid_control
+          controller: pid
+          traffic_percent: 50
+        - name: mpc_control
+          controller: mpc
+          traffic_percent: 50
+      duration_hours: 72
+      metrics: [stability, response_time, overshoot]
+      
+# Monitoring and Alerting
+monitoring:
+  # Metrics collection
+  metrics:
+    prometheus:
+      enabled: true
+      scrape_interval_seconds: 15
+      retention_days: 30
+      
+    custom_metrics_server:
+      enabled: true
+      endpoint: "http://custom-metrics-api:8080"
+      
+  # Alerting rules
+  alerts:
+    - name: scaling_flapping
+      condition: "scaling_changes > 5"
+      window: 10m
+      severity: warning
+      
+    - name: prediction_error_high
+      condition: "prediction_error > 20"
+      window: 5m
+      severity: critical
+      
+    - name: cost_overrun
+      condition: "hourly_cost > budget * 1.1"
+      window: 1h
+      severity: critical
+      
+    - name: resource_exhaustion
+      condition: "available_capacity < 10"
+      window: 5m
+      severity: critical
+      
+# Self-Optimization
+self_optimization:
+  enabled: true
+  
+  # Reinforcement learning
+  rl_tuning:
+    algorithm: ppo  # ppo, a2c, sac
+    
+    # State space
+    state_features:
+      - current_replicas
+      - cpu_utilization
+      - memory_utilization
+      - request_rate
+      - response_time
+      - error_rate
+      - time_of_day
+      - day_of_week
+      
+    # Action space
+    actions:
+      - scale_up_1
+      - scale_up_5
+      - scale_down_1
+      - scale_down_5
+      - no_action
+      
+    # Reward function
+    reward:
+      performance_weight: 0.4
+      cost_weight: 0.3
+      stability_weight: 0.3
+      
+    # Training
+    episodes: 10000
+    learning_rate: 0.0003
+    batch_size: 64
+    
+  # Bayesian optimization
+  bayesian_tuning:
+    enabled: true
+    parameters:
+      - name: scale_up_threshold
+        bounds: [0.4, 0.9]
+      - name: scale_down_threshold
+        bounds: [0.1, 0.5]
+      - name: cooldown_period
+        bounds: [60, 600]
+    acquisition_function: expected_improvement
+    n_iterations: 100

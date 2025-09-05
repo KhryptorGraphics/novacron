@@ -1,0 +1,287 @@
+# Spark Dating App Performance Configuration
+# Optimized for sub-second response times and 99.9% uptime
+
+application:
+  name: "spark-dating-app"
+  environment: "production"
+  version: "1.0.0"
+  
+# Performance Targets
+performance_targets:
+  api_response_time_p95: "200ms"
+  cache_hit_rate_min: "90%"
+  database_query_time_p95: "50ms"
+  websocket_latency_max: "50ms"
+  uptime_target: "99.9%"
+  error_rate_max: "0.1%"
+  concurrent_users_target: 10000
+
+# Multi-Tier Cache Configuration
+cache:
+  # L1 Cache (Memory)
+  l1:
+    enabled: true
+    max_size: 50000  # Higher for dating app user profiles
+    default_ttl: "2m"
+    cleanup_interval: "30s"
+    
+  # L2 Cache (Redis Cluster)
+  l2:
+    enabled: true
+    cluster_mode: true
+    nodes:
+      - "redis-1.spark.internal:7001"
+      - "redis-2.spark.internal:7002"  
+      - "redis-3.spark.internal:7003"
+      - "redis-4.spark.internal:7004"
+      - "redis-5.spark.internal:7005"
+      - "redis-6.spark.internal:7006"
+    pool_size: 200
+    min_idle_connections: 50
+    max_retries: 3
+    read_timeout: "3s"
+    write_timeout: "3s"
+    default_ttl: "15m"
+    compression_enabled: true
+    compression_level: 6
+    serialization: "msgpack"
+    
+  # L3 Cache (Persistent)
+  l3:
+    enabled: true
+    storage_path: "/var/cache/spark"
+    
+  # Spark-specific cache patterns
+  patterns:
+    user_profile:
+      ttl: "5m"
+      pattern: "user:profile:{id}"
+      compression: true
+      
+    user_preferences:
+      ttl: "10m"
+      pattern: "user:preferences:{id}"
+      compression: true
+      
+    match_suggestions:
+      ttl: "2m"
+      pattern: "matches:suggestions:{id}"
+      compression: true
+      
+    location_nearby:
+      ttl: "1m"
+      pattern: "location:nearby:{lat}:{lng}"
+      compression: true
+      
+    swipe_queue:
+      ttl: "30s"
+      pattern: "swipe:queue:{id}"
+      compression: false  # Frequent access
+      
+    chat_messages:
+      ttl: "1h"
+      pattern: "chat:messages:{conversation_id}"
+      compression: true
+      max_items: 1000
+
+# Database Configuration
+database:
+  primary:
+    host: "postgres-primary.spark.internal"
+    port: 5432
+    database: "spark_dating"
+    max_open_connections: 100
+    max_idle_connections: 25
+    connection_max_lifetime: "30m"
+    connection_max_idle_time: "5m"
+    statement_timeout: "10s"
+    lock_timeout: "5s"
+    work_mem: "8MB"
+    shared_buffers: "512MB"
+    effective_cache_size: "2GB"
+    
+  read_replicas:
+    - host: "postgres-read-1.spark.internal"
+      port: 5432
+      weight: 60
+      max_connections: 50
+    - host: "postgres-read-2.spark.internal"
+      port: 5432 
+      weight: 40
+      max_connections: 50
+      
+  # Query optimization settings
+  query_optimization:
+    enable_prepared_statements: true
+    query_cache_size: "256MB"
+    slow_query_threshold: "100ms"
+    log_slow_queries: true
+    
+  # Spark-specific database optimizations
+  indexes:
+    users_location_age_active: "GIST(location, age, is_active, updated_at) WHERE is_active = true"
+    messages_conversation_timestamp: "(conversation_id, created_at DESC) WHERE deleted_at IS NULL"
+    swipes_user_target: "(user_id, target_id, created_at)"
+    matches_users_timestamp: "(user1_id, user2_id, matched_at DESC)"
+
+# Real-time System Configuration
+realtime:
+  websocket:
+    max_connections: 10000
+    buffer_size: 1000
+    read_timeout: "60s"
+    write_timeout: "10s"
+    ping_interval: "30s"
+    pong_timeout: "10s"
+    
+  message_queue:
+    batch_size: 100
+    batch_timeout: "100ms"
+    worker_count: 20
+    max_retry_attempts: 3
+    
+  push_notifications:
+    batch_size: 50
+    batch_timeout: "2s"
+    max_concurrent: 100
+    retry_backoff: "exponential"
+    priority_queue: true
+
+# API Configuration
+api:
+  # Rate limiting
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 60
+    burst_size: 10
+    
+  # Response optimization
+  response_optimization:
+    enable_compression: true
+    compression_level: 6
+    min_compress_size: 1024
+    
+  # Mobile-specific optimizations
+  mobile:
+    max_payload_size: "50KB"
+    image_quality_mobile: 80
+    pagination_size: 10
+    enable_data_saver_mode: true
+    
+  # Batch API settings
+  batch_api:
+    max_batch_size: 20
+    batch_timeout: "5s"
+    parallel_processing: true
+
+# CDN & Media Configuration
+cdn:
+  primary_provider: "cloudflare"
+  secondary_provider: "aws_cloudfront"
+  
+  # Image optimization
+  images:
+    formats: ["avif", "webp", "jpeg"]
+    qualities:
+      thumbnail: 80
+      card: 85
+      fullsize: 90
+    max_sizes:
+      thumbnail: "150x150"
+      card: "400x600"  
+      fullsize: "1080x1920"
+    cache_ttl: "30d"
+    
+  # Video optimization
+  videos:
+    formats: ["mp4", "webm"]
+    profiles:
+      mobile_low: "480x640@500k"
+      mobile_high: "720x960@1200k"
+      web_hd: "1080x1920@2500k"
+    max_duration: "30s"
+    cache_ttl: "7d"
+    enable_adaptive_streaming: true
+
+# Monitoring Configuration  
+monitoring:
+  metrics:
+    collection_interval: "10s"
+    retention_period: "30d"
+    
+  # Performance metrics
+  performance_metrics:
+    - name: "api_response_time"
+      type: "histogram"
+      buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5]
+      
+    - name: "cache_hit_rate"  
+      type: "counter"
+      labels: ["layer", "pattern"]
+      
+    - name: "database_query_time"
+      type: "histogram"
+      buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5]
+      
+    - name: "websocket_connections"
+      type: "gauge"
+      
+    - name: "match_calculation_time"
+      type: "histogram"
+      buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1]
+      
+  # Alerting rules
+  alerts:
+    - name: "HighAPILatency"
+      condition: "api_response_time_p95 > 200ms"
+      duration: "2m"
+      severity: "warning"
+      
+    - name: "LowCacheHitRate"
+      condition: "cache_hit_rate < 85%"
+      duration: "5m"
+      severity: "critical"
+      
+    - name: "DatabaseSlowQueries"
+      condition: "database_query_time_p95 > 100ms"
+      duration: "2m"
+      severity: "warning"
+      
+    - name: "HighErrorRate"
+      condition: "error_rate > 0.5%"
+      duration: "1m"
+      severity: "critical"
+
+# Security Configuration
+security:
+  # Rate limiting for dating-specific endpoints
+  endpoint_limits:
+    "/api/swipe": "120/minute"  # Higher limit for core functionality
+    "/api/matches": "30/minute"
+    "/api/messages": "60/minute"
+    "/api/profile": "10/minute"  # Lower for profile updates
+    
+  # Image upload security
+  image_upload:
+    max_file_size: "10MB"
+    allowed_types: ["image/jpeg", "image/png", "image/webp"]
+    scan_for_malware: true
+    strip_exif: true
+    
+  # Video upload security  
+  video_upload:
+    max_file_size: "50MB"
+    max_duration: "60s"
+    allowed_types: ["video/mp4", "video/quicktime"]
+    transcode_required: true
+
+# Feature Flags for Performance Testing
+feature_flags:
+  enable_l3_cache: true
+  enable_image_optimization: true
+  enable_video_streaming: true
+  enable_batch_apis: true
+  enable_websocket_compression: true
+  enable_database_read_replicas: true
+  enable_cdn_optimization: true
+  enable_smart_caching: true

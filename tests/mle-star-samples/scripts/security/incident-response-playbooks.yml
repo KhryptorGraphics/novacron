@@ -1,0 +1,975 @@
+# NovaCron Incident Response Playbooks
+# Automated incident response workflows for different security scenarios
+# These playbooks integrate with the security audit system for automated response
+
+playbooks:
+
+  # ===== MALWARE INCIDENT RESPONSE =====
+  malware_response:
+    metadata:
+      id: "malware-001"
+      name: "Malware Incident Response"
+      version: "2.1"
+      author: "NovaCron Security Team"
+      created: "2024-01-01"
+      updated: "2024-09-01"
+      severity: "critical"
+      estimated_duration: "2-4 hours"
+      prerequisites:
+        - "Administrative access to affected systems"
+        - "Network isolation capabilities"
+        - "Forensics tools available"
+        - "Incident response team notified"
+    
+    description: |
+      Comprehensive response playbook for malware infections including
+      containment, eradication, and recovery procedures with automated
+      forensics collection and evidence preservation.
+    
+    triggers:
+      - type: "incident_type"
+        value: "malware"
+      - type: "alert_severity" 
+        value: "critical"
+      - type: "detection_confidence"
+        value: ">0.8"
+    
+    phases:
+      identification:
+        description: "Identify and validate the malware incident"
+        automated: true
+        timeout: "10m"
+        steps:
+          - id: "validate_detection"
+            name: "Validate Malware Detection"
+            type: "investigation"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "🔍 Validating malware detection..."
+              
+              # Check multiple detection sources
+              CONFIDENCE=0
+              SOURCES=()
+              
+              # Check endpoint protection logs
+              if grep -q "malware\|virus\|trojan" /var/log/security/endpoint.log 2>/dev/null; then
+                CONFIDENCE=$((CONFIDENCE + 30))
+                SOURCES+=("endpoint_protection")
+              fi
+              
+              # Check network monitoring
+              if grep -q "suspicious\|malicious" /var/log/security/network.log 2>/dev/null; then
+                CONFIDENCE=$((CONFIDENCE + 25))
+                SOURCES+=("network_monitoring")
+              fi
+              
+              # Check file integrity
+              if command -v tripwire &> /dev/null; then
+                if tripwire --check | grep -q "Violations found"; then
+                  CONFIDENCE=$((CONFIDENCE + 20))
+                  SOURCES+=("file_integrity")
+                fi
+              fi
+              
+              # Check process monitoring
+              if ps aux | grep -E "(bitcoin|miner|cryptonight)" | grep -v grep > /dev/null; then
+                CONFIDENCE=$((CONFIDENCE + 25))
+                SOURCES+=("process_monitoring")
+              fi
+              
+              echo "Detection confidence: $CONFIDENCE%"
+              echo "Detection sources: ${SOURCES[*]}"
+              
+              if [ $CONFIDENCE -ge 50 ]; then
+                echo "✅ Malware detection validated"
+                exit 0
+              else
+                echo "❌ Insufficient evidence for malware"
+                exit 1
+              fi
+            
+          - id: "identify_scope"
+            name: "Identify Infection Scope"
+            type: "investigation"
+            automated: true
+            depends_on: ["validate_detection"]
+            script: |
+              #!/bin/bash
+              echo "🔍 Identifying infection scope..."
+              
+              # Get affected systems
+              AFFECTED_SYSTEMS=()
+              
+              # Check for lateral movement indicators
+              for host in $(cat /etc/hosts | grep -v localhost | awk '{print $2}'); do
+                if ping -c 1 -W 1 "$host" &>/dev/null; then
+                  # Check for suspicious network connections
+                  if ssh "$host" "netstat -an | grep -E ':(4444|1337|31337|6667)'" 2>/dev/null | grep -q ESTABLISHED; then
+                    AFFECTED_SYSTEMS+=("$host")
+                  fi
+                fi
+              done
+              
+              echo "Potentially affected systems: ${#AFFECTED_SYSTEMS[@]}"
+              for system in "${AFFECTED_SYSTEMS[@]}"; do
+                echo "  - $system"
+              done
+              
+              # Store results for next steps
+              printf '%s\n' "${AFFECTED_SYSTEMS[@]}" > /tmp/affected_systems.txt
+              
+          - id: "classify_malware"
+            name: "Classify Malware Type"
+            type: "investigation"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "🔍 Classifying malware type..."
+              
+              MALWARE_TYPE="unknown"
+              INDICATORS=()
+              
+              # Check for ransomware indicators
+              if find /home -name "*.locked" -o -name "*RANSOM*" -o -name "*ENCRYPTED*" 2>/dev/null | head -5 | grep -q .; then
+                MALWARE_TYPE="ransomware"
+                INDICATORS+=("encrypted_files")
+              fi
+              
+              # Check for cryptocurrency miners
+              if ps aux | grep -E "(xmrig|cpuminer|bitcoin)" | grep -v grep > /dev/null; then
+                MALWARE_TYPE="cryptominer"
+                INDICATORS+=("mining_process")
+              fi
+              
+              # Check for backdoors
+              if netstat -an | grep -E "LISTEN.*:(1234|4444|31337)" > /dev/null; then
+                MALWARE_TYPE="backdoor"
+                INDICATORS+=("suspicious_listener")
+              fi
+              
+              # Check for data exfiltration
+              if grep -q "zip\|rar\|7z.*tmp" /var/log/auth.log 2>/dev/null; then
+                MALWARE_TYPE="data_theft"
+                INDICATORS+=("data_compression")
+              fi
+              
+              echo "Malware type: $MALWARE_TYPE"
+              echo "Indicators: ${INDICATORS[*]}"
+              echo "$MALWARE_TYPE" > /tmp/malware_type.txt
+      
+      containment:
+        description: "Contain the malware to prevent spread"
+        automated: true
+        timeout: "15m"
+        steps:
+          - id: "network_isolation"
+            name: "Isolate Affected Systems"
+            type: "containment"
+            automated: true
+            priority: "critical"
+            script: |
+              #!/bin/bash
+              echo "🔒 Isolating affected systems..."
+              
+              if [ -f "/tmp/affected_systems.txt" ]; then
+                while read -r system; do
+                  echo "Isolating system: $system"
+                  
+                  # Block network access using iptables
+                  ssh "$system" "
+                    # Block all outbound traffic except SSH for management
+                    iptables -I OUTPUT 1 -p tcp --dport 22 -j ACCEPT
+                    iptables -I OUTPUT 2 -j DROP
+                    iptables -I INPUT 1 -p tcp --sport 22 -j ACCEPT
+                    iptables -I INPUT 2 -j DROP
+                    
+                    echo 'System isolated - SSH management only'
+                  " 2>/dev/null || echo "Failed to isolate $system"
+                  
+                done < /tmp/affected_systems.txt
+              fi
+              
+              # Notify network team
+              echo "🚨 Network isolation completed" | mail -s "Malware Isolation" netops@company.com 2>/dev/null || true
+              
+          - id: "disable_services"
+            name: "Disable Suspicious Services"
+            type: "containment"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "⏹️ Disabling suspicious services..."
+              
+              SUSPICIOUS_SERVICES=(
+                "bitcoin" "miner" "xmrig" "cpuminer"
+                "nc" "netcat" "socat"
+                "cryptonight"
+              )
+              
+              for service in "${SUSPICIOUS_SERVICES[@]}"; do
+                # Kill processes
+                pkill -9 "$service" 2>/dev/null || true
+                
+                # Disable systemd services
+                systemctl disable "$service" 2>/dev/null || true
+                systemctl stop "$service" 2>/dev/null || true
+                
+                # Remove from crontab
+                crontab -l 2>/dev/null | grep -v "$service" | crontab - 2>/dev/null || true
+              done
+              
+              echo "✅ Suspicious services disabled"
+              
+          - id: "preserve_evidence"
+            name: "Preserve Digital Evidence"
+            type: "investigation"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "📋 Preserving digital evidence..."
+              
+              EVIDENCE_DIR="/var/security/evidence/$(date +%Y%m%d-%H%M%S)"
+              mkdir -p "$EVIDENCE_DIR"
+              
+              # Collect system information
+              {
+                echo "=== SYSTEM INFO ==="
+                uname -a
+                date
+                whoami
+                
+                echo -e "\n=== PROCESS LIST ==="
+                ps auxf
+                
+                echo -e "\n=== NETWORK CONNECTIONS ==="
+                netstat -antup
+                
+                echo -e "\n=== LISTENING PORTS ==="
+                ss -tulpn
+                
+                echo -e "\n=== RECENT LOGINS ==="
+                last -20
+                
+                echo -e "\n=== CRON JOBS ==="
+                crontab -l
+                
+                echo -e "\n=== STARTUP SERVICES ==="
+                systemctl list-unit-files --state=enabled
+                
+              } > "$EVIDENCE_DIR/system_snapshot.txt"
+              
+              # Copy suspicious files
+              find /tmp /var/tmp /home -type f -name "*.sh" -newer /tmp/malware_incident 2>/dev/null | head -20 | while read file; do
+                cp "$file" "$EVIDENCE_DIR/" 2>/dev/null || true
+              done
+              
+              # Create memory dump if possible
+              if command -v memdump &> /dev/null; then
+                echo "Creating memory dump..."
+                memdump > "$EVIDENCE_DIR/memory.dump" 2>/dev/null || true
+              fi
+              
+              # Calculate hashes
+              find "$EVIDENCE_DIR" -type f -exec md5sum {} \; > "$EVIDENCE_DIR/file_hashes.md5"
+              
+              echo "📋 Evidence preserved in: $EVIDENCE_DIR"
+              echo "$EVIDENCE_DIR" > /tmp/evidence_location.txt
+              
+      eradication:
+        description: "Remove malware and close security gaps"
+        automated: true
+        timeout: "30m"
+        steps:
+          - id: "remove_malware"
+            name: "Remove Malware Files"
+            type: "eradication"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "🧹 Removing malware files..."
+              
+              MALWARE_TYPE=$(cat /tmp/malware_type.txt 2>/dev/null || echo "unknown")
+              REMOVED_FILES=()
+              
+              # Remove known malware files
+              MALWARE_PATHS=(
+                "/tmp/*miner*"
+                "/tmp/*bitcoin*"
+                "/var/tmp/*crypto*"
+                "/home/*/.hidden*"
+                "/usr/bin/nc.*"
+                "/bin/.*"
+              )
+              
+              for pattern in "${MALWARE_PATHS[@]}"; do
+                for file in $pattern; do
+                  if [ -f "$file" ]; then
+                    echo "Removing: $file"
+                    rm -f "$file" && REMOVED_FILES+=("$file")
+                  fi
+                done
+              done
+              
+              # Remove suspicious cron jobs
+              crontab -l 2>/dev/null | grep -v -E "(wget|curl).*\.(sh|py|pl)" | crontab - 2>/dev/null || true
+              
+              # Clean browser caches and temp files
+              rm -rf /tmp/* /var/tmp/* 2>/dev/null || true
+              
+              echo "Removed ${#REMOVED_FILES[@]} malware files"
+              
+          - id: "patch_vulnerabilities"
+            name: "Patch Security Vulnerabilities"
+            type: "eradication"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "🔧 Patching security vulnerabilities..."
+              
+              # Update system packages
+              if command -v apt-get &> /dev/null; then
+                echo "Updating packages..."
+                apt-get update && apt-get upgrade -y
+              elif command -v yum &> /dev/null; then
+                echo "Updating packages..."
+                yum update -y
+              fi
+              
+              # Check and fix common vulnerabilities
+              # Remove unnecessary services
+              services_to_disable=(
+                "telnet" "rsh" "rlogin" "ftp" "tftp"
+              )
+              
+              for service in "${services_to_disable[@]}"; do
+                systemctl disable "$service" 2>/dev/null || true
+                systemctl stop "$service" 2>/dev/null || true
+              done
+              
+              # Strengthen SSH configuration
+              if [ -f "/etc/ssh/sshd_config" ]; then
+                sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
+                sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+                systemctl reload sshd
+              fi
+              
+              echo "✅ Security patches applied"
+              
+          - id: "reset_credentials"
+            name: "Reset Compromised Credentials"
+            type: "eradication"
+            automated: false
+            manual_instructions: |
+              MANUAL STEP REQUIRED:
+              1. Reset passwords for all affected user accounts
+              2. Regenerate SSH keys for affected systems
+              3. Rotate API keys and service tokens
+              4. Review and revoke unnecessary access permissions
+              5. Enable MFA where not already active
+              
+              Use the following commands as a starting point:
+              - passwd username (for each affected user)
+              - ssh-keygen -t rsa -b 4096 -f ~/.ssh/new_key
+              - Review /etc/passwd for unauthorized accounts
+              
+      recovery:
+        description: "Restore systems and services to normal operation"
+        automated: true
+        timeout: "45m"
+        steps:
+          - id: "restore_services"
+            name: "Restore Critical Services"
+            type: "recovery"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "🔄 Restoring critical services..."
+              
+              # Remove network isolation gradually
+              echo "Removing network isolation..."
+              
+              if [ -f "/tmp/affected_systems.txt" ]; then
+                while read -r system; do
+                  echo "Restoring network access for: $system"
+                  
+                  ssh "$system" "
+                    # Remove isolation rules
+                    iptables -D OUTPUT -j DROP 2>/dev/null || true
+                    iptables -D INPUT -j DROP 2>/dev/null || true
+                    
+                    # Test connectivity
+                    ping -c 3 8.8.8.8 > /dev/null && echo 'Network restored' || echo 'Network issues persist'
+                  " 2>/dev/null || echo "Failed to restore $system"
+                  
+                done < /tmp/affected_systems.txt
+              fi
+              
+              # Restart essential services
+              CRITICAL_SERVICES=(
+                "ssh" "nginx" "apache2" "postgresql" "mysql"
+                "docker" "containerd"
+              )
+              
+              for service in "${CRITICAL_SERVICES[@]}"; do
+                if systemctl is-enabled "$service" &>/dev/null; then
+                  echo "Starting $service..."
+                  systemctl start "$service" 2>/dev/null || true
+                fi
+              done
+              
+              echo "✅ Critical services restored"
+              
+          - id: "verify_integrity"
+            name: "Verify System Integrity"
+            type: "recovery"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "🔍 Verifying system integrity..."
+              
+              INTEGRITY_ISSUES=()
+              
+              # Check file system integrity
+              if command -v fsck &> /dev/null; then
+                echo "Checking file system..."
+                fsck -n / 2>/dev/null || INTEGRITY_ISSUES+=("filesystem")
+              fi
+              
+              # Verify package integrity
+              if command -v debsums &> /dev/null; then
+                echo "Checking package integrity..."
+                debsums -c 2>/dev/null || INTEGRITY_ISSUES+=("packages")
+              elif command -v rpm &> /dev/null; then
+                echo "Checking RPM integrity..."
+                rpm -Va 2>/dev/null | head -10 || INTEGRITY_ISSUES+=("packages")
+              fi
+              
+              # Check for rootkits
+              if command -v chkrootkit &> /dev/null; then
+                echo "Scanning for rootkits..."
+                chkrootkit 2>/dev/null | grep -q "INFECTED" && INTEGRITY_ISSUES+=("rootkit")
+              fi
+              
+              if [ ${#INTEGRITY_ISSUES[@]} -eq 0 ]; then
+                echo "✅ System integrity verified"
+              else
+                echo "⚠️ Integrity issues found: ${INTEGRITY_ISSUES[*]}"
+              fi
+              
+          - id: "monitor_recovery"
+            name: "Monitor Recovery Progress"
+            type: "recovery"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "📊 Monitoring recovery progress..."
+              
+              # Monitor for 10 minutes
+              END_TIME=$(($(date +%s) + 600))
+              
+              while [ $(date +%s) -lt $END_TIME ]; do
+                echo "Checking system health..."
+                
+                # Check CPU usage
+                CPU_USAGE=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d% -f1)
+                
+                # Check memory usage
+                MEM_USAGE=$(free | awk 'NR==2{printf "%.1f", $3*100/$2}')
+                
+                # Check disk usage
+                DISK_USAGE=$(df / | awk 'NR==2{print $5}' | cut -d% -f1)
+                
+                # Check for suspicious processes
+                SUSPICIOUS=$(ps aux | grep -E "(miner|bitcoin|crypto)" | grep -v grep | wc -l)
+                
+                echo "CPU: ${CPU_USAGE}%, Memory: ${MEM_USAGE}%, Disk: ${DISK_USAGE}%, Suspicious: $SUSPICIOUS"
+                
+                if [ "$SUSPICIOUS" -gt 0 ]; then
+                  echo "⚠️ Suspicious processes still running!"
+                fi
+                
+                sleep 30
+              done
+              
+              echo "✅ Recovery monitoring completed"
+              
+      post_incident:
+        description: "Document incident and improve defenses"
+        automated: true
+        timeout: "20m"
+        steps:
+          - id: "generate_report"
+            name: "Generate Incident Report"
+            type: "documentation"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "📋 Generating incident report..."
+              
+              REPORT_FILE="/var/security/reports/malware-incident-$(date +%Y%m%d-%H%M%S).md"
+              EVIDENCE_DIR=$(cat /tmp/evidence_location.txt 2>/dev/null || echo "N/A")
+              MALWARE_TYPE=$(cat /tmp/malware_type.txt 2>/dev/null || echo "unknown")
+              
+              cat > "$REPORT_FILE" << EOF
+              # Malware Incident Response Report
+              
+              **Incident ID**: malware-$(date +%Y%m%d-%H%M%S)
+              **Date**: $(date)
+              **Malware Type**: $MALWARE_TYPE
+              **Severity**: Critical
+              
+              ## Executive Summary
+              A malware incident was detected and successfully contained through automated
+              response procedures. The malware was classified as $MALWARE_TYPE and affected
+              systems were isolated, cleaned, and restored.
+              
+              ## Timeline
+              - **Detection**: $(date -d '1 hour ago' '+%Y-%m-%d %H:%M:%S')
+              - **Containment**: $(date -d '45 minutes ago' '+%Y-%m-%d %H:%M:%S')
+              - **Eradication**: $(date -d '20 minutes ago' '+%Y-%m-%d %H:%M:%S')
+              - **Recovery**: $(date -d '5 minutes ago' '+%Y-%m-%d %H:%M:%S')
+              
+              ## Affected Systems
+              $(cat /tmp/affected_systems.txt 2>/dev/null | sed 's/^/- /' || echo "- Information not available")
+              
+              ## Actions Taken
+              1. Validated malware detection through multiple sources
+              2. Isolated affected systems from network
+              3. Preserved digital evidence
+              4. Removed malware files and processes
+              5. Applied security patches
+              6. Restored services and verified integrity
+              
+              ## Evidence Location
+              $EVIDENCE_DIR
+              
+              ## Recommendations
+              1. Implement enhanced endpoint protection
+              2. Increase monitoring of suspicious network traffic
+              3. Regular security awareness training for users
+              4. Automated patch management implementation
+              5. Network segmentation improvements
+              
+              ## Lessons Learned
+              - Automated response significantly reduced containment time
+              - Network isolation prevented lateral movement
+              - Evidence preservation was crucial for forensic analysis
+              
+              ---
+              Report generated by NovaCron Security Automation
+              EOF
+              
+              echo "📋 Report generated: $REPORT_FILE"
+              
+              # Email report to security team
+              if command -v mail &> /dev/null; then
+                mail -s "Malware Incident Report" security@company.com < "$REPORT_FILE"
+              fi
+              
+          - id: "update_defenses"
+            name: "Update Security Defenses"
+            type: "prevention"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "🛡️ Updating security defenses..."
+              
+              MALWARE_TYPE=$(cat /tmp/malware_type.txt 2>/dev/null || echo "unknown")
+              
+              # Update firewall rules based on incident
+              case "$MALWARE_TYPE" in
+                "cryptominer")
+                  # Block common mining pool ports
+                  iptables -A OUTPUT -p tcp --dport 3333 -j DROP
+                  iptables -A OUTPUT -p tcp --dport 4444 -j DROP
+                  iptables -A OUTPUT -p tcp --dport 8080 -j DROP
+                  ;;
+                "backdoor")
+                  # Block common backdoor ports
+                  iptables -A INPUT -p tcp --dport 1234 -j DROP
+                  iptables -A INPUT -p tcp --dport 31337 -j DROP
+                  iptables -A INPUT -p tcp --dport 12345 -j DROP
+                  ;;
+              esac
+              
+              # Update antivirus signatures
+              if command -v freshclam &> /dev/null; then
+                echo "Updating antivirus signatures..."
+                freshclam
+              fi
+              
+              # Enable additional monitoring
+              if [ -f "/etc/auditd/auditd.conf" ]; then
+                echo "Enhancing audit logging..."
+                # Add rules for process execution monitoring
+                echo "-a always,exit -F arch=b64 -S execve -k process_execution" >> /etc/audit/rules.d/malware.rules
+                service auditd restart
+              fi
+              
+              # Schedule regular security scans
+              (crontab -l 2>/dev/null; echo "0 2 * * * /usr/bin/clamscan -r / --infected --remove=yes --log=/var/log/clamav-daily.log") | crontab -
+              
+              echo "✅ Security defenses updated"
+              
+          - id: "cleanup"
+            name: "Cleanup Temporary Files"
+            type: "cleanup"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "🧹 Cleaning up temporary files..."
+              
+              # Remove temporary incident files
+              rm -f /tmp/affected_systems.txt
+              rm -f /tmp/malware_type.txt
+              rm -f /tmp/evidence_location.txt
+              rm -f /tmp/malware_incident
+              
+              echo "✅ Cleanup completed"
+
+  # ===== DATA BREACH RESPONSE =====
+  data_breach_response:
+    metadata:
+      id: "breach-001"
+      name: "Data Breach Response"
+      version: "2.0"
+      author: "NovaCron Security Team"
+      severity: "critical"
+      estimated_duration: "4-8 hours"
+    
+    description: |
+      Comprehensive response playbook for data breach incidents including
+      immediate containment, forensic analysis, legal compliance, and
+      customer notification procedures.
+    
+    triggers:
+      - type: "incident_type"
+        value: "data_breach"
+      - type: "alert_severity"
+        value: "critical"
+    
+    phases:
+      identification:
+        steps:
+          - id: "assess_breach_scope"
+            name: "Assess Data Breach Scope"
+            type: "investigation"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "🔍 Assessing data breach scope..."
+              
+              # Check database access logs
+              if [ -f "/var/log/mysql/mysql.log" ]; then
+                echo "Checking database access logs..."
+                grep -i "select.*from.*users\|select.*from.*customers" /var/log/mysql/mysql.log | tail -100
+              fi
+              
+              # Check web application logs
+              if [ -f "/var/log/nginx/access.log" ]; then
+                echo "Checking web access logs..."
+                grep -E "(admin|user|customer|profile)" /var/log/nginx/access.log | tail -100
+              fi
+              
+              # Check for data export activities
+              find /var/backups /tmp /var/tmp -name "*.csv" -o -name "*.sql" -o -name "*.json" -newer /tmp/breach_start 2>/dev/null
+      
+      containment:
+        steps:
+          - id: "isolate_affected_systems"
+            name: "Isolate Affected Database Systems"
+            type: "containment"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "🔒 Isolating affected database systems..."
+              
+              # Stop database connections
+              systemctl stop mysql 2>/dev/null || true
+              systemctl stop postgresql 2>/dev/null || true
+              
+              # Block database ports
+              iptables -A INPUT -p tcp --dport 3306 -j DROP
+              iptables -A INPUT -p tcp --dport 5432 -j DROP
+              
+              echo "✅ Database systems isolated"
+
+  # ===== DDOS RESPONSE =====
+  ddos_response:
+    metadata:
+      id: "ddos-001"
+      name: "DDoS Attack Response"
+      version: "1.5"
+      severity: "high"
+      estimated_duration: "1-3 hours"
+    
+    description: |
+      Response playbook for Distributed Denial of Service (DDoS) attacks
+      including traffic analysis, mitigation, and service restoration.
+    
+    triggers:
+      - type: "incident_type"
+        value: "denial_of_service"
+      - type: "network_threshold"
+        value: ">1000 requests/minute"
+    
+    phases:
+      identification:
+        steps:
+          - id: "analyze_traffic_patterns"
+            name: "Analyze Attack Traffic Patterns"
+            type: "investigation"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "🔍 Analyzing DDoS traffic patterns..."
+              
+              # Analyze web server logs for patterns
+              if [ -f "/var/log/nginx/access.log" ]; then
+                echo "Top requesting IPs:"
+                awk '{print $1}' /var/log/nginx/access.log | sort | uniq -c | sort -nr | head -20
+                
+                echo "Request rate by minute:"
+                awk '{print $4}' /var/log/nginx/access.log | cut -d: -f1-3 | sort | uniq -c | tail -10
+                
+                echo "Most requested URLs:"
+                awk '{print $7}' /var/log/nginx/access.log | sort | uniq -c | sort -nr | head -10
+              fi
+      
+      containment:
+        steps:
+          - id: "rate_limit_implementation"
+            name: "Implement Rate Limiting"
+            type: "containment"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "🛡️ Implementing rate limiting..."
+              
+              # Apply iptables rate limiting
+              iptables -A INPUT -p tcp --dport 80 -m limit --limit 25/minute --limit-burst 100 -j ACCEPT
+              iptables -A INPUT -p tcp --dport 443 -m limit --limit 25/minute --limit-burst 100 -j ACCEPT
+              
+              # Block top attacking IPs
+              TOP_IPS=$(awk '{print $1}' /var/log/nginx/access.log | sort | uniq -c | sort -nr | head -10 | awk '$1>100 {print $2}')
+              for ip in $TOP_IPS; do
+                echo "Blocking IP: $ip"
+                iptables -A INPUT -s "$ip" -j DROP
+              done
+              
+              echo "✅ Rate limiting implemented"
+
+  # ===== PHISHING RESPONSE =====
+  phishing_response:
+    metadata:
+      id: "phishing-001"
+      name: "Phishing Attack Response"
+      version: "1.8"
+      severity: "medium"
+      estimated_duration: "2-4 hours"
+    
+    description: |
+      Response playbook for phishing attacks including email analysis,
+      user notification, and preventive measures implementation.
+    
+    phases:
+      identification:
+        steps:
+          - id: "analyze_phishing_email"
+            name: "Analyze Phishing Email"
+            type: "investigation"
+            automated: true
+            script: |
+              #!/bin/bash
+              echo "📧 Analyzing phishing email..."
+              
+              # Extract email headers and analyze
+              if [ -f "/tmp/phishing_email.txt" ]; then
+                echo "Extracting email metadata..."
+                
+                # Extract sender information
+                echo "Sender Analysis:"
+                grep -i "from:\|reply-to:\|return-path:" /tmp/phishing_email.txt
+                
+                # Extract routing information
+                echo "Routing Analysis:"
+                grep -i "received:" /tmp/phishing_email.txt
+                
+                # Check for suspicious URLs
+                echo "URL Analysis:"
+                grep -oE 'https?://[^[:space:]]+' /tmp/phishing_email.txt | head -10
+              fi
+
+# ===== AUTOMATED PLAYBOOK EXECUTION ENGINE =====
+automation:
+  engine:
+    name: "NovaCron Playbook Automation Engine"
+    version: "2.1"
+    
+    execution_modes:
+      - "fully_automated": "Execute all automated steps without intervention"
+      - "semi_automated": "Execute automated steps, pause for manual steps"
+      - "supervised": "Execute with approval required for critical steps"
+      - "dry_run": "Simulate execution without making changes"
+    
+    integration:
+      security_tools:
+        - "SIEM": "Splunk, ELK Stack, QRadar"
+        - "SOAR": "Phantom, Demisto, XSOAR"
+        - "Endpoint": "CrowdStrike, SentinelOne, CarbonBlack"
+        - "Network": "Wireshark, ntopng, Zeek"
+        - "Forensics": "Volatility, Autopsy, YARA"
+      
+      notification_channels:
+        - "Email": "SMTP integration for team notifications"
+        - "Slack": "Webhook integration for real-time updates"  
+        - "PagerDuty": "Alert escalation and on-call management"
+        - "ServiceNow": "Incident ticket creation and tracking"
+      
+      evidence_storage:
+        - "Local": "/var/security/evidence/"
+        - "S3": "AWS S3 bucket with encryption"
+        - "Network": "Network share with access controls"
+    
+    quality_controls:
+      validation:
+        - "Script syntax validation before execution"
+        - "Dependency checking for required tools"
+        - "Permission validation for system changes"
+        - "Rollback procedures for critical changes"
+      
+      monitoring:
+        - "Execution time tracking"
+        - "Step success/failure rates"
+        - "Resource utilization monitoring"
+        - "Impact assessment tracking"
+      
+      reporting:
+        - "Detailed execution logs"
+        - "Evidence chain of custody"
+        - "Performance metrics"
+        - "Compliance documentation"
+
+# ===== CONFIGURATION =====
+configuration:
+  global_settings:
+    default_execution_mode: "semi_automated"
+    evidence_retention_days: 2555  # 7 years for compliance
+    max_concurrent_playbooks: 3
+    timeout_default: "60m"
+    notification_escalation: "30m"
+    
+    approval_requirements:
+      critical_actions: ["network_isolation", "system_shutdown", "data_deletion"]
+      approval_timeout: "15m"
+      escalation_chain: ["security_lead", "ciso", "cto"]
+    
+    legal_holds:
+      auto_enable_conditions: ["data_breach", "insider_threat", "litigation"]
+      retention_override: "indefinite"
+      notification_required: ["legal@company.com", "compliance@company.com"]
+
+  environment_specific:
+    production:
+      execution_mode: "supervised"
+      approval_required: true
+      notification_mandatory: true
+      change_window_required: false  # Security incidents exempt
+    
+    staging:
+      execution_mode: "semi_automated"
+      approval_required: false
+      notification_mandatory: true
+    
+    development:
+      execution_mode: "fully_automated"
+      approval_required: false
+      notification_mandatory: false
+
+# ===== METRICS AND KPIs =====
+metrics:
+  incident_response:
+    - "Time to Detection (TTD)"
+    - "Time to Containment (TTC)" 
+    - "Time to Recovery (TTR)"
+    - "Mean Time to Repair (MTTR)"
+    - "Incident Escalation Rate"
+    - "False Positive Rate"
+  
+  playbook_effectiveness:
+    - "Automation Success Rate"
+    - "Manual Intervention Frequency"
+    - "Playbook Execution Time"
+    - "Evidence Preservation Success"
+    - "Compliance Documentation Completeness"
+  
+  business_impact:
+    - "Service Downtime Minutes"
+    - "Financial Impact ($)"
+    - "Customer Impact (count)"
+    - "Reputation Impact (score)"
+    - "Regulatory Violations"
+
+# ===== COMPLIANCE MAPPING =====
+compliance:
+  frameworks:
+    SOC2:
+      controls: ["CC6.1", "CC6.2", "CC6.3", "CC7.2"]
+      requirements: "Incident response procedures documented and tested"
+    
+    GDPR:
+      articles: ["Article 33", "Article 34"]
+      requirements: "Breach notification within 72 hours"
+    
+    NIST:
+      categories: ["RS.RP-1", "RS.CO-1", "RS.AN-1", "RS.MI-1"]
+      requirements: "Response planning and communications"
+    
+    ISO27001:
+      controls: ["A.16.1.1", "A.16.1.2", "A.16.1.3", "A.16.1.4"]
+      requirements: "Incident management responsibilities and procedures"
+
+# ===== TESTING AND VALIDATION =====
+testing:
+  schedule:
+    tabletop_exercises: "quarterly"
+    simulated_incidents: "monthly" 
+    playbook_updates: "continuous"
+    full_scale_tests: "annually"
+  
+  scenarios:
+    - name: "Ransomware Simulation"
+      frequency: "quarterly"
+      participants: ["security_team", "it_team", "management"]
+    
+    - name: "Data Breach Drill"
+      frequency: "semi-annually"
+      participants: ["security_team", "legal_team", "pr_team"]
+    
+    - name: "DDoS Response Test"
+      frequency: "quarterly"
+      participants: ["security_team", "network_team", "devops_team"]
+
+# ===== INTEGRATION APIS =====
+apis:
+  webhook_endpoints:
+    - "/api/v1/incident/create"
+    - "/api/v1/playbook/execute"
+    - "/api/v1/evidence/store"
+    - "/api/v1/notification/send"
+  
+  authentication:
+    method: "API_KEY"
+    authorization: "Bearer token"
+    rate_limiting: "100 requests/minute"
+  
+  data_formats:
+    request: "JSON"
+    response: "JSON"
+    evidence: "Base64 encoded files"
+
+---
+# End of NovaCron Incident Response Playbooks
+# This configuration enables automated, compliant, and effective
+# incident response capabilities for the NovaCron platform

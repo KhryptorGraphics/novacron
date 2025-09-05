@@ -1,0 +1,292 @@
+# AWS CloudWatch Integration Configuration for NovaCron
+
+# CloudWatch Agent Configuration
+agent:
+  metrics_collection_interval: 60
+  run_as_user: "root"
+  
+# Metrics configuration
+metrics:
+  namespace: "NovaCron/Production"
+  
+  # System metrics
+  metrics_collected:
+    cpu:
+      measurement:
+        - cpu_usage_idle
+        - cpu_usage_iowait
+        - cpu_usage_user
+        - cpu_usage_system
+      metrics_collection_interval: 60
+      totalcpu: true
+    
+    disk:
+      measurement:
+        - used_percent
+        - inodes_free
+      metrics_collection_interval: 60
+      resources:
+        - "*"
+      drop_device: true
+      ignore_file_system_types:
+        - sysfs
+        - devtmpfs
+        - tmpfs
+    
+    diskio:
+      measurement:
+        - io_time
+        - read_bytes
+        - write_bytes
+        - reads
+        - writes
+      metrics_collection_interval: 60
+      resources:
+        - "*"
+    
+    mem:
+      measurement:
+        - mem_used_percent
+        - mem_available_percent
+      metrics_collection_interval: 60
+    
+    netstat:
+      measurement:
+        - tcp_established
+        - tcp_time_wait
+      metrics_collection_interval: 60
+    
+    swap:
+      measurement:
+        - swap_used_percent
+      metrics_collection_interval: 60
+  
+  # EC2 instance metadata
+  append_dimensions:
+    AutoScalingGroupName: "${aws:AutoScalingGroupName}"
+    InstanceId: "${aws:InstanceId}"
+    InstanceType: "${aws:InstanceType}"
+    ImageId: "${aws:ImageId}"
+
+# Logs configuration
+logs:
+  logs_collected:
+    files:
+      collect_list:
+        - file_path: "/var/log/novacron/*.log"
+          log_group_name: "novacron-application"
+          log_stream_name: "{instance_id}/application"
+          multiline_start_pattern: '^\d{4}-\d{2}-\d{2}'
+          timestamp_format: "%Y-%m-%d %H:%M:%S"
+          timezone: "UTC"
+        
+        - file_path: "/var/log/novacron/ml-pipeline/*.log"
+          log_group_name: "novacron-ml-pipeline"
+          log_stream_name: "{instance_id}/ml-pipeline"
+          multiline_start_pattern: '^\d{4}-\d{2}-\d{2}'
+          timestamp_format: "%Y-%m-%d %H:%M:%S"
+          timezone: "UTC"
+        
+        - file_path: "/var/log/novacron/mle-star/*.log"
+          log_group_name: "novacron-mle-star"
+          log_stream_name: "{instance_id}/mle-star"
+          multiline_start_pattern: '^\d{4}-\d{2}-\d{2}'
+          timestamp_format: "%Y-%m-%d %H:%M:%S"
+          timezone: "UTC"
+        
+        - file_path: "/var/log/syslog"
+          log_group_name: "novacron-system"
+          log_stream_name: "{instance_id}/syslog"
+          timestamp_format: "%b %d %H:%M:%S"
+        
+        - file_path: "/var/log/docker/*.log"
+          log_group_name: "novacron-docker"
+          log_stream_name: "{instance_id}/docker"
+          multiline_start_pattern: '^\d{4}-\d{2}-\d{2}'
+
+# Custom metrics
+custom_metrics:
+  # VM Management Metrics
+  - metric_name: "VMCount"
+    unit: "Count"
+    value: "script:///opt/novacron/scripts/count_vms.sh"
+    
+  - metric_name: "ActiveMigrations"
+    unit: "Count"
+    value: "script:///opt/novacron/scripts/count_migrations.sh"
+    
+  - metric_name: "ScheduledJobs"
+    unit: "Count"
+    value: "script:///opt/novacron/scripts/count_scheduled_jobs.sh"
+    
+  # ML Pipeline Metrics
+  - metric_name: "TrainingJobs"
+    unit: "Count" 
+    value: "script:///opt/novacron/scripts/count_training_jobs.sh"
+    
+  - metric_name: "ModelAccuracy"
+    unit: "None"
+    value: "script:///opt/novacron/scripts/get_model_accuracy.sh"
+    dimensions:
+      ModelName: "production-model"
+    
+  - metric_name: "DataDriftScore"
+    unit: "None"
+    value: "script:///opt/novacron/scripts/get_drift_score.sh"
+    
+# Alarms configuration  
+alarms:
+  - alarm_name: "NovaCron-HighCPU"
+    alarm_description: "High CPU usage detected"
+    metric_name: "CPUUtilization"
+    namespace: "AWS/EC2"
+    statistic: "Average"
+    period: 300
+    evaluation_periods: 2
+    threshold: 80
+    comparison_operator: "GreaterThanThreshold"
+    alarm_actions:
+      - "arn:aws:sns:us-west-2:123456789012:novacron-alerts"
+    
+  - alarm_name: "NovaCron-HighMemory"
+    alarm_description: "High memory usage detected"
+    metric_name: "MemoryUtilization"
+    namespace: "CWAgent"
+    statistic: "Average"
+    period: 300
+    evaluation_periods: 2
+    threshold: 85
+    comparison_operator: "GreaterThanThreshold"
+    alarm_actions:
+      - "arn:aws:sns:us-west-2:123456789012:novacron-alerts"
+    
+  - alarm_name: "NovaCron-DiskSpaceLow"
+    alarm_description: "Low disk space detected"
+    metric_name: "DiskSpaceUtilization"
+    namespace: "CWAgent"
+    statistic: "Average"
+    period: 300
+    evaluation_periods: 1
+    threshold: 90
+    comparison_operator: "GreaterThanThreshold"
+    alarm_actions:
+      - "arn:aws:sns:us-west-2:123456789012:novacron-alerts"
+    
+  - alarm_name: "NovaCron-ModelAccuracyLow"
+    alarm_description: "Model accuracy below threshold"
+    metric_name: "ModelAccuracy"
+    namespace: "NovaCron/Production"
+    statistic: "Average"
+    period: 900
+    evaluation_periods: 2
+    threshold: 0.85
+    comparison_operator: "LessThanThreshold"
+    alarm_actions:
+      - "arn:aws:sns:us-west-2:123456789012:novacron-ml-alerts"
+    
+  - alarm_name: "NovaCron-DataDriftHigh"
+    alarm_description: "Data drift score is high"
+    metric_name: "DataDriftScore"
+    namespace: "NovaCron/Production"
+    statistic: "Average"
+    period: 1800
+    evaluation_periods: 1
+    threshold: 0.3
+    comparison_operator: "GreaterThanThreshold"
+    alarm_actions:
+      - "arn:aws:sns:us-west-2:123456789012:novacron-ml-alerts"
+
+# CloudWatch Insights queries
+insights_queries:
+  - name: "Error Rate by Service"
+    query: |
+      fields @timestamp, service, level, message
+      | filter level = "ERROR"
+      | stats count() by service
+      | sort count desc
+      | limit 20
+    
+  - name: "ML Pipeline Performance"
+    query: |
+      fields @timestamp, model_name, stage, duration, status
+      | filter @log_group = "novacron-ml-pipeline"
+      | stats avg(duration), count() by model_name, stage
+      | sort avg desc
+      
+  - name: "Top Slow Requests"
+    query: |
+      fields @timestamp, method, path, duration, status_code
+      | filter @log_group = "novacron-application"
+      | filter duration > 1000
+      | sort @timestamp desc
+      | limit 50
+
+# Dashboard templates
+dashboards:
+  - name: "NovaCron-Overview"
+    widgets:
+      - type: "metric"
+        properties:
+          metrics:
+            - ["AWS/EC2", "CPUUtilization"]
+            - ["CWAgent", "MemoryUtilization"] 
+          period: 300
+          stat: "Average"
+          region: "us-west-2"
+          title: "System Resources"
+      
+      - type: "metric"
+        properties:
+          metrics:
+            - ["NovaCron/Production", "VMCount"]
+            - ["NovaCron/Production", "ActiveMigrations"]
+          period: 300
+          stat: "Average"
+          region: "us-west-2"
+          title: "VM Management"
+      
+      - type: "metric"
+        properties:
+          metrics:
+            - ["NovaCron/Production", "ModelAccuracy"]
+            - ["NovaCron/Production", "DataDriftScore"]
+          period: 900
+          stat: "Average"
+          region: "us-west-2"
+          title: "ML Performance"
+      
+      - type: "log"
+        properties:
+          query: |
+            SOURCE '/aws/ec2/novacron'
+            | fields @timestamp, level, message
+            | filter level = "ERROR"
+            | sort @timestamp desc
+            | limit 20
+          region: "us-west-2"
+          title: "Recent Errors"
+          
+# X-Ray tracing configuration
+xray:
+  tracing_config:
+    sampling_rules:
+      - description: "NovaCron API requests"
+        service_name: "novacron-api"
+        http_method: "*"
+        url_path: "/api/*"
+        fixed_target: 1
+        rate: 0.1
+      
+      - description: "ML Pipeline operations"
+        service_name: "ml-pipeline"
+        http_method: "*"
+        url_path: "*"
+        fixed_target: 2
+        rate: 0.5
+        
+      - description: "MLE-Star workflows"
+        service_name: "mle-star"
+        http_method: "*"
+        url_path: "*"
+        fixed_target: 1
+        rate: 1.0

@@ -1,0 +1,10 @@
+{
+  "swarm": [
+    {
+      "key": "swarm/database-architect/architecture",
+      "value": "{\"summary\": \"Designed optimized multi-tier database architecture with PostgreSQL clustering, TimescaleDB for metrics, Redis L1 cache, Memcached L2 cache, sharding strategy, and comprehensive migration plan\", \"key_decisions\": [\"Multi-tier caching with Redis and Memcached\", \"TimescaleDB for time-series data\", \"PostgreSQL partitioning by date\", \"Horizontal sharding by tenant\", \"Materialized views for reporting\", \"8-week phased migration with zero downtime\"], \"performance_targets\": {\"query_latency\": \"10ms for cached, 100ms for DB\", \"throughput\": \"100,000 QPS\", \"availability\": \"99.99%\", \"storage\": \"10TB with compression\"}, \"files_created\": [\"docs/database-architecture-design.md\", \"database/schemas/optimized_schema.sql\", \"src/cache/caching-strategy.ts\", \"docs/database-migration-plan.md\"]}",
+      "namespace": "swarm",
+      "timestamp": 1757054680116
+    }
+  ]
+}

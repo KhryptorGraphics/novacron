@@ -1,0 +1,184 @@
+groups:
+  - name: application.rules
+    rules:
+      # Application Down
+      - alert: ApplicationDown
+        expr: up{job=~"novacron-.*"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          component: application
+        annotations:
+          summary: "{{ $labels.job }} application is down"
+          description: "{{ $labels.job }} has been down for more than 30 seconds."
+
+      # High Application Response Time
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=~"novacron-.*"}[5m])) > 1
+        for: 2m
+        labels:
+          severity: warning
+          component: application
+        annotations:
+          summary: "High response time for {{ $labels.job }}"
+          description: "95th percentile response time is above 1s for {{ $labels.job }}. Current value: {{ $value }}s"
+
+      # Critical Application Response Time
+      - alert: CriticalResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=~"novacron-.*"}[5m])) > 5
+        for: 1m
+        labels:
+          severity: critical
+          component: application
+        annotations:
+          summary: "Critical response time for {{ $labels.job }}"
+          description: "95th percentile response time is above 5s for {{ $labels.job }}. Current value: {{ $value }}s"
+
+      # High Error Rate
+      - alert: HighErrorRate
+        expr: (rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])) * 100 > 5
+        for: 2m
+        labels:
+          severity: warning
+          component: application
+        annotations:
+          summary: "High error rate for {{ $labels.job }}"
+          description: "Error rate is above 5% for {{ $labels.job }}. Current value: {{ $value }}%"
+
+      # Critical Error Rate
+      - alert: CriticalErrorRate
+        expr: (rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])) * 100 > 20
+        for: 1m
+        labels:
+          severity: critical
+          component: application
+        annotations:
+          summary: "Critical error rate for {{ $labels.job }}"
+          description: "Error rate is above 20% for {{ $labels.job }}. Current value: {{ $value }}%"
+
+      # Low Request Rate (Possible Issue)
+      - alert: LowRequestRate
+        expr: rate(http_requests_total[5m]) < 1
+        for: 10m
+        labels:
+          severity: warning
+          component: application
+        annotations:
+          summary: "Low request rate for {{ $labels.job }}"
+          description: "Request rate is below 1 req/s for {{ $labels.job }} for more than 10 minutes."
+
+      # VM Management Service Alerts
+      - alert: VMCreationFailure
+        expr: increase(vm_creation_failures_total[5m]) > 3
+        for: 1m
+        labels:
+          severity: critical
+          component: vm-manager
+        annotations:
+          summary: "VM creation failures detected"
+          description: "{{ $value }} VM creation failures in the last 5 minutes."
+
+      - alert: HighVMCreationTime
+        expr: histogram_quantile(0.95, rate(vm_creation_duration_seconds_bucket[5m])) > 300
+        for: 2m
+        labels:
+          severity: warning
+          component: vm-manager
+        annotations:
+          summary: "High VM creation time"
+          description: "95th percentile VM creation time is above 5 minutes. Current value: {{ $value }}s"
+
+      # Migration Service Alerts
+      - alert: MigrationFailure
+        expr: increase(migration_failures_total[5m]) > 1
+        for: 1m
+        labels:
+          severity: critical
+          component: migration-service
+        annotations:
+          summary: "VM migration failures detected"
+          description: "{{ $value }} VM migration failures in the last 5 minutes."
+
+      - alert: HighMigrationTime
+        expr: histogram_quantile(0.95, rate(migration_duration_seconds_bucket[5m])) > 1800
+        for: 2m
+        labels:
+          severity: warning
+          component: migration-service
+        annotations:
+          summary: "High VM migration time"
+          description: "95th percentile migration time is above 30 minutes. Current value: {{ $value }}s"
+
+      # Scheduler Service Alerts
+      - alert: SchedulerDown
+        expr: up{job="scheduler"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          component: scheduler
+        annotations:
+          summary: "Scheduler service is down"
+          description: "Scheduler service has been down for more than 30 seconds."
+
+      - alert: HighSchedulingLatency
+        expr: histogram_quantile(0.95, rate(scheduling_duration_seconds_bucket[5m])) > 10
+        for: 2m
+        labels:
+          severity: warning
+          component: scheduler
+        annotations:
+          summary: "High scheduling latency"
+          description: "95th percentile scheduling latency is above 10 seconds. Current value: {{ $value }}s"
+
+      - alert: ResourceAllocationFailure
+        expr: increase(resource_allocation_failures_total[5m]) > 2
+        for: 1m
+        labels:
+          severity: warning
+          component: scheduler
+        annotations:
+          summary: "Resource allocation failures detected"
+          description: "{{ $value }} resource allocation failures in the last 5 minutes."
+
+      # Database Connection Issues
+      - alert: DatabaseConnectionFailure
+        expr: increase(database_connection_errors_total[5m]) > 5
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "Database connection failures detected"
+          description: "{{ $value }} database connection failures in the last 5 minutes."
+
+      # Cache Issues
+      - alert: CacheHitRateLow
+        expr: (redis_keyspace_hits_total / (redis_keyspace_hits_total + redis_keyspace_misses_total)) * 100 < 70
+        for: 5m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "Low cache hit rate"
+          description: "Cache hit rate is below 70%. Current value: {{ $value }}%"
+
+      # Queue Processing Issues
+      - alert: HighQueueLength
+        expr: queue_length > 1000
+        for: 2m
+        labels:
+          severity: warning
+          component: queue
+        annotations:
+          summary: "High queue length"
+          description: "Queue length is above 1000 items. Current value: {{ $value }}"
+
+      - alert: SlowQueueProcessing
+        expr: rate(queue_processed_total[5m]) < 10
+        for: 5m
+        labels:
+          severity: warning
+          component: queue
+        annotations:
+          summary: "Slow queue processing"
+          description: "Queue processing rate is below 10 items/s. Current value: {{ $value }}"

@@ -1,0 +1,214 @@
+apiVersion: 1
+
+datasources:
+  # Prometheus - Primary metrics datasource
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: POST
+      manageAlerts: true
+      prometheusType: Prometheus
+      prometheusVersion: 2.45.0
+      cacheLevel: 'High'
+      disableRecordingRules: false
+      incrementalQueryOverlapWindow: 10m
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: jaeger
+          urlDisplayLabel: "View Trace"
+
+  # Jaeger - Distributed tracing
+  - name: Jaeger
+    type: jaeger
+    uid: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    editable: true
+    jsonData:
+      tracesToLogs:
+        datasourceUid: loki
+        tags: ['job', 'instance', 'pod', 'namespace']
+        mappedTags: [
+          { key: 'service.name', value: 'service' },
+          { key: 'service.namespace', value: 'namespace' }
+        ]
+        mapTagNamesEnabled: false
+        spanStartTimeShift: 1h
+        spanEndTimeShift: 1h
+        filterByTraceID: false
+        filterBySpanID: false
+      tracesToMetrics:
+        datasourceUid: prometheus
+        tags: [
+          { key: 'service.name', value: 'service' },
+          { key: 'job' }
+        ]
+        queries:
+          - name: 'Sample query'
+            query: 'sum(rate(traces_spanmetrics_latency_bucket{$$__tags}[5m]))'
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
+      spanBar:
+        type: 'Tag'
+        tag: 'http.path'
+
+  # Loki - Log aggregation
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    editable: true
+    jsonData:
+      derivedFields:
+        - datasourceUid: jaeger
+          matcherRegex: "trace_id=(\\w+)"
+          name: TraceID
+          url: "$${__value.raw}"
+          urlDisplayLabel: "View Trace"
+
+  # Elasticsearch - Alternative log storage
+  - name: Elasticsearch
+    type: elasticsearch
+    access: proxy
+    url: http://elasticsearch:9200
+    database: "logstash-*"
+    editable: true
+    jsonData:
+      esVersion: "8.9.0"
+      timeField: "@timestamp"
+      interval: Daily
+      logMessageField: message
+      logLevelField: level
+      maxConcurrentShardRequests: 5
+
+  # InfluxDB - Time series storage for custom metrics
+  - name: InfluxDB
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    database: novacron
+    user: admin
+    secureJsonData:
+      password: admin123
+    editable: true
+    jsonData:
+      httpMode: GET
+      
+  # CloudWatch - AWS metrics (when deployed on AWS)
+  - name: CloudWatch
+    type: cloudwatch
+    access: proxy
+    editable: true
+    jsonData:
+      authType: keys
+      defaultRegion: us-west-2
+      customMetricsNamespaces: 'AWS/EC2,AWS/ELB,AWS/RDS,CWAgent,NovaCron'
+      assumeRoleArn: 'arn:aws:iam::123456789012:role/GrafanaCloudWatchRole'
+    secureJsonData:
+      accessKey: 'YOUR_AWS_ACCESS_KEY'
+      secretKey: 'YOUR_AWS_SECRET_KEY'
+
+  # Azure Monitor - Azure metrics (when deployed on Azure)
+  - name: Azure Monitor
+    type: grafana-azure-monitor-datasource
+    access: proxy
+    editable: true
+    jsonData:
+      subscriptionId: 'your-subscription-id'
+      tenantId: 'your-tenant-id'
+      clientId: 'your-client-id'
+      cloudName: 'azuremonitor'
+      azureLogAnalyticsSameAs: false
+      logAnalyticsDefaultWorkspace: 'your-workspace-id'
+      logAnalyticsSubscriptionId: 'your-subscription-id'
+      logAnalyticsTenantId: 'your-tenant-id'
+      logAnalyticsClientId: 'your-client-id'
+    secureJsonData:
+      clientSecret: 'your-client-secret'
+      logAnalyticsClientSecret: 'your-client-secret'
+
+  # Google Cloud Monitoring - GCP metrics (when deployed on GCP)
+  - name: Google Cloud Monitoring
+    type: stackdriver
+    access: proxy
+    editable: true
+    jsonData:
+      tokenUri: 'https://oauth2.googleapis.com/token'
+      authenticationType: 'jwt'
+      defaultProject: 'your-gcp-project'
+      clientEmail: 'your-service-account@your-project.iam.gserviceaccount.com'
+    secureJsonData:
+      privateKey: |
+        -----BEGIN PRIVATE KEY-----
+        your-service-account-private-key
+        -----END PRIVATE KEY-----
+
+  # Tempo - Distributed tracing (alternative to Jaeger)
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: true
+    jsonData:
+      httpMethod: GET
+      tracesToLogs:
+        datasourceUid: loki
+        tags: ['job', 'instance']
+      tracesToMetrics:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
+      lokiSearch:
+        datasourceUid: loki
+
+  # TestData - For testing dashboards
+  - name: TestData
+    type: testdata
+    uid: testdata
+    editable: false
+    jsonData: {}
+
+# Notification channels configuration
+notifiers:
+  - name: slack-alerts
+    type: slack
+    uid: slack001
+    settings:
+      url: https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
+      channel: "#alerts"
+      title: "Grafana Alert"
+      text: |
+        {{ range .Alerts }}
+        Alert: {{ .Annotations.summary }}
+        {{ end }}
+
+  - name: email-alerts
+    type: email
+    uid: email001
+    settings:
+      addresses: "ops@novacron.com;critical@novacron.com"
+      subject: "Grafana Alert - {{ .CommonLabels.alertname }}"
+      message: |
+        {{ range .Alerts }}
+        Alert: {{ .Annotations.summary }}
+        Description: {{ .Annotations.description }}
+        {{ end }}
+
+  - name: pagerduty-alerts
+    type: pagerduty
+    uid: pagerduty001
+    settings:
+      integrationKey: "your-pagerduty-integration-key"
+      severity: "error"
+      component: "NovaCron"
+      group: "Infrastructure"
