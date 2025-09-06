@@ -7,11 +7,15 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jmoiron/sqlx"
+	"github.com/khryptorgraphics/novacron/backend/core/security"
 	"github.com/khryptorgraphics/novacron/backend/pkg/logger"
 )
 
 type DatabaseHandlers struct {
-	db *sql.DB
+	db        *sql.DB
+	protector *security.SQLInjectionProtector
+	validator *security.InputValidator
 }
 
 type TableInfo struct {
@@ -54,7 +58,12 @@ type IndexInfo struct {
 }
 
 func NewDatabaseHandlers(db *sql.DB) *DatabaseHandlers {
-	return &DatabaseHandlers{db: db}
+	sqlxDB := sqlx.NewDb(db, "postgres")
+	return &DatabaseHandlers{
+		db:        db,
+		protector: security.NewSQLInjectionProtector(sqlxDB),
+		validator: security.NewInputValidator(),
+	}
 }
 
 // GET /api/admin/database/tables - List all tables

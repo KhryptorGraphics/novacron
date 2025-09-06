@@ -15,7 +15,7 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/pkg/logger"
 )
 
-type UserManagementHandlers struct {
+type SecureUserManagementHandlers struct {
 	db        *sql.DB
 	protector *security.SQLInjectionProtector
 }
@@ -52,16 +52,16 @@ type UserListResponse struct {
 	TotalPages int    `json:"total_pages"`
 }
 
-func NewUserManagementHandlers(db *sql.DB) *UserManagementHandlers {
+func NewSecureUserManagementHandlers(db *sql.DB) *SecureUserManagementHandlers {
 	sqlxDB := sqlx.NewDb(db, "postgres")
-	return &UserManagementHandlers{
+	return &SecureUserManagementHandlers{
 		db:        db,
 		protector: security.NewSQLInjectionProtector(sqlxDB),
 	}
 }
 
-// GET /api/admin/users - List users with pagination
-func (h *UserManagementHandlers) ListUsers(w http.ResponseWriter, r *http.Request) {
+// GET /api/admin/users - List users with pagination (SQL injection safe)
+func (h *SecureUserManagementHandlers) ListUsers(w http.ResponseWriter, r *http.Request) {
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	if page <= 0 {
 		page = 1
@@ -77,48 +77,57 @@ func (h *UserManagementHandlers) ListUsers(w http.ResponseWriter, r *http.Reques
 	
 	offset := (page - 1) * pageSize
 	
-	// Build query with filters
-	baseQuery := `SELECT id, username, email, role, active, created_at, updated_at FROM users`
-	countQuery := `SELECT COUNT(*) FROM users`
+	// Sanitize input parameters
+	search = security.SanitizeSearchTerm(search)
 	
-	conditions := []string{}
-	args := []interface{}{}
-	argIndex := 1
-	
-	if search != "" {
-		conditions = append(conditions, fmt.Sprintf("(username ILIKE $%d OR email ILIKE $%d)", argIndex, argIndex))
-		args = append(args, "%"+search+"%")
-		argIndex++
-	}
-	
+	// Validate role parameter against allowed values
 	if role != "" {
-		conditions = append(conditions, fmt.Sprintf("role = $%d", argIndex))
-		args = append(args, role)
-		argIndex++
-	}
-	
-	whereClause := ""
-	if len(conditions) > 0 {
-		whereClause = " WHERE " + conditions[0]
-		for _, condition := range conditions[1:] {
-			whereClause += " AND " + condition
+		allowedRoles := []string{"admin", "user", "viewer", "operator"}
+		roleValid := false
+		for _, allowedRole := range allowedRoles {
+			if role == allowedRole {
+				roleValid = true
+				break
+			}
+		}
+		if !roleValid {
+			http.Error(w, "Invalid role filter", http.StatusBadRequest)
+			return
 		}
 	}
 	
-	// Get total count
+	// Build secure parameterized query
+	baseQuery := `SELECT id, username, email, role, active, created_at, updated_at FROM users`
+	countQuery := `SELECT COUNT(*) FROM users`
+	
+	var whereClause string
+	var args []interface{}
+	
+	if search != "" && role != "" {
+		whereClause = ` WHERE (username ILIKE $1 OR email ILIKE $2) AND role = $3`
+		args = []interface{}{"%" + search + "%", "%" + search + "%", role}
+	} else if search != "" {
+		whereClause = ` WHERE (username ILIKE $1 OR email ILIKE $2)`
+		args = []interface{}{"%" + search + "%", "%" + search + "%"}
+	} else if role != "" {
+		whereClause = ` WHERE role = $1`
+		args = []interface{}{role}
+	}
+	
+	// Get total count using protected query
 	var total int
-	err := h.db.QueryRow(countQuery+whereClause, args...).Scan(&total)
-	if err != nil {
+	countRow := h.protector.SafeQueryRow(r.Context(), countQuery+whereClause, args...)
+	if err := countRow.Scan(&total); err != nil {
 		logger.Error("Failed to count users", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	
-	// Get users
-	query := baseQuery + whereClause + fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", argIndex, argIndex+1)
+	// Get users with limit and offset
+	query := baseQuery + whereClause + ` ORDER BY created_at DESC LIMIT $` + strconv.Itoa(len(args)+1) + ` OFFSET $` + strconv.Itoa(len(args)+2)
 	args = append(args, pageSize, offset)
 	
-	rows, err := h.db.Query(query, args...)
+	rows, err := h.protector.SafeQuery(r.Context(), query, args...)
 	if err != nil {
 		logger.Error("Failed to query users", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -151,8 +160,8 @@ func (h *UserManagementHandlers) ListUsers(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(response)
 }
 
-// POST /api/admin/users - Create user
-func (h *UserManagementHandlers) CreateUser(w http.ResponseWriter, r *http.Request) {
+// POST /api/admin/users - Create user (SQL injection safe)
+func (h *SecureUserManagementHandlers) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var req CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -160,19 +169,48 @@ func (h *UserManagementHandlers) CreateUser(w http.ResponseWriter, r *http.Reque
 	}
 	
 	// Validate required fields
+	req.Username = strings.TrimSpace(req.Username)
+	req.Email = strings.TrimSpace(req.Email)
+	
 	if req.Username == "" || req.Email == "" || req.Password == "" {
 		http.Error(w, "Username, email, and password are required", http.StatusBadRequest)
 		return
 	}
 	
-	if req.Role == "" {
-		req.Role = "user" // Default role
+	// Validate username length and characters
+	if len(req.Username) < 1 || len(req.Username) > 50 {
+		http.Error(w, "Username must be 1-50 characters", http.StatusBadRequest)
+		return
 	}
 	
-	// Check if username or email already exists
+	// Basic email validation
+	if !strings.Contains(req.Email, "@") || len(req.Email) > 100 {
+		http.Error(w, "Invalid email format", http.StatusBadRequest)
+		return
+	}
+	
+	// Validate role
+	if req.Role == "" {
+		req.Role = "user" // Default role
+	} else {
+		allowedRoles := []string{"admin", "user", "viewer", "operator"}
+		roleValid := false
+		for _, allowedRole := range allowedRoles {
+			if req.Role == allowedRole {
+				roleValid = true
+				break
+			}
+		}
+		if !roleValid {
+			http.Error(w, "Invalid role", http.StatusBadRequest)
+			return
+		}
+	}
+	
+	// Check if username or email already exists using protected query
 	var exists bool
-	err := h.db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE username = $1 OR email = $2)", req.Username, req.Email).Scan(&exists)
-	if err != nil {
+	existsRow := h.protector.SafeQueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1 OR email = $2)", req.Username, req.Email)
+	if err := existsRow.Scan(&exists); err != nil {
 		logger.Error("Failed to check user existence", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -186,28 +224,28 @@ func (h *UserManagementHandlers) CreateUser(w http.ResponseWriter, r *http.Reque
 	// Hash password (simplified - in production, use proper password hashing)
 	// hashedPassword := hashPassword(req.Password)
 	
-	// Insert user
+	// Insert user using protected query
 	var userID int
-	err = h.db.QueryRow(`
+	insertRow := h.protector.SafeQueryRow(r.Context(), `
 		INSERT INTO users (username, email, password_hash, role, active, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, true, NOW(), NOW())
 		RETURNING id
-	`, req.Username, req.Email, req.Password, req.Role).Scan(&userID)
+	`, req.Username, req.Email, req.Password, req.Role)
 	
-	if err != nil {
+	if err := insertRow.Scan(&userID); err != nil {
 		logger.Error("Failed to create user", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	
-	// Return created user (without password)
+	// Return created user (without password) using protected query
 	var user User
-	err = h.db.QueryRow(`
+	userRow := h.protector.SafeQueryRow(r.Context(), `
 		SELECT id, username, email, role, active, created_at, updated_at
 		FROM users WHERE id = $1
-	`, userID).Scan(&user.ID, &user.Username, &user.Email, &user.Role, &user.Active, &user.CreatedAt, &user.UpdatedAt)
+	`, userID)
 	
-	if err != nil {
+	if err := userRow.Scan(&user.ID, &user.Username, &user.Email, &user.Role, &user.Active, &user.CreatedAt, &user.UpdatedAt); err != nil {
 		logger.Error("Failed to retrieve created user", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -218,8 +256,8 @@ func (h *UserManagementHandlers) CreateUser(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(user)
 }
 
-// PUT /api/admin/users/{id} - Update user
-func (h *UserManagementHandlers) UpdateUser(w http.ResponseWriter, r *http.Request) {
+// PUT /api/admin/users/{id} - Update user (SQL injection safe)
+func (h *SecureUserManagementHandlers) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	userID, err := strconv.Atoi(vars["id"])
 	if err != nil {
@@ -233,10 +271,10 @@ func (h *UserManagementHandlers) UpdateUser(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	
-	// Check if user exists
+	// Check if user exists using protected query
 	var exists bool
-	err = h.db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", userID).Scan(&exists)
-	if err != nil {
+	existsRow := h.protector.SafeQueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", userID)
+	if err := existsRow.Scan(&exists); err != nil {
 		logger.Error("Failed to check user existence", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -247,33 +285,52 @@ func (h *UserManagementHandlers) UpdateUser(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	
-	// Build update query dynamically
+	// Build secure update query
 	setParts := []string{}
 	args := []interface{}{}
-	argIndex := 1
 	
 	if req.Username != "" {
-		setParts = append(setParts, fmt.Sprintf("username = $%d", argIndex))
+		// Validate username
+		req.Username = strings.TrimSpace(req.Username)
+		if len(req.Username) < 1 || len(req.Username) > 50 {
+			http.Error(w, "Username must be 1-50 characters", http.StatusBadRequest)
+			return
+		}
+		setParts = append(setParts, "username = $"+strconv.Itoa(len(args)+1))
 		args = append(args, req.Username)
-		argIndex++
 	}
 	
 	if req.Email != "" {
-		setParts = append(setParts, fmt.Sprintf("email = $%d", argIndex))
+		// Basic email validation
+		if !strings.Contains(req.Email, "@") || len(req.Email) > 100 {
+			http.Error(w, "Invalid email format", http.StatusBadRequest)
+			return
+		}
+		setParts = append(setParts, "email = $"+strconv.Itoa(len(args)+1))
 		args = append(args, req.Email)
-		argIndex++
 	}
 	
 	if req.Role != "" {
-		setParts = append(setParts, fmt.Sprintf("role = $%d", argIndex))
+		// Validate role
+		allowedRoles := []string{"admin", "user", "viewer", "operator"}
+		roleValid := false
+		for _, allowedRole := range allowedRoles {
+			if req.Role == allowedRole {
+				roleValid = true
+				break
+			}
+		}
+		if !roleValid {
+			http.Error(w, "Invalid role", http.StatusBadRequest)
+			return
+		}
+		setParts = append(setParts, "role = $"+strconv.Itoa(len(args)+1))
 		args = append(args, req.Role)
-		argIndex++
 	}
 	
 	if req.Active != nil {
-		setParts = append(setParts, fmt.Sprintf("active = $%d", argIndex))
+		setParts = append(setParts, "active = $"+strconv.Itoa(len(args)+1))
 		args = append(args, *req.Active)
-		argIndex++
 	}
 	
 	if len(setParts) == 0 {
@@ -281,30 +338,27 @@ func (h *UserManagementHandlers) UpdateUser(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	
-	setParts = append(setParts, fmt.Sprintf("updated_at = NOW()"))
-	setClause := setParts[0]
-	for _, part := range setParts[1:] {
-		setClause += ", " + part
-	}
+	setParts = append(setParts, "updated_at = NOW()")
+	setClause := strings.Join(setParts, ", ")
 	
 	args = append(args, userID)
-	query := fmt.Sprintf("UPDATE users SET %s WHERE id = $%d", setClause, argIndex)
+	query := "UPDATE users SET " + setClause + " WHERE id = $" + strconv.Itoa(len(args))
 	
-	_, err = h.db.Exec(query, args...)
+	_, err = h.protector.SafeExec(r.Context(), query, args...)
 	if err != nil {
 		logger.Error("Failed to update user", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	
-	// Return updated user
+	// Return updated user using protected query
 	var user User
-	err = h.db.QueryRow(`
+	updatedUserRow := h.protector.SafeQueryRow(r.Context(), `
 		SELECT id, username, email, role, active, created_at, updated_at
 		FROM users WHERE id = $1
-	`, userID).Scan(&user.ID, &user.Username, &user.Email, &user.Role, &user.Active, &user.CreatedAt, &user.UpdatedAt)
+	`, userID)
 	
-	if err != nil {
+	if err := updatedUserRow.Scan(&user.ID, &user.Username, &user.Email, &user.Role, &user.Active, &user.CreatedAt, &user.UpdatedAt); err != nil {
 		logger.Error("Failed to retrieve updated user", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -314,8 +368,8 @@ func (h *UserManagementHandlers) UpdateUser(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(user)
 }
 
-// DELETE /api/admin/users/{id} - Delete user
-func (h *UserManagementHandlers) DeleteUser(w http.ResponseWriter, r *http.Request) {
+// DELETE /api/admin/users/{id} - Delete user (SQL injection safe)
+func (h *SecureUserManagementHandlers) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	userID, err := strconv.Atoi(vars["id"])
 	if err != nil {
@@ -323,10 +377,10 @@ func (h *UserManagementHandlers) DeleteUser(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	
-	// Check if user exists
+	// Check if user exists using protected query
 	var exists bool
-	err = h.db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", userID).Scan(&exists)
-	if err != nil {
+	deleteExistsRow := h.protector.SafeQueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", userID)
+	if err := deleteExistsRow.Scan(&exists); err != nil {
 		logger.Error("Failed to check user existence", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -337,8 +391,8 @@ func (h *UserManagementHandlers) DeleteUser(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	
-	// Delete user
-	_, err = h.db.Exec("DELETE FROM users WHERE id = $1", userID)
+	// Delete user using protected query
+	_, err = h.protector.SafeExec(r.Context(), "DELETE FROM users WHERE id = $1", userID)
 	if err != nil {
 		logger.Error("Failed to delete user", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -348,8 +402,8 @@ func (h *UserManagementHandlers) DeleteUser(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// POST /api/admin/users/{id}/roles - Assign roles to user
-func (h *UserManagementHandlers) AssignRoles(w http.ResponseWriter, r *http.Request) {
+// POST /api/admin/users/{id}/roles - Assign roles to user (SQL injection safe)
+func (h *SecureUserManagementHandlers) AssignRoles(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	userID, err := strconv.Atoi(vars["id"])
 	if err != nil {
@@ -366,10 +420,22 @@ func (h *UserManagementHandlers) AssignRoles(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	
-	// For simplicity, we'll just update the main role field
-	// In a more complex system, you'd have a separate user_roles table
+	// Validate roles and update using protected query
 	if len(req.Roles) > 0 {
-		_, err = h.db.Exec("UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2", req.Roles[0], userID)
+		// Validate role
+		allowedRoles := []string{"admin", "user", "viewer", "operator"}
+		roleValid := false
+		for _, allowedRole := range allowedRoles {
+			if req.Roles[0] == allowedRole {
+				roleValid = true
+				break
+			}
+		}
+		if !roleValid {
+			http.Error(w, "Invalid role", http.StatusBadRequest)
+			return
+		}
+		_, err = h.protector.SafeExec(r.Context(), "UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2", req.Roles[0], userID)
 		if err != nil {
 			logger.Error("Failed to assign role", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
