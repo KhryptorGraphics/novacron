@@ -23,11 +23,11 @@ func New(databaseURL string) (*DB, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Configure connection pool
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(12)
-	db.SetConnMaxLifetime(5 * time.Minute)
-	db.SetConnMaxIdleTime(1 * time.Minute)
+	// Configure optimized connection pool for high performance
+	db.SetMaxOpenConns(100)              // Increased from 25 to handle more concurrent requests
+	db.SetMaxIdleConns(25)               // Increased from 12 to reduce connection overhead
+	db.SetConnMaxLifetime(30 * time.Minute) // Increased from 5 minutes for better reuse
+	db.SetConnMaxIdleTime(5 * time.Minute)  // Increased from 1 minute to reduce reconnection overhead
 
 	// Test connection
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -149,36 +149,98 @@ func (r *VMRepository) GetByID(ctx context.Context, id string) (*VM, error) {
 	return &vm, nil
 }
 
-// List retrieves all VMs with optional filtering
+// List retrieves all VMs with optional filtering and eager loading to prevent N+1 queries
 func (r *VMRepository) List(ctx context.Context, filters map[string]interface{}) ([]*VM, error) {
-	query := `SELECT id, name, state, node_id, owner_id, tenant_id, config, created_at, updated_at FROM vms WHERE 1=1`
+	// Use eager loading with JOINs to avoid N+1 queries
+	query := `
+		SELECT 
+			v.id, v.name, v.state, v.node_id, v.owner_id, v.tenant_id, v.config, v.created_at, v.updated_at,
+			u.username as owner_username,
+			t.name as tenant_name,
+			COALESCE(latest_metrics.cpu_usage, 0) as latest_cpu,
+			COALESCE(latest_metrics.memory_usage, 0) as latest_memory
+		FROM vms v
+		LEFT JOIN users u ON v.owner_id = u.id
+		LEFT JOIN tenants t ON v.tenant_id = t.id
+		LEFT JOIN LATERAL (
+			SELECT cpu_usage, memory_usage 
+			FROM vm_metrics 
+			WHERE vm_id = v.id 
+			ORDER BY timestamp DESC 
+			LIMIT 1
+		) latest_metrics ON true
+		WHERE 1=1`
 	args := []interface{}{}
 	argIndex := 1
 
 	// Add filters
 	if tenantID, ok := filters["tenant_id"]; ok {
-		query += fmt.Sprintf(" AND tenant_id = $%d", argIndex)
+		query += fmt.Sprintf(" AND v.tenant_id = $%d", argIndex)
 		args = append(args, tenantID)
 		argIndex++
 	}
 
 	if ownerID, ok := filters["owner_id"]; ok {
-		query += fmt.Sprintf(" AND owner_id = $%d", argIndex)
+		query += fmt.Sprintf(" AND v.owner_id = $%d", argIndex)
 		args = append(args, ownerID)
 		argIndex++
 	}
 
 	if state, ok := filters["state"]; ok {
-		query += fmt.Sprintf(" AND state = $%d", argIndex)
+		query += fmt.Sprintf(" AND v.state = $%d", argIndex)
 		args = append(args, state)
 		argIndex++
 	}
 
-	query += " ORDER BY created_at DESC"
+	query += " ORDER BY v.created_at DESC"
+
+	// Use prepared statement for better performance
+	stmt, err := r.db.PrepareContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare VM list query: %w", err)
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.QueryContext(ctx, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute VM list query: %w", err)
+	}
+	defer rows.Close()
 
 	var vms []*VM
-	if err := r.db.SelectContext(ctx, &vms, query, args...); err != nil {
-		return nil, fmt.Errorf("failed to list VMs: %w", err)
+	for rows.Next() {
+		vm := &VM{}
+		var ownerUsername, tenantName sql.NullString
+		var latestCPU, latestMemory sql.NullFloat64
+		
+		err := rows.Scan(
+			&vm.ID, &vm.Name, &vm.State, &vm.NodeID, &vm.OwnerID, &vm.TenantID, 
+			&vm.Config, &vm.CreatedAt, &vm.UpdatedAt,
+			&ownerUsername, &tenantName, &latestCPU, &latestMemory,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan VM row: %w", err)
+		}
+		
+		// Add preloaded data to avoid additional queries
+		if ownerUsername.Valid {
+			vm.OwnerUsername = ownerUsername.String
+		}
+		if tenantName.Valid {
+			vm.TenantName = tenantName.String
+		}
+		if latestCPU.Valid {
+			vm.LatestCPU = latestCPU.Float64
+		}
+		if latestMemory.Valid {
+			vm.LatestMemory = latestMemory.Float64
+		}
+		
+		vms = append(vms, vm)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating VM rows: %w", err)
 	}
 
 	return vms, nil
@@ -254,22 +316,46 @@ func (r *MetricsRepository) GetVMMetrics(ctx context.Context, vmID string, start
 	return metrics, nil
 }
 
-// GetLatestVMMetrics retrieves the latest metrics for all VMs
+// GetLatestVMMetrics retrieves the latest metrics for all VMs with optimized query
 func (r *MetricsRepository) GetLatestVMMetrics(ctx context.Context) ([]*VMMetric, error) {
+	// Optimized query using DISTINCT ON for better performance
 	query := `
-		WITH ranked_metrics AS (
-			SELECT vm_id, cpu_usage, memory_usage, disk_usage, network_sent, network_recv, iops, timestamp,
-				   ROW_NUMBER() OVER (PARTITION BY vm_id ORDER BY timestamp DESC) as rn
-			FROM vm_metrics
-			WHERE timestamp > NOW() - INTERVAL '1 hour'
-		)
-		SELECT vm_id, cpu_usage, memory_usage, disk_usage, network_sent, network_recv, iops, timestamp
-		FROM ranked_metrics 
-		WHERE rn = 1`
+		SELECT DISTINCT ON (vm_id) 
+			id, vm_id, cpu_usage, memory_usage, disk_usage, 
+			network_sent, network_recv, iops, timestamp
+		FROM vm_metrics
+		WHERE timestamp > NOW() - INTERVAL '1 hour'
+		ORDER BY vm_id, timestamp DESC`
+
+	// Use prepared statement with connection pooling
+	stmt, err := r.db.PrepareContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare latest VM metrics query: %w", err)
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.QueryContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute latest VM metrics query: %w", err)
+	}
+	defer rows.Close()
 
 	var metrics []*VMMetric
-	if err := r.db.SelectContext(ctx, &metrics, query); err != nil {
-		return nil, fmt.Errorf("failed to get latest VM metrics: %w", err)
+	for rows.Next() {
+		metric := &VMMetric{}
+		err := rows.Scan(
+			&metric.ID, &metric.VMID, &metric.CPUUsage, &metric.MemoryUsage,
+			&metric.DiskUsage, &metric.NetworkSent, &metric.NetworkRecv,
+			&metric.IOPS, &metric.Timestamp,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan VM metric row: %w", err)
+		}
+		metrics = append(metrics, metric)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating VM metric rows: %w", err)
 	}
 
 	return metrics, nil

@@ -50,7 +50,7 @@ type User struct {
 	UpdatedAt  time.Time `db:"updated_at" json:"updated_at"`
 }
 
-// VM represents a virtual machine in the database
+// VM represents a virtual machine in the database with preloaded relationships
 type VM struct {
 	ID        string    `db:"id" json:"id"`
 	Name      string    `db:"name" json:"name"`
@@ -61,6 +61,12 @@ type VM struct {
 	Config    JSONB     `db:"config" json:"config,omitempty"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+	
+	// Preloaded relationships to prevent N+1 queries
+	OwnerUsername string  `db:"-" json:"owner_username,omitempty"`
+	TenantName    string  `db:"-" json:"tenant_name,omitempty"`
+	LatestCPU     float64 `db:"-" json:"latest_cpu,omitempty"`
+	LatestMemory  float64 `db:"-" json:"latest_memory,omitempty"`
 }
 
 // VMMetric represents VM performance metrics in the database
