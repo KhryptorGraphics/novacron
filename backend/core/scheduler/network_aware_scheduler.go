@@ -8,7 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/khryptorgraphics/novacron/backend/core/scheduler/network"
+	"github.com/khryptorgraphics/novacron/backend/core/network"
+	ntop "github.com/khryptorgraphics/novacron/backend/core/network/topology"
 	"github.com/khryptorgraphics/novacron/backend/core/scheduler/workload"
 )
 
@@ -85,7 +86,10 @@ type NetworkAwareScheduler struct {
 	config NetworkAwareSchedulerConfig
 
 	// networkTopology is the network topology of the cluster
-	networkTopology *network.NetworkTopology
+	networkTopology *ntop.NetworkTopology
+
+	// performancePredictor is the AI-based performance predictor for network predictions
+	performancePredictor network.PerformancePredictor
 
 	// vmCommunications maps VM pairs to their communication statistics
 	vmCommunications     map[string]*VMCommunication
@@ -108,7 +112,8 @@ func NewNetworkAwareScheduler(
 	config NetworkAwareSchedulerConfig,
 	baseScheduler *Scheduler,
 	workloadAnalyzer *workload.WorkloadAnalyzer,
-	networkTopology *network.NetworkTopology,
+	networkTopology *ntop.NetworkTopology,
+	performancePredictor network.PerformancePredictor,
 ) *NetworkAwareScheduler {
 	// Create base resource-aware scheduler
 	resourceScheduler := NewResourceAwareScheduler(
@@ -122,6 +127,7 @@ func NewNetworkAwareScheduler(
 		ResourceAwareScheduler: resourceScheduler,
 		config:                 config,
 		networkTopology:        networkTopology,
+		performancePredictor:   performancePredictor,
 		vmCommunications:       make(map[string]*VMCommunication),
 		vmLocationCache:        make(map[string]string),
 		vmAffinityGroups:       make(map[string][]string),
@@ -258,6 +264,56 @@ func (s *NetworkAwareScheduler) TrackVMCommunication(sourceVMID, destVMID string
 			Priority:        0.5, // Default priority
 		}
 	}
+
+	// Store network metrics in AI predictor if available
+	if s.performancePredictor != nil {
+		go s.storeNetworkMetrics(sourceVMID, destVMID, bandwidth)
+	}
+}
+
+// storeNetworkMetrics stores network metrics in the AI predictor
+func (s *NetworkAwareScheduler) storeNetworkMetrics(sourceVMID, destVMID string, bandwidth float64) {
+	s.vmLocationCacheMutex.RLock()
+	sourceNodeID, sourceExists := s.vmLocationCache[sourceVMID]
+	destNodeID, destExists := s.vmLocationCache[destVMID]
+	s.vmLocationCacheMutex.RUnlock()
+
+	if !sourceExists || !destExists {
+		log.Printf("Cannot store network metrics: missing node locations for VMs %s or %s", sourceVMID, destVMID)
+		return
+	}
+
+	// Get link information for latency calculation
+	latency := 5.0 // Default latency
+	if link, err := s.networkTopology.GetLink(sourceNodeID, destNodeID); err == nil {
+		latency = link.Latency
+	}
+
+	// Create network metrics
+	metrics := network.NetworkMetrics{
+		Timestamp:         time.Now(),
+		SourceNode:        sourceNodeID,
+		TargetNode:        destNodeID,
+		BandwidthMbps:     bandwidth,
+		LatencyMs:         latency,
+		PacketLoss:        0.01, // Default 1% packet loss
+		JitterMs:          latency * 0.1, // Estimate jitter as 10% of latency
+		ThroughputMbps:    bandwidth * 0.95, // Assume 95% efficiency
+		ConnectionQuality: math.Max(0.0, 1.0 - (latency/100.0) - 0.01), // Quality based on latency and packet loss
+		RouteHops:         2, // Default route hops
+		CongestionLevel:   0.3, // Default congestion level
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := s.performancePredictor.StoreNetworkMetrics(ctx, metrics)
+	if err != nil {
+		log.Printf("Failed to store network metrics for %s -> %s: %v", sourceNodeID, destNodeID, err)
+	} else {
+		log.Printf("Successfully stored network metrics for %s -> %s: %.2f Mbps, %.2f ms latency", 
+			sourceNodeID, destNodeID, bandwidth, latency)
+	}
 }
 
 // SetVMLatencyRequirement sets a latency requirement for VM communication
@@ -294,6 +350,48 @@ func (s *NetworkAwareScheduler) UpdateVMLocation(vmID, nodeID string) {
 	s.vmLocationCacheMutex.Lock()
 	defer s.vmLocationCacheMutex.Unlock()
 	s.vmLocationCache[vmID] = nodeID
+
+	// Store workload characteristics in AI predictor if available
+	if s.performancePredictor != nil {
+		go s.storeVMWorkloadCharacteristics(vmID)
+	}
+}
+
+// storeVMWorkloadCharacteristics stores VM workload characteristics in the AI predictor
+func (s *NetworkAwareScheduler) storeVMWorkloadCharacteristics(vmID string) {
+	// Get workload profile if available
+	if s.workloadAnalyzer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		profile, err := s.workloadAnalyzer.GetWorkloadProfile(vmID)
+		if err != nil {
+			log.Printf("Failed to get workload profile for VM %s: %v", vmID, err)
+			return
+		}
+
+		// Convert workload profile to characteristics for AI predictor
+		workloadChars := network.WorkloadCharacteristics{
+			VMID:                 vmID,
+			WorkloadType:         profile.WorkloadType,
+			CPUCores:             int(profile.AvgCPUCores),
+			MemoryGB:             profile.AvgMemoryGB,
+			StorageGB:            profile.AvgStorageGB,
+			NetworkIntensive:     profile.NetworkIOPattern == "high" || profile.NetworkIOPattern == "intensive",
+			ExpectedConnections:  10, // Default value, could be enhanced with actual data
+			DataTransferPattern:  profile.NetworkIOPattern,
+			PeakHours:           []int{9, 10, 14, 15}, // Default business hours
+			HistoricalBandwidth: profile.AvgNetworkBandwidth,
+		}
+
+		// Store the characteristics
+		err = s.performancePredictor.StoreWorkloadCharacteristics(ctx, workloadChars)
+		if err != nil {
+			log.Printf("Failed to store workload characteristics for VM %s: %v", vmID, err)
+		} else {
+			log.Printf("Successfully stored workload characteristics for VM %s", vmID)
+		}
+	}
 }
 
 // CreateVMAffinityGroup creates a VM affinity group
@@ -485,7 +583,7 @@ func (s *NetworkAwareScheduler) scoreBandwidthAvailability(nodeID string) (float
 		return 0.0, false
 	}
 
-	nodeLinks := make([]*network.NetworkLink, 0)
+	nodeLinks := make([]*ntop.NetworkLink, 0)
 	for _, link := range links {
 		if link.SourceID == nodeID || link.DestinationID == nodeID {
 			nodeLinks = append(nodeLinks, link)
@@ -498,14 +596,63 @@ func (s *NetworkAwareScheduler) scoreBandwidthAvailability(nodeID string) (float
 
 	// Calculate average available bandwidth (1.0 - utilization) * bandwidth
 	availableBandwidth := 0.0
+	aiPredictedBandwidth := 0.0
+	aiPredictionCount := 0
+
 	for _, link := range nodeLinks {
-		availableBandwidth += (1.0 - link.Utilization) * link.Bandwidth
+		linkBandwidth := (1.0 - link.Utilization) * link.Bandwidth
+		availableBandwidth += linkBandwidth
+
+		// Try to get AI prediction for this link if performance predictor is available
+		if s.performancePredictor != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			
+			// Create a prediction request for this link
+			request := network.PredictionRequest{
+				SourceNode:         link.SourceID,
+				TargetNode:         link.DestinationID,
+				TimeHorizonHours:   1, // Predict for next hour
+				ConfidenceLevel:    0.8,
+				IncludeUncertainty: false,
+				WorkloadChars: network.WorkloadCharacteristics{
+					WorkloadType:        "compute",
+					NetworkIntensive:    true,
+					DataTransferPattern: "steady",
+				},
+			}
+
+			prediction, err := s.performancePredictor.PredictBandwidth(ctx, request)
+			cancel()
+
+			if err == nil && prediction.PredictedBandwidth > 0 {
+				// Use AI prediction if available and reasonable
+				if prediction.PredictionConfidence > 0.5 {
+					aiPredictedBandwidth += prediction.PredictedBandwidth
+					aiPredictionCount++
+				}
+			}
+		}
 	}
-	avgAvailableBandwidth := availableBandwidth / float64(len(nodeLinks))
+
+	// Calculate average bandwidth
+	var avgBandwidth float64
+	if aiPredictionCount > 0 && s.performancePredictor != nil {
+		// Use weighted combination of actual and AI-predicted bandwidth
+		actualAvg := availableBandwidth / float64(len(nodeLinks))
+		aiAvg := aiPredictedBandwidth / float64(aiPredictionCount)
+		
+		// Weight AI predictions at 60%, actual measurements at 40%
+		avgBandwidth = (aiAvg * 0.6) + (actualAvg * 0.4)
+		
+		log.Printf("Bandwidth scoring for node %s: actual=%.2f, AI-predicted=%.2f, weighted=%.2f", 
+			nodeID, actualAvg, aiAvg, avgBandwidth)
+	} else {
+		avgBandwidth = availableBandwidth / float64(len(nodeLinks))
+	}
 
 	// Normalize score: higher available bandwidth is better
 	// Assuming 10 Gbps as reference for normalization
-	score := math.Min(avgAvailableBandwidth/10000.0, 1.0)
+	score := math.Min(avgBandwidth/10000.0, 1.0)
 	return score, true
 }
 
@@ -700,10 +847,18 @@ func (s *NetworkAwareScheduler) RequestPlacement(vmID string, policy PlacementPo
 		// Add network-specific constraints if needed
 		// ...
 
-		// Ensure network awareness is given proper weight
-		s.config.NetworkAwarenessWeight = 0.6 // Increase weight for network-aware policy
+		// Create a thread-safe copy of the config for this request to avoid mutation
+		tempConfig := s.config
+		tempConfig.NetworkAwarenessWeight = 0.6 // Increase weight for network-aware policy
+		
+		// Create a temporary scheduler instance with the modified config
+		tempScheduler := *s
+		tempScheduler.config = tempConfig
+		
+		// Call base implementation with the temporary config
+		return tempScheduler.ResourceAwareScheduler.RequestPlacement(vmID, policy, constraints, resources, priority)
 	}
 
-	// Call base implementation
+	// Call base implementation with original config
 	return s.ResourceAwareScheduler.RequestPlacement(vmID, policy, constraints, resources, priority)
 }

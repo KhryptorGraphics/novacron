@@ -80,6 +80,8 @@ func (r *Resolver) CreateVM(ctx context.Context, args struct{ Input CreateVMInpu
 			CPUShares:  args.Input.CPU,
 			MemoryMB:   args.Input.Memory,
 			DiskSizeGB: args.Input.Disk,
+			Image:      args.Input.Image, // Set Image field for containerd driver
+			RootFS:     args.Input.Image, // Also set RootFS for compatibility
 			Command:    "/bin/bash",
 		},
 		Tags: make(map[string]string),
@@ -103,8 +105,32 @@ func (r *Resolver) UpdateVM(ctx context.Context, args struct {
 	ID    string
 	Input UpdateVMInput
 }) (*VM, error) {
-	// TODO: Implement UpdateVM method on VMManager
-	// For now, return placeholder response
+	// Convert GraphQL input to update spec
+	updateSpec := vm.VMUpdateSpec{}
+	if args.Input.Name != nil {
+		updateSpec.Name = args.Input.Name
+	}
+	if args.Input.CPU != nil {
+		updateSpec.CPU = args.Input.CPU
+	}
+	if args.Input.Memory != nil {
+		memory := int64(*args.Input.Memory)
+		updateSpec.Memory = &memory
+	}
+	if args.Input.Disk != nil {
+		updateSpec.Disk = args.Input.Disk
+	}
+	if args.Input.Tags != nil {
+		updateSpec.Tags = args.Input.Tags
+	}
+	
+	// Call VM manager to update
+	err := r.vmManager.UpdateVM(ctx, args.ID, updateSpec)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Get updated VM
 	vmInstance, err := r.vmManager.GetVM(args.ID)
 	if err != nil {
 		return nil, err
@@ -173,14 +199,30 @@ func (r *Resolver) MigrateVM(ctx context.Context, args struct {
 	ID    string
 	Input MigrateVMInput
 }) (*Migration, error) {
+	// Get VM to get source host
+	vmInstance, err := r.vmManager.GetVM(args.ID)
+	if err != nil {
+		return nil, err
+	}
+	
 	migrationID := fmt.Sprintf("migration-%d", time.Now().Unix())
+	sourceHost := vmInstance.NodeID()
+	if sourceHost == "" {
+		sourceHost = vmInstance.NodeID() // Keep as empty string if NodeID is empty rather than hardcoded "unknown"
+	}
+	
+	// Determine migration type from input
+	migrationType := "OFFLINE"
+	if args.Input.Live {
+		migrationType = "LIVE"
+	}
 	
 	migration := &Migration{
 		ID:         migrationID,
 		VMID:       args.ID,
-		SourceHost: "current-host", // Get from VM
+		SourceHost: sourceHost,
 		TargetHost: args.Input.TargetHost,
-		Type:       "LIVE",
+		Type:       migrationType,
 		Status:     "IN_PROGRESS",
 		Progress:   0.0,
 		StartedAt:  time.Now(),
@@ -188,13 +230,31 @@ func (r *Resolver) MigrateVM(ctx context.Context, args struct {
 	
 	// Start migration in background
 	go func() {
-		// TODO: Implement MigrateVM method on VMManager
-		// For now, simulate migration completion
-		time.Sleep(1 * time.Second)
-		migration.Status = "COMPLETED"
-		migration.CompletedAt = &time.Time{}
-		*migration.CompletedAt = time.Now()
-		migration.Progress = 100.0
+		// Use background context for long-running migration operation
+		// This ensures migration continues even if the GraphQL request context is cancelled
+		migrationCtx := context.Background()
+		
+		// Prepare migration options respecting input
+		options := make(map[string]string)
+		if args.Input.Live {
+			options["migration_type"] = "live"
+		} else {
+			options["migration_type"] = "offline"
+		}
+		
+		// Call VM manager to perform migration
+		err := r.vmManager.MigrateVM(migrationCtx, args.ID, args.Input.TargetHost, options)
+		
+		if err != nil {
+			migration.Status = "FAILED"
+			migration.Error = err.Error()
+		} else {
+			migration.Status = "COMPLETED"
+			migration.Progress = 100.0
+		}
+		
+		completedAt := time.Now()
+		migration.CompletedAt = &completedAt
 		
 		// Publish completion
 		r.subscriptions.PublishMigrationProgress(migration)
@@ -209,61 +269,30 @@ func (r *Resolver) MigrateVM(ctx context.Context, args struct {
 // Storage Resolvers
 
 // Volumes returns all storage volumes
+// DEFERRED: Volume listing not implemented - TierManager lacks ListVolumes() API
+// Storage resolvers require TierManager.ListVolumes(), TierManager.CreateVolume(), 
+// and TierManager.MoveVolumeTier() methods which are not yet available
 func (r *Resolver) Volumes(ctx context.Context, args struct{ Pagination *PaginationInput }) ([]*StorageVolume, error) {
-	// TODO: Implement volume listing through TierManager
-	volumes := []map[string]interface{}{}
-	
-	// Apply pagination if provided
-	if args.Pagination != nil {
-		start := args.Pagination.Page * args.Pagination.PageSize
-		end := start + args.Pagination.PageSize
-		
-		if start > len(volumes) {
-			return []*StorageVolume{}, nil
-		}
-		if end > len(volumes) {
-			end = len(volumes)
-		}
-		
-		volumes = volumes[start:end]
-	}
-	
-	// Convert to GraphQL types
-	result := make([]*StorageVolume, len(volumes))
-	for i, vol := range volumes {
-		result[i] = convertVolume(vol)
-	}
-	
-	return result, nil
+	// TODO: Implement when TierManager supports volume listing operations
+	// Current tier-based approach doesn't represent actual storage volumes
+	return nil, fmt.Errorf("volume listing not implemented: TierManager does not support ListVolumes operation")
 }
 
 // CreateVolume creates a new storage volume
+// DEFERRED: Volume creation not implemented - TierManager lacks CreateVolume() API
 func (r *Resolver) CreateVolume(ctx context.Context, args struct{ Input CreateVolumeInput }) (*StorageVolume, error) {
-	// TODO: Implement volume creation through TierManager
-	volume := map[string]interface{}{
-		"id":   fmt.Sprintf("vol-%d", time.Now().Unix()),
-		"name": args.Input.Name,
-		"size": args.Input.Size,
-		"tier": args.Input.Tier,
-	}
-	
-	return convertVolume(volume), nil
+	// TODO: Implement when TierManager.CreateVolume() method becomes available
+	return nil, fmt.Errorf("volume creation not implemented: TierManager does not support CreateVolume operation")
 }
 
 // ChangeVolumeTier changes the storage tier of a volume
+// DEFERRED: Volume tier migration not implemented - TierManager lacks MoveVolumeTier() API
 func (r *Resolver) ChangeVolumeTier(ctx context.Context, args struct {
 	ID   string
 	Tier string
 }) (*StorageVolume, error) {
-	// TODO: Implement tier migration through TierManager
-	volume := map[string]interface{}{
-		"id":   args.ID,
-		"name": "sample-volume",
-		"size": 100,
-		"tier": args.Tier,
-	}
-	
-	return convertVolume(volume), nil
+	// TODO: Implement when TierManager.MoveVolumeTier() method becomes available
+	return nil, fmt.Errorf("volume tier migration not yet implemented - pending TierManager.MoveVolumeTier() method")
 }
 
 // Cluster Resolvers

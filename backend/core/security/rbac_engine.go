@@ -52,27 +52,27 @@ type Policy struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
 	Version     int                    `json:"version"`
-	Rules       []PolicyRule           `json:"rules"`
+	Rules       []RBACPolicyRule       `json:"rules"`
 	CreatedAt   time.Time              `json:"created_at"`
 	UpdatedAt   time.Time              `json:"updated_at"`
 	IsActive    bool                   `json:"is_active"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
-// PolicyRule represents a single rule within a policy
-type PolicyRule struct {
+// RBACPolicyRule represents a single rule within a policy
+type RBACPolicyRule struct {
 	ID         string                 `json:"id"`
 	Effect     string                 `json:"effect"`     // allow, deny
 	Principals []string               `json:"principals"` // users, roles, groups
 	Resources  []string               `json:"resources"`  // resource patterns
 	Actions    []string               `json:"actions"`    // action patterns
-	Conditions []PolicyCondition      `json:"conditions,omitempty"`
+	Conditions []RBACPolicyCondition  `json:"conditions,omitempty"`
 	Priority   int                    `json:"priority"`
 	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
-// PolicyCondition represents a condition for policy evaluation
-type PolicyCondition struct {
+// RBACPolicyCondition represents a condition for policy evaluation
+type RBACPolicyCondition struct {
 	Key      string      `json:"key"`
 	Operator string      `json:"operator"` // eq, ne, in, not_in, gt, lt, contains
 	Value    interface{} `json:"value"`

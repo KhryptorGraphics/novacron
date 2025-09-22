@@ -3,7 +3,7 @@
 // Disable static generation for this page
 export const dynamic = 'force-dynamic';
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
@@ -14,21 +14,56 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Icons } from "@/components/ui/icons";
 import { SuccessAnimation } from "@/components/ui/success-animation";
 import { useToast } from "@/components/ui/use-toast";
+import { authService } from "@/lib/auth";
 
 export default function Setup2FAPage() {
   const [step, setStep] = useState<'setup' | 'verify' | 'complete'>('setup');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingSetup, setLoadingSetup] = useState(true);
   const [verificationCode, setVerificationCode] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
+  const [secret, setSecret] = useState<string>('');
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
   const router = useRouter();
   const { toast } = useToast();
 
-  // Demo QR code and secret - in production this would come from the server
-  const qrCodeUrl = "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=otpauth://totp/NovaCron:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=NovaCron";
-  const backupCodes = [
-    "1a2b-3c4d", "5e6f-7g8h", "9i0j-1k2l",
-    "3m4n-5o6p", "7q8r-9s0t", "1u2v-3w4x"
-  ] || [];
+  // Load 2FA setup data when component mounts
+  useEffect(() => {
+    const initSetup = async () => {
+      try {
+        // Check if user is authenticated
+        if (!authService.isAuthenticated()) {
+          router.push('/auth/login');
+          return;
+        }
+
+        setLoadingSetup(true);
+        const setupData = await authService.setup2FA();
+        setQrCodeUrl(setupData.qr_code);
+        setSecret(setupData.secret);
+        setBackupCodes(setupData.backup_codes);
+      } catch (error) {
+        console.error('Failed to initialize 2FA setup:', error);
+        toast({
+          title: "Error",
+          description: "Failed to initialize 2FA setup. Please try again.",
+          variant: "destructive",
+        });
+        // Fall back to demo data if API fails
+        setQrCodeUrl("https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=otpauth://totp/NovaCron:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=NovaCron");
+        setSecret("JBSWY3DPEHPK3PXP");
+        setBackupCodes([
+          "1a2b-3c4d", "5e6f-7g8h", "9i0j-1k2l",
+          "3m4n-5o6p", "7q8r-9s0t", "1u2v-3w4x"
+        ]);
+      } finally {
+        setLoadingSetup(false);
+      }
+    };
+
+    initSetup();
+  }, [router, toast]);
 
   const handleSkip = () => {
     router.push("/dashboard");
@@ -46,29 +81,33 @@ export default function Setup2FAPage() {
     setError(null);
 
     try {
-      // Simulate API call for verification
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const user = authService.getCurrentUser();
+      if (!user) {
+        throw new Error("User not authenticated");
+      }
 
-      // For demo, accept any 6-digit code
-      if (verificationCode && verificationCode.length === 6) {
+      const verifyResponse = await authService.verify2FASetup({
+        user_id: user.id,
+        code: verificationCode,
+      });
+
+      if (verifyResponse.valid) {
+        // Enable 2FA after successful verification
+        await authService.enable2FA(verificationCode);
         setStep('complete');
         toast({
           title: "Two-Factor Authentication Enabled",
           description: "Your account is now secured with 2FA",
         });
       } else {
-        throw new Error("Invalid code");
+        throw new Error(verifyResponse.error || "Verification failed");
       }
     } catch (error) {
+      console.error('2FA verification failed:', error);
       const errorMessage = error instanceof Error ? error.message : "Invalid verification code. Please try again.";
       setError(errorMessage);
     } finally {
       setIsLoading(false);
-      // If a verification API exists, call it here instead of the demo timeout.
-      // Example (uncomment and adjust if available):
-      // const res = await apiService.verifyTwoFactor(verificationCode);
-      // if (!res.success) throw new Error(res.message || "Verification failed");
-
     }
   };
 
@@ -99,6 +138,12 @@ export default function Setup2FAPage() {
             </CardHeader>
 
             <CardContent className="space-y-6">
+              {loadingSetup ? (
+                <div className="flex items-center justify-center py-8">
+                  <Icons.spinner className="h-8 w-8 animate-spin" />
+                  <span className="ml-2">Loading 2FA setup...</span>
+                </div>
+              ) : (
               <div className="space-y-4">
                 <div className="text-center">
                   <h3 className="font-semibold mb-2">1. Install an authenticator app</h3>
@@ -129,7 +174,7 @@ export default function Setup2FAPage() {
                     </div>
                   </div>
                   <p className="text-xs text-gray-500">
-                    Or manually enter this code: <code className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">JBSWY3DPEHPK3PXP</code>
+                    Or manually enter this code: <code className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">{secret}</code>
                   </p>
                 </div>
 
@@ -152,10 +197,14 @@ export default function Setup2FAPage() {
                 </div>
               </div>
 
+              </div>
+              )}
+
               <div className="flex gap-2">
                 <Button
                   onClick={() => setStep('verify')}
                   className="flex-1"
+                  disabled={loadingSetup}
                 >
                   <Icons.arrowRight className="mr-2 h-4 w-4" />
                   Continue to Verification
@@ -163,6 +212,7 @@ export default function Setup2FAPage() {
                 <Button
                   onClick={handleSkip}
                   variant="outline"
+                  disabled={loadingSetup}
                 >
                   Skip
                 </Button>

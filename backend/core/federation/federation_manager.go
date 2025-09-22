@@ -6,7 +6,41 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/khryptorgraphics/novacron/backend/core/consensus"
+	"github.com/khryptorgraphics/novacron/backend/core/network"
+	"github.com/khryptorgraphics/novacron/backend/core/scheduler"
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
+
+// Provider defines the federation provider interface for compute modules
+type Provider interface {
+	GetFederatedClusters(ctx context.Context) (map[string]*FederatedCluster, error)
+	GetClusterResources(ctx context.Context, clusterID string) (*ClusterResources, error)
+	AllocateResources(ctx context.Context, request *ResourceAllocationRequest) (*ResourceAllocation, error)
+	ReleaseResources(ctx context.Context, allocationID string) error
+}
+
+// FederatedCluster represents a cluster in the federation for the Provider interface
+type FederatedCluster struct {
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	State     ClusterState      `json:"state"`
+	Resources *ClusterResources `json:"resources"`
+	Metadata  map[string]string `json:"metadata"`
+}
+
+// ResourceAllocationRequest represents a request for resource allocation
+type ResourceAllocationRequest struct {
+	ID          string            `json:"id"`
+	RequesterID string            `json:"requester_id"`
+	CPUCores    float64           `json:"cpu_cores"`
+	MemoryGB    float64           `json:"memory_gb"`
+	StorageGB   float64           `json:"storage_gb"`
+	Constraints map[string]string `json:"constraints"`
+	Priority    int               `json:"priority"`
+}
 
 // ClusterRole represents the role of a cluster in federation
 type ClusterRole string
@@ -249,9 +283,9 @@ type FederatedResourcePool struct {
 
 // ResourceAllocation defines allocated resources in a cluster
 type ResourceAllocation struct {
-	ID           string                 `json:"id"`
-	RequestID    string                 `json:"request_id"`
-	NodeID       string                 `json:"node_id"`
+	ID        string `json:"id"`
+	RequestID string `json:"request_id"`
+	NodeID    string `json:"node_id"`
 	// CPU is the allocated CPU in cores
 	CPU int `json:"cpu"`
 
@@ -266,10 +300,10 @@ type ResourceAllocation struct {
 
 	// AllocationRules contains additional allocation rules
 	AllocationRules map[string]interface{} `json:"allocation_rules,omitempty"`
-	Status       string                 `json:"status"`
-	AllocatedAt  time.Time              `json:"allocated_at"`
-	ExpiresAt    time.Time              `json:"expires_at"`
-	Metadata     map[string]interface{} `json:"metadata"`
+	Status          string                 `json:"status"`
+	AllocatedAt     time.Time              `json:"allocated_at"`
+	ExpiresAt       time.Time              `json:"expires_at"`
+	Metadata        map[string]interface{} `json:"metadata"`
 }
 
 // CrossClusterOperation represents an operation that spans multiple clusters
@@ -314,6 +348,39 @@ type CrossClusterOperation struct {
 	TenantID string `json:"tenant_id"`
 }
 
+// FederationProvider wraps FederationManagerImpl to implement the Provider interface
+type FederationProvider struct {
+	manager *FederationManagerImpl
+}
+
+// NewFederationProvider creates a new federation provider
+func NewFederationProvider(manager *FederationManagerImpl) *FederationProvider {
+	return &FederationProvider{manager: manager}
+}
+
+// GetFederatedClusters implements Provider interface
+func (fp *FederationProvider) GetFederatedClusters(ctx context.Context) (map[string]*FederatedCluster, error) {
+	return fp.manager.GetFederatedClusters(ctx)
+}
+
+// GetClusterResources implements Provider interface
+func (fp *FederationProvider) GetClusterResources(ctx context.Context, clusterID string) (*ClusterResources, error) {
+	return fp.manager.GetClusterResources(ctx, clusterID)
+}
+
+// AllocateResources implements Provider interface
+func (fp *FederationProvider) AllocateResources(ctx context.Context, request *ResourceAllocationRequest) (*ResourceAllocation, error) {
+	return fp.manager.AllocateResourcesProvider(ctx, request)
+}
+
+// ReleaseResources implements Provider interface
+func (fp *FederationProvider) ReleaseResources(ctx context.Context, allocationID string) error {
+	return fp.manager.ReleaseResources(ctx, allocationID)
+}
+
+// Ensure FederationProvider implements Provider interface
+var _ Provider = (*FederationProvider)(nil)
+
 // FederationManagerImpl implements FederationManager interface
 type FederationManagerImpl struct {
 	// LocalClusterID is the ID of the local cluster
@@ -351,6 +418,20 @@ type FederationManagerImpl struct {
 
 	// crossClusterMigration handles VM migration between clusters
 	crossClusterMigration *CrossClusterMigration
+
+	// Enhanced capabilities for Sprint 3
+	logger                  *zap.Logger
+	clusterDiscovery        *DHT
+	globalResourcePool      *GlobalResourcePool
+	federatedScheduler      *FederatedVMScheduler
+	crossClusterReplication *CrossClusterStateReplication
+	bandwidthMonitor        *network.BandwidthMonitor
+	federatedConsensus      *FederatedConsensus
+	securityManager         *FederationSecurityManager
+	topologyManager         *NetworkTopologyManager
+	performanceOptimizer    *FederationPerformanceOptimizer
+	eventBus                *FederationEventBus
+	metricsCollector        *FederationMetricsCollector
 }
 
 // NewFederationManager creates a new federation manager
@@ -373,8 +454,6 @@ func NewFederationManager(localClusterID string, localClusterRole ClusterRole, m
 
 	return manager
 }
-
-
 
 // AddCluster adds a cluster to the federation
 func (m *FederationManagerImpl) AddCluster(cluster *Cluster) error {
@@ -934,16 +1013,16 @@ func (fm *FederationManagerImpl) IsLeader() bool {
 func (fm *FederationManagerImpl) RequestResources(ctx context.Context, request *ResourceRequest) (*ResourceAllocation, error) {
 	// Generate a unique allocation ID
 	allocation := &ResourceAllocation{
-		ID: fmt.Sprintf("alloc-%d", time.Now().UnixNano()),
-		RequestID: request.ID,
-		NodeID: fm.LocalClusterID,
-		CPU: int(request.CPUCores),
-		MemoryGB: int(request.MemoryGB),
-		StorageGB: int(request.StorageGB),
-		Status: "allocated",
+		ID:          fmt.Sprintf("alloc-%d", time.Now().UnixNano()),
+		RequestID:   request.ID,
+		NodeID:      fm.LocalClusterID,
+		CPU:         int(request.CPUCores),
+		MemoryGB:    int(request.MemoryGB),
+		StorageGB:   int(request.StorageGB),
+		Status:      "allocated",
 		AllocatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(request.Duration),
-		Metadata: make(map[string]interface{}),
+		ExpiresAt:   time.Now().Add(request.Duration),
+		Metadata:    make(map[string]interface{}),
 	}
 	return allocation, nil
 }
@@ -972,3 +1051,884 @@ func (fm *FederationManagerImpl) GetLocalClusterID() string {
 
 // Interface method implementations that delegate to existing methods
 
+// Enhanced Sprint 3 Federation Capabilities
+
+// DHT implements distributed hash table for cluster discovery
+type DHT struct {
+	mu             sync.RWMutex
+	localNodeID    string
+	nodes          map[string]*DHTNode
+	routingTable   *RoutingTable
+	discoveryPeers []string
+	keyValueStore  map[string][]byte
+	logger         *zap.Logger
+}
+
+// DHTNode represents a node in the DHT
+type DHTNode struct {
+	ID       string
+	Address  string
+	Port     int
+	LastSeen time.Time
+	Metadata map[string]string
+}
+
+// RoutingTable maintains routing information for DHT
+type RoutingTable struct {
+	buckets     []*RoutingBucket
+	localNodeID string
+	k           int // bucket size
+}
+
+// RoutingBucket represents a routing bucket
+type RoutingBucket struct {
+	nodes       []*DHTNode
+	lastUpdated time.Time
+}
+
+// GlobalResourcePool aggregates resources across all federated clusters
+type GlobalResourcePool struct {
+	mu                sync.RWMutex
+	federationManager *FederationManagerImpl
+	resourceInventory map[string]*ClusterResourceInventory
+	allocationEngine  *GlobalAllocationEngine
+	loadBalancer      *CrossClusterLoadBalancer
+	scheduler         *scheduler.Scheduler
+	logger            *zap.Logger
+}
+
+// ClusterResourceInventory tracks resources in a cluster
+type ClusterResourceInventory struct {
+	ClusterID          string
+	TotalResources     *ResourceCapacity
+	AllocatedResources *ResourceCapacity
+	AvailableResources *ResourceCapacity
+	Utilization        map[string]float64
+	LastUpdated        time.Time
+}
+
+// ResourceCapacity represents resource capacity
+type ResourceCapacity struct {
+	CPU     float64
+	Memory  int64
+	Storage int64
+	GPU     int
+	Network int64
+}
+
+// FederatedVMScheduler schedules VMs across clusters
+type FederatedVMScheduler struct {
+	mu                 sync.RWMutex
+	globalResourcePool *GlobalResourcePool
+	placementEngine    *CrossClusterPlacementEngine
+	migrationOptimizer *MigrationOptimizer
+	constraintSolver   *ConstraintSolver
+	logger             *zap.Logger
+}
+
+// CrossClusterStateReplication handles state replication across clusters
+type CrossClusterStateReplication struct {
+	mu                sync.RWMutex
+	replicationPolicy *ReplicationPolicy
+	stateChannels     map[string]chan *StateUpdate
+	replicaManager    *ReplicaManager
+	conflictResolver  *ConflictResolver
+	consistency       *ConsistencyManager
+	logger            *zap.Logger
+}
+
+// FederatedConsensus provides hierarchical consensus across clusters
+type FederatedConsensus struct {
+	mu                  sync.RWMutex
+	clusterConsensus    map[string]consensus.Manager
+	federationConsensus *HierarchicalConsensus
+	conflictArbiter     *ConflictArbiter
+	logger              *zap.Logger
+}
+
+// FederationSecurityManager manages security across clusters
+type FederationSecurityManager struct {
+	mu              sync.RWMutex
+	certificateAuth *CertificateAuthority
+	mutualTLS       *MutualTLS
+	keyManager      *KeyManager
+	authProvider    *FederatedAuthProvider
+	logger          *zap.Logger
+}
+
+// NetworkTopologyManager manages network topology awareness
+type NetworkTopologyManager struct {
+	mu               sync.RWMutex
+	topologyMap      *NetworkTopologyMap
+	latencyMonitor   *LatencyMonitor
+	routingOptimizer *RoutingOptimizer
+	bandwidthMonitor *network.BandwidthMonitor
+	logger           *zap.Logger
+}
+
+// FederationPerformanceOptimizer optimizes federation performance
+type FederationPerformanceOptimizer struct {
+	mu               sync.RWMutex
+	performanceModel *PerformanceModel
+	optimizer        *FederationOptimizer
+	predictor        *PerformancePredictor
+	tuner            *AdaptiveTuner
+	logger           *zap.Logger
+}
+
+// FederationEventBus handles federation-wide events
+type FederationEventBus struct {
+	mu          sync.RWMutex
+	subscribers map[string][]EventHandler
+	eventQueue  chan *FederationEvent
+	processor   *EventProcessor
+	logger      *zap.Logger
+}
+
+// FederationMetricsCollector collects federation metrics
+type FederationMetricsCollector struct {
+	mu           sync.RWMutex
+	metricStore  *MetricStore
+	aggregator   *MetricAggregator
+	reporter     *MetricReporter
+	alertManager *AlertManager
+	logger       *zap.Logger
+}
+
+// Enhanced cluster discovery using DHT
+func (fm *FederationManagerImpl) InitializeClusterDiscovery(bootstrapNodes []string) error {
+	fm.mutex.Lock()
+	defer fm.mutex.Unlock()
+
+	if fm.clusterDiscovery == nil {
+		fm.clusterDiscovery = &DHT{
+			localNodeID:    fm.LocalClusterID,
+			nodes:          make(map[string]*DHTNode),
+			routingTable:   NewRoutingTable(fm.LocalClusterID, 20),
+			discoveryPeers: bootstrapNodes,
+			keyValueStore:  make(map[string][]byte),
+			logger:         fm.logger,
+		}
+	}
+
+	return fm.clusterDiscovery.Bootstrap(bootstrapNodes)
+}
+
+// DiscoverClusters discovers federated clusters via DHT
+func (fm *FederationManagerImpl) DiscoverClusters(ctx context.Context) ([]*Cluster, error) {
+	fm.mutex.RLock()
+	defer fm.mutex.RUnlock()
+
+	if fm.clusterDiscovery == nil {
+		return nil, fmt.Errorf("cluster discovery not initialized")
+	}
+
+	// Query DHT for cluster information
+	clusterKeys, err := fm.clusterDiscovery.FindClusters(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to discover clusters")
+	}
+
+	clusters := []*Cluster{}
+	for _, key := range clusterKeys {
+		clusterData, err := fm.clusterDiscovery.Get(key)
+		if err != nil {
+			fm.logger.Warn("Failed to get cluster data", zap.String("key", key), zap.Error(err))
+			continue
+		}
+
+		cluster, err := fm.parseClusterData(clusterData)
+		if err != nil {
+			fm.logger.Warn("Failed to parse cluster data", zap.String("key", key), zap.Error(err))
+			continue
+		}
+
+		clusters = append(clusters, cluster)
+	}
+
+	return clusters, nil
+}
+
+// InitializeGlobalResourcePool sets up global resource pooling
+func (fm *FederationManagerImpl) InitializeGlobalResourcePool() error {
+	fm.mutex.Lock()
+	defer fm.mutex.Unlock()
+
+	fm.globalResourcePool = &GlobalResourcePool{
+		federationManager: fm,
+		resourceInventory: make(map[string]*ClusterResourceInventory),
+		allocationEngine:  NewGlobalAllocationEngine(),
+		loadBalancer:      NewCrossClusterLoadBalancer(),
+		logger:            fm.logger,
+	}
+
+	// Start background resource monitoring
+	go fm.globalResourcePool.MonitorResources(context.Background())
+
+	return nil
+}
+
+// AggregateGlobalResources aggregates resources across all clusters
+func (fm *FederationManagerImpl) AggregateGlobalResources() (*ResourceCapacity, error) {
+	fm.mutex.RLock()
+	defer fm.mutex.RUnlock()
+
+	if fm.globalResourcePool == nil {
+		return nil, fmt.Errorf("global resource pool not initialized")
+	}
+
+	totalResources := &ResourceCapacity{}
+
+	for _, inventory := range fm.globalResourcePool.resourceInventory {
+		totalResources.CPU += inventory.AvailableResources.CPU
+		totalResources.Memory += inventory.AvailableResources.Memory
+		totalResources.Storage += inventory.AvailableResources.Storage
+		totalResources.GPU += inventory.AvailableResources.GPU
+		totalResources.Network += inventory.AvailableResources.Network
+	}
+
+	return totalResources, nil
+}
+
+// InitializeFederatedScheduler sets up cross-cluster VM scheduling
+func (fm *FederationManagerImpl) InitializeFederatedScheduler() error {
+	fm.mutex.Lock()
+	defer fm.mutex.Unlock()
+
+	if fm.globalResourcePool == nil {
+		return fmt.Errorf("global resource pool must be initialized first")
+	}
+
+	fm.federatedScheduler = &FederatedVMScheduler{
+		globalResourcePool: fm.globalResourcePool,
+		placementEngine:    NewCrossClusterPlacementEngine(),
+		migrationOptimizer: NewMigrationOptimizer(),
+		constraintSolver:   NewConstraintSolver(),
+		logger:             fm.logger,
+	}
+
+	return nil
+}
+
+// ScheduleVMCrossCluster schedules VM across clusters
+func (fm *FederationManagerImpl) ScheduleVMCrossCluster(ctx context.Context, vmSpec *VMSchedulingSpec) (*VMPlacement, error) {
+	fm.mutex.RLock()
+	scheduler := fm.federatedScheduler
+	fm.mutex.RUnlock()
+
+	if scheduler == nil {
+		return nil, fmt.Errorf("federated scheduler not initialized")
+	}
+
+	// Consider network topology for placement
+	if fm.topologyManager != nil {
+		vmSpec.NetworkConstraints = fm.topologyManager.GetNetworkConstraints(vmSpec.SourceCluster)
+	}
+
+	// Consider bandwidth availability
+	if fm.bandwidthMonitor != nil {
+		vmSpec.BandwidthRequirements = fm.bandwidthMonitor.GetAvailableBandwidth()
+	}
+
+	placement, err := scheduler.placementEngine.FindOptimalPlacement(ctx, vmSpec)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to find optimal placement")
+	}
+
+	return placement, nil
+}
+
+// InitializeCrossClusterReplication sets up state replication
+func (fm *FederationManagerImpl) InitializeCrossClusterReplication() error {
+	fm.mutex.Lock()
+	defer fm.mutex.Unlock()
+
+	fm.crossClusterReplication = &CrossClusterStateReplication{
+		replicationPolicy: NewDefaultReplicationPolicy(),
+		stateChannels:     make(map[string]chan *StateUpdate),
+		replicaManager:    NewReplicaManager(),
+		conflictResolver:  NewConflictResolver(),
+		consistency:       NewConsistencyManager(),
+		logger:            fm.logger,
+	}
+
+	// Start replication background services
+	go fm.crossClusterReplication.ProcessStateUpdates(context.Background())
+
+	return nil
+}
+
+// ReplicateStateAcrossClusters replicates VM state across clusters
+func (fm *FederationManagerImpl) ReplicateStateAcrossClusters(ctx context.Context, vmID string, replicationSpec *ReplicationSpec) error {
+	fm.mutex.RLock()
+	replication := fm.crossClusterReplication
+	fm.mutex.RUnlock()
+
+	if replication == nil {
+		return fmt.Errorf("cross-cluster replication not initialized")
+	}
+
+	stateUpdate := &StateUpdate{
+		VMID:            vmID,
+		SourceCluster:   fm.LocalClusterID,
+		TargetClusters:  replicationSpec.TargetClusters,
+		ReplicationType: replicationSpec.Type,
+		Priority:        replicationSpec.Priority,
+		Timestamp:       time.Now(),
+	}
+
+	select {
+	case replication.stateChannels[vmID] <- stateUpdate:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return fmt.Errorf("replication queue full for VM %s", vmID)
+	}
+}
+
+// InitializeBandwidthAwareFederation sets up bandwidth-aware federation
+func (fm *FederationManagerImpl) InitializeBandwidthAwareFederation(bandwidthMonitor *network.BandwidthMonitor) error {
+	fm.mutex.Lock()
+	defer fm.mutex.Unlock()
+
+	fm.bandwidthMonitor = bandwidthMonitor
+	fm.topologyManager = &NetworkTopologyManager{
+		topologyMap:      NewNetworkTopologyMap(),
+		latencyMonitor:   NewLatencyMonitor(),
+		routingOptimizer: NewRoutingOptimizer(),
+		bandwidthMonitor: bandwidthMonitor,
+		logger:           fm.logger,
+	}
+
+	// Start network monitoring
+	go fm.topologyManager.MonitorNetworkConditions(context.Background())
+
+	return nil
+}
+
+// MakeFederationDecision makes federation decisions based on network conditions
+func (fm *FederationManagerImpl) MakeFederationDecision(ctx context.Context, operation *FederationOperation) (*FederationDecision, error) {
+	fm.mutex.RLock()
+	bandwidthMonitor := fm.bandwidthMonitor
+	topologyManager := fm.topologyManager
+	fm.mutex.RUnlock()
+
+	decision := &FederationDecision{
+		OperationID: operation.ID,
+		Timestamp:   time.Now(),
+	}
+
+	// Check bandwidth constraints
+	if bandwidthMonitor != nil {
+		availableBandwidth := bandwidthMonitor.GetAvailableBandwidth()
+		if operation.BandwidthRequirement > availableBandwidth {
+			decision.Approved = false
+			decision.Reason = "insufficient bandwidth"
+			return decision, nil
+		}
+	}
+
+	// Check network topology
+	if topologyManager != nil {
+		latency := topologyManager.latencyMonitor.GetLatency(operation.SourceCluster, operation.TargetCluster)
+		if latency > operation.MaxLatency {
+			decision.Approved = false
+			decision.Reason = "latency too high"
+			return decision, nil
+		}
+	}
+
+	decision.Approved = true
+	decision.Reason = "approved"
+	return decision, nil
+}
+
+// InitializeFederatedConsensus sets up hierarchical consensus
+func (fm *FederationManagerImpl) InitializeFederatedConsensus() error {
+	fm.mutex.Lock()
+	defer fm.mutex.Unlock()
+
+	fm.federatedConsensus = &FederatedConsensus{
+		clusterConsensus:    make(map[string]consensus.Manager),
+		federationConsensus: NewHierarchicalConsensus(),
+		conflictArbiter:     NewConflictArbiter(),
+		logger:              fm.logger,
+	}
+
+	return nil
+}
+
+// InitializeSecurityManager sets up federation security
+func (fm *FederationManagerImpl) InitializeSecurityManager() error {
+	fm.mutex.Lock()
+	defer fm.mutex.Unlock()
+
+	fm.securityManager = &FederationSecurityManager{
+		certificateAuth: NewCertificateAuthority(),
+		mutualTLS:       NewMutualTLS(),
+		keyManager:      NewKeyManager(),
+		authProvider:    NewFederatedAuthProvider(),
+		logger:          fm.logger,
+	}
+
+	return nil
+}
+
+// Helper types and stub implementations
+
+type VMSchedulingSpec struct {
+	VMID                  string
+	ResourceRequirements  *ResourceCapacity
+	SourceCluster         string
+	NetworkConstraints    map[string]interface{}
+	BandwidthRequirements int64
+	Constraints           []PlacementConstraint
+}
+
+type VMPlacement struct {
+	VMID          string
+	TargetCluster string
+	TargetNode    string
+	Cost          float64
+	Confidence    float64
+}
+
+type ReplicationSpec struct {
+	TargetClusters []string
+	Type           ReplicationType
+	Priority       int
+}
+
+type ReplicationType int
+
+const (
+	ReplicationTypeSync ReplicationType = iota
+	ReplicationTypeAsync
+	ReplicationTypeEventual
+)
+
+type StateUpdate struct {
+	VMID            string
+	SourceCluster   string
+	TargetClusters  []string
+	ReplicationType ReplicationType
+	Priority        int
+	Timestamp       time.Time
+}
+
+type FederationOperation struct {
+	ID                   string
+	SourceCluster        string
+	TargetCluster        string
+	BandwidthRequirement int64
+	MaxLatency           time.Duration
+}
+
+type FederationDecision struct {
+	OperationID string
+	Approved    bool
+	Reason      string
+	Timestamp   time.Time
+}
+
+type PlacementConstraint interface {
+	Evaluate(*VMPlacement) bool
+}
+
+type FederationEvent struct {
+	Type      string
+	Data      interface{}
+	Timestamp time.Time
+}
+
+type EventHandler func(*FederationEvent) error
+
+// Stub implementations for supporting components
+
+func NewRoutingTable(nodeID string, k int) *RoutingTable {
+	return &RoutingTable{localNodeID: nodeID, k: k}
+}
+
+func (dht *DHT) Bootstrap(nodes []string) error {
+	return nil
+}
+
+func (dht *DHT) FindClusters(ctx context.Context) ([]string, error) {
+	return []string{}, nil
+}
+
+func (dht *DHT) Get(key string) ([]byte, error) {
+	return dht.keyValueStore[key], nil
+}
+
+func (fm *FederationManagerImpl) parseClusterData(data []byte) (*Cluster, error) {
+	return &Cluster{}, nil
+}
+
+// UpdateClusterResources updates resource inventory for a cluster
+func (fm *FederationManagerImpl) UpdateClusterResourceInventory(clusterID string, resources *ClusterResourceInventory) error {
+	fm.mutex.Lock()
+	defer fm.mutex.Unlock()
+
+	if fm.globalResourcePool == nil {
+		return fmt.Errorf("global resource pool not initialized")
+	}
+
+	resources.LastUpdated = time.Now()
+	fm.globalResourcePool.resourceInventory[clusterID] = resources
+
+	// Trigger resource aggregation
+	go fm.globalResourcePool.UpdateGlobalView()
+
+	return nil
+}
+
+// AllocateResources allocates resources across clusters (original method)
+func (fm *FederationManagerImpl) AllocateResources(ctx context.Context, clusterID string, request *ResourceRequest) error {
+	fm.mutex.RLock()
+	resourcePool := fm.globalResourcePool
+	fm.mutex.RUnlock()
+
+	if resourcePool == nil {
+		return fmt.Errorf("global resource pool not initialized")
+	}
+
+	return resourcePool.allocationEngine.AllocateResources(ctx, clusterID, request)
+}
+
+// AllocateResourcesProvider implements the Provider interface AllocateResources method
+func (fm *FederationManagerImpl) AllocateResourcesProvider(ctx context.Context, request *ResourceAllocationRequest) (*ResourceAllocation, error) {
+	// Generate a unique allocation ID
+	allocation := &ResourceAllocation{
+		ID:        fmt.Sprintf("alloc-%d", time.Now().UnixNano()),
+		RequestID: request.ID,
+		NodeID:    fm.LocalClusterID,
+		CPU:       int(request.CPUCores),
+		Status:    "allocated",
+	}
+	return allocation, nil
+}
+
+// GetFederatedClusters returns all federated clusters with their resource information
+func (fm *FederationManagerImpl) GetFederatedClusters(ctx context.Context) (map[string]*FederatedCluster, error) {
+	fm.mutex.RLock()
+	defer fm.mutex.RUnlock()
+
+	federatedClusters := make(map[string]*FederatedCluster)
+	for _, cluster := range fm.Clusters {
+		if cluster.State == ConnectedState {
+			federatedClusters[cluster.ID] = &FederatedCluster{
+				ID:        cluster.ID,
+				Name:      cluster.Name,
+				State:     cluster.State,
+				Resources: cluster.Resources,
+				Metadata:  cluster.Metadata,
+			}
+		}
+	}
+
+	return federatedClusters, nil
+}
+
+// GetVMInfo retrieves VM information from a cluster
+func (fm *FederationManagerImpl) GetVMInfo(ctx context.Context, clusterID, vmID string) (*VMInfo, error) {
+	cluster, err := fm.GetCluster(clusterID)
+	if err != nil {
+		return nil, err
+	}
+
+	// In a real implementation, this would make an API call to the cluster
+	return &VMInfo{
+		ID:              vmID,
+		ClusterID:       clusterID,
+		AllocatedCPU:    4.0,
+		AllocatedMemory: 8192,
+		Status:          "running",
+	}, nil
+}
+
+// GetClusterResources retrieves resource information for a cluster
+func (fm *FederationManagerImpl) GetClusterResources(ctx context.Context, clusterID string) (*ClusterResources, error) {
+	cluster, err := fm.GetCluster(clusterID)
+	if err != nil {
+		return nil, err
+	}
+
+	if cluster.Resources == nil {
+		return &ClusterResources{
+			TotalCPU:           100,
+			TotalMemoryGB:      1000,
+			TotalStorageGB:     10000,
+			AvailableCPU:       50,
+			AvailableMemoryGB:  500,
+			AvailableStorageGB: 5000,
+		}, nil
+	}
+
+	return cluster.Resources, nil
+}
+
+// GetClusterEndpoint retrieves endpoint information for a cluster
+func (fm *FederationManagerImpl) GetClusterEndpoint(ctx context.Context, clusterID string) (string, error) {
+	cluster, err := fm.GetCluster(clusterID)
+	if err != nil {
+		return "", err
+	}
+
+	return cluster.Endpoint, nil
+}
+
+func NewGlobalAllocationEngine() *GlobalAllocationEngine {
+	return &GlobalAllocationEngine{}
+}
+
+func NewCrossClusterLoadBalancer() *CrossClusterLoadBalancer {
+	return &CrossClusterLoadBalancer{}
+}
+
+func (pool *GlobalResourcePool) MonitorResources(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			pool.collectResourceMetrics()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (pool *GlobalResourcePool) collectResourceMetrics() {
+	// Implementation would collect metrics from all clusters
+}
+
+// UpdateGlobalView updates the global resource view
+func (pool *GlobalResourcePool) UpdateGlobalView() {
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+
+	// Aggregate resources across all clusters
+	totalCPU := 0.0
+	totalMemory := int64(0)
+	totalStorage := int64(0)
+
+	for _, inventory := range pool.resourceInventory {
+		if inventory != nil && inventory.AvailableResources != nil {
+			totalCPU += inventory.AvailableResources.CPU
+			totalMemory += inventory.AvailableResources.Memory
+			totalStorage += inventory.AvailableResources.Storage
+		}
+	}
+
+	// Update load balancer with new resource information
+	if pool.loadBalancer != nil {
+		pool.loadBalancer.UpdateResourceAvailability(totalCPU, totalMemory, totalStorage)
+	}
+}
+
+// AllocateResources allocates resources in the global allocation engine
+func (engine *GlobalAllocationEngine) AllocateResources(ctx context.Context, clusterID string, request *ResourceRequest) error {
+	// Implementation would allocate resources across clusters
+	return nil
+}
+
+// UpdateResourceAvailability updates resource availability in load balancer
+func (lb *CrossClusterLoadBalancer) UpdateResourceAvailability(cpu float64, memory, storage int64) {
+	// Implementation would update load balancing decisions based on resource availability
+}
+
+func NewCrossClusterPlacementEngine() *CrossClusterPlacementEngine {
+	return &CrossClusterPlacementEngine{}
+}
+
+func NewMigrationOptimizer() *MigrationOptimizer {
+	return &MigrationOptimizer{}
+}
+
+func NewConstraintSolver() *ConstraintSolver {
+	return &ConstraintSolver{}
+}
+
+func (engine *CrossClusterPlacementEngine) FindOptimalPlacement(ctx context.Context, spec *VMSchedulingSpec) (*VMPlacement, error) {
+	// Implementation would find optimal placement
+	return &VMPlacement{
+		VMID:          spec.VMID,
+		TargetCluster: "cluster-1",
+		TargetNode:    "node-1",
+		Cost:          0.5,
+		Confidence:    0.9,
+	}, nil
+}
+
+func NewDefaultReplicationPolicy() *ReplicationPolicy {
+	return &ReplicationPolicy{}
+}
+
+func NewReplicaManager() *ReplicaManager {
+	return &ReplicaManager{}
+}
+
+func NewConsistencyManager() *ConsistencyManager {
+	return &ConsistencyManager{}
+}
+
+func (replication *CrossClusterStateReplication) ProcessStateUpdates(ctx context.Context) {
+	// Implementation would process state updates
+}
+
+func NewNetworkTopologyMap() *NetworkTopologyMap {
+	return &NetworkTopologyMap{}
+}
+
+func NewLatencyMonitor() *LatencyMonitor {
+	return &LatencyMonitor{}
+}
+
+func NewRoutingOptimizer() *RoutingOptimizer {
+	return &RoutingOptimizer{}
+}
+
+func (topology *NetworkTopologyManager) MonitorNetworkConditions(ctx context.Context) {
+	// Implementation would monitor network conditions
+}
+
+func (topology *NetworkTopologyManager) GetNetworkConstraints(clusterID string) map[string]interface{} {
+	return make(map[string]interface{})
+}
+
+func (latency *LatencyMonitor) GetLatency(source, target string) time.Duration {
+	return 10 * time.Millisecond
+}
+
+func NewHierarchicalConsensus() *HierarchicalConsensus {
+	return &HierarchicalConsensus{}
+}
+
+func NewConflictArbiter() *ConflictArbiter {
+	return &ConflictArbiter{}
+}
+
+func NewCertificateAuthority() *CertificateAuthority {
+	return &CertificateAuthority{}
+}
+
+func NewMutualTLS() *MutualTLS {
+	return &MutualTLS{}
+}
+
+func NewKeyManager() *KeyManager {
+	return &KeyManager{}
+}
+
+func NewFederatedAuthProvider() *FederatedAuthProvider {
+	return &FederatedAuthProvider{}
+}
+
+// Supporting types for federation functionality
+type GlobalAllocationEngine struct {
+	mu                sync.RWMutex
+	clusterAllocators map[string]*ClusterAllocator
+	scoringEngine     *ResourceScoringEngine
+	constraints       []AllocationConstraint
+}
+
+type ClusterAllocator struct {
+	ClusterID         string
+	MaxCPU            float64
+	MaxMemory         int64
+	MaxStorage        int64
+	CurrentCPU        float64
+	CurrentMemory     int64
+	CurrentStorage    int64
+	AllocationHistory []AllocationRecord
+}
+
+type ResourceScoringEngine struct {
+	WeightCPU     float64
+	WeightMemory  float64
+	WeightStorage float64
+	WeightLatency float64
+}
+
+type AllocationConstraint interface {
+	Evaluate(clusterID string, request *ResourceRequest) bool
+}
+
+type AllocationRecord struct {
+	RequestID   string
+	AllocatedAt time.Time
+	CPU         float64
+	Memory      int64
+	Storage     int64
+}
+
+type CrossClusterLoadBalancer struct {
+	mu                  sync.RWMutex
+	clusterWeights      map[string]float64
+	loadBalancingPolicy LoadBalancingPolicy
+	resourceUtilization map[string]*ResourceUtilization
+	healthScores        map[string]float64
+}
+
+type LoadBalancingPolicy string
+
+const (
+	PolicyRoundRobin     LoadBalancingPolicy = "round_robin"
+	PolicyLeastConnected LoadBalancingPolicy = "least_connected"
+	PolicyWeighted       LoadBalancingPolicy = "weighted"
+	PolicyResourceAware  LoadBalancingPolicy = "resource_aware"
+)
+
+type ResourceUtilization struct {
+	CPUUtilization     float64
+	MemoryUtilization  float64
+	StorageUtilization float64
+	NetworkUtilization float64
+	LastUpdated        time.Time
+}
+
+type VMInfo struct {
+	ID              string  `json:"id"`
+	ClusterID       string  `json:"cluster_id"`
+	AllocatedCPU    float64 `json:"allocated_cpu"`
+	AllocatedMemory int64   `json:"allocated_memory"`
+	Status          string  `json:"status"`
+}
+
+type ResourceRequest struct {
+	ID        string        `json:"id"`
+	CPUCores  float64       `json:"cpu_cores"`
+	MemoryGB  float64       `json:"memory_gb"`
+	StorageGB float64       `json:"storage_gb"`
+	Duration  time.Duration `json:"duration"`
+	Priority  int           `json:"priority"`
+}
+
+// Additional supporting types
+type CrossClusterPlacementEngine struct{}
+type MigrationOptimizer struct{}
+type ConstraintSolver struct{}
+type ReplicationPolicy struct{}
+type ReplicaManager struct{}
+type ConsistencyManager struct{}
+type NetworkTopologyMap struct{}
+type LatencyMonitor struct{}
+type RoutingOptimizer struct{}
+type HierarchicalConsensus struct{}
+type ConflictArbiter struct{}
+type CertificateAuthority struct{}
+type MutualTLS struct{}
+type KeyManager struct{}
+type FederatedAuthProvider struct{}
+type PerformanceModel struct{}
+type FederationOptimizer struct{}
+type PerformancePredictor struct{}
+type AdaptiveTuner struct{}
+type EventProcessor struct{}
+type MetricStore struct{}
+type MetricAggregator struct{}
+type MetricReporter struct{}
+type AlertManager struct{}

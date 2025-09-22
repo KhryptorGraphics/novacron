@@ -111,10 +111,8 @@ func (h *MonitoringHandlers) GetSystemMetrics(w http.ResponseWriter, r *http.Req
 		timeRange = 3600 // Default to 1 hour
 	}
 
-	ctx := context.Background()
-	
 	// Get hypervisor metrics
-	resourceInfo, err := h.kvmManager.GetHypervisorMetrics(ctx)
+	resourceInfo, err := h.kvmManager.GetHypervisorMetrics(r.Context())
 	if err != nil {
 		log.Printf("Error getting hypervisor metrics: %v", err)
 		http.Error(w, "Failed to get system metrics", http.StatusInternalServerError)
@@ -170,10 +168,8 @@ func (h *MonitoringHandlers) GetSystemMetrics(w http.ResponseWriter, r *http.Req
 
 // GetVMMetrics handles GET /api/monitoring/vms
 func (h *MonitoringHandlers) GetVMMetrics(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
-	
 	// Get list of VMs
-	vms, err := h.kvmManager.ListVMs(ctx)
+	vms, err := h.kvmManager.ListVMs(r.Context())
 	if err != nil {
 		log.Printf("Error listing VMs: %v", err)
 		http.Error(w, "Failed to get VM metrics", http.StatusInternalServerError)

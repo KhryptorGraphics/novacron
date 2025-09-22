@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // NetworkType defines the type of network
@@ -65,10 +66,23 @@ type Network struct {
 
 // NetworkInfo contains runtime information about a network
 type NetworkInfo struct {
-	Active      bool      `json:"active"`
-	ConnectedVMs []string `json:"connected_vms"`
-	LastUpdated time.Time `json:"last_updated"`
-	// Additional metrics could be added here
+	Active             bool                   `json:"active"`
+	ConnectedVMs       []string               `json:"connected_vms"`
+	LastUpdated        time.Time              `json:"last_updated"`
+	Metrics            NetworkMetrics         `json:"metrics"`
+	BandwidthUtilization float64              `json:"bandwidth_utilization"`
+	QoSStatus          map[string]interface{} `json:"qos_status"`
+}
+
+// NetworkMetrics contains network performance metrics
+type NetworkMetrics struct {
+	BandwidthUtilization float64   `json:"bandwidth_utilization"`
+	PacketLoss          float64   `json:"packet_loss"`
+	Latency             float64   `json:"latency_ms"`
+	Jitter              float64   `json:"jitter_ms"`
+	ThroughputBps       uint64    `json:"throughput_bps"`
+	ErrorRate           float64   `json:"error_rate"`
+	LastMeasured        time.Time `json:"last_measured"`
 }
 
 // NetworkEventType represents network event types
@@ -86,15 +100,27 @@ const (
 	
 	// NetworkEventError is emitted on network errors
 	NetworkEventError NetworkEventType = "error"
+	
+	// NetworkEventCongestion is emitted when network congestion is detected
+	NetworkEventCongestion NetworkEventType = "congestion"
+	
+	// NetworkEventBandwidthThreshold is emitted when bandwidth thresholds are exceeded
+	NetworkEventBandwidthThreshold NetworkEventType = "bandwidth_threshold"
+	
+	// NetworkEventQoSViolation is emitted when QoS violations occur
+	NetworkEventQoSViolation NetworkEventType = "qos_violation"
 )
 
 // NetworkEvent represents an event related to networks
 type NetworkEvent struct {
-	Type      NetworkEventType `json:"type"`
-	Network   Network         `json:"network"`
-	Timestamp time.Time       `json:"timestamp"`
-	NodeID    string          `json:"node_id"`
-	Message   string          `json:"message,omitempty"`
+	Type             NetworkEventType       `json:"type"`
+	Network          Network               `json:"network"`
+	Timestamp        time.Time             `json:"timestamp"`
+	NodeID           string                `json:"node_id"`
+	Message          string                `json:"message,omitempty"`
+	BandwidthMetrics *BandwidthMeasurement `json:"bandwidth_metrics,omitempty"`
+	Severity         string                `json:"severity,omitempty"`
+	Metadata         map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // NetworkEventListener is a callback for network events
@@ -102,42 +128,57 @@ type NetworkEventListener func(event NetworkEvent)
 
 // NetworkManagerConfig holds configuration for the network manager
 type NetworkManagerConfig struct {
-	DefaultNetworkType NetworkType `json:"default_network_type"`
-	DefaultSubnet      string      `json:"default_subnet"`
-	DefaultIPRange     string      `json:"default_ip_range"`
-	DefaultGateway     string      `json:"default_gateway"`
-	DNSServers         []string    `json:"dns_servers"`
-	UpdateInterval     time.Duration `json:"update_interval"`
+	DefaultNetworkType         NetworkType   `json:"default_network_type"`
+	DefaultSubnet              string        `json:"default_subnet"`
+	DefaultIPRange             string        `json:"default_ip_range"`
+	DefaultGateway             string        `json:"default_gateway"`
+	DNSServers                 []string      `json:"dns_servers"`
+	UpdateInterval             time.Duration `json:"update_interval"`
+	EnableQoS                  bool          `json:"enable_qos"`
+	DefaultQoSPolicies         []string      `json:"default_qos_policies"`
+	QoSUpdateInterval          time.Duration `json:"qos_update_interval"`
+	BandwidthMonitoringEnabled bool          `json:"bandwidth_monitoring_enabled"`
 }
 
 // DefaultNetworkManagerConfig returns a default configuration
 func DefaultNetworkManagerConfig() NetworkManagerConfig {
 	return NetworkManagerConfig{
-		DefaultNetworkType: NetworkTypeBridge,
-		DefaultSubnet:      "192.168.100.0/24",
-		DefaultIPRange:     "192.168.100.10/24",
-		DefaultGateway:     "192.168.100.1",
-		DNSServers:         []string{"8.8.8.8", "8.8.4.4"},
-		UpdateInterval:     30 * time.Second,
+		DefaultNetworkType:         NetworkTypeBridge,
+		DefaultSubnet:              "192.168.100.0/24",
+		DefaultIPRange:             "192.168.100.10/24",
+		DefaultGateway:             "192.168.100.1",
+		DNSServers:                 []string{"8.8.8.8", "8.8.4.4"},
+		UpdateInterval:             30 * time.Second,
+		EnableQoS:                  false,
+		DefaultQoSPolicies:         []string{},
+		QoSUpdateInterval:          30 * time.Second,
+		BandwidthMonitoringEnabled: false,
 	}
 }
 
 // NetworkManager manages virtual networks
 type NetworkManager struct {
-	networks       map[string]*Network
-	networksByName map[string]string // name -> id
-	networksMutex  sync.RWMutex
-	eventListeners []NetworkEventListener
-	eventMutex     sync.RWMutex
-	config         NetworkManagerConfig
-	nodeID         string
-	ctx            context.Context
-	cancel         context.CancelFunc
+	networks         map[string]*Network
+	networksByName   map[string]string // name -> id
+	networksMutex    sync.RWMutex
+	eventListeners   []NetworkEventListener
+	eventMutex       sync.RWMutex
+	config           NetworkManagerConfig
+	nodeID           string
+	ctx              context.Context
+	cancel           context.CancelFunc
+	qosManager       *QoSManager
+	bandwidthMonitor *BandwidthMonitor
+	logger           *zap.Logger
 }
 
 // NewNetworkManager creates a new network manager
-func NewNetworkManager(config NetworkManagerConfig, nodeID string) *NetworkManager {
+func NewNetworkManager(config NetworkManagerConfig, nodeID string, logger *zap.Logger) *NetworkManager {
 	ctx, cancel := context.WithCancel(context.Background())
+	
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	
 	manager := &NetworkManager{
 		networks:       make(map[string]*Network),
@@ -146,6 +187,7 @@ func NewNetworkManager(config NetworkManagerConfig, nodeID string) *NetworkManag
 		nodeID:         nodeID,
 		ctx:            ctx,
 		cancel:         cancel,
+		logger:         logger,
 	}
 	
 	return manager
@@ -153,23 +195,58 @@ func NewNetworkManager(config NetworkManagerConfig, nodeID string) *NetworkManag
 
 // Start starts the network manager
 func (m *NetworkManager) Start() error {
-	log.Println("Starting network manager")
+	m.logger.Info("Starting network manager", zap.String("node_id", m.nodeID))
+	
+	// Initialize bandwidth monitoring if enabled
+	if m.config.BandwidthMonitoringEnabled {
+		if err := m.initializeBandwidthMonitoring(); err != nil {
+			m.logger.Warn("Failed to initialize bandwidth monitoring", zap.Error(err))
+		}
+	}
+	
+	// Initialize QoS management if enabled
+	if m.config.EnableQoS {
+		if err := m.initializeQoSManager(); err != nil {
+			m.logger.Warn("Failed to initialize QoS manager", zap.Error(err))
+		}
+	}
 	
 	// Load existing networks
 	if err := m.loadNetworks(); err != nil {
-		log.Printf("Warning: Failed to load existing networks: %v", err)
+		m.logger.Warn("Failed to load existing networks", zap.Error(err))
 	}
 	
 	// Start the update loop
 	go m.updateNetworks()
 	
+	m.logger.Info("Network manager started successfully")
 	return nil
 }
 
 // Stop stops the network manager
 func (m *NetworkManager) Stop() error {
-	log.Println("Stopping network manager")
+	m.logger.Info("Stopping network manager", zap.String("node_id", m.nodeID))
+	
+	// Stop the bandwidth monitor if it exists
+	if m.bandwidthMonitor != nil {
+		if err := m.bandwidthMonitor.Stop(); err != nil {
+			m.logger.Warn("Failed to stop bandwidth monitor", zap.Error(err))
+		}
+		m.logger.Debug("Bandwidth monitor stopped")
+	}
+	
+	// Stop the QoS manager if it exists
+	if m.qosManager != nil {
+		if err := m.qosManager.Stop(); err != nil {
+			m.logger.Warn("Failed to stop QoS manager", zap.Error(err))
+		}
+		m.logger.Debug("QoS manager stopped")
+	}
+	
+	// Cancel the context to stop any background operations
 	m.cancel()
+	
+	m.logger.Info("Network manager stopped successfully")
 	return nil
 }
 
@@ -682,10 +759,55 @@ func (m *NetworkManager) refreshNetworkStatus() {
 	defer m.networksMutex.Unlock()
 	
 	for _, network := range m.networks {
-		// In a real implementation, this would check the actual status of the network
-		// and update metrics
+		// Update network metrics from bandwidth monitor
+		if m.bandwidthMonitor != nil {
+			utilization := m.bandwidthMonitor.GetNetworkUtilizationSummary()
+			
+			// Use interface identifier from network.Options as key
+			var interfaceKey string
+			if network.Options != nil {
+				if bridge, ok := network.Options["bridge"]; ok {
+					interfaceKey = bridge
+				} else if iface, ok := network.Options["interface"]; ok {
+					interfaceKey = iface
+				}
+			}
+			
+			if interfaceKey != "" {
+				if val, exists := utilization[interfaceKey]; exists {
+					network.NetworkInfo.BandwidthUtilization = val
+					network.NetworkInfo.Metrics.BandwidthUtilization = val
+					network.NetworkInfo.Metrics.LastMeasured = time.Now()
+				} else {
+					m.logger.Debug("Interface utilization not found", 
+						zap.String("interface", interfaceKey),
+						zap.String("network", network.Name))
+				}
+			} else {
+				m.logger.Debug("No interface identifier in network options", 
+					zap.String("network", network.Name))
+			}
+		}
+		
+		// Update QoS status
+		if m.qosManager != nil {
+			network.NetworkInfo.QoSStatus = m.qosManager.GetNetworkQoSStatus(network.ID)
+		}
 		
 		network.NetworkInfo.LastUpdated = time.Now()
+		
+		// Check for congestion and emit events if needed
+		if network.NetworkInfo.BandwidthUtilization > 85 {
+			m.emitEvent(NetworkEvent{
+				Type:      NetworkEventCongestion,
+				Network:   *network,
+				Timestamp: time.Now(),
+				NodeID:    m.nodeID,
+				Severity:  "warning",
+				Message:   fmt.Sprintf("High bandwidth utilization detected on network %s: %.1f%%", network.Name, network.NetworkInfo.BandwidthUtilization),
+				Metadata:  map[string]interface{}{"utilization": network.NetworkInfo.BandwidthUtilization},
+			})
+		}
 	}
 }
 
@@ -879,4 +1001,171 @@ func deleteDockerNetwork(dockerNetID string) error {
 func maskBits(mask net.IPMask) int {
 	bits, _ := mask.Size()
 	return bits
+}
+
+// initializeBandwidthMonitoring sets up bandwidth monitoring for the network manager
+func (m *NetworkManager) initializeBandwidthMonitoring() error {
+	config := &BandwidthMonitorConfig{
+		MonitoringInterval: 10 * time.Second,
+		HistoryRetention:   24 * time.Hour,
+		Interfaces:         []string{}, // Auto-discover interfaces
+		DefaultThresholds: []BandwidthThreshold{
+			{
+				InterfaceName:     "*", // Default for all interfaces
+				WarningThreshold:  70.0,
+				CriticalThreshold: 90.0,
+				Enabled:           true,
+			},
+		},
+		EnableQoSHooks:   m.config.EnableQoS,
+		MaxHistoryPoints: 1000,
+	}
+
+	alertHandler := NewDefaultAlertHandler(m.logger)
+	config.AlertHandlers = []BandwidthAlertHandler{alertHandler}
+
+	monitor := NewBandwidthMonitor(config, m.logger)
+	
+	// Add network manager as a bandwidth alert listener
+	monitor.AddQoSHook(m.handleBandwidthAlert)
+	
+	if err := monitor.Start(); err != nil {
+		return fmt.Errorf("failed to start bandwidth monitor: %w", err)
+	}
+
+	m.bandwidthMonitor = monitor
+	m.logger.Info("Bandwidth monitoring initialized")
+	
+	return nil
+}
+
+// initializeQoSManager sets up QoS management for the network manager
+func (m *NetworkManager) initializeQoSManager() error {
+	if m.config.QoSUpdateInterval == 0 {
+		m.config.QoSUpdateInterval = 30 * time.Second
+	}
+
+	config := &QoSManagerConfig{
+		EnableTrafficShaping:        true,
+		EnableDSCPMarking:          true,
+		UpdateInterval:             m.config.QoSUpdateInterval,
+		DefaultPolicies:            []*QoSPolicy{},
+		StatisticsRetention:        24 * time.Hour,
+		MaxPoliciesPerInterface:    100,
+	}
+
+	qosManager := NewQoSManager(config, m.bandwidthMonitor, m.logger)
+	
+	if err := qosManager.Start(); err != nil {
+		return fmt.Errorf("failed to start QoS manager: %w", err)
+	}
+
+	m.qosManager = qosManager
+	m.logger.Info("QoS management initialized")
+	
+	return nil
+}
+
+// handleBandwidthAlert processes bandwidth alerts from the monitoring system
+func (m *NetworkManager) handleBandwidthAlert(interfaceName string, utilization float64) {
+	m.logger.Warn("Bandwidth alert received", 
+		zap.String("interface", interfaceName),
+		zap.Float64("utilization", utilization))
+
+	// Find networks using this interface and emit events
+	m.networksMutex.RLock()
+	for _, network := range m.networks {
+		// Check if this network uses the interface
+		if network.Options != nil && network.Options["bridge"] == interfaceName {
+			m.emitEvent(NetworkEvent{
+				Type:      NetworkEventBandwidthThreshold,
+				Network:   *network,
+				Timestamp: time.Now(),
+				NodeID:    m.nodeID,
+				Severity:  "warning",
+				Message:   fmt.Sprintf("Bandwidth threshold exceeded on interface %s: %.1f%%", interfaceName, utilization),
+				Metadata: map[string]interface{}{
+					"interface":   interfaceName,
+					"utilization": utilization,
+				},
+			})
+		}
+	}
+	m.networksMutex.RUnlock()
+}
+
+// ApplyQoSPolicy applies a QoS policy to a specific network
+func (m *NetworkManager) ApplyQoSPolicy(networkID string, policy *QoSPolicy) error {
+	if m.qosManager == nil {
+		return fmt.Errorf("QoS manager not initialized")
+	}
+
+	network, err := m.GetNetwork(networkID)
+	if err != nil {
+		return fmt.Errorf("network not found: %w", err)
+	}
+
+	policy.NetworkID = networkID
+	policy.InterfaceName = network.Name
+
+	if err := m.qosManager.AddPolicy(policy); err != nil {
+		return fmt.Errorf("failed to apply QoS policy: %w", err)
+	}
+
+	m.logger.Info("QoS policy applied", 
+		zap.String("network_id", networkID),
+		zap.String("policy_id", policy.ID),
+		zap.String("policy_name", policy.Name))
+
+	return nil
+}
+
+// RemoveQoSPolicy removes a QoS policy from a network
+func (m *NetworkManager) RemoveQoSPolicy(networkID, policyID string) error {
+	if m.qosManager == nil {
+		return fmt.Errorf("QoS manager not initialized")
+	}
+
+	if err := m.qosManager.RemovePolicy(policyID); err != nil {
+		return fmt.Errorf("failed to remove QoS policy: %w", err)
+	}
+
+	m.logger.Info("QoS policy removed", 
+		zap.String("network_id", networkID),
+		zap.String("policy_id", policyID))
+
+	return nil
+}
+
+// GetNetworkQoSStatus returns QoS status for a specific network
+func (m *NetworkManager) GetNetworkQoSStatus(networkID string) (map[string]interface{}, error) {
+	if m.qosManager == nil {
+		return nil, fmt.Errorf("QoS manager not initialized")
+	}
+
+	network, err := m.GetNetwork(networkID)
+	if err != nil {
+		return nil, fmt.Errorf("network not found: %w", err)
+	}
+
+	return m.qosManager.GetNetworkQoSStatus(network.ID), nil
+}
+
+// GetBandwidthMetrics returns current bandwidth metrics for a network interface
+func (m *NetworkManager) GetBandwidthMetrics(interfaceName string) (*BandwidthMeasurement, error) {
+	if m.bandwidthMonitor == nil {
+		return nil, fmt.Errorf("bandwidth monitor not initialized")
+	}
+
+	return m.bandwidthMonitor.GetCurrentMeasurement(interfaceName)
+}
+
+// GetNetworkPerformanceMetrics returns comprehensive network performance metrics
+func (m *NetworkManager) GetNetworkPerformanceMetrics(networkID string) (*NetworkMetrics, error) {
+	network, err := m.GetNetwork(networkID)
+	if err != nil {
+		return nil, fmt.Errorf("network not found: %w", err)
+	}
+
+	return &network.NetworkInfo.Metrics, nil
 }

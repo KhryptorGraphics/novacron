@@ -69,14 +69,14 @@ export class ApiClient {
   async post<T>(endpoint: string, data?: any): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'POST',
-      body: data ? JSON.stringify(data) : undefined,
+      body: data ? JSON.stringify(data) : null,
     });
   }
 
   async put<T>(endpoint: string, data?: any): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PUT',
-      body: data ? JSON.stringify(data) : undefined,
+      body: data ? JSON.stringify(data) : null,
     });
   }
 
@@ -113,9 +113,7 @@ export const apiClient = new ApiClient();
 // ----- Core-mode typed API helpers -----
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8090/api/v1";
 
-export type ApiError = { code: string; message: string };
-export type Pagination = { page: number; pageSize: number; total: number; totalPages: number; sortBy?: "name"|"createdAt"|"state"; sortDir?: "asc"|"desc" };
-export type ApiEnvelope<T> = { data: T | null; error: ApiError | null; pagination?: Pagination };
+import type { ApiError, Pagination, ApiEnvelope } from '@/lib/api/types';
 
 function withParams(path: string, params?: Record<string, string | number | undefined>): string {
   const url = new URL(path, API_BASE);
@@ -179,3 +177,220 @@ export async function apiPost<T>(path: string, body?: unknown, opts?: { role?: "
   if (env.error) throw new ApiHttpError(res.status, env.error.code, env.error.message, url);
   return env;
 }
+
+// ----- Distributed System API Functions -----
+
+import type {
+  NetworkNode,
+  NetworkEdge,
+  ClusterTopology,
+  BandwidthMetrics,
+  QoSMetrics,
+  NetworkInterface,
+  ResourcePrediction,
+  WorkloadPattern,
+  MigrationPrediction,
+  ComputeJob,
+  GlobalResourcePool,
+  MemoryFabric,
+  ProcessingFabric
+} from '@/lib/api/types';
+
+// Network Topology APIs
+export const getNetworkTopology = () =>
+  apiGet<ClusterTopology>('/network/topology');
+
+export const getNetworkNodes = () =>
+  apiGet<NetworkNode[]>('/network/nodes');
+
+export const getNetworkEdges = () =>
+  apiGet<NetworkEdge[]>('/network/edges');
+
+export const updateNetworkNode = (nodeId: string, updates: Partial<NetworkNode>) =>
+  apiPost<NetworkNode>(`/network/nodes/${nodeId}`, updates, { role: 'operator' });
+
+// Bandwidth Monitoring APIs
+export const getBandwidthMetrics = (timeRange?: string) =>
+  apiGet<BandwidthMetrics>('/network/bandwidth/metrics', timeRange ? { timeRange } : undefined);
+
+export const getQoSMetrics = (interfaceId?: string) =>
+  apiGet<QoSMetrics>('/network/qos/metrics', interfaceId ? { interfaceId } : undefined);
+
+export const getNetworkInterfaces = () =>
+  apiGet<NetworkInterface[]>('/network/interfaces');
+
+export const updateQoSPolicy = (interfaceId: string, policy: any) =>
+  apiPost<QoSMetrics>(`/network/qos/${interfaceId}`, policy, { role: 'operator' });
+
+// Performance Prediction APIs
+export const getResourcePredictions = (timeHorizon?: number) =>
+  apiGet<ResourcePrediction[]>('/ai/predictions/resources', timeHorizon ? { timeHorizon } : undefined);
+
+export const getWorkloadPatterns = (clusterId?: string) =>
+  apiGet<WorkloadPattern[]>('/ai/patterns/workload', clusterId ? { clusterId } : undefined);
+
+export const getMigrationPredictions = () =>
+  apiGet<MigrationPrediction[]>('/ai/predictions/migration');
+
+export const triggerPredictionRefresh = () =>
+  apiPost<{ status: string }>('/ai/predictions/refresh', undefined, { role: 'operator' });
+
+// Supercompute Fabric APIs
+export const getComputeJobs = (status?: string) =>
+  apiGet<ComputeJob[]>('/fabric/jobs', status ? { status } : undefined);
+
+export const getGlobalResourcePool = () =>
+  apiGet<GlobalResourcePool>('/fabric/resources/global');
+
+export const getMemoryFabric = () =>
+  apiGet<MemoryFabric>('/fabric/memory');
+
+export const getProcessingFabric = () =>
+  apiGet<ProcessingFabric>('/fabric/processing');
+
+export const submitComputeJob = (job: Omit<ComputeJob, 'id' | 'status' | 'createdAt' | 'updatedAt'>) =>
+  apiPost<ComputeJob>('/fabric/jobs', job, { role: 'operator' });
+
+export const cancelComputeJob = (jobId: string) =>
+  apiPost<{ status: string }>(`/fabric/jobs/${jobId}/cancel`, undefined, { role: 'operator' });
+
+// Cross-Cluster Federation APIs
+export const getFederationStatus = () =>
+  apiGet<{ status: string; connectedClusters: number; syncHealth: string }>('/federation/status');
+
+export const getFederatedClusters = () =>
+  apiGet<Array<{ id: string; name: string; status: string; location: string }>>('/federation/clusters');
+
+export const initializeFederation = (clusterConfig: any) =>
+  apiPost<{ status: string }>('/federation/initialize', clusterConfig, { role: 'operator' });
+
+export const syncFederationState = () =>
+  apiPost<{ status: string }>('/federation/sync', undefined, { role: 'operator' });
+
+// Security and Compliance APIs
+export const getSecurityPolicies = () =>
+  apiGet<SecurityPolicy[]>('/security/policies');
+
+export const getComplianceReport = (framework?: string) =>
+  apiGet<ComplianceReport>('/security/compliance/report', framework ? { framework } : undefined);
+
+export const getAuditLogs = (startTime?: string, endTime?: string) =>
+  apiGet<AuditLog[]>('/security/audit/logs',
+    startTime && endTime ? { startTime, endTime } : undefined);
+
+export const updateSecurityPolicy = (policyId: string, policy: Partial<SecurityPolicy>) =>
+  apiPost<SecurityPolicy>(`/security/policies/${policyId}`, policy, { role: 'operator' });
+
+// System Configuration APIs
+export const getSystemConfiguration = () =>
+  apiGet<SystemConfiguration>('/system/configuration');
+
+export const updateSystemConfiguration = (config: Partial<SystemConfiguration>) =>
+  apiPost<SystemConfiguration>('/system/configuration', config, { role: 'operator' });
+
+export const getSystemHealth = () =>
+  apiGet<{ status: string; components: Array<{ name: string; status: string; lastCheck: string }> }>('/system/health');
+
+// Distributed Storage APIs
+export const getStorageMetrics = () =>
+  apiGet<{
+    totalCapacity: number;
+    usedCapacity: number;
+    availableCapacity: number;
+    replicationFactor: number;
+    storageHealth: string;
+  }>('/storage/metrics');
+
+export const getStoragePools = () =>
+  apiGet<Array<{
+    id: string;
+    name: string;
+    type: string;
+    capacity: number;
+    used: number;
+    health: string;
+  }>>('/storage/pools');
+
+// Migration and Backup APIs
+export const getMigrationJobs = () =>
+  apiGet<Array<{
+    id: string;
+    sourceCluster: string;
+    targetCluster: string;
+    status: string;
+    progress: number;
+    vmCount: number;
+    startTime: string;
+  }>>('/migration/jobs');
+
+export const initiateClusterMigration = (migrationConfig: {
+  sourceCluster: string;
+  targetCluster: string;
+  vmIds: string[];
+  migrationStrategy: string;
+}) =>
+  apiPost<{ jobId: string; status: string }>('/migration/initiate', migrationConfig, { role: 'operator' });
+
+export const getBackupStatus = () =>
+  apiGet<{
+    activeBackups: number;
+    lastBackupTime: string;
+    backupHealth: string;
+    totalBackupSize: number;
+  }>('/backup/status');
+
+// Live Migration APIs
+export const getLiveMigrationStatus = () =>
+  apiGet<Array<{
+    id: string;
+    vmId: string;
+    sourceNode: string;
+    targetNode: string;
+    progress: number;
+    phase: string;
+    bandwidth: number;
+  }>>('/migration/live/status');
+
+export const initiateLiveMigration = (vmId: string, targetNode: string, options?: {
+  maxDowntime?: number;
+  bandwidth?: number;
+  priority?: 'low' | 'normal' | 'high';
+}) =>
+  apiPost<{ migrationId: string; status: string }>(`/migration/live/${vmId}`,
+    { targetNode, ...options }, { role: 'operator' });
+
+// Real-time Metrics Stream APIs
+export const getMetricsStream = (endpoint: string, options?: {
+  interval?: number;
+  aggregation?: string;
+}) =>
+  apiGet<{ streamUrl: string; token: string }>(`/metrics/stream/${endpoint}`, options);
+
+export const getNodeMetrics = (nodeId: string, timeRange?: string) =>
+  apiGet<{
+    cpu: number[];
+    memory: number[];
+    network: number[];
+    storage: number[];
+    timestamps: string[];
+  }>(`/metrics/nodes/${nodeId}`, timeRange ? { timeRange } : undefined);
+
+// AI Model Management APIs
+export const getAIModels = () =>
+  apiGet<Array<{
+    id: string;
+    name: string;
+    type: string;
+    status: string;
+    accuracy: number;
+    lastTrained: string;
+  }>>('/ai/models');
+
+export const trainAIModel = (modelId: string, trainingConfig: {
+  dataset: string;
+  parameters: Record<string, any>;
+}) =>
+  apiPost<{ taskId: string; status: string }>(`/ai/models/${modelId}/train`, trainingConfig, { role: 'operator' });
+
+export const getModelPrediction = (modelId: string, input: any) =>
+  apiPost<{ prediction: any; confidence: number }>(`/ai/models/${modelId}/predict`, { input });

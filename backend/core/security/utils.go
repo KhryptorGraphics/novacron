@@ -15,32 +15,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// PasswordHasher handles secure password hashing
-type PasswordHasher struct {
-	cost int
-}
-
-// NewPasswordHasher creates a new password hasher
-func NewPasswordHasher() *PasswordHasher {
-	return &PasswordHasher{
-		cost: bcrypt.DefaultCost,
-	}
-}
-
-// HashPassword creates a secure hash of a password
-func (ph *PasswordHasher) HashPassword(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), ph.cost)
-	if err != nil {
-		return "", fmt.Errorf("failed to hash password: %w", err)
-	}
-	return string(bytes), nil
-}
-
-// VerifyPassword checks if a password matches a hash
-func (ph *PasswordHasher) VerifyPassword(password, hash string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	return err == nil
-}
 
 // SecureCompare performs constant-time comparison
 func SecureCompare(a, b string) bool {
@@ -224,20 +198,20 @@ func SecureRandomString(length int) (string, error) {
 	return base64.URLEncoding.EncodeToString(bytes)[:length], nil
 }
 
-// AuditLogger logs security-relevant events
-type AuditLogger struct {
+// SimpleAuditLogger logs security-relevant events
+type SimpleAuditLogger struct {
 	logger *log.Logger
 }
 
-// NewAuditLogger creates a new audit logger
-func NewAuditLogger(output io.Writer) *AuditLogger {
-	return &AuditLogger{
+// NewSimpleAuditLogger creates a new simple audit logger
+func NewSimpleAuditLogger(output io.Writer) *SimpleAuditLogger {
+	return &SimpleAuditLogger{
 		logger: log.New(output, "[AUDIT] ", log.LstdFlags|log.LUTC),
 	}
 }
 
 // LogAuthentication logs authentication attempts
-func (al *AuditLogger) LogAuthentication(ctx context.Context, email string, success bool, ip string) {
+func (al *SimpleAuditLogger) LogAuthentication(ctx context.Context, email string, success bool, ip string) {
 	status := "SUCCESS"
 	if !success {
 		status = "FAILURE"
@@ -246,7 +220,7 @@ func (al *AuditLogger) LogAuthentication(ctx context.Context, email string, succ
 }
 
 // LogAccessControl logs access control decisions
-func (al *AuditLogger) LogAccessControl(ctx context.Context, user, resource, action string, allowed bool) {
+func (al *SimpleAuditLogger) LogAccessControl(ctx context.Context, user, resource, action string, allowed bool) {
 	status := "ALLOWED"
 	if !allowed {
 		status = "DENIED"
@@ -255,11 +229,11 @@ func (al *AuditLogger) LogAccessControl(ctx context.Context, user, resource, act
 }
 
 // LogDataAccess logs data access events
-func (al *AuditLogger) LogDataAccess(ctx context.Context, user, dataType, operation string) {
+func (al *SimpleAuditLogger) LogDataAccess(ctx context.Context, user, dataType, operation string) {
 	al.logger.Printf("DATA user=%s type=%s operation=%s", user, dataType, operation)
 }
 
 // LogSecurityEvent logs general security events
-func (al *AuditLogger) LogSecurityEvent(ctx context.Context, eventType, description string) {
+func (al *SimpleAuditLogger) LogSecurityEvent(ctx context.Context, eventType, description string) {
 	al.logger.Printf("SECURITY event=%s description=%s", eventType, description)
 }

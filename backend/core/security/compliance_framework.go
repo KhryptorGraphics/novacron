@@ -263,7 +263,7 @@ type Gap struct {
 	Type        GapType     `json:"type"`
 	Severity    GapSeverity `json:"severity"`
 	Impact      string      `json:"impact"`
-	Root Cause  string      `json:"root_cause"`
+	RootCause   string      `json:"root_cause"`
 	Status      GapStatus   `json:"status"`
 	CreatedAt   time.Time   `json:"created_at"`
 }

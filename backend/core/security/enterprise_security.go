@@ -92,11 +92,12 @@ type RateLimitConfig struct {
 	DDoSConfig  DDoSConfig           `json:"ddos"`
 }
 
-type RateLimit struct {
-	RequestsPerSecond int           `json:"requests_per_second"`
-	BurstSize         int           `json:"burst_size"`
-	WindowSize        time.Duration `json:"window_size"`
-}
+// RateLimit moved to api_security.go to avoid duplication
+// type RateLimit struct {
+// 	RequestsPerSecond int           `json:"requests_per_second"`
+// 	BurstSize         int           `json:"burst_size"`
+// 	WindowSize        time.Duration `json:"window_size"`
+// }
 
 type DDoSConfig struct {
 	Enabled           bool    `json:"enabled"`
@@ -220,28 +221,8 @@ type SecretsConfig struct {
 	SecretsStore      map[string]string `json:"secrets_store"`
 }
 
-// ComplianceConfig defines compliance framework settings
-type ComplianceConfig struct {
-	Frameworks []ComplianceFramework `json:"frameworks"`
-	Reporting  ComplianceReporting   `json:"reporting"`
-	Monitoring ComplianceMonitoring  `json:"monitoring"`
-}
-
-type ComplianceFramework struct {
-	Name        string                 `json:"name"`        // SOC2, ISO27001, GDPR, HIPAA, PCI-DSS
-	Enabled     bool                   `json:"enabled"`
-	Controls    []ComplianceControl    `json:"controls"`
-	Evidence    map[string]interface{} `json:"evidence"`
-}
-
-type ComplianceControl struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	Status       string `json:"status"`      // compliant, non_compliant, not_applicable
-	Evidence     string `json:"evidence"`
-	LastAssessed time.Time `json:"last_assessed"`
-}
+// Compliance types moved to compliance_framework.go to avoid duplication
+// Using types from compliance_framework.go
 
 type ComplianceReporting struct {
 	Enabled       bool          `json:"enabled"`
@@ -658,17 +639,8 @@ type SecurityContext struct {
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }
 
-// DetectedThreat represents a detected security threat
-type DetectedThreat struct {
-	ID          string                 `json:"id"`
-	Type        string                 `json:"type"`
-	Severity    string                 `json:"severity"`
-	Confidence  float64                `json:"confidence"`
-	Description string                 `json:"description"`
-	Evidence    map[string]interface{} `json:"evidence"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Mitigated   bool                   `json:"mitigated"`
-}
+// DetectedThreat moved to api_security.go to avoid duplication
+// Using DetectedThreat from api_security.go
 
 // Helper functions
 func generateRequestID() string {

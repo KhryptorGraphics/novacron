@@ -68,7 +68,7 @@ type CORSPolicyConfig struct {
 // SecurityHealthChecker monitors overall security health
 type SecurityHealthChecker struct {
 	components          map[string]ComponentHealth `json:"components"`
-	overallHealth       HealthStatus              `json:"overall_health"`
+	overallHealth       IntegrationHealthStatus              `json:"overall_health"`
 	lastHealthCheck     time.Time                 `json:"last_health_check"`
 	healthScore         float64                   `json:"health_score"`
 	criticalIssues      []HealthIssue             `json:"critical_issues"`
@@ -78,7 +78,7 @@ type SecurityHealthChecker struct {
 // ComponentHealth represents health status of a security component
 type ComponentHealth struct {
 	Name          string                 `json:"name"`
-	Status        HealthStatus           `json:"status"`
+	Status        IntegrationHealthStatus           `json:"status"`
 	LastCheck     time.Time              `json:"last_check"`
 	ResponseTime  time.Duration          `json:"response_time"`
 	ErrorRate     float64                `json:"error_rate"`
@@ -86,14 +86,14 @@ type ComponentHealth struct {
 	Dependencies  []string               `json:"dependencies"`
 }
 
-// HealthStatus represents health status
-type HealthStatus string
+// IntegrationIntegrationHealthStatus represents health status
+type IntegrationIntegrationHealthStatus string
 
 const (
-	HealthHealthy   HealthStatus = "healthy"
-	HealthDegraded  HealthStatus = "degraded"
-	HealthUnhealthy HealthStatus = "unhealthy"
-	HealthCritical  HealthStatus = "critical"
+	HealthHealthy   IntegrationHealthStatus = "healthy"
+	HealthDegraded  IntegrationHealthStatus = "degraded"
+	HealthUnhealthy IntegrationHealthStatus = "unhealthy"
+	HealthCritical  IntegrationHealthStatus = "critical"
 )
 
 // HealthIssue represents a health issue
@@ -113,10 +113,10 @@ type HealthIssue struct {
 type IssueSeverity string
 
 const (
-	SeverityCritical IssueSeverity = "critical"
-	SeverityHigh     IssueSeverity = "high"
-	SeverityMedium   IssueSeverity = "medium"
-	SeverityLow      IssueSeverity = "low"
+	IssueSeverityCritical IssueSeverity = "critical"
+	IssueSeverityHigh     IssueSeverity = "high"
+	IssueSeverityMedium   IssueSeverity = "medium"
+	IssueSeverityLow      IssueSeverity = "low"
 )
 
 // Security metrics
@@ -664,7 +664,7 @@ func (so *SecurityOrchestrator) performHealthCheck() {
 		"rate_limiter":       so.checkRateLimiterHealth,
 		"encryption_manager": so.checkEncryptionManagerHealth,
 		"audit_logger":       so.checkAuditLoggerHealth,
-		"vulnerability_scanner": so.checkVulnerabilityScanner Health,
+		"vulnerability_scanner": so.checkVulnerabilityScannerHealth,
 		"secrets_manager":    so.checkSecretsManagerHealth,
 		"security_monitor":   so.checkSecurityMonitorHealth,
 		"compliance_framework": so.checkComplianceFrameworkHealth,
@@ -899,7 +899,7 @@ func (so *SecurityOrchestrator) checkSecurityMonitorHealth() ComponentHealth {
 	details := make(map[string]interface{})
 
 	if so.securityMonitor != nil {
-		healthStatus := so.securityMonitor.GetHealthStatus()
+		healthStatus := so.securityMonitor.GetIntegrationHealthStatus()
 		details = healthStatus
 	} else {
 		status = HealthCritical
@@ -964,8 +964,8 @@ func (so *SecurityOrchestrator) performComplianceChecks() {
 	}
 }
 
-// GetHealthStatus returns current health status
-func (so *SecurityOrchestrator) GetHealthStatus() *SecurityHealthChecker {
+// GetIntegrationHealthStatus returns current health status
+func (so *SecurityOrchestrator) GetIntegrationHealthStatus() *SecurityHealthChecker {
 	so.mu.RLock()
 	defer so.mu.RUnlock()
 	return so.healthChecker

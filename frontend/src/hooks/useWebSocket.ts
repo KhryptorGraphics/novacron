@@ -6,6 +6,7 @@ interface WebSocketOptions {
   reconnectAttempts?: number;
   heartbeat?: boolean;
   heartbeatInterval?: number;
+  queue?: boolean; // Use message queue for high-frequency data
 }
 
 interface WebSocketState<T = any> {
@@ -27,6 +28,7 @@ export function useWebSocket<T = any>(
     reconnectAttempts = 5,
     heartbeat = true,
     heartbeatInterval = 30000,
+    queue = false,
   } = options;
 
   const [data, setData] = useState<T | null>(null);
@@ -35,8 +37,9 @@ export function useWebSocket<T = any>(
   
   const ws = useRef<WebSocket | null>(null);
   const reconnectCount = useRef(0);
-  const heartbeatTimer = useRef<NodeJS.Timeout | null>(null);
-  const reconnectTimer = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queueUnsubscribeRef = useRef<(() => void) | null>(null);
 
   const clearTimers = useCallback(() => {
     if (heartbeatTimer.current) {
@@ -80,11 +83,20 @@ export function useWebSocket<T = any>(
           const parsedData = JSON.parse(event.data);
           // Ignore pong messages
           if (parsedData.type !== 'pong') {
-            setData(parsedData);
+            if (options.queue) {
+              wsMessageQueue.enqueue(parsedData);
+            } else {
+              setData(parsedData);
+            }
           }
         } catch (err) {
           // If not JSON, set raw data
-          setData(event.data);
+          const rawData = event.data;
+          if (options.queue) {
+            wsMessageQueue.enqueue(rawData);
+          } else {
+            setData(rawData);
+          }
         }
       };
 
@@ -130,11 +142,22 @@ export function useWebSocket<T = any>(
   useEffect(() => {
     connect();
 
+    // Subscribe to message queue if queue option is enabled
+    if (queue) {
+      queueUnsubscribeRef.current = wsMessageQueue.subscribe((queuedData) => {
+        setData(queuedData);
+      });
+    }
+
     return () => {
       clearTimers();
       ws.current?.close();
+      if (queueUnsubscribeRef.current) {
+        queueUnsubscribeRef.current();
+        queueUnsubscribeRef.current = null;
+      }
     };
-  }, [connect, clearTimers]);
+  }, [connect, clearTimers, queue]);
 
   return {
     data,
@@ -175,5 +198,192 @@ export function useSecurityWebSocket() {
   return useWebSocket('/api/ws/security', {
     heartbeatInterval: 10000,
     reconnectAttempts: 10, // More attempts for security monitoring
+  });
+}
+
+// Enhanced WebSocket hooks for distributed system updates
+export function useDistributedTopologyWebSocket() {
+  return useWebSocket('/api/ws/network/topology', {
+    heartbeatInterval: 15000,
+    reconnectAttempts: 8,
+  });
+}
+
+export function useBandwidthMonitoringWebSocket() {
+  return useWebSocket('/api/ws/network/bandwidth', {
+    heartbeatInterval: 5000, // High frequency for bandwidth data
+    reconnectAttempts: 12,
+  });
+}
+
+export function usePerformancePredictionWebSocket() {
+  return useWebSocket('/api/ws/ai/predictions', {
+    heartbeatInterval: 30000,
+    reconnectAttempts: 6,
+  });
+}
+
+export function useSupercomputeFabricWebSocket() {
+  return useWebSocket('/api/ws/fabric/global', {
+    heartbeatInterval: 20000,
+    reconnectAttempts: 10,
+  });
+}
+
+export function useFederationWebSocket() {
+  return useWebSocket('/api/ws/federation/events', {
+    heartbeatInterval: 25000,
+    reconnectAttempts: 8,
+  });
+}
+
+export function useCrossClusterWebSocket() {
+  return useWebSocket('/api/ws/clusters/cross', {
+    heartbeatInterval: 15000,
+    reconnectAttempts: 10,
+  });
+}
+
+// Specialized hooks for different data streams
+export function useMetricsStreamWebSocket(endpoint: string, options?: Partial<WebSocketOptions>) {
+  return useWebSocket(`/api/ws/metrics/${endpoint}`, {
+    heartbeatInterval: 10000,
+    reconnectAttempts: 8,
+    ...options,
+  });
+}
+
+export function useAIModelWebSocket(modelId: string) {
+  return useWebSocket(`/api/ws/ai/models/${modelId}`, {
+    heartbeatInterval: 45000,
+    reconnectAttempts: 5,
+  });
+}
+
+export function useJobMonitoringWebSocket(jobId?: string) {
+  const endpoint = jobId ? `/api/ws/jobs/${jobId}` : '/api/ws/jobs';
+  return useWebSocket(endpoint, {
+    heartbeatInterval: 10000,
+    reconnectAttempts: 8,
+  });
+}
+
+// Connection pool manager for multiple WebSocket connections
+class WebSocketConnectionPool {
+  private connections: Map<string, WebSocket> = new Map();
+  private maxConnections = 10;
+
+  getConnection(url: string): WebSocket | null {
+    if (this.connections.has(url)) {
+      return this.connections.get(url) || null;
+    }
+
+    if (this.connections.size >= this.maxConnections) {
+      // Close oldest connection
+      const firstKey = this.connections.keys().next().value;
+      const oldConnection = this.connections.get(firstKey);
+      if (oldConnection) {
+        oldConnection.close();
+        this.connections.delete(firstKey);
+      }
+    }
+
+    try {
+      const ws = new WebSocket(url);
+      this.connections.set(url, ws);
+      return ws;
+    } catch {
+      return null;
+    }
+  }
+
+  closeConnection(url: string) {
+    const connection = this.connections.get(url);
+    if (connection) {
+      connection.close();
+      this.connections.delete(url);
+    }
+  }
+
+  closeAllConnections() {
+    this.connections.forEach((ws) => ws.close());
+    this.connections.clear();
+  }
+}
+
+export const wsConnectionPool = new WebSocketConnectionPool();
+
+// WebSocket message queue for handling high-frequency updates
+class WebSocketMessageQueue {
+  private queue: Array<{ timestamp: number; data: any }> = [];
+  private maxSize = 1000;
+  private processingInterval = 100; // Process every 100ms
+  private processor: ReturnType<typeof setInterval> | null = null;
+  private subscribers: Array<(data: any) => void> = [];
+
+  start() {
+    if (this.processor) return;
+
+    this.processor = setInterval(() => {
+      this.processQueue();
+    }, this.processingInterval);
+  }
+
+  stop() {
+    if (this.processor) {
+      clearInterval(this.processor);
+      this.processor = null;
+    }
+  }
+
+  enqueue(data: any) {
+    if (this.subscribers.length === 0) return; // Don't queue if no subscribers
+
+    this.queue.push({ timestamp: Date.now(), data });
+
+    if (this.queue.length > this.maxSize) {
+      this.queue.shift(); // Remove oldest message
+    }
+  }
+
+  private processQueue() {
+    if (this.queue.length === 0 || this.subscribers.length === 0) return;
+
+    const messages = this.queue.splice(0, Math.min(10, this.queue.length));
+
+    messages.forEach(({ data }) => {
+      this.subscribers.forEach(callback => callback(data));
+    });
+  }
+
+  subscribe(callback: (data: any) => void) {
+    this.subscribers.push(callback);
+
+    // Start processing if this is the first subscriber
+    if (this.subscribers.length === 1 && !this.processor) {
+      this.start();
+    }
+
+    return () => {
+      const index = this.subscribers.indexOf(callback);
+      if (index > -1) {
+        this.subscribers.splice(index, 1);
+      }
+
+      // Stop processing if no subscribers
+      if (this.subscribers.length === 0) {
+        this.stop();
+      }
+    };
+  }
+}
+
+export const wsMessageQueue = new WebSocketMessageQueue();
+
+// Clean up on page unload
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    wsMessageQueue.stop();
+    wsConnectionPool.closeAllConnections();
   });
 }

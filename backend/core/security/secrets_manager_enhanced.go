@@ -17,8 +17,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// SecretsConfig represents the configuration from secrets.yaml
-type SecretsConfig struct {
+// EnhancedSecretsConfig represents the configuration from secrets.yaml
+type EnhancedSecretsConfig struct {
 	Secrets struct {
 		Provider string `yaml:"provider"`
 		Cache    struct {
@@ -87,12 +87,12 @@ type EnhancedSecretsManager struct {
 	auditor         AuditLogger
 	rotationManager *SecretRotationManager
 	cache           map[string]*cachedSecret
-	config          *SecretsConfig
+	config          *EnhancedSecretsConfig
 	mu              sync.RWMutex
 }
 
 // LoadSecretsConfig loads configuration from file
-func LoadSecretsConfig(configPath string) (*SecretsConfig, error) {
+func LoadSecretsConfig(configPath string) (*EnhancedSecretsConfig, error) {
 	// Default to environment-based config if file doesn't exist
 	if configPath == "" {
 		configPath = os.Getenv("SECRETS_CONFIG_PATH")
@@ -109,7 +109,7 @@ func LoadSecretsConfig(configPath string) (*SecretsConfig, error) {
 	}
 
 	// Parse YAML with environment variable expansion
-	config := &SecretsConfig{}
+	config := &EnhancedSecretsConfig{}
 	if err := yaml.Unmarshal(data, config); err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
@@ -121,8 +121,8 @@ func LoadSecretsConfig(configPath string) (*SecretsConfig, error) {
 }
 
 // loadConfigFromEnv creates config from environment variables
-func loadConfigFromEnv() *SecretsConfig {
-	config := &SecretsConfig{}
+func loadConfigFromEnv() *EnhancedSecretsConfig {
+	config := &EnhancedSecretsConfig{}
 	
 	// Provider configuration
 	config.Secrets.Provider = getEnvOrDefault("SECRETS_PROVIDER", "vault")
@@ -154,7 +154,7 @@ func loadConfigFromEnv() *SecretsConfig {
 }
 
 // expandConfigEnvVars expands environment variables in config
-func expandConfigEnvVars(config *SecretsConfig) {
+func expandConfigEnvVars(config *EnhancedSecretsConfig) {
 	// Expand Vault address - REQUIRED, no default
 	if config.Secrets.Vault.Address == "${VAULT_ADDR}" || config.Secrets.Vault.Address == "" {
 		config.Secrets.Vault.Address = os.Getenv("VAULT_ADDR")
@@ -223,7 +223,7 @@ func NewEnhancedSecretsManager(configPath string, db *sql.DB) (*EnhancedSecretsM
 }
 
 // createProvider creates the appropriate secret provider
-func createProvider(config *SecretsConfig) (SecretProvider, error) {
+func createProvider(config *EnhancedSecretsConfig) (SecretProvider, error) {
 	switch config.Secrets.Provider {
 	case "vault":
 		return newVaultProviderWithConfig(config)
@@ -240,7 +240,7 @@ func createProvider(config *SecretsConfig) (SecretProvider, error) {
 }
 
 // newVaultProviderWithConfig creates Vault provider from config
-func newVaultProviderWithConfig(config *SecretsConfig) (*VaultProvider, error) {
+func newVaultProviderWithConfig(config *EnhancedSecretsConfig) (*VaultProvider, error) {
 	if config.Secrets.Vault.Address == "" {
 		return nil, fmt.Errorf("Vault address is required")
 	}
@@ -386,13 +386,6 @@ func (m *EnhancedSecretsManager) RegisterRotationPolicy(key string, policy Secre
 
 // Helper functions
 
-func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
 func getEnvIntOrDefault(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		var intVal int
@@ -402,15 +395,6 @@ func getEnvIntOrDefault(key string, defaultValue int) int {
 	return defaultValue
 }
 
-func getActorFromContext(ctx context.Context) string {
-	if actor := ctx.Value("user_id"); actor != nil {
-		return actor.(string)
-	}
-	if actor := ctx.Value("service_account"); actor != nil {
-		return actor.(string)
-	}
-	return "system"
-}
 
 // Noop implementations for optional services
 
@@ -448,7 +432,7 @@ func (n *noopComplianceService) ReportEvent(ctx context.Context, event AuditEven
 
 // Authentication helpers
 
-func authenticateWithAppRole(client *vault.Client, config *SecretsConfig) error {
+func authenticateWithAppRole(client *vault.Client, config *EnhancedSecretsConfig) error {
 	data := map[string]interface{}{
 		"role_id":   config.Secrets.Vault.Auth.AppRole.RoleID,
 		"secret_id": config.Secrets.Vault.Auth.AppRole.SecretID,
@@ -467,7 +451,7 @@ func authenticateWithAppRole(client *vault.Client, config *SecretsConfig) error 
 	return nil
 }
 
-func authenticateWithKubernetes(client *vault.Client, config *SecretsConfig) error {
+func authenticateWithKubernetes(client *vault.Client, config *EnhancedSecretsConfig) error {
 	jwt, err := ioutil.ReadFile(config.Secrets.Vault.Auth.Kubernetes.JWTPath)
 	if err != nil {
 		return fmt.Errorf("failed to read JWT: %w", err)
@@ -492,7 +476,7 @@ func authenticateWithKubernetes(client *vault.Client, config *SecretsConfig) err
 }
 
 // newAWSProviderWithConfig creates AWS provider from config
-func newAWSProviderWithConfig(config *SecretsConfig) (*AWSSecretsProvider, error) {
+func newAWSProviderWithConfig(config *EnhancedSecretsConfig) (*AWSSecretsProvider, error) {
 	cfg, err := config.LoadDefaultConfig(context.Background(),
 		config.WithRegion(config.Secrets.AWS.Region),
 	)
@@ -507,7 +491,7 @@ func newAWSProviderWithConfig(config *SecretsConfig) (*AWSSecretsProvider, error
 }
 
 // newEnvProviderWithConfig creates environment provider from config
-func newEnvProviderWithConfig(config *SecretsConfig) *EnvProvider {
+func newEnvProviderWithConfig(config *EnhancedSecretsConfig) *EnvProvider {
 	return &EnvProvider{
 		values: make(map[string]string),
 	}

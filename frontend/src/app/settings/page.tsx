@@ -32,6 +32,8 @@ import {
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import AuthGuard from "@/components/auth/AuthGuard";
+import TwoFactorSettings from "@/components/auth/TwoFactorSettings";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState({
@@ -99,7 +101,8 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <AuthGuard>
+      <div className="container mx-auto p-6 space-y-6">
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
@@ -281,23 +284,7 @@ export default function SettingsPage() {
               <CardDescription>Configure authentication and access controls</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Two-Factor Authentication</Label>
-                  <div className="text-sm text-muted-foreground">
-                    Require 2FA for all admin accounts
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={settings.twoFactorAuth}
-                    onCheckedChange={(checked) => updateSetting('twoFactorAuth', checked)}
-                  />
-                  <Badge variant={settings.twoFactorAuth ? "default" : "secondary"}>
-                    {settings.twoFactorAuth ? "Enabled" : "Disabled"}
-                  </Badge>
-                </div>
-              </div>
+              <TwoFactorSettings />
               
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
@@ -533,6 +520,7 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
       </Tabs>
-    </div>
+      </div>
+    </AuthGuard>
   );
 }

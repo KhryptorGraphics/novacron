@@ -8,22 +8,38 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { 
-  Activity, Server, HardDrive, Network, Shield, AlertCircle, 
+import {
+  Activity, Server, HardDrive, Network, Shield, AlertCircle,
   Monitor, Database, Lock, Settings, TrendingUp, Users,
-  Cpu, MemoryStick, HardDriveIcon, WifiIcon, Clock, CheckCircle
+  Cpu, MemoryStick, HardDriveIcon, WifiIcon, Clock, CheckCircle,
+  BarChart3, Brain, Globe, Smartphone, Zap
 } from 'lucide-react';
 
 // Dynamically import components to avoid SSR issues
 const VMOperationsDashboard = dynamic(
   () => import('@/components/vm/VMOperationsDashboard'),
-  { 
-    ssr: false, 
+  {
+    ssr: false,
     loading: () => (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
           <p>Loading VM Operations...</p>
+        </div>
+      </div>
+    )
+  }
+);
+
+const NetworkTopology = dynamic(
+  () => import('@/components/visualizations/NetworkTopology').then(mod => ({ default: mod.NetworkTopology })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
+          <p>Loading Network Topology...</p>
         </div>
       </div>
     )
@@ -77,13 +93,74 @@ const NetworkConfigurationPanel = dynamic(
 
 const SecurityComplianceDashboard = dynamic(
   () => import('@/components/security/SecurityComplianceDashboard'),
-  { 
+  {
     ssr: false,
     loading: () => (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
           <p>Loading Security Dashboard...</p>
+        </div>
+      </div>
+    )
+  }
+);
+
+// New distributed monitoring components
+const BandwidthMonitoringDashboard = dynamic(
+  () => import('@/components/monitoring/BandwidthMonitoringDashboard'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
+          <p>Loading Bandwidth Monitoring...</p>
+        </div>
+      </div>
+    )
+  }
+);
+
+const PerformancePredictionDashboard = dynamic(
+  () => import('@/components/monitoring/PerformancePredictionDashboard'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
+          <p>Loading Performance Predictions...</p>
+        </div>
+      </div>
+    )
+  }
+);
+
+const SupercomputeFabricDashboard = dynamic(
+  () => import('@/components/monitoring/SupercomputeFabricDashboard'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
+          <p>Loading Supercompute Fabric...</p>
+        </div>
+      </div>
+    )
+  }
+);
+
+const MobileResponsiveAdmin = dynamic(
+  () => import('@/components/mobile/MobileResponsiveAdmin'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
+          <p>Loading Mobile Interface...</p>
         </div>
       </div>
     )
@@ -107,7 +184,15 @@ export default function UnifiedDashboard() {
     securityScore: 87,
     complianceScore: 92,
     backupStatus: 'healthy',
-    lastBackup: '2 hours ago'
+    lastBackup: '2 hours ago',
+    // Distributed system metrics
+    connectedClusters: 5,
+    federationHealth: 'excellent',
+    globalBandwidth: 45.2,
+    activeMigrations: 2,
+    computeJobs: 18,
+    predictionAccuracy: 94,
+    fabricUtilization: 73
   };
 
   return (
@@ -178,13 +263,53 @@ export default function UnifiedDashboard() {
               <Network className="h-4 w-4" />
               Network
             </Button>
-            <Button 
+            <Button
               variant={activeView === 'security' ? 'default' : 'ghost'}
               onClick={() => setActiveView('security')}
               className="flex items-center gap-2"
             >
               <Shield className="h-4 w-4" />
               Security
+            </Button>
+            <Button
+              variant={activeView === 'bandwidth' ? 'default' : 'ghost'}
+              onClick={() => setActiveView('bandwidth')}
+              className="flex items-center gap-2"
+            >
+              <BarChart3 className="h-4 w-4" />
+              Bandwidth
+            </Button>
+            <Button
+              variant={activeView === 'predictions' ? 'default' : 'ghost'}
+              onClick={() => setActiveView('predictions')}
+              className="flex items-center gap-2"
+            >
+              <Brain className="h-4 w-4" />
+              AI Predictions
+            </Button>
+            <Button
+              variant={activeView === 'fabric' ? 'default' : 'ghost'}
+              onClick={() => setActiveView('fabric')}
+              className="flex items-center gap-2"
+            >
+              <Globe className="h-4 w-4" />
+              Fabric
+            </Button>
+            <Button
+              variant={activeView === 'topology' ? 'default' : 'ghost'}
+              onClick={() => setActiveView('topology')}
+              className="flex items-center gap-2"
+            >
+              <Network className="h-4 w-4" />
+              Topology
+            </Button>
+            <Button
+              variant={activeView === 'mobile' ? 'default' : 'ghost'}
+              onClick={() => setActiveView('mobile')}
+              className="flex items-center gap-2"
+            >
+              <Smartphone className="h-4 w-4" />
+              Mobile
             </Button>
           </div>
         </div>
@@ -248,6 +373,59 @@ export default function UnifiedDashboard() {
               </Card>
             </div>
 
+            {/* Distributed System Metrics */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Connected Clusters</CardTitle>
+                  <Globe className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{systemMetrics.connectedClusters}</div>
+                  <Badge variant="secondary" className="text-xs mt-2">
+                    {systemMetrics.federationHealth}
+                  </Badge>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Global Bandwidth</CardTitle>
+                  <Zap className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{systemMetrics.globalBandwidth} Gbps</div>
+                  <Progress value={systemMetrics.fabricUtilization} className="mt-2" />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Active Migrations</CardTitle>
+                  <Activity className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{systemMetrics.activeMigrations}</div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Cross-cluster operations
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Compute Jobs</CardTitle>
+                  <Server className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{systemMetrics.computeJobs}</div>
+                  <Badge variant="outline" className="text-xs mt-2">
+                    Running
+                  </Badge>
+                </CardContent>
+              </Card>
+            </div>
+
             {/* Secondary Metrics */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Card>
@@ -285,17 +463,16 @@ export default function UnifiedDashboard() {
 
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Backup Status</CardTitle>
-                  <Database className="h-4 w-4 text-muted-foreground" />
+                  <CardTitle className="text-sm font-medium">AI Prediction Accuracy</CardTitle>
+                  <Brain className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold capitalize">{systemMetrics.backupStatus}</div>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Last backup: {systemMetrics.lastBackup}
+                  <div className="text-2xl font-bold">{systemMetrics.predictionAccuracy}%</div>
+                  <Progress value={systemMetrics.predictionAccuracy} className="mt-2" />
+                  <p className="text-xs text-muted-foreground mt-2">
+                    <TrendingUp className="h-3 w-3 inline mr-1 text-green-500" />
+                    Model performance
                   </p>
-                  <Button size="sm" variant="outline" className="mt-2 w-full">
-                    Run Backup
-                  </Button>
                 </CardContent>
               </Card>
             </div>
@@ -368,6 +545,21 @@ export default function UnifiedDashboard() {
         {activeView === 'storage' && <StorageManagementUI />}
         {activeView === 'network' && <NetworkConfigurationPanel />}
         {activeView === 'security' && <SecurityComplianceDashboard />}
+        {activeView === 'bandwidth' && <BandwidthMonitoringDashboard />}
+        {activeView === 'predictions' && <PerformancePredictionDashboard />}
+        {activeView === 'fabric' && <SupercomputeFabricDashboard />}
+        {activeView === 'topology' && (
+          <NetworkTopology
+            title="Distributed Network Topology"
+            description="Real-time visualization of the distributed system topology"
+            height={600}
+            showDistributed={true}
+            showBandwidth={true}
+            showPerformanceMetrics={true}
+            autoRefresh={true}
+          />
+        )}
+        {activeView === 'mobile' && <MobileResponsiveAdmin />}
       </div>
     </div>
   );

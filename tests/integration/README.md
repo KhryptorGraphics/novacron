@@ -26,7 +26,10 @@ tests/integration/
 ├── monitoring_test.go      # Monitoring and metrics
 ├── api_test.go             # REST and GraphQL API tests
 ├── performance_test.go     # Performance benchmarks
-└── e2e_test.go            # End-to-end workflow tests
+├── e2e_test.go            # End-to-end workflow tests
+├── network_fixes_integration_test.go  # Network component integration tests
+├── end_to_end_network_test.go        # Network E2E integration tests
+└── verification_test.go              # Verification comment compliance tests
 ```
 
 ## Running Tests
@@ -53,6 +56,27 @@ make test-integration
 go test -v ./tests/integration/vm_lifecycle_test.go
 go test -v ./tests/integration/auth_test.go
 go test -v ./tests/integration/performance_test.go
+
+# Run verification tests for comment fixes (NEW)
+go test -v ./tests/integration/verification_test.go
+go test -v ./tests/integration/network_fixes_integration_test.go
+go test -v ./tests/integration/end_to_end_network_test.go
+
+# Quick verification of all 13 comment fixes
+go test -v -run "TestAllVerificationComments" ./tests/integration/verification_test.go
+```
+
+### Running Verification Tests (NEW)
+
+The verification tests validate the implementation of 13 specific verification comments:
+
+```bash
+# Run automated test runner for all verification tests
+./scripts/run_integration_tests.sh
+
+# Run specific verification comment tests
+go test -v -run "TestVerificationComment1" ./tests/integration/verification_test.go
+go test -v -run "TestVerificationComment12" ./tests/integration/verification_test.go
 ```
 
 ### Running with Docker
@@ -117,6 +141,24 @@ AUTH_SECRET=test-secret-key
 - ✅ API response times
 - ✅ Concurrent operations
 - ✅ Memory usage profiling
+
+### Verification Tests (NEW)
+
+Validates implementation of 13 specific verification comment fixes:
+
+- ✅ **Comment 1**: Wildcard interface thresholds in bandwidth monitoring
+- ✅ **Comment 2**: Alert rate limiting conflation fix
+- ✅ **Comment 3**: UDPHolePuncher refactoring for single connection
+- ✅ **Comment 4**: NAT traversal connection type labeling
+- ✅ **Comment 5**: NATTraversalManager.Stop() proper cleanup
+- ✅ **Comment 6**: Relay fallback implementation for NAT traversal
+- ✅ **Comment 7**: External endpoint propagation in discovery
+- ✅ **Comment 8**: Routing table update race condition fix
+- ✅ **Comment 9**: QoS kernel state enforcement implementation
+- ✅ **Comment 10**: Configurable root qdisc rate in QoS
+- ✅ **Comment 11**: Network constraints validation in scheduler
+- ✅ **Comment 12**: RequestPlacement global config mutation fix
+- ✅ **Comment 13**: STUN client thread safety improvements
 
 ## Contributing
 

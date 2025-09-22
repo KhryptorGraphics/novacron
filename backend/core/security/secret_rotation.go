@@ -44,7 +44,7 @@ type RotationSchedule struct {
 type SecretRotationManager struct {
 	provider     SecretProvider
 	auditor      AuditLogger
-	notifier     NotificationService
+	notifier     RotationNotificationService
 	policies     map[string]SecretRotationPolicy
 	schedules    map[string]*RotationSchedule
 	versions     map[string][]SecretVersion
@@ -53,8 +53,8 @@ type SecretRotationManager struct {
 	wg           sync.WaitGroup
 }
 
-// NotificationService for rotation notifications
-type NotificationService interface {
+// RotationNotificationService for rotation notifications
+type RotationNotificationService interface {
 	NotifyRotationPending(ctx context.Context, secretKey string, timeUntil time.Duration) error
 	NotifyRotationComplete(ctx context.Context, secretKey string, newVersion string) error
 	NotifyRotationFailed(ctx context.Context, secretKey string, err error) error
@@ -64,7 +64,7 @@ type NotificationService interface {
 func NewSecretRotationManager(
 	provider SecretProvider,
 	auditor AuditLogger,
-	notifier NotificationService,
+	notifier RotationNotificationService,
 ) *SecretRotationManager {
 	return &SecretRotationManager{
 		provider:  provider,

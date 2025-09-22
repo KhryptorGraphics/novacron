@@ -14,11 +14,19 @@ import (
 // PredictivePrefetchingEngine uses AI to predict and pre-load data for migrations
 type PredictivePrefetchingEngine struct {
 	logger                *logrus.Logger
+	nodeID                string
 	aiModel              *MigrationAIModel
 	cacheManager         *PredictiveCache
 	accessPatternTracker *AccessPatternTracker
 	prefetchMetrics      *PrefetchingMetrics
 	trainingData         *TrainingDataCollector
+	migrationIntegration *MigrationIntegration
+	crossNodeCoordinator *CrossNodeCoordinator
+	memoryPrefetcher     *MemoryStatePrefetcher
+	deltaSync            *WANMigrationDeltaSync
+	performanceMonitor   *PrefetchPerformanceMonitor
+	modelManager         *ModelLifecycleManager
+	apiServer            *PredictionAPIServer
 	mu                   sync.RWMutex
 }
 
@@ -520,6 +528,16 @@ func (model *MigrationAIModel) PredictAccess(
 
 // Helper methods and supporting types
 
+// MigrationType represents the type of migration
+type MigrationType int
+
+const (
+	MigrationTypeLive MigrationType = iota
+	MigrationTypeCold
+	MigrationTypeHybrid
+	MigrationTypeIncremental
+)
+
 type MigrationSpec struct {
 	Type                MigrationType
 	SourceNode          string
@@ -597,6 +615,650 @@ const (
 	EvictionPolicyLFUPredictive
 	EvictionPolicyAIPriority
 )
+
+// MigrationIntegration provides hooks for migration workflow integration
+type MigrationIntegration struct {
+	migrationManager    *VMManager
+	deltaSync          *WANMigrationDeltaSync
+	federationManager  *federation.FederationManager
+	predictionCache    map[string]*MigrationPrediction
+	migrationHooks     []MigrationHook
+	mu                 sync.RWMutex
+}
+
+// CrossNodeCoordinator handles cross-node prefetching coordination
+type CrossNodeCoordinator struct {
+	nodeID             string
+	federationComm     *federation.CrossClusterComponents
+	remoteNodes        map[string]*RemoteNodeClient
+	coordinationQueue  chan *PrefetchCoordinationMessage
+	responseHandlers   map[string]chan *CoordinationResponse
+	mu                 sync.RWMutex
+}
+
+// MemoryStatePrefetcher extends prefetching to memory state
+type MemoryStatePrefetcher struct {
+	memoryDistribution *MemoryStateDistribution
+	pagePredictor      *MemoryPagePredictor
+	prefetchCache      *MemoryPageCache
+	accessPatterns     map[string]*MemoryAccessPattern
+	hotPageTracker     *HotPageTracker
+	mu                 sync.RWMutex
+}
+
+// PrefetchPerformanceMonitor monitors prefetching effectiveness
+type PrefetchPerformanceMonitor struct {
+	accuracyMetrics    *AccuracyMetrics
+	performanceGains   *PerformanceGains
+	feedbackLoop       *ModelFeedbackLoop
+	alertThresholds    *AlertThresholds
+	reportGenerator    *PerformanceReportGenerator
+}
+
+// ModelLifecycleManager manages AI model lifecycle
+type ModelLifecycleManager struct {
+	activeModels       map[string]*MigrationAIModel
+	modelVersions      map[string][]*ModelVersion
+	abTestingFramework *ABTestingFramework
+	modelUpdater       *AutoModelUpdater
+	rollbackManager    *ModelRollbackManager
+	mu                 sync.RWMutex
+}
+
+// PredictionAPIServer provides real-time prediction APIs
+type PredictionAPIServer struct {
+	grpcServer     *grpc.Server
+	restServer     *http.Server
+	engine         *PredictivePrefetchingEngine
+	rateLimiter    *RateLimiter
+	authManager    *AuthManager
+}
+
+// Integration with migration operations
+func (engine *PredictivePrefetchingEngine) IntegrateWithMigration(migrationManager *VMManager) error {
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+
+	engine.migrationIntegration = &MigrationIntegration{
+		migrationManager: migrationManager,
+		deltaSync:       engine.deltaSync,
+		predictionCache: make(map[string]*MigrationPrediction),
+		migrationHooks:  []MigrationHook{},
+	}
+
+	// Register migration hooks
+	hooks := []MigrationHook{
+		engine.preMigrationPredictionHook,
+		engine.duringMigrationPrefetchHook,
+		engine.postMigrationFeedbackHook,
+	}
+
+	for _, hook := range hooks {
+		engine.migrationIntegration.migrationHooks = append(engine.migrationIntegration.migrationHooks, hook)
+	}
+
+	return nil
+}
+
+// PredictAccessPatterns provides real-time access pattern prediction
+// This method bridges the API gap for memory_state_distribution.go
+func (engine *PredictivePrefetchingEngine) PredictAccessPatterns(vmID string) *AccessPredictions {
+	// Create a default migration spec for access pattern prediction
+	defaultSpec := &MigrationSpec{
+		Type:               MigrationType(0), // Default migration type
+		SourceNode:         engine.nodeID,
+		DestinationNode:    "",
+		NetworkBandwidth:   1000000000, // 1 Gbps default
+		EstimatedDuration:  5 * time.Minute,
+		CompressionEnabled: true,
+		EncryptionEnabled:  true,
+	}
+
+	// Use the existing PredictMigrationAccess method
+	result, err := engine.PredictMigrationAccess(context.Background(), vmID, defaultSpec)
+	if err != nil {
+		engine.logger.WithError(err).Error("Failed to predict access patterns")
+		return &AccessPredictions{
+			VMID:      vmID,
+			Timestamp: time.Now(),
+		}
+	}
+
+	// Convert PredictionResult to AccessPredictions
+	return &AccessPredictions{
+		VMID:           vmID,
+		HotPages:       engine.extractHotPagesFromResult(result),
+		ColdPages:      engine.extractColdPagesFromResult(result),
+		AccessSequence: engine.extractAccessSequenceFromResult(result),
+		Confidence:     result.Confidence,
+		Timestamp:      time.Now(),
+	}
+}
+
+// TriggerPredictiveDeltaSync integrates with delta synchronization
+func (engine *PredictivePrefetchingEngine) TriggerPredictiveDeltaSync(vmID string, targetNode string) error {
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+
+	// Get access predictions
+	predictions := engine.PredictAccessPatterns(vmID)
+
+	// Pre-compute deltas for predicted access
+	if engine.deltaSync != nil {
+		priorityBlocks := engine.convertPredictionsToBlocks(predictions)
+
+		// Trigger priority delta computation
+		err := engine.deltaSync.PreComputeDeltas(vmID, priorityBlocks)
+		if err != nil {
+			return fmt.Errorf("failed to pre-compute deltas: %w", err)
+		}
+	}
+
+	// Prefetch memory pages to target node
+	if engine.memoryPrefetcher != nil {
+		err := engine.memoryPrefetcher.PrefetchPagesToNode(vmID, targetNode, predictions.HotPages)
+		if err != nil {
+			engine.logger.WithError(err).Warn("Failed to prefetch memory pages")
+		}
+	}
+
+	return nil
+}
+
+// CrossNodePrefetching coordinates prefetching across nodes
+func (engine *PredictivePrefetchingEngine) CrossNodePrefetching(vmID string, targetNodes []string) error {
+	engine.mu.RLock()
+	coordinator := engine.crossNodeCoordinator
+	engine.mu.RUnlock()
+
+	if coordinator == nil {
+		return fmt.Errorf("cross-node coordinator not initialized")
+	}
+
+	predictions := engine.PredictAccessPatterns(vmID)
+
+	// Send prefetch requests to target nodes
+	for _, targetNode := range targetNodes {
+		message := &PrefetchCoordinationMessage{
+			Type:        MessageTypePrefetchRequest,
+			SourceNode:  coordinator.nodeID,
+			TargetNode:  targetNode,
+			VMID:        vmID,
+			Predictions: predictions,
+			Timestamp:   time.Now(),
+		}
+
+		select {
+		case coordinator.coordinationQueue <- message:
+			// Message queued successfully
+		default:
+			engine.logger.Warn("Coordination queue full, dropping prefetch request",
+				logrus.Fields{"vmID": vmID, "targetNode": targetNode})
+		}
+	}
+
+	return nil
+}
+
+// Migration hooks
+func (engine *PredictivePrefetchingEngine) preMigrationPredictionHook(ctx context.Context, vmID string, migrationSpec *MigrationSpec) error {
+	// Generate predictions before migration starts
+	predictions := engine.PredictAccessPatterns(vmID)
+
+	// Cache predictions for migration use
+	engine.migrationIntegration.mu.Lock()
+	engine.migrationIntegration.predictionCache[vmID] = &MigrationPrediction{
+		VMID:        vmID,
+		Predictions: predictions,
+		Timestamp:   time.Now(),
+	}
+	engine.migrationIntegration.mu.Unlock()
+
+	// Pre-warm cache on target node
+	if migrationSpec != nil {
+		return engine.TriggerPredictiveDeltaSync(vmID, migrationSpec.DestinationNode)
+	}
+
+	return nil
+}
+
+func (engine *PredictivePrefetchingEngine) duringMigrationPrefetchHook(ctx context.Context, vmID string, progress *MigrationProgress) error {
+	// Adjust prefetching based on migration progress
+	if progress.CompletionPercentage > 0.5 {
+		// Switch to more aggressive prefetching for remaining data
+		return engine.adjustPrefetchingStrategy(vmID, "aggressive")
+	}
+	return nil
+}
+
+func (engine *PredictivePrefetchingEngine) postMigrationFeedbackHook(ctx context.Context, vmID string, result *MigrationResult) error {
+	// Collect feedback for model improvement
+	engine.migrationIntegration.mu.RLock()
+	prediction, exists := engine.migrationIntegration.predictionCache[vmID]
+	engine.migrationIntegration.mu.RUnlock()
+
+	if exists {
+		// Generate training sample from actual migration results
+		sample := &TrainingSample{
+			VMID:            vmID,
+			Features:        engine.extractVMFeatures(vmID),
+			ActualAccess:    engine.convertResultToAccess(result),
+			MigrationResult: result,
+			Timestamp:       time.Now(),
+		}
+
+		// Add to training data
+		if engine.trainingData != nil {
+			engine.trainingData.AddSample(sample)
+		}
+
+		// Clean up prediction cache
+		engine.migrationIntegration.mu.Lock()
+		delete(engine.migrationIntegration.predictionCache, vmID)
+		engine.migrationIntegration.mu.Unlock()
+	}
+
+	return nil
+}
+
+// Real-time prediction API endpoints
+func (server *PredictionAPIServer) GetPredictions(ctx context.Context, req *GetPredictionsRequest) (*GetPredictionsResponse, error) {
+	predictions := server.engine.PredictAccessPatterns(req.VMID)
+
+	return &GetPredictionsResponse{
+		VMID:        req.VMID,
+		Predictions: predictions,
+		Timestamp:   time.Now(),
+	}, nil
+}
+
+func (server *PredictionAPIServer) TriggerPrefetch(ctx context.Context, req *TriggerPrefetchRequest) (*TriggerPrefetchResponse, error) {
+	err := server.engine.TriggerPredictiveDeltaSync(req.VMID, req.TargetNode)
+
+	return &TriggerPrefetchResponse{
+		Success:   err == nil,
+		Message:   getResponseMessage(err),
+		Timestamp: time.Now(),
+	}, err
+}
+
+// Performance monitoring integration
+func (engine *PredictivePrefetchingEngine) StartPerformanceMonitoring() {
+	if engine.performanceMonitor == nil {
+		return
+	}
+
+	go engine.performanceMonitor.MonitorContinuously(engine)
+}
+
+func (monitor *PrefetchPerformanceMonitor) MonitorContinuously(engine *PredictivePrefetchingEngine) {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			monitor.collectMetrics(engine)
+			monitor.updateFeedback(engine)
+			monitor.checkAlerts(engine)
+		}
+	}
+}
+
+// Model lifecycle management
+func (manager *ModelLifecycleManager) UpdateModel(modelName string, newVersion *ModelVersion) error {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+
+	// Store new version
+	if manager.modelVersions[modelName] == nil {
+		manager.modelVersions[modelName] = []*ModelVersion{}
+	}
+	manager.modelVersions[modelName] = append(manager.modelVersions[modelName], newVersion)
+
+	// A/B test new version
+	if manager.abTestingFramework != nil {
+		return manager.abTestingFramework.StartABTest(modelName, newVersion)
+	}
+
+	return nil
+}
+
+func (manager *ModelLifecycleManager) RollbackModel(modelName string, targetVersion string) error {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+
+	return manager.rollbackManager.RollbackToVersion(modelName, targetVersion)
+}
+
+// Helper methods
+func (engine *PredictivePrefetchingEngine) extractVMFeatures(vmID string) *VMDataFeatures {
+	// Implementation would extract current VM features
+	return &VMDataFeatures{VMID: vmID}
+}
+
+func (engine *PredictivePrefetchingEngine) extractHotPages(predictions []*AccessPrediction) []uint64 {
+	hotPages := []uint64{}
+	for _, pred := range predictions {
+		if pred.Probability > 0.8 {
+			// Extract page number from PageID
+			if pageNum := engine.extractPageNumberFromID(pred.PageID); pageNum != 0 {
+				hotPages = append(hotPages, pageNum)
+			}
+		}
+	}
+	return hotPages
+}
+
+func (engine *PredictivePrefetchingEngine) extractHotPagesFromResult(result *PredictionResult) []uint64 {
+	if result == nil || result.PredictedAccess == nil {
+		return []uint64{}
+	}
+	return engine.extractHotPages(result.PredictedAccess)
+}
+
+func (engine *PredictivePrefetchingEngine) extractColdPages(predictions []*AccessPrediction) []uint64 {
+	coldPages := []uint64{}
+	for _, pred := range predictions {
+		if pred.Probability < 0.2 {
+			// Extract page number from PageID
+			if pageNum := engine.extractPageNumberFromID(pred.PageID); pageNum != 0 {
+				coldPages = append(coldPages, pageNum)
+			}
+		}
+	}
+	return coldPages
+}
+
+func (engine *PredictivePrefetchingEngine) extractColdPagesFromResult(result *PredictionResult) []uint64 {
+	if result == nil || result.PredictedAccess == nil {
+		return []uint64{}
+	}
+	return engine.extractColdPages(result.PredictedAccess)
+}
+
+func (engine *PredictivePrefetchingEngine) extractAccessSequence(predictions []*AccessPrediction) []uint64 {
+	// Sort by access probability and time
+	sort.Slice(predictions, func(i, j int) bool {
+		return predictions[i].Probability > predictions[j].Probability
+	})
+
+	sequence := []uint64{}
+	for _, pred := range predictions {
+		if pageNum := engine.extractPageNumberFromID(pred.PageID); pageNum != 0 {
+			sequence = append(sequence, pageNum)
+		}
+	}
+	return sequence
+}
+
+func (engine *PredictivePrefetchingEngine) extractAccessSequenceFromResult(result *PredictionResult) []uint64 {
+	if result == nil || result.PredictedAccess == nil {
+		return []uint64{}
+	}
+	return engine.extractAccessSequence(result.PredictedAccess)
+}
+
+func (engine *PredictivePrefetchingEngine) calculateConfidence(predictions []*AccessPrediction) float64 {
+	if len(predictions) == 0 {
+		return 0.0
+	}
+
+	total := 0.0
+	for _, pred := range predictions {
+		total += pred.Probability
+	}
+	return total / float64(len(predictions))
+}
+
+// extractPageNumberFromID extracts the page number from a page ID string
+func (engine *PredictivePrefetchingEngine) extractPageNumberFromID(pageID string) uint64 {
+	// Expected format: "page_<vmID>_<pageNum>"
+	var pageNum uint64
+	_, err := fmt.Sscanf(pageID, "page_%s_%d", new(string), &pageNum)
+	if err != nil {
+		return 0
+	}
+	return pageNum
+}
+
+func (engine *PredictivePrefetchingEngine) convertPredictionsToBlocks(predictions *AccessPredictions) []uint64 {
+	// Convert page predictions to block numbers
+	blocks := []uint64{}
+	for _, page := range predictions.HotPages {
+		// Convert page to block (assuming 8 pages per block)
+		block := page / 8
+		blocks = append(blocks, block)
+	}
+	return blocks
+}
+
+func (engine *PredictivePrefetchingEngine) adjustPrefetchingStrategy(vmID string, strategy string) error {
+	// Implementation would adjust prefetching parameters
+	return nil
+}
+
+func (engine *PredictivePrefetchingEngine) convertResultToAccess(result *MigrationResult) []*AccessPrediction {
+	// Implementation would convert migration results to access patterns
+	return []*AccessPrediction{}
+}
+
+func getResponseMessage(err error) string {
+	if err != nil {
+		return err.Error()
+	}
+	return "Success"
+}
+
+// Supporting types for new functionality
+type MigrationHook func(context.Context, string, interface{}) error
+
+type MigrationPrediction struct {
+	VMID        string
+	Predictions *AccessPredictions
+	Timestamp   time.Time
+}
+
+type AccessPredictions struct {
+	VMID           string
+	HotPages       []uint64
+	ColdPages      []uint64
+	AccessSequence []uint64
+	Confidence     float64
+	Timestamp      time.Time
+}
+
+type PrefetchCoordinationMessage struct {
+	Type        MessageType
+	SourceNode  string
+	TargetNode  string
+	VMID        string
+	Predictions *AccessPredictions
+	Timestamp   time.Time
+}
+
+type MessageType int
+
+const (
+	MessageTypePrefetchRequest MessageType = iota
+	MessageTypePrefetchResponse
+	MessageTypePrefetchCancel
+)
+
+type CoordinationResponse struct {
+	Success   bool
+	Message   string
+	Timestamp time.Time
+}
+
+type MigrationProgress struct {
+	VMID                string
+	CompletionPercentage float64
+	DataTransferred     int64
+	EstimatedRemaining  time.Duration
+}
+
+type RemoteNodeClient struct {
+	NodeID   string
+	Address  string
+	Client   interface{} // gRPC client
+}
+
+type MemoryPagePredictor struct {
+	Model *MigrationAIModel
+}
+
+type MemoryPageCache struct {
+	Cache map[uint64][]byte
+	mu    sync.RWMutex
+}
+
+type MemoryAccessPattern struct {
+	VMID         string
+	HotPages     []uint64
+	AccessCounts map[uint64]int64
+}
+
+type AccuracyMetrics struct {
+	Precision float64
+	Recall    float64
+	F1Score   float64
+}
+
+type PerformanceGains struct {
+	CacheHitImprovement   float64
+	MigrationSpeedGain    float64
+	BandwidthSavings      int64
+}
+
+type ModelFeedbackLoop struct {
+	FeedbackQueue chan *FeedbackData
+}
+
+type FeedbackData struct {
+	PredictionID string
+	Actual       interface{}
+	Predicted    interface{}
+	Accuracy     float64
+}
+
+type AlertThresholds struct {
+	MinAccuracy    float64
+	MaxLatency     time.Duration
+	MinCacheHitRate float64
+}
+
+type PerformanceReportGenerator struct {
+	Reports []PerformanceReport
+}
+
+type PerformanceReport struct {
+	Timestamp time.Time
+	Metrics   map[string]interface{}
+}
+
+type ModelVersion struct {
+	Version    string
+	Model      *MigrationAIModel
+	Timestamp  time.Time
+	Performance float64
+}
+
+type ABTestingFramework struct {
+	ActiveTests map[string]*ABTest
+}
+
+type ABTest struct {
+	ModelName     string
+	ControlModel  *MigrationAIModel
+	TestModel     *MigrationAIModel
+	TrafficSplit  float64
+	StartTime     time.Time
+}
+
+type AutoModelUpdater struct {
+	UpdateInterval time.Duration
+	VersionChecker interface{}
+}
+
+type ModelRollbackManager struct {
+	RollbackHistory []RollbackEvent
+}
+
+type RollbackEvent struct {
+	ModelName     string
+	FromVersion   string
+	ToVersion     string
+	Timestamp     time.Time
+	Reason        string
+}
+
+type RateLimiter struct {
+	RequestsPerSecond int
+}
+
+type AuthManager struct {
+	AuthProvider interface{}
+}
+
+type GetPredictionsRequest struct {
+	VMID string
+}
+
+type GetPredictionsResponse struct {
+	VMID        string
+	Predictions *AccessPredictions
+	Timestamp   time.Time
+}
+
+type TriggerPrefetchRequest struct {
+	VMID       string
+	TargetNode string
+}
+
+type TriggerPrefetchResponse struct {
+	Success   bool
+	Message   string
+	Timestamp time.Time
+}
+
+// Memory prefetcher methods
+func (mp *MemoryStatePrefetcher) PrefetchPagesToNode(vmID string, targetNode string, pages []uint64) error {
+	mp.mu.Lock()
+	defer mp.mu.Unlock()
+
+	// Implementation would prefetch memory pages to target node
+	for _, pageNum := range pages {
+		// Fetch page from memory distribution
+		// Send to target node
+	}
+
+	return nil
+}
+
+// Monitor methods
+func (monitor *PrefetchPerformanceMonitor) collectMetrics(engine *PredictivePrefetchingEngine) {
+	// Implementation would collect performance metrics
+}
+
+func (monitor *PrefetchPerformanceMonitor) updateFeedback(engine *PredictivePrefetchingEngine) {
+	// Implementation would update model feedback
+}
+
+func (monitor *PrefetchPerformanceMonitor) checkAlerts(engine *PredictivePrefetchingEngine) {
+	// Implementation would check alert thresholds
+}
+
+// Training data collector methods
+func (collector *TrainingDataCollector) AddSample(sample *TrainingSample) {
+	// Implementation would add training sample
+}
+
+// Delta sync integration
+func (sync *WANMigrationDeltaSync) PreComputeDeltas(vmID string, priorityBlocks []uint64) error {
+	// Implementation would pre-compute deltas for priority blocks
+	return nil
+}
 
 type LayerType int
 
@@ -727,6 +1389,7 @@ type TrainingDataCollector struct {
 // AccessPrediction represents a prediction for memory/data access
 type AccessPrediction struct {
 	PageID        string    `json:"page_id"`
+	PageNumber    uint64    `json:"page_number"` // Direct page number for compatibility
 	Probability   float64   `json:"probability"`
 	AccessTime    time.Time `json:"access_time"`
 	AccessPattern string    `json:"access_pattern"` // "sequential", "random", "temporal"
@@ -1146,6 +1809,7 @@ func (model *MigrationAIModel) convertOutputToPredictions(output []float64, vmID
 		if prob > 0.1 { // Only include predictions above threshold
 			prediction := &AccessPrediction{
 				PageID:        fmt.Sprintf("page_%s_%d", vmID, i),
+				PageNumber:    uint64(i), // Store direct page number
 				Probability:   prob,
 				AccessTime:    time.Now().Add(time.Duration(i) * time.Minute),
 				AccessPattern: "sequential",

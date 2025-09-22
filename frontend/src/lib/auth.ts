@@ -28,7 +28,10 @@ interface AuthResponse {
     lastName: string;
     tenantId?: string;
     status: string;
+    two_factor_enabled?: boolean;
   };
+  requires_2fa?: boolean;
+  temp_token?: string;
 }
 
 interface UserResponse {
@@ -38,6 +41,27 @@ interface UserResponse {
   lastName: string;
   tenantId?: string;
   status: string;
+  two_factor_enabled?: boolean;
+}
+
+interface TwoFactorSetupResponse {
+  qr_code: string;
+  secret: string;
+  backup_codes: string[];
+}
+
+interface TwoFactorVerifyRequest {
+  user_id: string;
+  code: string;
+  is_backup_code?: boolean;
+  temp_token?: string;
+}
+
+interface TwoFactorVerifyResponse {
+  valid: boolean;
+  remaining_backup_codes?: number;
+  error?: string;
+  token?: string;
 }
 
 class AuthService {
@@ -160,6 +184,161 @@ class AuthService {
   logout() {
     this.removeToken();
     // In a real implementation, you might want to call the logout API endpoint
+  }
+
+  // 2FA Methods
+
+  // Setup 2FA - generate QR code and secret
+  async setup2FA(): Promise<TwoFactorSetupResponse> {
+    const token = this.getToken();
+    const user = this.getCurrentUser();
+    if (!user) {
+      throw new Error('User not authenticated');
+    }
+    return this.request<TwoFactorSetupResponse>('/api/auth/2fa/setup', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        user_id: user.id,
+        account_name: user.email
+      }),
+    });
+  }
+
+  // Verify 2FA setup with code
+  async verify2FASetup(data: TwoFactorVerifyRequest): Promise<TwoFactorVerifyResponse> {
+    const token = this.getToken();
+    const user = this.getCurrentUser();
+    if (!user && !data.user_id) {
+      throw new Error('User ID required for 2FA verification');
+    }
+    return this.request<TwoFactorVerifyResponse>('/api/auth/2fa/verify', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        user_id: data.user_id || user?.id,
+        code: data.code,
+        is_backup_code: data.is_backup_code || false
+      }),
+    });
+  }
+
+  // Verify 2FA during login
+  async verify2FALogin(data: TwoFactorVerifyRequest): Promise<AuthResponse> {
+    return this.request<AuthResponse>('/api/auth/2fa/verify-login', {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: data.user_id,
+        code: data.code,
+        is_backup_code: data.is_backup_code || false,
+        temp_token: data.temp_token
+      }),
+    });
+  }
+
+  // Enable 2FA after verification
+  async enable2FA(code: string): Promise<{ success: boolean; message: string }> {
+    const user = this.getCurrentUser();
+    if (!user) {
+      throw new Error('User not authenticated');
+    }
+    const token = this.getToken();
+    return this.request<{ success: boolean; message: string }>('/api/auth/2fa/enable', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        user_id: user.id,
+        code: code
+      }),
+    });
+  }
+
+  // Disable 2FA
+  async disable2FA(): Promise<{ success: boolean; message: string }> {
+    const user = this.getCurrentUser();
+    if (!user) {
+      throw new Error('User not authenticated');
+    }
+    const token = this.getToken();
+    return this.request<{ success: boolean; message: string }>('/api/auth/2fa/disable', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        user_id: user.id
+      }),
+    });
+  }
+
+  // Get 2FA status
+  async get2FAStatus(): Promise<{ enabled: boolean; backup_codes_remaining: number; setup?: boolean; setup_at?: string; last_used?: string }> {
+    const user = this.getCurrentUser();
+    if (!user) {
+      throw new Error('User not authenticated');
+    }
+    const token = this.getToken();
+    const response = await this.request<{ enabled: boolean; setup?: boolean; setup_at?: string; last_used?: string; algorithm?: string; digits?: number; period?: number }>('/api/auth/2fa/status?user_id=' + user.id, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    // Transform backend response to match frontend expectations
+    return {
+      enabled: response.enabled,
+      backup_codes_remaining: 0, // Backend doesn't return this in status, need separate call
+      setup: response.setup,
+      setup_at: response.setup_at,
+      last_used: response.last_used
+    };
+  }
+
+  // Generate new backup codes
+  async generateBackupCodes(): Promise<{ backup_codes: string[] }> {
+    const user = this.getCurrentUser();
+    if (!user) {
+      throw new Error('User not authenticated');
+    }
+    const token = this.getToken();
+    return this.request<{ backup_codes: string[] }>('/api/auth/2fa/backup-codes', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        user_id: user.id
+      }),
+    });
+  }
+
+  // Store temporary token for 2FA flow
+  setTempToken(tempToken: string) {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('tempToken', tempToken);
+    }
+  }
+
+  // Get temporary token for 2FA flow
+  getTempToken(): string | null {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('tempToken');
+    }
+    return null;
+  }
+
+  // Remove temporary token
+  removeTempToken() {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('tempToken');
+    }
   }
 }
 

@@ -2,6 +2,9 @@ package vm
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"time"
 )
 
 // VMType represents the type of VM
@@ -99,6 +102,58 @@ type VMState = State
 // - VMConfig (vm.go)
 // - VMManagerConfig (vm_manager.go)
 // - VMSchedulerConfig (vm_manager.go)
+
+// VMUpdateSpec represents specification for updating VM configuration
+type VMUpdateSpec struct {
+	Name   *string             `json:"name,omitempty"`    // VM name update
+	CPU    *int                `json:"cpu,omitempty"`     // CPU shares update
+	Memory *int64              `json:"memory,omitempty"`  // Memory update in MB
+	Disk   *int64              `json:"disk,omitempty"`    // Disk size update in GB
+	Tags   map[string]string   `json:"tags,omitempty"`    // Tag updates
+}
+
+// BackupVerificationResult moved to backup package as VerificationResult
+
+// MigrationStatus defined in vm_migration_types.go to avoid duplicates
+
+// MigrationProgress represents migration progress information
+type MigrationProgress struct {
+	ID          string          `json:"id"`
+	VMID        string          `json:"vm_id"`
+	SourceNode  string          `json:"source_node"`
+	TargetNode  string          `json:"target_node"`
+	Status      MigrationStatus `json:"status"`
+	Percentage  int             `json:"percentage"`
+	StartedAt   time.Time       `json:"started_at"`
+	CompletedAt *time.Time      `json:"completed_at,omitempty"`
+	Details     map[string]interface{} `json:"details,omitempty"`
+}
+
+// Enhanced error types for better error handling
+var (
+	ErrVMNotFound              = errors.New("VM not found")
+	ErrOperationNotSupported   = errors.New("operation not supported by driver")
+	ErrInvalidVMState         = errors.New("invalid VM state for operation")
+	ErrBackupNotFound         = errors.New("backup not found")
+	ErrBackupCorrupted        = errors.New("backup is corrupted")
+)
+
+type VMError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Cause   error  `json:"-"`
+}
+
+func (e *VMError) Error() string {
+	if e.Cause != nil {
+		return fmt.Sprintf("%s: %s (caused by: %v)", e.Code, e.Message, e.Cause)
+	}
+	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+}
+
+func (e *VMError) Unwrap() error {
+	return e.Cause
+}
 
 // CreateVMRequest represents a request to create a VM
 type CreateVMRequest struct {

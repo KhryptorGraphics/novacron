@@ -5,6 +5,8 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/toaster";
 import { QueryProvider } from "@/providers/query-provider";
+import { AuthProvider } from "@/hooks/useAuth";
+import { RBACProvider } from "@/contexts/RBACContext";
 
 // Metadata for the application
 export const metadata: Metadata = {
@@ -20,12 +22,16 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="font-sans antialiased">
-        <QueryProvider>
-          <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-            {children}
-            <Toaster />
-          </ThemeProvider>
-        </QueryProvider>
+        <AuthProvider>
+          <RBACProvider>
+            <QueryProvider>
+              <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+                {children}
+                <Toaster />
+              </ThemeProvider>
+            </QueryProvider>
+          </RBACProvider>
+        </AuthProvider>
       </body>
     </html>
   );

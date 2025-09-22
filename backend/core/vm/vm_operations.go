@@ -36,13 +36,13 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 	}
 	vmID := req.Spec.ID
 
-	// Use default VM type if not specified - Assuming VMConfig has Type field
-	// if req.Spec.Type == "" {
-	// 	req.Spec.Type = m.config.DefaultVMType
-	// }
+	// Use default VM type if not specified
+	if req.Spec.Type == "" {
+		req.Spec.Type = VMTypeContainerd // Use containerd as default
+	}
 
-	// Get the VM driver - Assuming driverFactory takes VMConfig or relevant field
-	driver, err := m.driverFactory(req.Spec) // Pass the whole spec? Or just type? Needs driverFactory definition
+	// Get the VM driver - Use consistent getDriver method
+	driver, err := m.getDriver(req.Spec)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get VM driver: %w", err)
 	}
@@ -142,11 +142,6 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 	vm.state = StateCreating // Directly setting internal state
 	vm.mutex.Unlock()
 
-	// Store the VM
-	m.vmsMutex.Lock()
-	m.vms[vmID] = vm
-	m.vmsMutex.Unlock()
-
 	// Create the VM on the node using the config from the VM object
 	// Assuming driver.Create takes VMConfig
 	_, err = driver.Create(ctx, vm.config) // driverID declared and not used error fixed
@@ -161,7 +156,7 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 			Type:      VMEventError,
 			VM:        *vm, // Pass the VM object
 			Timestamp: time.Now(),
-			NodeID:    "node1", // TODO: Use nodeID from allocation when scheduler is available
+			NodeID:    vm.NodeID(), // Use actual VM NodeID
 			Message:   fmt.Sprintf("Failed to create VM: %v", err),
 		})
 
@@ -172,21 +167,41 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 		return vm, err
 	}
 
+	// Store the VM only after successful creation
+	m.vmsMutex.Lock()
+	m.vms[vmID] = vm
+	m.vmsMutex.Unlock()
+
 	// Update the VM state
 	vm.mutex.Lock()
 	vm.state = StateStopped // Use correct state constant
 	// vm.updatedAt = time.Now() // Assuming internal field
 	vm.mutex.Unlock()
 
+	// Track resource allocation after successful VM creation
+	m.resourceMutex.Lock()
+	m.allocatedCPU += req.Spec.CPUShares
+	m.allocatedMemoryMB += int64(req.Spec.MemoryMB)
+	// Clamp negative values at mutation time
+	if m.allocatedCPU < 0 {
+		m.allocatedCPU = 0
+	}
+	if m.allocatedMemoryMB < 0 {
+		m.allocatedMemoryMB = 0
+	}
+	m.resourceMutex.Unlock()
+	
+	log.Printf("Allocated resources - CPU: %d, Memory: %dMB for VM %s", req.Spec.CPUShares, req.Spec.MemoryMB, vmID)
+
 	// Emit created event
 	m.emitEvent(VMEvent{
 		Type:      VMEventCreated,
 		VM:        *vm, // Pass the VM object
 		Timestamp: time.Now(),
-		NodeID:    "node1", // TODO: Use nodeID from allocation when scheduler is available
+		NodeID:    vm.NodeID(), // Use actual VM NodeID
 	})
 
-	log.Printf("Created VM %s of type %s on node %s", vm.ID(), vm.config.Command, "node1") // TODO: Use allocation nodeID when scheduler is available
+	log.Printf("Created VM %s of type %s on node %s", vm.ID(), vm.config.Command, vm.NodeID())
 
 	return vm, nil // Return the created VM object
 }
@@ -205,8 +220,8 @@ func (m *VMManager) PerformVMOperation(ctx context.Context, req VMOperationReque
 		}, nil
 	}
 
-	// Get the VM driver - Assuming driverFactory takes VMConfig
-	driver, err := m.driverFactory(vm.config)
+	// Get the VM driver - Use consistent getDriver method
+	driver, err := m.getDriver(vm.config)
 	if err != nil {
 		return &VMOperationResponse{
 			Success:      false,
@@ -619,6 +634,22 @@ func (m *VMManager) deleteVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 		NodeID:    vm.NodeID(),
 	})
 
+	// Deallocate resources before removing VM
+	config := vm.Config()
+	m.resourceMutex.Lock()
+	m.allocatedCPU -= config.CPUShares
+	m.allocatedMemoryMB -= int64(config.MemoryMB)
+	// Clamp negative values at mutation time
+	if m.allocatedCPU < 0 {
+		m.allocatedCPU = 0
+	}
+	if m.allocatedMemoryMB < 0 {
+		m.allocatedMemoryMB = 0
+	}
+	m.resourceMutex.Unlock()
+	
+	log.Printf("Deallocated resources - CPU: %d, Memory: %dMB for VM %s", config.CPUShares, config.MemoryMB, vm.ID())
+
 	// Remove VM from manager's map
 	m.vmsMutex.Lock()
 	delete(m.vms, vm.ID())
@@ -704,10 +735,8 @@ func (m *VMManager) migrateVM(ctx context.Context, vm *VM, driver VMDriver, para
 
 	// Update VM's node ID
 	oldNodeID := vm.NodeID()
-	vm.mutex.Lock()
-	// vm.nodeID = targetNode // This would be set if VM has a nodeID field
-	vm.state = StateRunning
-	vm.mutex.Unlock()
+	vm.SetNodeID(targetNode) // Update VM's node ID to target node
+	vm.SetState(StateRunning) // Use the proper setter method
 
 	// Emit migrated event
 	m.emitEvent(VMEvent{
@@ -878,7 +907,4 @@ func (m *VMManager) DeleteVM(ctx context.Context, vmID string) error {
 	return nil
 }
 
-// getDriverForVM gets the appropriate driver for a VM
-func (m *VMManager) getDriverForVM(vm *VM) (VMDriver, error) {
-	return m.getDriver(vm.config)
-}
+// Removed duplicate getDriverForVM - using the one from vm_manager.go

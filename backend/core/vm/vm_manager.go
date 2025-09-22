@@ -15,13 +15,18 @@ type VMManager struct {
 	vms            map[string]*VM
 	vmsMutex       sync.RWMutex
 	driverFactory  VMDriverFactory
-	scheduler      VMScheduler
+	scheduler      *VMScheduler
 	eventListeners []VMManagerEventListener
 	eventMutex     sync.RWMutex
 	vmCache        map[string]VMInfo
 	mutex          sync.RWMutex
 	ctx            context.Context
 	cancel         context.CancelFunc
+	
+	// Resource accounting fields
+	allocatedCPU      int
+	allocatedMemoryMB int64
+	resourceMutex     sync.RWMutex
 }
 
 // VMManagerConfig contains configuration for the VM manager
@@ -105,38 +110,23 @@ func NewVMManager(config VMManagerConfig) (*VMManager, error) {
 			MaxVMsPerNode:          10,
 		}
 		scheduler := NewVMScheduler(schedulerConfig)
-		manager.scheduler = *scheduler
+		manager.scheduler = scheduler
 	}
 
 	return manager, nil
 }
 
-// createDriver creates a driver instance based on type and config
-func createDriver(driverType VMType, config map[string]interface{}) (VMDriver, error) {
-	switch driverType {
-	case VMTypeKVM:
-		uri, ok := config["uri"].(string)
-		if !ok {
-			uri = "qemu:///system" // Default KVM URI
-		}
-		return NewKVMDriverStub(map[string]interface{}{"uri": uri})
-	case VMTypeContainer:
-		return NewContainerDriverStub(config)
-	case VMTypeContainerd:
-		return NewContainerdDriver(config)
-	default:
-		return nil, fmt.Errorf("unsupported driver type: %s", driverType)
-	}
-}
+// createDriver creates a driver instance based on type and config  
+// Delegates to createDriverForType to avoid duplication
 
 // createScheduler creates a scheduler instance based on config
-func createScheduler(config VMSchedulerConfig) (VMScheduler, error) {
+func createScheduler(config VMSchedulerConfig) (*VMScheduler, error) {
 	// For now, return a basic scheduler
 	// This can be expanded to support different scheduler types
 	scheduler := NewVMScheduler(SchedulerConfig{
 		Policy: SchedulerPolicyRoundRobin,
 	})
-	return *scheduler, nil
+	return scheduler, nil
 }
 
 // emitEvent emits a VM event to all registered listeners
@@ -208,7 +198,7 @@ func (m *VMManager) GetVM(vmID string) (*VM, error) { // Assuming VM is defined 
 
 	vm, exists := m.vms[vmID] // Assuming vms map is part of VMManager struct
 	if !exists {
-		return nil, fmt.Errorf("VM %s not found", vmID)
+		return nil, fmt.Errorf("VM %s not found: %w", vmID, ErrVMNotFound)
 	}
 
 	return vm, nil
@@ -306,10 +296,10 @@ func (m *VMManager) listAvailableVMTypes() []VMType { // Assuming VMType is defi
 	// Check which ones have working drivers
 	availableTypes := make([]VMType, 0)
 	for _, vmType := range standardTypes {
-		// Need a dummy config to check driver availability
-		dummyConfig := VMConfig{ /* Populate minimally if needed */ }
-		// This check might need refinement depending on how driverFactory works
-		if m.checkDriverAvailability(dummyConfig) == nil {
+		// Create config with correct Type field for driver check
+		config := VMConfig{Type: vmType}
+		// Check if driver is available for this specific type
+		if m.checkDriverAvailability(config) == nil {
 			availableTypes = append(availableTypes, vmType)
 		}
 	}
@@ -335,17 +325,17 @@ func (m *VMManager) createDriverForType(vmType VMType, config map[string]interfa
 
 // NewKVMDriverStub creates a stub KVM driver
 func NewKVMDriverStub(config map[string]interface{}) (VMDriver, error) {
-	return NewContainerdDriver(config)
+	return nil, fmt.Errorf("KVM driver not yet implemented")
 }
 
 // NewContainerDriverStub creates a stub container driver
 func NewContainerDriverStub(config map[string]interface{}) (VMDriver, error) {
-	return NewContainerdDriver(config)
+	return nil, fmt.Errorf("Container driver not yet implemented")
 }
 
 // NewProcessDriverStub creates a stub process driver
 func NewProcessDriverStub(config map[string]interface{}) (VMDriver, error) {
-	return NewContainerdDriver(config)
+	return nil, fmt.Errorf("Process driver not yet implemented")
 }
 
 // updateLoop runs the VM update loop
@@ -411,10 +401,51 @@ func (m *VMManager) GetVMStatus(ctx context.Context, vmID string) (*VMStatus, er
 
 // GetVMMetrics returns metrics for a VM
 func (m *VMManager) GetVMMetrics(ctx context.Context, vmID string) (*VMMetrics, error) {
-	// Stub implementation  
-	return &VMMetrics{
-		VMID: vmID,
-	}, nil
+	// Get the VM first to ensure it exists
+	vm, err := m.GetVM(vmID)
+	if err != nil {
+		return nil, fmt.Errorf("VM not found: %w", err)
+	}
+	
+	// Get the driver for this VM
+	driver, err := m.getDriver(vm.Config())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get driver for metrics: %w", err)
+	}
+	
+	// Call driver's GetMetrics which returns *VMInfo
+	vmInfo, err := driver.GetMetrics(ctx, vmID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get metrics: %w", err)
+	}
+	
+	// Convert VMInfo to VMMetrics - populate available fields
+	metrics := &VMMetrics{
+		VMID:      vmID,
+		NodeID:    vm.NodeID(),
+		Timestamp: time.Now(),
+		CPU: CPUMetrics{
+			Cores:        vm.config.CPUShares,
+			UsagePercent: 0.0, // Placeholder - containerd doesn't provide this yet
+		},
+		Memory: MemoryMetrics{
+			UsedBytes:  int64(vm.config.MemoryMB) * 1024 * 1024, // Convert MB to bytes
+			TotalBytes: int64(vm.config.MemoryMB) * 1024 * 1024,
+			UsagePercent: 0.0, // Placeholder
+		},
+		Disk:    make(map[string]DiskMetrics),
+		Network: make(map[string]NetMetrics),
+	}
+	
+	// Add VMInfo state if available
+	if vmInfo != nil {
+		metrics.Labels = map[string]string{
+			"state": string(vmInfo.State),
+			"image": vmInfo.Image,
+		}
+	}
+	
+	return metrics, nil
 }
 
 // DefaultVMManagerConfig returns a default VM manager configuration
@@ -452,3 +483,237 @@ type VMStatus struct {
 }
 
 // Note: VMMetrics is defined in vm_metrics.go to avoid duplication
+
+// UpdateVM updates VM configuration for stopped VMs
+func (m *VMManager) UpdateVM(ctx context.Context, vmID string, updateSpec VMUpdateSpec) error {
+	// Get VM
+	vm, err := m.GetVM(vmID)
+	if err != nil {
+		return &VMError{Code: "VM_NOT_FOUND", Message: fmt.Sprintf("VM %s not found", vmID), Cause: ErrVMNotFound}
+	}
+
+	// Check VM state - only allow updates on stopped VMs
+	if vm.State() != StateStopped {
+		return &VMError{
+			Code:    "INVALID_STATE", 
+			Message: fmt.Sprintf("VM %s is in state %s, can only update stopped VMs", vmID, vm.State()),
+			Cause:   ErrInvalidVMState,
+		}
+	}
+
+	// Get current config for resource accounting
+	oldConfig := vm.Config()
+	oldCPU := oldConfig.CPUShares
+	oldMemory := int64(oldConfig.MemoryMB)
+	
+	// Input validation before applying updates
+	if updateSpec.CPU != nil && *updateSpec.CPU <= 0 {
+		return &VMError{Code: "INVALID_ARGUMENT", Message: "CPU must be > 0", Cause: fmt.Errorf("invalid argument")}
+	}
+	if updateSpec.Memory != nil && *updateSpec.Memory <= 0 {
+		return &VMError{Code: "INVALID_ARGUMENT", Message: "Memory must be > 0", Cause: fmt.Errorf("invalid argument")}
+	}
+	if updateSpec.Disk != nil {
+		newDiskSize := int(*updateSpec.Disk)
+		if newDiskSize < oldConfig.DiskSizeGB {
+			return &VMError{Code: "INVALID_ARGUMENT", Message: "Disk shrinking not allowed", Cause: fmt.Errorf("invalid argument")}
+		}
+		if newDiskSize <= 0 {
+			return &VMError{Code: "INVALID_ARGUMENT", Message: "Disk size must be positive", Cause: fmt.Errorf("invalid argument")}
+		}
+		if newDiskSize > 10240 { // 10TB maximum disk size limit
+			return &VMError{Code: "INVALID_ARGUMENT", Message: "Disk size exceeds maximum limit (10TB)", Cause: fmt.Errorf("invalid argument")}
+		}
+		// Ensure disk expansion is reasonable (no more than 100x increase at once)
+		if newDiskSize > oldConfig.DiskSizeGB*100 {
+			return &VMError{Code: "INVALID_ARGUMENT", Message: "Disk size increase too large (max 100x current size)", Cause: fmt.Errorf("invalid argument")}
+		}
+	}
+
+	// Name validation - check for duplicate names if name is being updated
+	if updateSpec.Name != nil {
+		newName := *updateSpec.Name
+		if newName == "" {
+			return &VMError{Code: "INVALID_ARGUMENT", Message: "VM name cannot be empty", Cause: fmt.Errorf("invalid argument")}
+		}
+		
+		// Check if another VM already has this name
+		m.vmsMutex.RLock()
+		for id, existingVM := range m.vms {
+			if id != vmID && existingVM.Name() == newName {
+				m.vmsMutex.RUnlock()
+				return &VMError{
+					Code:    "NAME_CONFLICT", 
+					Message: fmt.Sprintf("VM name '%s' is already in use by VM %s", newName, id),
+					Cause:   fmt.Errorf("duplicate name"),
+				}
+			}
+		}
+		m.vmsMutex.RUnlock()
+	}
+
+	// Apply updates using encapsulated method
+	err = vm.ApplyUpdateSpec(updateSpec)
+	if err != nil {
+		return &VMError{Code: "UPDATE_FAILED", Message: fmt.Sprintf("Failed to apply update: %v", err), Cause: err}
+	}
+
+	// Get new config for resource accounting
+	newConfig := vm.Config()
+	newCPU := newConfig.CPUShares
+	newMemory := int64(newConfig.MemoryMB)
+
+	// Update resource counters with clamping
+	m.resourceMutex.Lock()
+	if updateSpec.CPU != nil {
+		deltaCPU := newCPU - oldCPU
+		m.allocatedCPU += deltaCPU
+		// Clamp to prevent negative totals
+		if m.allocatedCPU < 0 {
+			m.allocatedCPU = 0
+		}
+	}
+	if updateSpec.Memory != nil {
+		deltaMemory := newMemory - oldMemory
+		m.allocatedMemoryMB += deltaMemory
+		// Clamp to prevent negative totals
+		if m.allocatedMemoryMB < 0 {
+			m.allocatedMemoryMB = 0
+		}
+	}
+	m.resourceMutex.Unlock()
+
+	// Emit update event
+	m.emitEvent(VMEvent{
+		Type:      VMEventUpdated,
+		VM:        *vm,
+		Timestamp: time.Now(),
+		NodeID:    vm.NodeID(),
+		Message:   "VM configuration updated",
+	})
+
+	log.Printf("Updated VM %s configuration", vmID)
+	return nil
+}
+
+// MigrateVM migrates a VM to another node
+func (m *VMManager) MigrateVM(ctx context.Context, vmID string, targetNode string, options map[string]string) error {
+	// Get VM
+	vm, err := m.GetVM(vmID)
+	if err != nil {
+		return &VMError{Code: "VM_NOT_FOUND", Message: fmt.Sprintf("VM %s not found", vmID), Cause: ErrVMNotFound}
+	}
+
+	// Get driver for VM
+	driver, err := m.getDriverForVM(vm)
+	if err != nil {
+		return &VMError{Code: "DRIVER_ERROR", Message: "Failed to get VM driver", Cause: err}
+	}
+
+	// Check if driver supports migration
+	if !driver.SupportsMigrate() {
+		return &VMError{
+			Code:    "OPERATION_NOT_SUPPORTED", 
+			Message: "VM driver does not support migration",
+			Cause:   ErrOperationNotSupported,
+		}
+	}
+
+	// Convert options to driver format
+	params := make(map[string]string)
+	params["target_node"] = targetNode
+	for k, v := range options {
+		params[k] = v
+	}
+
+	// Call internal migration method
+	response, err := m.migrateVM(ctx, vm, driver, params)
+	if err != nil {
+		return err
+	}
+
+	if !response.Success {
+		return &VMError{
+			Code:    "MIGRATION_FAILED", 
+			Message: response.ErrorMessage,
+		}
+	}
+
+	return nil
+}
+
+// CreateSnapshot creates a VM snapshot
+func (m *VMManager) CreateSnapshot(ctx context.Context, vmID string, snapshotName string, options map[string]string) (string, error) {
+	// Get VM
+	vm, err := m.GetVM(vmID)
+	if err != nil {
+		return "", &VMError{Code: "VM_NOT_FOUND", Message: fmt.Sprintf("VM %s not found", vmID), Cause: ErrVMNotFound}
+	}
+
+	// Get driver for VM
+	driver, err := m.getDriverForVM(vm)
+	if err != nil {
+		return "", &VMError{Code: "DRIVER_ERROR", Message: "Failed to get VM driver", Cause: err}
+	}
+
+	// Check if driver supports snapshots
+	if !driver.SupportsSnapshot() {
+		return "", &VMError{
+			Code:    "OPERATION_NOT_SUPPORTED", 
+			Message: "VM driver does not support snapshots",
+			Cause:   ErrOperationNotSupported,
+		}
+	}
+
+	// Prepare parameters
+	params := make(map[string]string)
+	params["name"] = snapshotName
+	for k, v := range options {
+		params[k] = v
+	}
+
+	// Call internal snapshot method
+	response, err := m.snapshotVM(ctx, vm, driver, params)
+	if err != nil {
+		return "", err
+	}
+
+	if !response.Success {
+		return "", &VMError{
+			Code:    "SNAPSHOT_FAILED", 
+			Message: response.ErrorMessage,
+		}
+	}
+
+	// Extract snapshot ID from response data
+	if snapshotID, ok := response.Data["snapshot_id"]; ok {
+		return snapshotID, nil
+	}
+
+	return snapshotName, nil
+}
+
+// Helper method to get driver for VM (already exists but ensuring it's available)
+func (m *VMManager) getDriverForVM(vm *VM) (VMDriver, error) {
+	return m.getDriver(vm.config)
+}
+
+// GetCurrentAllocations returns the current resource allocations
+func (m *VMManager) GetCurrentAllocations() (cpu int, memoryMB int64) {
+	m.resourceMutex.RLock()
+	allocatedCPU := m.allocatedCPU
+	allocatedMemoryMB := m.allocatedMemoryMB
+	m.resourceMutex.RUnlock()
+	
+	// Add safety checks to prevent negative totals - clamp locally
+	if allocatedCPU < 0 {
+		log.Printf("Warning: Negative CPU allocation detected: %d, clamping to 0", allocatedCPU)
+		allocatedCPU = 0
+	}
+	if allocatedMemoryMB < 0 {
+		log.Printf("Warning: Negative memory allocation detected: %d, clamping to 0", allocatedMemoryMB)
+		allocatedMemoryMB = 0
+	}
+	
+	return allocatedCPU, allocatedMemoryMB
+}

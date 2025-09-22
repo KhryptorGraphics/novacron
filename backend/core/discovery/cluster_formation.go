@@ -9,6 +9,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // ClusterState represents the state of a cluster
@@ -391,7 +393,8 @@ func (r *randSource) Int(n int) int {
 // NewClusterFormation creates a new cluster formation manager
 func NewClusterFormation(config ClusterFormationConfig) (*ClusterFormation, error) {
 	// Create discovery service
-	discovery, err := NewInternetDiscovery(config.DiscoveryConfig)
+	logger := zap.NewNop() // TODO: Get logger from config
+	discovery, err := NewInternetDiscovery(config.DiscoveryConfig, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create discovery service: %w", err)
 	}

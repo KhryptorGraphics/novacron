@@ -2,9 +2,12 @@ module github.com/khryptorgraphics/novacron/tests/integration
 
 go 1.21
 
+replace github.com/khryptorgraphics/novacron => ../..
+
 require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/khryptorgraphics/novacron v0.0.0-00010101000000-000000000000
 	github.com/lib/pq v1.10.9
 	github.com/stretchr/testify v1.9.0
 )

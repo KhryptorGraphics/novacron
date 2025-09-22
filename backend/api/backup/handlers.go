@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,7 +17,7 @@ import (
 
 // BackupAPIServer provides REST endpoints for backup operations
 type BackupAPIServer struct {
-	backupManager   *backup.IncrementalBackupManager
+	backupManager   *backup.BackupManager
 	retentionManager *backup.RetentionManager
 	restoreManager  *backup.RestoreManager
 	router          *mux.Router
@@ -62,6 +63,16 @@ type BackupInfo struct {
 	Metadata        map[string]string `json:"metadata,omitempty"`
 }
 
+// BackupVerificationResponse represents a backup verification response for the backup API
+type BackupVerificationResponse struct {
+	BackupID         string                 `json:"backup_id"`
+	Status           string                 `json:"status"`
+	CheckedItems     int                    `json:"checked_items"`
+	ErrorsFound      []string               `json:"errors_found"`
+	VerificationTime time.Time              `json:"verification_time"`
+	Details          map[string]interface{} `json:"details,omitempty"`
+}
+
 // RestoreCreateRequest represents a restore request
 type RestoreCreateRequest struct {
 	BackupID        string            `json:"backup_id"`
@@ -100,7 +111,7 @@ type RetentionPolicyRequest struct {
 
 // NewBackupAPIServer creates a new backup API server
 func NewBackupAPIServer(
-	backupManager *backup.IncrementalBackupManager,
+	backupManager *backup.BackupManager,
 	retentionManager *backup.RetentionManager,
 	restoreManager *backup.RestoreManager,
 ) *BackupAPIServer {
@@ -200,8 +211,32 @@ func (s *BackupAPIServer) createBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// Create backup
-	manifest, err := s.backupManager.CreateIncrementalBackup(r.Context(), req.VMID, req.VMPath, backupType)
+	// Ensure VM ID is in metadata
+	if req.Metadata == nil {
+		req.Metadata = make(map[string]string)
+	}
+	req.Metadata["vm_id"] = req.VMID
+	
+	// Create backup job first
+	job := &backup.BackupJob{
+		ID:      fmt.Sprintf("job-%d", time.Now().Unix()),
+		Name:    fmt.Sprintf("Backup for %s", req.VMID),
+		Type:    backupType,
+		Targets: []*backup.BackupTarget{{ID: req.VMID, ResourceID: req.VMID, Type: "vm"}},
+		Storage: &backup.StorageConfig{Type: backup.LocalStorage},
+		Enabled: true,
+		TenantID: "default",
+		Metadata: req.Metadata,  // Pass metadata including vm_id
+	}
+	
+	// Register the job first
+	if err := s.backupManager.CreateBackupJob(job); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to register backup job: %v", err), http.StatusInternalServerError)
+		return
+	}
+	
+	// Now run the registered job
+	backupResult, err := s.backupManager.RunBackupJob(r.Context(), job.ID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to create backup: %v", err), http.StatusInternalServerError)
 		return
@@ -209,12 +244,12 @@ func (s *BackupAPIServer) createBackup(w http.ResponseWriter, r *http.Request) {
 	
 	// Prepare response
 	response := BackupCreateResponse{
-		BackupID:  manifest.BackupID,
-		VMID:      manifest.VMID,
-		Type:      string(manifest.Type),
-		Status:    "completed",
-		CreatedAt: manifest.CreatedAt,
-		Metadata:  manifest.Metadata,
+		BackupID:  backupResult.ID,
+		VMID:      req.VMID,
+		Type:      string(backupResult.Type),
+		Status:    string(backupResult.State),
+		CreatedAt: backupResult.StartedAt,
+		Metadata:  backupResult.Metadata,
 	}
 	
 	w.Header().Set("Content-Type", "application/json")
@@ -223,55 +258,162 @@ func (s *BackupAPIServer) createBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *BackupAPIServer) listBackups(w http.ResponseWriter, r *http.Request) {
-	// Parse query parameters
+	// Parse query parameters with pagination and filtering
 	vmID := r.URL.Query().Get("vm_id")
+	backupType := r.URL.Query().Get("type")
+	state := r.URL.Query().Get("state")
+	jobID := r.URL.Query().Get("job_id")
+	startDateStr := r.URL.Query().Get("start_date")
+	endDateStr := r.URL.Query().Get("end_date")
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
 	
-	var allBackups []BackupInfo
+	// Default pagination values
+	limit := 50
+	offset := 0
 	
-	if vmID != "" {
-		// List backups for specific VM
-		backupIDs, err := s.backupManager.ListBackups(vmID)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to list backups: %v", err), http.StatusInternalServerError)
-			return
+	// Parse pagination parameters
+	if limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+			if limit > 100 {
+				limit = 100 // Max limit
+			}
+		}
+	}
+	if offsetStr != "" {
+		if parsedOffset, err := strconv.Atoi(offsetStr); err == nil && parsedOffset >= 0 {
+			offset = parsedOffset
+		}
+	}
+	
+	// Parse date filters
+	var startDate, endDate time.Time
+	var hasStartDate, hasEndDate bool
+	if startDateStr != "" {
+		if parsed, err := time.Parse(time.RFC3339, startDateStr); err == nil {
+			startDate = parsed
+			hasStartDate = true
+		}
+	}
+	if endDateStr != "" {
+		if parsed, err := time.Parse(time.RFC3339, endDateStr); err == nil {
+			endDate = parsed
+			hasEndDate = true
+		}
+	}
+	
+	// Check if any filters are provided
+	hasFilters := vmID != "" || backupType != "" || state != "" || jobID != "" || hasStartDate || hasEndDate
+	
+	var backupList []backup.BackupInfo
+	var err error
+	
+	if !hasFilters {
+		// No filters provided, use ListAllBackups for efficiency
+		backupList, err = s.backupManager.ListAllBackups(r.Context())
+	} else {
+		// Filters provided, use filtered listing
+		filter := backup.BackupFilter{
+			VMID:  vmID,
+			Type:  backupType,
+			State: state,
+			JobID: jobID,
+		}
+		if hasStartDate {
+			filter.StartDate = startDate
+		}
+		if hasEndDate {
+			filter.EndDate = endDate
 		}
 		
-		for _, backupID := range backupIDs {
-			manifest, err := s.backupManager.GetBackupManifest(backupID)
-			if err != nil {
-				continue // Skip invalid backups
+		// Use manager-side filtering for filtered requests
+		filteredBackups, err := s.backupManager.ListBackupsFiltered(r.Context(), filter)
+		if err == nil {
+			// Convert from []*Backup to []BackupInfo
+			for _, b := range filteredBackups {
+				vmID := b.VMID
+				if vmID == "" && b.Metadata != nil {
+					vmID = b.Metadata["vm_id"]
+				}
+				
+				backupInfo := backup.BackupInfo{
+					ID:        b.ID,
+					JobID:     b.JobID,
+					VMID:      vmID,
+					Type:      b.Type,
+					State:     b.State,
+					Size:      b.Size,
+					StartedAt: b.StartedAt,
+					TenantID:  b.TenantID,
+					ParentID:  b.ParentID,
+					Metadata:  b.Metadata,
+				}
+				if !b.CompletedAt.IsZero() {
+					backupInfo.CompletedAt = &b.CompletedAt
+				}
+				backupList = append(backupList, backupInfo)
 			}
-			
-			compressionRatio := float64(1.0)
-			if manifest.Size > 0 {
-				compressionRatio = float64(manifest.CompressedSize) / float64(manifest.Size)
-			}
-			
-			backupInfo := BackupInfo{
-				ID:               manifest.BackupID,
-				VMID:             manifest.VMID,
-				Type:             string(manifest.Type),
-				Size:             manifest.Size,
-				CompressedSize:   manifest.CompressedSize,
-				CreatedAt:        manifest.CreatedAt,
-				ParentID:         manifest.ParentID,
-				BlockCount:       manifest.BlockCount,
-				ChangedBlocks:    manifest.ChangedBlocks,
-				CompressionRatio: compressionRatio,
-				Metadata:         manifest.Metadata,
-			}
-			
-			allBackups = append(allBackups, backupInfo)
 		}
-	} else {
-		// TODO: Implement listing all backups across all VMs
-		http.Error(w, "Listing all backups not yet implemented", http.StatusNotImplemented)
+	}
+	
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to list backups: %v", err), http.StatusInternalServerError)
 		return
 	}
 	
-	response := BackupListResponse{
+	// Convert to API response format
+	var allBackups []BackupInfo
+	for _, backupInfo := range backupList {
+		compressionRatio := float64(1.0)
+		compressedSize := backupInfo.Size // Placeholder - actual compression would be stored separately
+		
+		// Use VMID from backup info, or from metadata if available
+		resultVMID := backupInfo.VMID
+		if resultVMID == "" && backupInfo.Metadata != nil {
+			resultVMID = backupInfo.Metadata["vm_id"]
+		}
+		
+		apiBackupInfo := BackupInfo{
+			ID:               backupInfo.ID,
+			VMID:             resultVMID,
+			Type:             string(backupInfo.Type),
+			Size:             backupInfo.Size,
+			CompressedSize:   compressedSize,
+			CreatedAt:        backupInfo.StartedAt,
+			ParentID:         backupInfo.ParentID,
+			BlockCount:       0, // Not available in basic BackupInfo
+			ChangedBlocks:    0, // Not available in basic BackupInfo
+			CompressionRatio: compressionRatio,
+			Metadata:         backupInfo.Metadata,
+		}
+		
+		allBackups = append(allBackups, apiBackupInfo)
+	}
+	
+	// Apply pagination
+	total := len(allBackups)
+	if offset >= total {
+		allBackups = []BackupInfo{}
+	} else {
+		end := offset + limit
+		if end > total {
+			end = total
+		}
+		allBackups = allBackups[offset:end]
+	}
+	
+	// Include pagination metadata in response
+	response := struct {
+		Backups []BackupInfo `json:"backups"`
+		Total   int          `json:"total"`
+		Limit   int          `json:"limit"`
+		Offset  int          `json:"offset"`
+	}{
 		Backups: allBackups,
-		Total:   len(allBackups),
+		Total:   total,
+		Limit:   limit,
+		Offset:  offset,
 	}
 	
 	w.Header().Set("Content-Type", "application/json")
@@ -282,29 +424,42 @@ func (s *BackupAPIServer) getBackup(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	backupID := vars["backup_id"]
 	
+	// Get backup manifest to retrieve proper VM ID
 	manifest, err := s.backupManager.GetBackupManifest(backupID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Backup not found: %v", err), http.StatusNotFound)
+		if errors.Is(err, backup.ErrBackupNotFound) {
+			http.Error(w, fmt.Sprintf("Backup not found: %v", err), http.StatusNotFound)
+		} else {
+			http.Error(w, fmt.Sprintf("Failed to get backup manifest: %v", err), http.StatusInternalServerError)
+		}
+		return
+	}
+	
+	backup, err := s.backupManager.GetBackup(backupID)
+	if err != nil {
+		if errors.Is(err, backup.ErrBackupNotFound) {
+			http.Error(w, fmt.Sprintf("Backup not found: %v", err), http.StatusNotFound)
+		} else {
+			http.Error(w, fmt.Sprintf("Failed to get backup: %v", err), http.StatusInternalServerError)
+		}
 		return
 	}
 	
 	compressionRatio := float64(1.0)
-	if manifest.Size > 0 {
-		compressionRatio = float64(manifest.CompressedSize) / float64(manifest.Size)
-	}
+	compressedSize := backup.Size // Placeholder
 	
 	backupInfo := BackupInfo{
-		ID:               manifest.BackupID,
-		VMID:             manifest.VMID,
-		Type:             string(manifest.Type),
-		Size:             manifest.Size,
-		CompressedSize:   manifest.CompressedSize,
-		CreatedAt:        manifest.CreatedAt,
-		ParentID:         manifest.ParentID,
-		BlockCount:       manifest.BlockCount,
-		ChangedBlocks:    manifest.ChangedBlocks,
+		ID:               backup.ID,
+		VMID:             manifest.VMID, // Use VMID from manifest, not JobID
+		Type:             string(backup.Type),
+		Size:             backup.Size,
+		CompressedSize:   compressedSize,
+		CreatedAt:        backup.StartedAt,
+		ParentID:         backup.ParentID,
+		BlockCount:       0, // Not available in basic Backup
+		ChangedBlocks:    0, // Not available in basic Backup
 		CompressionRatio: compressionRatio,
-		Metadata:         manifest.Metadata,
+		Metadata:         backup.Metadata,
 	}
 	
 	w.Header().Set("Content-Type", "application/json")
@@ -315,16 +470,49 @@ func (s *BackupAPIServer) deleteBackup(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	backupID := vars["backup_id"]
 	
-	// TODO: Implement backup deletion
-	http.Error(w, "Backup deletion not yet implemented", http.StatusNotImplemented)
+	// Delete backup through backup manager
+	err := s.backupManager.DeleteBackup(r.Context(), backupID)
+	if err != nil {
+		// Use typed error checking
+		if errors.Is(err, backup.ErrBackupNotFound) {
+			http.Error(w, fmt.Sprintf("Backup not found: %v", err), http.StatusNotFound)
+		} else {
+			http.Error(w, fmt.Sprintf("Failed to delete backup: %v", err), http.StatusInternalServerError)
+		}
+		return
+	}
+	
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *BackupAPIServer) verifyBackup(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	backupID := vars["backup_id"]
 	
-	// TODO: Implement backup verification
-	http.Error(w, "Backup verification not yet implemented", http.StatusNotImplemented)
+	// Verify backup through backup manager using VerifyBackup
+	result, err := s.backupManager.VerifyBackup(r.Context(), backupID)
+	if err != nil {
+		// Use typed error checking
+		if errors.Is(err, backup.ErrBackupNotFound) {
+			http.Error(w, fmt.Sprintf("Backup not found: %v", err), http.StatusNotFound)
+		} else {
+			http.Error(w, fmt.Sprintf("Failed to verify backup: %v", err), http.StatusInternalServerError)
+		}
+		return
+	}
+	
+	// Convert to typed response
+	response := BackupVerificationResponse{
+		BackupID:         result.BackupID,
+		Status:           result.Status,
+		CheckedItems:     result.CheckedItems,
+		ErrorsFound:      result.ErrorsFound,
+		VerificationTime: result.VerificationTime,
+		Details:          result.Details,
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 func (s *BackupAPIServer) listVMBackups(w http.ResponseWriter, r *http.Request) {
@@ -350,7 +538,7 @@ func (s *BackupAPIServer) createVMBackup(w http.ResponseWriter, r *http.Request)
 	req.VMID = vmID
 	
 	// Re-encode and call createBackup
-	r.Body = jsonReader(req)
+	r.Body = io.NopCloser(jsonReader(req))
 	s.createBackup(w, r)
 }
 

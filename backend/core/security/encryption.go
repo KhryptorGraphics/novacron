@@ -32,8 +32,9 @@ const (
 	RSAEncryption EncryptionType = "rsa"
 )
 
-// EncryptionKey represents an encryption key
-type EncryptionKey struct {
+// BasicEncryptionKey represents a basic encryption key
+// Deprecated: Use EncryptionKey from encryption_manager.go for full features
+type BasicEncryptionKey struct {
 	// ID is the unique identifier of the key
 	ID string
 
@@ -59,10 +60,11 @@ type EncryptionKey struct {
 	Metadata map[string]string
 }
 
-// EncryptionManager manages encryption and decryption operations
-type EncryptionManager struct {
+// BasicEncryptionManager manages basic encryption and decryption operations
+// Deprecated: Use EncryptionManager from encryption_manager.go for full features
+type BasicEncryptionManager struct {
 	// keys is a map of key ID to key
-	keys map[string]*EncryptionKey
+	keys map[string]*BasicEncryptionKey
 
 	// defaultKeyID is the ID of the default key
 	defaultKeyID string
@@ -72,14 +74,14 @@ type EncryptionManager struct {
 }
 
 // NewEncryptionManager creates a new encryption manager
-func NewEncryptionManager() *EncryptionManager {
-	return &EncryptionManager{
-		keys: make(map[string]*EncryptionKey),
+func NewBasicEncryptionManager() *BasicEncryptionManager {
+	return &BasicEncryptionManager{
+		keys: make(map[string]*BasicEncryptionKey),
 	}
 }
 
 // AddKey adds a key to the manager
-func (m *EncryptionManager) AddKey(key *EncryptionKey) error {
+func (m *BasicEncryptionManager) AddKey(key *BasicEncryptionKey) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -100,7 +102,7 @@ func (m *EncryptionManager) AddKey(key *EncryptionKey) error {
 }
 
 // RemoveKey removes a key from the manager
-func (m *EncryptionManager) RemoveKey(keyID string) error {
+func (m *BasicEncryptionManager) RemoveKey(keyID string) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -129,7 +131,7 @@ func (m *EncryptionManager) RemoveKey(keyID string) error {
 }
 
 // GetKey gets a key by ID
-func (m *EncryptionManager) GetKey(keyID string) (*EncryptionKey, error) {
+func (m *BasicEncryptionManager) GetKey(keyID string) (*BasicEncryptionKey, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
@@ -143,7 +145,7 @@ func (m *EncryptionManager) GetKey(keyID string) (*EncryptionKey, error) {
 }
 
 // SetDefaultKey sets the default key
-func (m *EncryptionManager) SetDefaultKey(keyID string) error {
+func (m *BasicEncryptionManager) SetDefaultKey(keyID string) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -159,7 +161,7 @@ func (m *EncryptionManager) SetDefaultKey(keyID string) error {
 }
 
 // GetDefaultKey gets the default key
-func (m *EncryptionManager) GetDefaultKey() (*EncryptionKey, error) {
+func (m *BasicEncryptionManager) GetDefaultKey() (*BasicEncryptionKey, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
@@ -178,7 +180,7 @@ func (m *EncryptionManager) GetDefaultKey() (*EncryptionKey, error) {
 }
 
 // CreateAESKey creates a new AES key
-func (m *EncryptionManager) CreateAESKey(id, name string, keySize int) (*EncryptionKey, error) {
+func (m *BasicEncryptionManager) CreateAESKey(id, name string, keySize int) (*BasicEncryptionKey, error) {
 	if keySize <= 0 {
 		keySize = DefaultAESKeySize
 	}
@@ -190,7 +192,7 @@ func (m *EncryptionManager) CreateAESKey(id, name string, keySize int) (*Encrypt
 	}
 
 	// Create encryption key
-	encKey := &EncryptionKey{
+	encKey := &BasicEncryptionKey{
 		ID:       id,
 		Name:     name,
 		Type:     AESEncryption,
@@ -209,7 +211,7 @@ func (m *EncryptionManager) CreateAESKey(id, name string, keySize int) (*Encrypt
 }
 
 // CreateRSAKey creates a new RSA key
-func (m *EncryptionManager) CreateRSAKey(id, name string, keySize int) (*EncryptionKey, error) {
+func (m *BasicEncryptionManager) CreateRSAKey(id, name string, keySize int) (*BasicEncryptionKey, error) {
 	if keySize <= 0 {
 		keySize = DefaultKeySize
 	}
@@ -221,7 +223,7 @@ func (m *EncryptionManager) CreateRSAKey(id, name string, keySize int) (*Encrypt
 	}
 
 	// Create encryption key
-	encKey := &EncryptionKey{
+	encKey := &BasicEncryptionKey{
 		ID:       id,
 		Name:     name,
 		Type:     RSAEncryption,
@@ -240,7 +242,7 @@ func (m *EncryptionManager) CreateRSAKey(id, name string, keySize int) (*Encrypt
 }
 
 // EncryptWithAES encrypts data with AES-GCM
-func (m *EncryptionManager) EncryptWithAES(data []byte, keyID string) ([]byte, error) {
+func (m *BasicEncryptionManager) EncryptWithAES(data []byte, keyID string) ([]byte, error) {
 	// Get key
 	var key *EncryptionKey
 	var err error
@@ -283,7 +285,7 @@ func (m *EncryptionManager) EncryptWithAES(data []byte, keyID string) ([]byte, e
 }
 
 // DecryptWithAES decrypts data with AES-GCM
-func (m *EncryptionManager) DecryptWithAES(data []byte, keyID string) ([]byte, error) {
+func (m *BasicEncryptionManager) DecryptWithAES(data []byte, keyID string) ([]byte, error) {
 	// Get key
 	var key *EncryptionKey
 	var err error
@@ -331,7 +333,7 @@ func (m *EncryptionManager) DecryptWithAES(data []byte, keyID string) ([]byte, e
 }
 
 // EncryptWithRSA encrypts data with RSA-OAEP
-func (m *EncryptionManager) EncryptWithRSA(data []byte, keyID string) ([]byte, error) {
+func (m *BasicEncryptionManager) EncryptWithRSA(data []byte, keyID string) ([]byte, error) {
 	// Get key
 	var key *EncryptionKey
 	var err error
@@ -359,7 +361,7 @@ func (m *EncryptionManager) EncryptWithRSA(data []byte, keyID string) ([]byte, e
 }
 
 // DecryptWithRSA decrypts data with RSA-OAEP
-func (m *EncryptionManager) DecryptWithRSA(data []byte, keyID string) ([]byte, error) {
+func (m *BasicEncryptionManager) DecryptWithRSA(data []byte, keyID string) ([]byte, error) {
 	// Get key
 	var key *EncryptionKey
 	var err error
@@ -387,7 +389,7 @@ func (m *EncryptionManager) DecryptWithRSA(data []byte, keyID string) ([]byte, e
 }
 
 // EncryptField encrypts a field with the appropriate encryption method
-func (m *EncryptionManager) EncryptField(data []byte, keyID string) ([]byte, error) {
+func (m *BasicEncryptionManager) EncryptField(data []byte, keyID string) ([]byte, error) {
 	// Get key
 	var key *EncryptionKey
 	var err error
@@ -412,7 +414,7 @@ func (m *EncryptionManager) EncryptField(data []byte, keyID string) ([]byte, err
 }
 
 // DecryptField decrypts a field with the appropriate encryption method
-func (m *EncryptionManager) DecryptField(data []byte, keyID string) ([]byte, error) {
+func (m *BasicEncryptionManager) DecryptField(data []byte, keyID string) ([]byte, error) {
 	// Get key
 	var key *EncryptionKey
 	var err error
@@ -437,11 +439,11 @@ func (m *EncryptionManager) DecryptField(data []byte, keyID string) ([]byte, err
 }
 
 // ListKeys lists all keys
-func (m *EncryptionManager) ListKeys() []*EncryptionKey {
+func (m *BasicEncryptionManager) ListKeys() []*BasicEncryptionKey {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
-	keys := make([]*EncryptionKey, 0, len(m.keys))
+	keys := make([]*BasicEncryptionKey, 0, len(m.keys))
 	for _, key := range m.keys {
 		keys = append(keys, key)
 	}

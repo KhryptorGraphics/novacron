@@ -8,8 +8,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// InitializeSecurity initializes the complete NovaCron security system
-func InitializeSecurity() (*SecurityOrchestrator, error) {
+// InitializeSecuritySystem initializes the complete NovaCron security system
+// Renamed from InitializeSecurity to avoid conflict with example_integration.go
+func InitializeSecuritySystem() (*SecurityOrchestrator, error) {
 	log.Println("Initializing NovaCron Enterprise Security System...")
 
 	// Load security configuration

@@ -8,7 +8,7 @@ import (
 	"log"
 	"os"
 	
-	"github.com/novacron/backend/core/security"
+	"github.com/khryptorgraphics/novacron/backend/core/security"
 )
 
 func main() {

@@ -99,8 +99,6 @@ const (
 	StatusPending    ExportStatus = "pending"
 	StatusProcessing ExportStatus = "processing"
 	StatusCompleted  ExportStatus = "completed"
-	StatusFailed     ExportStatus = "failed"
-	StatusExpired    ExportStatus = "expired"
 )
 
 // DataErasureService handles right to be forgotten requests
@@ -180,7 +178,6 @@ type RetentionPolicy struct {
 type RetentionAction string
 
 const (
-	ActionDelete     RetentionAction = "delete"
 	ActionAnonymize  RetentionAction = "anonymize"
 	ActionArchive    RetentionAction = "archive"
 	ActionPurge      RetentionAction = "purge"
