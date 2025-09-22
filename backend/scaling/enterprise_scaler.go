@@ -18,7 +18,7 @@ import (
     "github.com/prometheus/client_golang/api"
     prometheus "github.com/prometheus/client_golang/api/v1"
     "github.com/redis/go-redis/v9"
-    "go.etcd.io/etcd/clientv3"
+    "go.etcd.io/etcd/client/v3"
     "go.uber.org/zap"
     "google.golang.org/grpc"
     "k8s.io/client-go/kubernetes"

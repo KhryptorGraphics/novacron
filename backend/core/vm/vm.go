@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -77,12 +78,14 @@ const (
 type VMConfig struct {
 	ID                      string                           `yaml:"id" json:"id"`
 	Name                    string                           `yaml:"name" json:"name"`
+	Type                    VMType                           `yaml:"type" json:"type"`
 	Command                 string                           `yaml:"command" json:"command"`
 	Args                    []string                         `yaml:"args" json:"args"`
 	CPUShares               int                              `yaml:"cpu_shares" json:"cpu_shares"`
 	MemoryMB                int                              `yaml:"memory_mb" json:"memory_mb"`
 	DiskSizeGB              int                              `yaml:"disk_size_gb" json:"disk_size_gb"`
 	RootFS                  string                           `yaml:"rootfs" json:"rootfs"`
+	Image                   string                           `yaml:"image" json:"image"`
 	Mounts                  []Mount                          `yaml:"mounts" json:"mounts"`
 	Env                     map[string]string                `yaml:"env" json:"env"`
 	NetworkID               string                           `yaml:"network_id" json:"network_id"`
@@ -153,10 +156,121 @@ type VMInfo struct {
 	NetworkID    string            `json:"network_id"`
 	IPAddress    string            `json:"ip_address"`
 	RootFS       string            `json:"rootfs"`
+	Image        string            `json:"image"`
 	ErrorMessage string            `json:"error_message,omitempty"`
 }
 
-// VM represents a virtual machine
+// DistributedStateInfo holds information about VM's distributed state
+type DistributedStateInfo struct {
+	StateVersion        uint64            `json:"state_version"`        // Vector clock for state consistency
+	LastStateUpdate     time.Time         `json:"last_state_update"`    // Timestamp of last state change
+	StateDirty          bool              `json:"state_dirty"`          // Whether state needs synchronization
+	ShardID             string            `json:"shard_id"`             // Which shard contains this VM's state
+	ReplicationNodes    []string          `json:"replication_nodes"`    // Nodes that replicate this VM's state
+	GlobalCoordinates   *GlobalPosition   `json:"global_coordinates"`   // Position in global cluster space
+	MigrationState      *MigrationInfo    `json:"migration_state"`      // Current migration status
+	PredictiveCache     *PredictiveCache  `json:"predictive_cache"`     // AI-driven predictive caching info
+	CrossClusterRefs    []string          `json:"cross_cluster_refs"`   // References to other clusters
+	StateConsistency    ConsistencyLevel  `json:"state_consistency"`    // Required consistency level
+	LastConsistencySync time.Time         `json:"last_consistency_sync"` // Last consistency check
+}
+
+// GlobalPosition represents VM's position in the global distributed space
+type GlobalPosition struct {
+	ClusterID       string    `json:"cluster_id"`
+	NodeID          string    `json:"node_id"`
+	RegionID        string    `json:"region_id"`
+	AvailabilityZone string   `json:"availability_zone"`
+	GeographicCoord *GeoCoord `json:"geographic_coord,omitempty"`
+	NetworkLatency  float64   `json:"network_latency"` // ms to cluster root
+}
+
+// GeoCoord represents geographic coordinates
+type GeoCoord struct {
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+
+// MigrationInfo tracks ongoing migration state
+type MigrationInfo struct {
+	InProgress      bool              `json:"in_progress"`
+	SourceNode      string            `json:"source_node"`
+	TargetNode      string            `json:"target_node"`
+	MigrationType   string            `json:"migration_type"` // "live", "offline", "hybrid"
+	StartedAt       time.Time         `json:"started_at"`
+	EstimatedCompletion time.Time     `json:"estimated_completion"`
+	Progress        float64           `json:"progress"` // 0.0 to 1.0
+	Strategy        MigrationStrategy `json:"strategy"`
+	BandwidthUsage  int64             `json:"bandwidth_usage"` // bytes/sec
+}
+
+// MigrationStrategy defines migration approach
+type MigrationStrategy struct {
+	MemoryStrategy    string  `json:"memory_strategy"`    // "pre-copy", "post-copy", "hybrid"
+	NetworkOptimized  bool    `json:"network_optimized"`  // Use bandwidth optimization
+	PredictiveEnabled bool    `json:"predictive_enabled"` // Use AI-driven prediction
+	CompressionLevel  int     `json:"compression_level"`  // 0-9
+	MaxDowntime       int64   `json:"max_downtime"`       // milliseconds
+}
+
+// PredictiveCache holds AI-driven predictive caching information
+type PredictiveCache struct {
+	Enabled           bool                    `json:"enabled"`
+	CacheHitRate      float64                 `json:"cache_hit_rate"`
+	PredictionAccuracy float64               `json:"prediction_accuracy"`
+	PrefetchedPages   map[string]time.Time    `json:"prefetched_pages"` // page_id -> prefetch_time
+	ModelVersion      string                  `json:"model_version"`
+	LastModelUpdate   time.Time               `json:"last_model_update"`
+	PredictionsActive []PredictionInfo        `json:"predictions_active"`
+	CacheSize         int64                   `json:"cache_size"` // bytes
+}
+
+// PredictionInfo represents an active prediction
+type PredictionInfo struct {
+	PageID       string    `json:"page_id"`
+	Confidence   float64   `json:"confidence"`   // 0.0 to 1.0
+	PredictedAt  time.Time `json:"predicted_at"`
+	AccessTime   time.Time `json:"access_time"`  // predicted access time
+	Priority     int       `json:"priority"`     // 1-10
+}
+
+// ConsistencyLevel defines required state consistency
+type ConsistencyLevel string
+
+const (
+	ConsistencyEventual ConsistencyLevel = "eventual"
+	ConsistencyStrong   ConsistencyLevel = "strong"
+	ConsistencySession  ConsistencyLevel = "session"
+	ConsistencyLinear   ConsistencyLevel = "linearizable"
+)
+
+// MemoryDistributionInfo tracks distributed memory state
+type MemoryDistributionInfo struct {
+	Enabled               bool                         `json:"enabled"`
+	TotalPages            int64                        `json:"total_pages"`
+	DistributedPages      int64                        `json:"distributed_pages"`
+	LocalPages            int64                        `json:"local_pages"`
+	RemotePages           int64                        `json:"remote_pages"`
+	PageDistribution      map[string]int64             `json:"page_distribution"` // node_id -> page_count
+	DirtyPages            []string                     `json:"dirty_pages"`       // page IDs that need sync
+	LastSyncTime          time.Time                    `json:"last_sync_time"`
+	SyncInProgress        bool                         `json:"sync_in_progress"`
+	CompressionEnabled    bool                         `json:"compression_enabled"`
+	CompressionRatio      float64                      `json:"compression_ratio"`
+	CoherenceProtocol     string                       `json:"coherence_protocol"` // "MSI", "MESI", "MOESI"
+	AccessPatterns        map[string]AccessPattern     `json:"access_patterns"`    // page_id -> pattern
+}
+
+// AccessPattern tracks memory access patterns for optimization
+type AccessPattern struct {
+	AccessCount     int64     `json:"access_count"`
+	LastAccess      time.Time `json:"last_access"`
+	AccessFrequency float64   `json:"access_frequency"` // accesses per second
+	ReadWriteRatio  float64   `json:"read_write_ratio"` // reads / writes
+	Locality        float64   `json:"locality"`         // spatial locality score
+}
+
+// VM represents a virtual machine with distributed state management
 type VM struct {
 	config     VMConfig
 	state      State
@@ -176,6 +290,233 @@ type VM struct {
 	resourceID  string
 	updatedAt   time.Time
 	processInfo VMProcessInfo
+
+	// Distributed State Management Fields
+	distributedState    *DistributedStateInfo     `json:"distributed_state"`
+	memoryDistribution  *MemoryDistributionInfo   `json:"memory_distribution"`
+	stateCoordinator    string                    `json:"state_coordinator"`    // Node ID of state coordinator
+	federationContext   *FederationContext        `json:"federation_context"`   // Cross-cluster federation info
+	stateHistory        []StateSnapshot           `json:"state_history"`        // Recent state snapshots
+	conflictResolution  *ConflictResolutionInfo   `json:"conflict_resolution"`  // Conflict handling state
+	performanceMetrics  *DistributedMetrics       `json:"performance_metrics"`  // Performance tracking
+	stateLock           sync.RWMutex              // Protects distributed state fields
+}
+
+// FederationContext holds cross-cluster federation information
+type FederationContext struct {
+	HomeClusterID       string            `json:"home_cluster_id"`
+	CurrentClusterID    string            `json:"current_cluster_id"`
+	AuthorizedClusters  []string          `json:"authorized_clusters"`
+	FederationTokens    map[string]string `json:"federation_tokens"`
+	CrossClusterRefs    []ClusterRef      `json:"cross_cluster_refs"`
+	SecurityContext     SecurityContext   `json:"security_context"`
+	NetworkPolicy       NetworkPolicy     `json:"network_policy"`
+}
+
+// ClusterRef represents a reference to another cluster
+type ClusterRef struct {
+	ClusterID       string    `json:"cluster_id"`
+	ClusterEndpoint string    `json:"cluster_endpoint"`
+	LastContact     time.Time `json:"last_contact"`
+	Available       bool      `json:"available"`
+	RTT             float64   `json:"rtt"` // Round trip time in ms
+}
+
+// SecurityContext defines security settings for distributed operations
+type SecurityContext struct {
+	EncryptionEnabled bool              `json:"encryption_enabled"`
+	KeyVersion        string            `json:"key_version"`
+	AccessPolicies    []string          `json:"access_policies"`
+	AuditEnabled      bool              `json:"audit_enabled"`
+	Certificates      map[string]string `json:"certificates"`
+}
+
+// NetworkPolicy defines networking policies for distributed VM operations
+type NetworkPolicy struct {
+	AllowedNetworks     []string          `json:"allowed_networks"`
+	BandwidthLimits     map[string]int64  `json:"bandwidth_limits"` // operation -> bytes/sec
+	CompressionEnabled  bool              `json:"compression_enabled"`
+	PriorityClass       string            `json:"priority_class"`
+	QoSSettings         QoSSettings       `json:"qos_settings"`
+}
+
+// QoSSettings defines Quality of Service settings
+type QoSSettings struct {
+	MaxLatency      int64   `json:"max_latency"`      // milliseconds
+	MinBandwidth    int64   `json:"min_bandwidth"`    // bytes/sec
+	MaxJitter       int64   `json:"max_jitter"`       // milliseconds
+	PacketLossLimit float64 `json:"packet_loss_limit"` // percentage
+}
+
+// StateSnapshot represents a point-in-time state snapshot
+type StateSnapshot struct {
+	Timestamp       time.Time              `json:"timestamp"`
+	StateVersion    uint64                 `json:"state_version"`
+	VMState         State                  `json:"vm_state"`
+	MemoryChecksum  string                 `json:"memory_checksum"`
+	ConfigChecksum  string                 `json:"config_checksum"`
+	Metadata        map[string]interface{} `json:"metadata"`
+	Size            int64                  `json:"size"`
+	Compressed      bool                   `json:"compressed"`
+}
+
+// ConflictResolutionInfo tracks conflict resolution state
+type ConflictResolutionInfo struct {
+	ActiveConflicts   []StateConflict      `json:"active_conflicts"`
+	ResolutionPolicy  ConflictPolicy       `json:"resolution_policy"`
+	LastResolution    time.Time            `json:"last_resolution"`
+	ConflictHistory   []ResolvedConflict   `json:"conflict_history"`
+	AutoResolveRules  []AutoResolveRule    `json:"auto_resolve_rules"`
+}
+
+// StateConflict represents a state conflict between nodes
+type StateConflict struct {
+	ConflictID      string                 `json:"conflict_id"`
+	ConflictType    string                 `json:"conflict_type"`
+	SourceNode      string                 `json:"source_node"`
+	TargetNode      string                 `json:"target_node"`
+	ConflictField   string                 `json:"conflict_field"`
+	SourceValue     interface{}            `json:"source_value"`
+	TargetValue     interface{}            `json:"target_value"`
+	DetectedAt      time.Time              `json:"detected_at"`
+	Severity        ConflictSeverity       `json:"severity"`
+	Metadata        map[string]interface{} `json:"metadata"`
+}
+
+// ConflictPolicy defines how conflicts should be resolved
+type ConflictPolicy struct {
+	DefaultStrategy   ConflictStrategy `json:"default_strategy"`
+	FieldPolicies     map[string]ConflictStrategy `json:"field_policies"`
+	TimeoutMs         int64            `json:"timeout_ms"`
+	RequireConsensus  bool             `json:"require_consensus"`
+	VotingEnabled     bool             `json:"voting_enabled"`
+}
+
+// ConflictStrategy defines conflict resolution strategies
+type ConflictStrategy string
+
+const (
+	ConflictLastWriteWins  ConflictStrategy = "last_write_wins"
+	ConflictHighestVersion ConflictStrategy = "highest_version"
+	ConflictMerge          ConflictStrategy = "merge"
+	ConflictManual         ConflictStrategy = "manual"
+	ConflictVoting         ConflictStrategy = "voting"
+)
+
+// ConflictSeverity defines the severity of a conflict
+type ConflictSeverity string
+
+const (
+	ConflictSeverityLow      ConflictSeverity = "low"
+	ConflictSeverityMedium   ConflictSeverity = "medium"
+	ConflictSeverityHigh     ConflictSeverity = "high"
+	ConflictSeverityCritical ConflictSeverity = "critical"
+)
+
+// ResolvedConflict represents a resolved conflict
+type ResolvedConflict struct {
+	ConflictID      string           `json:"conflict_id"`
+	Resolution      ConflictStrategy `json:"resolution"`
+	ResolvedAt      time.Time        `json:"resolved_at"`
+	ResolvedBy      string           `json:"resolved_by"`
+	FinalValue      interface{}      `json:"final_value"`
+	ConflictDuration time.Duration   `json:"conflict_duration"`
+}
+
+// AutoResolveRule defines automatic conflict resolution rules
+type AutoResolveRule struct {
+	RuleID          string                 `json:"rule_id"`
+	FieldPattern    string                 `json:"field_pattern"`
+	ConflictTypes   []string               `json:"conflict_types"`
+	Strategy        ConflictStrategy       `json:"strategy"`
+	Conditions      map[string]interface{} `json:"conditions"`
+	Priority        int                    `json:"priority"`
+	Enabled         bool                   `json:"enabled"`
+}
+
+// DistributedMetrics tracks performance metrics for distributed operations
+type DistributedMetrics struct {
+	StateAccess         *AccessMetrics       `json:"state_access"`
+	Migration           *MigrationMetrics    `json:"migration"`
+	MemoryDistribution  *MemoryMetrics       `json:"memory_distribution"`
+	NetworkPerformance  *NetworkMetrics      `json:"network_performance"`
+	ConsistencyMetrics  *ConsistencyMetrics  `json:"consistency_metrics"`
+	PredictiveMetrics   *PredictiveMetrics   `json:"predictive_metrics"`
+	LastUpdate          time.Time            `json:"last_update"`
+}
+
+// AccessMetrics tracks state access performance
+type AccessMetrics struct {
+	ReadLatencyMs       float64   `json:"read_latency_ms"`
+	WriteLatencyMs      float64   `json:"write_latency_ms"`
+	CacheHitRate        float64   `json:"cache_hit_rate"`
+	LocalHitRate        float64   `json:"local_hit_rate"`
+	RemoteHitRate       float64   `json:"remote_hit_rate"`
+	ErrorRate           float64   `json:"error_rate"`
+	ThroughputOpsPerSec float64   `json:"throughput_ops_per_sec"`
+	LastMeasurement     time.Time `json:"last_measurement"`
+}
+
+// MigrationMetrics tracks migration performance
+type MigrationMetrics struct {
+	AverageMigrationTime    time.Duration `json:"average_migration_time"`
+	SuccessRate             float64       `json:"success_rate"`
+	DowntimeMs              float64       `json:"downtime_ms"`
+	DataTransferRateMBps    float64       `json:"data_transfer_rate_mbps"`
+	CompressionRatio        float64       `json:"compression_ratio"`
+	PredictionAccuracy      float64       `json:"prediction_accuracy"`
+	TotalMigrations         int64         `json:"total_migrations"`
+	FailedMigrations        int64         `json:"failed_migrations"`
+	LastMigration           time.Time     `json:"last_migration"`
+}
+
+// MemoryMetrics tracks memory distribution performance
+type MemoryMetrics struct {
+	SyncLatencyMs           float64   `json:"sync_latency_ms"`
+	CompressionRatio        float64   `json:"compression_ratio"`
+	DeduplicationRatio      float64   `json:"deduplication_ratio"`
+	PageFaultRate           float64   `json:"page_fault_rate"`
+	RemotePageAccess        float64   `json:"remote_page_access"`
+	LocalityScore           float64   `json:"locality_score"`
+	CoherenceOverheadMs     float64   `json:"coherence_overhead_ms"`
+	LastMemorySync          time.Time `json:"last_memory_sync"`
+}
+
+// NetworkMetrics tracks network performance for distributed operations
+type NetworkMetrics struct {
+	BandwidthUtilization    float64   `json:"bandwidth_utilization"`
+	LatencyMs               float64   `json:"latency_ms"`
+	PacketLossRate          float64   `json:"packet_loss_rate"`
+	ThroughputMbps          float64   `json:"throughput_mbps"`
+	ConnectionPoolSize      int       `json:"connection_pool_size"`
+	ActiveConnections       int       `json:"active_connections"`
+	CompressionSavings      float64   `json:"compression_savings"`
+	RetransmissionRate      float64   `json:"retransmission_rate"`
+	LastNetworkMeasurement  time.Time `json:"last_network_measurement"`
+}
+
+// ConsistencyMetrics tracks consistency performance
+type ConsistencyMetrics struct {
+	ConsistencyLatencyMs    float64   `json:"consistency_latency_ms"`
+	ConflictRate            float64   `json:"conflict_rate"`
+	ResolutionTimeMs        float64   `json:"resolution_time_ms"`
+	SyncSuccessRate         float64   `json:"sync_success_rate"`
+	VectorClockDrift        float64   `json:"vector_clock_drift"`
+	StateVersions           int64     `json:"state_versions"`
+	LastConsistencyCheck    time.Time `json:"last_consistency_check"`
+}
+
+// PredictiveMetrics tracks AI-driven predictive performance
+type PredictiveMetrics struct {
+	PredictionAccuracy      float64   `json:"prediction_accuracy"`
+	PredictionLatencyMs     float64   `json:"prediction_latency_ms"`
+	CacheHitImprovement     float64   `json:"cache_hit_improvement"`
+	PrefetchSuccessRate     float64   `json:"prefetch_success_rate"`
+	ModelTrainingTime       time.Duration `json:"model_training_time"`
+	FalsePositiveRate       float64   `json:"false_positive_rate"`
+	FalseNegativeRate       float64   `json:"false_negative_rate"`
+	LastModelUpdate         time.Time `json:"last_model_update"`
+	PredictionsPerSecond    float64   `json:"predictions_per_second"`
 }
 
 // VMStats holds runtime statistics for a VM
@@ -513,6 +854,39 @@ func (vm *VM) SetResourceID(resourceID string) {
 	vm.updatedAt = time.Now()
 }
 
+// ApplyUpdateSpec applies an update specification to the VM
+func (vm *VM) ApplyUpdateSpec(spec VMUpdateSpec) error {
+	vm.mutex.Lock()
+	defer vm.mutex.Unlock()
+	
+	// Apply updates to VM configuration
+	if spec.Name != nil {
+		vm.config.Name = *spec.Name
+	}
+	if spec.CPU != nil {
+		vm.config.CPUShares = *spec.CPU
+	}
+	if spec.Memory != nil {
+		vm.config.MemoryMB = int(*spec.Memory)
+	}
+	if spec.Disk != nil {
+		vm.config.DiskSizeGB = int(*spec.Disk)
+	}
+	if spec.Tags != nil {
+		if vm.config.Tags == nil {
+			vm.config.Tags = make(map[string]string)
+		}
+		for k, v := range spec.Tags {
+			vm.config.Tags[k] = v
+		}
+	}
+	
+	// Update timestamp
+	vm.updatedAt = time.Now()
+	
+	return nil
+}
+
 // SetProcessInfo sets the process information
 func (vm *VM) SetProcessInfo(processInfo VMProcessInfo) {
 	vm.mutex.Lock()
@@ -799,4 +1173,403 @@ func (vm *VM) Resume() error {
 	vm.state = StateRunning
 	// Stub implementation - would actually resume VM
 	return nil
+}
+
+// ===== DISTRIBUTED STATE MANAGEMENT METHODS =====
+
+// InitializeDistributedState initializes distributed state management for the VM
+func (vm *VM) InitializeDistributedState(ctx context.Context, shardID string, coordinatorNode string) error {
+	vm.stateLock.Lock()
+	defer vm.stateLock.Unlock()
+
+	if vm.distributedState != nil {
+		return fmt.Errorf("distributed state already initialized for VM %s", vm.ID())
+	}
+
+	now := time.Now()
+	vm.distributedState = &DistributedStateInfo{
+		StateVersion:        1,
+		LastStateUpdate:     now,
+		StateDirty:          false,
+		ShardID:             shardID,
+		ReplicationNodes:    []string{},
+		StateConsistency:    ConsistencyEventual,
+		LastConsistencySync: now,
+		GlobalCoordinates: &GlobalPosition{
+			NodeID:         vm.nodeID,
+			NetworkLatency: 0.0,
+		},
+		PredictiveCache: &PredictiveCache{
+			Enabled:           true,
+			CacheHitRate:      0.0,
+			PredictionAccuracy: TARGET_PREDICTION_ACCURACY,
+			PrefetchedPages:   make(map[string]time.Time),
+			PredictionsActive: []PredictionInfo{},
+			CacheSize:         0,
+			ModelVersion:      "v1.0",
+			LastModelUpdate:   now,
+		},
+		CrossClusterRefs: []string{},
+	}
+
+	vm.memoryDistribution = &MemoryDistributionInfo{
+		Enabled:            true,
+		TotalPages:         0,
+		DistributedPages:   0,
+		LocalPages:         0,
+		RemotePages:        0,
+		PageDistribution:   make(map[string]int64),
+		DirtyPages:         []string{},
+		LastSyncTime:       now,
+		SyncInProgress:     false,
+		CompressionEnabled: true,
+		CompressionRatio:   1.0,
+		CoherenceProtocol:  "MESI",
+		AccessPatterns:     make(map[string]AccessPattern),
+	}
+
+	vm.stateCoordinator = coordinatorNode
+
+	vm.federationContext = &FederationContext{
+		HomeClusterID:      "local",
+		CurrentClusterID:   "local",
+		AuthorizedClusters: []string{},
+		FederationTokens:   make(map[string]string),
+		CrossClusterRefs:   []ClusterRef{},
+		SecurityContext: SecurityContext{
+			EncryptionEnabled: true,
+			KeyVersion:        "v1",
+			AccessPolicies:    []string{"default"},
+			AuditEnabled:      true,
+			Certificates:      make(map[string]string),
+		},
+		NetworkPolicy: NetworkPolicy{
+			AllowedNetworks:    []string{"0.0.0.0/0"},
+			BandwidthLimits:    make(map[string]int64),
+			CompressionEnabled: true,
+			PriorityClass:      "normal",
+			QoSSettings: QoSSettings{
+				MaxLatency:      100,  // 100ms
+				MinBandwidth:    1024, // 1KB/s
+				MaxJitter:       10,   // 10ms
+				PacketLossLimit: 0.01, // 1%
+			},
+		},
+	}
+
+	vm.stateHistory = []StateSnapshot{}
+	vm.conflictResolution = &ConflictResolutionInfo{
+		ActiveConflicts:  []StateConflict{},
+		ResolutionPolicy: ConflictPolicy{
+			DefaultStrategy:  ConflictLastWriteWins,
+			FieldPolicies:    make(map[string]ConflictStrategy),
+			TimeoutMs:        30000, // 30 seconds
+			RequireConsensus: false,
+			VotingEnabled:    false,
+		},
+		LastResolution:   now,
+		ConflictHistory:  []ResolvedConflict{},
+		AutoResolveRules: []AutoResolveRule{},
+	}
+
+	vm.performanceMetrics = &DistributedMetrics{
+		StateAccess: &AccessMetrics{
+			LastMeasurement: now,
+		},
+		Migration: &MigrationMetrics{
+			LastMigration: now,
+		},
+		MemoryDistribution: &MemoryMetrics{
+			LastMemorySync: now,
+		},
+		NetworkPerformance: &NetworkMetrics{
+			LastNetworkMeasurement: now,
+		},
+		ConsistencyMetrics: &ConsistencyMetrics{
+			LastConsistencyCheck: now,
+		},
+		PredictiveMetrics: &PredictiveMetrics{
+			LastModelUpdate: now,
+		},
+		LastUpdate: now,
+	}
+
+	log.Printf("Initialized distributed state for VM %s in shard %s with coordinator %s", vm.ID(), shardID, coordinatorNode)
+	return nil
+}
+
+// GetDistributedState returns the distributed state information
+func (vm *VM) GetDistributedState() *DistributedStateInfo {
+	vm.stateLock.RLock()
+	defer vm.stateLock.RUnlock()
+	return vm.distributedState
+}
+
+// GetMemoryDistribution returns the memory distribution information
+func (vm *VM) GetMemoryDistribution() *MemoryDistributionInfo {
+	vm.stateLock.RLock()
+	defer vm.stateLock.RUnlock()
+	return vm.memoryDistribution
+}
+
+// GetStateCoordinator returns the state coordinator node ID
+func (vm *VM) GetStateCoordinator() string {
+	vm.stateLock.RLock()
+	defer vm.stateLock.RUnlock()
+	return vm.stateCoordinator
+}
+
+// GetFederationContext returns the federation context
+func (vm *VM) GetFederationContext() *FederationContext {
+	vm.stateLock.RLock()
+	defer vm.stateLock.RUnlock()
+	return vm.federationContext
+}
+
+// GetPerformanceMetrics returns the performance metrics
+func (vm *VM) GetPerformanceMetrics() *DistributedMetrics {
+	vm.stateLock.RLock()
+	defer vm.stateLock.RUnlock()
+	return vm.performanceMetrics
+}
+
+// UpdateDistributedState updates the distributed state with thread safety
+func (vm *VM) UpdateDistributedState(updateFunc func(*DistributedStateInfo) error) error {
+	vm.stateLock.Lock()
+	defer vm.stateLock.Unlock()
+
+	if vm.distributedState == nil {
+		return fmt.Errorf("distributed state not initialized for VM %s", vm.ID())
+	}
+
+	if err := updateFunc(vm.distributedState); err != nil {
+		return err
+	}
+
+	vm.distributedState.StateVersion++
+	vm.distributedState.LastStateUpdate = time.Now()
+	vm.distributedState.StateDirty = true
+
+	return nil
+}
+
+// UpdateMemoryDistribution updates the memory distribution information
+func (vm *VM) UpdateMemoryDistribution(updateFunc func(*MemoryDistributionInfo) error) error {
+	vm.stateLock.Lock()
+	defer vm.stateLock.Unlock()
+
+	if vm.memoryDistribution == nil {
+		return fmt.Errorf("memory distribution not initialized for VM %s", vm.ID())
+	}
+
+	return updateFunc(vm.memoryDistribution)
+}
+
+// SetStateCoordinator sets the state coordinator node
+func (vm *VM) SetStateCoordinator(coordinatorNode string) {
+	vm.stateLock.Lock()
+	defer vm.stateLock.Unlock()
+	vm.stateCoordinator = coordinatorNode
+}
+
+// UpdateFederationContext updates the federation context
+func (vm *VM) UpdateFederationContext(updateFunc func(*FederationContext) error) error {
+	vm.stateLock.Lock()
+	defer vm.stateLock.Unlock()
+
+	if vm.federationContext == nil {
+		return fmt.Errorf("federation context not initialized for VM %s", vm.ID())
+	}
+
+	return updateFunc(vm.federationContext)
+}
+
+// AddStateSnapshot adds a state snapshot to the history
+func (vm *VM) AddStateSnapshot(snapshot StateSnapshot) error {
+	vm.stateLock.Lock()
+	defer vm.stateLock.Unlock()
+
+	// Limit history to last 10 snapshots
+	const maxSnapshots = 10
+	vm.stateHistory = append(vm.stateHistory, snapshot)
+	if len(vm.stateHistory) > maxSnapshots {
+		vm.stateHistory = vm.stateHistory[len(vm.stateHistory)-maxSnapshots:]
+	}
+
+	return nil
+}
+
+// GetStateHistory returns the state history
+func (vm *VM) GetStateHistory() []StateSnapshot {
+	vm.stateLock.RLock()
+	defer vm.stateLock.RUnlock()
+	return vm.stateHistory
+}
+
+// AddConflict adds a state conflict for resolution
+func (vm *VM) AddConflict(conflict StateConflict) error {
+	vm.stateLock.Lock()
+	defer vm.stateLock.Unlock()
+
+	if vm.conflictResolution == nil {
+		return fmt.Errorf("conflict resolution not initialized for VM %s", vm.ID())
+	}
+
+	vm.conflictResolution.ActiveConflicts = append(vm.conflictResolution.ActiveConflicts, conflict)
+	return nil
+}
+
+// ResolveConflict resolves a state conflict
+func (vm *VM) ResolveConflict(conflictID string, resolution ConflictStrategy, resolvedBy string, finalValue interface{}) error {
+	vm.stateLock.Lock()
+	defer vm.stateLock.Unlock()
+
+	if vm.conflictResolution == nil {
+		return fmt.Errorf("conflict resolution not initialized for VM %s", vm.ID())
+	}
+
+	// Find and remove the conflict
+	var resolvedConflict *StateConflict
+	for i, conflict := range vm.conflictResolution.ActiveConflicts {
+		if conflict.ConflictID == conflictID {
+			resolvedConflict = &conflict
+			vm.conflictResolution.ActiveConflicts = append(
+				vm.conflictResolution.ActiveConflicts[:i],
+				vm.conflictResolution.ActiveConflicts[i+1:]...,
+			)
+			break
+		}
+	}
+
+	if resolvedConflict == nil {
+		return fmt.Errorf("conflict %s not found", conflictID)
+	}
+
+	// Add to resolution history
+	now := time.Now()
+	resolved := ResolvedConflict{
+		ConflictID:       conflictID,
+		Resolution:       resolution,
+		ResolvedAt:       now,
+		ResolvedBy:       resolvedBy,
+		FinalValue:       finalValue,
+		ConflictDuration: now.Sub(resolvedConflict.DetectedAt),
+	}
+
+	vm.conflictResolution.ConflictHistory = append(vm.conflictResolution.ConflictHistory, resolved)
+	vm.conflictResolution.LastResolution = now
+
+	// Limit history
+	const maxHistory = 100
+	if len(vm.conflictResolution.ConflictHistory) > maxHistory {
+		vm.conflictResolution.ConflictHistory = vm.conflictResolution.ConflictHistory[len(vm.conflictResolution.ConflictHistory)-maxHistory:]
+	}
+
+	return nil
+}
+
+// UpdatePerformanceMetrics updates performance metrics
+func (vm *VM) UpdatePerformanceMetrics(updateFunc func(*DistributedMetrics) error) error {
+	vm.stateLock.Lock()
+	defer vm.stateLock.Unlock()
+
+	if vm.performanceMetrics == nil {
+		return fmt.Errorf("performance metrics not initialized for VM %s", vm.ID())
+	}
+
+	if err := updateFunc(vm.performanceMetrics); err != nil {
+		return err
+	}
+
+	vm.performanceMetrics.LastUpdate = time.Now()
+	return nil
+}
+
+// IsDistributedStateEnabled returns whether distributed state is enabled
+func (vm *VM) IsDistributedStateEnabled() bool {
+	vm.stateLock.RLock()
+	defer vm.stateLock.RUnlock()
+	return vm.distributedState != nil
+}
+
+// GetShardID returns the shard ID for this VM
+func (vm *VM) GetShardID() string {
+	vm.stateLock.RLock()
+	defer vm.stateLock.RUnlock()
+	if vm.distributedState == nil {
+		return ""
+	}
+	return vm.distributedState.ShardID
+}
+
+// GetStateVersion returns the current state version
+func (vm *VM) GetStateVersion() uint64 {
+	vm.stateLock.RLock()
+	defer vm.stateLock.RUnlock()
+	if vm.distributedState == nil {
+		return 0
+	}
+	return vm.distributedState.StateVersion
+}
+
+// IsStateDirty returns whether the state needs synchronization
+func (vm *VM) IsStateDirty() bool {
+	vm.stateLock.RLock()
+	defer vm.stateLock.RUnlock()
+	if vm.distributedState == nil {
+		return false
+	}
+	return vm.distributedState.StateDirty
+}
+
+// MarkStateClean marks the state as synchronized
+func (vm *VM) MarkStateClean() {
+	vm.stateLock.Lock()
+	defer vm.stateLock.Unlock()
+	if vm.distributedState != nil {
+		vm.distributedState.StateDirty = false
+		vm.distributedState.LastConsistencySync = time.Now()
+	}
+}
+
+// GetActiveConflicts returns the list of active conflicts
+func (vm *VM) GetActiveConflicts() []StateConflict {
+	vm.stateLock.RLock()
+	defer vm.stateLock.RUnlock()
+	if vm.conflictResolution == nil {
+		return []StateConflict{}
+	}
+	return vm.conflictResolution.ActiveConflicts
+}
+
+// HasActiveConflicts returns whether there are any active conflicts
+func (vm *VM) HasActiveConflicts() bool {
+	vm.stateLock.RLock()
+	defer vm.stateLock.RUnlock()
+	if vm.conflictResolution == nil {
+		return false
+	}
+	return len(vm.conflictResolution.ActiveConflicts) > 0
+}
+
+// GetPredictiveCache returns the predictive cache information
+func (vm *VM) GetPredictiveCache() *PredictiveCache {
+	vm.stateLock.RLock()
+	defer vm.stateLock.RUnlock()
+	if vm.distributedState == nil {
+		return nil
+	}
+	return vm.distributedState.PredictiveCache
+}
+
+// UpdatePredictiveCache updates the predictive cache information
+func (vm *VM) UpdatePredictiveCache(updateFunc func(*PredictiveCache) error) error {
+	vm.stateLock.Lock()
+	defer vm.stateLock.Unlock()
+
+	if vm.distributedState == nil || vm.distributedState.PredictiveCache == nil {
+		return fmt.Errorf("predictive cache not initialized for VM %s", vm.ID())
+	}
+
+	return updateFunc(vm.distributedState.PredictiveCache)
 }

@@ -6,722 +6,507 @@ import (
 	"crypto/cipher"
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"net"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/khryptorgraphics/novacron/backend/core/audit"
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/hkdf"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
-// SecureMessagingService provides end-to-end encrypted messaging for dating apps
-type SecureMessagingService struct {
-	keyExchange       *X3DHKeyExchange
-	doubleRatchet    *DoubleRatchetProtocol
-	messageEncryption *MessageEncryptionService
-	metadataProtection *MetadataProtectionService
-	contentModeration *MessageModerationService
-	messageStore     *EncryptedMessageStore
-	auditLogger      AuditLogger
-	config           *MessagingSecurityConfig
-	mu               sync.RWMutex
+// DistributedSecureMessaging provides secure communication for distributed cluster nodes
+type DistributedSecureMessaging struct {
+	clusterChannels    map[string]*SecureChannel
+	federationManager  FederationManager
+	crossClusterRunner CrossClusterRunner
+	stateCoordinator   DistributedStateCoordinator
+	encryptionManager  *EncryptionManager
+	auditLogger        audit.AuditLogger
+	tlsConfig          *tls.Config
+	nodeID             string
+	mu                 sync.RWMutex
 }
 
-// MessagingSecurityConfig holds messaging security configuration
-type MessagingSecurityConfig struct {
-	EnableE2EE              bool          `json:"enable_e2ee"`
-	EnablePerfectForwardSecrecy bool      `json:"enable_pfs"`
-	MessageRetentionDays    int           `json:"message_retention_days"`
-	MaxMessageSize          int64         `json:"max_message_size"`
-	EnableContentModeration bool          `json:"enable_content_moderation"`
-	EnableMetadataProtection bool         `json:"enable_metadata_protection"`
-	KeyRotationInterval     time.Duration `json:"key_rotation_interval"`
-	EnableMessageExpiry     bool          `json:"enable_message_expiry"`
-	DefaultExpiryTime       time.Duration `json:"default_expiry_time"`
-	EnableReadReceipts      bool          `json:"enable_read_receipts"`
-	EnableDeliveryReceipts  bool          `json:"enable_delivery_receipts"`
+// SecureChannel represents a secure communication channel between cluster nodes
+type SecureChannel struct {
+	ChannelID        string           `json:"channel_id"`
+	LocalNodeID      string           `json:"local_node_id"`
+	RemoteNodeID     string           `json:"remote_node_id"`
+	ChannelType      ChannelType      `json:"channel_type"`
+	SessionKeys      *SessionKeyPair  `json:"session_keys"`
+	Connection       *grpc.ClientConn `json:"-"`
+	Status           ChannelStatus    `json:"status"`
+	CreatedAt        time.Time        `json:"created_at"`
+	LastActivity     time.Time        `json:"last_activity"`
+	MetricsCollector *ChannelMetrics  `json:"-"`
 }
 
-// X3DHKeyExchange implements the X3DH key agreement protocol
-type X3DHKeyExchange struct {
-	identityKeys    map[string]*IdentityKey
-	signedPreKeys   map[string]*SignedPreKey
-	oneTimePreKeys  map[string][]*OneTimePreKey
-	keyStore        *KeyStore
-	mu              sync.RWMutex
-}
+// DistributedMessageType defines types of distributed messages
+type DistributedMessageType string
 
-type IdentityKey struct {
-	UserID     string           `json:"user_id"`
-	PublicKey  ed25519.PublicKey `json:"public_key"`
-	PrivateKey ed25519.PrivateKey `json:"private_key,omitempty"`
-	CreatedAt  time.Time        `json:"created_at"`
-	ExpiresAt  *time.Time       `json:"expires_at,omitempty"`
-	KeyID      string           `json:"key_id"`
-}
+const (
+	DistributedMessageTypeClusterSync     DistributedMessageType = "cluster_sync"
+	DistributedMessageTypeFederationEvent DistributedMessageType = "federation_event"
+	DistributedMessageTypeStateUpdate     DistributedMessageType = "state_update"
+	DistributedMessageTypeMigrationEvent  DistributedMessageType = "migration_event"
+	DistributedMessageTypeHeartbeat       DistributedMessageType = "heartbeat"
+	DistributedMessageTypeSecurityEvent   DistributedMessageType = "security_event"
+	DistributedMessageTypeControlPlane    DistributedMessageType = "control_plane"
+	DistributedMessageTypeDataPlane       DistributedMessageType = "data_plane"
+)
 
-type SignedPreKey struct {
-	KeyID      string    `json:"key_id"`
-	UserID     string    `json:"user_id"`
-	PublicKey  []byte    `json:"public_key"`
-	PrivateKey []byte    `json:"private_key,omitempty"`
-	Signature  []byte    `json:"signature"`
+// ChannelType defines types of communication channels
+type ChannelType string
+
+const (
+	ChannelTypeIntraCluster ChannelType = "intra_cluster"
+	ChannelTypeInterCluster ChannelType = "inter_cluster"
+	ChannelTypeFederation   ChannelType = "federation"
+	ChannelTypeMigration    ChannelType = "migration"
+	ChannelTypeControl      ChannelType = "control"
+)
+
+// ChannelStatus represents channel status
+type ChannelStatus string
+
+const (
+	ChannelStatusActive       ChannelStatus = "active"
+	ChannelStatusConnecting   ChannelStatus = "connecting"
+	ChannelStatusDisconnected ChannelStatus = "disconnected"
+	ChannelStatusError        ChannelStatus = "error"
+)
+
+// SecureDeliveryStatus represents message delivery status
+type SecureDeliveryStatus string
+
+const (
+	SecureStatusSent      SecureDeliveryStatus = "sent"
+	SecureStatusDelivered SecureDeliveryStatus = "delivered"
+	SecureStatusFailed    SecureDeliveryStatus = "failed"
+	SecureStatusPending   SecureDeliveryStatus = "pending"
+)
+
+// SessionKeyPair contains encryption keys for a secure session
+type SessionKeyPair struct {
+	SendKey    []byte    `json:"send_key"`
+	ReceiveKey []byte    `json:"receive_key"`
+	IV         []byte    `json:"iv"`
 	CreatedAt  time.Time `json:"created_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
+	Counter    uint64    `json:"counter"`
 }
 
-type OneTimePreKey struct {
-	KeyID      string    `json:"key_id"`
-	UserID     string    `json:"user_id"`
-	PublicKey  []byte    `json:"public_key"`
-	PrivateKey []byte    `json:"private_key,omitempty"`
-	Used       bool      `json:"used"`
-	CreatedAt  time.Time `json:"created_at"`
+// DistributedMessage represents a secure message in distributed communications
+type DistributedMessage struct {
+	MessageID        string                 `json:"message_id"`
+	ChannelID        string                 `json:"channel_id"`
+	MessageType      DistributedMessageType `json:"message_type"`
+	SourceNodeID     string                 `json:"source_node_id"`
+	TargetNodeID     string                 `json:"target_node_id"`
+	ClusterID        string                 `json:"cluster_id"`
+	Payload          []byte                 `json:"payload"`
+	EncryptedPayload []byte                 `json:"encrypted_payload"`
+	Signature        []byte                 `json:"signature"`
+	Timestamp        time.Time              `json:"timestamp"`
+	ExpiresAt        *time.Time             `json:"expires_at,omitempty"`
+	Priority         MessagePriority        `json:"priority"`
+	Headers          map[string]string      `json:"headers"`
+	Metadata         map[string]interface{} `json:"metadata"`
+	RetryCount       int                    `json:"retry_count"`
+	MaxRetries       int                    `json:"max_retries"`
 }
 
-// DoubleRatchetProtocol implements the Double Ratchet algorithm
-type DoubleRatchetProtocol struct {
-	sessions    map[string]*RatchetSession
-	keyRotator  *KeyRotationService
-	mu          sync.RWMutex
-}
-
-type RatchetSession struct {
-	SessionID        string                    `json:"session_id"`
-	UserA           string                    `json:"user_a"`
-	UserB           string                    `json:"user_b"`
-	RootKey         []byte                    `json:"root_key"`
-	ChainKeySend    []byte                    `json:"chain_key_send"`
-	ChainKeyReceive []byte                    `json:"chain_key_receive"`
-	DHKeyPairSend   *DHKeyPair               `json:"dh_key_pair_send"`
-	DHKeyPairReceive *DHKeyPair              `json:"dh_key_pair_receive"`
-	MessageKeys     map[string]*MessageKey    `json:"message_keys"`
-	SendCounter     uint32                   `json:"send_counter"`
-	ReceiveCounter  uint32                   `json:"receive_counter"`
-	PreviousChainLength uint32               `json:"previous_chain_length"`
-	SkippedKeys     map[string]*MessageKey    `json:"skipped_keys"`
-	CreatedAt       time.Time                `json:"created_at"`
-	LastUsed        time.Time                `json:"last_used"`
-	ExpiresAt       time.Time                `json:"expires_at"`
-}
-
-type DHKeyPair struct {
-	PublicKey  []byte `json:"public_key"`
-	PrivateKey []byte `json:"private_key"`
-}
-
-type MessageKey struct {
-	Key       []byte    `json:"key"`
-	IV        []byte    `json:"iv"`
-	Counter   uint32    `json:"counter"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-// MessageEncryptionService handles message-level encryption
-type MessageEncryptionService struct {
-	encryptionManager *EncryptionManager
-	compressionService *MessageCompressionService
-	config           *MessagingSecurityConfig
-}
-
-// EncryptedMessage represents an encrypted message with metadata protection
-type EncryptedMessage struct {
-	MessageID       string            `json:"message_id"`
-	ConversationID  string            `json:"conversation_id"`
-	EncryptedContent []byte           `json:"content"`
-	ContentType     MessageType       `json:"content_type"`
-	MessageKey      *EncryptedKey     `json:"key_info"`
-	Timestamp       *ProtectedTime    `json:"timestamp"`
-	Signature       []byte            `json:"signature"`
-	ExpiryTime      *time.Time        `json:"expiry_time,omitempty"`
-	ReadReceipt     bool              `json:"read_receipt"`
-	DeliveryStatus  DeliveryStatus    `json:"delivery_status"`
-	Metadata        map[string]interface{} `json:"metadata,omitempty"`
-	Version         int               `json:"version"`
-}
-
-type EncryptedKey struct {
-	KeyID      string `json:"key_id"`
-	Algorithm  string `json:"algorithm"`
-	KeyData    []byte `json:"key_data"`
-	IV         []byte `json:"iv"`
-	Counter    uint32 `json:"counter,omitempty"`
-}
-
-type ProtectedTime struct {
-	EncryptedTime []byte `json:"encrypted_time"`
-	TimePeriod    int    `json:"time_period"` // Hour-based bucketing for metadata protection
-}
-
-// MetadataProtectionService protects communication metadata
-type MetadataProtectionService struct {
-	timingObfuscator   *TimingObfuscator
-	sizeObfuscator     *MessageSizeObfuscator
-	patternScrambler   *CommunicationPatternScrambler
-	trafficGenerator   *DummyTrafficGenerator
-	config            *MessagingSecurityConfig
-}
-
-type TimingObfuscator struct {
-	delayDistribution *RandomDelayDistribution
-	scheduledMessages map[string]*ScheduledMessage
-	mu                sync.RWMutex
-}
-
-type MessageSizeObfuscator struct {
-	paddingStrategy PaddingStrategy
-	maxPaddingSize  int
-}
-
-type PaddingStrategy string
+// MessagePriority defines message priority levels
+type MessagePriority string
 
 const (
-	PaddingFixed    PaddingStrategy = "fixed"
-	PaddingRandom   PaddingStrategy = "random"
-	PaddingBuckets  PaddingStrategy = "buckets"
+	MessagePriorityLow      MessagePriority = "low"
+	MessagePriorityNormal   MessagePriority = "normal"
+	MessagePriorityHigh     MessagePriority = "high"
+	MessagePriorityCritical MessagePriority = "critical"
 )
 
-// MessageModerationService provides content moderation for messages
-type MessageModerationService struct {
-	aiModerator       *AIModerationEngine
-	keywordFilter     *KeywordFilterService
-	spamDetector      *SpamDetectionService
-	harassmentDetector *HarassmentDetectionService
-	threatAnalyzer    *ThreatAnalysisService
-	reportingSystem   *MessageReportingService
-	config           *ModerationConfig
+// ChannelMetrics collects metrics for secure channels
+type ChannelMetrics struct {
+	MessagesSent     uint64        `json:"messages_sent"`
+	MessagesReceived uint64        `json:"messages_received"`
+	BytesSent        uint64        `json:"bytes_sent"`
+	BytesReceived    uint64        `json:"bytes_received"`
+	ErrorCount       uint64        `json:"error_count"`
+	LastError        string        `json:"last_error,omitempty"`
+	AverageLatency   time.Duration `json:"average_latency"`
+	ConnectionUptime time.Duration `json:"connection_uptime"`
 }
 
-type ModerationConfig struct {
-	EnableAIModeration      bool      `json:"enable_ai_moderation"`
-	EnableKeywordFiltering  bool      `json:"enable_keyword_filtering"`
-	EnableSpamDetection     bool      `json:"enable_spam_detection"`
-	EnableThreatDetection   bool      `json:"enable_threat_detection"`
-	AutoModerationThreshold float64   `json:"auto_moderation_threshold"`
-	HumanReviewThreshold    float64   `json:"human_review_threshold"`
-	MaxReportedMessages     int       `json:"max_reported_messages"`
-	ReportCooldownPeriod    time.Duration `json:"report_cooldown_period"`
+// FederationManager interface for federation operations
+type FederationManager interface {
+	GetClusterNodes(clusterID string) ([]string, error)
+	RegisterNode(nodeID, clusterID string) error
+	HandleFederationEvent(event interface{}) error
 }
 
-type ModerationResult struct {
-	MessageID       string                 `json:"message_id"`
-	Status          ModerationStatus       `json:"status"`
-	ConfidenceScore float64               `json:"confidence_score"`
-	Violations      []ModerationViolation `json:"violations"`
-	Categories      []ContentCategory     `json:"categories"`
-	Action          ModerationAction      `json:"action"`
-	ProcessingTime  time.Duration         `json:"processing_time"`
-	ReviewRequired  bool                  `json:"review_required"`
-	Metadata        map[string]interface{} `json:"metadata"`
+// CrossClusterRunner interface for cross-cluster operations
+type CrossClusterRunner interface {
+	ExecuteRemoteOperation(ctx context.Context, targetNode string, operation interface{}) error
+	GetRemoteState(ctx context.Context, targetNode string) (interface{}, error)
+	SynchronizeState(ctx context.Context, nodes []string) error
 }
 
-type ModerationStatus string
-
-const (
-	ModerationApproved ModerationStatus = "approved"
-	ModerationRejected ModerationStatus = "rejected"
-	ModerationPending  ModerationStatus = "pending"
-	ModerationFlagged  ModerationStatus = "flagged"
-)
-
-type ModerationViolation struct {
-	Type        ViolationType `json:"type"`
-	Severity    string        `json:"severity"`
-	Confidence  float64       `json:"confidence"`
-	Description string        `json:"description"`
-	Context     string        `json:"context,omitempty"`
+// DistributedStateCoordinator interface for state coordination
+type DistributedStateCoordinator interface {
+	UpdateState(key string, value interface{}) error
+	GetState(key string) (interface{}, error)
+	SynchronizeState(nodes []string) error
+	GetDistributedLock(key string) (interface{}, error)
 }
 
-type ViolationType string
+// NewDistributedSecureMessaging creates a new distributed secure messaging service
+func NewDistributedSecureMessaging(
+	nodeID string,
+	encMgr *EncryptionManager,
+	auditLogger audit.AuditLogger,
+	fedMgr FederationManager,
+	crossRunner CrossClusterRunner,
+	stateCoord DistributedStateCoordinator,
+) (*DistributedSecureMessaging, error) {
 
-const (
-	ViolationHarassment   ViolationType = "harassment"
-	ViolationThreat       ViolationType = "threat"
-	ViolationSpam         ViolationType = "spam"
-	ViolationInappropriate ViolationType = "inappropriate"
-	ViolationHateSpeech   ViolationType = "hate_speech"
-	ViolationScam         ViolationType = "scam"
-	ViolationAdultContent ViolationType = "adult_content"
-)
-
-type ModerationAction string
-
-const (
-	ActionAllow    ModerationAction = "allow"
-	ActionBlock    ModerationAction = "block"
-	ActionFlag     ModerationAction = "flag"
-	ActionReview   ModerationAction = "review"
-	ActionWarning  ModerationAction = "warning"
-	ActionSuspend  ModerationAction = "suspend"
-)
-
-// NewSecureMessagingService creates a comprehensive secure messaging service
-func NewSecureMessagingService(config *MessagingSecurityConfig, auditLogger AuditLogger) (*SecureMessagingService, error) {
-	if config == nil {
-		config = DefaultMessagingSecurityConfig()
-	}
-
-	keyExchange, err := NewX3DHKeyExchange()
+	tlsConfig, err := encMgr.GetTLSConfig()
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize key exchange: %w", err)
+		return nil, fmt.Errorf("failed to get TLS config: %w", err)
 	}
 
-	doubleRatchet, err := NewDoubleRatchetProtocol()
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize double ratchet: %w", err)
+	dsm := &DistributedSecureMessaging{
+		clusterChannels:    make(map[string]*SecureChannel),
+		nodeID:             nodeID,
+		encryptionManager:  encMgr,
+		auditLogger:        auditLogger,
+		federationManager:  fedMgr,
+		crossClusterRunner: crossRunner,
+		stateCoordinator:   stateCoord,
+		tlsConfig:          tlsConfig,
 	}
 
-	service := &SecureMessagingService{
-		keyExchange:       keyExchange,
-		doubleRatchet:    doubleRatchet,
-		messageEncryption: NewMessageEncryptionService(config),
-		metadataProtection: NewMetadataProtectionService(config),
-		contentModeration: NewMessageModerationService(),
-		messageStore:     NewEncryptedMessageStore(),
-		auditLogger:      auditLogger,
-		config:          config,
-	}
-
-	return service, nil
+	return dsm, nil
 }
 
-// DefaultMessagingSecurityConfig returns secure defaults for messaging
-func DefaultMessagingSecurityConfig() *MessagingSecurityConfig {
-	return &MessagingSecurityConfig{
-		EnableE2EE:              true,
-		EnablePerfectForwardSecrecy: true,
-		MessageRetentionDays:    365, // 1 year
-		MaxMessageSize:          10 * 1024 * 1024, // 10MB
-		EnableContentModeration: true,
-		EnableMetadataProtection: true,
-		KeyRotationInterval:     7 * 24 * time.Hour, // Weekly
-		EnableMessageExpiry:     true,
-		DefaultExpiryTime:       24 * time.Hour, // 24 hours
-		EnableReadReceipts:      true,
-		EnableDeliveryReceipts:  true,
-	}
-}
+// EstablishSecureChannel creates a secure communication channel with another node
+func (dsm *DistributedSecureMessaging) EstablishSecureChannel(
+	ctx context.Context,
+	targetNodeID string,
+	channelType ChannelType,
+) (*SecureChannel, error) {
+	dsm.mu.Lock()
+	defer dsm.mu.Unlock()
 
-// SendMessage encrypts and sends a message with full security protection
-func (sms *SecureMessagingService) SendMessage(ctx context.Context, senderID, recipientID string, content []byte, messageType MessageType) (*EncryptedMessage, error) {
-	sms.mu.Lock()
-	defer sms.mu.Unlock()
+	channelID := dsm.generateChannelID(dsm.nodeID, targetNodeID)
 
-	// Content moderation
-	if sms.config.EnableContentModeration {
-		moderationResult, err := sms.contentModeration.ModerateContent(ctx, content, messageType)
-		if err != nil {
-			return nil, fmt.Errorf("content moderation failed: %w", err)
-		}
-		
-		if moderationResult.Status == ModerationRejected {
-			return nil, fmt.Errorf("message rejected by content moderation: %v", moderationResult.Violations)
+	// Check if channel already exists
+	if existingChannel, exists := dsm.clusterChannels[channelID]; exists {
+		if existingChannel.Status == ChannelStatusActive {
+			return existingChannel, nil
 		}
 	}
 
-	// Check message size
-	if int64(len(content)) > sms.config.MaxMessageSize {
-		return nil, fmt.Errorf("message size exceeds limit: %d bytes", len(content))
+	// Generate session keys
+	sessionKeys, err := dsm.generateSessionKeys()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate session keys: %w", err)
 	}
 
-	// Get or create Double Ratchet session
-	sessionID := sms.getSessionID(senderID, recipientID)
-	session, err := sms.doubleRatchet.GetOrCreateSession(ctx, sessionID, senderID, recipientID)
+	// Establish gRPC connection with mutual TLS
+	conn, err := dsm.establishGRPCConnection(ctx, targetNodeID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get ratchet session: %w", err)
+		return nil, fmt.Errorf("failed to establish gRPC connection: %w", err)
 	}
 
-	// Generate message key
-	messageKey, err := sms.doubleRatchet.NextSendKey(session)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate message key: %w", err)
+	channel := &SecureChannel{
+		ChannelID:        channelID,
+		LocalNodeID:      dsm.nodeID,
+		RemoteNodeID:     targetNodeID,
+		ChannelType:      channelType,
+		SessionKeys:      sessionKeys,
+		Connection:       conn,
+		Status:           ChannelStatusActive,
+		CreatedAt:        time.Now(),
+		LastActivity:     time.Now(),
+		MetricsCollector: &ChannelMetrics{},
 	}
 
-	// Encrypt message content
-	encryptedContent, err := sms.messageEncryption.EncryptContent(content, messageKey)
+	dsm.clusterChannels[channelID] = channel
+
+	// Audit log channel establishment
+	dsm.auditLogger.LogEvent(ctx, &audit.AuditEvent{
+		UserID:   dsm.nodeID,
+		Resource: fmt.Sprintf("channel_%s", channelID),
+		Action:   audit.ActionUpdate,
+		Result:   audit.ResultSuccess,
+		Details: map[string]interface{}{
+			"description":  fmt.Sprintf("Secure channel established between %s and %s", dsm.nodeID, targetNodeID),
+			"channel_id":   channelID,
+			"channel_type": string(channelType),
+			"local_node":   dsm.nodeID,
+			"remote_node":  targetNodeID,
+			"severity":     "info",
+		},
+	})
+
+	log.Printf("Established secure channel %s with node %s", channelID, targetNodeID)
+	return channel, nil
+}
+
+// SendMessage sends a secure message to another node
+func (dsm *DistributedSecureMessaging) SendMessage(
+	ctx context.Context,
+	targetNodeID string,
+	messageType DistributedMessageType,
+	payload []byte,
+	priority MessagePriority,
+) (*DistributedMessage, error) {
+
+	// Get or create secure channel
+	channel, err := dsm.getOrCreateChannel(ctx, targetNodeID, ChannelTypeIntraCluster)
 	if err != nil {
-		return nil, fmt.Errorf("failed to encrypt message: %w", err)
+		return nil, fmt.Errorf("failed to get secure channel: %w", err)
 	}
 
 	// Create message
-	messageID := uuid.New().String()
-	conversationID := sms.getConversationID(senderID, recipientID)
-	
-	var expiryTime *time.Time
-	if sms.config.EnableMessageExpiry {
-		expiry := time.Now().Add(sms.config.DefaultExpiryTime)
-		expiryTime = &expiry
+	message := &DistributedMessage{
+		MessageID:    uuid.New().String(),
+		ChannelID:    channel.ChannelID,
+		MessageType:  messageType,
+		SourceNodeID: dsm.nodeID,
+		TargetNodeID: targetNodeID,
+		Payload:      payload,
+		Timestamp:    time.Now(),
+		Priority:     priority,
+		Headers:      make(map[string]string),
+		Metadata:     make(map[string]interface{}),
+		MaxRetries:   3,
 	}
 
-	message := &EncryptedMessage{
-		MessageID:       messageID,
-		ConversationID:  conversationID,
-		EncryptedContent: encryptedContent,
-		ContentType:     messageType,
-		MessageKey: &EncryptedKey{
-			KeyID:     messageKey.Counter,
-			Algorithm: "AES-GCM",
-			KeyData:   messageKey.Key,
-			IV:        messageKey.IV,
-			Counter:   messageKey.Counter,
-		},
-		Timestamp:      sms.createProtectedTimestamp(time.Now()),
-		ExpiryTime:     expiryTime,
-		ReadReceipt:    sms.config.EnableReadReceipts,
-		DeliveryStatus: StatusSent,
-		Version:        1,
+	// Set message expiration based on priority
+	switch priority {
+	case MessagePriorityCritical:
+		expiry := time.Now().Add(5 * time.Minute)
+		message.ExpiresAt = &expiry
+	case MessagePriorityHigh:
+		expiry := time.Now().Add(15 * time.Minute)
+		message.ExpiresAt = &expiry
+	case MessagePriorityNormal:
+		expiry := time.Now().Add(1 * time.Hour)
+		message.ExpiresAt = &expiry
 	}
 
-	// Sign message for integrity
-	signature, err := sms.signMessage(message, senderID)
+	// Encrypt payload
+	encryptedPayload, err := dsm.encryptPayload(payload, channel.SessionKeys)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt payload: %w", err)
+	}
+	message.EncryptedPayload = encryptedPayload
+
+	// Sign message
+	signature, err := dsm.signMessage(message)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign message: %w", err)
 	}
 	message.Signature = signature
 
-	// Apply metadata protection
-	if sms.config.EnableMetadataProtection {
-		if err := sms.metadataProtection.ApplyProtection(message); err != nil {
-			return nil, fmt.Errorf("failed to apply metadata protection: %w", err)
-		}
+	// Send message via gRPC or other transport
+	if err := dsm.transmitMessage(ctx, channel, message); err != nil {
+		return nil, fmt.Errorf("failed to transmit message: %w", err)
 	}
 
-	// Store encrypted message
-	if err := sms.messageStore.StoreMessage(ctx, message); err != nil {
-		return nil, fmt.Errorf("failed to store message: %w", err)
-	}
+	// Update metrics
+	channel.MetricsCollector.MessagesSent++
+	channel.MetricsCollector.BytesSent += uint64(len(encryptedPayload))
+	channel.LastActivity = time.Now()
 
 	// Audit log message sending
-	sms.auditLogger.LogSecretModification(ctx, senderID, "encrypted_message",
-		ActionWrite, ResultSuccess, map[string]interface{}{
-			"message_id":      messageID,
-			"conversation_id": conversationID,
-			"recipient_id":    recipientID,
-			"content_type":    messageType,
-			"encrypted":       true,
-		})
+	dsm.auditLogger.LogEvent(ctx, &audit.AuditEvent{
+		UserID:   dsm.nodeID,
+		Resource: "secure_message",
+		Action:   audit.ActionWrite,
+		Result:   audit.ResultSuccess,
+		Details: map[string]interface{}{
+			"description":  fmt.Sprintf("Secure message sent from %s to %s", dsm.nodeID, targetNodeID),
+			"message_id":   message.MessageID,
+			"channel_id":   channel.ChannelID,
+			"message_type": string(messageType),
+			"priority":     string(priority),
+			"size_bytes":   len(encryptedPayload),
+		},
+	})
 
 	return message, nil
 }
 
-// ReceiveMessage decrypts and processes a received message
-func (sms *SecureMessagingService) ReceiveMessage(ctx context.Context, recipientID string, encryptedMessage *EncryptedMessage) ([]byte, error) {
-	sms.mu.Lock()
-	defer sms.mu.Unlock()
+// ReceiveMessage handles incoming secure messages
+func (dsm *DistributedSecureMessaging) ReceiveMessage(
+	ctx context.Context,
+	encryptedMessage *DistributedMessage,
+) ([]byte, error) {
 
 	// Verify message signature
-	if err := sms.verifyMessage(encryptedMessage); err != nil {
+	if err := dsm.verifyMessage(encryptedMessage); err != nil {
 		return nil, fmt.Errorf("message signature verification failed: %w", err)
 	}
 
-	// Check message expiry
-	if encryptedMessage.ExpiryTime != nil && encryptedMessage.ExpiryTime.Before(time.Now()) {
+	// Check message expiration
+	if encryptedMessage.ExpiresAt != nil && encryptedMessage.ExpiresAt.Before(time.Now()) {
 		return nil, fmt.Errorf("message has expired")
 	}
 
-	// Get Double Ratchet session
-	session, err := sms.doubleRatchet.GetSession(encryptedMessage.ConversationID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get ratchet session: %w", err)
-	}
-
-	// Get message key
-	messageKey := &MessageKey{
-		Key:     encryptedMessage.MessageKey.KeyData,
-		IV:      encryptedMessage.MessageKey.IV,
-		Counter: encryptedMessage.MessageKey.Counter,
-	}
-
-	// Decrypt message content
-	content, err := sms.messageEncryption.DecryptContent(encryptedMessage.EncryptedContent, messageKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt message: %w", err)
-	}
-
-	// Update message delivery status
-	encryptedMessage.DeliveryStatus = StatusDelivered
-	sms.messageStore.UpdateMessage(ctx, encryptedMessage)
-
-	// Audit log message receiving
-	sms.auditLogger.LogSecretAccess(ctx, recipientID, "encrypted_message",
-		ActionRead, ResultSuccess, map[string]interface{}{
-			"message_id":      encryptedMessage.MessageID,
-			"conversation_id": encryptedMessage.ConversationID,
-			"content_type":    encryptedMessage.ContentType,
-			"decrypted":       true,
-		})
-
-	return content, nil
-}
-
-// NewX3DHKeyExchange creates a new X3DH key exchange service
-func NewX3DHKeyExchange() (*X3DHKeyExchange, error) {
-	return &X3DHKeyExchange{
-		identityKeys:   make(map[string]*IdentityKey),
-		signedPreKeys:  make(map[string]*SignedPreKey),
-		oneTimePreKeys: make(map[string][]*OneTimePreKey),
-		keyStore:       NewKeyStore(),
-	}, nil
-}
-
-// GenerateIdentityKey generates a new identity key pair for a user
-func (kx *X3DHKeyExchange) GenerateIdentityKey(userID string) (*IdentityKey, error) {
-	kx.mu.Lock()
-	defer kx.mu.Unlock()
-
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate identity key: %w", err)
-	}
-
-	identityKey := &IdentityKey{
-		UserID:     userID,
-		PublicKey:  publicKey,
-		PrivateKey: privateKey,
-		CreatedAt:  time.Now(),
-		KeyID:      uuid.New().String(),
-	}
-
-	kx.identityKeys[userID] = identityKey
-	return identityKey, nil
-}
-
-// GenerateSignedPreKey generates a new signed pre-key
-func (kx *X3DHKeyExchange) GenerateSignedPreKey(userID string) (*SignedPreKey, error) {
-	kx.mu.Lock()
-	defer kx.mu.Unlock()
-
-	// Generate X25519 key pair
-	privateKey := make([]byte, 32)
-	if _, err := rand.Read(privateKey); err != nil {
-		return nil, fmt.Errorf("failed to generate private key: %w", err)
-	}
-
-	publicKey, err := curve25519.X25519(privateKey, curve25519.Basepoint)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate public key: %w", err)
-	}
-
-	// Sign the public key with identity key
-	identityKey, exists := kx.identityKeys[userID]
+	// Get channel
+	channel, exists := dsm.clusterChannels[encryptedMessage.ChannelID]
 	if !exists {
-		return nil, fmt.Errorf("no identity key found for user %s", userID)
+		return nil, fmt.Errorf("channel not found: %s", encryptedMessage.ChannelID)
 	}
 
-	signature := ed25519.Sign(identityKey.PrivateKey, publicKey)
-
-	signedPreKey := &SignedPreKey{
-		KeyID:      uuid.New().String(),
-		UserID:     userID,
-		PublicKey:  publicKey,
-		PrivateKey: privateKey,
-		Signature:  signature,
-		CreatedAt:  time.Now(),
-		ExpiresAt:  time.Now().Add(30 * 24 * time.Hour), // 30 days
-	}
-
-	kx.signedPreKeys[signedPreKey.KeyID] = signedPreKey
-	return signedPreKey, nil
-}
-
-// NewDoubleRatchetProtocol creates a new Double Ratchet protocol handler
-func NewDoubleRatchetProtocol() (*DoubleRatchetProtocol, error) {
-	return &DoubleRatchetProtocol{
-		sessions:   make(map[string]*RatchetSession),
-		keyRotator: NewKeyRotationService(),
-	}, nil
-}
-
-// GetOrCreateSession gets or creates a Double Ratchet session
-func (dr *DoubleRatchetProtocol) GetOrCreateSession(ctx context.Context, sessionID, userA, userB string) (*RatchetSession, error) {
-	dr.mu.Lock()
-	defer dr.mu.Unlock()
-
-	if session, exists := dr.sessions[sessionID]; exists {
-		session.LastUsed = time.Now()
-		return session, nil
-	}
-
-	// Create new session
-	session := &RatchetSession{
-		SessionID:    sessionID,
-		UserA:        userA,
-		UserB:        userB,
-		MessageKeys:  make(map[string]*MessageKey),
-		SkippedKeys:  make(map[string]*MessageKey),
-		CreatedAt:    time.Now(),
-		LastUsed:     time.Now(),
-		ExpiresAt:    time.Now().Add(30 * 24 * time.Hour), // 30 days
-	}
-
-	// Initialize session with shared secret from X3DH
-	if err := dr.initializeSession(session); err != nil {
-		return nil, fmt.Errorf("failed to initialize session: %w", err)
-	}
-
-	dr.sessions[sessionID] = session
-	return session, nil
-}
-
-func (dr *DoubleRatchetProtocol) initializeSession(session *RatchetSession) error {
-	// Generate initial root key and chain keys
-	rootKey := make([]byte, 32)
-	if _, err := rand.Read(rootKey); err != nil {
-		return err
-	}
-	session.RootKey = rootKey
-
-	chainKeySend := make([]byte, 32)
-	if _, err := rand.Read(chainKeySend); err != nil {
-		return err
-	}
-	session.ChainKeySend = chainKeySend
-
-	chainKeyReceive := make([]byte, 32)
-	if _, err := rand.Read(chainKeyReceive); err != nil {
-		return err
-	}
-	session.ChainKeyReceive = chainKeyReceive
-
-	// Generate initial DH key pairs
-	sendPrivate := make([]byte, 32)
-	if _, err := rand.Read(sendPrivate); err != nil {
-		return err
-	}
-	sendPublic, err := curve25519.X25519(sendPrivate, curve25519.Basepoint)
+	// Decrypt payload
+	payload, err := dsm.decryptPayload(encryptedMessage.EncryptedPayload, channel.SessionKeys)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to decrypt payload: %w", err)
 	}
-	session.DHKeyPairSend = &DHKeyPair{
-		PublicKey:  sendPublic,
-		PrivateKey: sendPrivate,
+
+	// Update metrics
+	channel.MetricsCollector.MessagesReceived++
+	channel.MetricsCollector.BytesReceived += uint64(len(encryptedMessage.EncryptedPayload))
+	channel.LastActivity = time.Now()
+
+	// Process message based on type
+	if err := dsm.processMessage(ctx, encryptedMessage, payload); err != nil {
+		log.Printf("Error processing message %s: %v", encryptedMessage.MessageID, err)
+	}
+
+	// Audit log message reception
+	dsm.auditLogger.LogEvent(ctx, &audit.AuditEvent{
+		UserID:   encryptedMessage.SourceNodeID,
+		Resource: "secure_message",
+		Action:   audit.ActionRead,
+		Result:   audit.ResultSuccess,
+		Details: map[string]interface{}{
+			"description":  fmt.Sprintf("Secure message received from %s to %s", encryptedMessage.SourceNodeID, dsm.nodeID),
+			"message_id":   encryptedMessage.MessageID,
+			"channel_id":   encryptedMessage.ChannelID,
+			"message_type": string(encryptedMessage.MessageType),
+			"source_node":  encryptedMessage.SourceNodeID,
+		},
+	})
+
+	return payload, nil
+}
+
+// BroadcastToCluster sends a message to all nodes in a cluster
+func (dsm *DistributedSecureMessaging) BroadcastToCluster(
+	ctx context.Context,
+	clusterID string,
+	messageType DistributedMessageType,
+	payload []byte,
+	priority MessagePriority,
+) error {
+
+	// Get cluster nodes from federation manager
+	nodes, err := dsm.federationManager.GetClusterNodes(clusterID)
+	if err != nil {
+		return fmt.Errorf("failed to get cluster nodes: %w", err)
+	}
+
+	var errors []error
+	for _, nodeID := range nodes {
+		if nodeID == dsm.nodeID {
+			continue // Skip self
+		}
+
+		if _, err := dsm.SendMessage(ctx, nodeID, messageType, payload, priority); err != nil {
+			errors = append(errors, fmt.Errorf("failed to send to %s: %w", nodeID, err))
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("broadcast partially failed: %v", errors)
 	}
 
 	return nil
 }
 
-// NextSendKey derives the next message key for sending
-func (dr *DoubleRatchetProtocol) NextSendKey(session *RatchetSession) (*MessageKey, error) {
-	// Derive message key from chain key
-	messageKey := make([]byte, 32)
-	iv := make([]byte, 12)
-	
-	// Use HKDF to derive message key
-	hkdf := hkdf.New(sha256.New, session.ChainKeySend, nil, []byte("message_key"))
-	if _, err := io.ReadFull(hkdf, messageKey); err != nil {
+// Helper methods
+
+func (dsm *DistributedSecureMessaging) generateChannelID(localNodeID, remoteNodeID string) string {
+	if localNodeID < remoteNodeID {
+		return fmt.Sprintf("%s-%s", localNodeID, remoteNodeID)
+	}
+	return fmt.Sprintf("%s-%s", remoteNodeID, localNodeID)
+}
+
+func (dsm *DistributedSecureMessaging) generateSessionKeys() (*SessionKeyPair, error) {
+	sendKey := make([]byte, 32)
+	receiveKey := make([]byte, 32)
+	iv := make([]byte, 16)
+
+	if _, err := rand.Read(sendKey); err != nil {
 		return nil, err
 	}
-	
+	if _, err := rand.Read(receiveKey); err != nil {
+		return nil, err
+	}
 	if _, err := rand.Read(iv); err != nil {
 		return nil, err
 	}
 
-	key := &MessageKey{
-		Key:       messageKey,
-		IV:        iv,
-		Counter:   session.SendCounter,
-		CreatedAt: time.Now(),
+	return &SessionKeyPair{
+		SendKey:    sendKey,
+		ReceiveKey: receiveKey,
+		IV:         iv,
+		CreatedAt:  time.Now(),
+		ExpiresAt:  time.Now().Add(24 * time.Hour), // 24 hour key rotation
+		Counter:    0,
+	}, nil
+}
+
+func (dsm *DistributedSecureMessaging) establishGRPCConnection(ctx context.Context, targetNodeID string) (*grpc.ClientConn, error) {
+	// In production, this would resolve the target node's address
+	targetAddress := fmt.Sprintf("%s:8443", targetNodeID) // Example
+
+	creds := credentials.NewTLS(dsm.tlsConfig)
+
+	conn, err := grpc.DialContext(ctx, targetAddress,
+		grpc.WithTransportCredentials(creds),
+		grpc.WithBlock(),
+		grpc.WithTimeout(30*time.Second),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial %s: %w", targetAddress, err)
 	}
 
-	// Update chain key for perfect forward secrecy
-	newChainKey := make([]byte, 32)
-	hkdf = hkdf.New(sha256.New, session.ChainKeySend, nil, []byte("chain_key"))
-	if _, err := io.ReadFull(hkdf, newChainKey); err != nil {
-		return nil, err
+	return conn, nil
+}
+
+func (dsm *DistributedSecureMessaging) getOrCreateChannel(ctx context.Context, targetNodeID string, channelType ChannelType) (*SecureChannel, error) {
+	channelID := dsm.generateChannelID(dsm.nodeID, targetNodeID)
+
+	dsm.mu.RLock()
+	if channel, exists := dsm.clusterChannels[channelID]; exists && channel.Status == ChannelStatusActive {
+		dsm.mu.RUnlock()
+		return channel, nil
 	}
-	session.ChainKeySend = newChainKey
-	session.SendCounter++
+	dsm.mu.RUnlock()
 
-	// Store message key
-	keyID := fmt.Sprintf("send_%d", key.Counter)
-	session.MessageKeys[keyID] = key
-
-	return key, nil
+	return dsm.EstablishSecureChannel(ctx, targetNodeID, channelType)
 }
 
-// GetSession retrieves a Double Ratchet session
-func (dr *DoubleRatchetProtocol) GetSession(sessionID string) (*RatchetSession, error) {
-	dr.mu.RLock()
-	defer dr.mu.RUnlock()
-
-	session, exists := dr.sessions[sessionID]
-	if !exists {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
-	}
-
-	return session, nil
-}
-
-// Helper methods and implementations...
-
-func (sms *SecureMessagingService) getSessionID(userA, userB string) string {
-	if userA < userB {
-		return fmt.Sprintf("%s:%s", userA, userB)
-	}
-	return fmt.Sprintf("%s:%s", userB, userA)
-}
-
-func (sms *SecureMessagingService) getConversationID(userA, userB string) string {
-	return sms.getSessionID(userA, userB) // Same as session ID for simplicity
-}
-
-func (sms *SecureMessagingService) createProtectedTimestamp(t time.Time) *ProtectedTime {
-	// Bucket timestamp into hour periods for metadata protection
-	hourPeriod := int(t.Unix() / 3600)
-	
-	// Encrypt the exact timestamp
-	timeData := []byte(t.Format(time.RFC3339))
-	encryptedTime := make([]byte, len(timeData))
-	// Simple XOR encryption for demo - use proper encryption in production
-	for i, b := range timeData {
-		encryptedTime[i] = b ^ byte(i)
-	}
-	
-	return &ProtectedTime{
-		EncryptedTime: encryptedTime,
-		TimePeriod:    hourPeriod,
-	}
-}
-
-func (sms *SecureMessagingService) signMessage(message *EncryptedMessage, senderID string) ([]byte, error) {
-	// Create message hash for signing
-	hash := sha256.New()
-	hash.Write([]byte(message.MessageID))
-	hash.Write(message.EncryptedContent)
-	hash.Write([]byte(senderID))
-	messageHash := hash.Sum(nil)
-
-	// In production, this would use the user's private key
-	// For demo, we'll create a simple signature
-	signature := make([]byte, 64)
-	copy(signature, messageHash[:32])
-	copy(signature[32:], messageHash[:32])
-
-	return signature, nil
-}
-
-func (sms *SecureMessagingService) verifyMessage(message *EncryptedMessage) error {
-	// Message signature verification
-	// In production, this would verify using the sender's public key
-	return nil
-}
-
-// Additional service implementations...
-
-func NewMessageEncryptionService(config *MessagingSecurityConfig) *MessageEncryptionService {
-	return &MessageEncryptionService{
-		config: config,
-	}
-}
-
-func (mes *MessageEncryptionService) EncryptContent(content []byte, key *MessageKey) ([]byte, error) {
-	block, err := aes.NewCipher(key.Key)
+func (dsm *DistributedSecureMessaging) encryptPayload(payload []byte, keys *SessionKeyPair) ([]byte, error) {
+	block, err := aes.NewCipher(keys.SendKey)
 	if err != nil {
 		return nil, err
 	}
@@ -731,12 +516,15 @@ func (mes *MessageEncryptionService) EncryptContent(content []byte, key *Message
 		return nil, err
 	}
 
-	ciphertext := gcm.Seal(nil, key.IV, content, nil)
+	// Use a portion of IV for nonce
+	nonce := keys.IV[:gcm.NonceSize()]
+
+	ciphertext := gcm.Seal(nil, nonce, payload, nil)
 	return ciphertext, nil
 }
 
-func (mes *MessageEncryptionService) DecryptContent(encryptedContent []byte, key *MessageKey) ([]byte, error) {
-	block, err := aes.NewCipher(key.Key)
+func (dsm *DistributedSecureMessaging) decryptPayload(encryptedPayload []byte, keys *SessionKeyPair) ([]byte, error) {
+	block, err := aes.NewCipher(keys.ReceiveKey)
 	if err != nil {
 		return nil, err
 	}
@@ -746,7 +534,9 @@ func (mes *MessageEncryptionService) DecryptContent(encryptedContent []byte, key
 		return nil, err
 	}
 
-	plaintext, err := gcm.Open(nil, key.IV, encryptedContent, nil)
+	nonce := keys.IV[:gcm.NonceSize()]
+
+	plaintext, err := gcm.Open(nil, nonce, encryptedPayload, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -754,115 +544,242 @@ func (mes *MessageEncryptionService) DecryptContent(encryptedContent []byte, key
 	return plaintext, nil
 }
 
-// Additional service constructors and placeholder implementations...
-
-func NewMetadataProtectionService(config *MessagingSecurityConfig) *MetadataProtectionService {
-	return &MetadataProtectionService{
-		config: config,
-	}
+func (dsm *DistributedSecureMessaging) signMessage(message *DistributedMessage) ([]byte, error) {
+	// Use EncryptionManager to sign the message
+	return dsm.encryptionManager.SignMessage(message.EncryptedPayload)
 }
 
-func (mps *MetadataProtectionService) ApplyProtection(message *EncryptedMessage) error {
-	// Apply timing obfuscation, size padding, etc.
+func (dsm *DistributedSecureMessaging) verifyMessage(message *DistributedMessage) error {
+	// Use EncryptionManager to verify the message signature
+	return dsm.encryptionManager.VerifySignature(message.EncryptedPayload, message.Signature)
+}
+
+func (dsm *DistributedSecureMessaging) transmitMessage(ctx context.Context, channel *SecureChannel, message *DistributedMessage) error {
+	// In a real implementation, this would use gRPC or other transport
+	// For now, simulate successful transmission
+	log.Printf("Transmitting message %s via channel %s", message.MessageID, channel.ChannelID)
 	return nil
 }
 
-func NewMessageModerationService() *MessageModerationService {
-	return &MessageModerationService{
-		config: &ModerationConfig{
-			EnableAIModeration:      true,
-			AutoModerationThreshold: 0.8,
-			HumanReviewThreshold:    0.6,
+func (dsm *DistributedSecureMessaging) processMessage(ctx context.Context, message *DistributedMessage, payload []byte) error {
+	switch message.MessageType {
+	case DistributedMessageTypeClusterSync:
+		return dsm.handleClusterSync(ctx, payload)
+	case DistributedMessageTypeFederationEvent:
+		return dsm.handleFederationEvent(ctx, payload)
+	case DistributedMessageTypeStateUpdate:
+		return dsm.handleStateUpdate(ctx, payload)
+	case DistributedMessageTypeMigrationEvent:
+		return dsm.handleMigrationEvent(ctx, payload)
+	case DistributedMessageTypeHeartbeat:
+		return dsm.handleHeartbeat(ctx, message.SourceNodeID, payload)
+	case DistributedMessageTypeSecurityEvent:
+		return dsm.handleSecurityEvent(ctx, payload)
+	default:
+		log.Printf("Unknown message type: %s", message.MessageType)
+		return nil
+	}
+}
+
+func (dsm *DistributedSecureMessaging) handleClusterSync(ctx context.Context, payload []byte) error {
+	// Handle cluster synchronization message
+	log.Printf("Processing cluster sync message")
+
+	var syncData map[string]interface{}
+	if err := json.Unmarshal(payload, &syncData); err != nil {
+		return fmt.Errorf("failed to unmarshal sync data: %w", err)
+	}
+
+	// Coordinate with state coordinator
+	if dsm.stateCoordinator != nil {
+		nodes, ok := syncData["nodes"].([]string)
+		if ok {
+			return dsm.stateCoordinator.SynchronizeState(nodes)
+		}
+	}
+
+	return nil
+}
+
+func (dsm *DistributedSecureMessaging) handleFederationEvent(ctx context.Context, payload []byte) error {
+	// Handle federation event message
+	log.Printf("Processing federation event message")
+
+	var eventData interface{}
+	if err := json.Unmarshal(payload, &eventData); err != nil {
+		return fmt.Errorf("failed to unmarshal federation event: %w", err)
+	}
+
+	if dsm.federationManager != nil {
+		return dsm.federationManager.HandleFederationEvent(eventData)
+	}
+
+	return nil
+}
+
+func (dsm *DistributedSecureMessaging) handleStateUpdate(ctx context.Context, payload []byte) error {
+	// Handle state update message
+	log.Printf("Processing state update message")
+
+	var updateData map[string]interface{}
+	if err := json.Unmarshal(payload, &updateData); err != nil {
+		return fmt.Errorf("failed to unmarshal state update: %w", err)
+	}
+
+	if dsm.stateCoordinator != nil {
+		for key, value := range updateData {
+			if err := dsm.stateCoordinator.UpdateState(key, value); err != nil {
+				log.Printf("Failed to update state %s: %v", key, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (dsm *DistributedSecureMessaging) handleMigrationEvent(ctx context.Context, payload []byte) error {
+	// Handle migration event message
+	log.Printf("Processing migration event message")
+
+	var migrationData interface{}
+	if err := json.Unmarshal(payload, &migrationData); err != nil {
+		return fmt.Errorf("failed to unmarshal migration event: %w", err)
+	}
+
+	// Coordinate with cross-cluster runner
+	// Implementation would depend on migration event structure
+
+	return nil
+}
+
+func (dsm *DistributedSecureMessaging) handleHeartbeat(ctx context.Context, sourceNodeID string, payload []byte) error {
+	// Handle heartbeat message
+	log.Printf("Received heartbeat from node %s", sourceNodeID)
+
+	// Update node status in federation manager
+	if dsm.federationManager != nil {
+		// Implementation would update node health status
+	}
+
+	return nil
+}
+
+func (dsm *DistributedSecureMessaging) handleSecurityEvent(ctx context.Context, payload []byte) error {
+	// Handle security event message
+	log.Printf("Processing security event message")
+
+	var securityEvent SecurityEvent
+	if err := json.Unmarshal(payload, &securityEvent); err != nil {
+		return fmt.Errorf("failed to unmarshal security event: %w", err)
+	}
+
+	// Process security event - could trigger alerts, policy enforcement, etc.
+	dsm.auditLogger.LogEvent(ctx, &audit.AuditEvent{
+		UserID:   securityEvent.NodeID,
+		Resource: "security_event",
+		Action:   audit.ActionRead,
+		Result:   audit.ResultSuccess,
+		Details: map[string]interface{}{
+			"description":    fmt.Sprintf("Security event received: %s", securityEvent.Type),
+			"security_event": securityEvent,
 		},
+	})
+
+	return nil
+}
+
+// GetChannelMetrics returns metrics for a specific channel
+func (dsm *DistributedSecureMessaging) GetChannelMetrics(channelID string) (*ChannelMetrics, error) {
+	dsm.mu.RLock()
+	defer dsm.mu.RUnlock()
+
+	channel, exists := dsm.clusterChannels[channelID]
+	if !exists {
+		return nil, fmt.Errorf("channel not found: %s", channelID)
 	}
+
+	// Calculate uptime
+	channel.MetricsCollector.ConnectionUptime = time.Since(channel.CreatedAt)
+
+	return channel.MetricsCollector, nil
 }
 
-func (mms *MessageModerationService) ModerateContent(ctx context.Context, content []byte, messageType MessageType) (*ModerationResult, error) {
-	// Content moderation implementation
-	return &ModerationResult{
-		Status:          ModerationApproved,
-		ConfidenceScore: 0.9,
-		Action:          ActionAllow,
-		ReviewRequired:  false,
-	}, nil
+// GetAllChannels returns all active secure channels
+func (dsm *DistributedSecureMessaging) GetAllChannels() map[string]*SecureChannel {
+	dsm.mu.RLock()
+	defer dsm.mu.RUnlock()
+
+	channels := make(map[string]*SecureChannel)
+	for id, channel := range dsm.clusterChannels {
+		channelCopy := *channel
+		channels[id] = &channelCopy
+	}
+
+	return channels
 }
 
-func NewEncryptedMessageStore() *EncryptedMessageStore {
-	return &EncryptedMessageStore{}
-}
+// CloseChannel closes a secure channel
+func (dsm *DistributedSecureMessaging) CloseChannel(channelID string) error {
+	dsm.mu.Lock()
+	defer dsm.mu.Unlock()
 
-func NewKeyStore() *KeyStore {
-	return &KeyStore{}
-}
+	channel, exists := dsm.clusterChannels[channelID]
+	if !exists {
+		return fmt.Errorf("channel not found: %s", channelID)
+	}
 
-func NewKeyRotationService() *KeyRotationService {
-	return &KeyRotationService{}
-}
+	if channel.Connection != nil {
+		channel.Connection.Close()
+	}
 
-// Additional types and placeholder implementations...
+	channel.Status = ChannelStatusDisconnected
+	delete(dsm.clusterChannels, channelID)
 
-type EncryptedMessageStore struct {
-	// Message storage implementation
-}
+	dsm.auditLogger.LogEvent(context.Background(), &audit.AuditEvent{
+		UserID:   dsm.nodeID,
+		Resource: "secure_channel",
+		Action:   audit.ActionDelete,
+		Result:   audit.ResultSuccess,
+		Details: map[string]interface{}{
+			"description": fmt.Sprintf("Secure channel %s closed", channelID),
+			"channel_id":  channelID,
+			"local_node":  channel.LocalNodeID,
+			"remote_node": channel.RemoteNodeID,
+		},
+	})
 
-func (ems *EncryptedMessageStore) StoreMessage(ctx context.Context, message *EncryptedMessage) error {
 	return nil
 }
 
-func (ems *EncryptedMessageStore) UpdateMessage(ctx context.Context, message *EncryptedMessage) error {
+// RotateSessionKeys rotates session keys for a channel
+func (dsm *DistributedSecureMessaging) RotateSessionKeys(ctx context.Context, channelID string) error {
+	dsm.mu.Lock()
+	defer dsm.mu.Unlock()
+
+	channel, exists := dsm.clusterChannels[channelID]
+	if !exists {
+		return fmt.Errorf("channel not found: %s", channelID)
+	}
+
+	newKeys, err := dsm.generateSessionKeys()
+	if err != nil {
+		return fmt.Errorf("failed to generate new session keys: %w", err)
+	}
+
+	oldKeys := channel.SessionKeys
+	channel.SessionKeys = newKeys
+
+	dsm.auditLogger.LogEvent(ctx, &audit.AuditEvent{
+		UserID:   dsm.nodeID,
+		Resource: "session_keys",
+		Action:   audit.ActionRotate,
+		Result:   audit.ResultSuccess,
+		Details: map[string]interface{}{
+			"description": fmt.Sprintf("Session keys rotated for channel %s", channelID),
+			"channel_id":  channelID,
+			"old_key_age": time.Since(oldKeys.CreatedAt).String(),
+		},
+	})
+
 	return nil
-}
-
-type KeyStore struct {
-	// Key storage implementation
-}
-
-type KeyRotationService struct {
-	// Key rotation implementation
-}
-
-type MessageCompressionService struct {
-	// Message compression implementation
-}
-
-type RandomDelayDistribution struct {
-	// Random delay distribution for timing obfuscation
-}
-
-type ScheduledMessage struct {
-	Message   *EncryptedMessage
-	SendAt    time.Time
-	DelayType string
-}
-
-type CommunicationPatternScrambler struct {
-	// Pattern scrambling implementation
-}
-
-type DummyTrafficGenerator struct {
-	// Dummy traffic generation
-}
-
-type AIModerationEngine struct {
-	// AI-based content moderation
-}
-
-type KeywordFilterService struct {
-	// Keyword-based filtering
-}
-
-type SpamDetectionService struct {
-	// Spam detection implementation
-}
-
-type HarassmentDetectionService struct {
-	// Harassment detection implementation  
-}
-
-type ThreatAnalysisService struct {
-	// Threat analysis implementation
-}
-
-type MessageReportingService struct {
-	// Message reporting system
 }

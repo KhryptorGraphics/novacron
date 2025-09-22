@@ -1,10 +1,14 @@
 package migration
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,21 +23,26 @@ type LiveMigrationOrchestrator struct {
 	wanOptimizer     *WANOptimizer
 	rollbackManager  *RollbackManager
 	monitor          *MigrationMonitor
-	
+
 	// Migration state
 	activeMigrations map[string]*LiveMigration
 	migrationQueue   *PriorityQueue
-	
+
 	// Network management
 	connectionPool   *ConnectionPool
 	bandwidthManager *BandwidthManager
-	
+
+	// AI integration
+	aiProvider       MigrationAIProvider
+	aiConfig         AIConfig
+	aiMetrics        *AIMigrationMetrics
+
 	// Configuration
 	config           MigrationConfig
-	
+
 	// Metrics and monitoring
 	metrics          *MigrationMetricsCollector
-	
+
 	// Synchronization
 	mu               sync.RWMutex
 	ctx              context.Context
@@ -158,8 +167,13 @@ type MigrationMetricsCollector struct {
 
 // NewLiveMigrationOrchestrator creates a new live migration orchestrator
 func NewLiveMigrationOrchestrator(config MigrationConfig) (*LiveMigrationOrchestrator, error) {
+	return NewLiveMigrationOrchestratorWithAI(config, nil)
+}
+
+// NewLiveMigrationOrchestratorWithAI creates a new live migration orchestrator with AI integration
+func NewLiveMigrationOrchestratorWithAI(config MigrationConfig, aiConfig *AIConfig) (*LiveMigrationOrchestrator, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	// Create WAN optimizer
 	wanConfig := WANOptimizerConfig{
 		CompressionType:  config.CompressionType,
@@ -171,23 +185,52 @@ func NewLiveMigrationOrchestrator(config MigrationConfig) (*LiveMigrationOrchest
 		PageCacheSize:    1024, // 1GB page cache
 		TCPOptimization:  true,
 	}
-	
+
 	wanOptimizer, err := NewWANOptimizer(wanConfig)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to create WAN optimizer: %w", err)
 	}
-	
+
 	// Create rollback manager
 	rollbackManager, err := NewRollbackManager("/var/lib/novacron/checkpoints")
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to create rollback manager: %w", err)
 	}
-	
+
 	// Create monitor
 	monitor := NewMigrationMonitor()
-	
+
+	// Initialize AI configuration
+	defaultAIConfig := AIConfig{
+		Enabled:                     false,
+		Endpoint:                    "http://localhost:8000",
+		Timeout:                     30 * time.Second,
+		ConfidenceThreshold:         0.8,
+		RetryAttempts:               3,
+		EnableOptimization:          true,
+		EnableAnomalyDetection:      true,
+		EnablePredictiveAdjustments: true,
+	}
+
+	if aiConfig != nil {
+		defaultAIConfig = *aiConfig
+	}
+
+	// Create AI provider with fallback
+	var aiProvider MigrationAIProvider
+	var httpAIProvider MigrationAIProvider
+	if defaultAIConfig.Enabled {
+		httpAIProvider = NewHTTPMigrationAIProvider(
+			defaultAIConfig.Endpoint,
+			defaultAIConfig.Timeout,
+			defaultAIConfig.RetryAttempts,
+		)
+	}
+	// Always use safe provider for defensive programming
+	aiProvider = NewSafeMigrationAIProvider(httpAIProvider, config)
+
 	orchestrator := &LiveMigrationOrchestrator{
 		wanOptimizer:     wanOptimizer,
 		rollbackManager:  rollbackManager,
@@ -196,63 +239,114 @@ func NewLiveMigrationOrchestrator(config MigrationConfig) (*LiveMigrationOrchest
 		migrationQueue:   NewPriorityQueue(),
 		connectionPool:   NewConnectionPool(10),
 		bandwidthManager: NewBandwidthManager(config.BandwidthLimit),
+		aiProvider:       aiProvider,
+		aiConfig:         defaultAIConfig,
+		aiMetrics:        &AIMigrationMetrics{},
 		config:           config,
 		metrics:          &MigrationMetricsCollector{},
 		ctx:              ctx,
 		cancel:           cancel,
 	}
-	
+
+	// Initialize AI metrics
+	orchestrator.aiMetrics.PredictionAccuracy.Store(float64(0))
+
 	// Start background workers
 	go orchestrator.queueProcessor()
 	go orchestrator.metricsCollector()
-	
+	if defaultAIConfig.Enabled {
+		go orchestrator.aiMetricsCollector()
+		go orchestrator.aiAnomalyMonitor()
+	}
+
 	return orchestrator, nil
 }
 
-// MigrateVM initiates a VM migration
+// MigrateVM initiates a VM migration with AI optimization
 func (o *LiveMigrationOrchestrator) MigrateVM(ctx context.Context, vmID, sourceNode, destNode string, options MigrationOptions) (string, error) {
 	// Generate migration ID
 	migrationID := uuid.New().String()
-	
+
 	// Get VM details (would normally fetch from VM manager)
 	vmInstance := &vm.VM{} // Placeholder
-	
+
+	// AI-powered pre-migration analysis
+	var aiStrategy *MigrationStrategy
+	if o.aiConfig.Enabled && o.aiConfig.EnableOptimization {
+		vmData := map[string]interface{}{
+			"vm_id":         vmID,
+			"memory_size":   "4GB", // Placeholder
+			"cpu_cores":     4,      // Placeholder
+			"disk_size":     "100GB", // Placeholder
+			"workload_type": "general",
+		}
+		networkData := map[string]interface{}{
+			"source_node":      sourceNode,
+			"destination_node": destNode,
+			"bandwidth":        o.config.BandwidthLimit,
+		}
+
+		strategy, err := o.aiProvider.OptimizeMigrationStrategy(vmData, networkData)
+		if err == nil && strategy.Confidence >= o.aiConfig.ConfidenceThreshold {
+			aiStrategy = &strategy
+			o.aiMetrics.OptimizationSuccess.Add(1)
+		} else {
+			o.aiMetrics.AIFailures.Add(1)
+		}
+	}
+
+	// Apply AI recommendations to configuration if available
+	migrationConfig := o.config
+	migrationType := MigrationTypeLive
+	if aiStrategy != nil {
+		migrationType = aiStrategy.Type
+		if aiStrategy.MemoryIterations > 0 {
+			migrationConfig.MemoryIterations = aiStrategy.MemoryIterations
+		}
+		if aiStrategy.CompressionLevel > 0 {
+			migrationConfig.CompressionLevel = aiStrategy.CompressionLevel
+		}
+		if aiStrategy.BandwidthAllocation > 0 {
+			migrationConfig.BandwidthLimit = aiStrategy.BandwidthAllocation
+		}
+	}
+
 	// Start monitoring
-	if err := o.monitor.StartMonitoring(migrationID, vmID, "VM-"+vmID, sourceNode, destNode, string(MigrationTypeLive)); err != nil {
+	if err := o.monitor.StartMonitoring(migrationID, vmID, "VM-"+vmID, sourceNode, destNode, string(migrationType)); err != nil {
 		return "", fmt.Errorf("failed to start monitoring: %w", err)
 	}
-	
+
 	// Create checkpoint if enabled
 	var checkpoint *Checkpoint
-	if o.config.EnableCheckpointing {
+	if migrationConfig.EnableCheckpointing {
 		var err error
 		checkpoint, err = o.rollbackManager.CreateCheckpoint(ctx, migrationID, vmID, sourceNode, VMStateSnapshot{})
 		if err != nil {
 			return "", fmt.Errorf("failed to create checkpoint: %w", err)
 		}
 	}
-	
+
 	// Create migration instance
 	migration := &LiveMigration{
 		ID:              migrationID,
 		VM:              vmInstance,
 		SourceNode:      sourceNode,
 		DestinationNode: destNode,
-		Type:            MigrationTypeLive,
-		Config:          o.config,
+		Type:            migrationType,
+		Config:          migrationConfig,
 		State:           NewMigrationState(),
 		Checkpoint:      checkpoint,
 		StartTime:       time.Now(),
 	}
-	
+
 	// Add to active migrations
 	o.mu.Lock()
 	o.activeMigrations[migrationID] = migration
 	o.mu.Unlock()
-	
+
 	// Check if we can start immediately or need to queue
 	if o.canStartMigration() {
-		go o.executeMigration(ctx, migration)
+		go o.executeMigrationWithAI(ctx, migration)
 	} else {
 		o.migrationQueue.Add(&QueueItem{
 			MigrationID: migrationID,
@@ -260,7 +354,7 @@ func (o *LiveMigrationOrchestrator) MigrateVM(ctx context.Context, vmID, sourceN
 			AddedAt:     time.Now(),
 		})
 	}
-	
+
 	return migrationID, nil
 }
 
@@ -859,14 +953,537 @@ func (o *LiveMigrationOrchestrator) GetMetrics() map[string]interface{} {
 	}
 }
 
+// executeMigrationWithAI executes migration with AI monitoring and adjustments
+func (o *LiveMigrationOrchestrator) executeMigrationWithAI(ctx context.Context, migration *LiveMigration) {
+	defer func() {
+		if r := recover(); r != nil {
+			o.handleMigrationPanic(migration.ID, r)
+		}
+	}()
+
+	// Start AI-powered real-time monitoring
+	var aiMonitorCtx context.Context
+	var aiCancel context.CancelFunc
+	if o.aiConfig.Enabled && o.aiConfig.EnableAnomalyDetection {
+		aiMonitorCtx, aiCancel = context.WithCancel(ctx)
+		go o.aiRealTimeMonitoring(aiMonitorCtx, migration)
+		defer aiCancel()
+	}
+
+	// Execute migration with standard process
+	o.executeMigration(ctx, migration)
+}
+
+// aiRealTimeMonitoring performs real-time AI monitoring during migration
+func (o *LiveMigrationOrchestrator) aiRealTimeMonitoring(ctx context.Context, migration *LiveMigration) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Collect current metrics
+			metrics := map[string]interface{}{
+				"migration_id":      migration.ID,
+				"bytes_transferred": migration.State.BytesTransferred.Load(),
+				"transfer_rate":     migration.State.TransferRate.Load(),
+				"dirty_pages":       migration.State.DirtyPages.Load(),
+				"iterations":        migration.State.Iterations.Load(),
+				"phase":             string(migration.State.Phase),
+			}
+
+			// AI anomaly detection
+			anomalies, err := o.aiProvider.DetectAnomalies(metrics)
+			if err == nil && len(anomalies) > 0 {
+				o.aiMetrics.AnomaliesDetected.Add(int64(len(anomalies)))
+				o.handleAnomalies(migration, anomalies)
+			}
+
+			// AI dynamic adjustments
+			if o.aiConfig.EnablePredictiveAdjustments {
+				recommendations, err := o.aiProvider.RecommendDynamicAdjustments(migration.ID, metrics)
+				if err == nil && len(recommendations) > 0 {
+					o.applyDynamicAdjustments(migration, recommendations)
+				}
+			}
+		}
+	}
+}
+
+// handleAnomalies handles detected anomalies during migration
+func (o *LiveMigrationOrchestrator) handleAnomalies(migration *LiveMigration, anomalies []AnomalyAlert) {
+	for _, anomaly := range anomalies {
+		switch anomaly.Severity {
+		case "critical":
+			// Critical anomalies may require migration abort
+			if anomaly.Confidence >= 0.9 {
+				fmt.Printf("Critical anomaly detected in migration %s: %s\n", migration.ID, anomaly.Message)
+				// Could trigger rollback or alternative strategy
+			}
+		case "warning":
+			// Apply recommendations if available
+			for _, rec := range anomaly.Recommendations {
+				fmt.Printf("Migration %s warning: %s. Recommendation: %s\n", migration.ID, anomaly.Message, rec)
+			}
+		}
+	}
+}
+
+// applyDynamicAdjustments applies AI-recommended dynamic adjustments
+func (o *LiveMigrationOrchestrator) applyDynamicAdjustments(migration *LiveMigration, recommendations []AdjustmentRecommendation) {
+	for _, rec := range recommendations {
+		if rec.Confidence < o.aiConfig.ConfidenceThreshold {
+			continue
+		}
+
+		switch rec.Parameter {
+		case "bandwidth_limit":
+			if newBandwidth, ok := rec.RecommendedValue.(float64); ok {
+				o.bandwidthManager.Release(migration.ID)
+				o.bandwidthManager.Allocate(migration.ID, int64(newBandwidth))
+				o.wanOptimizer.SetBandwidthLimit(int64(newBandwidth))
+				o.aiMetrics.AdjustmentsApplied.Add(1)
+				fmt.Printf("Applied bandwidth adjustment for migration %s: %v\n", migration.ID, newBandwidth)
+			}
+		case "compression_level":
+			if newLevel, ok := rec.RecommendedValue.(float64); ok {
+				migration.Config.CompressionLevel = int(newLevel)
+				o.aiMetrics.AdjustmentsApplied.Add(1)
+				fmt.Printf("Applied compression adjustment for migration %s: %v\n", migration.ID, int(newLevel))
+			}
+		case "memory_iterations":
+			if newIterations, ok := rec.RecommendedValue.(float64); ok {
+				migration.Config.MemoryIterations = int(newIterations)
+				o.aiMetrics.AdjustmentsApplied.Add(1)
+				fmt.Printf("Applied memory iterations adjustment for migration %s: %v\n", migration.ID, int(newIterations))
+			}
+		}
+	}
+}
+
+// aiMetricsCollector collects AI-related metrics
+func (o *LiveMigrationOrchestrator) aiMetricsCollector() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-o.ctx.Done():
+			return
+		case <-ticker.C:
+			o.collectAIMetrics()
+		}
+	}
+}
+
+// collectAIMetrics collects current AI metrics
+func (o *LiveMigrationOrchestrator) collectAIMetrics() {
+	accuracy := o.aiMetrics.PredictionAccuracy.Load().(float64)
+	optimizations := o.aiMetrics.OptimizationSuccess.Load()
+	anomalies := o.aiMetrics.AnomaliesDetected.Load()
+	adjustments := o.aiMetrics.AdjustmentsApplied.Load()
+	failures := o.aiMetrics.AIFailures.Load()
+
+	fmt.Printf("AI Migration Metrics - Accuracy: %.2f%%, Optimizations: %d, Anomalies: %d, Adjustments: %d, Failures: %d\n",
+		accuracy*100, optimizations, anomalies, adjustments, failures)
+}
+
+// aiAnomalyMonitor runs periodic anomaly detection across all active migrations
+func (o *LiveMigrationOrchestrator) aiAnomalyMonitor() {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-o.ctx.Done():
+			return
+		case <-ticker.C:
+			o.performGlobalAnomalyDetection()
+		}
+	}
+}
+
+// performGlobalAnomalyDetection performs system-wide anomaly detection
+func (o *LiveMigrationOrchestrator) performGlobalAnomalyDetection() {
+	o.mu.RLock()
+	activeMigrations := make(map[string]*LiveMigration)
+	for k, v := range o.activeMigrations {
+		activeMigrations[k] = v
+	}
+	o.mu.RUnlock()
+
+	for _, migration := range activeMigrations {
+		metrics := map[string]interface{}{
+			"migration_id":      migration.ID,
+			"bytes_transferred": migration.State.BytesTransferred.Load(),
+			"transfer_rate":     migration.State.TransferRate.Load(),
+			"duration":          time.Since(migration.StartTime).Seconds(),
+			"phase":             string(migration.State.Phase),
+		}
+
+		anomalies, err := o.aiProvider.DetectAnomalies(metrics)
+		if err == nil && len(anomalies) > 0 {
+			o.handleAnomalies(migration, anomalies)
+		}
+	}
+}
+
+// NewHTTPMigrationAIProvider creates a new HTTP-based AI provider
+func NewHTTPMigrationAIProvider(endpoint string, timeout time.Duration, retries int) *HTTPMigrationAIProvider {
+	client := &http.Client{
+		Timeout: timeout,
+	}
+
+	return &HTTPMigrationAIProvider{
+		client:   client,
+		endpoint: endpoint,
+		timeout:  timeout,
+		retries:  retries,
+	}
+}
+
+// PredictMigrationTime predicts migration time using AI
+func (p *HTTPMigrationAIProvider) PredictMigrationTime(sourceNode, destNode, vmSize string) (time.Duration, float64, error) {
+	reqData := map[string]interface{}{
+		"source_node": sourceNode,
+		"dest_node":   destNode,
+		"vm_size":     vmSize,
+	}
+
+	resp, err := p.makeRequest("/predict/migration_time", reqData)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	duration := time.Duration(resp["duration_seconds"].(float64)) * time.Second
+	confidence := resp["confidence"].(float64)
+
+	return duration, confidence, nil
+}
+
+// PredictBandwidthRequirements predicts bandwidth requirements
+func (p *HTTPMigrationAIProvider) PredictBandwidthRequirements(vmSize, networkConditions string) (int64, error) {
+	reqData := map[string]interface{}{
+		"vm_size":            vmSize,
+		"network_conditions": networkConditions,
+	}
+
+	resp, err := p.makeRequest("/predict/bandwidth", reqData)
+	if err != nil {
+		return 0, err
+	}
+
+	bandwidth := int64(resp["bandwidth"].(float64))
+	return bandwidth, nil
+}
+
+// PredictOptimalPath predicts optimal migration path
+func (p *HTTPMigrationAIProvider) PredictOptimalPath(sourceNode, destNode string, networkTopology map[string]interface{}) ([]string, error) {
+	reqData := map[string]interface{}{
+		"source_node":      sourceNode,
+		"dest_node":        destNode,
+		"network_topology": networkTopology,
+	}
+
+	resp, err := p.makeRequest("/predict/optimal_path", reqData)
+	if err != nil {
+		return nil, err
+	}
+
+	pathInterface := resp["path"].([]interface{})
+	path := make([]string, len(pathInterface))
+	for i, p := range pathInterface {
+		path[i] = p.(string)
+	}
+
+	return path, nil
+}
+
+// OptimizeMigrationStrategy optimizes migration strategy
+func (p *HTTPMigrationAIProvider) OptimizeMigrationStrategy(vmData, networkData map[string]interface{}) (MigrationStrategy, error) {
+	reqData := map[string]interface{}{
+		"vm_data":      vmData,
+		"network_data": networkData,
+	}
+
+	resp, err := p.makeRequest("/optimize/migration_strategy", reqData)
+	if err != nil {
+		return MigrationStrategy{}, err
+	}
+
+	strategy := MigrationStrategy{
+		Type:                MigrationType(resp["type"].(string)),
+		MemoryIterations:    int(resp["memory_iterations"].(float64)),
+		CompressionLevel:    int(resp["compression_level"].(float64)),
+		BandwidthAllocation: int64(resp["bandwidth_allocation"].(float64)),
+		Confidence:          resp["confidence"].(float64),
+	}
+
+	return strategy, nil
+}
+
+// OptimizeCompressionSettings optimizes compression settings
+func (p *HTTPMigrationAIProvider) OptimizeCompressionSettings(dataProfile map[string]interface{}) (CompressionConfig, error) {
+	reqData := map[string]interface{}{
+		"data_profile": dataProfile,
+	}
+
+	resp, err := p.makeRequest("/optimize/compression", reqData)
+	if err != nil {
+		return CompressionConfig{}, err
+	}
+
+	config := CompressionConfig{
+		Type:       CompressionType(resp["type"].(string)),
+		Level:      int(resp["level"].(float64)),
+		ChunkSize:  int(resp["chunk_size"].(float64)),
+		Confidence: resp["confidence"].(float64),
+	}
+
+	return config, nil
+}
+
+// OptimizeMemoryIterations optimizes memory iterations
+func (p *HTTPMigrationAIProvider) OptimizeMemoryIterations(vmMemoryPattern map[string]interface{}) (int, error) {
+	reqData := map[string]interface{}{
+		"vm_memory_pattern": vmMemoryPattern,
+	}
+
+	resp, err := p.makeRequest("/optimize/memory_iterations", reqData)
+	if err != nil {
+		return 0, err
+	}
+
+	iterations := int(resp["iterations"].(float64))
+	return iterations, nil
+}
+
+// AnalyzeNetworkConditions analyzes current network conditions
+func (p *HTTPMigrationAIProvider) AnalyzeNetworkConditions(nodeID string) (NetworkConditions, error) {
+	reqData := map[string]interface{}{
+		"node_id": nodeID,
+	}
+
+	resp, err := p.makeRequest("/analyze/network_conditions", reqData)
+	if err != nil {
+		return NetworkConditions{}, err
+	}
+
+	conditions := NetworkConditions{
+		Bandwidth:          int64(resp["bandwidth"].(float64)),
+		Latency:            int(resp["latency"].(float64)),
+		PacketLoss:         resp["packet_loss"].(float64),
+		Jitter:             int(resp["jitter"].(float64)),
+		CongestionLevel:    resp["congestion_level"].(float64),
+		PredictedStability: resp["predicted_stability"].(float64),
+	}
+
+	return conditions, nil
+}
+
+// DetectAnomalies detects anomalies in migration metrics
+func (p *HTTPMigrationAIProvider) DetectAnomalies(migrationMetrics map[string]interface{}) ([]AnomalyAlert, error) {
+	reqData := map[string]interface{}{
+		"metrics": migrationMetrics,
+	}
+
+	resp, err := p.makeRequest("/analyze/anomalies", reqData)
+	if err != nil {
+		return nil, err
+	}
+
+	anomaliesInterface := resp["anomalies"].([]interface{})
+	anomalies := make([]AnomalyAlert, len(anomaliesInterface))
+
+	for i, a := range anomaliesInterface {
+		anomalyMap := a.(map[string]interface{})
+		recommendationsInterface := anomalyMap["recommendations"].([]interface{})
+		recommendations := make([]string, len(recommendationsInterface))
+		for j, r := range recommendationsInterface {
+			recommendations[j] = r.(string)
+		}
+
+		anomalies[i] = AnomalyAlert{
+			Type:            anomalyMap["type"].(string),
+			Severity:        anomalyMap["severity"].(string),
+			Message:         anomalyMap["message"].(string),
+			Confidence:      anomalyMap["confidence"].(float64),
+			Timestamp:       time.Now(), // Would parse from response in real implementation
+			Recommendations: recommendations,
+		}
+	}
+
+	return anomalies, nil
+}
+
+// RecommendDynamicAdjustments recommends dynamic adjustments
+func (p *HTTPMigrationAIProvider) RecommendDynamicAdjustments(migrationID string, currentMetrics map[string]interface{}) ([]AdjustmentRecommendation, error) {
+	reqData := map[string]interface{}{
+		"migration_id":     migrationID,
+		"current_metrics": currentMetrics,
+	}
+
+	resp, err := p.makeRequest("/recommend/adjustments", reqData)
+	if err != nil {
+		return nil, err
+	}
+
+	recommendationsInterface := resp["recommendations"].([]interface{})
+	recommendations := make([]AdjustmentRecommendation, len(recommendationsInterface))
+
+	for i, r := range recommendationsInterface {
+		recMap := r.(map[string]interface{})
+		recommendations[i] = AdjustmentRecommendation{
+			Parameter:        recMap["parameter"].(string),
+			CurrentValue:     recMap["current_value"],
+			RecommendedValue: recMap["recommended_value"],
+			Reason:           recMap["reason"].(string),
+			Confidence:       recMap["confidence"].(float64),
+			Impact:           recMap["impact"].(string),
+		}
+	}
+
+	return recommendations, nil
+}
+
+// AnalyzeMigrationPatterns analyzes migration patterns
+func (p *HTTPMigrationAIProvider) AnalyzeMigrationPatterns(historicalData []MigrationRecord) ([]PatternInsight, error) {
+	reqData := map[string]interface{}{
+		"historical_data": historicalData,
+	}
+
+	resp, err := p.makeRequest("/analyze/patterns", reqData)
+	if err != nil {
+		return nil, err
+	}
+
+	patternsInterface := resp["patterns"].([]interface{})
+	patterns := make([]PatternInsight, len(patternsInterface))
+
+	for i, p := range patternsInterface {
+		patternMap := p.(map[string]interface{})
+		recommendationsInterface := patternMap["recommendations"].([]interface{})
+		recommendations := make([]string, len(recommendationsInterface))
+		for j, r := range recommendationsInterface {
+			recommendations[j] = r.(string)
+		}
+
+		patterns[i] = PatternInsight{
+			Pattern:         patternMap["pattern"].(string),
+			Frequency:       int(patternMap["frequency"].(float64)),
+			SuccessRate:     patternMap["success_rate"].(float64),
+			AvgDuration:     time.Duration(patternMap["avg_duration"].(float64)) * time.Second,
+			Recommendations: recommendations,
+		}
+	}
+
+	return patterns, nil
+}
+
+// PredictFailureRisk predicts migration failure risk
+func (p *HTTPMigrationAIProvider) PredictFailureRisk(migrationParams map[string]interface{}) (float64, error) {
+	reqData := map[string]interface{}{
+		"migration_params": migrationParams,
+	}
+
+	resp, err := p.makeRequest("/predict/failure_risk", reqData)
+	if err != nil {
+		return 0, err
+	}
+
+	risk := resp["risk"].(float64)
+	return risk, nil
+}
+
+// makeRequest makes an HTTP request to the AI service
+func (p *HTTPMigrationAIProvider) makeRequest(endpoint string, data map[string]interface{}) (map[string]interface{}, error) {
+	var lastErr error
+
+	for attempt := 0; attempt < p.retries; attempt++ {
+		start := time.Now()
+
+		jsonData, err := json.Marshal(data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request data: %w", err)
+		}
+
+		req, err := http.NewRequest("POST", p.endpoint+endpoint, bytes.NewBuffer(jsonData))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := p.client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("request failed (attempt %d): %w", attempt+1, err)
+			if attempt < p.retries-1 {
+				time.Sleep(time.Duration(math.Pow(2, float64(attempt))) * time.Second)
+				continue
+			}
+			break
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("AI service returned status %d", resp.StatusCode)
+			if attempt < p.retries-1 {
+				time.Sleep(time.Duration(math.Pow(2, float64(attempt))) * time.Second)
+				continue
+			}
+			break
+		}
+
+		var result map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			lastErr = fmt.Errorf("failed to decode response: %w", err)
+			if attempt < p.retries-1 {
+				time.Sleep(time.Duration(math.Pow(2, float64(attempt))) * time.Second)
+				continue
+			}
+			break
+		}
+
+		// Track response time for metrics
+		duration := time.Since(start)
+		// Could update metrics here with duration
+
+		return result, nil
+	}
+
+	return nil, lastErr
+}
+
+// GetAIMetrics returns AI-related metrics
+func (o *LiveMigrationOrchestrator) GetAIMetrics() map[string]interface{} {
+	if !o.aiConfig.Enabled {
+		return map[string]interface{}{"ai_enabled": false}
+	}
+
+	accuracy := o.aiMetrics.PredictionAccuracy.Load().(float64)
+
+	return map[string]interface{}{
+		"ai_enabled":            true,
+		"prediction_accuracy":   accuracy,
+		"optimization_success":  o.aiMetrics.OptimizationSuccess.Load(),
+		"anomalies_detected":    o.aiMetrics.AnomaliesDetected.Load(),
+		"adjustments_applied":   o.aiMetrics.AdjustmentsApplied.Load(),
+		"ai_failures":           o.aiMetrics.AIFailures.Load(),
+		"predictive_adjustments": o.aiMetrics.PredictiveAdjustments.Load(),
+		"avg_response_time_ms":  o.aiMetrics.AIResponseTime.Load(),
+	}
+}
+
 // Close shuts down the orchestrator
 func (o *LiveMigrationOrchestrator) Close() error {
 	o.cancel()
-	
+
 	// Close components
 	o.wanOptimizer.Close()
 	o.monitor.Close()
-	
+
 	return nil
 }
 
@@ -1006,4 +1623,126 @@ func (pq *PriorityQueue) Size() int {
 type MigrationOptions struct {
 	Priority int
 	Force    bool
+}
+
+// MigrationAIProvider interface for AI-powered migration optimization
+type MigrationAIProvider interface {
+	// Performance prediction
+	PredictMigrationTime(sourceNode, destNode, vmSize string) (time.Duration, float64, error)
+	PredictBandwidthRequirements(vmSize, networkConditions string) (int64, error)
+	PredictOptimalPath(sourceNode, destNode string, networkTopology map[string]interface{}) ([]string, error)
+
+	// Optimization recommendations
+	OptimizeMigrationStrategy(vmData, networkData map[string]interface{}) (MigrationStrategy, error)
+	OptimizeCompressionSettings(dataProfile map[string]interface{}) (CompressionConfig, error)
+	OptimizeMemoryIterations(vmMemoryPattern map[string]interface{}) (int, error)
+
+	// Real-time adjustments
+	AnalyzeNetworkConditions(nodeID string) (NetworkConditions, error)
+	DetectAnomalies(migrationMetrics map[string]interface{}) ([]AnomalyAlert, error)
+	RecommendDynamicAdjustments(migrationID string, currentMetrics map[string]interface{}) ([]AdjustmentRecommendation, error)
+
+	// Pattern recognition
+	AnalyzeMigrationPatterns(historicalData []MigrationRecord) ([]PatternInsight, error)
+	PredictFailureRisk(migrationParams map[string]interface{}) (float64, error)
+}
+
+// AIConfig contains AI-related configuration
+type AIConfig struct {
+	Enabled             bool   `json:"enabled"`
+	Endpoint            string `json:"endpoint"`
+	Timeout             time.Duration `json:"timeout"`
+	ConfidenceThreshold float64 `json:"confidence_threshold"`
+	RetryAttempts       int    `json:"retry_attempts"`
+	EnableOptimization  bool   `json:"enable_optimization"`
+	EnableAnomalyDetection bool `json:"enable_anomaly_detection"`
+	EnablePredictiveAdjustments bool `json:"enable_predictive_adjustments"`
+}
+
+// HTTPMigrationAIProvider implements MigrationAIProvider using HTTP calls to AI service
+type HTTPMigrationAIProvider struct {
+	client   *http.Client
+	endpoint string
+	timeout  time.Duration
+	retries  int
+}
+
+// MigrationStrategy represents AI-recommended migration strategy
+type MigrationStrategy struct {
+	Type                MigrationType `json:"type"`
+	MemoryIterations    int           `json:"memory_iterations"`
+	CompressionLevel    int           `json:"compression_level"`
+	BandwidthAllocation int64         `json:"bandwidth_allocation"`
+	Confidence          float64       `json:"confidence"`
+}
+
+// CompressionConfig represents AI-optimized compression settings
+type CompressionConfig struct {
+	Type      CompressionType `json:"type"`
+	Level     int            `json:"level"`
+	ChunkSize int            `json:"chunk_size"`
+	Confidence float64       `json:"confidence"`
+}
+
+// NetworkConditions represents current network conditions
+type NetworkConditions struct {
+	Bandwidth         int64   `json:"bandwidth"`
+	Latency           int     `json:"latency"`
+	PacketLoss        float64 `json:"packet_loss"`
+	Jitter            int     `json:"jitter"`
+	CongestionLevel   float64 `json:"congestion_level"`
+	PredictedStability float64 `json:"predicted_stability"`
+}
+
+// AnomalyAlert represents an anomaly detected during migration
+type AnomalyAlert struct {
+	Type        string    `json:"type"`
+	Severity    string    `json:"severity"`
+	Message     string    `json:"message"`
+	Confidence  float64   `json:"confidence"`
+	Timestamp   time.Time `json:"timestamp"`
+	Recommendations []string `json:"recommendations"`
+}
+
+// AdjustmentRecommendation represents AI recommendations for migration adjustments
+type AdjustmentRecommendation struct {
+	Parameter   string      `json:"parameter"`
+	CurrentValue interface{} `json:"current_value"`
+	RecommendedValue interface{} `json:"recommended_value"`
+	Reason      string      `json:"reason"`
+	Confidence  float64     `json:"confidence"`
+	Impact      string      `json:"impact"`
+}
+
+// PatternInsight represents insights from migration pattern analysis
+type PatternInsight struct {
+	Pattern     string    `json:"pattern"`
+	Frequency   int       `json:"frequency"`
+	SuccessRate float64   `json:"success_rate"`
+	AvgDuration time.Duration `json:"avg_duration"`
+	Recommendations []string `json:"recommendations"`
+}
+
+// MigrationRecord represents a historical migration record
+type MigrationRecord struct {
+	ID              string                 `json:"id"`
+	SourceNode      string                 `json:"source_node"`
+	DestinationNode string                 `json:"destination_node"`
+	VMSize          string                 `json:"vm_size"`
+	Success         bool                   `json:"success"`
+	Duration        time.Duration          `json:"duration"`
+	Downtime        time.Duration          `json:"downtime"`
+	Metrics         map[string]interface{} `json:"metrics"`
+	Timestamp       time.Time              `json:"timestamp"`
+}
+
+// AIMigrationMetrics tracks AI-related migration metrics
+type AIMigrationMetrics struct {
+	PredictionAccuracy     atomic.Value // float64
+	OptimizationSuccess    atomic.Int64
+	AnomaliesDetected      atomic.Int64
+	AdjustmentsApplied     atomic.Int64
+	AIResponseTime         atomic.Int64 // milliseconds
+	AIFailures            atomic.Int64
+	PredictiveAdjustments atomic.Int64
 }

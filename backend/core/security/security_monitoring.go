@@ -7,56 +7,59 @@ import (
 	"sync"
 	"time"
 
+	"github.com/khryptorgraphics/novacron/backend/core/audit"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 // SecurityMonitor provides real-time security monitoring and alerting
 type SecurityMonitor struct {
-	config           SecurityMonitorConfig
-	alertManager     *AlertManager
-	threatDetector   *ThreatDetectionEngine
-	incidentManager  *SecurityIncidentManager
-	metricsCollector *SecurityMetricsCollector
-	auditLogger      AuditLogger
-	subscribers      map[string]chan SecurityEvent
-	eventQueue       chan SecurityEvent
-	mu               sync.RWMutex
+	config              SecurityMonitorConfig
+	alertManager        *AlertManager
+	threatDetector      *ThreatDetectionEngine
+	incidentManager     *SecurityIncidentManager
+	metricsCollector    *SecurityMetricsCollector
+	auditLogger         audit.AuditLogger
+	subscribers         map[string]chan SecurityEvent
+	eventQueue          chan SecurityEvent
+	spilloverQueue      *SpilloverQueue // Disk-backed overflow queue
+	backpressureManager *EventQueueBackpressureManager
+	mu                  sync.RWMutex
 }
 
 // SecurityMonitorConfig defines monitoring configuration
 type SecurityMonitorConfig struct {
-	EnableRealTimeMonitoring   bool                      `json:"enable_realtime"`
-	ThreatDetectionConfig      ThreatDetectionConfig     `json:"threat_detection"`
-	AlertingConfig             AlertingConfig            `json:"alerting"`
-	IncidentManagementConfig   IncidentConfig            `json:"incident_management"`
-	ComplianceMonitoringConfig ComplianceMonitorConfig   `json:"compliance_monitoring"`
-	MetricsConfig              MetricsConfig             `json:"metrics"`
-	NotificationConfig         NotificationConfig        `json:"notifications"`
+	EnableRealTimeMonitoring   bool                    `json:"enable_realtime"`
+	ThreatDetectionConfig      ThreatDetectionConfig   `json:"threat_detection"`
+	AlertingConfig             AlertingConfig          `json:"alerting"`
+	IncidentManagementConfig   IncidentConfig          `json:"incident_management"`
+	ComplianceMonitoringConfig ComplianceMonitorConfig `json:"compliance_monitoring"`
+	MetricsConfig              MetricsConfig           `json:"metrics"`
+	NotificationConfig         NotificationConfig      `json:"notifications"`
 }
 
-// ThreatDetectionConfig defines threat detection parameters
+// MonitoringMonitoringThreatDetectionConfig defines threat detection parameters
 type ThreatDetectionConfig struct {
-	EnableBehaviorAnalysis   bool                    `json:"enable_behavior_analysis"`
-	EnableAnomalyDetection   bool                    `json:"enable_anomaly_detection"`
-	EnableMLDetection        bool                    `json:"enable_ml_detection"`
-	BruteForceThreshold      int                     `json:"brute_force_threshold"`
-	RateLimitThreshold       int                     `json:"rate_limit_threshold"`
-	GeoLocationEnabled       bool                    `json:"geolocation_enabled"`
-	AllowedCountries         []string                `json:"allowed_countries"`
-	ThreatIntelFeeds         []ThreatIntelFeed       `json:"threat_intel_feeds"`
-	CustomRules              []DetectionRule         `json:"custom_rules"`
+	EnableBehaviorAnalysis bool              `json:"enable_behavior_analysis"`
+	EnableAnomalyDetection bool              `json:"enable_anomaly_detection"`
+	EnableMLDetection      bool              `json:"enable_ml_detection"`
+	BruteForceThreshold    int               `json:"brute_force_threshold"`
+	RateLimitThreshold     int               `json:"rate_limit_threshold"`
+	GeoLocationEnabled     bool              `json:"geolocation_enabled"`
+	AllowedCountries       []string          `json:"allowed_countries"`
+	ThreatIntelFeeds       []ThreatIntelFeed `json:"threat_intel_feeds"`
+	CustomRules            []DetectionRule   `json:"custom_rules"`
 }
 
 // ThreatIntelFeed represents external threat intelligence feed
 type ThreatIntelFeed struct {
-	Name        string        `json:"name"`
-	URL         string        `json:"url"`
-	APIKey      string        `json:"api_key"`
-	UpdateFreq  time.Duration `json:"update_frequency"`
-	LastUpdate  time.Time     `json:"last_update"`
-	Enabled     bool          `json:"enabled"`
-	Categories  []string      `json:"categories"`
+	Name       string        `json:"name"`
+	URL        string        `json:"url"`
+	APIKey     string        `json:"api_key"`
+	UpdateFreq time.Duration `json:"update_frequency"`
+	LastUpdate time.Time     `json:"last_update"`
+	Enabled    bool          `json:"enabled"`
+	Categories []string      `json:"categories"`
 }
 
 // DetectionRule represents custom security detection rule
@@ -73,76 +76,76 @@ type DetectionRule struct {
 
 // AlertingConfig defines alerting behavior
 type AlertingConfig struct {
-	EnableEmailAlerts    bool                    `json:"enable_email_alerts"`
-	EnableSlackAlerts    bool                    `json:"enable_slack_alerts"`
-	EnableSMSAlerts      bool                    `json:"enable_sms_alerts"`
-	EnableWebhooks       bool                    `json:"enable_webhooks"`
-	EscalationPolicy     EscalationPolicy        `json:"escalation_policy"`
-	AlertThresholds      map[string]int          `json:"alert_thresholds"`
-	SuppressionsRules    []SuppressionRule       `json:"suppression_rules"`
-	AlertChannels        map[string]AlertChannel `json:"alert_channels"`
+	EnableEmailAlerts bool                    `json:"enable_email_alerts"`
+	EnableSlackAlerts bool                    `json:"enable_slack_alerts"`
+	EnableSMSAlerts   bool                    `json:"enable_sms_alerts"`
+	EnableWebhooks    bool                    `json:"enable_webhooks"`
+	EscalationPolicy  EscalationPolicy        `json:"escalation_policy"`
+	AlertThresholds   map[string]int          `json:"alert_thresholds"`
+	SuppressionsRules []SuppressionRule       `json:"suppression_rules"`
+	AlertChannels     map[string]AlertChannel `json:"alert_channels"`
 }
 
 // EscalationPolicy defines alert escalation behavior
 type EscalationPolicy struct {
-	Levels          []EscalationLevel `json:"levels"`
-	DefaultTimeout  time.Duration     `json:"default_timeout"`
-	MaxEscalations  int               `json:"max_escalations"`
-	AutoResolve     bool              `json:"auto_resolve"`
-	ResolveTimeout  time.Duration     `json:"resolve_timeout"`
+	Levels         []EscalationLevel `json:"levels"`
+	DefaultTimeout time.Duration     `json:"default_timeout"`
+	MaxEscalations int               `json:"max_escalations"`
+	AutoResolve    bool              `json:"auto_resolve"`
+	ResolveTimeout time.Duration     `json:"resolve_timeout"`
 }
 
 // EscalationLevel represents escalation tier
 type EscalationLevel struct {
-	Level       int           `json:"level"`
-	Recipients  []string      `json:"recipients"`
-	Channels    []string      `json:"channels"`
-	Timeout     time.Duration `json:"timeout"`
-	Actions     []string      `json:"actions"`
+	Level      int           `json:"level"`
+	Recipients []string      `json:"recipients"`
+	Channels   []string      `json:"channels"`
+	Timeout    time.Duration `json:"timeout"`
+	Actions    []string      `json:"actions"`
 }
 
 // SuppressionRule defines when to suppress alerts
 type SuppressionRule struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Pattern     string            `json:"pattern"`
-	Conditions  map[string]string `json:"conditions"`
-	Duration    time.Duration     `json:"duration"`
-	Enabled     bool              `json:"enabled"`
+	ID         string            `json:"id"`
+	Name       string            `json:"name"`
+	Pattern    string            `json:"pattern"`
+	Conditions map[string]string `json:"conditions"`
+	Duration   time.Duration     `json:"duration"`
+	Enabled    bool              `json:"enabled"`
 }
 
 // AlertChannel defines alert delivery channel
 type AlertChannel struct {
-	Type        string            `json:"type"`
-	Endpoint    string            `json:"endpoint"`
-	APIKey      string            `json:"api_key"`
-	Template    string            `json:"template"`
-	Enabled     bool              `json:"enabled"`
-	Metadata    map[string]string `json:"metadata"`
+	Type     string            `json:"type"`
+	Endpoint string            `json:"endpoint"`
+	APIKey   string            `json:"api_key"`
+	Template string            `json:"template"`
+	Enabled  bool              `json:"enabled"`
+	Metadata map[string]string `json:"metadata"`
 }
 
 // IncidentConfig defines incident management settings
 type IncidentConfig struct {
-	EnableAutoIncidents   bool                    `json:"enable_auto_incidents"`
-	IncidentThresholds    map[string]int          `json:"incident_thresholds"`
-	AutoAssignmentRules   []AssignmentRule        `json:"auto_assignment_rules"`
-	SLATargets           map[string]time.Duration `json:"sla_targets"`
-	IntegrationConfig    IntegrationConfig       `json:"integrations"`
+	EnableAutoIncidents bool                     `json:"enable_auto_incidents"`
+	IncidentThresholds  map[string]int           `json:"incident_thresholds"`
+	AutoAssignmentRules []AssignmentRule         `json:"auto_assignment_rules"`
+	SLATargets          map[string]time.Duration `json:"sla_targets"`
+	IntegrationConfig   IntegrationConfig        `json:"integrations"`
 }
 
 // AssignmentRule defines automatic incident assignment
 type AssignmentRule struct {
-	ID         string            `json:"id"`
-	Condition  map[string]string `json:"condition"`
-	Assignee   string            `json:"assignee"`
-	Team       string            `json:"team"`
-	Priority   IncidentPriority  `json:"priority"`
-	Enabled    bool              `json:"enabled"`
+	ID        string            `json:"id"`
+	Condition map[string]string `json:"condition"`
+	Assignee  string            `json:"assignee"`
+	Team      string            `json:"team"`
+	Priority  IncidentPriority  `json:"priority"`
+	Enabled   bool              `json:"enabled"`
 }
 
-// IntegrationConfig defines external integrations
+// MonitoringMonitoringIntegrationConfig defines external integrations
 type IntegrationConfig struct {
-	JiraEnabled       bool   `json:"jira_enabled"`
+	JiraEnabled      bool   `json:"jira_enabled"`
 	JiraURL          string `json:"jira_url"`
 	JiraToken        string `json:"jira_token"`
 	SlackEnabled     bool   `json:"slack_enabled"`
@@ -153,14 +156,14 @@ type IntegrationConfig struct {
 
 // ComplianceMonitorConfig defines compliance monitoring
 type ComplianceMonitorConfig struct {
-	EnableSOC2Monitoring    bool          `json:"enable_soc2"`
-	EnableISO27001Monitor   bool          `json:"enable_iso27001"`
-	EnableGDPRMonitoring    bool          `json:"enable_gdpr"`
-	EnableHIPAAMonitoring   bool          `json:"enable_hipaa"`
-	EnablePCIDSSMonitoring  bool          `json:"enable_pci_dss"`
-	ReportingFrequency      time.Duration `json:"reporting_frequency"`
-	AutoRemediation         bool          `json:"auto_remediation"`
-	ComplianceChecks        []ComplianceCheck `json:"compliance_checks"`
+	EnableSOC2Monitoring   bool              `json:"enable_soc2"`
+	EnableISO27001Monitor  bool              `json:"enable_iso27001"`
+	EnableGDPRMonitoring   bool              `json:"enable_gdpr"`
+	EnableHIPAAMonitoring  bool              `json:"enable_hipaa"`
+	EnablePCIDSSMonitoring bool              `json:"enable_pci_dss"`
+	ReportingFrequency     time.Duration     `json:"reporting_frequency"`
+	AutoRemediation        bool              `json:"auto_remediation"`
+	ComplianceChecks       []ComplianceCheck `json:"compliance_checks"`
 }
 
 // ComplianceCheck represents compliance validation
@@ -179,20 +182,20 @@ type ComplianceCheck struct {
 
 // MetricsConfig defines security metrics collection
 type MetricsConfig struct {
-	EnablePrometheus     bool          `json:"enable_prometheus"`
-	EnableCustomMetrics  bool          `json:"enable_custom_metrics"`
-	MetricRetention      time.Duration `json:"metric_retention"`
-	CollectionInterval   time.Duration `json:"collection_interval"`
-	AggregationPeriods   []time.Duration `json:"aggregation_periods"`
+	EnablePrometheus    bool            `json:"enable_prometheus"`
+	EnableCustomMetrics bool            `json:"enable_custom_metrics"`
+	MetricRetention     time.Duration   `json:"metric_retention"`
+	CollectionInterval  time.Duration   `json:"collection_interval"`
+	AggregationPeriods  []time.Duration `json:"aggregation_periods"`
 }
 
-// SecurityEvent represents a security event
+// MonitoringMonitoringSecurityEvent represents a security event
 type SecurityEvent struct {
 	ID          string                 `json:"id"`
 	Type        SecurityEventType      `json:"type"`
 	Timestamp   time.Time              `json:"timestamp"`
 	Source      string                 `json:"source"`
-	Severity    ThreatLevel           `json:"severity"`
+	Severity    ThreatLevel            `json:"severity"`
 	UserID      string                 `json:"user_id"`
 	IP          string                 `json:"ip"`
 	UserAgent   string                 `json:"user_agent"`
@@ -201,26 +204,26 @@ type SecurityEvent struct {
 	StatusCode  int                    `json:"status_code"`
 	Message     string                 `json:"message"`
 	Details     map[string]interface{} `json:"details"`
-	Location    *GeoLocation          `json:"location,omitempty"`
-	ThreatIntel *ThreatIntelData      `json:"threat_intel,omitempty"`
-	RiskScore   float64               `json:"risk_score"`
-	Remediated  bool                  `json:"remediated"`
+	Location    *GeoLocation           `json:"location,omitempty"`
+	ThreatIntel *ThreatIntelData       `json:"threat_intel,omitempty"`
+	RiskScore   float64                `json:"risk_score"`
+	Remediated  bool                   `json:"remediated"`
 }
 
-// SecurityEventType represents type of security event
+// MonitoringMonitoringMonitoringSecurityEventType represents type of security event
 type SecurityEventType string
 
 const (
-	EventAuthFailure        SecurityEventType = "auth_failure"
-	EventBruteForceAttempt  SecurityEventType = "brute_force_attempt"
-	EventRateLimitExceeded  SecurityEventType = "rate_limit_exceeded"
-	EventSuspiciousActivity SecurityEventType = "suspicious_activity"
-	EventUnauthorizedAccess SecurityEventType = "unauthorized_access"
-	EventDataBreach         SecurityEventType = "data_breach"
-	EventMalwareDetected    SecurityEventType = "malware_detected"
+	EventAuthFailure         SecurityEventType = "auth_failure"
+	EventBruteForceAttempt   SecurityEventType = "brute_force_attempt"
+	EventRateLimitExceeded   SecurityEventType = "rate_limit_exceeded"
+	EventSuspiciousActivity  SecurityEventType = "suspicious_activity"
+	EventUnauthorizedAccess  SecurityEventType = "unauthorized_access"
+	EventDataBreach          SecurityEventType = "data_breach"
+	EventMalwareDetected     SecurityEventType = "malware_detected"
 	EventComplianceViolation SecurityEventType = "compliance_violation"
-	EventVulnerabilityFound SecurityEventType = "vulnerability_found"
-	EventIncidentCreated    SecurityEventType = "incident_created"
+	EventVulnerabilityFound  SecurityEventType = "vulnerability_found"
+	EventIncidentCreated     SecurityEventType = "incident_created"
 )
 
 // ThreatLevel represents severity levels
@@ -268,18 +271,18 @@ type GeoLocation struct {
 
 // ThreatIntelData represents threat intelligence information
 type ThreatIntelData struct {
-	IsMalicious    bool              `json:"is_malicious"`
-	ThreatType     string            `json:"threat_type"`
-	Confidence     float64           `json:"confidence"`
-	Source         string            `json:"source"`
-	LastSeen       time.Time         `json:"last_seen"`
-	Categories     []string          `json:"categories"`
-	Indicators     map[string]string `json:"indicators"`
+	IsMalicious bool              `json:"is_malicious"`
+	ThreatType  string            `json:"threat_type"`
+	Confidence  float64           `json:"confidence"`
+	Source      string            `json:"source"`
+	LastSeen    time.Time         `json:"last_seen"`
+	Categories  []string          `json:"categories"`
+	Indicators  map[string]string `json:"indicators"`
 }
 
 // Prometheus metrics
 var (
-	securityEventsTotal = promauto.NewCounterVec(
+	monitoringSecurityEventsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "novacron_security_events_total",
 			Help: "Total number of security events",
@@ -318,10 +321,46 @@ var (
 		},
 		[]string{"type"},
 	)
+
+	// Backpressure metrics
+	securityEventsDroppedTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "novacron_security_events_dropped_total",
+			Help: "Total number of security events dropped due to backpressure",
+		},
+	)
+
+	eventQueueSize = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "novacron_security_event_queue_size",
+			Help: "Current size of the security event queue",
+		},
+	)
+
+	eventQueueCapacity = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "novacron_security_event_queue_capacity",
+			Help: "Maximum capacity of the security event queue",
+		},
+	)
+
+	spilloverQueueSize = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "novacron_security_spillover_queue_size",
+			Help: "Current size of the spillover queue",
+		},
+	)
+
+	backpressureActive = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "novacron_security_backpressure_active",
+			Help: "Whether backpressure is currently active (1 = active, 0 = inactive)",
+		},
+	)
 )
 
 // NewSecurityMonitor creates a new security monitor instance
-func NewSecurityMonitor(config SecurityMonitorConfig, auditLogger AuditLogger) (*SecurityMonitor, error) {
+func NewSecurityMonitor(config SecurityMonitorConfig, auditLogger audit.AuditLogger) (*SecurityMonitor, error) {
 	sm := &SecurityMonitor{
 		config:      config,
 		auditLogger: auditLogger,
@@ -365,7 +404,7 @@ func NewSecurityMonitor(config SecurityMonitorConfig, auditLogger AuditLogger) (
 	return sm, nil
 }
 
-// ProcessSecurityEvent processes a security event
+// ProcessMonitoringSecurityEvent processes a security event
 func (sm *SecurityMonitor) ProcessSecurityEvent(event SecurityEvent) error {
 	// Add timestamp if not set
 	if event.Timestamp.IsZero() {
@@ -385,21 +424,53 @@ func (sm *SecurityMonitor) ProcessSecurityEvent(event SecurityEvent) error {
 	// Calculate risk score
 	event.RiskScore = sm.calculateRiskScore(event)
 
-	// Queue event for processing
+	// Queue event for processing with backpressure handling
 	select {
 	case sm.eventQueue <- event:
 		// Event queued successfully
+		eventQueueSize.Set(float64(len(sm.eventQueue)))
 	default:
-		// Queue is full, log warning
-		sm.auditLogger.LogEvent(AuditEvent{
-			EventType: "security_event_queue_full",
-			Details:   "Security event queue is full, dropping events",
-		})
-		return fmt.Errorf("security event queue is full")
+		// Queue is full, try spillover queue
+		if sm.spilloverQueue != nil {
+			if err := sm.spilloverQueue.Enqueue(event); err != nil {
+				// Spillover also full, increment dropped metric
+				securityEventsDroppedTotal.Inc()
+
+				// Log event drop with context
+				sm.auditLogger.LogEvent(context.Background(), &audit.AuditEvent{
+					Action:   audit.ActionUpdate,
+					Resource: "event_queue",
+					Result:   audit.ResultFailure,
+					Details: map[string]interface{}{
+						"event_id":       event.ID,
+						"reason":         "queue_full",
+						"queue_size":     len(sm.eventQueue),
+						"spillover_size": sm.spilloverQueue.Size(),
+					},
+				})
+
+				// Activate backpressure
+				backpressureActive.Set(1)
+
+				// Apply sampling if configured
+				if sm.backpressureManager != nil {
+					if sm.backpressureManager.ShouldDrop() {
+						return fmt.Errorf("event dropped due to backpressure")
+					}
+				}
+
+				return fmt.Errorf("security event queue and spillover are full")
+			}
+			spilloverQueueSize.Set(float64(sm.spilloverQueue.Size()))
+		} else {
+			// No spillover configured, drop event
+			securityEventsDroppedTotal.Inc()
+			return fmt.Errorf("security event queue is full, no spillover configured")
+		}
 	}
 
 	// Update metrics
-	securityEventsTotal.WithLabelValues(
+	monitoringSecurityEventsTotal.WithLabelValues(
 		string(event.Type),
 		string(event.Severity),
 		event.Source,
@@ -416,9 +487,11 @@ func (sm *SecurityMonitor) eventProcessor() {
 		// Process with threat detector
 		threatResult, err := sm.threatDetector.AnalyzeEvent(event)
 		if err != nil {
-			sm.auditLogger.LogEvent(AuditEvent{
-				EventType: "threat_analysis_error",
-				Details:   fmt.Sprintf("Failed to analyze event %s: %v", event.ID, err),
+			sm.auditLogger.LogEvent(context.Background(), &audit.AuditEvent{
+				Action:   audit.ActionRead,
+				Resource: "threat_analysis",
+				Result:   audit.ResultFailure,
+				Details:  map[string]interface{}{"description": fmt.Sprintf("Failed to analyze event %s: %v", event.ID, err)},
 			})
 		}
 
@@ -426,9 +499,11 @@ func (sm *SecurityMonitor) eventProcessor() {
 		if sm.shouldTriggerAlert(event, threatResult) {
 			alert := sm.createAlert(event, threatResult)
 			if err := sm.alertManager.TriggerAlert(alert); err != nil {
-				sm.auditLogger.LogEvent(AuditEvent{
-					EventType: "alert_trigger_error",
-					Details:   fmt.Sprintf("Failed to trigger alert for event %s: %v", event.ID, err),
+				sm.auditLogger.LogEvent(context.Background(), &audit.AuditEvent{
+					Action:   audit.ActionCreate,
+					Resource: "security_alert",
+					Result:   audit.ResultFailure,
+					Details:  map[string]interface{}{"description": fmt.Sprintf("Failed to trigger alert for event %s: %v", event.ID, err)},
 				})
 			}
 		}
@@ -437,9 +512,11 @@ func (sm *SecurityMonitor) eventProcessor() {
 		if sm.shouldCreateIncident(event, threatResult) {
 			incident := sm.createIncident(event, threatResult)
 			if err := sm.incidentManager.CreateIncident(incident); err != nil {
-				sm.auditLogger.LogEvent(AuditEvent{
-					EventType: "incident_creation_error",
-					Details:   fmt.Sprintf("Failed to create incident for event %s: %v", event.ID, err),
+				sm.auditLogger.LogEvent(context.Background(), &audit.AuditEvent{
+					Action:   audit.ActionCreate,
+					Resource: "security_incident",
+					Result:   audit.ResultFailure,
+					Details:  map[string]interface{}{"description": fmt.Sprintf("Failed to create incident for event %s: %v", event.ID, err)},
 				})
 			}
 		}
@@ -451,9 +528,11 @@ func (sm *SecurityMonitor) eventProcessor() {
 		threatDetectionLatency.WithLabelValues(string(event.Type)).Observe(time.Since(start).Seconds())
 
 		// Audit log
-		sm.auditLogger.LogEvent(AuditEvent{
-			EventType: "security_event_processed",
-			Details:   fmt.Sprintf("Processed security event %s of type %s", event.ID, event.Type),
+		sm.auditLogger.LogEvent(context.Background(), &audit.AuditEvent{
+			Action:   audit.ActionRead,
+			Resource: "security_event",
+			Result:   audit.ResultSuccess,
+			Details:  map[string]interface{}{"description": fmt.Sprintf("Processed security event %s of type %s", event.ID, event.Type)},
 		})
 	}
 }
@@ -503,7 +582,7 @@ func (sm *SecurityMonitor) enrichEventWithThreatIntel(event *SecurityEvent) {
 	// Check threat intelligence for IP
 	if threatIntel := sm.threatDetector.GetThreatIntel(event.IP); threatIntel != nil {
 		event.ThreatIntel = threatIntel
-		
+
 		// Increase risk score if IP is malicious
 		if threatIntel.IsMalicious {
 			event.RiskScore += 0.3
@@ -513,7 +592,7 @@ func (sm *SecurityMonitor) enrichEventWithThreatIntel(event *SecurityEvent) {
 	// Get geolocation data
 	if location := sm.threatDetector.GetGeoLocation(event.IP); location != nil {
 		event.Location = location
-		
+
 		// Check if country is allowed
 		if !sm.isCountryAllowed(location.CountryCode) {
 			event.RiskScore += 0.2
@@ -665,7 +744,7 @@ func (sm *SecurityMonitor) createIncident(event SecurityEvent, threatResult *Thr
 
 // isCountryAllowed checks if country is in allowed list
 func (sm *SecurityMonitor) isCountryAllowed(countryCode string) bool {
-	if len(sm.config.ThreatDetectionConfig.AllowedCountries) == 0 {
+	if len(sm.config.MonitoringThreatDetectionConfig.AllowedCountries) == 0 {
 		return true // No restrictions
 	}
 
@@ -713,7 +792,7 @@ func (sm *SecurityMonitor) runComplianceChecks() {
 
 		go func(check ComplianceCheck) {
 			if violation := sm.executeComplianceCheck(check); violation != nil {
-				event := SecurityEvent{
+				event := SecurityEvent {
 					Type:      EventComplianceViolation,
 					Timestamp: time.Now(),
 					Source:    "compliance_monitor",
@@ -728,7 +807,7 @@ func (sm *SecurityMonitor) runComplianceChecks() {
 				}
 
 				sm.ProcessSecurityEvent(event)
-				
+
 				// Update compliance metrics
 				complianceViolationsTotal.WithLabelValues(
 					check.Framework,
@@ -770,9 +849,11 @@ func (sm *SecurityMonitor) updateThreatIntelFeeds() {
 			}
 
 			// Update threat intel feed - implementation would fetch from external API
-			sm.auditLogger.LogEvent(AuditEvent{
-				EventType: "threat_intel_updated",
-				Details:   fmt.Sprintf("Updated threat intelligence feed: %s", feed.Name),
+			sm.auditLogger.LogEvent(context.Background(), &audit.AuditEvent{
+				Action:   audit.ActionUpdate,
+				Resource: "threat_intelligence",
+				Result:   audit.ResultSuccess,
+				Details:  map[string]interface{}{"description": fmt.Sprintf("Updated threat intelligence feed: %s", feed.Name)},
 			})
 		}(feed)
 	}
@@ -786,10 +867,10 @@ func (sm *SecurityMonitor) GetSecurityMetrics() map[string]interface{} {
 // GetHealthStatus returns monitoring system health
 func (sm *SecurityMonitor) GetHealthStatus() map[string]interface{} {
 	return map[string]interface{}{
-		"event_queue_length":    len(sm.eventQueue),
-		"active_subscribers":    len(sm.subscribers),
-		"threat_detector_health": sm.threatDetector.GetHealthStatus(),
-		"alert_manager_health":   sm.alertManager.GetHealthStatus(),
+		"event_queue_length":      len(sm.eventQueue),
+		"active_subscribers":      len(sm.subscribers),
+		"threat_detector_health":  sm.threatDetector.GetHealthStatus(),
+		"alert_manager_health":    sm.alertManager.GetHealthStatus(),
 		"incident_manager_health": sm.incidentManager.GetHealthStatus(),
 	}
 }
@@ -954,10 +1035,10 @@ type ComplianceViolation struct {
 }
 
 type ThreatAnalysisResult struct {
-	IsThreat    bool
-	ThreatType  string
-	Confidence  float64
-	Indicators  []string
+	IsThreat   bool
+	ThreatType string
+	Confidence float64
+	Indicators []string
 }
 
 // Enum types (would typically be defined elsewhere)
@@ -969,14 +1050,14 @@ type IncidentStatus string
 
 const (
 	AlertTypeAuthFailure        AlertType = "auth_failure"
-	AlertTypeBruteForce        AlertType = "brute_force"
-	AlertTypeRateLimit         AlertType = "rate_limit"
+	AlertTypeBruteForce         AlertType = "brute_force"
+	AlertTypeRateLimit          AlertType = "rate_limit"
 	AlertTypeSuspiciousActivity AlertType = "suspicious_activity"
 	AlertTypeUnauthorizedAccess AlertType = "unauthorized_access"
-	AlertTypeDataBreach        AlertType = "data_breach"
-	AlertTypeMalware           AlertType = "malware"
-	AlertTypeCompliance        AlertType = "compliance"
-	AlertTypeGeneral           AlertType = "general"
+	AlertTypeDataBreach         AlertType = "data_breach"
+	AlertTypeMalware            AlertType = "malware"
+	AlertTypeCompliance         AlertType = "compliance"
+	AlertTypeGeneral            AlertType = "general"
 
 	AlertSeverityCritical AlertSeverity = "critical"
 	AlertSeverityHigh     AlertSeverity = "high"
@@ -987,11 +1068,11 @@ const (
 	AlertStatusOpen     AlertStatus = "open"
 	AlertStatusResolved AlertStatus = "resolved"
 
-	IncidentTypeSecurity          IncidentType = "security"
-	IncidentTypeDataBreach        IncidentType = "data_breach"
-	IncidentTypeMalware           IncidentType = "malware"
+	IncidentTypeSecurity           IncidentType = "security"
+	IncidentTypeDataBreach         IncidentType = "data_breach"
+	IncidentTypeMalware            IncidentType = "malware"
 	IncidentTypeUnauthorizedAccess IncidentType = "unauthorized_access"
-	IncidentTypeCompliance        IncidentType = "compliance"
+	IncidentTypeCompliance         IncidentType = "compliance"
 
 	IncidentStatusOpen       IncidentStatus = "open"
 	IncidentStatusInProgress IncidentStatus = "in_progress"

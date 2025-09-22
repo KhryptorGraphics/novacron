@@ -79,7 +79,7 @@ type RestoreOperation struct {
 	BlocksTotal     int64               `json:"blocks_total"`
 	BlocksRestored  int64               `json:"blocks_restored"`
 	Error           string              `json:"error,omitempty"`
-	VerificationResult *VerificationResult `json:"verification_result,omitempty"`
+	VerificationResult *RestoreVerificationResult `json:"verification_result,omitempty"`
 	Metadata        map[string]string   `json:"metadata"`
 	ctx             context.Context     `json:"-"`
 	cancel          context.CancelFunc  `json:"-"`
@@ -129,8 +129,8 @@ type VerificationOptions struct {
 	QuickVerification bool `json:"quick_verification"`
 }
 
-// VerificationResult contains verification results
-type VerificationResult struct {
+// RestoreVerificationResult contains verification results for restore operations
+type RestoreVerificationResult struct {
 	Success           bool              `json:"success"`
 	ChecksumMatch     bool              `json:"checksum_match"`
 	SizeMatch         bool              `json:"size_match"`
@@ -398,7 +398,7 @@ func (rm *RestoreManager) RestoreFromPointInTime(vmID string, pointInTime time.T
 }
 
 // ValidateRestore validates a restored VM
-func (rm *RestoreManager) ValidateRestore(operationID string) (*VerificationResult, error) {
+func (rm *RestoreManager) ValidateRestore(operationID string) (*RestoreVerificationResult, error) {
 	operation, err := rm.GetRestoreOperation(operationID)
 	if err != nil {
 		return nil, err
@@ -415,7 +415,7 @@ func (rm *RestoreManager) ValidateRestore(operationID string) (*VerificationResu
 	}
 	
 	// Verify restored file
-	result := &VerificationResult{
+	result := &RestoreVerificationResult{
 		VerifiedAt: time.Now(),
 		Details:    make(map[string]string),
 	}
@@ -523,7 +523,7 @@ type RecoveryTestResult struct {
 	StartedAt          time.Time            `json:"started_at"`
 	CompletedAt        time.Time            `json:"completed_at"`
 	Duration           time.Duration        `json:"duration"`
-	VerificationResult *VerificationResult  `json:"verification_result,omitempty"`
+	VerificationResult *RestoreVerificationResult  `json:"verification_result,omitempty"`
 	Error              string               `json:"error,omitempty"`
 	Details            map[string]string    `json:"details"`
 }
@@ -897,7 +897,7 @@ func (rm *RestoreManager) processVerification(job *VerificationJob) {
 	// Perform verification
 	result, err := rm.ValidateRestore(job.RestoreID)
 	if err != nil {
-		result = &VerificationResult{
+		result = &RestoreVerificationResult{
 			Success:    false,
 			Error:      err.Error(),
 			VerifiedAt: time.Now(),

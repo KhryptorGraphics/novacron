@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { apiClient } from "@/lib/api/client";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { 
@@ -40,128 +42,199 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// Mock security data
-const securityMetrics = {
-  threatLevel: "medium",
-  totalAlerts: 47,
-  activeThreats: 3,
-  blockedAttacks: 156,
-  securityScore: 85,
+// Security data types
+interface SecurityMetrics {
+  threatLevel: string;
+  totalAlerts: number;
+  activeThreats: number;
+  blockedAttacks: number;
+  securityScore: number;
   vulnerabilities: {
-    critical: 2,
-    high: 5,
-    medium: 12,
-    low: 8
-  }
-};
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+}
 
-const securityAlerts = [
-  {
-    id: 1,
-    type: "authentication",
-    severity: "high",
-    title: "Multiple Failed Login Attempts",
-    description: "User admin@company.com has 15 failed login attempts from IP 203.0.113.42",
-    timestamp: "2024-08-24T14:30:00Z",
-    status: "active",
-    source: "203.0.113.42",
-    user: "admin@company.com"
-  },
-  {
-    id: 2,
-    type: "access",
-    severity: "medium",
-    title: "Unusual API Access Pattern",
-    description: "High-frequency API requests detected from new location",
-    timestamp: "2024-08-24T13:45:00Z",
-    status: "investigating",
-    source: "198.51.100.15",
-    user: "api-client-001"
-  },
-  {
-    id: 3,
-    type: "system",
-    severity: "critical",
-    title: "Unauthorized Admin Access Attempt",
-    description: "Attempt to access admin endpoints without proper authorization",
-    timestamp: "2024-08-24T12:15:00Z",
-    status: "blocked",
-    source: "192.0.2.100",
-    user: "unknown"
-  },
-  {
-    id: 4,
-    type: "data",
-    severity: "low",
-    title: "Large Data Export",
-    description: "User exported unusually large dataset",
-    timestamp: "2024-08-24T11:20:00Z",
-    status: "resolved",
-    source: "10.0.0.45",
-    user: "data-analyst@company.com"
-  }
-];
+// Mock data arrays removed - now fetched from API
 
-const activeSessions = [
-  {
-    id: 1,
-    user: "admin@novacron.io",
-    ip: "192.168.1.100",
-    location: "San Francisco, CA",
-    device: "Chrome on Windows",
-    started: "2024-08-24T09:00:00Z",
-    lastActivity: "2024-08-24T14:25:00Z",
-    risk: "low"
-  },
-  {
-    id: 2,
-    user: "manager@company.com",
-    ip: "203.0.113.42",
-    location: "New York, NY",
-    device: "Safari on macOS",
-    started: "2024-08-24T10:30:00Z",
-    lastActivity: "2024-08-24T14:20:00Z",
-    risk: "medium"
-  },
-  {
-    id: 3,
-    user: "operator@startup.io",
-    ip: "198.51.100.75",
-    location: "London, UK",
-    device: "Firefox on Linux",
-    started: "2024-08-24T08:15:00Z",
-    lastActivity: "2024-08-24T14:10:00Z",
-    risk: "high"
-  }
-];
 
-const blockedIPs = [
-  {
-    ip: "192.0.2.100",
-    reason: "Brute force attack",
-    blockedAt: "2024-08-24T12:15:00Z",
-    attempts: 25,
-    status: "permanent"
-  },
-  {
-    ip: "203.0.113.99",
-    reason: "Suspicious activity",
-    blockedAt: "2024-08-24T11:45:00Z",
-    attempts: 8,
-    status: "temporary"
-  },
-  {
-    ip: "198.51.100.200",
-    reason: "Rate limit exceeded",
-    blockedAt: "2024-08-24T10:30:00Z",
-    attempts: 1000,
-    status: "temporary"
-  }
-];
 
 export function SecurityDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
   const [selectedAlert, setSelectedAlert] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [securityMetrics, setSecurityMetrics] = useState<SecurityMetrics>({
+    threatLevel: "low",
+    totalAlerts: 0,
+    activeThreats: 0,
+    blockedAttacks: 0,
+    securityScore: 100,
+    vulnerabilities: {
+      critical: 0,
+      high: 0,
+      medium: 0,
+      low: 0
+    }
+  });
+  const [securityAlerts, setSecurityAlerts] = useState<any[]>([]);
+  const [activeSessions, setActiveSessions] = useState<any[]>([]);
+  const [blockedIPs, setBlockedIPs] = useState<any[]>([]);
+
+  // WebSocket for real-time updates
+  const { data: wsData, isConnected } = useWebSocket('/api/security/events/stream');
+
+  // Fetch security data
+  const fetchSecurityData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Fetch all security data in parallel
+      const [threatsResponse, vulnsResponse, complianceResponse, incidentsResponse, auditStatsResponse] = await Promise.all([
+        apiClient.get('/api/security/threats'),
+        apiClient.get('/api/security/vulnerabilities'),
+        apiClient.get('/api/security/compliance'),
+        apiClient.get('/api/security/incidents'),
+        apiClient.get('/api/security/audit/statistics')
+      ]);
+
+      // Destructure the actual response shapes from backend
+      const { threats = [] } = threatsResponse.data || {};
+      const { vulnerabilities = [], summary: vulnsSummary = {} } = vulnsResponse.data || {};
+      const compliance = complianceResponse.data || {};
+      const { incidents = [] } = incidentsResponse.data || {};
+      const auditStats = auditStatsResponse.data || {};
+
+      // Update metrics using the correct response structure
+      setSecurityMetrics({
+        threatLevel: threats.length > 10 ? "high" : threats.length > 5 ? "medium" : "low",
+        totalAlerts: threats.length + incidents.length,
+        activeThreats: threats.filter((t: any) => t.status === 'active').length,
+        blockedAttacks: threats.filter((t: any) => t.status === 'blocked').length,
+        securityScore: compliance.score || auditStats.overallScore || 85,
+        vulnerabilities: {
+          critical: vulnsSummary.critical || vulnerabilities.filter((v: any) => v.severity === 'critical').length,
+          high: vulnsSummary.high || vulnerabilities.filter((v: any) => v.severity === 'high').length,
+          medium: vulnsSummary.medium || vulnerabilities.filter((v: any) => v.severity === 'medium').length,
+          low: vulnsSummary.low || vulnerabilities.filter((v: any) => v.severity === 'low').length
+        }
+      });
+
+      // Update alerts
+      setSecurityAlerts([...threats, ...incidents].slice(0, 10));
+
+      // Fetch session and IP data
+      const [eventsResponse] = await Promise.all([
+        apiClient.get('/api/security/events')
+      ]);
+
+      const { events = [] } = eventsResponse.data || {};
+
+      // Extract active sessions from events (assuming events contain session info)
+      const sessionEvents = events.filter((e: any) => e.type === 'session' || e.type === 'login');
+      setActiveSessions(sessionEvents.map((e: any) => ({
+        id: e.id,
+        user: e.user || e.actor || 'Unknown',
+        ip: e.source_ip || e.ip || 'Unknown',
+        location: e.location || 'Unknown',
+        device: e.user_agent || e.device || 'Unknown',
+        started: e.timestamp || new Date().toISOString(),
+        lastActivity: e.timestamp || new Date().toISOString(),
+        risk: e.risk_level || 'low'
+      })).slice(0, 10));
+
+      // Extract blocked IPs from threats/incidents
+      const blockedEvents = [...threats, ...incidents].filter((e: any) => e.status === 'blocked');
+      setBlockedIPs(blockedEvents.map((e: any) => ({
+        ip: e.source_ip || e.source || 'Unknown',
+        reason: e.description || e.title || 'Security violation',
+        blockedAt: e.timestamp || new Date().toISOString(),
+        attempts: e.attempt_count || 1,
+        status: e.block_type || 'temporary'
+      })).slice(0, 10));
+
+    } catch (err) {
+      console.error('Failed to fetch security data:', err);
+      setError('Failed to load security data');
+
+      // Set fallback empty data
+      setActiveSessions([]);
+      setBlockedIPs([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Initial fetch
+  useEffect(() => {
+    fetchSecurityData();
+  }, []);
+
+  // Handle WebSocket updates
+  useEffect(() => {
+    if (!wsData) return;
+
+    // The backend sends summary objects, not individual events with type field
+    // Check if it's a summary update
+    if (wsData.threats !== undefined || wsData.incidents !== undefined) {
+      // This is a summary update from StreamSecurityEvents
+      fetchSecurityData(); // Refresh all data
+    } else if (wsData.type) {
+      // Handle specific event types if backend is updated to send them
+      if (wsData.type === 'threat_detected') {
+        setSecurityMetrics(prev => ({
+          ...prev,
+          totalAlerts: prev.totalAlerts + 1,
+          activeThreats: prev.activeThreats + 1
+        }));
+
+        // Add to alerts
+        setSecurityAlerts(prev => [wsData, ...prev].slice(0, 10));
+      }
+
+      if (wsData.type === 'threat_resolved') {
+        setSecurityMetrics(prev => ({
+          ...prev,
+          activeThreats: Math.max(0, prev.activeThreats - 1),
+          blockedAttacks: prev.blockedAttacks + 1
+        }));
+      }
+
+      if (wsData.type === 'vulnerability_found') {
+        const severity = wsData.severity || 'medium';
+        setSecurityMetrics(prev => ({
+          ...prev,
+          vulnerabilities: {
+            ...prev.vulnerabilities,
+            [severity]: (prev.vulnerabilities[severity as keyof typeof prev.vulnerabilities] || 0) + 1
+          }
+        }));
+      }
+    }
+  }, [wsData]);
+
+  // Export audit data
+  const exportAuditData = async () => {
+    try {
+      const response = await apiClient.get('/api/security/audit/export', {
+        responseType: 'blob'
+      });
+
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `audit-export-${new Date().toISOString()}.json`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      console.error('Failed to export audit data:', err);
+    }
+  };
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {

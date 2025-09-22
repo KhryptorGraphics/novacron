@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
+import {
   Shield, Lock, Key, AlertTriangle, CheckCircle, XCircle,
   Eye, EyeOff, RefreshCw, Download, Upload, Filter,
-  ShieldCheck, ShieldAlert, UserCheck, FileText, 
+  ShieldCheck, ShieldAlert, UserCheck, FileText,
   Activity, TrendingUp, Clock, Settings, Search,
-  AlertCircle, CheckCircle2, Info, Ban, Zap
+  AlertCircle, CheckCircle2, Info, Ban, Zap, Plus
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -24,79 +24,12 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/components/ui/use-toast';
 import { PieChart, Pie, Cell, BarChart, Bar, LineChart, Line, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart } from 'recharts';
+import { useSecurityEvents, useCompliance, useVulnerabilityScans, useSecurityMetrics } from '@/hooks/useSecurity';
+import RBACGuard from '@/components/auth/RBACGuard';
+import PermissionGate from '@/components/auth/PermissionGate';
 
-interface SecurityEvent {
-  id: string;
-  timestamp: Date;
-  type: 'auth' | 'access' | 'modification' | 'anomaly' | 'threat';
-  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
-  source: string;
-  user?: string;
-  resource?: string;
-  action: string;
-  result: 'success' | 'failure' | 'blocked';
-  details: string;
-  ip?: string;
-  location?: string;
-}
-
-interface ComplianceRequirement {
-  id: string;
-  category: string;
-  name: string;
-  description: string;
-  status: 'compliant' | 'non-compliant' | 'partial' | 'pending';
-  severity: 'critical' | 'high' | 'medium' | 'low';
-  lastChecked: Date;
-  evidence?: string[];
-  remediationSteps?: string[];
-}
-
-interface VulnerabilityScan {
-  id: string;
-  target: string;
-  type: 'network' | 'application' | 'container' | 'infrastructure';
-  status: 'running' | 'completed' | 'failed' | 'scheduled';
-  startTime: Date;
-  endTime?: Date;
-  vulnerabilities: {
-    critical: number;
-    high: number;
-    medium: number;
-    low: number;
-    info: number;
-  };
-  findings?: VulnerabilityFinding[];
-}
-
-interface VulnerabilityFinding {
-  id: string;
-  cve?: string;
-  title: string;
-  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
-  component: string;
-  description: string;
-  remediation: string;
-  exploitable: boolean;
-}
-
-interface AccessControl {
-  id: string;
-  resource: string;
-  policy: string;
-  type: 'rbac' | 'abac' | 'dac' | 'mac';
-  rules: AccessRule[];
-  enforced: boolean;
-  lastModified: Date;
-}
-
-interface AccessRule {
-  id: string;
-  subject: string;
-  action: string;
-  effect: 'allow' | 'deny';
-  conditions?: Record<string, any>;
-}
+// Import types from the API service
+import type { SecurityEvent, ComplianceRequirement, VulnerabilityScan, VulnerabilityFinding, AccessControl, AccessRule } from '@/lib/api/security';
 
 const SecurityComplianceDashboard: React.FC = () => {
   const { toast } = useToast();
@@ -106,164 +39,127 @@ const SecurityComplianceDashboard: React.FC = () => {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshInterval, setRefreshInterval] = useState(30);
 
-  // Mock data - would come from API
-  const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([
-    {
-      id: '1',
-      timestamp: new Date(),
-      type: 'auth',
-      severity: 'medium',
-      source: 'auth-service',
-      user: 'admin@example.com',
-      action: 'login',
-      result: 'success',
-      details: 'Successful login from new location',
-      ip: '192.168.1.100',
-      location: 'New York, US'
-    },
-    {
-      id: '2',
-      timestamp: new Date(Date.now() - 3600000),
-      type: 'threat',
-      severity: 'high',
-      source: 'firewall',
-      action: 'block_intrusion',
-      result: 'blocked',
-      details: 'Blocked potential SQL injection attempt',
-      ip: '203.0.113.42'
-    },
-    {
-      id: '3',
-      timestamp: new Date(Date.now() - 7200000),
-      type: 'access',
-      severity: 'low',
-      source: 'api-gateway',
-      user: 'service-account-1',
-      resource: '/api/vms',
-      action: 'read',
-      result: 'success',
-      details: 'API access for VM list'
-    }
-  ]);
+  // Use real API hooks instead of mock data
+  const {
+    events: securityEvents,
+    loading: eventsLoading,
+    error: eventsError,
+    acknowledgeEvent
+  } = useSecurityEvents(autoRefresh, refreshInterval * 1000);
 
-  const [complianceRequirements, setComplianceRequirements] = useState<ComplianceRequirement[]>([
-    {
-      id: '1',
-      category: 'Data Protection',
-      name: 'Encryption at Rest',
-      description: 'All sensitive data must be encrypted at rest using AES-256',
-      status: 'compliant',
-      severity: 'critical',
-      lastChecked: new Date(),
-      evidence: ['encryption-audit.pdf', 'key-management-policy.pdf']
-    },
-    {
-      id: '2',
-      category: 'Access Control',
-      name: 'Multi-Factor Authentication',
-      description: 'MFA must be enabled for all administrative accounts',
-      status: 'partial',
-      severity: 'high',
-      lastChecked: new Date(Date.now() - 86400000),
-      remediationSteps: ['Enable MFA for remaining 3 admin accounts', 'Update authentication policy']
-    },
-    {
-      id: '3',
-      category: 'Audit Logging',
-      name: 'Security Event Logging',
-      description: 'All security events must be logged and retained for 90 days',
-      status: 'compliant',
-      severity: 'high',
-      lastChecked: new Date()
-    }
-  ]);
+  const {
+    requirements: complianceRequirements,
+    categoryBreakdown: complianceByCategory,
+    loading: complianceLoading,
+    triggerComplianceCheck
+  } = useCompliance();
 
-  const [vulnerabilityScans, setVulnerabilityScans] = useState<VulnerabilityScan[]>([
-    {
-      id: '1',
-      target: 'production-cluster',
-      type: 'infrastructure',
-      status: 'completed',
-      startTime: new Date(Date.now() - 7200000),
-      endTime: new Date(Date.now() - 3600000),
-      vulnerabilities: { critical: 0, high: 2, medium: 5, low: 12, info: 23 },
-      findings: [
-        {
-          id: '1',
-          cve: 'CVE-2024-1234',
-          title: 'Outdated SSL/TLS Configuration',
-          severity: 'high',
-          component: 'nginx:1.18',
-          description: 'The SSL/TLS configuration uses outdated cipher suites',
-          remediation: 'Update nginx configuration to use modern cipher suites',
-          exploitable: true
-        }
-      ]
-    }
-  ]);
+  const {
+    scans: vulnerabilityScans,
+    loading: scansLoading,
+    startScan
+  } = useVulnerabilityScans();
 
-  const [accessControls, setAccessControls] = useState<AccessControl[]>([
+  const {
+    metrics,
+    threatTrends,
+    loading: metricsLoading
+  } = useSecurityMetrics(autoRefresh, 60000);
+
+  // Mock access controls data until backend API is ready
+  const accessControls = [
     {
       id: '1',
-      resource: 'VM Management API',
-      policy: 'vm-admin-policy',
-      type: 'rbac',
+      resource: 'vm-management',
+      policy: 'vm-access-policy',
+      type: 'rbac' as const,
       rules: [
-        { id: '1', subject: 'admin-role', action: '*', effect: 'allow' },
-        { id: '2', subject: 'operator-role', action: 'read', effect: 'allow' },
-        { id: '3', subject: 'operator-role', action: 'update', effect: 'allow', conditions: { vmState: 'running' } }
+        { id: '1', subject: 'admin', action: 'vm:*', effect: 'allow' as const },
+        { id: '2', subject: 'operator', action: 'vm:read,vm:start,vm:stop', effect: 'allow' as const },
+        { id: '3', subject: 'viewer', action: 'vm:read', effect: 'allow' as const }
       ],
       enforced: true,
-      lastModified: new Date()
+      lastModified: new Date().toISOString()
+    },
+    {
+      id: '2',
+      resource: 'security-dashboard',
+      policy: 'security-access-policy',
+      type: 'rbac' as const,
+      rules: [
+        { id: '1', subject: 'security-admin', action: 'security:*', effect: 'allow' as const },
+        { id: '2', subject: 'auditor', action: 'security:read,audit:read', effect: 'allow' as const }
+      ],
+      enforced: true,
+      lastModified: new Date(Date.now() - 3600000).toISOString()
     }
-  ]);
-
-  // Metrics data for charts
-  const securityScore = 87;
-  const complianceScore = 92;
-
-  const threatTrends = [
-    { time: '00:00', threats: 12, blocked: 12 },
-    { time: '04:00', threats: 8, blocked: 8 },
-    { time: '08:00', threats: 15, blocked: 14 },
-    { time: '12:00', threats: 22, blocked: 21 },
-    { time: '16:00', threats: 18, blocked: 18 },
-    { time: '20:00', threats: 14, blocked: 14 },
-    { time: '24:00', threats: 10, blocked: 10 }
   ];
 
-  const complianceByCategory = [
-    { category: 'Data Protection', compliant: 8, total: 10 },
-    { category: 'Access Control', compliant: 6, total: 8 },
-    { category: 'Network Security', compliant: 9, total: 10 },
-    { category: 'Audit & Logging', compliant: 7, total: 7 },
-    { category: 'Incident Response', compliant: 4, total: 5 }
-  ];
+  // Transform API data for charts
+  const getChartData = () => {
+    if (!metrics || !threatTrends) return {
+      securityScore: 87,
+      complianceScore: 92,
+      vulnerabilityDistribution: [
+        { name: 'Critical', value: 0, color: '#dc2626' },
+        { name: 'High', value: 2, color: '#ea580c' },
+        { name: 'Medium', value: 5, color: '#ca8a04' },
+        { name: 'Low', value: 12, color: '#65a30d' },
+        { name: 'Info', value: 23, color: '#0891b2' }
+      ],
+      threatTrends: [
+        { time: '00:00', threats: 12, blocked: 12 },
+        { time: '04:00', threats: 8, blocked: 8 }
+      ]
+    };
 
-  const vulnerabilityDistribution = [
-    { name: 'Critical', value: 0, color: '#dc2626' },
-    { name: 'High', value: 2, color: '#ea580c' },
-    { name: 'Medium', value: 5, color: '#ca8a04' },
-    { name: 'Low', value: 12, color: '#65a30d' },
-    { name: 'Info', value: 23, color: '#0891b2' }
-  ];
+    return {
+      securityScore: metrics.securityScore,
+      complianceScore: metrics.complianceScore,
+      vulnerabilityDistribution: [
+        { name: 'Critical', value: metrics.vulnerabilityCount.critical, color: '#dc2626' },
+        { name: 'High', value: metrics.vulnerabilityCount.high, color: '#ea580c' },
+        { name: 'Medium', value: metrics.vulnerabilityCount.medium, color: '#ca8a04' },
+        { name: 'Low', value: metrics.vulnerabilityCount.low, color: '#65a30d' },
+        { name: 'Info', value: metrics.vulnerabilityCount.info, color: '#0891b2' }
+      ],
+      threatTrends: threatTrends.map(trend => ({
+        time: new Date(trend.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+        threats: trend.threats,
+        blocked: trend.blocked
+      }))
+    };
+  };
 
+  const chartData = getChartData();
+
+  // Security posture data
   const securityPosture = [
-    { metric: 'Authentication', score: 95, fullMark: 100 },
-    { metric: 'Authorization', score: 88, fullMark: 100 },
-    { metric: 'Encryption', score: 92, fullMark: 100 },
+    { metric: 'Authentication', score: chartData.securityScore, fullMark: 100 },
+    { metric: 'Authorization', score: chartData.securityScore - 5, fullMark: 100 },
+    { metric: 'Encryption', score: chartData.complianceScore, fullMark: 100 },
     { metric: 'Monitoring', score: 85, fullMark: 100 },
     { metric: 'Incident Response', score: 78, fullMark: 100 },
-    { metric: 'Compliance', score: 92, fullMark: 100 }
+    { metric: 'Compliance', score: chartData.complianceScore, fullMark: 100 }
   ];
 
+  // Format date helper
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleString();
+  };
+
   // Functions
-  const handleRunScan = useCallback(async (type: string) => {
-    toast({
-      title: 'Vulnerability Scan Started',
-      description: `Running ${type} vulnerability scan...`,
-    });
-  }, [toast]);
+  const handleRunScan = useCallback(async (type: string, target: string = 'production-cluster') => {
+    try {
+      await startScan(target, type);
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: `Failed to start ${type} vulnerability scan`,
+        variant: 'destructive',
+      });
+    }
+  }, [startScan, toast]);
 
   const handleExportReport = useCallback(async (type: string) => {
     toast({
@@ -323,8 +219,21 @@ const SecurityComplianceDashboard: React.FC = () => {
     return () => clearInterval(interval);
   }, [autoRefresh, refreshInterval]);
 
+  // Loading state
+  if (eventsLoading || complianceLoading || scansLoading || metricsLoading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
+          <p>Loading security dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="p-6 space-y-6">
+    <RBACGuard requiredPermissions={[{resource: 'security', action: 'read'}]}>
+      <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
@@ -366,8 +275,8 @@ const SecurityComplianceDashboard: React.FC = () => {
             <Shield className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{securityScore}%</div>
-            <Progress value={securityScore} className="mt-2" />
+            <div className="text-2xl font-bold">{chartData.securityScore}%</div>
+            <Progress value={chartData.securityScore} className="mt-2" />
             <p className="text-xs text-muted-foreground mt-2">
               <TrendingUp className="h-3 w-3 inline mr-1 text-green-500" />
               +5% from last week
@@ -381,8 +290,8 @@ const SecurityComplianceDashboard: React.FC = () => {
             <FileText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{complianceScore}%</div>
-            <Progress value={complianceScore} className="mt-2" />
+            <div className="text-2xl font-bold">{chartData.complianceScore}%</div>
+            <Progress value={chartData.complianceScore} className="mt-2" />
             <p className="text-xs text-muted-foreground mt-2">
               34 of 37 requirements met
             </p>
@@ -461,7 +370,7 @@ const SecurityComplianceDashboard: React.FC = () => {
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
-                  <AreaChart data={threatTrends}>
+                  <AreaChart data={chartData.threatTrends}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="time" />
                     <YAxis />
@@ -484,7 +393,7 @@ const SecurityComplianceDashboard: React.FC = () => {
                 <ResponsiveContainer width="100%" height={300}>
                   <PieChart>
                     <Pie
-                      data={vulnerabilityDistribution}
+                      data={chartData.vulnerabilityDistribution}
                       cx="50%"
                       cy="50%"
                       labelLine={false}
@@ -493,7 +402,7 @@ const SecurityComplianceDashboard: React.FC = () => {
                       fill="#8884d8"
                       dataKey="value"
                     >
-                      {vulnerabilityDistribution.map((entry, index) => (
+                      {chartData.vulnerabilityDistribution.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
@@ -546,7 +455,7 @@ const SecurityComplianceDashboard: React.FC = () => {
                         </div>
                         <p className="text-sm text-muted-foreground">{event.details}</p>
                         <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                          <span>{event.timestamp.toLocaleString()}</span>
+                          <span>{formatDate(event.timestamp)}</span>
                           {event.user && <span>User: {event.user}</span>}
                           {event.ip && <span>IP: {event.ip}</span>}
                         </div>
@@ -611,7 +520,7 @@ const SecurityComplianceDashboard: React.FC = () => {
                           </div>
                           <p className="text-sm text-muted-foreground">{event.details}</p>
                           <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                            <span>{event.timestamp.toLocaleString()}</span>
+                            <span>{formatDate(event.timestamp)}</span>
                             <span>Source: {event.source}</span>
                             {event.user && <span>User: {event.user}</span>}
                             {event.resource && <span>Resource: {event.resource}</span>}
@@ -655,7 +564,7 @@ const SecurityComplianceDashboard: React.FC = () => {
                         </div>
                         <p className="text-sm text-muted-foreground">{req.description}</p>
                         <div className="text-xs text-muted-foreground">
-                          Category: {req.category} | Last checked: {req.lastChecked.toLocaleString()}
+                          Category: {req.category} | Last checked: {formatDate(req.lastChecked)}
                         </div>
                         {req.remediationSteps && (
                           <Alert className="mt-2">
@@ -734,7 +643,7 @@ const SecurityComplianceDashboard: React.FC = () => {
                       <div>
                         <h4 className="font-medium">{scan.target}</h4>
                         <p className="text-sm text-muted-foreground">
-                          Type: {scan.type} | Status: {scan.status} | Started: {scan.startTime.toLocaleString()}
+                          Type: {scan.type} | Status: {scan.status} | Started: {formatDate(scan.startTime)}
                         </p>
                       </div>
                       <Badge variant={scan.status === 'completed' ? 'default' : 'secondary'}>
@@ -856,7 +765,7 @@ const SecurityComplianceDashboard: React.FC = () => {
                     </div>
 
                     <div className="text-xs text-muted-foreground mt-2">
-                      Last modified: {control.lastModified.toLocaleString()}
+                      Last modified: {formatDate(control.lastModified)}
                     </div>
                   </div>
                 ))}
@@ -907,6 +816,7 @@ const SecurityComplianceDashboard: React.FC = () => {
         </TabsContent>
       </Tabs>
     </div>
+    </RBACGuard>
   );
 };
 

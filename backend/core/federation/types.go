@@ -97,6 +97,48 @@ type ResourcePolicy struct {
 	Constraints        map[string]string `json:"constraints"`
 }
 
+// FederationProvider interface abstracts federation operations for different implementations
+type FederationProvider interface {
+	// Lifecycle management
+	Start(ctx context.Context) error
+	Stop(ctx context.Context) error
+
+	// Node management
+	JoinFederation(ctx context.Context, joinAddresses []string) error
+	LeaveFederation(ctx context.Context) error
+	GetNodes(ctx context.Context) ([]*Node, error)
+	GetNode(ctx context.Context, nodeID string) (*Node, error)
+	GetLocalNodeID() string
+
+	// Leadership and consensus
+	GetLeader(ctx context.Context) (*Node, error)
+	IsLeader() bool
+
+	// Resource management
+	RequestResources(ctx context.Context, request *ResourceRequest) (*ResourceAllocation, error)
+	ReleaseResources(ctx context.Context, allocationID string) error
+	AllocateResources(ctx context.Context, clusterID string, request *ResourceRequest) error
+
+	// Cluster operations
+	ListClusters() []*Cluster
+	GetCluster(clusterID string) (*Cluster, error)
+	GetFederatedClusters(ctx context.Context) ([]*Cluster, error)
+	GetClusterResources(ctx context.Context, clusterID string) (*ClusterResources, error)
+	GetClusterEndpoint(ctx context.Context, clusterID string) (string, error)
+
+	// VM operations
+	GetVMInfo(ctx context.Context, clusterID, vmID string) (*VMInfo, error)
+	ScheduleVMCrossCluster(ctx context.Context, vmSpec *VMSchedulingSpec) (*VMPlacement, error)
+
+	// Health and monitoring
+	GetHealth(ctx context.Context) (*HealthCheck, error)
+}
+
+// FederationManager is a compatibility alias for FederationProvider
+type FederationManager interface {
+	FederationProvider
+}
+
 // ResourceRequest represents a request for resources from the federation
 type ResourceRequest struct {
 	ID             string            `json:"id"`

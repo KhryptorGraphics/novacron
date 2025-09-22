@@ -12,7 +12,8 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { useToast } from "@/components/ui/use-toast";
 import { Icons } from "@/components/ui/icons";
 import Link from "next/link";
-import { apiService } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
+import TwoFactorLogin from "@/components/auth/TwoFactorLogin";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -20,30 +21,24 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const { login, verify2FA, requires2FA, tempToken } = useAuth();
 
   async function onSubmit(event: React.SyntheticEvent) {
     event.preventDefault();
     setIsLoading(true);
 
     try {
-      const response = await apiService.login(email, password);
+      await login(email, password);
 
-      // Store token in localStorage or secure cookie
-      localStorage.setItem("authToken", response.token);
-
-      toast({
-        title: "Success",
-        description: response.requiresTwoFactor ? "Two-factor authentication required. Continue to verification." : "You have been logged in successfully.",
-      });
-
-      // Redirect appropriately
-      if (response.requiresTwoFactor) {
-        router.push("/auth/setup-2fa");
-      } else {
+      if (!requires2FA) {
+        toast({
+          title: "Success",
+          description: "You have been logged in successfully.",
+        });
         router.push("/dashboard");
       }
-      router.refresh();
     } catch (error) {
+      console.error('Login error:', error);
       toast({
         title: "Error",
         description: "Invalid email or password. Please try again.",
@@ -52,6 +47,32 @@ export default function LoginPage() {
     } finally {
       setIsLoading(false);
     }
+  }
+
+  const handle2FASuccess = (token: string) => {
+    toast({
+      title: "Success",
+      description: "You have been logged in successfully.",
+    });
+    router.push("/dashboard");
+  };
+
+  const handle2FACancel = () => {
+    // Reset form state to allow new login attempt
+    setEmail("");
+    setPassword("");
+  };
+
+  if (requires2FA && tempToken) {
+    return (
+      <div className="container flex h-screen w-screen flex-col items-center justify-center">
+        <TwoFactorLogin
+          tempToken={tempToken}
+          onSuccess={handle2FASuccess}
+          onCancel={handle2FACancel}
+        />
+      </div>
+    );
   }
 
   return (

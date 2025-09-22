@@ -210,6 +210,9 @@ type Backup struct {
 	// JobID is the ID of the job that created this backup
 	JobID string `json:"job_id"`
 
+	// VMID is the ID of the VM that was backed up
+	VMID string `json:"vm_id"`
+
 	// Type is the type of backup
 	Type BackupType `json:"type"`
 
@@ -532,7 +535,7 @@ func (m *BackupManager) GetBackupJob(jobID string) (*BackupJob, error) {
 	// Check if job exists
 	job, exists := m.jobs[jobID]
 	if !exists {
-		return nil, fmt.Errorf("job with ID %s does not exist", jobID)
+		return nil, fmt.Errorf("job with ID %s: %w", jobID, ErrBackupNotFound)
 	}
 
 	return job, nil
@@ -614,6 +617,16 @@ func (m *BackupManager) RunBackupJob(ctx context.Context, jobID string) (*Backup
 		return nil, err
 	}
 
+	// Ensure VMID is populated from job targets or metadata
+	if backup.VMID == "" {
+		// Try to get VMID from job targets
+		if len(job.Targets) > 0 && job.Targets[0].ResourceID != "" {
+			backup.VMID = job.Targets[0].ResourceID
+		} else if backup.Metadata != nil && backup.Metadata["vm_id"] != "" {
+			backup.VMID = backup.Metadata["vm_id"]
+		}
+	}
+
 	// Update job with success
 	m.mutex.Lock()
 	job.LastRunStatus = BackupCompleted
@@ -644,7 +657,7 @@ func (m *BackupManager) GetBackup(backupID string) (*Backup, error) {
 	// Check if backup exists
 	backup, exists := m.backups[backupID]
 	if !exists {
-		return nil, fmt.Errorf("backup with ID %s does not exist", backupID)
+		return nil, fmt.Errorf("backup with ID %s: %w", backupID, ErrBackupNotFound)
 	}
 
 	return backup, nil
@@ -678,6 +691,65 @@ func (m *BackupManager) ListBackups(tenantID string, jobID string) ([]*Backup, e
 	return backups, nil
 }
 
+// ListBackupsFiltered lists backups with filtering support
+func (m *BackupManager) ListBackupsFiltered(ctx context.Context, filter BackupFilter) ([]*Backup, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	backups := make([]*Backup, 0)
+	
+	// Start with tenant filtering if specified
+	var candidateBackups []*Backup
+	if filter.TenantID != "" {
+		backupIDs := m.tenantBackups[filter.TenantID]
+		for _, id := range backupIDs {
+			if backup := m.backups[id]; backup != nil {
+				candidateBackups = append(candidateBackups, backup)
+			}
+		}
+	} else {
+		// Get all backups
+		for _, backup := range m.backups {
+			candidateBackups = append(candidateBackups, backup)
+		}
+	}
+	
+	// Apply filters
+	for _, backup := range candidateBackups {
+		// Filter by type
+		if filter.Type != "" && string(backup.Type) != filter.Type {
+			continue
+		}
+		
+		// Filter by VMID
+		if filter.VMID != "" && backup.VMID != filter.VMID {
+			continue
+		}
+		
+		// Filter by date range
+		if !filter.StartDate.IsZero() && backup.CreatedAt.Before(filter.StartDate) {
+			continue
+		}
+		if !filter.EndDate.IsZero() && backup.CreatedAt.After(filter.EndDate) {
+			continue
+		}
+		
+		// Filter by state
+		if filter.State != "" && string(backup.State) != filter.State {
+			continue
+		}
+		
+		// Filter by JobID
+		if filter.JobID != "" && backup.JobID != filter.JobID {
+			continue
+		}
+		
+		backups = append(backups, backup)
+	}
+	
+	return backups, nil
+}
+
 // DeleteBackup deletes a backup
 func (m *BackupManager) DeleteBackup(ctx context.Context, backupID string) error {
 	// Get backup
@@ -701,9 +773,33 @@ func (m *BackupManager) DeleteBackup(ctx context.Context, backupID string) error
 		return errors.New("no provider found for backup")
 	}
 
-	// Delete backup
+	// Capture original children for rollback
+	m.mutex.RLock()
+	originalChildren := make(map[string]string) // childID -> originalParentID
+	for id, b := range m.backups {
+		if b.ParentID == backupID {
+			originalChildren[id] = backupID
+		}
+	}
+	m.mutex.RUnlock()
+
+	// Delete backup from provider first
 	if err := provider.DeleteBackup(ctx, backupID); err != nil {
-		return err
+		// Provider delete failed, no rollback needed as we haven't changed state
+		return fmt.Errorf("failed to delete backup data: %w", err)
+	}
+
+	// Provider delete succeeded, now update backup chains
+	if err := m.updateBackupChains(ctx, backupID); err != nil {
+		// Chain update failed, attempt to restore original parent IDs
+		m.mutex.Lock()
+		for childID, originalParentID := range originalChildren {
+			if child, exists := m.backups[childID]; exists {
+				child.ParentID = originalParentID
+			}
+		}
+		m.mutex.Unlock()
+		return fmt.Errorf("failed to update backup chains (rolled back): %w", err)
 	}
 
 	// Remove backup from maps
@@ -782,7 +878,7 @@ func (m *BackupManager) GetRestoreJob(jobID string) (*RestoreJob, error) {
 	// Check if job exists
 	job, exists := m.restores[jobID]
 	if !exists {
-		return nil, fmt.Errorf("restore job with ID %s does not exist", jobID)
+		return nil, fmt.Errorf("restore job with ID %s: %w", jobID, ErrBackupNotFound)
 	}
 
 	return job, nil
@@ -871,11 +967,249 @@ func (m *BackupManager) applyRetentionPolicy(job *BackupJob) {
 	}
 }
 
+// VerifyBackup verifies the integrity of a backup
+func (m *BackupManager) VerifyBackup(ctx context.Context, backupID string) (*VerificationResult, error) {
+	// Verify backup exists
+	backup, err := m.GetBackup(backupID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get provider for backup
+	var provider BackupProvider
+	m.mutex.RLock()
+	for _, p := range m.providers {
+		if _, err := p.GetBackup(ctx, backupID); err == nil {
+			provider = p
+			break
+		}
+	}
+	m.mutex.RUnlock()
+
+	if provider == nil {
+		return nil, errors.New("no provider found for backup")
+	}
+
+	result := &VerificationResult{
+		BackupID:         backupID,
+		Status:           "valid",
+		CheckedItems:     0,
+		ErrorsFound:      make([]string, 0),
+		VerificationTime: time.Now(),
+		Details:          make(map[string]interface{}),
+	}
+
+	// Validate backup through provider
+	err = provider.ValidateBackup(ctx, backupID)
+	if err != nil {
+		result.Status = "corrupted"
+		result.ErrorsFound = append(result.ErrorsFound, err.Error())
+		result.Details["validation_error"] = err.Error()
+	} else {
+		result.CheckedItems = 1 // Basic validation count
+		result.Details["validation_passed"] = true
+	}
+
+	// Verify backup chain consistency for incremental backups
+	if backup.ParentID != "" {
+		if err := m.verifyBackupChain(ctx, backupID); err != nil {
+			result.Status = "incomplete"
+			result.ErrorsFound = append(result.ErrorsFound, fmt.Sprintf("Chain verification failed: %v", err))
+			result.Details["chain_error"] = err.Error()
+		} else {
+			result.CheckedItems++
+			result.Details["chain_verified"] = true
+		}
+	}
+
+	return result, nil
+}
+
+// ListAllBackups returns all backups across all VMs
+func (m *BackupManager) ListAllBackups(ctx context.Context) ([]BackupInfo, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	// Directly scan m.backups map to get all backups
+	backups := make([]BackupInfo, 0, len(m.backups))
+	for _, backup := range m.backups {
+			// Use VMID field directly, fall back to metadata if not set
+			vmID := backup.VMID
+			if vmID == "" && backup.Metadata != nil {
+				vmID = backup.Metadata["vm_id"]
+			}
+			
+			backupInfo := BackupInfo{
+				ID:        backup.ID,
+				JobID:     backup.JobID,
+				VMID:      vmID,  // Use actual VM ID field, not JobID
+				Type:      backup.Type,
+				State:     backup.State,
+				Size:      backup.Size,
+				StartedAt: backup.StartedAt,
+				TenantID:  backup.TenantID,
+				ParentID:  backup.ParentID,
+				Metadata:  backup.Metadata,
+			}
+			if !backup.CompletedAt.IsZero() {
+				backupInfo.CompletedAt = &backup.CompletedAt
+			}
+		backups = append(backups, backupInfo)
+	}
+
+	return backups, nil
+}
+
+// Helper methods
+
+// hasChildBackups checks if a backup has children in an incremental chain
+func (m *BackupManager) hasChildBackups(backupID string) bool {
+	for _, backup := range m.backups {
+		if backup.ParentID == backupID {
+			return true
+		}
+	}
+	return false
+}
+
+// updateBackupChains handles chain updates when a backup is deleted
+func (m *BackupManager) updateBackupChains(ctx context.Context, deletedBackupID string) error {
+	// Find child backups that reference the deleted backup
+	childBackups := make([]*Backup, 0)
+	for _, backup := range m.backups {
+		if backup.ParentID == deletedBackupID {
+			childBackups = append(childBackups, backup)
+		}
+	}
+
+	// Update child backups to reference the deleted backup's parent
+	deletedBackup := m.backups[deletedBackupID]
+	for _, child := range childBackups {
+		child.ParentID = deletedBackup.ParentID
+	}
+
+	return nil
+}
+
+// verifyBackupChain verifies the consistency of an incremental backup chain
+func (m *BackupManager) verifyBackupChain(ctx context.Context, backupID string) error {
+	backup := m.backups[backupID]
+	if backup.ParentID == "" {
+		return nil // No parent to verify
+	}
+
+	// Check if parent exists
+	_, exists := m.backups[backup.ParentID]
+	if !exists {
+		return fmt.Errorf("parent backup %s not found", backup.ParentID)
+	}
+
+	// Recursively verify parent chain
+	return m.verifyBackupChain(ctx, backup.ParentID)
+}
+
+// BackupInfo represents backup information for API responses
+type BackupInfo struct {
+	ID          string            `json:"id"`
+	JobID       string            `json:"job_id"`
+	VMID        string            `json:"vm_id"`     // Add proper VM ID field
+	Type        BackupType        `json:"type"`
+	State       BackupState       `json:"state"`
+	Size        int64             `json:"size"`
+	StartedAt   time.Time         `json:"started_at"`
+	CompletedAt *time.Time        `json:"completed_at,omitempty"`
+	TenantID    string            `json:"tenant_id"`
+	ParentID    string            `json:"parent_id,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
 // calculateNextRunTime calculates the next run time for a schedule
 func calculateNextRunTime(schedule *Schedule) time.Time {
 	// This is a simplified implementation
 	// A real implementation would need to handle cron expressions, intervals, etc.
 	return time.Now().Add(24 * time.Hour)
+}
+
+// GetBackupManifest retrieves the manifest for a backup
+// This is a stub that returns a basic manifest constructed from backup metadata
+func (m *BackupManager) GetBackupManifest(backupID string) (*BackupManifest, error) {
+	backup, err := m.GetBackup(backupID)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Extract VM ID from metadata
+	vmID := ""
+	if backup.Metadata != nil {
+		vmID = backup.Metadata["vm_id"]
+	}
+	
+	// Create a basic manifest from backup data
+	manifest := &BackupManifest{
+		BackupID:     backup.ID,
+		VMID:         vmID,
+		Type:         backup.Type,
+		ParentID:     backup.ParentID,
+		Size:         backup.Size,
+		CompressedSize: backup.Size, // Placeholder - actual compression would be stored
+		CreatedAt:    backup.StartedAt,
+		Metadata:     backup.Metadata,
+	}
+	
+	return manifest, nil
+}
+
+// InitializeCBT initializes Changed Block Tracking for a VM
+// This is a stub implementation
+func (m *BackupManager) InitializeCBT(vmID string, vmSize int64) (*CBTTracker, error) {
+	if vmID == "" {
+		return nil, fmt.Errorf("VM ID is required")
+	}
+	if vmSize <= 0 {
+		return nil, fmt.Errorf("VM size must be positive")
+	}
+	
+	// Create a basic CBT tracker (stub)
+	tracker := &CBTTracker{
+		vmID:        vmID,
+		totalBlocks: vmSize / CBTBlockSize,
+		blockSize:   CBTBlockSize,
+		createdAt:   time.Now(),
+		updatedAt:   time.Now(),
+		blocks:      make(map[int64]*BlockInfo),
+	}
+	
+	return tracker, nil
+}
+
+// GetCBTStats retrieves CBT statistics for a VM
+// This is a stub implementation
+func (m *BackupManager) GetCBTStats(vmID string) (map[string]interface{}, error) {
+	if vmID == "" {
+		return nil, fmt.Errorf("VM ID is required")
+	}
+	
+	// Return placeholder stats
+	stats := map[string]interface{}{
+		"vm_id":         vmID,
+		"total_blocks":  0,
+		"changed_blocks": 0,
+		"block_size":    CBTBlockSize,
+		"last_backup":   nil,
+		"initialized":   false,
+	}
+	
+	return stats, nil
+}
+
+// Test helper methods
+
+// AddBackupForTest adds a backup for testing purposes
+func (m *BackupManager) AddBackupForTest(backup *Backup) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.backups[backup.ID] = backup
+	m.tenantBackups[backup.TenantID] = append(m.tenantBackups[backup.TenantID], backup.ID)
 }
 
 // BackupScheduler schedules and executes backup jobs

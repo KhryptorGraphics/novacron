@@ -104,6 +104,7 @@ func (p *LocalStorageProvider) CreateBackup(ctx context.Context, job *backup.Bac
 		StorageLocation: backupDir,
 		TenantID:        job.TenantID,
 		TargetMetadata:  make(map[string]map[string]string),
+		Metadata:        job.Metadata,  // Copy metadata from job, including vm_id
 	}
 
 	// Create a metadata file for each target

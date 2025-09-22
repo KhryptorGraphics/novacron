@@ -27,6 +27,8 @@ import (
 	api_orch "github.com/khryptorgraphics/novacron/backend/api/orchestration"
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration"
 	"github.com/sirupsen/logrus"
+	security_handlers "github.com/khryptorgraphics/novacron/backend/api/security"
+	"github.com/khryptorgraphics/novacron/backend/core/security"
 
 )
 
@@ -66,6 +68,38 @@ func main() {
 
 	// Initialize authentication manager
 	authManager := auth.NewSimpleAuthManager(cfg.Auth.Secret, db)
+
+	// Initialize security components
+	encConfig := security.EncryptionConfig{
+		Algorithm:           "AES-256-GCM",
+		KeyRotationEnabled:  true,
+		KeyRotationInterval: 24 * time.Hour,
+	}
+	encMgr := security.NewEncryptionManager(encConfig)
+
+	// Initialize audit logger
+	auditLogger := security.NewAuditLogger(db)
+
+	// Initialize 2FA service
+	twoFactorService := auth.NewTwoFactorService("NovaCron", encMgr.GetEncryptionKey())
+
+	// Initialize security coordinator
+	securityCoordinator := security.NewDistributedSecurityCoordinator(encMgr, auditLogger)
+	if err := securityCoordinator.Start(); err != nil {
+		appLogger.Warn("Failed to start security coordinator", "error", err)
+	}
+	defer securityCoordinator.Stop()
+
+	// Initialize vulnerability scanner
+	vulnScanConfig := security.ScanConfig{
+		EnabledScanTypes: []security.ScanType{
+			security.ScanTypeSAST,
+			security.ScanTypeDependency,
+		},
+		SeverityThreshold: security.SeverityMedium,
+		AlertingEnabled:   true,
+	}
+	vulnScanner := security.NewVulnerabilityScanner(vulnScanConfig)
 
 	// Initialize VM manager with default configuration
 	vmConfig := core_vm.VMManagerConfig{
@@ -141,6 +175,16 @@ func main() {
 	wsManager := api_orch.NewWebSocketManager(logrus.New(), orchEngine.EventBus())
 	router.HandleFunc("/ws/events/v1", wsManager.HandleWebSocket)
 
+
+	// Register security routes
+	securityHandlers := security_handlers.NewSecurityHandlers(
+		twoFactorService,
+		securityCoordinator,
+		vulnScanner,
+		auditLogger,
+		encMgr,
+	)
+	securityHandlers.RegisterRoutes(router)
 
 	// Register monitoring routes
 	if kvmManager != nil {

@@ -143,6 +143,37 @@ This project uses SPARC (Specification, Pseudocode, Architecture, Refinement, Co
 ```bash
 # Add Claude Flow MCP server
 claude mcp add claude-flow npx claude-flow@alpha mcp start
+
+# Add Serena MCP server for semantic code understanding
+claude mcp add-json "serena" '{"command":"uvx","args":["--from","git+https://github.com/oraios/serena","serena-mcp-server"]}'
+```
+
+## 🧠 Serena MCP Server Integration
+
+**Serena provides semantic code understanding with LSP integration** - Use for:
+- **Symbol operations**: Rename, extract, move functions/classes across entire codebase
+- **Project memory**: Session persistence and cross-session context
+- **Large codebase navigation**: >50 files, complex architecture analysis
+- **Dependency tracking**: Understanding symbol references and relationships
+- **Language server features**: Go-to-definition, find references, symbol search
+
+### When to Use Serena vs Other Tools:
+- **Use Serena for**: Symbol renames, semantic search, LSP operations, session persistence
+- **Use Morphllm for**: Pattern-based edits, bulk text replacements, style enforcement
+- **Use Claude Code native for**: Simple file operations, basic analysis, single-file tasks
+
+### Supported Languages:
+Python, TypeScript/JavaScript, PHP, Go, Rust, C/C++, Java
+
+### Serena Integration Pattern:
+```javascript
+// ✅ OPTIMAL: Serena + Claude Code combination
+[Semantic Analysis with Serena] → [Implementation with Claude Code Task tool]
+
+// Example: Large refactor across codebase
+1. Serena: Find all symbol references and dependencies
+2. Claude Code Task tool: Spawn agents to implement changes systematically
+3. Serena: Validate semantic correctness after changes
 ```
 
 ## MCP Tool Categories

@@ -18,10 +18,11 @@ type CreateVMRequest struct {
 
 // UpdateVMRequest represents a request to update a VM
 type UpdateVMRequest struct {
-	Name   *string `json:"name,omitempty"`
-	CPU    *int    `json:"cpu,omitempty"`
-	Memory *int64  `json:"memory,omitempty"`
-	Disk   *int64  `json:"disk,omitempty"`
+	Name   *string           `json:"name,omitempty"`
+	CPU    *int              `json:"cpu,omitempty"`
+	Memory *int64            `json:"memory,omitempty"`
+	Disk   *int64            `json:"disk,omitempty"`
+	Tags   map[string]string `json:"tags,omitempty"`
 }
 
 func (r *UpdateVMRequest) toVMConfig() *vm.VMConfig {
@@ -49,8 +50,9 @@ type MigrateVMRequest struct {
 
 // SnapshotVMRequest represents a request to snapshot a VM
 type SnapshotVMRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	Name        string            `json:"name"`
+	Description string            `json:"description,omitempty"`
+	Options     map[string]string `json:"options,omitempty"`
 }
 
 // CreateVolumeRequest represents a request to create a volume
@@ -154,4 +156,14 @@ type PaginatedResponse struct {
 	Page       int         `json:"page"`
 	PageSize   int         `json:"page_size"`
 	HasMore    bool        `json:"has_more"`
+}
+
+// BackupVerificationResponse represents a backup verification response
+type BackupVerificationResponse struct {
+	BackupID         string            `json:"backup_id"`
+	Status           string            `json:"status"`
+	CheckedItems     int               `json:"checked_items"`
+	ErrorsFound      []string          `json:"errors_found"`
+	VerificationTime time.Time         `json:"verification_time"`
+	Details          map[string]interface{} `json:"details,omitempty"`
 }

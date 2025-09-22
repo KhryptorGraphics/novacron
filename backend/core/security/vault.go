@@ -13,12 +13,12 @@ import (
 // VaultManager handles secure secret storage and retrieval
 type VaultManager struct {
 	client *api.Client
-	cache  map[string]*cachedSecret
+	cache  map[string]*vaultCachedSecret
 	mu     sync.RWMutex
 }
 
-// cachedSecret stores a secret with expiration
-type cachedSecret struct {
+// vaultCachedSecret stores a secret with expiration
+type vaultCachedSecret struct {
 	value     string
 	expiresAt time.Time
 }
@@ -42,7 +42,7 @@ func NewVaultManager(address string, token string) (*VaultManager, error) {
 		if os.Getenv("NOVACRON_ENV") == "development" {
 			return &VaultManager{
 				client: nil, // Use environment fallback
-				cache:  make(map[string]*cachedSecret),
+				cache:  make(map[string]*vaultCachedSecret),
 			}, nil
 		}
 		return nil, fmt.Errorf("vault health check failed: %w", err)
@@ -54,7 +54,7 @@ func NewVaultManager(address string, token string) (*VaultManager, error) {
 	
 	return &VaultManager{
 		client: client,
-		cache:  make(map[string]*cachedSecret),
+		cache:  make(map[string]*vaultCachedSecret),
 	}, nil
 }
 
@@ -102,7 +102,7 @@ func (vm *VaultManager) GetSecret(ctx context.Context, path string) (string, err
 	
 	// Cache the secret
 	vm.mu.Lock()
-	vm.cache[path] = &cachedSecret{
+	vm.cache[path] = &vaultCachedSecret{
 		value:     value,
 		expiresAt: time.Now().Add(5 * time.Minute),
 	}

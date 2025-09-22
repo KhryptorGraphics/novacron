@@ -1,0 +1,843 @@
+version: '3.9'
+
+x-common-variables: &common-variables
+  ENVIRONMENT: production
+  LOG_LEVEL: info
+  TELEMETRY_ENABLED: "true"
+  METRICS_ENABLED: "true"
+
+x-security-context: &security-context
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  cap_add:
+    - NET_BIND_SERVICE
+  read_only: true
+  tmpfs:
+    - /tmp
+    - /var/run
+
+x-resource-limits: &resource-limits
+  deploy:
+    resources:
+      limits:
+        cpus: '2.0'
+        memory: 2G
+      reservations:
+        cpus: '0.5'
+        memory: 512M
+
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 60s
+
+services:
+  # API Server with High Availability
+  api-server-1:
+    image: novacron/api-server:${VERSION:-latest}
+    <<: *security-context
+    <<: *resource-limits
+    container_name: novacron-api-1
+    hostname: api-1
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      <<: *common-variables
+      NODE_ID: api-1
+      DB_HOST: postgres-primary
+      REDIS_HOST: redis-sentinel
+      REDIS_SENTINEL_HOST: redis-sentinel
+      REDIS_SENTINEL_PORT: 26379
+      ENABLE_TLS: "true"
+      TLS_CERT: /certs/server.crt
+      TLS_KEY: /certs/server.key
+      JAEGER_ENDPOINT: http://jaeger:14268
+    volumes:
+      - type: bind
+        source: /etc/novacron/certs
+        target: /certs
+        read_only: true
+      - type: volume
+        source: api-logs
+        target: /var/log/novacron
+    networks:
+      - novacron-net
+      - monitoring-net
+    ports:
+      - target: 8080
+        published: 8080
+        protocol: tcp
+        mode: host
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "--no-check-certificate", "https://localhost:8080/health"]
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      redis-sentinel:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        labels: "service=api-server,node=1"
+
+  api-server-2:
+    image: novacron/api-server:${VERSION:-latest}
+    <<: *security-context
+    <<: *resource-limits
+    container_name: novacron-api-2
+    hostname: api-2
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      <<: *common-variables
+      NODE_ID: api-2
+      DB_HOST: postgres-primary
+      REDIS_HOST: redis-sentinel
+      REDIS_SENTINEL_HOST: redis-sentinel
+      REDIS_SENTINEL_PORT: 26379
+      ENABLE_TLS: "true"
+      TLS_CERT: /certs/server.crt
+      TLS_KEY: /certs/server.key
+      JAEGER_ENDPOINT: http://jaeger:14268
+    volumes:
+      - type: bind
+        source: /etc/novacron/certs
+        target: /certs
+        read_only: true
+      - type: volume
+        source: api-logs
+        target: /var/log/novacron
+    networks:
+      - novacron-net
+      - monitoring-net
+    ports:
+      - target: 8080
+        published: 8081
+        protocol: tcp
+        mode: host
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "--no-check-certificate", "https://localhost:8080/health"]
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      redis-sentinel:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        labels: "service=api-server,node=2"
+
+  # Frontend with CDN and Caching (behind load balancer)
+  frontend:
+    image: novacron/frontend:${VERSION:-latest}
+    <<: *security-context
+    container_name: novacron-frontend
+    hostname: frontend
+    restart: unless-stopped
+    user: "nginx"
+    environment:
+      <<: *common-variables
+      API_URL: https://api.novacron.io
+      CDN_URL: https://cdn.novacron.io
+      ENABLE_COMPRESSION: "true"
+      ENABLE_CACHE: "true"
+    volumes:
+      - type: bind
+        source: /etc/novacron/nginx
+        target: /etc/nginx/conf.d
+        read_only: true
+      - type: tmpfs
+        target: /var/cache/nginx
+      - type: tmpfs
+        target: /var/run
+    networks:
+      - novacron-net
+    # Frontend runs behind load balancer, no direct port exposure
+    expose:
+      - "80"
+      - "443"
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # PostgreSQL with Primary-Replica Setup (internal only)
+  postgres-primary:
+    image: postgres:15-alpine
+    <<: *security-context
+    container_name: postgres-primary
+    hostname: postgres-primary
+    restart: unless-stopped
+    user: "postgres"
+    environment:
+      POSTGRES_DB: novacron
+      POSTGRES_USER: novacron
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      # Removed unsupported POSTGRES_REPLICATION_* environment variables
+      POSTGRES_MAX_CONNECTIONS: 200
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    command: |
+      bash -c '
+      # Set replication password from secret
+      if [ -f /run/secrets/replication_password ]; then
+        export REPLICATION_PASSWORD=$(cat /run/secrets/replication_password)
+      fi
+
+      # Copy initialization SQL
+      cp /postgres-init/*.sql /docker-entrypoint-initdb.d/ 2>/dev/null || true
+
+      # Start PostgreSQL with custom config
+      docker-entrypoint.sh postgres -c config_file=/etc/postgresql/postgresql.conf -c hba_file=/etc/postgresql/pg_hba.conf
+      '
+    volumes:
+      - type: volume
+        source: postgres-primary-data
+        target: /var/lib/postgresql/data
+      - type: bind
+        source: ./postgres/postgresql.conf
+        target: /etc/postgresql/postgresql.conf
+        read_only: true
+      - type: bind
+        source: ./postgres/pg_hba.conf
+        target: /etc/postgresql/pg_hba.conf
+        read_only: true
+      - type: bind
+        source: ./postgres/init
+        target: /postgres-init
+        read_only: true
+      - type: bind
+        source: ./postgres/scripts/primary-entrypoint.sh
+        target: /usr/local/bin/primary-entrypoint.sh
+        read_only: true
+    secrets:
+      - postgres_password
+      - replication_password
+    networks:
+      - novacron-net
+    # PostgreSQL port not exposed for security in production
+    expose:
+      - "5432"
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "/bin/bash", "-c", "pg_isready -U novacron -d novacron && psql -U postgres -tAc 'SELECT NOT pg_is_in_recovery();' | grep -q 't'"]
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+
+  postgres-replica:
+    image: postgres:15-alpine
+    <<: *security-context
+    container_name: postgres-replica
+    hostname: postgres-replica
+    restart: unless-stopped
+    user: "postgres"
+    environment:
+      PGUSER: postgres
+      POSTGRES_USER: postgres
+      # Environment variables for replica initialization script
+      PRIMARY_HOST: postgres-primary
+      PRIMARY_PORT: 5432
+      REPLICATION_USER: replicator
+      REPLICATION_PASSWORD_FILE: /run/secrets/replication_password
+    command: /replica-init/init-replica.sh
+    volumes:
+      - type: volume
+        source: postgres-replica-data
+        target: /var/lib/postgresql/data
+      - type: bind
+        source: ./postgres/init/init-replica.sh
+        target: /replica-init/init-replica.sh
+        read_only: true
+      - type: bind
+        source: ./postgres/postgresql.conf
+        target: /etc/postgresql/postgresql.conf
+        read_only: true
+      - type: bind
+        source: ./postgres/scripts/healthcheck-replica.sh
+        target: /usr/local/bin/healthcheck-replica.sh
+        read_only: true
+    secrets:
+      - replication_password
+    networks:
+      - novacron-net
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "/bin/bash", "-c", "pg_isready -U postgres && psql -U postgres -tAc 'SELECT pg_is_in_recovery();' | grep -q 't'"]
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Redis Master (primary instance)
+  redis-master:
+    image: redis:7-alpine
+    <<: *security-context
+    container_name: redis-master
+    hostname: redis-master
+    restart: unless-stopped
+    command: redis-server /etc/redis/redis.conf
+    environment:
+      REDIS_REPLICATION_MODE: master
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+    volumes:
+      - type: volume
+        source: redis-master-data
+        target: /data
+      - type: bind
+        source: /etc/novacron/redis/redis-master.conf
+        target: /etc/redis/redis.conf
+        read_only: true
+    secrets:
+      - redis_password
+    networks:
+      - novacron-net
+    expose:
+      - "6379"
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "redis-cli", "ping"]
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Redis Replica
+  redis-replica:
+    image: redis:7-alpine
+    <<: *security-context
+    container_name: redis-replica
+    hostname: redis-replica
+    restart: unless-stopped
+    command: redis-server /etc/redis/redis.conf --replicaof redis-master 6379
+    environment:
+      REDIS_REPLICATION_MODE: slave
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+    volumes:
+      - type: volume
+        source: redis-replica-data
+        target: /data
+      - type: bind
+        source: /etc/novacron/redis/redis-replica.conf
+        target: /etc/redis/redis.conf
+        read_only: true
+    secrets:
+      - redis_password
+    networks:
+      - novacron-net
+    expose:
+      - "6379"
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "redis-cli", "ping"]
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Redis Sentinel for automatic failover
+  redis-sentinel:
+    image: redis:7-alpine
+    <<: *security-context
+    container_name: redis-sentinel
+    hostname: redis-sentinel
+    restart: unless-stopped
+    command: redis-sentinel /etc/redis/sentinel.conf
+    volumes:
+      - type: bind
+        source: /etc/novacron/redis/sentinel.conf
+        target: /etc/redis/sentinel.conf
+        read_only: true
+    networks:
+      - novacron-net
+    expose:
+      - "26379"
+    depends_on:
+      redis-master:
+        condition: service_healthy
+      redis-replica:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+  # AI Engine
+  ai-engine:
+    image: novacron/ai-engine:${VERSION:-latest}
+    <<: *security-context
+    <<: *resource-limits
+    container_name: novacron-ai-engine
+    hostname: ai-engine
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      <<: *common-variables
+      MODEL_PATH: /models
+      GPU_ENABLED: ${GPU_ENABLED:-false}
+      INFERENCE_THREADS: 4
+      BATCH_SIZE: 32
+    volumes:
+      - type: volume
+        source: ai-models
+        target: /models
+        read_only: true
+      - type: tmpfs
+        target: /tmp
+    networks:
+      - novacron-net
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          cpus: '2.0'
+          memory: 4G
+      placement:
+        constraints:
+          - node.labels.gpu == true
+
+  # Monitoring Stack
+  prometheus:
+    image: prom/prometheus:latest
+    <<: *security-context
+    container_name: prometheus
+    hostname: prometheus
+    restart: unless-stopped
+    user: "nobody"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=10GB'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    volumes:
+      - type: volume
+        source: prometheus-data
+        target: /prometheus
+      - type: bind
+        source: /etc/novacron/prometheus
+        target: /etc/prometheus
+        read_only: true
+    networks:
+      - monitoring-net
+      - novacron-net
+    ports:
+      - target: 9090
+        published: 9090
+        protocol: tcp
+        mode: host
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+
+  grafana:
+    image: grafana/grafana:latest
+    <<: *security-context
+    container_name: grafana
+    hostname: grafana
+    restart: unless-stopped
+    user: "grafana"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD_FILE: /run/secrets/grafana_password
+      GF_INSTALL_PLUGINS: grafana-piechart-panel,grafana-worldmap-panel
+      GF_SERVER_ROOT_URL: https://grafana.novacron.io
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - type: volume
+        source: grafana-data
+        target: /var/lib/grafana
+      - type: bind
+        source: /etc/novacron/grafana/dashboards
+        target: /etc/grafana/provisioning/dashboards
+        read_only: true
+      - type: bind
+        source: /etc/novacron/grafana/datasources
+        target: /etc/grafana/provisioning/datasources
+        read_only: true
+    secrets:
+      - grafana_password
+    networks:
+      - monitoring-net
+      - novacron-net
+    ports:
+      - target: 3000
+        published: 3001
+        protocol: tcp
+        mode: host
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+    depends_on:
+      - prometheus
+
+  loki:
+    image: grafana/loki:latest
+    <<: *security-context
+    container_name: loki
+    hostname: loki
+    restart: unless-stopped
+    user: "loki"
+    command: -config.file=/etc/loki/config.yaml
+    volumes:
+      - type: volume
+        source: loki-data
+        target: /loki
+      - type: bind
+        source: /etc/novacron/loki/config.yaml
+        target: /etc/loki/config.yaml
+        read_only: true
+    networks:
+      - monitoring-net
+      - novacron-net
+    ports:
+      - target: 3100
+        published: 3100
+        protocol: tcp
+        mode: host
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100/ready"]
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    <<: *security-context
+    container_name: jaeger
+    hostname: jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_ZIPKIN_HTTP_PORT: 9411
+      SPAN_STORAGE_TYPE: memory
+      MEMORY_MAX_TRACES: 50000
+    networks:
+      - monitoring-net
+      - novacron-net
+    ports:
+      - target: 16686
+        published: 16686
+        protocol: tcp
+        mode: host
+      - target: 14268
+        published: 14268
+        protocol: tcp
+        mode: host
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:16686/"]
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Load Balancer
+  nginx-lb:
+    image: nginx:alpine
+    <<: *security-context
+    container_name: nginx-lb
+    hostname: nginx-lb
+    restart: unless-stopped
+    user: "nginx"
+    volumes:
+      - type: bind
+        source: /etc/novacron/nginx/nginx.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+      - type: bind
+        source: /etc/novacron/certs
+        target: /etc/nginx/certs
+        read_only: true
+      - type: tmpfs
+        target: /var/cache/nginx
+    networks:
+      - novacron-net
+    ports:
+      - target: 443
+        published: 443
+        protocol: tcp
+        mode: host
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: host
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "nginx", "-t"]
+    depends_on:
+      - api-server-1
+      - api-server-2
+
+  # Backup Service
+  backup:
+    image: novacron/backup:${VERSION:-latest}
+    <<: *security-context
+    container_name: novacron-backup
+    hostname: backup
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      <<: *common-variables
+      BACKUP_SCHEDULE: "0 2 * * *"
+      RETENTION_DAYS: 30
+      S3_BUCKET: ${BACKUP_S3_BUCKET}
+      AWS_ACCESS_KEY_ID_FILE: /run/secrets/aws_access_key
+      AWS_SECRET_ACCESS_KEY_FILE: /run/secrets/aws_secret_key
+    volumes:
+      - type: volume
+        source: backup-data
+        target: /backup
+      - postgres-primary-data:/data/postgres:ro
+      - redis-master-data:/data/redis-master:ro
+      - redis-replica-data:/data/redis-replica:ro
+    secrets:
+      - aws_access_key
+      - aws_secret_key
+    networks:
+      - novacron-net
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "test", "-f", "/backup/.health"]
+
+  # PostgreSQL Exporter for metrics
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: postgres-exporter
+    hostname: postgres-exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_URI: postgres-primary:5432/postgres?sslmode=disable
+      DATA_SOURCE_USER: postgres
+      DATA_SOURCE_PASS_FILE: /run/secrets/postgres_password
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: "true"
+      PG_EXPORTER_INCLUDE_DATABASES: "novacron"
+    secrets:
+      - postgres_password
+    networks:
+      - novacron-net
+      - monitoring-net
+    expose:
+      - "9187"
+    depends_on:
+      - postgres-primary
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "curl", "-f", "http://localhost:9187/metrics"]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+  # Redis Exporter for metrics
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: redis-exporter
+    hostname: redis-exporter
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://redis-master:6379
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+    secrets:
+      - redis_password
+    networks:
+      - novacron-net
+      - monitoring-net
+    expose:
+      - "9121"
+    depends_on:
+      - redis-master
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "curl", "-f", "http://localhost:9121/metrics"]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+  # Certificate Manager
+  certbot:
+    image: certbot/certbot:latest
+    container_name: certbot
+    hostname: certbot
+    restart: unless-stopped
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    volumes:
+      - type: volume
+        source: certbot-data
+        target: /etc/letsencrypt
+      - type: volume
+        source: certbot-www
+        target: /var/www/certbot
+    networks:
+      - novacron-net
+
+networks:
+  novacron-net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-novacron
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
+
+  monitoring-net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-monitoring
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+          gateway: 172.21.0.1
+
+volumes:
+  postgres-primary-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/novacron/postgres-primary
+
+  postgres-replica-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/novacron/postgres-replica
+
+  redis-master-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/novacron/redis-master
+
+  redis-replica-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/novacron/redis-replica
+
+  prometheus-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/novacron/prometheus
+
+  grafana-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/novacron/grafana
+
+  loki-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/novacron/loki
+
+  ai-models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/novacron/ai-models
+
+  backup-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/novacron/backup
+
+  api-logs:
+    driver: local
+
+  certbot-data:
+    driver: local
+
+  certbot-www:
+    driver: local
+
+secrets:
+  postgres_password:
+    file: /etc/novacron/secrets/postgres_password
+  replication_password:
+    file: /etc/novacron/secrets/replication_password
+  redis_password:
+    file: /etc/novacron/secrets/redis_password
+  grafana_password:
+    file: /etc/novacron/secrets/grafana_password
+  aws_access_key:
+    file: /etc/novacron/secrets/aws_access_key
+  aws_secret_key:
+    file: /etc/novacron/secrets/aws_secret_key

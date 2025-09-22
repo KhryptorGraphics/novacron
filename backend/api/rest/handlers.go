@@ -3,6 +3,7 @@ package rest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -93,13 +94,14 @@ func (h *APIHandler) CreateVM(w http.ResponseWriter, r *http.Request) {
 			CPUShares:  req.CPU,
 			MemoryMB:   int(req.Memory),
 			DiskSizeGB: int(req.Disk),
+			RootFS:     req.Image,    // Map Image to RootFS field
+			Image:      req.Image,    // Also set Image field for containerd driver
 			Command:    "/bin/bash", // default command
 		},
 		Tags: make(map[string]string),
 	}
 	
-	ctx := context.Background()
-	vmInstance, err := h.vmManager.CreateVM(ctx, createReq)
+	vmInstance, err := h.vmManager.CreateVM(r.Context(), createReq)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -133,9 +135,62 @@ func (h *APIHandler) UpdateVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// For now, return a placeholder response as UpdateVM is not implemented
-	// TODO: Implement UpdateVM method on VMManager
-	respondJSON(w, map[string]string{"status": "update not implemented", "vm_id": vmID})
+	// Convert request to update spec
+	updateSpec := vm.VMUpdateSpec{}
+	if req.Name != nil {
+		updateSpec.Name = req.Name
+	}
+	if req.CPU != nil {
+		updateSpec.CPU = req.CPU
+	}
+	if req.Memory != nil {
+		updateSpec.Memory = req.Memory
+	}
+	if req.Disk != nil {
+		updateSpec.Disk = req.Disk
+	}
+	if req.Tags != nil {
+		updateSpec.Tags = req.Tags
+	}
+	
+	// Call VM manager to update
+	err := h.vmManager.UpdateVM(r.Context(), vmID, updateSpec)
+	if err != nil {
+		// Handle specific error types - prefer type assertion for VMError
+		if vmErr, ok := err.(*vm.VMError); ok {
+			switch vmErr.Code {
+			case "VM_NOT_FOUND":
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			case "INVALID_STATE", "INVALID_ARGUMENT":
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			default:
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		// Fallback to errors.Is for sentinel errors
+		if errors.Is(err, vm.ErrVMNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, vm.ErrInvalidVMState) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	
+	// Get updated VM
+	vmInstance, err := h.vmManager.GetVM(vmID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	
+	respondJSON(w, vmInstance)
 }
 
 // DeleteVM deletes a VM
@@ -143,8 +198,7 @@ func (h *APIHandler) DeleteVM(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	vmID := vars["id"]
 	
-	ctx := context.Background()
-	if err := h.vmManager.DeleteVM(ctx, vmID); err != nil {
+	if err := h.vmManager.DeleteVM(r.Context(), vmID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -157,9 +211,12 @@ func (h *APIHandler) StartVM(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	vmID := vars["id"]
 	
-	ctx := context.Background()
-	if err := h.vmManager.StartVM(ctx, vmID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := h.vmManager.StartVM(r.Context(), vmID); err != nil {
+		if errors.Is(err, vm.ErrVMNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 	
@@ -171,9 +228,12 @@ func (h *APIHandler) StopVM(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	vmID := vars["id"]
 	
-	ctx := context.Background()
-	if err := h.vmManager.StopVM(ctx, vmID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := h.vmManager.StopVM(r.Context(), vmID); err != nil {
+		if errors.Is(err, vm.ErrVMNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 	
@@ -185,9 +245,12 @@ func (h *APIHandler) RestartVM(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	vmID := vars["id"]
 	
-	ctx := context.Background()
-	if err := h.vmManager.RestartVM(ctx, vmID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := h.vmManager.RestartVM(r.Context(), vmID); err != nil {
+		if errors.Is(err, vm.ErrVMNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 	
@@ -205,8 +268,51 @@ func (h *APIHandler) MigrateVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// TODO: Implement MigrateVM method on VMManager
-	respondJSON(w, map[string]string{"status": "migration not implemented", "vm_id": vmID, "target": req.TargetHost})
+	// Prepare migration options
+	options := make(map[string]string)
+	if req.Live {
+		options["migration_type"] = "live"
+	} else {
+		options["migration_type"] = "offline"
+	}
+	
+	// Call VM manager to migrate
+	err := h.vmManager.MigrateVM(r.Context(), vmID, req.TargetHost, options)
+	if err != nil {
+		// Handle specific error types - prefer type assertion for VMError
+		if vmErr, ok := err.(*vm.VMError); ok {
+			switch vmErr.Code {
+			case "VM_NOT_FOUND":
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			case "OPERATION_NOT_SUPPORTED":
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			default:
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		// Fallback to errors.Is for sentinel errors
+		if errors.Is(err, vm.ErrVMNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, vm.ErrOperationNotSupported) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	
+	respondJSON(w, map[string]interface{}{
+		"status":      "migration_completed",
+		"vm_id":       vmID,
+		"target_host": req.TargetHost,
+		"migration_type": options["migration_type"],
+		"timestamp":   time.Now(),
+	})
 }
 
 // SnapshotVM creates a snapshot of a VM
@@ -220,8 +326,50 @@ func (h *APIHandler) SnapshotVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// TODO: Implement CreateSnapshot method on VMManager
-	respondJSON(w, map[string]string{"status": "snapshot not implemented", "vm_id": vmID, "name": req.Name})
+	// Prepare snapshot options
+	options := make(map[string]string)
+	if req.Description != "" {
+		options["description"] = req.Description
+	}
+	
+	// Call VM manager to create snapshot
+	snapshotID, err := h.vmManager.CreateSnapshot(r.Context(), vmID, req.Name, options)
+	if err != nil {
+		// Handle specific error types - prefer type assertion for VMError
+		if vmErr, ok := err.(*vm.VMError); ok {
+			switch vmErr.Code {
+			case "VM_NOT_FOUND":
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			case "OPERATION_NOT_SUPPORTED":
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			default:
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		// Fallback to errors.Is for sentinel errors
+		if errors.Is(err, vm.ErrVMNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, vm.ErrOperationNotSupported) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	
+	respondJSON(w, map[string]interface{}{
+		"status":      "snapshot_created",
+		"vm_id":       vmID,
+		"snapshot_id": snapshotID,
+		"name":        req.Name,
+		"description": req.Description,
+		"created_at":  time.Now(),
+	})
 }
 
 // GetVMMetrics returns metrics for a VM
@@ -233,8 +381,7 @@ func (h *APIHandler) GetVMMetrics(w http.ResponseWriter, r *http.Request) {
 	// from := r.URL.Query().Get("from")
 	// to := r.URL.Query().Get("to")
 	
-	ctx := context.Background()
-	metrics, err := h.vmManager.GetVMMetrics(ctx, vmID)
+	metrics, err := h.vmManager.GetVMMetrics(r.Context(), vmID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -247,9 +394,8 @@ func (h *APIHandler) GetVMMetrics(w http.ResponseWriter, r *http.Request) {
 
 // ListVolumes returns all storage volumes
 func (h *APIHandler) ListVolumes(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement volume listing through TierManager
-	volumes := []map[string]interface{}{}
-	respondJSON(w, volumes)
+	// Return NotImplemented status since TierManager doesn't have ListVolumes method
+	http.Error(w, "Volume listing not yet implemented", http.StatusNotImplemented)
 }
 
 // CreateVolume creates a new storage volume
@@ -260,47 +406,35 @@ func (h *APIHandler) CreateVolume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// TODO: Implement volume creation through TierManager
-	volume := map[string]interface{}{
-		"name": req.Name,
-		"size": req.Size,
-		"tier": req.Tier,
-		"status": "created",
-	}
-	
-	respondJSON(w, volume)
+	// Return NotImplemented status since TierManager doesn't have CreateVolume method
+	http.Error(w, "Volume creation not yet implemented", http.StatusNotImplemented)
 }
 
 // GetVolume returns a specific volume
 func (h *APIHandler) GetVolume(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	volumeID := vars["id"]
+	_ = volumeID // placeholder usage
 	
-	// TODO: Implement volume retrieval through TierManager
-	volume := map[string]interface{}{
-		"id": volumeID,
-		"name": "sample-volume",
-		"status": "available",
-	}
-	
-	respondJSON(w, volume)
+	// Return NotImplemented status since TierManager doesn't have GetVolume method
+	http.Error(w, "Volume retrieval not yet implemented", http.StatusNotImplemented)
 }
 
 // DeleteVolume deletes a volume
 func (h *APIHandler) DeleteVolume(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	volumeID := vars["id"]
-	
-	// TODO: Implement volume deletion through TierManager
 	_ = volumeID // placeholder usage
 	
-	w.WriteHeader(http.StatusNoContent)
+	// Return NotImplemented status since TierManager doesn't have DeleteVolume method
+	http.Error(w, "Volume deletion not yet implemented", http.StatusNotImplemented)
 }
 
 // ChangeVolumeTier changes the storage tier of a volume
 func (h *APIHandler) ChangeVolumeTier(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	volumeID := vars["id"]
+	_ = volumeID // placeholder usage
 	
 	var req ChangeTierRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -308,10 +442,8 @@ func (h *APIHandler) ChangeVolumeTier(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// TODO: Implement tier migration through TierManager
-	_ = volumeID // placeholder usage
-	
-	respondJSON(w, map[string]string{"status": "migrated", "new_tier": req.NewTier})
+	// Return NotImplemented status since TierManager doesn't have MoveVolumeTier method
+	http.Error(w, "Volume tier migration not yet implemented", http.StatusNotImplemented)
 }
 
 // ListStorageTiers returns all storage tiers

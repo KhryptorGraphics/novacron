@@ -1,17 +1,21 @@
 package security
 
 import (
+	"crypto"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
 	"sync"
 	"time"
 )
@@ -51,14 +55,11 @@ type EncryptionKey struct {
 	Metadata    map[string]interface{} `json:"metadata"`
 }
 
-type KeyStatus string
-
+// Using KeyStatus from api_security.go to avoid duplicate definitions
+// Additional statuses specific to encryption manager
 const (
-	KeyStatusActive   KeyStatus = "active"
-	KeyStatusInactive KeyStatus = "inactive"
 	KeyStatusRotating KeyStatus = "rotating"
 	KeyStatusExpired  KeyStatus = "expired"
-	KeyStatusRevoked  KeyStatus = "revoked"
 )
 
 // CertificateManager handles TLS certificate management
@@ -692,5 +693,183 @@ func generateSerial() *big.Int {
 	return n
 }
 
-// Import for big.Int
-import "math/big"
+// SignMessage signs a message using Ed25519
+func (em *EncryptionManager) SignMessage(msg []byte) ([]byte, error) {
+	em.keyManager.mu.RLock()
+	defer em.keyManager.mu.RUnlock()
+
+	// Find or create signing key
+	var signingKey *EncryptionKey
+	for _, key := range em.keyManager.keys {
+		if key.Purpose == "signing" && key.Status == KeyStatusActive && key.Algorithm == "Ed25519" {
+			signingKey = key
+			break
+		}
+	}
+
+	if signingKey == nil {
+		// Generate new Ed25519 signing key
+		em.keyManager.mu.RUnlock()
+		newKey, err := em.GenerateSigningKey()
+		em.keyManager.mu.RLock()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate signing key: %w", err)
+		}
+		signingKey = newKey
+	}
+
+	// Sign the message
+	if len(signingKey.KeyData) != ed25519.PrivateKeySize {
+		return nil, fmt.Errorf("invalid Ed25519 private key size")
+	}
+
+	privateKey := ed25519.PrivateKey(signingKey.KeyData)
+	signature := ed25519.Sign(privateKey, msg)
+
+	return signature, nil
+}
+
+// VerifySignature verifies a message signature using Ed25519
+func (em *EncryptionManager) VerifySignature(msg []byte, sig []byte) error {
+	em.keyManager.mu.RLock()
+	defer em.keyManager.mu.RUnlock()
+
+	// Find signing key
+	var signingKey *EncryptionKey
+	for _, key := range em.keyManager.keys {
+		if key.Purpose == "signing" && key.Algorithm == "Ed25519" && len(key.PublicKey) > 0 {
+			signingKey = key
+			break
+		}
+	}
+
+	if signingKey == nil {
+		return fmt.Errorf("no signing key found for verification")
+	}
+
+	// Verify the signature
+	if len(signingKey.PublicKey) != ed25519.PublicKeySize {
+		return fmt.Errorf("invalid Ed25519 public key size")
+	}
+
+	publicKey := ed25519.PublicKey(signingKey.PublicKey)
+	if !ed25519.Verify(publicKey, msg, sig) {
+		return fmt.Errorf("signature verification failed")
+	}
+
+	return nil
+}
+
+// GenerateSigningKey generates a new Ed25519 signing key pair
+func (em *EncryptionManager) GenerateSigningKey() (*EncryptionKey, error) {
+	// Generate Ed25519 key pair
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate Ed25519 key: %w", err)
+	}
+
+	key := &EncryptionKey{
+		ID:        generateKeyID(),
+		Algorithm: "Ed25519",
+		KeySize:   256,
+		Purpose:   "signing",
+		Status:    KeyStatusActive,
+		KeyData:   privateKey,
+		PublicKey: publicKey,
+		CreatedAt: time.Now(),
+		Metadata:  map[string]interface{}{"type": "signing"},
+	}
+
+	em.keyManager.mu.Lock()
+	em.keyManager.keys[key.ID] = key
+	em.keyManager.mu.Unlock()
+
+	return key, nil
+}
+
+// SignMessageRSA signs a message using RSA (alternative to Ed25519)
+func (em *EncryptionManager) SignMessageRSA(msg []byte) ([]byte, error) {
+	em.keyManager.mu.RLock()
+	defer em.keyManager.mu.RUnlock()
+
+	// Find RSA signing key
+	var signingKey *EncryptionKey
+	for _, key := range em.keyManager.keys {
+		if key.Purpose == "signing" && key.Status == KeyStatusActive && key.Algorithm == "RSA" {
+			signingKey = key
+			break
+		}
+	}
+
+	if signingKey == nil {
+		return nil, fmt.Errorf("no RSA signing key found")
+	}
+
+	// Parse RSA private key
+	block, _ := pem.Decode(signingKey.KeyData)
+	if block == nil {
+		return nil, fmt.Errorf("failed to parse PEM block")
+	}
+
+	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse RSA private key: %w", err)
+	}
+
+	// Sign the message
+	hash := sha256.Sum256(msg)
+	signature, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, hash[:])
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign message: %w", err)
+	}
+
+	return signature, nil
+}
+
+// VerifySignatureRSA verifies a message signature using RSA
+func (em *EncryptionManager) VerifySignatureRSA(msg []byte, sig []byte) error {
+	em.keyManager.mu.RLock()
+	defer em.keyManager.mu.RUnlock()
+
+	// Find RSA signing key with public key
+	var signingKey *EncryptionKey
+	for _, key := range em.keyManager.keys {
+		if key.Purpose == "signing" && key.Algorithm == "RSA" && len(key.PublicKey) > 0 {
+			signingKey = key
+			break
+		}
+	}
+
+	if signingKey == nil {
+		return fmt.Errorf("no RSA signing key found for verification")
+	}
+
+	// Parse RSA public key
+	block, _ := pem.Decode(signingKey.PublicKey)
+	if block == nil {
+		return fmt.Errorf("failed to parse PEM block")
+	}
+
+	publicKey, err := x509.ParsePKCS1PublicKey(block.Bytes)
+	if err != nil {
+		// Try parsing as PKIX
+		pubInterface, err := x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse RSA public key: %w", err)
+		}
+		var ok bool
+		publicKey, ok = pubInterface.(*rsa.PublicKey)
+		if !ok {
+			return fmt.Errorf("not an RSA public key")
+		}
+	}
+
+	// Verify the signature
+	hash := sha256.Sum256(msg)
+	err = rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, hash[:], sig)
+	if err != nil {
+		return fmt.Errorf("signature verification failed: %w", err)
+	}
+
+	return nil
+}

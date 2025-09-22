@@ -507,6 +507,174 @@ func TestDedupStatsAPI(t *testing.T) {
 	}
 }
 
+// TestDeleteBackupAPI tests the backup deletion API endpoint with typed error handling
+func TestDeleteBackupAPI(t *testing.T) {
+	tmpDir := t.TempDir()
+	server := setupTestServer(tmpDir)
+	
+	// Test delete non-existent backup (should return 404 with typed error)
+	httpReq := httptest.NewRequest("DELETE", "/api/v1/backup/backups/non-existent-backup", nil)
+	httpReq = mux.SetURLVars(httpReq, map[string]string{"backup_id": "non-existent-backup"})
+	recorder := httptest.NewRecorder()
+	
+	server.Router().ServeHTTP(recorder, httpReq)
+	
+	if recorder.Code != http.StatusNotFound {
+		t.Errorf("Expected 404 for non-existent backup delete, got %d", recorder.Code)
+	}
+	
+	// Verify error message contains proper error handling
+	body := recorder.Body.String()
+	if !strings.Contains(body, "Backup not found") {
+		t.Errorf("Expected 'Backup not found' error message, got: %s", body)
+	}
+	
+	// Test delete with invalid backup ID format
+	httpReq = httptest.NewRequest("DELETE", "/api/v1/backup/backups/", nil)
+	httpReq = mux.SetURLVars(httpReq, map[string]string{"backup_id": ""})
+	recorder = httptest.NewRecorder()
+	
+	server.Router().ServeHTTP(recorder, httpReq)
+	
+	if recorder.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 for empty backup ID, got %d", recorder.Code)
+	}
+}
+
+// TestBackupVerificationAPI tests the backup verification API endpoint
+func TestBackupVerificationAPI(t *testing.T) {
+	tmpDir := t.TempDir()
+	server := setupTestServer(tmpDir)
+	
+	// Test verify non-existent backup
+	httpReq := httptest.NewRequest("POST", "/api/v1/backup/backups/non-existent-backup/verify", nil)
+	httpReq = mux.SetURLVars(httpReq, map[string]string{"backup_id": "non-existent-backup"})
+	recorder := httptest.NewRecorder()
+	
+	server.Router().ServeHTTP(recorder, httpReq)
+	
+	if recorder.Code != http.StatusNotFound {
+		t.Errorf("Expected 404 for non-existent backup verify, got %d", recorder.Code)
+	}
+}
+
+// TestRequestContextUsage tests that request context is properly used in handlers
+func TestRequestContextUsage(t *testing.T) {
+	tmpDir := t.TempDir()
+	server := setupTestServer(tmpDir)
+	
+	// Test with cancelled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+	
+	// Test delete with cancelled context
+	httpReq := httptest.NewRequestWithContext(ctx, "DELETE", "/api/v1/backup/backups/test-backup", nil)
+	httpReq = mux.SetURLVars(httpReq, map[string]string{"backup_id": "test-backup"})
+	recorder := httptest.NewRecorder()
+	
+	server.Router().ServeHTTP(recorder, httpReq)
+	
+	// Should handle context cancellation appropriately
+	if recorder.Code == http.StatusOK {
+		t.Error("Expected non-200 status for cancelled context request")
+	}
+	
+	// Test create backup with cancelled context
+	req := BackupCreateRequest{
+		VMID:       "test-vm-cancelled",
+		VMPath:     "/tmp/test-vm-disk.img",
+		BackupType: "full",
+		Metadata:   map[string]string{"test": "cancelled"},
+	}
+	
+	body, _ := json.Marshal(req)
+	httpReq = httptest.NewRequestWithContext(ctx, "POST", "/api/v1/backup/backups", bytes.NewBuffer(body))
+	httpReq.Header.Set("Content-Type", "application/json")
+	recorder = httptest.NewRecorder()
+	
+	server.Router().ServeHTTP(recorder, httpReq)
+	
+	// Should handle context cancellation appropriately
+	if recorder.Code == http.StatusOK {
+		t.Error("Expected non-200 status for cancelled context create request")
+	}
+}
+
+// TestErrorHandlingTypes tests that proper typed errors are returned
+func TestErrorHandlingTypes(t *testing.T) {
+	tmpDir := t.TempDir()
+	server := setupTestServer(tmpDir)
+	
+	testCases := []struct {
+		name           string
+		method         string
+		path           string
+		vars           map[string]string
+		expectedStatus int
+		expectedError  string
+	}{
+		{
+			name:           "Get non-existent backup",
+			method:         "GET",
+			path:           "/api/v1/backup/backups/non-existent",
+			vars:           map[string]string{"backup_id": "non-existent"},
+			expectedStatus: http.StatusNotFound,
+			expectedError:  "Backup not found",
+		},
+		{
+			name:           "Delete non-existent backup",
+			method:         "DELETE", 
+			path:           "/api/v1/backup/backups/non-existent",
+			vars:           map[string]string{"backup_id": "non-existent"},
+			expectedStatus: http.StatusNotFound,
+			expectedError:  "Backup not found",
+		},
+		{
+			name:           "Create restore with non-existent backup",
+			method:         "POST",
+			path:           "/api/v1/backup/restore",
+			expectedStatus: http.StatusNotFound,
+			expectedError:  "Backup not found",
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var httpReq *http.Request
+			
+			if tc.method == "POST" && strings.Contains(tc.path, "restore") {
+				// Special case for restore request
+				req := RestoreCreateRequest{
+					BackupID:    "non-existent-backup",
+					TargetPath:  "/tmp/restore-target",
+					RestoreType: "full",
+				}
+				body, _ := json.Marshal(req)
+				httpReq = httptest.NewRequest(tc.method, tc.path, bytes.NewBuffer(body))
+				httpReq.Header.Set("Content-Type", "application/json")
+			} else {
+				httpReq = httptest.NewRequest(tc.method, tc.path, nil)
+			}
+			
+			if tc.vars != nil {
+				httpReq = mux.SetURLVars(httpReq, tc.vars)
+			}
+			
+			recorder := httptest.NewRecorder()
+			server.Router().ServeHTTP(recorder, httpReq)
+			
+			if recorder.Code != tc.expectedStatus {
+				t.Errorf("Expected status %d, got %d", tc.expectedStatus, recorder.Code)
+			}
+			
+			body := recorder.Body.String()
+			if !strings.Contains(body, tc.expectedError) {
+				t.Errorf("Expected error message to contain '%s', got: %s", tc.expectedError, body)
+			}
+		})
+	}
+}
+
 // TestNotImplementedEndpoints tests endpoints that return not implemented
 func TestNotImplementedEndpoints(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -516,7 +684,6 @@ func TestNotImplementedEndpoints(t *testing.T) {
 		method string
 		path   string
 	}{
-		{"DELETE", "/api/v1/backup/backups/test-backup"},
 		{"POST", "/api/v1/backup/backups/test-backup/verify"},
 	}
 	

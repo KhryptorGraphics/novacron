@@ -1,0 +1,188 @@
+# Additional exporters configuration for Docker Compose deployment
+# This file should be merged with docker-compose.production.yml using:
+# docker-compose -f docker-compose.production.yml -f docker-compose.exporters.yml up -d
+
+version: '3.9'
+
+services:
+  # PostgreSQL Exporter for Prometheus metrics
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: postgres-exporter
+    hostname: postgres-exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_URI: postgres-primary:5432/postgres?sslmode=disable
+      DATA_SOURCE_USER: postgres
+      DATA_SOURCE_PASS_FILE: /run/secrets/postgres_password
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: "true"
+      PG_EXPORTER_INCLUDE_DATABASES: "novacron,postgres"
+      PG_EXPORTER_EXCLUDE_DATABASES: "template0,template1"
+      PG_EXPORTER_CONSTANT_LABELS: "cluster=novacron-prod"
+    secrets:
+      - postgres_password
+    networks:
+      - novacron-net
+      - monitoring-net
+    expose:
+      - "9187"
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9187/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+  # Redis Exporter for Prometheus metrics
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.55.0
+    container_name: redis-exporter
+    hostname: redis-exporter
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://redis-master:6379
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      REDIS_EXPORTER_CHECK_KEYS: "db0:*"
+      REDIS_EXPORTER_CHECK_SINGLE_KEYS: "novacron:*"
+      REDIS_EXPORTER_INCL_SYSTEM_METRICS: "true"
+    secrets:
+      - redis_password
+    networks:
+      - novacron-net
+      - monitoring-net
+    expose:
+      - "9121"
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9121/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+  # Node Exporter for system metrics
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: node-exporter
+    hostname: node-exporter
+    restart: unless-stopped
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--collector.netclass.ignored-devices=^(veth.*|docker.*|br-.*)$$'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - monitoring-net
+    expose:
+      - "9100"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9100/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 32M
+
+  # Blackbox Exporter for endpoint probing
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.24.0
+    container_name: blackbox-exporter
+    hostname: blackbox-exporter
+    restart: unless-stopped
+    command:
+      - '--config.file=/config/blackbox.yml'
+    volumes:
+      - type: bind
+        source: /etc/novacron/blackbox/blackbox.yml
+        target: /config/blackbox.yml
+        read_only: true
+    networks:
+      - monitoring-net
+      - novacron-net
+    expose:
+      - "9115"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9115/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
+        reservations:
+          cpus: '0.05'
+          memory: 16M
+
+# Update Prometheus scrape configs to use these exporters
+# Add these job configurations to your prometheus.yml:
+#
+# scrape_configs:
+#   - job_name: 'postgres-exporter'
+#     static_configs:
+#       - targets: ['postgres-exporter:9187']
+#     relabel_configs:
+#       - source_labels: [__address__]
+#         target_label: instance
+#         replacement: 'postgres-cluster'
+#
+#   - job_name: 'redis-exporter'
+#     static_configs:
+#       - targets: ['redis-exporter:9121']
+#     relabel_configs:
+#       - source_labels: [__address__]
+#         target_label: instance
+#         replacement: 'redis-cluster'
+#
+#   - job_name: 'node'
+#     static_configs:
+#       - targets: ['node-exporter:9100']
+#
+#   - job_name: 'blackbox'
+#     metrics_path: /probe
+#     params:
+#       module: [http_2xx]
+#     static_configs:
+#       - targets:
+#           - https://api.novacron.io/health
+#           - https://novacron.io
+#     relabel_configs:
+#       - source_labels: [__address__]
+#         target_label: __param_target
+#       - source_labels: [__param_target]
+#         target_label: instance
+#       - target_label: __address__
+#         replacement: blackbox-exporter:9115
