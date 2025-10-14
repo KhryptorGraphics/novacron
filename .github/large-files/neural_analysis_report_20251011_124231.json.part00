@@ -1,0 +1,433 @@
+{
+  "timestamp": "2025-10-11T12:42:30.702626",
+  "summary": {
+    "files_analyzed": 653,
+    "total_patterns": 117442,
+    "anti_patterns": 74,
+    "quality_score": "87.87%",
+    "security_score": "77.79%",
+    "performance_score": "38.94%"
+  },
+  "categories": {
+    "API_DESIGN": {
+      "total": 40768,
+      "anti_patterns": 0,
+      "unique_patterns": 10,
+      "top_patterns": [
+        [
+          "api_error_responses",
+          21146
+        ],
+        [
+          "api_pagination",
+          4860
+        ],
+        [
+          "api_caching",
+          3306
+        ],
+        [
+          "api_restful",
+          3279
+        ],
+        [
+          "api_filtering",
+          2567
+        ]
+      ]
+    },
+    "ERROR_HANDLING": {
+      "total": 13816,
+      "anti_patterns": 0,
+      "unique_patterns": 7,
+      "top_patterns": [
+        [
+          "error_error_context",
+          8818
+        ],
+        [
+          "error_graceful_degradation",
+          3773
+        ],
+        [
+          "error_error_recovery",
+          580
+        ],
+        [
+          "error_validation_errors",
+          387
+        ],
+        [
+          "error_error_logging",
+          192
+        ]
+      ]
+    },
+    "PERFORMANCE": {
+      "total": 28337,
+      "anti_patterns": 59,
+      "unique_patterns": 11,
+      "top_patterns": [
+        [
+          "perf_caching",
+          8922
+        ],
+        [
+          "perf_pagination",
+          4862
+        ],
+        [
+          "perf_lazy_loading",
+          3520
+        ],
+        [
+          "perf_compression",
+          3489
+        ],
+        [
+          "perf_query_optimization",
+          2285
+        ]
+      ]
+    },
+    "SECURITY": {
+      "total": 15331,
+      "anti_patterns": 15,
+      "unique_patterns": 14,
+      "top_patterns": [
+        [
+          "sec_authentication",
+          3144
+        ],
+        [
+          "sec_encryption",
+          3003
+        ],
+        [
+          "sec_input_validation",
+          2540
+        ],
+        [
+          "sec_authorization",
+          2273
+        ],
+        [
+          "sec_rate_limiting",
+          1720
+        ]
+      ]
+    },
+    "TESTING": {
+      "total": 13610,
+      "anti_patterns": 0,
+      "unique_patterns": 9,
+      "top_patterns": [
+        [
+          "test_assertions",
+          4826
+        ],
+        [
+          "test_bdd",
+          2623
+        ],
+        [
+          "test_coverage",
+          2178
+        ],
+        [
+          "test_mocking",
+          1547
+        ],
+        [
+          "test_test_fixtures",
+          1402
+        ]
+      ]
+    },
+    "DEPLOYMENT": {
+      "total": 5580,
+      "anti_patterns": 0,
+      "unique_patterns": 10,
+      "top_patterns": [
+        [
+          "deploy_containerization",
+          1560
+        ],
+        [
+          "deploy_load_balancing",
+          1181
+        ],
+        [
+          "deploy_health_checks",
+          853
+        ],
+        [
+          "deploy_monitoring",
+          752
+        ],
+        [
+          "deploy_auto_scaling",
+          626
+        ]
+      ]
+    }
+  },
+  "learnings": {
+    "API_DESIGN": [
+      "Most common patterns: api_error_responses, api_pagination, api_caching, api_restful, api_filtering"
+    ],
+    "ERROR_HANDLING": [
+      "Most common patterns: error_error_context, error_graceful_degradation, error_error_recovery, error_validation_errors, error_error_logging"
+    ],
+    "PERFORMANCE": [
+      "Most common patterns: perf_caching, perf_pagination, perf_lazy_loading, perf_compression, perf_query_optimization",
+      "Found 59 anti-patterns that need fixing",
+      "Average performance impact: 85.00%"
+    ],
+    "SECURITY": [
+      "Most common patterns: sec_authentication, sec_encryption, sec_input_validation, sec_authorization, sec_rate_limiting",
+      "Found 15 anti-patterns that need fixing",
+      "Critical: 15 security vulnerabilities detected"
+    ],
+    "TESTING": [
+      "Most common patterns: test_assertions, test_bdd, test_coverage, test_mocking, test_test_fixtures",
+      "Test files analyzed: 7069"
+    ],
+    "DEPLOYMENT": [
+      "Most common patterns: deploy_containerization, deploy_load_balancing, deploy_health_checks, deploy_monitoring, deploy_auto_scaling"
+    ]
+  },
+  "improvements": [
+    {
+      "priority": "high",
+      "category": "SECURITY",
+      "pattern": "vuln_hardcoded_secrets",
+      "file": "/home/kp/novacron/backend/cmd/api-server/main_production.go",
+      "line": 33,
+      "description": "Security vulnerability: hardcoded_secrets",
+      "recommendations": [
+        "Critical security issue: hardcoded_secrets"
+      ],
+      "impact": {
+        "performance": 0.0,
+        "security": 0.1,
+        "maintainability": 0.3
+      }
+    },
+    {
+      "priority": "high",
+      "category": "SECURITY",
+      "pattern": "vuln_hardcoded_secrets",
+      "file": "/home/kp/novacron/backend/cmd/api-server/main_working.go",
+      "line": 33,
+      "description": "Security vulnerability: hardcoded_secrets",
+      "recommendations": [
+        "Critical security issue: hardcoded_secrets"
+      ],
+      "impact": {
+        "performance": 0.0,
+        "security": 0.1,
+        "maintainability": 0.3
+      }
+    },
+    {
+      "priority": "high",
+      "category": "SECURITY",
+      "pattern": "vuln_hardcoded_secrets",
+      "file": "/home/kp/novacron/backend/pkg/middleware/request.go",
+      "line": 24,
+      "description": "Security vulnerability: hardcoded_secrets",
+      "recommendations": [
+        "Critical security issue: hardcoded_secrets"
+      ],
+      "impact": {
+        "performance": 0.0,
+        "security": 0.1,
+        "maintainability": 0.3
+      }
+    },
+    {
+      "priority": "high",
+      "category": "SECURITY",
+      "pattern": "vuln_hardcoded_secrets",
+      "file": "/home/kp/novacron/backend/pkg/middleware/request.go",
+      "line": 25,
+      "description": "Security vulnerability: hardcoded_secrets",
+      "recommendations": [
+        "Critical security issue: hardcoded_secrets"
+      ],
+      "impact": {
+        "performance": 0.0,
+        "security": 0.1,
+        "maintainability": 0.3
+      }
+    },
+    {
+      "priority": "high",
+      "category": "SECURITY",
+      "pattern": "vuln_hardcoded_secrets",
+      "file": "/home/kp/novacron/backend/pkg/middleware/request.go",
+      "line": 26,
+      "description": "Security vulnerability: hardcoded_secrets",
+      "recommendations": [
+        "Critical security issue: hardcoded_secrets"
+      ],
+      "impact": {
+        "performance": 0.0,
+        "security": 0.1,
+        "maintainability": 0.3
+      }
+    },
+    {
+      "priority": "high",
+      "category": "SECURITY",
+      "pattern": "vuln_hardcoded_secrets",
+      "file": "/home/kp/novacron/backend/pkg/middleware/request.go",
+      "line": 27,
+      "description": "Security vulnerability: hardcoded_secrets",
+      "recommendations": [
+        "Critical security issue: hardcoded_secrets"
+      ],
+      "impact": {
+        "performance": 0.0,
+        "security": 0.1,
+        "maintainability": 0.3
+      }
+    },
+    {
+      "priority": "high",
+      "category": "SECURITY",
+      "pattern": "vuln_hardcoded_secrets",
+      "file": "/home/kp/novacron/backend/pkg/middleware/request.go",
+      "line": 28,
+      "description": "Security vulnerability: hardcoded_secrets",
+      "recommendations": [
+        "Critical security issue: hardcoded_secrets"
+      ],
+      "impact": {
+        "performance": 0.0,
+        "security": 0.1,
+        "maintainability": 0.3
+      }
+    },
+    {
+      "priority": "high",
+      "category": "SECURITY",
+      "pattern": "vuln_hardcoded_secrets",
+      "file": "/home/kp/novacron/backend/pkg/middleware/request.go",
+      "line": 29,
+      "description": "Security vulnerability: hardcoded_secrets",
+      "recommendations": [
+        "Critical security issue: hardcoded_secrets"
+      ],
+      "impact": {
+        "performance": 0.0,
+        "security": 0.1,
+        "maintainability": 0.3
+      }
+    },
+    {
+      "priority": "high",
+      "category": "SECURITY",
+      "pattern": "vuln_hardcoded_secrets",
+      "file": "/home/kp/novacron/backend/core/audit/types.go",
+      "line": 78,
+      "description": "Security vulnerability: hardcoded_secrets",
+      "recommendations": [
+        "Critical security issue: hardcoded_secrets"
+      ],
+      "impact": {
+        "performance": 0.0,
+        "security": 0.1,
+        "maintainability": 0.3
+      }
+    },
+    {
+      "priority": "high",
+      "category": "SECURITY",
+      "pattern": "vuln_hardcoded_secrets",
+      "file": "/home/kp/novacron/backend/core/plugins/storage/object/driver.go",
+      "line": 167,
+      "description": "Security vulnerability: hardcoded_secrets",
+      "recommendations": [
+        "Critical security issue: hardcoded_secrets"
+      ],
+      "impact": {
+        "performance": 0.0,
+        "security": 0.1,
+        "maintainability": 0.3
+      }
+    }
+  ],
+  "propagation_strategy": {
+    "patterns_to_propagate": [
+      {
+        "category": "ERROR_HANDLING",
+        "pattern": "error_graceful_degradation",
+        "description": "Error handling: graceful_degradation",
+        "example": "Default",
+        "benefits": {
+          "security": 0.85,
+          "performance": 0.1,
+          "maintainability": 0.95
+        }
+      },
+      {
+        "category": "SECURITY",
+        "pattern": "sec_authentication",
+        "description": "Security implementation: authentication",
+        "example": "auth",
+        "benefits": {
+          "security": 0.95,
+          "performance": 0.3,
+          "maintainability": 0.85
+        }
+      }
+    ],
+    "files_to_update": [
+      "/home/kp/novacron/backend/cmd/api-server/main_secure.go",
+      "/home/kp/novacron/backend/cmd/api-server/main_enhanced.go",
+      "/home/kp/novacron/backend/cmd/api-server/main.go",
+      "/home/kp/novacron/backend/cmd/api-server/main_improved.go",
+      "/home/kp/novacron/backend/cmd/api-server/simple-api.go",
+      "/home/kp/novacron/backend/cmd/api-server/main_production.go",
+      "/home/kp/novacron/backend/cmd/api-server/main_multicloud.go",
+      "/home/kp/novacron/backend/cmd/api-server/main_real_backend.go",
+      "/home/kp/novacron/backend/cmd/api-server/main_working.go",
+      "/home/kp/novacron/backend/cmd/auth-test/main.go",
+      "/home/kp/novacron/backend/cmd/api-server/main_secure.go",
+      "/home/kp/novacron/backend/cmd/api-server/main_enhanced.go",
+      "/home/kp/novacron/backend/cmd/api-server/main.go",
+      "/home/kp/novacron/backend/cmd/api-server/simple-api.go",
+      "/home/kp/novacron/backend/cmd/api-server/main_production.go",
+      "/home/kp/novacron/backend/cmd/api-server/main_multicloud.go",
+      "/home/kp/novacron/backend/cmd/api-server/main_real_backend.go",
+      "/home/kp/novacron/backend/cmd/api-server/main_working.go",
+      "/home/kp/novacron/backend/cmd/auth-test/main.go",
+      "/home/kp/novacron/backend/api/auth/auth_handlers.go"
+    ],
+    "estimated_impact": {
+      "files_affected": 11,
+      "quality_improvement": 0.25,
+      "security_improvement": 0.3,
+      "performance_improvement": 0.2
+    }
+  },
+  "model_accuracy": {
+    "API_DESIGN": 0.1,
+    "ERROR_HANDLING": 0.1,
+    "PERFORMANCE": 0.1,
+    "SECURITY": 0.1,
+    "TESTING": 0.1,
+    "DEPLOYMENT": 0.1,
+    "CONCURRENCY": 0.0,
+    "DATA_ACCESS": 0.0,
+    "CACHING": 0.0,
+    "MONITORING": 0.0,
+    "AUTHENTICATION": 0.0,
+    "VALIDATION": 0.0,
+    "LOGGING": 0.0,
+    "CONFIGURATION": 0.0,
+    "DEPENDENCY": 0.0
+  }
+}

@@ -1,0 +1,5 @@
+#!/bin/bash
+# Git hook: Automatically reassemble large files after merge/pull
+
+echo "Running post-merge hook: reassembling large files..."
+bash scripts/join-large-files.sh
