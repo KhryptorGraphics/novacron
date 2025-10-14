@@ -1,0 +1,8 @@
+#!/bin/bash
+# Git hook: Automatically reassemble large files after checkout/clone
+
+# Only run on branch checkout (not file checkout)
+if [ "$3" == "1" ]; then
+    echo "Running post-checkout hook: reassembling large files..."
+    bash scripts/join-large-files.sh
+fi
