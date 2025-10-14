@@ -1,35 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(source:*)",
-      "Bash(pip install:*)",
-      "Bash(python -m pytest tests/test_ai_endpoints.py::TestGoClientCompatibility -v)",
-      "Bash(find:*)",
-      "Bash(go build:*)",
-      "Bash(go fmt:*)",
-      "Bash(npm run typecheck:*)",
-      "Bash(npm run:*)",
-      "Bash(npm install)",
-      "Bash(npx tsc:*)",
-      "Bash(go vet:*)",
-      "Bash(python test:*)",
-      "Bash(python:*)",
-      "mcp__sequential-thinking__sequentialthinking",
-      "Bash(go test:*)",
-      "Bash(go run:*)",
-      "Bash(chmod:*)",
-      "Bash(go mod:*)",
-      "Bash(PYTHONPATH=/home/kp/novacron python tests/verify_api_models_endpoint.py)",
-      "Bash(./scripts/verify_ai_fallback.sh:*)",
-      "Bash(timeout:*)",
-      "Bash(go get:*)",
-      "Read(//home/kp/**)",
-      "Bash(go list:*)",
-      "Bash(gofmt:*)",
-      "Bash(xargs:*)",
-      "Bash(mkdir:*)"
+      "mcp__ruv-swarm",
+      "mcp__claude-flow@alpha",
+      "mcp__flow-nexus"
     ],
-    "deny": [],
-    "ask": []
+    "deny": []
   }
 }
