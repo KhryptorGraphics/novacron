@@ -7,6 +7,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { QueryProvider } from "@/providers/query-provider";
 import { AuthProvider } from "@/hooks/useAuth";
 import { RBACProvider } from "@/contexts/RBACContext";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 // Metadata for the application
 export const metadata: Metadata = {
@@ -22,16 +23,18 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="font-sans antialiased">
-        <AuthProvider>
-          <RBACProvider>
-            <QueryProvider>
-              <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-                {children}
-                <Toaster />
-              </ThemeProvider>
-            </QueryProvider>
-          </RBACProvider>
-        </AuthProvider>
+        <ErrorBoundary>
+          <AuthProvider>
+            <RBACProvider>
+              <QueryProvider>
+                <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+                  {children}
+                  <Toaster />
+                </ThemeProvider>
+              </QueryProvider>
+            </RBACProvider>
+          </AuthProvider>
+        </ErrorBoundary>
       </body>
     </html>
   );

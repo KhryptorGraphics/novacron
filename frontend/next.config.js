@@ -1,11 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Disable static optimization to avoid null pointer errors during build
+  // Experimental features
   experimental: {
-    appDir: true,
-    // Disable static optimization
-    staticPageGenerationTimeout: 0,
-    dynamicIO: false,
+    // App router is now default in Next.js 13.5+
   },
 
   // Compiler optimizations

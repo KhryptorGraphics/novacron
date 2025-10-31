@@ -1,5 +1,6 @@
 {
   "/_not-found": "app/_not-found.js",
+  "/users/page": "app/users/page.js",
   "/dashboard/page": "app/dashboard/page.js",
   "/monitoring/page": "app/monitoring/page.js",
   "/core/vms/[id]/page": "app/core/vms/[id]/page.js",
@@ -8,18 +9,17 @@
   "/analytics/page": "app/analytics/page.js",
   "/network/page": "app/network/page.js",
   "/storage/page": "app/storage/page.js",
-  "/settings/page": "app/settings/page.js",
   "/security/page": "app/security/page.js",
-  "/users/page": "app/users/page.js",
   "/vms/page": "app/vms/page.js",
+  "/settings/page": "app/settings/page.js",
   "/admin/analytics/page": "app/admin/analytics/page.js",
   "/admin/config/page": "app/admin/config/page.js",
   "/admin/security/page": "app/admin/security/page.js",
   "/admin/users/page": "app/admin/users/page.js",
   "/admin/vms/page": "app/admin/vms/page.js",
-  "/admin/page": "app/admin/page.js",
-  "/auth/register/page": "app/auth/register/page.js",
-  "/auth/forgot-password/page": "app/auth/forgot-password/page.js",
   "/auth/setup-2fa/page": "app/auth/setup-2fa/page.js",
-  "/auth/login/page": "app/auth/login/page.js"
+  "/admin/page": "app/admin/page.js",
+  "/auth/forgot-password/page": "app/auth/forgot-password/page.js",
+  "/auth/login/page": "app/auth/login/page.js",
+  "/auth/register/page": "app/auth/register/page.js"
 }
