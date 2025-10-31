@@ -119,31 +119,66 @@ class AuthService {
     });
   }
 
+  // Decode JWT token (simple base64 decode - in production use a proper JWT library)
+  private decodeJWT(token: string): any {
+    try {
+      const parts = token.split('.');
+      if (parts.length !== 3) {
+        throw new Error('Invalid JWT format');
+      }
+
+      // Decode the payload (second part)
+      const payload = parts[1];
+      const decoded = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+      return JSON.parse(decoded);
+    } catch (error) {
+      console.error('Failed to decode JWT:', error);
+      return null;
+    }
+  }
+
   // Get current user from token
   getCurrentUser(): UserResponse | null {
     const token = this.getToken();
     if (!token) return null;
-    
+
     try {
-      // In a real implementation, you would decode the JWT token
-      // For now, we'll try to get user data from localStorage or return demo user
-      if (typeof window !== 'undefined') {
-        const storedUser = localStorage.getItem('authUser');
-        if (storedUser) {
-          return JSON.parse(storedUser);
-        }
+      // Decode JWT token to get user information
+      const payload = this.decodeJWT(token);
+      if (!payload) {
+        // Token is invalid, remove it
+        this.removeToken();
+        return null;
       }
-      
-      // Fallback demo user - in production this should decode the JWT
-      return {
-        id: "user-123",
-        email: "user@example.com", 
-        firstName: "Demo",
-        lastName: "User",
-        status: "active"
+
+      // Check if token is expired
+      if (payload.exp && payload.exp * 1000 < Date.now()) {
+        // Token expired, remove it
+        this.removeToken();
+        return null;
+      }
+
+      // Extract user information from JWT payload
+      // The backend JWT should contain: sub (user ID), email, firstName, lastName, etc.
+      const user: UserResponse = {
+        id: payload.sub || payload.user_id || payload.id,
+        email: payload.email || '',
+        firstName: payload.firstName || payload.first_name || payload.given_name || '',
+        lastName: payload.lastName || payload.last_name || payload.family_name || '',
+        tenantId: payload.tenantId || payload.tenant_id,
+        status: payload.status || 'active',
+        two_factor_enabled: payload.two_factor_enabled || payload['2fa_enabled'] || false
       };
+
+      // Cache user data in localStorage for quick access
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('authUser', JSON.stringify(user));
+      }
+
+      return user;
     } catch (error) {
       console.error('Error getting current user:', error);
+      this.removeToken();
       return null;
     }
   }
@@ -157,7 +192,8 @@ class AuthService {
   // Get auth token
   getToken() {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('authToken');
+      // Use consistent token key
+      return localStorage.getItem('novacron_token');
     }
     return null;
   }
@@ -165,7 +201,8 @@ class AuthService {
   // Set auth token and user data
   setToken(token: string, user?: UserResponse) {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('authToken', token);
+      // Use consistent token key
+      localStorage.setItem('novacron_token', token);
       if (user) {
         localStorage.setItem('authUser', JSON.stringify(user));
       }
@@ -175,8 +212,10 @@ class AuthService {
   // Remove auth token and user data
   removeToken() {
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('authToken');
+      // Use consistent token key
+      localStorage.removeItem('novacron_token');
       localStorage.removeItem('authUser');
+      localStorage.removeItem('tempToken');
     }
   }
 

@@ -16,6 +16,8 @@
 		"test:integration:docker": "NOVACRON_USE_DOCKER=true npm run test:integration",
 		"test:all": "npm run test:unit && npm run test:integration",
 		"test:ci": "npm run test:unit && npm run test:integration:coverage",
+		"test:auto-spawn": "jest tests/unit/smart-agent-spawner.test.js tests/unit/workload-monitor.test.js",
+		"test:auto-spawn:integration": "jest tests/integration/auto-spawning-integration.test.js",
 		"start": "node server.js",
 		"start:api": "node backend/cmd/api-server/main.js",
 		"start:frontend": "npm run dev --prefix frontend",
@@ -25,7 +27,11 @@
 		"build:backend": "go build -o bin/ ./backend/...",
 		"lint": "eslint . --ext .js,.jsx,.ts,.tsx",
 		"lint:fix": "eslint . --ext .js,.jsx,.ts,.tsx --fix",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"auto-spawn": "node src/cli/auto-spawn.js",
+		"auto-spawn:start": "node src/cli/auto-spawn.js start",
+		"auto-spawn:status": "node src/cli/auto-spawn.js status",
+		"auto-spawn:help": "node src/cli/auto-spawn.js help"
 	},
 	"dependencies": {
 		"@genkit-ai/mcp": "^1.19.2",

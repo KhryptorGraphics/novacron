@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
-
-// Disable static generation for this page
-export const dynamic = 'force-dynamic';
+import { useState, useEffect } from "react";
+import { useApi, useMutation } from "@/lib/api/hooks/useApi";
+import { usersApi, User } from "@/lib/api/users";
+import { useToast } from "@/components/ui/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,66 +40,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-// Mock user data
-const mockUsers = [
-  {
-    id: "user-001",
-    firstName: "John",
-    lastName: "Doe", 
-    email: "john.doe@company.com",
-    role: "admin",
-    status: "active",
-    lastLogin: "2025-04-11T14:30:00Z",
-    createdAt: "2024-01-15T10:00:00Z",
-    permissions: ["vm.create", "vm.delete", "vm.migrate", "system.configure"],
-    phone: "+1-555-0123",
-    twoFactorEnabled: true,
-    department: "IT Operations"
-  },
-  {
-    id: "user-002",
-    firstName: "Sarah",
-    lastName: "Johnson",
-    email: "sarah.johnson@company.com",
-    role: "operator",
-    status: "active",
-    lastLogin: "2025-04-11T13:15:00Z",
-    createdAt: "2024-02-20T09:30:00Z",
-    permissions: ["vm.view", "vm.start", "vm.stop", "vm.restart"],
-    phone: "+1-555-0124",
-    twoFactorEnabled: true,
-    department: "Engineering"
-  },
-  {
-    id: "user-003",
-    firstName: "Mike",
-    lastName: "Chen",
-    email: "mike.chen@company.com",
-    role: "viewer",
-    status: "inactive",
-    lastLogin: "2025-04-05T16:45:00Z",
-    createdAt: "2024-03-10T14:15:00Z",
-    permissions: ["vm.view", "system.view"],
-    phone: "+1-555-0125",
-    twoFactorEnabled: false,
-    department: "Development"
-  },
-  {
-    id: "user-004",
-    firstName: "Emma",
-    lastName: "Wilson",
-    email: "emma.wilson@company.com",
-    role: "operator",
-    status: "pending",
-    lastLogin: null,
-    createdAt: "2025-04-10T11:00:00Z",
-    permissions: ["vm.view", "vm.start", "vm.stop"],
-    phone: "+1-555-0126",
-    twoFactorEnabled: false,
-    department: "QA"
-  }
-];
-
 const userRoles = [
   { id: "admin", name: "Administrator", description: "Full system access" },
   { id: "operator", name: "Operator", description: "VM management access" },
@@ -107,24 +47,53 @@ const userRoles = [
 ];
 
 export default function UsersPage() {
-  const [users, setUsers] = useState(mockUsers);
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [limit] = useState(20);
 
-  // Filter users with null checks
-  const filteredUsers = Array.isArray(users) ? users.filter(user => {
-    if (!user || typeof user !== 'object') return false;
-    const matchesSearch = (user.firstName?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
-                         (user.lastName?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
-                         (user.email?.toLowerCase() || '').includes(searchQuery.toLowerCase());
-    const matchesRole = roleFilter === "all" || user.role === roleFilter;
-    const matchesStatus = statusFilter === "all" || user.status === statusFilter;
-    
-    return matchesSearch && matchesRole && matchesStatus;
-  }) : [];
+  // Fetch users from API
+  const { data: usersData, loading, error, refetch } = useApi<any>(
+    `/api/users?page=${page}&limit=${limit}${searchQuery ? `&search=${searchQuery}` : ''}${roleFilter !== 'all' ? `&role=${roleFilter}` : ''}${statusFilter !== 'all' ? `&status=${statusFilter}` : ''}`,
+    { dependencies: [page, limit, searchQuery, roleFilter, statusFilter] }
+  );
+
+  // Delete user mutation
+  const deleteUserMutation = useMutation<void, string>(
+    'DELETE',
+    (userId) => `/api/users/${userId}`,
+    {
+      onSuccess: () => {
+        toast({
+          title: "User deleted",
+          description: "User has been successfully deleted",
+        });
+        refetch();
+      },
+      onError: (error) => {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to delete user",
+          variant: "destructive",
+        });
+      },
+    }
+  );
+
+  // Extract users array from response
+  const users = usersData?.users || [];
+  const totalUsers = usersData?.total || 0;
+
+  // Handle delete user
+  const handleDeleteUser = async (userId: string) => {
+    if (confirm('Are you sure you want to delete this user?')) {
+      await deleteUserMutation.mutate(userId);
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -156,7 +125,7 @@ export default function UsersPage() {
   };
 
   const userStats = {
-    totalUsers: Array.isArray(users) ? users.length : 0,
+    totalUsers: totalUsers,
     activeUsers: Array.isArray(users) ? users.filter(u => u?.status === "active").length : 0,
     pendingUsers: Array.isArray(users) ? users.filter(u => u?.status === "pending").length : 0,
     adminUsers: Array.isArray(users) ? users.filter(u => u?.role === "admin").length : 0
@@ -164,8 +133,42 @@ export default function UsersPage() {
 
   const handleUserAction = (userId: string, action: string) => {
     console.log(`${action} user ${userId}`);
-    // In a real app, this would call an API
+    // TODO: Implement user actions (suspend, activate, etc.)
   };
+
+  // Loading state
+  if (loading && !users.length) {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="flex items-center justify-center h-96">
+          <div className="text-center space-y-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto"></div>
+            <p className="text-muted-foreground">Loading users...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error && !users.length) {
+    return (
+      <div className="container mx-auto p-6">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-center space-y-4">
+              <AlertTriangle className="h-12 w-12 text-red-500 mx-auto" />
+              <div>
+                <h3 className="text-lg font-semibold">Failed to load users</h3>
+                <p className="text-muted-foreground">{error.message}</p>
+              </div>
+              <Button onClick={() => refetch()}>Try Again</Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -302,17 +305,31 @@ export default function UsersPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {Array.isArray(filteredUsers) && filteredUsers.length > 0 ? filteredUsers.map((user) => {
+            {loading && (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
+                </TableCell>
+              </TableRow>
+            )}
+            {!loading && users.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                  No users found
+                </TableCell>
+              </TableRow>
+            )}
+            {!loading && Array.isArray(users) && users.length > 0 && users.map((user: User) => {
               if (!user || !user.id) return null;
               return (
               <TableRow key={user.id}>
                 <TableCell>
                   <div className="flex items-center space-x-3">
                     <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-semibold">
-                      {(user.firstName || '').charAt(0)}{(user.lastName || '').charAt(0)}
+                      {(user.first_name || user.username || '').charAt(0)}{(user.last_name || '').charAt(0)}
                     </div>
                     <div>
-                      <div className="font-medium">{user.firstName || ''} {user.lastName || ''}</div>
+                      <div className="font-medium">{user.first_name || user.username || ''} {user.last_name || ''}</div>
                       <div className="text-sm text-muted-foreground">{user.email || ''}</div>
                     </div>
                   </div>
@@ -329,12 +346,12 @@ export default function UsersPage() {
                     <span className="ml-1 capitalize">{user.status}</span>
                   </Badge>
                 </TableCell>
-                <TableCell>{user.department || 'N/A'}</TableCell>
+                <TableCell>N/A</TableCell>
                 <TableCell className="text-sm">
-                  {user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : "Never"}
+                  {user.last_login ? new Date(user.last_login).toLocaleDateString() : "Never"}
                 </TableCell>
                 <TableCell>
-                  {user.twoFactorEnabled ? (
+                  {user.two_factor_enabled ? (
                     <Badge variant="outline" className="bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400">
                       <CheckCircle className="h-3 w-3 mr-1" />
                       Enabled
@@ -371,9 +388,9 @@ export default function UsersPage() {
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem 
+                      <DropdownMenuItem
                         className="text-red-600"
-                        onClick={() => handleUserAction(user.id, "delete")}
+                        onClick={() => handleDeleteUser(user.id)}
                       >
                         <Trash2 className="mr-2 h-4 w-4" />
                         Delete User
@@ -383,13 +400,7 @@ export default function UsersPage() {
                 </TableCell>
               </TableRow>
               );
-            }) : (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
-                  No users found
-                </TableCell>
-              </TableRow>
-            )}
+            })}
           </TableBody>
         </Table>
       </Card>
