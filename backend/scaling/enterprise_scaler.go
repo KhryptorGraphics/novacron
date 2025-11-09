@@ -16,7 +16,7 @@ import (
     "github.com/golang/protobuf/ptypes"
     "github.com/hashicorp/consul/api"
     "github.com/prometheus/client_golang/api"
-    prometheus "github.com/prometheus/client_golang/api/v1"
+    prometheus "github.com/prometheus/client_golang/api/prometheus/v1"
     "github.com/redis/go-redis/v9"
     "go.etcd.io/etcd/client/v3"
     "go.uber.org/zap"

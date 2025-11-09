@@ -28,11 +28,11 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
-import { 
-  Settings, 
-  Database, 
-  Network, 
-  Shield, 
+import {
+  Settings,
+  Database,
+  Network,
+  Shield,
   Server,
   HardDrive,
   Cpu,
@@ -53,7 +53,8 @@ import {
   Search,
   Plus,
   Trash2,
-  Edit
+  Edit,
+  BarChart3
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SystemConfiguration, ResourceQuota } from "@/lib/api/types";

@@ -45,9 +45,9 @@ type RaftNode struct {
 	// Volatile state on leaders (reinitialized after election)
 	nextIndex  map[string]int64
 	matchIndex map[string]int64
-	
+
 	// Node identification
-	id       string
+	nodeID   string
 	peers    []string
 	state    NodeState
 	leaderID string
@@ -163,7 +163,7 @@ func NewRaftNode(id string, peers []string, transport Transport) *RaftNode {
 	ctx, cancel := context.WithCancel(context.Background())
 	
 	node := &RaftNode{
-		id:               id,
+		nodeID:           id,
 		peers:            peers,
 		state:            Follower,
 		currentTerm:      0,
@@ -194,7 +194,7 @@ func NewRaftNode(id string, peers []string, transport Transport) *RaftNode {
 
 // Start starts the Raft node
 func (rn *RaftNode) Start() {
-	log.Printf("Starting Raft node %s with peers %v", rn.id, rn.peers)
+	log.Printf("Starting Raft node %s with peers %v", rn.nodeID, rn.peers)
 	
 	// Start the main loop
 	go rn.run()
@@ -205,7 +205,7 @@ func (rn *RaftNode) Start() {
 
 // Stop stops the Raft node
 func (rn *RaftNode) Stop() {
-	log.Printf("Stopping Raft node %s", rn.id)
+	log.Printf("Stopping Raft node %s", rn.nodeID)
 	rn.cancel()
 }
 
@@ -229,12 +229,12 @@ func (rn *RaftNode) Submit(command interface{}) (int64, int64, bool) {
 	rn.log = append(rn.log, entry)
 	
 	log.Printf("Node %s: Added command to log at index %d, term %d", 
-		rn.id, entry.Index, entry.Term)
+		rn.nodeID, entry.Index, entry.Term)
 	
 	// For single-node clusters, commit immediately
 	if len(rn.peers) == 1 {
 		rn.commitIndex = entry.Index
-		log.Printf("Node %s: Updated commit index to %d (single-node)", rn.id, rn.commitIndex)
+		log.Printf("Node %s: Updated commit index to %d (single-node)", rn.nodeID, rn.commitIndex)
 	} else {
 		// Start replication for multi-node clusters
 		go rn.replicateToAll()
@@ -287,7 +287,7 @@ func (rn *RaftNode) run() {
 		case <-rn.electionTimer.C:
 			rn.mu.Lock()
 			if rn.state != Leader {
-				log.Printf("Node %s: Election timeout, starting election", rn.id)
+				log.Printf("Node %s: Election timeout, starting election", rn.nodeID)
 				rn.startElection()
 			}
 			rn.mu.Unlock()
@@ -336,10 +336,10 @@ func (rn *RaftNode) applyLoop() {
 func (rn *RaftNode) startElection() {
 	rn.state = Candidate
 	rn.currentTerm++
-	rn.votedFor = rn.id
+	rn.votedFor = rn.nodeID
 	rn.resetElectionTimer()
 	
-	log.Printf("Node %s: Starting election for term %d", rn.id, rn.currentTerm)
+	log.Printf("Node %s: Starting election for term %d", rn.nodeID, rn.currentTerm)
 	
 	// Vote for self
 	votes := 1
@@ -360,14 +360,14 @@ func (rn *RaftNode) startElection() {
 	
 	// Request votes from all peers
 	for _, peer := range rn.peers {
-		if peer == rn.id {
+		if peer == rn.nodeID {
 			continue
 		}
 		
 		go func(peerID string) {
 			req := &RequestVoteArgs{
 				Term:         rn.currentTerm,
-				CandidateID:  rn.id,
+				CandidateID:  rn.nodeID,
 				LastLogIndex: lastLogIndex,
 				LastLogTerm:  lastLogTerm,
 			}
@@ -377,7 +377,7 @@ func (rn *RaftNode) startElection() {
 			
 			reply, err := rn.transport.SendRequestVote(ctx, peerID, req)
 			if err != nil {
-				log.Printf("Node %s: Failed to request vote from %s: %v", rn.id, peerID, err)
+				log.Printf("Node %s: Failed to request vote from %s: %v", rn.nodeID, peerID, err)
 				return
 			}
 			
@@ -402,7 +402,7 @@ func (rn *RaftNode) startElection() {
 			if reply.VoteGranted {
 				votes++
 				log.Printf("Node %s: Received vote from %s (%d/%d)", 
-					rn.id, peerID, votes, votesNeeded)
+					rn.nodeID, peerID, votes, votesNeeded)
 				
 				// Check if we won
 				if votes >= votesNeeded {
@@ -419,15 +419,15 @@ func (rn *RaftNode) becomeLeader() {
 		return
 	}
 	
-	log.Printf("Node %s: Became leader for term %d", rn.id, rn.currentTerm)
+	log.Printf("Node %s: Became leader for term %d", rn.nodeID, rn.currentTerm)
 	
 	rn.state = Leader
-	rn.leaderID = rn.id
+	rn.leaderID = rn.nodeID
 	
 	// Initialize leader state
 	lastLogIndex := int64(len(rn.log))
 	for _, peer := range rn.peers {
-		if peer != rn.id {
+		if peer != rn.nodeID {
 			rn.nextIndex[peer] = lastLogIndex + 1
 			rn.matchIndex[peer] = 0
 		}
@@ -475,7 +475,7 @@ func (rn *RaftNode) replicateToAll() {
 	}
 	
 	for _, peer := range rn.peers {
-		if peer != rn.id {
+		if peer != rn.nodeID {
 			go rn.replicateToPeer(peer)
 		}
 	}
@@ -506,7 +506,7 @@ func (rn *RaftNode) replicateToPeer(peerID string) {
 	
 	req := &AppendEntriesArgs{
 		Term:         rn.currentTerm,
-		LeaderID:     rn.id,
+		LeaderID:     rn.nodeID,
 		PrevLogIndex: prevLogIndex,
 		PrevLogTerm:  prevLogTerm,
 		Entries:      entries,
@@ -521,7 +521,7 @@ func (rn *RaftNode) replicateToPeer(peerID string) {
 	
 	reply, err := rn.transport.SendAppendEntries(ctx, peerID, req)
 	if err != nil {
-		log.Printf("Node %s: Failed to send append entries to %s: %v", rn.id, peerID, err)
+		log.Printf("Node %s: Failed to send append entries to %s: %v", rn.nodeID, peerID, err)
 		return
 	}
 	
@@ -560,7 +560,7 @@ func (rn *RaftNode) replicateToPeer(peerID string) {
 		// Backup next index
 		rn.nextIndex[peerID] = max(1, rn.nextIndex[peerID]-1)
 		log.Printf("Node %s: Append entries failed for %s, backing up to %d", 
-			rn.id, peerID, rn.nextIndex[peerID])
+			rn.nodeID, peerID, rn.nextIndex[peerID])
 	}
 }
 
@@ -574,7 +574,7 @@ func (rn *RaftNode) updateCommitIndex() {
 	if len(rn.peers) == 1 {
 		if int64(len(rn.log)) > rn.commitIndex {
 			rn.commitIndex = int64(len(rn.log))
-			log.Printf("Node %s: Updated commit index to %d (single-node)", rn.id, rn.commitIndex)
+			log.Printf("Node %s: Updated commit index to %d (single-node)", rn.nodeID, rn.commitIndex)
 		}
 		return
 	}
@@ -584,7 +584,7 @@ func (rn *RaftNode) updateCommitIndex() {
 		count := 1 // Count self
 		
 		for _, peer := range rn.peers {
-			if peer != rn.id && rn.matchIndex[peer] >= n {
+			if peer != rn.nodeID && rn.matchIndex[peer] >= n {
 				count++
 			}
 		}
@@ -592,7 +592,7 @@ func (rn *RaftNode) updateCommitIndex() {
 		// Check if majority and from current term
 		if count > len(rn.peers)/2 && rn.log[n-1].Term == rn.currentTerm {
 			rn.commitIndex = n
-			log.Printf("Node %s: Updated commit index to %d", rn.id, rn.commitIndex)
+			log.Printf("Node %s: Updated commit index to %d", rn.nodeID, rn.commitIndex)
 			break
 		}
 	}
@@ -670,7 +670,7 @@ func (rn *RaftNode) HandleRequestVote(args *RequestVoteArgs) *RequestVoteReply {
 		rn.resetElectionTimer()
 		
 		log.Printf("Node %s: Granted vote to %s for term %d", 
-			rn.id, args.CandidateID, args.Term)
+			rn.nodeID, args.CandidateID, args.Term)
 	}
 	
 	return reply

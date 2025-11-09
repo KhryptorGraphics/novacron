@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/novacron-org/novacron/backend/core/ai"
+	"github.com/khryptorgraphics/novacron/backend/core/ai"
 )
 
 // AIIntegrationAdapter provides AI-powered enhancements for distributed supercompute fabric

@@ -1,0 +1,231 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kube-federation-system
+---
+apiVersion: core.kubefed.io/v1beta1
+kind: KubeFedCluster
+metadata:
+  name: us-east-1-cluster
+  namespace: kube-federation-system
+spec:
+  apiEndpoint: https://k8s-us-east-1.novacron.io
+  secretRef:
+    name: us-east-1-secret
+  caBundle: <base64-encoded-ca-cert>
+---
+apiVersion: core.kubefed.io/v1beta1
+kind: KubeFedCluster
+metadata:
+  name: eu-west-1-cluster
+  namespace: kube-federation-system
+spec:
+  apiEndpoint: https://k8s-eu-west-1.novacron.io
+  secretRef:
+    name: eu-west-1-secret
+  caBundle: <base64-encoded-ca-cert>
+---
+apiVersion: core.kubefed.io/v1beta1
+kind: KubeFedCluster
+metadata:
+  name: ap-southeast-1-cluster
+  namespace: kube-federation-system
+spec:
+  apiEndpoint: https://k8s-ap-southeast-1.novacron.io
+  secretRef:
+    name: ap-southeast-1-secret
+  caBundle: <base64-encoded-ca-cert>
+---
+apiVersion: types.kubefed.io/v1beta1
+kind: FederatedDeployment
+metadata:
+  name: novacron-api-federated
+  namespace: novacron
+spec:
+  template:
+    metadata:
+      labels:
+        app: novacron-api
+    spec:
+      replicas: 5
+      selector:
+        matchLabels:
+          app: novacron-api
+      template:
+        metadata:
+          labels:
+            app: novacron-api
+        spec:
+          containers:
+            - name: api
+              image: novacron/api:3.0.0
+              ports:
+                - containerPort: 8080
+  placement:
+    clusters:
+      - name: us-east-1-cluster
+      - name: eu-west-1-cluster
+      - name: ap-southeast-1-cluster
+  overrides:
+    - clusterName: us-east-1-cluster
+      clusterOverrides:
+        - path: "/spec/replicas"
+          value: 20
+        - path: "/spec/template/spec/containers/0/resources"
+          value:
+            requests:
+              cpu: "8"
+              memory: "16Gi"
+            limits:
+              cpu: "16"
+              memory: "32Gi"
+
+    - clusterName: eu-west-1-cluster
+      clusterOverrides:
+        - path: "/spec/replicas"
+          value: 15
+        - path: "/spec/template/spec/containers/0/resources"
+          value:
+            requests:
+              cpu: "6"
+              memory: "12Gi"
+            limits:
+              cpu: "12"
+              memory: "24Gi"
+
+    - clusterName: ap-southeast-1-cluster
+      clusterOverrides:
+        - path: "/spec/replicas"
+          value: 10
+        - path: "/spec/template/spec/containers/0/resources"
+          value:
+            requests:
+              cpu: "4"
+              memory: "8Gi"
+            limits:
+              cpu: "8"
+              memory: "16Gi"
+---
+apiVersion: types.kubefed.io/v1beta1
+kind: FederatedService
+metadata:
+  name: novacron-api-federated
+  namespace: novacron
+spec:
+  template:
+    metadata:
+      labels:
+        app: novacron-api
+    spec:
+      type: LoadBalancer
+      ports:
+        - port: 80
+          targetPort: 8080
+          protocol: TCP
+          name: http
+        - port: 443
+          targetPort: 8443
+          protocol: TCP
+          name: https
+      selector:
+        app: novacron-api
+  placement:
+    clusters:
+      - name: us-east-1-cluster
+      - name: eu-west-1-cluster
+      - name: ap-southeast-1-cluster
+---
+apiVersion: multiclusterdns.kubefed.io/v1alpha1
+kind: Domain
+metadata:
+  name: novacron.io
+  namespace: kube-federation-system
+spec:
+  domain: novacron.io
+---
+apiVersion: multiclusterdns.kubefed.io/v1alpha1
+kind: ServiceDNSRecord
+metadata:
+  name: novacron-api
+  namespace: novacron
+spec:
+  domainRef: novacron.io
+  recordTTL: 300
+---
+apiVersion: multiclusterdns.kubefed.io/v1alpha1
+kind: IngressDNSRecord
+metadata:
+  name: novacron-api-ingress
+  namespace: novacron
+spec:
+  hosts:
+    - api.novacron.io
+  recordTTL: 300
+---
+apiVersion: scheduling.kubefed.io/v1alpha1
+kind: ReplicaSchedulingPreference
+metadata:
+  name: novacron-api-scheduling
+  namespace: novacron
+spec:
+  targetKind: FederatedDeployment
+  totalReplicas: 45
+  rebalance: true
+  clusters:
+    us-east-1-cluster:
+      minReplicas: 10
+      maxReplicas: 30
+      weight: 3
+    eu-west-1-cluster:
+      minReplicas: 5
+      maxReplicas: 20
+      weight: 2
+    ap-southeast-1-cluster:
+      minReplicas: 5
+      maxReplicas: 15
+      weight: 1
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: federation-config
+  namespace: kube-federation-system
+data:
+  federation.yaml: |
+    clusters:
+      - name: us-east-1
+        region: us-east-1
+        provider: aws
+        priority: high
+        capacity:
+          cpu: 1000
+          memory: 2000Gi
+
+      - name: eu-west-1
+        region: eu-west-1
+        provider: aws
+        priority: high
+        capacity:
+          cpu: 800
+          memory: 1600Gi
+
+      - name: ap-southeast-1
+        region: ap-southeast-1
+        provider: aws
+        priority: medium
+        capacity:
+          cpu: 500
+          memory: 1000Gi
+
+    routing:
+      strategy: geo-latency
+      health_check_interval: 30s
+      failover_threshold: 3
+      load_balancing:
+        algorithm: weighted-round-robin
+        session_affinity: client-ip
+
+    synchronization:
+      interval: 5s
+      conflict_resolution: latest-write-wins
+      enable_crdt: true

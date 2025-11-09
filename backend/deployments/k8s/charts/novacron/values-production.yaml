@@ -1,0 +1,189 @@
+# Production environment overrides
+replicaCount: 10
+
+image:
+  tag: "3.0.0"
+  pullPolicy: Always
+
+resources:
+  requests:
+    cpu: "8"
+    memory: "16Gi"
+  limits:
+    cpu: "16"
+    memory: "32Gi"
+
+autoscaling:
+  enabled: true
+  minReplicas: 10
+  maxReplicas: 500
+  targetCPUUtilizationPercentage: 60
+  targetMemoryUtilizationPercentage: 70
+
+dwcp:
+  amst:
+    minStreams: 32
+    maxStreams: 512
+  hde:
+    compressionLevel: 9
+  acp:
+    nodes: 7
+    quorumSize: 4
+    snapshotInterval: 30m
+
+regions:
+  - name: us-east-1
+    enabled: true
+    replicas: 20
+    resources:
+      requests:
+        cpu: "16"
+        memory: "32Gi"
+      limits:
+        cpu: "32"
+        memory: "64Gi"
+
+  - name: us-west-2
+    enabled: true
+    replicas: 20
+    resources:
+      requests:
+        cpu: "16"
+        memory: "32Gi"
+      limits:
+        cpu: "32"
+        memory: "64Gi"
+
+  - name: eu-west-1
+    enabled: true
+    replicas: 15
+    resources:
+      requests:
+        cpu: "12"
+        memory: "24Gi"
+      limits:
+        cpu: "24"
+        memory: "48Gi"
+
+  - name: eu-central-1
+    enabled: true
+    replicas: 15
+    resources:
+      requests:
+        cpu: "12"
+        memory: "24Gi"
+      limits:
+        cpu: "24"
+        memory: "48Gi"
+
+  - name: ap-southeast-1
+    enabled: true
+    replicas: 10
+    resources:
+      requests:
+        cpu: "8"
+        memory: "16Gi"
+      limits:
+        cpu: "16"
+        memory: "32Gi"
+
+  - name: ap-northeast-1
+    enabled: true
+    replicas: 10
+    resources:
+      requests:
+        cpu: "8"
+        memory: "16Gi"
+      limits:
+        cpu: "16"
+        memory: "32Gi"
+
+persistence:
+  enabled: true
+  storageClass: premium-ssd
+  size: 500Gi
+  backup:
+    enabled: true
+    schedule: "0 */1 * * *"
+    retention: 720h  # 30 days
+
+postgresql:
+  primary:
+    persistence:
+      size: 500Gi
+      storageClass: premium-ssd
+    resources:
+      requests:
+        cpu: "8"
+        memory: "16Gi"
+      limits:
+        cpu: "16"
+        memory: "32Gi"
+  readReplicas:
+    replicaCount: 3
+    persistence:
+      size: 500Gi
+    resources:
+      requests:
+        cpu: "4"
+        memory: "8Gi"
+
+redis:
+  master:
+    persistence:
+      size: 50Gi
+    resources:
+      requests:
+        cpu: "2"
+        memory: "4Gi"
+  replica:
+    replicaCount: 3
+    resources:
+      requests:
+        cpu: "1"
+        memory: "2Gi"
+
+monitoring:
+  prometheus:
+    retention: 90d
+    scrapeInterval: 15s
+    resources:
+      requests:
+        cpu: "4"
+        memory: "8Gi"
+  grafana:
+    resources:
+      requests:
+        cpu: "2"
+        memory: "4Gi"
+
+serviceMesh:
+  enabled: true
+  mtls:
+    mode: STRICT
+  trafficPolicy:
+    loadBalancer:
+      consistentHash:
+        httpHeaderName: x-user-id
+    connectionPool:
+      tcp:
+        maxConnections: 10000
+      http:
+        http1MaxPendingRequests: 10000
+        http2MaxRequests: 10000
+
+env:
+  - name: LOG_LEVEL
+    value: "warn"
+  - name: ENVIRONMENT
+    value: "production"
+  - name: ENABLE_PROFILING
+    value: "false"
+  - name: MAX_CONNECTIONS
+    value: "10000"
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 8
+
+priorityClassName: critical-priority

@@ -1,0 +1,143 @@
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: 'localhost:587'
+  smtp_from: 'alertmanager@novacron.io'
+  smtp_require_tls: true
+
+# Templates for alert formatting
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Route tree for alert delivery
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: 'default-receiver'
+
+  routes:
+    # Critical alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 0s
+      repeat_interval: 5m
+
+    # DWCP component-specific routing
+    - match:
+        component: amst
+      receiver: 'amst-team'
+      group_interval: 5m
+
+    - match:
+        component: hde
+      receiver: 'hde-team'
+      group_interval: 5m
+
+    # SLA violation alerts
+    - match_re:
+        alertname: '^DWCP.*SLA.*'
+      receiver: 'sla-alerts'
+      group_wait: 0s
+      repeat_interval: 1h
+
+    # Informational alerts
+    - match:
+        severity: info
+      receiver: 'info-alerts'
+      group_interval: 30m
+      repeat_interval: 24h
+
+# Alert receivers
+receivers:
+  - name: 'default-receiver'
+    webhook_configs:
+      - url: 'http://localhost:5001/alerts'
+        send_resolved: true
+
+  - name: 'critical-alerts'
+    email_configs:
+      - to: 'oncall@novacron.io'
+        headers:
+          Subject: '[CRITICAL] DWCP Alert: {{ .GroupLabels.alertname }}'
+        html: |
+          {{ range .Alerts }}
+          <b>Alert:</b> {{ .Labels.alertname }}<br>
+          <b>Severity:</b> {{ .Labels.severity }}<br>
+          <b>Cluster:</b> {{ .Labels.cluster }}<br>
+          <b>Node:</b> {{ .Labels.node }}<br>
+          <b>Summary:</b> {{ .Annotations.summary }}<br>
+          <b>Description:</b> {{ .Annotations.description }}<br>
+          {{ end }}
+    webhook_configs:
+      - url: 'http://localhost:5001/critical'
+        send_resolved: true
+    # Uncomment for Slack integration
+    # slack_configs:
+    #   - api_url: 'YOUR_SLACK_WEBHOOK_URL'
+    #     channel: '#dwcp-critical'
+    #     title: 'DWCP Critical Alert'
+    #     text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+
+  - name: 'amst-team'
+    email_configs:
+      - to: 'amst-team@novacron.io'
+        headers:
+          Subject: 'AMST Alert: {{ .GroupLabels.alertname }}'
+    webhook_configs:
+      - url: 'http://localhost:5001/amst'
+        send_resolved: true
+
+  - name: 'hde-team'
+    email_configs:
+      - to: 'hde-team@novacron.io'
+        headers:
+          Subject: 'HDE Alert: {{ .GroupLabels.alertname }}'
+    webhook_configs:
+      - url: 'http://localhost:5001/hde'
+        send_resolved: true
+
+  - name: 'sla-alerts'
+    email_configs:
+      - to: 'sla-monitoring@novacron.io,management@novacron.io'
+        headers:
+          Subject: '[SLA VIOLATION] {{ .GroupLabels.alertname }}'
+        html: |
+          <h2>SLA Violation Detected</h2>
+          {{ range .Alerts }}
+          <p><b>Alert:</b> {{ .Labels.alertname }}</p>
+          <p><b>Cluster:</b> {{ .Labels.cluster }}</p>
+          <p><b>Description:</b> {{ .Annotations.description }}</p>
+          {{ end }}
+    webhook_configs:
+      - url: 'http://localhost:5001/sla'
+        send_resolved: true
+
+  - name: 'info-alerts'
+    webhook_configs:
+      - url: 'http://localhost:5001/info'
+        send_resolved: true
+
+# Inhibition rules - prevent alert spam
+inhibit_rules:
+  # Inhibit warning alerts if critical alert is firing
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'cluster', 'node']
+
+  # Inhibit component degraded if component is down
+  - source_match_re:
+      alertname: 'DWCPComponentDown'
+    target_match_re:
+      alertname: 'DWCPComponentDegraded'
+    equal: ['cluster', 'node', 'component']
+
+  # Inhibit migration slow alert if SLA violation is firing
+  - source_match_re:
+      alertname: 'DWCPSLAViolation'
+    target_match_re:
+      alertname: 'DWCPMigrationSlow'
+    equal: ['cluster']

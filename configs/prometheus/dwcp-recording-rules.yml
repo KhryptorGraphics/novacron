@@ -1,0 +1,162 @@
+# Prometheus recording rules for efficient DWCP metric aggregation
+groups:
+  - name: dwcp_aggregations
+    interval: 30s
+    rules:
+      # AMST aggregations
+      - record: dwcp:amst:error_rate:5m
+        expr: |
+          sum(rate(dwcp_amst_errors_total[5m])) by (cluster, node, error_type)
+          /
+          sum(rate(dwcp_amst_streams_total[5m])) by (cluster, node)
+
+      - record: dwcp:amst:throughput_mbps:5m
+        expr: |
+          sum(rate(dwcp_amst_bytes_sent_total[5m])) by (cluster, node) * 8 / 1000000
+
+      - record: dwcp:amst:stream_duration_p95:10m
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(dwcp_amst_latency_seconds_bucket{operation="stream_duration"}[10m])) by (cluster, node, le)
+          )
+
+      - record: dwcp:amst:stream_duration_p99:10m
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(dwcp_amst_latency_seconds_bucket{operation="stream_duration"}[10m])) by (cluster, node, le)
+          )
+
+      # HDE aggregations
+      - record: dwcp:hde:compression_ratio_median:10m
+        expr: |
+          histogram_quantile(0.5,
+            sum(rate(dwcp_hde_compression_ratio_bucket[10m])) by (cluster, node, data_type, le)
+          )
+
+      - record: dwcp:hde:compression_ratio_p95:10m
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(dwcp_hde_compression_ratio_bucket[10m])) by (cluster, node, data_type, le)
+          )
+
+      - record: dwcp:hde:bandwidth_saved_mbps:5m
+        expr: |
+          sum(rate(dwcp_hde_bytes_original_total[5m]) - rate(dwcp_hde_bytes_compressed_total[5m])) by (cluster, node) * 8 / 1000000
+
+      - record: dwcp:hde:operation_rate:5m
+        expr: |
+          sum(rate(dwcp_hde_operations_total[5m])) by (cluster, node, operation, result)
+
+      - record: dwcp:hde:success_rate:5m
+        expr: |
+          sum(rate(dwcp_hde_operations_total{result="success"}[5m])) by (cluster, node, operation)
+          /
+          sum(rate(dwcp_hde_operations_total[5m])) by (cluster, node, operation)
+
+      # Migration aggregations
+      - record: dwcp:migration:duration_median:1h
+        expr: |
+          histogram_quantile(0.5,
+            sum(rate(dwcp_migration_duration_seconds_bucket[1h])) by (cluster, dwcp_enabled, le)
+          )
+
+      - record: dwcp:migration:duration_p95:1h
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(dwcp_migration_duration_seconds_bucket[1h])) by (cluster, dwcp_enabled, le)
+          )
+
+      - record: dwcp:migration:speedup_actual:1h
+        expr: |
+          histogram_quantile(0.5,
+            sum(rate(dwcp_migration_duration_seconds_bucket{dwcp_enabled="false"}[1h])) by (cluster, le)
+          )
+          /
+          histogram_quantile(0.5,
+            sum(rate(dwcp_migration_duration_seconds_bucket{dwcp_enabled="true"}[1h])) by (cluster, le)
+          )
+
+      # Federation aggregations
+      - record: dwcp:federation:sync_duration_p95:10m
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(dwcp_federation_sync_duration_seconds_bucket[10m])) by (cluster, remote_cluster, sync_type, le)
+          )
+
+      - record: dwcp:federation:bandwidth_saved_gbps:1h
+        expr: |
+          sum(rate(dwcp_federation_bandwidth_saved_bytes_total[1h])) by (cluster, remote_cluster) * 8 / 1000000000
+
+      - record: dwcp:federation:total_savings_tb:24h
+        expr: |
+          sum(increase(dwcp_federation_bandwidth_saved_bytes_total[24h])) by (cluster) / 1000000000000
+
+      # System health aggregations
+      - record: dwcp:system:availability:5m
+        expr: |
+          sum(dwcp_system_component_health == 2) by (cluster)
+          /
+          count(dwcp_system_component_health) by (cluster)
+
+      - record: dwcp:system:degraded_components:5m
+        expr: |
+          count(dwcp_system_component_health == 1) by (cluster, node)
+
+      - record: dwcp:system:down_components:5m
+        expr: |
+          count(dwcp_system_component_health == 0) by (cluster, node)
+
+      # Cross-component efficiency metrics
+      - record: dwcp:efficiency:overall_compression:1h
+        expr: |
+          (
+            sum(rate(dwcp_hde_bytes_original_total[1h]))
+            /
+            sum(rate(dwcp_hde_bytes_compressed_total[1h]))
+          ) by (cluster)
+
+      - record: dwcp:efficiency:bandwidth_savings_percent:1h
+        expr: |
+          (
+            sum(rate(dwcp_hde_bytes_original_total[1h]) - rate(dwcp_hde_bytes_compressed_total[1h]))
+            /
+            sum(rate(dwcp_hde_bytes_original_total[1h]))
+          ) by (cluster) * 100
+
+      - record: dwcp:efficiency:cost_savings_usd:24h
+        expr: |
+          (sum(increase(dwcp_federation_bandwidth_saved_bytes_total[24h])) by (cluster) / 1000000000) * 0.02
+        # Assumes $0.02 per GB bandwidth cost
+
+  - name: dwcp_sla_tracking
+    interval: 1m
+    rules:
+      # SLA: 99.9% availability
+      - record: dwcp:sla:availability:30d
+        expr: |
+          (
+            sum_over_time((dwcp_system_component_health == 2)[30d:5m])
+            /
+            count_over_time(dwcp_system_component_health[30d:5m])
+          ) by (cluster)
+
+      # SLA: <5 minute average migration time
+      - record: dwcp:sla:migration_time:24h
+        expr: |
+          sum(rate(dwcp_migration_duration_seconds_sum{dwcp_enabled="true"}[24h])) by (cluster)
+          /
+          sum(rate(dwcp_migration_duration_seconds_count{dwcp_enabled="true"}[24h])) by (cluster)
+
+      # SLA: >5x compression ratio
+      - record: dwcp:sla:compression_ratio:24h
+        expr: |
+          histogram_quantile(0.5,
+            sum(rate(dwcp_hde_compression_ratio_bucket[24h])) by (cluster, le)
+          )
+
+      # SLA: <1% error rate
+      - record: dwcp:sla:error_rate:24h
+        expr: |
+          sum(rate(dwcp_amst_errors_total[24h])) by (cluster)
+          /
+          sum(rate(dwcp_amst_streams_total[24h])) by (cluster)

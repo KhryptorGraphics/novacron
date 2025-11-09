@@ -1,0 +1,149 @@
+# DWCP Configuration
+network:
+  transport: "tcp"
+  listen_addr: "0.0.0.0:8080"
+  
+  # Adaptive Multi-Stream Transport (AMST)
+  amst:
+    enabled: true
+    min_streams: 16
+    max_streams: 256
+    chunk_size_kb: 256
+    auto_tune: true
+    pacing_enabled: true
+    pacing_rate: 1073741824  # 1 Gbps
+    congestion_algorithm: "bbr"
+    connect_timeout: 30s
+
+  # UDP Transport Configuration
+  udp:
+    enabled: false
+    listen_addr: "0.0.0.0:8081"
+    buffer_size: 65536
+
+# Security Configuration
+security:
+  # TLS Configuration
+  tls:
+    enabled: true
+    min_version: "1.3"
+    cert_file: "/etc/dwcp/certs/server.crt"
+    key_file: "/etc/dwcp/certs/server.key"
+    ca_file: "/etc/dwcp/certs/ca.crt"
+    session_cache_size: 128
+    
+  # Mutual TLS (mTLS)
+  mtls:
+    enabled: true
+    require_client_cert: true
+    verify_peer: true
+    
+  # Certificate Management
+  cert_management:
+    auto_renew: true
+    renew_before: 720h  # 30 days
+    provider: "vault"  # Options: vault, acme, manual
+    
+    # HashiCorp Vault PKI
+    vault:
+      address: "https://vault.novacron.local:8200"
+      token_file: "/etc/dwcp/vault-token"
+      pki_path: "pki"
+      role: "dwcp-role"
+      token_ttl: 24h
+      
+    # ACME/Let's Encrypt
+    acme:
+      enabled: false
+      domains:
+        - "dwcp.novacron.local"
+      email: "admin@novacron.local"
+      cache_dir: "/var/lib/dwcp/acme-cache"
+      renew_before: 720h
+      use_staging: false  # Set to true for testing
+      http_challenge_port: 80
+      
+  # Data Encryption at Rest
+  encryption:
+    enabled: true
+    algorithm: "AES-256-GCM"
+    key_derivation: "argon2id"  # Options: argon2id, pbkdf2
+    key_length: 32
+    
+    # Argon2 parameters
+    argon2:
+      time: 1
+      memory: 65536  # 64 MB
+      threads: 4
+      
+    # PBKDF2 parameters (fallback)
+    pbkdf2:
+      iterations: 100000
+      
+  # Security Auditing
+  auditing:
+    enabled: true
+    max_events: 10000
+    export_path: "/var/log/dwcp/security-audit.json"
+    clear_old_events_after: 720h  # 30 days
+    
+    # Alert handlers
+    alerts:
+      enabled: true
+      webhook_url: ""
+      email_recipients: []
+      
+# Compression Configuration
+compression:
+  enabled: true
+  algorithm: "zstd"  # Options: zstd, lz4, snappy, gzip
+  level: 3  # 1-9 for zstd/gzip
+  min_size: 1024  # Minimum bytes to compress
+  
+  # Adaptive compression
+  adaptive:
+    enabled: true
+    sample_rate: 100  # Packets to sample
+
+# Monitoring Configuration
+monitoring:
+  enabled: true
+  metrics_port: 9090
+  health_check_interval: 10s
+  
+  # Prometheus
+  prometheus:
+    enabled: true
+    path: "/metrics"
+    
+  # Logging
+  logging:
+    level: "info"  # Options: debug, info, warn, error
+    format: "json"  # Options: json, console
+    output: "stdout"  # Options: stdout, file
+    file_path: "/var/log/dwcp/dwcp.log"
+
+# Performance Tuning
+performance:
+  # Buffer sizes
+  read_buffer_size: 4194304   # 4 MB
+  write_buffer_size: 4194304  # 4 MB
+  
+  # Connection pooling
+  max_connections: 1000
+  connection_timeout: 30s
+  idle_timeout: 300s
+  
+  # Worker pools
+  worker_threads: 0  # 0 = auto (number of CPUs)
+  
+# Federation Configuration
+federation:
+  enabled: true
+  cluster_id: "novacron-primary"
+  peer_discovery:
+    enabled: true
+    method: "static"  # Options: static, consul, etcd
+    peers:
+      - "dwcp1.novacron.local:8080"
+      - "dwcp2.novacron.local:8080"

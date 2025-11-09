@@ -17,7 +17,7 @@ import {
   LoadingStates 
 } from "@/components/ui/loading-states";
 import { FadeIn } from "@/lib/animations";
-import { 
+import {
   Settings,
   Users,
   Database,
@@ -28,7 +28,8 @@ import {
   UserCheck,
   Key,
   FileText,
-  AlertTriangle
+  AlertTriangle,
+  Activity
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";

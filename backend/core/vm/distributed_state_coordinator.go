@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/khryptorgraphics/novacron/backend/core/federation"
+	"github.com/khryptorgraphics/novacron/backend/core/shared"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -19,7 +19,7 @@ type DistributedStateCoordinator struct {
 	nodeID              string
 	shardingManager     *VMStateShardingManager
 	memoryDistribution  *MemoryStateDistribution
-	federationManager   federation.FederationManager
+	federationManager   shared.FederationManager
 	transactionManager  *DistributedTransactionManager
 	conflictResolver    *ConflictResolver
 	optimizer           *GlobalOptimizer

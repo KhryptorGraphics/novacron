@@ -1,0 +1,516 @@
+{
+  "dashboard": {
+    "title": "DWCP Performance Monitoring",
+    "tags": ["dwcp", "novacron", "networking", "performance"],
+    "timezone": "browser",
+    "editable": true,
+    "hideControls": false,
+    "graphTooltip": 1,
+    "panels": [
+      {
+        "id": 1,
+        "title": "AMST Active Streams",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "sum(dwcp_amst_streams_active) by (cluster, node)",
+            "legendFormat": "{{cluster}}/{{node}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Active Streams"},
+          {"format": "short"}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [100], "type": "gt"},
+              "operator": {"type": "and"},
+              "query": {"params": ["A", "5m", "now"]},
+              "reducer": {"params": [], "type": "avg"},
+              "type": "query"
+            }
+          ],
+          "executionErrorState": "alerting",
+          "frequency": "60s",
+          "handler": 1,
+          "name": "High Stream Count",
+          "noDataState": "no_data",
+          "notifications": []
+        }
+      },
+      {
+        "id": 2,
+        "title": "AMST Bandwidth Utilization",
+        "type": "gauge",
+        "gridPos": {"x": 12, "y": 0, "w": 6, "h": 8},
+        "targets": [
+          {
+            "expr": "avg(dwcp_amst_bandwidth_utilization_percent) by (cluster)",
+            "legendFormat": "{{cluster}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 70},
+                {"color": "red", "value": 85}
+              ]
+            },
+            "unit": "percent",
+            "min": 0,
+            "max": 100
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "HDE Compression Ratio Distribution",
+        "type": "heatmap",
+        "gridPos": {"x": 18, "y": 0, "w": 6, "h": 8},
+        "targets": [
+          {
+            "expr": "sum(increase(dwcp_hde_compression_ratio_bucket[5m])) by (le)",
+            "format": "heatmap",
+            "legendFormat": "{{le}}",
+            "refId": "A"
+          }
+        ],
+        "dataFormat": "tsbuckets",
+        "yAxis": {
+          "format": "short",
+          "decimals": 1,
+          "logBase": 1
+        },
+        "color": {
+          "mode": "spectrum",
+          "cardColor": "#b4ff00",
+          "colorScheme": "interpolateSpectral"
+        }
+      },
+      {
+        "id": 4,
+        "title": "AMST Throughput (Mbps)",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "dwcp:amst:throughput_mbps:5m",
+            "legendFormat": "{{cluster}}/{{node}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "Mbits", "label": "Throughput"},
+          {"format": "short"}
+        ],
+        "fill": 1,
+        "linewidth": 2,
+        "stack": false
+      },
+      {
+        "id": 5,
+        "title": "HDE Compression Efficiency",
+        "type": "stat",
+        "gridPos": {"x": 12, "y": 8, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "dwcp:hde:compression_ratio_median:10m",
+            "legendFormat": "{{data_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 3},
+                {"color": "green", "value": 5}
+              ]
+            },
+            "unit": "short",
+            "decimals": 2,
+            "mappings": []
+          }
+        },
+        "options": {
+          "graphMode": "area",
+          "colorMode": "value",
+          "justifyMode": "auto",
+          "textMode": "auto"
+        }
+      },
+      {
+        "id": 6,
+        "title": "HDE Delta Hit Rate",
+        "type": "gauge",
+        "gridPos": {"x": 18, "y": 8, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "avg(dwcp_hde_delta_hit_rate_percent) by (cluster)",
+            "legendFormat": "{{cluster}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 60},
+                {"color": "green", "value": 80}
+              ]
+            },
+            "unit": "percent",
+            "min": 0,
+            "max": 100
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Migration Performance Comparison",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "dwcp:migration:duration_median:1h{dwcp_enabled=\"true\"}",
+            "legendFormat": "DWCP Enabled (median)",
+            "refId": "A"
+          },
+          {
+            "expr": "dwcp:migration:duration_median:1h{dwcp_enabled=\"false\"}",
+            "legendFormat": "Standard (median)",
+            "refId": "B"
+          },
+          {
+            "expr": "dwcp:migration:duration_p95:1h{dwcp_enabled=\"true\"}",
+            "legendFormat": "DWCP Enabled (P95)",
+            "refId": "C"
+          },
+          {
+            "expr": "dwcp:migration:duration_p95:1h{dwcp_enabled=\"false\"}",
+            "legendFormat": "Standard (P95)",
+            "refId": "D"
+          }
+        ],
+        "yaxes": [
+          {"format": "s", "label": "Duration"},
+          {"format": "short"}
+        ],
+        "fill": 0,
+        "linewidth": 2
+      },
+      {
+        "id": 8,
+        "title": "Error Rate (5m)",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "dwcp:amst:error_rate:5m",
+            "legendFormat": "{{cluster}}/{{node}} - {{error_type}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "percentunit", "label": "Error Rate", "max": 0.1},
+          {"format": "short"}
+        ],
+        "fill": 1,
+        "linewidth": 2,
+        "thresholds": [
+          {
+            "value": 0.05,
+            "colorMode": "critical",
+            "fill": true,
+            "line": true,
+            "op": "gt"
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Bandwidth Savings Calculator",
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 24, "w": 8, "h": 6},
+        "targets": [
+          {
+            "expr": "dwcp:hde:bandwidth_saved_mbps:5m",
+            "legendFormat": "{{cluster}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null}
+              ]
+            },
+            "unit": "Mbits",
+            "decimals": 2
+          }
+        },
+        "options": {
+          "graphMode": "area",
+          "colorMode": "value",
+          "textMode": "value_and_name"
+        }
+      },
+      {
+        "id": 10,
+        "title": "Daily Bandwidth Savings (TB)",
+        "type": "stat",
+        "gridPos": {"x": 8, "y": 24, "w": 8, "h": 6},
+        "targets": [
+          {
+            "expr": "dwcp:federation:total_savings_tb:24h",
+            "legendFormat": "{{cluster}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null}
+              ]
+            },
+            "unit": "decbytes",
+            "decimals": 3
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Estimated Daily Cost Savings (USD)",
+        "type": "stat",
+        "gridPos": {"x": 16, "y": 24, "w": 8, "h": 6},
+        "targets": [
+          {
+            "expr": "sum(dwcp:efficiency:cost_savings_usd:24h) by (cluster)",
+            "legendFormat": "{{cluster}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null}
+              ]
+            },
+            "unit": "currencyUSD",
+            "decimals": 2
+          }
+        }
+      },
+      {
+        "id": 12,
+        "title": "Component Health Matrix",
+        "type": "status-history",
+        "gridPos": {"x": 0, "y": 30, "w": 24, "h": 8},
+        "targets": [
+          {
+            "expr": "dwcp_system_component_health",
+            "legendFormat": "{{cluster}}/{{node}}/{{component}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 1},
+                {"color": "green", "value": 2}
+              ]
+            },
+            "custom": {
+              "fillOpacity": 70,
+              "lineWidth": 0,
+              "spanNulls": false
+            }
+          }
+        }
+      },
+      {
+        "id": 13,
+        "title": "AMST Stream Latency (P95/P99)",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 38, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "dwcp:amst:stream_duration_p95:10m",
+            "legendFormat": "P95 - {{cluster}}/{{node}}",
+            "refId": "A"
+          },
+          {
+            "expr": "dwcp:amst:stream_duration_p99:10m",
+            "legendFormat": "P99 - {{cluster}}/{{node}}",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"format": "s", "label": "Latency"},
+          {"format": "short"}
+        ],
+        "fill": 0,
+        "linewidth": 2
+      },
+      {
+        "id": 14,
+        "title": "Migration Speedup Factor",
+        "type": "gauge",
+        "gridPos": {"x": 12, "y": 38, "w": 6, "h": 8},
+        "targets": [
+          {
+            "expr": "avg(dwcp_migration_speedup_factor) by (cluster, vm_type)",
+            "legendFormat": "{{cluster}} - {{vm_type}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 2},
+                {"color": "green", "value": 5},
+                {"color": "blue", "value": 10}
+              ]
+            },
+            "unit": "short",
+            "min": 1,
+            "max": 20,
+            "decimals": 1
+          }
+        }
+      },
+      {
+        "id": 15,
+        "title": "Federation Sync Performance",
+        "type": "graph",
+        "gridPos": {"x": 18, "y": 38, "w": 6, "h": 8},
+        "targets": [
+          {
+            "expr": "dwcp:federation:sync_duration_p95:10m",
+            "legendFormat": "{{remote_cluster}} - {{sync_type}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "s", "label": "Sync Duration (P95)"},
+          {"format": "short"}
+        ],
+        "fill": 1,
+        "linewidth": 2
+      },
+      {
+        "id": 16,
+        "title": "System Availability (SLA: 99.9%)",
+        "type": "gauge",
+        "gridPos": {"x": 0, "y": 46, "w": 8, "h": 6},
+        "targets": [
+          {
+            "expr": "dwcp:system:availability:5m * 100",
+            "legendFormat": "{{cluster}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 99},
+                {"color": "green", "value": 99.9}
+              ]
+            },
+            "unit": "percent",
+            "min": 98,
+            "max": 100,
+            "decimals": 3
+          }
+        }
+      },
+      {
+        "id": 17,
+        "title": "Average Migration Time (SLA: <5min)",
+        "type": "stat",
+        "gridPos": {"x": 8, "y": 46, "w": 8, "h": 6},
+        "targets": [
+          {
+            "expr": "dwcp:sla:migration_time:24h",
+            "legendFormat": "{{cluster}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 240},
+                {"color": "red", "value": 300}
+              ]
+            },
+            "unit": "s",
+            "decimals": 1
+          }
+        }
+      },
+      {
+        "id": 18,
+        "title": "Overall Error Rate (SLA: <1%)",
+        "type": "stat",
+        "gridPos": {"x": 16, "y": 46, "w": 8, "h": 6},
+        "targets": [
+          {
+            "expr": "dwcp:sla:error_rate:24h * 100",
+            "legendFormat": "{{cluster}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.5},
+                {"color": "red", "value": 1}
+              ]
+            },
+            "unit": "percent",
+            "decimals": 3
+          }
+        }
+      }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 36,
+    "version": 1,
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    }
+  }
+}

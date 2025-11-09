@@ -1,0 +1,292 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: velero
+---
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: aws-us-east-1
+  namespace: velero
+spec:
+  provider: aws
+  objectStorage:
+    bucket: novacron-backups-us-east-1
+    prefix: velero
+  config:
+    region: us-east-1
+    s3ForcePathStyle: "false"
+    s3Url: https://s3.us-east-1.amazonaws.com
+---
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: aws-eu-west-1
+  namespace: velero
+spec:
+  provider: aws
+  objectStorage:
+    bucket: novacron-backups-eu-west-1
+    prefix: velero
+  config:
+    region: eu-west-1
+    s3ForcePathStyle: "false"
+---
+apiVersion: velero.io/v1
+kind: VolumeSnapshotLocation
+metadata:
+  name: aws-us-east-1
+  namespace: velero
+spec:
+  provider: aws
+  config:
+    region: us-east-1
+---
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: novacron-hourly-backup
+  namespace: velero
+spec:
+  schedule: "0 * * * *"  # Every hour
+  template:
+    includedNamespaces:
+      - novacron
+    includedResources:
+      - '*'
+    excludedResources:
+      - events
+      - events.events.k8s.io
+    labelSelector:
+      matchLabels:
+        backup: enabled
+    snapshotVolumes: true
+    ttl: 168h  # 7 days
+    storageLocation: aws-us-east-1
+    volumeSnapshotLocations:
+      - aws-us-east-1
+    hooks:
+      resources:
+        - name: postgresql-backup-hook
+          includedNamespaces:
+            - novacron
+          labelSelector:
+            matchLabels:
+              app: postgresql
+          pre:
+            - exec:
+                command:
+                  - /bin/bash
+                  - -c
+                  - pg_dumpall > /backup/pre-backup.sql
+                container: postgresql
+                timeout: 5m
+          post:
+            - exec:
+                command:
+                  - /bin/bash
+                  - -c
+                  - rm /backup/pre-backup.sql
+                container: postgresql
+---
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: novacron-daily-full-backup
+  namespace: velero
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  template:
+    includedNamespaces:
+      - novacron
+      - monitoring
+      - kube-system
+    includedResources:
+      - '*'
+    snapshotVolumes: true
+    ttl: 720h  # 30 days
+    storageLocation: aws-us-east-1
+    volumeSnapshotLocations:
+      - aws-us-east-1
+---
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: novacron-cross-region-backup
+  namespace: velero
+spec:
+  schedule: "0 3 * * *"  # Daily at 3 AM
+  template:
+    includedNamespaces:
+      - novacron
+    snapshotVolumes: true
+    ttl: 2160h  # 90 days
+    storageLocation: aws-eu-west-1  # Cross-region backup
+    volumeSnapshotLocations:
+      - aws-us-east-1
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-restore-procedures
+  namespace: velero
+data:
+  restore-guide.md: |
+    # NovaCron Disaster Recovery Procedures
+
+    ## Quick Restore
+
+    ### Full Cluster Restore
+    ```bash
+    # List available backups
+    velero backup get
+
+    # Restore latest backup
+    velero restore create --from-backup novacron-daily-full-backup-<timestamp>
+
+    # Monitor restore progress
+    velero restore describe <restore-name>
+    velero restore logs <restore-name>
+    ```
+
+    ### Partial Restore (Specific Namespace)
+    ```bash
+    velero restore create --from-backup <backup-name> \
+      --include-namespaces novacron \
+      --restore-volumes=true
+    ```
+
+    ### Restore Specific Resources
+    ```bash
+    velero restore create --from-backup <backup-name> \
+      --include-resources deployments,statefulsets,services \
+      --namespace novacron
+    ```
+
+    ## Recovery Scenarios
+
+    ### Scenario 1: Complete Cluster Loss
+    1. Provision new Kubernetes cluster
+    2. Install Velero with same configuration
+    3. Restore from latest backup
+    4. Verify all services are running
+    5. Update DNS to point to new cluster
+
+    ### Scenario 2: Namespace Corruption
+    1. Delete corrupted namespace
+    2. Restore namespace from backup
+    3. Verify application health
+
+    ### Scenario 3: Data Corruption
+    1. Identify affected PVCs
+    2. Restore volume snapshots
+    3. Restart affected pods
+
+    ## Testing DR Procedures
+
+    ### Monthly DR Drill
+    ```bash
+    # Create test namespace
+    kubectl create namespace dr-test
+
+    # Restore to test namespace
+    velero restore create dr-drill-$(date +%Y%m%d) \
+      --from-backup novacron-daily-full-backup-latest \
+      --namespace-mappings novacron:dr-test
+
+    # Validate restore
+    kubectl get all -n dr-test
+
+    # Cleanup
+    kubectl delete namespace dr-test
+    ```
+
+  runbook.yaml: |
+    disaster_scenarios:
+      - name: "Complete Region Failure"
+        severity: critical
+        rto: 30m  # Recovery Time Objective
+        rpo: 1h   # Recovery Point Objective
+        steps:
+          - "Verify region is down"
+          - "Update DNS to route to backup region"
+          - "Restore from cross-region backup if needed"
+          - "Monitor application health"
+          - "Notify stakeholders"
+
+      - name: "Database Corruption"
+        severity: high
+        rto: 1h
+        rpo: 1h
+        steps:
+          - "Identify corrupted data"
+          - "Restore PostgreSQL from backup"
+          - "Verify data integrity"
+          - "Restart dependent services"
+
+      - name: "Consensus Node Failure"
+        severity: high
+        rto: 15m
+        rpo: 0m
+        steps:
+          - "Identify failed nodes"
+          - "Scale StatefulSet to replace nodes"
+          - "Wait for quorum re-establishment"
+          - "Verify consensus health"
+
+    contacts:
+      - role: "On-Call Engineer"
+        escalation: "PagerDuty"
+      - role: "Platform Lead"
+        contact: "platform-lead@novacron.io"
+      - role: "CTO"
+        contact: "cto@novacron.io"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-verification
+  namespace: velero
+spec:
+  schedule: "0 4 * * *"  # Daily at 4 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: velero
+          containers:
+            - name: verify
+              image: velero/velero:v1.12.0
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  # Get latest backup
+                  BACKUP=$(velero backup get --output json | jq -r '.items[0].metadata.name')
+
+                  # Verify backup exists and is complete
+                  STATUS=$(velero backup describe $BACKUP --details | grep "Phase:" | awk '{print $2}')
+
+                  if [ "$STATUS" != "Completed" ]; then
+                    echo "ERROR: Latest backup $BACKUP status is $STATUS"
+                    exit 1
+                  fi
+
+                  # Test restore to temporary namespace
+                  velero restore create verify-$BACKUP \
+                    --from-backup $BACKUP \
+                    --include-namespaces novacron \
+                    --namespace-mappings novacron:novacron-verify
+
+                  # Wait for restore
+                  sleep 60
+
+                  # Verify pods are running
+                  kubectl wait --for=condition=ready pod -l app=novacron-api \
+                    -n novacron-verify --timeout=5m
+
+                  # Cleanup
+                  kubectl delete namespace novacron-verify
+
+                  echo "Backup verification successful for $BACKUP"
+          restartPolicy: OnFailure

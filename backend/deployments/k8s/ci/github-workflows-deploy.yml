@@ -1,0 +1,372 @@
+name: Deploy NovaCron to Kubernetes
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+      - develop
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  HELM_VERSION: 3.12.0
+  KUBECTL_VERSION: 1.27.0
+
+jobs:
+  build:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ github.sha }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.build.outputs.image-tag }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Snyk security scan
+        uses: snyk/actions/docker@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          image: ${{ needs.build.outputs.image-tag }}
+          args: --severity-threshold=high
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: build
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Run unit tests
+        run: |
+          cd backend
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Run integration tests
+        run: |
+          cd backend
+          go test -v -tags=integration ./tests/integration/...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./backend/coverage.out
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build, security-scan, test]
+    if: github.ref == 'refs/heads/staging' || github.event.inputs.environment == 'staging'
+    environment:
+      name: staging
+      url: https://staging.novacron.io
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --name novacron-staging --region us-east-1
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install novacron \
+            ./backend/deployments/k8s/charts/novacron \
+            --namespace novacron \
+            --create-namespace \
+            --values ./backend/deployments/k8s/charts/novacron/values-staging.yaml \
+            --set image.tag=${{ github.sha }} \
+            --wait \
+            --timeout 15m \
+            --atomic
+
+      - name: Run smoke tests
+        run: |
+          kubectl wait --for=condition=ready pod -l app=novacron-api -n novacron --timeout=5m
+          ./scripts/smoke-tests.sh staging
+
+      - name: Notify Slack
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "Staging deployment ${{ job.status }}: ${{ github.repository }}@${{ github.sha }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Staging Deployment*\nStatus: ${{ job.status }}\nCommit: ${{ github.sha }}\nActor: ${{ github.actor }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build, security-scan, test]
+    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'production'
+    environment:
+      name: production
+      url: https://novacron.io
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Update kubeconfig for all regions
+        run: |
+          aws eks update-kubeconfig --name novacron-prod-us-east-1 --region us-east-1
+          aws eks update-kubeconfig --name novacron-prod-eu-west-1 --region eu-west-1
+          aws eks update-kubeconfig --name novacron-prod-ap-southeast-1 --region ap-southeast-1
+
+      - name: Create backup before deployment
+        run: |
+          kubectl create job --from=cronjob/pre-deployment-backup \
+            pre-deployment-backup-${{ github.sha }} -n novacron
+
+      - name: Deploy to US-EAST-1
+        run: |
+          kubectl config use-context novacron-prod-us-east-1
+          helm upgrade --install novacron \
+            ./backend/deployments/k8s/charts/novacron \
+            --namespace novacron \
+            --values ./backend/deployments/k8s/charts/novacron/values-production.yaml \
+            --set image.tag=${{ github.sha }} \
+            --set regions[0].enabled=true \
+            --wait \
+            --timeout 20m \
+            --atomic
+
+      - name: Deploy to EU-WEST-1
+        run: |
+          kubectl config use-context novacron-prod-eu-west-1
+          helm upgrade --install novacron \
+            ./backend/deployments/k8s/charts/novacron \
+            --namespace novacron \
+            --values ./backend/deployments/k8s/charts/novacron/values-production.yaml \
+            --set image.tag=${{ github.sha }} \
+            --set regions[1].enabled=true \
+            --wait \
+            --timeout 20m \
+            --atomic
+
+      - name: Deploy to AP-SOUTHEAST-1
+        run: |
+          kubectl config use-context novacron-prod-ap-southeast-1
+          helm upgrade --install novacron \
+            ./backend/deployments/k8s/charts/novacron \
+            --namespace novacron \
+            --values ./backend/deployments/k8s/charts/novacron/values-production.yaml \
+            --set image.tag=${{ github.sha }} \
+            --set regions[2].enabled=true \
+            --wait \
+            --timeout 20m \
+            --atomic
+
+      - name: Run production smoke tests
+        run: |
+          ./scripts/smoke-tests.sh production us-east-1
+          ./scripts/smoke-tests.sh production eu-west-1
+          ./scripts/smoke-tests.sh production ap-southeast-1
+
+      - name: Run load tests
+        run: |
+          ./scripts/load-tests.sh production 1000
+
+      - name: Monitor deployment health
+        run: |
+          ./scripts/monitor-deployment.sh --duration 10m --threshold 99.9
+
+      - name: Notify on success
+        if: success()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "Production deployment successful",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Production Deployment Successful*\nCommit: ${{ github.sha }}\nActor: ${{ github.actor }}\nRegions: US-EAST-1, EU-WEST-1, AP-SOUTHEAST-1"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Deployment failed, initiating rollback"
+          kubectl config use-context novacron-prod-us-east-1
+          helm rollback novacron -n novacron
+          kubectl config use-context novacron-prod-eu-west-1
+          helm rollback novacron -n novacron
+          kubectl config use-context novacron-prod-ap-southeast-1
+          helm rollback novacron -n novacron
+
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "Production deployment failed - rollback initiated",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Production Deployment Failed*\nCommit: ${{ github.sha }}\nActor: ${{ github.actor }}\nAction: Automatic rollback initiated"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -1,0 +1,396 @@
+name: DWCP Phase 1 Deployment
+
+on:
+  push:
+    branches:
+      - dwcp-phase1
+      - main
+    paths:
+      - 'backend/core/network/dwcp/**'
+      - 'configs/dwcp*.yaml'
+      - 'scripts/deploy-dwcp-phase1.sh'
+      - '.github/workflows/dwcp-phase1-deploy.yml'
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'backend/core/network/dwcp/**'
+      - 'configs/dwcp*.yaml'
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  GO_VERSION: '1.21'
+  DEPLOYMENT_TIMEOUT: 600  # 10 minutes
+
+jobs:
+  # Phase 1: Build and Test
+  build-and-test:
+    name: Build and Test DWCP
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better analysis
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: |
+          go mod download
+          go mod verify
+
+      - name: Run linting
+        working-directory: ./backend
+        run: |
+          go install golang.org/x/lint/golint@latest
+          golint -set_exit_status ./...
+
+      - name: Run unit tests
+        working-directory: ./backend
+        run: |
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Run DWCP-specific tests
+        working-directory: ./backend
+        run: |
+          go test -v -race -count=1 ./core/network/dwcp/...
+
+      - name: Generate coverage report
+        working-directory: ./backend
+        run: |
+          go tool cover -func=coverage.out -o coverage.txt
+          go tool cover -html=coverage.out -o coverage.html
+
+      - name: Check coverage threshold
+        working-directory: ./backend
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Coverage: $COVERAGE%"
+          if (( $(echo "$COVERAGE < 70.0" | bc -l) )); then
+            echo "Error: Coverage $COVERAGE% is below 70% threshold"
+            exit 1
+          fi
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./backend/coverage.out
+          flags: dwcp
+          name: dwcp-coverage
+
+      - name: Build binaries
+        working-directory: ./backend
+        run: |
+          mkdir -p bin
+          go build -v -o bin/api-server \
+            -ldflags "-X main.Version=${{ github.sha }} -X main.BuildTime=$(date -u +%Y%m%dT%H%M%S)" \
+            ./cmd/api-server/main.go
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: dwcp-binaries
+          path: backend/bin/
+          retention-days: 7
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-reports
+          path: |
+            backend/coverage.out
+            backend/coverage.txt
+            backend/coverage.html
+          retention-days: 30
+
+  # Phase 2: Run Benchmarks
+  benchmarks:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run AMST benchmarks
+        working-directory: ./backend
+        run: |
+          go test -bench=BenchmarkAMST -benchmem -run=^$ ./core/network/dwcp/amst/... | tee amst-bench.txt
+
+      - name: Run HDE benchmarks
+        working-directory: ./backend
+        run: |
+          go test -bench=BenchmarkHDE -benchmem -run=^$ ./core/network/dwcp/hde/... | tee hde-bench.txt
+
+      - name: Compare benchmarks
+        working-directory: ./backend
+        run: |
+          # Compare with baseline if available
+          if [[ -f benchmarks-baseline.txt ]]; then
+            go install golang.org/x/perf/cmd/benchstat@latest
+            benchstat benchmarks-baseline.txt amst-bench.txt hde-bench.txt
+          fi
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-results
+          path: |
+            backend/amst-bench.txt
+            backend/hde-bench.txt
+          retention-days: 30
+
+  # Phase 3: Security Scanning
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Gosec Security Scanner
+        uses: securego/gosec@master
+        with:
+          args: '-no-fail -fmt json -out gosec-results.json ./backend/...'
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: './backend'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload security scan results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # Phase 4: Deploy to Staging
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build-and-test, benchmarks, security-scan]
+    if: github.ref == 'refs/heads/dwcp-phase1' || github.event_name == 'workflow_dispatch'
+    environment:
+      name: staging
+      url: https://staging.novacron.example.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: dwcp-binaries
+          path: backend/bin/
+
+      - name: Validate configuration
+        run: |
+          # Install yamllint
+          pip install yamllint
+
+          # Validate YAML syntax
+          yamllint -d relaxed configs/dwcp.yaml
+          yamllint -d relaxed configs/dwcp.staging.yaml
+
+      - name: Run deployment script
+        run: |
+          chmod +x scripts/deploy-dwcp-phase1.sh
+          sudo scripts/deploy-dwcp-phase1.sh staging
+        timeout-minutes: 10
+
+      - name: Wait for service startup
+        run: |
+          echo "Waiting for service to be ready..."
+          for i in {1..30}; do
+            if curl -sf http://localhost:8080/health; then
+              echo "Service is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Service failed to start"
+          exit 1
+
+      - name: Run health checks
+        run: |
+          chmod +x scripts/validate-dwcp.sh
+          scripts/validate-dwcp.sh
+
+      - name: Collect deployment metrics
+        run: |
+          # Collect initial metrics baseline
+          curl -s http://localhost:9090/metrics | grep "dwcp_" > /tmp/metrics-baseline.txt
+
+      - name: Upload deployment logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-logs
+          path: |
+            /tmp/dwcp-deploy-*.log
+            /tmp/dwcp-validation-*.log
+            /tmp/metrics-baseline.txt
+          retention-days: 30
+
+      - name: Notify deployment success
+        if: success()
+        run: |
+          echo "✓ DWCP Phase 1 successfully deployed to staging"
+          echo "Metrics: http://localhost:9090/metrics"
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Deployment failed, initiating rollback..."
+          # The deploy script handles rollback automatically
+
+  # Phase 5: Integration Tests (Post-Deploy)
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run integration tests
+        working-directory: ./backend
+        run: |
+          # Run integration tests against staging
+          export API_ENDPOINT=http://localhost:8080
+          go test -v -tags=integration ./test/integration/...
+
+      - name: Test AMST streaming
+        run: |
+          # Test multi-stream functionality
+          curl -X POST http://localhost:8080/api/v1/dwcp/test/streams
+
+      - name: Test HDE compression
+        run: |
+          # Test compression with sample data
+          curl -X POST http://localhost:8080/api/v1/dwcp/test/compression
+
+      - name: Performance smoke test
+        run: |
+          # Quick performance check
+          ab -n 100 -c 10 http://localhost:8080/health
+
+  # Phase 6: Monitoring Setup
+  setup-monitoring:
+    name: Setup Monitoring
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Import Grafana dashboard
+        run: |
+          # Import DWCP staging dashboard
+          curl -X POST http://grafana:3000/api/dashboards/db \
+            -H "Content-Type: application/json" \
+            -d @configs/grafana/dwcp-staging-dashboard.json \
+            || echo "Grafana not available, skipping dashboard import"
+
+      - name: Configure Prometheus alerts
+        run: |
+          echo "Setting up Prometheus alerts for DWCP..."
+          # Configure alerts (would integrate with actual Prometheus)
+
+  # Phase 7: Production Deployment (Manual Approval Required)
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [integration-tests, setup-monitoring]
+    if: github.event.inputs.environment == 'production' && github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://novacron.example.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: dwcp-binaries
+          path: backend/bin/
+
+      - name: Deploy to production
+        run: |
+          chmod +x scripts/deploy-dwcp-phase1.sh
+          sudo scripts/deploy-dwcp-phase1.sh production
+        timeout-minutes: 15
+
+      - name: Run production validation
+        run: |
+          chmod +x scripts/validate-dwcp.sh
+          scripts/validate-dwcp.sh
+
+      - name: Notify production deployment
+        if: success()
+        run: |
+          echo "✓ DWCP Phase 1 successfully deployed to production"
+
+# Workflow notifications
+  notify:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, integration-tests]
+    if: always()
+
+    steps:
+      - name: Notify on success
+        if: needs.deploy-staging.result == 'success' && needs.integration-tests.result == 'success'
+        run: |
+          echo "✓ DWCP Phase 1 deployment pipeline completed successfully"
+
+      - name: Notify on failure
+        if: needs.deploy-staging.result == 'failure' || needs.integration-tests.result == 'failure'
+        run: |
+          echo "✗ DWCP Phase 1 deployment pipeline failed"
+          echo "Check logs for details"

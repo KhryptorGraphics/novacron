@@ -1,0 +1,347 @@
+{
+  "dashboard": {
+    "title": "DWCP Phase 1 Staging Dashboard",
+    "tags": ["dwcp", "staging", "phase1"],
+    "timezone": "browser",
+    "schemaVersion": 27,
+    "version": 1,
+    "refresh": "10s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Deployment Status Timeline",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "dwcp_enabled",
+            "legendFormat": "DWCP Enabled",
+            "refId": "A"
+          },
+          {
+            "expr": "dwcp_deployment_version",
+            "legendFormat": "Version",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {
+              "axisLabel": "Status",
+              "axisPlacement": "auto"
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "AMST Active Streams",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "dwcp_amst_active_streams",
+            "legendFormat": "Active Streams",
+            "refId": "A"
+          },
+          {
+            "expr": "dwcp_amst_min_streams",
+            "legendFormat": "Minimum",
+            "refId": "B"
+          },
+          {
+            "expr": "dwcp_amst_max_streams",
+            "legendFormat": "Maximum",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {
+              "axisLabel": "Streams",
+              "drawStyle": "line",
+              "lineInterpolation": "smooth"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 16},
+                {"color": "green", "value": 32}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "HDE Compression Ratio",
+        "type": "gauge",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "avg(dwcp_hde_compression_ratio)",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "none",
+            "min": 0,
+            "max": 10,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 2},
+                {"color": "green", "value": 3}
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        }
+      },
+      {
+        "id": 4,
+        "title": "Pre/Post DWCP Performance Comparison",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "rate(dwcp_requests_total[5m])",
+            "legendFormat": "With DWCP",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(standard_requests_total[5m])",
+            "legendFormat": "Without DWCP",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {
+              "axisLabel": "Requests/sec"
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Error Rate Monitoring",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+        "targets": [
+          {
+            "expr": "rate(dwcp_errors_total[5m]) / rate(dwcp_requests_total[5m]) * 100",
+            "legendFormat": "Error Rate %",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "custom": {
+              "axisLabel": "Error %"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 2},
+                {"color": "red", "value": 5}
+              ]
+            }
+          }
+        },
+        "alert": {
+          "name": "High Error Rate",
+          "conditions": [
+            {
+              "evaluator": {"type": "gt", "params": [5]},
+              "operator": {"type": "and"},
+              "query": {"params": ["A", "5m", "now"]},
+              "reducer": {"type": "avg"}
+            }
+          ],
+          "frequency": "1m",
+          "handler": 1,
+          "message": "DWCP error rate exceeded 5%",
+          "noDataState": "no_data",
+          "executionErrorState": "alerting"
+        }
+      },
+      {
+        "id": 6,
+        "title": "Throughput (Bytes/sec)",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+        "targets": [
+          {
+            "expr": "rate(dwcp_amst_bytes_sent[5m])",
+            "legendFormat": "Sent",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(dwcp_amst_bytes_received[5m])",
+            "legendFormat": "Received",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "Bps",
+            "color": {"mode": "palette-classic"}
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Baseline Synchronization Status",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 32},
+        "targets": [
+          {
+            "expr": "dwcp_hde_baselines_synced",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 1},
+                {"color": "green", "value": 5}
+              ]
+            }
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "graphMode": "none",
+          "textMode": "value_and_name"
+        }
+      },
+      {
+        "id": 8,
+        "title": "Configuration Status",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 32},
+        "targets": [
+          {
+            "expr": "dwcp_config_loaded",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "value": "0", "text": "Not Loaded"},
+              {"type": "value", "value": "1", "text": "Loaded"}
+            ],
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 9,
+        "title": "Rollback Readiness",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 32},
+        "targets": [
+          {
+            "expr": "dwcp_backup_available",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "value": "0", "text": "No Backup"},
+              {"type": "value", "value": "1", "text": "Ready"}
+            ],
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 10,
+        "title": "Health Check Status",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 36},
+        "targets": [
+          {
+            "expr": "dwcp_health_status",
+            "refId": "A",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {},
+              "indexByName": {},
+              "renameByName": {
+                "component": "Component",
+                "status": "Status",
+                "message": "Message"
+              }
+            }
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "left",
+              "displayMode": "color-background"
+            },
+            "mappings": [
+              {"type": "value", "value": "healthy", "text": "✓ Healthy", "color": "green"},
+              {"type": "value", "value": "degraded", "text": "⚠ Degraded", "color": "yellow"},
+              {"type": "value", "value": "unhealthy", "text": "✗ Unhealthy", "color": "red"}
+            ]
+          }
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "environment",
+          "type": "constant",
+          "current": {"value": "staging", "text": "staging"}
+        }
+      ]
+    },
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    }
+  }
+}

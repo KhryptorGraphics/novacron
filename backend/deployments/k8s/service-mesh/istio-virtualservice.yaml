@@ -1,0 +1,222 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: novacron-api
+  namespace: novacron
+spec:
+  hosts:
+    - novacron.example.com
+    - novacron-api.novacron.svc.cluster.local
+  gateways:
+    - novacron-gateway
+    - mesh
+  http:
+    # Canary deployment: 90% stable, 10% canary
+    - match:
+        - headers:
+            canary:
+              exact: "true"
+      route:
+        - destination:
+            host: novacron-api
+            subset: canary
+          weight: 100
+
+    # A/B testing based on user segment
+    - match:
+        - headers:
+            user-segment:
+              exact: "beta"
+      route:
+        - destination:
+            host: novacron-api
+            subset: beta
+          weight: 100
+
+    # Default routing with traffic split
+    - route:
+        - destination:
+            host: novacron-api
+            subset: stable
+          weight: 90
+        - destination:
+            host: novacron-api
+            subset: canary
+          weight: 10
+      retries:
+        attempts: 3
+        perTryTimeout: 2s
+        retryOn: 5xx,reset,connect-failure,refused-stream
+      timeout: 30s
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: novacron-api
+  namespace: novacron
+spec:
+  host: novacron-api
+  trafficPolicy:
+    loadBalancer:
+      consistentHash:
+        httpHeaderName: x-user-id
+    connectionPool:
+      tcp:
+        maxConnections: 1000
+        connectTimeout: 30s
+        tcpKeepalive:
+          time: 7200s
+          interval: 75s
+      http:
+        http1MaxPendingRequests: 1000
+        http2MaxRequests: 1000
+        maxRequestsPerConnection: 100
+        maxRetries: 3
+        idleTimeout: 3600s
+        h2UpgradePolicy: UPGRADE
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+      minHealthPercent: 50
+    tls:
+      mode: ISTIO_MUTUAL
+  subsets:
+    - name: stable
+      labels:
+        version: v3.0.0
+      trafficPolicy:
+        loadBalancer:
+          simple: LEAST_REQUEST
+
+    - name: canary
+      labels:
+        version: v3.1.0-rc1
+      trafficPolicy:
+        loadBalancer:
+          simple: ROUND_ROBIN
+
+    - name: beta
+      labels:
+        version: v3.1.0-beta
+---
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: novacron-gateway
+  namespace: novacron
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - novacron.example.com
+      tls:
+        httpsRedirect: true
+
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      hosts:
+        - novacron.example.com
+      tls:
+        mode: SIMPLE
+        credentialName: novacron-tls-cert
+
+    - port:
+        number: 9090
+        name: grpc
+        protocol: GRPC
+      hosts:
+        - grpc.novacron.example.com
+      tls:
+        mode: SIMPLE
+        credentialName: novacron-grpc-tls-cert
+---
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: novacron-mtls
+  namespace: novacron
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: novacron-api-authz
+  namespace: novacron
+spec:
+  selector:
+    matchLabels:
+      app: novacron-api
+  action: ALLOW
+  rules:
+    # Allow from ingress gateway
+    - from:
+        - source:
+            principals: ["cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"]
+
+    # Allow from same namespace
+    - from:
+        - source:
+            namespaces: ["novacron"]
+
+    # Allow from monitoring
+    - from:
+        - source:
+            namespaces: ["monitoring"]
+      to:
+        - operation:
+            paths: ["/metrics", "/healthz"]
+
+    # Deny all other traffic (implicit)
+---
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: external-database
+  namespace: novacron
+spec:
+  hosts:
+    - postgresql.example.com
+  ports:
+    - number: 5432
+      name: postgres
+      protocol: TCP
+  location: MESH_EXTERNAL
+  resolution: DNS
+---
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: novacron-tracing
+  namespace: novacron
+spec:
+  tracing:
+    - providers:
+        - name: jaeger
+      randomSamplingPercentage: 10.0
+      customTags:
+        environment:
+          literal:
+            value: production
+        region:
+          header:
+            name: x-region
+  metrics:
+    - providers:
+        - name: prometheus
+      overrides:
+        - match:
+            metric: ALL_METRICS
+          tagOverrides:
+            request_operation:
+              operation: UPSERT

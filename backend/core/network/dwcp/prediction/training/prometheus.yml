@@ -1,0 +1,41 @@
+global:
+  scrape_interval: 60s
+  evaluation_interval: 60s
+  external_labels:
+    cluster: 'pba-training'
+    environment: 'production'
+
+scrape_configs:
+  # DWCP PBA Metrics
+  - job_name: 'pba-metrics'
+    static_configs:
+      - targets: ['host.docker.internal:9090']
+    metric_relabel_configs:
+      # Keep only PBA-related metrics
+      - source_labels: [__name__]
+        regex: 'dwcp_pba_.*'
+        action: keep
+
+  # NovaCron DWCP Metrics
+  - job_name: 'dwcp-transport'
+    static_configs:
+      - targets: ['host.docker.internal:9090']
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'dwcp_(bandwidth|latency|packet_loss|jitter).*'
+        action: keep
+
+  # Node exporter for system metrics
+  - job_name: 'node'
+    static_configs:
+      - targets: ['host.docker.internal:9100']
+
+# Alerting configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+# Recording rules for aggregations
+rule_files:
+  - '/etc/prometheus/rules/*.yml'

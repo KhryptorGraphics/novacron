@@ -1,0 +1,340 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: novacron-api
+  namespace: novacron
+  labels:
+    app: novacron-api
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: novacron-api
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
+      scheme: http
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+        - sourceLabels: [__meta_kubernetes_pod_label_version]
+          targetLabel: version
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: novacron-consensus
+  namespace: novacron
+spec:
+  selector:
+    matchLabels:
+      app: novacron-consensus
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: novacron-dwcp
+  namespace: novacron
+spec:
+  selector:
+    matchLabels:
+      app: novacron-dwcp
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: novacron-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: novacron.api
+      interval: 30s
+      rules:
+        - alert: HighErrorRate
+          expr: |
+            sum(rate(http_requests_total{status=~"5.."}[5m])) by (service)
+            /
+            sum(rate(http_requests_total[5m])) by (service)
+            > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            component: api
+          annotations:
+            summary: "High error rate detected"
+            description: "Error rate is {{ $value | humanizePercentage }} for {{ $labels.service }}"
+
+        - alert: HighLatency
+          expr: histogram_quantile(0.95, http_request_duration_seconds_bucket) > 1
+          for: 5m
+          labels:
+            severity: warning
+            component: api
+          annotations:
+            summary: "High API latency detected"
+            description: "P95 latency is {{ $value }}s"
+
+        - alert: PodCrashLooping
+          expr: rate(kube_pod_container_status_restarts_total{namespace="novacron"}[15m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod is crash looping"
+            description: "Pod {{ $labels.pod }} is restarting frequently"
+
+    - name: novacron.consensus
+      interval: 15s
+      rules:
+        - alert: ConsensusQuorumLost
+          expr: |
+            count(up{app="novacron-consensus"} == 1)
+            <
+            (count(up{app="novacron-consensus"}) / 2) + 1
+          for: 1m
+          labels:
+            severity: critical
+            component: consensus
+          annotations:
+            summary: "Consensus quorum lost"
+            description: "Only {{ $value }} nodes available, quorum requires {{ (count(up{app='novacron-consensus'}) / 2) + 1 }}"
+
+        - alert: ConsensusHighCommitLatency
+          expr: consensus_commit_duration_seconds{quantile="0.95"} > 0.1
+          for: 5m
+          labels:
+            severity: warning
+            component: consensus
+          annotations:
+            summary: "High consensus commit latency"
+            description: "P95 commit latency is {{ $value }}s"
+
+        - alert: ConsensusLeaderElection
+          expr: changes(consensus_leader_id[5m]) > 2
+          for: 5m
+          labels:
+            severity: warning
+            component: consensus
+          annotations:
+            summary: "Frequent leader elections"
+            description: "Leader changed {{ $value }} times in 5 minutes"
+
+    - name: novacron.dwcp
+      interval: 30s
+      rules:
+        - alert: DWCPHighPacketLoss
+          expr: dwcp_packet_loss_ratio > 0.01
+          for: 5m
+          labels:
+            severity: warning
+            component: dwcp
+          annotations:
+            summary: "High packet loss detected"
+            description: "Packet loss is {{ $value | humanizePercentage }}"
+
+        - alert: DWCPCompressionFailure
+          expr: rate(dwcp_compression_errors_total[5m]) > 0
+          for: 2m
+          labels:
+            severity: warning
+            component: dwcp
+          annotations:
+            summary: "DWCP compression failures"
+            description: "Compression error rate: {{ $value }}/s"
+
+        - alert: DWCPConnectionDegraded
+          expr: dwcp_active_connections < dwcp_expected_connections * 0.8
+          for: 5m
+          labels:
+            severity: warning
+            component: dwcp
+          annotations:
+            summary: "DWCP connections degraded"
+            description: "Only {{ $value }} connections active, expected {{ $dwcp_expected_connections }}"
+
+    - name: novacron.resources
+      interval: 30s
+      rules:
+        - alert: HighMemoryUsage
+          expr: |
+            container_memory_working_set_bytes{namespace="novacron"}
+            /
+            container_spec_memory_limit_bytes{namespace="novacron"}
+            > 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High memory usage"
+            description: "Memory usage is {{ $value | humanizePercentage }} for {{ $labels.pod }}"
+
+        - alert: HighCPUUsage
+          expr: |
+            rate(container_cpu_usage_seconds_total{namespace="novacron"}[5m])
+            /
+            container_spec_cpu_quota{namespace="novacron"}
+            * 100000
+            > 90
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High CPU usage"
+            description: "CPU usage is {{ $value }}% for {{ $labels.pod }}"
+
+        - alert: PersistentVolumeSpaceLow
+          expr: |
+            kubelet_volume_stats_available_bytes{namespace="novacron"}
+            /
+            kubelet_volume_stats_capacity_bytes{namespace="novacron"}
+            < 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Persistent volume space low"
+            description: "Only {{ $value | humanizePercentage }} space remaining on {{ $labels.persistentvolumeclaim }}"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  novacron-overview.json: |
+    {
+      "dashboard": {
+        "title": "NovaCron Overview",
+        "panels": [
+          {
+            "title": "Request Rate",
+            "targets": [
+              {
+                "expr": "sum(rate(http_requests_total{namespace='novacron'}[5m])) by (service)"
+              }
+            ]
+          },
+          {
+            "title": "Error Rate",
+            "targets": [
+              {
+                "expr": "sum(rate(http_requests_total{namespace='novacron',status=~'5..'}[5m])) by (service) / sum(rate(http_requests_total{namespace='novacron'}[5m])) by (service)"
+              }
+            ]
+          },
+          {
+            "title": "Latency P95",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{namespace='novacron'}[5m])) by (le, service))"
+              }
+            ]
+          },
+          {
+            "title": "Active Pods",
+            "targets": [
+              {
+                "expr": "count(up{namespace='novacron'} == 1) by (app)"
+              }
+            ]
+          }
+        ]
+      }
+    }
+
+  dwcp-performance.json: |
+    {
+      "dashboard": {
+        "title": "DWCP Performance",
+        "panels": [
+          {
+            "title": "Throughput",
+            "targets": [
+              {
+                "expr": "sum(rate(dwcp_bytes_sent_total[5m])) by (region)"
+              }
+            ]
+          },
+          {
+            "title": "Compression Ratio",
+            "targets": [
+              {
+                "expr": "dwcp_compression_ratio"
+              }
+            ]
+          },
+          {
+            "title": "Active Streams",
+            "targets": [
+              {
+                "expr": "dwcp_active_streams"
+              }
+            ]
+          },
+          {
+            "title": "Packet Loss",
+            "targets": [
+              {
+                "expr": "dwcp_packet_loss_ratio"
+              }
+            ]
+          }
+        ]
+      }
+    }
+
+  consensus-health.json: |
+    {
+      "dashboard": {
+        "title": "Consensus Health",
+        "panels": [
+          {
+            "title": "Commit Latency",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(consensus_commit_duration_seconds_bucket[5m])) by (le))"
+              }
+            ]
+          },
+          {
+            "title": "Leader Elections",
+            "targets": [
+              {
+                "expr": "changes(consensus_leader_id[1h])"
+              }
+            ]
+          },
+          {
+            "title": "Quorum Status",
+            "targets": [
+              {
+                "expr": "consensus_quorum_size - count(up{app='novacron-consensus'} == 1)"
+              }
+            ]
+          },
+          {
+            "title": "Log Replication Lag",
+            "targets": [
+              {
+                "expr": "consensus_log_last_index - consensus_log_commit_index"
+              }
+            ]
+          }
+        ]
+      }
+    }

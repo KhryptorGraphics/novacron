@@ -1,0 +1,259 @@
+package optimization
+
+import (
+	"fmt"
+	"os"
+	"runtime"
+	"syscall"
+
+	"golang.org/x/sys/unix"
+)
+
+// CPUAffinity manages CPU affinity and NUMA optimizations
+type CPUAffinity struct {
+	cpuSet unix.CPUSet
+}
+
+// NewCPUAffinity creates a new CPU affinity manager
+func NewCPUAffinity() *CPUAffinity {
+	return &CPUAffinity{}
+}
+
+// SetAffinity pins the current thread to specific CPUs
+func (ca *CPUAffinity) SetAffinity(cpus []int) error {
+	ca.cpuSet.Zero()
+	for _, cpu := range cpus {
+		ca.cpuSet.Set(cpu)
+	}
+
+	return unix.SchedSetaffinity(0, &ca.cpuSet)
+}
+
+// GetAffinity returns the current CPU affinity
+func (ca *CPUAffinity) GetAffinity() ([]int, error) {
+	var cpuSet unix.CPUSet
+	if err := unix.SchedGetaffinity(0, &cpuSet); err != nil {
+		return nil, err
+	}
+
+	cpus := make([]int, 0, runtime.NumCPU())
+	for i := 0; i < runtime.NumCPU(); i++ {
+		if cpuSet.IsSet(i) {
+			cpus = append(cpus, i)
+		}
+	}
+
+	return cpus, nil
+}
+
+// PinToCore pins current goroutine to a specific CPU core
+func (ca *CPUAffinity) PinToCore(core int) error {
+	return ca.SetAffinity([]int{core})
+}
+
+// PinToNUMANode pins to all CPUs in a NUMA node
+func (ca *CPUAffinity) PinToNUMANode(node int) error {
+	cpus := ca.getCPUsForNUMANode(node)
+	if len(cpus) == 0 {
+		return fmt.Errorf("no CPUs found for NUMA node %d", node)
+	}
+	return ca.SetAffinity(cpus)
+}
+
+// getCPUsForNUMANode returns CPUs belonging to a NUMA node
+func (ca *CPUAffinity) getCPUsForNUMANode(node int) []int {
+	// Read from /sys/devices/system/node/node*/cpulist
+	cpulistPath := fmt.Sprintf("/sys/devices/system/node/node%d/cpulist", node)
+	data, err := os.ReadFile(cpulistPath)
+	if err != nil {
+		return nil
+	}
+
+	cpus := make([]int, 0)
+	// Parse CPU list (e.g., "0-7,16-23")
+	cpuStr := string(data)
+	_ = cpuStr // TODO: Parse CPU range string
+
+	return cpus
+}
+
+// NUMAAllocator manages NUMA-aware memory allocation
+type NUMAAllocator struct {
+	node int
+}
+
+// NewNUMAAllocator creates a NUMA-aware allocator
+func NewNUMAAllocator(node int) *NUMAAllocator {
+	return &NUMAAllocator{node: node}
+}
+
+// Allocate allocates memory on specific NUMA node
+func (na *NUMAAllocator) Allocate(size int) ([]byte, error) {
+	return AllocateNUMAMemory(size, na.node)
+}
+
+// AllocateNUMAMemory allocates memory on a specific NUMA node
+func AllocateNUMAMemory(size, node int) ([]byte, error) {
+	data := make([]byte, size)
+
+	// Set NUMA policy for this memory region
+	policy := unix.MPOL_BIND
+	nodemask := uint64(1 << uint(node))
+
+	err := unix.Mbind(
+		uintptr(unsafe.Pointer(&data[0])),
+		uintptr(size),
+		policy,
+		&nodemask,
+		64, // maxnode
+		unix.MPOL_MF_STRICT|unix.MPOL_MF_MOVE,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("mbind failed: %w", err)
+	}
+
+	return data, nil
+}
+
+// GetNUMANode returns the NUMA node for the current thread
+func GetNUMANode() (int, error) {
+	var cpu int
+	_, _, err := syscall.Syscall(syscall.SYS_GETCPU, uintptr(unsafe.Pointer(&cpu)), 0, 0)
+	if err != 0 {
+		return -1, err
+	}
+
+	// Read NUMA node from /sys
+	nodePath := fmt.Sprintf("/sys/devices/system/cpu/cpu%d/node", cpu)
+	data, err := os.ReadFile(nodePath)
+	if err != nil {
+		return -1, err
+	}
+
+	var node int
+	fmt.Sscanf(string(data), "%d", &node)
+	return node, nil
+}
+
+// ThreadPool manages worker threads with CPU affinity
+type ThreadPool struct {
+	workers  int
+	cpuCores []int
+	tasks    chan func()
+	done     chan struct{}
+}
+
+// NewThreadPool creates a thread pool with CPU affinity
+func NewThreadPool(workers int, cpuCores []int) *ThreadPool {
+	if len(cpuCores) == 0 {
+		// Default to all CPUs
+		cpuCores = make([]int, runtime.NumCPU())
+		for i := range cpuCores {
+			cpuCores[i] = i
+		}
+	}
+
+	tp := &ThreadPool{
+		workers:  workers,
+		cpuCores: cpuCores,
+		tasks:    make(chan func(), workers*2),
+		done:     make(chan struct{}),
+	}
+
+	tp.start()
+	return tp
+}
+
+// start initializes worker goroutines
+func (tp *ThreadPool) start() {
+	for i := 0; i < tp.workers; i++ {
+		core := tp.cpuCores[i%len(tp.cpuCores)]
+		go tp.worker(core)
+	}
+}
+
+// worker processes tasks with CPU affinity
+func (tp *ThreadPool) worker(core int) {
+	// Lock OS thread for CPU affinity
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	// Set CPU affinity
+	ca := NewCPUAffinity()
+	ca.PinToCore(core)
+
+	for {
+		select {
+		case task := <-tp.tasks:
+			task()
+		case <-tp.done:
+			return
+		}
+	}
+}
+
+// Submit submits a task to the pool
+func (tp *ThreadPool) Submit(task func()) {
+	tp.tasks <- task
+}
+
+// Close shuts down the thread pool
+func (tp *ThreadPool) Close() {
+	close(tp.done)
+}
+
+// CPUTopology provides information about CPU topology
+type CPUTopology struct {
+	NumCPUs     int
+	NumCores    int
+	NumSockets  int
+	NumNUMANodes int
+	L1CacheSize int
+	L2CacheSize int
+	L3CacheSize int
+}
+
+// GetCPUTopology retrieves CPU topology information
+func GetCPUTopology() (*CPUTopology, error) {
+	topo := &CPUTopology{
+		NumCPUs: runtime.NumCPU(),
+	}
+
+	// Read topology from /sys
+	// L1 cache
+	if data, err := os.ReadFile("/sys/devices/system/cpu/cpu0/cache/index0/size"); err == nil {
+		fmt.Sscanf(string(data), "%dK", &topo.L1CacheSize)
+		topo.L1CacheSize *= 1024
+	}
+
+	// L2 cache
+	if data, err := os.ReadFile("/sys/devices/system/cpu/cpu0/cache/index2/size"); err == nil {
+		fmt.Sscanf(string(data), "%dK", &topo.L2CacheSize)
+		topo.L2CacheSize *= 1024
+	}
+
+	// L3 cache
+	if data, err := os.ReadFile("/sys/devices/system/cpu/cpu0/cache/index3/size"); err == nil {
+		fmt.Sscanf(string(data), "%dK", &topo.L3CacheSize)
+		topo.L3CacheSize *= 1024
+	}
+
+	return topo, nil
+}
+
+// SetSchedulerAffinity sets scheduler affinity for optimal performance
+func SetSchedulerAffinity(policy int, priority int) error {
+	param := &unix.SchedParam{
+		Priority: int32(priority),
+	}
+
+	return unix.SchedSetscheduler(0, policy, param)
+}
+
+// SetRealtimePriority sets real-time scheduling priority
+func SetRealtimePriority(priority int) error {
+	return SetSchedulerAffinity(unix.SCHED_FIFO, priority)
+}
+
+import "unsafe"

@@ -1,0 +1,233 @@
+# Prometheus alerting rules for DWCP
+groups:
+  - name: dwcp_errors
+    interval: 30s
+    rules:
+      - alert: DWCPHighErrorRate
+        expr: |
+          (
+            sum(rate(dwcp_amst_errors_total[5m])) by (cluster, node)
+            /
+            sum(rate(dwcp_amst_streams_total[5m])) by (cluster, node)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: amst
+        annotations:
+          summary: "High DWCP error rate on {{ $labels.node }}"
+          description: "AMST error rate is {{ $value | humanizePercentage }} on node {{ $labels.node }} in cluster {{ $labels.cluster }}"
+
+      - alert: DWCPCriticalErrorRate
+        expr: |
+          (
+            sum(rate(dwcp_amst_errors_total[5m])) by (cluster, node)
+            /
+            sum(rate(dwcp_amst_streams_total[5m])) by (cluster, node)
+          ) > 0.15
+        for: 2m
+        labels:
+          severity: critical
+          component: amst
+        annotations:
+          summary: "Critical DWCP error rate on {{ $labels.node }}"
+          description: "AMST error rate is {{ $value | humanizePercentage }} on node {{ $labels.node }} - immediate attention required"
+
+  - name: dwcp_compression
+    interval: 1m
+    rules:
+      - alert: DWCPLowCompressionRatio
+        expr: |
+          histogram_quantile(0.5,
+            rate(dwcp_hde_compression_ratio_bucket[10m])
+          ) < 3.0
+        for: 10m
+        labels:
+          severity: warning
+          component: hde
+        annotations:
+          summary: "Low HDE compression ratio on {{ $labels.node }}"
+          description: "Median compression ratio is {{ $value | humanize }}x on node {{ $labels.node }} - expected >3x"
+
+      - alert: DWCPCompressionFailure
+        expr: |
+          rate(dwcp_hde_operations_total{result="failure"}[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          component: hde
+        annotations:
+          summary: "HDE compression failures detected"
+          description: "Compression failure rate is {{ $value | humanize }} ops/s on {{ $labels.node }}"
+
+  - name: dwcp_availability
+    interval: 30s
+    rules:
+      - alert: DWCPComponentDown
+        expr: dwcp_system_component_health < 2
+        for: 2m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "DWCP component {{ $labels.component }} unhealthy"
+          description: "Component {{ $labels.component }} on node {{ $labels.node }} health status: {{ $value }}"
+
+      - alert: DWCPComponentDegraded
+        expr: dwcp_system_component_health == 1
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "DWCP component {{ $labels.component }} degraded"
+          description: "Component {{ $labels.component }} on node {{ $labels.node }} is running in degraded mode"
+
+  - name: dwcp_performance
+    interval: 1m
+    rules:
+      - alert: DWCPLowBandwidthUtilization
+        expr: dwcp_amst_bandwidth_utilization_percent < 50
+        for: 15m
+        labels:
+          severity: info
+          component: amst
+        annotations:
+          summary: "Low AMST bandwidth utilization"
+          description: "Bandwidth utilization is {{ $value | humanize }}% on {{ $labels.node }} - capacity may be over-provisioned"
+
+      - alert: DWCPHighBandwidthUtilization
+        expr: dwcp_amst_bandwidth_utilization_percent > 85
+        for: 5m
+        labels:
+          severity: warning
+          component: amst
+        annotations:
+          summary: "High AMST bandwidth utilization"
+          description: "Bandwidth utilization is {{ $value | humanize }}% on {{ $labels.node }} - consider scaling"
+
+      - alert: DWCPMigrationSlow
+        expr: |
+          histogram_quantile(0.95,
+            rate(dwcp_migration_duration_seconds_bucket{dwcp_enabled="true"}[10m])
+          )
+          >
+          2 * histogram_quantile(0.95,
+            rate(dwcp_migration_duration_seconds_bucket{dwcp_enabled="false"}[10m])
+          )
+        for: 10m
+        labels:
+          severity: warning
+          component: migration
+        annotations:
+          summary: "DWCP migrations slower than standard"
+          description: "P95 DWCP migration time is {{ $value | humanizeDuration }} - slower than 2x standard migration target"
+
+      - alert: DWCPHighLatency
+        expr: |
+          histogram_quantile(0.99,
+            rate(dwcp_amst_latency_seconds_bucket[5m])
+          ) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          component: amst
+        annotations:
+          summary: "High AMST stream latency"
+          description: "P99 latency is {{ $value | humanizeDuration }} on {{ $labels.node }} - expected <1s"
+
+  - name: dwcp_capacity
+    interval: 5m
+    rules:
+      - alert: DWCPLowDeltaHitRate
+        expr: dwcp_hde_delta_hit_rate_percent < 60
+        for: 15m
+        labels:
+          severity: info
+          component: hde
+        annotations:
+          summary: "Low HDE delta encoding hit rate"
+          description: "Delta hit rate is {{ $value | humanize }}% on {{ $labels.node }} - baseline refresh may be needed"
+
+      - alert: DWCPHighStreamCount
+        expr: dwcp_amst_streams_active > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: amst
+        annotations:
+          summary: "High active stream count"
+          description: "{{ $value }} active streams on {{ $labels.node }} - consider connection pooling"
+
+      - alert: DWCPExcessiveBaselines
+        expr: sum(dwcp_hde_baseline_count) by (cluster, node) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          component: hde
+        annotations:
+          summary: "Excessive HDE baseline count"
+          description: "{{ $value }} baselines on {{ $labels.node }} - memory pressure possible"
+
+  - name: dwcp_federation
+    interval: 1m
+    rules:
+      - alert: DWCPFederationSyncSlow
+        expr: |
+          histogram_quantile(0.95,
+            rate(dwcp_federation_sync_duration_seconds_bucket[10m])
+          ) > 5.0
+        for: 10m
+        labels:
+          severity: warning
+          component: federation
+        annotations:
+          summary: "Slow federation sync to {{ $labels.remote_cluster }}"
+          description: "P95 sync duration is {{ $value | humanizeDuration }} - expected <5s"
+
+      - alert: DWCPLowBandwidthSavings
+        expr: |
+          rate(dwcp_federation_bandwidth_saved_bytes_total[1h])
+          /
+          (rate(dwcp_hde_bytes_original_total[1h]) - rate(dwcp_hde_bytes_compressed_total[1h]))
+          < 0.5
+        for: 1h
+        labels:
+          severity: info
+          component: federation
+        annotations:
+          summary: "Low federation bandwidth savings"
+          description: "Bandwidth savings ratio is {{ $value | humanizePercentage }} - DWCP benefits may be limited"
+
+  - name: dwcp_sla
+    interval: 5m
+    rules:
+      - alert: DWCPSLAViolation
+        expr: |
+          (
+            sum(rate(dwcp_migration_duration_seconds_sum{dwcp_enabled="true"}[1h]))
+            /
+            sum(rate(dwcp_migration_duration_seconds_count{dwcp_enabled="true"}[1h]))
+          ) > 300
+        for: 1h
+        labels:
+          severity: critical
+          component: migration
+        annotations:
+          summary: "DWCP migration SLA violation"
+          description: "Average migration time {{ $value | humanizeDuration }} exceeds 5-minute SLA target"
+
+      - alert: DWCPAvailabilitySLA
+        expr: |
+          (
+            sum(dwcp_system_component_health == 2)
+            /
+            count(dwcp_system_component_health)
+          ) < 0.99
+        for: 5m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "DWCP availability below SLA"
+          description: "Component availability {{ $value | humanizePercentage }} is below 99% SLA"

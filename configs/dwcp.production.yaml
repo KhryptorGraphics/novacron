@@ -1,0 +1,43 @@
+# DWCP Production Environment Configuration
+# Phase 2+ - Not yet enabled
+
+dwcp:
+  # Disabled until Phase 2
+  enabled: false
+
+  transport:
+    # Aggressive settings for production
+    initial_streams: 64
+    max_streams: 256
+    enable_rdma: true  # Enable if hardware available
+    pacing_rate: 10000000000  # 10 Gbps
+
+  compression:
+    # Optimized for production throughput
+    level: 5
+    enable_dictionary: true
+    dictionary_update_interval: 12h
+
+  monitoring:
+    log_level: "info"
+    prometheus_enabled: true
+    metrics_port: 9090
+    enable_tracing: true
+    tracing_sample_rate: 0.01  # 1% sampling in production
+
+  security:
+    # Full security for production
+    enable_tls: true
+    tls_cert_path: "/etc/dwcp/certs/server.crt"
+    tls_key_path: "/etc/dwcp/certs/server.key"
+    tls_ca_path: "/etc/dwcp/certs/ca.crt"
+    enable_mtls: true
+    client_cert_path: "/etc/dwcp/certs/client.crt"
+    client_key_path: "/etc/dwcp/certs/client.key"
+
+  performance:
+    enable_cpu_affinity: true
+    worker_threads: 0  # Auto-detect
+    enable_zero_copy: true
+    enable_batching: true
+    batch_size: 200

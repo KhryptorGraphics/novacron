@@ -1,0 +1,207 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: novacron-api-rolling
+  labels:
+    app: novacron-api
+    deployment-strategy: rolling-update
+spec:
+  replicas: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0  # Zero-downtime: never go below desired replicas
+      maxSurge: 1        # Add one pod at a time
+  selector:
+    matchLabels:
+      app: novacron-api
+  template:
+    metadata:
+      labels:
+        app: novacron-api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: api
+          image: novacron/api:3.0.0
+          ports:
+            - containerPort: 8080
+              name: http
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - |
+                    # Graceful shutdown sequence
+                    # 1. Stop accepting new connections
+                    killall -USR1 novacron-api
+
+                    # 2. Wait for existing connections to drain
+                    sleep 30
+
+                    # 3. Persist in-flight state to storage
+                    /usr/local/bin/persist-state.sh
+
+                    # 4. Notify load balancer to remove from rotation
+                    curl -X POST http://load-balancer:8080/remove-backend \
+                      -d "pod=${POD_NAME}"
+
+                    # 5. Final cleanup
+                    /usr/local/bin/cleanup.sh
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+              httpHeaders:
+                - name: X-Readiness-Check
+                  value: "true"
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          startupProbe:
+            httpGet:
+              path: /startup
+              port: 8080
+            initialDelaySeconds: 0
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30  # Allow up to 150s for startup
+
+          resources:
+            requests:
+              cpu: 4000m
+              memory: 8Gi
+            limits:
+              cpu: 8000m
+              memory: 16Gi
+
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: GRACEFUL_SHUTDOWN_TIMEOUT
+              value: "60s"
+            - name: CONNECTION_DRAIN_TIMEOUT
+              value: "30s"
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: novacron-api-pdb
+spec:
+  minAvailable: 80%  # Always keep 80% of pods available
+  selector:
+    matchLabels:
+      app: novacron-api
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: novacron-pre-deployment-check
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  template:
+    spec:
+      containers:
+        - name: pre-deployment
+          image: novacron/deployment-tools:3.0.0
+          command:
+            - /usr/local/bin/pre-deployment-check.sh
+          env:
+            - name: CHECK_DATABASE_MIGRATIONS
+              value: "true"
+            - name: CHECK_API_COMPATIBILITY
+              value: "true"
+            - name: CHECK_CONSENSUS_HEALTH
+              value: "true"
+            - name: MIN_HEALTHY_NODES
+              value: "3"
+      restartPolicy: Never
+  backoffLimit: 3
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: novacron-post-deployment-test
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  template:
+    spec:
+      containers:
+        - name: post-deployment
+          image: novacron/deployment-tools:3.0.0
+          command:
+            - /usr/local/bin/post-deployment-test.sh
+          env:
+            - name: RUN_SMOKE_TESTS
+              value: "true"
+            - name: RUN_INTEGRATION_TESTS
+              value: "true"
+            - name: VALIDATE_METRICS
+              value: "true"
+            - name: ALERT_ON_FAILURE
+              value: "true"
+      restartPolicy: Never
+  backoffLimit: 2
+---
+# Automated rollback on failure
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deployment-rollback-policy
+data:
+  rollback.yaml: |
+    triggers:
+      - type: metric
+        metric: error_rate
+        threshold: 5%
+        duration: 5m
+        action: rollback
+
+      - type: metric
+        metric: latency_p95
+        threshold: 1000ms
+        duration: 3m
+        action: rollback
+
+      - type: health
+        unhealthy_pods: 20%
+        duration: 2m
+        action: rollback
+
+      - type: custom
+        check: /usr/local/bin/custom-health-check.sh
+        interval: 1m
+        failures: 3
+        action: rollback
+
+    rollback:
+      mode: automatic
+      revision: previous
+      notify:
+        - slack: "#deployments"
+        - email: "ops@novacron.io"
+        - pagerduty: true

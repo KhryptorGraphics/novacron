@@ -1,0 +1,261 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: novacron-test
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: helm-chart-lint
+  namespace: novacron-test
+spec:
+  template:
+    spec:
+      containers:
+        - name: lint
+          image: alpine/helm:3.12.0
+          command:
+            - helm
+            - lint
+            - /charts/novacron
+            - --strict
+          volumeMounts:
+            - name: charts
+              mountPath: /charts
+      volumes:
+        - name: charts
+          hostPath:
+            path: /home/kp/novacron/backend/deployments/k8s/charts
+      restartPolicy: Never
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: yaml-validation
+  namespace: novacron-test
+spec:
+  template:
+    spec:
+      containers:
+        - name: validate
+          image: cytopia/yamllint:latest
+          command:
+            - yamllint
+            - -c
+            - /config/.yamllint
+            - /manifests
+          volumeMounts:
+            - name: manifests
+              mountPath: /manifests
+            - name: config
+              mountPath: /config
+      volumes:
+        - name: manifests
+          hostPath:
+            path: /home/kp/novacron/backend/deployments/k8s/manifests
+        - name: config
+          configMap:
+            name: yamllint-config
+      restartPolicy: Never
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yamllint-config
+  namespace: novacron-test
+data:
+  .yamllint: |
+    extends: default
+    rules:
+      line-length:
+        max: 120
+        level: warning
+      indentation:
+        spaces: 2
+      comments:
+        min-spaces-from-content: 1
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: e2e-deployment-test
+  namespace: novacron-test
+spec:
+  template:
+    spec:
+      serviceAccountName: test-deployer
+      containers:
+        - name: test
+          image: novacron/test-runner:3.0.0
+          command:
+            - /usr/local/bin/run-e2e-tests.sh
+          env:
+            - name: TEST_NAMESPACE
+              value: novacron-test-e2e
+            - name: CLEANUP_ON_SUCCESS
+              value: "true"
+            - name: HELM_CHART_PATH
+              value: /charts/novacron
+          volumeMounts:
+            - name: charts
+              mountPath: /charts
+            - name: kubeconfig
+              mountPath: /root/.kube
+      volumes:
+        - name: charts
+          hostPath:
+            path: /home/kp/novacron/backend/deployments/k8s/charts
+        - name: kubeconfig
+          secret:
+            secretName: test-kubeconfig
+      restartPolicy: Never
+  backoffLimit: 2
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chaos-test-config
+  namespace: novacron-test
+data:
+  chaos-tests.yaml: |
+    scenarios:
+      - name: pod-failure
+        type: PodChaos
+        action: pod-kill
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: novacron-api
+        mode: one
+        duration: 30s
+
+      - name: network-partition
+        type: NetworkChaos
+        action: partition
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: novacron-consensus
+        mode: all
+        duration: 60s
+        direction: both
+
+      - name: cpu-stress
+        type: StressChaos
+        stressors:
+          cpu:
+            workers: 4
+            load: 80
+        selector:
+          namespaces:
+            - novacron
+        mode: one
+        duration: 120s
+
+      - name: memory-stress
+        type: StressChaos
+        stressors:
+          memory:
+            workers: 4
+            size: 2GB
+        selector:
+          namespaces:
+            - novacron
+        mode: one
+        duration: 120s
+
+      - name: io-delay
+        type: IOChaos
+        action: latency
+        delay: 100ms
+        selector:
+          namespaces:
+            - novacron
+        mode: all
+        duration: 180s
+        volumePath: /data
+        percent: 50
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: load-test
+  namespace: novacron-test
+spec:
+  schedule: "0 2 * * 0"  # Weekly on Sunday at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: k6
+              image: grafana/k6:latest
+              command:
+                - k6
+                - run
+                - /scripts/load-test.js
+              env:
+                - name: TARGET_URL
+                  value: https://novacron.example.com
+                - name: VIRTUAL_USERS
+                  value: "1000"
+                - name: DURATION
+                  value: 10m
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+          volumes:
+            - name: scripts
+              configMap:
+                name: load-test-scripts
+          restartPolicy: Never
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: load-test-scripts
+  namespace: novacron-test
+data:
+  load-test.js: |
+    import http from 'k6/http';
+    import { check, sleep } from 'k6';
+    import { Rate } from 'k6/metrics';
+
+    const errorRate = new Rate('errors');
+
+    export let options = {
+      stages: [
+        { duration: '2m', target: 100 },   // Ramp up
+        { duration: '5m', target: 1000 },  // Stay at peak
+        { duration: '2m', target: 100 },   // Ramp down
+        { duration: '1m', target: 0 },     // Cool down
+      ],
+      thresholds: {
+        http_req_duration: ['p(95)<1000'],  // 95% under 1s
+        http_req_failed: ['rate<0.01'],     // <1% errors
+        errors: ['rate<0.05'],
+      },
+    };
+
+    export default function () {
+      const responses = http.batch([
+        ['GET', `${__ENV.TARGET_URL}/api/vms`],
+        ['GET', `${__ENV.TARGET_URL}/api/health`],
+        ['POST', `${__ENV.TARGET_URL}/api/vms`, JSON.stringify({
+          name: 'test-vm',
+          cpu: 2,
+          memory: 4096,
+        })],
+      ]);
+
+      responses.forEach((res) => {
+        check(res, {
+          'status is 200': (r) => r.status === 200 || r.status === 201,
+          'response time < 1s': (r) => r.timings.duration < 1000,
+        }) || errorRate.add(1);
+      });
+
+      sleep(1);
+    }

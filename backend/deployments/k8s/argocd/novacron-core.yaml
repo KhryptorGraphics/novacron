@@ -1,0 +1,131 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: novacron-core
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: novacron
+
+  source:
+    repoURL: https://github.com/novacron/novacron
+    targetRevision: main
+    path: backend/deployments/k8s/charts/novacron
+    helm:
+      releaseName: novacron
+      valueFiles:
+        - values.yaml
+        - values-production.yaml
+      parameters:
+        - name: image.tag
+          value: "3.0.0"
+        - name: replicaCount
+          value: "10"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: novacron
+
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10
+
+  # Sync waves for ordered deployment
+  info:
+    - name: sync-wave
+      value: "0"
+
+  # Health checks
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+
+  # Notifications
+  notification:
+    triggers:
+      - on-deployed
+      - on-health-degraded
+      - on-sync-failed
+      - on-sync-succeeded
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: novacron
+  namespace: argocd
+spec:
+  description: NovaCron Platform Project
+
+  sourceRepos:
+    - https://github.com/novacron/novacron
+    - https://charts.bitnami.com/bitnami
+    - https://prometheus-community.github.io/helm-charts
+
+  destinations:
+    - namespace: novacron
+      server: https://kubernetes.default.svc
+    - namespace: novacron-*
+      server: https://kubernetes.default.svc
+    - namespace: monitoring
+      server: https://kubernetes.default.svc
+
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
+
+  roles:
+    # Production deployment requires approval
+    - name: production-deployer
+      description: Production deployment role
+      policies:
+        - p, proj:novacron:production-deployer, applications, sync, novacron/*, allow
+      groups:
+        - ops-team
+        - platform-team
+
+    # Staging deployment is automated
+    - name: staging-deployer
+      description: Staging deployment role
+      policies:
+        - p, proj:novacron:staging-deployer, applications, *, novacron/*, allow
+      groups:
+        - dev-team
+        - ops-team
+
+  syncWindows:
+    # Prevent deployments during maintenance windows
+    - kind: deny
+      schedule: "0 2 * * 0"  # Sunday 2 AM
+      duration: 4h
+      applications:
+        - novacron-*
+      manualSync: true
+
+    # Allow emergency deployments
+    - kind: allow
+      schedule: "* * * * *"
+      duration: 24h
+      applications:
+        - novacron-hotfix-*

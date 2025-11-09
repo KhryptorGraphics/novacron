@@ -18,6 +18,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/khryptorgraphics/novacron/backend/api/monitoring"
 	"github.com/khryptorgraphics/novacron/backend/api/vm"
+	"github.com/khryptorgraphics/novacron/backend/api/admin"
 	"github.com/khryptorgraphics/novacron/backend/core/hypervisor"
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
 	core_vm "github.com/khryptorgraphics/novacron/backend/core/vm"
@@ -138,9 +139,14 @@ func main() {
 
 	// Add CORS middleware
 	corsHandler := handlers.CORS(
-		handlers.AllowedOrigins([]string{"http://localhost:8092", "http://localhost:3001"}),
-		handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}),
-		handlers.AllowedHeaders([]string{"Content-Type", "Authorization"}),
+		handlers.AllowedOrigins([]string{
+			"http://localhost:8092",
+			"http://localhost:3001",
+			"http://localhost:3000", // Next.js frontend
+		}),
+		handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"}),
+		handlers.AllowedHeaders([]string{"Content-Type", "Authorization", "X-User-Email"}),
+		handlers.AllowCredentials(),
 	)
 
 	// Add authentication middleware
@@ -185,6 +191,11 @@ func main() {
 		encMgr,
 	)
 	securityHandlers.RegisterRoutes(router)
+
+	// Register admin routes
+	adminHandlers := admin.NewAdminHandlers(db, cfg.Server.ConfigPath)
+	adminHandlers.RegisterRoutes(router)
+	appLogger.Info("Admin API routes registered")
 
 	// Register monitoring routes
 	if kvmManager != nil {
@@ -293,7 +304,10 @@ func runMigrations(db *sql.DB) error {
 			email VARCHAR(255) UNIQUE NOT NULL,
 			password_hash VARCHAR(255) NOT NULL,
 			role VARCHAR(50) DEFAULT 'user',
+			active BOOLEAN DEFAULT true,
 			tenant_id VARCHAR(255) DEFAULT 'default',
+			two_factor_enabled BOOLEAN DEFAULT false,
+			two_factor_secret VARCHAR(255),
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)`,
@@ -317,8 +331,73 @@ func runMigrations(db *sql.DB) error {
 			network_recv BIGINT,
 			timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS vm_templates (
+			id VARCHAR(255) PRIMARY KEY,
+			name VARCHAR(255) NOT NULL,
+			description TEXT,
+			os VARCHAR(100) NOT NULL,
+			os_version VARCHAR(50),
+			cpu_cores INTEGER NOT NULL,
+			memory_mb INTEGER NOT NULL,
+			disk_gb INTEGER NOT NULL,
+			image_path VARCHAR(500),
+			is_public BOOLEAN DEFAULT false,
+			usage_count INTEGER DEFAULT 0,
+			tags JSONB,
+			metadata JSONB,
+			created_by VARCHAR(255) NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS security_alerts (
+			id SERIAL PRIMARY KEY,
+			type VARCHAR(100) NOT NULL,
+			severity VARCHAR(50) NOT NULL,
+			title VARCHAR(255) NOT NULL,
+			description TEXT,
+			source VARCHAR(255),
+			ip VARCHAR(45),
+			user_agent TEXT,
+			status VARCHAR(50) DEFAULT 'open',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS audit_logs (
+			id SERIAL PRIMARY KEY,
+			user_id INTEGER REFERENCES users(id),
+			username VARCHAR(255),
+			action VARCHAR(100) NOT NULL,
+			resource VARCHAR(255),
+			details JSONB,
+			ip VARCHAR(45),
+			user_agent TEXT,
+			success BOOLEAN DEFAULT true,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS security_policies (
+			id SERIAL PRIMARY KEY,
+			name VARCHAR(255) NOT NULL,
+			description TEXT,
+			enabled BOOLEAN DEFAULT true,
+			max_login_attempts INTEGER DEFAULT 5,
+			lockout_duration_minutes INTEGER DEFAULT 30,
+			session_timeout_minutes INTEGER DEFAULT 60,
+			password_min_length INTEGER DEFAULT 12,
+			password_require_special BOOLEAN DEFAULT true,
+			require_mfa BOOLEAN DEFAULT false,
+			allowed_ips TEXT,
+			blocked_ips TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_vm_metrics_vm_id ON vm_metrics(vm_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_vm_metrics_timestamp ON vm_metrics(timestamp)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_security_alerts_status ON security_alerts(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_security_alerts_severity ON security_alerts(severity)`,
+		`CREATE INDEX IF NOT EXISTS idx_vm_templates_os ON vm_templates(os)`,
+		`CREATE INDEX IF NOT EXISTS idx_vm_templates_is_public ON vm_templates(is_public)`,
 	}
 
 	for _, migration := range migrations {

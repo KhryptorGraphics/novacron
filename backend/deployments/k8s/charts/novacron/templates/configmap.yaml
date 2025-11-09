@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "novacron.fullname" . }}
+  labels:
+    {{- include "novacron.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    server:
+      port: {{ .Values.service.targetPort }}
+      environment: {{ .Values.env | default "production" }}
+
+    database:
+      host: {{ .Values.postgresql.fullnameOverride | default (printf "%s-postgresql" .Release.Name) }}
+      port: 5432
+      name: {{ .Values.postgresql.auth.database }}
+
+    redis:
+      host: {{ .Values.redis.fullnameOverride | default (printf "%s-redis-master" .Release.Name) }}
+      port: 6379
+
+    {{- if .Values.dwcp.enabled }}
+    dwcp:
+      enabled: true
+      amst:
+        min_streams: {{ .Values.dwcp.amst.minStreams }}
+        max_streams: {{ .Values.dwcp.amst.maxStreams }}
+      hde:
+        compression_level: {{ .Values.dwcp.hde.compressionLevel }}
+        algorithm: {{ .Values.dwcp.hde.algorithm }}
+      acp:
+        nodes: {{ .Values.dwcp.acp.nodes }}
+        quorum_size: {{ .Values.dwcp.acp.quorumSize }}
+        consensus_engine: {{ .Values.dwcp.acp.consensusEngine }}
+    {{- end }}
+---
+{{- if .Values.dwcp.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "novacron.fullname" . }}-dwcp
+  labels:
+    {{- include "novacron.labels" . | nindent 4 }}
+data:
+  dwcp.yaml: |
+    transport:
+      protocol: {{ .Values.dwcp.networking.transport }}
+      encryption: {{ .Values.dwcp.networking.encryption }}
+      compression: {{ .Values.dwcp.networking.compression }}
+      mtu: {{ .Values.dwcp.networking.mtu }}
+
+    amst:
+      min_streams: {{ .Values.dwcp.amst.minStreams }}
+      max_streams: {{ .Values.dwcp.amst.maxStreams }}
+      priority: {{ .Values.dwcp.amst.priority }}
+      buffer_size: {{ .Values.dwcp.amst.bufferSize }}
+
+    hde:
+      compression_level: {{ .Values.dwcp.hde.compressionLevel }}
+      algorithm: {{ .Values.dwcp.hde.algorithm }}
+      dict_size: {{ .Values.dwcp.hde.dictSize }}
+
+    acp:
+      nodes: {{ .Values.dwcp.acp.nodes }}
+      quorum_size: {{ .Values.dwcp.acp.quorumSize }}
+      consensus_engine: {{ .Values.dwcp.acp.consensusEngine }}
+      heartbeat_interval: {{ .Values.dwcp.acp.heartbeatInterval }}
+      election_timeout: {{ .Values.dwcp.acp.electionTimeout }}
+      snapshot_interval: {{ .Values.dwcp.acp.snapshotInterval }}
+
+    crdt:
+      enabled: {{ .Values.dwcp.crdt.enabled }}
+      sync_interval: {{ .Values.dwcp.crdt.syncInterval }}
+      conflict_resolution: {{ .Values.dwcp.crdt.conflictResolution }}
+{{- end }}

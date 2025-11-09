@@ -91,20 +91,24 @@ export function RBACProvider({ children }: { children: ReactNode }) {
 
   const userRoles = getUserRoles();
 
-  const permissions: Permission[] = userRoles.flatMap(role => role.permissions);
+  // SSR-safe: Ensure userRoles is always an array before calling flatMap
+  const permissions: Permission[] = Array.isArray(userRoles)
+    ? userRoles.flatMap(role => role?.permissions || [])
+    : [];
 
   const hasPermission = (resource: string, action: string): boolean => {
-    if (!user) return false;
+    if (!user || !Array.isArray(permissions)) return false;
 
     // Check for super admin wildcard permission
     const hasSuperAdmin = permissions.some(
-      perm => perm.resource === '*' && perm.actions.includes('*')
+      perm => perm?.resource === '*' && perm?.actions?.includes('*')
     );
 
     if (hasSuperAdmin) return true;
 
     // Check specific permissions
     return permissions.some(perm => {
+      if (!perm || !perm.actions) return false;
       const resourceMatch = perm.resource === resource || perm.resource === '*';
       const actionMatch = perm.actions.includes(action) || perm.actions.includes('*');
       return resourceMatch && actionMatch;
@@ -112,7 +116,8 @@ export function RBACProvider({ children }: { children: ReactNode }) {
   };
 
   const hasRole = (roleName: string): boolean => {
-    return userRoles.some(role => role.id === roleName || role.name === roleName);
+    if (!Array.isArray(userRoles)) return false;
+    return userRoles.some(role => role?.id === roleName || role?.name === roleName);
   };
 
   const canAccess = (
@@ -122,15 +127,15 @@ export function RBACProvider({ children }: { children: ReactNode }) {
     if (!user) return false;
 
     // Check role requirements
-    if (requiredRoles && requiredRoles.length > 0) {
+    if (Array.isArray(requiredRoles) && requiredRoles.length > 0) {
       const hasRequiredRole = requiredRoles.some(role => hasRole(role));
       if (!hasRequiredRole) return false;
     }
 
     // Check permission requirements
-    if (requiredPermissions && requiredPermissions.length > 0) {
+    if (Array.isArray(requiredPermissions) && requiredPermissions.length > 0) {
       const hasAllPermissions = requiredPermissions.every(
-        perm => hasPermission(perm.resource, perm.action)
+        perm => hasPermission(perm?.resource, perm?.action)
       );
       if (!hasAllPermissions) return false;
     }
