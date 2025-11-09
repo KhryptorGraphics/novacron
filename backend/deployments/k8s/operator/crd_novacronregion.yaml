@@ -1,0 +1,85 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: novacronregions.novacron.io
+spec:
+  group: novacron.io
+  names:
+    kind: NovaCronRegion
+    listKind: NovaCronRegionList
+    plural: novacronregions
+    singular: novacronregion
+    shortNames:
+      - ncr
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - clusterRef
+                - region
+                - replicas
+              properties:
+                clusterRef:
+                  type: string
+                  description: Reference to parent NovaCronCluster
+                region:
+                  type: string
+                  description: AWS/GCP/Azure region name
+                replicas:
+                  type: integer
+                  minimum: 1
+                resources:
+                  type: object
+                  properties:
+                    requests:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                        memory:
+                          type: string
+                    limits:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                        memory:
+                          type: string
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: [Pending, Ready, Degraded, Failed]
+                ready:
+                  type: integer
+                conditions:
+                  type: array
+                  items:
+                    type: object
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Cluster
+          type: string
+          jsonPath: .spec.clusterRef
+        - name: Region
+          type: string
+          jsonPath: .spec.region
+        - name: Ready
+          type: integer
+          jsonPath: .status.ready
+        - name: Desired
+          type: integer
+          jsonPath: .spec.replicas
+        - name: Phase
+          type: string
+          jsonPath: .status.phase

@@ -1,0 +1,142 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: novacron-monitoring
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"  # Deploy after DWCP
+spec:
+  project: novacron
+
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    targetRevision: 15.18.0
+    chart: kube-prometheus-stack
+    helm:
+      releaseName: novacron-monitoring
+      values: |
+        prometheus:
+          prometheusSpec:
+            retention: 30d
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: fast-ssd
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 100Gi
+            resources:
+              requests:
+                cpu: 2000m
+                memory: 4Gi
+              limits:
+                cpu: 4000m
+                memory: 8Gi
+            additionalScrapeConfigs:
+              - job_name: 'novacron-api'
+                kubernetes_sd_configs:
+                  - role: pod
+                    namespaces:
+                      names:
+                        - novacron
+                relabel_configs:
+                  - source_labels: [__meta_kubernetes_pod_label_app]
+                    action: keep
+                    regex: novacron-api
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                    action: keep
+                    regex: true
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                    action: replace
+                    target_label: __metrics_path__
+                    regex: (.+)
+                  - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                    action: replace
+                    regex: ([^:]+)(?::\d+)?;(\d+)
+                    replacement: $1:$2
+                    target_label: __address__
+
+              - job_name: 'novacron-consensus'
+                kubernetes_sd_configs:
+                  - role: pod
+                    namespaces:
+                      names:
+                        - novacron
+                relabel_configs:
+                  - source_labels: [__meta_kubernetes_pod_label_app]
+                    action: keep
+                    regex: novacron-consensus
+
+        grafana:
+          adminPassword: changeme-production
+          persistence:
+            enabled: true
+            size: 10Gi
+            storageClassName: fast-ssd
+          dashboardProviders:
+            dashboardproviders.yaml:
+              apiVersion: 1
+              providers:
+                - name: 'novacron'
+                  orgId: 1
+                  folder: 'NovaCron'
+                  type: file
+                  disableDeletion: false
+                  editable: true
+                  options:
+                    path: /var/lib/grafana/dashboards/novacron
+          dashboardsConfigMaps:
+            novacron: "novacron-dashboards"
+
+        alertmanager:
+          config:
+            global:
+              resolve_timeout: 5m
+            route:
+              group_by: ['alertname', 'cluster', 'service']
+              group_wait: 10s
+              group_interval: 10s
+              repeat_interval: 12h
+              receiver: 'novacron-ops'
+              routes:
+                - match:
+                    severity: critical
+                  receiver: 'novacron-pagerduty'
+                  continue: true
+                - match:
+                    severity: warning
+                  receiver: 'novacron-slack'
+
+            receivers:
+              - name: 'novacron-ops'
+                email_configs:
+                  - to: 'ops@novacron.io'
+                    send_resolved: true
+
+              - name: 'novacron-pagerduty'
+                pagerduty_configs:
+                  - service_key: '<pagerduty-service-key>'
+                    send_resolved: true
+
+              - name: 'novacron-slack'
+                slack_configs:
+                  - api_url: '<slack-webhook-url>'
+                    channel: '#novacron-alerts'
+                    send_resolved: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        maxDuration: 2m

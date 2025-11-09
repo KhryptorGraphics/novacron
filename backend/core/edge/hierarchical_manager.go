@@ -345,7 +345,7 @@ func (h *HierarchicalManager) identifyPlacementCandidates(requirements WorkloadR
 	var candidates []*HierarchicalNode
 
 	for _, node := range h.topology.Nodes {
-		if h.nodeMatches Requirements(node, requirements) {
+		if h.nodeMatchesRequirements(node, requirements) {
 			candidates = append(candidates, node)
 		}
 	}

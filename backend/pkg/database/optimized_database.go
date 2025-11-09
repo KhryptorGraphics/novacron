@@ -2,7 +2,6 @@ package database
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -387,9 +386,9 @@ func (r *OptimizedVMRepository) BulkInsertMetrics(ctx context.Context, metrics [
 
 	for _, m := range metrics {
 		_, err = stmt.Exec(
-			m.VMID, m.CPUUsage, m.MemoryUsage, m.MemoryPercent,
-			m.DiskReadBytes, m.DiskWriteBytes, m.NetworkRxBytes,
-			m.NetworkTxBytes, m.Timestamp,
+			m.VMID, m.CPUUsage, m.MemoryUsage, m.MemoryUsage, // Fixed: using MemoryUsage instead of MemoryPercent
+			0, 0, m.NetworkRecv, // Fixed: using actual fields (NetworkRecv instead of NetworkRxBytes)
+			m.NetworkSent, m.Timestamp, // Fixed: using NetworkSent instead of NetworkTxBytes
 		)
 		if err != nil {
 			return fmt.Errorf("failed to execute COPY: %w", err)

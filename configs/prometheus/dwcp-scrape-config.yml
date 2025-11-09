@@ -1,0 +1,130 @@
+# Prometheus scrape configuration for DWCP metrics
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'dwcp-monitor'
+    environment: 'production'
+
+scrape_configs:
+  # DWCP main metrics endpoint
+  - job_name: 'dwcp-metrics'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets:
+          - 'localhost:9090'
+        labels:
+          service: 'dwcp'
+          component: 'core'
+
+  # DWCP AMST component
+  - job_name: 'dwcp-amst'
+    scrape_interval: 5s  # Higher frequency for stream metrics
+    scrape_timeout: 3s
+    metrics_path: /metrics
+    scheme: http
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'dwcp_amst_.*'
+        action: keep
+    static_configs:
+      - targets:
+          - 'localhost:9090'
+        labels:
+          service: 'dwcp'
+          component: 'amst'
+
+  # DWCP HDE component
+  - job_name: 'dwcp-hde'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    metrics_path: /metrics
+    scheme: http
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'dwcp_hde_.*'
+        action: keep
+    static_configs:
+      - targets:
+          - 'localhost:9090'
+        labels:
+          service: 'dwcp'
+          component: 'hde'
+
+  # DWCP Migration metrics
+  - job_name: 'dwcp-migration'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    metrics_path: /metrics
+    scheme: http
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'dwcp_migration_.*'
+        action: keep
+    static_configs:
+      - targets:
+          - 'localhost:9090'
+        labels:
+          service: 'dwcp'
+          component: 'migration'
+
+  # DWCP Federation metrics
+  - job_name: 'dwcp-federation'
+    scrape_interval: 15s
+    scrape_timeout: 7s
+    metrics_path: /metrics
+    scheme: http
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'dwcp_federation_.*'
+        action: keep
+    static_configs:
+      - targets:
+          - 'localhost:9090'
+        labels:
+          service: 'dwcp'
+          component: 'federation'
+
+  # DWCP System health
+  - job_name: 'dwcp-system'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    metrics_path: /metrics
+    scheme: http
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'dwcp_system_.*'
+        action: keep
+    static_configs:
+      - targets:
+          - 'localhost:9090'
+        labels:
+          service: 'dwcp'
+          component: 'system'
+
+  # NovaCron API Server (for correlation)
+  - job_name: 'novacron-api'
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - 'localhost:8080'
+        labels:
+          service: 'novacron'
+          component: 'api'
+
+# Recording rules for efficient aggregation
+rule_files:
+  - 'dwcp-alerts.yml'
+  - 'dwcp-recording-rules.yml'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - 'localhost:9093'
+      timeout: 10s

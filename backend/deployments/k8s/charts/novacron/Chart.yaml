@@ -1,0 +1,48 @@
+apiVersion: v2
+name: novacron
+description: NovaCron Distributed VM Management Platform with DWCP
+type: application
+version: 3.0.0
+appVersion: "3.0.0"
+keywords:
+  - vm
+  - distributed
+  - dwcp
+  - kubernetes
+  - cloud
+home: https://github.com/novacron/novacron
+sources:
+  - https://github.com/novacron/novacron
+maintainers:
+  - name: NovaCron Team
+    email: team@novacron.io
+dependencies:
+  - name: postgresql
+    version: "12.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled
+  - name: redis
+    version: "17.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled
+  - name: prometheus
+    version: "15.x.x"
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: monitoring.prometheus.enabled
+  - name: grafana
+    version: "6.x.x"
+    repository: https://grafana.github.io/helm-charts
+    condition: monitoring.grafana.enabled
+  - name: jaeger
+    version: "0.x.x"
+    repository: https://jaegertracing.github.io/helm-charts
+    condition: monitoring.jaeger.enabled
+annotations:
+  artifacthub.io/changes: |
+    - kind: added
+      description: DWCP Phase 3 global deployment support
+    - kind: added
+      description: Multi-region federation
+    - kind: added
+      description: Auto-scaling and HPA
+  artifacthub.io/license: Apache-2.0

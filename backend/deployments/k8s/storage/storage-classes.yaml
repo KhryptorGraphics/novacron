@@ -1,0 +1,100 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: fast-ssd
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+provisioner: kubernetes.io/aws-ebs  # Change based on provider
+parameters:
+  type: gp3
+  iops: "16000"
+  throughput: "1000"
+  fsType: ext4
+  encrypted: "true"
+  kmsKeyId: "arn:aws:kms:us-east-1:account:key/key-id"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: standard-ssd
+provisioner: kubernetes.io/aws-ebs
+parameters:
+  type: gp3
+  iops: "3000"
+  throughput: "125"
+  fsType: ext4
+  encrypted: "true"
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: regional-ssd
+provisioner: kubernetes.io/aws-ebs
+parameters:
+  type: gp3
+  iops: "16000"
+  throughput: "1000"
+  fsType: ext4
+  encrypted: "true"
+  replication-type: regional-pd
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: novacron-data-pvc
+  namespace: novacron
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: fast-ssd
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: novacron-snapshot-class
+driver: ebs.csi.aws.com
+deletionPolicy: Retain
+parameters:
+  encrypted: "true"
+  kmsKeyId: "arn:aws:kms:us-east-1:account:key/key-id"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: volume-snapshot-backup
+  namespace: novacron
+spec:
+  schedule: "0 */1 * * *"  # Hourly
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: volume-snapshot-controller
+          containers:
+            - name: snapshot-creator
+              image: novacron/backup-tools:3.0.0
+              command:
+                - /usr/local/bin/create-snapshots.sh
+              env:
+                - name: SNAPSHOT_CLASS
+                  value: novacron-snapshot-class
+                - name: RETENTION_DAYS
+                  value: "7"
+                - name: LABEL_SELECTOR
+                  value: "app=novacron"
+          restartPolicy: OnFailure

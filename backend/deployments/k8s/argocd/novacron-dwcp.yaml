@@ -1,0 +1,94 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: novacron-dwcp
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"  # Deploy after core
+spec:
+  project: novacron
+
+  source:
+    repoURL: https://github.com/novacron/novacron
+    targetRevision: main
+    path: backend/deployments/k8s/manifests
+    directory:
+      recurse: true
+      include: '{consensus-statefulset.yaml,network-daemonset.yaml}'
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: novacron
+
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  # Health assessment
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jsonPointers:
+        - /spec/volumeClaimTemplates
+
+  # Pre-sync hooks for validation
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - Validate=true
+
+  # Resource hooks
+  hooks:
+    - name: pre-sync-validation
+      type: PreSync
+      manifest: |
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: dwcp-pre-sync-validation
+          annotations:
+            argocd.argoproj.io/hook: PreSync
+            argocd.argoproj.io/hook-delete-policy: HookSucceeded
+        spec:
+          template:
+            spec:
+              containers:
+                - name: validate
+                  image: novacron/validator:3.0.0
+                  command:
+                    - /usr/local/bin/validate-dwcp
+                    - --check-consensus
+                    - --check-networking
+              restartPolicy: Never
+
+    - name: post-sync-test
+      type: PostSync
+      manifest: |
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: dwcp-post-sync-test
+          annotations:
+            argocd.argoproj.io/hook: PostSync
+            argocd.argoproj.io/hook-delete-policy: HookSucceeded
+        spec:
+          template:
+            spec:
+              containers:
+                - name: test
+                  image: novacron/tester:3.0.0
+                  command:
+                    - /usr/local/bin/test-dwcp
+                    - --validate-consensus
+                    - --validate-connectivity
+              restartPolicy: Never

@@ -69,13 +69,13 @@ type NetworkInfo struct {
 	Active             bool                   `json:"active"`
 	ConnectedVMs       []string               `json:"connected_vms"`
 	LastUpdated        time.Time              `json:"last_updated"`
-	Metrics            NetworkMetrics         `json:"metrics"`
+	Metrics            LocalNetworkMetrics    `json:"metrics"`
 	BandwidthUtilization float64              `json:"bandwidth_utilization"`
 	QoSStatus          map[string]interface{} `json:"qos_status"`
 }
 
-// NetworkMetrics contains network performance metrics
-type NetworkMetrics struct {
+// LocalNetworkMetrics contains network performance metrics for a single network
+type LocalNetworkMetrics struct {
 	BandwidthUtilization float64   `json:"bandwidth_utilization"`
 	PacketLoss          float64   `json:"packet_loss"`
 	Latency             float64   `json:"latency_ms"`
@@ -1161,7 +1161,7 @@ func (m *NetworkManager) GetBandwidthMetrics(interfaceName string) (*BandwidthMe
 }
 
 // GetNetworkPerformanceMetrics returns comprehensive network performance metrics
-func (m *NetworkManager) GetNetworkPerformanceMetrics(networkID string) (*NetworkMetrics, error) {
+func (m *NetworkManager) GetNetworkPerformanceMetrics(networkID string) (*LocalNetworkMetrics, error) {
 	network, err := m.GetNetwork(networkID)
 	if err != nil {
 		return nil, fmt.Errorf("network not found: %w", err)

@@ -1,0 +1,53 @@
+# Staging environment overrides
+replicaCount: 3
+
+image:
+  tag: "latest"
+  pullPolicy: Always
+
+resources:
+  requests:
+    cpu: "2"
+    memory: "4Gi"
+  limits:
+    cpu: "4"
+    memory: "8Gi"
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+
+regions:
+  - name: us-east-1
+    enabled: true
+    replicas: 3
+  - name: eu-west-1
+    enabled: false
+
+persistence:
+  enabled: true
+  size: 50Gi
+  backup:
+    enabled: true
+    schedule: "0 0 * * *"  # Daily
+    retention: 168h  # 7 days
+
+monitoring:
+  prometheus:
+    retention: 14d
+  grafana:
+    enabled: true
+
+env:
+  - name: LOG_LEVEL
+    value: "debug"
+  - name: ENVIRONMENT
+    value: "staging"
+  - name: ENABLE_PROFILING
+    value: "true"
+
+serviceMesh:
+  enabled: true
+  mtls:
+    mode: PERMISSIVE

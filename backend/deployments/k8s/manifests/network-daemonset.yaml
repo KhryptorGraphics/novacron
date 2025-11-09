@@ -1,0 +1,247 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: novacron-dwcp-network
+  labels:
+    app: novacron-dwcp
+    component: networking
+spec:
+  selector:
+    matchLabels:
+      app: novacron-dwcp
+      component: networking
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: novacron-dwcp
+        component: networking
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9101"
+    spec:
+      hostNetwork: true
+      hostPID: true
+      priorityClassName: system-node-critical
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          effect: NoSchedule
+      initContainers:
+        - name: setup-networking
+          image: novacron/dwcp-network:3.0.0
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - NET_ADMIN
+                - SYS_ADMIN
+                - NET_RAW
+          command:
+            - sh
+            - -c
+            - |
+              set -ex
+
+              # Load eBPF programs for packet processing
+              mount -t bpf bpf /sys/fs/bpf || true
+
+              # Configure network namespaces for isolation
+              ip netns add novacron-dwcp || true
+
+              # Setup VXLAN tunnel for cross-region communication
+              ip link add vxlan0 type vxlan id 100 dev eth0 dstport 4789 || true
+              ip link set vxlan0 up
+
+              # Configure MTU for jumbo frames
+              ip link set dev eth0 mtu 9000 || true
+
+              # Enable IP forwarding
+              sysctl -w net.ipv4.ip_forward=1
+              sysctl -w net.ipv6.conf.all.forwarding=1
+
+              # Optimize TCP settings for WAN
+              sysctl -w net.ipv4.tcp_congestion_control=bbr
+              sysctl -w net.core.rmem_max=134217728
+              sysctl -w net.core.wmem_max=134217728
+              sysctl -w net.ipv4.tcp_rmem="4096 87380 134217728"
+              sysctl -w net.ipv4.tcp_wmem="4096 65536 134217728"
+
+              echo "Network setup complete"
+          volumeMounts:
+            - name: sys
+              mountPath: /sys
+            - name: bpf
+              mountPath: /sys/fs/bpf
+            - name: modules
+              mountPath: /lib/modules
+              readOnly: true
+      containers:
+        - name: dwcp-transport
+          image: novacron/dwcp-network:3.0.0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+                - SYS_ADMIN
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: DWCP_AMST_MIN_STREAMS
+              value: "16"
+            - name: DWCP_AMST_MAX_STREAMS
+              value: "256"
+            - name: DWCP_HDE_COMPRESSION
+              value: "9"
+            - name: DWCP_TRANSPORT
+              value: "tcp"
+            - name: ENABLE_RDMA
+              value: "true"
+          ports:
+            - containerPort: 8888
+              hostPort: 8888
+              name: dwcp-tcp
+              protocol: TCP
+            - containerPort: 8889
+              hostPort: 8889
+              name: dwcp-udp
+              protocol: UDP
+            - containerPort: 9101
+              name: metrics
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: 8888
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 9101
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 1000m
+              memory: 2Gi
+            limits:
+              cpu: 4000m
+              memory: 8Gi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dwcp
+            - name: sys
+              mountPath: /sys
+            - name: bpf
+              mountPath: /sys/fs/bpf
+            - name: lib-modules
+              mountPath: /lib/modules
+              readOnly: true
+            - name: run
+              mountPath: /run/dwcp
+
+        - name: vpn-tunnel
+          image: novacron/wireguard:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          env:
+            - name: PEERS
+              valueFrom:
+                configMapKeyRef:
+                  name: dwcp-network-config
+                  key: wireguard.peers
+          volumeMounts:
+            - name: wireguard-config
+              mountPath: /config
+            - name: lib-modules
+              mountPath: /lib/modules
+              readOnly: true
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+
+      volumes:
+        - name: config
+          configMap:
+            name: dwcp-network-config
+        - name: sys
+          hostPath:
+            path: /sys
+        - name: bpf
+          hostPath:
+            path: /sys/fs/bpf
+            type: DirectoryOrCreate
+        - name: lib-modules
+          hostPath:
+            path: /lib/modules
+        - name: modules
+          hostPath:
+            path: /lib/modules
+        - name: run
+          hostPath:
+            path: /run/dwcp
+            type: DirectoryOrCreate
+        - name: wireguard-config
+          secret:
+            secretName: wireguard-keys
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dwcp-network-config
+data:
+  dwcp.yaml: |
+    transport:
+      protocol: tcp
+      listen_address: "0.0.0.0:8888"
+      udp_listen: "0.0.0.0:8889"
+      mtu: 9000
+      buffer_size: 4194304
+
+    amst:
+      min_streams: 16
+      max_streams: 256
+      stream_priority: 5
+      adaptive_scaling: true
+      congestion_control: bbr
+
+    hde:
+      compression_level: 9
+      algorithm: zstd
+      dictionary_size: 8388608
+      adaptive_compression: true
+
+    encryption:
+      enabled: true
+      algorithm: aes-256-gcm
+      key_rotation_interval: 24h
+
+    networking:
+      enable_rdma: true
+      rdma_device: mlx5_0
+      enable_dpdk: false
+      tcp_nodelay: true
+      tcp_keepalive: true
+
+  wireguard.peers: |
+    # Peer configurations generated dynamically

@@ -282,7 +282,7 @@ func (t *UDPTransport) handlePacket(data []byte, addr *net.UDPAddr) {
 	// Handle acknowledgments
 	if msg.Header.IsFlag(FlagAck) {
 		peer.acksMutex.Lock()
-		pendingMsg, exists := peer.pendingAcks[msg.Header.SequenceID]
+		_, exists := peer.pendingAcks[msg.Header.SequenceID]
 		if exists {
 			delete(peer.pendingAcks, msg.Header.SequenceID)
 		}

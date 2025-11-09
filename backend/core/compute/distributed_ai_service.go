@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/novacron-org/novacron/backend/core/ai"
+	"github.com/khryptorgraphics/novacron/backend/core/ai"
 )
 
 // DistributedAIService provides comprehensive AI integration for distributed supercompute fabric

@@ -1,0 +1,385 @@
+# Default values for NovaCron
+# This is a YAML-formatted file.
+
+# Global configuration
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+
+# NovaCron version
+image:
+  registry: docker.io
+  repository: novacron/novacron
+  tag: "3.0.0"
+  pullPolicy: IfNotPresent
+
+# Deployment replicas
+replicaCount: 3
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+  annotations: {}
+  labels: {}
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: novacron.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: novacron-tls
+      hosts:
+        - novacron.example.com
+
+# Resource requests and limits
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: 2000m
+    memory: 4Gi
+
+# Autoscaling configuration
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  customMetrics:
+    - type: Pods
+      pods:
+        metric:
+          name: http_requests_per_second
+        target:
+          type: AverageValue
+          averageValue: "1000"
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+# Health checks
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# DWCP Configuration
+dwcp:
+  enabled: true
+
+  # AMST (Adaptive Multi-Stream Transport)
+  amst:
+    enabled: true
+    minStreams: 16
+    maxStreams: 256
+    priority: 5
+    bufferSize: "4MB"
+
+  # HDE (Hierarchical Data Encoding)
+  hde:
+    enabled: true
+    compressionLevel: 9
+    algorithm: zstd
+    dictSize: "8MB"
+
+  # ACP (Adaptive Consensus Protocol)
+  acp:
+    enabled: true
+    nodes: 5
+    quorumSize: 3
+    consensusEngine: raft
+    heartbeatInterval: 1s
+    electionTimeout: 5s
+    snapshotInterval: 1h
+
+  # CRDT Synchronization
+  crdt:
+    enabled: true
+    syncInterval: 5s
+    conflictResolution: lww
+
+  # Networking
+  networking:
+    transport: tcp
+    encryption: true
+    compression: true
+    mtu: 9000
+
+# Regional deployment
+regions:
+  - name: us-east-1
+    enabled: true
+    replicas: 5
+    resources:
+      requests:
+        cpu: "4"
+        memory: "8Gi"
+      limits:
+        cpu: "8"
+        memory: "16Gi"
+    nodeSelector:
+      topology.kubernetes.io/region: us-east-1
+
+  - name: eu-west-1
+    enabled: true
+    replicas: 5
+    resources:
+      requests:
+        cpu: "4"
+        memory: "8Gi"
+      limits:
+        cpu: "8"
+        memory: "16Gi"
+    nodeSelector:
+      topology.kubernetes.io/region: eu-west-1
+
+  - name: ap-southeast-1
+    enabled: true
+    replicas: 3
+    resources:
+      requests:
+        cpu: "2"
+        memory: "4Gi"
+      limits:
+        cpu: "4"
+        memory: "8Gi"
+    nodeSelector:
+      topology.kubernetes.io/region: ap-southeast-1
+
+# Persistence
+persistence:
+  enabled: true
+  storageClass: fast-ssd
+  accessMode: ReadWriteOnce
+  size: 100Gi
+  annotations: {}
+
+  # Backup configuration
+  backup:
+    enabled: true
+    schedule: "0 */1 * * *"  # Hourly
+    retention: 168h  # 7 days
+    storageLocation: s3://novacron-backups
+
+# Database configuration
+postgresql:
+  enabled: true
+  auth:
+    username: novacron
+    database: novacron
+  primary:
+    persistence:
+      enabled: true
+      size: 50Gi
+      storageClass: fast-ssd
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 2Gi
+      limits:
+        cpu: 4000m
+        memory: 8Gi
+
+# Redis configuration
+redis:
+  enabled: true
+  architecture: replication
+  auth:
+    enabled: true
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+
+# Monitoring
+monitoring:
+  prometheus:
+    enabled: true
+    retention: 30d
+    scrapeInterval: 30s
+
+  grafana:
+    enabled: true
+    adminPassword: changeme
+    persistence:
+      enabled: true
+      size: 10Gi
+    dashboards:
+      - novacron-overview
+      - dwcp-performance
+      - consensus-health
+
+  jaeger:
+    enabled: true
+    sampling:
+      type: probabilistic
+      param: 0.1
+
+# Service Mesh
+serviceMesh:
+  enabled: true
+  provider: istio
+  mtls:
+    mode: STRICT
+  trafficPolicy:
+    loadBalancer:
+      simple: LEAST_REQUEST
+    connectionPool:
+      tcp:
+        maxConnections: 1000
+      http:
+        http1MaxPendingRequests: 1000
+        http2MaxRequests: 1000
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+
+# Network Policies
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: novacron
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432  # PostgreSQL
+        - protocol: TCP
+          port: 6379  # Redis
+
+# RBAC
+rbac:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources: ["pods", "services", "configmaps", "secrets"]
+      verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    - apiGroups: ["apps"]
+      resources: ["deployments", "statefulsets", "daemonsets"]
+      verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    - apiGroups: ["novacron.io"]
+      resources: ["novacronclusters", "novacronregions", "dwcpfederations"]
+      verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Service Account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Pod annotations
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+# Pod labels
+podLabels:
+  app.kubernetes.io/name: novacron
+  app.kubernetes.io/component: api-server
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - novacron
+          topologyKey: kubernetes.io/hostname
+
+# Priority class
+priorityClassName: high-priority
+
+# Environment variables
+env:
+  - name: LOG_LEVEL
+    value: "info"
+  - name: ENVIRONMENT
+    value: "development"
+  - name: DATABASE_HOST
+    value: "{{ .Release.Name }}-postgresql"
+  - name: REDIS_HOST
+    value: "{{ .Release.Name }}-redis-master"
+
+# Secret management
+secrets:
+  backend: vault
+  vaultAddress: https://vault.example.com
+  vaultPath: secret/data/novacron
+
+# Feature flags
+features:
+  dwcp: true
+  federation: true
+  autoscaling: true
+  monitoring: true
+  serviceMesh: true

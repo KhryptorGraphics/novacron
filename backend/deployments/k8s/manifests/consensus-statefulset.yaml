@@ -1,0 +1,210 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: novacron-consensus-headless
+  labels:
+    app: novacron-consensus
+    component: acp
+spec:
+  clusterIP: None
+  ports:
+    - port: 9090
+      name: raft
+      protocol: TCP
+    - port: 9091
+      name: gossip
+      protocol: TCP
+  selector:
+    app: novacron-consensus
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: novacron-consensus
+  labels:
+    app: novacron-consensus
+    component: acp
+spec:
+  serviceName: novacron-consensus-headless
+  replicas: 5
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: novacron-consensus
+  template:
+    metadata:
+      labels:
+        app: novacron-consensus
+        component: acp
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - novacron-consensus
+              topologyKey: kubernetes.io/hostname
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - novacron-consensus
+                topologyKey: topology.kubernetes.io/zone
+      initContainers:
+        - name: init-consensus
+          image: busybox:1.35
+          command:
+            - sh
+            - -c
+            - |
+              set -ex
+              # Generate node ID based on pod ordinal
+              POD_NAME=${HOSTNAME}
+              POD_ID=${POD_NAME##*-}
+              echo "Node ID: $POD_ID" > /data/node-id
+
+              # Create initial cluster configuration
+              cat > /data/cluster.yaml <<EOF
+              nodes:
+              {{- range $i := until 5 }}
+                - id: {{ $i }}
+                  address: novacron-consensus-{{ $i }}.novacron-consensus-headless:9090
+              {{- end }}
+              quorum_size: 3
+              heartbeat_interval: 1s
+              election_timeout: 5s
+              EOF
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      containers:
+        - name: consensus
+          image: novacron/consensus:3.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9090
+              name: raft
+              protocol: TCP
+            - containerPort: 9091
+              name: gossip
+              protocol: TCP
+            - containerPort: 8081
+              name: metrics
+              protocol: TCP
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CONSENSUS_ENGINE
+              value: "raft"
+            - name: DATA_DIR
+              value: "/data"
+            - name: CLUSTER_CONFIG
+              value: "/data/cluster.yaml"
+          command:
+            - /usr/local/bin/novacron-consensus
+            - --config=/data/cluster.yaml
+            - --data-dir=/data
+            - --node-id-file=/data/node-id
+          livenessProbe:
+            tcpSocket:
+              port: 9090
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 2000m
+              memory: 4Gi
+            limits:
+              cpu: 4000m
+              memory: 8Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /etc/consensus
+      volumes:
+        - name: config
+          configMap:
+            name: novacron-consensus-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app: novacron-consensus
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: fast-ssd
+        resources:
+          requests:
+            storage: 100Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: novacron-consensus-config
+data:
+  consensus.yaml: |
+    consensus:
+      engine: raft
+      snapshot_interval: 1h
+      snapshot_threshold: 10000
+      log_compaction: true
+      max_entries_per_message: 1000
+
+    networking:
+      max_connections: 1000
+      connection_timeout: 30s
+      read_timeout: 10s
+      write_timeout: 10s
+
+    storage:
+      sync_writes: true
+      cache_size: 1GB
+      max_log_size: 10GB
+
+    monitoring:
+      metrics_enabled: true
+      metrics_port: 8081
+      log_level: info
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: novacron-consensus-pdb
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app: novacron-consensus

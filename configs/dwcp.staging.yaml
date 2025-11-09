@@ -1,0 +1,37 @@
+# DWCP Staging Environment Configuration
+# Overrides base configuration for staging deployment
+
+dwcp:
+  # Enable DWCP in staging
+  enabled: true
+
+  transport:
+    # Conservative settings for staging
+    initial_streams: 16
+    max_streams: 128
+    enable_rdma: false  # Disable RDMA in staging
+
+  compression:
+    # Moderate compression for testing
+    level: 3
+    enable_dictionary: true
+
+  monitoring:
+    # Enhanced logging for staging
+    log_level: "debug"
+    prometheus_enabled: true
+    metrics_port: 9090
+    enable_tracing: true
+    tracing_sample_rate: 0.5  # 50% sampling in staging
+    jaeger_endpoint: "http://localhost:14268/api/traces"
+
+  security:
+    # Development certificates for staging
+    enable_tls: false  # Can enable with self-signed certs
+    enable_mtls: false
+
+  performance:
+    # Allow more detailed profiling
+    worker_threads: 4
+    enable_batching: true
+    batch_size: 50

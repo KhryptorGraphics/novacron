@@ -1,0 +1,273 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: novacron
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-ingress
+  namespace: novacron
+spec:
+  podSelector:
+    matchLabels:
+      app: novacron-api
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow from ingress controller
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+
+    # Allow from same namespace
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8080
+
+    # Allow from monitoring namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8081  # Metrics port
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-egress
+  namespace: novacron
+spec:
+  podSelector:
+    matchLabels:
+      app: novacron-api
+  policyTypes:
+    - Egress
+  egress:
+    # Allow DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+        - podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+
+    # Allow PostgreSQL
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgresql
+      ports:
+        - protocol: TCP
+          port: 5432
+
+    # Allow Redis
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+
+    # Allow consensus nodes
+    - to:
+        - podSelector:
+            matchLabels:
+              app: novacron-consensus
+      ports:
+        - protocol: TCP
+          port: 9090
+
+    # Allow external HTTPS (for external APIs)
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-consensus-communication
+  namespace: novacron
+spec:
+  podSelector:
+    matchLabels:
+      app: novacron-consensus
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow from API servers
+    - from:
+        - podSelector:
+            matchLabels:
+              app: novacron-api
+      ports:
+        - protocol: TCP
+          port: 9090
+
+    # Allow from other consensus nodes
+    - from:
+        - podSelector:
+            matchLabels:
+              app: novacron-consensus
+      ports:
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 9091  # Gossip port
+
+    # Allow monitoring
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8081
+
+  egress:
+    # Allow to other consensus nodes
+    - to:
+        - podSelector:
+            matchLabels:
+              app: novacron-consensus
+      ports:
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 9091
+
+    # Allow DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+
+    # Allow PostgreSQL for state persistence
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgresql
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dwcp-network
+  namespace: novacron
+spec:
+  podSelector:
+    matchLabels:
+      app: novacron-dwcp
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow from anywhere on DWCP ports (cross-region communication)
+    - ports:
+        - protocol: TCP
+          port: 8888
+        - protocol: UDP
+          port: 8889
+
+  egress:
+    # Allow to anywhere (cross-region requires external connectivity)
+    - {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: regional-isolation
+  namespace: novacron
+spec:
+  podSelector:
+    matchLabels:
+      isolation: regional
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only allow from same region
+    - from:
+        - podSelector:
+            matchLabels:
+              region: us-east-1
+      ports:
+        - protocol: TCP
+          port: 8080
+
+  egress:
+    # Only allow to same region
+    - to:
+        - podSelector:
+            matchLabels:
+              region: us-east-1
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: advanced-l7-policy
+  namespace: novacron
+spec:
+  endpointSelector:
+    matchLabels:
+      app: novacron-api
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: ingress-nginx
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+          rules:
+            http:
+              - method: "GET|POST|PUT|DELETE"
+                path: "/api/.*"
+              - method: "GET"
+                path: "/healthz"
+              - method: "GET"
+                path: "/metrics"
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: postgresql
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - toFQDNs:
+        - matchName: "api.external-service.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

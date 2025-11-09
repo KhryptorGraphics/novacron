@@ -1,0 +1,77 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: dwcpfederations.novacron.io
+spec:
+  group: novacron.io
+  names:
+    kind: DWCPFederation
+    listKind: DWCPFederationList
+    plural: dwcpfederations
+    singular: dwcpfederation
+    shortNames:
+      - dwcpfed
+  scope: Cluster
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - clusters
+                - topology
+              properties:
+                clusters:
+                  type: array
+                  minItems: 2
+                  items:
+                    type: string
+                  description: List of cluster names to federate
+                topology:
+                  type: string
+                  enum: [mesh, hub-spoke, hierarchical]
+                  description: Federation topology
+                routing:
+                  type: object
+                  properties:
+                    strategy:
+                      type: string
+                      enum: [latency, cost, geo]
+                    weights:
+                      type: object
+                      additionalProperties:
+                        type: integer
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: [Pending, Connecting, Connected, Degraded, Failed]
+                connected:
+                  type: array
+                  items:
+                    type: string
+                conditions:
+                  type: array
+                  items:
+                    type: object
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Topology
+          type: string
+          jsonPath: .spec.topology
+        - name: Clusters
+          type: integer
+          jsonPath: .spec.clusters[*]
+        - name: Connected
+          type: integer
+          jsonPath: .status.connected[*]
+        - name: Phase
+          type: string
+          jsonPath: .status.phase

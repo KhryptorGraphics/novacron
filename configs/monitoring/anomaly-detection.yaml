@@ -1,0 +1,73 @@
+# DWCP Anomaly Detection Configuration
+
+enabled: true
+check_interval: 10s
+buffer_size: 1000
+
+# Detector Configuration
+detector:
+  # Enable/disable individual detectors
+  enable_isolation_forest: true
+  enable_lstm: true
+  enable_zscore: true
+  enable_seasonal_esd: true
+
+  # Ensemble voting threshold (0.0-1.0)
+  ensemble_threshold: 0.6
+
+  # Model paths
+  isolation_forest_path: backend/core/network/dwcp/monitoring/models/isolation_forest.onnx
+  lstm_model_path: backend/core/network/dwcp/monitoring/models/lstm_autoencoder.onnx
+
+  # Z-Score detector settings
+  zscore_window: 100
+  zscore_threshold: 3.0
+
+  # Seasonal ESD settings
+  seasonal_period: 24  # hours
+  seasonal_max_anomalies: 10
+
+  # Alert settings
+  alert_on_warning: true
+  alert_on_critical: true
+
+# Alert Manager Configuration
+alert:
+  # Webhook
+  webhook_enabled: false
+  webhook_url: ""
+
+  # Slack
+  slack_enabled: false
+  slack_webhook_url: ""
+  slack_channel: "#dwcp-alerts"
+
+  # PagerDuty
+  pagerduty_enabled: false
+  pagerduty_key: ""
+
+  # Email
+  email_enabled: false
+  email_recipients:
+    - ops@example.com
+  smtp_server: ""
+  smtp_port: 587
+  smtp_username: ""
+  smtp_password: ""
+
+  # Alert throttling (prevent alert spam)
+  throttle_duration: 5m
+
+# Storage Configuration
+storage:
+  enabled: true
+  backend: "memory"  # Options: memory, postgres, elasticsearch
+  retention_period: 168h  # 7 days
+  max_anomalies: 10000
+
+  # PostgreSQL (if backend: postgres)
+  postgres_url: ""
+
+  # Elasticsearch (if backend: elasticsearch)
+  elasticsearch_url: "http://localhost:9200"
+  index_name: "dwcp-anomalies"
