@@ -1,0 +1,129 @@
+%% NovaCron Configuration Hierarchy and Override Flow
+%% Shows configuration sources, precedence, and validation
+
+graph TB
+    subgraph "Configuration Sources (Priority Order)"
+        EnvVars[Environment Variables<br/>Highest Priority]
+        ConfigFile[Configuration File<br/>YAML/JSON<br/>Medium Priority]
+        Defaults[Default Values<br/>Lowest Priority]
+    end
+
+    subgraph "Loading Process"
+        Start[Start Configuration Loading] --> DetectEnv[Detect Environment]
+        DetectEnv --> SelectMode{Deployment Mode?}
+
+        SelectMode -->|Datacenter| DC_Template[Load Datacenter Template]
+        SelectMode -->|Internet| Int_Template[Load Internet Template]
+        SelectMode -->|Hybrid| Hyb_Template[Load Hybrid Template]
+        SelectMode -->|Custom| Custom_Path[Load Custom Config File]
+
+        DC_Template --> ParseFile[Parse Configuration File]
+        Int_Template --> ParseFile
+        Hyb_Template --> ParseFile
+        Custom_Path --> ParseFile
+
+        ParseFile --> ApplyDefaults[Apply Default Values]
+        ApplyDefaults --> MergeEnv[Merge Environment Variables]
+        MergeEnv --> Merged[Merged Configuration]
+    end
+
+    subgraph "Validation Pipeline"
+        Merged --> SchemaVal[Schema Validation]
+        SchemaVal --> StructVal[Structural Validation]
+        StructVal --> ConstraintVal[Constraint Validation]
+        ConstraintVal --> ResourceVal[Resource Validation]
+
+        SchemaVal -->|Invalid| ValError1[Error: Schema Mismatch]
+        StructVal -->|Invalid| ValError2[Error: Missing Required Fields]
+        ConstraintVal -->|Invalid| ValError3[Error: Constraint Violation]
+        ResourceVal -->|Invalid| ValError4[Error: Invalid Resources]
+
+        ValError1 --> FailFast[Fail Fast with Error]
+        ValError2 --> FailFast
+        ValError3 --> FailFast
+        ValError4 --> FailFast
+
+        ResourceVal -->|Valid| ValidConfig[Valid Configuration]
+    end
+
+    subgraph "Configuration Categories"
+        ValidConfig --> System[System Configuration]
+        ValidConfig --> Security[Security Configuration]
+        ValidConfig --> Network[Network Configuration]
+        ValidConfig --> Storage[Storage Configuration]
+        ValidConfig --> DWCP[DWCP Configuration]
+        ValidConfig --> Monitoring[Monitoring Configuration]
+
+        System --> SysNode[Node ID, Data Dir, Log Level]
+        System --> SysRes[CPU, Memory, Disk Requirements]
+        System --> SysTiming[Timeouts, Concurrency Limits]
+
+        Security --> SecAuth[Authentication Provider]
+        Security --> SecEncrypt[Encryption Settings]
+        Security --> SecSecrets[Secrets Management]
+        Security --> SecTLS[TLS/mTLS Configuration]
+
+        Network --> NetListen[Listen Address, Port]
+        Network --> NetConn[Connection Limits, Timeouts]
+        Network --> NetTLS[TLS Certificates]
+
+        Storage --> StorDB[Database Configuration]
+        Storage --> StorCache[Cache Configuration]
+        Storage --> StorPool[Connection Pools]
+
+        DWCP --> DWCPMode[Deployment Mode]
+        DWCP --> DWCPTransport[Transport Configuration]
+        DWCP --> DWCPCompression[Compression Settings]
+        DWCP --> DWCPConsensus[Consensus Protocol]
+
+        Monitoring --> MonMetrics[Metrics Configuration]
+        Monitoring --> MonTracing[Tracing Configuration]
+        Monitoring --> MonLogging[Logging Configuration]
+    end
+
+    subgraph "Environment-Specific Optimizations"
+        DWCPMode --> ModeCheck{Deployment Mode?}
+
+        ModeCheck -->|Datacenter| DC_Opt[Datacenter Optimizations]
+        ModeCheck -->|Internet| Int_Opt[Internet Optimizations]
+        ModeCheck -->|Hybrid| Hyb_Opt[Hybrid Optimizations]
+
+        DC_Opt --> DC_RDMA[Enable RDMA]
+        DC_Opt --> DC_Streams[High Stream Count: 32-512]
+        DC_Opt --> DC_Compress[High Performance Compression]
+        DC_Opt --> DC_Consensus[Raft Consensus]
+        DC_Opt --> DC_Sync[Fast Sync: 100ms]
+
+        Int_Opt --> Int_NoRDMA[Disable RDMA]
+        Int_Opt --> Int_Streams[Moderate Streams: 16-256]
+        Int_Opt --> Int_Compress[Balanced Compression]
+        Int_Opt --> Int_Consensus[PBFT Consensus]
+        Int_Opt --> Int_Sync[Slower Sync: 5s]
+
+        Hyb_Opt --> Hyb_Adaptive[Adaptive Configuration]
+        Hyb_Opt --> Hyb_Detect[Peer Detection]
+        Hyb_Opt --> Hyb_Switch[Dynamic Mode Switching]
+    end
+
+    subgraph "Configuration Output"
+        DC_Sync --> FinalConfig[Final Configuration Object]
+        Int_Sync --> FinalConfig
+        Hyb_Switch --> FinalConfig
+
+        FinalConfig --> DI_Container[Register in DI Container]
+        DI_Container --> Available[Available to All Components]
+    end
+
+    Available --> Complete[Configuration Loading Complete]
+
+    classDef sourceClass fill:#ffd43b,stroke:#f08c00,color:#000
+    classDef processClass fill:#4dabf7,stroke:#1c7ed6,color:#fff
+    classDef validClass fill:#51cf66,stroke:#2f9e44,color:#fff
+    classDef errorClass fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef categoryClass fill:#9775fa,stroke:#7048e8,color:#fff
+
+    class EnvVars,ConfigFile,Defaults sourceClass
+    class DetectEnv,ParseFile,ApplyDefaults,MergeEnv processClass
+    class ValidConfig,FinalConfig,Complete validClass
+    class ValError1,ValError2,ValError3,ValError4,FailFast errorClass
+    class System,Security,Network,Storage,DWCP,Monitoring categoryClass

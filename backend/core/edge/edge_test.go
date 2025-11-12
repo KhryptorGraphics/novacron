@@ -1,19 +1,30 @@
+// Package edge provides comprehensive tests for edge computing components
 package edge
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
 
-func TestEdgeComputing(t *testing.T) {
-	config := DefaultEdgeConfig()
-	config.DiscoveryInterval = 5 * time.Second
-
-	ec, err := NewEdgeComputing(config)
-	if err != nil {
-		t.Fatalf("Failed to create edge computing: %v", err)
+// TestNodeManager tests edge node management
+func TestNodeManager(t *testing.T) {
+	config := &NodeManagerConfig{
+		DiscoveryInterval:    10 * time.Second,
+		HealthCheckInterval:  5 * time.Second,
+		HeartbeatTimeout:     30 * time.Second,
+		MaxNodesPerLocation:  100,
+		AutoProvision:        true,
+		ProvisionThreshold:   0.8,
+		EnableGeoRouting:     true,
+		EnableLoadBalancing:  true,
+		MetricsEnabled:       true,
 	}
+
+	nm := NewNodeManager(config)
+	defer nm.Stop()
 
 	// Test Start
 	ctx, cancel := context.WithCancel(context.Background())

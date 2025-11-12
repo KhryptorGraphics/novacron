@@ -1,0 +1,346 @@
+# Production Alertmanager Configuration for DWCP v3
+# Advanced routing, escalation policies, and multi-channel notifications
+
+global:
+  resolve_timeout: 5m
+  http_config:
+    follow_redirects: true
+  smtp_from: 'alertmanager@novacron.io'
+  smtp_smarthost: 'smtp.sendgrid.net:587'
+  smtp_auth_username: 'apikey'
+  smtp_auth_password: '${SENDGRID_API_KEY}'
+  smtp_require_tls: true
+
+  # Slack webhook
+  slack_api_url: '${SLACK_WEBHOOK_URL}'
+
+  # PagerDuty integration key
+  pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
+
+# Templates for notification formatting
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Routing tree
+route:
+  receiver: 'default'
+  group_by: ['alertname', 'cluster', 'service', 'severity']
+  group_wait: 10s        # Wait 10s before sending initial notification
+  group_interval: 5m     # Wait 5m before sending updates to group
+  repeat_interval: 4h    # Repeat every 4h if not resolved
+
+  # Child routes with specific matching
+  routes:
+
+  # =========================================================================
+  # CRITICAL ALERTS - Page immediately
+  # =========================================================================
+  - match:
+      severity: critical
+    receiver: 'critical-pagerduty'
+    group_wait: 5s       # Faster for critical
+    group_interval: 2m
+    repeat_interval: 30m # Repeat more frequently
+    continue: true       # Also send to other receivers
+
+    routes:
+    # Auto-rollback alerts - highest priority
+    - match:
+        auto_rollback: "true"
+      receiver: 'auto-rollback-webhook'
+      group_wait: 0s     # Immediate
+      group_interval: 0s
+      repeat_interval: 5m
+      continue: true
+
+    # SLA violations
+    - match_re:
+        component: sla
+      receiver: 'sla-violation'
+      continue: true
+
+    # Byzantine failures
+    - match:
+        component: consensus
+      receiver: 'byzantine-alert'
+      continue: true
+
+    # All replicas down - emergency
+    - match:
+        alertname: DWCPv3AllReplicasDown
+      receiver: 'emergency-oncall'
+      group_wait: 0s
+      continue: false  # Don't propagate further
+
+  # =========================================================================
+  # WARNING ALERTS - Notify but don't page
+  # =========================================================================
+  - match:
+      severity: warning
+    receiver: 'warning-slack'
+    group_wait: 30s
+    group_interval: 10m
+    repeat_interval: 12h
+
+    routes:
+    # Performance warnings
+    - match_re:
+        component: performance|resources
+      receiver: 'performance-team'
+
+    # Rollout warnings
+    - match:
+        component: rollout
+      receiver: 'deployment-team'
+      continue: true
+
+  # =========================================================================
+  # INFO ALERTS - Log only
+  # =========================================================================
+  - match:
+      severity: info
+    receiver: 'info-webhook'
+    group_interval: 30m
+    repeat_interval: 24h
+
+  # =========================================================================
+  # COMPONENT-SPECIFIC ROUTING
+  # =========================================================================
+  - match_re:
+      component: amst|hde|pba|ass|acp|itp
+    receiver: 'component-specialists'
+    group_by: ['component', 'alertname']
+
+# Inhibition rules - suppress alerts based on other alerts
+inhibit_rules:
+  # If all replicas are down, suppress individual replica alerts
+  - source_match:
+      alertname: DWCPv3AllReplicasDown
+    target_match_re:
+      alertname: DWCPv3ServiceDown
+    equal: ['cluster']
+
+  # If SLA is violated, suppress component warnings
+  - source_match:
+      severity: critical
+      component: sla
+    target_match:
+      severity: warning
+    equal: ['cluster']
+
+  # If consensus fails, suppress individual byzantine alerts
+  - source_match:
+      alertname: PBFTConsensusFailure
+    target_match:
+      alertname: ByzantineNodeDetected
+    equal: ['cluster']
+
+  # If auto-rollback is triggered, suppress rollout warnings
+  - source_match:
+      auto_rollback: "true"
+    target_match:
+      component: rollout
+    equal: ['cluster']
+
+# Muting time windows
+time_intervals:
+  - name: business-hours
+    time_intervals:
+    - times:
+      - start_time: '09:00'
+        end_time: '17:00'
+      weekdays: ['monday:friday']
+      location: 'America/New_York'
+
+  - name: off-hours
+    time_intervals:
+    - times:
+      - start_time: '17:00'
+        end_time: '09:00'
+      weekdays: ['monday:friday']
+    - weekdays: ['saturday', 'sunday']
+
+  - name: maintenance-window
+    time_intervals:
+    - times:
+      - start_time: '02:00'
+        end_time: '04:00'
+      weekdays: ['sunday']
+
+# Receiver definitions
+receivers:
+
+# ============================================================================
+# DEFAULT RECEIVER
+# ============================================================================
+- name: 'default'
+  webhook_configs:
+  - url: 'http://alertmanager-webhook:9099/webhook'
+    send_resolved: true
+    http_config:
+      follow_redirects: true
+
+# ============================================================================
+# CRITICAL RECEIVERS
+# ============================================================================
+
+# PagerDuty for critical alerts
+- name: 'critical-pagerduty'
+  pagerduty_configs:
+  - routing_key: '${PAGERDUTY_INTEGRATION_KEY}'
+    severity: 'critical'
+    description: '{{ template "pagerduty.default.description" . }}'
+    details:
+      firing: '{{ template "pagerduty.default.instances" .Alerts.Firing }}'
+      resolved: '{{ template "pagerduty.default.instances" .Alerts.Resolved }}'
+    send_resolved: true
+
+  # Also send to Slack
+  slack_configs:
+  - channel: '#dwcp-critical-alerts'
+    title: 'CRITICAL: {{ .GroupLabels.alertname }}'
+    text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+    color: 'danger'
+    send_resolved: true
+    actions:
+    - type: button
+      text: 'View Runbook'
+      url: '{{ (index .Alerts 0).Annotations.runbook_url }}'
+    - type: button
+      text: 'View Dashboard'
+      url: 'https://grafana.novacron.io/d/dwcp-v3-production'
+    - type: button
+      text: 'Silence'
+      url: '{{ template "__alertmanagerURL" . }}'
+
+  # Email for critical
+  email_configs:
+  - to: 'oncall@novacron.io,sre-team@novacron.io'
+    headers:
+      Subject: '[CRITICAL] {{ .GroupLabels.alertname }}'
+    html: '{{ template "email.default.html" . }}'
+    send_resolved: true
+
+# Auto-rollback webhook (triggers automated rollback)
+- name: 'auto-rollback-webhook'
+  webhook_configs:
+  - url: 'http://dwcp-v3-controller:8080/api/v1/rollback/trigger'
+    send_resolved: false
+    http_config:
+      bearer_token: '${ROLLBACK_API_TOKEN}'
+      follow_redirects: true
+
+  # Notify deployment team
+  slack_configs:
+  - channel: '#dwcp-deployments'
+    title: '🚨 AUTOMATIC ROLLBACK TRIGGERED'
+    text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+    color: 'danger'
+    send_resolved: true
+
+# SLA violation alerts
+- name: 'sla-violation'
+  pagerduty_configs:
+  - routing_key: '${PAGERDUTY_SLA_KEY}'
+    severity: 'critical'
+    description: 'SLA Violation: {{ .GroupLabels.alertname }}'
+
+  email_configs:
+  - to: 'sla-alerts@novacron.io,management@novacron.io'
+    headers:
+      Subject: '[SLA VIOLATION] {{ .GroupLabels.alertname }}'
+    html: '{{ template "email.default.html" . }}'
+
+  slack_configs:
+  - channel: '#sla-violations'
+    title: '⚠️ SLA VIOLATION'
+    text: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ .Annotations.description }}{{ end }}'
+    color: 'danger'
+
+# Byzantine failures
+- name: 'byzantine-alert'
+  pagerduty_configs:
+  - routing_key: '${PAGERDUTY_SECURITY_KEY}'
+    severity: 'critical'
+    description: 'Byzantine Node Detected'
+
+  email_configs:
+  - to: 'security-team@novacron.io,sre-team@novacron.io'
+    headers:
+      Subject: '[SECURITY] Byzantine Node Detected'
+
+  slack_configs:
+  - channel: '#security-alerts'
+    title: '🛡️ BYZANTINE NODE DETECTED'
+    color: 'danger'
+
+# Emergency on-call (all replicas down)
+- name: 'emergency-oncall'
+  pagerduty_configs:
+  - routing_key: '${PAGERDUTY_EMERGENCY_KEY}'
+    severity: 'critical'
+    description: 'EMERGENCY: All DWCP v3 Replicas Down'
+
+  # Call multiple phone numbers
+  webhook_configs:
+  - url: 'http://twilio-bridge:8080/call'
+    http_config:
+      bearer_token: '${TWILIO_API_TOKEN}'
+
+  email_configs:
+  - to: 'emergency@novacron.io'
+    headers:
+      Subject: '[EMERGENCY] ALL DWCP V3 REPLICAS DOWN'
+
+# ============================================================================
+# WARNING RECEIVERS
+# ============================================================================
+
+- name: 'warning-slack'
+  slack_configs:
+  - channel: '#dwcp-warnings'
+    title: 'Warning: {{ .GroupLabels.alertname }}'
+    text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+    color: 'warning'
+    send_resolved: true
+
+- name: 'performance-team'
+  email_configs:
+  - to: 'performance-team@novacron.io'
+    headers:
+      Subject: '[PERFORMANCE] {{ .GroupLabels.alertname }}'
+  slack_configs:
+  - channel: '#performance-monitoring'
+    color: 'warning'
+
+- name: 'deployment-team'
+  slack_configs:
+  - channel: '#dwcp-deployments'
+    title: 'Rollout Issue: {{ .GroupLabels.alertname }}'
+    color: 'warning'
+    send_resolved: true
+  email_configs:
+  - to: 'deployment-team@novacron.io'
+
+# ============================================================================
+# INFO RECEIVERS
+# ============================================================================
+
+- name: 'info-webhook'
+  webhook_configs:
+  - url: 'http://logging-service:8080/alerts/info'
+    send_resolved: true
+
+# ============================================================================
+# COMPONENT-SPECIFIC RECEIVERS
+# ============================================================================
+
+- name: 'component-specialists'
+  email_configs:
+  - to: 'dwcp-component-team@novacron.io'
+    headers:
+      Subject: '[{{ .GroupLabels.component | toUpper }}] {{ .GroupLabels.alertname }}'
+  slack_configs:
+  - channel: '#dwcp-components'
+    title: '{{ .GroupLabels.component | toUpper }}: {{ .GroupLabels.alertname }}'
+    send_resolved: true

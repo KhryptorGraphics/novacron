@@ -1,0 +1,487 @@
+{
+  "dashboard": {
+    "id": "executive-overview",
+    "title": "DWCP v3 Executive Dashboard",
+    "description": "C-level overview of system performance, costs, and SLAs",
+    "refresh_interval": "10s",
+    "time_range": {
+      "from": "now-24h",
+      "to": "now"
+    },
+    "tags": ["executive", "overview", "kpi"],
+    "version": "3.0.0",
+    "templating": {
+      "list": [
+        {
+          "name": "provider",
+          "type": "query",
+          "query": "label_values(provider)",
+          "multi": true,
+          "includeAll": true
+        },
+        {
+          "name": "region",
+          "type": "query",
+          "query": "label_values(region)",
+          "multi": true,
+          "includeAll": true
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "datasource": "prometheus",
+          "enable": true,
+          "name": "Deployments",
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "query": "deployment_events{}"
+        },
+        {
+          "datasource": "prometheus",
+          "enable": true,
+          "name": "Incidents",
+          "iconColor": "rgba(255, 96, 96, 1)",
+          "query": "incident_events{}"
+        }
+      ]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+        "type": "stat",
+        "title": "Total Infrastructure Cost",
+        "targets": [
+          {
+            "expr": "sum(dwcp_cost_total{provider=~\"$provider\"})",
+            "legendFormat": "Total Cost"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 2,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 50000},
+                {"color": "red", "value": 100000}
+              ]
+            }
+          }
+        },
+        "options": {
+          "orientation": "auto",
+          "textMode": "value_and_name",
+          "colorMode": "background",
+          "graphMode": "area",
+          "justifyMode": "center"
+        }
+      },
+      {
+        "id": 2,
+        "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+        "type": "stat",
+        "title": "Cost Optimization Savings",
+        "targets": [
+          {
+            "expr": "sum(dwcp_cost_savings_total)",
+            "legendFormat": "Savings"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 2,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 5000},
+                {"color": "green", "value": 10000}
+              ]
+            }
+          }
+        },
+        "options": {
+          "orientation": "auto",
+          "textMode": "value_and_name",
+          "colorMode": "background",
+          "graphMode": "area",
+          "justifyMode": "center"
+        }
+      },
+      {
+        "id": 3,
+        "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+        "type": "stat",
+        "title": "System Availability",
+        "targets": [
+          {
+            "expr": "avg(up{job=\"dwcp\"}) * 100",
+            "legendFormat": "Availability"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "decimals": 3,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 99},
+                {"color": "green", "value": 99.9}
+              ]
+            }
+          }
+        },
+        "options": {
+          "orientation": "auto",
+          "textMode": "value_and_name",
+          "colorMode": "background",
+          "graphMode": "none",
+          "justifyMode": "center"
+        }
+      },
+      {
+        "id": 4,
+        "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+        "type": "stat",
+        "title": "Active VMs",
+        "targets": [
+          {
+            "expr": "sum(dwcp_vms_active)",
+            "legendFormat": "VMs"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "decimals": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 10000},
+                {"color": "red", "value": 50000}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8},
+        "type": "graph",
+        "title": "Cost Trend Analysis",
+        "targets": [
+          {
+            "expr": "sum by (provider) (dwcp_cost_hourly{provider=~\"$provider\"})",
+            "legendFormat": "{{provider}}"
+          }
+        ],
+        "xaxis": {
+          "mode": "time",
+          "show": true
+        },
+        "yaxes": [
+          {
+            "format": "currencyUSD",
+            "label": "Cost per Hour",
+            "show": true
+          },
+          {
+            "format": "short",
+            "show": false
+          }
+        ],
+        "lines": true,
+        "fill": 2,
+        "linewidth": 2,
+        "nullPointMode": "connected",
+        "steppedLine": false,
+        "tooltip": {
+          "shared": true,
+          "value_type": "individual"
+        },
+        "legend": {
+          "show": true,
+          "alignAsTable": true,
+          "current": true,
+          "values": true,
+          "total": true,
+          "avg": true,
+          "min": true,
+          "max": true
+        }
+      },
+      {
+        "id": 6,
+        "gridPos": {"x": 12, "y": 4, "w": 12, "h": 8},
+        "type": "graph",
+        "title": "Resource Utilization",
+        "targets": [
+          {
+            "expr": "avg(dwcp_cpu_utilization{region=~\"$region\"})",
+            "legendFormat": "CPU"
+          },
+          {
+            "expr": "avg(dwcp_memory_utilization{region=~\"$region\"})",
+            "legendFormat": "Memory"
+          },
+          {
+            "expr": "avg(dwcp_storage_utilization{region=~\"$region\"})",
+            "legendFormat": "Storage"
+          },
+          {
+            "expr": "avg(dwcp_network_utilization{region=~\"$region\"})",
+            "legendFormat": "Network"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "percent",
+            "label": "Utilization",
+            "min": 0,
+            "max": 100,
+            "show": true
+          }
+        ],
+        "seriesOverrides": [
+          {
+            "alias": "CPU",
+            "color": "#5794F2"
+          },
+          {
+            "alias": "Memory",
+            "color": "#73BF69"
+          },
+          {
+            "alias": "Storage",
+            "color": "#FADE2A"
+          },
+          {
+            "alias": "Network",
+            "color": "#F2495C"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "gridPos": {"x": 0, "y": 12, "w": 8, "h": 8},
+        "type": "piechart",
+        "title": "Cost Distribution by Service",
+        "targets": [
+          {
+            "expr": "sum by (service) (dwcp_cost_by_service)",
+            "legendFormat": "{{service}}"
+          }
+        ],
+        "pieType": "donut",
+        "legendDisplayMode": "table",
+        "legendPlacement": "right",
+        "legendValues": ["value", "percent"],
+        "tooltipDisplayMode": "single",
+        "displayLabels": ["name", "percent"],
+        "reduceOptions": {
+          "values": false,
+          "fields": "",
+          "calcs": ["lastNotNull"]
+        }
+      },
+      {
+        "id": 8,
+        "gridPos": {"x": 8, "y": 12, "w": 8, "h": 8},
+        "type": "bargauge",
+        "title": "SLA Compliance",
+        "targets": [
+          {
+            "expr": "dwcp_sla_availability",
+            "legendFormat": "Availability"
+          },
+          {
+            "expr": "dwcp_sla_latency",
+            "legendFormat": "Latency"
+          },
+          {
+            "expr": "dwcp_sla_throughput",
+            "legendFormat": "Throughput"
+          },
+          {
+            "expr": "dwcp_sla_error_rate",
+            "legendFormat": "Error Rate"
+          }
+        ],
+        "options": {
+          "orientation": "horizontal",
+          "displayMode": "gradient",
+          "showUnfilled": true
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 95},
+                {"color": "green", "value": 99}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 9,
+        "gridPos": {"x": 16, "y": 12, "w": 8, "h": 8},
+        "type": "heatmap",
+        "title": "Performance Heatmap",
+        "targets": [
+          {
+            "expr": "sum(rate(dwcp_request_duration_seconds_bucket[5m])) by (le)",
+            "format": "heatmap",
+            "legendFormat": "{{le}}"
+          }
+        ],
+        "dataFormat": "tsbuckets",
+        "yAxis": {
+          "format": "ms",
+          "decimals": 0
+        },
+        "color": {
+          "mode": "spectrum",
+          "scheme": "Oranges",
+          "exponent": 0.5
+        },
+        "heatmap": {
+          "show": true
+        },
+        "tooltip": {
+          "show": true,
+          "showHistogram": true
+        }
+      },
+      {
+        "id": 10,
+        "gridPos": {"x": 0, "y": 20, "w": 24, "h": 8},
+        "type": "table",
+        "title": "Cost Optimization Recommendations",
+        "targets": [
+          {
+            "expr": "dwcp_optimization_recommendations",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {},
+              "indexByName": {
+                "recommendation": 0,
+                "annual_savings": 1,
+                "roi_percentage": 2,
+                "effort": 3,
+                "risk": 4,
+                "status": 5
+              },
+              "renameByName": {
+                "recommendation": "Recommendation",
+                "annual_savings": "Annual Savings",
+                "roi_percentage": "ROI %",
+                "effort": "Implementation Effort",
+                "risk": "Risk Level",
+                "status": "Status"
+              }
+            }
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "auto",
+              "displayMode": "auto",
+              "filterable": true
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "Annual Savings"},
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "currencyUSD"
+                },
+                {
+                  "id": "custom.displayMode",
+                  "value": "gradient-gauge"
+                }
+              ]
+            },
+            {
+              "matcher": {"id": "byName", "options": "ROI %"},
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "percent"
+                },
+                {
+                  "id": "custom.displayMode",
+                  "value": "color-background"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "datasources": {
+    "prometheus": {
+      "url": "http://prometheus:9090",
+      "type": "prometheus",
+      "default": true
+    },
+    "clickhouse": {
+      "url": "http://clickhouse:8123",
+      "type": "clickhouse",
+      "database": "dwcp_analytics"
+    },
+    "elasticsearch": {
+      "url": "http://elasticsearch:9200",
+      "type": "elasticsearch",
+      "index": "dwcp-logs-*"
+    }
+  },
+  "alerting": {
+    "rules": [
+      {
+        "name": "High Cost Alert",
+        "condition": "sum(dwcp_cost_hourly) > 1000",
+        "duration": "5m",
+        "severity": "warning",
+        "notifications": ["slack", "email"]
+      },
+      {
+        "name": "SLA Breach Alert",
+        "condition": "min(dwcp_sla_availability) < 99.9",
+        "duration": "1m",
+        "severity": "critical",
+        "notifications": ["pagerduty", "slack"]
+      },
+      {
+        "name": "Cost Anomaly Alert",
+        "condition": "dwcp_cost_anomaly_score > 3",
+        "duration": "10m",
+        "severity": "warning",
+        "notifications": ["email"]
+      }
+    ]
+  }
+}

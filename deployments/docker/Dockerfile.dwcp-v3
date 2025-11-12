@@ -1,0 +1,91 @@
+# Multi-stage Dockerfile for DWCP v3 optimized production deployment
+
+# Stage 1: Build dependencies
+FROM node:18-alpine AS dependencies
+LABEL stage=dependencies
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json package-lock.json ./
+
+# Install production dependencies only
+RUN npm ci --only=production --ignore-scripts && \
+    npm cache clean --force
+
+# Stage 2: Build application
+FROM node:18-alpine AS builder
+LABEL stage=builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json package-lock.json ./
+
+# Install all dependencies (including dev)
+RUN npm ci --ignore-scripts
+
+# Copy source code
+COPY . .
+
+# Build application
+RUN npm run build && \
+    npm prune --production && \
+    npm cache clean --force
+
+# Stage 3: Runtime image
+FROM node:18-alpine AS runtime
+
+# Install dumb-init for proper signal handling
+RUN apk add --no-cache dumb-init
+
+# Create app user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001
+
+WORKDIR /app
+
+# Set ownership
+RUN chown -R nodejs:nodejs /app
+
+# Copy production dependencies from dependencies stage
+COPY --from=dependencies --chown=nodejs:nodejs /app/node_modules ./node_modules
+
+# Copy built application from builder stage
+COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
+COPY --from=builder --chown=nodejs:nodejs /app/package.json ./
+
+# Copy DWCP v3 specific files
+COPY --from=builder --chown=nodejs:nodejs /app/backend/core/network/dwcp.v3 ./backend/core/network/dwcp.v3
+
+# Copy configuration files
+COPY --from=builder --chown=nodejs:nodejs /app/config ./config
+
+# Switch to app user
+USER nodejs
+
+# Environment variables
+ENV NODE_ENV=production \
+    PORT=8080 \
+    DWCP_VERSION=3.0.0
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD node healthcheck.js || exit 1
+
+# Expose port
+EXPOSE 8080
+
+# Metadata
+ARG VERSION=latest
+ARG COMMIT_SHA=unknown
+LABEL version="${VERSION}" \
+      commit="${COMMIT_SHA}" \
+      maintainer="novacron-team" \
+      description="DWCP v3 Production Runtime"
+
+# Use dumb-init to handle signals properly
+ENTRYPOINT ["dumb-init", "--"]
+
+# Start application
+CMD ["node", "dist/index.js"]

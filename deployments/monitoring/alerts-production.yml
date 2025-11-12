@@ -1,0 +1,503 @@
+# DWCP v3 Phase 6: Production Alert Rules
+# Comprehensive alerting with escalation policies and SLA monitoring
+# Target: <5 minute alert detection, zero false positives
+
+groups:
+  # ============================================================================
+  # CRITICAL ALERTS - Immediate action required
+  # ============================================================================
+  - name: dwcp_v3_critical_alerts
+    interval: 15s
+    rules:
+      # GO/NO-GO Decision Alert
+      - alert: DWCPv3RolloutNoGo
+        expr: |
+          (
+            min(dwcp_v3_sla_compliance{sla_type="latency"}) +
+            min(dwcp_v3_sla_compliance{sla_type="throughput"}) +
+            min(dwcp_v3_sla_compliance{sla_type="error_rate"})
+          ) / 3 < 0.5
+        for: 1m
+        labels:
+          severity: critical
+          phase: "6"
+          escalation: immediate
+          team: oncall
+        annotations:
+          summary: "HALT ROLLOUT - Critical SLA violations detected"
+          description: "Multiple SLA violations detected. Overall compliance: {{ $value | humanizePercentage }}. STOP rollout immediately."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/halt-rollout"
+          action: "IMMEDIATE: Execute rollback procedure"
+
+      # P99 Latency Critical
+      - alert: DWCPv3LatencyP99Critical
+        expr: |
+          histogram_quantile(0.99, sum(rate(dwcp_v3_migration_latency_seconds_bucket[5m])) by (le)) > 0.5
+        for: 2m
+        labels:
+          severity: critical
+          phase: "6"
+          escalation: immediate
+          team: performance
+        annotations:
+          summary: "P99 latency exceeded 500ms threshold"
+          description: "P99 migration latency is {{ $value | humanizeDuration }}, exceeding 500ms SLA target."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/high-latency"
+          action: "Investigate performance bottlenecks, check for resource saturation"
+
+      # Throughput Critical Low
+      - alert: DWCPv3ThroughputCriticalLow
+        expr: |
+          avg(dwcp_v3_throughput_bytes_per_second) < 2.0e9
+        for: 3m
+        labels:
+          severity: critical
+          phase: "6"
+          escalation: high
+          team: network
+        annotations:
+          summary: "Throughput below 2.0 GB/s critical threshold"
+          description: "Current throughput: {{ $value | humanize1024 }}B/s. Target: 2.4 GB/s minimum."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/low-throughput"
+          action: "Check AMST streams, network congestion, RDMA status"
+
+      # High Error Rate
+      - alert: DWCPv3ErrorRateCritical
+        expr: |
+          sum(rate(dwcp_v3_errors_total[5m])) > 10
+        for: 1m
+        labels:
+          severity: critical
+          phase: "6"
+          escalation: immediate
+          team: oncall
+        annotations:
+          summary: "Error rate critical: {{ $value | humanize }} errors/sec"
+          description: "Error rate is {{ $value | humanize }} errors/second, exceeding 1% SLA target."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/high-error-rate"
+          action: "Review error logs, check component health, prepare for rollback"
+
+      # Component Down
+      - alert: DWCPv3ComponentDown
+        expr: |
+          dwcp_v3_component_health == 0
+        for: 30s
+        labels:
+          severity: critical
+          phase: "6"
+          escalation: immediate
+          team: oncall
+        annotations:
+          summary: "Component {{$labels.component}} is unhealthy"
+          description: "Component {{$labels.component}} version {{$labels.version}} health check failed."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/component-failure"
+          action: "Check component logs, restart if needed, escalate if persistent"
+
+      # Consensus Failure (ACP)
+        - alert: DWCPv3ConsensusFailure
+        expr: |
+          rate(dwcp_v3_acp_consensus_failures_total[2m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          phase: "6"
+          escalation: immediate
+          team: distributed-systems
+        annotations:
+          summary: "Consensus protocol failures detected"
+          description: "ACP consensus failures: {{ $value | humanize }} failures/sec. This may cause data inconsistency."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/consensus-failure"
+          action: "URGENT: Check Raft/PBFT status, verify quorum, investigate Byzantine behavior"
+
+      # Memory Leak Detection
+      - alert: DWCPv3MemoryLeakSuspected
+        expr: |
+          rate(dwcp_v3_resource_utilization_percent{resource_type="memory"}[30m]) > 5
+        for: 10m
+        labels:
+          severity: critical
+          phase: "6"
+          escalation: high
+          team: performance
+        annotations:
+          summary: "Potential memory leak detected"
+          description: "Memory usage increasing by {{ $value }}% per 30 minutes. Current: {{ $value }}%."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/memory-leak"
+          action: "Enable profiling, collect heap dumps, identify leaking component"
+
+  # ============================================================================
+  # WARNING ALERTS - Attention needed
+  # ============================================================================
+  - name: dwcp_v3_warning_alerts
+    interval: 30s
+    rules:
+      # P95 Latency Warning
+      - alert: DWCPv3LatencyP95High
+        expr: |
+          histogram_quantile(0.95, sum(rate(dwcp_v3_migration_latency_seconds_bucket[5m])) by (le)) > 0.3
+        for: 5m
+        labels:
+          severity: warning
+          phase: "6"
+          escalation: low
+          team: performance
+        annotations:
+          summary: "P95 latency elevated: {{ $value | humanizeDuration }}"
+          description: "P95 latency is {{ $value | humanizeDuration }}, approaching 500ms P99 threshold."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/elevated-latency"
+          action: "Monitor closely, investigate if trend continues"
+
+      # Throughput Warning
+      - alert: DWCPv3ThroughputLow
+        expr: |
+          avg(dwcp_v3_throughput_bytes_per_second) < 2.2e9
+        for: 5m
+        labels:
+          severity: warning
+          phase: "6"
+          escalation: low
+          team: network
+        annotations:
+          summary: "Throughput below optimal: {{ $value | humanize1024 }}B/s"
+          description: "Throughput is {{ $value | humanize1024 }}B/s, below 2.4 GB/s target."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/suboptimal-throughput"
+          action: "Check for network congestion, verify stream configuration"
+
+      # Error Rate Warning
+      - alert: DWCPv3ErrorRateElevated
+        expr: |
+          sum(rate(dwcp_v3_errors_total[10m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+          phase: "6"
+          escalation: low
+          team: reliability
+        annotations:
+          summary: "Error rate elevated: {{ $value | humanize }} errors/sec"
+          description: "Error rate trending upward: {{ $value | humanize }} errors/second."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/elevated-errors"
+          action: "Review recent changes, check error types"
+
+      # CPU Saturation Warning
+      - alert: DWCPv3CPUHighUsage
+        expr: |
+          avg(dwcp_v3_resource_utilization_percent{resource_type="cpu"}) > 80
+        for: 10m
+        labels:
+          severity: warning
+          phase: "6"
+          escalation: low
+          team: infrastructure
+        annotations:
+          summary: "CPU utilization high: {{ $value }}%"
+          description: "CPU usage at {{ $value }}%, may impact performance."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/high-cpu"
+          action: "Consider scaling, check for CPU-intensive tasks"
+
+      # Rollout Progress Stalled
+      - alert: DWCPv3RolloutStalled
+        expr: |
+          rate(dwcp_v3_rollout_progress_percent[15m]) < 0.1
+        for: 15m
+        labels:
+          severity: warning
+          phase: "6"
+          escalation: low
+          team: deployment
+        annotations:
+          summary: "Rollout progress stalled in {{$labels.stage}}"
+          description: "Rollout progress rate: {{ $value }}% per 15 minutes in {{$labels.region}}."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/stalled-rollout"
+          action: "Check deployment pipeline, verify feature flags"
+
+  # ============================================================================
+  # ANOMALY ALERTS - Statistical anomaly detection
+  # ============================================================================
+  - name: dwcp_v3_anomaly_alerts
+    interval: 30s
+    rules:
+      # Latency Anomaly
+      - alert: DWCPv3LatencyAnomalyDetected
+        expr: |
+          increase(dwcp_v3_anomaly_detections_total{anomaly_type="latency"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          phase: "6"
+          escalation: low
+          team: performance
+        annotations:
+          summary: "Latency anomaly detected ({{ $labels.severity }})"
+          description: "Statistical anomaly in latency patterns detected."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/latency-anomaly"
+          action: "Investigate recent changes, check for external factors"
+
+      # Throughput Anomaly
+      - alert: DWCPv3ThroughputAnomalyDetected
+        expr: |
+          increase(dwcp_v3_anomaly_detections_total{anomaly_type="throughput"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          phase: "6"
+          escalation: low
+          team: network
+        annotations:
+          summary: "Throughput anomaly detected ({{ $labels.severity }})"
+          description: "Statistical anomaly in throughput patterns detected."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/throughput-anomaly"
+          action: "Check network conditions, verify AMST configuration"
+
+      # Multiple Anomalies (Predictive Failure)
+      - alert: DWCPv3MultipleAnomalies
+        expr: |
+          count(increase(dwcp_v3_anomaly_detections_total[5m]) > 0) >= 3
+        for: 3m
+        labels:
+          severity: critical
+          phase: "6"
+          escalation: high
+          team: oncall
+        annotations:
+          summary: "Multiple anomalies detected - system instability"
+          description: "{{ $value }} different anomaly types detected. System may be approaching failure."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/system-instability"
+          action: "URGENT: Prepare for rollback, investigate root cause"
+
+  # ============================================================================
+  # SLA COMPLIANCE ALERTS
+  # ============================================================================
+  - name: dwcp_v3_sla_alerts
+    interval: 30s
+    rules:
+      # Latency SLA Violation
+      - alert: DWCPv3SLALatencyViolation
+        expr: |
+          dwcp_v3_sla_compliance{sla_type="latency"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          phase: "6"
+          escalation: high
+          team: performance
+          sla: "true"
+        annotations:
+          summary: "SLA VIOLATION: Latency exceeds P99 500ms target"
+          description: "Latency SLA compliance: FAILED. P99 latency exceeds 500ms threshold."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/sla-latency-violation"
+          action: "Escalate to leadership, prepare incident report"
+
+      # Throughput SLA Violation
+      - alert: DWCPv3SLAThroughputViolation
+        expr: |
+          dwcp_v3_sla_compliance{sla_type="throughput"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          phase: "6"
+          escalation: high
+          team: network
+          sla: "true"
+        annotations:
+          summary: "SLA VIOLATION: Throughput below 2.4 GB/s target"
+          description: "Throughput SLA compliance: FAILED. Below 2.4 GB/s minimum."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/sla-throughput-violation"
+          action: "Escalate to leadership, investigate network bottlenecks"
+
+      # Error Rate SLA Violation
+      - alert: DWCPv3SLAErrorRateViolation
+        expr: |
+          dwcp_v3_sla_compliance{sla_type="error_rate"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          phase: "6"
+          escalation: immediate
+          team: oncall
+          sla: "true"
+        annotations:
+          summary: "SLA VIOLATION: Error rate exceeds 1% target"
+          description: "Error rate SLA compliance: FAILED. Error rate exceeds 1% threshold."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/sla-error-rate-violation"
+          action: "IMMEDIATE: Investigate errors, prepare rollback if necessary"
+
+      # Overall SLA Compliance Low
+      - alert: DWCPv3SLAOverallCompliance
+        expr: |
+          avg(dwcp_v3_sla_compliance) < 0.95
+        for: 5m
+        labels:
+          severity: warning
+          phase: "6"
+          escalation: low
+          team: reliability
+          sla: "true"
+        annotations:
+          summary: "Overall SLA compliance below 95%: {{ $value | humanizePercentage }}"
+          description: "Overall SLA compliance: {{ $value | humanizePercentage }}. Target: >99%."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/sla-overall-compliance"
+          action: "Review all SLA metrics, identify weak points"
+
+  # ============================================================================
+  # COMPONENT-SPECIFIC ALERTS
+  # ============================================================================
+  - name: dwcp_v3_component_alerts
+    interval: 30s
+    rules:
+      # AMST Stream Saturation
+      - alert: DWCPv3AMSTStreamSaturation
+        expr: |
+          dwcp_v3_amst_active_streams > 450
+        for: 5m
+        labels:
+          severity: warning
+          phase: "6"
+          escalation: low
+          team: network
+          component: amst
+        annotations:
+          summary: "AMST stream count high: {{ $value }}/512"
+          description: "AMST using {{ $value }} streams, approaching 512 limit."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/amst-stream-saturation"
+          action: "Scale AMST instances, review stream allocation"
+
+      # HDE Compression Ratio Low
+      - alert: DWCPv3HDECompressionLow
+        expr: |
+          avg(dwcp_v3_hde_compression_ratio) < 0.70
+        for: 10m
+        labels:
+          severity: warning
+          phase: "6"
+          escalation: low
+          team: storage
+          component: hde
+        annotations:
+          summary: "HDE compression ratio low: {{ $value | humanizePercentage }}"
+          description: "Compression ratio {{ $value | humanizePercentage }}, below 75% target."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/hde-low-compression"
+          action: "Check data patterns, verify compression algorithm selection"
+
+      # PBA Prediction Accuracy Low
+      - alert: DWCPv3PBAPredictionAccuracyLow
+        expr: |
+          avg(dwcp_v3_pba_prediction_accuracy) < 0.85
+        for: 10m
+        labels:
+          severity: warning
+          phase: "6"
+          escalation: low
+          team: ml
+          component: pba
+        annotations:
+          summary: "PBA prediction accuracy low: {{ $value | humanizePercentage }}"
+          description: "Bandwidth prediction accuracy {{ $value | humanizePercentage }}, below 85% target."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/pba-low-accuracy"
+          action: "Retrain LSTM model, review input features"
+
+      # ACP Consensus Latency High
+      - alert: DWCPv3ACPConsensusLatencyHigh
+        expr: |
+          avg(dwcp_v3_acp_consensus_latency_ms) > 100
+        for: 3m
+        labels:
+          severity: warning
+          phase: "6"
+          escalation: low
+          team: distributed-systems
+          component: acp
+        annotations:
+          summary: "ACP consensus latency high: {{ $value }}ms"
+          description: "Consensus latency {{ $value }}ms, exceeding 100ms target."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/acp-high-latency"
+          action: "Check network latency between nodes, verify quorum health"
+
+  # ============================================================================
+  # META ALERTS - Monitoring the monitoring
+  # ============================================================================
+  - name: dwcp_v3_meta_alerts
+    interval: 60s
+    rules:
+      # Prometheus Scrape Failures
+      - alert: DWCPv3PrometheusScrapeFailures
+        expr: |
+          rate(prometheus_target_scrapes_exceeded_sample_limit_total[5m]) > 0 or
+          rate(prometheus_target_scrapes_sample_duplicate_timestamp_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          phase: "6"
+          escalation: low
+          team: observability
+        annotations:
+          summary: "Prometheus scrape issues detected"
+          description: "Prometheus experiencing scrape failures or duplicate timestamps."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/prometheus-scrape-failures"
+          action: "Check Prometheus configuration, verify target health"
+
+      # Metrics Collection Latency High
+      - alert: DWCPv3MetricsCollectionSlow
+        expr: |
+          prometheus_target_interval_length_seconds{quantile="0.99"} > 10
+        for: 5m
+        labels:
+          severity: warning
+          phase: "6"
+          escalation: low
+          team: observability
+        annotations:
+          summary: "Metrics collection latency high: {{ $value }}s"
+          description: "P99 scrape interval {{ $value }}s, exceeding target."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/slow-metrics-collection"
+          action: "Scale Prometheus, reduce scrape targets, optimize queries"
+
+      # Alert Manager Down
+      - alert: DWCPv3AlertManagerDown
+        expr: |
+          up{job="alertmanager"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          phase: "6"
+          escalation: immediate
+          team: observability
+        annotations:
+          summary: "AlertManager instance down"
+          description: "AlertManager instance {{$labels.instance}} is unreachable."
+          runbook: "https://docs.internal/dwcp-v3/runbooks/alertmanager-down"
+          action: "URGENT: Restart AlertManager, check cluster status"
+
+  # ============================================================================
+  # RECORDING RULES - Pre-computed aggregations
+  # ============================================================================
+  - name: dwcp_v3_recording_rules
+    interval: 15s
+    rules:
+      # Pre-compute latency percentiles
+      - record: dwcp_v3:migration_latency_p50:5m
+        expr: |
+          histogram_quantile(0.50, sum(rate(dwcp_v3_migration_latency_seconds_bucket[5m])) by (le))
+
+      - record: dwcp_v3:migration_latency_p95:5m
+        expr: |
+          histogram_quantile(0.95, sum(rate(dwcp_v3_migration_latency_seconds_bucket[5m])) by (le))
+
+      - record: dwcp_v3:migration_latency_p99:5m
+        expr: |
+          histogram_quantile(0.99, sum(rate(dwcp_v3_migration_latency_seconds_bucket[5m])) by (le))
+
+      # Pre-compute throughput aggregates
+      - record: dwcp_v3:throughput_avg:5m
+        expr: |
+          avg(dwcp_v3_throughput_bytes_per_second)
+
+      # Pre-compute error rate
+      - record: dwcp_v3:error_rate:5m
+        expr: |
+          sum(rate(dwcp_v3_errors_total[5m]))
+
+      # Pre-compute SLA compliance
+      - record: dwcp_v3:sla_compliance_overall:5m
+        expr: |
+          avg(dwcp_v3_sla_compliance)

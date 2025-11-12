@@ -1,0 +1,88 @@
+%% NovaCron Component Dependency Graph
+%% Shows explicit dependencies between components for initialization ordering
+
+graph TD
+    subgraph "Level 0: Foundation"
+        Config[Configuration]
+        Logger[Logger]
+        Env[Environment Detector]
+    end
+
+    subgraph "Level 1: Security (No Dependencies)"
+        Security[Security System<br/>- Secrets Manager<br/>- Encryption<br/>- Auth Provider<br/>- RBAC]
+    end
+
+    subgraph "Level 2: Infrastructure (Depends: Security)"
+        Database[Database Layer<br/>- PostgreSQL<br/>- Migrations<br/>- Connection Pool]
+        Cache[Cache Layer<br/>- Redis<br/>- In-Memory Cache<br/>- Coherency]
+        Network[Network Stack<br/>- Transport<br/>- Protocols<br/>- Connections]
+    end
+
+    subgraph "Level 3: Core Protocol (Depends: Security, Network, Database)"
+        DWCP[DWCP System<br/>- AMST Transport<br/>- HDE Compression<br/>- Consensus<br/>- State Sync]
+    end
+
+    subgraph "Level 4: Services (Depends: Core Components)"
+        Orchestrator[Orchestration<br/>- Swarm Coordinator<br/>- Agent Manager<br/>- Task Queue]
+        APIServer[API Server<br/>- REST Endpoints<br/>- gRPC Services<br/>- WebSocket]
+        MLEngine[ML Engine<br/>- Neural Models<br/>- Prediction<br/>- Training]
+    end
+
+    subgraph "Level 5: Monitoring & Support"
+        Monitoring[Monitoring<br/>- Metrics<br/>- Tracing<br/>- Alerting]
+        HealthCheck[Health Check<br/>- Component Status<br/>- System Health]
+    end
+
+    %% Foundation dependencies
+    Config --> Security
+    Logger --> Security
+    Env --> Security
+
+    %% Level 1 to Level 2
+    Security -->|auth & encryption| Database
+    Security -->|encryption| Cache
+    Security -->|TLS| Network
+
+    %% Level 2 to Level 3
+    Security --> DWCP
+    Network -->|transport layer| DWCP
+    Database -->|state persistence| DWCP
+    Cache -->|caching| DWCP
+
+    %% Level 3 to Level 4
+    DWCP -->|distributed comm| Orchestrator
+    Security -->|auth/authz| APIServer
+    Database -->|data access| APIServer
+    Cache -->|caching| APIServer
+    Database -->|model storage| MLEngine
+    Cache -->|inference cache| MLEngine
+
+    %% Level 4 to Level 5
+    Orchestrator --> Monitoring
+    APIServer --> Monitoring
+    MLEngine --> Monitoring
+    DWCP --> Monitoring
+
+    %% Health checks depend on all components
+    Security --> HealthCheck
+    Database --> HealthCheck
+    Cache --> HealthCheck
+    Network --> HealthCheck
+    DWCP --> HealthCheck
+    Orchestrator --> HealthCheck
+    APIServer --> HealthCheck
+    Monitoring --> HealthCheck
+
+    classDef level0 fill:#868e96,stroke:#495057,color:#fff
+    classDef level1 fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef level2 fill:#4dabf7,stroke:#1c7ed6,color:#fff
+    classDef level3 fill:#9775fa,stroke:#7048e8,color:#fff
+    classDef level4 fill:#51cf66,stroke:#2f9e44,color:#fff
+    classDef level5 fill:#ffd43b,stroke:#f08c00,color:#000
+
+    class Config,Logger,Env level0
+    class Security level1
+    class Database,Cache,Network level2
+    class DWCP level3
+    class Orchestrator,APIServer,MLEngine level4
+    class Monitoring,HealthCheck level5

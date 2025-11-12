@@ -1,0 +1,323 @@
+# Promtail Configuration for DWCP v3
+# Log collection agent with structured logging support
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+  log_format: json
+
+positions:
+  filename: /tmp/positions.yaml
+  sync_period: 10s
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+    batchwait: 1s
+    batchsize: 1048576  # 1MB
+    timeout: 10s
+
+    external_labels:
+      cluster: dwcp-v3-production
+      environment: production
+
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 10
+
+    # Tenant ID for multi-tenancy
+    tenant_id: dwcp-v3
+
+scrape_configs:
+  # =========================================================================
+  # Kubernetes Pod Logs - DWCP v3 Components
+  # =========================================================================
+  - job_name: kubernetes-pods-dwcp-v3
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - dwcp-v3-production
+
+    pipeline_stages:
+      # Extract JSON logs
+      - json:
+          expressions:
+            timestamp: time
+            level: level
+            logger: logger
+            message: msg
+            component: component
+            node_id: node_id
+            trace_id: trace_id
+            span_id: span_id
+
+      # Parse timestamp
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+
+      # Set log level as label
+      - labels:
+          level:
+          component:
+          node_id:
+
+      # Extract DWCP-specific fields
+      - json:
+          expressions:
+            mode: network_mode
+            migration_id: migration_id
+            bytes_transferred: bytes_transferred
+            latency_ms: latency_ms
+            error_type: error_type
+
+      # Add structured labels for better querying
+      - labels:
+          mode:
+          error_type:
+
+      # Template for output formatting
+      - template:
+          source: message
+          template: '{{ .message }}'
+
+      # Metrics from logs (count errors by component)
+      - metrics:
+          error_count:
+            type: Counter
+            description: "Count of errors by component"
+            source: level
+            config:
+              action: inc
+              match_all: true
+              value: "1"
+              filters:
+                - level == "error"
+
+      # Add trace context
+      - labels:
+          trace_id:
+          span_id:
+
+    relabel_configs:
+      # Keep only DWCP v3 pods
+      - source_labels:
+          - __meta_kubernetes_pod_label_app
+        regex: dwcp-v3.*
+        action: keep
+
+      # Add pod name
+      - source_labels:
+          - __meta_kubernetes_pod_name
+        target_label: pod
+
+      # Add namespace
+      - source_labels:
+          - __meta_kubernetes_namespace
+        target_label: namespace
+
+      # Add container name
+      - source_labels:
+          - __meta_kubernetes_pod_container_name
+        target_label: container
+
+      # Add node name
+      - source_labels:
+          - __meta_kubernetes_pod_node_name
+        target_label: node
+
+      # Add version label
+      - source_labels:
+          - __meta_kubernetes_pod_label_version
+        target_label: version
+
+      # Add component label
+      - source_labels:
+          - __meta_kubernetes_pod_label_component
+        target_label: dwcp_component
+
+  # =========================================================================
+  # System Logs
+  # =========================================================================
+  - job_name: system-logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: system-logs
+          __path__: /var/log/*.log
+
+    pipeline_stages:
+      # Parse syslog format
+      - regex:
+          expression: '^(?P<timestamp>\S+\s+\S+\s+\S+) (?P<hostname>\S+) (?P<service>\S+)\[(?P<pid>\d+)\]: (?P<message>.*)$'
+
+      # Parse timestamp
+      - timestamp:
+          source: timestamp
+          format: Jan _2 15:04:05
+
+      # Add labels
+      - labels:
+          hostname:
+          service:
+
+  # =========================================================================
+  # DWCP v3 Application Logs (structured JSON)
+  # =========================================================================
+  - job_name: dwcp-v3-structured-logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: dwcp-v3-logs
+          __path__: /var/log/dwcp-v3/*.json
+
+    pipeline_stages:
+      # Parse JSON structure
+      - json:
+          expressions:
+            timestamp: ts
+            level: level
+            component: component
+            message: msg
+            node_id: node_id
+            migration_id: migration.id
+            migration_status: migration.status
+            migration_bytes: migration.bytes_transferred
+            migration_latency_ms: migration.latency_ms
+            mode: network.mode
+            consensus_type: consensus.type
+            byzantine_detected: security.byzantine_detected
+            error: error
+            trace_id: trace_id
+            span_id: span_id
+
+      # Parse timestamp
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+
+      # Extract critical security events
+      - labels:
+          byzantine_detected:
+
+      # Add all relevant labels
+      - labels:
+          level:
+          component:
+          node_id:
+          mode:
+          consensus_type:
+          migration_status:
+
+      # Count migrations
+      - metrics:
+          migration_count:
+            type: Counter
+            description: "Count of migrations by status"
+            source: migration_status
+            config:
+              action: inc
+              match_all: true
+
+      # Track Byzantine events
+      - metrics:
+          byzantine_events:
+            type: Counter
+            description: "Count of Byzantine detection events"
+            source: byzantine_detected
+            config:
+              action: inc
+              match_all: true
+              filters:
+                - byzantine_detected == "true"
+
+  # =========================================================================
+  # Audit Logs (compliance and security)
+  # =========================================================================
+  - job_name: audit-logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: audit-logs
+          __path__: /var/log/dwcp-v3/audit/*.json
+
+    pipeline_stages:
+      - json:
+          expressions:
+            timestamp: timestamp
+            user: user
+            action: action
+            resource: resource
+            result: result
+            ip_address: ip_address
+
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+
+      - labels:
+          user:
+          action:
+          result:
+
+      # Alert on failed authentication
+      - metrics:
+          auth_failures:
+            type: Counter
+            description: "Count of authentication failures"
+            source: result
+            config:
+              action: inc
+              match_all: true
+              filters:
+                - result == "failed"
+                - action == "authenticate"
+
+  # =========================================================================
+  # Performance Logs (high-volume metrics)
+  # =========================================================================
+  - job_name: performance-logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: performance-logs
+          __path__: /var/log/dwcp-v3/performance/*.log
+
+    pipeline_stages:
+      - json:
+          expressions:
+            timestamp: ts
+            operation: operation
+            duration_ms: duration_ms
+            throughput_mbps: throughput_mbps
+            component: component
+
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+
+      - labels:
+          operation:
+          component:
+
+      # Extract performance metrics
+      - metrics:
+          operation_duration:
+            type: Histogram
+            description: "Operation duration histogram"
+            source: duration_ms
+            config:
+              buckets: [10, 50, 100, 500, 1000, 5000, 10000]
+
+limits_config:
+  readline_rate: 10000
+  readline_burst: 20000
+
+target_config:
+  sync_period: 10s

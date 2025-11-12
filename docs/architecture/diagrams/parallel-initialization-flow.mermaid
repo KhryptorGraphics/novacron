@@ -1,0 +1,146 @@
+%% NovaCron Parallel Initialization Flow
+%% Shows level-based parallel component initialization
+
+graph TB
+    subgraph "Initialization Orchestrator"
+        Start[Start Initialization] --> BuildGraph[Build Dependency Graph]
+        BuildGraph --> TopoSort[Topological Sort]
+        TopoSort --> GroupLevels[Group by Dependency Level]
+    end
+
+    GroupLevels --> Level0[Level 0: Foundation]
+
+    subgraph "Level 0: Sequential (0-2s)"
+        Level0 --> L0_Config[Load Configuration]
+        L0_Config --> L0_Logger[Initialize Logger]
+        L0_Logger --> L0_Env[Detect Environment]
+        L0_Env --> L0_Complete[Level 0 Complete]
+    end
+
+    L0_Complete --> Level1[Level 1: Security]
+
+    subgraph "Level 1: Single Component (2-3.5s)"
+        Level1 --> L1_Security[Initialize Security System]
+        L1_Security --> L1_Secrets[Load Secrets]
+        L1_Secrets --> L1_Crypto[Setup Encryption]
+        L1_Crypto --> L1_Auth[Initialize Auth]
+        L1_Auth --> L1_Complete[Level 1 Complete]
+    end
+
+    L1_Complete --> Level2[Level 2: Infrastructure]
+
+    subgraph "Level 2: Parallel (3.5-8s) - 3 components concurrently"
+        Level2 --> Semaphore[Semaphore: Max 3 Concurrent]
+
+        Semaphore --> L2_DB_Start[Start: Database]
+        Semaphore --> L2_Cache_Start[Start: Cache]
+        Semaphore --> L2_Net_Start[Start: Network]
+
+        L2_DB_Start --> L2_DB_Pool[Create Connection Pool]
+        L2_DB_Pool --> L2_DB_Migrate[Run Migrations]
+        L2_DB_Migrate --> L2_DB_Validate[Validate Schema]
+        L2_DB_Validate --> L2_DB_Health[Health Check]
+        L2_DB_Health --> L2_DB_Done[Database Ready]
+
+        L2_Cache_Start --> L2_Cache_Connect[Connect to Redis]
+        L2_Cache_Connect --> L2_Cache_Test[Test Connection]
+        L2_Cache_Test --> L2_Cache_Coherency[Setup Coherency]
+        L2_Cache_Coherency --> L2_Cache_Done[Cache Ready]
+
+        L2_Net_Start --> L2_Net_Transport[Initialize Transport]
+        L2_Net_Transport --> L2_Net_Protocols[Setup Protocols]
+        L2_Net_Protocols --> L2_Net_Manager[Create Connection Manager]
+        L2_Net_Manager --> L2_Net_Done[Network Ready]
+
+        L2_DB_Done --> L2_WaitGroup[Wait for All Level 2]
+        L2_Cache_Done --> L2_WaitGroup
+        L2_Net_Done --> L2_WaitGroup
+
+        L2_WaitGroup --> L2_Complete[Level 2 Complete]
+    end
+
+    L2_Complete --> Level3[Level 3: DWCP]
+
+    subgraph "Level 3: Single Component (8-11s)"
+        Level3 --> L3_DWCP[Initialize DWCP System]
+        L3_DWCP --> L3_AMST[Setup AMST Transport]
+        L3_AMST --> L3_HDE[Initialize HDE Compression]
+        L3_HDE --> L3_Consensus[Setup Consensus]
+        L3_Consensus --> L3_StateSync[Configure State Sync]
+        L3_StateSync --> L3_Complete[Level 3 Complete]
+    end
+
+    L3_Complete --> Level4[Level 4: Services]
+
+    subgraph "Level 4: Parallel (11-17s) - 3 components concurrently"
+        Level4 --> L4_Sem[Semaphore: Max 3 Concurrent]
+
+        L4_Sem --> L4_Orch_Start[Start: Orchestrator]
+        L4_Sem --> L4_API_Start[Start: API Server]
+        L4_Sem --> L4_ML_Start[Start: ML Engine]
+
+        L4_Orch_Start --> L4_Orch_Swarm[Initialize Swarm Coordinator]
+        L4_Orch_Swarm --> L4_Orch_Agents[Setup Agent Manager]
+        L4_Orch_Agents --> L4_Orch_Queue[Create Task Queue]
+        L4_Orch_Queue --> L4_Orch_Done[Orchestrator Ready]
+
+        L4_API_Start --> L4_API_REST[Setup REST Endpoints]
+        L4_API_REST --> L4_API_GRPC[Setup gRPC Services]
+        L4_API_GRPC --> L4_API_WS[Setup WebSocket]
+        L4_API_WS --> L4_API_Bind[Bind to Port]
+        L4_API_Bind --> L4_API_Done[API Server Ready]
+
+        L4_ML_Start --> L4_ML_Load[Load Models - Optional]
+        L4_ML_Load --> L4_ML_Done[ML Engine Ready or Degraded]
+
+        L4_Orch_Done --> L4_WaitGroup[Wait for All Level 4]
+        L4_API_Done --> L4_WaitGroup
+        L4_ML_Done --> L4_WaitGroup
+
+        L4_WaitGroup --> L4_Complete[Level 4 Complete]
+    end
+
+    L4_Complete --> Level5[Level 5: Monitoring]
+
+    subgraph "Level 5: Parallel (17-20s) - 2 components concurrently"
+        Level5 --> L5_Sem[Semaphore: Max 2 Concurrent]
+
+        L5_Sem --> L5_Mon_Start[Start: Monitoring]
+        L5_Sem --> L5_Health_Start[Start: Health Check]
+
+        L5_Mon_Start --> L5_Mon_Metrics[Initialize Metrics]
+        L5_Mon_Metrics --> L5_Mon_Tracing[Setup Tracing]
+        L5_Mon_Tracing --> L5_Mon_Done[Monitoring Ready - Optional]
+
+        L5_Health_Start --> L5_Health_Check[Run System Health Check]
+        L5_Health_Check --> L5_Health_All[Check All Components]
+        L5_Health_All --> L5_Health_Done[Health Check Complete]
+
+        L5_Mon_Done --> L5_WaitGroup[Wait for All Level 5]
+        L5_Health_Done --> L5_WaitGroup
+
+        L5_WaitGroup --> L5_Complete[Level 5 Complete]
+    end
+
+    L5_Complete --> PostInit[Post-Initialization]
+
+    subgraph "Post-Init: Final Steps (20-22s)"
+        PostInit --> PI_Metrics[Emit Startup Metrics]
+        PI_Metrics --> PI_Discovery[Register Service Discovery]
+        PI_Discovery --> PI_Jobs[Start Background Jobs]
+        PI_Jobs --> PI_Ready[Mark System READY]
+    end
+
+    PI_Ready --> Complete[Initialization Complete]
+
+    Complete --> EmitTotal[Emit Total Duration: ~22s]
+
+    classDef levelClass fill:#4dabf7,stroke:#1c7ed6,color:#fff
+    classDef parallelClass fill:#51cf66,stroke:#2f9e44,color:#fff
+    classDef sequentialClass fill:#ffd43b,stroke:#f08c00,color:#000
+    classDef completeClass fill:#9775fa,stroke:#7048e8,color:#fff
+
+    class Level0,Level1,Level2,Level3,Level4,Level5 levelClass
+    class Semaphore,L2_WaitGroup,L4_Sem,L4_WaitGroup,L5_Sem,L5_WaitGroup parallelClass
+    class L0_Config,L0_Logger,L0_Env,L1_Security,L3_DWCP sequentialClass
+    class L0_Complete,L1_Complete,L2_Complete,L3_Complete,L4_Complete,L5_Complete,Complete completeClass

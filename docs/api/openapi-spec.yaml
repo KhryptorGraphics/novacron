@@ -1,0 +1,1447 @@
+openapi: 3.1.0
+info:
+  title: DWCP v3 API
+  version: 3.0.0
+  description: |
+    # Distributed Workspace Communication Protocol v3 API
+
+    Complete API specification for DWCP v3, the next-generation distributed computing platform.
+
+    ## Features
+    - Multi-protocol support (REST, GraphQL, gRPC, WebSocket)
+    - Byzantine fault tolerance
+    - Linear scalability to 1M+ nodes
+    - Sub-millisecond latency
+    - Quantum-resistant security
+
+    ## Authentication
+    All endpoints require authentication via mTLS certificates or JWT tokens.
+
+    ## Rate Limiting
+    - Standard tier: 1,000 requests/second
+    - Premium tier: 10,000 requests/second
+    - Enterprise tier: 100,000 requests/second
+
+    ## Base URL
+    - Production: `https://api.dwcp.io`
+    - Staging: `https://api.staging.dwcp.io`
+    - Development: `http://localhost:8080`
+
+  contact:
+    name: DWCP Support
+    email: support@dwcp.io
+    url: https://dwcp.io/support
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.dwcp.io/v3
+    description: Production server
+  - url: https://api.staging.dwcp.io/v3
+    description: Staging server
+  - url: http://localhost:8080/v3
+    description: Development server
+
+tags:
+  - name: Cluster
+    description: Cluster management operations
+  - name: Nodes
+    description: Node operations and health checks
+  - name: Consensus
+    description: Consensus protocol operations
+  - name: Services
+    description: Service deployment and management
+  - name: State
+    description: Distributed state management
+  - name: Security
+    description: Security and authentication
+  - name: Monitoring
+    description: Metrics, tracing, and health
+  - name: Configuration
+    description: Configuration management
+
+security:
+  - mTLS: []
+  - bearerAuth: []
+  - apiKey: []
+
+paths:
+  # ==================
+  # Cluster Operations
+  # ==================
+
+  /cluster:
+    get:
+      tags:
+        - Cluster
+      summary: Get cluster information
+      description: Retrieve comprehensive information about the cluster including topology, nodes, and health status
+      operationId: getCluster
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Cluster information retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterInfo'
+              example:
+                id: "cluster-prod-001"
+                name: "production-cluster"
+                topology: "raft"
+                nodes: 7
+                healthy_nodes: 7
+                leader: "node-1"
+                version: "3.0.0"
+                created_at: "2025-01-01T00:00:00Z"
+                status: "healthy"
+                metrics:
+                  requests_per_second: 45000
+                  avg_latency_ms: 2.3
+                  error_rate: 0.001
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags:
+        - Cluster
+      summary: Create new cluster
+      description: Initialize a new DWCP cluster with specified configuration
+      operationId: createCluster
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClusterCreateRequest'
+            example:
+              name: "new-cluster"
+              topology: "raft"
+              nodes: 5
+              consensus_config:
+                election_timeout: 5000
+                heartbeat_interval: 1000
+              security:
+                tls_enabled: true
+                mtls_required: true
+      responses:
+        '201':
+          description: Cluster created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterInfo'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      tags:
+        - Cluster
+      summary: Delete cluster
+      description: Permanently delete a cluster and all its data
+      operationId: deleteCluster
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: force
+          in: query
+          description: Force deletion even if cluster has active connections
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '204':
+          description: Cluster deleted successfully
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Cannot delete cluster with active connections
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /cluster/scale:
+    post:
+      tags:
+        - Cluster
+      summary: Scale cluster
+      description: Scale cluster up or down by adding or removing nodes
+      operationId: scaleCluster
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScaleRequest'
+            example:
+              target_nodes: 10
+              strategy: "gradual"
+              rebalance: true
+      responses:
+        '202':
+          description: Scaling operation initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /cluster/topology:
+    get:
+      tags:
+        - Cluster
+      summary: Get cluster topology
+      description: Retrieve detailed cluster topology including node connections
+      operationId: getTopology
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Topology retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopologyInfo'
+
+    put:
+      tags:
+        - Cluster
+      summary: Update cluster topology
+      description: Change cluster topology (e.g., from raft to byzantine)
+      operationId: updateTopology
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                topology:
+                  type: string
+                  enum: [raft, byzantine, gossip]
+                migration_strategy:
+                  type: string
+                  enum: [rolling, blue-green, canary]
+      responses:
+        '202':
+          description: Topology update initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationStatus'
+
+  # ==================
+  # Node Operations
+  # ==================
+
+  /nodes:
+    get:
+      tags:
+        - Nodes
+      summary: List all nodes
+      description: Retrieve list of all nodes in the cluster
+      operationId: listNodes
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          description: Filter by node status
+          schema:
+            type: string
+            enum: [healthy, unhealthy, draining, joining]
+        - name: role
+          in: query
+          description: Filter by node role
+          schema:
+            type: string
+            enum: [leader, follower, candidate]
+        - name: limit
+          in: query
+          description: Maximum number of nodes to return
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 1000
+        - name: offset
+          in: query
+          description: Pagination offset
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Nodes retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nodes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NodeInfo'
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+              example:
+                nodes:
+                  - id: "node-1"
+                    status: "healthy"
+                    role: "leader"
+                    address: "10.0.1.10:50051"
+                    cpu_usage: 45.2
+                    memory_usage: 62.8
+                    disk_usage: 38.5
+                  - id: "node-2"
+                    status: "healthy"
+                    role: "follower"
+                    address: "10.0.1.11:50051"
+                    cpu_usage: 42.1
+                    memory_usage: 58.3
+                    disk_usage: 35.2
+                total: 7
+                limit: 100
+                offset: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags:
+        - Nodes
+      summary: Add node to cluster
+      description: Add a new node to the cluster
+      operationId: addNode
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NodeCreateRequest'
+            example:
+              address: "10.0.1.20:50051"
+              role: "follower"
+              resources:
+                cpu: 16
+                memory_gb: 64
+                disk_gb: 500
+      responses:
+        '201':
+          description: Node added successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeInfo'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /nodes/{nodeId}:
+    get:
+      tags:
+        - Nodes
+      summary: Get node details
+      description: Retrieve detailed information about a specific node
+      operationId: getNode
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: nodeId
+          in: path
+          required: true
+          description: Node identifier
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Node details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeDetails'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags:
+        - Nodes
+      summary: Remove node from cluster
+      description: Remove a node from the cluster (graceful shutdown)
+      operationId: removeNode
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: drain_timeout
+          in: query
+          description: Time to wait for connections to drain (seconds)
+          schema:
+            type: integer
+            default: 300
+      responses:
+        '202':
+          description: Node removal initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationStatus'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /nodes/{nodeId}/health:
+    get:
+      tags:
+        - Nodes
+      summary: Check node health
+      description: Perform health check on a specific node
+      operationId: checkNodeHealth
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Health check completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              example:
+                status: "healthy"
+                checks:
+                  consensus: "pass"
+                  storage: "pass"
+                  network: "pass"
+                  cpu: "pass"
+                  memory: "pass"
+                  disk: "pass"
+                last_check: "2025-11-10T22:54:55Z"
+
+  /nodes/{nodeId}/metrics:
+    get:
+      tags:
+        - Nodes
+      summary: Get node metrics
+      description: Retrieve real-time metrics for a specific node
+      operationId: getNodeMetrics
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: duration
+          in: query
+          description: Time window for metrics (e.g., "5m", "1h", "1d")
+          schema:
+            type: string
+            default: "1h"
+      responses:
+        '200':
+          description: Metrics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeMetrics'
+
+  # ==================
+  # Consensus Operations
+  # ==================
+
+  /consensus:
+    get:
+      tags:
+        - Consensus
+      summary: Get consensus status
+      description: Retrieve current consensus protocol status
+      operationId: getConsensusStatus
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Consensus status retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsensusStatus'
+              example:
+                protocol: "raft"
+                leader: "node-1"
+                term: 42
+                committed_index: 15230
+                applied_index: 15230
+                election_timeout: 5000
+                last_heartbeat: "2025-11-10T22:54:55Z"
+
+  /consensus/propose:
+    post:
+      tags:
+        - Consensus
+      summary: Propose operation
+      description: Propose an operation to be committed via consensus
+      operationId: proposeOperation
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                operation:
+                  type: string
+                  description: Operation type
+                data:
+                  type: object
+                  description: Operation data
+              required:
+                - operation
+                - data
+            example:
+              operation: "write"
+              data:
+                key: "user:123"
+                value: '{"name": "Alice", "email": "alice@example.com"}'
+      responses:
+        '202':
+          description: Operation proposed and committed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  index:
+                    type: integer
+                    description: Log index of committed operation
+                  term:
+                    type: integer
+                    description: Term in which operation was committed
+                  commit_time:
+                    type: string
+                    format: date-time
+        '503':
+          description: Consensus not available (no leader)
+
+  # ==================
+  # Service Operations
+  # ==================
+
+  /services:
+    get:
+      tags:
+        - Services
+      summary: List services
+      description: Retrieve list of all deployed services
+      operationId: listServices
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [running, stopped, deploying, failed]
+      responses:
+        '200':
+          description: Services retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  services:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ServiceInfo'
+
+    post:
+      tags:
+        - Services
+      summary: Deploy service
+      description: Deploy a new service to the cluster
+      operationId: deployService
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceDeployRequest'
+            example:
+              name: "user-service"
+              version: "1.0.0"
+              image: "registry.example.com/user-service:1.0.0"
+              replicas: 3
+              resources:
+                cpu: 2
+                memory_gb: 4
+              endpoints:
+                - path: "/users"
+                  method: "GET"
+                - path: "/users/{id}"
+                  method: "GET"
+                - path: "/users"
+                  method: "POST"
+      responses:
+        '201':
+          description: Service deployment initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceInfo'
+
+  /services/{serviceId}:
+    get:
+      tags:
+        - Services
+      summary: Get service details
+      description: Retrieve detailed information about a specific service
+      operationId: getService
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: serviceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Service details retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceDetails'
+
+    put:
+      tags:
+        - Services
+      summary: Update service
+      description: Update service configuration or scale replicas
+      operationId: updateService
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: serviceId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                replicas:
+                  type: integer
+                resources:
+                  type: object
+                version:
+                  type: string
+      responses:
+        '200':
+          description: Service updated successfully
+
+    delete:
+      tags:
+        - Services
+      summary: Delete service
+      description: Remove service from cluster
+      operationId: deleteService
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: serviceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Service deleted successfully
+
+  # ==================
+  # State Operations
+  # ==================
+
+  /state/{key}:
+    get:
+      tags:
+        - State
+      summary: Get state value
+      description: Retrieve value for a specific key from distributed state
+      operationId: getState
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: State key
+          schema:
+            type: string
+        - name: consistency
+          in: query
+          description: Consistency level
+          schema:
+            type: string
+            enum: [strong, eventual]
+            default: strong
+      responses:
+        '200':
+          description: State retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StateValue'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags:
+        - State
+      summary: Set state value
+      description: Set or update value for a key in distributed state
+      operationId: setState
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                value:
+                  type: object
+                  description: Value to store
+                ttl:
+                  type: integer
+                  description: Time to live in seconds (optional)
+            example:
+              value: '{"name": "Alice", "age": 30}'
+              ttl: 3600
+      responses:
+        '200':
+          description: State updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StateValue'
+
+    delete:
+      tags:
+        - State
+      summary: Delete state value
+      description: Remove a key from distributed state
+      operationId: deleteState
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: State deleted successfully
+
+  /state:
+    post:
+      tags:
+        - State
+      summary: Batch state operations
+      description: Perform multiple state operations atomically
+      operationId: batchStateOps
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                operations:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      op:
+                        type: string
+                        enum: [get, set, delete]
+                      key:
+                        type: string
+                      value:
+                        type: object
+            example:
+              operations:
+                - op: "set"
+                  key: "user:123"
+                  value: '{"name": "Alice"}'
+                - op: "set"
+                  key: "user:124"
+                  value: '{"name": "Bob"}'
+                - op: "delete"
+                  key: "user:125"
+      responses:
+        '200':
+          description: Batch operations completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+
+  # ==================
+  # Security Operations
+  # ==================
+
+  /auth/token:
+    post:
+      tags:
+        - Security
+      summary: Generate authentication token
+      description: Generate JWT token for API authentication
+      operationId: generateToken
+      security:
+        - mTLS: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                client_id:
+                  type: string
+                client_secret:
+                  type: string
+                scope:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Token generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                  expires_in:
+                    type: integer
+                  scope:
+                    type: string
+
+  /auth/certificates:
+    get:
+      tags:
+        - Security
+      summary: List certificates
+      description: List all TLS certificates
+      operationId: listCertificates
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Certificates retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CertificateInfo'
+
+    post:
+      tags:
+        - Security
+      summary: Generate certificate
+      description: Generate new TLS certificate
+      operationId: generateCertificate
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                common_name:
+                  type: string
+                domains:
+                  type: array
+                  items:
+                    type: string
+                validity_days:
+                  type: integer
+      responses:
+        '201':
+          description: Certificate generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CertificateInfo'
+
+  # ==================
+  # Monitoring Operations
+  # ==================
+
+  /metrics:
+    get:
+      tags:
+        - Monitoring
+      summary: Get cluster metrics
+      description: Retrieve Prometheus-format metrics
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Metrics retrieved
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: |
+                # HELP dwcp_requests_total Total number of requests
+                # TYPE dwcp_requests_total counter
+                dwcp_requests_total{method="GET",status="200"} 123456
+
+                # HELP dwcp_request_duration_seconds Request duration in seconds
+                # TYPE dwcp_request_duration_seconds histogram
+                dwcp_request_duration_seconds_bucket{le="0.001"} 10000
+                dwcp_request_duration_seconds_bucket{le="0.01"} 25000
+                dwcp_request_duration_seconds_bucket{le="0.1"} 30000
+
+  /health:
+    get:
+      tags:
+        - Monitoring
+      summary: Cluster health check
+      description: Check overall cluster health
+      operationId: checkHealth
+      responses:
+        '200':
+          description: Cluster is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '503':
+          description: Cluster is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+  /health/live:
+    get:
+      tags:
+        - Monitoring
+      summary: Liveness probe
+      description: Kubernetes liveness probe endpoint
+      operationId: livenessProbe
+      responses:
+        '200':
+          description: Service is alive
+
+  /health/ready:
+    get:
+      tags:
+        - Monitoring
+      summary: Readiness probe
+      description: Kubernetes readiness probe endpoint
+      operationId: readinessProbe
+      responses:
+        '200':
+          description: Service is ready
+        '503':
+          description: Service is not ready
+
+  # ==================
+  # Configuration Operations
+  # ==================
+
+  /config:
+    get:
+      tags:
+        - Configuration
+      summary: Get configuration
+      description: Retrieve current cluster configuration
+      operationId: getConfig
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Configuration retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterConfig'
+
+    put:
+      tags:
+        - Configuration
+      summary: Update configuration
+      description: Update cluster configuration (hot reload)
+      operationId: updateConfig
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClusterConfig'
+      responses:
+        '200':
+          description: Configuration updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+components:
+  securitySchemes:
+    mTLS:
+      type: mutualTLS
+      description: Mutual TLS authentication using X.509 certificates
+
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token authentication
+
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key authentication
+
+  schemas:
+    ClusterInfo:
+      type: object
+      required:
+        - id
+        - name
+        - topology
+        - nodes
+        - status
+      properties:
+        id:
+          type: string
+          description: Unique cluster identifier
+        name:
+          type: string
+          description: Cluster name
+        topology:
+          type: string
+          enum: [raft, byzantine, gossip]
+        nodes:
+          type: integer
+          description: Total number of nodes
+        healthy_nodes:
+          type: integer
+        leader:
+          type: string
+          description: Current leader node ID
+        version:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        metrics:
+          type: object
+          properties:
+            requests_per_second:
+              type: number
+            avg_latency_ms:
+              type: number
+            error_rate:
+              type: number
+
+    ClusterCreateRequest:
+      type: object
+      required:
+        - name
+        - topology
+        - nodes
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 64
+        topology:
+          type: string
+          enum: [raft, byzantine, gossip]
+        nodes:
+          type: integer
+          minimum: 3
+        consensus_config:
+          type: object
+        security:
+          type: object
+          properties:
+            tls_enabled:
+              type: boolean
+            mtls_required:
+              type: boolean
+
+    ScaleRequest:
+      type: object
+      required:
+        - target_nodes
+      properties:
+        target_nodes:
+          type: integer
+          minimum: 3
+        strategy:
+          type: string
+          enum: [immediate, gradual]
+          default: gradual
+        rebalance:
+          type: boolean
+          default: true
+
+    TopologyInfo:
+      type: object
+      properties:
+        topology_type:
+          type: string
+        nodes:
+          type: array
+          items:
+            type: object
+        connections:
+          type: array
+          items:
+            type: object
+
+    NodeInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [healthy, unhealthy, draining, joining]
+        role:
+          type: string
+          enum: [leader, follower, candidate, observer]
+        address:
+          type: string
+        cpu_usage:
+          type: number
+        memory_usage:
+          type: number
+        disk_usage:
+          type: number
+
+    NodeDetails:
+      allOf:
+        - $ref: '#/components/schemas/NodeInfo'
+        - type: object
+          properties:
+            uptime:
+              type: integer
+            version:
+              type: string
+            resources:
+              type: object
+            connections:
+              type: integer
+
+    NodeCreateRequest:
+      type: object
+      required:
+        - address
+      properties:
+        address:
+          type: string
+        role:
+          type: string
+        resources:
+          type: object
+
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        checks:
+          type: object
+        last_check:
+          type: string
+          format: date-time
+
+    NodeMetrics:
+      type: object
+      properties:
+        cpu:
+          type: object
+        memory:
+          type: object
+        disk:
+          type: object
+        network:
+          type: object
+
+    ConsensusStatus:
+      type: object
+      properties:
+        protocol:
+          type: string
+        leader:
+          type: string
+        term:
+          type: integer
+        committed_index:
+          type: integer
+        applied_index:
+          type: integer
+
+    ServiceInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        status:
+          type: string
+        replicas:
+          type: integer
+        endpoints:
+          type: array
+          items:
+            type: object
+
+    ServiceDetails:
+      allOf:
+        - $ref: '#/components/schemas/ServiceInfo'
+        - type: object
+          properties:
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+            metrics:
+              type: object
+
+    ServiceDeployRequest:
+      type: object
+      required:
+        - name
+        - version
+        - image
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        image:
+          type: string
+        replicas:
+          type: integer
+          default: 1
+        resources:
+          type: object
+        endpoints:
+          type: array
+          items:
+            type: object
+
+    StateValue:
+      type: object
+      properties:
+        key:
+          type: string
+        value:
+          type: object
+        version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CertificateInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        common_name:
+          type: string
+        domains:
+          type: array
+          items:
+            type: string
+        valid_from:
+          type: string
+          format: date-time
+        valid_until:
+          type: string
+          format: date-time
+        fingerprint:
+          type: string
+
+    ClusterConfig:
+      type: object
+      properties:
+        consensus:
+          type: object
+        networking:
+          type: object
+        security:
+          type: object
+        storage:
+          type: object
+        monitoring:
+          type: object
+
+    OperationStatus:
+      type: object
+      properties:
+        operation_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, in_progress, completed, failed]
+        progress:
+          type: number
+        message:
+          type: string
+
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+        request_id:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "bad_request"
+            message: "Invalid request parameters"
+            request_id: "req-123456"
+
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "unauthorized"
+            message: "Authentication required"
+            request_id: "req-123456"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "not_found"
+            message: "Requested resource not found"
+            request_id: "req-123456"
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "internal_error"
+            message: "An unexpected error occurred"
+            request_id: "req-123456"
+
+  examples:
+    CreateClusterExample:
+      value:
+        name: "production-cluster"
+        topology: "raft"
+        nodes: 7
+        consensus_config:
+          election_timeout: 5000
+          heartbeat_interval: 1000
+        security:
+          tls_enabled: true
+          mtls_required: true

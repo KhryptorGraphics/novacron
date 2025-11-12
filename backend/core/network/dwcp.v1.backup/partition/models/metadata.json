@@ -1,0 +1,95 @@
+{
+  "model_name": "dqn_v1",
+  "version": "1.0.0",
+  "description": "Deep Q-Network for DWCP Task Partitioning",
+  "architecture": {
+    "type": "DQN",
+    "state_size": 20,
+    "action_size": 15,
+    "hidden_layers": [128, 128, 64],
+    "activation": "relu",
+    "output_activation": "linear"
+  },
+  "training": {
+    "framework": "TensorFlow 2.13+",
+    "optimizer": "Adam",
+    "learning_rate": 0.001,
+    "gamma": 0.95,
+    "epsilon_start": 1.0,
+    "epsilon_min": 0.01,
+    "epsilon_decay": 0.995,
+    "replay_buffer_size": 10000,
+    "batch_size": 32,
+    "episodes": 1000,
+    "update_target_frequency": 10
+  },
+  "features": {
+    "prioritized_replay": true,
+    "double_dqn": true,
+    "batch_normalization": true,
+    "dropout": 0.2
+  },
+  "input_features": [
+    "stream_bandwidth_0",
+    "stream_bandwidth_1",
+    "stream_bandwidth_2",
+    "stream_bandwidth_3",
+    "stream_latency_0",
+    "stream_latency_1",
+    "stream_latency_2",
+    "stream_latency_3",
+    "stream_congestion_0",
+    "stream_congestion_1",
+    "stream_congestion_2",
+    "stream_congestion_3",
+    "stream_success_rate_0",
+    "stream_success_rate_1",
+    "stream_success_rate_2",
+    "stream_success_rate_3",
+    "task_queue_depth",
+    "task_size",
+    "task_priority",
+    "time_of_day"
+  ],
+  "actions": [
+    "stream_1",
+    "stream_2",
+    "stream_3",
+    "stream_4",
+    "split_1_2",
+    "split_1_3",
+    "split_1_4",
+    "split_2_3",
+    "split_2_4",
+    "split_3_4",
+    "split_1_2_3",
+    "split_1_2_4",
+    "split_1_3_4",
+    "split_2_3_4",
+    "split_all"
+  ],
+  "reward_function": {
+    "alpha_throughput": 1.0,
+    "beta_latency": 0.5,
+    "gamma_imbalance": 0.3,
+    "delta_completion": 2.0,
+    "epsilon_retransmit": 1.0
+  },
+  "performance": {
+    "baseline_comparison": "20% improvement over round-robin",
+    "convergence_episodes": 800,
+    "inference_latency_ms": 5,
+    "success_rate": 0.92
+  },
+  "deployment": {
+    "format": "ONNX",
+    "runtime": "ONNX Runtime Go",
+    "online_learning": true,
+    "update_frequency": "24h",
+    "min_experiences": 1000
+  },
+  "created_at": "2025-11-08T00:00:00Z",
+  "last_updated": "2025-11-08T00:00:00Z",
+  "author": "NovaCron ML Team",
+  "license": "Proprietary"
+}

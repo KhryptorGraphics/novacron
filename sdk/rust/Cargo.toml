@@ -1,0 +1,43 @@
+[package]
+name = "dwcp"
+version = "3.0.0"
+edition = "2021"
+authors = ["NovaCron Platform Team <platform@novacron.io>"]
+description = "Rust SDK for Distributed Worker Control Protocol (DWCP) v3"
+license = "Apache-2.0"
+repository = "https://github.com/novacron/dwcp-sdk-rust"
+keywords = ["dwcp", "vm", "virtualization", "distributed", "async"]
+categories = ["api-bindings", "asynchronous", "network-programming"]
+
+[dependencies]
+tokio = { version = "1.35", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures = "0.3"
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.6", features = ["v4", "serde"] }
+thiserror = "1.0"
+bytes = "1.5"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# TLS support
+tokio-native-tls = { version = "0.3", optional = true }
+native-tls = { version = "0.2", optional = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+criterion = "0.5"
+
+[features]
+default = ["tls"]
+tls = ["tokio-native-tls", "native-tls"]
+
+[[example]]
+name = "basic"
+path = "examples/basic.rs"
+
+[[bench]]
+name = "client_benchmark"
+harness = false

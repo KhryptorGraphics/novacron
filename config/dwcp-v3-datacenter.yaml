@@ -1,0 +1,295 @@
+# DWCP v3 Datacenter Mode Configuration
+# Optimized for RDMA-enabled high-performance networks
+
+mode: datacenter
+
+# Network Configuration
+network:
+  # Primary transport: RDMA for maximum performance
+  transport: rdma
+  rdmaDevice: mlx5_0
+  port: 8080
+
+  # RDMA-specific parameters
+  rdma:
+    enabled: true
+    qpType: RC  # Reliable Connection
+    maxQueuePairs: 1024
+    maxSendWr: 4096
+    maxRecvWr: 4096
+    maxSge: 30
+    maxInlineData: 512
+
+    # Completion queue settings
+    cqDepth: 8192
+    cqPollInterval: 1  # microseconds
+
+    # Memory registration
+    memoryRegion: 16GB
+    hugepagesEnabled: true
+    hugepageSize: 2MB
+
+    # Performance tuning
+    qpTimeout: 14  # 67ms
+    retryCount: 7
+    rnrRetryCount: 7
+    minRnrTimer: 12
+
+    # Flow control
+    maxRdmaReadAtomicOutstanding: 16
+    enableAtomicOperations: true
+
+  # Fallback to TCP when RDMA unavailable
+  fallback:
+    enabled: true
+    transport: tcp
+    port: 8081
+
+  # MTU (Maximum Transmission Unit)
+  mtu: 9000  # Jumbo frames
+
+  # Network interface binding
+  bindInterface: ens1f0
+  numaNode: 0
+
+# Performance Configuration
+performance:
+  # Target metrics for datacenter
+  targetLatencyMicros: 5
+  targetThroughputGbps: 200
+
+  # Buffer sizes (optimized for RDMA)
+  sendBufferSize: 16MB
+  recvBufferSize: 16MB
+
+  # Connection management
+  maxConnections: 10000
+  connectionPoolSize: 1000
+  idleTimeout: 300s
+
+  # Zero-copy operations
+  zeroCopy: true
+  directIO: true
+
+  # CPU pinning and affinity
+  cpuAffinity:
+    enabled: true
+    cores: [0, 1, 2, 3, 4, 5, 6, 7]
+    rxQueues: [0, 1, 2, 3]
+    txQueues: [4, 5, 6, 7]
+
+  # Polling mode (busy-wait for lowest latency)
+  pollingMode: true
+  pollTimeout: 0  # No timeout, continuous polling
+
+  # Batching
+  batchSize: 64
+  batchTimeout: 10us
+
+# Protocol Configuration
+protocol:
+  # Version
+  version: 3
+
+  # Compression (disabled in datacenter for lowest latency)
+  compression:
+    enabled: false
+    algorithm: none
+    level: 0
+
+  # Encryption (optional, adds latency)
+  encryption:
+    enabled: false
+    algorithm: none
+
+  # Flow control
+  flowControl:
+    enabled: true
+    algorithm: credit-based
+    initialCredits: 1024
+    creditRefresh: 100us
+
+  # Congestion control (minimal overhead)
+  congestionControl:
+    enabled: true
+    algorithm: dcqcn  # Data Center Quantized Congestion Notification
+    minThreshold: 20KB
+    maxThreshold: 200KB
+
+  # Reliability
+  reliability:
+    enabled: true
+    ackTimeout: 1ms
+    maxRetries: 5
+    selectiveAck: true
+
+# Memory Configuration
+memory:
+  # Hugepages for zero-copy
+  hugepages: true
+  hugepageSize: 2MB
+
+  # Memory pool
+  poolSize: 32GB
+  preAllocate: true
+
+  # NUMA awareness
+  numaAware: true
+  localAllocOnly: true
+
+# Monitoring Configuration
+monitoring:
+  enabled: true
+  metricsPort: 9100
+  metricsInterval: 1s
+
+  # Detailed metrics
+  metrics:
+    - name: dwcp_latency_p50_us
+      enabled: true
+    - name: dwcp_latency_p99_us
+      enabled: true
+    - name: dwcp_latency_p999_us
+      enabled: true
+    - name: dwcp_throughput_gbps
+      enabled: true
+    - name: dwcp_throughput_mpps
+      enabled: true
+    - name: dwcp_active_connections
+      enabled: true
+    - name: dwcp_rdma_qp_errors
+      enabled: true
+    - name: dwcp_rdma_completion_errors
+      enabled: true
+    - name: dwcp_packet_loss_rate
+      enabled: true
+    - name: dwcp_cpu_utilization
+      enabled: true
+    - name: dwcp_memory_usage_bytes
+      enabled: true
+
+  # Health check endpoint
+  healthCheckPath: /health
+  healthCheckInterval: 5s
+
+  # Prometheus integration
+  prometheus:
+    enabled: true
+    pushGateway: false
+
+  # Distributed tracing
+  tracing:
+    enabled: false  # Disabled for performance
+    samplingRate: 0.0
+
+# Logging Configuration
+logging:
+  level: info
+  format: json
+  output: /var/log/dwcp/datacenter.log
+
+  # Rotation
+  maxSize: 100MB
+  maxBackups: 10
+  maxAge: 30
+  compress: true
+
+  # Performance logging
+  perfLog:
+    enabled: true
+    output: /var/log/dwcp/perf.log
+    interval: 10s
+
+# Feature Flags
+features:
+  enableV3: true
+  enableHybridMode: false  # Pure datacenter mode
+  enableCompression: false
+  enableEncryption: false
+  enableByzantine: false  # Not needed in trusted datacenter
+  enableAdaptiveMode: false
+
+# Cluster Configuration
+cluster:
+  # Discovery
+  discovery:
+    method: static  # Use static configuration in datacenter
+    staticPeers:
+      - 10.0.1.10:8080
+      - 10.0.1.11:8080
+      - 10.0.1.12:8080
+      - 10.0.1.13:8080
+      - 10.0.1.14:8080
+
+  # Gossip protocol (lightweight)
+  gossip:
+    enabled: true
+    interval: 100ms
+    fanout: 3
+
+  # Failure detection
+  failureDetection:
+    enabled: true
+    heartbeatInterval: 100ms
+    timeoutMultiplier: 5
+
+  # Leader election (if needed)
+  leaderElection:
+    enabled: false
+
+# Resource Limits
+limits:
+  maxCPU: 16
+  maxMemory: 64GB
+  maxOpenFiles: 1048576
+  maxThreads: 256
+
+# Security Configuration
+security:
+  # Authentication (optional in datacenter)
+  authentication:
+    enabled: false
+    method: none
+
+  # Authorization
+  authorization:
+    enabled: false
+
+  # TLS (optional, adds latency)
+  tls:
+    enabled: false
+
+  # Network ACLs
+  allowedCIDRs:
+    - 10.0.0.0/8
+
+  blockedCIDRs: []
+
+# Adaptive Behavior (detection only)
+adaptive:
+  # Mode detection
+  detection:
+    enabled: false  # Fixed datacenter mode
+
+  # Threshold for mode switching (if enabled)
+  thresholds:
+    latencyMicros: 100
+    throughputGbps: 50
+    packetLoss: 0.001
+
+# Experimental Features
+experimental:
+  enableIntelDADX: false
+  enableNVIDIAGPUDirect: false
+  enableKernelBypass: true
+  enableDPDK: false
+
+# Telemetry
+telemetry:
+  enabled: true
+  endpoint: http://monitoring.novacron.io:9090
+  interval: 10s
+  tags:
+    environment: production
+    mode: datacenter
+    region: us-east-1

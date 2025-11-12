@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020", "DOM"],
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "outDir": "./dist",
+    "rootDir": "./",
+    "types": ["node", "@playwright/test"],
+    "baseUrl": ".",
+    "paths": {
+      "@utils/*": ["./utils/*"],
+      "@fixtures/*": ["./fixtures/*"]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.spec.ts",
+    "global-setup.ts",
+    "global-teardown.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "reports",
+    "archives"
+  ]
+}

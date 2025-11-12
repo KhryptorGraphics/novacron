@@ -1,0 +1,84 @@
+{
+  "mcp_servers": {
+    "required": [
+      {
+        "name": "claude-flow",
+        "command": "claude mcp add claude-flow npx claude-flow@alpha mcp start",
+        "purpose": "Core swarm coordination, SPARC workflows, agent orchestration",
+        "version": "@alpha",
+        "documentation": "https://github.com/ruvnet/claude-flow"
+      }
+    ],
+    "optional": [
+      {
+        "name": "ruv-swarm",
+        "command": "claude mcp add ruv-swarm npx ruv-swarm mcp start",
+        "purpose": "Enhanced swarm coordination and multi-agent workflows",
+        "version": "latest",
+        "documentation": "https://github.com/ruvnet/ruv-swarm"
+      },
+      {
+        "name": "flow-nexus",
+        "command": "claude mcp add flow-nexus npx flow-nexus@latest mcp start",
+        "purpose": "Cloud-based sandboxes, neural AI, templates, GitHub integration (70+ tools)",
+        "version": "latest",
+        "requires_auth": true,
+        "auth_commands": [
+          "npx flow-nexus@latest register  # New users",
+          "npx flow-nexus@latest login     # Existing users"
+        ],
+        "documentation": "https://flow-nexus.ruv.io"
+      },
+      {
+        "name": "beads",
+        "command": "npm install -g @beads/beads-cli",
+        "purpose": "Lightweight issue tracking and project management",
+        "type": "plugin",
+        "init_command": "bd init",
+        "documentation": "Claude marketplace or beads documentation"
+      },
+      {
+        "name": "deep-research",
+        "command": "# Check package documentation for installation",
+        "purpose": "Advanced web research using Tavily Search and Crawl",
+        "package": "pinkpixel-dev-deep-research-mcp",
+        "documentation": "Check package registry for installation details"
+      },
+      {
+        "name": "ide",
+        "command": "# Built-in VS Code integration",
+        "purpose": "VS Code language diagnostics and Jupyter code execution",
+        "type": "built-in",
+        "documentation": "https://docs.claude.com/claude-code"
+      }
+    ]
+  },
+  "installation_order": [
+    "claude-flow (required first)",
+    "ruv-swarm (optional - enhanced coordination)",
+    "flow-nexus (optional - cloud features, requires auth)",
+    "beads (optional - issue tracking)",
+    "deep-research (optional - web research)",
+    "ide (built-in, no installation needed)"
+  ],
+  "post_installation": {
+    "verify": "claude mcp list",
+    "status_check": "claude mcp status",
+    "flow_nexus_auth": "npx flow-nexus@latest login",
+    "beads_init": "bd init"
+  },
+  "project_files_to_copy": [
+    "CLAUDE.md",
+    ".claude/ directory",
+    "package.json",
+    ".beads/ directory (if using beads)"
+  ],
+  "notes": [
+    "claude-flow is REQUIRED for core orchestration",
+    "All other servers are optional based on needs",
+    "flow-nexus requires account registration at flow-nexus.ruv.io",
+    "beads requires initialization per project with 'bd init'",
+    "MCP servers can be added/removed at any time with 'claude mcp add/remove'",
+    "Some MCP servers may require Node.js and npm installed"
+  ]
+}

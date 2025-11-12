@@ -1,0 +1,44 @@
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  external_labels:
+    cluster: 'dwcp-v3'
+    environment: 'production'
+
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+      - alertmanager:9093
+
+rule_files:
+  - 'alerts.yml'
+
+scrape_configs:
+  # DWCP v3 Application
+  - job_name: 'dwcp-v3'
+    static_configs:
+    - targets:
+      - dwcp-v3:9090
+    scrape_interval: 15s
+    metrics_path: '/metrics'
+
+  # Redis
+  - job_name: 'redis'
+    static_configs:
+    - targets:
+      - redis-exporter:9121
+    scrape_interval: 30s
+
+  # Node Exporter
+  - job_name: 'node'
+    static_configs:
+    - targets:
+      - node-exporter:9100
+    scrape_interval: 30s
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+    - targets:
+      - localhost:9090
