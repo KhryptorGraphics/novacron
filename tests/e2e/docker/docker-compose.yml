@@ -1,0 +1,180 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database for testing
+  postgres:
+    image: postgres:15-alpine
+    container_name: e2e-postgres
+    environment:
+      POSTGRES_DB: test_db
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d test_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - e2e-network
+
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: e2e-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis-data:/data
+    networks:
+      - e2e-network
+
+  # Backend API
+  backend:
+    build:
+      context: ../../../
+      dockerfile: tests/e2e/docker/Dockerfile
+      target: test-runtime
+    container_name: e2e-backend
+    environment:
+      NODE_ENV: test
+      PORT: 8080
+      DATABASE_URL: postgresql://test:test@postgres:5432/test_db
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: test-secret-key
+      LOG_LEVEL: info
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ../../../backend:/app/backend
+      - backend-logs:/app/logs
+    networks:
+      - e2e-network
+    command: npm run start:test
+
+  # Frontend application
+  frontend:
+    build:
+      context: ../../../
+      dockerfile: tests/e2e/docker/Dockerfile
+      target: test-runtime
+    container_name: e2e-frontend
+    environment:
+      NODE_ENV: test
+      PORT: 3000
+      REACT_APP_API_URL: http://backend:8080
+      REACT_APP_ENV: test
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ../../../frontend:/app/frontend
+    networks:
+      - e2e-network
+    command: npm run start:test
+
+  # Playwright test runner
+  playwright:
+    build:
+      context: ../../../
+      dockerfile: tests/e2e/docker/Dockerfile
+      target: test-runtime
+    container_name: e2e-playwright
+    environment:
+      TEST_BASE_URL: http://frontend:3000
+      API_BASE_URL: http://backend:8080
+      DATABASE_URL: postgresql://test:test@postgres:5432/test_db
+      REDIS_URL: redis://redis:6379
+      CI: ${CI:-false}
+      PWDEBUG: ${PWDEBUG:-0}
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ../../../tests/e2e:/app/tests/e2e
+      - test-results:/app/tests/e2e/test-results
+      - playwright-report:/app/tests/e2e/playwright-report
+    networks:
+      - e2e-network
+    command: npx playwright test --workers=${WORKERS:-4}
+
+  # MailHog for email testing
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: e2e-mailhog
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+    networks:
+      - e2e-network
+
+  # MinIO for S3-compatible storage testing
+  minio:
+    image: minio/minio:latest
+    container_name: e2e-minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - e2e-network
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  backend-logs:
+    driver: local
+  test-results:
+    driver: local
+  playwright-report:
+    driver: local
+  minio-data:
+    driver: local
+
+networks:
+  e2e-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

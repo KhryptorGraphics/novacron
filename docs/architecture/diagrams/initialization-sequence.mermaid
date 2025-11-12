@@ -1,0 +1,100 @@
+```mermaid
+sequenceDiagram
+    participant Main as Main Process
+    participant Init as Initializer
+    participant Orch as Orchestrator
+    participant Reg as Registry
+    participant Sec as SecurityComponent
+    participant DB as DatabaseComponent
+    participant Net as NetworkComponent
+    participant DWCP as DWCPComponent
+    participant API as APIServerComponent
+
+    Note over Main,API: Phase 1: Pre-Initialization (2-5s)
+    Main->>Init: NewInitializer(configPath)
+    Init->>Init: Load configuration
+    Init->>Init: Initialize logger
+    Init->>Init: Validate resources
+    Init-->>Main: Initializer ready
+
+    Main->>Init: Initialize(ctx)
+    Note over Init: Save checkpoint: init_start
+
+    Note over Main,API: Phase 2: Core Initialization (5-10s)
+    Init->>Orch: Register components
+    Init->>Reg: Register(SecurityComponent)
+    Init->>Reg: Register(DatabaseComponent)
+    Init->>Reg: Register(CacheComponent)
+    Init->>Reg: Register(NetworkComponent)
+    Init->>Reg: Register(DWCPComponent)
+
+    Init->>Orch: InitializeParallel(ctx, maxConcurrency)
+    Orch->>Orch: Build dependency graph
+    Orch->>Orch: Group by dependency level
+
+    Note over Orch,Sec: Level 0: Security (Sequential)
+    Orch->>Sec: Initialize(ctx, deps)
+    Sec->>Sec: Init secrets manager
+    Sec->>Sec: Init encryption engine
+    Sec->>Sec: Init auth/authz
+    Sec->>Orch: HealthCheck()
+    Sec-->>Orch: Ready
+
+    Note over Orch,Net: Level 1: Database, Cache, Network (Parallel)
+    par Parallel Initialization
+        Orch->>DB: Initialize(ctx, deps)
+        DB->>DB: Connect to database
+        DB->>DB: Run migrations
+        DB->>DB: Validate schema
+        DB-->>Orch: Ready
+    and
+        Orch->>Net: Initialize(ctx, deps)
+        Net->>Net: Init transport layer
+        Net->>Net: Start protocol handlers
+        Net->>Net: Setup connection manager
+        Net-->>Orch: Ready
+    end
+
+    Note over Orch,DWCP: Level 2: DWCP v3 (Sequential)
+    Orch->>DWCP: Initialize(ctx, deps)
+    DWCP->>DWCP: Detect network mode
+    DWCP->>DWCP: Init AMST v3 (transport)
+    DWCP->>DWCP: Init HDE v3 (compression)
+    DWCP->>DWCP: Init PBA v3 (bandwidth)
+    DWCP->>DWCP: Init ASS v3 (state sync)
+    DWCP->>DWCP: Init ACP v3 (congestion)
+    DWCP->>DWCP: Init ITP v3 (placement)
+    DWCP->>Orch: HealthCheck()
+    DWCP-->>Orch: Ready
+
+    Note over Init: Save checkpoint: core_init_complete
+
+    Note over Main,API: Phase 3: Service Initialization (5-10s)
+    par Service Initialization (Parallel)
+        Orch->>API: Initialize(ctx, deps)
+        API->>API: Start REST server
+        API->>API: Start gRPC server
+        API->>API: Start WebSocket handler
+        API-->>Orch: Ready
+    end
+
+    Note over Init: Save checkpoint: service_init_complete
+
+    Note over Main,API: Phase 4: Post-Initialization (2-5s)
+    Init->>Orch: HealthCheck(ctx)
+    Orch->>Sec: HealthCheck()
+    Orch->>DB: HealthCheck()
+    Orch->>DWCP: HealthCheck()
+    Orch->>API: HealthCheck()
+    Orch-->>Init: All healthy
+
+    Init->>Init: Emit startup metrics
+    Init->>Init: Register with service discovery
+    Init->>Init: Start background jobs
+    Init->>Init: Mark system ready
+
+    Note over Init: Save checkpoint: init_complete
+
+    Init-->>Main: Initialization successful
+    Main->>Main: Start serving requests
+```

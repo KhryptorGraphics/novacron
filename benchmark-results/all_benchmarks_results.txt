@@ -1,0 +1,333 @@
+goos: linux
+goarch: amd64
+pkg: github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/benchmarks
+cpu: Intel(R) Xeon(R) CPU E5-4657L v2 @ 2.40GHz
+BenchmarkAMSTTransportThroughput/RDMA_4KB_1Stream-96         	66076383	        18.11 ns/op	       226.1 GB/s	         1.000 streams	       0 B/op	       0 allocs/op
+BenchmarkAMSTTransportThroughput/RDMA_64KB_1Stream-96        	65716694	        19.02 ns/op	      3445 GB/s	         1.000 streams	       0 B/op	       0 allocs/op
+BenchmarkAMSTTransportThroughput/RDMA_1MB_1Stream-96         	65662798	        18.36 ns/op	     57090 GB/s	         1.000 streams	       0 B/op	       0 allocs/op
+BenchmarkAMSTTransportThroughput/RDMA_64KB_8Streams-96       	40824102	        26.53 ns/op	      2469 GB/s	         8.000 streams	       0 B/op	       0 allocs/op
+BenchmarkAMSTTransportThroughput/RDMA_64KB_32Streams-96      	43042532	        26.20 ns/op	      2501 GB/s	        32.00 streams	       0 B/op	       0 allocs/op
+BenchmarkAMSTTransportThroughput/TCP_4KB_1Stream-96          	58547437	        18.74 ns/op	       218.4 GB/s	         1.000 streams	       0 B/op	       0 allocs/op
+BenchmarkAMSTTransportThroughput/TCP_64KB_1Stream-96         	57212601	        19.20 ns/op	      3412 GB/s	         1.000 streams	       0 B/op	       0 allocs/op
+BenchmarkAMSTTransportThroughput/TCP_1MB_1Stream-96          	67770573	        18.64 ns/op	     56253 GB/s	         1.000 streams	       0 B/op	       0 allocs/op
+BenchmarkAMSTTransportThroughput/TCP_64KB_8Streams-96        	47113881	        25.52 ns/op	      2567 GB/s	         8.000 streams	       0 B/op	       0 allocs/op
+BenchmarkAMSTTransportThroughput/TCP_64KB_32Streams-96       	44280278	        26.28 ns/op	      2493 GB/s	        32.00 streams	       0 B/op	       0 allocs/op
+BenchmarkAMSTStreamScalability/1Streams-96                   	66465055	        18.52 ns/op	      3538 GB/s	    353828 efficiency_%	       0 B/op	       0 allocs/op
+BenchmarkAMSTStreamScalability/2Streams-96                   	55129576	        23.94 ns/op	      2737 GB/s	    136854 efficiency_%	       0 B/op	       0 allocs/op
+BenchmarkAMSTStreamScalability/4Streams-96                   	45804322	        25.95 ns/op	      2524 GB/s	     63110 efficiency_%	       0 B/op	       0 allocs/op
+BenchmarkAMSTStreamScalability/8Streams-96                   	46755189	        25.35 ns/op	      2585 GB/s	     32307 efficiency_%	       0 B/op	       0 allocs/op
+BenchmarkAMSTStreamScalability/16Streams-96                  	44159046	        26.01 ns/op	      2519 GB/s	     15742 efficiency_%	       0 B/op	       0 allocs/op
+BenchmarkAMSTStreamScalability/32Streams-96                  	39620043	        26.23 ns/op	      2497 GB/s	      7805 efficiency_%	       0 B/op	       0 allocs/op
+BenchmarkAMSTStreamScalability/64Streams-96                  	45770779	        22.26 ns/op	      2943 GB/s	      4598 efficiency_%	       0 B/op	       0 allocs/op
+BenchmarkAMSTStreamScalability/128Streams-96                 	50466392	        21.46 ns/op	      3051 GB/s	      2383 efficiency_%	       0 B/op	       0 allocs/op
+BenchmarkAMSTStreamScalability/256Streams-96                 	52554590	        20.26 ns/op	      3233 GB/s	      1263 efficiency_%	       0 B/op	       0 allocs/op
+BenchmarkAMSTStreamScalability/512Streams-96                 	59341747	        20.55 ns/op	      3188 GB/s	       622.6 efficiency_%	       0 B/op	       0 allocs/op
+BenchmarkAMSTConnectionEstablishment/RDMA_Local-96           	     553	   1877993 ns/op	         1.877 ms/conn	       0 B/op	       0 allocs/op
+BenchmarkAMSTConnectionEstablishment/RDMA_Datacenter-96      	     669	   1931166 ns/op	         1.931 ms/conn	       0 B/op	       0 allocs/op
+BenchmarkAMSTConnectionEstablishment/TCP_Local-96            	     550	   2214359 ns/op	         2.214 ms/conn	       0 B/op	       0 allocs/op
+BenchmarkAMSTConnectionEstablishment/TCP_Datacenter-96       	     542	   2222446 ns/op	         2.222 ms/conn	       0 B/op	       0 allocs/op
+BenchmarkAMSTConnectionEstablishment/TCP_Internet-96         	      22	  51390736 ns/op	        51.39 ms/conn	       5 B/op	       0 allocs/op
+BenchmarkAMSTModeSwitching/Datacenter_to_Internet_1Stream-96 	     537	   2267876 ns/op	         2.267 ms/switch	         1.000 streams	       0 B/op	       0 allocs/op
+BenchmarkAMSTModeSwitching/Datacenter_to_Internet_8Streams-96         	     356	   3363005 ns/op	         3.362 ms/switch	         8.000 streams	       0 B/op	       0 allocs/op
+BenchmarkAMSTModeSwitching/Datacenter_to_Internet_32Streams-96        	     266	   4478425 ns/op	         4.478 ms/switch	        32.00 streams	       0 B/op	       0 allocs/op
+BenchmarkAMSTModeSwitching/Internet_to_Datacenter_1Stream-96          	     588	   2134201 ns/op	         2.134 ms/switch	         1.000 streams	       0 B/op	       0 allocs/op
+BenchmarkAMSTModeSwitching/Internet_to_Datacenter_8Streams-96         	     357	   3381822 ns/op	         3.381 ms/switch	         8.000 streams	       0 B/op	       0 allocs/op
+BenchmarkAMSTModeSwitching/Internet_to_Datacenter_32Streams-96        	     268	   4440680 ns/op	         4.440 ms/switch	        32.00 streams	       0 B/op	       0 allocs/op
+BenchmarkAMSTConcurrentOperations/1Concurrent-96                      	54449919	        19.07 ns/op	         1.000 concurrency	  52445509 ops/sec	       0 B/op	       0 allocs/op
+BenchmarkAMSTConcurrentOperations/10Concurrent-96                     	46795118	        25.44 ns/op	        10.00 concurrency	  39306525 ops/sec	       0 B/op	       0 allocs/op
+BenchmarkAMSTConcurrentOperations/50Concurrent-96                     	44921611	        24.24 ns/op	        50.00 concurrency	  41258270 ops/sec	       0 B/op	       0 allocs/op
+BenchmarkAMSTConcurrentOperations/100Concurrent-96                    	51890320	        19.66 ns/op	       100.0 concurrency	  50870454 ops/sec	       0 B/op	       0 allocs/op
+BenchmarkAMSTConcurrentOperations/500Concurrent-96                    	53811176	        20.46 ns/op	       500.0 concurrency	  48886342 ops/sec	       0 B/op	       0 allocs/op
+BenchmarkAMSTConcurrentOperations/1000Concurrent-96                   	50539722	        20.28 ns/op	      1000 concurrency	  49311297 ops/sec	       0 B/op	       0 allocs/op
+BenchmarkAMSTMemoryFootprint/Light_8Streams_64KB-96                   	    3181	    411094 ns/op	         0.5000 MB	  524289 B/op	       8 allocs/op
+BenchmarkAMSTMemoryFootprint/Medium_32Streams_256KB-96                	     248	   4852243 ns/op	         8.000 MB	 8388613 B/op	      32 allocs/op
+BenchmarkAMSTMemoryFootprint/Heavy_128Streams_1MB-96                  	      22	  60459050 ns/op	       128.0 MB	134217741 B/op	     128 allocs/op
+BenchmarkAMSTMemoryFootprint/Extreme_512Streams_4MB-96                	       3	1155979333 ns/op	      2048 MB	2147483840 B/op	     514 allocs/op
+BenchmarkAMSTZeroCopyTransfer/4KB-96                                  	131553111	         8.907 ns/op	       459.9 GB/s	       0 B/op	       0 allocs/op
+BenchmarkAMSTZeroCopyTransfer/64KB-96                                 	130496725	         9.074 ns/op	      7222 GB/s	       0 B/op	       0 allocs/op
+BenchmarkAMSTZeroCopyTransfer/1024KB-96                               	127358384	         9.537 ns/op	    109944 GB/s	       0 B/op	       0 allocs/op
+BenchmarkAMSTZeroCopyTransfer/16384KB-96                              	130086802	         9.162 ns/op	   1831104 GB/s	       0 B/op	       0 allocs/op
+BenchmarkASSRaftConsensusLatency/3Nodes_1KB-96                        	    1078	   1127371 ns/op	       887.0 commits/sec	         1.127 ms/commit	       0 B/op	       0 allocs/op
+BenchmarkASSRaftConsensusLatency/5Nodes_1KB-96                        	     490	   2271773 ns/op	       440.2 commits/sec	         2.271 ms/commit	       0 B/op	       0 allocs/op
+BenchmarkASSRaftConsensusLatency/7Nodes_1KB-96                        	     348	   3324974 ns/op	       300.8 commits/sec	         3.324 ms/commit	       0 B/op	       0 allocs/op
+BenchmarkASSRaftConsensusLatency/3Nodes_64KB-96                       	    1063	   1121780 ns/op	       891.4 commits/sec	         1.121 ms/commit	       0 B/op	       0 allocs/op
+BenchmarkASSRaftConsensusLatency/5Nodes_64KB-96                       	     530	   2252080 ns/op	       444.0 commits/sec	         2.252 ms/commit	       0 B/op	       0 allocs/op
+BenchmarkASSRaftConsensusLatency/7Nodes_64KB-96                       	     360	   3379300 ns/op	       295.9 commits/sec	         3.379 ms/commit	       0 B/op	       0 allocs/op
+BenchmarkACPPBFTConsensusThroughput/4Nodes_Batch1_Seq-96              	     355	   3391492 ns/op	         1.000 batch_size	       294.8 ops/sec	       0 B/op	       0 allocs/op
+BenchmarkACPPBFTConsensusThroughput/4Nodes_Batch10_Seq-96             	     356	   3383753 ns/op	        10.00 batch_size	      2954 ops/sec	       0 B/op	       0 allocs/op
+BenchmarkACPPBFTConsensusThroughput/4Nodes_Batch1_Parallel10-96       	    3522	    337140 ns/op	         1.000 batch_size	      2964 ops/sec	       0 B/op	       0 allocs/op
+BenchmarkACPPBFTConsensusThroughput/7Nodes_Batch1_Seq-96              	     356	   3373733 ns/op	         1.000 batch_size	       296.3 ops/sec	       0 B/op	       0 allocs/op
+BenchmarkACPPBFTConsensusThroughput/7Nodes_Batch10_Seq-96             	     350	   3392664 ns/op	        10.00 batch_size	      2947 ops/sec	       0 B/op	       0 allocs/op
+BenchmarkACPPBFTConsensusThroughput/7Nodes_Batch1_Parallel10-96       	    3552	    335893 ns/op	         1.000 batch_size	      2975 ops/sec	       0 B/op	       0 allocs/op
+BenchmarkASSStateSyncPerformance/1MB_3Nodes-96                        	     531	   2276279 ns/op	 921.31 MB/s	         2.275 ms/sync	       0 B/op	       0 allocs/op
+BenchmarkASSStateSyncPerformance/10MB_3Nodes-96                       	      52	  22513583 ns/op	 931.51 MB/s	        22.50 ms/sync	       1 B/op	       0 allocs/op
+BenchmarkASSStateSyncPerformance/100MB_3Nodes-96                      	       5	 210652220 ns/op	 995.55 MB/s	       210.6 ms/sync	       0 B/op	       0 allocs/op
+BenchmarkASSStateSyncPerformance/1MB_7Nodes-96                        	     177	   6734258 ns/op	 934.25 MB/s	         6.729 ms/sync	       0 B/op	       0 allocs/op
+BenchmarkASSStateSyncPerformance/10MB_7Nodes-96                       	      16	  67582619 ns/op	 930.93 MB/s	        67.56 ms/sync	       6 B/op	       0 allocs/op
+BenchmarkASSStateSyncPerformance/100MB_7Nodes-96                      	       2	 632162850 ns/op	 995.23 MB/s	       632.0 ms/sync	      48 B/op	       0 allocs/op
+BenchmarkACPConflictResolution/LowConflict_Small-96                   	   39373	     30547 ns/op	     32737 resolutions/sec	        30.44 us/resolution	    9032 B/op	       9 allocs/op
+BenchmarkACPConflictResolution/MediumConflict_Small-96                	   38288	     30247 ns/op	     33061 resolutions/sec	        30.13 us/resolution	    9032 B/op	       9 allocs/op
+BenchmarkACPConflictResolution/HighConflict_Small-96                  	   39684	     29273 ns/op	     34161 resolutions/sec	        29.18 us/resolution	    9032 B/op	       9 allocs/op
+BenchmarkACPConflictResolution/LowConflict_Large-96                   	     250	   4736617 ns/op	       211.1 resolutions/sec	      4736 us/resolution	 1307994 B/op	      79 allocs/op
+BenchmarkACPConflictResolution/MediumConflict_Large-96                	     213	   5279643 ns/op	       189.4 resolutions/sec	      5279 us/resolution	 1307992 B/op	      79 allocs/op
+BenchmarkACPConflictResolution/HighConflict_Large-96                  	     247	   4734494 ns/op	       211.2 resolutions/sec	      4734 us/resolution	 1307992 B/op	      79 allocs/op
+BenchmarkASSLeaderElection/3Nodes-96                                  	     537	   2266532 ns/op	       441.2 elections/sec	         2.264 ms/election	       0 B/op	       0 allocs/op
+BenchmarkASSLeaderElection/5Nodes-96                                  	     369	   3238177 ns/op	       308.8 elections/sec	         3.236 ms/election	       0 B/op	       0 allocs/op
+BenchmarkASSLeaderElection/7Nodes-96                                  	     280	   4224738 ns/op	       236.7 elections/sec	         4.221 ms/election	       0 B/op	       0 allocs/op
+BenchmarkASSLeaderElection/9Nodes-96                                  	     229	   5252244 ns/op	       190.4 elections/sec	         5.249 ms/election	       0 B/op	       0 allocs/op
+BenchmarkASSLeaderElection/11Nodes-96                                 	     192	   6275406 ns/op	       159.4 elections/sec	         6.271 ms/election	       0 B/op	       0 allocs/op
+BenchmarkACPQuorumVerification/3Nodes_Full-96                         	100000000	        11.97 ns/op	         3.000 total_nodes	  83574851 verifications/sec	       0 B/op	       0 allocs/op
+BenchmarkACPQuorumVerification/3Nodes_Quorum-96                       	131978848	         9.176 ns/op	         3.000 total_nodes	 108983152 verifications/sec	       0 B/op	       0 allocs/op
+BenchmarkACPQuorumVerification/7Nodes_Full-96                         	100000000	        11.95 ns/op	         7.000 total_nodes	  83687975 verifications/sec	       0 B/op	       0 allocs/op
+BenchmarkACPQuorumVerification/7Nodes_Quorum-96                       	100000000	        11.97 ns/op	         7.000 total_nodes	  83542363 verifications/sec	       0 B/op	       0 allocs/op
+BenchmarkACPQuorumVerification/11Nodes_Full-96                        	94298847	        13.07 ns/op	        11.00 total_nodes	  76520477 verifications/sec	       0 B/op	       0 allocs/op
+BenchmarkACPQuorumVerification/11Nodes_Quorum-96                      	100000000	        12.07 ns/op	        11.00 total_nodes	  82860874 verifications/sec	       0 B/op	       0 allocs/op
+BenchmarkASSMessageBroadcast/3Nodes_1KB_Sequential-96                 	     372	   3298950 ns/op	   0.93 MB/s	         3.298 ms/broadcast	       0 B/op	       0 allocs/op
+BenchmarkASSMessageBroadcast/7Nodes_1KB_Sequential-96                 	     154	   7791877 ns/op	   0.92 MB/s	         7.791 ms/broadcast	       0 B/op	       0 allocs/op
+BenchmarkASSMessageBroadcast/11Nodes_1KB_Sequential-96                	     100	  12094930 ns/op	   0.93 MB/s	        12.09 ms/broadcast	       0 B/op	       0 allocs/op
+BenchmarkASSMessageBroadcast/3Nodes_1KB_Parallel-96                   	    1064	   1139990 ns/op	   2.69 MB/s	         1.140 ms/broadcast	     352 B/op	       7 allocs/op
+BenchmarkASSMessageBroadcast/7Nodes_1KB_Parallel-96                   	    1154	   1087042 ns/op	   6.59 MB/s	         1.087 ms/broadcast	     800 B/op	      15 allocs/op
+BenchmarkASSMessageBroadcast/11Nodes_1KB_Parallel-96                  	    1059	   1107148 ns/op	  10.17 MB/s	         1.107 ms/broadcast	    1248 B/op	      23 allocs/op
+BenchmarkACPByzantineFaultTolerance/4Nodes_0Faulty-96                 	     344	   3378665 ns/op	         3.378 ms/op	       100.0 success_%	       0 B/op	       0 allocs/op
+BenchmarkACPByzantineFaultTolerance/4Nodes_1Faulty-96                 	     354	   3388128 ns/op	         3.387 ms/op	       100.0 success_%	       0 B/op	       0 allocs/op
+BenchmarkACPByzantineFaultTolerance/7Nodes_0Faulty-96                 	     351	   3426668 ns/op	         3.425 ms/op	       100.0 success_%	       0 B/op	       0 allocs/op
+BenchmarkACPByzantineFaultTolerance/7Nodes_2Faulty-96                 	     356	   3373518 ns/op	         3.371 ms/op	       100.0 success_%	       0 B/op	       0 allocs/op
+BenchmarkACPByzantineFaultTolerance/10Nodes_0Faulty-96                	     348	   3439984 ns/op	         3.437 ms/op	       100.0 success_%	       0 B/op	       0 allocs/op
+BenchmarkACPByzantineFaultTolerance/10Nodes_3Faulty-96                	     351	   3377728 ns/op	         3.376 ms/op	       100.0 success_%	       0 B/op	       0 allocs/op
+BenchmarkDWCPvsCompetitors/Datacenter_4GB/DWCP_v3-96                  	       1	1720264600 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Datacenter_4GB/VMware_vMotion-96           	       1	10091345600 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Datacenter_4GB/HyperV_LiveMigration-96     	       1	13239497500 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Datacenter_4GB/KVM_QEMU-96                 	       1	18320135700 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Datacenter_4GB/QEMU_NBD-96                 	       1	26480116600 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Datacenter_4GB/ComparisonReport-96         	1000000000	         0.0002197 ns/op	       0 B/op	       0 allocs/op
+--- BENCH: BenchmarkDWCPvsCompetitors/Datacenter_4GB/ComparisonReport-96
+    competitor_comparison_test.go:429: 
+        ========================================
+    competitor_comparison_test.go:430: DWCP v3 vs Competitors Comparison Report
+    competitor_comparison_test.go:431: Mode: datacenter
+    competitor_comparison_test.go:432: ========================================
+    competitor_comparison_test.go:440: Solution                       Throughput        Downtime     Compression       CPU Usage
+    competitor_comparison_test.go:441:                                    (GB/s)            (ms)             (%)             (%)
+    competitor_comparison_test.go:442: --------------------------------------------------------------------------------------
+    competitor_comparison_test.go:451: DWCP v3                              2.50          345.00               -            15.0
+    competitor_comparison_test.go:451: VMware vMotion                       0.50         1500.00               -            25.0
+	... [output truncated]
+BenchmarkDWCPvsCompetitors/Internet_4GB/DWCP_v3-96                    	       1	70789538100 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Internet_4GB/VMware_vMotion-96             	       1	90929491100 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Internet_4GB/HyperV_LiveMigration-96       	       1	290334914900 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Internet_4GB/KVM_QEMU-96                   	       1	418322363400 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Internet_4GB/QEMU_NBD-96                   	       1	153175152800 ns/op	     128 B/op	       2 allocs/op
+BenchmarkDWCPvsCompetitors/Internet_4GB/ComparisonReport-96           	1000000000	         0.0004771 ns/op	       0 B/op	       0 allocs/op
+--- BENCH: BenchmarkDWCPvsCompetitors/Internet_4GB/ComparisonReport-96
+    competitor_comparison_test.go:429: 
+        ========================================
+    competitor_comparison_test.go:430: DWCP v3 vs Competitors Comparison Report
+    competitor_comparison_test.go:431: Mode: internet
+    competitor_comparison_test.go:432: ========================================
+    competitor_comparison_test.go:440: Solution                       Throughput        Downtime     Compression       CPU Usage
+    competitor_comparison_test.go:441:                                    (GB/s)            (ms)             (%)             (%)
+    competitor_comparison_test.go:442: --------------------------------------------------------------------------------------
+    competitor_comparison_test.go:451: DWCP v3                              0.06         2001.00           80.0%            15.0
+    competitor_comparison_test.go:451: VMware vMotion                       0.05         5004.00               -            25.0
+	... [output truncated]
+BenchmarkDWCPvsCompetitors/Datacenter_8GB/DWCP_v3-96                  	       1	3437814300 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Datacenter_8GB/VMware_vMotion-96           	       1	18680906300 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Datacenter_8GB/HyperV_LiveMigration-96     	       1	23977213500 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Datacenter_8GB/KVM_QEMU-96                 	       1	32637056300 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Datacenter_8GB/QEMU_NBD-96                 	       1	47950360200 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Datacenter_8GB/ComparisonReport-96         	1000000000	         0.0001968 ns/op	       0 B/op	       0 allocs/op
+--- BENCH: BenchmarkDWCPvsCompetitors/Datacenter_8GB/ComparisonReport-96
+    competitor_comparison_test.go:429: 
+        ========================================
+    competitor_comparison_test.go:430: DWCP v3 vs Competitors Comparison Report
+    competitor_comparison_test.go:431: Mode: datacenter
+    competitor_comparison_test.go:432: ========================================
+    competitor_comparison_test.go:440: Solution                       Throughput        Downtime     Compression       CPU Usage
+    competitor_comparison_test.go:441:                                    (GB/s)            (ms)             (%)             (%)
+    competitor_comparison_test.go:442: --------------------------------------------------------------------------------------
+    competitor_comparison_test.go:451: DWCP v3                              2.50          688.00               -            15.0
+    competitor_comparison_test.go:451: VMware vMotion                       0.50         1500.00               -            25.0
+	... [output truncated]
+BenchmarkDWCPvsCompetitors/Internet_8GB/DWCP_v3-96                    	       1	139440321000 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Internet_8GB/VMware_vMotion-96             	       1	176803701700 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Internet_8GB/HyperV_LiveMigration-96       	       1	576694026000 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Internet_8GB/KVM_QEMU-96                   	       1	830683068000 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Internet_8GB/QEMU_NBD-96                   	       1	296341035200 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Internet_8GB/ComparisonReport-96           	1000000000	         0.0003331 ns/op	       0 B/op	       0 allocs/op
+--- BENCH: BenchmarkDWCPvsCompetitors/Internet_8GB/ComparisonReport-96
+    competitor_comparison_test.go:429: 
+        ========================================
+    competitor_comparison_test.go:430: DWCP v3 vs Competitors Comparison Report
+    competitor_comparison_test.go:431: Mode: internet
+    competitor_comparison_test.go:432: ========================================
+    competitor_comparison_test.go:440: Solution                       Throughput        Downtime     Compression       CPU Usage
+    competitor_comparison_test.go:441:                                    (GB/s)            (ms)             (%)             (%)
+    competitor_comparison_test.go:442: --------------------------------------------------------------------------------------
+    competitor_comparison_test.go:451: DWCP v3                              0.06         2000.00           80.0%            15.0
+    competitor_comparison_test.go:451: VMware vMotion                       0.05         5004.00               -            25.0
+	... [output truncated]
+BenchmarkFeatureComparison/FeatureMatrix-96                           	1000000000	         0.0002084 ns/op	       0 B/op	       0 allocs/op
+--- BENCH: BenchmarkFeatureComparison/FeatureMatrix-96
+    competitor_comparison_test.go:552: 
+        ========================================
+    competitor_comparison_test.go:553: Feature Comparison Matrix
+    competitor_comparison_test.go:554: ========================================
+    competitor_comparison_test.go:557: Feature                        DWCP v3         vMotion         Hyper-V         KVM/QEMU       
+    competitor_comparison_test.go:559: -------------------------------------------------------------------------------------------
+    competitor_comparison_test.go:576: RDMA Support                   ✓ Yes           ✓ Yes           ✓ Yes           ✗ No           
+    competitor_comparison_test.go:576: Adaptive Compression           ✓ Yes           ✗ No            ✗ No            ✗ No           
+    competitor_comparison_test.go:576: LSTM Prediction                ✓ Yes           ✗ No            ✗ No            ✗ No           
+    competitor_comparison_test.go:576: Byzantine Consensus            ✓ Yes           ✗ No            ✗ No            ✗ No           
+	... [output truncated]
+BenchmarkHDECompressionRatio/Zeros_1MB_snappy-96                      	     918	   1170364 ns/op	         1.000 MB	        95.31 compression_%	 1228800 B/op	       1 allocs/op
+BenchmarkHDECompressionRatio/Zeros_1MB_lz4-96                         	    1132	   1076906 ns/op	         1.000 MB	        99.60 compression_%	    9276 B/op	       8 allocs/op
+BenchmarkHDECompressionRatio/Zeros_1MB_gzip-fast-96                   	     171	   6826307 ns/op	         1.000 MB	        99.90 compression_%	  817810 B/op	      23 allocs/op
+BenchmarkHDECompressionRatio/Zeros_1MB_gzip-best-96                   	     171	   6538539 ns/op	         1.000 MB	        99.90 compression_%	  817809 B/op	      23 allocs/op
+BenchmarkHDECompressionRatio/Zeros_1MB_zstd-96                        	    1150	    995084 ns/op	         1.000 MB	        95.31 compression_%	 1228801 B/op	       1 allocs/op
+BenchmarkHDECompressionRatio/Random_1MB_snappy-96                     	    1128	   1193560 ns/op	         1.000 MB	        -0.004864 compression_%	 1228801 B/op	       1 allocs/op
+BenchmarkHDECompressionRatio/Random_1MB_lz4-96                        	     644	   1898946 ns/op	         1.000 MB	        -0.001812 compression_%	 1098390 B/op	       8 allocs/op
+BenchmarkHDECompressionRatio/Random_1MB_gzip-fast-96                  	      32	  44214069 ns/op	         1.000 MB	        -0.03271 compression_%	 3412889 B/op	      26 allocs/op
+BenchmarkHDECompressionRatio/Random_1MB_gzip-best-96                  	      28	  42829189 ns/op	         1.000 MB	        -0.03271 compression_%	 3412883 B/op	      26 allocs/op
+BenchmarkHDECompressionRatio/Random_1MB_zstd-96                       	    1149	   1014727 ns/op	         1.000 MB	        -0.004864 compression_%	 1228801 B/op	       1 allocs/op
+BenchmarkHDECompressionRatio/Text_1MB_snappy-96                       	    1122	   1043018 ns/op	         1.000 MB	        95.23 compression_%	 1228801 B/op	       1 allocs/op
+BenchmarkHDECompressionRatio/Text_1MB_lz4-96                          	    1060	   1131481 ns/op	         1.000 MB	        99.60 compression_%	    9669 B/op	       8 allocs/op
+BenchmarkHDECompressionRatio/Text_1MB_gzip-fast-96                    	     142	   7144664 ns/op	         1.000 MB	        99.70 compression_%	  821904 B/op	      24 allocs/op
+BenchmarkHDECompressionRatio/Text_1MB_gzip-best-96                    	     159	   7292429 ns/op	         1.000 MB	        99.70 compression_%	  821904 B/op	      24 allocs/op
+BenchmarkHDECompressionRatio/Text_1MB_zstd-96                         	    1078	   1128429 ns/op	         1.000 MB	        95.23 compression_%	 1228801 B/op	       1 allocs/op
+BenchmarkHDECompressionRatio/VMMemory_1MB_snappy-96                   	    1141	   1057396 ns/op	         1.000 MB	        85.77 compression_%	 1228800 B/op	       1 allocs/op
+BenchmarkHDECompressionRatio/VMMemory_1MB_lz4-96                      	     895	   1227683 ns/op	         1.000 MB	        89.60 compression_%	  116225 B/op	       8 allocs/op
+BenchmarkHDECompressionRatio/VMMemory_1MB_gzip-fast-96                	     100	  11624573 ns/op	         1.000 MB	        89.74 compression_%	 1075856 B/op	      29 allocs/op
+BenchmarkHDECompressionRatio/VMMemory_1MB_gzip-best-96                	     100	  11053427 ns/op	         1.000 MB	        89.74 compression_%	 1075858 B/op	      29 allocs/op
+BenchmarkHDECompressionRatio/VMMemory_1MB_zstd-96                     	     918	   1178596 ns/op	         1.000 MB	        85.77 compression_%	 1228800 B/op	       1 allocs/op
+BenchmarkHDECompressionRatio/MixedWorkload_1MB_snappy-96              	    1047	   1125313 ns/op	         1.000 MB	        66.71 compression_%	 1228801 B/op	       1 allocs/op
+BenchmarkHDECompressionRatio/MixedWorkload_1MB_lz4-96                 	     840	   1389944 ns/op	         1.000 MB	        69.60 compression_%	  337538 B/op	       8 allocs/op
+BenchmarkHDECompressionRatio/MixedWorkload_1MB_gzip-fast-96           	      58	  17444217 ns/op	         1.000 MB	        69.81 compression_%	 1862289 B/op	      31 allocs/op
+BenchmarkHDECompressionRatio/MixedWorkload_1MB_gzip-best-96           	      74	  17600924 ns/op	         1.000 MB	        69.81 compression_%	 1862288 B/op	      31 allocs/op
+BenchmarkHDECompressionRatio/MixedWorkload_1MB_zstd-96                	    1096	   1093272 ns/op	         1.000 MB	        66.71 compression_%	 1228801 B/op	       1 allocs/op
+BenchmarkHDECompressionThroughput/Compress_4KB_snappy-96              	  154634	      7192 ns/op	 569.46 MB/s	    4864 B/op	       1 allocs/op
+BenchmarkHDECompressionThroughput/Decompress_4KB_snappy-96            	  159681	      6982 ns/op	  87.63 MB/s	    4096 B/op	       1 allocs/op
+BenchmarkHDECompressionThroughput/Compress_4KB_lz4-96                 	  130825	      7869 ns/op	 520.21 MB/s	    1213 B/op	       8 allocs/op
+BenchmarkHDECompressionThroughput/Decompress_4KB_lz4-96               	     424	   3064030 ns/op	   0.15 MB/s	 4268918 B/op	      15 allocs/op
+BenchmarkHDECompressionThroughput/Compress_4KB_gzip-fast-96           	    1408	    871939 ns/op	   4.69 MB/s	  814737 B/op	      21 allocs/op
+BenchmarkHDECompressionThroughput/Decompress_4KB_gzip-fast-96         	   19420	     62321 ns/op	   8.12 MB/s	   48912 B/op	      10 allocs/op
+BenchmarkHDECompressionThroughput/Compress_4KB_zstd-96                	  153360	      7033 ns/op	 582.25 MB/s	    4864 B/op	       1 allocs/op
+BenchmarkHDECompressionThroughput/Decompress_4KB_zstd-96              	  133068	      7735 ns/op	  79.08 MB/s	    4096 B/op	       1 allocs/op
+BenchmarkHDECompressionThroughput/Compress_64KB_snappy-96             	   13116	     95662 ns/op	 684.92 MB/s	   81920 B/op	       1 allocs/op
+BenchmarkHDECompressionThroughput/Decompress_64KB_snappy-96           	   13280	     97125 ns/op	  96.22 MB/s	   65536 B/op	       1 allocs/op
+BenchmarkHDECompressionThroughput/Compress_64KB_lz4-96                	   17269	     70163 ns/op	 933.87 MB/s	    8324 B/op	       8 allocs/op
+BenchmarkHDECompressionThroughput/Decompress_64KB_lz4-96              	     398	   3507217 ns/op	   1.96 MB/s	 4466656 B/op	      19 allocs/op
+BenchmarkHDECompressionThroughput/Compress_64KB_gzip-fast-96          	     709	   1569326 ns/op	  41.75 MB/s	  830098 B/op	      25 allocs/op
+BenchmarkHDECompressionThroughput/Decompress_64KB_gzip-fast-96        	    1960	    536861 ns/op	  12.83 MB/s	  302920 B/op	      17 allocs/op
+BenchmarkHDECompressionThroughput/Compress_64KB_zstd-96               	   12711	     89009 ns/op	 736.06 MB/s	   81920 B/op	       1 allocs/op
+BenchmarkHDECompressionThroughput/Decompress_64KB_zstd-96             	   13191	    102726 ns/op	  90.89 MB/s	   65536 B/op	       1 allocs/op
+BenchmarkHDECompressionThroughput/Compress_1024KB_snappy-96           	     826	   1313295 ns/op	 798.11 MB/s	 1228801 B/op	       1 allocs/op
+BenchmarkHDECompressionThroughput/Decompress_1024KB_snappy-96         	     706	   1531284 ns/op	  97.45 MB/s	 1048576 B/op	       1 allocs/op
+BenchmarkHDECompressionThroughput/Compress_1024KB_lz4-96              	     951	   1365254 ns/op	 767.89 MB/s	  125089 B/op	       8 allocs/op
+BenchmarkHDECompressionThroughput/Decompress_1024KB_lz4-96            	     100	  10524503 ns/op	  10.36 MB/s	 8740760 B/op	      26 allocs/op
+BenchmarkHDECompressionThroughput/Compress_1024KB_gzip-fast-96        	     100	  11306820 ns/op	  92.70 MB/s	 1075860 B/op	      29 allocs/op
+BenchmarkHDECompressionThroughput/Decompress_1024KB_gzip-fast-96      	     187	   6473387 ns/op	  16.57 MB/s	 4235082 B/op	      21 allocs/op
+BenchmarkHDECompressionThroughput/Compress_1024KB_zstd-96             	     870	   1172095 ns/op	 894.32 MB/s	 1228801 B/op	       1 allocs/op
+BenchmarkHDECompressionThroughput/Decompress_1024KB_zstd-96           	     753	   1587721 ns/op	  93.84 MB/s	 1048577 B/op	       1 allocs/op
+BenchmarkHDECompressionThroughput/Compress_16384KB_snappy-96          	      80	  14460202 ns/op	1159.91 MB/s	19578881 B/op	       1 allocs/op
+BenchmarkHDECompressionThroughput/Decompress_16384KB_snappy-96        	      61	  19664361 ns/op	 121.37 MB/s	16777217 B/op	       1 allocs/op
+BenchmarkHDECompressionThroughput/Compress_16384KB_lz4-96             	      76	  16481021 ns/op	1017.74 MB/s	 2120684 B/op	      11 allocs/op
+BenchmarkHDECompressionThroughput/Decompress_16384KB_lz4-96           	       7	 150643029 ns/op	  11.57 MB/s	72525129 B/op	      34 allocs/op
+BenchmarkHDECompressionThroughput/Compress_16384KB_gzip-fast-96       	       7	 151832514 ns/op	 110.47 MB/s	 5008016 B/op	      33 allocs/op
+BenchmarkHDECompressionThroughput/Decompress_16384KB_gzip-fast-96     	       9	 122217556 ns/op	  13.91 MB/s	67150005 B/op	      31 allocs/op
+BenchmarkHDECompressionThroughput/Compress_16384KB_zstd-96            	      82	  15438446 ns/op	1086.19 MB/s	19578881 B/op	       1 allocs/op
+BenchmarkHDECompressionThroughput/Decompress_16384KB_zstd-96          	      58	  18044709 ns/op	 132.28 MB/s	16777222 B/op	       1 allocs/op
+BenchmarkHDECRDTMergePerformance/Small_LowChange-96                   	 1816725	       658.5 ns/op	        10.00 changed_keys	   1518505 merges/sec	       0 B/op	       0 allocs/op
+BenchmarkHDECRDTMergePerformance/Small_HighChange-96                  	   39010	     30208 ns/op	       500.0 changed_keys	     33104 merges/sec	       0 B/op	       0 allocs/op
+BenchmarkHDECRDTMergePerformance/Medium_LowChange-96                  	  229491	      5397 ns/op	       100.0 changed_keys	    185304 merges/sec	       0 B/op	       0 allocs/op
+BenchmarkHDECRDTMergePerformance/Medium_HighChange-96                 	    2553	    480908 ns/op	      5000 changed_keys	      2079 merges/sec	       0 B/op	       0 allocs/op
+BenchmarkHDECRDTMergePerformance/Large_LowChange-96                   	   12812	     93117 ns/op	      1000 changed_keys	     10739 merges/sec	       0 B/op	       0 allocs/op
+BenchmarkHDECRDTMergePerformance/Large_HighChange-96                  	      72	  16954289 ns/op	     50000 changed_keys	        58.98 merges/sec	       0 B/op	       0 allocs/op
+BenchmarkHDEDeltaEncodingEfficiency/TinyChange_4KB-96                 	  150602	      7713 ns/op	        99.71 compression_%	         0.2930 delta_%	     416 B/op	       1 allocs/op
+BenchmarkHDEDeltaEncodingEfficiency/SmallChange_4KB-96                	  138792	      7503 ns/op	        97.07 compression_%	         2.930 delta_%	     416 B/op	       1 allocs/op
+BenchmarkHDEDeltaEncodingEfficiency/MediumChange_4KB-96               	   86898	     13290 ns/op	        70.04 compression_%	        29.96 delta_%	    4064 B/op	       4 allocs/op
+BenchmarkHDEDeltaEncodingEfficiency/TinyChange_64KB-96                	   10000	    123052 ns/op	        99.70 compression_%	         0.2975 delta_%	    6784 B/op	       1 allocs/op
+BenchmarkHDEDeltaEncodingEfficiency/SmallChange_64KB-96               	    9793	    134726 ns/op	        97.00 compression_%	         2.998 delta_%	    6784 B/op	       1 allocs/op
+BenchmarkHDEDeltaEncodingEfficiency/MediumChange_64KB-96              	    5121	    218242 ns/op	        70.00 compression_%	        30.00 delta_%	   66688 B/op	       5 allocs/op
+BenchmarkHDEParallelCompression/1Workers-96                           	      79	  15368182 ns/op	         1.091 GB/s	       109.1 efficiency_%	19579112 B/op	       5 allocs/op
+BenchmarkHDEParallelCompression/2Workers-96                           	     139	   8744068 ns/op	         1.917 GB/s	        95.87 efficiency_%	19579224 B/op	       8 allocs/op
+BenchmarkHDEParallelCompression/4Workers-96                           	     206	   5709705 ns/op	         2.936 GB/s	        73.41 efficiency_%	19595845 B/op	      14 allocs/op
+BenchmarkHDEParallelCompression/8Workers-96                           	     231	   4696826 ns/op	         3.567 GB/s	        44.59 efficiency_%	19596323 B/op	      26 allocs/op
+BenchmarkHDEParallelCompression/16Workers-96                          	     240	   5271039 ns/op	         3.180 GB/s	        19.88 efficiency_%	19662759 B/op	      50 allocs/op
+BenchmarkHDEParallelCompression/32Workers-96                          	     219	   5516669 ns/op	         3.040 GB/s	         9.501 efficiency_%	19664671 B/op	      98 allocs/op
+BenchmarkITPPlacementAlgorithm/10VMs_5Hosts_Basic-96                  	  651328	      1792 ns/op	         0.001706 ms/placement	    558126 placements/sec	     616 B/op	       3 allocs/op
+BenchmarkITPPlacementAlgorithm/50VMs_20Hosts_Basic-96                 	   97122	     11179 ns/op	         0.01108 ms/placement	     89457 placements/sec	    4136 B/op	       7 allocs/op
+BenchmarkITPPlacementAlgorithm/100VMs_50Hosts_Basic-96                	   53601	     23527 ns/op	         0.02338 ms/placement	     42504 placements/sec	    9032 B/op	       9 allocs/op
+BenchmarkITPPlacementAlgorithm/10VMs_5Hosts_Complex-96                	  588598	      1832 ns/op	         0.001745 ms/placement	    545889 placements/sec	     616 B/op	       3 allocs/op
+BenchmarkITPPlacementAlgorithm/50VMs_20Hosts_Complex-96               	  107338	     11097 ns/op	         0.01100 ms/placement	     90111 placements/sec	    4136 B/op	       7 allocs/op
+BenchmarkITPPlacementAlgorithm/100VMs_50Hosts_Complex-96              	   45765	     25872 ns/op	         0.02576 ms/placement	     38652 placements/sec	    9032 B/op	       9 allocs/op
+BenchmarkITPGeographicOptimization/3Regions_9DCs_50VMs-96             	   46072	     25284 ns/op	         0.02518 ms/optimization	     39550 optimizations/sec	    4472 B/op	       9 allocs/op
+BenchmarkITPGeographicOptimization/3Regions_9DCs_200VMs-96            	   10000	    104898 ns/op	         0.1047 ms/optimization	      9533 optimizations/sec	   18872 B/op	      13 allocs/op
+BenchmarkITPGeographicOptimization/5Regions_20DCs_50VMs-96            	   30838	     38769 ns/op	         0.03865 ms/optimization	     25794 optimizations/sec	    4472 B/op	       9 allocs/op
+BenchmarkITPGeographicOptimization/5Regions_20DCs_200VMs-96           	    8086	    159282 ns/op	         0.1590 ms/optimization	      6278 optimizations/sec	   18872 B/op	      13 allocs/op
+BenchmarkITPGeographicOptimization/10Regions_50DCs_50VMs-96           	   16304	     75014 ns/op	         0.07489 ms/optimization	     13331 optimizations/sec	    4472 B/op	       9 allocs/op
+BenchmarkITPGeographicOptimization/10Regions_50DCs_200VMs-96          	    3597	    301076 ns/op	         0.3008 ms/optimization	      3321 optimizations/sec	   18872 B/op	      13 allocs/op
+BenchmarkITPResourceUtilization/10Hosts-96                            	  649965	      1761 ns/op	    567851 calculations/sec	        10.00 hosts	     456 B/op	       3 allocs/op
+BenchmarkITPResourceUtilization/50Hosts-96                            	  127064	      9502 ns/op	    105241 calculations/sec	        50.00 hosts	    3208 B/op	       7 allocs/op
+BenchmarkITPResourceUtilization/100Hosts-96                           	   52728	     20088 ns/op	     49781 calculations/sec	       100.0 hosts	    6696 B/op	       9 allocs/op
+BenchmarkITPResourceUtilization/500Hosts-96                           	    7173	    141359 ns/op	      7074 calculations/sec	       500.0 hosts	   54152 B/op	      15 allocs/op
+BenchmarkITPResourceUtilization/1000Hosts-96                          	    4262	    290838 ns/op	      3438 calculations/sec	      1000 hosts	  108760 B/op	      20 allocs/op
+BenchmarkITPPlacementQuality/10VMs_5Hosts_3Metrics-96                 	20206544	        59.72 ns/op	  16745520 scores/sec	       0 B/op	       0 allocs/op
+BenchmarkITPPlacementQuality/50VMs_20Hosts_5Metrics-96                	11853642	       104.1 ns/op	   9605807 scores/sec	       0 B/op	       0 allocs/op
+BenchmarkITPPlacementQuality/100VMs_50Hosts_10Metrics-96              	 5411566	       202.4 ns/op	   4940511 scores/sec	       0 B/op	       0 allocs/op
+BenchmarkITPPlacementQuality/500VMs_200Hosts_5Metrics-96              	11623682	       101.1 ns/op	   9894225 scores/sec	       0 B/op	       0 allocs/op
+BenchmarkITPAffinityRules/10VMs_5Rules_Affinity-96                    	13385924	        92.16 ns/op	  10851029 validations/sec	       0 B/op	       0 allocs/op
+BenchmarkITPAffinityRules/50VMs_20Rules_Affinity-96                   	 5191388	       193.7 ns/op	   5161419 validations/sec	       0 B/op	       0 allocs/op
+BenchmarkITPAffinityRules/10VMs_5Rules_AntiAffinity-96                	13319658	        88.50 ns/op	  11299098 validations/sec	       0 B/op	       0 allocs/op
+BenchmarkITPAffinityRules/50VMs_20Rules_AntiAffinity-96               	 6522202	       192.2 ns/op	   5203517 validations/sec	       0 B/op	       0 allocs/op
+BenchmarkITPAffinityRules/100VMs_50Rules_Mixed-96                     	 5084168	       229.0 ns/op	   4367511 validations/sec	       0 B/op	       0 allocs/op
+BenchmarkITPLoadBalancing/10Hosts_LowImbalance-96                     	     970	   1133905 ns/op	         1.133 ms/rebalance	       881.9 rebalances/sec	       0 B/op	       0 allocs/op
+BenchmarkITPLoadBalancing/10Hosts_HighImbalance-96                    	    1065	   1152935 ns/op	         1.152 ms/rebalance	       867.4 rebalances/sec	       0 B/op	       0 allocs/op
+BenchmarkITPLoadBalancing/50Hosts_LowImbalance-96                     	     228	   5236582 ns/op	         5.232 ms/rebalance	       191.0 rebalances/sec	       0 B/op	       0 allocs/op
+BenchmarkITPLoadBalancing/50Hosts_HighImbalance-96                    	     229	   5262118 ns/op	         5.258 ms/rebalance	       190.0 rebalances/sec	       0 B/op	       0 allocs/op
+BenchmarkITPLoadBalancing/100Hosts_LowImbalance-96                    	     100	  10323069 ns/op	        10.32 ms/rebalance	        96.87 rebalances/sec	       0 B/op	       0 allocs/op
+BenchmarkITPLoadBalancing/100Hosts_HighImbalance-96                   	     100	  10258911 ns/op	        10.25 ms/rebalance	        97.48 rebalances/sec	       0 B/op	       0 allocs/op
+BenchmarkITPDynamicPlacement/50VMs_20Hosts_LowChange-96               	  105296	     11930 ns/op	         0.01167 ms/placement	     83823 placements/sec	    4136 B/op	       7 allocs/op
+BenchmarkITPDynamicPlacement/50VMs_20Hosts_MediumChange-96            	  104044	     11757 ns/op	         0.01109 ms/placement	     85058 placements/sec	    4136 B/op	       7 allocs/op
+BenchmarkITPDynamicPlacement/50VMs_20Hosts_HighChange-96              	   85532	     12050 ns/op	         0.01083 ms/placement	     82984 placements/sec	    4136 B/op	       7 allocs/op
+BenchmarkITPDynamicPlacement/200VMs_100Hosts_LowChange-96             	   27848	     46874 ns/op	         0.04589 ms/placement	     21334 placements/sec	   18536 B/op	      11 allocs/op
+BenchmarkITPDynamicPlacement/200VMs_100Hosts_MediumChange-96          	   26102	     48467 ns/op	         0.04551 ms/placement	     20633 placements/sec	   18536 B/op	      11 allocs/op
+BenchmarkVMMigrationDatacenter/1GB_10Gbps_8Streams-96                 	       2	 567064500 ns/op	         4.500 downtime_ms	       567.0 migration_ms	         0.2102 throughput_GB/s	      48 B/op	       0 allocs/op
+BenchmarkVMMigrationDatacenter/2GB_10Gbps_8Streams-96                 	       1	1126992100 ns/op	         4.000 downtime_ms	      1126 migration_ms	         0.2115 throughput_GB/s	      96 B/op	       1 allocs/op
+BenchmarkVMMigrationDatacenter/4GB_10Gbps_16Streams-96                	       1	1533635700 ns/op	         5.000 downtime_ms	      1533 migration_ms	         0.3109 throughput_GB/s	      96 B/op	       1 allocs/op
+BenchmarkVMMigrationDatacenter/8GB_25Gbps_32Streams-96                	       2	 750088000 ns/op	         4.500 downtime_ms	       750.0 migration_ms	         1.271 throughput_GB/s	      48 B/op	       0 allocs/op
+BenchmarkVMMigrationDatacenter/16GB_25Gbps_32Streams-96               	       1	1493444000 ns/op	         3.000 downtime_ms	      1493 migration_ms	         1.277 throughput_GB/s	      96 B/op	       1 allocs/op
+BenchmarkVMMigrationDatacenter/32GB_40Gbps_64Streams-96               	       1	1051084600 ns/op	         4.000 downtime_ms	      1051 migration_ms	         3.629 throughput_GB/s	      96 B/op	       1 allocs/op
+BenchmarkVMMigrationInternet/1GB_100Mbps_Snappy-96                    	       1	11003044800 ns/op	        87.61 compression_%	       120.8 effective_MB/s	        11.00 migration_sec	1551286416 B/op	      10 allocs/op
+--- BENCH: BenchmarkVMMigrationInternet/1GB_100Mbps_Snappy-96
+    migration_benchmark_test.go:198: WARNING: Compression ratio 87.61% outside 75-85% target range
+BenchmarkVMMigrationInternet/2GB_100Mbps_Snappy-96                    	       1	22203844700 ns/op	        87.61 compression_%	       119.8 effective_MB/s	        22.20 migration_sec	3102539872 B/op	       8 allocs/op
+--- BENCH: BenchmarkVMMigrationInternet/2GB_100Mbps_Snappy-96
+    migration_benchmark_test.go:198: WARNING: Compression ratio 87.61% outside 75-85% target range
+BenchmarkVMMigrationInternet/4GB_500Mbps_LZ4-96                       	       1	15858950100 ns/op	        91.56 compression_%	       335.4 effective_MB/s	        15.86 migration_sec	1367503904 B/op	     123 allocs/op
+--- BENCH: BenchmarkVMMigrationInternet/4GB_500Mbps_LZ4-96
+    migration_benchmark_test.go:198: WARNING: Compression ratio 91.56% outside 75-85% target range
+BenchmarkVMMigrationInternet/8GB_1000Mbps_LZ4-96                      	       1	25654678900 ns/op	        91.56 compression_%	       414.6 effective_MB/s	        25.65 migration_sec	2721993760 B/op	     129 allocs/op
+--- BENCH: BenchmarkVMMigrationInternet/8GB_1000Mbps_LZ4-96
+    migration_benchmark_test.go:198: WARNING: Compression ratio 91.56% outside 75-85% target range
+BenchmarkVMMigrationInternet/1GB_100Mbps_ZSTD-96                      	       1	10502075600 ns/op	        87.61 compression_%	       126.6 effective_MB/s	        10.50 migration_sec	1551286384 B/op	       9 allocs/op
+--- BENCH: BenchmarkVMMigrationInternet/1GB_100Mbps_ZSTD-96
+    migration_benchmark_test.go:198: WARNING: Compression ratio 87.61% outside 75-85% target range
+BenchmarkVMMigrationInternet/4GB_500Mbps_ZSTD-96                      	panic: snappy: decoded block is too large
+
+goroutine 60473 [running]:
+github.com/golang/snappy.Encode({0x0?, 0x7?, 0x34bf9777f3fd?}, {0xc002902000?, 0x0?, 0x0?})
+	/home/kp/go/pkg/mod/github.com/golang/snappy@v1.0.0/encode.go:22 +0x2a9
+github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/benchmarks.compressData({0xc002902000, 0x100000000, 0x100000000}, {0x5c0544?, 0xc00016dd98?})
+	/home/kp/novacron/backend/core/network/dwcp/v3/benchmarks/hde_benchmark_test.go:309 +0xfb
+github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/benchmarks.compressWithTiming({0xc002902000, 0x100000000, 0x100000000}, {0x5c0544, 0x4})
+	/home/kp/novacron/backend/core/network/dwcp/v3/benchmarks/migration_benchmark_test.go:487 +0x69
+github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/benchmarks.benchmarkInternetMigration(0xc000238848, 0x49a733?, 0x1f4, {0x5c0544, 0x4})
+	/home/kp/novacron/backend/core/network/dwcp/v3/benchmarks/migration_benchmark_test.go:146 +0x1e5
+github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/benchmarks.BenchmarkVMMigrationInternet.func1(0xc000238848?)
+	/home/kp/novacron/backend/core/network/dwcp/v3/benchmarks/migration_benchmark_test.go:126 +0x25
+testing.(*B).runN(0xc000238848, 0x1)
+	/snap/go/10984/src/testing/benchmark.go:219 +0x190
+testing.(*B).run1.func1()
+	/snap/go/10984/src/testing/benchmark.go:245 +0x48
+created by testing.(*B).run1 in goroutine 60482
+	/snap/go/10984/src/testing/benchmark.go:238 +0x90

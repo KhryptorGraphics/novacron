@@ -1,0 +1,59 @@
+%% NovaCron Error Handling and Recovery Flow
+%% Shows error classification, retry logic, and rollback mechanisms
+
+graph TD
+    Start[Component Initialization Start] --> Init[Initialize Component]
+
+    Init --> Check{Initialization Result}
+
+    Check -->|Success| Health[Health Check]
+    Check -->|Error| Classify[Classify Error]
+
+    Classify --> Critical{Critical Error?}
+
+    Critical -->|Yes| ImmediateRollback[Immediate Rollback]
+    Critical -->|No| Retriable{Retriable Error?}
+
+    Retriable -->|Yes| RetryCheck{Retry Count < Max?}
+    Retriable -->|No| Degraded{Allow Degraded?}
+
+    RetryCheck -->|Yes| Wait[Wait with Exponential Backoff]
+    RetryCheck -->|No| MaxRetries[Max Retries Exceeded]
+
+    Wait --> Init
+
+    MaxRetries --> Degraded
+
+    Degraded -->|Yes| MarkDegraded[Mark as Degraded]
+    Degraded -->|No| Rollback[Trigger Rollback]
+
+    Health -->|Pass| Success[Mark as Ready]
+    Health -->|Fail| HealthRetry{Retry Health Check?}
+
+    HealthRetry -->|Yes| Health
+    HealthRetry -->|No| Rollback
+
+    MarkDegraded --> LogWarning[Log Warning]
+    LogWarning --> Continue[Continue with Reduced Functionality]
+
+    Rollback --> ShutdownReverse[Shutdown Components in Reverse Order]
+    ImmediateRollback --> ShutdownReverse
+
+    ShutdownReverse --> CleanupState[Cleanup State]
+    CleanupState --> ReturnError[Return Aggregated Error]
+
+    Success --> RegisterComponent[Register Component in Registry]
+    RegisterComponent --> EmitMetrics[Emit Success Metrics]
+    EmitMetrics --> Complete[Initialization Complete]
+
+    Continue --> CompleteWarning[Initialization Complete with Warnings]
+
+    classDef successClass fill:#51cf66,stroke:#2f9e44,color:#fff
+    classDef errorClass fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef warningClass fill:#ffd43b,stroke:#f08c00,color:#000
+    classDef decisionClass fill:#4dabf7,stroke:#1c7ed6,color:#fff
+
+    class Success,Complete,EmitMetrics,RegisterComponent successClass
+    class ImmediateRollback,Rollback,ShutdownReverse,ReturnError errorClass
+    class MarkDegraded,LogWarning,Continue,CompleteWarning warningClass
+    class Check,Critical,Retriable,RetryCheck,Degraded,HealthRetry decisionClass

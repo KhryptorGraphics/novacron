@@ -1,0 +1,338 @@
+# OpenTelemetry Collector Configuration for DWCP v3
+# Comprehensive distributed tracing with Jaeger backend
+
+receivers:
+  # OTLP receiver for DWCP v3 components
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 32
+        max_concurrent_streams: 100
+        read_buffer_size: 524288
+        write_buffer_size: 524288
+        keepalive:
+          server_parameters:
+            max_connection_idle: 11m
+            max_connection_age: 12m
+            max_connection_age_grace: 13m
+            time: 30s
+            timeout: 5s
+          enforcement_policy:
+            min_time: 10s
+            permit_without_stream: true
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins:
+            - "http://*"
+            - "https://*"
+          max_age: 7200
+
+  # Jaeger receiver for legacy compatibility
+  jaeger:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:14250
+      thrift_http:
+        endpoint: 0.0.0.0:14268
+      thrift_compact:
+        endpoint: 0.0.0.0:6831
+      thrift_binary:
+        endpoint: 0.0.0.0:6832
+
+  # Zipkin receiver
+  zipkin:
+    endpoint: 0.0.0.0:9411
+
+  # Prometheus receiver for metrics
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'otel-collector'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['localhost:8888']
+
+processors:
+  # Batch processor for efficiency
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 2048
+    spike_limit_mib: 512
+
+  # Resource detection
+  resourcedetection:
+    detectors: [env, system, docker, kubernetes]
+    timeout: 5s
+    override: false
+
+  # Attributes processor for enrichment
+  attributes:
+    actions:
+      - key: environment
+        value: production
+        action: insert
+      - key: cluster
+        value: dwcp-v3-production
+        action: insert
+      - key: service.namespace
+        value: dwcp-v3
+        action: insert
+
+  # Span processor for trace customization
+  span:
+    name:
+      from_attributes: ["http.method", "http.route"]
+      separator: " "
+    include:
+      match_type: regexp
+      span_names:
+        - ".*migration.*"
+        - ".*consensus.*"
+        - ".*sync.*"
+
+  # Probabilistic sampler for production
+  probabilistic_sampler:
+    sampling_percentage: 10  # 10% sampling in production
+    hash_seed: 22
+
+  # Tail sampling for intelligent trace collection
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 100000
+    expected_new_traces_per_sec: 1000
+    policies:
+      # Always sample errors
+      - name: error-policy
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+
+      # Always sample slow traces (>1s)
+      - name: latency-policy
+        type: latency
+        latency:
+          threshold_ms: 1000
+
+      # Sample 100% of Byzantine detection traces
+      - name: byzantine-policy
+        type: string_attribute
+        string_attribute:
+          key: trace.type
+          values: ["byzantine", "consensus", "security"]
+          enabled_regex_matching: true
+          invert_match: false
+
+      # Sample 100% of rollback traces
+      - name: rollback-policy
+        type: string_attribute
+        string_attribute:
+          key: operation
+          values: ["rollback", "failover"]
+
+      # Sample 50% of VM migration traces
+      - name: migration-policy
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 50
+
+      # Sample 10% of normal operations
+      - name: default-policy
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 10
+
+  # Filter processor to drop debug spans in production
+  filter:
+    traces:
+      span:
+        - 'attributes["debug"] == true'
+
+  # Transform processor for trace enrichment
+  transform:
+    trace_statements:
+      - context: span
+        statements:
+          # Add DWCP version
+          - set(attributes["dwcp.version"], "v3")
+          # Add datacenter info if available
+          - set(attributes["datacenter"], resource.attributes["cloud.availability_zone"])
+          # Calculate migration size if available
+          - set(attributes["migration.size_mb"], attributes["bytes_transferred"] / 1048576)
+
+exporters:
+  # Jaeger exporter for trace storage
+  jaeger:
+    endpoint: jaeger-collector:14250
+    tls:
+      insecure: false
+      ca_file: /etc/otel/certs/ca.crt
+      cert_file: /etc/otel/certs/client.crt
+      key_file: /etc/otel/certs/client.key
+
+  # OTLP exporter to Tempo (alternative to Jaeger)
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: false
+    compression: gzip
+    sending_queue:
+      num_consumers: 10
+      queue_size: 5000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # Prometheus exporter for trace metrics
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: otel
+    const_labels:
+      cluster: dwcp-v3-production
+    send_timestamps: true
+    metric_expiration: 5m
+
+  # Logging exporter for debugging (can be disabled in production)
+  logging:
+    loglevel: info
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  # Kafka exporter for streaming traces to data lake
+  kafka:
+    brokers:
+      - kafka-0:9092
+      - kafka-1:9092
+      - kafka-2:9092
+    topic: dwcp-v3-traces
+    encoding: otlp_proto
+    compression: gzip
+    metadata:
+      full: true
+    timeout: 10s
+    retry:
+      max_retries: 3
+      backoff:
+        initial: 100ms
+        max: 1s
+
+  # File exporter for local trace storage (backup)
+  file:
+    path: /var/log/otel/traces.json
+    rotation:
+      max_megabytes: 100
+      max_days: 7
+      max_backups: 10
+
+extensions:
+  # Health check endpoint
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: /health
+    check_collector_pipeline:
+      enabled: true
+      interval: 5s
+      exporter_failure_threshold: 5
+
+  # Prometheus metrics about the collector
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+  # zPages for diagnostics
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+  # Ballast for memory stability
+  memory_ballast:
+    size_mib: 512
+
+service:
+  extensions: [health_check, pprof, zpages, memory_ballast]
+
+  pipelines:
+    # Traces pipeline
+    traces:
+      receivers: [otlp, jaeger, zipkin]
+      processors:
+        - memory_limiter
+        - resourcedetection
+        - attributes
+        - span
+        - filter
+        - transform
+        - tail_sampling
+        - batch
+      exporters:
+        - jaeger
+        - otlp/tempo
+        - kafka
+        - prometheus
+        - logging
+        - file
+
+    # Metrics pipeline (from trace spans)
+    metrics:
+      receivers: [otlp, prometheus]
+      processors:
+        - memory_limiter
+        - resourcedetection
+        - attributes
+        - batch
+      exporters:
+        - prometheus
+        - logging
+
+    # Logs pipeline (correlated with traces)
+    logs:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - resourcedetection
+        - attributes
+        - batch
+      exporters:
+        - logging
+        - kafka
+
+  # Telemetry configuration
+  telemetry:
+    logs:
+      level: info
+      development: false
+      encoding: json
+      disable_caller: false
+      disable_stacktrace: false
+      output_paths:
+        - stdout
+        - /var/log/otel/collector.log
+      error_output_paths:
+        - stderr
+      initial_fields:
+        service: otel-collector
+        environment: production
+
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+      readers:
+        - periodic:
+            interval: 10s
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+
+    traces:
+      processors:
+        - batch:
+            timeout: 10s
+            send_batch_size: 1024

@@ -1,0 +1,473 @@
+---
+# DWCP v3 Production Setup Playbook
+# Installs and configures DWCP v3 components across hybrid infrastructure
+# Usage: ansible-playbook -i inventory/production.ini dwcp-v3-setup.yml
+
+- name: DWCP v3 - Prerequisites and System Setup
+  hosts: all
+  become: yes
+  tags: prerequisites
+  vars:
+    dwcp_version: "3.0.0"
+    go_version: "1.21.5"
+    kernel_min_version: "5.15"
+
+  tasks:
+    - name: Verify kernel version for DWCP v3
+      shell: uname -r | cut -d. -f1,2
+      register: kernel_version
+      changed_when: false
+
+    - name: Assert kernel version compatibility
+      assert:
+        that:
+          - kernel_version.stdout is version(kernel_min_version, '>=')
+        fail_msg: "Kernel version {{ kernel_version.stdout }} is too old. DWCP v3 requires {{ kernel_min_version }}+"
+        success_msg: "Kernel version {{ kernel_version.stdout }} is compatible"
+
+    - name: Update system packages
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Install system dependencies
+      apt:
+        name:
+          - build-essential
+          - git
+          - wget
+          - curl
+          - vim
+          - htop
+          - iotop
+          - sysstat
+          - net-tools
+          - ethtool
+          - iperf3
+          - numactl
+          - libnuma-dev
+          - linux-tools-generic
+          - linux-headers-{{ ansible_kernel }}
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install RDMA packages (datacenter nodes)
+      apt:
+        name:
+          - rdma-core
+          - libibverbs1
+          - libibverbs-dev
+          - librdmacm1
+          - librdmacm-dev
+          - ibverbs-utils
+          - infiniband-diags
+          - perftest
+        state: present
+      when:
+        - ansible_os_family == "Debian"
+        - "'datacenter' in group_names"
+
+    - name: Configure kernel parameters for DWCP v3
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+      loop:
+        # Network buffer sizes
+        - { name: 'net.core.rmem_max', value: '134217728' }
+        - { name: 'net.core.wmem_max', value: '134217728' }
+        - { name: 'net.core.rmem_default', value: '16777216' }
+        - { name: 'net.core.wmem_default', value: '16777216' }
+        - { name: 'net.ipv4.tcp_rmem', value: '4096 87380 134217728' }
+        - { name: 'net.ipv4.tcp_wmem', value: '4096 65536 134217728' }
+        # TCP optimization
+        - { name: 'net.ipv4.tcp_congestion_control', value: 'bbr' }
+        - { name: 'net.core.default_qdisc', value: 'fq' }
+        - { name: 'net.ipv4.tcp_mtu_probing', value: '1' }
+        - { name: 'net.ipv4.tcp_slow_start_after_idle', value: '0' }
+        # Connection tracking
+        - { name: 'net.netfilter.nf_conntrack_max', value: '1048576' }
+        - { name: 'net.ipv4.ip_local_port_range', value: '1024 65535' }
+        # Performance
+        - { name: 'vm.swappiness', value: '10' }
+        - { name: 'vm.dirty_ratio', value: '40' }
+        - { name: 'vm.dirty_background_ratio', value: '10' }
+        - { name: 'fs.file-max', value: '2097152' }
+
+    - name: Load BBR kernel module
+      modprobe:
+        name: tcp_bbr
+        state: present
+
+    - name: Ensure BBR loads on boot
+      lineinfile:
+        path: /etc/modules-load.d/dwcp.conf
+        line: tcp_bbr
+        create: yes
+
+    - name: Configure RDMA (datacenter nodes)
+      block:
+        - name: Load RDMA kernel modules
+          modprobe:
+            name: "{{ item }}"
+            state: present
+          loop:
+            - rdma_cm
+            - ib_uverbs
+            - rdma_ucm
+            - ib_core
+
+        - name: Ensure RDMA modules load on boot
+          lineinfile:
+            path: /etc/modules-load.d/rdma.conf
+            line: "{{ item }}"
+            create: yes
+          loop:
+            - rdma_cm
+            - ib_uverbs
+            - rdma_ucm
+            - ib_core
+
+        - name: Start RDMA services
+          systemd:
+            name: "{{ item }}"
+            state: started
+            enabled: yes
+          loop:
+            - rdma-ndd
+            - ibacm
+      when: "'datacenter' in group_names"
+
+- name: DWCP v3 - Install Go and Build Tools
+  hosts: all
+  become: yes
+  tags: golang
+  vars:
+    go_version: "1.21.5"
+    go_install_dir: "/usr/local"
+
+  tasks:
+    - name: Check if Go is already installed
+      command: go version
+      register: go_installed
+      changed_when: false
+      failed_when: false
+
+    - name: Download Go
+      get_url:
+        url: "https://go.dev/dl/go{{ go_version }}.linux-amd64.tar.gz"
+        dest: "/tmp/go{{ go_version }}.linux-amd64.tar.gz"
+        checksum: "sha256:https://go.dev/dl/?mode=json"
+      when: go_installed.rc != 0 or go_version not in go_installed.stdout
+
+    - name: Remove old Go installation
+      file:
+        path: "{{ go_install_dir }}/go"
+        state: absent
+      when: go_installed.rc != 0 or go_version not in go_installed.stdout
+
+    - name: Extract Go
+      unarchive:
+        src: "/tmp/go{{ go_version }}.linux-amd64.tar.gz"
+        dest: "{{ go_install_dir }}"
+        remote_src: yes
+      when: go_installed.rc != 0 or go_version not in go_installed.stdout
+
+    - name: Configure Go environment
+      blockinfile:
+        path: /etc/profile.d/go.sh
+        create: yes
+        mode: '0644'
+        block: |
+          export GOROOT={{ go_install_dir }}/go
+          export GOPATH=/opt/go
+          export PATH=$PATH:$GOROOT/bin:$GOPATH/bin
+
+    - name: Create GOPATH directory
+      file:
+        path: /opt/go
+        state: directory
+        mode: '0755'
+
+- name: DWCP v3 - Clone and Build
+  hosts: all
+  become: yes
+  tags: build
+  vars:
+    dwcp_repo: "https://github.com/novacron/dwcp.git"
+    dwcp_install_dir: "/opt/dwcp"
+    dwcp_branch: "v3"
+
+  tasks:
+    - name: Install Git
+      apt:
+        name: git
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Clone DWCP v3 repository
+      git:
+        repo: "{{ dwcp_repo }}"
+        dest: "{{ dwcp_install_dir }}"
+        version: "{{ dwcp_branch }}"
+        force: yes
+
+    - name: Build DWCP v3 components
+      shell: |
+        export GOROOT=/usr/local/go
+        export GOPATH=/opt/go
+        export PATH=$PATH:$GOROOT/bin:$GOPATH/bin
+        cd {{ dwcp_install_dir }}/backend/core/network/dwcp.v3
+        go mod download
+        go build -o /usr/local/bin/dwcp-v3 ./cmd/dwcp
+      args:
+        creates: /usr/local/bin/dwcp-v3
+
+    - name: Build DWCP v3 daemon
+      shell: |
+        export GOROOT=/usr/local/go
+        export GOPATH=/opt/go
+        export PATH=$PATH:$GOROOT/bin:$GOPATH/bin
+        cd {{ dwcp_install_dir }}/backend/core/network/dwcp.v3
+        go build -o /usr/local/bin/dwcpd ./cmd/dwcpd
+      args:
+        creates: /usr/local/bin/dwcpd
+
+    - name: Build DWCP v3 CLI tools
+      shell: |
+        export GOROOT=/usr/local/go
+        export GOPATH=/opt/go
+        export PATH=$PATH:$GOROOT/bin:$GOPATH/bin
+        cd {{ dwcp_install_dir }}/backend/core/network/dwcp.v3
+        go build -o /usr/local/bin/dwcp-ctl ./cmd/dwcp-ctl
+      args:
+        creates: /usr/local/bin/dwcp-ctl
+
+    - name: Set executable permissions
+      file:
+        path: "{{ item }}"
+        mode: '0755'
+      loop:
+        - /usr/local/bin/dwcp-v3
+        - /usr/local/bin/dwcpd
+        - /usr/local/bin/dwcp-ctl
+
+- name: DWCP v3 - Configuration
+  hosts: all
+  become: yes
+  tags: config
+  vars:
+    dwcp_config_dir: "/etc/dwcp"
+    dwcp_data_dir: "/var/lib/dwcp"
+    dwcp_log_dir: "/var/log/dwcp"
+
+  tasks:
+    - name: Create DWCP directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ dwcp_config_dir }}"
+        - "{{ dwcp_data_dir }}"
+        - "{{ dwcp_log_dir }}"
+
+    - name: Deploy datacenter mode configuration
+      copy:
+        src: "{{ playbook_dir }}/../../config/dwcp-v3-datacenter.yaml"
+        dest: "{{ dwcp_config_dir }}/datacenter.yaml"
+        mode: '0644'
+      when: "'datacenter' in group_names"
+      notify: Restart DWCP
+
+    - name: Deploy internet mode configuration
+      copy:
+        src: "{{ playbook_dir }}/../../config/dwcp-v3-internet.yaml"
+        dest: "{{ dwcp_config_dir }}/internet.yaml"
+        mode: '0644'
+      when: "'internet' in group_names"
+      notify: Restart DWCP
+
+    - name: Deploy hybrid mode configuration
+      copy:
+        src: "{{ playbook_dir }}/../../config/dwcp-v3-hybrid.yaml"
+        dest: "{{ dwcp_config_dir }}/hybrid.yaml"
+        mode: '0644'
+      when: "'hybrid' in group_names"
+      notify: Restart DWCP
+
+    - name: Create systemd service file
+      copy:
+        dest: /etc/systemd/system/dwcp.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=DWCP v3 - Distributed Wire-speed Communication Protocol
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=root
+          ExecStart=/usr/local/bin/dwcpd --config {{ dwcp_config_dir }}/{{ dwcp_mode | default('hybrid') }}.yaml
+          ExecReload=/bin/kill -HUP $MAINPID
+          KillMode=process
+          Restart=on-failure
+          RestartSec=10s
+          LimitNOFILE=1048576
+          LimitNPROC=512
+
+          # Performance tuning
+          CPUSchedulingPolicy=fifo
+          CPUSchedulingPriority=99
+          IOSchedulingClass=realtime
+          IOSchedulingPriority=0
+
+          # Security
+          NoNewPrivileges=true
+          PrivateTmp=true
+
+          # Logging
+          StandardOutput=journal
+          StandardError=journal
+          SyslogIdentifier=dwcp
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Restart DWCP
+
+    - name: Enable and start DWCP service
+      systemd:
+        name: dwcp
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+- name: DWCP v3 - Monitoring Setup
+  hosts: all
+  become: yes
+  tags: monitoring
+  vars:
+    prometheus_port: 9090
+    node_exporter_version: "1.7.0"
+
+  tasks:
+    - name: Download Node Exporter
+      get_url:
+        url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+        dest: "/tmp/node_exporter.tar.gz"
+
+    - name: Extract Node Exporter
+      unarchive:
+        src: "/tmp/node_exporter.tar.gz"
+        dest: /tmp
+        remote_src: yes
+
+    - name: Install Node Exporter
+      copy:
+        src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+        dest: /usr/local/bin/node_exporter
+        mode: '0755'
+        remote_src: yes
+
+    - name: Create Node Exporter systemd service
+      copy:
+        dest: /etc/systemd/system/node_exporter.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Prometheus Node Exporter
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=root
+          ExecStart=/usr/local/bin/node_exporter
+          Restart=on-failure
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start Node Exporter
+      systemd:
+        name: node_exporter
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Configure DWCP metrics endpoint
+      lineinfile:
+        path: /etc/dwcp/{{ dwcp_mode | default('hybrid') }}.yaml
+        regexp: '^  metricsPort:'
+        line: '  metricsPort: 9100'
+        insertafter: '^monitoring:'
+      notify: Restart DWCP
+
+- name: DWCP v3 - Validation and Health Checks
+  hosts: all
+  become: yes
+  tags: validation
+
+  tasks:
+    - name: Wait for DWCP service to be ready
+      wait_for:
+        port: 9100
+        delay: 5
+        timeout: 60
+
+    - name: Check DWCP service status
+      systemd:
+        name: dwcp
+        state: started
+      register: dwcp_status
+
+    - name: Validate DWCP version
+      shell: /usr/local/bin/dwcp-ctl version
+      register: dwcp_version_check
+      changed_when: false
+
+    - name: Display DWCP version
+      debug:
+        msg: "{{ dwcp_version_check.stdout }}"
+
+    - name: Check DWCP health endpoint
+      uri:
+        url: "http://localhost:9100/health"
+        method: GET
+        return_content: yes
+      register: health_check
+      retries: 3
+      delay: 5
+
+    - name: Display health check results
+      debug:
+        msg: "{{ health_check.content }}"
+
+    - name: Check RDMA devices (datacenter nodes)
+      command: ibv_devices
+      register: rdma_devices
+      changed_when: false
+      when: "'datacenter' in group_names"
+
+    - name: Display RDMA devices
+      debug:
+        msg: "{{ rdma_devices.stdout }}"
+      when: "'datacenter' in group_names"
+
+    - name: Verify network configuration
+      command: dwcp-ctl status
+      register: dwcp_status_output
+      changed_when: false
+
+    - name: Display DWCP status
+      debug:
+        msg: "{{ dwcp_status_output.stdout }}"
+
+  handlers:
+    - name: Restart DWCP
+      systemd:
+        name: dwcp
+        state: restarted
+        daemon_reload: yes

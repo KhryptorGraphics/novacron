@@ -1,0 +1,45 @@
+{
+  "name": "@novacron/dwcp-sdk",
+  "version": "3.0.0",
+  "description": "TypeScript/JavaScript SDK for Distributed Worker Control Protocol (DWCP) v3",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "format": "prettier --write src/**/*.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "dwcp",
+    "vm",
+    "virtualization",
+    "distributed",
+    "cloud"
+  ],
+  "author": "NovaCron Platform Team",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/novacron/dwcp-sdk-typescript"
+  },
+  "dependencies": {
+    "ws": "^8.14.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.0",
+    "@types/ws": "^8.5.5",
+    "@types/uuid": "^9.0.5",
+    "@typescript-eslint/eslint-plugin": "^6.7.0",
+    "@typescript-eslint/parser": "^6.7.0",
+    "eslint": "^8.50.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.0.3",
+    "typescript": "^5.2.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

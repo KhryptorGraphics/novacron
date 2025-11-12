@@ -1,0 +1,172 @@
+{
+  "name": "dwcp-vscode",
+  "displayName": "DWCP Development Tools",
+  "description": "VSCode extension for Distributed Worker Control Protocol (DWCP) development",
+  "version": "3.0.0",
+  "publisher": "novacron",
+  "icon": "resources/icon.png",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other",
+    "Snippets",
+    "Debuggers"
+  ],
+  "activationEvents": [
+    "onLanguage:dwcp",
+    "onCommand:dwcp.connectServer",
+    "onCommand:dwcp.createVM",
+    "onView:dwcpVMs"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "dwcp.connectServer",
+        "title": "DWCP: Connect to Server"
+      },
+      {
+        "command": "dwcp.disconnectServer",
+        "title": "DWCP: Disconnect from Server"
+      },
+      {
+        "command": "dwcp.createVM",
+        "title": "DWCP: Create Virtual Machine"
+      },
+      {
+        "command": "dwcp.startVM",
+        "title": "DWCP: Start VM"
+      },
+      {
+        "command": "dwcp.stopVM",
+        "title": "DWCP: Stop VM"
+      },
+      {
+        "command": "dwcp.destroyVM",
+        "title": "DWCP: Destroy VM"
+      },
+      {
+        "command": "dwcp.migrateVM",
+        "title": "DWCP: Migrate VM"
+      },
+      {
+        "command": "dwcp.snapshotVM",
+        "title": "DWCP: Create Snapshot"
+      },
+      {
+        "command": "dwcp.showMetrics",
+        "title": "DWCP: Show VM Metrics"
+      },
+      {
+        "command": "dwcp.refreshVMs",
+        "title": "DWCP: Refresh VM List",
+        "icon": "$(refresh)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "dwcp-explorer",
+          "title": "DWCP",
+          "icon": "resources/dwcp-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "dwcp-explorer": [
+        {
+          "id": "dwcpVMs",
+          "name": "Virtual Machines"
+        },
+        {
+          "id": "dwcpNodes",
+          "name": "Cluster Nodes"
+        },
+        {
+          "id": "dwcpTemplates",
+          "name": "Templates"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "DWCP",
+      "properties": {
+        "dwcp.server.address": {
+          "type": "string",
+          "default": "localhost",
+          "description": "DWCP server address"
+        },
+        "dwcp.server.port": {
+          "type": "number",
+          "default": 9000,
+          "description": "DWCP server port"
+        },
+        "dwcp.server.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for authentication"
+        },
+        "dwcp.server.tlsEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable TLS connection"
+        },
+        "dwcp.ui.refreshInterval": {
+          "type": "number",
+          "default": 5000,
+          "description": "Auto-refresh interval in milliseconds"
+        },
+        "dwcp.ui.showMetricsInline": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show VM metrics inline in tree view"
+        }
+      }
+    },
+    "snippets": [
+      {
+        "language": "yaml",
+        "path": "./snippets/vm-config.json"
+      },
+      {
+        "language": "javascript",
+        "path": "./snippets/sdk-js.json"
+      },
+      {
+        "language": "typescript",
+        "path": "./snippets/sdk-ts.json"
+      },
+      {
+        "language": "python",
+        "path": "./snippets/sdk-python.json"
+      },
+      {
+        "language": "go",
+        "path": "./snippets/sdk-go.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.0",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^6.7.0",
+    "@typescript-eslint/parser": "^6.7.0",
+    "eslint": "^8.50.0",
+    "typescript": "^5.2.0",
+    "@vscode/test-electron": "^2.3.0",
+    "vsce": "^2.15.0"
+  },
+  "dependencies": {
+    "@novacron/dwcp-sdk": "^3.0.0"
+  }
+}

@@ -1,0 +1,35 @@
+# Playwright Test Artifacts
+/test-results/
+/playwright-report/
+/playwright/.cache/
+
+# Test reports and artifacts
+reports/
+archives/
+snapshots/*-actual.png
+snapshots/*-diff.png
+
+# Authentication state
+fixtures/auth-state.json
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Node modules
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+*.temp

@@ -1,0 +1,949 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": "Prometheus",
+        "enable": true,
+        "expr": "dwcp_v3_mode_switches_total",
+        "iconColor": "purple",
+        "name": "Mode Switches",
+        "step": "60s",
+        "tagKeys": "from_mode,to_mode",
+        "textFormat": "Mode switch: {{ from_mode }} → {{ to_mode }}",
+        "titleFormat": "Mode Switch"
+      },
+      {
+        "datasource": "Prometheus",
+        "enable": true,
+        "expr": "increase(dwcp_v3_acp_byzantine_detections_total[1m]) > 0",
+        "iconColor": "red",
+        "name": "Byzantine Events",
+        "tagKeys": "node_id",
+        "textFormat": "Byzantine node detected: {{ node_id }}",
+        "titleFormat": "Security Event"
+      }
+    ]
+  },
+  "description": "Real-time performance monitoring for DWCP v3 with live VM migrations, bandwidth utilization, and consensus tracking",
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "icon": "external link",
+      "tags": [],
+      "title": "Production Rollout",
+      "type": "link",
+      "url": "/d/dwcp-v3-production-rollout"
+    },
+    {
+      "icon": "external link",
+      "tags": [],
+      "title": "SLA Compliance",
+      "type": "link",
+      "url": "/d/dwcp-v3-sla"
+    }
+  ],
+  "panels": [
+    {
+      "datasource": "Prometheus",
+      "description": "Active VM migrations happening right now",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 18,
+          "valueSize": 48
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(dwcp_v3_active_streams)",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Active Migrations",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Current network mode (datacenter/internet/hybrid)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "datacenter": {
+                  "color": "green",
+                  "index": 0,
+                  "text": "DATACENTER"
+                },
+                "hybrid": {
+                  "color": "yellow",
+                  "index": 2,
+                  "text": "HYBRID"
+                },
+                "internet": {
+                  "color": "blue",
+                  "index": 1,
+                  "text": "INTERNET"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 18,
+          "valueSize": 36
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "expr": "dwcp_v3_current_mode",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Current Mode",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Current bandwidth utilization across all streams",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
+          "max": 3000,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1000
+              },
+              {
+                "color": "green",
+                "value": 2000
+              }
+            ]
+          },
+          "unit": "MBs"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "text": {
+          "titleSize": 18,
+          "valueSize": 42
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(dwcp_v3_bytes_transferred_total[5s])) / 1024 / 1024",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Real-Time Bandwidth Utilization",
+      "type": "gauge"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Byzantine detection events in last 5 minutes",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 16,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 18,
+          "valueSize": 48
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(dwcp_v3_acp_byzantine_detections_total[5m]))",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Byzantine Events (5m)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "PBFT consensus latency (real-time)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
+      "id": 5,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "text": {
+          "titleSize": 18,
+          "valueSize": 42
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, rate(dwcp_v3_component_latency_seconds_bucket{component=\"acp\"}[5s])) * 1000",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "PBFT Consensus P99",
+      "type": "gauge"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Live VM migrations by datacenter vs internet mode",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Migrations/sec",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "lastNotNull", "max"],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(dwcp_v3_migration_duration_seconds_count{mode=\"datacenter\"}[5s])",
+          "legendFormat": "Datacenter Mode",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(dwcp_v3_migration_duration_seconds_count{mode=\"internet\"}[5s])",
+          "legendFormat": "Internet Mode",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(dwcp_v3_migration_duration_seconds_count{mode=\"hybrid\"}[5s])",
+          "legendFormat": "Hybrid Mode",
+          "refId": "C"
+        }
+      ],
+      "title": "Live VM Migrations by Mode",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Real-time bandwidth utilization by mode",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Bandwidth (MB/s)",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 2400
+              }
+            ]
+          },
+          "unit": "MBs"
+        }
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "lastNotNull", "max"],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(dwcp_v3_bytes_transferred_total{mode=\"datacenter\"}[5s])) by (mode) / 1024 / 1024",
+          "legendFormat": "Datacenter (Target: 2.4 GB/s)",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(dwcp_v3_bytes_transferred_total{mode=\"internet\"}[5s])) by (mode) / 1024 / 1024",
+          "legendFormat": "Internet (Target: 100-900 Mbps)",
+          "refId": "B"
+        },
+        {
+          "expr": "2400",
+          "hide": false,
+          "legendFormat": "Datacenter Target",
+          "refId": "C"
+        }
+      ],
+      "title": "Real-Time Bandwidth by Mode",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Mode switching events over time",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Switches",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": ["sum"],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "increase(dwcp_v3_mode_switches_total{from_mode=\"datacenter\",to_mode=\"internet\"}[1m])",
+          "legendFormat": "Datacenter → Internet",
+          "refId": "A"
+        },
+        {
+          "expr": "increase(dwcp_v3_mode_switches_total{from_mode=\"internet\",to_mode=\"datacenter\"}[1m])",
+          "legendFormat": "Internet → Datacenter",
+          "refId": "B"
+        },
+        {
+          "expr": "increase(dwcp_v3_mode_switches_total{to_mode=\"hybrid\"}[1m])",
+          "legendFormat": "→ Hybrid",
+          "refId": "C"
+        }
+      ],
+      "title": "Mode Switching Events",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Consensus protocol activity (Raft vs PBFT)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Operations/sec",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "lastNotNull", "max"],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(dwcp_v3_component_operations_total{component=\"acp\",operation_type=\"raft_consensus\"}[5s])",
+          "legendFormat": "Raft Consensus",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(dwcp_v3_component_operations_total{component=\"acp\",operation_type=\"pbft_consensus\"}[5s])",
+          "legendFormat": "PBFT Consensus",
+          "refId": "B"
+        }
+      ],
+      "title": "Consensus Protocol Activity",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Component latency heatmap showing distribution",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          }
+        }
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "id": 10,
+      "options": {
+        "calculate": false,
+        "cellGap": 2,
+        "cellValues": {},
+        "color": {
+          "exponent": 0.5,
+          "fill": "dark-orange",
+          "mode": "scheme",
+          "reverse": false,
+          "scale": "exponential",
+          "scheme": "Spectral",
+          "steps": 128
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1e-9
+        },
+        "legend": {
+          "show": true
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "tooltip": {
+          "show": true,
+          "yHistogram": false
+        },
+        "yAxis": {
+          "axisPlacement": "left",
+          "reverse": false,
+          "unit": "s"
+        }
+      },
+      "pluginVersion": "9.0.0",
+      "targets": [
+        {
+          "expr": "sum(rate(dwcp_v3_component_latency_seconds_bucket[1m])) by (le, component)",
+          "format": "heatmap",
+          "legendFormat": "{{component}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Component Latency Heatmap",
+      "type": "heatmap"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Real-time stream activity by component",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Active Streams",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "lastNotNull", "max"],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "dwcp_v3_active_streams{mode=\"datacenter\"}",
+          "legendFormat": "Datacenter Streams",
+          "refId": "A"
+        },
+        {
+          "expr": "dwcp_v3_active_streams{mode=\"internet\"}",
+          "legendFormat": "Internet Streams",
+          "refId": "B"
+        },
+        {
+          "expr": "dwcp_v3_active_streams{mode=\"hybrid\"}",
+          "legendFormat": "Hybrid Streams",
+          "refId": "C"
+        }
+      ],
+      "title": "Active Streams by Mode",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "1s",
+  "schemaVersion": 36,
+  "style": "dark",
+  "tags": ["dwcp-v3", "real-time", "performance"],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "Prometheus"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": ["All"],
+          "value": ["$__all"]
+        },
+        "datasource": "${datasource}",
+        "definition": "label_values(dwcp_v3_active_streams, node_id)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Node",
+        "multi": true,
+        "name": "node",
+        "options": [],
+        "query": {
+          "query": "label_values(dwcp_v3_active_streams, node_id)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["1s", "5s", "10s", "30s", "1m"]
+  },
+  "timezone": "browser",
+  "title": "DWCP v3 - Real-Time Performance",
+  "uid": "dwcp-v3-real-time",
+  "version": 1,
+  "weekStart": ""
+}

@@ -1,0 +1,456 @@
+# DWCP v3 Hybrid Mode Configuration
+# Adaptive switching between datacenter and internet modes
+
+mode: hybrid
+
+# Network Configuration
+network:
+  # Dual transport support
+  transports:
+    - name: rdma
+      enabled: true
+      device: mlx5_0
+      port: 8080
+      priority: 1  # Highest priority
+    - name: tcp
+      enabled: true
+      port: 443
+      priority: 2  # Fallback
+    - name: quic
+      enabled: true
+      port: 443
+      priority: 3  # Alternative fallback
+
+  # RDMA configuration
+  rdma:
+    enabled: true
+    qpType: RC
+    maxQueuePairs: 1024
+    maxSendWr: 4096
+    maxRecvWr: 4096
+    cqDepth: 8192
+    hugepagesEnabled: true
+
+  # TCP configuration
+  tcp:
+    enabled: true
+    congestionControl: bbr
+    noDelay: true
+    fastOpen: true
+    sendBuffer: 4MB
+    recvBuffer: 4MB
+
+  # QUIC configuration
+  quic:
+    enabled: true
+    maxStreams: 1000
+    initialMaxData: 10MB
+
+  # MTU (adaptive)
+  mtu: 9000  # Start with jumbo frames, adapt down if needed
+  mtuProbing: true
+
+  # Network interface
+  bindInterface: auto  # Auto-detect
+  bindAddress: 0.0.0.0
+
+# Performance Configuration
+performance:
+  # Target metrics (adaptive)
+  targetLatency: auto  # 5us datacenter, 50ms internet
+  targetThroughput: auto  # 200Gbps datacenter, 10Gbps internet
+
+  # Buffer sizes (adaptive)
+  sendBufferSize: auto
+  recvBufferSize: auto
+
+  # Connection management
+  maxConnections: 30000
+  connectionPoolSize: 3000
+  idleTimeout: 120s
+
+  # Zero-copy (when available)
+  zeroCopy: auto
+  directIO: auto
+
+  # CPU affinity (adaptive)
+  cpuAffinity:
+    enabled: true
+    mode: adaptive  # Strict in datacenter, relaxed in internet
+
+  # Polling vs event-driven (adaptive)
+  pollingMode: auto
+
+  # Batching
+  batchSize: 48
+  batchTimeout: auto
+
+# Protocol Configuration
+protocol:
+  version: 3
+
+  # Compression (adaptive)
+  compression:
+    enabled: true
+    algorithm: zstd
+    level: auto  # 0 for datacenter, 3 for internet
+    minSize: 1KB
+    adaptiveLevelThreshold: 10ms  # Switch to faster compression if latency > 10ms
+
+  # Encryption (adaptive)
+  encryption:
+    enabled: true
+    algorithm: aes-256-gcm
+    disableInDatacenter: true  # Disable in trusted datacenter
+    keyRotationInterval: 24h
+
+  # Flow control (adaptive)
+  flowControl:
+    enabled: true
+    algorithm: auto  # Credit-based for datacenter, window-based for internet
+
+  # Congestion control (adaptive)
+  congestionControl:
+    enabled: true
+    algorithm: auto  # DCQCN for datacenter, BBR for internet
+
+  # Reliability (adaptive)
+  reliability:
+    enabled: true
+    ackTimeout: auto
+    maxRetries: auto
+    selectiveAck: true
+
+# Memory Configuration
+memory:
+  # Hugepages (when available)
+  hugepages: auto
+  hugepageSize: 2MB
+
+  # Memory pool
+  poolSize: 16GB
+  preAllocate: auto
+
+  # NUMA awareness
+  numaAware: true
+
+# Monitoring Configuration
+monitoring:
+  enabled: true
+  metricsPort: 9100
+  metricsInterval: 5s
+
+  # Comprehensive metrics for both modes
+  metrics:
+    - name: dwcp_mode
+      enabled: true
+    - name: dwcp_latency_us
+      enabled: true
+    - name: dwcp_latency_ms
+      enabled: true
+    - name: dwcp_throughput_gbps
+      enabled: true
+    - name: dwcp_active_connections
+      enabled: true
+    - name: dwcp_mode_switches_total
+      enabled: true
+    - name: dwcp_mode_switch_duration_ms
+      enabled: true
+    - name: dwcp_rdma_available
+      enabled: true
+    - name: dwcp_compression_enabled
+      enabled: true
+    - name: dwcp_encryption_enabled
+      enabled: true
+    - name: dwcp_packet_loss_rate
+      enabled: true
+    - name: dwcp_network_quality_score
+      enabled: true
+
+  healthCheckPath: /health
+  healthCheckInterval: 10s
+
+  prometheus:
+    enabled: true
+
+  tracing:
+    enabled: true
+    samplingRate: 0.1
+
+# Logging Configuration
+logging:
+  level: info
+  format: json
+  output: /var/log/dwcp/hybrid.log
+
+  maxSize: 100MB
+  maxBackups: 10
+  maxAge: 30
+  compress: true
+
+  perfLog:
+    enabled: true
+    output: /var/log/dwcp/perf.log
+    interval: 10s
+
+  # Mode switching log
+  modeSwitchLog:
+    enabled: true
+    output: /var/log/dwcp/mode-switch.log
+
+# Feature Flags
+features:
+  enableV3: true
+  enableHybridMode: true  # Core feature
+  enableCompression: true
+  enableEncryption: true
+  enableByzantine: auto  # Enabled in internet mode
+  enableAdaptiveMode: true  # Key feature
+
+# Adaptive Mode Switching
+adaptive:
+  # Detection
+  detection:
+    enabled: true
+    interval: 1s
+    samplingWindow: 10s
+
+  # Mode detection criteria
+  datacenterCriteria:
+    - metric: latency
+      operator: less_than
+      value: 100us
+      weight: 0.4
+    - metric: throughput
+      operator: greater_than
+      value: 50Gbps
+      weight: 0.3
+    - metric: packetLoss
+      operator: less_than
+      value: 0.001
+      weight: 0.2
+    - metric: rdmaAvailable
+      operator: equals
+      value: true
+      weight: 0.1
+
+  internetCriteria:
+    - metric: latency
+      operator: greater_than
+      value: 10ms
+      weight: 0.4
+    - metric: throughput
+      operator: less_than
+      value: 10Gbps
+      weight: 0.3
+    - metric: packetLoss
+      operator: greater_than
+      value: 0.001
+      weight: 0.2
+    - metric: rdmaAvailable
+      operator: equals
+      value: false
+      weight: 0.1
+
+  # Thresholds for mode switching
+  thresholds:
+    # Switch to datacenter mode
+    datacenterScore: 0.7
+
+    # Switch to internet mode
+    internetScore: 0.7
+
+    # Hysteresis to prevent flapping
+    hysteresis: 0.1
+
+  # Mode switching behavior
+  switching:
+    # Cooldown period between switches
+    cooldownPeriod: 30s
+
+    # Graceful transition
+    gracefulTransition: true
+    drainTimeout: 10s
+
+    # Proactive switching
+    proactive: true
+    predictionWindow: 5s
+
+  # Per-connection mode selection
+  perConnection:
+    enabled: true
+    strategy: best-effort  # Use best available mode per connection
+
+# Byzantine Fault Tolerance (for internet mode)
+byzantine:
+  enabled: auto  # Enabled when in internet mode
+
+  authentication:
+    method: hmac-sha256
+    keyRotation: 1h
+
+  validation:
+    checksums: true
+    signatures: auto
+    timestampTolerance: 5s
+
+  reputation:
+    enabled: true
+    decayInterval: 1h
+
+  rateLimit:
+    enabled: true
+    requestsPerSecond: 5000
+    burstSize: 10000
+
+# Cluster Configuration
+cluster:
+  # Discovery (hybrid approach)
+  discovery:
+    methods:
+      - method: static
+        priority: 1
+        staticPeers:
+          - 10.0.1.10:8080
+          - 10.0.1.11:8080
+      - method: dns
+        priority: 2
+        dnsDomain: dwcp.novacron.io
+
+  # Gossip protocol
+  gossip:
+    enabled: true
+    interval: 500ms
+    fanout: 4
+
+  # Failure detection
+  failureDetection:
+    enabled: true
+    heartbeatInterval: 1s
+    timeoutMultiplier: 3
+
+# Resource Limits
+limits:
+  maxCPU: 32
+  maxMemory: 64GB
+  maxOpenFiles: 524288
+  maxThreads: 512
+
+# Security Configuration
+security:
+  # Authentication (adaptive)
+  authentication:
+    enabled: auto  # Disabled in datacenter, enabled in internet
+    method: jwt
+    jwtSecret: ${JWT_SECRET}
+
+  # Authorization
+  authorization:
+    enabled: true
+    method: rbac
+
+  # TLS (adaptive)
+  tls:
+    enabled: auto  # Disabled in datacenter, enabled in internet
+    cert: /etc/dwcp/tls/server.crt
+    key: /etc/dwcp/tls/server.key
+    minVersion: TLS1.3
+
+  # Network ACLs
+  allowedCIDRs:
+    - 10.0.0.0/8  # Datacenter
+    - 0.0.0.0/0   # Internet
+
+  # Rate limiting
+  rateLimit:
+    enabled: true
+    requestsPerSecond: auto  # Higher in datacenter
+
+# Quality of Service
+qos:
+  enabled: true
+
+  # Traffic shaping (adaptive)
+  trafficShaping:
+    enabled: true
+    maxRate: auto
+
+  # Priority queues
+  priorityQueues:
+    - name: critical
+      priority: 1
+      weight: 50
+      affinityMode: datacenter  # Prefer datacenter mode
+    - name: normal
+      priority: 2
+      weight: 30
+      affinityMode: auto
+    - name: background
+      priority: 3
+      weight: 20
+      affinityMode: internet  # Can use internet mode
+
+# Caching
+cache:
+  enabled: true
+  maxSize: 2GB
+  ttl: 5m
+  evictionPolicy: lru
+
+# Connection Migration
+migration:
+  enabled: true
+
+  # Seamless migration between modes
+  seamless: true
+  migrationTimeout: 5s
+
+  # Connection state preservation
+  preserveState: true
+
+  # Fallback on migration failure
+  fallbackOnFailure: true
+
+# Experimental Features
+experimental:
+  enableMultipath: true  # Use both RDMA and TCP simultaneously
+  enablePathSelection: true  # Dynamic path selection
+  enableLoadBalancing: true  # Balance across modes
+  enablePredictiveSwitching: true  # ML-based mode prediction
+
+# Machine Learning (for predictive mode switching)
+ml:
+  enabled: true
+
+  # Model
+  modelPath: /var/lib/dwcp/models/mode-predictor.onnx
+  updateInterval: 1h
+
+  # Features
+  features:
+    - latency_history
+    - throughput_history
+    - packet_loss_history
+    - time_of_day
+    - connection_count
+
+  # Prediction
+  predictionWindow: 10s
+  confidenceThreshold: 0.8
+
+# Telemetry
+telemetry:
+  enabled: true
+  endpoint: http://monitoring.novacron.io:9090
+  interval: 10s
+  tags:
+    environment: production
+    mode: hybrid
+    region: multi
+
+  # Enhanced telemetry for hybrid mode
+  extendedMetrics:
+    - mode_distribution
+    - mode_switch_reasons
+    - per_mode_performance
+    - adaptive_score_history

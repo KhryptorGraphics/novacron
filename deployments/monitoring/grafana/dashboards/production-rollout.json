@@ -1,0 +1,806 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": "Prometheus",
+        "enable": true,
+        "expr": "ALERTS{alertname=~\"SLA.*Violation|.*Rollback.*\"}",
+        "iconColor": "red",
+        "name": "Critical Alerts",
+        "tagKeys": "alertname,severity",
+        "textFormat": "{{ alertname }}: {{ description }}",
+        "titleFormat": "Alert"
+      }
+    ]
+  },
+  "description": "DWCP v3 Production Rollout Monitoring - Feature flags, health metrics, and automated go/no-go decision indicators",
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "icon": "external link",
+      "tags": [],
+      "title": "Real-Time Performance",
+      "type": "link",
+      "url": "/d/dwcp-v3-real-time"
+    },
+    {
+      "icon": "external link",
+      "tags": [],
+      "title": "SLA Compliance",
+      "type": "link",
+      "url": "/d/dwcp-v3-sla"
+    }
+  ],
+  "panels": [
+    {
+      "datasource": "Prometheus",
+      "description": "Overall rollout health status with automatic go/no-go indicators",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "index": 0,
+                  "text": "NO GO"
+                },
+                "1": {
+                  "color": "green",
+                  "index": 1,
+                  "text": "GO"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "text": {
+          "titleSize": 32,
+          "valueSize": 80
+        }
+      },
+      "pluginVersion": "9.0.0",
+      "targets": [
+        {
+          "expr": "(sla:availability:5m >= 0.999) and (sla:latency_p99:5m <= 0.1) and (sla:error_rate:5m <= 0.01)",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "GO / NO-GO STATUS",
+      "type": "gauge"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Current rollout percentage across all nodes",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "text": {
+          "titleSize": 24,
+          "valueSize": 72
+        }
+      },
+      "pluginVersion": "9.0.0",
+      "targets": [
+        {
+          "expr": "avg(dwcp_v3_rollout_percentage) * 100",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Rollout Progress",
+      "type": "gauge"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Number of nodes running v3 vs v1",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "mappings": []
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "displayLabels": ["percent", "value"],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": ["value", "percent"]
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "expr": "count(up{job=\"dwcp-v3-core\",version=\"v3\"} == 1)",
+          "legendFormat": "v3",
+          "refId": "A"
+        },
+        {
+          "expr": "count(up{job=\"dwcp-v1-legacy\",version=\"v1\"} == 1)",
+          "legendFormat": "v1",
+          "refId": "B"
+        }
+      ],
+      "title": "Version Distribution",
+      "type": "piechart"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Time remaining until next rollout phase",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "dtdurations"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 20,
+          "valueSize": 48
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "dwcp_v3_rollout_next_phase_seconds",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Time to Next Phase",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Error rate comparison: V3 vs V1",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Error Rate",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "mappings": [],
+          "max": 0.02,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.005
+              },
+              {
+                "color": "red",
+                "value": 0.01
+              }
+            ]
+          },
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "lastNotNull", "max"],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(dwcp_v3_component_errors_total{version=\"v3\"}[5m]) / rate(dwcp_v3_component_operations_total{version=\"v3\"}[5m])",
+          "legendFormat": "V3 Error Rate",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(dwcp_v3_component_errors_total{version=\"v1\"}[5m]) / rate(dwcp_v3_component_operations_total{version=\"v1\"}[5m])",
+          "legendFormat": "V1 Error Rate",
+          "refId": "B"
+        },
+        {
+          "expr": "0.01",
+          "hide": false,
+          "legendFormat": "SLA Threshold (1%)",
+          "refId": "C"
+        }
+      ],
+      "title": "Error Rate Comparison (V3 vs V1)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "P99 latency comparison: V3 vs V1",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "P99 Latency",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "mappings": [],
+          "max": 0.15,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.08
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "lastNotNull", "max"],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, rate(dwcp_v3_mode_latency_seconds_bucket{version=\"v3\",mode=\"datacenter\"}[5m]))",
+          "legendFormat": "V3 P99 Latency",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(dwcp_v3_mode_latency_seconds_bucket{version=\"v1\",mode=\"datacenter\"}[5m]))",
+          "legendFormat": "V1 P99 Latency",
+          "refId": "B"
+        },
+        {
+          "expr": "0.1",
+          "hide": false,
+          "legendFormat": "SLA Threshold (100ms)",
+          "refId": "C"
+        }
+      ],
+      "title": "Latency Comparison (V3 vs V1)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Throughput comparison: V3 vs V1",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Throughput",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 2400
+              }
+            ]
+          },
+          "unit": "MBs"
+        }
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "lastNotNull", "max"],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(dwcp_v3_bytes_transferred_total{version=\"v3\",mode=\"datacenter\"}[5m]) / 1024 / 1024",
+          "legendFormat": "V3 Throughput",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(dwcp_v3_bytes_transferred_total{version=\"v1\",mode=\"datacenter\"}[5m]) / 1024 / 1024",
+          "legendFormat": "V1 Throughput",
+          "refId": "B"
+        },
+        {
+          "expr": "2400",
+          "hide": false,
+          "legendFormat": "Target Throughput (2.4 GB/s)",
+          "refId": "C"
+        }
+      ],
+      "title": "Throughput Comparison (V3 vs V1)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Health status of each node in the cluster",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "displayMode": "color-background",
+            "inspect": false
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "index": 0,
+                  "text": "DOWN"
+                },
+                "1": {
+                  "color": "green",
+                  "index": 1,
+                  "text": "UP"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Version"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "v1": {
+                        "color": "blue",
+                        "index": 0,
+                        "text": "V1 (Legacy)"
+                      },
+                      "v3": {
+                        "color": "green",
+                        "index": 1,
+                        "text": "V3 (New)"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "id": 8,
+      "options": {
+        "footer": {
+          "fields": "",
+          "reducer": ["sum"],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "Node"
+          }
+        ]
+      },
+      "pluginVersion": "9.0.0",
+      "targets": [
+        {
+          "expr": "up{job=~\"dwcp-v3-core|dwcp-v1-legacy\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Node Health Status",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "cluster": true,
+              "environment": true,
+              "job": true
+            },
+            "indexByName": {
+              "Value": 3,
+              "node": 0,
+              "pod": 1,
+              "version": 2
+            },
+            "renameByName": {
+              "Value": "Status",
+              "node": "Node",
+              "pod": "Pod",
+              "version": "Version"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": "Prometheus",
+      "description": "Recent alerts and events",
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "id": 9,
+      "options": {
+        "alertInstanceLabelFilter": "{alertname=~\".*Rollout.*|SLA.*Violation\"}",
+        "alertName": "",
+        "dashboardAlerts": false,
+        "groupBy": [],
+        "groupMode": "default",
+        "maxItems": 20,
+        "sortOrder": 1,
+        "stateFilter": {
+          "error": true,
+          "firing": true,
+          "noData": false,
+          "normal": false,
+          "pending": true
+        },
+        "viewMode": "list"
+      },
+      "title": "Active Alerts",
+      "type": "alertlist"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 36,
+  "style": "dark",
+  "tags": ["dwcp-v3", "rollout", "production"],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "Prometheus"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "dwcp-v3-production",
+          "value": "dwcp-v3-production"
+        },
+        "datasource": "${datasource}",
+        "definition": "label_values(up{job=~\"dwcp-v3.*\"}, cluster)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Cluster",
+        "multi": false,
+        "name": "cluster",
+        "options": [],
+        "query": {
+          "query": "label_values(up{job=~\"dwcp-v3.*\"}, cluster)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m"]
+  },
+  "timezone": "browser",
+  "title": "DWCP v3 - Production Rollout",
+  "uid": "dwcp-v3-production-rollout",
+  "version": 1,
+  "weekStart": ""
+}

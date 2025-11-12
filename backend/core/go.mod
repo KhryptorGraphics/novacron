@@ -23,7 +23,7 @@ require (
 	github.com/hashicorp/mdns v1.0.6
 	github.com/hashicorp/vault/api v1.20.0
 	github.com/khryptorgraphics/novacron/backend/pkg/logger v0.0.0-20250829122648-af5195bda8b9
-	github.com/klauspost/compress v1.18.0
+	github.com/klauspost/compress v1.18.1
 	github.com/lib/pq v1.10.9
 	github.com/montanaflynn/stats v0.7.1
 	github.com/opencontainers/runtime-spec v1.2.1
@@ -117,6 +117,7 @@ require (
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
+	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/grafana/regexp v0.0.0-20240518133315-a468a5bfb3bc // indirect
@@ -175,6 +176,7 @@ require (
 	github.com/ugorji/go/codec v1.2.12 // indirect
 	github.com/vishvananda/netns v0.0.0-20210104183010-2eb08e3e575f // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	github.com/yalue/onnxruntime_go v1.22.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect

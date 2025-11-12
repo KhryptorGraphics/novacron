@@ -1,0 +1,357 @@
+# DWCP v3 Internet Mode Configuration
+# Optimized for TCP/BBR over unreliable WAN connections
+
+mode: internet
+
+# Network Configuration
+network:
+  # Primary transport: TCP with BBR congestion control
+  transport: tcp
+  port: 443
+
+  # TCP-specific parameters
+  tcp:
+    enabled: true
+
+    # BBR (Bottleneck Bandwidth and Round-trip propagation time)
+    congestionControl: bbr
+
+    # TCP optimization
+    noDelay: true  # Nagle's algorithm disabled
+    quickAck: true
+    keepAlive: true
+    keepAliveInterval: 10s
+    keepAliveProbes: 3
+
+    # Buffer sizes
+    sendBuffer: 4MB
+    recvBuffer: 4MB
+
+    # Backlog
+    listenBacklog: 4096
+
+    # Fast open
+    fastOpen: true
+    fastOpenQueueLength: 1024
+
+    # Connection reuse
+    reuseAddr: true
+    reusePort: true
+
+    # MTU discovery
+    mtuProbing: true
+
+  # QUIC support (for improved performance over UDP)
+  quic:
+    enabled: true
+    port: 443
+    maxStreams: 1000
+    initialMaxData: 10MB
+    maxIdleTimeout: 30s
+
+  # MTU
+  mtu: 1500  # Standard internet MTU
+
+  # Network interface
+  bindInterface: eth0
+  bindAddress: 0.0.0.0
+
+# Performance Configuration
+performance:
+  # Target metrics for internet
+  targetLatencyMs: 50
+  targetThroughputGbps: 10
+
+  # Buffer sizes
+  sendBufferSize: 4MB
+  recvBufferSize: 4MB
+
+  # Connection management
+  maxConnections: 50000
+  connectionPoolSize: 5000
+  idleTimeout: 60s
+
+  # Zero-copy (if available)
+  zeroCopy: false
+  directIO: false
+
+  # CPU affinity (less strict than datacenter)
+  cpuAffinity:
+    enabled: false
+
+  # Event-driven mode (not polling)
+  pollingMode: false
+  eventTimeout: 100ms
+
+  # Batching
+  batchSize: 32
+  batchTimeout: 10ms
+
+# Protocol Configuration
+protocol:
+  version: 3
+
+  # Compression (enabled for internet to save bandwidth)
+  compression:
+    enabled: true
+    algorithm: zstd
+    level: 3  # Balanced compression
+    minSize: 1KB  # Only compress messages >= 1KB
+
+  # Encryption (strongly recommended for internet)
+  encryption:
+    enabled: true
+    algorithm: aes-256-gcm
+    keyRotationInterval: 24h
+
+  # Flow control
+  flowControl:
+    enabled: true
+    algorithm: window-based
+    initialWindow: 256KB
+    maxWindow: 16MB
+    windowUpdateThreshold: 0.5
+
+  # Congestion control
+  congestionControl:
+    enabled: true
+    algorithm: bbr  # Use BBR for internet
+
+  # Reliability (critical for unreliable networks)
+  reliability:
+    enabled: true
+    ackTimeout: 1s
+    maxRetries: 10
+    selectiveAck: true
+    duplicateDetection: true
+    reorderingTolerance: 10
+
+# Memory Configuration
+memory:
+  hugepages: false
+
+  # Memory pool
+  poolSize: 8GB
+  preAllocate: false
+
+  # NUMA awareness
+  numaAware: false
+
+# Monitoring Configuration
+monitoring:
+  enabled: true
+  metricsPort: 9100
+  metricsInterval: 5s
+
+  # Internet-specific metrics
+  metrics:
+    - name: dwcp_latency_p50_ms
+      enabled: true
+    - name: dwcp_latency_p99_ms
+      enabled: true
+    - name: dwcp_throughput_mbps
+      enabled: true
+    - name: dwcp_active_connections
+      enabled: true
+    - name: dwcp_packet_loss_rate
+      enabled: true
+    - name: dwcp_retransmit_rate
+      enabled: true
+    - name: dwcp_compression_ratio
+      enabled: true
+    - name: dwcp_encryption_overhead_ms
+      enabled: true
+    - name: dwcp_tcp_congestion_window
+      enabled: true
+    - name: dwcp_rtt_ms
+      enabled: true
+    - name: dwcp_bandwidth_estimate_mbps
+      enabled: true
+
+  healthCheckPath: /health
+  healthCheckInterval: 10s
+
+  prometheus:
+    enabled: true
+    pushGateway: false
+
+  tracing:
+    enabled: true
+    samplingRate: 0.01  # 1% sampling
+
+# Logging Configuration
+logging:
+  level: info
+  format: json
+  output: /var/log/dwcp/internet.log
+
+  maxSize: 100MB
+  maxBackups: 10
+  maxAge: 30
+  compress: true
+
+  perfLog:
+    enabled: true
+    output: /var/log/dwcp/perf.log
+    interval: 30s
+
+# Feature Flags
+features:
+  enableV3: true
+  enableHybridMode: false  # Pure internet mode
+  enableCompression: true
+  enableEncryption: true
+  enableByzantine: true  # Important for untrusted internet
+  enableAdaptiveMode: false
+
+# Byzantine Fault Tolerance
+byzantine:
+  enabled: true
+
+  # Authentication
+  authentication:
+    method: hmac-sha256
+    keyRotation: 1h
+
+  # Message validation
+  validation:
+    checksums: true
+    signatures: true
+    timestampTolerance: 5s
+
+  # Peer reputation
+  reputation:
+    enabled: true
+    decayInterval: 1h
+    minReputation: 0.5
+    blacklistThreshold: 0.1
+
+  # Rate limiting
+  rateLimit:
+    enabled: true
+    requestsPerSecond: 1000
+    burstSize: 2000
+
+# Cluster Configuration
+cluster:
+  # Discovery (use DNS or service discovery)
+  discovery:
+    method: dns
+    dnsDomain: dwcp.novacron.io
+    dnsRefreshInterval: 60s
+
+  # Gossip protocol
+  gossip:
+    enabled: true
+    interval: 1s
+    fanout: 5
+    maxHops: 3
+
+  # Failure detection
+  failureDetection:
+    enabled: true
+    heartbeatInterval: 5s
+    timeoutMultiplier: 3
+    suspicionMultiplier: 2
+
+  # Membership
+  membership:
+    joinRetries: 10
+    joinInterval: 5s
+
+# Resource Limits
+limits:
+  maxCPU: 32
+  maxMemory: 64GB
+  maxOpenFiles: 65536
+  maxThreads: 512
+
+# Security Configuration
+security:
+  # Authentication
+  authentication:
+    enabled: true
+    method: jwt
+    jwtSecret: ${JWT_SECRET}
+    jwtExpiration: 24h
+
+  # Authorization
+  authorization:
+    enabled: true
+    method: rbac
+
+  # TLS
+  tls:
+    enabled: true
+    cert: /etc/dwcp/tls/server.crt
+    key: /etc/dwcp/tls/server.key
+    ca: /etc/dwcp/tls/ca.crt
+    minVersion: TLS1.3
+    cipherSuites:
+      - TLS_AES_256_GCM_SHA384
+      - TLS_CHACHA20_POLY1305_SHA256
+
+  # Network ACLs (allow all by default, use firewall)
+  allowedCIDRs:
+    - 0.0.0.0/0
+
+  # Rate limiting
+  rateLimit:
+    enabled: true
+    requestsPerSecond: 10000
+    burstSize: 20000
+
+# Adaptive Behavior
+adaptive:
+  detection:
+    enabled: false  # Fixed internet mode
+
+  thresholds:
+    latencyMs: 100
+    throughputMbps: 100
+    packetLoss: 0.01
+
+# Quality of Service
+qos:
+  enabled: true
+
+  # Traffic shaping
+  trafficShaping:
+    enabled: true
+    maxRate: 10Gbps
+    burstSize: 100MB
+
+  # Priority queues
+  priorityQueues:
+    - name: critical
+      priority: 1
+      weight: 50
+    - name: normal
+      priority: 2
+      weight: 30
+    - name: background
+      priority: 3
+      weight: 20
+
+# Caching
+cache:
+  enabled: true
+  maxSize: 1GB
+  ttl: 5m
+  evictionPolicy: lru
+
+# Experimental Features
+experimental:
+  enableQUIC: true
+  enableMultipath: false
+  enableHybridEncryption: false
+
+# Telemetry
+telemetry:
+  enabled: true
+  endpoint: http://monitoring.novacron.io:9090
+  interval: 30s
+  tags:
+    environment: production
+    mode: internet
+    region: global

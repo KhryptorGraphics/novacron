@@ -1,0 +1,3 @@
+Validation Results - Tue Nov 11 09:34:07 CST 2025
+=========================================
+DWCP v4 WASM Runtime: WARNING (Only 590 lines)

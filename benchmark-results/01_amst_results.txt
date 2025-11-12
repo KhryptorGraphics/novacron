@@ -1,0 +1,15 @@
+# github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/benchmarks [github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/benchmarks.test]
+./migration_benchmark_test.go:313:20: undefined: rand.Intn
+./migration_benchmark_test.go:500:6: generateVMMemoryData redeclared in this block
+	./hde_benchmark_test.go:352:6: other declaration of generateVMMemoryData
+./migration_benchmark_test.go:520:6: compressData redeclared in this block
+	./hde_benchmark_test.go:287:6: other declaration of compressData
+./ass_acp_benchmark_test.go:4:2: "context" imported and not used
+./ass_acp_benchmark_test.go:208:10: cannot use idx (variable of type int) as string value in map index
+./ass_acp_benchmark_test.go:208:17: invalid operation: state1[idx] ^ 0xFF (mismatched types interface{} and int)
+./stress_test.go:563:37: cannot use heapStats.samples (variable of type []float64) as []uint64 value in argument to calculateGrowthRate
+./stress_test.go:573:37: cannot use goroutineStats.samples (variable of type []float64) as []uint64 value in argument to calculateGrowthRate
+./competitor_comparison_test.go:5:2: "sync" imported and not used
+./competitor_comparison_test.go:6:2: "sync/atomic" imported and not used
+./competitor_comparison_test.go:6:2: too many errors
+FAIL	github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/benchmarks [build failed]

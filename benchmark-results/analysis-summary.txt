@@ -1,0 +1,41 @@
+=========================================
+DWCP v3 Benchmark Results Analysis
+=========================================
+
+Extracting benchmark results...
+## AMST (Adaptive Multi-Stream Transport)
+BenchmarkAMSTTransportThroughput/RDMA_4KB_1Stream-96 18.11 ns/op
+BenchmarkAMSTTransportThroughput/RDMA_64KB_1Stream-96 19.02 ns/op
+BenchmarkAMSTTransportThroughput/RDMA_1MB_1Stream-96 18.36 ns/op
+BenchmarkAMSTTransportThroughput/RDMA_64KB_8Streams-96 26.53 ns/op
+BenchmarkAMSTTransportThroughput/RDMA_64KB_32Streams-96 26.20 ns/op
+BenchmarkAMSTTransportThroughput/TCP_4KB_1Stream-96 18.74 ns/op
+BenchmarkAMSTTransportThroughput/TCP_64KB_1Stream-96 19.20 ns/op
+BenchmarkAMSTTransportThroughput/TCP_1MB_1Stream-96 18.64 ns/op
+BenchmarkAMSTTransportThroughput/TCP_64KB_8Streams-96 25.52 ns/op
+BenchmarkAMSTTransportThroughput/TCP_64KB_32Streams-96 26.28 ns/op
+BenchmarkAMSTStreamScalability/1Streams-96 18.52 ns/op
+
+## HDE (Hybrid Data Engine)
+
+## Migration Performance
+
+## Scalability
+
+## Competitor Comparison
+BenchmarkDWCPvsCompetitors/Datacenter_4GB/DWCP_v3-96                  	       1	1720264600 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Datacenter_4GB/VMware_vMotion-96           	       1	10091345600 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Datacenter_4GB/HyperV_LiveMigration-96     	       1	13239497500 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Datacenter_4GB/KVM_QEMU-96                 	       1	18320135700 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Datacenter_4GB/QEMU_NBD-96                 	       1	26480116600 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Datacenter_4GB/ComparisonReport-96         	1000000000	         0.0002197 ns/op	       0 B/op	       0 allocs/op
+--- BENCH: BenchmarkDWCPvsCompetitors/Datacenter_4GB/ComparisonReport-96
+    competitor_comparison_test.go:429: 
+--
+BenchmarkDWCPvsCompetitors/Internet_4GB/DWCP_v3-96                    	       1	70789538100 ns/op	      96 B/op	       1 allocs/op
+BenchmarkDWCPvsCompetitors/Internet_4GB/VMware_vMotion-96             	       1	90929491100 ns/op	      96 B/op	       1 allocs/op
+
+=========================================
+Analysis complete. Results saved to:
+/home/kp/novacron/docs/DWCP_V3_PHASE5_BENCHMARK_ANALYSIS.md
+=========================================

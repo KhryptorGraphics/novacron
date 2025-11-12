@@ -1,0 +1,294 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dwcp-v3
+  labels:
+    app: dwcp-v3
+    environment: production
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dwcp-v3-config
+  namespace: dwcp-v3
+data:
+  NODE_ENV: "production"
+  PORT: "8080"
+  LOG_LEVEL: "info"
+  DWCP_VERSION: "3.0.0"
+  REDIS_URL: "redis://dwcp-v3-redis:6379"
+  PROMETHEUS_PORT: "9090"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dwcp-v3-secrets
+  namespace: dwcp-v3
+type: Opaque
+data:
+  # Base64 encoded secrets (replace with actual values)
+  REDIS_PASSWORD: ""
+  API_KEY: ""
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dwcp-v3
+  namespace: dwcp-v3
+  labels:
+    app: dwcp-v3
+    version: v3.0.0
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: dwcp-v3
+  template:
+    metadata:
+      labels:
+        app: dwcp-v3
+        version: v3.0.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: dwcp-v3
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: dwcp-v3
+        image: ghcr.io/novacron/dwcp-v3:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: dwcp-v3-config
+        - secretRef:
+            name: dwcp-v3-secrets
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: data
+          mountPath: /app/data
+        - name: logs
+          mountPath: /app/logs
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: dwcp-v3-data
+      - name: logs
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dwcp-v3
+  namespace: dwcp-v3
+  labels:
+    app: dwcp-v3
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  - port: 9090
+    targetPort: 9090
+    protocol: TCP
+    name: metrics
+  selector:
+    app: dwcp-v3
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dwcp-v3
+  namespace: dwcp-v3
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dwcp-v3-data
+  namespace: dwcp-v3
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dwcp-v3-redis
+  namespace: dwcp-v3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dwcp-v3-redis
+  template:
+    metadata:
+      labels:
+        app: dwcp-v3-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: dwcp-v3-redis-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dwcp-v3-redis
+  namespace: dwcp-v3
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+    targetPort: 6379
+  selector:
+    app: dwcp-v3-redis
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dwcp-v3-redis-data
+  namespace: dwcp-v3
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: dwcp-v3-hpa
+  namespace: dwcp-v3
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: dwcp-v3
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dwcp-v3
+  namespace: dwcp-v3
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  tls:
+  - hosts:
+    - dwcp-v3.example.com
+    secretName: dwcp-v3-tls
+  rules:
+  - host: dwcp-v3.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: dwcp-v3
+            port:
+              number: 80

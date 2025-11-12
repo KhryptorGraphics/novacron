@@ -1,0 +1,374 @@
+# Production-Grade Prometheus Configuration for DWCP v3
+# High-availability setup with long-term storage and advanced scraping
+
+global:
+  scrape_interval: 5s          # Production: 5s for real-time monitoring
+  evaluation_interval: 15s      # Alert evaluation
+  scrape_timeout: 4s
+  external_labels:
+    cluster: 'dwcp-v3-production'
+    environment: 'production'
+    replica: '__replica__'      # HA replica identifier
+
+# Alertmanager configuration for HA
+alerting:
+  alert_relabel_configs:
+    - source_labels: [__replica__]
+      target_label: replica
+  alertmanagers:
+  - static_configs:
+    - targets:
+      - alertmanager-0:9093
+      - alertmanager-1:9093
+      - alertmanager-2:9093
+    timeout: 10s
+    api_version: v2
+
+# Alert and recording rules
+rule_files:
+  - 'prometheus-alerts-production.yml'
+  - 'prometheus-recording-rules.yml'
+
+# Remote write for long-term storage (Thanos/Cortex)
+remote_write:
+  - url: "http://thanos-receive:19291/api/v1/receive"
+    queue_config:
+      capacity: 10000
+      max_shards: 50
+      min_shards: 1
+      max_samples_per_send: 5000
+      batch_send_deadline: 5s
+      min_backoff: 30ms
+      max_backoff: 100ms
+    write_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'dwcp_v3_.*'
+        action: keep
+    metadata_config:
+      send: true
+      send_interval: 1m
+
+# Remote read for querying long-term storage
+remote_read:
+  - url: "http://thanos-query:19192/api/v1/read"
+    read_recent: true
+    required_matchers:
+      job: "dwcp-v3"
+
+# Scrape configurations
+scrape_configs:
+  # ============================================================================
+  # DWCP v3 Core Application - High Priority
+  # ============================================================================
+  - job_name: 'dwcp-v3-core'
+    scrape_interval: 5s
+    scrape_timeout: 4s
+    metrics_path: '/metrics'
+    scheme: http
+
+    # Kubernetes service discovery
+    kubernetes_sd_configs:
+    - role: pod
+      namespaces:
+        names:
+        - dwcp-v3-production
+
+    relabel_configs:
+    # Keep only pods with app=dwcp-v3
+    - source_labels: [__meta_kubernetes_pod_label_app]
+      regex: dwcp-v3
+      action: keep
+
+    # Add node name
+    - source_labels: [__meta_kubernetes_pod_node_name]
+      target_label: node
+
+    # Add pod name
+    - source_labels: [__meta_kubernetes_pod_name]
+      target_label: pod
+
+    # Add namespace
+    - source_labels: [__meta_kubernetes_namespace]
+      target_label: namespace
+
+    # Add container name
+    - source_labels: [__meta_kubernetes_pod_container_name]
+      target_label: container
+
+    # Add pod IP
+    - source_labels: [__meta_kubernetes_pod_ip]
+      target_label: pod_ip
+
+    # Add deployment version
+    - source_labels: [__meta_kubernetes_pod_label_version]
+      target_label: version
+
+    # Add feature flag status
+    - source_labels: [__meta_kubernetes_pod_annotation_feature_flag]
+      target_label: feature_flag
+
+    # Add rollout percentage
+    - source_labels: [__meta_kubernetes_pod_annotation_rollout_percentage]
+      target_label: rollout_percentage
+
+    metric_relabel_configs:
+    # Drop high-cardinality debug metrics in production
+    - source_labels: [__name__]
+      regex: 'dwcp_v3_debug_.*'
+      action: drop
+
+    # Add cluster label
+    - target_label: cluster
+      replacement: 'dwcp-v3-production'
+
+  # ============================================================================
+  # DWCP v3 Legacy (v1) - For comparison during rollout
+  # ============================================================================
+  - job_name: 'dwcp-v1-legacy'
+    scrape_interval: 10s
+    metrics_path: '/metrics'
+    scheme: http
+
+    kubernetes_sd_configs:
+    - role: pod
+      namespaces:
+        names:
+        - dwcp-v3-production
+
+    relabel_configs:
+    - source_labels: [__meta_kubernetes_pod_label_app]
+      regex: dwcp-v1
+      action: keep
+
+    - source_labels: [__meta_kubernetes_pod_name]
+      target_label: pod
+
+    - target_label: version
+      replacement: 'v1'
+
+  # ============================================================================
+  # DWCP v3 Components - Detailed Monitoring
+  # ============================================================================
+
+  # Adaptive Multi-Stream Transport (AMST)
+  - job_name: 'dwcp-v3-amst'
+    scrape_interval: 5s
+    metrics_path: '/metrics/amst'
+    static_configs:
+    - targets:
+      - dwcp-v3-amst-0:9091
+      - dwcp-v3-amst-1:9091
+      - dwcp-v3-amst-2:9091
+    metric_relabel_configs:
+    - source_labels: [__name__]
+      regex: 'dwcp_v3_amst_.*'
+      action: keep
+
+  # Hierarchical Delta Encoding (HDE)
+  - job_name: 'dwcp-v3-hde'
+    scrape_interval: 10s
+    metrics_path: '/metrics/hde'
+    static_configs:
+    - targets:
+      - dwcp-v3-hde-0:9092
+      - dwcp-v3-hde-1:9092
+
+  # Predictive Bandwidth Allocation (PBA)
+  - job_name: 'dwcp-v3-pba'
+    scrape_interval: 5s
+    metrics_path: '/metrics/pba'
+    static_configs:
+    - targets:
+      - dwcp-v3-pba-0:9093
+
+  # Adaptive Consensus Protocol (ACP) - CRITICAL
+  - job_name: 'dwcp-v3-acp'
+    scrape_interval: 2s  # Very fast for consensus monitoring
+    metrics_path: '/metrics/acp'
+    static_configs:
+    - targets:
+      - dwcp-v3-acp-0:9094
+      - dwcp-v3-acp-1:9094
+      - dwcp-v3-acp-2:9094
+    metric_relabel_configs:
+    - source_labels: [__name__]
+      regex: 'dwcp_v3_acp_(byzantine|pbft|raft)_.*'
+      action: keep
+
+  # Adaptive State Synchronization (ASS)
+  - job_name: 'dwcp-v3-ass'
+    scrape_interval: 5s
+    metrics_path: '/metrics/ass'
+    static_configs:
+    - targets:
+      - dwcp-v3-ass-0:9095
+
+  # Intelligent Task Placement (ITP)
+  - job_name: 'dwcp-v3-itp'
+    scrape_interval: 10s
+    metrics_path: '/metrics/itp'
+    static_configs:
+    - targets:
+      - dwcp-v3-itp-0:9096
+
+  # ============================================================================
+  # Infrastructure Monitoring
+  # ============================================================================
+
+  # Node Exporter - System metrics
+  - job_name: 'node-exporter'
+    scrape_interval: 15s
+    kubernetes_sd_configs:
+    - role: node
+    relabel_configs:
+    - source_labels: [__meta_kubernetes_node_name]
+      target_label: node
+    - source_labels: [__address__]
+      regex: '(.*):.*'
+      target_label: __address__
+      replacement: '${1}:9100'
+
+  # cAdvisor - Container metrics
+  - job_name: 'cadvisor'
+    scrape_interval: 15s
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    kubernetes_sd_configs:
+    - role: node
+    relabel_configs:
+    - target_label: __address__
+      replacement: kubernetes.default.svc:443
+    - source_labels: [__meta_kubernetes_node_name]
+      regex: (.+)
+      target_label: __metrics_path__
+      replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+
+  # Redis - Cache monitoring
+  - job_name: 'redis'
+    scrape_interval: 15s
+    static_configs:
+    - targets:
+      - redis-exporter:9121
+    metric_relabel_configs:
+    - source_labels: [__name__]
+      regex: 'redis_connected_clients|redis_memory_used_bytes|redis_commands_processed_total'
+      action: keep
+
+  # PostgreSQL - If used for metadata
+  - job_name: 'postgresql'
+    scrape_interval: 30s
+    static_configs:
+    - targets:
+      - postgres-exporter:9187
+
+  # etcd - Distributed coordination
+  - job_name: 'etcd'
+    scrape_interval: 10s
+    scheme: https
+    tls_config:
+      ca_file: /etc/prometheus/etcd-ca.crt
+      cert_file: /etc/prometheus/etcd-cert.crt
+      key_file: /etc/prometheus/etcd-key.key
+    static_configs:
+    - targets:
+      - etcd-0:2379
+      - etcd-1:2379
+      - etcd-2:2379
+
+  # ============================================================================
+  # Network Monitoring
+  # ============================================================================
+
+  # Blackbox Exporter - Endpoint monitoring
+  - job_name: 'blackbox-http'
+    scrape_interval: 30s
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+    - targets:
+      - http://dwcp-v3-api:8080/health
+      - http://dwcp-v3-api:8080/ready
+    relabel_configs:
+    - source_labels: [__address__]
+      target_label: __param_target
+    - source_labels: [__param_target]
+      target_label: instance
+    - target_label: __address__
+      replacement: blackbox-exporter:9115
+
+  # SNMP Exporter - Network device monitoring
+  - job_name: 'snmp'
+    scrape_interval: 60s
+    static_configs:
+    - targets:
+      - 10.0.0.1  # Network switches
+      - 10.0.0.2
+    metrics_path: /snmp
+    params:
+      module: [if_mib]
+    relabel_configs:
+    - source_labels: [__address__]
+      target_label: __param_target
+    - target_label: __address__
+      replacement: snmp-exporter:9116
+
+  # ============================================================================
+  # Prometheus Self-Monitoring
+  # ============================================================================
+  - job_name: 'prometheus'
+    scrape_interval: 15s
+    static_configs:
+    - targets:
+      - localhost:9090
+    metric_relabel_configs:
+    - source_labels: [__name__]
+      regex: 'prometheus_(tsdb|rule|target|http)_.*'
+      action: keep
+
+  # ============================================================================
+  # OpenTelemetry Collector
+  # ============================================================================
+  - job_name: 'otel-collector'
+    scrape_interval: 10s
+    static_configs:
+    - targets:
+      - otel-collector:8888
+    metric_relabel_configs:
+    - source_labels: [__name__]
+      regex: 'otelcol_.*'
+      action: keep
+
+# Tracing integration
+tracing:
+  enabled: true
+  sampling_fraction: 0.1  # 10% sampling in production
+  client_type: grpc
+  endpoint: otel-collector:4317
+  insecure: false
+  tls_config:
+    ca_file: /etc/prometheus/otel-ca.crt
+
+# Storage configuration
+storage:
+  tsdb:
+    path: /prometheus
+    retention.time: 30d        # Keep 30 days locally
+    retention.size: 100GB      # Max 100GB local storage
+    wal-compression: true       # Compress WAL for efficiency
+
+    # Optimize for high-cardinality metrics
+    min-block-duration: 2h
+    max-block-duration: 2h
+
+    # Enable out-of-order samples (for delayed metrics)
+    out-of-order-time-window: 5m
+
+# Feature flags
+feature_flags:
+  - native-histograms
+  - exemplar-storage
+  - otlp-write-receiver
+  - created-timestamp-zero-ingestion

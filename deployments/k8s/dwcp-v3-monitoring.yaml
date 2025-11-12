@@ -1,0 +1,253 @@
+---
+apiVersion: v1
+kind: ServiceMonitor
+metadata:
+  name: dwcp-v3
+  namespace: dwcp-v3
+  labels:
+    app: dwcp-v3
+spec:
+  selector:
+    matchLabels:
+      app: dwcp-v3
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dwcp-v3-grafana-dashboard
+  namespace: dwcp-v3
+  labels:
+    grafana_dashboard: "1"
+data:
+  dwcp-v3-dashboard.json: |
+    {
+      "dashboard": {
+        "title": "DWCP v3 Metrics",
+        "panels": [
+          {
+            "title": "Request Rate",
+            "targets": [
+              {
+                "expr": "rate(dwcp_requests_total[5m])"
+              }
+            ]
+          },
+          {
+            "title": "Error Rate",
+            "targets": [
+              {
+                "expr": "rate(dwcp_errors_total[5m])"
+              }
+            ]
+          },
+          {
+            "title": "Latency P95",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, dwcp_latency_seconds_bucket)"
+              }
+            ]
+          },
+          {
+            "title": "Active Connections",
+            "targets": [
+              {
+                "expr": "dwcp_active_connections"
+              }
+            ]
+          },
+          {
+            "title": "Throughput (MB/s)",
+            "targets": [
+              {
+                "expr": "rate(dwcp_bytes_transferred_total[5m]) / 1024 / 1024"
+              }
+            ]
+          },
+          {
+            "title": "Memory Usage",
+            "targets": [
+              {
+                "expr": "process_resident_memory_bytes{job='dwcp-v3'}"
+              }
+            ]
+          }
+        ]
+      }
+    }
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dwcp-v3-alert-rules
+  namespace: dwcp-v3
+data:
+  alerts.yml: |
+    groups:
+    - name: dwcp-v3
+      interval: 30s
+      rules:
+      # High Error Rate
+      - alert: HighErrorRate
+        expr: rate(dwcp_errors_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: dwcp-v3
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+
+      # High Latency
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, dwcp_latency_seconds_bucket) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          component: dwcp-v3
+        annotations:
+          summary: "High latency detected"
+          description: "P95 latency is {{ $value }}s (threshold: 1s)"
+
+      # Low Throughput
+      - alert: LowThroughput
+        expr: rate(dwcp_bytes_transferred_total[5m]) < 1048576
+        for: 10m
+        labels:
+          severity: warning
+          component: dwcp-v3
+        annotations:
+          summary: "Low throughput detected"
+          description: "Throughput is {{ $value | humanize }}B/s (threshold: 1MB/s)"
+
+      # Pod Restarts
+      - alert: PodRestarts
+        expr: rate(kube_pod_container_status_restarts_total{namespace="dwcp-v3"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          component: dwcp-v3
+        annotations:
+          summary: "Pod is restarting frequently"
+          description: "Pod {{ $labels.pod }} has restarted {{ $value }} times in the last 15 minutes"
+
+      # High Memory Usage
+      - alert: HighMemoryUsage
+        expr: |
+          (container_memory_usage_bytes{namespace="dwcp-v3",container="dwcp-v3"} /
+           container_spec_memory_limit_bytes{namespace="dwcp-v3",container="dwcp-v3"}) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: dwcp-v3
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value | humanizePercentage }} of limit"
+
+      # High CPU Usage
+      - alert: HighCPUUsage
+        expr: |
+          rate(container_cpu_usage_seconds_total{namespace="dwcp-v3",container="dwcp-v3"}[5m]) > 1.8
+        for: 5m
+        labels:
+          severity: warning
+          component: dwcp-v3
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value }} cores"
+
+      # Deployment Replica Mismatch
+      - alert: DeploymentReplicaMismatch
+        expr: |
+          kube_deployment_spec_replicas{namespace="dwcp-v3"} !=
+          kube_deployment_status_replicas_available{namespace="dwcp-v3"}
+        for: 10m
+        labels:
+          severity: critical
+          component: dwcp-v3
+        annotations:
+          summary: "Deployment replica mismatch"
+          description: "Deployment {{ $labels.deployment }} has mismatched replicas"
+
+      # Redis Down
+      - alert: RedisDown
+        expr: up{job="dwcp-v3-redis"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: redis
+        annotations:
+          summary: "Redis is down"
+          description: "Redis instance for DWCP v3 is not responding"
+
+      # Low Disk Space
+      - alert: LowDiskSpace
+        expr: |
+          (node_filesystem_avail_bytes{mountpoint="/data"} /
+           node_filesystem_size_bytes{mountpoint="/data"}) < 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "Low disk space"
+          description: "Available disk space is {{ $value | humanizePercentage }}"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: dwcp-v3
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 30s
+      evaluation_interval: 30s
+
+    alerting:
+      alertmanagers:
+      - static_configs:
+        - targets:
+          - alertmanager:9093
+
+    rule_files:
+    - /etc/prometheus/alerts.yml
+
+    scrape_configs:
+    - job_name: 'dwcp-v3'
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+          - dwcp-v3
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+
+    - job_name: 'kubernetes-nodes'
+      kubernetes_sd_configs:
+      - role: node
+      relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+
+    - job_name: 'redis'
+      static_configs:
+      - targets: ['dwcp-v3-redis:6379']

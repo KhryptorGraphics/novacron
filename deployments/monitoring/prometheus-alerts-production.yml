@@ -1,0 +1,429 @@
+# Production Alert Rules for DWCP v3 Phase 5 Deployment
+# SLA: 99.9% availability, P99 latency <100ms, throughput targets
+
+groups:
+# ============================================================================
+# CRITICAL ALERTS - Immediate Action Required
+# ============================================================================
+- name: dwcp-v3-critical-alerts
+  interval: 15s
+  rules:
+
+  # ===== SLA Violations =====
+
+  - alert: SLAAvailabilityViolation
+    expr: |
+      (
+        sum(rate(dwcp_v3_migration_success_total[5m]))
+        /
+        sum(rate(dwcp_v3_migration_duration_seconds_count[5m]))
+      ) < 0.999
+    for: 5m
+    labels:
+      severity: critical
+      component: sla
+      page: true
+      auto_rollback: true
+    annotations:
+      summary: "SLA Availability Violation - Below 99.9%"
+      description: "Current availability: {{ $value | humanizePercentage }} (SLA: 99.9%)"
+      runbook_url: "https://docs.novacron.io/runbooks/sla-availability-violation"
+      action: "AUTOMATIC ROLLBACK TRIGGERED"
+
+  - alert: SLALatencyViolation
+    expr: |
+      histogram_quantile(0.99,
+        rate(dwcp_v3_mode_latency_seconds_bucket{mode="datacenter"}[5m])
+      ) > 0.1
+    for: 3m
+    labels:
+      severity: critical
+      component: sla
+      page: true
+      auto_rollback: true
+    annotations:
+      summary: "SLA P99 Latency Violation - Above 100ms"
+      description: "Current P99 latency: {{ $value | humanizeDuration }} (SLA: <100ms)"
+      runbook_url: "https://docs.novacron.io/runbooks/sla-latency-violation"
+      action: "AUTOMATIC ROLLBACK TRIGGERED"
+
+  - alert: SLAErrorRateViolation
+    expr: |
+      (
+        sum(rate(dwcp_v3_component_errors_total[5m]))
+        /
+        sum(rate(dwcp_v3_component_operations_total[5m]))
+      ) > 0.01
+    for: 5m
+    labels:
+      severity: critical
+      component: sla
+      page: true
+      auto_rollback: true
+    annotations:
+      summary: "SLA Error Rate Violation - Above 1%"
+      description: "Current error rate: {{ $value | humanizePercentage }} (SLA: <1%)"
+      runbook_url: "https://docs.novacron.io/runbooks/sla-error-rate-violation"
+      action: "AUTOMATIC ROLLBACK TRIGGERED"
+
+  # ===== Service Health =====
+
+  - alert: DWCPv3ServiceDown
+    expr: up{job="dwcp-v3-core"} == 0
+    for: 1m
+    labels:
+      severity: critical
+      component: service
+      page: true
+    annotations:
+      summary: "DWCP v3 Service Down"
+      description: "Service {{ $labels.pod }} is down for more than 1 minute"
+      runbook_url: "https://docs.novacron.io/runbooks/service-down"
+
+  - alert: DWCPv3AllReplicasDown
+    expr: sum(up{job="dwcp-v3-core"}) == 0
+    for: 30s
+    labels:
+      severity: critical
+      component: service
+      page: true
+      auto_rollback: true
+    annotations:
+      summary: "ALL DWCP v3 Replicas Down - CRITICAL"
+      description: "All replicas are down. Service is completely unavailable."
+      runbook_url: "https://docs.novacron.io/runbooks/all-replicas-down"
+      action: "IMMEDIATE ROLLBACK TO V1"
+
+  # ===== Byzantine Failures =====
+
+  - alert: ByzantineNodeDetected
+    expr: increase(dwcp_v3_acp_byzantine_detections_total[5m]) > 0
+    for: 1m
+    labels:
+      severity: critical
+      component: consensus
+      page: true
+    annotations:
+      summary: "Byzantine Node Detected"
+      description: "Byzantine behavior detected on node {{ $labels.node_id }}"
+      runbook_url: "https://docs.novacron.io/runbooks/byzantine-node"
+      action: "Isolate node and trigger consensus reconfiguration"
+
+  - alert: PBFTConsensusFailure
+    expr: rate(dwcp_v3_component_errors_total{component="acp",error_type="consensus_timeout"}[5m]) > 0.1
+    for: 2m
+    labels:
+      severity: critical
+      component: consensus
+      page: true
+    annotations:
+      summary: "PBFT Consensus Failure"
+      description: "Consensus timeouts: {{ $value }} per second"
+      runbook_url: "https://docs.novacron.io/runbooks/pbft-consensus-failure"
+
+  # ===== Data Loss Risk =====
+
+  - alert: CRDTConflictStorm
+    expr: rate(dwcp_v3_component_operations_total{component="ass",operation_type="conflict_resolved"}[5m]) > 10
+    for: 3m
+    labels:
+      severity: critical
+      component: state-sync
+      page: true
+    annotations:
+      summary: "CRDT Conflict Storm"
+      description: "High conflict rate: {{ $value }} conflicts/sec. Possible split-brain."
+      runbook_url: "https://docs.novacron.io/runbooks/crdt-conflict-storm"
+
+  - alert: StateSynchronizationFailure
+    expr: |
+      (
+        sum(rate(dwcp_v3_component_operations_total{component="ass",operation_type="sync_failed"}[5m]))
+        /
+        sum(rate(dwcp_v3_component_operations_total{component="ass",operation_type=~"sync_.*"}[5m]))
+      ) > 0.05
+    for: 5m
+    labels:
+      severity: critical
+      component: state-sync
+      page: true
+    annotations:
+      summary: "State Synchronization Failure Rate High"
+      description: "Sync failure rate: {{ $value | humanizePercentage }}"
+      runbook_url: "https://docs.novacron.io/runbooks/state-sync-failure"
+
+# ============================================================================
+# WARNING ALERTS - Requires Investigation
+# ============================================================================
+- name: dwcp-v3-warning-alerts
+  interval: 30s
+  rules:
+
+  # ===== Performance Degradation =====
+
+  - alert: HighLatencyWarning
+    expr: |
+      histogram_quantile(0.99,
+        rate(dwcp_v3_mode_latency_seconds_bucket{mode="datacenter"}[5m])
+      ) > 0.08
+    for: 10m
+    labels:
+      severity: warning
+      component: performance
+    annotations:
+      summary: "High P99 Latency Warning"
+      description: "P99 latency: {{ $value | humanizeDuration }} (warning threshold: 80ms)"
+      runbook_url: "https://docs.novacron.io/runbooks/high-latency"
+
+  - alert: ThroughputDegradation
+    expr: |
+      rate(dwcp_v3_bytes_transferred_total{mode="datacenter"}[5m])
+      < 2400 * 1024 * 1024  # 2.4 GB/s
+    for: 10m
+    labels:
+      severity: warning
+      component: performance
+    annotations:
+      summary: "Throughput Below Target"
+      description: "Current throughput: {{ $value | humanize }}B/s (target: 2.4 GB/s)"
+      runbook_url: "https://docs.novacron.io/runbooks/throughput-degradation"
+
+  - alert: InternetModeThroughputLow
+    expr: |
+      rate(dwcp_v3_bytes_transferred_total{mode="internet"}[5m])
+      < 100 * 1024 * 1024  # 100 Mbps
+    for: 10m
+    labels:
+      severity: warning
+      component: performance
+    annotations:
+      summary: "Internet Mode Throughput Low"
+      description: "Current throughput: {{ $value | humanize }}B/s (minimum: 100 Mbps)"
+      runbook_url: "https://docs.novacron.io/runbooks/internet-throughput-low"
+
+  # ===== Resource Utilization =====
+
+  - alert: HighMemoryUsage
+    expr: |
+      (
+        container_memory_working_set_bytes{pod=~"dwcp-v3-.*"}
+        /
+        container_spec_memory_limit_bytes{pod=~"dwcp-v3-.*"}
+      ) > 0.85
+    for: 10m
+    labels:
+      severity: warning
+      component: resources
+    annotations:
+      summary: "High Memory Usage"
+      description: "Memory usage: {{ $value | humanizePercentage }} on pod {{ $labels.pod }}"
+      runbook_url: "https://docs.novacron.io/runbooks/high-memory"
+
+  - alert: HighCPUUsage
+    expr: |
+      rate(container_cpu_usage_seconds_total{pod=~"dwcp-v3-.*"}[5m]) > 0.8
+    for: 15m
+    labels:
+      severity: warning
+      component: resources
+    annotations:
+      summary: "High CPU Usage"
+      description: "CPU usage: {{ $value | humanizePercentage }} on pod {{ $labels.pod }}"
+      runbook_url: "https://docs.novacron.io/runbooks/high-cpu"
+
+  # ===== Component Health =====
+
+  - alert: StreamCreationFailures
+    expr: rate(dwcp_v3_component_errors_total{component="amst",error_type="stream_failed"}[5m]) > 1
+    for: 5m
+    labels:
+      severity: warning
+      component: amst
+    annotations:
+      summary: "Stream Creation Failures"
+      description: "Stream failures: {{ $value }} per second"
+      runbook_url: "https://docs.novacron.io/runbooks/stream-failures"
+
+  - alert: CompressionRatioDegraded
+    expr: dwcp_v3_compression_ratio{algorithm="zstd"} < 2.0
+    for: 15m
+    labels:
+      severity: warning
+      component: hde
+    annotations:
+      summary: "Compression Ratio Degraded"
+      description: "Compression ratio: {{ $value }} (expected: >2.0x)"
+      runbook_url: "https://docs.novacron.io/runbooks/compression-degraded"
+
+  - alert: PredictionAccuracyLow
+    expr: dwcp_v3_prediction_accuracy < 0.80
+    for: 10m
+    labels:
+      severity: warning
+      component: pba
+    annotations:
+      summary: "Bandwidth Prediction Accuracy Low"
+      description: "Prediction accuracy: {{ $value | humanizePercentage }} (target: >80%)"
+      runbook_url: "https://docs.novacron.io/runbooks/prediction-accuracy-low"
+
+# ============================================================================
+# ROLLOUT MONITORING ALERTS
+# ============================================================================
+- name: dwcp-v3-rollout-alerts
+  interval: 15s
+  rules:
+
+  - alert: RolloutErrorRateSpike
+    expr: |
+      (
+        rate(dwcp_v3_component_errors_total{version="v3"}[5m])
+        /
+        rate(dwcp_v3_component_operations_total{version="v3"}[5m])
+      )
+      >
+      (
+        rate(dwcp_v3_component_errors_total{version="v1"}[5m])
+        /
+        rate(dwcp_v3_component_operations_total{version="v1"}[5m])
+      ) * 1.5
+    for: 3m
+    labels:
+      severity: critical
+      component: rollout
+      auto_rollback: true
+    annotations:
+      summary: "Rollout Error Rate 50% Higher Than V1"
+      description: "V3 error rate significantly higher than V1"
+      action: "AUTOMATIC ROLLBACK"
+
+  - alert: RolloutLatencyRegression
+    expr: |
+      histogram_quantile(0.99,
+        rate(dwcp_v3_mode_latency_seconds_bucket{version="v3"}[5m])
+      )
+      >
+      histogram_quantile(0.99,
+        rate(dwcp_v3_mode_latency_seconds_bucket{version="v1"}[5m])
+      ) * 1.3
+    for: 5m
+    labels:
+      severity: critical
+      component: rollout
+      auto_rollback: true
+    annotations:
+      summary: "Rollout Latency Regression - 30% Slower Than V1"
+      description: "V3 P99 latency significantly worse than V1"
+      action: "AUTOMATIC ROLLBACK"
+
+  - alert: RolloutThroughputRegression
+    expr: |
+      rate(dwcp_v3_bytes_transferred_total{version="v3"}[5m])
+      <
+      rate(dwcp_v3_bytes_transferred_total{version="v1"}[5m]) * 0.8
+    for: 5m
+    labels:
+      severity: warning
+      component: rollout
+    annotations:
+      summary: "Rollout Throughput 20% Lower Than V1"
+      description: "V3 throughput significantly lower than V1"
+
+  - alert: RolloutStalled
+    expr: |
+      changes(dwcp_v3_rollout_percentage[30m]) == 0
+      and
+      dwcp_v3_rollout_percentage < 100
+    for: 30m
+    labels:
+      severity: warning
+      component: rollout
+    annotations:
+      summary: "Rollout Progress Stalled"
+      description: "Rollout at {{ $value }}% for 30 minutes with no progress"
+
+# ============================================================================
+# INFRASTRUCTURE ALERTS
+# ============================================================================
+- name: dwcp-v3-infrastructure-alerts
+  interval: 30s
+  rules:
+
+  - alert: NodeDiskPressure
+    expr: |
+      (
+        node_filesystem_avail_bytes{mountpoint="/"}
+        /
+        node_filesystem_size_bytes{mountpoint="/"}
+      ) < 0.15
+    for: 10m
+    labels:
+      severity: warning
+      component: infrastructure
+    annotations:
+      summary: "Node Disk Pressure"
+      description: "Available disk: {{ $value | humanizePercentage }} on {{ $labels.node }}"
+
+  - alert: NetworkLatencyHigh
+    expr: |
+      rate(node_network_receive_drop_total[5m]) > 100
+      or
+      rate(node_network_transmit_drop_total[5m]) > 100
+    for: 5m
+    labels:
+      severity: warning
+      component: network
+    annotations:
+      summary: "Network Packet Drops"
+      description: "Packet drops: {{ $value }} per second on {{ $labels.device }}"
+
+  - alert: EtcdClusterUnhealthy
+    expr: |
+      sum(up{job="etcd"}) < 2
+    for: 2m
+    labels:
+      severity: critical
+      component: etcd
+      page: true
+    annotations:
+      summary: "etcd Cluster Unhealthy"
+      description: "Only {{ $value }} etcd nodes available (minimum: 2)"
+
+# ============================================================================
+# RECORDING RULES FOR DASHBOARD OPTIMIZATION
+# ============================================================================
+- name: dwcp-v3-recording-rules
+  interval: 30s
+  rules:
+
+  # Availability SLI
+  - record: sla:availability:5m
+    expr: |
+      sum(rate(dwcp_v3_migration_success_total[5m]))
+      /
+      sum(rate(dwcp_v3_migration_duration_seconds_count[5m]))
+
+  # Latency SLI (P99)
+  - record: sla:latency_p99:5m
+    expr: |
+      histogram_quantile(0.99,
+        rate(dwcp_v3_mode_latency_seconds_bucket{mode="datacenter"}[5m])
+      )
+
+  # Error rate SLI
+  - record: sla:error_rate:5m
+    expr: |
+      sum(rate(dwcp_v3_component_errors_total[5m]))
+      /
+      sum(rate(dwcp_v3_component_operations_total[5m]))
+
+  # Throughput by mode
+  - record: performance:throughput_mbps:5m
+    expr: |
+      rate(dwcp_v3_bytes_transferred_total[5m]) * 8 / 1000000
+    labels:
+      unit: "Mbps"
+
+  # Active migrations
+  - record: operations:active_migrations:current
+    expr: |
+      sum(dwcp_v3_active_streams) by (mode)

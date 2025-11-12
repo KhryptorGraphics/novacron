@@ -1,0 +1,407 @@
+---
+# DWCP v3 Zero-Downtime Upgrade Playbook
+# Migrates from DWCP v1 to v3 with feature flags and health validation
+# Usage: ansible-playbook -i inventory/production.ini dwcp-v3-upgrade.yml
+
+- name: DWCP v3 Upgrade - Pre-flight Checks
+  hosts: all
+  become: yes
+  serial: 1
+  tags: preflight
+
+  vars:
+    dwcp_v1_bin: "/usr/local/bin/dwcp"
+    dwcp_v3_bin: "/usr/local/bin/dwcp-v3"
+    backup_dir: "/var/backups/dwcp"
+
+  tasks:
+    - name: Check current DWCP version
+      command: "{{ dwcp_v1_bin }} --version"
+      register: current_version
+      changed_when: false
+      failed_when: false
+
+    - name: Display current version
+      debug:
+        msg: "Current DWCP version: {{ current_version.stdout }}"
+
+    - name: Verify v3 binary exists
+      stat:
+        path: "{{ dwcp_v3_bin }}"
+      register: v3_binary
+      failed_when: not v3_binary.stat.exists
+
+    - name: Create backup directory
+      file:
+        path: "{{ backup_dir }}/{{ ansible_date_time.iso8601 }}"
+        state: directory
+        mode: '0755'
+
+    - name: Backup current configuration
+      copy:
+        src: /etc/dwcp/config.yaml
+        dest: "{{ backup_dir }}/{{ ansible_date_time.iso8601 }}/config.yaml.backup"
+        remote_src: yes
+
+    - name: Backup current binary
+      copy:
+        src: "{{ dwcp_v1_bin }}"
+        dest: "{{ backup_dir }}/{{ ansible_date_time.iso8601 }}/dwcp-v1.backup"
+        remote_src: yes
+        mode: preserve
+
+    - name: Check disk space
+      shell: df -h /var/lib/dwcp | tail -n 1 | awk '{print $5}' | sed 's/%//'
+      register: disk_usage
+      changed_when: false
+
+    - name: Assert sufficient disk space
+      assert:
+        that:
+          - disk_usage.stdout | int < 80
+        fail_msg: "Insufficient disk space: {{ disk_usage.stdout }}% used"
+        success_msg: "Sufficient disk space available"
+
+    - name: Check memory availability
+      shell: free -m | grep Mem | awk '{print ($4/$2) * 100.0}'
+      register: mem_available
+      changed_when: false
+
+    - name: Assert sufficient memory
+      assert:
+        that:
+          - mem_available.stdout | float > 20.0
+        fail_msg: "Insufficient memory: {{ mem_available.stdout }}% free"
+        success_msg: "Sufficient memory available"
+
+- name: DWCP v3 Upgrade - Deploy v3 with Feature Flags
+  hosts: all
+  become: yes
+  serial: "{{ batch_size | default('20%') }}"
+  max_fail_percentage: 10
+  tags: deploy
+
+  vars:
+    feature_flags:
+      enable_v3: false
+      enable_hybrid_mode: false
+      enable_compression: false
+      enable_byzantine: false
+    health_check_retries: 5
+    health_check_delay: 10
+
+  tasks:
+    - name: Deploy v3 configuration with feature flags disabled
+      template:
+        src: "{{ playbook_dir }}/../../config/dwcp-v3-hybrid.yaml"
+        dest: /etc/dwcp/dwcp-v3.yaml
+        mode: '0644'
+        backup: yes
+      vars:
+        features: "{{ feature_flags }}"
+
+    - name: Install v3 binary alongside v1
+      copy:
+        src: "{{ dwcp_v3_bin }}"
+        dest: /usr/local/bin/dwcp-v3
+        mode: '0755'
+        remote_src: yes
+
+    - name: Create v3 systemd service (inactive)
+      copy:
+        dest: /etc/systemd/system/dwcp-v3.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=DWCP v3 - Distributed Wire-speed Communication Protocol
+          After=network-online.target
+          Wants=network-online.target
+          ConditionPathExists=/etc/dwcp/dwcp-v3.yaml
+
+          [Service]
+          Type=simple
+          User=root
+          ExecStart=/usr/local/bin/dwcp-v3 --config /etc/dwcp/dwcp-v3.yaml
+          ExecReload=/bin/kill -HUP $MAINPID
+          KillMode=process
+          Restart=on-failure
+          RestartSec=10s
+          LimitNOFILE=1048576
+
+          # Performance
+          CPUSchedulingPolicy=fifo
+          CPUSchedulingPriority=99
+
+          # Security
+          NoNewPrivileges=true
+          PrivateTmp=true
+
+          # Logging
+          StandardOutput=journal
+          StandardError=journal
+          SyslogIdentifier=dwcp-v3
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Start v3 service on alternate port (shadow mode)
+      systemd:
+        name: dwcp-v3
+        state: started
+        enabled: no
+
+    - name: Wait for v3 service to be ready
+      wait_for:
+        port: 9101
+        delay: 5
+        timeout: 60
+
+    - name: Health check v3 service
+      uri:
+        url: "http://localhost:9101/health"
+        method: GET
+        return_content: yes
+      register: v3_health
+      retries: "{{ health_check_retries }}"
+      delay: "{{ health_check_delay }}"
+      until: v3_health.status == 200
+
+    - name: Validate v3 metrics endpoint
+      uri:
+        url: "http://localhost:9101/metrics"
+        method: GET
+        return_content: yes
+      register: v3_metrics
+      failed_when: v3_metrics.status != 200
+
+- name: DWCP v3 Upgrade - Gradual Traffic Migration
+  hosts: all
+  become: yes
+  serial: "{{ batch_size | default('20%') }}"
+  tags: migrate
+
+  vars:
+    migration_stages:
+      - { name: "shadow", v3_weight: 0, v1_weight: 100 }
+      - { name: "canary", v3_weight: 10, v1_weight: 90 }
+      - { name: "ramp_25", v3_weight: 25, v1_weight: 75 }
+      - { name: "ramp_50", v3_weight: 50, v1_weight: 50 }
+      - { name: "ramp_75", v3_weight: 75, v1_weight: 25 }
+      - { name: "full", v3_weight: 100, v1_weight: 0 }
+
+  tasks:
+    - name: Gradual traffic migration
+      include_tasks: migration_stage.yml
+      loop: "{{ migration_stages }}"
+      loop_control:
+        loop_var: stage
+
+- name: DWCP v3 Upgrade - Enable Feature Flags
+  hosts: all
+  become: yes
+  serial: "{{ batch_size | default('20%') }}"
+  tags: features
+
+  vars:
+    feature_rollout:
+      - { flag: "enable_v3", value: true, wait: 30 }
+      - { flag: "enable_hybrid_mode", value: true, wait: 60 }
+      - { flag: "enable_compression", value: true, wait: 30 }
+      - { flag: "enable_byzantine", value: true, wait: 30 }
+
+  tasks:
+    - name: Enable features gradually
+      include_tasks: feature_enable.yml
+      loop: "{{ feature_rollout }}"
+      loop_control:
+        loop_var: feature
+
+- name: DWCP v3 Upgrade - Cutover to v3
+  hosts: all
+  become: yes
+  serial: "{{ batch_size | default('20%') }}"
+  max_fail_percentage: 5
+  tags: cutover
+
+  tasks:
+    - name: Stop v1 service gracefully
+      systemd:
+        name: dwcp
+        state: stopped
+
+    - name: Wait for v1 connections to drain
+      wait_for:
+        port: 9100
+        state: stopped
+        timeout: 300
+
+    - name: Disable v1 service
+      systemd:
+        name: dwcp
+        enabled: no
+
+    - name: Update v3 to use primary port
+      lineinfile:
+        path: /etc/dwcp/dwcp-v3.yaml
+        regexp: '^  metricsPort:'
+        line: '  metricsPort: 9100'
+      notify: Restart DWCP v3
+
+    - name: Enable v3 service
+      systemd:
+        name: dwcp-v3
+        enabled: yes
+
+    - name: Restart v3 on primary port
+      systemd:
+        name: dwcp-v3
+        state: restarted
+
+    - name: Wait for v3 on primary port
+      wait_for:
+        port: 9100
+        delay: 5
+        timeout: 60
+
+    - name: Final health check
+      uri:
+        url: "http://localhost:9100/health"
+        method: GET
+        return_content: yes
+      register: final_health
+      retries: 5
+      delay: 10
+      until: final_health.status == 200
+
+    - name: Validate metrics
+      uri:
+        url: "http://localhost:9100/metrics"
+        method: GET
+        return_content: yes
+      register: final_metrics
+
+    - name: Check for errors in logs
+      shell: journalctl -u dwcp-v3 -n 100 --no-pager | grep -i error || true
+      register: error_logs
+      changed_when: false
+
+    - name: Assert no critical errors
+      assert:
+        that:
+          - "'CRITICAL' not in error_logs.stdout"
+          - "'FATAL' not in error_logs.stdout"
+        fail_msg: "Critical errors found in logs"
+        success_msg: "No critical errors detected"
+
+- name: DWCP v3 Upgrade - Post-Upgrade Validation
+  hosts: all
+  become: yes
+  tags: validation
+
+  tasks:
+    - name: Verify v3 service is running
+      systemd:
+        name: dwcp-v3
+        state: started
+      register: service_status
+
+    - name: Check v3 version
+      command: /usr/local/bin/dwcp-v3 --version
+      register: new_version
+      changed_when: false
+
+    - name: Display upgrade results
+      debug:
+        msg: "Successfully upgraded to {{ new_version.stdout }}"
+
+    - name: Collect performance metrics
+      shell: |
+        dwcp-ctl stats | jq '{
+          throughput: .throughput_gbps,
+          latency_p99: .latency_p99_us,
+          connections: .active_connections,
+          errors: .error_count
+        }'
+      register: perf_metrics
+      changed_when: false
+
+    - name: Display performance metrics
+      debug:
+        msg: "{{ perf_metrics.stdout }}"
+
+    - name: Test RDMA functionality (datacenter)
+      command: dwcp-ctl test rdma
+      register: rdma_test
+      when: "'datacenter' in group_names"
+      changed_when: false
+
+    - name: Test internet mode functionality
+      command: dwcp-ctl test internet
+      register: internet_test
+      when: "'internet' in group_names or 'hybrid' in group_names"
+      changed_when: false
+
+    - name: Save upgrade report
+      copy:
+        dest: "/var/log/dwcp/upgrade-report-{{ ansible_date_time.iso8601 }}.json"
+        content: |
+          {
+            "timestamp": "{{ ansible_date_time.iso8601 }}",
+            "hostname": "{{ ansible_hostname }}",
+            "old_version": "{{ current_version.stdout }}",
+            "new_version": "{{ new_version.stdout }}",
+            "metrics": {{ perf_metrics.stdout }},
+            "status": "success"
+          }
+
+- name: DWCP v3 Upgrade - Rollback Procedure (on failure)
+  hosts: all
+  become: yes
+  tags: rollback
+  when: upgrade_failed | default(false)
+
+  tasks:
+    - name: Stop v3 service
+      systemd:
+        name: dwcp-v3
+        state: stopped
+
+    - name: Restore v1 configuration
+      copy:
+        src: "{{ backup_dir }}/{{ ansible_date_time.iso8601 }}/config.yaml.backup"
+        dest: /etc/dwcp/config.yaml
+        remote_src: yes
+
+    - name: Start v1 service
+      systemd:
+        name: dwcp
+        state: started
+
+    - name: Wait for v1 service
+      wait_for:
+        port: 9100
+        delay: 5
+        timeout: 60
+
+    - name: Verify rollback
+      uri:
+        url: "http://localhost:9100/health"
+        method: GET
+      register: rollback_health
+      retries: 3
+      delay: 5
+
+    - name: Log rollback event
+      shell: |
+        echo "$(date -Iseconds) ROLLBACK: Reverted to v1 due to upgrade failure" >> /var/log/dwcp/upgrade.log
+
+  handlers:
+    - name: Restart DWCP v3
+      systemd:
+        name: dwcp-v3
+        state: restarted
+        daemon_reload: yes

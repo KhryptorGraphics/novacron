@@ -1,0 +1,85 @@
+```mermaid
+graph TD
+    %% Phase 1: Pre-Initialization
+    subgraph PreInit["Phase 1: Pre-Initialization (2-5s)"]
+        EnvDetector[EnvironmentDetector]
+        ConfigLoader[ConfigurationLoader]
+        LoggerFactory[LoggerFactory]
+        ResourceValidator[ResourceValidator]
+    end
+
+    %% Phase 2: Core Initialization - Level 0
+    subgraph CoreInit["Phase 2: Core Initialization (5-10s)"]
+        subgraph Level0["Level 0 (Sequential)"]
+            Security[SecurityComponent<br/>Secrets, Encryption, Auth]
+        end
+
+        subgraph Level1["Level 1 (Parallel)"]
+            Database[DatabaseComponent<br/>Connection, Migrations]
+            Cache[CacheComponent<br/>Redis, In-Memory]
+            Network[NetworkComponent<br/>Transport, Protocols]
+        end
+
+        subgraph Level2["Level 2 (Sequential)"]
+            DWCP[DWCPComponent<br/>AMST, HDE, PBA, ASS, ACP, ITP]
+        end
+    end
+
+    %% Phase 3: Service Initialization
+    subgraph ServiceInit["Phase 3: Service Initialization (5-10s)"]
+        subgraph ServiceLevel["All Services (Parallel)"]
+            Orchestration[OrchestrationComponent<br/>Swarm, Agents, Tasks]
+            APIServer[APIServerComponent<br/>REST, gRPC, WebSocket]
+            Monitoring[MonitoringComponent<br/>Metrics, Tracing]
+            MLEngine[MLEngineComponent<br/>Bandwidth, Scheduler]
+        end
+    end
+
+    %% Phase 4: Post-Initialization
+    subgraph PostInit["Phase 4: Post-Initialization (2-5s)"]
+        HealthCheck[System Health Check]
+        MetricsEmit[Emit Startup Metrics]
+        ServiceDiscovery[Service Discovery Registration]
+        BackgroundJobs[Start Background Jobs]
+        ReadySignal[Mark System Ready]
+    end
+
+    %% Dependencies - Phase 1 to Phase 2
+    PreInit --> Security
+
+    %% Dependencies - Level 0 to Level 1
+    Security --> Database
+    Security --> Cache
+    Security --> Network
+
+    %% Dependencies - Level 1 to Level 2
+    Security --> DWCP
+    Network --> DWCP
+
+    %% Dependencies - Phase 2 to Phase 3
+    DWCP --> Orchestration
+    Database --> Orchestration
+    DWCP --> APIServer
+    Security --> APIServer
+    Network --> Monitoring
+
+    %% Dependencies - Phase 3 to Phase 4
+    ServiceInit --> HealthCheck
+    HealthCheck --> MetricsEmit
+    MetricsEmit --> ServiceDiscovery
+    ServiceDiscovery --> BackgroundJobs
+    BackgroundJobs --> ReadySignal
+
+    %% Styling
+    classDef critical fill:#ff6b6b,stroke:#c92a2a,stroke-width:3px,color:#fff
+    classDef high fill:#ffa94d,stroke:#fd7e14,stroke-width:2px,color:#000
+    classDef medium fill:#74c0fc,stroke:#339af0,stroke-width:2px,color:#000
+    classDef low fill:#b2f2bb,stroke:#51cf66,stroke-width:1px,color:#000
+    classDef phase fill:#e9ecef,stroke:#868e96,stroke-width:2px,color:#000
+
+    class Security,Database,Network,APIServer critical
+    class DWCP,Orchestration high
+    class Cache,Monitoring medium
+    class MLEngine low
+    class PreInit,CoreInit,ServiceInit,PostInit phase
+```

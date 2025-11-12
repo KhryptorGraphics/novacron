@@ -1,0 +1,74 @@
+%% NovaCron Component Architecture Diagram
+%% Shows the component hierarchy and dependencies
+
+graph TB
+    subgraph "Pre-Initialization Phase"
+        Bootstrap[Bootstrap Entry Point]
+        EnvDetector[Environment Detector]
+        ConfigLoader[Configuration Loader]
+        Logger[Logger Factory]
+        ResourceValidator[Resource Validator]
+
+        Bootstrap --> EnvDetector
+        Bootstrap --> ConfigLoader
+        Bootstrap --> Logger
+        Bootstrap --> ResourceValidator
+    end
+
+    subgraph "Core Component Layer"
+        Registry[Component Registry]
+        Security[Security System]
+        Database[Database Layer]
+        Cache[Cache Layer]
+        Network[Network Stack]
+        DWCP[DWCP System]
+
+        Registry --> Security
+        Registry --> Database
+        Registry --> Cache
+        Registry --> Network
+        Registry --> DWCP
+
+        Security -.->|provides auth| Database
+        Security -.->|provides encryption| Cache
+        Security -.->|provides TLS| Network
+
+        Database -.->|state storage| DWCP
+        Cache -.->|caching| DWCP
+        Network -.->|transport| DWCP
+    end
+
+    subgraph "Service Layer"
+        Orchestrator[Orchestration System]
+        APIServer[API Server]
+        MLEngine[ML/AI Engine]
+        Monitoring[Monitoring System]
+
+        DWCP -.->|communication| Orchestrator
+        Security -.->|auth/authz| APIServer
+        Database -.->|persistence| APIServer
+        DWCP -.->|federation| Orchestrator
+        Database -.->|model storage| MLEngine
+    end
+
+    subgraph "Application Layer"
+        Frontend[Web Frontend]
+        CLI[CLI Tools]
+        SDKs[Client SDKs]
+
+        APIServer -.->|REST/gRPC| Frontend
+        APIServer -.->|REST/gRPC| CLI
+        APIServer -.->|REST/gRPC| SDKs
+    end
+
+    Bootstrap --> Registry
+
+    classDef criticalComponent fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef coreComponent fill:#4dabf7,stroke:#1c7ed6,color:#fff
+    classDef serviceComponent fill:#51cf66,stroke:#2f9e44,color:#fff
+    classDef appComponent fill:#ffd43b,stroke:#f08c00,color:#000
+
+    class Security,Database,Network criticalComponent
+    class Cache,DWCP,Registry coreComponent
+    class Orchestrator,APIServer,Monitoring,MLEngine serviceComponent
+    class Frontend,CLI,SDKs appComponent
