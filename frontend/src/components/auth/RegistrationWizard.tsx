@@ -365,7 +365,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                     <Input
                       id="email"
                       type="email"
-                      placeholder="john.doe@example.com"
+                      placeholder="user@organization.com"
                       value={formData.email}
                       onChange={(e) => updateFormData('email', e.target.value)}
                       className={cn(

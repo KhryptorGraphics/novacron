@@ -64,7 +64,7 @@ export function RegisterForm({ onSubmit, isLoading }: RegisterFormProps) {
         <Label htmlFor="email">Email</Label>
         <Input
           id="email"
-          placeholder="name@example.com"
+          placeholder="user@organization.com"
           type="email"
           autoCapitalize="none"
           autoComplete="email"

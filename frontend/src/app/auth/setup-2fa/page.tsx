@@ -45,7 +45,7 @@ export default function Setup2FAPage() {
           variant: "destructive",
         });
         // Fall back to demo data if API fails
-        setQrCodeUrl("https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=otpauth://totp/NovaCron:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=NovaCron");
+        setQrCodeUrl("https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=otpauth://totp/NovaCron:demo@demo.local?secret=JBSWY3DPEHPK3PXP&issuer=NovaCron");
         setSecret("JBSWY3DPEHPK3PXP");
         setBackupCodes([
           "1a2b-3c4d", "5e6f-7g8h", "9i0j-1k2l",

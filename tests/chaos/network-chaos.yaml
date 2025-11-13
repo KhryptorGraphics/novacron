@@ -1,0 +1,157 @@
+# NovaCron Network Chaos Tests
+# Tests network resilience: partitions, delays, packet loss, bandwidth limits, DNS failures
+
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Workflow
+metadata:
+  name: novacron-network-chaos
+  namespace: novacron
+spec:
+  entry: network-chaos-suite
+  templates:
+    - name: network-chaos-suite
+      templateType: Serial
+      deadline: 3h
+      children:
+        - network-partition
+        - network-delay
+        - packet-loss
+        - bandwidth-limit
+        - dns-failure
+
+    # Test 1: Network Partition - Isolate API servers
+    - name: network-partition
+      templateType: NetworkChaos
+      deadline: 15m
+      networkChaos:
+        action: partition
+        mode: all
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: novacron-api
+        direction: both
+        target:
+          mode: all
+          selector:
+            namespaces:
+              - novacron
+            labelSelectors:
+              app: novacron-database
+        duration: 5m
+
+    # Test 2: Network Delay - Add 100ms-1000ms latency
+    - name: network-delay
+      templateType: NetworkChaos
+      deadline: 20m
+      networkChaos:
+        action: delay
+        mode: all
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: novacron-api
+        delay:
+          latency: 500ms
+          correlation: '25'
+          jitter: 100ms
+        duration: 10m
+
+    # Test 3: Packet Loss - 1%-10% packet loss
+    - name: packet-loss
+      templateType: NetworkChaos
+      deadline: 20m
+      networkChaos:
+        action: loss
+        mode: all
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            tier: backend
+        loss:
+          loss: '5'
+          correlation: '25'
+        duration: 10m
+
+    # Test 4: Bandwidth Limit - Throttle to 10Mbps
+    - name: bandwidth-limit
+      templateType: NetworkChaos
+      deadline: 15m
+      networkChaos:
+        action: bandwidth
+        mode: all
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: novacron-api
+        bandwidth:
+          rate: 10mbps
+          limit: 20971520 # 20MB buffer
+          buffer: 10000
+        duration: 10m
+
+    # Test 5: DNS Failure - Simulate DNS outages
+    - name: dns-failure
+      templateType: DNSChaos
+      deadline: 10m
+      dnsChaos:
+        action: error
+        mode: all
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: novacron-api
+        patterns:
+          - db.novacron.io
+          - redis.novacron.io
+        duration: 5m
+
+---
+# Validation Tests - Run after chaos to verify recovery
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: network-chaos-validation
+  namespace: novacron
+spec:
+  template:
+    spec:
+      containers:
+      - name: validator
+        image: curlimages/curl:latest
+        command:
+          - /bin/sh
+          - -c
+          - |
+            #!/bin/sh
+            echo "Validating network recovery..."
+
+            # Test API health
+            curl -f https://api.novacron.io/health || exit 1
+            echo "✅ API health check passed"
+
+            # Test database connectivity
+            curl -f https://api.novacron.io/api/v1/vms | grep -q "id" || exit 1
+            echo "✅ Database connectivity restored"
+
+            # Test latency
+            START=$(date +%s%3N)
+            curl -s https://api.novacron.io/api/v1/vms > /dev/null
+            END=$(date +%s%3N)
+            LATENCY=$((END - START))
+
+            if [ $LATENCY -lt 500 ]; then
+              echo "✅ Latency normal: ${LATENCY}ms"
+            else
+              echo "⚠️ Latency high: ${LATENCY}ms"
+              exit 1
+            fi
+
+            echo "✅ All network chaos validations passed"
+      restartPolicy: Never
+  backoffLimit: 3

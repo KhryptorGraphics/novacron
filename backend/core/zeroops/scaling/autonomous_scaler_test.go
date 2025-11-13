@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yourusername/novacron/backend/core/zeroops"
+	"github.com/khryptorgraphics/novacron/backend/core/zeroops"
 )
 
 func TestAutonomousScaler(t *testing.T) {

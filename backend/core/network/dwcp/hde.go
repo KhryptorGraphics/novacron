@@ -72,13 +72,13 @@ type HDEConfig struct {
 	QuantizationBits   int         // Bits for quantization (default: 16)
 }
 
-// CompressionLevel represents the compression level for different tiers
-type CompressionLevel int
+// HDECompressionLevel represents the compression level for different tiers
+type HDECompressionLevel int
 
 const (
-	CompressionLocal    CompressionLevel = iota // Tier 1: Local/Intra-cluster
-	CompressionRegional                          // Tier 2: Regional/Inter-cluster
-	CompressionGlobal                            // Tier 3: Global/WAN
+	CompressionLocal    HDECompressionLevel = iota // Tier 1: Local/Intra-cluster
+	CompressionRegional                            // Tier 2: Regional/Inter-cluster
+	CompressionGlobal                              // Tier 3: Global/WAN
 )
 
 // Baseline represents a reference state for delta encoding
@@ -381,7 +381,7 @@ func (hde *HDE) Decompress(data []byte) ([]byte, error) {
 }
 
 // compress compresses data with the specified compression level
-func (hde *HDE) compress(data []byte, level CompressionLevel) ([]byte, error) {
+func (hde *HDE) compress(data []byte, level HDECompressionLevel) ([]byte, error) {
 	encoder, exists := hde.encoders[level]
 	if !exists {
 		return nil, fmt.Errorf("encoder not found for level %d", level)
@@ -391,7 +391,7 @@ func (hde *HDE) compress(data []byte, level CompressionLevel) ([]byte, error) {
 }
 
 // decompress decompresses data with the specified compression level
-func (hde *HDE) decompress(data []byte, level CompressionLevel) ([]byte, error) {
+func (hde *HDE) decompress(data []byte, level HDECompressionLevel) ([]byte, error) {
 	decoder, exists := hde.decoders[level]
 	if !exists {
 		return nil, fmt.Errorf("decoder not found for level %d", level)
@@ -401,7 +401,7 @@ func (hde *HDE) decompress(data []byte, level CompressionLevel) ([]byte, error) 
 }
 
 // compressWithDict compresses data using a dictionary
-func (hde *HDE) compressWithDict(data []byte, dict []byte, level CompressionLevel) ([]byte, error) {
+func (hde *HDE) compressWithDict(data []byte, dict []byte, level HDECompressionLevel) ([]byte, error) {
 	// Create encoder with dictionary
 	encoder, err := zstd.NewWriter(nil,
 		zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(hde.getCompressionLevel(level))),

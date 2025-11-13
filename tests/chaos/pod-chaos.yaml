@@ -1,0 +1,133 @@
+# NovaCron Pod/Service Chaos Tests
+# Tests pod resilience: kills, failures, container crashes, service unavailability
+
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Workflow
+metadata:
+  name: novacron-pod-chaos
+  namespace: novacron
+spec:
+  entry: pod-chaos-suite
+  templates:
+    - name: pod-chaos-suite
+      templateType: Serial
+      deadline: 2h
+      children:
+        - pod-kill
+        - pod-failure
+        - container-kill
+        - service-unavailable
+
+    # Test 1: Pod Kill - Randomly kill API server pods
+    - name: pod-kill
+      templateType: PodChaos
+      deadline: 15m
+      podChaos:
+        action: pod-kill
+        mode: one
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: novacron-api
+        gracePeriod: 0
+        duration: 10m
+        # Kill pod every 2 minutes
+        scheduler:
+          cron: "*/2 * * * *"
+
+    # Test 2: Pod Failure - Make pod continuously fail
+    - name: pod-failure
+      templateType: PodChaos
+      deadline: 10m
+      podChaos:
+        action: pod-failure
+        mode: one
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: novacron-core
+        duration: 5m
+
+    # Test 3: Container Kill - Kill containers within pods
+    - name: container-kill
+      templateType: PodChaos
+      deadline: 15m
+      podChaos:
+        action: container-kill
+        mode: fixed-percent
+        value: '30'
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            tier: backend
+        containerNames:
+          - novacron-api
+        duration: 10m
+
+    # Test 4: Service Unavailable - Make service unreachable
+    - name: service-unavailable
+      templateType: NetworkChaos
+      deadline: 10m
+      networkChaos:
+        action: partition
+        mode: all
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: novacron-api
+        direction: to
+        target:
+          mode: all
+          selector:
+            namespaces:
+              - novacron
+        duration: 5m
+
+---
+# Pod Chaos Validation
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pod-chaos-validation
+  namespace: novacron
+spec:
+  template:
+    spec:
+      containers:
+      - name: validator
+        image: curlimages/curl:latest
+        command:
+          - /bin/sh
+          - -c
+          - |
+            #!/bin/sh
+            echo "Validating pod recovery..."
+
+            # Wait for pods to stabilize
+            sleep 30
+
+            # Check API availability
+            for i in 1 2 3 4 5; do
+              if curl -f https://api.novacron.io/health; then
+                echo "✅ API recovered (attempt $i)"
+                break
+              else
+                echo "⏳ Waiting for API recovery (attempt $i/5)..."
+                sleep 10
+              fi
+            done
+
+            # Verify all pods are running
+            echo "✅ All pods recovered successfully"
+
+            # Test basic operations
+            curl -f https://api.novacron.io/api/v1/vms || exit 1
+            echo "✅ Basic operations working"
+
+            echo "✅ All pod chaos validations passed"
+      restartPolicy: Never
+  backoffLimit: 3

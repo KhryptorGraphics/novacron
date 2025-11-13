@@ -980,7 +980,8 @@ func (s *BackupAPIServer) testRecovery(w http.ResponseWriter, r *http.Request) {
 // Monitoring and statistics handlers
 
 func (s *BackupAPIServer) getBackupStats(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement comprehensive backup statistics
+	// Return placeholder statistics until comprehensive metrics are implemented
+	// In production, this would aggregate data from backup manager, retention policies, and storage
 	stats := map[string]interface{}{
 		"total_backups":   0,
 		"total_size":      0,
@@ -988,10 +989,14 @@ func (s *BackupAPIServer) getBackupStats(w http.ResponseWriter, r *http.Request)
 		"deduplication_ratio": 0.0,
 		"backup_success_rate": 0.0,
 		"average_backup_time": "0s",
+		"status": "placeholder", // Indicates this is not yet fully implemented
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode statistics: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 func (s *BackupAPIServer) getHealthStatus(w http.ResponseWriter, r *http.Request) {
@@ -1010,8 +1015,8 @@ func (s *BackupAPIServer) getHealthStatus(w http.ResponseWriter, r *http.Request
 }
 
 func (s *BackupAPIServer) getDedupStats(w http.ResponseWriter, r *http.Request) {
-	// Get deduplication statistics
-	// TODO: Get actual stats from deduplication engine
+	// Return placeholder deduplication statistics
+	// In production, this would query the actual deduplication engine
 	stats := map[string]interface{}{
 		"total_bytes":        0,
 		"unique_bytes":       0,
@@ -1020,6 +1025,7 @@ func (s *BackupAPIServer) getDedupStats(w http.ResponseWriter, r *http.Request) 
 		"chunk_count":        0,
 		"unique_chunks":      0,
 		"last_updated":       time.Now(),
+		"status": "placeholder", // Indicates this is not yet connected to dedup engine
 	}
 	
 	w.Header().Set("Content-Type", "application/json")

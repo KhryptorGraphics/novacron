@@ -42,15 +42,15 @@ type AuditLogEntry struct {
 }
 
 type SecurityMetrics struct {
-	TotalAlerts      int              `json:"total_alerts"`
-	CriticalAlerts   int              `json:"critical_alerts"`
-	FailedLogins     int              `json:"failed_logins_24h"`
-	ActiveSessions   int              `json:"active_sessions"`
-	LastBreach       *time.Time       `json:"last_breach,omitempty"`
-	AlertsByType     map[string]int   `json:"alerts_by_type"`
-	AlertsBySeverity map[string]int   `json:"alerts_by_severity"`
-	RecentActivities []AuditLogEntry  `json:"recent_activities"`
-	TopIPs           []IPStatistic    `json:"top_ips"`
+	TotalAlerts      int             `json:"total_alerts"`
+	CriticalAlerts   int             `json:"critical_alerts"`
+	FailedLogins     int             `json:"failed_logins_24h"`
+	ActiveSessions   int             `json:"active_sessions"`
+	LastBreach       *time.Time      `json:"last_breach,omitempty"`
+	AlertsByType     map[string]int  `json:"alerts_by_type"`
+	AlertsBySeverity map[string]int  `json:"alerts_by_severity"`
+	RecentActivities []AuditLogEntry `json:"recent_activities"`
+	TopIPs           []IPStatistic   `json:"top_ips"`
 }
 
 type IPStatistic struct {
@@ -84,19 +84,19 @@ func (h *SecurityHandlers) GetSecurityMetrics(w http.ResponseWriter, r *http.Req
 		AlertsByType:     make(map[string]int),
 		AlertsBySeverity: make(map[string]int),
 	}
-	
+
 	// Get total alerts
 	err := h.db.QueryRow("SELECT COUNT(*) FROM security_alerts WHERE created_at > NOW() - INTERVAL '30 days'").Scan(&metrics.TotalAlerts)
 	if err != nil {
 		logger.Error("Failed to get total alerts", "error", err)
 	}
-	
+
 	// Get critical alerts
 	err = h.db.QueryRow("SELECT COUNT(*) FROM security_alerts WHERE severity = 'critical' AND created_at > NOW() - INTERVAL '7 days'").Scan(&metrics.CriticalAlerts)
 	if err != nil {
 		logger.Error("Failed to get critical alerts", "error", err)
 	}
-	
+
 	// Get failed logins in last 24 hours
 	err = h.db.QueryRow(`
 		SELECT COUNT(*) FROM audit_logs 
@@ -106,10 +106,10 @@ func (h *SecurityHandlers) GetSecurityMetrics(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		logger.Error("Failed to get failed logins", "error", err)
 	}
-	
+
 	// Get active sessions (mock data for now)
 	metrics.ActiveSessions = 42
-	
+
 	// Get alerts by type
 	typeRows, err := h.db.Query(`
 		SELECT type, COUNT(*) 
@@ -127,7 +127,7 @@ func (h *SecurityHandlers) GetSecurityMetrics(w http.ResponseWriter, r *http.Req
 			}
 		}
 	}
-	
+
 	// Get alerts by severity
 	severityRows, err := h.db.Query(`
 		SELECT severity, COUNT(*) 
@@ -145,7 +145,7 @@ func (h *SecurityHandlers) GetSecurityMetrics(w http.ResponseWriter, r *http.Req
 			}
 		}
 	}
-	
+
 	// Get recent activities
 	activityRows, err := h.db.Query(`
 		SELECT 
@@ -162,27 +162,27 @@ func (h *SecurityHandlers) GetSecurityMetrics(w http.ResponseWriter, r *http.Req
 			var activity AuditLogEntry
 			var details sql.NullString
 			var username sql.NullString
-			
+
 			err := activityRows.Scan(&activity.ID, &activity.UserID, &username,
 				&activity.Action, &activity.Resource, &details,
 				&activity.IP, &activity.UserAgent, &activity.Success, &activity.CreatedAt)
-			
+
 			if err == nil {
 				if username.Valid {
 					activity.Username = username.String
 				}
-				
+
 				if details.Valid {
 					json.Unmarshal([]byte(details.String), &activity.Details)
 				} else {
 					activity.Details = make(map[string]interface{})
 				}
-				
+
 				metrics.RecentActivities = append(metrics.RecentActivities, activity)
 			}
 		}
 	}
-	
+
 	// Get top IPs by activity
 	ipRows, err := h.db.Query(`
 		SELECT ip, COUNT(*) as count
@@ -202,7 +202,7 @@ func (h *SecurityHandlers) GetSecurityMetrics(w http.ResponseWriter, r *http.Req
 			}
 		}
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(metrics)
 }
@@ -213,17 +213,17 @@ func (h *SecurityHandlers) GetSecurityAlerts(w http.ResponseWriter, r *http.Requ
 	if page <= 0 {
 		page = 1
 	}
-	
+
 	pageSize, _ := strconv.Atoi(r.URL.Query().Get("page_size"))
 	if pageSize <= 0 || pageSize > 100 {
 		pageSize = 20
 	}
-	
+
 	severity := r.URL.Query().Get("severity")
 	status := r.URL.Query().Get("status")
-	
+
 	offset := (page - 1) * pageSize
-	
+
 	// Build query
 	query := `
 		SELECT id, type, severity, title, description, source, ip, user_agent, status, created_at, updated_at
@@ -232,22 +232,22 @@ func (h *SecurityHandlers) GetSecurityAlerts(w http.ResponseWriter, r *http.Requ
 	`
 	args := []interface{}{}
 	argIndex := 1
-	
+
 	if severity != "" {
 		query += " AND severity = $" + strconv.Itoa(argIndex)
 		args = append(args, severity)
 		argIndex++
 	}
-	
+
 	if status != "" {
 		query += " AND status = $" + strconv.Itoa(argIndex)
 		args = append(args, status)
 		argIndex++
 	}
-	
+
 	query += " ORDER BY created_at DESC LIMIT $" + strconv.Itoa(argIndex) + " OFFSET $" + strconv.Itoa(argIndex+1)
 	args = append(args, pageSize, offset)
-	
+
 	rows, err := h.db.Query(query, args...)
 	if err != nil {
 		logger.Error("Failed to query security alerts", "error", err)
@@ -255,31 +255,31 @@ func (h *SecurityHandlers) GetSecurityAlerts(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	defer rows.Close()
-	
+
 	alerts := []SecurityAlert{}
 	for rows.Next() {
 		var alert SecurityAlert
 		var ip, userAgent sql.NullString
-		
+
 		err := rows.Scan(&alert.ID, &alert.Type, &alert.Severity, &alert.Title,
 			&alert.Description, &alert.Source, &ip, &userAgent,
 			&alert.Status, &alert.CreatedAt, &alert.UpdatedAt)
-		
+
 		if err != nil {
 			logger.Error("Failed to scan alert", "error", err)
 			continue
 		}
-		
+
 		if ip.Valid {
 			alert.IP = ip.String
 		}
 		if userAgent.Valid {
 			alert.UserAgent = userAgent.String
 		}
-		
+
 		alerts = append(alerts, alert)
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"alerts": alerts,
@@ -294,17 +294,17 @@ func (h *SecurityHandlers) GetAuditLogs(w http.ResponseWriter, r *http.Request) 
 	if page <= 0 {
 		page = 1
 	}
-	
+
 	pageSize, _ := strconv.Atoi(r.URL.Query().Get("page_size"))
 	if pageSize <= 0 || pageSize > 100 {
 		pageSize = 50
 	}
-	
+
 	action := r.URL.Query().Get("action")
 	userID := r.URL.Query().Get("user_id")
-	
+
 	offset := (page - 1) * pageSize
-	
+
 	query := `
 		SELECT 
 			al.id, al.user_id, u.username, al.action, al.resource,
@@ -315,22 +315,22 @@ func (h *SecurityHandlers) GetAuditLogs(w http.ResponseWriter, r *http.Request) 
 	`
 	args := []interface{}{}
 	argIndex := 1
-	
+
 	if action != "" {
 		query += " AND al.action = $" + strconv.Itoa(argIndex)
 		args = append(args, action)
 		argIndex++
 	}
-	
+
 	if userID != "" {
 		query += " AND al.user_id = $" + strconv.Itoa(argIndex)
 		args = append(args, userID)
 		argIndex++
 	}
-	
+
 	query += " ORDER BY al.created_at DESC LIMIT $" + strconv.Itoa(argIndex) + " OFFSET $" + strconv.Itoa(argIndex+1)
 	args = append(args, pageSize, offset)
-	
+
 	rows, err := h.db.Query(query, args...)
 	if err != nil {
 		logger.Error("Failed to query audit logs", "error", err)
@@ -338,35 +338,35 @@ func (h *SecurityHandlers) GetAuditLogs(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer rows.Close()
-	
+
 	logs := []AuditLogEntry{}
 	for rows.Next() {
 		var log AuditLogEntry
 		var details sql.NullString
 		var username sql.NullString
-		
+
 		err := rows.Scan(&log.ID, &log.UserID, &username, &log.Action,
 			&log.Resource, &details, &log.IP, &log.UserAgent,
 			&log.Success, &log.CreatedAt)
-		
+
 		if err != nil {
 			logger.Error("Failed to scan audit log", "error", err)
 			continue
 		}
-		
+
 		if username.Valid {
 			log.Username = username.String
 		}
-		
+
 		if details.Valid {
 			json.Unmarshal([]byte(details.String), &log.Details)
 		} else {
 			log.Details = make(map[string]interface{})
 		}
-		
+
 		logs = append(logs, log)
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"logs":  logs,
@@ -395,7 +395,7 @@ func (h *SecurityHandlers) GetSecurityPolicies(w http.ResponseWriter, r *http.Re
 			BlockedIPs:          "",
 		},
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"policies": policies,
@@ -410,11 +410,11 @@ func (h *SecurityHandlers) UpdateSecurityPolicy(w http.ResponseWriter, r *http.R
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	
+
 	// For now, just return the updated policy
 	// In production, this would update the database
 	policy.ID = 1 // Mock ID
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(policy)
 }
@@ -425,28 +425,28 @@ func (h *SecurityHandlers) CreateSecurityAlert(alertType, severity, title, descr
 		INSERT INTO security_alerts (type, severity, title, description, source, ip, user_agent, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', NOW(), NOW())
 	`, alertType, severity, title, description, source, ip, userAgent)
-	
+
 	if err != nil {
 		logger.Error("Failed to create security alert", "error", err)
 		return err
 	}
-	
+
 	return nil
 }
 
 // Helper function to log audit entry
 func (h *SecurityHandlers) LogAuditEntry(userID int, action, resource string, details map[string]interface{}, ip, userAgent string, success bool) error {
 	detailsJSON, _ := json.Marshal(details)
-	
+
 	_, err := h.db.Exec(`
 		INSERT INTO audit_logs (user_id, action, resource, details, ip, user_agent, success, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
 	`, userID, action, resource, string(detailsJSON), ip, userAgent, success)
-	
+
 	if err != nil {
 		logger.Error("Failed to create audit log entry", "error", err)
 		return err
 	}
-	
+
 	return nil
 }

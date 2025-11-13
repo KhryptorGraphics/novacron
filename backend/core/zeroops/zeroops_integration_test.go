@@ -4,12 +4,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yourusername/novacron/backend/core/zeroops/alerting"
-	"github.com/yourusername/novacron/backend/core/zeroops/incident"
-	"github.com/yourusername/novacron/backend/core/zeroops/metrics"
-	"github.com/yourusername/novacron/backend/core/zeroops/operations"
-	"github.com/yourusername/novacron/backend/core/zeroops/provisioning"
-	"github.com/yourusername/novacron/backend/core/zeroops/scaling"
+	"github.com/khryptorgraphics/novacron/backend/core/zeroops/alerting"
+	"github.com/khryptorgraphics/novacron/backend/core/zeroops/incident"
+	"github.com/khryptorgraphics/novacron/backend/core/zeroops/metrics"
+	"github.com/khryptorgraphics/novacron/backend/core/zeroops/operations"
+	"github.com/khryptorgraphics/novacron/backend/core/zeroops/provisioning"
+	"github.com/khryptorgraphics/novacron/backend/core/zeroops/scaling"
 )
 
 func TestZeroOpsIntegration(t *testing.T) {

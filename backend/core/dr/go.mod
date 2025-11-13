@@ -1,4 +1,4 @@
-module github.com/yourusername/novacron/backend/core/dr
+module github.com/khryptorgraphics/novacron/backend/core/dr
 
 go 1.21
 

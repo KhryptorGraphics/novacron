@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,34 +13,51 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/pkg/logger"
 )
 
+// Context keys for user information
+type contextKey string
+
+const (
+	contextKeyUser contextKey = "user"
+)
+
+// getUserFromContext retrieves the authenticated user from the request context
+// Returns "admin" as default if no user is found in context
+func getUserFromContext(ctx context.Context) string {
+	if user, ok := ctx.Value(contextKeyUser).(string); ok && user != "" {
+		return user
+	}
+	// Default to "admin" when authentication middleware hasn't set the user
+	return "admin"
+}
+
 type ConfigHandlers struct {
 	configPath string
 }
 
 type SystemConfig struct {
-	Server        ServerConfig        `json:"server"`
-	Database      DatabaseConfig      `json:"database"`
-	Security      SecurityConfig      `json:"security"`
-	Storage       StorageConfig       `json:"storage"`
-	VM            VMConfig           `json:"vm"`
-	Monitoring    MonitoringConfig   `json:"monitoring"`
-	Network       NetworkConfig      `json:"network"`
-	LastUpdated   time.Time          `json:"last_updated"`
-	UpdatedBy     string             `json:"updated_by,omitempty"`
+	Server      ServerConfig     `json:"server"`
+	Database    DatabaseConfig   `json:"database"`
+	Security    SecurityConfig   `json:"security"`
+	Storage     StorageConfig    `json:"storage"`
+	VM          VMConfig         `json:"vm"`
+	Monitoring  MonitoringConfig `json:"monitoring"`
+	Network     NetworkConfig    `json:"network"`
+	LastUpdated time.Time        `json:"last_updated"`
+	UpdatedBy   string           `json:"updated_by,omitempty"`
 }
 
 type ServerConfig struct {
-	APIPort         int    `json:"api_port"`
-	WSPort          int    `json:"ws_port"`
-	LogLevel        string `json:"log_level"`
-	LogFormat       string `json:"log_format"`
-	Environment     string `json:"environment"`
-	MaxConnections  int    `json:"max_connections"`
-	RequestTimeout  int    `json:"request_timeout_seconds"`
-	EnableCORS      bool   `json:"enable_cors"`
-	TLSEnabled      bool   `json:"tls_enabled"`
-	TLSCertPath     string `json:"tls_cert_path,omitempty"`
-	TLSKeyPath      string `json:"tls_key_path,omitempty"`
+	APIPort        int    `json:"api_port"`
+	WSPort         int    `json:"ws_port"`
+	LogLevel       string `json:"log_level"`
+	LogFormat      string `json:"log_format"`
+	Environment    string `json:"environment"`
+	MaxConnections int    `json:"max_connections"`
+	RequestTimeout int    `json:"request_timeout_seconds"`
+	EnableCORS     bool   `json:"enable_cors"`
+	TLSEnabled     bool   `json:"tls_enabled"`
+	TLSCertPath    string `json:"tls_cert_path,omitempty"`
+	TLSKeyPath     string `json:"tls_key_path,omitempty"`
 }
 
 type DatabaseConfig struct {
@@ -78,17 +96,17 @@ type StorageConfig struct {
 }
 
 type VMConfig struct {
-	DefaultDriver       string            `json:"default_driver"`
-	MaxVMsPerNode      int               `json:"max_vms_per_node"`
-	DefaultCPU         int               `json:"default_cpu_cores"`
-	DefaultMemory      int               `json:"default_memory_mb"`
-	DefaultDisk        int               `json:"default_disk_gb"`
-	MigrationEnabled   bool              `json:"migration_enabled"`
-	LiveMigration      bool              `json:"live_migration_enabled"`
-	CompressionLevel   int               `json:"compression_level"`
-	NetworkOptimized   bool              `json:"network_optimized"`
-	ResourceLimits     ResourceLimits    `json:"resource_limits"`
-	SupportedDrivers   []string          `json:"supported_drivers"`
+	DefaultDriver    string         `json:"default_driver"`
+	MaxVMsPerNode    int            `json:"max_vms_per_node"`
+	DefaultCPU       int            `json:"default_cpu_cores"`
+	DefaultMemory    int            `json:"default_memory_mb"`
+	DefaultDisk      int            `json:"default_disk_gb"`
+	MigrationEnabled bool           `json:"migration_enabled"`
+	LiveMigration    bool           `json:"live_migration_enabled"`
+	CompressionLevel int            `json:"compression_level"`
+	NetworkOptimized bool           `json:"network_optimized"`
+	ResourceLimits   ResourceLimits `json:"resource_limits"`
+	SupportedDrivers []string       `json:"supported_drivers"`
 }
 
 type ResourceLimits struct {
@@ -122,11 +140,11 @@ type NetworkConfig struct {
 }
 
 type ConfigBackup struct {
-	ID          int           `json:"id"`
-	Config      SystemConfig  `json:"config"`
-	CreatedAt   time.Time     `json:"created_at"`
-	CreatedBy   string        `json:"created_by"`
-	Description string        `json:"description"`
+	ID          int          `json:"id"`
+	Config      SystemConfig `json:"config"`
+	CreatedAt   time.Time    `json:"created_at"`
+	CreatedBy   string       `json:"created_by"`
+	Description string       `json:"description"`
 }
 
 func NewConfigHandlers(configPath string) *ConfigHandlers {
@@ -136,7 +154,7 @@ func NewConfigHandlers(configPath string) *ConfigHandlers {
 // GET /api/admin/config - Get current system configuration
 func (h *ConfigHandlers) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config := h.loadCurrentConfig()
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(config)
 }
@@ -148,31 +166,30 @@ func (h *ConfigHandlers) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Validate configuration
 	if err := h.validateConfig(newConfig); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid configuration: %v", err), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Create backup of current config
 	currentConfig := h.loadCurrentConfig()
 	if err := h.createConfigBackup(currentConfig, "Auto-backup before update"); err != nil {
 		logger.Error("Failed to create config backup", "error", err)
 		// Continue with update but log the failure
 	}
-	
+
 	// Update timestamp and user
 	newConfig.LastUpdated = time.Now()
-	// TODO: Get user from authentication context
-	newConfig.UpdatedBy = "admin"
-	
+	newConfig.UpdatedBy = getUserFromContext(r.Context())
+
 	// Apply configuration
 	if err := h.applyConfig(newConfig); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to apply configuration: %v", err), http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(newConfig)
 }
@@ -184,7 +201,7 @@ func (h *ConfigHandlers) ValidateConfig(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	
+
 	if err := h.validateConfig(config); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -193,7 +210,7 @@ func (h *ConfigHandlers) ValidateConfig(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"valid":   true,
@@ -206,21 +223,21 @@ func (h *ConfigHandlers) CreateBackup(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Description string `json:"description"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	
+
 	currentConfig := h.loadCurrentConfig()
-	
+
 	backup, err := h.createConfigBackup(currentConfig, req.Description)
 	if err != nil {
 		logger.Error("Failed to create config backup", "error", err)
 		http.Error(w, "Failed to create backup", http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(backup)
@@ -232,12 +249,12 @@ func (h *ConfigHandlers) ListBackups(w http.ResponseWriter, r *http.Request) {
 	if page <= 0 {
 		page = 1
 	}
-	
+
 	pageSize, _ := strconv.Atoi(r.URL.Query().Get("page_size"))
 	if pageSize <= 0 || pageSize > 50 {
 		pageSize = 20
 	}
-	
+
 	// For now, return mock data
 	// In production, this would query the database
 	backups := []ConfigBackup{
@@ -254,7 +271,7 @@ func (h *ConfigHandlers) ListBackups(w http.ResponseWriter, r *http.Request) {
 			Description: "Auto-backup before update",
 		},
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"backups":  backups,
@@ -272,15 +289,15 @@ func (h *ConfigHandlers) RestoreBackup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid backup ID", http.StatusBadRequest)
 		return
 	}
-	
+
 	// For now, return current config as if we restored
 	// In production, this would restore from database
 	_ = backupID
-	
+
 	config := h.loadCurrentConfig()
 	config.LastUpdated = time.Now()
 	config.UpdatedBy = "admin (restored)"
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Configuration restored successfully",
@@ -338,16 +355,16 @@ func (h *ConfigHandlers) loadCurrentConfig() SystemConfig {
 			TieredStorage:       getEnvBool("TIERED_STORAGE_ENABLED", false),
 		},
 		VM: VMConfig{
-			DefaultDriver:     getEnvString("DEFAULT_VM_DRIVER", "kvm"),
-			MaxVMsPerNode:     getEnvInt("MAX_VMS_PER_NODE", 50),
-			DefaultCPU:        getEnvInt("DEFAULT_CPU_CORES", 2),
-			DefaultMemory:     getEnvInt("DEFAULT_MEMORY_MB", 2048),
-			DefaultDisk:       getEnvInt("DEFAULT_DISK_GB", 20),
-			MigrationEnabled:  getEnvBool("MIGRATION_ENABLED", true),
-			LiveMigration:     getEnvBool("LIVE_MIGRATION_ENABLED", false),
-			CompressionLevel:  getEnvInt("COMPRESSION_LEVEL", 6),
-			NetworkOptimized:  getEnvBool("NETWORK_OPTIMIZED", true),
-			SupportedDrivers:  []string{"kvm", "container", "kata"},
+			DefaultDriver:    getEnvString("DEFAULT_VM_DRIVER", "kvm"),
+			MaxVMsPerNode:    getEnvInt("MAX_VMS_PER_NODE", 50),
+			DefaultCPU:       getEnvInt("DEFAULT_CPU_CORES", 2),
+			DefaultMemory:    getEnvInt("DEFAULT_MEMORY_MB", 2048),
+			DefaultDisk:      getEnvInt("DEFAULT_DISK_GB", 20),
+			MigrationEnabled: getEnvBool("MIGRATION_ENABLED", true),
+			LiveMigration:    getEnvBool("LIVE_MIGRATION_ENABLED", false),
+			CompressionLevel: getEnvInt("COMPRESSION_LEVEL", 6),
+			NetworkOptimized: getEnvBool("NETWORK_OPTIMIZED", true),
+			SupportedDrivers: []string{"kvm", "container", "kata"},
 			ResourceLimits: ResourceLimits{
 				MaxCPUCores:    getEnvInt("MAX_CPU_CORES", 16),
 				MaxMemoryGB:    getEnvInt("MAX_MEMORY_GB", 64),
@@ -386,23 +403,23 @@ func (h *ConfigHandlers) validateConfig(config SystemConfig) error {
 	if config.Server.APIPort < 1024 || config.Server.APIPort > 65535 {
 		return fmt.Errorf("API port must be between 1024 and 65535")
 	}
-	
+
 	if config.Server.WSPort < 1024 || config.Server.WSPort > 65535 {
 		return fmt.Errorf("WebSocket port must be between 1024 and 65535")
 	}
-	
+
 	// Validate database config
 	if config.Database.Port < 1 || config.Database.Port > 65535 {
 		return fmt.Errorf("database port must be between 1 and 65535")
 	}
-	
+
 	// Validate VM config
 	if config.VM.MaxVMsPerNode < 1 || config.VM.MaxVMsPerNode > 1000 {
 		return fmt.Errorf("max VMs per node must be between 1 and 1000")
 	}
-	
+
 	// Add more validation as needed
-	
+
 	return nil
 }
 
@@ -411,12 +428,12 @@ func (h *ConfigHandlers) applyConfig(config SystemConfig) error {
 	// 1. Update configuration files
 	// 2. Restart services if needed
 	// 3. Apply runtime configuration changes
-	
-	logger.Info("Configuration updated", 
+
+	logger.Info("Configuration updated",
 		"api_port", config.Server.APIPort,
 		"log_level", config.Server.LogLevel,
 		"updated_by", config.UpdatedBy)
-	
+
 	return nil
 }
 
@@ -425,12 +442,12 @@ func (h *ConfigHandlers) createConfigBackup(config SystemConfig, description str
 		ID:          int(time.Now().Unix()), // Mock ID
 		Config:      config,
 		CreatedAt:   time.Now(),
-		CreatedBy:   "admin", // TODO: Get from auth context
+		CreatedBy:   getUserFromContext(context.Background()), // Uses default "admin" until context is passed through
 		Description: description,
 	}
-	
+
 	// In production, this would save to database
-	
+
 	return backup, nil
 }
 

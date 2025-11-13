@@ -1,0 +1,220 @@
+# Prometheus Alerting Rules for NovaCron
+# Production-grade alerts with comprehensive coverage
+
+groups:
+  - name: api_alerts
+    interval: 30s
+    rules:
+      - alert: HighAPIErrorRate
+        expr: |
+          (
+            sum(rate(novacron_api_errors_total[5m])) by (endpoint)
+            /
+            sum(rate(novacron_api_requests_total[5m])) by (endpoint)
+          ) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "High API error rate on {{ $labels.endpoint }}"
+          description: "API endpoint {{ $labels.endpoint }} has {{ $value | humanizePercentage }} error rate (threshold: 1%)"
+          runbook_url: "https://novacron.io/runbooks/high-error-rate"
+
+      - alert: HighAPILatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(novacron_api_request_duration_seconds_bucket[5m])) by (le, endpoint)
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API latency on {{ $labels.endpoint }}"
+          description: "API endpoint {{ $labels.endpoint }} has p95 latency {{ $value }}s (threshold: 500ms)"
+          runbook_url: "https://novacron.io/runbooks/high-latency"
+
+      - alert: APIThroughputDegraded
+        expr: |
+          sum(rate(novacron_api_requests_total[5m])) < 1000
+        for: 10m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "API throughput degraded"
+          description: "API throughput is {{ $value }} req/s (expected: >10K req/s)"
+          runbook_url: "https://novacron.io/runbooks/low-throughput"
+
+  - name: dwcp_alerts
+    interval: 30s
+    rules:
+      - alert: HighDWCPMigrationFailureRate
+        expr: |
+          (
+            sum(rate(novacron_dwcp_migrations_total{status="failed"}[10m]))
+            /
+            sum(rate(novacron_dwcp_migrations_total[10m]))
+          ) > 0.02
+        for: 10m
+        labels:
+          severity: critical
+          component: dwcp
+        annotations:
+          summary: "High DWCP migration failure rate"
+          description: "DWCP migration failure rate is {{ $value | humanizePercentage }} (threshold: 2%)"
+          runbook_url: "https://novacron.io/runbooks/dwcp-failures"
+
+      - alert: LowDWCPBandwidthUtilization
+        expr: |
+          novacron_dwcp_bandwidth_utilization_percent < 70
+        for: 15m
+        labels:
+          severity: warning
+          component: dwcp
+        annotations:
+          summary: "Low DWCP bandwidth utilization on {{ $labels.link }}"
+          description: "DWCP link {{ $labels.link }} has {{ $value }}% utilization (expected: >70%)"
+          runbook_url: "https://novacron.io/runbooks/low-bandwidth"
+
+      - alert: SlowDWCPMigration
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(novacron_dwcp_migration_duration_seconds_bucket[10m])) by (le)
+          ) > 30
+        for: 10m
+        labels:
+          severity: warning
+          component: dwcp
+        annotations:
+          summary: "Slow DWCP migrations"
+          description: "DWCP migration p95 duration is {{ $value }}s (threshold: 30s)"
+          runbook_url: "https://novacron.io/runbooks/slow-migrations"
+
+  - name: database_alerts
+    interval: 30s
+    rules:
+      - alert: SlowDatabaseQueries
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(novacron_database_query_duration_seconds_bucket[5m])) by (le, operation)
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Slow database queries for {{ $labels.operation }}"
+          description: "Database {{ $labels.operation }} p95 latency is {{ $value }}s (threshold: 50ms)"
+          runbook_url: "https://novacron.io/runbooks/slow-queries"
+
+      - alert: DatabaseConnectionPoolExhaustion
+        expr: |
+          (novacron_database_connections_active / novacron_database_connection_pool_size) > 0.9
+        for: 5m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "Database connection pool nearly exhausted"
+          description: "Database connection pool is {{ $value | humanizePercentage }} full (threshold: 90%)"
+          runbook_url: "https://novacron.io/runbooks/connection-pool"
+
+      - alert: HighDatabaseErrorRate
+        expr: |
+          (
+            sum(rate(novacron_database_queries_total{status="error"}[5m]))
+            /
+            sum(rate(novacron_database_queries_total[5m]))
+          ) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "High database error rate"
+          description: "Database error rate is {{ $value | humanizePercentage }} (threshold: 1%)"
+          runbook_url: "https://novacron.io/runbooks/database-errors"
+
+  - name: system_alerts
+    interval: 30s
+    rules:
+      - alert: HighCPUUsage
+        expr: |
+          novacron_system_cpu_usage_percent > 90
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High CPU usage"
+          description: "System CPU usage is {{ $value }}% (threshold: 90%)"
+          runbook_url: "https://novacron.io/runbooks/high-cpu"
+
+      - alert: HighMemoryUsage
+        expr: |
+          (novacron_system_memory_usage_bytes / 1024 / 1024 / 1024) > 28
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage"
+          description: "System memory usage is {{ $value }}GB (threshold: 28GB of 32GB)"
+          runbook_url: "https://novacron.io/runbooks/high-memory"
+
+      - alert: DiskSpaceRunningOut
+        expr: |
+          (novacron_system_disk_usage_bytes / 1024 / 1024 / 1024) > 900
+        for: 15m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Disk space running out on {{ $labels.mount_point }}"
+          description: "Disk usage on {{ $labels.mount_point }} is {{ $value }}GB (threshold: 900GB of 1TB)"
+          runbook_url: "https://novacron.io/runbooks/disk-space"
+
+  - name: availability_alerts
+    interval: 30s
+    rules:
+      - alert: ServiceDown
+        expr: |
+          novacron_service_availability == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: availability
+        annotations:
+          summary: "Service {{ $labels.service }} is down"
+          description: "Service {{ $labels.service }} has been down for 2 minutes"
+          runbook_url: "https://novacron.io/runbooks/service-down"
+
+      - alert: LowAvailability
+        expr: |
+          (
+            sum(rate(novacron_service_availability[1h])) by (service)
+            /
+            count(novacron_service_availability) by (service)
+          ) < 0.999
+        for: 5m
+        labels:
+          severity: critical
+          component: availability
+        annotations:
+          summary: "Low availability for {{ $labels.service }}"
+          description: "Service {{ $labels.service }} availability is {{ $value | humanizePercentage }} (threshold: 99.9%)"
+          runbook_url: "https://novacron.io/runbooks/low-availability"
+
+      - alert: HealthCheckFailing
+        expr: |
+          novacron_health_check_status == 0
+        for: 3m
+        labels:
+          severity: warning
+          component: health
+        annotations:
+          summary: "Health check failing for {{ $labels.component }}"
+          description: "Component {{ $labels.component }} health check has been failing for 3 minutes"
+          runbook_url: "https://novacron.io/runbooks/health-check"

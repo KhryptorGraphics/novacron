@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yourusername/novacron/backend/core/zeroops"
+	"github.com/khryptorgraphics/novacron/backend/core/zeroops"
 )
 
 // AutoChaosEngine handles automated chaos engineering

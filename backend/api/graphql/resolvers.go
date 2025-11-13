@@ -30,34 +30,34 @@ func NewResolver(vmManager *vm.VMManager, storageManager *tiering.TierManager) *
 // VMs returns all VMs with optional pagination
 func (r *Resolver) VMs(ctx context.Context, args struct{ Pagination *PaginationInput }) ([]*VM, error) {
 	vmsMap := r.vmManager.ListVMs()
-	
+
 	// Convert map to slice
 	vms := make([]*vm.VM, 0, len(vmsMap))
 	for _, vmInstance := range vmsMap {
 		vms = append(vms, vmInstance)
 	}
-	
+
 	// Apply pagination if provided
 	if args.Pagination != nil {
 		start := args.Pagination.Page * args.Pagination.PageSize
 		end := start + args.Pagination.PageSize
-		
+
 		if start > len(vms) {
 			return []*VM{}, nil
 		}
 		if end > len(vms) {
 			end = len(vms)
 		}
-		
+
 		vms = vms[start:end]
 	}
-	
+
 	// Convert to GraphQL types
 	result := make([]*VM, len(vms))
 	for i, vm := range vms {
 		result[i] = convertVM(vm)
 	}
-	
+
 	return result, nil
 }
 
@@ -67,7 +67,7 @@ func (r *Resolver) VM(ctx context.Context, args struct{ ID string }) (*VM, error
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return convertVM(vm), nil
 }
 
@@ -86,17 +86,17 @@ func (r *Resolver) CreateVM(ctx context.Context, args struct{ Input CreateVMInpu
 		},
 		Tags: make(map[string]string),
 	}
-	
+
 	vmInstance, err := r.vmManager.CreateVM(ctx, createReq)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	result := convertVM(vmInstance)
-	
+
 	// Publish event
 	r.subscriptions.PublishVMStateChange(result)
-	
+
 	return result, nil
 }
 
@@ -123,24 +123,24 @@ func (r *Resolver) UpdateVM(ctx context.Context, args struct {
 	if args.Input.Tags != nil {
 		updateSpec.Tags = args.Input.Tags
 	}
-	
+
 	// Call VM manager to update
 	err := r.vmManager.UpdateVM(ctx, args.ID, updateSpec)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Get updated VM
 	vmInstance, err := r.vmManager.GetVM(args.ID)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	result := convertVM(vmInstance)
-	
+
 	// Publish event
 	r.subscriptions.PublishVMStateChange(result)
-	
+
 	return result, nil
 }
 
@@ -150,7 +150,7 @@ func (r *Resolver) DeleteVM(ctx context.Context, args struct{ ID string }) (bool
 	if err != nil {
 		return false, err
 	}
-	
+
 	return true, nil
 }
 
@@ -160,17 +160,17 @@ func (r *Resolver) StartVM(ctx context.Context, args struct{ ID string }) (*VM, 
 	if err != nil {
 		return nil, err
 	}
-	
+
 	vm, err := r.vmManager.GetVM(args.ID)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	result := convertVM(vm)
-	
+
 	// Publish event
 	r.subscriptions.PublishVMStateChange(result)
-	
+
 	return result, nil
 }
 
@@ -180,17 +180,17 @@ func (r *Resolver) StopVM(ctx context.Context, args struct{ ID string }) (*VM, e
 	if err != nil {
 		return nil, err
 	}
-	
+
 	vm, err := r.vmManager.GetVM(args.ID)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	result := convertVM(vm)
-	
+
 	// Publish event
 	r.subscriptions.PublishVMStateChange(result)
-	
+
 	return result, nil
 }
 
@@ -204,19 +204,19 @@ func (r *Resolver) MigrateVM(ctx context.Context, args struct {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	migrationID := fmt.Sprintf("migration-%d", time.Now().Unix())
 	sourceHost := vmInstance.NodeID()
 	if sourceHost == "" {
 		sourceHost = vmInstance.NodeID() // Keep as empty string if NodeID is empty rather than hardcoded "unknown"
 	}
-	
+
 	// Determine migration type from input
 	migrationType := "OFFLINE"
 	if args.Input.Live {
 		migrationType = "LIVE"
 	}
-	
+
 	migration := &Migration{
 		ID:         migrationID,
 		VMID:       args.ID,
@@ -227,13 +227,13 @@ func (r *Resolver) MigrateVM(ctx context.Context, args struct {
 		Progress:   0.0,
 		StartedAt:  time.Now(),
 	}
-	
+
 	// Start migration in background
 	go func() {
 		// Use background context for long-running migration operation
 		// This ensures migration continues even if the GraphQL request context is cancelled
 		migrationCtx := context.Background()
-		
+
 		// Prepare migration options respecting input
 		options := make(map[string]string)
 		if args.Input.Live {
@@ -241,10 +241,10 @@ func (r *Resolver) MigrateVM(ctx context.Context, args struct {
 		} else {
 			options["migration_type"] = "offline"
 		}
-		
+
 		// Call VM manager to perform migration
 		err := r.vmManager.MigrateVM(migrationCtx, args.ID, args.Input.TargetHost, options)
-		
+
 		if err != nil {
 			migration.Status = "FAILED"
 			migration.Error = err.Error()
@@ -252,17 +252,17 @@ func (r *Resolver) MigrateVM(ctx context.Context, args struct {
 			migration.Status = "COMPLETED"
 			migration.Progress = 100.0
 		}
-		
+
 		completedAt := time.Now()
 		migration.CompletedAt = &completedAt
-		
+
 		// Publish completion
 		r.subscriptions.PublishMigrationProgress(migration)
 	}()
-	
+
 	// Publish start
 	r.subscriptions.PublishMigrationProgress(migration)
-	
+
 	return migration, nil
 }
 
@@ -270,10 +270,9 @@ func (r *Resolver) MigrateVM(ctx context.Context, args struct {
 
 // Volumes returns all storage volumes
 // DEFERRED: Volume listing not implemented - TierManager lacks ListVolumes() API
-// Storage resolvers require TierManager.ListVolumes(), TierManager.CreateVolume(), 
+// Storage resolvers require TierManager.ListVolumes(), TierManager.CreateVolume(),
 // and TierManager.MoveVolumeTier() methods which are not yet available
 func (r *Resolver) Volumes(ctx context.Context, args struct{ Pagination *PaginationInput }) ([]*StorageVolume, error) {
-	// TODO: Implement when TierManager supports volume listing operations
 	// Current tier-based approach doesn't represent actual storage volumes
 	return nil, fmt.Errorf("volume listing not implemented: TierManager does not support ListVolumes operation")
 }
@@ -281,7 +280,6 @@ func (r *Resolver) Volumes(ctx context.Context, args struct{ Pagination *Paginat
 // CreateVolume creates a new storage volume
 // DEFERRED: Volume creation not implemented - TierManager lacks CreateVolume() API
 func (r *Resolver) CreateVolume(ctx context.Context, args struct{ Input CreateVolumeInput }) (*StorageVolume, error) {
-	// TODO: Implement when TierManager.CreateVolume() method becomes available
 	return nil, fmt.Errorf("volume creation not implemented: TierManager does not support CreateVolume operation")
 }
 
@@ -291,7 +289,6 @@ func (r *Resolver) ChangeVolumeTier(ctx context.Context, args struct {
 	ID   string
 	Tier string
 }) (*StorageVolume, error) {
-	// TODO: Implement when TierManager.MoveVolumeTier() method becomes available
 	return nil, fmt.Errorf("volume tier migration not yet implemented - pending TierManager.MoveVolumeTier() method")
 }
 
@@ -322,7 +319,7 @@ func (r *Resolver) Nodes(ctx context.Context) ([]*Node, error) {
 			VMCount:  3,
 		},
 	}
-	
+
 	return nodes, nil
 }
 
@@ -334,7 +331,7 @@ func (r *Resolver) ClusterStatus(ctx context.Context) (*ClusterStatus, error) {
 		HealthyNodes: 2,
 		HasQuorum:    true,
 	}
-	
+
 	return status, nil
 }
 
@@ -371,7 +368,7 @@ func (r *Resolver) SystemMetrics(ctx context.Context, args struct{ Range *TimeRa
 			Timestamp: time.Now(),
 		},
 	}
-	
+
 	return metrics, nil
 }
 
@@ -390,7 +387,7 @@ func (r *Resolver) Alerts(ctx context.Context, args struct {
 			Acknowledged: false,
 		},
 	}
-	
+
 	// Filter by severity if specified
 	if args.Severity != nil {
 		filtered := []*Alert{}
@@ -401,7 +398,7 @@ func (r *Resolver) Alerts(ctx context.Context, args struct {
 		}
 		alerts = filtered
 	}
-	
+
 	// Filter by acknowledged status if specified
 	if args.Acknowledged != nil {
 		filtered := []*Alert{}
@@ -412,7 +409,7 @@ func (r *Resolver) Alerts(ctx context.Context, args struct {
 		}
 		alerts = filtered
 	}
-	
+
 	return alerts, nil
 }
 
@@ -422,7 +419,7 @@ func (r *Resolver) Events(ctx context.Context, args struct{ Limit *int }) ([]*Ev
 	if args.Limit != nil {
 		limit = *args.Limit
 	}
-	
+
 	events := []*Event{
 		{
 			ID:        "event-1",
@@ -439,11 +436,11 @@ func (r *Resolver) Events(ctx context.Context, args struct{ Limit *int }) ([]*Ev
 			Timestamp: time.Now().Add(-15 * time.Minute),
 		},
 	}
-	
+
 	if len(events) > limit {
 		events = events[:limit]
 	}
-	
+
 	return events, nil
 }
 
@@ -452,7 +449,7 @@ func (r *Resolver) Events(ctx context.Context, args struct{ Limit *int }) ([]*Ev
 // VMStateChanged subscription for VM state changes
 func (r *Resolver) VMStateChanged(ctx context.Context, args struct{ VMID *string }) (<-chan *VM, error) {
 	ch := make(chan *VM)
-	
+
 	r.subscriptions.SubscribeVMStateChange(func(vm *VM) {
 		if args.VMID == nil || vm.ID == *args.VMID {
 			select {
@@ -461,31 +458,31 @@ func (r *Resolver) VMStateChanged(ctx context.Context, args struct{ VMID *string
 			}
 		}
 	})
-	
+
 	go func() {
 		<-ctx.Done()
 		close(ch)
 	}()
-	
+
 	return ch, nil
 }
 
 // NewAlert subscription for new alerts
 func (r *Resolver) NewAlert(ctx context.Context) (<-chan *Alert, error) {
 	ch := make(chan *Alert)
-	
+
 	r.subscriptions.SubscribeNewAlert(func(alert *Alert) {
 		select {
 		case ch <- alert:
 		case <-ctx.Done():
 		}
 	})
-	
+
 	go func() {
 		<-ctx.Done()
 		close(ch)
 	}()
-	
+
 	return ch, nil
 }
 
@@ -499,10 +496,10 @@ func convertVM(vmInstance *vm.VM) *VM {
 		State:     string(vmInstance.State()),
 		CPU:       info.CPUShares,
 		Memory:    info.MemoryMB,
-		Disk:      0,    // Not available in VMInfo
-		Image:     "",   // Not available from VMInfo
-		Host:      "",   // NodeID not available in VMInfo
-		IPAddress: "",   // Not available from VMInfo
+		Disk:      0,  // Not available in VMInfo
+		Image:     "", // Not available from VMInfo
+		Host:      "", // NodeID not available in VMInfo
+		IPAddress: "", // Not available from VMInfo
 		CreatedAt: info.CreatedAt,
 		UpdatedAt: info.CreatedAt, // Use CreatedAt as placeholder
 	}

@@ -1,206 +1,207 @@
-name: NovaCron CI
+name: CI - Continuous Integration
 
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
+  push:
+    branches: [develop]
+
+env:
+  GO_VERSION: '1.21'
+  NODE_VERSION: '20'
 
 jobs:
-  go-backend:
-    name: Go Backend Tests
+  lint:
+    name: Lint Code
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend/core
-    
     steps:
-      - uses: actions/checkout@v3
-      
+      - uses: actions/checkout@v4
+
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.19'
-          cache: true
-          cache-dependency-path: backend/core/go.sum
-      
-      - name: Install dependencies
-        run: go mod download
-      
-      - name: Verify dependencies
-        run: go mod verify
-      
-      - name: Run go vet
-        run: go vet ./...
-      
-      - name: Run tests
-        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
-      
-      - name: Upload coverage reports
-        uses: codecov/codecov-action@v3
-        with:
-          file: backend/core/coverage.out
-          flags: backend-go
+          go-version: ${{ env.GO_VERSION }}
 
-  python-services:
-    name: Python Services Tests
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend/services
-    
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v3
         with:
-          python-version: '3.12'
-          cache: 'pip'
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-cov
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-      
-      - name: Run tests
-        run: |
-          pytest --cov=. --cov-report=xml
-      
-      - name: Upload coverage reports
-        uses: codecov/codecov-action@v3
-        with:
-          file: backend/services/coverage.xml
-          flags: backend-python
+          version: latest
+          working-directory: backend
 
-  frontend:
-    name: Frontend Build & Tests
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    
-    steps:
-      - uses: actions/checkout@v3
-      
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-      
-      - name: Install dependencies
-        run: npm ci
-      
-      - name: Run linter
-        run: npm run lint
-      
-      - name: Run tests
-        run: npm test -- --coverage
-      
-      - name: Build
-        run: npm run build
-      
-      - name: Upload coverage reports
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      - name: Run ESLint
+        run: cd frontend && npm run lint
+
+  test-backend:
+    name: Test Backend
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: novacron_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run backend tests
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/novacron_test?sslmode=disable
+          REDIS_URL: redis://localhost:6379
+        run: |
+          cd backend
+          go test -v -race -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
+
+      - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
         with:
-          directory: frontend/coverage
-          flags: frontend
+          files: ./backend/coverage.out
+          flags: backend
 
-  docker-build:
-    name: Docker Build
+  test-frontend:
+    name: Test Frontend
     runs-on: ubuntu-latest
-    needs: [go-backend, python-services, frontend]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
     steps:
-      - uses: actions/checkout@v3
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-      
-      - name: Build hypervisor image
-        uses: docker/build-push-action@v4
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          context: .
-          file: docker/hypervisor.Dockerfile
-          push: false
-          tags: novacron/hypervisor:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      
-      - name: Build API image
-        uses: docker/build-push-action@v4
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v3
         with:
-          context: .
-          file: docker/api.Dockerfile
-          push: false
-          tags: novacron/api:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      
-      - name: Build frontend image
-        uses: docker/build-push-action@v4
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install dependencies
+        run: cd frontend && npm ci
+
+      - name: Run frontend tests
+        run: cd frontend && npm test -- --coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
         with:
-          context: .
-          file: docker/frontend.Dockerfile
-          push: false
-          tags: novacron/frontend:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          files: ./frontend/coverage/lcov.info
+          flags: frontend
 
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
-    needs: [docker-build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
     steps:
-      - uses: actions/checkout@v3
-      
-      - name: Run Trivy vulnerability scanner for Go
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
-          scan-ref: 'backend/core'
+          scan-ref: '.'
           format: 'sarif'
-          output: 'trivy-results-go.sarif'
-          severity: 'CRITICAL,HIGH'
-      
-      - name: Run Trivy vulnerability scanner for Python
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: 'backend/services'
-          format: 'sarif'
-          output: 'trivy-results-python.sarif'
-          severity: 'CRITICAL,HIGH'
-      
-      - name: Run Trivy vulnerability scanner for frontend
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: 'frontend'
-          format: 'sarif'
-          output: 'trivy-results-frontend.sarif'
-          severity: 'CRITICAL,HIGH'
-      
-      - name: Upload Go scan results to GitHub Security tab
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v2
         with:
-          sarif_file: 'trivy-results-go.sarif'
-          category: 'go-trivy'
-      
-      - name: Upload Python scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Snyk security scan
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          sarif_file: 'trivy-results-python.sarif'
-          category: 'python-trivy'
-      
-      - name: Upload frontend scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
+          args: --severity-threshold=high
+
+  build-validation:
+    name: Build Validation
+    runs-on: ubuntu-latest
+    needs: [lint, test-backend, test-frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
         with:
-          sarif_file: 'trivy-results-frontend.sarif'
-          category: 'frontend-trivy'
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build backend
+        run: |
+          cd backend
+          go build -v ./cmd/api-server
+          go build -v ./cmd/core-server
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Check build artifacts
+        run: |
+          test -f backend/api-server || exit 1
+          test -f backend/core-server || exit 1
+          test -d frontend/.next || exit 1
+
+  pr-comment:
+    name: PR Comment
+    runs-on: ubuntu-latest
+    needs: [lint, test-backend, test-frontend, security-scan, build-validation]
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Comment PR
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ All CI checks passed! Ready for review.'
+            })

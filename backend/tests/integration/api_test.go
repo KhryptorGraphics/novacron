@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/khryptorgraphics/novacron/backend/api/vm"
+	"novacron/backend/pkg/testutil"
 )
 
 // TestVMAPIIntegration tests the VM management API endpoints
@@ -179,7 +180,9 @@ func TestAuthAPIIntegration(t *testing.T) {
 		}
 
 		// Mock successful login
-		if email == "test@example.com" && password == "password123" {
+		testEmail := testutil.GetTestEmail()
+		testPassword := testutil.GetTestPassword()
+		if email == testEmail && password == testPassword {
 			response := map[string]interface{}{
 				"token":     "mock-jwt-token",
 				"user":      map[string]string{"email": email, "name": "Test User"},
@@ -194,8 +197,8 @@ func TestAuthAPIIntegration(t *testing.T) {
 	// Test successful login
 	t.Run("LoginSuccess", func(t *testing.T) {
 		loginData := map[string]string{
-			"email":    "test@example.com",
-			"password": "password123",
+			"email":    testutil.GetTestEmail(),
+			"password": testutil.GetTestPassword(),
 		}
 
 		jsonData, err := json.Marshal(loginData)
@@ -230,7 +233,7 @@ func TestAuthAPIIntegration(t *testing.T) {
 	// Test failed login
 	t.Run("LoginFailure", func(t *testing.T) {
 		loginData := map[string]string{
-			"email":    "wrong@example.com",
+			"email":    testutil.GenerateTestEmail(),
 			"password": "wrongpassword",
 		}
 

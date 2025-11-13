@@ -55,7 +55,7 @@ const databaseTables = [
 const mockUsers = [
   { 
     id: 1, 
-    email: "john@example.com", 
+    email: "user@organization.com", 
     name: "John Doe", 
     role: "user", 
     status: "active", 

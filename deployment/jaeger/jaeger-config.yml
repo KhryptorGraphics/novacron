@@ -1,0 +1,98 @@
+# Jaeger Configuration for NovaCron
+# Distributed tracing for end-to-end request tracking
+
+# Collector Configuration
+service:
+  pipelines:
+    traces:
+      receivers: [otlp, jaeger, zipkin]
+      processors: [batch, memory_limiter]
+      exporters: [jaeger]
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  jaeger:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:14250
+      thrift_http:
+        endpoint: 0.0.0.0:14268
+      thrift_compact:
+        endpoint: 0.0.0.0:6831
+      thrift_binary:
+        endpoint: 0.0.0.0:6832
+
+  zipkin:
+    endpoint: 0.0.0.0:9411
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+exporters:
+  jaeger:
+    endpoint: jaeger-collector:14250
+    tls:
+      insecure: true
+
+# Storage Configuration (Elasticsearch)
+storage:
+  type: elasticsearch
+  options:
+    server-urls: http://elasticsearch:9200
+    index-prefix: jaeger
+    username: elastic
+    password: ${ELASTICSEARCH_PASSWORD}
+    tags-as-fields:
+      all: true
+    num-shards: 3
+    num-replicas: 1
+
+# Query Service Configuration
+query:
+  base-path: /
+  static-files: /go/jaeger-ui/
+  ui-config: /etc/jaeger/ui-config.json
+  max-clock-skew-adjustment: 0s
+
+# Sampling Configuration
+sampling:
+  default_strategy:
+    type: probabilistic
+    param: 0.1  # Sample 10% of traces
+  per_operation_strategies:
+    default_sampling_probability: 0.1
+    default_lower_bound_traces_per_second: 100
+    per_operation_strategies:
+      - operation: "/api/v1/vms"
+        probabilistic_sampling:
+          sampling_probability: 1.0  # 100% sampling for VM operations
+      - operation: "/api/v1/migrations"
+        probabilistic_sampling:
+          sampling_probability: 1.0  # 100% sampling for migrations
+      - operation: "dwcp_migration"
+        probabilistic_sampling:
+          sampling_probability: 1.0
+      - operation: "database_query"
+        probabilistic_sampling:
+          sampling_probability: 0.5  # 50% for database queries
+
+# Metrics Configuration
+metrics:
+  backend: prometheus
+  http:
+    route: /metrics
+    port: 8889

@@ -295,7 +295,7 @@ export default function UserManagementPage() {
                         message: "Invalid email address"
                       }
                     })}
-                    placeholder="john@example.com"
+                    placeholder="user@organization.com"
                   />
                   {errors.email && (
                     <p className="text-sm text-red-500 mt-1">{errors.email.message}</p>

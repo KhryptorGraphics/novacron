@@ -322,8 +322,10 @@ CREATE INDEX IF NOT EXISTS idx_vms_owner_id ON vms(owner_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 
--- Create default admin user (password: admin123)
-INSERT INTO users (username, email, password_hash, role, tenant_id) 
+-- Create default admin user
+-- NOTE: Default password hash is for 'admin123' - MUST be changed in production
+-- Set ADMIN_DEFAULT_PASSWORD env var to override
+INSERT INTO users (username, email, password_hash, role, tenant_id)
 VALUES ('admin', 'admin@novacron.local', '$2a$10$rDjR8Z8Z8Z8Z8Z8Z8Z8Z8uQ8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8Z8', 'admin', 'default')
 ON CONFLICT (username) DO NOTHING;
 	`

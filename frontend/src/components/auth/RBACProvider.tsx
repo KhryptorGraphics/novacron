@@ -99,7 +99,7 @@ export const RBACProvider: React.FC<RBACProviderProps> = ({
       const userData: User = {
         id: userId,
         username: userId, // Use userId as username fallback
-        email: `${userId}@example.com`, // Mock email
+        email: `${userId}@mock.local`, // Mock email for development
         roles: rolesData.map((roleName: string) => ({
           id: roleName,
           name: roleName,

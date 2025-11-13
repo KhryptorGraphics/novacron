@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"novacron/backend/pkg/testutil"
 )
 
 // Test JWT Service
@@ -96,8 +97,8 @@ func TestPasswordSecurityService(t *testing.T) {
 
 	// Test password validation
 	user := &User{
-		Username:  "testuser",
-		Email:     "test@example.com",
+		Username:  testutil.DefaultTestUsername,
+		Email:     testutil.GetTestEmail(),
 		FirstName: "Test",
 		LastName:  "User",
 	}
@@ -264,10 +265,10 @@ func TestOAuth2Service(t *testing.T) {
 	oauth2Config := OAuth2Config{
 		ClientID:     "test-client",
 		ClientSecret: "test-secret",
-		AuthorizeURL: "https://example.com/authorize",
-		TokenURL:     "https://example.com/token",
-		UserInfoURL:  "https://example.com/userinfo",
-		RedirectURL:  "https://app.com/callback",
+		AuthorizeURL: "https://test-oauth.example.test/authorize",
+		TokenURL:     "https://test-oauth.example.test/token",
+		UserInfoURL:  "https://test-oauth.example.test/userinfo",
+		RedirectURL:  "https://app.test/callback",
 		Scopes:       []string{"openid", "email", "profile"},
 		ProviderName: "test-provider",
 		UsePKCE:      true,
@@ -307,7 +308,7 @@ func TestOAuth2Service(t *testing.T) {
 	// Test user creation from OAuth2
 	userInfo := &UserInfo{
 		ID:            "oauth-user-123",
-		Email:         "user@example.com",
+		Email:         testutil.GenerateTestEmail(),
 		EmailVerified: true,
 		Name:          "Test User",
 		GivenName:     "Test",
@@ -607,7 +608,7 @@ func TestEnhancedAuthServiceIntegration(t *testing.T) {
 	authService := NewAuthService(DefaultAuthConfiguration(), userStore, roleStore, tenantStore, auditService)
 
 	// Test user creation with secure password
-	user := NewUser("testuser", "test@example.com", "default")
+	user := NewUser(testutil.DefaultTestUsername, testutil.GetTestEmail(), "default")
 	password := "SecurePassword123!"
 
 	// Validate password first

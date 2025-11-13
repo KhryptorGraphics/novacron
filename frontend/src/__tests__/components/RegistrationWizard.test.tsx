@@ -52,7 +52,7 @@ describe('RegistrationWizard', () => {
     
     await user.type(screen.getByLabelText('First Name *'), 'John');
     await user.type(screen.getByLabelText('Last Name *'), 'Doe');
-    await user.type(screen.getByLabelText('Email Address *'), 'john.doe@example.com');
+    await user.type(screen.getByLabelText('Email Address *'), 'john.doe@test.local');
     await user.click(screen.getByText('Next'));
     
     // Step 3: Security
@@ -72,7 +72,7 @@ describe('RegistrationWizard', () => {
           accountType: 'personal',
           firstName: 'John',
           lastName: 'Doe',
-          email: 'john.doe@example.com',
+          email: 'john.doe@test.local',
           password: 'SecurePass123!',
           confirmPassword: 'SecurePass123!',
           acceptTerms: true,
@@ -131,7 +131,7 @@ describe('RegistrationWizard', () => {
     
     await user.type(screen.getByLabelText('First Name *'), 'John');
     await user.type(screen.getByLabelText('Last Name *'), 'Doe');
-    await user.type(screen.getByLabelText('Email Address *'), 'john@example.com');
+    await user.type(screen.getByLabelText('Email Address *'), 'john@test.local');
     await user.click(screen.getByText('Next'));
     
     // Type weak password
@@ -162,7 +162,7 @@ describe('RegistrationWizard', () => {
     
     await user.type(screen.getByLabelText('First Name *'), 'John');
     await user.type(screen.getByLabelText('Last Name *'), 'Doe');
-    await user.type(screen.getByLabelText('Email Address *'), 'john@example.com');
+    await user.type(screen.getByLabelText('Email Address *'), 'john@test.local');
     await user.click(screen.getByText('Next'));
     
     await user.type(screen.getByLabelText('Password *'), 'Password123!');
@@ -205,7 +205,7 @@ describe('RegistrationWizard', () => {
     
     await user.type(screen.getByLabelText('First Name *'), 'John');
     await user.type(screen.getByLabelText('Last Name *'), 'Doe');
-    await user.type(screen.getByLabelText('Email Address *'), 'john@example.com');
+    await user.type(screen.getByLabelText('Email Address *'), 'john@test.local');
     await user.click(screen.getByText('Next'));
     
     // Enable 2FA

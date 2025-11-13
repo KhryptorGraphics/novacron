@@ -311,7 +311,7 @@ func MigrateExistingState(integration *NovaCronIntegration, vms []VMState, nodes
 
 // Import ORMap type
 import (
-	"github.com/yourusername/novacron/backend/core/network/dwcp/sync/crdt"
+	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/sync/crdt"
 )
 
 type ORMap = crdt.ORMap

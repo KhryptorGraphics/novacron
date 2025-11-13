@@ -3,6 +3,7 @@ package auth
 import (
 	"testing"
 	"time"
+	"novacron/backend/pkg/testutil"
 )
 
 func TestAuthServiceIntegration(t *testing.T) {
@@ -24,7 +25,7 @@ func TestAuthServiceIntegration(t *testing.T) {
 	}
 
 	// Test user creation
-	user := NewUser("testuser", "test@example.com", "test-tenant")
+	user := NewUser(testutil.DefaultTestUsername, testutil.GetTestEmail(), "test-tenant")
 	user.Status = UserStatusActive
 	err = auth.CreateUser(user, "Password@123")
 	if err != nil {
@@ -38,7 +39,7 @@ func TestAuthServiceIntegration(t *testing.T) {
 	}
 
 	// Test login with valid credentials
-	session, err := auth.Login("testuser", "Password@123")
+	session, err := auth.Login(testutil.DefaultTestUsername, "Password@123")
 	if err != nil {
 		t.Fatalf("Login failed: %v", err)
 	}
@@ -144,42 +145,42 @@ func TestAuthServicePasswordValidation(t *testing.T) {
 	}
 
 	// Test creating a user with a too short password
-	user := NewUser("shortpw", "short@example.com", "test-tenant")
+	user := NewUser("shortpw", testutil.GenerateTestEmail(), "test-tenant")
 	err = auth.CreateUser(user, "Short1!")
 	if err == nil {
 		t.Fatal("User creation succeeded with too short password")
 	}
 
 	// Test creating a user with a password missing uppercase
-	user = NewUser("nouppercase", "nouppercase@example.com", "test-tenant")
+	user = NewUser("nouppercase", testutil.GenerateTestEmail(), "test-tenant")
 	err = auth.CreateUser(user, "password123!")
 	if err == nil {
 		t.Fatal("User creation succeeded with password missing uppercase")
 	}
 
 	// Test creating a user with a password missing lowercase
-	user = NewUser("nolowercase", "nolowercase@example.com", "test-tenant")
+	user = NewUser("nolowercase", testutil.GenerateTestEmail(), "test-tenant")
 	err = auth.CreateUser(user, "PASSWORD123!")
 	if err == nil {
 		t.Fatal("User creation succeeded with password missing lowercase")
 	}
 
 	// Test creating a user with a password missing numbers
-	user = NewUser("nonumbers", "nonumbers@example.com", "test-tenant")
+	user = NewUser("nonumbers", testutil.GenerateTestEmail(), "test-tenant")
 	err = auth.CreateUser(user, "Password!")
 	if err == nil {
 		t.Fatal("User creation succeeded with password missing numbers")
 	}
 
 	// Test creating a user with a password missing special characters
-	user = NewUser("nospecial", "nospecial@example.com", "test-tenant")
+	user = NewUser("nospecial", testutil.GenerateTestEmail(), "test-tenant")
 	err = auth.CreateUser(user, "Password123")
 	if err == nil {
 		t.Fatal("User creation succeeded with password missing special characters")
 	}
 
 	// Test creating a user with a valid password
-	user = NewUser("validpw", "validpw@example.com", "test-tenant")
+	user = NewUser("validpw", testutil.GenerateTestEmail(), "test-tenant")
 	err = auth.CreateUser(user, "ValidPassword123!")
 	if err != nil {
 		t.Fatalf("User creation failed with valid password: %v", err)

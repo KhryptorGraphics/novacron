@@ -45,7 +45,7 @@ describe('Authentication Components Accessibility', () => {
 
   it('EmailVerificationFlow should not have accessibility violations', async () => {
     const mockProps = {
-      email: 'test@example.com',
+      email: 'test@test.local',
       onVerificationComplete: jest.fn(),
       onSkip: jest.fn(),
     };
@@ -159,10 +159,10 @@ describe('Authentication Components Accessibility', () => {
   });
 
   it('loading states are announced to screen readers', async () => {
-    const { container } = render(<EmailVerificationFlow 
-      email="test@example.com" 
-      onVerificationComplete={jest.fn()} 
-      onSkip={jest.fn()} 
+    const { container } = render(<EmailVerificationFlow
+      email="test@test.local"
+      onVerificationComplete={jest.fn()}
+      onSkip={jest.fn()}
     />);
     
     // Check for loading indicators

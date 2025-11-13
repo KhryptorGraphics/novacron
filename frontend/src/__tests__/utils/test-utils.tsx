@@ -64,7 +64,7 @@ export const mockVMData = {
 export const mockUserData = {
   user1: {
     id: 'user-1',
-    email: 'test@example.com',
+    email: 'test@test.local',
     firstName: 'Test',
     lastName: 'User',
     accountType: 'personal',

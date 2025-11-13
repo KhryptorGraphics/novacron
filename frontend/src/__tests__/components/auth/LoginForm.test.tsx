@@ -87,16 +87,16 @@ describe('LoginForm', () => {
     render(<MockLoginForm onSubmit={mockOnSubmit} />);
 
     // Fill in the form
-    await user.type(screen.getByLabelText('Email'), 'test@example.com');
-    await user.type(screen.getByLabelText('Password'), 'password123');
+    await user.type(screen.getByLabelText('Email'), process.env.TEST_EMAIL || 'test@test.local');
+    await user.type(screen.getByLabelText('Password'), process.env.TEST_PASSWORD || 'TestPass123!');
 
     // Submit the form
     await user.click(screen.getByRole('button', { name: 'Sign In' }));
 
     await waitFor(() => {
       expect(mockOnSubmit).toHaveBeenCalledWith({
-        email: 'test@example.com',
-        password: 'password123',
+        email: process.env.TEST_EMAIL || 'test@test.local',
+        password: process.env.TEST_PASSWORD || 'TestPass123!',
       });
     });
   });
@@ -106,7 +106,7 @@ describe('LoginForm', () => {
     const mockOnSubmit = jest.fn().mockRejectedValue(new Error('Invalid credentials'));
     render(<MockLoginForm onSubmit={mockOnSubmit} />);
 
-    await user.type(screen.getByLabelText('Email'), 'test@example.com');
+    await user.type(screen.getByLabelText('Email'), process.env.TEST_EMAIL || 'test@test.local');
     await user.type(screen.getByLabelText('Password'), 'wrongpassword');
     await user.click(screen.getByRole('button', { name: 'Sign In' }));
 
@@ -126,8 +126,8 @@ describe('LoginForm', () => {
 
     render(<MockLoginForm onSubmit={mockOnSubmit} />);
 
-    await user.type(screen.getByLabelText('Email'), 'test@example.com');
-    await user.type(screen.getByLabelText('Password'), 'password123');
+    await user.type(screen.getByLabelText('Email'), process.env.TEST_EMAIL || 'test@test.local');
+    await user.type(screen.getByLabelText('Password'), process.env.TEST_PASSWORD || 'TestPass123!');
     await user.click(screen.getByRole('button', { name: 'Sign In' }));
 
     // Should show loading state

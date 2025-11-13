@@ -8,18 +8,18 @@ import (
 
 // VM represents a virtual machine
 type VM struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	State     string    `json:"state"`
-	CPU       int       `json:"cpu"`
-	Memory    int       `json:"memory"`
-	Disk      int       `json:"disk"`
-	Image     string    `json:"image"`
-	Host      string    `json:"host"`
-	IPAddress string    `json:"ipAddress,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-	Metrics   *VMMetrics `json:"metrics,omitempty"`
+	ID        string      `json:"id"`
+	Name      string      `json:"name"`
+	State     string      `json:"state"`
+	CPU       int         `json:"cpu"`
+	Memory    int         `json:"memory"`
+	Disk      int         `json:"disk"`
+	Image     string      `json:"image"`
+	Host      string      `json:"host"`
+	IPAddress string      `json:"ipAddress,omitempty"`
+	CreatedAt time.Time   `json:"createdAt"`
+	UpdatedAt time.Time   `json:"updatedAt"`
+	Metrics   *VMMetrics  `json:"metrics,omitempty"`
 	Snapshots []*Snapshot `json:"snapshots,omitempty"`
 }
 
