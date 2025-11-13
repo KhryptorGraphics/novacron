@@ -24,7 +24,7 @@ type FederationAdapterV3 struct {
 	modeRouter  *ModeRouter
 
 	// Cluster connections
-	connections map[string]*ClusterConnection
+	connections map[string]*ClusterConnectionV3
 
 	// Performance optimization
 	optimizer   *NetworkOptimizer
@@ -47,8 +47,8 @@ type FederationAdapterConfig struct {
 	CompressionLevel    int
 }
 
-// ClusterConnection represents a connection to a federated cluster
-type ClusterConnection struct {
+// ClusterConnectionV3 represents a connection to a federated cluster
+type ClusterConnectionV3 struct {
 	ClusterID       string
 	Endpoint        string
 	Region          string
@@ -135,7 +135,7 @@ func NewFederationAdapterV3(logger *zap.Logger, config *FederationAdapterConfig)
 		config:      config,
 		currentMode: config.DefaultMode,
 		modeRouter:  NewModeRouter(logger),
-		connections: make(map[string]*ClusterConnection),
+		connections: make(map[string]*ClusterConnectionV3),
 		optimizer:   NewNetworkOptimizer(logger),
 		metrics:     &AdapterMetrics{},
 		ctx:         ctx,
@@ -171,7 +171,7 @@ func DefaultFederationAdapterConfig() *FederationAdapterConfig {
 }
 
 // RegisterCluster registers a cluster with the adapter
-func (a *FederationAdapterV3) RegisterCluster(cluster *ClusterConnection) error {
+func (a *FederationAdapterV3) RegisterCluster(cluster *ClusterConnectionV3) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -371,7 +371,7 @@ func (a *FederationAdapterV3) Close() error {
 
 // Internal methods
 
-func (a *FederationAdapterV3) determineOptimalMode(cluster *ClusterConnection) upgrade.NetworkMode {
+func (a *FederationAdapterV3) determineOptimalMode(cluster *ClusterConnectionV3) upgrade.NetworkMode {
 	// Cloud provider (untrusted) -> Internet mode
 	if cluster.CloudProvider != "" && !cluster.Trusted {
 		return upgrade.ModeInternet
@@ -415,7 +415,7 @@ func (a *FederationAdapterV3) initializeModePreferences() {
 	}
 }
 
-func (a *FederationAdapterV3) routeDatacenter(ctx context.Context, connection *ClusterConnection, data []byte) error {
+func (a *FederationAdapterV3) routeDatacenter(ctx context.Context, connection *ClusterConnectionV3, data []byte) error {
 	// Fast routing for datacenter mode
 	// Use Raft consensus, light compression
 	a.logger.Debug("Routing via datacenter mode",
@@ -424,7 +424,7 @@ func (a *FederationAdapterV3) routeDatacenter(ctx context.Context, connection *C
 	return nil
 }
 
-func (a *FederationAdapterV3) routeInternet(ctx context.Context, connection *ClusterConnection, data []byte) error {
+func (a *FederationAdapterV3) routeInternet(ctx context.Context, connection *ClusterConnectionV3, data []byte) error {
 	// Secure routing for internet mode
 	// Use PBFT consensus, maximum compression
 	a.logger.Debug("Routing via internet mode",
@@ -434,7 +434,7 @@ func (a *FederationAdapterV3) routeInternet(ctx context.Context, connection *Clu
 	return nil
 }
 
-func (a *FederationAdapterV3) routeHybrid(ctx context.Context, connection *ClusterConnection, data []byte) error {
+func (a *FederationAdapterV3) routeHybrid(ctx context.Context, connection *ClusterConnectionV3, data []byte) error {
 	// Adaptive routing for hybrid mode
 	a.logger.Debug("Routing via hybrid mode",
 		zap.String("cluster", connection.ClusterID),
@@ -517,7 +517,7 @@ func NewNetworkOptimizer(logger *zap.Logger) *NetworkOptimizer {
 	}
 }
 
-func (o *NetworkOptimizer) ConfigureForCluster(cluster *ClusterConnection) {
+func (o *NetworkOptimizer) ConfigureForCluster(cluster *ClusterConnectionV3) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -547,7 +547,7 @@ func (o *NetworkOptimizer) OptimizeForMode(mode upgrade.NetworkMode, data []byte
 	return data, nil
 }
 
-func (o *NetworkOptimizer) OptimizeBandwidthForMode(mode upgrade.NetworkMode, connection *ClusterConnection) error {
+func (o *NetworkOptimizer) OptimizeBandwidthForMode(mode upgrade.NetworkMode, connection *ClusterConnectionV3) error {
 	// Apply bandwidth optimization
 	o.logger.Debug("Optimizing bandwidth",
 		zap.String("cluster", connection.ClusterID),

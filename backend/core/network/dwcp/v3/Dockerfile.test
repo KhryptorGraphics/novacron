@@ -1,0 +1,55 @@
+# DWCP v3 Test Docker Container
+# Provides clean Go environment with CGO support for running full test suite
+
+FROM golang:1.25-alpine
+
+# Install build essentials for CGO
+RUN apk add --no-cache \
+    gcc \
+    g++ \
+    musl-dev \
+    make \
+    git
+
+# Set working directory
+WORKDIR /app
+
+# Copy go module files
+COPY go.mod go.sum* ./
+
+# Download dependencies
+RUN go mod download || true
+
+# Copy source code
+COPY . .
+
+# Set environment variables
+ENV CGO_ENABLED=1
+ENV GOOS=linux
+ENV GOARCH=amd64
+
+# Create output directory
+RUN mkdir -p /app/test-results
+
+# Default command: run all tests with coverage
+CMD ["sh", "-c", "\
+    cd /app/backend/core/network/dwcp/v3 && \
+    echo '======================================' && \
+    echo 'DWCP v3 Test Suite Execution' && \
+    echo '======================================' && \
+    echo '' && \
+    go test -v -race -coverprofile=/app/test-results/coverage.out ./... && \
+    echo '' && \
+    echo '======================================' && \
+    echo 'Coverage Report' && \
+    echo '======================================' && \
+    go tool cover -func=/app/test-results/coverage.out && \
+    echo '' && \
+    go tool cover -html=/app/test-results/coverage.out -o /app/test-results/coverage.html && \
+    echo 'Coverage HTML report generated: /app/test-results/coverage.html' \
+"]
+
+# Alternative commands:
+# Run specific component: docker run dwcp-v3-test go test -v ./transport
+# Run benchmarks: docker run dwcp-v3-test go test -bench=. ./benchmarks
+# Generate coverage: docker run -v $(pwd)/test-results:/app/test-results dwcp-v3-test

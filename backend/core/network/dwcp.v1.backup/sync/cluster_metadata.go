@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yourusername/novacron/backend/core/network/dwcp/sync/crdt"
+	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/sync/crdt"
 )
 
 // ClusterMetadata manages conflict-free cluster metadata using CRDTs

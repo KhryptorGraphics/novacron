@@ -64,7 +64,7 @@ describe('RegistrationWizard', () => {
     // Fill out personal information
     await user.type(screen.getByLabelText('First Name *'), 'John');
     await user.type(screen.getByLabelText('Last Name *'), 'Doe');
-    await user.type(screen.getByLabelText('Email Address *'), 'john.doe@example.com');
+    await user.type(screen.getByLabelText('Email Address *'), 'john.doe@test.local');
 
     await user.click(nextButton);
 
@@ -89,7 +89,7 @@ describe('RegistrationWizard', () => {
       expect(apiService.register).toHaveBeenCalledWith({
         firstName: 'John',
         lastName: 'Doe',
-        email: 'john.doe@example.com',
+        email: 'john.doe@test.local',
         password: 'SecurePassword123!',
         accountType: 'personal',
         organizationName: '',
@@ -150,13 +150,13 @@ describe('RegistrationWizard', () => {
 
     // Type email that's not available
     const emailInput = screen.getByLabelText('Email Address *');
-    await user.type(emailInput, 'taken@example.com');
+    await user.type(emailInput, 'taken@test.local');
 
     await waitFor(() => {
       expect(screen.getByText('This email is already registered')).toBeInTheDocument();
     });
 
-    expect(apiService.checkEmailAvailability).toHaveBeenCalledWith('taken@example.com');
+    expect(apiService.checkEmailAvailability).toHaveBeenCalledWith('taken@test.local');
   });
 
   it('validates password strength', async () => {
@@ -168,7 +168,7 @@ describe('RegistrationWizard', () => {
     
     await user.type(screen.getByLabelText('First Name *'), 'John');
     await user.type(screen.getByLabelText('Last Name *'), 'Doe');
-    await user.type(screen.getByLabelText('Email Address *'), 'john@example.com');
+    await user.type(screen.getByLabelText('Email Address *'), 'john@test.local');
     await user.click(screen.getByRole('button', { name: /next/i }));
 
     // Type weak password
@@ -188,7 +188,7 @@ describe('RegistrationWizard', () => {
     
     await user.type(screen.getByLabelText('First Name *'), 'John');
     await user.type(screen.getByLabelText('Last Name *'), 'Doe');
-    await user.type(screen.getByLabelText('Email Address *'), 'john@example.com');
+    await user.type(screen.getByLabelText('Email Address *'), 'john@test.local');
     await user.click(screen.getByRole('button', { name: /next/i }));
 
     // Type mismatched passwords
@@ -211,7 +211,7 @@ describe('RegistrationWizard', () => {
     
     await user.type(screen.getByLabelText('First Name *'), 'John');
     await user.type(screen.getByLabelText('Last Name *'), 'Doe');
-    await user.type(screen.getByLabelText('Email Address *'), 'john@example.com');
+    await user.type(screen.getByLabelText('Email Address *'), 'john@test.local');
     await user.click(screen.getByRole('button', { name: /next/i }));
 
     await user.type(screen.getByLabelText('Password *'), 'SecurePassword123!');

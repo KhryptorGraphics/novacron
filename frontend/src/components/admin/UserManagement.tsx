@@ -49,7 +49,7 @@ const mockUsers = [
   {
     id: 1,
     name: "John Doe",
-    email: "john@example.com",
+    email: "user@organization.com",
     role: "user",
     status: "active",
     created_at: "2024-01-15T10:30:00Z",

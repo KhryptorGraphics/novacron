@@ -35,10 +35,10 @@ type ColumnInfo struct {
 }
 
 type QueryResult struct {
-	Columns []string        `json:"columns"`
-	Rows    [][]interface{} `json:"rows"`
-	Affected int64          `json:"affected"`
-	Duration string         `json:"duration"`
+	Columns  []string        `json:"columns"`
+	Rows     [][]interface{} `json:"rows"`
+	Affected int64           `json:"affected"`
+	Duration string          `json:"duration"`
 }
 
 type QueryRequest struct {
@@ -82,7 +82,7 @@ func (h *DatabaseHandlers) ListTables(w http.ResponseWriter, r *http.Request) {
 		AND t.table_type = 'BASE TABLE'
 		ORDER BY t.table_name
 	`
-	
+
 	rows, err := h.db.Query(query)
 	if err != nil {
 		logger.Error("Failed to query tables", "error", err)
@@ -90,25 +90,25 @@ func (h *DatabaseHandlers) ListTables(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
-	
+
 	tables := []TableInfo{}
 	for rows.Next() {
 		var table TableInfo
 		var description sql.NullString
-		
+
 		err := rows.Scan(&table.Name, &table.Schema, &table.RowCount, &table.Size, &description)
 		if err != nil {
 			logger.Error("Failed to scan table info", "error", err)
 			continue
 		}
-		
+
 		if description.Valid {
 			table.Description = description.String
 		}
-		
+
 		tables = append(tables, table)
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"tables": tables,
@@ -123,13 +123,13 @@ func (h *DatabaseHandlers) GetTableDetails(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Table name is required", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Sanitize table name to prevent SQL injection
 	if !isValidIdentifier(tableName) {
 		http.Error(w, "Invalid table name", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Get table info
 	var table TableInfo
 	var description sql.NullString
@@ -146,7 +146,7 @@ func (h *DatabaseHandlers) GetTableDetails(w http.ResponseWriter, r *http.Reques
 		WHERE t.table_name = $1 
 		AND t.table_schema NOT IN ('information_schema', 'pg_catalog')
 	`, tableName).Scan(&table.Name, &table.Schema, &table.RowCount, &table.Size, &description)
-	
+
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.Error(w, "Table not found", http.StatusNotFound)
@@ -156,11 +156,11 @@ func (h *DatabaseHandlers) GetTableDetails(w http.ResponseWriter, r *http.Reques
 		}
 		return
 	}
-	
+
 	if description.Valid {
 		table.Description = description.String
 	}
-	
+
 	// Get columns
 	columnRows, err := h.db.Query(`
 		SELECT 
@@ -179,32 +179,32 @@ func (h *DatabaseHandlers) GetTableDetails(w http.ResponseWriter, r *http.Reques
 		WHERE c.table_name = $1
 		ORDER BY c.ordinal_position
 	`, tableName)
-	
+
 	if err != nil {
 		logger.Error("Failed to get table columns", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	defer columnRows.Close()
-	
+
 	columns := []ColumnInfo{}
 	for columnRows.Next() {
 		var column ColumnInfo
 		var defaultValue sql.NullString
-		
+
 		err := columnRows.Scan(&column.Name, &column.Type, &column.Nullable, &defaultValue, &column.IsPrimaryKey)
 		if err != nil {
 			logger.Error("Failed to scan column info", "error", err)
 			continue
 		}
-		
+
 		if defaultValue.Valid {
 			column.DefaultValue = defaultValue.String
 		}
-		
+
 		columns = append(columns, column)
 	}
-	
+
 	// Get indexes
 	indexRows, err := h.db.Query(`
 		SELECT 
@@ -219,36 +219,36 @@ func (h *DatabaseHandlers) GetTableDetails(w http.ResponseWriter, r *http.Reques
 		GROUP BY i.relname, ix.indisunique
 		ORDER BY i.relname
 	`, tableName)
-	
+
 	if err != nil {
 		logger.Error("Failed to get table indexes", "error", err)
 		// Continue without indexes if query fails
 	}
-	
+
 	indexes := []IndexInfo{}
 	if indexRows != nil {
 		defer indexRows.Close()
 		for indexRows.Next() {
 			var index IndexInfo
 			var columnsArray []string
-			
+
 			err := indexRows.Scan(&index.Name, &columnsArray, &index.Unique)
 			if err != nil {
 				logger.Error("Failed to scan index info", "error", err)
 				continue
 			}
-			
+
 			index.Columns = columnsArray
 			indexes = append(indexes, index)
 		}
 	}
-	
+
 	response := TableDetailsResponse{
 		Table:   table,
 		Columns: columns,
 		Indexes: indexes,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -260,19 +260,19 @@ func (h *DatabaseHandlers) ExecuteQuery(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	
+
 	if req.SQL == "" {
 		http.Error(w, "SQL query is required", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Basic SQL injection prevention - only allow SELECT statements
 	trimmedSQL := strings.TrimSpace(strings.ToUpper(req.SQL))
 	if !strings.HasPrefix(trimmedSQL, "SELECT") && !strings.HasPrefix(trimmedSQL, "WITH") {
 		http.Error(w, "Only SELECT queries are allowed", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Check for dangerous keywords
 	dangerousKeywords := []string{"DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "CREATE", "TRUNCATE"}
 	for _, keyword := range dangerousKeywords {
@@ -281,7 +281,7 @@ func (h *DatabaseHandlers) ExecuteQuery(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	
+
 	// Execute query with timeout
 	ctx := r.Context()
 	rows, err := h.db.QueryContext(ctx, req.SQL)
@@ -291,7 +291,7 @@ func (h *DatabaseHandlers) ExecuteQuery(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer rows.Close()
-	
+
 	// Get column names
 	columns, err := rows.Columns()
 	if err != nil {
@@ -299,7 +299,7 @@ func (h *DatabaseHandlers) ExecuteQuery(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Read all rows
 	var resultRows [][]interface{}
 	for rows.Next() {
@@ -309,29 +309,29 @@ func (h *DatabaseHandlers) ExecuteQuery(w http.ResponseWriter, r *http.Request) 
 		for i := range values {
 			valuePtrs[i] = &values[i]
 		}
-		
+
 		if err := rows.Scan(valuePtrs...); err != nil {
 			logger.Error("Failed to scan row", "error", err)
 			continue
 		}
-		
+
 		// Convert []byte to string for JSON serialization
 		for i, val := range values {
 			if b, ok := val.([]byte); ok {
 				values[i] = string(b)
 			}
 		}
-		
+
 		resultRows = append(resultRows, values)
 	}
-	
+
 	result := QueryResult{
 		Columns:  columns,
 		Rows:     resultRows,
 		Affected: int64(len(resultRows)),
 		Duration: "N/A", // Could add timing if needed
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
 }
@@ -343,12 +343,12 @@ func (h *DatabaseHandlers) ExecuteStatement(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	
+
 	if req.SQL == "" {
 		http.Error(w, "SQL statement is required", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Execute statement
 	ctx := r.Context()
 	result, err := h.db.ExecContext(ctx, req.SQL)
@@ -357,16 +357,16 @@ func (h *DatabaseHandlers) ExecuteStatement(w http.ResponseWriter, r *http.Reque
 		http.Error(w, fmt.Sprintf("Statement execution failed: %v", err), http.StatusBadRequest)
 		return
 	}
-	
+
 	affected, _ := result.RowsAffected()
-	
+
 	response := QueryResult{
 		Columns:  []string{},
 		Rows:     [][]interface{}{},
 		Affected: affected,
 		Duration: "N/A",
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -376,24 +376,24 @@ func isValidIdentifier(name string) bool {
 	if len(name) == 0 || len(name) > 63 {
 		return false
 	}
-	
+
 	// Must start with letter or underscore
-	if !((name[0] >= 'a' && name[0] <= 'z') || 
-		  (name[0] >= 'A' && name[0] <= 'Z') || 
-		  name[0] == '_') {
+	if !((name[0] >= 'a' && name[0] <= 'z') ||
+		(name[0] >= 'A' && name[0] <= 'Z') ||
+		name[0] == '_') {
 		return false
 	}
-	
+
 	// Rest must be alphanumeric or underscore
 	for i := 1; i < len(name); i++ {
 		c := name[i]
-		if !((c >= 'a' && c <= 'z') || 
-			 (c >= 'A' && c <= 'Z') || 
-			 (c >= '0' && c <= '9') || 
-			 c == '_') {
+		if !((c >= 'a' && c <= 'z') ||
+			(c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') ||
+			c == '_') {
 			return false
 		}
 	}
-	
+
 	return true
 }

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yourusername/novacron/backend/core/cognitive"
+	"github.com/khryptorgraphics/novacron/backend/core/cognitive"
 )
 
 // ReasoningEngine performs logical reasoning and planning

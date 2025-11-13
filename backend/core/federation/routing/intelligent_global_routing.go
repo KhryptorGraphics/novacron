@@ -680,8 +680,9 @@ func (igr *IntelligentGlobalRouter) selectHybrid(regions []*RegionEndpoint, req 
 
 // getSourceRegion determines source region from IP
 func (igr *IntelligentGlobalRouter) getSourceRegion(sourceIP string) string {
-	// TODO: Implement IP geolocation
-	// For now, return "default"
+	// DEFERRED: IP geolocation requires MaxMind GeoIP2 or similar database
+	// Would use GeoIP lookup to determine client's approximate location
+	log.Printf("Using default region for IP %s (GeoIP not implemented)", sourceIP)
 	return "default"
 }
 
@@ -701,8 +702,9 @@ func (igr *IntelligentGlobalRouter) calculateRoutingCost(sourceRegion, targetReg
 
 // computePath computes routing path between regions
 func (igr *IntelligentGlobalRouter) computePath(sourceRegion, targetRegion string) []string {
-	// Simple: direct path
-	// TODO: Implement multi-hop routing for better optimization
+	// DEFERRED: Multi-hop routing requires graph algorithms (Dijkstra, A*)
+	// Would compute optimal path considering latency, cost, and bandwidth
+	log.Printf("Using direct route from %s to %s (multi-hop optimization not implemented)", sourceRegion, targetRegion)
 	return []string{sourceRegion, targetRegion}
 }
 

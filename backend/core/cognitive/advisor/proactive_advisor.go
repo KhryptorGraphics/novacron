@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yourusername/novacron/backend/core/cognitive"
+	"github.com/khryptorgraphics/novacron/backend/core/cognitive"
 )
 
 // ProactiveAdvisor generates proactive recommendations

@@ -8,17 +8,17 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yourusername/novacron/backend/core/cognitive"
-	"github.com/yourusername/novacron/backend/core/cognitive/advisor"
-	contextpkg "github.com/yourusername/novacron/backend/core/cognitive/context"
-	"github.com/yourusername/novacron/backend/core/cognitive/explanation"
-	"github.com/yourusername/novacron/backend/core/cognitive/knowledge"
-	"github.com/yourusername/novacron/backend/core/cognitive/memory"
-	"github.com/yourusername/novacron/backend/core/cognitive/metrics"
-	"github.com/yourusername/novacron/backend/core/cognitive/multimodal"
-	"github.com/yourusername/novacron/backend/core/cognitive/nli"
-	"github.com/yourusername/novacron/backend/core/cognitive/parser"
-	"github.com/yourusername/novacron/backend/core/cognitive/reasoning"
+	"github.com/khryptorgraphics/novacron/backend/core/cognitive"
+	"github.com/khryptorgraphics/novacron/backend/core/cognitive/advisor"
+	contextpkg "github.com/khryptorgraphics/novacron/backend/core/cognitive/context"
+	"github.com/khryptorgraphics/novacron/backend/core/cognitive/explanation"
+	"github.com/khryptorgraphics/novacron/backend/core/cognitive/knowledge"
+	"github.com/khryptorgraphics/novacron/backend/core/cognitive/memory"
+	"github.com/khryptorgraphics/novacron/backend/core/cognitive/metrics"
+	"github.com/khryptorgraphics/novacron/backend/core/cognitive/multimodal"
+	"github.com/khryptorgraphics/novacron/backend/core/cognitive/nli"
+	"github.com/khryptorgraphics/novacron/backend/core/cognitive/parser"
+	"github.com/khryptorgraphics/novacron/backend/core/cognitive/reasoning"
 )
 
 // TestIntentParserAccuracy tests intent parsing accuracy

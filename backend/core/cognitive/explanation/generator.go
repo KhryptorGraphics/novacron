@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yourusername/novacron/backend/core/cognitive"
+	"github.com/khryptorgraphics/novacron/backend/core/cognitive"
 )
 
 // ExplanationGenerator creates human-readable explanations

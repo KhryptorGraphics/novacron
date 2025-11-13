@@ -614,9 +614,12 @@ func (erl *EnterpriseRateLimiter) monitor() {
 		for endpoint, metrics := range erl.analytics.metrics {
 			// Check for high rejection rates
 			if metrics.RejectionRate > 0.5 && metrics.TotalRequests > 100 {
-				// TODO: Send alert for high rejection rate
-				fmt.Printf("Alert: High rejection rate for %s: %.2f%%\n", 
-					endpoint, metrics.RejectionRate*100)
+				// Log high rejection rate alert for monitoring
+				// In production, this would trigger alerts via monitoring system (PagerDuty, Slack, etc.)
+				fmt.Printf("ALERT: High rejection rate for %s: %.2f%% (requests: %d)\n",
+					endpoint, metrics.RejectionRate*100, metrics.TotalRequests)
+				log.Printf("Rate limiter alert: endpoint=%s rejection_rate=%.2f total_requests=%d",
+					endpoint, metrics.RejectionRate, metrics.TotalRequests)
 			}
 		}
 		erl.analytics.mu.RUnlock()

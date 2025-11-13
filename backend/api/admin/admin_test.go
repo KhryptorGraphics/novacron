@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/mux"
 	_ "github.com/mattn/go-sqlite3"
+	"novacron/backend/pkg/testutil"
 )
 
 // setupTestDB creates an in-memory SQLite database for testing
@@ -100,8 +101,8 @@ func TestUserManagementHandlers(t *testing.T) {
 
 	t.Run("CreateUser", func(t *testing.T) {
 		reqBody := CreateUserRequest{
-			Username: "testuser",
-			Email:    "test@example.com",
+			Username: testutil.DefaultTestUsername,
+			Email:    testutil.GetTestEmail(),
 			Password: "SecureP@ssw0rd",
 			Role:     "user",
 		}
@@ -308,7 +309,7 @@ func TestInputValidation(t *testing.T) {
 		// Test with empty username
 		reqBody := CreateUserRequest{
 			Username: "",
-			Email:    "test@example.com",
+			Email:    testutil.GetTestEmail(),
 			Password: "password",
 			Role:     "user",
 		}

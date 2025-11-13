@@ -1,0 +1,136 @@
+# NovaCron Resource Chaos Tests
+# Tests resource exhaustion: CPU stress, memory stress, disk stress, I/O stress
+
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Workflow
+metadata:
+  name: novacron-resource-chaos
+  namespace: novacron
+spec:
+  entry: resource-chaos-suite
+  templates:
+    - name: resource-chaos-suite
+      templateType: Serial
+      deadline: 2h
+      children:
+        - cpu-stress
+        - memory-stress
+        - disk-stress
+        - io-stress
+
+    # Test 1: CPU Stress - 100% CPU utilization
+    - name: cpu-stress
+      templateType: StressChaos
+      deadline: 15m
+      stressChaos:
+        mode: one
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: novacron-api
+        stressors:
+          cpu:
+            workers: 4
+            load: 100
+        duration: 10m
+
+    # Test 2: Memory Stress - Fill memory to 95%
+    - name: memory-stress
+      templateType: StressChaos
+      deadline: 15m
+      stressChaos:
+        mode: one
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: novacron-core
+        stressors:
+          memory:
+            workers: 4
+            size: 3GB
+        duration: 10m
+
+    # Test 3: Disk Stress - Fill disk to 90%
+    - name: disk-stress
+      templateType: StressChaos
+      deadline: 20m
+      stressChaos:
+        mode: one
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: novacron-api
+        stressors:
+          disk:
+            workers: 4
+            size: 10GB
+        duration: 15m
+
+    # Test 4: I/O Stress - Saturate disk I/O
+    - name: io-stress
+      templateType: IOChaos
+      deadline: 15m
+      ioChaos:
+        action: latency
+        mode: one
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: novacron-database
+        volumePath: /var/lib/postgresql/data
+        path: /var/lib/postgresql/data/**/*
+        delay: 100ms
+        percent: 50
+        duration: 10m
+
+---
+# Resource Chaos Validation
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: resource-chaos-validation
+  namespace: novacron
+spec:
+  template:
+    spec:
+      containers:
+      - name: validator
+        image: curlimages/curl:latest
+        command:
+          - /bin/sh
+          - -c
+          - |
+            #!/bin/sh
+            echo "Validating resource recovery..."
+
+            # Wait for resource levels to normalize
+            sleep 60
+
+            # Check system health
+            curl -f https://api.novacron.io/health || exit 1
+            echo "✅ System health restored"
+
+            # Check resource metrics
+            METRICS=$(curl -s https://api.novacron.io/api/v1/metrics/system)
+            echo "System metrics: $METRICS"
+
+            # Verify performance
+            START=$(date +%s%3N)
+            curl -s https://api.novacron.io/api/v1/vms > /dev/null
+            END=$(date +%s%3N)
+            LATENCY=$((END - START))
+
+            if [ $LATENCY -lt 200 ]; then
+              echo "✅ Performance restored: ${LATENCY}ms"
+            else
+              echo "⚠️ Performance degraded: ${LATENCY}ms"
+              exit 1
+            fi
+
+            echo "✅ All resource chaos validations passed"
+      restartPolicy: Never
+  backoffLimit: 3

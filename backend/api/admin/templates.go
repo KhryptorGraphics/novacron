@@ -50,17 +50,17 @@ type CreateTemplateRequest struct {
 }
 
 type UpdateTemplateRequest struct {
-	Name        *string                 `json:"name,omitempty"`
-	Description *string                 `json:"description,omitempty"`
-	OS          *string                 `json:"os,omitempty"`
-	OSVersion   *string                 `json:"os_version,omitempty"`
-	CPUCores    *int                    `json:"cpu_cores,omitempty"`
-	MemoryMB    *int                    `json:"memory_mb,omitempty"`
-	DiskGB      *int                    `json:"disk_gb,omitempty"`
-	ImagePath   *string                 `json:"image_path,omitempty"`
-	IsPublic    *bool                   `json:"is_public,omitempty"`
-	Tags        []string                `json:"tags,omitempty"`
-	Metadata    map[string]interface{}  `json:"metadata,omitempty"`
+	Name        *string                `json:"name,omitempty"`
+	Description *string                `json:"description,omitempty"`
+	OS          *string                `json:"os,omitempty"`
+	OSVersion   *string                `json:"os_version,omitempty"`
+	CPUCores    *int                   `json:"cpu_cores,omitempty"`
+	MemoryMB    *int                   `json:"memory_mb,omitempty"`
+	DiskGB      *int                   `json:"disk_gb,omitempty"`
+	ImagePath   *string                `json:"image_path,omitempty"`
+	IsPublic    *bool                  `json:"is_public,omitempty"`
+	Tags        []string               `json:"tags,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
 type TemplateListResponse struct {

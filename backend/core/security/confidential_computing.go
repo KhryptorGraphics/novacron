@@ -54,7 +54,7 @@ type ConfidentialComputingConfig struct {
 type SGXManager struct {
 	mu              sync.RWMutex
 	enclaves        map[string]*SGXEnclave
-	measurements    map[string]*EnclaveMe asurement
+	measurements    map[string]*EnclaveMeasurement
 	attestationKeys map[string][]byte
 }
 

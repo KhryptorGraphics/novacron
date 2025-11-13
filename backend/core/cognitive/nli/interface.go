@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/yourusername/novacron/backend/core/cognitive"
+	"github.com/khryptorgraphics/novacron/backend/core/cognitive"
 )
 
 // NaturalLanguageInterface handles natural language understanding

@@ -987,21 +987,25 @@ func (h *ComputeAPIHandler) MigrateCrossCluster(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// TODO: Implement cross-cluster migration
+	// DEFERRED: Cross-cluster migration requires coordination protocol implementation
+	// This would involve cluster membership, consensus, and state transfer mechanisms
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"vm_id":     vmID,
-		"status":    "migration_started",
+		"status":    "not_implemented",
+		"message":   "Cross-cluster migration requires distributed coordination",
 		"timestamp": time.Now(),
 	})
 }
 
 func (h *ComputeAPIHandler) ListMemoryPools(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement memory pool listing
+	// DEFERRED: Memory pool listing requires memory manager integration
+	// Would query available memory pools from hypervisor and memory allocator
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"pools": []interface{}{},
-		"total": 0,
+		"pools":  []interface{}{},
+		"total":  0,
+		"status": "not_implemented",
 	})
 }
 
@@ -1012,12 +1016,13 @@ func (h *ComputeAPIHandler) CreateMemoryPool(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// TODO: Implement memory pool creation
+	// DEFERRED: Memory pool creation requires memory manager API
+	// Would create dedicated memory pool via hypervisor or NUMA allocator
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+	w.WriteHeader(http.StatusNotImplemented)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"pool_id":   fmt.Sprintf("pool-%d", time.Now().UnixNano()),
-		"status":    "created",
+		"error":     "Memory pool creation not implemented",
+		"status":    "not_implemented",
 		"timestamp": time.Now(),
 	})
 }
@@ -1026,13 +1031,14 @@ func (h *ComputeAPIHandler) GetMemoryPool(w http.ResponseWriter, r *http.Request
 	vars := mux.Vars(r)
 	poolID := vars["id"]
 
-	// TODO: Implement memory pool retrieval
+	// DEFERRED: Memory pool retrieval requires memory manager API
+	// Would fetch pool details from hypervisor memory statistics
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotImplemented)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"pool_id":    poolID,
-		"status":     "active",
-		"total_size": "100GB",
-		"used_size":  "25GB",
+		"pool_id": poolID,
+		"error":   "Memory pool retrieval not implemented",
+		"status":  "not_implemented",
 	})
 }
 
@@ -1043,13 +1049,14 @@ func (h *ComputeAPIHandler) AllocateMemory(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// TODO: Implement memory allocation
+	// DEFERRED: Memory allocation requires memory manager integration
+	// Would allocate memory from pool using hypervisor allocation API
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+	w.WriteHeader(http.StatusNotImplemented)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"allocation_id": fmt.Sprintf("alloc-%d", time.Now().UnixNano()),
-		"status":        "allocated",
-		"timestamp":     time.Now(),
+		"error":     "Memory allocation not implemented",
+		"status":    "not_implemented",
+		"timestamp": time.Now(),
 	})
 }
 
@@ -1057,11 +1064,14 @@ func (h *ComputeAPIHandler) ReleaseMemory(w http.ResponseWriter, r *http.Request
 	vars := mux.Vars(r)
 	allocationID := vars["id"]
 
-	// TODO: Implement memory release
+	// DEFERRED: Memory release requires memory manager integration
+	// Would release allocated memory back to pool via hypervisor API
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotImplemented)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"allocation_id": allocationID,
-		"status":        "released",
+		"error":         "Memory release not implemented",
+		"status":        "not_implemented",
 		"timestamp":     time.Now(),
 	})
 }

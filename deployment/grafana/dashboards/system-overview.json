@@ -1,0 +1,182 @@
+{
+  "dashboard": {
+    "title": "NovaCron System Overview",
+    "tags": ["novacron", "overview", "production"],
+    "timezone": "UTC",
+    "editable": true,
+    "graphTooltip": 1,
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "10s",
+    "panels": [
+      {
+        "id": 1,
+        "gridPos": {"x": 0, "y": 0, "w": 8, "h": 8},
+        "type": "stat",
+        "title": "System Health",
+        "targets": [
+          {
+            "expr": "sum(novacron_service_availability)",
+            "legendFormat": "Services Up"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 3, "color": "yellow"},
+                {"value": 5, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "gridPos": {"x": 8, "y": 0, "w": 8, "h": 8},
+        "type": "stat",
+        "title": "Total VMs",
+        "targets": [
+          {
+            "expr": "sum(novacron_vms_total)",
+            "legendFormat": "Total VMs"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "gridPos": {"x": 16, "y": 0, "w": 8, "h": 8},
+        "type": "stat",
+        "title": "Active Users",
+        "targets": [
+          {
+            "expr": "novacron_active_users_total",
+            "legendFormat": "Users"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+        "type": "graph",
+        "title": "API Request Rate",
+        "targets": [
+          {
+            "expr": "sum(rate(novacron_api_requests_total[5m]))",
+            "legendFormat": "Requests/sec"
+          }
+        ],
+        "yaxes": [
+          {"format": "reqps", "label": "Requests/s"}
+        ]
+      },
+      {
+        "id": 5,
+        "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+        "type": "graph",
+        "title": "API Latency (p50, p95, p99)",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(novacron_api_request_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "p50"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(novacron_api_request_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "p95"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(novacron_api_request_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "p99"
+          }
+        ],
+        "yaxes": [
+          {"format": "s", "label": "Latency"}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [0.5], "type": "gt"},
+              "query": {"params": ["p95"]},
+              "type": "query"
+            }
+          ],
+          "frequency": "1m",
+          "name": "High API Latency"
+        }
+      },
+      {
+        "id": 6,
+        "gridPos": {"x": 0, "y": 16, "w": 8, "h": 8},
+        "type": "gauge",
+        "title": "CPU Usage",
+        "targets": [
+          {
+            "expr": "novacron_system_cpu_usage_percent",
+            "legendFormat": "CPU %"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 70, "color": "yellow"},
+                {"value": 90, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 7,
+        "gridPos": {"x": 8, "y": 16, "w": 8, "h": 8},
+        "type": "gauge",
+        "title": "Memory Usage",
+        "targets": [
+          {
+            "expr": "(novacron_system_memory_usage_bytes / 1024 / 1024 / 1024) / 32 * 100",
+            "legendFormat": "Memory %"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 70, "color": "yellow"},
+                {"value": 85, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 8,
+        "gridPos": {"x": 16, "y": 16, "w": 8, "h": 8},
+        "type": "graph",
+        "title": "Error Rate",
+        "targets": [
+          {
+            "expr": "sum(rate(novacron_api_errors_total[5m])) by (error_type)",
+            "legendFormat": "{{error_type}}"
+          }
+        ],
+        "yaxes": [
+          {"format": "ops", "label": "Errors/s"}
+        ]
+      }
+    ]
+  }
+}

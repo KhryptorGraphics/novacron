@@ -9,21 +9,21 @@ import (
 	"time"
 )
 
-// NodeState represents the state of a Raft node
-type NodeState int
+// RaftNodeState represents the state of a Raft node
+type RaftNodeState int
 
 const (
-	Follower NodeState = iota
+	Follower RaftNodeState = iota
 	Candidate
 	Leader
 )
 
-func (s NodeState) String() string {
+func (s RaftNodeState) String() string {
 	switch s {
 	case Follower:
 		return "Follower"
 	case Candidate:
-		return "Candidate" 
+		return "Candidate"
 	case Leader:
 		return "Leader"
 	default:
@@ -49,7 +49,7 @@ type RaftNode struct {
 	// Node identification
 	nodeID   string
 	peers    []string
-	state    NodeState
+	state    RaftNodeState
 	leaderID string
 	
 	// Timing and election

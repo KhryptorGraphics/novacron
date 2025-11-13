@@ -66,20 +66,20 @@ func (h *SecureUserManagementHandlers) ListUsers(w http.ResponseWriter, r *http.
 	if page <= 0 {
 		page = 1
 	}
-	
+
 	pageSize, _ := strconv.Atoi(r.URL.Query().Get("page_size"))
 	if pageSize <= 0 || pageSize > 100 {
 		pageSize = 20
 	}
-	
+
 	search := r.URL.Query().Get("search")
 	role := r.URL.Query().Get("role")
-	
+
 	offset := (page - 1) * pageSize
-	
+
 	// Sanitize input parameters
 	search = security.SanitizeSearchTerm(search)
-	
+
 	// Validate role parameter against allowed values
 	if role != "" {
 		allowedRoles := []string{"admin", "user", "viewer", "operator"}
@@ -95,14 +95,14 @@ func (h *SecureUserManagementHandlers) ListUsers(w http.ResponseWriter, r *http.
 			return
 		}
 	}
-	
+
 	// Build secure parameterized query
 	baseQuery := `SELECT id, username, email, role, active, created_at, updated_at FROM users`
 	countQuery := `SELECT COUNT(*) FROM users`
-	
+
 	var whereClause string
 	var args []interface{}
-	
+
 	if search != "" && role != "" {
 		whereClause = ` WHERE (username ILIKE $1 OR email ILIKE $2) AND role = $3`
 		args = []interface{}{"%" + search + "%", "%" + search + "%", role}
@@ -113,7 +113,7 @@ func (h *SecureUserManagementHandlers) ListUsers(w http.ResponseWriter, r *http.
 		whereClause = ` WHERE role = $1`
 		args = []interface{}{role}
 	}
-	
+
 	// Get total count using protected query
 	var total int
 	countRow := h.protector.SafeQueryRow(r.Context(), countQuery+whereClause, args...)
@@ -122,11 +122,11 @@ func (h *SecureUserManagementHandlers) ListUsers(w http.ResponseWriter, r *http.
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Get users with limit and offset
 	query := baseQuery + whereClause + ` ORDER BY created_at DESC LIMIT $` + strconv.Itoa(len(args)+1) + ` OFFSET $` + strconv.Itoa(len(args)+2)
 	args = append(args, pageSize, offset)
-	
+
 	rows, err := h.protector.SafeQuery(r.Context(), query, args...)
 	if err != nil {
 		logger.Error("Failed to query users", "error", err)
@@ -134,7 +134,7 @@ func (h *SecureUserManagementHandlers) ListUsers(w http.ResponseWriter, r *http.
 		return
 	}
 	defer rows.Close()
-	
+
 	users := []User{}
 	for rows.Next() {
 		var user User
@@ -145,9 +145,9 @@ func (h *SecureUserManagementHandlers) ListUsers(w http.ResponseWriter, r *http.
 		}
 		users = append(users, user)
 	}
-	
+
 	totalPages := (total + pageSize - 1) / pageSize
-	
+
 	response := UserListResponse{
 		Users:      users,
 		Total:      total,
@@ -155,7 +155,7 @@ func (h *SecureUserManagementHandlers) ListUsers(w http.ResponseWriter, r *http.
 		PageSize:   pageSize,
 		TotalPages: totalPages,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -167,28 +167,28 @@ func (h *SecureUserManagementHandlers) CreateUser(w http.ResponseWriter, r *http
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Validate required fields
 	req.Username = strings.TrimSpace(req.Username)
 	req.Email = strings.TrimSpace(req.Email)
-	
+
 	if req.Username == "" || req.Email == "" || req.Password == "" {
 		http.Error(w, "Username, email, and password are required", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Validate username length and characters
 	if len(req.Username) < 1 || len(req.Username) > 50 {
 		http.Error(w, "Username must be 1-50 characters", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Basic email validation
 	if !strings.Contains(req.Email, "@") || len(req.Email) > 100 {
 		http.Error(w, "Invalid email format", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Validate role
 	if req.Role == "" {
 		req.Role = "user" // Default role
@@ -206,7 +206,7 @@ func (h *SecureUserManagementHandlers) CreateUser(w http.ResponseWriter, r *http
 			return
 		}
 	}
-	
+
 	// Check if username or email already exists using protected query
 	var exists bool
 	existsRow := h.protector.SafeQueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1 OR email = $2)", req.Username, req.Email)
@@ -215,15 +215,15 @@ func (h *SecureUserManagementHandlers) CreateUser(w http.ResponseWriter, r *http
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	
+
 	if exists {
 		http.Error(w, "Username or email already exists", http.StatusConflict)
 		return
 	}
-	
+
 	// Hash password (simplified - in production, use proper password hashing)
 	// hashedPassword := hashPassword(req.Password)
-	
+
 	// Insert user using protected query
 	var userID int
 	insertRow := h.protector.SafeQueryRow(r.Context(), `
@@ -231,26 +231,26 @@ func (h *SecureUserManagementHandlers) CreateUser(w http.ResponseWriter, r *http
 		VALUES ($1, $2, $3, $4, true, NOW(), NOW())
 		RETURNING id
 	`, req.Username, req.Email, req.Password, req.Role)
-	
+
 	if err := insertRow.Scan(&userID); err != nil {
 		logger.Error("Failed to create user", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Return created user (without password) using protected query
 	var user User
 	userRow := h.protector.SafeQueryRow(r.Context(), `
 		SELECT id, username, email, role, active, created_at, updated_at
 		FROM users WHERE id = $1
 	`, userID)
-	
+
 	if err := userRow.Scan(&user.ID, &user.Username, &user.Email, &user.Role, &user.Active, &user.CreatedAt, &user.UpdatedAt); err != nil {
 		logger.Error("Failed to retrieve created user", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(user)
@@ -264,13 +264,13 @@ func (h *SecureUserManagementHandlers) UpdateUser(w http.ResponseWriter, r *http
 		http.Error(w, "Invalid user ID", http.StatusBadRequest)
 		return
 	}
-	
+
 	var req UpdateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Check if user exists using protected query
 	var exists bool
 	existsRow := h.protector.SafeQueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", userID)
@@ -279,16 +279,16 @@ func (h *SecureUserManagementHandlers) UpdateUser(w http.ResponseWriter, r *http
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	
+
 	if !exists {
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
 	}
-	
+
 	// Build secure update query
 	setParts := []string{}
 	args := []interface{}{}
-	
+
 	if req.Username != "" {
 		// Validate username
 		req.Username = strings.TrimSpace(req.Username)
@@ -299,7 +299,7 @@ func (h *SecureUserManagementHandlers) UpdateUser(w http.ResponseWriter, r *http
 		setParts = append(setParts, "username = $"+strconv.Itoa(len(args)+1))
 		args = append(args, req.Username)
 	}
-	
+
 	if req.Email != "" {
 		// Basic email validation
 		if !strings.Contains(req.Email, "@") || len(req.Email) > 100 {
@@ -309,7 +309,7 @@ func (h *SecureUserManagementHandlers) UpdateUser(w http.ResponseWriter, r *http
 		setParts = append(setParts, "email = $"+strconv.Itoa(len(args)+1))
 		args = append(args, req.Email)
 	}
-	
+
 	if req.Role != "" {
 		// Validate role
 		allowedRoles := []string{"admin", "user", "viewer", "operator"}
@@ -327,43 +327,43 @@ func (h *SecureUserManagementHandlers) UpdateUser(w http.ResponseWriter, r *http
 		setParts = append(setParts, "role = $"+strconv.Itoa(len(args)+1))
 		args = append(args, req.Role)
 	}
-	
+
 	if req.Active != nil {
 		setParts = append(setParts, "active = $"+strconv.Itoa(len(args)+1))
 		args = append(args, *req.Active)
 	}
-	
+
 	if len(setParts) == 0 {
 		http.Error(w, "No fields to update", http.StatusBadRequest)
 		return
 	}
-	
+
 	setParts = append(setParts, "updated_at = NOW()")
 	setClause := strings.Join(setParts, ", ")
-	
+
 	args = append(args, userID)
 	query := "UPDATE users SET " + setClause + " WHERE id = $" + strconv.Itoa(len(args))
-	
+
 	_, err = h.protector.SafeExec(r.Context(), query, args...)
 	if err != nil {
 		logger.Error("Failed to update user", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Return updated user using protected query
 	var user User
 	updatedUserRow := h.protector.SafeQueryRow(r.Context(), `
 		SELECT id, username, email, role, active, created_at, updated_at
 		FROM users WHERE id = $1
 	`, userID)
-	
+
 	if err := updatedUserRow.Scan(&user.ID, &user.Username, &user.Email, &user.Role, &user.Active, &user.CreatedAt, &user.UpdatedAt); err != nil {
 		logger.Error("Failed to retrieve updated user", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(user)
 }
@@ -376,7 +376,7 @@ func (h *SecureUserManagementHandlers) DeleteUser(w http.ResponseWriter, r *http
 		http.Error(w, "Invalid user ID", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Check if user exists using protected query
 	var exists bool
 	deleteExistsRow := h.protector.SafeQueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", userID)
@@ -385,12 +385,12 @@ func (h *SecureUserManagementHandlers) DeleteUser(w http.ResponseWriter, r *http
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	
+
 	if !exists {
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
 	}
-	
+
 	// Delete user using protected query
 	_, err = h.protector.SafeExec(r.Context(), "DELETE FROM users WHERE id = $1", userID)
 	if err != nil {
@@ -398,7 +398,7 @@ func (h *SecureUserManagementHandlers) DeleteUser(w http.ResponseWriter, r *http
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -410,16 +410,16 @@ func (h *SecureUserManagementHandlers) AssignRoles(w http.ResponseWriter, r *htt
 		http.Error(w, "Invalid user ID", http.StatusBadRequest)
 		return
 	}
-	
+
 	var req struct {
 		Roles []string `json:"roles"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Validate roles and update using protected query
 	if len(req.Roles) > 0 {
 		// Validate role
@@ -442,6 +442,6 @@ func (h *SecureUserManagementHandlers) AssignRoles(w http.ResponseWriter, r *htt
 			return
 		}
 	}
-	
+
 	w.WriteHeader(http.StatusNoContent)
 }

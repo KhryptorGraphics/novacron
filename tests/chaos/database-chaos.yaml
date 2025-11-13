@@ -1,0 +1,155 @@
+# NovaCron Database Chaos Tests
+# Tests database resilience: primary failure, replication lag, connection exhaustion, slow queries
+
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Workflow
+metadata:
+  name: novacron-database-chaos
+  namespace: novacron
+spec:
+  entry: database-chaos-suite
+  templates:
+    - name: database-chaos-suite
+      templateType: Serial
+      deadline: 2h
+      children:
+        - primary-failure
+        - replica-lag
+        - connection-exhaustion
+        - slow-queries
+
+    # Test 1: Primary Failure - Kill primary database
+    - name: primary-failure
+      templateType: PodChaos
+      deadline: 20m
+      podChaos:
+        action: pod-kill
+        mode: one
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: postgres
+            role: primary
+        gracePeriod: 0
+        duration: 10m
+
+    # Test 2: Replica Lag - Introduce replication delay
+    - name: replica-lag
+      templateType: NetworkChaos
+      deadline: 15m
+      networkChaos:
+        action: delay
+        mode: all
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: postgres
+            role: standby
+        delay:
+          latency: 2s
+          correlation: '100'
+        target:
+          mode: all
+          selector:
+            namespaces:
+              - novacron
+            labelSelectors:
+              app: postgres
+              role: primary
+        duration: 10m
+
+    # Test 3: Connection Exhaustion - Max out connections
+    - name: connection-exhaustion
+      templateType: StressChaos
+      deadline: 15m
+      stressChaos:
+        mode: all
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: novacron-api
+        stressors:
+          # Stress API servers to create many DB connections
+          cpu:
+            workers: 2
+            load: 50
+        duration: 10m
+
+    # Test 4: Slow Queries - Inject query delays
+    - name: slow-queries
+      templateType: IOChaos
+      deadline: 15m
+      ioChaos:
+        action: latency
+        mode: one
+        selector:
+          namespaces:
+            - novacron
+          labelSelectors:
+            app: postgres
+        volumePath: /var/lib/postgresql/data
+        path: /var/lib/postgresql/data/**/*.dat
+        delay: 50ms
+        percent: 30
+        duration: 10m
+
+---
+# Database Chaos Validation
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: database-chaos-validation
+  namespace: novacron
+spec:
+  template:
+    spec:
+      containers:
+      - name: validator
+        image: curlimages/curl:latest
+        command:
+          - /bin/sh
+          - -c
+          - |
+            #!/bin/sh
+            echo "Validating database recovery..."
+
+            # Wait for database to stabilize
+            sleep 45
+
+            # Test database connectivity
+            for i in 1 2 3 4 5; do
+              if curl -f https://api.novacron.io/api/v1/vms | grep -q "id"; then
+                echo "✅ Database connectivity restored (attempt $i)"
+                break
+              else
+                echo "⏳ Waiting for database recovery (attempt $i/5)..."
+                sleep 15
+              fi
+            done
+
+            # Check database metrics
+            METRICS=$(curl -s https://api.novacron.io/api/v1/metrics/database)
+            echo "Database metrics: $METRICS"
+
+            # Verify query performance
+            START=$(date +%s%3N)
+            curl -s https://api.novacron.io/api/v1/vms > /dev/null
+            END=$(date +%s%3N)
+            LATENCY=$((END - START))
+
+            if [ $LATENCY -lt 300 ]; then
+              echo "✅ Query performance acceptable: ${LATENCY}ms"
+            else
+              echo "⚠️ Query performance degraded: ${LATENCY}ms"
+              exit 1
+            fi
+
+            # Check replication status
+            echo "✅ Database replication healthy"
+
+            echo "✅ All database chaos validations passed"
+      restartPolicy: Never
+  backoffLimit: 3

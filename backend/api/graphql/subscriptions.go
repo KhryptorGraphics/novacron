@@ -7,20 +7,20 @@ import (
 // SubscriptionManager manages GraphQL subscriptions
 type SubscriptionManager struct {
 	mu sync.RWMutex
-	
+
 	// VM subscriptions
-	vmStateListeners    []func(*VM)
-	vmMetricsListeners  map[string][]func(*VMMetrics)
-	
+	vmStateListeners   []func(*VM)
+	vmMetricsListeners map[string][]func(*VMMetrics)
+
 	// Migration subscriptions
-	migrationListeners  map[string][]func(*Migration)
-	
+	migrationListeners map[string][]func(*Migration)
+
 	// Alert subscriptions
-	alertListeners      []func(*Alert)
-	
+	alertListeners []func(*Alert)
+
 	// Event subscriptions
-	eventListeners      map[string][]func(*Event)
-	
+	eventListeners map[string][]func(*Event)
+
 	// Metrics subscriptions
 	systemMetricsListeners []func(*SystemMetrics)
 	nodeMetricsListeners   map[string][]func(*NodeMetrics)
@@ -29,10 +29,10 @@ type SubscriptionManager struct {
 // NewSubscriptionManager creates a new subscription manager
 func NewSubscriptionManager() *SubscriptionManager {
 	return &SubscriptionManager{
-		vmMetricsListeners:     make(map[string][]func(*VMMetrics)),
-		migrationListeners:     make(map[string][]func(*Migration)),
-		eventListeners:         make(map[string][]func(*Event)),
-		nodeMetricsListeners:   make(map[string][]func(*NodeMetrics)),
+		vmMetricsListeners:   make(map[string][]func(*VMMetrics)),
+		migrationListeners:   make(map[string][]func(*Migration)),
+		eventListeners:       make(map[string][]func(*Event)),
+		nodeMetricsListeners: make(map[string][]func(*NodeMetrics)),
 	}
 }
 
@@ -42,7 +42,7 @@ func NewSubscriptionManager() *SubscriptionManager {
 func (sm *SubscriptionManager) SubscribeVMStateChange(listener func(*VM)) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	sm.vmStateListeners = append(sm.vmStateListeners, listener)
 }
 
@@ -52,7 +52,7 @@ func (sm *SubscriptionManager) PublishVMStateChange(vm *VM) {
 	listeners := make([]func(*VM), len(sm.vmStateListeners))
 	copy(listeners, sm.vmStateListeners)
 	sm.mu.RUnlock()
-	
+
 	for _, listener := range listeners {
 		go listener(vm)
 	}
@@ -62,7 +62,7 @@ func (sm *SubscriptionManager) PublishVMStateChange(vm *VM) {
 func (sm *SubscriptionManager) SubscribeVMMetrics(vmID string, listener func(*VMMetrics)) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	if sm.vmMetricsListeners[vmID] == nil {
 		sm.vmMetricsListeners[vmID] = make([]func(*VMMetrics), 0)
 	}
@@ -75,7 +75,7 @@ func (sm *SubscriptionManager) PublishVMMetrics(vmID string, metrics *VMMetrics)
 	listeners := make([]func(*VMMetrics), len(sm.vmMetricsListeners[vmID]))
 	copy(listeners, sm.vmMetricsListeners[vmID])
 	sm.mu.RUnlock()
-	
+
 	for _, listener := range listeners {
 		go listener(metrics)
 	}
@@ -87,7 +87,7 @@ func (sm *SubscriptionManager) PublishVMMetrics(vmID string, metrics *VMMetrics)
 func (sm *SubscriptionManager) SubscribeMigrationProgress(migrationID string, listener func(*Migration)) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	if sm.migrationListeners[migrationID] == nil {
 		sm.migrationListeners[migrationID] = make([]func(*Migration), 0)
 	}
@@ -100,7 +100,7 @@ func (sm *SubscriptionManager) PublishMigrationProgress(migration *Migration) {
 	listeners := make([]func(*Migration), len(sm.migrationListeners[migration.ID]))
 	copy(listeners, sm.migrationListeners[migration.ID])
 	sm.mu.RUnlock()
-	
+
 	for _, listener := range listeners {
 		go listener(migration)
 	}
@@ -112,7 +112,7 @@ func (sm *SubscriptionManager) PublishMigrationProgress(migration *Migration) {
 func (sm *SubscriptionManager) SubscribeNewAlert(listener func(*Alert)) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	sm.alertListeners = append(sm.alertListeners, listener)
 }
 
@@ -122,7 +122,7 @@ func (sm *SubscriptionManager) PublishNewAlert(alert *Alert) {
 	listeners := make([]func(*Alert), len(sm.alertListeners))
 	copy(listeners, sm.alertListeners)
 	sm.mu.RUnlock()
-	
+
 	for _, listener := range listeners {
 		go listener(alert)
 	}
@@ -134,11 +134,11 @@ func (sm *SubscriptionManager) PublishNewAlert(alert *Alert) {
 func (sm *SubscriptionManager) SubscribeSystemEvent(eventType string, listener func(*Event)) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	if eventType == "" {
 		eventType = "all"
 	}
-	
+
 	if sm.eventListeners[eventType] == nil {
 		sm.eventListeners[eventType] = make([]func(*Event), 0)
 	}
@@ -148,22 +148,22 @@ func (sm *SubscriptionManager) SubscribeSystemEvent(eventType string, listener f
 // PublishSystemEvent publishes a system event
 func (sm *SubscriptionManager) PublishSystemEvent(event *Event) {
 	sm.mu.RLock()
-	
+
 	// Get listeners for specific event type
 	specificListeners := make([]func(*Event), len(sm.eventListeners[event.Type]))
 	copy(specificListeners, sm.eventListeners[event.Type])
-	
+
 	// Get listeners for all events
 	allListeners := make([]func(*Event), len(sm.eventListeners["all"]))
 	copy(allListeners, sm.eventListeners["all"])
-	
+
 	sm.mu.RUnlock()
-	
+
 	// Notify specific listeners
 	for _, listener := range specificListeners {
 		go listener(event)
 	}
-	
+
 	// Notify all-event listeners
 	for _, listener := range allListeners {
 		go listener(event)
@@ -176,7 +176,7 @@ func (sm *SubscriptionManager) PublishSystemEvent(event *Event) {
 func (sm *SubscriptionManager) SubscribeSystemMetrics(listener func(*SystemMetrics)) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	sm.systemMetricsListeners = append(sm.systemMetricsListeners, listener)
 }
 
@@ -186,7 +186,7 @@ func (sm *SubscriptionManager) PublishSystemMetrics(metrics *SystemMetrics) {
 	listeners := make([]func(*SystemMetrics), len(sm.systemMetricsListeners))
 	copy(listeners, sm.systemMetricsListeners)
 	sm.mu.RUnlock()
-	
+
 	for _, listener := range listeners {
 		go listener(metrics)
 	}
@@ -196,11 +196,11 @@ func (sm *SubscriptionManager) PublishSystemMetrics(metrics *SystemMetrics) {
 func (sm *SubscriptionManager) SubscribeNodeMetrics(nodeID string, listener func(*NodeMetrics)) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	if nodeID == "" {
 		nodeID = "all"
 	}
-	
+
 	if sm.nodeMetricsListeners[nodeID] == nil {
 		sm.nodeMetricsListeners[nodeID] = make([]func(*NodeMetrics), 0)
 	}
@@ -210,22 +210,22 @@ func (sm *SubscriptionManager) SubscribeNodeMetrics(nodeID string, listener func
 // PublishNodeMetrics publishes node metrics
 func (sm *SubscriptionManager) PublishNodeMetrics(nodeID string, metrics *NodeMetrics) {
 	sm.mu.RLock()
-	
+
 	// Get listeners for specific node
 	specificListeners := make([]func(*NodeMetrics), len(sm.nodeMetricsListeners[nodeID]))
 	copy(specificListeners, sm.nodeMetricsListeners[nodeID])
-	
+
 	// Get listeners for all nodes
 	allListeners := make([]func(*NodeMetrics), len(sm.nodeMetricsListeners["all"]))
 	copy(allListeners, sm.nodeMetricsListeners["all"])
-	
+
 	sm.mu.RUnlock()
-	
+
 	// Notify specific listeners
 	for _, listener := range specificListeners {
 		go listener(metrics)
 	}
-	
+
 	// Notify all-node listeners
 	for _, listener := range allListeners {
 		go listener(metrics)
@@ -238,7 +238,7 @@ func (sm *SubscriptionManager) PublishNodeMetrics(nodeID string, metrics *NodeMe
 func (sm *SubscriptionManager) UnsubscribeVMStateChange() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	sm.vmStateListeners = []func(*VM){}
 }
 
@@ -246,7 +246,7 @@ func (sm *SubscriptionManager) UnsubscribeVMStateChange() {
 func (sm *SubscriptionManager) UnsubscribeVMMetrics(vmID string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	delete(sm.vmMetricsListeners, vmID)
 }
 
@@ -254,7 +254,7 @@ func (sm *SubscriptionManager) UnsubscribeVMMetrics(vmID string) {
 func (sm *SubscriptionManager) UnsubscribeMigration(migrationID string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	delete(sm.migrationListeners, migrationID)
 }
 
@@ -262,7 +262,7 @@ func (sm *SubscriptionManager) UnsubscribeMigration(migrationID string) {
 func (sm *SubscriptionManager) UnsubscribeAllAlerts() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	sm.alertListeners = []func(*Alert){}
 }
 
@@ -270,11 +270,11 @@ func (sm *SubscriptionManager) UnsubscribeAllAlerts() {
 func (sm *SubscriptionManager) UnsubscribeSystemEvents(eventType string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	if eventType == "" {
 		eventType = "all"
 	}
-	
+
 	delete(sm.eventListeners, eventType)
 }
 
@@ -282,7 +282,7 @@ func (sm *SubscriptionManager) UnsubscribeSystemEvents(eventType string) {
 func (sm *SubscriptionManager) UnsubscribeSystemMetrics() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	sm.systemMetricsListeners = []func(*SystemMetrics){}
 }
 
@@ -290,10 +290,10 @@ func (sm *SubscriptionManager) UnsubscribeSystemMetrics() {
 func (sm *SubscriptionManager) UnsubscribeNodeMetrics(nodeID string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	if nodeID == "" {
 		nodeID = "all"
 	}
-	
+
 	delete(sm.nodeMetricsListeners, nodeID)
 }

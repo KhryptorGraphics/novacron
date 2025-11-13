@@ -48,7 +48,7 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 	}
 
 	// Create resource constraints using fields from VMConfig
-	// TODO: Re-enable scheduler integration when scheduler package is available
+	// Note: Scheduler integration temporarily disabled for testing
 	// constraints := []scheduler.ResourceConstraint{
 	//	{
 	//		Type:      scheduler.ResourceCPU,
@@ -61,7 +61,7 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 	// }
 
 	// Request resources from the scheduler
-	// TODO: Re-enable scheduler integration when scheduler package is available
+	// Note: Scheduler integration temporarily disabled for testing
 	// resourceID, err := m.scheduler.RequestResources(constraints, 1, 1*time.Hour)
 	// if err != nil {
 	//	return nil, fmt.Errorf("failed to request resources: %w", err)
@@ -105,7 +105,7 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 	// }
 
 	// Get the allocations
-	// TODO: Re-enable when scheduler is available
+	// Note: Scheduler integration temporarily disabled for testing
 	// allocations := m.scheduler.GetActiveAllocations()
 	// var allocation scheduler.ResourceAllocation
 	// found := false
@@ -117,10 +117,10 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 	//	}
 	// }
 
-	// TODO: Skip scheduler check for now
-	found := true // Temporary fix
+	// Temporary workaround: skip scheduler check during testing
+	found := true
 	if !found {
-		// TODO: Re-enable when scheduler is available
+		// Note: Scheduler integration temporarily disabled for testing
 		// m.scheduler.CancelRequest(resourceID)
 		return nil, errors.New("allocation not found")
 	}
@@ -128,7 +128,7 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 	// Create the VM object using the constructor
 	vm, err := NewVM(req.Spec) // Pass the VMConfig spec
 	if err != nil {
-		// TODO: Re-enable when scheduler is available
+		// Note: Scheduler integration temporarily disabled for testing
 		// m.scheduler.CancelRequest(resourceID)
 		return nil, fmt.Errorf("failed to initialize VM object: %w", err)
 	}
@@ -161,7 +161,7 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 		})
 
 		// Cancel the resource request
-		// TODO: Re-enable when scheduler is available
+		// Note: Scheduler integration temporarily disabled for testing
 		// m.scheduler.CancelRequest(resourceID)
 
 		return vm, err
@@ -622,7 +622,7 @@ func (m *VMManager) deleteVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 	// Clean up resources
 	// If VM has a resource allocation, release it
 	if vm.resourceID != "" {
-		// TODO: Re-enable when scheduler is available
+		// Note: Scheduler integration temporarily disabled for testing
 		// m.scheduler.CancelRequest(vm.resourceID)
 	}
 

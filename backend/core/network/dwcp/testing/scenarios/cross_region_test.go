@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	testing_pkg "github.com/yourusername/novacron/backend/core/network/dwcp/testing"
+	testing_pkg "github.com/khryptorgraphics/novacron/backend/core/network/dwcp/testing"
 )
 
 // TestCrossRegionMigration tests cross-region VM migration

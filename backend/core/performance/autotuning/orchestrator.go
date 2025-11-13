@@ -6,15 +6,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yourusername/novacron/backend/core/performance/cpu_pinning"
-	"github.com/yourusername/novacron/backend/core/performance/cost_optimizer"
-	"github.com/yourusername/novacron/backend/core/performance/flamegraph"
-	"github.com/yourusername/novacron/backend/core/performance/io_tuning"
-	"github.com/yourusername/novacron/backend/core/performance/network_tuning"
-	"github.com/yourusername/novacron/backend/core/performance/numa"
-	"github.com/yourusername/novacron/backend/core/performance/profiler"
-	"github.com/yourusername/novacron/backend/core/performance/recommendations"
-	"github.com/yourusername/novacron/backend/core/performance/rightsizing"
+	"github.com/khryptorgraphics/novacron/backend/core/performance/cpu_pinning"
+	"github.com/khryptorgraphics/novacron/backend/core/performance/cost_optimizer"
+	"github.com/khryptorgraphics/novacron/backend/core/performance/flamegraph"
+	"github.com/khryptorgraphics/novacron/backend/core/performance/io_tuning"
+	"github.com/khryptorgraphics/novacron/backend/core/performance/network_tuning"
+	"github.com/khryptorgraphics/novacron/backend/core/performance/numa"
+	"github.com/khryptorgraphics/novacron/backend/core/performance/profiler"
+	"github.com/khryptorgraphics/novacron/backend/core/performance/recommendations"
+	"github.com/khryptorgraphics/novacron/backend/core/performance/rightsizing"
 )
 
 // Orchestrator coordinates all auto-tuning activities
