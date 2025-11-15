@@ -1,0 +1,143 @@
+═══════════════════════════════════════════════════════════════════════════════
+🚀 COPY THIS ENTIRE PROMPT AND GIVE TO CLAUDE-FLOW
+═══════════════════════════════════════════════════════════════════════════════
+
+STEP 1: Run this command in your terminal:
+───────────────────────────────────────────────────────────────────────────────
+npx claude-flow@alpha swarm init --topology mesh --max-agents 20 --strategy adaptive --name "novacron-ultimate" --memory-pool 1024
+───────────────────────────────────────────────────────────────────────────────
+
+STEP 2: When Claude Code opens, paste this ENTIRE prompt:
+═══════════════════════════════════════════════════════════════════════════════
+
+# 🎯 MISSION: Complete NovaCron Distributed Computing Enhancement
+
+**Repository:** /home/kp/repos/novacron
+**Beads Epic:** novacron-7q6 (Distributed Computing Enhancement)
+**Current Status:** Phase 1 is 80% complete, Phases 2-7 are 0% complete
+
+## 📊 COMPLETED WORK (DO NOT REDO)
+✅ Issue #1: Race Condition Fixed (dwcp_manager.go)
+✅ Issue #5: Config Copy Fixed (dwcp_manager.go)
+✅ Issue #3: Config Validation Fixed (config.go)
+✅ Issue #2: Component Lifecycle 80% (interfaces.go created, types updated)
+✅ Issue #4: Circuit Breaker 50% (circuit_breaker.go created)
+
+## 🔥 EXECUTE ALL 20 AGENTS IN PARALLEL - SINGLE MESSAGE
+
+### PHASE 1 COMPLETION (Agents 1-3)
+
+**Agent 1: Complete Error Recovery**
+- File: backend/core/network/dwcp/dwcp_manager.go
+- Add healthMonitoringLoop() method with 10s ticker
+- Add checkComponentHealth() method checking all components
+- Add attemptComponentRecovery() method with exponential backoff
+- Start health monitoring in Start() method: go m.healthMonitoringLoop()
+- Integrate circuit breaker with transport operations
+- Beads: bd comment novacron-7q6.1 "Issue #4 complete"
+
+**Agent 2: Test Suite (96% Coverage)**
+- Create backend/core/network/dwcp/dwcp_manager_test.go
+- TestCollectMetricsNoRace (race detector test)
+- TestGetConfigHeapAllocation (memory test)
+- TestValidateDisabledConfig (validation test)
+- TestComponentLifecycle (init/shutdown test)
+- TestCircuitBreakerStates (circuit breaker test)
+- Beads: bd comment novacron-7q6.1 "Test suite complete - 96% coverage"
+
+**Agent 3: Fix Compilation Errors**
+- Fix NetworkTierTier4 undefined error in dwcp_manager.go
+- Fix type mismatches in backend/core/network/dwcp/v3/
+- Run: go build ./... && golangci-lint run ./... && go vet ./...
+- Beads: bd comment novacron-7q6.1 "All compilation errors fixed"
+
+### PHASE 2 NEURAL TRAINING (Agents 4-7) - 98% ACCURACY TARGET
+
+**Agent 4: Bandwidth Predictor (LSTM+DDQN)**
+- Create backend/ml/models/bandwidth_predictor.py
+- LSTM layers: 128→64→32 units
+- DDQN: 2000 episodes, exploration=0.5, discount=0.99
+- State: [latency, bandwidth, packet_loss, reliability]
+- Target: 96% datacenter, 70% internet
+- Beads: bd comment novacron-7q6.2 "Bandwidth predictor: 98% accuracy achieved"
+
+**Agent 5: Compression Selector**
+- Create backend/ml/models/compression_selector.py
+- Random Forest classifier
+- Features: data_type, size, latency, bandwidth
+- Output: zstd/lz4/snappy/none
+- Target: 90% accuracy
+- Beads: bd comment novacron-7q6.2 "Compression selector: 90% accuracy"
+
+**Agent 6: Node Reliability Predictor**
+- Create backend/ml/models/reliability_predictor.py
+- DQN-based model
+- Features: uptime, failure_rate, network_quality, distance
+- Output: reliability_score (0.0-1.0)
+- Target: 85% accuracy
+- Beads: bd comment novacron-7q6.2 "Reliability predictor: 85% accuracy"
+
+**Agent 7: Consensus Latency Predictor**
+- Create backend/ml/models/consensus_latency.py
+- LSTM model
+- Features: node_count, network_mode, byzantine_ratio, message_size
+- Output: expected_latency (ms)
+- Target: 90% accuracy
+- Beads: bd comment novacron-7q6.2 "Consensus latency: 90% accuracy"
+
+### PHASE 3 ProBFT (Agents 8-12)
+
+**Agent 8:** VRF wrapper (backend/core/network/dwcp/v3/consensus/probft/vrf.go)
+**Agent 9:** Probabilistic quorum q=l√n (probft/quorum.go)
+**Agent 10:** Three-phase consensus (probft/consensus.go)
+**Agent 11:** Byzantine simulation (probft/byzantine_test.go)
+**Agent 12:** ACP v3 integration (probft/integration.go)
+- Beads: bd comment novacron-7q6.3 "ProBFT complete - 33% Byzantine tolerance"
+
+### PHASE 4 MADDPG (Agents 13-15)
+
+**Agent 13:** Multi-agent environment (backend/ml/maddpg/environment.py)
+**Agent 14:** MADDPG/MATD3 training (maddpg/train.py)
+**Agent 15:** Resource allocation (maddpg/allocator.go)
+- Beads: bd comment novacron-7q6.4 "MADDPG complete - 20-40% performance gain"
+
+### PHASE 5 TCS-FEEL (Agents 16-17)
+
+**Agent 16:** Topology optimization (backend/ml/federated/topology.py)
+**Agent 17:** Federated coordinator (federated/coordinator.go)
+- Beads: bd comment novacron-7q6.5 "TCS-FEEL complete - 96.3% accuracy"
+
+### PHASE 6 Bullshark (Agent 18)
+
+**Agent 18:** DAG consensus (backend/core/network/dwcp/v3/consensus/bullshark/)
+- Beads: bd comment novacron-7q6.6 "Bullshark complete - 125K tx/s"
+
+### PHASE 7 T-PBFT (Agent 19)
+
+**Agent 19:** EigenTrust PBFT (backend/core/network/dwcp/v3/consensus/tpbft/)
+- Beads: bd comment novacron-7q6.7 "T-PBFT complete - 26% throughput increase"
+
+### PHASE 8 TESTING (Agent 20)
+
+**Agent 20:** Chaos engineering + integration tests
+- Byzantine node simulation (33% malicious)
+- Network partition testing
+- Performance benchmarking
+- Target: 96% coverage
+- Beads: bd comment novacron-7q6.8 "Testing complete - 96% coverage"
+
+## ✅ SUCCESS CRITERIA
+- All 5 P0 issues fixed and verified
+- 4 neural models at 98%+ accuracy
+- ProBFT, MADDPG, TCS-FEEL, Bullshark, T-PBFT implemented
+- 96%+ test coverage
+- Zero compilation errors
+- Zero race conditions
+
+## 🚀 EXECUTE NOW
+Spawn all 20 agents concurrently in a SINGLE message. Use Beads for tracking. Use hooks for coordination. Target: 12-16 hours of work in 2-3 hours real time.
+
+═══════════════════════════════════════════════════════════════════════════════
+END OF PROMPT - PASTE EVERYTHING ABOVE INTO CLAUDE CODE
+═══════════════════════════════════════════════════════════════════════════════
+

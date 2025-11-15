@@ -169,22 +169,22 @@ func (a *Adapter) Configure(config interfaces.CloudConfig) error {
 	a.authorizer = authorizer
 
 	// Initialize clients
-	a.vmClient = compute.NewVirtualMachinesClient(azureConfig.SubscriptionID)
+	a.vmClient = &compute.VirtualMachinesClient{SubscriptionID: azureConfig.SubscriptionID}
 	a.vmClient.Authorizer = authorizer
 
-	a.diskClient = compute.NewDisksClient(azureConfig.SubscriptionID)
+	a.diskClient = &compute.DisksClient{SubscriptionID: azureConfig.SubscriptionID}
 	a.diskClient.Authorizer = authorizer
 
-	a.networkClient = network.NewVirtualNetworksClient(azureConfig.SubscriptionID)
+	a.networkClient = &network.VirtualNetworksClient{SubscriptionID: azureConfig.SubscriptionID}
 	a.networkClient.Authorizer = authorizer
 
-	a.subnetClient = network.NewSubnetsClient(azureConfig.SubscriptionID)
+	a.subnetClient = &network.SubnetsClient{SubscriptionID: azureConfig.SubscriptionID}
 	a.subnetClient.Authorizer = authorizer
 
-	a.nsgClient = network.NewSecurityGroupsClient(azureConfig.SubscriptionID)
+	a.nsgClient = &network.SecurityGroupsClient{SubscriptionID: azureConfig.SubscriptionID}
 	a.nsgClient.Authorizer = authorizer
 
-	a.resourcesClient = resources.NewClient(azureConfig.SubscriptionID)
+	a.resourcesClient = &resources.Client{SubscriptionID: azureConfig.SubscriptionID}
 	a.resourcesClient.Authorizer = authorizer
 
 	return nil
@@ -197,7 +197,7 @@ func (a *Adapter) ValidateCredentials(ctx context.Context) error {
 	}
 
 	// Try to list resource groups to validate credentials
-	_, err := a.resourcesClient.ListComplete(ctx, "", nil)
+	_, err := a.resourcesClient.ListComplete(ctx, "", "", nil)
 	return err
 }
 
@@ -313,7 +313,7 @@ func (a *Adapter) GetInstance(ctx context.Context, instanceID string) (*interfac
 		return nil, fmt.Errorf("adapter not configured")
 	}
 
-	vm, err := a.vmClient.Get(ctx, a.config.ResourceGroup, instanceID, compute.InstanceView)
+	vm, err := a.vmClient.Get(ctx, a.config.ResourceGroup, instanceID, compute.VirtualMachineInstanceView)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get VM: %w", err)
 	}
@@ -420,7 +420,7 @@ func (a *Adapter) DeleteInstance(ctx context.Context, instanceID string, force b
 		return fmt.Errorf("adapter not configured")
 	}
 
-	future, err := a.vmClient.Delete(ctx, a.config.ResourceGroup, instanceID)
+	future, err := a.vmClient.Delete(ctx, a.config.ResourceGroup, instanceID, nil)
 	if err != nil {
 		return fmt.Errorf("failed to delete VM: %w", err)
 	}
@@ -449,7 +449,7 @@ func (a *Adapter) StopInstance(ctx context.Context, instanceID string, force boo
 	}
 
 	// Azure VMs are deallocated when stopped to save costs
-	future, err := a.vmClient.Deallocate(ctx, a.config.ResourceGroup, instanceID)
+	future, err := a.vmClient.Deallocate(ctx, a.config.ResourceGroup, instanceID, nil)
 	if err != nil {
 		return fmt.Errorf("failed to stop VM: %w", err)
 	}

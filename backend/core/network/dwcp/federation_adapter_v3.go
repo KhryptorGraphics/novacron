@@ -15,9 +15,9 @@ import (
 // FederationAdapterV3 bridges DWCP v3 components with federation system
 // Provides mode-aware routing and optimization for cross-cluster communication
 type FederationAdapterV3 struct {
-	mu       sync.RWMutex
-	logger   *zap.Logger
-	config   *FederationAdapterConfig
+	mu     sync.RWMutex
+	logger *zap.Logger
+	config *FederationAdapterConfig
 
 	// Network mode management
 	currentMode upgrade.NetworkMode
@@ -27,44 +27,44 @@ type FederationAdapterV3 struct {
 	connections map[string]*ClusterConnectionV3
 
 	// Performance optimization
-	optimizer   *NetworkOptimizer
+	optimizer *NetworkOptimizer
 
 	// Metrics
-	metrics     *AdapterMetrics
+	metrics *AdapterMetrics
 
 	// Lifecycle
-	ctx         context.Context
-	cancel      context.CancelFunc
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // FederationAdapterConfig configures the federation adapter
 type FederationAdapterConfig struct {
-	NodeID              string
-	DefaultMode         upgrade.NetworkMode
-	EnableAdaptiveMode  bool
-	BandwidthThreshold  float64
-	LatencyThreshold    time.Duration
-	CompressionLevel    int
+	NodeID             string
+	DefaultMode        upgrade.NetworkMode
+	EnableAdaptiveMode bool
+	BandwidthThreshold float64
+	LatencyThreshold   time.Duration
+	CompressionLevel   int
 }
 
 // ClusterConnectionV3 represents a connection to a federated cluster
 type ClusterConnectionV3 struct {
-	ClusterID       string
-	Endpoint        string
-	Region          string
-	CloudProvider   string
-	NetworkMode     upgrade.NetworkMode
-	Trusted         bool
+	ClusterID     string
+	Endpoint      string
+	Region        string
+	CloudProvider string
+	NetworkMode   upgrade.NetworkMode
+	Trusted       bool
 
 	// Connection state
-	Connected       bool
-	Healthy         bool
-	LastSeen        time.Time
+	Connected bool
+	Healthy   bool
+	LastSeen  time.Time
 
 	// Performance metrics
-	Latency         time.Duration
-	Bandwidth       int64
-	PacketLoss      float64
+	Latency    time.Duration
+	Bandwidth  int64
+	PacketLoss float64
 }
 
 // ModeRouter routes traffic based on network mode
@@ -77,12 +77,12 @@ type ModeRouter struct {
 
 // ModePreference defines preferences for each network mode
 type ModePreference struct {
-	Mode                upgrade.NetworkMode
-	MaxLatency          time.Duration
-	MinBandwidth        int64
-	CompressionLevel    int
-	ConsensusAlgorithm  string
-	OptimalFor          []string // e.g., "datacenter", "cloud", "hybrid"
+	Mode               upgrade.NetworkMode
+	MaxLatency         time.Duration
+	MinBandwidth       int64
+	CompressionLevel   int
+	ConsensusAlgorithm string
+	OptimalFor         []string // e.g., "datacenter", "cloud", "hybrid"
 }
 
 // NetworkOptimizer optimizes network performance per mode
@@ -112,13 +112,13 @@ type AdapterMetrics struct {
 	HybridRoutes     uint64
 
 	// Performance metrics
-	AvgLatency       time.Duration
-	AvgBandwidth     int64
-	AvgCompression   float64
+	AvgLatency     time.Duration
+	AvgBandwidth   int64
+	AvgCompression float64
 
 	// Error metrics
-	RoutingErrors    uint64
-	ConnectionErrors uint64
+	RoutingErrors        uint64
+	ConnectionErrors     uint64
 	OptimizationFailures uint64
 }
 
@@ -330,7 +330,7 @@ func (a *FederationAdapterV3) GetMetrics() *AdapterMetrics {
 
 // ConnectCluster establishes connection to a cluster
 func (a *FederationAdapterV3) ConnectCluster(ctx context.Context, clusterID, endpoint, region string) error {
-	connection := &ClusterConnection{
+	connection := &ClusterConnectionV3{
 		ClusterID: clusterID,
 		Endpoint:  endpoint,
 		Region:    region,

@@ -26,12 +26,12 @@ type HDE struct {
 	decoders map[CompressionLevel]*zstd.Decoder
 
 	// Delta tracking
-	baselines     map[string]*Baseline
-	deltaTracker  *DeltaTracker
+	baselines    map[string]*Baseline
+	deltaTracker *DeltaTracker
 
 	// Dictionary management
-	dictionaries  map[string][]byte
-	dictMu        sync.RWMutex
+	dictionaries map[string][]byte
+	dictMu       sync.RWMutex
 
 	// Performance metrics
 	compressionRatio atomic.Value // float64
@@ -53,27 +53,29 @@ type HDEConfig struct {
 	GlobalLevel   int // Tier 3: WAN compression (default: 9 - best compression)
 
 	// Delta encoding settings
-	EnableDelta      bool          // Enable delta encoding (default: true)
-	BlockSize        int           // Block size for delta comparison (default: 4KB)
-	MaxDeltaHistory  int           // Maximum delta history entries (default: 100)
-	DeltaThreshold   float64       // Minimum similarity for delta encoding (default: 0.7)
+	EnableDelta     bool    // Enable delta encoding (default: true)
+	BlockSize       int     // Block size for delta comparison (default: 4KB)
+	MaxDeltaHistory int     // Maximum delta history entries (default: 100)
+	DeltaThreshold  float64 // Minimum similarity for delta encoding (default: 0.7)
 
 	// Dictionary settings
-	EnableDictionary bool          // Enable dictionary compression (default: true)
-	DictSize         int           // Dictionary size in KB (default: 1024)
-	TrainingSamples  int           // Number of samples for dictionary training (default: 100)
+	EnableDictionary bool // Enable dictionary compression (default: true)
+	DictSize         int  // Dictionary size in KB (default: 1024)
+	TrainingSamples  int  // Number of samples for dictionary training (default: 100)
 
 	// Memory management
-	MaxMemoryUsage   int64         // Maximum memory for caching (default: 1GB)
-	CleanupInterval  time.Duration // Cleanup interval (default: 5 minutes)
+	MaxMemoryUsage  int64         // Maximum memory for caching (default: 1GB)
+	CleanupInterval time.Duration // Cleanup interval (default: 5 minutes)
 
 	// Quantization for numerical data
-	EnableQuantization bool        // Enable quantization (default: true)
-	QuantizationBits   int         // Bits for quantization (default: 16)
+	EnableQuantization bool // Enable quantization (default: true)
+	QuantizationBits   int  // Bits for quantization (default: 16)
 }
 
-// HDECompressionLevel represents the compression level for different tiers
-type HDECompressionLevel int
+// HDECompressionLevel represents the compression level for different tiers.
+// It is an alias of CompressionLevel so HDE compression tiers integrate cleanly
+// with the global DWCP compression metrics.
+type HDECompressionLevel = CompressionLevel
 
 const (
 	CompressionLocal    HDECompressionLevel = iota // Tier 1: Local/Intra-cluster
@@ -83,30 +85,30 @@ const (
 
 // Baseline represents a reference state for delta encoding
 type Baseline struct {
-	ID           string
-	Data         []byte
-	Hash         []byte
-	Timestamp    time.Time
-	UsageCount   int32
-	Size         int64
-	Blocks       map[int][]byte // Block-level data for efficient delta
+	ID         string
+	Data       []byte
+	Hash       []byte
+	Timestamp  time.Time
+	UsageCount int32
+	Size       int64
+	Blocks     map[int][]byte // Block-level data for efficient delta
 }
 
 // DeltaTracker tracks delta changes between baselines
 type DeltaTracker struct {
-	deltas       map[string]*Delta
-	history      []string
-	maxHistory   int
-	mu           sync.RWMutex
+	deltas     map[string]*Delta
+	history    []string
+	maxHistory int
+	mu         sync.RWMutex
 }
 
 // Delta represents the difference between two states
 type Delta struct {
-	BaselineID   string
-	TargetID     string
-	Operations   []DeltaOperation
-	Size         int64
-	Timestamp    time.Time
+	BaselineID string
+	TargetID   string
+	Operations []DeltaOperation
+	Size       int64
+	Timestamp  time.Time
 }
 
 // DeltaOperation represents a single delta operation
@@ -121,9 +123,9 @@ type DeltaOperation struct {
 type DeltaOpType int
 
 const (
-	DeltaOpCopy DeltaOpType = iota // Copy from baseline
-	DeltaOpAdd                      // Add new data
-	DeltaOpModify                   // Modify existing data
+	DeltaOpCopy   DeltaOpType = iota // Copy from baseline
+	DeltaOpAdd                       // Add new data
+	DeltaOpModify                    // Modify existing data
 )
 
 // NewHDE creates a new Hierarchical Delta Encoding instance
@@ -361,6 +363,10 @@ func (hde *HDE) Decompress(data []byte) ([]byte, error) {
 	tier := CompressionLevel(data[1])
 	dataSize := binary.BigEndian.Uint64(data[8:16])
 
+	// Currently we don't enforce dataSize, but keep parsing it for forward
+	// compatibility with richer packet formats.
+	_ = dataSize
+
 	// Extract compressed data
 	compressedData := data[16:]
 
@@ -571,13 +577,14 @@ func (hde *HDE) TrainDictionary(id string, samples [][]byte) error {
 		trainingData = append(trainingData, sample...)
 	}
 
-	// Train dictionary using zstd
-	dict := zstd.BuildDict(zstd.DictOptions{
-		ID:          0,
-		Level:       3,
-		SizeLimit:   hde.config.DictSize * 1024,
-		Samples:     samples,
+	// Train dictionary using zstd. We mirror the production dictionary trainer
+	// in backend/core/network/dwcp/compression/dictionary_trainer.go.
+	dict, err := zstd.BuildDict(zstd.BuildDictOptions{
+		Contents: samples,
 	})
+	if err != nil {
+		return fmt.Errorf("dictionary training failed: %w", err)
+	}
 
 	// Store dictionary
 	hde.dictMu.Lock()
@@ -706,12 +713,12 @@ func (hde *HDE) GetMetrics() map[string]interface{} {
 	hde.dictMu.RUnlock()
 
 	return map[string]interface{}{
-		"compression_ratio":  hde.compressionRatio.Load(),
-		"bytes_original":     hde.bytesOriginal.Load(),
-		"bytes_compressed":   hde.bytesCompressed.Load(),
-		"delta_hit_rate":     hde.deltaHitRate.Load(),
-		"baseline_count":     baselineCount,
-		"dictionary_count":   dictCount,
+		"compression_ratio": hde.compressionRatio.Load(),
+		"bytes_original":    hde.bytesOriginal.Load(),
+		"bytes_compressed":  hde.bytesCompressed.Load(),
+		"delta_hit_rate":    hde.deltaHitRate.Load(),
+		"baseline_count":    baselineCount,
+		"dictionary_count":  dictCount,
 	}
 }
 
@@ -762,4 +769,87 @@ func (dt *DeltaTracker) cleanup(cutoff time.Time) {
 	if len(dt.history) > dt.maxHistory {
 		dt.history = dt.history[len(dt.history)-dt.maxHistory:]
 	}
+}
+
+// Start initializes and starts the HDE compression layer
+// Implements the Lifecycle interface
+func (h *HDE) Start(ctx context.Context) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.ctx != nil {
+		return fmt.Errorf("HDE already started")
+	}
+
+	// Create context for lifecycle management
+	h.ctx, h.cancel = context.WithCancel(ctx)
+
+	// Initialize compression engines if not already done
+	if h.encoders == nil {
+		h.encoders = make(map[CompressionLevel]*zstd.Encoder)
+	}
+	if h.decoders == nil {
+		h.decoders = make(map[CompressionLevel]*zstd.Decoder)
+	}
+	if h.baselines == nil {
+		h.baselines = make(map[string]*Baseline)
+	}
+	if h.dictionaries == nil {
+		h.dictionaries = make(map[string][]byte)
+	}
+
+	// Initialize delta tracker if enabled
+	if h.config.EnableDelta && h.deltaTracker == nil {
+		h.deltaTracker = &DeltaTracker{
+			deltas:     make(map[string]*Delta),
+			history:    make([]string, 0, h.config.MaxDeltaHistory),
+			maxHistory: h.config.MaxDeltaHistory,
+		}
+	}
+
+	return nil
+}
+
+// Stop gracefully shuts down the HDE compression layer
+// Implements the Lifecycle interface
+func (h *HDE) Stop() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.cancel != nil {
+		h.cancel()
+	}
+
+	// Close all encoders
+	for _, encoder := range h.encoders {
+		if encoder != nil {
+			encoder.Close()
+		}
+	}
+
+	// Close all decoders
+	for _, decoder := range h.decoders {
+		if decoder != nil {
+			decoder.Close()
+		}
+	}
+
+	// Clear maps to release memory
+	h.encoders = nil
+	h.decoders = nil
+	h.baselines = nil
+	h.dictionaries = nil
+
+	h.ctx = nil
+	h.cancel = nil
+
+	return nil
+}
+
+// IsRunning returns true if the HDE compression layer is running
+// Implements the Lifecycle interface
+func (h *HDE) IsRunning() bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.ctx != nil
 }

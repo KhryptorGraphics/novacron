@@ -17,10 +17,10 @@ type BenchmarkConfig struct {
 	Duration time.Duration
 
 	// Workload settings
-	NumVMs        int
-	VMSize        uint64 // bytes
-	Concurrency   int
-	ThinkTime     time.Duration
+	NumVMs      int
+	VMSize      uint64 // bytes
+	Concurrency int
+	ThinkTime   time.Duration
 
 	// Component selection
 	BenchmarkAMST bool
@@ -79,13 +79,13 @@ type BenchmarkResult struct {
 	MaxLatency time.Duration
 
 	// Resource metrics
-	CPUUsage      float64
-	MemoryUsage   uint64
-	Goroutines    int
+	CPUUsage    float64
+	MemoryUsage uint64
+	Goroutines  int
 
 	// Error metrics
-	Errors        uint64
-	ErrorRate     float64
+	Errors    uint64
+	ErrorRate float64
 
 	Timestamp time.Time
 }
@@ -95,9 +95,9 @@ type BenchmarkSuite struct {
 	config *BenchmarkConfig
 
 	// Components
-	profiler        *PerformanceProfiler
-	cpuOptimizer    *CPUOptimizer
-	memoryOptimizer *MemoryOptimizer
+	profiler         *PerformanceProfiler
+	cpuOptimizer     *CPUOptimizer
+	memoryOptimizer  *MemoryOptimizer
 	networkOptimizer *NetworkOptimizer
 
 	// Results
@@ -261,7 +261,7 @@ func (b *BenchmarkSuite) BenchmarkAMST(ctx context.Context) (*BenchmarkResult, e
 				opStart := time.Now()
 
 				// Simulate stream operation
-				streamID := fmt.Sprintf("stream-%d", rand.Intn(1000))
+				_ = fmt.Sprintf("stream-%d", rand.Intn(1000))
 				data := b.memoryOptimizer.GetBuffer(64 * 1024)
 
 				// Simulate processing

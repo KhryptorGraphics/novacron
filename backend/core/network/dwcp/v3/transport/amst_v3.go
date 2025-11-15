@@ -526,7 +526,7 @@ func (a *AMSTv3) GetMetrics() transport.TransportMetrics {
 		baseMetrics.TransportType = "hybrid"
 	}
 
-	baseMetrics.Mode = mode.String()
+	baseMetrics.TransportMode = mode.String()
 	baseMetrics.TotalBytesSent = a.totalBytesSent.Load()
 	baseMetrics.TotalBytesRecv = a.totalBytesRecv.Load()
 	baseMetrics.CongestionControl = a.config.CongestionAlgorithm

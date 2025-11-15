@@ -18,14 +18,14 @@ import (
 
 // FederationAdapter provides DWCP integration for cross-cluster federation
 type FederationAdapter struct {
-	mu                sync.RWMutex
-	logger            *zap.Logger
+	mu     sync.RWMutex
+	logger *zap.Logger
 
 	// Core DWCP components
-	hdeEngine         *HDEEngine
-	amstManager       *AMSTManager
-	baselineCache     *BaselineCache
-	connectionPool    *ConnectionPool
+	hdeEngine      *HDEEngine
+	amstManager    *AMSTManager
+	baselineCache  *BaselineCache
+	connectionPool *ConnectionPool
 
 	// Federation-specific
 	clusterConnections map[string]*ClusterConnection
@@ -34,54 +34,54 @@ type FederationAdapter struct {
 	consensusAdapter   *ConsensusAdapter
 
 	// Performance tracking
-	metrics            *FederationMetrics
-	bandwidthMonitor   *BandwidthMonitor
-	compressionRatios  map[string]float64
+	metrics           *FederationMetrics
+	bandwidthMonitor  *BandwidthMonitor
+	compressionRatios map[string]float64
 
 	// Configuration
-	config             *FederationConfig
+	config *FederationConfig
 }
 
 // FederationConfig contains DWCP federation configuration
 type FederationConfig struct {
 	// DWCP settings
-	EnableHDE           bool
-	EnableAMST          bool
-	CompressionLevel    int
-	BaselineInterval    time.Duration
-	DictionarySize      int
+	EnableHDE        bool
+	EnableAMST       bool
+	CompressionLevel int
+	BaselineInterval time.Duration
+	DictionarySize   int
 
 	// Network settings
-	MaxConnections      int
-	ConnectionTimeout   time.Duration
-	RetryInterval       time.Duration
-	KeepAliveInterval   time.Duration
+	MaxConnections    int
+	ConnectionTimeout time.Duration
+	RetryInterval     time.Duration
+	KeepAliveInterval time.Duration
 
 	// Federation settings
-	SyncInterval        time.Duration
-	ConsensusTimeout    time.Duration
-	PartitionTolerance  bool
+	SyncInterval       time.Duration
+	ConsensusTimeout   time.Duration
+	PartitionTolerance bool
 
 	// Optimization thresholds
-	BandwidthThreshold  float64
-	CompressionRatio    float64
-	LatencyThreshold    time.Duration
+	BandwidthThreshold float64
+	CompressionRatio   float64
+	LatencyThreshold   time.Duration
 }
 
 // ClusterConnection represents a DWCP connection to another cluster
 type ClusterConnection struct {
-	ClusterID       string
-	Region          string
-	Endpoint        string
+	ClusterID string
+	Region    string
+	Endpoint  string
 
 	// AMST streams
-	controlStream   *AMSTStream
-	dataStreams     []*AMSTStream
+	controlStream *AMSTStream
+	dataStreams   []*AMSTStream
 
 	// Connection state
-	conn            net.Conn
-	connected       atomic.Bool
-	lastSeen        time.Time
+	conn      net.Conn
+	connected atomic.Bool
+	lastSeen  time.Time
 
 	// Baseline management
 	baselineID      string
@@ -97,20 +97,20 @@ type ClusterConnection struct {
 
 // RegionManager manages connections within a region
 type RegionManager struct {
-	RegionID        string
-	Clusters        map[string]*ClusterConnection
-	BaselineCache   *RegionalBaselineCache
-	Topology        string // mesh, star, ring
-	LeaderCluster   string
+	RegionID      string
+	Clusters      map[string]*ClusterConnection
+	BaselineCache *RegionalBaselineCache
+	Topology      string // mesh, star, ring
+	LeaderCluster string
 }
 
 // StateSyncManager handles state synchronization via DWCP
 type StateSyncManager struct {
-	mu              sync.RWMutex
-	pendingUpdates  map[string]*StateUpdate
-	syncQueue       chan *StateUpdate
-	baselineStates  map[string][]byte
-	deltaEncoder    *DeltaEncoder
+	mu             sync.RWMutex
+	pendingUpdates map[string]*StateUpdate
+	syncQueue      chan *StateUpdate
+	baselineStates map[string][]byte
+	deltaEncoder   *DeltaEncoder
 }
 
 // StateUpdate represents a state synchronization update
@@ -128,41 +128,41 @@ type StateUpdate struct {
 
 // ConsensusAdapter adapts Raft/consensus messages for DWCP
 type ConsensusAdapter struct {
-	mu              sync.RWMutex
-	logCompressor   *LogCompressor
-	batchSize       int
-	batchInterval   time.Duration
-	pendingLogs     []*ConsensusLog
+	mu            sync.RWMutex
+	logCompressor *LogCompressor
+	batchSize     int
+	batchInterval time.Duration
+	pendingLogs   []*ConsensusLog
 }
 
 // ConsensusLog represents a consensus log entry
 type ConsensusLog struct {
-	Term        uint64
-	Index       uint64
-	Type        string
-	Data        []byte
-	Compressed  bool
+	Term       uint64
+	Index      uint64
+	Type       string
+	Data       []byte
+	Compressed bool
 }
 
 // FederationMetrics tracks federation performance metrics
 type FederationMetrics struct {
 	// Bandwidth metrics
-	TotalBytesSent      atomic.Uint64
-	TotalBytesReceived  atomic.Uint64
-	CompressedBytes     atomic.Uint64
-	UncompressedBytes   atomic.Uint64
+	TotalBytesSent     atomic.Uint64
+	TotalBytesReceived atomic.Uint64
+	CompressedBytes    atomic.Uint64
+	UncompressedBytes  atomic.Uint64
 
 	// Performance metrics
-	AverageLatency      atomic.Uint64 // microseconds
-	CompressionRatio    atomic.Uint64 // percentage * 100
-	MessageCount        atomic.Uint64
-	ErrorCount          atomic.Uint64
+	AverageLatency   atomic.Uint64 // microseconds
+	CompressionRatio atomic.Uint64 // percentage * 100
+	MessageCount     atomic.Uint64
+	ErrorCount       atomic.Uint64
 
 	// State sync metrics
-	SyncOperations      atomic.Uint64
-	SyncFailures        atomic.Uint64
-	BaselineRefreshes   atomic.Uint64
-	DeltaApplications   atomic.Uint64
+	SyncOperations    atomic.Uint64
+	SyncFailures      atomic.Uint64
+	BaselineRefreshes atomic.Uint64
+	DeltaApplications atomic.Uint64
 }
 
 // NewFederationAdapter creates a new DWCP federation adapter
@@ -294,12 +294,12 @@ func (fa *FederationAdapter) SyncClusterState(ctx context.Context, sourceCluster
 
 	// Create state update
 	update := &StateUpdate{
-		UpdateID:        generateUpdateID(),
-		SourceCluster:   sourceCluster,
-		TargetClusters:  targetClusters,
-		StateData:       stateData,
-		Timestamp:       time.Now(),
-		Priority:        5,
+		UpdateID:       generateUpdateID(),
+		SourceCluster:  sourceCluster,
+		TargetClusters: targetClusters,
+		StateData:      stateData,
+		Timestamp:      time.Now(),
+		Priority:       5,
 	}
 
 	// Check if we can use delta encoding
@@ -555,7 +555,7 @@ func (fa *FederationAdapter) OptimizeBandwidth(clusterID string) error {
 	fa.mu.Lock()
 	defer fa.mu.Unlock()
 
-	conn, exists := fa.clusterConnections[clusterID]
+	_, exists := fa.clusterConnections[clusterID]
 	if !exists {
 		return fmt.Errorf("cluster %s not found", clusterID)
 	}
@@ -664,10 +664,10 @@ func (fa *FederationAdapter) Close() error {
 func (fa *FederationAdapter) performHandshake(conn *ClusterConnection) error {
 	// Send handshake message
 	handshake := &HandshakeMessage{
-		Version:        "1.0",
-		ClusterID:      "local", // Would be actual cluster ID
-		Capabilities:   []string{"HDE", "AMST", "DELTA"},
-		Timestamp:      time.Now(),
+		Version:      "1.0",
+		ClusterID:    "local", // Would be actual cluster ID
+		Capabilities: []string{"HDE", "AMST", "DELTA"},
+		Timestamp:    time.Now(),
 	}
 
 	data := encodeHandshake(handshake)
@@ -999,7 +999,7 @@ type HandshakeMessage struct {
 type HDEEngine struct {
 	dictionarySize int
 	dictionaries   map[string][]byte
-	mu            sync.RWMutex
+	mu             sync.RWMutex
 }
 
 func NewHDEEngine(dictSize int) *HDEEngine {
@@ -1092,9 +1092,9 @@ func generateStreamID() string {
 }
 
 type BaselineCache struct {
-	baselines   map[string][]byte
-	lastUpdate  time.Time
-	mu          sync.RWMutex
+	baselines  map[string][]byte
+	lastUpdate time.Time
+	mu         sync.RWMutex
 }
 
 func NewBaselineCache() *BaselineCache {

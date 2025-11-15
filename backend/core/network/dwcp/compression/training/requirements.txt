@@ -1,0 +1,30 @@
+# DWCP Compression Selector Training Dependencies
+
+# Core ML libraries
+tensorflow>=2.13.0,<3.0.0
+numpy>=1.24.0,<2.0.0
+pandas>=2.0.0,<3.0.0
+scikit-learn>=1.3.0,<2.0.0
+
+# Model export and optimization
+tf2onnx>=1.15.0
+onnxruntime>=1.15.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Utilities
+tqdm>=4.65.0
+pyyaml>=6.0
+
+# Optional: GPU support (uncomment if training on GPU)
+# tensorflow-gpu>=2.13.0
+
+# Optional: Hyperparameter tuning (uncomment if needed)
+# optuna>=3.3.0
+# keras-tuner>=1.3.5
+
+# Optional: Model interpretability (uncomment if needed)
+# shap>=0.42.0
+# lime>=0.2.0

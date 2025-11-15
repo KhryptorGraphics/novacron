@@ -35,22 +35,7 @@ type ZeroTrustConfig struct {
 }
 
 // AIThreatConfig for AI-powered threat detection
-type AIThreatConfig struct {
-	Enabled                 bool
-	Model                   string  // "isolation_forest", "lstm", "ensemble"
-	Threshold               float64 // 0.8 (threat score threshold)
-	FalsePositiveTarget     float64 // 0.001 (<0.1%)
-	AnomalyDetection        bool
-	BehavioralAnalysis      bool
-	SignaturelessDetection  bool
-	ThreatIntelIntegration  bool
-	RealTimeScoring         bool
-	DetectionLatencyTarget  time.Duration // <500ms
-	ModelUpdateInterval     time.Duration
-	TrainingDataRetention   time.Duration
-}
 
-// CCConfig for confidential computing
 type CCConfig struct {
 	Enabled      bool
 	TEEType      string // "sgx", "sev", "trustzone"

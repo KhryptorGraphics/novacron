@@ -441,7 +441,7 @@ func NewExpansionEngine(config ExpansionConfig) *ExpansionEngine {
 		productCatalog:  initializeProductCatalog(),
 		pricingEngine:   initializePricingEngine(),
 		automationRules: initializeAutomationRules(),
-		metrics:         &ExpansionMetrics{TargetNRR: 150.0},
+		metrics:         &ExpansionMetrics{},
 		config:          config,
 	}
 }

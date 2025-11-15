@@ -43,8 +43,6 @@ const (
 )
 
 // PricingModel represents app pricing strategy
-type PricingModel string
-
 const (
 	PricingFree        PricingModel = "free"
 	PricingFreemium    PricingModel = "freemium"

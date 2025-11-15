@@ -309,16 +309,7 @@ type AssertionResult struct {
 }
 
 // AlertRule represents an alert rule for monitors
-type AlertRule struct {
-	Name        string        `json:"name"`
-	Condition   string        `json:"condition"`
-	Threshold   float64       `json:"threshold"`
-	Duration    time.Duration `json:"duration"`
-	Action      string        `json:"action"`
-	Channels    []string      `json:"channels"`
-}
 
-// NewDeploymentVerification creates a new deployment verification service
 func NewDeploymentVerification(config *VerificationConfig) (*DeploymentVerification, error) {
 	if config == nil {
 		return nil, fmt.Errorf("verification config cannot be nil")

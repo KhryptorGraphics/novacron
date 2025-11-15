@@ -17,13 +17,13 @@ import (
 
 // ACMEConfig holds ACME/Let's Encrypt configuration
 type ACMEConfig struct {
-	Domains       []string
-	Email         string
-	CacheDir      string
-	RenewBefore   time.Duration
-	DirectoryURL  string // Optional: custom ACME directory URL
-	UseStaging    bool   // Use Let's Encrypt staging environment
-	HTTPChallengePort int // Port for HTTP-01 challenge (default: 80)
+	Domains           []string
+	Email             string
+	CacheDir          string
+	RenewBefore       time.Duration
+	DirectoryURL      string // Optional: custom ACME directory URL
+	UseStaging        bool   // Use Let's Encrypt staging environment
+	HTTPChallengePort int    // Port for HTTP-01 challenge (default: 80)
 }
 
 // ACMEManager manages ACME certificate operations
@@ -291,7 +291,7 @@ func (am *ACMEManager) checkAndRenewAll() {
 }
 
 // HTTPChallengeHandler returns HTTP handler for HTTP-01 challenge
-func (am *ACMEManager) HTTPChallengeHandler() func(string, *tls.ClientHelloInfo) (*tls.Certificate, error) {
+func (am *ACMEManager) HTTPChallengeHandler() func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 	return am.manager.GetCertificate
 }
 

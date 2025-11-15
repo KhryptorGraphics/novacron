@@ -1,0 +1,24 @@
+{
+  "model_name": "compression_selector_policy_net",
+  "version": "1.0.0",
+  "training_date": "2025-11-14T09:26:59.814906",
+  "target_metrics": {
+    "accuracy": 0.98,
+    "throughput_gain": "positive"
+  },
+  "achieved_metrics": {
+    "accuracy": 0.9966666666666667,
+    "throughput_gain_pct": 14.950000000000001,
+    "precision_macro": 0.9933646631743449,
+    "recall_macro": 0.9943469160038928,
+    "f1_macro": 0.9938517106862005,
+    "test_samples": 1500
+  },
+  "training_time_seconds": 173.25370621681213,
+  "model_size_mb": 0.06992912292480469,
+  "success": true,
+  "config": {
+    "batch_size": 32,
+    "epochs": 25
+  }
+}

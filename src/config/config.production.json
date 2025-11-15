@@ -1,0 +1,35 @@
+{
+  "environment": "production",
+  "database": {
+    "postgres": {
+      "poolSize": 20,
+      "idleTimeout": 60000,
+      "connectionTimeout": 5000
+    },
+    "redis": {
+      "password": "${REDIS_PASSWORD}"
+    }
+  },
+  "logging": {
+    "level": "warning",
+    "file": {
+      "enabled": true,
+      "path": "./logs",
+      "maxSize": "50m",
+      "maxFiles": 10
+    }
+  },
+  "api": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "cors": {
+      "enabled": true,
+      "origin": ["https://novacron.io", "https://app.novacron.io"]
+    },
+    "rateLimit": {
+      "enabled": true,
+      "windowMs": 900000,
+      "max": 1000
+    }
+  }
+}

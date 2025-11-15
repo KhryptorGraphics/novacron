@@ -4,8 +4,11 @@ package optimization
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"sort"
 	"sync"
 	"time"
 
@@ -61,15 +64,15 @@ type ComponentMetrics struct {
 	Name string
 
 	// CPU metrics
-	CPUUsage      float64 // percentage
-	CPUTime       time.Duration
-	Goroutines    int
+	CPUUsage   float64 // percentage
+	CPUTime    time.Duration
+	Goroutines int
 
 	// Memory metrics
-	AllocBytes    uint64
-	HeapBytes     uint64
-	StackBytes    uint64
-	GCPauses      time.Duration
+	AllocBytes uint64
+	HeapBytes  uint64
+	StackBytes uint64
+	GCPauses   time.Duration
 
 	// Network metrics
 	BytesSent     uint64
@@ -84,12 +87,12 @@ type ComponentMetrics struct {
 	MaxLatency time.Duration
 
 	// Throughput metrics
-	Throughput    float64 // ops/sec
-	Bandwidth     float64 // bytes/sec
+	Throughput float64 // ops/sec
+	Bandwidth  float64 // bytes/sec
 
 	// Error metrics
-	Errors     uint64
-	Warnings   uint64
+	Errors   uint64
+	Warnings uint64
 
 	Timestamp time.Time
 }
@@ -103,10 +106,10 @@ type PerformanceProfiler struct {
 	components map[string]*componentProfiler
 
 	// Metrics collectors
-	cpuCollector      prometheus.Collector
-	memoryCollector   prometheus.Collector
-	networkCollector  prometheus.Collector
-	latencyCollector  prometheus.Collector
+	cpuCollector     prometheus.Collector
+	memoryCollector  prometheus.Collector
+	networkCollector prometheus.Collector
+	latencyCollector prometheus.Collector
 
 	// Profiling state
 	cpuProfileActive bool
@@ -125,7 +128,7 @@ type componentProfiler struct {
 	mu      sync.RWMutex
 
 	// Histogram for latency tracking
-	latencies []time.Duration
+	latencies    []time.Duration
 	maxLatencies int
 
 	// Counters
@@ -488,7 +491,7 @@ func (p *PerformanceProfiler) updateSystemMetrics() {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	for name, comp := range p.components {
+	for name, _ := range p.components {
 		if metrics, err := p.GetComponentMetrics(name); err == nil {
 			throughputGauge.WithLabelValues(name).Set(metrics.Throughput)
 			bandwidthGauge.WithLabelValues(name, "tx").Set(metrics.Bandwidth)
@@ -505,12 +508,12 @@ func (p *PerformanceProfiler) GetProfileSummary() map[string]interface{} {
 		"timestamp":  time.Now(),
 		"goroutines": runtime.NumGoroutine(),
 		"memory": map[string]interface{}{
-			"alloc_bytes":      m.Alloc,
-			"heap_bytes":       m.HeapAlloc,
-			"stack_bytes":      m.StackInuse,
-			"gc_count":         m.NumGC,
-			"gc_pause_total":   time.Duration(m.PauseTotalNs),
-			"gc_pause_last":    time.Duration(m.PauseNs[(m.NumGC+255)%256]),
+			"alloc_bytes":    m.Alloc,
+			"heap_bytes":     m.HeapAlloc,
+			"stack_bytes":    m.StackInuse,
+			"gc_count":       m.NumGC,
+			"gc_pause_total": time.Duration(m.PauseTotalNs),
+			"gc_pause_last":  time.Duration(m.PauseNs[(m.NumGC+255)%256]),
 		},
 		"components": p.GetAllMetrics(),
 	}
@@ -535,10 +538,3 @@ func (p *PerformanceProfiler) Close() error {
 
 	return nil
 }
-
-// Missing imports
-import (
-	"os"
-	"path/filepath"
-	"sort"
-)

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
-	"time"
 
 	"go.uber.org/zap"
 )
@@ -54,10 +53,10 @@ type GrafanaGridPos struct {
 
 // GrafanaTarget defines a metric query
 type GrafanaTarget struct {
-	Expr           string `json:"expr"`
-	LegendFormat   string `json:"legendFormat,omitempty"`
-	RefID          string `json:"refId"`
-	Interval       string `json:"interval,omitempty"`
+	Expr         string `json:"expr"`
+	LegendFormat string `json:"legendFormat,omitempty"`
+	RefID        string `json:"refId"`
+	Interval     string `json:"interval,omitempty"`
 }
 
 // GrafanaTimeRange defines dashboard time range
@@ -154,9 +153,9 @@ func (de *DashboardExporter) ExportComponentDashboard(component string) ([]byte,
 
 func (de *DashboardExporter) createOverviewPanel() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    1,
-		Title: "DWCP v3 Overview",
-		Type:  "stat",
+		ID:      1,
+		Title:   "DWCP v3 Overview",
+		Type:    "stat",
 		GridPos: GrafanaGridPos{X: 0, Y: 0, W: 24, H: 4},
 		Targets: []GrafanaTarget{
 			{
@@ -180,9 +179,9 @@ func (de *DashboardExporter) createOverviewPanel() GrafanaPanel {
 
 func (de *DashboardExporter) createModeDistributionPanel() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    2,
-		Title: "Network Mode Distribution",
-		Type:  "piechart",
+		ID:      2,
+		Title:   "Network Mode Distribution",
+		Type:    "piechart",
 		GridPos: GrafanaGridPos{X: 0, Y: 4, W: 8, H: 8},
 		Targets: []GrafanaTarget{
 			{
@@ -196,9 +195,9 @@ func (de *DashboardExporter) createModeDistributionPanel() GrafanaPanel {
 
 func (de *DashboardExporter) createThroughputPanel() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    3,
-		Title: "Throughput by Mode",
-		Type:  "graph",
+		ID:      3,
+		Title:   "Throughput by Mode",
+		Type:    "graph",
 		GridPos: GrafanaGridPos{X: 8, Y: 4, W: 16, H: 8},
 		Targets: []GrafanaTarget{
 			{
@@ -222,9 +221,9 @@ func (de *DashboardExporter) createThroughputPanel() GrafanaPanel {
 
 func (de *DashboardExporter) createLatencyPanel() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    4,
-		Title: "Latency Distribution (P50, P95, P99)",
-		Type:  "graph",
+		ID:      4,
+		Title:   "Latency Distribution (P50, P95, P99)",
+		Type:    "graph",
 		GridPos: GrafanaGridPos{X: 0, Y: 12, W: 12, H: 8},
 		Targets: []GrafanaTarget{
 			{
@@ -248,9 +247,9 @@ func (de *DashboardExporter) createLatencyPanel() GrafanaPanel {
 
 func (de *DashboardExporter) createComponentHealthPanel() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    5,
-		Title: "Component Health Status",
-		Type:  "table",
+		ID:      5,
+		Title:   "Component Health Status",
+		Type:    "table",
 		GridPos: GrafanaGridPos{X: 12, Y: 12, W: 12, H: 8},
 		Targets: []GrafanaTarget{
 			{
@@ -269,9 +268,9 @@ func (de *DashboardExporter) createComponentHealthPanel() GrafanaPanel {
 
 func (de *DashboardExporter) createCompressionPanel() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    6,
-		Title: "Compression Ratio by Algorithm",
-		Type:  "graph",
+		ID:      6,
+		Title:   "Compression Ratio by Algorithm",
+		Type:    "graph",
 		GridPos: GrafanaGridPos{X: 0, Y: 20, W: 12, H: 8},
 		Targets: []GrafanaTarget{
 			{
@@ -285,9 +284,9 @@ func (de *DashboardExporter) createCompressionPanel() GrafanaPanel {
 
 func (de *DashboardExporter) createAnomaliesPanel() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    7,
-		Title: "Detected Anomalies (Last 1h)",
-		Type:  "table",
+		ID:      7,
+		Title:   "Detected Anomalies (Last 1h)",
+		Type:    "table",
 		GridPos: GrafanaGridPos{X: 12, Y: 20, W: 12, H: 8},
 		Targets: []GrafanaTarget{
 			{
@@ -301,9 +300,9 @@ func (de *DashboardExporter) createAnomaliesPanel() GrafanaPanel {
 
 func (de *DashboardExporter) createV1vsV3ComparisonPanel() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    8,
-		Title: "v1 vs v3 Performance Comparison",
-		Type:  "graph",
+		ID:      8,
+		Title:   "v1 vs v3 Performance Comparison",
+		Type:    "graph",
 		GridPos: GrafanaGridPos{X: 0, Y: 28, W: 24, H: 8},
 		Targets: []GrafanaTarget{
 			{
@@ -349,9 +348,9 @@ func (de *DashboardExporter) getModePanels(mode string) []GrafanaPanel {
 
 func (de *DashboardExporter) createDatacenterRDMAPanel() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    10,
-		Title: "RDMA Throughput and Bandwidth",
-		Type:  "graph",
+		ID:      10,
+		Title:   "RDMA Throughput and Bandwidth",
+		Type:    "graph",
 		GridPos: GrafanaGridPos{X: 0, Y: 0, W: 12, H: 8},
 		Targets: []GrafanaTarget{
 			{
@@ -370,9 +369,9 @@ func (de *DashboardExporter) createDatacenterRDMAPanel() GrafanaPanel {
 
 func (de *DashboardExporter) createDatacenterStreamsPanel() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    11,
-		Title: "Active RDMA Streams",
-		Type:  "graph",
+		ID:      11,
+		Title:   "Active RDMA Streams",
+		Type:    "graph",
 		GridPos: GrafanaGridPos{X: 12, Y: 0, W: 12, H: 8},
 		Targets: []GrafanaTarget{
 			{
@@ -386,9 +385,9 @@ func (de *DashboardExporter) createDatacenterStreamsPanel() GrafanaPanel {
 
 func (de *DashboardExporter) createDatacenterLatencyHeatmap() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    12,
-		Title: "Latency Heatmap (Datacenter)",
-		Type:  "heatmap",
+		ID:      12,
+		Title:   "Latency Heatmap (Datacenter)",
+		Type:    "heatmap",
 		GridPos: GrafanaGridPos{X: 0, Y: 8, W: 24, H: 8},
 		Targets: []GrafanaTarget{
 			{
@@ -402,9 +401,9 @@ func (de *DashboardExporter) createDatacenterLatencyHeatmap() GrafanaPanel {
 
 func (de *DashboardExporter) createInternetTCPPanel() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    20,
-		Title: "TCP Streams and Congestion",
-		Type:  "graph",
+		ID:      20,
+		Title:   "TCP Streams and Congestion",
+		Type:    "graph",
 		GridPos: GrafanaGridPos{X: 0, Y: 0, W: 12, H: 8},
 		Targets: []GrafanaTarget{
 			{
@@ -423,9 +422,9 @@ func (de *DashboardExporter) createInternetTCPPanel() GrafanaPanel {
 
 func (de *DashboardExporter) createInternetCompressionPanel() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    21,
-		Title: "Compression Ratio (Internet Mode)",
-		Type:  "graph",
+		ID:      21,
+		Title:   "Compression Ratio (Internet Mode)",
+		Type:    "graph",
 		GridPos: GrafanaGridPos{X: 12, Y: 0, W: 12, H: 8},
 		Targets: []GrafanaTarget{
 			{
@@ -439,9 +438,9 @@ func (de *DashboardExporter) createInternetCompressionPanel() GrafanaPanel {
 
 func (de *DashboardExporter) createInternetByzantinePanel() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    22,
-		Title: "Byzantine Fault Detection",
-		Type:  "stat",
+		ID:      22,
+		Title:   "Byzantine Fault Detection",
+		Type:    "stat",
 		GridPos: GrafanaGridPos{X: 0, Y: 8, W: 24, H: 4},
 		Targets: []GrafanaTarget{
 			{
@@ -455,9 +454,9 @@ func (de *DashboardExporter) createInternetByzantinePanel() GrafanaPanel {
 
 func (de *DashboardExporter) createHybridModeSwitchPanel() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    30,
-		Title: "Mode Switch Frequency",
-		Type:  "graph",
+		ID:      30,
+		Title:   "Mode Switch Frequency",
+		Type:    "graph",
 		GridPos: GrafanaGridPos{X: 0, Y: 0, W: 12, H: 8},
 		Targets: []GrafanaTarget{
 			{
@@ -471,9 +470,9 @@ func (de *DashboardExporter) createHybridModeSwitchPanel() GrafanaPanel {
 
 func (de *DashboardExporter) createHybridAdaptiveMetricsPanel() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    31,
-		Title: "Adaptive Decision Accuracy",
-		Type:  "gauge",
+		ID:      31,
+		Title:   "Adaptive Decision Accuracy",
+		Type:    "gauge",
 		GridPos: GrafanaGridPos{X: 12, Y: 0, W: 12, H: 8},
 		Targets: []GrafanaTarget{
 			{
@@ -487,9 +486,9 @@ func (de *DashboardExporter) createHybridAdaptiveMetricsPanel() GrafanaPanel {
 
 func (de *DashboardExporter) createHybridFailoverPanel() GrafanaPanel {
 	return GrafanaPanel{
-		ID:    32,
-		Title: "Failover Events",
-		Type:  "table",
+		ID:      32,
+		Title:   "Failover Events",
+		Type:    "table",
 		GridPos: GrafanaGridPos{X: 0, Y: 8, W: 24, H: 8},
 		Targets: []GrafanaTarget{
 			{
@@ -525,9 +524,9 @@ func (de *DashboardExporter) getComponentPanels(component string) []GrafanaPanel
 func (de *DashboardExporter) getAMSTPanels() []GrafanaPanel {
 	return []GrafanaPanel{
 		{
-			ID:    40,
-			Title: "AMST Stream Management",
-			Type:  "graph",
+			ID:      40,
+			Title:   "AMST Stream Management",
+			Type:    "graph",
 			GridPos: GrafanaGridPos{X: 0, Y: 0, W: 24, H: 8},
 			Targets: []GrafanaTarget{
 				{Expr: "dwcp_v3_active_streams", LegendFormat: "Active", RefID: "A"},
@@ -540,9 +539,9 @@ func (de *DashboardExporter) getAMSTPanels() []GrafanaPanel {
 func (de *DashboardExporter) getHDEPanels() []GrafanaPanel {
 	return []GrafanaPanel{
 		{
-			ID:    50,
-			Title: "HDE Compression Performance",
-			Type:  "graph",
+			ID:      50,
+			Title:   "HDE Compression Performance",
+			Type:    "graph",
 			GridPos: GrafanaGridPos{X: 0, Y: 0, W: 24, H: 8},
 			Targets: []GrafanaTarget{
 				{Expr: "dwcp_v3_compression_ratio", LegendFormat: "Ratio", RefID: "A"},
@@ -555,9 +554,9 @@ func (de *DashboardExporter) getHDEPanels() []GrafanaPanel {
 func (de *DashboardExporter) getPBAPanels() []GrafanaPanel {
 	return []GrafanaPanel{
 		{
-			ID:    60,
-			Title: "PBA Prediction Accuracy",
-			Type:  "graph",
+			ID:      60,
+			Title:   "PBA Prediction Accuracy",
+			Type:    "graph",
 			GridPos: GrafanaGridPos{X: 0, Y: 0, W: 24, H: 8},
 			Targets: []GrafanaTarget{
 				{Expr: "dwcp_v3_prediction_accuracy", LegendFormat: "Accuracy %", RefID: "A"},
@@ -569,9 +568,9 @@ func (de *DashboardExporter) getPBAPanels() []GrafanaPanel {
 func (de *DashboardExporter) getASSPanels() []GrafanaPanel {
 	return []GrafanaPanel{
 		{
-			ID:    70,
-			Title: "ASS Synchronization Status",
-			Type:  "graph",
+			ID:      70,
+			Title:   "ASS Synchronization Status",
+			Type:    "graph",
 			GridPos: GrafanaGridPos{X: 0, Y: 0, W: 24, H: 8},
 			Targets: []GrafanaTarget{
 				{Expr: "rate(dwcp_v3_sync_operations_total[1m])", LegendFormat: "Sync Rate", RefID: "A"},
@@ -583,9 +582,9 @@ func (de *DashboardExporter) getASSPanels() []GrafanaPanel {
 func (de *DashboardExporter) getACPPanels() []GrafanaPanel {
 	return []GrafanaPanel{
 		{
-			ID:    80,
-			Title: "ACP Consensus Performance",
-			Type:  "graph",
+			ID:      80,
+			Title:   "ACP Consensus Performance",
+			Type:    "graph",
 			GridPos: GrafanaGridPos{X: 0, Y: 0, W: 24, H: 8},
 			Targets: []GrafanaTarget{
 				{Expr: "dwcp_v3_consensus_latency_seconds", LegendFormat: "Latency", RefID: "A"},
@@ -597,9 +596,9 @@ func (de *DashboardExporter) getACPPanels() []GrafanaPanel {
 func (de *DashboardExporter) getITPPanels() []GrafanaPanel {
 	return []GrafanaPanel{
 		{
-			ID:    90,
-			Title: "ITP Placement Quality",
-			Type:  "gauge",
+			ID:      90,
+			Title:   "ITP Placement Quality",
+			Type:    "gauge",
 			GridPos: GrafanaGridPos{X: 0, Y: 0, W: 24, H: 8},
 			Targets: []GrafanaTarget{
 				{Expr: "dwcp_v3_placement_score", LegendFormat: "Score", RefID: "A"},

@@ -18,20 +18,7 @@ type RBACManager struct {
 }
 
 // User represents a system user
-type User struct {
-	ID          string
-	Username    string
-	Email       string
-	Roles       []string
-	Enabled     bool
-	MFAEnabled  bool
-	LastLogin   time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	Metadata    map[string]string
-}
 
-// Role represents a role with permissions
 type Role struct {
 	ID          string
 	Name        string
@@ -290,32 +277,9 @@ func (rbac *RBACManager) matchesPermission(perm, resource, action, scope string)
 }
 
 // AuditLogger logs security events
-type AuditLogger struct {
-	mu     sync.RWMutex
-	events []*AuditEvent
-}
 
-// AuditEvent represents a security audit event
-type AuditEvent struct {
-	ID         string
-	Action     string
-	UserID     string
-	Resource   string
-	ResourceID string
-	Timestamp  time.Time
-	Success    bool
-	IPAddress  string
-	Details    map[string]interface{}
-}
 
-// NewAuditLogger creates a new audit logger
-func NewAuditLogger() *AuditLogger {
-	return &AuditLogger{
-		events: make([]*AuditEvent, 0),
-	}
-}
 
-// Log logs an audit event
 func (al *AuditLogger) Log(ctx context.Context, event *AuditEvent) {
 	al.mu.Lock()
 	defer al.mu.Unlock()
@@ -347,16 +311,7 @@ func (al *AuditLogger) GetEvents(ctx context.Context, filter *AuditFilter) []*Au
 }
 
 // AuditFilter filters audit events
-type AuditFilter struct {
-	UserID    string
-	Resource  string
-	Action    string
-	StartTime time.Time
-	EndTime   time.Time
-	Success   *bool
-}
 
-// Matches checks if an event matches the filter
 func (af *AuditFilter) Matches(event *AuditEvent) bool {
 	if af.UserID != "" && event.UserID != af.UserID {
 		return false

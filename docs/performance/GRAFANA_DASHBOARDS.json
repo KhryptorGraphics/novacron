@@ -1,0 +1,359 @@
+{
+  "dashboards": [
+    {
+      "name": "DWCP Executive Overview",
+      "uid": "dwcp-executive",
+      "tags": ["dwcp", "executive", "slo"],
+      "refresh": "10s",
+      "panels": [
+        {
+          "id": 1,
+          "title": "Consensus Latency SLO",
+          "type": "stat",
+          "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
+          "targets": [
+            {
+              "expr": "dwcp:consensus_latency:p95",
+              "legendFormat": "P95 Latency",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"value": 0, "color": "green"},
+                  {"value": 0.040, "color": "yellow"},
+                  {"value": 0.050, "color": "red"}
+                ]
+              },
+              "unit": "s",
+              "decimals": 3,
+              "mappings": [],
+              "custom": {
+                "displayMode": "gradient"
+              }
+            }
+          },
+          "options": {
+            "orientation": "horizontal",
+            "textMode": "value_and_name",
+            "colorMode": "background",
+            "graphMode": "area"
+          }
+        },
+        {
+          "id": 2,
+          "title": "Migration Success Rate (24h)",
+          "type": "gauge",
+          "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0},
+          "targets": [
+            {
+              "expr": "sum(rate(dwcp_v3_migration_success_total[24h])) / sum(rate(dwcp_v3_migration_success_total[24h]) + rate(dwcp_migration_failure_total[24h])) * 100",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "steps": [
+                  {"value": 0, "color": "red"},
+                  {"value": 95, "color": "yellow"},
+                  {"value": 99, "color": "green"}
+                ]
+              },
+              "unit": "percent"
+            }
+          },
+          "options": {
+            "showThresholdLabels": true,
+            "showThresholdMarkers": true
+          }
+        },
+        {
+          "id": 3,
+          "title": "Error Budget Remaining",
+          "type": "gauge",
+          "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
+          "targets": [
+            {
+              "expr": "dwcp_error_budget_remaining * 100",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "steps": [
+                  {"value": 0, "color": "red"},
+                  {"value": 10, "color": "yellow"},
+                  {"value": 20, "color": "green"}
+                ]
+              },
+              "unit": "percent"
+            }
+          }
+        },
+        {
+          "id": 4,
+          "title": "Total Migrations (24h)",
+          "type": "stat",
+          "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
+          "targets": [
+            {
+              "expr": "sum(increase(dwcp_v3_migration_success_total[24h]))",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "steps": [
+                  {"value": 0, "color": "text"}
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 5,
+          "title": "Consensus Latency Trend",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "targets": [
+            {
+              "expr": "dwcp:consensus_latency:p50",
+              "legendFormat": "P50",
+              "refId": "A"
+            },
+            {
+              "expr": "dwcp:consensus_latency:p95",
+              "legendFormat": "P95",
+              "refId": "B"
+            },
+            {
+              "expr": "dwcp:consensus_latency:p99",
+              "legendFormat": "P99",
+              "refId": "C"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "smooth",
+                "fillOpacity": 10
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "P95"},
+                "properties": [
+                  {"id": "custom.lineWidth", "value": 2},
+                  {"id": "color", "value": {"mode": "fixed", "fixedColor": "yellow"}}
+                ]
+              }
+            ]
+          },
+          "options": {
+            "tooltip": {"mode": "multi", "sort": "none"},
+            "legend": {"displayMode": "list", "placement": "bottom"}
+          }
+        },
+        {
+          "id": 6,
+          "title": "Bandwidth Utilization",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "targets": [
+            {
+              "expr": "dwcp:bandwidth:total_mbps",
+              "legendFormat": "Total Bandwidth",
+              "refId": "A"
+            },
+            {
+              "expr": "dwcp_bandwidth_predicted_mbps",
+              "legendFormat": "Predicted",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "Mbps",
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "smooth",
+                "fillOpacity": 15,
+                "spanNulls": true
+              }
+            }
+          }
+        },
+        {
+          "id": 7,
+          "title": "Circuit Breaker States",
+          "type": "bargauge",
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 16},
+          "targets": [
+            {
+              "expr": "sum(dwcp_circuit_breaker_state == 0) by (name)",
+              "legendFormat": "Closed - {{name}}",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(dwcp_circuit_breaker_state == 1) by (name)",
+              "legendFormat": "Half-Open - {{name}}",
+              "refId": "B"
+            },
+            {
+              "expr": "sum(dwcp_circuit_breaker_state == 2) by (name)",
+              "legendFormat": "Open - {{name}}",
+              "refId": "C"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "steps": [
+                  {"value": 0, "color": "green"},
+                  {"value": 1, "color": "yellow"},
+                  {"value": 2, "color": "red"}
+                ]
+              }
+            }
+          },
+          "options": {
+            "orientation": "horizontal",
+            "displayMode": "gradient"
+          }
+        },
+        {
+          "id": 8,
+          "title": "ML Prediction Accuracy",
+          "type": "gauge",
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 16},
+          "targets": [
+            {
+              "expr": "dwcp:bandwidth:prediction_accuracy_avg",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "steps": [
+                  {"value": 0, "color": "red"},
+                  {"value": 70, "color": "yellow"},
+                  {"value": 85, "color": "green"}
+                ]
+              },
+              "unit": "percent"
+            }
+          }
+        },
+        {
+          "id": 9,
+          "title": "Active Streams by Mode",
+          "type": "piechart",
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 16},
+          "targets": [
+            {
+              "expr": "sum(dwcp_v3_active_streams) by (mode)",
+              "legendFormat": "{{mode}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "legend": {"displayMode": "table", "placement": "right"},
+            "pieType": "donut"
+          }
+        }
+      ]
+    },
+    {
+      "name": "DWCP Performance Deep Dive",
+      "uid": "dwcp-performance",
+      "tags": ["dwcp", "performance"],
+      "refresh": "5s",
+      "panels": [
+        {
+          "id": 10,
+          "title": "Consensus Latency Distribution",
+          "type": "heatmap",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "targets": [
+            {
+              "expr": "rate(dwcp_consensus_latency_seconds_bucket[1m])",
+              "format": "heatmap",
+              "legendFormat": "{{le}}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "calculate": true,
+            "cellGap": 2,
+            "color": {
+              "mode": "spectrum",
+              "scheme": "Spectral"
+            },
+            "yAxis": {
+              "unit": "s"
+            }
+          }
+        },
+        {
+          "id": 11,
+          "title": "Network Partition Events",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "targets": [
+            {
+              "expr": "rate(dwcp_partition_events_total[5m])",
+              "legendFormat": "Partition Events/s",
+              "refId": "A"
+            },
+            {
+              "expr": "rate(dwcp_partition_healing_time_seconds_sum[5m]) / rate(dwcp_partition_healing_time_seconds_count[5m])",
+              "legendFormat": "Avg Healing Time",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "title": "Resource Utilization",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+          "targets": [
+            {
+              "expr": "dwcp_cpu_usage_percent",
+              "legendFormat": "CPU - {{node_id}}",
+              "refId": "A"
+            },
+            {
+              "expr": "(dwcp_memory_usage_bytes / (dwcp_memory_usage_bytes + dwcp_memory_available_bytes)) * 100",
+              "legendFormat": "Memory - {{node_id}}",
+              "refId": "B"
+            },
+            {
+              "expr": "rate(dwcp_disk_io_read_mbps[1m]) + rate(dwcp_disk_io_write_mbps[1m])",
+              "legendFormat": "Disk I/O - {{node_id}}",
+              "refId": "C"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

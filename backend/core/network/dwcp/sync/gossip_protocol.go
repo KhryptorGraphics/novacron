@@ -26,12 +26,12 @@ type GossipProtocol struct {
 
 // GossipMessage represents a gossip message
 type GossipMessage struct {
-	ID          string        `json:"id"`
-	Update      *CRDTUpdate   `json:"update"`
-	Hops        int           `json:"hops"`
-	TTL         int           `json:"ttl"`
-	Timestamp   time.Time     `json:"timestamp"`
-	Path        []string      `json:"path"` // Track propagation path
+	ID        string      `json:"id"`
+	Update    *CRDTUpdate `json:"update"`
+	Hops      int         `json:"hops"`
+	TTL       int         `json:"ttl"`
+	Timestamp time.Time   `json:"timestamp"`
+	Path      []string    `json:"path"` // Track propagation path
 }
 
 // NewGossipProtocol creates a new gossip protocol instance
@@ -168,10 +168,9 @@ func (gp *GossipProtocol) applyUpdate(update *CRDTUpdate) error {
 	crdtValue := gp.engine.deserializeCRDT(update.Key, update.Data)
 	if crdtValue == nil {
 		// Create new CRDT if doesn't exist
-		crdtValue = gp.createCRDT(update.Type, update.Data)
-		if crdtValue == nil {
-			return &SyncError{Message: "failed to create CRDT"}
-		}
+		// TODO: Fix CRDT interface - createCRDT returns CvRDT which doesn't implement crdt.CvRDT
+		// Temporarily skip CRDT creation until interface is fixed
+		return &SyncError{Message: "CRDT creation temporarily disabled - interface mismatch"}
 	}
 
 	// Get existing value or create new
@@ -190,24 +189,31 @@ func (gp *GossipProtocol) applyUpdate(update *CRDTUpdate) error {
 func (gp *GossipProtocol) createCRDT(crdtType string, data json.RawMessage) CvRDT {
 	var value CvRDT
 
-	switch crdtType {
-	case "g_counter":
-		value = NewGCounter(gp.engine.nodeID)
-	case "pn_counter":
-		value = NewPNCounter(gp.engine.nodeID)
-	case "or_set":
-		value = NewORSet(gp.engine.nodeID)
-	case "lww_register":
-		value = NewLWWRegister(gp.engine.nodeID)
-	case "mv_register":
-		value = NewMVRegister(gp.engine.nodeID)
-	case "or_map":
-		value = NewORMap(gp.engine.nodeID)
-	case "rga":
-		value = NewRGA(gp.engine.nodeID)
-	default:
-		return nil
-	}
+	// TODO: Fix CRDT interface - these functions return types incompatible with CvRDT interface
+	// Temporarily return nil until CRDT library interface is fixed
+	_ = crdtType
+	_ = data
+	value = nil
+
+	// Original code (commented out due to interface mismatch):
+	// switch crdtType {
+	// case "g_counter":
+	// 	value = crdt.NewGCounter(gp.engine.nodeID)
+	// case "pn_counter":
+	// 	value = crdt.NewPNCounter(gp.engine.nodeID)
+	// case "or_set":
+	// 	value = crdt.NewORSet(gp.engine.nodeID)
+	// case "lww_register":
+	// 	value = crdt.NewLWWRegister(gp.engine.nodeID)
+	// case "mv_register":
+	// 	value = crdt.NewMVRegister(gp.engine.nodeID)
+	// case "or_map":
+	// 	value = crdt.NewORMap(gp.engine.nodeID)
+	// case "rga":
+	// 	value = crdt.NewRGA(gp.engine.nodeID)
+	// default:
+	// 	return nil
+	// }
 
 	if err := value.Unmarshal(data); err != nil {
 		gp.logger.Error("Failed to unmarshal CRDT", zap.String("type", crdtType), zap.Error(err))
@@ -370,10 +376,12 @@ type CvRDT interface {
 	Value() interface{}
 }
 
-func NewGCounter(nodeID string) CvRDT     { return nil }
-func NewPNCounter(nodeID string) CvRDT    { return nil }
-func NewORSet(nodeID string) CvRDT        { return nil }
-func NewLWWRegister(nodeID string) CvRDT  { return nil }
-func NewMVRegister(nodeID string) CvRDT   { return nil }
-func NewORMap(nodeID string) CvRDT        { return nil }
-func NewRGA(nodeID string) CvRDT          { return nil }
+// CRDT factory functions removed to avoid redeclaration conflicts
+// Use crdt package functions directly instead:
+// - crdt.NewGCounter(nodeID)
+// - crdt.NewPNCounter(nodeID)
+// - crdt.NewORSet(nodeID)
+// - crdt.NewLWWRegister(nodeID)
+// - crdt.NewMVRegister(nodeID)
+// - crdt.NewORMap(nodeID)
+// - crdt.NewRGA(nodeID)

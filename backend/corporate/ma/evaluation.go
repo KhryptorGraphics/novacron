@@ -1257,7 +1257,7 @@ func (d *DiligenceEngine) conductLegalDiligence(target *AcquisitionTarget) Legal
 		IntellectualProperty: IPAssets{
 			Patents:       target.Technology.Patents,
 			Trademarks:    25,
-			Copyrights:    target.Technology.CodebaseSize / 1000000, // Copyrights per million LOC
+			Copyrights:    int(target.Technology.CodebaseSize / 1000000), // Copyrights per million LOC
 			TradeSecrets:  50,
 			Licenses:      []string{"MIT", "Apache 2.0", "Proprietary"},
 			OpenSource:    []string{"React", "Node.js", "PostgreSQL"},

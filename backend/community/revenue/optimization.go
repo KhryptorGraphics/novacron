@@ -160,7 +160,7 @@ type GraduationCriteria struct {
 	CustomerThreshold    int
 	QualityThreshold     float64
 	ConsistentMonths     int
-	NPS Threshold        float64
+	NPSThreshold         float64
 }
 
 // ProbationPolicy defines probation

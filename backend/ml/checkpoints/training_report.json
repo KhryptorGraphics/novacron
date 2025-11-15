@@ -1,0 +1,8 @@
+{
+  "training_start": "2025-11-14T06:34:33.220968",
+  "models": {
+    "consensus_latency": {
+      "status": "success",
+      "accuracy": 1.7085427135678393,
+      "target": "92-95%",
+      "target_met": 

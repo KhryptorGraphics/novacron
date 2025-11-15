@@ -29,45 +29,8 @@ func (t CertificationTier) String() string {
 }
 
 // CertificationLevel defines requirements for each tier
-type CertificationLevel struct {
-	Tier              CertificationTier
-	RequiredLabs      int
-	RequiredProjects  int
-	RequiredCEUs      int // Continuing Education Units per year
-	RequiredScore     float64
-	RequiredYears     int // Years of experience
-	RequiredCerts     []CertificationTier
-	CostUSD           float64
-	ValidityYears     int
-	RecertInterval    int // Months
-}
 
 // DeveloperProfile represents certified developer
-type DeveloperProfile struct {
-	ID                 string
-	Email              string
-	Name               string
-	CurrentTier        CertificationTier
-	CertificationID    string
-	CertifiedAt        time.Time
-	ExpiresAt          time.Time
-	RecertDueAt        time.Time
-	CompletedLabs      []string
-	CompletedProjects  []string
-	CEUsEarned         int
-	TotalScore         float64
-	YearsExperience    int
-	Specializations    []string
-	Endorsements       []Endorsement
-	Achievements       []Achievement
-	JobMatches         []JobMatch
-	MentorRating       float64
-	MenteeCount        int
-	PeerReviews        []PeerReview
-	ContinuingEd       []ContinuingEducation
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-}
 
 // Lab represents hands-on learning environment
 type Lab struct {
@@ -92,25 +55,8 @@ type Lab struct {
 }
 
 // LabEnvironment defines isolated lab infrastructure
-type LabEnvironment struct {
-	Type           string // kubernetes, vm, container, serverless
-	Resources      ResourceSpec
-	PreConfigured  bool
-	AccessMethod   string // web, ssh, api
-	TimeLimit      int    // minutes
-	AutoDestroy    bool
-	SnapshotPoints []string
-}
 
 // ResourceSpec defines lab resource requirements
-type ResourceSpec struct {
-	CPUCores      int
-	MemoryGB      int
-	StorageGB     int
-	GPURequired   bool
-	NetworkPolicy string
-	Bandwidth     string
-}
 
 // LabTask represents individual lab assignment
 type LabTask struct {
@@ -155,14 +101,6 @@ type TestCase struct {
 }
 
 // LabValidation defines overall lab completion validation
-type LabValidation struct {
-	MinScore         float64
-	RequiredTasks    []string
-	PeerReviewRequired bool
-	MentorApproval   bool
-	TimeConstraint   int // minutes
-	AttemptsAllowed  int
-}
 
 // Project represents real-world assessment project
 type Project struct {
@@ -235,26 +173,8 @@ type RubricLevel struct {
 }
 
 // Endorsement represents peer endorsement
-type Endorsement struct {
-	ID           string
-	FromDeveloper string
-	SkillArea    string
-	Rating       int // 1-5
-	Comment      string
-	Verified     bool
-	CreatedAt    time.Time
-}
 
 // Achievement represents earned achievement
-type Achievement struct {
-	ID          string
-	Type        string // lab, project, contribution, mentorship
-	Title       string
-	Description string
-	BadgeURL    string
-	EarnedAt    time.Time
-	Points      int
-}
 
 // JobMatch represents job marketplace matching
 type JobMatch struct {

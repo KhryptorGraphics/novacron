@@ -26,11 +26,11 @@ func ExampleGlobalDeployment() {
 				{Address: "10.0.1.1", Port: 8080, Protocol: "tcp", PublicIP: "203.0.113.1"},
 			},
 			Capacity: RegionCapacity{
-				MaxInstances:    1000,
+				MaxInstances:     1000,
 				MaxBandwidthMbps: 10000,
-				MaxStorage:      1000000,
-				AvailableVCPUs:  500,
-				AvailableRAM:    2048000,
+				MaxStorage:       1000000,
+				AvailableVCPUs:   500,
+				AvailableRAM:     2048000,
 			},
 		},
 		{
@@ -46,11 +46,11 @@ func ExampleGlobalDeployment() {
 				{Address: "10.0.2.1", Port: 8080, Protocol: "tcp", PublicIP: "203.0.113.2"},
 			},
 			Capacity: RegionCapacity{
-				MaxInstances:    800,
+				MaxInstances:     800,
 				MaxBandwidthMbps: 8000,
-				MaxStorage:      800000,
-				AvailableVCPUs:  400,
-				AvailableRAM:    1638400,
+				MaxStorage:       800000,
+				AvailableVCPUs:   400,
+				AvailableRAM:     1638400,
 			},
 		},
 		{
@@ -66,11 +66,11 @@ func ExampleGlobalDeployment() {
 				{Address: "10.0.3.1", Port: 8080, Protocol: "tcp", PublicIP: "203.0.113.3"},
 			},
 			Capacity: RegionCapacity{
-				MaxInstances:    600,
+				MaxInstances:     600,
 				MaxBandwidthMbps: 6000,
-				MaxStorage:      600000,
-				AvailableVCPUs:  300,
-				AvailableRAM:    1228800,
+				MaxStorage:       600000,
+				AvailableVCPUs:   300,
+				AvailableRAM:     1228800,
 			},
 		},
 	}
@@ -227,7 +227,7 @@ func ExampleGlobalDeployment() {
 
 	// Step 10: Setup dynamic route updates
 	routingTable := NewRoutingTable()
-	updater := NewRouteUpdater(topology, routingTable)
+	_ = NewRouteUpdater(topology, routingTable) // Route updater runs in background
 
 	// Populate routing table
 	for i := 0; i < len(regions); i++ {
@@ -378,23 +378,23 @@ func setupTestTopology() *GlobalTopology {
 
 	regions := []*Region{
 		{
-			ID:       "us-east-1",
-			Name:     "US East",
-			Location: GeoLocation{Latitude: 37.7749, Longitude: -122.4194, Country: "USA", City: "San Francisco"},
+			ID:        "us-east-1",
+			Name:      "US East",
+			Location:  GeoLocation{Latitude: 37.7749, Longitude: -122.4194, Country: "USA", City: "San Francisco"},
 			Endpoints: []NetworkEndpoint{{Address: "10.0.1.1", Port: 8080}},
 			Capacity:  RegionCapacity{MaxInstances: 1000, MaxBandwidthMbps: 10000},
 		},
 		{
-			ID:       "eu-west-1",
-			Name:     "EU West",
-			Location: GeoLocation{Latitude: 51.5074, Longitude: -0.1278, Country: "UK", City: "London"},
+			ID:        "eu-west-1",
+			Name:      "EU West",
+			Location:  GeoLocation{Latitude: 51.5074, Longitude: -0.1278, Country: "UK", City: "London"},
 			Endpoints: []NetworkEndpoint{{Address: "10.0.2.1", Port: 8080}},
 			Capacity:  RegionCapacity{MaxInstances: 800, MaxBandwidthMbps: 8000},
 		},
 		{
-			ID:       "ap-south-1",
-			Name:     "Asia Pacific South",
-			Location: GeoLocation{Latitude: 19.0760, Longitude: 72.8777, Country: "India", City: "Mumbai"},
+			ID:        "ap-south-1",
+			Name:      "Asia Pacific South",
+			Location:  GeoLocation{Latitude: 19.0760, Longitude: 72.8777, Country: "India", City: "Mumbai"},
 			Endpoints: []NetworkEndpoint{{Address: "10.0.3.1", Port: 8080}},
 			Capacity:  RegionCapacity{MaxInstances: 600, MaxBandwidthMbps: 6000},
 		},

@@ -14,17 +14,17 @@ import (
 
 // DQNAgent implements a Deep Q-Network agent for task partitioning
 type DQNAgent struct {
-	session        *ort.DynamicAdvancedSession
-	epsilon        float64
-	epsilonMin     float64
-	epsilonDecay   float64
-	stateBuffer    []float32
-	replayBuffer   *ReplayBuffer
-	learningRate   float64
-	gamma          float64 // Discount factor
-	updateFreq     int     // Update target network every N steps
-	stepCount      int
-	mu             sync.RWMutex
+	session      *ort.DynamicAdvancedSession
+	epsilon      float64
+	epsilonMin   float64
+	epsilonDecay float64
+	stateBuffer  []float32
+	replayBuffer *ReplayBuffer
+	learningRate float64
+	gamma        float64 // Discount factor
+	updateFreq   int     // Update target network every N steps
+	stepCount    int
+	mu           sync.RWMutex
 
 	// Performance metrics
 	totalReward    float64
@@ -34,13 +34,13 @@ type DQNAgent struct {
 
 // TaskPartitionDecision represents the agent's decision on how to partition a task
 type TaskPartitionDecision struct {
-	StreamIDs       []int           // Which streams to use
-	ChunkSizes      []int           // Size of chunk for each stream
-	Confidence      float64         // Confidence in the decision
-	ExpectedTime    time.Duration   // Expected completion time
-	Action          Action          // The action taken
-	QValue          float64         // Q-value of the action
-	ExplorationUsed bool            // Whether exploration was used
+	StreamIDs       []int         // Which streams to use
+	ChunkSizes      []int         // Size of chunk for each stream
+	Confidence      float64       // Confidence in the decision
+	ExpectedTime    time.Duration // Expected completion time
+	Action          Action        // The action taken
+	QValue          float64       // Q-value of the action
+	ExplorationUsed bool          // Whether exploration was used
 }
 
 // NewDQNAgent creates a new DQN agent
@@ -259,7 +259,7 @@ func (agent *DQNAgent) estimateTime(taskSize int, streams []int, state *Environm
 	maxTime := 0.0
 
 	for i, streamID := range streams {
-		chunkSize := taskSize / len(streams) // Simplified for estimation
+		chunkSize := taskSize / len(streams)                   // Simplified for estimation
 		bandwidth := state.StreamBandwidth[streamID] * 1e6 / 8 // Convert Mbps to bytes/s
 		latency := state.StreamLatency[streamID] / 1000        // Convert ms to seconds
 
@@ -354,12 +354,12 @@ func (agent *DQNAgent) GetMetrics() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"epsilon":         agent.epsilon,
-		"buffer_size":     agent.replayBuffer.Size(),
-		"total_episodes":  len(agent.episodeRewards),
-		"average_reward":  avgReward,
-		"success_rate":    agent.successRate,
-		"steps":           agent.stepCount,
+		"epsilon":        agent.epsilon,
+		"buffer_size":    agent.replayBuffer.Size(),
+		"total_episodes": len(agent.episodeRewards),
+		"average_reward": avgReward,
+		"success_rate":   agent.successRate,
+		"steps":          agent.stepCount,
 	}
 }
 
@@ -405,4 +405,18 @@ func (agent *DQNAgent) Destroy() {
 	// Note: DestroyEnvironment() should only be called once per process
 	// Commenting out to avoid issues in tests
 	// ort.DestroyEnvironment()
+}
+
+// GetReplayBuffer returns the agent's replay buffer (getter for unexported field)
+func (agent *DQNAgent) GetReplayBuffer() *ReplayBuffer {
+	agent.mu.RLock()
+	defer agent.mu.RUnlock()
+	return agent.replayBuffer
+}
+
+// GetEpsilon returns the current epsilon value (getter for unexported field)
+func (agent *DQNAgent) GetEpsilon() float64 {
+	agent.mu.RLock()
+	defer agent.mu.RUnlock()
+	return agent.epsilon
 }

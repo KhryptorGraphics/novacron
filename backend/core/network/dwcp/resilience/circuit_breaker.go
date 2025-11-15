@@ -58,6 +58,9 @@ type CircuitBreaker struct {
 	totalFailures  int64
 	totalSuccesses int64
 	stateChanges   int64
+
+	// Prometheus metrics
+	prometheusMetrics *PrometheusMetrics
 }
 
 // NewCircuitBreaker creates a new circuit breaker
@@ -66,19 +69,27 @@ func NewCircuitBreaker(name string, maxFailures int, timeout, resetTimeout time.
 		logger = zap.NewNop()
 	}
 
-	return &CircuitBreaker{
-		name:         name,
-		maxFailures:  maxFailures,
-		timeout:      timeout,
-		resetTimeout: resetTimeout,
-		state:        StateClosed,
-		halfOpenMax:  3, // Allow 3 test requests in half-open state
-		logger:       logger,
+	cb := &CircuitBreaker{
+		name:              name,
+		maxFailures:       maxFailures,
+		timeout:           timeout,
+		resetTimeout:      resetTimeout,
+		state:             StateClosed,
+		halfOpenMax:       3, // Allow 3 test requests in half-open state
+		logger:            logger,
+		prometheusMetrics: GetMetrics(),
 	}
+
+	// Initialize Prometheus metrics
+	cb.updatePrometheusState()
+
+	return cb
 }
 
 // Execute runs the provided function with circuit breaker protection
 func (cb *CircuitBreaker) Execute(fn func() error) error {
+	startTime := time.Now()
+
 	cb.mu.Lock()
 	cb.totalRequests++
 
@@ -89,6 +100,7 @@ func (cb *CircuitBreaker) Execute(fn func() error) error {
 			cb.transitionToHalfOpen()
 		} else {
 			cb.mu.Unlock()
+			cb.prometheusMetrics.CircuitBreakerRequests.WithLabelValues(cb.name, "rejected").Inc()
 			cb.logger.Debug("Circuit breaker rejecting request",
 				zap.String("name", cb.name),
 				zap.String("state", cb.state.String()))
@@ -123,6 +135,10 @@ func (cb *CircuitBreaker) Execute(fn func() error) error {
 		res.err = errors.New("circuit breaker timeout")
 	}
 
+	// Record latency
+	latency := time.Since(startTime)
+	cb.prometheusMetrics.CircuitBreakerLatency.WithLabelValues(cb.name).Observe(latency.Seconds())
+
 	// Handle the result
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
@@ -130,6 +146,8 @@ func (cb *CircuitBreaker) Execute(fn func() error) error {
 	if res.err != nil {
 		cb.recordFailure()
 		cb.totalFailures++
+		cb.prometheusMetrics.CircuitBreakerRequests.WithLabelValues(cb.name, "failure").Inc()
+		cb.prometheusMetrics.CircuitBreakerFailures.WithLabelValues(cb.name).Inc()
 
 		if cb.failures >= cb.maxFailures && cb.state == StateClosed {
 			cb.transitionToOpen()
@@ -144,6 +162,7 @@ func (cb *CircuitBreaker) Execute(fn func() error) error {
 	// Success
 	cb.recordSuccess()
 	cb.totalSuccesses++
+	cb.prometheusMetrics.CircuitBreakerRequests.WithLabelValues(cb.name, "success").Inc()
 
 	if currentState == StateHalfOpen {
 		cb.successCount++
@@ -202,9 +221,14 @@ func (cb *CircuitBreaker) Reset() {
 // Private methods
 
 func (cb *CircuitBreaker) transitionToOpen() {
+	oldState := cb.state
 	cb.state = StateOpen
 	cb.lastFailTime = time.Now()
 	cb.stateChanges++
+
+	cb.updatePrometheusState()
+	cb.prometheusMetrics.CircuitBreakerStateChanges.WithLabelValues(
+		cb.name, oldState.String(), StateOpen.String()).Inc()
 
 	cb.logger.Warn("Circuit breaker opened",
 		zap.String("name", cb.name),
@@ -213,23 +237,46 @@ func (cb *CircuitBreaker) transitionToOpen() {
 }
 
 func (cb *CircuitBreaker) transitionToHalfOpen() {
+	oldState := cb.state
 	cb.state = StateHalfOpen
 	cb.failures = 0
 	cb.successCount = 0
 	cb.stateChanges++
+
+	cb.updatePrometheusState()
+	cb.prometheusMetrics.CircuitBreakerStateChanges.WithLabelValues(
+		cb.name, oldState.String(), StateHalfOpen.String()).Inc()
 
 	cb.logger.Info("Circuit breaker transitioned to half-open",
 		zap.String("name", cb.name))
 }
 
 func (cb *CircuitBreaker) transitionToClosed() {
+	oldState := cb.state
 	cb.state = StateClosed
 	cb.failures = 0
 	cb.successCount = 0
 	cb.stateChanges++
 
+	cb.updatePrometheusState()
+	cb.prometheusMetrics.CircuitBreakerStateChanges.WithLabelValues(
+		cb.name, oldState.String(), StateClosed.String()).Inc()
+
 	cb.logger.Info("Circuit breaker closed",
 		zap.String("name", cb.name))
+}
+
+func (cb *CircuitBreaker) updatePrometheusState() {
+	var stateValue float64
+	switch cb.state {
+	case StateClosed:
+		stateValue = 0
+	case StateHalfOpen:
+		stateValue = 1
+	case StateOpen:
+		stateValue = 2
+	}
+	cb.prometheusMetrics.CircuitBreakerState.WithLabelValues(cb.name).Set(stateValue)
 }
 
 func (cb *CircuitBreaker) recordFailure() {

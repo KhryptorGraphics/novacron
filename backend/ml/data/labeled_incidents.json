@@ -1,0 +1,702 @@
+[
+  {
+    "timestamp": "2024-01-01T00:00:00",
+    "node_id": 52,
+    "incident_type": "crash",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-01T01:40:00",
+    "node_id": 72,
+    "incident_type": "crash",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-01T03:20:00",
+    "node_id": 83,
+    "incident_type": "disk_full",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-01T05:00:00",
+    "node_id": 75,
+    "incident_type": "memory_leak",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-01T06:40:00",
+    "node_id": 24,
+    "incident_type": "disk_full",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-01T08:20:00",
+    "node_id": 53,
+    "incident_type": "network_failure",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-01T10:00:00",
+    "node_id": 30,
+    "incident_type": "network_failure",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-01T11:40:00",
+    "node_id": 64,
+    "incident_type": "memory_leak",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-01T13:20:00",
+    "node_id": 33,
+    "incident_type": "memory_leak",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-01T15:00:00",
+    "node_id": 22,
+    "incident_type": "crash",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-01T16:40:00",
+    "node_id": 89,
+    "incident_type": "crash",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-01T18:20:00",
+    "node_id": 59,
+    "incident_type": "disk_full",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-01T20:00:00",
+    "node_id": 92,
+    "incident_type": "memory_leak",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-01T21:40:00",
+    "node_id": 15,
+    "incident_type": "network_failure",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-01T23:20:00",
+    "node_id": 47,
+    "incident_type": "network_failure",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-02T01:00:00",
+    "node_id": 55,
+    "incident_type": "memory_leak",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-02T02:40:00",
+    "node_id": 3,
+    "incident_type": "crash",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-02T04:20:00",
+    "node_id": 7,
+    "incident_type": "crash",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-02T06:00:00",
+    "node_id": 39,
+    "incident_type": "network_failure",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-02T07:40:00",
+    "node_id": 89,
+    "incident_type": "memory_leak",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-02T09:20:00",
+    "node_id": 9,
+    "incident_type": "network_failure",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-02T11:00:00",
+    "node_id": 2,
+    "incident_type": "memory_leak",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-02T12:40:00",
+    "node_id": 60,
+    "incident_type": "disk_full",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-02T14:20:00",
+    "node_id": 8,
+    "incident_type": "disk_full",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-02T16:00:00",
+    "node_id": 78,
+    "incident_type": "crash",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-02T17:40:00",
+    "node_id": 50,
+    "incident_type": "memory_leak",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-02T19:20:00",
+    "node_id": 2,
+    "incident_type": "network_failure",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-02T21:00:00",
+    "node_id": 54,
+    "incident_type": "network_failure",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-02T22:40:00",
+    "node_id": 54,
+    "incident_type": "crash",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-03T00:20:00",
+    "node_id": 18,
+    "incident_type": "network_failure",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-03T02:00:00",
+    "node_id": 34,
+    "incident_type": "network_failure",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-03T03:40:00",
+    "node_id": 14,
+    "incident_type": "disk_full",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-03T05:20:00",
+    "node_id": 15,
+    "incident_type": "memory_leak",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-03T07:00:00",
+    "node_id": 87,
+    "incident_type": "memory_leak",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-03T08:40:00",
+    "node_id": 62,
+    "incident_type": "memory_leak",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-03T10:20:00",
+    "node_id": 80,
+    "incident_type": "crash",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-03T12:00:00",
+    "node_id": 53,
+    "incident_type": "memory_leak",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-03T13:40:00",
+    "node_id": 89,
+    "incident_type": "memory_leak",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-03T15:20:00",
+    "node_id": 41,
+    "incident_type": "crash",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-03T17:00:00",
+    "node_id": 45,
+    "incident_type": "crash",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-03T18:40:00",
+    "node_id": 71,
+    "incident_type": "crash",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-03T20:20:00",
+    "node_id": 1,
+    "incident_type": "memory_leak",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-03T22:00:00",
+    "node_id": 88,
+    "incident_type": "disk_full",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-03T23:40:00",
+    "node_id": 81,
+    "incident_type": "memory_leak",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-04T01:20:00",
+    "node_id": 35,
+    "incident_type": "crash",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-04T03:00:00",
+    "node_id": 5,
+    "incident_type": "network_failure",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-04T04:40:00",
+    "node_id": 41,
+    "incident_type": "memory_leak",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-04T06:20:00",
+    "node_id": 73,
+    "incident_type": "memory_leak",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-04T08:00:00",
+    "node_id": 34,
+    "incident_type": "crash",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-04T09:40:00",
+    "node_id": 23,
+    "incident_type": "network_failure",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-04T11:20:00",
+    "node_id": 37,
+    "incident_type": "disk_full",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-04T13:00:00",
+    "node_id": 86,
+    "incident_type": "disk_full",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-04T14:40:00",
+    "node_id": 65,
+    "incident_type": "disk_full",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-04T16:20:00",
+    "node_id": 47,
+    "incident_type": "network_failure",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-04T18:00:00",
+    "node_id": 1,
+    "incident_type": "crash",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-04T19:40:00",
+    "node_id": 14,
+    "incident_type": "disk_full",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-04T21:20:00",
+    "node_id": 9,
+    "incident_type": "disk_full",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-04T23:00:00",
+    "node_id": 90,
+    "incident_type": "network_failure",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-05T00:40:00",
+    "node_id": 77,
+    "incident_type": "disk_full",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-05T02:20:00",
+    "node_id": 96,
+    "incident_type": "disk_full",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-05T04:00:00",
+    "node_id": 52,
+    "incident_type": "crash",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-05T05:40:00",
+    "node_id": 4,
+    "incident_type": "network_failure",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-05T07:20:00",
+    "node_id": 23,
+    "incident_type": "disk_full",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-05T09:00:00",
+    "node_id": 15,
+    "incident_type": "disk_full",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-05T10:40:00",
+    "node_id": 36,
+    "incident_type": "crash",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-05T12:20:00",
+    "node_id": 71,
+    "incident_type": "disk_full",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-05T14:00:00",
+    "node_id": 86,
+    "incident_type": "memory_leak",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-05T15:40:00",
+    "node_id": 42,
+    "incident_type": "crash",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-05T17:20:00",
+    "node_id": 57,
+    "incident_type": "crash",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-05T19:00:00",
+    "node_id": 28,
+    "incident_type": "memory_leak",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-05T20:40:00",
+    "node_id": 44,
+    "incident_type": "memory_leak",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-05T22:20:00",
+    "node_id": 62,
+    "incident_type": "disk_full",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-06T00:00:00",
+    "node_id": 92,
+    "incident_type": "crash",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-06T01:40:00",
+    "node_id": 62,
+    "incident_type": "crash",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-06T03:20:00",
+    "node_id": 27,
+    "incident_type": "network_failure",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-06T05:00:00",
+    "node_id": 77,
+    "incident_type": "crash",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-06T06:40:00",
+    "node_id": 70,
+    "incident_type": "memory_leak",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-06T08:20:00",
+    "node_id": 9,
+    "incident_type": "network_failure",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-06T10:00:00",
+    "node_id": 97,
+    "incident_type": "disk_full",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-06T11:40:00",
+    "node_id": 44,
+    "incident_type": "memory_leak",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-06T13:20:00",
+    "node_id": 59,
+    "incident_type": "network_failure",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-06T15:00:00",
+    "node_id": 96,
+    "incident_type": "memory_leak",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-06T16:40:00",
+    "node_id": 52,
+    "incident_type": "crash",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-06T18:20:00",
+    "node_id": 58,
+    "incident_type": "memory_leak",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-06T20:00:00",
+    "node_id": 39,
+    "incident_type": "network_failure",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-06T21:40:00",
+    "node_id": 56,
+    "incident_type": "crash",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-06T23:20:00",
+    "node_id": 2,
+    "incident_type": "network_failure",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-07T01:00:00",
+    "node_id": 54,
+    "incident_type": "disk_full",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-07T02:40:00",
+    "node_id": 96,
+    "incident_type": "crash",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-07T04:20:00",
+    "node_id": 19,
+    "incident_type": "network_failure",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-07T06:00:00",
+    "node_id": 53,
+    "incident_type": "memory_leak",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-07T07:40:00",
+    "node_id": 32,
+    "incident_type": "network_failure",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-07T09:20:00",
+    "node_id": 68,
+    "incident_type": "disk_full",
+    "severity": "high",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-07T11:00:00",
+    "node_id": 56,
+    "incident_type": "disk_full",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-07T12:40:00",
+    "node_id": 38,
+    "incident_type": "memory_leak",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-07T14:20:00",
+    "node_id": 98,
+    "incident_type": "network_failure",
+    "severity": "medium",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-07T16:00:00",
+    "node_id": 11,
+    "incident_type": "disk_full",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-07T17:40:00",
+    "node_id": 16,
+    "incident_type": "crash",
+    "severity": "low",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-07T19:20:00",
+    "node_id": 59,
+    "incident_type": "network_failure",
+    "severity": "critical",
+    "resolved": true
+  },
+  {
+    "timestamp": "2024-01-07T21:00:00",
+    "node_id": 93,
+    "incident_type": "disk_full",
+    "severity": "critical",
+    "resolved": true
+  }
+]

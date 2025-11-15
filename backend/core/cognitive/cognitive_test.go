@@ -6,14 +6,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/khryptorgraphics/novacron/backend/core/cognitive"
 	"github.com/khryptorgraphics/novacron/backend/core/cognitive/advisor"
 	contextpkg "github.com/khryptorgraphics/novacron/backend/core/cognitive/context"
 	"github.com/khryptorgraphics/novacron/backend/core/cognitive/explanation"
 	"github.com/khryptorgraphics/novacron/backend/core/cognitive/knowledge"
-	"github.com/khryptorgraphics/novacron/backend/core/cognitive/memory"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	// TODO: Create cognitive/memory package
+	// "github.com/khryptorgraphics/novacron/backend/core/cognitive/memory"
 	"github.com/khryptorgraphics/novacron/backend/core/cognitive/metrics"
 	"github.com/khryptorgraphics/novacron/backend/core/cognitive/multimodal"
 	"github.com/khryptorgraphics/novacron/backend/core/cognitive/nli"
@@ -27,9 +29,9 @@ func TestIntentParserAccuracy(t *testing.T) {
 	intentParser := parser.NewIntentParser(llmClient)
 
 	testCases := []struct {
-		input            string
-		expectedAction   string
-		minConfidence    float64
+		input          string
+		expectedAction string
+		minConfidence  float64
 	}{
 		{"Deploy a VM in us-east-1", "deploy", 0.8},
 		{"Migrate all VMs from AWS to GCP", "migrate", 0.8},

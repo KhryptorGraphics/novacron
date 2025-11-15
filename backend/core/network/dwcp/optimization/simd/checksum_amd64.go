@@ -1,11 +1,21 @@
+//go:build amd64
 // +build amd64
 
 package simd
 
 import (
 	"hash/crc32"
+
 	"github.com/klauspost/cpuid/v2"
 )
+
+// Assembly function declarations
+//
+//go:noescape
+func crc32CLMUL(data []byte) uint32
+
+//go:noescape
+func crc32cCLMUL(data []byte) uint32
 
 // ChecksumCalculator provides SIMD-accelerated checksum calculation
 type ChecksumCalculator struct {

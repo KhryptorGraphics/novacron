@@ -40,7 +40,9 @@ import (
 	"github.com/cloudflare/circl/kem/kyber/kyber768"
 	"github.com/cloudflare/circl/sign"
 	"github.com/cloudflare/circl/sign/dilithium/mode3"
-	"github.com/cloudflare/circl/sign/sphincsplus"
+
+	// TODO: sphincsplus package doesn't exist in circl v1.6.1 - need alternative implementation
+	// "github.com/cloudflare/circl/sign/sphincsplus"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
@@ -49,20 +51,20 @@ import (
 
 // Version information
 const (
-	Version             = "4.0.0-GA"
-	NISTSecurityLevel   = 3 // NIST security level (1-5)
-	QuantumResistance   = "100%" // Target quantum resistance
-	BuildDate           = "2025-11-11"
+	Version           = "4.0.0-GA"
+	NISTSecurityLevel = 3      // NIST security level (1-5)
+	QuantumResistance = "100%" // Target quantum resistance
+	BuildDate         = "2025-11-11"
 )
 
 // Algorithm identifiers
 const (
-	AlgoKyber768       = "KYBER768"
-	AlgoDilithium3     = "DILITHIUM3"
-	AlgoSPHINCSPlus    = "SPHINCS+"
-	AlgoRSA4096        = "RSA4096"
-	AlgoEd25519        = "ED25519"
-	AlgoAES256GCM      = "AES256-GCM"
+	AlgoKyber768    = "KYBER768"
+	AlgoDilithium3  = "DILITHIUM3"
+	AlgoSPHINCSPlus = "SPHINCS+"
+	AlgoRSA4096     = "RSA4096"
+	AlgoEd25519     = "ED25519"
+	AlgoAES256GCM   = "AES256-GCM"
 )
 
 // Performance metrics
@@ -97,13 +99,13 @@ var (
 // PostQuantumConfig configures post-quantum cryptography
 type PostQuantumConfig struct {
 	// Algorithm selection
-	EnableKyber      bool
-	EnableDilithium  bool
+	EnableKyber       bool
+	EnableDilithium   bool
 	EnableSPHINCSPlus bool
 
 	// Hybrid mode (classical + PQ)
-	EnableHybridMode    bool
-	ClassicalAlgorithm  string // "RSA4096" or "ED25519"
+	EnableHybridMode   bool
+	ClassicalAlgorithm string // "RSA4096" or "ED25519"
 
 	// Key management
 	KeyRotationIntervalHours int
@@ -111,17 +113,17 @@ type PostQuantumConfig struct {
 	MaxKeyAge                time.Duration
 
 	// Quantum RNG
-	EnableQuantumRNG       bool
-	QuantumRNGEndpoint     string
+	EnableQuantumRNG   bool
+	QuantumRNGEndpoint string
 
 	// Hardware acceleration
-	EnableHardwareAccel    bool
-	PreferAES_NI           bool
+	EnableHardwareAccel bool
+	PreferAES_NI        bool
 
 	// Certificate management
-	EnableCertMigration    bool
-	LegacyCertPath         string
-	PQCertPath             string
+	EnableCertMigration bool
+	LegacyCertPath      string
+	PQCertPath          string
 
 	// Logging
 	Logger *zap.Logger
@@ -132,13 +134,13 @@ func DefaultPostQuantumConfig() *PostQuantumConfig {
 	logger, _ := zap.NewProduction()
 	return &PostQuantumConfig{
 		// Enable all PQ algorithms
-		EnableKyber:         true,
-		EnableDilithium:     true,
-		EnableSPHINCSPlus:   true,
+		EnableKyber:       true,
+		EnableDilithium:   true,
+		EnableSPHINCSPlus: true,
 
 		// Hybrid mode for migration
-		EnableHybridMode:    true,
-		ClassicalAlgorithm:  AlgoRSA4096,
+		EnableHybridMode:   true,
+		ClassicalAlgorithm: AlgoRSA4096,
 
 		// Automatic key rotation
 		KeyRotationIntervalHours: 24,
@@ -146,8 +148,8 @@ func DefaultPostQuantumConfig() *PostQuantumConfig {
 		MaxKeyAge:                48 * time.Hour,
 
 		// Quantum RNG
-		EnableQuantumRNG:    false, // Optional hardware
-		QuantumRNGEndpoint:  "",
+		EnableQuantumRNG:   false, // Optional hardware
+		QuantumRNGEndpoint: "",
 
 		// Hardware acceleration
 		EnableHardwareAccel: true,
@@ -177,20 +179,20 @@ type PostQuantumCrypto struct {
 	sphincsPlusScheme sign.Scheme
 
 	// Hybrid mode
-	classicalSigner  interface{} // *rsa.PrivateKey or ed25519.PrivateKey
+	classicalSigner interface{} // *rsa.PrivateKey or ed25519.PrivateKey
 
 	// Key rotation
-	keyRotator       *KeyRotator
-	currentKeyID     atomic.Uint64
+	keyRotator   *KeyRotator
+	currentKeyID atomic.Uint64
 
 	// Quantum RNG
-	quantumRNG       *QuantumRNG
+	quantumRNG *QuantumRNG
 
 	// Hardware acceleration
-	hardwareAccel    *HardwareAccelerator
+	hardwareAccel *HardwareAccelerator
 
 	// Certificate manager
-	certManager      *CertificateManager
+	certManager *CertificateManager
 
 	mu sync.RWMutex
 }
@@ -537,7 +539,7 @@ func (pqc *PostQuantumCrypto) Decrypt(privateKeyBytes, ciphertext []byte) (plain
 		return nil, errors.New("invalid ciphertext format")
 	}
 
-	kemCiphertext := ciphertext[4:4+kemLen]
+	kemCiphertext := ciphertext[4 : 4+kemLen]
 	aesCiphertext := ciphertext[4+kemLen:]
 
 	// 2. KEM decapsulation to recover shared secret

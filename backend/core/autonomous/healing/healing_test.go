@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/novacron/backend/core/autonomous"
+	"github.com/khryptorgraphics/novacron/backend/core/autonomous"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"

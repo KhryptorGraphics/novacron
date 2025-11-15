@@ -4,8 +4,8 @@ package aws
 import (
 	"context"
 	"fmt"
-	"strconv"
-	"strings"
+// 	"strconv"
+// 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"

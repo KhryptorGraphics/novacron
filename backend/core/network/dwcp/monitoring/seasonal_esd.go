@@ -14,13 +14,13 @@ import (
 // SeasonalESDDetector implements Seasonal Hybrid ESD (Extreme Studentized Deviate) test
 // for detecting anomalies in seasonal time series
 type SeasonalESDDetector struct {
-	period        int     // Seasonal period (e.g., 24 for hourly data with daily seasonality)
-	maxAnomalies  int     // Maximum number of anomalies to detect
-	alpha         float64 // Significance level
-	logger        *zap.Logger
+	period       int     // Seasonal period (e.g., 24 for hourly data with daily seasonality)
+	maxAnomalies int     // Maximum number of anomalies to detect
+	alpha        float64 // Significance level
+	logger       *zap.Logger
 
-	timeSeries    map[string]*TimeSeriesData
-	mu            sync.RWMutex
+	timeSeries map[string]*TimeSeriesData
+	mu         sync.RWMutex
 }
 
 // TimeSeriesData holds time series data for a metric
@@ -260,11 +260,11 @@ func (sed *SeasonalESDDetector) esdTest(residuals []float64, currentResidual flo
 	}
 
 	// Calculate test statistic
-	testStat := math.Abs(currentResidual - m) / s
+	testStat := math.Abs(currentResidual-m) / s
 
 	// Calculate critical value
 	n := len(residuals)
-	p := 1.0 - sed.alpha/(2.0*float64(n))
+	_ = 1.0 - sed.alpha/(2.0*float64(n))
 
 	// Approximate critical value using t-distribution
 	// For simplicity, using 3-sigma rule approximation
@@ -357,7 +357,7 @@ func (sed *SeasonalESDDetector) detectMultipleAnomalies(values []float64) []int 
 		maxIndex := -1
 
 		for i, v := range workingData {
-			deviation := math.Abs(v - m) / s
+			deviation := math.Abs(v-m) / s
 			if deviation > maxDeviation {
 				maxDeviation = deviation
 				maxIndex = i
@@ -366,7 +366,7 @@ func (sed *SeasonalESDDetector) detectMultipleAnomalies(values []float64) []int 
 
 		// Calculate critical value
 		n := len(workingData)
-		p := 1.0 - sed.alpha/(2.0*float64(n-k))
+		_ = 1.0 - sed.alpha/(2.0*float64(n-k))
 		criticalValue := 3.0 + 0.5*math.Log(float64(n-k))
 
 		if maxDeviation <= criticalValue {

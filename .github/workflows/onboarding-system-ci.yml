@@ -1,0 +1,313 @@
+name: Onboarding System CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'backend/services/onboarding/**'
+      - 'backend/api/onboarding/**'
+      - 'backend/integrations/beads/**'
+      - 'backend/models/onboarding_*.go'
+      - '.github/workflows/onboarding-system-ci.yml'
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'backend/services/onboarding/**'
+      - 'backend/api/onboarding/**'
+      - 'backend/integrations/beads/**'
+      - 'backend/models/onboarding_*.go'
+
+env:
+  GO_VERSION: '1.21'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/onboarding
+
+jobs:
+  test:
+    name: Test Onboarding System
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: novacron_test
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          go mod download
+          go mod verify
+
+      - name: Setup test database
+        env:
+          DATABASE_URL: postgres://test_user:test_password@localhost:5432/novacron_test?sslmode=disable
+        run: |
+          cd backend/database/migrations
+          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+          migrate -path . -database "$DATABASE_URL" up
+
+      - name: Run unit tests
+        env:
+          DATABASE_URL: postgres://test_user:test_password@localhost:5432/novacron_test?sslmode=disable
+          REDIS_URL: redis://localhost:6379
+          BEADS_API_URL: http://localhost:8080
+          BEADS_API_KEY: test_key
+        run: |
+          cd backend
+          go test -v -race -coverprofile=coverage.out -covermode=atomic \
+            ./services/onboarding/... \
+            ./api/onboarding/... \
+            ./integrations/beads/... \
+            ./models/onboarding_*.go
+
+      - name: Check test coverage
+        run: |
+          cd backend
+          go tool cover -func=coverage.out
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Total coverage: $COVERAGE%"
+          if (( $(echo "$COVERAGE < 96" | bc -l) )); then
+            echo "❌ Coverage $COVERAGE% is below 96% threshold"
+            exit 1
+          fi
+          echo "✅ Coverage $COVERAGE% meets 96% threshold"
+
+      - name: Generate coverage report
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./backend/coverage.out
+          flags: onboarding
+          name: onboarding-coverage
+
+  lint:
+    name: Lint and Static Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+          working-directory: backend
+          args: >-
+            --timeout=5m
+            --enable=gofmt,goimports,govet,errcheck,staticcheck,unused,gosimple,structcheck,
+            varcheck,ineffassign,deadcode,typecheck,gosec,goconst,gocyclo,dupl
+            ./services/onboarding/...
+            ./api/onboarding/...
+            ./integrations/beads/...
+
+      - name: Run go vet
+        run: |
+          cd backend
+          go vet ./services/onboarding/...
+          go vet ./api/onboarding/...
+          go vet ./integrations/beads/...
+
+      - name: Check formatting
+        run: |
+          cd backend
+          if [ -n "$(gofmt -l ./services/onboarding ./api/onboarding ./integrations/beads)" ]; then
+            echo "❌ Go files must be formatted with gofmt"
+            gofmt -l ./services/onboarding ./api/onboarding ./integrations/beads
+            exit 1
+          fi
+
+  security:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Gosec Security Scanner
+        uses: securego/gosec@master
+        with:
+          args: '-no-fail -fmt json -out gosec-report.json ./backend/...'
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: './backend'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  build:
+    name: Build Docker Image
+    needs: [test, lint, security]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./deployments/docker/onboarding.Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            GO_VERSION=${{ env.GO_VERSION }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+
+  deploy-staging:
+    name: Deploy to Staging
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+      url: https://staging-onboarding.novacron.io
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v3
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG_STAGING }}
+
+      - name: Deploy to Kubernetes
+        run: |
+          cd deployments/kubernetes
+          kubectl apply -f namespace.yaml
+          kubectl apply -f configmap-staging.yaml
+          kubectl apply -f secrets-staging.yaml
+          kubectl apply -f onboarding-deployment.yaml
+          kubectl apply -f onboarding-service.yaml
+          kubectl apply -f onboarding-ingress.yaml
+          kubectl apply -f onboarding-hpa.yaml
+
+      - name: Wait for deployment
+        run: |
+          kubectl rollout status deployment/onboarding -n novacron-staging --timeout=5m
+
+      - name: Run smoke tests
+        run: |
+          chmod +x scripts/deploy/smoke-test.sh
+          ./scripts/deploy/smoke-test.sh https://staging-onboarding.novacron.io
+
+  deploy-production:
+    name: Deploy to Production
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://onboarding.novacron.io
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v3
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG_PRODUCTION }}
+
+      - name: Deploy with Blue-Green strategy
+        run: |
+          chmod +x scripts/deploy/deploy-onboarding.sh
+          ./scripts/deploy/deploy-onboarding.sh production ${{ github.sha }}
+
+      - name: Run health checks
+        run: |
+          chmod +x scripts/deploy/health-check.sh
+          ./scripts/deploy/health-check.sh https://onboarding.novacron.io
+
+      - name: Notify deployment
+        uses: 8398a7/action-slack@v3
+        if: always()
+        with:
+          status: ${{ job.status }}
+          text: 'Onboarding System deployment to production: ${{ job.status }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}

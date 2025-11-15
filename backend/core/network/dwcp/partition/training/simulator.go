@@ -39,16 +39,16 @@ func NewNetworkSimulator() *NetworkSimulator {
 
 // TrainingMetrics tracks training progress
 type TrainingMetrics struct {
-	Episode        int
-	TotalReward    float64
-	AvgReward      float64
-	Steps          int
-	Epsilon        float64
-	BufferSize     int
-	SuccessRate    float64
-	AvgThroughput  float64
-	AvgLatency     float64
-	Timestamp      time.Time
+	Episode       int
+	TotalReward   float64
+	AvgReward     float64
+	Steps         int
+	Epsilon       float64
+	BufferSize    int
+	SuccessRate   float64
+	AvgThroughput float64
+	AvgLatency    float64
+	Timestamp     time.Time
 }
 
 // SimulateEpisode runs a full training episode
@@ -96,7 +96,7 @@ func (sim *NetworkSimulator) SimulateEpisode(agent *partition.DQNAgent, maxSteps
 		}
 
 		// Train agent periodically
-		if agent.ReplayBuffer.Size() > 32 {
+		if agent.GetReplayBuffer().Size() > 32 {
 			// Trigger replay training (would be done in Python)
 			// For Go, we just collect experiences
 		}
@@ -112,8 +112,8 @@ func (sim *NetworkSimulator) SimulateEpisode(agent *partition.DQNAgent, maxSteps
 		TotalReward:   totalReward,
 		AvgReward:     totalReward / float64(steps),
 		Steps:         steps,
-		Epsilon:       agent.Epsilon,
-		BufferSize:    agent.ReplayBuffer.Size(),
+		Epsilon:       agent.GetEpsilon(),
+		BufferSize:    agent.GetReplayBuffer().Size(),
 		SuccessRate:   float64(successCount) / float64(steps),
 		AvgThroughput: totalThroughput / float64(steps),
 		AvgLatency:    totalLatency / float64(steps),
@@ -331,7 +331,7 @@ func (sim *NetworkSimulator) RunTraining(agent *partition.DQNAgent, episodes int
 
 func (sim *NetworkSimulator) exportExperiences(agent *partition.DQNAgent, filename string) error {
 	// Sample experiences from replay buffer
-	experiences := agent.ReplayBuffer.Sample(1000)
+	experiences := agent.GetReplayBuffer().Sample(1000)
 
 	// Convert to JSON-serializable format
 	type ExperienceJSON struct {

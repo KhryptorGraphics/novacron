@@ -16,8 +16,6 @@ import (
 )
 
 // CertificationLevel represents the certification tier
-type CertificationLevel string
-
 const (
 	LevelDeveloper CertificationLevel = "DEVELOPER"
 	LevelArchitect CertificationLevel = "ARCHITECT"
@@ -115,14 +113,6 @@ type ProjectRecord struct {
 }
 
 // Endorsement represents professional endorsement
-type Endorsement struct {
-	ID          string    `json:"id"`
-	EndorserID  string    `json:"endorser_id"`
-	EndorserName string   `json:"endorser_name"`
-	Relationship string   `json:"relationship"`
-	Comments    string    `json:"comments"`
-	CreatedAt   time.Time `json:"created_at"`
-}
 
 // Exam represents a certification exam
 type Exam struct {
@@ -182,13 +172,6 @@ type PracticalLab struct {
 }
 
 // LabEnvironment defines lab sandbox environment
-type LabEnvironment struct {
-	ContainerImage  string            `json:"container_image"`
-	Resources       ResourceLimits    `json:"resources"`
-	PreloadedFiles  map[string]string `json:"preloaded_files"`
-	AllowedPorts    []int             `json:"allowed_ports"`
-	NetworkAccess   bool              `json:"network_access"`
-}
 
 // ResourceLimits defines resource constraints for lab environment
 type ResourceLimits struct {
@@ -238,23 +221,8 @@ type Answer struct {
 }
 
 // LabResult represents practical lab submission result
-type LabResult struct {
-	LabID              string    `json:"lab_id"`
-	SubmissionTime     time.Time `json:"submission_time"`
-	ValidationResults  []ValidationResult `json:"validation_results"`
-	TotalPointsEarned  int       `json:"total_points_earned"`
-	TotalPointsPossible int      `json:"total_points_possible"`
-	ManualReviewNeeded bool      `json:"manual_review_needed"`
-	ReviewerFeedback   string    `json:"reviewer_feedback"`
-}
 
 // ValidationResult represents result of a validation test
-type ValidationResult struct {
-	TestID       string `json:"test_id"`
-	Passed       bool   `json:"passed"`
-	ActualOutput string `json:"actual_output"`
-	PointsEarned int    `json:"points_earned"`
-}
 
 // ProctoringFlag represents suspicious activity during exam
 type ProctoringFlag struct {
@@ -281,19 +249,6 @@ type StudyProgress struct {
 }
 
 // ContinuingEducation tracks CEU credits for renewal
-type ContinuingEducation struct {
-	ID            string    `json:"id"`
-	UserID        string    `json:"user_id"`
-	CertificateID string    `json:"certificate_id"`
-	ActivityType  string    `json:"activity_type"`
-	Title         string    `json:"title"`
-	Description   string    `json:"description"`
-	CEUCredits    int       `json:"ceu_credits"`
-	CompletionDate time.Time `json:"completion_date"`
-	VerificationURL string  `json:"verification_url"`
-	ApprovalStatus string   `json:"approval_status"`
-	CreatedAt     time.Time `json:"created_at"`
-}
 
 // CertificationPlatform manages the entire certification system
 type CertificationPlatform struct {
@@ -327,12 +282,6 @@ type ProctoringService interface {
 }
 
 // LabEnvironmentManager manages hands-on lab environments
-type LabEnvironmentManager interface {
-	CreateEnvironment(ctx context.Context, lab *PracticalLab, userID string) (string, error)
-	ExecuteValidation(ctx context.Context, envID string, test ValidationTest) (*ValidationResult, error)
-	DestroyEnvironment(ctx context.Context, envID string) error
-	GetEnvironmentStatus(ctx context.Context, envID string) (string, error)
-}
 
 // NotificationService handles user notifications
 type NotificationService interface {

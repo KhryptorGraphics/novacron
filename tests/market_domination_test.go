@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"novacron/backend/business/revenue"
-	"novacron/backend/competitive"
-	"novacron/backend/business/verticals"
-	"novacron/backend/partners"
+	"github.com/khryptorgraphics/novacron/backend/business/revenue"
+	"github.com/khryptorgraphics/novacron/backend/competitive"
+	"github.com/khryptorgraphics/novacron/backend/business/verticals"
+	"github.com/khryptorgraphics/novacron/backend/partners"
 )
 
 // TestRevenueAccelerationEngine tests the $1B ARR revenue acceleration engine

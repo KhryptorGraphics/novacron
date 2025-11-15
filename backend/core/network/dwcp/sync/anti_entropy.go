@@ -3,33 +3,35 @@ package sync
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"math/big"
 	"sync"
 	"time"
 
+	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/sync/crdt"
 	"go.uber.org/zap"
 )
 
 // AntiEntropyService implements the anti-entropy protocol for eventual consistency
 type AntiEntropyService struct {
-	engine    *ASSEngine
-	interval  time.Duration
-	ctx       context.Context
-	cancel    context.CancelFunc
-	logger    *zap.Logger
-	stats     *AntiEntropyStats
-	statsMu   sync.RWMutex
+	engine   *ASSEngine
+	interval time.Duration
+	ctx      context.Context
+	cancel   context.CancelFunc
+	logger   *zap.Logger
+	stats    *AntiEntropyStats
+	statsMu  sync.RWMutex
 }
 
 // AntiEntropyStats tracks anti-entropy statistics
 type AntiEntropyStats struct {
-	TotalSyncs       int64         `json:"total_syncs"`
-	SuccessfulSyncs  int64         `json:"successful_syncs"`
-	FailedSyncs      int64         `json:"failed_syncs"`
-	LastSyncTime     time.Time     `json:"last_sync_time"`
-	AverageSyncTime  time.Duration `json:"average_sync_time"`
-	TotalSyncTime    time.Duration `json:"total_sync_time"`
-	KeysExchanged    int64         `json:"keys_exchanged"`
+	TotalSyncs      int64         `json:"total_syncs"`
+	SuccessfulSyncs int64         `json:"successful_syncs"`
+	FailedSyncs     int64         `json:"failed_syncs"`
+	LastSyncTime    time.Time     `json:"last_sync_time"`
+	AverageSyncTime time.Duration `json:"average_sync_time"`
+	TotalSyncTime   time.Duration `json:"total_sync_time"`
+	KeysExchanged   int64         `json:"keys_exchanged"`
 }
 
 // NewAntiEntropyService creates a new anti-entropy service
@@ -314,9 +316,6 @@ type BloomFilter struct {
 	hashFns int
 }
 
-// Import json package
-import "encoding/json"
-
-// Import Digest and Delta types
+// Type aliases for CRDT types
 type Digest = crdt.Digest
 type Delta = crdt.Delta

@@ -103,7 +103,7 @@ func (g *GeographicOptimizer) calculateNodeScore(vm *VM, node *Node, constraints
 
 		// Uptime constraint
 		if constraints.RequiredUptime > 0 {
-			uptimeRatio := float64(node.Uptime) / float64(time.Hour * 24 * 365)
+			uptimeRatio := float64(node.Uptime) / float64(time.Hour*24*365)
 			if uptimeRatio < constraints.RequiredUptime {
 				score *= 0.1 // Heavy penalty for not meeting uptime requirement
 			}
@@ -151,7 +151,7 @@ func (g *GeographicOptimizer) calculateProximityScore(vm *VM, node *Node) float6
 // calculateReliabilityScore calculates score based on node reliability
 func (g *GeographicOptimizer) calculateReliabilityScore(node *Node) float64 {
 	// Uptime score (normalized to 0-1)
-	uptimeScore := float64(node.Uptime) / float64(time.Hour * 24 * 365) // Assume max uptime is 1 year
+	uptimeScore := float64(node.Uptime) / float64(time.Hour*24*365) // Assume max uptime is 1 year
 
 	// Failure rate score (inverse, lower is better)
 	failureScore := 1.0 / (1.0 + node.FailureRate)
@@ -256,7 +256,7 @@ func (g *GeographicOptimizer) calculateGreatCircleDistance(lat1, lon1, lat2, lon
 
 	a := math.Sin(dlat/2)*math.Sin(dlat/2) +
 		math.Cos(lat1Rad)*math.Cos(lat2Rad)*
-		math.Sin(dlon/2)*math.Sin(dlon/2)
+			math.Sin(dlon/2)*math.Sin(dlon/2)
 
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 
@@ -348,7 +348,7 @@ func (gp *GeographicPlacer) Place(ctx context.Context, vm *VM, nodes []*Node, co
 
 // SetRegions sets the regions for the placer
 func (gp *GeographicPlacer) SetRegions(regions map[string]*Region) {
-	for id, region := range regions {
+	for _, region := range regions {
 		gp.optimizer.AddRegion(region)
 	}
 }

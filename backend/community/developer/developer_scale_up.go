@@ -4,11 +4,20 @@ package developer
 
 import (
 	"context"
-	"encoding/json"
+// 	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 )
+
+type InPersonTrainingProgram struct { Name string; Location string; Duration int }
+
+
+type HybridTrainingProgram struct { Name string; OnlineHours int; InPersonHours int }
+
+
+type CulturalAdaptationEngine struct { Enabled bool; Strategies []string }
+
 
 // DeveloperScaleUpEngine manages massive developer ecosystem growth
 type DeveloperScaleUpEngine struct {

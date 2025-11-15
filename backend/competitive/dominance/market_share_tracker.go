@@ -315,7 +315,7 @@ func (sfe *ShareForecastEngine) Forecast(months int) ([]ShareDataPoint, error) {
 	intercept := (sumY - slope*sumX) / float64(n)
 
 	// Generate forecast
-	lastShare := sfe.historicalData[n-1].Share
+	_ = sfe.historicalData[n-1].Share  // lastShare declared but not used
 	lastTime := sfe.historicalData[n-1].Timestamp
 
 	for i := 0; i < months; i++ {

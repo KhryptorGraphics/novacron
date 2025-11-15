@@ -6,24 +6,24 @@ import (
 	"sync"
 	"time"
 
-	"github.com/novacron/backend/core/autonomous"
+	"github.com/khryptorgraphics/novacron/backend/core/autonomous"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
 
 // HealingEngine provides autonomous self-healing capabilities
 type HealingEngine struct {
-	config          *autonomous.AutonomousConfig
-	logger          *zap.Logger
-	faultDetector   *FaultDetector
+	config            *autonomous.AutonomousConfig
+	logger            *zap.Logger
+	faultDetector     *FaultDetector
 	rootCauseAnalyzer *RootCauseAnalyzer
-	remediator      *Remediator
-	predictiveEngine *PredictiveEngine
-	metrics         *HealingMetrics
-	mu              sync.RWMutex
-	healingHistory  []*HealingEvent
-	activeHealing   map[string]*HealingEvent
-	stopCh          chan struct{}
+	remediator        *Remediator
+	predictiveEngine  *PredictiveEngine
+	metrics           *HealingMetrics
+	mu                sync.RWMutex
+	healingHistory    []*HealingEvent
+	activeHealing     map[string]*HealingEvent
+	stopCh            chan struct{}
 }
 
 // FaultDetector detects system faults in sub-second time
@@ -47,12 +47,12 @@ type RootCauseAnalyzer struct {
 
 // Remediator executes automated remediation actions
 type Remediator struct {
-	logger         *zap.Logger
-	actionLibrary  map[autonomous.HealingAction]RemediationAction
-	executor       *ActionExecutor
-	validator      *ActionValidator
-	rollbackStack  []*RollbackAction
-	mu             sync.RWMutex
+	logger        *zap.Logger
+	actionLibrary map[autonomous.HealingAction]RemediationAction
+	executor      *ActionExecutor
+	validator     *ActionValidator
+	rollbackStack []*RollbackAction
+	mu            sync.RWMutex
 }
 
 // PredictiveEngine predicts failures before they occur
@@ -66,18 +66,18 @@ type PredictiveEngine struct {
 
 // HealingEvent represents a healing action taken
 type HealingEvent struct {
-	ID            string
-	Timestamp     time.Time
-	FaultType     string
-	RootCause     *RootCause
-	Action        autonomous.HealingAction
-	Status        HealingStatus
-	Duration      time.Duration
-	Success       bool
-	ErrorMessage  string
-	PreState      *SystemState
-	PostState     *SystemState
-	Confidence    float64
+	ID           string
+	Timestamp    time.Time
+	FaultType    string
+	RootCause    *RootCause
+	Action       autonomous.HealingAction
+	Status       HealingStatus
+	Duration     time.Duration
+	Success      bool
+	ErrorMessage string
+	PreState     *SystemState
+	PostState    *SystemState
+	Confidence   float64
 }
 
 // HealingStatus represents the status of a healing action
@@ -93,14 +93,14 @@ const (
 
 // SystemState captures the system state
 type SystemState struct {
-	Timestamp    time.Time
-	CPUUsage     float64
-	MemoryUsage  float64
-	DiskUsage    float64
-	NetworkLoad  float64
+	Timestamp     time.Time
+	CPUUsage      float64
+	MemoryUsage   float64
+	DiskUsage     float64
+	NetworkLoad   float64
 	ServiceHealth map[string]bool
-	VMStatus     map[string]string
-	Errors       []string
+	VMStatus      map[string]string
+	Errors        []string
 }
 
 // RootCause represents the identified root cause
@@ -135,15 +135,15 @@ type RemediationAction interface {
 // NewHealingEngine creates a new healing engine
 func NewHealingEngine(config *autonomous.AutonomousConfig, logger *zap.Logger) *HealingEngine {
 	return &HealingEngine{
-		config:          config,
-		logger:          logger,
-		faultDetector:   NewFaultDetector(logger),
+		config:            config,
+		logger:            logger,
+		faultDetector:     NewFaultDetector(logger),
 		rootCauseAnalyzer: NewRootCauseAnalyzer(logger),
-		remediator:      NewRemediator(logger),
-		predictiveEngine: NewPredictiveEngine(config.PredictionHorizon, logger),
-		metrics:         NewHealingMetrics(),
-		activeHealing:   make(map[string]*HealingEvent),
-		stopCh:          make(chan struct{}),
+		remediator:        NewRemediator(logger),
+		predictiveEngine:  NewPredictiveEngine(config.PredictionHorizon, logger),
+		metrics:           NewHealingMetrics(),
+		activeHealing:     make(map[string]*HealingEvent),
+		stopCh:            make(chan struct{}),
 	}
 }
 
@@ -376,12 +376,12 @@ func (he *HealingEngine) preventFailure(ctx context.Context, prediction *Failure
 
 	// Create preventive healing event
 	event := &HealingEvent{
-		ID:        generateID(),
-		Timestamp: time.Now(),
-		FaultType: "predicted_" + prediction.FailureType,
-		Action:    he.selectPreventiveAction(prediction),
-		Status:    HealingPending,
-		PreState:  he.captureSystemState(),
+		ID:         generateID(),
+		Timestamp:  time.Now(),
+		FaultType:  "predicted_" + prediction.FailureType,
+		Action:     he.selectPreventiveAction(prediction),
+		Status:     HealingPending,
+		PreState:   he.captureSystemState(),
 		Confidence: prediction.Probability,
 	}
 

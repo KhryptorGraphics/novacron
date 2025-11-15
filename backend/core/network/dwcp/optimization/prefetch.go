@@ -1,7 +1,8 @@
 package optimization
 
 import (
-	_ "unsafe"
+	"sync/atomic"
+	"unsafe"
 )
 
 //go:linkname prefetch runtime.prefetch
@@ -161,9 +162,9 @@ func (p *PaddedUint64) Add(delta uint64) uint64 {
 
 // StrideAccess optimizes stride-based memory access
 type StrideAccess struct {
-	data      []byte
-	stride    int
-	prefetch  *Prefetcher
+	data     []byte
+	stride   int
+	prefetch *Prefetcher
 }
 
 // NewStrideAccess creates a stride access optimizer
@@ -197,10 +198,10 @@ func (sa *StrideAccess) Access(index int, fn func([]byte)) {
 type TemporalLocality int
 
 const (
-	TemporalNone TemporalLocality = iota // No temporal locality
-	TemporalLow                           // Low temporal locality
-	TemporalMedium                        // Medium temporal locality
-	TemporalHigh                          // High temporal locality
+	TemporalNone   TemporalLocality = iota // No temporal locality
+	TemporalLow                            // Low temporal locality
+	TemporalMedium                         // Medium temporal locality
+	TemporalHigh                           // High temporal locality
 )
 
 // NonTemporalLoad performs non-temporal load (bypass cache)
@@ -308,8 +309,3 @@ func (hpo *HugePageOptimizer) AlignToHugePage(size int) int {
 func (hpo *HugePageOptimizer) IsAligned(addr uintptr) bool {
 	return addr&uintptr(hpo.pageSize-1) == 0
 }
-
-import (
-	"sync/atomic"
-	"unsafe"
-)

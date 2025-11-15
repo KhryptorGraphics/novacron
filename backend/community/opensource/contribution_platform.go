@@ -355,7 +355,7 @@ type ContributionStats struct {
 	RejectedPRs         int
 	AverageReviewTime   float64 // hours
 	AverageMergeTime    float64 // hours
-	TotalRewardsP aid    float64
+	TotalRewardsPaid    float64
 	CashRewards         float64
 	CreditRewards       float64
 	TopContributors     []string

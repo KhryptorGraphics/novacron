@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"runtime/trace"
+	"sync/atomic"
 	"time"
 )
 
@@ -211,14 +212,14 @@ func (pm *PerformanceMetrics) Stats() Stats {
 	}
 
 	return Stats{
-		Requests:      requests,
-		Errors:        errors,
+		Requests:       requests,
+		Errors:         errors,
 		BytesProcessed: bytes,
-		Elapsed:       elapsed,
-		AvgLatency:    avgLatency,
-		MinLatency:    pm.minLatency,
-		MaxLatency:    pm.maxLatency,
-		Throughput:    throughput,
+		Elapsed:        elapsed,
+		AvgLatency:     avgLatency,
+		MinLatency:     pm.minLatency,
+		MaxLatency:     pm.maxLatency,
+		Throughput:     throughput,
 	}
 }
 
@@ -340,5 +341,3 @@ func PrintMemoryStats() {
 	fmt.Printf("  HeapInuse: %d MB\n", stats.HeapInuse/1024/1024)
 	fmt.Printf("  HeapObjects: %d\n", stats.HeapObjects)
 }
-
-import "sync/atomic"
