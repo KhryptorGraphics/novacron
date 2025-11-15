@@ -3,6 +3,7 @@ package testing
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"fmt"
 	"math"
 	mathrand "math/rand"
 	"time"
@@ -56,18 +57,18 @@ func (wg *WorkloadGenerator) fillWithRealisticData(data []byte) {
 	// 2. Repetitive patterns (40% - OS code, libraries, page cache)
 	repetitiveRatio := 0.4
 	repetitiveBytes := int(float64(size) * repetitiveRatio)
-	wg.fillRepetitivePattern(data[offset:offset+repetitiveBytes])
+	wg.fillRepetitivePattern(data[offset : offset+repetitiveBytes])
 	offset += repetitiveBytes
 
 	// 3. Low-entropy data (20% - text, logs, structured data)
 	lowEntropyRatio := 0.2
 	lowEntropyBytes := int(float64(size) * lowEntropyRatio)
-	wg.fillLowEntropyData(data[offset:offset+lowEntropyBytes])
+	wg.fillLowEntropyData(data[offset : offset+lowEntropyBytes])
 	offset += lowEntropyBytes
 
 	// 4. High-entropy data (10% - encrypted data, random working set)
 	highEntropyBytes := size - offset
-	rand.Read(data[offset:offset+highEntropyBytes])
+	rand.Read(data[offset : offset+highEntropyBytes])
 }
 
 // fillRepetitivePattern fills with repetitive patterns
@@ -156,9 +157,9 @@ func (wg *WorkloadGenerator) GenerateMemorySnapshot(vmID string, size int64) *Me
 		Size:      size,
 		Data:      data,
 		Metadata: MemoryMetadata{
-			ZeroPages:      wg.countZeroPages(data),
-			CompressRatio:  wg.estimateCompressibility(data),
-			Entropy:        wg.calculateEntropy(data),
+			ZeroPages:     wg.countZeroPages(data),
+			CompressRatio: wg.estimateCompressibility(data),
+			Entropy:       wg.calculateEntropy(data),
 		},
 	}
 }

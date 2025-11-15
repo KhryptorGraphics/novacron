@@ -25,7 +25,7 @@ type MonitoringAPI struct {
 	capacityPlanner  *CapacityPlanner
 
 	// Configuration
-	region           string
+	region string
 }
 
 // TimeRange represents a time range for queries
@@ -34,20 +34,20 @@ type TimeRange struct {
 	End   time.Time
 }
 
-// MonitoringConfig configures the monitoring system
-type MonitoringConfig struct {
-	Region          string
-	PrometheusURL   string
-	GrafanaURL      string
-	GrafanaAPIKey   string
-	JaegerEndpoint  string
+// APIConfig configures the monitoring API connections
+type APIConfig struct {
+	Region           string
+	PrometheusURL    string
+	GrafanaURL       string
+	GrafanaAPIKey    string
+	JaegerEndpoint   string
 	ElasticsearchURL string
 }
 
 // NewMonitoringAPI creates a new monitoring API
-func NewMonitoringAPI(config *MonitoringConfig) (*MonitoringAPI, error) {
+func NewMonitoringAPI(apiConfig *APIConfig, monConfig *MonitoringConfig) (*MonitoringAPI, error) {
 	// Initialize metrics collector
-	metricsCollector, err := NewMetricsCollector(config.Region)
+	metricsCollector, err := NewMetricsCollector(apiConfig.Region)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create metrics collector: %w", err)
 	}
@@ -55,7 +55,7 @@ func NewMonitoringAPI(config *MonitoringConfig) (*MonitoringAPI, error) {
 	// Initialize tracing system
 	traceConfig := &TraceConfig{
 		ServiceName:    "dwcp",
-		JaegerEndpoint: config.JaegerEndpoint,
+		JaegerEndpoint: apiConfig.JaegerEndpoint,
 		SamplingRate:   0.1,
 		Strategy:       SamplingAdaptive,
 	}
@@ -66,17 +66,20 @@ func NewMonitoringAPI(config *MonitoringConfig) (*MonitoringAPI, error) {
 
 	// Initialize dashboard manager
 	dashboardConfig := &DashboardConfig{
-		GrafanaURL: config.GrafanaURL,
-		APIKey:     config.GrafanaAPIKey,
+		GrafanaURL: apiConfig.GrafanaURL,
+		APIKey:     apiConfig.GrafanaAPIKey,
 	}
 	dashboard := NewDashboardManager(dashboardConfig)
 
 	// Initialize other components
 	alerting := NewAlertingSystem()
-	anomalyDetector := NewAnomalyDetector()
+	anomalyDetector, err := NewAnomalyDetector(monConfig.Detector, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create anomaly detector: %w", err)
+	}
 	healthMonitor := NewHealthMonitor()
 	slaMonitor := NewSLAMonitor()
-	logAggregator := NewLogAggregator(config.ElasticsearchURL, "dwcp-logs")
+	logAggregator := NewLogAggregator(apiConfig.ElasticsearchURL, "dwcp-logs")
 	networkTelemetry := NewNetworkTelemetry()
 	profiler := NewProfiler()
 	capacityPlanner := NewCapacityPlanner()
@@ -93,7 +96,7 @@ func NewMonitoringAPI(config *MonitoringConfig) (*MonitoringAPI, error) {
 		networkTelemetry: networkTelemetry,
 		profiler:         profiler,
 		capacityPlanner:  capacityPlanner,
-		region:           config.Region,
+		region:           apiConfig.Region,
 	}
 
 	return api, nil

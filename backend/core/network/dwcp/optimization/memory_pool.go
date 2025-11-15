@@ -3,21 +3,23 @@ package optimization
 import (
 	"sync"
 	"sync/atomic"
+
+	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/optimization/lockfree"
 )
 
 // ObjectPool provides size-class based memory pooling
 type ObjectPool struct {
-	pools      []sync.Pool
-	sizeClass  []int
-	stats      poolStats
-	enableGC   bool
+	pools     []sync.Pool
+	sizeClass []int
+	stats     poolStats
+	enableGC  bool
 }
 
 type poolStats struct {
-	allocations uint64
+	allocations   uint64
 	deallocations uint64
-	hits uint64
-	misses uint64
+	hits          uint64
+	misses        uint64
 }
 
 // NewObjectPool creates a new object pool with predefined size classes
@@ -311,15 +313,8 @@ func (hpa *HugePageAllocator) Free(buf []byte) {
 	}
 }
 
-import (
-	"sync/atomic"
-)
-
 // LockFreeStack is imported from lockfree package
 type LockFreeStack = lockfree.LockFreeStack
-
-// Import lockfree package
-import "novacron/backend/core/network/dwcp/optimization/lockfree"
 
 // NewLockFreeStack creates a new lock-free stack
 func NewLockFreeStack() *LockFreeStack {

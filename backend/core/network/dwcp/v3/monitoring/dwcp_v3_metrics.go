@@ -2,7 +2,6 @@ package monitoring
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,10 +18,10 @@ type DWCPv3MetricsCollector struct {
 	mu sync.RWMutex
 
 	// Configuration
-	nodeID      string
-	clusterID   string
+	nodeID           string
+	clusterID        string
 	enablePrometheus bool
-	logger      *zap.Logger
+	logger           *zap.Logger
 
 	// Mode-specific metrics
 	datacenterMetrics *ModeMetrics
@@ -65,10 +64,10 @@ type ModeMetrics struct {
 	RDMABandwidthUse float64 // percentage
 
 	// TCP metrics (internet)
-	TCPStreams        int32
+	TCPStreams          int32
 	TCPCompressionRatio float64
-	TCPPacketLoss     float64 // percentage
-	ByzantineEvents   int64
+	TCPPacketLoss       float64 // percentage
+	ByzantineEvents     int64
 
 	// Common metrics
 	AverageThroughput float64 // Mbps
@@ -104,15 +103,15 @@ type AMSTMetrics struct {
 type HDEMetrics struct {
 	mu sync.RWMutex
 
-	CompressionsTotal     int64
-	DecompressionsTotal   int64
-	BytesOriginal         int64
-	BytesCompressed       int64
-	CompressionRatio      float64
-	DeltaHitRate          float64 // percentage
-	MLSelectionAccuracy   float64 // percentage
-	CRDTMerges            int64
-	CRDTConflicts         int64
+	CompressionsTotal      int64
+	DecompressionsTotal    int64
+	BytesOriginal          int64
+	BytesCompressed        int64
+	CompressionRatio       float64
+	DeltaHitRate           float64 // percentage
+	MLSelectionAccuracy    float64 // percentage
+	CRDTMerges             int64
+	CRDTConflicts          int64
 	AverageCompressionTime time.Duration
 
 	// Algorithm distribution
@@ -165,21 +164,21 @@ type ACPMetrics struct {
 type ITPMetrics struct {
 	mu sync.RWMutex
 
-	PlacementDecisions    int64
-	OptimalPlacements     int64
-	SuboptimalPlacements  int64
-	PlacementScore        float64 // 0-100
-	MLPredictionAccuracy  float64 // percentage
+	PlacementDecisions      int64
+	OptimalPlacements       int64
+	SuboptimalPlacements    int64
+	PlacementScore          float64 // 0-100
+	MLPredictionAccuracy    float64 // percentage
 	GeographicOptimizations int64
-	CostOptimizations     int64
-	AvgPlacementTime      time.Duration
+	CostOptimizations       int64
+	AvgPlacementTime        time.Duration
 }
 
 // PrometheusMetrics wraps Prometheus metrics
 type PrometheusMetrics struct {
 	// Mode metrics
-	ModeSwitches *prometheus.CounterVec
-	ModeLatency  *prometheus.HistogramVec
+	ModeSwitches   *prometheus.CounterVec
+	ModeLatency    *prometheus.HistogramVec
 	ModeThroughput *prometheus.GaugeVec
 
 	// Component metrics
@@ -188,13 +187,13 @@ type PrometheusMetrics struct {
 	ComponentErrors     *prometheus.CounterVec
 
 	// Transfer metrics
-	BytesTransferred *prometheus.CounterVec
+	BytesTransferred  *prometheus.CounterVec
 	MigrationDuration *prometheus.HistogramVec
 	MigrationSuccess  *prometheus.CounterVec
 
 	// Resource metrics
-	ActiveStreams    *prometheus.GaugeVec
-	CompressionRatio *prometheus.GaugeVec
+	ActiveStreams      *prometheus.GaugeVec
+	CompressionRatio   *prometheus.GaugeVec
 	PredictionAccuracy *prometheus.GaugeVec
 }
 
@@ -203,21 +202,21 @@ func NewDWCPv3MetricsCollector(nodeID, clusterID string, enablePrometheus bool, 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	collector := &DWCPv3MetricsCollector{
-		nodeID:           nodeID,
-		clusterID:        clusterID,
-		enablePrometheus: enablePrometheus,
-		logger:           logger,
+		nodeID:            nodeID,
+		clusterID:         clusterID,
+		enablePrometheus:  enablePrometheus,
+		logger:            logger,
 		datacenterMetrics: newModeMetrics("datacenter"),
 		internetMetrics:   newModeMetrics("internet"),
 		hybridMetrics:     newModeMetrics("hybrid"),
-		amstMetrics:      &AMSTMetrics{},
-		hdeMetrics:       &HDEMetrics{AlgorithmUsage: make(map[string]int64)},
-		pbaMetrics:       &PBAMetrics{},
-		assMetrics:       &ASSMetrics{},
-		acpMetrics:       &ACPMetrics{},
-		itpMetrics:       &ITPMetrics{},
-		ctx:              ctx,
-		cancel:           cancel,
+		amstMetrics:       &AMSTMetrics{},
+		hdeMetrics:        &HDEMetrics{AlgorithmUsage: make(map[string]int64)},
+		pbaMetrics:        &PBAMetrics{},
+		assMetrics:        &ASSMetrics{},
+		acpMetrics:        &ACPMetrics{},
+		itpMetrics:        &ITPMetrics{},
+		ctx:               ctx,
+		cancel:            cancel,
 	}
 
 	collector.currentMode.Store(upgrade.ModeHybrid)
@@ -576,12 +575,12 @@ func (c *DWCPv3MetricsCollector) GetComprehensiveMetrics() map[string]interface{
 		"cluster_id": c.clusterID,
 		"mode":       mode.String(),
 		"global": map[string]interface{}{
-			"total_migrations":       c.totalMigrations.Load(),
-			"successful_migrations":  c.successfulMigrations.Load(),
-			"failed_migrations":      c.failedMigrations.Load(),
+			"total_migrations":        c.totalMigrations.Load(),
+			"successful_migrations":   c.successfulMigrations.Load(),
+			"failed_migrations":       c.failedMigrations.Load(),
 			"total_bytes_transferred": c.totalBytesTransferred.Load(),
-			"total_mode_switches":    c.totalModeSwitches.Load(),
-			"success_rate":           c.calculateSuccessRate(),
+			"total_mode_switches":     c.totalModeSwitches.Load(),
+			"success_rate":            c.calculateSuccessRate(),
 		},
 	}
 
@@ -619,12 +618,12 @@ func (c *DWCPv3MetricsCollector) getHDEMetrics() map[string]interface{} {
 	c.hdeMetrics.mu.RLock()
 	defer c.hdeMetrics.mu.RUnlock()
 	return map[string]interface{}{
-		"compressions_total":   c.hdeMetrics.CompressionsTotal,
-		"decompression_total":  c.hdeMetrics.DecompressionsTotal,
-		"compression_ratio":    c.hdeMetrics.CompressionRatio,
-		"delta_hit_rate":       c.hdeMetrics.DeltaHitRate,
-		"crdt_merges":          c.hdeMetrics.CRDTMerges,
-		"algorithm_usage":      c.hdeMetrics.AlgorithmUsage,
+		"compressions_total":  c.hdeMetrics.CompressionsTotal,
+		"decompression_total": c.hdeMetrics.DecompressionsTotal,
+		"compression_ratio":   c.hdeMetrics.CompressionRatio,
+		"delta_hit_rate":      c.hdeMetrics.DeltaHitRate,
+		"crdt_merges":         c.hdeMetrics.CRDTMerges,
+		"algorithm_usage":     c.hdeMetrics.AlgorithmUsage,
 	}
 }
 
@@ -632,12 +631,12 @@ func (c *DWCPv3MetricsCollector) getPBAMetrics() map[string]interface{} {
 	c.pbaMetrics.mu.RLock()
 	defer c.pbaMetrics.mu.RUnlock()
 	return map[string]interface{}{
-		"total_predictions":       c.pbaMetrics.TotalPredictions,
-		"datacenter_predictions":  c.pbaMetrics.DatacenterPredictions,
-		"internet_predictions":    c.pbaMetrics.InternetPredictions,
-		"prediction_accuracy":     c.pbaMetrics.PredictionAccuracy,
-		"avg_prediction_latency":  c.pbaMetrics.AvgPredictionLatency.String(),
-		"max_prediction_latency":  c.pbaMetrics.MaxPredictionLatency.String(),
+		"total_predictions":      c.pbaMetrics.TotalPredictions,
+		"datacenter_predictions": c.pbaMetrics.DatacenterPredictions,
+		"internet_predictions":   c.pbaMetrics.InternetPredictions,
+		"prediction_accuracy":    c.pbaMetrics.PredictionAccuracy,
+		"avg_prediction_latency": c.pbaMetrics.AvgPredictionLatency.String(),
+		"max_prediction_latency": c.pbaMetrics.MaxPredictionLatency.String(),
 	}
 }
 
@@ -645,12 +644,12 @@ func (c *DWCPv3MetricsCollector) getASSMetrics() map[string]interface{} {
 	c.assMetrics.mu.RLock()
 	defer c.assMetrics.mu.RUnlock()
 	return map[string]interface{}{
-		"sync_operations":       c.assMetrics.SyncOperations,
-		"successful_syncs":      c.assMetrics.SuccessfulSyncs,
-		"failed_syncs":          c.assMetrics.FailedSyncs,
-		"conflict_resolutions":  c.assMetrics.ConflictResolutions,
-		"full_syncs":            c.assMetrics.FullSyncs,
-		"incremental_syncs":     c.assMetrics.IncrementalSyncs,
+		"sync_operations":      c.assMetrics.SyncOperations,
+		"successful_syncs":     c.assMetrics.SuccessfulSyncs,
+		"failed_syncs":         c.assMetrics.FailedSyncs,
+		"conflict_resolutions": c.assMetrics.ConflictResolutions,
+		"full_syncs":           c.assMetrics.FullSyncs,
+		"incremental_syncs":    c.assMetrics.IncrementalSyncs,
 	}
 }
 
@@ -658,12 +657,12 @@ func (c *DWCPv3MetricsCollector) getACPMetrics() map[string]interface{} {
 	c.acpMetrics.mu.RLock()
 	defer c.acpMetrics.mu.RUnlock()
 	return map[string]interface{}{
-		"consensus_operations":  c.acpMetrics.ConsensusOperations,
-		"raft_consensus":        c.acpMetrics.RaftConsensus,
-		"pbft_consensus":        c.acpMetrics.PBFTConsensus,
-		"avg_consensus_time":    c.acpMetrics.AvgConsensusTime.String(),
-		"byzantine_detections":  c.acpMetrics.ByzantineDetections,
-		"failovers":             c.acpMetrics.Failovers,
+		"consensus_operations": c.acpMetrics.ConsensusOperations,
+		"raft_consensus":       c.acpMetrics.RaftConsensus,
+		"pbft_consensus":       c.acpMetrics.PBFTConsensus,
+		"avg_consensus_time":   c.acpMetrics.AvgConsensusTime.String(),
+		"byzantine_detections": c.acpMetrics.ByzantineDetections,
+		"failovers":            c.acpMetrics.Failovers,
 	}
 }
 
@@ -671,10 +670,10 @@ func (c *DWCPv3MetricsCollector) getITPMetrics() map[string]interface{} {
 	c.itpMetrics.mu.RLock()
 	defer c.itpMetrics.mu.RUnlock()
 	return map[string]interface{}{
-		"placement_decisions":     c.itpMetrics.PlacementDecisions,
-		"optimal_placements":      c.itpMetrics.OptimalPlacements,
-		"placement_score":         c.itpMetrics.PlacementScore,
-		"ml_prediction_accuracy":  c.itpMetrics.MLPredictionAccuracy,
+		"placement_decisions":    c.itpMetrics.PlacementDecisions,
+		"optimal_placements":     c.itpMetrics.OptimalPlacements,
+		"placement_score":        c.itpMetrics.PlacementScore,
+		"ml_prediction_accuracy": c.itpMetrics.MLPredictionAccuracy,
 	}
 }
 

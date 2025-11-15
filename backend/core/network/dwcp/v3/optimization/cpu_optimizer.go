@@ -17,20 +17,20 @@ type CPUOptimizerConfig struct {
 	WorkerIdleTimeout time.Duration
 
 	// GOMAXPROCS settings
-	MaxProcs          int // 0 = auto-detect
+	MaxProcs int // 0 = auto-detect
 
 	// Batch processing
-	EnableBatching    bool
-	BatchSize         int
-	BatchTimeout      time.Duration
+	EnableBatching bool
+	BatchSize      int
+	BatchTimeout   time.Duration
 
 	// Compression optimization
 	CompressionWorkers int
 	CompressionLevel   int // 1-9, auto-adjusted
 
 	// LSTM inference optimization
-	LSTMBatchSize      int
-	LSTMParallelism    int
+	LSTMBatchSize   int
+	LSTMParallelism int
 
 	// Consensus optimization
 	ConsensusBatchSize int
@@ -76,9 +76,9 @@ type CPUOptimizer struct {
 	batchProcessors map[string]*batchProcessor
 
 	// Object pools
-	bufferPool     *sync.Pool
+	bufferPool      *sync.Pool
 	compressionPool *sync.Pool
-	signaturePool  *sync.Pool
+	signaturePool   *sync.Pool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -359,9 +359,9 @@ func (o *CPUOptimizer) PutSignatureContext(ctx *SignatureContext) {
 
 // OptimizeAMST optimizes AMST v3 stream management.
 type AMSTOptimization struct {
-	optimizer    *CPUOptimizer
-	streamPool   *workerPool
-	connectionPool *ConnectionPool
+	optimizer      *CPUOptimizer
+	streamPool     *workerPool
+	connectionPool *CPUConnectionPool
 }
 
 // NewAMSTOptimization creates AMST optimization.
@@ -376,7 +376,7 @@ func NewAMSTOptimization(optimizer *CPUOptimizer) (*AMSTOptimization, error) {
 	}
 
 	// Create connection pool
-	opt.connectionPool = NewConnectionPool(optimizer.config.ConnectionPoolSize)
+	opt.connectionPool = NewCPUConnectionPool(optimizer.config.ConnectionPoolSize)
 
 	return opt, nil
 }
@@ -395,14 +395,14 @@ func (a *AMSTOptimization) ProcessStream(streamID string, data []byte) error {
 
 // OptimizeHDE optimizes HDE v3 compression.
 type HDEOptimization struct {
-	optimizer         *CPUOptimizer
+	optimizer          *CPUOptimizer
 	compressionWorkers int
 }
 
 // NewHDEOptimization creates HDE optimization.
 func NewHDEOptimization(optimizer *CPUOptimizer) (*HDEOptimization, error) {
 	opt := &HDEOptimization{
-		optimizer:         optimizer,
+		optimizer:          optimizer,
 		compressionWorkers: optimizer.config.CompressionWorkers,
 	}
 
@@ -499,9 +499,9 @@ func (p *PBAOptimization) PredictBatch(inputs []interface{}) error {
 
 // OptimizeACP optimizes ACP v3 consensus.
 type ACPOptimization struct {
-	optimizer  *CPUOptimizer
-	batchSize  int
-	sigPool    int
+	optimizer *CPUOptimizer
+	batchSize int
+	sigPool   int
 }
 
 // NewACPOptimization creates ACP optimization.
@@ -542,10 +542,10 @@ func (o *CPUOptimizer) GetOptimizationStats() map[string]interface{} {
 	defer o.mu.RUnlock()
 
 	stats := map[string]interface{}{
-		"gomaxprocs": runtime.GOMAXPROCS(0),
-		"num_cpu":    runtime.NumCPU(),
-		"goroutines": runtime.NumGoroutine(),
-		"worker_pools": make(map[string]interface{}),
+		"gomaxprocs":       runtime.GOMAXPROCS(0),
+		"num_cpu":          runtime.NumCPU(),
+		"goroutines":       runtime.NumGoroutine(),
+		"worker_pools":     make(map[string]interface{}),
 		"batch_processors": make(map[string]interface{}),
 	}
 
@@ -588,13 +588,18 @@ func (o *CPUOptimizer) Close() error {
 
 // Placeholder types for compilation
 type CompressionContext struct{}
-func (c *CompressionContext) Reset() {}
+
+func (c *CompressionContext) Reset()                               {}
 func (c *CompressionContext) Compress(data []byte) ([]byte, error) { return data, nil }
 
 type SignatureContext struct{}
+
 func (s *SignatureContext) Reset() {}
 
-type ConnectionPool struct {
+// CPUConnectionPool is a stub for CPU-specific connection pooling
+// Renamed to avoid conflict with network_optimizer.ConnectionPool
+type CPUConnectionPool struct {
 	size int
 }
-func NewConnectionPool(size int) *ConnectionPool { return &ConnectionPool{size: size} }
+
+func NewCPUConnectionPool(size int) *CPUConnectionPool { return &CPUConnectionPool{size: size} }

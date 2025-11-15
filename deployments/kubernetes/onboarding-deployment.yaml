@@ -1,0 +1,223 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: onboarding
+  namespace: novacron-onboarding
+  labels:
+    app: onboarding
+    version: v1
+    component: backend
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: onboarding
+  template:
+    metadata:
+      labels:
+        app: onboarding
+        version: v1
+        component: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: onboarding-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:15-alpine
+        command:
+          - sh
+          - -c
+          - |
+            until pg_isready -h $(POSTGRES_HOST) -p 5432; do
+              echo "Waiting for PostgreSQL..."
+              sleep 2
+            done
+            echo "PostgreSQL is ready!"
+        env:
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: onboarding-config
+              key: db.host
+
+      - name: run-migrations
+        image: ghcr.io/novacron/onboarding:latest
+        command: ["/usr/local/bin/migrate"]
+        args:
+          - "-path"
+          - "/app/migrations"
+          - "-database"
+          - "$(DATABASE_URL)"
+          - "up"
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: onboarding-secrets
+              key: database-url
+
+      containers:
+      - name: onboarding
+        image: ghcr.io/novacron/onboarding:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+
+        env:
+        - name: APP_ENV
+          value: "production"
+        - name: SERVER_PORT
+          value: "8080"
+        - name: METRICS_PORT
+          value: "9090"
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: onboarding-config
+              key: log.level
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: onboarding-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: onboarding-secrets
+              key: redis-url
+        - name: BEADS_API_URL
+          valueFrom:
+            configMapKeyRef:
+              name: onboarding-config
+              key: beads.api.url
+        - name: BEADS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: onboarding-secrets
+              key: beads-api-key
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: onboarding-secrets
+              key: jwt-secret
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: onboarding-secrets
+              key: encryption-key
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 0
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 30
+
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+              - ALL
+
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        - name: logs
+          mountPath: /app/logs
+
+      volumes:
+      - name: config
+        configMap:
+          name: onboarding-config
+      - name: tmp
+        emptyDir: {}
+      - name: logs
+        emptyDir: {}
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - onboarding
+              topologyKey: kubernetes.io/hostname
+
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: onboarding
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: onboarding-sa
+  namespace: novacron-onboarding

@@ -216,14 +216,7 @@ type TimeRestrictions struct {
 	Timezone   string         `json:"timezone"`
 }
 
-type KeyStatus string
-
-const (
-	KeyStatusActive    KeyStatus = "active"
-	KeyStatusInactive  KeyStatus = "inactive"
-	KeyStatusSuspended KeyStatus = "suspended"
-	KeyStatusRevoked   KeyStatus = "revoked"
-)
+// KeyStatus is defined in security_types.go
 
 // RequestSigningService provides request signature verification
 type RequestSigningService struct {
@@ -286,14 +279,7 @@ type ThreatSignature struct {
 	UpdatedAt     time.Time         `json:"updated_at"`
 }
 
-type ThreatSeverity string
-
-const (
-	SeverityLow      ThreatSeverity = "low"
-	SeverityMedium   ThreatSeverity = "medium"
-	SeverityHigh     ThreatSeverity = "high"
-	SeverityCritical ThreatSeverity = "critical"
-)
+// ThreatSeverity and severity constants are defined in security_types.go
 
 // NewAPISecurityManager creates a comprehensive API security manager
 func NewAPISecurityManager(config *APISecurityConfig, auditLogger AuditLogger) (*APISecurityManager, error) {

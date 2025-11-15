@@ -153,7 +153,7 @@ type KeyStatus string
 
 const (
 	KeyStatusActive     KeyStatus = "active"
-	KeyStatusRotating   KeyStatus = "rotating"
+	 "rotating"
 	KeyStatusDeprecated KeyStatus = "deprecated"
 	KeyStatusRevoked    KeyStatus = "revoked"
 )

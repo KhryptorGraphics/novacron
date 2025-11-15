@@ -6,7 +6,6 @@ package devex
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync"
 	"time"
 )
@@ -418,7 +417,7 @@ type Solution struct {
 	Description string
 	Steps       []string
 	Code        string
-	Success Rate float64
+	SuccessRate float64
 	Difficulty  string
 }
 

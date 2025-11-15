@@ -25,27 +25,27 @@ type PredictionService struct {
 	cancel context.CancelFunc
 
 	// Model management
-	modelPath        string
-	retrainInterval  time.Duration
-	lastRetrain      time.Time
-	modelVersion     int
+	modelPath       string
+	retrainInterval time.Duration
+	lastRetrain     time.Time
+	modelVersion    int
 
 	// Prediction history
 	predictionHistory []PredictionHistoryEntry
 	maxHistory        int
 
 	// A/B testing
-	abTestEnabled   bool
-	alternateModel  *LSTMPredictor
-	abTestResults   *ABTestResults
+	abTestEnabled  bool
+	alternateModel *LSTMPredictor
+	abTestResults  *ABTestResults
 
 	// Prometheus metrics
-	predictionAccuracy   prometheus.Gauge
-	predictionLatency    prometheus.Histogram
-	modelVersionGauge    prometheus.Gauge
-	confidenceGauge      prometheus.Gauge
-	retrainCounter       prometheus.Counter
-	predictionCounter    prometheus.Counter
+	predictionAccuracy prometheus.Gauge
+	predictionLatency  prometheus.Histogram
+	modelVersionGauge  prometheus.Gauge
+	confidenceGauge    prometheus.Gauge
+	retrainCounter     prometheus.Counter
+	predictionCounter  prometheus.Counter
 }
 
 // BandwidthPrediction contains predicted network metrics
@@ -70,14 +70,14 @@ type PredictionHistoryEntry struct {
 
 // ABTestResults tracks A/B testing metrics
 type ABTestResults struct {
-	PrimaryAccuracy    float64
-	AlternateAccuracy  float64
-	PrimaryLatency     time.Duration
-	AlternateLatency   time.Duration
-	TestStartTime      time.Time
-	TestDuration       time.Duration
-	PredictionCount    int
-	WinningModel       string
+	PrimaryAccuracy   float64
+	AlternateAccuracy float64
+	PrimaryLatency    time.Duration
+	AlternateLatency  time.Duration
+	TestStartTime     time.Time
+	TestDuration      time.Duration
+	PredictionCount   int
+	WinningModel      string
 }
 
 // NewPredictionService creates a new prediction service
@@ -148,21 +148,36 @@ func (s *PredictionService) initMetrics() {
 }
 
 // Start begins the prediction service
-func (s *PredictionService) Start() error {
+// Implements the Lifecycle interface
+func (s *PredictionService) Start(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.ctx != nil {
+		return fmt.Errorf("prediction service already started")
+	}
+
+	// Create context for lifecycle management
+	s.ctx, s.cancel = context.WithCancel(ctx)
+
 	// Start data collection
-	s.collector.Start()
+	if s.collector != nil {
+		s.collector.Start()
+	}
 
-	// Wait for initial samples
-	time.Sleep(2 * time.Minute)
+	// Wait for initial samples (non-blocking)
+	go func() {
+		time.Sleep(2 * time.Minute)
 
-	// Start prediction update loop
-	go s.predictionLoop()
+		// Start prediction update loop
+		go s.predictionLoop()
 
-	// Start model retraining loop
-	go s.retrainLoop()
+		// Start model retraining loop
+		go s.retrainLoop()
 
-	// Start accuracy tracking loop
-	go s.accuracyTrackingLoop()
+		// Start accuracy tracking loop
+		go s.accuracyTrackingLoop()
+	}()
 
 	return nil
 }
@@ -430,8 +445,8 @@ func (s *PredictionService) runABTest(history []NetworkSample) {
 
 	// Get prediction from alternate model
 	startTime := time.Now()
-	altPrediction, err := s.alternateModel.Predict(history)
-	if err != nil {
+	_, altErr := s.alternateModel.Predict(history)
+	if altErr != nil {
 		return
 	}
 	altLatency := time.Since(startTime)
@@ -511,14 +526,31 @@ func (s *PredictionService) ExportMetrics(outputPath string) error {
 }
 
 // Stop stops the prediction service
-func (s *PredictionService) Stop() {
-	s.cancel()
-	s.collector.Stop()
-	s.predictor.Close()
+// Implements the Lifecycle interface
+func (s *PredictionService) Stop() error {
+	if s.cancel != nil {
+		s.cancel()
+	}
+	if s.collector != nil {
+		s.collector.Stop()
+	}
+	if s.predictor != nil {
+		s.predictor.Close()
+	}
 
 	if s.alternateModel != nil {
 		s.alternateModel.Close()
 	}
+
+	return nil
+}
+
+// IsRunning returns true if the prediction service is running
+// Implements the Lifecycle interface
+func (s *PredictionService) IsRunning() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ctx != nil && s.ctx.Err() == nil
 }
 
 // Helper functions

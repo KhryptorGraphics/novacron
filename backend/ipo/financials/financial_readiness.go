@@ -630,7 +630,7 @@ type Shareholder struct {
 
 	// Board representation
 	BoardSeats       int
-	Observer Rights  bool
+	ObserverRights   bool
 }
 
 // FairValueAnalysis (409A valuation)

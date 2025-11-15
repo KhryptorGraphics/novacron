@@ -74,9 +74,9 @@ func (m *Manager) initializeResilience() error {
 	rm.RegisterHealthCheck(resilience.NewThresholdHealthCheck(
 		"send-error-rate",
 		func() float64 {
-			if budget, ok := rm.errorBudgets["send"]; ok {
-				metrics := budget.GetMetrics()
-				return 1.0 - metrics.SuccessRate
+			metrics := rm.GetAllMetrics()
+			if budgetMetrics, ok := metrics.ErrorBudgets["send"]; ok {
+				return 1.0 - budgetMetrics.SuccessRate
 			}
 			return 0.0
 		},
@@ -87,9 +87,9 @@ func (m *Manager) initializeResilience() error {
 	rm.RegisterHealthCheck(resilience.NewThresholdHealthCheck(
 		"system-error-rate",
 		func() float64 {
-			if budget, ok := rm.errorBudgets["system"]; ok {
-				metrics := budget.GetMetrics()
-				return 1.0 - metrics.SuccessRate
+			metrics := rm.GetAllMetrics()
+			if budgetMetrics, ok := metrics.ErrorBudgets["system"]; ok {
+				return 1.0 - budgetMetrics.SuccessRate
 			}
 			return 0.0
 		},
@@ -98,7 +98,7 @@ func (m *Manager) initializeResilience() error {
 	))
 
 	// Set up degradation callbacks
-	rm.degradationMgr.SetLevelChangeCallback(func(old, new resilience.DegradationLevel) {
+	rm.SetDegradationLevelChangeCallback(func(old, new resilience.DegradationLevel) {
 		m.logger.Warn("DWCP degradation level changed",
 			zap.String("oldLevel", old.String()),
 			zap.String("newLevel", new.String()))
@@ -110,7 +110,7 @@ func (m *Manager) initializeResilience() error {
 	})
 
 	// Set up error budget callbacks
-	for name, budget := range rm.errorBudgets {
+	rm.ForEachErrorBudget(func(name string, budget *resilience.ErrorBudget) {
 		budgetName := name // Capture for closure
 		budget.SetBudgetExhaustedCallback(func() {
 			m.logger.Error("Error budget exhausted",
@@ -125,9 +125,9 @@ func (m *Manager) initializeResilience() error {
 				zap.String("budget", budgetName))
 
 			// Recover from degradation
-			rm.degradationMgr.Recover(budgetName)
+			rm.SetComponentDegradation(budgetName, resilience.LevelNormal)
 		})
-	}
+	})
 
 	// Register chaos faults (disabled by default)
 	rm.RegisterFault(resilience.NewLatencyFault("network-latency", 50*time.Millisecond, 200*time.Millisecond))
@@ -166,7 +166,7 @@ func (m *Manager) Receive(ctx context.Context) ([]byte, error) {
 	if m.resilience == nil {
 		// Fallback to direct receive if resilience not initialized
 		if m.transport != nil {
-			return m.transport.Receive()
+			return m.transport.Receive(0) // 0 = read all available data
 		}
 		return nil, nil
 	}
@@ -176,7 +176,7 @@ func (m *Manager) Receive(ctx context.Context) ([]byte, error) {
 		if m.transport == nil {
 			return nil
 		}
-		data, err := m.transport.Receive()
+		data, err := m.transport.Receive(0) // 0 = read all available data
 		result = data
 		return err
 	})

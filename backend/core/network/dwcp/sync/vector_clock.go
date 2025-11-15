@@ -67,21 +67,21 @@ func (vcm *VectorClockManager) Unmarshal(data []byte) error {
 
 // CausalTracker tracks causal ordering of events
 type CausalTracker struct {
-	nodeID         string
-	vectorClock    *VectorClockManager
+	nodeID          string
+	vectorClock     *VectorClockManager
 	deliveredEvents map[string]struct{}
-	pendingEvents  map[string]*CausalEvent
-	mu             sync.RWMutex
+	pendingEvents   map[string]*CausalEvent
+	mu              sync.RWMutex
 }
 
 // CausalEvent represents an event with causal dependencies
 type CausalEvent struct {
-	ID          string              `json:"id"`
-	Type        string              `json:"type"`
-	Timestamp   crdt.Timestamp      `json:"timestamp"`
-	VectorClock crdt.VectorClock    `json:"vector_clock"`
-	Payload     interface{}         `json:"payload"`
-	Dependencies []string           `json:"dependencies"`
+	ID           string           `json:"id"`
+	Type         string           `json:"type"`
+	Timestamp    crdt.Timestamp   `json:"timestamp"`
+	VectorClock  crdt.VectorClock `json:"vector_clock"`
+	Payload      interface{}      `json:"payload"`
+	Dependencies []string         `json:"dependencies"`
 }
 
 // NewCausalTracker creates a new causal tracker
@@ -155,7 +155,7 @@ func (ct *CausalTracker) checkPendingEvents() {
 	delivered := true
 	for delivered {
 		delivered = false
-		for id, event := range ct.pendingEvents {
+		for _, event := range ct.pendingEvents {
 			if ct.canDeliverInternal(event) {
 				ct.deliverEventInternal(event)
 				delivered = true

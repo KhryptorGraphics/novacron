@@ -1,0 +1,44 @@
+{
+  "model_type": "pytorch_lstm_autoencoder_consensus_latency",
+  "sequence_length": 30,
+  "n_features": 12,
+  "encoding_dim": 16,
+  "anomaly_threshold": 0.2918093509204461,
+  "feature_names": [
+    "queue_depth",
+    "proposals_pending",
+    "proposals_committed",
+    "latency_p50",
+    "latency_p95",
+    "latency_p99",
+    "leader_changes",
+    "quorum_size",
+    "active_nodes",
+    "network_tier",
+    "dwcp_mode",
+    "consensus_type"
+  ],
+  "training_date": "2025-11-14T15:32:02.884907",
+  "metrics": {
+    "precision": 1.0,
+    "recall": 0.9056356487549148,
+    "f1_score": 0.9504814305364512,
+    "detection_accuracy": 0.9528178243774574,
+    "roc_auc": 0.9818797534342387,
+    "confusion_matrix": [
+      [
+        3208,
+        0
+      ],
+      [
+        72,
+        691
+      ]
+    ],
+    "threshold": 0.2918093509204461,
+    "total_samples": 3971,
+    "true_anomalies": 763,
+    "predicted_anomalies": 691
+  },
+  "target_achieved": false
+}

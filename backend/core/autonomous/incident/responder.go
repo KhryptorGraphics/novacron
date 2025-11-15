@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/novacron/backend/core/autonomous"
+	"github.com/khryptorgraphics/novacron/backend/core/autonomous"
 	"go.uber.org/zap"
 )
 
@@ -26,34 +26,34 @@ type IncidentResponder struct {
 
 // Incident represents a system incident
 type Incident struct {
-	ID           string
-	Priority     autonomous.IncidentPriority
-	Type         IncidentType
-	Description  string
-	Component    string
-	DetectedAt   time.Time
+	ID             string
+	Priority       autonomous.IncidentPriority
+	Type           IncidentType
+	Description    string
+	Component      string
+	DetectedAt     time.Time
 	AcknowledgedAt *time.Time
-	ResolvedAt   *time.Time
-	MTTD         time.Duration
-	MTTR         time.Duration
-	Status       IncidentStatus
-	RootCause    string
-	Resolution   string
-	Runbook      *Runbook
-	PostMortem   *PostMortem
-	Escalated    bool
-	AutoResolved bool
+	ResolvedAt     *time.Time
+	MTTD           time.Duration
+	MTTR           time.Duration
+	Status         IncidentStatus
+	RootCause      string
+	Resolution     string
+	Runbook        *Runbook
+	PostMortem     *PostMortem
+	Escalated      bool
+	AutoResolved   bool
 }
 
 // IncidentType defines incident types
 type IncidentType string
 
 const (
-	ServiceOutage    IncidentType = "service_outage"
-	PerformanceIssue IncidentType = "performance_issue"
-	SecurityBreach   IncidentType = "security_breach"
-	DataCorruption   IncidentType = "data_corruption"
-	NetworkPartition IncidentType = "network_partition"
+	ServiceOutage      IncidentType = "service_outage"
+	PerformanceIssue   IncidentType = "performance_issue"
+	SecurityBreach     IncidentType = "security_breach"
+	DataCorruption     IncidentType = "data_corruption"
+	NetworkPartition   IncidentType = "network_partition"
 	ResourceExhaustion IncidentType = "resource_exhaustion"
 )
 
@@ -98,24 +98,24 @@ type RunbookExecutor struct {
 
 // Runbook represents an automated runbook
 type Runbook struct {
-	ID          string
-	Name        string
-	Type        IncidentType
-	Steps       []*RunbookStep
-	Timeout     time.Duration
-	Rollback    bool
+	ID           string
+	Name         string
+	Type         IncidentType
+	Steps        []*RunbookStep
+	Timeout      time.Duration
+	Rollback     bool
 	LastExecuted time.Time
 }
 
 // RunbookStep represents a runbook step
 type RunbookStep struct {
-	Order       int
-	Name        string
-	Action      string
-	Parameters  map[string]interface{}
-	Timeout     time.Duration
-	OnFailure   StepFailureAction
-	Validation  *StepValidation
+	Order      int
+	Name       string
+	Action     string
+	Parameters map[string]interface{}
+	Timeout    time.Duration
+	OnFailure  StepFailureAction
+	Validation *StepValidation
 }
 
 // StepFailureAction defines failure actions
@@ -137,17 +137,17 @@ type StepValidation struct {
 
 // EscalationManager manages incident escalation
 type EscalationManager struct {
-	logger     *zap.Logger
-	policies   []*EscalationPolicy
-	contacts   map[string]*Contact
-	notifier   *Notifier
+	logger   *zap.Logger
+	policies []*EscalationPolicy
+	contacts map[string]*Contact
+	notifier *Notifier
 }
 
 // EscalationPolicy defines escalation rules
 type EscalationPolicy struct {
-	Priority     autonomous.IncidentPriority
+	Priority       autonomous.IncidentPriority
 	TimeToEscalate time.Duration
-	Levels       []*EscalationLevel
+	Levels         []*EscalationLevel
 }
 
 // EscalationLevel represents an escalation level
@@ -159,12 +159,12 @@ type EscalationLevel struct {
 
 // Contact represents a contact for escalation
 type Contact struct {
-	ID       string
-	Name     string
-	Role     string
-	Email    string
-	Phone    string
-	OnCall   bool
+	ID     string
+	Name   string
+	Role   string
+	Email  string
+	Phone  string
+	OnCall bool
 }
 
 // PostMortemGenerator generates automatic post-mortems
@@ -176,15 +176,15 @@ type PostMortemGenerator struct {
 
 // PostMortem represents an incident post-mortem
 type PostMortem struct {
-	ID              string
-	IncidentID      string
-	GeneratedAt     time.Time
-	Summary         string
-	Timeline        []*TimelineEvent
-	RootCause       string
-	Impact          *ImpactAnalysis
-	ActionItems     []*ActionItem
-	LessonsLearned  []string
+	ID                 string
+	IncidentID         string
+	GeneratedAt        time.Time
+	Summary            string
+	Timeline           []*TimelineEvent
+	RootCause          string
+	Impact             *ImpactAnalysis
+	ActionItems        []*ActionItem
+	LessonsLearned     []string
 	PreventiveMeasures []string
 }
 
@@ -218,9 +218,9 @@ type ActionItem struct {
 
 // RootCauseDocumenter documents root causes
 type RootCauseDocumenter struct {
-	logger      *zap.Logger
-	analyzer    *CausalAnalyzer
-	documenter  *DocumentGenerator
+	logger     *zap.Logger
+	analyzer   *CausalAnalyzer
+	documenter *DocumentGenerator
 }
 
 // MTTDTracker tracks Mean Time To Detection
@@ -537,8 +537,8 @@ func (ir *IncidentResponder) GetIncidentStats() *IncidentStats {
 
 	stats := &IncidentStats{
 		TotalIncidents: len(ir.incidents),
-		MTTD:          ir.mttdTracker.GetAverage(),
-		MTTR:          ir.mttrTracker.GetAverage(),
+		MTTD:           ir.mttdTracker.GetAverage(),
+		MTTR:           ir.mttrTracker.GetAverage(),
 	}
 
 	for _, incident := range ir.incidents {
@@ -568,11 +568,11 @@ func (ir *IncidentResponder) GetIncidentStats() *IncidentStats {
 // Helper functions and types
 
 type Alert struct {
-	Component        string
-	Severity         string
-	Description      string
-	Metric           string
-	FirstOccurrence  time.Time
+	Component       string
+	Severity        string
+	Description     string
+	Metric          string
+	FirstOccurrence time.Time
 }
 
 type IncidentStats struct {

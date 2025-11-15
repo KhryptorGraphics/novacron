@@ -6,7 +6,6 @@ package growth
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync"
 	"time"
 )
@@ -319,10 +318,10 @@ type BestPractice struct {
 
 // GroupSupport provides group support
 type GroupSupport struct {
-	SupportTeam  []SupportMember
-	Office Hours []OfficeHour
-	Helpdesk     string
-	Knowledge base string
+	SupportTeam    []SupportMember
+	OfficeHours    []OfficeHour
+	Helpdesk       string
+	KnowledgeBase  string
 }
 
 // SupportMember represents support team member
@@ -607,7 +606,7 @@ type Registration struct {
 	Status         string
 	PurchaseDate   time.Time
 	Amount         float64
-	Checked In     bool
+	CheckedIn      bool
 	CheckInTime    *time.Time
 	Sessions       []string // registered sessions
 	Networking     NetworkingProfile

@@ -9,28 +9,28 @@ import (
 
 // TestHarness executes test scenarios
 type TestHarness struct {
-	simulator   *NetworkSimulator
-	metrics     *TestMetrics
-	results     []*TestResult
-	mu          sync.RWMutex
-	ctx         context.Context
-	cancel      context.CancelFunc
+	simulator *NetworkSimulator
+	metrics   *TestMetrics
+	results   []*TestResult
+	mu        sync.RWMutex
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 // TestMetrics tracks test metrics
 type TestMetrics struct {
-	StartTime         time.Time
-	EndTime           time.Time
-	TotalBytes        int64
-	CompressedBytes   int64
-	PacketsSent       int64
-	PacketsReceived   int64
-	PacketsLost       int64
-	TotalLatency      time.Duration
-	LatencySamples    int
-	BandwidthSamples  []BandwidthSample
-	OperationResults  []*OperationResult
-	mu                sync.RWMutex
+	StartTime        time.Time
+	EndTime          time.Time
+	TotalBytes       int64
+	CompressedBytes  int64
+	PacketsSent      int64
+	PacketsReceived  int64
+	PacketsLost      int64
+	TotalLatency     time.Duration
+	LatencySamples   int
+	BandwidthSamples []BandwidthSample
+	OperationResults []*OperationResult
+	mu               sync.RWMutex
 }
 
 // BandwidthSample represents a bandwidth measurement
@@ -51,21 +51,21 @@ type OperationResult struct {
 
 // TestResult represents the result of a test scenario
 type TestResult struct {
-	Scenario        string
-	Duration        time.Duration
-	Metrics         *TestMetrics
-	Passed          bool
-	Assertions      []AssertionResult
-	FailureReasons  []string
+	Scenario       string
+	Duration       time.Duration
+	Metrics        *TestMetrics
+	Passed         bool
+	Assertions     []AssertionResult
+	FailureReasons []string
 }
 
 // AssertionResult represents the result of an assertion
 type AssertionResult struct {
-	Type      AssertionType
-	Expected  float64
-	Actual    float64
-	Passed    bool
-	Message   string
+	Type     AssertionType
+	Expected float64
+	Actual   float64
+	Passed   bool
+	Message  string
 }
 
 // NewTestHarness creates a new test harness
@@ -421,7 +421,7 @@ func (th *TestHarness) PrintResults() {
 		for _, ar := range result.Assertions {
 			status := "✓"
 			if !ar.Passed {
-				status := "✗"
+				status = "✗"
 			}
 			fmt.Printf("  %s %s: %s\n", status, ar.Type, ar.Message)
 		}

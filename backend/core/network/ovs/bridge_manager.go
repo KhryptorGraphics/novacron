@@ -467,7 +467,7 @@ func (bm *BridgeManager) AddPort(ctx context.Context, bridgeName, portName strin
 	uuid, err := bm.getPortUUID(portName)
 	if err != nil {
 		log.Printf("Warning: Could not get UUID for port %s: %v", portName, err)
-		uuid = uuid.New().String()
+		uuid = uuid.New().String().String()
 	}
 	
 	// Create port object
@@ -565,7 +565,7 @@ func (bm *BridgeManager) AddFlowRule(ctx context.Context, bridgeName string, rul
 	
 	// Generate rule ID if not provided
 	if rule.ID == "" {
-		rule.ID = uuid.New().String()
+		rule.ID = uuid.New().String().String()
 	}
 	
 	// Set creation time
@@ -997,7 +997,7 @@ func (bm *BridgeManager) loadPortDetails(bridgeName, portName string) (*Port, er
 	// Get port UUID
 	uuid, err := bm.getPortUUID(portName)
 	if err != nil {
-		uuid = uuid.New().String()
+		uuid = uuid.New().String().String()
 	}
 	
 	// Get OpenFlow port number
@@ -1138,6 +1138,6 @@ func (bm *BridgeManager) getBridgeFlowCount(name string) (int, error) {
 // generateDatapathID generates a random datapath ID
 func generateDatapathID() string {
 	// Generate a random 64-bit datapath ID
-	id := uuid.New()
+	id := uuid.New().String()
 	return fmt.Sprintf("%016x", id.ID())
 }

@@ -178,60 +178,8 @@ type ContributorManagement struct {
 }
 
 // Contributor represents an open source contributor
-type Contributor struct {
-	ID                  string
-	Name                string
-	Email               string
-	GitHubUsername      string
-	Organization        string
-	Location            string
-	Timezone            string
-
-	// Classification
-	Type                string // internal, external, sponsored
-	Status              string // active, occasional, inactive
-	ExpertiseLevel      string // beginner, intermediate, advanced, expert
-
-	// Contributions
-	TotalCommits        int64
-	TotalPRs            int64
-	TotalIssues         int64
-	TotalReviews        int64
-	TotalComments       int64
-	LinesAdded          int64
-	LinesRemoved        int64
-
-	// Projects
-	Projects            []string
-	PrimaryProject      string
-	Specializations     []string
-
-	// Timeline
-	FirstContribution   time.Time
-	LastContribution    time.Time
-	ContributionStreak  int
-	LongestStreak       int
-
-	// Recognition
-	BadgeLevel          string
-	Badges              []Badge
-	Achievements        []Achievement
-	MentorshipRole      string // mentee, mentor, both
-
-	// Compensation
-	Sponsored           bool
-	SponsorshipAmount   float64
-	RewardEarnings      float64
-}
 
 // ContributionType represents a type of contribution
-type ContributionType struct {
-	Type                string // code, documentation, design, testing, review
-	Description         string
-	Weight              float64
-	BadgeEligibility    []string
-	RewardMultiplier    float64
-}
 
 // ContributorOnboarding manages contributor onboarding
 type ContributorOnboarding struct {
@@ -443,36 +391,10 @@ type Requirement struct {
 }
 
 // Reward represents a contributor reward
-type Reward struct {
-	Type                string // monetary, swag, credits, recognition
-	Value               float64
-	Description         string
-	Eligibility         []string
-	Redeemable          bool
-}
 
 // Badge represents a contributor badge
-type Badge struct {
-	ID                  string
-	Name                string
-	Description         string
-	Icon                string
-	Level               string // bronze, silver, gold, platinum
-	Category            string
-	EarnedDate          time.Time
-	DisplayURL          string
-}
 
 // CommunityGovernance defines open source governance
-type CommunityGovernance struct {
-	governanceModel     string // meritocracy, council, foundation
-	governanceDoc       *GovernanceDocument
-	decisionProcess     *DecisionProcess
-	votingSystem        *VotingSystem
-	committeeStructure  *CommitteeStructure
-
-	mu sync.RWMutex
-}
 
 // GovernanceDocument defines governance structure
 type GovernanceDocument struct {
@@ -513,32 +435,8 @@ type VotingSystem struct {
 }
 
 // Proposal represents a governance proposal
-type Proposal struct {
-	ID                  string
-	Title               string
-	Description         string
-	Proposer            string
-	SubmittedDate       time.Time
-	VotingStartDate     time.Time
-	VotingEndDate       time.Time
-	Status              string // draft, voting, approved, rejected
-
-	// Voting
-	VotesFor            int
-	VotesAgainst        int
-	VotesAbstain        int
-	Quorum              bool
-	Result              string
-}
 
 // Vote represents a vote record
-type Vote struct {
-	ProposalID          string
-	VoterID             string
-	Choice              string // for, against, abstain
-	Rationale           string
-	Timestamp           time.Time
-}
 
 // OpensourceSustainabilityFund manages $10M+ sustainability fund
 type OpensourceSustainabilityFund struct {
@@ -712,37 +610,6 @@ type VulnerabilityTracker struct {
 }
 
 // Vulnerability represents a security vulnerability
-type Vulnerability struct {
-	ID                  string
-	CVEID               string
-	Title               string
-	Description         string
-	Severity            string // critical, high, medium, low
-	CVSSScore           float64
-
-	// Reporter
-	ReporterName        string
-	ReporterEmail       string
-	ReportedDate        time.Time
-
-	// Status
-	Status              string // reported, confirmed, fixing, fixed, disclosed
-	AcknowledgedDate    time.Time
-	FixedDate           time.Time
-	DisclosedDate       time.Time
-
-	// Fix
-	AffectedVersions    []string
-	FixedInVersion      string
-	PatchURL            string
-	Workarounds         []string
-
-	// Response
-	AssignedTo          string
-	InternalTicket      string
-	PublicAdvisory      string
-	Credits             []string
-}
 
 // VulnerabilityRewardProgram manages $1M+ annual rewards
 type VulnerabilityRewardProgram struct {
@@ -807,7 +674,7 @@ func NewOpensourceLeadershipEngine() *OpensourceLeadershipEngine {
 		contributorMgr:      NewContributorManagement(),
 		sponsorshipProgram:  NewGitHubSponsorshipProgram(),
 		recognitionEngine:   NewContributorRecognition(),
-		governanceModel:     NewCommunityGovernance(),
+		
 		sustainabilityFund:  NewOpensourceSustainabilityFund(),
 		corporateProgram:    NewCorporateContributorProgram(),
 		securityProgram:     NewSecurityDisclosureProgram(),
@@ -898,7 +765,7 @@ func (e *OpensourceLeadershipEngine) GenerateMetrics() map[string]interface{} {
 		"sponsorship":             e.totalSponsorship,
 		"sustainability_fund":     10000000,
 		"vulnerability_rewards":   1000000,
-		"governance":              e.governanceModel.governanceModel,
+		"governance":              e.governanceModel,
 	}
 }
 
@@ -940,7 +807,7 @@ func NewContributorRecognition() *ContributorRecognition {
 
 func NewCommunityGovernance() *CommunityGovernance {
 	return &CommunityGovernance{
-		governanceModel: "meritocracy",
+		
 	}
 }
 

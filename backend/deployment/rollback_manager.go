@@ -254,15 +254,7 @@ type EmergencyProcedure struct {
 }
 
 // TriggerCondition represents a condition that triggers an emergency procedure
-type TriggerCondition struct {
-	Type      string      `json:"type"`
-	Metric    string      `json:"metric"`
-	Operator  string      `json:"operator"`
-	Threshold interface{} `json:"threshold"`
-	Duration  time.Duration `json:"duration"`
-}
 
-// EmergencyAction represents an action in an emergency procedure
 type EmergencyAction struct {
 	Type        string                 `json:"type"`
 	Component   string                 `json:"component"`

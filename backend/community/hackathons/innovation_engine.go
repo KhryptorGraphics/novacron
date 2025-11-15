@@ -716,7 +716,7 @@ func (ie *InnovationEngine) initializeSampleData() {
 
 	// Create sample investors
 	investorNames := []string{"Tech Ventures", "Innovation Capital", "Startup Fund", "Growth Partners"}
-	for i, name := range investorNames {
+	for _i, name := range investorNames {
 		investor := &Investor{
 			ID:   ie.generateID("INV"),
 			Name: name,
@@ -724,12 +724,12 @@ func (ie *InnovationEngine) initializeSampleData() {
 			Role: "Partner",
 			Focus: []string{"AI/ML", "Cloud", "SaaS"},
 			Stage: []string{"seed", "series_a"},
-			TicketRange: TicketRange{
+			// TicketRange: TicketRange{
 				Min: 100000,
 				Max: 5000000,
 			},
-			Portfolio: []string{},
-			Notable:   []string{"Startup A", "Startup B"},
+// 			Portfolio: []string{},
+// 			Notable:   []string{"Startup A", "Startup B"},
 		}
 
 		ie.investors[investor.ID] = investor

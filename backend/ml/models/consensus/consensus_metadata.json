@@ -1,0 +1,43 @@
+{
+  "model_type": "lstm_autoencoder_consensus_latency",
+  "sequence_length": 30,
+  "n_features": 12,
+  "anomaly_threshold": 0.6380219443998149,
+  "feature_names": [
+    "queue_depth",
+    "proposals_pending",
+    "proposals_committed",
+    "latency_p50",
+    "latency_p95",
+    "latency_p99",
+    "leader_changes",
+    "quorum_size",
+    "active_nodes",
+    "network_tier",
+    "dwcp_mode",
+    "consensus_type"
+  ],
+  "training_date": "2025-11-14T10:01:52.177650",
+  "metrics": {
+    "precision": 1.0,
+    "recall": 0.9491978609625669,
+    "f1_score": 0.9739368998628258,
+    "detection_accuracy": 0.9745989304812834,
+    "roc_auc": 0.9959683765348799,
+    "confusion_matrix": [
+      [
+        1597,
+        0
+      ],
+      [
+        19,
+        355
+      ]
+    ],
+    "threshold": 0.6380219443998149,
+    "total_samples": 1971,
+    "true_anomalies": 374,
+    "predicted_anomalies": 355
+  },
+  "target_achieved": false
+}

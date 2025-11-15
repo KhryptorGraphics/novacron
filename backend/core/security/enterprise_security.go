@@ -64,17 +64,7 @@ type EnterpriseSecurityConfig struct {
 }
 
 // ZeroTrustConfig defines zero-trust architecture settings
-type ZeroTrustConfig struct {
-	Enabled                   bool          `json:"enabled"`
-	TrustNoRequest           bool          `json:"trust_no_request"`
-	ContinuousVerification   bool          `json:"continuous_verification"`
-	DeviceFingerprinting     bool          `json:"device_fingerprinting"`
-	BehaviorAnalysis         bool          `json:"behavior_analysis"`
-	MinTrustScore            float64       `json:"min_trust_score"`
-	VerificationInterval     time.Duration `json:"verification_interval"`
-}
 
-// MFAConfig defines multi-factor authentication settings
 type MFAConfig struct {
 	Enabled         bool     `json:"enabled"`
 	RequiredMethods []string `json:"required_methods"` // TOTP, SMS, Email, Hardware
@@ -164,14 +154,7 @@ type ThreatDetectionConfig struct {
 	Integrations        map[string]interface{}  `json:"integrations"`
 }
 
-type ThreatResponseAction struct {
-	ThreatType string `json:"threat_type"`
-	Action     string `json:"action"`     // block, alert, quarantine, investigate
-	Severity   string `json:"severity"`   // low, medium, high, critical
-	Automatic  bool   `json:"automatic"`
-}
 
-// NetworkSecurityConfig defines network security settings
 type NetworkSecurityConfig struct {
 	Firewall         FirewallConfig     `json:"firewall"`
 	VPN              VPNConfig          `json:"vpn"`

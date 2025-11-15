@@ -12,12 +12,12 @@ import (
 
 // TaskPartitioner provides intelligent task partitioning using Deep RL
 type TaskPartitioner struct {
-	agent          *partition.DQNAgent
-	onlineLearner  *partition.OnlineLearner
-	envState       *partition.EnvironmentState
-	logger         *zap.Logger
-	enabled        bool
-	mu             sync.RWMutex
+	agent         *partition.DQNAgent
+	onlineLearner *partition.OnlineLearner
+	envState      *partition.EnvironmentState
+	logger        *zap.Logger
+	enabled       bool
+	mu            sync.RWMutex
 
 	// Metrics
 	totalDecisions  int64
@@ -32,25 +32,27 @@ func NewTaskPartitioner(modelPath string, logger *zap.Logger) (*TaskPartitioner,
 		logger, _ = zap.NewProduction()
 	}
 
-	// Initialize DQN agent
+	// Initialize DQN agent (may fail if ONNX/runtime is not available)
 	agent, err := partition.NewDQNAgent(modelPath)
 	if err != nil {
-		logger.Warn("Failed to initialize DQN agent, using heuristic mode",
+		logger.Warn("Failed to initialize DQN agent, falling back to heuristic-only mode",
 			zap.Error(err),
 			zap.String("model_path", modelPath))
-		// Continue with heuristic mode
 	}
 
-	// Initialize online learner
-	learnerConfig := &partition.OnlineLearnerConfig{
-		UpdateFrequency:  24 * time.Hour,
-		MinExperiences:   1000,
-		TrainingScript:   "/home/kp/novacron/backend/core/network/dwcp/partition/training/train_dqn.py",
-		ModelPath:        modelPath,
-		EnableAutoUpdate: true,
-	}
+	var onlineLearner *partition.OnlineLearner
+	if agent != nil {
+		// Initialize online learner when agent is available
+		learnerConfig := &partition.OnlineLearnerConfig{
+			UpdateFrequency:  24 * time.Hour,
+			MinExperiences:   1000,
+			TrainingScript:   "/home/kp/novacron/backend/core/network/dwcp/partition/training/train_dqn.py",
+			ModelPath:        modelPath,
+			EnableAutoUpdate: true,
+		}
 
-	onlineLearner := partition.NewOnlineLearner(agent, learnerConfig)
+		onlineLearner = partition.NewOnlineLearner(agent, learnerConfig)
+	}
 
 	tp := &TaskPartitioner{
 		agent:         agent,
@@ -62,7 +64,7 @@ func NewTaskPartitioner(modelPath string, logger *zap.Logger) (*TaskPartitioner,
 
 	logger.Info("Task partitioner initialized",
 		zap.String("model_path", modelPath),
-		zap.Bool("online_learning", true))
+		zap.Bool("online_learning", onlineLearner != nil))
 
 	return tp, nil
 }
@@ -83,12 +85,21 @@ func (tp *TaskPartitioner) PartitionTask(task *Task) (*partition.TaskPartitionDe
 	defer tp.mu.Unlock()
 
 	if !tp.enabled {
-		// Fallback to simple round-robin
+		// Fallback to simple heuristic partitioning
 		return tp.simplePartition(task), nil
 	}
 
 	// Update environment state with current network conditions
 	tp.updateEnvironmentState(task)
+
+	// If no DQN agent is available, fall back to heuristic partitioning
+	if tp.agent == nil {
+		tp.logger.Debug("DQN agent not available, using heuristic partitioning",
+			zap.String("task_id", task.ID))
+		decision := tp.simplePartition(task)
+		tp.totalDecisions++
+		return decision, nil
+	}
 
 	// Get RL agent decision
 	decision, err := tp.agent.SelectAction(tp.envState)
@@ -96,7 +107,7 @@ func (tp *TaskPartitioner) PartitionTask(task *Task) (*partition.TaskPartitionDe
 		tp.logger.Error("Failed to get partition decision, falling back to heuristic",
 			zap.Error(err),
 			zap.String("task_id", task.ID))
-		return tp.simplePartition(task), nil
+		decision = tp.simplePartition(task)
 	}
 
 	tp.totalDecisions++
@@ -126,10 +137,20 @@ func (tp *TaskPartitioner) ReportOutcome(taskID string, decision *partition.Task
 		tp.failedTasks++
 	}
 
+	// If learning components are not initialized, just track basic stats
+	if tp.agent == nil || tp.onlineLearner == nil {
+		tp.logger.Debug("Skipping online learning update for task outcome; learning components not initialized",
+			zap.String("task_id", taskID),
+			zap.Bool("success", success),
+			zap.Float64("throughput", actualThroughput),
+			zap.Duration("latency", actualLatency))
+		return
+	}
+
 	// Calculate reward
 	outcome := &partition.ActionOutcome{
 		ActualThroughput:   actualThroughput,
-		BaselineThroughput: 100.0, // Base expectation
+		BaselineThroughput: 100.0,                          // Base expectation
 		ActualLatency:      actualLatency.Seconds() * 1000, // Convert to ms
 		TargetLatency:      decision.ExpectedTime.Seconds() * 1000,
 		StreamImbalance:    tp.calculateStreamImbalance(decision.StreamIDs),
@@ -395,16 +416,20 @@ func (tp *TaskPartitioner) GetMetrics() map[string]interface{} {
 		"avg_reward":       tp.avgReward,
 	}
 
-	// Add agent metrics
-	agentMetrics := tp.agent.GetMetrics()
-	for k, v := range agentMetrics {
-		metrics["agent_"+k] = v
+	// Add agent metrics when agent is available
+	if tp.agent != nil {
+		agentMetrics := tp.agent.GetMetrics()
+		for k, v := range agentMetrics {
+			metrics["agent_"+k] = v
+		}
 	}
 
-	// Add online learner status
-	learnerStatus := tp.onlineLearner.GetStatus()
-	for k, v := range learnerStatus {
-		metrics["learner_"+k] = v
+	// Add online learner status when available
+	if tp.onlineLearner != nil {
+		learnerStatus := tp.onlineLearner.GetStatus()
+		for k, v := range learnerStatus {
+			metrics["learner_"+k] = v
+		}
 	}
 
 	return metrics
@@ -412,17 +437,36 @@ func (tp *TaskPartitioner) GetMetrics() map[string]interface{} {
 
 // ForceModelUpdate triggers an immediate model update
 func (tp *TaskPartitioner) ForceModelUpdate() error {
+	tp.mu.Lock()
+	defer tp.mu.Unlock()
+
+	if tp.onlineLearner == nil {
+		return fmt.Errorf("online learner not initialized")
+	}
+
 	return tp.onlineLearner.ForceUpdate()
 }
 
 // Evaluate evaluates the current model performance
 func (tp *TaskPartitioner) Evaluate(episodes int) (*partition.EvaluationResults, error) {
+	tp.mu.RLock()
+	defer tp.mu.RUnlock()
+
+	if tp.onlineLearner == nil {
+		return nil, fmt.Errorf("online learner not initialized")
+	}
+
 	return tp.onlineLearner.EvaluateModel(episodes)
 }
 
 // Destroy cleans up resources
 func (tp *TaskPartitioner) Destroy() {
-	tp.agent.Destroy()
+	tp.mu.Lock()
+	defer tp.mu.Unlock()
+
+	if tp.agent != nil {
+		tp.agent.Destroy()
+	}
 }
 
 // Integration with DWCP Manager
@@ -437,8 +481,8 @@ func (m *Manager) AddTaskPartitioner(modelPath string) error {
 		return fmt.Errorf("failed to create task partitioner: %w", err)
 	}
 
-	// Store partitioner (would need to add field to Manager struct)
-	// m.partitioner = partitioner
+	// Store partitioner on the manager so future calls can use it
+	m.partitioner = partitioner
 
 	m.logger.Info("Task partitioner added to DWCP manager",
 		zap.String("model_path", modelPath))
@@ -455,14 +499,70 @@ func (m *Manager) PartitionTask(ctx context.Context, task *Task) (*partition.Tas
 		return nil, fmt.Errorf("DWCP not enabled or not started")
 	}
 
-	// Would use m.partitioner here
-	// return m.partitioner.PartitionTask(task)
+	// If no partitioner is configured yet, fall back to a simple default decision
+	if m.partitioner == nil {
+		m.logger.Warn("Task partitioner not initialized, using default partitioning",
+			zap.String("task_id", task.ID))
+		return &partition.TaskPartitionDecision{
+			StreamIDs:    []int{0},
+			ChunkSizes:   []int{task.Size},
+			Confidence:   0.5,
+			ExpectedTime: 1 * time.Second,
+		}, nil
+	}
 
-	// For now, return a placeholder
-	return &partition.TaskPartitionDecision{
-		StreamIDs:    []int{0},
-		ChunkSizes:   []int{task.Size},
-		Confidence:   0.5,
-		ExpectedTime: 1 * time.Second,
-	}, nil
+	decision, err := m.partitioner.PartitionTask(task)
+	if err != nil {
+		m.logger.Error("Task partitioner failed, using default partitioning",
+			zap.Error(err),
+			zap.String("task_id", task.ID))
+		return &partition.TaskPartitionDecision{
+			StreamIDs:    []int{0},
+			ChunkSizes:   []int{task.Size},
+			Confidence:   0.5,
+			ExpectedTime: 1 * time.Second,
+		}, nil
+	}
+
+	return decision, nil
+}
+
+// Start initializes and starts the TaskPartitioner
+// Implements the Lifecycle interface
+func (tp *TaskPartitioner) Start(ctx context.Context) error {
+	tp.mu.Lock()
+	defer tp.mu.Unlock()
+
+	if tp.enabled {
+		return fmt.Errorf("task partitioner already started")
+	}
+
+	tp.enabled = true
+	tp.logger.Info("Task partitioner started successfully")
+
+	return nil
+}
+
+// Stop gracefully shuts down the TaskPartitioner
+// Implements the Lifecycle interface
+func (tp *TaskPartitioner) Stop() error {
+	tp.mu.Lock()
+	defer tp.mu.Unlock()
+
+	if !tp.enabled {
+		return nil
+	}
+
+	tp.enabled = false
+	tp.logger.Info("Task partitioner stopped successfully")
+
+	return nil
+}
+
+// IsRunning returns true if the TaskPartitioner is running
+// Implements the Lifecycle interface
+func (tp *TaskPartitioner) IsRunning() bool {
+	tp.mu.RLock()
+	defer tp.mu.RUnlock()
+	return tp.enabled
 }

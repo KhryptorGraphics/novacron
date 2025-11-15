@@ -26,16 +26,6 @@ const (
 	TransportModeHybrid
 )
 
-// CompressionLevel defines the compression strategy
-type CompressionLevel int
-
-const (
-	CompressionLevelNone CompressionLevel = iota
-	CompressionLevelFast                  // Zstandard level 0
-	CompressionLevelBalanced              // Zstandard level 3
-	CompressionLevelMax                   // Zstandard level 9
-)
-
 // NetworkTier represents the network tier classification
 type NetworkTier int
 
@@ -43,32 +33,33 @@ const (
 	NetworkTierTier1 NetworkTier = iota // <10ms, >10Gbps
 	NetworkTierTier2                    // <50ms, >1Gbps
 	NetworkTierTier3                    // >50ms, <1Gbps
+	NetworkTierTier4                    // Global, high latency
 )
 
 // TransportMetrics contains transport layer statistics
 type TransportMetrics struct {
-	StreamCount       int           `json:"stream_count"`
-	ActiveStreams     int           `json:"active_streams"`
-	TotalBytesSent    uint64        `json:"total_bytes_sent"`
-	TotalBytesRecv    uint64        `json:"total_bytes_recv"`
-	BandwidthMbps     float64       `json:"bandwidth_mbps"`
-	Utilization       float64       `json:"utilization"` // 0.0-1.0
-	AverageLatency    time.Duration `json:"average_latency"`
-	PacketLossRate    float64       `json:"packet_loss_rate"`
+	StreamCount        int           `json:"stream_count"`
+	ActiveStreams      int           `json:"active_streams"`
+	TotalBytesSent     uint64        `json:"total_bytes_sent"`
+	TotalBytesRecv     uint64        `json:"total_bytes_recv"`
+	BandwidthMbps      float64       `json:"bandwidth_mbps"`
+	Utilization        float64       `json:"utilization"` // 0.0-1.0
+	AverageLatency     time.Duration `json:"average_latency"`
+	PacketLossRate     float64       `json:"packet_loss_rate"`
 	RetransmissionRate float64       `json:"retransmission_rate"`
-	Timestamp         time.Time     `json:"timestamp"`
+	Timestamp          time.Time     `json:"timestamp"`
 }
 
 // CompressionMetrics contains compression statistics
 type CompressionMetrics struct {
-	BytesIn         uint64        `json:"bytes_in"`
-	BytesOut        uint64        `json:"bytes_out"`
-	CompressionRatio float64       `json:"compression_ratio"`
-	CompressionTime time.Duration `json:"compression_time"`
-	DecompressionTime time.Duration `json:"decompression_time"`
-	Level           CompressionLevel `json:"level"`
-	DeltaHitRate    float64       `json:"delta_hit_rate"` // % of data that was delta-encoded
-	Timestamp       time.Time     `json:"timestamp"`
+	BytesIn           uint64           `json:"bytes_in"`
+	BytesOut          uint64           `json:"bytes_out"`
+	CompressionRatio  float64          `json:"compression_ratio"`
+	CompressionTime   time.Duration    `json:"compression_time"`
+	DecompressionTime time.Duration    `json:"decompression_time"`
+	Level             CompressionLevel `json:"level"`
+	DeltaHitRate      float64          `json:"delta_hit_rate"` // % of data that was delta-encoded
+	Timestamp         time.Time        `json:"timestamp"`
 }
 
 // DWCPMetrics aggregates all DWCP statistics
@@ -99,10 +90,11 @@ func (e *DWCPError) Error() string {
 
 // Common error codes
 const (
-	ErrCodeStreamCreation    = "STREAM_CREATION_FAILED"
-	ErrCodeStreamClosed      = "STREAM_CLOSED"
-	ErrCodeCompressionFailed = "COMPRESSION_FAILED"
+	ErrCodeStreamCreation      = "STREAM_CREATION_FAILED"
+	ErrCodeStreamClosed        = "STREAM_CLOSED"
+	ErrCodeCompressionFailed   = "COMPRESSION_FAILED"
 	ErrCodeDecompressionFailed = "DECOMPRESSION_FAILED"
-	ErrCodeInvalidConfig     = "INVALID_CONFIG"
-	ErrCodeNetworkTimeout    = "NETWORK_TIMEOUT"
+	ErrCodeInvalidConfig       = "INVALID_CONFIG"
+	ErrCodeNetworkTimeout      = "NETWORK_TIMEOUT"
+	ErrCodeCircuitOpen         = "CIRCUIT_OPEN"
 )

@@ -3,7 +3,8 @@ package partition
 import (
 	"context"
 	"errors"
-	"fmt"
+
+	// 	"fmt"
 	"sort"
 	"time"
 )
@@ -14,9 +15,9 @@ type HeterogeneousPlacementEngine struct {
 	nodeCapabilities map[string]*NodeCapabilities
 
 	// Placement strategies per node type
-	cloudStrategy     PlacementStrategy
-	edgeStrategy      PlacementStrategy
-	volunteerStrategy PlacementStrategy
+	cloudStrategy      PlacementStrategy
+	edgeStrategy       PlacementStrategy
+	volunteerStrategy  PlacementStrategy
 	datacenterStrategy PlacementStrategy
 }
 
@@ -26,26 +27,26 @@ type NodeCapabilities struct {
 	NodeType NodeType
 
 	// Compute capabilities
-	CPUArchitecture string   // x86_64, arm64, etc.
-	GPUTypes        []string // nvidia-v100, amd-mi100, etc.
+	CPUArchitecture  string   // x86_64, arm64, etc.
+	GPUTypes         []string // nvidia-v100, amd-mi100, etc.
 	AcceleratorTypes []string // TPU, FPGA, etc.
 
 	// Special features
-	HasSGX          bool // Intel SGX for secure enclaves
-	HasNVME         bool // Fast storage
-	HasRDMA         bool // Remote DMA support
-	HasInfiniband   bool // High-speed interconnect
+	HasSGX        bool // Intel SGX for secure enclaves
+	HasNVME       bool // Fast storage
+	HasRDMA       bool // Remote DMA support
+	HasInfiniband bool // High-speed interconnect
 
 	// Network capabilities
-	MaxBandwidth    float64 // Gbps
-	MinLatency      time.Duration
-	PublicIP        bool
-	IPv6Support     bool
+	MaxBandwidth float64 // Gbps
+	MinLatency   time.Duration
+	PublicIP     bool
+	IPv6Support  bool
 
 	// Reliability characteristics
-	PowerBackup     bool
+	PowerBackup      bool
 	RedundantNetwork bool
-	SLAGuarantee    float64 // Uptime guarantee percentage
+	SLAGuarantee     float64 // Uptime guarantee percentage
 
 	// Compliance and certifications
 	Certifications  []string // ISO27001, SOC2, etc.
@@ -461,7 +462,7 @@ func (e *EdgePlacementStrategy) Score(vm *VM, node *Node, cap *NodeCapabilities)
 
 	// Edge nodes prioritize:
 	// 1. Proximity (low latency)
-	latencyScore := 1.0 - float64(cap.MinLatency)/(100*time.Millisecond)
+	latencyScore := 1.0 - (float64(cap.MinLatency) / float64(100*time.Millisecond))
 	if latencyScore < 0 {
 		latencyScore = 0
 	}
@@ -647,4 +648,3 @@ func (h *HybridPlacer) Place(ctx context.Context, vm *VM, nodes []*Node, constra
 		return h.heteroEngine.PlaceVM(ctx, vm, nodes)
 	}
 }
-

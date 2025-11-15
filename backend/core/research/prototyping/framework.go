@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/novacron/backend/core/research/analysis"
+	"github.com/khryptorgraphics/novacron/backend/core/research/analysis"
 )
 
 // PrototypeStatus represents prototype lifecycle status
@@ -28,21 +28,21 @@ type Prototype struct {
 	Title       string
 	Description string
 
-	Status      PrototypeStatus
-	StartDate   time.Time
-	TargetDate  time.Time
+	Status         PrototypeStatus
+	StartDate      time.Time
+	TargetDate     time.Time
 	CompletionDate time.Time
 
-	Team        []string
-	Repository  string
-	Sandbox     string
+	Team       []string
+	Repository string
+	Sandbox    string
 
 	// Metrics
-	Metrics     PrototypeMetrics
+	Metrics PrototypeMetrics
 
 	// Testing
-	ABTests     []ABTest
-	Benchmarks  []Benchmark
+	ABTests    []ABTest
+	Benchmarks []Benchmark
 
 	// Production path
 	ProductionReady bool
@@ -51,24 +51,24 @@ type Prototype struct {
 
 // PrototypeMetrics tracks prototype metrics
 type PrototypeMetrics struct {
-	LinesOfCode      int
-	TestCoverage     float64
-	PerformanceGain  float64
-	ResourceUsage    float64
-	BugCount         int
-	SuccessRate      float64
+	LinesOfCode     int
+	TestCoverage    float64
+	PerformanceGain float64
+	ResourceUsage   float64
+	BugCount        int
+	SuccessRate     float64
 }
 
 // ABTest represents an A/B test
 type ABTest struct {
-	ID              string
-	Name            string
-	StartDate       time.Time
-	EndDate         time.Time
-	ControlGroup    string
-	TreatmentGroup  string
-	Metric          string
-	Results         ABTestResults
+	ID             string
+	Name           string
+	StartDate      time.Time
+	EndDate        time.Time
+	ControlGroup   string
+	TreatmentGroup string
+	Metric         string
+	Results        ABTestResults
 }
 
 // ABTestResults contains A/B test results
@@ -92,19 +92,19 @@ type Benchmark struct {
 
 // RolloutPlan defines production rollout plan
 type RolloutPlan struct {
-	Phases         []RolloutPhase
-	RollbackPlan   string
-	Monitoring     []string
+	Phases          []RolloutPhase
+	RollbackPlan    string
+	Monitoring      []string
 	SuccessCriteria []string
 }
 
 // RolloutPhase defines a rollout phase
 type RolloutPhase struct {
-	Name        string
-	Percentage  int
-	Duration    time.Duration
-	Criteria    []string
-	RollbackOn  []string
+	Name       string
+	Percentage int
+	Duration   time.Duration
+	Criteria   []string
+	RollbackOn []string
 }
 
 // PrototypingFramework manages research prototyping
@@ -135,16 +135,16 @@ func NewPrototypingFramework(config FrameworkConfig) *PrototypingFramework {
 // CreatePrototype creates a new prototype
 func (pf *PrototypingFramework) CreatePrototype(ctx context.Context, analysis *analysis.FeasibilityAnalysis, team []string) (*Prototype, error) {
 	prototype := &Prototype{
-		ID:         fmt.Sprintf("proto-%d", time.Now().Unix()),
-		PaperID:    analysis.PaperID,
-		Title:      analysis.Title,
+		ID:          fmt.Sprintf("proto-%d", time.Now().Unix()),
+		PaperID:     analysis.PaperID,
+		Title:       analysis.Title,
 		Description: fmt.Sprintf("Prototype implementation of: %s", analysis.Title),
-		Status:     StatusPlanning,
-		StartDate:  time.Now(),
-		TargetDate: time.Now().Add(pf.config.TimeToPrototype),
-		Team:       team,
-		ABTests:    make([]ABTest, 0),
-		Benchmarks: make([]Benchmark, 0),
+		Status:      StatusPlanning,
+		StartDate:   time.Now(),
+		TargetDate:  time.Now().Add(pf.config.TimeToPrototype),
+		Team:        team,
+		ABTests:     make([]ABTest, 0),
+		Benchmarks:  make([]Benchmark, 0),
 	}
 
 	// Create sandbox environment
@@ -419,11 +419,11 @@ func (pf *PrototypingFramework) CreateRolloutPlan(prototypeID string) (*RolloutP
 
 // EvaluationReport contains prototype evaluation results
 type EvaluationReport struct {
-	PrototypeID     string
-	Timestamp       time.Time
-	Criteria        []EvaluationCriteria
-	ReadinessScore  float64
-	Recommendation  string
+	PrototypeID    string
+	Timestamp      time.Time
+	Criteria       []EvaluationCriteria
+	ReadinessScore float64
+	Recommendation string
 }
 
 // EvaluationCriteria represents a single evaluation criterion

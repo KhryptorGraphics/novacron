@@ -4,20 +4,20 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/novacron/backend/core/research/monitoring"
+	"github.com/khryptorgraphics/novacron/backend/core/research/monitoring"
 )
 
 // FeasibilityAnalysis represents research-to-production feasibility
 type FeasibilityAnalysis struct {
-	PaperID     string
-	Title       string
+	PaperID string
+	Title   string
 
 	// Scores (0-1)
-	TechnicalScore    float64
-	ResourceScore     float64
-	TimelineScore     float64
-	ROIScore          float64
-	OverallScore      float64
+	TechnicalScore float64
+	ResourceScore  float64
+	TimelineScore  float64
+	ROIScore       float64
+	OverallScore   float64
 
 	// Assessments
 	TechnicalFeasibility string
@@ -37,23 +37,23 @@ type FeasibilityAnalysis struct {
 
 // ResourceEstimate estimates required resources
 type ResourceEstimate struct {
-	Engineers      int
-	Researchers    int
-	Budget         int64
-	Hardware       []string
-	Software       []string
-	Partnerships   []string
-	EstimatedCost  int64
+	Engineers     int
+	Researchers   int
+	Budget        int64
+	Hardware      []string
+	Software      []string
+	Partnerships  []string
+	EstimatedCost int64
 }
 
 // TimelineEstimate estimates implementation timeline
 type TimelineEstimate struct {
-	Research      time.Duration
-	Prototyping   time.Duration
-	Development   time.Duration
-	Testing       time.Duration
-	Production    time.Duration
-	Total         time.Duration
+	Research    time.Duration
+	Prototyping time.Duration
+	Development time.Duration
+	Testing     time.Duration
+	Production  time.Duration
+	Total       time.Duration
 }
 
 // Risk represents implementation risk
@@ -67,11 +67,11 @@ type Risk struct {
 
 // ROIEstimate estimates return on investment
 type ROIEstimate struct {
-	Investment       int64
-	ExpectedReturn   int64
-	PaybackPeriod    time.Duration
-	NetPresentValue  int64
-	IRR              float64
+	Investment          int64
+	ExpectedReturn      int64
+	PaybackPeriod       time.Duration
+	NetPresentValue     int64
+	IRR                 float64
 	QualitativeBenefits []string
 }
 
@@ -197,8 +197,8 @@ func (fa *FeasibilityAnalyzer) describeTechnicalFeasibility(score float64) strin
 // estimateResources estimates required resources
 func (fa *FeasibilityAnalyzer) estimateResources(paper *monitoring.ResearchPaper) ResourceEstimate {
 	estimate := ResourceEstimate{
-		Hardware: make([]string, 0),
-		Software: make([]string, 0),
+		Hardware:     make([]string, 0),
+		Software:     make([]string, 0),
 		Partnerships: make([]string, 0),
 	}
 
@@ -269,11 +269,11 @@ func (fa *FeasibilityAnalyzer) estimateTimeline(paper *monitoring.ResearchPaper,
 	estimate := TimelineEstimate{}
 
 	// Base timeline
-	estimate.Research = 30 * 24 * time.Hour      // 1 month
-	estimate.Prototyping = 60 * 24 * time.Hour   // 2 months
-	estimate.Development = 90 * 24 * time.Hour   // 3 months
-	estimate.Testing = 30 * 24 * time.Hour       // 1 month
-	estimate.Production = 30 * 24 * time.Hour    // 1 month
+	estimate.Research = 30 * 24 * time.Hour    // 1 month
+	estimate.Prototyping = 60 * 24 * time.Hour // 2 months
+	estimate.Development = 90 * 24 * time.Hour // 3 months
+	estimate.Testing = 30 * 24 * time.Hour     // 1 month
+	estimate.Production = 30 * 24 * time.Hour  // 1 month
 
 	// Adjust based on technical feasibility
 	if technicalScore < 0.6 {
@@ -504,9 +504,9 @@ func (fa *FeasibilityAnalyzer) generateNextSteps(analysis *FeasibilityAnalysis) 
 func contains(text, substr string) bool {
 	return len(text) > 0 && len(substr) > 0 &&
 		(text == substr || len(text) > len(substr) &&
-		(text[:len(substr)] == substr ||
-		text[len(text)-len(substr):] == substr ||
-		containsMiddle(text, substr)))
+			(text[:len(substr)] == substr ||
+				text[len(text)-len(substr):] == substr ||
+				containsMiddle(text, substr)))
 }
 
 func containsMiddle(text, substr string) bool {

@@ -350,7 +350,7 @@ type KeyFinancialMetrics struct {
 	// Efficiency
 	RuleOf40         float64   // Growth + Margin (67+)
 	MagicNumber      float64   // CAC efficiency
-	Payback Period   int       // months
+	PaybackPeriod    int       // months
 
 	// Customer metrics
 	CustomersTotal   int64     // 350 Fortune 500

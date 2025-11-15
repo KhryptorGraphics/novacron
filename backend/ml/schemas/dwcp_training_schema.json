@@ -1,0 +1,136 @@
+{
+  "version": "1.0.0",
+  "description": "Unified data schema for DWCP neural model training - Production-grade ML pipeline",
+  "last_updated": "2025-11-14",
+  "schema_type": "training_data",
+
+  "features": {
+    "temporal": {
+      "description": "Time-series features for sequential models",
+      "columns": ["timestamp", "epoch_time"],
+      "types": ["datetime", "int64"],
+      "required": true
+    },
+    "network_topology": {
+      "description": "Network infrastructure context",
+      "columns": ["region", "az", "link_type", "datacenter_id"],
+      "types": ["string", "string", "categorical", "string"],
+      "required": true
+    },
+    "node_identity": {
+      "description": "Node and peer identification",
+      "columns": ["node_id", "peer_id", "node_role"],
+      "types": ["string", "string", "categorical"],
+      "required": true
+    },
+    "latency_metrics": {
+      "description": "Round-trip time and jitter measurements",
+      "columns": ["rtt_ms", "jitter_ms", "p50_latency_ms", "p99_latency_ms"],
+      "types": ["float", "float", "float", "float"],
+      "required": true,
+      "units": "milliseconds"
+    },
+    "throughput_metrics": {
+      "description": "Data transfer rate measurements",
+      "columns": ["throughput_mbps", "bytes_tx", "bytes_rx", "transfer_rate_mbps"],
+      "types": ["float", "int64", "int64", "float"],
+      "required": true,
+      "units": "megabits_per_second"
+    },
+    "reliability_metrics": {
+      "description": "Packet loss and retransmission tracking",
+      "columns": ["packet_loss", "retransmits", "error_rate", "uptime_pct"],
+      "types": ["float", "int64", "float", "float"],
+      "required": true
+    },
+    "congestion_metrics": {
+      "description": "Network congestion indicators",
+      "columns": ["congestion_window", "queue_depth", "buffer_utilization"],
+      "types": ["int64", "int64", "float"],
+      "required": true
+    },
+    "dwcp_protocol": {
+      "description": "DWCP-specific protocol settings",
+      "columns": ["dwcp_mode", "network_tier", "transport_type"],
+      "types": ["categorical", "categorical", "categorical"],
+      "required": true
+    },
+    "compression_metrics": {
+      "description": "HDE compression performance",
+      "columns": ["hde_compression_ratio", "hde_delta_hit_rate", "compression_level"],
+      "types": ["float", "float", "int"],
+      "required": false
+    },
+    "amst_metrics": {
+      "description": "AMST multi-streaming metrics",
+      "columns": ["amst_streams", "amst_transfer_rate", "stream_utilization"],
+      "types": ["int", "float", "float"],
+      "required": false
+    },
+    "reliability_budget": {
+      "description": "Error budget and SLO tracking",
+      "columns": ["error_budget_burn_rate", "slo_compliance", "failure_rate"],
+      "types": ["float", "float", "float"],
+      "required": true
+    }
+  },
+
+  "categorical_values": {
+    "link_type": ["dc", "metro", "wan", "edge"],
+    "network_tier": ["tier1", "tier2", "tier3"],
+    "dwcp_mode": ["standard", "optimized", "resilient"],
+    "transport_type": ["tcp", "udp", "quic"],
+    "node_role": ["coordinator", "worker", "edge"]
+  },
+
+  "target_variables": {
+    "bandwidth_prediction": {
+      "column": "throughput_mbps",
+      "type": "regression",
+      "metric": "mape",
+      "target_accuracy": 0.05
+    },
+    "bandwidth_classification": {
+      "column": "bandwidth_class",
+      "type": "classification",
+      "classes": ["good", "degraded", "bad"],
+      "metric": "accuracy",
+      "target_accuracy": 0.98
+    },
+    "compression_selection": {
+      "column": "optimal_compression",
+      "type": "classification",
+      "classes": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+      "metric": "accuracy",
+      "target_accuracy": 0.98
+    },
+    "reliability_anomaly": {
+      "column": "is_anomaly",
+      "type": "binary_classification",
+      "metric": "recall",
+      "target_accuracy": 0.98
+    },
+    "consensus_latency": {
+      "column": "consensus_latency_ms",
+      "type": "timeseries_regression",
+      "metric": "detection_accuracy",
+      "target_accuracy": 0.98
+    }
+  },
+
+  "data_quality": {
+    "missing_value_threshold": 0.05,
+    "outlier_detection": "iqr",
+    "normalization": "standardization",
+    "time_series_split": "temporal"
+  },
+
+  "training_config": {
+    "train_split": 0.7,
+    "validation_split": 0.15,
+    "test_split": 0.15,
+    "random_seed": 42,
+    "sequence_length": 10,
+    "batch_size": 32
+  }
+}

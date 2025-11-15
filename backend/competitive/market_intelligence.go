@@ -5,7 +5,7 @@ package competitive
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	_ "errors"  // imported for potential future use
 	"fmt"
 	"sync"
 	"time"
@@ -695,7 +695,7 @@ type Deal struct {
 	PrimaryCompetitor string               `json:"primary_competitor"`
 	WonBy           string                 `json:"won_by,omitempty"`
 	Reasons         []string               `json:"reasons"`
-	Buyer Persona   string                 `json:"buyer_persona"`
+	BuyerPersona   string                  `json:"buyer_persona"`
 	Industry        string                 `json:"industry"`
 	CompanySize     string                 `json:"company_size"`
 	Geography       string                 `json:"geography"`
@@ -738,7 +738,7 @@ type WinLossInsight struct {
 	Description string                 `json:"description"`
 	Impact      string                 `json:"impact"`
 	Confidence  float64                `json:"confidence"`   // 0-100%
-	Supporting Data []interface{}      `json:"supporting_data"`
+	SupportingData []interface{}       `json:"supporting_data"`
 	Recommendations []string           `json:"recommendations"`
 	Generated   time.Time              `json:"generated"`
 	Metadata    map[string]interface{} `json:"metadata"`
@@ -779,11 +779,11 @@ type PredictionFactor struct {
 // CompetitorThreat represents competitive threat in deal
 type CompetitorThreat struct {
 	Competitor  string  `json:"competitor"`
-	Threat Level string  `json:"threat_level"` // High, medium, low
+	ThreatLevel string  `json:"threat_level"` // High, medium, low
 	Likelihood  float64 `json:"likelihood"`   // 0-100%
 	Strengths   []string `json:"strengths"`
 	Weaknesses  []string `json:"weaknesses"`
-	Counter Strategy string `json:"counter_strategy"`
+	CounterStrategy string `json:"counter_strategy"`
 }
 
 // NewWinLossAnalyzer creates new win/loss analyzer
@@ -895,7 +895,7 @@ type MessagingFramework struct {
 	TargetAudience  []string               `json:"target_audience"`
 	ValueProps      []string               `json:"value_props"`
 	KeyMessages     []string               `json:"key_messages"`
-	Proof Points    []string               `json:"proof_points"`
+	ProofPoints     []string               `json:"proof_points"`
 	Differentiation string                 `json:"differentiation"`
 	CallToAction    string                 `json:"call_to_action"`
 	Metadata        map[string]interface{} `json:"metadata"`

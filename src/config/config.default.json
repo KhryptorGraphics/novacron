@@ -1,0 +1,96 @@
+{
+  "environment": "development",
+  "platform": {
+    "name": "NovaCron",
+    "version": "1.0.0",
+    "description": "Advanced VM Management and ML Engineering Platform"
+  },
+  "database": {
+    "postgres": {
+      "host": "localhost",
+      "port": 5432,
+      "database": "novacron",
+      "user": "novacron",
+      "password": "",
+      "poolSize": 10,
+      "idleTimeout": 30000,
+      "connectionTimeout": 10000
+    },
+    "redis": {
+      "host": "localhost",
+      "port": 6379,
+      "password": "",
+      "database": 0
+    }
+  },
+  "services": {
+    "cache": {
+      "enabled": true,
+      "ttl": 3600,
+      "maxSize": 1000
+    },
+    "workload-monitor": {
+      "enabled": true,
+      "interval": 5000,
+      "thresholds": {
+        "cpu": 80,
+        "memory": 85,
+        "disk": 90
+      }
+    },
+    "mcp-integration": {
+      "enabled": true,
+      "autoConnect": true,
+      "timeout": 10000
+    },
+    "smart-agent-spawner": {
+      "enabled": true,
+      "maxAgents": 10,
+      "autoSpawn": true
+    },
+    "auto-spawning-orchestrator": {
+      "enabled": true,
+      "coordinationInterval": 1000
+    }
+  },
+  "logging": {
+    "level": "info",
+    "format": "json",
+    "destination": "console",
+    "file": {
+      "enabled": false,
+      "path": "./logs",
+      "maxSize": "10m",
+      "maxFiles": 5
+    }
+  },
+  "api": {
+    "host": "localhost",
+    "port": 3000,
+    "cors": {
+      "enabled": true,
+      "origin": "*"
+    },
+    "rateLimit": {
+      "enabled": true,
+      "windowMs": 900000,
+      "max": 100
+    }
+  },
+  "security": {
+    "jwt": {
+      "expiresIn": "24h",
+      "refreshExpiresIn": "7d"
+    },
+    "bcrypt": {
+      "rounds": 10
+    }
+  },
+  "features": {
+    "mlEngineering": true,
+    "vmManagement": true,
+    "distributedSystems": true,
+    "autoScaling": true,
+    "monitoring": true
+  }
+}

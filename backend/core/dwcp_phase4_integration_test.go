@@ -10,7 +10,9 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/core/governance/compliance"
 	"github.com/khryptorgraphics/novacron/backend/core/ml/automl"
 	"github.com/khryptorgraphics/novacron/backend/core/multicloud/abstraction"
-	"github.com/khryptorgraphics/novacron/backend/core/network/ai/dqn_routing"
+
+	// TODO: Create dqn_routing package
+	// "github.com/khryptorgraphics/novacron/backend/core/network/ai/dqn_routing"
 	"github.com/khryptorgraphics/novacron/backend/core/performance/autotuning"
 	"github.com/khryptorgraphics/novacron/backend/core/security/zerotrust"
 )
@@ -112,8 +114,8 @@ func testMLPipelineOptimization(t *testing.T) {
 func testIntelligentCaching(t *testing.T) {
 	// Test Agent 3: Intelligent Caching
 	cacheConfig := cache.CacheConfig{
-		L1Size:          1024 * 1024 * 10,  // 10MB
-		L2Size:          1024 * 1024 * 100, // 100MB
+		L1Size:          1024 * 1024 * 10,   // 10MB
+		L2Size:          1024 * 1024 * 100,  // 100MB
 		L3Size:          1024 * 1024 * 1000, // 1GB
 		EvictionPolicy:  "ml",
 		EnablePrefetch:  true,
@@ -159,9 +161,9 @@ func testIntelligentCaching(t *testing.T) {
 func testZeroTrustSecurity(t *testing.T) {
 	// Test Agent 4: Advanced Security
 	ztConfig := zerotrust.ZeroTrustConfig{
-		ContinuousAuth:      true,
+		ContinuousAuth:       true,
 		ContextAwarePolicies: true,
-		TrustCacheTTL:       5 * time.Minute,
+		TrustCacheTTL:        5 * time.Minute,
 	}
 
 	ztEngine := zerotrust.NewZeroTrustEngine(ztConfig)
@@ -197,11 +199,11 @@ func testZeroTrustSecurity(t *testing.T) {
 func testAutoTuningPerformance(t *testing.T) {
 	// Test Agent 5: Performance Auto-Tuning
 	tuningConfig := autotuning.AutoTuningConfig{
-		ProfilingEnabled:    true,
-		AutoRightSizing:     true,
-		AutoCPUPinning:      true,
+		ProfilingEnabled:     true,
+		AutoRightSizing:      true,
+		AutoCPUPinning:       true,
 		AutoNumaOptimization: true,
-		ConvergenceTimeout:  30 * time.Minute,
+		ConvergenceTimeout:   30 * time.Minute,
 	}
 
 	tuner := autotuning.NewAutoTuner(tuningConfig)
@@ -251,15 +253,15 @@ func testMultiCloudFederation(t *testing.T) {
 func testAINetworkRouting(t *testing.T) {
 	// Test Agent 7: AI-Driven Network
 	routerConfig := dqn_routing.DQNConfig{
-		StateSize:       64,
-		ActionSize:      10,
-		LearningRate:    0.001,
-		Gamma:           0.95,
-		EpsilonStart:    1.0,
-		EpsilonEnd:      0.01,
-		EpsilonDecay:    0.995,
-		BatchSize:       32,
-		MemorySize:      10000,
+		StateSize:        64,
+		ActionSize:       10,
+		LearningRate:     0.001,
+		Gamma:            0.95,
+		EpsilonStart:     1.0,
+		EpsilonEnd:       0.01,
+		EpsilonDecay:     0.995,
+		BatchSize:        32,
+		MemorySize:       10000,
 		TargetUpdateFreq: 100,
 	}
 
@@ -373,10 +375,10 @@ type mockCloudProvider struct {
 
 func (m *mockCloudProvider) GetProviderInfo() abstraction.ProviderInfo {
 	return abstraction.ProviderInfo{
-		Name:     m.name,
-		Type:     "mock",
-		Regions:  []string{"us-east-1", "eu-west-1"},
-		Quotas:   map[string]int{"vms": 1000},
+		Name:    m.name,
+		Type:    "mock",
+		Regions: []string{"us-east-1", "eu-west-1"},
+		Quotas:  map[string]int{"vms": 1000},
 	}
 }
 
@@ -419,7 +421,7 @@ func benchmarkMLInference(b *testing.B) {
 
 func benchmarkCacheAccess(b *testing.B) {
 	config := cache.CacheConfig{
-		L1Size: 1024 * 1024,
+		L1Size:         1024 * 1024,
 		EvictionPolicy: "lru",
 	}
 	cacheSystem := cache.NewMultiTierCache(config)

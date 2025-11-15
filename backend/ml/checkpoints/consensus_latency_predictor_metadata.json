@@ -1,0 +1,27 @@
+{
+  "sequence_length": 10,
+  "feature_names": [
+    "node_count",
+    "network_mode",
+    "byzantine_ratio",
+    "message_size"
+  ],
+  "scaler_X_mean": [
+    50.99828125,
+    0.504375,
+    0.1649517821045271,
+    49666.66328125
+  ],
+  "scaler_X_scale": [
+    28.21030668560519,
+    0.4999808590086225,
+    0.09443659847506425,
+    29147.77114668113
+  ],
+  "scaler_y_mean": [
+    80.76307857588307
+  ],
+  "scaler_y_scale": [
+    50.421735501933306
+  ]
+}

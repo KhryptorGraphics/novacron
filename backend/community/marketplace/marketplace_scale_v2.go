@@ -135,20 +135,6 @@ type MarketplaceApp struct {
 }
 
 // AppCategory represents an app category
-type AppCategory struct {
-	ID                  string
-	Name                string
-	Description         string
-	Icon                string
-	ParentCategory      string
-	Subcategories       []string
-
-	// Stats
-	AppCount            int64
-	TotalDownloads      int64
-	AverageRating       float64
-	TrendingScore       float64
-}
 
 // 5 major app categories with targets
 var appCategoryTargets = map[string]int64{
@@ -195,23 +181,8 @@ type AppDependency struct {
 }
 
 // Permission represents an app permission
-type Permission struct {
-	Name                string
-	Description         string
-	Type                string // read, write, admin
-	Scope               string
-	Required            bool
-}
 
 // APIEndpoint represents an API endpoint
-type APIEndpoint struct {
-	Method              string
-	Path                string
-	Description         string
-	RateLimit           int
-	RequiresAuth        bool
-	ResponseFormat      string
-}
 
 // Webhook represents a webhook configuration
 type Webhook struct {
@@ -355,13 +326,6 @@ type PersonalizationEngine struct {
 }
 
 // UserProfile represents a user's profile for personalization
-type UserProfile struct {
-	UserID              string
-	Preferences         map[string]interface{}
-	InterestsCategories []string
-	BehaviorPatterns    *BehaviorPattern
-	HistoricalInteractions []Interaction
-}
 
 // BehaviorPattern represents user behavior patterns
 type BehaviorPattern struct {
@@ -411,23 +375,8 @@ type PricingOptimizer struct {
 }
 
 // PricingModel represents a pricing model
-type PricingModel struct {
-	Type                string // fixed, tiered, usage-based, freemium
-	BasePrice           float64
-	Tiers               []PriceTier
-	Discounts           []Discount
-	OptimalPrice        float64
-	RevenueProjection   float64
-}
 
 // PriceTier represents a pricing tier
-type PriceTier struct {
-	Name                string
-	Price               float64
-	Features            []string
-	Limits              map[string]int64
-	PopularityScore     float64
-}
 
 // Discount represents a pricing discount
 type Discount struct {
@@ -459,18 +408,6 @@ type MonetizationStrategy struct {
 }
 
 // PayoutEngine manages developer payouts
-type PayoutEngine struct {
-	payoutSchedule      string // weekly, bi-weekly, monthly
-	minimumPayout       float64
-	paymentMethods      []string
-	taxHandling         *TaxEngine
-	invoiceGenerator    *InvoiceGenerator
-
-	// Metrics
-	totalPaidOut        float64
-	averagePayoutTime   time.Duration
-	payoutAccuracy      float64
-}
 
 // BonusProgram manages developer bonus programs
 type BonusProgram struct {
@@ -580,67 +517,16 @@ type EnforcementAction struct {
 }
 
 // EnterpriseMarketplace manages enterprise apps with 99.99% SLA
-type EnterpriseMarketplace struct {
-	enterpriseApps      map[string]*EnterpriseApp
-	slaManager          *SLAManager
-	dedicatedSupport    *DedicatedSupportTeam
-	complianceManager   *EnterpriseComplianceManager
-	customContracts     *CustomContractEngine
-
-	// Metrics
-	totalEnterpriseApps int64
-	enterpriseRevenue   float64
-	averageSLA          float64
-	customerSatisfaction float64
-
-	mu sync.RWMutex
-}
 
 // EnterpriseApp represents an enterprise-grade app
-type EnterpriseApp struct {
-	MarketplaceApp // Inherits base app fields
-
-	// Enterprise features
-	SLA                 float64 // 99.99% uptime
-	DedicatedSupport    bool
-	CustomIntegrations  []Integration
-	OnPremiseDeployment bool
-	WhiteLabeling       bool
-	CustomContracts     bool
-
-	// Compliance
-	SOC2Certified       bool
-	ISO27001Certified   bool
-	HIPAACompliant      bool
-	GDPRCompliant       bool
-	FCCCompliant        bool
-
-	// Enterprise pricing
-	EnterprisePrice     float64
-	VolumeDiscounts     []VolumeDiscount
-	CustomPricing       bool
-
-	// Support
-	SupportTier         string // premium, dedicated, white-glove
-	SupportTeam         []string
-	ResponseTime        time.Duration
-	EscalationPath      []string
-}
 
 // Integration represents a custom integration
-type Integration struct {
-	Name                string
-	Type                string // api, webhook, sso, saml
-	Configuration       map[string]interface{}
+
 	Active              bool
 }
 
 // VolumeDiscount represents volume-based pricing
-type VolumeDiscount struct {
-	MinimumQuantity     int64
-	DiscountPercent     float64
-	Active              bool
-}
+
 
 // SLAManager manages service level agreements
 type SLAManager struct {
@@ -912,7 +798,7 @@ func NewQualityEnforcementEngine() *QualityEnforcementEngine {
 func NewEnterpriseMarketplace() *EnterpriseMarketplace {
 	return &EnterpriseMarketplace{
 		enterpriseApps:      make(map[string]*EnterpriseApp),
-		slaManager:          &SLAManager{},
+		
 		dedicatedSupport:    &DedicatedSupportTeam{},
 		complianceManager:   &EnterpriseComplianceManager{},
 		customContracts:     &CustomContractEngine{},

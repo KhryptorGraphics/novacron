@@ -413,7 +413,7 @@ type UniversityMetrics struct {
 	ActiveStudents      int
 	CompletedCourses    int
 	CertifiedStudents   int
-	InternsPla ced       int
+	InternsPlaced       int
 	ResearchProjects    int
 	Publications        int
 	CreditsUsed         float64
@@ -471,6 +471,7 @@ type AcademicStats struct {
 	StudentSatisfaction float64
 	FacultySatisfaction float64
 	UpdatedAt           time.Time
+	InternsPlaced int
 }
 
 // NewAcademicProgramManager creates academic program manager

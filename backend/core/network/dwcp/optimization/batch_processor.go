@@ -29,7 +29,9 @@ func NewBatchProcessor(batchSize int, timeout time.Duration, fd int) *BatchProce
 	}
 
 	if timeout > 0 {
-		bp.flushTimer = time.AfterFunc(timeout, bp.Flush)
+		bp.flushTimer = time.AfterFunc(timeout, func() {
+			_ = bp.Flush() // Ignore error from async flush
+		})
 	}
 
 	return bp

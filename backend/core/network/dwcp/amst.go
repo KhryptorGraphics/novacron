@@ -3,7 +3,6 @@ package dwcp
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -34,35 +33,35 @@ type AMST struct {
 	packetLoss       atomic.Value // float64
 
 	// Adaptive optimization
-	optimizer       *StreamOptimizer
-	chunkSize       atomic.Int32
-	streamCount     atomic.Int32
+	optimizer   *StreamOptimizer
+	chunkSize   atomic.Int32
+	streamCount atomic.Int32
 
 	// Rate limiting
-	rateLimiter     *rate.Limiter
+	rateLimiter *rate.Limiter
 
 	// Synchronization
-	mu              sync.RWMutex
-	ctx             context.Context
-	cancel          context.CancelFunc
+	mu     sync.RWMutex
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// Error handling
-	lastError       atomic.Value // error
-	errorCount      atomic.Int32
-	reconnectDelay  time.Duration
+	lastError      atomic.Value // error
+	errorCount     atomic.Int32
+	reconnectDelay time.Duration
 }
 
 // AMSTConfig contains configuration for AMST
 type AMSTConfig struct {
 	// Connection parameters
-	MinStreams      int           // Minimum number of parallel streams (default: 4)
-	MaxStreams      int           // Maximum number of parallel streams (default: 256)
-	InitialStreams  int           // Initial stream count (default: 16)
+	MinStreams     int // Minimum number of parallel streams (default: 4)
+	MaxStreams     int // Maximum number of parallel streams (default: 256)
+	InitialStreams int // Initial stream count (default: 16)
 
 	// Performance tuning
-	ChunkSize       int           // Initial chunk size in bytes (default: 64KB)
-	MinChunkSize    int           // Minimum chunk size (default: 4KB)
-	MaxChunkSize    int           // Maximum chunk size (default: 1MB)
+	ChunkSize    int // Initial chunk size in bytes (default: 64KB)
+	MinChunkSize int // Minimum chunk size (default: 4KB)
+	MaxChunkSize int // Maximum chunk size (default: 1MB)
 
 	// Network optimization
 	TCPNoDelay      bool          // Disable Nagle's algorithm (default: true)
@@ -70,29 +69,29 @@ type AMSTConfig struct {
 	KeepAlivePeriod time.Duration // Keepalive period (default: 30s)
 
 	// Bandwidth management
-	BandwidthLimit  int64         // Maximum bandwidth in bytes/sec (0 = unlimited)
-	BurstSize       int           // Token bucket burst size
+	BandwidthLimit int64 // Maximum bandwidth in bytes/sec (0 = unlimited)
+	BurstSize      int   // Token bucket burst size
 
 	// Timeout settings
-	ConnectTimeout  time.Duration // Connection timeout (default: 30s)
-	ReadTimeout     time.Duration // Read timeout per chunk (default: 60s)
-	WriteTimeout    time.Duration // Write timeout per chunk (default: 60s)
+	ConnectTimeout time.Duration // Connection timeout (default: 30s)
+	ReadTimeout    time.Duration // Read timeout per chunk (default: 60s)
+	WriteTimeout   time.Duration // Write timeout per chunk (default: 60s)
 
 	// Adaptive optimization
-	EnableAdaptive  bool          // Enable adaptive optimization (default: true)
+	EnableAdaptive   bool          // Enable adaptive optimization (default: true)
 	OptimizeInterval time.Duration // Optimization interval (default: 5s)
 
 	// Reliability
-	MaxRetries      int           // Maximum retry attempts (default: 3)
-	RetryDelay      time.Duration // Delay between retries (default: 1s)
-	EnablePacing    bool          // Enable packet pacing (default: true)
+	MaxRetries   int           // Maximum retry attempts (default: 3)
+	RetryDelay   time.Duration // Delay between retries (default: 1s)
+	EnablePacing bool          // Enable packet pacing (default: true)
 }
 
 // Stream represents a single TCP stream in the multi-stream transport
 type Stream struct {
-	id              string
-	conn            net.Conn
-	amst            *AMST
+	id   string
+	conn net.Conn
+	amst *AMST
 
 	// Statistics
 	bytesTransferred int64
@@ -101,24 +100,24 @@ type Stream struct {
 	lastActive       time.Time
 
 	// State
-	active          bool
-	mu              sync.Mutex
+	active bool
+	mu     sync.Mutex
 }
 
 // StreamOptimizer dynamically optimizes stream parameters based on network conditions
 type StreamOptimizer struct {
-	amst            *AMST
+	amst *AMST
 
 	// Network measurements
-	rttHistory      []time.Duration
+	rttHistory       []time.Duration
 	bandwidthHistory []int64
-	lossHistory     []float64
+	lossHistory      []float64
 
 	// Optimization state
-	lastOptimization time.Time
+	lastOptimization  time.Time
 	optimizationCount int
 
-	mu              sync.Mutex
+	mu sync.Mutex
 }
 
 // NewAMST creates a new Adaptive Multi-Stream Transport instance
@@ -212,10 +211,10 @@ func NewAMST(config AMSTConfig) (*AMST, error) {
 	// Create optimizer if adaptive optimization is enabled
 	if config.EnableAdaptive {
 		amst.optimizer = &StreamOptimizer{
-			amst:           amst,
-			rttHistory:     make([]time.Duration, 0, 100),
+			amst:             amst,
+			rttHistory:       make([]time.Duration, 0, 100),
 			bandwidthHistory: make([]int64, 0, 100),
-			lossHistory:    make([]float64, 0, 100),
+			lossHistory:      make([]float64, 0, 100),
 		}
 
 		// Start optimization loop
@@ -518,6 +517,11 @@ func (amst *AMST) Receive(ctx context.Context, progressCallback func(int64)) ([]
 				chunkSize := int(binary.BigEndian.Uint32(header[8:12]))
 				fileTotalSize := int64(binary.BigEndian.Uint32(header[12:16]))
 
+				// Currently we rely on chunkID ordering for reassembly and
+				// don't need the explicit offset, but keep parsing it to
+				// maintain header compatibility.
+				_ = offset
+
 				// Update total size if not set
 				mu.Lock()
 				if totalSize == 0 {
@@ -735,15 +739,15 @@ func (amst *AMST) GetMetrics() map[string]interface{} {
 	amst.mu.RUnlock()
 
 	return map[string]interface{}{
-		"active_streams":     amst.activeStreams.Load(),
-		"total_streams":      amst.streamCount.Load(),
-		"chunk_size":         amst.chunkSize.Load(),
-		"bytes_transferred":  amst.bytesTransferred.Load(),
-		"transfer_rate":      amst.transferRate.Load(),
-		"latency_ms":         amst.latency.Load(),
-		"packet_loss":        amst.packetLoss.Load(),
-		"error_count":        amst.errorCount.Load(),
-		"stream_metrics":     streamMetrics,
+		"active_streams":    amst.activeStreams.Load(),
+		"total_streams":     amst.streamCount.Load(),
+		"chunk_size":        amst.chunkSize.Load(),
+		"bytes_transferred": amst.bytesTransferred.Load(),
+		"transfer_rate":     amst.transferRate.Load(),
+		"latency_ms":        amst.latency.Load(),
+		"packet_loss":       amst.packetLoss.Load(),
+		"error_count":       amst.errorCount.Load(),
+		"stream_metrics":    streamMetrics,
 	}
 }
 

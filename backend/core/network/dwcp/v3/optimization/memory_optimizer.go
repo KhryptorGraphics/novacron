@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -12,22 +13,22 @@ import (
 // MemoryOptimizerConfig defines configuration for memory optimization.
 type MemoryOptimizerConfig struct {
 	// GC tuning
-	GCPercent          int           // GOGC percentage
-	GCInterval         time.Duration // Force GC interval
+	GCPercent  int           // GOGC percentage
+	GCInterval time.Duration // Force GC interval
 
 	// Buffer pooling
-	EnableBufferPool   bool
-	SmallBufferSize    int // e.g., 4KB
-	MediumBufferSize   int // e.g., 64KB
-	LargeBufferSize    int // e.g., 1MB
-	MaxPooledBuffers   int
+	EnableBufferPool bool
+	SmallBufferSize  int // e.g., 4KB
+	MediumBufferSize int // e.g., 64KB
+	LargeBufferSize  int // e.g., 1MB
+	MaxPooledBuffers int
 
 	// Object pooling
-	EnableObjectPool   bool
-	MaxPooledObjects   int
+	EnableObjectPool bool
+	MaxPooledObjects int
 
 	// Memory limits
-	MaxHeapSize        uint64 // bytes
+	MaxHeapSize          uint64  // bytes
 	HeapWarningThreshold float64 // 0-1
 
 	// Leak detection
@@ -35,7 +36,7 @@ type MemoryOptimizerConfig struct {
 	LeakCheckInterval   time.Duration
 
 	// Allocation tracking
-	TrackAllocations   bool
+	TrackAllocations    bool
 	AllocationThreshold uint64 // bytes per second
 }
 
@@ -45,9 +46,9 @@ func DefaultMemoryOptimizerConfig() *MemoryOptimizerConfig {
 		GCPercent:            100,
 		GCInterval:           5 * time.Minute,
 		EnableBufferPool:     true,
-		SmallBufferSize:      4 * 1024,       // 4KB
-		MediumBufferSize:     64 * 1024,      // 64KB
-		LargeBufferSize:      1024 * 1024,    // 1MB
+		SmallBufferSize:      4 * 1024,    // 4KB
+		MediumBufferSize:     64 * 1024,   // 64KB
+		LargeBufferSize:      1024 * 1024, // 1MB
 		MaxPooledBuffers:     10000,
 		EnableObjectPool:     true,
 		MaxPooledObjects:     5000,
@@ -124,12 +125,12 @@ type LeakDetector struct {
 
 // MemorySnapshot captures memory state at a point in time.
 type MemorySnapshot struct {
-	Timestamp   time.Time
-	HeapAlloc   uint64
-	HeapSys     uint64
-	StackInuse  uint64
-	Goroutines  int
-	GCCount     uint32
+	Timestamp  time.Time
+	HeapAlloc  uint64
+	HeapSys    uint64
+	StackInuse uint64
+	Goroutines int
+	GCCount    uint32
 }
 
 // NewMemoryOptimizer creates a new memory optimizer.
@@ -139,7 +140,7 @@ func NewMemoryOptimizer(config *MemoryOptimizerConfig) *MemoryOptimizer {
 	}
 
 	// Set GOGC
-	runtime.SetGCPercent(config.GCPercent)
+	debug.SetGCPercent(config.GCPercent)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -426,12 +427,12 @@ func (ld *LeakDetector) TakeSnapshot() {
 	runtime.ReadMemStats(&m)
 
 	snapshot := &MemorySnapshot{
-		Timestamp:   time.Now(),
-		HeapAlloc:   m.HeapAlloc,
-		HeapSys:     m.HeapSys,
-		StackInuse:  m.StackInuse,
-		Goroutines:  runtime.NumGoroutine(),
-		GCCount:     m.NumGC,
+		Timestamp:  time.Now(),
+		HeapAlloc:  m.HeapAlloc,
+		HeapSys:    m.HeapSys,
+		StackInuse: m.StackInuse,
+		Goroutines: runtime.NumGoroutine(),
+		GCCount:    m.NumGC,
 	}
 
 	ld.mu.Lock()
@@ -586,7 +587,7 @@ func (o *MemoryOptimizer) GetMemoryStats() map[string]interface{} {
 		pool.mu.Unlock()
 	}
 
-	for name, tracker := range o.allocations {
+	for name, _ := range o.allocations {
 		if stats_data, err := o.GetAllocationStats(name); err == nil {
 			stats["allocations"].(map[string]interface{})[name] = map[string]interface{}{
 				"allocations":   stats_data.allocations,

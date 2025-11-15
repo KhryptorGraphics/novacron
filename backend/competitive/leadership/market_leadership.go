@@ -7,7 +7,7 @@ package leadership
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	_ "fmt"  // imported for potential future use
 	"sync"
 	"time"
 

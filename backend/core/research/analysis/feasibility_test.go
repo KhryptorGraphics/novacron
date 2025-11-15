@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/novacron/backend/core/research/monitoring"
+	"github.com/khryptorgraphics/novacron/backend/core/research/monitoring"
 )
 
 func TestNewFeasibilityAnalyzer(t *testing.T) {

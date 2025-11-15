@@ -133,17 +133,7 @@ type HealthCheck struct {
 }
 
 // HealthStatus represents the health status of an upstream
-type HealthStatus struct {
-	Status        UpstreamStatus `json:"status"`
-	ResponseTime  time.Duration  `json:"response_time"`
-	StatusCode    int            `json:"status_code"`
-	LastCheck     time.Time      `json:"last_check"`
-	FailureCount  int            `json:"failure_count"`
-	SuccessCount  int            `json:"success_count"`
-	Message       string         `json:"message"`
-}
 
-// RoutingRule defines traffic routing rules
 type RoutingRule struct {
 	ID            string                 `json:"id"`
 	Name          string                 `json:"name"`

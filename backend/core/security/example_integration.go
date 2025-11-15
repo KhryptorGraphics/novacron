@@ -13,15 +13,7 @@ import (
 )
 
 // SecurityConfig holds all security configuration
-type SecurityConfig struct {
-	VaultAddress string
-	VaultToken   string
-	TLSCertPath  string
-	TLSKeyPath   string
-	DatabaseURL  string
-}
 
-// InitializeSecurity sets up all security components
 func InitializeSecurity(ctx context.Context, config *SecurityConfig) (*SecurityManager, error) {
 	// Initialize Vault
 	vault, err := NewVaultManager(config.VaultAddress, config.VaultToken)

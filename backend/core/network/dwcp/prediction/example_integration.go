@@ -3,6 +3,7 @@ package prediction
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -49,7 +50,7 @@ func ExamplePBAIntegration() {
 	}
 	defer predictionService.Stop()
 
-	err = predictionService.Start()
+	err = predictionService.Start(context.Background())
 	if err != nil {
 		logger.Error("Failed to start prediction service", zap.Error(err))
 		return
@@ -135,7 +136,7 @@ func ExamplePBAIntegration() {
 			fmt.Printf("  Avg Bandwidth: %.1f Mbps\n", stats.AvgBandwidth)
 			fmt.Printf("  Avg Latency: %.1f ms\n", stats.AvgLatency)
 
-			fmt.Println("\n" + "─"*60)
+			fmt.Println("\n" + strings.Repeat("─", 60))
 		}
 	}
 }
@@ -150,7 +151,7 @@ func ExampleQuickStart() {
 		logger.Fatal("Failed to create service", zap.Error(err))
 	}
 
-	service.Start()
+	service.Start(context.Background())
 	defer service.Stop()
 
 	// Get prediction
@@ -165,7 +166,7 @@ func ExampleQuickStart() {
 
 // ExampleABTesting demonstrates A/B testing between models
 func ExampleABTesting() error {
-	logger, _ := zap.NewProduction()
+	_, _ = zap.NewProduction()
 
 	// Create primary service
 	service, err := NewPredictionService("./models/bandwidth_lstm_v1.onnx", 1*time.Minute)
@@ -180,7 +181,7 @@ func ExampleABTesting() error {
 		return err
 	}
 
-	service.Start()
+	service.Start(context.Background())
 
 	// Run for test duration
 	time.Sleep(1 * time.Hour)
@@ -208,7 +209,7 @@ func ExampleMetricsExport() error {
 	}
 	defer service.Stop()
 
-	service.Start()
+	service.Start(context.Background())
 
 	// Run for some time
 	time.Sleep(30 * time.Minute)
@@ -251,7 +252,7 @@ func ExampleCustomOptimizer() {
 	logger, _ := zap.NewProduction()
 
 	service, _ := NewPredictionService("./models/bandwidth_lstm_v1.onnx", 1*time.Minute)
-	service.Start()
+	service.Start(context.Background())
 	defer service.Stop()
 
 	optimizer := NewAMSTOptimizer(service, logger)

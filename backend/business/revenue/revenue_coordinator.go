@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"novacron/backend/business/expansion"
-	"novacron/backend/business/rev_ops"
-	"novacron/backend/sales/acquisition"
+	"github.com/khryptorgraphics/novacron/backend/business/expansion"
+	"github.com/khryptorgraphics/novacron/backend/business/rev_ops"
+	"github.com/khryptorgraphics/novacron/backend/sales/acquisition"
 )
 
 // RevenueCoordinator orchestrates all revenue systems

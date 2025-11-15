@@ -13,18 +13,18 @@ type ResilienceManager struct {
 	name string
 
 	// Resilience components
-	circuitBreakers   map[string]*CircuitBreaker
-	rateLimiters      map[string]*RateLimiter
+	circuitBreakers      map[string]*CircuitBreaker
+	rateLimiters         map[string]*RateLimiter
 	adaptiveRateLimiters map[string]*AdaptiveRateLimiter
-	bulkheads         map[string]*Bulkhead
-	retryPolicies     map[string]*RetryPolicy
-	timeoutManager    *TimeoutManager
-	healthChecker     *HealthChecker
-	chaosMonkey       *ChaosMonkey
-	degradationMgr    *DegradationManager
-	errorBudgets      map[string]*ErrorBudget
-	sloTracker        *SLOTracker
-	latencyBudgets    map[string]*LatencyBudget
+	bulkheads            map[string]*Bulkhead
+	retryPolicies        map[string]*RetryPolicy
+	timeoutManager       *TimeoutManager
+	healthChecker        *HealthChecker
+	chaosMonkey          *ChaosMonkey
+	degradationMgr       *DegradationManager
+	errorBudgets         map[string]*ErrorBudget
+	sloTracker           *SLOTracker
+	latencyBudgets       map[string]*LatencyBudget
 
 	logger *zap.Logger
 }
@@ -195,6 +195,13 @@ func (rm *ResilienceManager) SetComponentDegradation(component string, level Deg
 	rm.degradationMgr.SetComponentLevel(component, level)
 }
 
+// SetDegradationLevelChangeCallback registers a callback for overall degradation level changes.
+// This allows external packages (like DWCP) to react to degradation transitions without
+// accessing internal fields of the degradation manager.
+func (rm *ResilienceManager) SetDegradationLevelChangeCallback(fn func(old, new DegradationLevel)) {
+	rm.degradationMgr.SetLevelChangeCallback(fn)
+}
+
 // GetDegradationLevel returns current degradation level
 func (rm *ResilienceManager) GetDegradationLevel() DegradationLevel {
 	return rm.degradationMgr.GetLevel()
@@ -232,6 +239,14 @@ func (rm *ResilienceManager) IsBudgetExhausted(name string) bool {
 		return eb.BudgetExhausted()
 	}
 	return false
+}
+
+// ForEachErrorBudget iterates over all registered error budgets.
+// This provides controlled external access without exposing internal maps.
+func (rm *ResilienceManager) ForEachErrorBudget(fn func(name string, budget *ErrorBudget)) {
+	for name, eb := range rm.errorBudgets {
+		fn(name, eb)
+	}
 }
 
 // Latency Budget operations
@@ -301,17 +316,17 @@ func (rm *ResilienceManager) ExecuteWithAllProtections(ctx context.Context, oper
 // GetAllMetrics returns comprehensive metrics
 func (rm *ResilienceManager) GetAllMetrics() ResilienceMetrics {
 	metrics := ResilienceMetrics{
-		Name:             rm.name,
-		CircuitBreakers:  make(map[string]CircuitBreakerMetrics),
-		RateLimiters:     make(map[string]RateLimiterMetrics),
-		Bulkheads:        make(map[string]BulkheadMetrics),
-		RetryPolicies:    make(map[string]RetryPolicyMetrics),
-		ErrorBudgets:     make(map[string]ErrorBudgetMetrics),
-		LatencyBudgets:   make(map[string]LatencyBudgetMetrics),
-		HealthChecker:    rm.healthChecker.GetMetrics(),
-		ChaosMonkey:      rm.chaosMonkey.GetMetrics(),
-		Degradation:      rm.degradationMgr.GetMetrics(),
-		Timeout:          rm.timeoutManager.GetMetrics(),
+		Name:            rm.name,
+		CircuitBreakers: make(map[string]CircuitBreakerMetrics),
+		RateLimiters:    make(map[string]RateLimiterMetrics),
+		Bulkheads:       make(map[string]BulkheadMetrics),
+		RetryPolicies:   make(map[string]RetryPolicyMetrics),
+		ErrorBudgets:    make(map[string]ErrorBudgetMetrics),
+		LatencyBudgets:  make(map[string]LatencyBudgetMetrics),
+		HealthChecker:   rm.healthChecker.GetMetrics(),
+		ChaosMonkey:     rm.chaosMonkey.GetMetrics(),
+		Degradation:     rm.degradationMgr.GetMetrics(),
+		Timeout:         rm.timeoutManager.GetMetrics(),
 	}
 
 	for name, cb := range rm.circuitBreakers {
