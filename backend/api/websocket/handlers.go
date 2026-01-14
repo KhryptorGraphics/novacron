@@ -1069,13 +1069,41 @@ func (h *WebSocketHandler) parseIntWithDefault(str string, defaultVal int) int {
 }
 
 func (h *WebSocketHandler) collectMetrics(sources []string) map[string]interface{} {
-	// Collect metrics from metric registry
-	return map[string]interface{}{
-		"cpu_usage":    85.5,
-		"memory_usage": 67.2,
-		"disk_usage":   45.8,
-		"network_io":   1024.0,
+	result := make(map[string]interface{})
+
+	// If no specific sources requested, collect common metrics
+	if len(sources) == 0 {
+		sources = []string{"cpu_usage", "memory_usage", "disk_usage", "network_io", "bandwidth", "qos"}
 	}
+
+	// Collect metrics from metric registry
+	if h.metricRegistry != nil {
+		for _, source := range sources {
+			series, err := h.metricRegistry.GetMetrics(source)
+			if err == nil && len(series) > 0 {
+				// Get the latest value from the first series
+				if len(series[0].Metrics) > 0 {
+					latestMetric := series[0].Metrics[len(series[0].Metrics)-1]
+					result[source] = latestMetric.Value
+				}
+			}
+		}
+	}
+
+	// Add current timestamp
+	result["timestamp"] = time.Now().UnixMilli()
+
+	// If no real metrics found, return some system metrics
+	if len(result) <= 1 {
+		// Fall back to basic system info if registry is empty
+		result["cpu_usage"] = 0.0
+		result["memory_usage"] = 0.0
+		result["disk_usage"] = 0.0
+		result["network_io"] = 0.0
+		result["status"] = "no_data"
+	}
+
+	return result
 }
 
 func (h *WebSocketHandler) matchesAlertFilters(alert AlertMessage, filters map[string]interface{}) bool {

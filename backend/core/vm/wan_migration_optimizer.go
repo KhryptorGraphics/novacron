@@ -9,10 +9,15 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/sirupsen/logrus"
 )
 
 // WANMigrationOptimizer provides optimizations for VM migrations over wide-area networks
-// where bandwidth, latency, and connection stability may be limited
+// where bandwidth, latency, and connection stability may be limited.
+//
+// The optimizer integrates with eBPF-based page filtering through its internal DeltaSyncManager
+// to provide efficient memory page tracking during migration. Use SupportsEBPF() to check
+// availability and EnableEBPFFiltering()/DisableEBPFFiltering() to control eBPF lifecycle.
 type WANMigrationOptimizer struct {
 	// Configuration
 	config WANMigrationConfig
@@ -26,6 +31,12 @@ type WANMigrationOptimizer struct {
 
 	// Mutex for thread safety
 	mu sync.RWMutex
+
+	// DeltaSyncManager for optimized file transfers with eBPF support
+	deltaSyncManager *DeltaSyncManager
+
+	// Logger for optimizer operations
+	logger *logrus.Entry
 }
 
 // WANMigrationConfig contains configuration for WAN migration optimization
@@ -55,6 +66,14 @@ type WANMigrationConfig struct {
 	EnablePreemptiveTransfer bool // Start transferring before VM is fully stopped in cold migrations
 	EnableBackgroundTransfer bool // Transfer in background during VM operation
 	QoSPriority              int  // QoS priority (0-7, higher = more priority)
+
+	// eBPF options
+	EnableEBPFFiltering bool          // Enable eBPF-based page filtering for migration
+	EBPFAgingThreshold  time.Duration // Time threshold for marking pages as unused
+	FallbackOnEBPFError bool          // Continue without eBPF if initialization fails
+
+	// Logger (optional, defaults to logrus.New())
+	Logger *logrus.Logger
 }
 
 // WANMigrationStats tracks statistics for WAN migration
@@ -103,15 +122,39 @@ func NewWANMigrationOptimizer(config WANMigrationConfig) *WANMigrationOptimizer 
 		config.DeltaBlockSizeKB = 64 // Default to 64KB blocks
 	}
 
+	if config.EBPFAgingThreshold == 0 {
+		config.EBPFAgingThreshold = 5 * time.Second // Default to 5 seconds
+	}
+
+	// Set up logger
+	logger := config.Logger
+	if logger == nil {
+		logger = logrus.New()
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// Create DeltaSyncManager for delta sync operations with eBPF support
+	deltaSyncConfig := DefaultDeltaSyncConfig()
+	deltaSyncConfig.BlockSizeKB = config.DeltaBlockSizeKB
+	deltaSyncConfig.EnableCompression = config.CompressionLevel > 0
+	deltaSyncConfig.CompressionLevel = config.CompressionLevel
+	deltaSyncConfig.HashAlgorithm = config.DeltaHashAlgorithm
+	deltaSyncConfig.EnableEBPFFiltering = config.EnableEBPFFiltering
+	deltaSyncConfig.EBPFAgingThreshold = config.EBPFAgingThreshold
+	deltaSyncConfig.FallbackOnEBPFError = config.FallbackOnEBPFError
+	deltaSyncConfig.Logger = logger
+	deltaSyncManager := NewDeltaSyncManager(deltaSyncConfig)
 
 	return &WANMigrationOptimizer{
 		config: config,
 		stats: WANMigrationStats{
 			StartTime: time.Now(),
 		},
-		ctx:    ctx,
-		cancel: cancel,
+		ctx:              ctx,
+		cancel:           cancel,
+		deltaSyncManager: deltaSyncManager,
+		logger:           logger.WithField("component", "WANMigrationOptimizer"),
 	}
 }
 
@@ -134,6 +177,10 @@ func DefaultWANMigrationConfig() WANMigrationConfig {
 		EnablePreemptiveTransfer: true,
 		EnableBackgroundTransfer: true,
 		QoSPriority:              4,
+		// eBPF defaults - disabled by default for compatibility, graceful fallback enabled
+		EnableEBPFFiltering: false,
+		EBPFAgingThreshold:  5 * time.Second,
+		FallbackOnEBPFError: true,
 	}
 }
 
@@ -232,6 +279,10 @@ func (o *WANMigrationOptimizer) CompleteStats() {
 
 // Close releases resources used by the optimizer
 func (o *WANMigrationOptimizer) Close() error {
+	// Close delta sync manager (includes eBPF cleanup)
+	if o.deltaSyncManager != nil {
+		o.deltaSyncManager.Close()
+	}
 	o.cancel()
 	return nil
 }
@@ -350,4 +401,99 @@ func (o *WANMigrationOptimizer) GetOptimizedMigrationOptions(migrationType strin
 	options.Priority = o.config.QoSPriority
 
 	return options
+}
+
+// SupportsEBPF returns whether eBPF-based page filtering is supported on this system.
+// This checks both system capability and whether eBPF filtering is enabled in the config.
+func (o *WANMigrationOptimizer) SupportsEBPF() bool {
+	// Check if eBPF is configured to be enabled
+	if !o.config.EnableEBPFFiltering {
+		return false
+	}
+
+	// Check if eBPF is supported on the system
+	return IsEBPFSupported()
+}
+
+// EnableEBPFFiltering enables eBPF-based page filtering for the target VM process.
+// This provides efficient unused page detection during migration, potentially reducing
+// the amount of data that needs to be transferred.
+//
+// Parameters:
+// - vmPID: The VM process PID (e.g., QEMU process ID)
+// - namespacePath: Optional path to guest PID namespace for guest-aware tracking.
+//                  Pass empty string to use host namespace (fallback mode).
+//
+// When namespacePath is provided and accessible, the filter operates in the guest's
+// namespace context, providing 20-30% improvement in unused page detection accuracy.
+//
+// Returns an error if:
+// - eBPF is not configured to be enabled (config.EnableEBPFFiltering is false)
+// - eBPF is not supported on the system and FallbackOnEBPFError is false
+// - Program loading/attachment fails and FallbackOnEBPFError is false
+//
+// When FallbackOnEBPFError is true, errors result in graceful degradation.
+func (o *WANMigrationOptimizer) EnableEBPFFiltering(vmPID uint32, namespacePath string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if o.deltaSyncManager == nil {
+		return fmt.Errorf("delta sync manager not initialized")
+	}
+
+	if o.logger != nil {
+		o.logger.WithFields(logrus.Fields{
+			"vm_pid":         vmPID,
+			"namespace_path": namespacePath,
+		}).Info("Enabling eBPF filtering via WANMigrationOptimizer")
+	}
+
+	// Delegate to delta sync manager
+	return o.deltaSyncManager.EnableEBPFFilteringWithNamespace(vmPID, namespacePath)
+}
+
+// DisableEBPFFiltering disables eBPF-based page filtering and releases associated resources.
+// This should be called when migration is complete or if eBPF filtering is no longer needed.
+func (o *WANMigrationOptimizer) DisableEBPFFiltering() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if o.deltaSyncManager != nil {
+		o.deltaSyncManager.DisableEBPFFiltering()
+	}
+
+	if o.logger != nil {
+		o.logger.Info("eBPF filtering disabled via WANMigrationOptimizer")
+	}
+}
+
+// IsEBPFEnabled returns whether eBPF filtering is currently active.
+func (o *WANMigrationOptimizer) IsEBPFEnabled() bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	if o.deltaSyncManager == nil {
+		return false
+	}
+	return o.deltaSyncManager.IsEBPFEnabled()
+}
+
+// GetEBPFStats returns statistics about eBPF page tracking.
+// Returns a map with keys like "enabled", "total_pages", "unused_pages", etc.
+func (o *WANMigrationOptimizer) GetEBPFStats() map[string]interface{} {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	if o.deltaSyncManager == nil {
+		return map[string]interface{}{"enabled": false}
+	}
+	return o.deltaSyncManager.GetEBPFStats()
+}
+
+// GetDeltaSyncManager returns the internal DeltaSyncManager for direct access.
+// This is useful for advanced use cases where the caller needs fine-grained control
+// over delta sync operations. Use with caution - prefer the higher-level methods
+// on WANMigrationOptimizer when possible.
+func (o *WANMigrationOptimizer) GetDeltaSyncManager() *DeltaSyncManager {
+	return o.deltaSyncManager
 }

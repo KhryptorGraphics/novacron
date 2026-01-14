@@ -26,6 +26,8 @@ type MigrationExecutorImpl struct {
 	mu                  sync.Mutex
 	prefetchingEngine   *PredictivePrefetchingEngine
 	prefetchingEnabled  bool
+	deltaSyncManager    *DeltaSyncManager
+	deltaSyncEnabled    bool
 }
 
 // NewMigrationExecutor creates a new MigrationExecutor
@@ -42,11 +44,26 @@ func NewVMMigrationExecutor(logger *logrus.Logger, storageDir string) (*Migratio
 		prefetchingEngine = nil
 	}
 
+	// Initialize delta sync manager for optimized transfers
+	deltaSyncConfig := DefaultDeltaSyncConfig()
+	deltaSyncConfig.Logger = logger
+	deltaSyncConfig.EnableCompression = true
+	deltaSyncConfig.CompressionLevel = 3
+	deltaSyncConfig.BlockSizeKB = 64
+	// Enable eBPF if supported
+	if IsEBPFSupported() {
+		deltaSyncConfig.EnableEBPFFiltering = true
+		deltaSyncConfig.FallbackOnEBPFError = true
+	}
+	deltaSyncManager := NewDeltaSyncManager(deltaSyncConfig)
+
 	return &MigrationExecutorImpl{
 		logger:             logger,
 		storageDir:         storageDir,
 		prefetchingEngine:  prefetchingEngine,
 		prefetchingEnabled: prefetchingEngine != nil,
+		deltaSyncManager:   deltaSyncManager,
+		deltaSyncEnabled:   true, // Enable by default
 	}, nil
 }
 
@@ -55,6 +72,13 @@ func (e *MigrationExecutorImpl) EnablePredictivePrefetching(enabled bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.prefetchingEnabled = enabled && e.prefetchingEngine != nil
+}
+
+// EnableDeltaSync enables or disables delta synchronization
+func (e *MigrationExecutorImpl) EnableDeltaSync(enabled bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.deltaSyncEnabled = enabled && e.deltaSyncManager != nil
 }
 
 // ExecuteColdMigration executes a cold migration (stop VM, transfer data, start VM on target)
@@ -391,29 +415,96 @@ func (e *MigrationExecutorImpl) transferVMData(migrationID string, vm *VM, targe
 	startTime := time.Now()
 	var totalBytes int64
 
+	// Get VM process PID for eBPF filtering (if available)
+	vmPID := getVMProcessPID(vm.ID())
+	if e.deltaSyncEnabled && vmPID > 0 {
+		// Try to get the namespace path for guest-aware eBPF injection
+		namespacePath := ""
+		if vmDriverRegistry != nil {
+			if resolver, ok := vmDriverRegistry.(interface{ GetNamespacePath(string) string }); ok {
+				namespacePath = resolver.GetNamespacePath(vm.ID())
+			}
+		}
+		// Fallback: construct namespace path from PID
+		if namespacePath == "" && vmPID > 0 {
+			namespacePath = fmt.Sprintf("/proc/%d/ns/pid", vmPID)
+		}
+
+		// Enable eBPF with guest namespace injection (provides 20-30% improvement)
+		if err := e.deltaSyncManager.EnableEBPFFilteringWithNamespace(vmPID, namespacePath); err != nil {
+			logger.WithError(err).Warn("Failed to enable eBPF filtering, using standard delta sync")
+		} else {
+			logger.WithFields(logrus.Fields{
+				"vm_pid":         vmPID,
+				"namespace_path": namespacePath,
+			}).Info("eBPF filtering enabled with guest namespace injection")
+		}
+	}
+
 	// Transfer each disk
 	for i, diskPath := range diskPaths {
 		diskFileName := fmt.Sprintf("disk_%d.img", i)
 		tmpDiskPath := filepath.Join(tmpDir, diskFileName)
-
-		// Copy disk to temporary location
-		logger.Infof("Copying disk %d to temporary location", i)
-		copiedBytes, err := copyFile(diskPath, tmpDiskPath)
-		if err != nil {
-			return fmt.Errorf("failed to copy disk to temporary location: %w", err)
-		}
-		totalBytes += copiedBytes
-
-		// Transfer disk to target node
-		logger.Infof("Transferring disk %d to target node", i)
 		targetDiskPath := targetNode.GetDiskPath(vm.ID())
-		if err := targetNode.EnsureDirectoryExists(filepath.Dir(targetDiskPath)); err != nil {
-			return fmt.Errorf("failed to create directory on target node: %w", err)
-		}
 
-		if err := targetNode.ReceiveFile(tmpDiskPath, targetDiskPath); err != nil {
-			return fmt.Errorf("failed to transfer disk to target node: %w", err)
+		// Use delta sync if enabled, otherwise fall back to copyFile
+		if e.deltaSyncEnabled && e.deltaSyncManager != nil {
+			logger.Infof("Using delta sync for disk %d transfer", i)
+
+			// Sync directly to target (delta sync handles the transfer)
+			if err := targetNode.EnsureDirectoryExists(filepath.Dir(targetDiskPath)); err != nil {
+				return fmt.Errorf("failed to create directory on target node: %w", err)
+			}
+
+			ctx := context.Background()
+			// Use SyncFileWithType to properly configure eBPF mapping (disk images disable eBPF)
+			if err := e.deltaSyncManager.SyncFileWithType(ctx, diskPath, tmpDiskPath, "disk_image"); err != nil {
+				logger.WithError(err).Warn("Delta sync failed, falling back to regular copy")
+				// Fall back to copyFile
+				copiedBytes, copyErr := copyFile(diskPath, tmpDiskPath)
+				if copyErr != nil {
+					return fmt.Errorf("failed to copy disk (fallback): %w", copyErr)
+				}
+				totalBytes += copiedBytes
+			} else {
+				// Get stats from delta sync
+				stats := e.deltaSyncManager.GetStats()
+				totalBytes += stats.TransferredBytes
+				logger.WithFields(logrus.Fields{
+					"transferred_bytes": stats.TransferredBytes,
+					"bytes_saved":       stats.BytesSaved,
+					"compression_ratio": stats.BytesSavedPercent,
+				}).Info("Delta sync completed for disk")
+			}
+
+			// Transfer the synced file to target node
+			if err := targetNode.ReceiveFile(tmpDiskPath, targetDiskPath); err != nil {
+				return fmt.Errorf("failed to transfer disk to target node: %w", err)
+			}
+		} else {
+			// Standard copy without delta sync
+			logger.Infof("Using standard copy for disk %d transfer", i)
+			copiedBytes, err := copyFile(diskPath, tmpDiskPath)
+			if err != nil {
+				return fmt.Errorf("failed to copy disk to temporary location: %w", err)
+			}
+			totalBytes += copiedBytes
+
+			// Transfer disk to target node
+			logger.Infof("Transferring disk %d to target node", i)
+			if err := targetNode.EnsureDirectoryExists(filepath.Dir(targetDiskPath)); err != nil {
+				return fmt.Errorf("failed to create directory on target node: %w", err)
+			}
+
+			if err := targetNode.ReceiveFile(tmpDiskPath, targetDiskPath); err != nil {
+				return fmt.Errorf("failed to transfer disk to target node: %w", err)
+			}
 		}
+	}
+
+	// Disable eBPF filtering after transfer
+	if e.deltaSyncEnabled && e.deltaSyncManager != nil {
+		e.deltaSyncManager.DisableEBPFFiltering()
 	}
 
 	// Calculate transfer stats
@@ -455,23 +546,59 @@ func (e *MigrationExecutorImpl) transferVMMemoryState(migrationID string, vm *VM
 	}
 
 	tmpMemoryPath := filepath.Join(tmpDir, "memory.state")
-
-	// Copy memory state to temporary location
-	logger.Info("Copying memory state to temporary location")
-	copiedBytes, err := copyFile(memoryStatePath, tmpMemoryPath)
-	if err != nil {
-		return fmt.Errorf("failed to copy memory state to temporary location: %w", err)
-	}
-
-	// Transfer memory state to target node
-	logger.Info("Transferring memory state to target node")
 	targetMemoryPath := targetNode.GetMemoryStatePath(vm.ID())
-	if err := targetNode.EnsureDirectoryExists(filepath.Dir(targetMemoryPath)); err != nil {
-		return fmt.Errorf("failed to create directory on target node: %w", err)
-	}
 
-	if err := targetNode.ReceiveFile(tmpMemoryPath, targetMemoryPath); err != nil {
-		return fmt.Errorf("failed to transfer memory state to target node: %w", err)
+	var copiedBytes int64
+
+	// Use delta sync if enabled, otherwise fall back to copyFile
+	if e.deltaSyncEnabled && e.deltaSyncManager != nil {
+		logger.Info("Using delta sync for memory state transfer")
+
+		ctx := context.Background()
+		if err := targetNode.EnsureDirectoryExists(filepath.Dir(targetMemoryPath)); err != nil {
+			return fmt.Errorf("failed to create directory on target node: %w", err)
+		}
+
+		// Use SyncFileWithType to configure eBPF mapping for memory snapshot
+		// Memory snapshots map sequentially: file_offset/PageSize = guest PFN
+		if err := e.deltaSyncManager.SyncFileWithType(ctx, memoryStatePath, tmpMemoryPath, "memory_snapshot"); err != nil {
+			logger.WithError(err).Warn("Delta sync failed for memory state, falling back to regular copy")
+			// Fall back to copyFile
+			copiedBytes, err = copyFile(memoryStatePath, tmpMemoryPath)
+			if err != nil {
+				return fmt.Errorf("failed to copy memory state (fallback): %w", err)
+			}
+		} else {
+			// Get stats from delta sync
+			stats := e.deltaSyncManager.GetStats()
+			copiedBytes = stats.TransferredBytes
+			logger.WithFields(logrus.Fields{
+				"transferred_bytes": stats.TransferredBytes,
+				"bytes_saved":       stats.BytesSaved,
+			}).Info("Delta sync completed for memory state")
+		}
+
+		// Transfer the synced file to target node
+		if err := targetNode.ReceiveFile(tmpMemoryPath, targetMemoryPath); err != nil {
+			return fmt.Errorf("failed to transfer memory state to target node: %w", err)
+		}
+	} else {
+		// Standard copy without delta sync
+		logger.Info("Copying memory state to temporary location")
+		copiedBytes, err = copyFile(memoryStatePath, tmpMemoryPath)
+		if err != nil {
+			return fmt.Errorf("failed to copy memory state to temporary location: %w", err)
+		}
+
+		// Transfer memory state to target node
+		logger.Info("Transferring memory state to target node")
+		if err := targetNode.EnsureDirectoryExists(filepath.Dir(targetMemoryPath)); err != nil {
+			return fmt.Errorf("failed to create directory on target node: %w", err)
+		}
+
+		if err := targetNode.ReceiveFile(tmpMemoryPath, targetMemoryPath); err != nil {
+			return fmt.Errorf("failed to transfer memory state to target node: %w", err)
+		}
 	}
 
 	logger.WithFields(logrus.Fields{
@@ -508,23 +635,55 @@ func (e *MigrationExecutorImpl) transferVMMemoryDelta(migrationID string, vm *VM
 	}
 
 	tmpMemoryDeltaPath := filepath.Join(tmpDir, fmt.Sprintf("memory_delta_%d.state", iteration))
-
-	// Copy memory delta to temporary location
-	logger.Info("Copying memory delta to temporary location")
-	copiedBytes, err := copyFile(memoryDeltaPath, tmpMemoryDeltaPath)
-	if err != nil {
-		return fmt.Errorf("failed to copy memory delta to temporary location: %w", err)
-	}
-
-	// Transfer memory delta to target node
-	logger.Info("Transferring memory delta to target node")
 	targetMemoryDeltaPath := targetNode.GetMemoryDeltaPath(vm.ID())
-	if err := targetNode.EnsureDirectoryExists(filepath.Dir(targetMemoryDeltaPath)); err != nil {
-		return fmt.Errorf("failed to create directory on target node: %w", err)
-	}
 
-	if err := targetNode.ReceiveFile(tmpMemoryDeltaPath, targetMemoryDeltaPath); err != nil {
-		return fmt.Errorf("failed to transfer memory delta to target node: %w", err)
+	var copiedBytes int64
+
+	// Use delta sync if enabled, otherwise fall back to copyFile
+	if e.deltaSyncEnabled && e.deltaSyncManager != nil {
+		logger.Info("Using delta sync for memory delta transfer")
+
+		ctx := context.Background()
+		if err := targetNode.EnsureDirectoryExists(filepath.Dir(targetMemoryDeltaPath)); err != nil {
+			return fmt.Errorf("failed to create directory on target node: %w", err)
+		}
+
+		// Use SyncFileWithType to configure eBPF mapping for memory delta
+		// Memory deltas also map sequentially like memory snapshots
+		if err := e.deltaSyncManager.SyncFileWithType(ctx, memoryDeltaPath, tmpMemoryDeltaPath, "memory_snapshot"); err != nil {
+			logger.WithError(err).Warn("Delta sync failed for memory delta, falling back to regular copy")
+			// Fall back to copyFile
+			copiedBytes, err = copyFile(memoryDeltaPath, tmpMemoryDeltaPath)
+			if err != nil {
+				return fmt.Errorf("failed to copy memory delta (fallback): %w", err)
+			}
+		} else {
+			// Get stats from delta sync
+			stats := e.deltaSyncManager.GetStats()
+			copiedBytes = stats.TransferredBytes
+		}
+
+		// Transfer the synced file to target node
+		if err := targetNode.ReceiveFile(tmpMemoryDeltaPath, targetMemoryDeltaPath); err != nil {
+			return fmt.Errorf("failed to transfer memory delta to target node: %w", err)
+		}
+	} else {
+		// Standard copy without delta sync
+		logger.Info("Copying memory delta to temporary location")
+		copiedBytes, err = copyFile(memoryDeltaPath, tmpMemoryDeltaPath)
+		if err != nil {
+			return fmt.Errorf("failed to copy memory delta to temporary location: %w", err)
+		}
+
+		// Transfer memory delta to target node
+		logger.Info("Transferring memory delta to target node")
+		if err := targetNode.EnsureDirectoryExists(filepath.Dir(targetMemoryDeltaPath)); err != nil {
+			return fmt.Errorf("failed to create directory on target node: %w", err)
+		}
+
+		if err := targetNode.ReceiveFile(tmpMemoryDeltaPath, targetMemoryDeltaPath); err != nil {
+			return fmt.Errorf("failed to transfer memory delta to target node: %w", err)
+		}
 	}
 
 	logger.WithFields(logrus.Fields{

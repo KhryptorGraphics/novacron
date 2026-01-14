@@ -271,6 +271,11 @@ type ResourceAwareScheduler struct {
 	// placementSemaphore limits concurrent placements
 	placementSemaphore chan struct{}
 
+	// LAVA/LARS/NILAS integration
+	lavaScheduler     *LAVAScheduler
+	larsRescheduler   *LARSRescheduler
+	lifetimePredictor LifetimePredictor
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -299,6 +304,31 @@ func NewResourceAwareScheduler(
 		ctx:                    ctx,
 		cancel:                 cancel,
 	}
+}
+
+// SetLAVAScheduler sets the LAVA scheduler for lifetime-aware placement
+func (s *ResourceAwareScheduler) SetLAVAScheduler(lava *LAVAScheduler) {
+	s.lavaScheduler = lava
+}
+
+// SetLARSRescheduler sets the LARS rescheduler for lifetime-aware migration ordering
+func (s *ResourceAwareScheduler) SetLARSRescheduler(lars *LARSRescheduler) {
+	s.larsRescheduler = lars
+}
+
+// SetLifetimePredictor sets the lifetime predictor
+func (s *ResourceAwareScheduler) SetLifetimePredictor(predictor LifetimePredictor) {
+	s.lifetimePredictor = predictor
+}
+
+// GetLAVAScheduler returns the LAVA scheduler
+func (s *ResourceAwareScheduler) GetLAVAScheduler() *LAVAScheduler {
+	return s.lavaScheduler
+}
+
+// GetLARSRescheduler returns the LARS rescheduler
+func (s *ResourceAwareScheduler) GetLARSRescheduler() *LARSRescheduler {
+	return s.larsRescheduler
 }
 
 // Start starts the resource-aware scheduler
@@ -838,6 +868,16 @@ func (s *ResourceAwareScheduler) scoreNode(
 	if vmProfile != nil && s.config.ConsiderWorkloadTypes {
 		workloadScore = s.scoreWorkloadCompatibility(node, vmProfile)
 		componentScores["workload_compatibility"] = workloadScore
+	}
+
+	// LAVA scoring: lifetime-aware VM allocation
+	// This is the highest priority scoring component (lexicographic)
+	if s.lavaScheduler != nil && s.lavaScheduler.IsEnabled() {
+		// TODO: Get VM's lifetime class from VM struct once lifetime fields are added
+		// For now, use LifetimeClassUnknown as default
+		vmLifetimeClass := LifetimeClassUnknown
+		lavaScore := s.lavaScheduler.LAVAScore(nodeID, vmLifetimeClass)
+		componentScores["lava_lifetime"] = lavaScore
 	}
 
 	// Apply policy-specific scoring adjustments
