@@ -662,7 +662,35 @@ func (s *Scheduler) Start() error {
 		log.Println("AI metrics collection started")
 	}
 
+	// Start lifetime metrics update loop for LAVA/LARS integration
+	go s.lifetimeMetricsLoop()
+	log.Println("Lifetime metrics collection started")
+
 	return nil
+}
+
+// lifetimeMetricsLoop periodically updates lifetime outcome metrics
+func (s *Scheduler) lifetimeMetricsLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			s.updateLifetimeMetrics()
+		}
+	}
+}
+
+// updateLifetimeMetrics updates lifetime outcome metrics for all nodes
+func (s *Scheduler) updateLifetimeMetrics() {
+	s.nodeMutex.RLock()
+	defer s.nodeMutex.RUnlock()
+
+	// Call UpdateLifetimeMetrics with current nodes
+	UpdateLifetimeMetrics(s.nodes)
 }
 
 // Stop stops the scheduler

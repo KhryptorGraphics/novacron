@@ -210,35 +210,40 @@ export function useDistributedTopologyWebSocket() {
 }
 
 export function useBandwidthMonitoringWebSocket() {
-  return useWebSocket('/api/ws/network/bandwidth', {
+  // Connect to backend /ws/metrics with bandwidth-specific sources
+  return useWebSocket('/ws/metrics?sources=bandwidth,network_io,qos&interval=5', {
     heartbeatInterval: 5000, // High frequency for bandwidth data
     reconnectAttempts: 12,
   });
 }
 
 export function usePerformancePredictionWebSocket() {
-  return useWebSocket('/api/ws/ai/predictions', {
+  // Connect to backend /ws/metrics with prediction-specific sources
+  return useWebSocket('/ws/metrics?sources=cpu_usage,memory_usage,disk_usage,predictions&interval=30', {
     heartbeatInterval: 30000,
     reconnectAttempts: 6,
   });
 }
 
 export function useSupercomputeFabricWebSocket() {
-  return useWebSocket('/api/ws/fabric/global', {
+  // Connect to backend /ws/metrics with fabric-specific sources
+  return useWebSocket('/ws/metrics?sources=fabric,compute_jobs,memory_fabric,processing&interval=20', {
     heartbeatInterval: 20000,
     reconnectAttempts: 10,
   });
 }
 
 export function useFederationWebSocket() {
-  return useWebSocket('/api/ws/federation/events', {
+  // Connect to backend /ws/alerts for federation events
+  return useWebSocket('/ws/alerts?sources=federation', {
     heartbeatInterval: 25000,
     reconnectAttempts: 8,
   });
 }
 
 export function useCrossClusterWebSocket() {
-  return useWebSocket('/api/ws/clusters/cross', {
+  // Connect to backend /ws/metrics with cross-cluster sources
+  return useWebSocket('/ws/metrics?sources=cluster,cross_cluster,replication&interval=15', {
     heartbeatInterval: 15000,
     reconnectAttempts: 10,
   });

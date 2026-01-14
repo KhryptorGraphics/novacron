@@ -601,3 +601,142 @@ func (d *KVMDriverEnhanced) ConfigureCPUPinning(ctx context.Context, vmID string
 func (d *KVMDriverEnhanced) ConfigureNUMA(ctx context.Context, vmID string, topology *NUMATopology) error {
 	return fmt.Errorf("NUMA configuration not implemented for KVM driver")
 }
+
+// GetProcessPID returns the hypervisor process PID for a given VM.
+// For KVM/QEMU VMs, this reads from the PID file or falls back to process scanning.
+func (d *KVMDriverEnhanced) GetProcessPID(vmID string) int {
+	d.vmLock.RLock()
+	defer d.vmLock.RUnlock()
+
+	vmInfo, exists := d.vms[vmID]
+	if !exists {
+		return 0
+	}
+
+	// If we have a cached PID and the VM is running, return it
+	if vmInfo.PID > 0 && vmInfo.State == StateRunning {
+		return vmInfo.PID
+	}
+
+	// Try to read from PID file
+	pidFilePath := filepath.Join(filepath.Dir(vmInfo.DiskPath), "qemu.pid")
+	pidData, err := os.ReadFile(pidFilePath)
+	if err == nil {
+		pid, err := strconv.Atoi(string(pidData[:len(pidData)-1])) // Remove newline
+		if err == nil && pid > 0 {
+			// Verify process exists
+			if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err == nil {
+				return pid
+			}
+		}
+	}
+
+	// Fallback: try /var/run/libvirt/qemu pattern (for libvirt-managed VMs)
+	libvirtPidPath := fmt.Sprintf("/var/run/libvirt/qemu/%s.pid", vmID)
+	pidData, err = os.ReadFile(libvirtPidPath)
+	if err == nil {
+		pid, err := strconv.Atoi(string(pidData[:len(pidData)-1]))
+		if err == nil && pid > 0 {
+			if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err == nil {
+				return pid
+			}
+		}
+	}
+
+	// Final fallback: scan /proc for qemu process with matching VM ID
+	return d.findQEMUProcessByVMID(vmID)
+}
+
+// findQEMUProcessByVMID scans /proc to find a QEMU process associated with the given VM ID
+func (d *KVMDriverEnhanced) findQEMUProcessByVMID(vmID string) int {
+	// Read /proc directory
+	procDir, err := os.Open("/proc")
+	if err != nil {
+		return 0
+	}
+	defer procDir.Close()
+
+	entries, err := procDir.Readdirnames(-1)
+	if err != nil {
+		return 0
+	}
+
+	for _, entry := range entries {
+		// Check if entry is a PID (numeric)
+		pid, err := strconv.Atoi(entry)
+		if err != nil {
+			continue
+		}
+
+		// Read cmdline for this process
+		cmdlinePath := fmt.Sprintf("/proc/%d/cmdline", pid)
+		cmdlineData, err := os.ReadFile(cmdlinePath)
+		if err != nil {
+			continue
+		}
+
+		cmdline := string(cmdlineData)
+
+		// Check if it's a QEMU process with our VM ID
+		if containsQEMUAndVMID(cmdline, vmID) {
+			return pid
+		}
+	}
+
+	return 0
+}
+
+// containsQEMUAndVMID checks if a cmdline contains both qemu and the VM ID
+func containsQEMUAndVMID(cmdline, vmID string) bool {
+	hasQEMU := false
+	hasVMID := false
+
+	// cmdline has null-separated arguments
+	for i := 0; i < len(cmdline); i++ {
+		// Find next null or end of string
+		j := i
+		for j < len(cmdline) && cmdline[j] != 0 {
+			j++
+		}
+
+		arg := cmdline[i:j]
+
+		// Check for qemu in the argument
+		if !hasQEMU {
+			for k := 0; k <= len(arg)-4; k++ {
+				if arg[k:k+4] == "qemu" {
+					hasQEMU = true
+					break
+				}
+			}
+		}
+
+		// Check for VM ID in the argument
+		if !hasVMID && len(arg) >= len(vmID) {
+			for k := 0; k <= len(arg)-len(vmID); k++ {
+				if arg[k:k+len(vmID)] == vmID {
+					hasVMID = true
+					break
+				}
+			}
+		}
+
+		if hasQEMU && hasVMID {
+			return true
+		}
+
+		i = j
+	}
+
+	return false
+}
+
+// GetNamespacePath returns the PID namespace path for a given VM's QEMU process.
+// This is used for guest namespace eBPF injection.
+func (d *KVMDriverEnhanced) GetNamespacePath(vmID string) string {
+	pid := d.GetProcessPID(vmID)
+	if pid <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("/proc/%d/ns/pid", pid)
+}

@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 )
@@ -15,6 +16,9 @@ type LiveMigrationManager struct {
 	memoryTransfer    *MemoryTransferEngine
 	wanOptimizer      *WANOptimizer
 	metricsCollector  *MigrationMetrics
+	// WAN migration components
+	wanMigrationOptimizer *WANMigrationOptimizer
+	deltaSyncManager      *DeltaSyncManager
 }
 
 // LiveMigrationConfig configuration for live migration
@@ -60,6 +64,241 @@ const (
 	PhaseComplete       MigrationPhase = "complete"
 	PhaseFailed         MigrationPhase = "failed"
 )
+
+// vmDriverRegistry holds the global VM driver for PID resolution
+// This should be set during application initialization
+var vmDriverRegistry VMDriver
+
+// SetVMDriverForPIDResolution sets the VM driver used for PID resolution
+func SetVMDriverForPIDResolution(driver VMDriver) {
+	vmDriverRegistry = driver
+}
+
+// VMPIDResolver is an interface for getting VM process PIDs
+type VMPIDResolver interface {
+	GetProcessPID(vmID string) int
+}
+
+// getVMProcessPID retrieves the hypervisor process PID for a given VM.
+// This function uses the configured VM driver to get the actual QEMU process PID.
+//
+// For KVM/QEMU VMs, it tries multiple methods in order:
+// 1. Check the driver's cached PID (if VM is tracked)
+// 2. Read from PID file at /var/lib/novacron/vms/<vmid>/qemu.pid
+// 3. Read from libvirt PID file at /var/run/libvirt/qemu/<vmid>.pid
+// 4. Scan /proc for QEMU process with matching VM ID
+//
+// Returns 0 if the PID cannot be determined.
+func getVMProcessPID(vmID string) uint32 {
+	// Try using the registered driver
+	if vmDriverRegistry != nil {
+		if resolver, ok := vmDriverRegistry.(VMPIDResolver); ok {
+			pid := resolver.GetProcessPID(vmID)
+			if pid > 0 {
+				return uint32(pid)
+			}
+		}
+	}
+
+	// Fallback: try to read from common PID file locations
+	// Try libvirt path first
+	libvirtPidPath := fmt.Sprintf("/var/run/libvirt/qemu/%s.pid", vmID)
+	if pid := readPIDFromFile(libvirtPidPath); pid > 0 {
+		return pid
+	}
+
+	// Try NovaCron's default path
+	novacronPidPath := fmt.Sprintf("/var/lib/novacron/vms/%s/qemu.pid", vmID)
+	if pid := readPIDFromFile(novacronPidPath); pid > 0 {
+		return pid
+	}
+
+	// Final fallback: scan /proc for QEMU process
+	pid := scanProcForQEMU(vmID)
+	if pid > 0 {
+		return pid
+	}
+
+	// PID not found - log warning
+	logger.WithField("vmID", vmID).Warn("Could not determine VM process PID")
+	return 0
+}
+
+// readPIDFromFile reads a PID from a file and verifies the process exists
+func readPIDFromFile(path string) uint32 {
+	data, err := readFile(path)
+	if err != nil {
+		return 0
+	}
+
+	// Trim whitespace and newlines
+	pidStr := trimWhitespace(data)
+	if len(pidStr) == 0 {
+		return 0
+	}
+
+	pid := 0
+	for _, c := range pidStr {
+		if c < '0' || c > '9' {
+			break
+		}
+		pid = pid*10 + int(c-'0')
+	}
+
+	if pid <= 0 {
+		return 0
+	}
+
+	// Verify process exists
+	procPath := fmt.Sprintf("/proc/%d", pid)
+	if _, err := statFile(procPath); err != nil {
+		return 0
+	}
+
+	return uint32(pid)
+}
+
+// readFile is a helper to read file contents
+func readFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// statFile is a helper to check if a file/directory exists
+func statFile(path string) (os.FileInfo, error) {
+	return os.Stat(path)
+}
+
+// trimWhitespace removes leading and trailing whitespace
+func trimWhitespace(s string) string {
+	start := 0
+	end := len(s)
+
+	for start < end && (s[start] == ' ' || s[start] == '\n' || s[start] == '\r' || s[start] == '\t') {
+		start++
+	}
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\n' || s[end-1] == '\r' || s[end-1] == '\t') {
+		end--
+	}
+
+	return s[start:end]
+}
+
+// scanProcForQEMU scans /proc for a QEMU process associated with the given VM ID
+func scanProcForQEMU(vmID string) uint32 {
+	procDir, err := os.Open("/proc")
+	if err != nil {
+		return 0
+	}
+	defer procDir.Close()
+
+	entries, err := procDir.Readdirnames(-1)
+	if err != nil {
+		return 0
+	}
+
+	for _, entry := range entries {
+		// Check if entry is a PID (all digits)
+		isDigit := true
+		for _, c := range entry {
+			if c < '0' || c > '9' {
+				isDigit = false
+				break
+			}
+		}
+		if !isDigit {
+			continue
+		}
+
+		// Parse PID
+		pid := 0
+		for _, c := range entry {
+			pid = pid*10 + int(c-'0')
+		}
+
+		// Read cmdline
+		cmdlinePath := fmt.Sprintf("/proc/%d/cmdline", pid)
+		cmdlineData, err := os.ReadFile(cmdlinePath)
+		if err != nil {
+			continue
+		}
+
+		cmdline := string(cmdlineData)
+
+		// Check if it's a QEMU process with our VM ID
+		if hasQEMUAndVMID(cmdline, vmID) {
+			return uint32(pid)
+		}
+	}
+
+	return 0
+}
+
+// hasQEMUAndVMID checks if a cmdline contains both "qemu" and the VM ID
+func hasQEMUAndVMID(cmdline, vmID string) bool {
+	hasQEMU := false
+	hasVMID := false
+
+	// cmdline has null-separated arguments
+	for i := 0; i < len(cmdline); {
+		// Find next null or end of string
+		j := i
+		for j < len(cmdline) && cmdline[j] != 0 {
+			j++
+		}
+
+		arg := cmdline[i:j]
+
+		// Check for qemu
+		if !hasQEMU && len(arg) >= 4 {
+			for k := 0; k <= len(arg)-4; k++ {
+				if arg[k:k+4] == "qemu" {
+					hasQEMU = true
+					break
+				}
+			}
+		}
+
+		// Check for VM ID
+		if !hasVMID && len(arg) >= len(vmID) {
+			for k := 0; k <= len(arg)-len(vmID); k++ {
+				if arg[k:k+len(vmID)] == vmID {
+					hasVMID = true
+					break
+				}
+			}
+		}
+
+		if hasQEMU && hasVMID {
+			return true
+		}
+
+		i = j + 1
+	}
+
+	return false
+}
+
+// logger is a package-level logger for live migration
+var logger = &migrationLogger{}
+
+type migrationLogger struct{}
+
+func (l *migrationLogger) WithField(key string, value interface{}) *migrationLogEntry {
+	return &migrationLogEntry{fields: map[string]interface{}{key: value}}
+}
+
+type migrationLogEntry struct {
+	fields map[string]interface{}
+}
+
+func (e *migrationLogEntry) Warn(msg string) {
+	// In production, this would use the actual logger
+	fmt.Printf("WARN: %s %v\n", msg, e.fields)
+}
 
 // NewLiveMigrationManager creates a new live migration manager
 func NewLiveMigrationManager(config *LiveMigrationConfig) *LiveMigrationManager {
@@ -142,22 +381,64 @@ func (lmm *LiveMigrationManager) executeMigration(ctx context.Context, state *Mi
 func (lmm *LiveMigrationManager) initializeMigration(ctx context.Context, state *MigrationState) error {
 	state.Phase = PhaseInitialization
 	state.Status = "initializing"
-	
+
 	// Get VM memory size
 	state.TotalMemory = 8 * 1024 * 1024 * 1024 // 8GB example
-	
+
 	// Prepare destination host
 	if err := lmm.prepareDestination(ctx, state); err != nil {
 		return fmt.Errorf("failed to prepare destination: %w", err)
 	}
-	
-	// Initialize WAN optimization if needed
+
+	// Initialize WAN optimization if needed (legacy support)
 	if state.SourceHost != state.DestHost {
-		if err := lmm.wanOptimizer.Initialize(ctx, state.SourceHost, state.DestHost); err != nil {
-			return fmt.Errorf("failed to initialize WAN optimizer: %w", err)
+		if lmm.wanOptimizer != nil {
+			if err := lmm.wanOptimizer.Initialize(ctx, state.SourceHost, state.DestHost); err != nil {
+				return fmt.Errorf("failed to initialize WAN optimizer: %w", err)
+			}
+		}
+
+		// Initialize new WAN migration optimizer
+		if lmm.config.CompressionEnabled {
+			wanConfig := DefaultWANMigrationConfig()
+			wanConfig.CompressionLevel = 3
+			wanConfig.EnableDeltaSync = true
+			wanConfig.MaxBandwidthMbps = int(lmm.config.BandwidthLimit / (1024 * 1024 / 8))
+
+			lmm.wanMigrationOptimizer = NewWANMigrationOptimizer(wanConfig)
+
+			// Initialize delta sync manager
+			deltaSyncConfig := DefaultDeltaSyncConfig()
+			deltaSyncConfig.EnableCompression = lmm.config.CompressionEnabled
+			deltaSyncConfig.CompressionLevel = 3
+			deltaSyncConfig.BlockSizeKB = 64
+
+			// Enable eBPF if supported
+			if IsEBPFSupported() {
+				deltaSyncConfig.EnableEBPFFiltering = true
+				deltaSyncConfig.FallbackOnEBPFError = true
+				deltaSyncConfig.EBPFAgingThreshold = 5 * time.Second
+			}
+
+			lmm.deltaSyncManager = NewDeltaSyncManager(deltaSyncConfig)
+
+			// Try to enable eBPF filtering for the VM process (if we have a PID)
+			if deltaSyncConfig.EnableEBPFFiltering {
+				// Get the actual VM process ID from the VM state
+				// This assumes the VM has a method to get its hypervisor process PID
+				vmPID := getVMProcessPID(state.VMID)
+				if vmPID > 0 {
+					if err := lmm.deltaSyncManager.EnableEBPFFiltering(vmPID); err != nil {
+						// Log but don't fail - fallback to standard delta sync
+						fmt.Printf("eBPF filtering initialization failed (non-fatal): %v\n", err)
+					}
+				} else {
+					logger.WithField("vmID", state.VMID).Warn("Could not determine VM process PID, eBPF filtering disabled")
+				}
+			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -245,6 +526,17 @@ func (lmm *LiveMigrationManager) finalizeMigration(ctx context.Context, state *M
 	state.Phase = PhaseFinalization
 	state.Status = "finalizing"
 
+	// Cleanup WAN migration components
+	if lmm.deltaSyncManager != nil {
+		lmm.deltaSyncManager.Close()
+		lmm.deltaSyncManager = nil
+	}
+
+	if lmm.wanMigrationOptimizer != nil {
+		lmm.wanMigrationOptimizer.Close()
+		lmm.wanMigrationOptimizer = nil
+	}
+
 	// Cleanup source VM
 	if err := lmm.cleanupSource(ctx, state); err != nil {
 		return fmt.Errorf("failed to cleanup source: %w", err)
@@ -284,6 +576,17 @@ func (lmm *LiveMigrationManager) failMigration(state *MigrationState, err error)
 	state.Status = "failed"
 	state.Error = err
 	lmm.metricsCollector.RecordFailure(state, err)
+
+	// Cleanup WAN migration components on failure
+	if lmm.deltaSyncManager != nil {
+		lmm.deltaSyncManager.Close()
+		lmm.deltaSyncManager = nil
+	}
+
+	if lmm.wanMigrationOptimizer != nil {
+		lmm.wanMigrationOptimizer.Close()
+		lmm.wanMigrationOptimizer = nil
+	}
 }
 
 // GetMigrationState returns the current state of a migration
