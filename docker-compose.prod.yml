@@ -12,7 +12,7 @@ services:
       - DB_HOST=novacron-db
       - DB_PORT=3306
       - DB_USER=novacron
-      - DB_PASSWORD=novacron123
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD environment variable must be set}
       - DB_NAME=novacron
       - REDIS_URL=redis://novacron-redis:6379
     depends_on:
@@ -33,7 +33,7 @@ services:
       - DB_HOST=novacron-db
       - DB_PORT=3306
       - DB_USER=novacron
-      - DB_PASSWORD=novacron123
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD environment variable must be set}
       - DB_NAME=novacron
     depends_on:
       - novacron-db
