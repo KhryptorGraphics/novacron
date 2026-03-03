@@ -1,0 +1,1879 @@
+{
+  "updated_at": "2026-03-02T18:55:20.080019356-06:00",
+  "file_count": 6142,
+  "hubs": [
+    "backend/ml/data/network_simulator.py",
+    "backend/core/planetary/interplanetary/mars_relay.go",
+    "tests/mle-star-samples/computer-vision/src/data_loader.py",
+    "backend/core/planetary/leo/satellite_manager.go",
+    "backend/core/ai/integration_layer.go",
+    "backend/core/quantum/compiler/circuit_compiler.go",
+    "ai_engine/workload_pattern_recognition.py",
+    "backend/core/network/dwcp/v3/v3.go",
+    "tests/mle-star-samples/tabular-data/src/data_preprocessor.py",
+    "backend/pkg/errors/errors.go",
+    "ai_engine/models.py",
+    "backend/core/planetary/space/space_compute.go",
+    "tests/mle-star-samples/nlp/src/data_processor.py",
+    "backend/core/shared/interfaces.go",
+    "frontend/src/lib/api/types.ts",
+    "qdrant_mcp_utils.py",
+    "adapters/pkg/interfaces/adapter.go",
+    "frontend/src/lib/api/vms.ts",
+    "k8s-operator/pkg/novacron/client.go",
+    "ai_engine/performance_optimizer.py",
+    "ai-engine/ai_engine/utils/logging.py",
+    "backend/core/scheduler/network/topology.go",
+    "backend/core/planetary/mesh/global_mesh.go",
+    "backend/ml/models/bandwidth_predictor.py",
+    "backend/pkg/config/config.go",
+    "backend/core/neuromorphic/snn/snn_framework.go",
+    "backend/pkg/logger/logger.go",
+    "backend/ml/models/reliability_predictor.py",
+    "backend/core/autonomous/config.go",
+    "backend/ml/maddpg/train.py",
+    "ai_engine/predictive_scaling.py",
+    "backend/core/v4/wasm/runtime.go"
+  ],
+  "importers": {
+    "adapters/pkg/aws/adapter.go": [
+      "adapters/examples/usage.go",
+      "adapters/pkg/factory/factory.go"
+    ],
+    "adapters/pkg/azure/adapter.go": [
+      "adapters/examples/usage.go",
+      "adapters/pkg/factory/factory.go"
+    ],
+    "adapters/pkg/factory/factory.go": [
+      "adapters/examples/usage.go"
+    ],
+    "adapters/pkg/gcp/adapter.go": [
+      "adapters/examples/usage.go",
+      "adapters/pkg/factory/factory.go"
+    ],
+    "adapters/pkg/interfaces/adapter.go": [
+      "adapters/examples/usage.go",
+      "adapters/pkg/aws/adapter.go",
+      "adapters/pkg/gcp/adapter.go",
+      "adapters/pkg/factory/factory.go",
+      "adapters/pkg/azure/adapter.go"
+    ],
+    "ai-engine/ai_engine/api/main.py": [
+      "ai-engine/tests/test_api.py"
+    ],
+    "ai-engine/ai_engine/config.py": [
+      "ai-engine/tests/conftest.py"
+    ],
+    "ai-engine/ai_engine/core/anomaly_detector.py": [
+      "ai-engine/tests/conftest.py"
+    ],
+    "ai-engine/ai_engine/core/failure_predictor.py": [
+      "ai-engine/tests/conftest.py"
+    ],
+    "ai-engine/ai_engine/core/resource_optimizer.py": [
+      "ai-engine/tests/conftest.py",
+      "ai-engine/tests/test_api.py"
+    ],
+    "ai-engine/ai_engine/core/workload_optimizer.py": [
+      "ai-engine/tests/conftest.py",
+      "ai-engine/tests/test_api.py"
+    ],
+    "ai-engine/ai_engine/models/base.py": [
+      "ai-engine/tests/test_api.py"
+    ],
+    "ai-engine/ai_engine/utils/logging.py": [
+      "ai_engine/predictive_scaling.py",
+      "tests/mle-star-samples/nlp/src/data_processor.py",
+      "backend/core/ai/failure/predictive_prevention.py",
+      "backend/core/network/dwcp/compression/training/train_compression_selector_v3.py",
+      "src/mle-star/templates/tensorflow_model.py",
+      "backend/core/network/dwcp/monitoring/training/train_isolation_forest.py",
+      "research/bci/bci_roadmap.py",
+      "src/mle-star/templates/pytorch_model.py",
+      "backend/core/ai/rl_optimizer.py",
+      "tests/mle-star-samples/src/mle-star/enhancements/advanced_ml/ensemble_methods.py",
+      "tests/mle-star-samples/src/mle-star/enhancements/framework_extensions/jax_flax.py",
+      "external_knowledge.py",
+      "tests/mle-star-samples/src/mle-star/enhancements/framework_extensions/ray_tune_integration.py",
+      "backend/core/mlops/pipeline/ml_pipeline.py",
+      "backend/core/quantum/production_optimizer.py",
+      "sdk/python/novacron/client.py",
+      "backend/core/automation/drift/detector.py",
+      "tests/mle-star-samples/src/mle-star/enhancements/production_ops/drift_detection.py",
+      "tests/mle-star-samples/src/mle-star/enhancements/advanced_ml/automl_pipeline.py",
+      "backend/operations/intelligence/ops_intelligence.py",
+      "backend/core/network/dwcp/monitoring/training/train_isolation_forest_aggressive.py",
+      "backend/core/ai/predictive_engine.py",
+      "src/mle-star/templates/data_pipeline.py",
+      "backend/core/automation/self_optimization/optimizer.py",
+      "backend/ml/federated/validate_calibration.py",
+      "ai_engine/bandwidth_predictor.py",
+      "backend/services/websocket/main.py",
+      "backend/core/network/dwcp/monitoring/training/train_lstm_autoencoder.py",
+      "ai-engine/ai_engine/api/main.py",
+      "tests/mle-star-samples/src/mle-star/enhancements/production_ops/ab_testing.py",
+      "backend/core/automation/gitops/argocd_integration.py",
+      "backend/core/network/dwcp.v1.backup/partition/training/train_dqn.py",
+      "backend/ml/federated/fast_calibrate.py",
+      "ai-engine/ai_engine/utils/logging.py",
+      "backend/core/analytics/capacity/planning_ai.py",
+      "sdk/python/novacron/enhanced_client.py",
+      "src/mle-star/templates/main.py",
+      "scripts/sre/runbook_automation.py",
+      "backend/core/network/dwcp/monitoring/training/train_lstm_pytorch.py",
+      "ai-engine/ai_engine/core/failure_predictor.py",
+      "backend/core/ai/capacity/intelligent_planner.py",
+      "backend/ml/models/compression_selector.py",
+      "tests/mle-star-samples/nlp/src/bert_model.py",
+      "tests/mle-star-samples/src/mle-star/enhancements/framework_extensions/mlflow_integration.py",
+      "ai_engine/models.py",
+      "sdk/examples/python/multi_cloud_orchestrator.py",
+      "backend/core/ai/governance/ai_governance.py",
+      "scripts/automation/runbook_executor.py",
+      "research/materials/superconductor_roadmap.py",
+      "ai_engine/performance_optimizer.py",
+      "backend/core/automation/decision/autonomous_engine.py",
+      "ai-engine/ai_engine/core/workload_optimizer.py",
+      "ai_engine/app.py",
+      "backend/ml/federated/calibrate_tcsfeel.py",
+      "backend/core/network/dwcp/compression/training/train_compression_selector_v2.py",
+      "tests/mle-star-samples/src/mle-star/enhancements/advanced_ml/bayesian_hpo.py",
+      "tests/mle-star-samples/src/mle-star/enhancements/core.py",
+      "backend/core/analytics/cost/intelligence_platform.py",
+      "backend/ml/federated/calibration_final.py",
+      "backend/core/ai/ensemble/multi_model_engine.py",
+      "backend/core/ai/rl/infrastructure_optimizer.py",
+      "create_collection.py",
+      "backend/core/automation/compliance/framework.py",
+      "backend/ml/train_dwcp_models.py",
+      "backend/core/ml/capacity_planner.py",
+      "tests/mle-star-samples/nlp/src/trainer.py",
+      "scripts/mock_hypervisor.py",
+      "backend/core/ml/predictive_model.py",
+      "src/neural/pattern_analyzer.py",
+      "scripts/automation/runbook-engine.py",
+      "tests/mle-star-samples/src/mle-star/enhancements/advanced_ml/model_interpretability.py",
+      "index_external_knowledge.py",
+      "backend/core/neuromorphic/inference_engine.py",
+      "backend/core/network/dwcp/compression/training/train_compression_selector.py",
+      "test_qdrant_mcp.py",
+      "backend/core/ai/incident/autonomous_responder.py",
+      "backend/core/ml/anomaly_detector.py",
+      "backend/core/v4/ai/production_llm.py",
+      "backend/core/mlops/governance/ml_governance.py",
+      "backend/ml/evaluate_dwcp_models.py",
+      "src/mle-star/templates/scikit-learn_model.py",
+      "research/agi/commercialization/agi_commercial.py",
+      "ai-engine/ai_engine/utils/metrics.py",
+      "src/main.py",
+      "src/data/data_pipeline.py",
+      "ai-engine/ai_engine/utils/feature_engineering.py",
+      "research/quantum/commercialization/quantum_pilot.py",
+      "ai-engine/ai_engine/core/anomaly_detector.py",
+      "backend/services/api/main.py",
+      "backend/ml/api/compression_api.py",
+      "tests/mle-star-samples/src/mle-star/enhancements/production_ops/model_registry.py",
+      "store_repo_in_qdrant_mcp.py",
+      "backend/core/ml/auto_optimizer.py",
+      "ai_engine/workload_pattern_recognition.py",
+      "ai_engine/bandwidth_predictor_v3.py",
+      "tests/mle-star-samples/src/mle-star/enhancements/advanced_ml/neural_architecture_search.py",
+      "tests/mle-star-samples/src/mle-star/enhancements/framework_extensions/wandb_integration.py",
+      "backend/core/v4/ai/infrastructure_llm.py",
+      "backend/ml/federated/topology.py",
+      "ai-engine/ai_engine/core/resource_optimizer.py",
+      "backend/core/ai/anomaly_ai.py",
+      "tests/mle-star-samples/mle_star_workflow_runner.py",
+      "index_key_files_mcp.py",
+      "backend/ml/models/consensus_latency.py",
+      "backend/core/mlops/monitoring/ml_monitoring.py",
+      "backend/core/network/dwcp/partition/training/train_dqn.py",
+      "tests/mle-star-samples/src/mle-star/enhancements/framework_extensions/kubeflow_integration.py",
+      "src/models/model.py",
+      "backend/core/ai/nlops/nl_interface.py",
+      "backend/core/mlops/serving/model_server.py",
+      "research/biological/commercialization/pilot_deployment.py",
+      "backend/core/storage/dna_storage.py",
+      "tests/mle-star-samples/config/monitoring/exporters/ml-model/ml_model_exporter.py"
+    ],
+    "ai_engine/__init__.py": [
+      "tests/verify_all_fixes.py"
+    ],
+    "ai_engine/app.py": [
+      "tests/test_ai_endpoints.py",
+      "tests/test_go_integration_compatibility.py"
+    ],
+    "ai_engine/bandwidth_predictor_v3.py": [
+      "ai_engine/test_bandwidth_predictor_v3.py",
+      "ai_engine/train_bandwidth_predictor_v3.py"
+    ],
+    "ai_engine/models.py": [
+      "scripts/demo_model_persistence.py",
+      "tests/test_model_persistence.py",
+      "tests/simple_persistence_test.py",
+      "tests/verify_all_fixes.py",
+      "tests/verify_api_models_endpoint.py"
+    ],
+    "ai_engine/performance_optimizer.py": [
+      "tests/test_ai_db_config.py",
+      "tests/verify_all_fixes.py",
+      "tests/test_numeric_ranges_validation.py"
+    ],
+    "ai_engine/predictive_scaling.py": [
+      "tests/test_ai_endpoints.py",
+      "tests/test_predictive_scaling_fixes.py",
+      "tests/test_ai_db_config.py",
+      "tests/test_migration_clarity.py",
+      "tests/test_legacy_compatibility.py",
+      "docs/migration_specific_example.py",
+      "tests/verify_all_fixes.py",
+      "docs/migration_action_example.py",
+      "tests/test_numeric_ranges_validation.py"
+    ],
+    "ai_engine/workload_pattern_recognition.py": [
+      "tests/test_ai_endpoints.py",
+      "tests/test_ai_db_config.py",
+      "tests/test_period_calculation_fixes.py",
+      "tests/test_legacy_compatibility.py",
+      "tests/verify_all_fixes.py"
+    ],
+    "backend/api/security/handlers.go": [
+      "backend/tests/api/security_handlers_test.go",
+      "backend/cmd/api-server/main.go"
+    ],
+    "backend/business/expansion/expansion_acceleration.go": [
+      "backend/business/revenue/revenue_coordinator.go"
+    ],
+    "backend/business/fortune500/fortune500_acceleration.go": [
+      "tests/integration/competitive_integration_test.go"
+    ],
+    "backend/business/rev_ops/rev_ops_automation.go": [
+      "backend/business/revenue/revenue_coordinator.go"
+    ],
+    "backend/business/verticals/domination.go": [
+      "tests/market_domination_test.go"
+    ],
+    "backend/competitive/displacement/displacement_engine.go": [
+      "tests/integration/competitive_integration_test.go"
+    ],
+    "backend/competitive/dominance/market_share_tracker.go": [
+      "tests/integration/competitive_integration_test.go"
+    ],
+    "backend/competitive/leadership/market_leadership.go": [
+      "tests/integration/competitive_integration_test.go"
+    ],
+    "backend/core/ai/integration_layer.go": [
+      "tests/integration/ml_model_validation_test.go",
+      "tests/integration/ai_optimization_test.go",
+      "backend/core/compute/ai_integration_adapter.go",
+      "backend/core/compute/distributed_ai_service.go"
+    ],
+    "backend/core/autonomous/codegen/generator.go": [
+      "backend/core/dwcp_phase5_integration_test.go"
+    ],
+    "backend/core/autonomous/config.go": [
+      "backend/core/autonomous/healing/engine.go",
+      "backend/core/autonomous/incident/responder.go",
+      "backend/core/autonomous/healing/healing_test.go"
+    ],
+    "backend/core/autonomous/evolution/architecture_evolver.go": [
+      "backend/core/dwcp_phase5_integration_test.go"
+    ],
+    "backend/core/autonomous/predictive/maintenance.go": [
+      "backend/core/dwcp_phase5_integration_test.go"
+    ],
+    "backend/core/autonomous/twin/digital_twin.go": [
+      "backend/core/dwcp_phase5_integration_test.go"
+    ],
+    "backend/core/autoscaling/forecasting/capacity_planner.go": [
+      "backend/core/autoscaling/enhanced_autoscaling_manager.go",
+      "backend/core/autoscaling/integration_test.go"
+    ],
+    "backend/core/blockchain/contracts/orchestrator.go": [
+      "backend/core/dwcp_phase5_integration_test.go"
+    ],
+    "backend/core/blockchain/did/did_manager.go": [
+      "backend/core/dwcp_phase5_integration_test.go"
+    ],
+    "backend/core/blockchain/governance/governance.go": [
+      "backend/core/dwcp_phase5_integration_test.go"
+    ],
+    "backend/core/blockchain/state/state_manager.go": [
+      "backend/core/dwcp_phase5_integration_test.go"
+    ],
+    "backend/core/blockchain/tokens/token_manager.go": [
+      "backend/core/dwcp_phase5_integration_test.go"
+    ],
+    "backend/core/cluster/types.go": [
+      "backend/tests/api/federation_handlers_test.go"
+    ],
+    "backend/core/cognitive/advisor/proactive_advisor.go": [
+      "backend/core/cognitive/cognitive_test.go"
+    ],
+    "backend/core/cognitive/context/manager.go": [
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/cognitive/cognitive_test.go"
+    ],
+    "backend/core/cognitive/explanation/generator.go": [
+      "backend/core/cognitive/cognitive_test.go"
+    ],
+    "backend/core/cognitive/knowledge/graph.go": [
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/cognitive/cognitive_test.go"
+    ],
+    "backend/core/cognitive/metrics/metrics.go": [
+      "backend/core/cognitive/cognitive_test.go"
+    ],
+    "backend/core/cognitive/multimodal/interface.go": [
+      "backend/core/cognitive/cognitive_test.go"
+    ],
+    "backend/core/cognitive/nli/interface.go": [
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/cognitive/cognitive_test.go"
+    ],
+    "backend/core/cognitive/parser/intent_parser.go": [
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/cognitive/cognitive_test.go"
+    ],
+    "backend/core/cognitive/reasoning/reasoner.go": [
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/cognitive/cognitive_test.go"
+    ],
+    "backend/core/mlops/governance/ml_governance.py": [
+      "tests/mlops/test_complete_mlops_workflow.py"
+    ],
+    "backend/core/mlops/monitoring/ml_monitoring.py": [
+      "tests/mlops/test_complete_mlops_workflow.py"
+    ],
+    "backend/core/mlops/pipeline/ml_pipeline.py": [
+      "tests/mlops/test_complete_mlops_workflow.py"
+    ],
+    "backend/core/mlops/serving/model_server.py": [
+      "tests/mlops/test_complete_mlops_workflow.py"
+    ],
+    "backend/core/monitoring/tracing/opentelemetry.go": [
+      "backend/core/monitoring/monitoring_system.go"
+    ],
+    "backend/core/network/dwcp/v3/v3.go": [
+      "tests/chaos/failure_scenarios_test.go",
+      "tests/chaos/byzantine_test.go",
+      "tests/chaos/network_partition_test.go"
+    ],
+    "backend/core/network/segmentation/firewall/microseg_firewall.go": [
+      "backend/core/network/segmentation/segmentation_manager.go"
+    ],
+    "backend/core/network/segmentation/qos/qos_engine.go": [
+      "backend/core/network/segmentation/segmentation_manager.go"
+    ],
+    "backend/core/network/segmentation/tenant/tenant_manager.go": [
+      "backend/core/network/segmentation/segmentation_manager.go"
+    ],
+    "backend/core/network/topology/discovery_engine.go": [
+      "backend/core/scheduler/network_aware_scheduler.go",
+      "tests/integration/end_to_end_network_test.go"
+    ],
+    "backend/core/neuromorphic/benchmark/benchmark.go": [
+      "backend/core/neuromorphic/neuromorphic.go"
+    ],
+    "backend/core/neuromorphic/edge/edge_deployer.go": [
+      "backend/core/neuromorphic/neuromorphic.go"
+    ],
+    "backend/core/neuromorphic/energy/energy_monitor.go": [
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/neuromorphic/neuromorphic.go"
+    ],
+    "backend/core/neuromorphic/hardware/hw_manager.go": [
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/neuromorphic/neuromorphic.go"
+    ],
+    "backend/core/neuromorphic/metrics/metrics.go": [
+      "backend/core/neuromorphic/benchmark/benchmark.go",
+      "backend/core/neuromorphic/neuromorphic.go"
+    ],
+    "backend/core/neuromorphic/snn/snn_framework.go": [
+      "backend/core/neuromorphic/models/anomaly_detection.go",
+      "backend/core/neuromorphic/neuromorphic_test.go",
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/neuromorphic/benchmark/benchmark.go",
+      "backend/core/neuromorphic/compiler/snn_compiler.go",
+      "backend/core/neuromorphic/neuromorphic.go",
+      "backend/core/neuromorphic/models/object_detection.go"
+    ],
+    "backend/core/performance/cost_optimizer/optimizer.go": [
+      "backend/core/performance/autotuning/orchestrator.go"
+    ],
+    "backend/core/performance/cpu_pinning/engine.go": [
+      "backend/core/performance/autotuning/orchestrator.go"
+    ],
+    "backend/core/performance/flamegraph/generator.go": [
+      "backend/core/performance/autotuning/orchestrator.go"
+    ],
+    "backend/core/performance/io_tuning/tuner.go": [
+      "backend/core/performance/autotuning/orchestrator.go"
+    ],
+    "backend/core/performance/network_tuning/tuner.go": [
+      "backend/core/performance/autotuning/orchestrator.go"
+    ],
+    "backend/core/performance/numa/optimizer.go": [
+      "backend/core/performance/autotuning/orchestrator.go"
+    ],
+    "backend/core/performance/recommendations/engine.go": [
+      "backend/core/performance/autotuning/orchestrator.go"
+    ],
+    "backend/core/planetary/cables/cable_manager.go": [
+      "backend/core/planetary/planetary_coordinator.go"
+    ],
+    "backend/core/planetary/coverage/coverage_map.go": [
+      "backend/core/planetary/planetary_coordinator.go"
+    ],
+    "backend/core/planetary/dr/planetary_dr.go": [
+      "backend/core/planetary/planetary_coordinator.go"
+    ],
+    "backend/core/planetary/interplanetary/mars_relay.go": [
+      "backend/core/planetary/planetary_test.go",
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/planetary/planetary_coordinator.go"
+    ],
+    "backend/core/planetary/leo/satellite_manager.go": [
+      "backend/core/planetary/planetary_test.go",
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/planetary/planetary_coordinator.go"
+    ],
+    "backend/core/planetary/mesh/global_mesh.go": [
+      "backend/core/planetary/interplanetary/mars_relay.go",
+      "backend/core/planetary/planetary_test.go",
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/planetary/regions/region_coordinator.go",
+      "backend/core/planetary/planetary_coordinator.go"
+    ],
+    "backend/core/planetary/metrics/planetary_metrics.go": [
+      "backend/core/planetary/planetary_coordinator.go"
+    ],
+    "backend/core/planetary/regions/region_coordinator.go": [
+      "backend/core/planetary/planetary_test.go",
+      "backend/core/planetary/planetary_coordinator.go"
+    ],
+    "backend/core/planetary/routing/global_optimizer.go": [
+      "backend/core/planetary/planetary_coordinator.go"
+    ],
+    "backend/core/planetary/space/space_compute.go": [
+      "backend/core/planetary/planetary_test.go",
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/planetary/planetary_coordinator.go"
+    ],
+    "backend/core/plugins/storage/ceph/driver.go": [
+      "backend/core/plugins/storage/plugin_integration.go",
+      "backend/core/plugins/registry/storage_registry.go"
+    ],
+    "backend/core/plugins/storage/netfs/driver.go": [
+      "backend/core/plugins/storage/plugin_integration.go",
+      "backend/core/plugins/registry/storage_registry.go"
+    ],
+    "backend/core/plugins/storage/object/driver.go": [
+      "backend/core/plugins/registry/storage_registry.go"
+    ],
+    "backend/core/plugins/storage/objectstorage/object_storage.go": [
+      "backend/core/plugins/storage/plugin_integration.go"
+    ],
+    "backend/core/quantum/compiler/circuit_compiler.go": [
+      "backend/core/quantum/ecc/error_corrector.go",
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/quantum/quantum_integration_test.go",
+      "backend/core/quantum/simulator/qsim.go",
+      "backend/core/quantum/algorithms/shor.go",
+      "backend/core/quantum/algorithms/grover.go",
+      "backend/core/quantum/algorithms/vqe.go",
+      "backend/core/quantum/algorithms/qaoa.go",
+      "backend/core/quantum/executor/hybrid_executor.go"
+    ],
+    "backend/core/quantum/ecc/error_corrector.go": [
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/quantum/quantum_integration_test.go"
+    ],
+    "backend/core/quantum/executor/hybrid_executor.go": [
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/quantum/quantum_integration_test.go"
+    ],
+    "backend/core/quantum/qkd/qkd_manager.go": [
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/quantum/quantum_integration_test.go"
+    ],
+    "backend/core/quantum/simulator/qsim.go": [
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/quantum/quantum_integration_test.go"
+    ],
+    "backend/core/research/collaboration/portal.go": [
+      "backend/core/dwcp_phase5_integration_test.go"
+    ],
+    "backend/core/research/opensource/contributions.go": [
+      "backend/core/dwcp_phase5_integration_test.go"
+    ],
+    "backend/core/research/patents/patent_manager.go": [
+      "backend/core/dwcp_phase5_integration_test.go"
+    ],
+    "backend/core/scheduler/network/topology.go": [
+      "backend/core/sdn/controller/sdn_controller.go",
+      "backend/core/sdn/discovery/edge_topology_discovery.go",
+      "backend/core/scheduler/scheduler_factory.go",
+      "backend/examples/scheduler/multi_tenant_scheduler.go",
+      "backend/core/sdn/controller/sdn_controller_test.go",
+      "backend/core/scheduler/network_aware_scheduler_test.go",
+      "backend/examples/scheduler/network_aware_example.go"
+    ],
+    "backend/core/security/zerotrust/engine.go": [
+      "backend/core/dwcp_phase4_integration_test.go"
+    ],
+    "backend/core/shared/interfaces.go": [
+      "backend/core/network/dwcp.v1.backup/federation_adapter.go",
+      "backend/core/backup/federation.go",
+      "backend/core/federation/cross_cluster_components.go",
+      "backend/core/federation/backup_integration.go",
+      "backend/core/vm/distributed_state_coordinator.go",
+      "backend/core/federation/dwcp_integration_test.go",
+      "backend/core/network/dwcp/federation_adapter.go",
+      "backend/core/network/dwcp/federation_adapter_v3.go"
+    ],
+    "backend/core/templates/template_manager.go": [
+      "backend/examples/templates/ubuntu_24_04_template.go"
+    ],
+    "backend/core/v4/wasm/runtime.go": [
+      "backend/tests/comprehensive/test_coordinator.go",
+      "backend/core/v4/benchmarks/comprehensive_benchmarks.go",
+      "backend/core/network/dwcp.v1.backup/optimization/profiling.go",
+      "backend/core/edge/edge_agent.go",
+      "tests/chaos/failure_scenarios_test.go",
+      "tests/chaos/comprehensive_resilience_test.go",
+      "backend/core/network/dwcp/monitoring/profiler.go",
+      "backend/tests/comprehensive/integration/performance_benchmarks_test.go",
+      "backend/core/performance/profiler/continuous_profiler.go",
+      "backend/core/network/dwcp/compression/adaptive_compression.go",
+      "cli/internal/commands/version.go",
+      "backend/chaos/injectors.go",
+      "backend/core/vm/vm_migration_utils.go",
+      "backend/core/v4/wasm/production_runtime.go",
+      "backend/core/v4/release/ga_manager.go",
+      "backend/core/performance/profiling.go",
+      "backend/core/network/dwcp/optimization/cpu_affinity.go",
+      "backend/core/monitoring/production_metrics.go",
+      "backend/core/network/dwcp/v3/optimization/benchmarks.go",
+      "backend/pkg/errors/errors.go",
+      "backend/core/network/dwcp/transport/production_test.go",
+      "backend/core/network/dwcp/v3/optimization/performance_profiler.go",
+      "backend/core/cmd/novacron/main.go",
+      "k8s-operator/cmd/manager/main.go",
+      "backend/core/v4/edge/edge_native.go",
+      "backend/core/network/dwcp.v1.backup/compression/adaptive_compression.go",
+      "backend/core/network/dwcp/v3/optimization/cpu_optimizer.go",
+      "backend/core/v5/runtime/microsecond_validation.go",
+      "backend/pkg/logger/logger.go",
+      "backend/core/performance/simd_optimizations.go",
+      "tests/automation/test_orchestrator.go",
+      "backend/core/network/dwcp/v3/benchmarks/stress_test.go",
+      "config/performance/container_optimization.go",
+      "backend/core/edge/system_monitor.go",
+      "backend/core/network/dwcp.v1.backup/monitoring/profiler.go",
+      "backend/core/performance/performance_test.go",
+      "backend/core/monitoring/collectors.go",
+      "backend/core/performance/pool.go",
+      "backend/core/performance/memory_optimization.go",
+      "backend/core/performance/lockfree.go",
+      "backend/core/network/dwcp/v3/optimization/memory_optimizer.go",
+      "backend/core/performance/gpu/migration.go",
+      "backend/core/network/dwcp.v1.backup/optimization/cpu_affinity.go",
+      "backend/core/network/dwcp/dwcp_manager_test.go",
+      "config/performance/memory_optimization.go",
+      "backend/core/network/dwcp.v1.backup/transport/production_test.go",
+      "backend/core/network/dwcp/optimization/profiling.go",
+      "backend/core/vm/ebpf_capability.go",
+      "config/performance/api_optimization.go",
+      "backend/core/v4/compression/advanced_engine.go"
+    ],
+    "backend/core/vm/kata/driver.go": [
+      "backend/core/vm/unified/scheduler.go"
+    ],
+    "backend/core/zeroops/alerting/smart_alerting.go": [
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/zeroops/zeroops_integration_test.go"
+    ],
+    "backend/core/zeroops/incident/auto_responder.go": [
+      "backend/core/zeroops/zeroops_integration_test.go"
+    ],
+    "backend/core/zeroops/metrics/metrics.go": [
+      "backend/core/zeroops/zeroops_integration_test.go"
+    ],
+    "backend/core/zeroops/provisioning/self_provisioner.go": [
+      "backend/core/dwcp_phase5_integration_test.go",
+      "backend/core/zeroops/zeroops_integration_test.go"
+    ],
+    "backend/examples/policy/advanced/advanced_policy_example.go": [
+      "backend/examples/policy/policy_examples.go"
+    ],
+    "backend/ml/data/network_simulator.py": [
+      "backend/ml/validate_bandwidth_predictor.py",
+      "backend/ml/training/bandwidth_trainer.py",
+      "backend/ml/test_bandwidth_predictor.py"
+    ],
+    "backend/ml/federated/calibrate_tcsfeel.py": [
+      "tests/unit/ml/test_tcsfeel_calibration.py"
+    ],
+    "backend/ml/federated/topology.py": [
+      "tests/ml/test_tcsfeel.py"
+    ],
+    "backend/ml/maddpg/train.py": [
+      "backend/ml/maddpg/benchmark.py",
+      "backend/ml/maddpg/inference.py",
+      "backend/ml/maddpg/test_maddpg.py"
+    ],
+    "backend/ml/models/bandwidth_predictor.py": [
+      "backend/ml/validate_bandwidth_predictor.py",
+      "backend/ml/training/bandwidth_trainer.py",
+      "backend/ml/test_bandwidth_predictor.py"
+    ],
+    "backend/ml/models/consensus_latency.py": [
+      "tests/ml/test_consensus_latency.py",
+      "backend/ml/train_all_models.py"
+    ],
+    "backend/ml/models/reliability_predictor.py": [
+      "tests/ml/test_reliability_predictor.py",
+      "backend/ml/models/reliability_predictor_api.py",
+      "backend/ml/train_all_models.py"
+    ],
+    "backend/partners/ecosystem_scale.go": [
+      "tests/market_domination_test.go"
+    ],
+    "backend/partners/strategic/management.go": [
+      "tests/integration/competitive_integration_test.go"
+    ],
+    "backend/pkg/config/config.go": [
+      "backend/cmd/api-server/main_production.go",
+      "backend/cmd/api-server/main_enhanced.go",
+      "backend/cmd/api-server/main_real_backend.go",
+      "backend/cmd/api-server/main_secure.go",
+      "backend/cmd/api-server/main_multicloud.go",
+      "backend/cmd/api-server/main_working.go",
+      "backend/cmd/core-server/main.go",
+      "backend/cmd/api-server/main.go"
+    ],
+    "backend/pkg/errors/errors.go": [
+      "backend/pkg/security/ratelimit.go",
+      "backend/pkg/security/validation.go",
+      "backend/pkg/middleware/error.go"
+    ],
+    "backend/pkg/logger/logger.go": [
+      "backend/api/admin/security.go",
+      "backend/cmd/api-server/main_production.go",
+      "backend/cmd/api-server/main_enhanced.go",
+      "backend/core/iot/edge_analytics.go",
+      "backend/api/admin/database.go",
+      "backend/api/admin/user_management.go",
+      "backend/api/admin/config.go",
+      "backend/cmd/api-server/main_real_backend.go",
+      "backend/cmd/api-server/main_secure.go",
+      "backend/core/iot/device_discovery.go",
+      "backend/core/iot/device_manager.go",
+      "backend/api/admin/user_management_secure.go",
+      "backend/cmd/api-server/main_multicloud.go",
+      "backend/core/performance/database.go",
+      "backend/core/performance/cache.go",
+      "backend/cmd/api-server/main_working.go",
+      "backend/core/iot/data_aggregation.go",
+      "backend/cmd/core-server/main.go",
+      "backend/core/iot/gateway.go",
+      "backend/core/performance/pool.go",
+      "backend/api/admin/handlers.go",
+      "backend/cmd/api-server/main.go",
+      "backend/api/admin/templates.go"
+    ],
+    "backend/sales/acquisition/new_logo_engine.go": [
+      "backend/business/revenue/revenue_coordinator.go"
+    ],
+    "backend/sales/enterprise_intelligence.py": [
+      "tests/sales_intelligence_test.py"
+    ],
+    "code_memory.py": [
+      "novabay_code_memory.py"
+    ],
+    "configs/dwcp.yaml": [
+      "sdk/python/examples/basic.py"
+    ],
+    "external_knowledge.py": [
+      "index_external_knowledge.py"
+    ],
+    "frontend/src/lib/api/client.ts": [
+      "frontend/src/lib/api/vms.ts"
+    ],
+    "frontend/src/lib/api/types.ts": [
+      "frontend/src/lib/api/vms.ts",
+      "frontend/src/lib/api/hooks/useVMs.ts",
+      "frontend/src/lib/api/hooks/useVM.ts",
+      "frontend/src/lib/api/hooks/useVMAction.ts"
+    ],
+    "frontend/src/lib/api/vms.ts": [
+      "frontend/src/lib/api/hooks/useVMs.ts",
+      "frontend/src/lib/api/hooks/useVM.ts",
+      "frontend/src/lib/api/hooks/useVMAction.ts"
+    ],
+    "k8s-operator/pkg/novacron/client.go": [
+      "k8s-operator/pkg/controllers/virtualmachine_controller.go",
+      "k8s-operator/pkg/controllers/vmtemplate_controller.go",
+      "k8s-operator/pkg/controllers/vmcluster_controller.go",
+      "k8s-operator/cmd/manager/main.go",
+      "k8s-operator/pkg/controllers/multicloudvm_controller.go"
+    ],
+    "qdrant_mcp_utils.py": [
+      "external_knowledge.py",
+      "web_interface/app.py",
+      "qdrant_mcp_demo.py",
+      "index_key_files_mcp.py"
+    ],
+    "research/agi/infrastructure_agi.py": [
+      "research/validation/research_validation.py"
+    ],
+    "research/bci/neural_infrastructure.py": [
+      "research/validation/research_validation.py"
+    ],
+    "research/biological/dna_computation.py": [
+      "research/validation/research_validation.py"
+    ],
+    "research/materials/next_gen_materials.py": [
+      "research/validation/research_validation.py"
+    ],
+    "research/quantum/quantum_network.py": [
+      "research/validation/research_validation.py"
+    ],
+    "sdk/python/novacron/exceptions.py": [
+      "sdk/examples/python/multi_cloud_orchestrator.py"
+    ],
+    "sdk/python/novacron/models.py": [
+      "sdk/examples/python/multi_cloud_orchestrator.py"
+    ],
+    "src/data/data_pipeline.py": [
+      "src/mle-star/templates/main.py",
+      "src/main.py"
+    ],
+    "src/mle-star/plugin.js": [
+      "backend/core/plugins/plugin_manager.go"
+    ],
+    "src/models/model.py": [
+      "src/mle-star/templates/main.py",
+      "src/main.py"
+    ],
+    "src/neural/pattern_analyzer.py": [
+      "src/neural/pattern_analyzer_part2.py"
+    ],
+    "src/neural/pattern_analyzer_part2.py": [
+      "src/neural/analyze_novacron.py"
+    ],
+    "tests/mle-star-samples/computer-vision/src/data_loader.py": [
+      "tests/mle-star-samples/test_setup.py",
+      "tests/mle-star-samples/computer-vision/src/trainer.py",
+      "tests/mle-star-samples/mle_star_workflow_runner.py"
+    ],
+    "tests/mle-star-samples/mle_star_workflow_runner.py": [
+      "tests/mle-star-samples/test_setup.py"
+    ],
+    "tests/mle-star-samples/nlp/src/bert_model.py": [
+      "tests/mle-star-samples/nlp/src/trainer.py",
+      "tests/mle-star-samples/mle_star_workflow_runner.py"
+    ],
+    "tests/mle-star-samples/nlp/src/data_processor.py": [
+      "tests/mle-star-samples/test_setup.py",
+      "tests/mle-star-samples/nlp/src/trainer.py",
+      "tests/mle-star-samples/mle_star_workflow_runner.py"
+    ],
+    "tests/mle-star-samples/tabular-data/src/data_preprocessor.py": [
+      "tests/mle-star-samples/test_setup.py",
+      "tests/mle-star-samples/tabular-data/src/model_ensemble.py",
+      "tests/mle-star-samples/mle_star_workflow_runner.py"
+    ],
+    "tests/mle-star-samples/tabular-data/src/model_ensemble.py": [
+      "tests/mle-star-samples/mle_star_workflow_runner.py"
+    ],
+    "tools/indexer/my-app/public/next.svg": [
+      "tools/indexer/my-app/next.config.ts"
+    ]
+  },
+  "imports": {
+    "adapters/examples/usage.go": [
+      "adapters/pkg/interfaces/adapter.go",
+      "adapters/pkg/factory/factory.go",
+      "adapters/pkg/aws/adapter.go",
+      "adapters/pkg/azure/adapter.go",
+      "adapters/pkg/gcp/adapter.go"
+    ],
+    "adapters/pkg/aws/adapter.go": [
+      "adapters/pkg/interfaces/adapter.go"
+    ],
+    "adapters/pkg/azure/adapter.go": [
+      "adapters/pkg/interfaces/adapter.go"
+    ],
+    "adapters/pkg/factory/factory.go": [
+      "adapters/pkg/interfaces/adapter.go",
+      "adapters/pkg/aws/adapter.go",
+      "adapters/pkg/azure/adapter.go",
+      "adapters/pkg/gcp/adapter.go"
+    ],
+    "adapters/pkg/gcp/adapter.go": [
+      "adapters/pkg/interfaces/adapter.go"
+    ],
+    "ai-engine/ai_engine/api/main.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "ai-engine/ai_engine/core/anomaly_detector.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "ai-engine/ai_engine/core/failure_predictor.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "ai-engine/ai_engine/core/resource_optimizer.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "ai-engine/ai_engine/core/workload_optimizer.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "ai-engine/ai_engine/utils/feature_engineering.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "ai-engine/ai_engine/utils/logging.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "ai-engine/ai_engine/utils/metrics.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "ai-engine/tests/conftest.py": [
+      "ai-engine/ai_engine/config.py",
+      "ai-engine/ai_engine/core/failure_predictor.py",
+      "ai-engine/ai_engine/core/workload_optimizer.py",
+      "ai-engine/ai_engine/core/anomaly_detector.py",
+      "ai-engine/ai_engine/core/resource_optimizer.py"
+    ],
+    "ai-engine/tests/test_api.py": [
+      "ai-engine/ai_engine/api/main.py",
+      "ai-engine/ai_engine/models/base.py",
+      "ai-engine/ai_engine/core/workload_optimizer.py",
+      "ai-engine/ai_engine/core/resource_optimizer.py"
+    ],
+    "ai_engine/app.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "ai_engine/bandwidth_predictor.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "ai_engine/bandwidth_predictor_v3.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "ai_engine/models.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "ai_engine/performance_optimizer.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "ai_engine/predictive_scaling.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "ai_engine/test_bandwidth_predictor_v3.py": [
+      "ai_engine/bandwidth_predictor_v3.py"
+    ],
+    "ai_engine/train_bandwidth_predictor_v3.py": [
+      "ai_engine/bandwidth_predictor_v3.py"
+    ],
+    "ai_engine/workload_pattern_recognition.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/api/admin/config.go": [
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/api/admin/database.go": [
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/api/admin/handlers.go": [
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/api/admin/security.go": [
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/api/admin/templates.go": [
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/api/admin/user_management.go": [
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/api/admin/user_management_secure.go": [
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/business/revenue/revenue_coordinator.go": [
+      "backend/business/expansion/expansion_acceleration.go",
+      "backend/business/rev_ops/rev_ops_automation.go",
+      "backend/sales/acquisition/new_logo_engine.go"
+    ],
+    "backend/chaos/injectors.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/cmd/api-server/main.go": [
+      "backend/pkg/config/config.go",
+      "backend/pkg/logger/logger.go",
+      "backend/api/security/handlers.go"
+    ],
+    "backend/cmd/api-server/main_enhanced.go": [
+      "backend/pkg/config/config.go",
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/cmd/api-server/main_multicloud.go": [
+      "backend/pkg/config/config.go",
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/cmd/api-server/main_production.go": [
+      "backend/pkg/config/config.go",
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/cmd/api-server/main_real_backend.go": [
+      "backend/pkg/config/config.go",
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/cmd/api-server/main_secure.go": [
+      "backend/pkg/config/config.go",
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/cmd/api-server/main_working.go": [
+      "backend/pkg/config/config.go",
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/cmd/core-server/main.go": [
+      "backend/pkg/config/config.go",
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/core/ai/anomaly_ai.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/ai/capacity/intelligent_planner.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/ai/ensemble/multi_model_engine.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/ai/failure/predictive_prevention.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/ai/governance/ai_governance.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/ai/incident/autonomous_responder.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/ai/nlops/nl_interface.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/ai/predictive_engine.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/ai/rl/infrastructure_optimizer.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/ai/rl_optimizer.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/analytics/capacity/planning_ai.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/analytics/cost/intelligence_platform.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/automation/compliance/framework.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/automation/decision/autonomous_engine.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/automation/drift/detector.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/automation/gitops/argocd_integration.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/automation/self_optimization/optimizer.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/autonomous/healing/engine.go": [
+      "backend/core/autonomous/config.go"
+    ],
+    "backend/core/autonomous/healing/healing_test.go": [
+      "backend/core/autonomous/config.go"
+    ],
+    "backend/core/autonomous/incident/responder.go": [
+      "backend/core/autonomous/config.go"
+    ],
+    "backend/core/autoscaling/enhanced_autoscaling_manager.go": [
+      "backend/core/autoscaling/forecasting/capacity_planner.go"
+    ],
+    "backend/core/autoscaling/integration_test.go": [
+      "backend/core/autoscaling/forecasting/capacity_planner.go"
+    ],
+    "backend/core/backup/federation.go": [
+      "backend/core/shared/interfaces.go"
+    ],
+    "backend/core/cmd/novacron/main.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/cognitive/cognitive_test.go": [
+      "backend/core/cognitive/advisor/proactive_advisor.go",
+      "backend/core/cognitive/context/manager.go",
+      "backend/core/cognitive/explanation/generator.go",
+      "backend/core/cognitive/knowledge/graph.go",
+      "backend/core/cognitive/metrics/metrics.go",
+      "backend/core/cognitive/multimodal/interface.go",
+      "backend/core/cognitive/nli/interface.go",
+      "backend/core/cognitive/parser/intent_parser.go",
+      "backend/core/cognitive/reasoning/reasoner.go"
+    ],
+    "backend/core/compute/ai_integration_adapter.go": [
+      "backend/core/ai/integration_layer.go"
+    ],
+    "backend/core/compute/distributed_ai_service.go": [
+      "backend/core/ai/integration_layer.go"
+    ],
+    "backend/core/dwcp_phase4_integration_test.go": [
+      "backend/core/security/zerotrust/engine.go"
+    ],
+    "backend/core/dwcp_phase5_integration_test.go": [
+      "backend/core/autonomous/codegen/generator.go",
+      "backend/core/autonomous/evolution/architecture_evolver.go",
+      "backend/core/autonomous/predictive/maintenance.go",
+      "backend/core/autonomous/twin/digital_twin.go",
+      "backend/core/blockchain/contracts/orchestrator.go",
+      "backend/core/blockchain/did/did_manager.go",
+      "backend/core/blockchain/governance/governance.go",
+      "backend/core/blockchain/state/state_manager.go",
+      "backend/core/blockchain/tokens/token_manager.go",
+      "backend/core/cognitive/context/manager.go",
+      "backend/core/cognitive/knowledge/graph.go",
+      "backend/core/cognitive/nli/interface.go",
+      "backend/core/cognitive/parser/intent_parser.go",
+      "backend/core/cognitive/reasoning/reasoner.go",
+      "backend/core/neuromorphic/energy/energy_monitor.go",
+      "backend/core/neuromorphic/hardware/hw_manager.go",
+      "backend/core/neuromorphic/snn/snn_framework.go",
+      "backend/core/planetary/interplanetary/mars_relay.go",
+      "backend/core/planetary/leo/satellite_manager.go",
+      "backend/core/planetary/mesh/global_mesh.go",
+      "backend/core/planetary/space/space_compute.go",
+      "backend/core/quantum/compiler/circuit_compiler.go",
+      "backend/core/quantum/ecc/error_corrector.go",
+      "backend/core/quantum/executor/hybrid_executor.go",
+      "backend/core/quantum/qkd/qkd_manager.go",
+      "backend/core/quantum/simulator/qsim.go",
+      "backend/core/research/collaboration/portal.go",
+      "backend/core/research/opensource/contributions.go",
+      "backend/core/research/patents/patent_manager.go",
+      "backend/core/zeroops/alerting/smart_alerting.go",
+      "backend/core/zeroops/provisioning/self_provisioner.go"
+    ],
+    "backend/core/edge/edge_agent.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/edge/system_monitor.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/federation/backup_integration.go": [
+      "backend/core/shared/interfaces.go"
+    ],
+    "backend/core/federation/cross_cluster_components.go": [
+      "backend/core/shared/interfaces.go"
+    ],
+    "backend/core/federation/dwcp_integration_test.go": [
+      "backend/core/shared/interfaces.go"
+    ],
+    "backend/core/iot/data_aggregation.go": [
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/core/iot/device_discovery.go": [
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/core/iot/device_manager.go": [
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/core/iot/edge_analytics.go": [
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/core/iot/gateway.go": [
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/core/ml/anomaly_detector.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/ml/auto_optimizer.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/ml/capacity_planner.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/ml/predictive_model.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/mlops/governance/ml_governance.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/mlops/monitoring/ml_monitoring.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/mlops/pipeline/ml_pipeline.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/mlops/serving/model_server.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/monitoring/collectors.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/monitoring/monitoring_system.go": [
+      "backend/core/monitoring/tracing/opentelemetry.go"
+    ],
+    "backend/core/monitoring/production_metrics.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/dwcp.v1.backup/compression/adaptive_compression.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/dwcp.v1.backup/federation_adapter.go": [
+      "backend/core/shared/interfaces.go"
+    ],
+    "backend/core/network/dwcp.v1.backup/monitoring/profiler.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/dwcp.v1.backup/optimization/cpu_affinity.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/dwcp.v1.backup/optimization/profiling.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/dwcp.v1.backup/partition/training/train_dqn.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/network/dwcp.v1.backup/transport/production_test.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/dwcp/compression/adaptive_compression.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/dwcp/compression/training/train_compression_selector.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/network/dwcp/compression/training/train_compression_selector_v2.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/network/dwcp/compression/training/train_compression_selector_v3.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/network/dwcp/dwcp_manager_test.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/dwcp/federation_adapter.go": [
+      "backend/core/shared/interfaces.go"
+    ],
+    "backend/core/network/dwcp/federation_adapter_v3.go": [
+      "backend/core/shared/interfaces.go"
+    ],
+    "backend/core/network/dwcp/monitoring/profiler.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/dwcp/monitoring/training/train_isolation_forest.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/network/dwcp/monitoring/training/train_isolation_forest_aggressive.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/network/dwcp/monitoring/training/train_lstm_autoencoder.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/network/dwcp/monitoring/training/train_lstm_pytorch.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/network/dwcp/optimization/cpu_affinity.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/dwcp/optimization/profiling.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/dwcp/partition/training/train_dqn.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/network/dwcp/transport/production_test.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/dwcp/v3/benchmarks/stress_test.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/dwcp/v3/optimization/benchmarks.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/dwcp/v3/optimization/cpu_optimizer.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/dwcp/v3/optimization/memory_optimizer.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/dwcp/v3/optimization/performance_profiler.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/network/segmentation/segmentation_manager.go": [
+      "backend/core/network/segmentation/tenant/tenant_manager.go",
+      "backend/core/network/segmentation/firewall/microseg_firewall.go",
+      "backend/core/network/segmentation/qos/qos_engine.go"
+    ],
+    "backend/core/neuromorphic/benchmark/benchmark.go": [
+      "backend/core/neuromorphic/metrics/metrics.go",
+      "backend/core/neuromorphic/snn/snn_framework.go"
+    ],
+    "backend/core/neuromorphic/compiler/snn_compiler.go": [
+      "backend/core/neuromorphic/snn/snn_framework.go"
+    ],
+    "backend/core/neuromorphic/inference_engine.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/neuromorphic/models/anomaly_detection.go": [
+      "backend/core/neuromorphic/snn/snn_framework.go"
+    ],
+    "backend/core/neuromorphic/models/object_detection.go": [
+      "backend/core/neuromorphic/snn/snn_framework.go"
+    ],
+    "backend/core/neuromorphic/neuromorphic.go": [
+      "backend/core/neuromorphic/benchmark/benchmark.go",
+      "backend/core/neuromorphic/edge/edge_deployer.go",
+      "backend/core/neuromorphic/energy/energy_monitor.go",
+      "backend/core/neuromorphic/hardware/hw_manager.go",
+      "backend/core/neuromorphic/metrics/metrics.go",
+      "backend/core/neuromorphic/snn/snn_framework.go"
+    ],
+    "backend/core/neuromorphic/neuromorphic_test.go": [
+      "backend/core/neuromorphic/snn/snn_framework.go"
+    ],
+    "backend/core/performance/autotuning/orchestrator.go": [
+      "backend/core/performance/cpu_pinning/engine.go",
+      "backend/core/performance/cost_optimizer/optimizer.go",
+      "backend/core/performance/flamegraph/generator.go",
+      "backend/core/performance/io_tuning/tuner.go",
+      "backend/core/performance/network_tuning/tuner.go",
+      "backend/core/performance/numa/optimizer.go",
+      "backend/core/performance/recommendations/engine.go"
+    ],
+    "backend/core/performance/cache.go": [
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/core/performance/database.go": [
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/core/performance/gpu/migration.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/performance/lockfree.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/performance/memory_optimization.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/performance/performance_test.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/performance/pool.go": [
+      "backend/core/v4/wasm/runtime.go",
+      "backend/pkg/logger/logger.go"
+    ],
+    "backend/core/performance/profiler/continuous_profiler.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/performance/profiling.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/performance/simd_optimizations.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/planetary/interplanetary/mars_relay.go": [
+      "backend/core/planetary/mesh/global_mesh.go"
+    ],
+    "backend/core/planetary/planetary_coordinator.go": [
+      "backend/core/planetary/cables/cable_manager.go",
+      "backend/core/planetary/coverage/coverage_map.go",
+      "backend/core/planetary/dr/planetary_dr.go",
+      "backend/core/planetary/interplanetary/mars_relay.go",
+      "backend/core/planetary/leo/satellite_manager.go",
+      "backend/core/planetary/mesh/global_mesh.go",
+      "backend/core/planetary/metrics/planetary_metrics.go",
+      "backend/core/planetary/regions/region_coordinator.go",
+      "backend/core/planetary/routing/global_optimizer.go",
+      "backend/core/planetary/space/space_compute.go"
+    ],
+    "backend/core/planetary/planetary_test.go": [
+      "backend/core/planetary/interplanetary/mars_relay.go",
+      "backend/core/planetary/leo/satellite_manager.go",
+      "backend/core/planetary/mesh/global_mesh.go",
+      "backend/core/planetary/regions/region_coordinator.go",
+      "backend/core/planetary/space/space_compute.go"
+    ],
+    "backend/core/planetary/regions/region_coordinator.go": [
+      "backend/core/planetary/mesh/global_mesh.go"
+    ],
+    "backend/core/plugins/plugin_manager.go": [
+      "src/mle-star/plugin.js"
+    ],
+    "backend/core/plugins/registry/storage_registry.go": [
+      "backend/core/plugins/storage/ceph/driver.go",
+      "backend/core/plugins/storage/netfs/driver.go",
+      "backend/core/plugins/storage/object/driver.go"
+    ],
+    "backend/core/plugins/storage/plugin_integration.go": [
+      "backend/core/plugins/storage/ceph/driver.go",
+      "backend/core/plugins/storage/netfs/driver.go",
+      "backend/core/plugins/storage/objectstorage/object_storage.go"
+    ],
+    "backend/core/quantum/algorithms/grover.go": [
+      "backend/core/quantum/compiler/circuit_compiler.go"
+    ],
+    "backend/core/quantum/algorithms/qaoa.go": [
+      "backend/core/quantum/compiler/circuit_compiler.go"
+    ],
+    "backend/core/quantum/algorithms/shor.go": [
+      "backend/core/quantum/compiler/circuit_compiler.go"
+    ],
+    "backend/core/quantum/algorithms/vqe.go": [
+      "backend/core/quantum/compiler/circuit_compiler.go"
+    ],
+    "backend/core/quantum/ecc/error_corrector.go": [
+      "backend/core/quantum/compiler/circuit_compiler.go"
+    ],
+    "backend/core/quantum/executor/hybrid_executor.go": [
+      "backend/core/quantum/compiler/circuit_compiler.go"
+    ],
+    "backend/core/quantum/production_optimizer.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/quantum/quantum_integration_test.go": [
+      "backend/core/quantum/compiler/circuit_compiler.go",
+      "backend/core/quantum/ecc/error_corrector.go",
+      "backend/core/quantum/executor/hybrid_executor.go",
+      "backend/core/quantum/qkd/qkd_manager.go",
+      "backend/core/quantum/simulator/qsim.go"
+    ],
+    "backend/core/quantum/simulator/qsim.go": [
+      "backend/core/quantum/compiler/circuit_compiler.go"
+    ],
+    "backend/core/scheduler/network_aware_scheduler.go": [
+      "backend/core/network/topology/discovery_engine.go"
+    ],
+    "backend/core/scheduler/network_aware_scheduler_test.go": [
+      "backend/core/scheduler/network/topology.go"
+    ],
+    "backend/core/scheduler/scheduler_factory.go": [
+      "backend/core/scheduler/network/topology.go"
+    ],
+    "backend/core/sdn/controller/sdn_controller.go": [
+      "backend/core/scheduler/network/topology.go"
+    ],
+    "backend/core/sdn/controller/sdn_controller_test.go": [
+      "backend/core/scheduler/network/topology.go"
+    ],
+    "backend/core/sdn/discovery/edge_topology_discovery.go": [
+      "backend/core/scheduler/network/topology.go"
+    ],
+    "backend/core/storage/dna_storage.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/v4/ai/infrastructure_llm.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/v4/ai/production_llm.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/core/v4/benchmarks/comprehensive_benchmarks.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/v4/compression/advanced_engine.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/v4/edge/edge_native.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/v4/release/ga_manager.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/v4/wasm/production_runtime.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/v5/runtime/microsecond_validation.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/vm/distributed_state_coordinator.go": [
+      "backend/core/shared/interfaces.go"
+    ],
+    "backend/core/vm/ebpf_capability.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/vm/unified/scheduler.go": [
+      "backend/core/vm/kata/driver.go"
+    ],
+    "backend/core/vm/vm_migration_utils.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/core/zeroops/zeroops_integration_test.go": [
+      "backend/core/zeroops/alerting/smart_alerting.go",
+      "backend/core/zeroops/incident/auto_responder.go",
+      "backend/core/zeroops/metrics/metrics.go",
+      "backend/core/zeroops/provisioning/self_provisioner.go"
+    ],
+    "backend/examples/policy/policy_examples.go": [
+      "backend/examples/policy/advanced/advanced_policy_example.go"
+    ],
+    "backend/examples/scheduler/multi_tenant_scheduler.go": [
+      "backend/core/scheduler/network/topology.go"
+    ],
+    "backend/examples/scheduler/network_aware_example.go": [
+      "backend/core/scheduler/network/topology.go"
+    ],
+    "backend/examples/templates/ubuntu_24_04_template.go": [
+      "backend/core/templates/template_manager.go"
+    ],
+    "backend/ml/api/compression_api.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/ml/evaluate_dwcp_models.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/ml/federated/calibrate_tcsfeel.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/ml/federated/calibration_final.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/ml/federated/fast_calibrate.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/ml/federated/topology.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/ml/federated/validate_calibration.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/ml/maddpg/benchmark.py": [
+      "backend/ml/maddpg/train.py"
+    ],
+    "backend/ml/maddpg/inference.py": [
+      "backend/ml/maddpg/train.py"
+    ],
+    "backend/ml/maddpg/test_maddpg.py": [
+      "backend/ml/maddpg/train.py"
+    ],
+    "backend/ml/models/compression_selector.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/ml/models/consensus_latency.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/ml/models/reliability_predictor_api.py": [
+      "backend/ml/models/reliability_predictor.py"
+    ],
+    "backend/ml/test_bandwidth_predictor.py": [
+      "backend/ml/models/bandwidth_predictor.py",
+      "backend/ml/data/network_simulator.py"
+    ],
+    "backend/ml/train_all_models.py": [
+      "backend/ml/models/consensus_latency.py",
+      "backend/ml/models/reliability_predictor.py"
+    ],
+    "backend/ml/train_dwcp_models.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/ml/training/bandwidth_trainer.py": [
+      "backend/ml/models/bandwidth_predictor.py",
+      "backend/ml/data/network_simulator.py"
+    ],
+    "backend/ml/validate_bandwidth_predictor.py": [
+      "backend/ml/models/bandwidth_predictor.py",
+      "backend/ml/data/network_simulator.py"
+    ],
+    "backend/operations/intelligence/ops_intelligence.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/pkg/errors/errors.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/pkg/logger/logger.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/pkg/middleware/error.go": [
+      "backend/pkg/errors/errors.go"
+    ],
+    "backend/pkg/security/ratelimit.go": [
+      "backend/pkg/errors/errors.go"
+    ],
+    "backend/pkg/security/validation.go": [
+      "backend/pkg/errors/errors.go"
+    ],
+    "backend/services/api/main.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/services/websocket/main.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "backend/tests/api/federation_handlers_test.go": [
+      "backend/core/cluster/types.go"
+    ],
+    "backend/tests/api/security_handlers_test.go": [
+      "backend/api/security/handlers.go"
+    ],
+    "backend/tests/comprehensive/integration/performance_benchmarks_test.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "backend/tests/comprehensive/test_coordinator.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "cli/internal/commands/version.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "config/performance/api_optimization.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "config/performance/container_optimization.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "config/performance/memory_optimization.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "create_collection.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "docs/migration_action_example.py": [
+      "ai_engine/predictive_scaling.py"
+    ],
+    "docs/migration_specific_example.py": [
+      "ai_engine/predictive_scaling.py"
+    ],
+    "external_knowledge.py": [
+      "ai-engine/ai_engine/utils/logging.py",
+      "qdrant_mcp_utils.py"
+    ],
+    "frontend/src/lib/api/hooks/useVM.ts": [
+      "frontend/src/lib/api/vms.ts",
+      "frontend/src/lib/api/types.ts"
+    ],
+    "frontend/src/lib/api/hooks/useVMAction.ts": [
+      "frontend/src/lib/api/vms.ts",
+      "frontend/src/lib/api/types.ts"
+    ],
+    "frontend/src/lib/api/hooks/useVMs.ts": [
+      "frontend/src/lib/api/vms.ts",
+      "frontend/src/lib/api/types.ts"
+    ],
+    "frontend/src/lib/api/vms.ts": [
+      "frontend/src/lib/api/client.ts",
+      "frontend/src/lib/api/types.ts"
+    ],
+    "index_external_knowledge.py": [
+      "ai-engine/ai_engine/utils/logging.py",
+      "external_knowledge.py"
+    ],
+    "index_key_files_mcp.py": [
+      "ai-engine/ai_engine/utils/logging.py",
+      "qdrant_mcp_utils.py"
+    ],
+    "k8s-operator/cmd/manager/main.go": [
+      "backend/core/v4/wasm/runtime.go",
+      "k8s-operator/pkg/novacron/client.go"
+    ],
+    "k8s-operator/pkg/controllers/multicloudvm_controller.go": [
+      "k8s-operator/pkg/novacron/client.go"
+    ],
+    "k8s-operator/pkg/controllers/virtualmachine_controller.go": [
+      "k8s-operator/pkg/novacron/client.go"
+    ],
+    "k8s-operator/pkg/controllers/vmcluster_controller.go": [
+      "k8s-operator/pkg/novacron/client.go"
+    ],
+    "k8s-operator/pkg/controllers/vmtemplate_controller.go": [
+      "k8s-operator/pkg/novacron/client.go"
+    ],
+    "novabay_code_memory.py": [
+      "code_memory.py"
+    ],
+    "qdrant_mcp_demo.py": [
+      "qdrant_mcp_utils.py"
+    ],
+    "research/agi/commercialization/agi_commercial.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "research/bci/bci_roadmap.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "research/biological/commercialization/pilot_deployment.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "research/materials/superconductor_roadmap.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "research/quantum/commercialization/quantum_pilot.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "research/validation/research_validation.py": [
+      "research/biological/dna_computation.py",
+      "research/quantum/quantum_network.py",
+      "research/agi/infrastructure_agi.py",
+      "research/materials/next_gen_materials.py",
+      "research/bci/neural_infrastructure.py"
+    ],
+    "scripts/automation/runbook-engine.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "scripts/automation/runbook_executor.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "scripts/demo_model_persistence.py": [
+      "ai_engine/models.py"
+    ],
+    "scripts/mock_hypervisor.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "scripts/sre/runbook_automation.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "sdk/examples/python/multi_cloud_orchestrator.py": [
+      "ai-engine/ai_engine/utils/logging.py",
+      "sdk/python/novacron/models.py",
+      "sdk/python/novacron/exceptions.py"
+    ],
+    "sdk/python/examples/basic.py": [
+      "configs/dwcp.yaml"
+    ],
+    "sdk/python/novacron/client.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "sdk/python/novacron/enhanced_client.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "src/data/data_pipeline.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "src/main.py": [
+      "ai-engine/ai_engine/utils/logging.py",
+      "src/data/data_pipeline.py",
+      "src/models/model.py"
+    ],
+    "src/mle-star/templates/data_pipeline.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "src/mle-star/templates/main.py": [
+      "ai-engine/ai_engine/utils/logging.py",
+      "src/data/data_pipeline.py",
+      "src/models/model.py"
+    ],
+    "src/mle-star/templates/pytorch_model.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "src/mle-star/templates/scikit-learn_model.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "src/mle-star/templates/tensorflow_model.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "src/models/model.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "src/neural/analyze_novacron.py": [
+      "src/neural/pattern_analyzer_part2.py"
+    ],
+    "src/neural/pattern_analyzer.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "src/neural/pattern_analyzer_part2.py": [
+      "src/neural/pattern_analyzer.py"
+    ],
+    "store_repo_in_qdrant_mcp.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "test_qdrant_mcp.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/automation/test_orchestrator.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "tests/chaos/byzantine_test.go": [
+      "backend/core/network/dwcp/v3/v3.go"
+    ],
+    "tests/chaos/comprehensive_resilience_test.go": [
+      "backend/core/v4/wasm/runtime.go"
+    ],
+    "tests/chaos/failure_scenarios_test.go": [
+      "backend/core/v4/wasm/runtime.go",
+      "backend/core/network/dwcp/v3/v3.go"
+    ],
+    "tests/chaos/network_partition_test.go": [
+      "backend/core/network/dwcp/v3/v3.go"
+    ],
+    "tests/integration/ai_optimization_test.go": [
+      "backend/core/ai/integration_layer.go"
+    ],
+    "tests/integration/competitive_integration_test.go": [
+      "backend/competitive/dominance/market_share_tracker.go",
+      "backend/competitive/displacement/displacement_engine.go",
+      "backend/competitive/leadership/market_leadership.go",
+      "backend/business/fortune500/fortune500_acceleration.go",
+      "backend/partners/strategic/management.go"
+    ],
+    "tests/integration/end_to_end_network_test.go": [
+      "backend/core/network/topology/discovery_engine.go"
+    ],
+    "tests/integration/ml_model_validation_test.go": [
+      "backend/core/ai/integration_layer.go"
+    ],
+    "tests/market_domination_test.go": [
+      "backend/business/verticals/domination.go",
+      "backend/partners/ecosystem_scale.go"
+    ],
+    "tests/ml/test_consensus_latency.py": [
+      "backend/ml/models/consensus_latency.py"
+    ],
+    "tests/ml/test_reliability_predictor.py": [
+      "backend/ml/models/reliability_predictor.py"
+    ],
+    "tests/ml/test_tcsfeel.py": [
+      "backend/ml/federated/topology.py"
+    ],
+    "tests/mle-star-samples/computer-vision/src/trainer.py": [
+      "tests/mle-star-samples/computer-vision/src/data_loader.py"
+    ],
+    "tests/mle-star-samples/config/monitoring/exporters/ml-model/ml_model_exporter.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/mle_star_workflow_runner.py": [
+      "ai-engine/ai_engine/utils/logging.py",
+      "tests/mle-star-samples/computer-vision/src/data_loader.py",
+      "tests/mle-star-samples/nlp/src/data_processor.py",
+      "tests/mle-star-samples/tabular-data/src/data_preprocessor.py",
+      "tests/mle-star-samples/nlp/src/bert_model.py",
+      "tests/mle-star-samples/tabular-data/src/model_ensemble.py"
+    ],
+    "tests/mle-star-samples/nlp/src/bert_model.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/nlp/src/data_processor.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/nlp/src/trainer.py": [
+      "ai-engine/ai_engine/utils/logging.py",
+      "tests/mle-star-samples/nlp/src/data_processor.py",
+      "tests/mle-star-samples/nlp/src/bert_model.py"
+    ],
+    "tests/mle-star-samples/src/mle-star/enhancements/advanced_ml/automl_pipeline.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/src/mle-star/enhancements/advanced_ml/bayesian_hpo.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/src/mle-star/enhancements/advanced_ml/ensemble_methods.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/src/mle-star/enhancements/advanced_ml/model_interpretability.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/src/mle-star/enhancements/advanced_ml/neural_architecture_search.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/src/mle-star/enhancements/core.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/src/mle-star/enhancements/framework_extensions/jax_flax.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/src/mle-star/enhancements/framework_extensions/kubeflow_integration.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/src/mle-star/enhancements/framework_extensions/mlflow_integration.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/src/mle-star/enhancements/framework_extensions/ray_tune_integration.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/src/mle-star/enhancements/framework_extensions/wandb_integration.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/src/mle-star/enhancements/production_ops/ab_testing.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/src/mle-star/enhancements/production_ops/drift_detection.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/src/mle-star/enhancements/production_ops/model_registry.py": [
+      "ai-engine/ai_engine/utils/logging.py"
+    ],
+    "tests/mle-star-samples/tabular-data/src/model_ensemble.py": [
+      "tests/mle-star-samples/tabular-data/src/data_preprocessor.py"
+    ],
+    "tests/mle-star-samples/test_setup.py": [
+      "tests/mle-star-samples/mle_star_workflow_runner.py",
+      "tests/mle-star-samples/computer-vision/src/data_loader.py",
+      "tests/mle-star-samples/nlp/src/data_processor.py",
+      "tests/mle-star-samples/tabular-data/src/data_preprocessor.py"
+    ],
+    "tests/mlops/test_complete_mlops_workflow.py": [
+      "backend/core/mlops/pipeline/ml_pipeline.py",
+      "backend/core/mlops/serving/model_server.py",
+      "backend/core/mlops/monitoring/ml_monitoring.py",
+      "backend/core/mlops/governance/ml_governance.py"
+    ],
+    "tests/sales_intelligence_test.py": [
+      "backend/sales/enterprise_intelligence.py"
+    ],
+    "tests/simple_persistence_test.py": [
+      "ai_engine/models.py"
+    ],
+    "tests/test_ai_db_config.py": [
+      "ai_engine/predictive_scaling.py",
+      "ai_engine/workload_pattern_recognition.py",
+      "ai_engine/performance_optimizer.py"
+    ],
+    "tests/test_ai_endpoints.py": [
+      "ai_engine/app.py",
+      "ai_engine/workload_pattern_recognition.py",
+      "ai_engine/predictive_scaling.py"
+    ],
+    "tests/test_go_integration_compatibility.py": [
+      "ai_engine/app.py"
+    ],
+    "tests/test_legacy_compatibility.py": [
+      "ai_engine/predictive_scaling.py",
+      "ai_engine/workload_pattern_recognition.py"
+    ],
+    "tests/test_migration_clarity.py": [
+      "ai_engine/predictive_scaling.py"
+    ],
+    "tests/test_model_persistence.py": [
+      "ai_engine/models.py"
+    ],
+    "tests/test_numeric_ranges_validation.py": [
+      "ai_engine/predictive_scaling.py",
+      "ai_engine/performance_optimizer.py"
+    ],
+    "tests/test_period_calculation_fixes.py": [
+      "ai_engine/workload_pattern_recognition.py"
+    ],
+    "tests/test_predictive_scaling_fixes.py": [
+      "ai_engine/predictive_scaling.py"
+    ],
+    "tests/unit/ml/test_tcsfeel_calibration.py": [
+      "backend/ml/federated/calibrate_tcsfeel.py"
+    ],
+    "tests/verify_all_fixes.py": [
+      "ai_engine/models.py",
+      "ai_engine/performance_optimizer.py",
+      "ai_engine/workload_pattern_recognition.py",
+      "ai_engine/predictive_scaling.py",
+      "ai_engine/__init__.py"
+    ],
+    "tests/verify_api_models_endpoint.py": [
+      "ai_engine/models.py"
+    ],
+    "tools/indexer/my-app/next.config.ts": [
+      "tools/indexer/my-app/public/next.svg"
+    ],
+    "web_interface/app.py": [
+      "qdrant_mcp_utils.py"
+    ]
+  },
+  "recent_events": []
+}
