@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -63,6 +64,8 @@ func NewStorageManager(config StorageManagerConfig) (*StorageManager, error) {
 
 // CreateVolume creates a new storage volume
 func (sm *StorageManager) CreateVolume(ctx context.Context, opts VolumeCreateOptions) (*VolumeInfo, error) {
+	_ = ctx
+
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
 
@@ -76,45 +79,53 @@ func (sm *StorageManager) CreateVolume(ctx context.Context, opts VolumeCreateOpt
 	volumeID := uuid.New().String()
 	volumePath := filepath.Join(sm.basePath, fmt.Sprintf("%s.%s", volumeID, opts.Format))
 
+	metadata := cloneStringMap(opts.Metadata)
+	now := time.Now()
 	volume := &VolumeInfo{
-		ID:        volumeID,
-		Name:      opts.Name,
-		Type:      opts.Type,
-		Format:    opts.Format,
-		SizeMB:    int(opts.Size / (1024 * 1024)), // Convert bytes to MB
-		Size:      opts.Size,
-		Path:      volumePath,
-		Status:    VolumeStatusCreating,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		Labels:    opts.Metadata, // Use metadata as labels for now
-		Metadata:  make(map[string]string),
+		ID:          volumeID,
+		Name:        opts.Name,
+		Type:        opts.Type,
+		Format:      opts.Format,
+		SizeMB:      int(opts.Size / (1024 * 1024)), // Convert bytes to MB
+		Size:        opts.Size,
+		Path:        volumePath,
+		Status:      VolumeStatusCreating,
+		State:       VolumeStateCreating,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		LastUpdated: now,
+		Labels:      cloneStringMap(metadata),
+		Metadata:    metadata,
 	}
 
-	// Store in memory first
 	sm.volumes[volumeID] = volume
 
-	// Create the actual volume file
-	go func() {
-		if err := sm.createVolumeFile(volume); err != nil {
-			sm.mutex.Lock()
-			volume.Status = VolumeStatusError
-			volume.Metadata["error"] = err.Error()
-			sm.mutex.Unlock()
-			log.Printf("Failed to create volume file for %s: %v", volume.Name, err)
-		} else {
-			sm.mutex.Lock()
-			volume.Status = VolumeStatusAvailable
-			volume.UpdatedAt = time.Now()
-			sm.mutex.Unlock()
-			log.Printf("Successfully created volume %s", volume.Name)
+	if err := sm.createVolumeFile(volume); err != nil {
+		volume.Status = VolumeStatusError
+		if volume.Metadata == nil {
+			volume.Metadata = make(map[string]string)
 		}
+		volume.Metadata["error"] = err.Error()
+		delete(sm.volumes, volumeID)
+		return nil, fmt.Errorf("failed to create volume file for %s: %w", volume.Name, err)
+	}
 
-		// Save volume metadata
-		sm.saveVolumeMetadata(volume)
-	}()
+	volume.Status = VolumeStatusAvailable
+	volume.State = VolumeStateAvailable
+	volume.Available = true
+	volume.UpdatedAt = time.Now()
+	volume.LastUpdated = volume.UpdatedAt
 
-	return volume, nil
+	if err := sm.saveVolumeMetadata(volume); err != nil {
+		delete(sm.volumes, volumeID)
+		if removeErr := os.Remove(volume.Path); removeErr != nil && !os.IsNotExist(removeErr) {
+			log.Printf("Failed to clean up volume file %s after metadata save error: %v", volume.Path, removeErr)
+		}
+		return nil, err
+	}
+
+	volumeCopy := *volume
+	return &volumeCopy, nil
 }
 
 // DeleteVolume deletes a storage volume
@@ -174,6 +185,8 @@ func (sm *StorageManager) GetVolume(ctx context.Context, volumeID string) (*Volu
 
 // ListVolumes lists all volumes
 func (sm *StorageManager) ListVolumes(ctx context.Context) ([]*VolumeInfo, error) {
+	_ = ctx
+
 	sm.mutex.RLock()
 	defer sm.mutex.RUnlock()
 
@@ -182,6 +195,13 @@ func (sm *StorageManager) ListVolumes(ctx context.Context) ([]*VolumeInfo, error
 		volumeCopy := *volume
 		volumes = append(volumes, &volumeCopy)
 	}
+
+	sort.Slice(volumes, func(i, j int) bool {
+		if volumes[i].Name == volumes[j].Name {
+			return volumes[i].ID < volumes[j].ID
+		}
+		return volumes[i].Name < volumes[j].Name
+	})
 
 	return volumes, nil
 }
@@ -480,4 +500,17 @@ func (sm *StorageManager) loadVolumeFromMetadata(metadataFile string) error {
 
 	sm.volumes[volume.ID] = &volume
 	return nil
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return make(map[string]string)
+	}
+
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+
+	return cloned
 }
