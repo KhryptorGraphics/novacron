@@ -1,6 +1,8 @@
 // Package security provides unified type definitions for NovaCron security modules
 // This file resolves type redeclaration conflicts by establishing domain-specific
 // type hierarchies with clear semantic boundaries
+//go:build novacron_security_orchestrator
+
 package security
 
 import (

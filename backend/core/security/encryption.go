@@ -1,3 +1,5 @@
+//go:build novacron_basic_encryption
+
 package security
 
 import (
@@ -8,9 +10,9 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"time"
 	"io"
 	"sync"
+	"time"
 )
 
 const (

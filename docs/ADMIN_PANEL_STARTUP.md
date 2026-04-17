@@ -58,13 +58,13 @@ export API_PORT="8090"
 ```bash
 cd /home/kp/repos/novacron
 go mod tidy
-go run ./backend/cmd/api-server/main_working.go
+go run ./backend/cmd/api-server/main.go
 ```
 
-The standalone development server will:
+The canonical development server will:
 - ✅ Connect to PostgreSQL
 - ✅ Run database migrations automatically
-- ✅ Provide the working local VM and monitoring API surface
+- ✅ Provide the working local auth, VM, and monitoring API surface
 - ✅ Start listening on port 8090
 
 **Expected Output:**
@@ -90,20 +90,27 @@ Expected response:
   "service": "novacron-api",
   "checks": {
     "database": "ok",
-    "kvm": "not configured",
     "storage": "ok"
   }
 }
 ```
 
-### 4. Smoke Test the Standalone API
+### 4. Smoke Test the Canonical API
 
-The `main_working.go` entrypoint is the stable local development target. It exposes the VM and monitoring API surface needed for general frontend work, but it does **not** register the full `/api/admin/*` or `/api/security/*` routes.
+The `main.go` entrypoint is the canonical local backend. It exposes the auth, VM, and monitoring surfaces needed for general frontend work, but it still returns explicit `501 Not Implemented` responses for `/api/security/*`, `/api/admin/security/*`, `/api/ws/*`, and `/graphql`.
 
 Use these checks instead:
 ```bash
+# Login via canonical auth route
+curl -X POST http://localhost:8090/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"user@example.com","password":"secret"}'
+
 # List VMs
 curl http://localhost:8090/api/vms
+
+# List VMs via canonical v1 route
+curl http://localhost:8090/api/v1/vms
 
 # Fetch monitoring metrics
 curl http://localhost:8090/api/monitoring/metrics
@@ -174,24 +181,35 @@ http://localhost:8092/admin
 
 ---
 
-## Standalone API Surface
+## Canonical API Surface
 
-The `main_working.go` entrypoint is the supported local backend for this stabilization milestone. It does **not** register the full `/api/admin/*` or `/api/security/*` API families.
+The `main.go` entrypoint is the supported local backend for this stabilization phase. It exposes the canonical auth and `/api/v1` routes, while keeping compatibility aliases for the older `/auth/*` and `/api/*` paths.
 
-Use the standalone surface below when validating the local stack:
+Use the surface below when validating the local stack:
 
 ```
 GET    /health                            # API health
+POST   /api/auth/login                    # Canonical authentication
+POST   /api/auth/register                 # Canonical authentication
+GET    /api/auth/check-email              # Canonical auth helper
 POST   /auth/login                        # Authentication
 POST   /auth/register                     # Authentication
-POST   /auth/forgot-password              # Authentication
+GET    /api/v1/vms                        # Canonical VM list
+POST   /api/v1/vms                        # Canonical VM create
+GET    /api/v1/vms/{id}                   # Canonical VM details
+POST   /api/v1/vms/{id}/start             # Canonical VM start
+POST   /api/v1/vms/{id}/stop              # Canonical VM stop
+GET    /api/v1/vms/{id}/metrics           # Canonical VM metrics
 GET    /api/vms                           # VM list
 POST   /api/vms                           # VM create
 GET    /api/monitoring/metrics            # Monitoring summary
 GET    /api/monitoring/vms                # VM monitoring view
+GET    /api/security/*                    # Explicit 501 not implemented
+GET    /api/admin/security/*              # Explicit 501 not implemented
+GET    /graphql                           # Explicit 501 not implemented
 ```
 
-The `/admin` frontend route is still available for UI development, but richer admin and security workflows depend on the broader backend rehabilitation track rather than the standalone server documented here.
+The `/admin` frontend route is still available for UI development, but richer admin and security workflows depend on the broader backend rehabilitation track rather than the canonical server documented here.
 
 ---
 
@@ -343,7 +361,7 @@ The full production backend entrypoint (`./backend/cmd/api-server/main.go`) is p
 
 For issues or questions:
 - **Documentation**: `/docs/ADMIN_PANEL_COMPLETION.md`
-- **Local Backend Entry Point**: `/backend/cmd/api-server/main_working.go`
+- **Local Backend Entry Point**: `/backend/cmd/api-server/main.go`
 - **Frontend Components**: Check `/frontend/src/components/admin/`
 
 ---

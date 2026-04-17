@@ -1,3 +1,5 @@
+//go:build novacron_improved
+
 package main
 
 import (

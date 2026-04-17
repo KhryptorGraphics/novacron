@@ -1,3 +1,5 @@
+//go:build novacron_vm_advanced_migration
+
 package vm
 
 import (
@@ -214,4 +216,3 @@ func (wo *WANOptimizer) GetCompressionStats() map[string]interface{} {
 		"savings_percent":        (1 - wo.compressionStats.compressionRatio) * 100,
 	}
 }
-

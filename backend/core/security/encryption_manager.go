@@ -22,12 +22,12 @@ import (
 
 // EncryptionManager provides comprehensive encryption services
 type EncryptionManager struct {
-	config           EncryptionConfig
-	keyManager       *KeyManager
-	tlsConfig        *tls.Config
-	certManager      *CertificateManager
-	fieldEncryption  *FieldEncryption
-	mu               sync.RWMutex
+	config          EncryptionConfig
+	keyManager      *KeyManager
+	tlsConfig       *tls.Config
+	certManager     *CertificateManager
+	fieldEncryption *FieldEncryption
+	mu              sync.RWMutex
 }
 
 // KeyManager handles cryptographic key management
@@ -72,17 +72,17 @@ type CertificateManager struct {
 
 // CertificateInfo holds certificate information
 type CertificateInfo struct {
-	ID          string      `json:"id"`
-	CommonName  string      `json:"common_name"`
-	SANs        []string    `json:"sans"`
-	Certificate []byte      `json:"certificate"`
-	PrivateKey  []byte      `json:"private_key"`
-	Chain       [][]byte    `json:"chain,omitempty"`
-	IssuedAt    time.Time   `json:"issued_at"`
-	ExpiresAt   time.Time   `json:"expires_at"`
-	Issuer      string      `json:"issuer"`
-	KeyUsage    []string    `json:"key_usage"`
-	Status      KeyStatus   `json:"status"`
+	ID          string    `json:"id"`
+	CommonName  string    `json:"common_name"`
+	SANs        []string  `json:"sans"`
+	Certificate []byte    `json:"certificate"`
+	PrivateKey  []byte    `json:"private_key"`
+	Chain       [][]byte  `json:"chain,omitempty"`
+	IssuedAt    time.Time `json:"issued_at"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	Issuer      string    `json:"issuer"`
+	KeyUsage    []string  `json:"key_usage"`
+	Status      KeyStatus `json:"status"`
 }
 
 // FieldEncryption provides field-level encryption
@@ -119,17 +119,32 @@ type KeyDerivationService struct {
 
 // EncryptedData represents encrypted data with metadata
 type EncryptedData struct {
-	Data          []byte            `json:"data"`
-	Algorithm     string            `json:"algorithm"`
-	KeyID         string            `json:"key_id"`
-	IV            []byte            `json:"iv,omitempty"`
-	AuthTag       []byte            `json:"auth_tag,omitempty"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
-	EncryptedAt   time.Time         `json:"encrypted_at"`
+	Data        []byte            `json:"data"`
+	Algorithm   string            `json:"algorithm"`
+	KeyID       string            `json:"key_id"`
+	IV          []byte            `json:"iv,omitempty"`
+	AuthTag     []byte            `json:"auth_tag,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	EncryptedAt time.Time         `json:"encrypted_at"`
 }
 
 // NewEncryptionManager creates a new encryption manager
 func NewEncryptionManager(config EncryptionConfig) *EncryptionManager {
+	if config.Algorithm == "" {
+		config.Algorithm = "AES-256-GCM"
+	}
+	if config.KeyManagement.KeyRotation == 0 {
+		switch {
+		case config.KeyRotationEnabled && config.KeyRotationInterval > 0:
+			config.KeyManagement.KeyRotation = int(config.KeyRotationInterval / (24 * time.Hour))
+			if config.KeyManagement.KeyRotation == 0 {
+				config.KeyManagement.KeyRotation = 1
+			}
+		default:
+			config.KeyManagement.KeyRotation = 90
+		}
+	}
+
 	keyManager := &KeyManager{
 		keys:             make(map[string]*EncryptionKey),
 		rotationSchedule: make(map[string]time.Time),
@@ -181,10 +196,10 @@ func (em *EncryptionManager) initializeTLS() {
 			tls.TLS_AES_128_GCM_SHA256,
 			tls.TLS_CHACHA20_POLY1305_SHA256,
 		},
-		ClientAuth:               tls.RequireAndVerifyClientCert,
-		InsecureSkipVerify:      false,
-		GetCertificate:          em.getCertificate,
-		GetClientCertificate:    em.getClientCertificate,
+		ClientAuth:           tls.RequireAndVerifyClientCert,
+		InsecureSkipVerify:   false,
+		GetCertificate:       em.getCertificate,
+		GetClientCertificate: em.getClientCertificate,
 	}
 }
 
@@ -269,10 +284,10 @@ func (em *EncryptionManager) GenerateKey(algorithm string, keySize int, purpose 
 // Encrypt encrypts data using the active encryption key
 func (em *EncryptionManager) Encrypt(plaintext []byte, keyID ...string) (*EncryptedData, error) {
 	em.keyManager.mu.RLock()
-	
+
 	var key *EncryptionKey
 	var selectedKeyID string
-	
+
 	if len(keyID) > 0 && keyID[0] != "" {
 		selectedKeyID = keyID[0]
 		var exists bool
@@ -289,7 +304,7 @@ func (em *EncryptionManager) Encrypt(plaintext []byte, keyID ...string) (*Encryp
 			return nil, fmt.Errorf("no active encryption key available")
 		}
 	}
-	
+
 	em.keyManager.mu.RUnlock()
 
 	if key.Status != KeyStatusActive {
@@ -377,10 +392,10 @@ func (em *EncryptionManager) decryptAESGCM(encryptedData *EncryptedData, key *En
 // EncryptField encrypts a database field
 func (em *EncryptionManager) EncryptField(tableName, columnName string, value []byte) (*EncryptedData, error) {
 	em.fieldEncryption.mu.RLock()
-	
+
 	mappingKey := fmt.Sprintf("%s.%s", tableName, columnName)
 	mapping, exists := em.fieldEncryption.fieldMappings[mappingKey]
-	
+
 	em.fieldEncryption.mu.RUnlock()
 
 	if !exists {
@@ -462,14 +477,14 @@ func (em *EncryptionManager) startKeyRotationScheduler() {
 		for keyID, key := range em.keyManager.keys {
 			if key.Status == KeyStatusActive && key.ExpiresAt != nil && time.Now().After(*key.ExpiresAt) {
 				em.keyManager.mu.RUnlock()
-				
+
 				// Rotate expired key
 				if _, err := em.RotateKey(keyID); err != nil {
 					fmt.Printf("Failed to rotate key %s: %v\n", keyID, err)
 				} else {
 					fmt.Printf("Successfully rotated key %s\n", keyID)
 				}
-				
+
 				em.keyManager.mu.RLock()
 			}
 		}
@@ -491,10 +506,10 @@ func (em *EncryptionManager) GenerateCertificate(commonName string, sans []strin
 	template := x509.Certificate{
 		SerialNumber:          generateSerial(),
 		Subject:               x509.Name{CommonName: commonName},
-		NotBefore:            time.Now(),
-		NotAfter:             time.Now().Add(365 * 24 * time.Hour), // 1 year
-		KeyUsage:             x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:          []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // 1 year
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 	}
 
@@ -602,7 +617,7 @@ func (em *EncryptionManager) startCertRenewalScheduler() {
 			// Renew certificates that expire within 30 days
 			if certInfo.Status == KeyStatusActive && time.Until(certInfo.ExpiresAt) < 30*24*time.Hour {
 				em.certManager.mu.RUnlock()
-				
+
 				// Renew certificate
 				newCert, err := em.GenerateCertificate(certInfo.CommonName, certInfo.SANs)
 				if err != nil {
@@ -614,7 +629,7 @@ func (em *EncryptionManager) startCertRenewalScheduler() {
 					em.certManager.mu.Unlock()
 					fmt.Printf("Successfully renewed certificate %s\n", newCert.ID)
 				}
-				
+
 				em.certManager.mu.RLock()
 			}
 		}

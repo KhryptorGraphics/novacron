@@ -1,3 +1,5 @@
+//go:build novacron_security_enterprise
+
 package security
 
 import (

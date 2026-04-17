@@ -1,3 +1,5 @@
+//go:build novacron_enhanced
+
 package main
 
 import (
@@ -566,4 +568,3 @@ func authRegisterHandler(authManager *auth.SimpleAuthManager) http.HandlerFunc {
 		})
 	}
 }
-

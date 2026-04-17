@@ -1,3 +1,5 @@
+//go:build novacron_vm_advanced_migration
+
 package vm
 
 import (

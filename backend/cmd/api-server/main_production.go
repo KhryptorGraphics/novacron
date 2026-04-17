@@ -1,3 +1,5 @@
+//go:build novacron_production
+
 package main
 
 import (

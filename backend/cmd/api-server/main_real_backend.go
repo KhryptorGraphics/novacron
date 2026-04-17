@@ -1,3 +1,5 @@
+//go:build novacron_real_backend
+
 package main
 
 import (

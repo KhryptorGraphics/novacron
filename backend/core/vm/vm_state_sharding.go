@@ -1,3 +1,5 @@
+//go:build novacron_vm_distribution
+
 // Package vm provides virtual machine management with distributed state sharding
 package vm
 

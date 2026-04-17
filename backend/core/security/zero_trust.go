@@ -1,3 +1,5 @@
+//go:build novacron_zero_trust
+
 package security
 
 import (

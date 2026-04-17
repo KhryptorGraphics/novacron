@@ -1,3 +1,5 @@
+//go:build novacron_security_enterprise
+
 package security
 
 import (
@@ -11,24 +13,24 @@ import (
 
 // EnterpriseRateLimiter provides comprehensive rate limiting and DDoS protection
 type EnterpriseRateLimiter struct {
-	config          RateLimitConfig
-	globalLimiter   *rate.Limiter
-	userLimiters    map[string]*rate.Limiter
-	ipLimiters      map[string]*rate.Limiter
+	config           RateLimitConfig
+	globalLimiter    *rate.Limiter
+	userLimiters     map[string]*rate.Limiter
+	ipLimiters       map[string]*rate.Limiter
 	endpointLimiters map[string]*rate.Limiter
-	ddosProtector   *DDoSProtector
-	analytics       *RateLimitAnalytics
-	mu              sync.RWMutex
+	ddosProtector    *DDoSProtector
+	analytics        *RateLimitAnalytics
+	mu               sync.RWMutex
 }
 
 // DDoSProtector provides DDoS detection and mitigation
 type DDoSProtector struct {
-	config           DDoSConfig
-	blockedIPs       map[string]time.Time
-	suspiciousIPs    map[string]*SuspiciousActivity
-	whitelist        []*net.IPNet
-	requestCounters  map[string]*RequestCounter
-	mu               sync.RWMutex
+	config          DDoSConfig
+	blockedIPs      map[string]time.Time
+	suspiciousIPs   map[string]*SuspiciousActivity
+	whitelist       []*net.IPNet
+	requestCounters map[string]*RequestCounter
+	mu              sync.RWMutex
 }
 
 // SuspiciousActivity tracks suspicious IP activity
@@ -76,12 +78,12 @@ type RateLimitMetrics struct {
 
 // RateLimitResult represents the result of a rate limit check
 type RateLimitResult struct {
-	Allowed      bool          `json:"allowed"`
-	Reason       string        `json:"reason,omitempty"`
-	Remaining    int           `json:"remaining"`
-	ResetTime    time.Time     `json:"reset_time"`
-	RetryAfter   time.Duration `json:"retry_after,omitempty"`
-	ThreatLevel  string        `json:"threat_level,omitempty"`
+	Allowed     bool          `json:"allowed"`
+	Reason      string        `json:"reason,omitempty"`
+	Remaining   int           `json:"remaining"`
+	ResetTime   time.Time     `json:"reset_time"`
+	RetryAfter  time.Duration `json:"retry_after,omitempty"`
+	ThreatLevel string        `json:"threat_level,omitempty"`
 }
 
 // NewEnterpriseRateLimiter creates a new enterprise rate limiter
@@ -413,7 +415,7 @@ func (ddos *DDoSProtector) handleRequestSpike(ip string, secCtx *SecurityContext
 	if activity != nil {
 		activity.SuspicionScore += 0.1
 	}
-	
+
 	return false, "request_spike_detected" // Don't block immediately for spikes
 }
 
@@ -557,23 +559,23 @@ func (erl *EnterpriseRateLimiter) cleanup() {
 
 		// Cleanup old IP limiters (inactive for > 1 hour)
 		for ip, limiter := range erl.ipLimiters {
-			if limiter.Tokens() == float64(erl.config.PerIP.BurstSize) && 
-			   time.Since(now) > time.Hour {
+			if limiter.Tokens() == float64(erl.config.PerIP.BurstSize) &&
+				time.Since(now) > time.Hour {
 				delete(erl.ipLimiters, ip)
 			}
 		}
 
 		// Cleanup old user limiters
 		for userID, limiter := range erl.userLimiters {
-			if limiter.Tokens() == float64(erl.config.PerUser.BurstSize) && 
-			   time.Since(now) > time.Hour {
+			if limiter.Tokens() == float64(erl.config.PerUser.BurstSize) &&
+				time.Since(now) > time.Hour {
 				delete(erl.userLimiters, userID)
 			}
 		}
 
 		// Cleanup DDoS protection data
 		erl.ddosProtector.mu.Lock()
-		
+
 		// Remove expired blocked IPs
 		for ip, blockedUntil := range erl.ddosProtector.blockedIPs {
 			if now.After(blockedUntil) {

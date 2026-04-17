@@ -1,4 +1,6 @@
 // Package vm provides memory state distribution with delta synchronization
+//go:build novacron_vm_distribution
+
 package vm
 
 import (

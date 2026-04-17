@@ -1,4 +1,6 @@
 // Package security provides unified event handling for all security domains
+//go:build novacron_security_orchestrator
+
 package security
 
 import (

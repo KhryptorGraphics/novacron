@@ -1,3 +1,5 @@
+//go:build novacron_vm_distribution
+
 package vm
 
 import (

@@ -1,3 +1,5 @@
+//go:build novacron_secure
+
 package main
 
 import (

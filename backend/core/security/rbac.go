@@ -11,15 +11,15 @@ import (
 type RBACManager struct {
 	mu          sync.RWMutex
 	users       map[string]*User
-	roles       map[string]*Role
-	permissions map[string]*Permission
+	roles       map[string]*legacyRole
+	permissions map[string]*legacyPermission
 	auditLog    *AuditLogger
 	config      *RBACConfig
 }
 
 // User represents a system user
 
-type Role struct {
+type legacyRole struct {
 	ID          string
 	Name        string
 	Description string
@@ -30,22 +30,22 @@ type Role struct {
 }
 
 // Permission represents a permission
-type Permission struct {
-	ID          string
-	Resource    string // e.g., "vm", "network", "storage"
-	Action      string // e.g., "create", "read", "update", "delete"
-	Scope       string // e.g., "global", "tenant", "user"
-	Conditions  map[string]interface{}
-	CreatedAt   time.Time
+type legacyPermission struct {
+	ID         string
+	Resource   string // e.g., "vm", "network", "storage"
+	Action     string // e.g., "create", "read", "update", "delete"
+	Scope      string // e.g., "global", "tenant", "user"
+	Conditions map[string]interface{}
+	CreatedAt  time.Time
 }
 
 // RBACConfig configuration for RBAC
 type RBACConfig struct {
-	EnableAuditLog     bool
-	EnableMFA          bool
-	SessionTimeout     time.Duration
-	MaxLoginAttempts   int
-	PasswordMinLength  int
+	EnableAuditLog        bool
+	EnableMFA             bool
+	SessionTimeout        time.Duration
+	MaxLoginAttempts      int
+	PasswordMinLength     int
 	RequireStrongPassword bool
 }
 
@@ -53,25 +53,25 @@ type RBACConfig struct {
 func NewRBACManager(config *RBACConfig) *RBACManager {
 	rbac := &RBACManager{
 		users:       make(map[string]*User),
-		roles:       make(map[string]*Role),
-		permissions: make(map[string]*Permission),
+		roles:       make(map[string]*legacyRole),
+		permissions: make(map[string]*legacyPermission),
 		config:      config,
 	}
-	
+
 	if config.EnableAuditLog {
 		rbac.auditLog = NewAuditLogger()
 	}
-	
+
 	// Initialize default roles
 	rbac.initializeDefaultRoles()
-	
+
 	return rbac
 }
 
 // initializeDefaultRoles creates default system roles
 func (rbac *RBACManager) initializeDefaultRoles() {
 	// Admin role - full access
-	adminRole := &Role{
+	adminRole := &legacyRole{
 		ID:          "role-admin",
 		Name:        "admin",
 		Description: "Full system access",
@@ -80,9 +80,9 @@ func (rbac *RBACManager) initializeDefaultRoles() {
 		UpdatedAt:   time.Now(),
 	}
 	rbac.roles[adminRole.ID] = adminRole
-	
+
 	// Operator role - manage VMs and resources
-	operatorRole := &Role{
+	operatorRole := &legacyRole{
 		ID:          "role-operator",
 		Name:        "operator",
 		Description: "Manage VMs and resources",
@@ -98,9 +98,9 @@ func (rbac *RBACManager) initializeDefaultRoles() {
 		UpdatedAt: time.Now(),
 	}
 	rbac.roles[operatorRole.ID] = operatorRole
-	
+
 	// Viewer role - read-only access
-	viewerRole := &Role{
+	viewerRole := &legacyRole{
 		ID:          "role-viewer",
 		Name:        "viewer",
 		Description: "Read-only access",
@@ -119,17 +119,17 @@ func (rbac *RBACManager) initializeDefaultRoles() {
 func (rbac *RBACManager) CreateUser(ctx context.Context, user *User) error {
 	rbac.mu.Lock()
 	defer rbac.mu.Unlock()
-	
+
 	if _, exists := rbac.users[user.ID]; exists {
 		return fmt.Errorf("user %s already exists", user.ID)
 	}
-	
+
 	user.CreatedAt = time.Now()
 	user.UpdatedAt = time.Now()
 	user.Enabled = true
-	
+
 	rbac.users[user.ID] = user
-	
+
 	// Audit log
 	if rbac.auditLog != nil {
 		rbac.auditLog.Log(ctx, &AuditEvent{
@@ -140,7 +140,7 @@ func (rbac *RBACManager) CreateUser(ctx context.Context, user *User) error {
 			Success:   true,
 		})
 	}
-	
+
 	return nil
 }
 
@@ -148,38 +148,38 @@ func (rbac *RBACManager) CreateUser(ctx context.Context, user *User) error {
 func (rbac *RBACManager) AssignRole(ctx context.Context, userID, roleID string) error {
 	rbac.mu.Lock()
 	defer rbac.mu.Unlock()
-	
+
 	user, exists := rbac.users[userID]
 	if !exists {
 		return fmt.Errorf("user %s not found", userID)
 	}
-	
+
 	if _, exists := rbac.roles[roleID]; !exists {
 		return fmt.Errorf("role %s not found", roleID)
 	}
-	
+
 	// Check if already assigned
 	for _, r := range user.Roles {
 		if r == roleID {
 			return fmt.Errorf("role already assigned")
 		}
 	}
-	
+
 	user.Roles = append(user.Roles, roleID)
 	user.UpdatedAt = time.Now()
-	
+
 	// Audit log
 	if rbac.auditLog != nil {
 		rbac.auditLog.Log(ctx, &AuditEvent{
-			Action:    "role.assign",
-			UserID:    userID,
-			Resource:  "role",
+			Action:     "role.assign",
+			UserID:     userID,
+			Resource:   "role",
 			ResourceID: roleID,
-			Timestamp: time.Now(),
-			Success:   true,
+			Timestamp:  time.Now(),
+			Success:    true,
 		})
 	}
-	
+
 	return nil
 }
 
@@ -209,11 +209,11 @@ func (rbac *RBACManager) CheckPermission(ctx context.Context, userID, resource, 
 			// Audit log
 			if rbac.auditLog != nil {
 				rbac.auditLog.Log(ctx, &AuditEvent{
-					Action:     fmt.Sprintf("%s.%s", resource, action),
-					UserID:     userID,
-					Resource:   resource,
-					Timestamp:  time.Now(),
-					Success:    true,
+					Action:    fmt.Sprintf("%s.%s", resource, action),
+					UserID:    userID,
+					Resource:  resource,
+					Timestamp: time.Now(),
+					Success:   true,
 				})
 			}
 			return true, nil
@@ -223,12 +223,12 @@ func (rbac *RBACManager) CheckPermission(ctx context.Context, userID, resource, 
 	// Audit log - permission denied
 	if rbac.auditLog != nil {
 		rbac.auditLog.Log(ctx, &AuditEvent{
-			Action:     fmt.Sprintf("%s.%s", resource, action),
-			UserID:     userID,
-			Resource:   resource,
-			Timestamp:  time.Now(),
-			Success:    false,
-			Details:    map[string]interface{}{"reason": "permission denied"},
+			Action:    fmt.Sprintf("%s.%s", resource, action),
+			UserID:    userID,
+			Resource:  resource,
+			Timestamp: time.Now(),
+			Success:   false,
+			Details:   map[string]interface{}{"reason": "permission denied"},
 		})
 	}
 
@@ -236,7 +236,7 @@ func (rbac *RBACManager) CheckPermission(ctx context.Context, userID, resource, 
 }
 
 // hasPermission checks if a role has a specific permission
-func (rbac *RBACManager) hasPermission(role *Role, resource, action, scope string) bool {
+func (rbac *RBACManager) hasPermission(role *legacyRole, resource, action, scope string) bool {
 	for _, perm := range role.Permissions {
 		if rbac.matchesPermission(perm, resource, action, scope) {
 			return true
@@ -277,8 +277,6 @@ func (rbac *RBACManager) matchesPermission(perm, resource, action, scope string)
 }
 
 // AuditLogger logs security events
-
-
 
 func (al *AuditLogger) Log(ctx context.Context, event *AuditEvent) {
 	al.mu.Lock()
@@ -341,40 +339,38 @@ func (af *AuditFilter) Matches(event *AuditEvent) bool {
 }
 
 // EncryptionManager handles end-to-end encryption
-type EncryptionManager struct {
+type legacyEncryptionManager struct {
 	mu     sync.RWMutex
 	keys   map[string][]byte
-	config *EncryptionConfig
+	config *legacyEncryptionConfig
 }
 
 // EncryptionConfig configuration for encryption
-type EncryptionConfig struct {
-	Algorithm      string // AES-256-GCM
+type legacyEncryptionConfig struct {
+	Algorithm           string // AES-256-GCM
 	KeyRotationInterval time.Duration
-	EnableAtRest   bool
-	EnableInTransit bool
+	EnableAtRest        bool
+	EnableInTransit     bool
 }
 
 // NewEncryptionManager creates a new encryption manager
-func NewEncryptionManager(config *EncryptionConfig) *EncryptionManager {
-	return &EncryptionManager{
+func newLegacyEncryptionManager(config *legacyEncryptionConfig) *legacyEncryptionManager {
+	return &legacyEncryptionManager{
 		keys:   make(map[string][]byte),
 		config: config,
 	}
 }
 
 // Encrypt encrypts data
-func (em *EncryptionManager) Encrypt(ctx context.Context, data []byte, keyID string) ([]byte, error) {
+func (em *legacyEncryptionManager) Encrypt(ctx context.Context, data []byte, keyID string) ([]byte, error) {
 	// Implement AES-256-GCM encryption
 	// This is a placeholder
 	return data, nil
 }
 
 // Decrypt decrypts data
-func (em *EncryptionManager) Decrypt(ctx context.Context, data []byte, keyID string) ([]byte, error) {
+func (em *legacyEncryptionManager) Decrypt(ctx context.Context, data []byte, keyID string) ([]byte, error) {
 	// Implement AES-256-GCM decryption
 	// This is a placeholder
 	return data, nil
 }
-
-

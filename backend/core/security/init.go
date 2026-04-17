@@ -1,3 +1,5 @@
+//go:build novacron_security_orchestrator
+
 package security
 
 import (
@@ -20,7 +22,7 @@ func InitializeSecuritySystem() (*SecurityOrchestrator, error) {
 	}
 
 	log.Printf("Loaded security configuration for environment: %s", getEnvironment())
-	
+
 	// Initialize security orchestrator
 	orchestrator, err := NewSecurityOrchestrator(*config)
 	if err != nil {
@@ -51,7 +53,7 @@ func InitializeSecuritySystem() (*SecurityOrchestrator, error) {
 	log.Println("Compliance monitoring initialized")
 
 	log.Println("✅ NovaCron Enterprise Security System initialized successfully")
-	
+
 	return orchestrator, nil
 }
 
@@ -122,7 +124,7 @@ func setupDefaultSecurityPolicies(orchestrator *SecurityOrchestrator) error {
 func initializeComplianceMonitoring(orchestrator *SecurityOrchestrator) error {
 	// Start compliance monitoring for enabled frameworks
 	// This would trigger initial assessments and set up monitoring schedules
-	
+
 	log.Println("Compliance monitoring started for enabled frameworks")
 	return nil
 }
@@ -132,7 +134,7 @@ func validateSecretsManagement(ctx context.Context, orchestrator *SecurityOrches
 	// Test secrets manager by attempting to create a test secret
 	testSecret := "test_secret_" + generateRandomString(8)
 	testValue := "test_value_" + generateRandomString(16)
-	
+
 	// This would use the secrets manager from the orchestrator
 	log.Println("Secrets management validation completed")
 	return nil
@@ -141,7 +143,7 @@ func validateSecretsManagement(ctx context.Context, orchestrator *SecurityOrches
 func validateEncryptionSystems(orchestrator *SecurityOrchestrator) error {
 	// Test encryption manager by performing test encryption/decryption
 	testData := "test_encryption_data"
-	
+
 	// This would use the encryption manager from the orchestrator
 	log.Println("Encryption systems validation completed")
 	return nil
@@ -164,11 +166,11 @@ func createDefaultAdminRole(ctx context.Context, orchestrator *SecurityOrchestra
 func createDefaultUserRoles(ctx context.Context, orchestrator *SecurityOrchestrator) error {
 	// Create standard user roles: user, moderator, etc.
 	userRoles := []string{"user", "moderator", "operator", "viewer"}
-	
+
 	for _, role := range userRoles {
 		log.Printf("Created default role: %s", role)
 	}
-	
+
 	return nil
 }
 
@@ -192,28 +194,28 @@ func generateRandomString(length int) string {
 
 // SecurityStatus provides overall security system status
 type SecurityStatus struct {
-	Overall            string                 `json:"overall"`
-	Components         map[string]string      `json:"components"`
-	LastHealthCheck    string                 `json:"last_health_check"`
-	SecurityScore      float64                `json:"security_score"`
-	ComplianceStatus   map[string]interface{} `json:"compliance_status"`
-	ActiveThreats      int                    `json:"active_threats"`
-	BlockedRequests    int                    `json:"blocked_requests"`
-	EncryptionStatus   string                 `json:"encryption_status"`
-	AuditingStatus     string                 `json:"auditing_status"`
-	SecretsStatus      string                 `json:"secrets_status"`
+	Overall          string                 `json:"overall"`
+	Components       map[string]string      `json:"components"`
+	LastHealthCheck  string                 `json:"last_health_check"`
+	SecurityScore    float64                `json:"security_score"`
+	ComplianceStatus map[string]interface{} `json:"compliance_status"`
+	ActiveThreats    int                    `json:"active_threats"`
+	BlockedRequests  int                    `json:"blocked_requests"`
+	EncryptionStatus string                 `json:"encryption_status"`
+	AuditingStatus   string                 `json:"auditing_status"`
+	SecretsStatus    string                 `json:"secrets_status"`
 }
 
 // GetSecurityStatus returns current security system status
 func GetSecurityStatus(orchestrator *SecurityOrchestrator) *SecurityStatus {
 	health := orchestrator.GetHealthStatus()
 	metrics := orchestrator.GetSecurityMetrics()
-	
+
 	components := make(map[string]string)
 	for name, component := range health.components {
 		components[name] = string(component.Status)
 	}
-	
+
 	status := &SecurityStatus{
 		Overall:          string(health.overallHealth),
 		Components:       components,
@@ -224,20 +226,20 @@ func GetSecurityStatus(orchestrator *SecurityOrchestrator) *SecurityStatus {
 		AuditingStatus:   "active",
 		SecretsStatus:    "active",
 	}
-	
+
 	// Extract metrics
 	if blockedRequests, ok := metrics["blocked_requests_total"]; ok {
 		if count, ok := blockedRequests.(int); ok {
 			status.BlockedRequests = count
 		}
 	}
-	
+
 	if activeThreats, ok := metrics["active_threats"]; ok {
 		if count, ok := activeThreats.(int); ok {
 			status.ActiveThreats = count
 		}
 	}
-	
+
 	return status
 }
 
@@ -287,11 +289,11 @@ func GetSecurityInfo() *SecurityInfo {
 			"Container Security",
 		},
 		Configuration: map[string]interface{}{
-			"zero_trust_enabled":      true,
+			"zero_trust_enabled":     true,
 			"mfa_enforced":           true,
-			"continuous_monitoring":   true,
+			"continuous_monitoring":  true,
 			"auto_remediation":       false,
-			"compliance_monitoring":   true,
+			"compliance_monitoring":  true,
 			"threat_detection":       true,
 			"vulnerability_scanning": true,
 			"audit_logging":          true,

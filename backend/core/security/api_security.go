@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -24,62 +25,62 @@ import (
 
 // APISecurityManager provides comprehensive API security for dating applications
 type APISecurityManager struct {
-	rateLimiter      *AdvancedRateLimiter
-	inputValidator   *InputValidationEngine
-	authzEngine      *AuthorizationEngine
-	apiKeyManager    *APIKeyManager
-	requestSigner    *RequestSigningService
-	csrfProtection   *CSRFProtectionService
-	corsManager      *CORSManager
-	threatDetector   *APIThreatDetector
-	auditLogger      AuditLogger
-	config          *APISecurityConfig
-	mu              sync.RWMutex
+	rateLimiter    *AdvancedRateLimiter
+	inputValidator *InputValidationEngine
+	authzEngine    *AuthorizationEngine
+	apiKeyManager  *APIKeyManager
+	requestSigner  *RequestSigningService
+	csrfProtection *CSRFProtectionService
+	corsManager    *CORSManager
+	threatDetector *APIThreatDetector
+	auditLogger    AuditLogger
+	config         *APISecurityConfig
+	mu             sync.RWMutex
 }
 
 // APISecurityConfig holds API security configuration
 type APISecurityConfig struct {
 	// Rate limiting configuration
-	DefaultRateLimit     int                     `json:"default_rate_limit"`
-	BurstSize           int                     `json:"burst_size"`
-	UserTierLimits      map[UserTier]RateLimit  `json:"user_tier_limits"`
-	EndpointLimits      map[string]RateLimit    `json:"endpoint_limits"`
-	GeographicLimits    map[string]RateLimit    `json:"geographic_limits"`
-	
+	DefaultRateLimit int                    `json:"default_rate_limit"`
+	BurstSize        int                    `json:"burst_size"`
+	UserTierLimits   map[UserTier]RateLimit `json:"user_tier_limits"`
+	EndpointLimits   map[string]RateLimit   `json:"endpoint_limits"`
+	GeographicLimits map[string]RateLimit   `json:"geographic_limits"`
+
 	// Input validation configuration
-	MaxPayloadSize      int64                   `json:"max_payload_size"`
-	AllowedContentTypes []string                `json:"allowed_content_types"`
+	MaxPayloadSize      int64                     `json:"max_payload_size"`
+	AllowedContentTypes []string                  `json:"allowed_content_types"`
 	ValidationRules     map[string]ValidationRule `json:"validation_rules"`
-	
+
 	// Authentication configuration
-	RequireAPIKey       bool                    `json:"require_api_key"`
-	RequireRequestSigning bool                  `json:"require_request_signing"`
-	SigningAlgorithm    string                  `json:"signing_algorithm"`
-	NonceWindow         time.Duration           `json:"nonce_window"`
-	
+	RequireAPIKey         bool          `json:"require_api_key"`
+	RequireRequestSigning bool          `json:"require_request_signing"`
+	SigningAlgorithm      string        `json:"signing_algorithm"`
+	NonceWindow           time.Duration `json:"nonce_window"`
+
 	// CORS configuration
-	AllowedOrigins      []string                `json:"allowed_origins"`
-	AllowedMethods      []string                `json:"allowed_methods"`
-	AllowedHeaders      []string                `json:"allowed_headers"`
-	MaxAge             int                     `json:"max_age"`
-	
+	AllowedOrigins []string `json:"allowed_origins"`
+	AllowedMethods []string `json:"allowed_methods"`
+	AllowedHeaders []string `json:"allowed_headers"`
+	MaxAge         int      `json:"max_age"`
+
 	// Security headers
-	SecurityHeaders     map[string]string       `json:"security_headers"`
-	
+	SecurityHeaders map[string]string `json:"security_headers"`
+
 	// Threat detection
-	AnomalyThreshold    float64                 `json:"anomaly_threshold"`
-	BlockSuspiciousIPs  bool                    `json:"block_suspicious_ips"`
-	AlertingEnabled     bool                    `json:"alerting_enabled"`
+	AnomalyThreshold   float64 `json:"anomaly_threshold"`
+	BlockSuspiciousIPs bool    `json:"block_suspicious_ips"`
+	AlertingEnabled    bool    `json:"alerting_enabled"`
 }
 
 type UserTier string
 
 const (
-	TierFree     UserTier = "free"
-	TierPremium  UserTier = "premium"
-	TierVIP      UserTier = "vip"
-	TierAdmin    UserTier = "admin"
-	TierSystem   UserTier = "system"
+	TierFree    UserTier = "free"
+	TierPremium UserTier = "premium"
+	TierVIP     UserTier = "vip"
+	TierAdmin   UserTier = "admin"
+	TierSystem  UserTier = "system"
 )
 
 type RateLimit struct {
@@ -92,26 +93,26 @@ type RateLimit struct {
 
 // AdvancedRateLimiter provides sophisticated rate limiting
 type AdvancedRateLimiter struct {
-	userTierLimits    map[UserTier]*rate.Limiter
-	endpointLimiters  map[string]*rate.Limiter
-	ipLimiters        map[string]*rate.Limiter
-	geoLimiters       map[string]*rate.Limiter
-	behaviorAnalysis  *BehaviorAnalysisService
-	ddosProtection    *DDoSProtectionService
+	userTierLimits   map[UserTier]*rate.Limiter
+	endpointLimiters map[string]*rate.Limiter
+	ipLimiters       map[string]*rate.Limiter
+	geoLimiters      map[string]*rate.Limiter
+	behaviorAnalysis *BehaviorAnalysisService
+	ddosProtection   *DDoSProtectionService
 	config           *APISecurityConfig
 	mu               sync.RWMutex
 }
 
 // InputValidationEngine provides comprehensive input validation
 type InputValidationEngine struct {
-	validators      map[string]Validator
-	sanitizers      map[string]Sanitizer
+	validators         map[string]Validator
+	sanitizers         map[string]Sanitizer
 	sqlInjectionFilter *SQLInjectionDetector
-	xssProtection   *XSSFilterEngine
-	jsonValidator   *JSONSchemaValidator
-	fileValidator   *FileTypeValidator
-	contentValidator *ContentModerationService
-	config          *APISecurityConfig
+	xssProtection      *XSSFilterEngine
+	jsonValidator      *JSONSchemaValidator
+	fileValidator      *FileTypeValidator
+	contentValidator   *ContentModerationService
+	config             *APISecurityConfig
 }
 
 type Validator interface {
@@ -125,25 +126,25 @@ type Sanitizer interface {
 }
 
 type ValidationRule struct {
-	Field          string            `json:"field"`
-	Required       bool              `json:"required"`
-	Type           string            `json:"type"`
-	MinLength      int               `json:"min_length,omitempty"`
-	MaxLength      int               `json:"max_length,omitempty"`
-	Pattern        string            `json:"pattern,omitempty"`
-	AllowedValues  []string          `json:"allowed_values,omitempty"`
-	CustomValidator string           `json:"custom_validator,omitempty"`
-	Sanitizers     []string          `json:"sanitizers,omitempty"`
-	ErrorMessage   string            `json:"error_message,omitempty"`
+	Field           string   `json:"field"`
+	Required        bool     `json:"required"`
+	Type            string   `json:"type"`
+	MinLength       int      `json:"min_length,omitempty"`
+	MaxLength       int      `json:"max_length,omitempty"`
+	Pattern         string   `json:"pattern,omitempty"`
+	AllowedValues   []string `json:"allowed_values,omitempty"`
+	CustomValidator string   `json:"custom_validator,omitempty"`
+	Sanitizers      []string `json:"sanitizers,omitempty"`
+	ErrorMessage    string   `json:"error_message,omitempty"`
 }
 
 // AuthorizationEngine handles API authorization
 type AuthorizationEngine struct {
-	policyEngine    *PolicyEngine
-	roleManager     *RoleManager
-	scopeValidator  *ScopeValidator
-	resourceGuard   *ResourceAccessGuard
-	auditLogger     AuditLogger
+	policyEngine   *PolicyEngine
+	roleManager    *RoleManager
+	scopeValidator *ScopeValidator
+	resourceGuard  *ResourceAccessGuard
+	auditLogger    AuditLogger
 }
 
 type PolicyEngine struct {
@@ -153,16 +154,16 @@ type PolicyEngine struct {
 }
 
 type AccessPolicy struct {
-	PolicyID      string            `json:"policy_id"`
-	Name          string            `json:"name"`
-	Resource      string            `json:"resource"`
-	Actions       []string          `json:"actions"`
-	Conditions    []PolicyCondition `json:"conditions"`
-	Effect        PolicyEffect      `json:"effect"`
-	Priority      int               `json:"priority"`
-	Version       int               `json:"version"`
-	CreatedAt     time.Time         `json:"created_at"`
-	UpdatedAt     time.Time         `json:"updated_at"`
+	PolicyID   string            `json:"policy_id"`
+	Name       string            `json:"name"`
+	Resource   string            `json:"resource"`
+	Actions    []string          `json:"actions"`
+	Conditions []PolicyCondition `json:"conditions"`
+	Effect     PolicyEffect      `json:"effect"`
+	Priority   int               `json:"priority"`
+	Version    int               `json:"version"`
+	CreatedAt  time.Time         `json:"created_at"`
+	UpdatedAt  time.Time         `json:"updated_at"`
 }
 
 type PolicyCondition struct {
@@ -188,24 +189,24 @@ type APIKeyManager struct {
 }
 
 type APIKey struct {
-	KeyID       string            `json:"key_id"`
-	Name        string            `json:"name"`
-	UserID      string            `json:"user_id"`
-	KeyHash     string            `json:"key_hash"`
-	Scopes      []string          `json:"scopes"`
-	RateLimit   *RateLimit        `json:"rate_limit"`
-	Restrictions *KeyRestrictions `json:"restrictions"`
-	Status      KeyStatus         `json:"status"`
-	CreatedAt   time.Time         `json:"created_at"`
-	ExpiresAt   *time.Time        `json:"expires_at,omitempty"`
-	LastUsed    *time.Time        `json:"last_used,omitempty"`
-	Metadata    map[string]string `json:"metadata"`
+	KeyID        string            `json:"key_id"`
+	Name         string            `json:"name"`
+	UserID       string            `json:"user_id"`
+	KeyHash      string            `json:"key_hash"`
+	Scopes       []string          `json:"scopes"`
+	RateLimit    *RateLimit        `json:"rate_limit"`
+	Restrictions *KeyRestrictions  `json:"restrictions"`
+	Status       KeyStatus         `json:"status"`
+	CreatedAt    time.Time         `json:"created_at"`
+	ExpiresAt    *time.Time        `json:"expires_at,omitempty"`
+	LastUsed     *time.Time        `json:"last_used,omitempty"`
+	Metadata     map[string]string `json:"metadata"`
 }
 
 type KeyRestrictions struct {
-	AllowedIPs     []string  `json:"allowed_ips,omitempty"`
-	AllowedDomains []string  `json:"allowed_domains,omitempty"`
-	AllowedPaths   []string  `json:"allowed_paths,omitempty"`
+	AllowedIPs       []string          `json:"allowed_ips,omitempty"`
+	AllowedDomains   []string          `json:"allowed_domains,omitempty"`
+	AllowedPaths     []string          `json:"allowed_paths,omitempty"`
 	TimeRestrictions *TimeRestrictions `json:"time_restrictions,omitempty"`
 }
 
@@ -222,14 +223,14 @@ type TimeRestrictions struct {
 type RequestSigningService struct {
 	signingKeys    map[string]*SigningKey
 	nonceValidator *NonceValidator
-	config        *APISecurityConfig
+	config         *APISecurityConfig
 }
 
 type SigningKey struct {
-	KeyID     string    `json:"key_id"`
-	Algorithm string    `json:"algorithm"`
-	KeyData   []byte    `json:"-"`
-	CreatedAt time.Time `json:"created_at"`
+	KeyID     string     `json:"key_id"`
+	Algorithm string     `json:"algorithm"`
+	KeyData   []byte     `json:"-"`
+	CreatedAt time.Time  `json:"created_at"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
@@ -245,16 +246,16 @@ type RequestSignature struct {
 type CSRFProtectionService struct {
 	tokenGenerator *CSRFTokenGenerator
 	tokenValidator *CSRFTokenValidator
-	config        *CSRFConfig
+	config         *CSRFConfig
 }
 
 type CSRFConfig struct {
-	TokenExpiry    time.Duration `json:"token_expiry"`
-	SecureCookie   bool          `json:"secure_cookie"`
-	SameSite       http.SameSite `json:"same_site"`
-	CookieName     string        `json:"cookie_name"`
-	HeaderName     string        `json:"header_name"`
-	FieldName      string        `json:"field_name"`
+	TokenExpiry  time.Duration `json:"token_expiry"`
+	SecureCookie bool          `json:"secure_cookie"`
+	SameSite     http.SameSite `json:"same_site"`
+	CookieName   string        `json:"cookie_name"`
+	HeaderName   string        `json:"header_name"`
+	FieldName    string        `json:"field_name"`
 }
 
 // APIThreatDetector identifies and responds to API threats
@@ -264,19 +265,19 @@ type APIThreatDetector struct {
 	behaviorAnalyzer *BehaviorAnalysisService
 	threatIntel      *ThreatIntelligenceService
 	responseHandler  *ThreatResponseHandler
-	config          *APISecurityConfig
+	config           *APISecurityConfig
 }
 
 type ThreatSignature struct {
-	SignatureID   string            `json:"signature_id"`
-	Name          string            `json:"name"`
-	Description   string            `json:"description"`
-	Severity      ThreatSeverity    `json:"severity"`
-	Pattern       string            `json:"pattern"`
-	Fields        []string          `json:"fields"`
-	Metadata      map[string]string `json:"metadata"`
-	CreatedAt     time.Time         `json:"created_at"`
-	UpdatedAt     time.Time         `json:"updated_at"`
+	SignatureID string            `json:"signature_id"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Severity    ThreatSeverity    `json:"severity"`
+	Pattern     string            `json:"pattern"`
+	Fields      []string          `json:"fields"`
+	Metadata    map[string]string `json:"metadata"`
+	CreatedAt   time.Time         `json:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at"`
 }
 
 // ThreatSeverity and severity constants are defined in security_types.go
@@ -288,15 +289,15 @@ func NewAPISecurityManager(config *APISecurityConfig, auditLogger AuditLogger) (
 	}
 
 	manager := &APISecurityManager{
-		rateLimiter:     NewAdvancedRateLimiter(config),
-		inputValidator:  NewInputValidationEngine(config),
-		authzEngine:     NewAuthorizationEngine(auditLogger),
-		apiKeyManager:   NewAPIKeyManager(auditLogger),
-		requestSigner:   NewRequestSigningService(config),
-		csrfProtection:  NewCSRFProtectionService(),
-		corsManager:     NewCORSManager(config),
-		threatDetector:  NewAPIThreatDetector(config),
-		auditLogger:     auditLogger,
+		rateLimiter:    NewAdvancedRateLimiter(config),
+		inputValidator: NewInputValidationEngine(config),
+		authzEngine:    NewAuthorizationEngine(auditLogger),
+		apiKeyManager:  NewAPIKeyManager(auditLogger),
+		requestSigner:  NewRequestSigningService(config),
+		csrfProtection: NewCSRFProtectionService(),
+		corsManager:    NewCORSManager(config),
+		threatDetector: NewAPIThreatDetector(config),
+		auditLogger:    auditLogger,
 		config:         config,
 	}
 
@@ -308,7 +309,7 @@ func DefaultAPISecurityConfig() *APISecurityConfig {
 	return &APISecurityConfig{
 		// Rate limiting
 		DefaultRateLimit: 100,
-		BurstSize:       20,
+		BurstSize:        20,
 		UserTierLimits: map[UserTier]RateLimit{
 			TierFree:    {RequestsPerMinute: 60, RequestsPerHour: 1000, RequestsPerDay: 10000, BurstSize: 10},
 			TierPremium: {RequestsPerMinute: 200, RequestsPerHour: 5000, RequestsPerDay: 50000, BurstSize: 50},
@@ -321,33 +322,33 @@ func DefaultAPISecurityConfig() *APISecurityConfig {
 			"/api/v1/messages":      {RequestsPerMinute: 50, BurstSize: 20},
 			"/api/v1/media/upload":  {RequestsPerMinute: 10, BurstSize: 5},
 		},
-		
+
 		// Input validation
 		MaxPayloadSize:      10 * 1024 * 1024, // 10MB
 		AllowedContentTypes: []string{"application/json", "multipart/form-data", "application/x-www-form-urlencoded"},
-		
+
 		// Authentication
 		RequireAPIKey:         true,
 		RequireRequestSigning: false, // Enable for high-security APIs
-		SigningAlgorithm:     "HMAC-SHA256",
-		NonceWindow:          5 * time.Minute,
-		
+		SigningAlgorithm:      "HMAC-SHA256",
+		NonceWindow:           5 * time.Minute,
+
 		// CORS
 		AllowedOrigins: []string{"https://spark-dating.app", "https://*.spark-dating.app"},
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{"Authorization", "Content-Type", "X-API-Key", "X-Requested-With"},
 		MaxAge:         86400, // 24 hours
-		
+
 		// Security headers
 		SecurityHeaders: map[string]string{
-			"X-Content-Type-Options": "nosniff",
-			"X-Frame-Options":        "DENY",
-			"X-XSS-Protection":       "1; mode=block",
+			"X-Content-Type-Options":    "nosniff",
+			"X-Frame-Options":           "DENY",
+			"X-XSS-Protection":          "1; mode=block",
 			"Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-			"Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
-			"Referrer-Policy":        "strict-origin-when-cross-origin",
+			"Content-Security-Policy":   "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+			"Referrer-Policy":           "strict-origin-when-cross-origin",
 		},
-		
+
 		// Threat detection
 		AnomalyThreshold:   0.8,
 		BlockSuspiciousIPs: true,
@@ -360,31 +361,31 @@ func (asm *APISecurityManager) SecurityMiddleware() func(http.Handler) http.Hand
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
-			
+
 			// Add security headers
 			for header, value := range asm.config.SecurityHeaders {
 				w.Header().Set(header, value)
 			}
-			
+
 			// CORS handling
 			if r.Method == "OPTIONS" {
 				asm.corsManager.HandlePreflight(w, r)
 				return
 			}
-			
+
 			// Rate limiting
 			allowed, err := asm.rateLimiter.Allow(r)
 			if !allowed {
 				asm.handleSecurityError(w, r, "rate_limit_exceeded", err)
 				return
 			}
-			
+
 			// Input validation
 			if err := asm.inputValidator.ValidateRequest(r); err != nil {
 				asm.handleSecurityError(w, r, "input_validation_failed", err)
 				return
 			}
-			
+
 			// API key validation
 			if asm.config.RequireAPIKey {
 				apiKey, err := asm.apiKeyManager.ValidateAPIKey(r)
@@ -394,7 +395,7 @@ func (asm *APISecurityManager) SecurityMiddleware() func(http.Handler) http.Hand
 				}
 				ctx = context.WithValue(ctx, "api_key", apiKey)
 			}
-			
+
 			// Request signature validation
 			if asm.config.RequireRequestSigning {
 				if err := asm.requestSigner.ValidateSignature(r); err != nil {
@@ -402,7 +403,7 @@ func (asm *APISecurityManager) SecurityMiddleware() func(http.Handler) http.Hand
 					return
 				}
 			}
-			
+
 			// CSRF protection for state-changing operations
 			if r.Method != "GET" && r.Method != "HEAD" {
 				if err := asm.csrfProtection.ValidateToken(r); err != nil {
@@ -410,13 +411,13 @@ func (asm *APISecurityManager) SecurityMiddleware() func(http.Handler) http.Hand
 					return
 				}
 			}
-			
+
 			// Threat detection
 			if threat := asm.threatDetector.AnalyzeRequest(r); threat != nil {
 				asm.handleThreatDetection(w, r, threat)
 				return
 			}
-			
+
 			// Continue to next handler with enriched context
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -434,13 +435,13 @@ func (asm *APISecurityManager) handleSecurityError(w http.ResponseWriter, r *htt
 			"user_agent": r.UserAgent(),
 			"error":      err.Error(),
 		})
-	
+
 	// Return appropriate error response
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	var statusCode int
 	var message string
-	
+
 	switch errorType {
 	case "rate_limit_exceeded":
 		statusCode = http.StatusTooManyRequests
@@ -461,11 +462,11 @@ func (asm *APISecurityManager) handleSecurityError(w http.ResponseWriter, r *htt
 		statusCode = http.StatusForbidden
 		message = "Security validation failed"
 	}
-	
+
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"error":   errorType,
-		"message": message,
+		"error":     errorType,
+		"message":   message,
 		"timestamp": time.Now().UTC(),
 	})
 }
@@ -482,15 +483,15 @@ func (asm *APISecurityManager) handleThreatDetection(w http.ResponseWriter, r *h
 			"path":        r.URL.Path,
 			"method":      r.Method,
 		})
-	
+
 	// Take appropriate action based on severity
 	switch threat.Severity {
 	case SeverityCritical, SeverityHigh:
 		// Block immediately and alert security team
 		w.WriteHeader(http.StatusForbidden)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error":   "security_threat_detected",
-			"message": "Request blocked due to security threat",
+			"error":     "security_threat_detected",
+			"message":   "Request blocked due to security threat",
 			"threat_id": threat.ThreatID,
 		})
 	case SeverityMedium:
@@ -515,18 +516,18 @@ func NewAdvancedRateLimiter(config *APISecurityConfig) *AdvancedRateLimiter {
 		endpointLimiters: make(map[string]*rate.Limiter),
 		ipLimiters:       make(map[string]*rate.Limiter),
 		geoLimiters:      make(map[string]*rate.Limiter),
-		config:          config,
+		config:           config,
 	}
 }
 
 func (arl *AdvancedRateLimiter) Allow(r *http.Request) (bool, error) {
 	arl.mu.Lock()
 	defer arl.mu.Unlock()
-	
+
 	clientIP := GetClientIP(r, nil)
 	endpoint := r.URL.Path
 	userTier := arl.getUserTier(r)
-	
+
 	// Check IP-based rate limit
 	ipLimiter, exists := arl.ipLimiters[clientIP]
 	if !exists {
@@ -535,11 +536,11 @@ func (arl *AdvancedRateLimiter) Allow(r *http.Request) (bool, error) {
 		ipLimiter = rate.NewLimiter(limit, arl.config.BurstSize)
 		arl.ipLimiters[clientIP] = ipLimiter
 	}
-	
+
 	if !ipLimiter.Allow() {
 		return false, fmt.Errorf("IP rate limit exceeded for %s", clientIP)
 	}
-	
+
 	// Check endpoint-specific rate limit
 	if endpointLimit, exists := arl.config.EndpointLimits[endpoint]; exists {
 		endpointLimiter, exists := arl.endpointLimiters[endpoint]
@@ -548,12 +549,12 @@ func (arl *AdvancedRateLimiter) Allow(r *http.Request) (bool, error) {
 			endpointLimiter = rate.NewLimiter(limit, endpointLimit.BurstSize)
 			arl.endpointLimiters[endpoint] = endpointLimiter
 		}
-		
+
 		if !endpointLimiter.Allow() {
 			return false, fmt.Errorf("Endpoint rate limit exceeded for %s", endpoint)
 		}
 	}
-	
+
 	// Check user tier rate limit
 	if tierLimit, exists := arl.config.UserTierLimits[userTier]; exists {
 		tierLimiter, exists := arl.userTierLimits[userTier]
@@ -562,12 +563,12 @@ func (arl *AdvancedRateLimiter) Allow(r *http.Request) (bool, error) {
 			tierLimiter = rate.NewLimiter(limit, tierLimit.BurstSize)
 			arl.userTierLimits[userTier] = tierLimiter
 		}
-		
+
 		if !tierLimiter.Allow() {
 			return false, fmt.Errorf("User tier rate limit exceeded for %s", userTier)
 		}
 	}
-	
+
 	return true, nil
 }
 
@@ -584,20 +585,20 @@ func (arl *AdvancedRateLimiter) getUserTier(r *http.Request) UserTier {
 // Additional implementation details for other services...
 
 type DetectedThreat struct {
-	ThreatID    string         `json:"threat_id"`
-	ThreatType  string         `json:"threat_type"`
-	Severity    ThreatSeverity `json:"severity"`
-	Confidence  float64        `json:"confidence"`
-	Description string         `json:"description"`
-	Timestamp   time.Time      `json:"timestamp"`
+	ThreatID    string                 `json:"threat_id"`
+	ThreatType  string                 `json:"threat_type"`
+	Severity    ThreatSeverity         `json:"severity"`
+	Confidence  float64                `json:"confidence"`
+	Description string                 `json:"description"`
+	Timestamp   time.Time              `json:"timestamp"`
 	Metadata    map[string]interface{} `json:"metadata"`
 }
 
 func NewInputValidationEngine(config *APISecurityConfig) *InputValidationEngine {
 	return &InputValidationEngine{
-		validators:       make(map[string]Validator),
-		sanitizers:       make(map[string]Sanitizer),
-		config:          config,
+		validators: make(map[string]Validator),
+		sanitizers: make(map[string]Sanitizer),
+		config:     config,
 	}
 }
 
@@ -607,12 +608,12 @@ func (ive *InputValidationEngine) ValidateRequest(r *http.Request) error {
 	if !ive.isAllowedContentType(contentType) {
 		return fmt.Errorf("unsupported content type: %s", contentType)
 	}
-	
+
 	// Validate content length
 	if r.ContentLength > ive.config.MaxPayloadSize {
 		return fmt.Errorf("payload too large: %d bytes", r.ContentLength)
 	}
-	
+
 	// Additional validation logic would go here
 	return nil
 }
@@ -649,41 +650,41 @@ func (akm *APIKeyManager) ValidateAPIKey(r *http.Request) (*APIKey, error) {
 	if keyValue == "" {
 		return nil, fmt.Errorf("API key required")
 	}
-	
+
 	// Hash the key value to compare with stored hash
 	keyHash := sha256.Sum256([]byte(keyValue))
 	keyHashStr := hex.EncodeToString(keyHash[:])
-	
+
 	// Look up API key by hash
 	akm.mu.RLock()
 	defer akm.mu.RUnlock()
-	
+
 	for _, key := range akm.keys {
 		if subtle.ConstantTimeCompare([]byte(key.KeyHash), []byte(keyHashStr)) == 1 {
 			// Validate key status and expiry
 			if key.Status != KeyStatusActive {
 				return nil, fmt.Errorf("API key is not active")
 			}
-			
+
 			if key.ExpiresAt != nil && key.ExpiresAt.Before(time.Now()) {
 				return nil, fmt.Errorf("API key has expired")
 			}
-			
+
 			// Update last used timestamp
 			now := time.Now()
 			key.LastUsed = &now
-			
+
 			return key, nil
 		}
 	}
-	
+
 	return nil, fmt.Errorf("invalid API key")
 }
 
 func NewRequestSigningService(config *APISecurityConfig) *RequestSigningService {
 	return &RequestSigningService{
 		signingKeys: make(map[string]*SigningKey),
-		config:     config,
+		config:      config,
 	}
 }
 
@@ -693,19 +694,19 @@ func (rss *RequestSigningService) ValidateSignature(r *http.Request) error {
 	if signatureHeader == "" {
 		return fmt.Errorf("signature required")
 	}
-	
+
 	// Parse signature
 	signature, err := rss.parseSignature(signatureHeader)
 	if err != nil {
 		return fmt.Errorf("invalid signature format: %w", err)
 	}
-	
+
 	// Get signing key
 	signingKey, exists := rss.signingKeys[signature.KeyID]
 	if !exists {
 		return fmt.Errorf("unknown signing key: %s", signature.KeyID)
 	}
-	
+
 	// Verify signature
 	return rss.verifySignature(r, signature, signingKey)
 }
@@ -714,16 +715,16 @@ func (rss *RequestSigningService) parseSignature(header string) (*RequestSignatu
 	// Parse signature header format: algorithm=HMAC-SHA256,keyId=key123,signature=abc123,timestamp=1234567890,nonce=xyz
 	parts := strings.Split(header, ",")
 	sig := &RequestSignature{}
-	
+
 	for _, part := range parts {
 		kv := strings.SplitN(part, "=", 2)
 		if len(kv) != 2 {
 			continue
 		}
-		
+
 		key := strings.TrimSpace(kv[0])
 		value := strings.TrimSpace(kv[1])
-		
+
 		switch key {
 		case "algorithm":
 			sig.Algorithm = value
@@ -739,7 +740,7 @@ func (rss *RequestSigningService) parseSignature(header string) (*RequestSignatu
 			sig.Nonce = value
 		}
 	}
-	
+
 	return sig, nil
 }
 
@@ -752,17 +753,17 @@ func (rss *RequestSigningService) verifySignature(r *http.Request, signature *Re
 		signature.Timestamp.Unix(),
 		signature.Nonce,
 	)
-	
+
 	// Calculate expected signature
 	mac := hmac.New(sha256.New, key.KeyData)
 	mac.Write([]byte(stringToSign))
 	expectedSignature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
-	
+
 	// Compare signatures
 	if subtle.ConstantTimeCompare([]byte(signature.Signature), []byte(expectedSignature)) != 1 {
 		return fmt.Errorf("signature verification failed")
 	}
-	
+
 	return nil
 }
 
@@ -781,17 +782,33 @@ func NewCSRFProtectionService() *CSRFProtectionService {
 	}
 }
 
+func GetClientIP(r *http.Request, securityHeaders map[string]string) string {
+	_ = securityHeaders
+
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		return strings.TrimSpace(strings.Split(forwarded, ",")[0])
+	}
+	if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
+		return realIP
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil && host != "" {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
+}
+
 func (cps *CSRFProtectionService) ValidateToken(r *http.Request) error {
 	// Get token from header or form field
 	token := r.Header.Get(cps.config.HeaderName)
 	if token == "" {
 		token = r.FormValue(cps.config.FieldName)
 	}
-	
+
 	if token == "" {
 		return fmt.Errorf("CSRF token required")
 	}
-	
+
 	// Validate token
 	return cps.tokenValidator.ValidateToken(token, r)
 }
@@ -830,6 +847,21 @@ type CSRFTokenGenerator struct {
 
 type CSRFTokenValidator struct {
 	// CSRF token validation
+}
+
+func (ctv *CSRFTokenValidator) ValidateToken(token string, r *http.Request) error {
+	if token == "" {
+		return fmt.Errorf("empty CSRF token")
+	}
+
+	cookie, err := r.Cookie("_csrf_token")
+	if err != nil {
+		return fmt.Errorf("csrf cookie missing")
+	}
+	if subtle.ConstantTimeCompare([]byte(token), []byte(cookie.Value)) != 1 {
+		return fmt.Errorf("csrf token mismatch")
+	}
+	return nil
 }
 
 type CORSManager struct {

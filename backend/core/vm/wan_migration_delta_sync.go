@@ -1,3 +1,5 @@
+//go:build novacron_vm_advanced_migration
+
 package vm
 
 import (
@@ -118,15 +120,15 @@ type DeltaSyncStats struct {
 
 // DeltaSyncManager manages delta synchronization for VM migration
 type DeltaSyncManager struct {
-	config        DeltaSyncConfig
-	stats         DeltaSyncStats
-	mu            sync.RWMutex
-	ctx           context.Context
-	cancel        context.CancelFunc
-	logger        *logrus.Entry
-	ebpfFilter    *EBPFMigrationFilter
+	config          DeltaSyncConfig
+	stats           DeltaSyncStats
+	mu              sync.RWMutex
+	ctx             context.Context
+	cancel          context.CancelFunc
+	logger          *logrus.Entry
+	ebpfFilter      *EBPFMigrationFilter
 	ebpfBlockFilter *EBPFBlockFilter
-	ebpfEnabled   bool
+	ebpfEnabled     bool
 }
 
 // NewDeltaSyncManager creates a new delta sync manager
@@ -163,9 +165,9 @@ func NewDeltaSyncManager(config DeltaSyncConfig) *DeltaSyncManager {
 			StartTime: time.Now(),
 			BlockSize: config.BlockSizeKB * 1024,
 		},
-		ctx:    ctx,
-		cancel: cancel,
-		logger: logger.WithField("component", "DeltaSyncManager"),
+		ctx:         ctx,
+		cancel:      cancel,
+		logger:      logger.WithField("component", "DeltaSyncManager"),
 		ebpfEnabled: false,
 	}
 
@@ -1045,9 +1047,9 @@ func (m *DeltaSyncManager) EnableEBPFFiltering(pid uint32) error {
 // guest namespace injection. This provides true guest-aware unused page detection.
 //
 // Parameters:
-// - pid: The VM process PID (QEMU process ID from host perspective)
-// - namespacePath: Path to guest PID namespace (e.g., "/proc/<pid>/ns/pid")
-//                  Pass empty string to use host namespace (fallback mode)
+//   - pid: The VM process PID (QEMU process ID from host perspective)
+//   - namespacePath: Path to guest PID namespace (e.g., "/proc/<pid>/ns/pid")
+//     Pass empty string to use host namespace (fallback mode)
 //
 // When namespacePath is provided and accessible:
 // - Switches to guest namespace before loading eBPF

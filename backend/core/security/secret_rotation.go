@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
+	"os"
 	"sync"
 	"time"
 )
@@ -21,36 +23,36 @@ type SecretRotationPolicy struct {
 
 // SecretVersion represents a versioned secret
 type SecretVersion struct {
-	Version     string    `json:"version"`
-	Value       string    `json:"-"` // Never log the actual value
-	CreatedAt   time.Time `json:"created_at"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	RotatedFrom string    `json:"rotated_from,omitempty"`
-	RotatedBy   string    `json:"rotated_by,omitempty"`
-	Status      string    `json:"status"` // active, rotating, expired, revoked
+	Version     string                 `json:"version"`
+	Value       string                 `json:"-"` // Never log the actual value
+	CreatedAt   time.Time              `json:"created_at"`
+	ExpiresAt   time.Time              `json:"expires_at"`
+	RotatedFrom string                 `json:"rotated_from,omitempty"`
+	RotatedBy   string                 `json:"rotated_by,omitempty"`
+	Status      string                 `json:"status"` // active, rotating, expired, revoked
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // RotationSchedule tracks rotation schedules
 type RotationSchedule struct {
-	SecretKey      string               `json:"secret_key"`
-	NextRotation   time.Time            `json:"next_rotation"`
-	LastRotation   time.Time            `json:"last_rotation"`
-	Policy         SecretRotationPolicy `json:"policy"`
-	NotificationSent bool               `json:"notification_sent"`
+	SecretKey        string               `json:"secret_key"`
+	NextRotation     time.Time            `json:"next_rotation"`
+	LastRotation     time.Time            `json:"last_rotation"`
+	Policy           SecretRotationPolicy `json:"policy"`
+	NotificationSent bool                 `json:"notification_sent"`
 }
 
 // SecretRotationManager manages secret lifecycle
 type SecretRotationManager struct {
-	provider     SecretProvider
-	auditor      AuditLogger
-	notifier     RotationNotificationService
-	policies     map[string]SecretRotationPolicy
-	schedules    map[string]*RotationSchedule
-	versions     map[string][]SecretVersion
-	mu           sync.RWMutex
-	stopChan     chan struct{}
-	wg           sync.WaitGroup
+	provider  SecretProvider
+	auditor   AuditLogger
+	notifier  RotationNotificationService
+	policies  map[string]SecretRotationPolicy
+	schedules map[string]*RotationSchedule
+	versions  map[string][]SecretVersion
+	mu        sync.RWMutex
+	stopChan  chan struct{}
+	wg        sync.WaitGroup
 }
 
 // RotationNotificationService for rotation notifications
@@ -91,7 +93,7 @@ func (m *SecretRotationManager) RegisterPolicy(secretKey string, policy SecretRo
 	}
 
 	m.policies[secretKey] = policy
-	
+
 	// Create initial schedule
 	m.schedules[secretKey] = &RotationSchedule{
 		SecretKey:    secretKey,
@@ -214,7 +216,7 @@ func (m *SecretRotationManager) RotateSecret(ctx context.Context, secretKey stri
 
 	// Mark as active
 	newVersion.Status = "active"
-	
+
 	// Mark old versions as rotated
 	for i := range m.versions[secretKey] {
 		if m.versions[secretKey][i].Status == "active" && m.versions[secretKey][i].Version != newVersion.Version {

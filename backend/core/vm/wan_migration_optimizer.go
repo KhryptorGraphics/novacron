@@ -1,3 +1,5 @@
+//go:build novacron_vm_advanced_migration
+
 package vm
 
 import (
@@ -420,9 +422,9 @@ func (o *WANMigrationOptimizer) SupportsEBPF() bool {
 // the amount of data that needs to be transferred.
 //
 // Parameters:
-// - vmPID: The VM process PID (e.g., QEMU process ID)
-// - namespacePath: Optional path to guest PID namespace for guest-aware tracking.
-//                  Pass empty string to use host namespace (fallback mode).
+//   - vmPID: The VM process PID (e.g., QEMU process ID)
+//   - namespacePath: Optional path to guest PID namespace for guest-aware tracking.
+//     Pass empty string to use host namespace (fallback mode).
 //
 // When namespacePath is provided and accessible, the filter operates in the guest's
 // namespace context, providing 20-30% improvement in unused page detection accuracy.

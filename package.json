@@ -31,7 +31,7 @@
 		"test:e2e:install": "playwright install --with-deps",
 		"test:e2e:ci": "playwright test --project=chromium --project=firefox",
 		"start": "npm run dev",
-		"start:api": "go run ./backend/cmd/api-server/main_working.go",
+		"start:api": "go run ./backend/cmd/api-server/main.go",
 		"start:frontend": "npm run dev --prefix frontend",
 		"dev:api": "npm run start:api",
 		"dev:frontend": "npm run start:frontend",

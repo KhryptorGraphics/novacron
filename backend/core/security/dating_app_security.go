@@ -1,3 +1,5 @@
+//go:build novacron_dating_app_security
+
 package security
 
 import (

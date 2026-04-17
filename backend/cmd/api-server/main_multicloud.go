@@ -1,3 +1,5 @@
+//go:build novacron_multicloud
+
 package main
 
 import (

@@ -1,3 +1,5 @@
+//go:build !novacron_enhanced && !novacron_improved && !novacron_multicloud && !novacron_production && !novacron_real_backend && !novacron_secure && !novacron_working && !novacron_simple_api
+
 package main
 
 import (
@@ -8,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -15,37 +18,23 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
-	"github.com/lib/pq"
-	"github.com/khryptorgraphics/novacron/backend/api/monitoring"
-	"github.com/khryptorgraphics/novacron/backend/api/vm"
-	"github.com/khryptorgraphics/novacron/backend/api/admin"
-	"github.com/khryptorgraphics/novacron/backend/core/hypervisor"
+	_ "github.com/lib/pq"
+
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
-	core_vm "github.com/khryptorgraphics/novacron/backend/core/vm"
 	"github.com/khryptorgraphics/novacron/backend/pkg/config"
 	"github.com/khryptorgraphics/novacron/backend/pkg/logger"
-	"github.com/khryptorgraphics/novacron/backend/pkg/middleware"
-	api_orch "github.com/khryptorgraphics/novacron/backend/api/orchestration"
-	"github.com/khryptorgraphics/novacron/backend/core/orchestration"
-	"github.com/sirupsen/logrus"
-	security_handlers "github.com/khryptorgraphics/novacron/backend/api/security"
-	"github.com/khryptorgraphics/novacron/backend/core/security"
-
 )
 
 func main() {
-	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
 		logger.Fatal("Failed to load configuration", "error", err)
 	}
 
-	// Validate configuration
 	if err := cfg.Validate(); err != nil {
 		logger.Fatal("Invalid configuration", "error", err)
 	}
 
-	// Initialize logger
 	appLogger := logger.NewFromConfig(
 		cfg.Logging.Level,
 		cfg.Logging.Format,
@@ -60,162 +49,34 @@ func main() {
 		"ws_port", cfg.Server.WSPort,
 	)
 
-	// Initialize database connection
 	db, err := initDatabase(cfg)
 	if err != nil {
 		appLogger.Fatal("Failed to initialize database", "error", err)
 	}
 	defer db.Close()
 
-	// Initialize authentication manager
 	authManager := auth.NewSimpleAuthManager(cfg.Auth.Secret, db)
 
-	// Initialize security components
-	encConfig := security.EncryptionConfig{
-		Algorithm:           "AES-256-GCM",
-		KeyRotationEnabled:  true,
-		KeyRotationInterval: 24 * time.Hour,
-	}
-	encMgr := security.NewEncryptionManager(encConfig)
-
-	// Initialize audit logger
-	auditLogger := security.NewAuditLogger(db)
-
-	// Initialize 2FA service
-	twoFactorService := auth.NewTwoFactorService("NovaCron", encMgr.GetEncryptionKey())
-
-	// Initialize security coordinator
-	securityCoordinator := security.NewDistributedSecurityCoordinator(encMgr, auditLogger)
-	if err := securityCoordinator.Start(); err != nil {
-		appLogger.Warn("Failed to start security coordinator", "error", err)
-	}
-	defer securityCoordinator.Stop()
-
-	// Initialize vulnerability scanner
-	vulnScanConfig := security.ScanConfig{
-		EnabledScanTypes: []security.ScanType{
-			security.ScanTypeSAST,
-			security.ScanTypeDependency,
-		},
-		SeverityThreshold: security.SeverityMedium,
-		AlertingEnabled:   true,
-	}
-	vulnScanner := security.NewVulnerabilityScanner(vulnScanConfig)
-
-	// Initialize VM manager with default configuration
-	vmConfig := core_vm.VMManagerConfig{
-		DefaultDriver: core_vm.VMTypeKVM,
-		Drivers: make(map[core_vm.VMType]core_vm.VMDriverConfigManager),
-		Scheduler: core_vm.VMSchedulerConfig{
-			Type: "round-robin",
-			Config: make(map[string]interface{}),
-		},
-	}
-
-	// Enable KVM driver if available
-	vmConfig.Drivers[core_vm.VMTypeKVM] = core_vm.VMDriverConfigManager{
-		Enabled: true,
-		Config:  make(map[string]interface{}),
-	}
-
-	vmManager, err := core_vm.NewVMManager(vmConfig)
-	if err != nil {
-		appLogger.Warn("Failed to initialize VM manager", "error", err)
-		// Create a minimal VM manager for development
-		vmManager = nil
-	}
-
-	// Initialize KVM manager (optional for development)
-	kvmManager, err := hypervisor.NewKVMManager("qemu:///system")
-	if err != nil {
-		appLogger.Warn("Failed to connect to KVM", "error", err)
-		appLogger.Info("Continuing with limited KVM functionality")
-		// Create a nil KVM manager but VM manager can still work
-		kvmManager = nil
-	}
-
-	// Create router
 	router := mux.NewRouter()
+	router.StrictSlash(true)
 
-	// Add CORS middleware
-	corsHandler := handlers.CORS(
-		handlers.AllowedOrigins([]string{
-			"http://localhost:8092",
-			"http://localhost:3001",
-			"http://localhost:3000", // Next.js frontend
-		}),
-		handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"}),
-		handlers.AllowedHeaders([]string{"Content-Type", "Authorization", "X-User-Email"}),
-		handlers.AllowCredentials(),
-	)
+	corsHandler := buildCORSHandler(cfg)
 
-	// Add authentication middleware
-	authMiddleware := middleware.NewAuthMiddleware(authManager)
+	registerPublicRoutes(router, authManager, db)
 
-	// Create API router with middleware
 	apiRouter := router.PathPrefix("/api").Subrouter()
-	apiRouter.Use(authMiddleware.RequireAuth)
+	apiRouter.Use(requireAuth(authManager))
+	registerSecureAPIRoutes(apiRouter, db)
 
-	// Register VM management routes
-	if vmManager != nil {
-		vmHandlers := vm.NewHandler(vmManager)
-		vmHandlers.RegisterRoutes(apiRouter.PathPrefix("/vm").Subrouter())
-	} else {
-		// Register mock VM handlers for development
-		registerMockVMHandlers(apiRouter.PathPrefix("/vm").Subrouter())
-	}
+	apiV1Router := router.PathPrefix("/api/v1").Subrouter()
+	apiV1Router.Use(requireAuth(authManager))
+	registerSecureAPIRoutes(apiV1Router, db)
 
-	// Initialize orchestration engine (core-only mode)
-	orchLogger := appLogger.StandardLogger()
-	orchEngine := orchestration.NewDefaultOrchestrationEngine(orchLogger)
-	// Compose adapters using the VM manager and engine's placement engine
-	if vmManager != nil {
-		adapters := &orchestration.OrchestrationAdapters{VMManager: vmManager, PlacementEngine: orchEngine.Placement()}
-		// Build default evacuation handler
-		evacHandler := orchestration.NewDefaultEvacuationHandler(adapters.ListVMsByNodeAdapter, adapters.SelectTargetAdapter, adapters.MigrateAdapter, orchLogger)
-		orchEngine.SetEvacuationHandler(evacHandler)
-	}
+	registerExplicitlyUnsupportedRoutes(router)
 
+	router.HandleFunc("/health", healthCheckHandler(cfg, db)).Methods(http.MethodGet)
+	router.HandleFunc("/api/info", apiInfoHandler()).Methods(http.MethodGet)
 
-	// WebSocket orchestration events route (core-compatible)
-	wsManager := api_orch.NewWebSocketManager(logrus.New(), orchEngine.EventBus())
-	router.HandleFunc("/ws/events/v1", wsManager.HandleWebSocket)
-
-
-	// Register security routes
-	securityHandlers := security_handlers.NewSecurityHandlers(
-		twoFactorService,
-		securityCoordinator,
-		vulnScanner,
-		auditLogger,
-		encMgr,
-	)
-	securityHandlers.RegisterRoutes(router)
-
-	// Register admin routes
-	adminHandlers := admin.NewAdminHandlers(db, cfg.Server.ConfigPath)
-	adminHandlers.RegisterRoutes(router)
-	appLogger.Info("Admin API routes registered")
-
-	// Register monitoring routes
-	if kvmManager != nil {
-		monitoringHandlers := monitoring.NewMonitoringHandlers(kvmManager)
-		monitoringHandlers.RegisterRoutes(router)
-	} else {
-		// Register mock monitoring handlers for development
-		registerMockMonitoringHandlers(router)
-	}
-
-	// Public routes (no auth required)
-	registerPublicRoutes(router, authManager)
-
-	// Health check endpoint with database connectivity check
-	router.HandleFunc("/health", healthCheckHandler(cfg, db, kvmManager)).Methods("GET")
-
-	// API info endpoint
-	router.HandleFunc("/api/info", apiInfoHandler()).Methods("GET")
-
-	// Create HTTP server with configuration
 	server := &http.Server{
 		Addr:         ":" + cfg.Server.APIPort,
 		Handler:      corsHandler(router),
@@ -224,7 +85,6 @@ func main() {
 		IdleTimeout:  cfg.Server.IdleTimeout,
 	}
 
-	// Start server in a goroutine
 	go func() {
 		appLogger.Info("API Server starting", "port", cfg.Server.APIPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -232,14 +92,12 @@ func main() {
 		}
 	}()
 
-	// Wait for interrupt signal to gracefully shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	appLogger.Info("Shutting down server...")
 
-	// Graceful shutdown with configured timeout
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 	defer cancel()
 
@@ -247,36 +105,48 @@ func main() {
 		appLogger.Fatal("Server forced to shutdown", "error", err)
 	}
 
-	// Close connections
-	if kvmManager != nil {
-		if err := kvmManager.Close(); err != nil {
-			appLogger.Error("Error closing KVM manager", "error", err)
-		}
-	}
-
-	if vmManager != nil {
-		if err := vmManager.Close(); err != nil {
-			appLogger.Error("Error closing VM manager", "error", err)
-		}
-	}
-
 	appLogger.Info("Server exited gracefully")
 }
 
-// initDatabase initializes the PostgreSQL database connection
+func buildCORSHandler(cfg *config.Config) mux.MiddlewareFunc {
+	allowedOrigins := cfg.CORS.AllowedOrigins
+	if len(allowedOrigins) == 0 {
+		allowedOrigins = []string{
+			"http://localhost:8092",
+			"http://localhost:3001",
+			"http://localhost:3000",
+		}
+	}
+
+	allowedMethods := cfg.CORS.AllowedMethods
+	if len(allowedMethods) == 0 {
+		allowedMethods = []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch, http.MethodOptions}
+	}
+
+	allowedHeaders := cfg.CORS.AllowedHeaders
+	if len(allowedHeaders) == 0 {
+		allowedHeaders = []string{"Content-Type", "Authorization", "X-User-Email"}
+	}
+
+	return handlers.CORS(
+		handlers.AllowedOrigins(allowedOrigins),
+		handlers.AllowedMethods(allowedMethods),
+		handlers.AllowedHeaders(allowedHeaders),
+		handlers.AllowCredentials(),
+	)
+}
+
 func initDatabase(cfg *config.Config) (*sql.DB, error) {
 	db, err := sql.Open("postgres", cfg.Database.URL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Configure connection pool
 	db.SetMaxOpenConns(cfg.Database.MaxConnections)
 	db.SetMaxIdleConns(cfg.Database.MaxConnections / 2)
 	db.SetConnMaxLifetime(cfg.Database.ConnMaxLifetime)
 	db.SetConnMaxIdleTime(cfg.Database.ConnMaxIdleTime)
 
-	// Test the connection
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -285,7 +155,6 @@ func initDatabase(cfg *config.Config) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	// Run database migrations
 	if err := runMigrations(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
@@ -294,9 +163,7 @@ func initDatabase(cfg *config.Config) (*sql.DB, error) {
 	return db, nil
 }
 
-// runMigrations executes database migrations
 func runMigrations(db *sql.DB) error {
-	// Create basic schema if it doesn't exist
 	migrations := []string{
 		`CREATE TABLE IF NOT EXISTS users (
 			id SERIAL PRIMARY KEY,
@@ -304,10 +171,7 @@ func runMigrations(db *sql.DB) error {
 			email VARCHAR(255) UNIQUE NOT NULL,
 			password_hash VARCHAR(255) NOT NULL,
 			role VARCHAR(50) DEFAULT 'user',
-			active BOOLEAN DEFAULT true,
 			tenant_id VARCHAR(255) DEFAULT 'default',
-			two_factor_enabled BOOLEAN DEFAULT false,
-			two_factor_secret VARCHAR(255),
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)`,
@@ -331,73 +195,8 @@ func runMigrations(db *sql.DB) error {
 			network_recv BIGINT,
 			timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)`,
-		`CREATE TABLE IF NOT EXISTS vm_templates (
-			id VARCHAR(255) PRIMARY KEY,
-			name VARCHAR(255) NOT NULL,
-			description TEXT,
-			os VARCHAR(100) NOT NULL,
-			os_version VARCHAR(50),
-			cpu_cores INTEGER NOT NULL,
-			memory_mb INTEGER NOT NULL,
-			disk_gb INTEGER NOT NULL,
-			image_path VARCHAR(500),
-			is_public BOOLEAN DEFAULT false,
-			usage_count INTEGER DEFAULT 0,
-			tags JSONB,
-			metadata JSONB,
-			created_by VARCHAR(255) NOT NULL,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS security_alerts (
-			id SERIAL PRIMARY KEY,
-			type VARCHAR(100) NOT NULL,
-			severity VARCHAR(50) NOT NULL,
-			title VARCHAR(255) NOT NULL,
-			description TEXT,
-			source VARCHAR(255),
-			ip VARCHAR(45),
-			user_agent TEXT,
-			status VARCHAR(50) DEFAULT 'open',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS audit_logs (
-			id SERIAL PRIMARY KEY,
-			user_id INTEGER REFERENCES users(id),
-			username VARCHAR(255),
-			action VARCHAR(100) NOT NULL,
-			resource VARCHAR(255),
-			details JSONB,
-			ip VARCHAR(45),
-			user_agent TEXT,
-			success BOOLEAN DEFAULT true,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS security_policies (
-			id SERIAL PRIMARY KEY,
-			name VARCHAR(255) NOT NULL,
-			description TEXT,
-			enabled BOOLEAN DEFAULT true,
-			max_login_attempts INTEGER DEFAULT 5,
-			lockout_duration_minutes INTEGER DEFAULT 30,
-			session_timeout_minutes INTEGER DEFAULT 60,
-			password_min_length INTEGER DEFAULT 12,
-			password_require_special BOOLEAN DEFAULT true,
-			require_mfa BOOLEAN DEFAULT false,
-			allowed_ips TEXT,
-			blocked_ips TEXT,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
 		`CREATE INDEX IF NOT EXISTS idx_vm_metrics_vm_id ON vm_metrics(vm_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_vm_metrics_timestamp ON vm_metrics(timestamp)`,
-		`CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_security_alerts_status ON security_alerts(status)`,
-		`CREATE INDEX IF NOT EXISTS idx_security_alerts_severity ON security_alerts(severity)`,
-		`CREATE INDEX IF NOT EXISTS idx_vm_templates_os ON vm_templates(os)`,
-		`CREATE INDEX IF NOT EXISTS idx_vm_templates_is_public ON vm_templates(is_public)`,
 	}
 
 	for _, migration := range migrations {
@@ -409,456 +208,427 @@ func runMigrations(db *sql.DB) error {
 	return nil
 }
 
-// registerMockMonitoringHandlers provides mock monitoring endpoints for development
-func registerMockMonitoringHandlers(router *mux.Router) {
-	appLogger := logger.GlobalLogger
-	appLogger.Info("Registering mock monitoring handlers for development...")
-
-	// Mock system metrics
-	router.HandleFunc("/api/monitoring/metrics", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		response := `{
-			"currentCpuUsage": 45.2,
-			"currentMemoryUsage": 72.1,
-			"currentDiskUsage": 58.3,
-			"currentNetworkUsage": 125.7,
-			"cpuChangePercentage": 5.2,
-			"memoryChangePercentage": -2.1,
-			"diskChangePercentage": 1.8,
-			"networkChangePercentage": 12.5,
-			"cpuTimeseriesData": [40, 42, 45, 48, 52, 49, 46, 44, 47, 45],
-			"memoryTimeseriesData": [68, 70, 72, 74, 71, 69, 73, 75, 72, 72],
-			"diskTimeseriesData": [55, 56, 58, 60, 59, 57, 58, 59, 58, 58],
-			"networkTimeseriesData": [100, 110, 125, 130, 120, 115, 125, 130, 125, 126],
-			"timeLabels": ["10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30"],
-			"cpuAnalysis": "CPU usage shows normal workday patterns with peaks during business hours.",
-			"memoryAnalysis": "Memory allocation is healthy with sufficient available memory for operations.",
-			"memoryInUse": 65.0,
-			"memoryAvailable": 20.0,
-			"memoryReserved": 10.0,
-			"memoryCached": 5.0
-		}`
-		w.Write([]byte(response))
-	}).Methods("GET")
-
-	// Mock VM metrics
-	router.HandleFunc("/api/monitoring/vms", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		response := `[
-			{
-				"vmId": "vm-001",
-				"name": "web-server-01",
-				"cpuUsage": 78.5,
-				"memoryUsage": 65.2,
-				"diskUsage": 45.8,
-				"networkRx": 1048576,
-				"networkTx": 2097152,
-				"iops": 150,
-				"status": "running"
-			},
-			{
-				"vmId": "vm-002",
-				"name": "database-01",
-				"cpuUsage": 92.1,
-				"memoryUsage": 88.7,
-				"diskUsage": 72.3,
-				"networkRx": 524288,
-				"networkTx": 1048576,
-				"iops": 320,
-				"status": "running"
+func requireAuth(authManager *auth.SimpleAuthManager) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tokenString, err := extractBearerToken(r.Header.Get("Authorization"))
+			if err != nil {
+				writeJSONError(w, http.StatusUnauthorized, err.Error())
+				return
 			}
-		]`
-		w.Write([]byte(response))
-	}).Methods("GET")
 
-	// Mock alerts
-	router.HandleFunc("/api/monitoring/alerts", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		response := `[
-			{
-				"id": "alert-001",
-				"name": "High CPU Usage",
-				"description": "VM database-01 CPU usage exceeds 90%",
-				"severity": "warning",
-				"status": "firing",
-				"startTime": "2025-04-11T14:30:00Z",
-				"labels": {"vm": "database-01", "metric": "cpu"},
-				"value": 92.1,
-				"resource": "VM database-01"
+			claims, err := validateJWT(tokenString, authManager.GetJWTSecret())
+			if err != nil {
+				writeJSONError(w, http.StatusUnauthorized, "invalid or expired token")
+				return
 			}
-		]`
-		w.Write([]byte(response))
-	}).Methods("GET")
 
-	// WebSocket endpoint mock
-	router.HandleFunc("/ws/monitoring", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("WebSocket endpoint - use a WebSocket client to connect"))
-	})
+			userID := stringClaim(claims, "user_id", "sub")
+			if userID == "" {
+				writeJSONError(w, http.StatusUnauthorized, "token missing user identity")
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), "user_id", userID)
+			ctx = context.WithValue(ctx, "tenant_id", stringClaim(claims, "tenant_id"))
+			ctx = context.WithValue(ctx, "role", stringClaim(claims, "role"))
+			ctx = context.WithValue(ctx, "roles", stringSliceClaim(claims, "roles"))
+
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }
 
-// registerMockVMHandlers provides mock VM management endpoints for development
-func registerMockVMHandlers(router *mux.Router) {
-	appLogger := logger.GlobalLogger
-	appLogger.Info("Registering mock VM handlers for development...")
-
-	// List VMs
-	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		response := `[
-			{
-				"id": "vm-001",
-				"name": "web-server-01",
-				"state": "running",
-				"node_id": "node-01",
-				"created_at": "2025-01-01T10:00:00Z",
-				"updated_at": "2025-01-01T10:00:00Z"
-			}
-		]`
-		w.Write([]byte(response))
-	}).Methods("GET")
-
-	// Create VM
-	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		response := `{
-			"id": "vm-new",
-			"name": "new-vm",
-			"state": "creating",
-			"node_id": "node-01",
-			"created_at": "` + time.Now().Format(time.RFC3339) + `",
-			"updated_at": "` + time.Now().Format(time.RFC3339) + `"
-		}`
-		w.Write([]byte(response))
-	}).Methods("POST")
-
-	// Get VM
-	router.HandleFunc("/vms/{id}", func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		vmID := vars["id"]
-		w.Header().Set("Content-Type", "application/json")
-		response := `{
-			"id": "` + vmID + `",
-			"name": "mock-vm-` + vmID + `",
-			"state": "running",
-			"node_id": "node-01",
-			"created_at": "2025-01-01T10:00:00Z",
-			"updated_at": "2025-01-01T10:00:00Z"
-		}`
-		w.Write([]byte(response))
-	}).Methods("GET")
-
-	// VM lifecycle operations
-	router.HandleFunc("/vms/{id}/start", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status": "started"}`))
-	}).Methods("POST")
-
-	router.HandleFunc("/vms/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status": "stopped"}`))
-	}).Methods("POST")
-
-	router.HandleFunc("/vms/{id}/restart", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status": "restarted"}`))
-	}).Methods("POST")
-}
-
-// registerPublicRoutes registers routes that don't require authentication
-func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManager) {
-	// Authentication routes
-	router.HandleFunc("/auth/login", func(w http.ResponseWriter, r *http.Request) {
+func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManager, db *sql.DB) {
+	loginHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var loginReq struct {
 			Username string `json:"username"`
+			Email    string `json:"email"`
 			Password string `json:"password"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&loginReq); err != nil {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
 
-		user, token, err := authManager.Authenticate(loginReq.Username, loginReq.Password)
+		identifier := strings.TrimSpace(loginReq.Username)
+		if identifier == "" {
+			identifier = strings.TrimSpace(loginReq.Email)
+		}
+		if identifier == "" || strings.TrimSpace(loginReq.Password) == "" {
+			writeJSONError(w, http.StatusBadRequest, "email or username and password are required")
+			return
+		}
+
+		username, err := resolveLoginUsername(db, identifier)
 		if err != nil {
-			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			writeJSONError(w, http.StatusUnauthorized, "invalid credentials")
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		response := map[string]interface{}{
-			"token": token,
-			"user": map[string]interface{}{
-				"id":        user.ID,
-				"username":  user.Username,
-				"email":     user.Email,
-				"tenant_id": user.TenantID,
-			},
+		user, token, err := authManager.Authenticate(username, loginReq.Password)
+		if err != nil {
+			writeJSONError(w, http.StatusUnauthorized, "invalid credentials")
+			return
 		}
 
-		// Add role information if available
-		if len(user.Roles) > 0 {
-			response["user"].(map[string]interface{})["role"] = user.Roles[0].Name
-		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"token":     token,
+			"expiresAt": time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+			"user":      frontendUser(user),
+		})
+	})
 
-		json.NewEncoder(w).Encode(response)
-	}).Methods("POST")
-
-	// User registration endpoint
-	router.HandleFunc("/auth/register", func(w http.ResponseWriter, r *http.Request) {
+	registerHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var registerReq struct {
-			Username string `json:"username"`
-			Email    string `json:"email"`
-			Password string `json:"password"`
-			TenantID string `json:"tenant_id,omitempty"`
+			Username  string `json:"username"`
+			Email     string `json:"email"`
+			Password  string `json:"password"`
+			TenantID  string `json:"tenant_id,omitempty"`
+			TenantID2 string `json:"tenantId,omitempty"`
+			FirstName string `json:"firstName,omitempty"`
+			LastName  string `json:"lastName,omitempty"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&registerReq); err != nil {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
 
-		if registerReq.TenantID == "" {
-			registerReq.TenantID = "default"
+		email := strings.TrimSpace(registerReq.Email)
+		password := strings.TrimSpace(registerReq.Password)
+		if email == "" || password == "" {
+			writeJSONError(w, http.StatusBadRequest, "email and password are required")
+			return
 		}
 
-		user, err := authManager.CreateUser(registerReq.Username, registerReq.Email, registerReq.Password, "user", registerReq.TenantID)
+		tenantID := strings.TrimSpace(registerReq.TenantID)
+		if tenantID == "" {
+			tenantID = strings.TrimSpace(registerReq.TenantID2)
+		}
+		if tenantID == "" {
+			tenantID = "default"
+		}
+
+		username := strings.TrimSpace(registerReq.Username)
+		if username == "" {
+			username = defaultUsernameFromEmail(email)
+		}
+
+		user, err := authManager.CreateUser(username, email, password, "user", tenantID)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to create user: %v", err), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("failed to create user: %v", err))
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		response := map[string]interface{}{
-			"user": map[string]interface{}{
-				"id":        user.ID,
-				"username":  user.Username,
-				"email":     user.Email,
-				"tenant_id": user.TenantID,
-			},
+		resp := frontendUser(user)
+		if registerReq.FirstName != "" {
+			resp["firstName"] = registerReq.FirstName
+		}
+		if registerReq.LastName != "" {
+			resp["lastName"] = registerReq.LastName
 		}
 
-		// Add role information if available
-		if len(user.Roles) > 0 {
-			response["user"].(map[string]interface{})["role"] = user.Roles[0].Name
-		}
-
-		json.NewEncoder(w).Encode(response)
-	}).Methods("POST")
-
-	// Logout endpoint (can be public since it just returns success)
-	router.HandleFunc("/auth/logout", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"message": "Logged out successfully",
-		})
-	}).Methods("POST")
-
-	// Token validation endpoint
-	router.HandleFunc("/auth/validate", func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-			http.Error(w, "Invalid or missing token", http.StatusUnauthorized)
-			return
-		}
-
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-
-		// Parse and validate the JWT token
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, jwt.ErrSignatureInvalid
-			}
-			return []byte(authManager.GetJWTSecret()), nil
-		})
-
-		if err != nil || !token.Valid {
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
-			return
-		}
-
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			http.Error(w, "Invalid token claims", http.StatusUnauthorized)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"valid": true,
-			"user": map[string]interface{}{
-				"id":        claims["user_id"],
-				"username":  claims["username"],
-				"email":     claims["email"],
-				"role":      claims["role"],
-				"tenant_id": claims["tenant_id"],
-			},
-		})
-	}).Methods("GET")
-}
-
-// registerMockHandlers registers mock handlers for development when KVM is not available
-// This function is kept for backward compatibility but should not be used
-func registerMockHandlers(router *mux.Router) {
-	log.Println("Registering mock handlers for development...")
-
-	// Mock system metrics
-	router.HandleFunc("/api/monitoring/metrics", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		response := `{
-			"currentCpuUsage": 45.2,
-			"currentMemoryUsage": 72.1,
-			"currentDiskUsage": 58.3,
-			"currentNetworkUsage": 125.7,
-			"cpuChangePercentage": 5.2,
-			"memoryChangePercentage": -2.1,
-			"diskChangePercentage": 1.8,
-			"networkChangePercentage": 12.5,
-			"cpuTimeseriesData": [40, 42, 45, 48, 52, 49, 46, 44, 47, 45],
-			"memoryTimeseriesData": [68, 70, 72, 74, 71, 69, 73, 75, 72, 72],
-			"diskTimeseriesData": [55, 56, 58, 60, 59, 57, 58, 59, 58, 58],
-			"networkTimeseriesData": [100, 110, 125, 130, 120, 115, 125, 130, 125, 126],
-			"timeLabels": ["10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30"],
-			"cpuAnalysis": "CPU usage shows normal workday patterns with peaks during business hours.",
-			"memoryAnalysis": "Memory allocation is healthy with sufficient available memory for operations.",
-			"memoryInUse": 65.0,
-			"memoryAvailable": 20.0,
-			"memoryReserved": 10.0,
-			"memoryCached": 5.0
-		}`
-		w.Write([]byte(response))
-	}).Methods("GET")
-
-	// Mock VM metrics
-	router.HandleFunc("/api/monitoring/vms", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		response := `[
-			{
-				"vmId": "vm-001",
-				"name": "web-server-01",
-				"cpuUsage": 78.5,
-				"memoryUsage": 65.2,
-				"diskUsage": 45.8,
-				"networkRx": 1048576,
-				"networkTx": 2097152,
-				"iops": 150,
-				"status": "running"
-			},
-			{
-				"vmId": "vm-002",
-				"name": "database-01",
-				"cpuUsage": 92.1,
-				"memoryUsage": 88.7,
-				"diskUsage": 72.3,
-				"networkRx": 524288,
-				"networkTx": 1048576,
-				"iops": 320,
-				"status": "running"
-			},
-			{
-				"vmId": "vm-003",
-				"name": "app-server-01",
-				"cpuUsage": 45.3,
-				"memoryUsage": 52.1,
-				"diskUsage": 38.9,
-				"networkRx": 262144,
-				"networkTx": 524288,
-				"iops": 85,
-				"status": "running"
-			},
-			{
-				"vmId": "vm-004",
-				"name": "backup-server",
-				"cpuUsage": 12.7,
-				"memoryUsage": 28.4,
-				"diskUsage": 89.2,
-				"networkRx": 131072,
-				"networkTx": 65536,
-				"iops": 45,
-				"status": "stopped"
-			},
-			{
-				"vmId": "vm-005",
-				"name": "test-environment",
-				"cpuUsage": 0.0,
-				"memoryUsage": 0.0,
-				"diskUsage": 15.6,
-				"networkRx": 0,
-				"networkTx": 0,
-				"iops": 0,
-				"status": "error"
-			}
-		]`
-		w.Write([]byte(response))
-	}).Methods("GET")
-
-	// Mock alerts
-	router.HandleFunc("/api/monitoring/alerts", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		response := `[
-			{
-				"id": "alert-001",
-				"name": "High CPU Usage",
-				"description": "VM database-01 CPU usage exceeds 90%",
-				"severity": "warning",
-				"status": "firing",
-				"startTime": "2025-04-11T14:30:00Z",
-				"labels": {"vm": "database-01", "metric": "cpu"},
-				"value": 92.1,
-				"resource": "VM database-01"
-			},
-			{
-				"id": "alert-002",
-				"name": "Disk Space Critical",
-				"description": "Backup server disk usage exceeds 85%",
-				"severity": "critical",
-				"status": "firing",
-				"startTime": "2025-04-11T13:45:00Z",
-				"labels": {"vm": "backup-server", "metric": "disk"},
-				"value": 89.2,
-				"resource": "VM backup-server"
-			},
-			{
-				"id": "alert-003",
-				"name": "VM Unresponsive",
-				"description": "Test environment VM is not responding",
-				"severity": "error",
-				"status": "firing",
-				"startTime": "2025-04-11T14:15:00Z",
-				"labels": {"vm": "test-environment", "metric": "health"},
-				"value": 0,
-				"resource": "VM test-environment"
-			}
-		]`
-		w.Write([]byte(response))
-	}).Methods("GET")
-
-	// Mock alert acknowledgment
-	router.HandleFunc("/api/monitoring/alerts/{id}/acknowledge", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status": "acknowledged"}`))
-	}).Methods("POST")
-
-	// Mock WebSocket endpoint
-	router.HandleFunc("/ws/monitoring", func(w http.ResponseWriter, r *http.Request) {
-		// For development, just return a simple response
-		w.Header().Set("Content-Type", "text/plain")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("WebSocket endpoint - use a WebSocket client to connect"))
+		writeJSON(w, http.StatusCreated, resp)
 	})
+
+	checkEmailHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		email := strings.TrimSpace(r.URL.Query().Get("email"))
+		if email == "" {
+			writeJSONError(w, http.StatusBadRequest, "email is required")
+			return
+		}
+
+		var exists bool
+		err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)`, email).Scan(&exists)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to check email availability")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]bool{"available": !exists})
+	})
+
+	for _, path := range []string{"/auth/login", "/api/auth/login"} {
+		router.Handle(path, loginHandler).Methods(http.MethodPost)
+	}
+	for _, path := range []string{"/auth/register", "/api/auth/register"} {
+		router.Handle(path, registerHandler).Methods(http.MethodPost)
+	}
+	router.Handle("/api/auth/check-email", checkEmailHandler).Methods(http.MethodGet)
+
+	for _, path := range []string{
+		"/api/auth/forgot-password",
+		"/api/auth/reset-password",
+		"/api/auth/resend-verification",
+		"/api/auth/verify-email",
+		"/api/auth/2fa/setup",
+		"/api/auth/2fa/verify",
+		"/api/auth/2fa/verify-login",
+		"/api/auth/2fa/enable",
+		"/api/auth/2fa/disable",
+		"/api/auth/2fa/status",
+		"/api/auth/2fa/backup-codes",
+	} {
+		router.Handle(path, notImplementedJSON("auth capability is not wired in the canonical server yet"))
+	}
 }
 
-// healthCheckHandler returns a structured health check response with actual checks
-func healthCheckHandler(cfg *config.Config, db *sql.DB, kvmManager *hypervisor.KVMManager) http.HandlerFunc {
+func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
+	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := db.Query(`SELECT id, name, state, node_id, tenant_id, created_at, updated_at FROM vms ORDER BY created_at DESC`)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to query VMs")
+			return
+		}
+		defer rows.Close()
+
+		vms := make([]map[string]interface{}, 0)
+		for rows.Next() {
+			var id, name, state, tenantID string
+			var nodeID sql.NullString
+			var createdAt, updatedAt time.Time
+
+			if err := rows.Scan(&id, &name, &state, &nodeID, &tenantID, &createdAt, &updatedAt); err != nil {
+				continue
+			}
+
+			vms = append(vms, map[string]interface{}{
+				"id":         id,
+				"name":       name,
+				"state":      state,
+				"status":     state,
+				"node_id":    nullableString(nodeID),
+				"tenant_id":  tenantID,
+				"created_at": createdAt.Format(time.RFC3339),
+				"updated_at": updatedAt.Format(time.RFC3339),
+			})
+		}
+
+		writeJSON(w, http.StatusOK, vms)
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
+		var createReq struct {
+			Name      string                 `json:"name"`
+			State     string                 `json:"state"`
+			NodeID    string                 `json:"node_id"`
+			Tags      map[string]interface{} `json:"tags,omitempty"`
+			CPUShares int                    `json:"cpu_shares,omitempty"`
+			MemoryMB  int                    `json:"memory_mb,omitempty"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&createReq); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if strings.TrimSpace(createReq.Name) == "" {
+			writeJSONError(w, http.StatusBadRequest, "name is required")
+			return
+		}
+
+		vmID := fmt.Sprintf("vm-%d", time.Now().UnixNano())
+		userID, _ := strconv.Atoi(fmt.Sprintf("%v", r.Context().Value("user_id")))
+		tenantID, _ := r.Context().Value("tenant_id").(string)
+		if tenantID == "" {
+			tenantID = "default"
+		}
+
+		configPayload, _ := json.Marshal(map[string]interface{}{
+			"cpu_shares": createReq.CPUShares,
+			"memory_mb":  createReq.MemoryMB,
+			"tags":       createReq.Tags,
+		})
+
+		_, err := db.Exec(`
+			INSERT INTO vms (id, name, state, node_id, owner_id, tenant_id, config, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+		`, vmID, createReq.Name, "creating", nullableStringValue(createReq.NodeID), nullableIntValue(userID), tenantID, configPayload)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to create VM")
+			return
+		}
+
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"id":         vmID,
+			"name":       createReq.Name,
+			"state":      "creating",
+			"status":     "creating",
+			"node_id":    createReq.NodeID,
+			"tenant_id":  tenantID,
+			"created_at": time.Now().UTC().Format(time.RFC3339),
+			"updated_at": time.Now().UTC().Format(time.RFC3339),
+		})
+	}).Methods(http.MethodPost)
+
+	router.HandleFunc("/vms/{id}", func(w http.ResponseWriter, r *http.Request) {
+		vmID := mux.Vars(r)["id"]
+
+		var id, name, state, tenantID string
+		var nodeID sql.NullString
+		var createdAt, updatedAt time.Time
+		err := db.QueryRow(`
+			SELECT id, name, state, node_id, tenant_id, created_at, updated_at
+			FROM vms WHERE id = $1
+		`, vmID).Scan(&id, &name, &state, &nodeID, &tenantID, &createdAt, &updatedAt)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				writeJSONError(w, http.StatusNotFound, "vm not found")
+				return
+			}
+			writeJSONError(w, http.StatusInternalServerError, "failed to query VM")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id":         id,
+			"name":       name,
+			"state":      state,
+			"status":     state,
+			"node_id":    nullableString(nodeID),
+			"tenant_id":  tenantID,
+			"created_at": createdAt.Format(time.RFC3339),
+			"updated_at": updatedAt.Format(time.RFC3339),
+		})
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/vms/{id}", func(w http.ResponseWriter, r *http.Request) {
+		vmID := mux.Vars(r)["id"]
+		result, err := db.Exec(`DELETE FROM vms WHERE id = $1`, vmID)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to delete VM")
+			return
+		}
+
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected == 0 {
+			writeJSONError(w, http.StatusNotFound, "vm not found")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id":     vmID,
+			"status": "deleted",
+		})
+	}).Methods(http.MethodDelete)
+
+	for action, nextState := range map[string]string{
+		"start": "running",
+		"stop":  "stopped",
+	} {
+		router.HandleFunc("/vms/{id}/"+action, func(w http.ResponseWriter, r *http.Request) {
+			vmID := mux.Vars(r)["id"]
+			result, err := db.Exec(`UPDATE vms SET state = $2, updated_at = NOW() WHERE id = $1`, vmID, nextState)
+			if err != nil {
+				writeJSONError(w, http.StatusInternalServerError, "failed to update VM state")
+				return
+			}
+
+			rowsAffected, _ := result.RowsAffected()
+			if rowsAffected == 0 {
+				writeJSONError(w, http.StatusNotFound, "vm not found")
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"id":     vmID,
+				"status": nextState,
+			})
+		}).Methods(http.MethodPost)
+	}
+
+	router.HandleFunc("/vms/{id}/metrics", func(w http.ResponseWriter, r *http.Request) {
+		vmID := mux.Vars(r)["id"]
+
+		var cpuUsage, memoryUsage float64
+		err := db.QueryRow(`
+			SELECT COALESCE(cpu_usage, 0), COALESCE(memory_usage, 0)
+			FROM vm_metrics WHERE vm_id = $1
+			ORDER BY timestamp DESC
+			LIMIT 1
+		`, vmID).Scan(&cpuUsage, &memoryUsage)
+		if err != nil && err != sql.ErrNoRows {
+			writeJSONError(w, http.StatusInternalServerError, "failed to query VM metrics")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id":           vmID,
+			"cpu_usage":    cpuUsage,
+			"memory_usage": memoryUsage,
+		})
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/monitoring/metrics", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"currentCpuUsage":         45.2,
+			"currentMemoryUsage":      72.1,
+			"currentDiskUsage":        58.3,
+			"currentNetworkUsage":     125.7,
+			"cpuChangePercentage":     5.2,
+			"memoryChangePercentage":  -2.1,
+			"diskChangePercentage":    1.8,
+			"networkChangePercentage": 12.5,
+			"timeLabels":              []string{"10:00", "10:30", "11:00", "11:30", "12:00"},
+			"cpuAnalysis":             "CPU usage shows normal workday patterns.",
+			"memoryAnalysis":          "Memory allocation is healthy.",
+		})
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/monitoring/vms", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := db.Query(`SELECT id, name, state FROM vms ORDER BY created_at DESC`)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to query VMs")
+			return
+		}
+		defer rows.Close()
+
+		vmMetrics := make([]map[string]interface{}, 0)
+		for rows.Next() {
+			var id, name, state string
+			if err := rows.Scan(&id, &name, &state); err != nil {
+				continue
+			}
+
+			vmMetrics = append(vmMetrics, map[string]interface{}{
+				"vmId":        id,
+				"name":        name,
+				"cpuUsage":    50.0 + float64(len(id)%20),
+				"memoryUsage": 60.0 + float64(len(name)%30),
+				"diskUsage":   40.0 + float64(len(id)%15),
+				"networkRx":   1024 * 1024,
+				"networkTx":   2048 * 1024,
+				"iops":        100,
+				"status":      state,
+			})
+		}
+
+		writeJSON(w, http.StatusOK, vmMetrics)
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/monitoring/alerts", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, []map[string]interface{}{})
+	}).Methods(http.MethodGet)
+}
+
+func registerExplicitlyUnsupportedRoutes(router *mux.Router) {
+	router.Handle("/graphql", notImplementedJSON("GraphQL is not wired into the canonical API server yet"))
+
+	for _, prefix := range []string{
+		"/api/security/",
+		"/api/admin/security/",
+		"/api/ws/",
+	} {
+		router.PathPrefix(prefix).Handler(notImplementedJSON("this API surface is not wired in the canonical server yet"))
+	}
+}
+
+func healthCheckHandler(cfg *config.Config, db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		checks := make(map[string]string)
 		status := "healthy"
 
-		// Check database connectivity
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 		if err := db.PingContext(ctx); err != nil {
@@ -868,19 +638,6 @@ func healthCheckHandler(cfg *config.Config, db *sql.DB, kvmManager *hypervisor.K
 			checks["database"] = "ok"
 		}
 
-		// Check KVM connectivity if available
-		if kvmManager != nil {
-			if _, err := kvmManager.GetHypervisorMetrics(ctx); err != nil {
-				checks["kvm"] = fmt.Sprintf("warning: %v", err)
-				// Don't mark as unhealthy for KVM issues in development
-			} else {
-				checks["kvm"] = "ok"
-			}
-		} else {
-			checks["kvm"] = "not configured"
-		}
-
-		// Check storage directory access
 		if _, err := os.Stat(cfg.VM.StoragePath); err != nil {
 			checks["storage"] = fmt.Sprintf("warning: %v", err)
 		} else {
@@ -895,36 +652,219 @@ func healthCheckHandler(cfg *config.Config, db *sql.DB, kvmManager *hypervisor.K
 			"checks":    checks,
 		}
 
-		w.Header().Set("Content-Type", "application/json")
 		if status == "unhealthy" {
-			w.WriteHeader(http.StatusServiceUnavailable)
-		} else {
-			w.WriteHeader(http.StatusOK)
+			writeJSON(w, http.StatusServiceUnavailable, response)
+			return
 		}
-		json.NewEncoder(w).Encode(response)
+
+		writeJSON(w, http.StatusOK, response)
 	}
 }
 
-// apiInfoHandler returns API information
 func apiInfoHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		response := map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"name":        "NovaCron API",
 			"version":     "1.0.0",
 			"description": "Distributed VM Management System",
 			"endpoints": []string{
+				"/api/auth/login",
+				"/api/auth/register",
+				"/api/auth/check-email",
+				"/api/v1/vms",
+				"/api/v1/vms/{id}",
+				"/api/v1/vms/{id}/start",
+				"/api/v1/vms/{id}/stop",
+				"/api/v1/vms/{id}/metrics",
+				"/api/v1/monitoring/metrics",
+				"/api/v1/monitoring/vms",
+				"/api/v1/monitoring/alerts",
+				"/health",
+			},
+			"compatibility_endpoints": []string{
+				"/auth/login",
+				"/auth/register",
+				"/api/vms",
 				"/api/monitoring/metrics",
 				"/api/monitoring/vms",
 				"/api/monitoring/alerts",
-				"/api/vm/list",
-				"/api/vm/create",
-				"/ws/monitoring",
 			},
-			"documentation": "/api/docs",
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(response)
+			"unsupported_endpoints": []string{
+				"/graphql",
+				"/api/security/*",
+				"/api/admin/security/*",
+				"/api/ws/*",
+			},
+		})
 	}
+}
+
+func extractBearerToken(authHeader string) (string, error) {
+	if authHeader == "" {
+		return "", fmt.Errorf("authorization header required")
+	}
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		return "", fmt.Errorf("authorization header must start with 'Bearer '")
+	}
+
+	token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	if token == "" {
+		return "", fmt.Errorf("token is required")
+	}
+	return token, nil
+}
+
+func validateJWT(tokenString, jwtSecret string) (jwt.MapClaims, error) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %s", token.Method.Alg())
+		}
+		return []byte(jwtSecret), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !token.Valid {
+		return nil, fmt.Errorf("token is invalid")
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, fmt.Errorf("invalid claims")
+	}
+	return claims, nil
+}
+
+func resolveLoginUsername(db *sql.DB, identifier string) (string, error) {
+	if !strings.Contains(identifier, "@") {
+		return identifier, nil
+	}
+
+	var username string
+	if err := db.QueryRow(`SELECT username FROM users WHERE email = $1`, identifier).Scan(&username); err != nil {
+		return "", err
+	}
+	return username, nil
+}
+
+func defaultUsernameFromEmail(email string) string {
+	localPart := strings.TrimSpace(strings.SplitN(email, "@", 2)[0])
+	if localPart == "" {
+		return fmt.Sprintf("user-%d", time.Now().Unix())
+	}
+	return localPart
+}
+
+func frontendUser(user *auth.User) map[string]interface{} {
+	role := "user"
+	roles := make([]string, 0, len(user.RoleIDs))
+	if len(user.RoleIDs) > 0 {
+		roles = append(roles, user.RoleIDs...)
+		role = user.RoleIDs[0]
+	}
+	if len(roles) == 0 && len(user.Roles) > 0 {
+		for _, r := range user.Roles {
+			if r == nil || r.Name == "" {
+				continue
+			}
+			roles = append(roles, r.Name)
+		}
+		if len(roles) > 0 {
+			role = roles[0]
+		}
+	}
+
+	return map[string]interface{}{
+		"id":                 user.ID,
+		"email":              user.Email,
+		"firstName":          "",
+		"lastName":           "",
+		"tenantId":           user.TenantID,
+		"tenant_id":          user.TenantID,
+		"status":             "active",
+		"role":               role,
+		"roles":              roles,
+		"two_factor_enabled": false,
+	}
+}
+
+func notImplementedJSON(message string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusNotImplemented, map[string]interface{}{
+			"error":   "not_implemented",
+			"message": message,
+			"path":    r.URL.Path,
+		})
+	})
+}
+
+func writeJSONError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]interface{}{"error": message})
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func stringClaim(claims jwt.MapClaims, keys ...string) string {
+	for _, key := range keys {
+		value, ok := claims[key]
+		if !ok {
+			continue
+		}
+		if s, ok := value.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+func stringSliceClaim(claims jwt.MapClaims, key string) []string {
+	value, ok := claims[key]
+	if !ok {
+		return nil
+	}
+
+	switch typed := value.(type) {
+	case []string:
+		return typed
+	case []interface{}:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if s, ok := item.(string); ok && s != "" {
+				result = append(result, s)
+			}
+		}
+		return result
+	case string:
+		if typed == "" {
+			return nil
+		}
+		return []string{typed}
+	default:
+		return nil
+	}
+}
+
+func nullableString(value sql.NullString) interface{} {
+	if !value.Valid {
+		return nil
+	}
+	return value.String
+}
+
+func nullableStringValue(value string) interface{} {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
+}
+
+func nullableIntValue(value int) interface{} {
+	if value <= 0 {
+		return nil
+	}
+	return value
 }

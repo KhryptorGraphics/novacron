@@ -1,3 +1,5 @@
+//go:build novacron_simple_api
+
 package main
 
 import (

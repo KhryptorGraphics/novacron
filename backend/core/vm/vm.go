@@ -76,54 +76,54 @@ const (
 
 // VMConfig holds configuration for a VM
 type VMConfig struct {
-	ID                      string                           `yaml:"id" json:"id"`
-	Name                    string                           `yaml:"name" json:"name"`
-	Type                    VMType                           `yaml:"type" json:"type"`
-	Command                 string                           `yaml:"command" json:"command"`
-	Args                    []string                         `yaml:"args" json:"args"`
-	CPUShares               int                              `yaml:"cpu_shares" json:"cpu_shares"`
-	MemoryMB                int                              `yaml:"memory_mb" json:"memory_mb"`
-	DiskSizeGB              int                              `yaml:"disk_size_gb" json:"disk_size_gb"`
-	RootFS                  string                           `yaml:"rootfs" json:"rootfs"`
-	Image                   string                           `yaml:"image" json:"image"`
-	Mounts                  []Mount                          `yaml:"mounts" json:"mounts"`
-	Env                     map[string]string                `yaml:"env" json:"env"`
-	NetworkID               string                           `yaml:"network_id" json:"network_id"`
-	WorkDir                 string                           `yaml:"work_dir" json:"work_dir"`
-	Tags                    map[string]string                `yaml:"tags" json:"tags"`
-	PredictivePrefetching   *PredictivePrefetchingConfig     `yaml:"predictive_prefetching,omitempty" json:"predictive_prefetching,omitempty"`
+	ID                    string                       `yaml:"id" json:"id"`
+	Name                  string                       `yaml:"name" json:"name"`
+	Type                  VMType                       `yaml:"type" json:"type"`
+	Command               string                       `yaml:"command" json:"command"`
+	Args                  []string                     `yaml:"args" json:"args"`
+	CPUShares             int                          `yaml:"cpu_shares" json:"cpu_shares"`
+	MemoryMB              int                          `yaml:"memory_mb" json:"memory_mb"`
+	DiskSizeGB            int                          `yaml:"disk_size_gb" json:"disk_size_gb"`
+	RootFS                string                       `yaml:"rootfs" json:"rootfs"`
+	Image                 string                       `yaml:"image" json:"image"`
+	Mounts                []Mount                      `yaml:"mounts" json:"mounts"`
+	Env                   map[string]string            `yaml:"env" json:"env"`
+	NetworkID             string                       `yaml:"network_id" json:"network_id"`
+	WorkDir               string                       `yaml:"work_dir" json:"work_dir"`
+	Tags                  map[string]string            `yaml:"tags" json:"tags"`
+	PredictivePrefetching *PredictivePrefetchingConfig `yaml:"predictive_prefetching,omitempty" json:"predictive_prefetching,omitempty"`
 }
 
 // PredictivePrefetchingConfig configures AI-driven predictive prefetching for VM migrations
 type PredictivePrefetchingConfig struct {
-	Enabled                bool              `yaml:"enabled" json:"enabled"`
-	PredictionAccuracy     float64           `yaml:"prediction_accuracy" json:"prediction_accuracy"`         // Target accuracy (default: 0.85)
-	MaxCacheSize           int64             `yaml:"max_cache_size" json:"max_cache_size"`                   // Max cache size in bytes
-	PredictionLatencyMs    int64             `yaml:"prediction_latency_ms" json:"prediction_latency_ms"`     // Max prediction latency in ms
-	ModelType              string            `yaml:"model_type" json:"model_type"`                           // "neural_network", "random_forest", etc.
-	TrainingDataSize       int64             `yaml:"training_data_size" json:"training_data_size"`           // Max training samples to retain
-	ContinuousLearning     bool              `yaml:"continuous_learning" json:"continuous_learning"`         // Enable continuous model training
-	PrefetchAheadTime      string            `yaml:"prefetch_ahead_time" json:"prefetch_ahead_time"`         // How far ahead to prefetch (e.g., "5m")
-	AIModelConfig          map[string]string `yaml:"ai_model_config,omitempty" json:"ai_model_config,omitempty"` // Model-specific configuration
+	Enabled             bool              `yaml:"enabled" json:"enabled"`
+	PredictionAccuracy  float64           `yaml:"prediction_accuracy" json:"prediction_accuracy"`             // Target accuracy (default: 0.85)
+	MaxCacheSize        int64             `yaml:"max_cache_size" json:"max_cache_size"`                       // Max cache size in bytes
+	PredictionLatencyMs int64             `yaml:"prediction_latency_ms" json:"prediction_latency_ms"`         // Max prediction latency in ms
+	ModelType           string            `yaml:"model_type" json:"model_type"`                               // "neural_network", "random_forest", etc.
+	TrainingDataSize    int64             `yaml:"training_data_size" json:"training_data_size"`               // Max training samples to retain
+	ContinuousLearning  bool              `yaml:"continuous_learning" json:"continuous_learning"`             // Enable continuous model training
+	PrefetchAheadTime   string            `yaml:"prefetch_ahead_time" json:"prefetch_ahead_time"`             // How far ahead to prefetch (e.g., "5m")
+	AIModelConfig       map[string]string `yaml:"ai_model_config,omitempty" json:"ai_model_config,omitempty"` // Model-specific configuration
 }
 
 // DefaultPredictivePrefetchingConfig returns default configuration for predictive prefetching
 func DefaultPredictivePrefetchingConfig() *PredictivePrefetchingConfig {
 	return &PredictivePrefetchingConfig{
-		Enabled:                true,
-		PredictionAccuracy:     TARGET_PREDICTION_ACCURACY,    // 0.85
-		MaxCacheSize:           1024 * 1024 * 1024,            // 1GB
-		PredictionLatencyMs:    TARGET_PREDICTION_LATENCY_MS,  // 10ms
-		ModelType:              "neural_network",
-		TrainingDataSize:       100000,                        // 100k samples
-		ContinuousLearning:     true,
-		PrefetchAheadTime:      "5m",
+		Enabled:             true,
+		PredictionAccuracy:  TARGET_PREDICTION_ACCURACY,   // 0.85
+		MaxCacheSize:        1024 * 1024 * 1024,           // 1GB
+		PredictionLatencyMs: TARGET_PREDICTION_LATENCY_MS, // 10ms
+		ModelType:           "neural_network",
+		TrainingDataSize:    100000, // 100k samples
+		ContinuousLearning:  true,
+		PrefetchAheadTime:   "5m",
 		AIModelConfig: map[string]string{
-			"learning_rate":    "0.001",
-			"batch_size":       "32",
-			"epochs":          "100",
-			"hidden_layers":   "128,64",
-			"activation":      "relu",
+			"learning_rate": "0.001",
+			"batch_size":    "32",
+			"epochs":        "100",
+			"hidden_layers": "128,64",
+			"activation":    "relu",
 		},
 	}
 }
@@ -162,27 +162,27 @@ type VMInfo struct {
 
 // DistributedStateInfo holds information about VM's distributed state
 type DistributedStateInfo struct {
-	StateVersion        uint64            `json:"state_version"`        // Vector clock for state consistency
-	LastStateUpdate     time.Time         `json:"last_state_update"`    // Timestamp of last state change
-	StateDirty          bool              `json:"state_dirty"`          // Whether state needs synchronization
-	ShardID             string            `json:"shard_id"`             // Which shard contains this VM's state
-	ReplicationNodes    []string          `json:"replication_nodes"`    // Nodes that replicate this VM's state
-	GlobalCoordinates   *GlobalPosition   `json:"global_coordinates"`   // Position in global cluster space
-	MigrationState      *MigrationInfo    `json:"migration_state"`      // Current migration status
-	PredictiveCache     *PredictiveCache  `json:"predictive_cache"`     // AI-driven predictive caching info
-	CrossClusterRefs    []string          `json:"cross_cluster_refs"`   // References to other clusters
-	StateConsistency    ConsistencyLevel  `json:"state_consistency"`    // Required consistency level
-	LastConsistencySync time.Time         `json:"last_consistency_sync"` // Last consistency check
+	StateVersion        uint64           `json:"state_version"`         // Vector clock for state consistency
+	LastStateUpdate     time.Time        `json:"last_state_update"`     // Timestamp of last state change
+	StateDirty          bool             `json:"state_dirty"`           // Whether state needs synchronization
+	ShardID             string           `json:"shard_id"`              // Which shard contains this VM's state
+	ReplicationNodes    []string         `json:"replication_nodes"`     // Nodes that replicate this VM's state
+	GlobalCoordinates   *GlobalPosition  `json:"global_coordinates"`    // Position in global cluster space
+	MigrationState      *MigrationInfo   `json:"migration_state"`       // Current migration status
+	PredictiveCache     *PredictiveCache `json:"predictive_cache"`      // AI-driven predictive caching info
+	CrossClusterRefs    []string         `json:"cross_cluster_refs"`    // References to other clusters
+	StateConsistency    ConsistencyLevel `json:"state_consistency"`     // Required consistency level
+	LastConsistencySync time.Time        `json:"last_consistency_sync"` // Last consistency check
 }
 
 // GlobalPosition represents VM's position in the global distributed space
 type GlobalPosition struct {
-	ClusterID       string    `json:"cluster_id"`
-	NodeID          string    `json:"node_id"`
-	RegionID        string    `json:"region_id"`
-	AvailabilityZone string   `json:"availability_zone"`
-	GeographicCoord *GeoCoord `json:"geographic_coord,omitempty"`
-	NetworkLatency  float64   `json:"network_latency"` // ms to cluster root
+	ClusterID        string    `json:"cluster_id"`
+	NodeID           string    `json:"node_id"`
+	RegionID         string    `json:"region_id"`
+	AvailabilityZone string    `json:"availability_zone"`
+	GeographicCoord  *GeoCoord `json:"geographic_coord,omitempty"`
+	NetworkLatency   float64   `json:"network_latency"` // ms to cluster root
 }
 
 // GeoCoord represents geographic coordinates
@@ -193,45 +193,45 @@ type GeoCoord struct {
 
 // MigrationInfo tracks ongoing migration state
 type MigrationInfo struct {
-	InProgress      bool              `json:"in_progress"`
-	SourceNode      string            `json:"source_node"`
-	TargetNode      string            `json:"target_node"`
-	MigrationType   string            `json:"migration_type"` // "live", "offline", "hybrid"
-	StartedAt       time.Time         `json:"started_at"`
-	EstimatedCompletion time.Time     `json:"estimated_completion"`
-	Progress        float64           `json:"progress"` // 0.0 to 1.0
-	Strategy        MigrationStrategy `json:"strategy"`
-	BandwidthUsage  int64             `json:"bandwidth_usage"` // bytes/sec
+	InProgress          bool              `json:"in_progress"`
+	SourceNode          string            `json:"source_node"`
+	TargetNode          string            `json:"target_node"`
+	MigrationType       string            `json:"migration_type"` // "live", "offline", "hybrid"
+	StartedAt           time.Time         `json:"started_at"`
+	EstimatedCompletion time.Time         `json:"estimated_completion"`
+	Progress            float64           `json:"progress"` // 0.0 to 1.0
+	Strategy            MigrationStrategy `json:"strategy"`
+	BandwidthUsage      int64             `json:"bandwidth_usage"` // bytes/sec
 }
 
 // MigrationStrategy defines migration approach
 type MigrationStrategy struct {
-	MemoryStrategy    string  `json:"memory_strategy"`    // "pre-copy", "post-copy", "hybrid"
-	NetworkOptimized  bool    `json:"network_optimized"`  // Use bandwidth optimization
-	PredictiveEnabled bool    `json:"predictive_enabled"` // Use AI-driven prediction
-	CompressionLevel  int     `json:"compression_level"`  // 0-9
-	MaxDowntime       int64   `json:"max_downtime"`       // milliseconds
+	MemoryStrategy    string `json:"memory_strategy"`    // "pre-copy", "post-copy", "hybrid"
+	NetworkOptimized  bool   `json:"network_optimized"`  // Use bandwidth optimization
+	PredictiveEnabled bool   `json:"predictive_enabled"` // Use AI-driven prediction
+	CompressionLevel  int    `json:"compression_level"`  // 0-9
+	MaxDowntime       int64  `json:"max_downtime"`       // milliseconds
 }
 
 // PredictiveCache holds AI-driven predictive caching information
 type PredictiveCache struct {
-	Enabled           bool                    `json:"enabled"`
-	CacheHitRate      float64                 `json:"cache_hit_rate"`
-	PredictionAccuracy float64               `json:"prediction_accuracy"`
-	PrefetchedPages   map[string]time.Time    `json:"prefetched_pages"` // page_id -> prefetch_time
-	ModelVersion      string                  `json:"model_version"`
-	LastModelUpdate   time.Time               `json:"last_model_update"`
-	PredictionsActive []PredictionInfo        `json:"predictions_active"`
-	CacheSize         int64                   `json:"cache_size"` // bytes
+	Enabled            bool                 `json:"enabled"`
+	CacheHitRate       float64              `json:"cache_hit_rate"`
+	PredictionAccuracy float64              `json:"prediction_accuracy"`
+	PrefetchedPages    map[string]time.Time `json:"prefetched_pages"` // page_id -> prefetch_time
+	ModelVersion       string               `json:"model_version"`
+	LastModelUpdate    time.Time            `json:"last_model_update"`
+	PredictionsActive  []PredictionInfo     `json:"predictions_active"`
+	CacheSize          int64                `json:"cache_size"` // bytes
 }
 
 // PredictionInfo represents an active prediction
 type PredictionInfo struct {
-	PageID       string    `json:"page_id"`
-	Confidence   float64   `json:"confidence"`   // 0.0 to 1.0
-	PredictedAt  time.Time `json:"predicted_at"`
-	AccessTime   time.Time `json:"access_time"`  // predicted access time
-	Priority     int       `json:"priority"`     // 1-10
+	PageID      string    `json:"page_id"`
+	Confidence  float64   `json:"confidence"` // 0.0 to 1.0
+	PredictedAt time.Time `json:"predicted_at"`
+	AccessTime  time.Time `json:"access_time"` // predicted access time
+	Priority    int       `json:"priority"`    // 1-10
 }
 
 // ConsistencyLevel defines required state consistency
@@ -246,19 +246,19 @@ const (
 
 // MemoryDistributionInfo tracks distributed memory state
 type MemoryDistributionInfo struct {
-	Enabled               bool                         `json:"enabled"`
-	TotalPages            int64                        `json:"total_pages"`
-	DistributedPages      int64                        `json:"distributed_pages"`
-	LocalPages            int64                        `json:"local_pages"`
-	RemotePages           int64                        `json:"remote_pages"`
-	PageDistribution      map[string]int64             `json:"page_distribution"` // node_id -> page_count
-	DirtyPages            []string                     `json:"dirty_pages"`       // page IDs that need sync
-	LastSyncTime          time.Time                    `json:"last_sync_time"`
-	SyncInProgress        bool                         `json:"sync_in_progress"`
-	CompressionEnabled    bool                         `json:"compression_enabled"`
-	CompressionRatio      float64                      `json:"compression_ratio"`
-	CoherenceProtocol     string                       `json:"coherence_protocol"` // "MSI", "MESI", "MOESI"
-	AccessPatterns        map[string]AccessPattern     `json:"access_patterns"`    // page_id -> pattern
+	Enabled            bool                     `json:"enabled"`
+	TotalPages         int64                    `json:"total_pages"`
+	DistributedPages   int64                    `json:"distributed_pages"`
+	LocalPages         int64                    `json:"local_pages"`
+	RemotePages        int64                    `json:"remote_pages"`
+	PageDistribution   map[string]int64         `json:"page_distribution"` // node_id -> page_count
+	DirtyPages         []string                 `json:"dirty_pages"`       // page IDs that need sync
+	LastSyncTime       time.Time                `json:"last_sync_time"`
+	SyncInProgress     bool                     `json:"sync_in_progress"`
+	CompressionEnabled bool                     `json:"compression_enabled"`
+	CompressionRatio   float64                  `json:"compression_ratio"`
+	CoherenceProtocol  string                   `json:"coherence_protocol"` // "MSI", "MESI", "MOESI"
+	AccessPatterns     map[string]AccessPattern `json:"access_patterns"`    // page_id -> pattern
 }
 
 // AccessPattern tracks memory access patterns for optimization
@@ -292,25 +292,25 @@ type VM struct {
 	processInfo VMProcessInfo
 
 	// Distributed State Management Fields
-	distributedState    *DistributedStateInfo     `json:"distributed_state"`
-	memoryDistribution  *MemoryDistributionInfo   `json:"memory_distribution"`
-	stateCoordinator    string                    `json:"state_coordinator"`    // Node ID of state coordinator
-	federationContext   *FederationContext        `json:"federation_context"`   // Cross-cluster federation info
-	stateHistory        []StateSnapshot           `json:"state_history"`        // Recent state snapshots
-	conflictResolution  *ConflictResolutionInfo   `json:"conflict_resolution"`  // Conflict handling state
-	performanceMetrics  *DistributedMetrics       `json:"performance_metrics"`  // Performance tracking
-	stateLock           sync.RWMutex              // Protects distributed state fields
+	distributedState   *DistributedStateInfo   `json:"distributed_state"`
+	memoryDistribution *MemoryDistributionInfo `json:"memory_distribution"`
+	stateCoordinator   string                  `json:"state_coordinator"`   // Node ID of state coordinator
+	federationContext  *FederationContext      `json:"federation_context"`  // Cross-cluster federation info
+	stateHistory       []StateSnapshot         `json:"state_history"`       // Recent state snapshots
+	conflictResolution *ConflictResolutionInfo `json:"conflict_resolution"` // Conflict handling state
+	performanceMetrics *DistributedMetrics     `json:"performance_metrics"` // Performance tracking
+	stateLock          sync.RWMutex            // Protects distributed state fields
 }
 
 // FederationContext holds cross-cluster federation information
 type FederationContext struct {
-	HomeClusterID       string            `json:"home_cluster_id"`
-	CurrentClusterID    string            `json:"current_cluster_id"`
-	AuthorizedClusters  []string          `json:"authorized_clusters"`
-	FederationTokens    map[string]string `json:"federation_tokens"`
-	CrossClusterRefs    []ClusterRef      `json:"cross_cluster_refs"`
-	SecurityContext     SecurityContext   `json:"security_context"`
-	NetworkPolicy       NetworkPolicy     `json:"network_policy"`
+	HomeClusterID      string            `json:"home_cluster_id"`
+	CurrentClusterID   string            `json:"current_cluster_id"`
+	AuthorizedClusters []string          `json:"authorized_clusters"`
+	FederationTokens   map[string]string `json:"federation_tokens"`
+	CrossClusterRefs   []ClusterRef      `json:"cross_cluster_refs"`
+	SecurityContext    SecurityContext   `json:"security_context"`
+	NetworkPolicy      NetworkPolicy     `json:"network_policy"`
 }
 
 // ClusterRef represents a reference to another cluster
@@ -333,63 +333,63 @@ type SecurityContext struct {
 
 // NetworkPolicy defines networking policies for distributed VM operations
 type NetworkPolicy struct {
-	AllowedNetworks     []string          `json:"allowed_networks"`
-	BandwidthLimits     map[string]int64  `json:"bandwidth_limits"` // operation -> bytes/sec
-	CompressionEnabled  bool              `json:"compression_enabled"`
-	PriorityClass       string            `json:"priority_class"`
-	QoSSettings         QoSSettings       `json:"qos_settings"`
+	AllowedNetworks    []string         `json:"allowed_networks"`
+	BandwidthLimits    map[string]int64 `json:"bandwidth_limits"` // operation -> bytes/sec
+	CompressionEnabled bool             `json:"compression_enabled"`
+	PriorityClass      string           `json:"priority_class"`
+	QoSSettings        QoSSettings      `json:"qos_settings"`
 }
 
 // QoSSettings defines Quality of Service settings
 type QoSSettings struct {
-	MaxLatency      int64   `json:"max_latency"`      // milliseconds
-	MinBandwidth    int64   `json:"min_bandwidth"`    // bytes/sec
-	MaxJitter       int64   `json:"max_jitter"`       // milliseconds
+	MaxLatency      int64   `json:"max_latency"`       // milliseconds
+	MinBandwidth    int64   `json:"min_bandwidth"`     // bytes/sec
+	MaxJitter       int64   `json:"max_jitter"`        // milliseconds
 	PacketLossLimit float64 `json:"packet_loss_limit"` // percentage
 }
 
 // StateSnapshot represents a point-in-time state snapshot
 type StateSnapshot struct {
-	Timestamp       time.Time              `json:"timestamp"`
-	StateVersion    uint64                 `json:"state_version"`
-	VMState         State                  `json:"vm_state"`
-	MemoryChecksum  string                 `json:"memory_checksum"`
-	ConfigChecksum  string                 `json:"config_checksum"`
-	Metadata        map[string]interface{} `json:"metadata"`
-	Size            int64                  `json:"size"`
-	Compressed      bool                   `json:"compressed"`
+	Timestamp      time.Time              `json:"timestamp"`
+	StateVersion   uint64                 `json:"state_version"`
+	VMState        State                  `json:"vm_state"`
+	MemoryChecksum string                 `json:"memory_checksum"`
+	ConfigChecksum string                 `json:"config_checksum"`
+	Metadata       map[string]interface{} `json:"metadata"`
+	Size           int64                  `json:"size"`
+	Compressed     bool                   `json:"compressed"`
 }
 
 // ConflictResolutionInfo tracks conflict resolution state
 type ConflictResolutionInfo struct {
-	ActiveConflicts   []StateConflict      `json:"active_conflicts"`
-	ResolutionPolicy  ConflictPolicy       `json:"resolution_policy"`
-	LastResolution    time.Time            `json:"last_resolution"`
-	ConflictHistory   []ResolvedConflict   `json:"conflict_history"`
-	AutoResolveRules  []AutoResolveRule    `json:"auto_resolve_rules"`
+	ActiveConflicts  []StateConflict    `json:"active_conflicts"`
+	ResolutionPolicy ConflictPolicy     `json:"resolution_policy"`
+	LastResolution   time.Time          `json:"last_resolution"`
+	ConflictHistory  []ResolvedConflict `json:"conflict_history"`
+	AutoResolveRules []AutoResolveRule  `json:"auto_resolve_rules"`
 }
 
 // StateConflict represents a state conflict between nodes
 type StateConflict struct {
-	ConflictID      string                 `json:"conflict_id"`
-	ConflictType    string                 `json:"conflict_type"`
-	SourceNode      string                 `json:"source_node"`
-	TargetNode      string                 `json:"target_node"`
-	ConflictField   string                 `json:"conflict_field"`
-	SourceValue     interface{}            `json:"source_value"`
-	TargetValue     interface{}            `json:"target_value"`
-	DetectedAt      time.Time              `json:"detected_at"`
-	Severity        ConflictSeverity       `json:"severity"`
-	Metadata        map[string]interface{} `json:"metadata"`
+	ConflictID    string                 `json:"conflict_id"`
+	ConflictType  string                 `json:"conflict_type"`
+	SourceNode    string                 `json:"source_node"`
+	TargetNode    string                 `json:"target_node"`
+	ConflictField string                 `json:"conflict_field"`
+	SourceValue   interface{}            `json:"source_value"`
+	TargetValue   interface{}            `json:"target_value"`
+	DetectedAt    time.Time              `json:"detected_at"`
+	Severity      ConflictSeverity       `json:"severity"`
+	Metadata      map[string]interface{} `json:"metadata"`
 }
 
 // ConflictPolicy defines how conflicts should be resolved
 type ConflictPolicy struct {
-	DefaultStrategy   ConflictStrategy `json:"default_strategy"`
-	FieldPolicies     map[string]ConflictStrategy `json:"field_policies"`
-	TimeoutMs         int64            `json:"timeout_ms"`
-	RequireConsensus  bool             `json:"require_consensus"`
-	VotingEnabled     bool             `json:"voting_enabled"`
+	DefaultStrategy  ConflictStrategy            `json:"default_strategy"`
+	FieldPolicies    map[string]ConflictStrategy `json:"field_policies"`
+	TimeoutMs        int64                       `json:"timeout_ms"`
+	RequireConsensus bool                        `json:"require_consensus"`
+	VotingEnabled    bool                        `json:"voting_enabled"`
 }
 
 // ConflictStrategy defines conflict resolution strategies
@@ -415,34 +415,34 @@ const (
 
 // ResolvedConflict represents a resolved conflict
 type ResolvedConflict struct {
-	ConflictID      string           `json:"conflict_id"`
-	Resolution      ConflictStrategy `json:"resolution"`
-	ResolvedAt      time.Time        `json:"resolved_at"`
-	ResolvedBy      string           `json:"resolved_by"`
-	FinalValue      interface{}      `json:"final_value"`
-	ConflictDuration time.Duration   `json:"conflict_duration"`
+	ConflictID       string           `json:"conflict_id"`
+	Resolution       ConflictStrategy `json:"resolution"`
+	ResolvedAt       time.Time        `json:"resolved_at"`
+	ResolvedBy       string           `json:"resolved_by"`
+	FinalValue       interface{}      `json:"final_value"`
+	ConflictDuration time.Duration    `json:"conflict_duration"`
 }
 
 // AutoResolveRule defines automatic conflict resolution rules
 type AutoResolveRule struct {
-	RuleID          string                 `json:"rule_id"`
-	FieldPattern    string                 `json:"field_pattern"`
-	ConflictTypes   []string               `json:"conflict_types"`
-	Strategy        ConflictStrategy       `json:"strategy"`
-	Conditions      map[string]interface{} `json:"conditions"`
-	Priority        int                    `json:"priority"`
-	Enabled         bool                   `json:"enabled"`
+	RuleID        string                 `json:"rule_id"`
+	FieldPattern  string                 `json:"field_pattern"`
+	ConflictTypes []string               `json:"conflict_types"`
+	Strategy      ConflictStrategy       `json:"strategy"`
+	Conditions    map[string]interface{} `json:"conditions"`
+	Priority      int                    `json:"priority"`
+	Enabled       bool                   `json:"enabled"`
 }
 
 // DistributedMetrics tracks performance metrics for distributed operations
 type DistributedMetrics struct {
-	StateAccess         *AccessMetrics       `json:"state_access"`
-	Migration           *MigrationMetrics    `json:"migration"`
-	MemoryDistribution  *MemoryMetrics       `json:"memory_distribution"`
-	NetworkPerformance  *NetworkMetrics      `json:"network_performance"`
-	ConsistencyMetrics  *ConsistencyMetrics  `json:"consistency_metrics"`
-	PredictiveMetrics   *PredictiveMetrics   `json:"predictive_metrics"`
-	LastUpdate          time.Time            `json:"last_update"`
+	StateAccess        *AccessMetrics             `json:"state_access"`
+	Migration          *MigrationMetrics          `json:"migration"`
+	MemoryDistribution *MemoryDistributionMetrics `json:"memory_distribution"`
+	NetworkPerformance *NetworkMetrics            `json:"network_performance"`
+	ConsistencyMetrics *ConsistencyMetrics        `json:"consistency_metrics"`
+	PredictiveMetrics  *PredictiveMetrics         `json:"predictive_metrics"`
+	LastUpdate         time.Time                  `json:"last_update"`
 }
 
 // AccessMetrics tracks state access performance
@@ -459,64 +459,64 @@ type AccessMetrics struct {
 
 // MigrationMetrics tracks migration performance
 type MigrationMetrics struct {
-	AverageMigrationTime    time.Duration `json:"average_migration_time"`
-	SuccessRate             float64       `json:"success_rate"`
-	DowntimeMs              float64       `json:"downtime_ms"`
-	DataTransferRateMBps    float64       `json:"data_transfer_rate_mbps"`
-	CompressionRatio        float64       `json:"compression_ratio"`
-	PredictionAccuracy      float64       `json:"prediction_accuracy"`
-	TotalMigrations         int64         `json:"total_migrations"`
-	FailedMigrations        int64         `json:"failed_migrations"`
-	LastMigration           time.Time     `json:"last_migration"`
+	AverageMigrationTime time.Duration `json:"average_migration_time"`
+	SuccessRate          float64       `json:"success_rate"`
+	DowntimeMs           float64       `json:"downtime_ms"`
+	DataTransferRateMBps float64       `json:"data_transfer_rate_mbps"`
+	CompressionRatio     float64       `json:"compression_ratio"`
+	PredictionAccuracy   float64       `json:"prediction_accuracy"`
+	TotalMigrations      int64         `json:"total_migrations"`
+	FailedMigrations     int64         `json:"failed_migrations"`
+	LastMigration        time.Time     `json:"last_migration"`
 }
 
-// MemoryMetrics tracks memory distribution performance
-type MemoryMetrics struct {
-	SyncLatencyMs           float64   `json:"sync_latency_ms"`
-	CompressionRatio        float64   `json:"compression_ratio"`
-	DeduplicationRatio      float64   `json:"deduplication_ratio"`
-	PageFaultRate           float64   `json:"page_fault_rate"`
-	RemotePageAccess        float64   `json:"remote_page_access"`
-	LocalityScore           float64   `json:"locality_score"`
-	CoherenceOverheadMs     float64   `json:"coherence_overhead_ms"`
-	LastMemorySync          time.Time `json:"last_memory_sync"`
+// MemoryDistributionMetrics tracks memory distribution performance.
+type MemoryDistributionMetrics struct {
+	SyncLatencyMs       float64   `json:"sync_latency_ms"`
+	CompressionRatio    float64   `json:"compression_ratio"`
+	DeduplicationRatio  float64   `json:"deduplication_ratio"`
+	PageFaultRate       float64   `json:"page_fault_rate"`
+	RemotePageAccess    float64   `json:"remote_page_access"`
+	LocalityScore       float64   `json:"locality_score"`
+	CoherenceOverheadMs float64   `json:"coherence_overhead_ms"`
+	LastMemorySync      time.Time `json:"last_memory_sync"`
 }
 
 // NetworkMetrics tracks network performance for distributed operations
 type NetworkMetrics struct {
-	BandwidthUtilization    float64   `json:"bandwidth_utilization"`
-	LatencyMs               float64   `json:"latency_ms"`
-	PacketLossRate          float64   `json:"packet_loss_rate"`
-	ThroughputMbps          float64   `json:"throughput_mbps"`
-	ConnectionPoolSize      int       `json:"connection_pool_size"`
-	ActiveConnections       int       `json:"active_connections"`
-	CompressionSavings      float64   `json:"compression_savings"`
-	RetransmissionRate      float64   `json:"retransmission_rate"`
-	LastNetworkMeasurement  time.Time `json:"last_network_measurement"`
+	BandwidthUtilization   float64   `json:"bandwidth_utilization"`
+	LatencyMs              float64   `json:"latency_ms"`
+	PacketLossRate         float64   `json:"packet_loss_rate"`
+	ThroughputMbps         float64   `json:"throughput_mbps"`
+	ConnectionPoolSize     int       `json:"connection_pool_size"`
+	ActiveConnections      int       `json:"active_connections"`
+	CompressionSavings     float64   `json:"compression_savings"`
+	RetransmissionRate     float64   `json:"retransmission_rate"`
+	LastNetworkMeasurement time.Time `json:"last_network_measurement"`
 }
 
 // ConsistencyMetrics tracks consistency performance
 type ConsistencyMetrics struct {
-	ConsistencyLatencyMs    float64   `json:"consistency_latency_ms"`
-	ConflictRate            float64   `json:"conflict_rate"`
-	ResolutionTimeMs        float64   `json:"resolution_time_ms"`
-	SyncSuccessRate         float64   `json:"sync_success_rate"`
-	VectorClockDrift        float64   `json:"vector_clock_drift"`
-	StateVersions           int64     `json:"state_versions"`
-	LastConsistencyCheck    time.Time `json:"last_consistency_check"`
+	ConsistencyLatencyMs float64   `json:"consistency_latency_ms"`
+	ConflictRate         float64   `json:"conflict_rate"`
+	ResolutionTimeMs     float64   `json:"resolution_time_ms"`
+	SyncSuccessRate      float64   `json:"sync_success_rate"`
+	VectorClockDrift     float64   `json:"vector_clock_drift"`
+	StateVersions        int64     `json:"state_versions"`
+	LastConsistencyCheck time.Time `json:"last_consistency_check"`
 }
 
 // PredictiveMetrics tracks AI-driven predictive performance
 type PredictiveMetrics struct {
-	PredictionAccuracy      float64   `json:"prediction_accuracy"`
-	PredictionLatencyMs     float64   `json:"prediction_latency_ms"`
-	CacheHitImprovement     float64   `json:"cache_hit_improvement"`
-	PrefetchSuccessRate     float64   `json:"prefetch_success_rate"`
-	ModelTrainingTime       time.Duration `json:"model_training_time"`
-	FalsePositiveRate       float64   `json:"false_positive_rate"`
-	FalseNegativeRate       float64   `json:"false_negative_rate"`
-	LastModelUpdate         time.Time `json:"last_model_update"`
-	PredictionsPerSecond    float64   `json:"predictions_per_second"`
+	PredictionAccuracy   float64       `json:"prediction_accuracy"`
+	PredictionLatencyMs  float64       `json:"prediction_latency_ms"`
+	CacheHitImprovement  float64       `json:"cache_hit_improvement"`
+	PrefetchSuccessRate  float64       `json:"prefetch_success_rate"`
+	ModelTrainingTime    time.Duration `json:"model_training_time"`
+	FalsePositiveRate    float64       `json:"false_positive_rate"`
+	FalseNegativeRate    float64       `json:"false_negative_rate"`
+	LastModelUpdate      time.Time     `json:"last_model_update"`
+	PredictionsPerSecond float64       `json:"predictions_per_second"`
 }
 
 // VMStats holds runtime statistics for a VM
@@ -858,7 +858,7 @@ func (vm *VM) SetResourceID(resourceID string) {
 func (vm *VM) ApplyUpdateSpec(spec VMUpdateSpec) error {
 	vm.mutex.Lock()
 	defer vm.mutex.Unlock()
-	
+
 	// Apply updates to VM configuration
 	if spec.Name != nil {
 		vm.config.Name = *spec.Name
@@ -880,10 +880,10 @@ func (vm *VM) ApplyUpdateSpec(spec VMUpdateSpec) error {
 			vm.config.Tags[k] = v
 		}
 	}
-	
+
 	// Update timestamp
 	vm.updatedAt = time.Now()
-	
+
 	return nil
 }
 
@@ -1200,14 +1200,14 @@ func (vm *VM) InitializeDistributedState(ctx context.Context, shardID string, co
 			NetworkLatency: 0.0,
 		},
 		PredictiveCache: &PredictiveCache{
-			Enabled:           true,
-			CacheHitRate:      0.0,
+			Enabled:            true,
+			CacheHitRate:       0.0,
 			PredictionAccuracy: TARGET_PREDICTION_ACCURACY,
-			PrefetchedPages:   make(map[string]time.Time),
-			PredictionsActive: []PredictionInfo{},
-			CacheSize:         0,
-			ModelVersion:      "v1.0",
-			LastModelUpdate:   now,
+			PrefetchedPages:    make(map[string]time.Time),
+			PredictionsActive:  []PredictionInfo{},
+			CacheSize:          0,
+			ModelVersion:       "v1.0",
+			LastModelUpdate:    now,
 		},
 		CrossClusterRefs: []string{},
 	}
@@ -1259,7 +1259,7 @@ func (vm *VM) InitializeDistributedState(ctx context.Context, shardID string, co
 
 	vm.stateHistory = []StateSnapshot{}
 	vm.conflictResolution = &ConflictResolutionInfo{
-		ActiveConflicts:  []StateConflict{},
+		ActiveConflicts: []StateConflict{},
 		ResolutionPolicy: ConflictPolicy{
 			DefaultStrategy:  ConflictLastWriteWins,
 			FieldPolicies:    make(map[string]ConflictStrategy),
@@ -1279,7 +1279,7 @@ func (vm *VM) InitializeDistributedState(ctx context.Context, shardID string, co
 		Migration: &MigrationMetrics{
 			LastMigration: now,
 		},
-		MemoryDistribution: &MemoryMetrics{
+		MemoryDistribution: &MemoryDistributionMetrics{
 			LastMemorySync: now,
 		},
 		NetworkPerformance: &NetworkMetrics{

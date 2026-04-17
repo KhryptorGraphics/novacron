@@ -11,7 +11,7 @@ make test   # run all Go tests
 go mod tidy   # one-time module sync for the Go backend
 npm install
 cd frontend && npm ci
-npm run dev   # repo root: standalone Go API (main_working.go) on :8090 + frontend on :8092
+npm run dev   # repo root: canonical Go API (main.go) on :8090 + frontend on :8092
 ```
 
 If you only need the frontend:
