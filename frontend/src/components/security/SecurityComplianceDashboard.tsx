@@ -2,11 +2,10 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Shield, Lock, Key, AlertTriangle, CheckCircle, XCircle,
-  Eye, EyeOff, RefreshCw, Download, Upload, Filter,
-  ShieldCheck, ShieldAlert, UserCheck, FileText,
-  Activity, TrendingUp, Clock, Settings, Search,
-  AlertCircle, CheckCircle2, Info, Ban, Zap, Plus
+  Shield, AlertTriangle, XCircle,
+  Eye, RefreshCw, Download, Filter,
+  FileText, Activity, TrendingUp,
+  AlertCircle, CheckCircle2, Info, Ban, Zap,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,20 +15,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
-import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/components/ui/use-toast';
-import { PieChart, Pie, Cell, BarChart, Bar, LineChart, Line, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart } from 'recharts';
+import { PieChart, Pie, Cell, BarChart, Bar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart } from 'recharts';
 import { useSecurityEvents, useCompliance, useVulnerabilityScans, useSecurityMetrics } from '@/hooks/useSecurity';
 import RBACGuard from '@/components/auth/RBACGuard';
-import PermissionGate from '@/components/auth/PermissionGate';
 
 // Import types from the API service
-import type { SecurityEvent, ComplianceRequirement, VulnerabilityScan, VulnerabilityFinding, AccessControl, AccessRule } from '@/lib/api/security';
+import type { VulnerabilityFinding } from '@/lib/api/security';
 
 const SecurityComplianceDashboard: React.FC = () => {
   const { toast } = useToast();
@@ -37,80 +32,50 @@ const SecurityComplianceDashboard: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterSeverity, setFilterSeverity] = useState<string>('all');
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [refreshInterval, setRefreshInterval] = useState(30);
+  const refreshInterval = 30;
 
   // Use real API hooks instead of mock data
   const {
     events: securityEvents,
     loading: eventsLoading,
     error: eventsError,
-    acknowledgeEvent
   } = useSecurityEvents(autoRefresh, refreshInterval * 1000);
 
   const {
     requirements: complianceRequirements,
     categoryBreakdown: complianceByCategory,
     loading: complianceLoading,
+    error: complianceError,
     triggerComplianceCheck
   } = useCompliance();
 
   const {
     scans: vulnerabilityScans,
     loading: scansLoading,
+    error: scansError,
     startScan
   } = useVulnerabilityScans();
 
   const {
     metrics,
     threatTrends,
-    loading: metricsLoading
+    loading: metricsLoading,
+    error: metricsError
   } = useSecurityMetrics(autoRefresh, 60000);
-
-  // Mock access controls data until backend API is ready
-  const accessControls = [
-    {
-      id: '1',
-      resource: 'vm-management',
-      policy: 'vm-access-policy',
-      type: 'rbac' as const,
-      rules: [
-        { id: '1', subject: 'admin', action: 'vm:*', effect: 'allow' as const },
-        { id: '2', subject: 'operator', action: 'vm:read,vm:start,vm:stop', effect: 'allow' as const },
-        { id: '3', subject: 'viewer', action: 'vm:read', effect: 'allow' as const }
-      ],
-      enforced: true,
-      lastModified: new Date().toISOString()
-    },
-    {
-      id: '2',
-      resource: 'security-dashboard',
-      policy: 'security-access-policy',
-      type: 'rbac' as const,
-      rules: [
-        { id: '1', subject: 'security-admin', action: 'security:*', effect: 'allow' as const },
-        { id: '2', subject: 'auditor', action: 'security:read,audit:read', effect: 'allow' as const }
-      ],
-      enforced: true,
-      lastModified: new Date(Date.now() - 3600000).toISOString()
-    }
-  ];
 
   // Transform API data for charts
   const getChartData = () => {
     if (!metrics || !threatTrends) return {
-      securityScore: 87,
-      complianceScore: 92,
+      securityScore: 0,
+      complianceScore: 0,
       vulnerabilityDistribution: [
         { name: 'Critical', value: 0, color: '#dc2626' },
-        { name: 'High', value: 2, color: '#ea580c' },
-        { name: 'Medium', value: 5, color: '#ca8a04' },
-        { name: 'Low', value: 12, color: '#65a30d' },
-        { name: 'Info', value: 23, color: '#0891b2' }
+        { name: 'High', value: 0, color: '#ea580c' },
+        { name: 'Medium', value: 0, color: '#ca8a04' },
+        { name: 'Low', value: 0, color: '#65a30d' },
+        { name: 'Info', value: 0, color: '#0891b2' }
       ],
-      threatTrends: [
-        { time: '00:00', threats: 12, blocked: 12 },
-        { time: '04:00', threats: 8, blocked: 8 }
-      ]
+      threatTrends: []
     };
 
     return {
@@ -172,13 +137,6 @@ const SecurityComplianceDashboard: React.FC = () => {
     toast({
       title: 'Remediation Started',
       description: `Applying remediation for ${finding.title}...`,
-    });
-  }, [toast]);
-
-  const handleUpdatePolicy = useCallback(async (policy: AccessControl) => {
-    toast({
-      title: 'Policy Updated',
-      description: `Access control policy ${policy.policy} has been updated.`,
     });
   }, [toast]);
 
@@ -267,6 +225,16 @@ const SecurityComplianceDashboard: React.FC = () => {
         </div>
       </div>
 
+      {(eventsError || complianceError || scansError || metricsError) && (
+        <Alert>
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Partial security data unavailable</AlertTitle>
+          <AlertDescription>
+            {[eventsError, complianceError, scansError, metricsError].filter(Boolean).join(' ')}
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Security Score Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
@@ -293,7 +261,9 @@ const SecurityComplianceDashboard: React.FC = () => {
             <div className="text-2xl font-bold">{chartData.complianceScore}%</div>
             <Progress value={chartData.complianceScore} className="mt-2" />
             <p className="text-xs text-muted-foreground mt-2">
-              34 of 37 requirements met
+              {complianceRequirements.length > 0
+                ? `${complianceRequirements.filter((requirement) => requirement.status === 'compliant').length} of ${complianceRequirements.length} requirements met`
+                : 'No compliance requirements reported'}
             </p>
           </CardContent>
         </Card>
@@ -304,10 +274,12 @@ const SecurityComplianceDashboard: React.FC = () => {
             <AlertTriangle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">2</div>
+            <div className="text-2xl font-bold">{metrics?.activeThreats ?? 0}</div>
             <div className="flex gap-2 mt-2">
-              <Badge variant="destructive">2 High</Badge>
-              <Badge variant="secondary">0 Critical</Badge>
+              <Badge variant={(metrics?.threatLevel === 'critical' || metrics?.threatLevel === 'high') ? 'destructive' : 'secondary'}>
+                {(metrics?.threatLevel || 'low').toUpperCase()}
+              </Badge>
+              <Badge variant="secondary">{metrics?.blockedThreats ?? 0} Blocked</Badge>
             </div>
           </CardContent>
         </Card>
@@ -318,9 +290,11 @@ const SecurityComplianceDashboard: React.FC = () => {
             <Activity className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">1h ago</div>
+            <div className="text-2xl font-bold">
+              {vulnerabilityScans[0]?.endTime ? formatDate(vulnerabilityScans[0].endTime) : 'No scans'}
+            </div>
             <p className="text-xs text-muted-foreground mt-2">
-              Next scan in 23 hours
+              {vulnerabilityScans.length > 0 ? `${vulnerabilityScans.length} scan records available` : 'No completed scan history reported'}
             </p>
             <Button size="sm" variant="outline" className="mt-2 w-full" onClick={() => handleRunScan('full')}>
               <RefreshCw className="h-3 w-3 mr-1" />
@@ -591,7 +565,12 @@ const SecurityComplianceDashboard: React.FC = () => {
                         )}
                       </div>
                       <div className="flex gap-2">
-                        <Button size="sm" variant="outline">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled
+                          onClick={() => triggerComplianceCheck(req.id)}
+                        >
                           <RefreshCw className="h-4 w-4 mr-1" />
                           Recheck
                         </Button>
@@ -721,61 +700,13 @@ const SecurityComplianceDashboard: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {accessControls.map((control) => (
-                  <div key={control.id} className="border rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <h4 className="font-medium">{control.resource}</h4>
-                        <p className="text-sm text-muted-foreground">
-                          Policy: {control.policy} | Type: {control.type.toUpperCase()}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant={control.enforced ? 'default' : 'destructive'}>
-                          {control.enforced ? 'Enforced' : 'Disabled'}
-                        </Badge>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleUpdatePolicy(control)}
-                        >
-                          <Settings className="h-4 w-4 mr-1" />
-                          Configure
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <h5 className="text-sm font-medium">Rules:</h5>
-                      {control.rules.map((rule) => (
-                        <div key={rule.id} className="flex items-center gap-2 text-sm p-2 bg-accent/50 rounded">
-                          <Badge variant={rule.effect === 'allow' ? 'default' : 'destructive'}>
-                            {rule.effect}
-                          </Badge>
-                          <span>{rule.subject}</span>
-                          <span className="text-muted-foreground">→</span>
-                          <span>{rule.action}</span>
-                          {rule.conditions && (
-                            <Badge variant="outline">
-                              Conditional
-                            </Badge>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="text-xs text-muted-foreground mt-2">
-                      Last modified: {formatDate(control.lastModified)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-4">
-                <Button>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Policy
-                </Button>
+                <Alert>
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>Access-control management unavailable</AlertTitle>
+                  <AlertDescription>
+                    The current backend exposes RBAC metadata but does not provide the access-control policy management endpoints this view expects.
+                  </AlertDescription>
+                </Alert>
               </div>
             </CardContent>
           </Card>

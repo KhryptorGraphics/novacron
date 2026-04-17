@@ -248,16 +248,7 @@ func (s *EnhancedResourceScheduler) analyzeWorkloadPatterns() {
 		}
 
 		// Create or update enhanced profile
-		enhancedProfile, exists := s.enhancedProfiles[vmID]
-		if !exists {
-			enhancedProfile = workload.NewEnhancedProfile(baseProfile)
-		} else {
-			// Update with latest base profile
-			enhancedProfile.WorkloadProfile = baseProfile
-		}
-
-		// Detect patterns
-		enhancedProfile.DetectPatterns()
+		enhancedProfile := s.buildEnhancedProfile(vmID, baseProfile)
 
 		// Store the enhanced profile
 		s.enhancedProfiles[vmID] = enhancedProfile
@@ -281,24 +272,32 @@ func (s *EnhancedResourceScheduler) getOptimalMigrationWindow(vmID string) (*mig
 		return nil, fmt.Errorf("no enhanced profile for VM %s", vmID)
 	}
 
-	// Get optimal migration windows for the next 24 hours
 	now := time.Now()
-	end := now.Add(24 * time.Hour)
-	windows := enhancedProfile.GetOptimalMigrationWindows(now, end)
+	for _, patterns := range enhancedProfile.RecognizedPatterns {
+		for _, pattern := range patterns {
+			for _, trough := range pattern.TroughTimestamps {
+				if trough.Before(now) || trough.After(now.Add(24*time.Hour)) {
+					continue
+				}
 
-	if len(windows) == 0 {
-		return nil, fmt.Errorf("no optimal migration windows for VM %s", vmID)
+				window := migration.MigrationWindow{
+					StartTime: trough.Add(-s.config.OptimalMigrationWindowMargin),
+					EndTime:   trough.Add(s.config.OptimalMigrationWindowMargin),
+					Quality:   maxFloat(pattern.Confidence, enhancedProfile.WorkloadStability),
+					Reason:    "Migration aligned to predicted low-utilization window",
+				}
+
+				return &window, nil
+			}
+		}
 	}
 
-	// Convert to migration.MigrationWindow
-	window := migration.MigrationWindow{
-		StartTime: windows[0].StartTime.Add(-s.config.OptimalMigrationWindowMargin),
-		EndTime:   windows[0].EndTime.Add(s.config.OptimalMigrationWindowMargin),
-		Quality:   windows[0].Quality,
-		Reason:    windows[0].Reason,
-	}
-
-	return &window, nil
+	return &migration.MigrationWindow{
+		StartTime: now.Add(2 * time.Hour),
+		EndTime:   now.Add(4 * time.Hour),
+		Quality:   enhancedProfile.WorkloadStability,
+		Reason:    "Default migration window for stable workload",
+	}, nil
 }
 
 // planProactiveMigrations plans migrations based on workload patterns and system condition
@@ -438,7 +437,7 @@ func (s *EnhancedResourceScheduler) predictResourceNeeds() {
 		}
 
 		// Predict usage for each resource type
-		for resourceType := range profile.ResourceUsagePatterns {
+		for resourceType := range profile.ResourceProfiles {
 			// Initialize resource predictions if needed
 			if _, exists := nodeResourcePredictions[nodeID][resourceType]; !exists {
 				nodeResourcePredictions[nodeID][resourceType] = make(map[time.Time]float64)
@@ -446,7 +445,7 @@ func (s *EnhancedResourceScheduler) predictResourceNeeds() {
 
 			// Predict usage at each time point
 			for _, t := range predictionPoints {
-				usage := profile.PredictResourceUsage(resourceType, t)
+				usage := s.predictResourceUsage(profile, resourceType, t)
 				if usage >= 0 {
 					// Add to node's predicted usage
 					nodeResourcePredictions[nodeID][resourceType][t] += usage
@@ -492,7 +491,7 @@ func (s *EnhancedResourceScheduler) RequestPlacement(
 
 		// For each resource type, add predicted usage
 		for resourceType := range resources {
-			predicted := enhancedProfile.PredictResourceUsage(resourceType, predictionTime)
+			predicted := s.predictResourceUsage(enhancedProfile, resourceType, predictionTime)
 			if predicted >= 0 {
 				// Use predicted value, with a small safety margin
 				predictedResources[resourceType] = predicted * 1.1 // 10% safety margin
@@ -507,36 +506,39 @@ func (s *EnhancedResourceScheduler) RequestPlacement(
 			enhancedProfile.WorkloadStability >= s.config.PatternConfidenceThreshold {
 
 			// Add appropriate constraints based on workload patterns
-			for _, pattern := range enhancedProfile.RecognizedPatterns {
-				switch pattern.PatternType {
-				case workload.PatternTypeDiurnal:
-					// For diurnal patterns, add resource requirements that vary by time of day
-					resourceType := pattern.ResourceType
-					if resourceType != "" {
-						constraints = append(constraints, PlacementConstraint{
-							Type:          ConstraintResourceRequirement,
-							ResourceType:  resourceType,
-							MinimumAmount: predictedResources[resourceType],
-							Weight:        0.8,
-							Mandatory:     false,
-							Created:       time.Now(),
-						})
-					}
-				case workload.PatternTypeBursty:
-					// For bursty workloads, ensure ample resources
-					resourceType := pattern.ResourceType
-					if resourceType != "" && pattern.Parameters["baseline"] > 0 {
-						// Use baseline + peak amplitude as requirement
-						baseline := pattern.Parameters["baseline"]
-						amplitude := pattern.Parameters["amplitude"]
-						constraints = append(constraints, PlacementConstraint{
-							Type:          ConstraintResourceRequirement,
-							ResourceType:  resourceType,
-							MinimumAmount: baseline + amplitude,
-							Weight:        0.7,
-							Mandatory:     false,
-							Created:       time.Now(),
-						})
+			for _, patterns := range enhancedProfile.RecognizedPatterns {
+				for _, pattern := range patterns {
+					switch pattern.PatternType {
+					case workload.PatternTypeDiurnal:
+						// For diurnal patterns, add resource requirements that vary by time of day
+						resourceType := pattern.ResourceType
+						if resourceType != "" {
+							constraints = append(constraints, PlacementConstraint{
+								Type:          ConstraintResourceRequirement,
+								ResourceType:  resourceType,
+								MinimumAmount: predictedResources[resourceType],
+								Weight:        0.8,
+								Mandatory:     false,
+								Created:       time.Now(),
+							})
+						}
+					case workload.PatternTypeBursty, workload.BurstPattern:
+						// For bursty workloads, ensure ample resources
+						resourceType := pattern.ResourceType
+						if resourceType != "" {
+							profile := enhancedProfile.GetResourceProfile(resourceType)
+							if profile == nil {
+								continue
+							}
+							constraints = append(constraints, PlacementConstraint{
+								Type:          ConstraintResourceRequirement,
+								ResourceType:  resourceType,
+								MinimumAmount: profile.PeakUsage,
+								Weight:        0.7,
+								Mandatory:     false,
+								Created:       time.Now(),
+							})
+						}
 					}
 				}
 			}
@@ -548,4 +550,62 @@ func (s *EnhancedResourceScheduler) RequestPlacement(
 
 	// Fall back to base scheduler logic
 	return s.baseScheduler.RequestPlacement(vmID, policy, constraints, resources, priority)
+}
+
+func (s *EnhancedResourceScheduler) buildEnhancedProfile(vmID string, baseProfile *workload.WorkloadProfile) *workload.EnhancedWorkloadProfile {
+	enhancedProfile := workload.NewEnhancedProfile(vmID)
+	if baseProfile == nil {
+		return enhancedProfile
+	}
+
+	adapter := &workload.WorkloadProfileAdapter{
+		VMID:            vmID,
+		HistoryDuration: baseProfile.HistoryDuration,
+		LastUpdated:     baseProfile.UpdatedAt,
+		ResourceUsage:   make(map[string]workload.ResourceUsageStats, len(baseProfile.ResourceUsagePatterns)),
+	}
+
+	for resourceType, pattern := range baseProfile.ResourceUsagePatterns {
+		samples := make([]workload.ResourceSample, 0, len(pattern.UsagePattern))
+		for ts, value := range pattern.UsagePattern {
+			samples = append(samples, workload.ResourceSample{
+				Timestamp: ts,
+				Value:     value,
+			})
+		}
+
+		adapter.ResourceUsage[resourceType] = workload.ResourceUsageStats{
+			AverageUsage:      pattern.AverageUsage,
+			PeakUsage:         pattern.PeakUsage,
+			MinimumUsage:      0,
+			StandardDeviation: pattern.VariabilityScore * pattern.AverageUsage,
+			Samples:           samples,
+		}
+	}
+
+	enhancedProfile.SetWorkloadProfile(adapter)
+	return enhancedProfile
+}
+
+func (s *EnhancedResourceScheduler) predictResourceUsage(profile *workload.EnhancedWorkloadProfile, resourceType string, _ time.Time) float64 {
+	resourceProfile := profile.GetResourceProfile(resourceType)
+	if resourceProfile == nil {
+		return -1
+	}
+
+	for _, pattern := range profile.GetPatterns(resourceType) {
+		switch pattern.PatternType {
+		case workload.PatternTypeBursty, workload.BurstPattern:
+			return resourceProfile.PeakUsage
+		}
+	}
+
+	return resourceProfile.AverageUsage
+}
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }

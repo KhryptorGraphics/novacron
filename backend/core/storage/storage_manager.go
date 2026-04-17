@@ -15,8 +15,6 @@ import (
 	"github.com/google/uuid"
 )
 
-
-
 // StorageManager manages storage volumes and operations
 type StorageManager struct {
 	basePath    string
@@ -111,7 +109,7 @@ func (sm *StorageManager) CreateVolume(ctx context.Context, opts VolumeCreateOpt
 			sm.mutex.Unlock()
 			log.Printf("Successfully created volume %s", volume.Name)
 		}
-		
+
 		// Save volume metadata
 		sm.saveVolumeMetadata(volume)
 	}()
@@ -239,6 +237,44 @@ func (sm *StorageManager) DetachVolume(ctx context.Context, volumeID string) err
 	return nil
 }
 
+// UpdateVolumeTier persists the desired storage tier for a volume.
+func (sm *StorageManager) UpdateVolumeTier(ctx context.Context, volumeID, tier string) (*VolumeInfo, error) {
+	_ = ctx
+
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+
+	volume, exists := sm.volumes[volumeID]
+	if !exists {
+		return nil, fmt.Errorf("volume %s not found", volumeID)
+	}
+
+	normalizedTier := strings.ToLower(strings.TrimSpace(tier))
+	switch normalizedTier {
+	case "hot", "warm", "cold", "archive":
+	default:
+		return nil, fmt.Errorf("unsupported storage tier %q", tier)
+	}
+
+	if volume.Metadata == nil {
+		volume.Metadata = make(map[string]string)
+	}
+	if volume.Labels == nil {
+		volume.Labels = make(map[string]string)
+	}
+
+	volume.Metadata["tier"] = normalizedTier
+	volume.Labels["tier"] = normalizedTier
+	volume.UpdatedAt = time.Now()
+
+	if err := sm.saveVolumeMetadata(volume); err != nil {
+		return nil, err
+	}
+
+	volumeCopy := *volume
+	return &volumeCopy, nil
+}
+
 // ResizeVolume resizes a volume
 func (sm *StorageManager) ResizeVolume(ctx context.Context, volumeID string, newSizeMB int) error {
 	sm.mutex.Lock()
@@ -268,7 +304,7 @@ func (sm *StorageManager) ResizeVolume(ctx context.Context, volumeID string, new
 		} else {
 			log.Printf("Successfully resized volume %s from %dMB to %dMB", volume.Name, oldSize, newSizeMB)
 		}
-		
+
 		sm.saveVolumeMetadata(volume)
 	}()
 
@@ -390,7 +426,7 @@ func (sm *StorageManager) resizeVolumeFile(volume *VolumeInfo, newSizeMB int) er
 // saveVolumeMetadata saves volume metadata to disk
 func (sm *StorageManager) saveVolumeMetadata(volume *VolumeInfo) error {
 	metadataPath := volume.Path + ".meta"
-	
+
 	data, err := json.Marshal(volume)
 	if err != nil {
 		return fmt.Errorf("failed to marshal volume metadata: %w", err)
@@ -425,7 +461,7 @@ func (sm *StorageManager) loadExistingVolumes() error {
 // loadVolumeFromMetadata loads a single volume from its metadata file
 func (sm *StorageManager) loadVolumeFromMetadata(metadataFile string) error {
 	metadataPath := filepath.Join(sm.basePath, metadataFile)
-	
+
 	data, err := os.ReadFile(metadataPath)
 	if err != nil {
 		return fmt.Errorf("failed to read metadata file: %w", err)

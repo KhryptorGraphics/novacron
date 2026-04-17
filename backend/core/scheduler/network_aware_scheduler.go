@@ -230,12 +230,19 @@ func (s *NetworkAwareScheduler) updateLinkUtilizationFromVMCommunication() {
 		var sourceID, destID string
 		fmt.Sscanf(key, "%s:%s", &sourceID, &destID)
 
-		// Try to update the link
-		err := s.networkTopology.UpdateLinkUtilization(sourceID, destID, utilization)
-		if err != nil {
-			// Link might not exist in topology, can create it if needed
-			log.Printf("Warning: Could not update link utilization for %s -> %s: %v", sourceID, destID, err)
+		link := s.getTopologyLink(sourceID, destID)
+		if link == nil {
+			log.Printf("Warning: Could not update link utilization for %s -> %s: link not found", sourceID, destID)
+			continue
 		}
+
+		link.Utilization.InboundPercent = utilization
+		link.Utilization.OutboundPercent = utilization
+		link.Utilization.AveragePercent = utilization
+		if utilization > link.Utilization.PeakPercent {
+			link.Utilization.PeakPercent = utilization
+		}
+		link.Utilization.LastUpdated = time.Now()
 	}
 }
 
@@ -285,8 +292,8 @@ func (s *NetworkAwareScheduler) storeNetworkMetrics(sourceVMID, destVMID string,
 
 	// Get link information for latency calculation
 	latency := 5.0 // Default latency
-	if link, err := s.networkTopology.GetLink(sourceNodeID, destNodeID); err == nil {
-		latency = link.Latency
+	if link := s.getTopologyLink(sourceNodeID, destNodeID); link != nil {
+		latency = float64(link.Latency.Milliseconds())
 	}
 
 	// Create network metrics
@@ -296,12 +303,12 @@ func (s *NetworkAwareScheduler) storeNetworkMetrics(sourceVMID, destVMID string,
 		TargetNode:        destNodeID,
 		BandwidthMbps:     bandwidth,
 		LatencyMs:         latency,
-		PacketLoss:        0.01, // Default 1% packet loss
-		JitterMs:          latency * 0.1, // Estimate jitter as 10% of latency
-		ThroughputMbps:    bandwidth * 0.95, // Assume 95% efficiency
-		ConnectionQuality: math.Max(0.0, 1.0 - (latency/100.0) - 0.01), // Quality based on latency and packet loss
-		RouteHops:         2, // Default route hops
-		CongestionLevel:   0.3, // Default congestion level
+		PacketLoss:        0.01,                                    // Default 1% packet loss
+		JitterMs:          latency * 0.1,                           // Estimate jitter as 10% of latency
+		ThroughputMbps:    bandwidth * 0.95,                        // Assume 95% efficiency
+		ConnectionQuality: math.Max(0.0, 1.0-(latency/100.0)-0.01), // Quality based on latency and packet loss
+		RouteHops:         2,                                       // Default route hops
+		CongestionLevel:   0.3,                                     // Default congestion level
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -311,7 +318,7 @@ func (s *NetworkAwareScheduler) storeNetworkMetrics(sourceVMID, destVMID string,
 	if err != nil {
 		log.Printf("Failed to store network metrics for %s -> %s: %v", sourceNodeID, destNodeID, err)
 	} else {
-		log.Printf("Successfully stored network metrics for %s -> %s: %.2f Mbps, %.2f ms latency", 
+		log.Printf("Successfully stored network metrics for %s -> %s: %.2f Mbps, %.2f ms latency",
 			sourceNodeID, destNodeID, bandwidth, latency)
 	}
 }
@@ -372,16 +379,16 @@ func (s *NetworkAwareScheduler) storeVMWorkloadCharacteristics(vmID string) {
 
 		// Convert workload profile to characteristics for AI predictor
 		workloadChars := network.WorkloadCharacteristics{
-			VMID:                 vmID,
-			WorkloadType:         profile.WorkloadType,
-			CPUCores:             int(profile.AvgCPUCores),
-			MemoryGB:             profile.AvgMemoryGB,
-			StorageGB:            profile.AvgStorageGB,
-			NetworkIntensive:     profile.NetworkIOPattern == "high" || profile.NetworkIOPattern == "intensive",
-			ExpectedConnections:  10, // Default value, could be enhanced with actual data
-			DataTransferPattern:  profile.NetworkIOPattern,
+			VMID:                vmID,
+			WorkloadType:        string(profile.DominantWorkloadType),
+			CPUCores:            int(s.averageResourceUsage(profile, "cpu")),
+			MemoryGB:            s.averageResourceUsage(profile, "memory"),
+			StorageGB:           s.averageResourceUsage(profile, "storage"),
+			NetworkIntensive:    profile.DominantWorkloadType == workload.WorkloadTypeNetworkIntensive,
+			ExpectedConnections: 10, // Default value, could be enhanced with actual data
+			DataTransferPattern: s.networkTransferPattern(profile),
 			PeakHours:           []int{9, 10, 14, 15}, // Default business hours
-			HistoricalBandwidth: profile.AvgNetworkBandwidth,
+			HistoricalBandwidth: s.averageResourceUsage(profile, "network"),
 		}
 
 		// Store the characteristics
@@ -414,6 +421,107 @@ func getVMPairKey(vm1, vm2 string) string {
 		return fmt.Sprintf("%s:%s", vm1, vm2)
 	}
 	return fmt.Sprintf("%s:%s", vm2, vm1)
+}
+
+func (s *NetworkAwareScheduler) getTopologyLink(sourceNodeID, destNodeID string) *ntop.NetworkLink {
+	if s.networkTopology == nil {
+		return nil
+	}
+
+	for _, link := range s.networkTopology.Links {
+		if (link.SourceNodeID == sourceNodeID && link.TargetNodeID == destNodeID) ||
+			(link.SourceNodeID == destNodeID && link.TargetNodeID == sourceNodeID) {
+			return link
+		}
+	}
+
+	return nil
+}
+
+func (s *NetworkAwareScheduler) getTopologyNode(nodeID string) *ntop.NetworkNode {
+	if s.networkTopology == nil || s.networkTopology.Nodes == nil {
+		return nil
+	}
+
+	return s.networkTopology.Nodes[nodeID]
+}
+
+func (s *NetworkAwareScheduler) getConnectedLinks(nodeID string) []*ntop.NetworkLink {
+	if s.networkTopology == nil || s.networkTopology.Links == nil {
+		return nil
+	}
+
+	links := make([]*ntop.NetworkLink, 0)
+	for _, link := range s.networkTopology.Links {
+		if link.SourceNodeID == nodeID || link.TargetNodeID == nodeID {
+			links = append(links, link)
+		}
+	}
+
+	return links
+}
+
+func (s *NetworkAwareScheduler) getNetworkCost(sourceNodeID, destNodeID string) (float64, error) {
+	if sourceNodeID == destNodeID {
+		return 0, nil
+	}
+
+	link := s.getTopologyLink(sourceNodeID, destNodeID)
+	if link == nil {
+		return 1.0, fmt.Errorf("no network link between %s and %s", sourceNodeID, destNodeID)
+	}
+
+	latencyCost := math.Min(float64(link.Latency.Milliseconds())/100.0, 1.0)
+	utilizationCost := math.Min(link.Utilization.AveragePercent/100.0, 1.0)
+	bandwidthAvailability := math.Min(float64(link.Bandwidth)/10_000_000_000.0, 1.0)
+
+	cost := (latencyCost * 0.5) + (utilizationCost * 0.3) + ((1.0 - bandwidthAvailability) * 0.2)
+	return math.Max(0, math.Min(cost, 1.0)), nil
+}
+
+func (s *NetworkAwareScheduler) nodeZoneKey(node *ntop.NetworkNode) string {
+	if node == nil {
+		return ""
+	}
+
+	switch {
+	case node.Location.Datacenter != "":
+		return node.Location.Datacenter
+	case node.Location.Rack != "":
+		return node.Location.Rack
+	case node.Location.Building != "":
+		return node.Location.Building
+	default:
+		return node.ID
+	}
+}
+
+func (s *NetworkAwareScheduler) averageResourceUsage(profile *workload.WorkloadProfile, resourceType string) float64 {
+	if profile == nil || profile.ResourceUsagePatterns == nil {
+		return 0
+	}
+
+	resourcePattern, exists := profile.ResourceUsagePatterns[resourceType]
+	if !exists || resourcePattern == nil {
+		return 0
+	}
+
+	return resourcePattern.AverageUsage
+}
+
+func (s *NetworkAwareScheduler) networkTransferPattern(profile *workload.WorkloadProfile) string {
+	if profile == nil {
+		return "steady"
+	}
+
+	switch profile.DominantWorkloadType {
+	case workload.WorkloadTypeNetworkIntensive:
+		return "intensive"
+	case workload.WorkloadTypeIOIntensive:
+		return "burst"
+	default:
+		return "steady"
+	}
 }
 
 // Override scoreNode to include network topology awareness
@@ -559,7 +667,7 @@ func (s *NetworkAwareScheduler) scoreCommunicatingVMs(vmID, nodeID string) (floa
 		}
 
 		// Get network cost between potential node and communicating VM's node
-		cost, err := s.networkTopology.GetNetworkCost(nodeID, commNodeID)
+		cost, err := s.getNetworkCost(nodeID, commNodeID)
 		if err != nil {
 			// If error, assume worst cost
 			cost = 1.0
@@ -578,19 +686,8 @@ func (s *NetworkAwareScheduler) scoreCommunicatingVMs(vmID, nodeID string) (floa
 // scoreBandwidthAvailability scores a node based on bandwidth availability
 func (s *NetworkAwareScheduler) scoreBandwidthAvailability(nodeID string) (float64, bool) {
 	// Collect all links connected to this node
-	links := s.networkTopology.GetAllLinks()
+	links := s.getConnectedLinks(nodeID)
 	if len(links) == 0 {
-		return 0.0, false
-	}
-
-	nodeLinks := make([]*ntop.NetworkLink, 0)
-	for _, link := range links {
-		if link.SourceID == nodeID || link.DestinationID == nodeID {
-			nodeLinks = append(nodeLinks, link)
-		}
-	}
-
-	if len(nodeLinks) == 0 {
 		return 0.0, false
 	}
 
@@ -599,18 +696,19 @@ func (s *NetworkAwareScheduler) scoreBandwidthAvailability(nodeID string) (float
 	aiPredictedBandwidth := 0.0
 	aiPredictionCount := 0
 
-	for _, link := range nodeLinks {
-		linkBandwidth := (1.0 - link.Utilization) * link.Bandwidth
+	for _, link := range links {
+		utilization := math.Min(link.Utilization.AveragePercent/100.0, 1.0)
+		linkBandwidth := (1.0 - utilization) * (float64(link.Bandwidth) / 1_000_000.0)
 		availableBandwidth += linkBandwidth
 
 		// Try to get AI prediction for this link if performance predictor is available
 		if s.performancePredictor != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			
+
 			// Create a prediction request for this link
 			request := network.PredictionRequest{
-				SourceNode:         link.SourceID,
-				TargetNode:         link.DestinationID,
+				SourceNode:         link.SourceNodeID,
+				TargetNode:         link.TargetNodeID,
 				TimeHorizonHours:   1, // Predict for next hour
 				ConfidenceLevel:    0.8,
 				IncludeUncertainty: false,
@@ -638,16 +736,16 @@ func (s *NetworkAwareScheduler) scoreBandwidthAvailability(nodeID string) (float
 	var avgBandwidth float64
 	if aiPredictionCount > 0 && s.performancePredictor != nil {
 		// Use weighted combination of actual and AI-predicted bandwidth
-		actualAvg := availableBandwidth / float64(len(nodeLinks))
+		actualAvg := availableBandwidth / float64(len(links))
 		aiAvg := aiPredictedBandwidth / float64(aiPredictionCount)
-		
+
 		// Weight AI predictions at 60%, actual measurements at 40%
 		avgBandwidth = (aiAvg * 0.6) + (actualAvg * 0.4)
-		
-		log.Printf("Bandwidth scoring for node %s: actual=%.2f, AI-predicted=%.2f, weighted=%.2f", 
+
+		log.Printf("Bandwidth scoring for node %s: actual=%.2f, AI-predicted=%.2f, weighted=%.2f",
 			nodeID, actualAvg, aiAvg, avgBandwidth)
 	} else {
-		avgBandwidth = availableBandwidth / float64(len(nodeLinks))
+		avgBandwidth = availableBandwidth / float64(len(links))
 	}
 
 	// Normalize score: higher available bandwidth is better
@@ -700,10 +798,10 @@ func (s *NetworkAwareScheduler) scoreLatencyCharacteristics(vmID, nodeID string)
 		}
 
 		// Get link between nodes
-		link, err := s.networkTopology.GetLink(nodeID, commNodeID)
-		if err != nil {
+		link := s.getTopologyLink(nodeID, commNodeID)
+		if link == nil {
 			// If no direct link, check network cost as approximation
-			cost, err := s.networkTopology.GetNetworkCost(nodeID, commNodeID)
+			cost, err := s.getNetworkCost(nodeID, commNodeID)
 			if err == nil && cost < 0.5 { // Lower cost generally means lower latency
 				satisfiedReqs++
 			}
@@ -711,7 +809,7 @@ func (s *NetworkAwareScheduler) scoreLatencyCharacteristics(vmID, nodeID string)
 		}
 
 		// Check if latency requirement is satisfied
-		if link.Latency <= reqLatency {
+		if float64(link.Latency.Milliseconds()) <= reqLatency {
 			satisfiedReqs++
 		}
 	}
@@ -750,12 +848,12 @@ func (s *NetworkAwareScheduler) scoreZoneProximity(vmID, nodeID string) float64 
 		}
 
 		// Get zone of the node
-		node, err := s.networkTopology.GetNode(nodeID)
-		if err != nil {
+		node := s.getTopologyNode(nodeID)
+		if node == nil {
 			return 0.5 // Neutral score if can't get node
 		}
 
-		nodeZone := node.Location.Zone
+		nodeZone := s.nodeZoneKey(node)
 
 		// Calculate proportion of VMs in this zone
 		totalVMs := 0
@@ -779,12 +877,12 @@ func (s *NetworkAwareScheduler) scoreZoneProximity(vmID, nodeID string) float64 
 		defer s.vmLocationCacheMutex.RUnlock()
 
 		// Get zone of the node
-		node, err := s.networkTopology.GetNode(nodeID)
-		if err != nil {
+		node := s.getTopologyNode(nodeID)
+		if node == nil {
 			return 0.5 // Neutral score if can't get node
 		}
 
-		nodeZone := node.Location.Zone
+		nodeZone := s.nodeZoneKey(node)
 
 		// Count VMs in the same zone
 		sameZoneCount := 0
@@ -802,12 +900,12 @@ func (s *NetworkAwareScheduler) scoreZoneProximity(vmID, nodeID string) float64 
 
 			totalVMsWithLocation++
 
-			vmNode, err := s.networkTopology.GetNode(vmNodeID)
-			if err != nil {
+			vmNode := s.getTopologyNode(vmNodeID)
+			if vmNode == nil {
 				continue
 			}
 
-			if vmNode.Location.Zone == nodeZone {
+			if s.nodeZoneKey(vmNode) == nodeZone {
 				sameZoneCount++
 			}
 		}
@@ -829,12 +927,12 @@ func (s *NetworkAwareScheduler) getZoneDistribution() (map[string]int, error) {
 	defer s.vmLocationCacheMutex.RUnlock()
 
 	for _, nodeID := range s.vmLocationCache {
-		node, err := s.networkTopology.GetNode(nodeID)
-		if err != nil {
+		node := s.getTopologyNode(nodeID)
+		if node == nil {
 			continue
 		}
 
-		zones[node.Location.Zone]++
+		zones[s.nodeZoneKey(node)]++
 	}
 
 	return zones, nil
@@ -850,11 +948,11 @@ func (s *NetworkAwareScheduler) RequestPlacement(vmID string, policy PlacementPo
 		// Create a thread-safe copy of the config for this request to avoid mutation
 		tempConfig := s.config
 		tempConfig.NetworkAwarenessWeight = 0.6 // Increase weight for network-aware policy
-		
+
 		// Create a temporary scheduler instance with the modified config
 		tempScheduler := *s
 		tempScheduler.config = tempConfig
-		
+
 		// Call base implementation with the temporary config
 		return tempScheduler.ResourceAwareScheduler.RequestPlacement(vmID, policy, constraints, resources, priority)
 	}

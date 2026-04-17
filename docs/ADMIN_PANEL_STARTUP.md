@@ -20,9 +20,8 @@ Create or update your configuration file `/backend/configs/config.yaml`:
 
 ```yaml
 server:
-  api_port: "8080"
-  ws_port: "8081"
-  config_path: "/etc/novacron/config.yaml"  # For admin config API
+  api_port: "8090"
+  ws_port: "8091"
   read_timeout: 30s
   write_timeout: 30s
   idle_timeout: 120s
@@ -51,38 +50,35 @@ Or set environment variables:
 ```bash
 export DATABASE_URL="postgres://username:password@localhost:5432/novacron?sslmode=disable"
 export AUTH_SECRET="your-secret-key-change-this-in-production"
-export API_PORT="8080"
+export API_PORT="8090"
 ```
 
 ### 2. Start Backend Server
 
 ```bash
-cd /home/kp/novacron/backend
-
-# Start the API server
-go run cmd/api-server/main.go
+cd /home/kp/repos/novacron
+go mod tidy
+go run ./backend/cmd/api-server/main_working.go
 ```
 
-The server will:
+The standalone development server will:
 - ✅ Connect to PostgreSQL
 - ✅ Run database migrations automatically
-- ✅ Create all admin tables (users, templates, security_alerts, audit_logs, etc.)
-- ✅ Register admin API routes at `/api/admin/*`
-- ✅ Start listening on port 8080
+- ✅ Provide the working local VM and monitoring API surface
+- ✅ Start listening on port 8090
 
 **Expected Output:**
 ```
-INFO Starting NovaCron API Server... version=1.0.0 api_port=8080
+INFO Starting NovaCron API Server... version=1.0.0 api_port=8090
 INFO Database migrations completed successfully
-INFO Admin API routes registered
-INFO API Server starting port=8080
+INFO API Server starting port=8090
 ```
 
 ### 3. Verify Backend is Running
 
 Test the health endpoint:
 ```bash
-curl http://localhost:8080/health
+curl http://localhost:8090/health
 ```
 
 Expected response:
@@ -100,45 +96,20 @@ Expected response:
 }
 ```
 
-### 4. Test Admin Endpoints
+### 4. Smoke Test the Standalone API
 
-Create a test user:
+The `main_working.go` entrypoint is the stable local development target. It exposes the VM and monitoring API surface needed for general frontend work, but it does **not** register the full `/api/admin/*` or `/api/security/*` routes.
+
+Use these checks instead:
 ```bash
-curl -X POST http://localhost:8080/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "admin",
-    "email": "admin@novacron.local",
-    "password": "Admin123!@#",
-    "tenant_id": "default"
-  }'
-```
+# List VMs
+curl http://localhost:8090/api/vms
 
-Login and get token:
-```bash
-curl -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "admin",
-    "password": "Admin123!@#"
-  }'
-```
+# Fetch monitoring metrics
+curl http://localhost:8090/api/monitoring/metrics
 
-Save the token from the response.
-
-Test admin API (replace TOKEN with your actual token):
-```bash
-# List users
-curl http://localhost:8080/api/admin/users \
-  -H "Authorization: Bearer TOKEN"
-
-# Get security metrics
-curl http://localhost:8080/api/admin/security/metrics \
-  -H "Authorization: Bearer TOKEN"
-
-# List VM templates
-curl http://localhost:8080/api/admin/templates \
-  -H "Authorization: Bearer TOKEN"
+# Fetch VM monitoring summary
+curl http://localhost:8090/api/monitoring/vms
 ```
 
 ---
@@ -148,7 +119,7 @@ curl http://localhost:8080/api/admin/templates \
 ### 1. Install Dependencies
 
 ```bash
-cd /home/kp/novacron/frontend
+cd /home/kp/repos/novacron/frontend
 npm install
 ```
 
@@ -158,8 +129,8 @@ Update `/frontend/.env.local` (create if doesn't exist):
 
 ```env
 # API Configuration
-NEXT_PUBLIC_API_URL=http://localhost:8080
-NEXT_PUBLIC_WS_URL=ws://localhost:8081
+NEXT_PUBLIC_API_URL=http://localhost:8090
+NEXT_PUBLIC_WS_URL=ws://localhost:8091
 
 # Auth Configuration
 NEXT_PUBLIC_AUTH_ENABLED=true
@@ -171,16 +142,16 @@ NEXT_PUBLIC_ENABLE_ADMIN=true
 ### 3. Start Frontend Development Server
 
 ```bash
-cd /home/kp/novacron/frontend
+cd /home/kp/repos/novacron/frontend
 npm run dev
 ```
 
-The frontend will start on `http://localhost:3000`
+The frontend will start on `http://localhost:8092`
 
 **Expected Output:**
 ```
    ▲ Next.js 14.x.x
-   - Local:        http://localhost:3000
+   - Local:        http://localhost:8092
    - Network:      http://192.168.x.x:3000
 
  ✓ Ready in 2.5s
@@ -190,69 +161,37 @@ The frontend will start on `http://localhost:3000`
 
 Open your browser and navigate to:
 ```
-http://localhost:3000/admin
+http://localhost:8092/admin
 ```
 
 **Available Admin Routes:**
-- **Dashboard**: http://localhost:3000/admin
-- **Users**: http://localhost:3000/admin/users
-- **Security**: http://localhost:3000/admin/security
-- **Analytics**: http://localhost:3000/admin/analytics
-- **VMs**: http://localhost:3000/admin/vms
-- **Config**: http://localhost:3000/admin/config
+- **Dashboard**: http://localhost:8092/admin
+- **Users**: http://localhost:8092/admin/users
+- **Security**: http://localhost:8092/admin/security
+- **Analytics**: http://localhost:8092/admin/analytics
+- **VMs**: http://localhost:8092/admin/vms
+- **Config**: http://localhost:8092/admin/config
 
 ---
 
-## Admin API Endpoints
+## Standalone API Surface
 
-### User Management
-```
-GET    /api/admin/users                    # List users
-POST   /api/admin/users                    # Create user
-GET    /api/admin/users/{id}               # Get user
-PUT    /api/admin/users/{id}               # Update user
-DELETE /api/admin/users/{id}               # Delete user
-POST   /api/admin/users/{id}/roles         # Assign roles
-POST   /api/admin/users/bulk               # Bulk operations
-```
+The `main_working.go` entrypoint is the supported local backend for this stabilization milestone. It does **not** register the full `/api/admin/*` or `/api/security/*` API families.
 
-### Security
+Use the standalone surface below when validating the local stack:
+
 ```
-GET    /api/admin/security/metrics         # Security overview
-GET    /api/admin/security/alerts          # List alerts
-GET    /api/admin/security/alerts/{id}     # Get alert
-PUT    /api/admin/security/alerts/{id}     # Update alert
-GET    /api/admin/security/audit           # Audit logs
-GET    /api/admin/security/policies        # Security policies
-PUT    /api/admin/security/policies/{id}   # Update policy
+GET    /health                            # API health
+POST   /auth/login                        # Authentication
+POST   /auth/register                     # Authentication
+POST   /auth/forgot-password              # Authentication
+GET    /api/vms                           # VM list
+POST   /api/vms                           # VM create
+GET    /api/monitoring/metrics            # Monitoring summary
+GET    /api/monitoring/vms                # VM monitoring view
 ```
 
-### VM Templates
-```
-GET    /api/admin/templates                # List templates
-POST   /api/admin/templates                # Create template
-GET    /api/admin/templates/{id}           # Get template
-PUT    /api/admin/templates/{id}           # Update template
-DELETE /api/admin/templates/{id}           # Delete template
-```
-
-### System Configuration
-```
-GET    /api/admin/config                   # Get configuration
-PUT    /api/admin/config                   # Update configuration
-POST   /api/admin/config/validate          # Validate config
-POST   /api/admin/config/backup            # Create backup
-GET    /api/admin/config/backups           # List backups
-POST   /api/admin/config/restore/{id}      # Restore backup
-```
-
-### Database Administration
-```
-GET    /api/admin/database/tables          # List tables
-GET    /api/admin/database/tables/{table}  # Table details
-POST   /api/admin/database/query           # Execute query
-POST   /api/admin/database/execute         # Execute statement
-```
+The `/admin` frontend route is still available for UI development, but richer admin and security workflows depend on the broader backend rehabilitation track rather than the standalone server documented here.
 
 ---
 
@@ -265,13 +204,13 @@ The following tables are automatically created:
 - `vms` - Virtual machine records
 - `vm_metrics` - VM performance metrics
 
-### Admin Tables
+### Additional Tables
 - `vm_templates` - VM template definitions
 - `security_alerts` - Security alerts and incidents
 - `audit_logs` - Comprehensive audit trail
 - `security_policies` - Security policy configuration
 
-All tables include proper indexes for performance.
+These tables may exist after migrations, but the standalone server documented here does not expose the full admin/security CRUD surface for them.
 
 ---
 
@@ -290,8 +229,8 @@ psql -h localhost -U username -d novacron
 
 **Port Already in Use:**
 ```bash
-# Check what's using port 8080
-lsof -i :8080
+# Check what's using port 8090
+lsof -i :8090
 
 # Kill the process or change the port in config
 ```
@@ -305,7 +244,7 @@ psql -h localhost -U username -d novacron -f backend/migrations/schema.sql
 ### Frontend Issues
 
 **API Connection Failed:**
-- Verify backend is running on port 8080
+- Verify backend is running on port 8090
 - Check CORS settings in backend
 - Verify `NEXT_PUBLIC_API_URL` in `.env.local`
 
@@ -359,29 +298,16 @@ VALUES ('tmpl-001', 'Ubuntu 24.04 LTS', 'ubuntu', '24.04', 2, 4096, 40, 'admin@n
 
 ## Production Deployment
 
-### Backend
+This guide covers the supported local development path only:
 
 ```bash
-# Build the binary
-cd backend
-go build -o novacron-server cmd/api-server/main.go
-
-# Run with systemd
-sudo systemctl start novacron-api
+cd /home/kp/repos/novacron
+npm run dev
 ```
 
-### Frontend
+That starts the standalone Go API on `:8090` and the Next.js frontend on `:8092`.
 
-```bash
-# Build production bundle
-cd frontend
-npm run build
-
-# Start production server
-npm start
-```
-
-Or use a reverse proxy (nginx/caddy) for production.
+The full production backend entrypoint (`./backend/cmd/api-server/main.go`) is part of the broader backend rehabilitation track and should not be treated as a drop-in replacement for the standalone server until that work is completed.
 
 ---
 
@@ -417,7 +343,7 @@ Or use a reverse proxy (nginx/caddy) for production.
 
 For issues or questions:
 - **Documentation**: `/docs/ADMIN_PANEL_COMPLETION.md`
-- **API Reference**: Check individual handler files in `/backend/api/admin/`
+- **Local Backend Entry Point**: `/backend/cmd/api-server/main_working.go`
 - **Frontend Components**: Check `/frontend/src/components/admin/`
 
 ---
@@ -425,15 +351,14 @@ For issues or questions:
 ## Next Steps
 
 1. ✅ Create admin user account
-2. ✅ Configure security policies
+2. ✅ Verify authentication and role-based access on `/admin`
 3. ✅ Create VM templates for your environment
-4. ✅ Set up monitoring and alerts
-5. ✅ Configure backup schedules
-6. ✅ Review audit logs regularly
+4. ✅ Validate VM and monitoring endpoints against the standalone API surface
+5. ✅ Track any `/api/admin/*` or `/api/security/*` work against the backend rehabilitation backlog
 
 ---
 
-**Admin Panel Status:** ✅ **FULLY CONNECTED AND OPERATIONAL**
+**Admin Panel Status:** ✅ **Local Standalone Development Path Operational**
 
-Backend API is listening on `http://localhost:8080/api/admin/*`
-Frontend is accessible at `http://localhost:3000/admin`
+Backend API is listening on `http://localhost:8090`
+Frontend is accessible at `http://localhost:8092/admin`

@@ -29,6 +29,8 @@ interface AuthResponse {
     tenantId?: string;
     status: string;
     two_factor_enabled?: boolean;
+    role?: string;
+    roles?: string[];
   };
   requires_2fa?: boolean;
   temp_token?: string;
@@ -42,6 +44,8 @@ interface UserResponse {
   tenantId?: string;
   status: string;
   two_factor_enabled?: boolean;
+  role?: string;
+  roles?: string[];
 }
 
 interface TwoFactorSetupResponse {
@@ -65,6 +69,43 @@ interface TwoFactorVerifyResponse {
 }
 
 class AuthService {
+  private normalizeRoles(
+    primaryRole?: unknown,
+    roleList?: unknown,
+  ): { role?: string; roles?: string[] } {
+    const normalizedRoles = Array.isArray(roleList)
+      ? roleList.filter((role): role is string => typeof role === 'string' && role.length > 0)
+      : [];
+    const normalizedPrimaryRole = typeof primaryRole === 'string' && primaryRole.length > 0
+      ? primaryRole
+      : normalizedRoles[0];
+
+    if (normalizedPrimaryRole && !normalizedRoles.includes(normalizedPrimaryRole)) {
+      normalizedRoles.unshift(normalizedPrimaryRole);
+    }
+
+    return {
+      role: normalizedPrimaryRole,
+      roles: normalizedRoles.length > 0 ? normalizedRoles : undefined,
+    };
+  }
+
+  private buildUserFromClaims(payload: any): UserResponse {
+    const { role, roles } = this.normalizeRoles(payload.role, payload.roles);
+
+    return {
+      id: payload.sub || payload.user_id || payload.id,
+      email: payload.email || '',
+      firstName: payload.firstName || payload.first_name || payload.given_name || '',
+      lastName: payload.lastName || payload.last_name || payload.family_name || '',
+      tenantId: payload.tenantId || payload.tenant_id,
+      status: payload.status || 'active',
+      two_factor_enabled: payload.two_factor_enabled || payload['2fa_enabled'] || false,
+      role,
+      roles,
+    };
+  }
+
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
     
@@ -160,15 +201,7 @@ class AuthService {
 
       // Extract user information from JWT payload
       // The backend JWT should contain: sub (user ID), email, firstName, lastName, etc.
-      const user: UserResponse = {
-        id: payload.sub || payload.user_id || payload.id,
-        email: payload.email || '',
-        firstName: payload.firstName || payload.first_name || payload.given_name || '',
-        lastName: payload.lastName || payload.last_name || payload.family_name || '',
-        tenantId: payload.tenantId || payload.tenant_id,
-        status: payload.status || 'active',
-        two_factor_enabled: payload.two_factor_enabled || payload['2fa_enabled'] || false
-      };
+      const user = this.buildUserFromClaims(payload);
 
       // Cache user data in localStorage for quick access
       if (typeof window !== 'undefined') {
@@ -204,7 +237,18 @@ class AuthService {
       // Use consistent token key
       localStorage.setItem('novacron_token', token);
       if (user) {
-        localStorage.setItem('authUser', JSON.stringify(user));
+        const payload = this.decodeJWT(token);
+        const tokenClaims = payload ? this.buildUserFromClaims(payload) : null;
+        const normalizedRoles = this.normalizeRoles(
+          user.role ?? tokenClaims?.role,
+          user.roles ?? tokenClaims?.roles,
+        );
+
+        localStorage.setItem('authUser', JSON.stringify({
+          ...user,
+          role: normalizedRoles.role,
+          roles: normalizedRoles.roles,
+        }));
       }
     }
   }

@@ -10,6 +10,7 @@ for VM management, migration, monitoring, and administration.
 import argparse
 import logging
 import os
+import re
 import sys
 import yaml
 import json
@@ -24,6 +25,12 @@ import httpx
 import uvicorn
 from contextlib import asynccontextmanager
 
+try:
+    from jose import JWTError, jwt
+except ImportError:
+    import jwt
+    JWTError = jwt.PyJWTError
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +38,7 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger("novacron-api")
+ENV_VAR_PATTERN = re.compile(r"\$\{[^}]+\}")
 
 # API Models
 class VMCreateRequest(BaseModel):
@@ -104,47 +112,99 @@ app.add_middleware(
 )
 
 # Configuration
+def _expand_config_env_vars(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _expand_config_env_vars(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_expand_config_env_vars(child) for child in value]
+    if isinstance(value, str):
+        return os.path.expandvars(value)
+    return value
+
+
+def _auth_config() -> Dict[str, Any]:
+    config = getattr(app.state, "config", None)
+    auth_config = (config or {}).get("auth")
+    if not isinstance(auth_config, dict):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication is not configured",
+        )
+
+    if not auth_config.get("enabled", False):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication is disabled",
+        )
+
+    jwt_secret = auth_config.get("jwt_secret") or auth_config.get("secret")
+    if not isinstance(jwt_secret, str) or not jwt_secret.strip() or ENV_VAR_PATTERN.search(jwt_secret):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication is misconfigured",
+        )
+
+    algorithms = auth_config.get("algorithms", ["HS256"])
+    if isinstance(algorithms, str):
+        algorithms = [algorithms]
+
+    return {
+        "jwt_secret": jwt_secret,
+        "algorithms": algorithms,
+    }
+
+
 def load_config():
     config_path = os.environ.get("CONFIG_PATH", "/etc/novacron/api.yaml")
     try:
         with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
+            config = _expand_config_env_vars(yaml.safe_load(f) or {})
+            if not isinstance(config, dict):
+                raise ValueError("Configuration root must be a mapping")
             app.state.config = config
             logger.info(f"Loaded configuration from {config_path}")
+            return config
     except Exception as e:
         logger.error(f"Failed to load configuration: {e}")
-        # Use default configuration
-        app.state.config = {
-            "server": {
-                "host": "0.0.0.0",
-                "port": 8090,
-            },
-            "hypervisor": {
-                "url": "http://localhost:8090",
-            },
-            "auth": {
-                "enabled": False,
-            },
-            "cors": {
-                "allowed_origins": ["*"],
-            },
-        }
+        raise RuntimeError(f"Failed to load configuration from {config_path}") from e
 
 # Auth dependency
 async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Security(security)):
-    if not app.state.config["auth"]["enabled"]:
-        return {"id": "anonymous", "role": "admin"}
-        
+    auth_config = _auth_config()
+
     if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    # In a real implementation, validate the token and get user info
-    # For now, just return a mock user
-    return {"id": "user1", "role": "admin"}
+
+    try:
+        payload = jwt.decode(
+            credentials.credentials,
+            auth_config["jwt_secret"],
+            algorithms=auth_config["algorithms"],
+        )
+    except JWTError as exc:
+        logger.warning("Rejected bearer token: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    subject = payload.get("sub") or payload.get("user_id") or payload.get("id")
+    if not subject:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token subject is required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return {
+        "id": str(subject),
+        "role": payload.get("role", "user"),
+    }
 
 # Error handling
 @app.exception_handler(Exception)

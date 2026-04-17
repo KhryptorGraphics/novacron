@@ -4,25 +4,26 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os/exec"
 	"sync"
 	"testing"
 	"time"
-	"os/exec"
 
-// 	"github.com/google/uuid"
+	// 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
-// 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	// 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
 // NetworkTestSuite provides comprehensive testing for networking components
 type NetworkTestSuite struct {
 	suite.Suite
-	networkManager    *NetworkManager
-	testNetworks      []*Network
-	testContext       context.Context
-	testCancel        context.CancelFunc
-	networkSimulator  *NetworkSimulator
+	networkManager     *NetworkManager
+	testNetworks       []*Network
+	testContext        context.Context
+	testCancel         context.CancelFunc
+	networkSimulator   *NetworkSimulator
 	performanceMetrics *NetworkPerformanceMetrics
 }
 
@@ -36,38 +37,38 @@ type NetworkSimulator struct {
 
 // SimulatedInterface represents a simulated network interface
 type SimulatedInterface struct {
-	Name         string
-	IP           net.IP
-	Subnet       *net.IPNet
-	MTU          int
-	State        InterfaceState
-	PacketsRx    uint64
-	PacketsTx    uint64
-	BytesRx      uint64
-	BytesTx      uint64
-	ErrorsRx     uint64
-	ErrorsTx     uint64
-	DroppedRx    uint64
-	DroppedTx    uint64
-	Latency      time.Duration
-	Bandwidth    int64 // bits per second
-	PacketLoss   float64
-	Jitter       time.Duration
-	Created      time.Time
+	Name       string
+	IP         net.IP
+	Subnet     *net.IPNet
+	MTU        int
+	State      InterfaceState
+	PacketsRx  uint64
+	PacketsTx  uint64
+	BytesRx    uint64
+	BytesTx    uint64
+	ErrorsRx   uint64
+	ErrorsTx   uint64
+	DroppedRx  uint64
+	DroppedTx  uint64
+	Latency    time.Duration
+	Bandwidth  int64 // bits per second
+	PacketLoss float64
+	Jitter     time.Duration
+	Created    time.Time
 }
 
 // SimulatedLink represents a network link between interfaces
 type SimulatedLink struct {
-	ID            string
-	Source        string
-	Destination   string
-	Bandwidth     int64
-	Latency       time.Duration
-	PacketLoss    float64
-	Jitter        time.Duration
-	State         LinkState
-	Traffic       *TrafficStats
-	QoSRules      []QoSRule
+	ID          string
+	Source      string
+	Destination string
+	Bandwidth   int64
+	Latency     time.Duration
+	PacketLoss  float64
+	Jitter      time.Duration
+	State       LinkState
+	Traffic     *TrafficStats
+	QoSRules    []QoSRule
 }
 
 // NetworkRule represents a network policy rule
@@ -91,21 +92,21 @@ type RuleMatch struct {
 
 // RuleAction defines actions to take on matched traffic
 type RuleAction struct {
-	Type        ActionType
-	Target      string
-	Parameters  map[string]interface{}
+	Type       ActionType
+	Target     string
+	Parameters map[string]interface{}
 }
 
 // ActionType defines types of actions
 type ActionType string
 
 const (
-	ActionAllow      ActionType = "allow"
-	ActionDeny       ActionType = "deny"
-	ActionDrop       ActionType = "drop"
-	ActionRedirect   ActionType = "redirect"
-	ActionRateLimit  ActionType = "rate_limit"
-	ActionMirror     ActionType = "mirror"
+	ActionAllow       ActionType = "allow"
+	ActionDeny        ActionType = "deny"
+	ActionDrop        ActionType = "drop"
+	ActionRedirect    ActionType = "redirect"
+	ActionRateLimit   ActionType = "rate_limit"
+	ActionMirror      ActionType = "mirror"
 	ActionSetPriority ActionType = "set_priority"
 )
 
@@ -130,11 +131,11 @@ const (
 type LinkState string
 
 const (
-	LinkStateUp           LinkState = "up"
-	LinkStateDown         LinkState = "down"
-	LinkStateDegraded     LinkState = "degraded"
-	LinkStateSaturated    LinkState = "saturated"
-	LinkStateMaintenance  LinkState = "maintenance"
+	LinkStateUp          LinkState = "up"
+	LinkStateDown        LinkState = "down"
+	LinkStateDegraded    LinkState = "degraded"
+	LinkStateSaturated   LinkState = "saturated"
+	LinkStateMaintenance LinkState = "maintenance"
 )
 
 // TrafficStats tracks traffic statistics
@@ -177,7 +178,7 @@ type NetworkPerformanceMetrics struct {
 // SetupSuite initializes the test suite
 func (suite *NetworkTestSuite) SetupSuite() {
 	suite.testContext, suite.testCancel = context.WithCancel(context.Background())
-	
+
 	// Initialize network manager with test configuration
 	config := NetworkManagerConfig{
 		DefaultNetworkType: NetworkTypeBridge,
@@ -187,17 +188,17 @@ func (suite *NetworkTestSuite) SetupSuite() {
 		DNSServers:         []string{"8.8.8.8", "8.8.4.4"},
 		UpdateInterval:     1 * time.Second, // Faster for tests
 	}
-	
-	suite.networkManager = NewNetworkManager(config, "test-node")
+
+	suite.networkManager = NewNetworkManager(config, "test-node", zap.NewNop())
 	err := suite.networkManager.Start()
 	suite.Require().NoError(err)
-	
+
 	// Initialize network simulator
 	suite.networkSimulator = NewNetworkSimulator()
-	
+
 	// Initialize performance metrics
 	suite.performanceMetrics = &NetworkPerformanceMetrics{}
-	
+
 	// Create test networks
 	suite.createTestNetworks()
 }
@@ -206,17 +207,17 @@ func (suite *NetworkTestSuite) SetupSuite() {
 func (suite *NetworkTestSuite) TearDownSuite() {
 	// Clean up test networks
 	suite.cleanupTestNetworks()
-	
+
 	// Stop network manager
 	if suite.networkManager != nil {
 		suite.networkManager.Stop()
 	}
-	
+
 	// Cleanup simulator
 	if suite.networkSimulator != nil {
 		suite.networkSimulator.Cleanup()
 	}
-	
+
 	// Cancel context
 	if suite.testCancel != nil {
 		suite.testCancel()
@@ -238,11 +239,11 @@ func (suite *NetworkTestSuite) createTestNetworks() {
 			"type": "bridge",
 		},
 	}
-	
+
 	bridgeNet, err := suite.networkManager.CreateNetwork(suite.testContext, bridgeSpec)
 	suite.Require().NoError(err)
 	suite.testNetworks = append(suite.testNetworks, bridgeNet)
-	
+
 	// Overlay network for advanced networking tests
 	overlaySpec := NetworkSpec{
 		Name: "test-overlay-network",
@@ -256,11 +257,11 @@ func (suite *NetworkTestSuite) createTestNetworks() {
 			"type": "overlay",
 		},
 	}
-	
+
 	overlayNet, err := suite.networkManager.CreateNetwork(suite.testContext, overlaySpec)
 	suite.Require().NoError(err)
 	suite.testNetworks = append(suite.testNetworks, overlayNet)
-	
+
 	// Multi-tenant isolation network
 	tenantSpec := NetworkSpec{
 		Name: "test-tenant-network",
@@ -271,12 +272,12 @@ func (suite *NetworkTestSuite) createTestNetworks() {
 		},
 		Internal: true,
 		Labels: map[string]string{
-			"test":   "true",
-			"tenant": "test-tenant-1",
+			"test":      "true",
+			"tenant":    "test-tenant-1",
 			"isolation": "strict",
 		},
 	}
-	
+
 	tenantNet, err := suite.networkManager.CreateNetwork(suite.testContext, tenantSpec)
 	suite.Require().NoError(err)
 	suite.testNetworks = append(suite.testNetworks, tenantNet)
@@ -306,11 +307,11 @@ func NewNetworkSimulator() *NetworkSimulator {
 func (sim *NetworkSimulator) CreateInterface(name string, ip net.IP, subnet *net.IPNet) (*SimulatedInterface, error) {
 	sim.mutex.Lock()
 	defer sim.mutex.Unlock()
-	
+
 	if _, exists := sim.interfaces[name]; exists {
 		return nil, fmt.Errorf("interface %s already exists", name)
 	}
-	
+
 	iface := &SimulatedInterface{
 		Name:      name,
 		IP:        ip,
@@ -320,7 +321,7 @@ func (sim *NetworkSimulator) CreateInterface(name string, ip net.IP, subnet *net
 		Bandwidth: 1000000000, // 1 Gbps default
 		Created:   time.Now(),
 	}
-	
+
 	sim.interfaces[name] = iface
 	return iface, nil
 }
@@ -329,12 +330,12 @@ func (sim *NetworkSimulator) CreateInterface(name string, ip net.IP, subnet *net
 func (sim *NetworkSimulator) CreateLink(source, destination string, bandwidth int64, latency time.Duration) (*SimulatedLink, error) {
 	sim.mutex.Lock()
 	defer sim.mutex.Unlock()
-	
+
 	linkID := fmt.Sprintf("%s-%s", source, destination)
 	if _, exists := sim.links[linkID]; exists {
 		return nil, fmt.Errorf("link %s already exists", linkID)
 	}
-	
+
 	// Verify interfaces exist
 	if _, exists := sim.interfaces[source]; !exists {
 		return nil, fmt.Errorf("source interface %s does not exist", source)
@@ -342,7 +343,7 @@ func (sim *NetworkSimulator) CreateLink(source, destination string, bandwidth in
 	if _, exists := sim.interfaces[destination]; !exists {
 		return nil, fmt.Errorf("destination interface %s does not exist", destination)
 	}
-	
+
 	link := &SimulatedLink{
 		ID:          linkID,
 		Source:      source,
@@ -352,7 +353,7 @@ func (sim *NetworkSimulator) CreateLink(source, destination string, bandwidth in
 		State:       LinkStateUp,
 		Traffic:     &TrafficStats{},
 	}
-	
+
 	sim.links[linkID] = link
 	return link, nil
 }
@@ -361,11 +362,11 @@ func (sim *NetworkSimulator) CreateLink(source, destination string, bandwidth in
 func (sim *NetworkSimulator) AddNetworkRule(rule *NetworkRule) error {
 	sim.mutex.Lock()
 	defer sim.mutex.Unlock()
-	
+
 	if _, exists := sim.networkRules[rule.ID]; exists {
 		return fmt.Errorf("rule %s already exists", rule.ID)
 	}
-	
+
 	sim.networkRules[rule.ID] = rule
 	return nil
 }
@@ -374,26 +375,26 @@ func (sim *NetworkSimulator) AddNetworkRule(rule *NetworkRule) error {
 func (sim *NetworkSimulator) SimulateTraffic(source, destination string, packets uint64, bytes uint64) error {
 	sim.mutex.Lock()
 	defer sim.mutex.Unlock()
-	
+
 	// Update source interface stats
 	if srcIface, exists := sim.interfaces[source]; exists {
 		srcIface.PacketsTx += packets
 		srcIface.BytesTx += bytes
 	}
-	
+
 	// Update destination interface stats
 	if dstIface, exists := sim.interfaces[destination]; exists {
 		dstIface.PacketsRx += packets
 		dstIface.BytesRx += bytes
 	}
-	
+
 	// Update link stats
 	linkID := fmt.Sprintf("%s-%s", source, destination)
 	if link, exists := sim.links[linkID]; exists {
 		link.Traffic.PacketsPerSecond += packets
 		link.Traffic.BytesPerSecond += bytes
 	}
-	
+
 	return nil
 }
 
@@ -401,7 +402,7 @@ func (sim *NetworkSimulator) SimulateTraffic(source, destination string, packets
 func (sim *NetworkSimulator) InjectNetworkFault(target string, faultType FaultType, parameters map[string]interface{}) error {
 	sim.mutex.Lock()
 	defer sim.mutex.Unlock()
-	
+
 	switch faultType {
 	case FaultTypeLatency:
 		if latency, ok := parameters["latency"].(time.Duration); ok {
@@ -438,7 +439,7 @@ func (sim *NetworkSimulator) InjectNetworkFault(target string, faultType FaultTy
 			link.State = LinkStateDown
 		}
 	}
-	
+
 	return nil
 }
 
@@ -458,12 +459,12 @@ const (
 func (sim *NetworkSimulator) GetInterfaceStats(name string) (*SimulatedInterface, error) {
 	sim.mutex.RLock()
 	defer sim.mutex.RUnlock()
-	
+
 	iface, exists := sim.interfaces[name]
 	if !exists {
 		return nil, fmt.Errorf("interface %s not found", name)
 	}
-	
+
 	// Create a copy to avoid race conditions
 	stats := *iface
 	return &stats, nil
@@ -473,12 +474,12 @@ func (sim *NetworkSimulator) GetInterfaceStats(name string) (*SimulatedInterface
 func (sim *NetworkSimulator) GetLinkStats(linkID string) (*SimulatedLink, error) {
 	sim.mutex.RLock()
 	defer sim.mutex.RUnlock()
-	
+
 	link, exists := sim.links[linkID]
 	if !exists {
 		return nil, fmt.Errorf("link %s not found", linkID)
 	}
-	
+
 	// Create a copy to avoid race conditions
 	stats := *link
 	return &stats, nil
@@ -488,31 +489,31 @@ func (sim *NetworkSimulator) GetLinkStats(linkID string) (*SimulatedLink, error)
 func (sim *NetworkSimulator) ValidateNetworkConnectivity(source, destination string) (bool, error) {
 	sim.mutex.RLock()
 	defer sim.mutex.RUnlock()
-	
+
 	// Check if source interface exists and is up
 	srcIface, exists := sim.interfaces[source]
 	if !exists || srcIface.State != InterfaceStateUp {
 		return false, fmt.Errorf("source interface %s not available", source)
 	}
-	
+
 	// Check if destination interface exists and is up
 	dstIface, exists := sim.interfaces[destination]
 	if !exists || dstIface.State != InterfaceStateUp {
 		return false, fmt.Errorf("destination interface %s not available", destination)
 	}
-	
+
 	// Check if there's a path between source and destination
 	linkID := fmt.Sprintf("%s-%s", source, destination)
 	if link, exists := sim.links[linkID]; exists && link.State == LinkStateUp {
 		return true, nil
 	}
-	
+
 	// Try reverse direction
 	reverseLinkID := fmt.Sprintf("%s-%s", destination, source)
 	if link, exists := sim.links[reverseLinkID]; exists && link.State == LinkStateUp {
 		return true, nil
 	}
-	
+
 	return false, fmt.Errorf("no path found between %s and %s", source, destination)
 }
 
@@ -520,7 +521,7 @@ func (sim *NetworkSimulator) ValidateNetworkConnectivity(source, destination str
 func (sim *NetworkSimulator) Cleanup() {
 	sim.mutex.Lock()
 	defer sim.mutex.Unlock()
-	
+
 	sim.interfaces = make(map[string]*SimulatedInterface)
 	sim.links = make(map[string]*SimulatedLink)
 	sim.networkRules = make(map[string]*NetworkRule)
@@ -530,17 +531,17 @@ func (sim *NetworkSimulator) Cleanup() {
 func (metrics *NetworkPerformanceMetrics) UpdatePerformanceMetrics(packets, bytes uint64, latency time.Duration, packetLoss float64) {
 	metrics.mutex.Lock()
 	defer metrics.mutex.Unlock()
-	
+
 	metrics.TotalPackets += packets
 	metrics.TotalBytes += bytes
-	
+
 	// Update average latency (simple moving average)
 	if metrics.AverageLatency == 0 {
 		metrics.AverageLatency = latency
 	} else {
 		metrics.AverageLatency = (metrics.AverageLatency + latency) / 2
 	}
-	
+
 	// Update packet loss (exponential weighted moving average)
 	if metrics.PacketLoss == 0 {
 		metrics.PacketLoss = packetLoss
@@ -553,7 +554,7 @@ func (metrics *NetworkPerformanceMetrics) UpdatePerformanceMetrics(packets, byte
 func (metrics *NetworkPerformanceMetrics) GetPerformanceSnapshot() NetworkPerformanceMetrics {
 	metrics.mutex.RLock()
 	defer metrics.mutex.RUnlock()
-	
+
 	return NetworkPerformanceMetrics{
 		TotalPackets:       metrics.TotalPackets,
 		TotalBytes:         metrics.TotalBytes,
@@ -578,10 +579,10 @@ func RunNetworkTestSuite(t *testing.T) {
 func WaitForNetworkCondition(t *testing.T, condition func() bool, timeout time.Duration, description string) {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
-	
+
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-timer.C:
@@ -598,10 +599,10 @@ func WaitForNetworkCondition(t *testing.T, condition func() bool, timeout time.D
 func GenerateNetworkLoad(sim *NetworkSimulator, source, destination string, duration time.Duration, packetsPerSecond uint64) error {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	
+
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
-	
+
 	for {
 		select {
 		case <-timer.C:
@@ -621,13 +622,13 @@ func GenerateNetworkLoad(sim *NetworkSimulator, source, destination string, dura
 func ValidateNetworkIsolation(t *testing.T, networkManager *NetworkManager, tenant1Net, tenant2Net *Network) {
 	// This would typically involve creating VMs in each network and attempting cross-tenant communication
 	// For now, we validate at the network configuration level
-	
+
 	assert.NotEqual(t, tenant1Net.IPAM.Subnet, tenant2Net.IPAM.Subnet, "Tenant networks should have different subnets")
-	
+
 	// Check that networks have proper isolation labels
 	tenant1Label, exists1 := tenant1Net.Labels["tenant"]
 	tenant2Label, exists2 := tenant2Net.Labels["tenant"]
-	
+
 	assert.True(t, exists1, "Tenant 1 network should have tenant label")
 	assert.True(t, exists2, "Tenant 2 network should have tenant label")
 	assert.NotEqual(t, tenant1Label, tenant2Label, "Tenants should have different labels")
@@ -641,7 +642,7 @@ func MeasureNetworkLatency(source, destination string, count int) (time.Duration
 	if err != nil {
 		return 0, fmt.Errorf("ping failed: %w, output: %s", err, string(output))
 	}
-	
+
 	// Parse ping output to extract average latency
 	// This is a simplified implementation - in practice would parse the actual output
 	return 1 * time.Millisecond, nil

@@ -20,94 +20,94 @@ import (
 
 // QuantumCryptoManager manages quantum-resistant cryptography
 type QuantumCryptoManager struct {
-	mu                sync.RWMutex
-	keyStore          *QuantumKeyStore
-	kyberEngine       *KyberEngine
-	dilithiumEngine   *DilithiumEngine
-	hybridCrypto      *HybridCryptoEngine
-	cryptoAgility     *CryptoAgilityFramework
-	config            *QuantumCryptoConfig
-	metrics           *QuantumCryptoMetrics
+	mu              sync.RWMutex
+	keyStore        *QuantumKeyStore
+	kyberEngine     *KyberEngine
+	dilithiumEngine *DilithiumEngine
+	hybridCrypto    *HybridCryptoEngine
+	cryptoAgility   *CryptoAgilityFramework
+	config          *QuantumCryptoConfig
+	metrics         *QuantumCryptoMetrics
 }
 
 // QuantumCryptoConfig configuration for quantum crypto
 type QuantumCryptoConfig struct {
 	// Post-quantum algorithms
-	EnableKyber        bool // CRYSTALS-Kyber for key exchange
-	EnableDilithium    bool // CRYSTALS-Dilithium for signatures
-	EnableSphincs      bool // SPHINCS+ for signatures
-	EnableFrodo        bool // FrodoKEM for key exchange
+	EnableKyber     bool // CRYSTALS-Kyber for key exchange
+	EnableDilithium bool // CRYSTALS-Dilithium for signatures
+	EnableSphincs   bool // SPHINCS+ for signatures
+	EnableFrodo     bool // FrodoKEM for key exchange
 
 	// Hybrid mode
-	EnableHybridMode   bool // Classical + quantum-resistant
+	EnableHybridMode   bool   // Classical + quantum-resistant
 	ClassicalAlgorithm string // RSA, ECDSA, etc.
 
 	// Key management
-	KeyRotationInterval  time.Duration
-	KeyDerivationRounds  uint32
-	MinKeyStrength       int
+	KeyRotationInterval time.Duration
+	KeyDerivationRounds uint32
+	MinKeyStrength      int
 
 	// Performance
-	UseHardwareAccel     bool
-	ParallelOperations   int
-	CachingEnabled       bool
+	UseHardwareAccel   bool
+	ParallelOperations int
+	CachingEnabled     bool
 
 	// Compliance
-	FIPS140_3Compliant   bool
-	NISTLevel            int // NIST security level (1-5)
+	FIPS140_3Compliant bool
+	NISTLevel          int // NIST security level (1-5)
 }
 
 // QuantumKeyStore stores quantum-resistant keys
 type QuantumKeyStore struct {
-	mu              sync.RWMutex
-	kyberKeys       map[string]*KyberKeyPair
-	dilithiumKeys   map[string]*DilithiumKeyPair
-	sphincsKeys     map[string]*SphincsKeyPair
-	hybridKeys      map[string]*HybridKeyPair
-	keyMetadata     map[string]*KeyMetadata
+	mu            sync.RWMutex
+	kyberKeys     map[string]*KyberKeyPair
+	dilithiumKeys map[string]*DilithiumKeyPair
+	sphincsKeys   map[string]*SphincsKeyPair
+	hybridKeys    map[string]*HybridKeyPair
+	keyMetadata   map[string]*KeyMetadata
 }
 
 // KyberKeyPair represents CRYSTALS-Kyber key pair
 type KyberKeyPair struct {
-	ID              string
-	PublicKey       []byte
-	PrivateKey      []byte
-	SecurityLevel   int // 2, 3, or 5 (corresponding to 512, 768, 1024)
-	CreatedAt       time.Time
-	LastUsed        time.Time
-	UsageCount      int64
-	RotationDue     time.Time
+	ID            string
+	PublicKey     []byte
+	PrivateKey    []byte
+	SecurityLevel int // 2, 3, or 5 (corresponding to 512, 768, 1024)
+	CreatedAt     time.Time
+	LastUsed      time.Time
+	UsageCount    int64
+	RotationDue   time.Time
 }
 
 // DilithiumKeyPair represents CRYSTALS-Dilithium key pair
 type DilithiumKeyPair struct {
-	ID              string
-	PublicKey       []byte
-	PrivateKey      []byte
-	SecurityLevel   int // 2, 3, or 5
-	CreatedAt       time.Time
-	LastUsed        time.Time
-	SignatureCount  int64
-	RotationDue     time.Time
+	ID             string
+	PublicKey      []byte
+	PrivateKey     []byte
+	SecurityLevel  int // 2, 3, or 5
+	CreatedAt      time.Time
+	LastUsed       time.Time
+	SignatureCount int64
+	RotationDue    time.Time
 }
 
 // SphincsKeyPair represents SPHINCS+ key pair
 type SphincsKeyPair struct {
-	ID              string
-	PublicKey       []byte
-	PrivateKey      []byte
-	Variant         string // "shake256", "sha256"
-	SecurityLevel   int
-	CreatedAt       time.Time
+	ID            string
+	PublicKey     []byte
+	PrivateKey    []byte
+	Variant       string // "shake256", "sha256"
+	SecurityLevel int
+	CreatedAt     time.Time
 }
 
 // HybridKeyPair represents hybrid classical+quantum key pair
 type HybridKeyPair struct {
-	ID              string
-	ClassicalKey    interface{} // RSA or ECDSA key
-	QuantumKey      interface{} // Kyber or other PQC key
-	Algorithm       string
-	CreatedAt       time.Time
+	ID           string
+	ClassicalKey interface{} // RSA or ECDSA key
+	QuantumKey   interface{} // Kyber or other PQC key
+	Algorithm    string
+	CreatedAt    time.Time
 }
 
 // KeyMetadata contains key metadata
@@ -131,11 +131,11 @@ type KeyMetadata struct {
 type KeyType string
 
 const (
-	KeyTypeKyber        KeyType = "kyber"
-	KeyTypeDilithium    KeyType = "dilithium"
-	KeyTypeSphincs      KeyType = "sphincs"
-	KeyTypeHybrid       KeyType = "hybrid"
-	KeyTypeSymmetric    KeyType = "symmetric"
+	KeyTypeKyber     KeyType = "kyber"
+	KeyTypeDilithium KeyType = "dilithium"
+	KeyTypeSphincs   KeyType = "sphincs"
+	KeyTypeHybrid    KeyType = "hybrid"
+	KeyTypeSymmetric KeyType = "symmetric"
 )
 
 // KeyPurpose defines key purposes
@@ -153,18 +153,17 @@ type KeyStatus string
 
 const (
 	KeyStatusActive     KeyStatus = "active"
-	 "rotating"
 	KeyStatusDeprecated KeyStatus = "deprecated"
 	KeyStatusRevoked    KeyStatus = "revoked"
 )
 
 // RotationPolicy defines key rotation policy
 type RotationPolicy struct {
-	Enabled         bool
-	Interval        time.Duration
-	MaxUsageCount   int64
-	AutoRotate      bool
-	NotifyBefore    time.Duration
+	Enabled       bool
+	Interval      time.Duration
+	MaxUsageCount int64
+	AutoRotate    bool
+	NotifyBefore  time.Duration
 }
 
 // KyberEngine implements CRYSTALS-Kyber KEM
@@ -184,9 +183,9 @@ type KEMCache struct {
 
 // CachedKEM represents cached KEM
 type CachedKEM struct {
-	Ciphertext  []byte
+	Ciphertext   []byte
 	SharedSecret []byte
-	Timestamp   time.Time
+	Timestamp    time.Time
 }
 
 // DilithiumEngine implements CRYSTALS-Dilithium signatures
@@ -212,27 +211,27 @@ type CachedSignature struct {
 
 // HybridCryptoEngine implements hybrid classical+quantum crypto
 type HybridCryptoEngine struct {
-	mu             sync.RWMutex
+	mu              sync.RWMutex
 	classicalEngine interface{}
 	quantumEngine   interface{}
-	combiner       *KeyCombiner
+	combiner        *KeyCombiner
 }
 
 // KeyCombiner combines classical and quantum keys
 type KeyCombiner struct {
-	mu         sync.RWMutex
-	algorithm  CombinerAlgorithm
-	kdf        *KeyDerivationFunction
+	mu        sync.RWMutex
+	algorithm CombinerAlgorithm
+	kdf       *KeyDerivationFunction
 }
 
 // CombinerAlgorithm defines combination algorithm
 type CombinerAlgorithm string
 
 const (
-	CombinerXOR        CombinerAlgorithm = "xor"
-	CombinerConcat     CombinerAlgorithm = "concat"
-	CombinerKDF        CombinerAlgorithm = "kdf"
-	CombinerHKDF       CombinerAlgorithm = "hkdf"
+	CombinerXOR    CombinerAlgorithm = "xor"
+	CombinerConcat CombinerAlgorithm = "concat"
+	CombinerKDF    CombinerAlgorithm = "kdf"
+	CombinerHKDF   CombinerAlgorithm = "hkdf"
 )
 
 // KeyDerivationFunction implements KDF
@@ -247,10 +246,10 @@ type KeyDerivationFunction struct {
 type KDFAlgorithm string
 
 const (
-	KDFArgon2   KDFAlgorithm = "argon2"
-	KDFPBKDF2   KDFAlgorithm = "pbkdf2"
-	KDFHKDF     KDFAlgorithm = "hkdf"
-	KDFScrypt   KDFAlgorithm = "scrypt"
+	KDFArgon2 KDFAlgorithm = "argon2"
+	KDFPBKDF2 KDFAlgorithm = "pbkdf2"
+	KDFHKDF   KDFAlgorithm = "hkdf"
+	KDFScrypt KDFAlgorithm = "scrypt"
 )
 
 // CryptoAgilityFramework enables crypto algorithm agility
@@ -264,48 +263,48 @@ type CryptoAgilityFramework struct {
 
 // AlgorithmProfile defines algorithm profile
 type AlgorithmProfile struct {
-	ID              string
-	Name            string
-	Type            AlgorithmType
-	SecurityLevel   int
-	QuantumResistant bool
-	Enabled         bool
+	ID                 string
+	Name               string
+	Type               AlgorithmType
+	SecurityLevel      int
+	QuantumResistant   bool
+	Enabled            bool
 	PerformanceProfile *PerformanceProfile
-	ComplianceFlags []string
-	DeprecationDate *time.Time
+	ComplianceFlags    []string
+	DeprecationDate    *time.Time
 }
 
 // AlgorithmType defines algorithm types
 type AlgorithmType string
 
 const (
-	AlgorithmTypeKEM       AlgorithmType = "kem"
-	AlgorithmTypeSignature AlgorithmType = "signature"
+	AlgorithmTypeKEM        AlgorithmType = "kem"
+	AlgorithmTypeSignature  AlgorithmType = "signature"
 	AlgorithmTypeEncryption AlgorithmType = "encryption"
 	AlgorithmTypeHash       AlgorithmType = "hash"
 )
 
 // PerformanceProfile contains performance metrics
 type PerformanceProfile struct {
-	KeyGenSpeed      float64 // ops/sec
-	EncryptSpeed     float64 // MB/s
-	DecryptSpeed     float64 // MB/s
-	SignSpeed        float64 // ops/sec
-	VerifySpeed      float64 // ops/sec
-	KeySize          int     // bytes
+	KeyGenSpeed         float64 // ops/sec
+	EncryptSpeed        float64 // MB/s
+	DecryptSpeed        float64 // MB/s
+	SignSpeed           float64 // ops/sec
+	VerifySpeed         float64 // ops/sec
+	KeySize             int     // bytes
 	CiphertextExpansion float64 // ratio
 }
 
 // MigrationPlan defines crypto migration plan
 type MigrationPlan struct {
-	FromAlgorithm   string
-	ToAlgorithm     string
-	StartDate       time.Time
-	EndDate         time.Time
-	RollbackPlan    *RollbackPlan
-	MigrationSteps  []MigrationStep
-	CurrentStep     int
-	Status          MigrationStatus
+	FromAlgorithm  string
+	ToAlgorithm    string
+	StartDate      time.Time
+	EndDate        time.Time
+	RollbackPlan   *RollbackPlan
+	MigrationSteps []MigrationStep
+	CurrentStep    int
+	Status         MigrationStatus
 }
 
 // MigrationStatus defines migration status
@@ -321,9 +320,9 @@ const (
 
 // RollbackPlan defines rollback plan
 type RollbackPlan struct {
-	Enabled      bool
+	Enabled           bool
 	TriggerConditions []RollbackCondition
-	Steps        []RollbackStep
+	Steps             []RollbackStep
 }
 
 // RollbackCondition defines rollback conditions
@@ -364,18 +363,18 @@ const (
 
 // QuantumCryptoMetrics contains metrics
 type QuantumCryptoMetrics struct {
-	mu                    sync.RWMutex
-	TotalKeys             int64
-	KeyRotations          int64
-	EncryptionOps         int64
-	DecryptionOps         int64
-	SignatureOps          int64
-	VerificationOps       int64
-	HybridOps             int64
-	QuantumOps            int64
-	AverageOpLatency      time.Duration
-	CacheHitRate          float64
-	LastUpdated           time.Time
+	mu               sync.RWMutex
+	TotalKeys        int64
+	KeyRotations     int64
+	EncryptionOps    int64
+	DecryptionOps    int64
+	SignatureOps     int64
+	VerificationOps  int64
+	HybridOps        int64
+	QuantumOps       int64
+	AverageOpLatency time.Duration
+	CacheHitRate     float64
+	LastUpdated      time.Time
 }
 
 // NewQuantumCryptoManager creates quantum crypto manager

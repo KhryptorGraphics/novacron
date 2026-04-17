@@ -13,10 +13,10 @@ type NILASConfig struct {
 
 // NILASScheduler implements non-invasive lifetime-aware scheduling as tie-breaker
 type NILASScheduler struct {
-	resourceAware *ResourceAwareScheduler
-	predictor     LifetimePredictor
-	config        NILASConfig
-	hostLifetimeCache map[string]time.Time
+	resourceAware     *ResourceAwareScheduler
+	predictor         LifetimePredictor
+	config            NILASConfig
+	hostLifetimeCache map[string]time.Duration
 	hostLifetimeMu    sync.RWMutex
 	repredictInterval time.Duration
 }
@@ -27,7 +27,7 @@ func NewNILASScheduler(resourceAware *ResourceAwareScheduler, predictor Lifetime
 		resourceAware:     resourceAware,
 		predictor:         predictor,
 		config:            config,
-		hostLifetimeCache: make(map[string]time.Time),
+		hostLifetimeCache: make(map[string]time.Duration),
 		repredictInterval: 5 * time.Minute,
 	}
 	return s

@@ -76,11 +76,11 @@ type ResourceConstraint struct {
 
 // NetworkConstraint represents network-specific constraints
 type NetworkConstraint struct {
-	MinBandwidthBps   uint64        `json:"min_bandwidth_bps"`   // Minimum bandwidth required
-	MaxLatencyMs      float64       `json:"max_latency_ms"`      // Maximum acceptable latency
-	RequiredTopology  string        `json:"required_topology"`   // Required network topology (e.g., "low-latency")
-	MinConnections    int           `json:"min_connections"`     // Minimum number of network connections
-	BandwidthGuarantee bool         `json:"bandwidth_guarantee"` // Whether bandwidth must be guaranteed
+	MinBandwidthBps    uint64  `json:"min_bandwidth_bps"`   // Minimum bandwidth required
+	MaxLatencyMs       float64 `json:"max_latency_ms"`      // Maximum acceptable latency
+	RequiredTopology   string  `json:"required_topology"`   // Required network topology (e.g., "low-latency")
+	MinConnections     int     `json:"min_connections"`     // Minimum number of network connections
+	BandwidthGuarantee bool    `json:"bandwidth_guarantee"` // Whether bandwidth must be guaranteed
 }
 
 // ResourceRequest represents a request for resources
@@ -149,16 +149,16 @@ type SchedulerConfig struct {
 
 	// BalancingWeight determines weight given to load balancing vs. resource efficiency
 	BalancingWeight float64
-	
+
 	// NetworkAwarenessEnabled enables network-aware scheduling
 	NetworkAwarenessEnabled bool
-	
+
 	// NetworkScoreWeight weight of network score in overall scoring
 	NetworkScoreWeight float64
-	
+
 	// MaxNetworkUtilization is the maximum allowed network utilization percentage
 	MaxNetworkUtilization float64
-	
+
 	// BandwidthPredictionEnabled enables bandwidth prediction for scheduling
 	BandwidthPredictionEnabled bool
 }
@@ -169,11 +169,11 @@ func ValidateAndNormalizeWeights(config *SchedulerConfig) error {
 	if config.BalancingWeight < 0.0 || config.BalancingWeight > 1.0 {
 		return fmt.Errorf("BalancingWeight must be between 0.0 and 1.0, got %f", config.BalancingWeight)
 	}
-	
+
 	if config.NetworkScoreWeight < 0.0 || config.NetworkScoreWeight > 1.0 {
 		return fmt.Errorf("NetworkScoreWeight must be between 0.0 and 1.0, got %f", config.NetworkScoreWeight)
 	}
-	
+
 	// Ensure weights don't exceed 1.0 when combined
 	if config.NetworkAwarenessEnabled {
 		totalWeight := config.BalancingWeight + config.NetworkScoreWeight
@@ -185,12 +185,12 @@ func ValidateAndNormalizeWeights(config *SchedulerConfig) error {
 				normalizationFactor := 1.0 / totalWeight
 				config.BalancingWeight *= normalizationFactor * 0.8 // Leave 20% for resource weight
 				config.NetworkScoreWeight *= normalizationFactor * 0.8
-				log.Printf("Normalized weights: BalancingWeight=%.3f, NetworkScoreWeight=%.3f", 
+				log.Printf("Normalized weights: BalancingWeight=%.3f, NetworkScoreWeight=%.3f",
 					config.BalancingWeight, config.NetworkScoreWeight)
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -208,18 +208,18 @@ func DefaultSchedulerConfig() SchedulerConfig {
 			ResourceDisk:    1.2, // Disk can be overcommitted by 20%
 			ResourceNetwork: 2.0, // Network can be overcommitted by 100%
 		},
-		BalancingWeight: 0.5, // Equal weight to load balancing and resource efficiency
-		NetworkAwarenessEnabled: false,
-		NetworkScoreWeight: 0.3,
-		MaxNetworkUtilization: 90.0,
+		BalancingWeight:            0.5, // Equal weight to load balancing and resource efficiency
+		NetworkAwarenessEnabled:    false,
+		NetworkScoreWeight:         0.3,
+		MaxNetworkUtilization:      90.0,
 		BandwidthPredictionEnabled: false,
 	}
-	
+
 	// Validate and normalize weights
 	if err := ValidateAndNormalizeWeights(&config); err != nil {
 		log.Printf("Warning: Weight validation failed for default config: %v", err)
 	}
-	
+
 	return config
 }
 
@@ -228,8 +228,8 @@ type NetworkTopologyProvider interface {
 	GetNetworkCost(nodeA, nodeB string) (float64, error)
 	GetBandwidthAvailability(nodeID string) (float64, error)
 	GetNetworkUtilization() map[string]float64
-	GetBandwidthCapability(nodeID string) (uint64, error)        // Get maximum bandwidth capability
-	GetLatencyBetweenNodes(nodeA, nodeB string) (float64, error) // Get latency in milliseconds
+	GetBandwidthCapability(nodeID string) (uint64, error)                           // Get maximum bandwidth capability
+	GetLatencyBetweenNodes(nodeA, nodeB string) (float64, error)                    // Get latency in milliseconds
 	ValidateNetworkConstraints(nodeID string, constraints *NetworkConstraint) error // Validate network constraints
 }
 
@@ -259,13 +259,13 @@ type AIProvider interface {
 
 // AISchedulingRecommendation represents AI-based scheduling recommendations
 type AISchedulingRecommendation struct {
-	NodeID          string                 `json:"node_id"`
-	Score           float64                `json:"score"`
-	Confidence      float64                `json:"confidence"`
-	Reasoning       []string               `json:"reasoning"`
-	PredictedLoad   map[ResourceType]float64 `json:"predicted_load"`
-	RiskAssessment  map[string]float64     `json:"risk_assessment"`
-	OptimizationTips []string              `json:"optimization_tips"`
+	NodeID           string                   `json:"node_id"`
+	Score            float64                  `json:"score"`
+	Confidence       float64                  `json:"confidence"`
+	Reasoning        []string                 `json:"reasoning"`
+	PredictedLoad    map[ResourceType]float64 `json:"predicted_load"`
+	RiskAssessment   map[string]float64       `json:"risk_assessment"`
+	OptimizationTips []string                 `json:"optimization_tips"`
 }
 
 // AIMetricsData represents data sent to AI engine for analysis
@@ -281,17 +281,17 @@ type AIMetricsData struct {
 
 // AISchedulerConfig contains AI-specific configuration
 type AISchedulerConfig struct {
-	Enabled                 bool          `json:"enabled"`
-	AIEngineURL            string        `json:"ai_engine_url"`
-	PredictionHorizon      int           `json:"prediction_horizon_minutes"`
-	ConfidenceThreshold    float64       `json:"confidence_threshold"`
-	AnomalySensitivity     float64       `json:"anomaly_sensitivity"`
-	MaxRetries             int           `json:"max_retries"`
-	RequestTimeout         time.Duration `json:"request_timeout"`
+	Enabled                   bool          `json:"enabled"`
+	AIEngineURL               string        `json:"ai_engine_url"`
+	PredictionHorizon         int           `json:"prediction_horizon_minutes"`
+	ConfidenceThreshold       float64       `json:"confidence_threshold"`
+	AnomalySensitivity        float64       `json:"anomaly_sensitivity"`
+	MaxRetries                int           `json:"max_retries"`
+	RequestTimeout            time.Duration `json:"request_timeout"`
 	MetricsCollectionInterval time.Duration `json:"metrics_collection_interval"`
-	EnableProactiveScaling bool          `json:"enable_proactive_scaling"`
-	EnableAnomalyDetection bool          `json:"enable_anomaly_detection"`
-	AIWeightInScheduling   float64       `json:"ai_weight_in_scheduling"`
+	EnableProactiveScaling    bool          `json:"enable_proactive_scaling"`
+	EnableAnomalyDetection    bool          `json:"enable_anomaly_detection"`
+	AIWeightInScheduling      float64       `json:"ai_weight_in_scheduling"`
 }
 
 // Scheduler handles resource scheduling across nodes
@@ -313,8 +313,8 @@ type Scheduler struct {
 	httpClient         *http.Client
 	metricsHistory     []AIMetricsData
 	metricsMutex       sync.RWMutex
-	globalPool         *GlobalResourcePool   // Global resource pooling for federated scheduling
-	federationProvider FederationProvider   // Provider for cross-cluster communication
+	globalPool         *GlobalResourcePool // Global resource pooling for federated scheduling
+	federationProvider FederationProvider  // Provider for cross-cluster communication
 }
 
 // SetNetworkProvider sets the network topology provider for network-aware scheduling
@@ -331,12 +331,12 @@ func (s *Scheduler) SetAIProvider(provider AIProvider) {
 func DefaultAISchedulerConfig() AISchedulerConfig {
 	return AISchedulerConfig{
 		Enabled:                   false,
-		AIEngineURL:              "http://localhost:8095",
-		PredictionHorizon:        60,
-		ConfidenceThreshold:      0.7,
-		AnomalySensitivity:       0.1,
-		MaxRetries:               3,
-		RequestTimeout:           30 * time.Second,
+		AIEngineURL:               "http://localhost:8095",
+		PredictionHorizon:         60,
+		ConfidenceThreshold:       0.7,
+		AnomalySensitivity:        0.1,
+		MaxRetries:                3,
+		RequestTimeout:            30 * time.Second,
 		MetricsCollectionInterval: 5 * time.Minute,
 		EnableProactiveScaling:    true,
 		EnableAnomalyDetection:    true,
@@ -366,7 +366,7 @@ func NewHTTPAIProvider(baseURL string, timeout time.Duration, maxRetries int) *H
 func (p *HTTPAIProvider) PredictResourceDemand(nodeID string, resourceType ResourceType, horizonMinutes int) ([]float64, float64, error) {
 	requestData := map[string]interface{}{
 		"resource_id":        nodeID,
-		"metrics":           map[string]float64{string(resourceType) + "_usage": 0.5},
+		"metrics":            map[string]float64{string(resourceType) + "_usage": 0.5},
 		"prediction_horizon": horizonMinutes,
 	}
 
@@ -406,8 +406,8 @@ func (p *HTTPAIProvider) PredictResourceDemand(nodeID string, resourceType Resou
 // OptimizePerformance optimizes performance using AI engine
 func (p *HTTPAIProvider) OptimizePerformance(clusterData map[string]interface{}, goals []string) (map[string]interface{}, error) {
 	requestData := map[string]interface{}{
-		"cluster_id":        "default",
-		"performance_data":  []map[string]interface{}{clusterData},
+		"cluster_id":         "default",
+		"performance_data":   []map[string]interface{}{clusterData},
 		"optimization_goals": goals,
 	}
 
@@ -427,7 +427,7 @@ func (p *HTTPAIProvider) OptimizePerformance(clusterData map[string]interface{},
 // AnalyzeWorkload analyzes workload patterns using AI engine
 func (p *HTTPAIProvider) AnalyzeWorkload(vmID string, workloadData []map[string]interface{}) (map[string]interface{}, error) {
 	requestData := map[string]interface{}{
-		"vm_id":        vmID,
+		"vm_id":         vmID,
 		"workload_data": workloadData,
 	}
 
@@ -1007,7 +1007,7 @@ func (s *Scheduler) findBestNode(request *ResourceRequest, nodes []*NodeResource
 		// Combine scores based on weights
 		var combinedScore float64
 		if s.config.NetworkAwarenessEnabled {
-			combinedScore = s.config.BalancingWeight*loadScore + 
+			combinedScore = s.config.BalancingWeight*loadScore +
 				(1-s.config.BalancingWeight-s.config.NetworkScoreWeight)*resourceScore +
 				s.config.NetworkScoreWeight*networkScore
 		} else {
@@ -1057,7 +1057,7 @@ func (s *Scheduler) canNodeFulfillRequest(node *NodeResources, request *Resource
 				return false
 			}
 		}
-		
+
 		// Validate specific network constraints if present
 		if request.NetworkConstraints != nil {
 			if err := s.validateNetworkConstraintsForNode(node.NodeID, request.NetworkConstraints); err != nil {
@@ -1075,41 +1075,42 @@ func (s *Scheduler) validateNetworkConstraintsForNode(nodeID string, constraints
 	if s.networkProvider == nil {
 		return fmt.Errorf("network provider not available")
 	}
-	
+
+	otherNodes := make([]string, 0)
+
 	// Check minimum bandwidth requirement
 	if constraints.MinBandwidthBps > 0 {
 		bandwidthCap, err := s.networkProvider.GetBandwidthCapability(nodeID)
 		if err != nil {
 			return fmt.Errorf("failed to get bandwidth capability: %w", err)
 		}
-		
+
 		// Get current bandwidth availability
 		bandwidthAvail, err := s.networkProvider.GetBandwidthAvailability(nodeID)
 		if err != nil {
 			return fmt.Errorf("failed to get bandwidth availability: %w", err)
 		}
-		
+
 		// Calculate available bandwidth in bps (availability is in percentage)
 		availableBps := uint64(float64(bandwidthCap) * (bandwidthAvail / 100.0))
-		
+
 		if constraints.MinBandwidthBps > availableBps {
-			return fmt.Errorf("insufficient bandwidth: required %d bps, available %d bps", 
+			return fmt.Errorf("insufficient bandwidth: required %d bps, available %d bps",
 				constraints.MinBandwidthBps, availableBps)
 		}
 	}
-	
+
 	// Check maximum latency requirement
 	if constraints.MaxLatencyMs > 0 {
 		// Check latency to all other nodes to ensure the constraint can be met
 		s.nodeMutex.RLock()
-		otherNodes := make([]string, 0)
 		for nID := range s.nodes {
 			if nID != nodeID {
 				otherNodes = append(otherNodes, nID)
 			}
 		}
 		s.nodeMutex.RUnlock()
-		
+
 		// Validate latency requirements against other nodes
 		for _, otherNodeID := range otherNodes {
 			latency, err := s.networkProvider.GetLatencyBetweenNodes(nodeID, otherNodeID)
@@ -1118,28 +1119,28 @@ func (s *Scheduler) validateNetworkConstraintsForNode(nodeID string, constraints
 				log.Printf("Warning: Failed to get latency between %s and %s: %v", nodeID, otherNodeID, err)
 				continue
 			}
-			
+
 			if latency > constraints.MaxLatencyMs {
-				return fmt.Errorf("latency constraint violated: latency to node %s is %.2f ms, maximum allowed is %.2f ms", 
+				return fmt.Errorf("latency constraint violated: latency to node %s is %.2f ms, maximum allowed is %.2f ms",
 					otherNodeID, latency, constraints.MaxLatencyMs)
 			}
 		}
 	}
-	
+
 	// Check minimum connections requirement
 	if constraints.MinConnections > 0 {
 		connectionCount := len(otherNodes) // Number of other nodes this node can connect to
 		if connectionCount < constraints.MinConnections {
-			return fmt.Errorf("insufficient network connections: node has %d connections, minimum required is %d", 
+			return fmt.Errorf("insufficient network connections: node has %d connections, minimum required is %d",
 				connectionCount, constraints.MinConnections)
 		}
 	}
-	
+
 	// Use the NetworkTopologyProvider's validation if it supports constraints validation
 	if err := s.networkProvider.ValidateNetworkConstraints(nodeID, constraints); err != nil {
 		return fmt.Errorf("network constraint validation failed: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -1392,7 +1393,7 @@ func (s *Scheduler) collectMetricsForAI() {
 				Metrics:      node.Metrics,
 				Metadata: map[string]interface{}{
 					"available_percentage": resource.AvailablePercentage(),
-					"last_update":         node.LastUpdate,
+					"last_update":          node.LastUpdate,
 				},
 			}
 
@@ -1522,12 +1523,12 @@ func (s *Scheduler) GetAISchedulingRecommendations(constraints []ResourceConstra
 		}
 
 		recommendations = append(recommendations, AISchedulingRecommendation{
-			NodeID:          nodeID,
-			Score:           nodeScore,
-			Confidence:      confidence,
-			Reasoning:       reasoning,
-			PredictedLoad:   predictedLoad,
-			RiskAssessment:  riskAssessment,
+			NodeID:           nodeID,
+			Score:            nodeScore,
+			Confidence:       confidence,
+			Reasoning:        reasoning,
+			PredictedLoad:    predictedLoad,
+			RiskAssessment:   riskAssessment,
 			OptimizationTips: optimizationTips,
 		})
 	}
@@ -1545,7 +1546,7 @@ func (s *Scheduler) calculateAINodeScore(node *NodeResources, predictedLoad map[
 	var score float64 = 1.0
 
 	// Factor in predicted resource utilization
-	for resourceType, predictedUtil := range predictedLoad {
+	for _, predictedUtil := range predictedLoad {
 		if predictedUtil > 0.9 { // Very high utilization predicted
 			score *= 0.2
 		} else if predictedUtil > 0.8 { // High utilization predicted
@@ -1563,7 +1564,7 @@ func (s *Scheduler) calculateAINodeScore(node *NodeResources, predictedLoad map[
 
 			if available < constraint.MinAmount {
 				score *= 0.1 // Severely penalize if constraints won't be met
-			} else if available < constraint.MinAmount * 1.2 {
+			} else if available < constraint.MinAmount*1.2 {
 				score *= 0.7 // Penalize if tight fit
 			}
 		}
@@ -1588,14 +1589,22 @@ func (s *Scheduler) calculateAINodeScore(node *NodeResources, predictedLoad map[
 func (s *Scheduler) OptimizeSchedulingWithAI(request *ResourceRequest) (string, error) {
 	if !s.aiConfig.Enabled || s.aiProvider == nil {
 		// Fall back to standard scheduling
-		return s.allocateResources(request)
+		allocation, err := s.scheduleLocalResourceAllocation(request)
+		if err != nil {
+			return "", err
+		}
+		return allocation.RequestID, nil
 	}
 
 	// Get AI recommendations
 	recommendations, err := s.GetAISchedulingRecommendations(request.Constraints)
 	if err != nil {
 		log.Printf("AI recommendations failed, falling back to standard scheduling: %v", err)
-		return s.allocateResources(request)
+		allocation, scheduleErr := s.scheduleLocalResourceAllocation(request)
+		if scheduleErr != nil {
+			return "", scheduleErr
+		}
+		return allocation.RequestID, nil
 	}
 
 	// Try to allocate based on AI recommendations
@@ -1635,7 +1644,11 @@ func (s *Scheduler) OptimizeSchedulingWithAI(request *ResourceRequest) (string, 
 
 	// If AI-based allocation fails, fall back to standard allocation
 	log.Printf("AI-optimized allocation failed, falling back to standard scheduling for request %s", request.ID)
-	return s.allocateResources(request)
+	allocation, err := s.scheduleLocalResourceAllocation(request)
+	if err != nil {
+		return "", err
+	}
+	return allocation.RequestID, nil
 }
 
 // tryAllocateOnNode attempts to allocate resources on a specific node
@@ -1705,18 +1718,18 @@ func (s *Scheduler) GetAIMetrics() map[string]interface{} {
 	s.nodeMutex.RUnlock()
 
 	return map[string]interface{}{
-		"ai_enabled":              s.aiConfig.Enabled,
+		"ai_enabled":             s.aiConfig.Enabled,
 		"ai_engine_url":          s.aiConfig.AIEngineURL,
 		"metrics_history_count":  len(s.metricsHistory),
 		"prediction_horizon_min": s.aiConfig.PredictionHorizon,
 		"confidence_threshold":   s.aiConfig.ConfidenceThreshold,
 		"anomaly_sensitivity":    s.aiConfig.AnomalySensitivity,
-		"total_nodes":           totalNodes,
-		"anomalous_nodes":       anomalousNodes,
-		"ai_provider_available": s.aiProvider != nil,
-		"proactive_scaling":     s.aiConfig.EnableProactiveScaling,
-		"anomaly_detection":     s.aiConfig.EnableAnomalyDetection,
-		"ai_scheduling_weight":  s.aiConfig.AIWeightInScheduling,
+		"total_nodes":            totalNodes,
+		"anomalous_nodes":        anomalousNodes,
+		"ai_provider_available":  s.aiProvider != nil,
+		"proactive_scaling":      s.aiConfig.EnableProactiveScaling,
+		"anomaly_detection":      s.aiConfig.EnableAnomalyDetection,
+		"ai_scheduling_weight":   s.aiConfig.AIWeightInScheduling,
 	}
 }
 
@@ -1842,11 +1855,17 @@ func (s *Scheduler) GetGlobalResourceInventory() (map[string]ClusterResourceInfo
 	}
 	s.nodeMutex.RUnlock()
 
+	localNodes := make(map[string]*NodeResources)
+	for nodeID, node := range s.GetNodesStatus() {
+		nodeCopy := node
+		localNodes[nodeID] = &nodeCopy
+	}
+
 	inventory[s.globalPool.parentCluster] = ClusterResourceInfo{
 		ClusterID:     s.globalPool.parentCluster,
 		Location:      "local",
 		Resources:     localResources,
-		Nodes:         s.GetNodesStatus(),
+		Nodes:         localNodes,
 		NetworkCost:   0.0, // Local cluster has no network cost
 		LastHeartbeat: time.Now(),
 		IsHealthy:     true,
@@ -1932,7 +1951,7 @@ func (s *Scheduler) canClusterFulfillRequest(cluster *ClusterResourceInfo, reque
 		if cluster.NetworkCost > 0 { // Remote cluster
 			// For remote clusters, we need to be more conservative with network constraints
 			if request.NetworkConstraints.MaxLatencyMs > 0 &&
-			   cluster.NetworkCost > request.NetworkConstraints.MaxLatencyMs/100.0 {
+				cluster.NetworkCost > request.NetworkConstraints.MaxLatencyMs/100.0 {
 				return false
 			}
 		}
@@ -2001,10 +2020,6 @@ func (s *Scheduler) calculateGlobalClusterScore(cluster *ClusterResourceInfo, re
 // scheduleLocalResourceAllocation schedules resources on the local cluster
 func (s *Scheduler) scheduleLocalResourceAllocation(request *ResourceRequest) (*ResourceAllocation, error) {
 	// Use existing local scheduling logic
-	s.requestMutex.RLock()
-	pendingRequests := []*ResourceRequest{request}
-	s.requestMutex.RUnlock()
-
 	s.nodeMutex.RLock()
 	availableNodes := make([]*NodeResources, 0)
 	for _, node := range s.nodes {
@@ -2107,8 +2122,6 @@ func (s *Scheduler) GetGlobalResourceUtilization() (map[string]map[ResourceType]
 
 // ScheduleGlobalWorkloadDistribution distributes workloads across clusters for optimal performance
 func (s *Scheduler) ScheduleGlobalWorkloadDistribution(workloads []ResourceRequest, strategy string) ([]ResourceAllocation, error) {
-	var allocations []ResourceAllocation
-
 	switch strategy {
 	case "balanced":
 		return s.scheduleBalancedDistribution(workloads)

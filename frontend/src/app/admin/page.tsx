@@ -1,10 +1,9 @@
-"use client";
+'use client';
 
 // Disable static generation for this page
 export const dynamic = 'force-dynamic';
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/use-toast";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { SkipToMain } from "@/components/accessibility/a11y-components";
@@ -23,10 +22,8 @@ import {
   Database,
   Shield,
   BarChart3,
-  Server,
   Bell,
   UserCheck,
-  Key,
   FileText,
   AlertTriangle,
   Activity
@@ -34,6 +31,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
 
 // Admin Components
 import { DatabaseEditor } from "@/components/admin/DatabaseEditor";
@@ -47,9 +45,10 @@ import { RealTimeDashboard } from "@/components/admin/RealTimeDashboard";
 
 export default function AdminDashboard() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [notifications, setNotifications] = useState(5);
+  const notifications = 5;
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(new Date());
+  const { user, logout } = useAuth();
   
   // Loading states
   const [loadingState, setLoadingState] = useState({
@@ -59,18 +58,16 @@ export default function AdminDashboard() {
     message: ""
   });
   
-  const user = {
-    name: "System Administrator",
-    email: "admin@novacron.io",
-    role: "admin"
+  const navigationUser = {
+    name: [user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.email || "Administrator",
+    email: user?.email || "",
+    role: user?.role || user?.roles?.[0] || "admin"
   };
 
-  const router = useRouter();
   const { toast } = useToast();
   const handleLogout = () => {
-    try { localStorage.removeItem("authToken"); } catch {}
+    logout();
     toast({ title: "Logged out" });
-    router.push("/auth/login");
   };
 
   // Simulate data loading
@@ -187,11 +184,11 @@ export default function AdminDashboard() {
         <SkipToMain />
         
         {/* Mobile Navigation */}
-        <MobileNavigation user={user} onLogout={handleLogout} />
+        <MobileNavigation user={navigationUser} onLogout={handleLogout} />
 
         {/* Desktop Sidebar */}
         <DesktopSidebar 
-          user={user} 
+          user={navigationUser} 
           collapsed={sidebarCollapsed}
           onCollapse={setSidebarCollapsed}
         />

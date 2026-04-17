@@ -17,10 +17,10 @@ import (
 type BridgeType string
 
 const (
-	BridgeTypeNormal     BridgeType = "normal"
-	BridgeTypeVXLAN      BridgeType = "vxlan"
-	BridgeTypeTunnel     BridgeType = "tunnel"
-	BridgeTypeAccess     BridgeType = "access"
+	BridgeTypeNormal BridgeType = "normal"
+	BridgeTypeVXLAN  BridgeType = "vxlan"
+	BridgeTypeTunnel BridgeType = "tunnel"
+	BridgeTypeAccess BridgeType = "access"
 )
 
 // Bridge represents an Open vSwitch bridge
@@ -42,13 +42,13 @@ type Bridge struct {
 
 // BridgeStatus represents the operational status of a bridge
 type BridgeStatus struct {
-	State         string    `json:"state"`
-	Active        bool      `json:"active"`
-	FlowCount     int       `json:"flow_count"`
-	PacketCount   int64     `json:"packet_count"`
-	ByteCount     int64     `json:"byte_count"`
-	LastSeen      time.Time `json:"last_seen"`
-	ErrorCount    int       `json:"error_count"`
+	State       string    `json:"state"`
+	Active      bool      `json:"active"`
+	FlowCount   int       `json:"flow_count"`
+	PacketCount int64     `json:"packet_count"`
+	ByteCount   int64     `json:"byte_count"`
+	LastSeen    time.Time `json:"last_seen"`
+	ErrorCount  int       `json:"error_count"`
 }
 
 // Port represents a port on an OVS bridge
@@ -111,19 +111,19 @@ type FlowRule struct {
 
 // FlowMatch represents OpenFlow matching criteria
 type FlowMatch struct {
-	InPort      string `json:"in_port,omitempty"`
-	EthSrc      string `json:"dl_src,omitempty"`
-	EthDst      string `json:"dl_dst,omitempty"`
-	EthType     string `json:"dl_type,omitempty"`
-	VlanID      int    `json:"dl_vlan,omitempty"`
-	VlanPCP     int    `json:"dl_vlan_pcp,omitempty"`
-	IPSrc       string `json:"nw_src,omitempty"`
-	IPDst       string `json:"nw_dst,omitempty"`
-	IPProto     int    `json:"nw_proto,omitempty"`
-	TCPSrc      int    `json:"tp_src,omitempty"`
-	TCPDst      int    `json:"tp_dst,omitempty"`
-	TunnelID    uint64 `json:"tun_id,omitempty"`
-	Metadata    uint64 `json:"metadata,omitempty"`
+	InPort   string `json:"in_port,omitempty"`
+	EthSrc   string `json:"dl_src,omitempty"`
+	EthDst   string `json:"dl_dst,omitempty"`
+	EthType  string `json:"dl_type,omitempty"`
+	VlanID   int    `json:"dl_vlan,omitempty"`
+	VlanPCP  int    `json:"dl_vlan_pcp,omitempty"`
+	IPSrc    string `json:"nw_src,omitempty"`
+	IPDst    string `json:"nw_dst,omitempty"`
+	IPProto  int    `json:"nw_proto,omitempty"`
+	TCPSrc   int    `json:"tp_src,omitempty"`
+	TCPDst   int    `json:"tp_dst,omitempty"`
+	TunnelID uint64 `json:"tun_id,omitempty"`
+	Metadata uint64 `json:"metadata,omitempty"`
 }
 
 // FlowAction represents OpenFlow actions
@@ -134,33 +134,33 @@ type FlowAction struct {
 
 // QoSPolicy represents Quality of Service policies
 type QoSPolicy struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	Type          QoSType           `json:"type"`
-	Queues        []QoSQueue        `json:"queues"`
-	Rules         []QoSRule         `json:"rules"`
-	Options       map[string]string `json:"options,omitempty"`
-	CreatedAt     time.Time         `json:"created_at"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Type      QoSType           `json:"type"`
+	Queues    []QoSQueue        `json:"queues"`
+	Rules     []QoSRule         `json:"rules"`
+	Options   map[string]string `json:"options,omitempty"`
+	CreatedAt time.Time         `json:"created_at"`
 }
 
 // QoSType represents different types of QoS policies
 type QoSType string
 
 const (
-	QoSTypeHTB    QoSType = "linux-htb"
-	QoSTypeCBQ    QoSType = "linux-cbq"
-	QoSTypeFQ     QoSType = "linux-fq_codel"
-	QoSTypeSFQ    QoSType = "linux-sfq"
+	QoSTypeHTB QoSType = "linux-htb"
+	QoSTypeCBQ QoSType = "linux-cbq"
+	QoSTypeFQ  QoSType = "linux-fq_codel"
+	QoSTypeSFQ QoSType = "linux-sfq"
 )
 
 // QoSQueue represents a QoS queue configuration
 type QoSQueue struct {
-	ID         int    `json:"id"`
-	MinRate    int64  `json:"min_rate_bps"`
-	MaxRate    int64  `json:"max_rate_bps"`
-	Burst      int64  `json:"burst_bytes"`
-	Priority   int    `json:"priority"`
-	DSCP       int    `json:"dscp,omitempty"`
+	ID       int   `json:"id"`
+	MinRate  int64 `json:"min_rate_bps"`
+	MaxRate  int64 `json:"max_rate_bps"`
+	Burst    int64 `json:"burst_bytes"`
+	Priority int   `json:"priority"`
+	DSCP     int   `json:"dscp,omitempty"`
 }
 
 // QoSRule represents a QoS classification rule
@@ -185,16 +185,16 @@ type BridgeManager struct {
 
 // BridgeManagerConfig holds configuration for the bridge manager
 type BridgeManagerConfig struct {
-	OVSDBPath           string        `json:"ovsdb_path"`
-	OVSctlPath          string        `json:"ovsctl_path"`
-	OFctlPath           string        `json:"ofctl_path"`
-	DefaultController   []string      `json:"default_controller"`
-	DefaultProtocols    []string      `json:"default_protocols"`
-	MonitoringInterval  time.Duration `json:"monitoring_interval"`
-	FlowTableSize       int           `json:"flow_table_size"`
-	EnableSTP           bool          `json:"enable_stp"`
-	EnableRSTP          bool          `json:"enable_rstp"`
-	FailMode            string        `json:"fail_mode"`
+	OVSDBPath          string        `json:"ovsdb_path"`
+	OVSctlPath         string        `json:"ovsctl_path"`
+	OFctlPath          string        `json:"ofctl_path"`
+	DefaultController  []string      `json:"default_controller"`
+	DefaultProtocols   []string      `json:"default_protocols"`
+	MonitoringInterval time.Duration `json:"monitoring_interval"`
+	FlowTableSize      int           `json:"flow_table_size"`
+	EnableSTP          bool          `json:"enable_stp"`
+	EnableRSTP         bool          `json:"enable_rstp"`
+	FailMode           string        `json:"fail_mode"`
 }
 
 // DefaultBridgeManagerConfig returns default configuration
@@ -216,7 +216,7 @@ func DefaultBridgeManagerConfig() BridgeManagerConfig {
 // NewBridgeManager creates a new bridge manager
 func NewBridgeManager(config BridgeManagerConfig) *BridgeManager {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &BridgeManager{
 		bridges:    make(map[string]*Bridge),
 		ovsdbPath:  config.OVSDBPath,
@@ -231,20 +231,20 @@ func NewBridgeManager(config BridgeManagerConfig) *BridgeManager {
 // Start starts the bridge manager
 func (bm *BridgeManager) Start() error {
 	log.Println("Starting OVS Bridge Manager")
-	
+
 	// Check if OVS is installed and running
 	if err := bm.checkOVSAvailability(); err != nil {
 		return fmt.Errorf("OVS not available: %w", err)
 	}
-	
+
 	// Load existing bridges
 	if err := bm.loadExistingBridges(); err != nil {
 		log.Printf("Warning: Failed to load existing bridges: %v", err)
 	}
-	
+
 	// Start monitoring loop
 	go bm.monitoringLoop()
-	
+
 	log.Println("OVS Bridge Manager started successfully")
 	return nil
 }
@@ -262,18 +262,18 @@ func (bm *BridgeManager) checkOVSAvailability() error {
 	if _, err := exec.LookPath("ovs-vsctl"); err != nil {
 		return fmt.Errorf("ovs-vsctl not found: %w", err)
 	}
-	
+
 	// Check ovs-ofctl
 	if _, err := exec.LookPath("ovs-ofctl"); err != nil {
 		return fmt.Errorf("ovs-ofctl not found: %w", err)
 	}
-	
+
 	// Test ovs-vsctl connectivity
 	cmd := exec.Command("ovs-vsctl", "show")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("cannot connect to OVS database: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -281,31 +281,31 @@ func (bm *BridgeManager) checkOVSAvailability() error {
 func (bm *BridgeManager) CreateBridge(ctx context.Context, name string, bridgeType BridgeType, options map[string]string) (*Bridge, error) {
 	bm.bridgesMutex.Lock()
 	defer bm.bridgesMutex.Unlock()
-	
+
 	// Check if bridge already exists
 	if _, exists := bm.bridges[name]; exists {
 		return nil, fmt.Errorf("bridge %s already exists", name)
 	}
-	
+
 	// Create the bridge using ovs-vsctl
 	cmd := exec.Command("ovs-vsctl", "add-br", name)
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("failed to create bridge %s: %w", name, err)
 	}
-	
+
 	// Get bridge UUID
 	uuid, err := bm.getBridgeUUID(name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get bridge UUID: %w", err)
 	}
-	
+
 	// Generate datapath ID
 	dpid, err := bm.getBridgeDatapathID(name)
 	if err != nil {
 		log.Printf("Warning: Could not get datapath ID for bridge %s: %v", name, err)
 		dpid = generateDatapathID()
 	}
-	
+
 	// Create bridge object
 	bridge := &Bridge{
 		Name:       name,
@@ -324,17 +324,17 @@ func (bm *BridgeManager) CreateBridge(ctx context.Context, name string, bridgeTy
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	
+
 	// Configure bridge settings
 	if err := bm.configureBridge(bridge); err != nil {
 		// Clean up on failure
 		bm.deleteBridgeFromOVS(name)
 		return nil, fmt.Errorf("failed to configure bridge: %w", err)
 	}
-	
+
 	// Store the bridge
 	bm.bridges[name] = bridge
-	
+
 	log.Printf("Created OVS bridge: %s (UUID: %s, DPID: %s)", name, uuid, dpid)
 	return bridge, nil
 }
@@ -342,7 +342,7 @@ func (bm *BridgeManager) CreateBridge(ctx context.Context, name string, bridgeTy
 // configureBridge applies configuration to a bridge
 func (bm *BridgeManager) configureBridge(bridge *Bridge) error {
 	name := bridge.Name
-	
+
 	// Set controller
 	if len(bridge.Controller) > 0 {
 		args := []string{"set-controller", name}
@@ -352,17 +352,17 @@ func (bm *BridgeManager) configureBridge(bridge *Bridge) error {
 			return fmt.Errorf("failed to set controller: %w", err)
 		}
 	}
-	
+
 	// Set protocols
 	if len(bridge.Protocols) > 0 {
 		protocols := strings.Join(bridge.Protocols, ",")
-		cmd := exec.Command("ovs-vsctl", "set", "bridge", name, 
+		cmd := exec.Command("ovs-vsctl", "set", "bridge", name,
 			fmt.Sprintf("protocols=%s", protocols))
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("failed to set protocols: %w", err)
 		}
 	}
-	
+
 	// Set fail mode
 	if bm.config.FailMode != "" {
 		cmd := exec.Command("ovs-vsctl", "set-fail-mode", name, bm.config.FailMode)
@@ -370,7 +370,7 @@ func (bm *BridgeManager) configureBridge(bridge *Bridge) error {
 			return fmt.Errorf("failed to set fail mode: %w", err)
 		}
 	}
-	
+
 	// Enable/disable STP/RSTP
 	if bm.config.EnableSTP {
 		cmd := exec.Command("ovs-vsctl", "set", "bridge", name, "stp_enable=true")
@@ -378,14 +378,14 @@ func (bm *BridgeManager) configureBridge(bridge *Bridge) error {
 			log.Printf("Warning: Failed to enable STP on bridge %s: %v", name, err)
 		}
 	}
-	
+
 	if bm.config.EnableRSTP {
 		cmd := exec.Command("ovs-vsctl", "set", "bridge", name, "rstp_enable=true")
 		if err := cmd.Run(); err != nil {
 			log.Printf("Warning: Failed to enable RSTP on bridge %s: %v", name, err)
 		}
 	}
-	
+
 	// Apply custom options
 	for key, value := range bridge.Options {
 		cmd := exec.Command("ovs-vsctl", "set", "bridge", name, fmt.Sprintf("%s=%s", key, value))
@@ -393,7 +393,7 @@ func (bm *BridgeManager) configureBridge(bridge *Bridge) error {
 			log.Printf("Warning: Failed to set option %s=%s on bridge %s: %v", key, value, name, err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -401,26 +401,26 @@ func (bm *BridgeManager) configureBridge(bridge *Bridge) error {
 func (bm *BridgeManager) DeleteBridge(ctx context.Context, name string) error {
 	bm.bridgesMutex.Lock()
 	defer bm.bridgesMutex.Unlock()
-	
+
 	// Check if bridge exists
 	bridge, exists := bm.bridges[name]
 	if !exists {
 		return fmt.Errorf("bridge %s not found", name)
 	}
-	
+
 	// Delete flow rules first
 	if err := bm.deleteAllFlowRules(name); err != nil {
 		log.Printf("Warning: Failed to delete flow rules for bridge %s: %v", name, err)
 	}
-	
+
 	// Delete the bridge from OVS
 	if err := bm.deleteBridgeFromOVS(name); err != nil {
 		return fmt.Errorf("failed to delete bridge from OVS: %w", err)
 	}
-	
+
 	// Remove from our map
 	delete(bm.bridges, name)
-	
+
 	log.Printf("Deleted OVS bridge: %s (UUID: %s)", name, bridge.UUID)
 	return nil
 }
@@ -438,43 +438,43 @@ func (bm *BridgeManager) deleteBridgeFromOVS(name string) error {
 func (bm *BridgeManager) AddPort(ctx context.Context, bridgeName, portName string, portType PortType, options map[string]string) (*Port, error) {
 	bm.bridgesMutex.Lock()
 	defer bm.bridgesMutex.Unlock()
-	
+
 	// Check if bridge exists
 	bridge, exists := bm.bridges[bridgeName]
 	if !exists {
 		return nil, fmt.Errorf("bridge %s not found", bridgeName)
 	}
-	
+
 	// Check if port already exists
 	for _, port := range bridge.Ports {
 		if port.Name == portName {
 			return nil, fmt.Errorf("port %s already exists on bridge %s", portName, bridgeName)
 		}
 	}
-	
+
 	// Add port to OVS
 	if err := bm.addPortToOVS(bridgeName, portName, portType, options); err != nil {
 		return nil, fmt.Errorf("failed to add port to OVS: %w", err)
 	}
-	
+
 	// Get port details
 	ofPort, err := bm.getPortOfPort(bridgeName, portName)
 	if err != nil {
 		log.Printf("Warning: Could not get OpenFlow port number for %s: %v", portName, err)
 		ofPort = 0
 	}
-	
-	uuid, err := bm.getPortUUID(portName)
+
+	portUUID, err := bm.getPortUUID(portName)
 	if err != nil {
 		log.Printf("Warning: Could not get UUID for port %s: %v", portName, err)
-		uuid = uuid.New().String().String()
+		portUUID = uuid.NewString()
 	}
-	
+
 	// Create port object
 	port := &Port{
-		ID:        uuid,
+		ID:        portUUID,
 		Name:      portName,
-		UUID:      uuid,
+		UUID:      portUUID,
 		OfPort:    ofPort,
 		Type:      portType,
 		Interface: portName,
@@ -484,11 +484,11 @@ func (bm *BridgeManager) AddPort(ctx context.Context, bridgeName, portName strin
 			Link:  true,
 		},
 	}
-	
+
 	// Add to bridge ports
 	bridge.Ports = append(bridge.Ports, *port)
 	bridge.UpdatedAt = time.Now()
-	
+
 	log.Printf("Added port %s to bridge %s (OF port: %d)", portName, bridgeName, ofPort)
 	return port, nil
 }
@@ -496,22 +496,22 @@ func (bm *BridgeManager) AddPort(ctx context.Context, bridgeName, portName strin
 // addPortToOVS adds a port to OVS bridge
 func (bm *BridgeManager) addPortToOVS(bridgeName, portName string, portType PortType, options map[string]string) error {
 	args := []string{"add-port", bridgeName, portName}
-	
+
 	// Add port type and options
 	if portType != PortTypePhysical {
 		args = append(args, "--", "set", "interface", portName, fmt.Sprintf("type=%s", portType))
-		
+
 		// Add type-specific options
 		for key, value := range options {
 			args = append(args, fmt.Sprintf("options:%s=%s", key, value))
 		}
 	}
-	
+
 	cmd := exec.Command("ovs-vsctl", args...)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to add port: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -519,13 +519,13 @@ func (bm *BridgeManager) addPortToOVS(bridgeName, portName string, portType Port
 func (bm *BridgeManager) DeletePort(ctx context.Context, bridgeName, portName string) error {
 	bm.bridgesMutex.Lock()
 	defer bm.bridgesMutex.Unlock()
-	
+
 	// Check if bridge exists
 	bridge, exists := bm.bridges[bridgeName]
 	if !exists {
 		return fmt.Errorf("bridge %s not found", bridgeName)
 	}
-	
+
 	// Find and remove port from bridge
 	portFound := false
 	for i, port := range bridge.Ports {
@@ -535,19 +535,19 @@ func (bm *BridgeManager) DeletePort(ctx context.Context, bridgeName, portName st
 			break
 		}
 	}
-	
+
 	if !portFound {
 		return fmt.Errorf("port %s not found on bridge %s", portName, bridgeName)
 	}
-	
+
 	// Remove from OVS
 	cmd := exec.Command("ovs-vsctl", "del-port", bridgeName, portName)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to delete port from OVS: %w", err)
 	}
-	
+
 	bridge.UpdatedAt = time.Now()
-	
+
 	log.Printf("Deleted port %s from bridge %s", portName, bridgeName)
 	return nil
 }
@@ -556,34 +556,34 @@ func (bm *BridgeManager) DeletePort(ctx context.Context, bridgeName, portName st
 func (bm *BridgeManager) AddFlowRule(ctx context.Context, bridgeName string, rule FlowRule) error {
 	bm.bridgesMutex.Lock()
 	defer bm.bridgesMutex.Unlock()
-	
+
 	// Check if bridge exists
 	bridge, exists := bm.bridges[bridgeName]
 	if !exists {
 		return fmt.Errorf("bridge %s not found", bridgeName)
 	}
-	
+
 	// Generate rule ID if not provided
 	if rule.ID == "" {
-		rule.ID = uuid.New().String().String()
+		rule.ID = uuid.NewString()
 	}
-	
+
 	// Set creation time
 	rule.CreatedAt = time.Now()
-	
+
 	// Convert rule to ovs-ofctl format
 	ruleStr := bm.flowRuleToString(rule)
-	
+
 	// Add rule to OVS
 	cmd := exec.Command("ovs-ofctl", "add-flow", bridgeName, ruleStr)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to add flow rule: %w", err)
 	}
-	
+
 	// Add to bridge rules
 	bridge.FlowRules = append(bridge.FlowRules, rule)
 	bridge.UpdatedAt = time.Now()
-	
+
 	log.Printf("Added flow rule %s to bridge %s", rule.ID, bridgeName)
 	return nil
 }
@@ -591,20 +591,20 @@ func (bm *BridgeManager) AddFlowRule(ctx context.Context, bridgeName string, rul
 // flowRuleToString converts a FlowRule to ovs-ofctl string format
 func (bm *BridgeManager) flowRuleToString(rule FlowRule) string {
 	var parts []string
-	
+
 	// Add table if specified
 	if rule.Table > 0 {
 		parts = append(parts, fmt.Sprintf("table=%d", rule.Table))
 	}
-	
+
 	// Add priority
 	parts = append(parts, fmt.Sprintf("priority=%d", rule.Priority))
-	
+
 	// Add cookie
 	if rule.Cookie > 0 {
 		parts = append(parts, fmt.Sprintf("cookie=%d", rule.Cookie))
 	}
-	
+
 	// Add timeouts
 	if rule.IdleTimeout > 0 {
 		parts = append(parts, fmt.Sprintf("idle_timeout=%d", rule.IdleTimeout))
@@ -612,26 +612,26 @@ func (bm *BridgeManager) flowRuleToString(rule FlowRule) string {
 	if rule.HardTimeout > 0 {
 		parts = append(parts, fmt.Sprintf("hard_timeout=%d", rule.HardTimeout))
 	}
-	
+
 	// Add match criteria
 	matchParts := bm.flowMatchToString(rule.Match)
 	if matchParts != "" {
 		parts = append(parts, matchParts)
 	}
-	
+
 	// Add actions
 	actionParts := bm.flowActionsToString(rule.Actions)
 	if actionParts != "" {
 		parts = append(parts, fmt.Sprintf("actions=%s", actionParts))
 	}
-	
+
 	return strings.Join(parts, ",")
 }
 
 // flowMatchToString converts FlowMatch to string format
 func (bm *BridgeManager) flowMatchToString(match FlowMatch) string {
 	var parts []string
-	
+
 	if match.InPort != "" {
 		parts = append(parts, fmt.Sprintf("in_port=%s", match.InPort))
 	}
@@ -671,14 +671,14 @@ func (bm *BridgeManager) flowMatchToString(match FlowMatch) string {
 	if match.Metadata > 0 {
 		parts = append(parts, fmt.Sprintf("metadata=%d", match.Metadata))
 	}
-	
+
 	return strings.Join(parts, ",")
 }
 
 // flowActionsToString converts FlowActions to string format
 func (bm *BridgeManager) flowActionsToString(actions []FlowAction) string {
 	var parts []string
-	
+
 	for _, action := range actions {
 		switch action.Type {
 		case "output":
@@ -718,7 +718,7 @@ func (bm *BridgeManager) flowActionsToString(actions []FlowAction) string {
 			}
 		}
 	}
-	
+
 	return strings.Join(parts, ",")
 }
 
@@ -726,13 +726,13 @@ func (bm *BridgeManager) flowActionsToString(actions []FlowAction) string {
 func (bm *BridgeManager) DeleteFlowRule(ctx context.Context, bridgeName, ruleID string) error {
 	bm.bridgesMutex.Lock()
 	defer bm.bridgesMutex.Unlock()
-	
+
 	// Check if bridge exists
 	bridge, exists := bm.bridges[bridgeName]
 	if !exists {
 		return fmt.Errorf("bridge %s not found", bridgeName)
 	}
-	
+
 	// Find and remove rule
 	ruleFound := false
 	var ruleToDelete FlowRule
@@ -744,15 +744,15 @@ func (bm *BridgeManager) DeleteFlowRule(ctx context.Context, bridgeName, ruleID 
 			break
 		}
 	}
-	
+
 	if !ruleFound {
 		return fmt.Errorf("flow rule %s not found on bridge %s", ruleID, bridgeName)
 	}
-	
+
 	// Delete from OVS (use cookie to identify the rule)
 	var cmd *exec.Cmd
 	if ruleToDelete.Cookie > 0 {
-		cmd = exec.Command("ovs-ofctl", "del-flows", bridgeName, 
+		cmd = exec.Command("ovs-ofctl", "del-flows", bridgeName,
 			fmt.Sprintf("cookie=%d/-1", ruleToDelete.Cookie))
 	} else {
 		// Delete by match criteria if no cookie
@@ -764,13 +764,13 @@ func (bm *BridgeManager) DeleteFlowRule(ctx context.Context, bridgeName, ruleID 
 			return nil
 		}
 	}
-	
+
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to delete flow rule from OVS: %w", err)
 	}
-	
+
 	bridge.UpdatedAt = time.Now()
-	
+
 	log.Printf("Deleted flow rule %s from bridge %s", ruleID, bridgeName)
 	return nil
 }
@@ -781,13 +781,13 @@ func (bm *BridgeManager) deleteAllFlowRules(bridgeName string) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to delete all flow rules: %w", err)
 	}
-	
+
 	// Clear from bridge object
 	if bridge, exists := bm.bridges[bridgeName]; exists {
 		bridge.FlowRules = []FlowRule{}
 		bridge.UpdatedAt = time.Now()
 	}
-	
+
 	return nil
 }
 
@@ -795,12 +795,12 @@ func (bm *BridgeManager) deleteAllFlowRules(bridgeName string) error {
 func (bm *BridgeManager) GetBridge(name string) (*Bridge, error) {
 	bm.bridgesMutex.RLock()
 	defer bm.bridgesMutex.RUnlock()
-	
+
 	bridge, exists := bm.bridges[name]
 	if !exists {
 		return nil, fmt.Errorf("bridge %s not found", name)
 	}
-	
+
 	return bridge, nil
 }
 
@@ -808,12 +808,12 @@ func (bm *BridgeManager) GetBridge(name string) (*Bridge, error) {
 func (bm *BridgeManager) ListBridges() []*Bridge {
 	bm.bridgesMutex.RLock()
 	defer bm.bridgesMutex.RUnlock()
-	
+
 	bridges := make([]*Bridge, 0, len(bm.bridges))
 	for _, bridge := range bm.bridges {
 		bridges = append(bridges, bridge)
 	}
-	
+
 	return bridges
 }
 
@@ -825,25 +825,25 @@ func (bm *BridgeManager) loadExistingBridges() error {
 	if err != nil {
 		return fmt.Errorf("failed to list bridges: %w", err)
 	}
-	
+
 	bridgeNames := strings.Split(strings.TrimSpace(string(output)), "\n")
 	for _, name := range bridgeNames {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
 		}
-		
+
 		// Get bridge details
 		bridge, err := bm.loadBridgeDetails(name)
 		if err != nil {
 			log.Printf("Warning: Failed to load bridge %s: %v", name, err)
 			continue
 		}
-		
+
 		bm.bridges[name] = bridge
 		log.Printf("Loaded existing bridge: %s", name)
 	}
-	
+
 	return nil
 }
 
@@ -854,39 +854,39 @@ func (bm *BridgeManager) loadBridgeDetails(name string) (*Bridge, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Get datapath ID
 	dpid, err := bm.getBridgeDatapathID(name)
 	if err != nil {
 		dpid = generateDatapathID()
 	}
-	
+
 	// Get controller info
 	controllers, err := bm.getBridgeControllers(name)
 	if err != nil {
 		controllers = []string{}
 	}
-	
+
 	// Get protocols
 	protocols, err := bm.getBridgeProtocols(name)
 	if err != nil {
 		protocols = bm.config.DefaultProtocols
 	}
-	
+
 	// Load ports
 	ports, err := bm.loadBridgePorts(name)
 	if err != nil {
 		log.Printf("Warning: Failed to load ports for bridge %s: %v", name, err)
 		ports = []Port{}
 	}
-	
+
 	// Load flow rules
 	flowRules, err := bm.loadBridgeFlowRules(name)
 	if err != nil {
 		log.Printf("Warning: Failed to load flow rules for bridge %s: %v", name, err)
 		flowRules = []FlowRule{}
 	}
-	
+
 	bridge := &Bridge{
 		Name:       name,
 		UUID:       uuid,
@@ -905,7 +905,7 @@ func (bm *BridgeManager) loadBridgeDetails(name string) (*Bridge, error) {
 		CreatedAt: time.Now(), // We don't know the real creation time
 		UpdatedAt: time.Now(),
 	}
-	
+
 	return bridge, nil
 }
 
@@ -935,12 +935,12 @@ func (bm *BridgeManager) getBridgeControllers(name string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	controllerStr := strings.TrimSpace(string(output))
 	if controllerStr == "" {
 		return []string{}, nil
 	}
-	
+
 	return strings.Split(controllerStr, " "), nil
 }
 
@@ -950,17 +950,17 @@ func (bm *BridgeManager) getBridgeProtocols(name string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	protocolsStr := strings.Trim(strings.TrimSpace(string(output)), "[]\"")
 	if protocolsStr == "" {
 		return []string{}, nil
 	}
-	
+
 	protocols := strings.Split(protocolsStr, ",")
 	for i, p := range protocols {
 		protocols[i] = strings.Trim(strings.TrimSpace(p), "\"")
 	}
-	
+
 	return protocols, nil
 }
 
@@ -971,51 +971,51 @@ func (bm *BridgeManager) loadBridgePorts(name string) ([]Port, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var ports []Port
 	portNames := strings.Split(strings.TrimSpace(string(output)), "\n")
-	
+
 	for _, portName := range portNames {
 		portName = strings.TrimSpace(portName)
 		if portName == "" {
 			continue
 		}
-		
+
 		port, err := bm.loadPortDetails(name, portName)
 		if err != nil {
 			log.Printf("Warning: Failed to load port %s: %v", portName, err)
 			continue
 		}
-		
+
 		ports = append(ports, *port)
 	}
-	
+
 	return ports, nil
 }
 
 func (bm *BridgeManager) loadPortDetails(bridgeName, portName string) (*Port, error) {
 	// Get port UUID
-	uuid, err := bm.getPortUUID(portName)
+	portUUID, err := bm.getPortUUID(portName)
 	if err != nil {
-		uuid = uuid.New().String().String()
+		portUUID = uuid.NewString()
 	}
-	
+
 	// Get OpenFlow port number
 	ofPort, err := bm.getPortOfPort(bridgeName, portName)
 	if err != nil {
 		ofPort = 0
 	}
-	
+
 	// Get port type
 	portType, err := bm.getPortType(portName)
 	if err != nil {
 		portType = PortTypePhysical
 	}
-	
+
 	port := &Port{
-		ID:        uuid,
+		ID:        portUUID,
 		Name:      portName,
-		UUID:      uuid,
+		UUID:      portUUID,
 		OfPort:    ofPort,
 		Type:      portType,
 		Interface: portName,
@@ -1025,7 +1025,7 @@ func (bm *BridgeManager) loadPortDetails(bridgeName, portName string) (*Port, er
 			Link:  true,
 		},
 	}
-	
+
 	return port, nil
 }
 
@@ -1044,13 +1044,13 @@ func (bm *BridgeManager) getPortOfPort(bridgeName, portName string) (int, error)
 	if err != nil {
 		return 0, err
 	}
-	
+
 	ofPortStr := strings.TrimSpace(string(output))
 	ofPort, err := strconv.Atoi(ofPortStr)
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return ofPort, nil
 }
 
@@ -1060,7 +1060,7 @@ func (bm *BridgeManager) getPortType(portName string) (PortType, error) {
 	if err != nil {
 		return PortTypePhysical, nil
 	}
-	
+
 	typeStr := strings.Trim(strings.TrimSpace(string(output)), "\"")
 	switch typeStr {
 	case "internal":
@@ -1088,7 +1088,7 @@ func (bm *BridgeManager) loadBridgeFlowRules(name string) ([]FlowRule, error) {
 func (bm *BridgeManager) monitoringLoop() {
 	ticker := time.NewTicker(bm.config.MonitoringInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-bm.ctx.Done():
@@ -1103,14 +1103,14 @@ func (bm *BridgeManager) monitoringLoop() {
 func (bm *BridgeManager) updateBridgeStatistics() {
 	bm.bridgesMutex.Lock()
 	defer bm.bridgesMutex.Unlock()
-	
+
 	for name, bridge := range bm.bridges {
 		// Update flow count
 		flowCount, err := bm.getBridgeFlowCount(name)
 		if err == nil {
 			bridge.Status.FlowCount = flowCount
 		}
-		
+
 		// Update packet/byte counts (simplified - would aggregate from ports)
 		bridge.Status.LastSeen = time.Now()
 		bridge.UpdatedAt = time.Now()
@@ -1123,7 +1123,7 @@ func (bm *BridgeManager) getBridgeFlowCount(name string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	lines := strings.Split(string(output), "\n")
 	count := 0
 	for _, line := range lines {
@@ -1131,13 +1131,13 @@ func (bm *BridgeManager) getBridgeFlowCount(name string) (int, error) {
 			count++
 		}
 	}
-	
+
 	return count, nil
 }
 
 // generateDatapathID generates a random datapath ID
 func generateDatapathID() string {
 	// Generate a random 64-bit datapath ID
-	id := uuid.New().String()
-	return fmt.Sprintf("%016x", id.ID())
+	id := strings.ReplaceAll(uuid.NewString(), "-", "")
+	return id[:16]
 }

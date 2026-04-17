@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log"
 
+	coretopology "github.com/khryptorgraphics/novacron/backend/core/network/topology"
 	"github.com/khryptorgraphics/novacron/backend/core/scheduler/migration"
-	"github.com/khryptorgraphics/novacron/backend/core/scheduler/network"
 	"github.com/khryptorgraphics/novacron/backend/core/scheduler/workload"
 )
 
@@ -76,7 +76,7 @@ type SchedulerFactory struct {
 	migrationCostEstimator *migration.MigrationCostEstimator
 
 	// networkTopology provides network topology awareness
-	networkTopology *network.NetworkTopology
+	networkTopology *coretopology.NetworkTopology
 }
 
 // NewSchedulerFactory creates a new scheduler factory
@@ -100,7 +100,10 @@ func NewSchedulerFactory(config SchedulerFactoryConfig) *SchedulerFactory {
 	}
 
 	if config.EnableNetworkTopology {
-		factory.networkTopology = network.NewNetworkTopology()
+		factory.networkTopology = &coretopology.NetworkTopology{
+			Nodes: make(map[string]*coretopology.NetworkNode),
+			Links: make(map[string]*coretopology.NetworkLink),
+		}
 		log.Println("Initialized network topology")
 	}
 
@@ -141,7 +144,10 @@ func (f *SchedulerFactory) CreateScheduler() (interface{}, error) {
 		}
 
 		if f.networkTopology == nil {
-			f.networkTopology = network.NewNetworkTopology()
+			f.networkTopology = &coretopology.NetworkTopology{
+				Nodes: make(map[string]*coretopology.NetworkNode),
+				Links: make(map[string]*coretopology.NetworkLink),
+			}
 			log.Println("Created network topology on demand")
 		}
 
@@ -151,6 +157,7 @@ func (f *SchedulerFactory) CreateScheduler() (interface{}, error) {
 			baseScheduler,
 			f.workloadAnalyzer,
 			f.networkTopology,
+			nil,
 		)
 
 		return networkScheduler, nil
@@ -171,6 +178,6 @@ func (f *SchedulerFactory) GetMigrationCostEstimator() *migration.MigrationCostE
 }
 
 // GetNetworkTopology returns the network topology
-func (f *SchedulerFactory) GetNetworkTopology() *network.NetworkTopology {
+func (f *SchedulerFactory) GetNetworkTopology() *coretopology.NetworkTopology {
 	return f.networkTopology
 }

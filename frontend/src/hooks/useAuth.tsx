@@ -49,7 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setRequires2FA(true);
       } else {
         authService.setToken(response.token, response.user);
-        setUser(response.user);
+        setUser(authService.getCurrentUser());
         setRequires2FA(false);
         setTempToken(null);
       }
@@ -70,7 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       authService.setToken(response.token, response.user);
       authService.removeTempToken();
-      setUser(response.user);
+      setUser(authService.getCurrentUser());
       setRequires2FA(false);
       setTempToken(null);
     } catch (error) {

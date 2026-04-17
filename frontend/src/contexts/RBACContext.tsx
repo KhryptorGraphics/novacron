@@ -84,7 +84,15 @@ export function RBACProvider({ children }: { children: ReactNode }) {
 
     // For demo purposes, assign roles based on user email or ID
     // In production, this would come from the user object or a separate API call
-    const userRoleNames = (user as any).roles || ['viewer']; // Default to viewer
+    const userRolesFromProfile = Array.isArray((user as any).roles)
+      ? (user as any).roles
+      : [];
+    const primaryRole = typeof (user as any).role === 'string' ? (user as any).role : undefined;
+    const userRoleNames = userRolesFromProfile.length > 0
+      ? userRolesFromProfile
+      : primaryRole
+        ? [primaryRole]
+        : ['viewer'];
 
     return SYSTEM_ROLES.filter(role => userRoleNames.includes(role.id));
   };

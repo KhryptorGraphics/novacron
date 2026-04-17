@@ -68,7 +68,7 @@ func (s *LAVAScheduler) LAVAScore(hostID string, vmLifetimeClass LifetimeClass) 
 	// LAVA scoring logic: prefer diversity in lifetime classes
 	// Penalty for host dominated by same class as VM
 	hostVMCount := 0
-	for c, count := range hostState.VMCountByClass {
+	for _, count := range hostState.VMCountByClass {
 		hostVMCount += count
 	}
 

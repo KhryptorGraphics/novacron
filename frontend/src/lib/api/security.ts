@@ -1,6 +1,10 @@
 // Security API service for NovaCron frontend
 
+import authService from '@/lib/auth';
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8090';
+
+type RawRecord = Record<string, any>;
 
 export interface SecurityEvent {
   id: string;
@@ -113,6 +117,139 @@ export interface ComplianceByCategory {
   percentage: number;
 }
 
+function normalizeSeverity(value: unknown): SecurityEvent['severity'] {
+  switch (String(value || '').toLowerCase()) {
+    case 'critical':
+    case 'high':
+    case 'medium':
+    case 'low':
+    case 'info':
+      return value as SecurityEvent['severity'];
+    default:
+      return 'info';
+  }
+}
+
+function normalizeComplianceStatus(value: unknown): ComplianceRequirement['status'] {
+  switch (String(value || '').toLowerCase()) {
+    case 'compliant':
+      return 'compliant';
+    case 'partial':
+    case 'partially_compliant':
+      return 'partial';
+    case 'pending':
+      return 'pending';
+    default:
+      return 'non-compliant';
+  }
+}
+
+function normalizeComplianceSeverity(status: ComplianceRequirement['status']): ComplianceRequirement['severity'] {
+  switch (status) {
+    case 'non-compliant':
+      return 'high';
+    case 'partial':
+      return 'medium';
+    case 'pending':
+      return 'low';
+    default:
+      return 'low';
+  }
+}
+
+function normalizeComplianceRequirements(payload: RawRecord): ComplianceRequirement[] {
+  const frameworks = Array.isArray(payload.frameworks) ? payload.frameworks : [];
+  const checkedAt =
+    typeof payload.last_updated === 'string' ? payload.last_updated : new Date().toISOString();
+
+  return frameworks.map((framework, index) => {
+    const status = normalizeComplianceStatus(framework.status);
+    const name = String(framework.name || `Framework ${index + 1}`);
+    const remediationSteps =
+      status === 'compliant'
+        ? undefined
+        : ['Review the framework findings and remediate the failing controls.'];
+
+    return {
+      id: String(framework.id || framework.name || `framework-${index}`),
+      category: name,
+      name,
+      description: `${name} compliance status reported by the backend.`,
+      status,
+      severity: normalizeComplianceSeverity(status),
+      lastChecked: checkedAt,
+      ...(remediationSteps ? { remediationSteps } : {}),
+    };
+  });
+}
+
+function aggregateComplianceByCategory(
+  requirements: ComplianceRequirement[]
+): ComplianceByCategory[] {
+  const byCategory = new Map<string, { compliant: number; total: number }>();
+
+  for (const requirement of requirements) {
+    const counts = byCategory.get(requirement.category) || { compliant: 0, total: 0 };
+    counts.total += 1;
+    if (requirement.status === 'compliant') {
+      counts.compliant += 1;
+    }
+    byCategory.set(requirement.category, counts);
+  }
+
+  return Array.from(byCategory.entries()).map(([category, counts]) => ({
+    category,
+    compliant: counts.compliant,
+    total: counts.total,
+    percentage: counts.total === 0 ? 0 : Math.round((counts.compliant / counts.total) * 100),
+  }));
+}
+
+function normalizeVulnerabilityFinding(finding: RawRecord, index: number): VulnerabilityFinding {
+  const cve = typeof finding.cve === 'string' ? finding.cve : undefined;
+  const cvssScore = typeof finding.cvssScore === 'number' ? finding.cvssScore : undefined;
+  const references = Array.isArray(finding.references)
+    ? finding.references.map(String)
+    : undefined;
+
+  return {
+    id: String(finding.id || finding.cve || `finding-${index}`),
+    title: String(finding.title || finding.name || finding.component || 'Vulnerability finding'),
+    severity: normalizeSeverity(finding.severity),
+    component: String(finding.component || finding.target || 'unknown'),
+    description: String(finding.description || 'No backend description provided.'),
+    remediation: String(
+      finding.remediation ||
+        'Review the backend scan output and remediate the affected component.'
+    ),
+    exploitable: Boolean(finding.exploitable),
+    ...(cve ? { cve } : {}),
+    ...(cvssScore !== undefined ? { cvssScore } : {}),
+    ...(references ? { references } : {}),
+  };
+}
+
+function summarizeThreatLevel(
+  activeThreats: number,
+  counts: SecurityMetrics['vulnerabilityCount']
+): SecurityMetrics['threatLevel'] {
+  if (activeThreats > 0 || counts.critical > 0) return 'critical';
+  if (counts.high > 0) return 'high';
+  if (counts.medium > 0) return 'medium';
+  return 'low';
+}
+
+function deriveSecurityScore(
+  complianceScore: number,
+  activeThreats: number,
+  counts: SecurityMetrics['vulnerabilityCount']
+): number {
+  const penalty =
+    counts.critical * 12 + counts.high * 5 + counts.medium * 2 + activeThreats * 6;
+
+  return Math.max(0, Math.min(100, Math.round(complianceScore - penalty)));
+}
+
 class SecurityAPIService {
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
@@ -142,10 +279,7 @@ class SecurityAPIService {
   }
 
   private getAuthToken(): string {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('authToken') || '';
-    }
-    return '';
+    return authService.getToken() || '';
   }
 
   // Security Events
@@ -178,7 +312,8 @@ class SecurityAPIService {
 
   // Compliance
   async getComplianceRequirements(): Promise<ComplianceRequirement[]> {
-    return this.request<ComplianceRequirement[]>('/api/security/compliance/requirements');
+    const response = await this.request<RawRecord>('/api/security/compliance');
+    return normalizeComplianceRequirements(response);
   }
 
   async updateComplianceRequirement(
@@ -192,36 +327,65 @@ class SecurityAPIService {
   }
 
   async triggerComplianceCheck(requirementId?: string): Promise<{ jobId: string }> {
-    const endpoint = requirementId
-      ? `/api/security/compliance/check/${requirementId}`
-      : '/api/security/compliance/check';
-
-    return this.request<{ jobId: string }>(endpoint, {
-      method: 'POST',
-    });
+    void requirementId;
+    throw new Error('Compliance re-checks are not implemented by the current backend.');
   }
 
   async getComplianceByCategory(): Promise<ComplianceByCategory[]> {
-    return this.request<ComplianceByCategory[]>('/api/security/compliance/by-category');
+    const requirements = await this.getComplianceRequirements();
+    return aggregateComplianceByCategory(requirements);
   }
 
   // Vulnerability Scanning
   async getVulnerabilityScans(): Promise<VulnerabilityScan[]> {
-    return this.request<VulnerabilityScan[]>('/api/security/vulnerabilities/scans');
+    const response = await this.request<RawRecord>('/api/security/vulnerabilities');
+    const findings = Array.isArray(response.vulnerabilities)
+      ? response.vulnerabilities.map(normalizeVulnerabilityFinding)
+      : [];
+    const summary = response.summary || {};
+    const lastScan = typeof response.last_scan === 'string' ? response.last_scan : undefined;
+    const startTime = lastScan || new Date().toISOString();
+
+    if (!lastScan && findings.length === 0) {
+      return [];
+    }
+
+    return [
+      {
+        id: lastScan || 'latest-scan',
+        target: 'cluster',
+        type: 'infrastructure',
+        status: 'completed',
+        startTime,
+        ...(lastScan ? { endTime: lastScan } : {}),
+        vulnerabilities: {
+          critical: Number(summary.critical || 0),
+          high: Number(summary.high || 0),
+          medium: Number(summary.medium || 0),
+          low: Number(summary.low || 0),
+          info: Number(summary.info || 0),
+        },
+        findings,
+      },
+    ];
   }
 
   async startVulnerabilityScan(
     target: string,
     scanType: string
   ): Promise<{ scanId: string }> {
-    return this.request<{ scanId: string }>('/api/security/vulnerabilities/scan', {
+    const response = await this.request<{ scan_id: string }>('/api/security/scan', {
       method: 'POST',
-      body: JSON.stringify({ target, type: scanType }),
+      body: JSON.stringify({ targets: [target], scan_types: [scanType], config: {} }),
     });
+
+    return { scanId: response.scan_id };
   }
 
   async getScanFindings(scanId: string): Promise<VulnerabilityFinding[]> {
-    return this.request<VulnerabilityFinding[]>(`/api/security/vulnerabilities/scans/${scanId}/findings`);
+    const response = await this.request<RawRecord>(`/api/security/scan/${scanId}`);
+    const findings = response.results?.findings;
+    return Array.isArray(findings) ? findings.map(normalizeVulnerabilityFinding) : [];
   }
 
   async markFindingResolved(findingId: string): Promise<void> {
@@ -258,19 +422,39 @@ class SecurityAPIService {
 
   // Security Metrics
   async getSecurityMetrics(): Promise<SecurityMetrics> {
-    return this.request<SecurityMetrics>('/api/security/metrics');
+    const [threats, vulnerabilities, compliance] = await Promise.all([
+      this.request<RawRecord>('/api/security/threats'),
+      this.request<RawRecord>('/api/security/vulnerabilities'),
+      this.request<RawRecord>('/api/security/compliance'),
+    ]);
+
+    const vulnerabilityCount = {
+      critical: Number(vulnerabilities.summary?.critical || 0),
+      high: Number(vulnerabilities.summary?.high || 0),
+      medium: Number(vulnerabilities.summary?.medium || 0),
+      low: Number(vulnerabilities.summary?.low || 0),
+      info: Number(vulnerabilities.summary?.info || 0),
+    };
+    const activeThreats = Array.isArray(threats.threats) ? threats.threats.length : 0;
+    const complianceScore = Number(compliance.compliance_score || 0);
+
+    return {
+      complianceScore,
+      vulnerabilityCount,
+      activeThreats,
+      blockedThreats: 0,
+      threatLevel: summarizeThreatLevel(activeThreats, vulnerabilityCount),
+      securityScore: deriveSecurityScore(complianceScore, activeThreats, vulnerabilityCount),
+    };
   }
 
   async getThreatTrends(
     timeRange: string = '24h',
     granularity: string = '1h'
   ): Promise<ThreatTrend[]> {
-    const params = new URLSearchParams({
-      timeRange,
-      granularity,
-    });
-
-    return this.request<ThreatTrend[]>(`/api/security/metrics/threats?${params.toString()}`);
+    void timeRange;
+    void granularity;
+    return [];
   }
 
   // Security Configuration
@@ -305,7 +489,7 @@ class SecurityAPIService {
     if (timeRange) params.append('timeRange', timeRange);
 
     return this.request<{ events: SecurityEvent[]; total: number }>(
-      `/api/security/audit?${params.toString()}`
+      `/api/security/audit/events?${params.toString()}`
     );
   }
 
