@@ -18,13 +18,12 @@ function toWebSocketOrigin(value: string): string {
 }
 
 const configuredApiOrigin = process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_ORIGIN;
-const configuredWsOrigin = process.env.NEXT_PUBLIC_WS_URL;
+const deprecatedWsOrigin = process.env.NEXT_PUBLIC_WS_URL;
 
 export const API_ORIGIN = originFromUrl(configuredApiOrigin);
-export const API_V1_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL || `${API_ORIGIN}/api/v1`;
-export const WS_ORIGIN = configuredWsOrigin
-  ? originFromUrl(configuredWsOrigin)
+export const API_V1_BASE = `${API_ORIGIN}/api/v1`;
+export const WS_ORIGIN = deprecatedWsOrigin
+  ? originFromUrl(deprecatedWsOrigin)
   : toWebSocketOrigin(API_ORIGIN);
 
 function normalizePath(path: string): string {
@@ -51,6 +50,14 @@ export function buildApiUrl(path: string): string {
   return new URL(normalizePath(path), `${API_ORIGIN}/`).toString();
 }
 
+export function buildApiV1Url(path: string): string {
+  if (/^https?:\/\//.test(path)) {
+    return path;
+  }
+
+  return new URL(`api/v1${normalizePath(path)}`, `${API_ORIGIN}/`).toString();
+}
+
 export function buildWebSocketUrls(path: string): string[] {
   if (/^wss?:\/\//.test(path)) {
     return [path];
@@ -73,6 +80,11 @@ export function buildWebSocketUrls(path: string): string[] {
       break;
     case normalized === '/api/security/events/stream':
       candidates.add('/api/ws/security/events');
+      break;
+    case normalized === '/api/ws/admin':
+    case normalized === '/admin/ws':
+      candidates.add('/api/ws/alerts');
+      candidates.add('/ws/alerts');
       break;
     case normalized.startsWith('/api/ws/alerts'):
       candidates.add(normalized.replace('/api/ws/alerts', '/ws/alerts'));

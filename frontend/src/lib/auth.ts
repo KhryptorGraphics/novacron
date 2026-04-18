@@ -1,6 +1,6 @@
 // Authentication service for NovaCron frontend
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8090';
+import { buildApiUrl } from '@/lib/api/origin';
 
 interface LoginRequest {
   email: string;
@@ -107,7 +107,7 @@ class AuthService {
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const url = `${API_BASE_URL}${endpoint}`;
+    const url = buildApiUrl(endpoint);
     
     const config: RequestInit = {
       headers: {

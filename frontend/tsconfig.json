@@ -9,7 +9,6 @@
     ],
     "allowJs": true,
     "skipLibCheck": true,
-    
     // Strict Type-Checking Options
     "strict": true,
     "noImplicitAny": true,
@@ -25,24 +24,34 @@
     "exactOptionalPropertyTypes": true,
     "noPropertyAccessFromIndexSignature": false,
     "noUncheckedIndexedAccess": false,
-    
     // Module Resolution Options
     "module": "esnext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "@/components/*": ["src/components/*"],
-      "@/lib/*": ["src/lib/*"],
-      "@/hooks/*": ["src/hooks/*"],
-      "@/types/*": ["src/types/*"],
-      "@/utils/*": ["src/lib/utils/*"]
+      "@/*": [
+        "src/*"
+      ],
+      "@/components/*": [
+        "src/components/*"
+      ],
+      "@/lib/*": [
+        "src/lib/*"
+      ],
+      "@/hooks/*": [
+        "src/hooks/*"
+      ],
+      "@/types/*": [
+        "src/types/*"
+      ],
+      "@/utils/*": [
+        "src/lib/utils/*"
+      ]
     },
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    
     // Emit Options
     "declaration": true,
     "declarationMap": true,
@@ -53,11 +62,9 @@
     "importHelpers": true,
     "downlevelIteration": true,
     "isolatedModules": true,
-    
     // JSX Options
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "jsxImportSource": "react",
-    
     // Advanced Options
     "incremental": true,
     "tsBuildInfoFile": ".next/cache/tsbuildinfo.json",
@@ -66,7 +73,6 @@
         "name": "next"
       }
     ],
-    
     // Additional Checks
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -81,7 +87,8 @@
     "src/**/*.test.ts",
     "src/**/*.test.tsx",
     "src/**/*.spec.ts",
-    "src/**/*.spec.tsx"
+    "src/**/*.spec.tsx",
+    ".next/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

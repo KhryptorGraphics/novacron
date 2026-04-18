@@ -1,13 +1,26 @@
+import { API_ORIGIN, API_V1_BASE, buildApiUrl, buildApiV1Url, buildWebSocketUrls } from '@/lib/api/origin';
+import type { ApiError, Pagination, ApiEnvelope } from '@/lib/api/types';
+import type {
+  NetworkNode,
+  NetworkEdge,
+  ClusterTopology,
+  BandwidthMetrics,
+  QoSMetrics,
+  NetworkInterface,
+  ResourcePrediction,
+  WorkloadPattern,
+  MigrationPrediction,
+  ComputeJob,
+  GlobalResourcePool,
+  MemoryFabric,
+  ProcessingFabric
+} from '@/lib/api/types';
+
 // API Client for NovaCron Enhanced API
 export class ApiClient {
-  private baseURL: string;
-  private wsURL: string;
   private token: string | null = null;
 
   constructor() {
-    this.baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8090';
-    this.wsURL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8091';
-
     // Try to get token from localStorage if available
     if (typeof window !== 'undefined') {
       this.token = localStorage.getItem('novacron_token') || null;
@@ -34,7 +47,7 @@ export class ApiClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const url = `${this.baseURL}${endpoint}`;
+    const url = buildApiUrl(endpoint);
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -87,7 +100,10 @@ export class ApiClient {
   // WebSocket connection
   connectWebSocket(path: string): WebSocket | null {
     try {
-      const url = `${this.wsURL}${path}`;
+      const [url] = buildWebSocketUrls(path);
+      if (!url) {
+        throw new Error(`No websocket candidates available for ${path}`);
+      }
       const ws = new WebSocket(url);
 
       // Add authentication if token is available
@@ -111,12 +127,10 @@ export class ApiClient {
 export const apiClient = new ApiClient();
 
 // ----- Core-mode typed API helpers -----
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8090/api/v1";
-
-import type { ApiError, Pagination, ApiEnvelope } from '@/lib/api/types';
+export const API_BASE = API_V1_BASE;
 
 function withParams(path: string, params?: Record<string, string | number | undefined>): string {
-  const url = new URL(path, API_BASE);
+  const url = new URL(buildApiV1Url(path));
   const sp = new URLSearchParams();
   if (params) {
     for (const [k,v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") sp.set(k, String(v));
@@ -170,7 +184,7 @@ export async function apiGet<T>(path: string, params?: Record<string, string | n
  * @returns ApiEnvelope<T>
  */
 export async function apiPost<T>(path: string, body?: unknown, opts?: { role?: "viewer" | "operator" }): Promise<ApiEnvelope<T>> {
-  const url = new URL(path, API_BASE).toString();
+  const url = buildApiV1Url(path);
   const role = opts?.role ?? "viewer";
   const res = await fetch(url, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", "X-Role": role }, body: body!==undefined?JSON.stringify(body):undefined, credentials: "include" });
   const env = await res.json() as ApiEnvelope<T>;
@@ -179,22 +193,6 @@ export async function apiPost<T>(path: string, body?: unknown, opts?: { role?: "
 }
 
 // ----- Distributed System API Functions -----
-
-import type {
-  NetworkNode,
-  NetworkEdge,
-  ClusterTopology,
-  BandwidthMetrics,
-  QoSMetrics,
-  NetworkInterface,
-  ResourcePrediction,
-  WorkloadPattern,
-  MigrationPrediction,
-  ComputeJob,
-  GlobalResourcePool,
-  MemoryFabric,
-  ProcessingFabric
-} from '@/lib/api/types';
 
 // Network Topology APIs
 export const getNetworkTopology = () =>

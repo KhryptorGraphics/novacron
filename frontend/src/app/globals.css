@@ -1,9 +1,8 @@
+@import '../styles/design-tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-/* Import NovaCron design tokens */
-@import '../styles/design-tokens.css';
 
 @layer base {
   :root {

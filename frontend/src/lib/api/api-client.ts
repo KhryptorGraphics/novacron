@@ -3,7 +3,7 @@
  * Provides a consistent interface for all API calls
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8090';
+import { API_ORIGIN, buildApiUrl } from '@/lib/api/origin';
 
 export interface ApiError {
   message: string;
@@ -22,7 +22,7 @@ class ApiClient {
   private baseUrl: string;
   private defaultHeaders: HeadersInit;
 
-  constructor(baseUrl: string = API_BASE_URL) {
+  constructor(baseUrl: string = API_ORIGIN) {
     this.baseUrl = baseUrl;
     this.defaultHeaders = {
       'Content-Type': 'application/json',
@@ -95,7 +95,9 @@ class ApiClient {
     options: RequestInit = {},
     retries: number = 0
   ): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`;
+    const url = this.baseUrl === API_ORIGIN
+      ? buildApiUrl(endpoint)
+      : new URL(endpoint, `${this.baseUrl}/`).toString();
     const headers = this.buildHeaders(options.headers);
 
     try {
@@ -221,4 +223,3 @@ class ApiClient {
 // Export singleton instance
 export const apiClient = new ApiClient();
 export default apiClient;
-

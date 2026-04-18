@@ -1,4 +1,8 @@
-export const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8090/ws/events/v1";
+import { buildWebSocketUrls } from '@/lib/api/origin';
+
+const EVENT_STREAM_PATH = '/api/ws/metrics';
+
+export const WS_URL = buildWebSocketUrls(EVENT_STREAM_PATH)[0] || 'ws://localhost:8090/api/ws/metrics';
 
 /**
  * Get auth token from localStorage
@@ -17,7 +21,8 @@ export function connectEvents(onWelcome?: (msg: unknown) => void): WebSocket {
   try {
     // Get auth token and add to URL
     const token = getAuthToken();
-    const wsUrl = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
+    const baseUrl = buildWebSocketUrls(EVENT_STREAM_PATH)[0] || WS_URL;
+    const wsUrl = token ? `${baseUrl}?token=${encodeURIComponent(token)}` : baseUrl;
 
     const ws = new WebSocket(wsUrl);
     let first = true;
@@ -62,4 +67,3 @@ export function connectEvents(onWelcome?: (msg: unknown) => void): WebSocket {
     } as WebSocket;
   }
 }
-

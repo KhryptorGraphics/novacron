@@ -130,8 +130,9 @@ jest.mock('next/image', () => ({
 }));
 
 // Mock environment variables
-process.env.NEXT_PUBLIC_API_URL = 'http://localhost:8090/api';
-process.env.NEXT_PUBLIC_WS_URL = 'ws://localhost:8091/ws';
+process.env.NEXT_PUBLIC_API_URL = 'http://localhost:8090';
+delete process.env.NEXT_PUBLIC_WS_URL;
+delete process.env.NEXT_PUBLIC_API_BASE_URL;
 
 // Global test utilities
 global.testUtils = {

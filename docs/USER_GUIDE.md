@@ -25,7 +25,8 @@ cd frontend && npm ci && npm run dev
 ```
 
 ## API Reference
-See `config/novacron/api.yaml` for endpoint definitions.
+See `docs/CANONICAL_CONTRACT_MATRIX.md` for the current shipped route and websocket status matrix.
+`config/novacron/api.yaml` is not the source of truth for the canonical control-plane surface.
 
 ## Monitoring
 Dashboard available at `http://localhost:8092/dashboard`.
