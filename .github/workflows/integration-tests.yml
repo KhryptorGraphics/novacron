@@ -5,12 +5,18 @@ on:
     branches: [main, develop]
     paths:
       - "backend/cmd/api-server/**"
+      - "backend/api/graphql/**"
+      - "backend/api/security/**"
+      - "backend/api/websocket/**"
       - ".github/workflows/integration-tests.yml"
       - ".github/workflows/ci.yml"
   push:
     branches: [main, develop]
     paths:
       - "backend/cmd/api-server/**"
+      - "backend/api/graphql/**"
+      - "backend/api/security/**"
+      - "backend/api/websocket/**"
       - ".github/workflows/integration-tests.yml"
       - ".github/workflows/ci.yml"
   workflow_dispatch:
@@ -19,8 +25,8 @@ env:
   GO_VERSION: "1.21"
 
 jobs:
-  canonical-route-contract:
-    name: Canonical Route Contract
+  canonical-surface-contract:
+    name: Canonical Surface Contract
     runs-on: ubuntu-latest
 
     steps:
@@ -41,7 +47,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Run canonical route contract tests
+      - name: Run canonical surface contract tests
         run: >
-          go test ./backend/cmd/api-server -run
-          'TestRequireAuth|TestRegisterPublicRoutesSupportsCanonicalEmailLogin|TestRegisterSecureAPIRoutesListsVMsOnCanonicalRoute|TestRegisterSecureAPIRoutesCreatesVMOnCompatibilityRoute|TestRegisterSecureAPIRoutesSupportsStateTransitionsAndMetrics|TestAPIInfoAdvertisesCanonicalContract|TestRegisterExplicitlyUnsupportedRoutesReturnsNotImplemented'
+          go test
+          ./backend/cmd/api-server
+          ./backend/api/graphql
+          ./backend/api/websocket
