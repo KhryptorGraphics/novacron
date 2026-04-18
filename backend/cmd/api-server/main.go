@@ -77,6 +77,32 @@ func main() {
 	}
 	defer services.shutdown()
 
+	server := buildCanonicalServer(cfg, db, authManager, services)
+
+	go func() {
+		appLogger.Info("API Server starting", "port", cfg.Server.APIPort)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			appLogger.Fatal("Server failed to start", "error", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	appLogger.Info("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		appLogger.Fatal("Server forced to shutdown", "error", err)
+	}
+
+	appLogger.Info("Server exited gracefully")
+}
+
+func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.SimpleAuthManager, services *canonicalServices) *http.Server {
 	router := mux.NewRouter()
 	router.StrictSlash(true)
 
@@ -102,35 +128,13 @@ func main() {
 	router.HandleFunc("/health", healthCheckHandler(cfg, db)).Methods(http.MethodGet)
 	router.HandleFunc("/api/info", apiInfoHandler()).Methods(http.MethodGet)
 
-	server := &http.Server{
+	return &http.Server{
 		Addr:         ":" + cfg.Server.APIPort,
 		Handler:      corsHandler(router),
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 		IdleTimeout:  cfg.Server.IdleTimeout,
 	}
-
-	go func() {
-		appLogger.Info("API Server starting", "port", cfg.Server.APIPort)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			appLogger.Fatal("Server failed to start", "error", err)
-		}
-	}()
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	appLogger.Info("Shutting down server...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
-	defer cancel()
-
-	if err := server.Shutdown(ctx); err != nil {
-		appLogger.Fatal("Server forced to shutdown", "error", err)
-	}
-
-	appLogger.Info("Server exited gracefully")
 }
 
 func buildCORSHandler(cfg *config.Config) mux.MiddlewareFunc {

@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -14,12 +17,16 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
+	"github.com/gorilla/websocket"
+	"github.com/sirupsen/logrus"
 
 	graphqlapi "github.com/khryptorgraphics/novacron/backend/api/graphql"
 	securityapi "github.com/khryptorgraphics/novacron/backend/api/security"
+	websocketapi "github.com/khryptorgraphics/novacron/backend/api/websocket"
 	"github.com/khryptorgraphics/novacron/backend/core/audit"
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
 	"github.com/khryptorgraphics/novacron/backend/core/storage"
+	"github.com/khryptorgraphics/novacron/backend/pkg/config"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -573,5 +580,276 @@ func TestRegisterCanonicalGraphQLRouteSupportsVolumeOperations(t *testing.T) {
 	}
 	if tier, _ := volume["tier"].(string); !strings.EqualFold(tier, "hot") {
 		t.Fatalf("expected queried volume tier hot, got %#v", volume["tier"])
+	}
+}
+
+func TestBuildCanonicalServerSupportsLiveStartup(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	authManager := auth.NewSimpleAuthManager("test-secret", db)
+	twoFactorService := auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret()))
+	securityHandlers := securityapi.NewSecurityHandlers(twoFactorService, audit.NewSimpleAuditLogger())
+	volumeStore, err := storage.NewStorageManager(storage.StorageManagerConfig{
+		BasePath: filepath.Join(t.TempDir(), "volumes"),
+	})
+	if err != nil {
+		t.Fatalf("failed to create storage manager: %v", err)
+	}
+
+	wsHandler := websocketapi.NewWebSocketHandler(nil, nil, nil, nil, logrus.New())
+	defer wsHandler.Shutdown()
+
+	services := &canonicalServices{
+		twoFactorService: twoFactorService,
+		securityHandlers: securityHandlers,
+		websocketHandler: wsHandler,
+		graphqlHandler: graphqlapi.NewVolumeHTTPHandler(
+			graphqlapi.NewResolverWithVolumeStore(nil, nil, volumeStore),
+		),
+		shutdown: func() {
+			wsHandler.Shutdown()
+		},
+	}
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			APIPort:         "0",
+			ReadTimeout:     5 * time.Second,
+			WriteTimeout:    5 * time.Second,
+			IdleTimeout:     30 * time.Second,
+			ShutdownTimeout: 5 * time.Second,
+		},
+		VM: config.VMConfig{
+			StoragePath:     t.TempDir(),
+			HypervisorAddrs: []string{"localhost:9000"},
+		},
+	}
+
+	server := buildCanonicalServer(cfg, db, authManager, services)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- server.Serve(listener)
+	}()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	defer func() {
+		if err := server.Shutdown(shutdownCtx); err != nil && err != http.ErrServerClosed {
+			t.Fatalf("failed to shutdown server: %v", err)
+		}
+		if err := <-serverErr; err != nil && err != http.ErrServerClosed {
+			t.Fatalf("server exited unexpectedly: %v", err)
+		}
+	}()
+
+	baseURL := "http://" + listener.Addr().String()
+	mock.ExpectPing()
+
+	healthResp, err := http.Get(baseURL + "/health")
+	if err != nil {
+		t.Fatalf("health request failed: %v", err)
+	}
+	defer healthResp.Body.Close()
+
+	if healthResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected health 200, got %d", healthResp.StatusCode)
+	}
+
+	var healthPayload map[string]interface{}
+	if err := json.NewDecoder(healthResp.Body).Decode(&healthPayload); err != nil {
+		t.Fatalf("failed to decode health response: %v", err)
+	}
+	if healthPayload["status"] != "healthy" {
+		t.Fatalf("expected healthy status, got %#v", healthPayload["status"])
+	}
+
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("correct-horse-battery-staple"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("failed to hash password: %v", err)
+	}
+
+	now := time.Now().UTC()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT username FROM users WHERE email = $1`)).
+		WithArgs("admin@example.com").
+		WillReturnRows(sqlmock.NewRows([]string{"username"}).AddRow("admin"))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, username, email, password_hash, role, tenant_id, created_at, updated_at
+		FROM users WHERE username = $1
+	`)).
+		WithArgs("admin").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "tenant_id", "created_at", "updated_at"}).
+			AddRow("7", "admin", "admin@example.com", string(passwordHash), "admin", "default", now, now))
+
+	loginReq, err := http.NewRequest(http.MethodPost, baseURL+"/api/auth/login", strings.NewReader(`{"email":"admin@example.com","password":"correct-horse-battery-staple"}`))
+	if err != nil {
+		t.Fatalf("failed to build login request: %v", err)
+	}
+	loginReq.Header.Set("Content-Type", "application/json")
+
+	loginResp, err := http.DefaultClient.Do(loginReq)
+	if err != nil {
+		t.Fatalf("login request failed: %v", err)
+	}
+	defer loginResp.Body.Close()
+
+	if loginResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected login 200, got %d", loginResp.StatusCode)
+	}
+
+	var loginPayload struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(loginResp.Body).Decode(&loginPayload); err != nil {
+		t.Fatalf("failed to decode login response: %v", err)
+	}
+	if loginPayload.Token == "" {
+		t.Fatal("expected login token")
+	}
+
+	complianceReq, err := http.NewRequest(http.MethodGet, baseURL+"/api/security/compliance", nil)
+	if err != nil {
+		t.Fatalf("failed to build compliance request: %v", err)
+	}
+	complianceReq.Header.Set("Authorization", "Bearer "+loginPayload.Token)
+
+	complianceResp, err := http.DefaultClient.Do(complianceReq)
+	if err != nil {
+		t.Fatalf("compliance request failed: %v", err)
+	}
+	defer complianceResp.Body.Close()
+
+	if complianceResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected compliance 200, got %d", complianceResp.StatusCode)
+	}
+
+	var compliancePayload map[string]interface{}
+	if err := json.NewDecoder(complianceResp.Body).Decode(&compliancePayload); err != nil {
+		t.Fatalf("failed to decode compliance response: %v", err)
+	}
+	if _, ok := compliancePayload["compliance_score"]; !ok {
+		t.Fatalf("expected compliance_score in response, got %#v", compliancePayload)
+	}
+
+	wsHeaders := http.Header{}
+	wsHeaders.Set("Authorization", "Bearer "+loginPayload.Token)
+	wsURL := "ws://" + listener.Addr().String() + "/api/ws/security/events"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, wsHeaders)
+	if err != nil {
+		t.Fatalf("failed to dial websocket: %v", err)
+	}
+	_ = conn.Close()
+
+	createReq, err := http.NewRequest(http.MethodPost, baseURL+"/graphql", bytes.NewBufferString(`{
+		"query":"mutation CreateVolume($input: CreateVolumeInput!) { createVolume(input: $input) { id name tier size } }",
+		"variables":{"input":{"name":"startup-smoke","size":10,"tier":"hot"}}
+	}`))
+	if err != nil {
+		t.Fatalf("failed to build GraphQL create request: %v", err)
+	}
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+loginPayload.Token)
+
+	createResp, err := http.DefaultClient.Do(createReq)
+	if err != nil {
+		t.Fatalf("createVolume request failed: %v", err)
+	}
+	defer createResp.Body.Close()
+
+	if createResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected createVolume 200, got %d", createResp.StatusCode)
+	}
+
+	var createPayload struct {
+		Data struct {
+			CreateVolume struct {
+				ID string `json:"id"`
+			} `json:"createVolume"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(createResp.Body).Decode(&createPayload); err != nil {
+		t.Fatalf("failed to decode createVolume response: %v", err)
+	}
+	if createPayload.Data.CreateVolume.ID == "" {
+		t.Fatal("expected created volume id")
+	}
+
+	listReq, err := http.NewRequest(http.MethodPost, baseURL+"/graphql", bytes.NewBufferString(`{
+		"query":"query Volumes { volumes { id name tier size } }"
+	}`))
+	if err != nil {
+		t.Fatalf("failed to build GraphQL list request: %v", err)
+	}
+	listReq.Header.Set("Content-Type", "application/json")
+	listReq.Header.Set("Authorization", "Bearer "+loginPayload.Token)
+
+	listResp, err := http.DefaultClient.Do(listReq)
+	if err != nil {
+		t.Fatalf("volumes request failed: %v", err)
+	}
+	defer listResp.Body.Close()
+
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected volumes 200, got %d", listResp.StatusCode)
+	}
+
+	var listPayload struct {
+		Data struct {
+			Volumes []struct {
+				ID string `json:"id"`
+			} `json:"volumes"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("failed to decode volumes response: %v", err)
+	}
+	if len(listPayload.Data.Volumes) != 1 || listPayload.Data.Volumes[0].ID != createPayload.Data.CreateVolume.ID {
+		t.Fatalf("expected created volume in GraphQL list response, got %#v", listPayload.Data.Volumes)
+	}
+
+	changeReq, err := http.NewRequest(http.MethodPost, baseURL+"/graphql", bytes.NewBufferString(fmt.Sprintf(`{
+		"query":"mutation ChangeVolumeTier($id: ID!, $tier: String!) { changeVolumeTier(id: $id, tier: $tier) { id tier } }",
+		"variables":{"id":"%s","tier":"cold"}
+	}`, createPayload.Data.CreateVolume.ID)))
+	if err != nil {
+		t.Fatalf("failed to build GraphQL change-tier request: %v", err)
+	}
+	changeReq.Header.Set("Content-Type", "application/json")
+	changeReq.Header.Set("Authorization", "Bearer "+loginPayload.Token)
+
+	changeResp, err := http.DefaultClient.Do(changeReq)
+	if err != nil {
+		t.Fatalf("changeVolumeTier request failed: %v", err)
+	}
+	defer changeResp.Body.Close()
+
+	if changeResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected changeVolumeTier 200, got %d", changeResp.StatusCode)
+	}
+
+	var changePayload struct {
+		Data struct {
+			ChangeVolumeTier struct {
+				Tier string `json:"tier"`
+			} `json:"changeVolumeTier"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(changeResp.Body).Decode(&changePayload); err != nil {
+		t.Fatalf("failed to decode changeVolumeTier response: %v", err)
+	}
+	if !strings.EqualFold(changePayload.Data.ChangeVolumeTier.Tier, "cold") {
+		t.Fatalf("expected changed tier cold, got %q", changePayload.Data.ChangeVolumeTier.Tier)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
