@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,9 +16,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/sirupsen/logrus"
-	
+
 	"github.com/khryptorgraphics/novacron/backend/core/vm"
-	"github.com/khryptorgraphics/novacron/backend/core/monitoring"
 )
 
 var (
@@ -43,29 +45,37 @@ var (
 
 // WebSocketHandler manages WebSocket connections for real-time features
 type WebSocketHandler struct {
-	vmManager       *vm.VMManager
-	consoleManager  *vm.ConsoleManager
-	metricRegistry  *monitoring.MetricRegistry
-	alertManager    *monitoring.AlertManager
-	logger          *logrus.Logger
+	vmManager      vmLookup
+	consoleManager consoleService
+	logger         *logrus.Logger
 
-	upgrader        websocket.Upgrader
-	
+	upgrader websocket.Upgrader
+
 	// Connection pools
-	consoleClients  map[string][]*WebSocketClient
-	metricsClients  []*WebSocketClient
-	alertClients    []*WebSocketClient
-	logClients      map[string][]*WebSocketClient
-	
-	clientsMutex    sync.RWMutex
-	
+	consoleClients map[string][]*WebSocketClient
+	metricsClients []*WebSocketClient
+	alertClients   []*WebSocketClient
+	logClients     map[string][]*WebSocketClient
+
+	clientsMutex sync.RWMutex
+
 	// Broadcasting channels
 	metricsBroadcast chan MetricsMessage
 	alertsBroadcast  chan AlertMessage
 	logsBroadcast    chan LogMessage
-	
-	ctx             context.Context
-	cancel          context.CancelFunc
+
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+type vmLookup interface {
+	GetVM(vmID string) (*vm.VM, error)
+}
+
+type consoleService interface {
+	CreateConsoleSession(ctx context.Context, vmID string) (string, error)
+	SendInput(ctx context.Context, sessionID string, input string) error
+	StreamOutput(ctx context.Context, sessionID string, output chan<- string)
 }
 
 // WebSocketClient represents a connected WebSocket client
@@ -78,10 +88,10 @@ type WebSocketClient struct {
 	ConnectedAt  time.Time
 	UserID       string
 	Roles        []string
-	
-	send         chan []byte
-	ctx          context.Context
-	cancel       context.CancelFunc
+
+	send   chan []byte
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // ConsoleMessage represents console output message
@@ -95,11 +105,11 @@ type ConsoleMessage struct {
 
 // MetricsMessage represents real-time metrics message
 type MetricsMessage struct {
-	Type        string                 `json:"type"`
-	Source      string                 `json:"source"`
-	Metrics     map[string]interface{} `json:"metrics"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Labels      map[string]string      `json:"labels,omitempty"`
+	Type      string                 `json:"type"`
+	Source    string                 `json:"source"`
+	Metrics   map[string]interface{} `json:"metrics"`
+	Timestamp time.Time              `json:"timestamp"`
+	Labels    map[string]string      `json:"labels,omitempty"`
 }
 
 // AlertMessage represents alert notification message
@@ -117,15 +127,15 @@ type AlertMessage struct {
 
 // LogMessage represents log streaming message
 type LogMessage struct {
-	Type        string                 `json:"type"`
-	Source      string                 `json:"source"`
-	Level       string                 `json:"level"`
-	Message     string                 `json:"message"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Component   string                 `json:"component,omitempty"`
-	VMID        string                 `json:"vm_id,omitempty"`
-	Labels      map[string]string      `json:"labels,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	Type      string                 `json:"type"`
+	Source    string                 `json:"source"`
+	Level     string                 `json:"level"`
+	Message   string                 `json:"message"`
+	Timestamp time.Time              `json:"timestamp"`
+	Component string                 `json:"component,omitempty"`
+	VMID      string                 `json:"vm_id,omitempty"`
+	Labels    map[string]string      `json:"labels,omitempty"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // WebSocketMessage represents a generic WebSocket message
@@ -138,16 +148,23 @@ type WebSocketMessage struct {
 }
 
 // NewWebSocketHandler creates a new WebSocket handler
-func NewWebSocketHandler(vmManager *vm.VMManager, consoleManager *vm.ConsoleManager, metricRegistry *monitoring.MetricRegistry, alertManager *monitoring.AlertManager, logger *logrus.Logger) *WebSocketHandler {
+func NewWebSocketHandler(vmManager vmLookup, consoleManager consoleService, deps ...interface{}) *WebSocketHandler {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+	var logger *logrus.Logger
+	for _, dependency := range deps {
+		if candidate, ok := dependency.(*logrus.Logger); ok && candidate != nil {
+			logger = candidate
+		}
+	}
+	if logger == nil {
+		logger = logrus.New()
+	}
+
 	handler := &WebSocketHandler{
 		vmManager:      vmManager,
 		consoleManager: consoleManager,
-		metricRegistry: metricRegistry,
-		alertManager:   alertManager,
 		logger:         logger,
-		
+
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -156,43 +173,45 @@ func NewWebSocketHandler(vmManager *vm.VMManager, consoleManager *vm.ConsoleMana
 				return true
 			},
 		},
-		
+
 		consoleClients: make(map[string][]*WebSocketClient),
 		metricsClients: make([]*WebSocketClient, 0),
 		alertClients:   make([]*WebSocketClient, 0),
 		logClients:     make(map[string][]*WebSocketClient),
-		
+
 		metricsBroadcast: make(chan MetricsMessage, 100),
 		alertsBroadcast:  make(chan AlertMessage, 100),
 		logsBroadcast:    make(chan LogMessage, 100),
-		
+
 		ctx:    ctx,
 		cancel: cancel,
 	}
-	
+
 	// Start background workers
 	go handler.broadcastWorker()
 	go handler.cleanupWorker()
-	
+
 	return handler
 }
 
 // RegisterWebSocketRoutes registers WebSocket API routes
 func (h *WebSocketHandler) RegisterWebSocketRoutes(router *mux.Router, require func(string, http.HandlerFunc) http.Handler) {
-	wsRouter := router.PathPrefix("/ws").Subrouter()
+	for _, prefix := range []string{"/api/ws", "/ws"} {
+		wsRouter := router.PathPrefix(prefix).Subrouter()
 
-	// Console WebSocket (operator+)
-	wsRouter.Handle("/console/{vmId}", require("operator", h.HandleConsoleWebSocket)).Methods("GET")
-	
-	// Metrics streaming (viewer+)
-	wsRouter.Handle("/metrics", require("viewer", h.HandleMetricsWebSocket)).Methods("GET")
-	
-	// Alert notifications (viewer+)
-	wsRouter.Handle("/alerts", require("viewer", h.HandleAlertsWebSocket)).Methods("GET")
-	
-	// Log streaming (admin+)
-	wsRouter.Handle("/logs", require("admin", h.HandleLogsWebSocket)).Methods("GET")
-	wsRouter.Handle("/logs/{source}", require("admin", h.HandleSourceLogsWebSocket)).Methods("GET")
+		// Console WebSocket (operator+)
+		wsRouter.Handle("/console/{vmId}", require("operator", h.HandleConsoleWebSocket)).Methods("GET")
+
+		// Metrics streaming (viewer+)
+		wsRouter.Handle("/metrics", require("viewer", h.HandleMetricsWebSocket)).Methods("GET")
+
+		// Alert notifications (viewer+)
+		wsRouter.Handle("/alerts", require("viewer", h.HandleAlertsWebSocket)).Methods("GET")
+
+		// Log streaming (admin+)
+		wsRouter.Handle("/logs", require("admin", h.HandleLogsWebSocket)).Methods("GET")
+		wsRouter.Handle("/logs/{source}", require("admin", h.HandleSourceLogsWebSocket)).Methods("GET")
+	}
 }
 
 // HandleConsoleWebSocket handles /ws/console/{vmId}
@@ -208,6 +227,11 @@ func (h *WebSocketHandler) RegisterWebSocketRoutes(router *mux.Router, require f
 // @Failure 500 "Internal Server Error"
 // @Router /ws/console/{vmId} [get]
 func (h *WebSocketHandler) HandleConsoleWebSocket(w http.ResponseWriter, r *http.Request) {
+	if h.vmManager == nil || h.consoleManager == nil {
+		http.Error(w, "VM console websocket is not supported by the canonical backend", http.StatusNotImplemented)
+		return
+	}
+
 	timer := prometheus.NewTimer(connectionDuration.WithLabelValues("console"))
 	defer timer.ObserveDuration()
 
@@ -220,7 +244,7 @@ func (h *WebSocketHandler) HandleConsoleWebSocket(w http.ResponseWriter, r *http
 	}
 
 	// Validate VM exists and is accessible
-	vmInfo, err := h.vmManager.GetVM(r.Context(), vmID)
+	vmInfo, err := h.vmManager.GetVM(vmID)
 	if err != nil {
 		if err == vm.ErrVMNotFound {
 			http.Error(w, "VM not found", http.StatusNotFound)
@@ -232,7 +256,7 @@ func (h *WebSocketHandler) HandleConsoleWebSocket(w http.ResponseWriter, r *http
 	}
 
 	// Check VM is running
-	if vmInfo.Status != "running" {
+	if vmInfo.State() != vm.StateRunning {
 		http.Error(w, "VM must be running for console access", http.StatusConflict)
 		return
 	}
@@ -397,10 +421,10 @@ func (h *WebSocketHandler) HandleAlertsWebSocket(w http.ResponseWriter, r *http.
 	activeConnections.WithLabelValues("alerts", "notification").Inc()
 
 	h.logger.WithFields(logrus.Fields{
-		"client_id":   client.ID,
-		"severities":  severities,
-		"sources":     sources,
-		"user_id":     client.UserID,
+		"client_id":  client.ID,
+		"severities": severities,
+		"sources":    sources,
+		"user_id":    client.UserID,
 	}).Info("Alerts WebSocket client connected")
 
 	// Start client handlers
@@ -438,7 +462,7 @@ func (h *WebSocketHandler) HandleLogsWebSocket(w http.ResponseWriter, r *http.Re
 func (h *WebSocketHandler) HandleSourceLogsWebSocket(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	source := vars["source"]
-	
+
 	if source == "" {
 		http.Error(w, "Source is required", http.StatusBadRequest)
 		return
@@ -550,7 +574,7 @@ func (h *WebSocketHandler) handleLogsWebSocket(w http.ResponseWriter, r *http.Re
 func (h *WebSocketHandler) addConsoleClient(vmID string, client *WebSocketClient) {
 	h.clientsMutex.Lock()
 	defer h.clientsMutex.Unlock()
-	
+
 	if h.consoleClients[vmID] == nil {
 		h.consoleClients[vmID] = make([]*WebSocketClient, 0)
 	}
@@ -572,7 +596,7 @@ func (h *WebSocketHandler) addAlertClient(client *WebSocketClient) {
 func (h *WebSocketHandler) addLogClient(source string, client *WebSocketClient) {
 	h.clientsMutex.Lock()
 	defer h.clientsMutex.Unlock()
-	
+
 	if h.logClients[source] == nil {
 		h.logClients[source] = make([]*WebSocketClient, 0)
 	}
@@ -699,7 +723,7 @@ func (h *WebSocketHandler) consoleWritePump(client *WebSocketClient, vmID, sessi
 				Data:      output,
 				Timestamp: time.Now(),
 			}
-			
+
 			data, _ := json.Marshal(msg)
 			select {
 			case client.send <- data:
@@ -770,7 +794,7 @@ func (h *WebSocketHandler) metricsWritePump(client *WebSocketClient) {
 	ticker := time.NewTicker(54 * time.Second)
 	interval := client.Filters["interval"].(int)
 	metricsTicker := time.NewTicker(time.Duration(interval) * time.Second)
-	
+
 	defer func() {
 		ticker.Stop()
 		metricsTicker.Stop()
@@ -781,19 +805,19 @@ func (h *WebSocketHandler) metricsWritePump(client *WebSocketClient) {
 		select {
 		case <-client.ctx.Done():
 			return
-			
+
 		case <-metricsTicker.C:
 			// Collect and send metrics
 			sources, _ := client.Filters["sources"].([]string)
 			metrics := h.collectMetrics(sources)
-			
+
 			msg := MetricsMessage{
 				Type:      "metrics_update",
 				Source:    "system",
 				Metrics:   metrics,
 				Timestamp: time.Now(),
 			}
-			
+
 			data, _ := json.Marshal(msg)
 			select {
 			case client.send <- data:
@@ -871,7 +895,7 @@ func (h *WebSocketHandler) alertsWritePump(client *WebSocketClient) {
 		select {
 		case <-client.ctx.Done():
 			return
-			
+
 		case alert := <-h.alertsBroadcast:
 			// Apply filters
 			if h.matchesAlertFilters(alert, client.Filters) {
@@ -953,7 +977,7 @@ func (h *WebSocketHandler) logsWritePump(client *WebSocketClient, source string)
 		select {
 		case <-client.ctx.Done():
 			return
-			
+
 		case logMsg := <-h.logsBroadcast:
 			// Apply filters
 			if h.matchesLogFilters(logMsg, source, client.Filters) {
@@ -1013,7 +1037,7 @@ func (h *WebSocketHandler) cleanupWorker() {
 
 func (h *WebSocketHandler) cleanupInactiveClients() {
 	cutoff := time.Now().Add(-5 * time.Minute)
-	
+
 	h.clientsMutex.Lock()
 	defer h.clientsMutex.Unlock()
 
@@ -1045,13 +1069,36 @@ func (h *WebSocketHandler) generateClientID() string {
 }
 
 func (h *WebSocketHandler) getUserIDFromRequest(r *http.Request) string {
-	// Extract from JWT token or session
-	return "user-id" // placeholder
+	if userID, ok := r.Context().Value("user_id").(string); ok && strings.TrimSpace(userID) != "" {
+		return strings.TrimSpace(userID)
+	}
+	return strings.TrimSpace(r.Header.Get("X-User-ID"))
 }
 
 func (h *WebSocketHandler) getUserRolesFromRequest(r *http.Request) []string {
-	// Extract from JWT token or session
-	return []string{"viewer"} // placeholder
+	roleSet := make(map[string]struct{})
+	if roles, ok := r.Context().Value("roles").([]string); ok {
+		for _, role := range roles {
+			trimmed := strings.TrimSpace(role)
+			if trimmed != "" {
+				roleSet[trimmed] = struct{}{}
+			}
+		}
+	}
+	if role, ok := r.Context().Value("role").(string); ok && strings.TrimSpace(role) != "" {
+		roleSet[strings.TrimSpace(role)] = struct{}{}
+	}
+
+	if len(roleSet) == 0 {
+		return []string{"viewer"}
+	}
+
+	roles := make([]string, 0, len(roleSet))
+	for role := range roleSet {
+		roles = append(roles, role)
+	}
+	slices.Sort(roles)
+	return roles
 }
 
 func (h *WebSocketHandler) parseCommaSeparated(str string) []string {
@@ -1074,20 +1121,6 @@ func (h *WebSocketHandler) collectMetrics(sources []string) map[string]interface
 	// If no specific sources requested, collect common metrics
 	if len(sources) == 0 {
 		sources = []string{"cpu_usage", "memory_usage", "disk_usage", "network_io", "bandwidth", "qos"}
-	}
-
-	// Collect metrics from metric registry
-	if h.metricRegistry != nil {
-		for _, source := range sources {
-			series, err := h.metricRegistry.GetMetrics(source)
-			if err == nil && len(series) > 0 {
-				// Get the latest value from the first series
-				if len(series[0].Metrics) > 0 {
-					latestMetric := series[0].Metrics[len(series[0].Metrics)-1]
-					result[source] = latestMetric.Value
-				}
-			}
-		}
 	}
 
 	// Add current timestamp

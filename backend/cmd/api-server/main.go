@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -19,11 +20,25 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
+	"github.com/sirupsen/logrus"
 
+	graphqlapi "github.com/khryptorgraphics/novacron/backend/api/graphql"
+	securityapi "github.com/khryptorgraphics/novacron/backend/api/security"
+	websocketapi "github.com/khryptorgraphics/novacron/backend/api/websocket"
+	"github.com/khryptorgraphics/novacron/backend/core/audit"
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
+	"github.com/khryptorgraphics/novacron/backend/core/storage"
 	"github.com/khryptorgraphics/novacron/backend/pkg/config"
 	"github.com/khryptorgraphics/novacron/backend/pkg/logger"
 )
+
+type canonicalServices struct {
+	twoFactorService *auth.TwoFactorService
+	securityHandlers *securityapi.SecurityHandlers
+	websocketHandler *websocketapi.WebSocketHandler
+	graphqlHandler   http.Handler
+	shutdown         func()
+}
 
 func main() {
 	cfg, err := config.Load()
@@ -56,13 +71,18 @@ func main() {
 	defer db.Close()
 
 	authManager := auth.NewSimpleAuthManager(cfg.Auth.Secret, db)
+	services, err := initializeCanonicalServices(cfg, db, authManager)
+	if err != nil {
+		appLogger.Fatal("Failed to initialize canonical backend services", "error", err)
+	}
+	defer services.shutdown()
 
 	router := mux.NewRouter()
 	router.StrictSlash(true)
 
 	corsHandler := buildCORSHandler(cfg)
 
-	registerPublicRoutes(router, authManager, db)
+	registerPublicRoutes(router, authManager, db, services.twoFactorService)
 
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	apiRouter.Use(requireAuth(authManager))
@@ -72,7 +92,12 @@ func main() {
 	apiV1Router.Use(requireAuth(authManager))
 	registerSecureAPIRoutes(apiV1Router, db)
 
-	registerExplicitlyUnsupportedRoutes(router)
+	registerCanonicalSecurityRoutes(router, authManager, services.securityHandlers)
+	registerCanonicalGraphQLRoute(router, authManager, services.graphqlHandler)
+	services.websocketHandler.RegisterWebSocketRoutes(router, func(required string, next http.HandlerFunc) http.Handler {
+		return requireAuth(authManager)(requireRoleHandler(required, next))
+	})
+	registerSecurityWebSocketAliases(router, authManager, services.securityHandlers)
 
 	router.HandleFunc("/health", healthCheckHandler(cfg, db)).Methods(http.MethodGet)
 	router.HandleFunc("/api/info", apiInfoHandler()).Methods(http.MethodGet)
@@ -239,7 +264,30 @@ func requireAuth(authManager *auth.SimpleAuthManager) func(http.Handler) http.Ha
 	}
 }
 
-func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManager, db *sql.DB) {
+func requireAnyRoleMiddleware(requiredRoles ...string) mux.MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		return requireAnyRole(requiredRoles...)(next)
+	}
+}
+
+func requireAnyRole(requiredRoles ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if hasAnyRole(r.Context(), requiredRoles...) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			writeJSONError(w, http.StatusForbidden, "insufficient permissions")
+		})
+	}
+}
+
+func requireRoleHandler(requiredRole string, next http.HandlerFunc) http.Handler {
+	return requireAnyRole(requiredRole)(next)
+}
+
+func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManager, db *sql.DB, twoFactorService *auth.TwoFactorService) {
 	loginHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var loginReq struct {
 			Username string `json:"username"`
@@ -273,10 +321,30 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 			return
 		}
 
+		userPayload := frontendUser(user)
+		twoFactorEnabled := userHasEnabledTwoFactor(twoFactorService, user.ID)
+		userPayload["two_factor_enabled"] = twoFactorEnabled
+
+		if twoFactorEnabled {
+			tempToken, err := issuePending2FAToken(authManager.GetJWTSecret(), user)
+			if err != nil {
+				writeJSONError(w, http.StatusInternalServerError, "failed to create 2FA challenge")
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"requires_2fa": true,
+				"temp_token":   tempToken,
+				"expiresAt":    time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339),
+				"user":         userPayload,
+			})
+			return
+		}
+
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"token":     token,
 			"expiresAt": time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
-			"user":      frontendUser(user),
+			"user":      userPayload,
 		})
 	})
 
@@ -358,21 +426,78 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 	}
 	router.Handle("/api/auth/check-email", checkEmailHandler).Methods(http.MethodGet)
 
-	for _, path := range []string{
-		"/api/auth/forgot-password",
-		"/api/auth/reset-password",
-		"/api/auth/resend-verification",
-		"/api/auth/verify-email",
-		"/api/auth/2fa/setup",
-		"/api/auth/2fa/verify",
-		"/api/auth/2fa/verify-login",
-		"/api/auth/2fa/enable",
-		"/api/auth/2fa/disable",
-		"/api/auth/2fa/status",
-		"/api/auth/2fa/backup-codes",
-	} {
-		router.Handle(path, notImplementedJSON("auth capability is not wired in the canonical server yet"))
-	}
+	router.Handle("/api/auth/verify-email", notImplementedJSON("email verification is not wired in the canonical server yet"))
+	router.Handle("/api/auth/forgot-password", notImplementedJSON("password reset is not wired in the canonical server yet"))
+	router.Handle("/api/auth/reset-password", notImplementedJSON("password reset is not wired in the canonical server yet"))
+	router.Handle("/api/auth/resend-verification", notImplementedJSON("email verification is not wired in the canonical server yet"))
+
+	router.HandleFunc("/api/auth/2fa/verify-login", func(w http.ResponseWriter, r *http.Request) {
+		if twoFactorService == nil {
+			writeJSON(w, http.StatusNotImplemented, map[string]interface{}{
+				"error":   "not_supported",
+				"message": "two-factor verification is not configured in the canonical server",
+			})
+			return
+		}
+
+		var verifyReq struct {
+			UserID       string `json:"user_id"`
+			Code         string `json:"code"`
+			IsBackupCode bool   `json:"is_backup_code"`
+			TempToken    string `json:"temp_token"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&verifyReq); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		claims, err := validatePending2FAToken(verifyReq.TempToken, authManager.GetJWTSecret())
+		if err != nil {
+			writeJSONError(w, http.StatusUnauthorized, "invalid or expired temporary token")
+			return
+		}
+
+		userID := stringClaim(claims, "user_id", "sub")
+		if verifyReq.UserID != "" && verifyReq.UserID != userID {
+			writeJSONError(w, http.StatusUnauthorized, "temporary token does not match requested user")
+			return
+		}
+
+		verifyResponse, err := twoFactorService.VerifyCode(auth.TwoFactorVerifyRequest{
+			UserID:       userID,
+			Code:         verifyReq.Code,
+			IsBackupCode: verifyReq.IsBackupCode,
+		})
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to verify two-factor code")
+			return
+		}
+		if !verifyResponse.Valid {
+			writeJSONError(w, http.StatusUnauthorized, "invalid two-factor code")
+			return
+		}
+
+		user, err := authManager.GetUser(userID)
+		if err != nil {
+			writeJSONError(w, http.StatusUnauthorized, "user not found for temporary token")
+			return
+		}
+
+		sessionToken, err := issueSessionToken(authManager.GetJWTSecret(), user)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to create session token")
+			return
+		}
+
+		userPayload := frontendUser(user)
+		userPayload["two_factor_enabled"] = true
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"token":                  sessionToken,
+			"expiresAt":              time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+			"user":                   userPayload,
+			"remaining_backup_codes": verifyResponse.RemainingCodes,
+		})
+	}).Methods(http.MethodPost)
 }
 
 func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
@@ -612,16 +737,85 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 	}).Methods(http.MethodGet)
 }
 
-func registerExplicitlyUnsupportedRoutes(router *mux.Router) {
-	router.Handle("/graphql", notImplementedJSON("GraphQL is not wired into the canonical API server yet"))
+func initializeCanonicalServices(cfg *config.Config, db *sql.DB, authManager *auth.SimpleAuthManager) (*canonicalServices, error) {
+	auditLogger := audit.NewSimpleAuditLogger()
+	twoFactorService := auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret()))
+	securityHandlers := securityapi.NewSecurityHandlers(twoFactorService, auditLogger).WithRBACStore(securityapi.NewPostgresRBACStore(db))
 
-	for _, prefix := range []string{
-		"/api/security/",
-		"/api/admin/security/",
-		"/api/ws/",
-	} {
-		router.PathPrefix(prefix).Handler(notImplementedJSON("this API surface is not wired in the canonical server yet"))
+	volumeStore, err := storage.NewStorageManager(storage.StorageManagerConfig{
+		BasePath: filepath.Join(cfg.VM.StoragePath, "volumes"),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize storage-backed volume store: %w", err)
 	}
+
+	graphqlResolver := graphqlapi.NewResolverWithVolumeStore(nil, nil, volumeStore)
+	websocketLogger := logrus.New()
+	websocketLogger.SetLevel(logrus.InfoLevel)
+	websocketHandler := websocketapi.NewWebSocketHandler(nil, nil, nil, nil, websocketLogger)
+
+	return &canonicalServices{
+		twoFactorService: twoFactorService,
+		securityHandlers: securityHandlers,
+		websocketHandler: websocketHandler,
+		graphqlHandler:   graphqlapi.NewVolumeHTTPHandler(graphqlResolver),
+		shutdown: func() {
+			websocketHandler.Shutdown()
+		},
+	}, nil
+}
+
+func registerCanonicalSecurityRoutes(router *mux.Router, authManager *auth.SimpleAuthManager, handlers *securityapi.SecurityHandlers) {
+	twoFactorRouter := router.PathPrefix("/api/auth/2fa").Subrouter()
+	twoFactorRouter.Use(requireAuth(authManager))
+	twoFactorRouter.HandleFunc("/setup", handlers.Setup2FA).Methods(http.MethodPost)
+	twoFactorRouter.HandleFunc("/qr", handlers.GenerateQRCode).Methods(http.MethodGet)
+	twoFactorRouter.HandleFunc("/verify", handlers.Verify2FA).Methods(http.MethodPost)
+	twoFactorRouter.HandleFunc("/enable", handlers.Enable2FA).Methods(http.MethodPost)
+	twoFactorRouter.HandleFunc("/disable", handlers.Disable2FA).Methods(http.MethodPost)
+	twoFactorRouter.HandleFunc("/status", handlers.Get2FAStatus).Methods(http.MethodGet)
+	twoFactorRouter.HandleFunc("/backup-codes", handlers.GetBackupCodes).Methods(http.MethodGet)
+	twoFactorRouter.HandleFunc("/backup-codes", handlers.RegenerateBackupCodes).Methods(http.MethodPost)
+
+	registerSecurityRouteSet(router.PathPrefix("/api/security").Subrouter(), authManager, handlers, false)
+	registerSecurityRouteSet(router.PathPrefix("/api/admin/security").Subrouter(), authManager, handlers, true)
+}
+
+func registerSecurityRouteSet(router *mux.Router, authManager *auth.SimpleAuthManager, handlers *securityapi.SecurityHandlers, adminOnly bool) {
+	router.Use(requireAuth(authManager))
+	if adminOnly {
+		router.Use(requireAnyRoleMiddleware("admin", "super-admin"))
+	}
+
+	router.HandleFunc("/threats", handlers.GetThreats).Methods(http.MethodGet)
+	router.HandleFunc("/vulnerabilities", handlers.GetVulnerabilities).Methods(http.MethodGet)
+	router.HandleFunc("/compliance", handlers.GetComplianceStatus).Methods(http.MethodGet)
+	router.HandleFunc("/incidents", handlers.GetIncidents).Methods(http.MethodGet)
+	router.HandleFunc("/events", handlers.GetSecurityEvents).Methods(http.MethodGet)
+	router.HandleFunc("/scan", handlers.StartVulnerabilityScan).Methods(http.MethodPost)
+	router.HandleFunc("/scan/{scanId}", handlers.GetScanResults).Methods(http.MethodGet)
+	router.HandleFunc("/cluster/{clusterId}/state", handlers.GetClusterSecurityState).Methods(http.MethodGet)
+	router.HandleFunc("/audit/events", handlers.GetAuditEvents).Methods(http.MethodGet)
+	router.HandleFunc("/audit/export", handlers.ExportAuditLog).Methods(http.MethodGet)
+	router.HandleFunc("/audit/statistics", handlers.GetAuditStatistics).Methods(http.MethodGet)
+	router.HandleFunc("/rbac/roles", handlers.GetRoles).Methods(http.MethodGet)
+	router.HandleFunc("/rbac/permissions", handlers.GetPermissions).Methods(http.MethodGet)
+	router.HandleFunc("/rbac/user/{userId}/roles", handlers.GetUserRoles).Methods(http.MethodGet)
+	router.HandleFunc("/rbac/user/{userId}/roles", handlers.AssignUserRoles).Methods(http.MethodPost)
+	router.HandleFunc("/rbac/user/{userId}/permissions", handlers.GetUserPermissions).Methods(http.MethodGet)
+}
+
+func registerCanonicalGraphQLRoute(router *mux.Router, authManager *auth.SimpleAuthManager, handler http.Handler) {
+	router.Handle("/graphql", requireAuth(authManager)(handler)).Methods(http.MethodPost)
+}
+
+func registerSecurityWebSocketAliases(router *mux.Router, authManager *auth.SimpleAuthManager, handlers *securityapi.SecurityHandlers) {
+	securityStream := requireAuth(authManager)(requireRoleHandler("viewer", handlers.StreamSecurityEvents))
+	router.Handle("/api/ws/security/events", securityStream).Methods(http.MethodGet)
+
+	compatSecurityRouter := router.PathPrefix("/api/security").Subrouter()
+	compatSecurityRouter.Use(requireAuth(authManager))
+	compatSecurityRouter.Handle("/events/stream", requireRoleHandler("viewer", handlers.StreamSecurityEvents)).Methods(http.MethodGet)
 }
 
 func healthCheckHandler(cfg *config.Config, db *sql.DB) http.HandlerFunc {
@@ -671,6 +865,13 @@ func apiInfoHandler() http.HandlerFunc {
 				"/api/auth/login",
 				"/api/auth/register",
 				"/api/auth/check-email",
+				"/api/auth/2fa/setup",
+				"/api/auth/2fa/verify",
+				"/api/auth/2fa/verify-login",
+				"/api/auth/2fa/enable",
+				"/api/auth/2fa/disable",
+				"/api/auth/2fa/status",
+				"/api/auth/2fa/backup-codes",
 				"/api/v1/vms",
 				"/api/v1/vms/{id}",
 				"/api/v1/vms/{id}/start",
@@ -679,6 +880,23 @@ func apiInfoHandler() http.HandlerFunc {
 				"/api/v1/monitoring/metrics",
 				"/api/v1/monitoring/vms",
 				"/api/v1/monitoring/alerts",
+				"/api/security/threats",
+				"/api/security/vulnerabilities",
+				"/api/security/compliance",
+				"/api/security/incidents",
+				"/api/security/events",
+				"/api/security/scan",
+				"/api/security/audit/events",
+				"/api/security/audit/statistics",
+				"/api/security/rbac/roles",
+				"/api/security/rbac/permissions",
+				"/api/admin/security/threats",
+				"/api/admin/security/compliance",
+				"/graphql",
+				"/api/ws/metrics",
+				"/api/ws/alerts",
+				"/api/ws/logs",
+				"/api/ws/security/events",
 				"/health",
 			},
 			"compatibility_endpoints": []string{
@@ -688,12 +906,18 @@ func apiInfoHandler() http.HandlerFunc {
 				"/api/monitoring/metrics",
 				"/api/monitoring/vms",
 				"/api/monitoring/alerts",
+				"/ws/metrics",
+				"/ws/alerts",
+				"/ws/logs",
+				"/api/security/events/stream",
 			},
 			"unsupported_endpoints": []string{
-				"/graphql",
-				"/api/security/*",
-				"/api/admin/security/*",
-				"/api/ws/*",
+				"/api/auth/forgot-password",
+				"/api/auth/reset-password",
+				"/api/auth/resend-verification",
+				"/api/auth/verify-email",
+				"/api/ws/console/{vmId}",
+				"unsupported GraphQL operations outside storage-backed volume queries and mutations",
 			},
 		})
 	}
@@ -755,6 +979,90 @@ func defaultUsernameFromEmail(email string) string {
 	return localPart
 }
 
+func userHasEnabledTwoFactor(twoFactorService *auth.TwoFactorService, userID string) bool {
+	if twoFactorService == nil || strings.TrimSpace(userID) == "" {
+		return false
+	}
+
+	info, err := twoFactorService.GetUserTwoFactorInfo(userID)
+	return err == nil && info != nil && info.Enabled
+}
+
+func issuePending2FAToken(secret string, user *auth.User) (string, error) {
+	if user == nil {
+		return "", fmt.Errorf("user is required")
+	}
+
+	claims := jwt.MapClaims{
+		"purpose":   "pending_2fa",
+		"user_id":   user.ID,
+		"sub":       user.ID,
+		"email":     user.Email,
+		"username":  user.Username,
+		"role":      primaryRole(user),
+		"roles":     append([]string(nil), user.RoleIDs...),
+		"tenant_id": user.TenantID,
+		"exp":       time.Now().Add(10 * time.Minute).Unix(),
+		"iat":       time.Now().Unix(),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(secret))
+}
+
+func validatePending2FAToken(tokenString, secret string) (jwt.MapClaims, error) {
+	claims, err := validateJWT(tokenString, secret)
+	if err != nil {
+		return nil, err
+	}
+	if stringClaim(claims, "purpose") != "pending_2fa" {
+		return nil, fmt.Errorf("token is not a pending 2FA token")
+	}
+	return claims, nil
+}
+
+func issueSessionToken(secret string, user *auth.User) (string, error) {
+	if user == nil {
+		return "", fmt.Errorf("user is required")
+	}
+
+	role := primaryRole(user)
+	roles := append([]string(nil), user.RoleIDs...)
+	if len(roles) == 0 && role != "" {
+		roles = []string{role}
+	}
+
+	claims := jwt.MapClaims{
+		"user_id":   user.ID,
+		"sub":       user.ID,
+		"username":  user.Username,
+		"email":     user.Email,
+		"role":      role,
+		"roles":     roles,
+		"tenant_id": user.TenantID,
+		"exp":       time.Now().Add(24 * time.Hour).Unix(),
+		"iat":       time.Now().Unix(),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(secret))
+}
+
+func primaryRole(user *auth.User) string {
+	if user == nil {
+		return ""
+	}
+	if len(user.RoleIDs) > 0 && strings.TrimSpace(user.RoleIDs[0]) != "" {
+		return strings.TrimSpace(user.RoleIDs[0])
+	}
+	for _, role := range user.Roles {
+		if role != nil && strings.TrimSpace(role.Name) != "" {
+			return strings.TrimSpace(role.Name)
+		}
+	}
+	return "user"
+}
+
 func frontendUser(user *auth.User) map[string]interface{} {
 	role := "user"
 	roles := make([]string, 0, len(user.RoleIDs))
@@ -785,6 +1093,77 @@ func frontendUser(user *auth.User) map[string]interface{} {
 		"role":               role,
 		"roles":              roles,
 		"two_factor_enabled": false,
+	}
+}
+
+func hasAnyRole(ctx context.Context, requiredRoles ...string) bool {
+	required := make(map[string]struct{}, len(requiredRoles))
+	for _, role := range requiredRoles {
+		normalized := strings.ToLower(strings.TrimSpace(role))
+		if normalized != "" {
+			required[normalized] = struct{}{}
+		}
+	}
+
+	for _, role := range contextRoles(ctx) {
+		if roleSatisfies(role, required) {
+			return true
+		}
+	}
+	return false
+}
+
+func contextRoles(ctx context.Context) []string {
+	roleSet := make(map[string]struct{})
+	if role, ok := ctx.Value("role").(string); ok && strings.TrimSpace(role) != "" {
+		roleSet[strings.ToLower(strings.TrimSpace(role))] = struct{}{}
+	}
+	if roles, ok := ctx.Value("roles").([]string); ok {
+		for _, role := range roles {
+			if trimmed := strings.ToLower(strings.TrimSpace(role)); trimmed != "" {
+				roleSet[trimmed] = struct{}{}
+			}
+		}
+	}
+
+	normalizedRoles := make([]string, 0, len(roleSet))
+	for role := range roleSet {
+		normalizedRoles = append(normalizedRoles, role)
+	}
+	return normalizedRoles
+}
+
+func roleSatisfies(userRole string, required map[string]struct{}) bool {
+	if len(required) == 0 {
+		return true
+	}
+
+	rank := roleRank(userRole)
+	for role := range required {
+		if requiredRank := roleRank(role); rank >= requiredRank && requiredRank > 0 {
+			return true
+		}
+		if _, exact := required[userRole]; exact {
+			return true
+		}
+	}
+	return false
+}
+
+func roleRank(role string) int {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "super-admin":
+		return 5
+	case "admin":
+		return 4
+	case "operator":
+		return 3
+	case "viewer", "user":
+		return 2
+	case "readonly":
+		return 1
+	default:
+		return 0
 	}
 }
 

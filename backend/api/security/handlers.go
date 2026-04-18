@@ -1,45 +1,69 @@
 package handlers
 
 import (
+	"cmp"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/khryptorgraphics/novacron/backend/core/audit"
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
-	"github.com/khryptorgraphics/novacron/backend/core/security"
 )
 
 // SecurityHandlers provides HTTP handlers for security endpoints
 type SecurityHandlers struct {
-	twoFactorService    *auth.TwoFactorService
-	securityCoordinator *security.DistributedSecurityCoordinator
-	vulnerabilityScanner *security.VulnerabilityScanner
-	auditLogger         audit.AuditLogger
-	encryptionManager   *security.EncryptionManager
+	twoFactorService *auth.TwoFactorService
+	auditLogger      audit.AuditLogger
+	rbacStore        UserRoleStore
+
+	scanMu      sync.RWMutex
+	scanRecords map[string]*scanRecord
+}
+
+type scanRecord struct {
+	ScanID      string       `json:"scan_id"`
+	Status      string       `json:"status"`
+	Targets     []string     `json:"targets"`
+	ScanTypes   []ScanType   `json:"scan_types"`
+	StartedAt   time.Time    `json:"started_at"`
+	CompletedAt *time.Time   `json:"completed_at,omitempty"`
+	Error       string       `json:"error,omitempty"`
+	Results     *ScanResults `json:"results,omitempty"`
 }
 
 // NewSecurityHandlers creates new security handlers
-func NewSecurityHandlers(
-	twoFactorService *auth.TwoFactorService,
-	securityCoordinator *security.DistributedSecurityCoordinator,
-	vulnerabilityScanner *security.VulnerabilityScanner,
-	auditLogger audit.AuditLogger,
-	encryptionManager *security.EncryptionManager,
-) *SecurityHandlers {
-	return &SecurityHandlers{
-		twoFactorService:    twoFactorService,
-		securityCoordinator: securityCoordinator,
-		vulnerabilityScanner: vulnerabilityScanner,
-		auditLogger:         auditLogger,
-		encryptionManager:   encryptionManager,
+func NewSecurityHandlers(twoFactorService *auth.TwoFactorService, deps ...interface{}) *SecurityHandlers {
+	handler := &SecurityHandlers{
+		twoFactorService: twoFactorService,
+		auditLogger:      audit.NewSimpleAuditLogger(),
+		scanRecords:      make(map[string]*scanRecord),
 	}
+
+	for _, dependency := range deps {
+		switch typed := dependency.(type) {
+		case audit.AuditLogger:
+			handler.auditLogger = typed
+		case UserRoleStore:
+			handler.rbacStore = typed
+		}
+	}
+
+	return handler
+}
+
+func (h *SecurityHandlers) WithRBACStore(store UserRoleStore) *SecurityHandlers {
+	h.rbacStore = store
+	return h
 }
 
 // RegisterRoutes registers all security routes
@@ -80,6 +104,523 @@ func (h *SecurityHandlers) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/api/security/events/stream", h.StreamSecurityEvents)
 }
 
+func (h *SecurityHandlers) respondJSON(w http.ResponseWriter, status int, payload interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func (h *SecurityHandlers) respondUnsupported(w http.ResponseWriter, r *http.Request, capability string) {
+	h.respondJSON(w, http.StatusNotImplemented, map[string]interface{}{
+		"error":     "not_supported",
+		"message":   capability + " is not supported by the canonical backend yet",
+		"path":      r.URL.Path,
+		"supported": false,
+		"timestamp": time.Now().UTC(),
+	})
+}
+
+func userIDFromRequest(r *http.Request, explicitUserID string) string {
+	if trimmed := strings.TrimSpace(explicitUserID); trimmed != "" {
+		return trimmed
+	}
+	if queryUserID := strings.TrimSpace(r.URL.Query().Get("user_id")); queryUserID != "" {
+		return queryUserID
+	}
+	if userID, ok := r.Context().Value("user_id").(string); ok {
+		return strings.TrimSpace(userID)
+	}
+	return ""
+}
+
+func (h *SecurityHandlers) logAudit(ctx context.Context, event *audit.AuditEvent) {
+	if h.auditLogger == nil || event == nil {
+		return
+	}
+	if err := h.auditLogger.LogEvent(ctx, event); err != nil {
+		log.Printf("audit log error: %v", err)
+	}
+}
+
+func (h *SecurityHandlers) listAuditEvents(ctx context.Context, filter *audit.AuditFilter) ([]*audit.AuditEvent, error) {
+	if h.auditLogger == nil {
+		return nil, fmt.Errorf("audit logging is not configured")
+	}
+	return h.auditLogger.QueryEvents(ctx, filter)
+}
+
+func (h *SecurityHandlers) saveScanRecord(record *scanRecord) {
+	h.scanMu.Lock()
+	defer h.scanMu.Unlock()
+	h.scanRecords[record.ScanID] = record
+}
+
+func (h *SecurityHandlers) getScanRecord(scanID string) (*scanRecord, bool) {
+	h.scanMu.RLock()
+	defer h.scanMu.RUnlock()
+	record, ok := h.scanRecords[scanID]
+	if !ok {
+		return nil, false
+	}
+	copyRecord := *record
+	return &copyRecord, true
+}
+
+func (h *SecurityHandlers) completedScanRecords() []*scanRecord {
+	h.scanMu.RLock()
+	defer h.scanMu.RUnlock()
+
+	records := make([]*scanRecord, 0, len(h.scanRecords))
+	for _, record := range h.scanRecords {
+		if record.Status != "completed" || record.Results == nil {
+			continue
+		}
+		copyRecord := *record
+		records = append(records, &copyRecord)
+	}
+
+	slices.SortFunc(records, func(a, b *scanRecord) int {
+		return cmp.Compare(b.StartedAt.UnixNano(), a.StartedAt.UnixNano())
+	})
+
+	return records
+}
+
+func (h *SecurityHandlers) buildThreats(limit int) []SecurityThreat {
+	threats := make([]SecurityThreat, 0)
+	for _, record := range h.completedScanRecords() {
+		if record.Results == nil {
+			continue
+		}
+		for _, finding := range record.Results.Findings {
+			if finding.Severity != SeverityCritical && finding.Severity != SeverityHigh {
+				continue
+			}
+			threats = append(threats, SecurityThreat{
+				ID:          finding.ID,
+				Severity:    finding.Severity,
+				Title:       finding.Title,
+				Description: finding.Description,
+				Source:      "vulnerability_scan",
+				Target:      finding.Target,
+				Timestamp:   finding.DiscoveredAt,
+				Metadata: map[string]interface{}{
+					"category": finding.Category,
+					"scan_id":  record.ScanID,
+				},
+			})
+		}
+	}
+
+	slices.SortFunc(threats, func(a, b SecurityThreat) int {
+		return cmp.Compare(b.Timestamp.UnixNano(), a.Timestamp.UnixNano())
+	})
+	if limit > 0 && len(threats) > limit {
+		return threats[:limit]
+	}
+	return threats
+}
+
+func (h *SecurityHandlers) buildSecurityEvents(limit int) []SecurityEvent {
+	events := make([]SecurityEvent, 0)
+
+	for _, record := range h.completedScanRecords() {
+		message := "Security scan completed"
+		severity := SeverityInfo
+		if record.Results != nil && record.Results.Summary.Critical > 0 {
+			severity = SeverityCritical
+			message = fmt.Sprintf("Security scan completed with %d critical findings", record.Results.Summary.Critical)
+		} else if record.Results != nil && record.Results.Summary.High > 0 {
+			severity = SeverityHigh
+			message = fmt.Sprintf("Security scan completed with %d high findings", record.Results.Summary.High)
+		}
+
+		events = append(events, SecurityEvent{
+			ID:        record.ScanID,
+			Type:      "scan.completed",
+			Severity:  severity,
+			Message:   message,
+			Source:    "security_scan",
+			Timestamp: record.StartedAt,
+			Metadata: map[string]interface{}{
+				"status":     record.Status,
+				"targets":    record.Targets,
+				"scan_types": record.ScanTypes,
+			},
+		})
+	}
+
+	auditEvents, err := h.listAuditEvents(context.Background(), &audit.AuditFilter{Limit: limit})
+	if err == nil {
+		for _, event := range auditEvents {
+			severity := SeverityInfo
+			if event.Result == audit.ResultFailure {
+				severity = SeverityMedium
+			}
+			events = append(events, SecurityEvent{
+				ID:        fmt.Sprintf("audit-%s", event.ID),
+				Type:      strings.ToLower(string(event.EventType)),
+				Severity:  severity,
+				Message:   describeAuditEvent(event),
+				Source:    "audit",
+				Timestamp: event.Timestamp,
+				Metadata: map[string]interface{}{
+					"action":   event.Action,
+					"result":   event.Result,
+					"resource": event.Resource,
+					"user_id":  event.UserID,
+				},
+			})
+		}
+	}
+
+	slices.SortFunc(events, func(a, b SecurityEvent) int {
+		return cmp.Compare(b.Timestamp.UnixNano(), a.Timestamp.UnixNano())
+	})
+	if limit > 0 && len(events) > limit {
+		return events[:limit]
+	}
+	return events
+}
+
+func describeAuditEvent(event *audit.AuditEvent) string {
+	if event == nil {
+		return "audit event"
+	}
+	if event.Details != nil {
+		if description, ok := event.Details["description"].(string); ok && strings.TrimSpace(description) != "" {
+			return description
+		}
+	}
+	return fmt.Sprintf("%s %s on %s", event.UserID, event.Action, event.Resource)
+}
+
+func vulnerabilitySummary(records []*scanRecord) map[string]int {
+	summary := map[string]int{
+		"total":    0,
+		"critical": 0,
+		"high":     0,
+		"medium":   0,
+		"low":      0,
+		"info":     0,
+	}
+
+	for _, record := range records {
+		if record == nil || record.Results == nil {
+			continue
+		}
+		for _, finding := range record.Results.Findings {
+			summary["total"]++
+			severity := strings.ToLower(strings.TrimSpace(string(finding.Severity)))
+			if _, ok := summary[severity]; ok {
+				summary[severity]++
+			}
+		}
+	}
+
+	return summary
+}
+
+func scoreCompliance(records []*scanRecord, threats []SecurityThreat, auditEvents []*audit.AuditEvent) int {
+	summary := vulnerabilitySummary(records)
+	auditPenalty := 0
+	for _, event := range auditEvents {
+		if event == nil {
+			continue
+		}
+		switch event.Result {
+		case audit.ResultDenied:
+			auditPenalty += 4
+		case audit.ResultFailure:
+			auditPenalty += 2
+		}
+	}
+
+	score := 100 -
+		(summary["critical"] * 14) -
+		(summary["high"] * 6) -
+		(summary["medium"] * 3) -
+		(len(threats) * 8) -
+		auditPenalty
+	if score < 0 {
+		return 0
+	}
+	if score > 100 {
+		return 100
+	}
+	return score
+}
+
+func statusFromScore(score int) string {
+	switch {
+	case score >= 90:
+		return "compliant"
+	case score >= 75:
+		return "partially_compliant"
+	default:
+		return "non_compliant"
+	}
+}
+
+func complianceFrameworks(score int, summary map[string]int, threats []SecurityThreat, auditEvents []*audit.AuditEvent, checkedAt time.Time) []map[string]interface{} {
+	accessScore := 100
+	denied := 0
+	failures := 0
+	for _, event := range auditEvents {
+		if event == nil {
+			continue
+		}
+		switch event.Result {
+		case audit.ResultDenied:
+			denied++
+			accessScore -= 8
+		case audit.ResultFailure:
+			failures++
+			accessScore -= 4
+		}
+	}
+	if accessScore < 0 {
+		accessScore = 0
+	}
+
+	vulnerabilityScore := 100 - (summary["critical"] * 18) - (summary["high"] * 8) - (summary["medium"] * 3)
+	if vulnerabilityScore < 0 {
+		vulnerabilityScore = 0
+	}
+
+	incidentScore := 100 - (len(threats) * 12) - (denied * 2)
+	if incidentScore < 0 {
+		incidentScore = 0
+	}
+
+	framework := func(id string, name string, componentScore int, description string) map[string]interface{} {
+		return map[string]interface{}{
+			"id":           id,
+			"name":         name,
+			"status":       statusFromScore(componentScore),
+			"score":        componentScore,
+			"description":  description,
+			"last_updated": checkedAt.UTC(),
+		}
+	}
+
+	return []map[string]interface{}{
+		framework(
+			"access-control",
+			"Access Control",
+			accessScore,
+			fmt.Sprintf("%d denied and %d failed privileged actions were observed in the audit trail.", denied, failures),
+		),
+		framework(
+			"vulnerability-management",
+			"Vulnerability Management",
+			vulnerabilityScore,
+			fmt.Sprintf("%d critical and %d high findings are currently unresolved.", summary["critical"], summary["high"]),
+		),
+		framework(
+			"incident-response",
+			"Incident Response",
+			incidentScore,
+			fmt.Sprintf("%d active high-severity incidents currently require follow-up.", len(threats)),
+		),
+		framework(
+			"overall-security-posture",
+			"Overall Security Posture",
+			score,
+			"Weighted aggregate of audit, vulnerability, and incident signals from the canonical backend.",
+		),
+	}
+}
+
+func normalizeThreatEvent(threat SecurityThreat) map[string]interface{} {
+	status := "active"
+	sourceIP := ""
+	if threat.Metadata != nil {
+		if value, ok := threat.Metadata["status"].(string); ok && strings.TrimSpace(value) != "" {
+			status = strings.ToLower(strings.TrimSpace(value))
+		}
+		if value, ok := threat.Metadata["source_ip"].(string); ok && strings.TrimSpace(value) != "" {
+			sourceIP = strings.TrimSpace(value)
+		}
+	}
+
+	return map[string]interface{}{
+		"id":          threat.ID,
+		"timestamp":   threat.Timestamp.UTC(),
+		"type":        "threat",
+		"severity":    strings.ToLower(string(threat.Severity)),
+		"source":      threat.Source,
+		"resource":    threat.Target,
+		"action":      "scan",
+		"result":      status,
+		"details":     threat.Description,
+		"ip":          sourceIP,
+		"title":       threat.Title,
+		"description": threat.Description,
+		"status":      status,
+		"source_ip":   sourceIP,
+	}
+}
+
+func normalizeAuditSeverity(event *audit.AuditEvent) string {
+	if event == nil {
+		return "low"
+	}
+	switch event.Result {
+	case audit.ResultDenied:
+		return "high"
+	case audit.ResultFailure:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+func normalizeAuditResult(event *audit.AuditEvent) string {
+	if event == nil {
+		return "failure"
+	}
+	switch event.Result {
+	case audit.ResultSuccess:
+		return "success"
+	case audit.ResultDenied:
+		return "blocked"
+	default:
+		return "failure"
+	}
+}
+
+func normalizeAuditType(event *audit.AuditEvent) string {
+	if event == nil {
+		return "anomaly"
+	}
+
+	resource := strings.ToLower(strings.TrimSpace(event.Resource))
+	if resource == "2fa_setup" || resource == "2fa_verification" || strings.Contains(resource, "auth") {
+		return "auth"
+	}
+	if event.Result == audit.ResultDenied {
+		return "access"
+	}
+	switch event.Action {
+	case audit.ActionWrite, audit.ActionUpdate, audit.ActionDelete, audit.ActionRotate:
+		return "modification"
+	default:
+		return "anomaly"
+	}
+}
+
+func normalizeAuditDescription(event *audit.AuditEvent) string {
+	if event == nil {
+		return "Audit event recorded."
+	}
+	if event.Details != nil {
+		if value, ok := event.Details["description"].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	if strings.TrimSpace(event.ErrorMsg) != "" {
+		return strings.TrimSpace(event.ErrorMsg)
+	}
+
+	return fmt.Sprintf("%s %s on %s", strings.ToLower(string(event.Result)), strings.ToLower(string(event.Action)), event.Resource)
+}
+
+func normalizeAuditEvent(event *audit.AuditEvent) map[string]interface{} {
+	ipAddress := strings.TrimSpace(event.ClientIP)
+	if ipAddress == "" {
+		ipAddress = strings.TrimSpace(event.IPAddress)
+	}
+
+	return map[string]interface{}{
+		"id":        event.ID,
+		"timestamp": event.Timestamp.UTC(),
+		"type":      normalizeAuditType(event),
+		"severity":  normalizeAuditSeverity(event),
+		"source":    event.Resource,
+		"user":      event.Actor,
+		"resource":  event.Resource,
+		"action":    strings.ToLower(string(event.Action)),
+		"result":    normalizeAuditResult(event),
+		"details":   normalizeAuditDescription(event),
+		"ip":        ipAddress,
+	}
+}
+
+func incidentSeverityFromAudit(event *audit.AuditEvent) string {
+	if event == nil {
+		return "medium"
+	}
+	switch event.Result {
+	case audit.ResultDenied:
+		return "high"
+	case audit.ResultFailure:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+func incidentFromThreat(threat SecurityThreat) map[string]interface{} {
+	status := "investigating"
+	if threat.Metadata != nil {
+		if value, ok := threat.Metadata["status"].(string); ok && strings.TrimSpace(value) != "" {
+			status = strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	if status == "active" {
+		status = "investigating"
+	}
+
+	sourceIP := ""
+	if threat.Metadata != nil {
+		if value, ok := threat.Metadata["source_ip"].(string); ok && strings.TrimSpace(value) != "" {
+			sourceIP = strings.TrimSpace(value)
+		}
+	}
+
+	return map[string]interface{}{
+		"id":          threat.ID,
+		"title":       threat.Title,
+		"description": threat.Description,
+		"status":      status,
+		"severity":    strings.ToLower(string(threat.Severity)),
+		"timestamp":   threat.Timestamp.UTC(),
+		"createdAt":   threat.Timestamp.UTC(),
+		"source":      threat.Source,
+		"source_ip":   sourceIP,
+		"target":      threat.Target,
+	}
+}
+
+func incidentFromAudit(event *audit.AuditEvent) map[string]interface{} {
+	status := "resolved"
+	switch event.Result {
+	case audit.ResultDenied:
+		status = "blocked"
+	case audit.ResultFailure:
+		status = "investigating"
+	}
+
+	ipAddress := strings.TrimSpace(event.ClientIP)
+	if ipAddress == "" {
+		ipAddress = strings.TrimSpace(event.IPAddress)
+	}
+
+	return map[string]interface{}{
+		"id":          fmt.Sprintf("audit-incident-%s", event.ID),
+		"title":       strings.Title(strings.ReplaceAll(string(event.EventType), "_", " ")),
+		"description": normalizeAuditDescription(event),
+		"status":      status,
+		"severity":    incidentSeverityFromAudit(event),
+		"timestamp":   event.Timestamp.UTC(),
+		"createdAt":   event.Timestamp.UTC(),
+		"source":      event.Resource,
+		"source_ip":   ipAddress,
+		"user":        event.Actor,
+	}
+}
+
 // 2FA Handlers
 
 // Setup2FA initiates 2FA setup
@@ -94,6 +635,8 @@ func (h *SecurityHandlers) Setup2FA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.UserID = userIDFromRequest(r, req.UserID)
+
 	if req.UserID == "" || req.AccountName == "" {
 		http.Error(w, "user_id and account_name are required", http.StatusBadRequest)
 		return
@@ -107,7 +650,7 @@ func (h *SecurityHandlers) Setup2FA(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	h.auditLogger.LogEvent(ctx, &audit.AuditEvent{
+	h.logAudit(ctx, &audit.AuditEvent{
 		UserID:   req.UserID,
 		Resource: "2fa_setup",
 		Action:   audit.ActionUpdate,
@@ -124,7 +667,7 @@ func (h *SecurityHandlers) Setup2FA(w http.ResponseWriter, r *http.Request) {
 
 // GenerateQRCode generates QR code for 2FA setup
 func (h *SecurityHandlers) GenerateQRCode(w http.ResponseWriter, r *http.Request) {
-	userID := r.URL.Query().Get("user_id")
+	userID := userIDFromRequest(r, "")
 	if userID == "" {
 		http.Error(w, "user_id is required", http.StatusBadRequest)
 		return
@@ -150,6 +693,12 @@ func (h *SecurityHandlers) Verify2FA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.UserID = userIDFromRequest(r, req.UserID)
+	if req.UserID == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+
 	response, err := h.twoFactorService.VerifyCode(req)
 	if err != nil {
 		log.Printf("2FA verification error: %v", err)
@@ -162,7 +711,7 @@ func (h *SecurityHandlers) Verify2FA(w http.ResponseWriter, r *http.Request) {
 	if !response.Valid {
 		result = audit.ResultFailure
 	}
-	h.auditLogger.LogEvent(ctx, &audit.AuditEvent{
+	h.logAudit(ctx, &audit.AuditEvent{
 		UserID:   req.UserID,
 		Resource: "2fa_verification",
 		Action:   audit.ActionRead,
@@ -190,6 +739,12 @@ func (h *SecurityHandlers) Enable2FA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.UserID = userIDFromRequest(r, req.UserID)
+	if req.UserID == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+
 	if err := h.twoFactorService.VerifyAndEnable(req.UserID, req.Code); err != nil {
 		log.Printf("2FA enable error: %v", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -197,7 +752,7 @@ func (h *SecurityHandlers) Enable2FA(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	h.auditLogger.LogEvent(ctx, &audit.AuditEvent{
+	h.logAudit(ctx, &audit.AuditEvent{
 		UserID:   req.UserID,
 		Resource: "2fa_configuration",
 		Action:   audit.ActionUpdate,
@@ -225,6 +780,12 @@ func (h *SecurityHandlers) Disable2FA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.UserID = userIDFromRequest(r, req.UserID)
+	if req.UserID == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+
 	if err := h.twoFactorService.DisableTwoFactor(req.UserID); err != nil {
 		log.Printf("2FA disable error: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -232,7 +793,7 @@ func (h *SecurityHandlers) Disable2FA(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	h.auditLogger.LogEvent(ctx, &audit.AuditEvent{
+	h.logAudit(ctx, &audit.AuditEvent{
 		UserID:   req.UserID,
 		Resource: "2fa_configuration",
 		Action:   audit.ActionUpdate,
@@ -251,7 +812,7 @@ func (h *SecurityHandlers) Disable2FA(w http.ResponseWriter, r *http.Request) {
 
 // GetBackupCodes returns backup codes for a user
 func (h *SecurityHandlers) GetBackupCodes(w http.ResponseWriter, r *http.Request) {
-	userID := r.URL.Query().Get("user_id")
+	userID := userIDFromRequest(r, "")
 	if userID == "" {
 		http.Error(w, "user_id is required", http.StatusBadRequest)
 		return
@@ -281,6 +842,12 @@ func (h *SecurityHandlers) RegenerateBackupCodes(w http.ResponseWriter, r *http.
 		return
 	}
 
+	req.UserID = userIDFromRequest(r, req.UserID)
+	if req.UserID == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+
 	codes, err := h.twoFactorService.RegenerateBackupCodes(req.UserID)
 	if err != nil {
 		log.Printf("Regenerate backup codes error: %v", err)
@@ -289,7 +856,7 @@ func (h *SecurityHandlers) RegenerateBackupCodes(w http.ResponseWriter, r *http.
 	}
 
 	ctx := r.Context()
-	h.auditLogger.LogEvent(ctx, &audit.AuditEvent{
+	h.logAudit(ctx, &audit.AuditEvent{
 		UserID:   req.UserID,
 		Resource: "2fa_backup_codes",
 		Action:   audit.ActionUpdate,
@@ -307,7 +874,7 @@ func (h *SecurityHandlers) RegenerateBackupCodes(w http.ResponseWriter, r *http.
 
 // Get2FAStatus returns 2FA status for a user
 func (h *SecurityHandlers) Get2FAStatus(w http.ResponseWriter, r *http.Request) {
-	userID := r.URL.Query().Get("user_id")
+	userID := userIDFromRequest(r, "")
 	if userID == "" {
 		http.Error(w, "user_id is required", http.StatusBadRequest)
 		return
@@ -318,21 +885,21 @@ func (h *SecurityHandlers) Get2FAStatus(w http.ResponseWriter, r *http.Request) 
 		// User doesn't have 2FA setup
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"enabled":      false,
-			"setup":        false,
+			"enabled": false,
+			"setup":   false,
 		})
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"enabled":      info.Enabled,
-		"setup":        true,
-		"setup_at":     info.SetupAt,
-		"last_used":    info.LastUsed,
-		"algorithm":    info.Algorithm,
-		"digits":       info.Digits,
-		"period":       info.Period,
+		"enabled":   info.Enabled,
+		"setup":     true,
+		"setup_at":  info.SetupAt,
+		"last_used": info.LastUsed,
+		"algorithm": info.Algorithm,
+		"digits":    info.Digits,
+		"period":    info.Period,
 	})
 }
 
@@ -340,64 +907,99 @@ func (h *SecurityHandlers) Get2FAStatus(w http.ResponseWriter, r *http.Request) 
 
 // GetThreats returns current security threats
 func (h *SecurityHandlers) GetThreats(w http.ResponseWriter, r *http.Request) {
-	states := h.securityCoordinator.GetAllClusterStates()
-
-	var allThreats []security.SecurityEvent
-	for _, state := range states {
-		allThreats = append(allThreats, state.ActiveThreats...)
+	threats := h.buildThreats(100)
+	normalized := make([]map[string]interface{}, 0, len(threats))
+	for _, threat := range threats {
+		normalized = append(normalized, normalizeThreatEvent(threat))
 	}
 
 	response := map[string]interface{}{
-		"threats": allThreats,
-		"count":   len(allThreats),
+		"threats":    normalized,
+		"count":      len(normalized),
 		"updated_at": time.Now(),
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	h.respondJSON(w, http.StatusOK, response)
 }
 
 // GetVulnerabilities returns vulnerability scan results
 func (h *SecurityHandlers) GetVulnerabilities(w http.ResponseWriter, r *http.Request) {
-	// This would typically come from a database of scan results
-	// For now, return mock data structure
-	response := map[string]interface{}{
-		"vulnerabilities": []map[string]interface{}{},
-		"summary": map[string]interface{}{
-			"total":    0,
-			"critical": 0,
-			"high":     0,
-			"medium":   0,
-			"low":      0,
-		},
-		"last_scan": nil,
+	records := h.completedScanRecords()
+	findings := make([]SecurityFinding, 0)
+	summary := map[string]int{
+		"total":    0,
+		"critical": 0,
+		"high":     0,
+		"medium":   0,
+		"low":      0,
+		"info":     0,
+	}
+	var lastScan *time.Time
+
+	for _, record := range records {
+		if record.Results == nil {
+			continue
+		}
+		findings = append(findings, record.Results.Findings...)
+		if record.CompletedAt != nil {
+			if lastScan == nil || record.CompletedAt.After(*lastScan) {
+				completedAt := *record.CompletedAt
+				lastScan = &completedAt
+			}
+		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	slices.SortFunc(findings, func(a, b SecurityFinding) int {
+		return cmp.Compare(b.DiscoveredAt.UnixNano(), a.DiscoveredAt.UnixNano())
+	})
+
+	for _, finding := range findings {
+		summary["total"]++
+		severity := strings.ToLower(strings.TrimSpace(string(finding.Severity)))
+		if _, ok := summary[severity]; ok {
+			summary[severity]++
+		}
+	}
+
+	response := map[string]interface{}{
+		"vulnerabilities": findings,
+		"summary":         summary,
+		"last_scan":       nil,
+	}
+	if lastScan != nil {
+		response["last_scan"] = lastScan.UTC()
+	}
+
+	h.respondJSON(w, http.StatusOK, response)
 }
 
 // GetComplianceStatus returns compliance status
 func (h *SecurityHandlers) GetComplianceStatus(w http.ResponseWriter, r *http.Request) {
-	response := map[string]interface{}{
-		"compliance_score": 85.5,
-		"frameworks": []map[string]interface{}{
-			{
-				"name":   "OWASP Top 10",
-				"score":  90.0,
-				"status": "compliant",
-			},
-			{
-				"name":   "NIST Cybersecurity Framework",
-				"score":  82.5,
-				"status": "partially_compliant",
-			},
-		},
-		"last_updated": time.Now(),
+	records := h.completedScanRecords()
+	threats := h.buildThreats(200)
+	auditEvents, err := h.listAuditEvents(r.Context(), &audit.AuditFilter{Limit: 250})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	checkedAt := time.Now().UTC()
+	summary := vulnerabilitySummary(records)
+	score := scoreCompliance(records, threats, auditEvents)
+
+	response := map[string]interface{}{
+		"score":            score,
+		"compliance_score": score,
+		"frameworks":       complianceFrameworks(score, summary, threats, auditEvents, checkedAt),
+		"last_updated":     checkedAt,
+		"summary": map[string]interface{}{
+			"vulnerabilities": summary,
+			"active_threats":  len(threats),
+			"audit_events":    len(auditEvents),
+		},
+	}
+
+	h.respondJSON(w, http.StatusOK, response)
 }
 
 // GetIncidents returns security incidents
@@ -409,15 +1011,39 @@ func (h *SecurityHandlers) GetIncidents(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// This would typically come from a database
-	response := map[string]interface{}{
-		"incidents": []map[string]interface{}{},
-		"total":     0,
-		"limit":     limit,
+	threats := h.buildThreats(limit)
+	incidents := make([]map[string]interface{}, 0, limit)
+	for _, threat := range threats {
+		incidents = append(incidents, incidentFromThreat(threat))
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	auditEvents, err := h.listAuditEvents(r.Context(), &audit.AuditFilter{Limit: limit})
+	if err == nil {
+		for _, event := range auditEvents {
+			if event == nil || (event.Result != audit.ResultDenied && event.Result != audit.ResultFailure) {
+				continue
+			}
+			incidents = append(incidents, incidentFromAudit(event))
+		}
+	}
+
+	slices.SortFunc(incidents, func(a, b map[string]interface{}) int {
+		left, _ := a["timestamp"].(time.Time)
+		right, _ := b["timestamp"].(time.Time)
+		return cmp.Compare(right.UnixNano(), left.UnixNano())
+	})
+	if len(incidents) > limit {
+		incidents = incidents[:limit]
+	}
+
+	response := map[string]interface{}{
+		"incidents":  incidents,
+		"total":      len(incidents),
+		"limit":      limit,
+		"updated_at": time.Now().UTC(),
+	}
+
+	h.respondJSON(w, http.StatusOK, response)
 }
 
 // GetSecurityEvents returns recent security events
@@ -429,23 +1055,75 @@ func (h *SecurityHandlers) GetSecurityEvents(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	// This would typically come from a database
+	events := make([]map[string]interface{}, 0, limit)
+	for _, threat := range h.buildThreats(limit) {
+		events = append(events, normalizeThreatEvent(threat))
+	}
+
+	filter := &audit.AuditFilter{Limit: limit}
+	if userID := strings.TrimSpace(r.URL.Query().Get("user_id")); userID != "" {
+		filter.UserID = userID
+	}
+	if userID := strings.TrimSpace(r.URL.Query().Get("user")); userID != "" && filter.UserID == "" {
+		filter.UserID = userID
+	}
+	if action := strings.TrimSpace(r.URL.Query().Get("action")); action != "" {
+		filter.Action = action
+	}
+	if resource := strings.TrimSpace(r.URL.Query().Get("resource")); resource != "" {
+		filter.Resource = resource
+	}
+
+	auditEvents, err := h.listAuditEvents(r.Context(), filter)
+	if err == nil {
+		for _, event := range auditEvents {
+			events = append(events, normalizeAuditEvent(event))
+		}
+	}
+
+	if severity := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("severity"))); severity != "" && severity != "all" {
+		filtered := events[:0]
+		for _, event := range events {
+			if eventSeverity, ok := event["severity"].(string); ok && eventSeverity == severity {
+				filtered = append(filtered, event)
+			}
+		}
+		events = filtered
+	}
+	if eventType := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("type"))); eventType != "" && eventType != "all" {
+		filtered := events[:0]
+		for _, event := range events {
+			if normalizedType, ok := event["type"].(string); ok && normalizedType == eventType {
+				filtered = append(filtered, event)
+			}
+		}
+		events = filtered
+	}
+
+	slices.SortFunc(events, func(a, b map[string]interface{}) int {
+		left, _ := a["timestamp"].(time.Time)
+		right, _ := b["timestamp"].(time.Time)
+		return cmp.Compare(right.UnixNano(), left.UnixNano())
+	})
+	if len(events) > limit {
+		events = events[:limit]
+	}
+
 	response := map[string]interface{}{
-		"events": []map[string]interface{}{},
-		"total":  0,
+		"events": events,
+		"total":  len(events),
 		"limit":  limit,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	h.respondJSON(w, http.StatusOK, response)
 }
 
 // StartVulnerabilityScan starts a vulnerability scan
 func (h *SecurityHandlers) StartVulnerabilityScan(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Targets   []string                    `json:"targets"`
-		ScanTypes []security.ScanType         `json:"scan_types"`
-		Config    map[string]interface{}      `json:"config"`
+		Targets   []string               `json:"targets"`
+		ScanTypes []ScanType             `json:"scan_types"`
+		Config    map[string]interface{} `json:"config"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -460,14 +1138,30 @@ func (h *SecurityHandlers) StartVulnerabilityScan(w http.ResponseWriter, r *http
 
 	// Start scan asynchronously
 	scanID := fmt.Sprintf("scan-%d", time.Now().UnixNano())
+	record := &scanRecord{
+		ScanID:    scanID,
+		Status:    "started",
+		Targets:   append([]string(nil), req.Targets...),
+		ScanTypes: append([]ScanType(nil), normalizeScanTypes(req.ScanTypes)...),
+		StartedAt: time.Now().UTC(),
+	}
+	h.saveScanRecord(record)
 
 	go func() {
-		results, err := h.vulnerabilityScanner.RunComprehensiveScan(r.Context(), req.Targets)
+		results, err := runLocalScan(context.Background(), scanID, req.Targets, req.ScanTypes, record.StartedAt)
+		completedAt := time.Now().UTC()
+		record.CompletedAt = &completedAt
 		if err != nil {
 			log.Printf("Vulnerability scan failed: %v", err)
+			record.Status = "failed"
+			record.Error = err.Error()
 		} else {
 			log.Printf("Vulnerability scan completed: %s", results.ScanID)
+			results.ScanID = scanID
+			record.Status = "completed"
+			record.Results = results
 		}
+		h.saveScanRecord(record)
 	}()
 
 	response := map[string]interface{}{
@@ -475,11 +1169,10 @@ func (h *SecurityHandlers) StartVulnerabilityScan(w http.ResponseWriter, r *http
 		"status":     "started",
 		"targets":    req.Targets,
 		"scan_types": req.ScanTypes,
-		"started_at": time.Now(),
+		"started_at": record.StartedAt,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	h.respondJSON(w, http.StatusAccepted, response)
 }
 
 // GetScanResults returns vulnerability scan results
@@ -487,39 +1180,29 @@ func (h *SecurityHandlers) GetScanResults(w http.ResponseWriter, r *http.Request
 	vars := mux.Vars(r)
 	scanID := vars["scanId"]
 
-	// This would typically fetch from database
-	response := map[string]interface{}{
-		"scan_id": scanID,
-		"status":  "completed",
-		"results": map[string]interface{}{
-			"findings": []map[string]interface{}{},
-			"summary": map[string]interface{}{
-				"total":    0,
-				"critical": 0,
-				"high":     0,
-				"medium":   0,
-				"low":      0,
-			},
-		},
+	record, ok := h.getScanRecord(scanID)
+	if !ok {
+		http.Error(w, "scan not found", http.StatusNotFound)
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	response := map[string]interface{}{
+		"scan_id":      record.ScanID,
+		"status":       record.Status,
+		"targets":      record.Targets,
+		"scan_types":   record.ScanTypes,
+		"started_at":   record.StartedAt,
+		"completed_at": record.CompletedAt,
+		"error":        record.Error,
+		"results":      record.Results,
+	}
+
+	h.respondJSON(w, http.StatusOK, response)
 }
 
 // GetClusterSecurityState returns security state for a specific cluster
 func (h *SecurityHandlers) GetClusterSecurityState(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	clusterID := vars["clusterId"]
-
-	state, err := h.securityCoordinator.GetClusterSecurityState(clusterID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(state)
+	h.respondUnsupported(w, r, "distributed cluster security state")
 }
 
 // Audit Handlers
@@ -533,15 +1216,39 @@ func (h *SecurityHandlers) GetAuditEvents(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// This would typically come from audit storage
+	filter := &audit.AuditFilter{
+		Limit:    limit,
+		UserID:   strings.TrimSpace(r.URL.Query().Get("user_id")),
+		Action:   strings.TrimSpace(r.URL.Query().Get("action")),
+		Resource: strings.TrimSpace(r.URL.Query().Get("resource")),
+	}
+	if filter.UserID == "" {
+		filter.UserID = strings.TrimSpace(r.URL.Query().Get("user"))
+	}
+	events, err := h.listAuditEvents(r.Context(), filter)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	slices.SortFunc(events, func(a, b *audit.AuditEvent) int {
+		return cmp.Compare(b.Timestamp.UnixNano(), a.Timestamp.UnixNano())
+	})
+	if len(events) > limit {
+		events = events[:limit]
+	}
+
+	normalized := make([]map[string]interface{}, 0, len(events))
+	for _, event := range events {
+		normalized = append(normalized, normalizeAuditEvent(event))
+	}
+
 	response := map[string]interface{}{
-		"events": []map[string]interface{}{},
-		"total":  0,
+		"events": normalized,
+		"total":  len(normalized),
 		"limit":  limit,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	h.respondJSON(w, http.StatusOK, response)
 }
 
 // ExportAuditLog exports audit log
@@ -551,114 +1258,155 @@ func (h *SecurityHandlers) ExportAuditLog(w http.ResponseWriter, r *http.Request
 		format = "json"
 	}
 
-	// This would typically generate and return audit export
+	events, err := h.listAuditEvents(r.Context(), &audit.AuditFilter{})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	slices.SortFunc(events, func(a, b *audit.AuditEvent) int {
+		return cmp.Compare(a.Timestamp.UnixNano(), b.Timestamp.UnixNano())
+	})
+
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=audit-log.%s", format))
 
 	switch format {
 	case "csv":
 		w.Header().Set("Content-Type", "text/csv")
-		w.Write([]byte("timestamp,event_type,user_id,description\n"))
+		_, _ = w.Write([]byte("timestamp,event_type,user_id,action,result,resource,description\n"))
+		for _, event := range events {
+			description := ""
+			if event.Details != nil {
+				if value, ok := event.Details["description"].(string); ok {
+					description = strings.ReplaceAll(value, ",", " ")
+				}
+			}
+			_, _ = w.Write([]byte(fmt.Sprintf("%s,%s,%s,%s,%s,%s,%s\n",
+				event.Timestamp.UTC().Format(time.RFC3339),
+				event.EventType,
+				event.UserID,
+				event.Action,
+				event.Result,
+				event.Resource,
+				description,
+			)))
+		}
 	default:
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"events": []map[string]interface{}{},
-			"exported_at": time.Now(),
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"events":       events,
+			"exported_at":  time.Now().UTC(),
+			"total_events": len(events),
 		})
 	}
 }
 
 // GetAuditStatistics returns audit statistics
 func (h *SecurityHandlers) GetAuditStatistics(w http.ResponseWriter, r *http.Request) {
-	response := map[string]interface{}{
-		"total_events": 0,
-		"events_by_type": map[string]int{},
-		"events_by_severity": map[string]int{},
-		"period": "last_30_days",
+	period := r.URL.Query().Get("period")
+	if period == "" {
+		period = "last_30_days"
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	events, err := h.listAuditEvents(r.Context(), &audit.AuditFilter{})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	eventsByType := make(map[string]int)
+	eventsByResult := make(map[string]int)
+	eventsByAction := make(map[string]int)
+	successCount := 0
+	for _, event := range events {
+		eventsByType[string(event.EventType)]++
+		eventsByResult[string(event.Result)]++
+		eventsByAction[string(event.Action)]++
+		if event.Result == audit.ResultSuccess {
+			successCount++
+		}
+	}
+
+	overallScore := 100
+	if len(events) > 0 {
+		overallScore = int(float64(successCount) / float64(len(events)) * 100)
+	}
+
+	response := map[string]interface{}{
+		"total_events":     len(events),
+		"events_by_type":   eventsByType,
+		"events_by_result": eventsByResult,
+		"events_by_action": eventsByAction,
+		"overallScore":     overallScore,
+		"period":           period,
+	}
+
+	h.respondJSON(w, http.StatusOK, response)
 }
 
 // RBAC Handlers
 
 // GetRoles returns available roles
 func (h *SecurityHandlers) GetRoles(w http.ResponseWriter, r *http.Request) {
-	roles := []map[string]interface{}{
-		{
-			"id":          "admin",
-			"name":        "Administrator",
-			"description": "Full system access",
-			"permissions": []string{"*"},
-		},
-		{
-			"id":          "user",
-			"name":        "User",
-			"description": "Standard user access",
-			"permissions": []string{"read", "write_own"},
-		},
-		{
-			"id":          "readonly",
-			"name":        "Read Only",
-			"description": "Read-only access",
-			"permissions": []string{"read"},
-		},
+	if h.rbacStore == nil {
+		h.respondUnsupported(w, r, "RBAC role enumeration")
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"roles": roles,
-	})
+	roles, err := h.rbacStore.ListRoles(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	h.respondJSON(w, http.StatusOK, map[string]interface{}{"roles": roles})
 }
 
 // GetPermissions returns available permissions
 func (h *SecurityHandlers) GetPermissions(w http.ResponseWriter, r *http.Request) {
-	permissions := []map[string]interface{}{
-		{
-			"id":          "read",
-			"name":        "Read",
-			"description": "Read access to resources",
-		},
-		{
-			"id":          "write",
-			"name":        "Write",
-			"description": "Write access to resources",
-		},
-		{
-			"id":          "delete",
-			"name":        "Delete",
-			"description": "Delete access to resources",
-		},
-		{
-			"id":          "admin",
-			"name":        "Admin",
-			"description": "Administrative access",
-		},
+	if h.rbacStore == nil {
+		h.respondUnsupported(w, r, "RBAC permission enumeration")
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"permissions": permissions,
-	})
+	permissions, err := h.rbacStore.ListPermissions(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	h.respondJSON(w, http.StatusOK, map[string]interface{}{"permissions": permissions})
 }
 
 // GetUserRoles returns roles for a specific user
 func (h *SecurityHandlers) GetUserRoles(w http.ResponseWriter, r *http.Request) {
+	if h.rbacStore == nil {
+		h.respondUnsupported(w, r, "user role lookup")
+		return
+	}
+
 	vars := mux.Vars(r)
 	userID := vars["userId"]
 
-	// This would typically come from database
-	response := map[string]interface{}{
-		"user_id": userID,
-		"roles":   []string{"user"},
+	roles, err := h.rbacStore.GetUserRoles(r.Context(), userID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if err == sql.ErrNoRows {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	h.respondJSON(w, http.StatusOK, map[string]interface{}{"user_id": userID, "roles": roles})
 }
 
 // AssignUserRoles assigns roles to a user
 func (h *SecurityHandlers) AssignUserRoles(w http.ResponseWriter, r *http.Request) {
+	if h.rbacStore == nil {
+		h.respondUnsupported(w, r, "user role assignment")
+		return
+	}
+
 	vars := mux.Vars(r)
 	userID := vars["userId"]
 
@@ -671,39 +1419,57 @@ func (h *SecurityHandlers) AssignUserRoles(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// This would typically update database
+	roles, err := h.rbacStore.AssignUserRoles(r.Context(), userID, req.Roles)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if err == sql.ErrNoRows {
+			status = http.StatusNotFound
+		} else if strings.Contains(err.Error(), "at least one role") || strings.Contains(err.Error(), "unsupported role") {
+			status = http.StatusBadRequest
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+
 	ctx := r.Context()
-	h.auditLogger.LogEvent(ctx, &audit.AuditEvent{
+	h.logAudit(ctx, &audit.AuditEvent{
 		UserID:   userID,
 		Resource: "user_roles",
 		Action:   audit.ActionUpdate,
 		Result:   audit.ResultSuccess,
-		Details:   map[string]interface{}{"roles": req.Roles, "description": "User roles assigned"},
+		Details:  map[string]interface{}{"roles": req.Roles, "description": "User roles assigned"},
 	})
 
 	response := map[string]interface{}{
 		"user_id": userID,
-		"roles":   req.Roles,
+		"roles":   roles,
 		"success": true,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	h.respondJSON(w, http.StatusOK, response)
 }
 
 // GetUserPermissions returns effective permissions for a user
 func (h *SecurityHandlers) GetUserPermissions(w http.ResponseWriter, r *http.Request) {
+	if h.rbacStore == nil {
+		h.respondUnsupported(w, r, "user permission lookup")
+		return
+	}
+
 	vars := mux.Vars(r)
 	userID := vars["userId"]
 
-	// This would typically calculate from roles and return effective permissions
-	response := map[string]interface{}{
-		"user_id":     userID,
-		"permissions": []string{"read", "write_own"},
+	permissions, err := h.rbacStore.GetUserPermissions(r.Context(), userID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if err == sql.ErrNoRows {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	h.respondJSON(w, http.StatusOK, map[string]interface{}{"user_id": userID, "permissions": permissions})
 }
 
 var upgrader = websocket.Upgrader{
@@ -726,8 +1492,8 @@ func (h *SecurityHandlers) StreamSecurityEvents(w http.ResponseWriter, r *http.R
 	defer conn.Close()
 
 	// Log the connection
-	h.auditLogger.LogEvent(ctx, &audit.AuditEvent{
-		UserID:   r.Header.Get("X-User-ID"), // In real app, get from auth context
+	h.logAudit(ctx, &audit.AuditEvent{
+		UserID:   userIDFromRequest(r, ""),
 		Resource: "websocket_connection",
 		Action:   audit.ActionRead,
 		Result:   audit.ResultSuccess,
@@ -744,30 +1510,15 @@ func (h *SecurityHandlers) StreamSecurityEvents(w http.ResponseWriter, r *http.R
 	for {
 		select {
 		case <-ticker.C:
-			// Get current security events
-			states := h.securityCoordinator.GetAllClusterStates()
-
-			// Create event summary
+			events := h.buildSecurityEvents(20)
+			threats := h.buildThreats(20)
 			summary := map[string]interface{}{
-				"timestamp": time.Now(),
-				"clusters":  len(states),
-				"events":    []interface{}{},
+				"timestamp":            time.Now().UTC(),
+				"events":               events,
+				"threats":              threats,
+				"total_events":         len(events),
+				"total_active_threats": len(threats),
 			}
-
-			totalThreats := 0
-			for clusterID, state := range states {
-				totalThreats += len(state.ActiveThreats)
-				if len(state.ActiveThreats) > 0 {
-					summary["events"] = append(summary["events"].([]interface{}), map[string]interface{}{
-						"cluster_id":    clusterID,
-						"threat_level":  state.ThreatLevel,
-						"active_threats": len(state.ActiveThreats),
-						"quarantined":   state.Quarantined,
-					})
-				}
-			}
-
-			summary["total_active_threats"] = totalThreats
 
 			// Send the summary
 			if err := conn.WriteJSON(summary); err != nil {

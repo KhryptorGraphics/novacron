@@ -13,6 +13,39 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+func passthroughRoleGuard(_ string, next http.HandlerFunc) http.Handler {
+	return next
+}
+
+func TestRegisterWebSocketRoutesIncludesCanonicalAliases(t *testing.T) {
+	logger := logrus.New()
+	handler := NewWebSocketHandler(nil, nil, logger)
+	defer handler.Shutdown()
+
+	router := mux.NewRouter()
+	handler.RegisterWebSocketRoutes(router, passthroughRoleGuard)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	for _, path := range []string{"/ws/metrics?interval=1", "/api/ws/metrics?interval=1"} {
+		wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + path
+		conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if err != nil {
+			t.Fatalf("failed to connect to %s: %v", path, err)
+		}
+
+		if resp.StatusCode != http.StatusSwitchingProtocols {
+			conn.Close()
+			t.Fatalf("expected status 101 from %s, got %d", path, resp.StatusCode)
+		}
+
+		if err := conn.Close(); err != nil {
+			t.Fatalf("close websocket %s: %v", path, err)
+		}
+	}
+}
+
 // TestWebSocketMetricsEndpoint tests the /ws/metrics endpoint
 func TestWebSocketMetricsEndpoint(t *testing.T) {
 	// Create handler with nil dependencies (will use defaults)
@@ -71,6 +104,47 @@ func TestWebSocketMetricsEndpoint(t *testing.T) {
 	}
 
 	t.Logf("Received metrics message: %+v", metricsMsg)
+}
+
+func TestRegisterWebSocketRoutesSupportsCanonicalMetricsPrefix(t *testing.T) {
+	logger := logrus.New()
+	handler := NewWebSocketHandler(nil, nil, nil, nil, logger)
+	defer handler.Shutdown()
+
+	router := mux.NewRouter()
+	handler.RegisterWebSocketRoutes(router, func(_ string, next http.HandlerFunc) http.Handler {
+		return http.HandlerFunc(next)
+	})
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/ws/metrics?interval=1"
+
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to connect to canonical metrics WebSocket: %v", err)
+	}
+	defer conn.Close()
+
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Errorf("Expected status 101, got %d", resp.StatusCode)
+	}
+
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, message, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("Failed to read canonical metrics message: %v", err)
+	}
+
+	var metricsMsg MetricsMessage
+	if err := json.Unmarshal(message, &metricsMsg); err != nil {
+		t.Fatalf("Failed to parse canonical metrics message: %v", err)
+	}
+
+	if metricsMsg.Type != "metrics_update" {
+		t.Errorf("Expected type 'metrics_update', got '%s'", metricsMsg.Type)
+	}
 }
 
 // TestWebSocketAlertsEndpoint tests the /ws/alerts endpoint

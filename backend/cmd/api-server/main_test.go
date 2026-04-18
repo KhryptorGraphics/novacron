@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +15,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 
+	graphqlapi "github.com/khryptorgraphics/novacron/backend/api/graphql"
+	securityapi "github.com/khryptorgraphics/novacron/backend/api/security"
+	"github.com/khryptorgraphics/novacron/backend/core/audit"
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
+	"github.com/khryptorgraphics/novacron/backend/core/storage"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -120,7 +127,7 @@ func TestRegisterPublicRoutesSupportsCanonicalEmailLogin(t *testing.T) {
 
 	authManager := auth.NewSimpleAuthManager("test-secret", db)
 	router := mux.NewRouter()
-	registerPublicRoutes(router, authManager, db)
+	registerPublicRoutes(router, authManager, db, nil)
 
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte("correct-horse-battery-staple"), bcrypt.DefaultCost)
 	if err != nil {
@@ -128,10 +135,13 @@ func TestRegisterPublicRoutesSupportsCanonicalEmailLogin(t *testing.T) {
 	}
 
 	now := time.Now()
-	mock.ExpectQuery(`SELECT username FROM users WHERE email = \\$1`).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT username FROM users WHERE email = $1`)).
 		WithArgs("user@example.com").
 		WillReturnRows(sqlmock.NewRows([]string{"username"}).AddRow("user"))
-	mock.ExpectQuery(`SELECT id, username, email, password_hash, role, tenant_id, created_at, updated_at\\s+FROM users WHERE username = \\$1`).
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, username, email, password_hash, role, tenant_id, created_at, updated_at
+		FROM users WHERE username = $1
+	`)).
 		WithArgs("user").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "tenant_id", "created_at", "updated_at"}).
 			AddRow("7", "user", "user@example.com", string(passwordHash), "admin", "default", now, now))
@@ -175,20 +185,6 @@ func TestRegisterPublicRoutesSupportsCanonicalEmailLogin(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
-	}
-}
-
-func TestRegisterExplicitlyUnsupportedRoutesReturnsNotImplemented(t *testing.T) {
-	router := mux.NewRouter()
-	registerExplicitlyUnsupportedRoutes(router)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/security/health", nil)
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotImplemented {
-		t.Fatalf("expected 501, got %d", rec.Code)
 	}
 }
 
@@ -395,7 +391,187 @@ func TestAPIInfoAdvertisesCanonicalContract(t *testing.T) {
 
 	assertContains("endpoints", endpoints, "/api/v1/vms")
 	assertContains("endpoints", endpoints, "/api/v1/monitoring/metrics")
+	assertContains("endpoints", endpoints, "/api/security/threats")
+	assertContains("endpoints", endpoints, "/api/security/compliance")
+	assertContains("endpoints", endpoints, "/api/security/incidents")
+	assertContains("endpoints", endpoints, "/graphql")
 	assertContains("compatibility_endpoints", compatibilityEndpoints, "/api/vms")
-	assertContains("unsupported_endpoints", unsupportedEndpoints, "/graphql")
-	assertContains("unsupported_endpoints", unsupportedEndpoints, "/api/security/*")
+	assertContains("compatibility_endpoints", compatibilityEndpoints, "/ws/metrics")
+	assertContains("unsupported_endpoints", unsupportedEndpoints, "/api/ws/console/{vmId}")
+}
+
+func TestRegisterCanonicalSecurityRoutesServesDashboardEndpoints(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	twoFactorService := auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret()))
+	auditLogger := audit.NewSimpleAuditLogger()
+	if err := auditLogger.LogEvent(context.Background(), &audit.AuditEvent{
+		ID:        "audit-1",
+		Timestamp: time.Now().Add(-5 * time.Minute).UTC(),
+		EventType: audit.EventPermissionDeny,
+		Actor:     "alice@example.com",
+		UserID:    "7",
+		Resource:  "admin_panel",
+		Action:    audit.ActionRead,
+		Result:    audit.ResultDenied,
+		ClientIP:  "203.0.113.7",
+		Details: map[string]interface{}{
+			"description": "Blocked admin panel access from suspicious IP",
+		},
+	}); err != nil {
+		t.Fatalf("failed to seed audit log: %v", err)
+	}
+
+	handlers := securityapi.NewSecurityHandlers(twoFactorService, auditLogger).WithRBACStore(securityapi.NewPostgresRBACStore(db))
+	router := mux.NewRouter()
+	registerCanonicalSecurityRoutes(router, authManager, handlers)
+
+	token := signedBearerToken(t, authManager, "7", "default", "admin")
+	for _, endpoint := range []string{
+		"/api/security/compliance",
+		"/api/security/incidents",
+		"/api/security/events",
+		"/api/security/audit/statistics",
+	} {
+		req := httptest.NewRequest(http.MethodGet, endpoint, nil)
+		req.Header.Set("Authorization", token)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 from %s, got %d (%s)", endpoint, rec.Code, rec.Body.String())
+		}
+	}
+
+	complianceReq := httptest.NewRequest(http.MethodGet, "/api/security/compliance", nil)
+	complianceReq.Header.Set("Authorization", token)
+	complianceRec := httptest.NewRecorder()
+	router.ServeHTTP(complianceRec, complianceReq)
+
+	var compliancePayload map[string]interface{}
+	if err := json.NewDecoder(complianceRec.Body).Decode(&compliancePayload); err != nil {
+		t.Fatalf("failed to decode compliance response: %v", err)
+	}
+	if _, ok := compliancePayload["compliance_score"]; !ok {
+		t.Fatalf("expected compliance_score in response, got %#v", compliancePayload)
+	}
+	if frameworks, ok := compliancePayload["frameworks"].([]interface{}); !ok || len(frameworks) == 0 {
+		t.Fatalf("expected compliance frameworks in response, got %#v", compliancePayload["frameworks"])
+	}
+
+	incidentReq := httptest.NewRequest(http.MethodGet, "/api/security/incidents", nil)
+	incidentReq.Header.Set("Authorization", token)
+	incidentRec := httptest.NewRecorder()
+	router.ServeHTTP(incidentRec, incidentReq)
+
+	var incidentPayload map[string]interface{}
+	if err := json.NewDecoder(incidentRec.Body).Decode(&incidentPayload); err != nil {
+		t.Fatalf("failed to decode incidents response: %v", err)
+	}
+	incidents, ok := incidentPayload["incidents"].([]interface{})
+	if !ok || len(incidents) == 0 {
+		t.Fatalf("expected at least one incident, got %#v", incidentPayload["incidents"])
+	}
+
+	auditStatsReq := httptest.NewRequest(http.MethodGet, "/api/security/audit/statistics", nil)
+	auditStatsReq.Header.Set("Authorization", token)
+	auditStatsRec := httptest.NewRecorder()
+	router.ServeHTTP(auditStatsRec, auditStatsReq)
+
+	var auditStatsPayload map[string]interface{}
+	if err := json.NewDecoder(auditStatsRec.Body).Decode(&auditStatsPayload); err != nil {
+		t.Fatalf("failed to decode audit statistics response: %v", err)
+	}
+	if _, ok := auditStatsPayload["overallScore"]; !ok {
+		t.Fatalf("expected overallScore in audit statistics, got %#v", auditStatsPayload)
+	}
+}
+
+func TestRegisterCanonicalGraphQLRouteSupportsVolumeOperations(t *testing.T) {
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	volumeStore, err := storage.NewStorageManager(storage.StorageManagerConfig{
+		BasePath: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("failed to create storage manager: %v", err)
+	}
+
+	router := mux.NewRouter()
+	registerCanonicalGraphQLRoute(
+		router,
+		authManager,
+		graphqlapi.NewVolumeHTTPHandler(graphqlapi.NewResolverWithVolumeStore(nil, nil, volumeStore)),
+	)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/graphql", bytes.NewBufferString(`{
+		"query":"mutation CreateVolume($input: CreateVolumeInput!) { createVolume(input: $input) { id name tier size } }",
+		"variables":{"input":{"name":"alpha","size":25,"tier":"hot"}}
+	}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+	createRec := httptest.NewRecorder()
+	router.ServeHTTP(createRec, createReq)
+
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for createVolume, got %d (%s)", createRec.Code, createRec.Body.String())
+	}
+
+	var createPayload map[string]interface{}
+	if err := json.NewDecoder(createRec.Body).Decode(&createPayload); err != nil {
+		t.Fatalf("failed to decode createVolume response: %v", err)
+	}
+
+	data, ok := createPayload["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected GraphQL data envelope, got %#v", createPayload)
+	}
+	createdVolume, ok := data["createVolume"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected createVolume payload, got %#v", data["createVolume"])
+	}
+	if createdVolume["name"] != "alpha" {
+		t.Fatalf("expected created volume name alpha, got %#v", createdVolume["name"])
+	}
+
+	queryReq := httptest.NewRequest(http.MethodPost, "/graphql", bytes.NewBufferString(`{
+		"query":"query Volumes { volumes { id name tier size } }"
+	}`))
+	queryReq.Header.Set("Content-Type", "application/json")
+	queryReq.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+	queryRec := httptest.NewRecorder()
+	router.ServeHTTP(queryRec, queryReq)
+
+	if queryRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for volumes query, got %d (%s)", queryRec.Code, queryRec.Body.String())
+	}
+
+	var queryPayload map[string]interface{}
+	if err := json.NewDecoder(queryRec.Body).Decode(&queryPayload); err != nil {
+		t.Fatalf("failed to decode volumes response: %v", err)
+	}
+
+	queryData, ok := queryPayload["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected GraphQL data envelope, got %#v", queryPayload)
+	}
+	volumes, ok := queryData["volumes"].([]interface{})
+	if !ok || len(volumes) != 1 {
+		t.Fatalf("expected one volume in GraphQL query, got %#v", queryData["volumes"])
+	}
+
+	volume, ok := volumes[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected volume object, got %#v", volumes[0])
+	}
+	if volume["name"] != "alpha" {
+		t.Fatalf("expected queried volume name alpha, got %#v", volume["name"])
+	}
+	if tier, _ := volume["tier"].(string); !strings.EqualFold(tier, "hot") {
+		t.Fatalf("expected queried volume tier hot, got %#v", volume["tier"])
+	}
 }
