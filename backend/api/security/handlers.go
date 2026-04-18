@@ -643,6 +643,99 @@ func incidentFromAudit(event *audit.AuditEvent) map[string]interface{} {
 	}
 }
 
+const (
+	auditEventTypeSecurityEventAcknowledge audit.AuditEventType = "SECURITY_EVENT_ACKNOWLEDGE"
+	auditEventTypeComplianceRecheck        audit.AuditEventType = "COMPLIANCE_RECHECK"
+	auditEventTypeManualIncident           audit.AuditEventType = "MANUAL_SECURITY_INCIDENT"
+)
+
+func auditEventDetailString(event *audit.AuditEvent, key string) string {
+	if event == nil || event.Details == nil {
+		return ""
+	}
+	value, ok := event.Details[key]
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", value))
+}
+
+func buildAcknowledgementIndex(events []*audit.AuditEvent) map[string]*audit.AuditEvent {
+	acknowledgements := make(map[string]*audit.AuditEvent)
+	for _, event := range events {
+		if event == nil || event.EventType != auditEventTypeSecurityEventAcknowledge {
+			continue
+		}
+
+		eventID := auditEventDetailString(event, "event_id")
+		if eventID == "" {
+			continue
+		}
+
+		if existing, ok := acknowledgements[eventID]; ok && existing.Timestamp.After(event.Timestamp) {
+			continue
+		}
+		acknowledgements[eventID] = event
+	}
+	return acknowledgements
+}
+
+func applyAcknowledgements(events []map[string]interface{}, acknowledgements map[string]*audit.AuditEvent) {
+	if len(acknowledgements) == 0 {
+		return
+	}
+
+	for _, event := range events {
+		eventID, _ := event["id"].(string)
+		if eventID == "" {
+			continue
+		}
+
+		ack, ok := acknowledgements[eventID]
+		if !ok {
+			continue
+		}
+
+		event["acknowledged"] = true
+		event["acknowledged_at"] = ack.Timestamp.UTC()
+		event["acknowledged_by"] = strings.TrimSpace(ack.Actor)
+		event["status"] = "acknowledged"
+		event["result"] = "success"
+
+		details, _ := event["details"].(string)
+		note := auditEventDetailString(ack, "note")
+		if note != "" {
+			event["details"] = fmt.Sprintf("%s (acknowledged by %s: %s)", details, ack.Actor, note)
+		} else {
+			event["details"] = fmt.Sprintf("%s (acknowledged by %s)", details, ack.Actor)
+		}
+	}
+}
+
+func incidentFromManualAudit(event *audit.AuditEvent) map[string]interface{} {
+	status := auditEventDetailString(event, "status")
+	if status == "" {
+		status = "open"
+	}
+
+	severity := strings.ToLower(auditEventDetailString(event, "severity"))
+	if severity == "" {
+		severity = "medium"
+	}
+
+	return map[string]interface{}{
+		"id":          fmt.Sprintf("manual-incident-%s", event.ID),
+		"title":       auditEventDetailString(event, "title"),
+		"description": normalizeAuditDescription(event),
+		"status":      status,
+		"severity":    severity,
+		"timestamp":   event.Timestamp.UTC(),
+		"createdAt":   event.Timestamp.UTC(),
+		"source":      event.Resource,
+		"user":        event.Actor,
+	}
+}
+
 // 2FA Handlers
 
 // Setup2FA initiates 2FA setup
@@ -1024,6 +1117,116 @@ func (h *SecurityHandlers) GetComplianceStatus(w http.ResponseWriter, r *http.Re
 	h.respondJSON(w, http.StatusOK, response)
 }
 
+// TriggerComplianceCheck records a compliance re-check and immediately recomputes canonical status.
+func (h *SecurityHandlers) TriggerComplianceCheck(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RequirementID string `json:"requirement_id,omitempty"`
+	}
+
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	jobID := fmt.Sprintf("compliance-check-%d", time.Now().UTC().UnixNano())
+	userID := userIDFromRequest(r, "")
+	actor := userID
+	if actor == "" {
+		actor = "canonical-security"
+	}
+
+	h.logAudit(r.Context(), &audit.AuditEvent{
+		UserID:      userID,
+		Actor:       actor,
+		Resource:    "compliance",
+		ResourceID:  strings.TrimSpace(req.RequirementID),
+		EventType:   auditEventTypeComplianceRecheck,
+		Action:      audit.ActionUpdate,
+		Result:      audit.ResultSuccess,
+		Sensitivity: audit.SensitivityInternal,
+		Details: map[string]interface{}{
+			"job_id":         jobID,
+			"requirement_id": strings.TrimSpace(req.RequirementID),
+			"description":    "Compliance re-check triggered from canonical security surface",
+		},
+	})
+
+	records := h.completedScanRecords()
+	threats := h.buildThreats(200)
+	auditEvents, err := h.listAuditEvents(r.Context(), &audit.AuditFilter{Limit: 250})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	summary := vulnerabilitySummary(records)
+	score := scoreCompliance(records, threats, auditEvents)
+	checkedAt := time.Now().UTC()
+
+	h.respondJSON(w, http.StatusAccepted, map[string]interface{}{
+		"jobId":            jobID,
+		"status":           "completed",
+		"requirementId":    strings.TrimSpace(req.RequirementID),
+		"complianceScore":  score,
+		"frameworks":       complianceFrameworks(score, summary, threats, auditEvents, checkedAt),
+		"lastUpdated":      checkedAt,
+		"activeThreats":    len(threats),
+		"vulnerabilitySummary": summary,
+	})
+}
+
+// ExportComplianceReport exports the current compliance posture in JSON or CSV.
+func (h *SecurityHandlers) ExportComplianceReport(w http.ResponseWriter, r *http.Request) {
+	records := h.completedScanRecords()
+	threats := h.buildThreats(200)
+	auditEvents, err := h.listAuditEvents(r.Context(), &audit.AuditFilter{Limit: 250})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	summary := vulnerabilitySummary(records)
+	score := scoreCompliance(records, threats, auditEvents)
+	checkedAt := time.Now().UTC()
+	frameworks := complianceFrameworks(score, summary, threats, auditEvents, checkedAt)
+
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	if format == "" {
+		format = "json"
+	}
+
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=compliance-report.%s", format))
+
+	switch format {
+	case "csv":
+		w.Header().Set("Content-Type", "text/csv")
+		_, _ = w.Write([]byte("framework_id,framework_name,status,score,last_updated,description\n"))
+		for _, framework := range frameworks {
+			description := strings.ReplaceAll(fmt.Sprintf("%v", framework["description"]), ",", " ")
+			_, _ = w.Write([]byte(fmt.Sprintf("%v,%v,%v,%v,%v,%s\n",
+				framework["id"],
+				framework["name"],
+				framework["status"],
+				framework["score"],
+				checkedAt.Format(time.RFC3339),
+				description,
+			)))
+		}
+	default:
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"score":            score,
+			"compliance_score": score,
+			"frameworks":       frameworks,
+			"last_updated":     checkedAt,
+			"summary": map[string]interface{}{
+				"vulnerabilities": summary,
+				"active_threats":  len(threats),
+				"audit_events":    len(auditEvents),
+			},
+		})
+	}
+}
+
 // GetIncidents returns security incidents
 func (h *SecurityHandlers) GetIncidents(w http.ResponseWriter, r *http.Request) {
 	limit := 50
@@ -1042,6 +1245,13 @@ func (h *SecurityHandlers) GetIncidents(w http.ResponseWriter, r *http.Request) 
 	auditEvents, err := h.listAuditEvents(r.Context(), &audit.AuditFilter{Limit: limit})
 	if err == nil {
 		for _, event := range auditEvents {
+			if event == nil {
+				continue
+			}
+			if event.EventType == auditEventTypeManualIncident {
+				incidents = append(incidents, incidentFromManualAudit(event))
+				continue
+			}
 			if event == nil || (event.Result != audit.ResultDenied && event.Result != audit.ResultFailure) {
 				continue
 			}
@@ -1066,6 +1276,70 @@ func (h *SecurityHandlers) GetIncidents(w http.ResponseWriter, r *http.Request) 
 	}
 
 	h.respondJSON(w, http.StatusOK, response)
+}
+
+// CreateSecurityIncident records a manual security incident in the canonical audit trail.
+func (h *SecurityHandlers) CreateSecurityIncident(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Title           string   `json:"title"`
+		Description     string   `json:"description"`
+		Severity        string   `json:"severity"`
+		Type            string   `json:"type"`
+		AffectedSystems []string `json:"affectedSystems"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	req.Title = strings.TrimSpace(req.Title)
+	req.Description = strings.TrimSpace(req.Description)
+	req.Severity = strings.ToLower(strings.TrimSpace(req.Severity))
+	if req.Title == "" || req.Description == "" {
+		http.Error(w, "title and description are required", http.StatusBadRequest)
+		return
+	}
+	switch req.Severity {
+	case "critical", "high", "medium", "low":
+	default:
+		req.Severity = "medium"
+	}
+
+	userID := userIDFromRequest(r, "")
+	actor := userID
+	if actor == "" {
+		actor = "canonical-security"
+	}
+	incidentID := fmt.Sprintf("incident-%d", time.Now().UTC().UnixNano())
+	recordedAt := time.Now().UTC()
+
+	h.logAudit(r.Context(), &audit.AuditEvent{
+		ID:          incidentID,
+		Timestamp:   recordedAt,
+		UserID:      userID,
+		Actor:       actor,
+		Resource:    "security_incident",
+		ResourceID:  incidentID,
+		EventType:   auditEventTypeManualIncident,
+		Action:      audit.ActionWrite,
+		Result:      audit.ResultSuccess,
+		Sensitivity: audit.SensitivityInternal,
+		Details: map[string]interface{}{
+			"title":            req.Title,
+			"description":      req.Description,
+			"severity":         req.Severity,
+			"type":             strings.TrimSpace(req.Type),
+			"status":           "open",
+			"affected_systems": req.AffectedSystems,
+		},
+	})
+
+	h.respondJSON(w, http.StatusCreated, map[string]interface{}{
+		"incidentId": incidentID,
+		"status":     "open",
+		"createdAt":  recordedAt,
+	})
 }
 
 // GetSecurityEvents returns recent security events
@@ -1101,6 +1375,7 @@ func (h *SecurityHandlers) GetSecurityEvents(w http.ResponseWriter, r *http.Requ
 		for _, event := range auditEvents {
 			events = append(events, normalizeAuditEvent(event))
 		}
+		applyAcknowledgements(events, buildAcknowledgementIndex(auditEvents))
 	}
 
 	if severity := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("severity"))); severity != "" && severity != "all" {
@@ -1138,6 +1413,55 @@ func (h *SecurityHandlers) GetSecurityEvents(w http.ResponseWriter, r *http.Requ
 	}
 
 	h.respondJSON(w, http.StatusOK, response)
+}
+
+// AcknowledgeSecurityEvent records acknowledgement state for a derived security event.
+func (h *SecurityHandlers) AcknowledgeSecurityEvent(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	eventID := strings.TrimSpace(vars["eventId"])
+	if eventID == "" {
+		http.Error(w, "eventId is required", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Note string `json:"note,omitempty"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	userID := userIDFromRequest(r, "")
+	actor := userID
+	if actor == "" {
+		actor = "canonical-security"
+	}
+	acknowledgedAt := time.Now().UTC()
+
+	h.logAudit(r.Context(), &audit.AuditEvent{
+		Timestamp:   acknowledgedAt,
+		UserID:      userID,
+		Actor:       actor,
+		Resource:    "security_event",
+		ResourceID:  eventID,
+		EventType:   auditEventTypeSecurityEventAcknowledge,
+		Action:      audit.ActionUpdate,
+		Result:      audit.ResultSuccess,
+		Sensitivity: audit.SensitivityInternal,
+		Details: map[string]interface{}{
+			"event_id":     eventID,
+			"note":         strings.TrimSpace(req.Note),
+			"description":  "Security event acknowledged",
+			"acknowledged": true,
+		},
+	})
+
+	h.respondJSON(w, http.StatusOK, map[string]interface{}{
+		"eventId":        eventID,
+		"acknowledged":   true,
+		"acknowledgedAt": acknowledgedAt,
+		"acknowledgedBy": actor,
+	})
 }
 
 // StartVulnerabilityScan starts a vulnerability scan

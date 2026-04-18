@@ -799,8 +799,12 @@ func registerSecurityRouteSet(router *mux.Router, authManager *auth.SimpleAuthMa
 	router.HandleFunc("/threats", handlers.GetThreats).Methods(http.MethodGet)
 	router.HandleFunc("/vulnerabilities", handlers.GetVulnerabilities).Methods(http.MethodGet)
 	router.HandleFunc("/compliance", handlers.GetComplianceStatus).Methods(http.MethodGet)
+	router.HandleFunc("/compliance/check", handlers.TriggerComplianceCheck).Methods(http.MethodPost)
+	router.HandleFunc("/compliance/export", handlers.ExportComplianceReport).Methods(http.MethodGet)
 	router.HandleFunc("/incidents", handlers.GetIncidents).Methods(http.MethodGet)
+	router.HandleFunc("/incidents", handlers.CreateSecurityIncident).Methods(http.MethodPost)
 	router.HandleFunc("/events", handlers.GetSecurityEvents).Methods(http.MethodGet)
+	router.HandleFunc("/events/{eventId}/acknowledge", handlers.AcknowledgeSecurityEvent).Methods(http.MethodPost)
 	router.HandleFunc("/scan", handlers.StartVulnerabilityScan).Methods(http.MethodPost)
 	router.HandleFunc("/scan/{scanId}", handlers.GetScanResults).Methods(http.MethodGet)
 	router.HandleFunc("/cluster/{clusterId}/state", handlers.GetClusterSecurityState).Methods(http.MethodGet)
@@ -874,6 +878,8 @@ func apiInfoHandler() http.HandlerFunc {
 				"/api/auth/login",
 				"/api/auth/register",
 				"/api/auth/check-email",
+				"/api/auth/forgot-password",
+				"/api/auth/reset-password",
 				"/api/auth/2fa/setup",
 				"/api/auth/2fa/verify",
 				"/api/auth/2fa/verify-login",
@@ -892,20 +898,30 @@ func apiInfoHandler() http.HandlerFunc {
 				"/api/security/threats",
 				"/api/security/vulnerabilities",
 				"/api/security/compliance",
+				"/api/security/compliance/check",
+				"/api/security/compliance/export",
 				"/api/security/incidents",
 				"/api/security/events",
+				"/api/security/events/{eventId}/acknowledge",
 				"/api/security/scan",
 				"/api/security/audit/events",
+				"/api/security/audit/export",
 				"/api/security/audit/statistics",
 				"/api/security/rbac/roles",
 				"/api/security/rbac/permissions",
 				"/api/admin/security/threats",
 				"/api/admin/security/compliance",
+				"/api/admin/security/compliance/check",
+				"/api/admin/security/compliance/export",
+				"/api/admin/security/incidents",
+				"/api/admin/security/audit/export",
+				"/api/admin/security/events/{eventId}/acknowledge",
 				"/graphql",
 				"/api/ws/metrics",
 				"/api/ws/alerts",
 				"/api/ws/logs",
 				"/api/ws/security/events",
+				"/api/ws/console/{vmId}",
 				"/health",
 			},
 			"compatibility_endpoints": []string{
@@ -921,11 +937,8 @@ func apiInfoHandler() http.HandlerFunc {
 				"/api/security/events/stream",
 			},
 			"unsupported_endpoints": []string{
-				"/api/auth/forgot-password",
-				"/api/auth/reset-password",
 				"/api/auth/resend-verification",
 				"/api/auth/verify-email",
-				"/api/ws/console/{vmId}",
 				"unsupported GraphQL operations outside storage-backed volume queries and mutations",
 			},
 		})

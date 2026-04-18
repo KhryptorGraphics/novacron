@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	corestorage "github.com/khryptorgraphics/novacron/backend/core/storage"
@@ -134,6 +137,30 @@ func TestNewVolumeHTTPHandlerRejectsUnsupportedOperations(t *testing.T) {
 	}
 	if len(resp.Errors) == 0 {
 		t.Fatalf("expected graphql errors, got %#v", resp)
+	}
+}
+
+func TestVolumeSchemaSnapshotDocumentsReleaseContract(t *testing.T) {
+	t.Parallel()
+
+	schemaPath := filepath.Join("schema.volume.graphql")
+	raw, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatalf("read volume schema snapshot: %v", err)
+	}
+
+	schema := string(raw)
+	for _, expected := range []string{
+		"type Query",
+		"type Mutation",
+		"volumes(",
+		"createVolume(",
+		"changeVolumeTier(",
+		"enum StorageTier",
+	} {
+		if !strings.Contains(schema, expected) {
+			t.Fatalf("expected schema snapshot to contain %q", expected)
+		}
 	}
 }
 

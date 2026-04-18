@@ -24,7 +24,7 @@ import { useSecurityEvents, useCompliance, useVulnerabilityScans, useSecurityMet
 import RBACGuard from '@/components/auth/RBACGuard';
 
 // Import types from the API service
-import { securityCapabilities, type VulnerabilityFinding } from '@/lib/api/security';
+import { securityAPI, securityCapabilities, type VulnerabilityFinding } from '@/lib/api/security';
 
 const SecurityComplianceDashboard: React.FC = () => {
   const { toast } = useToast();
@@ -127,10 +127,22 @@ const SecurityComplianceDashboard: React.FC = () => {
   }, [startScan, toast]);
 
   const handleExportReport = useCallback(async (type: string) => {
-    toast({
-      title: 'Unavailable',
-      description: `${type} export is not available on the canonical server yet.`,
-    });
+    try {
+      await securityAPI.exportSecurityReport(
+        type === 'audit' ? 'audit' : 'compliance',
+        'json',
+      );
+      toast({
+        title: 'Export started',
+        description: `${type} report download has started.`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Export failed',
+        description: error instanceof Error ? error.message : `Failed to export ${type} report.`,
+        variant: 'destructive',
+      });
+    }
   }, [toast]);
 
   const handleRemediateVulnerability = useCallback(async (finding: VulnerabilityFinding) => {
@@ -238,14 +250,14 @@ const SecurityComplianceDashboard: React.FC = () => {
         </Alert>
       )}
 
-      {(!securityCapabilities.exportSecurityReports ||
-        !securityCapabilities.triggerComplianceChecks ||
-        !securityCapabilities.remediateFindings) && (
+      {(!securityCapabilities.remediateFindings ||
+        !securityCapabilities.manageSecurityConfig ||
+        !securityCapabilities.performHealthChecks) && (
         <Alert>
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Some actions are unavailable</AlertTitle>
           <AlertDescription>
-            Report export, compliance rechecks, and finding remediation are not wired into the canonical server yet.
+            Vulnerability remediation, security configuration, and security health checks remain deferred on the canonical server.
           </AlertDescription>
         </Alert>
       )}

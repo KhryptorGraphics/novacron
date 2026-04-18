@@ -1,0 +1,43 @@
+schema {
+  query: Query
+  mutation: Mutation
+}
+
+type Query {
+  volumes(pagination: PaginationInput): [StorageVolume!]!
+}
+
+type Mutation {
+  createVolume(input: CreateVolumeInput!): StorageVolume!
+  changeVolumeTier(id: ID!, tier: StorageTier!): StorageVolume!
+}
+
+type StorageVolume {
+  id: ID!
+  name: String!
+  size: Int!
+  tier: StorageTier!
+  vmId: ID
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+input PaginationInput {
+  page: Int
+  pageSize: Int
+}
+
+input CreateVolumeInput {
+  name: String!
+  size: Int!
+  tier: StorageTier!
+  vmId: ID
+}
+
+enum StorageTier {
+  HOT
+  WARM
+  COLD
+}
+
+scalar Time

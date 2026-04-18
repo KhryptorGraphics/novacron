@@ -400,11 +400,19 @@ func TestAPIInfoAdvertisesCanonicalContract(t *testing.T) {
 	assertContains("endpoints", endpoints, "/api/v1/monitoring/metrics")
 	assertContains("endpoints", endpoints, "/api/security/threats")
 	assertContains("endpoints", endpoints, "/api/security/compliance")
+	assertContains("endpoints", endpoints, "/api/security/compliance/check")
+	assertContains("endpoints", endpoints, "/api/security/compliance/export")
 	assertContains("endpoints", endpoints, "/api/security/incidents")
+	assertContains("endpoints", endpoints, "/api/security/events/{eventId}/acknowledge")
+	assertContains("endpoints", endpoints, "/api/admin/security/compliance/check")
+	assertContains("endpoints", endpoints, "/api/admin/security/compliance/export")
+	assertContains("endpoints", endpoints, "/api/admin/security/incidents")
+	assertContains("endpoints", endpoints, "/api/admin/security/events/{eventId}/acknowledge")
 	assertContains("endpoints", endpoints, "/graphql")
+	assertContains("endpoints", endpoints, "/api/ws/console/{vmId}")
 	assertContains("compatibility_endpoints", compatibilityEndpoints, "/api/vms")
 	assertContains("compatibility_endpoints", compatibilityEndpoints, "/ws/metrics")
-	assertContains("unsupported_endpoints", unsupportedEndpoints, "/api/ws/console/{vmId}")
+	assertContains("unsupported_endpoints", unsupportedEndpoints, "/api/auth/resend-verification")
 }
 
 func TestRegisterCanonicalSecurityRoutesServesDashboardEndpoints(t *testing.T) {

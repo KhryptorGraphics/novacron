@@ -1,255 +1,225 @@
 'use client';
 
-// Disable static generation for this page
-export const dynamic = 'force-dynamic';
+import { useEffect, useState } from 'react';
+import { AlertTriangle, Bell, FileText, Loader2, Shield, UserCheck } from 'lucide-react';
 
-import { useState, useEffect } from "react";
-import { useToast } from "@/components/ui/use-toast";
-import { ErrorBoundary } from "@/components/error-boundary";
-import { SkipToMain } from "@/components/accessibility/a11y-components";
-import { ThemeToggle } from "@/components/theme/theme-toggle";
-import { MobileNavigation, DesktopSidebar } from "@/components/ui/mobile-navigation";
-import { LazyTabs } from "@/components/ui/progressive-disclosure";
-import { 
-  DashboardSkeleton, 
-  RefreshIndicator,
-  LoadingStates 
-} from "@/components/ui/loading-states";
-import { FadeIn } from "@/lib/animations";
-import {
-  Settings,
-  Users,
-  Database,
-  Shield,
-  BarChart3,
-  Bell,
-  UserCheck,
-  FileText,
-  AlertTriangle,
-  Activity
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
-import { useAuth } from "@/hooks/useAuth";
+import { ErrorBoundary } from '@/components/error-boundary';
+import { SkipToMain } from '@/components/accessibility/a11y-components';
+import RolePermissionManager from '@/components/admin/RolePermissionManager';
+import SecurityComplianceDashboard from '@/components/security/SecurityComplianceDashboard';
+import { MobileNavigation, DesktopSidebar } from '@/components/ui/mobile-navigation';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { LoadingStates, RefreshIndicator, DashboardSkeleton } from '@/components/ui/loading-states';
+import { LazyTabs } from '@/components/ui/progressive-disclosure';
+import { ThemeToggle } from '@/components/theme/theme-toggle';
+import { useToast } from '@/components/ui/use-toast';
+import { cn } from '@/lib/utils';
+import { useAuth } from '@/hooks/useAuth';
+import { securityAPI, type SecurityEvent } from '@/lib/api/security';
 
-// Admin Components
-import { DatabaseEditor } from "@/components/admin/DatabaseEditor";
-import { UserManagement } from "@/components/admin/UserManagement";
-import { SystemConfiguration } from "@/components/admin/SystemConfiguration";
-import { SecurityDashboard } from "@/components/admin/SecurityDashboard";
-import { AdminMetrics } from "@/components/admin/AdminMetrics";
-import { AuditLogs } from "@/components/admin/AuditLogs";
-import { RolePermissionManager } from "@/components/admin/RolePermissionManager";
-import { RealTimeDashboard } from "@/components/admin/RealTimeDashboard";
+function CanonicalAuditPanel() {
+  const { toast } = useToast();
+  const [events, setEvents] = useState<SecurityEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadAuditTrail = async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await securityAPI.getAuditTrail(50, 0);
+      setEvents(response.events);
+    } catch (auditError) {
+      setError(auditError instanceof Error ? auditError.message : 'Failed to load canonical audit events.');
+      setEvents([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadAuditTrail();
+  }, []);
+
+  const exportAudit = async () => {
+    try {
+      await securityAPI.exportSecurityReport('audit', 'json');
+      toast({
+        title: 'Audit export started',
+        description: 'The canonical audit export download has started.',
+      });
+    } catch (exportError) {
+      toast({
+        title: 'Audit export failed',
+        description: exportError instanceof Error ? exportError.message : 'Failed to export canonical audit events.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <CardTitle>Audit Trail</CardTitle>
+          <CardDescription>Canonical audit events and export, scoped to the release candidate surface.</CardDescription>
+        </div>
+        <Button variant="outline" onClick={exportAudit}>
+          <FileText className="mr-2 h-4 w-4" />
+          Export Audit
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {loading ? (
+          <div className="flex items-center text-sm text-muted-foreground">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Loading canonical audit events…
+          </div>
+        ) : null}
+        {error ? <div className="text-sm text-destructive">{error}</div> : null}
+        {!loading && !error && events.length === 0 ? (
+          <div className="text-sm text-muted-foreground">No audit events available on the canonical backend.</div>
+        ) : null}
+        {!loading && !error && events.length > 0 ? (
+          <div className="space-y-3">
+            {events.map((event) => (
+              <div key={event.id} className="rounded-lg border p-4">
+                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <div className="font-medium">{event.action}</div>
+                    <div className="text-sm text-muted-foreground">{event.details}</div>
+                  </div>
+                  <Badge variant="outline">{event.result}</Badge>
+                </div>
+                <div className="mt-3 grid gap-1 text-xs text-muted-foreground md:grid-cols-4">
+                  <span>Type: {event.type}</span>
+                  <span>Source: {event.source}</span>
+                  <span>User: {event.user || 'system'}</span>
+                  <span>{new Date(event.timestamp).toLocaleString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function AdminDashboard() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const notifications = 5;
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(new Date());
-  const { user, logout } = useAuth();
-  
-  // Loading states
   const [loadingState, setLoadingState] = useState({
     isLoading: true,
     isError: false,
     isSuccess: false,
-    message: ""
+    message: '',
   });
-  
-  const navigationUser = {
-    name: [user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.email || "Administrator",
-    email: user?.email || "",
-    role: user?.role || user?.roles?.[0] || "admin"
-  };
-
+  const { user, logout } = useAuth();
   const { toast } = useToast();
-  const handleLogout = () => {
-    logout();
-    toast({ title: "Logged out" });
-  };
 
-  // Simulate data loading
   useEffect(() => {
     const timer = setTimeout(() => {
       setLoadingState({
         isLoading: false,
         isError: false,
         isSuccess: true,
-        message: ""
+        message: '',
       });
-    }, 1000);
-    
+    }, 400);
+
     return () => clearTimeout(timer);
   }, []);
-  
-  // Handle refresh
+
   const handleRefresh = async () => {
     setRefreshing(true);
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise((resolve) => setTimeout(resolve, 500));
     setLastUpdated(new Date());
     setRefreshing(false);
   };
-  
-  // Admin tab configuration
+
+  const handleLogout = () => {
+    logout();
+    toast({ title: 'Logged out' });
+  };
+
+  const navigationUser = {
+    name: [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email || 'Administrator',
+    email: user?.email || '',
+    role: user?.role || user?.roles?.[0] || 'admin',
+  };
+
   const adminTabs = [
     {
-      id: "overview",
-      label: "Overview",
-      icon: <BarChart3 className="h-4 w-4" />,
-      content: (
-        <FadeIn>
-          <AdminMetrics />
-        </FadeIn>
-      )
-    },
-    {
-      id: "realtime",
-      label: "Real-time Monitor",
-      icon: <Activity className="h-4 w-4" />,
-      content: (
-        <FadeIn delay={0.1}>
-          <RealTimeDashboard />
-        </FadeIn>
-      )
-    },
-    {
-      id: "users",
-      label: "User Management",
-      icon: <Users className="h-4 w-4" />,
-      badge: 3, // Pending user requests
-      content: (
-        <FadeIn delay={0.1}>
-          <UserManagement />
-        </FadeIn>
-      )
-    },
-    {
-      id: "database",
-      label: "Database Editor",
-      icon: <Database className="h-4 w-4" />,
-      content: (
-        <FadeIn delay={0.2}>
-          <DatabaseEditor />
-        </FadeIn>
-      )
-    },
-    {
-      id: "security",
-      label: "Security",
+      id: 'security',
+      label: 'Security',
       icon: <Shield className="h-4 w-4" />,
-      badge: 2, // Security alerts
-      content: (
-        <FadeIn delay={0.3}>
-          <SecurityDashboard />
-        </FadeIn>
-      )
+      content: <SecurityComplianceDashboard />,
     },
     {
-      id: "permissions",
-      label: "Roles & Permissions",
+      id: 'permissions',
+      label: 'Roles & Permissions',
       icon: <UserCheck className="h-4 w-4" />,
-      content: (
-        <FadeIn delay={0.4}>
-          <RolePermissionManager />
-        </FadeIn>
-      )
+      content: <RolePermissionManager />,
     },
     {
-      id: "audit",
-      label: "Audit Logs",
+      id: 'audit',
+      label: 'Audit',
       icon: <FileText className="h-4 w-4" />,
-      content: (
-        <FadeIn delay={0.5}>
-          <AuditLogs />
-        </FadeIn>
-      )
+      content: <CanonicalAuditPanel />,
     },
-    {
-      id: "settings",
-      label: "System Config",
-      icon: <Settings className="h-4 w-4" />,
-      content: (
-        <FadeIn delay={0.6}>
-          <SystemConfiguration />
-        </FadeIn>
-      )
-    }
   ];
-  
+
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
         <SkipToMain />
-        
-        {/* Mobile Navigation */}
         <MobileNavigation user={navigationUser} onLogout={handleLogout} />
+        <DesktopSidebar user={navigationUser} collapsed={sidebarCollapsed} onCollapse={setSidebarCollapsed} />
 
-        {/* Desktop Sidebar */}
-        <DesktopSidebar 
-          user={navigationUser} 
-          collapsed={sidebarCollapsed}
-          onCollapse={setSidebarCollapsed}
-        />
-        
-        {/* Main Content */}
         <main
           id="main-content"
           className={cn(
-            "transition-all duration-300",
-            "lg:ml-64",
-            sidebarCollapsed && "lg:ml-16",
-            "pb-16 sm:pb-0"
+            'transition-all duration-300 lg:ml-64 pb-16 sm:pb-0',
+            sidebarCollapsed && 'lg:ml-16',
           )}
         >
-          {/* Header */}
-          <header className="sticky top-0 z-30 bg-white dark:bg-gray-900 border-b dark:border-gray-800">
+          <header className="sticky top-0 z-30 border-b bg-white dark:border-gray-800 dark:bg-gray-900">
             <div className="px-4 sm:px-6 lg:px-8">
-              <div className="flex items-center justify-between h-16">
+              <div className="flex h-16 items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <h1 className="text-2xl font-bold text-red-600 dark:text-red-400">
-                    Admin Dashboard
-                  </h1>
+                  <h1 className="text-2xl font-bold text-red-600 dark:text-red-400">Admin Dashboard</h1>
                   <Badge variant="destructive" className="animate-pulse">
-                    <AlertTriangle className="h-3 w-3 mr-1" />
+                    <AlertTriangle className="mr-1 h-3 w-3" />
                     Elevated Access
                   </Badge>
                 </div>
-                
+
                 <div className="flex items-center gap-2">
                   <RefreshIndicator
                     isRefreshing={refreshing}
                     onRefresh={handleRefresh}
                     lastUpdated={lastUpdated}
                   />
-                  
                   <Button variant="ghost" size="icon" className="relative">
                     <Bell className="h-5 w-5" />
-                    {notifications > 0 && (
-                      <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center">
-                        {notifications}
-                      </span>
-                    )}
+                    <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white">
+                      1
+                    </span>
                   </Button>
-                  
                   <ThemeToggle />
                 </div>
               </div>
             </div>
           </header>
-          
-          {/* Page Content */}
-          <div className="px-4 sm:px-6 lg:px-8 py-8">
-            <LoadingStates
-              state={loadingState}
-              loadingComponent={<DashboardSkeleton />}
-            >
-              <LazyTabs
-                tabs={adminTabs}
-                defaultTab="realtime"
-                className="w-full"
-              />
+
+          <div className="px-4 py-8 sm:px-6 lg:px-8">
+            <LoadingStates state={loadingState} loadingComponent={<DashboardSkeleton />}>
+              <LazyTabs tabs={adminTabs} defaultTab="security" className="w-full" />
             </LoadingStates>
           </div>
         </main>

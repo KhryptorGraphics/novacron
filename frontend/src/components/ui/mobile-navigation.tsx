@@ -11,12 +11,8 @@ import {
   Home,
   Server,
   Activity,
-  Settings,
   Database,
-  Network,
   Shield,
-  BarChart3,
-  Users,
   LogOut,
   ChevronRight,
   Moon,
@@ -48,12 +44,6 @@ const navigationItems = [
     description: "Virtual machine management"
   },
   {
-    name: "Core VMs",
-    href: "/core/vms",
-    icon: Server,
-    description: "Core-mode VM list"
-  },
-  {
     name: "Monitoring",
     href: "/monitoring",
     icon: Activity,
@@ -66,34 +56,10 @@ const navigationItems = [
     description: "Storage management"
   },
   {
-    name: "Network",
-    href: "/network",
-    icon: Network,
-    description: "Network configuration"
-  },
-  {
     name: "Security",
     href: "/security",
     icon: Shield,
     description: "Security settings"
-  },
-  {
-    name: "Analytics",
-    href: "/analytics",
-    icon: BarChart3,
-    description: "Performance analytics"
-  },
-  {
-    name: "Users",
-    href: "/users",
-    icon: Users,
-    description: "User management"
-  },
-  {
-    name: "Settings",
-    href: "/settings",
-    icon: Settings,
-    description: "System settings"
   },
   {
     name: "Admin",

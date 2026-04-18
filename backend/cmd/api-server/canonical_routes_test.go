@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -438,6 +439,143 @@ func TestCanonicalSecurityRoutesRunScansAndSurfaceThreats(t *testing.T) {
 	decodeJSONBody(t, incidentRec, &incidentPayload)
 	if total, _ := incidentPayload["total"].(float64); total < 1 {
 		t.Fatalf("expected at least one incident, got %#v", incidentPayload)
+	}
+}
+
+func TestCanonicalSecurityRoutesSupportReleaseAdminMutations(t *testing.T) {
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	auditLogger := audit.NewSimpleAuditLogger()
+	handlers := securityapi.NewSecurityHandlers(
+		auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret())),
+		auditLogger,
+	)
+	router := newCanonicalSecurityRouter(t, authManager, handlers)
+	authz := signedBearerToken(t, authManager, "7", "default", "admin")
+
+	seedEvent := &audit.AuditEvent{
+		ID:        "audit-seed",
+		Timestamp: time.Now().Add(-time.Minute).UTC(),
+		EventType: audit.EventPermissionDeny,
+		Actor:     "seed@example.com",
+		UserID:    "7",
+		Resource:  "admin_panel",
+		Action:    audit.ActionRead,
+		Result:    audit.ResultDenied,
+		Details: map[string]interface{}{
+			"description": "Seed security event",
+		},
+	}
+	if err := auditLogger.LogEvent(context.Background(), seedEvent); err != nil {
+		t.Fatalf("seed audit event: %v", err)
+	}
+
+	ackReq := mustJSONRequest(t, http.MethodPost, "/api/security/events/audit-seed/acknowledge", map[string]interface{}{
+		"note": "triaged",
+	})
+	ackReq.Header.Set("Authorization", authz)
+	ackRec := httptest.NewRecorder()
+	router.ServeHTTP(ackRec, ackReq)
+	if ackRec.Code != http.StatusOK {
+		t.Fatalf("expected acknowledge 200, got %d (%s)", ackRec.Code, ackRec.Body.String())
+	}
+
+	eventsReq := httptest.NewRequest(http.MethodGet, "/api/security/events", nil)
+	eventsReq.Header.Set("Authorization", authz)
+	eventsRec := httptest.NewRecorder()
+	router.ServeHTTP(eventsRec, eventsReq)
+	if eventsRec.Code != http.StatusOK {
+		t.Fatalf("expected events 200, got %d (%s)", eventsRec.Code, eventsRec.Body.String())
+	}
+
+	var eventsPayload map[string]interface{}
+	decodeJSONBody(t, eventsRec, &eventsPayload)
+	events, ok := eventsPayload["events"].([]interface{})
+	if !ok || len(events) == 0 {
+		t.Fatalf("expected events payload, got %#v", eventsPayload["events"])
+	}
+
+	foundAcknowledged := false
+	for _, rawEvent := range events {
+		event, ok := rawEvent.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if event["id"] == "audit-seed" {
+			foundAcknowledged = event["acknowledged"] == true
+		}
+	}
+	if !foundAcknowledged {
+		t.Fatalf("expected seeded event to be acknowledged, got %#v", events)
+	}
+
+	complianceReq := mustJSONRequest(t, http.MethodPost, "/api/security/compliance/check", map[string]interface{}{
+		"requirement_id": "overall-security-posture",
+	})
+	complianceReq.Header.Set("Authorization", authz)
+	complianceRec := httptest.NewRecorder()
+	router.ServeHTTP(complianceRec, complianceReq)
+	if complianceRec.Code != http.StatusAccepted {
+		t.Fatalf("expected compliance check 202, got %d (%s)", complianceRec.Code, complianceRec.Body.String())
+	}
+
+	var compliancePayload map[string]interface{}
+	decodeJSONBody(t, complianceRec, &compliancePayload)
+	if _, ok := compliancePayload["jobId"].(string); !ok {
+		t.Fatalf("expected compliance check jobId, got %#v", compliancePayload)
+	}
+
+	exportReq := httptest.NewRequest(http.MethodGet, "/api/security/compliance/export?format=csv", nil)
+	exportReq.Header.Set("Authorization", authz)
+	exportRec := httptest.NewRecorder()
+	router.ServeHTTP(exportRec, exportReq)
+	if exportRec.Code != http.StatusOK {
+		t.Fatalf("expected compliance export 200, got %d (%s)", exportRec.Code, exportRec.Body.String())
+	}
+	if contentType := exportRec.Header().Get("Content-Type"); !strings.Contains(contentType, "text/csv") {
+		t.Fatalf("expected csv export, got %q", contentType)
+	}
+
+	incidentReq := mustJSONRequest(t, http.MethodPost, "/api/security/incidents", map[string]interface{}{
+		"title": "Manual investigation",
+		"description": "Operator escalated a suspicious login pattern.",
+		"severity": "high",
+		"type": "manual",
+		"affectedSystems": []string{"auth-gateway"},
+	})
+	incidentReq.Header.Set("Authorization", authz)
+	incidentRec := httptest.NewRecorder()
+	router.ServeHTTP(incidentRec, incidentReq)
+	if incidentRec.Code != http.StatusCreated {
+		t.Fatalf("expected incident create 201, got %d (%s)", incidentRec.Code, incidentRec.Body.String())
+	}
+
+	incidentsReq := httptest.NewRequest(http.MethodGet, "/api/security/incidents", nil)
+	incidentsReq.Header.Set("Authorization", authz)
+	incidentsRec := httptest.NewRecorder()
+	router.ServeHTTP(incidentsRec, incidentsReq)
+	if incidentsRec.Code != http.StatusOK {
+		t.Fatalf("expected incidents 200, got %d (%s)", incidentsRec.Code, incidentsRec.Body.String())
+	}
+
+	var incidentsPayload map[string]interface{}
+	decodeJSONBody(t, incidentsRec, &incidentsPayload)
+	incidents, ok := incidentsPayload["incidents"].([]interface{})
+	if !ok || len(incidents) == 0 {
+		t.Fatalf("expected incidents payload, got %#v", incidentsPayload["incidents"])
+	}
+
+	foundManualIncident := false
+	for _, rawIncident := range incidents {
+		incident, ok := rawIncident.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if incident["title"] == "Manual investigation" {
+			foundManualIncident = true
+		}
+	}
+	if !foundManualIncident {
+		t.Fatalf("expected manual incident to be surfaced, got %#v", incidents)
 	}
 }
 

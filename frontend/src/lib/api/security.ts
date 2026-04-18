@@ -25,15 +25,28 @@ function unsupportedSecurityFeature(message: string): never {
 }
 
 export const securityCapabilities = {
-  acknowledgeEvents: false,
-  triggerComplianceChecks: false,
+  acknowledgeEvents: true,
+  triggerComplianceChecks: true,
   remediateFindings: false,
-  exportSecurityReports: false,
-  manageAccessControls: false,
+  exportSecurityReports: true,
+  manageAccessControls: true,
   manageSecurityConfig: false,
   performHealthChecks: false,
-  createIncidents: false,
+  createIncidents: true,
 } as const;
+
+export interface SecurityRoleDefinition {
+  id: string;
+  name: string;
+  description: string;
+  permissions: string[];
+}
+
+export interface SecurityPermissionDefinition {
+  id: string;
+  name: string;
+  description: string;
+}
 
 export interface SecurityEvent {
   id: string;
@@ -343,8 +356,10 @@ class SecurityAPIService {
   }
 
   async acknowledgeSecurityEvent(eventId: string): Promise<void> {
-    void eventId;
-    unsupportedSecurityFeature('Security event acknowledgement is not available on the canonical server.');
+    await this.request(`/api/security/events/${eventId}/acknowledge`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
   }
 
   // Compliance
@@ -363,8 +378,12 @@ class SecurityAPIService {
   }
 
   async triggerComplianceCheck(requirementId?: string): Promise<{ jobId: string }> {
-    void requirementId;
-    unsupportedSecurityFeature('Compliance re-checks are not available on the canonical server.');
+    return this.request<{ jobId: string }>('/api/security/compliance/check', {
+      method: 'POST',
+      body: JSON.stringify(
+        requirementId ? { requirement_id: requirementId } : {},
+      ),
+    });
   }
 
   async getComplianceByCategory(): Promise<ComplianceByCategory[]> {
@@ -496,6 +515,31 @@ class SecurityAPIService {
     unsupportedSecurityFeature('Security configuration is not available on the canonical server.');
   }
 
+  async getRoles(): Promise<SecurityRoleDefinition[]> {
+    const response = await this.request<{ roles: SecurityRoleDefinition[] }>('/api/security/rbac/roles');
+    return Array.isArray(response.roles) ? response.roles : [];
+  }
+
+  async getPermissions(): Promise<SecurityPermissionDefinition[]> {
+    const response = await this.request<{ permissions: SecurityPermissionDefinition[] }>(
+      '/api/security/rbac/permissions',
+    );
+    return Array.isArray(response.permissions) ? response.permissions : [];
+  }
+
+  async getUserRoleAssignments(userId: string): Promise<string[]> {
+    const response = await this.request<{ roles: string[] }>(`/api/security/rbac/user/${userId}/roles`);
+    return Array.isArray(response.roles) ? response.roles : [];
+  }
+
+  async assignUserRoles(userId: string, roles: string[]): Promise<string[]> {
+    const response = await this.request<{ roles: string[] }>(`/api/security/rbac/user/${userId}/roles`, {
+      method: 'POST',
+      body: JSON.stringify({ roles }),
+    });
+    return Array.isArray(response.roles) ? response.roles : [];
+  }
+
   async updateSecurityConfig(config: Record<string, any>): Promise<void> {
     void config;
     unsupportedSecurityFeature('Security configuration is not available on the canonical server.');
@@ -546,8 +590,17 @@ class SecurityAPIService {
     type: string;
     affectedSystems?: string[];
   }): Promise<{ incidentId: string }> {
-    void incident;
-    unsupportedSecurityFeature('Manual incident creation is not available on the canonical server.');
+    const response = await this.request<{ incidentId: string }>('/api/security/incidents', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: incident.title,
+        description: incident.description,
+        severity: incident.severity,
+        type: incident.type,
+        affectedSystems: incident.affectedSystems || [],
+      }),
+    });
+    return { incidentId: response.incidentId };
   }
 
   async getSecurityIncidents(): Promise<Array<{
@@ -559,6 +612,31 @@ class SecurityAPIService {
     resolvedAt?: string;
   }>> {
     return this.request<any>('/api/security/incidents');
+  }
+
+  async exportSecurityReport(kind: 'compliance' | 'audit', format: 'json' | 'csv' = 'json'): Promise<void> {
+    const endpoint =
+      kind === 'audit'
+        ? `/api/security/audit/export?format=${format}`
+        : `/api/security/compliance/export?format=${format}`;
+
+    const url = buildApiUrl(endpoint);
+    const token = this.getAuthToken();
+    const response = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to export ${kind} report`);
+    }
+
+    const blob = await response.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = `${kind}-report.${format}`;
+    link.click();
+    window.URL.revokeObjectURL(downloadUrl);
   }
 }
 

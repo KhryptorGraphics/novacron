@@ -1,5 +1,4 @@
 import securityAPI, {
-  UnsupportedSecurityFeatureError,
 } from '../../lib/api/security';
 
 describe('securityAPI auth token handling', () => {
@@ -32,11 +31,44 @@ describe('securityAPI auth token handling', () => {
     );
   });
 
-  it('fails fast for unsupported security actions instead of pretending success', async () => {
-    await expect(securityAPI.acknowledgeSecurityEvent('event-1')).rejects.toBeInstanceOf(
-      UnsupportedSecurityFeatureError,
-    );
+  it('calls the live event acknowledgement route on the canonical server', async () => {
+    window.localStorage.setItem('novacron_token', 'canonical-token');
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ acknowledged: true }),
+    });
 
-    expect(mockFetch).not.toHaveBeenCalled();
+    await securityAPI.acknowledgeSecurityEvent('event-1');
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/security/events/event-1/acknowledge'),
+      expect.objectContaining({
+        method: 'POST',
+      }),
+    );
+  });
+
+  it('creates manual security incidents on the canonical server', async () => {
+    window.localStorage.setItem('novacron_token', 'canonical-token');
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ incidentId: 'incident-1' }),
+    });
+
+    await expect(
+      securityAPI.createSecurityIncident({
+        title: 'Manual incident',
+        description: 'Operator escalation',
+        severity: 'high',
+        type: 'manual',
+      }),
+    ).resolves.toEqual({ incidentId: 'incident-1' });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/security/incidents'),
+      expect.objectContaining({
+        method: 'POST',
+      }),
+    );
   });
 });
