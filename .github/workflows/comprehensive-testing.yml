@@ -2,13 +2,10 @@
 name: Comprehensive Testing Pipeline
 
 on:
-  push:
-    branches: [ main, develop, feature/* ]
-  pull_request:
-    branches: [ main, develop ]
   schedule:
     # Run comprehensive tests daily at 2 AM UTC
     - cron: '0 2 * * *'
+  workflow_dispatch:
 
 env:
   GO_VERSION: '1.19'
