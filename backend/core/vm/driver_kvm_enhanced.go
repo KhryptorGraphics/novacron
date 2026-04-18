@@ -113,18 +113,8 @@ func (d *KVMDriverEnhanced) Create(ctx context.Context, config VMConfig) (string
 
 	// Create disk image
 	diskPath := filepath.Join(vmDir, "disk.qcow2")
-	diskSizeMB := 8192 // Default 8GB
-	if config.MemoryMB > 0 {
-		diskSizeMB = config.MemoryMB * 10 // 10x memory size for disk
-	}
-
-	createCmd := exec.CommandContext(ctx, "qemu-img", "create",
-		"-f", "qcow2",
-		diskPath,
-		fmt.Sprintf("%dM", diskSizeMB))
-
-	if output, err := createCmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("failed to create disk image: %w, output: %s", err, string(output))
+	if err := d.createDiskImage(ctx, config, diskPath); err != nil {
+		return "", err
 	}
 
 	// Create VM info
@@ -445,6 +435,14 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 		"-pidfile", filepath.Join(filepath.Dir(vmInfo.DiskPath), "qemu.pid"),
 	}
 
+	if vmInfo.Config.CloudInitISO != "" {
+		args = append(
+			args,
+			"-drive",
+			fmt.Sprintf("file=%s,format=raw,media=cdrom,readonly=on", vmInfo.Config.CloudInitISO),
+		)
+	}
+
 	// Add memory balloon
 	args = append(args, "-device", "virtio-balloon-pci")
 
@@ -452,6 +450,55 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 	args = append(args, "-device", "virtio-rng-pci")
 
 	return args
+}
+
+func (d *KVMDriverEnhanced) createDiskImage(ctx context.Context, config VMConfig, diskPath string) error {
+	baseImagePath := config.Image
+	if baseImagePath == "" {
+		baseImagePath = config.RootFS
+	}
+
+	if baseImagePath != "" {
+		if _, err := os.Stat(baseImagePath); err != nil {
+			return fmt.Errorf("failed to access VM base image %s: %w", baseImagePath, err)
+		}
+
+		args := []string{
+			"create",
+			"-f", "qcow2",
+			"-F", "qcow2",
+			"-b", baseImagePath,
+			diskPath,
+		}
+		if config.DiskSizeGB > 0 {
+			args = append(args, fmt.Sprintf("%dG", config.DiskSizeGB))
+		}
+
+		createCmd := exec.CommandContext(ctx, "qemu-img", args...)
+		if output, err := createCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to create disk image from base image: %w, output: %s", err, string(output))
+		}
+
+		return nil
+	}
+
+	diskSizeMB := 8192 // Default 8GB
+	if config.DiskSizeGB > 0 {
+		diskSizeMB = config.DiskSizeGB * 1024
+	} else if config.MemoryMB > 0 {
+		diskSizeMB = config.MemoryMB * 10 // 10x memory size for disk
+	}
+
+	createCmd := exec.CommandContext(ctx, "qemu-img", "create",
+		"-f", "qcow2",
+		diskPath,
+		fmt.Sprintf("%dM", diskSizeMB))
+
+	if output, err := createCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to create disk image: %w, output: %s", err, string(output))
+	}
+
+	return nil
 }
 
 func (d *KVMDriverEnhanced) saveVMConfig(vmInfo *KVMVMInfo) error {

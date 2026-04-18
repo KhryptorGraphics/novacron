@@ -86,6 +86,7 @@ type VMConfig struct {
 	DiskSizeGB            int                          `yaml:"disk_size_gb" json:"disk_size_gb"`
 	RootFS                string                       `yaml:"rootfs" json:"rootfs"`
 	Image                 string                       `yaml:"image" json:"image"`
+	CloudInitISO          string                       `yaml:"cloud_init_iso" json:"cloud_init_iso"`
 	Mounts                []Mount                      `yaml:"mounts" json:"mounts"`
 	Env                   map[string]string            `yaml:"env" json:"env"`
 	NetworkID             string                       `yaml:"network_id" json:"network_id"`
@@ -548,7 +549,7 @@ func NewVM(config VMConfig) (*VM, error) {
 		return nil, fmt.Errorf("VM name must be specified")
 	}
 
-	if config.Command == "" {
+	if config.Type != VMTypeKVM && config.Command == "" {
 		return nil, fmt.Errorf("VM command must be specified")
 	}
 
