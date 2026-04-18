@@ -247,6 +247,10 @@ func requireAuth(authManager *auth.SimpleAuthManager) func(http.Handler) http.Ha
 				writeJSONError(w, http.StatusUnauthorized, "invalid or expired token")
 				return
 			}
+			if stringClaim(claims, "purpose") == "pending_2fa" {
+				writeJSONError(w, http.StatusUnauthorized, "two-factor authentication is not complete")
+				return
+			}
 
 			userID := stringClaim(claims, "user_id", "sub")
 			if userID == "" {
@@ -777,15 +781,13 @@ func registerCanonicalSecurityRoutes(router *mux.Router, authManager *auth.Simpl
 	twoFactorRouter.HandleFunc("/backup-codes", handlers.GetBackupCodes).Methods(http.MethodGet)
 	twoFactorRouter.HandleFunc("/backup-codes", handlers.RegenerateBackupCodes).Methods(http.MethodPost)
 
-	registerSecurityRouteSet(router.PathPrefix("/api/security").Subrouter(), authManager, handlers, false)
-	registerSecurityRouteSet(router.PathPrefix("/api/admin/security").Subrouter(), authManager, handlers, true)
+	registerSecurityRouteSet(router.PathPrefix("/api/security").Subrouter(), authManager, handlers)
+	registerSecurityRouteSet(router.PathPrefix("/api/admin/security").Subrouter(), authManager, handlers)
 }
 
-func registerSecurityRouteSet(router *mux.Router, authManager *auth.SimpleAuthManager, handlers *securityapi.SecurityHandlers, adminOnly bool) {
+func registerSecurityRouteSet(router *mux.Router, authManager *auth.SimpleAuthManager, handlers *securityapi.SecurityHandlers) {
 	router.Use(requireAuth(authManager))
-	if adminOnly {
-		router.Use(requireAnyRoleMiddleware("admin", "super-admin"))
-	}
+	router.Use(requireAnyRoleMiddleware("admin", "super-admin"))
 
 	router.HandleFunc("/threats", handlers.GetThreats).Methods(http.MethodGet)
 	router.HandleFunc("/vulnerabilities", handlers.GetVulnerabilities).Methods(http.MethodGet)
@@ -810,12 +812,12 @@ func registerCanonicalGraphQLRoute(router *mux.Router, authManager *auth.SimpleA
 }
 
 func registerSecurityWebSocketAliases(router *mux.Router, authManager *auth.SimpleAuthManager, handlers *securityapi.SecurityHandlers) {
-	securityStream := requireAuth(authManager)(requireRoleHandler("viewer", handlers.StreamSecurityEvents))
+	securityStream := requireAuth(authManager)(requireRoleHandler("admin", handlers.StreamSecurityEvents))
 	router.Handle("/api/ws/security/events", securityStream).Methods(http.MethodGet)
 
 	compatSecurityRouter := router.PathPrefix("/api/security").Subrouter()
 	compatSecurityRouter.Use(requireAuth(authManager))
-	compatSecurityRouter.Handle("/events/stream", requireRoleHandler("viewer", handlers.StreamSecurityEvents)).Methods(http.MethodGet)
+	compatSecurityRouter.Handle("/events/stream", requireRoleHandler("admin", handlers.StreamSecurityEvents)).Methods(http.MethodGet)
 }
 
 func healthCheckHandler(cfg *config.Config, db *sql.DB) http.HandlerFunc {
@@ -1138,32 +1140,35 @@ func roleSatisfies(userRole string, required map[string]struct{}) bool {
 		return true
 	}
 
-	rank := roleRank(userRole)
-	for role := range required {
-		if requiredRank := roleRank(role); rank >= requiredRank && requiredRank > 0 {
-			return true
-		}
-		if _, exact := required[userRole]; exact {
+	normalizedUserRole := strings.ToLower(strings.TrimSpace(userRole))
+	if normalizedUserRole == "" {
+		return false
+	}
+	if _, ok := required[normalizedUserRole]; ok {
+		return true
+	}
+
+	for _, impliedRole := range impliedRoles(normalizedUserRole) {
+		if _, ok := required[impliedRole]; ok {
 			return true
 		}
 	}
+
 	return false
 }
 
-func roleRank(role string) int {
-	switch strings.ToLower(strings.TrimSpace(role)) {
+func impliedRoles(role string) []string {
+	switch role {
 	case "super-admin":
-		return 5
+		return []string{"admin", "operator", "viewer", "readonly", "user"}
 	case "admin":
-		return 4
+		return []string{"operator", "viewer", "readonly", "user"}
 	case "operator":
-		return 3
-	case "viewer", "user":
-		return 2
-	case "readonly":
-		return 1
+		return []string{"viewer", "readonly"}
+	case "viewer":
+		return []string{"readonly"}
 	default:
-		return 0
+		return nil
 	}
 }
 

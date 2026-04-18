@@ -121,14 +121,16 @@ func (h *SecurityHandlers) respondUnsupported(w http.ResponseWriter, r *http.Req
 }
 
 func userIDFromRequest(r *http.Request, explicitUserID string) string {
+	if userID, ok := r.Context().Value("user_id").(string); ok {
+		if trimmed := strings.TrimSpace(userID); trimmed != "" {
+			return trimmed
+		}
+	}
 	if trimmed := strings.TrimSpace(explicitUserID); trimmed != "" {
 		return trimmed
 	}
 	if queryUserID := strings.TrimSpace(r.URL.Query().Get("user_id")); queryUserID != "" {
 		return queryUserID
-	}
-	if userID, ok := r.Context().Value("user_id").(string); ok {
-		return strings.TrimSpace(userID)
 	}
 	return ""
 }
@@ -150,9 +152,29 @@ func (h *SecurityHandlers) listAuditEvents(ctx context.Context, filter *audit.Au
 }
 
 func (h *SecurityHandlers) saveScanRecord(record *scanRecord) {
+	if record == nil {
+		return
+	}
+
+	recordCopy := *record
+
 	h.scanMu.Lock()
 	defer h.scanMu.Unlock()
-	h.scanRecords[record.ScanID] = record
+	h.scanRecords[record.ScanID] = &recordCopy
+}
+
+func (h *SecurityHandlers) updateScanRecord(scanID string, apply func(*scanRecord)) {
+	h.scanMu.Lock()
+	defer h.scanMu.Unlock()
+
+	record, ok := h.scanRecords[scanID]
+	if !ok {
+		return
+	}
+
+	recordCopy := *record
+	apply(&recordCopy)
+	h.scanRecords[scanID] = &recordCopy
 }
 
 func (h *SecurityHandlers) getScanRecord(scanID string) (*scanRecord, bool) {
@@ -1150,18 +1172,21 @@ func (h *SecurityHandlers) StartVulnerabilityScan(w http.ResponseWriter, r *http
 	go func() {
 		results, err := runLocalScan(context.Background(), scanID, req.Targets, req.ScanTypes, record.StartedAt)
 		completedAt := time.Now().UTC()
-		record.CompletedAt = &completedAt
-		if err != nil {
-			log.Printf("Vulnerability scan failed: %v", err)
-			record.Status = "failed"
-			record.Error = err.Error()
-		} else {
+		h.updateScanRecord(scanID, func(updated *scanRecord) {
+			updated.CompletedAt = &completedAt
+			if err != nil {
+				log.Printf("Vulnerability scan failed: %v", err)
+				updated.Status = "failed"
+				updated.Error = err.Error()
+				return
+			}
+
 			log.Printf("Vulnerability scan completed: %s", results.ScanID)
 			results.ScanID = scanID
-			record.Status = "completed"
-			record.Results = results
-		}
-		h.saveScanRecord(record)
+			updated.Status = "completed"
+			updated.Results = results
+			updated.Error = ""
+		})
 	}()
 
 	response := map[string]interface{}{

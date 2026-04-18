@@ -189,6 +189,83 @@ func TestCanonicalTwoFactorLoginFlow(t *testing.T) {
 	}
 }
 
+func TestCanonicalTwoFactorVerifyLoginRejectsInvalidOrMismatchedTempToken(t *testing.T) {
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	twoFactorService := auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret()))
+
+	router := mux.NewRouter()
+	registerPublicRoutes(router, authManager, nil, twoFactorService)
+
+	invalidTokenReq := mustJSONRequest(t, http.MethodPost, "/api/auth/2fa/verify-login", map[string]interface{}{
+		"code":       "123456",
+		"temp_token": "not-a-valid-token",
+	})
+	invalidTokenRec := httptest.NewRecorder()
+	router.ServeHTTP(invalidTokenRec, invalidTokenReq)
+
+	if invalidTokenRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected invalid temp token to return 401, got %d (%s)", invalidTokenRec.Code, invalidTokenRec.Body.String())
+	}
+
+	pendingToken, err := issuePending2FAToken(authManager.GetJWTSecret(), &auth.User{
+		ID:       "7",
+		Email:    "user@example.com",
+		Username: "user",
+		RoleIDs:  []string{"admin"},
+		TenantID: "default",
+	})
+	if err != nil {
+		t.Fatalf("issue pending token: %v", err)
+	}
+
+	mismatchedUserReq := mustJSONRequest(t, http.MethodPost, "/api/auth/2fa/verify-login", map[string]interface{}{
+		"user_id":    "someone-else",
+		"code":       "123456",
+		"temp_token": pendingToken,
+	})
+	mismatchedUserRec := httptest.NewRecorder()
+	router.ServeHTTP(mismatchedUserRec, mismatchedUserReq)
+
+	if mismatchedUserRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected mismatched user to return 401, got %d (%s)", mismatchedUserRec.Code, mismatchedUserRec.Body.String())
+	}
+}
+
+func TestCanonicalTwoFactorRoutesUseAuthenticatedPrincipal(t *testing.T) {
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	twoFactorService := auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret()))
+	handlers := securityapi.NewSecurityHandlers(twoFactorService, audit.NewSimpleAuditLogger())
+
+	router := mux.NewRouter()
+	registerCanonicalSecurityRoutes(router, authManager, handlers)
+
+	setupReq := mustJSONRequest(t, http.MethodPost, "/api/auth/2fa/setup", map[string]interface{}{
+		"user_id":      "attacker-selected-user",
+		"account_name": "user@example.com",
+	})
+	setupReq.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+
+	setupRec := httptest.NewRecorder()
+	router.ServeHTTP(setupRec, setupReq)
+	if setupRec.Code != http.StatusOK {
+		t.Fatalf("expected setup 200, got %d (%s)", setupRec.Code, setupRec.Body.String())
+	}
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/auth/2fa/status?user_id=someone-else", nil)
+	statusReq.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+	statusRec := httptest.NewRecorder()
+	router.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (%s)", statusRec.Code, statusRec.Body.String())
+	}
+
+	var statusPayload map[string]interface{}
+	decodeJSONBody(t, statusRec, &statusPayload)
+	if setup, _ := statusPayload["setup"].(bool); !setup {
+		t.Fatalf("expected authenticated user's 2FA setup to be returned, got %#v", statusPayload)
+	}
+}
+
 func TestCanonicalSecurityRoutesRunScansAndSurfaceThreats(t *testing.T) {
 	authManager := auth.NewSimpleAuthManager("test-secret", nil)
 	handlers := securityapi.NewSecurityHandlers(auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret())), audit.NewSimpleAuditLogger())
@@ -298,6 +375,61 @@ func TestCanonicalSecurityRoutesRunScansAndSurfaceThreats(t *testing.T) {
 	decodeJSONBody(t, incidentRec, &incidentPayload)
 	if total, _ := incidentPayload["total"].(float64); total < 1 {
 		t.Fatalf("expected at least one incident, got %#v", incidentPayload)
+	}
+}
+
+func TestCanonicalSecurityRoutesRejectNonAdminUsers(t *testing.T) {
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	handlers := securityapi.NewSecurityHandlers(auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret())), audit.NewSimpleAuditLogger())
+	router := newCanonicalSecurityRouter(t, authManager, handlers)
+
+	for _, endpoint := range []struct {
+		method string
+		path   string
+		body   interface{}
+	}{
+		{method: http.MethodGet, path: "/api/security/compliance"},
+		{method: http.MethodPost, path: "/api/security/rbac/user/42/roles", body: map[string]interface{}{"roles": []string{"admin"}}},
+	} {
+		var req *http.Request
+		if endpoint.body == nil {
+			req = httptest.NewRequest(endpoint.method, endpoint.path, nil)
+		} else {
+			req = mustJSONRequest(t, endpoint.method, endpoint.path, endpoint.body)
+		}
+		req.Header.Set("Authorization", signedBearerToken(t, authManager, "11", "default", "user"))
+
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected %s %s to return 403 for user role, got %d (%s)", endpoint.method, endpoint.path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestCanonicalSecurityRoutesRejectPendingTwoFactorTokens(t *testing.T) {
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	handlers := securityapi.NewSecurityHandlers(auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret())), audit.NewSimpleAuditLogger())
+	router := newCanonicalSecurityRouter(t, authManager, handlers)
+
+	tempToken, err := issuePending2FAToken(authManager.GetJWTSecret(), &auth.User{
+		ID:       "7",
+		Email:    "user@example.com",
+		Username: "user",
+		RoleIDs:  []string{"admin"},
+		TenantID: "default",
+	})
+	if err != nil {
+		t.Fatalf("issue temp token: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/security/compliance", nil)
+	req.Header.Set("Authorization", "Bearer "+tempToken)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected pending 2FA token to return 401, got %d (%s)", rec.Code, rec.Body.String())
 	}
 }
 
@@ -450,6 +582,33 @@ func TestCanonicalAndCompatibilityWebSocketMetricsRoutes(t *testing.T) {
 	}
 }
 
+func TestCanonicalAndCompatibilityWebSocketMetricsRoutesRejectUserRole(t *testing.T) {
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	wsHandler := websocketapi.NewWebSocketHandler(nil, nil, nil, nil, logrus.New())
+	defer wsHandler.Shutdown()
+
+	router := mux.NewRouter()
+	wsHandler.RegisterWebSocketRoutes(router, func(required string, next http.HandlerFunc) http.Handler {
+		return requireAuth(authManager)(requireRoleHandler(required, next))
+	})
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	headers := http.Header{}
+	headers.Set("Authorization", signedBearerToken(t, authManager, "11", "default", "user"))
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/ws/metrics?interval=1"
+
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if err == nil {
+		_ = conn.Close()
+		t.Fatal("expected user role websocket dial to fail")
+	}
+	if resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected user role websocket rejection with 403, got resp=%v err=%v", resp, err)
+	}
+}
+
 func TestCanonicalSecurityWebSocketAliasesUpgrade(t *testing.T) {
 	authManager := auth.NewSimpleAuthManager("test-secret", nil)
 	handlers := securityapi.NewSecurityHandlers(auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret())), audit.NewSimpleAuditLogger())
@@ -470,5 +629,29 @@ func TestCanonicalSecurityWebSocketAliasesUpgrade(t *testing.T) {
 			t.Fatalf("dial %s: %v", route, err)
 		}
 		_ = conn.Close()
+	}
+}
+
+func TestCanonicalSecurityWebSocketAliasesRejectNonAdminUsers(t *testing.T) {
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	handlers := securityapi.NewSecurityHandlers(auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret())), audit.NewSimpleAuditLogger())
+
+	router := mux.NewRouter()
+	registerSecurityWebSocketAliases(router, authManager, handlers)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	headers := http.Header{}
+	headers.Set("Authorization", signedBearerToken(t, authManager, "11", "default", "user"))
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/ws/security/events"
+
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if err == nil {
+		_ = conn.Close()
+		t.Fatal("expected security websocket dial to fail for non-admin user")
+	}
+	if resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-admin security websocket, got resp=%v err=%v", resp, err)
 	}
 }
