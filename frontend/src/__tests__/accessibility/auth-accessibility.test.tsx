@@ -6,12 +6,10 @@ import { EmailVerificationFlow } from '@/components/auth/EmailVerificationFlow';
 
 expect.extend(toHaveNoViolations);
 
-// Mock dependencies
-jest.mock('@/lib/api', () => ({
-  apiService: {
+jest.mock('@/lib/auth', () => ({
+  authService: {
     checkEmailAvailability: jest.fn().mockResolvedValue({ available: true }),
-    register: jest.fn().mockResolvedValue({ success: true }),
-    resendVerificationEmail: jest.fn().mockResolvedValue({ success: true }),
+    register: jest.fn().mockResolvedValue({}),
   },
 }));
 
