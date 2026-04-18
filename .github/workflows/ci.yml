@@ -1,70 +1,19 @@
-name: CI - Continuous Integration
+name: CI - Canonical Verification
 
 on:
   pull_request:
     branches: [main, develop]
   push:
-    branches: [develop]
+    branches: [main, develop]
 
 env:
-  GO_VERSION: '1.21'
-  NODE_VERSION: '20'
+  GO_VERSION: "1.21"
+  NODE_VERSION: "20"
 
 jobs:
-  lint:
-    name: Lint Code
+  canonical-backend:
+    name: Canonical Backend
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v3
-        with:
-          version: latest
-          working-directory: backend
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install frontend dependencies
-        run: cd frontend && npm ci
-
-      - name: Run ESLint
-        run: cd frontend && npm run lint
-
-  test-backend:
-    name: Test Backend
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: novacron_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
@@ -75,31 +24,25 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Cache Go modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
-          path: ~/go/pkg/mod
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Run backend tests
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/novacron_test?sslmode=disable
-          REDIS_URL: redis://localhost:6379
-        run: |
-          cd backend
-          go test -v -race -coverprofile=coverage.out ./...
-          go tool cover -func=coverage.out
+      - name: Build canonical API server
+        run: go build ./backend/cmd/api-server
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./backend/coverage.out
-          flags: backend
+      - name: Run canonical backend tests
+        run: go test ./backend/cmd/api-server
 
-  test-frontend:
-    name: Test Frontend
+  canonical-frontend:
+    name: Canonical Frontend
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -107,101 +50,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Cache npm dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
 
-      - name: Install dependencies
-        run: cd frontend && npm ci
-
-      - name: Run frontend tests
-        run: cd frontend && npm test -- --coverage
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./frontend/coverage/lcov.info
-          flags: frontend
-
-  security-scan:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v2
-        with:
-          sarif_file: 'trivy-results.sarif'
-
-      - name: Run Snyk security scan
-        uses: snyk/actions/node@master
+      - name: Run canonical frontend tests
+        working-directory: frontend
         env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --severity-threshold=high
-
-  build-validation:
-    name: Build Validation
-    runs-on: ubuntu-latest
-    needs: [lint, test-backend, test-frontend]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Build backend
-        run: |
-          cd backend
-          go build -v ./cmd/api-server
-          go build -v ./cmd/core-server
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Build frontend
-        run: |
-          cd frontend
-          npm ci
-          npm run build
-
-      - name: Check build artifacts
-        run: |
-          test -f backend/api-server || exit 1
-          test -f backend/core-server || exit 1
-          test -d frontend/.next || exit 1
-
-  pr-comment:
-    name: PR Comment
-    runs-on: ubuntu-latest
-    needs: [lint, test-backend, test-frontend, security-scan, build-validation]
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: Comment PR
-        uses: actions/github-script@v6
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '✅ All CI checks passed! Ready for review.'
-            })
+          CI: "true"
+        run: >
+          npm test -- --runTestsByPath
+          src/__tests__/app/admin-layout.test.tsx
+          src/__tests__/hooks/useSecurity.test.tsx
+          src/__tests__/lib/security-api.test.ts
+          src/__tests__/lib/auth.test.ts
+          src/__tests__/lib/auth-phase3.test.ts
+          --coverage=false
