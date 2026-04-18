@@ -538,6 +538,236 @@ func TestCanonicalGraphQLRouteServesStorageBackedVolumeOperations(t *testing.T) 
 	}
 }
 
+func TestCanonicalLiveServerSmoke(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	authManager := auth.NewSimpleAuthManager("test-secret", db)
+	twoFactorService := auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret()))
+	securityHandlers := securityapi.NewSecurityHandlers(twoFactorService, audit.NewSimpleAuditLogger())
+
+	volumeStore, err := storage.NewStorageManager(storage.StorageManagerConfig{
+		BasePath: filepath.Join(t.TempDir(), "volumes"),
+	})
+	if err != nil {
+		t.Fatalf("create volume store: %v", err)
+	}
+
+	resolver := graphqlapi.NewResolverWithVolumeStore(nil, nil, volumeStore)
+	graphqlHandler := graphqlapi.NewVolumeHTTPHandler(resolver)
+	wsHandler := websocketapi.NewWebSocketHandler(nil, nil, nil, nil, logrus.New())
+	defer wsHandler.Shutdown()
+
+	router := mux.NewRouter()
+	registerPublicRoutes(router, authManager, db, twoFactorService)
+	registerCanonicalSecurityRoutes(router, authManager, securityHandlers)
+	registerCanonicalGraphQLRoute(router, authManager, graphqlHandler)
+	wsHandler.RegisterWebSocketRoutes(router, func(required string, next http.HandlerFunc) http.Handler {
+		return requireAuth(authManager)(requireRoleHandler(required, next))
+	})
+	registerSecurityWebSocketAliases(router, authManager, securityHandlers)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("correct-horse-battery-staple"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+
+	now := time.Now().UTC()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT username FROM users WHERE email = $1`)).
+		WithArgs("admin@example.com").
+		WillReturnRows(sqlmock.NewRows([]string{"username"}).AddRow("admin"))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, username, email, password_hash, role, tenant_id, created_at, updated_at
+		FROM users WHERE username = $1
+	`)).
+		WithArgs("admin").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "tenant_id", "created_at", "updated_at"}).
+			AddRow("7", "admin", "admin@example.com", string(passwordHash), "admin", "default", now, now))
+
+	loginReq, err := http.NewRequest(http.MethodPost, server.URL+"/api/auth/login", strings.NewReader(`{"email":"admin@example.com","password":"correct-horse-battery-staple"}`))
+	if err != nil {
+		t.Fatalf("build login request: %v", err)
+	}
+	loginReq.Header.Set("Content-Type", "application/json")
+
+	loginResp, err := http.DefaultClient.Do(loginReq)
+	if err != nil {
+		t.Fatalf("login request failed: %v", err)
+	}
+	defer loginResp.Body.Close()
+
+	if loginResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected login 200, got %d", loginResp.StatusCode)
+	}
+
+	var loginPayload struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(loginResp.Body).Decode(&loginPayload); err != nil {
+		t.Fatalf("decode login response: %v", err)
+	}
+	if loginPayload.Token == "" {
+		t.Fatal("expected login token from canonical server")
+	}
+
+	complianceReq, err := http.NewRequest(http.MethodGet, server.URL+"/api/security/compliance", nil)
+	if err != nil {
+		t.Fatalf("build compliance request: %v", err)
+	}
+	complianceReq.Header.Set("Authorization", "Bearer "+loginPayload.Token)
+
+	complianceResp, err := http.DefaultClient.Do(complianceReq)
+	if err != nil {
+		t.Fatalf("compliance request failed: %v", err)
+	}
+	defer complianceResp.Body.Close()
+
+	if complianceResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected compliance 200, got %d", complianceResp.StatusCode)
+	}
+
+	var compliancePayload map[string]interface{}
+	if err := json.NewDecoder(complianceResp.Body).Decode(&compliancePayload); err != nil {
+		t.Fatalf("decode compliance response: %v", err)
+	}
+	if _, ok := compliancePayload["compliance_score"]; !ok {
+		t.Fatalf("expected compliance_score in response, got %#v", compliancePayload)
+	}
+
+	wsHeaders := http.Header{}
+	wsHeaders.Set("Authorization", "Bearer "+loginPayload.Token)
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/ws/security/events"
+
+	wsConn, _, err := websocket.DefaultDialer.Dial(wsURL, wsHeaders)
+	if err != nil {
+		t.Fatalf("dial security websocket: %v", err)
+	}
+	_ = wsConn.Close()
+
+	createReq := mustJSONRequest(t, http.MethodPost, "/graphql", map[string]interface{}{
+		"query": `mutation CreateVolume($input: CreateVolumeInput!) { createVolume(input: $input) { id name size tier } }`,
+		"variables": map[string]interface{}{
+			"input": map[string]interface{}{
+				"name": "smoke-disk",
+				"size": 5,
+				"tier": "hot",
+			},
+		},
+	})
+	createReq.URL.Scheme = "http"
+	createReq.URL.Host = strings.TrimPrefix(server.URL, "http://")
+	createReq.RequestURI = ""
+	createReq.Header.Set("Authorization", "Bearer "+loginPayload.Token)
+
+	createResp, err := http.DefaultClient.Do(createReq)
+	if err != nil {
+		t.Fatalf("createVolume request failed: %v", err)
+	}
+	defer createResp.Body.Close()
+
+	if createResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected createVolume 200, got %d", createResp.StatusCode)
+	}
+
+	var createPayload struct {
+		Data struct {
+			CreateVolume struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+				Tier string `json:"tier"`
+			} `json:"createVolume"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(createResp.Body).Decode(&createPayload); err != nil {
+		t.Fatalf("decode createVolume response: %v", err)
+	}
+	if createPayload.Data.CreateVolume.ID == "" {
+		t.Fatal("expected created volume id")
+	}
+
+	listReq := mustJSONRequest(t, http.MethodPost, "/graphql", map[string]interface{}{
+		"query":     `query ListVolumes { volumes { id name tier } }`,
+		"variables": map[string]interface{}{},
+	})
+	listReq.URL.Scheme = "http"
+	listReq.URL.Host = strings.TrimPrefix(server.URL, "http://")
+	listReq.RequestURI = ""
+	listReq.Header.Set("Authorization", "Bearer "+loginPayload.Token)
+
+	listResp, err := http.DefaultClient.Do(listReq)
+	if err != nil {
+		t.Fatalf("list volumes request failed: %v", err)
+	}
+	defer listResp.Body.Close()
+
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected volumes 200, got %d", listResp.StatusCode)
+	}
+
+	var listPayload struct {
+		Data struct {
+			Volumes []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+				Tier string `json:"tier"`
+			} `json:"volumes"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode volumes response: %v", err)
+	}
+	if len(listPayload.Data.Volumes) != 1 || listPayload.Data.Volumes[0].ID != createPayload.Data.CreateVolume.ID {
+		t.Fatalf("expected created volume in list response, got %#v", listPayload.Data.Volumes)
+	}
+
+	changeReq := mustJSONRequest(t, http.MethodPost, "/graphql", map[string]interface{}{
+		"query": `mutation ChangeVolumeTier($id: ID!, $tier: String!) { changeVolumeTier(id: $id, tier: $tier) { id tier } }`,
+		"variables": map[string]interface{}{
+			"id":   createPayload.Data.CreateVolume.ID,
+			"tier": "cold",
+		},
+	})
+	changeReq.URL.Scheme = "http"
+	changeReq.URL.Host = strings.TrimPrefix(server.URL, "http://")
+	changeReq.RequestURI = ""
+	changeReq.Header.Set("Authorization", "Bearer "+loginPayload.Token)
+
+	changeResp, err := http.DefaultClient.Do(changeReq)
+	if err != nil {
+		t.Fatalf("changeVolumeTier request failed: %v", err)
+	}
+	defer changeResp.Body.Close()
+
+	if changeResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected changeVolumeTier 200, got %d", changeResp.StatusCode)
+	}
+
+	var changePayload struct {
+		Data struct {
+			ChangeVolumeTier struct {
+				ID   string `json:"id"`
+				Tier string `json:"tier"`
+			} `json:"changeVolumeTier"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(changeResp.Body).Decode(&changePayload); err != nil {
+		t.Fatalf("decode changeVolumeTier response: %v", err)
+	}
+	if !strings.EqualFold(changePayload.Data.ChangeVolumeTier.Tier, "cold") {
+		t.Fatalf("expected changed tier cold, got %q", changePayload.Data.ChangeVolumeTier.Tier)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestCanonicalAndCompatibilityWebSocketMetricsRoutes(t *testing.T) {
 	authManager := auth.NewSimpleAuthManager("test-secret", nil)
 	wsHandler := websocketapi.NewWebSocketHandler(nil, nil, nil, nil, logrus.New())
