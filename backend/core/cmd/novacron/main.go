@@ -16,6 +16,8 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/core/scheduler"
 	"github.com/khryptorgraphics/novacron/backend/core/storage"
 	"github.com/khryptorgraphics/novacron/backend/core/vm"
+	"github.com/shirou/gopsutil/v3/disk"
+	gopsutilmem "github.com/shirou/gopsutil/v3/mem"
 	"gopkg.in/yaml.v2"
 )
 
@@ -424,11 +426,85 @@ func initializeVMManager(config runtimeConfig) (*vm.VMManager, error) {
 		return nil, err
 	}
 
+	if err := registerLocalSchedulerNode(manager, config.Hypervisor.ID, config.Storage.BasePath); err != nil {
+		return nil, fmt.Errorf("register local scheduler node: %w", err)
+	}
+
 	if err := manager.Start(); err != nil {
 		return nil, fmt.Errorf("start VM manager: %w", err)
 	}
 
 	return manager, nil
+}
+
+func registerLocalSchedulerNode(manager *vm.VMManager, nodeID, storagePath string) error {
+	if manager == nil {
+		return fmt.Errorf("vm manager is required")
+	}
+	if nodeID == "" {
+		return fmt.Errorf("node id is required")
+	}
+
+	totalMemoryMB := 1024
+	usedMemoryMB := 0
+	if memoryStats, err := gopsutilmem.VirtualMemory(); err == nil {
+		totalMemoryMB = int(memoryStats.Total / (1024 * 1024))
+		usedMemoryMB = int((memoryStats.Total - memoryStats.Available) / (1024 * 1024))
+	}
+
+	totalDiskGB := 1
+	usedDiskGB := 0
+	if storagePath != "" {
+		if diskUsage, err := disk.Usage(storagePath); err == nil {
+			totalDiskGB = int(diskUsage.Total / (1024 * 1024 * 1024))
+			usedDiskGB = int((diskUsage.Total - diskUsage.Free) / (1024 * 1024 * 1024))
+		}
+	}
+
+	totalCPU := runtime.NumCPU()
+	if totalCPU < 1 {
+		totalCPU = 1
+	}
+	if totalMemoryMB < 1 {
+		totalMemoryMB = 1
+	}
+	if totalDiskGB < 1 {
+		totalDiskGB = 1
+	}
+
+	nodeInfo := &vm.NodeResourceInfo{
+		NodeID:             nodeID,
+		TotalCPU:           totalCPU,
+		UsedCPU:            0,
+		TotalMemoryMB:      totalMemoryMB,
+		UsedMemoryMB:       clampInt(usedMemoryMB, 0, totalMemoryMB),
+		TotalDiskGB:        totalDiskGB,
+		UsedDiskGB:         clampInt(usedDiskGB, 0, totalDiskGB),
+		CPUUsagePercent:    0,
+		MemoryUsagePercent: percent(clampInt(usedMemoryMB, 0, totalMemoryMB), totalMemoryMB),
+		DiskUsagePercent:   percent(clampInt(usedDiskGB, 0, totalDiskGB), totalDiskGB),
+		Status:             "available",
+		Labels:             map[string]string{"runtime": "novacron", "hypervisor": string(vm.VMTypeKVM)},
+	}
+
+	return manager.RegisterSchedulerNode(nodeInfo)
+}
+
+func percent(used, total int) float64 {
+	if total <= 0 {
+		return 0
+	}
+	return float64(used) / float64(total) * 100
+}
+
+func clampInt(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
 }
 
 func ensureNonStubKVMRuntime(manager *vm.VMManager) error {

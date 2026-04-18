@@ -750,3 +750,132 @@ func (m *VMManager) GetCurrentAllocations() (cpu int, memoryMB int64) {
 
 	return allocatedCPU, allocatedMemoryMB
 }
+
+// RegisterSchedulerNode registers or updates a scheduler node for local admission control.
+func (m *VMManager) RegisterSchedulerNode(nodeInfo *NodeResourceInfo) error {
+	if nodeInfo == nil {
+		return fmt.Errorf("node resource info is required")
+	}
+	if m.scheduler == nil {
+		return fmt.Errorf("vm manager scheduler is not configured")
+	}
+
+	if _, err := m.scheduler.GetNode(nodeInfo.NodeID); err == nil {
+		return m.scheduler.UpdateNode(nodeInfo)
+	}
+
+	return m.scheduler.RegisterNode(nodeInfo)
+}
+
+// ListSchedulerNodes returns the scheduler's registered node inventory.
+func (m *VMManager) ListSchedulerNodes() []*NodeResourceInfo {
+	if m.scheduler == nil {
+		return nil
+	}
+	return m.scheduler.ListNodes()
+}
+
+// CanAdmitVM checks aggregate scheduler inventory before VM creation proceeds.
+func (m *VMManager) CanAdmitVM(vm *VM) error {
+	if vm == nil {
+		return fmt.Errorf("vm is required for admission control")
+	}
+	if m.scheduler == nil {
+		return nil
+	}
+
+	nodes := m.scheduler.ListNodes()
+	if len(nodes) == 0 {
+		return nil
+	}
+
+	availableNodes := make([]*NodeResourceInfo, 0, len(nodes))
+	for _, node := range nodes {
+		if node.Status != "available" {
+			continue
+		}
+		availableNodes = append(availableNodes, node)
+	}
+	if len(availableNodes) == 0 {
+		return fmt.Errorf("no available scheduler nodes registered for admission control")
+	}
+
+	eligibleNodes, err := applyPlacementConstraints(vm, availableNodes)
+	if err != nil {
+		return err
+	}
+
+	requiredCPU := cpuAllocationForVM(vm)
+	requiredMemoryMB := vm.config.MemoryMB
+	requiredDiskGB := diskAllocationForVM(vm)
+
+	totalAvailableCPU := 0
+	totalAvailableMemoryMB := 0
+	totalAvailableDiskGB := 0
+	totalAvailableSlots := 0
+
+	for _, node := range eligibleNodes {
+		totalAvailableCPU += availableCPUCapacity(node, m.scheduler.config.MaxCPUOvercommit)
+		totalAvailableMemoryMB += availableMemoryCapacity(node, m.scheduler.config.MaxMemoryOvercommit)
+		totalAvailableDiskGB += availableDiskCapacity(node)
+
+		if m.scheduler.config.MaxVMsPerNode > 0 {
+			totalAvailableSlots += maxInt(0, m.scheduler.config.MaxVMsPerNode-node.VMCount)
+		}
+	}
+
+	if m.scheduler.config.MaxVMsPerNode > 0 && totalAvailableSlots < 1 {
+		return fmt.Errorf("insufficient VM slot capacity on eligible nodes")
+	}
+	if requiredCPU > totalAvailableCPU {
+		return fmt.Errorf("insufficient aggregate CPU capacity: need %d, have %d", requiredCPU, totalAvailableCPU)
+	}
+	if requiredMemoryMB > totalAvailableMemoryMB {
+		return fmt.Errorf("insufficient aggregate memory capacity: need %dMB, have %dMB", requiredMemoryMB, totalAvailableMemoryMB)
+	}
+	if requiredDiskGB > totalAvailableDiskGB {
+		return fmt.Errorf("insufficient aggregate disk capacity: need %dGB, have %dGB", requiredDiskGB, totalAvailableDiskGB)
+	}
+
+	return nil
+}
+
+func availableCPUCapacity(node *NodeResourceInfo, overcommit float64) int {
+	if node == nil {
+		return 0
+	}
+
+	totalCPU := node.TotalCPU
+	if overcommit > 1.0 {
+		totalCPU = int(float64(node.TotalCPU) * overcommit)
+	}
+
+	return maxInt(0, totalCPU-node.UsedCPU)
+}
+
+func availableMemoryCapacity(node *NodeResourceInfo, overcommit float64) int {
+	if node == nil {
+		return 0
+	}
+
+	totalMemory := node.TotalMemoryMB
+	if overcommit > 1.0 {
+		totalMemory = int(float64(node.TotalMemoryMB) * overcommit)
+	}
+
+	return maxInt(0, totalMemory-node.UsedMemoryMB)
+}
+
+func availableDiskCapacity(node *NodeResourceInfo) int {
+	if node == nil {
+		return 0
+	}
+	return maxInt(0, node.TotalDiskGB-node.UsedDiskGB)
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}

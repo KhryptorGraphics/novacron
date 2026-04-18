@@ -126,6 +126,49 @@ func TestEnsureNonStubKVMRuntimeRejectsExplicitStubFallback(t *testing.T) {
 	}
 }
 
+func TestRegisterLocalSchedulerNodeRegistersInventory(t *testing.T) {
+	t.Parallel()
+
+	manager, err := vm.NewVMManager(newTestVMManagerConfig(t, "qemu-system-x86_64"))
+	if err != nil {
+		t.Fatalf("NewVMManager returned error: %v", err)
+	}
+	defer manager.Stop()
+
+	if err := registerLocalSchedulerNode(manager, "test-node", t.TempDir()); err != nil {
+		t.Fatalf("registerLocalSchedulerNode returned error: %v", err)
+	}
+
+	nodes := manager.ListSchedulerNodes()
+	if len(nodes) != 1 {
+		t.Fatalf("expected one scheduler node, got %d", len(nodes))
+	}
+
+	node := nodes[0]
+	if node.NodeID != "test-node" {
+		t.Fatalf("scheduler node id = %q, want %q", node.NodeID, "test-node")
+	}
+	if node.Status != "available" {
+		t.Fatalf("scheduler node status = %q, want %q", node.Status, "available")
+	}
+	if node.TotalCPU < 1 {
+		t.Fatalf("scheduler total cpu = %d, want >= 1", node.TotalCPU)
+	}
+	if node.TotalMemoryMB < 1 {
+		t.Fatalf("scheduler total memory = %d, want >= 1", node.TotalMemoryMB)
+	}
+	if node.TotalDiskGB < 1 {
+		t.Fatalf("scheduler total disk = %d, want >= 1", node.TotalDiskGB)
+	}
+
+	if err := registerLocalSchedulerNode(manager, "test-node", t.TempDir()); err != nil {
+		t.Fatalf("registerLocalSchedulerNode update returned error: %v", err)
+	}
+	if len(manager.ListSchedulerNodes()) != 1 {
+		t.Fatalf("expected scheduler node update to keep a single entry, got %d", len(manager.ListSchedulerNodes()))
+	}
+}
+
 func newTestVMManagerConfig(t *testing.T, qemuPath string) vm.VMManagerConfig {
 	t.Helper()
 

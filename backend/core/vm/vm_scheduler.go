@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"sync"
 	// "time" // Currently unused
 )
@@ -56,17 +57,20 @@ type SchedulerConfig struct {
 
 // VMScheduler schedules VMs on nodes
 type VMScheduler struct {
-	config          SchedulerConfig
-	nodes           map[string]*NodeResourceInfo
-	nodesMutex      sync.RWMutex
-	customScheduler func(vm *VM, nodes []*NodeResourceInfo) (string, error)
+	config           SchedulerConfig
+	nodes            map[string]*NodeResourceInfo
+	nodesMutex       sync.RWMutex
+	allocations      map[string]ResourceAllocation
+	allocationsMutex sync.RWMutex
+	customScheduler  func(vm *VM, nodes []*NodeResourceInfo) (string, error)
 }
 
 // NewVMScheduler creates a new VM scheduler
 func NewVMScheduler(config SchedulerConfig) *VMScheduler {
 	return &VMScheduler{
-		config: config,
-		nodes:  make(map[string]*NodeResourceInfo),
+		config:      config,
+		nodes:       make(map[string]*NodeResourceInfo),
+		allocations: make(map[string]ResourceAllocation),
 	}
 }
 
@@ -148,9 +152,15 @@ type ResourceAllocation struct {
 
 // GetActiveAllocations returns all active resource allocations
 func (s *VMScheduler) GetActiveAllocations() map[string]ResourceAllocation {
-	// For now, return an empty map - this should be implemented based on actual allocation tracking
-	// In a real implementation, this would track active VM allocations
-	return make(map[string]ResourceAllocation)
+	s.allocationsMutex.RLock()
+	defer s.allocationsMutex.RUnlock()
+
+	allocations := make(map[string]ResourceAllocation, len(s.allocations))
+	for vmID, allocation := range s.allocations {
+		allocations[vmID] = allocation
+	}
+
+	return allocations
 }
 
 // ListNodes returns all registered nodes
@@ -196,6 +206,11 @@ func (s *VMScheduler) ScheduleVM(ctx context.Context, vm *VM) (string, error) {
 	// Check if there are any available nodes
 	if len(nodes) == 0 {
 		return "", fmt.Errorf("no available nodes for scheduling")
+	}
+
+	nodes, err := applyPlacementConstraints(vm, nodes)
+	if err != nil {
+		return "", err
 	}
 
 	// Use the appropriate scheduling policy
@@ -291,6 +306,65 @@ func (s *VMScheduler) scheduleSpreadOut(vm *VM, nodes []*NodeResourceInfo) (stri
 	return nodes[0].NodeID, nil
 }
 
+func applyPlacementConstraints(vm *VM, nodes []*NodeResourceInfo) ([]*NodeResourceInfo, error) {
+	if vm == nil || vm.config.Placement == nil {
+		return nodes, nil
+	}
+
+	excluded := normalizeNodeIDSet(vm.config.Placement.ExcludedNodes)
+	filteredNodes := make([]*NodeResourceInfo, 0, len(nodes))
+	for _, node := range nodes {
+		if _, skip := excluded[node.NodeID]; skip {
+			continue
+		}
+		filteredNodes = append(filteredNodes, node)
+	}
+
+	if len(filteredNodes) == 0 {
+		return nil, fmt.Errorf("no available nodes remain after applying placement exclusions")
+	}
+
+	preferred := normalizeNodeIDSet(vm.config.Placement.PreferredNodes)
+	if len(preferred) == 0 {
+		return filteredNodes, nil
+	}
+
+	preferredNodes := make([]*NodeResourceInfo, 0, len(filteredNodes))
+	for _, node := range filteredNodes {
+		if _, ok := preferred[node.NodeID]; ok {
+			preferredNodes = append(preferredNodes, node)
+		}
+	}
+
+	if len(preferredNodes) > 0 {
+		return preferredNodes, nil
+	}
+
+	// Preferred nodes are a soft constraint; fall back to the remaining eligible nodes.
+	return filteredNodes, nil
+}
+
+func normalizeNodeIDSet(nodeIDs []string) map[string]struct{} {
+	if len(nodeIDs) == 0 {
+		return nil
+	}
+
+	normalized := make(map[string]struct{}, len(nodeIDs))
+	for _, nodeID := range nodeIDs {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID == "" {
+			continue
+		}
+		normalized[nodeID] = struct{}{}
+	}
+
+	if len(normalized) == 0 {
+		return nil
+	}
+
+	return normalized
+}
+
 // hasEnoughResources checks if a node has enough resources for a VM
 func (s *VMScheduler) hasEnoughResources(node *NodeResourceInfo, vm *VM) bool {
 	// Check if the node has reached the maximum number of VMs
@@ -299,7 +373,7 @@ func (s *VMScheduler) hasEnoughResources(node *NodeResourceInfo, vm *VM) bool {
 	}
 
 	// Calculate required resources
-	requiredCPU := vm.config.CPUShares
+	requiredCPU := cpuAllocationForVM(vm)
 	requiredMemoryMB := vm.config.MemoryMB
 
 	// Check CPU
@@ -346,20 +420,45 @@ func (s *VMScheduler) ReserveResources(nodeID string, vm *VM) error {
 		return fmt.Errorf("node %s is not registered", nodeID)
 	}
 
+	// Recheck capacity at reservation time to avoid stale scheduling decisions.
+	if s.config.EnableResourceChecking && !s.hasEnoughResources(node, vm) {
+		return fmt.Errorf("node %s no longer has enough resources for VM %s", nodeID, vm.ID())
+	}
+
 	// Calculate required resources
-	requiredCPU := vm.config.CPUShares
+	requiredCPU := cpuAllocationForVM(vm)
 	requiredMemoryMB := vm.config.MemoryMB
+	requiredDiskGB := diskAllocationForVM(vm)
 
 	// Update node resources
 	node.UsedCPU += requiredCPU
 	node.UsedMemoryMB += requiredMemoryMB
+	node.UsedDiskGB += requiredDiskGB
 	node.VMCount++
 
-	// Update usage percentages
-	node.CPUUsagePercent = float64(node.UsedCPU) / float64(node.TotalCPU) * 100
-	node.MemoryUsagePercent = float64(node.UsedMemoryMB) / float64(node.TotalMemoryMB) * 100
+	updateNodeUsage(node)
 
-	log.Printf("Reserved resources on node %s for VM %s: CPU=%d, Memory=%dMB", nodeID, vm.ID(), requiredCPU, requiredMemoryMB)
+	allocation := ResourceAllocation{
+		VMID:      vm.ID(),
+		NodeID:    nodeID,
+		CPUCores:  requiredCPU,
+		MemoryMB:  requiredMemoryMB,
+		DiskGB:    requiredDiskGB,
+		RequestID: firstNonEmpty(vm.ResourceID(), vm.ID()),
+	}
+
+	s.allocationsMutex.Lock()
+	s.allocations[vm.ID()] = allocation
+	s.allocationsMutex.Unlock()
+
+	log.Printf(
+		"Reserved resources on node %s for VM %s: CPU=%d, Memory=%dMB, Disk=%dGB",
+		nodeID,
+		vm.ID(),
+		requiredCPU,
+		requiredMemoryMB,
+		requiredDiskGB,
+	)
 
 	return nil
 }
@@ -375,9 +474,22 @@ func (s *VMScheduler) ReleaseResources(nodeID string, vm *VM) error {
 		return fmt.Errorf("node %s is not registered", nodeID)
 	}
 
-	// Calculate required resources
-	requiredCPU := vm.config.CPUShares
+	requiredCPU := cpuAllocationForVM(vm)
 	requiredMemoryMB := vm.config.MemoryMB
+	requiredDiskGB := diskAllocationForVM(vm)
+
+	s.allocationsMutex.Lock()
+	if allocation, exists := s.allocations[vm.ID()]; exists {
+		requiredCPU = allocation.CPUCores
+		requiredMemoryMB = allocation.MemoryMB
+		requiredDiskGB = allocation.DiskGB
+		nodeID = allocation.NodeID
+		delete(s.allocations, vm.ID())
+		if allocationNode, allocationExists := s.nodes[nodeID]; allocationExists {
+			node = allocationNode
+		}
+	}
+	s.allocationsMutex.Unlock()
 
 	// Update node resources
 	node.UsedCPU -= requiredCPU
@@ -389,17 +501,82 @@ func (s *VMScheduler) ReleaseResources(nodeID string, vm *VM) error {
 	if node.UsedMemoryMB < 0 {
 		node.UsedMemoryMB = 0
 	}
+	node.UsedDiskGB -= requiredDiskGB
+	if node.UsedDiskGB < 0 {
+		node.UsedDiskGB = 0
+	}
 
 	node.VMCount--
 	if node.VMCount < 0 {
 		node.VMCount = 0
 	}
 
-	// Update usage percentages
-	node.CPUUsagePercent = float64(node.UsedCPU) / float64(node.TotalCPU) * 100
-	node.MemoryUsagePercent = float64(node.UsedMemoryMB) / float64(node.TotalMemoryMB) * 100
+	updateNodeUsage(node)
 
-	log.Printf("Released resources on node %s for VM %s: CPU=%d, Memory=%dMB", nodeID, vm.ID(), requiredCPU, requiredMemoryMB)
+	log.Printf(
+		"Released resources on node %s for VM %s: CPU=%d, Memory=%dMB, Disk=%dGB",
+		nodeID,
+		vm.ID(),
+		requiredCPU,
+		requiredMemoryMB,
+		requiredDiskGB,
+	)
 
 	return nil
+}
+
+func updateNodeUsage(node *NodeResourceInfo) {
+	if node.TotalCPU > 0 {
+		node.CPUUsagePercent = float64(node.UsedCPU) / float64(node.TotalCPU) * 100
+	} else {
+		node.CPUUsagePercent = 0
+	}
+
+	if node.TotalMemoryMB > 0 {
+		node.MemoryUsagePercent = float64(node.UsedMemoryMB) / float64(node.TotalMemoryMB) * 100
+	} else {
+		node.MemoryUsagePercent = 0
+	}
+
+	if node.TotalDiskGB > 0 {
+		node.DiskUsagePercent = float64(node.UsedDiskGB) / float64(node.TotalDiskGB) * 100
+	} else {
+		node.DiskUsagePercent = 0
+	}
+}
+
+func cpuAllocationForVM(vm *VM) int {
+	if vm == nil || vm.config.CPUShares <= 0 {
+		return 0
+	}
+
+	// KVM configs in this repo often use Linux-style CPU shares where 1024 ~= 1 vCPU.
+	if vm.config.CPUShares > 128 {
+		cores := vm.config.CPUShares / 1024
+		if vm.config.CPUShares%1024 != 0 {
+			cores++
+		}
+		if cores < 1 {
+			return 1
+		}
+		return cores
+	}
+
+	return vm.config.CPUShares
+}
+
+func diskAllocationForVM(vm *VM) int {
+	if vm == nil || vm.config.DiskSizeGB < 0 {
+		return 0
+	}
+	return vm.config.DiskSizeGB
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

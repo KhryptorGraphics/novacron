@@ -2,9 +2,9 @@ package vm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,6 +40,15 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 		req.Spec.ID = uuid.New().String()
 	}
 	vmID := req.Spec.ID
+
+	vm, err := NewVM(req.Spec)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize VM object: %w", err)
+	}
+
+	if err := m.CanAdmitVM(vm); err != nil {
+		return nil, fmt.Errorf("vm admission rejected for %s: %w", vmID, err)
+	}
 
 	// Get the VM driver - Use consistent getDriver method
 	driver, err := m.getDriver(req.Spec)
@@ -117,25 +126,23 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 	//	}
 	// }
 
-	// Temporary workaround: skip scheduler check during testing
-	found := true
-	if !found {
-		// Note: Scheduler integration temporarily disabled for testing
-		// m.scheduler.CancelRequest(resourceID)
-		return nil, errors.New("allocation not found")
-	}
+	reservationActive := false
+	if m.scheduler != nil && len(m.scheduler.ListNodes()) > 0 {
+		selectedNodeID, err := m.scheduler.ScheduleVM(ctx, vm)
+		if err != nil {
+			return nil, fmt.Errorf("failed to schedule VM %s: %w", vmID, err)
+		}
 
-	// Create the VM object using the constructor
-	vm, err := NewVM(req.Spec) // Pass the VMConfig spec
-	if err != nil {
-		// Note: Scheduler integration temporarily disabled for testing
-		// m.scheduler.CancelRequest(resourceID)
-		return nil, fmt.Errorf("failed to initialize VM object: %w", err)
+		vm.SetNodeID(selectedNodeID)
+		vm.SetResourceID(vmID)
+
+		if err := m.scheduler.ReserveResources(selectedNodeID, vm); err != nil {
+			return nil, fmt.Errorf("failed to reserve resources for VM %s on node %s: %w", vmID, selectedNodeID, err)
+		}
+		reservationActive = true
+	} else if explicitNodeID := strings.TrimSpace(req.Spec.Tags["node_id"]); explicitNodeID != "" {
+		vm.SetNodeID(explicitNodeID)
 	}
-	// Set internal fields not handled by constructor (if any)
-	// vm.nodeID = allocation.NodeID // Assuming nodeID is internal
-	// vm.resourceID = resourceID // Assuming resourceID is internal
-	// vm.owner = req.Owner // Assuming owner is internal
 
 	// Set initial state via method if available, otherwise internal (carefully)
 	vm.mutex.Lock()
@@ -150,6 +157,13 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 		vm.state = StateFailed // Use correct state constant
 		// vm.errorMessage = fmt.Sprintf("Failed to create VM: %v", err) // Assuming internal field
 		vm.mutex.Unlock()
+
+		if reservationActive {
+			if releaseErr := m.scheduler.ReleaseResources(vm.NodeID(), vm); releaseErr != nil {
+				log.Printf("Failed to release reserved resources for VM %s after create error: %v", vm.ID(), releaseErr)
+			}
+			vm.SetResourceID("")
+		}
 
 		// Emit error event
 		m.emitEvent(VMEvent{
@@ -619,11 +633,11 @@ func (m *VMManager) deleteVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 		}, err
 	}
 
-	// Clean up resources
-	// If VM has a resource allocation, release it
-	if vm.resourceID != "" {
-		// Note: Scheduler integration temporarily disabled for testing
-		// m.scheduler.CancelRequest(vm.resourceID)
+	// Clean up scheduler accounting before removing the VM from the manager.
+	if m.scheduler != nil && vm.ResourceID() != "" && vm.NodeID() != "" {
+		if err := m.scheduler.ReleaseResources(vm.NodeID(), vm); err != nil {
+			log.Printf("Failed to release scheduler resources for VM %s: %v", vm.ID(), err)
+		}
 	}
 
 	// Emit deleted event
