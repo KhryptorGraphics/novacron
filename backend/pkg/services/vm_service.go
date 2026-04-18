@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,35 +15,46 @@ import (
 
 // VMService provides VM management functionality
 type VMService struct {
-	db        *database.DB
-	repos     *database.Repositories
-	vmManager *vm.VMManager
+	db         *database.DB
+	repos      *database.Repositories
+	vmManager  *vm.VMManager
 	kvmManager *hypervisor.KVMManager
 }
 
 // CreateVMRequest represents a request to create a VM
 type CreateVMRequest struct {
-	Name       string            `json:"name"`
-	Command    string            `json:"command,omitempty"`
-	Args       []string          `json:"args,omitempty"`
-	CPUShares  int               `json:"cpu_shares"`
-	MemoryMB   int               `json:"memory_mb"`
-	DiskSizeGB int               `json:"disk_size_gb"`
-	Tags       map[string]string `json:"tags,omitempty"`
-	TenantID   string            `json:"tenant_id,omitempty"`
+	Name               string                   `json:"name"`
+	Type               vm.VMType                `json:"type,omitempty"`
+	Command            string                   `json:"command,omitempty"`
+	Args               []string                 `json:"args,omitempty"`
+	CPUShares          int                      `json:"cpu_shares"`
+	MemoryMB           int                      `json:"memory_mb"`
+	DiskSizeGB         int                      `json:"disk_size_gb"`
+	Image              string                   `json:"image,omitempty"`
+	RootFS             string                   `json:"rootfs,omitempty"`
+	CloudInitISO       string                   `json:"cloud_init_iso,omitempty"`
+	NetworkID          string                   `json:"network_id,omitempty"`
+	Tags               map[string]string        `json:"tags,omitempty"`
+	OwnerID            string                   `json:"owner_id,omitempty"`
+	TenantID           string                   `json:"tenant_id,omitempty"`
+	VolumeAttachments  []vm.VMVolumeAttachment  `json:"volume_attachments,omitempty"`
+	NetworkAttachments []vm.VMNetworkAttachment `json:"network_attachments,omitempty"`
+	Placement          *vm.VMPlacementSpec      `json:"placement,omitempty"`
+	Migration          *vm.VMMigrationPolicy    `json:"migration,omitempty"`
+	Replication        *vm.VMReplicationPolicy  `json:"replication,omitempty"`
 }
 
 // VMResponse represents a VM in API responses
 type VMResponse struct {
-	ID         string                 `json:"id"`
-	Name       string                 `json:"name"`
-	State      string                 `json:"state"`
-	NodeID     *string                `json:"node_id,omitempty"`
-	OwnerID    *int                   `json:"owner_id,omitempty"`
-	TenantID   string                 `json:"tenant_id"`
-	Config     map[string]interface{} `json:"config,omitempty"`
-	CreatedAt  time.Time              `json:"created_at"`
-	UpdatedAt  time.Time              `json:"updated_at"`
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	State     string                 `json:"state"`
+	NodeID    *string                `json:"node_id,omitempty"`
+	OwnerID   *int                   `json:"owner_id,omitempty"`
+	TenantID  string                 `json:"tenant_id"`
+	Config    map[string]interface{} `json:"config,omitempty"`
+	CreatedAt time.Time              `json:"created_at"`
+	UpdatedAt time.Time              `json:"updated_at"`
 }
 
 // NewVMService creates a new VM service
@@ -59,7 +71,7 @@ func NewVMService(db *database.DB, vmManager *vm.VMManager, kvmManager *hypervis
 func (s *VMService) CreateVM(ctx context.Context, request CreateVMRequest, userID int) (*VMResponse, error) {
 	// Generate VM ID
 	vmID := uuid.New().String()
-	
+
 	// Set defaults
 	if request.TenantID == "" {
 		request.TenantID = "default"
@@ -73,17 +85,42 @@ func (s *VMService) CreateVM(ctx context.Context, request CreateVMRequest, userI
 	if request.DiskSizeGB == 0 {
 		request.DiskSizeGB = 10
 	}
+	if request.OwnerID == "" {
+		request.OwnerID = strconv.Itoa(userID)
+	}
+
+	image := request.Image
+	if image == "" {
+		image = request.RootFS
+	}
+
+	rootFS := request.RootFS
+	if rootFS == "" {
+		rootFS = request.Image
+	}
 
 	// Create VM config
 	vmConfig := vm.VMConfig{
-		ID:         vmID,
-		Name:       request.Name,
-		Command:    request.Command,
-		Args:       request.Args,
-		CPUShares:  request.CPUShares,
-		MemoryMB:   request.MemoryMB,
-		DiskSizeGB: request.DiskSizeGB,
-		Tags:       request.Tags,
+		ID:                 vmID,
+		Name:               request.Name,
+		Type:               request.Type,
+		Command:            request.Command,
+		Args:               request.Args,
+		CPUShares:          request.CPUShares,
+		MemoryMB:           request.MemoryMB,
+		DiskSizeGB:         request.DiskSizeGB,
+		Image:              image,
+		RootFS:             rootFS,
+		CloudInitISO:       request.CloudInitISO,
+		NetworkID:          request.NetworkID,
+		OwnerID:            request.OwnerID,
+		TenantID:           request.TenantID,
+		VolumeAttachments:  request.VolumeAttachments,
+		NetworkAttachments: request.NetworkAttachments,
+		Placement:          request.Placement,
+		Migration:          request.Migration,
+		Replication:        request.Replication,
+		Tags:               request.Tags,
 	}
 
 	// If we have VM manager, use it to create the VM
@@ -94,7 +131,7 @@ func (s *VMService) CreateVM(ctx context.Context, request CreateVMRequest, userI
 			Spec: vmConfig,
 			Tags: request.Tags,
 		}
-		
+
 		var err error
 		newVM, err = s.vmManager.CreateVM(ctx, createRequest)
 		if err != nil {
@@ -109,6 +146,8 @@ func (s *VMService) CreateVM(ctx context.Context, request CreateVMRequest, userI
 		}
 	}
 
+	createdConfig := newVM.Config()
+
 	// Store in database
 	dbVM := &database.VM{
 		ID:       vmID,
@@ -118,12 +157,16 @@ func (s *VMService) CreateVM(ctx context.Context, request CreateVMRequest, userI
 		OwnerID:  &userID,
 		TenantID: request.TenantID,
 		Config: database.JSONB{
-			"command":      request.Command,
-			"args":         request.Args,
-			"cpu_shares":   request.CPUShares,
-			"memory_mb":    request.MemoryMB,
-			"disk_size_gb": request.DiskSizeGB,
-			"tags":         request.Tags,
+			"type":         string(createdConfig.Type),
+			"command":      createdConfig.Command,
+			"args":         createdConfig.Args,
+			"cpu_shares":   createdConfig.CPUShares,
+			"memory_mb":    createdConfig.MemoryMB,
+			"disk_size_gb": createdConfig.DiskSizeGB,
+			"image":        createdConfig.Image,
+			"rootfs":       createdConfig.RootFS,
+			"network_id":   createdConfig.NetworkID,
+			"tags":         createdConfig.Tags,
 		},
 	}
 
@@ -304,7 +347,7 @@ func (s *VMService) StartVM(ctx context.Context, vmID string) error {
 	dbVM.State = "running"
 	nodeID := "default-node-01"
 	dbVM.NodeID = &nodeID
-	
+
 	if err := s.repos.VMs.Update(ctx, dbVM); err != nil {
 		return fmt.Errorf("failed to update VM state: %w", err)
 	}
@@ -338,7 +381,7 @@ func (s *VMService) StopVM(ctx context.Context, vmID string) error {
 	// Update state in database
 	dbVM.State = "stopped"
 	dbVM.NodeID = nil
-	
+
 	if err := s.repos.VMs.Update(ctx, dbVM); err != nil {
 		return fmt.Errorf("failed to update VM state: %w", err)
 	}
@@ -403,7 +446,7 @@ func (s *VMService) PauseVM(ctx context.Context, vmID string) error {
 
 	// Update state in database
 	dbVM.State = "paused"
-	
+
 	if err := s.repos.VMs.Update(ctx, dbVM); err != nil {
 		return fmt.Errorf("failed to update VM state: %w", err)
 	}
@@ -436,7 +479,7 @@ func (s *VMService) ResumeVM(ctx context.Context, vmID string) error {
 
 	// Update state in database
 	dbVM.State = "running"
-	
+
 	if err := s.repos.VMs.Update(ctx, dbVM); err != nil {
 		return fmt.Errorf("failed to update VM state: %w", err)
 	}
@@ -510,7 +553,7 @@ func (s *VMService) GetVMMetrics(ctx context.Context, vmID string) (map[string]i
 // Helper method to convert database VM to response format
 func (s *VMService) convertToVMResponse(dbVM *database.VM) *VMResponse {
 	config := make(map[string]interface{})
-	
+
 	// Convert JSONB to regular map
 	if dbVM.Config != nil {
 		for k, v := range dbVM.Config {

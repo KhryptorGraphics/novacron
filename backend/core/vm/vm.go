@@ -90,6 +90,13 @@ type VMConfig struct {
 	Mounts                []Mount                      `yaml:"mounts" json:"mounts"`
 	Env                   map[string]string            `yaml:"env" json:"env"`
 	NetworkID             string                       `yaml:"network_id" json:"network_id"`
+	OwnerID               string                       `yaml:"owner_id,omitempty" json:"owner_id,omitempty"`
+	TenantID              string                       `yaml:"tenant_id,omitempty" json:"tenant_id,omitempty"`
+	VolumeAttachments     []VMVolumeAttachment         `yaml:"volume_attachments,omitempty" json:"volume_attachments,omitempty"`
+	NetworkAttachments    []VMNetworkAttachment        `yaml:"network_attachments,omitempty" json:"network_attachments,omitempty"`
+	Placement             *VMPlacementSpec             `yaml:"placement,omitempty" json:"placement,omitempty"`
+	Migration             *VMMigrationPolicy           `yaml:"migration,omitempty" json:"migration,omitempty"`
+	Replication           *VMReplicationPolicy         `yaml:"replication,omitempty" json:"replication,omitempty"`
 	WorkDir               string                       `yaml:"work_dir" json:"work_dir"`
 	Tags                  map[string]string            `yaml:"tags" json:"tags"`
 	PredictivePrefetching *PredictivePrefetchingConfig `yaml:"predictive_prefetching,omitempty" json:"predictive_prefetching,omitempty"`

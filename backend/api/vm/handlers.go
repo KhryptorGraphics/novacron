@@ -4,11 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"time"
 	"sort"
 	"strconv"
 	"strings"
-
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/khryptorgraphics/novacron/backend/core/vm"
@@ -63,17 +62,55 @@ func (h *Handler) ListVMs(w http.ResponseWriter, r *http.Request) {
 	vms := h.vmManager.ListVMs()
 
 	// Collect into slice for processing
-	type item struct{ id string; vm *vm.VM }
+	type item struct {
+		id string
+		vm *vm.VM
+	}
 	items := make([]item, 0, len(vms))
-	for _, m := range vms { items = append(items, item{id: m.ID(), vm: m}) }
+	for _, m := range vms {
+		items = append(items, item{id: m.ID(), vm: m})
+	}
 
 	// Parse and validate query params
 	q := r.URL.Query()
-	page := 1; pageSize := 20; sortBy := "createdAt"; sortDir := "asc"
-	if v := q.Get("page"); v != "" { if n, err := strconv.Atoi(v); err != nil || n < 1 { writeError(w, http.StatusBadRequest, "invalid_argument", "invalid page"); return } else { page = n } }
-	if v := q.Get("pageSize"); v != "" { if n, err := strconv.Atoi(v); err != nil || n < 1 || n > 100 { writeError(w, http.StatusBadRequest, "invalid_argument", "invalid pageSize"); return } else { pageSize = n } }
-	if v := q.Get("sortBy"); v != "" { switch v { case "name","createdAt","state": sortBy = v; default: writeError(w, http.StatusBadRequest, "invalid_argument", "invalid sortBy"); return } }
-	if v := q.Get("sortDir"); v != "" { switch v { case "asc","desc": sortDir = v; default: writeError(w, http.StatusBadRequest, "invalid_argument", "invalid sortDir"); return } }
+	page := 1
+	pageSize := 20
+	sortBy := "createdAt"
+	sortDir := "asc"
+	if v := q.Get("page"); v != "" {
+		if n, err := strconv.Atoi(v); err != nil || n < 1 {
+			writeError(w, http.StatusBadRequest, "invalid_argument", "invalid page")
+			return
+		} else {
+			page = n
+		}
+	}
+	if v := q.Get("pageSize"); v != "" {
+		if n, err := strconv.Atoi(v); err != nil || n < 1 || n > 100 {
+			writeError(w, http.StatusBadRequest, "invalid_argument", "invalid pageSize")
+			return
+		} else {
+			pageSize = n
+		}
+	}
+	if v := q.Get("sortBy"); v != "" {
+		switch v {
+		case "name", "createdAt", "state":
+			sortBy = v
+		default:
+			writeError(w, http.StatusBadRequest, "invalid_argument", "invalid sortBy")
+			return
+		}
+	}
+	if v := q.Get("sortDir"); v != "" {
+		switch v {
+		case "asc", "desc":
+			sortDir = v
+		default:
+			writeError(w, http.StatusBadRequest, "invalid_argument", "invalid sortDir")
+			return
+		}
+	}
 	stateFilter := strings.ToLower(q.Get("state"))
 	nodeIDFilter := q.Get("nodeId")
 	query := strings.ToLower(q.Get("q"))
@@ -82,12 +119,18 @@ func (h *Handler) ListVMs(w http.ResponseWriter, r *http.Request) {
 	filtered := items[:0]
 	for _, it := range items {
 		vm := it.vm
-		if stateFilter != "" && strings.ToLower(string(vm.State())) != stateFilter { continue }
-		if nodeIDFilter != "" && vm.GetNodeID() != nodeIDFilter { continue }
+		if stateFilter != "" && strings.ToLower(string(vm.State())) != stateFilter {
+			continue
+		}
+		if nodeIDFilter != "" && vm.GetNodeID() != nodeIDFilter {
+			continue
+		}
 		if query != "" {
 			name := strings.ToLower(vm.Name())
 			id := strings.ToLower(vm.ID())
-			if !strings.Contains(name, query) && !strings.Contains(id, query) { continue }
+			if !strings.Contains(name, query) && !strings.Contains(id, query) {
+				continue
+			}
 		}
 		filtered = append(filtered, it)
 	}
@@ -98,23 +141,41 @@ func (h *Handler) ListVMs(w http.ResponseWriter, r *http.Request) {
 		less := false
 		switch sortBy {
 		case "name":
-			if vi.Name() == vj.Name() { less = filtered[i].id < filtered[j].id } else { less = vi.Name() < vj.Name() }
+			if vi.Name() == vj.Name() {
+				less = filtered[i].id < filtered[j].id
+			} else {
+				less = vi.Name() < vj.Name()
+			}
 		case "state":
-			if vi.State() == vj.State() { less = filtered[i].id < filtered[j].id } else { less = string(vi.State()) < string(vj.State()) }
+			if vi.State() == vj.State() {
+				less = filtered[i].id < filtered[j].id
+			} else {
+				less = string(vi.State()) < string(vj.State())
+			}
 		default: // createdAt
 			ci, cj := vi.GetCreatedAt(), vj.GetCreatedAt()
-			if ci.Equal(cj) { less = filtered[i].id < filtered[j].id } else { less = ci.Before(cj) }
+			if ci.Equal(cj) {
+				less = filtered[i].id < filtered[j].id
+			} else {
+				less = ci.Before(cj)
+			}
 		}
-		if sortDir == "asc" { return less }
+		if sortDir == "asc" {
+			return less
+		}
 		return !less
 	})
 
 	// Paginate
 	total := len(filtered)
-	start := (page-1)*pageSize
-	if start > total { start = total }
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
 	end := start + pageSize
-	if end > total { end = total }
+	if end > total {
+		end = total
+	}
 	paged := filtered[start:end]
 
 	// Project for response
@@ -149,13 +210,28 @@ func (h *Handler) ListVMs(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 	// Parse request (minimal validation; allow empty command in core tests)
 	var request struct {
-		Name       string            `json:"name"`
-		Command    string            `json:"command"`
-		Args       []string          `json:"args"`
-		CPUShares  int               `json:"cpu_shares"`
-		MemoryMB   int               `json:"memory_mb"`
-		DiskSizeGB int               `json:"disk_size_gb"`
-		Tags       map[string]string `json:"tags"`
+		Name               string                   `json:"name"`
+		Type               vm.VMType                `json:"type"`
+		Command            string                   `json:"command"`
+		Args               []string                 `json:"args"`
+		CPU                int                      `json:"cpu"`
+		CPUShares          int                      `json:"cpu_shares"`
+		Memory             int                      `json:"memory"`
+		MemoryMB           int                      `json:"memory_mb"`
+		Disk               int                      `json:"disk"`
+		DiskSizeGB         int                      `json:"disk_size_gb"`
+		Image              string                   `json:"image"`
+		RootFS             string                   `json:"rootfs"`
+		CloudInitISO       string                   `json:"cloud_init_iso"`
+		NetworkID          string                   `json:"network_id"`
+		Tags               map[string]string        `json:"tags"`
+		OwnerID            string                   `json:"owner_id"`
+		TenantID           string                   `json:"tenant_id"`
+		VolumeAttachments  []vm.VMVolumeAttachment  `json:"volume_attachments"`
+		NetworkAttachments []vm.VMNetworkAttachment `json:"network_attachments"`
+		Placement          *vm.VMPlacementSpec      `json:"placement"`
+		Migration          *vm.VMMigrationPolicy    `json:"migration"`
+		Replication        *vm.VMReplicationPolicy  `json:"replication"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -163,15 +239,51 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create VM config
+	cpuShares := request.CPUShares
+	if cpuShares == 0 {
+		cpuShares = request.CPU
+	}
+
+	memoryMB := request.MemoryMB
+	if memoryMB == 0 {
+		memoryMB = request.Memory
+	}
+
+	diskSizeGB := request.DiskSizeGB
+	if diskSizeGB == 0 {
+		diskSizeGB = request.Disk
+	}
+
+	image := request.Image
+	if image == "" {
+		image = request.RootFS
+	}
+
+	rootFS := request.RootFS
+	if rootFS == "" {
+		rootFS = request.Image
+	}
+
 	config := vm.VMConfig{
-		Name:       request.Name,
-		Command:    request.Command,
-		Args:       request.Args,
-		CPUShares:  request.CPUShares,
-		MemoryMB:   request.MemoryMB,
-		DiskSizeGB: request.DiskSizeGB,
-		Tags:       request.Tags,
+		Name:               request.Name,
+		Type:               request.Type,
+		Command:            request.Command,
+		Args:               request.Args,
+		CPUShares:          cpuShares,
+		MemoryMB:           memoryMB,
+		DiskSizeGB:         diskSizeGB,
+		Image:              image,
+		RootFS:             rootFS,
+		CloudInitISO:       request.CloudInitISO,
+		NetworkID:          request.NetworkID,
+		OwnerID:            request.OwnerID,
+		TenantID:           request.TenantID,
+		VolumeAttachments:  request.VolumeAttachments,
+		NetworkAttachments: request.NetworkAttachments,
+		Placement:          request.Placement,
+		Migration:          request.Migration,
+		Replication:        request.Replication,
+		Tags:               request.Tags,
 	}
 
 	// Create VM request
@@ -229,12 +341,12 @@ func (h *Handler) GetVM(w http.ResponseWriter, r *http.Request) {
 		"created_at": vm.GetCreatedAt(),
 		"updated_at": vm.GetUpdatedAt(),
 		"config": map[string]interface{}{
-			"command":     vm.GetCommand(),
-			"args":        vm.GetArgs(),
-			"cpu_shares":  vm.GetCPUShares(),
-			"memory_mb":   vm.GetMemoryMB(),
+			"command":      vm.GetCommand(),
+			"args":         vm.GetArgs(),
+			"cpu_shares":   vm.GetCPUShares(),
+			"memory_mb":    vm.GetMemoryMB(),
 			"disk_size_gb": vm.GetDiskSizeGB(),
-			"tags":        vm.GetTags(),
+			"tags":         vm.GetTags(),
 		},
 	}
 
@@ -261,9 +373,16 @@ func (h *Handler) UpdateVM(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_argument", "invalid JSON payload")
 		return
 	}
-	if len(raw) == 0 { writeError(w, http.StatusBadRequest, "invalid_argument", "no supported fields to update"); return }
+	if len(raw) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "no supported fields to update")
+		return
+	}
 	unsupported := make([]string, 0)
-	for k := range raw { if k != "name" && k != "tags" { unsupported = append(unsupported, k) } }
+	for k := range raw {
+		if k != "name" && k != "tags" {
+			unsupported = append(unsupported, k)
+		}
+	}
 	if len(unsupported) > 0 {
 		writeError(w, http.StatusBadRequest, "invalid_argument", "unsupported fields: "+strings.Join(unsupported, ", "))
 		return
@@ -271,14 +390,23 @@ func (h *Handler) UpdateVM(w http.ResponseWriter, r *http.Request) {
 	// Apply allowed updates
 	if v, ok := raw["name"]; ok {
 		var name string
-		if err := json.Unmarshal(v, &name); err != nil { writeError(w, http.StatusBadRequest, "invalid_argument", "name must be a string"); return }
+		if err := json.Unmarshal(v, &name); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_argument", "name must be a string")
+			return
+		}
 		name = strings.TrimSpace(name)
-		if name == "" { writeError(w, http.StatusBadRequest, "invalid_argument", "name cannot be empty"); return }
+		if name == "" {
+			writeError(w, http.StatusBadRequest, "invalid_argument", "name cannot be empty")
+			return
+		}
 		vm.SetName(name)
 	}
 	if v, ok := raw["tags"]; ok {
 		var tags map[string]string
-		if err := json.Unmarshal(v, &tags); err != nil { writeError(w, http.StatusBadRequest, "invalid_argument", "tags must be an object of string:string"); return }
+		if err := json.Unmarshal(v, &tags); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_argument", "tags must be an object of string:string")
+			return
+		}
 		vm.SetTags(tags)
 	}
 
@@ -291,12 +419,12 @@ func (h *Handler) UpdateVM(w http.ResponseWriter, r *http.Request) {
 		"created_at": vm.GetCreatedAt(),
 		"updated_at": vm.GetUpdatedAt(),
 		"config": map[string]interface{}{
-			"command":     vm.GetCommand(),
-			"args":        vm.GetArgs(),
-			"cpu_shares":  vm.GetCPUShares(),
-			"memory_mb":   vm.GetMemoryMB(),
+			"command":      vm.GetCommand(),
+			"args":         vm.GetArgs(),
+			"cpu_shares":   vm.GetCPUShares(),
+			"memory_mb":    vm.GetMemoryMB(),
 			"disk_size_gb": vm.GetDiskSizeGB(),
-			"tags":        vm.GetTags(),
+			"tags":         vm.GetTags(),
 		},
 	}
 
@@ -522,8 +650,8 @@ func (h *Handler) GetVMMetrics(w http.ResponseWriter, r *http.Request) {
 
 	// Write response
 	response := map[string]interface{}{
-		"vm_id":       vm.ID(),
-		"cpu_usage":   stats.CPUUsage,
+		"vm_id":        vm.ID(),
+		"cpu_usage":    stats.CPUUsage,
 		"memory_usage": stats.MemoryUsage,
 		"network_sent": stats.NetworkSent,
 		"network_recv": stats.NetworkRecv,

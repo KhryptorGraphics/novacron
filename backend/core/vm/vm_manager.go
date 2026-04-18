@@ -299,7 +299,10 @@ func (m *VMManager) getDriver(config VMConfig) (VMDriver, error) { // Takes VMCo
 		return nil, errors.New("no driver factory configured")
 	}
 
-	return m.driverFactory(config) // Pass config
+	normalized := config
+	normalizeVMType(&normalized)
+
+	return m.driverFactory(normalized) // Pass config
 }
 
 // GetDriverForConfig is an exported helper to obtain a driver for a VM config

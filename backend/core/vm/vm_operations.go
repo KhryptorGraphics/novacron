@@ -30,16 +30,16 @@ const (
 
 // CreateVM creates a new VM
 func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, error) {
+	req = req.Normalized()
+	if err := req.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid vm create request: %w", err)
+	}
+
 	// Generate a unique ID for the VM if not provided in Spec
 	if req.Spec.ID == "" {
 		req.Spec.ID = uuid.New().String()
 	}
 	vmID := req.Spec.ID
-
-	// Use default VM type if not specified
-	if req.Spec.Type == "" {
-		req.Spec.Type = VMTypeContainerd // Use containerd as default
-	}
 
 	// Get the VM driver - Use consistent getDriver method
 	driver, err := m.getDriver(req.Spec)
@@ -190,7 +190,7 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 		m.allocatedMemoryMB = 0
 	}
 	m.resourceMutex.Unlock()
-	
+
 	log.Printf("Allocated resources - CPU: %d, Memory: %dMB for VM %s", req.Spec.CPUShares, req.Spec.MemoryMB, vmID)
 
 	// Emit created event
@@ -647,7 +647,7 @@ func (m *VMManager) deleteVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 		m.allocatedMemoryMB = 0
 	}
 	m.resourceMutex.Unlock()
-	
+
 	log.Printf("Deallocated resources - CPU: %d, Memory: %dMB for VM %s", config.CPUShares, config.MemoryMB, vm.ID())
 
 	// Remove VM from manager's map
@@ -735,7 +735,7 @@ func (m *VMManager) migrateVM(ctx context.Context, vm *VM, driver VMDriver, para
 
 	// Update VM's node ID
 	oldNodeID := vm.NodeID()
-	vm.SetNodeID(targetNode) // Update VM's node ID to target node
+	vm.SetNodeID(targetNode)  // Update VM's node ID to target node
 	vm.SetState(StateRunning) // Use the proper setter method
 
 	// Emit migrated event

@@ -95,18 +95,40 @@ func (r *Resolver) VM(ctx context.Context, args struct{ ID string }) (*VM, error
 
 // CreateVM creates a new VM
 func (r *Resolver) CreateVM(ctx context.Context, args struct{ Input CreateVMInput }) (*VM, error) {
+	image := args.Input.Image
+	if image == "" {
+		image = args.Input.RootFS
+	}
+
+	rootFS := args.Input.RootFS
+	if rootFS == "" {
+		rootFS = args.Input.Image
+	}
+
 	createReq := vm.CreateVMRequest{
 		Name: args.Input.Name,
 		Spec: vm.VMConfig{
-			Name:       args.Input.Name,
-			CPUShares:  args.Input.CPU,
-			MemoryMB:   args.Input.Memory,
-			DiskSizeGB: args.Input.Disk,
-			Image:      args.Input.Image, // Set Image field for containerd driver
-			RootFS:     args.Input.Image, // Also set RootFS for compatibility
-			Command:    "/bin/bash",
+			Name:               args.Input.Name,
+			Type:               args.Input.Type,
+			Command:            args.Input.Command,
+			Args:               args.Input.Args,
+			CPUShares:          args.Input.CPU,
+			MemoryMB:           args.Input.Memory,
+			DiskSizeGB:         args.Input.Disk,
+			Image:              image,
+			RootFS:             rootFS,
+			CloudInitISO:       args.Input.CloudInitISO,
+			NetworkID:          args.Input.NetworkID,
+			OwnerID:            args.Input.OwnerID,
+			TenantID:           args.Input.TenantID,
+			VolumeAttachments:  args.Input.VolumeAttachments,
+			NetworkAttachments: args.Input.NetworkAttachments,
+			Placement:          args.Input.Placement,
+			Migration:          args.Input.Migration,
+			Replication:        args.Input.Replication,
+			Tags:               args.Input.Tags,
 		},
-		Tags: make(map[string]string),
+		Tags: args.Input.Tags,
 	}
 
 	vmInstance, err := r.vmManager.CreateVM(ctx, createReq)

@@ -1,7 +1,6 @@
 package rest
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -41,7 +40,7 @@ func (h *APIHandler) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/api/vms/{id}/migrate", h.MigrateVM).Methods("POST")
 	router.HandleFunc("/api/vms/{id}/snapshot", h.SnapshotVM).Methods("POST")
 	router.HandleFunc("/api/vms/{id}/metrics", h.GetVMMetrics).Methods("GET")
-	
+
 	// Storage endpoints
 	router.HandleFunc("/api/storage/volumes", h.ListVolumes).Methods("GET")
 	router.HandleFunc("/api/storage/volumes", h.CreateVolume).Methods("POST")
@@ -50,13 +49,13 @@ func (h *APIHandler) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/api/storage/volumes/{id}/tier", h.ChangeVolumeTier).Methods("PUT")
 	router.HandleFunc("/api/storage/tiers", h.ListStorageTiers).Methods("GET")
 	router.HandleFunc("/api/storage/metrics", h.GetStorageMetrics).Methods("GET")
-	
+
 	// Cluster endpoints
 	router.HandleFunc("/api/cluster/nodes", h.ListNodes).Methods("GET")
 	router.HandleFunc("/api/cluster/nodes/{id}", h.GetNode).Methods("GET")
 	router.HandleFunc("/api/cluster/health", h.GetClusterHealth).Methods("GET")
 	router.HandleFunc("/api/cluster/leader", h.GetLeader).Methods("GET")
-	
+
 	// Monitoring endpoints
 	router.HandleFunc("/api/monitoring/metrics", h.GetSystemMetrics).Methods("GET")
 	router.HandleFunc("/api/monitoring/alerts", h.GetAlerts).Methods("GET")
@@ -68,13 +67,13 @@ func (h *APIHandler) RegisterRoutes(router *mux.Router) {
 // ListVMs returns all VMs
 func (h *APIHandler) ListVMs(w http.ResponseWriter, r *http.Request) {
 	vmsMap := h.vmManager.ListVMs()
-	
+
 	// Convert map to slice for JSON response
 	vms := make([]*vm.VM, 0, len(vmsMap))
 	for _, vmInstance := range vmsMap {
 		vms = append(vms, vmInstance)
 	}
-	
+
 	respondJSON(w, vms)
 }
 
@@ -85,28 +84,16 @@ func (h *APIHandler) CreateVM(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Convert API request to VM package request format
-	createReq := vm.CreateVMRequest{
-		Name: req.Name,
-		Spec: vm.VMConfig{
-			Name:       req.Name,
-			CPUShares:  req.CPU,
-			MemoryMB:   int(req.Memory),
-			DiskSizeGB: int(req.Disk),
-			RootFS:     req.Image,    // Map Image to RootFS field
-			Image:      req.Image,    // Also set Image field for containerd driver
-			Command:    "/bin/bash", // default command
-		},
-		Tags: make(map[string]string),
-	}
-	
+	createReq := req.toVMCreateRequest()
+
 	vmInstance, err := h.vmManager.CreateVM(r.Context(), createReq)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	respondJSON(w, vmInstance)
 }
 
@@ -114,13 +101,13 @@ func (h *APIHandler) CreateVM(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) GetVM(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	vmID := vars["id"]
-	
+
 	vm, err := h.vmManager.GetVM(vmID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	
+
 	respondJSON(w, vm)
 }
 
@@ -128,13 +115,13 @@ func (h *APIHandler) GetVM(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) UpdateVM(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	vmID := vars["id"]
-	
+
 	var req UpdateVMRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Convert request to update spec
 	updateSpec := vm.VMUpdateSpec{}
 	if req.Name != nil {
@@ -152,7 +139,7 @@ func (h *APIHandler) UpdateVM(w http.ResponseWriter, r *http.Request) {
 	if req.Tags != nil {
 		updateSpec.Tags = req.Tags
 	}
-	
+
 	// Call VM manager to update
 	err := h.vmManager.UpdateVM(r.Context(), vmID, updateSpec)
 	if err != nil {
@@ -182,14 +169,14 @@ func (h *APIHandler) UpdateVM(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Get updated VM
 	vmInstance, err := h.vmManager.GetVM(vmID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	respondJSON(w, vmInstance)
 }
 
@@ -197,12 +184,12 @@ func (h *APIHandler) UpdateVM(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) DeleteVM(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	vmID := vars["id"]
-	
+
 	if err := h.vmManager.DeleteVM(r.Context(), vmID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -210,7 +197,7 @@ func (h *APIHandler) DeleteVM(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) StartVM(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	vmID := vars["id"]
-	
+
 	if err := h.vmManager.StartVM(r.Context(), vmID); err != nil {
 		if errors.Is(err, vm.ErrVMNotFound) {
 			http.Error(w, err.Error(), http.StatusNotFound)
@@ -219,7 +206,7 @@ func (h *APIHandler) StartVM(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	
+
 	respondJSON(w, map[string]string{"status": "started"})
 }
 
@@ -227,7 +214,7 @@ func (h *APIHandler) StartVM(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) StopVM(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	vmID := vars["id"]
-	
+
 	if err := h.vmManager.StopVM(r.Context(), vmID); err != nil {
 		if errors.Is(err, vm.ErrVMNotFound) {
 			http.Error(w, err.Error(), http.StatusNotFound)
@@ -236,7 +223,7 @@ func (h *APIHandler) StopVM(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	
+
 	respondJSON(w, map[string]string{"status": "stopped"})
 }
 
@@ -244,7 +231,7 @@ func (h *APIHandler) StopVM(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) RestartVM(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	vmID := vars["id"]
-	
+
 	if err := h.vmManager.RestartVM(r.Context(), vmID); err != nil {
 		if errors.Is(err, vm.ErrVMNotFound) {
 			http.Error(w, err.Error(), http.StatusNotFound)
@@ -253,7 +240,7 @@ func (h *APIHandler) RestartVM(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	
+
 	respondJSON(w, map[string]string{"status": "restarted"})
 }
 
@@ -261,13 +248,13 @@ func (h *APIHandler) RestartVM(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) MigrateVM(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	vmID := vars["id"]
-	
+
 	var req MigrateVMRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Prepare migration options
 	options := make(map[string]string)
 	if req.Live {
@@ -275,7 +262,7 @@ func (h *APIHandler) MigrateVM(w http.ResponseWriter, r *http.Request) {
 	} else {
 		options["migration_type"] = "offline"
 	}
-	
+
 	// Call VM manager to migrate
 	err := h.vmManager.MigrateVM(r.Context(), vmID, req.TargetHost, options)
 	if err != nil {
@@ -305,13 +292,13 @@ func (h *APIHandler) MigrateVM(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	respondJSON(w, map[string]interface{}{
-		"status":      "migration_completed",
-		"vm_id":       vmID,
-		"target_host": req.TargetHost,
+		"status":         "migration_completed",
+		"vm_id":          vmID,
+		"target_host":    req.TargetHost,
 		"migration_type": options["migration_type"],
-		"timestamp":   time.Now(),
+		"timestamp":      time.Now(),
 	})
 }
 
@@ -319,19 +306,19 @@ func (h *APIHandler) MigrateVM(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) SnapshotVM(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	vmID := vars["id"]
-	
+
 	var req SnapshotVMRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Prepare snapshot options
 	options := make(map[string]string)
 	if req.Description != "" {
 		options["description"] = req.Description
 	}
-	
+
 	// Call VM manager to create snapshot
 	snapshotID, err := h.vmManager.CreateSnapshot(r.Context(), vmID, req.Name, options)
 	if err != nil {
@@ -361,7 +348,7 @@ func (h *APIHandler) SnapshotVM(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	respondJSON(w, map[string]interface{}{
 		"status":      "snapshot_created",
 		"vm_id":       vmID,
@@ -376,17 +363,17 @@ func (h *APIHandler) SnapshotVM(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) GetVMMetrics(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	vmID := vars["id"]
-	
+
 	// Parse time range from query params (currently not used by VM manager method)
 	// from := r.URL.Query().Get("from")
 	// to := r.URL.Query().Get("to")
-	
+
 	metrics, err := h.vmManager.GetVMMetrics(r.Context(), vmID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	respondJSON(w, metrics)
 }
 
@@ -405,7 +392,7 @@ func (h *APIHandler) CreateVolume(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Return NotImplemented status since TierManager doesn't have CreateVolume method
 	http.Error(w, "Volume creation not yet implemented", http.StatusNotImplemented)
 }
@@ -415,7 +402,7 @@ func (h *APIHandler) GetVolume(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	volumeID := vars["id"]
 	_ = volumeID // placeholder usage
-	
+
 	// Return NotImplemented status since TierManager doesn't have GetVolume method
 	http.Error(w, "Volume retrieval not yet implemented", http.StatusNotImplemented)
 }
@@ -425,7 +412,7 @@ func (h *APIHandler) DeleteVolume(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	volumeID := vars["id"]
 	_ = volumeID // placeholder usage
-	
+
 	// Return NotImplemented status since TierManager doesn't have DeleteVolume method
 	http.Error(w, "Volume deletion not yet implemented", http.StatusNotImplemented)
 }
@@ -435,13 +422,13 @@ func (h *APIHandler) ChangeVolumeTier(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	volumeID := vars["id"]
 	_ = volumeID // placeholder usage
-	
+
 	var req ChangeTierRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Return NotImplemented status since TierManager doesn't have MoveVolumeTier method
 	http.Error(w, "Volume tier migration not yet implemented", http.StatusNotImplemented)
 }
@@ -477,7 +464,7 @@ func (h *APIHandler) ListNodes(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) GetNode(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	nodeID := vars["id"]
-	
+
 	// Implementation would fetch from cluster membership
 	node := Node{
 		ID:      nodeID,
@@ -487,7 +474,7 @@ func (h *APIHandler) GetNode(w http.ResponseWriter, r *http.Request) {
 		Memory:  32768,
 		Disk:    1048576,
 	}
-	
+
 	respondJSON(w, node)
 }
 
@@ -501,7 +488,7 @@ func (h *APIHandler) GetClusterHealth(w http.ResponseWriter, r *http.Request) {
 		Leader:       "node-1",
 		LastUpdated:  time.Now(),
 	}
-	
+
 	respondJSON(w, health)
 }
 
@@ -512,7 +499,7 @@ func (h *APIHandler) GetLeader(w http.ResponseWriter, r *http.Request) {
 		"address": "192.168.1.100",
 		"term":    "5",
 	}
-	
+
 	respondJSON(w, leader)
 }
 
@@ -525,12 +512,12 @@ func (h *APIHandler) GetSystemMetrics(w http.ResponseWriter, r *http.Request) {
 	if metricType == "" {
 		metricType = "all"
 	}
-	
+
 	metrics := SystemMetrics{
 		CPU: CPUMetrics{
-			Usage:      65.5,
-			Cores:      32,
-			LoadAvg:    []float64{2.5, 2.8, 3.1},
+			Usage:   65.5,
+			Cores:   32,
+			LoadAvg: []float64{2.5, 2.8, 3.1},
 		},
 		Memory: MemoryMetrics{
 			Total:     131072,
@@ -545,14 +532,14 @@ func (h *APIHandler) GetSystemMetrics(w http.ResponseWriter, r *http.Request) {
 			Free:  2097152,
 		},
 		Network: NetworkMetrics{
-			BytesIn:  1048576000,
-			BytesOut: 524288000,
-			PacketsIn: 1000000,
+			BytesIn:    1048576000,
+			BytesOut:   524288000,
+			PacketsIn:  1000000,
 			PacketsOut: 500000,
 		},
 		Timestamp: time.Now(),
 	}
-	
+
 	respondJSON(w, metrics)
 }
 
@@ -560,26 +547,26 @@ func (h *APIHandler) GetSystemMetrics(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) GetAlerts(w http.ResponseWriter, r *http.Request) {
 	// Parse severity from query params
 	severity := r.URL.Query().Get("severity")
-	
+
 	alerts := []Alert{
 		{
-			ID:          "alert-1",
-			Severity:    "warning",
-			Message:     "High memory usage on node-3",
-			Source:      "node-3",
-			Timestamp:   time.Now().Add(-10 * time.Minute),
+			ID:           "alert-1",
+			Severity:     "warning",
+			Message:      "High memory usage on node-3",
+			Source:       "node-3",
+			Timestamp:    time.Now().Add(-10 * time.Minute),
 			Acknowledged: false,
 		},
 		{
-			ID:          "alert-2",
-			Severity:    "info",
-			Message:     "Scheduled maintenance window approaching",
-			Source:      "system",
-			Timestamp:   time.Now().Add(-1 * time.Hour),
+			ID:           "alert-2",
+			Severity:     "info",
+			Message:      "Scheduled maintenance window approaching",
+			Source:       "system",
+			Timestamp:    time.Now().Add(-1 * time.Hour),
 			Acknowledged: true,
 		},
 	}
-	
+
 	// Filter by severity if specified
 	if severity != "" {
 		filtered := []Alert{}
@@ -590,7 +577,7 @@ func (h *APIHandler) GetAlerts(w http.ResponseWriter, r *http.Request) {
 		}
 		alerts = filtered
 	}
-	
+
 	respondJSON(w, alerts)
 }
 
@@ -604,7 +591,7 @@ func (h *APIHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
 			limit = l
 		}
 	}
-	
+
 	events := []Event{
 		{
 			ID:        "event-1",
@@ -628,12 +615,12 @@ func (h *APIHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
 			Timestamp: time.Now().Add(-30 * time.Minute),
 		},
 	}
-	
+
 	// Limit results
 	if len(events) > limit {
 		events = events[:limit]
 	}
-	
+
 	respondJSON(w, events)
 }
 

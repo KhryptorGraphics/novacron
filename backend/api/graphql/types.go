@@ -2,6 +2,8 @@ package graphql
 
 import (
 	"time"
+
+	corevm "github.com/khryptorgraphics/novacron/backend/core/vm"
 )
 
 // GraphQL type definitions
@@ -188,11 +190,25 @@ type NetworkMetrics struct {
 
 // CreateVMInput represents input for creating a VM
 type CreateVMInput struct {
-	Name   string `json:"name"`
-	CPU    int    `json:"cpu"`
-	Memory int    `json:"memory"`
-	Disk   int    `json:"disk"`
-	Image  string `json:"image"`
+	Name               string                       `json:"name"`
+	Type               corevm.VMType                `json:"type,omitempty"`
+	Command            string                       `json:"command,omitempty"`
+	Args               []string                     `json:"args,omitempty"`
+	CPU                int                          `json:"cpu"`
+	Memory             int                          `json:"memory"`
+	Disk               int                          `json:"disk"`
+	Image              string                       `json:"image,omitempty"`
+	RootFS             string                       `json:"rootfs,omitempty"`
+	CloudInitISO       string                       `json:"cloudInitIso,omitempty"`
+	Tags               map[string]string            `json:"tags,omitempty"`
+	OwnerID            string                       `json:"ownerId,omitempty"`
+	TenantID           string                       `json:"tenantId,omitempty"`
+	NetworkID          string                       `json:"networkId,omitempty"`
+	VolumeAttachments  []corevm.VMVolumeAttachment  `json:"volumeAttachments,omitempty"`
+	NetworkAttachments []corevm.VMNetworkAttachment `json:"networkAttachments,omitempty"`
+	Placement          *corevm.VMPlacementSpec      `json:"placement,omitempty"`
+	Migration          *corevm.VMMigrationPolicy    `json:"migration,omitempty"`
+	Replication        *corevm.VMReplicationPolicy  `json:"replication,omitempty"`
 }
 
 // UpdateVMInput represents input for updating a VM

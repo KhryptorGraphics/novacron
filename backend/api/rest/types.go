@@ -1,19 +1,71 @@
 package rest
 
 import (
-	"time"
 	"github.com/khryptorgraphics/novacron/backend/core/vm"
+	"time"
 )
 
 // Request types
 
 // CreateVMRequest represents a request to create a VM
 type CreateVMRequest struct {
-	Name   string `json:"name"`
-	CPU    int    `json:"cpu"`
-	Memory int64  `json:"memory"`
-	Disk   int64  `json:"disk"`
-	Image  string `json:"image"`
+	Name               string                   `json:"name"`
+	Type               vm.VMType                `json:"type,omitempty"`
+	Command            string                   `json:"command,omitempty"`
+	Args               []string                 `json:"args,omitempty"`
+	CPU                int                      `json:"cpu"`
+	Memory             int64                    `json:"memory"`
+	Disk               int64                    `json:"disk"`
+	Image              string                   `json:"image,omitempty"`
+	RootFS             string                   `json:"rootfs,omitempty"`
+	CloudInitISO       string                   `json:"cloud_init_iso,omitempty"`
+	NetworkID          string                   `json:"network_id,omitempty"`
+	Tags               map[string]string        `json:"tags,omitempty"`
+	OwnerID            string                   `json:"owner_id,omitempty"`
+	TenantID           string                   `json:"tenant_id,omitempty"`
+	VolumeAttachments  []vm.VMVolumeAttachment  `json:"volume_attachments,omitempty"`
+	NetworkAttachments []vm.VMNetworkAttachment `json:"network_attachments,omitempty"`
+	Placement          *vm.VMPlacementSpec      `json:"placement,omitempty"`
+	Migration          *vm.VMMigrationPolicy    `json:"migration,omitempty"`
+	Replication        *vm.VMReplicationPolicy  `json:"replication,omitempty"`
+}
+
+func (r CreateVMRequest) toVMCreateRequest() vm.CreateVMRequest {
+	image := r.Image
+	if image == "" {
+		image = r.RootFS
+	}
+
+	rootFS := r.RootFS
+	if rootFS == "" {
+		rootFS = r.Image
+	}
+
+	return vm.CreateVMRequest{
+		Name: r.Name,
+		Spec: vm.VMConfig{
+			Name:               r.Name,
+			Type:               r.Type,
+			Command:            r.Command,
+			Args:               r.Args,
+			CPUShares:          r.CPU,
+			MemoryMB:           int(r.Memory),
+			DiskSizeGB:         int(r.Disk),
+			Image:              image,
+			RootFS:             rootFS,
+			CloudInitISO:       r.CloudInitISO,
+			NetworkID:          r.NetworkID,
+			OwnerID:            r.OwnerID,
+			TenantID:           r.TenantID,
+			VolumeAttachments:  r.VolumeAttachments,
+			NetworkAttachments: r.NetworkAttachments,
+			Placement:          r.Placement,
+			Migration:          r.Migration,
+			Replication:        r.Replication,
+			Tags:               cloneStringMap(r.Tags),
+		},
+		Tags: cloneStringMap(r.Tags),
+	}
 }
 
 // UpdateVMRequest represents a request to update a VM
@@ -40,6 +92,18 @@ func (r *UpdateVMRequest) toVMConfig() *vm.VMConfig {
 		config.DiskSizeGB = int(*r.Disk)
 	}
 	return config
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+
+	dst := make(map[string]string, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
 }
 
 // MigrateVMRequest represents a request to migrate a VM
@@ -141,29 +205,29 @@ type Alert struct {
 
 // Event represents a system event
 type Event struct {
-	ID        string    `json:"id"`
-	Type      string    `json:"type"`
-	Message   string    `json:"message"`
-	Source    string    `json:"source"`
-	Timestamp time.Time `json:"timestamp"`
+	ID        string                 `json:"id"`
+	Type      string                 `json:"type"`
+	Message   string                 `json:"message"`
+	Source    string                 `json:"source"`
+	Timestamp time.Time              `json:"timestamp"`
 	Details   map[string]interface{} `json:"details,omitempty"`
 }
 
 // PaginatedResponse represents a paginated response
 type PaginatedResponse struct {
-	Data       interface{} `json:"data"`
-	Total      int         `json:"total"`
-	Page       int         `json:"page"`
-	PageSize   int         `json:"page_size"`
-	HasMore    bool        `json:"has_more"`
+	Data     interface{} `json:"data"`
+	Total    int         `json:"total"`
+	Page     int         `json:"page"`
+	PageSize int         `json:"page_size"`
+	HasMore  bool        `json:"has_more"`
 }
 
 // BackupVerificationResponse represents a backup verification response
 type BackupVerificationResponse struct {
-	BackupID         string            `json:"backup_id"`
-	Status           string            `json:"status"`
-	CheckedItems     int               `json:"checked_items"`
-	ErrorsFound      []string          `json:"errors_found"`
-	VerificationTime time.Time         `json:"verification_time"`
+	BackupID         string                 `json:"backup_id"`
+	Status           string                 `json:"status"`
+	CheckedItems     int                    `json:"checked_items"`
+	ErrorsFound      []string               `json:"errors_found"`
+	VerificationTime time.Time              `json:"verification_time"`
 	Details          map[string]interface{} `json:"details,omitempty"`
 }
