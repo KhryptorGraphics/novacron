@@ -30,15 +30,20 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
     
     - name: Setup Node.js
       uses: actions/setup-node@v3
       with:
         node-version: '18'
         cache: 'npm'
-    
-    - name: Install backend dependencies
-      run: npm ci
+
+    - name: Download Go modules
+      run: go mod download
     
     - name: Install frontend dependencies
       run: cd frontend && npm ci
@@ -47,8 +52,8 @@ jobs:
       run: |
         mysql -h 127.0.0.1 -u root -proot123 novacron_test < src/database/migrations/001_jobs_table.sql
     
-    - name: Run backend tests
-      run: npm test
+    - name: Run canonical backend tests
+      run: go test ./backend/cmd/api-server
       env:
         DB_HOST: 127.0.0.1
         DB_PORT: 3306
@@ -68,14 +73,19 @@ jobs:
     
     steps:
     - uses: actions/checkout@v3
+
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
     
     - name: Setup Node.js
       uses: actions/setup-node@v3
       with:
         node-version: '18'
     
-    - name: Build backend
-      run: npm run build
+    - name: Build canonical backend
+      run: go build ./backend/cmd/api-server
     
     - name: Build frontend
       run: cd frontend && npm run build
