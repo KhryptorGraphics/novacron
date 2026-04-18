@@ -5,8 +5,10 @@ on:
     branches: [main, develop]
     paths:
       - "frontend/src/__tests__/**"
+      - "frontend/src/contexts/RBACContext.tsx"
       - "frontend/src/lib/auth.ts"
       - "frontend/src/lib/api/security.ts"
+      - "frontend/src/hooks/useWebSocket.ts"
       - "frontend/src/hooks/useSecurity.ts"
       - "frontend/src/components/auth/**"
       - "frontend/src/app/admin/**"
@@ -16,8 +18,10 @@ on:
     branches: [main, develop]
     paths:
       - "frontend/src/__tests__/**"
+      - "frontend/src/contexts/RBACContext.tsx"
       - "frontend/src/lib/auth.ts"
       - "frontend/src/lib/api/security.ts"
+      - "frontend/src/hooks/useWebSocket.ts"
       - "frontend/src/hooks/useSecurity.ts"
       - "frontend/src/components/auth/**"
       - "frontend/src/app/admin/**"
@@ -54,7 +58,9 @@ jobs:
         run: >
           npm test -- --runTestsByPath
           src/__tests__/app/admin-layout.test.tsx
+          src/__tests__/components/auth/RBACGuard.test.tsx
           src/__tests__/hooks/useSecurity.test.tsx
+          src/__tests__/hooks/useWebSocket.test.tsx
           src/__tests__/lib/security-api.test.ts
           src/__tests__/lib/auth.test.ts
           src/__tests__/lib/auth-phase3.test.ts
