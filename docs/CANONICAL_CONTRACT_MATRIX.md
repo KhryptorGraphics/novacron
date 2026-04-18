@@ -42,9 +42,9 @@ Treat older README sections, feature reports, and alternate entrypoints as histo
 | `POST /api/v1/vms/{id}/start` | live | Canonical VM action route. |
 | `POST /api/v1/vms/{id}/stop` | live | Canonical VM action route. |
 | `GET /api/v1/vms/{id}/metrics` | live | Canonical VM metrics route. |
-| `GET /api/v1/monitoring/metrics` | compat | Still exposed by the canonical server, but not the preferred long-term surface. |
-| `GET /api/v1/monitoring/vms` | compat | Still exposed by the canonical server, but not the preferred long-term surface. |
-| `GET /api/v1/monitoring/alerts` | compat | Still exposed by the canonical server, but not the preferred long-term surface. |
+| `GET /api/v1/monitoring/metrics` | live | Canonical monitoring summary route used by the routed monitoring dashboard. |
+| `GET /api/v1/monitoring/vms` | live | Canonical monitoring VM summary route used by the routed monitoring dashboard. |
+| `GET /api/v1/monitoring/alerts` | live | Canonical monitoring alert route used by the routed monitoring dashboard. |
 | `POST /api/v1/monitoring/alerts/{id}/acknowledge` | deferred | Frontend should present this as unavailable until the canonical server exposes it. |
 | `/api/vms*` and `/api/monitoring/*` | compat | Legacy secure aliases retained during gradual cutover. |
 | `/api/security/*` | live | Canonical admin/security surface. Requires auth and admin/super-admin roles. |
@@ -75,5 +75,6 @@ Treat older README sections, feature reports, and alternate entrypoints as histo
 
 - New frontend work should build URLs through `frontend/src/lib/api/origin.ts`.
 - Frontend realtime helpers should fail closed for `deferred` websocket channels instead of opening speculative connections.
+- The routed dashboard should expose only canonical VM, monitoring, storage, and security surfaces. Experimental fabric, AI, topology, mobile, and deferred realtime views are not part of the release path.
 - New backend work should extend canonical paths first and add compat aliases only when required by the gradual cutover plan.
 - If a route or channel is not marked `live` or `compat` here, treat it as unsupported until it is explicitly implemented and promoted.
