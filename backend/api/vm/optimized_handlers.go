@@ -328,16 +328,16 @@ func (h *OptimizedHandler) getRealTimeMetrics(ctx context.Context) map[string]in
 			SELECT DISTINCT ON (vm_id)
 				vm_id,
 				cpu_usage,
-				memory_percent
+				memory_usage
 			FROM vm_metrics
 			WHERE timestamp > NOW() - INTERVAL '5 minutes'
 			ORDER BY vm_id, timestamp DESC
 		)
 		SELECT 
 			AVG(cpu_usage) as avg_cpu,
-			AVG(memory_percent) as avg_memory,
+			AVG(memory_usage) as avg_memory,
 			MAX(cpu_usage) as max_cpu,
-			MAX(memory_percent) as max_memory
+			MAX(memory_usage) as max_memory
 		FROM latest`
 
 	var metrics map[string]interface{}
@@ -357,12 +357,12 @@ func (h *OptimizedHandler) calculateMetricsSummary(metrics []*database.VMMetric)
 
 	for _, m := range metrics {
 		totalCPU += m.CPUUsage
-		totalMem += m.MemoryPercent
+		totalMem += m.MemoryUsage
 		if m.CPUUsage > maxCPU {
 			maxCPU = m.CPUUsage
 		}
-		if m.MemoryPercent > maxMem {
-			maxMem = m.MemoryPercent
+		if m.MemoryUsage > maxMem {
+			maxMem = m.MemoryUsage
 		}
 	}
 
