@@ -7,11 +7,28 @@ on:
       - "frontend/src/__tests__/**"
       - "frontend/src/contexts/RBACContext.tsx"
       - "frontend/src/lib/auth.ts"
+      - "frontend/src/lib/api/admin.ts"
+      - "frontend/src/lib/api/networks.ts"
       - "frontend/src/lib/api/security.ts"
+      - "frontend/src/lib/graphql/volumes.ts"
       - "frontend/src/hooks/useWebSocket.ts"
       - "frontend/src/hooks/useSecurity.ts"
+      - "frontend/src/hooks/useVolumes.ts"
       - "frontend/src/components/auth/**"
+      - "frontend/src/components/dashboard/**"
+      - "frontend/src/components/storage/**"
+      - "frontend/src/components/vm/**"
       - "frontend/src/app/admin/**"
+      - "frontend/src/app/analytics/**"
+      - "frontend/src/app/core/vms/**"
+      - "frontend/src/app/dashboard/**"
+      - "frontend/src/app/network/**"
+      - "frontend/src/app/settings/**"
+      - "frontend/src/app/storage/**"
+      - "frontend/src/app/users/**"
+      - "frontend/src/app/vms/**"
+      - "tests/e2e/canonical-release-smoke.spec.ts"
+      - "playwright.config.ts"
       - ".github/workflows/e2e-tests.yml"
       - ".github/workflows/ci.yml"
   push:
@@ -20,11 +37,28 @@ on:
       - "frontend/src/__tests__/**"
       - "frontend/src/contexts/RBACContext.tsx"
       - "frontend/src/lib/auth.ts"
+      - "frontend/src/lib/api/admin.ts"
+      - "frontend/src/lib/api/networks.ts"
       - "frontend/src/lib/api/security.ts"
+      - "frontend/src/lib/graphql/volumes.ts"
       - "frontend/src/hooks/useWebSocket.ts"
       - "frontend/src/hooks/useSecurity.ts"
+      - "frontend/src/hooks/useVolumes.ts"
       - "frontend/src/components/auth/**"
+      - "frontend/src/components/dashboard/**"
+      - "frontend/src/components/storage/**"
+      - "frontend/src/components/vm/**"
       - "frontend/src/app/admin/**"
+      - "frontend/src/app/analytics/**"
+      - "frontend/src/app/core/vms/**"
+      - "frontend/src/app/dashboard/**"
+      - "frontend/src/app/network/**"
+      - "frontend/src/app/settings/**"
+      - "frontend/src/app/storage/**"
+      - "frontend/src/app/users/**"
+      - "frontend/src/app/vms/**"
+      - "tests/e2e/canonical-release-smoke.spec.ts"
+      - "playwright.config.ts"
       - ".github/workflows/e2e-tests.yml"
       - ".github/workflows/ci.yml"
   workflow_dispatch:
@@ -45,23 +79,60 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+
+      - name: Install root Playwright dependencies
+        run: npm install --no-fund --no-audit
 
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
 
-      - name: Run canonical auth and security smoke tests
+      - name: Build frontend
         working-directory: frontend
+        run: npm run build
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Start frontend
+        working-directory: frontend
+        run: |
+          npm run start -- --port 3000 > /tmp/novacron-frontend.log 2>&1 &
+          echo $! > /tmp/novacron-frontend.pid
+
+      - name: Wait for frontend
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000 >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Frontend failed to start"
+          cat /tmp/novacron-frontend.log || true
+          exit 1
+
+      - name: Run canonical browser smoke
         env:
           CI: "true"
-        run: >
-          npm test -- --runTestsByPath
-          src/__tests__/app/admin-layout.test.tsx
-          src/__tests__/components/auth/RBACGuard.test.tsx
-          src/__tests__/hooks/useSecurity.test.tsx
-          src/__tests__/hooks/useWebSocket.test.tsx
-          src/__tests__/lib/security-api.test.ts
-          src/__tests__/lib/auth.test.ts
-          src/__tests__/lib/auth-phase3.test.ts
-          --coverage=false
+          PLAYWRIGHT_BASE_URL: "http://127.0.0.1:3000"
+          PLAYWRIGHT_SKIP_AUTH: "true"
+        run: npx playwright test tests/e2e/canonical-release-smoke.spec.ts --project=chromium
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-release-smoke-report
+          path: |
+            tests/e2e/reports/**
+            /tmp/novacron-frontend.log
+
+      - name: Stop frontend
+        if: always()
+        run: |
+          if [ -f /tmp/novacron-frontend.pid ]; then
+            kill "$(cat /tmp/novacron-frontend.pid)" || true
+          fi
