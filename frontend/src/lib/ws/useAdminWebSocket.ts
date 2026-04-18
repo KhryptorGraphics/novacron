@@ -3,6 +3,7 @@ import useWebSocket, { ReadyState } from 'react-use-websocket';
 import { useQueryClient } from '@tanstack/react-query';
 import { ADMIN_QUERY_KEYS } from '../api/hooks/useAdmin';
 import { useToast } from '@/components/ui/use-toast';
+import { WS_ORIGIN } from '@/lib/api/origin';
 
 export interface AdminWebSocketMessage {
   type: 'system_metrics' | 'security_alert' | 'user_activity' | 'vm_status' | 'audit_log' | 'config_change';
@@ -30,12 +31,10 @@ export const useAdminWebSocket = () => {
   });
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
   
-  const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8091';
-  const socketUrl = `${wsUrl}/admin/ws`;
+  const socketUrl = `${WS_ORIGIN}/api/ws/admin`;
   
   const {
     sendMessage,
-    lastMessage,
     readyState,
     getWebSocket
   } = useWebSocket(socketUrl, {

@@ -1,6 +1,8 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { buildWebSocketUrls } from '@/lib/api/origin';
 
 interface WebSocketOptions {
+  enabled?: boolean;
   reconnect?: boolean;
   reconnectInterval?: number;
   reconnectAttempts?: number;
@@ -23,6 +25,7 @@ export function useWebSocket<T = any>(
   options: WebSocketOptions = {}
 ): WebSocketState<T> {
   const {
+    enabled = true,
     reconnect = true,
     reconnectInterval = 5000,
     reconnectAttempts = 5,
@@ -37,9 +40,12 @@ export function useWebSocket<T = any>(
   
   const ws = useRef<WebSocket | null>(null);
   const reconnectCount = useRef(0);
+  const candidateIndex = useRef(0);
+  const openedOnce = useRef(false);
   const heartbeatTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queueUnsubscribeRef = useRef<(() => void) | null>(null);
+  const candidateUrls = useMemo(() => buildWebSocketUrls(url), [url]);
 
   const clearTimers = useCallback(() => {
     if (heartbeatTimer.current) {
@@ -63,15 +69,17 @@ export function useWebSocket<T = any>(
   }, [heartbeat, heartbeatInterval]);
 
   const connect = useCallback(() => {
+    if (!enabled || candidateUrls.length === 0) {
+      return;
+    }
+
     try {
-      // Construct full WebSocket URL
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.host;
-      const fullUrl = url.startsWith('/') ? `${protocol}//${host}${url}` : url;
-      
+      const fullUrl = candidateUrls[Math.min(candidateIndex.current, candidateUrls.length - 1)];
       ws.current = new WebSocket(fullUrl);
 
       ws.current.onopen = () => {
+        openedOnce.current = true;
+        candidateIndex.current = 0;
         setIsConnected(true);
         setError(null);
         reconnectCount.current = 0;
@@ -100,13 +108,22 @@ export function useWebSocket<T = any>(
         }
       };
 
-      ws.current.onerror = (event) => {
+      ws.current.onerror = () => {
         setError(new Error('WebSocket error'));
       };
 
       ws.current.onclose = () => {
         setIsConnected(false);
         clearTimers();
+
+        if (!openedOnce.current && candidateIndex.current < candidateUrls.length - 1) {
+          candidateIndex.current += 1;
+          connect();
+          return;
+        }
+
+        openedOnce.current = false;
+        candidateIndex.current = 0;
         
         // Attempt reconnection if enabled
         if (reconnect && reconnectCount.current < reconnectAttempts) {
@@ -119,7 +136,15 @@ export function useWebSocket<T = any>(
     } catch (err) {
       setError(err as Error);
     }
-  }, [url, reconnect, reconnectInterval, reconnectAttempts, startHeartbeat, clearTimers]);
+  }, [
+    enabled,
+    candidateUrls,
+    reconnect,
+    reconnectInterval,
+    reconnectAttempts,
+    startHeartbeat,
+    clearTimers,
+  ]);
 
   const send = useCallback((data: any) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
@@ -130,16 +155,27 @@ export function useWebSocket<T = any>(
   const close = useCallback(() => {
     clearTimers();
     reconnectCount.current = reconnectAttempts; // Prevent reconnection
+    candidateIndex.current = 0;
+    openedOnce.current = false;
     ws.current?.close();
   }, [reconnectAttempts, clearTimers]);
 
   const reconnectManually = useCallback(() => {
     reconnectCount.current = 0;
+    candidateIndex.current = 0;
+    openedOnce.current = false;
     close();
     setTimeout(connect, 100);
   }, [close, connect]);
 
   useEffect(() => {
+    if (!enabled) {
+      clearTimers();
+      ws.current?.close();
+      setIsConnected(false);
+      return;
+    }
+
     connect();
 
     // Subscribe to message queue if queue option is enabled
@@ -157,7 +193,7 @@ export function useWebSocket<T = any>(
         queueUnsubscribeRef.current = null;
       }
     };
-  }, [connect, clearTimers, queue]);
+  }, [enabled, connect, clearTimers, queue]);
 
   return {
     data,
@@ -210,40 +246,35 @@ export function useDistributedTopologyWebSocket() {
 }
 
 export function useBandwidthMonitoringWebSocket() {
-  // Connect to backend /ws/metrics with bandwidth-specific sources
-  return useWebSocket('/ws/metrics?sources=bandwidth,network_io,qos&interval=5', {
+  return useWebSocket('/api/ws/metrics?sources=bandwidth,network_io,qos&interval=5', {
     heartbeatInterval: 5000, // High frequency for bandwidth data
     reconnectAttempts: 12,
   });
 }
 
 export function usePerformancePredictionWebSocket() {
-  // Connect to backend /ws/metrics with prediction-specific sources
-  return useWebSocket('/ws/metrics?sources=cpu_usage,memory_usage,disk_usage,predictions&interval=30', {
+  return useWebSocket('/api/ws/metrics?sources=cpu_usage,memory_usage,disk_usage,predictions&interval=30', {
     heartbeatInterval: 30000,
     reconnectAttempts: 6,
   });
 }
 
 export function useSupercomputeFabricWebSocket() {
-  // Connect to backend /ws/metrics with fabric-specific sources
-  return useWebSocket('/ws/metrics?sources=fabric,compute_jobs,memory_fabric,processing&interval=20', {
+  return useWebSocket('/api/ws/metrics?sources=fabric,compute_jobs,memory_fabric,processing&interval=20', {
     heartbeatInterval: 20000,
     reconnectAttempts: 10,
   });
 }
 
 export function useFederationWebSocket() {
-  // Connect to backend /ws/alerts for federation events
-  return useWebSocket('/ws/alerts?sources=federation', {
+  return useWebSocket('/api/ws/alerts?sources=federation', {
     heartbeatInterval: 25000,
     reconnectAttempts: 8,
   });
 }
 
 export function useCrossClusterWebSocket() {
-  // Connect to backend /ws/metrics with cross-cluster sources
-  return useWebSocket('/ws/metrics?sources=cluster,cross_cluster,replication&interval=15', {
+  return useWebSocket('/api/ws/metrics?sources=cluster,cross_cluster,replication&interval=15', {
     heartbeatInterval: 15000,
     reconnectAttempts: 10,
   });

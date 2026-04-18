@@ -1,10 +1,39 @@
 // Security API service for NovaCron frontend
 
 import authService from '@/lib/auth';
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8090';
+import { buildApiUrl } from '@/lib/api/origin';
 
 type RawRecord = Record<string, any>;
+
+export class UnsupportedSecurityFeatureError extends Error {
+  readonly code = 'UNSUPPORTED_SECURITY_FEATURE';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnsupportedSecurityFeatureError';
+  }
+}
+
+export function isUnsupportedSecurityFeatureError(
+  error: unknown,
+): error is UnsupportedSecurityFeatureError {
+  return error instanceof UnsupportedSecurityFeatureError;
+}
+
+function unsupportedSecurityFeature(message: string): never {
+  throw new UnsupportedSecurityFeatureError(message);
+}
+
+export const securityCapabilities = {
+  acknowledgeEvents: false,
+  triggerComplianceChecks: false,
+  remediateFindings: false,
+  exportSecurityReports: false,
+  manageAccessControls: false,
+  manageSecurityConfig: false,
+  performHealthChecks: false,
+  createIncidents: false,
+} as const;
 
 export interface SecurityEvent {
   id: string;
@@ -252,14 +281,19 @@ function deriveSecurityScore(
 
 class SecurityAPIService {
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const url = `${API_BASE_URL}${endpoint}`;
+    const url = buildApiUrl(endpoint);
+    const token = this.getAuthToken();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(options.headers as Record<string, string> || {}),
+    };
+
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
 
     const config: RequestInit = {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.getAuthToken()}`,
-        ...options.headers,
-      },
+      headers,
       ...options,
     };
 
@@ -267,6 +301,10 @@ class SecurityAPIService {
       const response = await fetch(url, config);
 
       if (!response.ok) {
+        if (response.status === 501) {
+          unsupportedSecurityFeature('This security capability is not available on the canonical server.');
+        }
+
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
@@ -305,9 +343,8 @@ class SecurityAPIService {
   }
 
   async acknowledgeSecurityEvent(eventId: string): Promise<void> {
-    return this.request<void>(`/api/security/events/${eventId}/acknowledge`, {
-      method: 'POST',
-    });
+    void eventId;
+    unsupportedSecurityFeature('Security event acknowledgement is not available on the canonical server.');
   }
 
   // Compliance
@@ -320,15 +357,14 @@ class SecurityAPIService {
     id: string,
     updates: Partial<ComplianceRequirement>
   ): Promise<ComplianceRequirement> {
-    return this.request<ComplianceRequirement>(`/api/security/compliance/requirements/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(updates),
-    });
+    void id;
+    void updates;
+    unsupportedSecurityFeature('Compliance requirement updates are not available on the canonical server.');
   }
 
   async triggerComplianceCheck(requirementId?: string): Promise<{ jobId: string }> {
     void requirementId;
-    throw new Error('Compliance re-checks are not implemented by the current backend.');
+    unsupportedSecurityFeature('Compliance re-checks are not available on the canonical server.');
   }
 
   async getComplianceByCategory(): Promise<ComplianceByCategory[]> {
@@ -389,24 +425,22 @@ class SecurityAPIService {
   }
 
   async markFindingResolved(findingId: string): Promise<void> {
-    return this.request<void>(`/api/security/vulnerabilities/findings/${findingId}/resolve`, {
-      method: 'POST',
-    });
+    void findingId;
+    unsupportedSecurityFeature('Vulnerability remediation is not available on the canonical server.');
   }
 
   // Access Controls
   async getAccessControls(): Promise<AccessControl[]> {
-    return this.request<AccessControl[]>('/api/security/access-controls');
+    unsupportedSecurityFeature('Access control management is not available on the canonical server.');
   }
 
   async updateAccessControl(
     id: string,
     updates: Partial<AccessControl>
   ): Promise<AccessControl> {
-    return this.request<AccessControl>(`/api/security/access-controls/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(updates),
-    });
+    void id;
+    void updates;
+    unsupportedSecurityFeature('Access control management is not available on the canonical server.');
   }
 
   async testAccessControl(
@@ -414,10 +448,10 @@ class SecurityAPIService {
     subject: string,
     action: string
   ): Promise<{ allowed: boolean; reason?: string }> {
-    return this.request<{ allowed: boolean; reason?: string }>('/api/security/access-controls/test', {
-      method: 'POST',
-      body: JSON.stringify({ resource, subject, action }),
-    });
+    void resource;
+    void subject;
+    void action;
+    unsupportedSecurityFeature('Access control testing is not available on the canonical server.');
   }
 
   // Security Metrics
@@ -459,14 +493,12 @@ class SecurityAPIService {
 
   // Security Configuration
   async getSecurityConfig(): Promise<Record<string, any>> {
-    return this.request<Record<string, any>>('/api/security/config');
+    unsupportedSecurityFeature('Security configuration is not available on the canonical server.');
   }
 
   async updateSecurityConfig(config: Record<string, any>): Promise<void> {
-    return this.request<void>('/api/security/config', {
-      method: 'PUT',
-      body: JSON.stringify(config),
-    });
+    void config;
+    unsupportedSecurityFeature('Security configuration is not available on the canonical server.');
   }
 
   // Audit Trail
@@ -503,7 +535,7 @@ class SecurityAPIService {
       details?: Record<string, any>;
     }>;
   }> {
-    return this.request<any>('/api/security/health');
+    unsupportedSecurityFeature('Security health checks are not available on the canonical server.');
   }
 
   // Incident Management
@@ -514,10 +546,8 @@ class SecurityAPIService {
     type: string;
     affectedSystems?: string[];
   }): Promise<{ incidentId: string }> {
-    return this.request<{ incidentId: string }>('/api/security/incidents', {
-      method: 'POST',
-      body: JSON.stringify(incident),
-    });
+    void incident;
+    unsupportedSecurityFeature('Manual incident creation is not available on the canonical server.');
   }
 
   async getSecurityIncidents(): Promise<Array<{

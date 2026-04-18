@@ -24,7 +24,7 @@ import { useSecurityEvents, useCompliance, useVulnerabilityScans, useSecurityMet
 import RBACGuard from '@/components/auth/RBACGuard';
 
 // Import types from the API service
-import type { VulnerabilityFinding } from '@/lib/api/security';
+import { securityCapabilities, type VulnerabilityFinding } from '@/lib/api/security';
 
 const SecurityComplianceDashboard: React.FC = () => {
   const { toast } = useToast();
@@ -128,15 +128,15 @@ const SecurityComplianceDashboard: React.FC = () => {
 
   const handleExportReport = useCallback(async (type: string) => {
     toast({
-      title: 'Report Export',
-      description: `Exporting ${type} report...`,
+      title: 'Unavailable',
+      description: `${type} export is not available on the canonical server yet.`,
     });
   }, [toast]);
 
   const handleRemediateVulnerability = useCallback(async (finding: VulnerabilityFinding) => {
     toast({
-      title: 'Remediation Started',
-      description: `Applying remediation for ${finding.title}...`,
+      title: 'Unavailable',
+      description: `Remediation for ${finding.title} is not available on the canonical server yet.`,
     });
   }, [toast]);
 
@@ -218,9 +218,12 @@ const SecurityComplianceDashboard: React.FC = () => {
               <SelectItem value="30d">Last 30 Days</SelectItem>
             </SelectContent>
           </Select>
-          <Button onClick={() => handleExportReport('security')}>
+          <Button
+            disabled={!securityCapabilities.exportSecurityReports}
+            onClick={() => handleExportReport('security')}
+          >
             <Download className="h-4 w-4 mr-2" />
-            Export Report
+            {securityCapabilities.exportSecurityReports ? 'Export Report' : 'Export Unavailable'}
           </Button>
         </div>
       </div>
@@ -231,6 +234,18 @@ const SecurityComplianceDashboard: React.FC = () => {
           <AlertTitle>Partial security data unavailable</AlertTitle>
           <AlertDescription>
             {[eventsError, complianceError, scansError, metricsError].filter(Boolean).join(' ')}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {(!securityCapabilities.exportSecurityReports ||
+        !securityCapabilities.triggerComplianceChecks ||
+        !securityCapabilities.remediateFindings) && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Some actions are unavailable</AlertTitle>
+          <AlertDescription>
+            Report export, compliance rechecks, and finding remediation are not wired into the canonical server yet.
           </AlertDescription>
         </Alert>
       )}
@@ -568,11 +583,11 @@ const SecurityComplianceDashboard: React.FC = () => {
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled
+                          disabled={!securityCapabilities.triggerComplianceChecks}
                           onClick={() => triggerComplianceCheck(req.id)}
                         >
                           <RefreshCw className="h-4 w-4 mr-1" />
-                          Recheck
+                          {securityCapabilities.triggerComplianceChecks ? 'Recheck' : 'Recheck Unavailable'}
                         </Button>
                         <Button size="sm" variant="outline">
                           <FileText className="h-4 w-4 mr-1" />
@@ -676,9 +691,10 @@ const SecurityComplianceDashboard: React.FC = () => {
                               <Button
                                 size="sm"
                                 variant="outline"
+                                disabled={!securityCapabilities.remediateFindings}
                                 onClick={() => handleRemediateVulnerability(finding)}
                               >
-                                Remediate
+                                {securityCapabilities.remediateFindings ? 'Remediate' : 'Remediation Unavailable'}
                               </Button>
                             </div>
                           </div>
@@ -728,9 +744,13 @@ const SecurityComplianceDashboard: React.FC = () => {
                   <Filter className="h-4 w-4 mr-2" />
                   Advanced Search
                 </Button>
-                <Button variant="outline" onClick={() => handleExportReport('audit')}>
+                <Button
+                  variant="outline"
+                  disabled={!securityCapabilities.exportSecurityReports}
+                  onClick={() => handleExportReport('audit')}
+                >
                   <Download className="h-4 w-4 mr-2" />
-                  Export Logs
+                  {securityCapabilities.exportSecurityReports ? 'Export Logs' : 'Export Unavailable'}
                 </Button>
               </div>
 

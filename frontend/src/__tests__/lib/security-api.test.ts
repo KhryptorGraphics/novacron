@@ -1,4 +1,6 @@
-import securityAPI from '../../lib/api/security';
+import securityAPI, {
+  UnsupportedSecurityFeatureError,
+} from '../../lib/api/security';
 
 describe('securityAPI auth token handling', () => {
   const mockFetch = jest.fn();
@@ -28,5 +30,13 @@ describe('securityAPI auth token handling', () => {
         }),
       }),
     );
+  });
+
+  it('fails fast for unsupported security actions instead of pretending success', async () => {
+    await expect(securityAPI.acknowledgeSecurityEvent('event-1')).rejects.toBeInstanceOf(
+      UnsupportedSecurityFeatureError,
+    );
+
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { apiClient } from "@/lib/api/client";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { securityCapabilities } from "@/lib/api/security";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { 
@@ -84,7 +85,7 @@ export function SecurityDashboard() {
   const [blockedIPs, setBlockedIPs] = useState<any[]>([]);
 
   // WebSocket for real-time updates
-  const { data: wsData, isConnected } = useWebSocket('/api/security/events/stream');
+  const { data: wsData, isConnected } = useWebSocket('/api/ws/security/events');
 
   // Fetch security data
   const fetchSecurityData = async () => {
@@ -217,25 +218,6 @@ export function SecurityDashboard() {
   }, [wsData]);
 
   // Export audit data
-  const exportAuditData = async () => {
-    try {
-      const response = await apiClient.get('/api/security/audit/export', {
-        responseType: 'blob'
-      });
-
-      // Create download link
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `audit-export-${new Date().toISOString()}.json`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    } catch (err) {
-      console.error('Failed to export audit data:', err);
-    }
-  };
-
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case "critical": return "bg-red-500";
@@ -304,9 +286,9 @@ export function SecurityDashboard() {
           >
             {securityMetrics.threatLevel} Threat Level
           </Badge>
-          <Button variant="outline">
+          <Button variant="outline" disabled={!securityCapabilities.exportSecurityReports}>
             <FileText className="h-4 w-4 mr-2" />
-            Security Report
+            {securityCapabilities.exportSecurityReports ? 'Security Report' : 'Report Unavailable'}
           </Button>
         </div>
       </div>
