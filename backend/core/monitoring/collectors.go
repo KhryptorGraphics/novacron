@@ -124,38 +124,45 @@ func (c *SystemCollector) Collect() ([]*MetricBatch, error) {
 
 	// Create a batch for this collection
 	batch := NewMetricBatch("system_collector")
-	
+
 	// For each metric, collect its value
 	for _, metric := range c.metrics {
+		var collected *Metric
+
 		// Collect the appropriate metric value
 		switch metric.Name {
 		case "system.memory.used":
 			value := float64(memStats.Alloc)
-			newMetric := NewMetric(metric.Name, MetricTypeGauge, value, nil)
-			batch.AddMetric(newMetric.WithSource("system_collector").WithUnit("bytes"))
+			collected = NewMetric(metric.Name, MetricTypeGauge, value, metric.Tags)
+			collected = collected.WithSource("system_collector").WithUnit("bytes")
 		case "system.memory.total":
 			value := float64(memStats.Sys)
-			newMetric := NewMetric(metric.Name, MetricTypeGauge, value, nil)
-			batch.AddMetric(newMetric.WithSource("system_collector").WithUnit("bytes"))
+			collected = NewMetric(metric.Name, MetricTypeGauge, value, metric.Tags)
+			collected = collected.WithSource("system_collector").WithUnit("bytes")
 		case "system.memory.heap.used":
 			value := float64(memStats.HeapAlloc)
-			newMetric := NewMetric(metric.Name, MetricTypeGauge, value, nil)
-			batch.AddMetric(newMetric.WithSource("system_collector").WithUnit("bytes"))
+			collected = NewMetric(metric.Name, MetricTypeGauge, value, metric.Tags)
+			collected = collected.WithSource("system_collector").WithUnit("bytes")
 		case "system.memory.heap.total":
 			value := float64(memStats.HeapSys)
-			newMetric := NewMetric(metric.Name, MetricTypeGauge, value, nil)
-			batch.AddMetric(newMetric.WithSource("system_collector").WithUnit("bytes"))
+			collected = NewMetric(metric.Name, MetricTypeGauge, value, metric.Tags)
+			collected = collected.WithSource("system_collector").WithUnit("bytes")
 		case "system.goroutines":
 			value := float64(runtime.NumGoroutine())
-			newMetric := NewMetric(metric.Name, MetricTypeGauge, value, nil)
-			batch.AddMetric(newMetric.WithSource("system_collector").WithUnit("count"))
+			collected = NewMetric(metric.Name, MetricTypeGauge, value, metric.Tags)
+			collected = collected.WithSource("system_collector").WithUnit("count")
 		case "system.cpu.count":
 			value := float64(runtime.NumCPU())
-			newMetric := NewMetric(metric.Name, MetricTypeGauge, value, nil)
-			batch.AddMetric(newMetric.WithSource("system_collector").WithUnit("count"))
+			collected = NewMetric(metric.Name, MetricTypeGauge, value, metric.Tags)
+			collected = collected.WithSource("system_collector").WithUnit("count")
+		}
+
+		if collected != nil {
+			batch.AddMetric(collected)
+			c.registry.RegisterMetric(collected)
 		}
 	}
-	
+
 	// Add the batch to the collection if it has metrics
 	if !batch.IsEmpty() {
 		batches = append(batches, batch)
@@ -275,17 +282,22 @@ func (c *VirtualMachineCollector) Collect() ([]*MetricBatch, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	batches := make([]*MetricBatch, 0, len(c.metrics))
+	batches := make([]*MetricBatch, 0, 1)
 	c.lastCollection = time.Now()
 
-	// In a real implementation, this would collect actual VM metrics
-	// For now, just return empty batches
+	batch := NewMetricBatch("vm_collector")
 	for _, metric := range c.metrics {
-		batch := MetricBatch{
-			MetricID:  metric.ID,
-			Timestamp: c.lastCollection,
-			Values:    make([]MetricValue, 0),
+		collected := NewMetric(metric.Name, MetricTypeGauge, 0, metric.Tags)
+		collected = collected.WithTimestamp(c.lastCollection).WithSource("vm_collector")
+		switch metric.Name {
+		case "vm.count", "vm.active":
+			collected = collected.WithUnit("count")
 		}
+		batch.AddMetric(collected)
+		c.registry.RegisterMetric(collected)
+	}
+
+	if !batch.IsEmpty() {
 		batches = append(batches, batch)
 	}
 
@@ -300,16 +312,12 @@ func (c *VirtualMachineCollector) registerMetrics() error {
 	// Create count metric
 	vmCount := NewGaugeMetric("vm.count", "VM Count", "Number of virtual machines", "vm")
 	c.metrics = append(c.metrics, vmCount)
-	if err := c.registry.RegisterMetric(vmCount); err != nil {
-		return err
-	}
+	c.registry.RegisterMetric(vmCount)
 
 	// Create status metric
 	vmActive := NewGaugeMetric("vm.active", "Active VMs", "Number of active virtual machines", "vm")
 	c.metrics = append(c.metrics, vmActive)
-	if err := c.registry.RegisterMetric(vmActive); err != nil {
-		return err
-	}
+	c.registry.RegisterMetric(vmActive)
 
 	return nil
 }
@@ -335,19 +343,24 @@ func (c *VirtualMachineCollector) run() {
 
 // CollectorManager manages multiple collectors
 type CollectorManager struct {
-	collectors []MetricCollector
+	collectors []managedCollector
 	mutex      sync.RWMutex
+}
+
+type managedCollector interface {
+	Start() error
+	Stop() error
 }
 
 // NewCollectorManager creates a new collector manager
 func NewCollectorManager() *CollectorManager {
 	return &CollectorManager{
-		collectors: make([]MetricCollector, 0),
+		collectors: make([]managedCollector, 0),
 	}
 }
 
 // AddCollector adds a collector
-func (m *CollectorManager) AddCollector(collector MetricCollector) {
+func (m *CollectorManager) AddCollector(collector managedCollector) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.collectors = append(m.collectors, collector)
@@ -385,7 +398,13 @@ func (m *CollectorManager) StopAll() error {
 func (m *CollectorManager) GetCollectors() []MetricCollector {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	return m.collectors
+	collectors := make([]MetricCollector, 0, len(m.collectors))
+	for _, collector := range m.collectors {
+		if typed, ok := collector.(MetricCollector); ok {
+			collectors = append(collectors, typed)
+		}
+	}
+	return collectors
 }
 
 // MetricHistoryManager manages historical metrics
@@ -440,29 +459,7 @@ func (m *MetricHistoryManager) run() {
 
 // cleanup removes old metric values
 func (m *MetricHistoryManager) cleanup() {
-	metrics := m.registry.ListMetrics()
-	cutoff := time.Now().Add(-m.retentionTime)
-
-	for _, metric := range metrics {
-		metric.mutex.Lock()
-		// Find the index of the first value to keep
-		keepIndex := 0
-		for i, value := range metric.Values {
-			if value.Timestamp.After(cutoff) {
-				keepIndex = i
-				break
-			}
-		}
-		// Truncate the values slice to keep only newer values
-		if keepIndex > 0 {
-			if keepIndex >= len(metric.Values) {
-				metric.Values = metric.Values[:0]
-			} else {
-				metric.Values = metric.Values[keepIndex:]
-			}
-		}
-		metric.mutex.Unlock()
-	}
+	m.registry.Cleanup(m.retentionTime)
 }
 
 // GetHistoricalValues gets historical values for a metric
@@ -472,7 +469,17 @@ func (m *MetricHistoryManager) GetHistoricalValues(metricID string, start, end t
 		return nil, err
 	}
 
-	return metric.GetValues(start, end), nil
+	rawValues := metric.GetValues(start, end)
+	values := make([]MetricValue, 0, len(rawValues))
+	for _, value := range rawValues {
+		values = append(values, MetricValue{
+			Value:     value.Value,
+			Timestamp: value.Timestamp,
+			Tags:      value.Tags,
+		})
+	}
+
+	return values, nil
 }
 
 // AnalyzeMetricTrend analyzes the trend of a metric

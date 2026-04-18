@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -154,6 +155,27 @@ func (s *MetricSeries) Slice(start, end time.Time) *MetricSeries {
 	return result
 }
 
+// GetValues returns metrics in the requested time range.
+func (s *MetricSeries) GetValues(start, end time.Time) []*Metric {
+	return s.Slice(start, end).Metrics
+}
+
+// GetLastValue returns the most recent metric in the series.
+func (s *MetricSeries) GetLastValue() *Metric {
+	if len(s.Metrics) == 0 {
+		return nil
+	}
+
+	last := s.Metrics[0]
+	for _, metric := range s.Metrics[1:] {
+		if metric.Timestamp.After(last.Timestamp) {
+			last = metric
+		}
+	}
+
+	return last
+}
+
 // PruneOlderThan removes metrics older than the given time
 func (s *MetricSeries) PruneOlderThan(cutoff time.Time) {
 	if len(s.Metrics) == 0 {
@@ -235,17 +257,17 @@ func NewMetricRegistry() *MetricRegistry {
 func (r *MetricRegistry) Register(metric *Metric) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
-	
+
 	// Create a key from metric name and tags
 	key := r.createKey(metric.Name, metric.Tags)
-	
+
 	// Get or create series
 	series, exists := r.metrics[key]
 	if !exists {
 		series = NewMetricSeries(metric.Name, metric.Tags)
 		r.metrics[key] = series
 	}
-	
+
 	// Add metric to series
 	series.AddMetric(metric)
 }
@@ -259,9 +281,9 @@ func (r *MetricRegistry) RegisterMetric(metric *Metric) {
 func (r *MetricRegistry) Query(query MetricQuery) ([]*MetricSeries, error) {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
-	
+
 	var results []*MetricSeries
-	
+
 	for _, series := range r.metrics {
 		// Check if series matches query
 		if r.matches(series, query) {
@@ -272,7 +294,7 @@ func (r *MetricRegistry) Query(query MetricQuery) ([]*MetricSeries, error) {
 			}
 		}
 	}
-	
+
 	return results, nil
 }
 
@@ -280,28 +302,62 @@ func (r *MetricRegistry) Query(query MetricQuery) ([]*MetricSeries, error) {
 func (r *MetricRegistry) GetMetrics(name string) ([]*MetricSeries, error) {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
-	
+
 	var results []*MetricSeries
 	for _, series := range r.metrics {
 		if series.Name == name {
 			results = append(results, series)
 		}
 	}
-	
+
 	return results, nil
+}
+
+// GetMetric returns a merged metric series for the given metric name.
+func (r *MetricRegistry) GetMetric(name string) (*MetricSeries, error) {
+	seriesList, err := r.GetMetrics(name)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(seriesList) == 0 {
+		return nil, fmt.Errorf("metric not found: %s", name)
+	}
+
+	if len(seriesList) == 1 {
+		return seriesList[0], nil
+	}
+
+	merged := NewMetricSeries(name, nil)
+	for _, series := range seriesList {
+		for _, metric := range series.Metrics {
+			merged.AddMetric(metric)
+		}
+	}
+
+	sort.Slice(merged.Metrics, func(i, j int) bool {
+		return merged.Metrics[i].Timestamp.Before(merged.Metrics[j].Timestamp)
+	})
+
+	return merged, nil
+}
+
+// GetMetricSeries is a compatibility alias for GetMetric.
+func (r *MetricRegistry) GetMetricSeries(name string) (*MetricSeries, error) {
+	return r.GetMetric(name)
 }
 
 // Cleanup removes metrics older than the specified duration
 func (r *MetricRegistry) Cleanup(maxAge time.Duration) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
-	
+
 	cutoff := time.Now().Add(-maxAge)
-	
+
 	// Prune old metrics from each series
 	for key, series := range r.metrics {
 		series.PruneOlderThan(cutoff)
-		
+
 		// Remove empty series
 		if len(series.Metrics) == 0 {
 			delete(r.metrics, key)
@@ -312,18 +368,18 @@ func (r *MetricRegistry) Cleanup(maxAge time.Duration) {
 // createKey creates a unique key for a metric series
 func (r *MetricRegistry) createKey(name string, tags map[string]string) string {
 	key := name
-	
+
 	// Sort tags to ensure consistent keys
 	var tagKeys []string
 	for k := range tags {
 		tagKeys = append(tagKeys, k)
 	}
-	
+
 	// Simple deterministic key generation
 	for _, k := range tagKeys {
 		key += fmt.Sprintf(":%s=%s", k, tags[k])
 	}
-	
+
 	return key
 }
 
@@ -333,14 +389,14 @@ func (r *MetricRegistry) matches(series *MetricSeries, query MetricQuery) bool {
 	if query.Pattern != "" && series.Name != query.Pattern {
 		return false
 	}
-	
+
 	// Check tags
 	for k, v := range query.Tags {
 		if seriesValue, exists := series.Tags[k]; !exists || seriesValue != v {
 			return false
 		}
 	}
-	
+
 	return true
 }
 

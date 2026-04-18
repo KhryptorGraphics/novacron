@@ -197,23 +197,58 @@ func (d *DistributedMetricCollector) GetMetric(ctx context.Context, name string,
 	// Otherwise fetch from storage
 	metricKey := formatMetricStorageKey(name, tags)
 	data, err := d.storage.Get(ctx, metricKey)
+	if err == nil {
+		// Parse the metric data
+		series, parseErr := ParseMetricSeries(data)
+		if parseErr != nil {
+			return nil, fmt.Errorf("failed to parse metric data: %w", parseErr)
+		}
+
+		// Cache the series for future use
+		d.metricCacheMutex.Lock()
+		d.metricCache[cacheKey] = series
+		d.metricCacheMutex.Unlock()
+
+		// Return the requested slice
+		return series.Slice(start, end), nil
+	}
+
+	keys, err := d.storage.List(ctx, formatMetricStorageKey(name, nil)+"*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get metric from storage: %w", err)
 	}
 
-	// Parse the metric data
-	series, err := ParseMetricSeries(data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse metric data: %w", err)
+	merged := NewMetricSeries(name, tags)
+	for _, key := range keys {
+		seriesData, getErr := d.storage.Get(ctx, key)
+		if getErr != nil {
+			continue
+		}
+
+		series, parseErr := ParseMetricSeries(seriesData)
+		if parseErr != nil {
+			continue
+		}
+
+		if !metricTagsMatch(series.Tags, tags) {
+			continue
+		}
+
+		for _, metric := range series.Metrics {
+			merged.AddMetric(metric)
+		}
 	}
 
-	// Cache the series for future use
+	if len(merged.Metrics) == 0 {
+		return nil, fmt.Errorf("metric not found: %s", name)
+	}
+
 	d.metricCacheMutex.Lock()
-	d.metricCache[cacheKey] = series
+	d.metricCache[cacheKey] = merged
 	d.metricCacheMutex.Unlock()
 
 	// Return the requested slice
-	return series.Slice(start, end), nil
+	return merged.Slice(start, end), nil
 }
 
 // QueryMetrics performs a query across metrics
@@ -429,4 +464,14 @@ func formatTags(tags map[string]string) string {
 		result += fmt.Sprintf("%s=%s", k, v)
 	}
 	return result
+}
+
+func metricTagsMatch(seriesTags, requestedTags map[string]string) bool {
+	for key, value := range requestedTags {
+		if seriesValue, ok := seriesTags[key]; !ok || seriesValue != value {
+			return false
+		}
+	}
+
+	return true
 }

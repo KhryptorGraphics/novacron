@@ -11,6 +11,7 @@ import (
 
 	"github.com/khryptorgraphics/novacron/backend/core/hypervisor"
 	"github.com/khryptorgraphics/novacron/backend/core/monitoring"
+	"github.com/khryptorgraphics/novacron/backend/core/storage"
 	"github.com/khryptorgraphics/novacron/backend/core/vm"
 	"github.com/khryptorgraphics/novacron/backend/pkg/database"
 )
@@ -87,8 +88,11 @@ type AlertResponse struct {
 // NewMonitoringService creates a new monitoring service
 func NewMonitoringService(db *database.DB, kvmManager *hypervisor.KVMManager, vmManager *vm.VMManager) *MonitoringService {
 	repos := database.NewRepositories(db)
-	
-	metricsCollector := monitoring.NewDistributedMetricCollector()
+
+	collectorConfig := monitoring.DefaultDistributedMetricCollectorConfig()
+	collectorConfig.NodeID = "default-node-01"
+	collectorConfig.ClusterID = "local"
+	metricsCollector := monitoring.NewDistributedMetricCollector(collectorConfig, storage.NewInMemoryStorage())
 	alertManager := monitoring.NewAlertManager(metricsCollector)
 	
 	service := &MonitoringService{
@@ -325,18 +329,18 @@ func (s *MonitoringService) collectSystemMetrics() *database.SystemMetric {
 		if resourceInfo, err := s.kvmManager.GetHypervisorMetrics(ctx); err == nil {
 			return &database.SystemMetric{
 				NodeID:          "default-node-01",
-				CPUUsage:        resourceInfo.CPUUsage,
-				MemoryUsage:     float64(resourceInfo.MemoryUsed) / float64(resourceInfo.MemoryTotal) * 100,
+				CPUUsage:        0,
+				MemoryUsage:     0,
 				MemoryTotal:     resourceInfo.MemoryTotal,
-				MemoryAvailable: resourceInfo.MemoryTotal - resourceInfo.MemoryUsed,
-				DiskUsage:       float64(resourceInfo.DiskUsed) / float64(resourceInfo.DiskTotal) * 100,
-				DiskTotal:       resourceInfo.DiskTotal,
-				DiskAvailable:   resourceInfo.DiskTotal - resourceInfo.DiskUsed,
-				NetworkSent:     resourceInfo.NetworkSent,
-				NetworkRecv:     resourceInfo.NetworkRecv,
-				LoadAverage1:    resourceInfo.LoadAvg1,
-				LoadAverage5:    resourceInfo.LoadAvg5,
-				LoadAverage15:   resourceInfo.LoadAvg15,
+				MemoryAvailable: resourceInfo.MemoryTotal,
+				DiskUsage:       0,
+				DiskTotal:       0,
+				DiskAvailable:   0,
+				NetworkSent:     0,
+				NetworkRecv:     0,
+				LoadAverage1:    0,
+				LoadAverage5:    0,
+				LoadAverage15:   0,
 				Timestamp:       time.Now(),
 			}
 		}

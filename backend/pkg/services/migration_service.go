@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/khryptorgraphics/novacron/backend/core/vm"
 	"github.com/khryptorgraphics/novacron/backend/pkg/database"
 )
 

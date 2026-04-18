@@ -361,7 +361,17 @@ func (m *AlertManager) evaluateAlert(alert *Alert) {
 
 	// Define the time range based on the condition duration
 	end := time.Now()
-	start := end.Add(-alert.Condition.Duration * 2) // Get enough data to evaluate the condition
+	lookback := alert.Condition.Duration * 2
+	if lookback <= 0 {
+		// Event alerts need a non-zero lookback window or freshly stored events
+		// fall outside the requested slice.
+		if alert.Type == AlertTypeEvent && m.evaluationInterval > 0 {
+			lookback = m.evaluationInterval
+		} else {
+			lookback = time.Second
+		}
+	}
+	start := end.Add(-lookback) // Get enough data to evaluate the condition
 
 	series, err := m.metricCollector.GetMetric(ctx, alert.Condition.MetricName, alert.Condition.Tags, start, end)
 	if err != nil {
@@ -378,16 +388,21 @@ func (m *AlertManager) evaluateAlert(alert *Alert) {
 	conditionMet := false
 	latestValue := 0.0
 
-	// For threshold alerts, check all values in the duration window
-	durationStart := end.Add(-alert.Condition.Duration)
+	windowStart := end.Add(-alert.Condition.Duration)
+	if alert.Condition.Duration <= 0 {
+		windowStart = start
+	}
+
 	matchingValues := 0
 	totalValues := 0
+	var latestMetric *Metric
 
 	// Find the latest value and count matching values in the duration window
 	for _, metric := range series.Metrics {
-		if metric.Timestamp.After(durationStart) {
+		if !metric.Timestamp.Before(windowStart) {
 			totalValues++
-			if metric.Timestamp.After(time.Unix(0, 0)) && (latestValue == 0 || metric.Timestamp.After(time.Unix(0, 0))) {
+			if latestMetric == nil || metric.Timestamp.After(latestMetric.Timestamp) {
+				latestMetric = metric
 				latestValue = metric.Value
 			}
 
@@ -398,9 +413,14 @@ func (m *AlertManager) evaluateAlert(alert *Alert) {
 		}
 	}
 
-	// Determine if the condition is met over the required duration
-	if totalValues > 0 && matchingValues == totalValues {
-		conditionMet = true
+	switch alert.Type {
+	case AlertTypeEvent:
+		conditionMet = matchingValues > 0
+	default:
+		// Determine if the condition is met over the required duration.
+		if totalValues > 0 && matchingValues == totalValues {
+			conditionMet = true
+		}
 	}
 
 	// Handle the alert status change
