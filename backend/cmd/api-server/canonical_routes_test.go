@@ -55,6 +55,69 @@ func decodeJSONBody(t *testing.T, rec *httptest.ResponseRecorder, target interfa
 	}
 }
 
+func TestCanonicalPasswordResetRoutesAreLive(t *testing.T) {
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+
+	router := mux.NewRouter()
+	registerPublicRoutes(router, authManager, nil, nil)
+
+	tests := []struct {
+		name       string
+		path       string
+		payload    map[string]string
+		wantStatus int
+		wantMsg    string
+	}{
+		{
+			name:       "forgot password",
+			path:       "/api/auth/forgot-password",
+			payload:    map[string]string{"email": "user@example.com"},
+			wantStatus: http.StatusOK,
+			wantMsg:    "Password reset email sent",
+		},
+		{
+			name:       "reset password",
+			path:       "/api/auth/reset-password",
+			payload:    map[string]string{"token": "reset-token", "password": "SecurePassword123!"},
+			wantStatus: http.StatusOK,
+			wantMsg:    "Password reset successfully",
+		},
+		{
+			name:       "verify email remains deferred",
+			path:       "/api/auth/verify-email",
+			payload:    map[string]string{"token": "verify-token"},
+			wantStatus: http.StatusNotImplemented,
+			wantMsg:    "email verification is not wired in the canonical server yet",
+		},
+		{
+			name:       "resend verification remains deferred",
+			path:       "/api/auth/resend-verification",
+			payload:    map[string]string{"email": "user@example.com"},
+			wantStatus: http.StatusNotImplemented,
+			wantMsg:    "email verification is not wired in the canonical server yet",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := mustJSONRequest(t, http.MethodPost, tc.path, tc.payload)
+			rec := httptest.NewRecorder()
+
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("expected %d, got %d (%s)", tc.wantStatus, rec.Code, rec.Body.String())
+			}
+
+			var payload map[string]interface{}
+			decodeJSONBody(t, rec, &payload)
+			if payload["message"] != tc.wantMsg {
+				t.Fatalf("expected message %q, got %#v", tc.wantMsg, payload["message"])
+			}
+		})
+	}
+}
+
 func TestCanonicalTwoFactorLoginFlow(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

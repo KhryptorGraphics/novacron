@@ -5,36 +5,25 @@ export const dynamic = 'force-dynamic';
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { RegistrationWizard } from "@/components/auth/RegistrationWizard";
 import { RegistrationData } from "@/lib/validation";
-import { apiService } from "@/lib/api";
+import { authService } from "@/lib/auth";
 import { useToast } from "@/components/ui/use-toast";
 
 export default function RegisterPage() {
-  const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
+  const [, setIsLoading] = useState(false);
   const { toast } = useToast();
 
   async function onComplete(data: RegistrationData) {
     setIsLoading(true);
     
     try {
-      // Call the API with the full registration data
-      await apiService.register({
+      await authService.register({
         firstName: data.firstName,
         lastName: data.lastName,
         email: data.email,
         password: data.password,
-        accountType: data.accountType,
-        organizationName: data.organizationName,
-        organizationSize: data.organizationSize,
-        phone: data.phone,
-        enableTwoFactor: data.enableTwoFactor,
       });
-      
-      // Success is handled by the wizard component
-      // (shows verification flow, then success animation, then redirects)
     } catch (error) {
       console.error("Registration error:", error);
       toast({

@@ -33,10 +33,10 @@ Treat older README sections, feature reports, and alternate entrypoints as histo
 | `GET/POST /api/auth/2fa/backup-codes` | live | Authenticated route. |
 | `POST /auth/login` | compat | Legacy alias retained during gradual cutover. |
 | `POST /auth/register` | compat | Legacy alias retained during gradual cutover. |
-| `POST /api/auth/forgot-password` | deferred | Canonical server returns not implemented. |
-| `POST /api/auth/reset-password` | deferred | Canonical server returns not implemented. |
-| `POST /api/auth/verify-email` | deferred | Canonical server returns not implemented. |
-| `POST /api/auth/resend-verification` | deferred | Canonical server returns not implemented. |
+| `POST /api/auth/forgot-password` | live | Canonical password-reset request route. Returns a generic success message. |
+| `POST /api/auth/reset-password` | live | Canonical password-reset completion route. Returns a generic success message. |
+| `POST /api/auth/verify-email` | deferred | Canonical server still returns not implemented; the routed registration flow does not depend on it. |
+| `POST /api/auth/resend-verification` | deferred | Canonical server still returns not implemented; the routed registration flow does not depend on it. |
 | `GET/POST /api/v1/vms` | live | Canonical VM list/create route set. |
 | `GET/DELETE /api/v1/vms/{id}` | live | Canonical VM detail/delete route set. |
 | `POST /api/v1/vms/{id}/start` | live | Canonical VM action route. |

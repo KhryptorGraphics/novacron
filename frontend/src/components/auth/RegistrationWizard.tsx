@@ -14,7 +14,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Icons } from "@/components/ui/icons";
 import { PasswordStrengthIndicator } from "./PasswordStrengthIndicator";
-import { EmailVerificationFlow } from "./EmailVerificationFlow";
 import { SuccessAnimation } from "@/components/ui/success-animation";
 import {
   validateRegistrationStep,
@@ -22,7 +21,7 @@ import {
   debounce,
   RegistrationData
 } from "@/lib/validation";
-import { apiService } from "@/lib/api";
+import { authService } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 interface RegistrationWizardProps {
@@ -36,8 +35,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
   const [errors, setErrors] = useState<string[]>([]);
   const [emailAvailable, setEmailAvailable] = useState<boolean | null>(null);
   const [checkingEmail, setCheckingEmail] = useState(false);
-  const [registrationFlow, setRegistrationFlow] = useState<'registration' | 'verification' | 'success'>('registration');
-  const [registrationSuccess, setRegistrationSuccess] = useState(false);
+  const [registrationFlow, setRegistrationFlow] = useState<'registration' | 'success'>('registration');
   
   const [formData, setFormData] = useState<RegistrationData>({
     accountType: '',
@@ -85,8 +83,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
     
     setCheckingEmail(true);
     try {
-      // Use actual API call
-      const result = await apiService.checkEmailAvailability(email);
+      const result = await authService.checkEmailAvailability(email);
       setEmailAvailable(result.available);
     } catch (error) {
       console.error("Error checking email:", error);
@@ -102,6 +99,22 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
       checkEmailAvailability(formData.email);
     }
   }, [formData.email]);
+
+  useEffect(() => {
+    if (registrationFlow !== 'success') {
+      return;
+    }
+
+    const redirectTimer = window.setTimeout(() => {
+      router.push("/auth/login?registered=1");
+    }, 3000);
+
+    return () => window.clearTimeout(redirectTimer);
+  }, [registrationFlow, router]);
+
+  const finishRegistration = () => {
+    setRegistrationFlow('success');
+  };
   
   const handleNext = async () => {
     const validation = validateRegistrationStep(currentStep, formData);
@@ -121,27 +134,15 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
       try {
         if (onComplete) {
           await onComplete(formData);
+          finishRegistration();
         } else {
-          // Use actual API service
-          const result = await apiService.register({
+          await authService.register({
             firstName: formData.firstName,
             lastName: formData.lastName,
             email: formData.email,
             password: formData.password,
-            accountType: formData.accountType,
-            organizationName: formData.organizationName,
-            organizationSize: formData.organizationSize,
-            phone: formData.phone,
-            enableTwoFactor: formData.enableTwoFactor,
           });
-
-          if (result.success) {
-            setRegistrationSuccess(true);
-            // Move to email verification flow
-            setRegistrationFlow('verification');
-          } else {
-            throw new Error('Registration failed');
-          }
+          finishRegistration();
         }
       } catch (error) {
         console.error("Registration error:", error);
@@ -167,36 +168,14 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
     }
   };
 
-  const handleVerificationComplete = () => {
-    setRegistrationFlow('success');
-    setTimeout(() => {
-      router.push("/dashboard");
-    }, 3000); // Show success animation for 3 seconds
-  };
-
-  const handleSkipVerification = () => {
-    // Allow user to skip verification and proceed to dashboard
-    router.push("/dashboard");
-  };
-
   // Show different flows based on registration state
-  if (registrationFlow === 'verification') {
-    return (
-      <EmailVerificationFlow
-        email={formData.email}
-        onVerificationComplete={handleVerificationComplete}
-        onSkip={handleSkipVerification}
-      />
-    );
-  }
-
   if (registrationFlow === 'success') {
     return (
       <Card className="w-full max-w-2xl mx-auto">
         <CardContent className="pt-6">
           <SuccessAnimation
             title="Welcome to NovaCron!"
-            description="Your account has been created successfully. You will be redirected to your dashboard shortly."
+            description="Your account has been created successfully. Redirecting you to sign in."
           />
         </CardContent>
       </Card>

@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { useToast } from "@/components/ui/use-toast";
 import { Icons } from "@/components/ui/icons";
 import Link from "next/link";
-import { apiService } from "@/lib/api";
+import { authService } from "@/lib/auth";
 
 export default function ForgotPasswordPage() {
   const router = useRouter();
@@ -26,7 +26,7 @@ export default function ForgotPasswordPage() {
     setIsLoading(true);
 
     try {
-      await apiService.forgotPassword({ email });
+      await authService.forgotPassword({ email });
       
       toast({
         title: "Success",

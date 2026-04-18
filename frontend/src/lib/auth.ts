@@ -146,6 +146,10 @@ class AuthService {
     });
   }
 
+  async checkEmailAvailability(email: string): Promise<{ available: boolean }> {
+    return this.request<{ available: boolean }>(`/api/auth/check-email?email=${encodeURIComponent(email)}`);
+  }
+
   async forgotPassword(data: ForgotPasswordRequest): Promise<{ message: string }> {
     return this.request<{ message: string }>('/api/auth/forgot-password', {
       method: 'POST',

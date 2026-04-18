@@ -22,6 +22,7 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/sirupsen/logrus"
 
+	authapi "github.com/khryptorgraphics/novacron/backend/api/auth"
 	graphqlapi "github.com/khryptorgraphics/novacron/backend/api/graphql"
 	securityapi "github.com/khryptorgraphics/novacron/backend/api/security"
 	websocketapi "github.com/khryptorgraphics/novacron/backend/api/websocket"
@@ -296,6 +297,8 @@ func requireRoleHandler(requiredRole string, next http.HandlerFunc) http.Handler
 }
 
 func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManager, db *sql.DB, twoFactorService *auth.TwoFactorService) {
+	passwordResetHandler := authapi.NewHandler(nil)
+
 	loginHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var loginReq struct {
 			Username string `json:"username"`
@@ -435,8 +438,8 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 	router.Handle("/api/auth/check-email", checkEmailHandler).Methods(http.MethodGet)
 
 	router.Handle("/api/auth/verify-email", notImplementedJSON("email verification is not wired in the canonical server yet"))
-	router.Handle("/api/auth/forgot-password", notImplementedJSON("password reset is not wired in the canonical server yet"))
-	router.Handle("/api/auth/reset-password", notImplementedJSON("password reset is not wired in the canonical server yet"))
+	router.Handle("/api/auth/forgot-password", http.HandlerFunc(passwordResetHandler.ForgotPassword)).Methods(http.MethodPost)
+	router.Handle("/api/auth/reset-password", http.HandlerFunc(passwordResetHandler.ResetPassword)).Methods(http.MethodPost)
 	router.Handle("/api/auth/resend-verification", notImplementedJSON("email verification is not wired in the canonical server yet"))
 
 	router.HandleFunc("/api/auth/2fa/verify-login", func(w http.ResponseWriter, r *http.Request) {
