@@ -46,9 +46,15 @@ Treat older README sections, feature reports, and alternate entrypoints as histo
 | `GET /api/v1/monitoring/vms` | live | Canonical monitoring VM summary route used by the routed monitoring dashboard. |
 | `GET /api/v1/monitoring/alerts` | live | Canonical monitoring alert route used by the routed monitoring dashboard. |
 | `POST /api/v1/monitoring/alerts/{id}/acknowledge` | deferred | Frontend should present this as unavailable until the canonical server exposes it. |
+| `GET/POST /api/v1/networks` | live | Canonical network inventory surface. |
+| `GET/DELETE /api/v1/networks/{id}` | live | Canonical network detail/delete route set. |
+| `GET/POST /api/v1/vms/{vm_id}/interfaces` | live | Canonical VM interface list/attach route set. |
+| `GET/PUT/DELETE /api/v1/vms/{vm_id}/interfaces/{id}` | live | Canonical VM interface detail/update/delete route set. |
 | `/api/vms*` and `/api/monitoring/*` | compat | Legacy secure aliases retained during gradual cutover. |
+| `/api/networks*` and `/api/vms/{vm_id}/interfaces*` | compat | Legacy secure aliases retained during gradual cutover. |
 | `/api/security/*` | live | Canonical admin/security surface. Requires auth and admin/super-admin roles. Includes event acknowledgement, compliance recheck/export, manual incidents, audit export, and RBAC assignment. |
 | `/api/admin/security/*` | live | Canonical alias for admin/security UI. Requires auth and admin/super-admin roles and mirrors `/api/security/*`. |
+| `/api/admin/users*` | live | Canonical admin-only user management surface. Supports list/create/update/delete plus role assignment. |
 | `POST /graphql` | live | Public release GraphQL surface is storage-backed volume operations only: `volumes`, `createVolume`, and `changeVolumeTier`. |
 
 ## WebSocket Surface
@@ -77,6 +83,11 @@ Treat older README sections, feature reports, and alternate entrypoints as histo
 - Frontend realtime helpers should fail closed for `deferred` websocket channels instead of opening speculative connections.
 - The routed dashboard should expose only canonical VM, monitoring, storage, and security surfaces. Experimental fabric, AI, topology, mobile, and deferred realtime views are not part of the release path.
 - The routed admin surface is restricted to canonical `security`, `roles & permissions`, and `audit` tabs. `/admin/users`, `/admin/analytics`, and `/admin/config` redirect back to `/admin`.
+- The routed `/users` page is admin-only and backed exclusively by `/api/admin/users*`.
+- The routed `/network` page is narrowed to live inventory and interface attachment operations only. Topology, QoS, and traffic analytics remain deferred.
+- The routed `/analytics` page is read-only and composed from live dashboard domains; it must not synthesize historical trends or mock charts.
+- The routed `/settings` page is limited to account and security controls, including the canonical 2FA flow.
+- `/core/vms` is a compatibility route that intentionally renders the same canonical implementation as `/vms`.
 - The routed storage surface is volume-only. Pools, snapshots, backups, deletion, and storage realtime channels are intentionally out of scope for the release candidate.
 - New backend work should extend canonical paths first and add compat aliases only when required by the gradual cutover plan.
 - If a route or channel is not marked `live` or `compat` here, treat it as unsupported until it is explicitly implemented and promoted.

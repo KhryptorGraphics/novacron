@@ -13,6 +13,10 @@ import {
   Activity,
   Database,
   Shield,
+  Users,
+  Network,
+  LineChart,
+  Settings,
   LogOut,
   ChevronRight,
   Moon,
@@ -50,6 +54,18 @@ const navigationItems = [
     description: "Real-time system monitoring"
   },
   {
+    name: "Analytics",
+    href: "/analytics",
+    icon: LineChart,
+    description: "Read-only operational analytics"
+  },
+  {
+    name: "Network",
+    href: "/network",
+    icon: Network,
+    description: "Network inventory and interfaces"
+  },
+  {
     name: "Storage",
     href: "/storage",
     icon: Database,
@@ -66,6 +82,18 @@ const navigationItems = [
     href: "/admin",
     icon: Shield,
     description: "Admin panel"
+  },
+  {
+    name: "Users",
+    href: "/users",
+    icon: Users,
+    description: "Canonical admin user management"
+  },
+  {
+    name: "Settings",
+    href: "/settings",
+    icon: Settings,
+    description: "Account and security settings"
   },
 ];
 

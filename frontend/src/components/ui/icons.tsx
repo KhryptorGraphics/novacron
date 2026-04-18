@@ -23,7 +23,9 @@ import {
   CheckCircle2,
   Calendar,
   Clock,
-  Sparkles
+  Sparkles,
+  Plus,
+  RefreshCw,
 } from "lucide-react"
 
 export const Icons = {
@@ -52,4 +54,6 @@ export const Icons = {
   calendar: Calendar,
   clock: Clock,
   sparkles: Sparkles,
+  plus: Plus,
+  refresh: RefreshCw,
 }

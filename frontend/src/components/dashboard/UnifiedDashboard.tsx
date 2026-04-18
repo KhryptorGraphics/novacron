@@ -1,332 +1,268 @@
 'use client';
 
-import React, { useState } from 'react';
-import dynamic from 'next/dynamic';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
+import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  Activity, Server, HardDrive, Network, Shield, AlertCircle,
-  Monitor, Database, TrendingUp,
-  Cpu, MemoryStick, HardDriveIcon, Clock, CheckCircle
+  Activity,
+  ArrowRight,
+  Database,
+  HardDrive,
+  Loader2,
+  Network,
+  Server,
+  Settings,
+  Shield,
+  Users,
 } from 'lucide-react';
 
-// Dynamically import components to avoid SSR issues
-const VMOperationsDashboard = dynamic(
-  () => import('@/components/vm/VMOperationsDashboard'),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
-          <p>Loading VM Operations...</p>
-        </div>
-      </div>
-    )
-  }
-);
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import { buildApiV1Url } from '@/lib/api/origin';
+import { adminApi } from '@/lib/api/admin';
+import { networkApi } from '@/lib/api/networks';
+import { useSecurityMetrics } from '@/hooks/useSecurity';
+import { useVolumes } from '@/hooks/useVolumes';
+import { useVMs } from '@/lib/api/hooks/useVMs';
 
-const MonitoringDashboard = dynamic(
-  () => import('@/components/monitoring/MonitoringDashboard'),
-  { 
-    ssr: false,
-    loading: () => (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
-          <p>Loading Monitoring Dashboard...</p>
-        </div>
-      </div>
-    )
-  }
-);
+type MonitoringSummary = {
+  currentCpuUsage: number;
+  currentMemoryUsage: number;
+  currentDiskUsage: number;
+  currentNetworkUsage: number;
+};
 
-const StorageManagementUI = dynamic(
-  () => import('@/components/storage/StorageManagementUI'),
-  { 
-    ssr: false,
-    loading: () => (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
-          <p>Loading Storage Management...</p>
-        </div>
-      </div>
-    )
-  }
-);
-
-const SecurityComplianceDashboard = dynamic(
-  () => import('@/components/security/SecurityComplianceDashboard'),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
-          <p>Loading Security Dashboard...</p>
-        </div>
-      </div>
-    )
-  }
-);
+function OverviewCard({
+  title,
+  value,
+  description,
+  icon,
+}: {
+  title: string;
+  value: string;
+  description: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        {icon}
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-semibold">{value}</div>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function UnifiedDashboard() {
-  const [activeView, setActiveView] = useState('overview');
+  const { items: vms, isLoading: vmsLoading, error: vmsError } = useVMs({ page: 1, pageSize: 100 });
+  const { volumes, loading: volumesLoading, error: volumesError } = useVolumes();
+  const { metrics: securityMetrics, loading: securityLoading, error: securityError } = useSecurityMetrics();
+  const [monitoring, setMonitoring] = useState<MonitoringSummary | null>(null);
+  const [monitoringError, setMonitoringError] = useState<string | null>(null);
+  const [networkCount, setNetworkCount] = useState<number | null>(null);
+  const [userCount, setUserCount] = useState<number | null>(null);
 
-  // Overview remains a summary shell, while routed detail tabs are restricted to live surfaces.
-  const systemMetrics = {
-    totalVMs: 47,
-    runningVMs: 42,
-    stoppedVMs: 5,
-    cpuUsage: 68,
-    memoryUsage: 72,
-    storageUsage: 54,
-    networkThroughput: 8.4,
-    activeAlerts: 3,
-    criticalAlerts: 0,
-    securityScore: 87,
-    complianceScore: 92,
-    backupStatus: 'healthy',
-    lastBackup: '2 hours ago'
-  };
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadOverview() {
+      try {
+        const metricsResponse = await fetch(buildApiV1Url('/monitoring/metrics'));
+        if (!metricsResponse.ok) {
+          throw new Error(`Monitoring request failed with ${metricsResponse.status}`);
+        }
+        const metricsPayload = (await metricsResponse.json()) as MonitoringSummary;
+
+        const [networks, users] = await Promise.all([
+          networkApi.listNetworks().catch(() => []),
+          adminApi.users.list({ page: 1, page_size: 1 }).catch(() => null),
+        ]);
+
+        if (!cancelled) {
+          setMonitoring(metricsPayload);
+          setNetworkCount(Array.isArray(networks) ? networks.length : null);
+          setUserCount(users?.total ?? null);
+        }
+      } catch (requestError) {
+        if (!cancelled) {
+          setMonitoringError(
+            requestError instanceof Error
+              ? requestError.message
+              : 'Failed to load canonical monitoring overview.',
+          );
+        }
+      }
+    }
+
+    void loadOverview();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const vmSummary = useMemo(() => {
+    const total = vms.length;
+    const running = vms.filter((vm) => vm.state === 'running').length;
+    const stopped = vms.filter((vm) => vm.state === 'stopped').length;
+    return { total, running, stopped };
+  }, [vms]);
+
+  const storageSummary = useMemo(() => {
+    const provisioned = volumes.reduce((sum, volume) => sum + volume.size, 0);
+    return {
+      total: volumes.length,
+      provisioned,
+    };
+  }, [volumes]);
+
+  const statusNotes = [
+    vmsError instanceof Error ? `VMs: ${vmsError.message}` : null,
+    volumesError ? `Storage: ${volumesError}` : null,
+    securityError ? `Security: ${securityError}` : null,
+    monitoringError ? `Monitoring: ${monitoringError}` : null,
+  ].filter(Boolean) as string[];
+
+  const quickLinks = [
+    { href: '/vms', label: 'Virtual Machines', description: 'Manage live VM inventory and actions', icon: Server },
+    { href: '/monitoring', label: 'Monitoring', description: 'Inspect canonical metrics, alerts, and VM telemetry', icon: Activity },
+    { href: '/storage', label: 'Storage', description: 'Use the volume-only GraphQL release surface', icon: HardDrive },
+    { href: '/security', label: 'Security', description: 'Review live security posture and compliance', icon: Shield },
+    { href: '/users', label: 'Users', description: 'Admin user management on the canonical `/api/admin/users*` surface', icon: Users },
+    { href: '/network', label: 'Network', description: 'Minimal network inventory and VM interface operations', icon: Network },
+    { href: '/analytics', label: 'Analytics', description: 'Current-state operational analytics without fabricated trends', icon: Database },
+    { href: '/settings', label: 'Settings', description: 'Account and security preferences only', icon: Settings },
+  ];
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <div className="border-b">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold">NovaCron Control Center</h1>
-              <p className="text-muted-foreground">Unified VM Management & Operations Platform</p>
-            </div>
-            <div className="flex items-center gap-4">
-              <Badge variant="outline" className="px-3 py-1">
-                <CheckCircle className="h-3 w-3 mr-1 text-green-500" />
-                System Healthy
-              </Badge>
-              <Badge variant="outline" className="px-3 py-1">
-                <Clock className="h-3 w-3 mr-1" />
-                {new Date().toLocaleTimeString()}
-              </Badge>
-            </div>
-          </div>
+    <div className="space-y-6 p-6">
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Dashboard</h1>
+          <p className="text-muted-foreground">
+            Live operational overview for the release-candidate surface.
+          </p>
         </div>
+        <Badge variant="outline">No Mock Data</Badge>
       </div>
 
-      {/* Navigation */}
-      <div className="border-b bg-card">
-        <div className="container mx-auto px-6 py-3">
-          <div className="flex gap-2 overflow-x-auto">
-            <Button 
-              variant={activeView === 'overview' ? 'default' : 'ghost'}
-              onClick={() => setActiveView('overview')}
-              className="flex items-center gap-2"
-            >
-              <Monitor className="h-4 w-4" />
-              Overview
-            </Button>
-            <Button 
-              variant={activeView === 'vms' ? 'default' : 'ghost'}
-              onClick={() => setActiveView('vms')}
-              className="flex items-center gap-2"
-            >
-              <Server className="h-4 w-4" />
-              Virtual Machines
-            </Button>
-            <Button 
-              variant={activeView === 'monitoring' ? 'default' : 'ghost'}
-              onClick={() => setActiveView('monitoring')}
-              className="flex items-center gap-2"
-            >
-              <Activity className="h-4 w-4" />
-              Monitoring
-            </Button>
-            <Button 
-              variant={activeView === 'storage' ? 'default' : 'ghost'}
-              onClick={() => setActiveView('storage')}
-              className="flex items-center gap-2"
-            >
-              <HardDrive className="h-4 w-4" />
-              Storage
-            </Button>
-            <Button
-              variant={activeView === 'security' ? 'default' : 'ghost'}
-              onClick={() => setActiveView('security')}
-              className="flex items-center gap-2"
-            >
-              <Shield className="h-4 w-4" />
-              Security
-            </Button>
-          </div>
-        </div>
+      {statusNotes.length > 0 && (
+        <Alert>
+          <AlertTitle>Some overview tiles are partially unavailable</AlertTitle>
+          <AlertDescription>{statusNotes.join(' ')}</AlertDescription>
+        </Alert>
+      )}
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <OverviewCard
+          title="Virtual Machines"
+          value={vmsLoading ? '…' : String(vmSummary.total)}
+          description={`${vmSummary.running} running, ${vmSummary.stopped} stopped`}
+          icon={<Server className="h-4 w-4 text-muted-foreground" />}
+        />
+        <OverviewCard
+          title="Monitoring"
+          value={monitoring ? `${monitoring.currentCpuUsage.toFixed(1)}% CPU` : '…'}
+          description={monitoring ? `${monitoring.currentMemoryUsage.toFixed(1)}% memory in use` : 'Loading canonical metrics'}
+          icon={<Activity className="h-4 w-4 text-muted-foreground" />}
+        />
+        <OverviewCard
+          title="Storage"
+          value={volumesLoading ? '…' : `${storageSummary.total} volumes`}
+          description={`${storageSummary.provisioned.toLocaleString()} GiB provisioned`}
+          icon={<HardDrive className="h-4 w-4 text-muted-foreground" />}
+        />
+        <OverviewCard
+          title="Security"
+          value={securityLoading || !securityMetrics ? '…' : `${securityMetrics.securityScore}%`}
+          description={
+            securityMetrics
+              ? `${securityMetrics.activeThreats} active threats, ${securityMetrics.complianceScore}% compliance`
+              : 'Loading security posture'
+          }
+          icon={<Shield className="h-4 w-4 text-muted-foreground" />}
+        />
       </div>
 
-      {/* Main Content */}
-      <div className="container mx-auto px-6 py-6">
-        {activeView === 'overview' && (
-          <div className="space-y-6">
-            {/* Key Metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total VMs</CardTitle>
-                  <Server className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{systemMetrics.totalVMs}</div>
-                  <div className="flex gap-2 mt-2">
-                    <Badge variant="secondary" className="text-xs">
-                      {systemMetrics.runningVMs} Running
-                    </Badge>
-                    <Badge variant="outline" className="text-xs">
-                      {systemMetrics.stoppedVMs} Stopped
-                    </Badge>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">CPU Usage</CardTitle>
-                  <Cpu className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{systemMetrics.cpuUsage}%</div>
-                  <Progress value={systemMetrics.cpuUsage} className="mt-2" />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Memory Usage</CardTitle>
-                  <MemoryStick className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{systemMetrics.memoryUsage}%</div>
-                  <Progress value={systemMetrics.memoryUsage} className="mt-2" />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Storage Usage</CardTitle>
-                  <HardDriveIcon className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{systemMetrics.storageUsage}%</div>
-                  <Progress value={systemMetrics.storageUsage} className="mt-2" />
-                </CardContent>
-              </Card>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Live Signals</CardTitle>
+            <CardDescription>Current-state summaries collected from the canonical APIs.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span>CPU usage</span>
+                <span>{monitoring ? `${monitoring.currentCpuUsage.toFixed(1)}%` : 'Loading…'}</span>
+              </div>
+              <Progress value={monitoring?.currentCpuUsage ?? 0} />
             </div>
-
-            {/* Secondary Metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Security Score</CardTitle>
-                  <Shield className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{systemMetrics.securityScore}%</div>
-                  <Progress value={systemMetrics.securityScore} className="mt-2" />
-                  <p className="text-xs text-muted-foreground mt-2">
-                    <TrendingUp className="h-3 w-3 inline mr-1 text-green-500" />
-                    +5% from last week
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Active Alerts</CardTitle>
-                  <AlertCircle className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{systemMetrics.activeAlerts}</div>
-                  <div className="flex gap-2 mt-2">
-                    <Badge variant={systemMetrics.criticalAlerts > 0 ? 'destructive' : 'secondary'}>
-                      {systemMetrics.criticalAlerts} Critical
-                    </Badge>
-                    <Badge variant="outline">
-                      {systemMetrics.activeAlerts - systemMetrics.criticalAlerts} Warning
-                    </Badge>
-                  </div>
-                </CardContent>
-              </Card>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span>Memory usage</span>
+                <span>{monitoring ? `${monitoring.currentMemoryUsage.toFixed(1)}%` : 'Loading…'}</span>
+              </div>
+              <Progress value={monitoring?.currentMemoryUsage ?? 0} />
             </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-lg border p-4">
+                <div className="text-sm font-medium text-muted-foreground">Networks</div>
+                <div className="mt-2 text-2xl font-semibold">{networkCount ?? '…'}</div>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="text-sm font-medium text-muted-foreground">Users</div>
+                <div className="mt-2 text-2xl font-semibold">{userCount ?? '…'}</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-            {/* Quick Actions */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Quick Actions</CardTitle>
-                <CardDescription>Common operations and shortcuts</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <Button variant="outline" className="h-auto py-4 flex flex-col gap-2" onClick={() => setActiveView('vms')}>
-                    <Server className="h-5 w-5" />
-                    <span className="text-xs">Open VMs</span>
-                  </Button>
-                  <Button variant="outline" className="h-auto py-4 flex flex-col gap-2" onClick={() => setActiveView('monitoring')}>
-                    <Activity className="h-5 w-5" />
-                    <span className="text-xs">Open Monitoring</span>
-                  </Button>
-                  <Button variant="outline" className="h-auto py-4 flex flex-col gap-2" onClick={() => setActiveView('storage')}>
-                    <Database className="h-5 w-5" />
-                    <span className="text-xs">Open Storage</span>
-                  </Button>
-                  <Button variant="outline" className="h-auto py-4 flex flex-col gap-2" onClick={() => setActiveView('security')}>
-                    <Shield className="h-5 w-5" />
-                    <span className="text-xs">Open Security</span>
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Recent Activity */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Recent Activity</CardTitle>
-                <CardDescription>Latest system events and operations</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="flex items-center gap-4 p-3 rounded-lg bg-accent/50">
-                    <CheckCircle className="h-4 w-4 text-green-500" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">VM "web-server-01" successfully migrated</p>
-                      <p className="text-xs text-muted-foreground">5 minutes ago</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4 p-3 rounded-lg bg-accent/50">
-                    <Database className="h-4 w-4 text-blue-500" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">Backup completed for storage pool "primary"</p>
-                      <p className="text-xs text-muted-foreground">2 hours ago</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4 p-3 rounded-lg bg-accent/50">
-                    <Shield className="h-4 w-4 text-purple-500" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">Security scan completed - no vulnerabilities found</p>
-                      <p className="text-xs text-muted-foreground">4 hours ago</p>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        {activeView === 'vms' && <VMOperationsDashboard />}
-        {activeView === 'monitoring' && <MonitoringDashboard />}
-        {activeView === 'storage' && <StorageManagementUI />}
-        {activeView === 'security' && <SecurityComplianceDashboard />}
+        <Card>
+          <CardHeader>
+            <CardTitle>Operational Notes</CardTitle>
+            <CardDescription>The release dashboard is a launchpad, not a fake multi-tab control center.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm text-muted-foreground">
+            <p>Historical analytics remain intentionally unavailable until a real analytics backend exists.</p>
+            <p>Storage is volume-only on the routed release path.</p>
+            <p>Network management is limited to inventory plus VM interface operations.</p>
+            <p>Settings are narrowed to account and security preferences instead of global system configuration.</p>
+          </CardContent>
+        </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Quick Links</CardTitle>
+          <CardDescription>Use the dedicated routed pages for deeper actions and detail.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {quickLinks.map((link) => {
+            const Icon = link.icon;
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                className="group rounded-lg border p-4 transition-colors hover:border-primary hover:bg-muted/40"
+              >
+                <div className="flex items-start justify-between">
+                  <Icon className="h-5 w-5 text-muted-foreground" />
+                  <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-1" />
+                </div>
+                <div className="mt-4 space-y-1">
+                  <div className="font-medium">{link.label}</div>
+                  <p className="text-sm text-muted-foreground">{link.description}</p>
+                </div>
+              </Link>
+            );
+          })}
+        </CardContent>
+      </Card>
     </div>
   );
 }

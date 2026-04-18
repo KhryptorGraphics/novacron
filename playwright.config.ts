@@ -121,8 +121,6 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        // Chrome-specific settings
-        channel: 'chrome',
         launchOptions: {
           args: [
             '--disable-web-security',

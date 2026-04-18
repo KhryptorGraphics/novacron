@@ -1,3 +1,5 @@
+'use client';
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { securityAPI, SecurityEvent, ComplianceRequirement, VulnerabilityScan, SecurityMetrics, ThreatTrend, ComplianceByCategory } from '@/lib/api/security';
 import { useToast } from '@/components/ui/use-toast';

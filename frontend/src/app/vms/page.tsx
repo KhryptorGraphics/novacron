@@ -2,8 +2,8 @@
 
 export const dynamic = "force-dynamic";
 
-import CoreVMsPage from "@/app/core/vms/page";
+import CanonicalVMsPage from "@/components/vm/CanonicalVMsPage";
 
 export default function VMsPage() {
-  return <CoreVMsPage />;
+  return <CanonicalVMsPage />;
 }

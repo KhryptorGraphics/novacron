@@ -2,15 +2,15 @@ import { render, screen } from '@testing-library/react';
 
 import VMsPage from '@/app/vms/page';
 
-jest.mock('@/app/core/vms/page', () => ({
+jest.mock('@/components/vm/CanonicalVMsPage', () => ({
   __esModule: true,
-  default: () => <div data-testid="core-vms-page">core-vms-page</div>,
+  default: () => <div data-testid="canonical-vms-page">canonical-vms-page</div>,
 }));
 
 describe('VMsPage', () => {
-  it('delegates to the canonical core VMs page', () => {
+  it('delegates to the canonical VMs page', () => {
     render(<VMsPage />);
 
-    expect(screen.getByTestId('core-vms-page')).toBeInTheDocument();
+    expect(screen.getByTestId('canonical-vms-page')).toBeInTheDocument();
   });
 });

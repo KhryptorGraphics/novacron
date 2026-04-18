@@ -120,6 +120,7 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	registerSecureAPIRoutes(apiV1Router, db)
 
 	registerCanonicalSecurityRoutes(router, authManager, services.securityHandlers)
+	registerCanonicalAdminRoutes(router, authManager, db)
 	registerCanonicalGraphQLRoute(router, authManager, services.graphqlHandler)
 	services.websocketHandler.RegisterWebSocketRoutes(router, func(required string, next http.HandlerFunc) http.Handler {
 		return requireAuth(authManager)(requireRoleHandler(required, next))
@@ -201,10 +202,12 @@ func runMigrations(db *sql.DB) error {
 			email VARCHAR(255) UNIQUE NOT NULL,
 			password_hash VARCHAR(255) NOT NULL,
 			role VARCHAR(50) DEFAULT 'user',
+			active BOOLEAN DEFAULT true,
 			tenant_id VARCHAR(255) DEFAULT 'default',
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true`,
 		`CREATE TABLE IF NOT EXISTS vms (
 			id VARCHAR(255) PRIMARY KEY,
 			name VARCHAR(255) NOT NULL,
@@ -227,6 +230,29 @@ func runMigrations(db *sql.DB) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_vm_metrics_vm_id ON vm_metrics(vm_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_vm_metrics_timestamp ON vm_metrics(timestamp)`,
+		`CREATE TABLE IF NOT EXISTS networks (
+			id VARCHAR(255) PRIMARY KEY,
+			name VARCHAR(255) NOT NULL,
+			type VARCHAR(50) NOT NULL DEFAULT 'bridged',
+			subnet VARCHAR(255) NOT NULL,
+			gateway VARCHAR(255),
+			status VARCHAR(50) NOT NULL DEFAULT 'active',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS vm_interfaces (
+			id VARCHAR(255) PRIMARY KEY,
+			vm_id VARCHAR(255) NOT NULL REFERENCES vms(id) ON DELETE CASCADE,
+			network_id VARCHAR(255) REFERENCES networks(id) ON DELETE SET NULL,
+			name VARCHAR(255) NOT NULL,
+			mac_address VARCHAR(255) NOT NULL,
+			ip_address VARCHAR(255),
+			status VARCHAR(50) NOT NULL DEFAULT 'attached',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_vm_interfaces_vm_id ON vm_interfaces(vm_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_vm_interfaces_network_id ON vm_interfaces(network_id)`,
 	}
 
 	for _, migration := range migrations {
@@ -746,6 +772,325 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 	router.HandleFunc("/monitoring/alerts", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []map[string]interface{}{})
 	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/networks", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := db.Query(`
+			SELECT id, name, type, subnet, gateway, status, created_at, updated_at
+			FROM networks
+			ORDER BY created_at DESC
+		`)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to query networks")
+			return
+		}
+		defer rows.Close()
+
+		networks := make([]map[string]interface{}, 0)
+		for rows.Next() {
+			var id, name, networkType, subnet, status string
+			var gateway sql.NullString
+			var createdAt, updatedAt time.Time
+
+			if err := rows.Scan(&id, &name, &networkType, &subnet, &gateway, &status, &createdAt, &updatedAt); err != nil {
+				continue
+			}
+
+			networks = append(networks, map[string]interface{}{
+				"id":         id,
+				"name":       name,
+				"type":       networkType,
+				"subnet":     subnet,
+				"gateway":    nullableString(gateway),
+				"status":     status,
+				"created_at": createdAt.Format(time.RFC3339),
+				"updated_at": updatedAt.Format(time.RFC3339),
+			})
+		}
+
+		writeJSON(w, http.StatusOK, networks)
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/networks", func(w http.ResponseWriter, r *http.Request) {
+		var createReq struct {
+			Name    string `json:"name"`
+			Type    string `json:"type"`
+			Subnet  string `json:"subnet"`
+			Gateway string `json:"gateway"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&createReq); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		if strings.TrimSpace(createReq.Name) == "" || strings.TrimSpace(createReq.Subnet) == "" {
+			writeJSONError(w, http.StatusBadRequest, "name and subnet are required")
+			return
+		}
+
+		if strings.TrimSpace(createReq.Type) == "" {
+			createReq.Type = "bridged"
+		}
+
+		networkID := fmt.Sprintf("net-%d", time.Now().UnixNano())
+		if _, err := db.Exec(`
+			INSERT INTO networks (id, name, type, subnet, gateway, status, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, NULLIF($5, ''), 'active', NOW(), NOW())
+		`, networkID, createReq.Name, createReq.Type, createReq.Subnet, createReq.Gateway); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to create network")
+			return
+		}
+
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"id":         networkID,
+			"name":       createReq.Name,
+			"type":       createReq.Type,
+			"subnet":     createReq.Subnet,
+			"gateway":    emptyStringToNil(createReq.Gateway),
+			"status":     "active",
+			"created_at": time.Now().UTC().Format(time.RFC3339),
+			"updated_at": time.Now().UTC().Format(time.RFC3339),
+		})
+	}).Methods(http.MethodPost)
+
+	router.HandleFunc("/networks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		networkID := mux.Vars(r)["id"]
+
+		var id, name, networkType, subnet, status string
+		var gateway sql.NullString
+		var createdAt, updatedAt time.Time
+		err := db.QueryRow(`
+			SELECT id, name, type, subnet, gateway, status, created_at, updated_at
+			FROM networks WHERE id = $1
+		`, networkID).Scan(&id, &name, &networkType, &subnet, &gateway, &status, &createdAt, &updatedAt)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				writeJSONError(w, http.StatusNotFound, "network not found")
+				return
+			}
+			writeJSONError(w, http.StatusInternalServerError, "failed to query network")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id":         id,
+			"name":       name,
+			"type":       networkType,
+			"subnet":     subnet,
+			"gateway":    nullableString(gateway),
+			"status":     status,
+			"created_at": createdAt.Format(time.RFC3339),
+			"updated_at": updatedAt.Format(time.RFC3339),
+		})
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/networks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		networkID := mux.Vars(r)["id"]
+		result, err := db.Exec(`DELETE FROM networks WHERE id = $1`, networkID)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to delete network")
+			return
+		}
+
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected == 0 {
+			writeJSONError(w, http.StatusNotFound, "network not found")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id":     networkID,
+			"status": "deleted",
+		})
+	}).Methods(http.MethodDelete)
+
+	router.HandleFunc("/vms/{vm_id}/interfaces", func(w http.ResponseWriter, r *http.Request) {
+		vmID := mux.Vars(r)["vm_id"]
+
+		rows, err := db.Query(`
+			SELECT id, vm_id, network_id, name, mac_address, ip_address, status, created_at, updated_at
+			FROM vm_interfaces
+			WHERE vm_id = $1
+			ORDER BY created_at DESC
+		`, vmID)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to query VM interfaces")
+			return
+		}
+		defer rows.Close()
+
+		interfaces := make([]map[string]interface{}, 0)
+		for rows.Next() {
+			var id, currentVMID, name, macAddress, status string
+			var networkID, ipAddress sql.NullString
+			var createdAt, updatedAt time.Time
+
+			if err := rows.Scan(&id, &currentVMID, &networkID, &name, &macAddress, &ipAddress, &status, &createdAt, &updatedAt); err != nil {
+				continue
+			}
+
+			interfaces = append(interfaces, map[string]interface{}{
+				"id":         id,
+				"vm_id":      currentVMID,
+				"network_id": nullableString(networkID),
+				"name":       name,
+				"mac_address": macAddress,
+				"ip_address": nullableString(ipAddress),
+				"status":     status,
+				"created_at": createdAt.Format(time.RFC3339),
+				"updated_at": updatedAt.Format(time.RFC3339),
+			})
+		}
+
+		writeJSON(w, http.StatusOK, interfaces)
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/vms/{vm_id}/interfaces", func(w http.ResponseWriter, r *http.Request) {
+		vmID := mux.Vars(r)["vm_id"]
+
+		var createReq struct {
+			NetworkID  string `json:"network_id"`
+			Name       string `json:"name"`
+			MACAddress string `json:"mac_address"`
+			IPAddress  string `json:"ip_address"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&createReq); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		if strings.TrimSpace(createReq.Name) == "" || strings.TrimSpace(createReq.MACAddress) == "" {
+			writeJSONError(w, http.StatusBadRequest, "name and mac_address are required")
+			return
+		}
+
+		var vmExists bool
+		if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM vms WHERE id = $1)`, vmID).Scan(&vmExists); err != nil || !vmExists {
+			writeJSONError(w, http.StatusNotFound, "vm not found")
+			return
+		}
+
+		interfaceID := fmt.Sprintf("iface-%d", time.Now().UnixNano())
+		if _, err := db.Exec(`
+			INSERT INTO vm_interfaces (id, vm_id, network_id, name, mac_address, ip_address, status, created_at, updated_at)
+			VALUES ($1, $2, NULLIF($3, ''), $4, $5, NULLIF($6, ''), 'attached', NOW(), NOW())
+		`, interfaceID, vmID, createReq.NetworkID, createReq.Name, createReq.MACAddress, createReq.IPAddress); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to attach interface")
+			return
+		}
+
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"id":          interfaceID,
+			"vm_id":       vmID,
+			"network_id":  emptyStringToNil(createReq.NetworkID),
+			"name":        createReq.Name,
+			"mac_address": createReq.MACAddress,
+			"ip_address":  emptyStringToNil(createReq.IPAddress),
+			"status":      "attached",
+			"created_at":  time.Now().UTC().Format(time.RFC3339),
+			"updated_at":  time.Now().UTC().Format(time.RFC3339),
+		})
+	}).Methods(http.MethodPost)
+
+	router.HandleFunc("/vms/{vm_id}/interfaces/{id}", func(w http.ResponseWriter, r *http.Request) {
+		vmID := mux.Vars(r)["vm_id"]
+		interfaceID := mux.Vars(r)["id"]
+
+		var id, currentVMID, name, macAddress, status string
+		var networkID, ipAddress sql.NullString
+		var createdAt, updatedAt time.Time
+		err := db.QueryRow(`
+			SELECT id, vm_id, network_id, name, mac_address, ip_address, status, created_at, updated_at
+			FROM vm_interfaces
+			WHERE vm_id = $1 AND id = $2
+		`, vmID, interfaceID).Scan(&id, &currentVMID, &networkID, &name, &macAddress, &ipAddress, &status, &createdAt, &updatedAt)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				writeJSONError(w, http.StatusNotFound, "vm interface not found")
+				return
+			}
+			writeJSONError(w, http.StatusInternalServerError, "failed to query VM interface")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id":          id,
+			"vm_id":       currentVMID,
+			"network_id":  nullableString(networkID),
+			"name":        name,
+			"mac_address": macAddress,
+			"ip_address":  nullableString(ipAddress),
+			"status":      status,
+			"created_at":  createdAt.Format(time.RFC3339),
+			"updated_at":  updatedAt.Format(time.RFC3339),
+		})
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/vms/{vm_id}/interfaces/{id}", func(w http.ResponseWriter, r *http.Request) {
+		vmID := mux.Vars(r)["vm_id"]
+		interfaceID := mux.Vars(r)["id"]
+
+		var updateReq struct {
+			NetworkID string `json:"network_id"`
+			Name      string `json:"name"`
+			IPAddress string `json:"ip_address"`
+			Status    string `json:"status"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&updateReq); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		result, err := db.Exec(`
+			UPDATE vm_interfaces
+			SET network_id = NULLIF($3, ''), name = COALESCE(NULLIF($4, ''), name), ip_address = NULLIF($5, ''), status = COALESCE(NULLIF($6, ''), status), updated_at = NOW()
+			WHERE vm_id = $1 AND id = $2
+		`, vmID, interfaceID, updateReq.NetworkID, updateReq.Name, updateReq.IPAddress, updateReq.Status)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to update VM interface")
+			return
+		}
+
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected == 0 {
+			writeJSONError(w, http.StatusNotFound, "vm interface not found")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id":         interfaceID,
+			"vm_id":      vmID,
+			"network_id": emptyStringToNil(updateReq.NetworkID),
+			"name":       updateReq.Name,
+			"ip_address": emptyStringToNil(updateReq.IPAddress),
+			"status":     updateReq.Status,
+		})
+	}).Methods(http.MethodPut)
+
+	router.HandleFunc("/vms/{vm_id}/interfaces/{id}", func(w http.ResponseWriter, r *http.Request) {
+		vmID := mux.Vars(r)["vm_id"]
+		interfaceID := mux.Vars(r)["id"]
+
+		result, err := db.Exec(`DELETE FROM vm_interfaces WHERE vm_id = $1 AND id = $2`, vmID, interfaceID)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to detach VM interface")
+			return
+		}
+
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected == 0 {
+			writeJSONError(w, http.StatusNotFound, "vm interface not found")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id":     interfaceID,
+			"vm_id":  vmID,
+			"status": "detached",
+		})
+	}).Methods(http.MethodDelete)
 }
 
 func initializeCanonicalServices(cfg *config.Config, db *sql.DB, authManager *auth.SimpleAuthManager) (*canonicalServices, error) {
@@ -790,6 +1135,350 @@ func registerCanonicalSecurityRoutes(router *mux.Router, authManager *auth.Simpl
 
 	registerSecurityRouteSet(router.PathPrefix("/api/security").Subrouter(), authManager, handlers)
 	registerSecurityRouteSet(router.PathPrefix("/api/admin/security").Subrouter(), authManager, handlers)
+}
+
+func registerCanonicalAdminRoutes(router *mux.Router, authManager *auth.SimpleAuthManager, db *sql.DB) {
+	adminRouter := router.PathPrefix("/api/admin").Subrouter()
+	adminRouter.Use(requireAuth(authManager))
+	adminRouter.Use(requireAnyRoleMiddleware("admin", "super-admin"))
+
+	adminRouter.HandleFunc("/users", listCanonicalAdminUsers(db)).Methods(http.MethodGet)
+	adminRouter.HandleFunc("/users", createCanonicalAdminUser(db)).Methods(http.MethodPost)
+	adminRouter.HandleFunc("/users/{id}", updateCanonicalAdminUser(db)).Methods(http.MethodPut)
+	adminRouter.HandleFunc("/users/{id}", deleteCanonicalAdminUser(db)).Methods(http.MethodDelete)
+	adminRouter.HandleFunc("/users/{id}/roles", assignCanonicalAdminUserRoles(db)).Methods(http.MethodPost)
+}
+
+type canonicalAdminUser struct {
+	ID        int       `json:"id"`
+	Username  string    `json:"username"`
+	Email     string    `json:"email"`
+	Role      string    `json:"role"`
+	Active    bool      `json:"active"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type canonicalAdminUserListResponse struct {
+	Users      []canonicalAdminUser `json:"users"`
+	Total      int                  `json:"total"`
+	Page       int                  `json:"page"`
+	PageSize   int                  `json:"page_size"`
+	TotalPages int                  `json:"total_pages"`
+}
+
+type canonicalAdminCreateUserRequest struct {
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Role     string `json:"role"`
+}
+
+type canonicalAdminUpdateUserRequest struct {
+	Username string `json:"username,omitempty"`
+	Email    string `json:"email,omitempty"`
+	Role     string `json:"role,omitempty"`
+	Active   *bool  `json:"active,omitempty"`
+}
+
+func listCanonicalAdminUsers(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		page := parsePositiveInt(r.URL.Query().Get("page"), 1)
+		pageSize := parsePositiveInt(r.URL.Query().Get("page_size"), 20)
+		if pageSize > 100 {
+			pageSize = 100
+		}
+
+		search := strings.TrimSpace(r.URL.Query().Get("search"))
+		role := normalizeCanonicalAdminRole(r.URL.Query().Get("role"))
+		if rawRole := strings.TrimSpace(r.URL.Query().Get("role")); rawRole != "" && role == "" {
+			writeJSONError(w, http.StatusBadRequest, "invalid role filter")
+			return
+		}
+
+		offset := (page - 1) * pageSize
+		whereParts := make([]string, 0, 2)
+		args := make([]interface{}, 0, 4)
+
+		if search != "" {
+			whereParts = append(whereParts, fmt.Sprintf("(username ILIKE $%d OR email ILIKE $%d)", len(args)+1, len(args)+2))
+			args = append(args, "%"+search+"%", "%"+search+"%")
+		}
+		if role != "" {
+			whereParts = append(whereParts, fmt.Sprintf("role = $%d", len(args)+1))
+			args = append(args, role)
+		}
+
+		whereClause := ""
+		if len(whereParts) > 0 {
+			whereClause = " WHERE " + strings.Join(whereParts, " AND ")
+		}
+
+		var total int
+		countQuery := "SELECT COUNT(*) FROM users" + whereClause
+		if err := db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to count users: %v", err))
+			return
+		}
+
+		listQuery := fmt.Sprintf(`
+			SELECT id, username, email, role, active, created_at, updated_at
+			FROM users
+			%s
+			ORDER BY created_at DESC
+			LIMIT $%d OFFSET $%d
+		`, whereClause, len(args)+1, len(args)+2)
+		listArgs := append(args, pageSize, offset)
+
+		rows, err := db.Query(listQuery, listArgs...)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to list users: %v", err))
+			return
+		}
+		defer rows.Close()
+
+		users := make([]canonicalAdminUser, 0)
+		for rows.Next() {
+			var user canonicalAdminUser
+			if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.Role, &user.Active, &user.CreatedAt, &user.UpdatedAt); err != nil {
+				writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to scan user: %v", err))
+				return
+			}
+			users = append(users, user)
+		}
+
+		writeJSON(w, http.StatusOK, canonicalAdminUserListResponse{
+			Users:      users,
+			Total:      total,
+			Page:       page,
+			PageSize:   pageSize,
+			TotalPages: maxInt(1, (total+pageSize-1)/pageSize),
+		})
+	}
+}
+
+func createCanonicalAdminUser(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req canonicalAdminCreateUserRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		req.Username = strings.TrimSpace(req.Username)
+		req.Email = strings.TrimSpace(req.Email)
+		req.Role = normalizeCanonicalAdminRole(req.Role)
+		if req.Role == "" {
+			req.Role = "user"
+		}
+
+		if req.Username == "" || req.Email == "" || strings.TrimSpace(req.Password) == "" {
+			writeJSONError(w, http.StatusBadRequest, "username, email, and password are required")
+			return
+		}
+		if !strings.Contains(req.Email, "@") {
+			writeJSONError(w, http.StatusBadRequest, "invalid email format")
+			return
+		}
+
+		var user canonicalAdminUser
+		err := db.QueryRow(`
+			INSERT INTO users (username, email, password_hash, role, active, tenant_id, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, true, 'default', NOW(), NOW())
+			RETURNING id, username, email, role, active, created_at, updated_at
+		`, req.Username, req.Email, req.Password, req.Role).Scan(
+			&user.ID,
+			&user.Username,
+			&user.Email,
+			&user.Role,
+			&user.Active,
+			&user.CreatedAt,
+			&user.UpdatedAt,
+		)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create user: %v", err))
+			return
+		}
+
+		writeJSON(w, http.StatusCreated, user)
+	}
+}
+
+func updateCanonicalAdminUser(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, err := canonicalAdminUserID(mux.Vars(r)["id"])
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		var req canonicalAdminUpdateUserRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		updates := make([]string, 0, 4)
+		args := make([]interface{}, 0, 5)
+
+		if username := strings.TrimSpace(req.Username); username != "" {
+			updates = append(updates, fmt.Sprintf("username = $%d", len(args)+1))
+			args = append(args, username)
+		}
+		if email := strings.TrimSpace(req.Email); email != "" {
+			if !strings.Contains(email, "@") {
+				writeJSONError(w, http.StatusBadRequest, "invalid email format")
+				return
+			}
+			updates = append(updates, fmt.Sprintf("email = $%d", len(args)+1))
+			args = append(args, email)
+		}
+		if req.Role != "" {
+			role := normalizeCanonicalAdminRole(req.Role)
+			if role == "" {
+				writeJSONError(w, http.StatusBadRequest, "invalid role")
+				return
+			}
+			updates = append(updates, fmt.Sprintf("role = $%d", len(args)+1))
+			args = append(args, role)
+		}
+		if req.Active != nil {
+			updates = append(updates, fmt.Sprintf("active = $%d", len(args)+1))
+			args = append(args, *req.Active)
+		}
+		if len(updates) == 0 {
+			writeJSONError(w, http.StatusBadRequest, "no fields to update")
+			return
+		}
+
+		updates = append(updates, "updated_at = NOW()")
+		args = append(args, userID)
+
+		query := fmt.Sprintf(`
+			UPDATE users
+			SET %s
+			WHERE id = $%d
+			RETURNING id, username, email, role, active, created_at, updated_at
+		`, strings.Join(updates, ", "), len(args))
+
+		var user canonicalAdminUser
+		err = db.QueryRow(query, args...).Scan(
+			&user.ID,
+			&user.Username,
+			&user.Email,
+			&user.Role,
+			&user.Active,
+			&user.CreatedAt,
+			&user.UpdatedAt,
+		)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				writeJSONError(w, http.StatusNotFound, "user not found")
+				return
+			}
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update user: %v", err))
+			return
+		}
+
+		writeJSON(w, http.StatusOK, user)
+	}
+}
+
+func deleteCanonicalAdminUser(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, err := canonicalAdminUserID(mux.Vars(r)["id"])
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		result, err := db.Exec(`DELETE FROM users WHERE id = $1`, userID)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to delete user: %v", err))
+			return
+		}
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected == 0 {
+			writeJSONError(w, http.StatusNotFound, "user not found")
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func assignCanonicalAdminUserRoles(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, err := canonicalAdminUserID(mux.Vars(r)["id"])
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		var req struct {
+			Roles []string `json:"roles"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if len(req.Roles) == 0 {
+			writeJSONError(w, http.StatusBadRequest, "at least one role is required")
+			return
+		}
+
+		role := normalizeCanonicalAdminRole(req.Roles[0])
+		if role == "" {
+			writeJSONError(w, http.StatusBadRequest, "invalid role")
+			return
+		}
+
+		var user canonicalAdminUser
+		err = db.QueryRow(`
+			UPDATE users
+			SET role = $1, updated_at = NOW()
+			WHERE id = $2
+			RETURNING id, username, email, role, active, created_at, updated_at
+		`, role, userID).Scan(
+			&user.ID,
+			&user.Username,
+			&user.Email,
+			&user.Role,
+			&user.Active,
+			&user.CreatedAt,
+			&user.UpdatedAt,
+		)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				writeJSONError(w, http.StatusNotFound, "user not found")
+				return
+			}
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to assign role: %v", err))
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"user":    user,
+			"message": "roles updated",
+		})
+	}
+}
+
+func canonicalAdminUserID(raw string) (int, error) {
+	userID, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || userID <= 0 {
+		return 0, fmt.Errorf("invalid user ID")
+	}
+	return userID, nil
+}
+
+func normalizeCanonicalAdminRole(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "admin", "operator", "viewer", "user", "super-admin":
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		return ""
+	}
 }
 
 func registerSecurityRouteSet(router *mux.Router, authManager *auth.SimpleAuthManager, handlers *securityapi.SecurityHandlers) {
@@ -909,6 +1598,9 @@ func apiInfoHandler() http.HandlerFunc {
 				"/api/security/audit/statistics",
 				"/api/security/rbac/roles",
 				"/api/security/rbac/permissions",
+				"/api/admin/users",
+				"/api/admin/users/{id}",
+				"/api/admin/users/{id}/roles",
 				"/api/admin/security/threats",
 				"/api/admin/security/compliance",
 				"/api/admin/security/compliance/check",
@@ -917,6 +1609,10 @@ func apiInfoHandler() http.HandlerFunc {
 				"/api/admin/security/audit/export",
 				"/api/admin/security/events/{eventId}/acknowledge",
 				"/graphql",
+				"/api/v1/networks",
+				"/api/v1/networks/{id}",
+				"/api/v1/vms/{vm_id}/interfaces",
+				"/api/v1/vms/{vm_id}/interfaces/{id}",
 				"/api/ws/metrics",
 				"/api/ws/alerts",
 				"/api/ws/logs",
@@ -931,6 +1627,10 @@ func apiInfoHandler() http.HandlerFunc {
 				"/api/monitoring/metrics",
 				"/api/monitoring/vms",
 				"/api/monitoring/alerts",
+				"/api/networks",
+				"/api/networks/{id}",
+				"/api/vms/{vm_id}/interfaces",
+				"/api/vms/{vm_id}/interfaces/{id}",
 				"/ws/metrics",
 				"/ws/alerts",
 				"/ws/logs",
@@ -1262,6 +1962,28 @@ func nullableString(value sql.NullString) interface{} {
 func nullableStringValue(value string) interface{} {
 	if strings.TrimSpace(value) == "" {
 		return nil
+	}
+	return value
+}
+
+func emptyStringToNil(value string) interface{} {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func parsePositiveInt(raw string, fallback int) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value <= 0 {
+		return fallback
 	}
 	return value
 }

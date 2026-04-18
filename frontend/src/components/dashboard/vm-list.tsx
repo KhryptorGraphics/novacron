@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
 import { OSSelector } from "@/components/dashboard/os-selector";
 import {

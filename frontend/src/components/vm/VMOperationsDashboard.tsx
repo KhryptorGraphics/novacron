@@ -1,8 +1,8 @@
 'use client';
 
-import CoreVMsPage from '@/app/core/vms/page';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import CanonicalVMsPage from '@/components/vm/CanonicalVMsPage';
 import { WifiOff } from 'lucide-react';
 
 const VMOperationsDashboard: React.FC = () => {
@@ -26,7 +26,7 @@ const VMOperationsDashboard: React.FC = () => {
         </AlertDescription>
       </Alert>
 
-      <CoreVMsPage />
+      <CanonicalVMsPage />
     </div>
   );
 };

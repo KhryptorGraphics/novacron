@@ -1,0 +1,26 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "email": "test@novacron.com",
+      "role": "admin"
+    },
+    {
+      "id": 2,
+      "email": "user@novacron.com",
+      "role": "user"
+    }
+  ],
+  "vms": [
+    {
+      "id": 1,
+      "name": "test-vm-1",
+      "status": "running"
+    },
+    {
+      "id": 2,
+      "name": "test-vm-2",
+      "status": "stopped"
+    }
+  ]
+}
