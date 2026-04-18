@@ -94,10 +94,9 @@ func NewVMDriverFactory(config VMDriverConfig) VMDriverFactory {
 			return nil, fmt.Errorf("kata driver is not available in this build")
 
 		case VMTypeKVM:
-			// Core mode: use a no-op driver so tests and core server can run without KVM
-			driver, err = NewCoreStubDriver(map[string]interface{}{"node_id": config.NodeID})
+			driver, err = createKVMDriver(config)
 			if err != nil {
-				return nil, fmt.Errorf("failed to initialize core stub driver: %w", err)
+				return nil, err
 			}
 
 		case VMTypeProcess:
@@ -141,6 +140,40 @@ func makeDirectoryIfNotExists(path string) error {
 	}
 
 	return nil
+}
+
+func createKVMDriver(config VMDriverConfig) (VMDriver, error) {
+	driverConfig := map[string]interface{}{
+		"node_id":   config.NodeID,
+		"qemu_path": config.QEMUBinaryPath,
+		"vm_path":   config.VMBasePath,
+	}
+
+	driver, err := NewKVMDriver(driverConfig)
+	if err == nil {
+		return driver, nil
+	}
+
+	if !allowStubKVMFallback() {
+		return nil, fmt.Errorf("failed to initialize KVM driver: %w", err)
+	}
+
+	log.Printf("Falling back to CoreStubDriver because NOVACRON_ALLOW_STUB_KVM is enabled: %v", err)
+	stubDriver, stubErr := NewCoreStubDriver(map[string]interface{}{"node_id": config.NodeID})
+	if stubErr != nil {
+		return nil, fmt.Errorf("failed to initialize KVM driver: %w; stub fallback also failed: %v", err, stubErr)
+	}
+
+	return stubDriver, nil
+}
+
+func allowStubKVMFallback() bool {
+	switch os.Getenv("NOVACRON_ALLOW_STUB_KVM") {
+	case "1", "true", "TRUE", "yes", "YES", "on", "ON":
+		return true
+	default:
+		return false
+	}
 }
 
 // VMDriverManager manages VM drivers

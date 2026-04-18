@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -93,10 +94,24 @@ scheduler:
 	}
 }
 
-func TestEnsureNonStubKVMRuntimeRejectsCoreStub(t *testing.T) {
+func TestEnsureNonStubKVMRuntimeUsesRealKVMWhenAvailable(t *testing.T) {
 	t.Parallel()
 
-	manager, err := vm.NewVMManager(vm.DefaultVMManagerConfig())
+	manager, err := vm.NewVMManager(newTestVMManagerConfig(t, "qemu-system-x86_64"))
+	if err != nil {
+		t.Fatalf("NewVMManager returned error: %v", err)
+	}
+	defer manager.Stop()
+
+	if err := ensureNonStubKVMRuntime(manager); err != nil {
+		t.Fatalf("ensureNonStubKVMRuntime returned error: %v", err)
+	}
+}
+
+func TestEnsureNonStubKVMRuntimeRejectsExplicitStubFallback(t *testing.T) {
+	t.Setenv("NOVACRON_ALLOW_STUB_KVM", "1")
+
+	manager, err := vm.NewVMManager(newTestVMManagerConfig(t, "missing-qemu-for-stub-test"))
 	if err != nil {
 		t.Fatalf("NewVMManager returned error: %v", err)
 	}
@@ -109,4 +124,28 @@ func TestEnsureNonStubKVMRuntimeRejectsCoreStub(t *testing.T) {
 	if !strings.Contains(err.Error(), "CoreStubDriver") {
 		t.Fatalf("ensureNonStubKVMRuntime error = %q, want mention of CoreStubDriver", err)
 	}
+}
+
+func newTestVMManagerConfig(t *testing.T, qemuPath string) vm.VMManagerConfig {
+	t.Helper()
+
+	if qemuPath != "" {
+		if qemuPath == "qemu-system-x86_64" {
+			if _, err := exec.LookPath(qemuPath); err != nil {
+				t.Skipf("qemu-system-x86_64 not available in PATH: %v", err)
+			}
+		}
+	}
+
+	config := vm.DefaultVMManagerConfig()
+	config.Drivers[vm.VMTypeKVM] = vm.VMDriverConfigManager{
+		Enabled: true,
+		Config: map[string]interface{}{
+			"node_id":   "test-node",
+			"qemu_path": qemuPath,
+			"vm_path":   filepath.Join(t.TempDir(), "vms"),
+		},
+	}
+
+	return config
 }

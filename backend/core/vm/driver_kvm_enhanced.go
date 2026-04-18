@@ -45,13 +45,36 @@ func NewKVMDriver(config map[string]interface{}) (VMDriver, error) {
 		qemuPath = path
 	}
 
-	return NewKVMDriverEnhanced(qemuPath)
+	vmBasePath := "/var/lib/novacron/vms"
+	if path, ok := config["vm_path"].(string); ok && path != "" {
+		vmBasePath = path
+	}
+	if path, ok := config["base_path"].(string); ok && path != "" {
+		vmBasePath = path
+	}
+
+	return newKVMDriverEnhanced(qemuPath, vmBasePath)
 }
 
 // NewKVMDriverEnhanced creates a new enhanced KVM driver
 func NewKVMDriverEnhanced(qemuPath string) (VMDriver, error) {
+	return newKVMDriverEnhanced(qemuPath, "/var/lib/novacron/vms")
+}
+
+func newKVMDriverEnhanced(qemuPath, vmBasePath string) (VMDriver, error) {
 	if qemuPath == "" {
 		qemuPath = "/usr/bin/qemu-system-x86_64"
+	}
+	if vmBasePath == "" {
+		vmBasePath = "/var/lib/novacron/vms"
+	}
+
+	if !filepath.IsAbs(qemuPath) {
+		resolvedPath, err := exec.LookPath(qemuPath)
+		if err != nil {
+			return nil, fmt.Errorf("QEMU binary %q not found in PATH: %w", qemuPath, err)
+		}
+		qemuPath = resolvedPath
 	}
 
 	// Check if QEMU binary exists
@@ -59,7 +82,6 @@ func NewKVMDriverEnhanced(qemuPath string) (VMDriver, error) {
 		return nil, fmt.Errorf("QEMU binary not found at %s: %w", qemuPath, err)
 	}
 
-	vmBasePath := "/var/lib/novacron/vms"
 	if err := os.MkdirAll(vmBasePath, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create VM base directory: %w", err)
 	}
@@ -535,20 +557,20 @@ func (d *KVMDriverEnhanced) SupportsNUMA() bool {
 func (d *KVMDriverEnhanced) GetCapabilities(ctx context.Context) (*HypervisorCapabilities, error) {
 	return &HypervisorCapabilities{
 		Type:                   VMTypeKVM,
-		Version:               "QEMU/KVM",
-		SupportsPause:         d.SupportsPause(),
-		SupportsResume:        d.SupportsResume(),
-		SupportsSnapshot:      d.SupportsSnapshot(),
-		SupportsMigrate:       d.SupportsMigrate(),
-		SupportsLiveMigration: d.SupportsLiveMigration(),
-		SupportsHotPlug:       d.SupportsHotPlug(),
+		Version:                "QEMU/KVM",
+		SupportsPause:          d.SupportsPause(),
+		SupportsResume:         d.SupportsResume(),
+		SupportsSnapshot:       d.SupportsSnapshot(),
+		SupportsMigrate:        d.SupportsMigrate(),
+		SupportsLiveMigration:  d.SupportsLiveMigration(),
+		SupportsHotPlug:        d.SupportsHotPlug(),
 		SupportsGPUPassthrough: d.SupportsGPUPassthrough(),
-		SupportsSRIOV:         d.SupportsSRIOV(),
-		SupportsNUMA:          d.SupportsNUMA(),
-		MaxVCPUs:              256,
-		MaxMemoryMB:           1024 * 1024, // 1TB
-		SupportedFeatures:     []string{"kvm", "qemu", "x86_64"},
-		HardwareExtensions:    []string{"vmx", "svm"},
+		SupportsSRIOV:          d.SupportsSRIOV(),
+		SupportsNUMA:           d.SupportsNUMA(),
+		MaxVCPUs:               256,
+		MaxMemoryMB:            1024 * 1024, // 1TB
+		SupportedFeatures:      []string{"kvm", "qemu", "x86_64"},
+		HardwareExtensions:     []string{"vmx", "svm"},
 	}, nil
 }
 
@@ -560,22 +582,22 @@ func (d *KVMDriverEnhanced) GetHypervisorInfo(ctx context.Context) (*HypervisorI
 	}
 
 	return &HypervisorInfo{
-		Type:            VMTypeKVM,
-		Version:         "QEMU/KVM",
-		ConnectionURI:   "qemu:///system",
-		Hostname:        "localhost",
-		CPUModel:        "host",
-		CPUCores:        8,  // Default
-		MemoryMB:        8192, // Default 8GB
-		Virtualization:  "KVM",
-		IOMMUEnabled:    false,
-		NUMANodes:       1,
-		GPUDevices:      []GPUDevice{},
-		NetworkDevices:  []NetworkDevice{},
-		StorageDevices:  []StorageDevice{},
-		ActiveVMs:       len(d.vms),
-		Capabilities:    capabilities,
-		Metadata:        map[string]interface{}{
+		Type:           VMTypeKVM,
+		Version:        "QEMU/KVM",
+		ConnectionURI:  "qemu:///system",
+		Hostname:       "localhost",
+		CPUModel:       "host",
+		CPUCores:       8,    // Default
+		MemoryMB:       8192, // Default 8GB
+		Virtualization: "KVM",
+		IOMMUEnabled:   false,
+		NUMANodes:      1,
+		GPUDevices:     []GPUDevice{},
+		NetworkDevices: []NetworkDevice{},
+		StorageDevices: []StorageDevice{},
+		ActiveVMs:      len(d.vms),
+		Capabilities:   capabilities,
+		Metadata: map[string]interface{}{
 			"qemu_path": d.qemuBinaryPath,
 			"base_path": d.vmBasePath,
 		},

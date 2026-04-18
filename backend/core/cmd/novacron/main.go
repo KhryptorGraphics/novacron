@@ -204,9 +204,15 @@ func defaultRuntimeConfig(nodeID, dataDir string) runtimeConfig {
 				MemoryMB:  1024,
 			},
 		},
-		VMManager: vm.DefaultVMManagerConfig(),
+		VMManager: defaultVMManagerRuntimeConfig(nodeID, dataDir),
 		Scheduler: scheduler.DefaultSchedulerConfig(),
 	}
+}
+
+func defaultVMManagerRuntimeConfig(nodeID, dataDir string) vm.VMManagerConfig {
+	config := vm.DefaultVMManagerConfig()
+	applyDefaultVMManagerDriverConfig(&config, nodeID, dataDir)
+	return config
 }
 
 func loadConfig(path, nodeID, dataDir string) (runtimeConfig, error) {
@@ -312,6 +318,43 @@ func applyRuntimeConfigDefaults(config *runtimeConfig, nodeID, dataDir string) {
 	}
 	if config.VMManager.Drivers == nil {
 		config.VMManager.Drivers = make(map[vm.VMType]vm.VMDriverConfigManager)
+	}
+	applyDefaultVMManagerDriverConfig(&config.VMManager, nodeID, dataDir)
+}
+
+func applyDefaultVMManagerDriverConfig(config *vm.VMManagerConfig, nodeID, dataDir string) {
+	if config == nil {
+		return
+	}
+	if config.Drivers == nil {
+		config.Drivers = make(map[vm.VMType]vm.VMDriverConfigManager)
+	}
+
+	if driverConfig, exists := config.Drivers[vm.VMTypeKVM]; exists {
+		if driverConfig.Config == nil {
+			driverConfig.Config = make(map[string]interface{})
+		}
+		if nodeIDValue, ok := driverConfig.Config["node_id"].(string); !ok || nodeIDValue == "" {
+			driverConfig.Config["node_id"] = nodeID
+		}
+		if qemuPathValue, ok := driverConfig.Config["qemu_path"].(string); !ok || qemuPathValue == "" {
+			driverConfig.Config["qemu_path"] = "qemu-system-x86_64"
+		}
+		if vmPathValue, ok := driverConfig.Config["vm_path"].(string); !ok || vmPathValue == "" {
+			driverConfig.Config["vm_path"] = filepath.Join(dataDir, "vms")
+		}
+		driverConfig.Enabled = true
+		config.Drivers[vm.VMTypeKVM] = driverConfig
+		return
+	}
+
+	config.Drivers[vm.VMTypeKVM] = vm.VMDriverConfigManager{
+		Enabled: true,
+		Config: map[string]interface{}{
+			"node_id":   nodeID,
+			"qemu_path": "qemu-system-x86_64",
+			"vm_path":   filepath.Join(dataDir, "vms"),
+		},
 	}
 }
 
