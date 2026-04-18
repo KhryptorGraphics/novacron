@@ -214,7 +214,7 @@ func (s *VMScheduler) ScheduleVM(ctx context.Context, vm *VM) (string, error) {
 	}
 
 	// Use the appropriate scheduling policy
-	switch s.config.Policy {
+	switch resolveSchedulerPolicy(vm, s.config.Policy) {
 	case SchedulerPolicyRoundRobin:
 		return s.scheduleRoundRobin(vm, nodes)
 	case SchedulerPolicyBinPacking:
@@ -228,6 +228,28 @@ func (s *VMScheduler) ScheduleVM(ctx context.Context, vm *VM) (string, error) {
 		return "", fmt.Errorf("custom scheduler not set")
 	default:
 		return "", fmt.Errorf("unknown scheduling policy: %s", s.config.Policy)
+	}
+}
+
+func resolveSchedulerPolicy(vm *VM, fallback SchedulerPolicy) SchedulerPolicy {
+	if vm == nil || vm.config.Placement == nil {
+		return fallback
+	}
+
+	switch normalizePlacementPolicy(vm.config.Placement.Policy) {
+	case "", "balanced":
+		return SchedulerPolicyRoundRobin
+	case "consolidated", "efficiency":
+		return SchedulerPolicyBinPacking
+	case "performance", "network-aware":
+		return SchedulerPolicySpreadOut
+	case "custom":
+		if len(normalizeNodeIDSet(vm.config.Placement.PreferredNodes)) > 0 || len(normalizeNodeIDSet(vm.config.Placement.ExcludedNodes)) > 0 {
+			return fallback
+		}
+		return SchedulerPolicyCustom
+	default:
+		return fallback
 	}
 }
 
@@ -525,6 +547,68 @@ func (s *VMScheduler) ReleaseResources(nodeID string, vm *VM) error {
 	return nil
 }
 
+// UpdateReservation updates an existing node reservation for a VM after a stopped-VM resize.
+func (s *VMScheduler) UpdateReservation(vmID string, config VMConfig) error {
+	s.nodesMutex.Lock()
+	defer s.nodesMutex.Unlock()
+
+	s.allocationsMutex.Lock()
+	defer s.allocationsMutex.Unlock()
+
+	allocation, exists := s.allocations[vmID]
+	if !exists {
+		return fmt.Errorf("no existing reservation for VM %s", vmID)
+	}
+
+	node, exists := s.nodes[allocation.NodeID]
+	if !exists {
+		return fmt.Errorf("node %s is not registered", allocation.NodeID)
+	}
+
+	newCPU := cpuAllocationForConfig(config)
+	newMemoryMB := config.MemoryMB
+	newDiskGB := diskAllocationForConfig(config)
+
+	projectedUsedCPU := node.UsedCPU - allocation.CPUCores + newCPU
+	projectedUsedMemoryMB := node.UsedMemoryMB - allocation.MemoryMB + newMemoryMB
+	projectedUsedDiskGB := node.UsedDiskGB - allocation.DiskGB + newDiskGB
+
+	maxCPU := node.TotalCPU
+	if s.config.MaxCPUOvercommit > 1.0 {
+		maxCPU = int(float64(node.TotalCPU) * s.config.MaxCPUOvercommit)
+	}
+	maxMemoryMB := node.TotalMemoryMB
+	if s.config.MaxMemoryOvercommit > 1.0 {
+		maxMemoryMB = int(float64(node.TotalMemoryMB) * s.config.MaxMemoryOvercommit)
+	}
+
+	if projectedUsedCPU > maxCPU {
+		return fmt.Errorf("node %s would exceed CPU capacity", allocation.NodeID)
+	}
+	if projectedUsedMemoryMB > maxMemoryMB {
+		return fmt.Errorf("node %s would exceed memory capacity", allocation.NodeID)
+	}
+	if projectedUsedDiskGB > node.TotalDiskGB {
+		return fmt.Errorf("node %s would exceed disk capacity", allocation.NodeID)
+	}
+
+	node.UsedCPU = maxInt(0, projectedUsedCPU)
+	node.UsedMemoryMB = maxInt(0, projectedUsedMemoryMB)
+	node.UsedDiskGB = maxInt(0, projectedUsedDiskGB)
+	updateNodeUsage(node)
+
+	s.allocations[vmID] = ResourceAllocation{
+		VMID:      vmID,
+		NodeID:    allocation.NodeID,
+		CPUCores:  newCPU,
+		MemoryMB:  newMemoryMB,
+		DiskGB:    newDiskGB,
+		RequestID: allocation.RequestID,
+	}
+
+	return nil
+}
+
 func updateNodeUsage(node *NodeResourceInfo) {
 	if node.TotalCPU > 0 {
 		node.CPUUsagePercent = float64(node.UsedCPU) / float64(node.TotalCPU) * 100
@@ -546,14 +630,21 @@ func updateNodeUsage(node *NodeResourceInfo) {
 }
 
 func cpuAllocationForVM(vm *VM) int {
-	if vm == nil || vm.config.CPUShares <= 0 {
+	if vm == nil {
+		return 0
+	}
+	return cpuAllocationForConfig(vm.config)
+}
+
+func cpuAllocationForConfig(config VMConfig) int {
+	if config.CPUShares <= 0 {
 		return 0
 	}
 
 	// KVM configs in this repo often use Linux-style CPU shares where 1024 ~= 1 vCPU.
-	if vm.config.CPUShares > 128 {
-		cores := vm.config.CPUShares / 1024
-		if vm.config.CPUShares%1024 != 0 {
+	if config.CPUShares > 128 {
+		cores := config.CPUShares / 1024
+		if config.CPUShares%1024 != 0 {
 			cores++
 		}
 		if cores < 1 {
@@ -562,14 +653,21 @@ func cpuAllocationForVM(vm *VM) int {
 		return cores
 	}
 
-	return vm.config.CPUShares
+	return config.CPUShares
 }
 
 func diskAllocationForVM(vm *VM) int {
-	if vm == nil || vm.config.DiskSizeGB < 0 {
+	if vm == nil {
 		return 0
 	}
-	return vm.config.DiskSizeGB
+	return diskAllocationForConfig(vm.config)
+}
+
+func diskAllocationForConfig(config VMConfig) int {
+	if config.DiskSizeGB < 0 {
+		return 0
+	}
+	return config.DiskSizeGB
 }
 
 func firstNonEmpty(values ...string) string {

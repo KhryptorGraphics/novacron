@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
@@ -299,7 +300,7 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 
 	newVM, err := h.vmManager.CreateVM(ctx, createRequest)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		writeError(w, vmHTTPStatus(err), "internal", err.Error())
 		return
 	}
 
@@ -317,6 +318,27 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Location", "/api/v1/vms/"+newVM.ID())
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(response)
+}
+
+func vmHTTPStatus(err error) int {
+	var vmErr *vm.VMError
+	if errors.As(err, &vmErr) {
+		switch vmErr.Code {
+		case "INVALID_ARGUMENT", "INVALID_STATE":
+			return http.StatusBadRequest
+		case "QUOTA_EXCEEDED", "INSUFFICIENT_CAPACITY", "PLACEMENT_UNAVAILABLE":
+			return http.StatusConflict
+		case "VM_NOT_FOUND":
+			return http.StatusNotFound
+		}
+	}
+	if errors.Is(err, vm.ErrVMNotFound) {
+		return http.StatusNotFound
+	}
+	if errors.Is(err, vm.ErrInvalidVMState) {
+		return http.StatusBadRequest
+	}
+	return http.StatusInternalServerError
 }
 
 // GetVM handles GET /vms/{id}

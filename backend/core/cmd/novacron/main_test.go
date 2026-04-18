@@ -65,6 +65,14 @@ hypervisor:
   role: master
 vm_manager:
   default_driver: containerd
+  tenant_quota:
+    default:
+      max_vms: 3
+      max_cpu_units: 8
+      max_memory_mb: 4096
+    overrides:
+      tenant-blue:
+        max_vms: 2
 scheduler:
   minimum_node_count: 3
 `
@@ -88,6 +96,18 @@ scheduler:
 	}
 	if got, want := config.VMManager.DefaultDriver, vm.VMTypeContainerd; got != want {
 		t.Fatalf("vm manager default driver = %q, want %q", got, want)
+	}
+	if got, want := config.VMManager.TenantQuota.Default.MaxVMs, 3; got != want {
+		t.Fatalf("vm manager default tenant max_vms = %d, want %d", got, want)
+	}
+	if got, want := config.VMManager.TenantQuota.Default.MaxCPUUnits, 8; got != want {
+		t.Fatalf("vm manager default tenant max_cpu_units = %d, want %d", got, want)
+	}
+	if got, want := config.VMManager.TenantQuota.Default.MaxMemoryMB, int64(4096); got != want {
+		t.Fatalf("vm manager default tenant max_memory_mb = %d, want %d", got, want)
+	}
+	if got, want := config.VMManager.TenantQuota.Overrides["tenant-blue"].MaxVMs, 2; got != want {
+		t.Fatalf("tenant-blue max_vms = %d, want %d", got, want)
 	}
 	if got, want := config.Scheduler.MinimumNodeCount, 3; got != want {
 		t.Fatalf("scheduler minimum node count = %d, want %d", got, want)

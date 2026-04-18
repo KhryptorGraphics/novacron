@@ -93,6 +93,8 @@ func TestVMManagerCreateUbuntu2404VMUsesBaseImageAndCloudInitISO(t *testing.T) {
 	vmInstance, err := manager.CreateUbuntu2404VM(context.Background(), vm.CreateVMRequest{
 		Name: "ubuntu-24-04-test",
 		Spec: vm.VMConfig{
+			OwnerID:    "owner-a",
+			TenantID:   "tenant-a",
 			CPUShares:  2,
 			MemoryMB:   1024,
 			DiskSizeGB: 20,

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -27,6 +28,9 @@ type VMManager struct {
 	allocatedCPU      int
 	allocatedMemoryMB int64
 	resourceMutex     sync.RWMutex
+	tenantQuotas      TenantQuotaConfig
+	tenantUsage       map[string]*tenantResourceUsage
+	tenantMutex       sync.RWMutex
 }
 
 // VMManagerConfig contains configuration for the VM manager
@@ -34,10 +38,31 @@ type VMManagerConfig struct {
 	DefaultDriver   VMType                           `yaml:"default_driver"`
 	Drivers         map[VMType]VMDriverConfigManager `yaml:"drivers"`
 	Scheduler       VMSchedulerConfig                `yaml:"scheduler"`
+	TenantQuota     TenantQuotaConfig                `yaml:"tenant_quota"`
 	UpdateInterval  time.Duration                    `yaml:"update_interval"`
 	CleanupInterval time.Duration                    `yaml:"cleanup_interval"`
 	DefaultVMType   VMType                           `yaml:"default_vm_type"`
 	RetentionPeriod time.Duration                    `yaml:"retention_period"`
+}
+
+// TenantQuotaLimits defines per-tenant resource limits for VM admission.
+type TenantQuotaLimits struct {
+	MaxVMs      int   `yaml:"max_vms" json:"max_vms"`
+	MaxCPUUnits int   `yaml:"max_cpu_units" json:"max_cpu_units"`
+	MaxMemoryMB int64 `yaml:"max_memory_mb" json:"max_memory_mb"`
+}
+
+// TenantQuotaConfig defines default and per-tenant quota overrides.
+type TenantQuotaConfig struct {
+	Default   TenantQuotaLimits            `yaml:"default" json:"default"`
+	Overrides map[string]TenantQuotaLimits `yaml:"overrides,omitempty" json:"overrides,omitempty"`
+}
+
+type tenantResourceUsage struct {
+	VMCount  int
+	CPUUnits int
+	MemoryMB int64
+	VMIDs    map[string]struct{}
 }
 
 // VMDriverConfigLegacy contains legacy driver-specific configuration (use driver_factory.go VMDriverConfig instead)
@@ -78,6 +103,8 @@ func NewVMManager(config VMManagerConfig) (*VMManager, error) {
 		vmCache:        make(map[string]VMInfo),
 		ctx:            ctx,
 		cancel:         cancel,
+		tenantQuotas:   normalizeTenantQuotaConfig(config.TenantQuota),
+		tenantUsage:    make(map[string]*tenantResourceUsage),
 	}
 
 	// Initialize driver factory with default config
@@ -494,7 +521,206 @@ func DefaultVMManagerConfig() VMManagerConfig {
 			Type:   "round-robin",
 			Config: make(map[string]interface{}),
 		},
+		TenantQuota: TenantQuotaConfig{
+			Overrides: make(map[string]TenantQuotaLimits),
+		},
 	}
+}
+
+func normalizeTenantQuotaConfig(config TenantQuotaConfig) TenantQuotaConfig {
+	if config.Overrides == nil {
+		config.Overrides = make(map[string]TenantQuotaLimits)
+	}
+	return config
+}
+
+func (m *VMManager) tenantQuotaLimits(tenantID string) TenantQuotaLimits {
+	if m == nil {
+		return TenantQuotaLimits{}
+	}
+
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID != "" {
+		if limits, ok := m.tenantQuotas.Overrides[tenantID]; ok {
+			return limits
+		}
+	}
+
+	return m.tenantQuotas.Default
+}
+
+func (m *VMManager) reserveTenantResources(vm *VM) error {
+	if vm == nil {
+		return &VMError{Code: "INVALID_ARGUMENT", Message: "vm is required for tenant accounting", Cause: fmt.Errorf("invalid argument")}
+	}
+
+	tenantID := strings.TrimSpace(vm.config.TenantID)
+	if tenantID == "" {
+		return &VMError{Code: "INVALID_ARGUMENT", Message: "tenant_id is required", Cause: fmt.Errorf("invalid argument")}
+	}
+
+	cpuUnits := cpuAllocationForVM(vm)
+	memoryMB := int64(vm.config.MemoryMB)
+	limits := m.tenantQuotaLimits(tenantID)
+
+	m.tenantMutex.Lock()
+	defer m.tenantMutex.Unlock()
+
+	usage := m.ensureTenantUsageLocked(tenantID)
+	if err := validateTenantUsageDelta(usage, limits, 1, cpuUnits, memoryMB); err != nil {
+		return err
+	}
+
+	usage.VMCount++
+	usage.CPUUnits += cpuUnits
+	usage.MemoryMB += memoryMB
+	usage.VMIDs[vm.ID()] = struct{}{}
+	return nil
+}
+
+func (m *VMManager) releaseTenantResources(vm *VM) {
+	if vm == nil {
+		return
+	}
+
+	tenantID := strings.TrimSpace(vm.config.TenantID)
+	if tenantID == "" {
+		return
+	}
+
+	cpuUnits := cpuAllocationForVM(vm)
+	memoryMB := int64(vm.config.MemoryMB)
+
+	m.tenantMutex.Lock()
+	defer m.tenantMutex.Unlock()
+
+	usage, ok := m.tenantUsage[tenantID]
+	if !ok {
+		return
+	}
+
+	if _, tracked := usage.VMIDs[vm.ID()]; tracked {
+		delete(usage.VMIDs, vm.ID())
+		if usage.VMCount > 0 {
+			usage.VMCount--
+		}
+		usage.CPUUnits -= cpuUnits
+		if usage.CPUUnits < 0 {
+			usage.CPUUnits = 0
+		}
+		usage.MemoryMB -= memoryMB
+		if usage.MemoryMB < 0 {
+			usage.MemoryMB = 0
+		}
+	}
+
+	if usage.VMCount == 0 && usage.CPUUnits == 0 && usage.MemoryMB == 0 {
+		delete(m.tenantUsage, tenantID)
+	}
+}
+
+func (m *VMManager) reserveTenantDelta(tenantID, vmID string, deltaCPU int, deltaMemoryMB int64) error {
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" {
+		return &VMError{Code: "INVALID_ARGUMENT", Message: "tenant_id is required", Cause: fmt.Errorf("invalid argument")}
+	}
+
+	limits := m.tenantQuotaLimits(tenantID)
+
+	m.tenantMutex.Lock()
+	defer m.tenantMutex.Unlock()
+
+	usage := m.ensureTenantUsageLocked(tenantID)
+	if err := validateTenantUsageDelta(usage, limits, 0, deltaCPU, deltaMemoryMB); err != nil {
+		return err
+	}
+
+	usage.CPUUnits += deltaCPU
+	if usage.CPUUnits < 0 {
+		usage.CPUUnits = 0
+	}
+	usage.MemoryMB += deltaMemoryMB
+	if usage.MemoryMB < 0 {
+		usage.MemoryMB = 0
+	}
+	if vmID != "" {
+		usage.VMIDs[vmID] = struct{}{}
+	}
+	return nil
+}
+
+func (m *VMManager) releaseTenantDelta(tenantID string, deltaCPU int, deltaMemoryMB int64) {
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" {
+		return
+	}
+
+	m.tenantMutex.Lock()
+	defer m.tenantMutex.Unlock()
+
+	usage, ok := m.tenantUsage[tenantID]
+	if !ok {
+		return
+	}
+
+	usage.CPUUnits -= deltaCPU
+	if usage.CPUUnits < 0 {
+		usage.CPUUnits = 0
+	}
+	usage.MemoryMB -= deltaMemoryMB
+	if usage.MemoryMB < 0 {
+		usage.MemoryMB = 0
+	}
+	if usage.VMCount == 0 && usage.CPUUnits == 0 && usage.MemoryMB == 0 {
+		delete(m.tenantUsage, tenantID)
+	}
+}
+
+func (m *VMManager) ensureTenantUsageLocked(tenantID string) *tenantResourceUsage {
+	if usage, ok := m.tenantUsage[tenantID]; ok {
+		if usage.VMIDs == nil {
+			usage.VMIDs = make(map[string]struct{})
+		}
+		return usage
+	}
+
+	usage := &tenantResourceUsage{VMIDs: make(map[string]struct{})}
+	m.tenantUsage[tenantID] = usage
+	return usage
+}
+
+func validateTenantUsageDelta(usage *tenantResourceUsage, limits TenantQuotaLimits, deltaVMs, deltaCPU int, deltaMemoryMB int64) error {
+	if usage == nil {
+		usage = &tenantResourceUsage{}
+	}
+
+	nextVMs := usage.VMCount + deltaVMs
+	nextCPU := usage.CPUUnits + deltaCPU
+	nextMemory := usage.MemoryMB + deltaMemoryMB
+
+	if limits.MaxVMs > 0 && nextVMs > limits.MaxVMs {
+		return &VMError{
+			Code:    "QUOTA_EXCEEDED",
+			Message: fmt.Sprintf("tenant VM quota exceeded: limit %d, requested total %d", limits.MaxVMs, nextVMs),
+			Cause:   fmt.Errorf("tenant vm quota exceeded"),
+		}
+	}
+	if limits.MaxCPUUnits > 0 && nextCPU > limits.MaxCPUUnits {
+		return &VMError{
+			Code:    "QUOTA_EXCEEDED",
+			Message: fmt.Sprintf("tenant CPU quota exceeded: limit %d, requested total %d", limits.MaxCPUUnits, nextCPU),
+			Cause:   fmt.Errorf("tenant cpu quota exceeded"),
+		}
+	}
+	if limits.MaxMemoryMB > 0 && nextMemory > limits.MaxMemoryMB {
+		return &VMError{
+			Code:    "QUOTA_EXCEEDED",
+			Message: fmt.Sprintf("tenant memory quota exceeded: limit %dMB, requested total %dMB", limits.MaxMemoryMB, nextMemory),
+			Cause:   fmt.Errorf("tenant memory quota exceeded"),
+		}
+	}
+
+	return nil
 }
 
 // Migration represents a VM migration
@@ -536,7 +762,7 @@ func (m *VMManager) UpdateVM(ctx context.Context, vmID string, updateSpec VMUpda
 
 	// Get current config for resource accounting
 	oldConfig := vm.Config()
-	oldCPU := oldConfig.CPUShares
+	oldCPUUnits := cpuAllocationForConfig(oldConfig)
 	oldMemory := int64(oldConfig.MemoryMB)
 
 	// Input validation before applying updates
@@ -585,34 +811,76 @@ func (m *VMManager) UpdateVM(ctx context.Context, vmID string, updateSpec VMUpda
 		m.vmsMutex.RUnlock()
 	}
 
-	// Apply updates using encapsulated method
+	newConfig := oldConfig
+	if updateSpec.Name != nil {
+		newConfig.Name = strings.TrimSpace(*updateSpec.Name)
+	}
+	if updateSpec.CPU != nil {
+		newConfig.CPUShares = *updateSpec.CPU
+	}
+	if updateSpec.Memory != nil {
+		newConfig.MemoryMB = int(*updateSpec.Memory)
+	}
+	if updateSpec.Disk != nil {
+		newConfig.DiskSizeGB = int(*updateSpec.Disk)
+	}
+	if updateSpec.Tags != nil {
+		newConfig.Tags = updateSpec.Tags
+	}
+
+	newCPUUnits := cpuAllocationForConfig(newConfig)
+	newMemory := int64(newConfig.MemoryMB)
+	deltaCPUUnits := newCPUUnits - oldCPUUnits
+	deltaMemory := newMemory - oldMemory
+
+	tenantReserved := false
+	if deltaCPUUnits != 0 || deltaMemory != 0 {
+		if err := m.reserveTenantDelta(oldConfig.TenantID, vmID, deltaCPUUnits, deltaMemory); err != nil {
+			return err
+		}
+		tenantReserved = true
+	}
+
+	schedulerUpdated := false
+	if m.scheduler != nil && vm.NodeID() != "" && vm.ResourceID() != "" {
+		if _, ok := m.scheduler.GetActiveAllocations()[vmID]; ok {
+			if err := m.scheduler.UpdateReservation(vmID, newConfig); err != nil {
+				if tenantReserved {
+					m.releaseTenantDelta(oldConfig.TenantID, deltaCPUUnits, deltaMemory)
+				}
+				return &VMError{
+					Code:    "INSUFFICIENT_CAPACITY",
+					Message: fmt.Sprintf("updated VM resources exceed node capacity: %v", err),
+					Cause:   err,
+				}
+			}
+			schedulerUpdated = true
+		}
+	}
+
+	// Apply updates using encapsulated method after quota and scheduler checks pass.
 	err = vm.ApplyUpdateSpec(updateSpec)
 	if err != nil {
+		if schedulerUpdated {
+			if rollbackErr := m.scheduler.UpdateReservation(vmID, oldConfig); rollbackErr != nil {
+				log.Printf("Failed to roll back scheduler reservation for VM %s after update error: %v", vmID, rollbackErr)
+			}
+		}
+		if tenantReserved {
+			m.releaseTenantDelta(oldConfig.TenantID, deltaCPUUnits, deltaMemory)
+		}
 		return &VMError{Code: "UPDATE_FAILED", Message: fmt.Sprintf("Failed to apply update: %v", err), Cause: err}
 	}
 
-	// Get new config for resource accounting
-	newConfig := vm.Config()
-	newCPU := newConfig.CPUShares
-	newMemory := int64(newConfig.MemoryMB)
-
-	// Update resource counters with clamping
+	// Update resource counters with clamping.
 	m.resourceMutex.Lock()
-	if updateSpec.CPU != nil {
-		deltaCPU := newCPU - oldCPU
-		m.allocatedCPU += deltaCPU
-		// Clamp to prevent negative totals
-		if m.allocatedCPU < 0 {
-			m.allocatedCPU = 0
-		}
+	m.allocatedCPU += deltaCPUUnits
+	if m.allocatedCPU < 0 {
+		m.allocatedCPU = 0
 	}
-	if updateSpec.Memory != nil {
-		deltaMemory := newMemory - oldMemory
-		m.allocatedMemoryMB += deltaMemory
-		// Clamp to prevent negative totals
-		if m.allocatedMemoryMB < 0 {
-			m.allocatedMemoryMB = 0
-		}
+	m.allocatedMemoryMB += deltaMemory
+	if m.allocatedMemoryMB < 0 {
+		m.allocatedMemoryMB = 0
 	}
 	m.resourceMutex.Unlock()
 
@@ -778,7 +1046,7 @@ func (m *VMManager) ListSchedulerNodes() []*NodeResourceInfo {
 // CanAdmitVM checks aggregate scheduler inventory before VM creation proceeds.
 func (m *VMManager) CanAdmitVM(vm *VM) error {
 	if vm == nil {
-		return fmt.Errorf("vm is required for admission control")
+		return &VMError{Code: "INVALID_ARGUMENT", Message: "vm is required for admission control", Cause: fmt.Errorf("invalid argument")}
 	}
 	if m.scheduler == nil {
 		return nil
@@ -797,12 +1065,20 @@ func (m *VMManager) CanAdmitVM(vm *VM) error {
 		availableNodes = append(availableNodes, node)
 	}
 	if len(availableNodes) == 0 {
-		return fmt.Errorf("no available scheduler nodes registered for admission control")
+		return &VMError{
+			Code:    "PLACEMENT_UNAVAILABLE",
+			Message: "no available scheduler nodes registered for admission control",
+			Cause:   fmt.Errorf("no available scheduler nodes"),
+		}
 	}
 
 	eligibleNodes, err := applyPlacementConstraints(vm, availableNodes)
 	if err != nil {
-		return err
+		return &VMError{
+			Code:    "PLACEMENT_UNAVAILABLE",
+			Message: err.Error(),
+			Cause:   err,
+		}
 	}
 
 	requiredCPU := cpuAllocationForVM(vm)
@@ -825,16 +1101,32 @@ func (m *VMManager) CanAdmitVM(vm *VM) error {
 	}
 
 	if m.scheduler.config.MaxVMsPerNode > 0 && totalAvailableSlots < 1 {
-		return fmt.Errorf("insufficient VM slot capacity on eligible nodes")
+		return &VMError{
+			Code:    "INSUFFICIENT_CAPACITY",
+			Message: "insufficient VM slot capacity on eligible nodes",
+			Cause:   fmt.Errorf("insufficient vm slot capacity"),
+		}
 	}
 	if requiredCPU > totalAvailableCPU {
-		return fmt.Errorf("insufficient aggregate CPU capacity: need %d, have %d", requiredCPU, totalAvailableCPU)
+		return &VMError{
+			Code:    "INSUFFICIENT_CAPACITY",
+			Message: fmt.Sprintf("insufficient aggregate CPU capacity: need %d, have %d", requiredCPU, totalAvailableCPU),
+			Cause:   fmt.Errorf("insufficient aggregate cpu capacity"),
+		}
 	}
 	if requiredMemoryMB > totalAvailableMemoryMB {
-		return fmt.Errorf("insufficient aggregate memory capacity: need %dMB, have %dMB", requiredMemoryMB, totalAvailableMemoryMB)
+		return &VMError{
+			Code:    "INSUFFICIENT_CAPACITY",
+			Message: fmt.Sprintf("insufficient aggregate memory capacity: need %dMB, have %dMB", requiredMemoryMB, totalAvailableMemoryMB),
+			Cause:   fmt.Errorf("insufficient aggregate memory capacity"),
+		}
 	}
 	if requiredDiskGB > totalAvailableDiskGB {
-		return fmt.Errorf("insufficient aggregate disk capacity: need %dGB, have %dGB", requiredDiskGB, totalAvailableDiskGB)
+		return &VMError{
+			Code:    "INSUFFICIENT_CAPACITY",
+			Message: fmt.Sprintf("insufficient aggregate disk capacity: need %dGB, have %dGB", requiredDiskGB, totalAvailableDiskGB),
+			Cause:   fmt.Errorf("insufficient aggregate disk capacity"),
+		}
 	}
 
 	return nil

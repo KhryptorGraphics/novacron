@@ -71,8 +71,9 @@ type vmConfigFile struct {
 }
 
 type vmManagerConfigFile struct {
-	DefaultDriver vm.VMType `yaml:"default_driver"`
-	DefaultVMType vm.VMType `yaml:"default_vm_type"`
+	DefaultDriver vm.VMType            `yaml:"default_driver"`
+	DefaultVMType vm.VMType            `yaml:"default_vm_type"`
+	TenantQuota   vm.TenantQuotaConfig `yaml:"tenant_quota"`
 }
 
 type schedulerConfigFile struct {
@@ -278,6 +279,23 @@ func mergeRuntimeConfig(config *runtimeConfig, fileConfig runtimeConfigFile) {
 		if fileConfig.VMManager.DefaultVMType != "" {
 			config.VMManager.DefaultVMType = fileConfig.VMManager.DefaultVMType
 		}
+		if fileConfig.VMManager.TenantQuota.Default.MaxVMs != 0 {
+			config.VMManager.TenantQuota.Default.MaxVMs = fileConfig.VMManager.TenantQuota.Default.MaxVMs
+		}
+		if fileConfig.VMManager.TenantQuota.Default.MaxCPUUnits != 0 {
+			config.VMManager.TenantQuota.Default.MaxCPUUnits = fileConfig.VMManager.TenantQuota.Default.MaxCPUUnits
+		}
+		if fileConfig.VMManager.TenantQuota.Default.MaxMemoryMB != 0 {
+			config.VMManager.TenantQuota.Default.MaxMemoryMB = fileConfig.VMManager.TenantQuota.Default.MaxMemoryMB
+		}
+		if len(fileConfig.VMManager.TenantQuota.Overrides) > 0 {
+			if config.VMManager.TenantQuota.Overrides == nil {
+				config.VMManager.TenantQuota.Overrides = make(map[string]vm.TenantQuotaLimits)
+			}
+			for tenantID, limits := range fileConfig.VMManager.TenantQuota.Overrides {
+				config.VMManager.TenantQuota.Overrides[tenantID] = limits
+			}
+		}
 	}
 
 	if fileConfig.Scheduler != nil && fileConfig.Scheduler.MinimumNodeCount != 0 {
@@ -320,6 +338,9 @@ func applyRuntimeConfigDefaults(config *runtimeConfig, nodeID, dataDir string) {
 	}
 	if config.VMManager.Drivers == nil {
 		config.VMManager.Drivers = make(map[vm.VMType]vm.VMDriverConfigManager)
+	}
+	if config.VMManager.TenantQuota.Overrides == nil {
+		config.VMManager.TenantQuota.Overrides = make(map[string]vm.TenantQuotaLimits)
 	}
 	applyDefaultVMManagerDriverConfig(&config.VMManager, nodeID, dataDir)
 }

@@ -47,7 +47,9 @@ func TestCreateVMRequestValidateRejectsInvalidPolicies(t *testing.T) {
 	req := vm.CreateVMRequest{
 		Name: "invalid-policy",
 		Spec: vm.VMConfig{
-			Type: vm.VMTypeKVM,
+			Type:     vm.VMTypeKVM,
+			OwnerID:  "owner-a",
+			TenantID: "tenant-a",
 			Placement: &vm.VMPlacementSpec{
 				Policy: "unsupported-policy",
 			},
@@ -56,6 +58,38 @@ func TestCreateVMRequestValidateRejectsInvalidPolicies(t *testing.T) {
 
 	if err := req.Normalized().Validate(); err == nil {
 		t.Fatal("expected invalid placement policy to fail validation")
+	}
+}
+
+func TestCreateVMRequestValidateRejectsMissingOwnership(t *testing.T) {
+	req := vm.CreateVMRequest{
+		Name: "missing-owner",
+		Spec: vm.VMConfig{
+			Type:     vm.VMTypeKVM,
+			TenantID: "tenant-a",
+		},
+	}
+
+	if err := req.Normalized().Validate(); err == nil {
+		t.Fatal("expected missing owner_id to fail validation")
+	}
+}
+
+func TestCreateVMRequestValidateRejectsCustomPlacementWithoutConstraints(t *testing.T) {
+	req := vm.CreateVMRequest{
+		Name: "custom-without-constraints",
+		Spec: vm.VMConfig{
+			Type:     vm.VMTypeKVM,
+			OwnerID:  "owner-a",
+			TenantID: "tenant-a",
+			Placement: &vm.VMPlacementSpec{
+				Policy: "custom",
+			},
+		},
+	}
+
+	if err := req.Normalized().Validate(); err == nil {
+		t.Fatal("expected custom placement without constraints to fail validation")
 	}
 }
 
@@ -81,6 +115,8 @@ func TestVMManagerCreateVMDefaultsToKVMContract(t *testing.T) {
 	vmInstance, err := manager.CreateVM(context.Background(), vm.CreateVMRequest{
 		Name: "contract-default-kvm",
 		Spec: vm.VMConfig{
+			OwnerID:    "owner-a",
+			TenantID:   "tenant-a",
 			CPUShares:  1,
 			MemoryMB:   512,
 			DiskSizeGB: 8,

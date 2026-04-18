@@ -32,7 +32,7 @@ const (
 func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, error) {
 	req = req.Normalized()
 	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid vm create request: %w", err)
+		return nil, &VMError{Code: "INVALID_ARGUMENT", Message: err.Error(), Cause: err}
 	}
 
 	// Generate a unique ID for the VM if not provided in Spec
@@ -43,16 +43,27 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 
 	vm, err := NewVM(req.Spec)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize VM object: %w", err)
+		return nil, &VMError{Code: "INVALID_ARGUMENT", Message: fmt.Sprintf("failed to initialize VM object: %v", err), Cause: err}
 	}
 
+	if err := m.reserveTenantResources(vm); err != nil {
+		return nil, err
+	}
+	tenantReserved := true
+
 	if err := m.CanAdmitVM(vm); err != nil {
-		return nil, fmt.Errorf("vm admission rejected for %s: %w", vmID, err)
+		if tenantReserved {
+			m.releaseTenantResources(vm)
+		}
+		return nil, err
 	}
 
 	// Get the VM driver - Use consistent getDriver method
 	driver, err := m.getDriver(req.Spec)
 	if err != nil {
+		if tenantReserved {
+			m.releaseTenantResources(vm)
+		}
 		return nil, fmt.Errorf("failed to get VM driver: %w", err)
 	}
 
@@ -130,14 +141,28 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 	if m.scheduler != nil && len(m.scheduler.ListNodes()) > 0 {
 		selectedNodeID, err := m.scheduler.ScheduleVM(ctx, vm)
 		if err != nil {
-			return nil, fmt.Errorf("failed to schedule VM %s: %w", vmID, err)
+			if tenantReserved {
+				m.releaseTenantResources(vm)
+			}
+			return nil, &VMError{
+				Code:    "PLACEMENT_UNAVAILABLE",
+				Message: fmt.Sprintf("failed to schedule VM %s: %v", vmID, err),
+				Cause:   err,
+			}
 		}
 
 		vm.SetNodeID(selectedNodeID)
 		vm.SetResourceID(vmID)
 
 		if err := m.scheduler.ReserveResources(selectedNodeID, vm); err != nil {
-			return nil, fmt.Errorf("failed to reserve resources for VM %s on node %s: %w", vmID, selectedNodeID, err)
+			if tenantReserved {
+				m.releaseTenantResources(vm)
+			}
+			return nil, &VMError{
+				Code:    "INSUFFICIENT_CAPACITY",
+				Message: fmt.Sprintf("failed to reserve resources for VM %s on node %s: %v", vmID, selectedNodeID, err),
+				Cause:   err,
+			}
 		}
 		reservationActive = true
 	} else if explicitNodeID := strings.TrimSpace(req.Spec.Tags["node_id"]); explicitNodeID != "" {
@@ -164,6 +189,9 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 			}
 			vm.SetResourceID("")
 		}
+		if tenantReserved {
+			m.releaseTenantResources(vm)
+		}
 
 		// Emit error event
 		m.emitEvent(VMEvent{
@@ -178,7 +206,7 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 		// Note: Scheduler integration temporarily disabled for testing
 		// m.scheduler.CancelRequest(resourceID)
 
-		return vm, err
+		return vm, &VMError{Code: "CREATE_FAILED", Message: fmt.Sprintf("failed to create VM: %v", err), Cause: err}
 	}
 
 	// Store the VM only after successful creation
@@ -194,7 +222,7 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 
 	// Track resource allocation after successful VM creation
 	m.resourceMutex.Lock()
-	m.allocatedCPU += req.Spec.CPUShares
+	m.allocatedCPU += cpuAllocationForVM(vm)
 	m.allocatedMemoryMB += int64(req.Spec.MemoryMB)
 	// Clamp negative values at mutation time
 	if m.allocatedCPU < 0 {
@@ -205,7 +233,7 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 	}
 	m.resourceMutex.Unlock()
 
-	log.Printf("Allocated resources - CPU: %d, Memory: %dMB for VM %s", req.Spec.CPUShares, req.Spec.MemoryMB, vmID)
+	log.Printf("Allocated resources - CPU units: %d, Memory: %dMB for VM %s", cpuAllocationForVM(vm), req.Spec.MemoryMB, vmID)
 
 	// Emit created event
 	m.emitEvent(VMEvent{
@@ -651,7 +679,7 @@ func (m *VMManager) deleteVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 	// Deallocate resources before removing VM
 	config := vm.Config()
 	m.resourceMutex.Lock()
-	m.allocatedCPU -= config.CPUShares
+	m.allocatedCPU -= cpuAllocationForConfig(config)
 	m.allocatedMemoryMB -= int64(config.MemoryMB)
 	// Clamp negative values at mutation time
 	if m.allocatedCPU < 0 {
@@ -661,8 +689,9 @@ func (m *VMManager) deleteVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 		m.allocatedMemoryMB = 0
 	}
 	m.resourceMutex.Unlock()
+	m.releaseTenantResources(vm)
 
-	log.Printf("Deallocated resources - CPU: %d, Memory: %dMB for VM %s", config.CPUShares, config.MemoryMB, vm.ID())
+	log.Printf("Deallocated resources - CPU units: %d, Memory: %dMB for VM %s", cpuAllocationForConfig(config), config.MemoryMB, vm.ID())
 
 	// Remove VM from manager's map
 	m.vmsMutex.Lock()

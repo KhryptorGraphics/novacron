@@ -21,8 +21,8 @@ type CreateVMRequest struct {
 	CloudInitISO       string                   `json:"cloud_init_iso,omitempty"`
 	NetworkID          string                   `json:"network_id,omitempty"`
 	Tags               map[string]string        `json:"tags,omitempty"`
-	OwnerID            string                   `json:"owner_id,omitempty"`
-	TenantID           string                   `json:"tenant_id,omitempty"`
+	OwnerID            string                   `json:"owner_id"`
+	TenantID           string                   `json:"tenant_id"`
 	VolumeAttachments  []vm.VMVolumeAttachment  `json:"volume_attachments,omitempty"`
 	NetworkAttachments []vm.VMNetworkAttachment `json:"network_attachments,omitempty"`
 	Placement          *vm.VMPlacementSpec      `json:"placement,omitempty"`
@@ -135,12 +135,24 @@ type ChangeTierRequest struct {
 
 // Node represents a cluster node
 type Node struct {
-	ID      string `json:"id"`
-	Address string `json:"address"`
-	Status  string `json:"status"`
-	CPU     int    `json:"cpu,omitempty"`
-	Memory  int64  `json:"memory,omitempty"`
-	Disk    int64  `json:"disk,omitempty"`
+	ID                 string            `json:"id"`
+	Address            string            `json:"address,omitempty"`
+	Status             string            `json:"status"`
+	CPU                int               `json:"cpu,omitempty"`
+	Memory             int64             `json:"memory,omitempty"`
+	Disk               int64             `json:"disk,omitempty"`
+	UsedCPU            int               `json:"used_cpu,omitempty"`
+	RemainingCPU       int               `json:"remaining_cpu,omitempty"`
+	UsedMemoryMB       int64             `json:"used_memory_mb,omitempty"`
+	RemainingMemoryMB  int64             `json:"remaining_memory_mb,omitempty"`
+	UsedDiskGB         int64             `json:"used_disk_gb,omitempty"`
+	RemainingDiskGB    int64             `json:"remaining_disk_gb,omitempty"`
+	CPUUsagePercent    float64           `json:"cpu_usage_percent,omitempty"`
+	MemoryUsagePercent float64           `json:"memory_usage_percent,omitempty"`
+	DiskUsagePercent   float64           `json:"disk_usage_percent,omitempty"`
+	VMCount            int               `json:"vm_count,omitempty"`
+	Schedulable        bool              `json:"schedulable"`
+	Labels             map[string]string `json:"labels,omitempty"`
 }
 
 // ClusterHealth represents cluster health status

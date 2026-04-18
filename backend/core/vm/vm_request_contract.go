@@ -63,11 +63,18 @@ func (r CreateVMRequest) Normalized() CreateVMRequest {
 
 	normalizeVMType(&r.Spec)
 
+	r.Spec.OwnerID = strings.TrimSpace(r.Spec.OwnerID)
+	r.Spec.TenantID = strings.TrimSpace(r.Spec.TenantID)
+
 	if r.Spec.OwnerID != "" {
 		r.Spec.Tags["owner_id"] = r.Spec.OwnerID
 	}
 	if r.Spec.TenantID != "" {
 		r.Spec.Tags["tenant_id"] = r.Spec.TenantID
+	}
+
+	if r.Spec.Placement != nil {
+		r.Spec.Placement.Policy = normalizePlacementPolicy(r.Spec.Placement.Policy)
 	}
 
 	if r.Spec.Image == "" && r.Spec.RootFS != "" && r.Spec.Type == VMTypeKVM {
@@ -101,6 +108,14 @@ func (r CreateVMRequest) Validate() error {
 	}
 	if name == "" {
 		return fmt.Errorf("vm name is required")
+	}
+	if !r.AllowMissingOwnership {
+		if strings.TrimSpace(r.Spec.OwnerID) == "" {
+			return fmt.Errorf("owner_id is required")
+		}
+		if strings.TrimSpace(r.Spec.TenantID) == "" {
+			return fmt.Errorf("tenant_id is required")
+		}
 	}
 	if !isSupportedVMType(r.Spec.Type) {
 		return fmt.Errorf("unsupported vm type %q", r.Spec.Type)
@@ -146,8 +161,13 @@ func (r CreateVMRequest) Validate() error {
 		return fmt.Errorf("only one primary network attachment is allowed")
 	}
 
-	if r.Spec.Placement != nil && !isValidPlacementPolicy(r.Spec.Placement.Policy) {
-		return fmt.Errorf("unsupported placement policy %q", r.Spec.Placement.Policy)
+	if r.Spec.Placement != nil {
+		if !isValidPlacementPolicy(r.Spec.Placement.Policy) {
+			return fmt.Errorf("unsupported placement policy %q", r.Spec.Placement.Policy)
+		}
+		if r.Spec.Placement.Policy == "custom" && len(normalizeNodeIDSet(r.Spec.Placement.PreferredNodes)) == 0 && len(normalizeNodeIDSet(r.Spec.Placement.ExcludedNodes)) == 0 {
+			return fmt.Errorf("custom placement policy requires preferred_nodes or excluded_nodes")
+		}
 	}
 	if r.Spec.Migration != nil && !isValidMigrationPolicyType(r.Spec.Migration.Type) {
 		return fmt.Errorf("unsupported migration policy %q", r.Spec.Migration.Type)
@@ -185,11 +205,23 @@ func isSupportedVMType(vmType VMType) bool {
 }
 
 func isValidPlacementPolicy(policy string) bool {
-	switch strings.TrimSpace(policy) {
+	switch normalizePlacementPolicy(policy) {
 	case "", "balanced", "consolidated", "performance", "efficiency", "network-aware", "custom":
 		return true
 	default:
 		return false
+	}
+}
+
+func normalizePlacementPolicy(policy string) string {
+	policy = strings.TrimSpace(strings.ToLower(policy))
+	switch policy {
+	case "":
+		return ""
+	case "balanced", "consolidated", "performance", "efficiency", "network-aware", "custom":
+		return policy
+	default:
+		return policy
 	}
 }
 

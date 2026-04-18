@@ -17,15 +17,15 @@ const (
 	VMTypeContainerd     VMType = "containerd"
 	VMTypeKataContainers VMType = "kata-containers"
 	VMTypeProcess        VMType = "process"
-	
+
 	// Phase 2: Comprehensive Hypervisor Integration
-	VMTypeVMware         VMType = "vmware"
-	VMTypeVSphere        VMType = "vsphere"
-	VMTypeHyperV         VMType = "hyperv"
-	VMTypeXen            VMType = "xen"
-	VMTypeXenServer      VMType = "xenserver"
-	VMTypeProxmox        VMType = "proxmox"
-	VMTypeProxmoxVE      VMType = "proxmox-ve"
+	VMTypeVMware    VMType = "vmware"
+	VMTypeVSphere   VMType = "vsphere"
+	VMTypeHyperV    VMType = "hyperv"
+	VMTypeXen       VMType = "xen"
+	VMTypeXenServer VMType = "xenserver"
+	VMTypeProxmox   VMType = "proxmox"
+	VMTypeProxmoxVE VMType = "proxmox-ve"
 )
 
 // VMDriverFactory is a function that creates a VM driver
@@ -52,7 +52,7 @@ type VMDriver interface {
 	SupportsGPUPassthrough() bool
 	SupportsSRIOV() bool
 	SupportsNUMA() bool
-	
+
 	// Capability detection
 	GetCapabilities(ctx context.Context) (*HypervisorCapabilities, error)
 	GetHypervisorInfo(ctx context.Context) (*HypervisorInfo, error)
@@ -61,7 +61,7 @@ type VMDriver interface {
 	Resume(ctx context.Context, vmID string) error
 	Snapshot(ctx context.Context, vmID, name string, params map[string]string) (string, error)
 	Migrate(ctx context.Context, vmID, target string, params map[string]string) error
-	
+
 	// Advanced operations for Phase 2
 	HotPlugDevice(ctx context.Context, vmID string, device *DeviceConfig) error
 	HotUnplugDevice(ctx context.Context, vmID string, deviceID string) error
@@ -105,11 +105,11 @@ type VMState = State
 
 // VMUpdateSpec represents specification for updating VM configuration
 type VMUpdateSpec struct {
-	Name   *string             `json:"name,omitempty"`    // VM name update
-	CPU    *int                `json:"cpu,omitempty"`     // CPU shares update
-	Memory *int64              `json:"memory,omitempty"`  // Memory update in MB
-	Disk   *int64              `json:"disk,omitempty"`    // Disk size update in GB
-	Tags   map[string]string   `json:"tags,omitempty"`    // Tag updates
+	Name   *string           `json:"name,omitempty"`   // VM name update
+	CPU    *int              `json:"cpu,omitempty"`    // CPU shares update
+	Memory *int64            `json:"memory,omitempty"` // Memory update in MB
+	Disk   *int64            `json:"disk,omitempty"`   // Disk size update in GB
+	Tags   map[string]string `json:"tags,omitempty"`   // Tag updates
 }
 
 // BackupVerificationResult moved to backup package as VerificationResult
@@ -118,24 +118,24 @@ type VMUpdateSpec struct {
 
 // MigrationProgress represents migration progress information
 type MigrationProgress struct {
-	ID          string          `json:"id"`
-	VMID        string          `json:"vm_id"`
-	SourceNode  string          `json:"source_node"`
-	TargetNode  string          `json:"target_node"`
-	Status      MigrationStatus `json:"status"`
-	Percentage  int             `json:"percentage"`
-	StartedAt   time.Time       `json:"started_at"`
-	CompletedAt *time.Time      `json:"completed_at,omitempty"`
+	ID          string                 `json:"id"`
+	VMID        string                 `json:"vm_id"`
+	SourceNode  string                 `json:"source_node"`
+	TargetNode  string                 `json:"target_node"`
+	Status      MigrationStatus        `json:"status"`
+	Percentage  int                    `json:"percentage"`
+	StartedAt   time.Time              `json:"started_at"`
+	CompletedAt *time.Time             `json:"completed_at,omitempty"`
 	Details     map[string]interface{} `json:"details,omitempty"`
 }
 
 // Enhanced error types for better error handling
 var (
-	ErrVMNotFound              = errors.New("VM not found")
-	ErrOperationNotSupported   = errors.New("operation not supported by driver")
-	ErrInvalidVMState         = errors.New("invalid VM state for operation")
-	ErrBackupNotFound         = errors.New("backup not found")
-	ErrBackupCorrupted        = errors.New("backup is corrupted")
+	ErrVMNotFound            = errors.New("VM not found")
+	ErrOperationNotSupported = errors.New("operation not supported by driver")
+	ErrInvalidVMState        = errors.New("invalid VM state for operation")
+	ErrBackupNotFound        = errors.New("backup not found")
+	ErrBackupCorrupted       = errors.New("backup is corrupted")
 )
 
 type VMError struct {
@@ -157,9 +157,10 @@ func (e *VMError) Unwrap() error {
 
 // CreateVMRequest represents a request to create a VM
 type CreateVMRequest struct {
-	Name string            `json:"name"`
-	Spec VMConfig          `json:"spec"`
-	Tags map[string]string `json:"tags"`
+	Name                  string            `json:"name"`
+	Spec                  VMConfig          `json:"spec"`
+	Tags                  map[string]string `json:"tags"`
+	AllowMissingOwnership bool              `json:"-" yaml:"-"`
 }
 
 // VMOperationRequest represents a request for VM operations
@@ -180,40 +181,40 @@ type VMOperationResponse struct {
 // HypervisorCapabilities represents the capabilities of a hypervisor
 type HypervisorCapabilities struct {
 	Type                   VMType   `json:"type"`
-	Version               string   `json:"version"`
-	SupportsPause         bool     `json:"supports_pause"`
-	SupportsResume        bool     `json:"supports_resume"`
-	SupportsSnapshot      bool     `json:"supports_snapshot"`
-	SupportsMigrate       bool     `json:"supports_migrate"`
-	SupportsLiveMigration bool     `json:"supports_live_migration"`
-	SupportsHotPlug       bool     `json:"supports_hot_plug"`
-	SupportsGPUPassthrough bool    `json:"supports_gpu_passthrough"`
-	SupportsSRIOV         bool     `json:"supports_sriov"`
-	SupportsNUMA          bool     `json:"supports_numa"`
-	MaxVCPUs              int      `json:"max_vcpus"`
-	MaxMemoryMB           int64    `json:"max_memory_mb"`
-	SupportedFeatures     []string `json:"supported_features"`
-	HardwareExtensions    []string `json:"hardware_extensions"`
+	Version                string   `json:"version"`
+	SupportsPause          bool     `json:"supports_pause"`
+	SupportsResume         bool     `json:"supports_resume"`
+	SupportsSnapshot       bool     `json:"supports_snapshot"`
+	SupportsMigrate        bool     `json:"supports_migrate"`
+	SupportsLiveMigration  bool     `json:"supports_live_migration"`
+	SupportsHotPlug        bool     `json:"supports_hot_plug"`
+	SupportsGPUPassthrough bool     `json:"supports_gpu_passthrough"`
+	SupportsSRIOV          bool     `json:"supports_sriov"`
+	SupportsNUMA           bool     `json:"supports_numa"`
+	MaxVCPUs               int      `json:"max_vcpus"`
+	MaxMemoryMB            int64    `json:"max_memory_mb"`
+	SupportedFeatures      []string `json:"supported_features"`
+	HardwareExtensions     []string `json:"hardware_extensions"`
 }
 
 // HypervisorInfo represents information about the hypervisor
 type HypervisorInfo struct {
-	Type            VMType                 `json:"type"`
-	Version         string                 `json:"version"`
-	ConnectionURI   string                 `json:"connection_uri"`
-	Hostname        string                 `json:"hostname"`
-	CPUModel        string                 `json:"cpu_model"`
-	CPUCores        int                    `json:"cpu_cores"`
-	MemoryMB        int64                  `json:"memory_mb"`
-	Virtualization  string                 `json:"virtualization"` // VT-x, AMD-V, etc.
-	IOMMUEnabled    bool                   `json:"iommu_enabled"`
-	NUMANodes       int                    `json:"numa_nodes"`
-	GPUDevices      []GPUDevice            `json:"gpu_devices"`
-	NetworkDevices  []NetworkDevice        `json:"network_devices"`
-	StorageDevices  []StorageDevice        `json:"storage_devices"`
-	ActiveVMs       int                    `json:"active_vms"`
-	Capabilities    *HypervisorCapabilities `json:"capabilities"`
-	Metadata        map[string]interface{} `json:"metadata"`
+	Type           VMType                  `json:"type"`
+	Version        string                  `json:"version"`
+	ConnectionURI  string                  `json:"connection_uri"`
+	Hostname       string                  `json:"hostname"`
+	CPUModel       string                  `json:"cpu_model"`
+	CPUCores       int                     `json:"cpu_cores"`
+	MemoryMB       int64                   `json:"memory_mb"`
+	Virtualization string                  `json:"virtualization"` // VT-x, AMD-V, etc.
+	IOMMUEnabled   bool                    `json:"iommu_enabled"`
+	NUMANodes      int                     `json:"numa_nodes"`
+	GPUDevices     []GPUDevice             `json:"gpu_devices"`
+	NetworkDevices []NetworkDevice         `json:"network_devices"`
+	StorageDevices []StorageDevice         `json:"storage_devices"`
+	ActiveVMs      int                     `json:"active_vms"`
+	Capabilities   *HypervisorCapabilities `json:"capabilities"`
+	Metadata       map[string]interface{}  `json:"metadata"`
 }
 
 // DeviceConfig represents a device configuration for hot-plug operations
@@ -236,9 +237,9 @@ type CPUPinningConfig struct {
 
 // VCPUPinning represents virtual CPU to physical CPU mapping
 type VCPUPinning struct {
-	VCPU        int    `json:"vcpu"`
-	CPUSet      string `json:"cpuset"` // e.g., "0-3,8,9"
-	Policy      string `json:"policy,omitempty"`
+	VCPU   int    `json:"vcpu"`
+	CPUSet string `json:"cpuset"` // e.g., "0-3,8,9"
+	Policy string `json:"policy,omitempty"`
 }
 
 // IOThreadPinning represents I/O thread to CPU mapping
@@ -250,29 +251,29 @@ type IOThreadPinning struct {
 // NUMATopology represents NUMA topology configuration
 type NUMATopology struct {
 	Nodes   []NUMANode             `json:"nodes"`
-	Mode    string                 `json:"mode"`    // strict, preferred, interleave
+	Mode    string                 `json:"mode"` // strict, preferred, interleave
 	Options map[string]interface{} `json:"options,omitempty"`
 }
 
 // NUMANode represents a NUMA node configuration
 type NUMANode struct {
-	ID       int      `json:"id"`
-	CPUs     string   `json:"cpus"`     // CPU set, e.g., "0-3"
-	MemoryMB int64    `json:"memory_mb"`
-	Distance []int    `json:"distance,omitempty"`
+	ID       int    `json:"id"`
+	CPUs     string `json:"cpus"` // CPU set, e.g., "0-3"
+	MemoryMB int64  `json:"memory_mb"`
+	Distance []int  `json:"distance,omitempty"`
 }
 
 // GPUDevice represents a GPU device
 type GPUDevice struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Vendor       string `json:"vendor"`
-	Model        string `json:"model"`
-	MemoryMB     int64  `json:"memory_mb"`
-	PCIAddress   string `json:"pci_address"`
-	IOMMUGroup   int    `json:"iommu_group"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Vendor        string `json:"vendor"`
+	Model         string `json:"model"`
+	MemoryMB      int64  `json:"memory_mb"`
+	PCIAddress    string `json:"pci_address"`
+	IOMMUGroup    int    `json:"iommu_group"`
 	Virtualizable bool   `json:"virtualizable"`
-	InUse        bool   `json:"in_use"`
+	InUse         bool   `json:"in_use"`
 }
 
 // NetworkDevice represents a network device
@@ -290,13 +291,13 @@ type NetworkDevice struct {
 
 // StorageDevice represents a storage device
 type StorageDevice struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Type         string `json:"type"` // ssd, nvme, hdd, etc.
-	SizeGB       int64  `json:"size_gb"`
-	Path         string `json:"path"`
-	ReadIOPS     int64  `json:"read_iops,omitempty"`
-	WriteIOPS    int64  `json:"write_iops,omitempty"`
-	Passthrough  bool   `json:"passthrough"`
-	InUse        bool   `json:"in_use"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Type        string `json:"type"` // ssd, nvme, hdd, etc.
+	SizeGB      int64  `json:"size_gb"`
+	Path        string `json:"path"`
+	ReadIOPS    int64  `json:"read_iops,omitempty"`
+	WriteIOPS   int64  `json:"write_iops,omitempty"`
+	Passthrough bool   `json:"passthrough"`
+	InUse       bool   `json:"in_use"`
 }

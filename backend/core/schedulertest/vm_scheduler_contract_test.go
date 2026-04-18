@@ -385,3 +385,133 @@ func TestVMManagerAdmissionRejectsPlacementExclusions(t *testing.T) {
 		t.Fatalf("expected admission control to reject when placement exclusions remove all eligible nodes")
 	}
 }
+
+func TestSchedulerUsesPlacementPolicyMappingPerVM(t *testing.T) {
+	scheduler := corevm.NewVMScheduler(corevm.SchedulerConfig{
+		Policy:                 corevm.SchedulerPolicyRoundRobin,
+		EnableResourceChecking: true,
+		MaxVMsPerNode:          10,
+	})
+
+	for _, node := range []*corevm.NodeResourceInfo{
+		{
+			NodeID:             "busy-node",
+			TotalCPU:           8,
+			UsedCPU:            6,
+			TotalMemoryMB:      16384,
+			UsedMemoryMB:       12288,
+			TotalDiskGB:        200,
+			UsedDiskGB:         50,
+			CPUUsagePercent:    75,
+			MemoryUsagePercent: 75,
+			Status:             "available",
+		},
+		{
+			NodeID:             "open-node",
+			TotalCPU:           8,
+			UsedCPU:            1,
+			TotalMemoryMB:      16384,
+			UsedMemoryMB:       2048,
+			TotalDiskGB:        200,
+			UsedDiskGB:         20,
+			CPUUsagePercent:    12.5,
+			MemoryUsagePercent: 12.5,
+			Status:             "available",
+		},
+	} {
+		if err := scheduler.RegisterNode(node); err != nil {
+			t.Fatalf("register node %s: %v", node.NodeID, err)
+		}
+	}
+
+	vm, err := corevm.NewVM(corevm.VMConfig{
+		ID:        "vm-performance",
+		Name:      "vm-performance",
+		Type:      corevm.VMTypeKVM,
+		CPUShares: 1024,
+		MemoryMB:  1024,
+		Placement: &corevm.VMPlacementSpec{
+			Policy: "performance",
+		},
+	})
+	if err != nil {
+		t.Fatalf("new vm: %v", err)
+	}
+
+	nodeID, err := scheduler.ScheduleVM(context.Background(), vm)
+	if err != nil {
+		t.Fatalf("schedule vm: %v", err)
+	}
+	if nodeID != "open-node" {
+		t.Fatalf("expected performance placement to pick open-node, got %s", nodeID)
+	}
+}
+
+func TestVMManagerCreateVMRejectsTenantQuotaExceeded(t *testing.T) {
+	t.Setenv("NOVACRON_ALLOW_STUB_KVM", "1")
+
+	config := corevm.DefaultVMManagerConfig()
+	config.TenantQuota.Default = corevm.TenantQuotaLimits{
+		MaxVMs:      1,
+		MaxCPUUnits: 1,
+		MaxMemoryMB: 1024,
+	}
+	config.Drivers[corevm.VMTypeKVM] = corevm.VMDriverConfigManager{
+		Enabled: true,
+		Config: map[string]interface{}{
+			"node_id":   "quota-node",
+			"qemu_path": "missing-qemu-for-stub-test",
+			"vm_path":   t.TempDir(),
+		},
+	}
+
+	manager, err := corevm.NewVMManager(config)
+	if err != nil {
+		t.Fatalf("new vm manager: %v", err)
+	}
+	defer manager.Stop()
+
+	if err := manager.RegisterSchedulerNode(&corevm.NodeResourceInfo{
+		NodeID:        "quota-node",
+		TotalCPU:      4,
+		TotalMemoryMB: 8192,
+		TotalDiskGB:   100,
+		Status:        "available",
+	}); err != nil {
+		t.Fatalf("register scheduler node: %v", err)
+	}
+
+	firstReq := corevm.CreateVMRequest{
+		Name: "tenant-first",
+		Spec: corevm.VMConfig{
+			Name:       "tenant-first",
+			Type:       corevm.VMTypeKVM,
+			OwnerID:    "owner-a",
+			TenantID:   "tenant-a",
+			CPUShares:  1024,
+			MemoryMB:   512,
+			DiskSizeGB: 10,
+		},
+	}
+	if _, err := manager.CreateVM(context.Background(), firstReq); err != nil {
+		t.Fatalf("create first vm: %v", err)
+	}
+
+	secondReq := corevm.CreateVMRequest{
+		Name: "tenant-second",
+		Spec: corevm.VMConfig{
+			Name:       "tenant-second",
+			Type:       corevm.VMTypeKVM,
+			OwnerID:    "owner-a",
+			TenantID:   "tenant-a",
+			CPUShares:  1024,
+			MemoryMB:   512,
+			DiskSizeGB: 10,
+		},
+	}
+	if _, err := manager.CreateVM(context.Background(), secondReq); err == nil {
+		t.Fatalf("expected second create to fail on tenant quota")
+	} else if vmErr, ok := err.(*corevm.VMError); !ok || vmErr.Code != "QUOTA_EXCEEDED" {
+		t.Fatalf("expected QUOTA_EXCEEDED, got %v", err)
+	}
+}

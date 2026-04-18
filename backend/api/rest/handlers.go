@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -90,7 +91,7 @@ func (h *APIHandler) CreateVM(w http.ResponseWriter, r *http.Request) {
 
 	vmInstance, err := h.vmManager.CreateVM(r.Context(), createReq)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), statusForVMError(err))
 		return
 	}
 
@@ -151,6 +152,9 @@ func (h *APIHandler) UpdateVM(w http.ResponseWriter, r *http.Request) {
 				return
 			case "INVALID_STATE", "INVALID_ARGUMENT":
 				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			case "QUOTA_EXCEEDED", "INSUFFICIENT_CAPACITY", "PLACEMENT_UNAVAILABLE":
+				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			default:
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -451,12 +455,14 @@ func (h *APIHandler) GetStorageMetrics(w http.ResponseWriter, r *http.Request) {
 
 // ListNodes returns all cluster nodes
 func (h *APIHandler) ListNodes(w http.ResponseWriter, r *http.Request) {
-	// Implementation would fetch from cluster membership
-	nodes := []Node{
-		{ID: "node-1", Address: "192.168.1.100", Status: "healthy"},
-		{ID: "node-2", Address: "192.168.1.101", Status: "healthy"},
-		{ID: "node-3", Address: "192.168.1.102", Status: "degraded"},
+	inventory := h.vmManager.ListSchedulerNodes()
+	nodes := make([]Node, 0, len(inventory))
+	for _, nodeInfo := range inventory {
+		nodes = append(nodes, schedulerNodeToAPI(nodeInfo))
 	}
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].ID < nodes[j].ID
+	})
 	respondJSON(w, nodes)
 }
 
@@ -465,27 +471,43 @@ func (h *APIHandler) GetNode(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	nodeID := vars["id"]
 
-	// Implementation would fetch from cluster membership
-	node := Node{
-		ID:      nodeID,
-		Address: "192.168.1.100",
-		Status:  "healthy",
-		CPU:     8,
-		Memory:  32768,
-		Disk:    1048576,
+	for _, nodeInfo := range h.vmManager.ListSchedulerNodes() {
+		if nodeInfo.NodeID == nodeID {
+			respondJSON(w, schedulerNodeToAPI(nodeInfo))
+			return
+		}
 	}
-
-	respondJSON(w, node)
+	http.Error(w, "node not found", http.StatusNotFound)
 }
 
 // GetClusterHealth returns cluster health status
 func (h *APIHandler) GetClusterHealth(w http.ResponseWriter, r *http.Request) {
+	inventory := h.vmManager.ListSchedulerNodes()
+	totalNodes := len(inventory)
+	healthyNodes := 0
+	leaderID := ""
+	for _, nodeInfo := range inventory {
+		if isSchedulableNode(nodeInfo) {
+			healthyNodes++
+			if leaderID == "" {
+				leaderID = nodeInfo.NodeID
+			}
+		}
+	}
+
+	status := "unavailable"
+	if healthyNodes > 0 && healthyNodes == totalNodes {
+		status = "healthy"
+	} else if healthyNodes > 0 {
+		status = "degraded"
+	}
+
 	health := ClusterHealth{
-		Status:       "healthy",
-		TotalNodes:   3,
-		HealthyNodes: 2,
-		HasQuorum:    true,
-		Leader:       "node-1",
+		Status:       status,
+		TotalNodes:   totalNodes,
+		HealthyNodes: healthyNodes,
+		HasQuorum:    healthyNodes > 0,
+		Leader:       leaderID,
 		LastUpdated:  time.Now(),
 	}
 
@@ -494,13 +516,17 @@ func (h *APIHandler) GetClusterHealth(w http.ResponseWriter, r *http.Request) {
 
 // GetLeader returns the current cluster leader
 func (h *APIHandler) GetLeader(w http.ResponseWriter, r *http.Request) {
-	leader := map[string]string{
-		"id":      "node-1",
-		"address": "192.168.1.100",
-		"term":    "5",
+	for _, nodeInfo := range h.vmManager.ListSchedulerNodes() {
+		if isSchedulableNode(nodeInfo) {
+			respondJSON(w, map[string]string{
+				"id":     nodeInfo.NodeID,
+				"status": nodeInfo.Status,
+				"scope":  "cluster-local",
+			})
+			return
+		}
 	}
-
-	respondJSON(w, leader)
+	http.Error(w, "no schedulable leader available", http.StatusNotFound)
 }
 
 // Monitoring Handlers
@@ -628,4 +654,76 @@ func (h *APIHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
 func respondJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
+}
+
+func statusForVMError(err error) int {
+	var vmErr *vm.VMError
+	if errors.As(err, &vmErr) {
+		switch vmErr.Code {
+		case "INVALID_ARGUMENT", "INVALID_STATE":
+			return http.StatusBadRequest
+		case "QUOTA_EXCEEDED", "INSUFFICIENT_CAPACITY", "PLACEMENT_UNAVAILABLE":
+			return http.StatusConflict
+		case "VM_NOT_FOUND":
+			return http.StatusNotFound
+		}
+	}
+	if errors.Is(err, vm.ErrVMNotFound) {
+		return http.StatusNotFound
+	}
+	if errors.Is(err, vm.ErrInvalidVMState) {
+		return http.StatusBadRequest
+	}
+	return http.StatusInternalServerError
+}
+
+func schedulerNodeToAPI(nodeInfo *vm.NodeResourceInfo) Node {
+	if nodeInfo == nil {
+		return Node{}
+	}
+
+	totalMemoryMB := int64(nodeInfo.TotalMemoryMB)
+	usedMemoryMB := int64(nodeInfo.UsedMemoryMB)
+	totalDiskGB := int64(nodeInfo.TotalDiskGB)
+	usedDiskGB := int64(nodeInfo.UsedDiskGB)
+	totalCPU := nodeInfo.TotalCPU
+	usedCPU := nodeInfo.UsedCPU
+
+	return Node{
+		ID:                 nodeInfo.NodeID,
+		Status:             nodeInfo.Status,
+		CPU:                totalCPU,
+		Memory:             totalMemoryMB,
+		Disk:               totalDiskGB,
+		UsedCPU:            usedCPU,
+		RemainingCPU:       maxInt(0, totalCPU-usedCPU),
+		UsedMemoryMB:       usedMemoryMB,
+		RemainingMemoryMB:  maxInt64(0, totalMemoryMB-usedMemoryMB),
+		UsedDiskGB:         usedDiskGB,
+		RemainingDiskGB:    maxInt64(0, totalDiskGB-usedDiskGB),
+		CPUUsagePercent:    nodeInfo.CPUUsagePercent,
+		MemoryUsagePercent: nodeInfo.MemoryUsagePercent,
+		DiskUsagePercent:   nodeInfo.DiskUsagePercent,
+		VMCount:            nodeInfo.VMCount,
+		Schedulable:        isSchedulableNode(nodeInfo),
+		Labels:             cloneStringMap(nodeInfo.Labels),
+	}
+}
+
+func isSchedulableNode(nodeInfo *vm.NodeResourceInfo) bool {
+	return nodeInfo != nil && nodeInfo.Status == "available"
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
