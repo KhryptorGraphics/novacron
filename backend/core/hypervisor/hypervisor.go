@@ -182,7 +182,7 @@ func (h *Hypervisor) Stop() error {
 	h.vmLock.RUnlock()
 
 	var wg sync.WaitGroup
-	for _, vm := range vms {
+	for _, instance := range vms {
 		wg.Add(1)
 		go func(v interface{}) {
 			defer wg.Done()
@@ -191,7 +191,7 @@ func (h *Hypervisor) Stop() error {
 					log.Printf("Error stopping VM %s: %v", vmPtr.ID(), err)
 				}
 			}
-		}(vm)
+		}(instance)
 	}
 	wg.Wait()
 
