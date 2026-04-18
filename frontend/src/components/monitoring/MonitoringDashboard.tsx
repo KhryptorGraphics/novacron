@@ -66,6 +66,7 @@ import {
   ResourceTreemap,
   AlertCorrelation
 } from '@/components/visualizations';
+import { buildApiV1Url, buildWebSocketUrls } from '@/lib/api/origin';
 
 // Register Chart.js components
 ChartJS.register(
@@ -118,10 +119,6 @@ interface TimeRangeOption {
   value: string;
   seconds: number;
 }
-
-// Constants
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8090/api';
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8091/ws';
 
 const TIME_RANGES: TimeRangeOption[] = [
   { label: 'Last 15 minutes', value: '15m', seconds: 15 * 60 },
@@ -367,7 +364,7 @@ const MonitoringDashboard: React.FC = () => {
     queryKey: ['systemMetrics', timeRange],
     queryFn: async () => {
       const rangeSeconds = TIME_RANGES.find(r => r.value === timeRange)?.seconds || 3600;
-      const response = await fetch(`${API_URL}/monitoring/metrics?timeRange=${rangeSeconds}`);
+      const response = await fetch(buildApiV1Url(`/monitoring/metrics?timeRange=${rangeSeconds}`));
       if (!response.ok) {
         throw new Error('Failed to fetch system metrics');
       }
@@ -383,7 +380,7 @@ const MonitoringDashboard: React.FC = () => {
   } = useQuery({
     queryKey: ['alerts'],
     queryFn: async () => {
-      const response = await fetch(`${API_URL}/monitoring/alerts`);
+      const response = await fetch(buildApiV1Url('/monitoring/alerts'));
       if (!response.ok) {
         throw new Error('Failed to fetch alerts');
       }
@@ -399,7 +396,7 @@ const MonitoringDashboard: React.FC = () => {
   } = useQuery({
     queryKey: ['vms'],
     queryFn: async () => {
-      const response = await fetch(`${API_URL}/monitoring/vms`);
+      const response = await fetch(buildApiV1Url('/monitoring/vms'));
       if (!response.ok) {
         throw new Error('Failed to fetch VM metrics');
       }
@@ -409,7 +406,7 @@ const MonitoringDashboard: React.FC = () => {
   });
 
   // WebSocket for real-time updates
-  const { lastMessage } = useWebSocket(`${WS_URL}/monitoring`, {
+  const { lastMessage } = useWebSocket(buildWebSocketUrls('/api/ws/metrics')[0], {
     onOpen: () => {
       console.log('WebSocket connected');
     },
@@ -456,27 +453,11 @@ const MonitoringDashboard: React.FC = () => {
 
   // Handle alert acknowledgment
   const handleAcknowledgeAlert = async (alertId: string) => {
-    try {
-      const response = await fetch(`${API_URL}/monitoring/alerts/${alertId}/acknowledge`, {
-        method: 'POST',
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to acknowledge alert');
-      }
-      
-      refetchAlerts();
-      toast({
-        title: 'Alert Acknowledged',
-        description: 'The alert has been acknowledged',
-      });
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'An unknown error occurred',
-        variant: 'destructive',
-      });
-    }
+    toast({
+      title: 'Action Unavailable',
+      description: `Alert acknowledgment for ${alertId} is not available on the canonical monitoring surface yet.`,
+      variant: 'destructive',
+    });
   };
 
   // Prepare chart data

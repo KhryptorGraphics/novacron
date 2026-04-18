@@ -38,7 +38,7 @@ import {
   LineChart as LineChartIcon
 } from 'lucide-react';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
-import { useWebSocket } from '@/hooks/useWebSocket';
+import { useMonitoringWebSocket } from '@/hooks/useWebSocket';
 
 interface Metric {
   id: string;
@@ -86,7 +86,7 @@ const RealTimeMonitoringDashboard: React.FC = () => {
   const metricsRef = useRef<{ [key: string]: number[] }>({});
 
   // WebSocket connection for real-time data
-  const { data: wsData, isConnected } = useWebSocket('/api/ws/monitoring');
+  const { data: wsData, isConnected } = useMonitoringWebSocket();
 
   // Generate mock real-time data
   useEffect(() => {

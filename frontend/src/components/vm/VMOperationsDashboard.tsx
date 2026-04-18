@@ -36,7 +36,7 @@ import {
   Eye,
   Gauge
 } from 'lucide-react';
-import { useWebSocket } from '@/hooks/useWebSocket';
+import { useVMWebSocket } from '@/hooks/useWebSocket';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 interface VM {
@@ -97,7 +97,7 @@ const VMOperationsDashboard: React.FC = () => {
   });
 
   // WebSocket connection for real-time updates
-  const { data: wsData, isConnected } = useWebSocket('/api/ws/vms');
+  const { data: wsData, isConnected } = useVMWebSocket();
 
   useEffect(() => {
     if (wsData) {

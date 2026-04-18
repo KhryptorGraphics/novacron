@@ -45,6 +45,7 @@ Treat older README sections, feature reports, and alternate entrypoints as histo
 | `GET /api/v1/monitoring/metrics` | compat | Still exposed by the canonical server, but not the preferred long-term surface. |
 | `GET /api/v1/monitoring/vms` | compat | Still exposed by the canonical server, but not the preferred long-term surface. |
 | `GET /api/v1/monitoring/alerts` | compat | Still exposed by the canonical server, but not the preferred long-term surface. |
+| `POST /api/v1/monitoring/alerts/{id}/acknowledge` | deferred | Frontend should present this as unavailable until the canonical server exposes it. |
 | `/api/vms*` and `/api/monitoring/*` | compat | Legacy secure aliases retained during gradual cutover. |
 | `/api/security/*` | live | Canonical admin/security surface. Requires auth and admin/super-admin roles. |
 | `/api/admin/security/*` | live | Canonical alias for admin/security UI. Requires auth and admin/super-admin roles. |
@@ -73,5 +74,6 @@ Treat older README sections, feature reports, and alternate entrypoints as histo
 ## Notes for Implementation
 
 - New frontend work should build URLs through `frontend/src/lib/api/origin.ts`.
+- Frontend realtime helpers should fail closed for `deferred` websocket channels instead of opening speculative connections.
 - New backend work should extend canonical paths first and add compat aliases only when required by the gradual cutover plan.
 - If a route or channel is not marked `live` or `compat` here, treat it as unsupported until it is explicitly implemented and promoted.

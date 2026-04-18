@@ -205,33 +205,44 @@ export function useWebSocket<T = any>(
   };
 }
 
+function unavailableRealtimeChannel<T = any>(message: string): WebSocketState<T> {
+  return {
+    data: null,
+    isConnected: false,
+    error: new Error(message),
+    send: () => {},
+    close: () => {},
+    reconnect: () => {},
+  };
+}
+
 // Specialized hooks for different WebSocket endpoints
 export function useMonitoringWebSocket() {
-  return useWebSocket('/api/ws/monitoring', {
+  return useWebSocket('/api/ws/metrics', {
     heartbeatInterval: 20000,
   });
 }
 
 export function useVMWebSocket(vmId?: string) {
-  return useWebSocket(vmId ? `/api/ws/vms/${vmId}` : '/api/ws/vms', {
-    heartbeatInterval: 15000,
-  });
+  return unavailableRealtimeChannel(
+    `VM realtime updates are not available on the canonical websocket contract${vmId ? ` for ${vmId}` : ''}.`
+  );
 }
 
 export function useNetworkWebSocket() {
-  return useWebSocket('/api/ws/network', {
-    heartbeatInterval: 25000,
-  });
+  return unavailableRealtimeChannel(
+    'Network realtime updates are not available on the canonical websocket contract.'
+  );
 }
 
 export function useStorageWebSocket() {
-  return useWebSocket('/api/ws/storage', {
-    heartbeatInterval: 30000,
-  });
+  return unavailableRealtimeChannel(
+    'Storage realtime updates are not available on the canonical websocket contract.'
+  );
 }
 
 export function useSecurityWebSocket() {
-  return useWebSocket('/api/ws/security', {
+  return useWebSocket('/api/ws/security/events', {
     heartbeatInterval: 10000,
     reconnectAttempts: 10, // More attempts for security monitoring
   });
@@ -239,10 +250,9 @@ export function useSecurityWebSocket() {
 
 // Enhanced WebSocket hooks for distributed system updates
 export function useDistributedTopologyWebSocket() {
-  return useWebSocket('/api/ws/network/topology', {
-    heartbeatInterval: 15000,
-    reconnectAttempts: 8,
-  });
+  return unavailableRealtimeChannel(
+    'Distributed topology updates are not available on the canonical websocket contract.'
+  );
 }
 
 export function useBandwidthMonitoringWebSocket() {
@@ -290,18 +300,15 @@ export function useMetricsStreamWebSocket(endpoint: string, options?: Partial<We
 }
 
 export function useAIModelWebSocket(modelId: string) {
-  return useWebSocket(`/api/ws/ai/models/${modelId}`, {
-    heartbeatInterval: 45000,
-    reconnectAttempts: 5,
-  });
+  return unavailableRealtimeChannel(
+    `AI model realtime updates are not available on the canonical websocket contract for ${modelId}.`
+  );
 }
 
 export function useJobMonitoringWebSocket(jobId?: string) {
-  const endpoint = jobId ? `/api/ws/jobs/${jobId}` : '/api/ws/jobs';
-  return useWebSocket(endpoint, {
-    heartbeatInterval: 10000,
-    reconnectAttempts: 8,
-  });
+  return unavailableRealtimeChannel(
+    `Job monitoring updates are not available on the canonical websocket contract${jobId ? ` for ${jobId}` : ''}.`
+  );
 }
 
 // Connection pool manager for multiple WebSocket connections
