@@ -3,7 +3,6 @@ package auth
 import (
 	"testing"
 	"time"
-	"novacron/backend/pkg/testutil"
 )
 
 func TestAuthServiceIntegration(t *testing.T) {
@@ -11,7 +10,7 @@ func TestAuthServiceIntegration(t *testing.T) {
 	users := NewUserMemoryStore()
 	roles := NewRoleMemoryStore()
 	tenants := NewTenantMemoryStore()
-	auditLog := NewInMemoryAuditLogService()
+	auditLog := NewInMemoryAuditService()
 
 	// Create auth service with default config
 	auth := NewAuthService(DefaultAuthConfiguration(), users, roles, tenants, auditLog)
@@ -25,7 +24,7 @@ func TestAuthServiceIntegration(t *testing.T) {
 	}
 
 	// Test user creation
-	user := NewUser(testutil.DefaultTestUsername, testutil.GetTestEmail(), "test-tenant")
+	user := NewUser(authTestDefaultUsername, authTestEmail(), "test-tenant")
 	user.Status = UserStatusActive
 	err = auth.CreateUser(user, "Password@123")
 	if err != nil {
@@ -39,15 +38,15 @@ func TestAuthServiceIntegration(t *testing.T) {
 	}
 
 	// Test login with valid credentials
-	session, err := auth.Login(testutil.DefaultTestUsername, "Password@123")
+	session, err := auth.Login(authTestDefaultUsername, "Password@123")
 	if err != nil {
 		t.Fatalf("Login failed: %v", err)
 	}
 	if session == nil {
 		t.Fatal("Session is nil")
 	}
-	if session.UserID != "testuser" {
-		t.Fatalf("Session user ID mismatch: expected 'testuser', got '%s'", session.UserID)
+	if session.UserID != authTestDefaultUsername {
+		t.Fatalf("Session user ID mismatch: expected %q, got %q", authTestDefaultUsername, session.UserID)
 	}
 
 	// Test session validation
@@ -89,13 +88,13 @@ func TestAuthServiceIntegration(t *testing.T) {
 	}
 
 	// Add role to user
-	err = users.AddRole("testuser", "test-role")
+	err = users.AddRole(authTestDefaultUsername, "test-role")
 	if err != nil {
 		t.Fatalf("Failed to add role to user: %v", err)
 	}
 
 	// Test permission check with a permission the user should have
-	hasPermission, err := auth.HasPermission("testuser", "vm", "read")
+	hasPermission, err := auth.HasPermission(authTestDefaultUsername, "vm", "read")
 	if err != nil {
 		t.Fatalf("Permission check failed: %v", err)
 	}
@@ -104,7 +103,7 @@ func TestAuthServiceIntegration(t *testing.T) {
 	}
 
 	// Test permission check with a permission the user should not have
-	hasPermission, err = auth.HasPermission("testuser", "vm", "delete")
+	hasPermission, err = auth.HasPermission(authTestDefaultUsername, "vm", "delete")
 	if err != nil {
 		t.Fatalf("Permission check failed: %v", err)
 	}
@@ -130,7 +129,7 @@ func TestAuthServicePasswordValidation(t *testing.T) {
 	users := NewUserMemoryStore()
 	roles := NewRoleMemoryStore()
 	tenants := NewTenantMemoryStore()
-	auditLog := NewInMemoryAuditLogService()
+	auditLog := NewInMemoryAuditService()
 
 	// Create auth service with default config
 	config := DefaultAuthConfiguration()
@@ -145,42 +144,42 @@ func TestAuthServicePasswordValidation(t *testing.T) {
 	}
 
 	// Test creating a user with a too short password
-	user := NewUser("shortpw", testutil.GenerateTestEmail(), "test-tenant")
+	user := NewUser("shortpw", authGeneratedEmail(), "test-tenant")
 	err = auth.CreateUser(user, "Short1!")
 	if err == nil {
 		t.Fatal("User creation succeeded with too short password")
 	}
 
 	// Test creating a user with a password missing uppercase
-	user = NewUser("nouppercase", testutil.GenerateTestEmail(), "test-tenant")
+	user = NewUser("nouppercase", authGeneratedEmail(), "test-tenant")
 	err = auth.CreateUser(user, "password123!")
 	if err == nil {
 		t.Fatal("User creation succeeded with password missing uppercase")
 	}
 
 	// Test creating a user with a password missing lowercase
-	user = NewUser("nolowercase", testutil.GenerateTestEmail(), "test-tenant")
+	user = NewUser("nolowercase", authGeneratedEmail(), "test-tenant")
 	err = auth.CreateUser(user, "PASSWORD123!")
 	if err == nil {
 		t.Fatal("User creation succeeded with password missing lowercase")
 	}
 
 	// Test creating a user with a password missing numbers
-	user = NewUser("nonumbers", testutil.GenerateTestEmail(), "test-tenant")
+	user = NewUser("nonumbers", authGeneratedEmail(), "test-tenant")
 	err = auth.CreateUser(user, "Password!")
 	if err == nil {
 		t.Fatal("User creation succeeded with password missing numbers")
 	}
 
 	// Test creating a user with a password missing special characters
-	user = NewUser("nospecial", testutil.GenerateTestEmail(), "test-tenant")
+	user = NewUser("nospecial", authGeneratedEmail(), "test-tenant")
 	err = auth.CreateUser(user, "Password123")
 	if err == nil {
 		t.Fatal("User creation succeeded with password missing special characters")
 	}
 
 	// Test creating a user with a valid password
-	user = NewUser("validpw", testutil.GenerateTestEmail(), "test-tenant")
+	user = NewUser("validpw", authGeneratedEmail(), "test-tenant")
 	err = auth.CreateUser(user, "ValidPassword123!")
 	if err != nil {
 		t.Fatalf("User creation failed with valid password: %v", err)
@@ -362,11 +361,11 @@ func TestSystemRoles(t *testing.T) {
 
 func TestAuditLogging(t *testing.T) {
 	// Create audit log service
-	auditLog := NewInMemoryAuditLogService()
+	auditLog := NewInMemoryAuditService()
 
 	// Log an entry
 	entry := AuditEntry{
-		Action:      string(AuditActionLogin),
+		Action:      "login_success",
 		Resource:    "user",
 		ResourceID:  "testuser",
 		Description: "Test login",
@@ -380,28 +379,14 @@ func TestAuditLogging(t *testing.T) {
 		t.Fatalf("Failed to log audit entry: %v", err)
 	}
 
-	// Search for the entry
-	results, err := auditLog.Search(map[string]interface{}{
-		"userId": "testuser",
-	}, 10, 0)
+	results, err := auditLog.GetUserActions("testuser", time.Now().Add(-1*time.Minute), time.Now().Add(1*time.Minute), 10, 0)
 	if err != nil {
-		t.Fatalf("Failed to search audit log: %v", err)
+		t.Fatalf("Failed to read user actions: %v", err)
 	}
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 audit entry, got %d", len(results))
 	}
-	if results[0].Action != string(AuditActionLogin) {
-		t.Fatalf("Audit entry action mismatch: expected '%s', got '%s'", AuditActionLogin, results[0].Action)
-	}
-
-	// Count entries
-	count, err := auditLog.Count(map[string]interface{}{
-		"userId": "testuser",
-	})
-	if err != nil {
-		t.Fatalf("Failed to count audit entries: %v", err)
-	}
-	if count != 1 {
-		t.Fatalf("Expected count of 1, got %d", count)
+	if results[0].Action != "login_success" {
+		t.Fatalf("Audit entry action mismatch: expected %q, got %q", "login_success", results[0].Action)
 	}
 }

@@ -178,18 +178,37 @@ func (sm *SecurityManager) OAuth2Callback(ctx context.Context, provider, code, s
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create user: %w", err)
 	}
+	if user.Metadata == nil {
+		user.Metadata = make(map[string]interface{})
+	}
+	if oauth2State.RedirectTo != "" {
+		user.Metadata["oauth_redirect_to"] = oauth2State.RedirectTo
+	}
 
 	// Try to find existing user
 	existingUser, err := sm.authService.(*AuthServiceImpl).users.GetByEmail(user.Email)
 	if err != nil {
 		// User doesn't exist, create new one
-		err = sm.authService.CreateUser(user, "")
+		password, passwordErr := sm.passwordService.GenerateSecurePassword()
+		if passwordErr != nil {
+			return nil, nil, fmt.Errorf("failed to generate bootstrap password for oauth2 user: %w", passwordErr)
+		}
+		err = sm.authService.CreateUser(user, password)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create user in auth service: %w", err)
 		}
 	} else {
 		// Update existing user
 		existingUser.LastLogin = time.Now()
+		if existingUser.Metadata == nil {
+			existingUser.Metadata = make(map[string]interface{})
+		}
+		if oauth2State.RedirectTo != "" {
+			existingUser.Metadata["oauth_redirect_to"] = oauth2State.RedirectTo
+		}
+		if updateErr := sm.authService.(*AuthServiceImpl).users.Update(existingUser); updateErr != nil {
+			return nil, nil, fmt.Errorf("failed to update oauth2 user: %w", updateErr)
+		}
 		user = existingUser
 	}
 

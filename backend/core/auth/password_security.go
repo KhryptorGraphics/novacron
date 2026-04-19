@@ -246,16 +246,58 @@ func (p *PasswordSecurityService) VerifyPassword(password string, hash *Password
 		}
 
 		// Extract parameters
-		memory := uint32(hash.Params["memory"].(float64))
-		time := uint32(hash.Params["time"].(float64))
-		threads := uint8(hash.Params["threads"].(float64))
-		keyLen := uint32(hash.Params["keyLen"].(float64))
+		memory, err := passwordHashParamUint32(hash.Params, "memory")
+		if err != nil {
+			return false, err
+		}
+		time, err := passwordHashParamUint32(hash.Params, "time")
+		if err != nil {
+			return false, err
+		}
+		threadsValue, err := passwordHashParamUint32(hash.Params, "threads")
+		if err != nil {
+			return false, err
+		}
+		keyLen, err := passwordHashParamUint32(hash.Params, "keyLen")
+		if err != nil {
+			return false, err
+		}
 
-		actualHash := argon2.IDKey([]byte(password), saltBytes, time, memory, threads, keyLen)
+		actualHash := argon2.IDKey([]byte(password), saltBytes, time, memory, uint8(threadsValue), keyLen)
 		return subtle.ConstantTimeCompare(expectedHash, actualHash) == 1, nil
 
 	default:
 		return false, fmt.Errorf("unsupported hash algorithm: %s", hash.Algorithm)
+	}
+}
+
+func passwordHashParamUint32(params map[string]interface{}, key string) (uint32, error) {
+	value, exists := params[key]
+	if !exists {
+		return 0, fmt.Errorf("missing password hash parameter: %s", key)
+	}
+
+	switch typed := value.(type) {
+	case uint8:
+		return uint32(typed), nil
+	case uint16:
+		return uint32(typed), nil
+	case uint32:
+		return typed, nil
+	case uint64:
+		return uint32(typed), nil
+	case int:
+		return uint32(typed), nil
+	case int32:
+		return uint32(typed), nil
+	case int64:
+		return uint32(typed), nil
+	case float32:
+		return uint32(typed), nil
+	case float64:
+		return uint32(typed), nil
+	default:
+		return 0, fmt.Errorf("unsupported password hash parameter type for %s: %T", key, value)
 	}
 }
 

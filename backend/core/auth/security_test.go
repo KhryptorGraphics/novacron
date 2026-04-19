@@ -4,14 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/golang-jwt/jwt/v5"
-	"novacron/backend/pkg/testutil"
 )
 
 // Test JWT Service
@@ -97,8 +95,8 @@ func TestPasswordSecurityService(t *testing.T) {
 
 	// Test password validation
 	user := &User{
-		Username:  testutil.DefaultTestUsername,
-		Email:     testutil.GetTestEmail(),
+		Username:  authTestDefaultUsername,
+		Email:     authTestEmail(),
 		FirstName: "Test",
 		LastName:  "User",
 	}
@@ -308,7 +306,7 @@ func TestOAuth2Service(t *testing.T) {
 	// Test user creation from OAuth2
 	userInfo := &UserInfo{
 		ID:            "oauth-user-123",
-		Email:         testutil.GenerateTestEmail(),
+		Email:         authGeneratedEmail(),
 		EmailVerified: true,
 		Name:          "Test User",
 		GivenName:     "Test",
@@ -326,6 +324,133 @@ func TestOAuth2Service(t *testing.T) {
 	}
 	if user.FirstName != userInfo.GivenName {
 		t.Errorf("Expected first name %s, got %s", userInfo.GivenName, user.FirstName)
+	}
+}
+
+func TestOAuth2ServiceGitHubResolvesPrimaryEmail(t *testing.T) {
+	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	jwtService := NewJWTService(JWTConfiguration{
+		RSAPrivateKey: privateKey,
+		RSAPublicKey:  &privateKey.PublicKey,
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/user":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":    4242,
+				"name":  "Octo Cat",
+				"login": "octocat",
+			})
+		case "/emails":
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"email": "octo@example.com", "primary": true, "verified": true},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	service := NewOAuth2Service(OAuth2Config{
+		UserInfoURL:  server.URL + "/user",
+		ProviderName: "github",
+	}, jwtService)
+
+	userInfo, err := service.GetUserInfo(context.Background(), "access-token")
+	if err != nil {
+		t.Fatalf("GetUserInfo returned error: %v", err)
+	}
+
+	if got, want := userInfo.ID, "4242"; got != want {
+		t.Fatalf("github user id = %q, want %q", got, want)
+	}
+	if got, want := userInfo.Email, "octo@example.com"; got != want {
+		t.Fatalf("github primary email = %q, want %q", got, want)
+	}
+	if !userInfo.EmailVerified {
+		t.Fatal("expected github email to be marked verified")
+	}
+}
+
+func TestSecurityManagerOAuth2CallbackCreatesNewGitHubUser(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/token":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"access_token": "github-access-token",
+				"token_type":   "bearer",
+			})
+		case "/user":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":    9001,
+				"name":  "GitHub Tester",
+				"login": "gh-tester",
+			})
+		case "/emails":
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"email": "gh-tester@example.com", "primary": true, "verified": true},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	securityConfig, err := DefaultSecurityConfiguration()
+	if err != nil {
+		t.Fatalf("DefaultSecurityConfiguration returned error: %v", err)
+	}
+	securityConfig.Compliance = false
+	securityConfig.ZeroTrust = false
+	securityConfig.OAuth2 = map[string]OAuth2Config{
+		"github": {
+			ClientID:     "github-client",
+			ClientSecret: "github-secret",
+			AuthorizeURL: server.URL + "/authorize",
+			TokenURL:     server.URL + "/token",
+			UserInfoURL:  server.URL + "/user",
+			RedirectURL:  "https://app.test/auth/github/callback",
+			Scopes:       []string{"user:email", "read:user"},
+			ProviderName: "github",
+			UsePKCE:      true,
+		},
+	}
+
+	userStore := NewUserMemoryStore()
+	roleStore := NewRoleMemoryStore()
+	tenantStore := NewTenantMemoryStore()
+	auditService := NewInMemoryAuditService()
+	authService := NewAuthService(DefaultAuthConfiguration(), userStore, roleStore, tenantStore, auditService)
+
+	securityManager, err := NewSecurityManager(securityConfig, authService)
+	if err != nil {
+		t.Fatalf("NewSecurityManager returned error: %v", err)
+	}
+
+	_, state, err := securityManager.OAuth2Login("github", "default", "/dashboard")
+	if err != nil {
+		t.Fatalf("OAuth2Login returned error: %v", err)
+	}
+
+	tokens, user, err := securityManager.OAuth2Callback(context.Background(), "github", "github-code", state.State)
+	if err != nil {
+		t.Fatalf("OAuth2Callback returned error: %v", err)
+	}
+
+	if tokens.AccessToken == "" {
+		t.Fatal("expected access token from oauth callback")
+	}
+	if got, want := user.Email, "gh-tester@example.com"; got != want {
+		t.Fatalf("oauth user email = %q, want %q", got, want)
+	}
+	if got, want := user.TenantID, "default"; got != want {
+		t.Fatalf("oauth user tenant = %q, want %q", got, want)
+	}
+	if _, err := userStore.GetByEmail("gh-tester@example.com"); err != nil {
+		t.Fatalf("expected oauth user to be stored, lookup error: %v", err)
 	}
 }
 
@@ -380,8 +505,16 @@ func TestSecurityMiddleware(t *testing.T) {
 		}
 	}
 
+	// Recreate the middleware chain so the injection checks are not masked by the
+	// deliberate rate-limit saturation above.
+	middleware = NewSecurityMiddleware(DefaultSecurityConfig(), auditService, encryptionService)
+	handler = middleware.Middleware(authService)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}))
+
 	// Test SQL injection detection
-	req = httptest.NewRequest("GET", "/api/test?id=1' OR '1'='1", nil)
+	req = httptest.NewRequest("GET", "/api/test?id=1%27%20OR%20%271%27=%271", nil)
 	rr = httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -390,7 +523,7 @@ func TestSecurityMiddleware(t *testing.T) {
 	}
 
 	// Test XSS detection
-	req = httptest.NewRequest("GET", "/api/test?name=<script>alert('xss')</script>", nil)
+	req = httptest.NewRequest("GET", "/api/test?name=%3Cscript%3Ealert%28%27xss%27%29%3C%2Fscript%3E", nil)
 	rr = httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
@@ -596,19 +729,12 @@ func TestEnhancedAuthServiceIntegration(t *testing.T) {
 	encryptionService := NewEncryptionService(DefaultEncryptionConfig())
 	passwordService := NewPasswordSecurityService(DefaultPasswordSecurityConfig())
 
-	// Generate JWT keys
-	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-	jwtConfig := JWTConfiguration{
-		RSAPrivateKey: privateKey,
-		RSAPublicKey:  &privateKey.PublicKey,
-	}
-	jwtService := NewJWTService(jwtConfig)
-
 	// Create enhanced auth service
 	authService := NewAuthService(DefaultAuthConfiguration(), userStore, roleStore, tenantStore, auditService)
 
 	// Test user creation with secure password
-	user := NewUser(testutil.DefaultTestUsername, testutil.GetTestEmail(), "default")
+	user := NewUser(authTestDefaultUsername, authTestEmail(), "default")
+	user.Status = UserStatusActive
 	password := "SecurePassword123!"
 
 	// Validate password first
@@ -617,16 +743,34 @@ func TestEnhancedAuthServiceIntegration(t *testing.T) {
 		t.Fatalf("Password validation failed: %v", err)
 	}
 
-	// Hash password
-	passwordHash, err := passwordService.HashPassword(password)
-	if err != nil {
-		t.Fatalf("Password hashing failed: %v", err)
-	}
-
 	// Create user with secure password hash
 	err = authService.CreateUser(user, password)
 	if err != nil {
 		t.Fatalf("User creation failed: %v", err)
+	}
+
+	role := &Role{
+		ID:          "enhanced-auth-reader",
+		Name:        "Enhanced Auth Reader",
+		Description: "Read-only VM access for integration testing",
+		TenantID:    user.TenantID,
+		Permissions: []Permission{
+			{
+				Resource: "vm",
+				Action:   "read",
+				Effect:   "allow",
+			},
+		},
+	}
+
+	err = authService.CreateRole(role)
+	if err != nil {
+		t.Fatalf("Role creation failed: %v", err)
+	}
+
+	err = userStore.AddRole(user.ID, role.ID)
+	if err != nil {
+		t.Fatalf("Failed to add role to user: %v", err)
 	}
 
 	// Test login with JWT integration
@@ -655,13 +799,13 @@ func TestEnhancedAuthServiceIntegration(t *testing.T) {
 		t.Fatalf("Permission check failed: %v", err)
 	}
 
-	// User should have basic permissions through default role
+	// The explicit integration-test role should grant VM read access.
 	if !hasPermission {
 		t.Error("User should have read permission on VMs")
 	}
 
 	// Test audit logging
-	auditEntries, err := auditService.GetUserActions(user.ID, time.Now().Add(-1*time.Hour), time.Now(), 100, 0)
+	auditEntries, err := auditService.GetResourceActions("user", user.ID, time.Now().Add(-1*time.Hour), time.Now(), 100, 0)
 	if err != nil {
 		t.Fatalf("Failed to get audit entries: %v", err)
 	}

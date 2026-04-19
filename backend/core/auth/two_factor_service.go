@@ -17,12 +17,12 @@ import (
 
 // TwoFactorService manages 2FA operations
 type TwoFactorService struct {
-	mu              sync.RWMutex
-	userSecrets     map[string]*UserTwoFactor
-	backupCodes     map[string][]string
-	rateLimiter     map[string]*RateLimit
-	issuer          string
-	encryptionKey   []byte
+	mu            sync.RWMutex
+	userSecrets   map[string]*UserTwoFactor
+	backupCodes   map[string][]string
+	rateLimiter   map[string]*RateLimit
+	issuer        string
+	encryptionKey []byte
 }
 
 // UserTwoFactor stores 2FA data for a user
@@ -40,9 +40,9 @@ type UserTwoFactor struct {
 
 // RateLimit tracks verification attempts
 type RateLimit struct {
-	Attempts  int       `json:"attempts"`
-	LastReset time.Time `json:"last_reset"`
-	Blocked   bool      `json:"blocked"`
+	Attempts     int       `json:"attempts"`
+	LastReset    time.Time `json:"last_reset"`
+	Blocked      bool      `json:"blocked"`
 	BlockedUntil time.Time `json:"blocked_until"`
 }
 
@@ -56,24 +56,24 @@ type TwoFactorSetupResponse struct {
 
 // TwoFactorVerifyRequest represents a verification request
 type TwoFactorVerifyRequest struct {
-	UserID string `json:"user_id"`
-	Code   string `json:"code"`
-	IsBackupCode bool `json:"is_backup_code,omitempty"`
+	UserID       string `json:"user_id"`
+	Code         string `json:"code"`
+	IsBackupCode bool   `json:"is_backup_code,omitempty"`
 }
 
 // TwoFactorVerifyResponse represents a verification response
 type TwoFactorVerifyResponse struct {
-	Valid         bool     `json:"valid"`
-	RemainingCodes int     `json:"remaining_backup_codes,omitempty"`
-	Error         string   `json:"error,omitempty"`
+	Valid          bool   `json:"valid"`
+	RemainingCodes int    `json:"remaining_backup_codes,omitempty"`
+	Error          string `json:"error,omitempty"`
 }
 
 const (
 	MaxVerificationAttempts = 5
-	RateLimitWindow        = 15 * time.Minute
-	BlockDuration         = 30 * time.Minute
-	BackupCodeLength      = 8
-	BackupCodeCount       = 10
+	RateLimitWindow         = 15 * time.Minute
+	BlockDuration           = 30 * time.Minute
+	BackupCodeLength        = 8
+	BackupCodeCount         = 10
 )
 
 // NewTwoFactorService creates a new 2FA service
@@ -120,7 +120,7 @@ func (tfs *TwoFactorService) SetupTwoFactor(userID, accountName string) (*TwoFac
 		Enabled:     false,
 		SetupAt:     time.Now(),
 		BackupCodes: backupCodes,
-		Algorithm:   string(otp.AlgorithmSHA1),
+		Algorithm:   otp.AlgorithmSHA1.String(),
 		Digits:      int(otp.DigitsSix),
 		Period:      30,
 	}
@@ -539,10 +539,10 @@ func (tfs *TwoFactorService) GetStats() map[string]interface{} {
 	defer tfs.mu.RUnlock()
 
 	stats := map[string]interface{}{
-		"total_users":      len(tfs.userSecrets),
-		"enabled_users":    0,
-		"rate_limited":     0,
-		"blocked_users":    0,
+		"total_users":   len(tfs.userSecrets),
+		"enabled_users": 0,
+		"rate_limited":  0,
+		"blocked_users": 0,
 	}
 
 	enabledCount := 0

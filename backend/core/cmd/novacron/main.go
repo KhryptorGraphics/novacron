@@ -50,6 +50,7 @@ type runtimeConfig struct {
 	Hypervisor hypervisor.Config            `yaml:"hypervisor"`
 	VMManager  vm.VMManagerConfig           `yaml:"vm_manager"`
 	Scheduler  scheduler.SchedulerConfig    `yaml:"scheduler"`
+	Auth       runtimeAuthConfig            `yaml:"auth"`
 }
 
 type runtimeConfigFile struct {
@@ -57,6 +58,7 @@ type runtimeConfigFile struct {
 	Hypervisor *hypervisorConfigFile `yaml:"hypervisor"`
 	VMManager  *vmManagerConfigFile  `yaml:"vm_manager"`
 	Scheduler  *schedulerConfigFile  `yaml:"scheduler"`
+	Auth       *authConfigFile       `yaml:"auth"`
 }
 
 type storageConfigFile struct {
@@ -216,6 +218,7 @@ func defaultRuntimeConfig(nodeID, dataDir string) runtimeConfig {
 		},
 		VMManager: defaultVMManagerRuntimeConfig(nodeID, dataDir),
 		Scheduler: scheduler.DefaultSchedulerConfig(),
+		Auth:      defaultRuntimeAuthConfig(),
 	}
 }
 
@@ -308,6 +311,8 @@ func mergeRuntimeConfig(config *runtimeConfig, fileConfig runtimeConfigFile) {
 	if fileConfig.Scheduler != nil && fileConfig.Scheduler.MinimumNodeCount != 0 {
 		config.Scheduler.MinimumNodeCount = fileConfig.Scheduler.MinimumNodeCount
 	}
+
+	mergeRuntimeAuthConfig(&config.Auth, fileConfig.Auth)
 }
 
 func applyRuntimeConfigDefaults(config *runtimeConfig, nodeID, dataDir string) {
@@ -350,6 +355,7 @@ func applyRuntimeConfigDefaults(config *runtimeConfig, nodeID, dataDir string) {
 		config.VMManager.TenantQuota.Overrides = make(map[string]vm.TenantQuotaLimits)
 	}
 	applyDefaultVMManagerDriverConfig(&config.VMManager, nodeID, dataDir)
+	applyRuntimeAuthDefaults(&config.Auth)
 }
 
 func applyDefaultVMManagerDriverConfig(config *vm.VMManagerConfig, nodeID, dataDir string) {
@@ -599,12 +605,17 @@ func initializeAPI(
 
 	log.Printf("Starting API server on %s", listenAddress)
 
+	runtimeAuth, err := initializeRuntimeAuth(config.Auth)
+	if err != nil {
+		return nil, fmt.Errorf("initialize runtime auth: %w", err)
+	}
+
 	listener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		return nil, fmt.Errorf("listen on %s: %w", listenAddress, err)
 	}
 
-	router := newRuntimeRouter(vmManager)
+	router := newRuntimeRouter(config, vmManager, runtimeAuth)
 	server := &http.Server{
 		Handler: router,
 		BaseContext: func(net.Listener) context.Context {
@@ -651,9 +662,11 @@ func (s *APIServer) Shutdown(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
-func newRuntimeRouter(vmManager *vm.VMManager) *mux.Router {
+func newRuntimeRouter(config runtimeConfig, vmManager *vm.VMManager, runtimeAuth *runtimeAuthRuntime) *mux.Router {
 	router := mux.NewRouter()
+	router.Use(runtimeCORSMiddleware(config.Auth))
 	router.HandleFunc("/healthz", handleHealthz).Methods(http.MethodGet)
+	registerRuntimeAuthRoutes(router, runtimeAuth)
 	router.HandleFunc("/api/cluster/nodes", runtimeListNodesHandler(vmManager)).Methods(http.MethodGet)
 	router.HandleFunc("/api/cluster/nodes/{id}", runtimeGetNodeHandler(vmManager)).Methods(http.MethodGet)
 	router.HandleFunc("/api/cluster/health", runtimeGetClusterHealthHandler(vmManager)).Methods(http.MethodGet)

@@ -80,6 +80,16 @@ vm_manager:
         max_vms: 2
 scheduler:
   minimum_node_count: 3
+auth:
+  enabled: true
+  frontend_url: http://localhost:3000
+  default_tenant_id: tenant-auth
+  default_cluster_id: cluster-auth
+  oauth:
+    github:
+      client_id: github-client
+      client_secret: github-secret
+      redirect_url: http://localhost:8090/api/auth/oauth/github/callback
 `
 	if err := os.WriteFile(configPath, []byte(configYAML), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -116,6 +126,27 @@ scheduler:
 	}
 	if got, want := config.Scheduler.MinimumNodeCount, 3; got != want {
 		t.Fatalf("scheduler minimum node count = %d, want %d", got, want)
+	}
+	if got, want := config.Auth.Enabled, true; got != want {
+		t.Fatalf("auth enabled = %t, want %t", got, want)
+	}
+	if got, want := config.Auth.FrontendURL, "http://localhost:3000"; got != want {
+		t.Fatalf("auth frontend url = %q, want %q", got, want)
+	}
+	if got, want := config.Auth.DefaultTenantID, "tenant-auth"; got != want {
+		t.Fatalf("auth default tenant id = %q, want %q", got, want)
+	}
+	if got, want := config.Auth.DefaultClusterID, "cluster-auth"; got != want {
+		t.Fatalf("auth default cluster id = %q, want %q", got, want)
+	}
+	if got, want := config.Auth.OAuth.GitHub.ClientID, "github-client"; got != want {
+		t.Fatalf("auth github client id = %q, want %q", got, want)
+	}
+	if got, want := config.Auth.OAuth.GitHub.ClientSecret, "github-secret"; got != want {
+		t.Fatalf("auth github client secret = %q, want %q", got, want)
+	}
+	if got, want := config.Auth.OAuth.GitHub.RedirectURL, "http://localhost:8090/api/auth/oauth/github/callback"; got != want {
+		t.Fatalf("auth github redirect url = %q, want %q", got, want)
 	}
 }
 

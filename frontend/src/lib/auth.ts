@@ -48,6 +48,11 @@ interface UserResponse {
   roles?: string[];
 }
 
+interface OAuthAuthorizationUrlResponse {
+  provider: string;
+  authorizationUrl: string;
+}
+
 interface TwoFactorSetupResponse {
   qr_code: string;
   secret: string;
@@ -95,11 +100,11 @@ class AuthService {
 
     return {
       id: payload.sub || payload.user_id || payload.id,
-      email: payload.email || '',
-      firstName: payload.firstName || payload.first_name || payload.given_name || '',
-      lastName: payload.lastName || payload.last_name || payload.family_name || '',
+      email: payload.email || payload.metadata?.email || '',
+      firstName: payload.firstName || payload.first_name || payload.given_name || payload.metadata?.first_name || '',
+      lastName: payload.lastName || payload.last_name || payload.family_name || payload.metadata?.last_name || '',
       tenantId: payload.tenantId || payload.tenant_id,
-      status: payload.status || 'active',
+      status: payload.status || payload.metadata?.status || 'active',
       two_factor_enabled: payload.two_factor_enabled || payload['2fa_enabled'] || false,
       role,
       roles,
@@ -144,6 +149,12 @@ class AuthService {
       method: 'POST',
       body: JSON.stringify(userData),
     });
+  }
+
+  async getGitHubAuthorizationUrl(redirectTo: string = '/dashboard'): Promise<OAuthAuthorizationUrlResponse> {
+    return this.request<OAuthAuthorizationUrlResponse>(
+      `/api/auth/oauth/github/url?redirect_to=${encodeURIComponent(redirectTo)}`,
+    );
   }
 
   async checkEmailAvailability(email: string): Promise<{ available: boolean }> {
@@ -205,7 +216,21 @@ class AuthService {
 
       // Extract user information from JWT payload
       // The backend JWT should contain: sub (user ID), email, firstName, lastName, etc.
-      const user = this.buildUserFromClaims(payload);
+      const tokenUser = this.buildUserFromClaims(payload);
+      const cachedUser = typeof window !== 'undefined'
+        ? JSON.parse(localStorage.getItem('authUser') || 'null')
+        : null;
+      const user: UserResponse = {
+        ...cachedUser,
+        ...tokenUser,
+        email: tokenUser.email || cachedUser?.email || '',
+        firstName: tokenUser.firstName || cachedUser?.firstName || '',
+        lastName: tokenUser.lastName || cachedUser?.lastName || '',
+        tenantId: tokenUser.tenantId || cachedUser?.tenantId,
+        status: tokenUser.status || cachedUser?.status || 'active',
+        role: tokenUser.role || cachedUser?.role,
+        roles: tokenUser.roles || cachedUser?.roles,
+      };
 
       // Cache user data in localStorage for quick access
       if (typeof window !== 'undefined') {

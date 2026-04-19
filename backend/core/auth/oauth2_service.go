@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -320,6 +321,8 @@ func (o *OAuth2Service) GetUserInfo(ctx context.Context, accessToken string) (*U
 		userInfo.ID = id
 	} else if id, ok := rawUserInfo["id"].(string); ok {
 		userInfo.ID = id
+	} else if id, exists := rawUserInfo["id"]; exists {
+		userInfo.ID = fmt.Sprint(id)
 	}
 
 	if email, ok := rawUserInfo["email"].(string); ok {
@@ -350,6 +353,20 @@ func (o *OAuth2Service) GetUserInfo(ctx context.Context, accessToken string) (*U
 		userInfo.Locale = locale
 	}
 
+	if o.config.ProviderName == "github" {
+		if login, ok := rawUserInfo["login"].(string); ok && login != "" {
+			userInfo.RawClaims["login"] = login
+		}
+		if userInfo.Email == "" {
+			email, verified, err := o.getGitHubPrimaryEmail(ctx, accessToken)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve github primary email: %w", err)
+			}
+			userInfo.Email = email
+			userInfo.EmailVerified = verified
+		}
+	}
+
 	return userInfo, nil
 }
 
@@ -360,6 +377,15 @@ func (o *OAuth2Service) CreateUserFromOAuth2(userInfo *UserInfo, tenantID string
 	}
 
 	now := time.Now()
+	if userInfo.GivenName == "" || userInfo.FamilyName == "" {
+		givenName, familyName := splitOAuthDisplayName(userInfo)
+		if userInfo.GivenName == "" {
+			userInfo.GivenName = givenName
+		}
+		if userInfo.FamilyName == "" {
+			userInfo.FamilyName = familyName
+		}
+	}
 	user := &User{
 		ID:        fmt.Sprintf("%s-%s", userInfo.Provider, userInfo.ID),
 		Username:  userInfo.Email,
@@ -382,6 +408,81 @@ func (o *OAuth2Service) CreateUserFromOAuth2(userInfo *UserInfo, tenantID string
 	}
 
 	return user, nil
+}
+
+func (o *OAuth2Service) getGitHubPrimaryEmail(ctx context.Context, accessToken string) (string, bool, error) {
+	userInfoURL, err := url.Parse(o.config.UserInfoURL)
+	if err != nil {
+		return "", false, fmt.Errorf("parse github user info url: %w", err)
+	}
+	userInfoURL.Path = path.Join(path.Dir(userInfoURL.Path), "emails")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, userInfoURL.String(), nil)
+	if err != nil {
+		return "", false, fmt.Errorf("create github email request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "novacron")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", false, fmt.Errorf("github email request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", false, fmt.Errorf("github email request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var emails []struct {
+		Email    string `json:"email"`
+		Primary  bool   `json:"primary"`
+		Verified bool   `json:"verified"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&emails); err != nil {
+		return "", false, fmt.Errorf("decode github email response: %w", err)
+	}
+
+	for _, entry := range emails {
+		if entry.Primary && entry.Email != "" {
+			return entry.Email, entry.Verified, nil
+		}
+	}
+	for _, entry := range emails {
+		if entry.Verified && entry.Email != "" {
+			return entry.Email, true, nil
+		}
+	}
+	for _, entry := range emails {
+		if entry.Email != "" {
+			return entry.Email, entry.Verified, nil
+		}
+	}
+
+	return "", false, fmt.Errorf("github account has no usable email address")
+}
+
+func splitOAuthDisplayName(userInfo *UserInfo) (string, string) {
+	if userInfo == nil {
+		return "", ""
+	}
+
+	name := strings.TrimSpace(userInfo.Name)
+	if name == "" {
+		return "", ""
+	}
+	parts := strings.Fields(name)
+	if len(parts) == 0 {
+		return "", ""
+	}
+	if len(parts) == 1 {
+		return parts[0], ""
+	}
+
+	return parts[0], strings.Join(parts[1:], " ")
 }
 
 // RefreshToken refreshes an OAuth2 access token
