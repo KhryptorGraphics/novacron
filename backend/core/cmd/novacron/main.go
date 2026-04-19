@@ -2,15 +2,22 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"syscall"
+	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/khryptorgraphics/novacron/backend/core/hypervisor"
 	"github.com/khryptorgraphics/novacron/backend/core/network"
 	"github.com/khryptorgraphics/novacron/backend/core/scheduler"
@@ -580,17 +587,36 @@ func initializeAPI(
 	networkManager *network.NetworkManager,
 	storageManager *storage.StorageManager,
 ) (*APIServer, error) {
-	_ = ctx
 	_ = config
-	_ = vmManager
 	_ = migrationManager
 	_ = schedulerService
 	_ = networkManager
 	_ = storageManager
 
+	if vmManager == nil {
+		return nil, fmt.Errorf("vm manager is required for runtime API")
+	}
+
 	log.Printf("Starting API server on %s", listenAddress)
 
-	apiServer := &APIServer{}
+	listener, err := net.Listen("tcp", listenAddress)
+	if err != nil {
+		return nil, fmt.Errorf("listen on %s: %w", listenAddress, err)
+	}
+
+	router := newRuntimeRouter(vmManager)
+	server := &http.Server{
+		Handler: router,
+		BaseContext: func(net.Listener) context.Context {
+			return ctx
+		},
+	}
+
+	apiServer := &APIServer{
+		server:   server,
+		listener: listener,
+		address:  listener.Addr().String(),
+	}
 	if err := apiServer.Start(); err != nil {
 		return nil, fmt.Errorf("start API server: %w", err)
 	}
@@ -598,13 +624,220 @@ func initializeAPI(
 	return apiServer, nil
 }
 
-type APIServer struct{}
+type APIServer struct {
+	server   *http.Server
+	listener net.Listener
+	address  string
+}
 
 func (s *APIServer) Start() error {
+	if s == nil || s.server == nil || s.listener == nil {
+		return fmt.Errorf("api server is not configured")
+	}
+
+	go func() {
+		if err := s.server.Serve(s.listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("API server stopped with error: %v", err)
+		}
+	}()
+
 	return nil
 }
 
 func (s *APIServer) Shutdown(ctx context.Context) error {
-	_ = ctx
-	return nil
+	if s == nil || s.server == nil {
+		return nil
+	}
+	return s.server.Shutdown(ctx)
+}
+
+func newRuntimeRouter(vmManager *vm.VMManager) *mux.Router {
+	router := mux.NewRouter()
+	router.HandleFunc("/healthz", handleHealthz).Methods(http.MethodGet)
+	router.HandleFunc("/api/cluster/nodes", runtimeListNodesHandler(vmManager)).Methods(http.MethodGet)
+	router.HandleFunc("/api/cluster/nodes/{id}", runtimeGetNodeHandler(vmManager)).Methods(http.MethodGet)
+	router.HandleFunc("/api/cluster/health", runtimeGetClusterHealthHandler(vmManager)).Methods(http.MethodGet)
+	router.HandleFunc("/api/cluster/leader", runtimeGetLeaderHandler(vmManager)).Methods(http.MethodGet)
+	return router
+}
+
+type runtimeNode struct {
+	ID                 string            `json:"id"`
+	Address            string            `json:"address,omitempty"`
+	Status             string            `json:"status"`
+	CPU                int               `json:"cpu,omitempty"`
+	Memory             int64             `json:"memory,omitempty"`
+	Disk               int64             `json:"disk,omitempty"`
+	UsedCPU            int               `json:"used_cpu,omitempty"`
+	RemainingCPU       int               `json:"remaining_cpu,omitempty"`
+	UsedMemoryMB       int64             `json:"used_memory_mb,omitempty"`
+	RemainingMemoryMB  int64             `json:"remaining_memory_mb,omitempty"`
+	UsedDiskGB         int64             `json:"used_disk_gb,omitempty"`
+	RemainingDiskGB    int64             `json:"remaining_disk_gb,omitempty"`
+	CPUUsagePercent    float64           `json:"cpu_usage_percent,omitempty"`
+	MemoryUsagePercent float64           `json:"memory_usage_percent,omitempty"`
+	DiskUsagePercent   float64           `json:"disk_usage_percent,omitempty"`
+	VMCount            int               `json:"vm_count,omitempty"`
+	Schedulable        bool              `json:"schedulable"`
+	Labels             map[string]string `json:"labels,omitempty"`
+}
+
+type runtimeClusterHealth struct {
+	Status       string    `json:"status"`
+	TotalNodes   int       `json:"total_nodes"`
+	HealthyNodes int       `json:"healthy_nodes"`
+	HasQuorum    bool      `json:"has_quorum"`
+	Leader       string    `json:"leader"`
+	LastUpdated  time.Time `json:"last_updated"`
+}
+
+func handleHealthz(w http.ResponseWriter, _ *http.Request) {
+	respondRuntimeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func runtimeListNodesHandler(vmManager *vm.VMManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		inventory := vmManager.ListSchedulerNodes()
+		nodes := make([]runtimeNode, 0, len(inventory))
+		for _, nodeInfo := range inventory {
+			nodes = append(nodes, runtimeSchedulerNodeToAPI(nodeInfo))
+		}
+		sort.Slice(nodes, func(i, j int) bool {
+			return nodes[i].ID < nodes[j].ID
+		})
+		respondRuntimeJSON(w, http.StatusOK, nodes)
+	}
+}
+
+func runtimeGetNodeHandler(vmManager *vm.VMManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		nodeID := mux.Vars(r)["id"]
+		for _, nodeInfo := range vmManager.ListSchedulerNodes() {
+			if nodeInfo.NodeID == nodeID {
+				respondRuntimeJSON(w, http.StatusOK, runtimeSchedulerNodeToAPI(nodeInfo))
+				return
+			}
+		}
+		http.Error(w, "node not found", http.StatusNotFound)
+	}
+}
+
+func runtimeGetClusterHealthHandler(vmManager *vm.VMManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		inventory := vmManager.ListSchedulerNodes()
+		totalNodes := len(inventory)
+		healthyNodes := 0
+		leaderID := ""
+		for _, nodeInfo := range inventory {
+			if runtimeIsSchedulableNode(nodeInfo) {
+				healthyNodes++
+				if leaderID == "" {
+					leaderID = nodeInfo.NodeID
+				}
+			}
+		}
+
+		status := "unavailable"
+		if healthyNodes > 0 && healthyNodes == totalNodes {
+			status = "healthy"
+		} else if healthyNodes > 0 {
+			status = "degraded"
+		}
+
+		respondRuntimeJSON(w, http.StatusOK, runtimeClusterHealth{
+			Status:       status,
+			TotalNodes:   totalNodes,
+			HealthyNodes: healthyNodes,
+			HasQuorum:    healthyNodes > 0,
+			Leader:       leaderID,
+			LastUpdated:  time.Now().UTC(),
+		})
+	}
+}
+
+func runtimeGetLeaderHandler(vmManager *vm.VMManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		for _, nodeInfo := range vmManager.ListSchedulerNodes() {
+			if runtimeIsSchedulableNode(nodeInfo) {
+				respondRuntimeJSON(w, http.StatusOK, map[string]string{
+					"id":     nodeInfo.NodeID,
+					"status": nodeInfo.Status,
+					"scope":  "cluster-local",
+				})
+				return
+			}
+		}
+		http.Error(w, "no schedulable leader available", http.StatusNotFound)
+	}
+}
+
+func runtimeSchedulerNodeToAPI(nodeInfo *vm.NodeResourceInfo) runtimeNode {
+	if nodeInfo == nil {
+		return runtimeNode{}
+	}
+
+	totalMemoryMB := int64(nodeInfo.TotalMemoryMB)
+	usedMemoryMB := int64(nodeInfo.UsedMemoryMB)
+	totalDiskGB := int64(nodeInfo.TotalDiskGB)
+	usedDiskGB := int64(nodeInfo.UsedDiskGB)
+	totalCPU := nodeInfo.TotalCPU
+	usedCPU := nodeInfo.UsedCPU
+
+	return runtimeNode{
+		ID:                 nodeInfo.NodeID,
+		Status:             nodeInfo.Status,
+		CPU:                totalCPU,
+		Memory:             totalMemoryMB,
+		Disk:               totalDiskGB,
+		UsedCPU:            usedCPU,
+		RemainingCPU:       maxInt(0, totalCPU-usedCPU),
+		UsedMemoryMB:       usedMemoryMB,
+		RemainingMemoryMB:  maxInt64(0, totalMemoryMB-usedMemoryMB),
+		UsedDiskGB:         usedDiskGB,
+		RemainingDiskGB:    maxInt64(0, totalDiskGB-usedDiskGB),
+		CPUUsagePercent:    nodeInfo.CPUUsagePercent,
+		MemoryUsagePercent: nodeInfo.MemoryUsagePercent,
+		DiskUsagePercent:   nodeInfo.DiskUsagePercent,
+		VMCount:            nodeInfo.VMCount,
+		Schedulable:        runtimeIsSchedulableNode(nodeInfo),
+		Labels:             cloneStringMap(nodeInfo.Labels),
+	}
+}
+
+func runtimeIsSchedulableNode(nodeInfo *vm.NodeResourceInfo) bool {
+	return nodeInfo != nil && nodeInfo.Status == "available"
+}
+
+func respondRuntimeJSON(w http.ResponseWriter, status int, payload interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		log.Printf("failed to encode runtime API response: %v", err)
+	}
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+
+	dst := make(map[string]string, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }

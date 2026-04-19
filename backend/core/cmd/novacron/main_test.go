@@ -1,6 +1,11 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -187,6 +192,108 @@ func TestRegisterLocalSchedulerNodeRegistersInventory(t *testing.T) {
 	if len(manager.ListSchedulerNodes()) != 1 {
 		t.Fatalf("expected scheduler node update to keep a single entry, got %d", len(manager.ListSchedulerNodes()))
 	}
+}
+
+func TestInitializeAPIRejectsNilVMManager(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if _, err := initializeAPI(ctx, runtimeConfig{}, "127.0.0.1:0", nil, nil, nil, nil, nil); err == nil {
+		t.Fatal("initializeAPI succeeded with nil vm manager, want error")
+	}
+}
+
+func TestInitializeAPIExposesClusterLocalEndpoints(t *testing.T) {
+	t.Parallel()
+
+	manager, err := vm.NewVMManager(newTestVMManagerConfig(t, "qemu-system-x86_64"))
+	if err != nil {
+		t.Fatalf("NewVMManager returned error: %v", err)
+	}
+	defer manager.Stop()
+
+	if err := registerLocalSchedulerNode(manager, "test-node", t.TempDir()); err != nil {
+		t.Fatalf("registerLocalSchedulerNode returned error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	apiServer, err := initializeAPI(ctx, runtimeConfig{}, "127.0.0.1:0", manager, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("initializeAPI returned error: %v", err)
+	}
+	defer apiServer.Shutdown(context.Background())
+
+	healthzResponse := getJSONResponse[map[string]string](t, apiServer, "/healthz")
+	if got, want := healthzResponse["status"], "ok"; got != want {
+		t.Fatalf("healthz status = %q, want %q", got, want)
+	}
+
+	nodes := getJSONResponse[[]runtimeNode](t, apiServer, "/api/cluster/nodes")
+	if len(nodes) != 1 {
+		t.Fatalf("expected one cluster node, got %d", len(nodes))
+	}
+
+	node := nodes[0]
+	if got, want := node.ID, "test-node"; got != want {
+		t.Fatalf("node id = %q, want %q", got, want)
+	}
+	if !node.Schedulable {
+		t.Fatal("expected cluster node to be schedulable")
+	}
+	if node.CPU < 1 {
+		t.Fatalf("node cpu = %d, want >= 1", node.CPU)
+	}
+
+	selectedNode := getJSONResponse[runtimeNode](t, apiServer, "/api/cluster/nodes/test-node")
+	if got, want := selectedNode.ID, "test-node"; got != want {
+		t.Fatalf("selected node id = %q, want %q", got, want)
+	}
+
+	health := getJSONResponse[runtimeClusterHealth](t, apiServer, "/api/cluster/health")
+	if got, want := health.Status, "healthy"; got != want {
+		t.Fatalf("cluster health status = %q, want %q", got, want)
+	}
+	if got, want := health.TotalNodes, 1; got != want {
+		t.Fatalf("cluster total nodes = %d, want %d", got, want)
+	}
+	if got, want := health.Leader, "test-node"; got != want {
+		t.Fatalf("cluster leader = %q, want %q", got, want)
+	}
+
+	leader := getJSONResponse[map[string]string](t, apiServer, "/api/cluster/leader")
+	if got, want := leader["id"], "test-node"; got != want {
+		t.Fatalf("leader id = %q, want %q", got, want)
+	}
+	if got, want := leader["scope"], "cluster-local"; got != want {
+		t.Fatalf("leader scope = %q, want %q", got, want)
+	}
+}
+
+func getJSONResponse[T any](t *testing.T, apiServer *APIServer, path string) T {
+	t.Helper()
+
+	var zero T
+	url := fmt.Sprintf("http://%s%s", apiServer.address, path)
+	response, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s returned error: %v", url, err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("GET %s status = %d, want %d: %s", url, response.StatusCode, http.StatusOK, strings.TrimSpace(string(body)))
+	}
+
+	if err := json.NewDecoder(response.Body).Decode(&zero); err != nil {
+		t.Fatalf("decode %s response: %v", url, err)
+	}
+
+	return zero
 }
 
 func newTestVMManagerConfig(t *testing.T, qemuPath string) vm.VMManagerConfig {
