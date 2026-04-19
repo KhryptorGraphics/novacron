@@ -12,7 +12,7 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/encoding"
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/partition"
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/prediction"
-	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/sync"
+	statesync "github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/sync"
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/transport"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -24,47 +24,47 @@ import (
 // - Internet: PBFT consensus, ZStd max compression, Byzantine tolerance
 // - Hybrid: Adaptive switching with automatic mode detection
 type CrossClusterComponentsV3 struct {
-	mu       sync.RWMutex
-	logger   *zap.Logger
-	nodeID   string
-	mode     upgrade.NetworkMode
+	mu     sync.RWMutex
+	logger *zap.Logger
+	nodeID string
+	mode   upgrade.NetworkMode
 
 	// DWCP v3 components
-	hdeEngine       *encoding.HDEv3      // Hierarchical Delta Encoding v3
-	amstTransport   *transport.AMSTv3   // Adaptive Multi-Stream Transport v3
-	acpConsensus    *consensus.ACPv3    // Adaptive Consensus Protocol v3
-	assSync         *sync.ASSv3         // Adaptive State Synchronization v3
-	pbaPredictor    *prediction.PBAv3   // Predictive Bandwidth Allocation v3
-	itpPartition    *partition.ITPv3    // Intelligent Topology Partitioning v3
+	hdeEngine     *encoding.HDEv3   // Hierarchical Delta Encoding v3
+	amstTransport *transport.AMSTv3 // Adaptive Multi-Stream Transport v3
+	acpConsensus  *consensus.ACPv3  // Adaptive Consensus Protocol v3
+	assSync       *statesync.ASSv3  // Adaptive State Synchronization v3
+	pbaPredictor  *prediction.PBAv3 // Predictive Bandwidth Allocation v3
+	itpPartition  *partition.ITPv3  // Intelligent Topology Partitioning v3
 
 	// Federation management
 	clusterConnections map[string]*ClusterConnectionV3
 	regionManagers     map[string]*RegionManagerV3
 
 	// Performance tracking
-	metrics            *FederationV3Metrics
-	healthMonitor      *HealthMonitor
+	metrics       *FederationV3Metrics
+	healthMonitor *HealthMonitor
 
 	// Configuration
-	config             *FederationV3Config
+	config *FederationV3Config
 
 	// Lifecycle
-	ctx                context.Context
-	cancel             context.CancelFunc
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // FederationV3Config contains configuration for v3 federation
 type FederationV3Config struct {
-	NodeID          string
-	NetworkMode     upgrade.NetworkMode
+	NodeID      string
+	NetworkMode upgrade.NetworkMode
 
 	// Multi-cloud strategy
-	MultiCloudMode  MultiCloudStrategy
-	CloudProviders  []CloudProvider
+	MultiCloudMode MultiCloudStrategy
+	CloudProviders []CloudProvider
 
 	// Cross-datacenter settings
-	DatacenterMode  DatacenterStrategy
-	Datacenters     []Datacenter
+	DatacenterMode DatacenterStrategy
+	Datacenters    []Datacenter
 
 	// Consensus configuration
 	ConsensusConfig *consensus.ACPConfig
@@ -78,8 +78,8 @@ type FederationV3Config struct {
 	BandwidthThreshold float64
 
 	// State synchronization
-	SyncInterval       time.Duration
-	BaselineInterval   time.Duration
+	SyncInterval     time.Duration
+	BaselineInterval time.Duration
 
 	// Partition handling
 	PartitionTolerance bool
@@ -90,9 +90,9 @@ type FederationV3Config struct {
 type MultiCloudStrategy string
 
 const (
-	MultiCloudActive   MultiCloudStrategy = "active"   // All clouds active
-	MultiCloudPassive  MultiCloudStrategy = "passive"  // Primary/backup
-	MultiCloudHybrid   MultiCloudStrategy = "hybrid"   // Mixed workloads
+	MultiCloudActive  MultiCloudStrategy = "active"  // All clouds active
+	MultiCloudPassive MultiCloudStrategy = "passive" // Primary/backup
+	MultiCloudHybrid  MultiCloudStrategy = "hybrid"  // Mixed workloads
 )
 
 // CloudProvider represents a cloud provider configuration
@@ -101,7 +101,7 @@ type CloudProvider struct {
 	Type     string // aws, azure, gcp, oracle
 	Region   string
 	Endpoint string
-	Trusted  bool   // False for untrusted clouds requiring Byzantine tolerance
+	Trusted  bool // False for untrusted clouds requiring Byzantine tolerance
 }
 
 // DatacenterStrategy defines cross-datacenter strategy
@@ -123,20 +123,20 @@ type Datacenter struct {
 
 // ClusterConnectionV3 represents a v3 connection to another cluster
 type ClusterConnectionV3 struct {
-	ClusterID       string
-	CloudProvider   string
-	Datacenter      string
-	Region          string
-	Endpoint        string
-	NetworkMode     upgrade.NetworkMode
+	ClusterID     string
+	CloudProvider string
+	Datacenter    string
+	Region        string
+	Endpoint      string
+	NetworkMode   upgrade.NetworkMode
 
 	// AMST transport
-	transport       *transport.AMSTv3
+	transport *transport.AMSTv3
 
 	// Connection state
-	connected       atomic.Bool
-	healthy         atomic.Bool
-	lastSeen        time.Time
+	connected atomic.Bool
+	healthy   atomic.Bool
+	lastSeen  time.Time
 
 	// Performance metrics
 	latency         atomic.Int64  // microseconds
@@ -144,41 +144,41 @@ type ClusterConnectionV3 struct {
 	compressionRate atomic.Uint64 // percentage * 100
 
 	// Byzantine tolerance
-	trusted         bool
-	faultCount      atomic.Int32
+	trusted    bool
+	faultCount atomic.Int32
 }
 
 // RegionManagerV3 manages connections within a region
 type RegionManagerV3 struct {
-	RegionID        string
-	Strategy        DatacenterStrategy
-	Clusters        map[string]*ClusterConnectionV3
-	LeaderCluster   string
+	RegionID      string
+	Strategy      DatacenterStrategy
+	Clusters      map[string]*ClusterConnectionV3
+	LeaderCluster string
 
 	// Regional optimization
-	baselineCache   *RegionalBaselineCache
-	topology        *RegionTopology
+	baselineCache *RegionalBaselineCache
+	topology      *RegionTopology
 }
 
 // RegionTopology defines region network topology
 type RegionTopology struct {
-	Type            string
-	Nodes           []string
-	Edges           map[string][]string
-	Weights         map[string]float64
+	Type    string
+	Nodes   []string
+	Edges   map[string][]string
+	Weights map[string]float64
 }
 
 // FederationV3Metrics tracks v3 federation performance
 type FederationV3Metrics struct {
 	// Connection metrics
-	TotalConnections    atomic.Int32
-	ActiveConnections   atomic.Int32
-	FailedConnections   atomic.Int32
+	TotalConnections  atomic.Int32
+	ActiveConnections atomic.Int32
+	FailedConnections atomic.Int32
 
 	// Bandwidth metrics (reuse from existing)
-	TotalBytesSent      atomic.Uint64
-	TotalBytesReceived  atomic.Uint64
-	CompressionRatio    atomic.Uint64
+	TotalBytesSent     atomic.Uint64
+	TotalBytesReceived atomic.Uint64
+	CompressionRatio   atomic.Uint64
 
 	// Consensus metrics
 	ConsensusOperations atomic.Uint64
@@ -186,9 +186,9 @@ type FederationV3Metrics struct {
 	AvgConsensusLatency atomic.Int64 // microseconds
 
 	// State sync metrics
-	SyncOperations      atomic.Uint64
-	SyncFailures        atomic.Uint64
-	DeltaSyncRatio      atomic.Uint64 // percentage * 100
+	SyncOperations atomic.Uint64
+	SyncFailures   atomic.Uint64
+	DeltaSyncRatio atomic.Uint64 // percentage * 100
 
 	// Byzantine metrics
 	ByzantineDetections atomic.Uint64
@@ -202,20 +202,20 @@ type FederationV3Metrics struct {
 
 // HealthMonitor monitors cluster health
 type HealthMonitor struct {
-	mu              sync.RWMutex
-	healthChecks    map[string]*HealthCheck
-	alertThreshold  float64
-	checkInterval   time.Duration
+	mu             sync.RWMutex
+	healthChecks   map[string]*ClusterHealthCheckV3
+	alertThreshold float64
+	checkInterval  time.Duration
 }
 
-// HealthCheck represents a health check result
-type HealthCheck struct {
-	ClusterID    string
-	Healthy      bool
-	LastCheck    time.Time
-	Latency      time.Duration
-	ErrorRate    float64
-	Message      string
+// ClusterHealthCheckV3 represents connection health tracked by the v3 federation monitor.
+type ClusterHealthCheckV3 struct {
+	ClusterID string
+	Healthy   bool
+	LastCheck time.Time
+	Latency   time.Duration
+	ErrorRate float64
+	Message   string
 }
 
 // NewCrossClusterComponentsV3 creates v3 cross-cluster components
@@ -248,14 +248,10 @@ func NewCrossClusterComponentsV3(logger *zap.Logger, config *FederationV3Config)
 		return nil, errors.Wrap(err, "failed to create HDE v3")
 	}
 
-	// Initialize AMST v3 transport
-	amstConfig := &transport.AMSTv3Config{
-		NodeID:        config.NodeID,
-		NetworkMode:   config.NetworkMode,
-		MaxStreams:    16,
-		StreamTimeout: 30 * time.Second,
-	}
-	cc.amstTransport, err = transport.NewAMSTv3(amstConfig, logger)
+	// Initialize AMST v3 transport with the shared hybrid defaults.
+	amstConfig := transport.DefaultAMSTv3Config()
+	amstConfig.MaxStreams = 16
+	cc.amstTransport, err = transport.NewAMSTv3(amstConfig, nil, logger)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create AMST v3")
 	}
@@ -271,35 +267,22 @@ func NewCrossClusterComponentsV3(logger *zap.Logger, config *FederationV3Config)
 		return nil, errors.Wrap(err, "failed to create ACP v3")
 	}
 
-	// Initialize ASS v3 state synchronization
-	assConfig := &sync.ASSv3Config{
-		NodeID:           config.NodeID,
-		NetworkMode:      config.NetworkMode,
-		SyncInterval:     config.SyncInterval,
-		ConflictResolver: sync.NewCRDTResolver(),
-	}
-	cc.assSync, err = sync.NewASSv3(assConfig, logger)
+	// Initialize ASS v3 state synchronization.
+	cc.assSync, err = statesync.NewASSv3(config.NodeID, config.NetworkMode, logger)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create ASS v3")
 	}
 
-	// Initialize PBA v3 bandwidth predictor
-	pbaConfig := &prediction.PBAv3Config{
-		NodeID:         config.NodeID,
-		NetworkMode:    config.NetworkMode,
-		PredictionWindow: 10 * time.Second,
-		LearningRate:   0.01,
+	// Initialize PBA v3 bandwidth predictor.
+	pbaConfig := prediction.DefaultPBAv3Config()
+	pbaConfig.DefaultMode = config.NetworkMode
+	cc.pbaPredictor, err = prediction.NewPBAv3(pbaConfig)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create PBA v3")
 	}
-	cc.pbaPredictor = prediction.NewPBAv3(pbaConfig, logger)
 
-	// Initialize ITP v3 partition handler
-	itpConfig := &partition.ITPv3Config{
-		NodeID:          config.NodeID,
-		NetworkMode:     config.NetworkMode,
-		PartitionTolerance: config.PartitionTolerance,
-		RecoveryTimeout: config.RecoveryTimeout,
-	}
-	cc.itpPartition, err = partition.NewITPv3(itpConfig, logger)
+	// Initialize ITP v3 partition handler.
+	cc.itpPartition, err = partition.NewITPv3(config.NetworkMode)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create ITP v3")
 	}
@@ -340,40 +323,37 @@ func (cc *CrossClusterComponentsV3) ConnectClusterV3(ctx context.Context, cluste
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
 
+	cluster.NetworkMode = cc.resolveNetworkMode(cluster)
+
 	cc.logger.Info("Connecting cluster with DWCP v3",
 		zap.String("cluster", cluster.ClusterID),
 		zap.String("provider", cluster.CloudProvider),
 		zap.String("mode", cluster.NetworkMode.String()))
 
-	// Determine network mode based on cluster type
-	if cluster.CloudProvider != "" && !cluster.trusted {
-		// Untrusted cloud requires Internet mode with Byzantine tolerance
-		cluster.NetworkMode = upgrade.ModeInternet
-		cc.logger.Info("Using Internet mode with Byzantine tolerance for untrusted cloud",
-			zap.String("cluster", cluster.ClusterID),
-			zap.String("provider", cluster.CloudProvider))
-	} else if cluster.Datacenter != "" {
-		// Trusted datacenter can use high-performance mode
-		cluster.NetworkMode = upgrade.ModeDatacenter
-		cc.logger.Info("Using Datacenter mode for trusted datacenter",
-			zap.String("cluster", cluster.ClusterID),
-			zap.String("datacenter", cluster.Datacenter))
-	} else {
-		// Default to hybrid mode
-		cluster.NetworkMode = upgrade.ModeHybrid
+	// Initialize AMST transport for the remote cluster using its endpoint as the transport target.
+	connectionConfig := transport.DefaultAMSTv3Config()
+	connectionConfig.RemoteAddr = cluster.Endpoint
+	switch cluster.NetworkMode {
+	case upgrade.ModeDatacenter:
+		connectionConfig.EnableInternet = false
+	case upgrade.ModeInternet:
+		connectionConfig.EnableDatacenter = false
 	}
 
-	// Initialize AMST transport for cluster
-	transport, err := cc.amstTransport.CreateConnection(cluster.Endpoint, cluster.NetworkMode)
+	clusterTransport, err := transport.NewAMSTv3(connectionConfig, nil, cc.logger)
 	if err != nil {
 		cc.metrics.FailedConnections.Add(1)
 		return errors.Wrapf(err, "failed to create transport for cluster %s", cluster.ClusterID)
 	}
-	cluster.transport = transport
+	if err := clusterTransport.Start(ctx, cluster.Endpoint); err != nil {
+		cc.metrics.FailedConnections.Add(1)
+		return errors.Wrapf(err, "failed to start transport for cluster %s", cluster.ClusterID)
+	}
+	cluster.transport = clusterTransport
 
 	// Perform handshake
 	if err := cc.performHandshakeV3(cluster); err != nil {
-		transport.Close()
+		clusterTransport.Close()
 		cc.metrics.FailedConnections.Add(1)
 		return errors.Wrap(err, "handshake failed")
 	}
@@ -406,6 +386,24 @@ func (cc *CrossClusterComponentsV3) ConnectClusterV3(ctx context.Context, cluste
 	return nil
 }
 
+func (cc *CrossClusterComponentsV3) resolveNetworkMode(cluster *ClusterConnectionV3) upgrade.NetworkMode {
+	if cluster.CloudProvider != "" && !cluster.trusted {
+		cc.logger.Info("Using Internet mode with Byzantine tolerance for untrusted cloud",
+			zap.String("cluster", cluster.ClusterID),
+			zap.String("provider", cluster.CloudProvider))
+		return upgrade.ModeInternet
+	}
+
+	if cluster.Datacenter != "" {
+		cc.logger.Info("Using Datacenter mode for trusted datacenter",
+			zap.String("cluster", cluster.ClusterID),
+			zap.String("datacenter", cluster.Datacenter))
+		return upgrade.ModeDatacenter
+	}
+
+	return upgrade.ModeHybrid
+}
+
 // SyncClusterStateV3 synchronizes cluster state using v3 components
 func (cc *CrossClusterComponentsV3) SyncClusterStateV3(ctx context.Context, sourceCluster string, targetClusters []string, stateData []byte) error {
 	cc.mu.RLock()
@@ -424,9 +422,6 @@ func (cc *CrossClusterComponentsV3) SyncClusterStateV3(ctx context.Context, sour
 		zap.Int("compressed", compressed.CompressedSize),
 		zap.Float64("ratio", compressed.CompressionRatio()))
 
-	// Update bandwidth prediction
-	cc.pbaPredictor.RecordTransfer(int64(compressed.CompressedSize), compressed.CompressionTime)
-
 	// Synchronize to target clusters
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(targetClusters))
@@ -441,11 +436,23 @@ func (cc *CrossClusterComponentsV3) SyncClusterStateV3(ctx context.Context, sour
 				errChan <- fmt.Errorf("cluster %s not connected", clusterID)
 				return
 			}
+			if conn.transport == nil {
+				errChan <- fmt.Errorf("cluster %s has no active transport", clusterID)
+				return
+			}
 
-			// Use ASS v3 for state synchronization
-			if err := cc.assSync.Synchronize(ctx, clusterID, compressed.Marshal()); err != nil {
+			payload := compressed.Marshal()
+
+			// Record the state transition in the mode-aware sync engine.
+			if err := cc.assSync.SyncState(ctx, payload); err != nil {
 				cc.metrics.SyncFailures.Add(1)
-				errChan <- errors.Wrapf(err, "failed to sync to %s", clusterID)
+				errChan <- errors.Wrapf(err, "failed to stage sync state for %s", clusterID)
+				return
+			}
+
+			if err := conn.transport.SendData(ctx, payload); err != nil {
+				cc.metrics.SyncFailures.Add(1)
+				errChan <- errors.Wrapf(err, "failed to send sync payload to %s", clusterID)
 				return
 			}
 
@@ -525,8 +532,8 @@ func (cc *CrossClusterComponentsV3) HandlePartitionV3(ctx context.Context, affec
 	cc.logger.Warn("Handling network partition with ITP v3",
 		zap.Strings("clusters", affectedClusters))
 
-	// Use ITP v3 for intelligent partition handling
-	if err := cc.itpPartition.HandlePartition(ctx, affectedClusters); err != nil {
+	// Bias placement toward resilient internet-mode behavior while the federation is partitioned.
+	if err := cc.itpPartition.SetMode(upgrade.ModeInternet); err != nil {
 		return errors.Wrap(err, "partition handling failed")
 	}
 
@@ -549,8 +556,8 @@ func (cc *CrossClusterComponentsV3) RecoverFromPartitionV3(ctx context.Context, 
 	cc.logger.Info("Recovering from partition with ITP v3",
 		zap.Strings("clusters", recoveredClusters))
 
-	// Use ITP v3 for intelligent recovery
-	if err := cc.itpPartition.RecoverFromPartition(ctx, recoveredClusters); err != nil {
+	// Restore the placement engine to the currently selected federation mode.
+	if err := cc.itpPartition.SetMode(cc.mode); err != nil {
 		return errors.Wrap(err, "partition recovery failed")
 	}
 
@@ -585,8 +592,10 @@ func (cc *CrossClusterComponentsV3) UpdateNetworkMode(mode upgrade.NetworkMode) 
 	// Update all components
 	cc.hdeEngine.UpdateNetworkMode(mode)
 	cc.acpConsensus.SetMode(mode)
-	cc.assSync.UpdateMode(mode)
-	cc.pbaPredictor.UpdateMode(mode)
+	cc.assSync.SetMode(mode)
+	if err := cc.itpPartition.SetMode(mode); err != nil {
+		cc.logger.Warn("Failed to update partition mode", zap.Error(err))
+	}
 }
 
 // GetMetricsV3 returns v3 federation metrics
@@ -675,7 +684,10 @@ func (cc *CrossClusterComponentsV3) Close() error {
 		cc.acpConsensus.Stop()
 	}
 	if cc.assSync != nil {
-		cc.assSync.Close()
+		cc.assSync.Stop()
+	}
+	if cc.pbaPredictor != nil {
+		cc.pbaPredictor.Close()
 	}
 
 	return nil
@@ -702,7 +714,7 @@ func (cc *CrossClusterComponentsV3) updateRegionManagerV3(cluster *ClusterConnec
 			RegionID:      region,
 			Strategy:      cc.config.DatacenterMode,
 			Clusters:      map[string]*ClusterConnectionV3{cluster.ClusterID: cluster},
-			baselineCache: NewRegionalBaselineCache(),
+			baselineCache: NewRegionalBaselineCache(cc.logger),
 			topology:      &RegionTopology{Type: string(cc.config.DatacenterMode)},
 		}
 	}
@@ -789,14 +801,18 @@ func (cc *CrossClusterComponentsV3) adaptiveModeLoop() {
 
 func (cc *CrossClusterComponentsV3) adaptNetworkMode() {
 	// Analyze network conditions and switch mode if beneficial
-	// Use PBA v3 predictions to determine optimal mode
-	prediction := cc.pbaPredictor.GetBandwidthPrediction()
+	// Use PBA v3 predictions to determine optimal mode when enough history exists.
+	prediction, err := cc.pbaPredictor.PredictBandwidth(cc.ctx)
+	if err != nil {
+		cc.logger.Debug("Skipping adaptive mode update until bandwidth history is available", zap.Error(err))
+		return
+	}
 
 	// Simple heuristic: switch based on bandwidth and latency
-	if prediction.AvgLatency < 10*time.Millisecond && prediction.AvgBandwidth > 1000000000 {
+	if prediction.PredictedLatencyMs < 10 && prediction.PredictedBandwidthMbps > 1000 {
 		// High bandwidth, low latency: use datacenter mode
 		cc.UpdateNetworkMode(upgrade.ModeDatacenter)
-	} else if prediction.AvgLatency > 100*time.Millisecond || prediction.AvgBandwidth < 10000000 {
+	} else if prediction.PredictedLatencyMs > 100 || prediction.PredictedBandwidthMbps < 10 {
 		// High latency or low bandwidth: use internet mode
 		cc.UpdateNetworkMode(upgrade.ModeInternet)
 	}
@@ -810,7 +826,7 @@ func NewFederationV3Metrics() *FederationV3Metrics {
 // NewHealthMonitor creates a new health monitor
 func NewHealthMonitor() *HealthMonitor {
 	return &HealthMonitor{
-		healthChecks:   make(map[string]*HealthCheck),
+		healthChecks:   make(map[string]*ClusterHealthCheckV3),
 		alertThreshold: 0.8,
 		checkInterval:  30 * time.Second,
 	}
@@ -820,7 +836,7 @@ func (hm *HealthMonitor) UpdateHealth(clusterID string, healthy bool, latency in
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
 
-	check := &HealthCheck{
+	check := &ClusterHealthCheckV3{
 		ClusterID: clusterID,
 		Healthy:   healthy,
 		LastCheck: time.Now(),

@@ -714,7 +714,7 @@ const (
 
 // StateSyncMessage represents a state synchronization message
 type StateSyncMessage struct {
-	Type                StateMessageType
+	Type               StateMessageType
 	MessageID          string
 	SourceCluster      string
 	TargetCluster      string
@@ -734,15 +734,15 @@ type BandwidthAwareMessage struct {
 	CompressionLevel    int
 	AdaptiveCompression bool
 	TrafficShaping      *TrafficShapingConfig
-	QoSLevel           QoSLevel
+	QoSLevel            QoSLevel
 }
 
 // TrafficShapingConfig defines traffic shaping parameters
 type TrafficShapingConfig struct {
-	MaxBandwidth    int64
-	BurstSize       int64
-	RateLimiting    bool
-	PriorityQueue   bool
+	MaxBandwidth  int64
+	BurstSize     int64
+	RateLimiting  bool
+	PriorityQueue bool
 }
 
 // QoSLevel defines quality of service levels
@@ -779,11 +779,11 @@ const (
 // SecureMessage includes security features
 type SecureMessage struct {
 	ReliableMessage
-	EncryptionType    EncryptionType
-	KeyID             string
-	Signature         []byte
-	CertificateChain  [][]byte
-	AuthToken         string
+	EncryptionType   EncryptionType
+	KeyID            string
+	Signature        []byte
+	CertificateChain [][]byte
+	AuthToken        string
 }
 
 // EncryptionType defines encryption methods
@@ -798,43 +798,43 @@ const (
 
 // CrossClusterComponents handles all cross-cluster communication
 type CrossClusterComponents struct {
-	mu                   sync.RWMutex
-	logger               *zap.Logger
-	stateSync            *StateSynchronizationProtocol
-	bandwidthOptimizer   *BandwidthOptimizer
-	reliableDelivery     *ReliableDeliveryManager
-	securityManager      *CrossClusterSecurityManager
-	performanceMonitor   *CrossClusterPerformanceMonitor
-	messageQueue         chan SecureMessage
-	ackQueue             chan AcknowledgmentMessage
-	errorHandler         *ErrorHandler
-	metricsCollector     *CrossClusterMetricsCollector
+	mu                 sync.RWMutex
+	logger             *zap.Logger
+	stateSync          *StateSynchronizationProtocol
+	bandwidthOptimizer *BandwidthOptimizer
+	reliableDelivery   *ReliableDeliveryManager
+	securityManager    *CrossClusterSecurityManager
+	performanceMonitor *CrossClusterPerformanceMonitor
+	messageQueue       chan SecureMessage
+	ackQueue           chan AcknowledgmentMessage
+	errorHandler       *ErrorHandler
+	metricsCollector   *CrossClusterMetricsCollector
 
 	// DWCP Integration
-	dwcpAdapter          *dwcp.FederationAdapter
-	dwcpEnabled          bool
+	dwcpAdapter *dwcp.FederationAdapter
+	dwcpEnabled bool
 }
 
 // StateSynchronizationProtocol handles state sync between clusters
 type StateSynchronizationProtocol struct {
-	mu                sync.RWMutex
-	coordinator       shared.DistributedStateCoordinator // Changed to interface to break import cycle
-	memoryDistribution interface{} // Changed from *vm.MemoryStateDistribution to break import cycle
-	syncChannels      map[string]chan *StateSyncMessage
-	conflictResolver  *StateSyncConflictResolver
-	versionControl    *StateVersionControl
-	logger            *zap.Logger
+	mu                 sync.RWMutex
+	coordinator        shared.DistributedStateCoordinator // Changed to interface to break import cycle
+	memoryDistribution interface{}                        // Changed from *vm.MemoryStateDistribution to break import cycle
+	syncChannels       map[string]chan *StateSyncMessage
+	conflictResolver   *StateSyncConflictResolver
+	versionControl     *StateVersionControl
+	logger             *zap.Logger
 }
 
 // BandwidthOptimizer optimizes cross-cluster communication bandwidth
 type BandwidthOptimizer struct {
-	mu               sync.RWMutex
-	bandwidthMonitor *network.BandwidthMonitor
+	mu                sync.RWMutex
+	bandwidthMonitor  *network.BandwidthMonitor
 	compressionEngine *AdaptiveCompressionEngine
-	trafficShaper    *TrafficShaper
-	qosManager       *QoSManager
-	predictionModel  *BandwidthPredictionModel
-	logger           *zap.Logger
+	trafficShaper     *TrafficShaper
+	qosManager        *QoSManager
+	predictionModel   *BandwidthPredictionModel
+	logger            *zap.Logger
 }
 
 // ReliableDeliveryManager ensures message delivery
@@ -850,24 +850,24 @@ type ReliableDeliveryManager struct {
 
 // CrossClusterSecurityManager manages security for cross-cluster communication
 type CrossClusterSecurityManager struct {
-	mu              sync.RWMutex
-	tlsConfig       *tls.Config
-	keyManager      *SecretKeyManager
-	authProvider    *CrossClusterAuthProvider
-	certificateCA   *CertificateAuthority
-	encryptionCore  *EncryptionEngine
-	logger          *zap.Logger
+	mu             sync.RWMutex
+	tlsConfig      *tls.Config
+	keyManager     *SecretKeyManager
+	authProvider   *CrossClusterAuthProvider
+	certificateCA  *CertificateAuthority
+	encryptionCore *EncryptionEngine
+	logger         *zap.Logger
 }
 
 // CrossClusterPerformanceMonitor monitors cross-cluster performance
 type CrossClusterPerformanceMonitor struct {
-	mu            sync.RWMutex
-	latencyTracker *LatencyTracker
+	mu                sync.RWMutex
+	latencyTracker    *LatencyTracker
 	throughputMonitor *ThroughputMonitor
-	errorRateTracker *ErrorRateTracker
-	alertSystem     *PerformanceAlertSystem
-	dashboardData   *PerformanceDashboard
-	logger          *zap.Logger
+	errorRateTracker  *ErrorRateTracker
+	alertSystem       *PerformanceAlertSystem
+	dashboardData     *PerformanceDashboard
+	logger            *zap.Logger
 }
 
 // NewCrossClusterComponents creates enhanced cross-cluster components
@@ -876,22 +876,22 @@ func NewCrossClusterComponents(logger *zap.Logger, bandwidthMonitor *network.Ban
 	dwcpConfig := dwcp.DefaultFederationConfig()
 	dwcpConfig.EnableHDE = true
 	dwcpConfig.EnableAMST = true
-	dwcpConfig.CompressionRatio = 10.0 // Target 10x compression
+	dwcpConfig.CompressionRatio = 10.0  // Target 10x compression
 	dwcpConfig.BandwidthThreshold = 0.6 // Optimize when >60% bandwidth used
 
 	return &CrossClusterComponents{
-		logger:              logger,
-		stateSync:           NewStateSynchronizationProtocol(logger),
-		bandwidthOptimizer:  NewBandwidthOptimizer(logger, bandwidthMonitor),
-		reliableDelivery:    NewReliableDeliveryManager(logger),
-		securityManager:     NewCrossClusterSecurityManager(logger),
-		performanceMonitor:  NewCrossClusterPerformanceMonitor(logger),
-		messageQueue:        make(chan SecureMessage, 10000),
+		logger:             logger,
+		stateSync:          NewStateSynchronizationProtocol(logger),
+		bandwidthOptimizer: NewBandwidthOptimizer(logger, bandwidthMonitor),
+		reliableDelivery:   NewReliableDeliveryManager(logger),
+		securityManager:    NewCrossClusterSecurityManager(logger),
+		performanceMonitor: NewCrossClusterPerformanceMonitor(logger),
+		messageQueue:       make(chan SecureMessage, 10000),
 		ackQueue:           make(chan AcknowledgmentMessage, 1000),
 		errorHandler:       NewErrorHandler(logger),
 		metricsCollector:   NewCrossClusterMetricsCollector(logger),
-		dwcpAdapter:         dwcp.NewFederationAdapter(logger, dwcpConfig),
-		dwcpEnabled:         true,
+		dwcpAdapter:        dwcp.NewFederationAdapter(logger, dwcpConfig),
+		dwcpEnabled:        true,
 	}
 }
 
@@ -928,16 +928,12 @@ func (cc *CrossClusterComponents) SendStateUpdate(ctx context.Context, update *S
 
 // SynchronizeDistributedState synchronizes VM state across clusters
 func (cc *CrossClusterComponents) SynchronizeDistributedState(ctx context.Context, vmID string, targetClusters []string) error {
-	cc.mu.RLock()
-	stateSync := cc.stateSync
-	cc.mu.RUnlock()
-
 	// Create synchronization messages for each target cluster
 	messages := []*StateSyncMessage{}
 	for _, cluster := range targetClusters {
 		msg := &StateSyncMessage{
 			Type:               StateMessageTypeSynchronization,
-			MessageID:          generateMessageID(),
+			MessageID:          generateCrossClusterMessageID(),
 			SourceCluster:      "local", // Would be actual cluster ID
 			TargetCluster:      cluster,
 			VMID:               vmID,
@@ -990,7 +986,19 @@ func (cc *CrossClusterComponents) OptimizeForBandwidth(ctx context.Context, clus
 	optimizer := cc.bandwidthOptimizer
 
 	// Get current bandwidth utilization
-	utilization := optimizer.bandwidthMonitor.GetUtilization(clusterID)
+	utilization := 0.0
+	if optimizer.bandwidthMonitor != nil {
+		summary := optimizer.bandwidthMonitor.GetNetworkUtilizationSummary()
+		if clusterUtilization, ok := summary[clusterID]; ok {
+			utilization = clusterUtilization / 100.0
+		} else if len(summary) > 0 {
+			var total float64
+			for _, value := range summary {
+				total += value / 100.0
+			}
+			utilization = total / float64(len(summary))
+		}
+	}
 
 	// Adjust compression based on utilization
 	if utilization > 0.8 {
@@ -1178,7 +1186,7 @@ func NewCrossClusterMetricsCollector(logger *zap.Logger) *CrossClusterMetricsCol
 	return &CrossClusterMetricsCollector{}
 }
 
-func generateMessageID() string {
+func generateCrossClusterMessageID() string {
 	return fmt.Sprintf("msg-%d", time.Now().UnixNano())
 }
 
@@ -1213,14 +1221,14 @@ func (cc *CrossClusterComponents) GetDWCPMetrics() map[string]interface{} {
 	if cc.dwcpEnabled && cc.dwcpAdapter != nil {
 		metrics := cc.dwcpAdapter.GetMetrics()
 		return map[string]interface{}{
-			"totalBytesSent":      metrics.TotalBytesSent.Load(),
-			"totalBytesReceived":  metrics.TotalBytesReceived.Load(),
-			"compressionRatio":    float64(metrics.CompressionRatio.Load()) / 100.0,
-			"syncOperations":      metrics.SyncOperations.Load(),
-			"syncFailures":        metrics.SyncFailures.Load(),
-			"baselineRefreshes":   metrics.BaselineRefreshes.Load(),
-			"deltaApplications":   metrics.DeltaApplications.Load(),
-			"errorCount":          metrics.ErrorCount.Load(),
+			"totalBytesSent":     metrics.TotalBytesSent.Load(),
+			"totalBytesReceived": metrics.TotalBytesReceived.Load(),
+			"compressionRatio":   float64(metrics.CompressionRatio.Load()) / 100.0,
+			"syncOperations":     metrics.SyncOperations.Load(),
+			"syncFailures":       metrics.SyncFailures.Load(),
+			"baselineRefreshes":  metrics.BaselineRefreshes.Load(),
+			"deltaApplications":  metrics.DeltaApplications.Load(),
+			"errorCount":         metrics.ErrorCount.Load(),
 		}
 	}
 
@@ -1291,7 +1299,7 @@ func (sync *StateSynchronizationProtocol) SynchronizeAfterPartition(ctx context.
 
 func (engine *AdaptiveCompressionEngine) SetCompressionLevel(level int) {}
 
-func (shaper *TrafficShaper) EnableAggressiveShaping()  {}
+func (shaper *TrafficShaper) EnableAggressiveShaping() {}
 func (shaper *TrafficShaper) EnableStandardShaping()   {}
 func (shaper *TrafficShaper) DisableShaping()          {}
 
@@ -1299,6 +1307,6 @@ func (qos *QoSManager) UpdatePolicies(cluster string, utilization float64) error
 	return nil
 }
 
-func (monitor *CrossClusterPerformanceMonitor) CollectMetrics()   {}
+func (monitor *CrossClusterPerformanceMonitor) CollectMetrics()  {}
 func (monitor *CrossClusterPerformanceMonitor) CheckAlerts()     {}
 func (monitor *CrossClusterPerformanceMonitor) UpdateDashboard() {}

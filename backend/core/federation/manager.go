@@ -35,19 +35,19 @@ var (
 
 // Manager implements the FederationManager interface
 type Manager struct {
-	config           *FederationConfig
-	consensus        ConsensusManager
-	discovery        DiscoveryManager
-	resourcePool     ResourceManager
-	healthChecker    HealthChecker
-	nodes            map[string]*Node
-	nodesMu          sync.RWMutex
-	localNode        *Node
-	isRunning        atomic.Bool
-	stopCh           chan struct{}
-	eventCh          chan interface{}
-	metrics          *FederationMetrics
-	logger           Logger
+	config        *FederationConfig
+	consensus     ConsensusManager
+	discovery     DiscoveryManager
+	resourcePool  ResourceManager
+	healthChecker HealthChecker
+	nodes         map[string]*Node
+	nodesMu       sync.RWMutex
+	localNode     *Node
+	isRunning     atomic.Bool
+	stopCh        chan struct{}
+	eventCh       chan interface{}
+	metrics       *FederationMetrics
+	logger        Logger
 }
 
 // FederationMetrics tracks federation performance metrics
@@ -193,6 +193,9 @@ func (m *Manager) Start(ctx context.Context) error {
 		// Bootstrap as single-node federation
 		m.localNode.State = NodeStateActive
 		m.localNode.Role = RoleLeader
+		if raft, ok := m.consensus.(*RaftConsensus); ok {
+			raft.becomeLeader()
+		}
 	}
 
 	m.logger.Info("Federation manager started successfully")
@@ -581,7 +584,7 @@ func (m *Manager) metricsCollector(ctx context.Context) {
 func (m *Manager) collectMetrics() {
 	m.nodesMu.RLock()
 	m.metrics.NodesTotal = int64(len(m.nodes))
-	
+
 	healthy := int64(0)
 	for _, node := range m.nodes {
 		if node.State == NodeStateActive {

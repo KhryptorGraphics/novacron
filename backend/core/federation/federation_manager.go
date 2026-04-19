@@ -10,7 +10,7 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/core/consensus"
 	"github.com/khryptorgraphics/novacron/backend/core/network"
 	"github.com/khryptorgraphics/novacron/backend/core/scheduler"
-	"github.com/pkg/errors"
+	pkgerrors "github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
@@ -348,38 +348,38 @@ type CrossClusterOperation struct {
 	TenantID string `json:"tenant_id"`
 }
 
-// FederationProvider wraps FederationManagerImpl to implement the Provider interface
-type FederationProvider struct {
+// FederationProviderAdapter wraps FederationManagerImpl to implement the Provider interface.
+type FederationProviderAdapter struct {
 	manager *FederationManagerImpl
 }
 
 // NewFederationProvider creates a new federation provider
-func NewFederationProvider(manager *FederationManagerImpl) *FederationProvider {
-	return &FederationProvider{manager: manager}
+func NewFederationProvider(manager *FederationManagerImpl) *FederationProviderAdapter {
+	return &FederationProviderAdapter{manager: manager}
 }
 
 // GetFederatedClusters implements Provider interface
-func (fp *FederationProvider) GetFederatedClusters(ctx context.Context) (map[string]*FederatedCluster, error) {
+func (fp *FederationProviderAdapter) GetFederatedClusters(ctx context.Context) (map[string]*FederatedCluster, error) {
 	return fp.manager.GetFederatedClusters(ctx)
 }
 
 // GetClusterResources implements Provider interface
-func (fp *FederationProvider) GetClusterResources(ctx context.Context, clusterID string) (*ClusterResources, error) {
+func (fp *FederationProviderAdapter) GetClusterResources(ctx context.Context, clusterID string) (*ClusterResources, error) {
 	return fp.manager.GetClusterResources(ctx, clusterID)
 }
 
 // AllocateResources implements Provider interface
-func (fp *FederationProvider) AllocateResources(ctx context.Context, request *ResourceAllocationRequest) (*ResourceAllocation, error) {
+func (fp *FederationProviderAdapter) AllocateResources(ctx context.Context, request *ResourceAllocationRequest) (*ResourceAllocation, error) {
 	return fp.manager.AllocateResourcesProvider(ctx, request)
 }
 
 // ReleaseResources implements Provider interface
-func (fp *FederationProvider) ReleaseResources(ctx context.Context, allocationID string) error {
+func (fp *FederationProviderAdapter) ReleaseResources(ctx context.Context, allocationID string) error {
 	return fp.manager.ReleaseResources(ctx, allocationID)
 }
 
-// Ensure FederationProvider implements Provider interface
-var _ Provider = (*FederationProvider)(nil)
+// Ensure FederationProviderAdapter implements Provider interface
+var _ Provider = (*FederationProviderAdapter)(nil)
 
 // FederationManagerImpl implements FederationManager interface
 type FederationManagerImpl struct {
@@ -1132,7 +1132,7 @@ type CrossClusterStateReplication struct {
 	replicationPolicy *ReplicationPolicy
 	stateChannels     map[string]chan *StateUpdate
 	replicaManager    *ReplicaManager
-	conflictResolver  *ConflictResolver
+	conflictResolver  *StateSyncConflictResolver
 	consistency       *ConsistencyManager
 	logger            *zap.Logger
 }
@@ -1140,7 +1140,7 @@ type CrossClusterStateReplication struct {
 // FederatedConsensus provides hierarchical consensus across clusters
 type FederatedConsensus struct {
 	mu                  sync.RWMutex
-	clusterConsensus    map[string]consensus.Manager
+	clusterConsensus    map[string]*consensus.RaftNode
 	federationConsensus *HierarchicalConsensus
 	conflictArbiter     *ConflictArbiter
 	logger              *zap.Logger
@@ -1226,7 +1226,7 @@ func (fm *FederationManagerImpl) DiscoverClusters(ctx context.Context) ([]*Clust
 	// Query DHT for cluster information
 	clusterKeys, err := fm.clusterDiscovery.FindClusters(ctx)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to discover clusters")
+		return nil, pkgerrors.Wrap(err, "failed to discover clusters")
 	}
 
 	clusters := []*Cluster{}
@@ -1327,12 +1327,12 @@ func (fm *FederationManagerImpl) ScheduleVMCrossCluster(ctx context.Context, vmS
 
 	// Consider bandwidth availability
 	if fm.bandwidthMonitor != nil {
-		vmSpec.BandwidthRequirements = fm.bandwidthMonitor.GetAvailableBandwidth()
+		vmSpec.BandwidthRequirements = estimateAvailableBandwidth(fm.bandwidthMonitor)
 	}
 
 	placement, err := scheduler.placementEngine.FindOptimalPlacement(ctx, vmSpec)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to find optimal placement")
+		return nil, pkgerrors.Wrap(err, "failed to find optimal placement")
 	}
 
 	return placement, nil
@@ -1347,7 +1347,7 @@ func (fm *FederationManagerImpl) InitializeCrossClusterReplication() error {
 		replicationPolicy: NewDefaultReplicationPolicy(),
 		stateChannels:     make(map[string]chan *StateUpdate),
 		replicaManager:    NewReplicaManager(),
-		conflictResolver:  NewConflictResolver(),
+		conflictResolver:  &StateSyncConflictResolver{},
 		consistency:       NewConsistencyManager(),
 		logger:            fm.logger,
 	}
@@ -1421,8 +1421,8 @@ func (fm *FederationManagerImpl) MakeFederationDecision(ctx context.Context, ope
 
 	// Check bandwidth constraints
 	if bandwidthMonitor != nil {
-		availableBandwidth := bandwidthMonitor.GetAvailableBandwidth()
-		if operation.BandwidthRequirement > availableBandwidth {
+		availableBandwidth := estimateAvailableBandwidth(bandwidthMonitor)
+		if availableBandwidth > 0 && operation.BandwidthRequirement > availableBandwidth {
 			decision.Approved = false
 			decision.Reason = "insufficient bandwidth"
 			return decision, nil
@@ -1450,7 +1450,7 @@ func (fm *FederationManagerImpl) InitializeFederatedConsensus() error {
 	defer fm.mutex.Unlock()
 
 	fm.federatedConsensus = &FederatedConsensus{
-		clusterConsensus:    make(map[string]consensus.Manager),
+		clusterConsensus:    make(map[string]*consensus.RaftNode),
 		federationConsensus: NewHierarchicalConsensus(),
 		conflictArbiter:     NewConflictArbiter(),
 		logger:              fm.logger,
@@ -1566,6 +1566,36 @@ func (fm *FederationManagerImpl) parseClusterData(data []byte) (*Cluster, error)
 	return &Cluster{}, nil
 }
 
+func estimateAvailableBandwidth(bandwidthMonitor *network.BandwidthMonitor) int64 {
+	if bandwidthMonitor == nil {
+		return 0
+	}
+
+	var available int64
+	for _, measurement := range bandwidthMonitor.GetAllCurrentMeasurements() {
+		if measurement == nil {
+			continue
+		}
+
+		utilizationFraction := measurement.Utilization / 100.0
+		if utilizationFraction < 0 {
+			utilizationFraction = 0
+		}
+		if utilizationFraction > 1 {
+			utilizationFraction = 1
+		}
+
+		linkSpeed := int64(measurement.LinkSpeed)
+		if linkSpeed <= 0 {
+			continue
+		}
+
+		available += int64(float64(linkSpeed) * (1 - utilizationFraction))
+	}
+
+	return available
+}
+
 // UpdateClusterResources updates resource inventory for a cluster
 func (fm *FederationManagerImpl) UpdateClusterResourceInventory(clusterID string, resources *ClusterResourceInventory) error {
 	fm.mutex.Lock()
@@ -1633,7 +1663,7 @@ func (fm *FederationManagerImpl) GetFederatedClusters(ctx context.Context) (map[
 
 // GetVMInfo retrieves VM information from a cluster
 func (fm *FederationManagerImpl) GetVMInfo(ctx context.Context, clusterID, vmID string) (*VMInfo, error) {
-	cluster, err := fm.GetCluster(clusterID)
+	_, err := fm.GetCluster(clusterID)
 	if err != nil {
 		return nil, err
 	}
@@ -1896,15 +1926,6 @@ type VMInfo struct {
 	AllocatedCPU    float64 `json:"allocated_cpu"`
 	AllocatedMemory int64   `json:"allocated_memory"`
 	Status          string  `json:"status"`
-}
-
-type ResourceRequest struct {
-	ID        string        `json:"id"`
-	CPUCores  float64       `json:"cpu_cores"`
-	MemoryGB  float64       `json:"memory_gb"`
-	StorageGB float64       `json:"storage_gb"`
-	Duration  time.Duration `json:"duration"`
-	Priority  int           `json:"priority"`
 }
 
 // Additional supporting types

@@ -2,6 +2,7 @@ package federation
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -212,9 +213,9 @@ func TestResourceAllocation(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, allocation)
 	assert.Equal(t, "test-request", allocation.RequestID)
-	assert.Equal(t, float64(2), allocation.AllocatedCPU)
-	assert.Equal(t, float64(8), allocation.AllocatedMem)
-	assert.Equal(t, AllocationActive, allocation.Status)
+	assert.Equal(t, 2, allocation.CPU)
+	assert.Equal(t, 8, allocation.MemoryGB)
+	assert.Equal(t, "active", allocation.Status)
 
 	// Release resources
 	err = manager.ReleaseResources(ctx, allocation.ID)

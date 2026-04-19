@@ -58,7 +58,7 @@ func TestBandwidthHistory(t *testing.T) {
 			LatencyMs:     float64(5 + i),
 			PacketLoss:    0.001,
 			JitterMs:      1.0,
-			TimeOfDay:     float64(i % 24),
+			TimeOfDay:     i % 24,
 		}
 		history.Add(sample)
 	}
@@ -213,8 +213,8 @@ func TestAddSample(t *testing.T) {
 			LatencyMs:     float64(5 + i%10),
 			PacketLoss:    0.001,
 			JitterMs:      1.0,
-			TimeOfDay:     float64(i % 24),
-			DayOfWeek:     float64(i % 7),
+			TimeOfDay:     i % 24,
+			DayOfWeek:     i % 7,
 		}
 		pba.AddSample(sample)
 	}
@@ -280,8 +280,8 @@ func BenchmarkPrediction(b *testing.B) {
 			LatencyMs:     5.0,
 			PacketLoss:    0.001,
 			JitterMs:      1.0,
-			TimeOfDay:     float64(12),
-			DayOfWeek:     float64(3),
+			TimeOfDay:     12,
+			DayOfWeek:     3,
 		}
 		pba.AddSample(sample)
 	}
@@ -314,8 +314,8 @@ func TestPredictionLatency(t *testing.T) {
 			LatencyMs:     5.0,
 			PacketLoss:    0.001,
 			JitterMs:      1.0,
-			TimeOfDay:     float64(12),
-			DayOfWeek:     float64(3),
+			TimeOfDay:     12,
+			DayOfWeek:     3,
 		}
 		pba.AddSample(sample)
 	}

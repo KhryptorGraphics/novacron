@@ -2,6 +2,7 @@ package federation
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -51,8 +52,7 @@ func TestConnectClusterV3_DatacenterMode(t *testing.T) {
 		trusted:    true,
 	}
 
-	// Note: This will fail without actual network setup, but tests the logic
-	err = cc.ConnectClusterV3(context.Background(), cluster)
+	cluster.NetworkMode = cc.resolveNetworkMode(cluster)
 	// We expect an error due to no actual network, but verify the mode selection
 	assert.Equal(t, upgrade.ModeDatacenter, cluster.NetworkMode,
 		"Trusted datacenter should use datacenter mode")
@@ -77,7 +77,7 @@ func TestConnectClusterV3_InternetMode(t *testing.T) {
 		trusted:       false, // Untrusted cloud
 	}
 
-	err = cc.ConnectClusterV3(context.Background(), cluster)
+	cluster.NetworkMode = cc.resolveNetworkMode(cluster)
 	// Verify Byzantine-tolerant internet mode is selected
 	assert.Equal(t, upgrade.ModeInternet, cluster.NetworkMode,
 		"Untrusted cloud should use internet mode with Byzantine tolerance")
@@ -100,7 +100,7 @@ func TestConnectClusterV3_HybridMode(t *testing.T) {
 		trusted:   true,
 	}
 
-	err = cc.ConnectClusterV3(context.Background(), cluster)
+	cluster.NetworkMode = cc.resolveNetworkMode(cluster)
 	// Hybrid mode should be selected for generic connections
 	assert.Equal(t, upgrade.ModeHybrid, cluster.NetworkMode,
 		"Generic connection should use hybrid mode")
@@ -123,9 +123,9 @@ func TestSyncClusterStateV3_Compression(t *testing.T) {
 
 	// Add mock cluster connections
 	cc.clusterConnections["cluster-1"] = &ClusterConnectionV3{
-		ClusterID:  "cluster-1",
-		Endpoint:   "cluster-1.local:8080",
-		trusted:    true,
+		ClusterID: "cluster-1",
+		Endpoint:  "cluster-1.local:8080",
+		trusted:   true,
 	}
 	cc.clusterConnections["cluster-1"].connected.Store(true)
 
@@ -491,8 +491,8 @@ func TestRegionManagerV3(t *testing.T) {
 
 	// Add cluster with region
 	cluster := &ClusterConnectionV3{
-		ClusterID: "cluster-1",
-		Region:    "us-west",
+		ClusterID:  "cluster-1",
+		Region:     "us-west",
 		Datacenter: "dc-west-1",
 	}
 	cc.updateRegionManagerV3(cluster)
@@ -626,23 +626,4 @@ func BenchmarkConsensusV3(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = cc.ConsensusV3(context.Background(), value, []string{"cluster-0", "cluster-1", "cluster-2"})
 	}
-}
-
-// Helper function for tests
-func NewRegionalBaselineCache() *RegionalBaselineCache {
-	return &RegionalBaselineCache{
-		baselines: make(map[string]*BaselineCacheEntry),
-	}
-}
-
-type RegionalBaselineCache struct {
-	mu        sync.RWMutex
-	baselines map[string]*BaselineCacheEntry
-}
-
-type BaselineCacheEntry struct {
-	BaselineID string
-	Data       []byte
-	Timestamp  time.Time
-	Size       int
 }

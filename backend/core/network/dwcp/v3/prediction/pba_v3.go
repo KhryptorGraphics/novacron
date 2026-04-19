@@ -3,6 +3,7 @@ package prediction
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -21,7 +22,7 @@ type PBAv3 struct {
 
 	// Predictors for each mode
 	datacenterPredictor *prediction.LSTMPredictor // v1 predictor (optimized for datacenter)
-	internetPredictor   *LSTMPredictorV3           // v3 predictor (optimized for internet)
+	internetPredictor   *LSTMPredictorV3          // v3 predictor (optimized for internet)
 
 	// Configuration
 	config *PBAv3Config
@@ -61,24 +62,24 @@ type PBAv3Metrics struct {
 	mu sync.RWMutex
 
 	// Prediction counts
-	TotalPredictions        uint64
-	DatacenterPredictions   uint64
-	InternetPredictions     uint64
-	HybridModeSwitches      uint64
+	TotalPredictions      uint64
+	DatacenterPredictions uint64
+	InternetPredictions   uint64
+	HybridModeSwitches    uint64
 
 	// Accuracy tracking
-	DatacenterAccuracy      float64
-	InternetAccuracy        float64
-	OverallAccuracy         float64
+	DatacenterAccuracy float64
+	InternetAccuracy   float64
+	OverallAccuracy    float64
 
 	// Latency tracking
-	AvgPredictionLatency    time.Duration
-	MaxPredictionLatency    time.Duration
-	P95PredictionLatency    time.Duration
+	AvgPredictionLatency time.Duration
+	MaxPredictionLatency time.Duration
+	P95PredictionLatency time.Duration
 
 	// Mode-specific latency
-	DatacenterAvgLatency    time.Duration
-	InternetAvgLatency      time.Duration
+	DatacenterAvgLatency time.Duration
+	InternetAvgLatency   time.Duration
 }
 
 // BandwidthHistory maintains historical bandwidth data for predictions
@@ -96,8 +97,8 @@ func DefaultPBAv3Config() *PBAv3Config {
 		DefaultMode:              upgrade.ModeHybrid,
 		DatacenterModelPath:      "/var/lib/dwcp/models/datacenter_bandwidth_predictor.onnx",
 		InternetModelPath:        "/var/lib/dwcp/models/internet_bandwidth_predictor.onnx",
-		DatacenterSequenceLength: 10,  // Shorter for stable networks
-		InternetSequenceLength:   60,  // Longer for variable networks
+		DatacenterSequenceLength: 10, // Shorter for stable networks
+		InternetSequenceLength:   60, // Longer for variable networks
 		PredictionHorizon:        15 * time.Minute,
 		DatacenterAccuracyTarget: 0.85, // 85%
 		InternetAccuracyTarget:   0.70, // 70%
@@ -124,13 +125,17 @@ func NewPBAv3(config *PBAv3Config) (*PBAv3, error) {
 	var err error
 	pba.datacenterPredictor, err = prediction.NewLSTMPredictor(config.DatacenterModelPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize datacenter predictor: %w", err)
+		pba.datacenterPredictor = nil
 	}
 
 	// Initialize internet predictor (v3)
 	pba.internetPredictor, err = NewLSTMPredictorV3(config.InternetModelPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize internet predictor: %w", err)
+		pba.internetPredictor = nil
+	}
+
+	if pba.datacenterPredictor == nil && pba.internetPredictor == nil {
+		pba.currentMode = config.DefaultMode
 	}
 
 	// Start mode detection if enabled
@@ -175,6 +180,10 @@ func (p *PBAv3) PredictBandwidth(ctx context.Context) (*prediction.BandwidthPred
 
 // predictDatacenter uses v1 predictor optimized for datacenter
 func (p *PBAv3) predictDatacenter(ctx context.Context) (*prediction.BandwidthPrediction, error) {
+	if p.datacenterPredictor == nil {
+		return p.fallbackPrediction(upgrade.ModeDatacenter), nil
+	}
+
 	p.mu.RLock()
 	history := p.datacenterHistory.GetRecent(p.config.DatacenterSequenceLength)
 	p.mu.RUnlock()
@@ -197,6 +206,10 @@ func (p *PBAv3) predictDatacenter(ctx context.Context) (*prediction.BandwidthPre
 
 // predictInternet uses v3 predictor optimized for internet
 func (p *PBAv3) predictInternet(ctx context.Context) (*prediction.BandwidthPrediction, error) {
+	if p.internetPredictor == nil {
+		return p.fallbackPrediction(upgrade.ModeInternet), nil
+	}
+
 	p.mu.RLock()
 	history := p.internetHistory.GetRecent(p.config.InternetSequenceLength)
 	p.mu.RUnlock()
@@ -317,8 +330,74 @@ func (p *PBAv3) AddSample(sample prediction.NetworkSample) {
 	p.internetHistory.Add(sample)
 
 	// Update predictors with actual values
-	p.datacenterPredictor.UpdateActual(sample.Timestamp, sample)
-	p.internetPredictor.UpdateActual(sample.Timestamp, sample)
+	if p.datacenterPredictor != nil {
+		p.datacenterPredictor.UpdateActual(sample.Timestamp, sample)
+	}
+	if p.internetPredictor != nil {
+		p.internetPredictor.UpdateActual(sample.Timestamp, sample)
+	}
+}
+
+func (p *PBAv3) fallbackPrediction(mode upgrade.NetworkMode) *prediction.BandwidthPrediction {
+	var history []prediction.NetworkSample
+
+	p.mu.RLock()
+	switch mode {
+	case upgrade.ModeDatacenter:
+		history = p.datacenterHistory.GetRecent(minInt(5, p.datacenterHistory.Len()))
+	default:
+		history = p.internetHistory.GetRecent(minInt(5, p.internetHistory.Len()))
+	}
+	p.mu.RUnlock()
+
+	bandwidth := 100.0
+	latency := 10.0
+	packetLoss := 0.01
+	jitter := 2.0
+
+	if len(history) > 0 {
+		var bandwidthSum float64
+		var latencySum float64
+		var packetLossSum float64
+		var jitterSum float64
+		for _, sample := range history {
+			bandwidthSum += sample.BandwidthMbps
+			latencySum += sample.LatencyMs
+			packetLossSum += sample.PacketLoss
+			jitterSum += sample.JitterMs
+		}
+		count := float64(len(history))
+		bandwidth = bandwidthSum / count
+		latency = latencySum / count
+		packetLoss = packetLossSum / count
+		jitter = jitterSum / count
+	}
+
+	confidence := 0.35
+	if mode == upgrade.ModeDatacenter {
+		confidence = 0.45
+	}
+	if len(history) > 0 {
+		confidence += math.Min(0.2, float64(len(history))*0.02)
+	}
+
+	return &prediction.BandwidthPrediction{
+		PredictedBandwidthMbps: bandwidth,
+		PredictedLatencyMs:     latency,
+		PredictedPacketLoss:    packetLoss,
+		PredictedJitterMs:      jitter,
+		Confidence:             confidence,
+		ValidUntil:             time.Now().Add(p.config.PredictionHorizon),
+		ModelVersion:           "heuristic-fallback",
+		PredictionTime:         time.Now(),
+	}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // autoModeDetection runs mode detection loop
