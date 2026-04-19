@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { Icons } from '@/components/ui/icons';
+import { authService } from '@/lib/auth';
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -16,7 +17,7 @@ export default function AuthGuard({
   requireAuth = true,
   redirectTo = '/auth/login'
 }: AuthGuardProps) {
-  const { isAuthenticated, isLoading, requires2FA } = useAuth();
+  const { isAuthenticated, isLoading, requires2FA, needsClusterSelection, hasClusterAccess } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -32,9 +33,31 @@ export default function AuthGuard({
       return;
     }
 
-    // If authenticated but on auth pages, redirect to dashboard
+    const postLoginPath = authService.resolvePostLoginPath();
+
+    if (isAuthenticated && !hasClusterAccess && pathname !== '/cluster/access') {
+      router.push('/cluster/access');
+      return;
+    }
+
+    if (isAuthenticated && needsClusterSelection && pathname !== '/clusters/select') {
+      router.push('/clusters/select');
+      return;
+    }
+
+    // If authenticated but on auth pages, redirect to the correct cluster-aware destination.
     if (isAuthenticated && isPublicRoute) {
-      router.push('/dashboard');
+      router.push(postLoginPath);
+      return;
+    }
+
+    if (isAuthenticated && pathname === '/cluster/access' && hasClusterAccess) {
+      router.push(postLoginPath);
+      return;
+    }
+
+    if (isAuthenticated && pathname === '/clusters/select' && !needsClusterSelection && hasClusterAccess) {
+      router.push(postLoginPath);
       return;
     }
 
@@ -44,7 +67,7 @@ export default function AuthGuard({
       router.push('/auth/login');
       return;
     }
-  }, [isAuthenticated, isLoading, requires2FA, pathname, router, requireAuth, redirectTo]);
+  }, [hasClusterAccess, isAuthenticated, isLoading, needsClusterSelection, pathname, redirectTo, requireAuth, requires2FA, router]);
 
   // Show loading spinner while checking auth
   if (isLoading) {

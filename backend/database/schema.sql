@@ -48,12 +48,60 @@ CREATE TABLE users (
 CREATE TABLE sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token VARCHAR(255) UNIQUE NOT NULL,
-    refresh_token VARCHAR(255) UNIQUE,
+    tenant_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
+    token TEXT UNIQUE NOT NULL,
+    refresh_token TEXT UNIQUE,
     ip_address INET,
     user_agent TEXT,
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_accessed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    revoked_at TIMESTAMP WITH TIME ZONE,
+    selected_cluster_id TEXT,
+    metadata JSONB DEFAULT '{}'
+);
+
+-- Runtime cluster catalog
+CREATE TABLE runtime_clusters (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    tier TEXT NOT NULL,
+    interconnect_latency_ms DOUBLE PRECISION NOT NULL,
+    interconnect_bandwidth_mbps DOUBLE PRECISION NOT NULL,
+    growth_latency_penalty_ms DOUBLE PRECISION NOT NULL,
+    growth_bandwidth_penalty_mbps DOUBLE PRECISION NOT NULL,
+    current_node_count INTEGER NOT NULL DEFAULT 1,
+    max_supported_node_count INTEGER NOT NULL DEFAULT 1,
+    performance_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+    growth_state TEXT NOT NULL DEFAULT 'expandable',
+    federation_state TEXT NOT NULL DEFAULT 'cluster-local',
+    degraded BOOLEAN NOT NULL DEFAULT FALSE,
+    last_evaluated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+
+-- Runtime user memberships in logical clusters
+CREATE TABLE runtime_cluster_memberships (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tenant_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
+    cluster_id TEXT NOT NULL REFERENCES runtime_clusters(id) ON DELETE CASCADE,
+    state TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'member',
+    source TEXT NOT NULL DEFAULT 'runtime',
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(user_id, cluster_id)
+);
+
+-- Runtime user-to-cluster edge performance samples
+CREATE TABLE runtime_user_cluster_edges (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    cluster_id TEXT NOT NULL REFERENCES runtime_clusters(id) ON DELETE CASCADE,
+    latency_ms DOUBLE PRECISION NOT NULL DEFAULT 0,
+    bandwidth_mbps DOUBLE PRECISION NOT NULL DEFAULT 0,
+    recorded_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, cluster_id)
 );
 
 -- Audit logs table
@@ -258,6 +306,11 @@ CREATE INDEX idx_alerts_acknowledged ON alerts(acknowledged);
 CREATE INDEX idx_audit_logs_user ON audit_logs(user_id);
 CREATE INDEX idx_audit_logs_created ON audit_logs(created_at DESC);
 CREATE INDEX idx_sessions_user ON sessions(user_id);
+CREATE INDEX idx_sessions_refresh_token ON sessions(refresh_token);
+CREATE INDEX idx_runtime_cluster_memberships_user ON runtime_cluster_memberships(user_id);
+CREATE INDEX idx_runtime_cluster_memberships_cluster ON runtime_cluster_memberships(cluster_id);
+CREATE INDEX idx_runtime_clusters_performance ON runtime_clusters(performance_score DESC, tier);
+CREATE INDEX idx_runtime_user_cluster_edges_user ON runtime_user_cluster_edges(user_id);
 CREATE INDEX idx_sessions_token ON sessions(token);
 
 -- Functions

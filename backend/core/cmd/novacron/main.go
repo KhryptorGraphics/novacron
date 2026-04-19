@@ -593,7 +593,6 @@ func initializeAPI(
 	networkManager *network.NetworkManager,
 	storageManager *storage.StorageManager,
 ) (*APIServer, error) {
-	_ = config
 	_ = migrationManager
 	_ = schedulerService
 	_ = networkManager
@@ -624,9 +623,10 @@ func initializeAPI(
 	}
 
 	apiServer := &APIServer{
-		server:   server,
-		listener: listener,
-		address:  listener.Addr().String(),
+		server:      server,
+		listener:    listener,
+		address:     listener.Addr().String(),
+		runtimeAuth: runtimeAuth,
 	}
 	if err := apiServer.Start(); err != nil {
 		return nil, fmt.Errorf("start API server: %w", err)
@@ -639,6 +639,7 @@ type APIServer struct {
 	server   *http.Server
 	listener net.Listener
 	address  string
+	runtimeAuth *runtimeAuthRuntime
 }
 
 func (s *APIServer) Start() error {
@@ -656,10 +657,17 @@ func (s *APIServer) Start() error {
 }
 
 func (s *APIServer) Shutdown(ctx context.Context) error {
-	if s == nil || s.server == nil {
+	if s == nil {
 		return nil
 	}
-	return s.server.Shutdown(ctx)
+	var shutdownErr error
+	if s.server != nil {
+		shutdownErr = errors.Join(shutdownErr, s.server.Shutdown(ctx))
+	}
+	if s.runtimeAuth != nil && s.runtimeAuth.persistence != nil {
+		shutdownErr = errors.Join(shutdownErr, s.runtimeAuth.persistence.Close())
+	}
+	return shutdownErr
 }
 
 func newRuntimeRouter(config runtimeConfig, vmManager *vm.VMManager, runtimeAuth *runtimeAuthRuntime) *mux.Router {
@@ -667,10 +675,12 @@ func newRuntimeRouter(config runtimeConfig, vmManager *vm.VMManager, runtimeAuth
 	router.Use(runtimeCORSMiddleware(config.Auth))
 	router.HandleFunc("/healthz", handleHealthz).Methods(http.MethodGet)
 	registerRuntimeAuthRoutes(router, runtimeAuth)
-	router.HandleFunc("/api/cluster/nodes", runtimeListNodesHandler(vmManager)).Methods(http.MethodGet)
-	router.HandleFunc("/api/cluster/nodes/{id}", runtimeGetNodeHandler(vmManager)).Methods(http.MethodGet)
-	router.HandleFunc("/api/cluster/health", runtimeGetClusterHealthHandler(vmManager)).Methods(http.MethodGet)
-	router.HandleFunc("/api/cluster/leader", runtimeGetLeaderHandler(vmManager)).Methods(http.MethodGet)
+	clusterHandler := runtimeProtectClusterRoute(runtimeAuth)
+	router.Handle("/api/cluster/nodes", clusterHandler(runtimeListNodesHandler(vmManager))).Methods(http.MethodGet)
+	router.Handle("/api/cluster/nodes/{id}", clusterHandler(runtimeGetNodeHandler(vmManager))).Methods(http.MethodGet)
+	router.Handle("/api/cluster/health", clusterHandler(runtimeGetClusterHealthHandler(vmManager, runtimeAuth))).Methods(http.MethodGet)
+	router.Handle("/api/cluster/leader", clusterHandler(runtimeGetLeaderHandler(vmManager))).Methods(http.MethodGet)
+	router.Handle("/api/cluster/federation", clusterHandler(runtimeGetFederationHandler(runtimeAuth))).Methods(http.MethodGet)
 	return router
 }
 
@@ -702,6 +712,33 @@ type runtimeClusterHealth struct {
 	HasQuorum    bool      `json:"has_quorum"`
 	Leader       string    `json:"leader"`
 	LastUpdated  time.Time `json:"last_updated"`
+	Auth         *runtimeAuthHealth       `json:"auth,omitempty"`
+	Federation   *runtimeFederationHealth `json:"federation,omitempty"`
+}
+
+type runtimeAuthHealth struct {
+	Enabled                bool   `json:"enabled"`
+	SessionTransport       string `json:"sessionTransport,omitempty"`
+	AutoAdmit              bool   `json:"autoAdmit,omitempty"`
+	DefaultMembershipState string `json:"defaultMembershipState,omitempty"`
+}
+
+type runtimeFederationHealth struct {
+	Enabled            bool                         `json:"enabled"`
+	TotalClusters      int                          `json:"totalClusters,omitempty"`
+	ActiveMemberships  int                          `json:"activeMemberships,omitempty"`
+	PendingMemberships int                          `json:"pendingMemberships,omitempty"`
+	RevokedMemberships int                          `json:"revokedMemberships,omitempty"`
+	SelectedClusterID  string                       `json:"selectedClusterId,omitempty"`
+	HighestTier        string                       `json:"highestTier,omitempty"`
+	Clusters           []runtimeClusterSummaryResponse `json:"clusters,omitempty"`
+}
+
+type runtimeFederationResponse struct {
+	Auth             runtimeAuthHealth          `json:"auth"`
+	Federation       runtimeFederationHealth    `json:"federation"`
+	Memberships      []runtimeAdmissionResponse `json:"memberships,omitempty"`
+	SelectedCluster  *runtimeClusterSummaryResponse `json:"selectedCluster,omitempty"`
 }
 
 func handleHealthz(w http.ResponseWriter, _ *http.Request) {
@@ -735,8 +772,8 @@ func runtimeGetNodeHandler(vmManager *vm.VMManager) http.HandlerFunc {
 	}
 }
 
-func runtimeGetClusterHealthHandler(vmManager *vm.VMManager) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
+func runtimeGetClusterHealthHandler(vmManager *vm.VMManager, runtimeAuth *runtimeAuthRuntime) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
 		inventory := vmManager.ListSchedulerNodes()
 		totalNodes := len(inventory)
 		healthyNodes := 0
@@ -757,6 +794,11 @@ func runtimeGetClusterHealthHandler(vmManager *vm.VMManager) http.HandlerFunc {
 			status = "degraded"
 		}
 
+		authHealth, federationHealth, _, selectedCluster := runtimeRuntimeHealth(runtimeAuth, req)
+		if selectedCluster != nil && leaderID == "" {
+			leaderID = selectedCluster.ID
+		}
+
 		respondRuntimeJSON(w, http.StatusOK, runtimeClusterHealth{
 			Status:       status,
 			TotalNodes:   totalNodes,
@@ -764,8 +806,107 @@ func runtimeGetClusterHealthHandler(vmManager *vm.VMManager) http.HandlerFunc {
 			HasQuorum:    healthyNodes > 0,
 			Leader:       leaderID,
 			LastUpdated:  time.Now().UTC(),
+			Auth:         authHealth,
+			Federation:   federationHealth,
 		})
 	}
+}
+
+func runtimeGetFederationHandler(runtimeAuth *runtimeAuthRuntime) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		authHealth, federationHealth, memberships, selectedCluster := runtimeRuntimeHealth(runtimeAuth, req)
+		if authHealth == nil || federationHealth == nil {
+			respondRuntimeJSON(w, http.StatusOK, runtimeFederationResponse{
+				Auth:       runtimeAuthHealth{Enabled: false},
+				Federation: runtimeFederationHealth{Enabled: false},
+			})
+			return
+		}
+		respondRuntimeJSON(w, http.StatusOK, runtimeFederationResponse{
+			Auth:            *authHealth,
+			Federation:      *federationHealth,
+			Memberships:     memberships,
+			SelectedCluster: selectedCluster,
+		})
+	}
+}
+
+func runtimeProtectClusterRoute(runtimeAuth *runtimeAuthRuntime) func(http.HandlerFunc) http.Handler {
+	return func(next http.HandlerFunc) http.Handler {
+		if runtimeAuth != nil && runtimeAuth.enabled() {
+			return runtimeAuth.requireAuthenticated(http.HandlerFunc(next))
+		}
+		return http.HandlerFunc(next)
+	}
+}
+
+func runtimeRuntimeHealth(runtimeAuth *runtimeAuthRuntime, req *http.Request) (*runtimeAuthHealth, *runtimeFederationHealth, []runtimeAdmissionResponse, *runtimeClusterSummaryResponse) {
+	if runtimeAuth == nil || !runtimeAuth.enabled() {
+		return &runtimeAuthHealth{Enabled: false}, &runtimeFederationHealth{Enabled: false}, nil, nil
+	}
+
+	authHealth := &runtimeAuthHealth{
+		Enabled:                true,
+		SessionTransport:       runtimeAuth.config.Session.Transport,
+		AutoAdmit:              runtimeAuth.config.Membership.AutoAdmit,
+		DefaultMembershipState: runtimeAuth.config.Membership.DefaultState,
+	}
+
+	clusters, err := runtimeAuth.persistence.clusters.List()
+	if err != nil {
+		return authHealth, &runtimeFederationHealth{Enabled: true}, nil, nil
+	}
+
+	summaries := make([]runtimeClusterSummaryResponse, 0, len(clusters))
+	highestTier := ""
+	for _, cluster := range clusters {
+		summary := runtimeClusterSummaryResponseFromRecord(&cluster)
+		summaries = append(summaries, summary)
+		if highestTier == "" {
+			highestTier = summary.Tier
+		}
+	}
+	sort.SliceStable(summaries, func(i, j int) bool {
+		if summaries[i].PerformanceScore == summaries[j].PerformanceScore {
+			return summaries[i].ID < summaries[j].ID
+		}
+		return summaries[i].PerformanceScore > summaries[j].PerformanceScore
+	})
+
+	var memberships []runtimeAdmissionResponse
+	var selectedCluster *runtimeClusterSummaryResponse
+	active := 0
+	pending := 0
+	revoked := 0
+	if principal, ok := runtimePrincipalFromContext(req.Context()); ok && principal != nil {
+		memberships, selectedCluster = runtimeAuth.membershipResponses(principal.User.ID, principal.Session.SelectedClusterID)
+		for _, membership := range memberships {
+			switch membership.State {
+			case "active":
+				active++
+			case "pending":
+				pending++
+			case "revoked":
+				revoked++
+			}
+		}
+	}
+
+	return authHealth, &runtimeFederationHealth{
+		Enabled:            true,
+		TotalClusters:      len(summaries),
+		ActiveMemberships:  active,
+		PendingMemberships: pending,
+		RevokedMemberships: revoked,
+		SelectedClusterID: func() string {
+			if selectedCluster == nil {
+				return ""
+			}
+			return selectedCluster.ID
+		}(),
+		HighestTier: highestTier,
+		Clusters:    summaries,
+	}, memberships, selectedCluster
 }
 
 func runtimeGetLeaderHandler(vmManager *vm.VMManager) http.HandlerFunc {

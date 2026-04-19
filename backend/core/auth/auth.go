@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Session represents a user session
@@ -200,7 +202,7 @@ func (s *AuthServiceImpl) Login(username, password string) (*Session, error) {
 	}
 
 	// Generate a session
-	sessionID := fmt.Sprintf("session-%d", time.Now().UnixNano())
+	sessionID := uuid.NewString()
 	token, err := s.generateToken(s.config.TokenLength)
 	if err != nil {
 		s.auditLog.Log(AuditEntry{

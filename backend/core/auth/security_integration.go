@@ -144,6 +144,45 @@ func (sm *SecurityManager) RefreshJWT(refreshToken string) (*TokenPair, error) {
 	return sm.jwtService.RefreshToken(refreshToken)
 }
 
+// GetTokenClaims extracts token claims without requiring the token to still be valid.
+func (sm *SecurityManager) GetTokenClaims(token string) (*JWTClaims, error) {
+	return sm.jwtService.GetTokenClaims(token)
+}
+
+// IssueJWTForUser generates a session-bound token pair for a user using their current roles.
+func (sm *SecurityManager) IssueJWTForUser(user *User, sessionID string, metadata map[string]interface{}) (*TokenPair, error) {
+	if user == nil {
+		return nil, fmt.Errorf("user is required")
+	}
+
+	roles, err := sm.authService.GetUserRoles(user.ID)
+	if err != nil {
+		roles = []*Role{}
+	}
+
+	roleNames := make([]string, len(roles))
+	permissions := make([]string, 0)
+	for i, role := range roles {
+		roleNames[i] = role.Name
+		for _, perm := range role.Permissions {
+			permissions = append(permissions, fmt.Sprintf("%s:%s", perm.Resource, perm.Action))
+		}
+	}
+
+	if metadata == nil {
+		metadata = user.Metadata
+	}
+
+	return sm.jwtService.GenerateTokenPair(
+		user.ID,
+		user.TenantID,
+		roleNames,
+		permissions,
+		sessionID,
+		metadata,
+	)
+}
+
 // OAuth2Login initiates OAuth2 authentication
 func (sm *SecurityManager) OAuth2Login(provider, tenantID, redirectTo string) (string, *OAuth2State, error) {
 	oauth2Service, exists := sm.oauth2Services[provider]

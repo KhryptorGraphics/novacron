@@ -23,21 +23,21 @@ export default function LoginPage() {
   const [isGitHubLoading, setIsGitHubLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const { login, verify2FA, requires2FA, tempToken } = useAuth();
+  const { login, requires2FA, tempToken } = useAuth();
 
   async function onSubmit(event: React.SyntheticEvent) {
     event.preventDefault();
     setIsLoading(true);
 
     try {
-      await login(email, password);
+      const destination = await login(email, password);
 
-      if (!requires2FA) {
+      if (destination) {
         toast({
           title: "Success",
           description: "You have been logged in successfully.",
         });
-        router.push("/dashboard");
+        router.push(destination);
       }
     } catch (error) {
       console.error('Login error:', error);
@@ -51,12 +51,12 @@ export default function LoginPage() {
     }
   }
 
-  const handle2FASuccess = (token: string) => {
+  const handle2FASuccess = (destination: string) => {
     toast({
       title: "Success",
       description: "You have been logged in successfully.",
     });
-    router.push("/dashboard");
+    router.push(destination);
   };
 
   const handle2FACancel = () => {

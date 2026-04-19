@@ -4,7 +4,13 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { authService } from "@/lib/auth";
+import {
+  AdmissionResponse,
+  ClusterSummaryResponse,
+  SessionResponse,
+  UserResponse,
+  authService,
+} from "@/lib/auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Icons } from "@/components/ui/icons";
 import { useToast } from "@/components/ui/use-toast";
@@ -35,11 +41,18 @@ export default function GitHubCallbackPage() {
       : window.location.hash;
     const params = new URLSearchParams(fragment);
     const token = params.get('token');
+    const refreshToken = params.get('refresh_token') || undefined;
     const encodedUser = params.get('user');
+    const encodedMemberships = params.get('memberships');
+    const encodedSelectedCluster = params.get('selected_cluster');
+    const encodedSession = params.get('session');
     const redirectTo = params.get('redirect_to') || '/dashboard';
-    const user = decodeFragmentPayload(encodedUser);
+    const user = decodeFragmentPayload<UserResponse>(encodedUser);
+    const memberships = decodeFragmentPayload<AdmissionResponse[]>(encodedMemberships) || [];
+    const selectedCluster = decodeFragmentPayload<ClusterSummaryResponse>(encodedSelectedCluster);
+    const session = decodeFragmentPayload<SessionResponse>(encodedSession);
 
-    if (!token || !user) {
+    if (!token || !user || !session) {
       toast({
         title: "GitHub Login Failed",
         description: "The GitHub callback did not include a valid session.",
@@ -49,8 +62,15 @@ export default function GitHubCallbackPage() {
       return;
     }
 
-    authService.setToken(token, user);
-    router.replace(redirectTo);
+    authService.storeOAuthCallbackSession({
+      token,
+      ...(refreshToken ? { refreshToken } : {}),
+      user,
+      memberships,
+      ...(selectedCluster ? { selectedCluster } : {}),
+      session,
+    });
+    router.replace(authService.resolvePostLoginPath(memberships, selectedCluster, redirectTo));
   }, [router, toast]);
 
   return (
@@ -59,7 +79,7 @@ export default function GitHubCallbackPage() {
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl text-center">Finishing GitHub Sign In</CardTitle>
           <CardDescription className="text-center">
-            NovaCron is exchanging your GitHub session and admitting you into the local cluster.
+            NovaCron is restoring your memberships and selecting the best available cluster.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex items-center justify-center py-8">

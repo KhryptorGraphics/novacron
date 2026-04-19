@@ -72,6 +72,90 @@ func TestRuntimeAuthRegisterLoginAndAdmissionFlow(t *testing.T) {
 	if got, want := admission.ClusterID, "cluster-local"; got != want {
 		t.Fatalf("cluster admission id = %q, want %q", got, want)
 	}
+
+	health := getAuthorizedJSONResponse[runtimeClusterHealth](t, apiServer, "/api/cluster/health", authResponse.Token)
+	if health.Auth == nil || !health.Auth.Enabled {
+		t.Fatal("expected protected cluster health to include enabled auth metadata")
+	}
+	if health.Federation == nil || health.Federation.TotalClusters < 1 {
+		t.Fatal("expected protected cluster health to include federation cluster summaries")
+	}
+}
+
+func TestRuntimeAuthRefreshLogoutAndClusterSelectionFlow(t *testing.T) {
+	t.Parallel()
+
+	apiServer, manager := newRuntimeAuthTestServer(t, runtimeAuthConfig{
+		Enabled:          true,
+		FrontendURL:      "http://localhost:3000",
+		DefaultTenantID:  "default",
+		DefaultClusterID: "cluster-local",
+	})
+	defer manager.Stop()
+	defer apiServer.Shutdown(context.Background())
+
+	if err := apiServer.runtimeAuth.persistence.clusters.Upsert(&runtimeClusterRecord{
+		ID:                         "cluster-premium",
+		Name:                       "Premium Cluster",
+		InterconnectLatencyMS:      0.8,
+		InterconnectBandwidthMBPS:  25000,
+		GrowthLatencyPenaltyMS:     apiServer.runtimeAuth.config.Clustering.GrowthLatencyPenaltyMS,
+		GrowthBandwidthPenaltyMBPS: apiServer.runtimeAuth.config.Clustering.GrowthBandwidthPenaltyMBPS,
+		CurrentNodeCount:           2,
+		FederationState:            "tiered-federation",
+	}); err != nil {
+		t.Fatalf("upsert premium cluster: %v", err)
+	}
+
+	postJSONResponse[runtimeAuthUserResponse](t, apiServer, "/api/auth/register", runtimeAuthRegisterRequest{
+		Email:     "operator@example.com",
+		Password:  "ValidPassword123!",
+		FirstName: "Op",
+		LastName:  "User",
+	}, http.StatusCreated)
+
+	loginResponse := postJSONResponse[runtimeAuthResponse](t, apiServer, "/api/auth/login", runtimeAuthLoginRequest{
+		Email:    "operator@example.com",
+		Password: "ValidPassword123!",
+	}, http.StatusOK)
+
+	if len(loginResponse.Memberships) != 2 {
+		t.Fatalf("login memberships = %d, want 2", len(loginResponse.Memberships))
+	}
+
+	unauthorizedHealth := getRawResponse(t, apiServer, "/api/cluster/health", "", http.StatusUnauthorized)
+	if !strings.Contains(unauthorizedHealth, "authorization required") {
+		t.Fatalf("unauthorized cluster health response = %q, want auth failure", unauthorizedHealth)
+	}
+
+	selected := postAuthorizedJSONResponse[runtimeAuthCurrentUserResponse](t, apiServer, "/api/cluster/admissions/select", loginResponse.Token, runtimeSelectClusterRequest{
+		ClusterID: "cluster-premium",
+	}, http.StatusOK)
+	if selected.SelectedCluster == nil || selected.SelectedCluster.ID != "cluster-premium" {
+		t.Fatalf("selected cluster = %+v, want cluster-premium", selected.SelectedCluster)
+	}
+
+	refreshed := postJSONResponse[runtimeAuthResponse](t, apiServer, "/api/auth/refresh", runtimeRefreshRequest{
+		RefreshToken: loginResponse.RefreshToken,
+	}, http.StatusOK)
+	if refreshed.SelectedCluster == nil || refreshed.SelectedCluster.ID != "cluster-premium" {
+		t.Fatalf("refreshed selected cluster = %+v, want cluster-premium", refreshed.SelectedCluster)
+	}
+
+	federation := getAuthorizedJSONResponse[runtimeFederationResponse](t, apiServer, "/api/cluster/federation", refreshed.Token)
+	if federation.Federation.TotalClusters != 2 {
+		t.Fatalf("federation total clusters = %d, want 2", federation.Federation.TotalClusters)
+	}
+	if federation.Federation.SelectedClusterID != "cluster-premium" {
+		t.Fatalf("federation selected cluster id = %q, want cluster-premium", federation.Federation.SelectedClusterID)
+	}
+
+	postAuthorizedJSONResponse[map[string]bool](t, apiServer, "/api/auth/logout", refreshed.Token, map[string]string{}, http.StatusOK)
+
+	loggedOut := getRawResponse(t, apiServer, "/api/auth/me", refreshed.Token, http.StatusUnauthorized)
+	if !strings.Contains(loggedOut, "revoked") {
+		t.Fatalf("post-logout me response = %q, want token revocation", loggedOut)
+	}
 }
 
 func TestRuntimeAuthGitHubAuthorizationURLRequiresConfiguration(t *testing.T) {
@@ -161,6 +245,40 @@ func postJSONResponse[T any](t *testing.T, apiServer *APIServer, path string, bo
 		t.Fatalf("create POST request for %s: %v", path, err)
 	}
 	request.Header.Set("Content-Type", "application/json")
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("POST %s returned error: %v", path, err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != expectedStatus {
+		bodyBytes, _ := io.ReadAll(response.Body)
+		t.Fatalf("POST %s status = %d, want %d: %s", path, response.StatusCode, expectedStatus, strings.TrimSpace(string(bodyBytes)))
+	}
+
+	var decoded T
+	if err := json.NewDecoder(response.Body).Decode(&decoded); err != nil {
+		t.Fatalf("decode POST %s response: %v", path, err)
+	}
+
+	return decoded
+}
+
+func postAuthorizedJSONResponse[T any](t *testing.T, apiServer *APIServer, path string, token string, body interface{}, expectedStatus int) T {
+	t.Helper()
+
+	payload, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+
+	request, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s%s", apiServer.address, path), bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("create POST request for %s: %v", path, err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+token)
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {

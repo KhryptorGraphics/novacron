@@ -5,7 +5,6 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 
 export default function HomePage() {
   const router = useRouter();
@@ -21,7 +20,7 @@ export default function HomePage() {
   }, []);
 
   const handleGetStarted = () => {
-    router.push("/dashboard");
+    router.push("/auth/login");
   };
 
   return (
