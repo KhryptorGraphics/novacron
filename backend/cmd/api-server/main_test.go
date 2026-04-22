@@ -360,7 +360,19 @@ func TestAPIInfoAdvertisesCanonicalContract(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/info", nil)
 
-	apiInfoHandler().ServeHTTP(rec, req)
+	apiInfoHandler(&config.Config{
+		RuntimeManifest: config.RuntimeManifestConfig{
+			Loaded:            true,
+			Path:              "/etc/novacron/runtime.yaml",
+			Version:           "v1alpha1",
+			DeploymentProfile: "single-node",
+			DiscoveryMode:     "disabled",
+			FederationMode:    "disabled",
+			MigrationMode:     "disabled",
+			AuthMode:          "runtime",
+			EnabledServices:   []string{"api", "auth", "vm"},
+		},
+	}).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -384,6 +396,17 @@ func TestAPIInfoAdvertisesCanonicalContract(t *testing.T) {
 	unsupportedEndpoints, ok := payload["unsupported_endpoints"].([]interface{})
 	if !ok {
 		t.Fatalf("expected unsupported endpoints list, got %#v", payload["unsupported_endpoints"])
+	}
+
+	runtimeManifest, ok := payload["runtime_manifest"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected runtime_manifest object, got %#v", payload["runtime_manifest"])
+	}
+	if runtimeManifest["loaded"] != true {
+		t.Fatalf("expected runtime_manifest.loaded=true, got %#v", runtimeManifest["loaded"])
+	}
+	if runtimeManifest["version"] != "v1alpha1" {
+		t.Fatalf("expected runtime manifest version v1alpha1, got %#v", runtimeManifest["version"])
 	}
 
 	assertContains := func(label string, values []interface{}, expected string) {

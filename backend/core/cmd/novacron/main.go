@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,6 +28,7 @@ import (
 	"github.com/shirou/gopsutil/v3/disk"
 	gopsutilmem "github.com/shirou/gopsutil/v3/mem"
 	"gopkg.in/yaml.v2"
+	manifestconfig "novacron/backend/core/initialization/config"
 )
 
 var (
@@ -240,6 +243,10 @@ func loadConfig(path, nodeID, dataDir string) (runtimeConfig, error) {
 		return runtimeConfig{}, fmt.Errorf("read config %s: %w", path, err)
 	}
 
+	if manifestConfig, handled, err := loadSharedRuntimeManifest(path, configBytes, nodeID, dataDir); handled || err != nil {
+		return manifestConfig, err
+	}
+
 	var fileConfig runtimeConfigFile
 	if err := yaml.Unmarshal(configBytes, &fileConfig); err != nil {
 		return runtimeConfig{}, fmt.Errorf("parse config %s: %w", path, err)
@@ -249,6 +256,80 @@ func loadConfig(path, nodeID, dataDir string) (runtimeConfig, error) {
 	applyRuntimeConfigDefaults(&config, nodeID, dataDir)
 	log.Printf("Loaded configuration from %s", path)
 	return config, nil
+}
+
+func loadSharedRuntimeManifest(path string, configBytes []byte, nodeID, dataDir string) (runtimeConfig, bool, error) {
+	if !looksLikeSharedRuntimeManifest(configBytes) {
+		return runtimeConfig{}, false, nil
+	}
+
+	loader := manifestconfig.NewLoader(path)
+	manifest, err := loader.Load()
+	if err != nil {
+		return runtimeConfig{}, true, fmt.Errorf("load shared runtime manifest %s: %w", path, err)
+	}
+	if err := loader.LoadFromEnv(manifest); err != nil {
+		return runtimeConfig{}, true, fmt.Errorf("apply shared runtime manifest env overrides: %w", err)
+	}
+
+	config := runtimeConfigFromManifest(manifest, nodeID, dataDir)
+	log.Printf(
+		"Loaded shared runtime manifest from %s (version=%s profile=%s discovery=%s federation=%s migration=%s auth=%s enabled_services=%s)",
+		path,
+		manifest.Runtime.Version,
+		manifest.Runtime.DeploymentProfile,
+		manifest.Runtime.DiscoveryMode,
+		manifest.Runtime.FederationMode,
+		manifest.Runtime.MigrationMode,
+		manifest.Runtime.AuthMode,
+		strings.Join(manifest.Runtime.EnabledServices, ","),
+	)
+
+	return config, true, nil
+}
+
+func looksLikeSharedRuntimeManifest(configBytes []byte) bool {
+	content := bytes.ToLower(configBytes)
+	return bytes.HasPrefix(content, []byte("system:")) ||
+		bytes.Contains(content, []byte("\nsystem:")) ||
+		bytes.HasPrefix(content, []byte("runtime:")) ||
+		bytes.Contains(content, []byte("\nruntime:"))
+}
+
+func runtimeConfigFromManifest(manifest *manifestconfig.Config, nodeID, dataDir string) runtimeConfig {
+	effectiveNodeID := strings.TrimSpace(nodeID)
+	if manifest != nil && strings.TrimSpace(manifest.System.NodeID) != "" {
+		effectiveNodeID = strings.TrimSpace(manifest.System.NodeID)
+	}
+
+	effectiveDataDir := strings.TrimSpace(dataDir)
+	if manifest != nil && strings.TrimSpace(manifest.System.DataDir) != "" {
+		effectiveDataDir = strings.TrimSpace(manifest.System.DataDir)
+	}
+
+	config := defaultRuntimeConfig(effectiveNodeID, effectiveDataDir)
+	if manifest == nil {
+		return config
+	}
+
+	config.Storage.BasePath = filepath.Join(effectiveDataDir, "storage")
+	config.Storage.Encryption = manifest.Security.EnableEncryption
+	config.Network.BandwidthMonitoringEnabled = manifest.Monitoring.EnableMetrics
+	config.Auth.Enabled = manifest.Security.EnableAuth &&
+		manifest.Runtime.AuthMode == "runtime" &&
+		serviceEnabled(manifest.Runtime.EnabledServices, "auth")
+
+	return config
+}
+
+func serviceEnabled(enabledServices []string, service string) bool {
+	target := strings.ToLower(strings.TrimSpace(service))
+	for _, enabled := range enabledServices {
+		if strings.ToLower(strings.TrimSpace(enabled)) == target {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeRuntimeConfig(config *runtimeConfig, fileConfig runtimeConfigFile) {
@@ -636,9 +717,9 @@ func initializeAPI(
 }
 
 type APIServer struct {
-	server   *http.Server
-	listener net.Listener
-	address  string
+	server      *http.Server
+	listener    net.Listener
+	address     string
 	runtimeAuth *runtimeAuthRuntime
 }
 
@@ -706,12 +787,12 @@ type runtimeNode struct {
 }
 
 type runtimeClusterHealth struct {
-	Status       string    `json:"status"`
-	TotalNodes   int       `json:"total_nodes"`
-	HealthyNodes int       `json:"healthy_nodes"`
-	HasQuorum    bool      `json:"has_quorum"`
-	Leader       string    `json:"leader"`
-	LastUpdated  time.Time `json:"last_updated"`
+	Status       string                   `json:"status"`
+	TotalNodes   int                      `json:"total_nodes"`
+	HealthyNodes int                      `json:"healthy_nodes"`
+	HasQuorum    bool                     `json:"has_quorum"`
+	Leader       string                   `json:"leader"`
+	LastUpdated  time.Time                `json:"last_updated"`
 	Auth         *runtimeAuthHealth       `json:"auth,omitempty"`
 	Federation   *runtimeFederationHealth `json:"federation,omitempty"`
 }
@@ -724,21 +805,21 @@ type runtimeAuthHealth struct {
 }
 
 type runtimeFederationHealth struct {
-	Enabled            bool                         `json:"enabled"`
-	TotalClusters      int                          `json:"totalClusters,omitempty"`
-	ActiveMemberships  int                          `json:"activeMemberships,omitempty"`
-	PendingMemberships int                          `json:"pendingMemberships,omitempty"`
-	RevokedMemberships int                          `json:"revokedMemberships,omitempty"`
-	SelectedClusterID  string                       `json:"selectedClusterId,omitempty"`
-	HighestTier        string                       `json:"highestTier,omitempty"`
+	Enabled            bool                            `json:"enabled"`
+	TotalClusters      int                             `json:"totalClusters,omitempty"`
+	ActiveMemberships  int                             `json:"activeMemberships,omitempty"`
+	PendingMemberships int                             `json:"pendingMemberships,omitempty"`
+	RevokedMemberships int                             `json:"revokedMemberships,omitempty"`
+	SelectedClusterID  string                          `json:"selectedClusterId,omitempty"`
+	HighestTier        string                          `json:"highestTier,omitempty"`
 	Clusters           []runtimeClusterSummaryResponse `json:"clusters,omitempty"`
 }
 
 type runtimeFederationResponse struct {
-	Auth             runtimeAuthHealth          `json:"auth"`
-	Federation       runtimeFederationHealth    `json:"federation"`
-	Memberships      []runtimeAdmissionResponse `json:"memberships,omitempty"`
-	SelectedCluster  *runtimeClusterSummaryResponse `json:"selectedCluster,omitempty"`
+	Auth            runtimeAuthHealth              `json:"auth"`
+	Federation      runtimeFederationHealth        `json:"federation"`
+	Memberships     []runtimeAdmissionResponse     `json:"memberships,omitempty"`
+	SelectedCluster *runtimeClusterSummaryResponse `json:"selectedCluster,omitempty"`
 }
 
 func handleHealthz(w http.ResponseWriter, _ *http.Request) {

@@ -43,6 +43,56 @@ func TestLoadConfigMissingUsesDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadConfigSupportsSharedRuntimeManifest(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	manifestYAML := `
+system:
+  node_id: manifest-node
+  data_dir: /tmp/manifest-data
+runtime:
+  version: v1alpha1
+  auth_mode: disabled
+  enabled_services:
+    - api
+    - vm
+    - scheduler
+    - storage
+    - network
+    - hypervisor
+monitoring:
+  enable_metrics: true
+security:
+  enable_auth: true
+  enable_encryption: true
+`
+	if err := os.WriteFile(configPath, []byte(manifestYAML), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	config, err := loadConfig(configPath, "fallback-node", "/tmp/fallback-data")
+	if err != nil {
+		t.Fatalf("loadConfig returned error: %v", err)
+	}
+
+	if got, want := config.Hypervisor.ID, "manifest-node"; got != want {
+		t.Fatalf("hypervisor id = %q, want %q", got, want)
+	}
+	if got, want := config.Storage.BasePath, "/tmp/manifest-data/storage"; got != want {
+		t.Fatalf("storage base path = %q, want %q", got, want)
+	}
+	if config.Auth.Enabled {
+		t.Fatal("expected runtime auth to be disabled when auth_mode is disabled")
+	}
+	if !config.Storage.Encryption {
+		t.Fatal("expected storage encryption to follow manifest security settings")
+	}
+	if !config.Network.BandwidthMonitoringEnabled {
+		t.Fatal("expected network bandwidth monitoring to follow manifest monitoring settings")
+	}
+}
+
 func TestLoadConfigRejectsInvalidYAML(t *testing.T) {
 	t.Parallel()
 

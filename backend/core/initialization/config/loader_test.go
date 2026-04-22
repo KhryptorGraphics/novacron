@@ -102,6 +102,18 @@ func TestLoader_ApplyDefaults(t *testing.T) {
 		t.Errorf("Expected shutdown_timeout=30s, got %v", cfg.System.ShutdownTimeout)
 	}
 
+	if cfg.Runtime.Version != DefaultRuntimeManifestVersion {
+		t.Errorf("Expected runtime.version=%s, got %s", DefaultRuntimeManifestVersion, cfg.Runtime.Version)
+	}
+
+	if cfg.Runtime.DeploymentProfile != "single-node" {
+		t.Errorf("Expected runtime.deployment_profile=single-node, got %s", cfg.Runtime.DeploymentProfile)
+	}
+
+	if !containsString(cfg.Runtime.EnabledServices, "api") {
+		t.Fatalf("Expected runtime.enabled_services to contain api, got %#v", cfg.Runtime.EnabledServices)
+	}
+
 	// Check DWCP defaults
 	if cfg.DWCP.Transport.MinStreams != 4 {
 		t.Errorf("Expected min_streams=4, got %d", cfg.DWCP.Transport.MinStreams)
@@ -209,8 +221,72 @@ func TestGenerateDefault(t *testing.T) {
 	if cfg.System.NodeID == "" {
 		t.Error("Generated config missing node_id")
 	}
+
+	if cfg.Runtime.Version != DefaultRuntimeManifestVersion {
+		t.Fatalf("Generated config runtime.version=%q, want %q", cfg.Runtime.Version, DefaultRuntimeManifestVersion)
+	}
+}
+
+func TestLoader_LoadRuntimeManifestFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	configYAML := `
+system:
+  node_id: "node-manifest"
+  data_dir: "/tmp/novacron"
+runtime:
+  version: "v1alpha1"
+  deployment_profile: "multi-node"
+  discovery_mode: "seeded"
+  federation_mode: "trusted"
+  migration_mode: "cold"
+  auth_mode: "external"
+  storage_classes:
+    - "default"
+    - "fast-ssd"
+  enabled_services:
+    - "api"
+    - "auth"
+    - "vm"
+`
+
+	if err := os.WriteFile(configPath, []byte(configYAML), 0o644); err != nil {
+		t.Fatalf("Failed to write config: %v", err)
+	}
+
+	loader := NewLoader(configPath)
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if got, want := cfg.Runtime.DeploymentProfile, "multi-node"; got != want {
+		t.Fatalf("runtime.deployment_profile=%q, want %q", got, want)
+	}
+	if got, want := cfg.Runtime.DiscoveryMode, "seeded"; got != want {
+		t.Fatalf("runtime.discovery_mode=%q, want %q", got, want)
+	}
+	if got, want := cfg.Runtime.AuthMode, "external"; got != want {
+		t.Fatalf("runtime.auth_mode=%q, want %q", got, want)
+	}
+	if !containsString(cfg.Runtime.StorageClasses, "fast-ssd") {
+		t.Fatalf("runtime.storage_classes missing fast-ssd: %#v", cfg.Runtime.StorageClasses)
+	}
+	if !containsString(cfg.Runtime.EnabledServices, "vm") {
+		t.Fatalf("runtime.enabled_services missing vm: %#v", cfg.Runtime.EnabledServices)
+	}
 }
 
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && s[:len(substr)] == substr || len(s) > len(substr) && contains(s[1:], substr)
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

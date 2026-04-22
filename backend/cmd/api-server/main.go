@@ -128,7 +128,7 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	registerSecurityWebSocketAliases(router, authManager, services.securityHandlers)
 
 	router.HandleFunc("/health", healthCheckHandler(cfg, db)).Methods(http.MethodGet)
-	router.HandleFunc("/api/info", apiInfoHandler()).Methods(http.MethodGet)
+	router.HandleFunc("/api/info", apiInfoHandler(cfg)).Methods(http.MethodGet)
 
 	return &http.Server{
 		Addr:         ":" + cfg.Server.APIPort,
@@ -930,15 +930,15 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 			}
 
 			interfaces = append(interfaces, map[string]interface{}{
-				"id":         id,
-				"vm_id":      currentVMID,
-				"network_id": nullableString(networkID),
-				"name":       name,
+				"id":          id,
+				"vm_id":       currentVMID,
+				"network_id":  nullableString(networkID),
+				"name":        name,
 				"mac_address": macAddress,
-				"ip_address": nullableString(ipAddress),
-				"status":     status,
-				"created_at": createdAt.Format(time.RFC3339),
-				"updated_at": updatedAt.Format(time.RFC3339),
+				"ip_address":  nullableString(ipAddress),
+				"status":      status,
+				"created_at":  createdAt.Format(time.RFC3339),
+				"updated_at":  updatedAt.Format(time.RFC3339),
 			})
 		}
 
@@ -1540,6 +1540,16 @@ func healthCheckHandler(cfg *config.Config, db *sql.DB) http.HandlerFunc {
 			checks["storage"] = "ok"
 		}
 
+		switch {
+		case cfg != nil && cfg.RuntimeManifest.Loaded:
+			checks["runtime_manifest"] = "ok"
+		case cfg != nil && cfg.RuntimeManifest.Required:
+			checks["runtime_manifest"] = "error: required runtime manifest not loaded"
+			status = "unhealthy"
+		default:
+			checks["runtime_manifest"] = "disabled"
+		}
+
 		response := map[string]interface{}{
 			"status":    status,
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
@@ -1557,12 +1567,32 @@ func healthCheckHandler(cfg *config.Config, db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func apiInfoHandler() http.HandlerFunc {
+func apiInfoHandler(cfg *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		runtimeManifest := map[string]interface{}{
+			"loaded": false,
+		}
+		if cfg != nil {
+			runtimeManifest = map[string]interface{}{
+				"loaded":             cfg.RuntimeManifest.Loaded,
+				"required":           cfg.RuntimeManifest.Required,
+				"path":               cfg.RuntimeManifest.Path,
+				"version":            cfg.RuntimeManifest.Version,
+				"deployment_profile": cfg.RuntimeManifest.DeploymentProfile,
+				"discovery_mode":     cfg.RuntimeManifest.DiscoveryMode,
+				"federation_mode":    cfg.RuntimeManifest.FederationMode,
+				"migration_mode":     cfg.RuntimeManifest.MigrationMode,
+				"auth_mode":          cfg.RuntimeManifest.AuthMode,
+				"storage_classes":    cfg.RuntimeManifest.StorageClasses,
+				"enabled_services":   cfg.RuntimeManifest.EnabledServices,
+			}
+		}
+
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"name":        "NovaCron API",
-			"version":     "1.0.0",
-			"description": "Distributed VM Management System",
+			"name":             "NovaCron API",
+			"version":          "1.0.0",
+			"description":      "Distributed VM Management System",
+			"runtime_manifest": runtimeManifest,
 			"endpoints": []string{
 				"/api/auth/login",
 				"/api/auth/register",

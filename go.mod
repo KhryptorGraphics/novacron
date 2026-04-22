@@ -58,6 +58,7 @@ require (
 	k8s.io/api v0.34.1
 	k8s.io/apimachinery v0.34.1
 	k8s.io/client-go v0.34.1
+	novacron/backend/core/initialization v0.0.0
 	sigs.k8s.io/controller-runtime v0.22.4
 )
 
@@ -295,5 +296,7 @@ replace github.com/khryptorgraphics/novacron/backend/core/auth => ./backend/core
 replace github.com/khryptorgraphics/novacron/backend/core/ai => ./backend/core/ai
 
 replace github.com/khryptorgraphics/novacron/backend/core/shared => ./backend/core/shared
+
+replace novacron/backend/core/initialization => ./backend/core/initialization
 
 replace github.com/novacron/dwcp-sdk-go => ./sdk/go

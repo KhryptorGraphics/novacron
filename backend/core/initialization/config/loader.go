@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -15,6 +16,9 @@ import (
 type Config struct {
 	// Core system configuration
 	System SystemConfig `yaml:"system" json:"system"`
+
+	// Runtime manifest configuration
+	Runtime RuntimeManifestConfig `yaml:"runtime" json:"runtime"`
 
 	// DWCP configuration
 	DWCP DWCPConfig `yaml:"dwcp" json:"dwcp"`
@@ -31,6 +35,11 @@ type Config struct {
 	// Security configuration
 	Security SecurityConfig `yaml:"security" json:"security"`
 }
+
+const (
+	// DefaultRuntimeManifestVersion is the version string emitted by the shared runtime manifest baseline.
+	DefaultRuntimeManifestVersion = "v1alpha1"
+)
 
 // SystemConfig defines core system settings
 type SystemConfig struct {
@@ -71,72 +80,84 @@ type DWCPConfig struct {
 // TransportConfig defines transport layer settings
 type TransportConfig struct {
 	// Multi-stream settings
-	MinStreams      int           `yaml:"min_streams" json:"min_streams"`
-	MaxStreams      int           `yaml:"max_streams" json:"max_streams"`
-	StreamTimeout   time.Duration `yaml:"stream_timeout" json:"stream_timeout"`
+	MinStreams    int           `yaml:"min_streams" json:"min_streams"`
+	MaxStreams    int           `yaml:"max_streams" json:"max_streams"`
+	StreamTimeout time.Duration `yaml:"stream_timeout" json:"stream_timeout"`
 
 	// RDMA settings (datacenter mode)
-	EnableRDMA      bool   `yaml:"enable_rdma" json:"enable_rdma"`
-	RDMADevice      string `yaml:"rdma_device" json:"rdma_device"`
+	EnableRDMA bool   `yaml:"enable_rdma" json:"enable_rdma"`
+	RDMADevice string `yaml:"rdma_device" json:"rdma_device"`
 
 	// Congestion control
-	CongestionAlgo  string `yaml:"congestion_algo" json:"congestion_algo"`
+	CongestionAlgo string `yaml:"congestion_algo" json:"congestion_algo"`
 }
 
 // CompressionConfig defines compression settings
 type CompressionConfig struct {
-	Algorithm       string `yaml:"algorithm" json:"algorithm"` // "zstd", "lz4", "none"
-	Level           int    `yaml:"level" json:"level"`         // 0-22 for zstd
-	EnableDelta     bool   `yaml:"enable_delta" json:"enable_delta"`
-	EnableMLModel   bool   `yaml:"enable_ml_model" json:"enable_ml_model"`
+	Algorithm     string `yaml:"algorithm" json:"algorithm"` // "zstd", "lz4", "none"
+	Level         int    `yaml:"level" json:"level"`         // 0-22 for zstd
+	EnableDelta   bool   `yaml:"enable_delta" json:"enable_delta"`
+	EnableMLModel bool   `yaml:"enable_ml_model" json:"enable_ml_model"`
 }
 
 // ConsensusConfig defines consensus protocol settings
 type ConsensusConfig struct {
-	Protocol        string        `yaml:"protocol" json:"protocol"` // "raft", "pbft", "gossip"
-	HeartbeatInterval time.Duration `yaml:"heartbeat_interval" json:"heartbeat_interval"`
-	ElectionTimeout time.Duration `yaml:"election_timeout" json:"election_timeout"`
-	ByzantineTolerance bool       `yaml:"byzantine_tolerance" json:"byzantine_tolerance"`
+	Protocol           string        `yaml:"protocol" json:"protocol"` // "raft", "pbft", "gossip"
+	HeartbeatInterval  time.Duration `yaml:"heartbeat_interval" json:"heartbeat_interval"`
+	ElectionTimeout    time.Duration `yaml:"election_timeout" json:"election_timeout"`
+	ByzantineTolerance bool          `yaml:"byzantine_tolerance" json:"byzantine_tolerance"`
 }
 
 // NetworkConfig defines network settings
 type NetworkConfig struct {
-	ListenAddress   string        `yaml:"listen_address" json:"listen_address"`
-	AdvertiseAddress string       `yaml:"advertise_address" json:"advertise_address"`
-	BindPort        int           `yaml:"bind_port" json:"bind_port"`
-	MaxConnections  int           `yaml:"max_connections" json:"max_connections"`
-	ConnTimeout     time.Duration `yaml:"conn_timeout" json:"conn_timeout"`
-	EnableTLS       bool          `yaml:"enable_tls" json:"enable_tls"`
-	TLSCertPath     string        `yaml:"tls_cert_path" json:"tls_cert_path"`
-	TLSKeyPath      string        `yaml:"tls_key_path" json:"tls_key_path"`
+	ListenAddress    string        `yaml:"listen_address" json:"listen_address"`
+	AdvertiseAddress string        `yaml:"advertise_address" json:"advertise_address"`
+	BindPort         int           `yaml:"bind_port" json:"bind_port"`
+	MaxConnections   int           `yaml:"max_connections" json:"max_connections"`
+	ConnTimeout      time.Duration `yaml:"conn_timeout" json:"conn_timeout"`
+	EnableTLS        bool          `yaml:"enable_tls" json:"enable_tls"`
+	TLSCertPath      string        `yaml:"tls_cert_path" json:"tls_cert_path"`
+	TLSKeyPath       string        `yaml:"tls_key_path" json:"tls_key_path"`
 }
 
 // StorageConfig defines storage settings
 type StorageConfig struct {
-	Backend         string `yaml:"backend" json:"backend"` // "sqlite", "postgres", "redis"
-	ConnectionString string `yaml:"connection_string" json:"connection_string"`
-	MaxConnections  int    `yaml:"max_connections" json:"max_connections"`
-	EnableCache     bool   `yaml:"enable_cache" json:"enable_cache"`
-	CacheTTL        time.Duration `yaml:"cache_ttl" json:"cache_ttl"`
+	Backend          string        `yaml:"backend" json:"backend"` // "sqlite", "postgres", "redis"
+	ConnectionString string        `yaml:"connection_string" json:"connection_string"`
+	MaxConnections   int           `yaml:"max_connections" json:"max_connections"`
+	EnableCache      bool          `yaml:"enable_cache" json:"enable_cache"`
+	CacheTTL         time.Duration `yaml:"cache_ttl" json:"cache_ttl"`
 }
 
 // MonitoringConfig defines monitoring settings
 type MonitoringConfig struct {
-	EnableMetrics     bool   `yaml:"enable_metrics" json:"enable_metrics"`
-	MetricsPort       int    `yaml:"metrics_port" json:"metrics_port"`
-	EnableTracing     bool   `yaml:"enable_tracing" json:"enable_tracing"`
-	TracingEndpoint   string `yaml:"tracing_endpoint" json:"tracing_endpoint"`
-	EnableProfiling   bool   `yaml:"enable_profiling" json:"enable_profiling"`
-	ProfilingPort     int    `yaml:"profiling_port" json:"profiling_port"`
+	EnableMetrics   bool   `yaml:"enable_metrics" json:"enable_metrics"`
+	MetricsPort     int    `yaml:"metrics_port" json:"metrics_port"`
+	EnableTracing   bool   `yaml:"enable_tracing" json:"enable_tracing"`
+	TracingEndpoint string `yaml:"tracing_endpoint" json:"tracing_endpoint"`
+	EnableProfiling bool   `yaml:"enable_profiling" json:"enable_profiling"`
+	ProfilingPort   int    `yaml:"profiling_port" json:"profiling_port"`
 }
 
 // SecurityConfig defines security settings
 type SecurityConfig struct {
-	EnableAuth      bool     `yaml:"enable_auth" json:"enable_auth"`
-	AuthMethod      string   `yaml:"auth_method" json:"auth_method"` // "mtls", "token", "none"
-	TrustedNodes    []string `yaml:"trusted_nodes" json:"trusted_nodes"`
-	EnableEncryption bool    `yaml:"enable_encryption" json:"enable_encryption"`
-	EncryptionAlgo  string   `yaml:"encryption_algo" json:"encryption_algo"`
+	EnableAuth       bool     `yaml:"enable_auth" json:"enable_auth"`
+	AuthMethod       string   `yaml:"auth_method" json:"auth_method"` // "mtls", "token", "none"
+	TrustedNodes     []string `yaml:"trusted_nodes" json:"trusted_nodes"`
+	EnableEncryption bool     `yaml:"enable_encryption" json:"enable_encryption"`
+	EncryptionAlgo   string   `yaml:"encryption_algo" json:"encryption_algo"`
+}
+
+// RuntimeManifestConfig defines the shared runtime-manifest contract consumed by converging entrypoints.
+type RuntimeManifestConfig struct {
+	Version           string   `yaml:"version" json:"version"`
+	DeploymentProfile string   `yaml:"deployment_profile" json:"deployment_profile"`
+	DiscoveryMode     string   `yaml:"discovery_mode" json:"discovery_mode"`
+	FederationMode    string   `yaml:"federation_mode" json:"federation_mode"`
+	MigrationMode     string   `yaml:"migration_mode" json:"migration_mode"`
+	AuthMode          string   `yaml:"auth_mode" json:"auth_mode"`
+	StorageClasses    []string `yaml:"storage_classes" json:"storage_classes"`
+	EnabledServices   []string `yaml:"enabled_services" json:"enabled_services"`
 }
 
 // Loader handles configuration loading from various sources
@@ -214,6 +235,34 @@ func (l *Loader) applyDefaults(config *Config) error {
 	}
 	if config.System.ShutdownTimeout == 0 {
 		config.System.ShutdownTimeout = 30 * time.Second
+	}
+
+	// Runtime manifest defaults
+	if config.Runtime.Version == "" {
+		config.Runtime.Version = DefaultRuntimeManifestVersion
+	}
+	if config.Runtime.DeploymentProfile == "" {
+		config.Runtime.DeploymentProfile = "single-node"
+	}
+	if config.Runtime.DiscoveryMode == "" {
+		config.Runtime.DiscoveryMode = "disabled"
+	}
+	if config.Runtime.FederationMode == "" {
+		config.Runtime.FederationMode = "disabled"
+	}
+	if config.Runtime.MigrationMode == "" {
+		config.Runtime.MigrationMode = "disabled"
+	}
+	if config.Runtime.AuthMode == "" {
+		config.Runtime.AuthMode = "runtime"
+	}
+	if len(config.Runtime.StorageClasses) == 0 {
+		config.Runtime.StorageClasses = []string{"default"}
+	}
+	if len(config.Runtime.EnabledServices) == 0 {
+		config.Runtime.EnabledServices = defaultEnabledServices()
+	} else {
+		config.Runtime.EnabledServices = normalizeStringList(config.Runtime.EnabledServices)
 	}
 
 	// DWCP defaults
@@ -303,6 +352,29 @@ func (l *Loader) applyDefaults(config *Config) error {
 
 // validate validates the configuration
 func (l *Loader) validate(config *Config) error {
+	runtimeConfig := config.Runtime
+	if runtimeConfig.Version == "" {
+		runtimeConfig.Version = DefaultRuntimeManifestVersion
+	}
+	if runtimeConfig.DeploymentProfile == "" {
+		runtimeConfig.DeploymentProfile = "single-node"
+	}
+	if runtimeConfig.DiscoveryMode == "" {
+		runtimeConfig.DiscoveryMode = "disabled"
+	}
+	if runtimeConfig.FederationMode == "" {
+		runtimeConfig.FederationMode = "disabled"
+	}
+	if runtimeConfig.MigrationMode == "" {
+		runtimeConfig.MigrationMode = "disabled"
+	}
+	if runtimeConfig.AuthMode == "" {
+		runtimeConfig.AuthMode = "runtime"
+	}
+	if len(runtimeConfig.EnabledServices) == 0 {
+		runtimeConfig.EnabledServices = defaultEnabledServices()
+	}
+
 	// System validation
 	if config.System.NodeID == "" {
 		return fmt.Errorf("system.node_id is required")
@@ -314,6 +386,60 @@ func (l *Loader) validate(config *Config) error {
 	validLogLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
 	if !validLogLevels[config.System.LogLevel] {
 		return fmt.Errorf("invalid log_level: %s (must be debug, info, warn, or error)", config.System.LogLevel)
+	}
+
+	// Runtime manifest validation
+	validRuntimeVersions := map[string]bool{
+		DefaultRuntimeManifestVersion: true,
+	}
+	if !validRuntimeVersions[runtimeConfig.Version] {
+		return fmt.Errorf("invalid runtime.version: %s", runtimeConfig.Version)
+	}
+
+	validDeploymentProfiles := map[string]bool{"local": true, "single-node": true, "multi-node": true}
+	if !validDeploymentProfiles[runtimeConfig.DeploymentProfile] {
+		return fmt.Errorf("invalid runtime.deployment_profile: %s", runtimeConfig.DeploymentProfile)
+	}
+
+	validDiscoveryModes := map[string]bool{"disabled": true, "seeded": true}
+	if !validDiscoveryModes[runtimeConfig.DiscoveryMode] {
+		return fmt.Errorf("invalid runtime.discovery_mode: %s", runtimeConfig.DiscoveryMode)
+	}
+
+	validFederationModes := map[string]bool{"disabled": true, "trusted": true}
+	if !validFederationModes[runtimeConfig.FederationMode] {
+		return fmt.Errorf("invalid runtime.federation_mode: %s", runtimeConfig.FederationMode)
+	}
+
+	validMigrationModes := map[string]bool{"disabled": true, "cold": true, "checkpoint": true, "live": true}
+	if !validMigrationModes[runtimeConfig.MigrationMode] {
+		return fmt.Errorf("invalid runtime.migration_mode: %s", runtimeConfig.MigrationMode)
+	}
+
+	validAuthModes := map[string]bool{"runtime": true, "external": true, "disabled": true}
+	if !validAuthModes[runtimeConfig.AuthMode] {
+		return fmt.Errorf("invalid runtime.auth_mode: %s", runtimeConfig.AuthMode)
+	}
+
+	validServices := map[string]bool{
+		"api":        true,
+		"auth":       true,
+		"backup":     true,
+		"discovery":  true,
+		"edge":       true,
+		"federation": true,
+		"hypervisor": true,
+		"migration":  true,
+		"ml":         true,
+		"network":    true,
+		"scheduler":  true,
+		"storage":    true,
+		"vm":         true,
+	}
+	for _, service := range runtimeConfig.EnabledServices {
+		if !validServices[service] {
+			return fmt.Errorf("invalid runtime.enabled_services entry: %s", service)
+		}
 	}
 
 	// DWCP validation
@@ -386,6 +512,32 @@ func (l *Loader) LoadFromEnv(config *Config) error {
 		config.Network.ListenAddress = listenAddr
 	}
 
+	// Runtime manifest overrides
+	if version := os.Getenv("NOVACRON_RUNTIME_MANIFEST_VERSION"); version != "" {
+		config.Runtime.Version = strings.TrimSpace(version)
+	}
+	if profile := os.Getenv("NOVACRON_DEPLOYMENT_PROFILE"); profile != "" {
+		config.Runtime.DeploymentProfile = strings.TrimSpace(profile)
+	}
+	if mode := os.Getenv("NOVACRON_DISCOVERY_MODE"); mode != "" {
+		config.Runtime.DiscoveryMode = strings.TrimSpace(mode)
+	}
+	if mode := os.Getenv("NOVACRON_FEDERATION_MODE"); mode != "" {
+		config.Runtime.FederationMode = strings.TrimSpace(mode)
+	}
+	if mode := os.Getenv("NOVACRON_MIGRATION_MODE"); mode != "" {
+		config.Runtime.MigrationMode = strings.TrimSpace(mode)
+	}
+	if mode := os.Getenv("NOVACRON_AUTH_MODE"); mode != "" {
+		config.Runtime.AuthMode = strings.TrimSpace(mode)
+	}
+	if classes := os.Getenv("NOVACRON_STORAGE_CLASSES"); classes != "" {
+		config.Runtime.StorageClasses = normalizeStringList(strings.Split(classes, ","))
+	}
+	if enabled := os.Getenv("NOVACRON_ENABLED_SERVICES"); enabled != "" {
+		config.Runtime.EnabledServices = normalizeStringList(strings.Split(enabled, ","))
+	}
+
 	return nil
 }
 
@@ -399,6 +551,16 @@ func GenerateDefault(path string) error {
 			MaxConcurrency:  1000,
 			HealthCheckPort: 8080,
 			ShutdownTimeout: 30 * time.Second,
+		},
+		Runtime: RuntimeManifestConfig{
+			Version:           DefaultRuntimeManifestVersion,
+			DeploymentProfile: "single-node",
+			DiscoveryMode:     "disabled",
+			FederationMode:    "disabled",
+			MigrationMode:     "disabled",
+			AuthMode:          "runtime",
+			StorageClasses:    []string{"default"},
+			EnabledServices:   defaultEnabledServices(),
 		},
 		DWCP: DWCPConfig{
 			EnableAutoDetection: true,
@@ -419,9 +581,9 @@ func GenerateDefault(path string) error {
 				CongestionAlgo: "cubic",
 			},
 			Compression: CompressionConfig{
-				Algorithm:    "zstd",
-				Level:        3,
-				EnableDelta:  true,
+				Algorithm:     "zstd",
+				Level:         3,
+				EnableDelta:   true,
 				EnableMLModel: false,
 			},
 			Consensus: ConsensusConfig{
@@ -436,7 +598,7 @@ func GenerateDefault(path string) error {
 			BindPort:       9090,
 			MaxConnections: 10000,
 			ConnTimeout:    30 * time.Second,
-			EnableTLS:      true,
+			EnableTLS:      false,
 		},
 		Storage: StorageConfig{
 			Backend:        "sqlite",
@@ -468,4 +630,38 @@ func GenerateDefault(path string) error {
 	}
 
 	return nil
+}
+
+func defaultEnabledServices() []string {
+	return []string{
+		"api",
+		"auth",
+		"hypervisor",
+		"network",
+		"scheduler",
+		"storage",
+		"vm",
+	}
+}
+
+func normalizeStringList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(values))
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		item := strings.ToLower(strings.TrimSpace(value))
+		if item == "" {
+			continue
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		normalized = append(normalized, item)
+	}
+
+	return normalized
 }

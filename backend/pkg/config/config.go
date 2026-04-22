@@ -6,16 +6,19 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	runtimeloader "novacron/backend/core/initialization/config"
 )
 
 // Config holds all configuration for the NovaCron system
 type Config struct {
-	Server   ServerConfig   `json:"server"`
-	Database DatabaseConfig `json:"database"`
-	Auth     AuthConfig     `json:"auth"`
-	VM       VMConfig       `json:"vm"`
-	Logging  LoggingConfig  `json:"logging"`
-	CORS     CORSConfig     `json:"cors"`
+	Server          ServerConfig          `json:"server"`
+	Database        DatabaseConfig        `json:"database"`
+	Auth            AuthConfig            `json:"auth"`
+	VM              VMConfig              `json:"vm"`
+	Logging         LoggingConfig         `json:"logging"`
+	CORS            CORSConfig            `json:"cors"`
+	RuntimeManifest RuntimeManifestConfig `json:"runtime_manifest"`
 }
 
 // ServerConfig holds HTTP server configuration
@@ -50,11 +53,11 @@ type AuthConfig struct {
 
 // VMConfig holds VM management configuration
 type VMConfig struct {
-	StoragePath         string   `json:"storage_path" env:"STORAGE_PATH" default:"/var/lib/novacron/vms"`
-	HypervisorAddrs     []string `json:"hypervisor_addrs" env:"HYPERVISOR_ADDRS" default:"localhost:9000"`
-	DefaultCPUShares    int      `json:"default_cpu_shares" env:"VM_DEFAULT_CPU_SHARES" default:"1024"`
-	DefaultMemoryMB     int      `json:"default_memory_mb" env:"VM_DEFAULT_MEMORY_MB" default:"512"`
-	MaxVMsPerNode       int      `json:"max_vms_per_node" env:"VM_MAX_PER_NODE" default:"100"`
+	StoragePath         string        `json:"storage_path" env:"STORAGE_PATH" default:"/var/lib/novacron/vms"`
+	HypervisorAddrs     []string      `json:"hypervisor_addrs" env:"HYPERVISOR_ADDRS" default:"localhost:9000"`
+	DefaultCPUShares    int           `json:"default_cpu_shares" env:"VM_DEFAULT_CPU_SHARES" default:"1024"`
+	DefaultMemoryMB     int           `json:"default_memory_mb" env:"VM_DEFAULT_MEMORY_MB" default:"512"`
+	MaxVMsPerNode       int           `json:"max_vms_per_node" env:"VM_MAX_PER_NODE" default:"100"`
 	HealthCheckInterval time.Duration `json:"health_check_interval" env:"VM_HEALTH_CHECK_INTERVAL" default:"30s"`
 }
 
@@ -73,10 +76,25 @@ type CORSConfig struct {
 	AllowedHeaders []string `json:"allowed_headers" env:"CORS_ALLOWED_HEADERS" default:"Content-Type,Authorization"`
 }
 
+// RuntimeManifestConfig captures the shared runtime-manifest summary that the API entrypoint can expose.
+type RuntimeManifestConfig struct {
+	Path              string   `json:"path" env:"NOVACRON_RUNTIME_MANIFEST_PATH"`
+	Required          bool     `json:"required" env:"NOVACRON_REQUIRE_RUNTIME_MANIFEST"`
+	Loaded            bool     `json:"loaded"`
+	Version           string   `json:"version,omitempty"`
+	DeploymentProfile string   `json:"deployment_profile,omitempty"`
+	DiscoveryMode     string   `json:"discovery_mode,omitempty"`
+	FederationMode    string   `json:"federation_mode,omitempty"`
+	MigrationMode     string   `json:"migration_mode,omitempty"`
+	AuthMode          string   `json:"auth_mode,omitempty"`
+	StorageClasses    []string `json:"storage_classes,omitempty"`
+	EnabledServices   []string `json:"enabled_services,omitempty"`
+}
+
 // Load creates a new Config instance with values loaded from environment variables
 func Load() (*Config, error) {
 	config := &Config{}
-	
+
 	// Load server configuration
 	config.Server = ServerConfig{
 		APIPort:         getEnvOrDefault("API_PORT", "8090"),
@@ -86,7 +104,7 @@ func Load() (*Config, error) {
 		IdleTimeout:     getEnvDurationOrDefault("IDLE_TIMEOUT", 60*time.Second),
 		ShutdownTimeout: getEnvDurationOrDefault("SHUTDOWN_TIMEOUT", 30*time.Second),
 	}
-	
+
 	// Load database configuration
 	config.Database = DatabaseConfig{
 		URL:             getEnvOrDefault("DB_URL", "postgresql://postgres:postgres@localhost:5432/novacron"),
@@ -94,13 +112,13 @@ func Load() (*Config, error) {
 		ConnMaxLifetime: getEnvDurationOrDefault("DB_CONN_MAX_LIFETIME", 5*time.Minute),
 		ConnMaxIdleTime: getEnvDurationOrDefault("DB_CONN_MAX_IDLE_TIME", 1*time.Minute),
 	}
-	
+
 	// Load auth configuration
 	authSecret := getEnvOrDefault("AUTH_SECRET", "changeme_in_production")
 	if authSecret == "changeme_in_production" {
 		return nil, fmt.Errorf("AUTH_SECRET must be set to a secure value in production")
 	}
-	
+
 	config.Auth = AuthConfig{
 		Secret:                authSecret,
 		SessionExpiry:         getEnvDurationOrDefault("AUTH_SESSION_EXPIRY", 24*time.Hour),
@@ -111,13 +129,13 @@ func Load() (*Config, error) {
 		RequirePasswordNumber: getEnvBoolOrDefault("AUTH_REQUIRE_PASSWORD_NUMBER", true),
 		RequirePasswordSymbol: getEnvBoolOrDefault("AUTH_REQUIRE_PASSWORD_SYMBOL", true),
 	}
-	
+
 	// Load VM configuration
 	hypervisorAddrs := strings.Split(getEnvOrDefault("HYPERVISOR_ADDRS", "localhost:9000"), ",")
 	for i, addr := range hypervisorAddrs {
 		hypervisorAddrs[i] = strings.TrimSpace(addr)
 	}
-	
+
 	config.VM = VMConfig{
 		StoragePath:         getEnvOrDefault("STORAGE_PATH", "/var/lib/novacron/vms"),
 		HypervisorAddrs:     hypervisorAddrs,
@@ -126,7 +144,7 @@ func Load() (*Config, error) {
 		MaxVMsPerNode:       getEnvIntOrDefault("VM_MAX_PER_NODE", 100),
 		HealthCheckInterval: getEnvDurationOrDefault("VM_HEALTH_CHECK_INTERVAL", 30*time.Second),
 	}
-	
+
 	// Load logging configuration
 	config.Logging = LoggingConfig{
 		Level:      getEnvOrDefault("LOG_LEVEL", "info"),
@@ -134,29 +152,37 @@ func Load() (*Config, error) {
 		Output:     getEnvOrDefault("LOG_OUTPUT", "stdout"),
 		Structured: getEnvBoolOrDefault("LOG_STRUCTURED", true),
 	}
-	
+
 	// Load CORS configuration
 	allowedOrigins := strings.Split(getEnvOrDefault("CORS_ALLOWED_ORIGINS", "http://localhost:8092,http://localhost:3001"), ",")
 	for i, origin := range allowedOrigins {
 		allowedOrigins[i] = strings.TrimSpace(origin)
 	}
-	
+
 	allowedMethods := strings.Split(getEnvOrDefault("CORS_ALLOWED_METHODS", "GET,POST,PUT,DELETE,OPTIONS"), ",")
 	for i, method := range allowedMethods {
 		allowedMethods[i] = strings.TrimSpace(method)
 	}
-	
+
 	allowedHeaders := strings.Split(getEnvOrDefault("CORS_ALLOWED_HEADERS", "Content-Type,Authorization"), ",")
 	for i, header := range allowedHeaders {
 		allowedHeaders[i] = strings.TrimSpace(header)
 	}
-	
+
 	config.CORS = CORSConfig{
 		AllowedOrigins: allowedOrigins,
 		AllowedMethods: allowedMethods,
 		AllowedHeaders: allowedHeaders,
 	}
-	
+
+	config.RuntimeManifest = RuntimeManifestConfig{
+		Path:     strings.TrimSpace(getEnvOrDefault("NOVACRON_RUNTIME_MANIFEST_PATH", "")),
+		Required: getEnvBoolOrDefault("NOVACRON_REQUIRE_RUNTIME_MANIFEST", false),
+	}
+	if err := loadRuntimeManifestSummary(config); err != nil {
+		return nil, err
+	}
+
 	return config, nil
 }
 
@@ -165,19 +191,19 @@ func (c *Config) Validate() error {
 	if c.Auth.Secret == "" || c.Auth.Secret == "changeme_in_production" {
 		return fmt.Errorf("AUTH_SECRET must be set to a secure value")
 	}
-	
+
 	if c.Auth.PasswordMinLength < 6 {
 		return fmt.Errorf("AUTH_PASSWORD_MIN_LENGTH must be at least 6")
 	}
-	
+
 	if c.Database.URL == "" {
 		return fmt.Errorf("DB_URL must be set")
 	}
-	
+
 	if len(c.VM.HypervisorAddrs) == 0 {
 		return fmt.Errorf("at least one hypervisor address must be configured")
 	}
-	
+
 	validLogLevels := []string{"debug", "info", "warn", "error"}
 	validLevel := false
 	for _, level := range validLogLevels {
@@ -189,7 +215,11 @@ func (c *Config) Validate() error {
 	if !validLevel {
 		return fmt.Errorf("LOG_LEVEL must be one of: %s", strings.Join(validLogLevels, ", "))
 	}
-	
+
+	if c.RuntimeManifest.Required && c.RuntimeManifest.Path == "" {
+		return fmt.Errorf("NOVACRON_RUNTIME_MANIFEST_PATH must be set when NOVACRON_REQUIRE_RUNTIME_MANIFEST=true")
+	}
+
 	return nil
 }
 
@@ -227,4 +257,38 @@ func getEnvDurationOrDefault(key string, defaultValue time.Duration) time.Durati
 		}
 	}
 	return defaultValue
+}
+
+func loadRuntimeManifestSummary(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+
+	if cfg.RuntimeManifest.Required && cfg.RuntimeManifest.Path == "" {
+		return fmt.Errorf("NOVACRON_RUNTIME_MANIFEST_PATH must be set when NOVACRON_REQUIRE_RUNTIME_MANIFEST=true")
+	}
+	if cfg.RuntimeManifest.Path == "" {
+		return nil
+	}
+
+	loader := runtimeloader.NewLoader(cfg.RuntimeManifest.Path)
+	manifest, err := loader.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load runtime manifest %s: %w", cfg.RuntimeManifest.Path, err)
+	}
+	if err := loader.LoadFromEnv(manifest); err != nil {
+		return fmt.Errorf("failed to apply runtime manifest env overrides: %w", err)
+	}
+
+	cfg.RuntimeManifest.Loaded = true
+	cfg.RuntimeManifest.Version = manifest.Runtime.Version
+	cfg.RuntimeManifest.DeploymentProfile = manifest.Runtime.DeploymentProfile
+	cfg.RuntimeManifest.DiscoveryMode = manifest.Runtime.DiscoveryMode
+	cfg.RuntimeManifest.FederationMode = manifest.Runtime.FederationMode
+	cfg.RuntimeManifest.MigrationMode = manifest.Runtime.MigrationMode
+	cfg.RuntimeManifest.AuthMode = manifest.Runtime.AuthMode
+	cfg.RuntimeManifest.StorageClasses = append([]string(nil), manifest.Runtime.StorageClasses...)
+	cfg.RuntimeManifest.EnabledServices = append([]string(nil), manifest.Runtime.EnabledServices...)
+
+	return nil
 }

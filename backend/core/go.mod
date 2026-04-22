@@ -339,4 +339,7 @@ require (
 	github.com/go-redis/redis/v8 v8.11.5
 	golang.org/x/crypto v0.43.0
 	golang.org/x/sys v0.37.0
+	novacron/backend/core/initialization v0.0.0
 )
+
+replace novacron/backend/core/initialization => ./initialization
