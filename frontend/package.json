@@ -6,12 +6,14 @@
     "dev": "next dev -p 8092",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
+    "ci:canonical": "npm run test:smoke && npm run build",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:ci": "jest --ci --coverage --watchAll=false",
     "test:debug": "jest --debug",
+    "test:smoke": "jest --runTestsByPath src/__tests__/app/dashboard-page.test.tsx src/__tests__/app/vms-page.test.tsx src/__tests__/app/analytics-page.test.tsx src/__tests__/app/settings-page.test.tsx src/__tests__/app/users-page.test.tsx src/__tests__/app/network-page.test.tsx src/__tests__/app/admin-layout.test.tsx src/__tests__/components/auth/RBACGuard.test.tsx src/__tests__/hooks/useSecurity.test.tsx src/__tests__/hooks/useWebSocket.test.tsx src/__tests__/lib/security-api.test.ts src/__tests__/lib/auth.test.ts src/__tests__/lib/auth-phase3.test.ts --coverage=false",
     "test:unit": "jest --testPathPattern=__tests__/(?!e2e)",
     "test:components": "jest --testPathPattern=components",
     "test:hooks": "jest --testPathPattern=hooks",
@@ -98,5 +100,9 @@
     "postcss-preset-env": "^9.6.0",
     "puppeteer": "^22.15.0",
     "tailwindcss": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=20.0.0 <21.0.0",
+    "npm": ">=10.0.0 <11.0.0"
   }
 }

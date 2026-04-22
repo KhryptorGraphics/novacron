@@ -1,10 +1,6 @@
-name: DWCP v3 - Continuous Integration
+name: DWCP v3 - Continuous Integration (Manual Only)
 
 on:
-  push:
-    branches: [main, develop, 'feature/**', 'dwcp-v3/**']
-  pull_request:
-    branches: [main, develop]
   workflow_dispatch:
 
 env:

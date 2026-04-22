@@ -1,0 +1,101 @@
+sprint: phase0-sprint1
+title: Toolchain And CI Normalization
+status: completed
+updated_at: 2026-04-22T22:12:58Z
+branch: feat/convergence-sprint0-foundation
+objective: Normalize the default toolchain and CI hierarchy for the core backend, frontend, integration, and smoke-test lanes.
+
+owners:
+  coordinator_integrator: codex
+  repo_cartographer: codex
+  research_pod: completed
+  build_pod_backend_owner: codex
+  build_pod_frontend_api_owner: codex
+  validation_pod: codex
+
+artifacts:
+  - .nvmrc
+  - package.json
+  - frontend/package.json
+  - .github/workflows/ci.yml
+  - .github/workflows/integration-tests.yml
+  - .github/workflows/e2e-tests.yml
+  - .github/workflows/ci-cd.yml
+  - .github/workflows/ci-cd-production.yml
+  - .github/workflows/dwcp-v3-ci.yml
+  - .github/workflows/dwcp-v3-cd.yml
+  - .github/workflows/e2e-visual-regression.yml
+  - .swarm/runs/phase0-sprint1/README.md
+  - .swarm/runs/phase0-sprint1/toolchain-baseline.md
+  - backend/api/graphql/resolvers.go
+  - frontend/jest.config.js
+  - tests/e2e/canonical-release-smoke.spec.ts
+
+expected_scope:
+  automatic_workflows_retained:
+    - .github/workflows/ci.yml
+    - .github/workflows/integration-tests.yml
+    - .github/workflows/e2e-tests.yml
+  automatic_workflows_quarantined:
+    - .github/workflows/ci-cd.yml
+    - .github/workflows/ci-cd-production.yml
+    - .github/workflows/dwcp-v3-ci.yml
+    - .github/workflows/dwcp-v3-cd.yml
+    - .github/workflows/e2e-visual-regression.yml
+  package_manager_default:
+    root: npm
+    frontend: npm
+  toolchain_defaults:
+    go: go.mod
+    node: .nvmrc
+  validation_fixes:
+    - backend/api/graphql/resolvers.go
+    - frontend/jest.config.js
+    - tests/e2e/canonical-release-smoke.spec.ts
+
+gates:
+  gate_0: pass
+  gate_1: pass
+  gate_2: not_applicable
+  gate_3: pass
+  gate_4: not_applicable
+  gate_5: pass
+
+verification:
+  symbol_impact:
+    status: pass
+    note: GitNexus impact RPC was not exposed in this session; used gitnexus context on UpdateVM and MigrateVM plus codemap importers as the fallback blast-radius check before editing resolver methods.
+    evidence:
+      - Method UpdateVM in backend/api/graphql/resolvers.go had no indexed processes and only local Resolver ownership in gitnexus context.
+      - Method MigrateVM in backend/api/graphql/resolvers.go had no indexed processes and only local Resolver ownership in gitnexus context.
+      - codemap reported no importers for backend/api/graphql/resolvers.go.
+  command_results:
+    - command: GOTOOLCHAIN=go1.24.6 go test ./backend/cmd/api-server ./backend/api/graphql ./backend/api/security ./backend/api/websocket
+      result: pass
+    - command: GOTOOLCHAIN=go1.24.6 go build ./backend/cmd/api-server
+      result: pass
+    - command: source ~/.nvm/nvm.sh && nvm install 20 && nvm use 20 && npm --prefix frontend run ci:canonical
+      result: pass
+    - command: source ~/.nvm/nvm.sh && nvm use 20 && npm ci
+      result: pass
+    - command: source ~/.nvm/nvm.sh && nvm use 20 && npm run test:e2e:canonical -- --list
+      result: pass
+    - command: source ~/.nvm/nvm.sh && nvm use 20 && PLAYWRIGHT_BASE_URL=http://127.0.0.1:41000 PLAYWRIGHT_SKIP_AUTH=true npm run test:e2e:canonical
+      result: pass
+  warnings:
+    - frontend next build reports deprecated or invalid next.config.js keys including eslint, swcMinify, and experimental.isrMemoryCacheSize.
+    - frontend next build warns about multiple lockfiles when inferring workspace root.
+    - Playwright global teardown summary currently reports incorrect aggregate counts even when the smoke test passes.
+  gitnexus_detect_changes:
+    scope: staged
+    changed_files: 17
+    changed_count: 35
+    affected_processes: 0
+    risk_level: low
+    note: Symbol attribution is noisy for generic package-manifest nodes, but GitNexus reported no affected execution flows for the staged Sprint 1 scope.
+
+notes:
+  - Sprint 1 intentionally isolates overlapping legacy and prototype workflows before deeper runtime convergence begins.
+  - Specialized scheduled or path-filtered workflows remain outside the core default baseline unless they overlap the shipping path.
+  - Validation surfaced and fixed resolver drift in backend/api/graphql/resolvers.go so the canonical backend lane compiles against the current GraphQL types.
+  - Validation surfaced and fixed a Jest config typo plus missing canonical auth-session seeding in the Playwright smoke fixture.

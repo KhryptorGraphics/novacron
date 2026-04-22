@@ -63,9 +63,6 @@ on:
       - ".github/workflows/ci.yml"
   workflow_dispatch:
 
-env:
-  NODE_VERSION: "20"
-
 jobs:
   canonical-ui-smoke:
     name: Canonical UI Smoke
@@ -77,13 +74,14 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: |
+            package-lock.json
             frontend/package-lock.json
 
       - name: Install root Playwright dependencies
-        run: npm install --no-fund --no-audit
+        run: npm ci
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -119,7 +117,7 @@ jobs:
           CI: "true"
           PLAYWRIGHT_BASE_URL: "http://127.0.0.1:3000"
           PLAYWRIGHT_SKIP_AUTH: "true"
-        run: npx playwright test tests/e2e/canonical-release-smoke.spec.ts --project=chromium
+        run: npm run test:e2e:canonical
 
       - name: Upload Playwright report
         if: always()

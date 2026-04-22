@@ -162,10 +162,8 @@ func (r *Resolver) UpdateVM(ctx context.Context, args struct {
 		updateSpec.Memory = &memory
 	}
 	if args.Input.Disk != nil {
-		updateSpec.Disk = args.Input.Disk
-	}
-	if args.Input.Tags != nil {
-		updateSpec.Tags = args.Input.Tags
+		disk := int64(*args.Input.Disk)
+		updateSpec.Disk = &disk
 	}
 
 	// Call VM manager to update
@@ -291,7 +289,6 @@ func (r *Resolver) MigrateVM(ctx context.Context, args struct {
 
 		if err != nil {
 			migration.Status = "FAILED"
-			migration.Error = err.Error()
 		} else {
 			migration.Status = "COMPLETED"
 			migration.Progress = 100.0

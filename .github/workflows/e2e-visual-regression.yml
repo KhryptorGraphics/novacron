@@ -1,17 +1,6 @@
-name: Visual Regression Tests
+name: Visual Regression Tests (Manual Only)
 
 on:
-  push:
-    branches: [main, develop]
-    paths:
-      - 'frontend/**'
-      - 'tests/e2e/visual/**'
-      - '.github/workflows/e2e-visual-regression.yml'
-  pull_request:
-    branches: [main, develop]
-    paths:
-      - 'frontend/**'
-      - 'tests/e2e/visual/**'
   workflow_dispatch:
     inputs:
       update_baseline:

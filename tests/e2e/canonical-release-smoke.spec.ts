@@ -85,6 +85,49 @@ test('canonical release routes load and support live rehabbed flows', async ({ p
   const now = '2026-04-18T00:00:00Z';
   const token = makeAdminToken();
   let complianceChecks = 0;
+  const adminUser = {
+    id: 'admin-1',
+    email: 'admin@novacron.dev',
+    firstName: 'Release',
+    lastName: 'Admin',
+    tenantId: 'default',
+    status: 'active',
+    role: 'admin',
+    roles: ['admin'],
+  };
+  const selectedCluster = {
+    id: 'cluster-a',
+    name: 'Primary Fabric',
+    tier: 'production',
+    performanceScore: 98,
+    interconnectLatencyMs: 12,
+    interconnectBandwidthMbps: 20000,
+    currentNodeCount: 3,
+    maxSupportedNodeCount: 12,
+    growthState: 'stable',
+    federationState: 'healthy',
+    degraded: false,
+    lastEvaluatedAt: now,
+  };
+  const memberships = [
+    {
+      admitted: true,
+      state: 'active',
+      clusterId: selectedCluster.id,
+      role: 'admin',
+      source: 'smoke-fixture',
+      admittedAt: now,
+      selected: true,
+      cluster: selectedCluster,
+    },
+  ];
+  const session = {
+    id: 'session-admin-1',
+    expiresAt: '2026-04-18T12:00:00Z',
+    createdAt: now,
+    lastAccessedAt: now,
+    selectedClusterId: selectedCluster.id,
+  };
 
   const vms: CanonicalVm[] = [
     {
@@ -163,9 +206,19 @@ test('canonical release routes load and support live rehabbed flows', async ({ p
     },
   ];
 
-  await page.addInitScript((seedToken) => {
-    window.localStorage.setItem('novacron_token', seedToken);
-  }, token);
+  await page.addInitScript((seed) => {
+    window.localStorage.setItem('novacron_token', seed.token);
+    window.localStorage.setItem('authUser', JSON.stringify(seed.user));
+    window.localStorage.setItem('authMemberships', JSON.stringify(seed.memberships));
+    window.localStorage.setItem('selectedCluster', JSON.stringify(seed.selectedCluster));
+    window.localStorage.setItem('authSession', JSON.stringify(seed.session));
+  }, {
+    token,
+    user: adminUser,
+    memberships,
+    selectedCluster,
+    session,
+  });
 
   await page.route('**/*', async (route) => {
     const request = route.request();
@@ -180,6 +233,17 @@ test('canonical release routes load and support live rehabbed flows', async ({ p
         body: JSON.stringify(body),
       });
     };
+
+    if (path === '/api/auth/me' && method === 'GET') {
+      await fulfillJson({
+        user: adminUser,
+        admission: memberships[0],
+        memberships,
+        selectedCluster,
+        session,
+      });
+      return;
+    }
 
     if (path === '/graphql' && method === 'POST') {
       const payload = request.postDataJSON() as { query?: string; variables?: Record<string, unknown> };

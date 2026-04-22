@@ -30,6 +30,7 @@
 		"test:e2e:codegen": "playwright codegen",
 		"test:e2e:install": "playwright install --with-deps",
 		"test:e2e:ci": "playwright test --project=chromium --project=firefox",
+		"test:e2e:canonical": "playwright test tests/e2e/canonical-release-smoke.spec.ts --project=chromium",
 		"start": "npm run dev",
 		"start:api": "go run ./backend/cmd/api-server/main.go",
 		"start:frontend": "npm run dev --prefix frontend",
@@ -104,8 +105,8 @@
 		]
 	},
 	"engines": {
-		"node": ">=18.0.0",
-		"npm": ">=9.0.0"
+		"node": ">=20.0.0 <21.0.0",
+		"npm": ">=10.0.0 <11.0.0"
 	},
 	"repository": {
 		"type": "git",

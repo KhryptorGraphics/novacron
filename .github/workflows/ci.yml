@@ -6,10 +6,6 @@ on:
   push:
     branches: [main, develop]
 
-env:
-  GO_VERSION: "1.21"
-  NODE_VERSION: "20"
-
 jobs:
   canonical-backend:
     name: Canonical Backend
@@ -21,7 +17,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
 
       - name: Cache Go modules
         uses: actions/cache@v4
@@ -54,7 +50,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -62,27 +58,8 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Run canonical frontend tests
+      - name: Run canonical frontend lane
         working-directory: frontend
         env:
           CI: "true"
-        run: >
-          npm test -- --runTestsByPath
-          src/__tests__/app/dashboard-page.test.tsx
-          src/__tests__/app/vms-page.test.tsx
-          src/__tests__/app/analytics-page.test.tsx
-          src/__tests__/app/settings-page.test.tsx
-          src/__tests__/app/users-page.test.tsx
-          src/__tests__/app/network-page.test.tsx
-          src/__tests__/app/admin-layout.test.tsx
-          src/__tests__/components/auth/RBACGuard.test.tsx
-          src/__tests__/hooks/useSecurity.test.tsx
-          src/__tests__/hooks/useWebSocket.test.tsx
-          src/__tests__/lib/security-api.test.ts
-          src/__tests__/lib/auth.test.ts
-          src/__tests__/lib/auth-phase3.test.ts
-          --coverage=false
-
-      - name: Build canonical frontend
-        working-directory: frontend
-        run: npm run build
+        run: npm run ci:canonical
