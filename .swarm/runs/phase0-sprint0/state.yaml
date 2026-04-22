@@ -1,0 +1,73 @@
+sprint: phase0-sprint0
+title: Truth Reset
+status: completed
+updated_at: 2026-04-22T18:44:25Z
+branch: feat/convergence-sprint0-foundation
+objective: Establish authoritative repo truth, bootstrap run memory, and seed phase epics.
+
+product_line:
+  canonical_runtime_target: backend/core/cmd/novacron/main.go
+  current_split_runtime:
+    - backend/core/cmd/novacron/main.go
+    - backend/cmd/api-server/main.go
+    - cmd/novacron/main.go
+    - main.go
+
+owners:
+  coordinator_integrator: pending
+  repo_cartographer: codex
+  research_pod: pending
+  build_pod_backend_owner: pending
+  build_pod_frontend_api_owner: pending
+  build_pod_ml_research_owner: pending
+  review_pod: pending
+  validation_pod: pending
+
+artifacts:
+  - .swarm/validation-matrix.yaml
+  - .swarm/runs/README.md
+  - .swarm/runs/phase0-sprint0/repo-truth-matrix.md
+  - .swarm/runs/phase0-sprint0/architecture-map.md
+  - .swarm/runs/phase0-sprint0/phase-epics.md
+
+blockers:
+  - id: beads-dolt-local
+    severity: medium
+    status: open
+    summary: The local bd CLI cannot mutate the tracker because the checkout lacks a working Dolt-backed rig.
+    evidence:
+      - bd doctor reports a fresh-clone state with issues.jsonl but no Dolt database
+      - .beads/metadata.json still points at legacy beads.db naming
+      - .beads/issues.jsonl remains present and authoritative enough to seed epics
+    mitigation:
+      - Seed convergence epics directly into .beads/issues.jsonl for this sprint.
+      - Repair the tracker later with bd init --prefix novacron --from-jsonl after dolt is installed.
+
+gates:
+  gate_0: pass
+  gate_1: pass
+  gate_2: not_applicable
+  gate_3: not_applicable
+  gate_4: not_applicable
+  gate_5: pass
+
+verification:
+  yaml_and_jsonl_parse: pass
+  gitnexus_detect_changes:
+    scope: staged
+    changed_files: 9
+    changed_symbols: 0
+    affected_processes: 0
+    risk_level: low
+
+phase_epics:
+  - NC-p0a
+  - NC-p1a
+  - NC-p2a
+  - NC-p3a
+  - NC-p4a
+  - NC-p5a
+
+notes:
+  - Sprint 0 intentionally changes run-state and issue-tracking artifacts only.
+  - Existing root status documents remain in place but are now explicitly non-authoritative unless cited by current sprint artifacts.

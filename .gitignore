@@ -44,7 +44,11 @@ frontend/node_modules/@next/swc-linux-x64-musl/next-swc.linux-x64-musl.node
 .claude/settings.local.json
 .mcp.json
 claude-flow.config.json
-.swarm/
+.swarm/*
+!.swarm/runs/
+!.swarm/runs/**
+!.swarm/validation-matrix.yaml
+.swarm/memory.db
 .hive-mind/
 .claude-flow/
 memory/

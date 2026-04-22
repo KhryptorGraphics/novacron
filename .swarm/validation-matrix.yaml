@@ -1,0 +1,112 @@
+version: 1
+program: NovaCron Convergence Program
+owner: validation-pod
+updated_at: 2026-04-22T18:44:25Z
+authority: .swarm/validation-matrix.yaml
+status: active
+
+gates:
+  gate_0:
+    name: repo-map-and-blast-radius
+    purpose: Confirm repo truth and blast radius before any shared-path change.
+    required_actions:
+      - Refresh the sprint repo truth matrix when entrypoints, workflows, modules, or deployment surfaces change.
+      - Run GitNexus context or impact analysis for every edited symbol and record the result in sprint state.
+      - Record expected changed scope before edits land.
+  gate_1:
+    name: targeted-unit-and-static-checks
+    purpose: Prove the local change compiles, lints, or validates in its own lane.
+    required_actions:
+      - Run the narrowest stack-specific checks that cover the touched surfaces.
+      - Record any skipped checks and why they were skipped.
+  gate_2:
+    name: cross-module-integration
+    purpose: Verify interactions between backend, frontend, storage, network, auth, or deployment surfaces.
+    required_actions:
+      - Exercise at least one real interaction path when runtime behavior changes.
+  gate_3:
+    name: user-path-e2e
+    purpose: Cover the operator-visible flow for shipping UI or API behavior.
+    required_actions:
+      - Run or update one end-to-end scenario when the user path changes.
+  gate_4:
+    name: chaos-performance-security
+    purpose: Expand validation when shared runtime paths or trust boundaries change.
+    required_actions:
+      - Run only when federation, migration, storage replication, auth, transport, or scheduler behavior changes.
+  gate_5:
+    name: pre-merge-scope-verification
+    purpose: Prove the change touched only the intended files and execution flows.
+    required_actions:
+      - Run `git status` and stage only the intended files.
+      - Run GitNexus `detect_changes` before commit.
+      - Provide a handoff note with blockers and remaining work.
+
+stacks:
+  backend_go:
+    current_state: unconverged
+    observed_toolchains:
+      repo_default: go 1.24.0 with toolchain go1.24.6
+      ci_examples:
+        - go 1.21 in .github/workflows/ci.yml
+        - go 1.21 in .github/workflows/ci-cd.yml
+    candidate_default_commands:
+      - source: .github/workflows/ci.yml
+        command: go test ./backend/cmd/api-server ./backend/api/graphql ./backend/api/security ./backend/api/websocket
+      - source: package.json
+        command: go build -o bin/ ./backend/...
+  frontend_node:
+    current_state: unconverged
+    observed_toolchains:
+      repo_default: frontend/package.json uses next 16.0.2 and react 18.2.0
+      ci_examples:
+        - node 20 in .github/workflows/ci.yml
+        - node 18 in .github/workflows/ci-cd.yml
+    candidate_default_commands:
+      - npm --prefix frontend test
+      - npm --prefix frontend build
+  root_node:
+    current_state: unconverged
+    observed_toolchains:
+      repo_default: package.json requires node >=18 and npm >=9
+      alternate_package_manager_surface: tools/indexer has yarn.lock plus pnpm metadata
+    candidate_default_commands:
+      - npm test
+      - npm run test:e2e:playwright
+  beads_tracking:
+    current_state: degraded
+    blocker: local bd expects a Dolt-backed rig but this checkout only has issues.jsonl plus a legacy sqlite artifact and no dolt binary
+
+required_scenarios:
+  - daemon boot and shutdown
+  - API auth
+  - VM create, start, and stop
+  - network attach
+  - volume attach
+  - node join and leave
+  - swarm re-election
+  - placement under latency and bandwidth constraints
+  - cold migration
+  - interrupted migration rollback
+  - replica loss
+  - backup restore
+  - UI permission denial
+  - deployment from a clean environment
+
+profiles:
+  sprint_0_truth_reset:
+    required_gates:
+      - gate_0
+      - gate_5
+    recommended_gates:
+      - gate_1
+    notes:
+      - Use documentation and inventory validation only unless code changes are introduced.
+      - Capture blockers that would prevent normal Beads or CI usage.
+  sprint_1_toolchain_normalization:
+    required_gates:
+      - gate_0
+      - gate_1
+      - gate_5
+    recommended_gates:
+      - gate_2
