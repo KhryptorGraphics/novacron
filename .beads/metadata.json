@@ -1,5 +1,7 @@
 {
-  "database": "beads.db",
-  "version": "0.22.1",
-  "jsonl_export": "beads.jsonl"
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "novacron",
+  "project_id": "cd013f8c-04db-4b65-ab50-e4d3ab53902f"
 }

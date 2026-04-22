@@ -77,3 +77,6 @@ docs/neural_analysis_report_*.json
 # Large files excluded from git
 /architecture.md
 masterdocs/architecture.txt
+
+# Dolt database files (added by bd init)
+.dolt/
