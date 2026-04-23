@@ -41,6 +41,121 @@ type canonicalServices struct {
 	shutdown         func()
 }
 
+const (
+	canonicalRuntimeMonitoringReadsEnv = "CANONICAL_RUNTIME_MONITORING_READS"
+	canonicalRuntimeBaseURLEnv         = "CANONICAL_RUNTIME_BASE_URL"
+	canonicalRuntimeMonitoringReadPath = "/internal/runtime/v1/monitoring/metrics"
+	canonicalRuntimeMonitoringTimeout  = 2 * time.Second
+	novaCronReadSourceHeader           = "X-NovaCron-Read-Source"
+	novaCronReadSourceRuntime          = "runtime"
+	novaCronReadSourceSQLFallback      = "sql-fallback"
+)
+
+type monitoringSummaryResponse struct {
+	CurrentCpuUsage         float64  `json:"currentCpuUsage"`
+	CurrentMemoryUsage      float64  `json:"currentMemoryUsage"`
+	CurrentDiskUsage        float64  `json:"currentDiskUsage"`
+	CurrentNetworkUsage     float64  `json:"currentNetworkUsage"`
+	CpuChangePercentage     float64  `json:"cpuChangePercentage"`
+	MemoryChangePercentage  float64  `json:"memoryChangePercentage"`
+	DiskChangePercentage    float64  `json:"diskChangePercentage"`
+	NetworkChangePercentage float64  `json:"networkChangePercentage"`
+	TimeLabels              []string `json:"timeLabels"`
+	CpuAnalysis             string   `json:"cpuAnalysis"`
+	MemoryAnalysis          string   `json:"memoryAnalysis"`
+}
+
+type runtimeMonitoringReadClient struct {
+	baseURL string
+	client  *http.Client
+}
+
+func syntheticMonitoringSummaryPayload() monitoringSummaryResponse {
+	return monitoringSummaryResponse{
+		CurrentCpuUsage:         45.2,
+		CurrentMemoryUsage:      72.1,
+		CurrentDiskUsage:        58.3,
+		CurrentNetworkUsage:     125.7,
+		CpuChangePercentage:     5.2,
+		MemoryChangePercentage:  -2.1,
+		DiskChangePercentage:    1.8,
+		NetworkChangePercentage: 12.5,
+		TimeLabels:              []string{"10:00", "10:30", "11:00", "11:30", "12:00"},
+		CpuAnalysis:             "CPU usage shows normal workday patterns.",
+		MemoryAnalysis:          "Memory allocation is healthy.",
+	}
+}
+
+func newRuntimeMonitoringReadClientFromEnv() *runtimeMonitoringReadClient {
+	if !envBool(canonicalRuntimeMonitoringReadsEnv) {
+		return nil
+	}
+
+	baseURL := strings.TrimSpace(os.Getenv(canonicalRuntimeBaseURLEnv))
+	if baseURL == "" {
+		return nil
+	}
+
+	return &runtimeMonitoringReadClient{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		client: &http.Client{
+			Timeout: canonicalRuntimeMonitoringTimeout,
+		},
+	}
+}
+
+func (c *runtimeMonitoringReadClient) readMonitoringSummary(ctx context.Context, source *http.Request) (monitoringSummaryResponse, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, canonicalRuntimeMonitoringTimeout)
+	defer cancel()
+
+	targetURL := c.baseURL + canonicalRuntimeMonitoringReadPath
+	if rawQuery := source.URL.RawQuery; rawQuery != "" {
+		targetURL += "?" + rawQuery
+	}
+
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		return monitoringSummaryResponse{}, err
+	}
+
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return monitoringSummaryResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return monitoringSummaryResponse{}, fmt.Errorf("runtime monitoring summary returned status %d", resp.StatusCode)
+	}
+
+	var payload monitoringSummaryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return monitoringSummaryResponse{}, err
+	}
+
+	return payload, nil
+}
+
+func monitoringSummaryHandler(runtimeClient *runtimeMonitoringReadClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		payload := syntheticMonitoringSummaryPayload()
+		readSource := novaCronReadSourceSQLFallback
+
+		if runtimeClient != nil {
+			runtimePayload, err := runtimeClient.readMonitoringSummary(r.Context(), r)
+			if err == nil {
+				payload = runtimePayload
+				readSource = novaCronReadSourceRuntime
+			}
+		}
+
+		w.Header().Set(novaCronReadSourceHeader, readSource)
+		writeJSON(w, http.StatusOK, payload)
+	}
+}
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -538,6 +653,8 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 }
 
 func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
+	runtimeMonitoringClient := newRuntimeMonitoringReadClientFromEnv()
+
 	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
 		rows, err := db.Query(`SELECT id, name, state, node_id, tenant_id, created_at, updated_at FROM vms ORDER BY created_at DESC`)
 		if err != nil {
@@ -722,21 +839,7 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 		})
 	}).Methods(http.MethodGet)
 
-	router.HandleFunc("/monitoring/metrics", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"currentCpuUsage":         45.2,
-			"currentMemoryUsage":      72.1,
-			"currentDiskUsage":        58.3,
-			"currentNetworkUsage":     125.7,
-			"cpuChangePercentage":     5.2,
-			"memoryChangePercentage":  -2.1,
-			"diskChangePercentage":    1.8,
-			"networkChangePercentage": 12.5,
-			"timeLabels":              []string{"10:00", "10:30", "11:00", "11:30", "12:00"},
-			"cpuAnalysis":             "CPU usage shows normal workday patterns.",
-			"memoryAnalysis":          "Memory allocation is healthy.",
-		})
-	}).Methods(http.MethodGet)
+	router.HandleFunc("/monitoring/metrics", monitoringSummaryHandler(runtimeMonitoringClient)).Methods(http.MethodGet)
 
 	router.HandleFunc("/monitoring/vms", func(w http.ResponseWriter, r *http.Request) {
 		rows, err := db.Query(`SELECT id, name, state FROM vms ORDER BY created_at DESC`)
@@ -1940,6 +2043,25 @@ func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func envBool(name string) bool {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return false
+	}
+
+	enabled, err := strconv.ParseBool(raw)
+	if err == nil {
+		return enabled
+	}
+
+	switch strings.ToLower(raw) {
+	case "yes", "y", "on", "enabled":
+		return true
+	default:
+		return false
+	}
 }
 
 func stringClaim(claims jwt.MapClaims, keys ...string) string {

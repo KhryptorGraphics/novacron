@@ -756,6 +756,7 @@ func newRuntimeRouter(config runtimeConfig, vmManager *vm.VMManager, runtimeAuth
 	router.Use(runtimeCORSMiddleware(config.Auth))
 	router.HandleFunc("/healthz", handleHealthz).Methods(http.MethodGet)
 	registerRuntimeAuthRoutes(router, runtimeAuth)
+	router.HandleFunc("/internal/runtime/v1/monitoring/metrics", runtimeGetMonitoringMetricsHandler(vmManager)).Methods(http.MethodGet)
 	clusterHandler := runtimeProtectClusterRoute(runtimeAuth)
 	router.Handle("/api/cluster/nodes", clusterHandler(runtimeListNodesHandler(vmManager))).Methods(http.MethodGet)
 	router.Handle("/api/cluster/nodes/{id}", clusterHandler(runtimeGetNodeHandler(vmManager))).Methods(http.MethodGet)
@@ -822,8 +823,94 @@ type runtimeFederationResponse struct {
 	SelectedCluster *runtimeClusterSummaryResponse `json:"selectedCluster,omitempty"`
 }
 
+type runtimeMonitoringSummary struct {
+	CurrentCpuUsage         float64  `json:"currentCpuUsage"`
+	CurrentMemoryUsage      float64  `json:"currentMemoryUsage"`
+	CurrentDiskUsage        float64  `json:"currentDiskUsage"`
+	CurrentNetworkUsage     float64  `json:"currentNetworkUsage"`
+	CpuChangePercentage     float64  `json:"cpuChangePercentage"`
+	MemoryChangePercentage  float64  `json:"memoryChangePercentage"`
+	DiskChangePercentage    float64  `json:"diskChangePercentage"`
+	NetworkChangePercentage float64  `json:"networkChangePercentage"`
+	TimeLabels              []string `json:"timeLabels"`
+	CpuAnalysis             string   `json:"cpuAnalysis"`
+	MemoryAnalysis          string   `json:"memoryAnalysis"`
+}
+
 func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	respondRuntimeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func runtimeGetMonitoringMetricsHandler(vmManager *vm.VMManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		var inventory []*vm.NodeResourceInfo
+		if vmManager != nil {
+			inventory = vmManager.ListSchedulerNodes()
+		}
+		respondRuntimeJSON(w, http.StatusOK, runtimeMonitoringSummaryFromInventory(inventory))
+	}
+}
+
+func runtimeMonitoringSummaryFromInventory(inventory []*vm.NodeResourceInfo) runtimeMonitoringSummary {
+	summary := runtimeMonitoringSummary{
+		TimeLabels: runtimeMonitoringTimeLabels(),
+	}
+
+	totalCPU := 0
+	usedCPU := 0
+	totalMemoryMB := 0
+	usedMemoryMB := 0
+	totalDiskGB := 0
+	usedDiskGB := 0
+	nodeCount := 0
+
+	for _, nodeInfo := range inventory {
+		if nodeInfo == nil {
+			continue
+		}
+
+		nodeCount++
+
+		nodeTotalCPU := maxInt(0, nodeInfo.TotalCPU)
+		nodeTotalMemoryMB := maxInt(0, nodeInfo.TotalMemoryMB)
+		nodeTotalDiskGB := maxInt(0, nodeInfo.TotalDiskGB)
+
+		totalCPU += nodeTotalCPU
+		usedCPU += clampInt(nodeInfo.UsedCPU, 0, nodeTotalCPU)
+		totalMemoryMB += nodeTotalMemoryMB
+		usedMemoryMB += clampInt(nodeInfo.UsedMemoryMB, 0, nodeTotalMemoryMB)
+		totalDiskGB += nodeTotalDiskGB
+		usedDiskGB += clampInt(nodeInfo.UsedDiskGB, 0, nodeTotalDiskGB)
+	}
+
+	summary.CurrentCpuUsage = percent(usedCPU, totalCPU)
+	summary.CurrentMemoryUsage = percent(usedMemoryMB, totalMemoryMB)
+	summary.CurrentDiskUsage = percent(usedDiskGB, totalDiskGB)
+	summary.CpuAnalysis = runtimeUsageAnalysis("CPU", summary.CurrentCpuUsage, nodeCount)
+	summary.MemoryAnalysis = runtimeUsageAnalysis("Memory", summary.CurrentMemoryUsage, nodeCount)
+
+	return summary
+}
+
+func runtimeMonitoringTimeLabels() []string {
+	return []string{"00:00", "00:05", "00:10", "00:15", "00:20"}
+}
+
+func runtimeUsageAnalysis(resource string, usage float64, nodeCount int) string {
+	if nodeCount == 0 {
+		return fmt.Sprintf("%s usage is unavailable because no scheduler nodes are registered.", resource)
+	}
+
+	switch {
+	case usage >= 90:
+		return fmt.Sprintf("%s usage is critical across registered scheduler nodes.", resource)
+	case usage >= 75:
+		return fmt.Sprintf("%s usage is elevated across registered scheduler nodes.", resource)
+	case usage > 0:
+		return fmt.Sprintf("%s usage reflects current scheduler node allocations.", resource)
+	default:
+		return fmt.Sprintf("%s usage is idle across registered scheduler nodes.", resource)
+	}
 }
 
 func runtimeListNodesHandler(vmManager *vm.VMManager) http.HandlerFunc {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -48,6 +49,50 @@ func signedBearerToken(t *testing.T, authManager *auth.SimpleAuthManager, userID
 	}
 
 	return "Bearer " + tokenString
+}
+
+func newMonitoringSummaryTestRouter(t *testing.T) (*mux.Router, *auth.SimpleAuthManager) {
+	t.Helper()
+
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	router := mux.NewRouter()
+
+	apiCompat := router.PathPrefix("/api").Subrouter()
+	apiCompat.Use(requireAuth(authManager))
+	registerSecureAPIRoutes(apiCompat, nil)
+
+	apiV1 := router.PathPrefix("/api/v1").Subrouter()
+	apiV1.Use(requireAuth(authManager))
+	registerSecureAPIRoutes(apiV1, nil)
+
+	return router, authManager
+}
+
+func performAuthenticatedMonitoringSummaryRequest(t *testing.T, router http.Handler, authManager *auth.SimpleAuthManager, path string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+func decodeMonitoringSummaryPayload(t *testing.T, body []byte) (monitoringSummaryResponse, map[string]interface{}) {
+	t.Helper()
+
+	var payload monitoringSummaryResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("failed to decode typed monitoring summary payload: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("failed to decode raw monitoring summary payload: %v", err)
+	}
+
+	return payload, raw
 }
 
 func TestRequireAuthRejectsInvalidToken(t *testing.T) {
@@ -353,6 +398,142 @@ func TestRegisterSecureAPIRoutesSupportsStateTransitionsAndMetrics(t *testing.T)
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestRegisterSecureAPIRoutesUsesRuntimeMonitoringSummaryWhenEnabled(t *testing.T) {
+	expected := monitoringSummaryResponse{
+		CurrentCpuUsage:         11.5,
+		CurrentMemoryUsage:      22.5,
+		CurrentDiskUsage:        33.5,
+		CurrentNetworkUsage:     44.5,
+		CpuChangePercentage:     1.5,
+		MemoryChangePercentage:  -2.5,
+		DiskChangePercentage:    3.5,
+		NetworkChangePercentage: 4.5,
+		TimeLabels:              []string{"09:00", "09:30", "10:00"},
+		CpuAnalysis:             "Runtime CPU analysis",
+		MemoryAnalysis:          "Runtime memory analysis",
+	}
+
+	requestPaths := make(chan string, 2)
+	runtimeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+			t.Fatalf("expected canonical runtime monitoring proxy to avoid forwarding Authorization, got %q", authHeader)
+		}
+		if userEmail := r.Header.Get("X-User-Email"); userEmail != "" {
+			t.Fatalf("expected canonical runtime monitoring proxy to avoid forwarding X-User-Email, got %q", userEmail)
+		}
+		requestPaths <- r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"currentCpuUsage":         expected.CurrentCpuUsage,
+			"currentMemoryUsage":      expected.CurrentMemoryUsage,
+			"currentDiskUsage":        expected.CurrentDiskUsage,
+			"currentNetworkUsage":     expected.CurrentNetworkUsage,
+			"cpuChangePercentage":     expected.CpuChangePercentage,
+			"memoryChangePercentage":  expected.MemoryChangePercentage,
+			"diskChangePercentage":    expected.DiskChangePercentage,
+			"networkChangePercentage": expected.NetworkChangePercentage,
+			"timeLabels":              expected.TimeLabels,
+			"cpuAnalysis":             expected.CpuAnalysis,
+			"memoryAnalysis":          expected.MemoryAnalysis,
+			"memoryCached":            123.0,
+		})
+	}))
+	defer runtimeServer.Close()
+
+	t.Setenv(canonicalRuntimeMonitoringReadsEnv, "true")
+	t.Setenv(canonicalRuntimeBaseURLEnv, runtimeServer.URL)
+
+	router, authManager := newMonitoringSummaryTestRouter(t)
+
+	for _, path := range []string{"/api/v1/monitoring/metrics", "/api/monitoring/metrics"} {
+		rec := performAuthenticatedMonitoringSummaryRequest(t, router, authManager, path)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 for %s, got %d (%s)", path, rec.Code, rec.Body.String())
+		}
+		if got := rec.Header().Get(novaCronReadSourceHeader); got != novaCronReadSourceRuntime {
+			t.Fatalf("expected %s header %q for %s, got %q", novaCronReadSourceHeader, novaCronReadSourceRuntime, path, got)
+		}
+
+		payload, raw := decodeMonitoringSummaryPayload(t, rec.Body.Bytes())
+		if !reflect.DeepEqual(payload, expected) {
+			t.Fatalf("unexpected runtime monitoring summary for %s: %#v", path, payload)
+		}
+		if len(raw) != 11 {
+			t.Fatalf("expected 11 monitoring summary fields for %s, got %d", path, len(raw))
+		}
+		if _, exists := raw["memoryCached"]; exists {
+			t.Fatalf("expected runtime extras to be dropped for %s, got %#v", path, raw)
+		}
+	}
+
+	for i := 0; i < 2; i++ {
+		if gotPath := <-requestPaths; gotPath != canonicalRuntimeMonitoringReadPath {
+			t.Fatalf("expected runtime reads to use %s, got %s", canonicalRuntimeMonitoringReadPath, gotPath)
+		}
+	}
+}
+
+func TestRegisterSecureAPIRoutesFallsBackToSyntheticMonitoringSummaryWhenRuntimeUnavailable(t *testing.T) {
+	runtimeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	runtimeURL := runtimeServer.URL
+	runtimeServer.Close()
+
+	t.Setenv(canonicalRuntimeMonitoringReadsEnv, "true")
+	t.Setenv(canonicalRuntimeBaseURLEnv, runtimeURL)
+
+	router, authManager := newMonitoringSummaryTestRouter(t)
+	rec := performAuthenticatedMonitoringSummaryRequest(t, router, authManager, "/api/v1/monitoring/metrics")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(novaCronReadSourceHeader); got != novaCronReadSourceSQLFallback {
+		t.Fatalf("expected %s header %q, got %q", novaCronReadSourceHeader, novaCronReadSourceSQLFallback, got)
+	}
+
+	payload, raw := decodeMonitoringSummaryPayload(t, rec.Body.Bytes())
+	if !reflect.DeepEqual(payload, syntheticMonitoringSummaryPayload()) {
+		t.Fatalf("unexpected fallback monitoring summary: %#v", payload)
+	}
+	if len(raw) != 11 {
+		t.Fatalf("expected 11 monitoring summary fields, got %d", len(raw))
+	}
+}
+
+func TestRegisterSecureAPIRoutesKeepsSyntheticMonitoringSummaryWhenRuntimeReadsDisabled(t *testing.T) {
+	runtimeHits := 0
+	runtimeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		runtimeHits++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"currentCpuUsage": 99.9,
+		})
+	}))
+	defer runtimeServer.Close()
+
+	t.Setenv(canonicalRuntimeMonitoringReadsEnv, "false")
+	t.Setenv(canonicalRuntimeBaseURLEnv, runtimeServer.URL)
+
+	router, authManager := newMonitoringSummaryTestRouter(t)
+	rec := performAuthenticatedMonitoringSummaryRequest(t, router, authManager, "/api/v1/monitoring/metrics")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(novaCronReadSourceHeader); got != novaCronReadSourceSQLFallback {
+		t.Fatalf("expected %s header %q, got %q", novaCronReadSourceHeader, novaCronReadSourceSQLFallback, got)
+	}
+	if runtimeHits != 0 {
+		t.Fatalf("expected runtime endpoint to remain unused when flag is off, got %d calls", runtimeHits)
+	}
+
+	payload, raw := decodeMonitoringSummaryPayload(t, rec.Body.Bytes())
+	if !reflect.DeepEqual(payload, syntheticMonitoringSummaryPayload()) {
+		t.Fatalf("unexpected flag-off monitoring summary: %#v", payload)
+	}
+	if len(raw) != 11 {
+		t.Fatalf("expected 11 monitoring summary fields, got %d", len(raw))
 	}
 }
 

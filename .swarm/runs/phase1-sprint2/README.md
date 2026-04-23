@@ -27,5 +27,6 @@ Introduce the first converged runtime-manifest contract and make both active ent
 - Shared runtime-manifest contract: complete
 - Canonical daemon manifest awareness with legacy fallback: complete
 - Canonical API manifest awareness: complete
-- Canonical API runtime-backed reads: deferred
+- Canonical API runtime-backed monitoring summary reads: complete behind a guarded internal bridge
+- Canonical API runtime-backed VM, inventory, and network reads: deferred pending source-of-truth convergence
 - One startup path / one shutdown path: deferred to later Phase 1 work

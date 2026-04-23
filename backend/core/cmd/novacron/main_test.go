@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -351,6 +352,102 @@ func TestInitializeAPIExposesClusterLocalEndpoints(t *testing.T) {
 	}
 	if got, want := leader["scope"], "cluster-local"; got != want {
 		t.Fatalf("leader scope = %q, want %q", got, want)
+	}
+}
+
+func TestInitializeAPIExposesInternalRuntimeMonitoringMetrics(t *testing.T) {
+	t.Parallel()
+
+	manager, err := vm.NewVMManager(newTestVMManagerConfig(t, "qemu-system-x86_64"))
+	if err != nil {
+		t.Fatalf("NewVMManager returned error: %v", err)
+	}
+	defer manager.Stop()
+
+	if err := registerLocalSchedulerNode(manager, "test-node", t.TempDir()); err != nil {
+		t.Fatalf("registerLocalSchedulerNode returned error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	apiServer, err := initializeAPI(ctx, runtimeConfig{}, "127.0.0.1:0", manager, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("initializeAPI returned error: %v", err)
+	}
+	defer apiServer.Shutdown(context.Background())
+
+	url := fmt.Sprintf("http://%s/internal/runtime/v1/monitoring/metrics", apiServer.address)
+	response, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s returned error: %v", url, err)
+	}
+	defer response.Body.Close()
+
+	if got, want := response.StatusCode, http.StatusOK; got != want {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("GET %s status = %d, want %d: %s", url, got, want, strings.TrimSpace(string(body)))
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read %s response: %v", url, err)
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode %s payload map: %v", url, err)
+	}
+
+	wantKeys := []string{
+		"cpuAnalysis",
+		"cpuChangePercentage",
+		"currentCpuUsage",
+		"currentDiskUsage",
+		"currentMemoryUsage",
+		"currentNetworkUsage",
+		"diskChangePercentage",
+		"memoryAnalysis",
+		"memoryChangePercentage",
+		"networkChangePercentage",
+		"timeLabels",
+	}
+	gotKeys := make([]string, 0, len(payload))
+	for key := range payload {
+		gotKeys = append(gotKeys, key)
+	}
+	sort.Strings(gotKeys)
+	if len(gotKeys) != len(wantKeys) {
+		t.Fatalf("monitoring payload key count = %d, want %d (%v)", len(gotKeys), len(wantKeys), gotKeys)
+	}
+	for i := range wantKeys {
+		if gotKeys[i] != wantKeys[i] {
+			t.Fatalf("monitoring payload keys = %v, want %v", gotKeys, wantKeys)
+		}
+	}
+
+	var metrics runtimeMonitoringSummary
+	if err := json.Unmarshal(body, &metrics); err != nil {
+		t.Fatalf("decode %s metrics response: %v", url, err)
+	}
+
+	if metrics.CurrentMemoryUsage <= 0 {
+		t.Fatalf("currentMemoryUsage = %f, want > 0 from registered scheduler node", metrics.CurrentMemoryUsage)
+	}
+	if metrics.CurrentNetworkUsage != 0 {
+		t.Fatalf("currentNetworkUsage = %f, want deterministic unavailable fallback of 0", metrics.CurrentNetworkUsage)
+	}
+	if metrics.NetworkChangePercentage != 0 {
+		t.Fatalf("networkChangePercentage = %f, want deterministic unavailable fallback of 0", metrics.NetworkChangePercentage)
+	}
+	if len(metrics.TimeLabels) != 5 {
+		t.Fatalf("timeLabels length = %d, want 5", len(metrics.TimeLabels))
+	}
+	if metrics.CpuAnalysis == "" {
+		t.Fatal("cpuAnalysis is empty, want deterministic analysis text")
+	}
+	if metrics.MemoryAnalysis == "" {
+		t.Fatal("memoryAnalysis is empty, want deterministic analysis text")
 	}
 }
 

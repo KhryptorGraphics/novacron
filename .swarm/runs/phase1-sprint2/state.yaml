@@ -1,7 +1,7 @@
 sprint: phase1-sprint2
 title: Shared Runtime Manifest Baseline
 status: completed
-updated_at: 2026-04-22T23:40:00Z
+updated_at: 2026-04-23T00:20:00Z
 branch: feat/convergence-sprint0-foundation
 objective: Introduce a versioned shared runtime-manifest contract and thread it through the canonical daemon and API entrypoints without breaking the existing default runtime paths.
 
@@ -16,6 +16,7 @@ owners:
 artifacts:
   - .swarm/runs/phase1-sprint2/README.md
   - .swarm/runs/phase1-sprint2/manifest-baseline.md
+  - .swarm/runs/phase1-sprint2/runtime-monitoring-read-bridge.md
   - backend/core/initialization/config/loader.go
   - backend/core/initialization/config/loader_test.go
   - backend/core/initialization/go.sum
@@ -84,4 +85,6 @@ verification:
 notes:
   - The shared manifest contract is intentionally additive and opt-in for the API server via NOVACRON_RUNTIME_MANIFEST_PATH.
   - The canonical daemon still accepts its legacy daemon-only YAML shape so the existing runtime tests and operator configs remain valid during the convergence program.
-  - Runtime-backed canonical API reads remain deferred. This slice only establishes the shared contract and entrypoint awareness needed for later Phase 1 wiring.
+  - Runtime-backed canonical monitoring summary reads are now available behind CANONICAL_RUNTIME_MONITORING_READS=true and CANONICAL_RUNTIME_BASE_URL=<daemon-base-url>.
+  - The canonical daemon now exposes /internal/runtime/v1/monitoring/metrics with the canonical monitoring summary JSON shape, and the canonical API server can proxy that payload with runtime/sql-fallback source headers.
+  - Runtime-backed VM, monitoring inventory, and network reads remain deferred pending novacron-0ex to converge the source of truth before cutover.
