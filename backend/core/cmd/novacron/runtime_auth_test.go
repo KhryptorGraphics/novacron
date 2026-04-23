@@ -223,7 +223,7 @@ func newRuntimeAuthTestServer(t *testing.T, authConfig runtimeAuthConfig) (*APIS
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	apiServer, err := initializeAPI(ctx, runtimeConfig{Auth: authConfig}, "127.0.0.1:0", manager, nil, nil, nil, nil)
+	apiServer, err := initializeAPI(ctx, runtimeConfig{Auth: authConfig}, "127.0.0.1:0", manager, nil, nil, nil, nil, nil)
 	if err != nil {
 		manager.Stop()
 		t.Fatalf("initializeAPI returned error: %v", err)

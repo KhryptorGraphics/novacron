@@ -54,6 +54,48 @@ type runtimeConfig struct {
 	VMManager  vm.VMManagerConfig           `yaml:"vm_manager"`
 	Scheduler  scheduler.SchedulerConfig    `yaml:"scheduler"`
 	Auth       runtimeAuthConfig            `yaml:"auth"`
+	Services   runtimeManifestSummary       `yaml:"-"`
+}
+
+type runtimeManifestSummary struct {
+	Version           string   `json:"version,omitempty"`
+	DeploymentProfile string   `json:"deployment_profile,omitempty"`
+	DiscoveryMode     string   `json:"discovery_mode,omitempty"`
+	FederationMode    string   `json:"federation_mode,omitempty"`
+	MigrationMode     string   `json:"migration_mode,omitempty"`
+	AuthMode          string   `json:"auth_mode,omitempty"`
+	EnabledServices   []string `json:"enabled_services,omitempty"`
+}
+
+type runtimeServiceStatus struct {
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+	State   string `json:"state"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+type runtimeServiceReport struct {
+	Status           string                 `json:"status"`
+	Manifest         runtimeManifestSummary `json:"manifest"`
+	Services         []runtimeServiceStatus `json:"services"`
+	DisabledServices []string               `json:"disabled_services,omitempty"`
+}
+
+const (
+	runtimeServiceStateRunning     = "running"
+	runtimeServiceStateDisabled    = "disabled"
+	runtimeServiceStateUnavailable = "unavailable"
+)
+
+var runtimeServiceOrder = []string{
+	"api",
+	"auth",
+	"hypervisor",
+	"migration",
+	"network",
+	"scheduler",
+	"storage",
+	"vm",
 }
 
 type runtimeConfigFile struct {
@@ -130,34 +172,68 @@ func main() {
 
 	log.Printf("Starting NovaCron node: %s", *nodeID)
 
-	storageManager, err := initializeStorage(config)
-	if err != nil {
-		log.Fatalf("Failed to initialize storage: %v", err)
+	if !runtimeServiceEnabled(config, "api") {
+		log.Fatal("runtime manifest disables api service; backend/core/cmd/novacron requires api to boot")
 	}
 
-	vmManager, err := initializeVMManager(config)
-	if err != nil {
-		log.Fatalf("Failed to initialize VM manager: %v", err)
+	var storageManager *storage.StorageManager
+	if runtimeServiceEnabled(config, "storage") {
+		storageManager, err = initializeStorage(config)
+		if err != nil {
+			log.Fatalf("Failed to initialize storage: %v", err)
+		}
+	} else {
+		log.Println("Storage service disabled by runtime manifest")
 	}
 
-	schedulerService, err := initializeScheduler(config)
-	if err != nil {
-		log.Fatalf("Failed to initialize scheduler: %v", err)
+	var vmManager *vm.VMManager
+	if runtimeServiceEnabled(config, "vm") {
+		vmManager, err = initializeVMManager(config)
+		if err != nil {
+			log.Fatalf("Failed to initialize VM manager: %v", err)
+		}
+	} else {
+		log.Println("VM service disabled by runtime manifest")
 	}
 
-	migrationManager, err := initializeMigrationManager(*nodeID, *dataDir)
-	if err != nil {
-		log.Fatalf("Failed to initialize migration manager: %v", err)
+	var schedulerService *scheduler.Scheduler
+	if runtimeServiceEnabled(config, "scheduler") {
+		schedulerService, err = initializeScheduler(config)
+		if err != nil {
+			log.Fatalf("Failed to initialize scheduler: %v", err)
+		}
+	} else {
+		log.Println("Scheduler service disabled by runtime manifest")
 	}
 
-	networkManager, err := initializeNetwork(ctx, config, *nodeID)
-	if err != nil {
-		log.Fatalf("Failed to initialize network: %v", err)
+	var migrationManager *vm.VMMigrationManager
+	if runtimeServiceEnabled(config, "migration") {
+		migrationManager, err = initializeMigrationManager(*nodeID, *dataDir)
+		if err != nil {
+			log.Fatalf("Failed to initialize migration manager: %v", err)
+		}
+	} else {
+		log.Println("Migration service disabled by runtime manifest")
 	}
 
-	hypervisorManager, err := initializeHypervisor(ctx, config, *nodeID)
-	if err != nil {
-		log.Fatalf("Failed to initialize hypervisor: %v", err)
+	var networkManager *network.NetworkManager
+	if runtimeServiceEnabled(config, "network") {
+		networkManager, err = initializeNetwork(ctx, config, *nodeID)
+		if err != nil {
+			log.Fatalf("Failed to initialize network: %v", err)
+		}
+	} else {
+		log.Println("Network service disabled by runtime manifest")
+	}
+
+	var hypervisorManager *hypervisor.Hypervisor
+	if runtimeServiceEnabled(config, "hypervisor") {
+		hypervisorManager, err = initializeHypervisor(ctx, config, *nodeID)
+		if err != nil {
+			log.Fatalf("Failed to initialize hypervisor: %v", err)
+		}
+	} else {
+		log.Println("Hypervisor service disabled by runtime manifest")
 	}
 
 	apiServer, err := initializeAPI(
@@ -169,6 +245,7 @@ func main() {
 		schedulerService,
 		networkManager,
 		storageManager,
+		hypervisorManager,
 	)
 	if err != nil {
 		log.Fatalf("Failed to initialize API server: %v", err)
@@ -186,20 +263,125 @@ func main() {
 	if err := apiServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("API server shutdown error: %v", err)
 	}
-	if err := hypervisorManager.Stop(); err != nil {
-		log.Printf("Hypervisor shutdown error: %v", err)
+	if hypervisorManager != nil {
+		if err := hypervisorManager.Stop(); err != nil {
+			log.Printf("Hypervisor shutdown error: %v", err)
+		}
 	}
-	if err := networkManager.Stop(); err != nil {
-		log.Printf("Network manager shutdown error: %v", err)
+	if networkManager != nil {
+		if err := networkManager.Stop(); err != nil {
+			log.Printf("Network manager shutdown error: %v", err)
+		}
 	}
-	if err := schedulerService.Stop(); err != nil {
-		log.Printf("Scheduler shutdown error: %v", err)
+	if schedulerService != nil {
+		if err := schedulerService.Stop(); err != nil {
+			log.Printf("Scheduler shutdown error: %v", err)
+		}
 	}
-	if err := vmManager.Stop(); err != nil {
-		log.Printf("VM manager shutdown error: %v", err)
+	if vmManager != nil {
+		if err := vmManager.Stop(); err != nil {
+			log.Printf("VM manager shutdown error: %v", err)
+		}
 	}
 
 	log.Println("Shutdown complete")
+}
+
+func runtimeServiceReportFromRuntime(
+	config runtimeConfig,
+	vmManager *vm.VMManager,
+	migrationManager *vm.VMMigrationManager,
+	schedulerService *scheduler.Scheduler,
+	networkManager *network.NetworkManager,
+	storageManager *storage.StorageManager,
+	hypervisorManager *hypervisor.Hypervisor,
+	runtimeAuth *runtimeAuthRuntime,
+) runtimeServiceReport {
+	disabledServices := make([]string, 0)
+	services := make([]runtimeServiceStatus, 0, len(runtimeServiceOrder))
+	overallStatus := "healthy"
+
+	authEnabled, authDisabledReason := runtimeAuthServiceEnabled(config)
+
+	for _, serviceName := range runtimeServiceOrder {
+		status := runtimeServiceStatus{Name: serviceName}
+
+		switch serviceName {
+		case "api":
+			status.Enabled = runtimeServiceEnabled(config, serviceName)
+			if status.Enabled {
+				status.State = runtimeServiceStateRunning
+			} else {
+				status.State = runtimeServiceStateDisabled
+				status.Reason = "disabled by runtime manifest"
+			}
+		case "auth":
+			status.Enabled = authEnabled
+			switch {
+			case !authEnabled:
+				status.State = runtimeServiceStateDisabled
+				status.Reason = authDisabledReason
+			case runtimeAuth != nil && runtimeAuth.enabled():
+				status.State = runtimeServiceStateRunning
+			default:
+				status.State = runtimeServiceStateUnavailable
+				status.Reason = "auth runtime failed to initialize"
+			}
+		case "hypervisor":
+			status = runtimeServiceStatusFromInstance(config, serviceName, hypervisorManager != nil, "hypervisor manager unavailable")
+		case "migration":
+			status = runtimeServiceStatusFromInstance(config, serviceName, migrationManager != nil, "migration manager unavailable")
+		case "network":
+			status = runtimeServiceStatusFromInstance(config, serviceName, networkManager != nil, "network manager unavailable")
+		case "scheduler":
+			status = runtimeServiceStatusFromInstance(config, serviceName, schedulerService != nil, "scheduler unavailable")
+		case "storage":
+			status = runtimeServiceStatusFromInstance(config, serviceName, storageManager != nil, "storage manager unavailable")
+		case "vm":
+			status = runtimeServiceStatusFromInstance(config, serviceName, vmManager != nil, "vm manager unavailable")
+		default:
+			status = runtimeServiceStatusFromInstance(config, serviceName, false, "service status unavailable")
+		}
+
+		if status.State == runtimeServiceStateDisabled {
+			disabledServices = append(disabledServices, status.Name)
+		}
+		if status.Enabled && status.State != runtimeServiceStateRunning {
+			overallStatus = "degraded"
+		}
+		services = append(services, status)
+	}
+
+	sort.Strings(disabledServices)
+
+	return runtimeServiceReport{
+		Status:           overallStatus,
+		Manifest:         config.Services,
+		Services:         services,
+		DisabledServices: disabledServices,
+	}
+}
+
+func runtimeServiceStatusFromInstance(config runtimeConfig, serviceName string, available bool, unavailableReason string) runtimeServiceStatus {
+	status := runtimeServiceStatus{
+		Name:    serviceName,
+		Enabled: runtimeServiceEnabled(config, serviceName),
+	}
+
+	if !status.Enabled {
+		status.State = runtimeServiceStateDisabled
+		status.Reason = "disabled by runtime manifest"
+		return status
+	}
+
+	if available {
+		status.State = runtimeServiceStateRunning
+		return status
+	}
+
+	status.State = runtimeServiceStateUnavailable
+	status.Reason = unavailableReason
+	return status
 }
 
 func defaultRuntimeConfig(nodeID, dataDir string) runtimeConfig {
@@ -222,7 +404,20 @@ func defaultRuntimeConfig(nodeID, dataDir string) runtimeConfig {
 		VMManager: defaultVMManagerRuntimeConfig(nodeID, dataDir),
 		Scheduler: scheduler.DefaultSchedulerConfig(),
 		Auth:      defaultRuntimeAuthConfig(),
+		Services: runtimeManifestSummary{
+			Version:           manifestconfig.DefaultRuntimeManifestVersion,
+			DeploymentProfile: "legacy-default",
+			DiscoveryMode:     "disabled",
+			FederationMode:    "disabled",
+			MigrationMode:     "disabled",
+			AuthMode:          "runtime",
+			EnabledServices:   defaultEnabledRuntimeServices(),
+		},
 	}
+}
+
+func defaultEnabledRuntimeServices() []string {
+	return []string{"api", "auth", "hypervisor", "migration", "network", "scheduler", "storage", "vm"}
 }
 
 func defaultVMManagerRuntimeConfig(nodeID, dataDir string) vm.VMManagerConfig {
@@ -312,6 +507,16 @@ func runtimeConfigFromManifest(manifest *manifestconfig.Config, nodeID, dataDir 
 		return config
 	}
 
+	config.Services = runtimeManifestSummary{
+		Version:           manifest.Runtime.Version,
+		DeploymentProfile: manifest.Runtime.DeploymentProfile,
+		DiscoveryMode:     manifest.Runtime.DiscoveryMode,
+		FederationMode:    manifest.Runtime.FederationMode,
+		MigrationMode:     manifest.Runtime.MigrationMode,
+		AuthMode:          manifest.Runtime.AuthMode,
+		EnabledServices:   append([]string(nil), manifest.Runtime.EnabledServices...),
+	}
+
 	config.Storage.BasePath = filepath.Join(effectiveDataDir, "storage")
 	config.Storage.Encryption = manifest.Security.EnableEncryption
 	config.Network.BandwidthMonitoringEnabled = manifest.Monitoring.EnableMetrics
@@ -330,6 +535,25 @@ func serviceEnabled(enabledServices []string, service string) bool {
 		}
 	}
 	return false
+}
+
+func runtimeServiceEnabled(config runtimeConfig, service string) bool {
+	return serviceEnabled(config.Services.EnabledServices, service)
+}
+
+func runtimeAuthServiceEnabled(config runtimeConfig) (bool, string) {
+	if !runtimeServiceEnabled(config, "auth") {
+		return false, "disabled by runtime manifest"
+	}
+	if !config.Auth.Enabled {
+		switch {
+		case strings.TrimSpace(config.Services.AuthMode) != "" && config.Services.AuthMode != "runtime":
+			return false, fmt.Sprintf("disabled by auth_mode=%s", config.Services.AuthMode)
+		default:
+			return false, "disabled by runtime auth configuration"
+		}
+	}
+	return true, ""
 }
 
 func mergeRuntimeConfig(config *runtimeConfig, fileConfig runtimeConfigFile) {
@@ -437,6 +661,39 @@ func applyRuntimeConfigDefaults(config *runtimeConfig, nodeID, dataDir string) {
 	}
 	applyDefaultVMManagerDriverConfig(&config.VMManager, nodeID, dataDir)
 	applyRuntimeAuthDefaults(&config.Auth)
+	applyRuntimeServiceDefaults(config)
+}
+
+func applyRuntimeServiceDefaults(config *runtimeConfig) {
+	if config == nil {
+		return
+	}
+
+	if len(config.Services.EnabledServices) == 0 {
+		config.Services.EnabledServices = defaultEnabledRuntimeServices()
+	}
+	if config.Services.Version == "" {
+		config.Services.Version = manifestconfig.DefaultRuntimeManifestVersion
+	}
+	if config.Services.DeploymentProfile == "" {
+		config.Services.DeploymentProfile = "legacy-default"
+	}
+	if config.Services.DiscoveryMode == "" {
+		config.Services.DiscoveryMode = "disabled"
+	}
+	if config.Services.FederationMode == "" {
+		config.Services.FederationMode = "disabled"
+	}
+	if config.Services.MigrationMode == "" {
+		config.Services.MigrationMode = "disabled"
+	}
+	if config.Services.AuthMode == "" {
+		if config.Auth.Enabled {
+			config.Services.AuthMode = "runtime"
+		} else {
+			config.Services.AuthMode = "disabled"
+		}
+	}
 }
 
 func applyDefaultVMManagerDriverConfig(config *vm.VMManagerConfig, nodeID, dataDir string) {
@@ -673,15 +930,9 @@ func initializeAPI(
 	schedulerService *scheduler.Scheduler,
 	networkManager *network.NetworkManager,
 	storageManager *storage.StorageManager,
+	hypervisorManager *hypervisor.Hypervisor,
 ) (*APIServer, error) {
-	_ = migrationManager
-	_ = schedulerService
-	_ = networkManager
-	_ = storageManager
-
-	if vmManager == nil {
-		return nil, fmt.Errorf("vm manager is required for runtime API")
-	}
+	applyRuntimeServiceDefaults(&config)
 
 	log.Printf("Starting API server on %s", listenAddress)
 
@@ -695,7 +946,7 @@ func initializeAPI(
 		return nil, fmt.Errorf("listen on %s: %w", listenAddress, err)
 	}
 
-	router := newRuntimeRouter(config, vmManager, runtimeAuth)
+	router := newRuntimeRouter(config, vmManager, migrationManager, schedulerService, networkManager, storageManager, hypervisorManager, runtimeAuth)
 	server := &http.Server{
 		Handler: router,
 		BaseContext: func(net.Listener) context.Context {
@@ -751,12 +1002,22 @@ func (s *APIServer) Shutdown(ctx context.Context) error {
 	return shutdownErr
 }
 
-func newRuntimeRouter(config runtimeConfig, vmManager *vm.VMManager, runtimeAuth *runtimeAuthRuntime) *mux.Router {
+func newRuntimeRouter(
+	config runtimeConfig,
+	vmManager *vm.VMManager,
+	migrationManager *vm.VMMigrationManager,
+	schedulerService *scheduler.Scheduler,
+	networkManager *network.NetworkManager,
+	storageManager *storage.StorageManager,
+	hypervisorManager *hypervisor.Hypervisor,
+	runtimeAuth *runtimeAuthRuntime,
+) *mux.Router {
 	router := mux.NewRouter()
 	router.Use(runtimeCORSMiddleware(config.Auth))
 	router.HandleFunc("/healthz", handleHealthz).Methods(http.MethodGet)
 	registerRuntimeAuthRoutes(router, runtimeAuth)
 	router.HandleFunc("/internal/runtime/v1/monitoring/metrics", runtimeGetMonitoringMetricsHandler(vmManager)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/services", runtimeGetServicesHandler(config, vmManager, migrationManager, schedulerService, networkManager, storageManager, hypervisorManager, runtimeAuth)).Methods(http.MethodGet)
 	clusterHandler := runtimeProtectClusterRoute(runtimeAuth)
 	router.Handle("/api/cluster/nodes", clusterHandler(runtimeListNodesHandler(vmManager))).Methods(http.MethodGet)
 	router.Handle("/api/cluster/nodes/{id}", clusterHandler(runtimeGetNodeHandler(vmManager))).Methods(http.MethodGet)
@@ -841,6 +1102,31 @@ func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	respondRuntimeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func runtimeGetServicesHandler(
+	config runtimeConfig,
+	vmManager *vm.VMManager,
+	migrationManager *vm.VMMigrationManager,
+	schedulerService *scheduler.Scheduler,
+	networkManager *network.NetworkManager,
+	storageManager *storage.StorageManager,
+	hypervisorManager *hypervisor.Hypervisor,
+	runtimeAuth *runtimeAuthRuntime,
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		report := runtimeServiceReportFromRuntime(
+			config,
+			vmManager,
+			migrationManager,
+			schedulerService,
+			networkManager,
+			storageManager,
+			hypervisorManager,
+			runtimeAuth,
+		)
+		respondRuntimeJSON(w, http.StatusOK, report)
+	}
+}
+
 func runtimeGetMonitoringMetricsHandler(vmManager *vm.VMManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		var inventory []*vm.NodeResourceInfo
@@ -915,6 +1201,10 @@ func runtimeUsageAnalysis(resource string, usage float64, nodeCount int) string 
 
 func runtimeListNodesHandler(vmManager *vm.VMManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
+		if vmManager == nil {
+			respondRuntimeJSON(w, http.StatusOK, []runtimeNode{})
+			return
+		}
 		inventory := vmManager.ListSchedulerNodes()
 		nodes := make([]runtimeNode, 0, len(inventory))
 		for _, nodeInfo := range inventory {
@@ -929,6 +1219,10 @@ func runtimeListNodesHandler(vmManager *vm.VMManager) http.HandlerFunc {
 
 func runtimeGetNodeHandler(vmManager *vm.VMManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if vmManager == nil {
+			http.Error(w, "vm service is disabled", http.StatusServiceUnavailable)
+			return
+		}
 		nodeID := mux.Vars(r)["id"]
 		for _, nodeInfo := range vmManager.ListSchedulerNodes() {
 			if nodeInfo.NodeID == nodeID {
@@ -942,7 +1236,10 @@ func runtimeGetNodeHandler(vmManager *vm.VMManager) http.HandlerFunc {
 
 func runtimeGetClusterHealthHandler(vmManager *vm.VMManager, runtimeAuth *runtimeAuthRuntime) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
-		inventory := vmManager.ListSchedulerNodes()
+		inventory := []*vm.NodeResourceInfo(nil)
+		if vmManager != nil {
+			inventory = vmManager.ListSchedulerNodes()
+		}
 		totalNodes := len(inventory)
 		healthyNodes := 0
 		leaderID := ""
@@ -1079,6 +1376,10 @@ func runtimeRuntimeHealth(runtimeAuth *runtimeAuthRuntime, req *http.Request) (*
 
 func runtimeGetLeaderHandler(vmManager *vm.VMManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
+		if vmManager == nil {
+			http.Error(w, "vm service is disabled", http.StatusServiceUnavailable)
+			return
+		}
 		for _, nodeInfo := range vmManager.ListSchedulerNodes() {
 			if runtimeIsSchedulableNode(nodeInfo) {
 				respondRuntimeJSON(w, http.StatusOK, map[string]string{

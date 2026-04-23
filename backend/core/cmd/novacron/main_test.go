@@ -92,6 +92,15 @@ security:
 	if !config.Network.BandwidthMonitoringEnabled {
 		t.Fatal("expected network bandwidth monitoring to follow manifest monitoring settings")
 	}
+	if got, want := config.Services.Version, "v1alpha1"; got != want {
+		t.Fatalf("services manifest version = %q, want %q", got, want)
+	}
+	if got, want := config.Services.AuthMode, "disabled"; got != want {
+		t.Fatalf("services auth mode = %q, want %q", got, want)
+	}
+	if !serviceEnabled(config.Services.EnabledServices, "scheduler") {
+		t.Fatalf("expected services enabled list to contain scheduler, got %#v", config.Services.EnabledServices)
+	}
 }
 
 func TestLoadConfigRejectsInvalidYAML(t *testing.T) {
@@ -276,14 +285,72 @@ func TestRegisterLocalSchedulerNodeRegistersInventory(t *testing.T) {
 	}
 }
 
-func TestInitializeAPIRejectsNilVMManager(t *testing.T) {
+func TestInitializeAPIReportsDisabledServicesWhenVMServiceIsOff(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if _, err := initializeAPI(ctx, runtimeConfig{}, "127.0.0.1:0", nil, nil, nil, nil, nil); err == nil {
-		t.Fatal("initializeAPI succeeded with nil vm manager, want error")
+	config := runtimeConfig{
+		Auth: runtimeAuthConfig{Enabled: false},
+		Services: runtimeManifestSummary{
+			Version:           "v1alpha1",
+			DeploymentProfile: "single-node",
+			DiscoveryMode:     "disabled",
+			FederationMode:    "disabled",
+			MigrationMode:     "disabled",
+			AuthMode:          "disabled",
+			EnabledServices:   []string{"api"},
+		},
+	}
+
+	apiServer, err := initializeAPI(ctx, config, "127.0.0.1:0", nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("initializeAPI returned error: %v", err)
+	}
+	defer apiServer.Shutdown(context.Background())
+
+	report := getJSONResponse[runtimeServiceReport](t, apiServer, "/internal/runtime/v1/services")
+	if got, want := report.Status, "healthy"; got != want {
+		t.Fatalf("service report status = %q, want %q", got, want)
+	}
+	if got, want := report.Manifest.Version, "v1alpha1"; got != want {
+		t.Fatalf("manifest version = %q, want %q", got, want)
+	}
+	if got, want := report.Manifest.DeploymentProfile, "single-node"; got != want {
+		t.Fatalf("deployment profile = %q, want %q", got, want)
+	}
+
+	serviceStates := make(map[string]runtimeServiceStatus, len(report.Services))
+	for _, service := range report.Services {
+		serviceStates[service.Name] = service
+	}
+
+	if got := serviceStates["api"].State; got != runtimeServiceStateRunning {
+		t.Fatalf("api state = %q, want %q", got, runtimeServiceStateRunning)
+	}
+	if got := serviceStates["vm"].State; got != runtimeServiceStateDisabled {
+		t.Fatalf("vm state = %q, want %q", got, runtimeServiceStateDisabled)
+	}
+	if got := serviceStates["vm"].Reason; got != "disabled by runtime manifest" {
+		t.Fatalf("vm reason = %q, want disabled by runtime manifest", got)
+	}
+	if got := serviceStates["auth"].State; got != runtimeServiceStateDisabled {
+		t.Fatalf("auth state = %q, want %q", got, runtimeServiceStateDisabled)
+	}
+	if got := serviceStates["network"].State; got != runtimeServiceStateDisabled {
+		t.Fatalf("network state = %q, want %q", got, runtimeServiceStateDisabled)
+	}
+	if got := serviceStates["scheduler"].State; got != runtimeServiceStateDisabled {
+		t.Fatalf("scheduler state = %q, want %q", got, runtimeServiceStateDisabled)
+	}
+	if len(report.DisabledServices) == 0 {
+		t.Fatal("expected disabled services to be reported")
+	}
+
+	nodes := getJSONResponse[[]runtimeNode](t, apiServer, "/api/cluster/nodes")
+	if len(nodes) != 0 {
+		t.Fatalf("expected no cluster nodes when vm service is disabled, got %d", len(nodes))
 	}
 }
 
@@ -303,7 +370,7 @@ func TestInitializeAPIExposesClusterLocalEndpoints(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	apiServer, err := initializeAPI(ctx, runtimeConfig{}, "127.0.0.1:0", manager, nil, nil, nil, nil)
+	apiServer, err := initializeAPI(ctx, runtimeConfig{}, "127.0.0.1:0", manager, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("initializeAPI returned error: %v", err)
 	}
@@ -371,7 +438,7 @@ func TestInitializeAPIExposesInternalRuntimeMonitoringMetrics(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	apiServer, err := initializeAPI(ctx, runtimeConfig{}, "127.0.0.1:0", manager, nil, nil, nil, nil)
+	apiServer, err := initializeAPI(ctx, runtimeConfig{}, "127.0.0.1:0", manager, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("initializeAPI returned error: %v", err)
 	}

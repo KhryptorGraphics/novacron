@@ -1,0 +1,61 @@
+sprint: phase1-sprint3
+title: Daemon Service-State Reporting
+status: completed
+updated_at: 2026-04-23T00:40:00Z
+branch: feat/convergence-sprint0-foundation
+objective: Make the canonical daemon report and honor manifest-backed enabled and disabled service state for the currently wired runtime subsystems.
+
+owners:
+  coordinator_integrator: codex
+  build_pod_backend_owner: codex
+  validation_pod: codex
+
+artifacts:
+  - .swarm/runs/phase1-sprint3/README.md
+  - .swarm/runs/phase1-sprint3/service-state-reporting.md
+  - backend/core/cmd/novacron/main.go
+  - backend/core/cmd/novacron/main_test.go
+  - backend/core/cmd/novacron/runtime_auth_test.go
+
+expected_scope:
+  canonical_daemon:
+    - backend/core/cmd/novacron/main.go
+    - backend/core/cmd/novacron/main_test.go
+    - backend/core/cmd/novacron/runtime_auth_test.go
+  run_state:
+    - .swarm/runs/phase1-sprint3/README.md
+    - .swarm/runs/phase1-sprint3/state.yaml
+    - .swarm/runs/phase1-sprint3/service-state-reporting.md
+
+gates:
+  gate_0: pass
+  gate_1: pass
+  gate_2: pass
+  gate_3: not_applicable
+  gate_4: not_applicable
+  gate_5: pass_with_warning
+
+verification:
+  symbol_impact:
+    status: pass_with_warning
+    note: GitNexus impact is not exposed in this session, so exact-symbol context plus direct caller inspection was used for initializeAPI, newRuntimeRouter, runtimeConfigFromManifest, handleHealthz, and newRuntimeAuthTestServer before edits.
+  gitnexus_detect_changes:
+    scope: staged
+    changed_files: 6
+    changed_count: 43
+    affected_processes: 11
+    risk_level: high
+    note: The risk level is driven by line-shift over-attribution inside backend/core/cmd/novacron/main.go. The staged scope remains limited to the daemon service-state slice plus Sprint 3 run-state artifacts.
+  command_results:
+    - command: GOTOOLCHAIN=go1.24.6 go test ./cmd/novacron
+      workdir: backend/core
+      result: pass
+    - command: GOTOOLCHAIN=go1.24.6 go test ./cmd/novacron -run 'TestInitializeAPIReportsDisabledServicesWhenVMServiceIsOff|TestInitializeAPIExposesClusterLocalEndpoints|TestInitializeAPIExposesInternalRuntimeMonitoringMetrics|TestRuntimeAuth(RegisterLoginAndAdmissionFlow|RefreshLogoutAndClusterSelectionFlow|GitHubAuthorizationURLRequiresConfiguration|GitHubAuthorizationURLConfigured)' -count=1
+      workdir: backend/core
+      result: pass
+
+notes:
+  - The canonical daemon now treats `api` as required for this entrypoint and refuses silent boot assumptions for the other current core services.
+  - `GET /internal/runtime/v1/services` reports per-service `running`, `disabled`, or `unavailable` state plus the runtime manifest summary used at startup.
+  - When `vm` is disabled, the runtime API still boots and reports explicit disabled state rather than failing before operators can inspect the node.
+  - Canonical API read cutover for VM and network surfaces remains blocked on `novacron-0ex`.
