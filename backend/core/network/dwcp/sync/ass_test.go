@@ -1,13 +1,12 @@
 package sync
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/sync/crdt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/sync/crdt"
 	"go.uber.org/zap"
 )
 
@@ -356,11 +355,11 @@ func TestClusterMetadata(t *testing.T) {
 
 	// Test node status updates
 	nodeStatus := NodeStatus{
-		ID:        "node1",
-		Region:    "us-east",
-		Status:    "active",
-		CPUUsage:  45.5,
-		VMCount:   10,
+		ID:       "node1",
+		Region:   "us-east",
+		Status:   "active",
+		CPUUsage: 45.5,
+		VMCount:  10,
 	}
 
 	err = cm.UpdateNodeStatus("node1", nodeStatus)

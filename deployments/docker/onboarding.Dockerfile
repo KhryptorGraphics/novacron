@@ -2,7 +2,7 @@
 # Optimized for production with security best practices
 
 # Stage 1: Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24.6-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \

@@ -1,5 +1,5 @@
 # NovaCron Orchestration Service Dockerfile
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24.6-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata gcc musl-dev

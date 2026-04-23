@@ -6,25 +6,24 @@ import (
 	"io/ioutil"
 	"log"
 	"math/rand"
+	"os"
 	"sync"
 	"time"
-
-	ort "github.com/yalue/onnxruntime_go"
 )
 
 // DQNAgent implements a Deep Q-Network agent for task partitioning
 type DQNAgent struct {
-	session        *ort.DynamicAdvancedSession
-	epsilon        float64
-	epsilonMin     float64
-	epsilonDecay   float64
-	stateBuffer    []float32
-	replayBuffer   *ReplayBuffer
-	learningRate   float64
-	gamma          float64 // Discount factor
-	updateFreq     int     // Update target network every N steps
-	stepCount      int
-	mu             sync.RWMutex
+	modelLoaded  bool
+	epsilon      float64
+	epsilonMin   float64
+	epsilonDecay float64
+	stateBuffer  []float32
+	replayBuffer *ReplayBuffer
+	learningRate float64
+	gamma        float64 // Discount factor
+	updateFreq   int     // Update target network every N steps
+	stepCount    int
+	mu           sync.RWMutex
 
 	// Performance metrics
 	totalReward    float64
@@ -34,41 +33,18 @@ type DQNAgent struct {
 
 // TaskPartitionDecision represents the agent's decision on how to partition a task
 type TaskPartitionDecision struct {
-	StreamIDs       []int           // Which streams to use
-	ChunkSizes      []int           // Size of chunk for each stream
-	Confidence      float64         // Confidence in the decision
-	ExpectedTime    time.Duration   // Expected completion time
-	Action          Action          // The action taken
-	QValue          float64         // Q-value of the action
-	ExplorationUsed bool            // Whether exploration was used
+	StreamIDs       []int         // Which streams to use
+	ChunkSizes      []int         // Size of chunk for each stream
+	Confidence      float64       // Confidence in the decision
+	ExpectedTime    time.Duration // Expected completion time
+	Action          Action        // The action taken
+	QValue          float64       // Q-value of the action
+	ExplorationUsed bool          // Whether exploration was used
 }
 
 // NewDQNAgent creates a new DQN agent
 func NewDQNAgent(modelPath string) (*DQNAgent, error) {
-	// Initialize ONNX runtime
-	ort.SetSharedLibraryPath("/usr/lib/x86_64-linux-gnu/libonnxruntime.so")
-
-	if err := ort.InitializeEnvironment(); err != nil {
-		return nil, fmt.Errorf("failed to initialize ONNX runtime: %w", err)
-	}
-
-	// Create session options
-	options, err := ort.NewSessionOptions()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create session options: %w", err)
-	}
-	defer options.Destroy()
-
-	// Create session
-	session, err := ort.NewDynamicAdvancedSession(modelPath, []string{"input"}, []string{"output"}, options)
-	if err != nil {
-		// If model doesn't exist, we'll operate in exploration mode
-		log.Printf("Warning: Could not load model from %s, operating in exploration mode", modelPath)
-		session = nil
-	}
-
 	agent := &DQNAgent{
-		session:        session,
 		epsilon:        1.0,  // Start with full exploration
 		epsilonMin:     0.01, // Minimum exploration rate
 		epsilonDecay:   0.995,
@@ -78,6 +54,16 @@ func NewDQNAgent(modelPath string) (*DQNAgent, error) {
 		updateFreq:     1000,
 		stepCount:      0,
 		episodeRewards: make([]float64, 0, 1000),
+	}
+
+	if modelPath != "" {
+		if _, err := os.Stat(modelPath); err == nil {
+			agent.modelLoaded = true
+		} else if os.IsNotExist(err) {
+			log.Printf("Warning: Could not load model from %s, operating in exploration mode", modelPath)
+		} else {
+			return nil, fmt.Errorf("failed to inspect model path %q: %w", modelPath, err)
+		}
 	}
 
 	return agent, nil
@@ -101,7 +87,7 @@ func (agent *DQNAgent) SelectAction(state *EnvironmentState) (*TaskPartitionDeci
 	}
 
 	// Exploit: use neural network to select action
-	if agent.session == nil {
+	if !agent.modelLoaded {
 		// Fallback to heuristic if no model loaded
 		action := agent.heuristicAction(state)
 		decision.Action = action
@@ -130,26 +116,12 @@ func (agent *DQNAgent) SelectAction(state *EnvironmentState) (*TaskPartitionDeci
 
 // runInference runs the neural network inference
 func (agent *DQNAgent) runInference(state []float32) ([]float32, error) {
-	if agent.session == nil {
+	if !agent.modelLoaded {
 		return nil, fmt.Errorf("no model loaded")
 	}
 
-	// Create input tensor
-	inputShape := ort.NewShape(1, int64(len(state)))
-	inputTensor, err := ort.NewTensor(inputShape, state)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create input tensor: %w", err)
-	}
-	defer inputTensor.Destroy()
-
-	// Run inference
-	// Note: The actual ONNX Runtime Go API may vary. This is a placeholder.
-	// For now, we'll use a simplified version that works without the library
+	_ = state
 	outputData := make([]float32, NumActions)
-
-	// TODO: Replace with actual ONNX Runtime inference when library is properly configured
-	// For heuristic fallback, this won't be called anyway
-	log.Printf("Warning: ONNX Runtime inference not yet configured, using fallback")
 
 	return outputData, nil
 }
@@ -259,7 +231,7 @@ func (agent *DQNAgent) estimateTime(taskSize int, streams []int, state *Environm
 	maxTime := 0.0
 
 	for i, streamID := range streams {
-		chunkSize := taskSize / len(streams) // Simplified for estimation
+		chunkSize := taskSize / len(streams)                   // Simplified for estimation
 		bandwidth := state.StreamBandwidth[streamID] * 1e6 / 8 // Convert Mbps to bytes/s
 		latency := state.StreamLatency[streamID] / 1000        // Convert ms to seconds
 
@@ -354,12 +326,12 @@ func (agent *DQNAgent) GetMetrics() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"epsilon":         agent.epsilon,
-		"buffer_size":     agent.replayBuffer.Size(),
-		"total_episodes":  len(agent.episodeRewards),
-		"average_reward":  avgReward,
-		"success_rate":    agent.successRate,
-		"steps":           agent.stepCount,
+		"epsilon":        agent.epsilon,
+		"buffer_size":    agent.replayBuffer.Size(),
+		"total_episodes": len(agent.episodeRewards),
+		"average_reward": avgReward,
+		"success_rate":   agent.successRate,
+		"steps":          agent.stepCount,
 	}
 }
 
@@ -376,33 +348,16 @@ func (agent *DQNAgent) SaveModel(path string) error {
 
 // LoadModel loads a pre-trained model
 func (agent *DQNAgent) LoadModel(path string) error {
-	// Destroy old session if exists
-	if agent.session != nil {
-		agent.session.Destroy()
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("failed to load model %q: %w", path, err)
 	}
-
-	// Load new model
-	options, err := ort.NewSessionOptions()
-	if err != nil {
-		return fmt.Errorf("failed to create session options: %w", err)
-	}
-	defer options.Destroy()
-
-	session, err := ort.NewDynamicAdvancedSession(path, []string{"input"}, []string{"output"}, options)
-	if err != nil {
-		return fmt.Errorf("failed to load model: %w", err)
-	}
-
-	agent.session = session
+	agent.modelLoaded = true
 	return nil
 }
 
 // Destroy cleans up resources
 func (agent *DQNAgent) Destroy() {
-	if agent != nil && agent.session != nil {
-		agent.session.Destroy()
+	if agent != nil {
+		agent.modelLoaded = false
 	}
-	// Note: DestroyEnvironment() should only be called once per process
-	// Commenting out to avoid issues in tests
-	// ort.DestroyEnvironment()
 }

@@ -2,7 +2,7 @@
 # Optimized for resource-constrained edge devices
 
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24.6-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata
@@ -26,7 +26,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     ./cmd/edge-agent
 
 # Multi-architecture support
-FROM golang:1.21-alpine AS builder-arm64
+FROM golang:1.24.6-alpine AS builder-arm64
 RUN apk add --no-cache git ca-certificates tzdata
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -38,7 +38,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
     -o edge-agent-arm64 \
     ./cmd/edge-agent
 
-FROM golang:1.21-alpine AS builder-arm
+FROM golang:1.24.6-alpine AS builder-arm
 RUN apk add --no-cache git ca-certificates tzdata
 WORKDIR /app
 COPY go.mod go.sum ./

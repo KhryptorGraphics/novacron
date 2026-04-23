@@ -1,8 +1,13 @@
 module github.com/khryptorgraphics/novacron/tests/integration
 
-go 1.21
+go 1.24.0
+
+toolchain go1.24.6
 
 replace github.com/khryptorgraphics/novacron => ../..
+replace github.com/khryptorgraphics/novacron/backend/core => ../../backend/core
+replace github.com/novacron-org/novacron/backend/core => ../../backend/core
+replace github.com/novacron/backend/core => ../../backend/core
 
 require (
 	github.com/google/uuid v1.6.0
