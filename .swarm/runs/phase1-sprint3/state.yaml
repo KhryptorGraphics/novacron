@@ -1,9 +1,9 @@
 sprint: phase1-sprint3
-title: Daemon Service-State Reporting
+title: Runtime Read Convergence
 status: completed
-updated_at: 2026-04-23T00:40:00Z
+updated_at: 2026-04-23T02:05:00Z
 branch: feat/convergence-sprint0-foundation
-objective: Make the canonical daemon report and honor manifest-backed enabled and disabled service state for the currently wired runtime subsystems.
+objective: Complete Phase 1 by converging canonical VM and network inventory reads on the canonical daemon path while keeping the persisted SQL inventory as the truthful restart-stable source of truth.
 
 owners:
   coordinator_integrator: codex
@@ -13,19 +13,29 @@ owners:
 artifacts:
   - .swarm/runs/phase1-sprint3/README.md
   - .swarm/runs/phase1-sprint3/service-state-reporting.md
+  - .swarm/runs/phase1-sprint3/runtime-inventory-read-cutover.md
   - backend/core/cmd/novacron/main.go
+  - backend/core/cmd/novacron/runtime_inventory.go
   - backend/core/cmd/novacron/main_test.go
-  - backend/core/cmd/novacron/runtime_auth_test.go
+  - backend/core/cmd/novacron/runtime_inventory_test.go
+  - backend/cmd/api-server/main.go
+  - backend/cmd/api-server/runtime_inventory_reads.go
+  - backend/cmd/api-server/main_test.go
 
 expected_scope:
   canonical_daemon:
     - backend/core/cmd/novacron/main.go
+    - backend/core/cmd/novacron/runtime_inventory.go
     - backend/core/cmd/novacron/main_test.go
-    - backend/core/cmd/novacron/runtime_auth_test.go
+    - backend/core/cmd/novacron/runtime_inventory_test.go
+  canonical_api:
+    - backend/cmd/api-server/main.go
+    - backend/cmd/api-server/runtime_inventory_reads.go
+    - backend/cmd/api-server/main_test.go
   run_state:
     - .swarm/runs/phase1-sprint3/README.md
     - .swarm/runs/phase1-sprint3/state.yaml
-    - .swarm/runs/phase1-sprint3/service-state-reporting.md
+    - .swarm/runs/phase1-sprint3/runtime-inventory-read-cutover.md
 
 gates:
   gate_0: pass
@@ -38,24 +48,24 @@ gates:
 verification:
   symbol_impact:
     status: pass_with_warning
-    note: GitNexus impact is not exposed in this session, so exact-symbol context plus direct caller inspection was used for initializeAPI, newRuntimeRouter, runtimeConfigFromManifest, handleHealthz, and newRuntimeAuthTestServer before edits.
+    note: GitNexus CLI context and impact were run for registerSecureAPIRoutes, initializeAPI, and newRuntimeRouter. Common-name ambiguity affected raw impact resolution, so exact-file context plus direct caller inspection was used to keep edits inside the canonical API and daemon entrypoints.
   gitnexus_detect_changes:
     scope: staged
-    changed_files: 6
-    changed_count: 43
-    affected_processes: 11
-    risk_level: high
-    note: The risk level is driven by line-shift over-attribution inside backend/core/cmd/novacron/main.go. The staged scope remains limited to the daemon service-state slice plus Sprint 3 run-state artifacts.
+    changed_files: 9
+    changed_count: unavailable
+    affected_processes: unavailable
+    risk_level: unavailable
+    note: The local GitNexus CLI in this session does not expose detect_changes. Staged scope was verified with exact-symbol context and impact checks plus `git diff --cached --stat`, which shows the intended 9-file Sprint 3 read-convergence slice only.
   command_results:
     - command: GOTOOLCHAIN=go1.24.6 go test ./cmd/novacron
       workdir: backend/core
       result: pass
-    - command: GOTOOLCHAIN=go1.24.6 go test ./cmd/novacron -run 'TestInitializeAPIReportsDisabledServicesWhenVMServiceIsOff|TestInitializeAPIExposesClusterLocalEndpoints|TestInitializeAPIExposesInternalRuntimeMonitoringMetrics|TestRuntimeAuth(RegisterLoginAndAdmissionFlow|RefreshLogoutAndClusterSelectionFlow|GitHubAuthorizationURLRequiresConfiguration|GitHubAuthorizationURLConfigured)' -count=1
-      workdir: backend/core
+    - command: GOTOOLCHAIN=go1.24.6 go test ./backend/cmd/api-server
+      workdir: .
       result: pass
 
 notes:
-  - The canonical daemon now treats `api` as required for this entrypoint and refuses silent boot assumptions for the other current core services.
-  - `GET /internal/runtime/v1/services` reports per-service `running`, `disabled`, or `unavailable` state plus the runtime manifest summary used at startup.
-  - When `vm` is disabled, the runtime API still boots and reports explicit disabled state rather than failing before operators can inspect the node.
-  - Canonical API read cutover for VM and network surfaces remains blocked on `novacron-0ex`.
+  - The daemon now exposes SQL-backed internal inventory reads for VMs, VM metrics, monitoring inventory, networks, and VM interfaces under /internal/runtime/v1/.
+  - The canonical API now proxies matching GET routes to the daemon when CANONICAL_RUNTIME_INVENTORY_READS=true and CANONICAL_RUNTIME_BASE_URL are set.
+  - Runtime inventory proxy fallback is flag-safe and keeps the prior direct SQL handlers available with X-NovaCron-Read-Source: sql-fallback.
+  - `novacron-0ex` and `NC-p1a` were closed after this slice completed.

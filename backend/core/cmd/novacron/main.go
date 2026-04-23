@@ -936,8 +936,16 @@ func initializeAPI(
 
 	log.Printf("Starting API server on %s", listenAddress)
 
+	inventoryStore, err := newRuntimeInventoryStoreFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("initialize runtime inventory store: %w", err)
+	}
+
 	runtimeAuth, err := initializeRuntimeAuth(config.Auth)
 	if err != nil {
+		if inventoryStore != nil {
+			_ = inventoryStore.Close()
+		}
 		return nil, fmt.Errorf("initialize runtime auth: %w", err)
 	}
 
@@ -946,7 +954,7 @@ func initializeAPI(
 		return nil, fmt.Errorf("listen on %s: %w", listenAddress, err)
 	}
 
-	router := newRuntimeRouter(config, vmManager, migrationManager, schedulerService, networkManager, storageManager, hypervisorManager, runtimeAuth)
+	router := newRuntimeRouter(config, vmManager, migrationManager, schedulerService, networkManager, storageManager, hypervisorManager, inventoryStore, runtimeAuth)
 	server := &http.Server{
 		Handler: router,
 		BaseContext: func(net.Listener) context.Context {
@@ -959,6 +967,7 @@ func initializeAPI(
 		listener:    listener,
 		address:     listener.Addr().String(),
 		runtimeAuth: runtimeAuth,
+		inventory:   inventoryStore,
 	}
 	if err := apiServer.Start(); err != nil {
 		return nil, fmt.Errorf("start API server: %w", err)
@@ -972,6 +981,7 @@ type APIServer struct {
 	listener    net.Listener
 	address     string
 	runtimeAuth *runtimeAuthRuntime
+	inventory   *runtimeInventoryStore
 }
 
 func (s *APIServer) Start() error {
@@ -996,6 +1006,9 @@ func (s *APIServer) Shutdown(ctx context.Context) error {
 	if s.server != nil {
 		shutdownErr = errors.Join(shutdownErr, s.server.Shutdown(ctx))
 	}
+	if s.inventory != nil {
+		shutdownErr = errors.Join(shutdownErr, s.inventory.Close())
+	}
 	if s.runtimeAuth != nil && s.runtimeAuth.persistence != nil {
 		shutdownErr = errors.Join(shutdownErr, s.runtimeAuth.persistence.Close())
 	}
@@ -1010,6 +1023,7 @@ func newRuntimeRouter(
 	networkManager *network.NetworkManager,
 	storageManager *storage.StorageManager,
 	hypervisorManager *hypervisor.Hypervisor,
+	inventoryStore *runtimeInventoryStore,
 	runtimeAuth *runtimeAuthRuntime,
 ) *mux.Router {
 	router := mux.NewRouter()
@@ -1017,6 +1031,14 @@ func newRuntimeRouter(
 	router.HandleFunc("/healthz", handleHealthz).Methods(http.MethodGet)
 	registerRuntimeAuthRoutes(router, runtimeAuth)
 	router.HandleFunc("/internal/runtime/v1/monitoring/metrics", runtimeGetMonitoringMetricsHandler(vmManager)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/vms", runtimeGetVMsHandler(inventoryStore)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/vms/{id}", runtimeGetVMHandler(inventoryStore)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/vms/{id}/metrics", runtimeGetVMMetricsHandler(inventoryStore)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/monitoring/vms", runtimeGetMonitoringVMsHandler(inventoryStore)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/networks", runtimeGetNetworksHandler(inventoryStore)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/networks/{id}", runtimeGetNetworkHandler(inventoryStore)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/vms/{vm_id}/interfaces", runtimeGetVMInterfacesHandler(inventoryStore)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/vms/{vm_id}/interfaces/{id}", runtimeGetVMInterfaceHandler(inventoryStore)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/services", runtimeGetServicesHandler(config, vmManager, migrationManager, schedulerService, networkManager, storageManager, hypervisorManager, runtimeAuth)).Methods(http.MethodGet)
 	clusterHandler := runtimeProtectClusterRoute(runtimeAuth)
 	router.Handle("/api/cluster/nodes", clusterHandler(runtimeListNodesHandler(vmManager))).Methods(http.MethodGet)

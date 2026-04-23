@@ -654,8 +654,14 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 
 func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 	runtimeMonitoringClient := newRuntimeMonitoringReadClientFromEnv()
+	runtimeInventoryClient := newRuntimeInventoryReadClientFromEnv()
 
 	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeInventoryClient.proxy(w, r, "/internal/runtime/v1/vms") {
+			return
+		}
+		setRuntimeSQLFallbackHeader(w)
+
 		rows, err := db.Query(`SELECT id, name, state, node_id, tenant_id, created_at, updated_at FROM vms ORDER BY created_at DESC`)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to query VMs")
@@ -742,6 +748,11 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 	}).Methods(http.MethodPost)
 
 	router.HandleFunc("/vms/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeInventoryClient.proxy(w, r, "/internal/runtime/v1/vms/"+mux.Vars(r)["id"]) {
+			return
+		}
+		setRuntimeSQLFallbackHeader(w)
+
 		vmID := mux.Vars(r)["id"]
 
 		var id, name, state, tenantID string
@@ -819,6 +830,10 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 
 	router.HandleFunc("/vms/{id}/metrics", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["id"]
+		if runtimeInventoryClient.proxy(w, r, "/internal/runtime/v1/vms/"+vmID+"/metrics") {
+			return
+		}
+		setRuntimeSQLFallbackHeader(w)
 
 		var cpuUsage, memoryUsage float64
 		err := db.QueryRow(`
@@ -842,6 +857,11 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 	router.HandleFunc("/monitoring/metrics", monitoringSummaryHandler(runtimeMonitoringClient)).Methods(http.MethodGet)
 
 	router.HandleFunc("/monitoring/vms", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeInventoryClient.proxy(w, r, "/internal/runtime/v1/monitoring/vms") {
+			return
+		}
+		setRuntimeSQLFallbackHeader(w)
+
 		rows, err := db.Query(`SELECT id, name, state FROM vms ORDER BY created_at DESC`)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to query VMs")
@@ -877,6 +897,11 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/networks", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeInventoryClient.proxy(w, r, "/internal/runtime/v1/networks") {
+			return
+		}
+		setRuntimeSQLFallbackHeader(w)
+
 		rows, err := db.Query(`
 			SELECT id, name, type, subnet, gateway, status, created_at, updated_at
 			FROM networks
@@ -957,6 +982,11 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 	}).Methods(http.MethodPost)
 
 	router.HandleFunc("/networks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeInventoryClient.proxy(w, r, "/internal/runtime/v1/networks/"+mux.Vars(r)["id"]) {
+			return
+		}
+		setRuntimeSQLFallbackHeader(w)
+
 		networkID := mux.Vars(r)["id"]
 
 		var id, name, networkType, subnet, status string
@@ -1009,6 +1039,10 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 
 	router.HandleFunc("/vms/{vm_id}/interfaces", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["vm_id"]
+		if runtimeInventoryClient.proxy(w, r, "/internal/runtime/v1/vms/"+vmID+"/interfaces") {
+			return
+		}
+		setRuntimeSQLFallbackHeader(w)
 
 		rows, err := db.Query(`
 			SELECT id, vm_id, network_id, name, mac_address, ip_address, status, created_at, updated_at
@@ -1099,6 +1133,10 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 	router.HandleFunc("/vms/{vm_id}/interfaces/{id}", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["vm_id"]
 		interfaceID := mux.Vars(r)["id"]
+		if runtimeInventoryClient.proxy(w, r, "/internal/runtime/v1/vms/"+vmID+"/interfaces/"+interfaceID) {
+			return
+		}
+		setRuntimeSQLFallbackHeader(w)
 
 		var id, currentVMID, name, macAddress, status string
 		var networkID, ipAddress sql.NullString

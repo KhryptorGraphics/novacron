@@ -537,6 +537,166 @@ func TestRegisterSecureAPIRoutesKeepsSyntheticMonitoringSummaryWhenRuntimeReadsD
 	}
 }
 
+func TestRegisterSecureAPIRoutesUsesRuntimeInventoryReadsWhenEnabled(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	requestPaths := make(chan string, 2)
+	runtimeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+			t.Fatalf("expected canonical runtime inventory proxy to avoid forwarding Authorization, got %q", authHeader)
+		}
+		if userEmail := r.Header.Get("X-User-Email"); userEmail != "" {
+			t.Fatalf("expected canonical runtime inventory proxy to avoid forwarding X-User-Email, got %q", userEmail)
+		}
+
+		requestPaths <- r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.URL.Path {
+		case "/internal/runtime/v1/vms":
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{
+					"id":         "vm-runtime-1",
+					"name":       "runtime-alpha",
+					"state":      "running",
+					"status":     "running",
+					"node_id":    "node-runtime",
+					"tenant_id":  "default",
+					"created_at": "2026-04-23T00:00:00Z",
+					"updated_at": "2026-04-23T00:00:00Z",
+				},
+			})
+		case "/internal/runtime/v1/networks/net-9":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":         "net-9",
+				"name":       "runtime-network",
+				"type":       "bridged",
+				"subnet":     "10.10.0.0/24",
+				"gateway":    "10.10.0.1",
+				"status":     "active",
+				"created_at": "2026-04-23T00:00:00Z",
+				"updated_at": "2026-04-23T00:00:00Z",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer runtimeServer.Close()
+
+	t.Setenv(canonicalRuntimeInventoryReadsEnv, "true")
+	t.Setenv(canonicalRuntimeBaseURLEnv, runtimeServer.URL)
+
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	router := mux.NewRouter()
+	apiV1 := router.PathPrefix("/api/v1").Subrouter()
+	apiV1.Use(requireAuth(authManager))
+	registerSecureAPIRoutes(apiV1, db)
+
+	for _, tc := range []struct {
+		path      string
+		expectID  string
+		expectKey string
+	}{
+		{path: "/api/v1/vms", expectID: "vm-runtime-1", expectKey: "id"},
+		{path: "/api/v1/networks/net-9", expectID: "net-9", expectKey: "id"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		req.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 for %s, got %d (%s)", tc.path, rec.Code, rec.Body.String())
+		}
+		if got := rec.Header().Get(novaCronReadSourceHeader); got != novaCronReadSourceRuntime {
+			t.Fatalf("expected %s header %q for %s, got %q", novaCronReadSourceHeader, novaCronReadSourceRuntime, tc.path, got)
+		}
+
+		if tc.path == "/api/v1/vms" {
+			var payload []map[string]interface{}
+			if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+				t.Fatalf("failed to decode VM payload: %v", err)
+			}
+			if len(payload) != 1 || payload[0][tc.expectKey] != tc.expectID {
+				t.Fatalf("unexpected VM payload for %s: %#v", tc.path, payload)
+			}
+			continue
+		}
+
+		var payload map[string]interface{}
+		if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+			t.Fatalf("failed to decode network payload: %v", err)
+		}
+		if payload[tc.expectKey] != tc.expectID {
+			t.Fatalf("unexpected payload for %s: %#v", tc.path, payload)
+		}
+	}
+
+	for _, wantPath := range []string{"/internal/runtime/v1/vms", "/internal/runtime/v1/networks/net-9"} {
+		if gotPath := <-requestPaths; gotPath != wantPath {
+			t.Fatalf("expected runtime inventory read path %s, got %s", wantPath, gotPath)
+		}
+	}
+}
+
+func TestRegisterSecureAPIRoutesFallsBackToSQLForInventoryReadsWhenRuntimeUnavailable(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	runtimeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer runtimeServer.Close()
+
+	t.Setenv(canonicalRuntimeInventoryReadsEnv, "true")
+	t.Setenv(canonicalRuntimeBaseURLEnv, runtimeServer.URL)
+
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	router := mux.NewRouter()
+	apiV1 := router.PathPrefix("/api/v1").Subrouter()
+	apiV1.Use(requireAuth(authManager))
+	registerSecureAPIRoutes(apiV1, db)
+
+	now := time.Now().UTC()
+	mock.ExpectQuery(`SELECT id, name, type, subnet, gateway, status, created_at, updated_at\s+FROM networks WHERE id = \$1`).
+		WithArgs("net-7").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "type", "subnet", "gateway", "status", "created_at", "updated_at"}).
+			AddRow("net-7", "blue", "bridged", "10.0.0.0/24", "10.0.0.1", "active", now, now))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/networks/net-7", nil)
+	req.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(novaCronReadSourceHeader); got != novaCronReadSourceSQLFallback {
+		t.Fatalf("expected %s header %q, got %q", novaCronReadSourceHeader, novaCronReadSourceSQLFallback, got)
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode fallback payload: %v", err)
+	}
+	if payload["id"] != "net-7" {
+		t.Fatalf("unexpected fallback payload: %#v", payload)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestAPIInfoAdvertisesCanonicalContract(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/info", nil)
