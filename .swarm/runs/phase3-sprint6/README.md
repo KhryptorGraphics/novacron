@@ -14,11 +14,13 @@ In progress.
 - Added policy-checked cold migration execution through `/internal/runtime/v1/mobility/cold-migrations`.
 - Added a verified-backup precondition before policy-driven cold migration runs.
 - Added policy-checked checkpoint restore execution through `/internal/runtime/v1/mobility/checkpoint-restores`.
+- Added explicit rollback observability fields for interrupted mobility operations.
 
 ## Current Boundary
 
 - Cold migration now executes local state-file transfer through the canonical daemon endpoint when a recent backup is marked verified.
 - Checkpoint restore now executes local checkpoint-to-state recovery through the canonical daemon endpoint when checkpoint mode is enabled and a recent backup is marked verified.
+- Interrupted checkpoint restore reports rollback attempt, rollback success, and the original failure reason in the daemon response.
 - The richer `backend/core/backup` and `backend/core/dr` subsystems remain unwired to `backend/core/cmd/novacron`.
 - Advanced live migration remains behind existing optional/build-tagged paths.
 

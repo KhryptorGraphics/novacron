@@ -44,6 +44,9 @@ type VMMigration struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	Error             string
+	RollbackAttempted bool
+	RollbackSucceeded bool
+	RollbackError     string
 	Options           map[string]string
 }
 
@@ -128,13 +131,14 @@ func (m *VMMigrationManager) ExecuteMigration(ctx context.Context, migration *VM
 	if err != nil {
 		migration.Status = MigrationStatusFailed
 		migration.Error = err.Error()
+		migration.RollbackAttempted = true
 
 		// Perform rollback
 		rollbackErr := m.rollbackMigration(migration)
 		if rollbackErr != nil {
-			// Log the rollback error, but return the original error
-			fmt.Printf("Error rolling back migration: %v\n", rollbackErr)
+			migration.RollbackError = rollbackErr.Error()
 		} else {
+			migration.RollbackSucceeded = true
 			migration.Status = MigrationStatusRolledBack
 		}
 
@@ -204,7 +208,11 @@ func (m *VMMigrationManager) ExecuteCheckpointRestoreWithPolicy(ctx context.Cont
 	if err != nil {
 		migration.Status = MigrationStatusFailed
 		migration.Error = err.Error()
-		if rollbackErr := m.rollbackMigration(migration); rollbackErr == nil {
+		migration.RollbackAttempted = true
+		if rollbackErr := m.rollbackMigration(migration); rollbackErr != nil {
+			migration.RollbackError = rollbackErr.Error()
+		} else {
+			migration.RollbackSucceeded = true
 			migration.Status = MigrationStatusRolledBack
 		}
 		return err

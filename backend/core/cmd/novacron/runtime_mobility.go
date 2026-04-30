@@ -45,6 +45,9 @@ type runtimeColdMigrationResponse struct {
 	BackupVerified    bool               `json:"backup_verified"`
 	BackupID          string             `json:"backup_id,omitempty"`
 	CheckpointID      string             `json:"checkpoint_id,omitempty"`
+	RollbackAttempted bool               `json:"rollback_attempted"`
+	RollbackSucceeded bool               `json:"rollback_succeeded"`
+	RollbackError     string             `json:"rollback_error,omitempty"`
 }
 
 func runtimeMobilityPolicyFromConfig(config runtimeConfig) vm.MigrationBackupPolicy {
@@ -194,5 +197,8 @@ func runtimeColdMigrationResponseFromMigration(migration *vm.VMMigration, policy
 	response.Status = migration.Status
 	response.Progress = migration.Progress
 	response.Error = migration.Error
+	response.RollbackAttempted = migration.RollbackAttempted
+	response.RollbackSucceeded = migration.RollbackSucceeded
+	response.RollbackError = migration.RollbackError
 	return response
 }

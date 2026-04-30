@@ -172,6 +172,56 @@ func TestRuntimeCheckpointRestoreEndpointRequiresCheckpointPolicy(t *testing.T) 
 	}
 }
 
+func TestRuntimeCheckpointRestoreEndpointReportsInterruptedRollback(t *testing.T) {
+	t.Parallel()
+
+	sourceDir := t.TempDir()
+	targetDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "vm-restore.checkpoint"), []byte("checkpoint-state"), 0o644); err != nil {
+		t.Fatalf("write source checkpoint: %v", err)
+	}
+	config := defaultRuntimeConfig("node-a", t.TempDir())
+	config.Services.MigrationMode = vm.MigrationModeCheckpoint
+	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+
+	payload := runtimeCheckpointRestoreRequest{
+		VMID:             "vm-restore",
+		TargetNodeID:     "node-b",
+		TargetStorageDir: targetDir,
+		BackupVerified:   true,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodPost, "/internal/runtime/v1/mobility/checkpoint-restores", bytes.NewReader(body)).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("POST checkpoint restore status = %d, want %d: %s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+
+	var response runtimeColdMigrationResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, want := response.Status, vm.MigrationStatusRolledBack; got != want {
+		t.Fatalf("restore status = %q, want %q", got, want)
+	}
+	if !response.RollbackAttempted {
+		t.Fatal("rollback should be reported as attempted")
+	}
+	if !response.RollbackSucceeded {
+		t.Fatal("rollback should be reported as successful")
+	}
+	if response.Error != context.Canceled.Error() {
+		t.Fatalf("restore error = %q, want %q", response.Error, context.Canceled.Error())
+	}
+}
+
 func postRuntimeMobilityJSON[T any](t *testing.T, router http.Handler, path string, payload interface{}, expectedStatus int) T {
 	t.Helper()
 
