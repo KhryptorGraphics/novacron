@@ -1,0 +1,30 @@
+phase: 4
+sprint: 8
+status: complete
+issue: novacron-e1x
+epic: NC-p4a
+canonical_backend_api: backend/cmd/api-server/main.go
+implemented:
+  - orchestration_status_route
+  - orchestration_decisions_route
+  - orchestration_policies_crud_contract_routes
+  - orchestration_ml_models_route
+  - orchestration_ml_retrain_action
+  - orchestration_ml_download_explicit_501
+  - orchestration_realtime_metrics_route
+  - orchestration_scaling_metrics_route
+  - orchestration_scaling_events_route
+  - api_and_api_v1_route_parity_tests
+remaining:
+  - live_runtime_service_wiring_tracked_by_novacron_65v
+  - remaining_mock_surface_cleanup_tracked_by_novacron_hig
+followups:
+  - novacron-65v
+validation:
+  targeted:
+    - command: git diff --check
+      result: pass
+    - command: go test ./backend/cmd/api-server
+      result: pass
+    - command: npm run test:smoke -- --runInBand
+      result: pass

@@ -656,6 +656,8 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 	runtimeMonitoringClient := newRuntimeMonitoringReadClientFromEnv()
 	runtimeInventoryClient := newRuntimeInventoryReadClientFromEnv()
 
+	registerOrchestrationDashboardRoutes(router)
+
 	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
 		if runtimeInventoryClient.proxy(w, r, "/internal/runtime/v1/vms") {
 			return
@@ -1620,6 +1622,104 @@ func normalizeCanonicalAdminRole(raw string) string {
 	default:
 		return ""
 	}
+}
+
+func registerOrchestrationDashboardRoutes(router *mux.Router) {
+	router.HandleFunc("/orchestration/status", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"state":           "running",
+			"startTime":       time.Now().UTC().Format(time.RFC3339),
+			"activePolicies":  0,
+			"eventsProcessed": 0,
+			"metrics": map[string]interface{}{
+				"source": "api-server",
+			},
+		})
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/orchestration/decisions", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, []map[string]interface{}{})
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/orchestration/policies", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"policies": []map[string]interface{}{},
+			"count":    0,
+		})
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/orchestration/policies", func(w http.ResponseWriter, r *http.Request) {
+		var policy map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&policy); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if _, ok := policy["id"].(string); !ok {
+			policy["id"] = fmt.Sprintf("policy-%d", time.Now().UnixNano())
+		}
+		now := time.Now().UTC().Format(time.RFC3339)
+		if _, ok := policy["createdAt"].(string); !ok {
+			policy["createdAt"] = now
+		}
+		policy["updatedAt"] = now
+		writeJSON(w, http.StatusCreated, policy)
+	}).Methods(http.MethodPost)
+
+	router.HandleFunc("/orchestration/policies/{id}", func(w http.ResponseWriter, r *http.Request) {
+		var policy map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&policy); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		policy["id"] = mux.Vars(r)["id"]
+		policy["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
+		writeJSON(w, http.StatusOK, policy)
+	}).Methods(http.MethodPut, http.MethodPatch)
+
+	router.HandleFunc("/orchestration/policies/{id}", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id":      mux.Vars(r)["id"],
+			"deleted": true,
+		})
+	}).Methods(http.MethodDelete)
+
+	router.HandleFunc("/orchestration/ml-models", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, []map[string]interface{}{})
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/orchestration/ml-models/{modelType}/retrain", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusAccepted, map[string]interface{}{
+			"status":    "queued",
+			"modelType": mux.Vars(r)["modelType"],
+		})
+	}).Methods(http.MethodPost)
+
+	router.HandleFunc("/orchestration/ml-models/{modelType}/download", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusNotImplemented, map[string]interface{}{
+			"error":     "model download is not available in the canonical API profile",
+			"modelType": mux.Vars(r)["modelType"],
+		})
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/orchestration/metrics/realtime", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"timestamp":            time.Now().UTC().Format(time.RFC3339),
+			"cpu_usage":            0,
+			"memory_usage":         0,
+			"network_io":           0,
+			"disk_io":              0,
+			"decisions_per_minute": 0,
+			"response_time":        0,
+		})
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/orchestration/scaling/metrics", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, []map[string]interface{}{})
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/orchestration/scaling/events", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, []map[string]interface{}{})
+	}).Methods(http.MethodGet)
 }
 
 func registerSecurityRouteSet(router *mux.Router, authManager *auth.SimpleAuthManager, handlers *securityapi.SecurityHandlers) {

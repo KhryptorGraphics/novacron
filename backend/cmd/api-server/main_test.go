@@ -79,6 +79,29 @@ func performAuthenticatedMonitoringSummaryRequest(t *testing.T, router http.Hand
 	return rec
 }
 
+func performAuthenticatedAPIRequest(t *testing.T, router http.Handler, authManager *auth.SimpleAuthManager, method string, path string, body interface{}) *httptest.ResponseRecorder {
+	t.Helper()
+
+	var reqBody *bytes.Reader
+	if body == nil {
+		reqBody = bytes.NewReader(nil)
+	} else {
+		payload, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("failed to marshal request body: %v", err)
+		}
+		reqBody = bytes.NewReader(payload)
+	}
+
+	req := httptest.NewRequest(method, path, reqBody)
+	req.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
 func decodeMonitoringSummaryPayload(t *testing.T, body []byte) (monitoringSummaryResponse, map[string]interface{}) {
 	t.Helper()
 
@@ -93,6 +116,91 @@ func decodeMonitoringSummaryPayload(t *testing.T, body []byte) (monitoringSummar
 	}
 
 	return payload, raw
+}
+
+func TestOrchestrationDashboardContractRoutes(t *testing.T) {
+	router, authManager := newMonitoringSummaryTestRouter(t)
+
+	cases := []struct {
+		path       string
+		expectKey  string
+		expectCode int
+	}{
+		{path: "/api/orchestration/status", expectKey: "state", expectCode: http.StatusOK},
+		{path: "/api/orchestration/decisions?limit=10", expectCode: http.StatusOK},
+		{path: "/api/orchestration/policies", expectKey: "policies", expectCode: http.StatusOK},
+		{path: "/api/orchestration/ml-models", expectCode: http.StatusOK},
+		{path: "/api/orchestration/metrics/realtime", expectKey: "cpu_usage", expectCode: http.StatusOK},
+		{path: "/api/orchestration/scaling/metrics?range=1h", expectCode: http.StatusOK},
+		{path: "/api/orchestration/scaling/events?limit=20", expectCode: http.StatusOK},
+		{path: "/api/v1/orchestration/status", expectKey: "state", expectCode: http.StatusOK},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			rec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodGet, tc.path, nil)
+			if rec.Code != tc.expectCode {
+				t.Fatalf("expected %d, got %d: %s", tc.expectCode, rec.Code, rec.Body.String())
+			}
+
+			if tc.expectKey == "" {
+				return
+			}
+
+			var payload map[string]interface{}
+			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if _, ok := payload[tc.expectKey]; !ok {
+				t.Fatalf("expected response key %q in %#v", tc.expectKey, payload)
+			}
+		})
+	}
+}
+
+func TestOrchestrationPolicyAndModelActions(t *testing.T) {
+	router, authManager := newMonitoringSummaryTestRouter(t)
+
+	policy := map[string]interface{}{
+		"name":        "Test Policy",
+		"description": "contract test",
+		"enabled":     true,
+		"priority":    5,
+		"rules":       []interface{}{},
+	}
+
+	createRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPost, "/api/orchestration/policies", policy)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected create status 201, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+
+	var created map[string]interface{}
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode created policy: %v", err)
+	}
+	if created["id"] == "" || created["updatedAt"] == "" {
+		t.Fatalf("expected generated id and updatedAt, got %#v", created)
+	}
+
+	updateRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPut, "/api/orchestration/policies/policy-1", policy)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("expected update status 200, got %d: %s", updateRec.Code, updateRec.Body.String())
+	}
+
+	deleteRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodDelete, "/api/orchestration/policies/policy-1", nil)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("expected delete status 200, got %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	retrainRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPost, "/api/orchestration/ml-models/bandwidth/retrain", nil)
+	if retrainRec.Code != http.StatusAccepted {
+		t.Fatalf("expected retrain status 202, got %d: %s", retrainRec.Code, retrainRec.Body.String())
+	}
+
+	downloadRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodGet, "/api/orchestration/ml-models/bandwidth/download", nil)
+	if downloadRec.Code != http.StatusNotImplemented {
+		t.Fatalf("expected download status 501, got %d: %s", downloadRec.Code, downloadRec.Body.String())
+	}
 }
 
 func TestRequireAuthRejectsInvalidToken(t *testing.T) {
