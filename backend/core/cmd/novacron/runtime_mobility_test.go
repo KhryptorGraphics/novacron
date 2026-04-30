@@ -57,7 +57,7 @@ func TestRuntimeColdMigrationEndpointExecutesPolicyVerifiedMigration(t *testing.
 	config := defaultRuntimeConfig("node-a", t.TempDir())
 	config.Services.MigrationMode = vm.MigrationModeCold
 	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
-	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil, nil)
 	verifyRuntimeBackup(t, router, "backup-1", "vm-1")
 
 	payload := runtimeColdMigrationRequest{
@@ -90,7 +90,7 @@ func TestRuntimeColdMigrationEndpointRequiresVerifiedBackup(t *testing.T) {
 	config := defaultRuntimeConfig("node-a", t.TempDir())
 	config.Services.MigrationMode = vm.MigrationModeCold
 	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
-	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	payload := runtimeColdMigrationRequest{
 		VMID:             "vm-1",
@@ -117,7 +117,7 @@ func TestRuntimeMobilityOperationsEndpointReportsHistory(t *testing.T) {
 	config := defaultRuntimeConfig("node-a", t.TempDir())
 	config.Services.MigrationMode = vm.MigrationModeCold
 	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
-	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil, nil)
 	verifyRuntimeBackup(t, router, "backup-1", "vm-1")
 
 	payload := runtimeColdMigrationRequest{
@@ -159,7 +159,7 @@ func TestRuntimeColdMigrationEndpointIgnoresUnregisteredBackupFlag(t *testing.T)
 	config := defaultRuntimeConfig("node-a", t.TempDir())
 	config.Services.MigrationMode = vm.MigrationModeCold
 	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
-	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	payload := runtimeColdMigrationRequest{
 		VMID:             "vm-1",
@@ -188,7 +188,7 @@ func TestRuntimeMobilityRecoveryEndpointReportsHealthyState(t *testing.T) {
 	config := defaultRuntimeConfig("node-a", t.TempDir())
 	config.Services.MigrationMode = vm.MigrationModeCold
 	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
-	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil, nil)
 	verifyRuntimeBackup(t, router, "backup-1", "vm-1")
 
 	payload := runtimeColdMigrationRequest{
@@ -246,7 +246,7 @@ func TestRuntimeMobilityRecoveryEndpointReportsRolledBackOperation(t *testing.T)
 	config := defaultRuntimeConfig("node-a", t.TempDir())
 	config.Services.MigrationMode = vm.MigrationModeCheckpoint
 	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
-	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil, nil)
 	verifyRuntimeBackup(t, router, "backup-restore-1", "vm-restore")
 
 	payload := runtimeCheckpointRestoreRequest{
@@ -294,7 +294,7 @@ func TestRuntimeCheckpointRestoreEndpointExecutesPolicyVerifiedRestore(t *testin
 	config := defaultRuntimeConfig("node-a", t.TempDir())
 	config.Services.MigrationMode = vm.MigrationModeCheckpoint
 	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
-	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil, nil)
 	verifyRuntimeBackup(t, router, "backup-restore-1", "vm-restore")
 
 	payload := runtimeCheckpointRestoreRequest{
@@ -335,7 +335,7 @@ func TestRuntimeCheckpointRestoreEndpointRequiresCheckpointPolicy(t *testing.T) 
 	config := defaultRuntimeConfig("node-a", t.TempDir())
 	config.Services.MigrationMode = vm.MigrationModeCold
 	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
-	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil, nil)
 	verifyRuntimeBackup(t, router, "backup-restore-1", "vm-restore")
 
 	payload := runtimeCheckpointRestoreRequest{
@@ -365,7 +365,7 @@ func TestRuntimeCheckpointRestoreEndpointReportsInterruptedRollback(t *testing.T
 	config := defaultRuntimeConfig("node-a", t.TempDir())
 	config.Services.MigrationMode = vm.MigrationModeCheckpoint
 	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
-	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil, nil)
 	verifyRuntimeBackup(t, router, "backup-restore-1", "vm-restore")
 
 	payload := runtimeCheckpointRestoreRequest{

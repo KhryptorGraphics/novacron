@@ -308,6 +308,7 @@ func runtimeServiceReportFromRuntime(
 	hypervisorManager *hypervisor.Hypervisor,
 	runtimeAuth *runtimeAuthRuntime,
 	discovery *runtimeDiscoveryState,
+	runtimeDR *runtimeDRRuntime,
 ) runtimeServiceReport {
 	disabledServices := make([]string, 0)
 	services := make([]runtimeServiceStatus, 0, len(runtimeServiceOrder))
@@ -340,7 +341,7 @@ func runtimeServiceReportFromRuntime(
 				status.Reason = "auth runtime failed to initialize"
 			}
 		case "backup":
-			status = runtimeServiceStatusFromInstance(config, serviceName, false, "backup runtime is gated behind mobility policy integration")
+			status = runtimeServiceStatusFromInstance(config, serviceName, runtimeDR != nil, "backup/DR runtime unavailable")
 		case "discovery":
 			status.Enabled = runtimeDiscoveryEnabled(config)
 			switch {
@@ -1018,7 +1019,19 @@ func initializeAPI(
 		return nil, fmt.Errorf("initialize runtime discovery: %w", err)
 	}
 
-	router := newRuntimeRouter(config, vmManager, migrationManager, schedulerService, networkManager, storageManager, hypervisorManager, inventoryStore, runtimeAuth, discoveryState)
+	runtimeDR, err := initializeRuntimeDR(config)
+	if err != nil {
+		_ = listener.Close()
+		if inventoryStore != nil {
+			_ = inventoryStore.Close()
+		}
+		if runtimeAuth != nil && runtimeAuth.persistence != nil {
+			_ = runtimeAuth.persistence.Close()
+		}
+		return nil, fmt.Errorf("initialize runtime DR: %w", err)
+	}
+
+	router := newRuntimeRouter(config, vmManager, migrationManager, schedulerService, networkManager, storageManager, hypervisorManager, inventoryStore, runtimeAuth, discoveryState, runtimeDR)
 	server := &http.Server{
 		Handler: router,
 		BaseContext: func(net.Listener) context.Context {
@@ -1032,8 +1045,12 @@ func initializeAPI(
 		address:     listener.Addr().String(),
 		runtimeAuth: runtimeAuth,
 		inventory:   inventoryStore,
+		runtimeDR:   runtimeDR,
 	}
 	if err := apiServer.Start(); err != nil {
+		if runtimeDR != nil {
+			_ = runtimeDR.Stop()
+		}
 		return nil, fmt.Errorf("start API server: %w", err)
 	}
 
@@ -1046,6 +1063,7 @@ type APIServer struct {
 	address     string
 	runtimeAuth *runtimeAuthRuntime
 	inventory   *runtimeInventoryStore
+	runtimeDR   *runtimeDRRuntime
 }
 
 func (s *APIServer) Start() error {
@@ -1076,6 +1094,9 @@ func (s *APIServer) Shutdown(ctx context.Context) error {
 	if s.runtimeAuth != nil && s.runtimeAuth.persistence != nil {
 		shutdownErr = errors.Join(shutdownErr, s.runtimeAuth.persistence.Close())
 	}
+	if s.runtimeDR != nil {
+		shutdownErr = errors.Join(shutdownErr, s.runtimeDR.Stop())
+	}
 	return shutdownErr
 }
 
@@ -1090,6 +1111,7 @@ func newRuntimeRouter(
 	inventoryStore *runtimeInventoryStore,
 	runtimeAuth *runtimeAuthRuntime,
 	discovery *runtimeDiscoveryState,
+	runtimeDR *runtimeDRRuntime,
 ) *mux.Router {
 	router := mux.NewRouter()
 	router.Use(runtimeCORSMiddleware(config.Auth))
@@ -1104,7 +1126,8 @@ func newRuntimeRouter(
 	router.HandleFunc("/internal/runtime/v1/networks/{id}", runtimeGetNetworkHandler(inventoryStore)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/vms/{vm_id}/interfaces", runtimeGetVMInterfacesHandler(inventoryStore)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/vms/{vm_id}/interfaces/{id}", runtimeGetVMInterfaceHandler(inventoryStore)).Methods(http.MethodGet)
-	router.HandleFunc("/internal/runtime/v1/services", runtimeGetServicesHandler(config, vmManager, migrationManager, schedulerService, networkManager, storageManager, hypervisorManager, runtimeAuth, discovery)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/services", runtimeGetServicesHandler(config, vmManager, migrationManager, schedulerService, networkManager, storageManager, hypervisorManager, runtimeAuth, discovery, runtimeDR)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/dr/status", runtimeGetDRStatusHandler(runtimeDR)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/discovery/inventory", runtimeGetDiscoveryInventoryHandler(discovery)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/discovery/seeds", runtimeGetDiscoverySeedsHandler(discovery)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/discovery/seeds/{id}/verify", runtimeVerifyDiscoverySeedInventoryHandler(discovery)).Methods(http.MethodPost)
@@ -1209,6 +1232,7 @@ func runtimeGetServicesHandler(
 	hypervisorManager *hypervisor.Hypervisor,
 	runtimeAuth *runtimeAuthRuntime,
 	discovery *runtimeDiscoveryState,
+	runtimeDR *runtimeDRRuntime,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		report := runtimeServiceReportFromRuntime(
@@ -1221,6 +1245,7 @@ func runtimeGetServicesHandler(
 			hypervisorManager,
 			runtimeAuth,
 			discovery,
+			runtimeDR,
 		)
 		respondRuntimeJSON(w, http.StatusOK, report)
 	}

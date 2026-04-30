@@ -22,7 +22,7 @@ func TestRuntimeInventoryRouterListsVMsFromSQLPersistence(t *testing.T) {
 	mock.ExpectQuery(`SELECT id, name, state, node_id, tenant_id, created_at, updated_at FROM vms ORDER BY created_at DESC`).
 		WillReturnRows(nowRows)
 
-	router := newRuntimeRouter(defaultRuntimeConfig("node-a", t.TempDir()), nil, nil, nil, nil, nil, nil, &runtimeInventoryStore{db: db}, nil, nil)
+	router := newRuntimeRouter(defaultRuntimeConfig("node-a", t.TempDir()), nil, nil, nil, nil, nil, nil, &runtimeInventoryStore{db: db}, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/internal/runtime/v1/vms", nil)
 	rec := httptest.NewRecorder()
@@ -65,7 +65,7 @@ func TestRuntimeInventoryRouterGetsNetworkFromSQLPersistence(t *testing.T) {
 		WithArgs("net-1").
 		WillReturnRows(rows)
 
-	router := newRuntimeRouter(defaultRuntimeConfig("node-a", t.TempDir()), nil, nil, nil, nil, nil, nil, &runtimeInventoryStore{db: db}, nil, nil)
+	router := newRuntimeRouter(defaultRuntimeConfig("node-a", t.TempDir()), nil, nil, nil, nil, nil, nil, &runtimeInventoryStore{db: db}, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/internal/runtime/v1/networks/net-1", nil)
 	rec := httptest.NewRecorder()
