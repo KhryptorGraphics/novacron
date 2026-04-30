@@ -104,6 +104,74 @@ func TestRuntimeColdMigrationEndpointRequiresVerifiedBackup(t *testing.T) {
 	}
 }
 
+func TestRuntimeCheckpointRestoreEndpointExecutesPolicyVerifiedRestore(t *testing.T) {
+	t.Parallel()
+
+	sourceDir := t.TempDir()
+	targetDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "checkpoint-1.checkpoint"), []byte("checkpoint-state"), 0o644); err != nil {
+		t.Fatalf("write source checkpoint: %v", err)
+	}
+	config := defaultRuntimeConfig("node-a", t.TempDir())
+	config.Services.MigrationMode = vm.MigrationModeCheckpoint
+	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+
+	payload := runtimeCheckpointRestoreRequest{
+		VMID:             "vm-restore",
+		TargetNodeID:     "node-b",
+		TargetStorageDir: targetDir,
+		CheckpointID:     "checkpoint-1",
+		BackupVerified:   true,
+		BackupID:         "backup-restore-1",
+	}
+	response := postRuntimeMobilityJSON[runtimeColdMigrationResponse](t, router, "/internal/runtime/v1/mobility/checkpoint-restores", payload, http.StatusAccepted)
+	if got, want := response.Type, vm.MigrationType(vm.MigrationModeCheckpoint); got != want {
+		t.Fatalf("restore type = %q, want %q", got, want)
+	}
+	if got, want := response.Status, vm.MigrationStatusCompleted; got != want {
+		t.Fatalf("restore status = %q, want %q", got, want)
+	}
+	if got, want := response.CheckpointID, "checkpoint-1"; got != want {
+		t.Fatalf("checkpoint id = %q, want %q", got, want)
+	}
+	restored, err := os.ReadFile(filepath.Join(targetDir, "vm-restore.state"))
+	if err != nil {
+		t.Fatalf("expected target state file to be restored: %v", err)
+	}
+	if got, want := string(restored), "checkpoint-state"; got != want {
+		t.Fatalf("restored state = %q, want %q", got, want)
+	}
+}
+
+func TestRuntimeCheckpointRestoreEndpointRequiresCheckpointPolicy(t *testing.T) {
+	t.Parallel()
+
+	sourceDir := t.TempDir()
+	targetDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "vm-restore.checkpoint"), []byte("checkpoint-state"), 0o644); err != nil {
+		t.Fatalf("write source checkpoint: %v", err)
+	}
+	config := defaultRuntimeConfig("node-a", t.TempDir())
+	config.Services.MigrationMode = vm.MigrationModeCold
+	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+
+	payload := runtimeCheckpointRestoreRequest{
+		VMID:             "vm-restore",
+		TargetNodeID:     "node-b",
+		TargetStorageDir: targetDir,
+		BackupVerified:   true,
+	}
+	response := postRuntimeMobilityJSON[runtimeColdMigrationResponse](t, router, "/internal/runtime/v1/mobility/checkpoint-restores", payload, http.StatusConflict)
+	if got, want := response.Status, vm.MigrationStatusPending; got != want {
+		t.Fatalf("restore status = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "vm-restore.state")); !os.IsNotExist(err) {
+		t.Fatalf("checkpoint restore should not create target state when policy rejects it, stat err: %v", err)
+	}
+}
+
 func postRuntimeMobilityJSON[T any](t *testing.T, router http.Handler, path string, payload interface{}, expectedStatus int) T {
 	t.Helper()
 

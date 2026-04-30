@@ -23,6 +23,15 @@ type runtimeColdMigrationRequest struct {
 	BackupID         string `json:"backup_id,omitempty"`
 }
 
+type runtimeCheckpointRestoreRequest struct {
+	VMID             string `json:"vm_id"`
+	TargetNodeID     string `json:"target_node_id"`
+	TargetStorageDir string `json:"target_storage_dir"`
+	CheckpointID     string `json:"checkpoint_id,omitempty"`
+	BackupVerified   bool   `json:"backup_verified"`
+	BackupID         string `json:"backup_id,omitempty"`
+}
+
 type runtimeColdMigrationResponse struct {
 	ID                string             `json:"id"`
 	VMID              string             `json:"vm_id"`
@@ -35,6 +44,7 @@ type runtimeColdMigrationResponse struct {
 	Policy            string             `json:"policy"`
 	BackupVerified    bool               `json:"backup_verified"`
 	BackupID          string             `json:"backup_id,omitempty"`
+	CheckpointID      string             `json:"checkpoint_id,omitempty"`
 }
 
 func runtimeMobilityPolicyFromConfig(config runtimeConfig) vm.MigrationBackupPolicy {
@@ -102,18 +112,76 @@ func runtimeStartColdMigrationHandler(config runtimeConfig, migrationManager *vm
 			if strings.Contains(err.Error(), "requires a verified recent backup") {
 				status = http.StatusPreconditionFailed
 			}
-			respondRuntimeJSON(w, status, runtimeColdMigrationResponseFromMigration(migration, policy, request.BackupVerified, request.BackupID))
+			respondRuntimeJSON(w, status, runtimeColdMigrationResponseFromMigration(migration, policy, request.BackupVerified, request.BackupID, ""))
 			return
 		}
-		respondRuntimeJSON(w, http.StatusAccepted, runtimeColdMigrationResponseFromMigration(migration, policy, request.BackupVerified, request.BackupID))
+		respondRuntimeJSON(w, http.StatusAccepted, runtimeColdMigrationResponseFromMigration(migration, policy, request.BackupVerified, request.BackupID, ""))
 	}
 }
 
-func runtimeColdMigrationResponseFromMigration(migration *vm.VMMigration, policy vm.MigrationBackupPolicy, backupVerified bool, backupID string) runtimeColdMigrationResponse {
+func runtimeStartCheckpointRestoreHandler(config runtimeConfig, migrationManager *vm.VMMigrationManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if migrationManager == nil {
+			respondRuntimeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "migration runtime is not initialized"})
+			return
+		}
+
+		var request runtimeCheckpointRestoreRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			respondRuntimeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid checkpoint restore request"})
+			return
+		}
+		request.VMID = strings.TrimSpace(request.VMID)
+		request.TargetNodeID = strings.TrimSpace(request.TargetNodeID)
+		request.TargetStorageDir = strings.TrimSpace(request.TargetStorageDir)
+		request.CheckpointID = strings.TrimSpace(request.CheckpointID)
+		request.BackupID = strings.TrimSpace(request.BackupID)
+		if request.VMID == "" || request.TargetNodeID == "" || request.TargetStorageDir == "" {
+			respondRuntimeJSON(w, http.StatusBadRequest, map[string]string{"error": "vm_id, target_node_id, and target_storage_dir are required"})
+			return
+		}
+
+		options := map[string]string{
+			vm.MigrationOptionBackupVerified: fmt.Sprintf("%t", request.BackupVerified),
+		}
+		if request.BackupID != "" {
+			options[vm.MigrationOptionBackupID] = request.BackupID
+		}
+		if request.CheckpointID != "" {
+			options[vm.MigrationOptionCheckpointID] = request.CheckpointID
+		}
+		now := time.Now().UTC()
+		migration := &vm.VMMigration{
+			ID:                fmt.Sprintf("checkpoint-%s-%d", request.VMID, now.UnixNano()),
+			VMID:              request.VMID,
+			SourceNodeID:      runtimeDiscoveryNodeID(config),
+			DestinationNodeID: request.TargetNodeID,
+			Type:              vm.MigrationType(vm.MigrationModeCheckpoint),
+			Status:            vm.MigrationStatusPending,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+			Options:           options,
+		}
+		policy := runtimeMobilityPolicyFromConfig(config)
+		destinationManager := vm.NewVMMigrationManager(request.TargetNodeID, request.TargetStorageDir)
+		if err := migrationManager.ExecuteCheckpointRestoreWithPolicy(r.Context(), migration, destinationManager, policy); err != nil {
+			status := http.StatusConflict
+			if strings.Contains(err.Error(), "requires a verified recent backup") {
+				status = http.StatusPreconditionFailed
+			}
+			respondRuntimeJSON(w, status, runtimeColdMigrationResponseFromMigration(migration, policy, request.BackupVerified, request.BackupID, request.CheckpointID))
+			return
+		}
+		respondRuntimeJSON(w, http.StatusAccepted, runtimeColdMigrationResponseFromMigration(migration, policy, request.BackupVerified, request.BackupID, request.CheckpointID))
+	}
+}
+
+func runtimeColdMigrationResponseFromMigration(migration *vm.VMMigration, policy vm.MigrationBackupPolicy, backupVerified bool, backupID string, checkpointID string) runtimeColdMigrationResponse {
 	response := runtimeColdMigrationResponse{
 		Policy:         policy.DefaultMigrationMode,
 		BackupVerified: backupVerified,
 		BackupID:       backupID,
+		CheckpointID:   checkpointID,
 	}
 	if migration == nil {
 		return response

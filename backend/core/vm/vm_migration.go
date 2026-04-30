@@ -50,6 +50,7 @@ type VMMigration struct {
 const (
 	MigrationOptionBackupVerified = "backup_verified"
 	MigrationOptionBackupID       = "backup_id"
+	MigrationOptionCheckpointID   = "checkpoint_id"
 )
 
 // Using VM struct from vm.go
@@ -167,6 +168,50 @@ func (m *VMMigrationManager) ExecuteMigrationWithPolicy(ctx context.Context, mig
 		return fmt.Errorf("mobility policy requires a verified recent backup before migration")
 	}
 	return m.ExecuteMigration(ctx, migration, destManager)
+}
+
+// ExecuteCheckpointRestoreWithPolicy restores a checkpoint through the same
+// mobility policy contract used by migration and backup preconditions.
+func (m *VMMigrationManager) ExecuteCheckpointRestoreWithPolicy(ctx context.Context, migration *VMMigration, destManager *VMMigrationManager, policy MigrationBackupPolicy) error {
+	if migration == nil {
+		return errors.New("migration cannot be nil")
+	}
+	policy = policy.Normalize()
+	if err := policy.Validate(); err != nil {
+		return fmt.Errorf("invalid mobility policy: %w", err)
+	}
+	if !policy.Recovery.CheckpointRestore {
+		return errors.New("checkpoint restore is not enabled by mobility policy")
+	}
+	if !policy.AllowsMigrationMode(MigrationModeCheckpoint) {
+		return errors.New("checkpoint restore mode is not allowed by mobility policy")
+	}
+	if policy.Backup.RequireRecentBackup && !migrationOptionEnabled(migration.Options, MigrationOptionBackupVerified) {
+		return errors.New("mobility policy requires a verified recent backup before checkpoint restore")
+	}
+	if migration.SourceNodeID != m.nodeID {
+		return fmt.Errorf("source node ID mismatch: expected %s, got %s", m.nodeID, migration.SourceNodeID)
+	}
+
+	migration.Type = MigrationType(MigrationModeCheckpoint)
+	migration.Status = MigrationStatusInProgress
+	migration.StartTime = time.Now()
+	migration.Progress = 0
+
+	err := m.executeCheckpointRestore(ctx, migration, destManager)
+	migration.EndTime = time.Now()
+	migration.UpdatedAt = time.Now()
+	if err != nil {
+		migration.Status = MigrationStatusFailed
+		migration.Error = err.Error()
+		if rollbackErr := m.rollbackMigration(migration); rollbackErr == nil {
+			migration.Status = MigrationStatusRolledBack
+		}
+		return err
+	}
+	migration.Status = MigrationStatusCompleted
+	migration.Progress = 100
+	return nil
 }
 
 // executeColdMigration performs a cold migration
@@ -367,6 +412,48 @@ func (m *VMMigrationManager) executeLiveMigration(ctx context.Context, migration
 	// Update progress
 	migration.Progress = 100
 
+	return nil
+}
+
+func (m *VMMigrationManager) executeCheckpointRestore(ctx context.Context, migration *VMMigration, destManager *VMMigrationManager) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	vmID := migration.VMID
+	checkpointID := strings.TrimSpace(migration.Options[MigrationOptionCheckpointID])
+	checkpointFileName := vmID + ".checkpoint"
+	if checkpointID != "" {
+		checkpointFileName = checkpointID + ".checkpoint"
+	}
+
+	checkpointFile := filepath.Join(m.storageDir, checkpointFileName)
+	if _, err := os.Stat(checkpointFile); err != nil {
+		return fmt.Errorf("VM checkpoint file not found: %v", err)
+	}
+
+	destStateFile := filepath.Join(destManager.storageDir, vmID+".state")
+	if err := copyVMFile(checkpointFile, destStateFile); err != nil {
+		return fmt.Errorf("failed to restore VM checkpoint: %v", err)
+	}
+
+	config := VMConfig{
+		ID:      vmID,
+		Name:    vmID,
+		Command: "echo",
+		Args:    []string{"placeholder"},
+	}
+	destVM, _ := NewVM(config)
+	destVM.SetState(StateRunning)
+	destVM.SetNodeID(destManager.nodeID)
+
+	destManager.mutex.Lock()
+	destManager.vms[destVM.ID()] = destVM
+	destManager.mutex.Unlock()
+
+	migration.Progress = 100
 	return nil
 }
 
