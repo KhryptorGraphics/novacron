@@ -15,12 +15,15 @@ In progress.
 - Added a canonical daemon DR adapter that starts and stops the DR orchestrator when `backup` is enabled in the runtime manifest.
 - Added `/internal/runtime/v1/dr/status` for operator-facing DR status and metrics.
 - Switched `/internal/runtime/v1/services` backup reporting from hard-coded gated status to runtime-backed availability.
+- Added daemon-owned persistent DR backup metadata at `storage/backups/metadata.json`.
+- Added `/internal/runtime/v1/dr/backups` list/register endpoints and restart reload coverage.
 
 ## Current Boundary
 
 - `backend/core/dr` now passes its own targeted test suite and is consumed by the canonical runtime when the `backup` service is enabled.
-- The canonical daemon disables DR cron schedules and transaction-log streaming by default; explicit backup execution and persistent metadata remain future work.
-- The next implementation slice should persist backup metadata across restart and connect restore orchestration to VM lifecycle state.
+- The canonical daemon disables DR cron schedules and transaction-log streaming by default.
+- DR backup metadata now survives daemon restart.
+- The next implementation slice should connect restore orchestration to VM lifecycle state and add node-loss or replica-loss recovery tests.
 
 ## Validation
 

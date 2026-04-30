@@ -1128,6 +1128,8 @@ func newRuntimeRouter(
 	router.HandleFunc("/internal/runtime/v1/vms/{vm_id}/interfaces/{id}", runtimeGetVMInterfaceHandler(inventoryStore)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/services", runtimeGetServicesHandler(config, vmManager, migrationManager, schedulerService, networkManager, storageManager, hypervisorManager, runtimeAuth, discovery, runtimeDR)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/dr/status", runtimeGetDRStatusHandler(runtimeDR)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/dr/backups", runtimeListDRBackupsHandler(runtimeDR)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/dr/backups", runtimeRegisterDRBackupHandler(runtimeDR)).Methods(http.MethodPost)
 	router.HandleFunc("/internal/runtime/v1/discovery/inventory", runtimeGetDiscoveryInventoryHandler(discovery)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/discovery/seeds", runtimeGetDiscoverySeedsHandler(discovery)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/discovery/seeds/{id}/verify", runtimeVerifyDiscoverySeedInventoryHandler(discovery)).Methods(http.MethodPost)

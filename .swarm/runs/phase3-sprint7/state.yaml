@@ -14,8 +14,10 @@ implemented:
   - daemon_dr_status_endpoint
   - runtime_backed_backup_service_reporting
   - daemon_startup_shutdown_test_for_dr_runtime
+  - persistent_dr_backup_metadata
+  - daemon_dr_backup_registry_endpoint
+  - restart_reload_test_for_dr_backups
 remaining:
-  - persist_dr_backup_metadata_across_restart
   - connect_restore_orchestration_to_vm_lifecycle
   - add_node_loss_and_replica_loss_recovery_tests
 validation:
