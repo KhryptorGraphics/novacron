@@ -58,13 +58,21 @@ type runtimeConfig struct {
 }
 
 type runtimeManifestSummary struct {
-	Version           string   `json:"version,omitempty"`
-	DeploymentProfile string   `json:"deployment_profile,omitempty"`
-	DiscoveryMode     string   `json:"discovery_mode,omitempty"`
-	FederationMode    string   `json:"federation_mode,omitempty"`
-	MigrationMode     string   `json:"migration_mode,omitempty"`
-	AuthMode          string   `json:"auth_mode,omitempty"`
-	EnabledServices   []string `json:"enabled_services,omitempty"`
+	Version           string                 `json:"version,omitempty"`
+	DeploymentProfile string                 `json:"deployment_profile,omitempty"`
+	DiscoveryMode     string                 `json:"discovery_mode,omitempty"`
+	FederationMode    string                 `json:"federation_mode,omitempty"`
+	MigrationMode     string                 `json:"migration_mode,omitempty"`
+	AuthMode          string                 `json:"auth_mode,omitempty"`
+	EnabledServices   []string               `json:"enabled_services,omitempty"`
+	DiscoverySeeds    []runtimeDiscoverySeed `json:"discovery_seeds,omitempty"`
+}
+
+type runtimeDiscoverySeed struct {
+	ID        string   `json:"id,omitempty"`
+	Address   string   `json:"address"`
+	PublicKey string   `json:"public_key,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
 }
 
 type runtimeServiceStatus struct {
@@ -515,6 +523,7 @@ func runtimeConfigFromManifest(manifest *manifestconfig.Config, nodeID, dataDir 
 		MigrationMode:     manifest.Runtime.MigrationMode,
 		AuthMode:          manifest.Runtime.AuthMode,
 		EnabledServices:   append([]string(nil), manifest.Runtime.EnabledServices...),
+		DiscoverySeeds:    runtimeDiscoverySeedsFromManifest(manifest.Runtime.DiscoverySeeds),
 	}
 
 	config.Storage.BasePath = filepath.Join(effectiveDataDir, "storage")
@@ -525,6 +534,22 @@ func runtimeConfigFromManifest(manifest *manifestconfig.Config, nodeID, dataDir 
 		serviceEnabled(manifest.Runtime.EnabledServices, "auth")
 
 	return config
+}
+
+func runtimeDiscoverySeedsFromManifest(seeds []manifestconfig.RuntimeDiscoverySeed) []runtimeDiscoverySeed {
+	if len(seeds) == 0 {
+		return nil
+	}
+	result := make([]runtimeDiscoverySeed, 0, len(seeds))
+	for _, seed := range seeds {
+		result = append(result, runtimeDiscoverySeed{
+			ID:        seed.ID,
+			Address:   seed.Address,
+			PublicKey: seed.PublicKey,
+			Tags:      append([]string(nil), seed.Tags...),
+		})
+	}
+	return result
 }
 
 func serviceEnabled(enabledServices []string, service string) bool {

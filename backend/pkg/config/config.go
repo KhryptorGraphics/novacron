@@ -78,17 +78,25 @@ type CORSConfig struct {
 
 // RuntimeManifestConfig captures the shared runtime-manifest summary that the API entrypoint can expose.
 type RuntimeManifestConfig struct {
-	Path              string   `json:"path" env:"NOVACRON_RUNTIME_MANIFEST_PATH"`
-	Required          bool     `json:"required" env:"NOVACRON_REQUIRE_RUNTIME_MANIFEST"`
-	Loaded            bool     `json:"loaded"`
-	Version           string   `json:"version,omitempty"`
-	DeploymentProfile string   `json:"deployment_profile,omitempty"`
-	DiscoveryMode     string   `json:"discovery_mode,omitempty"`
-	FederationMode    string   `json:"federation_mode,omitempty"`
-	MigrationMode     string   `json:"migration_mode,omitempty"`
-	AuthMode          string   `json:"auth_mode,omitempty"`
-	StorageClasses    []string `json:"storage_classes,omitempty"`
-	EnabledServices   []string `json:"enabled_services,omitempty"`
+	Path              string                 `json:"path" env:"NOVACRON_RUNTIME_MANIFEST_PATH"`
+	Required          bool                   `json:"required" env:"NOVACRON_REQUIRE_RUNTIME_MANIFEST"`
+	Loaded            bool                   `json:"loaded"`
+	Version           string                 `json:"version,omitempty"`
+	DeploymentProfile string                 `json:"deployment_profile,omitempty"`
+	DiscoveryMode     string                 `json:"discovery_mode,omitempty"`
+	FederationMode    string                 `json:"federation_mode,omitempty"`
+	MigrationMode     string                 `json:"migration_mode,omitempty"`
+	AuthMode          string                 `json:"auth_mode,omitempty"`
+	StorageClasses    []string               `json:"storage_classes,omitempty"`
+	EnabledServices   []string               `json:"enabled_services,omitempty"`
+	DiscoverySeeds    []RuntimeDiscoverySeed `json:"discovery_seeds,omitempty"`
+}
+
+type RuntimeDiscoverySeed struct {
+	ID        string   `json:"id,omitempty"`
+	Address   string   `json:"address"`
+	PublicKey string   `json:"public_key,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
 }
 
 // Load creates a new Config instance with values loaded from environment variables
@@ -289,6 +297,15 @@ func loadRuntimeManifestSummary(cfg *Config) error {
 	cfg.RuntimeManifest.AuthMode = manifest.Runtime.AuthMode
 	cfg.RuntimeManifest.StorageClasses = append([]string(nil), manifest.Runtime.StorageClasses...)
 	cfg.RuntimeManifest.EnabledServices = append([]string(nil), manifest.Runtime.EnabledServices...)
+	cfg.RuntimeManifest.DiscoverySeeds = make([]RuntimeDiscoverySeed, 0, len(manifest.Runtime.DiscoverySeeds))
+	for _, seed := range manifest.Runtime.DiscoverySeeds {
+		cfg.RuntimeManifest.DiscoverySeeds = append(cfg.RuntimeManifest.DiscoverySeeds, RuntimeDiscoverySeed{
+			ID:        seed.ID,
+			Address:   seed.Address,
+			PublicKey: seed.PublicKey,
+			Tags:      append([]string(nil), seed.Tags...),
+		})
+	}
 
 	return nil
 }

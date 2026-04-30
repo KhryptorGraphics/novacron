@@ -29,6 +29,11 @@ runtime:
     - "auth"
     - "vm"
     - "scheduler"
+  discovery_seeds:
+    - id: "seed-a"
+      address: "10.0.0.20:8090"
+      tags:
+        - "trusted"
 `
 	if err := os.WriteFile(manifestPath, []byte(manifestYAML), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
@@ -55,6 +60,12 @@ runtime:
 	}
 	if !containsValue(cfg.RuntimeManifest.EnabledServices, "scheduler") {
 		t.Fatalf("expected enabled services to include scheduler, got %#v", cfg.RuntimeManifest.EnabledServices)
+	}
+	if len(cfg.RuntimeManifest.DiscoverySeeds) != 1 {
+		t.Fatalf("expected one discovery seed, got %#v", cfg.RuntimeManifest.DiscoverySeeds)
+	}
+	if got, want := cfg.RuntimeManifest.DiscoverySeeds[0].Address, "10.0.0.20:8090"; got != want {
+		t.Fatalf("runtime discovery seed address = %q, want %q", got, want)
 	}
 }
 

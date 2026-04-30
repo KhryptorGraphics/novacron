@@ -150,14 +150,23 @@ type SecurityConfig struct {
 
 // RuntimeManifestConfig defines the shared runtime-manifest contract consumed by converging entrypoints.
 type RuntimeManifestConfig struct {
-	Version           string   `yaml:"version" json:"version"`
-	DeploymentProfile string   `yaml:"deployment_profile" json:"deployment_profile"`
-	DiscoveryMode     string   `yaml:"discovery_mode" json:"discovery_mode"`
-	FederationMode    string   `yaml:"federation_mode" json:"federation_mode"`
-	MigrationMode     string   `yaml:"migration_mode" json:"migration_mode"`
-	AuthMode          string   `yaml:"auth_mode" json:"auth_mode"`
-	StorageClasses    []string `yaml:"storage_classes" json:"storage_classes"`
-	EnabledServices   []string `yaml:"enabled_services" json:"enabled_services"`
+	Version           string                 `yaml:"version" json:"version"`
+	DeploymentProfile string                 `yaml:"deployment_profile" json:"deployment_profile"`
+	DiscoveryMode     string                 `yaml:"discovery_mode" json:"discovery_mode"`
+	FederationMode    string                 `yaml:"federation_mode" json:"federation_mode"`
+	MigrationMode     string                 `yaml:"migration_mode" json:"migration_mode"`
+	AuthMode          string                 `yaml:"auth_mode" json:"auth_mode"`
+	StorageClasses    []string               `yaml:"storage_classes" json:"storage_classes"`
+	EnabledServices   []string               `yaml:"enabled_services" json:"enabled_services"`
+	DiscoverySeeds    []RuntimeDiscoverySeed `yaml:"discovery_seeds" json:"discovery_seeds,omitempty"`
+}
+
+// RuntimeDiscoverySeed declares a trusted bootstrap peer for seeded discovery.
+type RuntimeDiscoverySeed struct {
+	ID        string   `yaml:"id" json:"id,omitempty"`
+	Address   string   `yaml:"address" json:"address"`
+	PublicKey string   `yaml:"public_key" json:"public_key,omitempty"`
+	Tags      []string `yaml:"tags" json:"tags,omitempty"`
 }
 
 // Loader handles configuration loading from various sources
@@ -264,6 +273,7 @@ func (l *Loader) applyDefaults(config *Config) error {
 	} else {
 		config.Runtime.EnabledServices = normalizeStringList(config.Runtime.EnabledServices)
 	}
+	config.Runtime.DiscoverySeeds = normalizeRuntimeDiscoverySeeds(config.Runtime.DiscoverySeeds)
 
 	// DWCP defaults
 	if config.DWCP.DetectionInterval == 0 {
@@ -374,6 +384,7 @@ func (l *Loader) validate(config *Config) error {
 	if len(runtimeConfig.EnabledServices) == 0 {
 		runtimeConfig.EnabledServices = defaultEnabledServices()
 	}
+	runtimeConfig.DiscoverySeeds = normalizeRuntimeDiscoverySeeds(runtimeConfig.DiscoverySeeds)
 
 	// System validation
 	if config.System.NodeID == "" {
@@ -404,6 +415,11 @@ func (l *Loader) validate(config *Config) error {
 	validDiscoveryModes := map[string]bool{"disabled": true, "seeded": true}
 	if !validDiscoveryModes[runtimeConfig.DiscoveryMode] {
 		return fmt.Errorf("invalid runtime.discovery_mode: %s", runtimeConfig.DiscoveryMode)
+	}
+	for _, seed := range runtimeConfig.DiscoverySeeds {
+		if seed.Address == "" {
+			return fmt.Errorf("runtime.discovery_seeds entries require address")
+		}
 	}
 
 	validFederationModes := map[string]bool{"disabled": true, "trusted": true}
@@ -537,6 +553,9 @@ func (l *Loader) LoadFromEnv(config *Config) error {
 	if enabled := os.Getenv("NOVACRON_ENABLED_SERVICES"); enabled != "" {
 		config.Runtime.EnabledServices = normalizeStringList(strings.Split(enabled, ","))
 	}
+	if seeds := os.Getenv("NOVACRON_DISCOVERY_SEEDS"); seeds != "" {
+		config.Runtime.DiscoverySeeds = discoverySeedsFromAddresses(strings.Split(seeds, ","))
+	}
 
 	return nil
 }
@@ -664,4 +683,46 @@ func normalizeStringList(values []string) []string {
 	}
 
 	return normalized
+}
+
+func normalizeRuntimeDiscoverySeeds(seeds []RuntimeDiscoverySeed) []RuntimeDiscoverySeed {
+	if len(seeds) == 0 {
+		return nil
+	}
+
+	normalized := make([]RuntimeDiscoverySeed, 0, len(seeds))
+	seen := make(map[string]struct{}, len(seeds))
+	for _, seed := range seeds {
+		item := RuntimeDiscoverySeed{
+			ID:        strings.TrimSpace(seed.ID),
+			Address:   strings.TrimSpace(seed.Address),
+			PublicKey: strings.TrimSpace(seed.PublicKey),
+			Tags:      normalizeStringList(seed.Tags),
+		}
+		if item.Address == "" {
+			normalized = append(normalized, item)
+			continue
+		}
+		key := item.ID + "|" + item.Address
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, item)
+	}
+	return normalized
+}
+
+func discoverySeedsFromAddresses(addresses []string) []RuntimeDiscoverySeed {
+	if len(addresses) == 0 {
+		return nil
+	}
+	seeds := make([]RuntimeDiscoverySeed, 0, len(addresses))
+	for _, address := range addresses {
+		seed := RuntimeDiscoverySeed{Address: strings.TrimSpace(address)}
+		if seed.Address != "" {
+			seeds = append(seeds, seed)
+		}
+	}
+	return normalizeRuntimeDiscoverySeeds(seeds)
 }

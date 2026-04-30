@@ -249,6 +249,13 @@ runtime:
     - "api"
     - "auth"
     - "vm"
+  discovery_seeds:
+    - id: "seed-a"
+      address: "10.0.0.20:8090"
+      public_key: "seed-public-key"
+      tags:
+        - "trusted"
+        - "wan"
 `
 
 	if err := os.WriteFile(configPath, []byte(configYAML), 0o644); err != nil {
@@ -275,6 +282,15 @@ runtime:
 	}
 	if !containsString(cfg.Runtime.EnabledServices, "vm") {
 		t.Fatalf("runtime.enabled_services missing vm: %#v", cfg.Runtime.EnabledServices)
+	}
+	if len(cfg.Runtime.DiscoverySeeds) != 1 {
+		t.Fatalf("runtime.discovery_seeds len = %d, want 1", len(cfg.Runtime.DiscoverySeeds))
+	}
+	if got, want := cfg.Runtime.DiscoverySeeds[0].Address, "10.0.0.20:8090"; got != want {
+		t.Fatalf("runtime.discovery_seeds[0].address=%q, want %q", got, want)
+	}
+	if !containsString(cfg.Runtime.DiscoverySeeds[0].Tags, "trusted") {
+		t.Fatalf("runtime.discovery_seeds[0].tags missing trusted: %#v", cfg.Runtime.DiscoverySeeds[0].Tags)
 	}
 }
 

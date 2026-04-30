@@ -62,6 +62,11 @@ runtime:
     - storage
     - network
     - hypervisor
+  discovery_seeds:
+    - id: seed-a
+      address: 10.0.0.20:8090
+      tags:
+        - trusted
 monitoring:
   enable_metrics: true
 security:
@@ -100,6 +105,12 @@ security:
 	}
 	if !serviceEnabled(config.Services.EnabledServices, "scheduler") {
 		t.Fatalf("expected services enabled list to contain scheduler, got %#v", config.Services.EnabledServices)
+	}
+	if len(config.Services.DiscoverySeeds) != 1 {
+		t.Fatalf("expected one discovery seed, got %#v", config.Services.DiscoverySeeds)
+	}
+	if got, want := config.Services.DiscoverySeeds[0].Address, "10.0.0.20:8090"; got != want {
+		t.Fatalf("discovery seed address = %q, want %q", got, want)
 	}
 }
 

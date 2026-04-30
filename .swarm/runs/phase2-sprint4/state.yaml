@@ -1,0 +1,15 @@
+phase: 2
+sprint: 4
+status: in_progress
+issue: NC-p2a
+canonical_runtime: backend/core/cmd/novacron/main.go
+implemented:
+  - signed_node_inventory_contract
+  - runtime_manifest_discovery_seeds
+  - runtime_manifest_seed_summary
+remaining:
+  - start_seeded_discovery_from_canonical_daemon
+  - publish_local_signed_inventory
+  - verify_remote_inventory_signatures
+  - feed measured_network_metrics_into_placement
+  - retire_or_gate_parallel_dwcp_discovery_paths
