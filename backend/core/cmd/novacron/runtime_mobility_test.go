@@ -235,6 +235,65 @@ func TestRuntimeMobilityRecoveryFromStateReportsStaleBackup(t *testing.T) {
 	}
 }
 
+func TestRuntimeMobilityRecoveryFromStateReportsNodeLoss(t *testing.T) {
+	t.Parallel()
+
+	policy := vm.DefaultMigrationBackupPolicy(vm.MigrationModeCold)
+	now := time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC)
+	response := runtimeMobilityRecoveryFromState(policy, []*vm.VMMigration{{
+		ID:        "node-loss-1",
+		VMID:      "vm-1",
+		Status:    vm.MigrationStatusFailed,
+		Error:     "source node lost during migration",
+		UpdatedAt: now.Add(-time.Minute),
+		Options: map[string]string{
+			runtimeMobilityFailureDomainOption: runtimeMobilityFailureDomainNode,
+		},
+	}}, []vm.VerifiedBackup{{
+		ID:         "backup-node-loss",
+		VMID:       "vm-1",
+		VerifiedAt: now.Add(-time.Minute),
+	}}, now)
+	if got, want := response.State, "failed"; got != want {
+		t.Fatalf("recovery state = %q, want %q", got, want)
+	}
+	if got, want := response.NodeLossCount, 1; got != want {
+		t.Fatalf("node loss count = %d, want %d", got, want)
+	}
+	if !containsRuntimeMobilityString(response.RecoveryActionsNeeded, "restore_workload_on_surviving_node") {
+		t.Fatalf("recovery actions = %#v, want restore_workload_on_surviving_node", response.RecoveryActionsNeeded)
+	}
+}
+
+func TestRuntimeMobilityRecoveryFromStateReportsReplicaLoss(t *testing.T) {
+	t.Parallel()
+
+	policy := vm.DefaultMigrationBackupPolicy(vm.MigrationModeCold)
+	now := time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC)
+	response := runtimeMobilityRecoveryFromState(policy, []*vm.VMMigration{{
+		ID:        "replica-loss-1",
+		VMID:      "vm-1",
+		Status:    vm.MigrationStatusCompleted,
+		UpdatedAt: now.Add(-time.Minute),
+		Options: map[string]string{
+			runtimeMobilityFailureDomainOption: runtimeMobilityFailureDomainReplica,
+		},
+	}}, []vm.VerifiedBackup{{
+		ID:         "backup-replica-loss",
+		VMID:       "vm-1",
+		VerifiedAt: now.Add(-time.Minute),
+	}}, now)
+	if got, want := response.State, "degraded"; got != want {
+		t.Fatalf("recovery state = %q, want %q", got, want)
+	}
+	if got, want := response.ReplicaLossCount, 1; got != want {
+		t.Fatalf("replica loss count = %d, want %d", got, want)
+	}
+	if !containsRuntimeMobilityString(response.RecoveryActionsNeeded, "reseed_storage_replica") {
+		t.Fatalf("recovery actions = %#v, want reseed_storage_replica", response.RecoveryActionsNeeded)
+	}
+}
+
 func TestRuntimeMobilityRecoveryEndpointReportsRolledBackOperation(t *testing.T) {
 	t.Parallel()
 

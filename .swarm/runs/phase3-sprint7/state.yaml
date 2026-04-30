@@ -20,8 +20,10 @@ implemented:
   - daemon_dr_restore_endpoint
   - verified_backup_restore_preconditions
   - vm_lifecycle_restore_target_validation
+  - node_loss_recovery_classification
+  - replica_loss_recovery_classification
 remaining:
-  - add_node_loss_and_replica_loss_recovery_tests
+  - final_phase3_sprint7_review_and_closeout
 validation:
   targeted:
     - command: GOTOOLCHAIN=go1.24.6 go test ./cmd/novacron

@@ -43,12 +43,20 @@ type runtimeVerifiedBackupResponse struct {
 	VerifiedAt time.Time `json:"verified_at"`
 }
 
+const (
+	runtimeMobilityFailureDomainOption  = "failure_domain"
+	runtimeMobilityFailureDomainNode    = "node_loss"
+	runtimeMobilityFailureDomainReplica = "replica_loss"
+)
+
 type runtimeMobilityRecoveryResponse struct {
 	State                 string        `json:"state"`
 	OperationCount        int           `json:"operation_count"`
 	CompletedCount        int           `json:"completed_count"`
 	FailedCount           int           `json:"failed_count"`
 	RolledBackCount       int           `json:"rolled_back_count"`
+	NodeLossCount         int           `json:"node_loss_count"`
+	ReplicaLossCount      int           `json:"replica_loss_count"`
 	VerifiedBackupCount   int           `json:"verified_backup_count"`
 	LatestBackupID        string        `json:"latest_backup_id,omitempty"`
 	LatestBackupAge       time.Duration `json:"latest_backup_age"`
@@ -159,6 +167,12 @@ func runtimeMobilityRecoveryFromState(policy vm.MigrationBackupPolicy, operation
 		if latestOperation == nil || operation.UpdatedAt.After(latestOperation.UpdatedAt) {
 			latestOperation = operation
 		}
+		switch strings.TrimSpace(operation.Options[runtimeMobilityFailureDomainOption]) {
+		case runtimeMobilityFailureDomainNode:
+			response.NodeLossCount++
+		case runtimeMobilityFailureDomainReplica:
+			response.ReplicaLossCount++
+		}
 	}
 	if latestOperation != nil {
 		response.LastOperationStatus = string(latestOperation.Status)
@@ -197,6 +211,14 @@ func runtimeMobilityRecoveryFromState(policy vm.MigrationBackupPolicy, operation
 	if response.RolledBackCount > 0 && response.State != "failed" {
 		response.State = "recovering"
 		response.RecoveryActionsNeeded = append(response.RecoveryActionsNeeded, "review_rolled_back_mobility_operation")
+	}
+	if response.NodeLossCount > 0 {
+		response.State = "failed"
+		response.RecoveryActionsNeeded = append(response.RecoveryActionsNeeded, "restore_workload_on_surviving_node")
+	}
+	if response.ReplicaLossCount > 0 && response.State != "failed" {
+		response.State = "degraded"
+		response.RecoveryActionsNeeded = append(response.RecoveryActionsNeeded, "reseed_storage_replica")
 	}
 	if response.LastRollbackAttempted && !response.LastRollbackSucceeded {
 		response.State = "failed"
