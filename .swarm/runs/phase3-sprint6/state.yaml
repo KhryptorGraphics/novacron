@@ -1,7 +1,7 @@
 phase: 3
 sprint: 6
 status: in_progress
-issue: novacron-qp3
+issue: novacron-t98
 canonical_runtime: backend/core/cmd/novacron/main.go
 implemented:
   - canonical_migration_backup_policy_contract
@@ -9,8 +9,10 @@ implemented:
   - daemon_mobility_policy_endpoint
   - live_migration_gate_default
   - explicit_backup_service_reporting
+  - policy_checked_cold_migration_execution
+  - daemon_cold_migration_endpoint
+  - verified_backup_precondition_for_cold_migration
 remaining:
-  - wire_policy_to_cold_migration_execution
   - wire_policy_to_checkpoint_restore_execution
   - connect_backup_dr_runtime_to_canonical_daemon
   - add_interrupted_migration_rollback_observability

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -45,6 +46,11 @@ type VMMigration struct {
 	Error             string
 	Options           map[string]string
 }
+
+const (
+	MigrationOptionBackupVerified = "backup_verified"
+	MigrationOptionBackupID       = "backup_id"
+)
 
 // Using VM struct from vm.go
 
@@ -138,6 +144,29 @@ func (m *VMMigrationManager) ExecuteMigration(ctx context.Context, migration *VM
 	migration.Progress = 100
 
 	return nil
+}
+
+// ExecuteMigrationWithPolicy executes a migration only after the canonical
+// mobility policy allows the requested mode and backup preconditions.
+func (m *VMMigrationManager) ExecuteMigrationWithPolicy(ctx context.Context, migration *VMMigration, destManager *VMMigrationManager, policy MigrationBackupPolicy) error {
+	if migration == nil {
+		return errors.New("migration cannot be nil")
+	}
+	policy = policy.Normalize()
+	if err := policy.Validate(); err != nil {
+		return fmt.Errorf("invalid mobility policy: %w", err)
+	}
+	mode := NormalizeMigrationMode(string(migration.Type))
+	if !policy.AllowsMigrationMode(mode) {
+		return fmt.Errorf("migration mode %q is not allowed by mobility policy", mode)
+	}
+	if mode == MigrationModeLive && !policy.LiveMigrationGate.Enabled {
+		return fmt.Errorf("live migration is gated: %s", policy.LiveMigrationGate.Reason)
+	}
+	if policy.Backup.RequireRecentBackup && !migrationOptionEnabled(migration.Options, MigrationOptionBackupVerified) {
+		return fmt.Errorf("mobility policy requires a verified recent backup before migration")
+	}
+	return m.ExecuteMigration(ctx, migration, destManager)
 }
 
 // executeColdMigration performs a cold migration
@@ -392,4 +421,13 @@ func copyVMFile(src, dst string) error {
 	// Copy content
 	_, err = io.Copy(dstFile, srcFile)
 	return err
+}
+
+func migrationOptionEnabled(options map[string]string, key string) bool {
+	switch strings.TrimSpace(strings.ToLower(options[key])) {
+	case "1", "true", "yes", "verified":
+		return true
+	default:
+		return false
+	}
 }

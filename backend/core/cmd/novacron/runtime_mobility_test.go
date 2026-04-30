@@ -1,7 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/khryptorgraphics/novacron/backend/core/vm"
@@ -37,6 +43,85 @@ func TestRuntimeMobilityPolicyEndpointGatesLiveMigration(t *testing.T) {
 	if !containsRuntimeMobilityString(response.Policy.AllowedMigrationModes, vm.MigrationModeCheckpoint) {
 		t.Fatalf("checkpoint should be allowed before live migration: %#v", response.Policy.AllowedMigrationModes)
 	}
+}
+
+func TestRuntimeColdMigrationEndpointExecutesPolicyVerifiedMigration(t *testing.T) {
+	t.Parallel()
+
+	sourceDir := t.TempDir()
+	targetDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "vm-1.state"), []byte("vm-state"), 0o644); err != nil {
+		t.Fatalf("write source state: %v", err)
+	}
+	config := defaultRuntimeConfig("node-a", t.TempDir())
+	config.Services.MigrationMode = vm.MigrationModeCold
+	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+
+	payload := runtimeColdMigrationRequest{
+		VMID:             "vm-1",
+		TargetNodeID:     "node-b",
+		TargetStorageDir: targetDir,
+		BackupVerified:   true,
+		BackupID:         "backup-1",
+	}
+	response := postRuntimeMobilityJSON[runtimeColdMigrationResponse](t, router, "/internal/runtime/v1/mobility/cold-migrations", payload, http.StatusAccepted)
+	if got, want := response.Status, vm.MigrationStatusCompleted; got != want {
+		t.Fatalf("migration status = %q, want %q", got, want)
+	}
+	if got, want := response.Progress, float64(100); got != want {
+		t.Fatalf("migration progress = %f, want %f", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "vm-1.state")); err != nil {
+		t.Fatalf("expected target state file to be copied: %v", err)
+	}
+}
+
+func TestRuntimeColdMigrationEndpointRequiresVerifiedBackup(t *testing.T) {
+	t.Parallel()
+
+	sourceDir := t.TempDir()
+	targetDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "vm-1.state"), []byte("vm-state"), 0o644); err != nil {
+		t.Fatalf("write source state: %v", err)
+	}
+	config := defaultRuntimeConfig("node-a", t.TempDir())
+	config.Services.MigrationMode = vm.MigrationModeCold
+	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+
+	payload := runtimeColdMigrationRequest{
+		VMID:             "vm-1",
+		TargetNodeID:     "node-b",
+		TargetStorageDir: targetDir,
+	}
+	response := postRuntimeMobilityJSON[runtimeColdMigrationResponse](t, router, "/internal/runtime/v1/mobility/cold-migrations", payload, http.StatusPreconditionFailed)
+	if got, want := response.Status, vm.MigrationStatusPending; got != want {
+		t.Fatalf("migration status = %q, want %q", got, want)
+	}
+	if response.Error != "" {
+		t.Fatalf("precondition failure should not mutate migration error, got %q", response.Error)
+	}
+}
+
+func postRuntimeMobilityJSON[T any](t *testing.T, router http.Handler, path string, payload interface{}, expectedStatus int) T {
+	t.Helper()
+
+	var zero T
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != expectedStatus {
+		t.Fatalf("POST %s status = %d, want %d: %s", path, rec.Code, expectedStatus, rec.Body.String())
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&zero); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return zero
 }
 
 func containsRuntimeMobilityString(values []string, target string) bool {

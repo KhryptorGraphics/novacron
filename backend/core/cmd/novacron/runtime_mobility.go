@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/khryptorgraphics/novacron/backend/core/vm"
 )
@@ -9,6 +13,28 @@ import (
 type runtimeMobilityPolicyResponse struct {
 	Mode   string                   `json:"mode"`
 	Policy vm.MigrationBackupPolicy `json:"policy"`
+}
+
+type runtimeColdMigrationRequest struct {
+	VMID             string `json:"vm_id"`
+	TargetNodeID     string `json:"target_node_id"`
+	TargetStorageDir string `json:"target_storage_dir"`
+	BackupVerified   bool   `json:"backup_verified"`
+	BackupID         string `json:"backup_id,omitempty"`
+}
+
+type runtimeColdMigrationResponse struct {
+	ID                string             `json:"id"`
+	VMID              string             `json:"vm_id"`
+	SourceNodeID      string             `json:"source_node_id"`
+	DestinationNodeID string             `json:"destination_node_id"`
+	Type              vm.MigrationType   `json:"type"`
+	Status            vm.MigrationStatus `json:"status"`
+	Progress          float64            `json:"progress"`
+	Error             string             `json:"error,omitempty"`
+	Policy            string             `json:"policy"`
+	BackupVerified    bool               `json:"backup_verified"`
+	BackupID          string             `json:"backup_id,omitempty"`
 }
 
 func runtimeMobilityPolicyFromConfig(config runtimeConfig) vm.MigrationBackupPolicy {
@@ -29,4 +55,76 @@ func runtimeGetMobilityPolicyHandler(config runtimeConfig) http.HandlerFunc {
 			Policy: policy,
 		})
 	}
+}
+
+func runtimeStartColdMigrationHandler(config runtimeConfig, migrationManager *vm.VMMigrationManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if migrationManager == nil {
+			respondRuntimeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "migration runtime is not initialized"})
+			return
+		}
+
+		var request runtimeColdMigrationRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			respondRuntimeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cold migration request"})
+			return
+		}
+		request.VMID = strings.TrimSpace(request.VMID)
+		request.TargetNodeID = strings.TrimSpace(request.TargetNodeID)
+		request.TargetStorageDir = strings.TrimSpace(request.TargetStorageDir)
+		request.BackupID = strings.TrimSpace(request.BackupID)
+		if request.VMID == "" || request.TargetNodeID == "" || request.TargetStorageDir == "" {
+			respondRuntimeJSON(w, http.StatusBadRequest, map[string]string{"error": "vm_id, target_node_id, and target_storage_dir are required"})
+			return
+		}
+
+		options := map[string]string{
+			vm.MigrationOptionBackupVerified: fmt.Sprintf("%t", request.BackupVerified),
+		}
+		if request.BackupID != "" {
+			options[vm.MigrationOptionBackupID] = request.BackupID
+		}
+		migration := &vm.VMMigration{
+			ID:                fmt.Sprintf("cold-%s-%d", request.VMID, time.Now().UTC().UnixNano()),
+			VMID:              request.VMID,
+			SourceNodeID:      runtimeDiscoveryNodeID(config),
+			DestinationNodeID: request.TargetNodeID,
+			Type:              vm.MigrationTypeCold,
+			Status:            vm.MigrationStatusPending,
+			CreatedAt:         time.Now().UTC(),
+			UpdatedAt:         time.Now().UTC(),
+			Options:           options,
+		}
+		policy := runtimeMobilityPolicyFromConfig(config)
+		destinationManager := vm.NewVMMigrationManager(request.TargetNodeID, request.TargetStorageDir)
+		if err := migrationManager.ExecuteMigrationWithPolicy(r.Context(), migration, destinationManager, policy); err != nil {
+			status := http.StatusConflict
+			if strings.Contains(err.Error(), "requires a verified recent backup") {
+				status = http.StatusPreconditionFailed
+			}
+			respondRuntimeJSON(w, status, runtimeColdMigrationResponseFromMigration(migration, policy, request.BackupVerified, request.BackupID))
+			return
+		}
+		respondRuntimeJSON(w, http.StatusAccepted, runtimeColdMigrationResponseFromMigration(migration, policy, request.BackupVerified, request.BackupID))
+	}
+}
+
+func runtimeColdMigrationResponseFromMigration(migration *vm.VMMigration, policy vm.MigrationBackupPolicy, backupVerified bool, backupID string) runtimeColdMigrationResponse {
+	response := runtimeColdMigrationResponse{
+		Policy:         policy.DefaultMigrationMode,
+		BackupVerified: backupVerified,
+		BackupID:       backupID,
+	}
+	if migration == nil {
+		return response
+	}
+	response.ID = migration.ID
+	response.VMID = migration.VMID
+	response.SourceNodeID = migration.SourceNodeID
+	response.DestinationNodeID = migration.DestinationNodeID
+	response.Type = migration.Type
+	response.Status = migration.Status
+	response.Progress = migration.Progress
+	response.Error = migration.Error
+	return response
 }

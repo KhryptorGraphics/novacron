@@ -164,6 +164,10 @@ func (p MigrationBackupPolicy) Validate() error {
 	return nil
 }
 
+func (p MigrationBackupPolicy) AllowsMigrationMode(mode string) bool {
+	return containsPolicyValue(p.Normalize().AllowedMigrationModes, NormalizeMigrationMode(mode))
+}
+
 func NormalizeMigrationMode(mode string) string {
 	switch strings.TrimSpace(strings.ToLower(mode)) {
 	case "", MigrationModeDisabled:
