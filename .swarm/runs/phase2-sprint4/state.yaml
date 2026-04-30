@@ -7,9 +7,10 @@ implemented:
   - signed_node_inventory_contract
   - runtime_manifest_discovery_seeds
   - runtime_manifest_seed_summary
+  - canonical_daemon_local_signed_inventory_endpoint
+  - canonical_daemon_seed_signature_verification_endpoint
+  - explicit_discovery_and_federation_service_reporting
 remaining:
-  - start_seeded_discovery_from_canonical_daemon
-  - publish_local_signed_inventory
-  - verify_remote_inventory_signatures
+  - start_seeded_peer_fetch_and_reachability_probes_from_canonical_daemon
   - feed measured_network_metrics_into_placement
   - retire_or_gate_parallel_dwcp_discovery_paths

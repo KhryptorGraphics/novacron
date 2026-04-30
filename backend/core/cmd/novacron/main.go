@@ -98,6 +98,8 @@ const (
 var runtimeServiceOrder = []string{
 	"api",
 	"auth",
+	"discovery",
+	"federation",
 	"hypervisor",
 	"migration",
 	"network",
@@ -304,6 +306,7 @@ func runtimeServiceReportFromRuntime(
 	storageManager *storage.StorageManager,
 	hypervisorManager *hypervisor.Hypervisor,
 	runtimeAuth *runtimeAuthRuntime,
+	discovery *runtimeDiscoveryState,
 ) runtimeServiceReport {
 	disabledServices := make([]string, 0)
 	services := make([]runtimeServiceStatus, 0, len(runtimeServiceOrder))
@@ -334,6 +337,27 @@ func runtimeServiceReportFromRuntime(
 			default:
 				status.State = runtimeServiceStateUnavailable
 				status.Reason = "auth runtime failed to initialize"
+			}
+		case "discovery":
+			status.Enabled = runtimeDiscoveryEnabled(config)
+			switch {
+			case !status.Enabled:
+				status.State = runtimeServiceStateDisabled
+				status.Reason = "disabled by runtime manifest"
+			case discovery != nil:
+				status.State = runtimeServiceStateRunning
+			default:
+				status.State = runtimeServiceStateUnavailable
+				status.Reason = "discovery runtime failed to initialize"
+			}
+		case "federation":
+			status.Enabled = runtimeFederationEnabled(config)
+			if !status.Enabled {
+				status.State = runtimeServiceStateDisabled
+				status.Reason = "disabled by runtime manifest"
+			} else {
+				status.State = runtimeServiceStateUnavailable
+				status.Reason = "federation runtime is gated behind signed discovery integration"
 			}
 		case "hypervisor":
 			status = runtimeServiceStatusFromInstance(config, serviceName, hypervisorManager != nil, "hypervisor manager unavailable")
@@ -979,7 +1003,19 @@ func initializeAPI(
 		return nil, fmt.Errorf("listen on %s: %w", listenAddress, err)
 	}
 
-	router := newRuntimeRouter(config, vmManager, migrationManager, schedulerService, networkManager, storageManager, hypervisorManager, inventoryStore, runtimeAuth)
+	discoveryState, err := newRuntimeDiscoveryState(config, listener.Addr().String())
+	if err != nil {
+		_ = listener.Close()
+		if inventoryStore != nil {
+			_ = inventoryStore.Close()
+		}
+		if runtimeAuth != nil && runtimeAuth.persistence != nil {
+			_ = runtimeAuth.persistence.Close()
+		}
+		return nil, fmt.Errorf("initialize runtime discovery: %w", err)
+	}
+
+	router := newRuntimeRouter(config, vmManager, migrationManager, schedulerService, networkManager, storageManager, hypervisorManager, inventoryStore, runtimeAuth, discoveryState)
 	server := &http.Server{
 		Handler: router,
 		BaseContext: func(net.Listener) context.Context {
@@ -1050,6 +1086,7 @@ func newRuntimeRouter(
 	hypervisorManager *hypervisor.Hypervisor,
 	inventoryStore *runtimeInventoryStore,
 	runtimeAuth *runtimeAuthRuntime,
+	discovery *runtimeDiscoveryState,
 ) *mux.Router {
 	router := mux.NewRouter()
 	router.Use(runtimeCORSMiddleware(config.Auth))
@@ -1064,7 +1101,10 @@ func newRuntimeRouter(
 	router.HandleFunc("/internal/runtime/v1/networks/{id}", runtimeGetNetworkHandler(inventoryStore)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/vms/{vm_id}/interfaces", runtimeGetVMInterfacesHandler(inventoryStore)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/vms/{vm_id}/interfaces/{id}", runtimeGetVMInterfaceHandler(inventoryStore)).Methods(http.MethodGet)
-	router.HandleFunc("/internal/runtime/v1/services", runtimeGetServicesHandler(config, vmManager, migrationManager, schedulerService, networkManager, storageManager, hypervisorManager, runtimeAuth)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/services", runtimeGetServicesHandler(config, vmManager, migrationManager, schedulerService, networkManager, storageManager, hypervisorManager, runtimeAuth, discovery)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/discovery/inventory", runtimeGetDiscoveryInventoryHandler(discovery)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/discovery/seeds", runtimeGetDiscoverySeedsHandler(discovery)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/discovery/seeds/{id}/verify", runtimeVerifyDiscoverySeedInventoryHandler(discovery)).Methods(http.MethodPost)
 	clusterHandler := runtimeProtectClusterRoute(runtimeAuth)
 	router.Handle("/api/cluster/nodes", clusterHandler(runtimeListNodesHandler(vmManager))).Methods(http.MethodGet)
 	router.Handle("/api/cluster/nodes/{id}", clusterHandler(runtimeGetNodeHandler(vmManager))).Methods(http.MethodGet)
@@ -1158,6 +1198,7 @@ func runtimeGetServicesHandler(
 	storageManager *storage.StorageManager,
 	hypervisorManager *hypervisor.Hypervisor,
 	runtimeAuth *runtimeAuthRuntime,
+	discovery *runtimeDiscoveryState,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		report := runtimeServiceReportFromRuntime(
@@ -1169,6 +1210,7 @@ func runtimeGetServicesHandler(
 			storageManager,
 			hypervisorManager,
 			runtimeAuth,
+			discovery,
 		)
 		respondRuntimeJSON(w, http.StatusOK, report)
 	}
