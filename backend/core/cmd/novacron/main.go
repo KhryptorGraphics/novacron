@@ -1109,6 +1109,7 @@ func newRuntimeRouter(
 	router.HandleFunc("/internal/runtime/v1/discovery/seeds", runtimeGetDiscoverySeedsHandler(discovery)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/discovery/seeds/{id}/verify", runtimeVerifyDiscoverySeedInventoryHandler(discovery)).Methods(http.MethodPost)
 	router.HandleFunc("/internal/runtime/v1/mobility/policy", runtimeGetMobilityPolicyHandler(config)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/mobility/operations", runtimeListMobilityOperationsHandler(config, migrationManager)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/mobility/cold-migrations", runtimeStartColdMigrationHandler(config, migrationManager)).Methods(http.MethodPost)
 	router.HandleFunc("/internal/runtime/v1/mobility/checkpoint-restores", runtimeStartCheckpointRestoreHandler(config, migrationManager)).Methods(http.MethodPost)
 	clusterHandler := runtimeProtectClusterRoute(runtimeAuth)

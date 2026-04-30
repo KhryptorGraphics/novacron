@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -92,6 +93,7 @@ func (m *VMMigrationManager) ExecuteMigration(ctx context.Context, migration *VM
 	migration.Status = MigrationStatusInProgress
 	migration.StartTime = time.Now()
 	migration.Progress = 0
+	m.recordMigration(migration)
 
 	// Simulate VM setup before migration
 	// In a real implementation, we would use the VM struct from vm.go
@@ -141,12 +143,14 @@ func (m *VMMigrationManager) ExecuteMigration(ctx context.Context, migration *VM
 			migration.RollbackSucceeded = true
 			migration.Status = MigrationStatusRolledBack
 		}
+		m.recordMigration(migration)
 
 		return err
 	}
 
 	migration.Status = MigrationStatusCompleted
 	migration.Progress = 100
+	m.recordMigration(migration)
 
 	return nil
 }
@@ -201,6 +205,7 @@ func (m *VMMigrationManager) ExecuteCheckpointRestoreWithPolicy(ctx context.Cont
 	migration.Status = MigrationStatusInProgress
 	migration.StartTime = time.Now()
 	migration.Progress = 0
+	m.recordMigration(migration)
 
 	err := m.executeCheckpointRestore(ctx, migration, destManager)
 	migration.EndTime = time.Now()
@@ -215,10 +220,12 @@ func (m *VMMigrationManager) ExecuteCheckpointRestoreWithPolicy(ctx context.Cont
 			migration.RollbackSucceeded = true
 			migration.Status = MigrationStatusRolledBack
 		}
+		m.recordMigration(migration)
 		return err
 	}
 	migration.Status = MigrationStatusCompleted
 	migration.Progress = 100
+	m.recordMigration(migration)
 	return nil
 }
 
@@ -490,6 +497,48 @@ func (m *VMMigrationManager) GetVM(vmID string) (*VM, error) {
 	}
 
 	return vm, nil
+}
+
+// ListMigrations returns a stable snapshot of known migration and restore
+// operations for runtime recovery and observability surfaces.
+func (m *VMMigrationManager) ListMigrations() []*VMMigration {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	migrations := make([]*VMMigration, 0, len(m.migrations))
+	for _, migration := range m.migrations {
+		migrations = append(migrations, cloneMigration(migration))
+	}
+	sort.Slice(migrations, func(i, j int) bool {
+		if migrations[i].CreatedAt.Equal(migrations[j].CreatedAt) {
+			return migrations[i].ID < migrations[j].ID
+		}
+		return migrations[i].CreatedAt.Before(migrations[j].CreatedAt)
+	})
+	return migrations
+}
+
+func (m *VMMigrationManager) recordMigration(migration *VMMigration) {
+	if migration == nil {
+		return
+	}
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.migrations[migration.ID] = cloneMigration(migration)
+}
+
+func cloneMigration(migration *VMMigration) *VMMigration {
+	if migration == nil {
+		return nil
+	}
+	clone := *migration
+	if migration.Options != nil {
+		clone.Options = make(map[string]string, len(migration.Options))
+		for key, value := range migration.Options {
+			clone.Options[key] = value
+		}
+	}
+	return &clone
 }
 
 // Helper function to copy files

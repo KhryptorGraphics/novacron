@@ -15,6 +15,7 @@ implemented:
   - policy_checked_checkpoint_restore_execution
   - daemon_checkpoint_restore_endpoint
   - interrupted_restore_rollback_observability
+  - daemon_mobility_operation_history
 remaining:
   - connect_backup_dr_runtime_to_canonical_daemon
   - add_node_loss_and_replica_loss_recovery_tests

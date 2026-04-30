@@ -70,6 +70,28 @@ func runtimeGetMobilityPolicyHandler(config runtimeConfig) http.HandlerFunc {
 	}
 }
 
+func runtimeListMobilityOperationsHandler(config runtimeConfig, migrationManager *vm.VMMigrationManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		if migrationManager == nil {
+			respondRuntimeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "migration runtime is not initialized"})
+			return
+		}
+		policy := runtimeMobilityPolicyFromConfig(config)
+		operations := migrationManager.ListMigrations()
+		response := make([]runtimeColdMigrationResponse, 0, len(operations))
+		for _, operation := range operations {
+			response = append(response, runtimeColdMigrationResponseFromMigration(
+				operation,
+				policy,
+				runtimeMigrationOptionEnabled(operation.Options, vm.MigrationOptionBackupVerified),
+				operation.Options[vm.MigrationOptionBackupID],
+				operation.Options[vm.MigrationOptionCheckpointID],
+			))
+		}
+		respondRuntimeJSON(w, http.StatusOK, response)
+	}
+}
+
 func runtimeStartColdMigrationHandler(config runtimeConfig, migrationManager *vm.VMMigrationManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if migrationManager == nil {
@@ -201,4 +223,13 @@ func runtimeColdMigrationResponseFromMigration(migration *vm.VMMigration, policy
 	response.RollbackSucceeded = migration.RollbackSucceeded
 	response.RollbackError = migration.RollbackError
 	return response
+}
+
+func runtimeMigrationOptionEnabled(options map[string]string, key string) bool {
+	switch strings.TrimSpace(strings.ToLower(options[key])) {
+	case "1", "true", "yes", "verified":
+		return true
+	default:
+		return false
+	}
 }

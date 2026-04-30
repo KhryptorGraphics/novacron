@@ -104,6 +104,47 @@ func TestRuntimeColdMigrationEndpointRequiresVerifiedBackup(t *testing.T) {
 	}
 }
 
+func TestRuntimeMobilityOperationsEndpointReportsHistory(t *testing.T) {
+	t.Parallel()
+
+	sourceDir := t.TempDir()
+	targetDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "vm-1.state"), []byte("vm-state"), 0o644); err != nil {
+		t.Fatalf("write source state: %v", err)
+	}
+	config := defaultRuntimeConfig("node-a", t.TempDir())
+	config.Services.MigrationMode = vm.MigrationModeCold
+	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+
+	payload := runtimeColdMigrationRequest{
+		VMID:             "vm-1",
+		TargetNodeID:     "node-b",
+		TargetStorageDir: targetDir,
+		BackupVerified:   true,
+		BackupID:         "backup-1",
+	}
+	postRuntimeMobilityJSON[runtimeColdMigrationResponse](t, router, "/internal/runtime/v1/mobility/cold-migrations", payload, http.StatusAccepted)
+
+	operations := getRuntimeMobilityJSON[[]runtimeColdMigrationResponse](t, router, "/internal/runtime/v1/mobility/operations", http.StatusOK)
+	if got, want := len(operations), 1; got != want {
+		t.Fatalf("operation count = %d, want %d", got, want)
+	}
+	operation := operations[0]
+	if got, want := operation.VMID, "vm-1"; got != want {
+		t.Fatalf("operation vm id = %q, want %q", got, want)
+	}
+	if got, want := operation.Status, vm.MigrationStatusCompleted; got != want {
+		t.Fatalf("operation status = %q, want %q", got, want)
+	}
+	if !operation.BackupVerified {
+		t.Fatal("operation should preserve backup verification state")
+	}
+	if got, want := operation.BackupID, "backup-1"; got != want {
+		t.Fatalf("operation backup id = %q, want %q", got, want)
+	}
+}
+
 func TestRuntimeCheckpointRestoreEndpointExecutesPolicyVerifiedRestore(t *testing.T) {
 	t.Parallel()
 
@@ -235,6 +276,22 @@ func postRuntimeMobilityJSON[T any](t *testing.T, router http.Handler, path stri
 	router.ServeHTTP(rec, req)
 	if rec.Code != expectedStatus {
 		t.Fatalf("POST %s status = %d, want %d: %s", path, rec.Code, expectedStatus, rec.Body.String())
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&zero); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return zero
+}
+
+func getRuntimeMobilityJSON[T any](t *testing.T, router http.Handler, path string, expectedStatus int) T {
+	t.Helper()
+
+	var zero T
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != expectedStatus {
+		t.Fatalf("GET %s status = %d, want %d: %s", path, rec.Code, expectedStatus, rec.Body.String())
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&zero); err != nil {
 		t.Fatalf("decode response: %v", err)
