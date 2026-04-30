@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useWorkflow, useWorkflowExecution } from "@/hooks/useAPI";
+import { useWorkflow, useWorkflowExecution } from "@/lib/api/hooks/useAutomation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";

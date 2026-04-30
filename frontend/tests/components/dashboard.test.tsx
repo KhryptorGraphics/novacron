@@ -1,15 +1,13 @@
-import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { JobList } from '@/components/dashboard/job-list';
 import { WorkflowList } from '@/components/dashboard/workflow-list';
-import { useJobs, useWorkflows } from '@/hooks/useAPI';
+import { useJobs, useWorkflows } from '@/lib/api/hooks/useAutomation';
 
 // Mock the API hooks
-jest.mock('@/hooks/useAPI', () => ({
+jest.mock('@/lib/api/hooks/useAutomation', () => ({
   useJobs: jest.fn(),
-  useWorkflows: jest.fn(),
-  useWebSocket: jest.fn().mockReturnValue({ connected: true, lastMessage: null })
+  useWorkflows: jest.fn()
 }));
 
 // Mock useRouter

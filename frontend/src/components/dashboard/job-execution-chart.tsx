@@ -1,7 +1,7 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useJobs } from "@/hooks/useAPI";
+import { useJobs } from "@/lib/api/hooks/useAutomation";
 
 export function JobExecutionChart() {
   const { jobs } = useJobs();
@@ -12,7 +12,7 @@ export function JobExecutionChart() {
     hour.setHours(hour.getHours() - (23 - i));
     return {
       hour: hour.getHours(),
-      count: Math.floor(Math.random() * 10), // Placeholder data
+      count: jobs?.filter((job) => job.last_run_at && new Date(job.last_run_at).getHours() === hour.getHours()).length ?? 0,
     };
   });
 

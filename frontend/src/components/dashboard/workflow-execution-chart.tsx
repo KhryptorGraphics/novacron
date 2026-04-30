@@ -1,7 +1,7 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useWorkflows } from "@/hooks/useAPI";
+import { useWorkflows } from "@/lib/api/hooks/useAutomation";
 
 export function WorkflowExecutionChart() {
   const { workflows } = useWorkflows();
@@ -12,7 +12,10 @@ export function WorkflowExecutionChart() {
     day.setDate(day.getDate() - (6 - i));
     return {
       day: day.toLocaleDateString('en-US', { weekday: 'short' }),
-      count: Math.floor(Math.random() * 5), // Placeholder data
+      count: workflows?.filter((workflow) => {
+        const updatedAt = new Date(workflow.updatedAt);
+        return updatedAt.toDateString() === day.toDateString();
+      }).length ?? 0,
     };
   });
 

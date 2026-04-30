@@ -1,0 +1,33 @@
+phase: 4
+sprint: 8
+status: complete
+issue: novacron-3wz
+epic: NC-p4a
+canonical_frontend_api: frontend/src/lib/api
+implemented:
+  - phase4_sprint8_bead_created
+  - typed_automation_api_module
+  - react_query_automation_hooks
+  - automation_api_barrel_exports
+  - dashboard_jobs_legacy_useapi_removed
+  - dashboard_workflows_legacy_useapi_removed
+  - scheduling_websocket_legacy_useapi_removed
+  - dashboard_component_tests_updated
+  - mock_surface_followups_recorded
+remaining: []
+followups:
+  - novacron-hig
+  - novacron-ab5
+validation:
+  targeted:
+    - command: git diff --check
+      result: pass
+    - command: npm test -- --runTestsByPath tests/components/dashboard.test.tsx --runInBand --coverage=false
+      result: pass
+      note: emits existing Radix/React act warnings, no failures
+    - command: npm run test:smoke -- --runInBand
+      result: pass
+  broad:
+    - command: npx tsc --noEmit
+      result: fail
+      note: repo-wide pre-existing frontend type debt; no diagnostics remained for this slice's changed files
