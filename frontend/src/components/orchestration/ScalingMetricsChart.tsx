@@ -1,163 +1,33 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useScalingMetrics } from '@/lib/api/hooks/useOrchestration';
 import {
-  LineChart,
   Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  AreaChart,
   Area,
-  BarChart,
   Bar,
   ComposedChart,
 } from 'recharts';
-import { TrendingUp, Zap, Activity, RefreshCw } from 'lucide-react';
-
-interface ScalingEvent {
-  timestamp: string;
-  action: 'scale_up' | 'scale_down' | 'no_change';
-  vmId: string;
-  beforeCount: number;
-  afterCount: number;
-  reason: string;
-  cpuUtilization: number;
-  memoryUtilization: number;
-  requestRate: number;
-  responseTime: number;
-}
-
-interface ScalingMetrics {
-  timestamp: string;
-  totalVMs: number;
-  cpuUtilization: number;
-  memoryUtilization: number;
-  requestRate: number;
-  responseTime: number;
-  throughput: number;
-  errorRate: number;
-  scalingEvents: number;
-}
+import { TrendingUp, Zap, Activity, RefreshCw, AlertTriangle } from 'lucide-react';
 
 export function ScalingMetricsChart() {
-  const [scalingData, setScalingData] = useState<ScalingMetrics[]>([]);
-  const [recentEvents, setRecentEvents] = useState<ScalingEvent[]>([]);
   const [timeRange, setTimeRange] = useState('1h');
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchScalingMetrics = async () => {
-      try {
-        const [metricsRes, eventsRes] = await Promise.all([
-          fetch(`/api/orchestration/scaling/metrics?range=${timeRange}`),
-          fetch('/api/orchestration/scaling/events?limit=20'),
-        ]);
-
-        if (metricsRes.ok) {
-          const metrics = await metricsRes.json();
-          setScalingData(metrics);
-        }
-
-        if (eventsRes.ok) {
-          const events = await eventsRes.json();
-          setRecentEvents(events);
-        }
-      } catch (err) {
-        console.error('Failed to fetch scaling metrics:', err);
-        // Generate mock data for demonstration
-        generateMockData();
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchScalingMetrics();
-    
-    // Poll for updates every 30 seconds
-    const interval = setInterval(fetchScalingMetrics, 30000);
-    return () => clearInterval(interval);
-  }, [timeRange]);
-
-  const generateMockData = () => {
-    const now = new Date();
-    const interval = timeRange === '1h' ? 5 * 60 * 1000 : timeRange === '6h' ? 30 * 60 * 1000 : 60 * 60 * 1000;
-    const points = timeRange === '1h' ? 12 : timeRange === '6h' ? 12 : 24;
-
-    const metrics: ScalingMetrics[] = [];
-    const events: ScalingEvent[] = [];
-
-    for (let i = points - 1; i >= 0; i--) {
-      const timestamp = new Date(now.getTime() - i * interval);
-      
-      // Simulate scaling patterns
-      const hour = timestamp.getHours();
-      const baseLoad = 0.3 + 0.4 * Math.sin((hour - 6) * Math.PI / 12);
-      const randomVariation = 0.1 * (Math.random() - 0.5);
-      
-      const cpuUtil = Math.max(0.1, Math.min(0.95, baseLoad + randomVariation));
-      const memUtil = Math.max(0.1, Math.min(0.9, cpuUtil * 0.8 + randomVariation * 0.5));
-      const requestRate = 100 + cpuUtil * 500 + Math.random() * 100;
-      const responseTime = 50 + cpuUtil * 200 + Math.random() * 50;
-      const throughput = requestRate * (1 - Math.min(0.1, cpuUtil * 0.1));
-      const errorRate = Math.min(0.05, cpuUtil > 0.8 ? (cpuUtil - 0.8) * 0.25 : 0);
-      
-      // Determine VM count based on load
-      let vmCount = Math.ceil(cpuUtil * 10) + 2;
-      if (i < points - 1) {
-        const prevCount = metrics[metrics.length - 1].totalVMs;
-        // Smooth transitions
-        vmCount = Math.max(1, Math.min(12, prevCount + (Math.random() > 0.7 ? (Math.random() > 0.5 ? 1 : -1) : 0)));
-      }
-
-      metrics.push({
-        timestamp: timestamp.toISOString(),
-        totalVMs: vmCount,
-        cpuUtilization: cpuUtil * 100,
-        memoryUtilization: memUtil * 100,
-        requestRate,
-        responseTime,
-        throughput,
-        errorRate: errorRate * 100,
-        scalingEvents: Math.random() > 0.8 ? 1 : 0,
-      });
-
-      // Generate scaling events
-      if (i < points - 2 && Math.random() > 0.7) {
-        const prevCount = i === points - 1 ? vmCount : metrics[metrics.length - 2].totalVMs;
-        if (vmCount !== prevCount) {
-          events.push({
-            timestamp: timestamp.toISOString(),
-            action: vmCount > prevCount ? 'scale_up' : 'scale_down',
-            vmId: `vm-${Math.random().toString(36).substr(2, 9)}`,
-            beforeCount: prevCount,
-            afterCount: vmCount,
-            reason: vmCount > prevCount ? 
-              `High ${cpuUtil > 0.8 ? 'CPU' : 'memory'} utilization detected` :
-              'Low resource utilization, scaling down',
-            cpuUtilization: cpuUtil * 100,
-            memoryUtilization: memUtil * 100,
-            requestRate,
-            responseTime,
-          });
-        }
-      }
-    }
-
-    setScalingData(metrics);
-    setRecentEvents(events.slice(-10).reverse());
-  };
+  const { scalingData, recentEvents, loading, error, refetch } = useScalingMetrics(timeRange);
 
   const getActionColor = (action: string) => {
     switch (action) {
-      case 'scale_up': return 'success';
-      case 'scale_down': return 'warning';
+      case 'scale_up': return 'default';
+      case 'scale_down': return 'secondary';
       default: return 'secondary';
     }
   };
@@ -196,6 +66,15 @@ export function ScalingMetricsChart() {
     );
   }
 
+  if (error) {
+    return (
+      <Alert variant="destructive">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Scaling Overview */}
@@ -221,7 +100,7 @@ export function ScalingMetricsChart() {
                 <SelectItem value="24h">24h</SelectItem>
               </SelectContent>
             </Select>
-            <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
               <RefreshCw className="h-4 w-4" />
             </Button>
           </div>

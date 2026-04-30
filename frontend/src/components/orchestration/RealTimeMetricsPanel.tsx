@@ -1,10 +1,13 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useRealtimeOrchestrationMetrics } from '@/lib/api/hooks/useOrchestration';
+import type { EngineStatus, MetricPoint } from '@/lib/api/orchestration';
 import { 
   Activity,
   Cpu,
@@ -14,7 +17,6 @@ import {
   RefreshCw,
   AlertTriangle,
   TrendingUp,
-  Clock,
 } from 'lucide-react';
 import { 
   LineChart, 
@@ -28,26 +30,8 @@ import {
   Area,
 } from 'recharts';
 
-interface EngineStatus {
-  state: 'starting' | 'running' | 'stopping' | 'stopped' | 'error';
-  startTime: string;
-  activePolicies: number;
-  eventsProcessed: number;
-  metrics: Record<string, any>;
-}
-
 interface RealTimeMetricsPanelProps {
   engineStatus: EngineStatus | null;
-}
-
-interface MetricPoint {
-  timestamp: string;
-  cpuUsage: number;
-  memoryUsage: number;
-  networkIO: number;
-  diskIO: number;
-  decisionsPerMinute: number;
-  responseTime: number;
 }
 
 interface SystemAlert {
@@ -63,88 +47,36 @@ export function RealTimeMetricsPanel({ engineStatus }: RealTimeMetricsPanelProps
   const [currentMetrics, setCurrentMetrics] = useState<MetricPoint | null>(null);
   const [alerts, setAlerts] = useState<SystemAlert[]>([]);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const { metric, error, refetch } = useRealtimeOrchestrationMetrics(autoRefresh);
 
   useEffect(() => {
-    const fetchMetrics = async () => {
-      try {
-        const response = await fetch('/api/orchestration/metrics/realtime');
-        if (response.ok) {
-          const data = await response.json();
-          
-          const newMetric: MetricPoint = {
-            timestamp: new Date().toISOString(),
-            cpuUsage: data.cpu_usage || Math.random() * 80 + 10,
-            memoryUsage: data.memory_usage || Math.random() * 70 + 20,
-            networkIO: data.network_io || Math.random() * 100,
-            diskIO: data.disk_io || Math.random() * 50,
-            decisionsPerMinute: data.decisions_per_minute || Math.floor(Math.random() * 20) + 5,
-            responseTime: data.response_time || Math.random() * 50 + 10,
-          };
-
-          setCurrentMetrics(newMetric);
-          setMetricsHistory(prev => {
-            const updated = [...prev, newMetric].slice(-30); // Keep last 30 points
-            return updated;
-          });
-
-          // Generate alerts based on metrics
-          if (newMetric.cpuUsage > 80) {
-            setAlerts(prev => [...prev, {
-              id: `cpu-${Date.now()}`,
-              type: 'warning',
-              message: `High CPU usage detected: ${newMetric.cpuUsage.toFixed(1)}%`,
-              timestamp: new Date().toISOString(),
-              component: 'CPU',
-            }].slice(-10));
-          }
-
-          if (newMetric.responseTime > 100) {
-            setAlerts(prev => [...prev, {
-              id: `response-${Date.now()}`,
-              type: 'error',
-              message: `High response time: ${newMetric.responseTime.toFixed(0)}ms`,
-              timestamp: new Date().toISOString(),
-              component: 'Performance',
-            }].slice(-10));
-          }
-        }
-      } catch (error) {
-        console.error('Failed to fetch metrics:', error);
-        // Generate mock data for demonstration
-        generateMockMetrics();
-      }
-    };
-
-    const generateMockMetrics = () => {
-      const newMetric: MetricPoint = {
-        timestamp: new Date().toISOString(),
-        cpuUsage: 30 + Math.sin(Date.now() / 10000) * 20 + Math.random() * 10,
-        memoryUsage: 45 + Math.cos(Date.now() / 12000) * 15 + Math.random() * 8,
-        networkIO: 20 + Math.random() * 30,
-        diskIO: 15 + Math.random() * 20,
-        decisionsPerMinute: 10 + Math.floor(Math.random() * 15),
-        responseTime: 25 + Math.random() * 25,
-      };
-
-      setCurrentMetrics(newMetric);
-      setMetricsHistory(prev => [...prev, newMetric].slice(-30));
-    };
-
-    // Initial fetch
-    fetchMetrics();
-
-    // Set up interval if auto-refresh is enabled
-    let interval: NodeJS.Timeout;
-    if (autoRefresh) {
-      interval = setInterval(fetchMetrics, 5000); // Every 5 seconds
+    if (!metric) {
+      return;
     }
 
-    return () => {
-      if (interval) {
-        clearInterval(interval);
-      }
-    };
-  }, [autoRefresh]);
+    setCurrentMetrics(metric);
+    setMetricsHistory(prev => [...prev, metric].slice(-30));
+
+    if (metric.cpuUsage > 80) {
+      setAlerts(prev => [...prev, {
+        id: `cpu-${Date.now()}`,
+        type: 'warning' as const,
+        message: `High CPU usage detected: ${metric.cpuUsage.toFixed(1)}%`,
+        timestamp: new Date().toISOString(),
+        component: 'CPU',
+      }].slice(-10));
+    }
+
+    if (metric.responseTime > 100) {
+      setAlerts(prev => [...prev, {
+        id: `response-${Date.now()}`,
+        type: 'error' as const,
+        message: `High response time: ${metric.responseTime.toFixed(0)}ms`,
+        timestamp: new Date().toISOString(),
+        component: 'Performance',
+      }].slice(-10));
+    }
+  }, [metric]);
 
   const getMetricStatus = (value: number, thresholds: { warning: number; critical: number }) => {
     if (value > thresholds.critical) return 'critical';
@@ -208,13 +140,18 @@ export function RealTimeMetricsPanel({ engineStatus }: RealTimeMetricsPanelProps
             </CardDescription>
           </div>
           <div className="flex items-center space-x-2">
-            <Badge variant={engineStatus?.state === 'running' ? 'success' : 'warning'}>
+            <Badge variant={engineStatus?.state === 'running' ? 'default' : 'secondary'}>
               {engineStatus?.state || 'Unknown'}
             </Badge>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setAutoRefresh(!autoRefresh)}
+              onClick={() => {
+                if (!autoRefresh) {
+                  refetch();
+                }
+                setAutoRefresh(!autoRefresh);
+              }}
             >
               <RefreshCw className={`h-4 w-4 ${autoRefresh ? 'animate-spin' : ''}`} />
               <span className="ml-1">{autoRefresh ? 'Auto' : 'Manual'}</span>
@@ -250,6 +187,13 @@ export function RealTimeMetricsPanel({ engineStatus }: RealTimeMetricsPanelProps
           </div>
         </CardContent>
       </Card>
+
+      {error && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
       {/* Resource Usage Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

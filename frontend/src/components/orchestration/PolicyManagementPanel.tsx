@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { usePolicyMutations } from '@/lib/api/hooks/useOrchestration';
+import type { OrchestrationPolicy, PolicyRule } from '@/lib/api/orchestration';
 import { 
   Settings, 
   Plus, 
@@ -24,24 +26,6 @@ import {
   CheckCircle,
   Clock,
 } from 'lucide-react';
-
-interface OrchestrationPolicy {
-  id: string;
-  name: string;
-  description: string;
-  enabled: boolean;
-  priority: number;
-  rules: PolicyRule[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface PolicyRule {
-  type: 'placement' | 'autoscaling' | 'healing' | 'loadbalance' | 'security' | 'compliance';
-  enabled: boolean;
-  priority: number;
-  parameters: Record<string, any>;
-}
 
 interface PolicyManagementPanelProps {
   policies: OrchestrationPolicy[];
@@ -72,6 +56,11 @@ export function PolicyManagementPanel({ policies: initialPolicies }: PolicyManag
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [filter, setFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const { createPolicy, updatePolicy, deletePolicy: deletePolicyApi } = usePolicyMutations();
+
+  useEffect(() => {
+    setPolicies(initialPolicies);
+  }, [initialPolicies]);
 
   // Filter and search policies
   const filteredPolicies = policies.filter(policy => {
@@ -90,17 +79,9 @@ export function PolicyManagementPanel({ policies: initialPolicies }: PolicyManag
       const policy = policies.find(p => p.id === policyId);
       if (!policy) return;
 
-      const response = await fetch(`/api/orchestration/policies/${policyId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !policy.enabled }),
-      });
-
-      if (response.ok) {
-        setPolicies(policies.map(p => 
-          p.id === policyId ? { ...p, enabled: !p.enabled } : p
-        ));
-      }
+      const updatedPolicy = { ...policy, enabled: !policy.enabled, updatedAt: new Date().toISOString() };
+      await updatePolicy(policyId, updatedPolicy);
+      setPolicies(policies.map(p => p.id === policyId ? updatedPolicy : p));
     } catch (error) {
       console.error('Failed to toggle policy:', error);
     }
@@ -110,13 +91,8 @@ export function PolicyManagementPanel({ policies: initialPolicies }: PolicyManag
     if (!confirm('Are you sure you want to delete this policy?')) return;
 
     try {
-      const response = await fetch(`/api/orchestration/policies/${policyId}`, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        setPolicies(policies.filter(p => p.id !== policyId));
-      }
+      await deletePolicyApi(policyId);
+      setPolicies(policies.filter(p => p.id !== policyId));
     } catch (error) {
       console.error('Failed to delete policy:', error);
     }
@@ -160,7 +136,14 @@ export function PolicyManagementPanel({ policies: initialPolicies }: PolicyManag
                     Define a new orchestration policy with custom rules
                   </DialogDescription>
                 </DialogHeader>
-                <PolicyForm onSave={() => setIsCreateDialogOpen(false)} />
+                <PolicyForm
+                  onCancel={() => setIsCreateDialogOpen(false)}
+                  onSave={async (policyData) => {
+                    const savedPolicy = await createPolicy(policyData);
+                    setPolicies([savedPolicy, ...policies]);
+                    setIsCreateDialogOpen(false);
+                  }}
+                />
               </DialogContent>
             </Dialog>
           </div>
@@ -201,7 +184,7 @@ export function PolicyManagementPanel({ policies: initialPolicies }: PolicyManag
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <CardTitle className="text-lg">{policy.name}</CardTitle>
-                  <Badge variant={policy.enabled ? 'success' : 'secondary'}>
+                  <Badge variant={policy.enabled ? 'default' : 'secondary'}>
                     {policy.enabled ? 'Active' : 'Inactive'}
                   </Badge>
                   <Badge variant="outline">Priority {policy.priority}</Badge>
@@ -235,7 +218,13 @@ export function PolicyManagementPanel({ policies: initialPolicies }: PolicyManag
                       {selectedPolicy && (
                         <PolicyForm 
                           policy={selectedPolicy} 
-                          onSave={() => {
+                          onCancel={() => {
+                            setIsEditDialogOpen(false);
+                            setSelectedPolicy(null);
+                          }}
+                          onSave={async (policyData) => {
+                            const savedPolicy = await updatePolicy(selectedPolicy.id, policyData);
+                            setPolicies(policies.map((item) => item.id === savedPolicy.id ? savedPolicy : item));
                             setIsEditDialogOpen(false);
                             setSelectedPolicy(null);
                           }} 
@@ -280,7 +269,7 @@ export function PolicyManagementPanel({ policies: initialPolicies }: PolicyManag
                           </div>
                         </div>
                         <div className="flex items-center space-x-2">
-                          <Badge variant={rule.enabled ? 'success' : 'secondary'}>
+                          <Badge variant={rule.enabled ? 'default' : 'secondary'}>
                             {rule.enabled ? <CheckCircle className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
                           </Badge>
                         </div>
@@ -336,10 +325,11 @@ export function PolicyManagementPanel({ policies: initialPolicies }: PolicyManag
 // Policy Form Component
 interface PolicyFormProps {
   policy?: OrchestrationPolicy;
-  onSave: () => void;
+  onCancel: () => void;
+  onSave: (policy: OrchestrationPolicy) => void | Promise<void>;
 }
 
-function PolicyForm({ policy, onSave }: PolicyFormProps) {
+function PolicyForm({ policy, onCancel, onSave }: PolicyFormProps) {
   const [formData, setFormData] = useState({
     name: policy?.name || '',
     description: policy?.description || '',
@@ -373,31 +363,15 @@ function PolicyForm({ policy, onSave }: PolicyFormProps) {
 
   const handleSave = async () => {
     try {
-      const policyData = {
+      const policyData: OrchestrationPolicy = {
         ...formData,
         rules,
         updatedAt: new Date().toISOString(),
-        ...(policy ? {} : { 
-          id: `policy-${Date.now()}`,
-          createdAt: new Date().toISOString() 
-        }),
+        id: policy?.id ?? `policy-${Date.now()}`,
+        createdAt: policy?.createdAt ?? new Date().toISOString(),
       };
 
-      const url = policy 
-        ? `/api/orchestration/policies/${policy.id}`
-        : '/api/orchestration/policies';
-      
-      const method = policy ? 'PUT' : 'POST';
-
-      const response = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(policyData),
-      });
-
-      if (response.ok) {
-        onSave();
-      }
+      await onSave(policyData);
     } catch (error) {
       console.error('Failed to save policy:', error);
     }
@@ -512,7 +486,7 @@ function PolicyForm({ policy, onSave }: PolicyFormProps) {
       </div>
 
       <DialogFooter>
-        <Button variant="outline" onClick={onSave}>
+        <Button variant="outline" onClick={onCancel}>
           Cancel
         </Button>
         <Button onClick={handleSave} disabled={!formData.name || rules.length === 0}>

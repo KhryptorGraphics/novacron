@@ -1,43 +1,21 @@
 "use client";
 
-import React, { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useModelMutations } from '@/lib/api/hooks/useOrchestration';
+import type { MLModelMetrics } from '@/lib/api/orchestration';
 import { 
   Brain, 
-  TrendingUp, 
-  Zap, 
   RefreshCw, 
   Download,
   Play,
   AlertCircle,
   CheckCircle,
 } from 'lucide-react';
-
-interface MLModelMetrics {
-  modelType: string;
-  accuracy: number;
-  throughput: number;
-  latency: number;
-  lastTraining: string;
-  version: string;
-  status: 'training' | 'deployed' | 'evaluating' | 'error';
-  benchmarkResults?: {
-    precision: number;
-    recall: number;
-    f1Score: number;
-    auc: number;
-  };
-  trainingMetrics?: {
-    epochs: number;
-    trainingLoss: number;
-    validationLoss: number;
-    trainingTime: string;
-  };
-}
 
 interface MLModelPerformancePanelProps {
   models: MLModelMetrics[];
@@ -46,11 +24,16 @@ interface MLModelPerformancePanelProps {
 export function MLModelPerformancePanel({ models: initialModels }: MLModelPerformancePanelProps) {
   const [models, setModels] = useState(initialModels);
   const [isTraining, setIsTraining] = useState<string | null>(null);
+  const { retrainModel: retrainModelApi, downloadModel: downloadModelApi } = useModelMutations();
+
+  useEffect(() => {
+    setModels(initialModels);
+  }, [initialModels]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'deployed': return 'success';
-      case 'training': return 'warning';
+      case 'deployed': return 'default';
+      case 'training': return 'secondary';
       case 'evaluating': return 'secondary';
       case 'error': return 'destructive';
       default: return 'secondary';
@@ -70,52 +53,38 @@ export function MLModelPerformancePanel({ models: initialModels }: MLModelPerfor
   const retrainModel = async (modelType: string) => {
     setIsTraining(modelType);
     try {
-      const response = await fetch(`/api/orchestration/ml-models/${modelType}/retrain`, {
-        method: 'POST',
-      });
-      
-      if (response.ok) {
-        // Update model status
-        setModels(models.map(model => 
-          model.modelType === modelType 
-            ? { ...model, status: 'training' as const }
-            : model
-        ));
-        
-        // Poll for training completion (simplified)
-        setTimeout(() => {
-          setModels(models.map(model => 
-            model.modelType === modelType 
-              ? { ...model, status: 'deployed' as const, lastTraining: new Date().toISOString() }
-              : model
-          ));
-          setIsTraining(null);
-        }, 5000);
-      }
+      await retrainModelApi(modelType);
+      setModels(models.map(model =>
+        model.modelType === modelType
+          ? { ...model, status: 'training' as const }
+          : model
+      ));
     } catch (error) {
       console.error('Failed to retrain model:', error);
+    } finally {
       setIsTraining(null);
     }
   };
 
   const downloadModel = async (modelType: string) => {
     try {
-      const response = await fetch(`/api/orchestration/ml-models/${modelType}/download`);
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${modelType}-model.pkl`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
+      const blob = await downloadModelApi(modelType);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${modelType}-model.pkl`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Failed to download model:', error);
     }
   };
+
+  const averageThroughput = models.length
+    ? models.reduce((sum, model) => sum + model.throughput, 0) / models.length
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -144,7 +113,7 @@ export function MLModelPerformancePanel({ models: initialModels }: MLModelPerfor
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-purple-600">
-                {(models.reduce((sum, m) => sum + m.throughput, 0) / models.length).toFixed(0)}
+                {averageThroughput.toFixed(0)}
               </div>
               <p className="text-sm text-muted-foreground">Avg Throughput/s</p>
             </div>

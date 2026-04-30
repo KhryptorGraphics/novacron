@@ -7,5 +7,6 @@ export {
   apiGet,
   apiPost,
 } from './client';
+export * from './orchestration';
 export * from './origin';
 export * from './types';

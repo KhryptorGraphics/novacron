@@ -1,25 +1,19 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useOrchestrationDashboard } from '@/lib/api/hooks/useOrchestration';
 import {
   Activity,
   Brain,
   Settings,
-  TrendingUp,
   AlertCircle,
   CheckCircle,
   Clock,
-  Cpu,
-  MemoryStick,
-  Network,
-  HardDrive,
-  Zap,
 } from 'lucide-react';
 
 import { PlacementDecisionChart } from './PlacementDecisionChart';
@@ -28,110 +22,21 @@ import { PolicyManagementPanel } from './PolicyManagementPanel';
 import { MLModelPerformancePanel } from './MLModelPerformancePanel';
 import { RealTimeMetricsPanel } from './RealTimeMetricsPanel';
 
-// Types for orchestration data
-interface EngineStatus {
-  state: 'starting' | 'running' | 'stopping' | 'stopped' | 'error';
-  startTime: string;
-  activePolicies: number;
-  eventsProcessed: number;
-  metrics: Record<string, any>;
-}
-
-interface OrchestrationDecision {
-  id: string;
-  decisionType: 'placement' | 'scaling' | 'healing' | 'migration' | 'optimization';
-  recommendation: string;
-  score: number;
-  confidence: number;
-  explanation: string;
-  timestamp: string;
-  status: 'pending' | 'executed' | 'failed' | 'cancelled';
-}
-
-interface OrchestrationPolicy {
-  id: string;
-  name: string;
-  description: string;
-  enabled: boolean;
-  priority: number;
-  rules: PolicyRule[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface PolicyRule {
-  type: 'placement' | 'autoscaling' | 'healing' | 'loadbalance' | 'security' | 'compliance';
-  enabled: boolean;
-  priority: number;
-  parameters: Record<string, any>;
-}
-
-interface MLModelMetrics {
-  modelType: string;
-  accuracy: number;
-  throughput: number;
-  latency: number;
-  lastTraining: string;
-  version: string;
-}
-
 export function OrchestrationDashboard() {
-  const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null);
-  const [recentDecisions, setRecentDecisions] = useState<OrchestrationDecision[]>([]);
-  const [activePolicies, setActivePolicies] = useState<OrchestrationPolicy[]>([]);
-  const [mlModels, setMLModels] = useState<MLModelMetrics[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchOrchestrationData = async () => {
-      try {
-        const [statusRes, decisionsRes, policiesRes, modelsRes] = await Promise.all([
-          fetch('/api/orchestration/status'),
-          fetch('/api/orchestration/decisions?limit=10'),
-          fetch('/api/orchestration/policies'),
-          fetch('/api/orchestration/ml-models'),
-        ]);
-
-        if (statusRes.ok) {
-          const status = await statusRes.json();
-          setEngineStatus(status);
-        }
-
-        if (decisionsRes.ok) {
-          const decisions = await decisionsRes.json();
-          setRecentDecisions(decisions);
-        }
-
-        if (policiesRes.ok) {
-          const policies = await policiesRes.json();
-          setActivePolicies(policies.filter((p: OrchestrationPolicy) => p.enabled));
-        }
-
-        if (modelsRes.ok) {
-          const models = await modelsRes.json();
-          setMLModels(models);
-        }
-      } catch (err) {
-        setError('Failed to load orchestration data');
-        console.error('Orchestration data fetch error:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchOrchestrationData();
-    
-    // Set up polling for real-time updates
-    const interval = setInterval(fetchOrchestrationData, 30000); // Every 30 seconds
-    
-    return () => clearInterval(interval);
-  }, []);
+  const {
+    engineStatus,
+    recentDecisions,
+    policies,
+    activePolicies,
+    mlModels,
+    loading,
+    error,
+  } = useOrchestrationDashboard();
 
   const getStatusColor = (state: string) => {
     switch (state) {
-      case 'running': return 'success';
-      case 'starting': return 'warning';
+      case 'running': return 'default';
+      case 'starting': return 'secondary';
       case 'error': return 'destructive';
       default: return 'secondary';
     }
@@ -260,7 +165,7 @@ export function OrchestrationDashboard() {
                       <div className="flex-1">
                         <div className="flex items-center space-x-2">
                           <Badge variant="outline">{decision.decisionType}</Badge>
-                          <Badge variant={decision.status === 'executed' ? 'success' : 'warning'}>
+                          <Badge variant={decision.status === 'executed' ? 'default' : 'secondary'}>
                             {decision.status}
                           </Badge>
                         </div>
@@ -288,7 +193,7 @@ export function OrchestrationDashboard() {
                       <div className="flex-1">
                         <div className="flex items-center space-x-2">
                           <span className="font-medium">{policy.name}</span>
-                          <Badge variant="success">Active</Badge>
+                          <Badge variant="default">Active</Badge>
                         </div>
                         <p className="text-sm text-muted-foreground">{policy.description}</p>
                         <div className="flex items-center space-x-4 mt-2 text-xs text-muted-foreground">
@@ -313,7 +218,7 @@ export function OrchestrationDashboard() {
                     <div key={model.modelType} className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium">{model.modelType}</span>
-                        <Badge variant={model.accuracy > 0.85 ? 'success' : 'warning'}>
+                        <Badge variant={model.accuracy > 0.85 ? 'default' : 'secondary'}>
                           {(model.accuracy * 100).toFixed(1)}%
                         </Badge>
                       </div>
@@ -344,7 +249,7 @@ export function OrchestrationDashboard() {
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center space-x-2">
                         <Badge variant="outline">{decision.decisionType}</Badge>
-                        <Badge variant={decision.status === 'executed' ? 'success' : decision.status === 'failed' ? 'destructive' : 'warning'}>
+                        <Badge variant={decision.status === 'executed' ? 'default' : decision.status === 'failed' ? 'destructive' : 'secondary'}>
                           {decision.status}
                         </Badge>
                         <span className="text-sm text-muted-foreground">
@@ -377,7 +282,7 @@ export function OrchestrationDashboard() {
 
         {/* Policies Tab */}
         <TabsContent value="policies">
-          <PolicyManagementPanel policies={activePolicies} />
+          <PolicyManagementPanel policies={policies} />
         </TabsContent>
 
         {/* ML Models Tab */}

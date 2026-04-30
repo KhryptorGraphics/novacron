@@ -1,0 +1,33 @@
+phase: 4
+sprint: 8
+status: complete
+issue: novacron-ab5
+epic: NC-p4a
+canonical_frontend_api: frontend/src/lib/api
+implemented:
+  - orchestration_api_module
+  - react_query_orchestration_hooks
+  - orchestration_dashboard_direct_fetch_removed
+  - policy_management_direct_fetch_removed
+  - realtime_metrics_direct_fetch_removed
+  - scaling_metrics_direct_fetch_removed
+  - ml_model_direct_fetch_removed
+  - orchestration_random_demo_fallbacks_removed
+remaining:
+  - backend_contract_parity_for_optional_orchestration_endpoints
+  - remaining_mock_surface_cleanup_tracked_by_novacron_hig
+followups:
+  - novacron-e1x
+validation:
+  targeted:
+    - command: git diff --check
+      result: pass
+    - command: grep -RIn "fetch.*api/orchestration\\|Math\\.random\\|mock" frontend/src/components/orchestration
+      result: pass
+      note: no matches
+    - command: npm run test:smoke -- --runInBand
+      result: pass
+  broad:
+    - command: npx tsc --noEmit
+      result: fail
+      note: repo-wide pre-existing frontend type debt; no diagnostics remained for this slice's changed files
