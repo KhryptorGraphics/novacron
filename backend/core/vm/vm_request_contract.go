@@ -76,6 +76,17 @@ func (r CreateVMRequest) Normalized() CreateVMRequest {
 	if r.Spec.Placement != nil {
 		r.Spec.Placement.Policy = normalizePlacementPolicy(r.Spec.Placement.Policy)
 	}
+	if r.Spec.Mobility == nil {
+		migrationMode := ""
+		if r.Spec.Migration != nil {
+			migrationMode = r.Spec.Migration.Type
+		}
+		mobility := DefaultMigrationBackupPolicy(migrationMode)
+		r.Spec.Mobility = &mobility
+	} else {
+		mobility := r.Spec.Mobility.Normalize()
+		r.Spec.Mobility = &mobility
+	}
 
 	if r.Spec.Image == "" && r.Spec.RootFS != "" && r.Spec.Type == VMTypeKVM {
 		r.Spec.Image = r.Spec.RootFS
@@ -174,6 +185,11 @@ func (r CreateVMRequest) Validate() error {
 	}
 	if r.Spec.Replication != nil && r.Spec.Replication.Factor < 0 {
 		return fmt.Errorf("replication factor cannot be negative")
+	}
+	if r.Spec.Mobility != nil {
+		if err := r.Spec.Mobility.Validate(); err != nil {
+			return err
+		}
 	}
 
 	return nil

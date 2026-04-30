@@ -98,6 +98,7 @@ const (
 var runtimeServiceOrder = []string{
 	"api",
 	"auth",
+	"backup",
 	"discovery",
 	"federation",
 	"hypervisor",
@@ -338,6 +339,8 @@ func runtimeServiceReportFromRuntime(
 				status.State = runtimeServiceStateUnavailable
 				status.Reason = "auth runtime failed to initialize"
 			}
+		case "backup":
+			status = runtimeServiceStatusFromInstance(config, serviceName, false, "backup runtime is gated behind mobility policy integration")
 		case "discovery":
 			status.Enabled = runtimeDiscoveryEnabled(config)
 			switch {
@@ -1105,6 +1108,7 @@ func newRuntimeRouter(
 	router.HandleFunc("/internal/runtime/v1/discovery/inventory", runtimeGetDiscoveryInventoryHandler(discovery)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/discovery/seeds", runtimeGetDiscoverySeedsHandler(discovery)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/discovery/seeds/{id}/verify", runtimeVerifyDiscoverySeedInventoryHandler(discovery)).Methods(http.MethodPost)
+	router.HandleFunc("/internal/runtime/v1/mobility/policy", runtimeGetMobilityPolicyHandler(config)).Methods(http.MethodGet)
 	clusterHandler := runtimeProtectClusterRoute(runtimeAuth)
 	router.Handle("/api/cluster/nodes", clusterHandler(runtimeListNodesHandler(vmManager))).Methods(http.MethodGet)
 	router.Handle("/api/cluster/nodes/{id}", clusterHandler(runtimeGetNodeHandler(vmManager))).Methods(http.MethodGet)

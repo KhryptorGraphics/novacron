@@ -23,25 +23,26 @@ type VMService struct {
 
 // CreateVMRequest represents a request to create a VM
 type CreateVMRequest struct {
-	Name               string                   `json:"name"`
-	Type               vm.VMType                `json:"type,omitempty"`
-	Command            string                   `json:"command,omitempty"`
-	Args               []string                 `json:"args,omitempty"`
-	CPUShares          int                      `json:"cpu_shares"`
-	MemoryMB           int                      `json:"memory_mb"`
-	DiskSizeGB         int                      `json:"disk_size_gb"`
-	Image              string                   `json:"image,omitempty"`
-	RootFS             string                   `json:"rootfs,omitempty"`
-	CloudInitISO       string                   `json:"cloud_init_iso,omitempty"`
-	NetworkID          string                   `json:"network_id,omitempty"`
-	Tags               map[string]string        `json:"tags,omitempty"`
-	OwnerID            string                   `json:"owner_id,omitempty"`
-	TenantID           string                   `json:"tenant_id,omitempty"`
-	VolumeAttachments  []vm.VMVolumeAttachment  `json:"volume_attachments,omitempty"`
-	NetworkAttachments []vm.VMNetworkAttachment `json:"network_attachments,omitempty"`
-	Placement          *vm.VMPlacementSpec      `json:"placement,omitempty"`
-	Migration          *vm.VMMigrationPolicy    `json:"migration,omitempty"`
-	Replication        *vm.VMReplicationPolicy  `json:"replication,omitempty"`
+	Name               string                    `json:"name"`
+	Type               vm.VMType                 `json:"type,omitempty"`
+	Command            string                    `json:"command,omitempty"`
+	Args               []string                  `json:"args,omitempty"`
+	CPUShares          int                       `json:"cpu_shares"`
+	MemoryMB           int                       `json:"memory_mb"`
+	DiskSizeGB         int                       `json:"disk_size_gb"`
+	Image              string                    `json:"image,omitempty"`
+	RootFS             string                    `json:"rootfs,omitempty"`
+	CloudInitISO       string                    `json:"cloud_init_iso,omitempty"`
+	NetworkID          string                    `json:"network_id,omitempty"`
+	Tags               map[string]string         `json:"tags,omitempty"`
+	OwnerID            string                    `json:"owner_id,omitempty"`
+	TenantID           string                    `json:"tenant_id,omitempty"`
+	VolumeAttachments  []vm.VMVolumeAttachment   `json:"volume_attachments,omitempty"`
+	NetworkAttachments []vm.VMNetworkAttachment  `json:"network_attachments,omitempty"`
+	Placement          *vm.VMPlacementSpec       `json:"placement,omitempty"`
+	Migration          *vm.VMMigrationPolicy     `json:"migration,omitempty"`
+	Replication        *vm.VMReplicationPolicy   `json:"replication,omitempty"`
+	Mobility           *vm.MigrationBackupPolicy `json:"mobility,omitempty"`
 }
 
 // VMResponse represents a VM in API responses
@@ -120,6 +121,7 @@ func (s *VMService) CreateVM(ctx context.Context, request CreateVMRequest, userI
 		Placement:          request.Placement,
 		Migration:          request.Migration,
 		Replication:        request.Replication,
+		Mobility:           request.Mobility,
 		Tags:               request.Tags,
 	}
 
@@ -166,6 +168,7 @@ func (s *VMService) CreateVM(ctx context.Context, request CreateVMRequest, userI
 			"image":        createdConfig.Image,
 			"rootfs":       createdConfig.RootFS,
 			"network_id":   createdConfig.NetworkID,
+			"mobility":     createdConfig.Mobility,
 			"tags":         createdConfig.Tags,
 		},
 	}

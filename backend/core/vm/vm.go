@@ -97,6 +97,7 @@ type VMConfig struct {
 	Placement             *VMPlacementSpec             `yaml:"placement,omitempty" json:"placement,omitempty"`
 	Migration             *VMMigrationPolicy           `yaml:"migration,omitempty" json:"migration,omitempty"`
 	Replication           *VMReplicationPolicy         `yaml:"replication,omitempty" json:"replication,omitempty"`
+	Mobility              *MigrationBackupPolicy       `yaml:"mobility,omitempty" json:"mobility,omitempty"`
 	WorkDir               string                       `yaml:"work_dir" json:"work_dir"`
 	Tags                  map[string]string            `yaml:"tags" json:"tags"`
 	PredictivePrefetching *PredictivePrefetchingConfig `yaml:"predictive_prefetching,omitempty" json:"predictive_prefetching,omitempty"`
