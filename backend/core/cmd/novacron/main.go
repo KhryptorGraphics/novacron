@@ -1019,7 +1019,11 @@ func initializeAPI(
 		return nil, fmt.Errorf("initialize runtime discovery: %w", err)
 	}
 
-	runtimeDR, err := initializeRuntimeDR(config)
+	var runtimeDRVMResolver runtimeDRVMResolver
+	if vmManager != nil {
+		runtimeDRVMResolver = vmManager
+	}
+	runtimeDR, err := initializeRuntimeDR(config, runtimeDRVMResolver)
 	if err != nil {
 		_ = listener.Close()
 		if inventoryStore != nil {
@@ -1130,6 +1134,8 @@ func newRuntimeRouter(
 	router.HandleFunc("/internal/runtime/v1/dr/status", runtimeGetDRStatusHandler(runtimeDR)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/dr/backups", runtimeListDRBackupsHandler(runtimeDR)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/dr/backups", runtimeRegisterDRBackupHandler(runtimeDR)).Methods(http.MethodPost)
+	router.HandleFunc("/internal/runtime/v1/dr/restores", runtimeListDRRestoresHandler(runtimeDR)).Methods(http.MethodGet)
+	router.HandleFunc("/internal/runtime/v1/dr/restores", runtimeStartDRRestoreHandler(runtimeDR)).Methods(http.MethodPost)
 	router.HandleFunc("/internal/runtime/v1/discovery/inventory", runtimeGetDiscoveryInventoryHandler(discovery)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/discovery/seeds", runtimeGetDiscoverySeedsHandler(discovery)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/discovery/seeds/{id}/verify", runtimeVerifyDiscoverySeedInventoryHandler(discovery)).Methods(http.MethodPost)

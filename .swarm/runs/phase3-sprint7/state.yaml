@@ -17,16 +17,18 @@ implemented:
   - persistent_dr_backup_metadata
   - daemon_dr_backup_registry_endpoint
   - restart_reload_test_for_dr_backups
+  - daemon_dr_restore_endpoint
+  - verified_backup_restore_preconditions
+  - vm_lifecycle_restore_target_validation
 remaining:
-  - connect_restore_orchestration_to_vm_lifecycle
   - add_node_loss_and_replica_loss_recovery_tests
 validation:
   targeted:
-    - command: GOTOOLCHAIN=go1.24.6 go test ./...
-      workdir: backend/core/dr
-      status: passed
     - command: GOTOOLCHAIN=go1.24.6 go test ./cmd/novacron
       workdir: backend/core
+      status: passed
+    - command: GOTOOLCHAIN=go1.24.6 go test ./...
+      workdir: backend/core/dr
       status: passed
   known_non_slice_failures:
     - command: GOTOOLCHAIN=go1.24.6 go test ./...

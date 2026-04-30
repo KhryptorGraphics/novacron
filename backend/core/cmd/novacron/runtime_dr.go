@@ -12,15 +12,23 @@ import (
 	"time"
 
 	dr "github.com/khryptorgraphics/novacron/backend/core/dr"
+	"github.com/khryptorgraphics/novacron/backend/core/vm"
 )
 
 type runtimeDRRuntime struct {
 	orchestrator *dr.Orchestrator
 	api          *dr.DRAPI
 	started      bool
+	vmResolver   runtimeDRVMResolver
 	backupPath   string
 	backupMu     sync.RWMutex
 	backups      map[string]runtimeDRBackupRecord
+	restoreMu    sync.RWMutex
+	restores     map[string]runtimeDRRestoreRecord
+}
+
+type runtimeDRVMResolver interface {
+	GetVM(vmID string) (*vm.VM, error)
 }
 
 type runtimeDRBackupRecord struct {
@@ -46,6 +54,26 @@ type runtimeDRBackupRequest struct {
 	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
+type runtimeDRRestoreRequest struct {
+	BackupID     string   `json:"backup_id"`
+	VMID         string   `json:"vm_id"`
+	TargetRegion string   `json:"target_region,omitempty"`
+	Selective    []string `json:"selective,omitempty"`
+}
+
+type runtimeDRRestoreRecord struct {
+	RestoreID    string    `json:"restore_id"`
+	BackupID     string    `json:"backup_id"`
+	VMID         string    `json:"vm_id"`
+	TargetType   string    `json:"target_type"`
+	TargetRegion string    `json:"target_region,omitempty"`
+	VMState      string    `json:"vm_state"`
+	Status       string    `json:"status"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Error        string    `json:"error,omitempty"`
+}
+
 type runtimeDRStatusResponse struct {
 	Enabled          bool              `json:"enabled"`
 	State            string            `json:"state"`
@@ -63,7 +91,7 @@ type runtimeDRStatusResponse struct {
 	RestoreMetrics   dr.RestoreMetrics `json:"restore_metrics"`
 }
 
-func initializeRuntimeDR(config runtimeConfig) (*runtimeDRRuntime, error) {
+func initializeRuntimeDR(config runtimeConfig, vmResolver runtimeDRVMResolver) (*runtimeDRRuntime, error) {
 	if !runtimeServiceEnabled(config, "backup") {
 		return nil, nil
 	}
@@ -81,8 +109,10 @@ func initializeRuntimeDR(config runtimeConfig) (*runtimeDRRuntime, error) {
 		orchestrator: orchestrator,
 		api:          dr.NewDRAPI(orchestrator),
 		started:      true,
+		vmResolver:   vmResolver,
 		backupPath:   runtimeDRBackupMetadataPath(config),
 		backups:      make(map[string]runtimeDRBackupRecord),
+		restores:     make(map[string]runtimeDRRestoreRecord),
 	}
 	if err := runtime.loadBackups(); err != nil {
 		_ = runtime.Stop()
@@ -246,6 +276,88 @@ func (runtime *runtimeDRRuntime) RegisterBackup(request runtimeDRBackupRequest) 
 	return record, nil
 }
 
+func (runtime *runtimeDRRuntime) StartRestore(request runtimeDRRestoreRequest) (runtimeDRRestoreRecord, error) {
+	if runtime == nil || runtime.api == nil {
+		return runtimeDRRestoreRecord{}, fmt.Errorf("DR runtime is not initialized")
+	}
+	if runtime.vmResolver == nil {
+		return runtimeDRRestoreRecord{}, fmt.Errorf("VM runtime is not initialized")
+	}
+
+	backupID := strings.TrimSpace(request.BackupID)
+	if backupID == "" {
+		return runtimeDRRestoreRecord{}, fmt.Errorf("backup_id is required")
+	}
+	vmID := strings.TrimSpace(request.VMID)
+	if vmID == "" {
+		return runtimeDRRestoreRecord{}, fmt.Errorf("vm_id is required")
+	}
+
+	runtime.backupMu.RLock()
+	backupRecord, ok := runtime.backups[backupID]
+	runtime.backupMu.RUnlock()
+	if !ok {
+		return runtimeDRRestoreRecord{}, fmt.Errorf("backup_id %q is not registered", backupID)
+	}
+	if !strings.EqualFold(backupRecord.Status, "verified") {
+		return runtimeDRRestoreRecord{}, fmt.Errorf("backup_id %q is not verified", backupID)
+	}
+	if backupRecord.VMID != "" && backupRecord.VMID != vmID {
+		return runtimeDRRestoreRecord{}, fmt.Errorf("backup_id %q belongs to vm_id %q", backupID, backupRecord.VMID)
+	}
+
+	vmInstance, err := runtime.vmResolver.GetVM(vmID)
+	if err != nil {
+		return runtimeDRRestoreRecord{}, fmt.Errorf("validate restore target VM: %w", err)
+	}
+
+	target := dr.RestoreTarget{
+		Type:         "vm",
+		TargetID:     vmID,
+		TargetRegion: strings.TrimSpace(request.TargetRegion),
+		Selective:    append([]string(nil), request.Selective...),
+	}
+	restoreID, err := runtime.api.RestoreFromBackupWithID(backupID, target)
+	if err != nil {
+		return runtimeDRRestoreRecord{}, err
+	}
+
+	now := time.Now().UTC()
+	record := runtimeDRRestoreRecord{
+		RestoreID:    restoreID,
+		BackupID:     backupID,
+		VMID:         vmID,
+		TargetType:   target.Type,
+		TargetRegion: target.TargetRegion,
+		VMState:      string(vmInstance.State()),
+		Status:       "running",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	runtime.restoreMu.Lock()
+	runtime.restores[restoreID] = record
+	runtime.restoreMu.Unlock()
+	return record, nil
+}
+
+func (runtime *runtimeDRRuntime) ListRestores() ([]runtimeDRRestoreRecord, error) {
+	if runtime == nil {
+		return nil, fmt.Errorf("DR runtime is not initialized")
+	}
+
+	runtime.restoreMu.RLock()
+	defer runtime.restoreMu.RUnlock()
+	records := make([]runtimeDRRestoreRecord, 0, len(runtime.restores))
+	for _, record := range runtime.restores {
+		records = append(records, record)
+	}
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].UpdatedAt.After(records[j].UpdatedAt)
+	})
+	return records, nil
+}
+
 func (runtime *runtimeDRRuntime) Stop() error {
 	if runtime == nil || runtime.orchestrator == nil || !runtime.started {
 		return nil
@@ -276,7 +388,7 @@ func (runtime *runtimeDRRuntime) Status() (runtimeDRStatusResponse, error) {
 		RTOSeconds:       int64(status.RTO / time.Second),
 		RPOSeconds:       int64(status.RPO / time.Second),
 		BackupCount:      runtime.backupCount(status.BackupCount),
-		RestoreCount:     status.RestoreCount,
+		RestoreCount:     runtime.restoreCount(status.RestoreCount),
 		BackupMetrics:    runtime.api.GetBackupMetrics(),
 		RestoreMetrics:   runtime.api.GetRestoreMetrics(),
 	}, nil
@@ -292,6 +404,18 @@ func (runtime *runtimeDRRuntime) backupCount(defaultCount int64) int64 {
 		return defaultCount
 	}
 	return int64(len(runtime.backups))
+}
+
+func (runtime *runtimeDRRuntime) restoreCount(defaultCount int64) int64 {
+	if runtime == nil {
+		return defaultCount
+	}
+	runtime.restoreMu.RLock()
+	defer runtime.restoreMu.RUnlock()
+	if len(runtime.restores) == 0 {
+		return defaultCount
+	}
+	return int64(len(runtime.restores))
 }
 
 func runtimeGetDRStatusHandler(runtimeDR *runtimeDRRuntime) http.HandlerFunc {
@@ -313,6 +437,39 @@ func runtimeListDRBackupsHandler(runtimeDR *runtimeDRRuntime) http.HandlerFunc {
 			return
 		}
 		respondRuntimeJSON(w, http.StatusOK, records)
+	}
+}
+
+func runtimeListDRRestoresHandler(runtimeDR *runtimeDRRuntime) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		records, err := runtimeDR.ListRestores()
+		if err != nil {
+			respondRuntimeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+			return
+		}
+		respondRuntimeJSON(w, http.StatusOK, records)
+	}
+}
+
+func runtimeStartDRRestoreHandler(runtimeDR *runtimeDRRuntime) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var request runtimeDRRestoreRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			respondRuntimeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		record, err := runtimeDR.StartRestore(request)
+		if err != nil {
+			status := http.StatusBadRequest
+			if strings.Contains(err.Error(), "not initialized") {
+				status = http.StatusServiceUnavailable
+			} else if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "not registered") {
+				status = http.StatusNotFound
+			}
+			respondRuntimeJSON(w, status, map[string]string{"error": err.Error()})
+			return
+		}
+		respondRuntimeJSON(w, http.StatusAccepted, record)
 	}
 }
 

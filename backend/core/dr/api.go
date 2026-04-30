@@ -29,8 +29,13 @@ func (api *DRAPI) InitiateBackup(backupType BackupType) (string, error) {
 
 // RestoreFromBackup initiates a restore operation
 func (api *DRAPI) RestoreFromBackup(backupID string, target RestoreTarget) error {
-	_, err := api.orchestrator.restoreSys.RestoreFromBackup(context.Background(), backupID, target)
+	_, err := api.RestoreFromBackupWithID(backupID, target)
 	return err
+}
+
+// RestoreFromBackupWithID initiates a restore operation and returns its job ID.
+func (api *DRAPI) RestoreFromBackupWithID(backupID string, target RestoreTarget) (string, error) {
+	return api.orchestrator.restoreSys.RestoreFromBackup(context.Background(), backupID, target)
 }
 
 // GetDRStatus returns current DR status

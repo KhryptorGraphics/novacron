@@ -17,13 +17,15 @@ In progress.
 - Switched `/internal/runtime/v1/services` backup reporting from hard-coded gated status to runtime-backed availability.
 - Added daemon-owned persistent DR backup metadata at `storage/backups/metadata.json`.
 - Added `/internal/runtime/v1/dr/backups` list/register endpoints and restart reload coverage.
+- Added `/internal/runtime/v1/dr/restores` list/start endpoints.
+- Restore requests now require a verified registered backup, reject backup and VM mismatches, validate the target VM through the daemon VM runtime, and return the DR restore job ID.
 
 ## Current Boundary
 
 - `backend/core/dr` now passes its own targeted test suite and is consumed by the canonical runtime when the `backup` service is enabled.
 - The canonical daemon disables DR cron schedules and transaction-log streaming by default.
 - DR backup metadata now survives daemon restart.
-- The next implementation slice should connect restore orchestration to VM lifecycle state and add node-loss or replica-loss recovery tests.
+- Restore orchestration is now exposed through the canonical daemon with VM lifecycle target validation. The next implementation slice should add node-loss or replica-loss recovery tests.
 
 ## Validation
 
