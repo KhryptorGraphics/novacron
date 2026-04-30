@@ -1,5 +1,5 @@
-import { API_ORIGIN, API_V1_BASE, buildApiUrl, buildApiV1Url, buildWebSocketUrls } from '@/lib/api/origin';
-import type { ApiError, Pagination, ApiEnvelope } from '@/lib/api/types';
+import { API_V1_BASE, buildApiUrl, buildApiV1Url, buildWebSocketUrls } from '@/lib/api/origin';
+import type { Pagination, ApiEnvelope } from '@/lib/api/types';
 import type {
   NetworkNode,
   NetworkEdge,
@@ -13,7 +13,11 @@ import type {
   ComputeJob,
   GlobalResourcePool,
   MemoryFabric,
-  ProcessingFabric
+  ProcessingFabric,
+  SecurityPolicy,
+  ComplianceReport,
+  AuditLog,
+  SystemConfiguration
 } from '@/lib/api/types';
 
 // API Client for NovaCron Enhanced API
@@ -186,7 +190,24 @@ export async function apiGet<T>(path: string, params?: Record<string, string | n
 export async function apiPost<T>(path: string, body?: unknown, opts?: { role?: "viewer" | "operator" }): Promise<ApiEnvelope<T>> {
   const url = buildApiV1Url(path);
   const role = opts?.role ?? "viewer";
-  const res = await fetch(url, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", "X-Role": role }, body: body!==undefined?JSON.stringify(body):undefined, credentials: "include" });
+  const init: RequestInit = {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json", "X-Role": role },
+    credentials: "include",
+  };
+  if (body !== undefined) {
+    init.body = JSON.stringify(body);
+  }
+  const res = await fetch(url, init);
+  const env = await res.json() as ApiEnvelope<T>;
+  if (env.error) throw new ApiHttpError(res.status, env.error.code, env.error.message, url);
+  return env;
+}
+
+export async function apiDelete<T>(path: string, opts?: { role?: "viewer" | "operator" }): Promise<ApiEnvelope<T>> {
+  const url = buildApiV1Url(path);
+  const role = opts?.role ?? "viewer";
+  const res = await fetch(url, { method: "DELETE", headers: { Accept: "application/json", "X-Role": role }, credentials: "include" });
   const env = await res.json() as ApiEnvelope<T>;
   if (env.error) throw new ApiHttpError(res.status, env.error.code, env.error.message, url);
   return env;

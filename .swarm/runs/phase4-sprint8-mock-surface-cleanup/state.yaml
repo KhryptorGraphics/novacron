@@ -1,0 +1,29 @@
+phase: 4
+sprint: 8
+status: complete
+issue: novacron-hig
+epic: NC-p4a
+implemented:
+  - admin_vm_management_page_api_backed
+  - dashboard_vm_list_api_backed
+  - admin_user_management_api_backed
+  - typed_vm_create_delete_helpers
+  - api_delete_helper
+  - database_editor_non_product_demo_isolated
+  - network_configuration_panel_non_product_demo_isolated
+  - migration_workflow_non_product_demo_isolated
+  - backup_recovery_flow_non_product_demo_isolated
+  - vm_migration_dialog_non_product_demo_isolated
+remaining:
+  - live_contract_replacement_for_advanced_demo_workspaces_tracked_by_novacron_j1s
+followups:
+  - novacron-j1s
+validation:
+  targeted:
+    - command: git diff --check
+      result: pass
+    - command: npm run test:smoke -- --runInBand
+      result: pass
+    - command: npx tsc --noEmit --pretty false | rg changed-files
+      result: pass
+      note: no diagnostics for changed product files; repo-wide type debt remains

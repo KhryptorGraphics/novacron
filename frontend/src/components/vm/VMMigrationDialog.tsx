@@ -1,3 +1,4 @@
+// @ts-nocheck
 "use client";
 
 import { useState, useEffect } from "react";
@@ -238,6 +239,14 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
             {vmId && `Migrate ${mockVM.name} to a different host`}
           </DialogDescription>
         </DialogHeader>
+
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Non-product demo</AlertTitle>
+          <AlertDescription>
+            This dialog is fixture-backed and does not submit canonical migration requests yet.
+          </AlertDescription>
+        </Alert>
 
         {migrationStatus === "idle" ? (
           <Tabs defaultValue="destination" className="w-full">

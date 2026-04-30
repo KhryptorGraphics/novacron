@@ -20,9 +20,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import { FadeIn } from "@/lib/animations";
+import { useUsers, useUpdateUser } from "@/lib/api/hooks/useAdmin";
+import type { User } from "@/lib/api/types";
 import { 
   Users, 
   Search, 
@@ -33,91 +33,58 @@ import {
   UserCheck, 
   Eye,
   Edit,
-  Trash2,
-  MoreHorizontal,
-  Calendar,
-  Activity,
   AlertCircle,
   CheckCircle,
-  Clock,
-  Filter
+  Clock
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 
-// Mock user data
-const mockUsers = [
-  {
-    id: 1,
-    name: "John Doe",
-    email: "user@organization.com",
-    role: "user",
-    status: "active",
-    created_at: "2024-01-15T10:30:00Z",
-    last_login: "2024-08-23T14:22:00Z",
-    login_count: 45,
-    organization: "ACME Corp",
-    two_factor: true,
-    email_verified: true
-  },
-  {
-    id: 2,
-    name: "Jane Smith",
-    email: "jane@company.com",
-    role: "moderator",
-    status: "suspended",
-    created_at: "2024-02-10T09:15:00Z",
-    last_login: "2024-08-18T16:45:00Z",
-    login_count: 123,
-    organization: "Tech Solutions",
-    two_factor: false,
-    email_verified: true
-  },
-  {
-    id: 3,
-    name: "Bob Wilson",
-    email: "bob@startup.io",
-    role: "admin",
-    status: "active",
-    created_at: "2024-01-01T08:00:00Z",
-    last_login: "2024-08-24T12:10:00Z",
-    login_count: 289,
-    organization: "Startup Inc",
-    two_factor: true,
-    email_verified: true
-  },
-  {
-    id: 4,
-    name: "Alice Johnson",
-    email: "alice.johnson@email.com",
-    role: "user",
-    status: "pending",
-    created_at: "2024-08-20T13:45:00Z",
-    last_login: null,
-    login_count: 0,
-    organization: "New Company",
-    two_factor: false,
-    email_verified: false
-  }
-];
-
-const userStats = {
-  total: 1247,
-  active: 892,
-  suspended: 23,
-  pending: 45,
-  admins: 12,
-  moderators: 34,
-  twoFactorEnabled: 756
+type CanonicalAdminUser = Partial<User> & {
+  username?: string;
+  active?: boolean;
 };
 
+type UserRow = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  last_login: string | null;
+  login_count: number;
+  organization: string;
+  two_factor: boolean;
+  email_verified: boolean;
+};
+
+function normalizeUser(user: CanonicalAdminUser): UserRow {
+  const activeStatus = user.active === false ? "suspended" : "active";
+
+  return {
+    id: String(user.id || ""),
+    name: user.name || user.username || user.email || "Unnamed user",
+    email: user.email || "",
+    role: user.role || "user",
+    status: user.status || activeStatus,
+    last_login: user.last_login || null,
+    login_count: user.login_count || 0,
+    organization: user.organization || "Default",
+    two_factor: user.two_factor_enabled || false,
+    email_verified: user.email_verified ?? true,
+  };
+}
+
 export function UserManagement() {
-  const [users, setUsers] = useState(mockUsers);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [roleFilter, setRoleFilter] = useState("all");
-  const [selectedUser, setSelectedUser] = useState<any>(null);
-  const [showUserModal, setShowUserModal] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const userQueryFilters: { search?: string; status?: string; role?: string; pageSize?: number } = { pageSize: 100 };
+  if (searchQuery) userQueryFilters.search = searchQuery;
+  if (statusFilter !== "all") userQueryFilters.status = statusFilter;
+  if (roleFilter !== "all") userQueryFilters.role = roleFilter;
+  const usersQuery = useUsers(userQueryFilters);
+  const updateUser = useUpdateUser();
+  const users = (usersQuery.data?.users || []).map((user) => normalizeUser(user as CanonicalAdminUser));
+  const loading = usersQuery.isLoading || updateUser.isPending;
 
   const filteredUsers = users.filter(user => {
     const matchesSearch = user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -129,38 +96,16 @@ export function UserManagement() {
     return matchesSearch && matchesStatus && matchesRole;
   });
 
-  const handleUserAction = async (userId: number, action: string) => {
-    setLoading(true);
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    setUsers(prev => prev.map(user => {
-      if (user.id === userId) {
-        switch (action) {
-          case 'activate':
-            return { ...user, status: 'active' };
-          case 'suspend':
-            return { ...user, status: 'suspended' };
-          case 'approve':
-            return { ...user, status: 'active', email_verified: true };
-          default:
-            return user;
-        }
-      }
-      return user;
-    }));
-    
-    setLoading(false);
+  const userStats = {
+    total: usersQuery.data?.total || filteredUsers.length,
+    active: filteredUsers.filter((user) => user.status === "active").length,
+    pending: filteredUsers.filter((user) => user.status === "pending").length,
+    twoFactorEnabled: filteredUsers.filter((user) => user.two_factor).length,
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "active": return "bg-green-500";
-      case "suspended": return "bg-red-500";
-      case "pending": return "bg-yellow-500";
-      default: return "bg-gray-500";
-    }
+  const handleUserAction = async (userId: string, action: string) => {
+    const active = action === "activate" || action === "approve";
+    await updateUser.mutateAsync({ id: userId, active });
   };
 
   const getStatusIcon = (status: string) => {
@@ -308,6 +253,11 @@ export function UserManagement() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {Boolean(usersQuery.error) && (
+              <div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+                Failed to load users from the canonical admin API.
+              </div>
+            )}
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -417,8 +367,8 @@ export function UserManagement() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => setSelectedUser(user)}
                             className="h-7 w-7 p-0"
+                            title={`${user.name} details are available through the canonical user table row`}
                           >
                             <Eye className="h-3 w-3" />
                           </Button>

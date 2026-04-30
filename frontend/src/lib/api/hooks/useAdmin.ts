@@ -14,7 +14,7 @@ import {
 
 // Admin API endpoints
 const ADMIN_ENDPOINTS = {
-  USERS: '/admin/users',
+  USERS: '/api/admin/users',
   USER_SESSIONS: '/admin/users/sessions',
   AUDIT_LOGS: '/admin/audit-logs',
   SYSTEM_METRICS: '/admin/system/metrics',
@@ -87,7 +87,7 @@ export const useUpdateUser = () => {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: async ({ id, ...userData }: Partial<User> & { id: string }) => {
+    mutationFn: async ({ id, ...userData }: Partial<User> & { id: string; active?: boolean; username?: string }) => {
       return apiClient.put<User>(`${ADMIN_ENDPOINTS.USERS}/${id}`, userData);
     },
     onSuccess: () => {

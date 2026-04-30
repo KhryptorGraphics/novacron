@@ -4,6 +4,7 @@ export {
   ApiClient,
   ApiHttpError,
   apiClient,
+  apiDelete,
   apiGet,
   apiPost,
 } from './client';

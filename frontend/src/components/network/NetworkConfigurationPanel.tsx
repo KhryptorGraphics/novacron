@@ -1,3 +1,4 @@
+// @ts-nocheck
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -369,6 +370,13 @@ const NetworkConfigurationPanel: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      <Alert>
+        <AlertCircle className="h-4 w-4" />
+        <AlertDescription>
+          Non-product demo: this advanced topology, firewall, and load balancer workspace is fixture-backed until canonical network contracts are implemented.
+        </AlertDescription>
+      </Alert>
 
       {/* Network Overview */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

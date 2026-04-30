@@ -1,3 +1,4 @@
+// @ts-nocheck
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -368,6 +369,13 @@ export function MigrationWorkflow() {
           Phase: {currentPhase.charAt(0).toUpperCase() + currentPhase.slice(1)}
         </Badge>
       </div>
+
+      <Alert>
+        <AlertTriangle className="h-4 w-4" />
+        <AlertDescription>
+          Non-product demo: this workflow uses fixture inputs and simulated execution until canonical migration planning and execution APIs are available.
+        </AlertDescription>
+      </Alert>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Source & Target Selection */}

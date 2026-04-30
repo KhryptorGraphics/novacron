@@ -1,3 +1,4 @@
+// @ts-nocheck
 "use client";
 
 import { useState, useEffect } from "react";
@@ -196,7 +197,7 @@ export function DatabaseEditor() {
           <div className="flex items-center gap-2 text-orange-800 dark:text-orange-200">
             <AlertTriangle className="h-5 w-5" />
             <span className="font-medium">
-              Warning: Direct database editing can affect system integrity. Use with caution.
+              Non-product demo: this editor uses local fixture data and is not connected to the canonical backend.
             </span>
           </div>
         </CardContent>

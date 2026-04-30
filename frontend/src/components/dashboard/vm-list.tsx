@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { OSSelector } from "@/components/dashboard/os-selector";
 import {
   Card,
@@ -33,7 +34,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -46,7 +46,6 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import { toast } from "@/components/ui/use-toast";
 import { useToast } from "@/components/ui/use-toast";
 import {
   Play,
@@ -56,15 +55,17 @@ import {
   MoreVertical,
   Plus,
   Pause,
-  Pencil,
   ExternalLink,
   Copy,
   Server,
   HardDrive,
   Cpu,
-  Memory
+  MemoryStick
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { createVM, deleteVM, postVMAction, type ListVMsParams } from "@/lib/api/vms";
+import { useVMs } from "@/lib/api/hooks/useVMs";
+import type { VM } from "@/lib/api/types";
 import { formatDistanceToNow } from 'date-fns';
 
 // Types
@@ -110,115 +111,36 @@ const stateColors = {
   deleting: "bg-rose-500",
 };
 
-// Mock data - would be replaced with API calls in production
-const mockVMs: VMProps[] = [
-  {
-    id: "vm-2435fa3e",
-    name: "web-server-01",
-    state: "running",
-    node_id: "node-1",
-    owner: "admin",
+function toVMProps(vm: VM): VMProps {
+  return {
+    id: vm.id,
+    name: vm.name,
+    state: vm.state || "unknown",
+    node_id: vm.node_id || "unassigned",
+    owner: "system",
     spec: {
-      vcpu: 2,
-      memory_mb: 4096,
-      disk_mb: 20480,
-      type: "kvm",
-      image: "ubuntu-22.04",
+      vcpu: 0,
+      memory_mb: 0,
+      disk_mb: 0,
+      type: "canonical",
+      image: "runtime-managed",
     },
-    created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
-    updated_at: new Date(Date.now() - 3600000).toISOString(),
-    tags: { env: "production", role: "web" },
-    process_info: {
-      cpu_usage_percent: 15.2,
-      memory_usage_mb: 2048,
-    },
-  },
-  {
-    id: "vm-98765",
-    name: "database-01",
-    state: "running",
-    node_id: "node-2",
-    owner: "admin",
-    spec: {
-      vcpu: 4,
-      memory_mb: 8192,
-      disk_mb: 51200,
-      type: "kvm",
-      image: "ubuntu-22.04",
-    },
-    created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
-    updated_at: new Date(Date.now() - 7200000).toISOString(),
-    tags: { env: "production", role: "database" },
-    process_info: {
-      cpu_usage_percent: 45.7,
-      memory_usage_mb: 6144,
-    },
-  },
-  {
-    id: "vm-56328",
-    name: "cache-01",
-    state: "stopped",
-    node_id: "node-1",
-    owner: "admin",
-    spec: {
-      vcpu: 1,
-      memory_mb: 2048,
-      disk_mb: 10240,
-      type: "container",
-      image: "redis:latest",
-    },
-    created_at: new Date(Date.now() - 86400000 * 3).toISOString(),
-    updated_at: new Date(Date.now() - 86400000).toISOString(),
-    tags: { env: "development", role: "cache" },
-  },
-  {
-    id: "vm-79246",
-    name: "test-server",
-    state: "paused",
-    node_id: "node-3",
-    owner: "developer",
-    spec: {
-      vcpu: 2,
-      memory_mb: 4096,
-      disk_mb: 20480,
-      type: "process",
-      image: "alpine:latest",
-    },
-    created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
-    updated_at: new Date(Date.now() - 43200000).toISOString(),
-    tags: { env: "test", role: "application" },
-    process_info: {
-      cpu_usage_percent: 0.1,
-      memory_usage_mb: 512,
-    },
-  },
-  {
-    id: "vm-38216",
-    name: "api-gateway",
-    state: "error",
-    node_id: "node-2",
-    owner: "admin",
-    spec: {
-      vcpu: 2,
-      memory_mb: 4096,
-      disk_mb: 20480,
-      type: "containerd",
-      image: "nginx:latest",
-    },
-    created_at: new Date(Date.now() - 86400000).toISOString(),
-    updated_at: new Date(Date.now() - 1800000).toISOString(),
-    tags: { env: "production", role: "gateway" },
-  },
-];
+    created_at: vm.created_at,
+    updated_at: vm.updated_at,
+    tags: {},
+  };
+}
 
 // VM List Component
 export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }: VMListProps) {
   const { toast } = useToast();
-  const [vms, setVMs] = useState<VMProps[]>(mockVMs);
-  const [isLoading, setIsLoading] = useState(false);
+  const queryClient = useQueryClient();
+  const vmQueryParams: ListVMsParams = {};
+  if (limit !== undefined) vmQueryParams.pageSize = limit;
+  if (filter) vmQueryParams.q = filter;
+  const { items, isLoading: isVMsLoading, error: vmsError } = useVMs(vmQueryParams);
+  const [isMutating, setIsMutating] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [selectedVM, setSelectedVM] = useState<VMProps | null>(null);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
     action: string;
@@ -239,111 +161,46 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
     disk_mb: 10240,
   });
 
-  // Fetch VMs from API
-  useEffect(() => {
-    // In a real application, this would be an API call
-    // Something like:
-    /*
-    const fetchVMs = async () => {
-      setIsLoading(true);
-      try {
-        const response = await fetch('/api/vms');
-        const data = await response.json();
-        setVMs(data);
-      } catch (error) {
-        console.error('Failed to fetch VMs:', error);
-        toast({
-          title: "Error",
-          description: "Failed to fetch virtual machines",
-          variant: "destructive",
-        });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchVMs();
-    */
-
-    // Filter mock data based on filter prop
-    if (filter) {
-      const filteredVMs = mockVMs.filter(
-        (vm) =>
-          vm.name.toLowerCase().includes(filter.toLowerCase()) ||
-          vm.state.toLowerCase() === filter.toLowerCase() ||
-          vm.node_id.toLowerCase() === filter.toLowerCase() ||
-          vm.spec.type.toLowerCase() === filter.toLowerCase()
+  const vms = items
+    .map(toVMProps)
+    .filter((vm) => {
+      if (!filter) return true;
+      const normalizedFilter = filter.toLowerCase();
+      return (
+        vm.name.toLowerCase().includes(normalizedFilter) ||
+        vm.state.toLowerCase() === normalizedFilter ||
+        vm.node_id.toLowerCase() === normalizedFilter ||
+        vm.spec.type.toLowerCase() === normalizedFilter
       );
-      setVMs(filteredVMs);
-    } else {
-      setVMs(mockVMs);
-    }
+    })
+    .slice(0, limit || undefined);
 
-    // Apply limit if provided
-    if (limit && vms.length > limit) {
-      setVMs(vms.slice(0, limit));
-    }
-  }, [filter, limit, toast]);
+  const isLoading = isVMsLoading || isMutating;
 
   // VM operations
   const handleVMOperation = async (vmId: string, operation: string) => {
-    setIsLoading(true);
+    setIsMutating(true);
 
-    // In a real application, this would be an API call
-    // For now, we'll simulate with setTimeout
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Update VM state based on operation
-      const updatedVMs = vms.map((vm) => {
-        if (vm.id === vmId) {
-          let newState;
-          switch (operation) {
-            case 'start':
-              newState = 'running';
-              break;
-            case 'stop':
-              newState = 'stopped';
-              break;
-            case 'restart':
-              newState = 'restarting';
-              // Simulate restart completing after 2 seconds
-              setTimeout(() => {
-                setVMs(prevVMs =>
-                  prevVMs.map(innerVM =>
-                    innerVM.id === vmId
-                      ? { ...innerVM, state: 'running' }
-                      : innerVM
-                  )
-                );
-              }, 2000);
-              break;
-            case 'pause':
-              newState = 'paused';
-              break;
-            case 'delete':
-              // Return the VM with no changes - we'll filter it out below
-              return vm;
-            default:
-              newState = vm.state;
-          }
-
-          return {
-            ...vm,
-            state: newState,
-            updated_at: new Date().toISOString()
-          };
-        }
-        return vm;
-      });
-
-      // If operation was delete, filter out the VM
-      if (operation === 'delete') {
-        setVMs(updatedVMs.filter(vm => vm.id !== vmId));
-      } else {
-        setVMs(updatedVMs);
+      switch (operation) {
+        case "start":
+        case "stop":
+          await postVMAction(vmId, operation, { role: "operator" });
+          break;
+        case "restart":
+          await postVMAction(vmId, "stop", { role: "operator" });
+          await postVMAction(vmId, "start", { role: "operator" });
+          break;
+        case "delete":
+          await deleteVM(vmId);
+          break;
+        case "pause":
+          throw new Error("Pause is not exposed by the canonical VM API yet");
+        default:
+          throw new Error(`Unsupported VM operation: ${operation}`);
       }
+
+      await queryClient.invalidateQueries({ queryKey: ["vms"] });
 
       toast({
         title: "Success",
@@ -357,14 +214,14 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
         variant: "destructive",
       });
     } finally {
-      setIsLoading(false);
+      setIsMutating(false);
       setConfirmDialog({ open: false, action: "" });
     }
   };
 
   // Create new VM
   const handleCreateVM = async () => {
-    setIsLoading(true);
+    setIsMutating(true);
 
     try {
       // Validate form
@@ -372,42 +229,18 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
         throw new Error("Name and image are required");
       }
 
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
-      // Generate new VM
-      const newVMId = `vm-${Math.floor(Math.random() * 100000)}`;
-      const createdVM: VMProps = {
-        id: newVMId,
+      await createVM({
         name: newVM.name,
-        state: "creating",
-        node_id: `node-${Math.floor(Math.random() * 3) + 1}`,
-        owner: "admin",
-        spec: {
-          vcpu: newVM.vcpu,
-          memory_mb: newVM.memory_mb,
-          disk_mb: newVM.disk_mb,
-          type: newVM.type as string,
+        cpu_shares: newVM.vcpu,
+        memory_mb: newVM.memory_mb,
+        tags: {
+          type: newVM.type,
           image: newVM.image,
+          disk_mb: newVM.disk_mb,
+          created_by: "ui",
         },
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        tags: { created_by: "ui" },
-      };
-
-      // Add to VM list
-      setVMs([createdVM, ...vms]);
-
-      // Simulate VM creation completing after 3 seconds
-      setTimeout(() => {
-        setVMs(prevVMs =>
-          prevVMs.map(vm =>
-            vm.id === newVMId
-              ? { ...vm, state: 'stopped' }
-              : vm
-          )
-        );
-      }, 3000);
+      });
+      await queryClient.invalidateQueries({ queryKey: ["vms"] });
 
       toast({
         title: "Success",
@@ -432,14 +265,12 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
         variant: "destructive",
       });
     } finally {
-      setIsLoading(false);
+      setIsMutating(false);
     }
   };
 
   // Get VM details
   const openVMDetails = (vm: VMProps) => {
-    setSelectedVM(vm);
-    setDetailsOpen(true);
     if (onVMClick) {
       onVMClick(vm);
     }
@@ -460,7 +291,11 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {isLoading ? (
+        {vmsError ? (
+          <div className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+            Failed to load virtual machines from the canonical API.
+          </div>
+        ) : isLoading ? (
           <div className="flex justify-center items-center h-64">
             <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary"></div>
           </div>
@@ -540,7 +375,7 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
                           )}
                         </div>
                         <div className="flex items-center">
-                          <Memory className="h-3 w-3 mr-1" />
+                          <MemoryStick className="h-3 w-3 mr-1" />
                           <span>{(vm.spec.memory_mb / 1024).toFixed(1)} GB</span>
                           {vm.process_info && (
                             <span className="text-muted-foreground ml-1">
