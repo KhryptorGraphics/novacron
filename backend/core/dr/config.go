@@ -10,8 +10,8 @@ import (
 // DRConfig contains all disaster recovery configuration
 type DRConfig struct {
 	// Backup configuration
-	BackupSchedule  BackupSchedule  `json:"backup_schedule"`
-	RetentionPolicy RetentionPolicy `json:"retention_policy"`
+	BackupSchedule  BackupSchedule   `json:"backup_schedule"`
+	RetentionPolicy RetentionPolicy  `json:"retention_policy"`
 	BackupLocations []BackupLocation `json:"backup_locations"`
 
 	// Failover configuration
@@ -22,22 +22,22 @@ type DRConfig struct {
 	RPO time.Duration `json:"rpo"` // 5 minutes default
 
 	// Automation settings
-	AutoFailover      bool     `json:"auto_failover"`
-	RequireApproval   bool     `json:"require_approval"`
+	AutoFailover        bool     `json:"auto_failover"`
+	RequireApproval     bool     `json:"require_approval"`
 	NotificationTargets []string `json:"notification_targets"`
 
 	// Multi-region settings
-	PrimaryRegion     string   `json:"primary_region"`
-	SecondaryRegions  []string `json:"secondary_regions"`
-	MinActiveRegions  int      `json:"min_active_regions"`
+	PrimaryRegion    string   `json:"primary_region"`
+	SecondaryRegions []string `json:"secondary_regions"`
+	MinActiveRegions int      `json:"min_active_regions"`
 
 	// Health monitoring
 	HealthChecks []HealthCheck `json:"health_checks"`
 
 	// Chaos engineering
-	ChaosEnabled      bool          `json:"chaos_enabled"`
-	ChaosSchedule     string        `json:"chaos_schedule"` // Cron expression
-	ChaosBlastRadius  int           `json:"chaos_blast_radius"`
+	ChaosEnabled     bool   `json:"chaos_enabled"`
+	ChaosSchedule    string `json:"chaos_schedule"` // Cron expression
+	ChaosBlastRadius int    `json:"chaos_blast_radius"`
 
 	// Security
 	EncryptionEnabled bool   `json:"encryption_enabled"`
@@ -48,17 +48,17 @@ type DRConfig struct {
 	AuditLogRetention int    `json:"audit_log_retention_days"`
 
 	// Testing
-	DRTestSchedule    string `json:"dr_test_schedule"` // Cron expression
-	TestingEnabled    bool   `json:"testing_enabled"`
+	DRTestSchedule string `json:"dr_test_schedule"` // Cron expression
+	TestingEnabled bool   `json:"testing_enabled"`
 }
 
 // DefaultDRConfig returns production-ready default configuration
 func DefaultDRConfig() *DRConfig {
 	return &DRConfig{
 		BackupSchedule: BackupSchedule{
-			FullBackup:        "0 0 * * *",      // Daily at midnight
-			IncrementalBackup: "0 * * * *",      // Hourly
-			TransactionLog:    true,             // Continuous
+			FullBackup:        "0 0 * * *", // Daily at midnight
+			IncrementalBackup: "0 * * * *", // Hourly
+			TransactionLog:    true,        // Continuous
 			SnapshotInterval:  1 * time.Hour,
 		},
 		RetentionPolicy: RetentionPolicy{
@@ -87,18 +87,36 @@ func DefaultDRConfig() *DRConfig {
 					RequireQuorum: true,
 				},
 			},
-			MinHealthyRegions:   2,
-			QuorumRequirement:   2,
-			MaxFailoverAttempts: 3,
-			RollbackOnFailure:   true,
-			ApprovalRequired:    false,
+			MinHealthyRegions:    2,
+			QuorumRequirement:    2,
+			MaxFailoverAttempts:  3,
+			RollbackOnFailure:    true,
+			ApprovalRequired:     false,
 			NotifyBeforeFailover: true,
 		},
-		RTO:               30 * time.Minute,
-		RPO:               5 * time.Minute,
-		AutoFailover:      true,
-		RequireApproval:   false,
-		MinActiveRegions:  2,
+		RTO:              30 * time.Minute,
+		RPO:              5 * time.Minute,
+		AutoFailover:     true,
+		RequireApproval:  false,
+		PrimaryRegion:    "us-east-1",
+		SecondaryRegions: []string{"us-west-2", "eu-west-1"},
+		MinActiveRegions: 2,
+		BackupLocations: []BackupLocation{
+			{
+				ID:       "local-primary",
+				Type:     "local",
+				Region:   "us-east-1",
+				Endpoint: "/var/lib/novacron/backups",
+				Priority: 1,
+			},
+			{
+				ID:       "local-secondary",
+				Type:     "local",
+				Region:   "us-west-2",
+				Endpoint: "/var/lib/novacron/backups-replica",
+				Priority: 2,
+			},
+		},
 		HealthChecks: []HealthCheck{
 			{
 				Level:              1,
@@ -141,7 +159,7 @@ func DefaultDRConfig() *DRConfig {
 				ExpectedStatus:     200,
 			},
 		},
-		ChaosEnabled:      false, // Disabled by default, enable in staging
+		ChaosEnabled:      false,       // Disabled by default, enable in staging
 		ChaosSchedule:     "0 2 * * 0", // Sunday 2 AM
 		ChaosBlastRadius:  5,
 		EncryptionEnabled: true,

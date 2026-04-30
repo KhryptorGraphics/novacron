@@ -1,0 +1,28 @@
+phase: 3
+sprint: 7
+status: in_progress
+issue: novacron-b91
+canonical_runtime: backend/core/cmd/novacron/main.go
+implemented:
+  - dr_module_checksum_baseline
+  - standard_dr_runbooks_registered
+  - self_validating_dr_default_config
+  - manual_backup_freshness_accounting
+  - initial_dr_health_aggregation
+  - targeted_dr_module_test_baseline
+remaining:
+  - add_runtime_dr_adapter_to_canonical_daemon
+  - expose_dr_status_endpoint
+  - switch_backup_service_report_from_gated_to_runtime_status
+  - add_daemon_startup_shutdown_tests_for_dr_runtime
+  - persist_dr_backup_metadata_across_restart
+validation:
+  targeted:
+    - command: GOTOOLCHAIN=go1.24.6 go test ./...
+      workdir: backend/core/dr
+      status: passed
+  known_non_slice_failures:
+    - command: GOTOOLCHAIN=go1.24.6 go test ./...
+      workdir: .
+      status: failed
+      reason: broad monorepo compile failures outside backend/core/dr

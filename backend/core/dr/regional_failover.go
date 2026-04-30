@@ -1,7 +1,6 @@
 package dr
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -10,20 +9,20 @@ import (
 
 // RegionalFailoverManager handles multi-region failover
 type RegionalFailoverManager struct {
-	config         *DRConfig
-	regions        map[string]*RegionHealth
-	regionsMu      sync.RWMutex
-	primaryRegion  string
-	primaryMu      sync.RWMutex
-	dnsManager     *DNSManager
+	config        *DRConfig
+	regions       map[string]*RegionHealth
+	regionsMu     sync.RWMutex
+	primaryRegion string
+	primaryMu     sync.RWMutex
+	dnsManager    *DNSManager
 }
 
 // DNSManager handles DNS failover
 type DNSManager struct {
-	provider       string // "route53", "cloudflare", "manual"
-	recordName     string
-	currentTarget  string
-	mu             sync.Mutex
+	provider      string // "route53", "cloudflare", "manual"
+	recordName    string
+	currentTarget string
+	mu            sync.Mutex
 }
 
 // NewRegionalFailoverManager creates a new failover manager

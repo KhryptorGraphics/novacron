@@ -12,24 +12,24 @@ import (
 
 // HealthMonitor monitors system health at multiple levels
 type HealthMonitor struct {
-	config         *DRConfig
-	checks         []HealthCheck
-	regionHealth   map[string]*RegionHealth
-	healthMu       sync.RWMutex
-	globalHealth   *GlobalHealth
-	globalMu       sync.RWMutex
+	config          *DRConfig
+	checks          []HealthCheck
+	regionHealth    map[string]*RegionHealth
+	healthMu        sync.RWMutex
+	globalHealth    *GlobalHealth
+	globalMu        sync.RWMutex
 	anomalyDetector *AnomalyDetector
 }
 
 // GlobalHealth represents overall system health
 type GlobalHealth struct {
-	HealthScore    float64
-	TotalRegions   int
-	HealthyRegions int
+	HealthScore     float64
+	TotalRegions    int
+	HealthyRegions  int
 	DegradedRegions int
-	FailedRegions  int
-	LastUpdate     time.Time
-	Alerts         []HealthAlert
+	FailedRegions   int
+	LastUpdate      time.Time
+	Alerts          []HealthAlert
 }
 
 // HealthAlert represents a health alert
@@ -90,6 +90,8 @@ func NewHealthMonitor(config *DRConfig) *HealthMonitor {
 			LastCheck:   time.Now(),
 		}
 	}
+
+	hm.calculateGlobalHealth()
 
 	return hm
 }

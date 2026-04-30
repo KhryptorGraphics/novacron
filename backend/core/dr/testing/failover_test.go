@@ -1,12 +1,10 @@
 package testing
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // TestFailoverScenario tests complete failover scenario
@@ -27,8 +25,6 @@ func TestFailoverScenario(t *testing.T) {
 }
 
 func testRegionFailover(t *testing.T) {
-	ctx := context.Background()
-
 	// Setup test environment
 	// ... initialization code ...
 
@@ -40,8 +36,6 @@ func testRegionFailover(t *testing.T) {
 }
 
 func testNetworkPartition(t *testing.T) {
-	ctx := context.Background()
-
 	// Setup partitioned network
 	// Verify quorum maintained
 	// Verify split-brain prevented
@@ -50,8 +44,6 @@ func testNetworkPartition(t *testing.T) {
 }
 
 func testDataCenterOutage(t *testing.T) {
-	ctx := context.Background()
-
 	// Simulate DC failure
 	// Verify services migrate
 	// Verify data consistency
@@ -172,8 +164,6 @@ func testResourceExhaustionExperiment(t *testing.T) {
 
 // BenchmarkFailover benchmarks failover performance
 func BenchmarkFailover(b *testing.B) {
-	ctx := context.Background()
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Simulate failover
@@ -183,8 +173,6 @@ func BenchmarkFailover(b *testing.B) {
 
 // BenchmarkBackup benchmarks backup performance
 func BenchmarkBackup(b *testing.B) {
-	ctx := context.Background()
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Simulate backup

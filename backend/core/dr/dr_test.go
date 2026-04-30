@@ -43,6 +43,13 @@ func TestFailoverExecution(t *testing.T) {
 	require.NoError(t, err)
 	defer orchestrator.Stop()
 
+	backupID, err := orchestrator.backupSys.InitiateBackup(context.Background(), BackupTypeIncremental)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		job, err := orchestrator.backupSys.GetBackupStatus(backupID)
+		return err == nil && job.Status == "completed"
+	}, 2*time.Second, 50*time.Millisecond)
+
 	// Trigger failover
 	event := &FailureEvent{
 		ID:           "test-failure-1",

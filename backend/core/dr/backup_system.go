@@ -12,21 +12,21 @@ import (
 
 // BackupSystem manages backup operations
 type BackupSystem struct {
-	config        *DRConfig
-	backupMgr     BackupManager // Interface to existing backup system
-	scheduler     *cron.Cron
+	config    *DRConfig
+	backupMgr BackupManager // Interface to existing backup system
+	scheduler *cron.Cron
 
 	lastFullBackup        time.Time
 	lastIncrementalBackup time.Time
 	lastTransactionLog    time.Time
 
-	backupMu      sync.RWMutex
+	backupMu sync.RWMutex
 
 	activeBackups map[string]*BackupJob
 	activeMu      sync.RWMutex
 
-	metrics       BackupMetrics
-	metricsMu     sync.RWMutex
+	metrics   BackupMetrics
+	metricsMu sync.RWMutex
 }
 
 // BackupManager is the interface to existing backup system
@@ -142,19 +142,8 @@ func (bs *BackupSystem) performScheduledBackup(ctx context.Context, backupType B
 	} else {
 		job.Status = "completed"
 		log.Printf("Backup completed: %s in %v", job.ID, job.CompletedAt.Sub(job.StartedAt))
+		bs.recordSuccessfulBackup(job)
 		bs.updateMetrics(job, true)
-
-		// Update last backup time
-		bs.backupMu.Lock()
-		switch backupType {
-		case BackupTypeFull:
-			bs.lastFullBackup = job.CompletedAt
-		case BackupTypeIncremental:
-			bs.lastIncrementalBackup = job.CompletedAt
-		case BackupTypeTransaction:
-			bs.lastTransactionLog = job.CompletedAt
-		}
-		bs.backupMu.Unlock()
 	}
 }
 
@@ -398,11 +387,26 @@ func (bs *BackupSystem) InitiateBackup(ctx context.Context, backupType BackupTyp
 			bs.updateMetrics(job, false)
 		} else {
 			job.Status = "completed"
+			bs.recordSuccessfulBackup(job)
 			bs.updateMetrics(job, true)
 		}
 	}()
 
 	return job.ID, nil
+}
+
+func (bs *BackupSystem) recordSuccessfulBackup(job *BackupJob) {
+	bs.backupMu.Lock()
+	defer bs.backupMu.Unlock()
+
+	switch job.Type {
+	case BackupTypeFull:
+		bs.lastFullBackup = job.CompletedAt
+	case BackupTypeIncremental:
+		bs.lastIncrementalBackup = job.CompletedAt
+	case BackupTypeTransaction:
+		bs.lastTransactionLog = job.CompletedAt
+	}
 }
 
 // GetBackupStatus returns status of a backup job
