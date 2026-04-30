@@ -17,6 +17,7 @@ In progress.
 - Added explicit rollback observability fields for interrupted mobility operations.
 - Added `/internal/runtime/v1/mobility/operations` so backup/DR surfaces can inspect recorded mobility outcomes.
 - Added daemon-owned verified backup registration at `/internal/runtime/v1/mobility/backups/verified`.
+- Added `/internal/runtime/v1/mobility/recovery` to summarize mobility recovery state against RPO/RTO policy.
 
 ## Current Boundary
 
@@ -25,6 +26,7 @@ In progress.
 - Interrupted checkpoint restore reports rollback attempt, rollback success, and the original failure reason in the daemon response.
 - The daemon now records completed and rolled-back mobility operations in memory for recovery status inspection.
 - Mobility execution no longer trusts request-supplied backup verification flags unless the backup ID is registered with the runtime.
+- Recovery summary now reports healthy, degraded, recovering, and failed states from backup freshness, completed operations, and rollback outcomes.
 - The richer `backend/core/backup` and `backend/core/dr` subsystems remain unwired to `backend/core/cmd/novacron`.
 - Advanced live migration remains behind existing optional/build-tagged paths.
 

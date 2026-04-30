@@ -43,6 +43,26 @@ type runtimeVerifiedBackupResponse struct {
 	VerifiedAt time.Time `json:"verified_at"`
 }
 
+type runtimeMobilityRecoveryResponse struct {
+	State                 string        `json:"state"`
+	OperationCount        int           `json:"operation_count"`
+	CompletedCount        int           `json:"completed_count"`
+	FailedCount           int           `json:"failed_count"`
+	RolledBackCount       int           `json:"rolled_back_count"`
+	VerifiedBackupCount   int           `json:"verified_backup_count"`
+	LatestBackupID        string        `json:"latest_backup_id,omitempty"`
+	LatestBackupAge       time.Duration `json:"latest_backup_age"`
+	BackupRPOSeconds      int64         `json:"backup_rpo_seconds"`
+	BackupWithinRPO       bool          `json:"backup_within_rpo"`
+	RTOSeconds            int64         `json:"rto_seconds"`
+	LastOperationStatus   string        `json:"last_operation_status,omitempty"`
+	LastOperationError    string        `json:"last_operation_error,omitempty"`
+	LastRollbackAttempted bool          `json:"last_rollback_attempted"`
+	LastRollbackSucceeded bool          `json:"last_rollback_succeeded"`
+	LastRollbackError     string        `json:"last_rollback_error,omitempty"`
+	RecoveryActionsNeeded []string      `json:"recovery_actions_needed,omitempty"`
+}
+
 type runtimeColdMigrationResponse struct {
 	ID                string             `json:"id"`
 	VMID              string             `json:"vm_id"`
@@ -101,6 +121,88 @@ func runtimeListMobilityOperationsHandler(config runtimeConfig, migrationManager
 		}
 		respondRuntimeJSON(w, http.StatusOK, response)
 	}
+}
+
+func runtimeGetMobilityRecoveryHandler(config runtimeConfig, migrationManager *vm.VMMigrationManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		if migrationManager == nil {
+			respondRuntimeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "migration runtime is not initialized"})
+			return
+		}
+		respondRuntimeJSON(w, http.StatusOK, runtimeMobilityRecoveryFromState(runtimeMobilityPolicyFromConfig(config), migrationManager.ListMigrations(), migrationManager.ListVerifiedBackups(), time.Now().UTC()))
+	}
+}
+
+func runtimeMobilityRecoveryFromState(policy vm.MigrationBackupPolicy, operations []*vm.VMMigration, backups []vm.VerifiedBackup, now time.Time) runtimeMobilityRecoveryResponse {
+	policy = policy.Normalize()
+	response := runtimeMobilityRecoveryResponse{
+		State:               "healthy",
+		OperationCount:      len(operations),
+		VerifiedBackupCount: len(backups),
+		BackupRPOSeconds:    policy.Backup.RPOSeconds,
+		BackupWithinRPO:     !policy.Backup.RequireRecentBackup,
+		RTOSeconds:          policy.Recovery.RTOSeconds,
+	}
+	var latestOperation *vm.VMMigration
+	for _, operation := range operations {
+		if operation == nil {
+			continue
+		}
+		switch operation.Status {
+		case vm.MigrationStatusCompleted:
+			response.CompletedCount++
+		case vm.MigrationStatusFailed:
+			response.FailedCount++
+		case vm.MigrationStatusRolledBack:
+			response.RolledBackCount++
+		}
+		if latestOperation == nil || operation.UpdatedAt.After(latestOperation.UpdatedAt) {
+			latestOperation = operation
+		}
+	}
+	if latestOperation != nil {
+		response.LastOperationStatus = string(latestOperation.Status)
+		response.LastOperationError = latestOperation.Error
+		response.LastRollbackAttempted = latestOperation.RollbackAttempted
+		response.LastRollbackSucceeded = latestOperation.RollbackSucceeded
+		response.LastRollbackError = latestOperation.RollbackError
+	}
+
+	var latestBackup *vm.VerifiedBackup
+	for i := range backups {
+		if latestBackup == nil || backups[i].VerifiedAt.After(latestBackup.VerifiedAt) {
+			latestBackup = &backups[i]
+		}
+	}
+	if latestBackup != nil {
+		response.LatestBackupID = latestBackup.ID
+		response.LatestBackupAge = now.Sub(latestBackup.VerifiedAt)
+		if response.LatestBackupAge < 0 {
+			response.LatestBackupAge = 0
+		}
+		if policy.Backup.RequireRecentBackup {
+			rpo := time.Duration(policy.Backup.RPOSeconds) * time.Second
+			response.BackupWithinRPO = policy.Backup.RPOSeconds <= 0 || response.LatestBackupAge <= rpo
+		}
+	}
+
+	if policy.Backup.RequireRecentBackup && !response.BackupWithinRPO {
+		response.State = "degraded"
+		response.RecoveryActionsNeeded = append(response.RecoveryActionsNeeded, "verify_recent_backup")
+	}
+	if response.FailedCount > 0 {
+		response.State = "failed"
+		response.RecoveryActionsNeeded = append(response.RecoveryActionsNeeded, "inspect_failed_mobility_operation")
+	}
+	if response.RolledBackCount > 0 && response.State != "failed" {
+		response.State = "recovering"
+		response.RecoveryActionsNeeded = append(response.RecoveryActionsNeeded, "review_rolled_back_mobility_operation")
+	}
+	if response.LastRollbackAttempted && !response.LastRollbackSucceeded {
+		response.State = "failed"
+		response.RecoveryActionsNeeded = append(response.RecoveryActionsNeeded, "repair_failed_rollback")
+	}
+	return response
 }
 
 func runtimeListVerifiedBackupsHandler(migrationManager *vm.VMMigrationManager) http.HandlerFunc {

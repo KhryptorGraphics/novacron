@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/khryptorgraphics/novacron/backend/core/vm"
 )
@@ -173,6 +174,112 @@ func TestRuntimeColdMigrationEndpointIgnoresUnregisteredBackupFlag(t *testing.T)
 	}
 	if got, want := response.Status, vm.MigrationStatusPending; got != want {
 		t.Fatalf("migration status = %q, want %q", got, want)
+	}
+}
+
+func TestRuntimeMobilityRecoveryEndpointReportsHealthyState(t *testing.T) {
+	t.Parallel()
+
+	sourceDir := t.TempDir()
+	targetDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "vm-1.state"), []byte("vm-state"), 0o644); err != nil {
+		t.Fatalf("write source state: %v", err)
+	}
+	config := defaultRuntimeConfig("node-a", t.TempDir())
+	config.Services.MigrationMode = vm.MigrationModeCold
+	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+	verifyRuntimeBackup(t, router, "backup-1", "vm-1")
+
+	payload := runtimeColdMigrationRequest{
+		VMID:             "vm-1",
+		TargetNodeID:     "node-b",
+		TargetStorageDir: targetDir,
+		BackupID:         "backup-1",
+	}
+	postRuntimeMobilityJSON[runtimeColdMigrationResponse](t, router, "/internal/runtime/v1/mobility/cold-migrations", payload, http.StatusAccepted)
+
+	response := getRuntimeMobilityJSON[runtimeMobilityRecoveryResponse](t, router, "/internal/runtime/v1/mobility/recovery", http.StatusOK)
+	if got, want := response.State, "healthy"; got != want {
+		t.Fatalf("recovery state = %q, want %q", got, want)
+	}
+	if got, want := response.CompletedCount, 1; got != want {
+		t.Fatalf("completed count = %d, want %d", got, want)
+	}
+	if !response.BackupWithinRPO {
+		t.Fatal("registered recent backup should be within RPO")
+	}
+	if got, want := response.LatestBackupID, "backup-1"; got != want {
+		t.Fatalf("latest backup id = %q, want %q", got, want)
+	}
+}
+
+func TestRuntimeMobilityRecoveryFromStateReportsStaleBackup(t *testing.T) {
+	t.Parallel()
+
+	policy := vm.DefaultMigrationBackupPolicy(vm.MigrationModeCold)
+	now := time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC)
+	response := runtimeMobilityRecoveryFromState(policy, nil, []vm.VerifiedBackup{{
+		ID:         "backup-stale",
+		VMID:       "vm-1",
+		VerifiedAt: now.Add(-time.Duration(policy.Backup.RPOSeconds+1) * time.Second),
+	}}, now)
+	if got, want := response.State, "degraded"; got != want {
+		t.Fatalf("recovery state = %q, want %q", got, want)
+	}
+	if response.BackupWithinRPO {
+		t.Fatal("stale backup should not be within RPO")
+	}
+	if !containsRuntimeMobilityString(response.RecoveryActionsNeeded, "verify_recent_backup") {
+		t.Fatalf("recovery actions = %#v, want verify_recent_backup", response.RecoveryActionsNeeded)
+	}
+}
+
+func TestRuntimeMobilityRecoveryEndpointReportsRolledBackOperation(t *testing.T) {
+	t.Parallel()
+
+	sourceDir := t.TempDir()
+	targetDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "vm-restore.checkpoint"), []byte("checkpoint-state"), 0o644); err != nil {
+		t.Fatalf("write source checkpoint: %v", err)
+	}
+	config := defaultRuntimeConfig("node-a", t.TempDir())
+	config.Services.MigrationMode = vm.MigrationModeCheckpoint
+	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+	verifyRuntimeBackup(t, router, "backup-restore-1", "vm-restore")
+
+	payload := runtimeCheckpointRestoreRequest{
+		VMID:             "vm-restore",
+		TargetNodeID:     "node-b",
+		TargetStorageDir: targetDir,
+		BackupID:         "backup-restore-1",
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodPost, "/internal/runtime/v1/mobility/checkpoint-restores", bytes.NewReader(body)).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("POST checkpoint restore status = %d, want %d: %s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+
+	response := getRuntimeMobilityJSON[runtimeMobilityRecoveryResponse](t, router, "/internal/runtime/v1/mobility/recovery", http.StatusOK)
+	if got, want := response.State, "recovering"; got != want {
+		t.Fatalf("recovery state = %q, want %q", got, want)
+	}
+	if got, want := response.RolledBackCount, 1; got != want {
+		t.Fatalf("rolled back count = %d, want %d", got, want)
+	}
+	if got, want := response.LastOperationError, context.Canceled.Error(); got != want {
+		t.Fatalf("last operation error = %q, want %q", got, want)
+	}
+	if !containsRuntimeMobilityString(response.RecoveryActionsNeeded, "review_rolled_back_mobility_operation") {
+		t.Fatalf("recovery actions = %#v, want review_rolled_back_mobility_operation", response.RecoveryActionsNeeded)
 	}
 }
 
