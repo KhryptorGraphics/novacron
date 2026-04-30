@@ -32,6 +32,17 @@ type runtimeCheckpointRestoreRequest struct {
 	BackupID         string `json:"backup_id,omitempty"`
 }
 
+type runtimeVerifyBackupRequest struct {
+	BackupID string `json:"backup_id"`
+	VMID     string `json:"vm_id,omitempty"`
+}
+
+type runtimeVerifiedBackupResponse struct {
+	BackupID   string    `json:"backup_id"`
+	VMID       string    `json:"vm_id,omitempty"`
+	VerifiedAt time.Time `json:"verified_at"`
+}
+
 type runtimeColdMigrationResponse struct {
 	ID                string             `json:"id"`
 	VMID              string             `json:"vm_id"`
@@ -92,6 +103,49 @@ func runtimeListMobilityOperationsHandler(config runtimeConfig, migrationManager
 	}
 }
 
+func runtimeListVerifiedBackupsHandler(migrationManager *vm.VMMigrationManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		if migrationManager == nil {
+			respondRuntimeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "migration runtime is not initialized"})
+			return
+		}
+		backups := migrationManager.ListVerifiedBackups()
+		response := make([]runtimeVerifiedBackupResponse, 0, len(backups))
+		for _, backup := range backups {
+			response = append(response, runtimeVerifiedBackupResponse{
+				BackupID:   backup.ID,
+				VMID:       backup.VMID,
+				VerifiedAt: backup.VerifiedAt,
+			})
+		}
+		respondRuntimeJSON(w, http.StatusOK, response)
+	}
+}
+
+func runtimeVerifyBackupHandler(migrationManager *vm.VMMigrationManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if migrationManager == nil {
+			respondRuntimeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "migration runtime is not initialized"})
+			return
+		}
+		var request runtimeVerifyBackupRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			respondRuntimeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid backup verification request"})
+			return
+		}
+		backup, err := migrationManager.RecordVerifiedBackup(request.BackupID, request.VMID, time.Now().UTC())
+		if err != nil {
+			respondRuntimeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		respondRuntimeJSON(w, http.StatusAccepted, runtimeVerifiedBackupResponse{
+			BackupID:   backup.ID,
+			VMID:       backup.VMID,
+			VerifiedAt: backup.VerifiedAt,
+		})
+	}
+}
+
 func runtimeStartColdMigrationHandler(config runtimeConfig, migrationManager *vm.VMMigrationManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if migrationManager == nil {
@@ -113,8 +167,9 @@ func runtimeStartColdMigrationHandler(config runtimeConfig, migrationManager *vm
 			return
 		}
 
+		backupVerified := migrationManager.BackupVerified(request.BackupID)
 		options := map[string]string{
-			vm.MigrationOptionBackupVerified: fmt.Sprintf("%t", request.BackupVerified),
+			vm.MigrationOptionBackupVerified: fmt.Sprintf("%t", backupVerified),
 		}
 		if request.BackupID != "" {
 			options[vm.MigrationOptionBackupID] = request.BackupID
@@ -137,10 +192,10 @@ func runtimeStartColdMigrationHandler(config runtimeConfig, migrationManager *vm
 			if strings.Contains(err.Error(), "requires a verified recent backup") {
 				status = http.StatusPreconditionFailed
 			}
-			respondRuntimeJSON(w, status, runtimeColdMigrationResponseFromMigration(migration, policy, request.BackupVerified, request.BackupID, ""))
+			respondRuntimeJSON(w, status, runtimeColdMigrationResponseFromMigration(migration, policy, backupVerified, request.BackupID, ""))
 			return
 		}
-		respondRuntimeJSON(w, http.StatusAccepted, runtimeColdMigrationResponseFromMigration(migration, policy, request.BackupVerified, request.BackupID, ""))
+		respondRuntimeJSON(w, http.StatusAccepted, runtimeColdMigrationResponseFromMigration(migration, policy, backupVerified, request.BackupID, ""))
 	}
 }
 
@@ -166,8 +221,9 @@ func runtimeStartCheckpointRestoreHandler(config runtimeConfig, migrationManager
 			return
 		}
 
+		backupVerified := migrationManager.BackupVerified(request.BackupID)
 		options := map[string]string{
-			vm.MigrationOptionBackupVerified: fmt.Sprintf("%t", request.BackupVerified),
+			vm.MigrationOptionBackupVerified: fmt.Sprintf("%t", backupVerified),
 		}
 		if request.BackupID != "" {
 			options[vm.MigrationOptionBackupID] = request.BackupID
@@ -194,10 +250,10 @@ func runtimeStartCheckpointRestoreHandler(config runtimeConfig, migrationManager
 			if strings.Contains(err.Error(), "requires a verified recent backup") {
 				status = http.StatusPreconditionFailed
 			}
-			respondRuntimeJSON(w, status, runtimeColdMigrationResponseFromMigration(migration, policy, request.BackupVerified, request.BackupID, request.CheckpointID))
+			respondRuntimeJSON(w, status, runtimeColdMigrationResponseFromMigration(migration, policy, backupVerified, request.BackupID, request.CheckpointID))
 			return
 		}
-		respondRuntimeJSON(w, http.StatusAccepted, runtimeColdMigrationResponseFromMigration(migration, policy, request.BackupVerified, request.BackupID, request.CheckpointID))
+		respondRuntimeJSON(w, http.StatusAccepted, runtimeColdMigrationResponseFromMigration(migration, policy, backupVerified, request.BackupID, request.CheckpointID))
 	}
 }
 

@@ -51,6 +51,12 @@ type VMMigration struct {
 	Options           map[string]string
 }
 
+type VerifiedBackup struct {
+	ID         string
+	VMID       string
+	VerifiedAt time.Time
+}
+
 const (
 	MigrationOptionBackupVerified = "backup_verified"
 	MigrationOptionBackupID       = "backup_id"
@@ -65,6 +71,7 @@ type VMMigrationManager struct {
 	storageDir string
 	vms        map[string]*VM
 	migrations map[string]*VMMigration
+	backups    map[string]VerifiedBackup
 	mutex      sync.RWMutex
 }
 
@@ -75,6 +82,7 @@ func NewVMMigrationManager(nodeID, storageDir string) *VMMigrationManager {
 		storageDir: storageDir,
 		vms:        make(map[string]*VM),
 		migrations: make(map[string]*VMMigration),
+		backups:    make(map[string]VerifiedBackup),
 	}
 }
 
@@ -516,6 +524,55 @@ func (m *VMMigrationManager) ListMigrations() []*VMMigration {
 		return migrations[i].CreatedAt.Before(migrations[j].CreatedAt)
 	})
 	return migrations
+}
+
+func (m *VMMigrationManager) RecordVerifiedBackup(backupID, vmID string, verifiedAt time.Time) (VerifiedBackup, error) {
+	backupID = strings.TrimSpace(backupID)
+	vmID = strings.TrimSpace(vmID)
+	if backupID == "" {
+		return VerifiedBackup{}, errors.New("backup ID is required")
+	}
+	if verifiedAt.IsZero() {
+		verifiedAt = time.Now().UTC()
+	}
+	backup := VerifiedBackup{
+		ID:         backupID,
+		VMID:       vmID,
+		VerifiedAt: verifiedAt.UTC(),
+	}
+
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.backups[backupID] = backup
+	return backup, nil
+}
+
+func (m *VMMigrationManager) BackupVerified(backupID string) bool {
+	backupID = strings.TrimSpace(backupID)
+	if backupID == "" {
+		return false
+	}
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	_, ok := m.backups[backupID]
+	return ok
+}
+
+func (m *VMMigrationManager) ListVerifiedBackups() []VerifiedBackup {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	backups := make([]VerifiedBackup, 0, len(m.backups))
+	for _, backup := range m.backups {
+		backups = append(backups, backup)
+	}
+	sort.Slice(backups, func(i, j int) bool {
+		if backups[i].VerifiedAt.Equal(backups[j].VerifiedAt) {
+			return backups[i].ID < backups[j].ID
+		}
+		return backups[i].VerifiedAt.Before(backups[j].VerifiedAt)
+	})
+	return backups
 }
 
 func (m *VMMigrationManager) recordMigration(migration *VMMigration) {

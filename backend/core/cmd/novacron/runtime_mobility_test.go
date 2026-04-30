@@ -57,6 +57,7 @@ func TestRuntimeColdMigrationEndpointExecutesPolicyVerifiedMigration(t *testing.
 	config.Services.MigrationMode = vm.MigrationModeCold
 	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
 	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+	verifyRuntimeBackup(t, router, "backup-1", "vm-1")
 
 	payload := runtimeColdMigrationRequest{
 		VMID:             "vm-1",
@@ -116,6 +117,7 @@ func TestRuntimeMobilityOperationsEndpointReportsHistory(t *testing.T) {
 	config.Services.MigrationMode = vm.MigrationModeCold
 	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
 	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+	verifyRuntimeBackup(t, router, "backup-1", "vm-1")
 
 	payload := runtimeColdMigrationRequest{
 		VMID:             "vm-1",
@@ -145,6 +147,35 @@ func TestRuntimeMobilityOperationsEndpointReportsHistory(t *testing.T) {
 	}
 }
 
+func TestRuntimeColdMigrationEndpointIgnoresUnregisteredBackupFlag(t *testing.T) {
+	t.Parallel()
+
+	sourceDir := t.TempDir()
+	targetDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "vm-1.state"), []byte("vm-state"), 0o644); err != nil {
+		t.Fatalf("write source state: %v", err)
+	}
+	config := defaultRuntimeConfig("node-a", t.TempDir())
+	config.Services.MigrationMode = vm.MigrationModeCold
+	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
+	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+
+	payload := runtimeColdMigrationRequest{
+		VMID:             "vm-1",
+		TargetNodeID:     "node-b",
+		TargetStorageDir: targetDir,
+		BackupVerified:   true,
+		BackupID:         "unregistered-backup",
+	}
+	response := postRuntimeMobilityJSON[runtimeColdMigrationResponse](t, router, "/internal/runtime/v1/mobility/cold-migrations", payload, http.StatusPreconditionFailed)
+	if response.BackupVerified {
+		t.Fatal("runtime should not trust request-supplied backup_verified without registry entry")
+	}
+	if got, want := response.Status, vm.MigrationStatusPending; got != want {
+		t.Fatalf("migration status = %q, want %q", got, want)
+	}
+}
+
 func TestRuntimeCheckpointRestoreEndpointExecutesPolicyVerifiedRestore(t *testing.T) {
 	t.Parallel()
 
@@ -157,6 +188,7 @@ func TestRuntimeCheckpointRestoreEndpointExecutesPolicyVerifiedRestore(t *testin
 	config.Services.MigrationMode = vm.MigrationModeCheckpoint
 	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
 	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+	verifyRuntimeBackup(t, router, "backup-restore-1", "vm-restore")
 
 	payload := runtimeCheckpointRestoreRequest{
 		VMID:             "vm-restore",
@@ -197,12 +229,14 @@ func TestRuntimeCheckpointRestoreEndpointRequiresCheckpointPolicy(t *testing.T) 
 	config.Services.MigrationMode = vm.MigrationModeCold
 	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
 	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+	verifyRuntimeBackup(t, router, "backup-restore-1", "vm-restore")
 
 	payload := runtimeCheckpointRestoreRequest{
 		VMID:             "vm-restore",
 		TargetNodeID:     "node-b",
 		TargetStorageDir: targetDir,
 		BackupVerified:   true,
+		BackupID:         "backup-restore-1",
 	}
 	response := postRuntimeMobilityJSON[runtimeColdMigrationResponse](t, router, "/internal/runtime/v1/mobility/checkpoint-restores", payload, http.StatusConflict)
 	if got, want := response.Status, vm.MigrationStatusPending; got != want {
@@ -225,12 +259,14 @@ func TestRuntimeCheckpointRestoreEndpointReportsInterruptedRollback(t *testing.T
 	config.Services.MigrationMode = vm.MigrationModeCheckpoint
 	migrationManager := vm.NewVMMigrationManager("node-a", sourceDir)
 	router := newRuntimeRouter(config, nil, migrationManager, nil, nil, nil, nil, nil, nil, nil)
+	verifyRuntimeBackup(t, router, "backup-restore-1", "vm-restore")
 
 	payload := runtimeCheckpointRestoreRequest{
 		VMID:             "vm-restore",
 		TargetNodeID:     "node-b",
 		TargetStorageDir: targetDir,
 		BackupVerified:   true,
+		BackupID:         "backup-restore-1",
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -281,6 +317,14 @@ func postRuntimeMobilityJSON[T any](t *testing.T, router http.Handler, path stri
 		t.Fatalf("decode response: %v", err)
 	}
 	return zero
+}
+
+func verifyRuntimeBackup(t *testing.T, router http.Handler, backupID string, vmID string) runtimeVerifiedBackupResponse {
+	t.Helper()
+	return postRuntimeMobilityJSON[runtimeVerifiedBackupResponse](t, router, "/internal/runtime/v1/mobility/backups/verified", runtimeVerifyBackupRequest{
+		BackupID: backupID,
+		VMID:     vmID,
+	}, http.StatusAccepted)
 }
 
 func getRuntimeMobilityJSON[T any](t *testing.T, router http.Handler, path string, expectedStatus int) T {
