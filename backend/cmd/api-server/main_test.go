@@ -203,6 +203,70 @@ func TestOrchestrationPolicyAndModelActions(t *testing.T) {
 	}
 }
 
+func TestMigrationBackupContractRoutes(t *testing.T) {
+	router, authManager := newMonitoringSummaryTestRouter(t)
+
+	readCases := []struct {
+		path      string
+		expectKey string
+	}{
+		{path: "/api/migration/jobs"},
+		{path: "/api/migration/live/status"},
+		{path: "/api/backup/status", expectKey: "backupHealth"},
+		{path: "/api/v1/backup/status", expectKey: "backupHealth"},
+	}
+	for _, tc := range readCases {
+		t.Run(tc.path, func(t *testing.T) {
+			rec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodGet, tc.path, nil)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if tc.expectKey == "" {
+				return
+			}
+			var payload map[string]interface{}
+			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if _, ok := payload[tc.expectKey]; !ok {
+				t.Fatalf("expected response key %q in %#v", tc.expectKey, payload)
+			}
+		})
+	}
+
+	initiateRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPost, "/api/migration/initiate", map[string]interface{}{
+		"sourceCluster":     "cluster-a",
+		"targetCluster":     "cluster-b",
+		"vmIds":             []string{"vm-1"},
+		"migrationStrategy": "cold",
+	})
+	if initiateRec.Code != http.StatusAccepted {
+		t.Fatalf("expected initiate status 202, got %d: %s", initiateRec.Code, initiateRec.Body.String())
+	}
+	var initiated map[string]interface{}
+	if err := json.Unmarshal(initiateRec.Body.Bytes(), &initiated); err != nil {
+		t.Fatalf("failed to decode initiated migration: %v", err)
+	}
+	if initiated["jobId"] == "" || initiated["status"] != "queued" {
+		t.Fatalf("expected queued migration job, got %#v", initiated)
+	}
+
+	liveRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPost, "/api/migration/live/vm-1", map[string]interface{}{
+		"targetNode": "node-2",
+		"priority":   "normal",
+	})
+	if liveRec.Code != http.StatusAccepted {
+		t.Fatalf("expected live status 202, got %d: %s", liveRec.Code, liveRec.Body.String())
+	}
+	var live map[string]interface{}
+	if err := json.Unmarshal(liveRec.Body.Bytes(), &live); err != nil {
+		t.Fatalf("failed to decode live migration: %v", err)
+	}
+	if live["migrationId"] == "" || live["vmId"] != "vm-1" {
+		t.Fatalf("expected live migration response, got %#v", live)
+	}
+}
+
 func TestRequireAuthRejectsInvalidToken(t *testing.T) {
 	authManager := auth.NewSimpleAuthManager("test-secret", nil)
 

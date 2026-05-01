@@ -1,0 +1,17 @@
+phase: 4
+sprint: 8
+bead: novacron-j1s
+status: in_progress
+slice: migration-backup-live-contracts
+completed:
+  - Added canonical authenticated migration and backup contract routes under /api and /api/v1.
+  - Replaced VMMigrationDialog fixture behavior with a typed live API submission path.
+  - Covered migration and backup contract routes in api-server tests.
+validation:
+  - go test ./backend/cmd/api-server
+  - frontend npm run test:smoke -- --runInBand
+  - frontend npx tsc --noEmit --pretty false
+remaining:
+  - Replace DatabaseEditor fixture workspace with live database administration contracts.
+  - Replace NetworkConfigurationPanel fixture workspace with live network management contracts.
+  - Replace MigrationWorkflow and BackupRecoveryFlow demos with live planning, execution, restore, and policy contracts.

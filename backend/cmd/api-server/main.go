@@ -657,6 +657,7 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 	runtimeInventoryClient := newRuntimeInventoryReadClientFromEnv()
 
 	registerOrchestrationDashboardRoutes(router)
+	registerMigrationBackupContractRoutes(router)
 
 	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
 		if runtimeInventoryClient.proxy(w, r, "/internal/runtime/v1/vms") {
@@ -1719,6 +1720,85 @@ func registerOrchestrationDashboardRoutes(router *mux.Router) {
 
 	router.HandleFunc("/orchestration/scaling/events", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []map[string]interface{}{})
+	}).Methods(http.MethodGet)
+}
+
+func registerMigrationBackupContractRoutes(router *mux.Router) {
+	router.HandleFunc("/migration/jobs", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, []map[string]interface{}{})
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/migration/initiate", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			SourceCluster     string   `json:"sourceCluster"`
+			TargetCluster     string   `json:"targetCluster"`
+			VMIDs             []string `json:"vmIds"`
+			MigrationStrategy string   `json:"migrationStrategy"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if strings.TrimSpace(req.TargetCluster) == "" || len(req.VMIDs) == 0 {
+			writeJSONError(w, http.StatusBadRequest, "targetCluster and vmIds are required")
+			return
+		}
+		if strings.TrimSpace(req.MigrationStrategy) == "" {
+			req.MigrationStrategy = "cold"
+		}
+
+		writeJSON(w, http.StatusAccepted, map[string]interface{}{
+			"jobId":             fmt.Sprintf("migration-job-%d", time.Now().UnixNano()),
+			"status":            "queued",
+			"sourceCluster":     req.SourceCluster,
+			"targetCluster":     req.TargetCluster,
+			"vmCount":           len(req.VMIDs),
+			"migrationStrategy": req.MigrationStrategy,
+			"createdAt":         time.Now().UTC().Format(time.RFC3339),
+		})
+	}).Methods(http.MethodPost)
+
+	router.HandleFunc("/migration/live/status", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, []map[string]interface{}{})
+	}).Methods(http.MethodGet)
+
+	router.HandleFunc("/migration/live/{vmId}", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			TargetNode  string `json:"targetNode"`
+			MaxDowntime int    `json:"maxDowntime,omitempty"`
+			Bandwidth   int    `json:"bandwidth,omitempty"`
+			Priority    string `json:"priority,omitempty"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if strings.TrimSpace(req.TargetNode) == "" {
+			writeJSONError(w, http.StatusBadRequest, "targetNode is required")
+			return
+		}
+		if req.Priority == "" {
+			req.Priority = "normal"
+		}
+
+		vmID := mux.Vars(r)["vmId"]
+		writeJSON(w, http.StatusAccepted, map[string]interface{}{
+			"migrationId": fmt.Sprintf("live-migration-%s-%d", vmID, time.Now().UnixNano()),
+			"status":      "queued",
+			"vmId":        vmID,
+			"targetNode":  req.TargetNode,
+			"priority":    req.Priority,
+			"createdAt":   time.Now().UTC().Format(time.RFC3339),
+		})
+	}).Methods(http.MethodPost)
+
+	router.HandleFunc("/backup/status", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"activeBackups":   0,
+			"lastBackupTime":  "",
+			"backupHealth":    "not_configured",
+			"totalBackupSize": 0,
+		})
 	}).Methods(http.MethodGet)
 }
 
