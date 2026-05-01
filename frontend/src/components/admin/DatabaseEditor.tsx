@@ -1,19 +1,19 @@
-// @ts-nocheck
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
-import { 
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -21,153 +21,207 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { FadeIn } from "@/lib/animations";
-import { 
-  Database, 
-  Search, 
-  Edit, 
-  Trash2, 
-  Plus, 
-  Save, 
-  X, 
+import { useCreateUser, useDeleteUser, useUpdateUser, useUsers } from "@/lib/api/hooks/useAdmin";
+import type { User } from "@/lib/api/types";
+import {
   AlertTriangle,
-  Eye,
-  Download,
-  Upload,
-  RefreshCw
+  CheckCircle,
+  Database,
+  Edit,
+  Plus,
+  RefreshCw,
+  Save,
+  Search,
+  Trash2,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// Mock database schema
-const databaseTables = [
-  { name: "users", rows: 1247, size: "24.3 MB", description: "User accounts and profiles" },
-  { name: "organizations", rows: 89, size: "2.1 MB", description: "Organization entities" },
-  { name: "vms", rows: 2341, size: "45.7 MB", description: "Virtual machine configurations" },
-  { name: "schedules", rows: 5432, size: "12.8 MB", description: "Scheduled job definitions" },
-  { name: "migrations", rows: 876, size: "156.2 MB", description: "VM migration history" },
-  { name: "audit_logs", rows: 98765, size: "234.5 MB", description: "System audit trail" },
-  { name: "sessions", rows: 456, size: "3.4 MB", description: "User session data" },
-  { name: "configurations", rows: 123, size: "890 KB", description: "System configuration settings" }
+type CanonicalUser = Partial<User> & {
+  username?: string;
+  active?: boolean;
+};
+
+type UserRow = {
+  id: string;
+  username: string;
+  email: string;
+  role: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type EditingRow = {
+  id: string | null;
+  data: {
+    username: string;
+    email: string;
+    role: string;
+    active: boolean;
+    password: string;
+  };
+};
+
+const liveTables = [
+  {
+    name: "users",
+    description: "Canonical admin user accounts",
+    contract: "GET/POST/PUT/DELETE /api/admin/users",
+    live: true,
+  },
+  {
+    name: "audit_logs",
+    description: "Audit log read model",
+    contract: "Pending canonical contract",
+    live: false,
+  },
+  {
+    name: "sessions",
+    description: "User session read model",
+    contract: "Pending canonical contract",
+    live: false,
+  },
+  {
+    name: "configurations",
+    description: "Runtime configuration records",
+    contract: "Pending canonical contract",
+    live: false,
+  },
 ];
 
-// Mock user data for editing
-const mockUsers = [
-  { 
-    id: 1, 
-    email: "user@organization.com", 
-    name: "John Doe", 
-    role: "user", 
-    status: "active", 
-    created_at: "2024-01-15",
-    last_login: "2024-08-20"
-  },
-  { 
-    id: 2, 
-    email: "admin@novacron.io", 
-    name: "System Admin", 
-    role: "admin", 
-    status: "active", 
-    created_at: "2024-01-01",
-    last_login: "2024-08-24"
-  },
-  { 
-    id: 3, 
-    email: "jane@company.com", 
-    name: "Jane Smith", 
-    role: "moderator", 
-    status: "suspended", 
-    created_at: "2024-02-10",
-    last_login: "2024-08-18"
-  }
-];
+const roleOptions = ["admin", "operator", "viewer", "user", "super-admin"];
 
-interface EditingRow {
-  id: number | null;
-  data: Record<string, any>;
+function normalizeUser(user: CanonicalUser): UserRow {
+  return {
+    id: String(user.id ?? ""),
+    username: user.username || user.name || user.email || "",
+    email: user.email || "",
+    role: user.role || "user",
+    active: user.active !== false && user.status !== "disabled" && user.status !== "suspended",
+    created_at: user.created_at || "",
+    updated_at: user.updated_at || "",
+  };
+}
+
+function formatDate(value: string) {
+  if (!value) return "never";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString();
 }
 
 export function DatabaseEditor() {
   const [selectedTable, setSelectedTable] = useState("users");
-  const [tableData, setTableData] = useState(mockUsers);
   const [searchQuery, setSearchQuery] = useState("");
   const [editingRow, setEditingRow] = useState<EditingRow | null>(null);
-  const [showDangerZone, setShowDangerZone] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  const filteredData = tableData.filter(row => 
-    Object.values(row).some(value => 
-      String(value).toLowerCase().includes(searchQuery.toLowerCase())
-    )
-  );
+  const userFilters: { search?: string; pageSize: number } = { pageSize: 100 };
+  if (searchQuery) {
+    userFilters.search = searchQuery;
+  }
+  const usersQuery = useUsers(userFilters);
+  const createUser = useCreateUser();
+  const updateUser = useUpdateUser();
+  const deleteUser = useDeleteUser();
 
-  const handleEdit = (row: any) => {
-    setEditingRow({ id: row.id, data: { ...row } });
+  const selectedTableInfo = liveTables.find((table) => table.name === selectedTable) || liveTables[0];
+  const rows = (usersQuery.data?.users || []).map((user) => normalizeUser(user as CanonicalUser));
+  const isMutating = createUser.isPending || updateUser.isPending || deleteUser.isPending;
+  const loading = usersQuery.isLoading || isMutating;
+
+  const filteredRows = rows.filter((row) => {
+    const query = searchQuery.toLowerCase();
+    return [row.id, row.username, row.email, row.role, row.active ? "active" : "disabled"]
+      .some((value) => value.toLowerCase().includes(query));
+  });
+
+  const handleEdit = (row: UserRow) => {
+    setNotice(null);
+    setEditingRow({
+      id: row.id,
+      data: {
+        username: row.username,
+        email: row.email,
+        role: row.role,
+        active: row.active,
+        password: "",
+      },
+    });
+  };
+
+  const handleAddNew = () => {
+    setNotice(null);
+    setEditingRow({
+      id: null,
+      data: {
+        username: "",
+        email: "",
+        role: "user",
+        active: true,
+        password: "",
+      },
+    });
   };
 
   const handleSave = async () => {
     if (!editingRow) return;
-    
-    setLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    if (editingRow.id) {
-      // Update existing row
-      setTableData(prev => 
-        prev.map(row => row.id === editingRow.id ? { ...editingRow.data } : row)
-      );
-    } else {
-      // Add new row
-      const newId = Math.max(...tableData.map(r => r.id)) + 1;
-      setTableData(prev => [...prev, { ...editingRow.data, id: newId }]);
-    }
-    
-    setEditingRow(null);
-    setLoading(false);
-  };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm("Are you sure you want to delete this record? This action cannot be undone.")) {
+    const username = editingRow.data.username.trim();
+    const email = editingRow.data.email.trim();
+    if (!username || !email) {
+      setNotice("Username and email are required.");
       return;
     }
-    
-    setLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setTableData(prev => prev.filter(row => row.id !== id));
-    setLoading(false);
-  };
 
-  const handleAddNew = () => {
-    setEditingRow({
-      id: null,
-      data: {
-        email: "",
-        name: "",
-        role: "user",
-        status: "active",
-        created_at: new Date().toISOString().split('T')[0],
-        last_login: ""
+    try {
+      if (editingRow.id) {
+        await updateUser.mutateAsync({
+          id: editingRow.id,
+          username,
+          email,
+          role: editingRow.data.role as User["role"],
+          active: editingRow.data.active,
+        });
+        setNotice("User record updated through the canonical admin API.");
+      } else {
+        if (!editingRow.data.password.trim()) {
+          setNotice("A temporary password is required for new users.");
+          return;
+        }
+        await createUser.mutateAsync({
+          username,
+          name: username,
+          email,
+          role: editingRow.data.role as User["role"],
+          active: editingRow.data.active,
+          password: editingRow.data.password,
+        } as Partial<User> & { username: string; active: boolean; password: string });
+        setNotice("User record created through the canonical admin API.");
       }
-    });
+      setEditingRow(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "User record save failed.");
+    }
   };
 
-  const handleCancel = () => {
-    setEditingRow(null);
-  };
+  const handleDelete = async (id: string) => {
+    if (!window.confirm("Delete this user through the canonical admin API?")) {
+      return;
+    }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "active": return "bg-green-500";
-      case "suspended": return "bg-red-500";
-      case "pending": return "bg-yellow-500";
-      default: return "bg-gray-500";
+    try {
+      await deleteUser.mutateAsync(id);
+      setNotice("User record deleted through the canonical admin API.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "User record delete failed.");
     }
   };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold flex items-center gap-2">
@@ -175,45 +229,58 @@ export function DatabaseEditor() {
             Database Editor
           </h2>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Direct database table management with CRUD operations
+            Live table operations backed by canonical NovaCron admin contracts
           </p>
         </div>
-        
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
-            <Download className="h-4 w-4 mr-2" />
-            Export
-          </Button>
-          <Button variant="outline" size="sm">
-            <Upload className="h-4 w-4 mr-2" />
-            Import
-          </Button>
-        </div>
+
+        <Button variant="outline" size="sm" onClick={() => usersQuery.refetch()} disabled={loading}>
+          <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
+          Refresh
+        </Button>
       </div>
 
-      {/* Warning Banner */}
-      <Card className="border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950">
+      <Card className="border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950">
         <CardContent className="p-4">
-          <div className="flex items-center gap-2 text-orange-800 dark:text-orange-200">
-            <AlertTriangle className="h-5 w-5" />
+          <div className="flex items-center gap-2 text-green-800 dark:text-green-200">
+            <CheckCircle className="h-5 w-5" />
             <span className="font-medium">
-              Non-product demo: this editor uses local fixture data and is not connected to the canonical backend.
+              Users table is connected to the canonical authenticated admin API.
             </span>
           </div>
         </CardContent>
       </Card>
 
+      {notice && (
+        <Card className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950">
+          <CardContent className="p-4 text-sm text-blue-800 dark:text-blue-200">
+            {notice}
+          </CardContent>
+        </Card>
+      )}
+
+      {Boolean(usersQuery.error) && (
+        <Card className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-red-800 dark:text-red-200">
+              <AlertTriangle className="h-5 w-5" />
+              <span className="font-medium">
+                Failed to load users from the canonical admin API.
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Table Selection Sidebar */}
         <div className="lg:col-span-1">
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Database Tables</CardTitle>
-              <CardDescription>Select a table to view and edit</CardDescription>
+              <CardDescription>Only tables with live contracts are editable.</CardDescription>
             </CardHeader>
             <CardContent className="p-0">
               <div className="space-y-1">
-                {databaseTables.map((table) => (
+                {liveTables.map((table) => (
                   <button
                     key={table.name}
                     onClick={() => setSelectedTable(table.name)}
@@ -222,9 +289,14 @@ export function DatabaseEditor() {
                       selectedTable === table.name && "bg-blue-50 dark:bg-blue-950 border-r-2 border-blue-500"
                     )}
                   >
-                    <div className="font-medium">{table.name}</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{table.name}</span>
+                      <Badge variant={table.live ? "default" : "outline"}>
+                        {table.live ? "live" : "pending"}
+                      </Badge>
+                    </div>
                     <div className="text-sm text-gray-600 dark:text-gray-400">
-                      {table.rows.toLocaleString()} rows • {table.size}
+                      {table.description}
                     </div>
                   </button>
                 ))}
@@ -233,249 +305,227 @@ export function DatabaseEditor() {
           </Card>
         </div>
 
-        {/* Main Table Editor */}
         <div className="lg:col-span-3 space-y-4">
-          {/* Controls */}
           <Card>
             <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="capitalize">{selectedTable} Table</CardTitle>
-                <div className="flex items-center gap-2">
-                  <Button 
-                    onClick={handleAddNew}
-                    disabled={!!editingRow}
-                    size="sm"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add New
-                  </Button>
-                  <Button variant="outline" size="sm">
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Refresh
-                  </Button>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <CardTitle className="capitalize">{selectedTable} Table</CardTitle>
+                  <CardDescription>{selectedTableInfo.contract}</CardDescription>
                 </div>
+                <Button
+                  onClick={handleAddNew}
+                  disabled={!selectedTableInfo.live || Boolean(editingRow)}
+                  size="sm"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add User
+                </Button>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center gap-4 mb-4">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <Input
-                    placeholder="Search records..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10"
-                  />
+              {!selectedTableInfo.live ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                  This table is intentionally read-only until a canonical API contract exists.
                 </div>
-                <Badge variant="outline">
-                  {filteredData.length} records
-                </Badge>
-              </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <Input
+                        placeholder="Search users..."
+                        value={searchQuery}
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                        className="pl-10"
+                      />
+                    </div>
+                    <Badge variant="outline">{filteredRows.length} records</Badge>
+                  </div>
 
-              {/* Data Table */}
-              <div className="border rounded-md">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>ID</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Created</TableHead>
-                      <TableHead>Last Login</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {/* Editing Row */}
-                    {editingRow && (
-                      <TableRow className="bg-blue-50 dark:bg-blue-950">
-                        <TableCell>{editingRow.id || "New"}</TableCell>
-                        <TableCell>
-                          <Input
-                            value={editingRow.data.email}
-                            onChange={(e) => setEditingRow(prev => prev && {
-                              ...prev,
-                              data: { ...prev.data, email: e.target.value }
-                            })}
-                            className="h-8"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={editingRow.data.name}
-                            onChange={(e) => setEditingRow(prev => prev && {
-                              ...prev,
-                              data: { ...prev.data, name: e.target.value }
-                            })}
-                            className="h-8"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Select
-                            value={editingRow.data.role}
-                            onValueChange={(value) => setEditingRow(prev => prev && {
-                              ...prev,
-                              data: { ...prev.data, role: value }
-                            })}
-                          >
-                            <SelectTrigger className="h-8">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="user">User</SelectItem>
-                              <SelectItem value="moderator">Moderator</SelectItem>
-                              <SelectItem value="admin">Admin</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell>
-                          <Select
-                            value={editingRow.data.status}
-                            onValueChange={(value) => setEditingRow(prev => prev && {
-                              ...prev,
-                              data: { ...prev.data, status: value }
-                            })}
-                          >
-                            <SelectTrigger className="h-8">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="active">Active</SelectItem>
-                              <SelectItem value="suspended">Suspended</SelectItem>
-                              <SelectItem value="pending">Pending</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            type="date"
-                            value={editingRow.data.created_at}
-                            onChange={(e) => setEditingRow(prev => prev && {
-                              ...prev,
-                              data: { ...prev.data, created_at: e.target.value }
-                            })}
-                            className="h-8"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            type="date"
-                            value={editingRow.data.last_login}
-                            onChange={(e) => setEditingRow(prev => prev && {
-                              ...prev,
-                              data: { ...prev.data, last_login: e.target.value }
-                            })}
-                            className="h-8"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            <Button
-                              size="sm"
-                              onClick={handleSave}
-                              disabled={loading}
-                            >
-                              <Save className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={handleCancel}
-                            >
-                              <X className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
+                  <FadeIn>
+                    <div className="border rounded-md">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>ID</TableHead>
+                            <TableHead>Username</TableHead>
+                            <TableHead>Email</TableHead>
+                            <TableHead>Role</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Updated</TableHead>
+                            <TableHead>Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {editingRow?.id === null && (
+                            <EditableUserRow
+                              editingRow={editingRow}
+                              loading={loading}
+                              setEditingRow={setEditingRow}
+                              onSave={handleSave}
+                              onCancel={() => setEditingRow(null)}
+                            />
+                          )}
 
-                    {/* Data Rows */}
-                    {filteredData.map((row) => (
-                      <TableRow key={row.id}>
-                        <TableCell className="font-medium">{row.id}</TableCell>
-                        <TableCell>{row.email}</TableCell>
-                        <TableCell>{row.name}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="capitalize">
-                            {row.role}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <div className={cn("h-2 w-2 rounded-full", getStatusColor(row.status))} />
-                            <span className="capitalize">{row.status}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>{row.created_at}</TableCell>
-                        <TableCell>{row.last_login || "Never"}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleEdit(row)}
-                              disabled={!!editingRow}
-                            >
-                              <Edit className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleDelete(row.id)}
-                              disabled={!!editingRow || loading}
-                              className="text-red-600 hover:text-red-700"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                          {filteredRows.map((row) => (
+                            editingRow?.id === row.id ? (
+                              <EditableUserRow
+                                key={row.id}
+                                editingRow={editingRow}
+                                loading={loading}
+                                setEditingRow={setEditingRow}
+                                onSave={handleSave}
+                                onCancel={() => setEditingRow(null)}
+                              />
+                            ) : (
+                              <TableRow key={row.id}>
+                                <TableCell className="font-mono text-sm">{row.id}</TableCell>
+                                <TableCell>{row.username}</TableCell>
+                                <TableCell>{row.email}</TableCell>
+                                <TableCell>
+                                  <Badge variant="outline">{row.role}</Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge
+                                    variant={row.active ? "default" : "secondary"}
+                                    className={row.active ? "bg-green-100 text-green-800" : ""}
+                                  >
+                                    {row.active ? "active" : "disabled"}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>{formatDate(row.updated_at || row.created_at)}</TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-1">
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => handleEdit(row)}
+                                      disabled={loading || Boolean(editingRow)}
+                                    >
+                                      <Edit className="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => handleDelete(row.id)}
+                                      disabled={loading || Boolean(editingRow)}
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            )
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </FadeIn>
+                </>
+              )}
             </CardContent>
-          </Card>
-
-          {/* Danger Zone */}
-          <Card className="border-red-200">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-red-600">
-                  <AlertTriangle className="h-5 w-5" />
-                  <CardTitle>Danger Zone</CardTitle>
-                </div>
-                <Switch
-                  checked={showDangerZone}
-                  onCheckedChange={setShowDangerZone}
-                />
-              </div>
-              <CardDescription>
-                Destructive actions that cannot be undone
-              </CardDescription>
-            </CardHeader>
-            {showDangerZone && (
-              <CardContent>
-                <div className="flex items-center gap-4">
-                  <Button variant="destructive" size="sm">
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Truncate Table
-                  </Button>
-                  <Button variant="destructive" size="sm">
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Drop Table
-                  </Button>
-                  <span className="text-sm text-gray-600 dark:text-gray-400">
-                    These actions require additional confirmation
-                  </span>
-                </div>
-              </CardContent>
-            )}
           </Card>
         </div>
       </div>
     </div>
+  );
+}
+
+type EditableUserRowProps = {
+  editingRow: EditingRow;
+  loading: boolean;
+  setEditingRow: Dispatch<SetStateAction<EditingRow | null>>;
+  onSave: () => void;
+  onCancel: () => void;
+};
+
+function EditableUserRow({
+  editingRow,
+  loading,
+  setEditingRow,
+  onSave,
+  onCancel,
+}: EditableUserRowProps) {
+  const updateField = (field: keyof EditingRow["data"], value: string | boolean) => {
+    setEditingRow((current) => current && {
+      ...current,
+      data: {
+        ...current.data,
+        [field]: value,
+      },
+    });
+  };
+
+  return (
+    <TableRow className="bg-blue-50 dark:bg-blue-950">
+      <TableCell className="font-mono text-sm">{editingRow.id || "new"}</TableCell>
+      <TableCell>
+        <Input
+          value={editingRow.data.username}
+          onChange={(event) => updateField("username", event.target.value)}
+          className="h-8"
+        />
+      </TableCell>
+      <TableCell>
+        <Input
+          type="email"
+          value={editingRow.data.email}
+          onChange={(event) => updateField("email", event.target.value)}
+          className="h-8"
+        />
+      </TableCell>
+      <TableCell>
+        <Select value={editingRow.data.role} onValueChange={(value) => updateField("role", value)}>
+          <SelectTrigger className="h-8">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {roleOptions.map((role) => (
+              <SelectItem key={role} value={role}>
+                {role}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </TableCell>
+      <TableCell>
+        <Select
+          value={editingRow.data.active ? "active" : "disabled"}
+          onValueChange={(value) => updateField("active", value === "active")}
+        >
+          <SelectTrigger className="h-8">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="active">active</SelectItem>
+            <SelectItem value="disabled">disabled</SelectItem>
+          </SelectContent>
+        </Select>
+      </TableCell>
+      <TableCell>
+        {editingRow.id ? (
+          <span className="text-sm text-gray-500">managed by API</span>
+        ) : (
+          <Input
+            type="password"
+            placeholder="Temporary password"
+            value={editingRow.data.password}
+            onChange={(event) => updateField("password", event.target.value)}
+            className="h-8"
+          />
+        )}
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-1">
+          <Button size="sm" onClick={onSave} disabled={loading}>
+            <Save className="h-3 w-3" />
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onCancel} disabled={loading}>
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
   );
 }
