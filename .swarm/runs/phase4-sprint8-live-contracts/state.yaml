@@ -8,10 +8,11 @@ completed:
   - Replaced VMMigrationDialog fixture behavior with a typed live API submission path.
   - Covered migration and backup contract routes in api-server tests.
   - Replaced DatabaseEditor fixture CRUD with canonical admin user API hooks.
+  - Replaced NetworkConfigurationPanel fixture data with live virtual-network list, create, and delete operations.
 validation:
   - go test ./backend/cmd/api-server
   - frontend npm run test:smoke -- --runInBand
   - frontend npx tsc --noEmit --pretty false
 remaining:
-  - Replace NetworkConfigurationPanel fixture workspace with live network management contracts.
+  - Add canonical firewall and load-balancer APIs before enabling those NetworkConfigurationPanel tabs.
   - Replace MigrationWorkflow and BackupRecoveryFlow demos with live planning, execution, restore, and policy contracts.
