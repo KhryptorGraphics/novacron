@@ -658,6 +658,7 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 
 	registerOrchestrationDashboardRoutes(router)
 	registerMigrationBackupContractRoutes(router)
+	registerNetworkPolicyContractRoutes(router)
 
 	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
 		if runtimeInventoryClient.proxy(w, r, "/internal/runtime/v1/vms") {
@@ -1725,7 +1726,9 @@ func registerOrchestrationDashboardRoutes(router *mux.Router) {
 
 func registerMigrationBackupContractRoutes(router *mux.Router) {
 	router.HandleFunc("/migration/jobs", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, []map[string]interface{}{})
+		phase4Contracts.mu.Lock()
+		defer phase4Contracts.mu.Unlock()
+		writeJSON(w, http.StatusOK, cloneRecords(phase4Contracts.migrationJobs))
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/migration/initiate", func(w http.ResponseWriter, r *http.Request) {
@@ -1747,7 +1750,7 @@ func registerMigrationBackupContractRoutes(router *mux.Router) {
 			req.MigrationStrategy = "cold"
 		}
 
-		writeJSON(w, http.StatusAccepted, map[string]interface{}{
+		job := map[string]interface{}{
 			"jobId":             fmt.Sprintf("migration-job-%d", time.Now().UnixNano()),
 			"status":            "queued",
 			"sourceCluster":     req.SourceCluster,
@@ -1755,7 +1758,12 @@ func registerMigrationBackupContractRoutes(router *mux.Router) {
 			"vmCount":           len(req.VMIDs),
 			"migrationStrategy": req.MigrationStrategy,
 			"createdAt":         time.Now().UTC().Format(time.RFC3339),
-		})
+			"progress":          0,
+		}
+		phase4Contracts.mu.Lock()
+		phase4Contracts.migrationJobs = append([]map[string]interface{}{job}, phase4Contracts.migrationJobs...)
+		phase4Contracts.mu.Unlock()
+		writeJSON(w, http.StatusAccepted, job)
 	}).Methods(http.MethodPost)
 
 	router.HandleFunc("/migration/live/status", func(w http.ResponseWriter, r *http.Request) {
@@ -1793,13 +1801,21 @@ func registerMigrationBackupContractRoutes(router *mux.Router) {
 	}).Methods(http.MethodPost)
 
 	router.HandleFunc("/backup/status", func(w http.ResponseWriter, r *http.Request) {
+		phase4Contracts.mu.Lock()
+		activeBackups := len(phase4Contracts.backupRuns)
+		backupCount := len(phase4Contracts.backupRuns)
+		phase4Contracts.mu.Unlock()
+
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"activeBackups":   0,
+			"activeBackups":   activeBackups,
 			"lastBackupTime":  "",
 			"backupHealth":    "not_configured",
-			"totalBackupSize": 0,
+			"totalBackupSize": backupCount * 1024 * 1024 * 1024,
 		})
 	}).Methods(http.MethodGet)
+
+	registerMigrationPlanningContractRoutes(router)
+	registerBackupPolicyContractRoutes(router)
 }
 
 func registerSecurityRouteSet(router *mux.Router, authManager *auth.SimpleAuthManager, handlers *securityapi.SecurityHandlers) {

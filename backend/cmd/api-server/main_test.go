@@ -204,6 +204,7 @@ func TestOrchestrationPolicyAndModelActions(t *testing.T) {
 }
 
 func TestMigrationBackupContractRoutes(t *testing.T) {
+	phase4Contracts = &phase4ContractStore{}
 	router, authManager := newMonitoringSummaryTestRouter(t)
 
 	readCases := []struct {
@@ -264,6 +265,113 @@ func TestMigrationBackupContractRoutes(t *testing.T) {
 	}
 	if live["migrationId"] == "" || live["vmId"] != "vm-1" {
 		t.Fatalf("expected live migration response, got %#v", live)
+	}
+}
+
+func TestPhase4ContractParityRoutes(t *testing.T) {
+	phase4Contracts = &phase4ContractStore{}
+	router, authManager := newMonitoringSummaryTestRouter(t)
+
+	firewallRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPost, "/api/v1/network/firewall-rules", map[string]interface{}{
+		"name":        "allow-web",
+		"networkId":   "net-1",
+		"direction":   "inbound",
+		"action":      "allow",
+		"protocol":    "tcp",
+		"source":      "0.0.0.0/0",
+		"destination": "10.0.0.0/24",
+		"port":        "443",
+	})
+	if firewallRec.Code != http.StatusCreated {
+		t.Fatalf("expected firewall create status 201, got %d: %s", firewallRec.Code, firewallRec.Body.String())
+	}
+	var firewall map[string]interface{}
+	if err := json.Unmarshal(firewallRec.Body.Bytes(), &firewall); err != nil {
+		t.Fatalf("failed to decode firewall rule: %v", err)
+	}
+	if firewall["id"] == "" || firewall["status"] != "not_configured" {
+		t.Fatalf("expected canonical firewall response, got %#v", firewall)
+	}
+
+	loadBalancerRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPost, "/api/v1/network/load-balancers", map[string]interface{}{
+		"name":      "edge-lb",
+		"networkId": "net-1",
+		"vip":       "10.0.0.10",
+		"port":      80,
+	})
+	if loadBalancerRec.Code != http.StatusCreated {
+		t.Fatalf("expected load balancer create status 201, got %d: %s", loadBalancerRec.Code, loadBalancerRec.Body.String())
+	}
+	var loadBalancer map[string]interface{}
+	if err := json.Unmarshal(loadBalancerRec.Body.Bytes(), &loadBalancer); err != nil {
+		t.Fatalf("failed to decode load balancer: %v", err)
+	}
+	if loadBalancer["id"] == "" || loadBalancer["status"] != "not_configured" {
+		t.Fatalf("expected canonical load balancer response, got %#v", loadBalancer)
+	}
+
+	planRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPost, "/api/v1/migration/plans", map[string]interface{}{
+		"sourceCluster":     "local",
+		"targetCluster":     "trusted-west",
+		"vmIds":             []string{"vm-1", "vm-2"},
+		"migrationStrategy": "checkpoint",
+	})
+	if planRec.Code != http.StatusCreated {
+		t.Fatalf("expected migration plan status 201, got %d: %s", planRec.Code, planRec.Body.String())
+	}
+	var plan map[string]interface{}
+	if err := json.Unmarshal(planRec.Body.Bytes(), &plan); err != nil {
+		t.Fatalf("failed to decode migration plan: %v", err)
+	}
+	if plan["planId"] == "" || plan["status"] == "" || plan["checks"] == nil {
+		t.Fatalf("expected migration plan contract fields, got %#v", plan)
+	}
+
+	preflightRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPost, "/api/v1/migration/preflight", map[string]interface{}{
+		"targetCluster":     "trusted-west",
+		"vmIds":             []string{"vm-1"},
+		"migrationStrategy": "live",
+	})
+	if preflightRec.Code != http.StatusOK {
+		t.Fatalf("expected preflight status 200, got %d: %s", preflightRec.Code, preflightRec.Body.String())
+	}
+
+	policyRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPost, "/api/v1/backup/policies", map[string]interface{}{
+		"name":          "daily",
+		"schedule":      "daily",
+		"retentionDays": 30,
+	})
+	if policyRec.Code != http.StatusCreated {
+		t.Fatalf("expected backup policy status 201, got %d: %s", policyRec.Code, policyRec.Body.String())
+	}
+	var policy map[string]interface{}
+	if err := json.Unmarshal(policyRec.Body.Bytes(), &policy); err != nil {
+		t.Fatalf("failed to decode backup policy: %v", err)
+	}
+	policyID, _ := policy["id"].(string)
+	if policyID == "" {
+		t.Fatalf("expected policy id, got %#v", policy)
+	}
+
+	runRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPost, "/api/v1/backup/policies/"+policyID+"/run", nil)
+	if runRec.Code != http.StatusAccepted {
+		t.Fatalf("expected backup run status 202, got %d: %s", runRec.Code, runRec.Body.String())
+	}
+	var run map[string]interface{}
+	if err := json.Unmarshal(runRec.Body.Bytes(), &run); err != nil {
+		t.Fatalf("failed to decode backup run: %v", err)
+	}
+	runID, _ := run["id"].(string)
+	if runID == "" {
+		t.Fatalf("expected backup run id, got %#v", run)
+	}
+
+	restoreRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPost, "/api/v1/backup/restore", map[string]interface{}{
+		"backupId": runID,
+		"target":   "original",
+	})
+	if restoreRec.Code != http.StatusAccepted {
+		t.Fatalf("expected restore status 202, got %d: %s", restoreRec.Code, restoreRec.Body.String())
 	}
 }
 

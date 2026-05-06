@@ -23,6 +23,38 @@ export type CanonicalVmInterface = {
   updated_at: string;
 };
 
+export type FirewallRule = {
+  id: string;
+  name: string;
+  networkId?: string;
+  direction: 'inbound' | 'outbound' | string;
+  action: 'allow' | 'deny' | string;
+  protocol: 'tcp' | 'udp' | 'icmp' | 'any' | string;
+  source: string;
+  destination: string;
+  port: string;
+  priority: number;
+  enabled: boolean;
+  hits: number;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type LoadBalancer = {
+  id: string;
+  name: string;
+  networkId?: string;
+  vip?: string;
+  port: number;
+  algorithm: string;
+  type: string;
+  status: string;
+  backends: Array<Record<string, unknown>>;
+  createdAt: string;
+  updatedAt: string;
+};
+
 function authHeaders(): HeadersInit {
   const token = typeof window !== 'undefined' ? window.localStorage.getItem('novacron_token') : null;
   return {
@@ -84,4 +116,30 @@ export const networkApi = {
     request<{ id: string; vm_id: string; status: string }>(`/vms/${vmId}/interfaces/${interfaceId}`, {
       method: 'DELETE',
     }),
+  listFirewallRules: () => request<FirewallRule[]>('/network/firewall-rules'),
+  createFirewallRule: (payload: Partial<FirewallRule> & { name: string }) =>
+    request<FirewallRule>('/network/firewall-rules', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateFirewallRule: (id: string, payload: Partial<FirewallRule>) =>
+    request<FirewallRule>(`/network/firewall-rules/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  deleteFirewallRule: (id: string) =>
+    request<{ id: string; status: string }>(`/network/firewall-rules/${id}`, { method: 'DELETE' }),
+  listLoadBalancers: () => request<LoadBalancer[]>('/network/load-balancers'),
+  createLoadBalancer: (payload: Partial<LoadBalancer> & { name: string }) =>
+    request<LoadBalancer>('/network/load-balancers', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateLoadBalancer: (id: string, payload: Partial<LoadBalancer>) =>
+    request<LoadBalancer>(`/network/load-balancers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  deleteLoadBalancer: (id: string) =>
+    request<{ id: string; status: string }>(`/network/load-balancers/${id}`, { method: 'DELETE' }),
 };

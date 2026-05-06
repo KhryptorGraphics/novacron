@@ -8,16 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Archive, CheckCircle, Database, RefreshCw, RotateCcw, Shield } from "lucide-react";
-import { apiClient } from "@/lib/api/client";
+import { backupApi, type BackupPolicy, type BackupRun, type BackupStatus } from "@/lib/api/backup";
 import { useVMs } from "@/lib/api/hooks/useVMs";
 import { cn } from "@/lib/utils";
-
-type BackupStatus = {
-  activeBackups: number;
-  lastBackupTime: string;
-  backupHealth: string;
-  totalBackupSize: number;
-};
 
 const emptyStatus: BackupStatus = {
   activeBackups: 0,
@@ -63,15 +56,24 @@ function healthVariant(health: string): "default" | "secondary" | "destructive" 
 export function BackupRecoveryFlow() {
   const { items: vms, isLoading: vmsLoading, error: vmsError } = useVMs({ page: 1, pageSize: 100 });
   const [status, setStatus] = useState<BackupStatus>(emptyStatus);
+  const [policies, setPolicies] = useState<BackupPolicy[]>([]);
+  const [backups, setBackups] = useState<BackupRun[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   const loadBackupStatus = async () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await apiClient.get<BackupStatus>("/api/v1/backup/status");
+      const [response, policyResponse, backupResponse] = await Promise.all([
+        backupApi.getStatus(),
+        backupApi.listPolicies(),
+        backupApi.listBackups(),
+      ]);
       setStatus(response || emptyStatus);
+      setPolicies(Array.isArray(policyResponse) ? policyResponse : []);
+      setBackups(Array.isArray(backupResponse) ? backupResponse : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load backup status.");
     } finally {
@@ -83,13 +85,63 @@ export function BackupRecoveryFlow() {
     loadBackupStatus();
   }, []);
 
+  const createPolicy = async () => {
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const created = await backupApi.createPolicy({
+        name: `Daily VM policy ${policies.length + 1}`,
+        schedule: "daily",
+        retentionDays: 30,
+        target: "local",
+        enabled: true,
+      });
+      setPolicies((current) => [created, ...current]);
+      setMessage("Backup policy created through the canonical backup API.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create backup policy.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runPolicy = async (policyId: string) => {
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const run = await backupApi.runPolicy(policyId);
+      setBackups((current) => [run, ...current]);
+      setMessage(`Backup run ${run.id} queued.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to run backup policy.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const restoreBackup = async (backupId: string) => {
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const restore = await backupApi.restore({ backupId, target: "original" });
+      setMessage(`Restore job ${restore.id} queued.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to queue restore.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-3xl font-bold">Backup & Recovery</h2>
           <p className="text-gray-600 mt-1">
-            Monitor backup readiness through canonical NovaCron backup contracts
+            Operate backup policy, run, and restore contracts through canonical NovaCron APIs
           </p>
         </div>
         <Button variant="outline" onClick={loadBackupStatus} disabled={loading}>
@@ -101,9 +153,16 @@ export function BackupRecoveryFlow() {
       <Alert className="border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950">
         <CheckCircle className="h-4 w-4 text-green-700 dark:text-green-300" />
         <AlertDescription className="text-green-800 dark:text-green-200">
-          Backup health is backed by live `GET /api/v1/backup/status`. Policy, run, restore, and point-in-time recovery controls stay disabled until their canonical APIs exist.
+          Backup health, policies, manual runs, restore points, and recovery execution use live canonical backup contracts.
         </AlertDescription>
       </Alert>
+
+      {message && (
+        <Alert>
+          <CheckCircle className="h-4 w-4" />
+          <AlertDescription>{message}</AlertDescription>
+        </Alert>
+      )}
 
       {(error || Boolean(vmsError)) && (
         <Alert variant="destructive">
@@ -160,17 +219,70 @@ export function BackupRecoveryFlow() {
         </TabsContent>
 
         <TabsContent value="policies">
-          <PendingContractCard
-            title="Backup Policies"
-            description="Policy create/update, manual backup run, retention, encryption, and storage target controls are disabled until canonical backup policy APIs are implemented."
-          />
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Backup Policies</CardTitle>
+                <CardDescription>Live records from `/api/v1/backup/policies`</CardDescription>
+              </div>
+              <Button onClick={createPolicy} disabled={loading}>Create Policy</Button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {policies.length === 0 && (
+                <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
+                  {loading ? "Loading policies..." : "No backup policies returned by the canonical API."}
+                </div>
+              )}
+              {policies.map((policy) => (
+                <div key={policy.id} className="flex items-center justify-between rounded-lg border p-4">
+                  <div>
+                    <div className="font-medium">{policy.name}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {policy.schedule}, {policy.retentionDays} days, target {policy.target}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">{policy.status}</Badge>
+                    <Button variant="outline" size="sm" onClick={() => runPolicy(policy.id)} disabled={loading}>
+                      Run
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="restore">
-          <PendingContractCard
-            title="Restore Operations"
-            description="Restore-point browsing, target VM selection, rollback, and recovery execution are disabled until canonical restore APIs are implemented."
-          />
+          <Card>
+            <CardHeader>
+              <CardTitle>Restore Operations</CardTitle>
+              <CardDescription>Live records from `/api/v1/backup/backups` and `/api/v1/backup/restore`</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {backups.length === 0 && (
+                <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
+                  {loading ? "Loading restore points..." : "No backup runs returned by the canonical API."}
+                </div>
+              )}
+              {backups.map((backup) => (
+                <div key={backup.id} className="flex items-center justify-between rounded-lg border p-4">
+                  <div>
+                    <div className="font-medium">{backup.id}</div>
+                    <div className="text-sm text-muted-foreground">
+                      Policy {backup.policyId || "unknown"} queued {formatDate(backup.createdAt)}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">{backup.status}</Badge>
+                    <Button variant="outline" size="sm" onClick={() => restoreBackup(backup.id)} disabled={loading}>
+                      Restore
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>
@@ -208,21 +320,5 @@ function Detail({ label, value }: { label: string; value: string }) {
       <div className="text-sm text-muted-foreground">{label}</div>
       <div className="mt-1 font-medium">{value}</div>
     </div>
-  );
-}
-
-function PendingContractCard({ title, description }: { title: string; description: string }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardDescription>Canonical contract pending</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
-          {description}
-        </div>
-      </CardContent>
-    </Card>
   );
 }

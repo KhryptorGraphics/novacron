@@ -20,7 +20,7 @@ import {
   Shield,
   Trash2,
 } from "lucide-react";
-import { apiClient } from "@/lib/api/client";
+import { networkApi, type FirewallRule, type LoadBalancer } from "@/lib/api/networks";
 import { cn } from "@/lib/utils";
 
 type NetworkRecord = {
@@ -70,6 +70,8 @@ function statusClass(status: string) {
 
 export function NetworkConfigurationPanel() {
   const [networks, setNetworks] = useState<NetworkRecord[]>([]);
+  const [firewallRules, setFirewallRules] = useState<FirewallRule[]>([]);
+  const [loadBalancers, setLoadBalancers] = useState<LoadBalancer[]>([]);
   const [selectedNetworkId, setSelectedNetworkId] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newNetwork, setNewNetwork] = useState<CreateNetworkForm>(emptyNetworkForm);
@@ -83,8 +85,14 @@ export function NetworkConfigurationPanel() {
     setLoading(true);
     setError(null);
     try {
-      const response = await apiClient.get<NetworkRecord[]>("/api/v1/networks");
+      const [response, rules, balancers] = await Promise.all([
+        networkApi.listNetworks(),
+        networkApi.listFirewallRules(),
+        networkApi.listLoadBalancers(),
+      ]);
       setNetworks(Array.isArray(response) ? response : []);
+      setFirewallRules(Array.isArray(rules) ? rules : []);
+      setLoadBalancers(Array.isArray(balancers) ? balancers : []);
       if (!selectedNetworkId && Array.isArray(response) && response.length > 0) {
         setSelectedNetworkId(response[0].id);
       }
@@ -112,7 +120,7 @@ export function NetworkConfigurationPanel() {
     setLoading(true);
     setError(null);
     try {
-      const created = await apiClient.post<NetworkRecord>("/api/v1/networks", {
+      const created = await networkApi.createNetwork({
         name,
         type: newNetwork.type,
         subnet,
@@ -138,7 +146,7 @@ export function NetworkConfigurationPanel() {
     setLoading(true);
     setError(null);
     try {
-      await apiClient.delete(`/api/v1/networks/${networkId}`);
+      await networkApi.deleteNetwork(networkId);
       setNetworks((current) => current.filter((network) => network.id !== networkId));
       if (selectedNetworkId === networkId) {
         setSelectedNetworkId(null);
@@ -146,6 +154,88 @@ export function NetworkConfigurationPanel() {
       setNotice("Network deleted through the canonical network API.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete network.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const createFirewallRule = async () => {
+    if (!selectedNetwork) {
+      setError("Select a network before creating a firewall rule.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const created = await networkApi.createFirewallRule({
+        name: `${selectedNetwork.name} allow tcp`,
+        networkId: selectedNetwork.id,
+        direction: "inbound",
+        action: "allow",
+        protocol: "tcp",
+        source: "0.0.0.0/0",
+        destination: selectedNetwork.subnet,
+        port: "any",
+        priority: 100,
+        enabled: true,
+      });
+      setFirewallRules((current) => [created, ...current]);
+      setNotice("Firewall rule created through the canonical network policy API.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create firewall rule.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteFirewallRule = async (ruleId: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      await networkApi.deleteFirewallRule(ruleId);
+      setFirewallRules((current) => current.filter((rule) => rule.id !== ruleId));
+      setNotice("Firewall rule deleted through the canonical network policy API.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete firewall rule.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const createLoadBalancer = async () => {
+    if (!selectedNetwork) {
+      setError("Select a network before creating a load balancer.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const created = await networkApi.createLoadBalancer({
+        name: `${selectedNetwork.name} edge`,
+        networkId: selectedNetwork.id,
+        vip: selectedNetwork.gateway || "",
+        port: 80,
+        algorithm: "round_robin",
+        type: "layer4",
+      });
+      setLoadBalancers((current) => [created, ...current]);
+      setNotice("Load balancer created through the canonical load-balancer API.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create load balancer.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteLoadBalancer = async (loadBalancerId: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      await networkApi.deleteLoadBalancer(loadBalancerId);
+      setLoadBalancers((current) => current.filter((lb) => lb.id !== loadBalancerId));
+      setNotice("Load balancer deleted through the canonical load-balancer API.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete load balancer.");
     } finally {
       setLoading(false);
     }
@@ -175,7 +265,7 @@ export function NetworkConfigurationPanel() {
       <Alert className="border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950">
         <CheckCircle className="h-4 w-4 text-green-700 dark:text-green-300" />
         <AlertDescription className="text-green-800 dark:text-green-200">
-          Virtual networks are backed by live `/api/v1/networks` contracts. Firewall and load balancer controls stay disabled until their canonical APIs exist.
+          Virtual networks, firewall rules, and load balancers are backed by live canonical network contracts.
         </AlertDescription>
       </Alert>
 
@@ -212,8 +302,8 @@ export function NetworkConfigurationPanel() {
             <Shield className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">pending</div>
-            <p className="text-xs text-muted-foreground">No canonical rule API yet</p>
+            <div className="text-2xl font-bold">{firewallRules.length}</div>
+            <p className="text-xs text-muted-foreground">Canonical policy records</p>
           </CardContent>
         </Card>
         <Card>
@@ -222,8 +312,8 @@ export function NetworkConfigurationPanel() {
             <Router className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">pending</div>
-            <p className="text-xs text-muted-foreground">No canonical load-balancer API yet</p>
+            <div className="text-2xl font-bold">{loadBalancers.length}</div>
+            <p className="text-xs text-muted-foreground">Canonical balancer records</p>
           </CardContent>
         </Card>
       </div>
@@ -315,17 +405,79 @@ export function NetworkConfigurationPanel() {
         </TabsContent>
 
         <TabsContent value="firewall">
-          <PendingContractCard
-            title="Firewall Rules"
-            description="Firewall and security-group editing is disabled until a canonical network policy API is available."
-          />
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Firewall Rules</CardTitle>
+                <CardDescription>Live records from `/api/v1/network/firewall-rules`</CardDescription>
+              </div>
+              <Button onClick={createFirewallRule} disabled={loading || !selectedNetwork}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Rule
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {firewallRules.length === 0 && (
+                <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+                  {loading ? "Loading firewall rules..." : "No firewall rules returned by the canonical API."}
+                </div>
+              )}
+              {firewallRules.map((rule) => (
+                <div key={rule.id} className="flex items-center justify-between rounded-lg border p-4">
+                  <div>
+                    <div className="font-medium">{rule.name}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {rule.direction} {rule.action} {rule.protocol} {rule.source} to {rule.destination}:{rule.port}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">{rule.status}</Badge>
+                    <Button variant="ghost" size="sm" onClick={() => deleteFirewallRule(rule.id)} disabled={loading}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="load-balancers">
-          <PendingContractCard
-            title="Load Balancers"
-            description="Load balancer topology and backend pool management is disabled until a canonical load-balancer API is available."
-          />
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Load Balancers</CardTitle>
+                <CardDescription>Live records from `/api/v1/network/load-balancers`</CardDescription>
+              </div>
+              <Button onClick={createLoadBalancer} disabled={loading || !selectedNetwork}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Load Balancer
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {loadBalancers.length === 0 && (
+                <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+                  {loading ? "Loading load balancers..." : "No load balancers returned by the canonical API."}
+                </div>
+              )}
+              {loadBalancers.map((balancer) => (
+                <div key={balancer.id} className="flex items-center justify-between rounded-lg border p-4">
+                  <div>
+                    <div className="font-medium">{balancer.name}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {balancer.type} {balancer.algorithm} on {balancer.vip || "unassigned"}:{balancer.port}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">{balancer.status}</Badge>
+                    <Button variant="ghost" size="sm" onClick={() => deleteLoadBalancer(balancer.id)} disabled={loading}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 
@@ -405,21 +557,5 @@ function Detail({ label, value, mono = false }: { label: string; value: string; 
       <span className="text-sm text-muted-foreground">{label}</span>
       <span className={cn("text-right text-sm font-medium", mono && "font-mono")}>{value}</span>
     </div>
-  );
-}
-
-function PendingContractCard({ title, description }: { title: string; description: string }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardDescription>Canonical contract pending</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
-          {description}
-        </div>
-      </CardContent>
-    </Card>
   );
 }

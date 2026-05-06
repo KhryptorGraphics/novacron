@@ -1,0 +1,31 @@
+phase: phase4
+sprint: sprint9-contract-parity
+status: in_progress
+updated_at: 2026-05-06T17:27:00Z
+owner: coordinator-integrator
+beads:
+  active:
+    - novacron-s50
+    - novacron-464
+    - novacron-2aw
+  parent_epic: NC-p4a
+scope:
+  backend:
+    - canonical network firewall and load-balancer contracts
+    - canonical migration planning, preflight, rollback, and job visibility contracts
+    - canonical backup policy, manual run, restore-point, and restore execution contracts
+  frontend:
+    - typed network policy API client
+    - typed migration API client
+    - typed backup API client
+    - advanced network, migration, and backup panels wired to live contracts
+validation:
+  passed:
+    - go test ./backend/cmd/api-server
+    - npm run test:smoke --prefix frontend -- --runInBand
+    - scoped changed-file TypeScript filter returned no errors
+  known_baseline_failures:
+    - full frontend typecheck still fails on pre-existing unrelated test utility, unused import, and exactOptionalPropertyTypes errors
+notes:
+  - Runtime executor integration remains explicit through not_configured statuses where subsystem backends are not wired.
+  - Live migration remains feature-gated; cold and checkpoint planning are the RC default paths.
