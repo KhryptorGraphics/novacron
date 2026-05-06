@@ -52,6 +52,43 @@ type CanonicalVolume = {
   updatedAt: string;
 };
 
+type FirewallRule = {
+  id: string;
+  name: string;
+  networkId?: string;
+  status: string;
+};
+
+type LoadBalancer = {
+  id: string;
+  name: string;
+  networkId?: string;
+  status: string;
+};
+
+type MigrationJob = {
+  jobId: string;
+  status: string;
+  sourceCluster: string;
+  targetCluster: string;
+  vmCount: number;
+  migrationStrategy: string;
+  createdAt: string;
+};
+
+type BackupPolicy = {
+  id: string;
+  name: string;
+  status: string;
+};
+
+type BackupRun = {
+  id: string;
+  policyId: string;
+  status: string;
+  createdAt: string;
+};
+
 function encodeBase64Url(value: unknown) {
   return Buffer.from(JSON.stringify(value))
     .toString('base64')
@@ -60,18 +97,18 @@ function encodeBase64Url(value: unknown) {
     .replace(/=+$/g, '');
 }
 
-function makeAdminToken() {
+function makeToken(role = 'admin', userId = 'admin-1', email = 'admin@novacron.dev') {
   const now = Math.floor(Date.now() / 1000);
 
   return [
     encodeBase64Url({ alg: 'HS256', typ: 'JWT' }),
     encodeBase64Url({
-      sub: 'admin-1',
-      email: 'admin@novacron.dev',
+      sub: userId,
+      email,
       first_name: 'Release',
-      last_name: 'Admin',
-      role: 'admin',
-      roles: ['admin'],
+      last_name: role === 'admin' ? 'Admin' : 'Viewer',
+      role,
+      roles: [role],
       tenant_id: 'default',
       exp: now + 3600,
     }),
@@ -79,9 +116,15 @@ function makeAdminToken() {
   ].join('.');
 }
 
+function makeAdminToken() {
+  return makeToken();
+}
+
 test.describe.configure({ mode: 'serial' });
 
 test('canonical release routes load and support live rehabbed flows', async ({ page }) => {
+  test.setTimeout(60_000);
+
   const now = '2026-04-18T00:00:00Z';
   const token = makeAdminToken();
   let complianceChecks = 0;
@@ -205,6 +248,12 @@ test('canonical release routes load and support live rehabbed flows', async ({ p
       updatedAt: now,
     },
   ];
+  const firewallRules: FirewallRule[] = [];
+  const loadBalancers: LoadBalancer[] = [];
+  const migrationJobs: MigrationJob[] = [];
+  const migrationPlans: Array<Record<string, unknown>> = [];
+  const backupPolicies: BackupPolicy[] = [];
+  const backupRuns: BackupRun[] = [];
 
   await page.addInitScript((seed) => {
     window.localStorage.setItem('novacron_token', seed.token);
@@ -242,6 +291,11 @@ test('canonical release routes load and support live rehabbed flows', async ({ p
         selectedCluster,
         session,
       });
+      return;
+    }
+
+    if (path.startsWith('/api/auth/2fa/status') && method === 'GET') {
+      await fulfillJson({ enabled: false, backup_codes_remaining: 0 });
       return;
     }
 
@@ -360,6 +414,42 @@ test('canonical release routes load and support live rehabbed flows', async ({ p
       return;
     }
 
+    if (path === '/api/v1/network/firewall-rules' && method === 'GET') {
+      await fulfillJson(firewallRules);
+      return;
+    }
+
+    if (path === '/api/v1/network/firewall-rules' && method === 'POST') {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      const createdRule: FirewallRule = {
+        id: `fw-${firewallRules.length + 1}`,
+        name: String(payload.name),
+        networkId: typeof payload.networkId === 'string' ? payload.networkId : undefined,
+        status: 'not_configured',
+      };
+      firewallRules.unshift(createdRule);
+      await fulfillJson(createdRule, 201);
+      return;
+    }
+
+    if (path === '/api/v1/network/load-balancers' && method === 'GET') {
+      await fulfillJson(loadBalancers);
+      return;
+    }
+
+    if (path === '/api/v1/network/load-balancers' && method === 'POST') {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      const createdBalancer: LoadBalancer = {
+        id: `lb-${loadBalancers.length + 1}`,
+        name: String(payload.name),
+        networkId: typeof payload.networkId === 'string' ? payload.networkId : undefined,
+        status: 'not_configured',
+      };
+      loadBalancers.unshift(createdBalancer);
+      await fulfillJson(createdBalancer, 201);
+      return;
+    }
+
     if (path === '/api/v1/networks' && method === 'POST') {
       const payload = request.postDataJSON() as Record<string, unknown>;
       const createdNetwork: CanonicalNetwork = {
@@ -396,6 +486,123 @@ test('canonical release routes load and support live rehabbed flows', async ({ p
         page_size: 100,
         total_pages: 1,
       });
+      return;
+    }
+
+    if (path === '/api/v1/migration/jobs' && method === 'GET') {
+      await fulfillJson(migrationJobs);
+      return;
+    }
+
+    if (path === '/api/v1/migration/initiate' && method === 'POST') {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      const job: MigrationJob = {
+        jobId: `migration-job-${migrationJobs.length + 1}`,
+        status: 'queued',
+        sourceCluster: String(payload.sourceCluster || 'local'),
+        targetCluster: String(payload.targetCluster),
+        vmCount: Array.isArray(payload.vmIds) ? payload.vmIds.length : 0,
+        migrationStrategy: String(payload.migrationStrategy || 'cold'),
+        createdAt: now,
+      };
+      migrationJobs.unshift(job);
+      await fulfillJson(job, 202);
+      return;
+    }
+
+    if (path === '/api/v1/migration/plans' && method === 'GET') {
+      await fulfillJson(migrationPlans);
+      return;
+    }
+
+    if (path === '/api/v1/migration/plans' && method === 'POST') {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      const plan = {
+        planId: `migration-plan-${migrationPlans.length + 1}`,
+        status: 'passed',
+        sourceCluster: String(payload.sourceCluster || 'local'),
+        targetCluster: String(payload.targetCluster),
+        vmIds: Array.isArray(payload.vmIds) ? payload.vmIds : [],
+        vmCount: Array.isArray(payload.vmIds) ? payload.vmIds.length : 0,
+        migrationStrategy: String(payload.migrationStrategy || 'cold'),
+        estimatedDurationSeconds: 300,
+        estimatedDowntimeSeconds: 120,
+        checks: [{ name: 'trusted_cluster', status: 'passed', message: 'trusted seed reachable' }],
+        createdAt: now,
+      };
+      migrationPlans.unshift(plan);
+      await fulfillJson(plan, 201);
+      return;
+    }
+
+    if (path === '/api/v1/migration/preflight' && method === 'POST') {
+      await fulfillJson({
+        status: 'passed',
+        checks: [{ name: 'trusted_cluster', status: 'passed', message: 'trusted seed reachable' }],
+      });
+      return;
+    }
+
+    const migrationRollbackMatch = path.match(/^\/api\/v1\/migration\/jobs\/([^/]+)\/rollback$/);
+    if (migrationRollbackMatch && method === 'POST') {
+      await fulfillJson({ jobId: migrationRollbackMatch[1], rollbackId: 'rollback-1', status: 'queued' }, 202);
+      return;
+    }
+
+    if (path === '/api/v1/backup/status' && method === 'GET') {
+      await fulfillJson({
+        activeBackups: backupRuns.length,
+        lastBackupTime: backupRuns[0]?.createdAt || '',
+        backupHealth: 'not_configured',
+        totalBackupSize: backupRuns.length * 1024 * 1024,
+      });
+      return;
+    }
+
+    if (path === '/api/v1/backup/policies' && method === 'GET') {
+      await fulfillJson(backupPolicies);
+      return;
+    }
+
+    if (path === '/api/v1/backup/policies' && method === 'POST') {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      const policy: BackupPolicy = {
+        id: `backup-policy-${backupPolicies.length + 1}`,
+        name: String(payload.name),
+        status: 'not_configured',
+      };
+      backupPolicies.unshift(policy);
+      await fulfillJson(policy, 201);
+      return;
+    }
+
+    const backupPolicyRunMatch = path.match(/^\/api\/v1\/backup\/policies\/([^/]+)\/run$/);
+    if (backupPolicyRunMatch && method === 'POST') {
+      const run: BackupRun = {
+        id: `backup-run-${backupRuns.length + 1}`,
+        policyId: backupPolicyRunMatch[1],
+        status: 'queued',
+        createdAt: now,
+      };
+      backupRuns.unshift(run);
+      await fulfillJson(run, 202);
+      return;
+    }
+
+    if (path === '/api/v1/backup/backups' && method === 'GET') {
+      await fulfillJson(backupRuns);
+      return;
+    }
+
+    if (path === '/api/v1/backup/restore' && method === 'POST') {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      await fulfillJson({
+        id: 'restore-1',
+        backupId: String(payload.backupId),
+        target: String(payload.target || 'original'),
+        status: 'queued',
+        createdAt: now,
+      }, 202);
       return;
     }
 
@@ -611,7 +818,12 @@ test('canonical release routes load and support live rehabbed flows', async ({ p
       return;
     }
 
-    await fulfillJson({ error: `Unhandled route for ${method} ${path}` }, 500);
+    if (path.startsWith('/api') || path === '/graphql') {
+      await fulfillJson({ error: `Unhandled route for ${method} ${path}` }, 500);
+      return;
+    }
+
+    await route.continue();
   });
 
   await page.goto('/dashboard');
@@ -626,6 +838,8 @@ test('canonical release routes load and support live rehabbed flows', async ({ p
   await page.goto('/core/vms');
   await expect(page.getByRole('heading', { name: 'Virtual Machines' })).toBeVisible();
   await expect(page.getByText('Beta')).toBeVisible();
+  await page.getByRole('row', { name: /Beta/ }).getByRole('button', { name: 'Start' }).click();
+  await expect(page.getByText('running').first()).toBeVisible();
 
   await page.goto('/analytics');
   await expect(page.getByRole('heading', { name: 'Analytics' })).toBeVisible();
@@ -655,6 +869,83 @@ test('canonical release routes load and support live rehabbed flows', async ({ p
   await page.getByRole('button', { name: 'Create Network' }).click();
   await expect(page.getByText('Staging', { exact: true })).toBeVisible();
 
+  const operatorContractResults = await page.evaluate(async () => {
+    const json = async (path: string, init?: RequestInit) => {
+      const response = await fetch(path, {
+        ...init,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(init?.headers || {}),
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`${init?.method || 'GET'} ${path} failed with ${response.status}`);
+      }
+      return response.json();
+    };
+
+    const firewall = await json('/api/v1/network/firewall-rules', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'allow-web', networkId: 'net-1' }),
+    });
+    const loadBalancer = await json('/api/v1/network/load-balancers', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'edge-lb', networkId: 'net-1' }),
+    });
+    const plan = await json('/api/v1/migration/plans', {
+      method: 'POST',
+      body: JSON.stringify({
+        sourceCluster: 'cluster-a',
+        targetCluster: 'cluster-b',
+        vmIds: ['vm-1'],
+        migrationStrategy: 'checkpoint',
+      }),
+    });
+    const preflight = await json('/api/v1/migration/preflight', {
+      method: 'POST',
+      body: JSON.stringify({ planId: plan.planId }),
+    });
+    const migration = await json('/api/v1/migration/initiate', {
+      method: 'POST',
+      body: JSON.stringify({
+        sourceCluster: 'cluster-a',
+        targetCluster: 'cluster-b',
+        vmIds: ['vm-1'],
+        migrationStrategy: 'cold',
+      }),
+    });
+    const rollback = await json(`/api/v1/migration/jobs/${migration.jobId}/rollback`, { method: 'POST' });
+    const policy = await json('/api/v1/backup/policies', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'daily', schedule: 'daily' }),
+    });
+    const backup = await json(`/api/v1/backup/policies/${policy.id}/run`, { method: 'POST' });
+    const restore = await json('/api/v1/backup/restore', {
+      method: 'POST',
+      body: JSON.stringify({ backupId: backup.id, target: 'original' }),
+    });
+
+    return {
+      firewallStatus: firewall.status,
+      loadBalancerStatus: loadBalancer.status,
+      preflightStatus: preflight.status,
+      migrationStatus: migration.status,
+      rollbackStatus: rollback.status,
+      backupStatus: backup.status,
+      restoreStatus: restore.status,
+    };
+  });
+
+  expect(operatorContractResults).toEqual({
+    firewallStatus: 'not_configured',
+    loadBalancerStatus: 'not_configured',
+    preflightStatus: 'passed',
+    migrationStatus: 'queued',
+    rollbackStatus: 'queued',
+    backupStatus: 'queued',
+    restoreStatus: 'queued',
+  });
+
   await page.goto('/storage');
   await expect(page.getByRole('heading', { name: 'Storage' })).toBeVisible();
   await page.getByLabel('Name').fill('logs-volume');
@@ -670,4 +961,85 @@ test('canonical release routes load and support live rehabbed flows', async ({ p
 
   await page.goto('/admin');
   await expect(page.getByRole('heading', { name: 'Admin Dashboard' })).toBeVisible();
+});
+
+test('canonical admin routes deny non-admin users', async ({ page }) => {
+  const now = '2026-04-18T00:00:00Z';
+  const viewerUser = {
+    id: 'viewer-1',
+    email: 'viewer@novacron.dev',
+    firstName: 'Release',
+    lastName: 'Viewer',
+    tenantId: 'default',
+    status: 'active',
+    role: 'viewer',
+    roles: ['viewer'],
+  };
+  const selectedCluster = {
+    id: 'cluster-a',
+    name: 'Primary Fabric',
+    tier: 'production',
+    performanceScore: 98,
+    interconnectLatencyMs: 12,
+    interconnectBandwidthMbps: 20000,
+    currentNodeCount: 3,
+    maxSupportedNodeCount: 12,
+    growthState: 'stable',
+    federationState: 'healthy',
+    degraded: false,
+    lastEvaluatedAt: now,
+  };
+  const memberships = [{
+    admitted: true,
+    state: 'active',
+    clusterId: selectedCluster.id,
+    role: 'viewer',
+    source: 'smoke-fixture',
+    admittedAt: now,
+    selected: true,
+    cluster: selectedCluster,
+  }];
+
+  await page.addInitScript((seed) => {
+    window.localStorage.setItem('novacron_token', seed.token);
+    window.localStorage.setItem('authUser', JSON.stringify(seed.user));
+    window.localStorage.setItem('authMemberships', JSON.stringify(seed.memberships));
+    window.localStorage.setItem('selectedCluster', JSON.stringify(seed.selectedCluster));
+    window.localStorage.setItem('authSession', JSON.stringify(seed.session));
+  }, {
+    token: makeToken('viewer', 'viewer-1', 'viewer@novacron.dev'),
+    user: viewerUser,
+    memberships,
+    selectedCluster,
+    session: {
+      id: 'session-viewer-1',
+      expiresAt: '2026-04-18T12:00:00Z',
+      createdAt: now,
+      lastAccessedAt: now,
+      selectedClusterId: selectedCluster.id,
+    },
+  });
+
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        user: viewerUser,
+        admission: memberships[0],
+        memberships,
+        selectedCluster,
+        session: {
+          id: 'session-viewer-1',
+          expiresAt: '2026-04-18T12:00:00Z',
+          createdAt: now,
+          lastAccessedAt: now,
+          selectedClusterId: selectedCluster.id,
+        },
+      }),
+    });
+  });
+
+  await page.goto('/admin');
+  await expect(page.getByText('Access Denied')).toBeVisible();
 });

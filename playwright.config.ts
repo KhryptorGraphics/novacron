@@ -205,8 +205,8 @@ export default defineConfig({
 
   // Web server configuration for local development
   webServer: process.env.CI ? undefined : {
-    command: 'npm run start:api',
-    url: 'http://localhost:3000',
+    command: process.env.PLAYWRIGHT_WEB_SERVER_COMMAND || 'npm run start:api',
+    url: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
     timeout: 120 * 1000,
     reuseExistingServer: !process.env.CI,
     stdout: 'pipe',

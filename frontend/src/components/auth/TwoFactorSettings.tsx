@@ -199,7 +199,7 @@ Keep these codes safe and secure!`;
               <Dialog open={showDisableDialog} onOpenChange={setShowDisableDialog}>
                 <DialogTrigger asChild>
                   <Button variant="destructive">
-                    <Icons.x className="mr-2 h-4 w-4" />
+                    <Icons.cross className="mr-2 h-4 w-4" />
                     Disable 2FA
                   </Button>
                 </DialogTrigger>

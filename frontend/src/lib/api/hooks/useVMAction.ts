@@ -8,7 +8,7 @@ export function useVMAction(id: string, action: "start" | "stop" | "restart" | "
   const qc = useQueryClient();
   return useMutation({
     mutationKey: ["vm-action", id, action, options?.role],
-    mutationFn: () => postVMAction(id, action, { role: options?.role }),
+    mutationFn: () => postVMAction(id, action, options?.role ? { role: options.role } : undefined),
     onMutate: async () => {
       // placeholder for optimistic update
     },
@@ -20,4 +20,3 @@ export function useVMAction(id: string, action: "start" | "stop" | "restart" | "
     },
   });
 }
-

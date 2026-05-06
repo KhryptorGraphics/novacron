@@ -61,12 +61,17 @@ export default function UsersPage() {
     setError(null);
 
     try {
-      const response = await adminApi.users.list({
+      const query: { page: number; page_size: number; search?: string; role?: string } = {
         page: 1,
         page_size: 100,
-        search: search || undefined,
-        role: roleFilter === 'all' ? undefined : roleFilter,
-      });
+      };
+      if (search) {
+        query.search = search;
+      }
+      if (roleFilter !== 'all') {
+        query.role = roleFilter;
+      }
+      const response = await adminApi.users.list(query);
       setUsers(response.users);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load canonical users.');

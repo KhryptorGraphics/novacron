@@ -26,6 +26,7 @@ import {
   Sparkles,
   Plus,
   RefreshCw,
+  Download,
 } from "lucide-react"
 
 export const Icons = {
@@ -56,4 +57,5 @@ export const Icons = {
   sparkles: Sparkles,
   plus: Plus,
   refresh: RefreshCw,
+  download: Download,
 }

@@ -10,12 +10,12 @@ export function useVMs(params?: ListVMsParams) {
     queryFn: () => listVMs(params),
     staleTime: 5_000,
   });
+  const payload = data?.data;
 
   return {
-    items: Array.isArray(data?.data) ? data.data as VM[] : [],
+    items: Array.isArray(payload) ? payload as VM[] : [],
     pagination: data?.pagination || { page: 1, pageSize: 10, total: 0, totalPages: 0 },
     isLoading,
     error,
   };
 }
-

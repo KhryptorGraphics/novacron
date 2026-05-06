@@ -50,12 +50,13 @@ export default function CanonicalVMsPage() {
   const [q, setQ] = useState('');
   const [state, setState] = useState<string>('all');
   const [busyId, setBusyId] = useState<string | null>(null);
-  const { items, isLoading, error } = useVMs({
-    q: q || undefined,
-    state: state === 'all' ? undefined : state,
+  const vmQuery = {
     page: 1,
     pageSize: 50,
-  });
+    ...(q ? { q } : {}),
+    ...(state !== 'all' ? { state } : {}),
+  };
+  const { items, isLoading, error } = useVMs(vmQuery);
 
   const handleAction = async (vmId: string, action: 'start' | 'stop') => {
     try {

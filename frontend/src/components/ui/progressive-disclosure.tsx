@@ -143,9 +143,9 @@ export function Accordion({
           key={item.id}
           title={item.title}
           defaultOpen={openItems.includes(item.id)}
-          badge={item.badge}
           icon={item.icon}
           onToggle={() => toggleItem(item.id)}
+          {...(item.badge !== undefined ? { badge: item.badge } : {})}
         >
           {item.content}
         </CollapsibleSection>

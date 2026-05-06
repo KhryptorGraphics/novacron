@@ -12,8 +12,15 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useVolumes } from '@/hooks/useVolumes';
+import type { VolumeTier } from '@/lib/graphql/volumes';
 
 const TIER_OPTIONS = ['HOT', 'WARM', 'COLD'] as const;
+type StorageFormState = {
+  name: string;
+  size: string;
+  tier: VolumeTier;
+  vmId: string;
+};
 
 function formatGiB(size: number) {
   return `${size.toLocaleString()} GiB`;
@@ -21,7 +28,7 @@ function formatGiB(size: number) {
 
 export default function StorageManagementUI() {
   const { volumes, loading, error, creating, changingTier, createVolume, changeVolumeTier } = useVolumes();
-  const [formState, setFormState] = useState({
+  const [formState, setFormState] = useState<StorageFormState>({
     name: '',
     size: '100',
     tier: 'HOT',
@@ -46,12 +53,15 @@ export default function StorageManagementUI() {
 
   const handleCreateVolume = async () => {
     const parsedSize = Number.parseInt(formState.size, 10);
-    await createVolume({
+    const payload: { name: string; size: number; tier: VolumeTier; vmId?: string } = {
       name: formState.name.trim(),
       size: parsedSize,
       tier: formState.tier,
-      vmId: formState.vmId.trim() || undefined,
-    });
+    };
+    if (formState.vmId.trim()) {
+      payload.vmId = formState.vmId.trim();
+    }
+    await createVolume(payload);
     setFormState({
       name: '',
       size: '100',
@@ -168,7 +178,7 @@ export default function StorageManagementUI() {
             <Label htmlFor="volume-tier">Tier</Label>
             <Select
               value={formState.tier}
-              onValueChange={(value) => setFormState((current) => ({ ...current, tier: value }))}
+              onValueChange={(value) => setFormState((current) => ({ ...current, tier: value as VolumeTier }))}
             >
               <SelectTrigger id="volume-tier">
                 <SelectValue />
@@ -249,7 +259,7 @@ export default function StorageManagementUI() {
                             value={volume.tier}
                             onValueChange={(tier) => {
                               if (tier !== volume.tier) {
-                                void changeVolumeTier(volume.id, tier);
+                                void changeVolumeTier(volume.id, tier as VolumeTier);
                               }
                             }}
                             disabled={changingTier === volume.id}

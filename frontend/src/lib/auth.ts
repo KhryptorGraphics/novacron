@@ -468,6 +468,9 @@ class AuthService {
 
     const tokenUser = this.buildUserFromClaims(payload);
     const cachedUser = this.getStoredJson<UserResponse>(AUTH_USER_KEY);
+    const tenantId = tokenUser.tenantId || cachedUser?.tenantId;
+    const role = tokenUser.role || cachedUser?.role;
+    const roles = tokenUser.roles || cachedUser?.roles;
     const user: UserResponse = {
       ...cachedUser,
       ...tokenUser,
@@ -475,9 +478,9 @@ class AuthService {
       firstName: tokenUser.firstName || cachedUser?.firstName || '',
       lastName: tokenUser.lastName || cachedUser?.lastName || '',
       status: tokenUser.status || cachedUser?.status || 'active',
-      ...((tokenUser.tenantId || cachedUser?.tenantId) ? { tenantId: tokenUser.tenantId || cachedUser?.tenantId } : {}),
-      ...((tokenUser.role || cachedUser?.role) ? { role: tokenUser.role || cachedUser?.role } : {}),
-      ...((tokenUser.roles || cachedUser?.roles) ? { roles: tokenUser.roles || cachedUser?.roles } : {}),
+      ...(tenantId ? { tenantId } : {}),
+      ...(role ? { role } : {}),
+      ...(roles ? { roles } : {}),
     };
 
     this.persistUser(user, token);

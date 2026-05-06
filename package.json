@@ -30,7 +30,7 @@
 		"test:e2e:codegen": "playwright codegen",
 		"test:e2e:install": "playwright install --with-deps",
 		"test:e2e:ci": "playwright test --project=chromium --project=firefox",
-		"test:e2e:canonical": "playwright test tests/e2e/canonical-release-smoke.spec.ts --project=chromium",
+		"test:e2e:canonical": "PLAYWRIGHT_BASE_URL=http://localhost:8092 PLAYWRIGHT_WEB_SERVER_COMMAND='npm run start:frontend' playwright test tests/e2e/canonical-release-smoke.spec.ts --project=chromium",
 		"start": "npm run dev",
 		"start:api": "go run ./backend/cmd/api-server/main.go",
 		"start:frontend": "npm run dev --prefix frontend",

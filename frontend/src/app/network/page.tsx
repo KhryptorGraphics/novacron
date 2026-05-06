@@ -102,12 +102,15 @@ export default function NetworkPage() {
   const createNetwork = async () => {
     setSaving(true);
     try {
-      const createdNetwork = await networkApi.createNetwork({
+      const networkPayload: { name: string; type: string; subnet: string; gateway?: string } = {
         name: networkForm.name,
         type: networkForm.type,
         subnet: networkForm.subnet,
-        gateway: networkForm.gateway || undefined,
-      });
+      };
+      if (networkForm.gateway.trim()) {
+        networkPayload.gateway = networkForm.gateway.trim();
+      }
+      const createdNetwork = await networkApi.createNetwork(networkPayload);
       setNetworks((current) => [createdNetwork, ...current]);
       setNetworkForm(emptyNetworkForm);
       setNetworkDialogOpen(false);
@@ -150,12 +153,17 @@ export default function NetworkPage() {
   const attachInterface = async () => {
     setSaving(true);
     try {
-      const attachedInterface = await networkApi.attachVmInterface(interfaceForm.vmId, {
-        network_id: interfaceForm.networkId || undefined,
+      const interfacePayload: { network_id?: string; name: string; mac_address: string; ip_address?: string } = {
         name: interfaceForm.name,
         mac_address: interfaceForm.macAddress,
-        ip_address: interfaceForm.ipAddress || undefined,
-      });
+      };
+      if (interfaceForm.networkId) {
+        interfacePayload.network_id = interfaceForm.networkId;
+      }
+      if (interfaceForm.ipAddress.trim()) {
+        interfacePayload.ip_address = interfaceForm.ipAddress.trim();
+      }
+      const attachedInterface = await networkApi.attachVmInterface(interfaceForm.vmId, interfacePayload);
 
       setInterfacesByVm((current) => ({
         ...current,

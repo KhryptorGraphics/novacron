@@ -171,13 +171,16 @@ class ApiClient {
    * POST request
    */
   async post<T>(endpoint: string, data?: any, options?: RequestInit): Promise<T> {
+    const requestOptions: RequestInit = {
+      ...options,
+      method: 'POST',
+    };
+    if (data !== undefined) {
+      requestOptions.body = JSON.stringify(data);
+    }
     return this.request<T>(
       endpoint,
-      {
-        ...options,
-        method: 'POST',
-        body: data ? JSON.stringify(data) : undefined,
-      },
+      requestOptions,
       1
     );
   }
@@ -186,13 +189,16 @@ class ApiClient {
    * PUT request
    */
   async put<T>(endpoint: string, data?: any, options?: RequestInit): Promise<T> {
+    const requestOptions: RequestInit = {
+      ...options,
+      method: 'PUT',
+    };
+    if (data !== undefined) {
+      requestOptions.body = JSON.stringify(data);
+    }
     return this.request<T>(
       endpoint,
-      {
-        ...options,
-        method: 'PUT',
-        body: data ? JSON.stringify(data) : undefined,
-      },
+      requestOptions,
       1
     );
   }
@@ -208,13 +214,16 @@ class ApiClient {
    * PATCH request
    */
   async patch<T>(endpoint: string, data?: any, options?: RequestInit): Promise<T> {
+    const requestOptions: RequestInit = {
+      ...options,
+      method: 'PATCH',
+    };
+    if (data !== undefined) {
+      requestOptions.body = JSON.stringify(data);
+    }
     return this.request<T>(
       endpoint,
-      {
-        ...options,
-        method: 'PATCH',
-        body: data ? JSON.stringify(data) : undefined,
-      },
+      requestOptions,
       1
     );
   }

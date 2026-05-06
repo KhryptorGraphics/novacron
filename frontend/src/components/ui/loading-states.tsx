@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { RefreshCw, Loader2 } from "lucide-react";
 
 // Dashboard skeleton loader
@@ -20,25 +21,47 @@ export function DashboardSkeleton() {
 // Refresh indicator
 export function RefreshIndicator({ 
   isRefreshing = false,
-  size = 16 
+  size = 16,
+  onRefresh,
+  lastUpdated,
 }: { 
   isRefreshing?: boolean;
   size?: number;
+  onRefresh?: () => void | Promise<void>;
+  lastUpdated?: Date;
 }) {
   return (
-    <RefreshCw 
-      className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} 
-    />
+    <button
+      type="button"
+      onClick={() => void onRefresh?.()}
+      className="inline-flex items-center justify-center rounded-md p-2 text-muted-foreground hover:bg-muted"
+      title={lastUpdated ? `Last updated ${lastUpdated.toLocaleString()}` : 'Refresh'}
+      disabled={isRefreshing}
+    >
+      <RefreshCw
+        className={`${isRefreshing ? 'animate-spin' : ''}`}
+        style={{ width: size, height: size }}
+      />
+    </button>
   );
 }
 
 // Loading states component
 export function LoadingStates({
   state = "loading",
-  size = "default"
+  size = "default",
+  loadingComponent,
+  children,
 }: {
-  state?: "loading" | "success" | "error" | "idle";
+  state?: "loading" | "success" | "error" | "idle" | {
+    isLoading?: boolean;
+    isError?: boolean;
+    isSuccess?: boolean;
+    message?: string;
+  };
   size?: "small" | "default" | "large";
+  loadingComponent?: ReactNode;
+  children?: ReactNode;
 }) {
   const getSizeClass = () => {
     switch (size) {
@@ -50,14 +73,24 @@ export function LoadingStates({
 
   const sizeClass = getSizeClass();
 
-  switch (state) {
+  const normalizedState = typeof state === "string"
+    ? state
+    : state.isLoading
+      ? "loading"
+      : state.isError
+        ? "error"
+        : state.isSuccess
+          ? "success"
+          : "idle";
+
+  switch (normalizedState) {
     case "loading":
-      return <Loader2 className={`${sizeClass} animate-spin`} />;
+      return loadingComponent ? <>{loadingComponent}</> : <Loader2 className={`${sizeClass} animate-spin`} />;
     case "success":
-      return <div className={`${sizeClass} text-green-500 flex items-center justify-center`}>✓</div>;
+      return children ? <>{children}</> : <div className={`${sizeClass} text-green-500 flex items-center justify-center`}>✓</div>;
     case "error":
       return <div className={`${sizeClass} text-red-500 flex items-center justify-center`}>✗</div>;
     default:
-      return null;
+      return children ? <>{children}</> : null;
   }
 }

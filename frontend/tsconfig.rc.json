@@ -1,0 +1,51 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "declarationMap": false,
+    "incremental": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "sourceMap": false,
+    "tsBuildInfoFile": null
+  },
+  "include": [
+    "next-env.d.ts",
+    "src/app/dashboard/page.tsx",
+    "src/app/vms/page.tsx",
+    "src/app/core/vms/**/*.tsx",
+    "src/app/network/page.tsx",
+    "src/app/storage/page.tsx",
+    "src/app/security/page.tsx",
+    "src/app/settings/page.tsx",
+    "src/app/users/page.tsx",
+    "src/app/admin/layout.tsx",
+    "src/app/admin/page.tsx",
+    "src/components/network/NetworkConfigurationPanel.tsx",
+    "src/components/flows/MigrationWorkflow.tsx",
+    "src/components/flows/BackupRecoveryFlow.tsx",
+    "src/components/vm/CanonicalVMsPage.tsx",
+    "src/components/storage/StorageManagementUI.tsx",
+    "src/components/security/SecurityComplianceDashboard.tsx",
+    "src/lib/api/**/*.ts",
+    "src/lib/auth*.ts",
+    "src/lib/security-api.ts",
+    "src/hooks/useAuth.tsx",
+    "src/hooks/usePermissions.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next",
+    "out",
+    "dist",
+    "coverage",
+    "cypress",
+    "src/__tests__",
+    "src/tests",
+    "tests",
+    "src/components/mobile",
+    "src/components/flows/MobileAppControls.tsx",
+    "src/components/flows/PerformanceOptimizationFlow.tsx",
+    "src/components/flows/UserSelfServicePortal.tsx"
+  ]
+}
