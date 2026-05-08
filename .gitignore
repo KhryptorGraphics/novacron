@@ -33,6 +33,9 @@ logs/
 
 # Crush agent ephemeral state
 .crush/
+.memdb/
+.codemap/status
+.beads/dolt-monitor.pid.lock
 frontend/.next/cache/webpack/client-production/0.pack
 frontend/.next/cache/webpack/server-production/0.pack
 acli.exe
