@@ -108,9 +108,69 @@ spec:
               value: "8093"
             - name: METRICS_PORT
               value: "9090"
+            - name: NOVACRON_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NOVACRON_DATA_DIR
+              value: "/var/lib/novacron"
+            - name: NOVACRON_LOG_LEVEL
+              value: "info"
+            - name: NOVACRON_LISTEN_ADDRESS
+              value: "0.0.0.0:8091"
+            - name: NOVACRON_RUNTIME_MANIFEST_VERSION
+              valueFrom:
+                configMapKeyRef:
+                  name: novacron-runtime-profile
+                  key: runtime_manifest_version
+            - name: NOVACRON_DEPLOYMENT_PROFILE
+              valueFrom:
+                configMapKeyRef:
+                  name: novacron-runtime-profile
+                  key: deployment_profile
+            - name: NOVACRON_DISCOVERY_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: novacron-runtime-profile
+                  key: discovery_mode
+            - name: NOVACRON_FEDERATION_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: novacron-runtime-profile
+                  key: federation_mode
+            - name: NOVACRON_MIGRATION_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: novacron-runtime-profile
+                  key: migration_mode
+            - name: NOVACRON_AUTH_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: novacron-runtime-profile
+                  key: auth_mode
+            - name: NOVACRON_STORAGE_CLASSES
+              valueFrom:
+                configMapKeyRef:
+                  name: novacron-runtime-profile
+                  key: storage_classes
+            - name: NOVACRON_ENABLED_SERVICES
+              valueFrom:
+                configMapKeyRef:
+                  name: novacron-runtime-profile
+                  key: enabled_services
+            - name: NOVACRON_DISCOVERY_SEEDS
+              valueFrom:
+                configMapKeyRef:
+                  name: novacron-runtime-profile
+                  key: discovery_seeds
             
             # Database Configuration
             - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: novacron-db-secrets
+                  key: database-url
+            - name: NOVACRON_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: novacron-db-secrets
@@ -130,6 +190,11 @@ spec:
             
             # Redis Configuration
             - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: novacron-redis-secrets
+                  key: redis-url
+            - name: NOVACRON_REDIS_URL
               valueFrom:
                 secretKeyRef:
                   name: novacron-redis-secrets

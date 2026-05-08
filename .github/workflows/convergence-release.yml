@@ -1,0 +1,77 @@
+name: Convergence Release Gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - feat/convergence-sprint0-foundation
+    paths:
+      - "backend/core/**"
+      - "deployment/**"
+      - "docs/deployment/CONVERGENCE_PHASE5_RELEASE_RUNBOOK.md"
+      - "frontend/**"
+      - "package.json"
+      - ".github/workflows/convergence-release.yml"
+  pull_request:
+    paths:
+      - "backend/core/**"
+      - "deployment/**"
+      - "docs/deployment/CONVERGENCE_PHASE5_RELEASE_RUNBOOK.md"
+      - "frontend/**"
+      - "package.json"
+      - ".github/workflows/convergence-release.yml"
+
+jobs:
+  deployment-profile-validation:
+    name: Deployment Profile Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.6"
+          cache-dependency-path: |
+            go.sum
+            backend/core/go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Validate canonical deployment profiles
+        run: npm run deploy:validate
+
+  frontend-release-gate:
+    name: Frontend Release Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefix frontend
+
+      - name: Canonical frontend CI
+        run: npm run ci:canonical --prefix frontend

@@ -7,6 +7,17 @@ metadata:
     app.kubernetes.io/name: novacron
     app.kubernetes.io/component: config
 data:
+  # Canonical runtime manifest profile consumed by backend/core/cmd/novacron.
+  runtime_manifest_version: "v1alpha1"
+  deployment_profile: "multi-node"
+  discovery_mode: "seeded"
+  federation_mode: "enabled"
+  migration_mode: "cold"
+  auth_mode: "runtime"
+  storage_classes: "default,replicated"
+  enabled_services: "storage,vm,scheduler,network,auth,api,health,federation,migration,backup"
+  discovery_seeds: "https://novacron-api.novacron.svc.cluster.local:8091/api/v1/federation/inventory"
+
   # Application Configuration
   app.yaml: |
     server:

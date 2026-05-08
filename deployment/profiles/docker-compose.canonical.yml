@@ -1,0 +1,136 @@
+# Canonical NovaCron deployment profiles.
+# Use with:
+#   docker compose --env-file deployment/profiles/local.env.example \
+#     -f deployment/profiles/docker-compose.canonical.yml --profile local up
+#
+# Profiles:
+#   local       Frontend + canonical runtime + local Postgres/Redis.
+#   single-node Canonical runtime only, for host-managed database/cache.
+#   multi-node  Two canonical runtime nodes with seeded discovery.
+
+x-runtime-env: &runtime-env
+  NOVACRON_RUNTIME_MANIFEST_VERSION: v1alpha1
+  NOVACRON_DATA_DIR: /var/lib/novacron
+  NOVACRON_LOG_LEVEL: ${NOVACRON_LOG_LEVEL:-info}
+  NOVACRON_LISTEN_ADDRESS: 0.0.0.0:8091
+  NOVACRON_AUTH_MODE: ${NOVACRON_AUTH_MODE:-runtime}
+  NOVACRON_MIGRATION_MODE: ${NOVACRON_MIGRATION_MODE:-cold}
+  NOVACRON_STORAGE_CLASSES: ${NOVACRON_STORAGE_CLASSES:-default,replicated}
+  NOVACRON_ENABLED_SERVICES: ${NOVACRON_ENABLED_SERVICES:-storage,vm,scheduler,network,auth,api,health,migration,backup}
+  NOVACRON_DATABASE_URL: ${NOVACRON_DATABASE_URL:-postgres://novacron:novacron@postgres:5432/novacron?sslmode=disable}
+  NOVACRON_REDIS_URL: ${NOVACRON_REDIS_URL:-redis://redis:6379/0}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["local"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-novacron}
+      POSTGRES_USER: ${POSTGRES_USER:-novacron}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-novacron}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-novacron} -d ${POSTGRES_DB:-novacron}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - canonical-postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["local"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - canonical-redis:/data
+
+  novacron:
+    image: novacron/api-server:${VERSION:-latest}
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.api
+    profiles: ["local", "single-node"]
+    environment:
+      <<: *runtime-env
+      NOVACRON_NODE_ID: ${NOVACRON_NODE_ID:-novacron-single}
+      NOVACRON_DEPLOYMENT_PROFILE: ${NOVACRON_DEPLOYMENT_PROFILE:-single-node}
+      NOVACRON_DISCOVERY_MODE: ${NOVACRON_DISCOVERY_MODE:-disabled}
+      NOVACRON_FEDERATION_MODE: ${NOVACRON_FEDERATION_MODE:-disabled}
+      NOVACRON_DISCOVERY_SEEDS: ${NOVACRON_DISCOVERY_SEEDS:-}
+    ports:
+      - "${NOVACRON_API_PORT:-8091}:8091"
+      - "${NOVACRON_WS_PORT:-8093}:8093"
+      - "127.0.0.1:${NOVACRON_METRICS_PORT:-9090}:9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+        required: false
+    volumes:
+      - canonical-data:/var/lib/novacron
+
+  novacron-node-a:
+    image: novacron/api-server:${VERSION:-latest}
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.api
+    profiles: ["multi-node"]
+    environment:
+      <<: *runtime-env
+      NOVACRON_NODE_ID: novacron-node-a
+      NOVACRON_DEPLOYMENT_PROFILE: multi-node
+      NOVACRON_DISCOVERY_MODE: seeded
+      NOVACRON_FEDERATION_MODE: enabled
+      NOVACRON_DISCOVERY_SEEDS: http://novacron-node-a:8091/api/v1/federation/inventory
+    ports:
+      - "8091:8091"
+      - "9090:9090"
+    volumes:
+      - canonical-node-a:/var/lib/novacron
+
+  novacron-node-b:
+    image: novacron/api-server:${VERSION:-latest}
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.api
+    profiles: ["multi-node"]
+    environment:
+      <<: *runtime-env
+      NOVACRON_NODE_ID: novacron-node-b
+      NOVACRON_DEPLOYMENT_PROFILE: multi-node
+      NOVACRON_DISCOVERY_MODE: seeded
+      NOVACRON_FEDERATION_MODE: enabled
+      NOVACRON_DISCOVERY_SEEDS: http://novacron-node-a:8091/api/v1/federation/inventory
+    ports:
+      - "8092:8091"
+      - "9091:9090"
+    depends_on:
+      - novacron-node-a
+    volumes:
+      - canonical-node-b:/var/lib/novacron
+
+  frontend:
+    image: novacron/frontend:${VERSION:-latest}
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8091}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8093}
+    profiles: ["local"]
+    ports:
+      - "${NOVACRON_FRONTEND_PORT:-8080}:80"
+    depends_on:
+      - novacron
+
+volumes:
+  canonical-postgres:
+  canonical-redis:
+  canonical-data:
+  canonical-node-a:
+  canonical-node-b:
