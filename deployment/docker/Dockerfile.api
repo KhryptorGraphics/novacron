@@ -15,7 +15,9 @@ RUN apk add --no-cache \
     ca-certificates \
     tzdata \
     gcc \
-    musl-dev
+    linux-headers \
+    musl-dev \
+    rdma-core-dev
 
 # Set working directory
 WORKDIR /build
@@ -24,6 +26,12 @@ WORKDIR /build
 COPY go.mod go.sum ./
 COPY backend/core/go.mod backend/core/go.sum ./backend/core/
 COPY backend/core/orchestration/go.mod backend/core/orchestration/go.sum ./backend/core/orchestration/
+COPY backend/core/backup/go.mod backend/core/backup/go.sum ./backend/core/backup/
+COPY backend/core/dr/go.mod backend/core/dr/go.sum ./backend/core/dr/
+COPY backend/core/initialization/go.mod backend/core/initialization/go.sum ./backend/core/initialization/
+COPY backend/core/neuromorphic/go.mod ./backend/core/neuromorphic/
+COPY backend/pkg/logger/go.mod ./backend/pkg/logger/
+COPY sdk/go/go.mod ./sdk/go/
 
 # Download dependencies
 RUN go mod download
@@ -33,6 +41,7 @@ COPY . .
 
 # Build the canonical runtime. Legacy API-server entrypoints remain gated wrappers;
 # production images run backend/core/cmd/novacron as the single composition root.
+WORKDIR /build/backend/core
 RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s \
     -X 'main.Version=${VERSION}' \
@@ -40,9 +49,10 @@ RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
     -X 'main.BuildDate=${BUILD_DATE}'" \
     -a -installsuffix cgo \
     -o /build/novacron-api \
-    ./backend/core/cmd/novacron
+    ./cmd/novacron
 
 # Build migration tool
+WORKDIR /build
 RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s" \
     -a -installsuffix cgo \
@@ -93,4 +103,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 EXPOSE 8091 8093 9090
 
 # Default command
-CMD ["./novacron-api"]
+CMD ["./novacron-api", "-listen", "0.0.0.0:8091"]

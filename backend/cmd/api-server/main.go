@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -1627,11 +1628,26 @@ func normalizeCanonicalAdminRole(raw string) string {
 }
 
 func registerOrchestrationDashboardRoutes(router *mux.Router) {
+	var policiesMu sync.RWMutex
+	policies := make(map[string]map[string]interface{})
+
+	policySnapshot := func(policy map[string]interface{}) map[string]interface{} {
+		snapshot := make(map[string]interface{}, len(policy))
+		for key, value := range policy {
+			snapshot[key] = value
+		}
+		return snapshot
+	}
+
 	router.HandleFunc("/orchestration/status", func(w http.ResponseWriter, r *http.Request) {
+		policiesMu.RLock()
+		activePolicies := len(policies)
+		policiesMu.RUnlock()
+
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"state":           "running",
 			"startTime":       time.Now().UTC().Format(time.RFC3339),
-			"activePolicies":  0,
+			"activePolicies":  activePolicies,
 			"eventsProcessed": 0,
 			"metrics": map[string]interface{}{
 				"source": "api-server",
@@ -1644,9 +1660,16 @@ func registerOrchestrationDashboardRoutes(router *mux.Router) {
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/orchestration/policies", func(w http.ResponseWriter, r *http.Request) {
+		policiesMu.RLock()
+		storedPolicies := make([]map[string]interface{}, 0, len(policies))
+		for _, policy := range policies {
+			storedPolicies = append(storedPolicies, policySnapshot(policy))
+		}
+		policiesMu.RUnlock()
+
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"policies": []map[string]interface{}{},
-			"count":    0,
+			"policies": storedPolicies,
+			"count":    len(storedPolicies),
 		})
 	}).Methods(http.MethodGet)
 
@@ -1664,23 +1687,60 @@ func registerOrchestrationDashboardRoutes(router *mux.Router) {
 			policy["createdAt"] = now
 		}
 		policy["updatedAt"] = now
-		writeJSON(w, http.StatusCreated, policy)
+
+		policiesMu.Lock()
+		policies[policy["id"].(string)] = policySnapshot(policy)
+		created := policySnapshot(policies[policy["id"].(string)])
+		policiesMu.Unlock()
+
+		writeJSON(w, http.StatusCreated, created)
 	}).Methods(http.MethodPost)
 
 	router.HandleFunc("/orchestration/policies/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := mux.Vars(r)["id"]
+
+		policiesMu.RLock()
+		existing, ok := policies[id]
+		policiesMu.RUnlock()
+		if !ok {
+			writeJSONError(w, http.StatusNotFound, "policy not found")
+			return
+		}
+
 		var policy map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&policy); err != nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		policy["id"] = mux.Vars(r)["id"]
+
+		if _, ok := policy["createdAt"].(string); !ok {
+			policy["createdAt"] = existing["createdAt"]
+		}
+		policy["id"] = id
 		policy["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
-		writeJSON(w, http.StatusOK, policy)
+
+		policiesMu.Lock()
+		policies[id] = policySnapshot(policy)
+		updated := policySnapshot(policies[id])
+		policiesMu.Unlock()
+
+		writeJSON(w, http.StatusOK, updated)
 	}).Methods(http.MethodPut, http.MethodPatch)
 
 	router.HandleFunc("/orchestration/policies/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := mux.Vars(r)["id"]
+
+		policiesMu.Lock()
+		if _, ok := policies[id]; !ok {
+			policiesMu.Unlock()
+			writeJSONError(w, http.StatusNotFound, "policy not found")
+			return
+		}
+		delete(policies, id)
+		policiesMu.Unlock()
+
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"id":      mux.Vars(r)["id"],
+			"id":      id,
 			"deleted": true,
 		})
 	}).Methods(http.MethodDelete)

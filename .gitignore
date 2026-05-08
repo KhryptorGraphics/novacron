@@ -23,6 +23,8 @@ __pycache__/
 # Build files
 dist/
 build/
+bin/
+frontend/.next/
 
 # Logs
 logs/
@@ -36,8 +38,6 @@ logs/
 .memdb/
 .codemap/status
 .beads/dolt-monitor.pid.lock
-frontend/.next/cache/webpack/client-production/0.pack
-frontend/.next/cache/webpack/server-production/0.pack
 acli.exe
 frontend/node_modules/@next/swc-linux-x64-gnu/next-swc.linux-x64-gnu.node
 frontend/node_modules/@next/swc-linux-x64-musl/next-swc.linux-x64-musl.node

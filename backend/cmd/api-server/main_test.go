@@ -181,15 +181,84 @@ func TestOrchestrationPolicyAndModelActions(t *testing.T) {
 	if created["id"] == "" || created["updatedAt"] == "" {
 		t.Fatalf("expected generated id and updatedAt, got %#v", created)
 	}
+	createdID, ok := created["id"].(string)
+	if !ok || createdID == "" {
+		t.Fatalf("expected string id, got %#v", created["id"])
+	}
 
-	updateRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPut, "/api/orchestration/policies/policy-1", policy)
+	listRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodGet, "/api/orchestration/policies", nil)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected list status 200, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+	var listed map[string]interface{}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("failed to decode listed policies: %v", err)
+	}
+	if listed["count"] != float64(1) {
+		t.Fatalf("expected one stored policy, got %#v", listed)
+	}
+
+	updatePolicy := map[string]interface{}{
+		"name":        "Updated Policy",
+		"description": "updated contract test",
+		"enabled":     false,
+		"priority":    7,
+		"rules":       []interface{}{},
+	}
+	updateRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPatch, "/api/orchestration/policies/"+createdID, updatePolicy)
 	if updateRec.Code != http.StatusOK {
 		t.Fatalf("expected update status 200, got %d: %s", updateRec.Code, updateRec.Body.String())
 	}
+	var updated map[string]interface{}
+	if err := json.Unmarshal(updateRec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("failed to decode updated policy: %v", err)
+	}
+	if updated["id"] != createdID || updated["name"] != "Updated Policy" {
+		t.Fatalf("expected persisted update for %q, got %#v", createdID, updated)
+	}
 
-	deleteRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodDelete, "/api/orchestration/policies/policy-1", nil)
+	listUpdatedRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodGet, "/api/orchestration/policies", nil)
+	if listUpdatedRec.Code != http.StatusOK {
+		t.Fatalf("expected updated list status 200, got %d: %s", listUpdatedRec.Code, listUpdatedRec.Body.String())
+	}
+	var listedUpdated map[string]interface{}
+	if err := json.Unmarshal(listUpdatedRec.Body.Bytes(), &listedUpdated); err != nil {
+		t.Fatalf("failed to decode updated policies: %v", err)
+	}
+	policies, ok := listedUpdated["policies"].([]interface{})
+	if !ok || len(policies) != 1 {
+		t.Fatalf("expected one policy after update, got %#v", listedUpdated)
+	}
+	stored, ok := policies[0].(map[string]interface{})
+	if !ok || stored["id"] != createdID || stored["name"] != "Updated Policy" {
+		t.Fatalf("expected updated policy in list, got %#v", listedUpdated)
+	}
+
+	missingUpdateRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPut, "/api/orchestration/policies/missing", updatePolicy)
+	if missingUpdateRec.Code != http.StatusNotFound {
+		t.Fatalf("expected missing update status 404, got %d: %s", missingUpdateRec.Code, missingUpdateRec.Body.String())
+	}
+
+	deleteRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodDelete, "/api/orchestration/policies/"+createdID, nil)
 	if deleteRec.Code != http.StatusOK {
 		t.Fatalf("expected delete status 200, got %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	listDeletedRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodGet, "/api/orchestration/policies", nil)
+	if listDeletedRec.Code != http.StatusOK {
+		t.Fatalf("expected deleted list status 200, got %d: %s", listDeletedRec.Code, listDeletedRec.Body.String())
+	}
+	var listedDeleted map[string]interface{}
+	if err := json.Unmarshal(listDeletedRec.Body.Bytes(), &listedDeleted); err != nil {
+		t.Fatalf("failed to decode deleted policies: %v", err)
+	}
+	if listedDeleted["count"] != float64(0) {
+		t.Fatalf("expected no policies after delete, got %#v", listedDeleted)
+	}
+
+	missingDeleteRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodDelete, "/api/orchestration/policies/"+createdID, nil)
+	if missingDeleteRec.Code != http.StatusNotFound {
+		t.Fatalf("expected missing delete status 404, got %d: %s", missingDeleteRec.Code, missingDeleteRec.Body.String())
 	}
 
 	retrainRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPost, "/api/orchestration/ml-models/bandwidth/retrain", nil)
