@@ -4,10 +4,12 @@ Utilities for integrating the Qdrant-based code memory with Claude's MCP.
 """
 
 import os
-import requests
 import json
 import hashlib
-import numpy as np
+import math
+import sys
+import urllib.error
+import urllib.request
 from typing import List, Dict, Any, Optional, Union
 
 # Qdrant connection settings
@@ -15,6 +17,35 @@ QDRANT_HOST = "localhost"
 QDRANT_PORT = 6333  # Standard Qdrant port
 COLLECTION_NAME = "novacron_files"
 VECTOR_DIM = 1536  # OpenAI ada-002 dimension
+
+def log_error(message: str) -> None:
+    print(message, file=sys.stderr)
+
+class HttpResponse:
+    """Small response wrapper matching the subset of requests.Response used here."""
+
+    def __init__(self, status_code: int, text: str):
+        self.status_code = status_code
+        self.text = text
+
+    def json(self) -> Dict[str, Any]:
+        return json.loads(self.text) if self.text else {}
+
+def http_request(method: str, url: str, payload: Optional[Dict[str, Any]] = None,
+                 headers: Optional[Dict[str, str]] = None) -> HttpResponse:
+    """Issue JSON HTTP requests without external dependencies."""
+    body = None
+    request_headers = dict(headers or {})
+    if payload is not None:
+        body = json.dumps(payload).encode("utf-8")
+        request_headers.setdefault("Content-Type", "application/json")
+
+    request = urllib.request.Request(url, data=body, headers=request_headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return HttpResponse(response.status, response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return HttpResponse(exc.code, exc.read().decode("utf-8", errors="replace"))
 
 class QdrantMemory:
     """Class to interact with Qdrant for code memory."""
@@ -32,61 +63,62 @@ class QdrantMemory:
         """Check if Qdrant is accessible and collection exists."""
         try:
             # Check server connection
-            response = requests.get(f"{self.base_url}/")
+            response = http_request("GET", f"{self.base_url}/")
             if response.status_code != 200:
-                print(f"Error connecting to Qdrant server: {response.status_code}")
+                log_error(f"Error connecting to Qdrant server: {response.status_code}")
                 return False
 
             # Check collection exists
-            response = requests.get(f"{self.base_url}/collections/{self.collection}")
+            response = http_request("GET", f"{self.base_url}/collections/{self.collection}")
             if response.status_code != 200:
-                print(f"Error: Collection '{self.collection}' does not exist.")
-                print("Run 'python setup_code_memory.py' to create collection and index files.")
+                log_error(f"Error: Collection '{self.collection}' does not exist.")
+                log_error("Run 'python setup_code_memory.py' to create collection and index files.")
                 return False
 
             return True
         except Exception as e:
-            print(f"Error checking Qdrant connection: {e}")
+            log_error(f"Error checking Qdrant connection: {e}")
             return False
     
     def get_collections(self) -> List[str]:
         """Get list of available collections."""
         try:
-            response = requests.get(f"{self.base_url}/collections")
+            response = http_request("GET", f"{self.base_url}/collections")
             if response.status_code != 200:
-                print(f"Error getting collections: {response.status_code}")
+                log_error(f"Error getting collections: {response.status_code}")
                 return []
             
             collections_data = response.json()
             return [c["name"] for c in collections_data.get("result", {}).get("collections", [])]
         except Exception as e:
-            print(f"Error getting collections: {e}")
+            log_error(f"Error getting collections: {e}")
             return []
     
     def get_collection_info(self) -> Dict[str, Any]:
         """Get information about the current collection."""
         try:
-            response = requests.get(f"{self.base_url}/collections/{self.collection}")
+            response = http_request("GET", f"{self.base_url}/collections/{self.collection}")
             if response.status_code != 200:
-                print(f"Error getting collection info: {response.status_code}")
+                log_error(f"Error getting collection info: {response.status_code}")
                 return {}
             
             return response.json().get("result", {})
         except Exception as e:
-            print(f"Error getting collection info: {e}")
+            log_error(f"Error getting collection info: {e}")
             return {}
             
     def get_indexed_file_types(self) -> List[str]:
         """Get list of file types/extensions that have been indexed."""
         try:
             # Get sample points to determine file types
-            response = requests.post(
+            response = http_request(
+                "POST",
                 f"{self.base_url}/collections/{self.collection}/points/scroll",
-                json={"limit": 100, "with_payload": True}
+                {"limit": 100, "with_payload": True}
             )
             
             if response.status_code != 200:
-                print(f"Error getting points: {response.status_code}")
+                log_error(f"Error getting points: {response.status_code}")
                 return []
             
             points = response.json().get("result", {}).get("points", [])
@@ -103,7 +135,7 @@ class QdrantMemory:
             
             return list(extensions)
         except Exception as e:
-            print(f"Error getting file types: {e}")
+            log_error(f"Error getting file types: {e}")
             return []
 
     def get_embedding(self, text: str) -> List[float]:
@@ -124,7 +156,7 @@ class QdrantMemory:
                 mock_embedding.append(float(bit_value))
 
             # Normalize the vector
-            norm = np.linalg.norm(mock_embedding)
+            norm = math.sqrt(sum(x * x for x in mock_embedding)) or 1.0
             return [x / norm for x in mock_embedding]
 
         # Use OpenAI API to get the embedding
@@ -138,14 +170,15 @@ class QdrantMemory:
             "model": "text-embedding-ada-002"
         }
 
-        response = requests.post(
+        response = http_request(
+            "POST",
             "https://api.openai.com/v1/embeddings",
-            headers=headers,
-            json=payload
+            payload,
+            headers=headers
         )
 
         if response.status_code != 200:
-            print(f"Error from OpenAI API: {response.text}")
+            log_error(f"Error from OpenAI API: {response.text}")
             return self.get_embedding("Error getting embedding")  # Fallback to mock
 
         data = response.json()
@@ -184,19 +217,20 @@ class QdrantMemory:
             }
             
             # Send upsert request to Qdrant
-            response = requests.put(
+            response = http_request(
+                "PUT",
                 f"{self.base_url}/collections/{self.collection}/points",
-                json={"points": [point]}
+                {"points": [point]}
             )
             
             if response.status_code != 200:
-                print(f"Error storing in Qdrant: {response.text}")
+                log_error(f"Error storing in Qdrant: {response.text}")
                 return {"success": False, "error": response.text}
                 
             return {"success": True, "id": point_id}
             
         except Exception as e:
-            print(f"Error storing in Qdrant: {str(e)}")
+            log_error(f"Error storing in Qdrant: {str(e)}")
             return {"success": False, "error": str(e)}
 
     def search(self, query: str, limit: int = 10, path_filter: Optional[str] = None,
@@ -242,18 +276,19 @@ class QdrantMemory:
 
         # Send search request
         try:
-            response = requests.post(
+            response = http_request(
+                "POST",
                 f"{self.base_url}/collections/{self.collection}/points/search",
-                json=payload
+                payload
             )
 
             if response.status_code != 200:
-                print(f"Error searching Qdrant: {response.text}")
+                log_error(f"Error searching Qdrant: {response.text}")
                 return []
 
             return response.json()["result"]
         except Exception as e:
-            print(f"Error during search: {e}")
+            log_error(f"Error during search: {e}")
             return []
 
     def create_excerpt(self, content: str, query: str, max_length: int = 150) -> str:
@@ -368,7 +403,7 @@ if __name__ == "__main__":
     # Simple CLI test
     import sys
     if len(sys.argv) < 2:
-        print("Usage: python qdrant_mcp_utils.py 'your search query'")
+        log_error("Usage: python qdrant_mcp_utils.py 'your search query'")
         sys.exit(1)
 
     query = sys.argv[1]
