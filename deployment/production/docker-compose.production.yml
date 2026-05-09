@@ -58,7 +58,6 @@ services:
       NOVACRON_NODE_ID: api-1
       NOVACRON_DATA_DIR: /var/lib/novacron
       NOVACRON_LOG_LEVEL: info
-      NOVACRON_LISTEN_ADDRESS: 0.0.0.0:8091
       NOVACRON_DATABASE_URL: ${NOVACRON_DATABASE_URL}
       NOVACRON_REDIS_URL: ${NOVACRON_REDIS_URL}
       DB_HOST: postgres-primary
@@ -113,7 +112,6 @@ services:
       NOVACRON_NODE_ID: api-2
       NOVACRON_DATA_DIR: /var/lib/novacron
       NOVACRON_LOG_LEVEL: info
-      NOVACRON_LISTEN_ADDRESS: 0.0.0.0:8091
       NOVACRON_DATABASE_URL: ${NOVACRON_DATABASE_URL}
       NOVACRON_REDIS_URL: ${NOVACRON_REDIS_URL}
       DB_HOST: postgres-primary

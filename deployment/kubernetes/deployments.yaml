@@ -116,8 +116,6 @@ spec:
               value: "/var/lib/novacron"
             - name: NOVACRON_LOG_LEVEL
               value: "info"
-            - name: NOVACRON_LISTEN_ADDRESS
-              value: "0.0.0.0:8091"
             - name: NOVACRON_RUNTIME_MANIFEST_VERSION
               valueFrom:
                 configMapKeyRef:
