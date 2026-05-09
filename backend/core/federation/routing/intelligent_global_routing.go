@@ -5,6 +5,7 @@ package routing
 import (
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"net"
 	"sync"
@@ -85,60 +86,60 @@ type IntelligentGlobalRouter struct {
 
 // RegionEndpoint represents a regional endpoint
 type RegionEndpoint struct {
-	RegionID      string
-	IPAddress     string
-	IPv6Address   string
-	Port          int
-	Protocol      string // "tcp", "udp", "quic"
-	Capacity      int64  // Mbps
-	CurrentLoad   int64  // Mbps
-	HealthStatus  HealthStatus
-	Priority      int
-	Weight        int
-	Metadata      map[string]string
-	LastUpdate    time.Time
+	RegionID     string
+	IPAddress    string
+	IPv6Address  string
+	Port         int
+	Protocol     string // "tcp", "udp", "quic"
+	Capacity     int64  // Mbps
+	CurrentLoad  int64  // Mbps
+	HealthStatus HealthStatus
+	Priority     int
+	Weight       int
+	Metadata     map[string]string
+	LastUpdate   time.Time
 }
 
 // HealthStatus represents endpoint health
 type HealthStatus struct {
-	State            string  // "healthy", "degraded", "unhealthy"
-	ResponseTime     time.Duration
-	PacketLoss       float64 // Percentage
-	Availability     float64 // Percentage
+	State               string // "healthy", "degraded", "unhealthy"
+	ResponseTime        time.Duration
+	PacketLoss          float64 // Percentage
+	Availability        float64 // Percentage
 	ConsecutiveFailures int
-	LastCheck        time.Time
+	LastCheck           time.Time
 }
 
 // RoutingAlgorithm defines routing strategy
 type RoutingAlgorithm int
 
 const (
-	RoutingLatencyBased RoutingAlgorithm = iota // Route to lowest latency
-	RoutingCostOptimized                        // Route to lowest cost
-	RoutingLoadBalanced                         // Distribute load evenly
-	RoutingGeoProximity                         // Route to nearest geographic region
-	RoutingHybrid                               // Combine latency + cost + load
+	RoutingLatencyBased  RoutingAlgorithm = iota // Route to lowest latency
+	RoutingCostOptimized                         // Route to lowest cost
+	RoutingLoadBalanced                          // Distribute load evenly
+	RoutingGeoProximity                          // Route to nearest geographic region
+	RoutingHybrid                                // Combine latency + cost + load
 )
 
 // RoutingRequest represents a routing decision request
 type RoutingRequest struct {
-	SourceIP        string
-	DestinationID   string
-	Protocol        string
-	PayloadSize     int64
-	QoSRequirement  QoSRequirement
-	Priority        int
-	Metadata        map[string]string
-	Timestamp       time.Time
+	SourceIP       string
+	DestinationID  string
+	Protocol       string
+	PayloadSize    int64
+	QoSRequirement QoSRequirement
+	Priority       int
+	Metadata       map[string]string
+	Timestamp      time.Time
 }
 
 // QoSRequirement defines quality of service needs
 type QoSRequirement struct {
-	MaxLatencyMS     float64
-	MinBandwidthMbps int64
-	MaxPacketLoss    float64
+	MaxLatencyMS      float64
+	MinBandwidthMbps  int64
+	MaxPacketLoss     float64
 	RequireEncryption bool
-	TrafficClass     string // "interactive", "bulk", "realtime"
+	TrafficClass      string // "interactive", "bulk", "realtime"
 }
 
 // RoutingDecision represents the routing decision
@@ -174,38 +175,38 @@ type AnycastPolicy struct {
 
 // DDoSProtector implements DDoS protection
 type DDoSProtector struct {
-	mu                  sync.RWMutex
-	enabled             bool
-	rateLimits          map[string]*RateLimit
-	blacklist           map[string]time.Time
-	whitelist           map[string]bool
-	detectionAlgorithm  string // "rate", "pattern", "ml"
-	thresholds          DDoSThresholds
-	mitigationActions   []string
-	alertWebhooks       []string
+	mu                 sync.RWMutex
+	enabled            bool
+	rateLimits         map[string]*RateLimit
+	blacklist          map[string]time.Time
+	whitelist          map[string]bool
+	detectionAlgorithm string // "rate", "pattern", "ml"
+	thresholds         DDoSThresholds
+	mitigationActions  []string
+	alertWebhooks      []string
 }
 
 // RateLimit tracks rate limiting state
 type RateLimit struct {
-	SourceIP        string
-	RequestsPerSec  float64
-	BytesPerSec     int64
-	LastRequest     time.Time
-	RequestCount    int64
-	ByteCount       int64
-	WindowStart     time.Time
-	WindowDuration  time.Duration
-	Blocked         bool
+	SourceIP       string
+	RequestsPerSec float64
+	BytesPerSec    int64
+	LastRequest    time.Time
+	RequestCount   int64
+	ByteCount      int64
+	WindowStart    time.Time
+	WindowDuration time.Duration
+	Blocked        bool
 }
 
 // DDoSThresholds defines attack detection thresholds
 type DDoSThresholds struct {
-	MaxRequestsPerSec    int64
-	MaxBytesPerSec       int64
-	MaxConnections       int64
-	SynFloodThreshold    int64
-	UdpFloodThreshold    int64
-	IcmpFloodThreshold   int64
+	MaxRequestsPerSec         int64
+	MaxBytesPerSec            int64
+	MaxConnections            int64
+	SynFloodThreshold         int64
+	UdpFloodThreshold         int64
+	IcmpFloodThreshold        int64
 	DnsAmplificationDetection bool
 }
 
@@ -220,11 +221,11 @@ type TrafficShaper struct {
 
 // ShapingPolicy defines traffic shaping rules
 type ShapingPolicy struct {
-	PolicyID        string
-	MatchCriteria   MatchCriteria
-	Actions         []ShapingAction
-	Priority        int
-	Enabled         bool
+	PolicyID      string
+	MatchCriteria MatchCriteria
+	Actions       []ShapingAction
+	Priority      int
+	Enabled       bool
 }
 
 // MatchCriteria defines traffic matching rules
@@ -239,41 +240,41 @@ type MatchCriteria struct {
 
 // ShapingAction defines actions to take
 type ShapingAction struct {
-	ActionType      string // "rate_limit", "priority", "drop", "mark_dscp"
-	Parameters      map[string]interface{}
+	ActionType string // "rate_limit", "priority", "drop", "mark_dscp"
+	Parameters map[string]interface{}
 }
 
 // PriorityQueue implements traffic prioritization
 type PriorityQueue struct {
-	QueueID       string
-	Priority      int
-	MaxSize       int64
-	CurrentSize   int64
-	Packets       [][]byte
-	mu            sync.Mutex
+	QueueID     string
+	Priority    int
+	MaxSize     int64
+	CurrentSize int64
+	Packets     [][]byte
+	mu          sync.Mutex
 }
 
 // HealthChecker performs endpoint health checks
 type HealthChecker struct {
-	mu               sync.RWMutex
-	checkInterval    time.Duration
-	timeout          time.Duration
-	healthyThreshold int
+	mu                 sync.RWMutex
+	checkInterval      time.Duration
+	timeout            time.Duration
+	healthyThreshold   int
 	unhealthyThreshold int
 }
 
 // MetricsCollector collects routing metrics
 type MetricsCollector struct {
-	mu                  sync.RWMutex
-	routingDecisions    int64
-	totalBytesRouted    int64
-	averageLatency      time.Duration
-	p50Latency          time.Duration
-	p95Latency          time.Duration
-	p99Latency          time.Duration
-	errorRate           float64
-	latencyHistory      []time.Duration
-	decisionLatencies   []time.Duration
+	mu                sync.RWMutex
+	routingDecisions  int64
+	totalBytesRouted  int64
+	averageLatency    time.Duration
+	p50Latency        time.Duration
+	p95Latency        time.Duration
+	p99Latency        time.Duration
+	errorRate         float64
+	latencyHistory    []time.Duration
+	decisionLatencies []time.Duration
 }
 
 // NewIntelligentGlobalRouter creates a new global router
@@ -338,15 +339,15 @@ func NewIntelligentGlobalRouter(cfg *RouterConfig) (*IntelligentGlobalRouter, er
 
 // RouterConfig defines router configuration
 type RouterConfig struct {
-	RegionEndpoints          []*RegionEndpoint
-	RoutingAlgorithm         RoutingAlgorithm
-	EnableDDoSProtection     bool
-	DDoSDetectionAlgorithm   string
-	DDoSThresholds           DDoSThresholds
-	EnableTrafficShaping     bool
-	HealthCheckInterval      time.Duration
-	HealthCheckTimeout       time.Duration
-	MeasurementInterval      time.Duration
+	RegionEndpoints        []*RegionEndpoint
+	RoutingAlgorithm       RoutingAlgorithm
+	EnableDDoSProtection   bool
+	DDoSDetectionAlgorithm string
+	DDoSThresholds         DDoSThresholds
+	EnableTrafficShaping   bool
+	HealthCheckInterval    time.Duration
+	HealthCheckTimeout     time.Duration
+	MeasurementInterval    time.Duration
 }
 
 // Start starts the router
@@ -919,7 +920,7 @@ func (igr *IntelligentGlobalRouter) updateDDoSProtection() {
 	}
 
 	// Reset rate limit windows
-	for ip, rateLimit := range igr.dDoSProtector.rateLimits {
+	for _, rateLimit := range igr.dDoSProtector.rateLimits {
 		if now.Sub(rateLimit.WindowStart) > rateLimit.WindowDuration {
 			rateLimit.WindowStart = now
 			rateLimit.RequestCount = 0
@@ -986,12 +987,12 @@ func (igr *IntelligentGlobalRouter) GetMetrics() *MetricsCollector {
 	defer igr.metricsCollector.mu.RUnlock()
 
 	return &MetricsCollector{
-		routingDecisions:  igr.metricsCollector.routingDecisions,
-		totalBytesRouted:  igr.metricsCollector.totalBytesRouted,
-		averageLatency:    igr.metricsCollector.averageLatency,
-		p50Latency:        igr.metricsCollector.p50Latency,
-		p95Latency:        igr.metricsCollector.p95Latency,
-		p99Latency:        igr.metricsCollector.p99Latency,
-		errorRate:         igr.metricsCollector.errorRate,
+		routingDecisions: igr.metricsCollector.routingDecisions,
+		totalBytesRouted: igr.metricsCollector.totalBytesRouted,
+		averageLatency:   igr.metricsCollector.averageLatency,
+		p50Latency:       igr.metricsCollector.p50Latency,
+		p95Latency:       igr.metricsCollector.p95Latency,
+		p99Latency:       igr.metricsCollector.p99Latency,
+		errorRate:        igr.metricsCollector.errorRate,
 	}
 }

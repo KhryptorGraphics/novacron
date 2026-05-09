@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -60,16 +61,16 @@ var (
 
 // StateEntry represents a single state entry
 type StateEntry struct {
-	Key         string                 // Unique key
-	Value       interface{}            // Actual value
-	Version     VectorClock            // Version vector for causality
-	Timestamp   time.Time              // Last modified timestamp
-	Region      string                 // Region where last modified
-	Metadata    map[string]interface{} // Additional metadata
-	TTL         time.Duration          // Time to live
-	ExpiresAt   time.Time              // Expiration time
-	Tombstone   bool                   // Soft delete flag
-	Checksum    []byte                 // Data integrity checksum
+	Key       string                 // Unique key
+	Value     interface{}            // Actual value
+	Version   VectorClock            // Version vector for causality
+	Timestamp time.Time              // Last modified timestamp
+	Region    string                 // Region where last modified
+	Metadata  map[string]interface{} // Additional metadata
+	TTL       time.Duration          // Time to live
+	ExpiresAt time.Time              // Expiration time
+	Tombstone bool                   // Soft delete flag
+	Checksum  []byte                 // Data integrity checksum
 }
 
 // VectorClock implements vector clock for causality tracking
@@ -189,11 +190,11 @@ const (
 
 // ReplicationTask represents a state replication task
 type ReplicationTask struct {
-	SourceRegion string
+	SourceRegion  string
 	TargetRegions []string
-	Entry        *StateEntry
-	Priority     int
-	Timestamp    time.Time
+	Entry         *StateEntry
+	Priority      int
+	Timestamp     time.Time
 }
 
 // CRDT interface for Conflict-free Replicated Data Types
@@ -510,7 +511,6 @@ func (gds *GeoDistributedState) Stop() error {
 
 // Get retrieves a value with specified consistency level
 func (gds *GeoDistributedState) Get(ctx context.Context, key string, consistency ConsistencyLevel) (*StateEntry, error) {
-	startTime := time.Now()
 	defer func() {
 		stateOperations.WithLabelValues(gds.localRegion, "get", "success").Inc()
 	}()
@@ -553,8 +553,6 @@ func (gds *GeoDistributedState) Get(ctx context.Context, key string, consistency
 
 // Put stores a value with replication
 func (gds *GeoDistributedState) Put(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
-	startTime := time.Now()
-
 	gds.mu.Lock()
 	defer gds.mu.Unlock()
 
@@ -735,7 +733,7 @@ func (gds *GeoDistributedState) executeReplication(ctx context.Context, task *Re
 	// DEFERRED: Network replication requires cross-region transport layer
 	// Would implement gRPC or HTTP/2 based state transfer with compression and retries
 	log.Printf("Simulating replication for key=%s to regions=%v (actual network replication not implemented)",
-		task.Key, task.TargetRegions)
+		task.Entry.Key, task.TargetRegions)
 	for _, targetRegion := range task.TargetRegions {
 		stateSyncLatency.WithLabelValues(gds.localRegion, targetRegion).Observe(50) // Simulate 50ms latency
 	}

@@ -120,9 +120,9 @@ func (p *AWSProvider) GetCapabilities() []multicloud.CloudCapability {
 func (p *AWSProvider) CreateVM(ctx context.Context, request *multicloud.VMCreateRequest) (*multicloud.VMInstance, error) {
 	// In a real implementation, this would use AWS SDK to create EC2 instance
 	// For now, return a mock VM instance
-	
+
 	vmID := fmt.Sprintf("i-%d", time.Now().Unix())
-	
+
 	vm := &multicloud.VMInstance{
 		ID:               vmID,
 		Name:             request.Name,
@@ -148,7 +148,7 @@ func (p *AWSProvider) CreateVM(ctx context.Context, request *multicloud.VMCreate
 
 	// Set public/private IPs (mock)
 	vm.PrivateIP = "10.0.1.100"
-	if !request.Tags["private_only"] == "true" {
+	if request.Tags["private_only"] != "true" {
 		vm.PublicIP = "54.123.45.67"
 	}
 
@@ -165,7 +165,7 @@ func (p *AWSProvider) CreateVM(ctx context.Context, request *multicloud.VMCreate
 func (p *AWSProvider) GetVM(ctx context.Context, vmID string) (*multicloud.VMInstance, error) {
 	// In a real implementation, this would call AWS DescribeInstances
 	// For now, return mock data
-	
+
 	return &multicloud.VMInstance{
 		ID:           vmID,
 		Name:         "test-vm",
@@ -268,7 +268,7 @@ func (p *AWSProvider) ExportVM(ctx context.Context, vmID string, format multiclo
 func (p *AWSProvider) ImportVM(ctx context.Context, data *multicloud.VMExportData) (*multicloud.VMInstance, error) {
 	// In a real implementation, this would import AMI and create instance
 	vmID := fmt.Sprintf("i-import-%d", time.Now().Unix())
-	
+
 	return &multicloud.VMInstance{
 		ID:        vmID,
 		Name:      "imported-vm",
@@ -318,16 +318,16 @@ func (p *AWSProvider) GetResourceQuota(ctx context.Context) (*multicloud.Resourc
 func (p *AWSProvider) GetResourceUsage(ctx context.Context) (*multicloud.ResourceUsage, error) {
 	// In a real implementation, this would aggregate actual usage from AWS APIs
 	return &multicloud.ResourceUsage{
-		UsedVMs:           15,
-		UsedCPU:           45,
-		UsedMemory:        128 * 1024, // 128GB in MB
-		UsedStorage:       500,        // 500GB
-		UsedNetworks:      2,
+		UsedVMs:            15,
+		UsedCPU:            45,
+		UsedMemory:         128 * 1024, // 128GB in MB
+		UsedStorage:        500,        // 500GB
+		UsedNetworks:       2,
 		UsedSecurityGroups: 8,
-		UsedSnapshots:     25,
-		UsedFloatingIPs:   2,
-		UsedLoadBalancers: 1,
-		TotalCost:         1250.75,
+		UsedSnapshots:      25,
+		UsedFloatingIPs:    2,
+		UsedLoadBalancers:  1,
+		TotalCost:          1250.75,
 	}, nil
 }
 
@@ -342,7 +342,7 @@ func (p *AWSProvider) GetPricing(ctx context.Context, resourceType string, regio
 			PricePerHour: 0.0116, // t3.micro price
 			Unit:         "hour",
 			TierPricing: []multicloud.PricingTier{
-				{From: 0, To: 744, Price: 0.0116},   // First 744 hours (month)
+				{From: 0, To: 744, Price: 0.0116},  // First 744 hours (month)
 				{From: 744, To: -1, Price: 0.0104}, // Additional hours
 			},
 			SpotPricing: &multicloud.SpotPricingInfo{
@@ -355,9 +355,9 @@ func (p *AWSProvider) GetPricing(ctx context.Context, resourceType string, regio
 		}, nil
 	case "storage":
 		return &multicloud.PricingInfo{
-			ResourceType: resourceType,
-			Region:       region,
-			Currency:     "USD",
+			ResourceType:  resourceType,
+			Region:        region,
+			Currency:      "USD",
 			PricePerMonth: 0.10, // EBS gp2 price per GB/month
 			Unit:          "GB/month",
 		}, nil
@@ -482,10 +482,10 @@ func (p *AWSProvider) GetProviderHealth(ctx context.Context) (*multicloud.Provid
 		Provider: multicloud.ProviderAWS,
 		Overall:  multicloud.HealthStatusHealthy,
 		Services: map[string]multicloud.HealthStatus{
-			"ec2":     multicloud.HealthStatusHealthy,
-			"ebs":     multicloud.HealthStatusHealthy,
-			"vpc":     multicloud.HealthStatusHealthy,
-			"s3":      multicloud.HealthStatusHealthy,
+			"ec2": multicloud.HealthStatusHealthy,
+			"ebs": multicloud.HealthStatusHealthy,
+			"vpc": multicloud.HealthStatusHealthy,
+			"s3":  multicloud.HealthStatusHealthy,
 		},
 		Regions: map[string]multicloud.HealthStatus{
 			"us-east-1": multicloud.HealthStatusHealthy,
@@ -518,10 +518,10 @@ func (p *AWSProvider) GetCostEstimate(ctx context.Context, request *multicloud.C
 	}
 
 	return &multicloud.CostEstimate{
-		TotalCost: totalCost,
-		Currency:  "USD",
-		Duration:  request.Duration,
-		Breakdown: breakdown,
+		TotalCost:  totalCost,
+		Currency:   "USD",
+		Duration:   request.Duration,
+		Breakdown:  breakdown,
 		Confidence: 0.95,
 		CreatedAt:  time.Now(),
 	}, nil
@@ -598,8 +598,8 @@ func (p *AWSProvider) GetComplianceStatus(ctx context.Context) (*multicloud.Comp
 			DataLocation:        "United States",
 			CrossBorderTransfer: true,
 		},
-		Certifications:  []string{"SOC 1", "SOC 2", "SOC 3", "ISO 27001", "PCI DSS", "HIPAA", "FedRAMP"},
-		LastAssessment:  time.Now().Add(-24 * time.Hour),
+		Certifications: []string{"SOC 1", "SOC 2", "SOC 3", "ISO 27001", "PCI DSS", "HIPAA", "FedRAMP"},
+		LastAssessment: time.Now().Add(-24 * time.Hour),
 	}, nil
 }
 
@@ -634,21 +634,21 @@ func (p *AWSProvider) CreateSecurityGroup(ctx context.Context, request *multiclo
 func (p *AWSProvider) getInstanceTypeCPU(instanceType string) int {
 	// Mock CPU allocation based on instance type
 	cpuMap := map[string]int{
-		"t3.nano":     1,
-		"t3.micro":    1,
-		"t3.small":    1,
-		"t3.medium":   2,
-		"t3.large":    2,
-		"t3.xlarge":   4,
-		"m5.large":    2,
-		"m5.xlarge":   4,
-		"m5.2xlarge":  8,
-		"c5.large":    2,
-		"c5.xlarge":   4,
-		"r5.large":    2,
-		"r5.xlarge":   4,
+		"t3.nano":    1,
+		"t3.micro":   1,
+		"t3.small":   1,
+		"t3.medium":  2,
+		"t3.large":   2,
+		"t3.xlarge":  4,
+		"m5.large":   2,
+		"m5.xlarge":  4,
+		"m5.2xlarge": 8,
+		"c5.large":   2,
+		"c5.xlarge":  4,
+		"r5.large":   2,
+		"r5.xlarge":  4,
 	}
-	
+
 	if cpu, ok := cpuMap[instanceType]; ok {
 		return cpu
 	}
@@ -658,21 +658,21 @@ func (p *AWSProvider) getInstanceTypeCPU(instanceType string) int {
 func (p *AWSProvider) getInstanceTypeMemory(instanceType string) int64 {
 	// Mock memory allocation based on instance type (in MB)
 	memoryMap := map[string]int64{
-		"t3.nano":     512,
-		"t3.micro":    1024,
-		"t3.small":    2048,
-		"t3.medium":   4096,
-		"t3.large":    8192,
-		"t3.xlarge":   16384,
-		"m5.large":    8192,
-		"m5.xlarge":   16384,
-		"m5.2xlarge":  32768,
-		"c5.large":    4096,
-		"c5.xlarge":   8192,
-		"r5.large":    16384,
-		"r5.xlarge":   32768,
+		"t3.nano":    512,
+		"t3.micro":   1024,
+		"t3.small":   2048,
+		"t3.medium":  4096,
+		"t3.large":   8192,
+		"t3.xlarge":  16384,
+		"m5.large":   8192,
+		"m5.xlarge":  16384,
+		"m5.2xlarge": 32768,
+		"c5.large":   4096,
+		"c5.xlarge":  8192,
+		"r5.large":   16384,
+		"r5.xlarge":  32768,
 	}
-	
+
 	if memory, ok := memoryMap[instanceType]; ok {
 		return memory
 	}
@@ -682,21 +682,21 @@ func (p *AWSProvider) getInstanceTypeMemory(instanceType string) int64 {
 func (p *AWSProvider) getInstanceTypeNetworkBandwidth(instanceType string) int64 {
 	// Mock network bandwidth (Mbps)
 	bandwidthMap := map[string]int64{
-		"t3.nano":     50,
-		"t3.micro":    100,
-		"t3.small":    200,
-		"t3.medium":   300,
-		"t3.large":    500,
-		"t3.xlarge":   1000,
-		"m5.large":    750,
-		"m5.xlarge":   1250,
-		"m5.2xlarge":  2500,
-		"c5.large":    750,
-		"c5.xlarge":   1250,
-		"r5.large":    750,
-		"r5.xlarge":   1250,
+		"t3.nano":    50,
+		"t3.micro":   100,
+		"t3.small":   200,
+		"t3.medium":  300,
+		"t3.large":   500,
+		"t3.xlarge":  1000,
+		"m5.large":   750,
+		"m5.xlarge":  1250,
+		"m5.2xlarge": 2500,
+		"c5.large":   750,
+		"c5.xlarge":  1250,
+		"r5.large":   750,
+		"r5.xlarge":  1250,
 	}
-	
+
 	if bandwidth, ok := bandwidthMap[instanceType]; ok {
 		return bandwidth
 	}
@@ -706,19 +706,19 @@ func (p *AWSProvider) getInstanceTypeNetworkBandwidth(instanceType string) int64
 func (p *AWSProvider) getInstanceTypeHourlyRate(instanceType, region string) float64 {
 	// Mock pricing based on instance type and region
 	basePrices := map[string]float64{
-		"t3.nano":     0.0052,
-		"t3.micro":    0.0104,
-		"t3.small":    0.0208,
-		"t3.medium":   0.0416,
-		"t3.large":    0.0832,
-		"t3.xlarge":   0.1664,
-		"m5.large":    0.096,
-		"m5.xlarge":   0.192,
-		"m5.2xlarge":  0.384,
-		"c5.large":    0.085,
-		"c5.xlarge":   0.17,
-		"r5.large":    0.126,
-		"r5.xlarge":   0.252,
+		"t3.nano":    0.0052,
+		"t3.micro":   0.0104,
+		"t3.small":   0.0208,
+		"t3.medium":  0.0416,
+		"t3.large":   0.0832,
+		"t3.xlarge":  0.1664,
+		"m5.large":   0.096,
+		"m5.xlarge":  0.192,
+		"m5.2xlarge": 0.384,
+		"c5.large":   0.085,
+		"c5.xlarge":  0.17,
+		"r5.large":   0.126,
+		"r5.xlarge":  0.252,
 	}
 
 	basePrice := basePrices[instanceType]

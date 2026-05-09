@@ -5,6 +5,7 @@ package monitoring
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -117,23 +118,23 @@ type SLADefinition struct {
 
 // SLAStatus tracks SLA compliance status
 type SLAStatus struct {
-	SLAID             string
-	CurrentValue      float64
-	TargetValue       float64
-	CompliancePercent float64
-	Status            string // "compliant", "warning", "breach"
-	LastBreach        time.Time
-	BreachCount       int64
+	SLAID               string
+	CurrentValue        float64
+	TargetValue         float64
+	CompliancePercent   float64
+	Status              string // "compliant", "warning", "breach"
+	LastBreach          time.Time
+	BreachCount         int64
 	ConsecutiveBreaches int
-	LastCheck         time.Time
-	History           []SLADataPoint
+	LastCheck           time.Time
+	History             []SLADataPoint
 }
 
 // SLADataPoint represents a single SLA measurement
 type SLADataPoint struct {
-	Timestamp  time.Time
-	Value      float64
-	Compliant  bool
+	Timestamp time.Time
+	Value     float64
+	Compliant bool
 }
 
 // HealthCheck represents a health check result
@@ -149,21 +150,21 @@ type HealthCheck struct {
 
 // Incident represents a detected incident
 type Incident struct {
-	IncidentID   string
-	RegionID     string
-	Severity     string // "critical", "high", "medium", "low"
-	Category     string // "availability", "performance", "security", "capacity"
-	Title        string
-	Description  string
-	Status       string // "open", "acknowledged", "resolved"
-	DetectedAt   time.Time
+	IncidentID     string
+	RegionID       string
+	Severity       string // "critical", "high", "medium", "low"
+	Category       string // "availability", "performance", "security", "capacity"
+	Title          string
+	Description    string
+	Status         string // "open", "acknowledged", "resolved"
+	DetectedAt     time.Time
 	AcknowledgedAt time.Time
-	ResolvedAt   time.Time
-	Impact       string
-	RootCause    string
-	Resolution   string
-	Assignee     string
-	Tags         []string
+	ResolvedAt     time.Time
+	Impact         string
+	RootCause      string
+	Resolution     string
+	Assignee       string
+	Tags           []string
 }
 
 // TraceCollector collects distributed traces
@@ -209,37 +210,37 @@ type SpanLog struct {
 
 // MetricsAggregator aggregates metrics across regions
 type MetricsAggregator struct {
-	mu                sync.RWMutex
-	globalMetrics     *GlobalMetrics
-	aggregationRules  []*AggregationRule
-	timeSeries        map[string][]*TimeSeriesPoint
+	mu               sync.RWMutex
+	globalMetrics    *GlobalMetrics
+	aggregationRules []*AggregationRule
+	timeSeries       map[string][]*TimeSeriesPoint
 }
 
 // GlobalMetrics contains global aggregated metrics
 type GlobalMetrics struct {
-	TotalRegions       int
-	HealthyRegions     int
-	DegradedRegions    int
-	UnhealthyRegions   int
-	TotalVMs           int64
-	TotalCPUCores      int64
-	TotalMemoryGB      int64
-	TotalStorageTB     int64
-	GlobalLatency      time.Duration
-	GlobalThroughput   float64
-	GlobalErrorRate    float64
+	TotalRegions         int
+	HealthyRegions       int
+	DegradedRegions      int
+	UnhealthyRegions     int
+	TotalVMs             int64
+	TotalCPUCores        int64
+	TotalMemoryGB        int64
+	TotalStorageTB       int64
+	GlobalLatency        time.Duration
+	GlobalThroughput     float64
+	GlobalErrorRate      float64
 	AverageSLACompliance float64
-	LastUpdate         time.Time
+	LastUpdate           time.Time
 }
 
 // AggregationRule defines how to aggregate metrics
 type AggregationRule struct {
-	RuleID         string
-	MetricName     string
+	RuleID          string
+	MetricName      string
 	AggregationType string // "sum", "avg", "min", "max", "count"
-	SourceRegions  []string
-	OutputName     string
-	Enabled        bool
+	SourceRegions   []string
+	OutputName      string
+	Enabled         bool
 }
 
 // TimeSeriesPoint represents a single time series data point
@@ -251,27 +252,27 @@ type TimeSeriesPoint struct {
 
 // AlertManager manages alerts and notifications
 type AlertManager struct {
-	mu             sync.RWMutex
-	activeAlerts   map[string]*Alert
-	alertRules     []*AlertRule
-	notifiers      []Notifier
-	silences       map[string]*Silence
+	mu           sync.RWMutex
+	activeAlerts map[string]*Alert
+	alertRules   []*AlertRule
+	notifiers    []Notifier
+	silences     map[string]*Silence
 }
 
 // Alert represents an active alert
 type Alert struct {
-	AlertID      string
-	RuleID       string
-	RegionID     string
-	Severity     string
-	Title        string
-	Description  string
-	Status       string // "firing", "pending", "resolved"
-	StartsAt     time.Time
-	EndsAt       time.Time
-	Labels       map[string]string
-	Annotations  map[string]string
-	SilenceID    string
+	AlertID     string
+	RuleID      string
+	RegionID    string
+	Severity    string
+	Title       string
+	Description string
+	Status      string // "firing", "pending", "resolved"
+	StartsAt    time.Time
+	EndsAt      time.Time
+	Labels      map[string]string
+	Annotations map[string]string
+	SilenceID   string
 }
 
 // AlertRule defines alert conditions
@@ -293,12 +294,12 @@ type Notifier interface {
 
 // Silence represents an alert silence
 type Silence struct {
-	SilenceID   string
-	Matchers    map[string]string
-	StartsAt    time.Time
-	EndsAt      time.Time
-	CreatedBy   string
-	Comment     string
+	SilenceID string
+	Matchers  map[string]string
+	StartsAt  time.Time
+	EndsAt    time.Time
+	CreatedBy string
+	Comment   string
 }
 
 // DashboardExporter exports metrics to dashboard systems
@@ -310,11 +311,11 @@ type DashboardExporter struct {
 
 // ExportTarget defines an export destination
 type ExportTarget struct {
-	TargetID   string
-	Type       string // "prometheus", "grafana", "datadog", "cloudwatch"
-	Endpoint   string
-	APIKey     string
-	Enabled    bool
+	TargetID string
+	Type     string // "prometheus", "grafana", "datadog", "cloudwatch"
+	Endpoint string
+	APIKey   string
+	Enabled  bool
 }
 
 // NewMultiRegionMonitor creates a new multi-region monitor
@@ -365,12 +366,12 @@ func NewMultiRegionMonitor(cfg *MonitorConfig) (*MultiRegionMonitor, error) {
 
 // MonitorConfig defines monitoring configuration
 type MonitorConfig struct {
-	Regions                []string
-	MonitoringInterval     time.Duration
-	SLADefinitions         []*SLADefinition
-	EnableTracing          bool
-	EnableDashboardExport  bool
-	AlertNotifiers         []Notifier
+	Regions               []string
+	MonitoringInterval    time.Duration
+	SLADefinitions        []*SLADefinition
+	EnableTracing         bool
+	EnableDashboardExport bool
+	AlertNotifiers        []Notifier
 }
 
 // Start starts the monitoring system
@@ -742,8 +743,8 @@ func (mrm *MultiRegionMonitor) computeGlobalMetrics() {
 	defer mrm.mu.RUnlock()
 
 	global := &GlobalMetrics{
-		TotalRegions:   len(mrm.regions),
-		LastUpdate:     time.Now(),
+		TotalRegions: len(mrm.regions),
+		LastUpdate:   time.Now(),
 	}
 
 	var totalLatency time.Duration

@@ -1,7 +1,6 @@
 package multicloud
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -77,7 +76,7 @@ func (h *APIHandlers) RegisterRoutes(router *mux.Router) {
 
 func (h *APIHandlers) ListProviders(w http.ResponseWriter, r *http.Request) {
 	providers := h.orchestrator.registry.ListProviders()
-	
+
 	response := make(map[string]interface{})
 	for providerID, provider := range providers {
 		response[providerID] = map[string]interface{}{
@@ -93,9 +92,9 @@ func (h *APIHandlers) ListProviders(w http.ResponseWriter, r *http.Request) {
 
 func (h *APIHandlers) RegisterProvider(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		ProviderID string                 `json:"provider_id"`
-		Type       CloudProviderType      `json:"type"`
-		Config     CloudProviderConfig    `json:"config"`
+		ProviderID string              `json:"provider_id"`
+		Type       CloudProviderType   `json:"type"`
+		Config     CloudProviderConfig `json:"config"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -508,14 +507,14 @@ func (h *APIHandlers) GetDashboard(w http.ResponseWriter, r *http.Request) {
 
 	// Get dashboard data in parallel
 	type dashboardData struct {
-		Providers   map[string]*ProviderHealthStatus    `json:"providers"`
-		Metrics     map[string]*ProviderMetrics         `json:"metrics"`
-		Utilization *MultiCloudResourceUtilization      `json:"utilization"`
-		Compliance  *ComplianceDashboard               `json:"compliance"`
+		Providers   map[string]*ProviderHealthStatus `json:"providers"`
+		Metrics     map[string]*ProviderMetrics      `json:"metrics"`
+		Utilization *MultiCloudResourceUtilization   `json:"utilization"`
+		Compliance  *ComplianceDashboard             `json:"compliance"`
 	}
 
 	data := &dashboardData{}
-	
+
 	// Get provider health and metrics
 	data.Providers = h.orchestrator.GetProviderHealth(ctx)
 	data.Metrics = h.orchestrator.GetProviderMetrics(ctx)
@@ -538,7 +537,7 @@ func (h *APIHandlers) GetDashboard(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandlers) writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	
+
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		http.Error(w, "Failed to encode JSON response", http.StatusInternalServerError)
 	}
@@ -546,8 +545,8 @@ func (h *APIHandlers) writeJSON(w http.ResponseWriter, status int, data interfac
 
 func (h *APIHandlers) writeError(w http.ResponseWriter, status int, message string, err error) {
 	errorResponse := map[string]interface{}{
-		"error":   message,
-		"status":  status,
+		"error":     message,
+		"status":    status,
 		"timestamp": time.Now().Format(time.RFC3339),
 	}
 

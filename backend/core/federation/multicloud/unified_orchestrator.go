@@ -13,13 +13,13 @@ import (
 type UnifiedOrchestrator struct {
 	mu               sync.RWMutex
 	registry         *ProviderRegistry
-	federationMgr    *federation.FederationManager
+	federationMgr    *federation.FederationManagerImpl
 	migrationEngine  *CrossCloudMigrationEngine
 	costOptimizer    *CostOptimizer
 	complianceEngine *ComplianceEngine
 	policyEngine     *MultiCloudPolicyEngine
 	resourceManager  *ResourceManager
-	
+
 	// Configuration
 	defaultProvider string
 	autoFailover    bool
@@ -27,9 +27,9 @@ type UnifiedOrchestrator struct {
 }
 
 // NewUnifiedOrchestrator creates a new unified orchestrator
-func NewUnifiedOrchestrator(federationMgr *federation.FederationManager) *UnifiedOrchestrator {
+func NewUnifiedOrchestrator(federationMgr *federation.FederationManagerImpl) *UnifiedOrchestrator {
 	registry := NewProviderRegistry()
-	
+
 	return &UnifiedOrchestrator{
 		registry:         registry,
 		federationMgr:    federationMgr,
@@ -101,9 +101,9 @@ func (o *UnifiedOrchestrator) CreateVM(ctx context.Context, request *UnifiedVMRe
 	criteria := &ProviderSelectionCriteria{
 		Region:               request.Region,
 		RequiredCapabilities: request.RequiredCapabilities,
-		CostOptimized:       request.CostOptimized,
-		LowLatency:          request.LowLatency,
-		HighAvailability:    request.HighAvailability,
+		CostOptimized:        request.CostOptimized,
+		LowLatency:           request.LowLatency,
+		HighAvailability:     request.HighAvailability,
 	}
 
 	if request.PreferredProvider != "" {
@@ -132,7 +132,7 @@ func (o *UnifiedOrchestrator) CreateVM(ctx context.Context, request *UnifiedVMRe
 	startTime := time.Now()
 	vm, err := provider.CreateVM(ctx, providerRequest)
 	responseTime := time.Since(startTime)
-	
+
 	// Update metrics
 	o.registry.UpdateProviderMetrics(providerID, responseTime, err == nil)
 
@@ -157,10 +157,10 @@ func (o *UnifiedOrchestrator) createVMWithFailover(ctx context.Context, request 
 	criteria := &ProviderSelectionCriteria{
 		Region:               request.Region,
 		RequiredCapabilities: request.RequiredCapabilities,
-		CostOptimized:       request.CostOptimized,
-		LowLatency:          request.LowLatency,
-		HighAvailability:    request.HighAvailability,
-		ExcludeProviders:    excludeProviders,
+		CostOptimized:        request.CostOptimized,
+		LowLatency:           request.LowLatency,
+		HighAvailability:     request.HighAvailability,
+		ExcludeProviders:     excludeProviders,
 	}
 
 	providerID, provider, err := o.registry.GetBestProvider(criteria)
@@ -184,7 +184,7 @@ func (o *UnifiedOrchestrator) createVMWithFailover(ctx context.Context, request 
 	startTime := time.Now()
 	vm, err := provider.CreateVM(ctx, providerRequest)
 	responseTime := time.Since(startTime)
-	
+
 	o.registry.UpdateProviderMetrics(providerID, responseTime, err == nil)
 
 	if err != nil && !isQuotaError(err) {
@@ -219,7 +219,7 @@ func (o *UnifiedOrchestrator) GetVM(ctx context.Context, vmID string) (*VMInstan
 	startTime := time.Now()
 	vm, err := provider.GetVM(ctx, vmID)
 	responseTime := time.Since(startTime)
-	
+
 	o.registry.UpdateProviderMetrics(providerID, responseTime, err == nil)
 
 	return vm, err
@@ -230,7 +230,7 @@ func (o *UnifiedOrchestrator) ListVMs(ctx context.Context, filters *UnifiedVMFil
 	var allVMs []*VMInstance
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	
+
 	providers := o.registry.ListProviders()
 	if filters.ProviderID != "" {
 		// Filter to specific provider
@@ -246,13 +246,13 @@ func (o *UnifiedOrchestrator) ListVMs(ctx context.Context, filters *UnifiedVMFil
 		wg.Add(1)
 		go func(pID string, p CloudProvider) {
 			defer wg.Done()
-			
+
 			startTime := time.Now()
 			vms, err := p.ListVMs(ctx, filters.ToProviderFilters())
 			responseTime := time.Since(startTime)
-			
+
 			o.registry.UpdateProviderMetrics(pID, responseTime, err == nil)
-			
+
 			if err == nil {
 				mu.Lock()
 				allVMs = append(allVMs, vms...)
@@ -324,7 +324,7 @@ func (o *UnifiedOrchestrator) GetProviderHealth(ctx context.Context) map[string]
 	return o.registry.GetAllProviderHealth()
 }
 
-// GetProviderMetrics gets performance metrics of all providers  
+// GetProviderMetrics gets performance metrics of all providers
 func (o *UnifiedOrchestrator) GetProviderMetrics(ctx context.Context) map[string]*ProviderMetrics {
 	return o.registry.GetAllProviderMetrics()
 }
@@ -387,54 +387,54 @@ func isQuotaError(err error) bool {
 }
 
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && 
-		   (s == substr || len(s) > len(substr) && 
-		   (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || 
-		   (len(s) > len(substr) && contains(s[1:], substr))))
+	return len(s) >= len(substr) &&
+		(s == substr || len(s) > len(substr) &&
+			(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
+				(len(s) > len(substr) && contains(s[1:], substr))))
 }
 
 // Request and response types
 
 // UnifiedVMRequest represents a unified VM creation request
 type UnifiedVMRequest struct {
-	Name                  string                 `json:"name"`
-	InstanceType          string                 `json:"instance_type"`
-	ImageID               string                 `json:"image_id"`
-	Region                string                 `json:"region"`
-	AvailabilityZone      string                 `json:"availability_zone,omitempty"`
-	KeyPair               string                 `json:"key_pair,omitempty"`
-	SecurityGroups        []string               `json:"security_groups"`
-	UserData              string                 `json:"user_data,omitempty"`
-	Tags                  map[string]string      `json:"tags"`
-	
+	Name             string            `json:"name"`
+	InstanceType     string            `json:"instance_type"`
+	ImageID          string            `json:"image_id"`
+	Region           string            `json:"region"`
+	AvailabilityZone string            `json:"availability_zone,omitempty"`
+	KeyPair          string            `json:"key_pair,omitempty"`
+	SecurityGroups   []string          `json:"security_groups"`
+	UserData         string            `json:"user_data,omitempty"`
+	Tags             map[string]string `json:"tags"`
+
 	// Resource specifications
-	CPU                   int                    `json:"cpu,omitempty"`
-	Memory                int64                  `json:"memory,omitempty"`
-	Storage               int64                  `json:"storage,omitempty"`
-	NetworkBandwidth      int64                  `json:"network_bandwidth,omitempty"`
-	
+	CPU              int   `json:"cpu,omitempty"`
+	Memory           int64 `json:"memory,omitempty"`
+	Storage          int64 `json:"storage,omitempty"`
+	NetworkBandwidth int64 `json:"network_bandwidth,omitempty"`
+
 	// Provider selection criteria
-	PreferredProvider     string                 `json:"preferred_provider,omitempty"`
-	RequiredCapabilities  []CloudCapability      `json:"required_capabilities,omitempty"`
-	CostOptimized         bool                   `json:"cost_optimized"`
-	LowLatency            bool                   `json:"low_latency"`
-	HighAvailability      bool                   `json:"high_availability"`
-	
+	PreferredProvider    string            `json:"preferred_provider,omitempty"`
+	RequiredCapabilities []CloudCapability `json:"required_capabilities,omitempty"`
+	CostOptimized        bool              `json:"cost_optimized"`
+	LowLatency           bool              `json:"low_latency"`
+	HighAvailability     bool              `json:"high_availability"`
+
 	// Advanced options
-	SpotInstance          bool                   `json:"spot_instance"`
-	MaxSpotPrice          float64                `json:"max_spot_price,omitempty"`
-	ComplianceRequirements []string              `json:"compliance_requirements,omitempty"`
-	DataResidencyRegions  []string               `json:"data_residency_regions,omitempty"`
-	CustomOptions         map[string]interface{} `json:"custom_options,omitempty"`
+	SpotInstance           bool                   `json:"spot_instance"`
+	MaxSpotPrice           float64                `json:"max_spot_price,omitempty"`
+	ComplianceRequirements []string               `json:"compliance_requirements,omitempty"`
+	DataResidencyRegions   []string               `json:"data_residency_regions,omitempty"`
+	CustomOptions          map[string]interface{} `json:"custom_options,omitempty"`
 }
 
 // UnifiedVMFilters represents filters for listing VMs
 type UnifiedVMFilters struct {
-	ProviderID   string `json:"provider_id,omitempty"`
-	ProviderType string `json:"provider_type,omitempty"`
-	Region       string `json:"region,omitempty"`
-	State        string `json:"state,omitempty"`
-	NamePattern  string `json:"name_pattern,omitempty"`
+	ProviderID   string            `json:"provider_id,omitempty"`
+	ProviderType string            `json:"provider_type,omitempty"`
+	Region       string            `json:"region,omitempty"`
+	State        string            `json:"state,omitempty"`
+	NamePattern  string            `json:"name_pattern,omitempty"`
 	TagFilters   map[string]string `json:"tag_filters,omitempty"`
 }
 
@@ -455,34 +455,34 @@ func (f *UnifiedVMFilters) ToProviderFilters() map[string]string {
 
 // MultiCloudResourceUtilization represents resource utilization across providers
 type MultiCloudResourceUtilization struct {
-	TotalVMs         int                                  `json:"total_vms"`
-	TotalCPU         int                                  `json:"total_cpu"`
-	TotalMemory      int64                                `json:"total_memory"`
-	TotalStorage     int64                                `json:"total_storage"`
-	TotalCost        float64                              `json:"total_cost"`
-	ByProvider       map[string]*ResourceUsage            `json:"by_provider"`
-	ByRegion         map[string]*ResourceUsage            `json:"by_region"`
-	Trends           *ResourceUtilizationTrends           `json:"trends"`
-	Recommendations  []ResourceOptimizationRecommendation `json:"recommendations"`
-	LastUpdated      time.Time                            `json:"last_updated"`
+	TotalVMs        int                                  `json:"total_vms"`
+	TotalCPU        int                                  `json:"total_cpu"`
+	TotalMemory     int64                                `json:"total_memory"`
+	TotalStorage    int64                                `json:"total_storage"`
+	TotalCost       float64                              `json:"total_cost"`
+	ByProvider      map[string]*ResourceUsage            `json:"by_provider"`
+	ByRegion        map[string]*ResourceUsage            `json:"by_region"`
+	Trends          *ResourceUtilizationTrends           `json:"trends"`
+	Recommendations []ResourceOptimizationRecommendation `json:"recommendations"`
+	LastUpdated     time.Time                            `json:"last_updated"`
 }
 
 // ResourceUtilizationTrends represents utilization trends
 type ResourceUtilizationTrends struct {
-	CPUTrend     string  `json:"cpu_trend"`     // increasing, decreasing, stable
-	MemoryTrend  string  `json:"memory_trend"`
-	StorageTrend string  `json:"storage_trend"`
-	CostTrend    string  `json:"cost_trend"`
-	TrendPeriod  string  `json:"trend_period"`  // 24h, 7d, 30d
+	CPUTrend     string `json:"cpu_trend"` // increasing, decreasing, stable
+	MemoryTrend  string `json:"memory_trend"`
+	StorageTrend string `json:"storage_trend"`
+	CostTrend    string `json:"cost_trend"`
+	TrendPeriod  string `json:"trend_period"` // 24h, 7d, 30d
 }
 
 // ResourceOptimizationRecommendation represents optimization recommendations
 type ResourceOptimizationRecommendation struct {
-	Type        string  `json:"type"`        // rightsizing, migration, termination
-	Resource    string  `json:"resource"`    // VM ID or resource identifier
+	Type        string  `json:"type"`     // rightsizing, migration, termination
+	Resource    string  `json:"resource"` // VM ID or resource identifier
 	Provider    string  `json:"provider"`
 	Description string  `json:"description"`
-	Potential   string  `json:"potential"`   // cost savings, performance improvement
-	Confidence  float64 `json:"confidence"`  // 0-1
-	Impact      string  `json:"impact"`      // low, medium, high
+	Potential   string  `json:"potential"`  // cost savings, performance improvement
+	Confidence  float64 `json:"confidence"` // 0-1
+	Impact      string  `json:"impact"`     // low, medium, high
 }
