@@ -2,9 +2,10 @@ package dwcp_test
 
 import (
 	"context"
-	"crypto/rand"
+	crand "crypto/rand"
 	"fmt"
 	"io"
+	mrand "math/rand"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -104,7 +105,7 @@ func (ws *WANSimulator) handleConnection(conn net.Conn) {
 		}
 
 		// Simulate packet loss
-		if rand.Float64() < ws.packetLossRate {
+		if mrand.Float64() < ws.packetLossRate {
 			continue // Drop packet
 		}
 
@@ -134,7 +135,6 @@ func TestWAN_HighLatency(t *testing.T) {
 	config := &transport.AMSTConfig{
 		MinStreams:          32,
 		MaxStreams:          128,
-		InitialStreams:      64,
 		CongestionAlgorithm: "bbr", // BBR performs better on high-latency networks
 		ChunkSizeKB:         512,
 		AutoTune:            true,
@@ -156,7 +156,7 @@ func TestWAN_HighLatency(t *testing.T) {
 	// Send data over high-latency link
 	testDataSize := 10 * 1024 * 1024 // 10 MB
 	testData := make([]byte, testDataSize)
-	rand.Read(testData)
+	crand.Read(testData)
 
 	startTime := time.Now()
 	err = mst.Send(testData)
@@ -195,7 +195,6 @@ func TestWAN_LowBandwidth(t *testing.T) {
 	amstConfig := &transport.AMSTConfig{
 		MinStreams:          16,
 		MaxStreams:          64,
-		InitialStreams:      32,
 		CongestionAlgorithm: "bbr",
 		ChunkSizeKB:         256,
 		AutoTune:            true,
@@ -224,7 +223,7 @@ func TestWAN_LowBandwidth(t *testing.T) {
 	defer encoder.Close()
 
 	// Test with compressible data
-	testDataSize := 8 * 1024 * 1024 // 8 MB
+	testDataSize := 8 * 1024 * 1024                            // 8 MB
 	testData := generateCompressibleData(t, testDataSize, 0.7) // 70% compressible
 
 	// Compress first
@@ -280,14 +279,11 @@ func TestWAN_PacketLoss(t *testing.T) {
 	config := &transport.AMSTConfig{
 		MinStreams:          32,
 		MaxStreams:          96,
-		InitialStreams:      64,
 		CongestionAlgorithm: "bbr", // BBR handles loss better than CUBIC
 		ChunkSizeKB:         256,
 		AutoTune:            true,
 		PacingEnabled:       true,
 		ConnectTimeout:      15 * time.Second,
-		ReadTimeout:         30 * time.Second,
-		WriteTimeout:        30 * time.Second,
 	}
 
 	mst, err := transport.NewMultiStreamTCP(
@@ -304,7 +300,7 @@ func TestWAN_PacketLoss(t *testing.T) {
 	// Send data over lossy link
 	testDataSize := 5 * 1024 * 1024 // 5 MB
 	testData := make([]byte, testDataSize)
-	rand.Read(testData)
+	crand.Read(testData)
 
 	startTime := time.Now()
 	err = mst.Send(testData)
@@ -339,11 +335,11 @@ func TestWAN_MultiRegion(t *testing.T) {
 
 	// Simulate different region scenarios
 	regions := []struct {
-		name           string
-		latency        time.Duration
-		bandwidthMbps  int
-		packetLoss     float64
-		expectedUtil   float64
+		name          string
+		latency       time.Duration
+		bandwidthMbps int
+		packetLoss    float64
+		expectedUtil  float64
 	}{
 		{
 			name:          "US-West to US-East",
@@ -391,7 +387,6 @@ func TestWAN_MultiRegion(t *testing.T) {
 			config := &transport.AMSTConfig{
 				MinStreams:          streamCount / 2,
 				MaxStreams:          streamCount * 2,
-				InitialStreams:      streamCount,
 				CongestionAlgorithm: "bbr",
 				ChunkSizeKB:         256,
 				AutoTune:            true,
@@ -483,8 +478,6 @@ func TestWAN_AdaptiveScaling(t *testing.T) {
 	config := &transport.AMSTConfig{
 		MinStreams:          8,
 		MaxStreams:          128,
-		InitialStreams:      16,
-		StreamScalingFactor: 1.5,
 		CongestionAlgorithm: "bbr",
 		ChunkSizeKB:         256,
 		AutoTune:            true,

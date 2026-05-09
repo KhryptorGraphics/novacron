@@ -3,6 +3,8 @@ package dwcp_test
 import (
 	"crypto/rand"
 	"fmt"
+	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,13 +34,12 @@ func BenchmarkAMSTThroughput(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			listener, port := startBandwidthTrackingServer(b.(*testing.T), bm.streams)
+			listener, port := startBenchmarkBandwidthTrackingServer(b, bm.streams)
 			defer listener.Close()
 
 			config := &transport.AMSTConfig{
 				MinStreams:     bm.streams,
 				MaxStreams:     bm.streams,
-				InitialStreams: bm.streams,
 				ChunkSizeKB:    512,
 				AutoTune:       false,
 				ConnectTimeout: 10 * time.Second,
@@ -69,12 +70,11 @@ func BenchmarkAMSTThroughput(b *testing.B) {
 
 			b.StopTimer()
 
-			metrics := mst.GetMetrics()
-			throughputMBps := metrics["throughput_mbps"].(float64)
-			utilization := metrics["bandwidth_utilization"].(float64)
+			throughputMBps := float64(dataSize*b.N) / (1024 * 1024) / b.Elapsed().Seconds()
+			utilization := mst.GetMetrics()["bandwidth_utilized"].(uint64)
 
 			b.ReportMetric(throughputMBps, "MB/s")
-			b.ReportMetric(utilization*100, "utilization%")
+			b.ReportMetric(float64(utilization), "utilization_units")
 		})
 	}
 }
@@ -90,13 +90,12 @@ func BenchmarkAMSTStreamScaling(b *testing.B) {
 
 	for _, streams := range streamCounts {
 		b.Run(fmt.Sprintf("%dStreams", streams), func(b *testing.B) {
-			listener, port := startBandwidthTrackingServer(b.(*testing.T), streams)
+			listener, port := startBenchmarkBandwidthTrackingServer(b, streams)
 			defer listener.Close()
 
 			config := &transport.AMSTConfig{
 				MinStreams:     streams,
 				MaxStreams:     streams,
-				InitialStreams: streams,
 				ChunkSizeKB:    256,
 				AutoTune:       false,
 				ConnectTimeout: 10 * time.Second,
@@ -146,15 +145,15 @@ func BenchmarkHDECompression(b *testing.B) {
 	}{
 		{
 			name: "VMMemory",
-			data: generateCompressibleData(b.(*testing.T), 4*1024*1024, 0.7), // 70% compressible
+			data: generateCompressibleData(b, 4*1024*1024, 0.7), // 70% compressible
 		},
 		{
 			name: "ClusterState",
-			data: generateCompressibleData(b.(*testing.T), 2*1024*1024, 0.8), // 80% compressible
+			data: generateCompressibleData(b, 2*1024*1024, 0.8), // 80% compressible
 		},
 		{
 			name: "Random",
-			data: generateCompressibleData(b.(*testing.T), 4*1024*1024, 0.1), // 10% compressible
+			data: generateCompressibleData(b, 4*1024*1024, 0.1), // 10% compressible
 		},
 	}
 
@@ -210,7 +209,7 @@ func BenchmarkHDEDeltaEncoding(b *testing.B) {
 
 	// Create baseline
 	baselineSize := 8 * 1024 * 1024 // 8 MB
-	baseline := generateCompressibleData(b.(*testing.T), baselineSize, 0.6)
+	baseline := generateCompressibleData(b, baselineSize, 0.6)
 
 	stateKey := "bench-delta"
 
@@ -262,16 +261,15 @@ func BenchmarkMigrationSpeed(b *testing.B) {
 
 	// Use smaller sample for benchmark (scale results for 8GB)
 	sampleSize := 32 * 1024 * 1024 // 32 MB sample
-	vmMemory := generateVMMemoryData(b.(*testing.T), sampleSize)
+	vmMemory := generateVMMemoryData(b, sampleSize)
 
-	listener, port := startBandwidthTrackingServer(b.(*testing.T), 128)
+	listener, port := startBenchmarkBandwidthTrackingServer(b, 128)
 	defer listener.Close()
 
 	// AMST setup
 	amstConfig := &transport.AMSTConfig{
 		MinStreams:          64,
 		MaxStreams:          128,
-		InitialStreams:      96,
 		CongestionAlgorithm: "bbr",
 		ChunkSizeKB:         512,
 		AutoTune:            true,
@@ -331,16 +329,15 @@ func BenchmarkFederationSync(b *testing.B) {
 	logger, _ := zap.NewDevelopment()
 
 	stateSize := 4 * 1024 * 1024 // 4 MB cluster state
-	clusterState := generateClusterStateData(b.(*testing.T), stateSize)
+	clusterState := generateClusterStateData(b, stateSize)
 
-	listener, port := startBandwidthTrackingServer(b.(*testing.T), 64)
+	listener, port := startBenchmarkBandwidthTrackingServer(b, 64)
 	defer listener.Close()
 
 	// Transport setup
 	amstConfig := &transport.AMSTConfig{
 		MinStreams:     32,
 		MaxStreams:     64,
-		InitialStreams: 48,
 		ChunkSizeKB:    256,
 		AutoTune:       true,
 		ConnectTimeout: 10 * time.Second,
@@ -358,7 +355,6 @@ func BenchmarkFederationSync(b *testing.B) {
 
 	// Compression setup
 	hdeConfig := compression.DefaultDeltaEncodingConfig()
-	hdeConfig.BaselineSyncEnabled = true
 
 	encoder, err := compression.NewDeltaEncoder(hdeConfig, logger)
 	if err != nil {
@@ -407,13 +403,12 @@ func BenchmarkConcurrentStreams(b *testing.B) {
 
 	for _, concurrency := range concurrencyLevels {
 		b.Run(fmt.Sprintf("Concurrent%d", concurrency), func(b *testing.B) {
-			listener, port := startBandwidthTrackingServer(b.(*testing.T), 128)
+			listener, port := startBenchmarkBandwidthTrackingServer(b, 128)
 			defer listener.Close()
 
 			config := &transport.AMSTConfig{
 				MinStreams:     64,
 				MaxStreams:     128,
-				InitialStreams: 96,
 				ChunkSizeKB:    256,
 				AutoTune:       true,
 				ConnectTimeout: 10 * time.Second,
@@ -455,7 +450,6 @@ func generateCompressibleData(t testing.TB, size int, compressibility float64) [
 	data := make([]byte, size)
 
 	compressibleSize := int(float64(size) * compressibility)
-	randomSize := size - compressibleSize
 
 	// Compressible part (repetitive pattern)
 	pattern := []byte("BENCHMARK_PATTERN_DATA_")
@@ -471,4 +465,45 @@ func generateCompressibleData(t testing.TB, size int, compressibility float64) [
 	rand.Read(data[compressibleSize:])
 
 	return data
+}
+
+func startBenchmarkBandwidthTrackingServer(t testing.TB, maxConnections int) (net.Listener, int) {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatalf("Failed to start bandwidth tracking server: %v", err)
+	}
+
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	go func() {
+		connectionCount := atomic.Int32{}
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+
+			if int(connectionCount.Load()) >= maxConnections {
+				_ = conn.Close()
+				continue
+			}
+
+			connectionCount.Add(1)
+			go func(c net.Conn) {
+				defer c.Close()
+				defer connectionCount.Add(-1)
+
+				buf := make([]byte, 8192)
+				for {
+					if _, err := c.Read(buf); err != nil {
+						return
+					}
+				}
+			}(conn)
+		}
+	}()
+
+	return listener, port
 }

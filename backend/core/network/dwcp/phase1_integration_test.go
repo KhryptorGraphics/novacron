@@ -1,8 +1,6 @@
 package dwcp_test
 
 import (
-	"bytes"
-	"context"
 	"crypto/rand"
 	"fmt"
 	"testing"
@@ -32,7 +30,6 @@ func TestPhase1_MigrationIntegration(t *testing.T) {
 	amstConfig := &transport.AMSTConfig{
 		MinStreams:          32,
 		MaxStreams:          128,
-		InitialStreams:      64,
 		CongestionAlgorithm: "bbr",
 		ChunkSizeKB:         512,
 		AutoTune:            true,
@@ -50,7 +47,7 @@ func TestPhase1_MigrationIntegration(t *testing.T) {
 	// HDE configuration
 	hdeConfig := compression.DefaultDeltaEncodingConfig()
 	hdeConfig.CompressionLevel = 6 // Balanced
-	hdeConfig.EnableDictionaryTraining = true
+	hdeConfig.EnableDictionary = true
 
 	encoder, err := compression.NewDeltaEncoder(hdeConfig, logger)
 	require.NoError(t, err)
@@ -140,7 +137,6 @@ func TestPhase1_FederationIntegration(t *testing.T) {
 	amstConfig := &transport.AMSTConfig{
 		MinStreams:          16,
 		MaxStreams:          64,
-		InitialStreams:      32,
 		CongestionAlgorithm: "bbr",
 		ChunkSizeKB:         256,
 		AutoTune:            true,
@@ -156,7 +152,7 @@ func TestPhase1_FederationIntegration(t *testing.T) {
 
 	// Setup compression with baseline sync
 	hdeConfig := compression.DefaultDeltaEncodingConfig()
-	hdeConfig.BaselineSyncEnabled = true
+	hdeConfig.EnableBaselineSync = true
 
 	encoder, err := compression.NewDeltaEncoder(hdeConfig, logger)
 	require.NoError(t, err)
@@ -523,7 +519,7 @@ func TestPhase1_MonitoringAlerts(t *testing.T) {
 
 // Helper functions
 
-func generateVMMemoryData(t *testing.T, size int) []byte {
+func generateVMMemoryData(t testing.TB, size int) []byte {
 	data := make([]byte, size)
 
 	// Simulate typical VM memory: 60% zeros, 30% repetitive, 10% random
@@ -551,7 +547,7 @@ func generateVMMemoryData(t *testing.T, size int) []byte {
 	return data
 }
 
-func generateClusterStateData(t *testing.T, size int) []byte {
+func generateClusterStateData(t testing.TB, size int) []byte {
 	data := make([]byte, size)
 
 	// Simulate cluster state with structured data
