@@ -1044,12 +1044,13 @@ func initializeAPI(
 	}
 
 	apiServer := &APIServer{
-		server:      server,
-		listener:    listener,
-		address:     listener.Addr().String(),
-		runtimeAuth: runtimeAuth,
-		inventory:   inventoryStore,
-		runtimeDR:   runtimeDR,
+		server:           server,
+		listener:         listener,
+		address:          listener.Addr().String(),
+		runtimeAuth:      runtimeAuth,
+		inventory:        inventoryStore,
+		runtimeDiscovery: discoveryState,
+		runtimeDR:        runtimeDR,
 	}
 	if err := apiServer.Start(); err != nil {
 		if runtimeDR != nil {
@@ -1057,17 +1058,19 @@ func initializeAPI(
 		}
 		return nil, fmt.Errorf("start API server: %w", err)
 	}
+	discoveryState.Start(ctx)
 
 	return apiServer, nil
 }
 
 type APIServer struct {
-	server      *http.Server
-	listener    net.Listener
-	address     string
-	runtimeAuth *runtimeAuthRuntime
-	inventory   *runtimeInventoryStore
-	runtimeDR   *runtimeDRRuntime
+	server           *http.Server
+	listener         net.Listener
+	address          string
+	runtimeAuth      *runtimeAuthRuntime
+	inventory        *runtimeInventoryStore
+	runtimeDiscovery *runtimeDiscoveryState
+	runtimeDR        *runtimeDRRuntime
 }
 
 func (s *APIServer) Start() error {
@@ -1089,6 +1092,9 @@ func (s *APIServer) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	var shutdownErr error
+	if s.runtimeDiscovery != nil {
+		s.runtimeDiscovery.Stop()
+	}
 	if s.server != nil {
 		shutdownErr = errors.Join(shutdownErr, s.server.Shutdown(ctx))
 	}

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -113,6 +114,79 @@ func TestRuntimeDiscoveryVerifiesConfiguredSeedInventory(t *testing.T) {
 	}
 	if got := rejectedResponse.Seed.State; got != "rejected" {
 		t.Fatalf("tampered seed state = %q, want rejected", got)
+	}
+}
+
+func TestRuntimeDiscoveryFetchesSeedInventoryAndRecordsMetrics(t *testing.T) {
+	seedPublicKey, seedPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate seed key: %v", err)
+	}
+	signedInventory := signedSeedInventory(t, "seed-node", "seed.example:8090", seedPrivateKey)
+	seedServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/internal/runtime/v1/discovery/inventory" {
+			http.NotFound(w, r)
+			return
+		}
+		respondRuntimeJSON(w, http.StatusOK, runtimeDiscoveryInventoryResponse{
+			Enabled:   true,
+			Mode:      "seeded",
+			PublicKey: base64.StdEncoding.EncodeToString(seedPublicKey),
+			Inventory: signedInventory,
+		})
+	}))
+	defer seedServer.Close()
+
+	config := defaultRuntimeConfig("node-a", t.TempDir())
+	config.Services.DiscoveryMode = "seeded"
+	config.Services.DiscoverySeeds = []runtimeDiscoverySeed{
+		{
+			ID:        "seed-a",
+			Address:   strings.TrimPrefix(seedServer.URL, "http://"),
+			PublicKey: base64.StdEncoding.EncodeToString(seedPublicKey),
+			Tags:      []string{"trusted"},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	apiServer, err := initializeAPI(ctx, config, "127.0.0.1:0", nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("initializeAPI returned error: %v", err)
+	}
+	defer apiServer.Shutdown(context.Background())
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		response := getJSONResponse[runtimeDiscoveryInventoryResponse](t, apiServer, "/internal/runtime/v1/discovery/inventory")
+		if len(response.Seeds) == 1 && response.Seeds[0].State == "verified" {
+			seedStatus := response.Seeds[0]
+			if seedStatus.LastCheckUnix == 0 || seedStatus.LastVerifyUnix == 0 {
+				t.Fatalf("expected seed check timestamps, got %#v", seedStatus)
+			}
+			if seedStatus.RTTMillis <= 0 {
+				t.Fatalf("expected measured RTT, got %#v", seedStatus)
+			}
+			if seedStatus.ThroughputMbps <= 0 {
+				t.Fatalf("expected measured throughput, got %#v", seedStatus)
+			}
+			network, ok := response.Inventory.Inventory.Network["seed-node"]
+			if !ok {
+				t.Fatalf("expected local signed inventory network metrics for seed-node, got %#v", response.Inventory.Inventory.Network)
+			}
+			if network.RTTMillis <= 0 || network.BandwidthMbps <= 0 || network.PacketLoss != 0 {
+				t.Fatalf("unexpected network metrics: %#v", network)
+			}
+			publicKey := decodeTestDiscoveryPublicKey(t, response.PublicKey)
+			if err := federation.VerifySignedNodeInventory(response.Inventory, publicKey); err != nil {
+				t.Fatalf("updated local inventory did not verify after metrics injection: %v", err)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("seed inventory was not verified before deadline")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
