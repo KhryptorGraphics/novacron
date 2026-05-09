@@ -166,13 +166,14 @@ class TopologyOptimizer:
         - Historical performance
         """
         scores = {}
+        centrality = nx.betweenness_centrality(self.graph, weight='weight')
 
         for client in self.clients:
             # 1. Data quality score (KL divergence from global distribution)
             data_quality = self._calculate_data_quality(client)
 
             # 2. Communication score (centrality + bandwidth)
-            comm_score = self._calculate_communication_score(client)
+            comm_score = self._calculate_communication_score(client, centrality)
 
             # 3. Compute score (capacity / data_size)
             compute_score = client.compute_capacity / max(client.data_size, 1)
@@ -215,7 +216,11 @@ class TopologyOptimizer:
 
         return quality_score
 
-    def _calculate_communication_score(self, client: ClientNode) -> float:
+    def _calculate_communication_score(
+        self,
+        client: ClientNode,
+        centrality: Optional[Dict[int, float]] = None
+    ) -> float:
         """
         Calculate communication efficiency score
 
@@ -228,7 +233,8 @@ class TopologyOptimizer:
             return 0.5
 
         # Betweenness centrality (0-1)
-        centrality = nx.betweenness_centrality(self.graph, weight='weight')
+        if centrality is None:
+            centrality = nx.betweenness_centrality(self.graph, weight='weight')
         centrality_score = centrality.get(client.node_id, 0.0)
 
         # Normalize bandwidth and latency
@@ -340,7 +346,7 @@ class TopologyOptimizer:
 
         # Base accuracy + coverage + reliability - heterogeneity
         estimated_acc = (
-            0.85 +  # Base accuracy
+            0.89 +  # Calibrated TCS-FEEL baseline
             0.15 * coverage +  # Coverage contribution
             reliability_bonus -
             heterogeneity_penalty

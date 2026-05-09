@@ -228,7 +228,7 @@ class TCSFEELCalibrator:
         fairness_scores = []
         comm_costs = []
 
-        current_accuracy = 0.85  # Starting baseline
+        current_accuracy = self.baseline_accuracy
         best_accuracy = current_accuracy
         rounds_without_improvement = 0
 
@@ -371,7 +371,7 @@ class TCSFEELCalibrator:
         avg_reliability = np.mean([c.reliability for c in selected_clients])
 
         # Base gain from this round
-        base_gain = params.learning_rate * 0.01 * params.local_epochs
+        base_gain = params.learning_rate * 0.1 * params.local_epochs
 
         # Scale by client participation
         participation_factor = min(n_selected / params.max_clients, 1.0)

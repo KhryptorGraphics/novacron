@@ -10,6 +10,7 @@ Usage:
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -33,6 +34,35 @@ class DWCPModelOrchestrator:
         self.results = {}
         self.start_time = None
         self.end_time = None
+        self.repo_root = Path(__file__).resolve().parents[2]
+        self.backend_root = self.repo_root / 'backend'
+        self.ml_root = Path(__file__).resolve().parent
+        self.output_dir = self._resolve_path(config['output_dir'], self.ml_root)
+        self.data_path = self._resolve_path(config['data_path'], self.repo_root)
+        self.incidents_path = self._resolve_path(config['incidents_path'], self.repo_root)
+
+        self.config['data_path'] = str(self.data_path)
+        self.config['output_dir'] = str(self.output_dir)
+        self.config['incidents_path'] = str(self.incidents_path)
+
+    def _resolve_path(self, path_value, preferred_base):
+        """Resolve CLI paths consistently from repo or backend/ml context."""
+        path = Path(path_value)
+        if path.is_absolute():
+            return path
+
+        candidates = [
+            Path.cwd() / path,
+            preferred_base / path,
+            self.ml_root / path,
+            self.repo_root / path,
+        ]
+
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate.resolve()
+
+        return (preferred_base / path).resolve()
 
     def validate_data_schema(self, data_path):
         """Validate input data against schema"""
@@ -70,7 +100,11 @@ class DWCPModelOrchestrator:
 
         try:
             # Build command
-            cmd = ['python', script_path] + args
+            cmd = [sys.executable, script_path] + args
+            env = os.environ.copy()
+            env.setdefault('PYTHONHASHSEED', str(self.config['seed']))
+            env.setdefault('TF_CPP_MIN_LOG_LEVEL', '2')
+            env.setdefault('CUDA_VISIBLE_DEVICES', '')
 
             logger.info(f"Command: {' '.join(cmd)}")
 
@@ -79,7 +113,9 @@ class DWCPModelOrchestrator:
                 cmd,
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                cwd=str(self.repo_root),
+                env=env
             )
 
             duration = time.time() - start
@@ -158,29 +194,29 @@ class DWCPModelOrchestrator:
 
     def get_model_configs(self):
         """Get training configurations for all models"""
-        base_path = Path(__file__).parent.parent
-        output_dir = Path(self.config['output_dir'])
+        base_path = self.backend_root
+        output_dir = self.output_dir
+        data_path = self.data_path
 
         models = {
             'bandwidth_predictor': {
                 'script': str(base_path / 'core/network/dwcp/prediction/training/train_lstm.py'),
                 'args': [
-                    '--data-path', self.config['data_path'],
-                    '--output', str(output_dir / 'bandwidth_predictor.keras'),
-                    '--target-correlation', str(self.config['target_accuracy']),
-                    '--target-mape', '5.0',
+                    '--data', str(data_path),
+                    '--output', str(output_dir / 'bandwidth_predictor'),
                     '--epochs', str(self.config['epochs']),
                     '--batch-size', str(self.config['batch_size']),
-                    '--seed', str(self.config['seed'])
+                    '--window-size', '10',
+                    '--validation-split', '0.2'
                 ]
             },
             'compression_selector': {
                 'script': str(base_path / 'core/network/dwcp/compression/training/train_compression_selector.py'),
                 'args': [
-                    '--data-path', self.config['data_path'],
+                    '--data-path', str(data_path),
                     '--output', str(output_dir / 'compression_selector.keras'),
                     '--target-accuracy', str(self.config['target_accuracy']),
-                    '--epochs', str(self.config['epochs'] // 2),  # Half epochs for policy net
+                    '--epochs', str(max(1, self.config['epochs'] // 2)),
                     '--batch-size', str(self.config['batch_size']),
                     '--seed', str(self.config['seed'])
                 ]
@@ -188,54 +224,121 @@ class DWCPModelOrchestrator:
             'reliability_detector': {
                 'script': str(base_path / 'core/network/dwcp/monitoring/training/train_isolation_forest.py'),
                 'args': [
-                    '--data-path', self.config['data_path'],
-                    '--incidents-path', self.config['incidents_path'],
-                    '--output', str(output_dir / 'reliability_model.pkl'),
+                    '--synthetic',
+                    '--n-samples', '10000',
+                    '--incident-rate', '0.02',
+                    '--output', str(output_dir),
+                    '--report', str(output_dir / 'reliability_model_report.md'),
                     '--target-recall', str(self.config['target_accuracy']),
-                    '--target-pr-auc', '0.90',
-                    '--seed', str(self.config['seed'])
+                    '--max-fp-rate', '0.05',
+                    '--test-size', '0.2'
                 ]
             },
             'consensus_latency': {
                 'script': str(base_path / 'core/network/dwcp/monitoring/training/train_lstm_autoencoder.py'),
                 'args': [
-                    '--data-path', self.config['data_path'],
-                    '--output', str(output_dir / 'consensus_latency.keras'),
-                    '--target-accuracy', str(self.config['target_accuracy']),
+                    '--output', str(output_dir / 'consensus_latency'),
+                    '--sequence-length', '30',
                     '--epochs', str(self.config['epochs']),
                     '--batch-size', str(self.config['batch_size']),
-                    '--window-size', '20',
-                    '--seed', str(self.config['seed'])
+                    '--encoding-dim', '16',
+                    '--n-normal', '10000',
+                    '--n-anomalies', '500'
                 ]
             }
         }
 
         return models
 
+    def _load_json(self, path):
+        with open(path, 'r') as f:
+            return json.load(f)
+
+    def _latest_file(self, directory, pattern):
+        matches = sorted(Path(directory).glob(pattern), key=lambda p: p.stat().st_mtime)
+        return matches[-1] if matches else None
+
     def load_evaluation_reports(self):
         """Load evaluation reports from trained models"""
         logger.info("Loading evaluation reports...")
 
-        output_dir = Path(self.config['output_dir'])
+        output_dir = self.output_dir
         reports = {}
 
-        model_files = {
-            'bandwidth_predictor': 'bandwidth_predictor_report.json',
-            'compression_selector': 'compression_selector_policy_net_report.json',
-            'reliability_detector': 'reliability_model_report.json',
-            'consensus_latency': 'consensus_latency_lstm_autoencoder_report.json'
-        }
+        for model_name in self.config['models_to_train']:
+            result = self.results.get(model_name, {'success': False, 'error': 'not run'})
+            report = {
+                'success': bool(result.get('success', False)),
+                'training_time_seconds': result.get('duration', 0),
+            }
 
-        for model_name, report_file in model_files.items():
-            report_path = output_dir / report_file
+            try:
+                if model_name == 'bandwidth_predictor':
+                    model_dir = output_dir / 'bandwidth_predictor'
+                    metadata_path = self._latest_file(model_dir, 'model_metadata_*.json')
+                    onnx_path = self._latest_file(model_dir, 'bandwidth_lstm_*.onnx')
+                    if metadata_path and onnx_path:
+                        metadata = self._load_json(metadata_path)
+                        report.update({
+                            'model_name': 'bandwidth_lstm_predictor',
+                            'achieved_metrics': metadata.get('metrics', {}),
+                            'metadata_path': str(metadata_path),
+                            'artifact_path': str(onnx_path),
+                            'model_size_mb': onnx_path.stat().st_size / (1024 * 1024),
+                        })
+                    else:
+                        report.update({'success': False, 'error': 'Bandwidth artifacts not found'})
 
-            if report_path.exists():
-                with open(report_path, 'r') as f:
-                    reports[model_name] = json.load(f)
-                logger.info(f"Loaded report for {model_name}")
-            else:
-                logger.warning(f"Report not found for {model_name}: {report_path}")
-                reports[model_name] = {'success': False, 'error': 'Report not found'}
+                elif model_name == 'compression_selector':
+                    report_path = output_dir / 'compression_selector_report.json'
+                    if report_path.exists():
+                        report.update(self._load_json(report_path))
+                        report['report_path'] = str(report_path)
+                    else:
+                        report.update({'success': False, 'error': 'Compression report not found'})
+
+                elif model_name == 'reliability_detector':
+                    metadata_path = output_dir / 'model_metadata_node_reliability.json'
+                    report_path = output_dir / 'reliability_model_report.md'
+                    if metadata_path.exists() and report_path.exists():
+                        metadata = self._load_json(metadata_path)
+                        achieved = metadata.get('evaluation_results', {})
+                        report.update({
+                            'model_name': 'node_reliability_isolation_forest',
+                            'success': bool(result.get('success', False)) and bool(metadata.get('target_achieved')),
+                            'metadata_path': str(metadata_path),
+                            'report_path': str(report_path),
+                            'target_metrics': {
+                                'recall': self.config['target_accuracy'],
+                                'max_fp_rate': 0.05,
+                            },
+                            'achieved_metrics': achieved or {
+                                'threshold': metadata.get('threshold'),
+                                'n_features': metadata.get('n_features'),
+                            },
+                        })
+                    else:
+                        report.update({'success': False, 'error': 'Reliability artifacts not found'})
+
+                elif model_name == 'consensus_latency':
+                    metadata_path = output_dir / 'consensus_latency' / 'consensus_metadata.json'
+                    if metadata_path.exists():
+                        metadata = self._load_json(metadata_path)
+                        report.update({
+                            'model_name': 'consensus_latency_lstm_autoencoder',
+                            'success': bool(result.get('success', False)) and bool(metadata.get('target_achieved')),
+                            'metadata_path': str(metadata_path),
+                            'achieved_metrics': metadata.get('metrics', {}),
+                        })
+                    else:
+                        report.update({'success': False, 'error': 'Consensus metadata not found'})
+            except Exception as exc:
+                report.update({'success': False, 'error': str(exc)})
+
+            if not result.get('success', False):
+                report['error'] = result.get('error', report.get('error', 'training command failed'))
+
+            reports[model_name] = report
 
         return reports
 
@@ -273,7 +376,7 @@ class DWCPModelOrchestrator:
         }
 
         # Save master report
-        output_dir = Path(self.config['output_dir'])
+        output_dir = self.output_dir
         output_dir.mkdir(parents=True, exist_ok=True)
 
         report_path = output_dir / 'master_training_report.json'

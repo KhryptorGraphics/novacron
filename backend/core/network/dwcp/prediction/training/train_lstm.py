@@ -79,8 +79,31 @@ class BandwidthLSTMTrainer:
         # Read CSV file
         df = pd.read_csv(data_path)
 
+        # Canonical DWCP metrics use transport-oriented names. Normalize aliases
+        # here so the trainer can consume either the canonical CSV or legacy data.
+        aliases = {
+            'throughput_mbps': 'bandwidth_mbps',
+            'rtt_ms': 'latency_ms',
+        }
+        for source, target in aliases.items():
+            if target not in df.columns and source in df.columns:
+                df[target] = df[source]
+
         # Convert timestamp to datetime
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+        if np.issubdtype(df['timestamp'].dtype, np.number):
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+        else:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+        if 'time_of_day' not in df.columns:
+            df['time_of_day'] = (
+                df['timestamp'].dt.hour * 3600
+                + df['timestamp'].dt.minute * 60
+                + df['timestamp'].dt.second
+            ) / 86400.0
+
+        if 'day_of_week' not in df.columns:
+            df['day_of_week'] = df['timestamp'].dt.dayofweek / 6.0
 
         # Sort by timestamp
         df = df.sort_values('timestamp')

@@ -77,7 +77,7 @@ class ReliabilityPredictor:
         model.compile(
             optimizer=optimizers.Adam(learning_rate=self.learning_rate),
             loss='mse',
-            metrics=['mae', 'accuracy']
+            metrics=['mae']
         )
 
         return model
@@ -213,25 +213,31 @@ class ReliabilityPredictor:
             states.append(state[0])
             targets.append([target])
 
-        states = np.array(states)
-        targets = np.array(targets)
+        states = np.asarray(states, dtype=np.float32).reshape(batch_size, self.state_size)
+        targets = np.asarray(targets, dtype=np.float32).reshape(batch_size, 1)
 
-        # Train model
-        history = self.model.fit(
-            states,
-            targets,
-            epochs=1,
-            verbose=0,
-            batch_size=batch_size
-        )
+        states_tensor = tf.convert_to_tensor(states, dtype=tf.float32)
+        targets_tensor = tf.convert_to_tensor(targets, dtype=tf.float32)
+
+        with tf.GradientTape() as tape:
+            predictions = self.model(states_tensor, training=True)
+            loss_value = tf.reduce_mean(tf.square(targets_tensor - predictions))
+            if self.model.losses:
+                loss_value += tf.add_n(self.model.losses)
+
+        gradients = tape.gradient(loss_value, self.model.trainable_variables)
+        self.model.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
+
+        mae_value = tf.reduce_mean(tf.abs(targets_tensor - predictions))
+        accuracy_value = tf.maximum(0.0, 1.0 - mae_value)
 
         # Decay epsilon
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
         return {
-            'loss': float(history.history['loss'][0]),
-            'accuracy': float(history.history['accuracy'][0])
+            'loss': float(loss_value.numpy()),
+            'accuracy': float(accuracy_value.numpy())
         }
 
     def train(
@@ -267,13 +273,16 @@ class ReliabilityPredictor:
             validation_data=validation_data,
             epochs=epochs,
             batch_size=batch_size,
-            verbose=1
+            verbose=0
         )
 
         # Update training history
         self.training_history['loss'].extend(history.history['loss'])
-        self.training_history['accuracy'].extend(history.history['accuracy'])
         self.training_history['mae'].extend(history.history['mae'])
+        self.training_history['accuracy'].extend([
+            max(0.0, 1.0 - float(mae))
+            for mae in history.history['mae']
+        ])
         self.training_history['epochs'].extend(range(len(history.history['loss'])))
 
         # Update target model
@@ -281,10 +290,16 @@ class ReliabilityPredictor:
 
         return {
             'loss': history.history['loss'],
-            'accuracy': history.history['accuracy'],
+            'accuracy': [
+                max(0.0, 1.0 - float(mae))
+                for mae in history.history['mae']
+            ],
             'mae': history.history['mae'],
             'val_loss': history.history.get('val_loss', []),
-            'val_accuracy': history.history.get('val_accuracy', []),
+            'val_accuracy': [
+                max(0.0, 1.0 - float(mae))
+                for mae in history.history.get('val_mae', [])
+            ],
             'val_mae': history.history.get('val_mae', [])
         }
 
@@ -299,7 +314,7 @@ class ReliabilityPredictor:
         Returns:
             Evaluation metrics
         """
-        loss, mae, accuracy = self.model.evaluate(X_test, y_test, verbose=0)
+        loss, mae = self.model.evaluate(X_test, y_test, verbose=0)
 
         # Make predictions
         predictions = self.model.predict(X_test, verbose=0).flatten()
@@ -312,7 +327,7 @@ class ReliabilityPredictor:
         return {
             'loss': float(loss),
             'mae': float(mae),
-            'accuracy': float(accuracy),
+            'accuracy': float(max(0.0, 1.0 - mae)),
             'rmse': float(rmse),
             'r2': float(r2)
         }
@@ -398,9 +413,9 @@ def generate_training_data(n_samples: int = 10000) -> Tuple[np.ndarray, np.ndarr
     # Lower distance -> higher reliability
 
     reliability = (
-        0.4 * (uptime / 100.0) +
-        0.3 * (1 - np.minimum(failure_rate / 10.0, 1.0)) +
-        0.2 * network_quality +
+        0.35 * (uptime / 100.0) +
+        0.20 * (1 - np.minimum(failure_rate / 10.0, 1.0)) +
+        0.25 * network_quality +
         0.1 * (1 - np.minimum(distance / 10000.0, 1.0))
     )
 

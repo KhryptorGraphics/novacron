@@ -562,7 +562,8 @@ def save_model(
     threshold: float,
     params: Dict[str, Any],
     feature_names: list,
-    output_dir: str
+    output_dir: str,
+    evaluation_results: Dict[str, Any] = None
 ):
     """Save model artifacts."""
     output_dir = Path(output_dir)
@@ -590,7 +591,13 @@ def save_model(
         'feature_names': feature_names,
         'training_date': datetime.now().isoformat(),
         'target_recall': 0.98,
-        'max_fp_rate': 0.05
+        'max_fp_rate': 0.05,
+        'evaluation_results': evaluation_results or {},
+        'target_achieved': bool(
+            evaluation_results
+            and evaluation_results.get('recall', 0) >= 0.98
+            and evaluation_results.get('fp_rate', 1) < 0.05
+        )
     }
 
     metadata_path = output_dir / "model_metadata_node_reliability.json"
@@ -855,7 +862,8 @@ def main():
         tuner.best_threshold,
         tuner.best_params,
         feature_engineer.feature_names,
-        args.output
+        args.output,
+        evaluation_results
     )
 
     # Generate report
@@ -886,6 +894,11 @@ def main():
     print(f"Evaluation report: {Path(args.report).absolute()}")
     print("=" * 80)
 
+    return 0 if (
+        evaluation_results['recall'] >= args.target_recall
+        and evaluation_results['fp_rate'] < args.max_fp_rate
+    ) else 1
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
