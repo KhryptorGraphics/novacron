@@ -155,10 +155,11 @@ func (m *Manager) startPhase0Components(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize transport: %w", err)
 	}
 	if m.transport != nil {
-		if err := m.transport.Start(); err != nil {
-			return fmt.Errorf("failed to start transport: %w", err)
+		if m.transport.IsStarted() {
+			m.logger.Info("Transport layer started successfully")
+		} else {
+			m.logger.Info("Transport layer initialized; start deferred until remote endpoint is configured")
 		}
-		m.logger.Info("Transport layer started successfully")
 	}
 
 	// 2. Compression Layer (HDE) - Data compression for transport
@@ -582,7 +583,7 @@ func (m *Manager) HealthCheck() error {
 	}
 
 	// Check transport health
-	if m.transport != nil {
+	if m.transport != nil && m.transport.IsStarted() {
 		if err := m.transport.HealthCheck(); err != nil {
 			return fmt.Errorf("transport layer unhealthy: %w", err)
 		}
@@ -634,7 +635,7 @@ func (m *Manager) checkComponentHealth() error {
 	var recoveryTasks []recoveryTask
 
 	// Check transport layer
-	if m.transport != nil {
+	if m.transport != nil && m.transport.IsStarted() {
 		if err := m.transport.HealthCheck(); err != nil {
 			m.logger.Warn("Transport layer unhealthy", zap.Error(err))
 			recoveryTasks = append(recoveryTasks, recoveryTask{"transport", err})

@@ -297,7 +297,7 @@ func TestPhase0_ConfigurationManagement(t *testing.T) {
 
 	// Test 2: Invalid transport configuration (must be enabled for validation)
 	invalidConfig := dwcp.DefaultConfig()
-	invalidConfig.Enabled = true // Must be enabled for validation
+	invalidConfig.Enabled = true           // Must be enabled for validation
 	invalidConfig.Transport.MinStreams = 0 // Invalid: must be >= 1
 	if err := invalidConfig.Validate(); err == nil {
 		t.Error("Expected validation error for MinStreams=0")
@@ -317,25 +317,19 @@ func TestPhase0_ConfigurationManagement(t *testing.T) {
 	}
 
 	// Test 4: Valid custom configuration
-	customConfig := &dwcp.Config{
-		Enabled: true,
-		Version: dwcp.DWCPVersion,
-		Transport: dwcp.TransportConfig{
-			MinStreams:          8,
-			MaxStreams:          64,
-			InitialStreams:      16,
-			StreamScalingFactor: 2.0,
-			CongestionAlgorithm: "bbr",
-			ConnectTimeout:      30 * time.Second,
-		},
-		Compression: dwcp.CompressionConfig{
-			Enabled:          true,
-			Algorithm:        "zstd",
-			Level:            dwcp.CompressionLevelBalanced,
-			MaxDeltaChain:    5,
-			BaselineInterval: 10 * time.Minute,
-		},
-	}
+	customConfig := dwcp.DefaultConfig()
+	customConfig.Enabled = true
+	customConfig.Transport.MinStreams = 8
+	customConfig.Transport.MaxStreams = 64
+	customConfig.Transport.InitialStreams = 16
+	customConfig.Transport.StreamScalingFactor = 2.0
+	customConfig.Transport.CongestionAlgorithm = "bbr"
+	customConfig.Transport.ConnectTimeout = 30 * time.Second
+	customConfig.Compression.Enabled = true
+	customConfig.Compression.Algorithm = "zstd"
+	customConfig.Compression.Level = dwcp.CompressionLevelBalanced
+	customConfig.Compression.MaxDeltaChain = 5
+	customConfig.Compression.BaselineInterval = 10 * time.Minute
 
 	if err := customConfig.Validate(); err != nil {
 		t.Errorf("Custom config validation failed: %v", err)

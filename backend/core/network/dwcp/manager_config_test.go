@@ -12,6 +12,7 @@ func TestManagerGetConfig(t *testing.T) {
 	config := DefaultConfig()
 	config.Enabled = true
 	config.Transport.MinStreams = 50
+	config.Transport.InitialStreams = 50
 
 	logger, _ := zap.NewDevelopment()
 	manager, err := NewManager(config, logger)
@@ -124,6 +125,7 @@ func TestManagerGetConfigMemoryIndependence(t *testing.T) {
 	config := DefaultConfig()
 	config.Enabled = true
 	config.Transport.MinStreams = 64
+	config.Transport.InitialStreams = 64
 	config.Transport.CongestionAlgorithm = "bbr"
 	config.Compression.Algorithm = "zstd"
 

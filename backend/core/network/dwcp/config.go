@@ -538,7 +538,7 @@ func (c *Config) validatePrediction() error {
 	}
 
 	// Validate confidence level (always validate structure)
-	if pred.ConfidenceLevel != 0.0 && (pred.ConfidenceLevel <= 0.0 || pred.ConfidenceLevel >= 1.0) {
+	if pred.ConfidenceLevel <= 0.0 || pred.ConfidenceLevel >= 1.0 {
 		return &DWCPError{Code: ErrCodeInvalidConfig, Message: "prediction.confidence_level must be between 0.0 and 1.0"}
 	}
 
@@ -587,7 +587,7 @@ func (c *Config) validateConsensus() error {
 	}
 
 	// Validate quorum size (always validate structure)
-	if cons.QuorumSize != 0 && cons.QuorumSize < 1 {
+	if cons.QuorumSize < 1 {
 		return &DWCPError{Code: ErrCodeInvalidConfig, Message: "consensus.quorum_size must be >= 1"}
 	}
 	if cons.QuorumSize > 1000 {
