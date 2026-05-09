@@ -23,9 +23,9 @@ func TestGlobalTopology(t *testing.T) {
 			{Address: "10.0.1.1", Port: 8080, Protocol: "tcp"},
 		},
 		Capacity: RegionCapacity{
-			MaxInstances:    1000,
+			MaxInstances:     1000,
 			MaxBandwidthMbps: 10000,
-			MaxStorage:      1000000,
+			MaxStorage:       1000000,
 		},
 	}
 
@@ -42,9 +42,9 @@ func TestGlobalTopology(t *testing.T) {
 			{Address: "10.0.2.1", Port: 8080, Protocol: "tcp"},
 		},
 		Capacity: RegionCapacity{
-			MaxInstances:    800,
+			MaxInstances:     800,
 			MaxBandwidthMbps: 8000,
-			MaxStorage:      800000,
+			MaxStorage:       800000,
 		},
 	}
 
@@ -101,7 +101,7 @@ func TestGlobalTopology(t *testing.T) {
 
 // TestRoutingEngine tests routing algorithms
 func TestRoutingEngine(t *testing.T) {
-	topology := setupTestTopology()
+	topology := setupMultiregionTestTopology()
 	engine := NewRoutingEngine(topology, StrategyLatency)
 
 	// Test Dijkstra (latency optimization)
@@ -140,7 +140,7 @@ func TestRoutingEngine(t *testing.T) {
 
 // TestTunnelManager tests VPN tunnel management
 func TestTunnelManager(t *testing.T) {
-	topology := setupTestTopology()
+	topology := setupMultiregionTestTopology()
 	tunnelMgr := NewTunnelManager(topology)
 
 	usEast, _ := topology.GetRegion("us-east-1")
@@ -184,7 +184,7 @@ func TestTunnelManager(t *testing.T) {
 
 // TestTrafficEngineer tests traffic distribution
 func TestTrafficEngineer(t *testing.T) {
-	topology := setupTestTopology()
+	topology := setupMultiregionTestTopology()
 	te := NewTrafficEngineer(topology, AlgorithmWECMP)
 
 	flow := &TrafficFlow{
@@ -236,7 +236,7 @@ func TestTrafficEngineer(t *testing.T) {
 
 // TestPathRedundancy tests failover mechanisms
 func TestPathRedundancy(t *testing.T) {
-	topology := setupTestTopology()
+	topology := setupMultiregionTestTopology()
 	engine := NewRoutingEngine(topology, StrategyLatency)
 
 	// Get primary path
@@ -275,7 +275,7 @@ func TestPathRedundancy(t *testing.T) {
 
 // TestBandwidthManager tests bandwidth reservation
 func TestBandwidthManager(t *testing.T) {
-	topology := setupTestTopology()
+	topology := setupMultiregionTestTopology()
 	bm := NewBandwidthManager(topology)
 	engine := NewRoutingEngine(topology, StrategyBandwidth)
 
@@ -338,7 +338,7 @@ func TestBandwidthManager(t *testing.T) {
 
 // TestNetworkTelemetry tests metrics collection
 func TestNetworkTelemetry(t *testing.T) {
-	topology := setupTestTopology()
+	topology := setupMultiregionTestTopology()
 	telemetry := NewNetworkTelemetry(topology)
 
 	// Collect metrics manually (normally runs in background)
@@ -369,7 +369,7 @@ func TestNetworkTelemetry(t *testing.T) {
 
 // TestRouteUpdater tests dynamic route updates
 func TestRouteUpdater(t *testing.T) {
-	topology := setupTestTopology()
+	topology := setupMultiregionTestTopology()
 	routingTable := NewRoutingTable()
 	engine := NewRoutingEngine(topology, StrategyLatency)
 
@@ -444,7 +444,7 @@ func (ts *testSubscriber) OnRouteUpdate(update *RouteUpdate) {
 
 // TestPerformanceMetrics tests routing performance
 func TestPerformanceMetrics(t *testing.T) {
-	topology := setupTestTopology()
+	topology := setupMultiregionTestTopology()
 	engine := NewRoutingEngine(topology, StrategyLatency)
 
 	// Measure route computation time
@@ -470,7 +470,7 @@ func TestPerformanceMetrics(t *testing.T) {
 }
 
 // setupTestTopology creates a test topology with multiple regions
-func setupTestTopology() *GlobalTopology {
+func setupMultiregionTestTopology() *GlobalTopology {
 	topology := NewGlobalTopology()
 
 	// Create regions
@@ -539,7 +539,7 @@ func setupTestTopology() *GlobalTopology {
 
 // Benchmark tests
 func BenchmarkRouteComputation(b *testing.B) {
-	topology := setupTestTopology()
+	topology := setupMultiregionTestTopology()
 	engine := NewRoutingEngine(topology, StrategyLatency)
 
 	b.ResetTimer()
@@ -549,7 +549,7 @@ func BenchmarkRouteComputation(b *testing.B) {
 }
 
 func BenchmarkBandwidthReservation(b *testing.B) {
-	topology := setupTestTopology()
+	topology := setupMultiregionTestTopology()
 	bm := NewBandwidthManager(topology)
 	engine := NewRoutingEngine(topology, StrategyBandwidth)
 

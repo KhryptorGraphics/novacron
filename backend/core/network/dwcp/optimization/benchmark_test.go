@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"novacron/backend/core/network/dwcp/optimization/lockfree"
-	"novacron/backend/core/network/dwcp/optimization/simd"
+	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/optimization/lockfree"
+	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/optimization/simd"
 )
 
 // BenchmarkXORDelta benchmarks SIMD vs scalar XOR operations
@@ -76,10 +76,10 @@ func BenchmarkChecksum(b *testing.B) {
 			}
 		})
 
-		b.Run(fmt.Sprintf("xxHash_Size_%d", size), func(b *testing.B) {
+		b.Run(fmt.Sprintf("Fletcher32_Size_%d", size), func(b *testing.B) {
 			b.SetBytes(int64(size))
 			for i := 0; i < b.N; i++ {
-				simd.xxHash32(data, 0)
+				simd.Fletcher32(data)
 			}
 		})
 	}
@@ -297,10 +297,10 @@ func BenchmarkDeltaCompression(b *testing.B) {
 // BenchmarkThroughput measures overall throughput
 func BenchmarkThroughput(b *testing.B) {
 	sizes := []int{
-		1024,      // 1KB
-		65536,     // 64KB
-		1048576,   // 1MB
-		16777216,  // 16MB
+		1024,     // 1KB
+		65536,    // 64KB
+		1048576,  // 1MB
+		16777216, // 16MB
 	}
 
 	for _, size := range sizes {

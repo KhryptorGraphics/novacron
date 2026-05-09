@@ -63,7 +63,7 @@ func ExamplePBAIntegration() {
 	defer optimizer.Stop()
 
 	// Step 5: Main prediction loop
-	fmt.Println("\nStep 5: Running prediction loop...\n")
+	fmt.Println("\nStep 5: Running prediction loop...")
 
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()

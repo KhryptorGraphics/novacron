@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"novacron/backend/core/network/dwcp/metrics"
+	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/metrics"
 )
 
 // ExampleInitializeMetrics shows how to initialize the metrics system
@@ -40,14 +40,14 @@ func ExampleAMSTMetricsWrapper() {
 
 	// Simulate data transfer
 	for i := 0; i < 10; i++ {
-		bytesSent := int64(1024 * 1024) // 1 MB
+		bytesSent := int64(1024 * 1024)    // 1 MB
 		bytesReceived := int64(512 * 1024) // 512 KB
 		amstMetrics.OnStreamData(streamID, bytesSent, bytesReceived)
 		time.Sleep(100 * time.Millisecond)
 	}
 
 	// Update bandwidth utilization
-	usedBandwidth := int64(100 * 1024 * 1024) // 100 MB/s
+	usedBandwidth := int64(100 * 1024 * 1024)       // 100 MB/s
 	availableBandwidth := int64(1024 * 1024 * 1024) // 1 GB/s
 	amstMetrics.OnBandwidthUpdate(usedBandwidth, availableBandwidth)
 
@@ -88,9 +88,9 @@ func ExampleHDEMetricsWrapper() {
 	hdeMetrics := metrics.NewHDEMetricsWrapper()
 
 	// Record successful compression with delta encoding
-	originalSize := int64(10 * 1024 * 1024) // 10 MB
+	originalSize := int64(10 * 1024 * 1024)  // 10 MB
 	compressedSize := int64(1 * 1024 * 1024) // 1 MB (10x compression)
-	deltaHit := true // Delta encoding was used
+	deltaHit := true                         // Delta encoding was used
 
 	hdeMetrics.OnCompressionComplete("vm_memory", originalSize, compressedSize, deltaHit)
 

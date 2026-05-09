@@ -863,7 +863,7 @@ func sortDurations(d []time.Duration) {
 
 // PrintResults prints benchmark results.
 func (b *BenchmarkSuite) PrintResults() {
-	fmt.Println("\n=== DWCP v3 Benchmark Results ===\n")
+	fmt.Println("\n=== DWCP v3 Benchmark Results ===")
 
 	for _, result := range b.results {
 		fmt.Printf("Benchmark: %s\n", result.Name)

@@ -352,7 +352,7 @@ func TestAMSTv3_Metrics(t *testing.T) {
 	assert.GreaterOrEqual(t, metrics.ActiveStreams, int32(0))
 	assert.GreaterOrEqual(t, metrics.TotalStreams, 0)
 	assert.NotEmpty(t, metrics.TransportType)
-	assert.NotEmpty(t, metrics.Mode)
+	assert.NotEmpty(t, metrics.TransportMode)
 }
 
 // BenchmarkAMSTv3_DatacenterThroughput benchmarks datacenter mode

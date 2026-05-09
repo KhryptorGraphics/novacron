@@ -4,11 +4,11 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/rs/zerolog/log"
 )
 
 // Exporter handles HTTP metrics endpoint
@@ -42,15 +42,11 @@ func NewExporter(port int) *Exporter {
 
 // Start begins serving metrics
 func (e *Exporter) Start() error {
-	log.Info().
-		Int("port", e.port).
-		Msg("Starting DWCP metrics exporter")
+	log.Printf("Starting DWCP metrics exporter on port %d", e.port)
 
 	go func() {
 		if err := e.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error().
-				Err(err).
-				Msg("Metrics exporter failed")
+			log.Printf("Metrics exporter failed: %v", err)
 		}
 	}()
 
@@ -59,7 +55,7 @@ func (e *Exporter) Start() error {
 
 // Stop gracefully shuts down the exporter
 func (e *Exporter) Stop(ctx context.Context) error {
-	log.Info().Msg("Stopping DWCP metrics exporter")
+	log.Printf("Stopping DWCP metrics exporter")
 	return e.server.Shutdown(ctx)
 }
 

@@ -2,9 +2,8 @@
 package metrics
 
 import (
+	"log"
 	"sync"
-
-	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -28,10 +27,7 @@ func InitializeMetrics(cluster, node string, port int) error {
 		globalCollector = NewCollector(cluster, node)
 		collectorMu.Unlock()
 
-		log.Info().
-			Str("cluster", cluster).
-			Str("node", node).
-			Msg("DWCP metrics collector initialized")
+		log.Printf("DWCP metrics collector initialized cluster=%s node=%s", cluster, node)
 	})
 
 	// Initialize exporter
@@ -39,16 +35,11 @@ func InitializeMetrics(cluster, node string, port int) error {
 		globalExporter = NewExporter(port)
 		if err := globalExporter.Start(); err != nil {
 			initErr = err
-			log.Error().
-				Err(err).
-				Int("port", port).
-				Msg("Failed to start metrics exporter")
+			log.Printf("Failed to start metrics exporter on port %d: %v", port, err)
 			return
 		}
 
-		log.Info().
-			Int("port", port).
-			Msg("DWCP metrics exporter started")
+		log.Printf("DWCP metrics exporter started on port %d", port)
 	})
 
 	return initErr
@@ -70,11 +61,11 @@ func GetExporter() *Exporter {
 func ShutdownMetrics() error {
 	if globalExporter != nil {
 		if err := globalExporter.Stop(nil); err != nil {
-			log.Error().Err(err).Msg("Failed to stop metrics exporter")
+			log.Printf("Failed to stop metrics exporter: %v", err)
 			return err
 		}
 	}
-	log.Info().Msg("DWCP metrics system shut down")
+	log.Printf("DWCP metrics system shut down")
 	return nil
 }
 
