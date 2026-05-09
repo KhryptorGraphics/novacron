@@ -1,7 +1,6 @@
 package testing
 
 import (
-	"fmt"
 	"testing"
 	"time"
 )
@@ -22,8 +21,14 @@ func TestFullTestingPipeline(t *testing.T) {
 
 	// Run each scenario
 	for _, scenario := range scenarios {
-		// Reduce duration for testing
-		scenario.Duration = 30 * time.Second
+		// Keep package tests fast; benchmarks cover larger workloads.
+		scenario.Duration = 5 * time.Second
+		scenario.Workload.VMs = 1
+		scenario.Workload.VMSize = 1024 * 1024
+		scenario.Workload.Operations = 1
+		scenario.Workload.Concurrency = 1
+		scenario.Workload.Pattern = PatternConstant
+		scenario.Workload.ThinkTime = time.Millisecond
 
 		t.Run(scenario.Name, func(t *testing.T) {
 			result, err := harness.RunScenario(scenario)
@@ -143,8 +148,8 @@ func TestChaosEngineering(t *testing.T) {
 	chaosEngine.Stop()
 }
 
-// TestReporter tests the test reporter
-func TestReporter(t *testing.T) {
+// TestReporterGeneration tests the test reporter
+func TestReporterGeneration(t *testing.T) {
 	reporter := NewTestReporter()
 
 	// Create mock test results

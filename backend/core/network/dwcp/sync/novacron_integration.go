@@ -226,20 +226,15 @@ type IntegrationStats struct {
 
 func (ni *NovaCronIntegration) storeClusterMetadata() error {
 	// Marshal cluster metadata
-	_, err := ni.clusterMetadata.Marshal()
+	data, err := ni.clusterMetadata.Marshal()
 	if err != nil {
 		return err
 	}
 
-	// Create OR-Map to store the metadata
-	// TODO: Fix CRDT interface - SetLWW method not available on CvRDT
-	// Temporarily store raw data until CRDT library is updated
 	metadataMap := crdt.NewORMap(ni.engine.nodeID)
-	_ = metadataMap // Placeholder until CRDT interface is fixed
+	metadataMap.SetLWW("cluster_metadata", string(data))
 
-	// Store in ASS engine with placeholder
-	// return ni.engine.Set("cluster_metadata", metadataMap)
-	return nil // Placeholder until CRDT interface is fixed
+	return ni.engine.Set("cluster_metadata", metadataMap)
 }
 
 func (ni *NovaCronIntegration) loadClusterMetadata() error {
