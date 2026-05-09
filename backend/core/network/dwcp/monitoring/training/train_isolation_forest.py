@@ -67,7 +67,7 @@ class FeatureEngineer:
         # Sort by timestamp for rolling windows
         if 'timestamp' in df.columns:
             df_engineered['timestamp'] = pd.to_datetime(df_engineered['timestamp'])
-            df_engineered = df_engineered.sort_values('timestamp')
+            df_engineered = df_engineered.sort_values('timestamp').reset_index(drop=True)
 
         # Base features
         base_features = [
@@ -82,42 +82,42 @@ class FeatureEngineer:
                 if feature in df.columns:
                     # Rolling mean
                     col_name = f'{feature}_rolling_mean_{window}'
-                    df_engineered[col_name] = df[feature].rolling(window=window, min_periods=1).mean()
+                    df_engineered[col_name] = df_engineered[feature].rolling(window=window, min_periods=1).mean()
 
                     # Rolling std
                     col_name = f'{feature}_rolling_std_{window}'
-                    df_engineered[col_name] = df[feature].rolling(window=window, min_periods=1).std().fillna(0)
+                    df_engineered[col_name] = df_engineered[feature].rolling(window=window, min_periods=1).std().fillna(0)
 
                     # Rolling min/max
-                    df_engineered[f'{feature}_rolling_min_{window}'] = df[feature].rolling(window=window, min_periods=1).min()
-                    df_engineered[f'{feature}_rolling_max_{window}'] = df[feature].rolling(window=window, min_periods=1).max()
+                    df_engineered[f'{feature}_rolling_min_{window}'] = df_engineered[feature].rolling(window=window, min_periods=1).min()
+                    df_engineered[f'{feature}_rolling_max_{window}'] = df_engineered[feature].rolling(window=window, min_periods=1).max()
 
         # Rate of change features
         for feature in base_features:
             if feature in df.columns:
-                df_engineered[f'{feature}_rate_of_change'] = df[feature].diff().fillna(0)
-                df_engineered[f'{feature}_acceleration'] = df[feature].diff().diff().fillna(0)
+                df_engineered[f'{feature}_rate_of_change'] = df_engineered[feature].diff().fillna(0)
+                df_engineered[f'{feature}_acceleration'] = df_engineered[feature].diff().diff().fillna(0)
 
         # Interaction features
         if 'error_rate' in df.columns and 'timeout_rate' in df.columns:
-            df_engineered['error_timeout_product'] = df['error_rate'] * df['timeout_rate']
+            df_engineered['error_timeout_product'] = df_engineered['error_rate'] * df_engineered['timeout_rate']
 
         if 'latency_p99' in df.columns and 'latency_p50' in df.columns:
-            df_engineered['latency_spread'] = df['latency_p99'] - df['latency_p50']
-            df_engineered['latency_ratio'] = df['latency_p99'] / (df['latency_p50'] + 1e-6)
+            df_engineered['latency_spread'] = df_engineered['latency_p99'] - df_engineered['latency_p50']
+            df_engineered['latency_ratio'] = df_engineered['latency_p99'] / (df_engineered['latency_p50'] + 1e-6)
 
         if 'cpu_usage' in df.columns and 'memory_usage' in df.columns:
-            df_engineered['resource_pressure'] = (df['cpu_usage'] + df['memory_usage']) / 2
+            df_engineered['resource_pressure'] = (df_engineered['cpu_usage'] + df_engineered['memory_usage']) / 2
 
         # Threshold violation indicators
         if 'error_rate' in df.columns:
-            df_engineered['high_error_rate'] = (df['error_rate'] > 0.01).astype(int)
+            df_engineered['high_error_rate'] = (df_engineered['error_rate'] > 0.01).astype(int)
 
         if 'latency_p99' in df.columns:
-            df_engineered['high_latency'] = (df['latency_p99'] > 100).astype(int)
+            df_engineered['high_latency'] = (df_engineered['latency_p99'] > 100).astype(int)
 
         if 'packet_loss_rate' in df.columns:
-            df_engineered['high_packet_loss'] = (df['packet_loss_rate'] > 0.05).astype(int)
+            df_engineered['high_packet_loss'] = (df_engineered['packet_loss_rate'] > 0.05).astype(int)
 
         # Categorical encoding
         if 'dwcp_mode' in df.columns:
@@ -146,13 +146,56 @@ class IsolationForestTuner:
         self.best_threshold = None
         self.best_params = None
         self.evaluation_results = {}
+        self.selected_feature_indices = None
+        self.selected_feature_names = None
+
+    def _select_features(
+        self,
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        feature_names: list = None,
+        max_features: int = 32
+    ) -> Tuple[np.ndarray, list]:
+        """Select labeled high-signal features before unsupervised fitting."""
+        X_train = np.asarray(X_train, dtype=float)
+        candidate_indices = np.arange(X_train.shape[1])
+        if feature_names is not None:
+            unstable_tokens = ('rolling_', 'rate_of_change', 'acceleration', 'mode_', 'tier_')
+            stable_indices = [
+                i for i, name in enumerate(feature_names)
+                if not any(token in name for token in unstable_tokens)
+            ]
+            if stable_indices:
+                candidate_indices = np.array(stable_indices)
+
+        X_candidates = X_train[:, candidate_indices]
+        if X_candidates.shape[1] <= max_features or len(np.unique(y_train)) < 2:
+            indices = candidate_indices
+        else:
+            normal = X_candidates[y_train == 0]
+            incident = X_candidates[y_train == 1]
+            normal_var = np.var(normal, axis=0)
+            incident_var = np.var(incident, axis=0)
+            separation = np.abs(np.mean(incident, axis=0) - np.mean(normal, axis=0))
+            pooled_std = np.sqrt((normal_var + incident_var) / 2.0) + 1e-9
+            scores = np.nan_to_num(separation / pooled_std, nan=0.0, posinf=0.0, neginf=0.0)
+            indices = candidate_indices[np.argsort(scores)[-max_features:]]
+            indices = np.sort(indices)
+
+        names = (
+            [feature_names[i] for i in indices]
+            if feature_names is not None
+            else [f'feature_{i}' for i in indices]
+        )
+        return indices, names
 
     def tune_hyperparameters(
         self,
         X_train: np.ndarray,
         y_train: np.ndarray,
         X_val: np.ndarray,
-        y_val: np.ndarray
+        y_val: np.ndarray,
+        feature_names: list = None
     ) -> Dict[str, Any]:
         """
         Tune hyperparameters to achieve target recall.
@@ -176,6 +219,19 @@ class IsolationForestTuner:
 
         logger.info(f"Incident rate in training data: {incident_rate:.4f}")
         logger.info(f"Testing contamination values: {contamination_values}")
+
+        self.selected_feature_indices, self.selected_feature_names = self._select_features(
+            X_train,
+            y_train,
+            feature_names
+        )
+        X_train = np.asarray(X_train[:, self.selected_feature_indices], dtype=float)
+        X_val = np.asarray(X_val[:, self.selected_feature_indices], dtype=float)
+        logger.info(
+            "Selected %d/%d reliability features",
+            len(self.selected_feature_indices),
+            len(feature_names) if feature_names is not None else X_train.shape[1]
+        )
 
         param_grid = {
             'n_estimators': [100, 200, 300, 500],
@@ -254,7 +310,8 @@ class IsolationForestTuner:
                                         'n_estimators': n_est,
                                         'max_samples': max_samp,
                                         'max_features': max_feat,
-                                        'contamination': contam
+                                        'contamination': contam,
+                                        'selected_features': self.selected_feature_names
                                     },
                                     'metrics': metrics
                                 }
@@ -296,7 +353,8 @@ class IsolationForestTuner:
                 'n_estimators': int(best_result['n_estimators']),
                 'max_samples': best_result['max_samples'],
                 'max_features': best_result['max_features'],
-                'contamination': best_result['contamination']
+                'contamination': best_result['contamination'],
+                'selected_features': self.selected_feature_names
             }
 
         return {
@@ -374,7 +432,10 @@ class IsolationForestTuner:
         """
         logger.info("Evaluating model on test set...")
 
-        X_test_scaled = self.best_scaler.transform(X_test)
+        if self.selected_feature_indices is not None:
+            X_test = X_test[:, self.selected_feature_indices]
+
+        X_test_scaled = self.best_scaler.transform(np.asarray(X_test, dtype=float))
         scores = self.best_model.score_samples(X_test_scaled)
         predictions = (scores <= self.best_threshold).astype(int)
 
@@ -526,7 +587,11 @@ def generate_synthetic_data(n_samples: int = 10000, incident_rate: float = 0.02)
 
     # Incident samples (anomalous patterns)
     incident_data = {
-        'timestamp': pd.date_range('2024-01-01', periods=n_incident, freq='1min'),
+        'timestamp': np.random.choice(
+            pd.date_range('2024-01-01', periods=n_normal, freq='1min'),
+            n_incident,
+            replace=False
+        ),
         'node_id': np.random.choice([f'node-{i:03d}' for i in range(100)], n_incident),
         'region': np.random.choice(['us-east', 'us-west', 'eu-west'], n_incident),
         'az': np.random.choice(['az1', 'az2', 'az3'], n_incident),
@@ -810,6 +875,7 @@ def main():
     # Feature engineering
     feature_engineer = FeatureEngineer(rolling_windows=[5, 15, 30])
     df_engineered = feature_engineer.engineer_features(df)
+    y = df_engineered['label'].values
 
     # Extract features
     X = df_engineered[feature_engineer.feature_names].values
@@ -840,7 +906,13 @@ def main():
         max_fp_rate=args.max_fp_rate
     )
 
-    tuning_results = tuner.tune_hyperparameters(X_train, y_train, X_val, y_val)
+    tuning_results = tuner.tune_hyperparameters(
+        X_train,
+        y_train,
+        X_val,
+        y_val,
+        feature_engineer.feature_names
+    )
 
     logger.info("\n" + "=" * 80)
     logger.info("Hyperparameter Tuning Complete")
@@ -861,7 +933,7 @@ def main():
         tuner.best_scaler,
         tuner.best_threshold,
         tuner.best_params,
-        feature_engineer.feature_names,
+        tuner.selected_feature_names or feature_engineer.feature_names,
         args.output,
         evaluation_results
     )
