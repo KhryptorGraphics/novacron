@@ -4,7 +4,6 @@ import type { ReactNode } from 'react';
 import {
   RBACProvider as CanonicalRBACProvider,
   useRBAC,
-  type Permission,
   type Role,
 } from '@/contexts/RBACContext';
 

@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
-import { AlertCircle, AlertTriangle, ArrowRight, ChevronDown, ChevronRight, Clock, Info, Search, X } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ChevronDown, ChevronRight, Clock, Info, Search, X } from 'lucide-react';
 
 export interface Alert {
   id: string;

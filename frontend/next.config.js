@@ -1,3 +1,5 @@
+const path = require('path');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Image optimization
@@ -29,26 +31,15 @@ const nextConfig = {
   // Basic optimizations
   poweredByHeader: false,
   reactStrictMode: true,
-  swcMinify: false, // Disable SWC to avoid crashes
   trailingSlash: false,
-
-  // ESLint configuration
-  eslint: {
-    // Warning: This allows production builds to complete even with ESLint errors
-    ignoreDuringBuilds: true,
-  },
 
   // TypeScript configuration
   typescript: {
-    // Warning: This allows production builds to complete even with TypeScript errors
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
 
-  // PRODUCTION FIX: Disable static optimization to bypass SSR errors
-  // This makes the build succeed by skipping pre-rendering
-  experimental: {
-    // Force dynamic rendering for all routes
-    isrMemoryCacheSize: 0,
+  turbopack: {
+    root: path.resolve(__dirname),
   },
 
   // Skip static page generation

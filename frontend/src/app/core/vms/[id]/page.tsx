@@ -10,7 +10,6 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { useVM } from "@/lib/api/hooks/useVM";
 import { useVMAction } from "@/lib/api/hooks/useVMAction";
-import type { VM } from "@/lib/api/types";
 import { useToast } from "@/components/ui/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -123,4 +122,3 @@ export default function VMDetailPage() {
     </div>
   );
 }
-

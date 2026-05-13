@@ -7,13 +7,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { 
   ChevronDown, 
   ChevronRight,
-  Plus,
-  Minus,
   Eye,
   EyeOff,
   Info,
-  Filter,
-  Settings,
   ChevronUp
 } from "lucide-react";
 import { Button } from "./button";
@@ -168,7 +164,7 @@ interface ShowMoreProps {
 export function ShowMore({
   children,
   maxHeight = 200,
-  maxLines,
+  maxLines: _maxLines,
   showLabel = "Show more",
   hideLabel = "Show less",
   className,

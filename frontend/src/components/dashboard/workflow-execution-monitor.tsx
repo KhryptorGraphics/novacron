@@ -28,10 +28,10 @@ export function WorkflowExecutionMonitor({ executionId }: { executionId: string 
         id,
         name: `Node ${id}`, // In a real implementation, you'd get the actual node name
         status: nodeExec.status,
-        startedAt: nodeExec.startedAt,
-        completedAt: nodeExec.completedAt,
-        durationMs: nodeExec.durationMs,
-        errorMessage: nodeExec.errorMessage
+        ...(nodeExec.startedAt !== undefined ? { startedAt: nodeExec.startedAt } : {}),
+        ...(nodeExec.completedAt !== undefined ? { completedAt: nodeExec.completedAt } : {}),
+        ...(nodeExec.durationMs !== undefined ? { durationMs: nodeExec.durationMs } : {}),
+        ...(nodeExec.errorMessage !== undefined ? { errorMessage: nodeExec.errorMessage } : {}),
       }));
       
       setNodes(nodeArray);

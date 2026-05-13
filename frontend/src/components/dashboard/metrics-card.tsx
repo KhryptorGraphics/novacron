@@ -1,7 +1,5 @@
 "use client";
 
-import React from "react";
-
 interface MetricsCardProps {
   title: string;
   value: string;

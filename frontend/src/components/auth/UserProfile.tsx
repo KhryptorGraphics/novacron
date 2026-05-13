@@ -1,14 +1,12 @@
 "use client";
 
-import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useRBAC } from '@/contexts/RBACContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Avatar, AvatarFallback, AvatarInitials } from '@/components/ui/avatar';
-import { User, Settings, Shield, LogOut, Eye } from 'lucide-react';
+import { User, Settings, Shield, LogOut } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,9 +63,9 @@ export default function UserProfile({ showCard = false }: UserProfileProps) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center gap-3">
-            <Avatar>
-              <AvatarFallback>{getUserInitials()}</AvatarFallback>
-            </Avatar>
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-sm font-medium">
+              {getUserInitials()}
+            </div>
             <div>
               <p className="font-medium">{user.firstName} {user.lastName}</p>
               <p className="text-sm text-muted-foreground">{user.email}</p>
@@ -127,11 +125,9 @@ export default function UserProfile({ showCard = false }: UserProfileProps) {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-          <Avatar className="h-8 w-8">
-            <AvatarFallback className="bg-primary/10">
-              {getUserInitials()}
-            </AvatarFallback>
-          </Avatar>
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-medium">
+            {getUserInitials()}
+          </div>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-56" align="end" forceMount>

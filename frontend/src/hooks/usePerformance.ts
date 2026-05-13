@@ -1,5 +1,18 @@
 import { useEffect, useState, useCallback } from 'react';
 
+type LayoutShiftPerformanceEntry = PerformanceEntry & {
+  hadRecentInput?: boolean;
+  value: number;
+};
+
+type MemoryPerformance = Performance & {
+  memory?: {
+    usedJSHeapSize: number;
+    totalJSHeapSize: number;
+    jsHeapSizeLimit: number;
+  };
+};
+
 // Performance monitoring hook for Core Web Vitals
 export function usePerformance() {
   const [metrics, setMetrics] = useState({
@@ -37,10 +50,12 @@ export function usePerformance() {
 
       return () => observer.disconnect();
     }
+
+    return undefined;
   }, []);
 
   useEffect(() => {
-    if (!isSupported) return;
+    if (!isSupported) return undefined;
 
     // Web Vitals measurement using the web-vitals library pattern
     const measureWebVitals = async () => {
@@ -58,7 +73,8 @@ export function usePerformance() {
           const entries = list.getEntries();
           entries.forEach((entry) => {
             if (entry.entryType === 'first-input') {
-              const fid = entry.processingStart - entry.startTime;
+              const firstInput = entry as PerformanceEntry & { processingStart: number };
+              const fid = firstInput.processingStart - firstInput.startTime;
               setMetrics(prev => ({ ...prev, fid }));
             }
           });
@@ -70,8 +86,9 @@ export function usePerformance() {
         const clsObserver = new PerformanceObserver((list) => {
           const entries = list.getEntries();
           entries.forEach((entry) => {
-            if (entry.entryType === 'layout-shift' && !(entry as any).hadRecentInput) {
-              clsValue += (entry as any).value;
+            const layoutShiftEntry = entry as LayoutShiftPerformanceEntry;
+            if (layoutShiftEntry.entryType === 'layout-shift' && !layoutShiftEntry.hadRecentInput) {
+              clsValue += layoutShiftEntry.value;
               setMetrics(prev => ({ ...prev, cls: clsValue }));
             }
           });
@@ -86,16 +103,13 @@ export function usePerformance() {
         };
       } catch (error) {
         console.warn('Performance measurement failed:', error);
+        return undefined;
       }
     };
 
     const cleanup = measureWebVitals();
     return () => {
-      if (cleanup instanceof Promise) {
-        cleanup.then(cleanupFn => cleanupFn && cleanupFn());
-      } else if (typeof cleanup === 'function') {
-        cleanup();
-      }
+      cleanup.then(cleanupFn => cleanupFn && cleanupFn());
     };
   }, [isSupported]);
 
@@ -104,7 +118,7 @@ export function usePerformance() {
     if (!analyticsEndpoint || !isSupported) return;
 
     const validMetrics = Object.entries(metrics)
-      .filter(([_, value]) => value !== null)
+      .filter(([, value]) => value !== null)
       .reduce((acc, [key, value]) => ({ ...acc, [key]: value }), {});
 
     if (Object.keys(validMetrics).length > 0) {
@@ -186,12 +200,16 @@ export function useMemoryMonitoring() {
   }>({});
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !(performance as any).memory) {
-      return;
+    if (typeof window === 'undefined' || !(performance as MemoryPerformance).memory) {
+      return undefined;
     }
 
     const updateMemoryInfo = () => {
-      const memory = (performance as any).memory;
+      const memory = (performance as MemoryPerformance).memory;
+      if (!memory) {
+        return;
+      }
+
       setMemoryInfo({
         usedJSHeapSize: memory.usedJSHeapSize,
         totalJSHeapSize: memory.totalJSHeapSize,

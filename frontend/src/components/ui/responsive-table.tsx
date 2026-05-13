@@ -325,21 +325,21 @@ export function ResponsiveDataTable<T>({
           className="sm:hidden"
         />
         <div className="hidden sm:block">
-          <ResponsiveTable className={className}>
+          <ResponsiveTable {...(className !== undefined ? { className } : {})}>
             <ResponsiveTableHeader>
               <ResponsiveTableRow>
                 {columns.map((column) => (
                   <ResponsiveTableHead
                     key={column.key as string}
-                    priority={column.priority}
-                    align={column.align}
-                    sortable={column.sortable}
                     sorted={
                       sortConfig?.key === column.key
                         ? sortConfig.direction
                         : null
                     }
-                    onSort={() => column.sortable && handleSort(column.key as string)}
+                    {...(column.priority !== undefined ? { priority: column.priority } : {})}
+                    {...(column.align !== undefined ? { align: column.align } : {})}
+                    {...(column.sortable !== undefined ? { sortable: column.sortable } : {})}
+                    {...(column.sortable ? { onSort: () => handleSort(column.key as string) } : {})}
                   >
                     {column.header}
                   </ResponsiveTableHead>
@@ -355,8 +355,8 @@ export function ResponsiveDataTable<T>({
                   {columns.map((column) => (
                     <ResponsiveTableCell
                       key={column.key as string}
-                      priority={column.priority}
-                      align={column.align}
+                      {...(column.priority !== undefined ? { priority: column.priority } : {})}
+                      {...(column.align !== undefined ? { align: column.align } : {})}
                     >
                       {column.render
                         ? column.render((item as any)[column.key], item)
@@ -374,21 +374,21 @@ export function ResponsiveDataTable<T>({
 
   // Desktop table view only
   return (
-    <ResponsiveTable className={className}>
+    <ResponsiveTable {...(className !== undefined ? { className } : {})}>
       <ResponsiveTableHeader>
         <ResponsiveTableRow>
           {columns.map((column) => (
             <ResponsiveTableHead
               key={column.key as string}
-              priority={column.priority}
-              align={column.align}
-              sortable={column.sortable}
               sorted={
                 sortConfig?.key === column.key
                   ? sortConfig.direction
                   : null
               }
-              onSort={() => column.sortable && handleSort(column.key as string)}
+              {...(column.priority !== undefined ? { priority: column.priority } : {})}
+              {...(column.align !== undefined ? { align: column.align } : {})}
+              {...(column.sortable !== undefined ? { sortable: column.sortable } : {})}
+              {...(column.sortable ? { onSort: () => handleSort(column.key as string) } : {})}
             >
               {column.header}
             </ResponsiveTableHead>
@@ -404,9 +404,9 @@ export function ResponsiveDataTable<T>({
             {columns.map((column) => (
               <ResponsiveTableCell
                 key={column.key as string}
-                priority={column.priority}
-                align={column.align}
                 mobileLabel={column.header}
+                {...(column.priority !== undefined ? { priority: column.priority } : {})}
+                {...(column.align !== undefined ? { align: column.align } : {})}
               >
                 {column.render
                   ? column.render((item as any)[column.key], item)

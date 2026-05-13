@@ -89,9 +89,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     
     try {
-      const response = await authService.register({ firstName, lastName, email, password });
+      await authService.register({ firstName, lastName, email, password });
       // After registration, user needs to log in
-      return response;
     } catch (error) {
       console.error('Registration failed:', error);
       throw error;

@@ -8,7 +8,6 @@ import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   Eye,
-  EyeOff,
   Volume2,
   VolumeX,
   Monitor,
@@ -20,11 +19,7 @@ import {
   Keyboard,
   AlertTriangle,
   CheckCircle,
-  Settings,
-  Accessibility,
-  ZoomIn,
-  ZoomOut,
-  SkipForward
+  Accessibility
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -126,7 +121,7 @@ export function AccessibilityProvider({ children, initialSettings = {} }: Access
     root.style.fontSize = `${settings.fontSize}%`;
     
     // Zoom level
-    root.style.zoom = `${settings.zoomLevel}%`;
+    root.style.setProperty('zoom', `${settings.zoomLevel}%`);
     
     // Dark mode
     if (settings.darkMode) {

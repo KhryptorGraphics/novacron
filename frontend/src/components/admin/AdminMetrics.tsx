@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { MetricsCard } from "@/components/monitoring/MetricsCard";
-import { AnimatedCounter, FadeIn, StaggeredList } from "@/lib/animations";
+import { AnimatedCounter, FadeIn } from "@/lib/animations";
 import { 
   Users, 
   Database, 
@@ -11,15 +11,10 @@ import {
   AlertTriangle, 
   Server, 
   Activity,
-  HardDrive,
-  Network,
   Clock,
   TrendingUp,
-  TrendingDown,
   UserCheck,
-  UserX,
   Eye,
-  Lock
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -85,15 +80,6 @@ export function AdminMetrics() {
       case "medium": return "secondary";
       case "low": return "outline";
       default: return "outline";
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "healthy": return "text-green-600";
-      case "warning": return "text-yellow-600";
-      case "error": return "text-red-600";
-      default: return "text-gray-600";
     }
   };
 

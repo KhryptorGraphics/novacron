@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -49,6 +49,12 @@ const STATUS_COLORS = {
   pending: '#eab308',
   failed: '#ef4444',
   cancelled: '#6b7280',
+};
+
+const getStatusBadgeVariant = (status: OrchestrationDecision['status']) => {
+  if (status === 'executed') return 'default';
+  if (status === 'failed') return 'destructive';
+  return 'secondary';
 };
 
 export function PlacementDecisionChart({ decisions }: PlacementDecisionChartProps) {
@@ -127,7 +133,7 @@ export function PlacementDecisionChart({ decisions }: PlacementDecisionChartProp
           <p className="text-sm text-muted-foreground">Type: {data.type}</p>
           <p className="text-sm">Score: {payload[0].value}%</p>
           <p className="text-sm">Confidence: {payload[1]?.value || data.confidence}%</p>
-          <Badge variant={data.status === 'executed' ? 'success' : 'warning'}>
+          <Badge variant={getStatusBadgeVariant(data.status)}>
             {data.status}
           </Badge>
         </div>
@@ -146,7 +152,7 @@ export function PlacementDecisionChart({ decisions }: PlacementDecisionChartProp
           <p className="text-sm">Score: {data.score.toFixed(1)}%</p>
           <p className="text-sm">Confidence: {data.confidence.toFixed(1)}%</p>
           <p className="text-sm">ID: {data.id}</p>
-          <Badge variant={data.status === 'executed' ? 'success' : 'warning'}>
+          <Badge variant={getStatusBadgeVariant(data.status)}>
             {data.status}
           </Badge>
         </div>
@@ -299,7 +305,7 @@ export function PlacementDecisionChart({ decisions }: PlacementDecisionChartProp
                   cy="50%"
                   outerRadius={80}
                   dataKey="value"
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
                 >
                   {decisionTypeData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />

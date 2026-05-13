@@ -7,37 +7,19 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import { securityCapabilities } from "@/lib/api/security";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
-} from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
 import { FadeIn } from "@/lib/animations";
 import { 
   Shield, 
   AlertTriangle, 
-  Lock, 
   Unlock,
-  Eye,
-  EyeOff,
   Ban,
-  CheckCircle,
   XCircle,
   Clock,
   Globe,
   User,
-  Key,
   Activity,
-  TrendingUp,
-  TrendingDown,
-  MapPin,
-  Smartphone,
   Monitor,
-  Wifi,
   FileText,
   Download
 } from "lucide-react";
@@ -58,13 +40,15 @@ interface SecurityMetrics {
   };
 }
 
+type SecurityApiResponse = {
+  data?: Record<string, any>;
+};
+
 // Mock data arrays removed - now fetched from API
 
 
 
 export function SecurityDashboard() {
-  const [activeTab, setActiveTab] = useState("overview");
-  const [selectedAlert, setSelectedAlert] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [securityMetrics, setSecurityMetrics] = useState<SecurityMetrics>({
@@ -100,7 +84,7 @@ export function SecurityDashboard() {
         apiClient.get('/api/security/compliance'),
         apiClient.get('/api/security/incidents'),
         apiClient.get('/api/security/audit/statistics')
-      ]);
+      ]) as SecurityApiResponse[];
 
       // Destructure the actual response shapes from backend
       const { threats = [] } = threatsResponse.data || {};
@@ -130,7 +114,7 @@ export function SecurityDashboard() {
       // Fetch session and IP data
       const [eventsResponse] = await Promise.all([
         apiClient.get('/api/security/events')
-      ]);
+      ]) as SecurityApiResponse[];
 
       const { events = [] } = eventsResponse.data || {};
 
@@ -247,14 +231,6 @@ export function SecurityDashboard() {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString() + " " + date.toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
-  };
-
   const getTimeAgo = (dateString: string) => {
     const now = new Date();
     const past = new Date(dateString);
@@ -280,6 +256,9 @@ export function SecurityDashboard() {
         </div>
         
         <div className="flex items-center gap-2">
+          <Badge variant={isConnected ? "secondary" : "outline"}>
+            {isConnected ? "Live" : "Offline"}
+          </Badge>
           <Badge 
             variant={securityMetrics.threatLevel === "high" ? "destructive" : "secondary"}
             className="capitalize"
@@ -292,6 +271,22 @@ export function SecurityDashboard() {
           </Button>
         </div>
       </div>
+
+      {error ? (
+        <Card className="border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/30">
+          <CardContent className="py-4 text-sm text-red-700 dark:text-red-300">
+            {error}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {loading ? (
+        <Card>
+          <CardContent className="py-4 text-sm text-muted-foreground">
+            Loading security data...
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Security Overview Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -370,8 +365,7 @@ export function SecurityDashboard() {
                   {securityAlerts.map((alert) => (
                     <div 
                       key={alert.id} 
-                      className="flex items-start gap-4 p-4 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
-                      onClick={() => setSelectedAlert(alert)}
+                      className="flex items-start gap-4 p-4 border rounded-lg"
                     >
                       <div className={cn("h-3 w-3 rounded-full mt-2", getSeverityColor(alert.severity))} />
                       

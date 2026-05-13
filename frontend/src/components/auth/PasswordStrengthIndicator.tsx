@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { validatePassword, PasswordStrength } from "@/lib/validation";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { CheckCircle2, AlertCircle, Info, Shield, Eye, Lock } from "lucide-react";
+import { CheckCircle2, AlertCircle, Info, Shield, Lock } from "lucide-react";
 
 interface PasswordStrengthIndicatorProps {
   password: string;

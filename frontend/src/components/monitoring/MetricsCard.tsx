@@ -1,13 +1,12 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 
 interface MetricsCardProps {
   title: string;
-  value: string | number;
+  value: React.ReactNode;
   unit?: string;
   change?: number;
   changeLabel?: string;

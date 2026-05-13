@@ -110,8 +110,9 @@ export const ResourceTreemap: React.FC<ResourceTreemapProps> = ({
   ): LayoutedNode => {
     // Base case: leaf node
     if (!node.children || node.children.length === 0) {
+      const { children: _children, ...leafNode } = node;
       return {
-        ...node,
+        ...leafNode,
         x0,
         y0,
         x1,
@@ -120,8 +121,7 @@ export const ResourceTreemap: React.FC<ResourceTreemapProps> = ({
           ? getValueColor(node.value, minValue, maxValue)
           : getCategoryColor(node)
         ),
-        children: undefined
-      } as LayoutedNode;
+      };
     }
     
     // Calculate total value of children

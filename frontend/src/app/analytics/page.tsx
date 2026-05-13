@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Activity, ArrowRight, Database, HardDrive, Loader2, Network, Server, Shield } from "lucide-react";
+import { Activity, ArrowRight, Database, HardDrive, Server, Shield } from "lucide-react";
 
 import AuthGuard from "@/components/auth/AuthGuard";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -34,7 +34,7 @@ function MetricPanel({
   title: string;
   value: string;
   description: string;
-  progress?: number;
+  progress?: number | undefined;
   icon: React.ReactNode;
 }) {
   return (

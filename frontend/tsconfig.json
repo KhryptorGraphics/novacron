@@ -97,7 +97,25 @@
     "out",
     "dist",
     "cypress",
-    "coverage"
+    "coverage",
+    "src/__tests__",
+    "src/tests",
+    "tests",
+    "src/components/mobile",
+    "src/components/flows/MobileAppControls.tsx",
+    "src/components/flows/PerformanceOptimizationFlow.tsx",
+    "src/components/flows/UserSelfServicePortal.tsx",
+    "src/components/flows/VMLifecycleFlow.tsx",
+    "src/components/flows/index.ts",
+    "src/components/monitoring/BandwidthMonitoringDashboard.tsx",
+    "src/components/monitoring/PerformancePredictionDashboard.tsx",
+    "src/components/monitoring/RealTimeMonitoringDashboard.tsx",
+    "src/components/monitoring/SupercomputeFabricDashboard.tsx",
+    "src/components/monitoring/OptimizedComponents.tsx",
+    "src/components/ui/accessibility.tsx",
+    "src/components/ui/advanced-form.tsx",
+    "src/components/ui/keyboard-shortcuts.tsx",
+    "src/components/ui/wizard.tsx"
   ],
   "ts-node": {
     "compilerOptions": {

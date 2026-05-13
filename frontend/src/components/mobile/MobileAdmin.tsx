@@ -1,5 +1,5 @@
 // Mobile-first administration interface for NovaCron
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,20 +7,17 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  Modal,
   Alert,
-  Platform,
   Dimensions,
   RefreshControl,
   FlatList,
   Switch,
-  ActivityIndicator,
   SafeAreaView,
   StatusBar,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LineChart, PieChart, BarChart } from 'react-native-chart-kit';
+import { LineChart } from 'react-native-chart-kit';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';

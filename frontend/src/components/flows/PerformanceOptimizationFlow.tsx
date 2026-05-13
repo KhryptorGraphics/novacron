@@ -1,40 +1,34 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { 
   TrendingUp,
   TrendingDown,
   Zap,
-  CPU,
+  Cpu,
   MemoryStick,
   HardDrive,
   Network,
   AlertTriangle,
   CheckCircle,
-  Clock,
-  Target,
   Settings,
   Play,
-  Pause,
   BarChart3,
-  LineChart,
   Activity,
-  Gauge,
   Wrench,
   Lightbulb,
   RefreshCw,
   ChevronRight,
   Eye,
+  ArrowRight,
   ArrowUp,
   ArrowDown
 } from 'lucide-react';
@@ -279,7 +273,7 @@ const mockRecommendations: OptimizationRecommendation[] = [
 
 export function PerformanceOptimizationFlow() {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [selectedVM, setSelectedVM] = useState('vm-001');
+  const selectedVM = 'vm-001';
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [selectedRecommendations, setSelectedRecommendations] = useState<string[]>([]);
@@ -296,65 +290,69 @@ export function PerformanceOptimizationFlow() {
 
   // Simulate analysis progress
   useEffect(() => {
-    if (isAnalyzing) {
-      const interval = setInterval(() => {
-        setAnalysisProgress(prev => {
-          if (prev >= 100) {
-            setIsAnalyzing(false);
-            toast({
-              title: "Analysis Complete",
-              description: "Performance bottlenecks have been identified with optimization recommendations.",
-            });
-            return 100;
-          }
-          return prev + Math.random() * 8;
-        });
-      }, 500);
-      
-      return () => clearInterval(interval);
+    if (!isAnalyzing) {
+      return undefined;
     }
+
+    const interval = setInterval(() => {
+      setAnalysisProgress(prev => {
+        if (prev >= 100) {
+          setIsAnalyzing(false);
+          toast({
+            title: "Analysis Complete",
+            description: "Performance bottlenecks have been identified with optimization recommendations.",
+          });
+          return 100;
+        }
+        return prev + Math.random() * 8;
+      });
+    }, 500);
+
+    return () => clearInterval(interval);
   }, [isAnalyzing, toast]);
 
   // Simulate optimization job progress
   useEffect(() => {
-    if (optimizationJob?.status === 'running') {
-      const interval = setInterval(() => {
-        setOptimizationJob(prev => {
-          if (!prev) return null;
-          
-          const newProgress = Math.min(prev.progress + Math.random() * 5, 100);
-          
-          if (newProgress >= 100) {
-            const results = {
-              appliedOptimizations: selectedRecommendations.length,
-              performanceGain: 28.5,
-              beforeAfter: {
-                cpu: { before: 85.4, after: 62.1 },
-                memory: { before: 78.2, after: 68.5 },
-                disk: { before: 156.8, after: 98.4 },
-                network: { before: 420.5, after: 445.2 }
-              }
-            };
-            
-            toast({
-              title: "Optimization Complete",
-              description: `Applied ${results.appliedOptimizations} optimizations with ${results.performanceGain}% performance improvement.`,
-            });
-            
-            return {
-              ...prev,
-              status: 'completed',
-              progress: 100,
-              results
-            };
-          }
-          
-          return { ...prev, progress: newProgress };
-        });
-      }, 800);
-      
-      return () => clearInterval(interval);
+    if (optimizationJob?.status !== 'running') {
+      return undefined;
     }
+
+    const interval = setInterval(() => {
+      setOptimizationJob(prev => {
+        if (!prev) return null;
+
+        const newProgress = Math.min(prev.progress + Math.random() * 5, 100);
+
+        if (newProgress >= 100) {
+          const results = {
+            appliedOptimizations: selectedRecommendations.length,
+            performanceGain: 28.5,
+            beforeAfter: {
+              cpu: { before: 85.4, after: 62.1 },
+              memory: { before: 78.2, after: 68.5 },
+              disk: { before: 156.8, after: 98.4 },
+              network: { before: 420.5, after: 445.2 }
+            }
+          };
+
+          toast({
+            title: "Optimization Complete",
+            description: `Applied ${results.appliedOptimizations} optimizations with ${results.performanceGain}% performance improvement.`,
+          });
+
+          return {
+            ...prev,
+            status: 'completed',
+            progress: 100,
+            results
+          };
+        }
+
+        return { ...prev, progress: newProgress };
+      });
+    }, 800);
+
+    return () => clearInterval(interval);
   }, [optimizationJob?.status, selectedRecommendations.length, toast]);
 
   const startAnalysis = () => {
@@ -395,7 +393,7 @@ export function PerformanceOptimizationFlow() {
 
   const getMetricIcon = (category: string) => {
     switch (category) {
-      case 'cpu': return CPU;
+      case 'cpu': return Cpu;
       case 'memory': return MemoryStick;
       case 'disk': return HardDrive;
       case 'network': return Network;

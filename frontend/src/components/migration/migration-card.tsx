@@ -1,14 +1,24 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Clock, ArrowRight, AlertTriangle, CheckCircle, RefreshCw, XCircle } from 'lucide-react';
+import { ArrowRight, RefreshCw, XCircle } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
-import { bytesToSize } from '@/lib/utils';
 import { useToast } from '@/components/ui/use-toast';
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return '0 B';
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / Math.pow(1024, exponent);
+  return `${value.toFixed(value >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
+}
 
 export interface MigrationStatus {
   migrationId: string;
@@ -54,9 +64,10 @@ export function MigrationCard({ migration, onCancel, onRetry }: MigrationCardPro
         description: `Cancellation request for ${migration.vmName} has been submitted.`,
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       toast({
         title: "Error cancelling migration",
-        description: `Failed to cancel migration: ${error.message}`,
+        description: `Failed to cancel migration: ${message}`,
         variant: "destructive",
       });
     }
@@ -72,9 +83,10 @@ export function MigrationCard({ migration, onCancel, onRetry }: MigrationCardPro
         description: `Started a new migration for ${migration.vmName}.`,
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       toast({
         title: "Error retrying migration",
-        description: `Failed to retry migration: ${error.message}`,
+        description: `Failed to retry migration: ${message}`,
         variant: "destructive",
       });
     }
@@ -127,14 +139,14 @@ export function MigrationCard({ migration, onCancel, onRetry }: MigrationCardPro
             {migration.transferRate && (
               <div>
                 <div className="text-gray-500">Transfer Rate</div>
-                <div className="font-medium">{bytesToSize(migration.transferRate)}/s</div>
+                <div className="font-medium">{formatBytes(migration.transferRate)}/s</div>
               </div>
             )}
             
             {migration.bytesTransferred && migration.totalBytes && (
               <div>
                 <div className="text-gray-500">Data Transferred</div>
-                <div className="font-medium">{bytesToSize(migration.bytesTransferred)} / {bytesToSize(migration.totalBytes)}</div>
+                <div className="font-medium">{formatBytes(migration.bytesTransferred)} / {formatBytes(migration.totalBytes)}</div>
               </div>
             )}
           </div>

@@ -64,6 +64,6 @@ export function connectEvents(onWelcome?: (msg: unknown) => void): WebSocket {
       removeEventListener: () => {},
       send: () => {},
       readyState: WebSocket.CLOSED
-    } as WebSocket;
+    } as unknown as WebSocket;
   }
 }

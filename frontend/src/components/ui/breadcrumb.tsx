@@ -58,7 +58,7 @@ function generateBreadcrumbs(pathname: string): BreadcrumbItem[] {
     
     breadcrumbs.push({
       label: routeLabels[currentPath] || segment.charAt(0).toUpperCase() + segment.slice(1),
-      href: isLast ? undefined : currentPath,
+      ...(isLast ? {} : { href: currentPath }),
     });
   });
   

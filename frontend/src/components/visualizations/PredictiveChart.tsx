@@ -170,7 +170,6 @@ export const PredictiveChart: React.FC<PredictiveChartProps> = ({
             return `${label}: ${value}`;
           },
           afterBody: function(tooltipItems: any[]) {
-            const index = tooltipItems[0].dataIndex;
             const label = tooltipItems[0].label;
             
             // Check if there's an anomaly at this point

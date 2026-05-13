@@ -1,7 +1,5 @@
 "use client";
 
-import React from "react";
-
 interface SystemStatusProps {
   total_nodes: number;
   total_vms: number;

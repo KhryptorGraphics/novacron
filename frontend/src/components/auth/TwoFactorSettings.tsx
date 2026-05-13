@@ -2,8 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Icons } from "@/components/ui/icons";
 import { useToast } from "@/components/ui/use-toast";
@@ -22,7 +20,6 @@ interface TwoFactorStatus {
 export default function TwoFactorSettings() {
   const [status, setStatus] = useState<TwoFactorStatus>({ enabled: false, backup_codes_remaining: 0 });
   const [isLoading, setIsLoading] = useState(true);
-  const [disableCode, setDisableCode] = useState('');
   const [isDisabling, setIsDisabling] = useState(false);
   const [newBackupCodes, setNewBackupCodes] = useState<string[]>([]);
   const [isGeneratingCodes, setIsGeneratingCodes] = useState(false);
@@ -64,7 +61,6 @@ export default function TwoFactorSettings() {
 
       setStatus({ enabled: false, backup_codes_remaining: 0 });
       setShowDisableDialog(false);
-      setDisableCode('');
     } catch (error) {
       console.error('Failed to disable 2FA:', error);
       const errorMessage = error instanceof Error ? error.message : "Failed to disable 2FA. Please try again.";

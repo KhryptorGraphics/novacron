@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Icons } from "@/components/ui/icons";
-import Link from "next/link";
 
 interface LoginFormProps {
   onSubmit: (email: string, password: string) => Promise<void>;

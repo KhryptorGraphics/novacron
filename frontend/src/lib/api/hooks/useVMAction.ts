@@ -2,7 +2,6 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { postVMAction } from "../vms";
-import type { VM } from "../types";
 
 export function useVMAction(id: string, action: "start" | "stop" | "restart" | "pause" | "resume", options?: { role?: "viewer" | "operator" }) {
   const qc = useQueryClient();

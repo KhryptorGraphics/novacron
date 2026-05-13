@@ -9,21 +9,21 @@ interface ProtectedRouteProps {
   requiredPermissions?: string[];
 }
 
-export function ProtectedRoute({ children, requiredPermissions }: ProtectedRouteProps) {
-  const { user, loading } = useAuth();
+export function ProtectedRoute({ children, requiredPermissions: _requiredPermissions }: ProtectedRouteProps) {
+  const { user, isLoading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
-    if (!loading && !user) {
+    if (!isLoading && !user) {
       // Store the intended destination
       const returnUrl = encodeURIComponent(pathname || '/dashboard');
       router.push(`/auth/login?returnUrl=${returnUrl}`);
     }
-  }, [user, loading, router, pathname]);
+  }, [user, isLoading, router, pathname]);
 
   // Show loading state
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center space-y-4">
@@ -40,7 +40,7 @@ export function ProtectedRoute({ children, requiredPermissions }: ProtectedRoute
   }
 
   // TODO: Implement permission checking
-  // if (requiredPermissions && !hasPermissions(user, requiredPermissions)) {
+  // if (_requiredPermissions && !hasPermissions(user, _requiredPermissions)) {
   //   return (
   //     <div className="flex items-center justify-center min-h-screen">
   //       <div className="text-center space-y-4">
@@ -53,4 +53,3 @@ export function ProtectedRoute({ children, requiredPermissions }: ProtectedRoute
 
   return <>{children}</>;
 }
-

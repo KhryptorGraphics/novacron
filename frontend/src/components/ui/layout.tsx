@@ -137,7 +137,7 @@ const Inline = React.forwardRef<HTMLDivElement, InlineProps>(
   ({ className, spacing, align, justify, wrap, ...props }, ref) => {
     return (
       <div
-        className={cn(inlineVariants({ spacing, align, justify, wrap: wrap ? "true" : "false", className }))}
+        className={cn(inlineVariants({ spacing, align, justify, wrap, className }))}
         ref={ref}
         {...props}
       />

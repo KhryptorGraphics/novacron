@@ -1,8 +1,7 @@
 // React hooks for API integration
 import { useState, useEffect, useCallback } from 'react';
-import { 
-  apiService, 
-  VMInfo, 
+import { apiService } from '@/lib/api';
+import type {
   HealthStatus, 
   CronJob, 
   CreateJobRequest, 
@@ -140,6 +139,8 @@ export function useVMMetrics(vmId: string | null) {
       const interval = setInterval(fetchMetrics, 10000);
       return () => clearInterval(interval);
     }
+
+    return undefined;
   }, [fetchMetrics, vmId]);
 
   return { metrics, loading, error, refetch: fetchMetrics };
@@ -456,12 +457,14 @@ export function useWorkflowExecution(id: string | null) {
   }, [id]);
 
   useEffect(() => {
-    if (id) {
-      fetchExecution();
-      // Poll for updates every 5 seconds
-      const interval = setInterval(fetchExecution, 5000);
-      return () => clearInterval(interval);
+    if (!id) {
+      return undefined;
     }
+
+    fetchExecution();
+    // Poll for updates every 5 seconds
+    const interval = setInterval(fetchExecution, 5000);
+    return () => clearInterval(interval);
   }, [fetchExecution, id]);
 
   return { 
@@ -488,14 +491,16 @@ export function useWebSocket() {
       }
     );
 
-    if (ws) {
-      ws.onopen = () => setConnected(true);
-      ws.onclose = () => setConnected(false);
-      
-      return () => {
-        ws.close();
-      };
+    if (!ws) {
+      return undefined;
     }
+
+    ws.onopen = () => setConnected(true);
+    ws.onclose = () => setConnected(false);
+
+    return () => {
+      ws.close();
+    };
   }, []);
 
   return { connected, lastMessage };
