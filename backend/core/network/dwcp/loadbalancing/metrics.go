@@ -12,10 +12,10 @@ type MetricsCollector struct {
 	config *LoadBalancerConfig
 
 	// Request metrics
-	totalRequests   uint64
-	totalFailures   uint64
-	totalFailovers  uint64
-	requestsPerSec  uint64
+	totalRequests  uint64
+	totalFailures  uint64
+	totalFailovers uint64
+	requestsPerSec uint64
 
 	// Latency tracking
 	routingLatencies  []time.Duration
@@ -29,9 +29,9 @@ type MetricsCollector struct {
 	// Geographic distribution
 	requestsByRegion map[string]uint64
 
-	mu       sync.RWMutex
-	ctx      context.Context
-	cancel   context.CancelFunc
+	mu     sync.RWMutex
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewMetricsCollector creates a new metrics collector
@@ -153,10 +153,11 @@ func (mc *MetricsCollector) runMetricsAggregation() {
 			currentRequests := atomic.LoadUint64(&mc.totalRequests)
 			currentTime := time.Now()
 
-			// Calculate requests per second
+			// Calculate requests per second; preserve the last non-zero rate across idle ticks.
 			elapsed := currentTime.Sub(lastTime).Seconds()
-			if elapsed > 0 {
-				rps := float64(currentRequests-lastRequestCount) / elapsed
+			requestDelta := currentRequests - lastRequestCount
+			if elapsed > 0 && requestDelta > 0 {
+				rps := float64(requestDelta) / elapsed
 				atomic.StoreUint64(&mc.requestsPerSec, uint64(rps))
 			}
 
@@ -172,10 +173,10 @@ func (mc *MetricsCollector) GetMetrics() *LoadBalancerStats {
 	defer mc.mu.RUnlock()
 
 	stats := &LoadBalancerStats{
-		TotalRequests:    atomic.LoadUint64(&mc.totalRequests),
-		TotalFailures:    atomic.LoadUint64(&mc.totalFailures),
-		TotalFailovers:   atomic.LoadUint64(&mc.totalFailovers),
-		TotalConnections: atomic.LoadInt32(&mc.activeConnections),
+		TotalRequests:     atomic.LoadUint64(&mc.totalRequests),
+		TotalFailures:     atomic.LoadUint64(&mc.totalFailures),
+		TotalFailovers:    atomic.LoadUint64(&mc.totalFailovers),
+		TotalConnections:  atomic.LoadInt32(&mc.activeConnections),
 		RequestsPerSecond: float64(atomic.LoadUint64(&mc.requestsPerSec)),
 	}
 

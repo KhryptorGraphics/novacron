@@ -212,11 +212,12 @@ func (ad *AnomalyDetector) DetectAnomaly(metricName string, value float64) *Anom
 	}
 	ad.mu.RUnlock()
 
-	// Simple heuristic-based anomaly detection for single metrics
-	// TODO: Integrate with full anomaly detection pipeline
+	// Single-metric detection uses conservative operating ranges when a full
+	// metric vector is not available for ensemble scoring.
 	isAnomaly := false
 	severity := SeverityInfo
 	confidence := 0.0
+	expected, deviation := metricExpectation(metricName, value)
 
 	// Basic threshold-based detection
 	// Typical ranges: bandwidth 0-10000 Mbps, latency 0-500ms, packet loss 0-100%
@@ -247,10 +248,39 @@ func (ad *AnomalyDetector) DetectAnomaly(metricName string, value float64) *Anom
 		Severity:    severity,
 		Confidence:  confidence,
 		Value:       value,
-		Expected:    0.0, // TODO: Calculate expected value
-		Deviation:   0.0, // TODO: Calculate deviation
+		Expected:    expected,
+		Deviation:   deviation,
 		Timestamp:   time.Now(),
 		Description: fmt.Sprintf("Metric: %s, Value: %.2f", metricName, value),
+	}
+}
+
+func metricExpectation(metricName string, value float64) (float64, float64) {
+	minValue, maxValue, ok := metricOperatingRange(metricName)
+	if !ok {
+		return value, 0
+	}
+
+	expected := value
+	if value < minValue {
+		expected = minValue
+	} else if value > maxValue {
+		expected = maxValue
+	}
+
+	return expected, math.Abs(value - expected)
+}
+
+func metricOperatingRange(metricName string) (float64, float64, bool) {
+	switch metricName {
+	case "bandwidth":
+		return 0, 10000, true
+	case "latency":
+		return 0, 500, true
+	case "packet_loss":
+		return 0, 100, true
+	default:
+		return 0, 0, false
 	}
 }
 

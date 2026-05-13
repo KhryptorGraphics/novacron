@@ -23,10 +23,10 @@ type Bullshark struct {
 	commitQueue    chan *Vertex
 
 	// Metrics
-	txThroughput   int64
-	latency        time.Duration
-	proposalCount  int64
-	commitCount    int64
+	txThroughput  int64
+	latency       time.Duration
+	proposalCount int64
+	commitCount   int64
 
 	// Synchronization
 	mu      sync.RWMutex
@@ -39,19 +39,19 @@ type Bullshark struct {
 // Config holds Bullshark configuration parameters
 type Config struct {
 	// Protocol parameters
-	RoundDuration    time.Duration
-	BatchSize        int
-	CommitteeSize    int
-	QuorumThreshold  float64
+	RoundDuration   time.Duration
+	BatchSize       int
+	CommitteeSize   int
+	QuorumThreshold float64
 
 	// Performance tuning
-	BufferSize       int
-	WorkerCount      int
-	MaxParents       int
+	BufferSize  int
+	WorkerCount int
+	MaxParents  int
 
 	// Timeouts
-	ProposeTimeout   time.Duration
-	CommitTimeout    time.Duration
+	ProposeTimeout time.Duration
+	CommitTimeout  time.Duration
 }
 
 // DefaultConfig returns default Bullshark configuration
@@ -114,10 +114,6 @@ func (b *Bullshark) Stop() error {
 	}
 
 	b.cancel()
-
-	// Close channels
-	close(b.proposalBuffer)
-	close(b.commitQueue)
 
 	// Wait for workers
 	b.wg.Wait()
@@ -342,11 +338,11 @@ func (b *Bullshark) metricsCollector() {
 // GetMetrics returns current consensus metrics
 func (b *Bullshark) GetMetrics() Metrics {
 	return Metrics{
-		Round:          atomic.LoadInt64(&b.round),
-		TxThroughput:   atomic.LoadInt64(&b.txThroughput),
-		ProposalCount:  atomic.LoadInt64(&b.proposalCount),
-		CommitCount:    atomic.LoadInt64(&b.commitCount),
-		DAGMetrics:     b.dag.Metrics(),
+		Round:         atomic.LoadInt64(&b.round),
+		TxThroughput:  atomic.LoadInt64(&b.txThroughput),
+		ProposalCount: atomic.LoadInt64(&b.proposalCount),
+		CommitCount:   atomic.LoadInt64(&b.commitCount),
+		DAGMetrics:    b.dag.Metrics(),
 	}
 }
 

@@ -1,9 +1,13 @@
 package compression
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,20 +17,21 @@ import (
 // BaselineSynchronizer manages baseline state synchronization across cluster nodes
 type BaselineSynchronizer struct {
 	// Local baselines
-	localBaselines  map[string]*BaselineState
-	baselineMutex   sync.RWMutex
+	localBaselines map[string]*BaselineState
+	baselineMutex  sync.RWMutex
 
 	// Remote node tracking
-	remoteNodes     map[string]*RemoteNode
-	nodesMutex      sync.RWMutex
+	remoteNodes map[string]*RemoteNode
+	nodesMutex  sync.RWMutex
 
 	// Configuration
-	config          *BaselineSyncConfig
-	logger          *zap.Logger
+	config *BaselineSyncConfig
+	logger *zap.Logger
 
 	// Synchronization
-	syncTicker      *time.Ticker
-	stopChan        chan struct{}
+	syncTicker *time.Ticker
+	stopChan   chan struct{}
+	httpClient *http.Client
 }
 
 // RemoteNode represents a remote cluster node
@@ -64,6 +69,11 @@ type BaselineVersion struct {
 	NodeID    string    `json:"node_id"`
 }
 
+type baselineSyncRequest struct {
+	Baselines map[string]*BaselineState `json:"baselines"`
+	SentAt    time.Time                 `json:"sent_at"`
+}
+
 // DefaultBaselineSyncConfig returns sensible defaults
 func DefaultBaselineSyncConfig() *BaselineSyncConfig {
 	return &BaselineSyncConfig{
@@ -91,6 +101,7 @@ func NewBaselineSynchronizer(config *BaselineSyncConfig, logger *zap.Logger) *Ba
 		config:         config,
 		logger:         logger,
 		stopChan:       make(chan struct{}),
+		httpClient:     &http.Client{Timeout: 10 * time.Second},
 	}
 
 	// Start sync scheduler if enabled
@@ -200,20 +211,19 @@ func (bs *BaselineSynchronizer) syncWithNode(ctx context.Context, node *RemoteNo
 	node.Status = NodeStatusSyncing
 	bs.nodesMutex.Unlock()
 
-	// TODO: Implement actual network sync using DWCP transport
-	// For now, this is a placeholder for the sync protocol
-
-	// Simulate sync delay
-	select {
-	case <-time.After(10 * time.Millisecond):
-	case <-ctx.Done():
-		return ctx.Err()
+	baselines := bs.snapshotBaselines()
+	if err := bs.pushBaselinesToNode(ctx, node, baselines); err != nil {
+		bs.nodesMutex.Lock()
+		node.Status = NodeStatusOffline
+		bs.nodesMutex.Unlock()
+		return err
 	}
 
 	// Update node status
 	bs.nodesMutex.Lock()
 	node.Status = NodeStatusOnline
 	node.LastSync = time.Now()
+	node.BaselineCount = len(baselines)
 	bs.nodesMutex.Unlock()
 
 	return nil
@@ -221,12 +231,33 @@ func (bs *BaselineSynchronizer) syncWithNode(ctx context.Context, node *RemoteNo
 
 // syncBaseline synchronizes a single baseline with cluster
 func (bs *BaselineSynchronizer) syncBaseline(key string, baseline *BaselineState) {
-	// TODO: Implement async baseline push to cluster nodes
-	// This would use DWCP transport to send baseline updates
+	nodes := bs.snapshotNodes()
+	if len(nodes) == 0 {
+		return
+	}
 
 	bs.logger.Debug("Syncing baseline",
 		zap.String("key", key),
 		zap.Int("size", len(baseline.Data)))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	payload := map[string]*BaselineState{key: baseline}
+	for _, node := range nodes {
+		if err := bs.pushBaselinesToNode(ctx, node, payload); err != nil {
+			bs.logger.Warn("Failed to push baseline",
+				zap.String("node_id", node.NodeID),
+				zap.String("key", key),
+				zap.Error(err))
+			continue
+		}
+		bs.nodesMutex.Lock()
+		node.Status = NodeStatusOnline
+		node.LastSync = time.Now()
+		node.BaselineCount++
+		bs.nodesMutex.Unlock()
+	}
 }
 
 // ResolveConflict resolves baseline conflicts using configured strategy
@@ -266,8 +297,17 @@ func (bs *BaselineSynchronizer) MigrateBaseline(key string, oldVersion, newVersi
 		return fmt.Errorf("baseline not found: %s", key)
 	}
 
-	// TODO: Implement actual version migration logic
-	// For now, just update timestamp
+	if oldVersion == newVersion {
+		return nil
+	}
+	if oldVersion < 0 || newVersion < 0 {
+		return fmt.Errorf("baseline versions must be >= 0")
+	}
+	if newVersion < oldVersion {
+		return fmt.Errorf("cannot migrate baseline %s from version %d to older version %d", key, oldVersion, newVersion)
+	}
+
+	baseline.DeltaCount = 0
 	baseline.Timestamp = time.Now()
 
 	bs.logger.Info("Migrated baseline",
@@ -276,6 +316,81 @@ func (bs *BaselineSynchronizer) MigrateBaseline(key string, oldVersion, newVersi
 		zap.Int("new_version", newVersion))
 
 	return nil
+}
+
+func (bs *BaselineSynchronizer) snapshotNodes() []*RemoteNode {
+	bs.nodesMutex.RLock()
+	defer bs.nodesMutex.RUnlock()
+
+	nodes := make([]*RemoteNode, 0, len(bs.remoteNodes))
+	for _, node := range bs.remoteNodes {
+		nodes = append(nodes, node)
+	}
+	return nodes
+}
+
+func (bs *BaselineSynchronizer) snapshotBaselines() map[string]*BaselineState {
+	bs.baselineMutex.RLock()
+	defer bs.baselineMutex.RUnlock()
+
+	baselines := make(map[string]*BaselineState, len(bs.localBaselines))
+	for key, baseline := range bs.localBaselines {
+		copyBaseline := *baseline
+		copyBaseline.Data = append([]byte(nil), baseline.Data...)
+		baselines[key] = &copyBaseline
+	}
+	return baselines
+}
+
+func (bs *BaselineSynchronizer) pushBaselinesToNode(ctx context.Context, node *RemoteNode, baselines map[string]*BaselineState) error {
+	endpoint, err := baselineSyncEndpoint(node.Address)
+	if err != nil {
+		return err
+	}
+
+	body, err := json.Marshal(baselineSyncRequest{
+		Baselines: baselines,
+		SentAt:    time.Now(),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal baseline sync request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create baseline sync request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-DWCP-Baseline-Sync", "v1")
+
+	resp, err := bs.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("push baselines to node %s: %w", node.NodeID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("push baselines to node %s: status %s", node.NodeID, resp.Status)
+	}
+
+	return nil
+}
+
+func baselineSyncEndpoint(address string) (string, error) {
+	if address == "" {
+		return "", fmt.Errorf("node address cannot be empty")
+	}
+	if !strings.Contains(address, "://") {
+		address = "http://" + address
+	}
+	parsed, err := url.Parse(address)
+	if err != nil {
+		return "", fmt.Errorf("invalid node address %q: %w", address, err)
+	}
+	if parsed.Path == "" || parsed.Path == "/" {
+		parsed.Path = "/dwcp/baselines/sync"
+	}
+	return parsed.String(), nil
 }
 
 // ExportBaselines exports all baselines for backup

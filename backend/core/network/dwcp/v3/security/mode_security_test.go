@@ -347,7 +347,7 @@ func TestModeAwareSecurity_ConcurrentValidation(t *testing.T) {
 		go func(id int) {
 			nodeID := "concurrent-node-" + string(rune('0'+id))
 			for j := 0; j < 100; j++ {
-				mas.ValidateMessage(nodeID, "prepare", map[string]string{"seq": string(rune('0'+j))}, "sig")
+				mas.ValidateMessage(nodeID, "prepare", map[string]string{"seq": string(rune('0' + j))}, "sig")
 			}
 			done <- true
 		}(i)
@@ -374,6 +374,19 @@ func TestModeAwareSecurity_TLSConfiguration(t *testing.T) {
 
 	if tlsConfig.MinVersion < 0x0304 {
 		t.Error("Expected minimum TLS 1.3")
+	}
+
+	if len(tlsConfig.Certificates) != 1 {
+		t.Fatalf("Expected one generated TLS certificate, got %d", len(tlsConfig.Certificates))
+	}
+	if len(tlsConfig.Certificates[0].Certificate) == 0 || tlsConfig.Certificates[0].PrivateKey == nil {
+		t.Fatal("Expected generated TLS certificate to include certificate chain and private key")
+	}
+	if tlsConfig.Certificates[0].Leaf == nil {
+		t.Fatal("Expected generated TLS certificate to include parsed leaf certificate")
+	}
+	if mas.certManager == nil || mas.certManager.caCertPool == nil {
+		t.Fatal("Expected certificate manager to initialize CA pool")
 	}
 
 	internetConfig := mas.internetConfig

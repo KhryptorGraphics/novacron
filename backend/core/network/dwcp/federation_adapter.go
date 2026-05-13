@@ -2,9 +2,12 @@
 package dwcp
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"net"
 	"sync"
@@ -124,6 +127,58 @@ type StateUpdate struct {
 	BaselineVersion uint64
 	Timestamp       time.Time
 	Priority        int
+}
+
+type stateUpdateEnvelope struct {
+	Type    string       `json:"type"`
+	Version int          `json:"version"`
+	Update  *StateUpdate `json:"update"`
+}
+
+type clusterStateSnapshot struct {
+	Type        string                    `json:"type"`
+	Version     int                       `json:"version"`
+	GeneratedAt time.Time                 `json:"generated_at"`
+	Clusters    []clusterConnectionState  `json:"clusters"`
+	Regions     []regionConnectionState   `json:"regions"`
+	Metrics     federationMetricsSnapshot `json:"metrics"`
+}
+
+type clusterConnectionState struct {
+	ClusterID        string    `json:"cluster_id"`
+	Region           string    `json:"region"`
+	Endpoint         string    `json:"endpoint"`
+	Connected        bool      `json:"connected"`
+	LastSeen         time.Time `json:"last_seen"`
+	BaselineID       string    `json:"baseline_id"`
+	BaselineVersion  uint64    `json:"baseline_version"`
+	LastSync         time.Time `json:"last_sync"`
+	BytesSent        uint64    `json:"bytes_sent"`
+	BytesReceived    uint64    `json:"bytes_received"`
+	MessagesCount    uint64    `json:"messages_count"`
+	CompressionRatio float64   `json:"compression_ratio"`
+}
+
+type regionConnectionState struct {
+	RegionID      string   `json:"region_id"`
+	Topology      string   `json:"topology"`
+	LeaderCluster string   `json:"leader_cluster"`
+	Clusters      []string `json:"clusters"`
+}
+
+type federationMetricsSnapshot struct {
+	TotalBytesSent     uint64 `json:"total_bytes_sent"`
+	TotalBytesReceived uint64 `json:"total_bytes_received"`
+	CompressedBytes    uint64 `json:"compressed_bytes"`
+	UncompressedBytes  uint64 `json:"uncompressed_bytes"`
+	AverageLatency     uint64 `json:"average_latency_us"`
+	CompressionRatio   uint64 `json:"compression_ratio_pct_x100"`
+	MessageCount       uint64 `json:"message_count"`
+	ErrorCount         uint64 `json:"error_count"`
+	SyncOperations     uint64 `json:"sync_operations"`
+	SyncFailures       uint64 `json:"sync_failures"`
+	BaselineRefreshes  uint64 `json:"baseline_refreshes"`
+	DeltaApplications  uint64 `json:"delta_applications"`
 }
 
 // ConsensusAdapter adapts Raft/consensus messages for DWCP
@@ -892,9 +947,68 @@ func (fa *FederationAdapter) sendStateUpdate(conn *ClusterConnection, update *St
 }
 
 func (fa *FederationAdapter) collectClusterState() []byte {
-	// This would collect actual cluster state
-	// For now, return placeholder
-	return []byte("cluster-state-placeholder")
+	fa.mu.RLock()
+	defer fa.mu.RUnlock()
+
+	snapshot := clusterStateSnapshot{
+		Type:        "dwcp_cluster_state",
+		Version:     1,
+		GeneratedAt: time.Now().UTC(),
+		Clusters:    make([]clusterConnectionState, 0, len(fa.clusterConnections)),
+		Regions:     make([]regionConnectionState, 0, len(fa.regionManagers)),
+		Metrics: federationMetricsSnapshot{
+			TotalBytesSent:     fa.metrics.TotalBytesSent.Load(),
+			TotalBytesReceived: fa.metrics.TotalBytesReceived.Load(),
+			CompressedBytes:    fa.metrics.CompressedBytes.Load(),
+			UncompressedBytes:  fa.metrics.UncompressedBytes.Load(),
+			AverageLatency:     fa.metrics.AverageLatency.Load(),
+			CompressionRatio:   fa.metrics.CompressionRatio.Load(),
+			MessageCount:       fa.metrics.MessageCount.Load(),
+			ErrorCount:         fa.metrics.ErrorCount.Load(),
+			SyncOperations:     fa.metrics.SyncOperations.Load(),
+			SyncFailures:       fa.metrics.SyncFailures.Load(),
+			BaselineRefreshes:  fa.metrics.BaselineRefreshes.Load(),
+			DeltaApplications:  fa.metrics.DeltaApplications.Load(),
+		},
+	}
+
+	for _, conn := range fa.clusterConnections {
+		snapshot.Clusters = append(snapshot.Clusters, clusterConnectionState{
+			ClusterID:        conn.ClusterID,
+			Region:           conn.Region,
+			Endpoint:         conn.Endpoint,
+			Connected:        conn.connected.Load(),
+			LastSeen:         conn.lastSeen,
+			BaselineID:       conn.baselineID,
+			BaselineVersion:  conn.baselineVersion,
+			LastSync:         conn.lastSync,
+			BytesSent:        conn.bytesSent.Load(),
+			BytesReceived:    conn.bytesReceived.Load(),
+			MessagesCount:    conn.messagesCount.Load(),
+			CompressionRatio: conn.compressionRate,
+		})
+	}
+
+	for _, region := range fa.regionManagers {
+		clusterIDs := make([]string, 0, len(region.Clusters))
+		for clusterID := range region.Clusters {
+			clusterIDs = append(clusterIDs, clusterID)
+		}
+		snapshot.Regions = append(snapshot.Regions, regionConnectionState{
+			RegionID:      region.RegionID,
+			Topology:      region.Topology,
+			LeaderCluster: region.LeaderCluster,
+			Clusters:      clusterIDs,
+		})
+	}
+
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		fa.logger.Error("Failed to marshal cluster state snapshot", zap.Error(err))
+		return []byte("{}")
+	}
+
+	return data
 }
 
 // Supporting type implementations
@@ -971,8 +1085,15 @@ func validateHandshakeResponse(data []byte) bool {
 }
 
 func encodeStateUpdate(update *StateUpdate) []byte {
-	// Encode state update - simplified
-	return update.StateData
+	data, err := json.Marshal(stateUpdateEnvelope{
+		Type:    "dwcp_state_update",
+		Version: 1,
+		Update:  update,
+	})
+	if err != nil {
+		return update.StateData
+	}
+	return data
 }
 
 // Message types for DWCP
@@ -1010,15 +1131,38 @@ func NewHDEEngine(dictSize int) *HDEEngine {
 }
 
 func (h *HDEEngine) Compress(data []byte, baselineID string) ([]byte, float64) {
-	// Simplified compression - would use actual HDE algorithm
-	compressed := data // Placeholder
-	ratio := 1.0
-	return compressed, ratio
+	return gzipCompress(data)
 }
 
 func (h *HDEEngine) CompressWithDictionary(data []byte, dictID string) ([]byte, float64) {
-	// Dictionary-based compression
-	return data, 1.0
+	return gzipCompress(data)
+}
+
+func gzipCompress(data []byte) ([]byte, float64) {
+	if len(data) == 0 {
+		return []byte{}, 1.0
+	}
+
+	var buf bytes.Buffer
+	writer, err := gzip.NewWriterLevel(&buf, gzip.BestSpeed)
+	if err != nil {
+		return data, 1.0
+	}
+
+	if _, err := writer.Write(data); err != nil {
+		_ = writer.Close()
+		return data, 1.0
+	}
+	if err := writer.Close(); err != nil {
+		return data, 1.0
+	}
+
+	compressed := buf.Bytes()
+	if len(compressed) == 0 {
+		return data, 1.0
+	}
+
+	return compressed, float64(len(data)) / float64(len(compressed))
 }
 
 func (h *HDEEngine) TrainDictionary(data []byte, id string) {

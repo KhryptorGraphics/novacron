@@ -2,6 +2,7 @@ package dwcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -120,6 +121,14 @@ type AdapterMetrics struct {
 	RoutingErrors        uint64
 	ConnectionErrors     uint64
 	OptimizationFailures uint64
+}
+
+const consensusLogReplicationPayloadVersion = 1
+
+type consensusLogReplicationPayload struct {
+	Type    string                `json:"type"`
+	Version int                   `json:"version"`
+	Logs    []shared.ConsensusLog `json:"logs"`
 }
 
 // NewFederationAdapterV3 creates a new federation adapter
@@ -344,10 +353,23 @@ func (a *FederationAdapterV3) ConnectCluster(ctx context.Context, clusterID, end
 
 // ReplicateLogs replicates consensus logs to target clusters
 func (a *FederationAdapterV3) ReplicateLogs(ctx context.Context, logs []shared.ConsensusLog, targetClusters []string) error {
-	// Marshal logs
-	data := make([]byte, 0) // TODO: Proper serialization
+	data, err := encodeConsensusLogReplication(logs)
+	if err != nil {
+		return errors.Wrap(err, "failed to encode consensus logs")
+	}
 
 	return a.SyncClusterState(ctx, "local", targetClusters, data)
+}
+
+func encodeConsensusLogReplication(logs []shared.ConsensusLog) ([]byte, error) {
+	logCopy := make([]shared.ConsensusLog, len(logs))
+	copy(logCopy, logs)
+
+	return json.Marshal(consensusLogReplicationPayload{
+		Type:    "consensus_logs",
+		Version: consensusLogReplicationPayloadVersion,
+		Logs:    logCopy,
+	})
 }
 
 // PropagateBaseline propagates baseline to all clusters

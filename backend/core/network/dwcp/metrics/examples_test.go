@@ -224,10 +224,7 @@ func ExampleSystemMetricsWrapper_degradedState() {
 
 // ExampleCollector_multipleOperations shows comprehensive metrics collection
 func ExampleCollector_multipleOperations() {
-	metrics.InitializeMetrics("cluster-1", "node-01", 9090)
-	defer metrics.ShutdownMetrics()
-
-	collector := metrics.GetCollector()
+	collector := metrics.NewCollector("cluster-1", "node-01")
 
 	// Start multiple streams
 	for i := 0; i < 5; i++ {

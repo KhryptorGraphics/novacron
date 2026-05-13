@@ -2,9 +2,15 @@ package security
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"sync"
 	"time"
 
@@ -22,7 +28,7 @@ type ModeAwareSecurity struct {
 	logger *zap.Logger
 
 	// Current mode
-	currentMode SecurityMode
+	currentMode    SecurityMode
 	lastModeChange time.Time
 
 	// Components
@@ -30,9 +36,9 @@ type ModeAwareSecurity struct {
 	reputationSystem  *ReputationSystem
 
 	// TLS configuration
-	tlsConfig     *tls.Config
-	certManager   *CertificateManager
-	tlsEnabled    bool
+	tlsConfig   *tls.Config
+	certManager *CertificateManager
+	tlsEnabled  bool
 
 	// Mode-specific settings
 	datacenterConfig *DatacenterSecurityConfig
@@ -64,57 +70,57 @@ type DatacenterSecurityConfig struct {
 	FastConsensusPath       bool
 
 	// Basic checks only
-	ValidateMessageFormat   bool
-	CheckNodeIdentity       bool
+	ValidateMessageFormat bool
+	CheckNodeIdentity     bool
 
 	// Timeouts (shorter for low latency)
-	MessageTimeout    time.Duration
-	ConsensusTimeout  time.Duration
+	MessageTimeout   time.Duration
+	ConsensusTimeout time.Duration
 }
 
 // InternetSecurityConfig for untrusted internet deployments
 type InternetSecurityConfig struct {
 	// Full security
-	RequireTLS              bool
-	RequireMutualTLS        bool
-	RequireSignatures       bool
+	RequireTLS               bool
+	RequireMutualTLS         bool
+	RequireSignatures        bool
 	EnableByzantineDetection bool
-	EnableReputationSystem  bool
+	EnableReputationSystem   bool
 
 	// Strict validation
-	ValidateAllMessages    bool
-	StrictConsensusChecks  bool
-	QuarantineAggressive   bool
+	ValidateAllMessages   bool
+	StrictConsensusChecks bool
+	QuarantineAggressive  bool
 
 	// Timeouts (longer for high latency)
-	MessageTimeout       time.Duration
-	ConsensusTimeout     time.Duration
-	HandshakeTimeout     time.Duration
+	MessageTimeout   time.Duration
+	ConsensusTimeout time.Duration
+	HandshakeTimeout time.Duration
 
 	// TLS settings
-	MinTLSVersion        uint16
-	RequireClientCerts   bool
-	AllowedCipherSuites  []uint16
-	CertValidityPeriod   time.Duration
+	MinTLSVersion       uint16
+	RequireClientCerts  bool
+	AllowedCipherSuites []uint16
+	CertValidityPeriod  time.Duration
 }
 
 // HybridSecurityConfig for adaptive security
 type HybridSecurityConfig struct {
 	// Thresholds for mode switching
-	TrustThreshold          float64 // > this = datacenter mode
-	UntrustThreshold        float64 // < this = internet mode
+	TrustThreshold   float64 // > this = datacenter mode
+	UntrustThreshold float64 // < this = internet mode
 
 	// Monitoring
-	MonitoringWindow        time.Duration
-	AdaptiveCheckInterval   time.Duration
+	MonitoringWindow      time.Duration
+	AdaptiveCheckInterval time.Duration
 
 	// Gradual security adjustment
-	GradualTransition       bool
-	TransitionSteps         int
+	GradualTransition bool
+	TransitionSteps   int
 
 	// Fallback
-	DefaultMode             SecurityMode
-	FallbackOnAmbiguous     bool
+	DefaultMode         SecurityMode
+	FallbackOnAmbiguous bool
 }
 
 // CertificateManager manages TLS certificates
@@ -125,9 +131,9 @@ type CertificateManager struct {
 	logger *zap.Logger
 
 	// Certificates
-	serverCert   *tls.Certificate
-	clientCerts  map[string]*x509.Certificate
-	caCertPool   *x509.CertPool
+	serverCert  *tls.Certificate
+	clientCerts map[string]*x509.Certificate
+	caCertPool  *x509.CertPool
 
 	// Rotation
 	certValidUntil   time.Time
@@ -239,6 +245,10 @@ func (mas *ModeAwareSecurity) SwitchMode(newMode SecurityMode, reason string) er
 	mas.mu.Lock()
 	defer mas.mu.Unlock()
 
+	return mas.switchModeLocked(newMode, reason)
+}
+
+func (mas *ModeAwareSecurity) switchModeLocked(newMode SecurityMode, reason string) error {
 	if mas.currentMode == newMode {
 		return nil // Already in this mode
 	}
@@ -530,14 +540,14 @@ func (mas *ModeAwareSecurity) adjustSecurityLevel() {
 	// Switch to datacenter mode if trust is high
 	if mas.networkTrust > config.TrustThreshold {
 		if time.Since(mas.lastModeChange) > config.MonitoringWindow {
-			mas.SwitchMode(ModeDatacenter, fmt.Sprintf("High network trust: %.2f", mas.networkTrust))
+			_ = mas.switchModeLocked(ModeDatacenter, fmt.Sprintf("High network trust: %.2f", mas.networkTrust))
 		}
 	}
 
 	// Switch to internet mode if trust is low
 	if mas.networkTrust < config.UntrustThreshold {
 		if time.Since(mas.lastModeChange) > config.MonitoringWindow {
-			mas.SwitchMode(ModeInternet, fmt.Sprintf("Low network trust: %.2f", mas.networkTrust))
+			_ = mas.switchModeLocked(ModeInternet, fmt.Sprintf("Low network trust: %.2f", mas.networkTrust))
 		}
 	}
 }
@@ -570,9 +580,9 @@ func (mas *ModeAwareSecurity) GetStats() map[string]interface{} {
 	defer mas.mu.RUnlock()
 
 	return map[string]interface{}{
-		"current_mode":    mas.modeString(mas.currentMode),
-		"tls_enabled":     mas.tlsEnabled,
-		"network_trust":   mas.networkTrust,
+		"current_mode":     mas.modeString(mas.currentMode),
+		"tls_enabled":      mas.tlsEnabled,
+		"network_trust":    mas.networkTrust,
 		"last_mode_change": mas.lastModeChange,
 	}
 }
@@ -595,25 +605,74 @@ func NewCertificateManager(nodeID string, logger *zap.Logger) *CertificateManage
 
 // GenerateSelfSignedCert generates a self-signed certificate
 func (cm *CertificateManager) GenerateSelfSignedCert(validity time.Duration) (*tls.Certificate, error) {
-	// In production, use proper certificate generation
-	// This is a placeholder for the actual implementation
-
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	cm.certValidUntil = time.Now().Add(validity)
+	if validity <= 0 {
+		validity = cm.rotationInterval
+	}
+
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate private key: %w", err)
+	}
+
+	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialLimit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate serial number: %w", err)
+	}
+
+	now := time.Now()
+	notAfter := now.Add(validity)
+	template := &x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			CommonName: cm.nodeID,
+		},
+		NotBefore:             now.Add(-time.Minute),
+		NotAfter:              notAfter,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		DNSNames:              []string{cm.nodeID},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create certificate: %w", err)
+	}
+
+	keyDER, err := x509.MarshalECPrivateKey(privateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal private key: %w", err)
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load key pair: %w", err)
+	}
+
+	leaf, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse certificate: %w", err)
+	}
+	cert.Leaf = leaf
 
 	cm.logger.Info("Certificate generated",
 		zap.String("node_id", cm.nodeID),
-		zap.Time("valid_until", cm.certValidUntil),
+		zap.Time("valid_until", notAfter),
 	)
 
-	// Return placeholder cert
-	// In production, generate actual certificate using crypto/x509
-	cert := &tls.Certificate{}
-	cm.serverCert = cert
+	cm.certValidUntil = notAfter
+	cm.caCertPool = x509.NewCertPool()
+	cm.caCertPool.AddCert(leaf)
+	cm.serverCert = &cert
 
-	return cert, nil
+	return &cert, nil
 }
 
 // RotateCertificate rotates the node's certificate

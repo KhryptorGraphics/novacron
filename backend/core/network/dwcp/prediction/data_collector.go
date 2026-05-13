@@ -15,6 +15,15 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+var (
+	dataCollectorMetricsOnce sync.Once
+	dataCollectorBandwidth   prometheus.Gauge
+	dataCollectorLatency     prometheus.Gauge
+	dataCollectorPacketLoss  prometheus.Gauge
+	dataCollectorJitter      prometheus.Gauge
+	dataCollectorSampleCount prometheus.Gauge
+)
+
 // NetworkSample represents a single network measurement
 type NetworkSample struct {
 	Timestamp     time.Time `json:"timestamp"`
@@ -82,30 +91,34 @@ func NewDataCollector(collectInterval time.Duration, maxSamples int) *DataCollec
 
 // initMetrics initializes Prometheus metrics
 func (c *DataCollector) initMetrics() {
-	c.bandwidthGauge = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "dwcp_pba_current_bandwidth_mbps",
-		Help: "Current measured bandwidth in Mbps",
+	dataCollectorMetricsOnce.Do(func() {
+		dataCollectorBandwidth = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "dwcp_pba_current_bandwidth_mbps",
+			Help: "Current measured bandwidth in Mbps",
+		})
+		dataCollectorLatency = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "dwcp_pba_current_latency_ms",
+			Help: "Current measured latency in milliseconds",
+		})
+		dataCollectorPacketLoss = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "dwcp_pba_current_packet_loss_ratio",
+			Help: "Current packet loss ratio (0-1)",
+		})
+		dataCollectorJitter = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "dwcp_pba_current_jitter_ms",
+			Help: "Current network jitter in milliseconds",
+		})
+		dataCollectorSampleCount = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "dwcp_pba_sample_count",
+			Help: "Number of collected network samples",
+		})
 	})
 
-	c.latencyGauge = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "dwcp_pba_current_latency_ms",
-		Help: "Current measured latency in milliseconds",
-	})
-
-	c.packetLossGauge = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "dwcp_pba_current_packet_loss_ratio",
-		Help: "Current packet loss ratio (0-1)",
-	})
-
-	c.jitterGauge = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "dwcp_pba_current_jitter_ms",
-		Help: "Current network jitter in milliseconds",
-	})
-
-	c.sampleCountGauge = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "dwcp_pba_sample_count",
-		Help: "Number of collected network samples",
-	})
+	c.bandwidthGauge = dataCollectorBandwidth
+	c.latencyGauge = dataCollectorLatency
+	c.packetLossGauge = dataCollectorPacketLoss
+	c.jitterGauge = dataCollectorJitter
+	c.sampleCountGauge = dataCollectorSampleCount
 }
 
 // Start begins continuous metric collection
@@ -236,7 +249,6 @@ func (c *DataCollector) measureJitter() float64 {
 	latencies := make([]float64, 10)
 	for i := range latencies {
 		latencies[i] = c.measureLatency()
-		time.Sleep(100 * time.Millisecond)
 	}
 
 	// Calculate standard deviation

@@ -11,21 +11,23 @@ import (
 
 // IsolationForestModel implements anomaly detection using Isolation Forest
 type IsolationForestModel struct {
-	modelPath   string
-	threshold   float64
-	logger      *zap.Logger
+	modelPath string
+	threshold float64
+	logger    *zap.Logger
 
 	// Simplified implementation without ONNX for now
 	// In production, use ONNX Runtime or similar
-	trees       []*IsolationTree
-	numTrees    int
-	sampleSize  int
+	trees         []*IsolationTree
+	numTrees      int
+	sampleSize    int
 	contamination float64
+	featureMeans  []float64
+	featureStddev []float64
 }
 
 // IsolationTree represents a single isolation tree
 type IsolationTree struct {
-	root *IsolationNode
+	root     *IsolationNode
 	maxDepth int
 }
 
@@ -66,19 +68,27 @@ func (ifm *IsolationForestModel) Detect(ctx context.Context, metrics *MetricVect
 
 	// Calculate anomaly score
 	score := ifm.anomalyScore(features)
+	zScore, zIndex := ifm.maxZScore(features)
 
 	// Determine if it's an anomaly
-	isAnomaly := score > ifm.threshold
+	isAnomaly := score > ifm.threshold || zScore > 5.0
 
 	if !isAnomaly {
 		return nil, nil
 	}
 
 	// Calculate confidence
-	confidence := math.Min(score/ifm.threshold, 1.0)
+	confidence := math.Min(math.Max(score/ifm.threshold, zScore/5.0), 1.0)
 
 	// Find which metric is most anomalous
 	metricName, expectedValue := ifm.findMostAnomalousMetric(features)
+	if zIndex >= 0 && zIndex < len(ifm.featureMeans) {
+		metricName = []string{
+			"bandwidth", "latency", "packet_loss", "jitter",
+			"cpu_usage", "memory_usage", "error_rate",
+		}[zIndex]
+		expectedValue = ifm.featureMeans[zIndex]
+	}
 	actualValue := features[ifm.getMetricIndex(metricName)]
 	deviation := math.Abs(actualValue - expectedValue)
 
@@ -123,6 +133,7 @@ func (ifm *IsolationForestModel) Train(ctx context.Context, normalData []*Metric
 		sample := ifm.sampleData(features)
 		ifm.trees[i] = ifm.buildTree(sample, 0, int(math.Ceil(math.Log2(float64(ifm.sampleSize)))))
 	}
+	ifm.trainFeatureStats(features)
 
 	// Calculate threshold based on contamination
 	scores := make([]float64, len(normalData))
@@ -142,6 +153,49 @@ func (ifm *IsolationForestModel) Train(ctx context.Context, normalData []*Metric
 // Name returns the detector name
 func (ifm *IsolationForestModel) Name() string {
 	return "isolation_forest"
+}
+
+func (ifm *IsolationForestModel) trainFeatureStats(features [][]float64) {
+	if len(features) == 0 {
+		return
+	}
+
+	featureCount := len(features[0])
+	ifm.featureMeans = make([]float64, featureCount)
+	ifm.featureStddev = make([]float64, featureCount)
+
+	for i := 0; i < featureCount; i++ {
+		values := make([]float64, len(features))
+		for j := range features {
+			values[j] = features[j][i]
+		}
+		ifm.featureMeans[i] = mean(values)
+		ifm.featureStddev[i] = stddev(values)
+		if ifm.featureStddev[i] == 0 {
+			ifm.featureStddev[i] = 1
+		}
+	}
+}
+
+func (ifm *IsolationForestModel) maxZScore(features []float64) (float64, int) {
+	if len(ifm.featureMeans) == 0 || len(ifm.featureStddev) == 0 {
+		return 0, -1
+	}
+
+	maxScore := 0.0
+	maxIndex := -1
+	for i, value := range features {
+		if i >= len(ifm.featureMeans) || i >= len(ifm.featureStddev) {
+			break
+		}
+		score := math.Abs(value-ifm.featureMeans[i]) / ifm.featureStddev[i]
+		if score > maxScore {
+			maxScore = score
+			maxIndex = i
+		}
+	}
+
+	return maxScore, maxIndex
 }
 
 // anomalyScore calculates the anomaly score for a sample

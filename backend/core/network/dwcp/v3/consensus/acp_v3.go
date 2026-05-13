@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -267,8 +268,8 @@ func (a *ACPv3) hybridConsensus(ctx context.Context, value interface{}) error {
 	a.logger.Debug("Hybrid consensus mode detected",
 		zap.String("mode", detectedMode.String()))
 
-	// Try Raft first if conditions are good
-	if detectedMode == upgrade.ModeDatacenter && a.raft.raftNode != nil {
+	// Try Raft first for datacenter or borderline hybrid conditions.
+	if (detectedMode == upgrade.ModeDatacenter || detectedMode == upgrade.ModeHybrid) && a.raft.raftNode != nil {
 		timeoutCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 		defer cancel()
 
@@ -413,6 +414,5 @@ func (a *ACPv3) GetConsensusLatency() time.Duration {
 // Helper functions
 
 func serializeValue(value interface{}) ([]byte, error) {
-	// TODO: Implement proper serialization
-	return []byte(fmt.Sprintf("%v", value)), nil
+	return json.Marshal(value)
 }

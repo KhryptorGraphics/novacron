@@ -12,11 +12,11 @@ import (
 type CompressionAlgorithm int
 
 const (
-	CompressionNone CompressionAlgorithm = iota
-	CompressionLZ4                       // Fast, moderate compression (datacenter mode)
-	CompressionZstd                      // Balanced compression/speed
-	CompressionZstdMax                   // Maximum compression (internet mode)
-	CompressionBrotli                    // High compression for static data
+	CompressionNone    CompressionAlgorithm = iota
+	CompressionLZ4                          // Fast, moderate compression (datacenter mode)
+	CompressionZstd                         // Balanced compression/speed
+	CompressionZstdMax                      // Maximum compression (internet mode)
+	CompressionBrotli                       // High compression for static data
 )
 
 // String returns the string representation of CompressionAlgorithm
@@ -68,24 +68,24 @@ type CompressionSelector struct {
 
 // AlgorithmStats tracks performance metrics for each algorithm
 type AlgorithmStats struct {
-	TotalBytes       int64
-	CompressedBytes  int64
-	TotalTime        time.Duration
-	UseCount         int64
-	AverageRatio     float64
-	AverageSpeed     float64 // MB/s
-	LastUsed         time.Time
+	TotalBytes      int64
+	CompressedBytes int64
+	TotalTime       time.Duration
+	UseCount        int64
+	AverageRatio    float64
+	AverageSpeed    float64 // MB/s
+	LastUsed        time.Time
 }
 
 // SelectorConfig configures the compression selector
 type SelectorConfig struct {
 	// Learning parameters
-	LearningRate     float64
-	AdaptiveEnabled  bool
+	LearningRate    float64
+	AdaptiveEnabled bool
 
 	// Size thresholds
-	SmallDataSize    int // < 1KB: minimal compression
-	LargeDataSize    int // > 1MB: aggressive compression
+	SmallDataSize int // < 1KB: minimal compression
+	LargeDataSize int // > 1MB: aggressive compression
 
 	// Performance targets
 	DatacenterTargetSpeed float64 // MB/s for datacenter mode
@@ -97,10 +97,10 @@ func DefaultSelectorConfig() *SelectorConfig {
 	return &SelectorConfig{
 		LearningRate:          0.1,
 		AdaptiveEnabled:       true,
-		SmallDataSize:         1024,       // 1KB
+		SmallDataSize:         1024,        // 1KB
 		LargeDataSize:         1024 * 1024, // 1MB
-		DatacenterTargetSpeed: 1000.0,     // 1 GB/s
-		InternetTargetRatio:   5.0,        // 5x compression
+		DatacenterTargetSpeed: 1000.0,      // 1 GB/s
+		InternetTargetRatio:   5.0,         // 5x compression
 	}
 }
 
@@ -157,7 +157,7 @@ func (cs *CompressionSelector) selectByMode(chars DataCharacteristics, mode upgr
 	}
 
 	// Incompressible data: skip compression
-	if !chars.Compressible || chars.Entropy > 0.9 {
+	if (!chars.Compressible || chars.Entropy > 0.9) && !chars.RepeatPattern {
 		return CompressionNone
 	}
 
@@ -244,7 +244,7 @@ func (cs *CompressionSelector) analyzeData(data []byte) DataCharacteristics {
 	}
 
 	// Sample-based entropy calculation (fast approximation)
-	sampleSize := 256
+	sampleSize := 4096
 	if len(data) < sampleSize {
 		sampleSize = len(data)
 	}
@@ -276,6 +276,9 @@ func (cs *CompressionSelector) analyzeData(data []byte) DataCharacteristics {
 		}
 	}
 	chars.RepeatPattern = float64(repeatCount)/float64(sampleSize) > 0.3
+	if !chars.RepeatPattern {
+		chars.RepeatPattern = hasPeriodicPattern(data, sampleSize)
+	}
 
 	// Detect text-like data (printable ASCII)
 	printableCount := 0
@@ -286,6 +289,9 @@ func (cs *CompressionSelector) analyzeData(data []byte) DataCharacteristics {
 	}
 	chars.TextLike = float64(printableCount)/float64(sampleSize) > 0.7
 	chars.BinaryLike = !chars.TextLike
+	if chars.RepeatPattern {
+		chars.Compressible = true
+	}
 
 	return chars
 }
@@ -400,6 +406,32 @@ func logApprox(x float64) float64 {
 		result += term / float64(i)
 	}
 	return result
+}
+
+func hasPeriodicPattern(data []byte, sampleSize int) bool {
+	if sampleSize < 16 {
+		return false
+	}
+
+	maxPeriod := 256
+	if sampleSize/2 < maxPeriod {
+		maxPeriod = sampleSize / 2
+	}
+
+	for period := 2; period <= maxPeriod; period++ {
+		matches := 0
+		comparisons := sampleSize - period
+		for i := period; i < sampleSize; i++ {
+			if data[i] == data[i-period] {
+				matches++
+			}
+		}
+		if comparisons > 0 && float64(matches)/float64(comparisons) > 0.95 {
+			return true
+		}
+	}
+
+	return false
 }
 
 // GetCompressionLevel returns zstd compression level for algorithm

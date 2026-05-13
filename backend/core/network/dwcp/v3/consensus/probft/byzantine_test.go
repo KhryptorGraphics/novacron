@@ -49,10 +49,10 @@ func TestProbabilisticQuorum(t *testing.T) {
 		totalNodes     int
 		expectedQuorum int
 	}{
-		{4, 2},   // √4 = 2
-		{9, 3},   // √9 = 3
-		{16, 4},  // √16 = 4
-		{25, 5},  // √25 = 5
+		{4, 2},    // √4 = 2
+		{9, 3},    // √9 = 3
+		{16, 4},   // √16 = 4
+		{25, 5},   // √25 = 5
 		{100, 10}, // √100 = 10
 	}
 
@@ -162,9 +162,190 @@ func TestByzantineNodeBehavior(t *testing.T) {
 		t.Error("Configuration not Byzantine safe")
 	}
 
-	// Verify quorum intersection
-	if !QuorumIntersection(totalNodes, byzantineCount, result.QuorumSize) {
-		t.Error("Quorum intersection property violated")
+	// ProBFT uses a probabilistic recipient committee q = l√n. Safety is
+	// enforced inside the selected committee with a 2q/3+1 vote threshold.
+	expectedQuorum := int(1.0 * 4) // ceil(1.0 * sqrt(10))
+	if result.QuorumSize != expectedQuorum {
+		t.Errorf("Quorum size = %d, want %d", result.QuorumSize, expectedQuorum)
+	}
+	if threshold := CalculateCommitteeVoteThreshold(result.QuorumSize); threshold != 3 {
+		t.Errorf("Committee vote threshold = %d, want 3", threshold)
+	}
+}
+
+func TestProBFTDeterministicRecipientSelection(t *testing.T) {
+	vrf, err := NewVRF()
+	if err != nil {
+		t.Fatalf("Failed to create VRF: %v", err)
+	}
+
+	probft, err := NewProBFT("node-0", vrf, QuorumConfig{
+		TotalNodes:      9,
+		ByzantineNodes:  2,
+		SecurityParam:   1.0,
+		ConfidenceLevel: 0.99,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create ProBFT: %v", err)
+	}
+
+	for i := 8; i >= 0; i-- {
+		pub, _, _ := ed25519.GenerateKey(rand.Reader)
+		if err := probft.AddNode(&Node{
+			ID:        fmt.Sprintf("node-%d", i),
+			PublicKey: pub,
+			IsActive:  true,
+		}); err != nil {
+			t.Fatalf("AddNode failed: %v", err)
+		}
+	}
+
+	active := probft.getActiveNodes()
+	seed := []byte("recipient-seed")
+	first := probft.selectRecipients(seed, probft.state.QuorumSize, active, "node-0")
+	second := probft.selectRecipients(seed, probft.state.QuorumSize, active, "node-0")
+
+	if len(first) != probft.state.QuorumSize {
+		t.Fatalf("Recipient count = %d, want %d", len(first), probft.state.QuorumSize)
+	}
+	if fmt.Sprint(first) != fmt.Sprint(second) {
+		t.Fatalf("Recipient selection was not deterministic: %v vs %v", first, second)
+	}
+	if !containsString(first, "node-0") {
+		t.Fatalf("Required proposer was not selected: %v", first)
+	}
+	for i := 1; i < len(active); i++ {
+		if active[i-1].ID > active[i].ID {
+			t.Fatalf("Active nodes are not sorted: %s before %s", active[i-1].ID, active[i].ID)
+		}
+	}
+}
+
+func TestProBFTRejectsVoteOutsideSelectedCommittee(t *testing.T) {
+	vrf, err := NewVRF()
+	if err != nil {
+		t.Fatalf("Failed to create VRF: %v", err)
+	}
+
+	probft, err := NewProBFT("node-0", vrf, QuorumConfig{
+		TotalNodes:      7,
+		ByzantineNodes:  2,
+		SecurityParam:   1.0,
+		ConfidenceLevel: 0.99,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create ProBFT: %v", err)
+	}
+
+	block := &Block{
+		Height:     1,
+		Hash:       []byte("hash"),
+		Data:       []byte("data"),
+		Proposer:   "node-0",
+		Recipients: []string{"node-0", "node-1", "node-2", "node-3"},
+	}
+	probft.state.Phase = PhasePrepare
+	probft.state.ProposedBlock = block
+
+	err = probft.handlePrepare(&Message{
+		Type:      MessagePrepare,
+		Phase:     PhasePrepare,
+		Block:     block,
+		NodeID:    "node-6",
+		Timestamp: time.Now(),
+	})
+	if err == nil {
+		t.Fatal("Expected non-recipient prepare vote to be rejected")
+	}
+}
+
+func TestProBFTProposeBlockAttachesVRFRecipients(t *testing.T) {
+	vrf, err := NewVRF()
+	if err != nil {
+		t.Fatalf("Failed to create VRF: %v", err)
+	}
+
+	input := []byte("0:0")
+	proof, err := vrf.Prove(input)
+	if err != nil {
+		t.Fatalf("Failed to prove VRF: %v", err)
+	}
+	leaderIndex := SelectLeader(proof.Output, 4)
+	nodeID := fmt.Sprintf("node-%d", leaderIndex)
+
+	probft, err := NewProBFT(nodeID, vrf, QuorumConfig{
+		TotalNodes:      4,
+		ByzantineNodes:  1,
+		SecurityParam:   1.0,
+		ConfidenceLevel: 0.99,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create ProBFT: %v", err)
+	}
+
+	for i := 0; i < 4; i++ {
+		pub, _, _ := ed25519.GenerateKey(rand.Reader)
+		if i == leaderIndex {
+			pub = vrf.GetPublicKey()
+		}
+		if err := probft.AddNode(&Node{
+			ID:        fmt.Sprintf("node-%d", i),
+			PublicKey: pub,
+			IsActive:  true,
+		}); err != nil {
+			t.Fatalf("AddNode failed: %v", err)
+		}
+	}
+
+	block := &Block{Hash: []byte("hash"), Data: []byte("payload")}
+	if err := probft.ProposeBlock(block); err != nil {
+		t.Fatalf("ProposeBlock failed: %v", err)
+	}
+	if block.VRFProof == nil {
+		t.Fatal("Expected VRF proof on proposed block")
+	}
+	if len(block.Recipients) != probft.state.QuorumSize {
+		t.Fatalf("Recipients = %d, want %d", len(block.Recipients), probft.state.QuorumSize)
+	}
+	if !sameStringSet(block.Recipients, []string{"node-0", "node-1", "node-2", "node-3"}) {
+		t.Fatalf("Unexpected recipients: %v", block.Recipients)
+	}
+}
+
+func TestProBFTBroadcastUsesConfiguredTransport(t *testing.T) {
+	vrf, err := NewVRF()
+	if err != nil {
+		t.Fatalf("Failed to create VRF: %v", err)
+	}
+
+	probft, err := NewProBFT("node-0", vrf, QuorumConfig{
+		TotalNodes:      4,
+		ByzantineNodes:  1,
+		SecurityParam:   1.0,
+		ConfidenceLevel: 0.99,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create ProBFT: %v", err)
+	}
+
+	sent := make(chan *Message, 1)
+	if err := probft.SetBroadcaster(func(msg *Message) error {
+		sent <- msg
+		return nil
+	}); err != nil {
+		t.Fatalf("SetBroadcaster failed: %v", err)
+	}
+
+	msg := &Message{Type: MessagePrepare, NodeID: "node-0", Timestamp: time.Now()}
+	probft.broadcastMessage(msg)
+
+	select {
+	case got := <-sent:
+		if got != msg {
+			t.Fatal("Broadcaster received unexpected message")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Timed out waiting for broadcaster")
 	}
 }
 

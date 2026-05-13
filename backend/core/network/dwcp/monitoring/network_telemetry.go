@@ -11,16 +11,16 @@ type NetworkTelemetry struct {
 	mu sync.RWMutex
 
 	// Inter-region metrics
-	bandwidth    map[string]*BandwidthMetrics
-	latency      map[string]*LatencyMetrics
-	packetLoss   map[string]*PacketLossMetrics
-	routes       map[string]*RouteMetrics
+	bandwidth  map[string]*BandwidthMetrics
+	latency    map[string]*LatencyMetrics
+	packetLoss map[string]*PacketLossMetrics
+	routes     map[string]*RouteMetrics
 
 	// VPN tunnel health
-	tunnels      map[string]*TunnelHealth
+	tunnels map[string]*TunnelHealth
 
 	// Topology
-	topology     *NetworkTopology
+	topology *NetworkTopology
 }
 
 // BandwidthMetrics tracks bandwidth utilization
@@ -308,10 +308,33 @@ type RoutePair struct {
 	Destination string
 }
 
-// measureLatency measures latency (simplified)
+// measureLatency returns the best observed latency for a source/destination pair.
 func (nt *NetworkTelemetry) measureLatency(source, dest string) float64 {
-	// Production would use actual ping/TCP measurements
-	return 10.0 // placeholder
+	nt.mu.RLock()
+	defer nt.mu.RUnlock()
+
+	key := source + "-" + dest
+	if metrics, ok := nt.latency[key]; ok && metrics.LatencyMs > 0 {
+		return metrics.LatencyMs
+	}
+
+	for _, link := range nt.topology.Links {
+		if link.Source == source && link.Destination == dest && link.Latency > 0 {
+			return link.Latency
+		}
+	}
+
+	for _, tunnel := range nt.tunnels {
+		if tunnel.Source == source && tunnel.Destination == dest && tunnel.Latency > 0 {
+			return tunnel.Latency
+		}
+	}
+
+	if route, ok := nt.routes[key]; ok && route.TotalDelay > 0 {
+		return route.TotalDelay
+	}
+
+	return 0
 }
 
 // GetAllMetrics retrieves all network metrics

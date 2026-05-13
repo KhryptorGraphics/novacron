@@ -18,8 +18,9 @@ type ReputationSystem struct {
 	logger *zap.Logger
 
 	// Reputation data
-	reputations map[string]*NodeReputation
-	quarantined map[string]*QuarantineRecord
+	reputations      map[string]*NodeReputation
+	quarantined      map[string]*QuarantineRecord
+	quarantineCounts map[string]int
 
 	// Configuration
 	config ReputationConfig
@@ -69,29 +70,29 @@ type ReputationConfig struct {
 	NewNodeGracePeriod time.Duration
 
 	// Scoring
-	ConsensusCorrectBoost    float64
-	ConsensusIncorrectPenalty float64
+	ConsensusCorrectBoost      float64
+	ConsensusIncorrectPenalty  float64
 	ByzantinePenaltyMultiplier float64
-	MessageSuccessBoost      float64
-	MessageFailurePenalty    float64
+	MessageSuccessBoost        float64
+	MessageFailurePenalty      float64
 
 	// Decay
-	DecayEnabled     bool
-	DecayRate        float64 // Points per hour of inactivity
-	DecayInterval    time.Duration
-	MinimumScore     float64 // Floor for decay
+	DecayEnabled  bool
+	DecayRate     float64 // Points per hour of inactivity
+	DecayInterval time.Duration
+	MinimumScore  float64 // Floor for decay
 
 	// Thresholds
-	QuarantineThreshold  float64 // Score below this = quarantine
-	TrustedThreshold     float64 // Score above this = trusted
-	SuspiciousThreshold  float64 // Score below this = suspicious
+	QuarantineThreshold float64 // Score below this = quarantine
+	TrustedThreshold    float64 // Score above this = trusted
+	SuspiciousThreshold float64 // Score below this = suspicious
 
 	// Quarantine
-	QuarantineEnabled   bool
-	QuarantineDuration  time.Duration
-	AllowRecovery       bool
-	RecoveryThreshold   float64 // Score needed to recover
-	MaxQuarantineCount  int     // Max times a node can be quarantined
+	QuarantineEnabled  bool
+	QuarantineDuration time.Duration
+	AllowRecovery      bool
+	RecoveryThreshold  float64 // Score needed to recover
+	MaxQuarantineCount int     // Max times a node can be quarantined
 
 	// Cleanup
 	CleanupInterval     time.Duration
@@ -115,13 +116,14 @@ func NewReputationSystem(nodeID string, logger *zap.Logger) *ReputationSystem {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	rs := &ReputationSystem{
-		nodeID:      nodeID,
-		logger:      logger,
-		reputations: make(map[string]*NodeReputation),
-		quarantined: make(map[string]*QuarantineRecord),
-		config:      DefaultReputationConfig(),
-		ctx:         ctx,
-		cancel:      cancel,
+		nodeID:           nodeID,
+		logger:           logger,
+		reputations:      make(map[string]*NodeReputation),
+		quarantined:      make(map[string]*QuarantineRecord),
+		quarantineCounts: make(map[string]int),
+		config:           DefaultReputationConfig(),
+		ctx:              ctx,
+		cancel:           cancel,
 	}
 
 	go rs.decayLoop()
@@ -137,7 +139,7 @@ func DefaultReputationConfig() ReputationConfig {
 		NewNodeGracePeriod: 5 * time.Minute,
 
 		ConsensusCorrectBoost:      2.0,
-		ConsensusIncorrectPenalty:   5.0,
+		ConsensusIncorrectPenalty:  5.0,
 		ByzantinePenaltyMultiplier: 3.0,
 		MessageSuccessBoost:        0.5,
 		MessageFailurePenalty:      1.0,
@@ -320,6 +322,10 @@ func (rs *ReputationSystem) QuarantineNode(nodeID string, reason string) error {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 
+	return rs.quarantineNodeLocked(nodeID, reason)
+}
+
+func (rs *ReputationSystem) quarantineNodeLocked(nodeID string, reason string) error {
 	if !rs.config.QuarantineEnabled {
 		return fmt.Errorf("quarantine disabled")
 	}
@@ -328,24 +334,33 @@ func (rs *ReputationSystem) QuarantineNode(nodeID string, reason string) error {
 
 	// Check max quarantine count
 	if record, exists := rs.quarantined[nodeID]; exists {
-		if record.ViolationCount >= rs.config.MaxQuarantineCount {
+		if rs.quarantineCounts[nodeID] >= rs.config.MaxQuarantineCount {
 			rs.logger.Error("Node exceeded max quarantine count",
 				zap.String("node_id", nodeID),
-				zap.Int("count", record.ViolationCount),
+				zap.Int("count", rs.quarantineCounts[nodeID]),
 			)
 			return fmt.Errorf("node exceeded max quarantine count")
 		}
-		record.ViolationCount++
+		rs.quarantineCounts[nodeID]++
+		record.ViolationCount = rs.quarantineCounts[nodeID]
 		record.QuarantinedAt = time.Now()
 		record.Reason = reason
 	} else {
+		if rs.quarantineCounts[nodeID] >= rs.config.MaxQuarantineCount {
+			rs.logger.Error("Node exceeded max quarantine count",
+				zap.String("node_id", nodeID),
+				zap.Int("count", rs.quarantineCounts[nodeID]),
+			)
+			return fmt.Errorf("node exceeded max quarantine count")
+		}
+		rs.quarantineCounts[nodeID]++
 		rs.quarantined[nodeID] = &QuarantineRecord{
 			NodeID:         nodeID,
 			QuarantinedAt:  time.Now(),
 			Reason:         reason,
 			CanRecover:     rs.config.AllowRecovery,
 			RecoveryAt:     time.Now().Add(rs.config.QuarantineDuration),
-			ViolationCount: 1,
+			ViolationCount: rs.quarantineCounts[nodeID],
 		}
 	}
 
@@ -436,10 +451,7 @@ func (rs *ReputationSystem) adjustScore(rep *NodeReputation, delta float64, reas
 	oldScore := rep.Score
 	rep.Score += delta
 
-	// Clamp to [0, 100]
-	if rep.Score < 0 {
-		rep.Score = 0
-	}
+	// Cap positive reputation; negative scores retain full penalty history.
 	if rep.Score > 100 {
 		rep.Score = 100
 	}
@@ -460,7 +472,7 @@ func (rs *ReputationSystem) checkQuarantine(rep *NodeReputation) {
 	}
 
 	if rep.Score <= rs.config.QuarantineThreshold && !rep.IsQuarantined {
-		rs.QuarantineNode(rep.NodeID, fmt.Sprintf("Score fell below threshold: %.2f", rep.Score))
+		_ = rs.quarantineNodeLocked(rep.NodeID, fmt.Sprintf("Score fell below threshold: %.2f", rep.Score))
 	}
 }
 

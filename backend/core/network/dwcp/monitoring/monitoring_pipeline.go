@@ -46,36 +46,39 @@ var (
 
 // MonitoringPipeline coordinates real-time anomaly detection and alerting
 type MonitoringPipeline struct {
-	detector       *AnomalyDetector
-	metricsBuffer  *MetricsBuffer
-	alertManager   *AlertManager
-	checkInterval  time.Duration
+	detector      *AnomalyDetector
+	metricsBuffer *MetricsBuffer
+	alertManager  *AlertManager
+	checkInterval time.Duration
 
-	logger         *zap.Logger
-	ctx            context.Context
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
+	logger       *zap.Logger
+	ctx          context.Context
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
+	anomalies    []*Anomaly
+	anomaliesMu  sync.RWMutex
+	maxAnomalies int
 
 	// Statistics
-	stats          *PipelineStats
-	statsMu        sync.RWMutex
+	stats   *PipelineStats
+	statsMu sync.RWMutex
 }
 
 // PipelineStats tracks pipeline statistics
 type PipelineStats struct {
-	MetricsProcessed   int64
-	AnomaliesDetected  int64
-	AlertsSent         int64
-	LastCheckTime      time.Time
-	AverageLatency     time.Duration
-	ErrorCount         int64
+	MetricsProcessed  int64
+	AnomaliesDetected int64
+	AlertsSent        int64
+	LastCheckTime     time.Time
+	AverageLatency    time.Duration
+	ErrorCount        int64
 }
 
 // MetricsBuffer buffers incoming metrics for anomaly detection
 type MetricsBuffer struct {
-	buffer    []*MetricVector
-	maxSize   int
-	mu        sync.RWMutex
+	buffer  []*MetricVector
+	maxSize int
+	mu      sync.RWMutex
 }
 
 // NewMetricsBuffer creates a new metrics buffer
@@ -179,6 +182,8 @@ func NewMonitoringPipeline(
 		logger:        logger,
 		ctx:           ctx,
 		cancel:        cancel,
+		anomalies:     make([]*Anomaly, 0, 1000),
+		maxAnomalies:  1000,
 		stats: &PipelineStats{
 			LastCheckTime: time.Now(),
 		},
@@ -307,6 +312,7 @@ func (mp *MonitoringPipeline) handleAnomaly(anomaly *Anomaly) {
 	mp.statsMu.Lock()
 	mp.stats.AnomaliesDetected++
 	mp.statsMu.Unlock()
+	mp.storeAnomaly(anomaly)
 
 	// Send alerts based on severity
 	if mp.alertManager != nil {
@@ -373,9 +379,50 @@ func (mp *MonitoringPipeline) DisableDetection() {
 	mp.logger.Info("Anomaly detection disabled")
 }
 
-// GetRecentAnomalies returns recently detected anomalies (from logs)
-// In production, this should query from a persistent store
+// GetRecentAnomalies returns recently detected anomalies.
 func (mp *MonitoringPipeline) GetRecentAnomalies(duration time.Duration) []*Anomaly {
-	// This is a placeholder - implement with actual anomaly storage
-	return nil
+	cutoff := time.Now().Add(-duration)
+	mp.anomaliesMu.RLock()
+	defer mp.anomaliesMu.RUnlock()
+
+	recent := make([]*Anomaly, 0)
+	for _, anomaly := range mp.anomalies {
+		if duration <= 0 || anomaly.Timestamp.After(cutoff) || anomaly.Timestamp.Equal(cutoff) {
+			recent = append(recent, cloneAnomaly(anomaly))
+		}
+	}
+	return recent
+}
+
+func (mp *MonitoringPipeline) storeAnomaly(anomaly *Anomaly) {
+	if anomaly == nil {
+		return
+	}
+	stored := cloneAnomaly(anomaly)
+	if stored.Timestamp.IsZero() {
+		stored.Timestamp = time.Now()
+	}
+
+	mp.anomaliesMu.Lock()
+	defer mp.anomaliesMu.Unlock()
+
+	mp.anomalies = append(mp.anomalies, stored)
+	if len(mp.anomalies) > mp.maxAnomalies {
+		copy(mp.anomalies, mp.anomalies[len(mp.anomalies)-mp.maxAnomalies:])
+		mp.anomalies = mp.anomalies[:mp.maxAnomalies]
+	}
+}
+
+func cloneAnomaly(anomaly *Anomaly) *Anomaly {
+	if anomaly == nil {
+		return nil
+	}
+	copyAnomaly := *anomaly
+	if anomaly.Context != nil {
+		copyAnomaly.Context = make(map[string]interface{}, len(anomaly.Context))
+		for key, value := range anomaly.Context {
+			copyAnomaly.Context[key] = value
+		}
+	}
+	return &copyAnomaly
 }

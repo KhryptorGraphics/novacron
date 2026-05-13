@@ -3,7 +3,6 @@ package partition
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"os"
@@ -29,6 +28,30 @@ type DQNAgent struct {
 	totalReward    float64
 	episodeRewards []float64
 	successRate    float64
+}
+
+const dqnAgentStateVersion = 1
+
+type dqnAgentState struct {
+	Version        int         `json:"version"`
+	ModelLoaded    bool        `json:"model_loaded"`
+	Epsilon        float64     `json:"epsilon"`
+	EpsilonMin     float64     `json:"epsilon_min"`
+	EpsilonDecay   float64     `json:"epsilon_decay"`
+	StateBuffer    []float32   `json:"state_buffer,omitempty"`
+	LearningRate   float64     `json:"learning_rate"`
+	Gamma          float64     `json:"gamma"`
+	UpdateFreq     int         `json:"update_freq"`
+	StepCount      int         `json:"step_count"`
+	TotalReward    float64     `json:"total_reward"`
+	EpisodeRewards []float64   `json:"episode_rewards,omitempty"`
+	SuccessRate    float64     `json:"success_rate"`
+	ReplayBuffer   replayState `json:"replay_buffer"`
+}
+
+type replayState struct {
+	Capacity    int           `json:"capacity"`
+	Experiences []*Experience `json:"experiences,omitempty"`
 }
 
 // TaskPartitionDecision represents the agent's decision on how to partition a task
@@ -152,6 +175,9 @@ func (agent *DQNAgent) UpdateEpsilon() {
 
 	if agent.epsilon > agent.epsilonMin {
 		agent.epsilon *= agent.epsilonDecay
+		if agent.epsilon < agent.epsilonMin {
+			agent.epsilon = agent.epsilonMin
+		}
 	}
 }
 
@@ -335,23 +361,76 @@ func (agent *DQNAgent) GetMetrics() map[string]interface{} {
 	}
 }
 
-// SaveModel exports the model parameters (placeholder for actual implementation)
+// SaveModel exports the agent policy state and replay buffer.
 func (agent *DQNAgent) SaveModel(path string) error {
-	metrics := agent.GetMetrics()
-	data, err := json.MarshalIndent(metrics, "", "  ")
+	agent.mu.RLock()
+	state := dqnAgentState{
+		Version:        dqnAgentStateVersion,
+		ModelLoaded:    agent.modelLoaded,
+		Epsilon:        agent.epsilon,
+		EpsilonMin:     agent.epsilonMin,
+		EpsilonDecay:   agent.epsilonDecay,
+		StateBuffer:    append([]float32(nil), agent.stateBuffer...),
+		LearningRate:   agent.learningRate,
+		Gamma:          agent.gamma,
+		UpdateFreq:     agent.updateFreq,
+		StepCount:      agent.stepCount,
+		TotalReward:    agent.totalReward,
+		EpisodeRewards: append([]float64(nil), agent.episodeRewards...),
+		SuccessRate:    agent.successRate,
+	}
+	agent.mu.RUnlock()
+
+	if agent.replayBuffer != nil {
+		agent.replayBuffer.mu.Lock()
+		state.ReplayBuffer.Capacity = agent.replayBuffer.capacity
+		state.ReplayBuffer.Experiences = append([]*Experience(nil), agent.replayBuffer.buffer...)
+		agent.replayBuffer.mu.Unlock()
+	}
+
+	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	return ioutil.WriteFile(path+".metrics.json", data, 0644)
+	return os.WriteFile(path, data, 0600)
 }
 
 // LoadModel loads a pre-trained model
 func (agent *DQNAgent) LoadModel(path string) error {
-	if _, err := os.Stat(path); err != nil {
+	data, err := os.ReadFile(path)
+	if err != nil {
 		return fmt.Errorf("failed to load model %q: %w", path, err)
 	}
+
+	var state dqnAgentState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return fmt.Errorf("failed to decode model %q: %w", path, err)
+	}
+	if state.Version != dqnAgentStateVersion {
+		return fmt.Errorf("unsupported model state version %d", state.Version)
+	}
+	if state.ReplayBuffer.Capacity <= 0 {
+		state.ReplayBuffer.Capacity = 10000
+	}
+
+	agent.mu.Lock()
+	agent.epsilon = state.Epsilon
+	agent.epsilonMin = state.EpsilonMin
+	agent.epsilonDecay = state.EpsilonDecay
+	agent.stateBuffer = append([]float32(nil), state.StateBuffer...)
+	agent.learningRate = state.LearningRate
+	agent.gamma = state.Gamma
+	agent.updateFreq = state.UpdateFreq
+	agent.stepCount = state.StepCount
+	agent.totalReward = state.TotalReward
+	agent.episodeRewards = append([]float64(nil), state.EpisodeRewards...)
+	agent.successRate = state.SuccessRate
+	agent.replayBuffer = NewReplayBuffer(state.ReplayBuffer.Capacity)
+	agent.replayBuffer.buffer = append([]*Experience(nil), state.ReplayBuffer.Experiences...)
 	agent.modelLoaded = true
+	agent.mu.Unlock()
+
 	return nil
 }
 

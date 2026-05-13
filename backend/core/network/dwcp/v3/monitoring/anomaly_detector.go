@@ -18,10 +18,10 @@ type AnomalyDetector struct {
 	config *AnomalyDetectorConfig
 
 	// Statistical models
-	bandwidthModel    *StatisticalModel
-	latencyModel      *StatisticalModel
-	compressionModel  *StatisticalModel
-	consensusModel    *StatisticalModel
+	bandwidthModel   *StatisticalModel
+	latencyModel     *StatisticalModel
+	compressionModel *StatisticalModel
+	consensusModel   *StatisticalModel
 
 	// Anomaly tracking
 	anomalies         []*Anomaly
@@ -38,19 +38,19 @@ type AnomalyDetector struct {
 // AnomalyDetectorConfig configuration for anomaly detection
 type AnomalyDetectorConfig struct {
 	// Detection thresholds (in standard deviations)
-	BandwidthThreshold    float64
-	LatencyThreshold      float64
-	CompressionThreshold  float64
-	ConsensusThreshold    float64
+	BandwidthThreshold   float64
+	LatencyThreshold     float64
+	CompressionThreshold float64
+	ConsensusThreshold   float64
 
 	// Window sizes for moving averages
-	ShortWindowSize  int // Fast detection (e.g., 10 samples)
-	LongWindowSize   int // Baseline (e.g., 100 samples)
+	ShortWindowSize int // Fast detection (e.g., 10 samples)
+	LongWindowSize  int // Baseline (e.g., 100 samples)
 
 	// Alert settings
-	EnableAlerts          bool
-	AlertCooldownPeriod   time.Duration
-	MinAnomalyConfidence  float64 // 0-1
+	EnableAlerts         bool
+	AlertCooldownPeriod  time.Duration
+	MinAnomalyConfidence float64 // 0-1
 }
 
 // StatisticalModel tracks statistical properties for anomaly detection
@@ -60,18 +60,18 @@ type StatisticalModel struct {
 	Name string
 
 	// Historical data
-	samples      []float64
-	maxSamples   int
+	samples    []float64
+	maxSamples int
 
 	// Statistical properties
-	Mean         float64
-	StdDev       float64
-	Min          float64
-	Max          float64
+	Mean   float64
+	StdDev float64
+	Min    float64
+	Max    float64
 
 	// Moving averages
-	ShortMA      float64 // Fast moving average
-	LongMA       float64 // Slow moving average
+	ShortMA float64 // Fast moving average
+	LongMA  float64 // Slow moving average
 
 	// Anomaly detection
 	LastAnomaly  time.Time
@@ -126,15 +126,15 @@ func NewAnomalyDetector(config *AnomalyDetectorConfig, logger *zap.Logger) *Anom
 // DefaultAnomalyDetectorConfig returns default configuration
 func DefaultAnomalyDetectorConfig() *AnomalyDetectorConfig {
 	return &AnomalyDetectorConfig{
-		BandwidthThreshold:    3.0, // 3 sigma
-		LatencyThreshold:      3.0, // 3 sigma
-		CompressionThreshold:  2.5, // 2.5 sigma
-		ConsensusThreshold:    2.5, // 2.5 sigma
-		ShortWindowSize:       10,
-		LongWindowSize:        100,
-		EnableAlerts:          true,
-		AlertCooldownPeriod:   5 * time.Minute,
-		MinAnomalyConfidence:  0.80, // 80%
+		BandwidthThreshold:   3.0, // 3 sigma
+		LatencyThreshold:     3.0, // 3 sigma
+		CompressionThreshold: 2.5, // 2.5 sigma
+		ConsensusThreshold:   2.5, // 2.5 sigma
+		ShortWindowSize:      10,
+		LongWindowSize:       100,
+		EnableAlerts:         true,
+		AlertCooldownPeriod:  5 * time.Minute,
+		MinAnomalyConfidence: 0.80, // 80%
 	}
 }
 
@@ -152,14 +152,14 @@ func (ad *AnomalyDetector) CheckBandwidth(throughputMbps float64) *Anomaly {
 		confidence := ad.calculateConfidence(deviation, ad.config.BandwidthThreshold)
 		if confidence >= ad.config.MinAnomalyConfidence {
 			anomaly := &Anomaly{
-				Timestamp:   time.Now(),
-				Component:   "amst",
-				Metric:      "bandwidth",
-				Value:       throughputMbps,
-				Expected:    ad.bandwidthModel.Mean,
-				Deviation:   deviation,
-				Confidence:  confidence,
-				Severity:    ad.calculateSeverity(deviation),
+				Timestamp:  time.Now(),
+				Component:  "amst",
+				Metric:     "bandwidth",
+				Value:      throughputMbps,
+				Expected:   ad.bandwidthModel.Mean,
+				Deviation:  deviation,
+				Confidence: confidence,
+				Severity:   ad.calculateSeverity(deviation),
 				Description: fmt.Sprintf("Bandwidth anomaly: %.2f Mbps (expected %.2f ± %.2f)",
 					throughputMbps, ad.bandwidthModel.Mean, ad.bandwidthModel.StdDev),
 			}
@@ -187,14 +187,14 @@ func (ad *AnomalyDetector) CheckLatency(latencyMs float64) *Anomaly {
 		confidence := ad.calculateConfidence(deviation, ad.config.LatencyThreshold)
 		if confidence >= ad.config.MinAnomalyConfidence {
 			anomaly := &Anomaly{
-				Timestamp:   time.Now(),
-				Component:   "amst",
-				Metric:      "latency",
-				Value:       latencyMs,
-				Expected:    ad.latencyModel.Mean,
-				Deviation:   deviation,
-				Confidence:  confidence,
-				Severity:    ad.calculateSeverity(deviation),
+				Timestamp:  time.Now(),
+				Component:  "amst",
+				Metric:     "latency",
+				Value:      latencyMs,
+				Expected:   ad.latencyModel.Mean,
+				Deviation:  deviation,
+				Confidence: confidence,
+				Severity:   ad.calculateSeverity(deviation),
 				Description: fmt.Sprintf("Latency spike: %.2f ms (expected %.2f ± %.2f)",
 					latencyMs, ad.latencyModel.Mean, ad.latencyModel.StdDev),
 			}
@@ -217,19 +217,19 @@ func (ad *AnomalyDetector) CheckCompressionRatio(ratio float64) *Anomaly {
 
 	deviation := ad.compressionModel.calculateDeviation(ratio)
 
-	// Alert on unusually low compression (positive deviation from norm)
-	if deviation > ad.config.CompressionThreshold {
+	// Alert on unusually low compression ratios.
+	if deviation < -ad.config.CompressionThreshold {
 		confidence := ad.calculateConfidence(deviation, ad.config.CompressionThreshold)
 		if confidence >= ad.config.MinAnomalyConfidence {
 			anomaly := &Anomaly{
-				Timestamp:   time.Now(),
-				Component:   "hde",
-				Metric:      "compression_ratio",
-				Value:       ratio,
-				Expected:    ad.compressionModel.Mean,
-				Deviation:   deviation,
-				Confidence:  confidence,
-				Severity:    ad.calculateSeverity(deviation),
+				Timestamp:  time.Now(),
+				Component:  "hde",
+				Metric:     "compression_ratio",
+				Value:      ratio,
+				Expected:   ad.compressionModel.Mean,
+				Deviation:  deviation,
+				Confidence: confidence,
+				Severity:   ad.calculateSeverity(deviation),
 				Description: fmt.Sprintf("Compression ratio anomaly: %.2fx (expected %.2f ± %.2f)",
 					ratio, ad.compressionModel.Mean, ad.compressionModel.StdDev),
 			}
@@ -256,14 +256,14 @@ func (ad *AnomalyDetector) CheckConsensusLatency(latencyMs float64) *Anomaly {
 		confidence := ad.calculateConfidence(deviation, ad.config.ConsensusThreshold)
 		if confidence >= ad.config.MinAnomalyConfidence {
 			anomaly := &Anomaly{
-				Timestamp:   time.Now(),
-				Component:   "acp",
-				Metric:      "consensus_latency",
-				Value:       latencyMs,
-				Expected:    ad.consensusModel.Mean,
-				Deviation:   deviation,
-				Confidence:  confidence,
-				Severity:    ad.calculateSeverity(deviation),
+				Timestamp:  time.Now(),
+				Component:  "acp",
+				Metric:     "consensus_latency",
+				Value:      latencyMs,
+				Expected:   ad.consensusModel.Mean,
+				Deviation:  deviation,
+				Confidence: confidence,
+				Severity:   ad.calculateSeverity(deviation),
 				Description: fmt.Sprintf("Consensus timeout anomaly: %.2f ms (expected %.2f ± %.2f)",
 					latencyMs, ad.consensusModel.Mean, ad.consensusModel.StdDev),
 			}
@@ -347,11 +347,12 @@ func (ad *AnomalyDetector) getModelForAnomaly(anomaly *Anomaly) *StatisticalMode
 func (ad *AnomalyDetector) calculateConfidence(deviation, threshold float64) float64 {
 	// Confidence increases with deviation beyond threshold
 	// 0.8 at threshold, approaches 1.0 as deviation increases
-	if deviation < threshold {
+	absDeviation := math.Abs(deviation)
+	if absDeviation < threshold {
 		return 0.0
 	}
 
-	excess := math.Abs(deviation) - threshold
+	excess := absDeviation - threshold
 	confidence := 0.8 + (0.2 * (excess / threshold))
 	if confidence > 1.0 {
 		confidence = 1.0
@@ -411,13 +412,13 @@ func (ad *AnomalyDetector) GetAnomalyStats() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"total_anomalies":      len(ad.anomalies),
-		"severity_distribution": severityCounts,
+		"total_anomalies":        len(ad.anomalies),
+		"severity_distribution":  severityCounts,
 		"component_distribution": componentCounts,
-		"bandwidth_anomalies":  ad.bandwidthModel.AnomalyCount,
-		"latency_anomalies":    ad.latencyModel.AnomalyCount,
-		"compression_anomalies": ad.compressionModel.AnomalyCount,
-		"consensus_anomalies":  ad.consensusModel.AnomalyCount,
+		"bandwidth_anomalies":    ad.bandwidthModel.AnomalyCount,
+		"latency_anomalies":      ad.latencyModel.AnomalyCount,
+		"compression_anomalies":  ad.compressionModel.AnomalyCount,
+		"consensus_anomalies":    ad.consensusModel.AnomalyCount,
 	}
 }
 

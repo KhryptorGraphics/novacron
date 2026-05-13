@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -36,6 +37,22 @@ func (mrn *MockRaftNode) ReadIndex(ctx context.Context) (uint64, error) {
 
 func (mrn *MockRaftNode) IsLeader() bool {
 	return mrn.isLeader
+}
+
+func TestSerializeStateUsesJSON(t *testing.T) {
+	data, err := serializeState(map[string]interface{}{
+		"vm_id": "vm-123",
+		"state": "running",
+	})
+	require.NoError(t, err)
+
+	var decoded map[string]interface{}
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	assert.Equal(t, "vm-123", decoded["vm_id"])
+	assert.Equal(t, "running", decoded["state"])
+
+	_, err = serializeState(make(chan struct{}))
+	require.Error(t, err)
 }
 
 func TestASSv3_Creation(t *testing.T) {

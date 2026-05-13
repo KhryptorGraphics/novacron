@@ -78,7 +78,7 @@ func (p *LSTMPredictor) Predict(history []NetworkSample) (*BandwidthPrediction, 
 		return nil, fmt.Errorf("failed to prepare input: %w", err)
 	}
 
-	prediction, err := p.parseOutput(nil)
+	prediction, err := p.parseOutput(nil, history)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse output: %w", err)
 	}
@@ -133,14 +133,8 @@ func (p *LSTMPredictor) prepareInput(history []NetworkSample) ([]float32, error)
 }
 
 // parseOutput converts model output to a bandwidth prediction.
-func (p *LSTMPredictor) parseOutput(_ []float32) (*BandwidthPrediction, error) {
-	prediction := &BandwidthPrediction{
-		PredictedBandwidthMbps: 100.0, // Default placeholder
-		PredictedLatencyMs:     10.0,  // Default placeholder
-		PredictedPacketLoss:    0.01,  // Default placeholder
-		PredictedJitterMs:      2.0,   // Default placeholder
-		ValidUntil:             time.Now().Add(15 * time.Minute),
-	}
+func (p *LSTMPredictor) parseOutput(_ []float32, history []NetworkSample) (*BandwidthPrediction, error) {
+	prediction := p.forecastFromHistory(history)
 
 	prediction.Confidence = p.calculateConfidence(prediction)
 	if !p.modelLoaded {
@@ -148,6 +142,36 @@ func (p *LSTMPredictor) parseOutput(_ []float32) (*BandwidthPrediction, error) {
 	}
 
 	return prediction, nil
+}
+
+func (p *LSTMPredictor) forecastFromHistory(history []NetworkSample) *BandwidthPrediction {
+	startIdx := len(history) - p.sequenceLength
+	recent := history[startIdx:]
+	first := recent[0]
+	last := recent[len(recent)-1]
+
+	var bandwidth, latency, packetLoss, jitter float64
+	for _, sample := range recent {
+		bandwidth += sample.BandwidthMbps
+		latency += sample.LatencyMs
+		packetLoss += sample.PacketLoss
+		jitter += sample.JitterMs
+	}
+
+	count := float64(len(recent))
+	trendScale := 1.0 / count
+	bandwidthTrend := (last.BandwidthMbps - first.BandwidthMbps) * trendScale
+	latencyTrend := (last.LatencyMs - first.LatencyMs) * trendScale
+	packetLossTrend := (last.PacketLoss - first.PacketLoss) * trendScale
+	jitterTrend := (last.JitterMs - first.JitterMs) * trendScale
+
+	return &BandwidthPrediction{
+		PredictedBandwidthMbps: math.Max(0, bandwidth/count+bandwidthTrend),
+		PredictedLatencyMs:     math.Max(0, latency/count+latencyTrend),
+		PredictedPacketLoss:    math.Max(0, packetLoss/count+packetLossTrend),
+		PredictedJitterMs:      math.Max(0, jitter/count+jitterTrend),
+		ValidUntil:             time.Now().Add(15 * time.Minute),
+	}
 }
 
 // calculateConfidence estimates prediction confidence

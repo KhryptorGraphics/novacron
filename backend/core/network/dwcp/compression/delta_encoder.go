@@ -14,17 +14,17 @@ import (
 // Phase 1: Production-ready with dictionary training and advanced algorithms
 type DeltaEncoder struct {
 	// Baseline management
-	baselineStates  map[string]*BaselineState
-	baselineMutex   sync.RWMutex
+	baselineStates   map[string]*BaselineState
+	baselineMutex    sync.RWMutex
 	baselineInterval time.Duration
 	maxBaselineAge   time.Duration
 
 	// Compression (with dictionary support)
-	compressor   *zstd.Encoder
-	decompressor *zstd.Decoder
-	dictEncoder  *zstd.Encoder // Dictionary-based encoder
-	dictDecoder  *zstd.Decoder // Dictionary-based decoder
-	compressMutex sync.Mutex // Protects concurrent compress/decompress operations
+	compressor    *zstd.Encoder
+	decompressor  *zstd.Decoder
+	dictEncoder   *zstd.Encoder // Dictionary-based encoder
+	dictDecoder   *zstd.Decoder // Dictionary-based decoder
+	compressMutex sync.Mutex    // Protects concurrent compress/decompress operations
 
 	// Phase 1: Advanced features
 	dictionaryTrainer *DictionaryTrainer
@@ -38,35 +38,35 @@ type DeltaEncoder struct {
 	logger *zap.Logger
 
 	// Legacy metrics (kept for backward compatibility)
-	totalEncoded     uint64
-	totalDecoded     uint64
-	deltaHits        uint64
-	baselineRefresh  uint64
-	mu               sync.RWMutex
+	totalEncoded    uint64
+	totalDecoded    uint64
+	deltaHits       uint64
+	baselineRefresh uint64
+	mu              sync.RWMutex
 }
 
 // BaselineState represents a baseline snapshot for delta computation
 type BaselineState struct {
-	Data      []byte
-	Timestamp time.Time
+	Data       []byte
+	Timestamp  time.Time
 	DeltaCount int // Number of deltas computed from this baseline
 }
 
 // DeltaEncodingConfig configuration for delta encoding
 type DeltaEncodingConfig struct {
-	Enabled            bool          `json:"enabled" yaml:"enabled"`
-	BaselineInterval   time.Duration `json:"baseline_interval" yaml:"baseline_interval"`
-	MaxBaselineAge     time.Duration `json:"max_baseline_age" yaml:"max_baseline_age"`
-	MaxDeltaChain      int           `json:"max_delta_chain" yaml:"max_delta_chain"`
-	CompressionLevel   int           `json:"compression_level" yaml:"compression_level"` // Zstandard: 0-9
-	EnableDictionary   bool          `json:"enable_dictionary" yaml:"enable_dictionary"`
+	Enabled          bool          `json:"enabled" yaml:"enabled"`
+	BaselineInterval time.Duration `json:"baseline_interval" yaml:"baseline_interval"`
+	MaxBaselineAge   time.Duration `json:"max_baseline_age" yaml:"max_baseline_age"`
+	MaxDeltaChain    int           `json:"max_delta_chain" yaml:"max_delta_chain"`
+	CompressionLevel int           `json:"compression_level" yaml:"compression_level"` // Zstandard: 0-9
+	EnableDictionary bool          `json:"enable_dictionary" yaml:"enable_dictionary"`
 
 	// Phase 1: Advanced features
-	DeltaAlgorithm     string        `json:"delta_algorithm" yaml:"delta_algorithm"`         // "xor", "rsync", "bsdiff", "auto"
-	AdaptiveThreshold  float64       `json:"adaptive_threshold" yaml:"adaptive_threshold"`   // Auto-adjust compression if ratio < threshold
-	MinCompressionRatio float64      `json:"min_compression_ratio" yaml:"min_compression_ratio"` // Skip compression if ratio < this
-	EnableAdaptive     bool          `json:"enable_adaptive" yaml:"enable_adaptive"`         // Enable adaptive compression
-	EnableBaselineSync bool          `json:"enable_baseline_sync" yaml:"enable_baseline_sync"` // Enable cluster sync
+	DeltaAlgorithm      string  `json:"delta_algorithm" yaml:"delta_algorithm"`             // "xor", "rsync", "bsdiff", "auto"
+	AdaptiveThreshold   float64 `json:"adaptive_threshold" yaml:"adaptive_threshold"`       // Auto-adjust compression if ratio < threshold
+	MinCompressionRatio float64 `json:"min_compression_ratio" yaml:"min_compression_ratio"` // Skip compression if ratio < this
+	EnableAdaptive      bool    `json:"enable_adaptive" yaml:"enable_adaptive"`             // Enable adaptive compression
+	EnableBaselineSync  bool    `json:"enable_baseline_sync" yaml:"enable_baseline_sync"`   // Enable cluster sync
 }
 
 // DefaultDeltaEncodingConfig returns sensible defaults for Phase 1
@@ -76,8 +76,8 @@ func DefaultDeltaEncodingConfig() *DeltaEncodingConfig {
 		BaselineInterval:    5 * time.Minute,
 		MaxBaselineAge:      15 * time.Minute,
 		MaxDeltaChain:       10,
-		CompressionLevel:    3, // Balanced compression (Zstandard level 3)
-		EnableDictionary:    true, // Phase 1: Dictionary training enabled
+		CompressionLevel:    3,      // Balanced compression (Zstandard level 3)
+		EnableDictionary:    true,   // Phase 1: Dictionary training enabled
 		DeltaAlgorithm:      "auto", // Phase 1: Auto-select algorithm
 		AdaptiveThreshold:   3.0,
 		MinCompressionRatio: 1.1,
@@ -176,19 +176,6 @@ func (de *DeltaEncoder) Encode(stateKey string, data []byte) (*EncodedData, erro
 		de.dictionaryTrainer.AddSample(de.extractResourceType(stateKey), data)
 	}
 
-	// Phase 1: Check if compression is worthwhile
-	if de.adaptiveComp != nil && !de.adaptiveComp.ShouldCompress(len(data)) {
-		de.metrics.RecordIncompressibleSkip()
-		return &EncodedData{
-			Data:           data,
-			OriginalSize:   len(data),
-			CompressedSize: len(data),
-			IsDelta:        false,
-			BaselineKey:    stateKey,
-			Timestamp:      time.Now(),
-		}, nil
-	}
-
 	de.baselineMutex.RLock()
 	baseline, hasBaseline := de.baselineStates[stateKey]
 	de.baselineMutex.RUnlock()
@@ -250,6 +237,7 @@ func (de *DeltaEncoder) Encode(stateKey string, data []byte) (*EncodedData, erro
 		Data:           compressed,
 		OriginalSize:   len(data),
 		CompressedSize: len(compressed),
+		Compressed:     true,
 		IsDelta:        true,
 		BaselineKey:    stateKey,
 		Timestamp:      time.Now(),
@@ -259,14 +247,23 @@ func (de *DeltaEncoder) Encode(stateKey string, data []byte) (*EncodedData, erro
 // Decode decompresses and applies delta reconstruction
 func (de *DeltaEncoder) Decode(stateKey string, encoded *EncodedData) ([]byte, error) {
 	if !de.config.Enabled || !encoded.IsDelta {
+		if !encoded.Compressed {
+			decoded := make([]byte, len(encoded.Data))
+			copy(decoded, encoded.Data)
+			return decoded, nil
+		}
 		// Just decompress
 		return de.decompress(encoded.Data)
 	}
 
 	// Decompress delta
-	delta, err := de.decompress(encoded.Data)
-	if err != nil {
-		return nil, fmt.Errorf("delta decompression failed: %w", err)
+	delta := encoded.Data
+	if encoded.Compressed {
+		decompressed, err := de.decompress(encoded.Data)
+		if err != nil {
+			return nil, fmt.Errorf("delta decompression failed: %w", err)
+		}
+		delta = decompressed
 	}
 
 	// Get baseline
@@ -317,12 +314,13 @@ func (de *DeltaEncoder) createBaseline(stateKey string, data []byte) (*EncodedDa
 		zap.Int("compressed", len(compressed)))
 
 	return &EncodedData{
-		Data:          compressed,
-		OriginalSize:  len(data),
+		Data:           compressed,
+		OriginalSize:   len(data),
 		CompressedSize: len(compressed),
-		IsDelta:       false,
-		BaselineKey:   stateKey,
-		Timestamp:     time.Now(),
+		Compressed:     true,
+		IsDelta:        false,
+		BaselineKey:    stateKey,
+		Timestamp:      time.Now(),
 	}, nil
 }
 
@@ -389,11 +387,12 @@ func (de *DeltaEncoder) compressOnly(data []byte) (*EncodedData, error) {
 	de.mu.Unlock()
 
 	return &EncodedData{
-		Data:          compressed,
-		OriginalSize:  len(data),
+		Data:           compressed,
+		OriginalSize:   len(data),
 		CompressedSize: len(compressed),
-		IsDelta:       false,
-		Timestamp:     time.Now(),
+		Compressed:     true,
+		IsDelta:        false,
+		Timestamp:      time.Now(),
 	}, nil
 }
 
@@ -595,12 +594,13 @@ func (de *DeltaEncoder) GetDetailedMetrics() map[string]interface{} {
 
 // EncodedData represents compressed and optionally delta-encoded data
 type EncodedData struct {
-	Data          []byte
-	OriginalSize  int
+	Data           []byte
+	OriginalSize   int
 	CompressedSize int
-	IsDelta       bool
-	BaselineKey   string
-	Timestamp     time.Time
+	Compressed     bool
+	IsDelta        bool
+	BaselineKey    string
+	Timestamp      time.Time
 }
 
 // CompressionRatio returns the compression ratio achieved

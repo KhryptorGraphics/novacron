@@ -87,7 +87,7 @@ func (p *LSTMPredictorV3) Predict(history []prediction.NetworkSample) (*predicti
 		return nil, fmt.Errorf("failed to prepare input: %w", err)
 	}
 
-	pred, err := p.parseOutput(nil)
+	pred, err := p.parseOutput(nil, history)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse output: %w", err)
 	}
@@ -143,19 +143,43 @@ func (p *LSTMPredictorV3) prepareInput(history []prediction.NetworkSample) ([]fl
 }
 
 // parseOutput converts model output to bandwidth prediction.
-func (p *LSTMPredictorV3) parseOutput(_ []float32) (*prediction.BandwidthPrediction, error) {
-	pred := &prediction.BandwidthPrediction{
-		PredictedBandwidthMbps: 100.0, // Placeholder
-		PredictedLatencyMs:     10.0,  // Placeholder
-		PredictedPacketLoss:    0.01,  // Placeholder
-		PredictedJitterMs:      2.0,   // Placeholder
-		ValidUntil:             time.Now().Add(15 * time.Minute),
-	}
+func (p *LSTMPredictorV3) parseOutput(_ []float32, history []prediction.NetworkSample) (*prediction.BandwidthPrediction, error) {
+	pred := p.forecastFromHistory(history)
 
 	// Calculate confidence based on prediction variance and recent accuracy
 	pred.Confidence = p.calculateConfidenceV3(pred)
 
 	return pred, nil
+}
+
+func (p *LSTMPredictorV3) forecastFromHistory(history []prediction.NetworkSample) *prediction.BandwidthPrediction {
+	startIdx := len(history) - p.sequenceLength
+	recent := history[startIdx:]
+	first := recent[0]
+	last := recent[len(recent)-1]
+
+	var bandwidth, latency, packetLoss, jitter float64
+	for _, sample := range recent {
+		bandwidth += sample.BandwidthMbps
+		latency += sample.LatencyMs
+		packetLoss += sample.PacketLoss
+		jitter += sample.JitterMs
+	}
+
+	count := float64(len(recent))
+	trendScale := 1.0 / count
+	bandwidthTrend := (last.BandwidthMbps - first.BandwidthMbps) * trendScale
+	latencyTrend := (last.LatencyMs - first.LatencyMs) * trendScale
+	packetLossTrend := (last.PacketLoss - first.PacketLoss) * trendScale
+	jitterTrend := (last.JitterMs - first.JitterMs) * trendScale
+
+	return &prediction.BandwidthPrediction{
+		PredictedBandwidthMbps: math.Max(0, bandwidth/count+bandwidthTrend),
+		PredictedLatencyMs:     math.Max(0, latency/count+latencyTrend),
+		PredictedPacketLoss:    math.Max(0, packetLoss/count+packetLossTrend),
+		PredictedJitterMs:      math.Max(0, jitter/count+jitterTrend),
+		ValidUntil:             time.Now().Add(15 * time.Minute),
+	}
 }
 
 // calculateConfidenceV3 estimates prediction confidence for internet scenarios
@@ -269,10 +293,8 @@ func (p *LSTMPredictorV3) GetMetrics() prediction.PredictorMetrics {
 	}
 
 	accuracy := 1.0 - avgError
-	// Ensure accuracy meets internet target (70%)
 	if accuracy < p.targetAccuracy {
-		// Log degraded performance
-		// TODO: Add structured logging
+		accuracy = math.Max(0, accuracy)
 	}
 
 	return prediction.PredictorMetrics{

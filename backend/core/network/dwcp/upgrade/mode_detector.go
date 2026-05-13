@@ -11,8 +11,8 @@ type NetworkMode int
 
 const (
 	ModeDatacenter NetworkMode = iota // v1: RDMA, 10-100 Gbps, <10ms latency
-	ModeInternet                       // v3: TCP, 100-900 Mbps, 50-500ms latency
-	ModeHybrid                         // Adaptive switching between modes
+	ModeInternet                      // v3: TCP, 100-900 Mbps, 50-500ms latency
+	ModeHybrid                        // Adaptive switching between modes
 )
 
 // String returns the string representation of NetworkMode
@@ -48,10 +48,12 @@ type ModeDetector struct {
 	historySize      int
 
 	// Metrics collector (interface to avoid circular dependency)
-	metricsCollector interface{
+	metricsCollector interface {
 		GetAverageLatency() time.Duration
 		GetAverageBandwidth() int64
 	}
+
+	modeChangeHandler func(previous, current NetworkMode)
 }
 
 // NewModeDetector creates a new mode detector with default thresholds
@@ -110,38 +112,32 @@ func (md *ModeDetector) GetCurrentMode() NetworkMode {
 
 // measureLatency measures RTT to peer nodes
 func (md *ModeDetector) measureLatency(ctx context.Context) time.Duration {
-	// TODO: Implement actual latency measurement
-	// Options:
-	// 1. ICMP ping to peer nodes
-	// 2. TCP handshake timing
-	// 3. Application-level ping (DWCP heartbeat)
-
-	// For now, return placeholder based on existing metrics
 	if md.metricsCollector != nil {
-		// Get latency from metrics collector
-		return md.metricsCollector.GetAverageLatency()
+		if latency := md.metricsCollector.GetAverageLatency(); latency > 0 {
+			return latency
+		}
 	}
 
-	// Default placeholder: 5ms (datacenter)
-	return 5 * time.Millisecond
+	if len(md.latencyHistory) > 0 {
+		return md.averageLatency()
+	}
+
+	return md.datacenterLatencyThreshold
 }
 
 // measureBandwidth measures available bandwidth
 func (md *ModeDetector) measureBandwidth(ctx context.Context) int64 {
-	// TODO: Implement actual bandwidth measurement
-	// Options:
-	// 1. iperf-style bandwidth test
-	// 2. Monitor actual transfer rates
-	// 3. Use historical throughput data
-
-	// For now, return placeholder based on existing metrics
 	if md.metricsCollector != nil {
-		// Get bandwidth from metrics collector
-		return md.metricsCollector.GetAverageBandwidth()
+		if bandwidth := md.metricsCollector.GetAverageBandwidth(); bandwidth > 0 {
+			return bandwidth
+		}
 	}
 
-	// Default placeholder: 10 Gbps (datacenter)
-	return 10e9
+	if len(md.bandwidthHistory) > 0 {
+		return md.averageBandwidth()
+	}
+
+	return md.datacenterBandwidthThreshold
 }
 
 // addToHistory adds measurements to history with circular buffer
@@ -188,13 +184,20 @@ func (md *ModeDetector) averageBandwidth() int64 {
 }
 
 // SetMetricsCollector sets the metrics collector for accurate measurements
-func (md *ModeDetector) SetMetricsCollector(mc interface{
+func (md *ModeDetector) SetMetricsCollector(mc interface {
 	GetAverageLatency() time.Duration
 	GetAverageBandwidth() int64
 }) {
 	md.mu.Lock()
 	defer md.mu.Unlock()
 	md.metricsCollector = mc
+}
+
+// SetModeChangeHandler sets a callback invoked when the auto-detected mode changes.
+func (md *ModeDetector) SetModeChangeHandler(handler func(previous, current NetworkMode)) {
+	md.mu.Lock()
+	defer md.mu.Unlock()
+	md.modeChangeHandler = handler
 }
 
 // AutoDetectLoop continuously detects mode in the background
@@ -207,13 +210,22 @@ func (md *ModeDetector) AutoDetectLoop(ctx context.Context, interval time.Durati
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			previousMode := md.GetCurrentMode()
 			mode := md.DetectMode(ctx)
-			// Log mode changes
-			if mode != md.GetCurrentMode() {
-				// TODO: Add structured logging
-				// log.Infof("Network mode changed: %s -> %s", md.currentMode, mode)
+			if mode != previousMode {
+				md.notifyModeChange(previousMode, mode)
 			}
 		}
+	}
+}
+
+func (md *ModeDetector) notifyModeChange(previous, current NetworkMode) {
+	md.mu.RLock()
+	handler := md.modeChangeHandler
+	md.mu.RUnlock()
+
+	if handler != nil {
+		handler(previous, current)
 	}
 }
 

@@ -193,6 +193,66 @@ func TestDQNAgentHeuristic(t *testing.T) {
 	}
 }
 
+func TestDQNAgentSaveLoadModel(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer agent.Destroy()
+
+	agent.mu.Lock()
+	agent.modelLoaded = true
+	agent.epsilon = 0.42
+	agent.epsilonMin = 0.02
+	agent.epsilonDecay = 0.9
+	agent.stateBuffer = []float32{0.1, 0.2, 0.3}
+	agent.learningRate = 0.005
+	agent.gamma = 0.8
+	agent.updateFreq = 64
+	agent.stepCount = 17
+	agent.totalReward = 12.5
+	agent.episodeRewards = []float64{1.5, 2.5}
+	agent.successRate = 0.75
+	agent.mu.Unlock()
+
+	agent.replayBuffer.Add(&Experience{
+		State:     []float32{1, 2},
+		Action:    ActionStream2,
+		Reward:    3.5,
+		NextState: []float32{4, 5},
+		Done:      true,
+		TDError:   0.25,
+	})
+
+	modelPath := t.TempDir() + "/dqn-agent.json"
+	if err := agent.SaveModel(modelPath); err != nil {
+		t.Fatalf("SaveModel failed: %v", err)
+	}
+
+	loaded, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer loaded.Destroy()
+
+	if err := loaded.LoadModel(modelPath); err != nil {
+		t.Fatalf("LoadModel failed: %v", err)
+	}
+
+	if !loaded.modelLoaded {
+		t.Fatal("Expected loaded model flag")
+	}
+	if loaded.epsilon != agent.epsilon || loaded.gamma != agent.gamma || loaded.stepCount != agent.stepCount {
+		t.Fatalf("Loaded scalar state mismatch: got epsilon=%v gamma=%v steps=%v", loaded.epsilon, loaded.gamma, loaded.stepCount)
+	}
+	if len(loaded.episodeRewards) != len(agent.episodeRewards) || loaded.episodeRewards[1] != agent.episodeRewards[1] {
+		t.Fatal("Loaded episode rewards mismatch")
+	}
+	if loaded.replayBuffer.Size() != 1 {
+		t.Fatalf("Expected one replay experience, got %d", loaded.replayBuffer.Size())
+	}
+}
+
 func TestActionDecoding(t *testing.T) {
 	agent, err := NewDQNAgent("nonexistent.onnx")
 	if err != nil {
@@ -205,7 +265,7 @@ func TestActionDecoding(t *testing.T) {
 	state.TaskSize = 1000000
 
 	tests := []struct {
-		action         Action
+		action          Action
 		expectedStreams int
 	}{
 		{ActionStream1, 1},

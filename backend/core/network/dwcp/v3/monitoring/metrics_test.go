@@ -2,6 +2,7 @@ package monitoring
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -519,10 +520,9 @@ func TestIntegrationScenario(t *testing.T) {
 	})
 }
 
-// Helper function for JSON unmarshaling (placeholder)
+// Helper function for JSON unmarshaling.
 func unmarshalJSON(data []byte, v interface{}) error {
-	// Would use json.Unmarshal in production
-	return nil
+	return json.Unmarshal(data, v)
 }
 
 // Benchmark tests

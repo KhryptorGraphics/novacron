@@ -5,6 +5,8 @@ import (
 	"hash/fnv"
 	"os"
 	"sync"
+
+	"go.uber.org/zap"
 )
 
 // DWCPFeatureFlags controls DWCP v3 feature rollout
@@ -41,8 +43,8 @@ var (
 		EnableV3Placement:   false,
 		V3RolloutPercentage: 0,
 		ForceV1Mode:         false,
-		EnableHybridMode:    true,  // Hybrid mode enabled by default
-		EnableModeDetection: true,  // Auto-detection enabled by default
+		EnableHybridMode:    true, // Hybrid mode enabled by default
+		EnableModeDetection: true, // Auto-detection enabled by default
 	}
 	flagsMu sync.RWMutex
 )
@@ -83,9 +85,17 @@ func UpdateFeatureFlags(flags *DWCPFeatureFlags) {
 	globalFlags.EnableHybridMode = flags.EnableHybridMode
 	globalFlags.EnableModeDetection = flags.EnableModeDetection
 
-	// TODO: Add structured logging
-	// log.Infof("Feature flags updated: rollout=%d%%, v3transport=%v, forceV1=%v",
-	//     flags.V3RolloutPercentage, flags.EnableV3Transport, flags.ForceV1Mode)
+	zap.L().Info("DWCP feature flags updated",
+		zap.Int("v3_rollout_percentage", globalFlags.V3RolloutPercentage),
+		zap.Bool("force_v1_mode", globalFlags.ForceV1Mode),
+		zap.Bool("enable_hybrid_mode", globalFlags.EnableHybridMode),
+		zap.Bool("enable_mode_detection", globalFlags.EnableModeDetection),
+		zap.Bool("enable_v3_transport", globalFlags.EnableV3Transport),
+		zap.Bool("enable_v3_compression", globalFlags.EnableV3Compression),
+		zap.Bool("enable_v3_prediction", globalFlags.EnableV3Prediction),
+		zap.Bool("enable_v3_state_sync", globalFlags.EnableV3StateSync),
+		zap.Bool("enable_v3_consensus", globalFlags.EnableV3Consensus),
+		zap.Bool("enable_v3_placement", globalFlags.EnableV3Placement))
 }
 
 // ShouldUseV3 determines if v3 should be used based on rollout percentage

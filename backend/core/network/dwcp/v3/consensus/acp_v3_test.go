@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -34,6 +35,22 @@ func (mrn *MockRaftNode) ReadIndex(ctx context.Context) (uint64, error) {
 
 func (mrn *MockRaftNode) IsLeader() bool {
 	return mrn.isLeader
+}
+
+func TestSerializeValueUsesJSON(t *testing.T) {
+	data, err := serializeValue(map[string]interface{}{
+		"operation": "migrate",
+		"vm_id":     "vm-123",
+	})
+	require.NoError(t, err)
+
+	var decoded map[string]interface{}
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	assert.Equal(t, "migrate", decoded["operation"])
+	assert.Equal(t, "vm-123", decoded["vm_id"])
+
+	_, err = serializeValue(make(chan struct{}))
+	require.Error(t, err)
 }
 
 func TestACPv3_Creation(t *testing.T) {

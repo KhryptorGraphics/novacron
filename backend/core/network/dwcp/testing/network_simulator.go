@@ -42,9 +42,9 @@ type Node struct {
 
 // ResourceCapacity defines node resources
 type ResourceCapacity struct {
-	CPU       int     // cores
-	Memory    int64   // bytes
-	Bandwidth int     // Mbps
+	CPU       int   // cores
+	Memory    int64 // bytes
+	Bandwidth int   // Mbps
 }
 
 // GeoLocation represents geographic coordinates
@@ -101,17 +101,17 @@ type LatencyModel struct {
 
 // PacketLossModel simulates packet loss
 type PacketLossModel struct {
-	profiles   map[string]*LossProfile
-	lossState  map[string]int // burst tracking
-	mu         sync.RWMutex
+	profiles  map[string]*LossProfile
+	lossState map[string]int // burst tracking
+	mu        sync.RWMutex
 }
 
 // BandwidthModel simulates bandwidth constraints
 type BandwidthModel struct {
-	profiles      map[string]*BandwidthProfile
-	utilization   map[string]float64
-	lastUpdate    map[string]time.Time
-	mu            sync.RWMutex
+	profiles    map[string]*BandwidthProfile
+	utilization map[string]float64
+	lastUpdate  map[string]time.Time
+	mu          sync.RWMutex
 }
 
 // NewNetworkSimulator creates a new network simulator
@@ -161,6 +161,13 @@ func (ns *NetworkSimulator) ApplyTopology(topology *NetworkTopology) error {
 		ns.latencyModel.AddProfile(linkID, &link.Latency)
 		ns.lossModel.AddProfile(linkID, &link.PacketLoss)
 		ns.bandwidthModel.AddProfile(linkID, &link.Bandwidth)
+
+		routeID := fmt.Sprintf("%s-%s", link.Source, link.Destination)
+		if routeID != linkID {
+			ns.latencyModel.AddProfile(routeID, &link.Latency)
+			ns.lossModel.AddProfile(routeID, &link.PacketLoss)
+			ns.bandwidthModel.AddProfile(routeID, &link.Bandwidth)
+		}
 	}
 
 	ns.active = true

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
@@ -235,15 +236,41 @@ func (am *ACMEManager) CheckCertificateExpiry() (map[string]time.Time, error) {
 			continue
 		}
 
-		// Parse certificate (simplified - real implementation needs proper PEM parsing)
-		// This is a placeholder - actual implementation would use proper PEM decoding
-		_ = certPEM
+		notAfter, err := parseCachedCertificateExpiry(certPEM)
+		if err != nil {
+			am.logger.Warn("Failed to parse cached certificate",
+				zap.String("domain", domain),
+				zap.Error(err))
+			continue
+		}
 
-		// For now, mark as needing check
-		expiry[domain] = time.Now()
+		expiry[domain] = notAfter
 	}
 
 	return expiry, nil
+}
+
+func parseCachedCertificateExpiry(certPEM []byte) (time.Time, error) {
+	remaining := certPEM
+	for {
+		block, rest := pem.Decode(remaining)
+		if block == nil {
+			break
+		}
+		remaining = rest
+
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("failed to parse certificate PEM block: %w", err)
+		}
+		return cert.NotAfter, nil
+	}
+
+	return time.Time{}, errors.New("no certificate PEM block found")
 }
 
 // StartAutoRenewal starts automatic certificate renewal monitoring

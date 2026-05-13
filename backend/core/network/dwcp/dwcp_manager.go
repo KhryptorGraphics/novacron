@@ -202,14 +202,24 @@ func (m *Manager) startPhase2Components(ctx context.Context) error {
 
 	// 5. Sync Layer (ASS) - State synchronization
 	if m.config.Sync.Enabled {
-		// TODO: Start sync layer when CRDT/Raft implementation is complete
-		m.logger.Info("Sync layer initialization deferred to Phase 3 state sync implementation")
+		if m.sync == nil {
+			m.logger.Info("Sync layer enabled but no implementation configured")
+		} else if err := m.sync.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start sync layer: %w", err)
+		} else {
+			m.logger.Info("Sync layer started successfully")
+		}
 	}
 
 	// 6. Consensus Layer (ACP) - Distributed consensus
 	if m.config.Consensus.Enabled {
-		// TODO: Start consensus layer when ProBFT/Bullshark implementation is complete
-		m.logger.Info("Consensus layer initialization deferred to Phase 3 consensus implementation")
+		if m.consensus == nil {
+			m.logger.Info("Consensus layer enabled but no implementation configured")
+		} else if err := m.consensus.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start consensus layer: %w", err)
+		} else {
+			m.logger.Info("Consensus layer started successfully")
+		}
 	}
 
 	return nil
@@ -454,9 +464,49 @@ func (m *Manager) collectMetrics() {
 	// Step 2: Copy state values to local variables to minimize critical section
 	// This allows us to release m.mu before acquiring metricsMutex
 	enabled := m.enabled
+	transportLayer := m.transport
+	compressionLayer := m.compression
+	predictionLayer := m.prediction
+	syncLayer := m.sync
+	consensusLayer := m.consensus
 
 	// Release state lock early to reduce contention
 	m.mu.RUnlock()
+
+	var transportMetrics TransportMetrics
+	var tier NetworkTier
+	var mode TransportMode
+	transportHealthy := true
+	hasTransport := false
+	if transportLayer != nil {
+		componentMetrics := transportLayer.GetMetrics()
+		transportMetrics = convertTransportMetrics(componentMetrics)
+		tier = networkTierFromTransportMetrics(componentMetrics)
+		mode = transportModeFromTransportMetrics(componentMetrics)
+		transportHealthy = componentMetrics.Healthy || componentMetrics.LastHealthCheck.IsZero()
+		hasTransport = true
+	} else {
+		tier = NetworkTierTier2
+		mode = TransportModeTCP
+	}
+
+	var compressionMetrics *CompressionMetrics
+	compressionHealthy := true
+	if compressionLayer != nil {
+		compressionMetrics = compressionLayer.GetMetrics()
+		compressionHealthy = compressionLayer.IsHealthy()
+	}
+
+	overallHealthy := transportHealthy && compressionHealthy
+	if predictionLayer != nil {
+		overallHealthy = overallHealthy && predictionLayer.IsHealthy()
+	}
+	if syncLayer != nil {
+		overallHealthy = overallHealthy && syncLayer.IsHealthy()
+	}
+	if consensusLayer != nil {
+		overallHealthy = overallHealthy && consensusLayer.IsHealthy()
+	}
 
 	// Step 3: Now acquire metrics lock and update
 	// Using local variables bridges the mutex boundary safely
@@ -466,43 +516,42 @@ func (m *Manager) collectMetrics() {
 	// Update basic status using local copies (no race condition)
 	m.metrics.Enabled = enabled
 	m.metrics.Version = DWCPVersion
-
-	// TODO: Collect transport metrics (Phase 0-1)
-	// Safe to use local 'transport' variable here
-	// if transport != nil {
-	//     m.metrics.Transport = transport.GetMetrics()
-	// }
-
-	// TODO: Collect compression metrics (Phase 0-1)
-	// if m.compression != nil {
-	//     m.metrics.Compression = m.compression.GetMetrics()
-	// }
-
-	// TODO: Determine network tier (Phase 1)
-	// m.metrics.Tier = m.detectNetworkTier()
-
-	// TODO: Determine transport mode (Phase 1)
-	// m.metrics.Mode = m.getTransportMode()
+	m.metrics.Tier = tier
+	m.metrics.Mode = mode
+	m.metrics.IsHealthy = overallHealthy
+	if hasTransport {
+		m.metrics.Transport = transportMetrics
+	}
+	if compressionMetrics != nil {
+		m.metrics.Compression = *compressionMetrics
+	}
 }
 
 // initializeTransport initializes the AMST transport layer
 func (m *Manager) initializeTransport() error {
-	// TODO: Read transport config from m.config
-	// For now, use defaults with environment-based overrides
+	config := m.config.Transport
+	rdmaDevice := config.RDMADevice
+	if rdmaDevice == "" {
+		rdmaDevice = "mlx5_0"
+	}
+	rdmaPort := config.RDMAPort
+	if rdmaPort == 0 {
+		rdmaPort = 1
+	}
 
 	transportConfig := &transport.TransportConfig{
 		RemoteAddr:          "", // Will be set per-connection
-		ConnectTimeout:      30 * time.Second,
-		MinStreams:          16,
-		MaxStreams:          256,
+		ConnectTimeout:      config.ConnectTimeout,
+		MinStreams:          config.MinStreams,
+		MaxStreams:          config.MaxStreams,
 		ChunkSizeKB:         256,
 		AutoTune:            true,
-		PacingEnabled:       true,
-		PacingRate:          1000 * 1024 * 1024, // 1 Gbps
-		EnableRDMA:          false,              // Disabled by default
-		RDMADevice:          "mlx5_0",
-		RDMAPort:            1,
-		CongestionAlgorithm: "bbr",
+		PacingEnabled:       config.EnablePacing,
+		PacingRate:          config.PacingRate,
+		EnableRDMA:          config.EnableRDMA,
+		RDMADevice:          rdmaDevice,
+		RDMAPort:            rdmaPort,
+		CongestionAlgorithm: config.CongestionAlgorithm,
 		EnableRetries:       true,
 		MaxRetries:          3,
 		RetryBackoffMs:      100,
@@ -559,11 +608,56 @@ func (m *Manager) getTransportMode() TransportMode {
 	}
 
 	metrics := m.transport.GetMetrics()
+	return transportModeFromTransportMetrics(metrics)
+}
+
+func convertTransportMetrics(metrics transport.TransportMetrics) TransportMetrics {
+	return TransportMetrics{
+		StreamCount:    metrics.TotalStreams,
+		ActiveStreams:  int(metrics.ActiveStreams),
+		TotalBytesSent: metrics.TotalBytesSent,
+		TotalBytesRecv: metrics.TotalBytesRecv,
+		BandwidthMbps:  metrics.ThroughputMbps,
+		Utilization:    normalizedTransportUtilization(metrics.BandwidthUtilized),
+		AverageLatency: time.Duration(metrics.AverageLatencyMs * float64(time.Millisecond)),
+		PacketLossRate: metrics.PacketLossRate,
+		Timestamp:      metrics.LastHealthCheck,
+	}
+}
+
+func normalizedTransportUtilization(utilization float64) float64 {
+	if utilization <= 0 {
+		return 0
+	}
+	if utilization > 1 {
+		utilization = utilization / 100
+	}
+	if utilization > 1 {
+		return 1
+	}
+	return utilization
+}
+
+func networkTierFromTransportMetrics(metrics transport.TransportMetrics) NetworkTier {
+	latency := metrics.AverageLatencyMs
+	if latency < 5 {
+		return NetworkTierTier1
+	}
+	if latency < 50 {
+		return NetworkTierTier2
+	}
+	if latency < 150 {
+		return NetworkTierTier3
+	}
+	return NetworkTierTier4
+}
+
+func transportModeFromTransportMetrics(metrics transport.TransportMetrics) TransportMode {
 	switch metrics.TransportType {
 	case "rdma":
 		return TransportModeRDMA
-	case "tcp":
-		return TransportModeTCP
+	case "hybrid":
+		return TransportModeHybrid
 	default:
 		return TransportModeTCP
 	}
@@ -589,10 +683,9 @@ func (m *Manager) HealthCheck() error {
 		}
 	}
 
-	// TODO: Check compression health (Phase 1)
-	// if m.compression != nil && !m.compression.IsHealthy() {
-	//     return fmt.Errorf("compression layer unhealthy")
-	// }
+	if m.compression != nil && !m.compression.IsHealthy() {
+		return fmt.Errorf("compression layer unhealthy")
+	}
 
 	return nil
 }

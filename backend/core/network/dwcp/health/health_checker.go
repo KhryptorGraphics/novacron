@@ -191,15 +191,15 @@ func AMSTHealthCheck(activeStreams, minStreams, maxStreams int) CheckFunc {
 		}
 
 		// Check if streams are within acceptable range
-		if activeStreams < minStreams {
+		if activeStreams == 0 {
+			health.Status = StatusUnhealthy
+			health.Message = "No active streams"
+		} else if activeStreams < minStreams {
 			health.Status = StatusDegraded
 			health.Message = fmt.Sprintf("Active streams (%d) below minimum (%d)", activeStreams, minStreams)
 		} else if activeStreams > maxStreams {
 			health.Status = StatusUnhealthy
 			health.Message = fmt.Sprintf("Active streams (%d) exceeds maximum (%d)", activeStreams, maxStreams)
-		} else if activeStreams == 0 {
-			health.Status = StatusUnhealthy
-			health.Message = "No active streams"
 		} else {
 			health.Status = StatusHealthy
 			health.Message = fmt.Sprintf("%d streams active", activeStreams)
@@ -216,7 +216,7 @@ func HDEHealthCheck(compressionEnabled bool, avgRatio, minRatio float64, baselin
 			Name:        "hde_compression",
 			LastChecked: time.Now(),
 			Metrics: map[string]interface{}{
-				"enabled":             compressionEnabled,
+				"enabled":               compressionEnabled,
 				"avg_compression_ratio": avgRatio,
 				"min_compression_ratio": minRatio,
 				"baseline_count":        baselineCount,
@@ -306,9 +306,9 @@ func ErrorRateHealthCheck(errorCount, totalRequests int, maxErrorRate float64) C
 		}
 
 		health.Metrics = map[string]interface{}{
-			"error_count":     errorCount,
-			"total_requests":  totalRequests,
-			"error_rate_pct": errorRate,
+			"error_count":        errorCount,
+			"total_requests":     totalRequests,
+			"error_rate_pct":     errorRate,
 			"max_error_rate_pct": maxErrorRate,
 		}
 

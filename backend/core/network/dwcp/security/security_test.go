@@ -4,6 +4,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"math/big"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -56,23 +58,38 @@ func TestTLSManager(t *testing.T) {
 func TestCertificateManager(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 
-	t.Run("Generate self-signed certificate", func(t *testing.T) {
+	t.Run("Load certificate from disk", func(t *testing.T) {
+		dir := t.TempDir()
+		certPath := filepath.Join(dir, "test-cert.pem")
+		keyPath := filepath.Join(dir, "test-key.pem")
+		keyPair := testAutocertCachePEM(t, time.Now().Add(24*time.Hour))
+		if err := os.WriteFile(certPath, keyPair, 0600); err != nil {
+			t.Fatalf("Failed to write cert: %v", err)
+		}
+		if err := os.WriteFile(keyPath, keyPair, 0600); err != nil {
+			t.Fatalf("Failed to write key: %v", err)
+		}
+
 		config := CertificateManagerConfig{
-			CertPath:    "/tmp/test-cert.pem",
-			KeyPath:     "/tmp/test-key.pem",
+			CertPath:    certPath,
+			KeyPath:     keyPath,
 			AutoRenew:   false,
 			RenewBefore: 30 * 24 * time.Hour,
 		}
 
 		cm, err := NewCertificateManager(config, logger)
-		if err == nil {
-			// Certificate files don't exist yet, so this should fail
-			// which is expected in test environment
-			defer cm.Stop()
+		if err != nil {
+			t.Fatalf("Failed to create certificate manager: %v", err)
 		}
+		defer cm.Stop()
 
-		// Test would require actual certificate files
-		// This is a placeholder for integration testing
+		cert, err := cm.GetCertificate(nil)
+		if err != nil {
+			t.Fatalf("Failed to get certificate: %v", err)
+		}
+		if cert == nil || len(cert.Certificate) == 0 {
+			t.Fatal("Expected loaded certificate chain")
+		}
 	})
 
 	t.Run("Certificate revocation check", func(t *testing.T) {

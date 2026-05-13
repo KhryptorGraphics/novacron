@@ -2,11 +2,12 @@ package optimization
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // ZeroCopyBuffer manages memory for zero-copy operations
@@ -72,35 +73,13 @@ func (zcb *ZeroCopyBuffer) Bytes() []byte {
 // SendFile performs zero-copy file transmission using sendfile()
 // Note: sendfile() is platform-specific and may not be available on all systems
 func (zcb *ZeroCopyBuffer) SendFile(conn *net.TCPConn, file *os.File, offset, count int64) (int64, error) {
-	// TODO: Implement zero-copy sendfile using platform-specific syscalls
-	// This requires syscall.Sendfile which has different signatures on different platforms
-
-	// For now, fall back to regular copy
-	data := make([]byte, count)
-	n, err := file.ReadAt(data, offset)
-	if err != nil && err != io.EOF {
-		return 0, err
-	}
-
-	written, err := conn.Write(data[:n])
-	return int64(written), err
+	return sendFileToTCP(conn, file, offset, count)
 }
 
 // Splice performs zero-copy data transfer between sockets
 // Note: splice() is platform-specific (Linux) and may not be available on all systems
 func (zcb *ZeroCopyBuffer) Splice(src, dst *net.TCPConn, maxBytes int) (int64, error) {
-	// TODO: Implement zero-copy splice using platform-specific syscalls
-	// This requires syscall.Splice and SPLICE_F_* flags which are Linux-specific
-
-	// For now, fall back to regular copy
-	data := make([]byte, maxBytes)
-	n, err := src.Read(data)
-	if err != nil && err != io.EOF {
-		return 0, err
-	}
-
-	written, err := dst.Write(data[:n])
-	return int64(written), err
+	return spliceTCPToTCP(src, dst, maxBytes)
 }
 
 // ZeroCopyReader provides zero-copy reading operations
@@ -131,18 +110,7 @@ func (zcr *ZeroCopyReader) Read(p []byte) (int, error) {
 // ReadToFile reads directly to file using splice
 // Note: splice() is platform-specific (Linux) and may not be available on all systems
 func (zcr *ZeroCopyReader) ReadToFile(file *os.File, maxBytes int64) (int64, error) {
-	// TODO: Implement zero-copy splice using platform-specific syscalls
-	// This requires syscall.Splice and SPLICE_F_* flags which are Linux-specific
-
-	// For now, fall back to regular copy
-	data := make([]byte, maxBytes)
-	n, err := zcr.conn.Read(data)
-	if err != nil && err != io.EOF {
-		return 0, err
-	}
-
-	written, err := file.Write(data[:n])
-	return int64(written), err
+	return spliceTCPToFile(zcr.conn, file, maxBytes)
 }
 
 // Close releases resources
@@ -177,18 +145,7 @@ func (zcw *ZeroCopyWriter) Write(p []byte) (int, error) {
 // WriteFromFile writes file contents using sendfile
 // Note: sendfile() is platform-specific and may not be available on all systems
 func (zcw *ZeroCopyWriter) WriteFromFile(file *os.File, offset, count int64) (int64, error) {
-	// TODO: Implement zero-copy sendfile using platform-specific syscalls
-	// This requires syscall.Sendfile which has different signatures on different platforms
-
-	// For now, fall back to regular copy
-	data := make([]byte, count)
-	n, err := file.ReadAt(data, offset)
-	if err != nil && err != io.EOF {
-		return 0, err
-	}
-
-	written, err := zcw.conn.Write(data[:n])
-	return int64(written), err
+	return sendFileToTCP(zcw.conn, file, offset, count)
 }
 
 // Close releases resources
@@ -225,11 +182,146 @@ func NewZeroCopySender(conn *net.TCPConn) (*ZeroCopySender, error) {
 // Send sends data using MSG_ZEROCOPY
 // Note: MSG_ZEROCOPY is platform-specific (Linux 4.14+) and may not be available on all systems
 func (zcs *ZeroCopySender) Send(data []byte) (int, error) {
-	// TODO: Implement MSG_ZEROCOPY using platform-specific syscalls
-	// This requires syscall.Send and syscall.MSG_ZEROCOPY which are Linux-specific
+	if len(data) == 0 {
+		return 0, nil
+	}
 
-	// For now, fall back to regular send
-	return zcs.conn.Write(data)
+	rawConn, err := zcs.conn.SyscallConn()
+	if err != nil {
+		return 0, err
+	}
+
+	var written int
+	var sendErr error
+	err = rawConn.Write(func(fd uintptr) bool {
+		written, sendErr = unix.SendmsgN(int(fd), data, nil, nil, unix.MSG_ZEROCOPY)
+		return sendErr != unix.EAGAIN && sendErr != unix.EINTR
+	})
+	if err != nil {
+		return written, err
+	}
+	return written, sendErr
+}
+
+func sendFileToTCP(conn *net.TCPConn, file *os.File, offset, count int64) (int64, error) {
+	if count < 0 {
+		return 0, fmt.Errorf("count must be >= 0")
+	}
+	if count == 0 {
+		return 0, nil
+	}
+
+	outFile, err := conn.File()
+	if err != nil {
+		return 0, err
+	}
+	defer outFile.Close()
+
+	inFD := int(file.Fd())
+	outFD := int(outFile.Fd())
+	currentOffset := offset
+	var total int64
+	for total < count {
+		chunk := count - total
+		if chunk > int64(^uint(0)>>1) {
+			chunk = int64(^uint(0) >> 1)
+		}
+		n, err := unix.Sendfile(outFD, inFD, &currentOffset, int(chunk))
+		if n > 0 {
+			total += int64(n)
+		}
+		if err == unix.EINTR || err == unix.EAGAIN {
+			continue
+		}
+		if err != nil {
+			return total, err
+		}
+		if n == 0 {
+			break
+		}
+	}
+	return total, nil
+}
+
+func spliceTCPToTCP(src, dst *net.TCPConn, maxBytes int) (int64, error) {
+	if maxBytes < 0 {
+		return 0, fmt.Errorf("maxBytes must be >= 0")
+	}
+	if maxBytes == 0 {
+		return 0, nil
+	}
+
+	srcFile, err := src.File()
+	if err != nil {
+		return 0, err
+	}
+	defer srcFile.Close()
+	dstFile, err := dst.File()
+	if err != nil {
+		return 0, err
+	}
+	defer dstFile.Close()
+
+	return spliceFDToFD(int(srcFile.Fd()), int(dstFile.Fd()), int64(maxBytes))
+}
+
+func spliceTCPToFile(src *net.TCPConn, file *os.File, maxBytes int64) (int64, error) {
+	if maxBytes < 0 {
+		return 0, fmt.Errorf("maxBytes must be >= 0")
+	}
+	if maxBytes == 0 {
+		return 0, nil
+	}
+
+	srcFile, err := src.File()
+	if err != nil {
+		return 0, err
+	}
+	defer srcFile.Close()
+
+	return spliceFDToFD(int(srcFile.Fd()), int(file.Fd()), maxBytes)
+}
+
+func spliceFDToFD(srcFD, dstFD int, maxBytes int64) (int64, error) {
+	pipeFDs := []int{0, 0}
+	if err := unix.Pipe2(pipeFDs, unix.O_CLOEXEC); err != nil {
+		return 0, err
+	}
+	defer unix.Close(pipeFDs[0])
+	defer unix.Close(pipeFDs[1])
+
+	var total int64
+	for total < maxBytes {
+		chunk := maxBytes - total
+		if chunk > 1<<20 {
+			chunk = 1 << 20
+		}
+
+		n, err := unix.Splice(srcFD, nil, pipeFDs[1], nil, int(chunk), unix.SPLICE_F_MOVE)
+		if n > 0 {
+			written, writeErr := unix.Splice(pipeFDs[0], nil, dstFD, nil, int(n), unix.SPLICE_F_MOVE)
+			total += written
+			if writeErr == unix.EINTR || writeErr == unix.EAGAIN {
+				continue
+			}
+			if writeErr != nil {
+				return total, writeErr
+			}
+			if written < n {
+				break
+			}
+		}
+		if err == unix.EINTR || err == unix.EAGAIN {
+			continue
+		}
+		if err != nil {
+			return total, err
+		}
+		if n == 0 {
+			break
+		}
+	}
+	return total, nil
 }
 
 // EnableTCPNoDelay disables Nagle's algorithm for lower latency

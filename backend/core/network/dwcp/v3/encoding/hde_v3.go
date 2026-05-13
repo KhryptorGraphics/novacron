@@ -44,8 +44,8 @@ type HDEv3 struct {
 	lz4Reader      *lz4.Reader
 
 	// Baseline management
-	baselines   map[string]*BaselineV3
-	baselineMu  sync.RWMutex
+	baselines  map[string]*BaselineV3
+	baselineMu sync.RWMutex
 
 	// Performance metrics
 	metrics *HDEv3Metrics
@@ -64,9 +64,9 @@ type HDEv3Config struct {
 	NetworkMode upgrade.NetworkMode
 
 	// Compression settings
-	EnableMLCompression  bool
-	EnableDeltaEncoding  bool
-	EnableCRDT           bool
+	EnableMLCompression bool
+	EnableDeltaEncoding bool
+	EnableCRDT          bool
 
 	// Delta encoding config (reuse from v1)
 	DeltaConfig *compression.DeltaEncodingConfig
@@ -146,11 +146,11 @@ func NewHDEv3(config *HDEv3Config) (*HDEv3, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	hde := &HDEv3{
-		config:     config,
-		baselines:  make(map[string]*BaselineV3),
-		metrics:    newHDEv3Metrics(),
-		ctx:        ctx,
-		cancel:     cancel,
+		config:    config,
+		baselines: make(map[string]*BaselineV3),
+		metrics:   newHDEv3Metrics(),
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 
 	// Initialize ML compression selector
@@ -280,15 +280,15 @@ func (hde *HDEv3) Compress(vmID string, data []byte) (*CompressedDataV3, error) 
 
 	// Create compressed data structure
 	result := &CompressedDataV3{
-		Data:               compressed,
-		OriginalSize:       originalSize,
-		CompressedSize:     len(compressed),
-		IsDelta:            isDelta,
-		Algorithm:          algo,
-		BaselineKey:        baselineKey,
-		Timestamp:          time.Now(),
-		CompressionTime:    duration,
-		NetworkMode:        hde.config.NetworkMode,
+		Data:            compressed,
+		OriginalSize:    originalSize,
+		CompressedSize:  len(compressed),
+		IsDelta:         isDelta,
+		Algorithm:       algo,
+		BaselineKey:     baselineKey,
+		Timestamp:       time.Now(),
+		CompressionTime: duration,
+		NetworkMode:     hde.config.NetworkMode,
 	}
 
 	return result, nil
@@ -309,9 +309,10 @@ func (hde *HDEv3) Decompress(compressed *CompressedDataV3) ([]byte, error) {
 	// Step 2: Apply delta reconstruction if needed
 	if compressed.IsDelta && hde.deltaEncoder != nil {
 		encodedData := &compression.EncodedData{
-			Data:           decompressed,
-			IsDelta:        true,
-			BaselineKey:    compressed.BaselineKey,
+			Data:        decompressed,
+			Compressed:  true,
+			IsDelta:     true,
+			BaselineKey: compressed.BaselineKey,
 		}
 		reconstructed, err := hde.deltaEncoder.Decode(compressed.BaselineKey, encodedData)
 		if err != nil {

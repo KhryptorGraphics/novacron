@@ -45,12 +45,12 @@ type TrainedDictionary struct {
 
 // DictionaryTrainingConfig configuration for dictionary training
 type DictionaryTrainingConfig struct {
-	Enabled         bool          `json:"enabled" yaml:"enabled"`
-	UpdateInterval  time.Duration `json:"update_interval" yaml:"update_interval"`
-	MaxSamples      int           `json:"max_samples" yaml:"max_samples"`
-	MinSampleSize   int           `json:"min_sample_size" yaml:"min_sample_size"`
-	MaxDictSize     int           `json:"max_dict_size" yaml:"max_dict_size"`
-	StoragePath     string        `json:"storage_path" yaml:"storage_path"`
+	Enabled        bool          `json:"enabled" yaml:"enabled"`
+	UpdateInterval time.Duration `json:"update_interval" yaml:"update_interval"`
+	MaxSamples     int           `json:"max_samples" yaml:"max_samples"`
+	MinSampleSize  int           `json:"min_sample_size" yaml:"min_sample_size"`
+	MaxDictSize    int           `json:"max_dict_size" yaml:"max_dict_size"`
+	StoragePath    string        `json:"storage_path" yaml:"storage_path"`
 }
 
 // DefaultDictionaryTrainingConfig returns sensible defaults
@@ -152,7 +152,14 @@ func (dt *DictionaryTrainer) TrainDictionary(resourceType string) error {
 	})
 
 	if err != nil {
-		return fmt.Errorf("dictionary training failed: %w", err)
+		dict = fallbackDictionary(samples, dt.config.MaxDictSize)
+		if len(dict) == 0 {
+			return fmt.Errorf("dictionary training failed: %w", err)
+		}
+		dt.logger.Warn("Zstandard dictionary training failed, using deterministic sample dictionary",
+			zap.String("resource_type", resourceType),
+			zap.Error(err),
+			zap.Int("dict_size", len(dict)))
 	}
 
 	// Store the trained dictionary
@@ -179,6 +186,42 @@ func (dt *DictionaryTrainer) TrainDictionary(resourceType string) error {
 		zap.Int("samples", len(samples)))
 
 	return nil
+}
+
+func fallbackDictionary(samples [][]byte, maxSize int) []byte {
+	if maxSize <= 0 {
+		maxSize = 128 * 1024
+	}
+
+	dict := make([]byte, 0, maxSize)
+	seen := make(map[string]struct{})
+	for _, sample := range samples {
+		if len(sample) == 0 {
+			continue
+		}
+
+		chunkSize := len(sample)
+		if chunkSize > 4096 {
+			chunkSize = 4096
+		}
+		chunk := sample[:chunkSize]
+		key := string(chunk)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		remaining := maxSize - len(dict)
+		if remaining <= 0 {
+			break
+		}
+		if len(chunk) > remaining {
+			chunk = chunk[:remaining]
+		}
+		dict = append(dict, chunk...)
+	}
+
+	return dict
 }
 
 // GetDictionary retrieves a trained dictionary for a resource type

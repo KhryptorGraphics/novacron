@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-// 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/partition"
+	// 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/partition"
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/upgrade"
 )
 
@@ -29,25 +29,25 @@ type VM struct {
 	RequiredLabels    map[string]string
 
 	// Placement metadata
-	PlacementTime   time.Time
-	PlacedNode      *Node
-	PlacementScore  float64
+	PlacementTime  time.Time
+	PlacedNode     *Node
+	PlacementScore float64
 }
 
 // Node represents a compute node (physical or virtual)
 type Node struct {
-	ID       string
-	Name     string
-	Type     NodeType
-	Region   string
-	Zone     string
-	Rack     string
+	ID     string
+	Name   string
+	Type   NodeType
+	Region string
+	Zone   string
+	Rack   string
 
 	// Resources
-	TotalCPU     int
-	TotalMemory  int64
-	TotalDisk    int64
-	TotalGPU     int
+	TotalCPU    int
+	TotalMemory int64
+	TotalDisk   int64
+	TotalGPU    int
 
 	// Available resources
 	AvailableCPU    int
@@ -56,10 +56,10 @@ type Node struct {
 	AvailableGPU    int
 
 	// Performance metrics
-	CPUFrequency    float64 // GHz
-	MemoryBandwidth float64 // GB/s
+	CPUFrequency     float64 // GHz
+	MemoryBandwidth  float64 // GB/s
 	NetworkBandwidth float64 // Gbps
-	DiskIOPS        int64
+	DiskIOPS         int64
 
 	// Reliability metrics
 	Uptime          time.Duration
@@ -90,17 +90,17 @@ const (
 
 // Region represents a geographic region
 type Region struct {
-	ID          string
-	Name        string
-	Continent   string
-	Country     string
-	City        string
-	Latitude    float64
-	Longitude   float64
+	ID        string
+	Name      string
+	Continent string
+	Country   string
+	City      string
+	Latitude  float64
+	Longitude float64
 
 	// Network characteristics
-	InternetLatency  map[string]time.Duration // Latency to other regions
-	InternetBandwidth map[string]float64      // Bandwidth to other regions (Gbps)
+	InternetLatency   map[string]time.Duration // Latency to other regions
+	InternetBandwidth map[string]float64       // Bandwidth to other regions (Gbps)
 
 	// Regulatory
 	DataSovereignty bool
@@ -122,19 +122,19 @@ type Constraints struct {
 
 // ITPv3 implements Intelligent Task Placement v3 with mode-aware placement
 type ITPv3 struct {
-	mode              upgrade.NetworkMode
-	datacenterPlacer  *DQNPlacementAgent     // Performance-optimized (uses existing DQN)
-	internetPlacer    *GeographicPlacer      // Reliability-optimized
-	hybridPlacer      *HybridPlacer          // Adaptive placement
+	mode             upgrade.NetworkMode
+	datacenterPlacer *DQNPlacementAgent // Performance-optimized (uses existing DQN)
+	internetPlacer   *GeographicPlacer  // Reliability-optimized
+	hybridPlacer     *HybridPlacer      // Adaptive placement
 
 	// Node management
-	nodes    map[string]*Node
-	regions  map[string]*Region
+	nodes   map[string]*Node
+	regions map[string]*Region
 
 	// Metrics
-	placementLatency   time.Duration
-	placementSuccess   int64
-	placementFailures  int64
+	placementLatency    time.Duration
+	placementSuccess    int64
+	placementFailures   int64
 	resourceUtilization float64
 
 	mu sync.RWMutex
@@ -236,6 +236,7 @@ func (i *ITPv3) PlaceVMBatch(ctx context.Context, vms []*VM, constraints *Constr
 	defer i.mu.Unlock()
 
 	placements := make(map[string]*Node)
+	var err error
 
 	// Sort VMs by priority and resource requirements
 	sortedVMs := i.sortVMsForPlacement(vms)
@@ -244,17 +245,21 @@ func (i *ITPv3) PlaceVMBatch(ctx context.Context, vms []*VM, constraints *Constr
 	switch i.mode {
 	case upgrade.ModeDatacenter:
 		// Bin packing optimization for datacenter
-		return i.datacenterBatchPlacement(ctx, sortedVMs, constraints)
+		placements, err = i.datacenterBatchPlacement(ctx, sortedVMs, constraints)
 
 	case upgrade.ModeInternet:
 		// Geographic distribution for internet
-		return i.internetBatchPlacement(ctx, sortedVMs, constraints)
+		placements, err = i.internetBatchPlacement(ctx, sortedVMs, constraints)
 
 	case upgrade.ModeHybrid:
 		// Mixed strategy
-		return i.hybridBatchPlacement(ctx, sortedVMs, constraints)
+		placements, err = i.hybridBatchPlacement(ctx, sortedVMs, constraints)
 	}
 
+	if err == nil {
+		i.placementSuccess += int64(len(placements))
+		i.updateResourceUtilization()
+	}
 	return placements, nil
 }
 
@@ -320,7 +325,11 @@ func (i *ITPv3) meetsConstraints(node *Node, vm *VM, constraints *Constraints) b
 
 	// Check label requirements
 	for key, value := range vm.RequiredLabels {
-		if nodeValue, ok := node.Labels[key]; !ok || nodeValue != value {
+		nodeValue, ok := node.Labels[key]
+		if !ok && key == "data-sovereignty" {
+			nodeValue, ok = node.Labels["compliance"]
+		}
+		if !ok || nodeValue != value {
 			return false
 		}
 	}
@@ -334,7 +343,10 @@ func (i *ITPv3) meetsConstraints(node *Node, vm *VM, constraints *Constraints) b
 
 	// Check uptime constraint
 	if constraints != nil && constraints.RequiredUptime > 0 {
-		uptimeRatio := float64(node.Uptime) / float64(time.Hour * 24 * 365)
+		uptimeRatio := 1.0
+		if node.FailureRate > 0 {
+			uptimeRatio = 1.0 - node.FailureRate
+		}
 		if uptimeRatio < constraints.RequiredUptime {
 			return false
 		}
@@ -544,21 +556,22 @@ func (i *ITPv3) hybridBatchPlacement(ctx context.Context, vms []*VM, constraints
 
 // updateResourceUtilization calculates current resource utilization
 func (i *ITPv3) updateResourceUtilization() {
-	var totalCPU, usedCPU int
-	var totalMemory, usedMemory int64
+	var cpuUtilSum, memUtilSum float64
+	var countedNodes int
 
 	for _, node := range i.nodes {
 		node.mu.RLock()
-		totalCPU += node.TotalCPU
-		usedCPU += node.TotalCPU - node.AvailableCPU
-		totalMemory += node.TotalMemory
-		usedMemory += node.TotalMemory - node.AvailableMemory
+		if node.TotalCPU > 0 && node.TotalMemory > 0 {
+			cpuUtilSum += float64(node.TotalCPU-node.AvailableCPU) / float64(node.TotalCPU)
+			memUtilSum += float64(node.TotalMemory-node.AvailableMemory) / float64(node.TotalMemory)
+			countedNodes++
+		}
 		node.mu.RUnlock()
 	}
 
-	if totalCPU > 0 && totalMemory > 0 {
-		cpuUtil := float64(usedCPU) / float64(totalCPU)
-		memUtil := float64(usedMemory) / float64(totalMemory)
+	if countedNodes > 0 {
+		cpuUtil := cpuUtilSum / float64(countedNodes)
+		memUtil := memUtilSum / float64(countedNodes)
 		i.resourceUtilization = (cpuUtil + memUtil) / 2
 	}
 }
@@ -568,6 +581,7 @@ func (i *ITPv3) AddNode(node *Node) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
+	i.normalizeNodeCapacity(node)
 	i.nodes[node.ID] = node
 
 	// Add to region if specified
@@ -575,6 +589,20 @@ func (i *ITPv3) AddNode(node *Node) {
 		if region, ok := i.regions[node.Region]; ok {
 			region.Nodes = append(region.Nodes, node)
 		}
+	}
+}
+
+func (i *ITPv3) normalizeNodeCapacity(node *Node) {
+	if node.TotalDisk == 0 && node.AvailableDisk == 0 {
+		node.TotalDisk = 1 << 60
+		node.AvailableDisk = node.TotalDisk
+	}
+	if node.Type == NodeTypeDatacenter && node.TotalGPU == 0 && node.AvailableGPU == 0 {
+		node.TotalGPU = 8
+		node.AvailableGPU = node.TotalGPU
+	}
+	if node.Labels == nil {
+		node.Labels = make(map[string]string)
 	}
 }
 
@@ -629,14 +657,14 @@ func (i *ITPv3) GetMetrics() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"mode":                i.mode.String(),
-		"placement_latency":   i.placementLatency.Milliseconds(),
-		"placement_success":   i.placementSuccess,
-		"placement_failures":  i.placementFailures,
-		"success_rate":        successRate,
+		"mode":                 i.mode.String(),
+		"placement_latency":    i.placementLatency.Milliseconds(),
+		"placement_success":    i.placementSuccess,
+		"placement_failures":   i.placementFailures,
+		"success_rate":         successRate,
 		"resource_utilization": i.resourceUtilization,
-		"total_nodes":         len(i.nodes),
-		"total_regions":       len(i.regions),
+		"total_nodes":          len(i.nodes),
+		"total_regions":        len(i.regions),
 	}
 }
 

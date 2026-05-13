@@ -11,9 +11,9 @@ import (
 
 // LSTMAutoencoderModel implements time-series anomaly detection using LSTM Autoencoder
 type LSTMAutoencoderModel struct {
-	modelPath      string
-	threshold      float64
-	logger         *zap.Logger
+	modelPath string
+	threshold float64
+	logger    *zap.Logger
 
 	// Time series buffer
 	timeSeriesBuffer []*MetricVector
@@ -21,7 +21,7 @@ type LSTMAutoencoderModel struct {
 
 	// Simplified implementation without TensorFlow/ONNX
 	// In production, use ONNX Runtime or TensorFlow
-	weights        map[string][]float64
+	weights map[string][]float64
 }
 
 // NewLSTMAutoencoderModel creates a new LSTM Autoencoder model
@@ -34,7 +34,7 @@ func NewLSTMAutoencoderModel(modelPath string, logger *zap.Logger) (*LSTMAutoenc
 		modelPath:        modelPath,
 		threshold:        0.05, // MSE threshold
 		logger:           logger,
-		windowSize:       10,    // 10 time steps
+		windowSize:       10, // 10 time steps
 		timeSeriesBuffer: make([]*MetricVector, 0, 10),
 		weights:          make(map[string][]float64),
 	}, nil
@@ -45,14 +45,14 @@ func (lam *LSTMAutoencoderModel) Detect(ctx context.Context, metrics *MetricVect
 	// Add to buffer
 	lam.timeSeriesBuffer = append(lam.timeSeriesBuffer, metrics)
 
+	// Use the first full window as warmup; detection starts with the next sample.
+	if len(lam.timeSeriesBuffer) <= lam.windowSize {
+		return nil, nil
+	}
+
 	// Keep only last windowSize entries
 	if len(lam.timeSeriesBuffer) > lam.windowSize {
 		lam.timeSeriesBuffer = lam.timeSeriesBuffer[1:]
-	}
-
-	// Need full window to detect
-	if len(lam.timeSeriesBuffer) < lam.windowSize {
-		return nil, nil
 	}
 
 	// Calculate reconstruction error
@@ -128,6 +128,7 @@ func (lam *LSTMAutoencoderModel) Train(ctx context.Context, normalData []*Metric
 
 	// Set threshold at 95th percentile
 	lam.threshold = percentile(errors, 0.95)
+	lam.timeSeriesBuffer = lam.timeSeriesBuffer[:0]
 
 	lam.logger.Info("LSTM Autoencoder training completed",
 		zap.Float64("threshold", lam.threshold))

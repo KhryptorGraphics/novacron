@@ -4,8 +4,17 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
+	"strings"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
+)
+
+const (
+	numaPolicyBind = 2
+	numaMove       = 2
+	numaStrict     = 1
 )
 
 // CPUAffinity manages CPU affinity and NUMA optimizations
@@ -68,12 +77,57 @@ func (ca *CPUAffinity) getCPUsForNUMANode(node int) []int {
 		return nil
 	}
 
-	cpus := make([]int, 0)
-	// Parse CPU list (e.g., "0-7,16-23")
-	cpuStr := string(data)
-	_ = cpuStr // TODO: Parse CPU range string
+	cpus, err := parseCPUList(string(data))
+	if err != nil {
+		return nil
+	}
 
 	return cpus
+}
+
+func parseCPUList(cpuList string) ([]int, error) {
+	cpuList = strings.TrimSpace(cpuList)
+	if cpuList == "" {
+		return nil, nil
+	}
+
+	cpus := make([]int, 0)
+	for _, part := range strings.Split(cpuList, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		if strings.Contains(part, "-") {
+			bounds := strings.SplitN(part, "-", 2)
+			start, err := strconv.Atoi(strings.TrimSpace(bounds[0]))
+			if err != nil {
+				return nil, fmt.Errorf("invalid CPU range %q: %w", part, err)
+			}
+			end, err := strconv.Atoi(strings.TrimSpace(bounds[1]))
+			if err != nil {
+				return nil, fmt.Errorf("invalid CPU range %q: %w", part, err)
+			}
+			if start < 0 || end < start {
+				return nil, fmt.Errorf("invalid CPU range %q", part)
+			}
+			for cpu := start; cpu <= end; cpu++ {
+				cpus = append(cpus, cpu)
+			}
+			continue
+		}
+
+		cpu, err := strconv.Atoi(part)
+		if err != nil {
+			return nil, fmt.Errorf("invalid CPU %q: %w", part, err)
+		}
+		if cpu < 0 {
+			return nil, fmt.Errorf("invalid CPU %q", part)
+		}
+		cpus = append(cpus, cpu)
+	}
+
+	return cpus, nil
 }
 
 // NUMAAllocator manages NUMA-aware memory allocation
@@ -94,38 +148,60 @@ func (na *NUMAAllocator) Allocate(size int) ([]byte, error) {
 // AllocateNUMAMemory allocates memory on a specific NUMA node
 // Note: NUMA memory allocation is platform-specific and may not be available on all systems
 func AllocateNUMAMemory(size, node int) ([]byte, error) {
+	if size < 0 {
+		return nil, fmt.Errorf("size must be >= 0")
+	}
+	if node < 0 {
+		return nil, fmt.Errorf("NUMA node must be >= 0")
+	}
+
 	data := make([]byte, size)
+	if size == 0 {
+		return data, nil
+	}
 
-	// TODO: Implement NUMA memory binding using platform-specific syscalls
-	// This requires:
-	// - unix.MPOL_BIND constant
-	// - unix.Mbind syscall
-	// - unix.MPOL_MF_STRICT and unix.MPOL_MF_MOVE flags
-	// These are not available on all platforms/Go versions
-
-	// For now, return the allocated memory without NUMA binding
-	// In production, use cgo or platform-specific build tags
+	nodeMask := numaNodeMask(node)
+	_, _, errno := unix.Syscall6(
+		unix.SYS_MBIND,
+		uintptr(unsafe.Pointer(&data[0])),
+		uintptr(len(data)),
+		uintptr(numaPolicyBind),
+		uintptr(unsafe.Pointer(&nodeMask[0])),
+		uintptr(node+1),
+		uintptr(numaMove|numaStrict),
+	)
+	if errno != 0 {
+		return data, fmt.Errorf("bind memory to NUMA node %d: %w", node, errno)
+	}
 
 	return data, nil
+}
+
+func numaNodeMask(node int) []uintptr {
+	const wordBits = 32 << (^uintptr(0) >> 63)
+	mask := make([]uintptr, node/wordBits+1)
+	mask[node/wordBits] = 1 << uint(node%wordBits)
+	return mask
 }
 
 // GetNUMANode returns the NUMA node for the current thread
 // Note: This uses platform-specific syscalls that may not be available on all systems
 func GetNUMANode() (int, error) {
-	// TODO: Implement NUMA node detection using platform-specific syscalls
-	// This requires syscall.SYS_GETCPU which is not available on all platforms
-
-	// For now, return default node 0
-	// In production, use cgo or platform-specific build tags
-
-	return 0, nil
+	var cpu uint32
+	var node uint32
+	_, _, errno := unix.RawSyscall(unix.SYS_GETCPU,
+		uintptr(unsafe.Pointer(&cpu)),
+		uintptr(unsafe.Pointer(&node)),
+		0)
+	if errno != 0 {
+		return 0, fmt.Errorf("get current NUMA node: %w", errno)
+	}
+	return int(node), nil
 }
 
 // GetNUMANodeLegacy returns the NUMA node for the current thread (legacy implementation)
 func GetNUMANodeLegacy() (int, error) {
-	// Placeholder for legacy implementation
-	// TODO: Implement proper NUMA node detection
-	return 0, nil
+	return GetNUMANode()
 }
 
 // ThreadPool manages worker threads with CPU affinity
@@ -237,13 +313,17 @@ func GetCPUTopology() (*CPUTopology, error) {
 // SetSchedulerAffinity sets scheduler affinity for optimal performance
 // Note: This uses platform-specific syscalls that may not be available on all systems
 func SetSchedulerAffinity(policy int, priority int) error {
-	// TODO: Implement scheduler affinity using platform-specific syscalls
-	// This requires unix.SchedParam and unix.SchedSetscheduler
-	// These are not available on all platforms/Go versions
+	if priority < 0 {
+		return fmt.Errorf("priority must be >= 0")
+	}
 
-	// For now, return success without setting affinity
-	// In production, use cgo or platform-specific build tags
-
+	attr := &unix.SchedAttr{
+		Policy:   uint32(policy),
+		Priority: uint32(priority),
+	}
+	if err := unix.SchedSetAttr(0, attr, 0); err != nil {
+		return fmt.Errorf("set scheduler policy %d priority %d: %w", policy, priority, err)
+	}
 	return nil
 }
 

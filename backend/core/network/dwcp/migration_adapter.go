@@ -17,22 +17,22 @@ import (
 // High-level API for VM migration service integration
 type MigrationAdapter struct {
 	// Core components
-	amst         *AMST
-	hde          *HDE
-	config       MigrationAdapterConfig
+	amst   *AMST
+	hde    *HDE
+	config MigrationAdapterConfig
 
 	// Connection management
-	connections  map[string]*MigrationConnection
-	connPool     sync.Pool
+	connections map[string]*MigrationConnection
+	connPool    sync.Pool
 
 	// Baseline management
-	vmBaselines  map[string]*VMBaseline
+	vmBaselines map[string]*VMBaseline
 
 	// Performance metrics
-	migrationsCompleted atomic.Int64
-	migrationsFailed    atomic.Int64
+	migrationsCompleted   atomic.Int64
+	migrationsFailed      atomic.Int64
 	totalBytesTransferred atomic.Int64
-	averageSpeedup      atomic.Value // float64
+	averageSpeedup        atomic.Value // float64
 
 	// Synchronization
 	mu     sync.RWMutex
@@ -43,37 +43,37 @@ type MigrationAdapter struct {
 // MigrationAdapterConfig contains configuration for the migration adapter
 type MigrationAdapterConfig struct {
 	// DWCP settings
-	EnableDWCP       bool          // Enable DWCP optimization (default: true)
-	EnableFallback   bool          // Enable fallback to standard TCP (default: true)
+	EnableDWCP     bool // Enable DWCP optimization (default: true)
+	EnableFallback bool // Enable fallback to standard TCP (default: true)
 
 	// AMST configuration
-	AMSTConfig       AMSTConfig
+	AMSTConfig AMSTConfig
 
 	// HDE configuration
-	HDEConfig        HDEConfig
+	HDEConfig HDEConfig
 
 	// Network settings
-	ListenPort       int           // Port for incoming migrations (default: 9876)
+	ListenPort        int           // Port for incoming migrations (default: 9876)
 	ConnectionTimeout time.Duration // Connection timeout (default: 30s)
 
 	// Performance targets
-	TargetSpeedup    float64       // Target speedup over baseline (default: 2.5x)
-	MaxMemoryUsage   int64         // Maximum memory for caching (default: 2GB)
+	TargetSpeedup  float64 // Target speedup over baseline (default: 2.5x)
+	MaxMemoryUsage int64   // Maximum memory for caching (default: 2GB)
 
 	// Monitoring
-	MetricsInterval  time.Duration // Metrics collection interval (default: 10s)
+	MetricsInterval time.Duration // Metrics collection interval (default: 10s)
 }
 
 // MigrationConnection represents a DWCP migration connection
 type MigrationConnection struct {
-	ID           string
-	SourceHost   string
-	TargetHost   string
-	AMST         *AMST
-	StartTime    time.Time
-	State        MigrationState
+	ID               string
+	SourceHost       string
+	TargetHost       string
+	AMST             *AMST
+	StartTime        time.Time
+	State            MigrationState
 	BytesTransferred int64
-	mu           sync.Mutex
+	mu               sync.Mutex
 }
 
 // MigrationState represents the state of a migration
@@ -88,13 +88,18 @@ const (
 	MigrationStateFailed
 )
 
+const (
+	migrationTypeMemory byte = iota
+	migrationTypeDisk
+)
+
 // VMBaseline stores VM state baselines for delta encoding
 type VMBaseline struct {
-	VMID          string
+	VMID           string
 	MemoryBaseline []byte
 	DiskBaselines  map[int][]byte // Block ID to baseline data
-	LastUpdated   time.Time
-	mu            sync.RWMutex
+	LastUpdated    time.Time
+	mu             sync.RWMutex
 }
 
 // NewMigrationAdapter creates a new DWCP migration adapter
@@ -119,11 +124,11 @@ func NewMigrationAdapter(config MigrationAdapterConfig) (*MigrationAdapter, erro
 	ctx, cancel := context.WithCancel(context.Background())
 
 	adapter := &MigrationAdapter{
-		config:       config,
-		connections:  make(map[string]*MigrationConnection),
-		vmBaselines:  make(map[string]*VMBaseline),
-		ctx:          ctx,
-		cancel:       cancel,
+		config:      config,
+		connections: make(map[string]*MigrationConnection),
+		vmBaselines: make(map[string]*VMBaseline),
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 
 	// Initialize average speedup
@@ -460,10 +465,13 @@ func (adapter *MigrationAdapter) migrateMemoryStandard(ctx context.Context, vmID
 	}
 	defer conn.Close()
 
-	// Send data size
+	if err := writeMigrationHeader(conn, migrationTypeMemory, vmID); err != nil {
+		return fmt.Errorf("failed to send migration header: %w", err)
+	}
+
 	header := make([]byte, 8)
 	binary.BigEndian.PutUint64(header, uint64(len(memoryData)))
-	if _, err := conn.Write(header); err != nil {
+	if err := writeAll(conn, header); err != nil {
 		return fmt.Errorf("failed to send header: %w", err)
 	}
 
@@ -477,12 +485,12 @@ func (adapter *MigrationAdapter) migrateMemoryStandard(ctx context.Context, vmID
 			end = len(memoryData)
 		}
 
-		n, err := conn.Write(memoryData[offset:end])
-		if err != nil {
+		chunk := memoryData[offset:end]
+		if err := writeAll(conn, chunk); err != nil {
 			return fmt.Errorf("failed to send data: %w", err)
 		}
 
-		totalSent += int64(n)
+		totalSent += int64(len(chunk))
 		if progressCallback != nil {
 			progressCallback(totalSent)
 		}
@@ -506,10 +514,13 @@ func (adapter *MigrationAdapter) migrateDiskStandard(ctx context.Context, vmID s
 		totalSize += int64(len(block))
 	}
 
-	// Send total size
+	if err := writeMigrationHeader(conn, migrationTypeDisk, vmID); err != nil {
+		return fmt.Errorf("failed to send migration header: %w", err)
+	}
+
 	header := make([]byte, 8)
 	binary.BigEndian.PutUint64(header, uint64(totalSize))
-	if _, err := conn.Write(header); err != nil {
+	if err := writeAll(conn, header); err != nil {
 		return fmt.Errorf("failed to send header: %w", err)
 	}
 
@@ -521,17 +532,15 @@ func (adapter *MigrationAdapter) migrateDiskStandard(ctx context.Context, vmID s
 		binary.BigEndian.PutUint32(blockHeader[0:4], uint32(blockID))
 		binary.BigEndian.PutUint32(blockHeader[4:8], uint32(len(blockData)))
 
-		if _, err := conn.Write(blockHeader); err != nil {
+		if err := writeAll(conn, blockHeader); err != nil {
 			return fmt.Errorf("failed to send block header: %w", err)
 		}
 
-		// Send block data
-		n, err := conn.Write(blockData)
-		if err != nil {
+		if err := writeAll(conn, blockData); err != nil {
 			return fmt.Errorf("failed to send block data: %w", err)
 		}
 
-		totalSent += int64(n)
+		totalSent += int64(len(blockData))
 		if progressCallback != nil {
 			progressCallback(totalSent)
 		}
@@ -730,9 +739,9 @@ func (adapter *MigrationAdapter) handleIncomingMigration(conn net.Conn) {
 	}
 
 	switch typeBuf[0] {
-	case 0: // Memory migration
+	case migrationTypeMemory:
 		adapter.receiveMemory(conn)
-	case 1: // Disk migration
+	case migrationTypeDisk:
 		adapter.receiveDisk(conn)
 	default:
 		fmt.Printf("Unknown migration type: %d\n", typeBuf[0])
@@ -741,12 +750,142 @@ func (adapter *MigrationAdapter) handleIncomingMigration(conn net.Conn) {
 
 // receiveMemory receives memory data from a migration
 func (adapter *MigrationAdapter) receiveMemory(conn net.Conn) {
-	// Implementation would receive and decompress memory data
-	// This is a placeholder for the actual implementation
+	vmID, err := readMigrationVMID(conn)
+	if err != nil {
+		adapter.migrationsFailed.Add(1)
+		fmt.Printf("Failed to read memory migration VM ID: %v\n", err)
+		return
+	}
+
+	header := make([]byte, 8)
+	if _, err := io.ReadFull(conn, header); err != nil {
+		adapter.migrationsFailed.Add(1)
+		fmt.Printf("Failed to read memory migration header: %v\n", err)
+		return
+	}
+
+	size := int64(binary.BigEndian.Uint64(header))
+	if size < 0 || size > adapter.config.MaxMemoryUsage {
+		adapter.migrationsFailed.Add(1)
+		fmt.Printf("Invalid memory migration size for VM %s: %d\n", vmID, size)
+		return
+	}
+
+	memoryData := make([]byte, size)
+	if _, err := io.ReadFull(conn, memoryData); err != nil {
+		adapter.migrationsFailed.Add(1)
+		fmt.Printf("Failed to read memory migration data for VM %s: %v\n", vmID, err)
+		return
+	}
+
+	adapter.storeMemoryBaseline(vmID, memoryData)
+	adapter.totalBytesTransferred.Add(size)
+	adapter.migrationsCompleted.Add(1)
 }
 
 // receiveDisk receives disk data from a migration
 func (adapter *MigrationAdapter) receiveDisk(conn net.Conn) {
-	// Implementation would receive and decompress disk data
-	// This is a placeholder for the actual implementation
+	vmID, err := readMigrationVMID(conn)
+	if err != nil {
+		adapter.migrationsFailed.Add(1)
+		fmt.Printf("Failed to read disk migration VM ID: %v\n", err)
+		return
+	}
+
+	header := make([]byte, 8)
+	if _, err := io.ReadFull(conn, header); err != nil {
+		adapter.migrationsFailed.Add(1)
+		fmt.Printf("Failed to read disk migration header: %v\n", err)
+		return
+	}
+
+	totalSize := int64(binary.BigEndian.Uint64(header))
+	if totalSize < 0 || totalSize > adapter.config.MaxMemoryUsage {
+		adapter.migrationsFailed.Add(1)
+		fmt.Printf("Invalid disk migration size for VM %s: %d\n", vmID, totalSize)
+		return
+	}
+
+	blocks := make(map[int][]byte)
+	received := int64(0)
+	blockHeader := make([]byte, 8)
+	for received < totalSize {
+		if _, err := io.ReadFull(conn, blockHeader); err != nil {
+			adapter.migrationsFailed.Add(1)
+			fmt.Printf("Failed to read disk block header for VM %s: %v\n", vmID, err)
+			return
+		}
+
+		blockID := int(binary.BigEndian.Uint32(blockHeader[0:4]))
+		blockSize := int64(binary.BigEndian.Uint32(blockHeader[4:8]))
+		if blockSize <= 0 || blockSize > totalSize-received {
+			adapter.migrationsFailed.Add(1)
+			fmt.Printf("Invalid disk block size for VM %s block %d: %d\n", vmID, blockID, blockSize)
+			return
+		}
+
+		blockData := make([]byte, blockSize)
+		if _, err := io.ReadFull(conn, blockData); err != nil {
+			adapter.migrationsFailed.Add(1)
+			fmt.Printf("Failed to read disk block data for VM %s block %d: %v\n", vmID, blockID, err)
+			return
+		}
+
+		blocks[blockID] = blockData
+		received += blockSize
+	}
+
+	adapter.storeDiskBaselines(vmID, blocks)
+	adapter.totalBytesTransferred.Add(totalSize)
+	adapter.migrationsCompleted.Add(1)
+}
+
+func writeMigrationHeader(conn net.Conn, migrationType byte, vmID string) error {
+	if len(vmID) == 0 {
+		return errors.New("vmID is required")
+	}
+	if len(vmID) > 65535 {
+		return fmt.Errorf("vmID too long: %d bytes", len(vmID))
+	}
+
+	header := make([]byte, 3)
+	header[0] = migrationType
+	binary.BigEndian.PutUint16(header[1:3], uint16(len(vmID)))
+	if err := writeAll(conn, header); err != nil {
+		return err
+	}
+	return writeAll(conn, []byte(vmID))
+}
+
+func readMigrationVMID(conn net.Conn) (string, error) {
+	header := make([]byte, 2)
+	if _, err := io.ReadFull(conn, header); err != nil {
+		return "", err
+	}
+
+	length := int(binary.BigEndian.Uint16(header))
+	if length == 0 {
+		return "", errors.New("empty VM ID")
+	}
+
+	vmID := make([]byte, length)
+	if _, err := io.ReadFull(conn, vmID); err != nil {
+		return "", err
+	}
+
+	return string(vmID), nil
+}
+
+func writeAll(conn net.Conn, data []byte) error {
+	for len(data) > 0 {
+		n, err := conn.Write(data)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+		data = data[n:]
+	}
+	return nil
 }

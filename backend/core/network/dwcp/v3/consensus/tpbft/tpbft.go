@@ -27,6 +27,17 @@ type Request struct {
 	ClientID  string    `json:"client_id"`
 }
 
+// RequestExecutor applies a committed request to application state.
+type RequestExecutor func(Request) ([]byte, error)
+
+// ExecutionResult is the default result envelope for committed requests.
+type ExecutionResult struct {
+	RequestID string `json:"request_id"`
+	ClientID  string `json:"client_id"`
+	DataHash  string `json:"data_hash"`
+	AppliedAt string `json:"applied_at"`
+}
+
 // Message represents a PBFT protocol message
 type Message struct {
 	Type      string    `json:"type"`
@@ -41,18 +52,19 @@ type Message struct {
 
 // TPBFT implements Trust-based PBFT consensus with EigenTrust reputation
 type TPBFT struct {
-	mu           sync.RWMutex
-	nodeID       string
-	view         int
-	sequence     int
-	trustMgr     *EigenTrust
-	committee    []string          // Trusted committee members
-	committeeSize int              // Target committee size
-	messages     map[string][]*Message // Message log: digest -> messages
-	prepared     map[string]bool   // Prepared certificates
-	committed    map[string]bool   // Committed certificates
-	executed     map[string]bool   // Executed requests
-	results      map[string][]byte // Execution results
+	mu            sync.RWMutex
+	nodeID        string
+	view          int
+	sequence      int
+	trustMgr      *EigenTrust
+	committee     []string              // Trusted committee members
+	committeeSize int                   // Target committee size
+	messages      map[string][]*Message // Message log: digest -> messages
+	prepared      map[string]bool       // Prepared certificates
+	committed     map[string]bool       // Committed certificates
+	executed      map[string]bool       // Executed requests
+	results       map[string][]byte     // Execution results
+	executor      RequestExecutor
 
 	// Performance metrics
 	consensusLatency time.Duration
@@ -60,7 +72,7 @@ type TPBFT struct {
 	totalRequests    int
 
 	// Thresholds (for f Byzantine nodes, need 2f+1 messages)
-	f               int // Max Byzantine nodes
+	f                int // Max Byzantine nodes
 	prepareThreshold int // 2f
 	commitThreshold  int // 2f+1
 }
@@ -68,18 +80,31 @@ type TPBFT struct {
 // NewTPBFT creates a new T-PBFT instance
 func NewTPBFT(nodeID string, trustMgr *EigenTrust) *TPBFT {
 	return &TPBFT{
-		nodeID:       nodeID,
-		view:         0,
-		sequence:     0,
-		trustMgr:     trustMgr,
+		nodeID:        nodeID,
+		view:          0,
+		sequence:      0,
+		trustMgr:      trustMgr,
 		committeeSize: 10, // Default committee size
-		messages:     make(map[string][]*Message),
-		prepared:     make(map[string]bool),
-		committed:    make(map[string]bool),
-		executed:     make(map[string]bool),
-		results:      make(map[string][]byte),
-		f:            3, // Allow up to 3 Byzantine nodes
+		messages:      make(map[string][]*Message),
+		prepared:      make(map[string]bool),
+		committed:     make(map[string]bool),
+		executed:      make(map[string]bool),
+		results:       make(map[string][]byte),
+		executor:      defaultRequestExecutor,
+		f:             3, // Allow up to 3 Byzantine nodes
 	}
+}
+
+// SetExecutor replaces the request executor used after commit certificates.
+func (t *TPBFT) SetExecutor(executor RequestExecutor) error {
+	if executor == nil {
+		return errors.New("executor cannot be nil")
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.executor = executor
+	return nil
 }
 
 // SelectCommittee selects committee members based on trust scores
@@ -212,20 +237,31 @@ func (t *TPBFT) commit(digest string) error {
 // execute executes the request after commit certificate
 func (t *TPBFT) execute(digest string, request Request) error {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 
 	// Check if already executed
 	if t.executed[digest] {
+		t.mu.Unlock()
 		return nil
 	}
 
 	// Verify commit certificate
 	if !t.committed[digest] {
+		t.mu.Unlock()
 		return errors.New("commit certificate not achieved")
 	}
+	executor := t.executor
+	t.mu.Unlock()
 
-	// Execute request (placeholder - actual execution depends on application)
-	result := t.executeRequest(request)
+	result, err := t.executeRequest(executor, request)
+	if err != nil {
+		return err
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.executed[digest] {
+		return nil
+	}
 	t.results[digest] = result
 	t.executed[digest] = true
 
@@ -239,10 +275,29 @@ func (t *TPBFT) execute(digest string, request Request) error {
 	return nil
 }
 
-// executeRequest processes the actual request (application-specific)
-func (t *TPBFT) executeRequest(request Request) []byte {
-	// Placeholder - implement actual state machine execution
-	return []byte(fmt.Sprintf("executed: %s", request.ID))
+// executeRequest applies a committed request with the configured executor.
+func (t *TPBFT) executeRequest(executor RequestExecutor, request Request) ([]byte, error) {
+	if executor == nil {
+		return nil, errors.New("request executor not configured")
+	}
+	return executor(request)
+}
+
+func defaultRequestExecutor(request Request) ([]byte, error) {
+	if request.ID == "" {
+		return nil, errors.New("request id is required")
+	}
+	if request.ClientID == "" {
+		return nil, errors.New("client id is required")
+	}
+
+	hash := sha256.Sum256(request.Data)
+	return json.Marshal(ExecutionResult{
+		RequestID: request.ID,
+		ClientID:  request.ClientID,
+		DataHash:  fmt.Sprintf("%x", hash),
+		AppliedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	})
 }
 
 // verifyPrePrepare verifies the pre-prepare message from leader

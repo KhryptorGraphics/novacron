@@ -320,20 +320,18 @@ func TestHealthCheck(t *testing.T) {
 
 // TestStreamReconnection tests automatic stream reconnection
 func TestStreamReconnection(t *testing.T) {
-	t.Skip("Manual test - requires controlled connection drops")
-
 	logger, _ := zap.NewDevelopment()
 
-	listener, port := startTestServer(t, 8)
+	listener, port := startTestServer(t, 2)
 	defer listener.Close()
 
 	config := &AMSTConfig{
-		MinStreams:     8,
-		MaxStreams:     16,
+		MinStreams:     2,
+		MaxStreams:     2,
 		ChunkSizeKB:    128,
 		AutoTune:       false,
 		PacingEnabled:  false,
-		ConnectTimeout: 5 * time.Second,
+		ConnectTimeout: time.Second,
 	}
 
 	mst, err := NewMultiStreamTCP(fmt.Sprintf("localhost:%d", port), config, logger)
@@ -349,13 +347,35 @@ func TestStreamReconnection(t *testing.T) {
 	initialStreams := mst.activeStreams.Load()
 	t.Logf("Initial active streams: %d", initialStreams)
 
-	// TODO: Simulate connection drops and verify reconnection
-	// This would require a more sophisticated test server
+	mst.mu.RLock()
+	if len(mst.streams) == 0 {
+		mst.mu.RUnlock()
+		t.Fatal("No streams created")
+	}
+	stream := mst.streams[0]
+	mst.mu.RUnlock()
 
-	time.Sleep(15 * time.Second) // Wait for health check cycles
+	stream.mu.Lock()
+	if stream.conn != nil {
+		_ = stream.conn.Close()
+	}
+	stream.healthy.Store(false)
+	stream.mu.Unlock()
+
+	mst.performHealthCheck()
+	mst.performHealthCheck()
 
 	finalStreams := mst.activeStreams.Load()
 	t.Logf("Final active streams: %d", finalStreams)
+	if finalStreams != initialStreams {
+		t.Fatalf("Expected active streams to recover to %d, got %d", initialStreams, finalStreams)
+	}
+	if stream.reconnects.Load() == 0 {
+		t.Fatal("Expected stream reconnection count to increase")
+	}
+	if !stream.healthy.Load() {
+		t.Fatal("Expected stream to be healthy after reconnection")
+	}
 }
 
 // BenchmarkBBRThroughput benchmarks throughput with BBR

@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -52,11 +53,11 @@ type RaftStateSync struct {
 
 // CRDTStateSync implements eventual consistency synchronization for internet mode
 type CRDTStateSync struct {
-	mu         sync.RWMutex
-	nodeID     string
-	crdtStore  map[string]crdt.CvRDT
+	mu          sync.RWMutex
+	nodeID      string
+	crdtStore   map[string]crdt.CvRDT
 	vectorClock crdt.VectorClock
-	logger     *zap.Logger
+	logger      *zap.Logger
 }
 
 // ConflictResolver handles conflicts in hybrid mode
@@ -268,9 +269,12 @@ func (a *ASSv3) hybridSync(ctx context.Context, state interface{}) error {
 	}
 	defer cancel()
 
-	// Try Raft first if conditions look good
-	if detectedMode == upgrade.ModeDatacenter {
-		if err := a.raftSync.Sync(syncCtx, state); err == nil {
+	// Try Raft first for datacenter or borderline hybrid conditions.
+	if detectedMode == upgrade.ModeDatacenter || detectedMode == upgrade.ModeHybrid {
+		raftCtx, raftCancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		err := a.raftSync.Sync(raftCtx, state)
+		raftCancel()
+		if err == nil {
 			return nil
 		} else {
 			a.logger.Warn("Raft sync failed, falling back to CRDT", zap.Error(err))
@@ -393,14 +397,10 @@ func (cr *ConflictResolver) RecordConflict(event ConflictEvent) {
 // Helper functions
 
 func serializeState(state interface{}) ([]byte, error) {
-	// TODO: Implement proper serialization
-	// For now, use simple byte conversion
-	return []byte(fmt.Sprintf("%v", state)), nil
+	return json.Marshal(state)
 }
 
 func stateToCRDT(nodeID string, state interface{}) (crdt.CvRDT, error) {
-	// TODO: Implement proper state to CRDT conversion
-	// For now, use LWW register
 	register := crdt.NewLWWRegister(nodeID)
 	data, err := serializeState(state)
 	if err != nil {

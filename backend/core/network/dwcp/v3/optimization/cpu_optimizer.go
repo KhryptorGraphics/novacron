@@ -2,7 +2,10 @@
 package optimization
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"runtime"
 	"sync"
@@ -139,15 +142,13 @@ func NewCPUOptimizer(config *CPUOptimizerConfig) *CPUOptimizer {
 
 	o.compressionPool = &sync.Pool{
 		New: func() interface{} {
-			// Create compression context (placeholder)
-			return &CompressionContext{}
+			return NewCompressionContext(config.CompressionLevel)
 		},
 	}
 
 	o.signaturePool = &sync.Pool{
 		New: func() interface{} {
-			// Create signature context (placeholder)
-			return &SignatureContext{}
+			return NewSignatureContext()
 		},
 	}
 
@@ -587,14 +588,54 @@ func (o *CPUOptimizer) Close() error {
 }
 
 // Placeholder types for compilation
-type CompressionContext struct{}
+type CompressionContext struct {
+	level int
+	buf   bytes.Buffer
+}
 
-func (c *CompressionContext) Reset()                               {}
-func (c *CompressionContext) Compress(data []byte) ([]byte, error) { return data, nil }
+func NewCompressionContext(level int) *CompressionContext {
+	if level < gzip.HuffmanOnly || level > gzip.BestCompression {
+		level = gzip.DefaultCompression
+	}
+	return &CompressionContext{level: level}
+}
 
-type SignatureContext struct{}
+func (c *CompressionContext) Reset() {
+	c.buf.Reset()
+}
 
-func (s *SignatureContext) Reset() {}
+func (c *CompressionContext) Compress(data []byte) ([]byte, error) {
+	c.buf.Reset()
+	writer, err := gzip.NewWriterLevel(&c.buf, c.level)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := writer.Write(data); err != nil {
+		writer.Close()
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), c.buf.Bytes()...), nil
+}
+
+type SignatureContext struct {
+	lastDigest [sha256.Size]byte
+}
+
+func NewSignatureContext() *SignatureContext {
+	return &SignatureContext{}
+}
+
+func (s *SignatureContext) Reset() {
+	s.lastDigest = [sha256.Size]byte{}
+}
+
+func (s *SignatureContext) Digest(data []byte) []byte {
+	s.lastDigest = sha256.Sum256(data)
+	return append([]byte(nil), s.lastDigest[:]...)
+}
 
 // CPUConnectionPool is a stub for CPU-specific connection pooling
 // Renamed to avoid conflict with network_optimizer.ConnectionPool

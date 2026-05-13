@@ -2,6 +2,7 @@
 package tpbft
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -164,6 +165,88 @@ func TestTPBFTConsensusFlow(t *testing.T) {
 	}
 
 	t.Logf("Request digest: %s", digest)
+}
+
+func TestTPBFTExecuteUsesConfiguredExecutor(t *testing.T) {
+	et := NewEigenTrust()
+	tpbft := NewTPBFT("node1", et)
+	tpbft.committee = []string{"node1", "node2"}
+
+	request := Request{
+		ID:        "req-exec",
+		Timestamp: time.Now(),
+		Data:      []byte("payload"),
+		ClientID:  "client1",
+	}
+	digest, err := tpbft.calculateDigest(request)
+	if err != nil {
+		t.Fatalf("Failed to calculate digest: %v", err)
+	}
+
+	called := false
+	if err := tpbft.SetExecutor(func(req Request) ([]byte, error) {
+		called = true
+		if req.ID != request.ID {
+			t.Fatalf("Expected request %s, got %s", request.ID, req.ID)
+		}
+		return []byte(`{"applied":true}`), nil
+	}); err != nil {
+		t.Fatalf("SetExecutor failed: %v", err)
+	}
+
+	tpbft.committed[digest] = true
+	if err := tpbft.execute(digest, request); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if !called {
+		t.Fatal("Configured executor was not called")
+	}
+	if !tpbft.executed[digest] {
+		t.Fatal("Request was not marked executed")
+	}
+	if string(tpbft.results[digest]) != `{"applied":true}` {
+		t.Fatalf("Unexpected result: %s", tpbft.results[digest])
+	}
+}
+
+func TestTPBFTDefaultExecutorReturnsDeterministicEnvelope(t *testing.T) {
+	request := Request{
+		ID:        "req-default",
+		Timestamp: time.Now(),
+		Data:      []byte("payload"),
+		ClientID:  "client1",
+	}
+
+	result, err := defaultRequestExecutor(request)
+	if err != nil {
+		t.Fatalf("Default executor failed: %v", err)
+	}
+
+	var envelope ExecutionResult
+	if err := json.Unmarshal(result, &envelope); err != nil {
+		t.Fatalf("Failed to unmarshal result: %v", err)
+	}
+	if envelope.RequestID != request.ID {
+		t.Fatalf("Expected request id %s, got %s", request.ID, envelope.RequestID)
+	}
+	if envelope.ClientID != request.ClientID {
+		t.Fatalf("Expected client id %s, got %s", request.ClientID, envelope.ClientID)
+	}
+	if envelope.DataHash == "" {
+		t.Fatal("Expected data hash")
+	}
+	if envelope.AppliedAt == "" {
+		t.Fatal("Expected applied timestamp")
+	}
+}
+
+func TestTPBFTSetExecutorRejectsNil(t *testing.T) {
+	tpbft := NewTPBFT("node1", NewEigenTrust())
+
+	if err := tpbft.SetExecutor(nil); err == nil {
+		t.Fatal("Expected nil executor error")
+	}
 }
 
 // TestTrustManagerInteractions tests trust manager interaction recording

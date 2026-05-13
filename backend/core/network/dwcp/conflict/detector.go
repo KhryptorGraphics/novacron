@@ -146,18 +146,18 @@ func (cr ClockRelation) String() string {
 
 // Conflict represents a detected conflict
 type Conflict struct {
-	ID                string
-	Type              ConflictType
-	Severity          ConflictSeverity
-	DetectedAt        time.Time
-	ResourceID        string
-	LocalVersion      *Version
-	RemoteVersion     *Version
-	CausalRelation    ClockRelation
-	ComplexityScore   float64
-	AffectedFields    []string
-	RequiresManual    bool
-	Context           map[string]interface{}
+	ID              string
+	Type            ConflictType
+	Severity        ConflictSeverity
+	DetectedAt      time.Time
+	ResourceID      string
+	LocalVersion    *Version
+	RemoteVersion   *Version
+	CausalRelation  ClockRelation
+	ComplexityScore float64
+	AffectedFields  []string
+	RequiresManual  bool
+	Context         map[string]interface{}
 }
 
 // Version represents a version of data with vector clock
@@ -247,6 +247,9 @@ func (cd *ConflictDetector) DetectConflict(ctx context.Context, resourceID strin
 	causalRelation := RelationConcurrent
 	if cd.config.EnableCausalTracking && local.VectorClock != nil && remote.VectorClock != nil {
 		causalRelation = local.VectorClock.Compare(remote.VectorClock)
+		if causalRelation == RelationEqual && local.NodeID != remote.NodeID {
+			causalRelation = RelationConcurrent
+		}
 	}
 
 	// If not concurrent, no conflict
@@ -339,7 +342,7 @@ type CausalViolationClassifier struct{}
 func (c *CausalViolationClassifier) Classify(local, remote *Version) (ConflictType, ConflictSeverity, []string) {
 	if local.VectorClock != nil && remote.VectorClock != nil {
 		relation := local.VectorClock.Compare(remote.VectorClock)
-		if relation == RelationConcurrent {
+		if relation == RelationBefore || relation == RelationAfter {
 			return ConflictTypeCausalViolation, SeverityHigh, []string{}
 		}
 	}
@@ -355,7 +358,7 @@ type SemanticConflictClassifier struct{}
 
 func (c *SemanticConflictClassifier) Classify(local, remote *Version) (ConflictType, ConflictSeverity, []string) {
 	// Semantic analysis would go here
-	return ConflictTypeSemanticConflict, SeverityMedium, []string{}
+	return ConflictTypeConcurrentUpdate, SeverityLow, []string{}
 }
 
 func (c *SemanticConflictClassifier) Priority() int {
@@ -367,7 +370,7 @@ type InvariantViolationClassifier struct{}
 
 func (c *InvariantViolationClassifier) Classify(local, remote *Version) (ConflictType, ConflictSeverity, []string) {
 	// Invariant checking would go here
-	return ConflictTypeInvariantViolation, SeverityCritical, []string{}
+	return ConflictTypeConcurrentUpdate, SeverityLow, []string{}
 }
 
 func (c *InvariantViolationClassifier) Priority() int {

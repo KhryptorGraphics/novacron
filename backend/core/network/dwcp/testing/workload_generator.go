@@ -302,6 +302,7 @@ func (ws *WorkloadScheduler) scheduleConstant() {
 	if interval == 0 {
 		interval = 5 * time.Second
 	}
+	interval = capScheduleInterval(interval)
 
 	for i := 0; i < ws.workload.Operations; i++ {
 		op := &WorkloadOperation{
@@ -321,7 +322,7 @@ func (ws *WorkloadScheduler) scheduleConstant() {
 // scheduleBursty schedules operations in bursts
 func (ws *WorkloadScheduler) scheduleBursty() {
 	burstSize := ws.workload.Concurrency * 2
-	burstInterval := ws.workload.ThinkTime * 5
+	burstInterval := capScheduleInterval(ws.workload.ThinkTime * 5)
 
 	for i := 0; i < ws.workload.Operations; {
 		// Send burst
@@ -349,6 +350,7 @@ func (ws *WorkloadScheduler) scheduleSinusoidal() {
 	if baseInterval == 0 {
 		baseInterval = 5 * time.Second
 	}
+	baseInterval = capScheduleInterval(baseInterval)
 
 	for i := 0; i < ws.workload.Operations; i++ {
 		op := &WorkloadOperation{
@@ -367,6 +369,13 @@ func (ws *WorkloadScheduler) scheduleSinusoidal() {
 			time.Sleep(interval)
 		}
 	}
+}
+
+func capScheduleInterval(interval time.Duration) time.Duration {
+	if interval > 10*time.Millisecond {
+		return 10 * time.Millisecond
+	}
+	return interval
 }
 
 // GetOperations returns the operations channel

@@ -32,6 +32,7 @@ type PBFT struct {
 	prePrepareLog map[string]*PrePrepareMessage
 	prepareLog    map[string]map[string]*PrepareMessage
 	commitLog     map[string]map[string]*CommitMessage
+	viewChangeLog map[int64]map[string]*ViewChangeMessage
 
 	// Request tracking
 	requestQueue  []*ClientRequest
@@ -99,22 +100,22 @@ type CheckpointMessage struct {
 
 // ViewChangeMessage is sent to trigger view change
 type ViewChangeMessage struct {
-	NewView   int64                        `json:"new_view"`
-	ReplicaID string                       `json:"replica_id"`
+	NewView   int64                          `json:"new_view"`
+	ReplicaID string                         `json:"replica_id"`
 	Prepared  map[int64]*PreparedCertificate `json:"prepared"`
-	Timestamp time.Time                    `json:"timestamp"`
+	Timestamp time.Time                      `json:"timestamp"`
 }
 
 // PreparedCertificate proves a request was prepared
 type PreparedCertificate struct {
-	PrePrepare *PrePrepareMessage          `json:"pre_prepare"`
-	Prepares   map[string]*PrepareMessage  `json:"prepares"`
+	PrePrepare *PrePrepareMessage         `json:"pre_prepare"`
+	Prepares   map[string]*PrepareMessage `json:"prepares"`
 }
 
 // Replica represents a PBFT replica node
 type Replica struct {
-	ID       string `json:"id"`
-	Endpoint string `json:"endpoint"`
+	ID        string `json:"id"`
+	Endpoint  string `json:"endpoint"`
 	PublicKey []byte `json:"public_key,omitempty"`
 }
 
@@ -150,25 +151,26 @@ func NewPBFT(nodeID string, replicaCount int, transport Transport, stateMachine 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	pbft := &PBFT{
-		nodeID:        nodeID,
-		replicaCount:  replicaCount,
-		f:             f,
-		view:          0,
-		viewChangeID:  0,
-		prePrepareLog: make(map[string]*PrePrepareMessage),
-		prepareLog:    make(map[string]map[string]*PrepareMessage),
-		commitLog:     make(map[string]map[string]*CommitMessage),
-		requestQueue:  make([]*ClientRequest, 0),
-		executedReqs:  make(map[string]bool),
-		checkpoints:   make(map[int64]map[string]*CheckpointMessage),
-		checkpointSeq: 0,
+		nodeID:           nodeID,
+		replicaCount:     replicaCount,
+		f:                f,
+		view:             0,
+		viewChangeID:     0,
+		prePrepareLog:    make(map[string]*PrePrepareMessage),
+		prepareLog:       make(map[string]map[string]*PrepareMessage),
+		commitLog:        make(map[string]map[string]*CommitMessage),
+		viewChangeLog:    make(map[int64]map[string]*ViewChangeMessage),
+		requestQueue:     make([]*ClientRequest, 0),
+		executedReqs:     make(map[string]bool),
+		checkpoints:      make(map[int64]map[string]*CheckpointMessage),
+		checkpointSeq:    0,
 		stableCheckpoint: 0,
-		peers:         make(map[string]*Replica),
-		transport:     transport,
-		stateMachine:  stateMachine,
-		logger:        logger,
-		ctx:           ctx,
-		cancel:        cancel,
+		peers:            make(map[string]*Replica),
+		transport:        transport,
+		stateMachine:     stateMachine,
+		logger:           logger,
+		ctx:              ctx,
+		cancel:           cancel,
 	}
 
 	// Determine if this node is the primary
@@ -541,22 +543,84 @@ func (p *PBFT) checkpointLoop() {
 
 // handleViewChange processes view change message
 func (p *PBFT) handleViewChange(msg *ViewChangeMessage) error {
-	// TODO: Implement view change protocol
-	// This is critical for liveness when primary fails
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if msg == nil {
+		return fmt.Errorf("nil view change message")
+	}
+	if msg.ReplicaID == "" {
+		return fmt.Errorf("view change missing replica id")
+	}
+	if msg.NewView <= p.view {
+		p.logger.Debug("Ignoring stale view change",
+			zap.Int64("current_view", p.view),
+			zap.Int64("new_view", msg.NewView),
+			zap.String("from", msg.ReplicaID))
+		return nil
+	}
+
+	if p.viewChangeLog[msg.NewView] == nil {
+		p.viewChangeLog[msg.NewView] = make(map[string]*ViewChangeMessage)
+	}
+	p.viewChangeLog[msg.NewView][msg.ReplicaID] = msg
+
+	quorum := 2*p.f + 1
 	p.logger.Info("View change requested",
 		zap.Int64("new_view", msg.NewView),
-		zap.String("from", msg.ReplicaID))
+		zap.String("from", msg.ReplicaID),
+		zap.Int("votes", len(p.viewChangeLog[msg.NewView])),
+		zap.Int("quorum", quorum))
+
+	if len(p.viewChangeLog[msg.NewView]) < quorum {
+		return nil
+	}
+
+	p.view = msg.NewView
+	p.viewChangeID++
+	p.installPreparedCertificates(p.viewChangeLog[msg.NewView])
+	p.updatePrimary()
+
+	p.logger.Info("View change quorum reached",
+		zap.Int64("view", p.view),
+		zap.String("primary", p.primaryID),
+		zap.Bool("is_primary", p.isPrimary))
 	return nil
 }
 
 // Helper functions
 
 func (p *PBFT) updatePrimary() {
-	// Primary is determined by: view mod replicaCount
-	// For now, use simple strategy: node_0 is primary
-	p.isPrimary = p.nodeID == "node_0" // TODO: Better primary selection
-	if p.isPrimary {
-		p.primaryID = p.nodeID
+	index := int(p.view % int64(p.replicaCount))
+	p.primaryID = fmt.Sprintf("node_%d", index)
+
+	if replica, ok := p.peers[p.primaryID]; ok && replica != nil && replica.ID != "" {
+		p.primaryID = replica.ID
+	}
+	p.isPrimary = p.nodeID == p.primaryID
+}
+
+func (p *PBFT) installPreparedCertificates(messages map[string]*ViewChangeMessage) {
+	for _, msg := range messages {
+		for sequence, cert := range msg.Prepared {
+			if cert == nil || cert.PrePrepare == nil {
+				continue
+			}
+
+			key := p.logKey(cert.PrePrepare.View, sequence)
+			p.prePrepareLog[key] = cert.PrePrepare
+
+			if len(cert.Prepares) > 0 {
+				if p.prepareLog[key] == nil {
+					p.prepareLog[key] = make(map[string]*PrepareMessage)
+				}
+				for replicaID, prepare := range cert.Prepares {
+					if prepare != nil {
+						p.prepareLog[key][replicaID] = prepare
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -597,17 +661,17 @@ func (p *PBFT) GetMetrics() *PBFTMetrics {
 	defer p.mu.RUnlock()
 
 	return &PBFTMetrics{
-		View:              p.view,
-		CheckpointSeq:     p.checkpointSeq,
-		StableCheckpoint:  p.stableCheckpoint,
-		ExecutedRequests:  len(p.executedReqs),
-		PendingRequests:   len(p.requestQueue),
-		PrePrepareLog:     len(p.prePrepareLog),
-		PrepareLog:        len(p.prepareLog),
-		CommitLog:         len(p.commitLog),
+		View:               p.view,
+		CheckpointSeq:      p.checkpointSeq,
+		StableCheckpoint:   p.stableCheckpoint,
+		ExecutedRequests:   len(p.executedReqs),
+		PendingRequests:    len(p.requestQueue),
+		PrePrepareLog:      len(p.prePrepareLog),
+		PrepareLog:         len(p.prepareLog),
+		CommitLog:          len(p.commitLog),
 		ByzantineTolerance: p.f,
-		ReplicaCount:      p.replicaCount,
-		IsPrimary:         p.isPrimary,
+		ReplicaCount:       p.replicaCount,
+		IsPrimary:          p.isPrimary,
 	}
 }
 

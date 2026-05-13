@@ -151,9 +151,9 @@ func TestPBFT_ByzantineTolerance(t *testing.T) {
 	stateMachine := NewMockStateMachine()
 
 	tests := []struct {
-		replicaCount       int
-		expectedF          int
-		expectedTolerance  string
+		replicaCount      int
+		expectedF         int
+		expectedTolerance string
 	}{
 		{4, 1, "25% malicious nodes"},
 		{7, 2, "28% malicious nodes"},
@@ -314,6 +314,132 @@ func TestPBFT_Metrics(t *testing.T) {
 	assert.Equal(t, 2, metrics.ByzantineTolerance) // f=2 for n=7
 	assert.Equal(t, 7, metrics.ReplicaCount)
 	assert.True(t, metrics.IsPrimary)
+}
+
+func TestPBFT_ViewChangeQuorumRotatesPrimary(t *testing.T) {
+	logger := zap.NewNop()
+	transport := NewMockTransport()
+	stateMachine := NewMockStateMachine()
+
+	pbft, err := NewPBFT("node_1", 4, transport, stateMachine, logger)
+	require.NoError(t, err)
+	assert.Equal(t, "node_0", pbft.primaryID)
+	assert.False(t, pbft.isPrimary)
+
+	for _, replicaID := range []string{"node_0", "node_1"} {
+		err = pbft.handleViewChange(&ViewChangeMessage{
+			NewView:   1,
+			ReplicaID: replicaID,
+			Prepared:  map[int64]*PreparedCertificate{},
+			Timestamp: time.Now(),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), pbft.view)
+	}
+
+	err = pbft.handleViewChange(&ViewChangeMessage{
+		NewView:   1,
+		ReplicaID: "node_2",
+		Prepared:  map[int64]*PreparedCertificate{},
+		Timestamp: time.Now(),
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1), pbft.view)
+	assert.Equal(t, int64(1), pbft.viewChangeID)
+	assert.Equal(t, "node_1", pbft.primaryID)
+	assert.True(t, pbft.isPrimary)
+}
+
+func TestPBFT_ViewChangeIgnoresStaleAndDuplicateVotes(t *testing.T) {
+	logger := zap.NewNop()
+	transport := NewMockTransport()
+	stateMachine := NewMockStateMachine()
+
+	pbft, err := NewPBFT("node_2", 4, transport, stateMachine, logger)
+	require.NoError(t, err)
+
+	vote := &ViewChangeMessage{
+		NewView:   2,
+		ReplicaID: "node_0",
+		Prepared:  map[int64]*PreparedCertificate{},
+		Timestamp: time.Now(),
+	}
+	require.NoError(t, pbft.handleViewChange(vote))
+	require.NoError(t, pbft.handleViewChange(vote))
+	assert.Equal(t, int64(0), pbft.view)
+	assert.Len(t, pbft.viewChangeLog[2], 1)
+
+	require.NoError(t, pbft.handleViewChange(&ViewChangeMessage{
+		NewView:   2,
+		ReplicaID: "node_1",
+		Prepared:  map[int64]*PreparedCertificate{},
+		Timestamp: time.Now(),
+	}))
+	require.NoError(t, pbft.handleViewChange(&ViewChangeMessage{
+		NewView:   2,
+		ReplicaID: "node_2",
+		Prepared:  map[int64]*PreparedCertificate{},
+		Timestamp: time.Now(),
+	}))
+
+	assert.Equal(t, int64(2), pbft.view)
+	assert.Equal(t, "node_2", pbft.primaryID)
+	assert.True(t, pbft.isPrimary)
+
+	require.NoError(t, pbft.handleViewChange(&ViewChangeMessage{
+		NewView:   1,
+		ReplicaID: "node_3",
+		Prepared:  map[int64]*PreparedCertificate{},
+		Timestamp: time.Now(),
+	}))
+	assert.Equal(t, int64(2), pbft.view)
+}
+
+func TestPBFT_ViewChangeInstallsPreparedCertificates(t *testing.T) {
+	logger := zap.NewNop()
+	transport := NewMockTransport()
+	stateMachine := NewMockStateMachine()
+
+	pbft, err := NewPBFT("node_0", 4, transport, stateMachine, logger)
+	require.NoError(t, err)
+
+	req := &ClientRequest{
+		ClientID:  "client_1",
+		Timestamp: time.Now(),
+		Operation: json.RawMessage(`{"key":"prepared","value":"request"}`),
+		Sequence:  9,
+	}
+	prePrepare := &PrePrepareMessage{
+		View:      0,
+		Sequence:  9,
+		Digest:    pbft.computeDigest(req),
+		Request:   req,
+		Timestamp: time.Now(),
+	}
+	prepares := map[string]*PrepareMessage{
+		"node_0": {View: 0, Sequence: 9, Digest: prePrepare.Digest, ReplicaID: "node_0", Timestamp: time.Now()},
+		"node_1": {View: 0, Sequence: 9, Digest: prePrepare.Digest, ReplicaID: "node_1", Timestamp: time.Now()},
+	}
+	prepared := map[int64]*PreparedCertificate{
+		9: {
+			PrePrepare: prePrepare,
+			Prepares:   prepares,
+		},
+	}
+
+	for _, replicaID := range []string{"node_0", "node_1", "node_2"} {
+		require.NoError(t, pbft.handleViewChange(&ViewChangeMessage{
+			NewView:   1,
+			ReplicaID: replicaID,
+			Prepared:  prepared,
+			Timestamp: time.Now(),
+		}))
+	}
+
+	key := pbft.logKey(0, 9)
+	assert.Same(t, prePrepare, pbft.prePrepareLog[key])
+	assert.Len(t, pbft.prepareLog[key], 2)
 }
 
 func TestPBFT_ConcurrentConsensus(t *testing.T) {

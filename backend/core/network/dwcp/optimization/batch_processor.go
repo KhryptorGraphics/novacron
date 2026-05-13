@@ -7,7 +7,15 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
+
+type mmsghdr struct {
+	hdr syscall.Msghdr
+	len uint32
+	pad uint32
+}
 
 // BatchProcessor processes operations in batches for efficiency
 type BatchProcessor struct {
@@ -68,9 +76,9 @@ func (bp *BatchProcessor) processBatch(batch [][]byte) error {
 	// Use writev for vectorized I/O
 	iovecs := make([]syscall.Iovec, len(batch))
 	for i, data := range batch {
-		iovecs[i] = syscall.Iovec{
-			Base: &data[0],
-			Len:  uint64(len(data)),
+		iovecs[i].Len = uint64(len(data))
+		if len(data) > 0 {
+			iovecs[i].Base = &data[0]
 		}
 	}
 
@@ -186,16 +194,25 @@ func NewBatchSender(conn *net.UDPConn, batchSize int) (*BatchSender, error) {
 
 // Send sends a packet (batched)
 func (bs *BatchSender) Send(data []byte, addr *net.UDPAddr) error {
+	if addr == nil {
+		return fmt.Errorf("UDP address cannot be nil")
+	}
+	ip := addr.IP.To4()
+	if ip == nil {
+		return fmt.Errorf("only IPv4 UDP addresses are supported")
+	}
+
 	// Convert address
 	var rawAddr syscall.RawSockaddrInet4
 	rawAddr.Family = syscall.AF_INET
 	rawAddr.Port = uint16(addr.Port)<<8 | uint16(addr.Port)>>8
-	copy(rawAddr.Addr[:], addr.IP.To4())
+	copy(rawAddr.Addr[:], ip)
 
-	bs.messages = append(bs.messages, syscall.Iovec{
-		Base: &data[0],
-		Len:  uint64(len(data)),
-	})
+	iovec := syscall.Iovec{Len: uint64(len(data))}
+	if len(data) > 0 {
+		iovec.Base = &data[0]
+	}
+	bs.messages = append(bs.messages, iovec)
 	bs.addrs = append(bs.addrs, rawAddr)
 
 	if len(bs.messages) >= bs.batchSize {
@@ -218,21 +235,35 @@ func (bs *BatchSender) Flush() error {
 	}
 	defer file.Close()
 
-	// TODO: Implement sendmmsg syscall
-	// For now, fall back to individual sends
-	for i := range bs.messages {
-		_, _, err := syscall.Syscall6(
-			syscall.SYS_SENDTO,
+	messages := make([]mmsghdr, len(bs.messages))
+	for i := range messages {
+		messages[i].hdr.Name = (*byte)(unsafe.Pointer(&bs.addrs[i]))
+		messages[i].hdr.Namelen = uint32(unsafe.Sizeof(bs.addrs[i]))
+		messages[i].hdr.Iov = &bs.messages[i]
+		messages[i].hdr.Iovlen = 1
+	}
+
+	sent := 0
+	for sent < len(messages) {
+		n, _, errno := syscall.Syscall6(
+			unix.SYS_SENDMMSG,
 			file.Fd(),
-			uintptr(unsafe.Pointer(bs.messages[i].Base)),
-			uintptr(bs.messages[i].Len),
+			uintptr(unsafe.Pointer(&messages[sent])),
+			uintptr(len(messages)-sent),
 			0,
-			uintptr(unsafe.Pointer(&bs.addrs[i])),
-			unsafe.Sizeof(bs.addrs[i]),
+			0,
+			0,
 		)
-		if err != 0 {
-			return fmt.Errorf("sendto failed: %v", err)
+		if errno == syscall.EINTR || errno == syscall.EAGAIN {
+			continue
 		}
+		if errno != 0 {
+			return fmt.Errorf("sendmmsg failed after %d/%d messages: %v", sent, len(messages), errno)
+		}
+		if n == 0 {
+			return fmt.Errorf("sendmmsg sent no messages")
+		}
+		sent += int(n)
 	}
 
 	bs.messages = bs.messages[:0]

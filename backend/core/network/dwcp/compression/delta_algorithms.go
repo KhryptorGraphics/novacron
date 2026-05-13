@@ -212,22 +212,137 @@ func (r *RSyncDeltaComputer) buildSignatures(data []byte) map[uint32]uint32 {
 // BSDiffDeltaComputer implements bsdiff algorithm for binary diffs
 type BSDiffDeltaComputer struct{}
 
+const (
+	bsdiffMagic          = "NBD1"
+	bsdiffMinCopyLength  = 16
+	bsdiffMaxCandidates  = 8
+	bsdiffCopyCommand    = 0x01
+	bsdiffLiteralCommand = 0x02
+)
+
 func (b *BSDiffDeltaComputer) Name() string {
 	return "bsdiff"
 }
 
 func (b *BSDiffDeltaComputer) ComputeDelta(baseline, current []byte) ([]byte, error) {
-	// TODO: Implement bsdiff once module dependency issues are resolved
-	// For now, fallback to XOR which is already proven to work
-	xor := &XORDeltaComputer{}
-	return xor.ComputeDelta(baseline, current)
+	index := buildBSDiffIndex(baseline)
+
+	var delta bytes.Buffer
+	delta.WriteString(bsdiffMagic)
+
+	var literal bytes.Buffer
+	flushLiteral := func() {
+		if literal.Len() == 0 {
+			return
+		}
+		delta.WriteByte(bsdiffLiteralCommand)
+		delta.Write(uint32ToBytes(uint32(literal.Len())))
+		delta.Write(literal.Bytes())
+		literal.Reset()
+	}
+
+	for pos := 0; pos < len(current); {
+		matchPos, matchLen := longestBSDiffMatch(baseline, current, pos, index)
+		if matchLen >= bsdiffMinCopyLength {
+			flushLiteral()
+			delta.WriteByte(bsdiffCopyCommand)
+			delta.Write(uint32ToBytes(uint32(matchPos)))
+			delta.Write(uint32ToBytes(uint32(matchLen)))
+			pos += matchLen
+			continue
+		}
+
+		literal.WriteByte(current[pos])
+		pos++
+	}
+	flushLiteral()
+
+	return delta.Bytes(), nil
 }
 
 func (b *BSDiffDeltaComputer) ApplyDelta(baseline, delta []byte) ([]byte, error) {
-	// TODO: Implement bspatch once module dependency issues are resolved
-	// For now, fallback to XOR which is already proven to work
-	xor := &XORDeltaComputer{}
-	return xor.ApplyDelta(baseline, delta)
+	if len(delta) < len(bsdiffMagic) || string(delta[:len(bsdiffMagic)]) != bsdiffMagic {
+		return nil, fmt.Errorf("invalid bsdiff delta header")
+	}
+
+	var result bytes.Buffer
+	pos := len(bsdiffMagic)
+	for pos < len(delta) {
+		cmd := delta[pos]
+		pos++
+
+		switch cmd {
+		case bsdiffCopyCommand:
+			if pos+8 > len(delta) {
+				return nil, fmt.Errorf("truncated bsdiff copy command")
+			}
+			baselinePos := int(bytesToUint32(delta[pos : pos+4]))
+			pos += 4
+			length := int(bytesToUint32(delta[pos : pos+4]))
+			pos += 4
+			if baselinePos < 0 || length < 0 || baselinePos+length > len(baseline) {
+				return nil, fmt.Errorf("invalid bsdiff copy range: pos=%d len=%d", baselinePos, length)
+			}
+			result.Write(baseline[baselinePos : baselinePos+length])
+
+		case bsdiffLiteralCommand:
+			if pos+4 > len(delta) {
+				return nil, fmt.Errorf("truncated bsdiff literal command")
+			}
+			length := int(bytesToUint32(delta[pos : pos+4]))
+			pos += 4
+			if length < 0 || pos+length > len(delta) {
+				return nil, fmt.Errorf("truncated bsdiff literal payload")
+			}
+			result.Write(delta[pos : pos+length])
+			pos += length
+
+		default:
+			return nil, fmt.Errorf("invalid bsdiff command: 0x%02x", cmd)
+		}
+	}
+
+	return result.Bytes(), nil
+}
+
+func buildBSDiffIndex(baseline []byte) map[string][]int {
+	index := make(map[string][]int)
+	if len(baseline) < bsdiffMinCopyLength {
+		return index
+	}
+	for pos := 0; pos+bsdiffMinCopyLength <= len(baseline); pos += bsdiffMinCopyLength {
+		key := string(baseline[pos : pos+bsdiffMinCopyLength])
+		if len(index[key]) >= bsdiffMaxCandidates {
+			continue
+		}
+		index[key] = append(index[key], pos)
+	}
+	return index
+}
+
+func longestBSDiffMatch(baseline, current []byte, currentPos int, index map[string][]int) (int, int) {
+	if currentPos+bsdiffMinCopyLength > len(current) {
+		return 0, 0
+	}
+
+	key := string(current[currentPos : currentPos+bsdiffMinCopyLength])
+	candidates := index[key]
+	bestPos := 0
+	bestLen := 0
+	for _, baselinePos := range candidates {
+		matchLen := 0
+		for baselinePos+matchLen < len(baseline) &&
+			currentPos+matchLen < len(current) &&
+			baseline[baselinePos+matchLen] == current[currentPos+matchLen] {
+			matchLen++
+		}
+		if matchLen > bestLen {
+			bestPos = baselinePos
+			bestLen = matchLen
+		}
+	}
+
+	return bestPos, bestLen
 }
 
 // AdaptiveDeltaComputer selects the best algorithm based on data characteristics

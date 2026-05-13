@@ -3,6 +3,10 @@ package monitoring
 import (
 	"context"
 	"fmt"
+	"os"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,12 +36,12 @@ type ObservabilityIntegration struct {
 	tracer         trace.Tracer
 
 	// Structured logging
-	logger        *zap.Logger
-	logCollector  *LogCollector
+	logger       *zap.Logger
+	logCollector *LogCollector
 
 	// Span tracking
-	activeSpans   map[string]trace.Span
-	spanHistory   []*SpanSummary
+	activeSpans    map[string]trace.Span
+	spanHistory    []*SpanSummary
 	maxSpanHistory int
 
 	// Performance profiling
@@ -70,15 +74,15 @@ type StructuredLog struct {
 
 // SpanSummary summarizes a completed span
 type SpanSummary struct {
-	TraceID      string
-	SpanID       string
-	Name         string
-	StartTime    time.Time
-	EndTime      time.Time
-	Duration     time.Duration
-	Status       string
-	Attributes   map[string]interface{}
-	Events       []SpanEvent
+	TraceID    string
+	SpanID     string
+	Name       string
+	StartTime  time.Time
+	EndTime    time.Time
+	Duration   time.Duration
+	Status     string
+	Attributes map[string]interface{}
+	Events     []SpanEvent
 }
 
 // SpanEvent represents an event within a span
@@ -93,16 +97,18 @@ type PerformanceProfiler struct {
 	mu sync.RWMutex
 
 	// CPU profiling
-	cpuSamples    []float64
-	avgCPU        float64
+	cpuSamples []float64
+	avgCPU     float64
 
 	// Memory profiling
 	memorySamples []uint64
 	avgMemory     uint64
 
 	// I/O profiling
-	ioReadBytes   uint64
-	ioWriteBytes  uint64
+	ioReadBytes  uint64
+	ioWriteBytes uint64
+	lastCPUTime  float64
+	lastWallTime time.Time
 }
 
 // NewObservabilityIntegration creates a new observability integration
@@ -326,10 +332,10 @@ func (oi *ObservabilityIntegration) GetLogStats() map[string]interface{} {
 	defer oi.logCollector.mu.RUnlock()
 
 	return map[string]interface{}{
-		"total_logs":   len(oi.logCollector.logs),
-		"error_count":  oi.logCollector.errorCount,
+		"total_logs":    len(oi.logCollector.logs),
+		"error_count":   oi.logCollector.errorCount,
 		"warning_count": oi.logCollector.warningCount,
-		"info_count":   oi.logCollector.infoCount,
+		"info_count":    oi.logCollector.infoCount,
 	}
 }
 
@@ -382,15 +388,31 @@ func (oi *ObservabilityIntegration) profileLoop() {
 }
 
 func (oi *ObservabilityIntegration) collectProfileData() {
-	// TODO: Implement actual profiling using pprof or similar
-	// This is a placeholder for demonstration
+	cpuTime, hasCPU := readProcessCPUSeconds()
+	now := time.Now()
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+	readBytes, writeBytes := readProcessIOBytes()
 
 	oi.profiler.mu.Lock()
 	defer oi.profiler.mu.Unlock()
 
-	// Collect CPU sample (placeholder)
-	cpuSample := 45.0 // Would get from runtime
-	oi.profiler.cpuSamples = append(oi.profiler.cpuSamples, cpuSample)
+	cpuSample := 0.0
+	if hasCPU && !oi.profiler.lastWallTime.IsZero() {
+		wallSeconds := now.Sub(oi.profiler.lastWallTime).Seconds()
+		if wallSeconds > 0 {
+			cpuDelta := cpuTime - oi.profiler.lastCPUTime
+			if cpuDelta < 0 {
+				cpuDelta = 0
+			}
+			cpuSample = (cpuDelta / wallSeconds) * 100 / float64(runtime.NumCPU())
+		}
+	}
+	if hasCPU {
+		oi.profiler.lastCPUTime = cpuTime
+		oi.profiler.lastWallTime = now
+		oi.profiler.cpuSamples = append(oi.profiler.cpuSamples, cpuSample)
+	}
 	if len(oi.profiler.cpuSamples) > 100 {
 		oi.profiler.cpuSamples = oi.profiler.cpuSamples[1:]
 	}
@@ -400,7 +422,24 @@ func (oi *ObservabilityIntegration) collectProfileData() {
 	for _, s := range oi.profiler.cpuSamples {
 		sum += s
 	}
-	oi.profiler.avgCPU = sum / float64(len(oi.profiler.cpuSamples))
+	if len(oi.profiler.cpuSamples) > 0 {
+		oi.profiler.avgCPU = sum / float64(len(oi.profiler.cpuSamples))
+	}
+
+	memoryMB := memStats.Alloc / 1024 / 1024
+	oi.profiler.memorySamples = append(oi.profiler.memorySamples, memoryMB)
+	if len(oi.profiler.memorySamples) > 100 {
+		oi.profiler.memorySamples = oi.profiler.memorySamples[1:]
+	}
+	var memorySum uint64
+	for _, sample := range oi.profiler.memorySamples {
+		memorySum += sample
+	}
+	if len(oi.profiler.memorySamples) > 0 {
+		oi.profiler.avgMemory = memorySum / uint64(len(oi.profiler.memorySamples))
+	}
+	oi.profiler.ioReadBytes = readBytes
+	oi.profiler.ioWriteBytes = writeBytes
 }
 
 // GetProfilingData returns performance profiling data
@@ -491,9 +530,12 @@ func (lc *LogCollector) Search(
 
 		// Simple text search in message
 		if query != "" {
-			// Would use more sophisticated search in production
-			// For now, just check if query is in message
-			// (placeholder implementation)
+			queryLower := strings.ToLower(query)
+			messageMatch := strings.Contains(strings.ToLower(log.Message), queryLower)
+			componentMatch := strings.Contains(strings.ToLower(log.Component), queryLower)
+			if !messageMatch && !componentMatch && !logFieldsContain(log.Fields, queryLower) {
+				continue
+			}
 		}
 
 		results = append(results, log)
@@ -518,4 +560,67 @@ func (lc *LogCollector) GetRecent(limit int) []*StructuredLog {
 	copy(recent, lc.logs[len(lc.logs)-limit:])
 
 	return recent
+}
+
+func readProcessCPUSeconds() (float64, bool) {
+	data, err := os.ReadFile("/proc/self/stat")
+	if err != nil {
+		return 0, false
+	}
+	stat := string(data)
+	endComm := strings.LastIndex(stat, ")")
+	if endComm == -1 || endComm+2 >= len(stat) {
+		return 0, false
+	}
+	fields := strings.Fields(stat[endComm+2:])
+	if len(fields) <= 12 {
+		return 0, false
+	}
+	utime, err := strconv.ParseFloat(fields[11], 64)
+	if err != nil {
+		return 0, false
+	}
+	stime, err := strconv.ParseFloat(fields[12], 64)
+	if err != nil {
+		return 0, false
+	}
+	const clockTicksPerSecond = 100.0
+	return (utime + stime) / clockTicksPerSecond, true
+}
+
+func readProcessIOBytes() (uint64, uint64) {
+	data, err := os.ReadFile("/proc/self/io")
+	if err != nil {
+		return 0, 0
+	}
+
+	var readBytes uint64
+	var writeBytes uint64
+	for _, line := range strings.Split(string(data), "\n") {
+		parts := strings.Fields(line)
+		if len(parts) != 2 {
+			continue
+		}
+		value, err := strconv.ParseUint(parts[1], 10, 64)
+		if err != nil {
+			continue
+		}
+		switch strings.TrimSuffix(parts[0], ":") {
+		case "read_bytes":
+			readBytes = value
+		case "write_bytes":
+			writeBytes = value
+		}
+	}
+	return readBytes, writeBytes
+}
+
+func logFieldsContain(fields map[string]interface{}, queryLower string) bool {
+	for key, value := range fields {
+		if strings.Contains(strings.ToLower(key), queryLower) ||
+			strings.Contains(strings.ToLower(fmt.Sprint(value)), queryLower) {
+			return true
+		}
+	}
+	return false
 }

@@ -50,10 +50,10 @@ type NodeBehavior struct {
 	LastSeen          time.Time
 
 	// Equivocation detection
-	PrePreparesSent  map[int64][]string // sequence -> digests
-	PreparesSent     map[int64][]string
-	CommitsSent      map[int64][]string
-	ViewChangeSent   map[int64][]int64 // sequence -> views
+	PrePreparesSent map[int64][]string // sequence -> digests
+	PreparesSent    map[int64][]string
+	CommitsSent     map[int64][]string
+	ViewChangeSent  map[int64][]int64 // sequence -> views
 }
 
 // MessageRecord stores message history for validation
@@ -100,7 +100,7 @@ type ViolationType int
 
 const (
 	ViolationInvalidSignature ViolationType = iota
-	ViolationEquivocation                    // Sending conflicting messages
+	ViolationEquivocation                   // Sending conflicting messages
 	ViolationTimingAnomaly
 	ViolationMalformedMessage
 	ViolationConflictingVote
@@ -112,12 +112,12 @@ const (
 
 // ByzantineEvidence contains proof of Byzantine behavior
 type ByzantineEvidence struct {
-	NodeID      string
-	AttackType  AttackType
-	Evidence    interface{}
-	Confidence  float64 // 0-1
-	DetectedAt  time.Time
-	Violations  []*Violation
+	NodeID     string
+	AttackType AttackType
+	Evidence   interface{}
+	Confidence float64 // 0-1
+	DetectedAt time.Time
+	Violations []*Violation
 }
 
 // AttackType defines categories of Byzantine attacks
@@ -195,14 +195,14 @@ func DefaultDetectorConfig() DetectorConfig {
 
 		ViolationWeights: map[ViolationType]float64{
 			ViolationInvalidSignature:       15.0,
-			ViolationEquivocation:            40.0,
-			ViolationTimingAnomaly:           10.0,
-			ViolationMalformedMessage:        8.0,
-			ViolationConflictingVote:         35.0,
-			ViolationSilentNode:              5.0,
-			ViolationFloodAttack:             25.0,
-			ViolationViewChangeAbuse:         30.0,
-			ViolationCheckpointManipulation:  45.0,
+			ViolationEquivocation:           40.0,
+			ViolationTimingAnomaly:          10.0,
+			ViolationMalformedMessage:       8.0,
+			ViolationConflictingVote:        35.0,
+			ViolationSilentNode:             5.0,
+			ViolationFloodAttack:            25.0,
+			ViolationViewChangeAbuse:        30.0,
+			ViolationCheckpointManipulation: 45.0,
 		},
 
 		RequireMultipleViolation: true,
@@ -310,10 +310,10 @@ func (bd *ByzantineDetector) RecordConsensusVote(nodeID string, view, sequence i
 				Severity:    bd.config.ViolationWeights[ViolationEquivocation],
 				Description: fmt.Sprintf("Equivocation in %s: sent different digests for seq %d", phase, sequence),
 				Evidence: map[string]interface{}{
-					"phase":          phase,
-					"sequence":       sequence,
-					"first_digest":   existingDigest,
-					"second_digest":  digest,
+					"phase":         phase,
+					"sequence":      sequence,
+					"first_digest":  existingDigest,
+					"second_digest": digest,
 				},
 				Timestamp: time.Now(),
 			})
@@ -333,15 +333,9 @@ func (bd *ByzantineDetector) RecordResponseTime(nodeID string, responseTime time
 	defer bd.mu.Unlock()
 
 	behavior := bd.getOrCreateBehavior(nodeID)
-	behavior.ResponseTimes = append(behavior.ResponseTimes, responseTime)
-
-	// Keep only recent response times
-	if len(behavior.ResponseTimes) > 100 {
-		behavior.ResponseTimes = behavior.ResponseTimes[len(behavior.ResponseTimes)-100:]
-	}
 
 	// Analyze for timing anomalies
-	if len(behavior.ResponseTimes) > 10 {
+	if len(behavior.ResponseTimes) >= 10 {
 		mean, stdDev := bd.computeStats(behavior.ResponseTimes)
 		if responseTime > mean+time.Duration(float64(stdDev)*bd.config.ResponseTimeStdDev) {
 			bd.recordViolation(nodeID, &Violation{
@@ -356,6 +350,13 @@ func (bd *ByzantineDetector) RecordResponseTime(nodeID string, responseTime time
 				Timestamp: time.Now(),
 			})
 		}
+	}
+
+	behavior.ResponseTimes = append(behavior.ResponseTimes, responseTime)
+
+	// Keep only recent response times
+	if len(behavior.ResponseTimes) > 100 {
+		behavior.ResponseTimes = behavior.ResponseTimes[len(behavior.ResponseTimes)-100:]
 	}
 }
 
@@ -485,7 +486,10 @@ func (bd *ByzantineDetector) calculateSuspicionScore(record *SuspicionRecord) fl
 		age := now.Sub(violation.Timestamp)
 		if age < bd.config.BehaviorWindow {
 			// Decay factor based on age
-			decay := 1.0 - (float64(age) / float64(bd.config.BehaviorWindow))
+			decay := 1.0
+			if age > time.Second {
+				decay = 1.0 - (float64(age) / float64(bd.config.BehaviorWindow))
+			}
 			totalScore += violation.Severity * decay
 			violationTypes[violation.Type] = true
 		}
@@ -506,8 +510,11 @@ func (bd *ByzantineDetector) calculateSuspicionScore(record *SuspicionRecord) fl
 
 // confirmByzantine marks a node as confirmed Byzantine
 func (bd *ByzantineDetector) confirmByzantine(nodeID string, record *SuspicionRecord) {
-	if _, exists := bd.confirmedBad[nodeID]; exists {
-		return // Already confirmed
+	if evidence, exists := bd.confirmedBad[nodeID]; exists {
+		evidence.Evidence = record.Violations
+		evidence.Confidence = record.SuspicionScore / 100.0
+		evidence.Violations = record.Violations
+		return
 	}
 
 	// Determine attack type
@@ -703,10 +710,10 @@ func (bd *ByzantineDetector) GetStats() map[string]interface{} {
 	defer bd.mu.RUnlock()
 
 	return map[string]interface{}{
-		"total_nodes":       len(bd.nodeBehavior),
-		"suspicious_nodes":  len(bd.suspiciousNodes),
-		"byzantine_nodes":   len(bd.confirmedBad),
-		"messages_tracked":  len(bd.messageHistory),
-		"votes_tracked":     len(bd.consensusVotes),
+		"total_nodes":      len(bd.nodeBehavior),
+		"suspicious_nodes": len(bd.suspiciousNodes),
+		"byzantine_nodes":  len(bd.confirmedBad),
+		"messages_tracked": len(bd.messageHistory),
+		"votes_tracked":    len(bd.consensusVotes),
 	}
 }

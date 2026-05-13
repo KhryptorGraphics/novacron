@@ -3,6 +3,7 @@ package loadbalancing
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -10,16 +11,16 @@ import (
 
 // GeoLoadBalancer implements geographic-aware load balancing
 type GeoLoadBalancer struct {
-	config          *LoadBalancerConfig
-	pool            *ServerPool
-	geoRouter       *GeoRouter
-	sessionManager  *SessionAffinityManager
-	healthChecker   *HealthChecker
-	metrics         *MetricsCollector
-	rrIndex         uint32 // Round-robin index
-	ctx             context.Context
-	cancel          context.CancelFunc
-	mu              sync.RWMutex
+	config         *LoadBalancerConfig
+	pool           *ServerPool
+	geoRouter      *GeoRouter
+	sessionManager *SessionAffinityManager
+	healthChecker  *HealthChecker
+	metrics        *MetricsCollector
+	rrIndex        uint32 // Round-robin index
+	ctx            context.Context
+	cancel         context.CancelFunc
+	mu             sync.RWMutex
 }
 
 // NewGeoLoadBalancer creates a new geographic load balancer
@@ -351,8 +352,12 @@ func (lb *GeoLoadBalancer) selectByRoundRobin() (*RoutingDecision, error) {
 	if len(servers) == 0 {
 		return nil, ErrNoHealthyServers
 	}
+	sort.Slice(servers, func(i, j int) bool {
+		return servers[i].ID < servers[j].ID
+	})
 
-	index := atomic.AddUint32(&lb.rrIndex, 1) % uint32(len(servers))
+	index := atomic.AddUint32(&lb.rrIndex, 1) - 1
+	index %= uint32(len(servers))
 	server := servers[index]
 
 	return &RoutingDecision{

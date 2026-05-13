@@ -357,7 +357,14 @@ func (rt *RDMATransport) HealthCheck() error {
 
 	// Check RDMA health if available
 	if rt.rdmaAvailable {
-		// TODO: Check RDMA QP state, CQ depth, etc.
+		if err := rt.checkRDMAHealth(); err != nil {
+			if rt.tcpTransport == nil || !rt.tcpTransport.IsStarted() {
+				rt.metrics.RecordHealthStatus(false)
+				return err
+			}
+			rt.logger.Warn("RDMA health degraded; TCP fallback remains active", zap.Error(err))
+			rt.metrics.RecordError("rdma_health_degraded")
+		}
 	}
 
 	// Always check TCP transport health
@@ -373,6 +380,64 @@ func (rt *RDMATransport) HealthCheck() error {
 
 	rt.metrics.RecordHealthStatus(true)
 	return nil
+}
+
+func (rt *RDMATransport) checkRDMAHealth() error {
+	if rt.rdmaManager == nil {
+		return fmt.Errorf("RDMA marked available but manager is not initialized")
+	}
+	if !rt.rdmaManager.IsConnected() {
+		return fmt.Errorf("RDMA manager is not connected")
+	}
+
+	stats := rt.rdmaManager.GetStats()
+	sendOps := uint64FromRDMAStats(stats, "send_operations")
+	recvOps := uint64FromRDMAStats(stats, "recv_operations")
+	sendCompletions := uint64FromRDMAStats(stats, "send_completions")
+	recvCompletions := uint64FromRDMAStats(stats, "recv_completions")
+	sendErrors := uint64FromRDMAStats(stats, "send_errors")
+	recvErrors := uint64FromRDMAStats(stats, "recv_errors")
+
+	if sendErrors > sendOps {
+		return fmt.Errorf("RDMA send errors exceed send operations")
+	}
+	if recvErrors > recvOps {
+		return fmt.Errorf("RDMA receive errors exceed receive operations")
+	}
+
+	maxPending := uint64(rt.config.MaxStreams)
+	if maxPending == 0 {
+		maxPending = 1024
+	}
+	if sendOps > sendCompletions+sendErrors+maxPending {
+		return fmt.Errorf("RDMA send completion backlog exceeds queue depth")
+	}
+	if recvOps > recvCompletions+recvErrors+maxPending {
+		return fmt.Errorf("RDMA receive completion backlog exceeds queue depth")
+	}
+
+	return nil
+}
+
+func uint64FromRDMAStats(stats map[string]interface{}, key string) uint64 {
+	switch value := stats[key].(type) {
+	case uint64:
+		return value
+	case uint32:
+		return uint64(value)
+	case int:
+		if value < 0 {
+			return 0
+		}
+		return uint64(value)
+	case int64:
+		if value < 0 {
+			return 0
+		}
+		return uint64(value)
+	default:
+		return 0
+	}
 }
 
 // IsStarted returns whether the transport is started

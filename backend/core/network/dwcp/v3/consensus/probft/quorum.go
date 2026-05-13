@@ -106,22 +106,19 @@ func CalculateProbabilisticQuorum(config QuorumConfig) (*QuorumResult, error) {
 
 	n := config.TotalNodes
 	f := config.ByzantineNodes
-
-	// Base probabilistic quorum
-	baseQuorum := CalculateQuorum(n)
-
-	// Classical BFT quorum for comparison
-	classicalQuorum := CalculateClassicalQuorum(n, f)
-
-	// Use the larger of the two for safety
-	quorumSize := baseQuorum
-	if classicalQuorum > baseQuorum {
-		quorumSize = classicalQuorum
+	lambda := config.SecurityParam
+	if lambda <= 0 {
+		lambda = 1
 	}
 
-	// Add security margin based on confidence level
-	securityMargin := int(math.Ceil(float64(f) * config.ConfidenceLevel))
-	quorumSize += securityMargin
+	baseQuorum := CalculateQuorum(n)
+	quorumSize := int(math.Ceil(lambda * math.Sqrt(float64(n))))
+	if quorumSize < baseQuorum {
+		quorumSize = baseQuorum
+	}
+	if quorumSize < 4 && n >= 4 {
+		quorumSize = 4
+	}
 
 	// Ensure quorum doesn't exceed total nodes
 	if quorumSize > n {
@@ -133,7 +130,7 @@ func CalculateProbabilisticQuorum(config QuorumConfig) (*QuorumResult, error) {
 	return &QuorumResult{
 		QuorumSize:         quorumSize,
 		ByzantineTolerance: tolerance,
-		SafetyMargin:       securityMargin,
+		SafetyMargin:       quorumSize - baseQuorum,
 		IsValid:            IsByzantineTolerant(n, f),
 	}, nil
 }
