@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import React from "react";
+import React from 'react';
 
 // This is a simplified example. In a production app, you'd use a more robust charting library
 // like Chart.js or D3.js for more sophisticated visualizations
@@ -52,10 +52,10 @@ export function LineChart({ data, xLabel, yLabel }: LineChartProps) {
 
         {/* Y-axis */}
         <line x1="60" y1="350" x2="60" y2="50" stroke="currentColor" strokeOpacity="0.2" />
-        
+
         {/* X-axis */}
         <line x1="60" y1="350" x2="740" y2="350" stroke="currentColor" strokeOpacity="0.2" />
-        
+
         {/* Y-axis ticks */}
         {[0, 0.25, 0.5, 0.75, 1].map((tick, i) => {
           const y = 350 - tick * 300;
@@ -70,7 +70,7 @@ export function LineChart({ data, xLabel, yLabel }: LineChartProps) {
             </React.Fragment>
           );
         })}
-        
+
         {/* X-axis ticks - show only a subset for clarity */}
         {data.filter((_, i) => i % Math.max(1, Math.floor(data.length / 5)) === 0).map((d, i, filtered) => {
           const x = 60 + (i / (filtered.length - 1 || 1)) * 680;
@@ -84,7 +84,7 @@ export function LineChart({ data, xLabel, yLabel }: LineChartProps) {
             </React.Fragment>
           );
         })}
-        
+
         {/* Line */}
         <polyline
           points={data
@@ -93,12 +93,12 @@ export function LineChart({ data, xLabel, yLabel }: LineChartProps) {
               const y = 350 - ((d.y - minY) / range) * 300;
               return `${x},${y}`;
             })
-            .join(" ")}
+            .join(' ')}
           fill="none"
           stroke="#3b82f6"
           strokeWidth="2"
         />
-        
+
         {/* Data points */}
         {data.map((d, i) => {
           const x = 60 + (i / (data.length - 1 || 1)) * 680;
@@ -134,17 +134,17 @@ export function PieChart({ data, label }: PieChartProps) {
   }
 
   const total = data.reduce((sum, d) => sum + d.value, 0);
-  
+
   // Colors for the pie chart
-  const colors = ["#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"];
-  
+  const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
+
   // Calculate pie segments
   let cumulativeAngle = 0;
   const segments = data.map((d, i) => {
     const startAngle = cumulativeAngle;
     const angle = (d.value / total) * 360;
     cumulativeAngle += angle;
-    
+
     return {
       ...d,
       startAngle,
@@ -152,7 +152,7 @@ export function PieChart({ data, label }: PieChartProps) {
       color: colors[i % colors.length],
     };
   });
-  
+
   return (
     <div className="w-full h-full flex flex-col items-center justify-center">
       <div className="relative w-64 h-64">
@@ -160,22 +160,22 @@ export function PieChart({ data, label }: PieChartProps) {
           {segments.map((segment, i) => {
             const startAngleRad = (segment.startAngle * Math.PI) / 180;
             const endAngleRad = ((segment.startAngle + segment.angle) * Math.PI) / 180;
-            
+
             // Calculate arc path
             const x1 = 50 + 40 * Math.cos(startAngleRad);
             const y1 = 50 + 40 * Math.sin(startAngleRad);
             const x2 = 50 + 40 * Math.cos(endAngleRad);
             const y2 = 50 + 40 * Math.sin(endAngleRad);
-            
+
             const largeArcFlag = segment.angle > 180 ? 1 : 0;
-            
+
             const pathData = `
               M 50 50
               L ${x1} ${y1}
               A 40 40 0 ${largeArcFlag} 1 ${x2} ${y2}
               Z
             `;
-            
+
             return (
               <path
                 key={i}
@@ -188,7 +188,7 @@ export function PieChart({ data, label }: PieChartProps) {
           })}
         </svg>
       </div>
-      
+
       <div className="mt-4">
         <div className="text-center font-medium mb-2">{label}</div>
         <div className="flex flex-wrap justify-center gap-4">
@@ -197,7 +197,7 @@ export function PieChart({ data, label }: PieChartProps) {
               <div
                 className="w-3 h-3 mr-1"
                 style={{ backgroundColor: segment.color }}
-              ></div>
+               />
               <div className="text-sm">
                 {segment.name}: {((segment.value / total) * 100).toFixed(1)}%
               </div>

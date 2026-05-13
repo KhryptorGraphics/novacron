@@ -1,15 +1,15 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../client';
-import { 
-  User, 
-  AuditLogEntry, 
-  SystemMetrics, 
-  SecurityAlert, 
+import {
+  User,
+  AuditLogEntry,
+  SystemMetrics,
+  SecurityAlert,
   SystemConfiguration,
   ResourceQuota,
   VmTemplate,
   PerformanceReport,
-  UserSession
+  UserSession,
 } from '../types';
 
 // Admin API endpoints
@@ -22,7 +22,7 @@ const ADMIN_ENDPOINTS = {
   SYSTEM_CONFIG: '/admin/system/config',
   RESOURCE_QUOTAS: '/admin/resource-quotas',
   VM_TEMPLATES: '/admin/vm-templates',
-  PERFORMANCE_REPORTS: '/admin/reports/performance'
+  PERFORMANCE_REPORTS: '/admin/reports/performance',
 };
 
 // Query keys
@@ -35,13 +35,13 @@ export const ADMIN_QUERY_KEYS = {
   SYSTEM_CONFIG: ['admin', 'system-config'],
   RESOURCE_QUOTAS: ['admin', 'resource-quotas'],
   VM_TEMPLATES: ['admin', 'vm-templates'],
-  PERFORMANCE_REPORTS: ['admin', 'performance-reports']
+  PERFORMANCE_REPORTS: ['admin', 'performance-reports'],
 };
 
 // User Management Hooks
-export const useUsers = (filters?: { 
-  status?: string; 
-  role?: string; 
+export const useUsers = (filters?: {
+  status?: string;
+  role?: string;
   search?: string;
   page?: number;
   pageSize?: number;
@@ -55,7 +55,7 @@ export const useUsers = (filters?: {
       if (filters?.search) params.append('search', filters.search);
       if (filters?.page) params.append('page', filters.page.toString());
       if (filters?.pageSize) params.append('pageSize', filters.pageSize.toString());
-      
+
       const response = await apiClient.get<{
         users: User[];
         total: number;
@@ -72,7 +72,7 @@ export const useUsers = (filters?: {
 
 export const useCreateUser = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: async (userData: Partial<User>) => {
       return apiClient.post<User>(ADMIN_ENDPOINTS.USERS, userData);
@@ -85,7 +85,7 @@ export const useCreateUser = () => {
 
 export const useUpdateUser = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: async ({ id, ...userData }: Partial<User> & { id: string; active?: boolean; username?: string }) => {
       return apiClient.put<User>(`${ADMIN_ENDPOINTS.USERS}/${id}`, userData);
@@ -98,7 +98,7 @@ export const useUpdateUser = () => {
 
 export const useDeleteUser = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: async (userId: string) => {
       return apiClient.delete(`${ADMIN_ENDPOINTS.USERS}/${userId}`);
@@ -113,7 +113,7 @@ export const useUserSessions = (userId?: string) => {
   return useQuery({
     queryKey: ADMIN_QUERY_KEYS.USER_SESSIONS(userId),
     queryFn: async () => {
-      const endpoint = userId 
+      const endpoint = userId
         ? `${ADMIN_ENDPOINTS.USER_SESSIONS}/${userId}`
         : ADMIN_ENDPOINTS.USER_SESSIONS;
       return apiClient.get<UserSession[]>(endpoint);
@@ -125,7 +125,7 @@ export const useUserSessions = (userId?: string) => {
 
 export const useTerminateSession = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: async (sessionId: string) => {
       return apiClient.delete(`${ADMIN_ENDPOINTS.USER_SESSIONS}/${sessionId}`);
@@ -157,7 +157,7 @@ export const useAuditLogs = (filters?: {
       if (filters?.endDate) params.append('endDate', filters.endDate);
       if (filters?.page) params.append('page', filters.page.toString());
       if (filters?.pageSize) params.append('pageSize', filters.pageSize.toString());
-      
+
       return apiClient.get<{
         logs: AuditLogEntry[];
         total: number;
@@ -200,7 +200,7 @@ export const useSecurityAlerts = (filters?: {
       if (filters?.type) params.append('type', filters.type);
       if (filters?.page) params.append('page', filters.page.toString());
       if (filters?.pageSize) params.append('pageSize', filters.pageSize.toString());
-      
+
       return apiClient.get<{
         alerts: SecurityAlert[];
         total: number;
@@ -216,7 +216,7 @@ export const useSecurityAlerts = (filters?: {
 
 export const useUpdateSecurityAlert = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: async ({ id, ...alertData }: Partial<SecurityAlert> & { id: string }) => {
       return apiClient.put<SecurityAlert>(`${ADMIN_ENDPOINTS.SECURITY_ALERTS}/${id}`, alertData);
@@ -241,7 +241,7 @@ export const useSystemConfig = (category?: string) => {
 
 export const useUpdateConfig = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: async ({ key, value, category }: { key: string; value: any; category?: string }) => {
       return apiClient.put<SystemConfiguration>(`${ADMIN_ENDPOINTS.SYSTEM_CONFIG}/${key}`, {
@@ -268,7 +268,7 @@ export const useResourceQuotas = (filters?: {
       if (filters?.userId) params.append('userId', filters.userId);
       if (filters?.organizationId) params.append('organizationId', filters.organizationId);
       if (filters?.resourceType) params.append('resourceType', filters.resourceType);
-      
+
       return apiClient.get<ResourceQuota[]>(`${ADMIN_ENDPOINTS.RESOURCE_QUOTAS}?${params.toString()}`);
     },
     staleTime: 60000,
@@ -277,7 +277,7 @@ export const useResourceQuotas = (filters?: {
 
 export const useUpdateResourceQuota = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: async ({ id, ...quotaData }: Partial<ResourceQuota> & { id: string }) => {
       return apiClient.put<ResourceQuota>(`${ADMIN_ENDPOINTS.RESOURCE_QUOTAS}/${id}`, quotaData);
@@ -301,7 +301,7 @@ export const useVmTemplates = () => {
 
 export const useCreateVmTemplate = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: async (templateData: Partial<VmTemplate>) => {
       return apiClient.post<VmTemplate>(ADMIN_ENDPOINTS.VM_TEMPLATES, templateData);
@@ -314,7 +314,7 @@ export const useCreateVmTemplate = () => {
 
 export const useDeleteVmTemplate = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: async (templateId: string) => {
       return apiClient.delete(`${ADMIN_ENDPOINTS.VM_TEMPLATES}/${templateId}`);
@@ -345,14 +345,14 @@ export const useAdminWebSocket = () => {
 // Bulk operations
 export const useBulkUserOperation = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: async ({ 
-      userIds, 
-      operation, 
-      data 
-    }: { 
-      userIds: string[]; 
+    mutationFn: async ({
+      userIds,
+      operation,
+      data,
+    }: {
+      userIds: string[];
       operation: 'activate' | 'suspend' | 'delete' | 'update_role' | 'send_email';
       data?: any;
     }) => {

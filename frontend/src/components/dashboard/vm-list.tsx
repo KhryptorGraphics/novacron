@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { OSSelector } from "@/components/dashboard/os-selector";
+import { OSSelector } from '@/components/dashboard/os-selector';
 import {
   Card,
   CardContent,
@@ -10,7 +10,7 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from '@/components/ui/card';
 import {
   Table,
   TableBody,
@@ -18,7 +18,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from '@/components/ui/table';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,7 +26,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from '@/components/ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
@@ -34,19 +34,19 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
-import { useToast } from "@/components/ui/use-toast";
+  SelectValue,
+} from '@/components/ui/select';
+import { useToast } from '@/components/ui/use-toast';
 import {
   Play,
   Square,
@@ -60,12 +60,12 @@ import {
   Server,
   HardDrive,
   Cpu,
-  MemoryStick
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import { createVM, deleteVM, postVMAction, type ListVMsParams } from "@/lib/api/vms";
-import { useVMs } from "@/lib/api/hooks/useVMs";
-import type { VM } from "@/lib/api/types";
+  MemoryStick,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { createVM, deleteVM, postVMAction, type ListVMsParams } from '@/lib/api/vms';
+import { useVMs } from '@/lib/api/hooks/useVMs';
+import type { VM } from '@/lib/api/types';
 import { formatDistanceToNow } from 'date-fns';
 
 // Types
@@ -100,30 +100,30 @@ interface VMListProps {
 
 // State color mapping
 const stateColors = {
-  running: "bg-green-500",
-  stopped: "bg-slate-500",
-  paused: "bg-amber-500",
-  error: "bg-red-500",
-  creating: "bg-blue-500",
-  unknown: "bg-purple-500",
-  migrating: "bg-indigo-500",
-  restarting: "bg-cyan-500",
-  deleting: "bg-rose-500",
+  running: 'bg-green-500',
+  stopped: 'bg-slate-500',
+  paused: 'bg-amber-500',
+  error: 'bg-red-500',
+  creating: 'bg-blue-500',
+  unknown: 'bg-purple-500',
+  migrating: 'bg-indigo-500',
+  restarting: 'bg-cyan-500',
+  deleting: 'bg-rose-500',
 };
 
 function toVMProps(vm: VM): VMProps {
   return {
     id: vm.id,
     name: vm.name,
-    state: vm.state || "unknown",
-    node_id: vm.node_id || "unassigned",
-    owner: "system",
+    state: vm.state || 'unknown',
+    node_id: vm.node_id || 'unassigned',
+    owner: 'system',
     spec: {
       vcpu: 0,
       memory_mb: 0,
       disk_mb: 0,
-      type: "canonical",
-      image: "runtime-managed",
+      type: 'canonical',
+      image: 'runtime-managed',
     },
     created_at: vm.created_at,
     updated_at: vm.updated_at,
@@ -132,7 +132,7 @@ function toVMProps(vm: VM): VMProps {
 }
 
 // VM List Component
-export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }: VMListProps) {
+export function VMList({ title = 'Virtual Machines', limit, filter, onVMClick }: VMListProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const vmQueryParams: ListVMsParams = {};
@@ -148,14 +148,14 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
     vmName?: string;
   }>({
     open: false,
-    action: "",
+    action: '',
   });
 
   // New VM form state
   const [newVM, setNewVM] = useState({
-    name: "",
-    type: "container",
-    image: "",
+    name: '',
+    type: 'container',
+    image: '',
     vcpu: 1,
     memory_mb: 1024,
     disk_mb: 10240,
@@ -183,39 +183,39 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
 
     try {
       switch (operation) {
-        case "start":
-        case "stop":
-          await postVMAction(vmId, operation, { role: "operator" });
+        case 'start':
+        case 'stop':
+          await postVMAction(vmId, operation, { role: 'operator' });
           break;
-        case "restart":
-          await postVMAction(vmId, "stop", { role: "operator" });
-          await postVMAction(vmId, "start", { role: "operator" });
+        case 'restart':
+          await postVMAction(vmId, 'stop', { role: 'operator' });
+          await postVMAction(vmId, 'start', { role: 'operator' });
           break;
-        case "delete":
+        case 'delete':
           await deleteVM(vmId);
           break;
-        case "pause":
-          throw new Error("Pause is not exposed by the canonical VM API yet");
+        case 'pause':
+          throw new Error('Pause is not exposed by the canonical VM API yet');
         default:
           throw new Error(`Unsupported VM operation: ${operation}`);
       }
 
-      await queryClient.invalidateQueries({ queryKey: ["vms"] });
+      await queryClient.invalidateQueries({ queryKey: ['vms'] });
 
       toast({
-        title: "Success",
+        title: 'Success',
         description: `VM ${operation} operation completed successfully`,
       });
     } catch (error) {
       console.error(`Failed to ${operation} VM:`, error);
       toast({
-        title: "Error",
+        title: 'Error',
         description: `Failed to ${operation} VM. Please try again.`,
-        variant: "destructive",
+        variant: 'destructive',
       });
     } finally {
       setIsMutating(false);
-      setConfirmDialog({ open: false, action: "" });
+      setConfirmDialog({ open: false, action: '' });
     }
   };
 
@@ -226,7 +226,7 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
     try {
       // Validate form
       if (!newVM.name || !newVM.image) {
-        throw new Error("Name and image are required");
+        throw new Error('Name and image are required');
       }
 
       await createVM({
@@ -237,21 +237,21 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
           type: newVM.type,
           image: newVM.image,
           disk_mb: newVM.disk_mb,
-          created_by: "ui",
+          created_by: 'ui',
         },
       });
-      await queryClient.invalidateQueries({ queryKey: ["vms"] });
+      await queryClient.invalidateQueries({ queryKey: ['vms'] });
 
       toast({
-        title: "Success",
+        title: 'Success',
         description: `VM ${newVM.name} created successfully`,
       });
 
       // Reset form and close dialog
       setNewVM({
-        name: "",
-        type: "container",
-        image: "",
+        name: '',
+        type: 'container',
+        image: '',
         vcpu: 1,
         memory_mb: 1024,
         disk_mb: 10240,
@@ -260,9 +260,9 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
     } catch (error) {
       console.error('Failed to create VM:', error);
       toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to create VM",
-        variant: "destructive",
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to create VM',
+        variant: 'destructive',
       });
     } finally {
       setIsMutating(false);
@@ -297,14 +297,14 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
           </div>
         ) : isLoading ? (
           <div className="flex justify-center items-center h-64">
-            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary"></div>
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary" />
           </div>
         ) : vms.length === 0 ? (
           <div className="text-center py-12">
             <Server className="mx-auto h-12 w-12 text-muted-foreground" />
             <h3 className="mt-4 text-lg font-semibold">No VMs found</h3>
             <p className="text-sm text-muted-foreground mt-1">
-              {filter ? "Try changing your filter criteria" : "Create a new VM to get started"}
+              {filter ? 'Try changing your filter criteria' : 'Create a new VM to get started'}
             </p>
             {!filter && (
               <Button
@@ -342,8 +342,8 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
                       <div className="flex items-center space-x-2">
                         <div
                           className={cn(
-                            "h-3 w-3 rounded-full",
-                            stateColors[vm.state as keyof typeof stateColors] || "bg-gray-500"
+                            'h-3 w-3 rounded-full',
+                            stateColors[vm.state as keyof typeof stateColors] || 'bg-gray-500',
                           )}
                           aria-hidden="true"
                         />
@@ -393,7 +393,7 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
                       <Badge variant="outline">{vm.node_id}</Badge>
                     </TableCell>
                     <TableCell>
-                      {vm.state === "running" ? (
+                      {vm.state === 'running' ? (
                         formatDistanceToNow(new Date(vm.updated_at), { addSuffix: true })
                       ) : (
                         <span className="text-muted-foreground">—</span>
@@ -409,14 +409,14 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                          {vm.state === "running" && (
+                          {vm.state === 'running' && (
                             <>
                               <DropdownMenuItem
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setConfirmDialog({
                                     open: true,
-                                    action: "stop",
+                                    action: 'stop',
                                     vmId: vm.id,
                                     vmName: vm.name,
                                   });
@@ -430,7 +430,7 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
                                   e.stopPropagation();
                                   setConfirmDialog({
                                     open: true,
-                                    action: "restart",
+                                    action: 'restart',
                                     vmId: vm.id,
                                     vmName: vm.name,
                                   });
@@ -442,7 +442,7 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
                               <DropdownMenuItem
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleVMOperation(vm.id, "pause");
+                                  handleVMOperation(vm.id, 'pause');
                                 }}
                               >
                                 <Pause className="mr-2 h-4 w-4" />
@@ -450,11 +450,11 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
                               </DropdownMenuItem>
                             </>
                           )}
-                          {(vm.state === "stopped" || vm.state === "paused") && (
+                          {(vm.state === 'stopped' || vm.state === 'paused') && (
                             <DropdownMenuItem
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleVMOperation(vm.id, "start");
+                                handleVMOperation(vm.id, 'start');
                               }}
                             >
                               <Play className="mr-2 h-4 w-4" />
@@ -476,8 +476,8 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
                               // Copy VM ID to clipboard
                               navigator.clipboard.writeText(vm.id);
                               toast({
-                                title: "Copied",
-                                description: "VM ID copied to clipboard",
+                                title: 'Copied',
+                                description: 'VM ID copied to clipboard',
                               });
                             }}
                           >
@@ -490,7 +490,7 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
                               e.stopPropagation();
                               setConfirmDialog({
                                 open: true,
-                                action: "delete",
+                                action: 'delete',
                                 vmId: vm.id,
                                 vmName: vm.name,
                               });
@@ -515,7 +515,7 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
           <div className="text-sm text-muted-foreground">
             Showing {vms.length} virtual machines
           </div>
-          <Button variant="outline" size="sm" onClick={() => {}}>
+          <Button variant="outline" size="sm">
             View All
           </Button>
         </CardFooter>
@@ -561,7 +561,7 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
                 </SelectContent>
               </Select>
             </div>
-            {newVM.type === "kvm" ? (
+            {newVM.type === 'kvm' ? (
               <div className="grid grid-cols-4 items-center gap-4">
                 <div className="col-span-4">
                   <OSSelector
@@ -582,8 +582,8 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
                   onChange={(e) => setNewVM({ ...newVM, image: e.target.value })}
                   className="col-span-3"
                   placeholder={
-                    newVM.type === "container" ? "nginx:latest" :
-                    newVM.type === "containerd" ? "docker.io/library/alpine:latest" :
+                    newVM.type === 'container' ? 'nginx:latest' :
+                    newVM.type === 'containerd' ? 'docker.io/library/alpine:latest' :
                     "bash -c 'sleep infinity'"
                   }
                 />
@@ -654,7 +654,7 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
                   Creating...
                 </>
               ) : (
-                "Create VM"
+                'Create VM'
               )}
             </Button>
           </DialogFooter>
@@ -671,22 +671,22 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle>
-              {confirmDialog.action === "delete"
-                ? "Delete VM"
-                : confirmDialog.action === "stop"
-                ? "Stop VM"
-                : confirmDialog.action === "restart"
-                ? "Restart VM"
-                : "Confirm Action"}
+              {confirmDialog.action === 'delete'
+                ? 'Delete VM'
+                : confirmDialog.action === 'stop'
+                ? 'Stop VM'
+                : confirmDialog.action === 'restart'
+                ? 'Restart VM'
+                : 'Confirm Action'}
             </DialogTitle>
             <DialogDescription>
-              {confirmDialog.action === "delete"
-                ? "Are you sure you want to delete this VM? This action cannot be undone."
-                : confirmDialog.action === "stop"
-                ? "Are you sure you want to stop this VM? Any running processes will be terminated."
-                : confirmDialog.action === "restart"
-                ? "Are you sure you want to restart this VM? This will cause a brief downtime."
-                : "Please confirm this action."}
+              {confirmDialog.action === 'delete'
+                ? 'Are you sure you want to delete this VM? This action cannot be undone.'
+                : confirmDialog.action === 'stop'
+                ? 'Are you sure you want to stop this VM? Any running processes will be terminated.'
+                : confirmDialog.action === 'restart'
+                ? 'Are you sure you want to restart this VM? This will cause a brief downtime.'
+                : 'Please confirm this action.'}
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
@@ -700,12 +700,12 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setConfirmDialog({ open: false, action: "" })}
+              onClick={() => setConfirmDialog({ open: false, action: '' })}
             >
               Cancel
             </Button>
             <Button
-              variant={confirmDialog.action === "delete" ? "destructive" : "default"}
+              variant={confirmDialog.action === 'delete' ? 'destructive' : 'default'}
               onClick={() => {
                 if (confirmDialog.vmId && confirmDialog.action) {
                   handleVMOperation(confirmDialog.vmId, confirmDialog.action);
@@ -719,13 +719,13 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
                   Processing...
                 </>
               ) : (
-                confirmDialog.action === "delete"
-                  ? "Delete"
-                  : confirmDialog.action === "stop"
-                  ? "Stop"
-                  : confirmDialog.action === "restart"
-                  ? "Restart"
-                  : "Confirm"
+                confirmDialog.action === 'delete'
+                  ? 'Delete'
+                  : confirmDialog.action === 'stop'
+                  ? 'Stop'
+                  : confirmDialog.action === 'restart'
+                  ? 'Restart'
+                  : 'Confirm'
               )}
             </Button>
           </DialogFooter>

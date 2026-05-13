@@ -1,12 +1,12 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { PasswordInput } from "@/components/ui/password-input";
-import { Label } from "@/components/ui/label";
-import { Icons } from "@/components/ui/icons";
-import { PasswordStrengthIndicator } from "./PasswordStrengthIndicator";
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
+import { Label } from '@/components/ui/label';
+import { Icons } from '@/components/ui/icons';
+import { PasswordStrengthIndicator } from './PasswordStrengthIndicator';
 
 interface RegisterFormProps {
   onSubmit: (firstName: string, lastName: string, email: string, password: string) => Promise<void>;
@@ -14,17 +14,17 @@ interface RegisterFormProps {
 }
 
 export function RegisterForm({ onSubmit, isLoading }: RegisterFormProps) {
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (password !== confirmPassword) {
       // In a real implementation, you would handle this error properly
-      console.error("Passwords do not match");
+      console.error('Passwords do not match');
       return;
     }
     await onSubmit(firstName, lastName, email, password);

@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'next/navigation';
@@ -14,7 +14,7 @@ interface ProtectedRouteProps {
 export default function ProtectedRoute({
   children,
   requiredRoles = [],
-  fallback
+  fallback,
 }: ProtectedRouteProps) {
   const { user, isLoading, isAuthenticated } = useAuth();
   const router = useRouter();
@@ -46,7 +46,7 @@ export default function ProtectedRoute({
     // You may need to adjust this based on your user model
     const userRoles = (user as any).roles || [];
     const hasRequiredRole = requiredRoles.some(role =>
-      userRoles.includes(role)
+      userRoles.includes(role),
     );
 
     if (!hasRequiredRole) {
@@ -57,7 +57,7 @@ export default function ProtectedRoute({
               Access Denied
             </h2>
             <p className="mt-2 text-gray-600 dark:text-gray-400">
-              You don't have permission to access this page.
+              You don&apos;t have permission to access this page.
             </p>
           </div>
         </div>

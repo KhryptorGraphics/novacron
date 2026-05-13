@@ -1,23 +1,24 @@
 import { API_V1_BASE, buildApiUrl, buildApiV1Url, buildWebSocketUrls } from '@/lib/api/origin';
-import type { Pagination, ApiEnvelope } from '@/lib/api/types';
 import type {
-  NetworkNode,
-  NetworkEdge,
-  ClusterTopology,
+  ApiEnvelope,
   BandwidthMetrics,
-  QoSMetrics,
-  NetworkInterface,
-  ResourcePrediction,
-  WorkloadPattern,
-  MigrationPrediction,
   ComputeJob,
-  GlobalResourcePool,
-  MemoryFabric,
-  ProcessingFabric,
-  SecurityPolicy,
+  ClusterTopology,
   ComplianceReport,
+  GlobalResourcePool,
+  NetworkEdge,
+  NetworkInterface,
+  NetworkNode,
+  MigrationPrediction,
+  MemoryFabric,
+  Pagination,
+  ProcessingFabric,
+  QoSMetrics,
+  ResourcePrediction,
+  SecurityPolicy,
   AuditLog,
-  SystemConfiguration
+  SystemConfiguration,
+  WorkloadPattern,
 } from '@/lib/api/types';
 
 // API Client for NovaCron Enhanced API
@@ -49,7 +50,7 @@ export class ApiClient {
 
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
   ): Promise<T> {
     const url = buildApiUrl(endpoint);
 
@@ -115,7 +116,7 @@ export class ApiClient {
         ws.addEventListener('open', () => {
           ws.send(JSON.stringify({
             type: 'auth',
-            token: this.token
+            token: this.token,
           }));
         });
       }
@@ -137,16 +138,16 @@ function withParams(path: string, params?: Record<string, string | number | unde
   const url = new URL(buildApiV1Url(path));
   const sp = new URLSearchParams();
   if (params) {
-    for (const [k,v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") sp.set(k, String(v));
+    for (const [k,v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') sp.set(k, String(v));
   }
   url.search = sp.toString();
   return url.toString();
 }
 
 function parsePaginationHeader(res: Response): Pagination | undefined {
-  const raw = res.headers.get("X-Pagination");
+  const raw = res.headers.get('X-Pagination');
   if (!raw) return undefined;
-  try { return JSON.parse(raw) as Pagination } catch { return undefined }
+  try { return JSON.parse(raw) as Pagination; } catch { return undefined; }
 }
 
 export class ApiHttpError extends Error {
@@ -161,22 +162,22 @@ export class ApiHttpError extends Error {
  * @param opts Optional options { role } where role defaults to "viewer"
  * @returns ApiEnvelope<T> with pagination populated from X-Pagination header if present
  */
-export async function apiGet<T>(path: string, params?: Record<string, string | number | undefined>, opts?: { role?: "viewer" | "operator" }): Promise<ApiEnvelope<T>> {
+export async function apiGet<T>(path: string, params?: Record<string, string | number | undefined>, opts?: { role?: 'viewer' | 'operator' }): Promise<ApiEnvelope<T>> {
   try {
     const url = withParams(path, params);
-    const role = opts?.role ?? "viewer";
-    const res = await fetch(url, { method: "GET", headers: { Accept: "application/json", "X-Role": role }, credentials: "include" });
-    
+    const role = opts?.role ?? 'viewer';
+    const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json', 'X-Role': role }, credentials: 'include' });
+
     if (!res.ok) {
       return { data: null, error: { code: `HTTP_${res.status}`, message: res.statusText } };
     }
-    
+
     const env = await res.json() as ApiEnvelope<T>;
     const pg = parsePaginationHeader(res); if (pg) env.pagination = pg;
     if (env.error) throw new ApiHttpError(res.status, env.error.code, env.error.message, url);
     return env;
   } catch (error) {
-    return { data: null, error: { code: "FETCH_ERROR", message: error instanceof Error ? error.message : "Unknown error" } };
+    return { data: null, error: { code: 'FETCH_ERROR', message: error instanceof Error ? error.message : 'Unknown error' } };
   }
 }
 
@@ -187,13 +188,13 @@ export async function apiGet<T>(path: string, params?: Record<string, string | n
  * @param opts Optional options { role } where role defaults to "viewer"
  * @returns ApiEnvelope<T>
  */
-export async function apiPost<T>(path: string, body?: unknown, opts?: { role?: "viewer" | "operator" }): Promise<ApiEnvelope<T>> {
+export async function apiPost<T>(path: string, body?: unknown, opts?: { role?: 'viewer' | 'operator' }): Promise<ApiEnvelope<T>> {
   const url = buildApiV1Url(path);
-  const role = opts?.role ?? "viewer";
+  const role = opts?.role ?? 'viewer';
   const init: RequestInit = {
-    method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json", "X-Role": role },
-    credentials: "include",
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Role': role },
+    credentials: 'include',
   };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
@@ -204,10 +205,10 @@ export async function apiPost<T>(path: string, body?: unknown, opts?: { role?: "
   return env;
 }
 
-export async function apiDelete<T>(path: string, opts?: { role?: "viewer" | "operator" }): Promise<ApiEnvelope<T>> {
+export async function apiDelete<T>(path: string, opts?: { role?: 'viewer' | 'operator' }): Promise<ApiEnvelope<T>> {
   const url = buildApiV1Url(path);
-  const role = opts?.role ?? "viewer";
-  const res = await fetch(url, { method: "DELETE", headers: { Accept: "application/json", "X-Role": role }, credentials: "include" });
+  const role = opts?.role ?? 'viewer';
+  const res = await fetch(url, { method: 'DELETE', headers: { Accept: 'application/json', 'X-Role': role }, credentials: 'include' });
   const env = await res.json() as ApiEnvelope<T>;
   if (env.error) throw new ApiHttpError(res.status, env.error.code, env.error.message, url);
   return env;

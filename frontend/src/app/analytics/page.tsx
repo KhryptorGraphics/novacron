@@ -1,21 +1,21 @@
-"use client";
+'use client';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { Activity, ArrowRight, Database, HardDrive, Server, Shield } from "lucide-react";
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { Activity, ArrowRight, Database, HardDrive, Server, Shield } from 'lucide-react';
 
-import AuthGuard from "@/components/auth/AuthGuard";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { buildApiV1Url } from "@/lib/api/origin";
-import { networkApi } from "@/lib/api/networks";
-import { useSecurityMetrics } from "@/hooks/useSecurity";
-import { useVolumes } from "@/hooks/useVolumes";
-import { useVMs } from "@/lib/api/hooks/useVMs";
+import AuthGuard from '@/components/auth/AuthGuard';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import { buildApiV1Url } from '@/lib/api/origin';
+import { networkApi } from '@/lib/api/networks';
+import { useSecurityMetrics } from '@/hooks/useSecurity';
+import { useVolumes } from '@/hooks/useVolumes';
+import { useVMs } from '@/lib/api/hooks/useVMs';
 
 type MonitoringSummary = {
   currentCpuUsage: number;

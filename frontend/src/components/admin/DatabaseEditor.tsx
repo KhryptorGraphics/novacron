@@ -1,10 +1,9 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import type { Dispatch, SetStateAction } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { type Dispatch, type SetStateAction, useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
@@ -12,18 +11,18 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from '@/components/ui/table';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
-import { FadeIn } from "@/lib/animations";
-import { useCreateUser, useDeleteUser, useUpdateUser, useUsers } from "@/lib/api/hooks/useAdmin";
-import type { User } from "@/lib/api/types";
+} from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { FadeIn } from '@/lib/animations';
+import { useCreateUser, useDeleteUser, useUpdateUser, useUsers } from '@/lib/api/hooks/useAdmin';
+import type { User } from '@/lib/api/types';
 import {
   AlertTriangle,
   CheckCircle,
@@ -35,8 +34,8 @@ import {
   Search,
   Trash2,
   X,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 type CanonicalUser = Partial<User> & {
   username?: string;
@@ -66,55 +65,55 @@ type EditingRow = {
 
 const liveTables = [
   {
-    name: "users",
-    description: "Canonical admin user accounts",
-    contract: "GET/POST/PUT/DELETE /api/admin/users",
+    name: 'users',
+    description: 'Canonical admin user accounts',
+    contract: 'GET/POST/PUT/DELETE /api/admin/users',
     live: true,
   },
   {
-    name: "audit_logs",
-    description: "Audit log read model",
-    contract: "Pending canonical contract",
+    name: 'audit_logs',
+    description: 'Audit log read model',
+    contract: 'Pending canonical contract',
     live: false,
   },
   {
-    name: "sessions",
-    description: "User session read model",
-    contract: "Pending canonical contract",
+    name: 'sessions',
+    description: 'User session read model',
+    contract: 'Pending canonical contract',
     live: false,
   },
   {
-    name: "configurations",
-    description: "Runtime configuration records",
-    contract: "Pending canonical contract",
+    name: 'configurations',
+    description: 'Runtime configuration records',
+    contract: 'Pending canonical contract',
     live: false,
   },
 ];
 
-const roleOptions = ["admin", "operator", "viewer", "user", "super-admin"];
+const roleOptions = ['admin', 'operator', 'viewer', 'user', 'super-admin'];
 
 function normalizeUser(user: CanonicalUser): UserRow {
   return {
-    id: String(user.id ?? ""),
-    username: user.username || user.name || user.email || "",
-    email: user.email || "",
-    role: user.role || "user",
-    active: user.active !== false && user.status !== "disabled" && user.status !== "suspended",
-    created_at: user.created_at || "",
-    updated_at: user.updated_at || "",
+    id: String(user.id ?? ''),
+    username: user.username || user.name || user.email || '',
+    email: user.email || '',
+    role: user.role || 'user',
+    active: user.active !== false && user.status !== 'disabled' && user.status !== 'suspended',
+    created_at: user.created_at || '',
+    updated_at: user.updated_at || '',
   };
 }
 
 function formatDate(value: string) {
-  if (!value) return "never";
+  if (!value) return 'never';
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString();
 }
 
 export function DatabaseEditor() {
-  const [selectedTable, setSelectedTable] = useState("users");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedTable, setSelectedTable] = useState('users');
+  const [searchQuery, setSearchQuery] = useState('');
   const [editingRow, setEditingRow] = useState<EditingRow | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -134,7 +133,7 @@ export function DatabaseEditor() {
 
   const filteredRows = rows.filter((row) => {
     const query = searchQuery.toLowerCase();
-    return [row.id, row.username, row.email, row.role, row.active ? "active" : "disabled"]
+    return [row.id, row.username, row.email, row.role, row.active ? 'active' : 'disabled']
       .some((value) => value.toLowerCase().includes(query));
   });
 
@@ -147,7 +146,7 @@ export function DatabaseEditor() {
         email: row.email,
         role: row.role,
         active: row.active,
-        password: "",
+        password: '',
       },
     });
   };
@@ -157,11 +156,11 @@ export function DatabaseEditor() {
     setEditingRow({
       id: null,
       data: {
-        username: "",
-        email: "",
-        role: "user",
+        username: '',
+        email: '',
+        role: 'user',
         active: true,
-        password: "",
+        password: '',
       },
     });
   };
@@ -172,7 +171,7 @@ export function DatabaseEditor() {
     const username = editingRow.data.username.trim();
     const email = editingRow.data.email.trim();
     if (!username || !email) {
-      setNotice("Username and email are required.");
+      setNotice('Username and email are required.');
       return;
     }
 
@@ -182,41 +181,41 @@ export function DatabaseEditor() {
           id: editingRow.id,
           username,
           email,
-          role: editingRow.data.role as User["role"],
+          role: editingRow.data.role as User['role'],
           active: editingRow.data.active,
         });
-        setNotice("User record updated through the canonical admin API.");
+        setNotice('User record updated through the canonical admin API.');
       } else {
         if (!editingRow.data.password.trim()) {
-          setNotice("A temporary password is required for new users.");
+          setNotice('A temporary password is required for new users.');
           return;
         }
         await createUser.mutateAsync({
           username,
           name: username,
           email,
-          role: editingRow.data.role as User["role"],
+          role: editingRow.data.role as User['role'],
           active: editingRow.data.active,
           password: editingRow.data.password,
         } as Partial<User> & { username: string; active: boolean; password: string });
-        setNotice("User record created through the canonical admin API.");
+        setNotice('User record created through the canonical admin API.');
       }
       setEditingRow(null);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "User record save failed.");
+      setNotice(error instanceof Error ? error.message : 'User record save failed.');
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Delete this user through the canonical admin API?")) {
+    if (!window.confirm('Delete this user through the canonical admin API?')) {
       return;
     }
 
     try {
       await deleteUser.mutateAsync(id);
-      setNotice("User record deleted through the canonical admin API.");
+      setNotice('User record deleted through the canonical admin API.');
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "User record delete failed.");
+      setNotice(error instanceof Error ? error.message : 'User record delete failed.');
     }
   };
 
@@ -234,7 +233,7 @@ export function DatabaseEditor() {
         </div>
 
         <Button variant="outline" size="sm" onClick={() => usersQuery.refetch()} disabled={loading}>
-          <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
+          <RefreshCw className={cn('h-4 w-4 mr-2', loading && 'animate-spin')} />
           Refresh
         </Button>
       </div>
@@ -285,14 +284,14 @@ export function DatabaseEditor() {
                     key={table.name}
                     onClick={() => setSelectedTable(table.name)}
                     className={cn(
-                      "w-full text-left px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors",
-                      selectedTable === table.name && "bg-blue-50 dark:bg-blue-950 border-r-2 border-blue-500"
+                      'w-full text-left px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors',
+                      selectedTable === table.name && 'bg-blue-50 dark:bg-blue-950 border-r-2 border-blue-500',
                     )}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium">{table.name}</span>
-                      <Badge variant={table.live ? "default" : "outline"}>
-                        {table.live ? "live" : "pending"}
+                      <Badge variant={table.live ? 'default' : 'outline'}>
+                        {table.live ? 'live' : 'pending'}
                       </Badge>
                     </div>
                     <div className="text-sm text-gray-600 dark:text-gray-400">
@@ -388,10 +387,10 @@ export function DatabaseEditor() {
                                 </TableCell>
                                 <TableCell>
                                   <Badge
-                                    variant={row.active ? "default" : "secondary"}
-                                    className={row.active ? "bg-green-100 text-green-800" : ""}
+                                    variant={row.active ? 'default' : 'secondary'}
+                                    className={row.active ? 'bg-green-100 text-green-800' : ''}
                                   >
-                                    {row.active ? "active" : "disabled"}
+                                    {row.active ? 'active' : 'disabled'}
                                   </Badge>
                                 </TableCell>
                                 <TableCell>{formatDate(row.updated_at || row.created_at)}</TableCell>
@@ -447,7 +446,7 @@ function EditableUserRow({
   onSave,
   onCancel,
 }: EditableUserRowProps) {
-  const updateField = (field: keyof EditingRow["data"], value: string | boolean) => {
+  const updateField = (field: keyof EditingRow['data'], value: string | boolean) => {
     setEditingRow((current) => current && {
       ...current,
       data: {
@@ -459,11 +458,11 @@ function EditableUserRow({
 
   return (
     <TableRow className="bg-blue-50 dark:bg-blue-950">
-      <TableCell className="font-mono text-sm">{editingRow.id || "new"}</TableCell>
+      <TableCell className="font-mono text-sm">{editingRow.id || 'new'}</TableCell>
       <TableCell>
         <Input
           value={editingRow.data.username}
-          onChange={(event) => updateField("username", event.target.value)}
+          onChange={(event) => updateField('username', event.target.value)}
           className="h-8"
         />
       </TableCell>
@@ -471,12 +470,12 @@ function EditableUserRow({
         <Input
           type="email"
           value={editingRow.data.email}
-          onChange={(event) => updateField("email", event.target.value)}
+          onChange={(event) => updateField('email', event.target.value)}
           className="h-8"
         />
       </TableCell>
       <TableCell>
-        <Select value={editingRow.data.role} onValueChange={(value) => updateField("role", value)}>
+        <Select value={editingRow.data.role} onValueChange={(value) => updateField('role', value)}>
           <SelectTrigger className="h-8">
             <SelectValue />
           </SelectTrigger>
@@ -491,8 +490,8 @@ function EditableUserRow({
       </TableCell>
       <TableCell>
         <Select
-          value={editingRow.data.active ? "active" : "disabled"}
-          onValueChange={(value) => updateField("active", value === "active")}
+          value={editingRow.data.active ? 'active' : 'disabled'}
+          onValueChange={(value) => updateField('active', value === 'active')}
         >
           <SelectTrigger className="h-8">
             <SelectValue />
@@ -511,7 +510,7 @@ function EditableUserRow({
             type="password"
             placeholder="Temporary password"
             value={editingRow.data.password}
-            onChange={(event) => updateField("password", event.target.value)}
+            onChange={(event) => updateField('password', event.target.value)}
             className="h-8"
           />
         )}

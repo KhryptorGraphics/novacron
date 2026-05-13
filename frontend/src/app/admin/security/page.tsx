@@ -1,43 +1,43 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { useSecurityAlerts, useUpdateSecurityAlert, useUsers } from "@/lib/api/hooks/useAdmin";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
-} from "@/components/ui/table";
-import { 
+import { useState, useEffect } from 'react';
+import { useSecurityAlerts, useUpdateSecurityAlert, useUsers } from '@/lib/api/hooks/useAdmin';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Progress } from "@/components/ui/progress";
-import { 
+} from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Progress } from '@/components/ui/progress';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { useToast } from "@/components/ui/use-toast";
-import { 
-  Shield, 
-  AlertTriangle, 
-  Eye, 
-  CheckCircle, 
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { useToast } from '@/components/ui/use-toast';
+import {
+  Shield,
+  AlertTriangle,
+  Eye,
+  CheckCircle,
   Search,
   Download,
   RefreshCw,
@@ -46,11 +46,11 @@ import {
   Key,
   Database,
   Smartphone,
-  Wifi
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import { SecurityAlert } from "@/lib/api/types";
-import { FadeIn } from "@/lib/animations";
+  Wifi,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { SecurityAlert } from '@/lib/api/types';
+import { FadeIn } from '@/lib/animations';
 
 // Mock security data
 const securityMetrics = {
@@ -62,24 +62,24 @@ const securityMetrics = {
   suspiciousActivities: 12,
   firewallRules: 156,
   activeConnections: 892,
-  sslCertStatus: "valid",
-  lastScan: "2024-08-24T10:30:00Z"
+  sslCertStatus: 'valid',
+  lastScan: '2024-08-24T10:30:00Z',
 };
 
 const threatCategories = [
-  { name: "Malware", count: 45, severity: "high", trend: "decreasing" },
-  { name: "Phishing", count: 23, severity: "medium", trend: "stable" },
-  { name: "Brute Force", count: 12, severity: "high", trend: "increasing" },
-  { name: "Data Breach", count: 2, severity: "critical", trend: "decreasing" },
-  { name: "Unauthorized Access", count: 8, severity: "high", trend: "stable" },
+  { name: 'Malware', count: 45, severity: 'high', trend: 'decreasing' },
+  { name: 'Phishing', count: 23, severity: 'medium', trend: 'stable' },
+  { name: 'Brute Force', count: 12, severity: 'high', trend: 'increasing' },
+  { name: 'Data Breach', count: 2, severity: 'critical', trend: 'decreasing' },
+  { name: 'Unauthorized Access', count: 8, severity: 'high', trend: 'stable' },
 ];
 
 const complianceChecks = [
-  { name: "GDPR Compliance", status: "passing", score: 98, description: "Data protection and privacy" },
-  { name: "SOC2 Type II", status: "passing", score: 96, description: "Security and availability controls" },
-  { name: "ISO 27001", status: "warning", score: 87, description: "Information security management" },
-  { name: "PCI DSS", status: "passing", score: 94, description: "Payment card data security" },
-  { name: "HIPAA", status: "not_applicable", score: null, description: "Healthcare data protection" },
+  { name: 'GDPR Compliance', status: 'passing', score: 98, description: 'Data protection and privacy' },
+  { name: 'SOC2 Type II', status: 'passing', score: 96, description: 'Security and availability controls' },
+  { name: 'ISO 27001', status: 'warning', score: 87, description: 'Information security management' },
+  { name: 'PCI DSS', status: 'passing', score: 94, description: 'Payment card data security' },
+  { name: 'HIPAA', status: 'not_applicable', score: null, description: 'Healthcare data protection' },
 ];
 
 export default function SecurityCenterPage() {
@@ -89,14 +89,14 @@ export default function SecurityCenterPage() {
     severity: '',
     type: '',
     page: 1,
-    pageSize: 20
+    pageSize: 20,
   });
   const [autoRefresh, setAutoRefresh] = useState(true);
-  
+
   const { data: alertsData, isLoading: alertsLoading, refetch: refetchAlerts } = useSecurityAlerts(alertFilters);
   const { data: usersData } = useUsers({ pageSize: 1000 });
   const updateAlert = useUpdateSecurityAlert();
-  
+
   // Auto-refresh alerts every 30 seconds
   useEffect(() => {
     if (!autoRefresh) {
@@ -109,9 +109,9 @@ export default function SecurityCenterPage() {
 
     return () => clearInterval(interval);
   }, [autoRefresh, refetchAlerts]);
-  
+
   const alerts = alertsData?.alerts || [];
-  
+
   const handleAlertAction = async (alertId: string, action: 'resolve' | 'investigate' | 'dismiss') => {
     try {
       let status: SecurityAlert['status'];
@@ -126,80 +126,80 @@ export default function SecurityCenterPage() {
           status = 'false_positive';
           break;
       }
-      
+
       await updateAlert.mutateAsync({ id: alertId, status });
-      
+
       toast({
-        title: "Alert updated",
-        description: `Alert has been marked as ${status.replace('_', ' ')}.`
+        title: 'Alert updated',
+        description: `Alert has been marked as ${status.replace('_', ' ')}.`,
       });
     } catch (error) {
       toast({
-        title: "Failed to update alert",
-        description: "Please try again later.",
-        variant: "destructive"
+        title: 'Failed to update alert',
+        description: 'Please try again later.',
+        variant: 'destructive',
       });
     }
   };
-  
+
   const getSeverityColor = (severity: string) => {
     switch (severity) {
-      case "critical": return "destructive";
-      case "high": return "destructive";
-      case "medium": return "secondary";
-      case "low": return "outline";
-      default: return "outline";
+      case 'critical': return 'destructive';
+      case 'high': return 'destructive';
+      case 'medium': return 'secondary';
+      case 'low': return 'outline';
+      default: return 'outline';
     }
   };
-  
+
   const getSeverityIcon = (severity: string) => {
     switch (severity) {
-      case "critical":
-      case "high":
+      case 'critical':
+      case 'high':
         return <AlertTriangle className="h-4 w-4" />;
-      case "medium":
+      case 'medium':
         return <Eye className="h-4 w-4" />;
-      case "low":
+      case 'low':
         return <CheckCircle className="h-4 w-4" />;
       default:
         return <Eye className="h-4 w-4" />;
     }
   };
-  
+
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "new": return "text-red-600";
-      case "investigating": return "text-yellow-600";
-      case "resolved": return "text-green-600";
-      case "false_positive": return "text-gray-600";
-      default: return "text-gray-600";
+      case 'new': return 'text-red-600';
+      case 'investigating': return 'text-yellow-600';
+      case 'resolved': return 'text-green-600';
+      case 'false_positive': return 'text-gray-600';
+      default: return 'text-gray-600';
     }
   };
-  
+
   const getComplianceColor = (status: string, score?: number | null) => {
-    if (status === "not_applicable") return "text-gray-600";
-    if (status === "passing" && score && score >= 90) return "text-green-600";
-    if (status === "warning" || (score && score >= 70)) return "text-yellow-600";
-    return "text-red-600";
+    if (status === 'not_applicable') return 'text-gray-600';
+    if (status === 'passing' && score && score >= 90) return 'text-green-600';
+    if (status === 'warning' || (score && score >= 70)) return 'text-yellow-600';
+    return 'text-red-600';
   };
-  
+
   const getSecurityScore = () => {
     const users = usersData?.users || [];
     const twoFactorEnabled = users.filter(u => u.two_factor_enabled).length;
     const totalUsers = users.length;
     const twoFactorPercentage = totalUsers > 0 ? (twoFactorEnabled / totalUsers) * 100 : 0;
-    
+
     const criticalAlerts = alerts.filter(a => a.severity === 'critical' && a.status === 'new').length;
     const alertsPenalty = Math.min(criticalAlerts * 5, 20); // Max 20 point penalty
-    
+
     const baseScore = 85;
     const twoFactorBonus = Math.min(twoFactorPercentage * 0.15, 15); // Max 15 point bonus
-    
+
     return Math.max(0, Math.min(100, baseScore + twoFactorBonus - alertsPenalty));
   };
-  
+
   const securityScore = getSecurityScore();
-  
+
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
@@ -213,13 +213,13 @@ export default function SecurityCenterPage() {
             Monitor security threats, compliance, and system protection
           </p>
         </div>
-        
+
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <Label htmlFor="auto-refresh" className="text-sm">Auto-refresh</Label>
-            <input 
+            <input
               id="auto-refresh"
-              type="checkbox" 
+              type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
               className="rounded"
@@ -235,7 +235,7 @@ export default function SecurityCenterPage() {
           </Button>
         </div>
       </div>
-      
+
       {/* Security Overview */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <FadeIn delay={0.1}>
@@ -245,8 +245,8 @@ export default function SecurityCenterPage() {
                 <div>
                   <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Security Score</p>
                   <p className={`text-2xl font-bold ${
-                    securityScore >= 90 ? 'text-green-600' : 
-                    securityScore >= 70 ? 'text-yellow-600' : 
+                    securityScore >= 90 ? 'text-green-600' :
+                    securityScore >= 70 ? 'text-yellow-600' :
                     'text-red-600'
                   }`}>
                     {securityScore.toFixed(0)}%
@@ -260,7 +260,7 @@ export default function SecurityCenterPage() {
             </CardContent>
           </Card>
         </FadeIn>
-        
+
         <FadeIn delay={0.2}>
           <Card>
             <CardContent className="p-6">
@@ -279,7 +279,7 @@ export default function SecurityCenterPage() {
             </CardContent>
           </Card>
         </FadeIn>
-        
+
         <FadeIn delay={0.3}>
           <Card>
             <CardContent className="p-6">
@@ -294,7 +294,7 @@ export default function SecurityCenterPage() {
             </CardContent>
           </Card>
         </FadeIn>
-        
+
         <FadeIn delay={0.4}>
           <Card>
             <CardContent className="p-6">
@@ -310,7 +310,7 @@ export default function SecurityCenterPage() {
           </Card>
         </FadeIn>
       </div>
-      
+
       {/* Security Tabs */}
       <Tabs defaultValue="alerts" className="space-y-6">
         <TabsList className="grid w-full grid-cols-4">
@@ -319,7 +319,7 @@ export default function SecurityCenterPage() {
           <TabsTrigger value="threats">Threat Analysis</TabsTrigger>
           <TabsTrigger value="access">Access Control</TabsTrigger>
         </TabsList>
-        
+
         {/* Security Alerts Tab */}
         <TabsContent value="alerts" className="space-y-6">
           {/* Filters */}
@@ -333,9 +333,9 @@ export default function SecurityCenterPage() {
                     className="pl-10"
                   />
                 </div>
-                
-                <Select 
-                  value={alertFilters.status} 
+
+                <Select
+                  value={alertFilters.status}
                   onValueChange={(value) => setAlertFilters(prev => ({ ...prev, status: value, page: 1 }))}
                 >
                   <SelectTrigger className="w-[180px]">
@@ -349,9 +349,9 @@ export default function SecurityCenterPage() {
                     <SelectItem value="false_positive">False Positive</SelectItem>
                   </SelectContent>
                 </Select>
-                
-                <Select 
-                  value={alertFilters.severity} 
+
+                <Select
+                  value={alertFilters.severity}
                   onValueChange={(value) => setAlertFilters(prev => ({ ...prev, severity: value, page: 1 }))}
                 >
                   <SelectTrigger className="w-[180px]">
@@ -365,9 +365,9 @@ export default function SecurityCenterPage() {
                     <SelectItem value="low">Low</SelectItem>
                   </SelectContent>
                 </Select>
-                
-                <Select 
-                  value={alertFilters.type} 
+
+                <Select
+                  value={alertFilters.type}
                   onValueChange={(value) => setAlertFilters(prev => ({ ...prev, type: value, page: 1 }))}
                 >
                   <SelectTrigger className="w-[180px]">
@@ -385,7 +385,7 @@ export default function SecurityCenterPage() {
               </div>
             </CardContent>
           </Card>
-          
+
           {/* Alerts Table */}
           <FadeIn delay={0.5}>
             <Card>
@@ -398,7 +398,7 @@ export default function SecurityCenterPage() {
               <CardContent>
                 {alertsLoading ? (
                   <div className="flex items-center justify-center h-64">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -425,15 +425,15 @@ export default function SecurityCenterPage() {
                                 </div>
                               </div>
                             </TableCell>
-                            
+
                             <TableCell>
                               <Badge variant="outline" className="capitalize">
                                 {alert.type.replace('_', ' ')}
                               </Badge>
                             </TableCell>
-                            
+
                             <TableCell>
-                              <Badge 
+                              <Badge
                                 variant={getSeverityColor(alert.severity) as any}
                                 className="flex items-center gap-1 w-fit"
                               >
@@ -441,15 +441,15 @@ export default function SecurityCenterPage() {
                                 {alert.severity}
                               </Badge>
                             </TableCell>
-                            
+
                             <TableCell>
-                              <span className={cn("capitalize", getStatusColor(alert.status))}>
+                              <span className={cn('capitalize', getStatusColor(alert.status))}>
                                 {alert.status.replace('_', ' ')}
                               </span>
                             </TableCell>
-                            
+
                             <TableCell>{alert.source}</TableCell>
-                            
+
                             <TableCell>
                               <div className="text-sm">
                                 {new Date(alert.timestamp).toLocaleDateString()}
@@ -458,7 +458,7 @@ export default function SecurityCenterPage() {
                                 </div>
                               </div>
                             </TableCell>
-                            
+
                             <TableCell>
                               <div className="flex items-center gap-1">
                                 {alert.status === 'new' && (
@@ -480,7 +480,7 @@ export default function SecurityCenterPage() {
                                     </Button>
                                   </>
                                 )}
-                                
+
                                 <Dialog>
                                   <DialogTrigger asChild>
                                     <Button
@@ -506,7 +506,7 @@ export default function SecurityCenterPage() {
                                         <Label>Description</Label>
                                         <p className="text-sm mt-1">{alert.description}</p>
                                       </div>
-                                      
+
                                       <div className="grid grid-cols-2 gap-4">
                                         <div>
                                           <Label>Type</Label>
@@ -525,7 +525,7 @@ export default function SecurityCenterPage() {
                                           <p className="text-sm mt-1 capitalize">{alert.status.replace('_', ' ')}</p>
                                         </div>
                                       </div>
-                                      
+
                                       {alert.affected_resources.length > 0 && (
                                         <div>
                                           <Label>Affected Resources</Label>
@@ -538,7 +538,7 @@ export default function SecurityCenterPage() {
                                           </div>
                                         </div>
                                       )}
-                                      
+
                                       {alert.remediation_steps && (
                                         <div>
                                           <Label>Remediation Steps</Label>
@@ -549,7 +549,7 @@ export default function SecurityCenterPage() {
                                           </ol>
                                         </div>
                                       )}
-                                      
+
                                       <div className="flex justify-end gap-2 pt-4">
                                         <Button
                                           variant="outline"
@@ -578,7 +578,7 @@ export default function SecurityCenterPage() {
             </Card>
           </FadeIn>
         </TabsContent>
-        
+
         {/* Compliance Tab */}
         <TabsContent value="compliance" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -619,7 +619,7 @@ export default function SecurityCenterPage() {
                 </CardContent>
               </Card>
             </FadeIn>
-            
+
             <FadeIn delay={0.6}>
               <Card>
                 <CardHeader>
@@ -638,7 +638,7 @@ export default function SecurityCenterPage() {
                       </div>
                       <Badge variant="secondary">Enabled</Badge>
                     </div>
-                    
+
                     <div className="flex justify-between items-center p-3 border rounded-lg">
                       <div className="flex items-center gap-3">
                         <Shield className="h-5 w-5 text-green-600" />
@@ -649,7 +649,7 @@ export default function SecurityCenterPage() {
                       </div>
                       <Badge variant="secondary">Enforced</Badge>
                     </div>
-                    
+
                     <div className="flex justify-between items-center p-3 border rounded-lg">
                       <div className="flex items-center gap-3">
                         <Lock className="h-5 w-5 text-purple-600" />
@@ -660,7 +660,7 @@ export default function SecurityCenterPage() {
                       </div>
                       <Badge variant="secondary">Active</Badge>
                     </div>
-                    
+
                     <div className="flex justify-between items-center p-3 border rounded-lg">
                       <div className="flex items-center gap-3">
                         <Database className="h-5 w-5 text-orange-600" />
@@ -677,7 +677,7 @@ export default function SecurityCenterPage() {
             </FadeIn>
           </div>
         </TabsContent>
-        
+
         {/* Threat Analysis Tab */}
         <TabsContent value="threats" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -706,7 +706,7 @@ export default function SecurityCenterPage() {
                           </div>
                         </div>
                         <div className="text-right">
-                          <Badge 
+                          <Badge
                             variant={getSeverityColor(category.severity) as any}
                             className="mb-1"
                           >
@@ -726,7 +726,7 @@ export default function SecurityCenterPage() {
                 </CardContent>
               </Card>
             </FadeIn>
-            
+
             <FadeIn delay={0.6}>
               <Card>
                 <CardHeader>
@@ -746,7 +746,7 @@ export default function SecurityCenterPage() {
                         </div>
                       </div>
                     </div>
-                    
+
                     <div className="p-3 bg-yellow-50 dark:bg-yellow-950/50 border border-yellow-200 dark:border-yellow-800 rounded-lg">
                       <div className="flex items-start gap-2">
                         <Eye className="h-4 w-4 text-yellow-600 mt-0.5" />
@@ -758,7 +758,7 @@ export default function SecurityCenterPage() {
                         </div>
                       </div>
                     </div>
-                    
+
                     <div className="p-3 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 rounded-lg">
                       <div className="flex items-start gap-2">
                         <CheckCircle className="h-4 w-4 text-blue-600 mt-0.5" />
@@ -776,7 +776,7 @@ export default function SecurityCenterPage() {
             </FadeIn>
           </div>
         </TabsContent>
-        
+
         {/* Access Control Tab */}
         <TabsContent value="access" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -793,20 +793,20 @@ export default function SecurityCenterPage() {
                     </div>
                     <Badge variant="secondary">100%</Badge>
                   </div>
-                  
+
                   <div className="flex justify-between items-center">
                     <div className="flex items-center gap-2">
                       <Smartphone className="h-4 w-4" />
                       <span className="text-sm">SMS 2FA</span>
                     </div>
                     <Badge variant="secondary">
-                      {usersData?.users ? 
+                      {usersData?.users ?
                         Math.round((usersData.users.filter(u => u.two_factor_enabled).length / usersData.users.length) * 100) :
                         0
                       }%
                     </Badge>
                   </div>
-                  
+
                   <div className="flex justify-between items-center">
                     <div className="flex items-center gap-2">
                       <Shield className="h-4 w-4" />
@@ -814,7 +814,7 @@ export default function SecurityCenterPage() {
                     </div>
                     <Badge variant="secondary">45%</Badge>
                   </div>
-                  
+
                   <div className="flex justify-between items-center">
                     <div className="flex items-center gap-2">
                       <Wifi className="h-4 w-4" />
@@ -825,7 +825,7 @@ export default function SecurityCenterPage() {
                 </CardContent>
               </Card>
             </FadeIn>
-            
+
             <FadeIn delay={0.6}>
               <Card>
                 <CardHeader>
@@ -838,21 +838,21 @@ export default function SecurityCenterPage() {
                       {usersData?.users ? usersData.users.filter(u => u.role === 'admin').length : 0}
                     </Badge>
                   </div>
-                  
+
                   <div className="flex justify-between items-center">
                     <span className="text-sm">Moderators</span>
                     <Badge variant="secondary">
                       {usersData?.users ? usersData.users.filter(u => u.role === 'moderator').length : 0}
                     </Badge>
                   </div>
-                  
+
                   <div className="flex justify-between items-center">
                     <span className="text-sm">Users</span>
                     <Badge variant="outline">
                       {usersData?.users ? usersData.users.filter(u => u.role === 'user').length : 0}
                     </Badge>
                   </div>
-                  
+
                   <div className="flex justify-between items-center">
                     <span className="text-sm">Viewers</span>
                     <Badge variant="outline">
@@ -862,7 +862,7 @@ export default function SecurityCenterPage() {
                 </CardContent>
               </Card>
             </FadeIn>
-            
+
             <FadeIn delay={0.7}>
               <Card>
                 <CardHeader>
@@ -873,17 +873,17 @@ export default function SecurityCenterPage() {
                     <span className="text-sm">Active Sessions</span>
                     <span className="font-bold text-green-600">{securityMetrics.activeConnections}</span>
                   </div>
-                  
+
                   <div className="flex justify-between items-center">
                     <span className="text-sm">Failed Logins (24h)</span>
                     <span className="font-bold text-red-600">{securityMetrics.failedLogins}</span>
                   </div>
-                  
+
                   <div className="flex justify-between items-center">
                     <span className="text-sm">Suspicious Activities</span>
                     <span className="font-bold text-yellow-600">{securityMetrics.suspiciousActivities}</span>
                   </div>
-                  
+
                   <div className="flex justify-between items-center">
                     <span className="text-sm">Total Auth Attempts</span>
                     <span className="font-bold">{securityMetrics.authenticationAttempts.toLocaleString()}</span>

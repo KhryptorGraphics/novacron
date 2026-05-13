@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { authService } from "@/lib/auth";
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { authService } from '@/lib/auth';
 
 interface User {
   id: string;
@@ -43,11 +43,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } else {
             // Fallback user object for demo purposes
             setUser({
-              id: "user-123",
-              email: "user@example.com",
-              firstName: "John",
-              lastName: "Doe",
-              status: "active"
+              id: 'user-123',
+              email: 'user@example.com',
+              firstName: 'John',
+              lastName: 'Doe',
+              status: 'active',
             });
           }
         }
@@ -59,7 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsLoading(false);
       }
     };
-    
+
     initAuth();
   }, []);
 
@@ -67,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!email || !password) {
       throw new Error('Email and password are required');
     }
-    
+
     try {
       const response = await authService.login({ email, password });
       if (response?.token && response?.user) {
@@ -87,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!firstName || !lastName || !email || !password) {
       throw new Error('All fields are required for registration');
     }
-    
+
     try {
       await authService.register({ firstName, lastName, email, password });
       // After registration, user needs to log in
@@ -117,7 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     register,
     logout,
     isAuthenticated,
-    isLoading
+    isLoading,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -126,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error("useAuth must be used within an AuthProvider");
+    throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
 }
@@ -134,16 +134,16 @@ export function useAuth() {
 // Protected route component
 export function ProtectedRoute({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
-  
+
   if (isLoading) {
     return <div>Loading...</div>;
   }
-  
+
   if (!isAuthenticated) {
     // In a real implementation, you would redirect to login page
     // For now, we'll just return null
     return null;
   }
-  
+
   return <>{children}</>;
 }

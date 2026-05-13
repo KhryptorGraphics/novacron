@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
 
 export function ExecutionStatistics() {
   // Mock statistics data
@@ -25,7 +25,7 @@ export function ExecutionStatistics() {
               <span className="font-medium">{stats.totalExecutions}</span>
             </div>
           </div>
-          
+
           <div>
             <div className="flex justify-between text-sm mb-1">
               <span>Success Rate</span>
@@ -33,14 +33,14 @@ export function ExecutionStatistics() {
             </div>
             <Progress value={stats.successRate} className="h-2" />
           </div>
-          
+
           <div>
             <div className="flex justify-between text-sm mb-1">
               <span>Average Duration</span>
               <span className="font-medium">{(stats.avgDuration / 1000).toFixed(2)}s</span>
             </div>
           </div>
-          
+
           <div>
             <div className="flex justify-between text-sm mb-1">
               <span>Failed Executions</span>

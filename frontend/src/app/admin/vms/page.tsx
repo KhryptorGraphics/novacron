@@ -1,14 +1,14 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { useVMs } from "@/lib/api/hooks/useVMs";
-import { useVmTemplates } from "@/lib/api/hooks/useAdmin";
-import { createVM, deleteVM, postVMAction } from "@/lib/api/vms";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useVMs } from '@/lib/api/hooks/useVMs';
+import { useVmTemplates } from '@/lib/api/hooks/useAdmin';
+import { createVM, deleteVM, postVMAction, type ListVMsParams } from '@/lib/api/vms';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import {
   Table,
   TableBody,
@@ -16,14 +16,14 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from '@/components/ui/table';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -32,9 +32,9 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { useToast } from "@/components/ui/use-toast";
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { useToast } from '@/components/ui/use-toast';
 import {
   Activity,
   AlertTriangle,
@@ -49,10 +49,9 @@ import {
   Settings,
   Square,
   Trash2,
-} from "lucide-react";
-import { FadeIn } from "@/lib/animations";
-import type { VM } from "@/lib/api/types";
-import type { ListVMsParams } from "@/lib/api/vms";
+} from 'lucide-react';
+import { FadeIn } from '@/lib/animations';
+import type { VM } from '@/lib/api/types';
 
 type AdminVM = {
   id: string;
@@ -67,8 +66,8 @@ function toAdminVM(vm: VM): AdminVM {
   return {
     id: vm.id,
     name: vm.name,
-    status: vm.state || "unknown",
-    node: vm.node_id || "unassigned",
+    status: vm.state || 'unknown',
+    node: vm.node_id || 'unassigned',
     created_at: vm.created_at,
     updated_at: vm.updated_at,
   };
@@ -76,31 +75,31 @@ function toAdminVM(vm: VM): AdminVM {
 
 function statusColor(status: string): string {
   switch (status) {
-    case "running":
-      return "text-green-600";
-    case "stopped":
-      return "text-red-600";
-    case "paused":
-      return "text-yellow-600";
-    case "migrating":
-    case "creating":
-      return "text-blue-600";
+    case 'running':
+      return 'text-green-600';
+    case 'stopped':
+      return 'text-red-600';
+    case 'paused':
+      return 'text-yellow-600';
+    case 'migrating':
+    case 'creating':
+      return 'text-blue-600';
     default:
-      return "text-gray-600";
+      return 'text-gray-600';
   }
 }
 
 export default function VMManagementPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [filters, setFilters] = useState({ status: "all", node: "all", search: "" });
+  const [filters, setFilters] = useState({ status: 'all', node: 'all', search: '' });
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [isMutating, setIsMutating] = useState(false);
-  const [newVM, setNewVM] = useState({ name: "", cpu_shares: 1, memory_mb: 1024 });
+  const [newVM, setNewVM] = useState({ name: '', cpu_shares: 1, memory_mb: 1024 });
 
   const vmQueryParams: ListVMsParams = { pageSize: 100 };
-  if (filters.status !== "all") vmQueryParams.state = filters.status;
-  if (filters.node !== "all") vmQueryParams.nodeId = filters.node;
+  if (filters.status !== 'all') vmQueryParams.state = filters.status;
+  if (filters.node !== 'all') vmQueryParams.nodeId = filters.node;
   if (filters.search) vmQueryParams.q = filters.search;
 
   const { items, isLoading, error } = useVMs(vmQueryParams);
@@ -113,31 +112,31 @@ export default function VMManagementPage() {
 
   const stats = {
     total: vms.length,
-    running: vms.filter((vm) => vm.status === "running").length,
-    stopped: vms.filter((vm) => vm.status === "stopped").length,
-    unassigned: vms.filter((vm) => vm.node === "unassigned").length,
+    running: vms.filter((vm) => vm.status === 'running').length,
+    stopped: vms.filter((vm) => vm.status === 'stopped').length,
+    unassigned: vms.filter((vm) => vm.node === 'unassigned').length,
   };
 
-  const refreshVMs = () => queryClient.invalidateQueries({ queryKey: ["vms"] });
+  const refreshVMs = () => queryClient.invalidateQueries({ queryKey: ['vms'] });
 
-  const runVMAction = async (vm: AdminVM, action: "start" | "stop" | "restart" | "delete") => {
+  const runVMAction = async (vm: AdminVM, action: 'start' | 'stop' | 'restart' | 'delete') => {
     setIsMutating(true);
     try {
-      if (action === "delete") {
+      if (action === 'delete') {
         await deleteVM(vm.id);
-      } else if (action === "restart") {
-        await postVMAction(vm.id, "stop", { role: "operator" });
-        await postVMAction(vm.id, "start", { role: "operator" });
+      } else if (action === 'restart') {
+        await postVMAction(vm.id, 'stop', { role: 'operator' });
+        await postVMAction(vm.id, 'start', { role: 'operator' });
       } else {
-        await postVMAction(vm.id, action, { role: "operator" });
+        await postVMAction(vm.id, action, { role: 'operator' });
       }
       await refreshVMs();
-      toast({ title: "VM action completed", description: `${action} completed for ${vm.name}.` });
+      toast({ title: 'VM action completed', description: `${action} completed for ${vm.name}.` });
     } catch (err) {
       toast({
-        title: "VM action failed",
+        title: 'VM action failed',
         description: err instanceof Error ? err.message : `Unable to ${action} ${vm.name}.`,
-        variant: "destructive",
+        variant: 'destructive',
       });
     } finally {
       setIsMutating(false);
@@ -146,7 +145,7 @@ export default function VMManagementPage() {
 
   const handleCreateVM = async () => {
     if (!newVM.name.trim()) {
-      toast({ title: "VM name required", description: "Enter a VM name before creating it.", variant: "destructive" });
+      toast({ title: 'VM name required', description: 'Enter a VM name before creating it.', variant: 'destructive' });
       return;
     }
 
@@ -159,13 +158,13 @@ export default function VMManagementPage() {
       });
       await refreshVMs();
       setShowCreateDialog(false);
-      setNewVM({ name: "", cpu_shares: 1, memory_mb: 1024 });
-      toast({ title: "VM creation requested", description: `${newVM.name} is being created by the canonical runtime.` });
+      setNewVM({ name: '', cpu_shares: 1, memory_mb: 1024 });
+      toast({ title: 'VM creation requested', description: `${newVM.name} is being created by the canonical runtime.` });
     } catch (err) {
       toast({
-        title: "Failed to create VM",
-        description: err instanceof Error ? err.message : "The canonical VM API rejected the request.",
-        variant: "destructive",
+        title: 'Failed to create VM',
+        description: err instanceof Error ? err.message : 'The canonical VM API rejected the request.',
+        variant: 'destructive',
       });
     } finally {
       setIsMutating(false);
@@ -226,7 +225,7 @@ export default function VMManagementPage() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancel</Button>
-              <Button onClick={handleCreateVM} disabled={isMutating}>{isMutating ? "Creating..." : "Create VM"}</Button>
+              <Button onClick={handleCreateVM} disabled={isMutating}>{isMutating ? 'Creating...' : 'Create VM'}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -380,22 +379,22 @@ export default function VMManagementPage() {
                         <TableCell>{new Date(vm.updated_at).toLocaleString()}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
-                            {vm.status === "running" ? (
-                              <Button size="sm" variant="outline" onClick={() => runVMAction(vm, "stop")} disabled={isMutating}>
+                            {vm.status === 'running' ? (
+                              <Button size="sm" variant="outline" onClick={() => runVMAction(vm, 'stop')} disabled={isMutating}>
                                 <Square className="h-3 w-3 mr-1" />
                                 Stop
                               </Button>
                             ) : (
-                              <Button size="sm" variant="outline" onClick={() => runVMAction(vm, "start")} disabled={isMutating}>
+                              <Button size="sm" variant="outline" onClick={() => runVMAction(vm, 'start')} disabled={isMutating}>
                                 <Play className="h-3 w-3 mr-1" />
                                 Start
                               </Button>
                             )}
-                            <Button size="sm" variant="outline" onClick={() => runVMAction(vm, "restart")} disabled={isMutating || vm.status !== "running"}>
+                            <Button size="sm" variant="outline" onClick={() => runVMAction(vm, 'restart')} disabled={isMutating || vm.status !== 'running'}>
                               <RotateCcw className="h-3 w-3 mr-1" />
                               Restart
                             </Button>
-                            <Button size="sm" variant="destructive" onClick={() => runVMAction(vm, "delete")} disabled={isMutating}>
+                            <Button size="sm" variant="destructive" onClick={() => runVMAction(vm, 'delete')} disabled={isMutating}>
                               <Trash2 className="h-3 w-3 mr-1" />
                               Delete
                             </Button>

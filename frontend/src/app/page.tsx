@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
 // Disable static generation for this page
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function HomePage() {
   const router = useRouter();
@@ -20,7 +20,7 @@ export default function HomePage() {
   }, []);
 
   const handleGetStarted = () => {
-    router.push("/auth/login");
+    router.push('/auth/login');
   };
 
   return (
@@ -28,7 +28,7 @@ export default function HomePage() {
       <div className="container flex flex-col items-center justify-center gap-12 px-4 py-16 md:py-24 lg:py-32">
         {loading ? (
           <div className="flex flex-col items-center gap-4">
-            <div className="h-16 w-16 animate-spin rounded-full border-4 border-t-blue-500"></div>
+            <div className="h-16 w-16 animate-spin rounded-full border-4 border-t-blue-500" />
             <p className="text-lg font-medium">Initializing NovaCron...</p>
           </div>
         ) : (
@@ -37,7 +37,7 @@ export default function HomePage() {
               <div className="mb-8 relative h-24 w-24 md:h-32 md:w-32">
                 {/* Placeholder for logo */}
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="h-20 w-20 md:h-28 md:w-28 rounded-full bg-blue-500 animate-pulse"></div>
+                  <div className="h-20 w-20 md:h-28 md:w-28 rounded-full bg-blue-500 animate-pulse" />
                 </div>
               </div>
               <h1 className="text-5xl font-extrabold tracking-tight sm:text-[5rem]">
@@ -89,7 +89,7 @@ export default function HomePage() {
                 Get Started
               </button>
               <button
-                onClick={() => router.push("/admin")}
+                onClick={() => router.push('/admin')}
                 className="px-8 py-3 text-lg font-medium bg-red-600 hover:bg-red-700 transition-colors rounded-md shadow-lg hover:shadow-xl"
               >
                 Admin Panel

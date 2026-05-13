@@ -1,27 +1,26 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Archive, CheckCircle, Database, RefreshCw, RotateCcw, Shield } from "lucide-react";
-import { backupApi, type BackupPolicy, type BackupRun, type BackupStatus } from "@/lib/api/backup";
-import { useVMs } from "@/lib/api/hooks/useVMs";
-import { cn } from "@/lib/utils";
+import { type ReactNode, useEffect, useState } from 'react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Archive, CheckCircle, Database, RefreshCw, RotateCcw, Shield } from 'lucide-react';
+import { backupApi, type BackupPolicy, type BackupRun, type BackupStatus } from '@/lib/api/backup';
+import { useVMs } from '@/lib/api/hooks/useVMs';
+import { cn } from '@/lib/utils';
 
 const emptyStatus: BackupStatus = {
   activeBackups: 0,
-  lastBackupTime: "",
-  backupHealth: "unknown",
+  lastBackupTime: '',
+  backupHealth: 'unknown',
   totalBackupSize: 0,
 };
 
 function formatBytes(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let next = value;
   let unit = 0;
   while (next >= 1024 && unit < units.length - 1) {
@@ -32,24 +31,24 @@ function formatBytes(value: number) {
 }
 
 function formatDate(value: string) {
-  if (!value) return "not available";
+  if (!value) return 'not available';
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString();
 }
 
-function healthVariant(health: string): "default" | "secondary" | "destructive" | "outline" {
+function healthVariant(health: string): 'default' | 'secondary' | 'destructive' | 'outline' {
   switch (health.toLowerCase()) {
-    case "healthy":
-      return "default";
-    case "degraded":
-    case "not_configured":
-      return "secondary";
-    case "failed":
-    case "critical":
-      return "destructive";
+    case 'healthy':
+      return 'default';
+    case 'degraded':
+    case 'not_configured':
+      return 'secondary';
+    case 'failed':
+    case 'critical':
+      return 'destructive';
     default:
-      return "outline";
+      return 'outline';
   }
 }
 
@@ -75,7 +74,7 @@ export function BackupRecoveryFlow() {
       setPolicies(Array.isArray(policyResponse) ? policyResponse : []);
       setBackups(Array.isArray(backupResponse) ? backupResponse : []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load backup status.");
+      setError(err instanceof Error ? err.message : 'Failed to load backup status.');
     } finally {
       setLoading(false);
     }
@@ -92,15 +91,15 @@ export function BackupRecoveryFlow() {
     try {
       const created = await backupApi.createPolicy({
         name: `Daily VM policy ${policies.length + 1}`,
-        schedule: "daily",
+        schedule: 'daily',
         retentionDays: 30,
-        target: "local",
+        target: 'local',
         enabled: true,
       });
       setPolicies((current) => [created, ...current]);
-      setMessage("Backup policy created through the canonical backup API.");
+      setMessage('Backup policy created through the canonical backup API.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create backup policy.");
+      setError(err instanceof Error ? err.message : 'Failed to create backup policy.');
     } finally {
       setLoading(false);
     }
@@ -115,7 +114,7 @@ export function BackupRecoveryFlow() {
       setBackups((current) => [run, ...current]);
       setMessage(`Backup run ${run.id} queued.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to run backup policy.");
+      setError(err instanceof Error ? err.message : 'Failed to run backup policy.');
     } finally {
       setLoading(false);
     }
@@ -126,10 +125,10 @@ export function BackupRecoveryFlow() {
     setError(null);
     setMessage(null);
     try {
-      const restore = await backupApi.restore({ backupId, target: "original" });
+      const restore = await backupApi.restore({ backupId, target: 'original' });
       setMessage(`Restore job ${restore.id} queued.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to queue restore.");
+      setError(err instanceof Error ? err.message : 'Failed to queue restore.');
     } finally {
       setLoading(false);
     }
@@ -145,7 +144,7 @@ export function BackupRecoveryFlow() {
           </p>
         </div>
         <Button variant="outline" onClick={loadBackupStatus} disabled={loading}>
-          <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
+          <RefreshCw className={cn('mr-2 h-4 w-4', loading && 'animate-spin')} />
           Refresh
         </Button>
       </div>
@@ -167,7 +166,7 @@ export function BackupRecoveryFlow() {
       {(error || Boolean(vmsError)) && (
         <Alert variant="destructive">
           <AlertDescription>
-            {error || "Failed to load VM inventory from the canonical API."}
+            {error || 'Failed to load VM inventory from the canonical API.'}
           </AlertDescription>
         </Alert>
       )}
@@ -186,7 +185,7 @@ export function BackupRecoveryFlow() {
         />
         <StatusCard
           title="Protected VMs"
-          value={vmsLoading ? "..." : String(vms.length)}
+          value={vmsLoading ? '...' : String(vms.length)}
           icon={<Database className="h-4 w-4 text-muted-foreground" />}
         />
         <StatusCard
@@ -230,7 +229,7 @@ export function BackupRecoveryFlow() {
             <CardContent className="space-y-3">
               {policies.length === 0 && (
                 <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
-                  {loading ? "Loading policies..." : "No backup policies returned by the canonical API."}
+                  {loading ? 'Loading policies...' : 'No backup policies returned by the canonical API.'}
                 </div>
               )}
               {policies.map((policy) => (
@@ -262,7 +261,7 @@ export function BackupRecoveryFlow() {
             <CardContent className="space-y-3">
               {backups.length === 0 && (
                 <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
-                  {loading ? "Loading restore points..." : "No backup runs returned by the canonical API."}
+                  {loading ? 'Loading restore points...' : 'No backup runs returned by the canonical API.'}
                 </div>
               )}
               {backups.map((backup) => (
@@ -270,7 +269,7 @@ export function BackupRecoveryFlow() {
                   <div>
                     <div className="font-medium">{backup.id}</div>
                     <div className="text-sm text-muted-foreground">
-                      Policy {backup.policyId || "unknown"} queued {formatDate(backup.createdAt)}
+                      Policy {backup.policyId || 'unknown'} queued {formatDate(backup.createdAt)}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">

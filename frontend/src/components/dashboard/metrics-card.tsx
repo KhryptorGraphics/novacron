@@ -1,34 +1,34 @@
-"use client";
+'use client';
 
 interface MetricsCardProps {
   title: string;
   value: string;
   icon: string;
-  trend?: "up" | "down" | "stable";
+  trend?: 'up' | 'down' | 'stable';
 }
 
-export function MetricsCard({ title, value, icon, trend = "stable" }: MetricsCardProps) {
+export function MetricsCard({ title, value, icon, trend = 'stable' }: MetricsCardProps) {
   // Get trend color and icon
   const getTrendDetails = () => {
     switch (trend) {
-      case "up":
+      case 'up':
         return {
-          color: "text-green-500",
-          icon: "↑",
-          text: "Increasing",
+          color: 'text-green-500',
+          icon: '↑',
+          text: 'Increasing',
         };
-      case "down":
+      case 'down':
         return {
-          color: "text-red-500",
-          icon: "↓",
-          text: "Decreasing",
+          color: 'text-red-500',
+          icon: '↓',
+          text: 'Decreasing',
         };
-      case "stable":
+      case 'stable':
       default:
         return {
-          color: "text-blue-500",
-          icon: "→",
-          text: "Stable",
+          color: 'text-blue-500',
+          icon: '→',
+          text: 'Stable',
         };
     }
   };

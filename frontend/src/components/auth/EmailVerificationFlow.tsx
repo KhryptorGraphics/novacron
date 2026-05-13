@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import { motion } from "framer-motion";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Icons } from "@/components/ui/icons";
+import { motion } from 'framer-motion';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Icons } from '@/components/ui/icons';
 
 interface EmailVerificationFlowProps {
   email: string;
@@ -11,10 +11,10 @@ interface EmailVerificationFlowProps {
   onSkip?: () => void;
 }
 
-export function EmailVerificationFlow({ 
-  email, 
-  onVerificationComplete, 
-  onSkip 
+export function EmailVerificationFlow({
+  email,
+  onVerificationComplete,
+  onSkip,
 }: EmailVerificationFlowProps) {
   void onVerificationComplete;
 

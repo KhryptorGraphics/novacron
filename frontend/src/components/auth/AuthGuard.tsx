@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
@@ -15,7 +15,7 @@ interface AuthGuardProps {
 export default function AuthGuard({
   children,
   requireAuth = true,
-  redirectTo = '/auth/login'
+  redirectTo = '/auth/login',
 }: AuthGuardProps) {
   const { isAuthenticated, isLoading, requires2FA, needsClusterSelection, hasClusterAccess } = useAuth();
   const router = useRouter();

@@ -1,28 +1,28 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { PasswordInput } from "@/components/ui/password-input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Progress } from "@/components/ui/progress";
-import { Icons } from "@/components/ui/icons";
-import { PasswordStrengthIndicator } from "./PasswordStrengthIndicator";
-import { SuccessAnimation } from "@/components/ui/success-animation";
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Progress } from '@/components/ui/progress';
+import { Icons } from '@/components/ui/icons';
+import { PasswordStrengthIndicator } from './PasswordStrengthIndicator';
+import { SuccessAnimation } from '@/components/ui/success-animation';
 import {
   validateRegistrationStep,
   validateEmail,
   debounce,
-  RegistrationData
-} from "@/lib/validation";
-import { authService } from "@/lib/auth";
-import { cn } from "@/lib/utils";
+  RegistrationData,
+} from '@/lib/validation';
+import { authService } from '@/lib/auth';
+import { cn } from '@/lib/utils';
 
 interface RegistrationWizardProps {
   onComplete?: (data: RegistrationData) => Promise<void>;
@@ -36,7 +36,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
   const [emailAvailable, setEmailAvailable] = useState<boolean | null>(null);
   const [checkingEmail, setCheckingEmail] = useState(false);
   const [registrationFlow, setRegistrationFlow] = useState<'registration' | 'success'>('registration');
-  
+
   const [formData, setFormData] = useState<RegistrationData>({
     accountType: '',
     firstName: '',
@@ -48,52 +48,52 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
     organizationSize: '',
     phone: '',
     acceptTerms: false,
-    enableTwoFactor: false
+    enableTwoFactor: false,
   });
-  
+
   const totalSteps = formData.accountType === 'organization' ? 4 : 3;
   const progress = (currentStep / totalSteps) * 100;
-  
+
   // Step configuration
   const getStepInfo = () => {
     const steps = [
-      { number: 1, title: "Account Type", description: "Choose your account type" },
-      { number: 2, title: "Personal Info", description: "Tell us about yourself" },
+      { number: 1, title: 'Account Type', description: 'Choose your account type' },
+      { number: 2, title: 'Personal Info', description: 'Tell us about yourself' },
     ];
-    
+
     if (formData.accountType === 'organization') {
-      steps.push({ number: 3, title: "Organization", description: "Organization details" });
+      steps.push({ number: 3, title: 'Organization', description: 'Organization details' });
     }
-    
+
     steps.push({
       number: steps.length + 1,
-      title: "Security",
-      description: "Secure your account"
+      title: 'Security',
+      description: 'Secure your account',
     });
-    
+
     return steps;
   };
-  
+
   // Email availability check
   const checkEmailAvailability = debounce(async (email: string) => {
     if (!email || !validateEmail(email).isValid) {
       setEmailAvailable(null);
       return;
     }
-    
+
     setCheckingEmail(true);
     try {
       const result = await authService.checkEmailAvailability(email);
       setEmailAvailable(result.available);
     } catch (error) {
-      console.error("Error checking email:", error);
+      console.error('Error checking email:', error);
       // Fallback for demo - check if email contains "taken"
-      setEmailAvailable(!email.includes("taken"));
+      setEmailAvailable(!email.includes('taken'));
     } finally {
       setCheckingEmail(false);
     }
   }, 500);
-  
+
   useEffect(() => {
     if (formData.email) {
       checkEmailAvailability(formData.email);
@@ -106,7 +106,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
     }
 
     const redirectTimer = window.setTimeout(() => {
-      router.push("/auth/login?registered=1");
+      router.push('/auth/login?registered=1');
     }, 3000);
 
     return () => window.clearTimeout(redirectTimer);
@@ -115,17 +115,17 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
   const finishRegistration = () => {
     setRegistrationFlow('success');
   };
-  
+
   const handleNext = async () => {
     const validation = validateRegistrationStep(currentStep, formData);
-    
+
     if (!validation.isValid) {
       setErrors(validation.errors);
       return;
     }
-    
+
     setErrors([]);
-    
+
     if (currentStep < totalSteps) {
       setCurrentStep(currentStep + 1);
     } else {
@@ -145,21 +145,21 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
           finishRegistration();
         }
       } catch (error) {
-        console.error("Registration error:", error);
-        setErrors(["Registration failed. Please try again."]);
+        console.error('Registration error:', error);
+        setErrors(['Registration failed. Please try again.']);
       } finally {
         setIsLoading(false);
       }
     }
   };
-  
+
   const handleBack = () => {
     if (currentStep > 1) {
       setCurrentStep(currentStep - 1);
       setErrors([]);
     }
   };
-  
+
   const updateFormData = (field: keyof RegistrationData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     // Clear errors when user makes changes
@@ -181,7 +181,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
       </Card>
     );
   }
-  
+
   return (
     <Card className="w-full max-w-2xl mx-auto">
       <CardHeader>
@@ -198,7 +198,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
         </div>
         <Progress value={progress} className="h-2" />
       </CardHeader>
-      
+
       <CardContent>
         {/* Error display */}
         {errors.length > 0 && (
@@ -220,7 +220,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
             </div>
           </div>
         )}
-        
+
         <AnimatePresence mode="wait">
           <motion.div
             key={currentStep}
@@ -240,10 +240,10 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                     <label
                       htmlFor="personal"
                       className={cn(
-                        "flex items-start space-x-3 p-4 border-2 rounded-lg cursor-pointer transition-all",
+                        'flex items-start space-x-3 p-4 border-2 rounded-lg cursor-pointer transition-all',
                         formData.accountType === 'personal'
-                          ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
-                          : "border-gray-200 dark:border-gray-700 hover:border-gray-300"
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-300',
                       )}
                     >
                       <RadioGroupItem value="personal" id="personal" />
@@ -270,14 +270,14 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                         </ul>
                       </div>
                     </label>
-                    
+
                     <label
                       htmlFor="organization"
                       className={cn(
-                        "flex items-start space-x-3 p-4 border-2 rounded-lg cursor-pointer transition-all",
+                        'flex items-start space-x-3 p-4 border-2 rounded-lg cursor-pointer transition-all',
                         formData.accountType === 'organization'
-                          ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
-                          : "border-gray-200 dark:border-gray-700 hover:border-gray-300"
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-300',
                       )}
                     >
                       <RadioGroupItem value="organization" id="organization" />
@@ -311,7 +311,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                 </RadioGroup>
               </div>
             )}
-            
+
             {/* Step 2: Personal Information */}
             {currentStep === 2 && (
               <div className="space-y-4">
@@ -323,7 +323,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                       placeholder="John"
                       value={formData.firstName}
                       onChange={(e) => updateFormData('firstName', e.target.value)}
-                      className={errors.some(e => e.includes("First name")) ? "border-red-500" : ""}
+                      className={errors.some(e => e.includes('First name')) ? 'border-red-500' : ''}
                     />
                   </div>
                   <div className="space-y-2">
@@ -333,11 +333,11 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                       placeholder="Doe"
                       value={formData.lastName}
                       onChange={(e) => updateFormData('lastName', e.target.value)}
-                      className={errors.some(e => e.includes("Last name")) ? "border-red-500" : ""}
+                      className={errors.some(e => e.includes('Last name')) ? 'border-red-500' : ''}
                     />
                   </div>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="email">Email Address *</Label>
                   <div className="relative">
@@ -348,9 +348,9 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                       value={formData.email}
                       onChange={(e) => updateFormData('email', e.target.value)}
                       className={cn(
-                        errors.some(e => e.includes("email")) ? "border-red-500" : "",
-                        emailAvailable === false ? "border-red-500" : "",
-                        emailAvailable === true ? "border-green-500" : ""
+                        errors.some(e => e.includes('email')) ? 'border-red-500' : '',
+                        emailAvailable === false ? 'border-red-500' : '',
+                        emailAvailable === true ? 'border-green-500' : '',
                       )}
                     />
                     {checkingEmail && (
@@ -377,7 +377,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                     <p className="text-sm text-red-600">This email is already registered</p>
                   )}
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="phone">Phone Number (Optional)</Label>
                   <Input
@@ -391,7 +391,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                 </div>
               </div>
             )}
-            
+
             {/* Step 3: Organization Details (conditional) */}
             {currentStep === 3 && formData.accountType === 'organization' && (
               <div className="space-y-4">
@@ -402,19 +402,19 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                     placeholder="Acme Corporation"
                     value={formData.organizationName}
                     onChange={(e) => updateFormData('organizationName', e.target.value)}
-                    className={errors.some(e => e.includes("Organization")) ? "border-red-500" : ""}
+                    className={errors.some(e => e.includes('Organization')) ? 'border-red-500' : ''}
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="orgSize">Organization Size *</Label>
                   <Select
-                    value={formData.organizationSize ?? ""}
+                    value={formData.organizationSize ?? ''}
                     onValueChange={(value) => updateFormData('organizationSize', value)}
                   >
                     <SelectTrigger
                       id="orgSize"
-                      className={errors.some(e => e.includes("size")) ? "border-red-500" : ""}
+                      className={errors.some(e => e.includes('size')) ? 'border-red-500' : ''}
                     >
                       <SelectValue placeholder="Select organization size" />
                     </SelectTrigger>
@@ -428,7 +428,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                   <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-2">
                     Organization Benefits
@@ -450,9 +450,9 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                 </div>
               </div>
             )}
-            
+
             {/* Step 4: Security */}
-            {((currentStep === 3 && formData.accountType !== 'organization') || 
+            {((currentStep === 3 && formData.accountType !== 'organization') ||
               (currentStep === 4 && formData.accountType === 'organization')) && (
               <div className="space-y-4">
                 <div className="space-y-2">
@@ -462,12 +462,12 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                     placeholder="Enter a strong password"
                     value={formData.password}
                     onChange={(e) => updateFormData('password', e.target.value)}
-                    className={errors.some(e => e.includes("Password")) ? "border-red-500" : ""}
+                    className={errors.some(e => e.includes('Password')) ? 'border-red-500' : ''}
                     autoComplete="new-password"
                   />
                   <PasswordStrengthIndicator password={formData.password} />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="confirmPassword">Confirm Password *</Label>
                   <PasswordInput
@@ -475,14 +475,14 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                     placeholder="Re-enter your password"
                     value={formData.confirmPassword}
                     onChange={(e) => updateFormData('confirmPassword', e.target.value)}
-                    className={errors.some(e => e.includes("match")) ? "border-red-500" : ""}
+                    className={errors.some(e => e.includes('match')) ? 'border-red-500' : ''}
                     autoComplete="new-password"
                   />
                   {formData.confirmPassword && formData.password !== formData.confirmPassword && (
                     <p className="text-sm text-red-600">Passwords do not match</p>
                   )}
                 </div>
-                
+
                 <div className="space-y-3 pt-2">
                   <div className="flex items-start space-x-3">
                     <Checkbox
@@ -502,13 +502,13 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                       </p>
                     </div>
                   </div>
-                  
+
                   <div className="flex items-start space-x-3">
                     <Checkbox
                       id="terms"
                       checked={formData.acceptTerms ?? false}
                       onCheckedChange={(checked) => updateFormData('acceptTerms', checked as boolean)}
-                      className={errors.some(e => e.includes("terms")) ? "border-red-500" : ""}
+                      className={errors.some(e => e.includes('terms')) ? 'border-red-500' : ''}
                     />
                     <div className="space-y-1">
                       <label
@@ -518,19 +518,19 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                         I accept the Terms of Service and Privacy Policy *
                       </label>
                       <p className="text-xs text-gray-500">
-                        By creating an account, you agree to our{" "}
+                        By creating an account, you agree to our{' '}
                         <a href="/terms" className="text-blue-600 hover:underline">Terms of Service</a>
-                        {" "}and{" "}
+                        {' '}and{' '}
                         <a href="/privacy" className="text-blue-600 hover:underline">Privacy Policy</a>
                       </p>
                     </div>
                   </div>
                 </div>
-                
+
                 {formData.enableTwoFactor && (
                   <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
                     <p className="text-sm text-green-800 dark:text-green-200">
-                      📱 You'll set up two-factor authentication after creating your account
+                      📱 You&apos;ll set up two-factor authentication after creating your account
                     </p>
                   </div>
                 )}
@@ -538,7 +538,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
             )}
           </motion.div>
         </AnimatePresence>
-        
+
         {/* Navigation buttons */}
         <div className="flex justify-between mt-6 pt-4 border-t">
           <Button
@@ -552,7 +552,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
             </svg>
             Back
           </Button>
-          
+
           <Button
             type="button"
             onClick={handleNext}

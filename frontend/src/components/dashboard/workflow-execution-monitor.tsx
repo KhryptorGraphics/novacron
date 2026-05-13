@@ -1,11 +1,11 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { useWorkflowExecution } from "@/lib/api/hooks/useAutomation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { format } from "date-fns";
+import { useState, useEffect } from 'react';
+import { useWorkflowExecution } from '@/lib/api/hooks/useAutomation';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { format } from 'date-fns';
 
 interface ExecutionNode {
   id: string;
@@ -33,7 +33,7 @@ export function WorkflowExecutionMonitor({ executionId }: { executionId: string 
         ...(nodeExec.durationMs !== undefined ? { durationMs: nodeExec.durationMs } : {}),
         ...(nodeExec.errorMessage !== undefined ? { errorMessage: nodeExec.errorMessage } : {}),
       }));
-      
+
       setNodes(nodeArray);
     }
   }, [execution]);
@@ -93,13 +93,13 @@ export function WorkflowExecutionMonitor({ executionId }: { executionId: string 
           <div className="border rounded-lg p-4">
             <div className="flex justify-between items-center mb-2">
               <h3 className="font-medium">Overall Status</h3>
-              <Badge 
+              <Badge
                 variant={execution.status === 'completed' ? 'default' : execution.status === 'failed' ? 'destructive' : 'secondary'}
               >
                 {execution.status}
               </Badge>
             </div>
-            
+
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span>Progress</span>
@@ -107,18 +107,18 @@ export function WorkflowExecutionMonitor({ executionId }: { executionId: string 
               </div>
               <Progress value={progress} />
             </div>
-            
+
             <div className="grid grid-cols-2 gap-4 mt-4">
               {execution.startedAt && (
                 <div>
                   <p className="text-sm text-gray-500">Started</p>
-                  <p>{format(new Date(execution.startedAt), "MMM dd, yyyy HH:mm:ss")}</p>
+                  <p>{format(new Date(execution.startedAt), 'MMM dd, yyyy HH:mm:ss')}</p>
                 </div>
               )}
               {execution.completedAt && (
                 <div>
                   <p className="text-sm text-gray-500">Completed</p>
-                  <p>{format(new Date(execution.completedAt), "MMM dd, yyyy HH:mm:ss")}</p>
+                  <p>{format(new Date(execution.completedAt), 'MMM dd, yyyy HH:mm:ss')}</p>
                 </div>
               )}
               {execution.durationMs && (
@@ -129,7 +129,7 @@ export function WorkflowExecutionMonitor({ executionId }: { executionId: string 
               )}
             </div>
           </div>
-          
+
           {/* Node executions */}
           <div>
             <h3 className="font-medium mb-3">Node Executions</h3>
@@ -138,24 +138,24 @@ export function WorkflowExecutionMonitor({ executionId }: { executionId: string 
                 <div key={node.id} className="border rounded-lg p-3">
                   <div className="flex justify-between items-center mb-2">
                     <h4 className="font-medium">{node.name}</h4>
-                    <Badge 
+                    <Badge
                       variant={node.status === 'completed' ? 'default' : node.status === 'failed' ? 'destructive' : 'secondary'}
                     >
                       {node.status}
                     </Badge>
                   </div>
-                  
+
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     {node.startedAt && (
                       <div>
                         <p className="text-gray-500">Started</p>
-                        <p>{format(new Date(node.startedAt), "HH:mm:ss")}</p>
+                        <p>{format(new Date(node.startedAt), 'HH:mm:ss')}</p>
                       </div>
                     )}
                     {node.completedAt && (
                       <div>
                         <p className="text-gray-500">Completed</p>
-                        <p>{format(new Date(node.completedAt), "HH:mm:ss")}</p>
+                        <p>{format(new Date(node.completedAt), 'HH:mm:ss')}</p>
                       </div>
                     )}
                     {node.durationMs && (
@@ -165,7 +165,7 @@ export function WorkflowExecutionMonitor({ executionId }: { executionId: string 
                       </div>
                     )}
                   </div>
-                  
+
                   {node.errorMessage && (
                     <div className="mt-2">
                       <p className="text-red-500 text-sm">Error: {node.errorMessage}</p>

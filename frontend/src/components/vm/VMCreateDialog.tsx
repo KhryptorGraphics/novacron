@@ -1,28 +1,28 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
-import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { 
-  Server, 
-  HardDrive, 
-  Cpu, 
-  MemoryStick, 
-  Network, 
+import { useState } from 'react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Separator } from '@/components/ui/separator';
+import { Badge } from '@/components/ui/badge';
+import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Server,
+  HardDrive,
+  Cpu,
+  MemoryStick,
+  Network,
   Settings,
   Plus,
-  X
-} from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+  X,
+} from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface VMCreateDialogProps {
   open: boolean;
@@ -31,51 +31,51 @@ interface VMCreateDialogProps {
 
 export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
   const [formData, setFormData] = useState({
-    name: "",
-    description: "",
-    template: "",
-    os: "",
+    name: '',
+    description: '',
+    template: '',
+    os: '',
     cpu: 2,
     memory: 4,
     storage: 50,
-    networkType: "bridged",
-    host: "",
+    networkType: 'bridged',
+    host: '',
     autoStart: true,
     enableBackup: true,
     tags: [] as string[],
   });
 
-  const [currentTag, setCurrentTag] = useState("");
+  const [currentTag, setCurrentTag] = useState('');
 
   const templates = [
-    { id: "ubuntu-22.04", name: "Ubuntu 22.04 LTS", description: "Latest LTS release" },
-    { id: "centos-8", name: "CentOS Stream 8", description: "Enterprise Linux" },
-    { id: "debian-11", name: "Debian 11", description: "Stable release" },
-    { id: "windows-server-2022", name: "Windows Server 2022", description: "Microsoft Windows Server" },
-    { id: "custom", name: "Custom ISO", description: "Upload your own ISO" }
+    { id: 'ubuntu-22.04', name: 'Ubuntu 22.04 LTS', description: 'Latest LTS release' },
+    { id: 'centos-8', name: 'CentOS Stream 8', description: 'Enterprise Linux' },
+    { id: 'debian-11', name: 'Debian 11', description: 'Stable release' },
+    { id: 'windows-server-2022', name: 'Windows Server 2022', description: 'Microsoft Windows Server' },
+    { id: 'custom', name: 'Custom ISO', description: 'Upload your own ISO' },
   ];
 
   const hosts = [
-    { id: "node-01", name: "node-01", cpu: "16 cores", memory: "64 GB", status: "available" },
-    { id: "node-02", name: "node-02", cpu: "24 cores", memory: "128 GB", status: "available" },
-    { id: "node-03", name: "node-03", cpu: "8 cores", memory: "32 GB", status: "maintenance" }
+    { id: 'node-01', name: 'node-01', cpu: '16 cores', memory: '64 GB', status: 'available' },
+    { id: 'node-02', name: 'node-02', cpu: '24 cores', memory: '128 GB', status: 'available' },
+    { id: 'node-03', name: 'node-03', cpu: '8 cores', memory: '32 GB', status: 'maintenance' },
   ];
 
   const handleCreate = () => {
     // Mock VM creation - replace with API call
-    console.log("Creating VM with data:", formData);
+    console.log('Creating VM with data:', formData);
     onOpenChange(false);
     // Reset form
     setFormData({
-      name: "",
-      description: "",
-      template: "",
-      os: "",
+      name: '',
+      description: '',
+      template: '',
+      os: '',
       cpu: 2,
       memory: 4,
       storage: 50,
-      networkType: "bridged",
-      host: "",
+      networkType: 'bridged',
+      host: '',
       autoStart: true,
       enableBackup: true,
       tags: [],
@@ -86,24 +86,24 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
     if (currentTag && !formData.tags.includes(currentTag)) {
       setFormData(prev => ({
         ...prev,
-        tags: [...prev.tags, currentTag]
+        tags: [...prev.tags, currentTag],
       }));
-      setCurrentTag("");
+      setCurrentTag('');
     }
   };
 
   const removeTag = (tag: string) => {
     setFormData(prev => ({
       ...prev,
-      tags: prev.tags.filter(t => t !== tag)
+      tags: prev.tags.filter(t => t !== tag),
     }));
   };
 
   const getResourceColor = (value: number, max: number) => {
     const percentage = (value / max) * 100;
-    if (percentage < 50) return "text-green-600";
-    if (percentage < 80) return "text-yellow-600";
-    return "text-red-600";
+    if (percentage < 50) return 'text-green-600';
+    if (percentage < 80) return 'text-yellow-600';
+    return 'text-red-600';
   };
 
   return (
@@ -138,11 +138,11 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="vm-template">Template*</Label>
-                <Select 
-                  value={formData.template} 
+                <Select
+                  value={formData.template}
                   onValueChange={(value) => setFormData(prev => ({ ...prev, template: value }))}
                 >
                   <SelectTrigger>
@@ -176,8 +176,8 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
 
             <div className="space-y-2">
               <Label htmlFor="vm-host">Target Host*</Label>
-              <Select 
-                value={formData.host} 
+              <Select
+                value={formData.host}
                 onValueChange={(value) => setFormData(prev => ({ ...prev, host: value }))}
               >
                 <SelectTrigger>
@@ -185,10 +185,10 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
                 </SelectTrigger>
                 <SelectContent>
                   {hosts.map(host => (
-                    <SelectItem 
-                      key={host.id} 
+                    <SelectItem
+                      key={host.id}
                       value={host.id}
-                      disabled={host.status === "maintenance"}
+                      disabled={host.status === 'maintenance'}
                     >
                       <div className="flex items-center justify-between w-full">
                         <div className="flex flex-col">
@@ -197,8 +197,8 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
                             {host.cpu} • {host.memory}
                           </span>
                         </div>
-                        <Badge 
-                          variant={host.status === "available" ? "default" : "secondary"}
+                        <Badge
+                          variant={host.status === 'available' ? 'default' : 'secondary'}
                           className="ml-2"
                         >
                           {host.status}
@@ -317,8 +317,8 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="network-type">Network Type</Label>
-                  <Select 
-                    value={formData.networkType} 
+                  <Select
+                    value={formData.networkType}
                     onValueChange={(value) => setFormData(prev => ({ ...prev, networkType: value }))}
                   >
                     <SelectTrigger>
@@ -332,16 +332,16 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <div className="text-sm text-muted-foreground">
-                  {formData.networkType === "bridged" && 
-                    "VM will have direct access to the physical network"}
-                  {formData.networkType === "nat" && 
+                  {formData.networkType === 'bridged' &&
+                    'VM will have direct access to the physical network'}
+                  {formData.networkType === 'nat' &&
                     "VM will share host's IP address with port forwarding"}
-                  {formData.networkType === "host-only" && 
-                    "VM can only communicate with host and other VMs"}
-                  {formData.networkType === "isolated" && 
-                    "VM has no network connectivity"}
+                  {formData.networkType === 'host-only' &&
+                    'VM can only communicate with host and other VMs'}
+                  {formData.networkType === 'isolated' &&
+                    'VM has no network connectivity'}
                 </div>
               </CardContent>
             </Card>
@@ -391,7 +391,7 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
                       placeholder="Add tag..."
                       value={currentTag}
                       onChange={(e) => setCurrentTag(e.target.value)}
-                      onKeyPress={(e) => e.key === "Enter" && addTag()}
+                      onKeyPress={(e) => e.key === 'Enter' && addTag()}
                     />
                     <Button type="button" variant="outline" onClick={addTag}>
                       <Plus className="h-4 w-4" />
@@ -401,8 +401,8 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
                     {formData.tags.map(tag => (
                       <Badge key={tag} variant="secondary" className="flex items-center gap-1">
                         {tag}
-                        <X 
-                          className="h-3 w-3 cursor-pointer" 
+                        <X
+                          className="h-3 w-3 cursor-pointer"
                           onClick={() => removeTag(tag)}
                         />
                       </Badge>
@@ -418,7 +418,7 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button 
+          <Button
             onClick={handleCreate}
             disabled={!formData.name || !formData.template || !formData.host}
           >

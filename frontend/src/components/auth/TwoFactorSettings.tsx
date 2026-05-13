@@ -1,13 +1,13 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Icons } from "@/components/ui/icons";
-import { useToast } from "@/components/ui/use-toast";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
-import { authService } from "@/lib/auth";
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Icons } from '@/components/ui/icons';
+import { useToast } from '@/components/ui/use-toast';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
+import { authService } from '@/lib/auth';
 
 interface TwoFactorStatus {
   enabled: boolean;
@@ -39,9 +39,9 @@ export default function TwoFactorSettings() {
     } catch (error) {
       console.error('Failed to load 2FA status:', error);
       toast({
-        title: "Error",
-        description: "Failed to load 2FA status. Please refresh the page.",
-        variant: "destructive",
+        title: 'Error',
+        description: 'Failed to load 2FA status. Please refresh the page.',
+        variant: 'destructive',
       });
     } finally {
       setIsLoading(false);
@@ -55,19 +55,19 @@ export default function TwoFactorSettings() {
       await authService.disable2FA();
 
       toast({
-        title: "Two-Factor Authentication Disabled",
-        description: "Your account is no longer protected by 2FA",
+        title: 'Two-Factor Authentication Disabled',
+        description: 'Your account is no longer protected by 2FA',
       });
 
       setStatus({ enabled: false, backup_codes_remaining: 0 });
       setShowDisableDialog(false);
     } catch (error) {
       console.error('Failed to disable 2FA:', error);
-      const errorMessage = error instanceof Error ? error.message : "Failed to disable 2FA. Please try again.";
+      const errorMessage = error instanceof Error ? error.message : 'Failed to disable 2FA. Please try again.';
       toast({
-        title: "Error",
+        title: 'Error',
         description: errorMessage,
-        variant: "destructive",
+        variant: 'destructive',
       });
     } finally {
       setIsDisabling(false);
@@ -86,15 +86,15 @@ export default function TwoFactorSettings() {
       await loadStatus();
 
       toast({
-        title: "New Backup Codes Generated",
-        description: "Your old backup codes are no longer valid. Save the new ones safely.",
+        title: 'New Backup Codes Generated',
+        description: 'Your old backup codes are no longer valid. Save the new ones safely.',
       });
     } catch (error) {
       console.error('Failed to generate backup codes:', error);
       toast({
-        title: "Error",
-        description: "Failed to generate new backup codes. Please try again.",
-        variant: "destructive",
+        title: 'Error',
+        description: 'Failed to generate new backup codes. Please try again.',
+        variant: 'destructive',
       });
     } finally {
       setIsGeneratingCodes(false);
@@ -154,8 +154,8 @@ Keep these codes safe and secure!`;
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className="font-medium">Status:</span>
-              <Badge variant={status.enabled ? "default" : "secondary"}>
-                {status.enabled ? "Enabled" : "Disabled"}
+              <Badge variant={status.enabled ? 'default' : 'secondary'}>
+                {status.enabled ? 'Enabled' : 'Disabled'}
               </Badge>
             </div>
             {status.enabled && (
@@ -234,7 +234,7 @@ Keep these codes safe and secure!`;
                           Disabling...
                         </>
                       ) : (
-                        "Disable 2FA"
+                        'Disable 2FA'
                       )}
                     </Button>
                   </DialogFooter>
@@ -250,7 +250,7 @@ Keep these codes safe and secure!`;
             <ul className="text-sm text-gray-600 space-y-1">
               <li>• Keep your authenticator app updated and backed up</li>
               <li>• Store backup codes in a secure location</li>
-              <li>• Generate new backup codes if you think they've been compromised</li>
+              <li>• Generate new backup codes if you think they&apos;ve been compromised</li>
               <li>• Consider using multiple authenticator apps for redundancy</li>
             </ul>
           </div>

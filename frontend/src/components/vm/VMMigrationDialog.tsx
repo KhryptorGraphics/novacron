@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import { useState } from "react";
+import { useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -8,20 +8,20 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { ArrowRight, CheckCircle, AlertCircle } from "lucide-react";
-import { initiateLiveMigration } from "@/lib/api/client";
+} from '@/components/ui/select';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { ArrowRight, CheckCircle, AlertCircle } from 'lucide-react';
+import { initiateLiveMigration } from '@/lib/api/client';
 
 interface VMMigrationDialogProps {
   open: boolean;
@@ -30,30 +30,30 @@ interface VMMigrationDialogProps {
 }
 
 export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialogProps) {
-  const [targetNode, setTargetNode] = useState("");
-  const [priority, setPriority] = useState<"low" | "normal" | "high">("normal");
-  const [bandwidth, setBandwidth] = useState("");
-  const [maxDowntime, setMaxDowntime] = useState("30");
+  const [targetNode, setTargetNode] = useState('');
+  const [priority, setPriority] = useState<'low' | 'normal' | 'high'>('normal');
+  const [bandwidth, setBandwidth] = useState('');
+  const [maxDowntime, setMaxDowntime] = useState('30');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<{ migrationId: string; status: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const reset = () => {
-    setTargetNode("");
-    setPriority("normal");
-    setBandwidth("");
-    setMaxDowntime("30");
+    setTargetNode('');
+    setPriority('normal');
+    setBandwidth('');
+    setMaxDowntime('30');
     setResult(null);
     setError(null);
   };
 
   const submitMigration = async () => {
     if (!vmId) {
-      setError("VM ID is required.");
+      setError('VM ID is required.');
       return;
     }
     if (!targetNode.trim()) {
-      setError("Target node is required.");
+      setError('Target node is required.');
       return;
     }
 
@@ -71,7 +71,7 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
       }
       setResult(response.data || null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Migration request failed.");
+      setError(err instanceof Error ? err.message : 'Migration request failed.');
     } finally {
       setIsSubmitting(false);
     }
@@ -92,7 +92,7 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
             Migrate Virtual Machine
           </DialogTitle>
           <DialogDescription>
-            Submit a canonical live migration request for {vmId || "the selected VM"}.
+            Submit a canonical live migration request for {vmId || 'the selected VM'}.
           </DialogDescription>
         </DialogHeader>
 
@@ -109,7 +109,7 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
 
           <div className="grid gap-2">
             <Label>Priority</Label>
-            <Select value={priority} onValueChange={(value) => setPriority(value as "low" | "normal" | "high")}>
+            <Select value={priority} onValueChange={(value) => setPriority(value as 'low' | 'normal' | 'high')}>
               <SelectTrigger>
                 <SelectValue placeholder="Priority" />
               </SelectTrigger>
@@ -169,7 +169,7 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
             Close
           </Button>
           <Button onClick={submitMigration} disabled={isSubmitting || !vmId}>
-            {isSubmitting ? "Submitting..." : "Start Migration"}
+            {isSubmitting ? 'Submitting...' : 'Start Migration'}
           </Button>
         </DialogFooter>
       </DialogContent>

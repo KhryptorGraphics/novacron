@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { ReactNode } from 'react';
 import { useRBAC } from '@/contexts/RBACContext';
@@ -14,7 +14,7 @@ export default function PermissionGate({
   children,
   resource,
   action,
-  fallback
+  fallback,
 }: PermissionGateProps) {
   const { hasPermission } = useRBAC();
 

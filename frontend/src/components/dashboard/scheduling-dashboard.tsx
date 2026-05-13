@@ -1,28 +1,28 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { JobList } from "@/components/dashboard/job-list";
-import { WorkflowList } from "@/components/dashboard/workflow-list";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useMonitoringWebSocket } from "@/hooks/useWebSocket";
+import { useState } from 'react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { JobList } from '@/components/dashboard/job-list';
+import { WorkflowList } from '@/components/dashboard/workflow-list';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useMonitoringWebSocket } from '@/hooks/useWebSocket';
 
 export function SchedulingDashboard() {
   const { isConnected, data } = useMonitoringWebSocket();
-  const [activeTab, setActiveTab] = useState("jobs");
+  const [activeTab, setActiveTab] = useState('jobs');
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-3xl font-bold tracking-tight">Scheduling Dashboard</h2>
         <div className="flex items-center space-x-2">
-          <div className={`h-3 w-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+          <div className={`h-3 w-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
           <span className="text-sm">
             {isConnected ? 'Connected' : 'Disconnected'}
           </span>
         </div>
       </div>
-      
+
       {data && (
         <Card>
           <CardHeader>
@@ -35,7 +35,7 @@ export function SchedulingDashboard() {
           </CardContent>
         </Card>
       )}
-      
+
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="jobs">Jobs</TabsTrigger>

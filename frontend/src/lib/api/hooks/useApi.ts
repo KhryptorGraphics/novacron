@@ -20,7 +20,7 @@ export function useApi<T>(
   options?: {
     enabled?: boolean;
     dependencies?: any[];
-  }
+  },
 ): UseApiState<T> {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
@@ -74,7 +74,7 @@ export function useMutation<T, V = any>(
   options?: {
     onSuccess?: (data: T) => void;
     onError?: (error: ApiError) => void;
-  }
+  },
 ): UseMutationState<T, V> {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(false);
@@ -118,7 +118,7 @@ export function useMutation<T, V = any>(
         setLoading(false);
       }
     },
-    [method, endpoint, options]
+    [method, endpoint, options],
   );
 
   const reset = useCallback(() => {
@@ -152,7 +152,7 @@ export interface UsePaginatedApiState<T> extends UseApiState<T> {
 
 export function usePaginatedApi<T>(
   endpoint: string,
-  initialPageSize: number = 20
+  initialPageSize = 20,
 ): UsePaginatedApiState<T> {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(initialPageSize);

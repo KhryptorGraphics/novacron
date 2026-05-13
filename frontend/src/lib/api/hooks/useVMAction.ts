@@ -1,20 +1,20 @@
-"use client";
+'use client';
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { postVMAction } from "../vms";
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { postVMAction } from '../vms';
 
-export function useVMAction(id: string, action: "start" | "stop" | "restart" | "pause" | "resume", options?: { role?: "viewer" | "operator" }) {
+export function useVMAction(id: string, action: 'start' | 'stop' | 'restart' | 'pause' | 'resume', options?: { role?: 'viewer' | 'operator' }) {
   const qc = useQueryClient();
   return useMutation({
-    mutationKey: ["vm-action", id, action, options?.role],
+    mutationKey: ['vm-action', id, action, options?.role],
     mutationFn: () => postVMAction(id, action, options?.role ? { role: options.role } : undefined),
     onMutate: async () => {
       // placeholder for optimistic update
     },
     onSuccess: async () => {
       await Promise.all([
-        qc.invalidateQueries({ queryKey: ["vm", id] }),
-        qc.invalidateQueries({ queryKey: ["vms"] }),
+        qc.invalidateQueries({ queryKey: ['vm', id] }),
+        qc.invalidateQueries({ queryKey: ['vms'] }),
       ]);
     },
   });

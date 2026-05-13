@@ -1,24 +1,24 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { MetricsCard } from "@/components/monitoring/MetricsCard";
-import { AnimatedCounter, FadeIn } from "@/lib/animations";
-import { 
-  Users, 
-  Database, 
-  Shield, 
-  AlertTriangle, 
-  Server, 
+import { useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { MetricsCard } from '@/components/monitoring/MetricsCard';
+import { AnimatedCounter, FadeIn } from '@/lib/animations';
+import {
+  Users,
+  Database,
+  Shield,
+  AlertTriangle,
+  Server,
   Activity,
   Clock,
   TrendingUp,
   UserCheck,
   Eye,
-} from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
+} from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
 
 // Mock admin metrics data
 const adminMetrics = {
@@ -27,42 +27,42 @@ const adminMetrics = {
     active: 892,
     pending: 23,
     suspended: 12,
-    growth: 8.5
+    growth: 8.5,
   },
   security: {
     loginAttempts: 15432,
     failedLogins: 234,
     sessions: 167,
-    alerts: 5
+    alerts: 5,
   },
   system: {
-    uptime: "99.97%",
+    uptime: '99.97%',
     diskUsage: 67,
     memoryUsage: 73,
     cpuUsage: 45,
-    networkThroughput: 2.4
+    networkThroughput: 2.4,
   },
   database: {
     connections: 45,
     maxConnections: 100,
     queryTime: 12.3,
-    slowQueries: 3
-  }
+    slowQueries: 3,
+  },
 };
 
 const systemHealth = [
-  { service: "Authentication Service", status: "healthy", uptime: "99.98%", responseTime: "45ms" },
-  { service: "Database Cluster", status: "healthy", uptime: "99.95%", responseTime: "12ms" },
-  { service: "VM Management", status: "warning", uptime: "99.87%", responseTime: "156ms" },
-  { service: "Storage Backend", status: "healthy", uptime: "99.99%", responseTime: "23ms" },
-  { service: "Network Overlay", status: "healthy", uptime: "99.94%", responseTime: "8ms" }
+  { service: 'Authentication Service', status: 'healthy', uptime: '99.98%', responseTime: '45ms' },
+  { service: 'Database Cluster', status: 'healthy', uptime: '99.95%', responseTime: '12ms' },
+  { service: 'VM Management', status: 'warning', uptime: '99.87%', responseTime: '156ms' },
+  { service: 'Storage Backend', status: 'healthy', uptime: '99.99%', responseTime: '23ms' },
+  { service: 'Network Overlay', status: 'healthy', uptime: '99.94%', responseTime: '8ms' },
 ];
 
 const recentAlerts = [
-  { id: 1, type: "security", severity: "high", message: "Multiple failed login attempts detected", time: "2 min ago" },
-  { id: 2, type: "performance", severity: "medium", message: "VM migration queue exceeding threshold", time: "15 min ago" },
-  { id: 3, type: "system", severity: "low", message: "Scheduled maintenance reminder", time: "1 hour ago" },
-  { id: 4, type: "security", severity: "high", message: "Unusual API access pattern detected", time: "2 hours ago" }
+  { id: 1, type: 'security', severity: 'high', message: 'Multiple failed login attempts detected', time: '2 min ago' },
+  { id: 2, type: 'performance', severity: 'medium', message: 'VM migration queue exceeding threshold', time: '15 min ago' },
+  { id: 3, type: 'system', severity: 'low', message: 'Scheduled maintenance reminder', time: '1 hour ago' },
+  { id: 4, type: 'security', severity: 'high', message: 'Unusual API access pattern detected', time: '2 hours ago' },
 ];
 
 export function AdminMetrics() {
@@ -76,10 +76,10 @@ export function AdminMetrics() {
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
-      case "high": return "destructive";
-      case "medium": return "secondary";
-      case "low": return "outline";
-      default: return "outline";
+      case 'high': return 'destructive';
+      case 'medium': return 'secondary';
+      case 'low': return 'outline';
+      default: return 'outline';
     }
   };
 
@@ -89,15 +89,15 @@ export function AdminMetrics() {
       <div>
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold">System Overview</h2>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             onClick={handleRefreshMetrics}
             disabled={refreshing}
           >
-            {refreshing ? "Refreshing..." : "Refresh Metrics"}
+            {refreshing ? 'Refreshing...' : 'Refresh Metrics'}
           </Button>
         </div>
-        
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <FadeIn delay={0.1}>
             <MetricsCard
@@ -109,7 +109,7 @@ export function AdminMetrics() {
               icon={<Users className="h-5 w-5" />}
             />
           </FadeIn>
-          
+
           <FadeIn delay={0.2}>
             <MetricsCard
               title="System Uptime"
@@ -120,7 +120,7 @@ export function AdminMetrics() {
               icon={<Clock className="h-5 w-5" />}
             />
           </FadeIn>
-          
+
           <FadeIn delay={0.3}>
             <MetricsCard
               title="Security Alerts"
@@ -131,7 +131,7 @@ export function AdminMetrics() {
               icon={<Shield className="h-5 w-5" />}
             />
           </FadeIn>
-          
+
           <FadeIn delay={0.4}>
             <MetricsCard
               title="DB Connections"
@@ -165,12 +165,12 @@ export function AdminMetrics() {
                 </div>
               </div>
               <Progress value={(adminMetrics.users.active / adminMetrics.users.total) * 100} className="h-2" />
-              
+
               <div className="flex justify-between items-center">
                 <span>Pending Approvals</span>
                 <Badge variant="secondary">{adminMetrics.users.pending}</Badge>
               </div>
-              
+
               <div className="flex justify-between items-center">
                 <span>Suspended Accounts</span>
                 <Badge variant="destructive">{adminMetrics.users.suspended}</Badge>
@@ -197,7 +197,7 @@ export function AdminMetrics() {
                 </div>
                 <Progress value={adminMetrics.system.cpuUsage} className="h-2" />
               </div>
-              
+
               <div>
                 <div className="flex justify-between mb-2">
                   <span>Memory Usage</span>
@@ -205,7 +205,7 @@ export function AdminMetrics() {
                 </div>
                 <Progress value={adminMetrics.system.memoryUsage} className="h-2" />
               </div>
-              
+
               <div>
                 <div className="flex justify-between mb-2">
                   <span>Disk Usage</span>
@@ -235,7 +235,7 @@ export function AdminMetrics() {
                   <div key={index} className="flex items-center justify-between p-3 rounded-lg border">
                     <div className="flex items-center gap-3">
                       <div className={`h-3 w-3 rounded-full ${
-                        service.status === 'healthy' ? 'bg-green-500' : 
+                        service.status === 'healthy' ? 'bg-green-500' :
                         service.status === 'warning' ? 'bg-yellow-500' : 'bg-red-500'
                       }`} />
                       <div>

@@ -1,4 +1,4 @@
-import { apiClient } from "./client";
+import { apiClient } from './client';
 
 type ApiDataResponse<T> = {
   success?: boolean;
@@ -34,7 +34,7 @@ export interface CreateJobRequest {
 export interface JobExecution {
   id: string;
   job_id: string;
-  status: "pending" | "running" | "completed" | "failed" | "retrying";
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'retrying';
   started_at: string;
   completed_at?: string;
   duration_ms?: number;
@@ -47,7 +47,7 @@ export interface JobExecution {
 export interface WorkflowNode {
   id: string;
   name: string;
-  type: "job" | "decision" | "parallel" | "subworkflow";
+  type: 'job' | 'decision' | 'parallel' | 'subworkflow';
   config: unknown;
   dependencies?: string[];
   next?: string[];
@@ -85,7 +85,7 @@ export interface CreateWorkflowRequest {
 export interface WorkflowExecution {
   id: string;
   workflowId: string;
-  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   startedAt?: string;
   completedAt?: string;
   durationMs?: number;
@@ -93,7 +93,7 @@ export interface WorkflowExecution {
   errorMessage?: string;
   currentNode?: string;
   nodeExecutions: Record<string, {
-    status: "pending" | "running" | "completed" | "failed";
+    status: 'pending' | 'running' | 'completed' | 'failed';
     startedAt?: string;
     completedAt?: string;
     durationMs?: number;
@@ -104,7 +104,7 @@ export interface WorkflowExecution {
 }
 
 function unwrapData<T>(response: T | ApiDataResponse<T>, fallback: T): T {
-  if (response && typeof response === "object" && "data" in response) {
+  if (response && typeof response === 'object' && 'data' in response) {
     return (response as ApiDataResponse<T>).data ?? fallback;
   }
   return response as T;
@@ -112,7 +112,7 @@ function unwrapData<T>(response: T | ApiDataResponse<T>, fallback: T): T {
 
 export const automationApi = {
   listJobs: async (): Promise<CronJob[]> => {
-    const response = await apiClient.get<CronJob[] | ApiDataResponse<CronJob[]>>("/api/jobs");
+    const response = await apiClient.get<CronJob[] | ApiDataResponse<CronJob[]>>('/api/jobs');
     return unwrapData(response, []);
   },
 
@@ -122,7 +122,7 @@ export const automationApi = {
   },
 
   createJob: async (job: CreateJobRequest): Promise<CronJob> => {
-    const response = await apiClient.post<CronJob | ApiDataResponse<CronJob>>("/api/jobs", job);
+    const response = await apiClient.post<CronJob | ApiDataResponse<CronJob>>('/api/jobs', job);
     return unwrapData(response, null as unknown as CronJob);
   },
 
@@ -133,7 +133,7 @@ export const automationApi = {
 
   deleteJob: async (id: string): Promise<boolean> => {
     const response = await apiClient.delete<boolean | { success?: boolean }>(`/api/jobs/${id}`);
-    return typeof response === "boolean" ? response : response.success ?? true;
+    return typeof response === 'boolean' ? response : response.success ?? true;
   },
 
   executeJob: async (id: string): Promise<unknown> => {
@@ -142,7 +142,7 @@ export const automationApi = {
   },
 
   listWorkflows: async (): Promise<Workflow[]> => {
-    const response = await apiClient.get<Workflow[] | ApiDataResponse<Workflow[]>>("/api/workflows");
+    const response = await apiClient.get<Workflow[] | ApiDataResponse<Workflow[]>>('/api/workflows');
     return unwrapData(response, []);
   },
 
@@ -152,7 +152,7 @@ export const automationApi = {
   },
 
   createWorkflow: async (workflow: CreateWorkflowRequest): Promise<Workflow> => {
-    const response = await apiClient.post<Workflow | ApiDataResponse<Workflow>>("/api/workflows", workflow);
+    const response = await apiClient.post<Workflow | ApiDataResponse<Workflow>>('/api/workflows', workflow);
     return unwrapData(response, null as unknown as Workflow);
   },
 
@@ -163,7 +163,7 @@ export const automationApi = {
 
   deleteWorkflow: async (id: string): Promise<boolean> => {
     const response = await apiClient.delete<boolean | { success?: boolean }>(`/api/workflows/${id}`);
-    return typeof response === "boolean" ? response : response.success ?? true;
+    return typeof response === 'boolean' ? response : response.success ?? true;
   },
 
   executeWorkflow: async (id: string): Promise<WorkflowExecution> => {

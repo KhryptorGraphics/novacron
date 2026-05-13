@@ -1,14 +1,14 @@
-"use client";
+'use client';
 
 // Disable static generation for this page
 export const dynamic = 'force-dynamic';
 
-import { useState } from "react";
-import Link from "next/link";
-import { RegistrationWizard } from "@/components/auth/RegistrationWizard";
-import { RegistrationData } from "@/lib/validation";
-import { authService } from "@/lib/auth";
-import { useToast } from "@/components/ui/use-toast";
+import { useState } from 'react';
+import Link from 'next/link';
+import { RegistrationWizard } from '@/components/auth/RegistrationWizard';
+import { RegistrationData } from '@/lib/validation';
+import { authService } from '@/lib/auth';
+import { useToast } from '@/components/ui/use-toast';
 
 export default function RegisterPage() {
   const [, setIsLoading] = useState(false);
@@ -16,7 +16,7 @@ export default function RegisterPage() {
 
   async function onComplete(data: RegistrationData) {
     setIsLoading(true);
-    
+
     try {
       await authService.register({
         firstName: data.firstName,
@@ -25,11 +25,11 @@ export default function RegisterPage() {
         password: data.password,
       });
     } catch (error) {
-      console.error("Registration error:", error);
+      console.error('Registration error:', error);
       toast({
-        title: "Registration Failed",
-        description: "Unable to create your account. Please try again.",
-        variant: "destructive",
+        title: 'Registration Failed',
+        description: 'Unable to create your account. Please try again.',
+        variant: 'destructive',
       });
       throw error; // Re-throw to be handled by the wizard
     } finally {
@@ -54,7 +54,7 @@ export default function RegisterPage() {
               Join thousands of organizations using NovaCron to manage their distributed infrastructure
             </p>
           </div>
-          
+
           <div className="grid gap-4">
             <div className="flex items-start gap-3">
               <div className="mt-1 h-5 w-5 rounded-full bg-blue-500/20 flex items-center justify-center">
@@ -65,7 +65,7 @@ export default function RegisterPage() {
                 <p className="text-sm text-gray-400">Provision, monitor, and manage VMs at scale</p>
               </div>
             </div>
-            
+
             <div className="flex items-start gap-3">
               <div className="mt-1 h-5 w-5 rounded-full bg-blue-500/20 flex items-center justify-center">
                 <span className="text-xs text-blue-400">✓</span>
@@ -75,7 +75,7 @@ export default function RegisterPage() {
                 <p className="text-sm text-gray-400">Zero-downtime migrations with WAN optimization</p>
               </div>
             </div>
-            
+
             <div className="flex items-start gap-3">
               <div className="mt-1 h-5 w-5 rounded-full bg-blue-500/20 flex items-center justify-center">
                 <span className="text-xs text-blue-400">✓</span>
@@ -86,16 +86,16 @@ export default function RegisterPage() {
               </div>
             </div>
           </div>
-          
+
           <blockquote className="border-l-2 border-blue-500 pl-4 space-y-2">
             <p className="text-lg italic">
-              "NovaCron has revolutionized how we manage our distributed infrastructure. The automation capabilities are unmatched."
+              &quot;NovaCron has revolutionized how we manage our distributed infrastructure. The automation capabilities are unmatched.&quot;
             </p>
             <footer className="text-sm text-gray-400">— Sofia Davis, CTO at TechCorp</footer>
           </blockquote>
         </div>
       </div>
-      
+
       <div className="lg:p-8">
         <div className="mx-auto flex w-full flex-col justify-center space-y-6">
           <div className="flex justify-center mb-4">
@@ -106,11 +106,11 @@ export default function RegisterPage() {
               Back to Home
             </Link>
           </div>
-          
+
           <RegistrationWizard onComplete={onComplete} />
-          
+
           <p className="text-center text-sm text-muted-foreground mt-4">
-            Already have an account?{" "}
+            Already have an account?{' '}
             <Link
               href="/auth/login"
               className="font-medium text-blue-600 hover:text-blue-500 underline underline-offset-4"

@@ -45,14 +45,14 @@ class ApiClient {
   private buildHeaders(customHeaders?: HeadersInit): HeadersInit {
     const headers = { ...this.defaultHeaders, ...customHeaders };
     const token = this.getAuthToken();
-    
+
     if (token) {
       return {
         ...headers,
         'Authorization': `Bearer ${token}`,
       };
     }
-    
+
     return headers;
   }
 
@@ -93,7 +93,7 @@ class ApiClient {
   private async request<T>(
     endpoint: string,
     options: RequestInit = {},
-    retries: number = 0
+    retries = 0,
   ): Promise<T> {
     const url = this.baseUrl === API_ORIGIN
       ? buildApiUrl(endpoint)
@@ -181,7 +181,7 @@ class ApiClient {
     return this.request<T>(
       endpoint,
       requestOptions,
-      1
+      1,
     );
   }
 
@@ -199,7 +199,7 @@ class ApiClient {
     return this.request<T>(
       endpoint,
       requestOptions,
-      1
+      1,
     );
   }
 
@@ -224,7 +224,7 @@ class ApiClient {
     return this.request<T>(
       endpoint,
       requestOptions,
-      1
+      1,
     );
   }
 }

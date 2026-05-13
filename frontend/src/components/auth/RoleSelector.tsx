@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
@@ -18,7 +18,7 @@ export default function RoleSelector({
   selectedRoles,
   onRoleChange,
   disabled = false,
-  showDescription = true
+  showDescription = true,
 }: RoleSelectorProps) {
   // Available roles - in production, this might be fetched from an API
   const availableRoles: Role[] = [
@@ -26,26 +26,26 @@ export default function RoleSelector({
       id: 'super-admin',
       name: 'Super Administrator',
       description: 'Full system access with all permissions',
-      permissions: []
+      permissions: [],
     },
     {
       id: 'admin',
       name: 'Administrator',
       description: 'System administration with most permissions',
-      permissions: []
+      permissions: [],
     },
     {
       id: 'operator',
       name: 'Operator',
       description: 'VM operations and monitoring access',
-      permissions: []
+      permissions: [],
     },
     {
       id: 'viewer',
       name: 'Viewer',
       description: 'Read-only access to system resources',
-      permissions: []
-    }
+      permissions: [],
+    },
   ];
 
   const getRoleIcon = (roleId: string) => {

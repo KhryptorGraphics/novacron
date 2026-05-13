@@ -1,12 +1,12 @@
-"use client";
+'use client';
 
-import { useQuery } from "@tanstack/react-query";
-import { listVMs, type ListVMsParams } from "../vms";
-import type { VM } from "../types";
+import { useQuery } from '@tanstack/react-query';
+import { listVMs, type ListVMsParams } from '../vms';
+import type { VM } from '../types';
 
 export function useVMs(params?: ListVMsParams) {
   const { data, isLoading, error } = useQuery({
-    queryKey: ["vms", params],
+    queryKey: ['vms', params],
     queryFn: () => listVMs(params),
     staleTime: 5_000,
   });

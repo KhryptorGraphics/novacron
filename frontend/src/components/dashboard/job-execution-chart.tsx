@@ -1,11 +1,11 @@
-"use client";
+'use client';
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useJobs } from "@/lib/api/hooks/useAutomation";
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useJobs } from '@/lib/api/hooks/useAutomation';
 
 export function JobExecutionChart() {
   const { jobs } = useJobs();
-  
+
   // Calculate execution frequency by hour for the last 24 hours
   const executionData = Array.from({ length: 24 }, (_, i) => {
     const hour = new Date();
@@ -25,7 +25,7 @@ export function JobExecutionChart() {
         <div className="h-64 flex items-end justify-between pt-4">
           {executionData.map((data, index) => (
             <div key={index} className="flex flex-col items-center flex-1 px-1">
-              <div 
+              <div
                 className="w-full bg-blue-500 rounded-t hover:bg-blue-600 transition-colors"
                 style={{ height: `${data.count * 10}%` }}
               />

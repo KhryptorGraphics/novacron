@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import { validatePassword, PasswordStrength } from "@/lib/validation";
-import { cn } from "@/lib/utils";
-import { motion, AnimatePresence } from "framer-motion";
-import { CheckCircle2, AlertCircle, Info, Shield, Lock } from "lucide-react";
+import { useEffect, useState } from 'react';
+import { validatePassword, PasswordStrength } from '@/lib/validation';
+import { cn } from '@/lib/utils';
+import { motion, AnimatePresence } from 'framer-motion';
+import { CheckCircle2, AlertCircle, Info, Shield, Lock } from 'lucide-react';
 
 interface PasswordStrengthIndicatorProps {
   password: string;
@@ -15,14 +15,14 @@ interface PasswordStrengthIndicatorProps {
 export function PasswordStrengthIndicator({
   password,
   showSuggestions = true,
-  className
+  className,
 }: PasswordStrengthIndicatorProps) {
   const [strength, setStrength] = useState<PasswordStrength>({
     score: 0,
-    feedback: "",
-    suggestions: []
+    feedback: '',
+    suggestions: [],
   });
-  
+
   useEffect(() => {
     if (password) {
       const result = validatePassword(password);
@@ -30,67 +30,67 @@ export function PasswordStrengthIndicator({
     } else {
       setStrength({
         score: 0,
-        feedback: "",
-        suggestions: []
+        feedback: '',
+        suggestions: [],
       });
     }
   }, [password]);
-  
+
   const getStrengthConfig = (score: number) => {
     switch (score) {
       case 0: return {
-        color: "bg-red-500",
-        textColor: "text-red-600 dark:text-red-400",
-        label: "Very Weak",
+        color: 'bg-red-500',
+        textColor: 'text-red-600 dark:text-red-400',
+        label: 'Very Weak',
         icon: AlertCircle,
-        bgColor: "bg-red-50 dark:bg-red-900/20"
+        bgColor: 'bg-red-50 dark:bg-red-900/20',
       };
       case 1: return {
-        color: "bg-orange-500",
-        textColor: "text-orange-600 dark:text-orange-400",
-        label: "Weak",
+        color: 'bg-orange-500',
+        textColor: 'text-orange-600 dark:text-orange-400',
+        label: 'Weak',
         icon: AlertCircle,
-        bgColor: "bg-orange-50 dark:bg-orange-900/20"
+        bgColor: 'bg-orange-50 dark:bg-orange-900/20',
       };
       case 2: return {
-        color: "bg-yellow-500",
-        textColor: "text-yellow-600 dark:text-yellow-400",
-        label: "Fair",
+        color: 'bg-yellow-500',
+        textColor: 'text-yellow-600 dark:text-yellow-400',
+        label: 'Fair',
         icon: Info,
-        bgColor: "bg-yellow-50 dark:bg-yellow-900/20"
+        bgColor: 'bg-yellow-50 dark:bg-yellow-900/20',
       };
       case 3: return {
-        color: "bg-blue-500",
-        textColor: "text-blue-600 dark:text-blue-400",
-        label: "Good",
+        color: 'bg-blue-500',
+        textColor: 'text-blue-600 dark:text-blue-400',
+        label: 'Good',
         icon: Shield,
-        bgColor: "bg-blue-50 dark:bg-blue-900/20"
+        bgColor: 'bg-blue-50 dark:bg-blue-900/20',
       };
       case 4: return {
-        color: "bg-green-500",
-        textColor: "text-green-600 dark:text-green-400",
-        label: "Strong",
+        color: 'bg-green-500',
+        textColor: 'text-green-600 dark:text-green-400',
+        label: 'Strong',
         icon: CheckCircle2,
-        bgColor: "bg-green-50 dark:bg-green-900/20"
+        bgColor: 'bg-green-50 dark:bg-green-900/20',
       };
       default: return {
-        color: "bg-gray-200",
-        textColor: "text-gray-500",
-        label: "",
+        color: 'bg-gray-200',
+        textColor: 'text-gray-500',
+        label: '',
         icon: Lock,
-        bgColor: "bg-gray-50 dark:bg-gray-900/20"
+        bgColor: 'bg-gray-50 dark:bg-gray-900/20',
       };
     }
   };
-  
+
   const config = getStrengthConfig(strength.score);
   const IconComponent = config.icon;
-  
+
   if (!password) return null;
-  
+
   return (
-    <motion.div 
-      className={cn("space-y-3", className)}
+    <motion.div
+      className={cn('space-y-3', className)}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
@@ -102,26 +102,26 @@ export function PasswordStrengthIndicator({
             <motion.div
               key={level}
               className={cn(
-                "h-2 flex-1 rounded-full transition-colors duration-500",
+                'h-2 flex-1 rounded-full transition-colors duration-500',
                 level <= strength.score
                   ? config.color
-                  : "bg-muted"
+                  : 'bg-muted',
               )}
               initial={{ scaleX: 0 }}
-              animate={{ 
+              animate={{
                 scaleX: level <= strength.score ? 1 : 1,
-                opacity: level <= strength.score ? 1 : 0.3
+                opacity: level <= strength.score ? 1 : 0.3,
               }}
-              transition={{ 
+              transition={{
                 delay: level * 0.1,
                 duration: 0.3,
-                ease: "easeOut"
+                ease: 'easeOut',
               }}
-              style={{ transformOrigin: "left" }}
+              style={{ transformOrigin: 'left' }}
             />
           ))}
         </div>
-        
+
         {/* Strength text with icon */}
         <AnimatePresence mode="wait">
           <motion.div
@@ -133,12 +133,12 @@ export function PasswordStrengthIndicator({
             transition={{ duration: 0.2 }}
           >
             <div className="flex items-center gap-2">
-              <IconComponent className={cn("h-4 w-4", config.textColor)} />
-              <span className={cn("text-sm font-medium", config.textColor)}>
+              <IconComponent className={cn('h-4 w-4', config.textColor)} />
+              <span className={cn('text-sm font-medium', config.textColor)}>
                 {config.label}
               </span>
             </div>
-            
+
             {/* Checkmark for strong passwords */}
             <AnimatePresence>
               {strength.score >= 3 && (
@@ -146,10 +146,10 @@ export function PasswordStrengthIndicator({
                   initial={{ scale: 0, rotate: -180 }}
                   animate={{ scale: 1, rotate: 0 }}
                   exit={{ scale: 0, rotate: 180 }}
-                  transition={{ 
-                    type: "spring",
+                  transition={{
+                    type: 'spring',
                     stiffness: 200,
-                    damping: 10
+                    damping: 10,
                   }}
                 >
                   <CheckCircle2 className="h-4 w-4 text-success" />
@@ -159,13 +159,13 @@ export function PasswordStrengthIndicator({
           </motion.div>
         </AnimatePresence>
       </div>
-      
+
       {/* Enhanced suggestions */}
       <AnimatePresence>
         {showSuggestions && strength.suggestions.length > 0 && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
+            animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.3 }}
             className="overflow-hidden"

@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 interface Node {
   id: string;
@@ -56,40 +56,40 @@ export function NodeList({ nodes, onAction }: NodeListProps) {
               <td className="px-6 py-4">{node.address}:{node.port}</td>
               <td className="px-6 py-4">
                 <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
-                  <div 
-                    className="bg-blue-600 h-2.5 rounded-full" 
+                  <div
+                    className="bg-blue-600 h-2.5 rounded-full"
                     style={{ width: `${Math.min(100, node.cpu_usage)}%` }}
-                  ></div>
+                   />
                 </div>
                 <span className="text-xs mt-1">{node.cpu_usage.toFixed(1)}%</span>
               </td>
               <td className="px-6 py-4">
                 <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
-                  <div 
-                    className="bg-green-600 h-2.5 rounded-full" 
+                  <div
+                    className="bg-green-600 h-2.5 rounded-full"
                     style={{ width: `${Math.min(100, (node.memory_usage / 1024 / 1024 / 1024) * 10)}%` }}
-                  ></div>
+                   />
                 </div>
                 <span className="text-xs mt-1">{(node.memory_usage / 1024 / 1024 / 1024).toFixed(1)} GB</span>
               </td>
               <td className="px-6 py-4">{node.vm_count}</td>
               <td className="px-6 py-4">
                 <div className="flex space-x-2">
-                  <button 
+                  <button
                     onClick={() => onAction(node.id, 'restart')}
                     className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-200"
                   >
                     Restart
                   </button>
                   {node.state === 'running' ? (
-                    <button 
+                    <button
                       onClick={() => onAction(node.id, 'stop')}
                       className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-200"
                     >
                       Stop
                     </button>
                   ) : (
-                    <button 
+                    <button
                       onClick={() => onAction(node.id, 'start')}
                       className="text-green-600 hover:text-green-900 dark:text-green-400 dark:hover:text-green-200"
                     >

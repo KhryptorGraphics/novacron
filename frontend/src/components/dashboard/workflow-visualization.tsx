@@ -1,17 +1,17 @@
-"use client";
+'use client';
 
-import { useState, useRef } from "react";
-import { useWorkflow, useWorkflowExecution } from "@/lib/api/hooks/useAutomation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogHeader, 
-  DialogTitle 
-} from "@/components/ui/dialog";
-import { format } from "date-fns";
+import { useState, useRef } from 'react';
+import { useWorkflow, useWorkflowExecution } from '@/lib/api/hooks/useAutomation';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { format } from 'date-fns';
 
 interface Node {
   id: string;
@@ -38,12 +38,12 @@ export function WorkflowVisualization({ workflowId }: { workflowId: string }) {
 
   const handleExecute = async () => {
     if (!workflow) return;
-    
+
     try {
       setIsExecuting(true);
       await executeWorkflow();
     } catch (err) {
-      console.error("Failed to execute workflow:", err);
+      console.error('Failed to execute workflow:', err);
     } finally {
       setIsExecuting(false);
     }
@@ -56,13 +56,13 @@ export function WorkflowVisualization({ workflowId }: { workflowId: string }) {
     type: node.type,
     x: 100 + (index % 3) * 200,
     y: 100 + Math.floor(index / 3) * 150,
-    status: execution?.nodeExecutions[node.id]?.status || 'pending'
+    status: execution?.nodeExecutions[node.id]?.status || 'pending',
   })) || [];
 
   const edges: Edge[] = workflow?.edges.map((edge: any, index: number) => ({
     id: `edge-${index}`,
     source: edge.from,
-    target: edge.to
+    target: edge.to,
   })) || [];
 
   if (loading) {
@@ -123,31 +123,31 @@ export function WorkflowVisualization({ workflowId }: { workflowId: string }) {
         <div className="flex justify-between items-center">
           <CardTitle>Workflow Visualization: {workflow.name}</CardTitle>
           <div className="flex space-x-2">
-            <Button 
-              onClick={handleExecute} 
+            <Button
+              onClick={handleExecute}
               disabled={isExecuting}
               variant="default"
             >
-              {isExecuting ? "Executing..." : "Execute"}
+              {isExecuting ? 'Executing...' : 'Execute'}
             </Button>
           </div>
         </div>
       </CardHeader>
       <CardContent>
         <div className="border rounded-lg p-4 h-96 overflow-auto">
-          <svg 
+          <svg
             ref={svgRef}
-            width="100%" 
-            height="100%" 
+            width="100%"
+            height="100%"
             className="min-w-full min-h-full"
           >
             {/* Render edges */}
             {edges.map(edge => {
               const sourceNode = getNode(edge.source);
               const targetNode = getNode(edge.target);
-              
+
               if (!sourceNode || !targetNode) return null;
-              
+
               return (
                 <line
                   key={edge.id}
@@ -161,7 +161,7 @@ export function WorkflowVisualization({ workflowId }: { workflowId: string }) {
                 />
               );
             })}
-            
+
             {/* Arrow marker definition */}
             <defs>
               <marker
@@ -178,10 +178,10 @@ export function WorkflowVisualization({ workflowId }: { workflowId: string }) {
                 />
               </marker>
             </defs>
-            
+
             {/* Render nodes */}
             {nodes.map(node => (
-              <g 
+              <g
                 key={node.id}
                 transform={`translate(${node.x}, ${node.y})`}
                 onClick={() => {
@@ -189,7 +189,7 @@ export function WorkflowVisualization({ workflowId }: { workflowId: string }) {
                   if (nodeData) {
                     setSelectedNode({
                       ...nodeData,
-                      execution: execution?.nodeExecutions[node.id]
+                      execution: execution?.nodeExecutions[node.id],
                     });
                     setIsNodeDialogOpen(true);
                   }
@@ -227,7 +227,7 @@ export function WorkflowVisualization({ workflowId }: { workflowId: string }) {
             ))}
           </svg>
         </div>
-        
+
         {/* Workflow execution status */}
         {execution && (
           <div className="mt-4 p-4 bg-gray-50 rounded-lg">
@@ -235,21 +235,21 @@ export function WorkflowVisualization({ workflowId }: { workflowId: string }) {
               <div>
                 <h3 className="font-medium">Execution Status</h3>
                 <p className="text-sm text-gray-500">
-                  Started: {execution.startedAt ? format(new Date(execution.startedAt), "MMM dd, yyyy HH:mm:ss") : "N/A"}
+                  Started: {execution.startedAt ? format(new Date(execution.startedAt), 'MMM dd, yyyy HH:mm:ss') : 'N/A'}
                 </p>
                 {execution.completedAt && (
                   <p className="text-sm text-gray-500">
-                    Completed: {format(new Date(execution.completedAt), "MMM dd, yyyy HH:mm:ss")}
+                    Completed: {format(new Date(execution.completedAt), 'MMM dd, yyyy HH:mm:ss')}
                   </p>
                 )}
               </div>
-              <Badge 
+              <Badge
                 variant={execution.status === 'completed' ? 'default' : execution.status === 'failed' ? 'destructive' : 'secondary'}
               >
                 {execution.status}
               </Badge>
             </div>
-            
+
             {execution.durationMs && (
               <p className="text-sm mt-2">
                 Duration: {execution.durationMs}ms
@@ -257,7 +257,7 @@ export function WorkflowVisualization({ workflowId }: { workflowId: string }) {
             )}
           </div>
         )}
-        
+
         {/* Node details dialog */}
         <Dialog open={isNodeDialogOpen} onOpenChange={setIsNodeDialogOpen}>
           <DialogContent>
@@ -274,7 +274,7 @@ export function WorkflowVisualization({ workflowId }: { workflowId: string }) {
                     {JSON.stringify(selectedNode.config, null, 2)}
                   </pre>
                 </div>
-                
+
                 {selectedNode.execution && (
                   <div>
                     <h4 className="font-medium mb-2">Execution Status</h4>
@@ -286,10 +286,10 @@ export function WorkflowVisualization({ workflowId }: { workflowId: string }) {
                         </Badge>
                       </div>
                       {selectedNode.execution.startedAt && (
-                        <p>Started: {format(new Date(selectedNode.execution.startedAt), "MMM dd, yyyy HH:mm:ss")}</p>
+                        <p>Started: {format(new Date(selectedNode.execution.startedAt), 'MMM dd, yyyy HH:mm:ss')}</p>
                       )}
                       {selectedNode.execution.completedAt && (
-                        <p>Completed: {format(new Date(selectedNode.execution.completedAt), "MMM dd, yyyy HH:mm:ss")}</p>
+                        <p>Completed: {format(new Date(selectedNode.execution.completedAt), 'MMM dd, yyyy HH:mm:ss')}</p>
                       )}
                       {selectedNode.execution.durationMs && (
                         <p>Duration: {selectedNode.execution.durationMs}ms</p>

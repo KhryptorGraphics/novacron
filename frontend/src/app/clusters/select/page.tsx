@@ -1,15 +1,15 @@
-"use client";
+'use client';
 
 export const dynamic = 'force-dynamic';
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import AuthGuard from "@/components/auth/AuthGuard";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Icons } from "@/components/ui/icons";
-import { useToast } from "@/components/ui/use-toast";
-import { useAuth } from "@/hooks/useAuth";
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import AuthGuard from '@/components/auth/AuthGuard';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Icons } from '@/components/ui/icons';
+import { useToast } from '@/components/ui/use-toast';
+import { useAuth } from '@/hooks/useAuth';
 
 export default function ClusterSelectionPage() {
   const router = useRouter();
@@ -24,16 +24,16 @@ export default function ClusterSelectionPage() {
     try {
       const destination = await selectCluster(clusterId);
       toast({
-        title: "Cluster Selected",
-        description: "Your runtime session is now bound to the selected cluster.",
+        title: 'Cluster Selected',
+        description: 'Your runtime session is now bound to the selected cluster.',
       });
       router.push(destination);
     } catch (error) {
       console.error('Failed to select cluster:', error);
       toast({
-        title: "Selection Failed",
-        description: "NovaCron could not bind your session to that cluster.",
-        variant: "destructive",
+        title: 'Selection Failed',
+        description: 'NovaCron could not bind your session to that cluster.',
+        variant: 'destructive',
       });
     } finally {
       setSubmittingClusterId(null);

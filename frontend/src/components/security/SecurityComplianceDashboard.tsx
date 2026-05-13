@@ -46,21 +46,21 @@ const SecurityComplianceDashboard: React.FC = () => {
     categoryBreakdown: complianceByCategory,
     loading: complianceLoading,
     error: complianceError,
-    triggerComplianceCheck
+    triggerComplianceCheck,
   } = useCompliance();
 
   const {
     scans: vulnerabilityScans,
     loading: scansLoading,
     error: scansError,
-    startScan
+    startScan,
   } = useVulnerabilityScans();
 
   const {
     metrics,
     threatTrends,
     loading: metricsLoading,
-    error: metricsError
+    error: metricsError,
   } = useSecurityMetrics(autoRefresh, 60000);
 
   // Transform API data for charts
@@ -73,9 +73,9 @@ const SecurityComplianceDashboard: React.FC = () => {
         { name: 'High', value: 0, color: '#ea580c' },
         { name: 'Medium', value: 0, color: '#ca8a04' },
         { name: 'Low', value: 0, color: '#65a30d' },
-        { name: 'Info', value: 0, color: '#0891b2' }
+        { name: 'Info', value: 0, color: '#0891b2' },
       ],
-      threatTrends: []
+      threatTrends: [],
     };
 
     return {
@@ -86,13 +86,13 @@ const SecurityComplianceDashboard: React.FC = () => {
         { name: 'High', value: metrics.vulnerabilityCount.high, color: '#ea580c' },
         { name: 'Medium', value: metrics.vulnerabilityCount.medium, color: '#ca8a04' },
         { name: 'Low', value: metrics.vulnerabilityCount.low, color: '#65a30d' },
-        { name: 'Info', value: metrics.vulnerabilityCount.info, color: '#0891b2' }
+        { name: 'Info', value: metrics.vulnerabilityCount.info, color: '#0891b2' },
       ],
       threatTrends: threatTrends.map(trend => ({
         time: new Date(trend.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
         threats: trend.threats,
-        blocked: trend.blocked
-      }))
+        blocked: trend.blocked,
+      })),
     };
   };
 
@@ -105,7 +105,7 @@ const SecurityComplianceDashboard: React.FC = () => {
     { metric: 'Encryption', score: chartData.complianceScore, fullMark: 100 },
     { metric: 'Monitoring', score: 85, fullMark: 100 },
     { metric: 'Incident Response', score: 78, fullMark: 100 },
-    { metric: 'Compliance', score: chartData.complianceScore, fullMark: 100 }
+    { metric: 'Compliance', score: chartData.complianceScore, fullMark: 100 },
   ];
 
   // Format date helper
@@ -114,7 +114,7 @@ const SecurityComplianceDashboard: React.FC = () => {
   };
 
   // Functions
-  const handleRunScan = useCallback(async (type: string, target: string = 'production-cluster') => {
+  const handleRunScan = useCallback(async (type: string, target = 'production-cluster') => {
     try {
       await startScan(target, type);
     } catch (error) {
@@ -194,7 +194,7 @@ const SecurityComplianceDashboard: React.FC = () => {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent mx-auto mb-4" />
           <p>Loading security dashboard...</p>
         </div>
       </div>

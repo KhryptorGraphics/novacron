@@ -1,15 +1,15 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useEffect, useState } from 'react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   AlertCircle,
   CheckCircle,
@@ -19,14 +19,14 @@ import {
   Router,
   Shield,
   Trash2,
-} from "lucide-react";
-import { networkApi, type FirewallRule, type LoadBalancer } from "@/lib/api/networks";
-import { cn } from "@/lib/utils";
+} from 'lucide-react';
+import { networkApi, type FirewallRule, type LoadBalancer } from '@/lib/api/networks';
+import { cn } from '@/lib/utils';
 
 type NetworkRecord = {
   id: string;
   name: string;
-  type: "bridged" | "overlay" | "isolated" | string;
+  type: 'bridged' | 'overlay' | 'isolated' | string;
   subnet: string;
   gateway?: string | null;
   status: string;
@@ -36,20 +36,20 @@ type NetworkRecord = {
 
 type CreateNetworkForm = {
   name: string;
-  type: "bridged" | "overlay" | "isolated";
+  type: 'bridged' | 'overlay' | 'isolated';
   subnet: string;
   gateway: string;
 };
 
 const emptyNetworkForm: CreateNetworkForm = {
-  name: "",
-  type: "bridged",
-  subnet: "",
-  gateway: "",
+  name: '',
+  type: 'bridged',
+  subnet: '',
+  gateway: '',
 };
 
 function formatDate(value?: string) {
-  if (!value) return "unknown";
+  if (!value) return 'unknown';
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString();
@@ -57,14 +57,14 @@ function formatDate(value?: string) {
 
 function statusClass(status: string) {
   switch (status.toLowerCase()) {
-    case "active":
-      return "bg-green-100 text-green-800";
-    case "configuring":
-      return "bg-yellow-100 text-yellow-800";
-    case "inactive":
-      return "bg-gray-100 text-gray-800";
+    case 'active':
+      return 'bg-green-100 text-green-800';
+    case 'configuring':
+      return 'bg-yellow-100 text-yellow-800';
+    case 'inactive':
+      return 'bg-gray-100 text-gray-800';
     default:
-      return "";
+      return '';
   }
 }
 
@@ -97,7 +97,7 @@ export function NetworkConfigurationPanel() {
         setSelectedNetworkId(response[0].id);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load networks.");
+      setError(err instanceof Error ? err.message : 'Failed to load networks.');
     } finally {
       setLoading(false);
     }
@@ -113,7 +113,7 @@ export function NetworkConfigurationPanel() {
     const name = newNetwork.name.trim();
     const subnet = newNetwork.subnet.trim();
     if (!name || !subnet) {
-      setError("Network name and subnet are required.");
+      setError('Network name and subnet are required.');
       return;
     }
 
@@ -130,16 +130,16 @@ export function NetworkConfigurationPanel() {
       setSelectedNetworkId(created.id);
       setNewNetwork(emptyNetworkForm);
       setCreateDialogOpen(false);
-      setNotice("Network created through the canonical network API.");
+      setNotice('Network created through the canonical network API.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create network.");
+      setError(err instanceof Error ? err.message : 'Failed to create network.');
     } finally {
       setLoading(false);
     }
   };
 
   const deleteNetwork = async (networkId: string) => {
-    if (!window.confirm("Delete this network through the canonical network API?")) {
+    if (!window.confirm('Delete this network through the canonical network API?')) {
       return;
     }
 
@@ -151,9 +151,9 @@ export function NetworkConfigurationPanel() {
       if (selectedNetworkId === networkId) {
         setSelectedNetworkId(null);
       }
-      setNotice("Network deleted through the canonical network API.");
+      setNotice('Network deleted through the canonical network API.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete network.");
+      setError(err instanceof Error ? err.message : 'Failed to delete network.');
     } finally {
       setLoading(false);
     }
@@ -161,7 +161,7 @@ export function NetworkConfigurationPanel() {
 
   const createFirewallRule = async () => {
     if (!selectedNetwork) {
-      setError("Select a network before creating a firewall rule.");
+      setError('Select a network before creating a firewall rule.');
       return;
     }
     setLoading(true);
@@ -170,19 +170,19 @@ export function NetworkConfigurationPanel() {
       const created = await networkApi.createFirewallRule({
         name: `${selectedNetwork.name} allow tcp`,
         networkId: selectedNetwork.id,
-        direction: "inbound",
-        action: "allow",
-        protocol: "tcp",
-        source: "0.0.0.0/0",
+        direction: 'inbound',
+        action: 'allow',
+        protocol: 'tcp',
+        source: '0.0.0.0/0',
         destination: selectedNetwork.subnet,
-        port: "any",
+        port: 'any',
         priority: 100,
         enabled: true,
       });
       setFirewallRules((current) => [created, ...current]);
-      setNotice("Firewall rule created through the canonical network policy API.");
+      setNotice('Firewall rule created through the canonical network policy API.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create firewall rule.");
+      setError(err instanceof Error ? err.message : 'Failed to create firewall rule.');
     } finally {
       setLoading(false);
     }
@@ -194,9 +194,9 @@ export function NetworkConfigurationPanel() {
     try {
       await networkApi.deleteFirewallRule(ruleId);
       setFirewallRules((current) => current.filter((rule) => rule.id !== ruleId));
-      setNotice("Firewall rule deleted through the canonical network policy API.");
+      setNotice('Firewall rule deleted through the canonical network policy API.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete firewall rule.");
+      setError(err instanceof Error ? err.message : 'Failed to delete firewall rule.');
     } finally {
       setLoading(false);
     }
@@ -204,7 +204,7 @@ export function NetworkConfigurationPanel() {
 
   const createLoadBalancer = async () => {
     if (!selectedNetwork) {
-      setError("Select a network before creating a load balancer.");
+      setError('Select a network before creating a load balancer.');
       return;
     }
     setLoading(true);
@@ -213,15 +213,15 @@ export function NetworkConfigurationPanel() {
       const created = await networkApi.createLoadBalancer({
         name: `${selectedNetwork.name} edge`,
         networkId: selectedNetwork.id,
-        vip: selectedNetwork.gateway || "",
+        vip: selectedNetwork.gateway || '',
         port: 80,
-        algorithm: "round_robin",
-        type: "layer4",
+        algorithm: 'round_robin',
+        type: 'layer4',
       });
       setLoadBalancers((current) => [created, ...current]);
-      setNotice("Load balancer created through the canonical load-balancer API.");
+      setNotice('Load balancer created through the canonical load-balancer API.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create load balancer.");
+      setError(err instanceof Error ? err.message : 'Failed to create load balancer.');
     } finally {
       setLoading(false);
     }
@@ -233,9 +233,9 @@ export function NetworkConfigurationPanel() {
     try {
       await networkApi.deleteLoadBalancer(loadBalancerId);
       setLoadBalancers((current) => current.filter((lb) => lb.id !== loadBalancerId));
-      setNotice("Load balancer deleted through the canonical load-balancer API.");
+      setNotice('Load balancer deleted through the canonical load-balancer API.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete load balancer.");
+      setError(err instanceof Error ? err.message : 'Failed to delete load balancer.');
     } finally {
       setLoading(false);
     }
@@ -252,7 +252,7 @@ export function NetworkConfigurationPanel() {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={loadNetworks} disabled={loading}>
-            <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
+            <RefreshCw className={cn('mr-2 h-4 w-4', loading && 'animate-spin')} />
             Refresh
           </Button>
           <Button onClick={() => setCreateDialogOpen(true)} disabled={loading}>
@@ -292,7 +292,7 @@ export function NetworkConfigurationPanel() {
           <CardContent>
             <div className="text-2xl font-bold">{networks.length}</div>
             <p className="text-xs text-muted-foreground">
-              {networks.filter((network) => network.status === "active").length} active
+              {networks.filter((network) => network.status === 'active').length} active
             </p>
           </CardContent>
         </Card>
@@ -336,7 +336,7 @@ export function NetworkConfigurationPanel() {
                 <div className="space-y-3">
                   {networks.length === 0 && (
                     <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-                      {loading ? "Loading networks..." : "No networks returned by the canonical API."}
+                      {loading ? 'Loading networks...' : 'No networks returned by the canonical API.'}
                     </div>
                   )}
 
@@ -346,8 +346,8 @@ export function NetworkConfigurationPanel() {
                       type="button"
                       onClick={() => setSelectedNetworkId(network.id)}
                       className={cn(
-                        "w-full rounded-lg border p-4 text-left transition-colors hover:bg-muted/60",
-                        selectedNetwork?.id === network.id && "border-primary bg-muted"
+                        'w-full rounded-lg border p-4 text-left transition-colors hover:bg-muted/60',
+                        selectedNetwork?.id === network.id && 'border-primary bg-muted',
                       )}
                     >
                       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -359,7 +359,7 @@ export function NetworkConfigurationPanel() {
                           </div>
                           <div className="font-mono text-sm text-muted-foreground">{network.subnet}</div>
                           <div className="text-sm text-muted-foreground">
-                            Gateway: {network.gateway || "not configured"}
+                            Gateway: {network.gateway || 'not configured'}
                           </div>
                         </div>
                         <Button
@@ -383,7 +383,7 @@ export function NetworkConfigurationPanel() {
             <Card>
               <CardHeader>
                 <CardTitle>Network Details</CardTitle>
-                <CardDescription>{selectedNetwork?.id || "Select a network"}</CardDescription>
+                <CardDescription>{selectedNetwork?.id || 'Select a network'}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {selectedNetwork ? (
@@ -391,7 +391,7 @@ export function NetworkConfigurationPanel() {
                     <Detail label="Name" value={selectedNetwork.name} />
                     <Detail label="Type" value={selectedNetwork.type} />
                     <Detail label="Subnet" value={selectedNetwork.subnet} mono />
-                    <Detail label="Gateway" value={selectedNetwork.gateway || "not configured"} mono />
+                    <Detail label="Gateway" value={selectedNetwork.gateway || 'not configured'} mono />
                     <Detail label="Status" value={selectedNetwork.status} />
                     <Detail label="Created" value={formatDate(selectedNetwork.created_at)} />
                     <Detail label="Updated" value={formatDate(selectedNetwork.updated_at)} />
@@ -419,7 +419,7 @@ export function NetworkConfigurationPanel() {
             <CardContent className="space-y-3">
               {firewallRules.length === 0 && (
                 <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-                  {loading ? "Loading firewall rules..." : "No firewall rules returned by the canonical API."}
+                  {loading ? 'Loading firewall rules...' : 'No firewall rules returned by the canonical API.'}
                 </div>
               )}
               {firewallRules.map((rule) => (
@@ -457,7 +457,7 @@ export function NetworkConfigurationPanel() {
             <CardContent className="space-y-3">
               {loadBalancers.length === 0 && (
                 <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-                  {loading ? "Loading load balancers..." : "No load balancers returned by the canonical API."}
+                  {loading ? 'Loading load balancers...' : 'No load balancers returned by the canonical API.'}
                 </div>
               )}
               {loadBalancers.map((balancer) => (
@@ -465,7 +465,7 @@ export function NetworkConfigurationPanel() {
                   <div>
                     <div className="font-medium">{balancer.name}</div>
                     <div className="text-sm text-muted-foreground">
-                      {balancer.type} {balancer.algorithm} on {balancer.vip || "unassigned"}:{balancer.port}
+                      {balancer.type} {balancer.algorithm} on {balancer.vip || 'unassigned'}:{balancer.port}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -523,7 +523,7 @@ export function NetworkConfigurationPanel() {
                 value={newNetwork.type}
                 onValueChange={(value) => setNewNetwork((current) => ({
                   ...current,
-                  type: value as CreateNetworkForm["type"],
+                  type: value as CreateNetworkForm['type'],
                 }))}
               >
                 <SelectTrigger>
@@ -555,7 +555,7 @@ function Detail({ label, value, mono = false }: { label: string; value: string; 
   return (
     <div className="flex justify-between gap-4">
       <span className="text-sm text-muted-foreground">{label}</span>
-      <span className={cn("text-right text-sm font-medium", mono && "font-mono")}>{value}</span>
+      <span className={cn('text-right text-sm font-medium', mono && 'font-mono')}>{value}</span>
     </div>
   );
 }

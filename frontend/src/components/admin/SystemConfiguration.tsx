@@ -1,34 +1,34 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
-import { Slider } from "@/components/ui/slider";
-import { Textarea } from "@/components/ui/textarea";
-import { 
+import { useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { Slider } from '@/components/ui/slider';
+import { Textarea } from '@/components/ui/textarea';
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { FadeIn } from "@/lib/animations";
-import { 
-  Settings, 
-  Save, 
-  RotateCcw, 
-  Shield, 
-  Database, 
+} from '@/components/ui/select';
+import { FadeIn } from '@/lib/animations';
+import {
+  Settings,
+  Save,
+  RotateCcw,
+  Shield,
+  Database,
   Bell,
   AlertTriangle,
   Server,
   FileText,
-  Upload
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+  Upload,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 // Configuration sections
 interface ConfigSection {
@@ -64,21 +64,21 @@ const configSections: ConfigSection[] = [
         label: 'System Name',
         description: 'Display name for the NovaCron system',
         type: 'string',
-        value: 'NovaCron Production'
+        value: 'NovaCron Production',
       },
       {
         key: 'maintenance_mode',
         label: 'Maintenance Mode',
         description: 'Enable maintenance mode to restrict access',
         type: 'boolean',
-        value: false
+        value: false,
       },
       {
         key: 'debug_mode',
         label: 'Debug Mode',
         description: 'Enable debug logging and error details',
         type: 'boolean',
-        value: false
+        value: false,
       },
       {
         key: 'session_timeout',
@@ -88,7 +88,7 @@ const configSections: ConfigSection[] = [
         value: [30],
         min: 5,
         max: 480,
-        unit: 'minutes'
+        unit: 'minutes',
       },
       {
         key: 'timezone',
@@ -104,10 +104,10 @@ const configSections: ConfigSection[] = [
           { value: 'America/Los_Angeles', label: 'Pacific Time' },
           { value: 'Europe/London', label: 'London' },
           { value: 'Europe/Paris', label: 'Paris' },
-          { value: 'Asia/Tokyo', label: 'Tokyo' }
-        ]
-      }
-    ]
+          { value: 'Asia/Tokyo', label: 'Tokyo' },
+        ],
+      },
+    ],
   },
   {
     id: 'security',
@@ -120,7 +120,7 @@ const configSections: ConfigSection[] = [
         label: 'Require Two-Factor Authentication',
         description: 'Force all users to enable 2FA',
         type: 'boolean',
-        value: true
+        value: true,
       },
       {
         key: 'password_min_length',
@@ -130,7 +130,7 @@ const configSections: ConfigSection[] = [
         value: [8],
         min: 6,
         max: 32,
-        unit: 'characters'
+        unit: 'characters',
       },
       {
         key: 'login_attempts',
@@ -140,7 +140,7 @@ const configSections: ConfigSection[] = [
         value: [5],
         min: 3,
         max: 10,
-        unit: 'attempts'
+        unit: 'attempts',
       },
       {
         key: 'jwt_secret',
@@ -148,7 +148,7 @@ const configSections: ConfigSection[] = [
         description: 'Secret key for JWT token signing',
         type: 'string',
         value: '••••••••••••••••••••••••••••••••',
-        sensitive: true
+        sensitive: true,
       },
       {
         key: 'api_rate_limit',
@@ -158,9 +158,9 @@ const configSections: ConfigSection[] = [
         value: [1000],
         min: 100,
         max: 10000,
-        unit: 'req/min'
-      }
-    ]
+        unit: 'req/min',
+      },
+    ],
   },
   {
     id: 'database',
@@ -176,7 +176,7 @@ const configSections: ConfigSection[] = [
         value: [50],
         min: 10,
         max: 200,
-        unit: 'connections'
+        unit: 'connections',
       },
       {
         key: 'query_timeout',
@@ -186,14 +186,14 @@ const configSections: ConfigSection[] = [
         value: [30],
         min: 5,
         max: 300,
-        unit: 'seconds'
+        unit: 'seconds',
       },
       {
         key: 'enable_query_logging',
         label: 'Query Logging',
         description: 'Log all database queries for debugging',
         type: 'boolean',
-        value: false
+        value: false,
       },
       {
         key: 'backup_retention',
@@ -203,9 +203,9 @@ const configSections: ConfigSection[] = [
         value: [30],
         min: 7,
         max: 365,
-        unit: 'days'
-      }
-    ]
+        unit: 'days',
+      },
+    ],
   },
   {
     id: 'vm',
@@ -221,7 +221,7 @@ const configSections: ConfigSection[] = [
         value: [3],
         min: 1,
         max: 10,
-        unit: 'migrations'
+        unit: 'migrations',
       },
       {
         key: 'migration_bandwidth_limit',
@@ -231,7 +231,7 @@ const configSections: ConfigSection[] = [
         value: [1000],
         min: 100,
         max: 10000,
-        unit: 'MB/s'
+        unit: 'MB/s',
       },
       {
         key: 'vm_snapshot_retention',
@@ -241,16 +241,16 @@ const configSections: ConfigSection[] = [
         value: [10],
         min: 3,
         max: 50,
-        unit: 'snapshots'
+        unit: 'snapshots',
       },
       {
         key: 'auto_scaling_enabled',
         label: 'Auto Scaling',
         description: 'Automatically scale resources based on demand',
         type: 'boolean',
-        value: true
-      }
-    ]
+        value: true,
+      },
+    ],
   },
   {
     id: 'notifications',
@@ -263,21 +263,21 @@ const configSections: ConfigSection[] = [
         label: 'SMTP Server',
         description: 'Email server hostname',
         type: 'string',
-        value: 'smtp.novacron.io'
+        value: 'smtp.novacron.io',
       },
       {
         key: 'smtp_port',
         label: 'SMTP Port',
         description: 'Email server port',
         type: 'number',
-        value: 587
+        value: 587,
       },
       {
         key: 'email_notifications',
         label: 'Email Notifications',
         description: 'Send email notifications for system events',
         type: 'boolean',
-        value: true
+        value: true,
       },
       {
         key: 'notification_frequency',
@@ -289,11 +289,11 @@ const configSections: ConfigSection[] = [
           { value: 'immediate', label: 'Immediate' },
           { value: 'hourly', label: 'Hourly' },
           { value: 'daily', label: 'Daily' },
-          { value: 'weekly', label: 'Weekly' }
-        ]
-      }
-    ]
-  }
+          { value: 'weekly', label: 'Weekly' },
+        ],
+      },
+    ],
+  },
 ];
 
 export function SystemConfiguration() {
@@ -318,10 +318,10 @@ export function SystemConfiguration() {
 
   const handleSave = async () => {
     setSaving(true);
-    
+
     // Simulate API call
     await new Promise(resolve => setTimeout(resolve, 2000));
-    
+
     setHasChanges(false);
     setSaving(false);
   };
@@ -366,7 +366,7 @@ export function SystemConfiguration() {
               {setting.description}
             </p>
             <Input
-              type={setting.sensitive ? "password" : "text"}
+              type={setting.sensitive ? 'password' : 'text'}
               value={value}
               onChange={(e) => updateSetting(setting.key, e.target.value)}
               className="w-full"
@@ -471,7 +471,7 @@ export function SystemConfiguration() {
             Manage system settings and preferences
           </p>
         </div>
-        
+
         <div className="flex items-center gap-2">
           {hasChanges && (
             <Badge variant="secondary">
@@ -479,15 +479,15 @@ export function SystemConfiguration() {
               Unsaved Changes
             </Badge>
           )}
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             onClick={handleReset}
             disabled={!hasChanges || saving}
           >
             <RotateCcw className="h-4 w-4 mr-2" />
             Reset
           </Button>
-          <Button 
+          <Button
             onClick={handleSave}
             disabled={!hasChanges || saving}
           >
@@ -511,8 +511,8 @@ export function SystemConfiguration() {
                     key={section.id}
                     onClick={() => setActiveSection(section.id)}
                     className={cn(
-                      "w-full text-left px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex items-center gap-3",
-                      activeSection === section.id && "bg-blue-50 dark:bg-blue-950 border-r-2 border-blue-500"
+                      'w-full text-left px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex items-center gap-3',
+                      activeSection === section.id && 'bg-blue-50 dark:bg-blue-950 border-r-2 border-blue-500',
                     )}
                   >
                     {section.icon}

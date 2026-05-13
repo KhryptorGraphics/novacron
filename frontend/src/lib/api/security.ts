@@ -226,7 +226,7 @@ function normalizeComplianceRequirements(payload: RawRecord): ComplianceRequirem
 }
 
 function aggregateComplianceByCategory(
-  requirements: ComplianceRequirement[]
+  requirements: ComplianceRequirement[],
 ): ComplianceByCategory[] {
   const byCategory = new Map<string, { compliant: number; total: number }>();
 
@@ -262,7 +262,7 @@ function normalizeVulnerabilityFinding(finding: RawRecord, index: number): Vulne
     description: String(finding.description || 'No backend description provided.'),
     remediation: String(
       finding.remediation ||
-        'Review the backend scan output and remediate the affected component.'
+        'Review the backend scan output and remediate the affected component.',
     ),
     exploitable: Boolean(finding.exploitable),
     ...(cve ? { cve } : {}),
@@ -273,7 +273,7 @@ function normalizeVulnerabilityFinding(finding: RawRecord, index: number): Vulne
 
 function summarizeThreatLevel(
   activeThreats: number,
-  counts: SecurityMetrics['vulnerabilityCount']
+  counts: SecurityMetrics['vulnerabilityCount'],
 ): SecurityMetrics['threatLevel'] {
   if (activeThreats > 0 || counts.critical > 0) return 'critical';
   if (counts.high > 0) return 'high';
@@ -284,7 +284,7 @@ function summarizeThreatLevel(
 function deriveSecurityScore(
   complianceScore: number,
   activeThreats: number,
-  counts: SecurityMetrics['vulnerabilityCount']
+  counts: SecurityMetrics['vulnerabilityCount'],
 ): number {
   const penalty =
     counts.critical * 12 + counts.high * 5 + counts.medium * 2 + activeThreats * 6;
@@ -335,11 +335,11 @@ class SecurityAPIService {
 
   // Security Events
   async getSecurityEvents(
-    limit: number = 100,
-    offset: number = 0,
+    limit = 100,
+    offset = 0,
     severity?: string,
     type?: string,
-    timeRange?: string
+    timeRange?: string,
   ): Promise<{ events: SecurityEvent[]; total: number }> {
     const params = new URLSearchParams({
       limit: limit.toString(),
@@ -351,7 +351,7 @@ class SecurityAPIService {
     if (timeRange) params.append('timeRange', timeRange);
 
     return this.request<{ events: SecurityEvent[]; total: number }>(
-      `/api/security/events?${params.toString()}`
+      `/api/security/events?${params.toString()}`,
     );
   }
 
@@ -370,7 +370,7 @@ class SecurityAPIService {
 
   async updateComplianceRequirement(
     id: string,
-    updates: Partial<ComplianceRequirement>
+    updates: Partial<ComplianceRequirement>,
   ): Promise<ComplianceRequirement> {
     void id;
     void updates;
@@ -427,7 +427,7 @@ class SecurityAPIService {
 
   async startVulnerabilityScan(
     target: string,
-    scanType: string
+    scanType: string,
   ): Promise<{ scanId: string }> {
     const response = await this.request<{ scan_id: string }>('/api/security/scan', {
       method: 'POST',
@@ -455,7 +455,7 @@ class SecurityAPIService {
 
   async updateAccessControl(
     id: string,
-    updates: Partial<AccessControl>
+    updates: Partial<AccessControl>,
   ): Promise<AccessControl> {
     void id;
     void updates;
@@ -465,7 +465,7 @@ class SecurityAPIService {
   async testAccessControl(
     resource: string,
     subject: string,
-    action: string
+    action: string,
   ): Promise<{ allowed: boolean; reason?: string }> {
     void resource;
     void subject;
@@ -502,8 +502,8 @@ class SecurityAPIService {
   }
 
   async getThreatTrends(
-    timeRange: string = '24h',
-    granularity: string = '1h'
+    timeRange = '24h',
+    granularity = '1h',
   ): Promise<ThreatTrend[]> {
     void timeRange;
     void granularity;
@@ -547,12 +547,12 @@ class SecurityAPIService {
 
   // Audit Trail
   async getAuditTrail(
-    limit: number = 100,
-    offset: number = 0,
+    limit = 100,
+    offset = 0,
     resource?: string,
     action?: string,
     user?: string,
-    timeRange?: string
+    timeRange?: string,
   ): Promise<{ events: SecurityEvent[]; total: number }> {
     const params = new URLSearchParams({
       limit: limit.toString(),
@@ -565,7 +565,7 @@ class SecurityAPIService {
     if (timeRange) params.append('timeRange', timeRange);
 
     return this.request<{ events: SecurityEvent[]; total: number }>(
-      `/api/security/audit/events?${params.toString()}`
+      `/api/security/audit/events?${params.toString()}`,
     );
   }
 

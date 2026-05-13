@@ -1,42 +1,42 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
-} from "@/components/ui/table";
-import { 
+import { useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { FadeIn } from "@/lib/animations";
-import { useUsers, useUpdateUser } from "@/lib/api/hooks/useAdmin";
-import type { User } from "@/lib/api/types";
-import { 
-  Users, 
-  Search, 
-  UserPlus, 
-  Mail, 
-  Shield, 
-  Ban, 
-  UserCheck, 
+} from '@/components/ui/select';
+import { FadeIn } from '@/lib/animations';
+import { useUsers, useUpdateUser } from '@/lib/api/hooks/useAdmin';
+import type { User } from '@/lib/api/types';
+import {
+  Users,
+  Search,
+  UserPlus,
+  Mail,
+  Shield,
+  Ban,
+  UserCheck,
   Eye,
   Edit,
   AlertCircle,
   CheckCircle,
-  Clock
-} from "lucide-react";
+  Clock,
+} from 'lucide-react';
 
 type CanonicalAdminUser = Partial<User> & {
   username?: string;
@@ -57,30 +57,30 @@ type UserRow = {
 };
 
 function normalizeUser(user: CanonicalAdminUser): UserRow {
-  const activeStatus = user.active === false ? "suspended" : "active";
+  const activeStatus = user.active === false ? 'suspended' : 'active';
 
   return {
-    id: String(user.id || ""),
-    name: user.name || user.username || user.email || "Unnamed user",
-    email: user.email || "",
-    role: user.role || "user",
+    id: String(user.id || ''),
+    name: user.name || user.username || user.email || 'Unnamed user',
+    email: user.email || '',
+    role: user.role || 'user',
     status: user.status || activeStatus,
     last_login: user.last_login || null,
     login_count: user.login_count || 0,
-    organization: user.organization || "Default",
+    organization: user.organization || 'Default',
     two_factor: user.two_factor_enabled || false,
     email_verified: user.email_verified ?? true,
   };
 }
 
 export function UserManagement() {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [roleFilter, setRoleFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [roleFilter, setRoleFilter] = useState('all');
   const userQueryFilters: { search?: string; status?: string; role?: string; pageSize?: number } = { pageSize: 100 };
   if (searchQuery) userQueryFilters.search = searchQuery;
-  if (statusFilter !== "all") userQueryFilters.status = statusFilter;
-  if (roleFilter !== "all") userQueryFilters.role = roleFilter;
+  if (statusFilter !== 'all') userQueryFilters.status = statusFilter;
+  if (roleFilter !== 'all') userQueryFilters.role = roleFilter;
   const usersQuery = useUsers(userQueryFilters);
   const updateUser = useUpdateUser();
   const users = (usersQuery.data?.users || []).map((user) => normalizeUser(user as CanonicalAdminUser));
@@ -90,37 +90,37 @@ export function UserManagement() {
     const matchesSearch = user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          user.organization.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === "all" || user.status === statusFilter;
-    const matchesRole = roleFilter === "all" || user.role === roleFilter;
-    
+    const matchesStatus = statusFilter === 'all' || user.status === statusFilter;
+    const matchesRole = roleFilter === 'all' || user.role === roleFilter;
+
     return matchesSearch && matchesStatus && matchesRole;
   });
 
   const userStats = {
     total: usersQuery.data?.total || filteredUsers.length,
-    active: filteredUsers.filter((user) => user.status === "active").length,
-    pending: filteredUsers.filter((user) => user.status === "pending").length,
+    active: filteredUsers.filter((user) => user.status === 'active').length,
+    pending: filteredUsers.filter((user) => user.status === 'pending').length,
     twoFactorEnabled: filteredUsers.filter((user) => user.two_factor).length,
   };
 
   const handleUserAction = async (userId: string, action: string) => {
-    const active = action === "activate" || action === "approve";
+    const active = action === 'activate' || action === 'approve';
     await updateUser.mutateAsync({ id: userId, active });
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case "active": return <CheckCircle className="h-4 w-4 text-green-600" />;
-      case "suspended": return <Ban className="h-4 w-4 text-red-600" />;
-      case "pending": return <Clock className="h-4 w-4 text-yellow-600" />;
+      case 'active': return <CheckCircle className="h-4 w-4 text-green-600" />;
+      case 'suspended': return <Ban className="h-4 w-4 text-red-600" />;
+      case 'pending': return <Clock className="h-4 w-4 text-yellow-600" />;
       default: return <AlertCircle className="h-4 w-4 text-gray-600" />;
     }
   };
 
   const formatDate = (dateString: string | null) => {
-    if (!dateString) return "Never";
-    return new Date(dateString).toLocaleDateString() + " " + 
-           new Date(dateString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (!dateString) return 'Never';
+    return `${new Date(dateString).toLocaleDateString()  } ${
+           new Date(dateString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   };
 
   return (
@@ -136,7 +136,7 @@ export function UserManagement() {
             Manage user accounts, roles, and permissions
           </p>
         </div>
-        
+
         <Button>
           <UserPlus className="h-4 w-4 mr-2" />
           Add User
@@ -215,7 +215,7 @@ export function UserManagement() {
                 className="pl-10"
               />
             </div>
-            
+
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Filter by status" />
@@ -227,7 +227,7 @@ export function UserManagement() {
                 <SelectItem value="pending">Pending</SelectItem>
               </SelectContent>
             </Select>
-            
+
             <Select value={roleFilter} onValueChange={setRoleFilter}>
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Filter by role" />
@@ -282,25 +282,25 @@ export function UserManagement() {
                           </span>
                         </div>
                       </TableCell>
-                      
+
                       <TableCell>{user.organization}</TableCell>
-                      
+
                       <TableCell>
-                        <Badge 
+                        <Badge
                           variant={user.role === 'admin' ? 'destructive' : user.role === 'moderator' ? 'secondary' : 'outline'}
                           className="capitalize"
                         >
                           {user.role}
                         </Badge>
                       </TableCell>
-                      
+
                       <TableCell>
                         <div className="flex items-center gap-2">
                           {getStatusIcon(user.status)}
                           <span className="capitalize">{user.status}</span>
                         </div>
                       </TableCell>
-                      
+
                       <TableCell>
                         <div className="text-sm">
                           {formatDate(user.last_login)}
@@ -309,24 +309,24 @@ export function UserManagement() {
                           </div>
                         </div>
                       </TableCell>
-                      
+
                       <TableCell>
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center gap-1 text-sm">
                             <Mail className="h-3 w-3" />
-                            <span className={user.email_verified ? "text-green-600" : "text-red-600"}>
-                              {user.email_verified ? "Verified" : "Unverified"}
+                            <span className={user.email_verified ? 'text-green-600' : 'text-red-600'}>
+                              {user.email_verified ? 'Verified' : 'Unverified'}
                             </span>
                           </div>
                           <div className="flex items-center gap-1 text-sm">
                             <Shield className="h-3 w-3" />
-                            <span className={user.two_factor ? "text-green-600" : "text-gray-600"}>
-                              {user.two_factor ? "2FA On" : "2FA Off"}
+                            <span className={user.two_factor ? 'text-green-600' : 'text-gray-600'}>
+                              {user.two_factor ? '2FA On' : '2FA Off'}
                             </span>
                           </div>
                         </div>
                       </TableCell>
-                      
+
                       <TableCell>
                         <div className="flex items-center gap-1">
                           {user.status === 'pending' && (
@@ -339,7 +339,7 @@ export function UserManagement() {
                               Approve
                             </Button>
                           )}
-                          
+
                           {user.status === 'active' && (
                             <Button
                               size="sm"
@@ -351,7 +351,7 @@ export function UserManagement() {
                               Suspend
                             </Button>
                           )}
-                          
+
                           {user.status === 'suspended' && (
                             <Button
                               size="sm"
@@ -363,7 +363,7 @@ export function UserManagement() {
                               Activate
                             </Button>
                           )}
-                          
+
                           <Button
                             size="sm"
                             variant="ghost"
@@ -372,7 +372,7 @@ export function UserManagement() {
                           >
                             <Eye className="h-3 w-3" />
                           </Button>
-                          
+
                           <Button
                             size="sm"
                             variant="ghost"

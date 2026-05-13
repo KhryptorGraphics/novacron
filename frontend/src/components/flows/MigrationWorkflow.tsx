@@ -1,26 +1,26 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CheckCircle, RefreshCw, Send, Server } from "lucide-react";
-import { migrationApi, type MigrationCheck, type MigrationJob, type MigrationPlan } from "@/lib/api/migration";
-import { useVMs } from "@/lib/api/hooks/useVMs";
-import { cn } from "@/lib/utils";
+import { useEffect, useState } from 'react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { CheckCircle, RefreshCw, Send, Server } from 'lucide-react';
+import { migrationApi, type MigrationCheck, type MigrationJob, type MigrationPlan } from '@/lib/api/migration';
+import { useVMs } from '@/lib/api/hooks/useVMs';
+import { cn } from '@/lib/utils';
 
 function jobId(job: MigrationJob) {
-  return job.jobId || job.id || "unknown";
+  return job.jobId || job.id || 'unknown';
 }
 
 function formatDate(value?: string) {
-  if (!value) return "unknown";
+  if (!value) return 'unknown';
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString();
@@ -29,9 +29,9 @@ function formatDate(value?: string) {
 export function MigrationWorkflow() {
   const { items: vms, isLoading: vmsLoading, error: vmsError } = useVMs({ page: 1, pageSize: 100 });
   const [selectedVMs, setSelectedVMs] = useState<string[]>([]);
-  const [sourceCluster, setSourceCluster] = useState("local");
-  const [targetCluster, setTargetCluster] = useState("");
-  const [migrationStrategy, setMigrationStrategy] = useState("cold");
+  const [sourceCluster, setSourceCluster] = useState('local');
+  const [targetCluster, setTargetCluster] = useState('');
+  const [migrationStrategy, setMigrationStrategy] = useState('cold');
   const [jobs, setJobs] = useState<MigrationJob[]>([]);
   const [plans, setPlans] = useState<MigrationPlan[]>([]);
   const [checks, setChecks] = useState<MigrationCheck[]>([]);
@@ -51,7 +51,7 @@ export function MigrationWorkflow() {
       setJobs(Array.isArray(response) ? response : []);
       setPlans(Array.isArray(planResponse) ? planResponse : []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load migration jobs.");
+      setError(err instanceof Error ? err.message : 'Failed to load migration jobs.');
     } finally {
       setLoadingJobs(false);
     }
@@ -65,17 +65,17 @@ export function MigrationWorkflow() {
     setSelectedVMs((current) =>
       current.includes(vmId)
         ? current.filter((id) => id !== vmId)
-        : [...current, vmId]
+        : [...current, vmId],
     );
   };
 
   const submitMigration = async () => {
     if (!targetCluster.trim()) {
-      setError("Target cluster is required.");
+      setError('Target cluster is required.');
       return;
     }
     if (selectedVMs.length === 0) {
-      setError("Select at least one VM.");
+      setError('Select at least one VM.');
       return;
     }
 
@@ -88,14 +88,14 @@ export function MigrationWorkflow() {
       setSelectedVMs([]);
       setMessage(`Migration ${jobId(created)} queued through the canonical API.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to queue migration.");
+      setError(err instanceof Error ? err.message : 'Failed to queue migration.');
     } finally {
       setSubmitting(false);
     }
   };
 
   const migrationPayload = () => ({
-    sourceCluster: sourceCluster.trim() || "local",
+    sourceCluster: sourceCluster.trim() || 'local',
     targetCluster: targetCluster.trim(),
     vmIds: selectedVMs,
     migrationStrategy,
@@ -103,7 +103,7 @@ export function MigrationWorkflow() {
 
   const createPlan = async () => {
     if (!targetCluster.trim() || selectedVMs.length === 0) {
-      setError("Target cluster and at least one VM are required for planning.");
+      setError('Target cluster and at least one VM are required for planning.');
       return;
     }
     setSubmitting(true);
@@ -115,7 +115,7 @@ export function MigrationWorkflow() {
       setChecks(created.checks || []);
       setMessage(`Migration plan ${created.planId} created through the canonical planning API.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create migration plan.");
+      setError(err instanceof Error ? err.message : 'Failed to create migration plan.');
     } finally {
       setSubmitting(false);
     }
@@ -123,7 +123,7 @@ export function MigrationWorkflow() {
 
   const runPreflight = async () => {
     if (!targetCluster.trim() || selectedVMs.length === 0) {
-      setError("Target cluster and at least one VM are required for preflight.");
+      setError('Target cluster and at least one VM are required for preflight.');
       return;
     }
     setSubmitting(true);
@@ -134,7 +134,7 @@ export function MigrationWorkflow() {
       setChecks(result.checks || []);
       setMessage(`Migration preflight completed with ${result.status} status.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to run migration preflight.");
+      setError(err instanceof Error ? err.message : 'Failed to run migration preflight.');
     } finally {
       setSubmitting(false);
     }
@@ -147,7 +147,7 @@ export function MigrationWorkflow() {
       const result = await migrationApi.rollback(id);
       setMessage(`Rollback ${result.rollbackId} queued for ${id}.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to queue rollback.");
+      setError(err instanceof Error ? err.message : 'Failed to queue rollback.');
     } finally {
       setSubmitting(false);
     }
@@ -163,7 +163,7 @@ export function MigrationWorkflow() {
           </p>
         </div>
         <Button variant="outline" onClick={loadJobs} disabled={loadingJobs}>
-          <RefreshCw className={cn("mr-2 h-4 w-4", loadingJobs && "animate-spin")} />
+          <RefreshCw className={cn('mr-2 h-4 w-4', loadingJobs && 'animate-spin')} />
           Refresh Jobs
         </Button>
       </div>
@@ -185,7 +185,7 @@ export function MigrationWorkflow() {
       {(error || Boolean(vmsError)) && (
         <Alert variant="destructive">
           <AlertDescription>
-            {error || "Failed to load VM inventory from the canonical API."}
+            {error || 'Failed to load VM inventory from the canonical API.'}
           </AlertDescription>
         </Alert>
       )}
@@ -233,7 +233,7 @@ export function MigrationWorkflow() {
               disabled={submitting || vmsLoading || selectedVMs.length === 0}
             >
               <Send className="mr-2 h-4 w-4" />
-              {submitting ? "Queuing..." : "Queue Migration"}
+              {submitting ? 'Queuing...' : 'Queue Migration'}
             </Button>
             <div className="grid grid-cols-2 gap-2">
               <Button
@@ -263,7 +263,7 @@ export function MigrationWorkflow() {
             <div className="space-y-3">
               {vms.length === 0 && (
                 <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-                  {vmsLoading ? "Loading VMs..." : "No VMs returned by the canonical API."}
+                  {vmsLoading ? 'Loading VMs...' : 'No VMs returned by the canonical API.'}
                 </div>
               )}
 
@@ -281,11 +281,11 @@ export function MigrationWorkflow() {
                     <div>
                       <div className="font-medium">{vm.name}</div>
                       <div className="text-sm text-muted-foreground">
-                        {vm.id} on {vm.node_id || "unassigned"}
+                        {vm.id} on {vm.node_id || 'unassigned'}
                       </div>
                     </div>
                   </div>
-                  <Badge variant={vm.state === "running" ? "default" : "secondary"}>
+                  <Badge variant={vm.state === 'running' ? 'default' : 'secondary'}>
                     {vm.state}
                   </Badge>
                 </label>
@@ -350,7 +350,7 @@ export function MigrationWorkflow() {
               {jobs.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
-                    {loadingJobs ? "Loading migration jobs..." : "No migration jobs returned by the canonical API."}
+                    {loadingJobs ? 'Loading migration jobs...' : 'No migration jobs returned by the canonical API.'}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -360,10 +360,10 @@ export function MigrationWorkflow() {
                     <TableCell>
                       <Badge variant="outline">{job.status}</Badge>
                     </TableCell>
-                    <TableCell>{job.sourceCluster || "unknown"}</TableCell>
-                    <TableCell>{job.targetCluster || "unknown"}</TableCell>
-                    <TableCell>{job.vmCount ?? "unknown"}</TableCell>
-                    <TableCell>{job.migrationStrategy || "unknown"}</TableCell>
+                    <TableCell>{job.sourceCluster || 'unknown'}</TableCell>
+                    <TableCell>{job.targetCluster || 'unknown'}</TableCell>
+                    <TableCell>{job.vmCount ?? 'unknown'}</TableCell>
+                    <TableCell>{job.migrationStrategy || 'unknown'}</TableCell>
                     <TableCell>{formatDate(job.createdAt || job.startTime)}</TableCell>
                     <TableCell>
                       <Button variant="outline" size="sm" onClick={() => rollbackJob(jobId(job))} disabled={submitting}>

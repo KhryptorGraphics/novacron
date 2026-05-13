@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useAuth } from '@/hooks/useAuth';
 import { useRBAC } from '@/contexts/RBACContext';

@@ -23,7 +23,7 @@ import {
   CardDescription,
   CardFooter,
   CardHeader,
-  CardTitle
+  CardTitle,
 } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -42,7 +42,7 @@ import {
   MemoryStick,
   Network,
   Database,
-  Activity
+  Activity,
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -53,7 +53,7 @@ import {
   TableCell,
   TableHead,
   TableHeader,
-  TableRow
+  TableRow,
 } from '@/components/ui/table';
 
 // Import new visualization components
@@ -62,7 +62,7 @@ import {
   NetworkTopology,
   PredictiveChart,
   ResourceTreemap,
-  AlertCorrelation
+  AlertCorrelation,
 } from '@/components/visualizations';
 import { buildApiV1Url, buildWebSocketUrls } from '@/lib/api/origin';
 
@@ -76,7 +76,7 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  ArcElement
+  ArcElement,
 );
 
 // Types
@@ -129,14 +129,14 @@ const TIME_RANGES: TimeRangeOption[] = [
 // Helper functions
 const formatBytes = (bytes: number, decimals = 2): string => {
   if (bytes === 0) return '0 Bytes';
-  
+
   const k = 1024;
   const dm = decimals < 0 ? 0 : decimals;
   const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
-  
+
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))  } ${  sizes[i]}`;
 };
 
 const formatPercentage = (value: number): string => {
@@ -249,9 +249,9 @@ const MetricCard: React.FC<{
   );
 };
 
-const AlertItem: React.FC<{ alert: Alert; onAcknowledge: (id: string) => void }> = ({ 
-  alert, 
-  onAcknowledge 
+const AlertItem: React.FC<{ alert: Alert; onAcknowledge: (id: string) => void }> = ({
+  alert,
+  onAcknowledge,
 }) => {
   return (
     <div className={`p-4 rounded-lg mb-3 ${getSeverityColor(alert.severity)}`}>
@@ -276,8 +276,8 @@ const AlertItem: React.FC<{ alert: Alert; onAcknowledge: (id: string) => void }>
               <span className="text-xs">{alert.resource}</span>
             </div>
             {alert.status === 'firing' && (
-              <Button 
-                size="sm" 
+              <Button
+                size="sm"
                 variant="outline"
                 onClick={() => onAcknowledge(alert.id)}
               >
@@ -352,9 +352,9 @@ const MonitoringDashboard: React.FC = () => {
   const { toast } = useToast();
   const [timeRange, setTimeRange] = useState<string>(TIME_RANGES[1].value);
   const [activeTab, setActiveTab] = useState<string>('overview');
-  
+
   // API Queries
-  const { 
+  const {
     data: systemMetrics,
     refetch: refetchMetrics,
   } = useQuery({
@@ -370,7 +370,7 @@ const MonitoringDashboard: React.FC = () => {
     refetchInterval: 30000, // Refetch every 30 seconds
   });
 
-  const { 
+  const {
     data: alerts,
     isLoading: isLoadingAlerts,
     refetch: refetchAlerts,
@@ -386,7 +386,7 @@ const MonitoringDashboard: React.FC = () => {
     refetchInterval: 15000, // Refetch every 15 seconds
   });
 
-  const { 
+  const {
     data: vms,
     isLoading: isLoadingVMs,
     refetch: refetchVMs,
@@ -422,7 +422,7 @@ const MonitoringDashboard: React.FC = () => {
   useEffect(() => {
     if (lastMessage !== null) {
       const data = JSON.parse(lastMessage.data);
-      
+
       // Handle different message types
       switch (data.type) {
         case 'metric':
@@ -462,8 +462,8 @@ const MonitoringDashboard: React.FC = () => {
   const memoryData = systemMetrics?.memoryTimeseriesData || Array(24).fill(0).map(() => Math.random() * 100);
   const diskData = systemMetrics?.diskTimeseriesData || Array(24).fill(0).map(() => Math.random() * 100);
   const networkData = systemMetrics?.networkTimeseriesData || Array(24).fill(0).map(() => Math.random() * 100);
-  
-  const timeLabels = systemMetrics?.timeLabels || 
+
+  const timeLabels = systemMetrics?.timeLabels ||
     Array(24).fill(0).map((_, i) => format(new Date(Date.now() - (23 - i) * 3600 * 1000), 'HH:mm'));
 
   const chartData = {
@@ -522,7 +522,7 @@ const MonitoringDashboard: React.FC = () => {
   // Alert statistics
   const alertStats = React.useMemo(() => {
     if (!alerts) return { critical: 0, error: 0, warning: 0, info: 0 };
-    
+
     return {
       critical: alerts.filter((a: Alert) => a.severity === 'critical' && a.status === 'firing').length,
       error: alerts.filter((a: Alert) => a.severity === 'error' && a.status === 'firing').length,
@@ -534,16 +534,16 @@ const MonitoringDashboard: React.FC = () => {
   // VM statistics
   const vmStats = React.useMemo(() => {
     if (!vms) return { running: 0, stopped: 0, error: 0, total: 0, avgCpu: 0, avgMemory: 0, avgDisk: 0 };
-    
+
     const running = vms.filter((vm: VMMetrics) => vm.status === 'running').length;
     const stopped = vms.filter((vm: VMMetrics) => vm.status === 'stopped').length;
     const error = vms.filter((vm: VMMetrics) => vm.status === 'error').length;
     const total = vms.length;
-    
+
     const avgCpu = vms.reduce((acc: number, vm: VMMetrics) => acc + vm.cpuUsage, 0) / (total || 1);
     const avgMemory = vms.reduce((acc: number, vm: VMMetrics) => acc + vm.memoryUsage, 0) / (total || 1);
     const avgDisk = vms.reduce((acc: number, vm: VMMetrics) => acc + vm.diskUsage, 0) / (total || 1);
-    
+
     return { running, stopped, error, total, avgCpu, avgMemory, avgDisk };
   }, [vms]);
 
@@ -590,7 +590,7 @@ const MonitoringDashboard: React.FC = () => {
           <TabsTrigger value="analytics">Analytics</TabsTrigger>
           <TabsTrigger value="advanced">Advanced Analytics</TabsTrigger>
         </TabsList>
-        
+
         {/* Overview Tab */}
         <TabsContent value="overview" className="space-y-6">
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -718,7 +718,7 @@ const MonitoringDashboard: React.FC = () => {
             </Card>
           </div>
         </TabsContent>
-        
+
         {/* Virtual Machines Tab */}
         <TabsContent value="vms" className="space-y-6">
           <div className="grid gap-4 grid-cols-3">
@@ -796,7 +796,7 @@ const MonitoringDashboard: React.FC = () => {
               </CardContent>
             </Card>
           </div>
-          
+
           <Card>
             <CardHeader>
               <CardTitle>Virtual Machines</CardTitle>
@@ -830,7 +830,7 @@ const MonitoringDashboard: React.FC = () => {
                 <div className="space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="text-sm flex items-center">
-                      <span className="h-3 w-3 rounded-full bg-red-500 inline-block mr-2"></span>
+                      <span className="h-3 w-3 rounded-full bg-red-500 inline-block mr-2" />
                       Critical
                     </span>
                     <Badge variant="outline" className="bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400">
@@ -839,7 +839,7 @@ const MonitoringDashboard: React.FC = () => {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm flex items-center">
-                      <span className="h-3 w-3 rounded-full bg-orange-500 inline-block mr-2"></span>
+                      <span className="h-3 w-3 rounded-full bg-orange-500 inline-block mr-2" />
                       Error
                     </span>
                     <Badge variant="outline" className="bg-orange-100 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400">
@@ -848,7 +848,7 @@ const MonitoringDashboard: React.FC = () => {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm flex items-center">
-                      <span className="h-3 w-3 rounded-full bg-amber-500 inline-block mr-2"></span>
+                      <span className="h-3 w-3 rounded-full bg-amber-500 inline-block mr-2" />
                       Warning
                     </span>
                     <Badge variant="outline" className="bg-amber-100 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400">
@@ -857,7 +857,7 @@ const MonitoringDashboard: React.FC = () => {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm flex items-center">
-                      <span className="h-3 w-3 rounded-full bg-blue-500 inline-block mr-2"></span>
+                      <span className="h-3 w-3 rounded-full bg-blue-500 inline-block mr-2" />
                       Info
                     </span>
                     <Badge variant="outline" className="bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">
@@ -874,7 +874,7 @@ const MonitoringDashboard: React.FC = () => {
               </CardHeader>
               <CardContent>
                 <div className="h-56">
-                  <Bar 
+                  <Bar
                     data={{
                       labels: ['6h ago', '5h ago', '4h ago', '3h ago', '2h ago', '1h ago', 'Now'],
                       datasets: [
@@ -932,10 +932,10 @@ const MonitoringDashboard: React.FC = () => {
               ) : alerts && alerts.length > 0 ? (
                 <div className="space-y-2">
                   {alerts.map((alert: Alert) => (
-                    <AlertItem 
-                      key={alert.id} 
-                      alert={alert} 
-                      onAcknowledge={handleAcknowledgeAlert} 
+                    <AlertItem
+                      key={alert.id}
+                      alert={alert}
+                      onAcknowledge={handleAcknowledgeAlert}
                     />
                   ))}
                 </div>
@@ -989,7 +989,7 @@ const MonitoringDashboard: React.FC = () => {
                     </div>
                     <div className="mt-2">
                       <p className="text-sm text-muted-foreground">
-                        {systemMetrics?.cpuAnalysis || "CPU usage shows standard workday pattern with peaks during business hours."}
+                        {systemMetrics?.cpuAnalysis || 'CPU usage shows standard workday pattern with peaks during business hours.'}
                       </p>
                     </div>
                   </div>
@@ -1025,14 +1025,14 @@ const MonitoringDashboard: React.FC = () => {
                     </div>
                     <div className="mt-2">
                       <p className="text-sm text-muted-foreground">
-                        {systemMetrics?.memoryAnalysis || "Memory allocation is healthy with sufficient available memory for peak operations."}
+                        {systemMetrics?.memoryAnalysis || 'Memory allocation is healthy with sufficient available memory for peak operations.'}
                       </p>
                     </div>
                   </div>
                 </div>
               </CardContent>
             </Card>
-            
+
             <Card>
               <CardHeader>
                 <CardTitle>Predictive Insights</CardTitle>
@@ -1047,8 +1047,8 @@ const MonitoringDashboard: React.FC = () => {
                         Resource Forecasting
                       </h4>
                       <p className="text-sm text-muted-foreground">
-                        Based on current trends, system resources will be sufficient for the next 30 days. 
-                        Consider adding additional storage capacity within 45 days as growth trends indicate 
+                        Based on current trends, system resources will be sufficient for the next 30 days.
+                        Consider adding additional storage capacity within 45 days as growth trends indicate
                         80% usage by that time.
                       </p>
                     </div>
@@ -1058,7 +1058,7 @@ const MonitoringDashboard: React.FC = () => {
                         Anomaly Detection
                       </h4>
                       <p className="text-sm text-muted-foreground">
-                        Hypervisor node 2 is showing slight performance degradation patterns compared to 
+                        Hypervisor node 2 is showing slight performance degradation patterns compared to
                         historical baseline. This may indicate early hardware issues or resource contention.
                         Scheduled diagnostic recommended.
                       </p>
@@ -1071,8 +1071,8 @@ const MonitoringDashboard: React.FC = () => {
                         Performance Optimization
                       </h4>
                       <p className="text-sm text-muted-foreground">
-                        VM resource rebalancing across nodes could improve overall system performance by 
-                        an estimated 12-15%. Database-heavy VMs on node 3 would benefit from memory 
+                        VM resource rebalancing across nodes could improve overall system performance by
+                        an estimated 12-15%. Database-heavy VMs on node 3 would benefit from memory
                         reallocation from underutilized compute-optimized VMs.
                       </p>
                     </div>
@@ -1082,8 +1082,8 @@ const MonitoringDashboard: React.FC = () => {
                         Workload Patterns
                       </h4>
                       <p className="text-sm text-muted-foreground">
-                        System has identified recurring peak usage patterns every Tuesday and Thursday 
-                        between 2-4 PM UTC. Consider scheduling non-essential maintenance outside these 
+                        System has identified recurring peak usage patterns every Tuesday and Thursday
+                        between 2-4 PM UTC. Consider scheduling non-essential maintenance outside these
                         windows and potentially allocating additional resources during peaks.
                       </p>
                     </div>
@@ -1093,7 +1093,7 @@ const MonitoringDashboard: React.FC = () => {
             </Card>
           </div>
         </TabsContent>
-        
+
         {/* Advanced Analytics Tab */}
         <TabsContent value="advanced" className="space-y-6">
           <div className="grid gap-4 grid-cols-2">
@@ -1144,10 +1144,10 @@ const MonitoringDashboard: React.FC = () => {
                 { timestamp: addHours(new Date(), 11).toISOString(), value: 60, upperBound: 70, lowerBound: 50 },
               ]}
               anomalies={[
-                { timestamp: addHours(new Date(), 5).toISOString(), severity: 'medium', message: 'Unusual spike in CPU usage' }
+                { timestamp: addHours(new Date(), 5).toISOString(), severity: 'medium', message: 'Unusual spike in CPU usage' },
               ]}
             />
-            
+
             {/* Resource Utilization Treemap */}
             <ResourceTreemap
               title="Resource Utilization"
@@ -1167,7 +1167,7 @@ const MonitoringDashboard: React.FC = () => {
                       { id: 'vm-3', name: 'VM-3', value: 92 },
                       { id: 'vm-4', name: 'VM-4', value: 58 },
                       { id: 'vm-5', name: 'VM-5', value: 62 },
-                    ]
+                    ],
                   },
                   {
                     id: 'storage',
@@ -1177,7 +1177,7 @@ const MonitoringDashboard: React.FC = () => {
                       { id: 'storage-1', name: 'SSD-1', value: 85 },
                       { id: 'storage-2', name: 'SSD-2', value: 65 },
                       { id: 'storage-3', name: 'HDD-1', value: 45 },
-                    ]
+                    ],
                   },
                   {
                     id: 'network',
@@ -1187,14 +1187,14 @@ const MonitoringDashboard: React.FC = () => {
                       { id: 'network-1', name: 'Switch-1', value: 52 },
                       { id: 'network-2', name: 'Router-1', value: 38 },
                       { id: 'network-3', name: 'Gateway', value: 65 },
-                    ]
+                    ],
                   },
-                ]
+                ],
               }}
               height={350}
             />
           </div>
-          
+
           <div className="grid gap-4 grid-cols-2">
             {/* Resource Usage Heatmap */}
             <HeatmapChart
@@ -1208,7 +1208,7 @@ const MonitoringDashboard: React.FC = () => {
                 { timestamp: '2025-04-11T04:00:00Z', resourceId: 'VM-1', value: 65 },
                 { timestamp: '2025-04-11T05:00:00Z', resourceId: 'VM-1', value: 72 },
                 { timestamp: '2025-04-11T06:00:00Z', resourceId: 'VM-1', value: 78 },
-                
+
                 { timestamp: '2025-04-11T00:00:00Z', resourceId: 'VM-2', value: 35 },
                 { timestamp: '2025-04-11T01:00:00Z', resourceId: 'VM-2', value: 38 },
                 { timestamp: '2025-04-11T02:00:00Z', resourceId: 'VM-2', value: 42 },
@@ -1216,7 +1216,7 @@ const MonitoringDashboard: React.FC = () => {
                 { timestamp: '2025-04-11T04:00:00Z', resourceId: 'VM-2', value: 55 },
                 { timestamp: '2025-04-11T05:00:00Z', resourceId: 'VM-2', value: 62 },
                 { timestamp: '2025-04-11T06:00:00Z', resourceId: 'VM-2', value: 68 },
-                
+
                 { timestamp: '2025-04-11T00:00:00Z', resourceId: 'VM-3', value: 55 },
                 { timestamp: '2025-04-11T01:00:00Z', resourceId: 'VM-3', value: 58 },
                 { timestamp: '2025-04-11T02:00:00Z', resourceId: 'VM-3', value: 62 },
@@ -1224,7 +1224,7 @@ const MonitoringDashboard: React.FC = () => {
                 { timestamp: '2025-04-11T04:00:00Z', resourceId: 'VM-3', value: 75 },
                 { timestamp: '2025-04-11T05:00:00Z', resourceId: 'VM-3', value: 82 },
                 { timestamp: '2025-04-11T06:00:00Z', resourceId: 'VM-3', value: 88 },
-                
+
                 { timestamp: '2025-04-11T00:00:00Z', resourceId: 'VM-4', value: 25 },
                 { timestamp: '2025-04-11T01:00:00Z', resourceId: 'VM-4', value: 28 },
                 { timestamp: '2025-04-11T02:00:00Z', resourceId: 'VM-4', value: 32 },
@@ -1232,7 +1232,7 @@ const MonitoringDashboard: React.FC = () => {
                 { timestamp: '2025-04-11T04:00:00Z', resourceId: 'VM-4', value: 45 },
                 { timestamp: '2025-04-11T05:00:00Z', resourceId: 'VM-4', value: 52 },
                 { timestamp: '2025-04-11T06:00:00Z', resourceId: 'VM-4', value: 58 },
-                
+
                 { timestamp: '2025-04-11T00:00:00Z', resourceId: 'VM-5', value: 65 },
                 { timestamp: '2025-04-11T01:00:00Z', resourceId: 'VM-5', value: 68 },
                 { timestamp: '2025-04-11T02:00:00Z', resourceId: 'VM-5', value: 72 },
@@ -1242,7 +1242,7 @@ const MonitoringDashboard: React.FC = () => {
                 { timestamp: '2025-04-11T06:00:00Z', resourceId: 'VM-5', value: 95 },
               ]}
             />
-            
+
             {/* Network Topology */}
             <NetworkTopology
               title="System Topology"
@@ -1280,7 +1280,7 @@ const MonitoringDashboard: React.FC = () => {
               height={350}
             />
           </div>
-          
+
           {/* Alert Correlation */}
           <AlertCorrelation
             alerts={[
