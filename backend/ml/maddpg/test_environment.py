@@ -108,6 +108,45 @@ class TestDistributedResourceEnv(unittest.TestCase):
         self.assertIn('step', info)
         self.assertIn('total_workloads', info)
 
+    def test_env_reset_replaces_nodes(self):
+        """Test repeated resets do not accumulate stale nodes"""
+        self.env.reset(seed=42)
+        self.env.reset(seed=42)
+
+        self.assertEqual(len(self.env.nodes), 5)
+        self.assertEqual([node.id for node in self.env.nodes], list(range(5)))
+
+    def test_env_reset_seed_is_reproducible(self):
+        """Test seeded resets reproduce node capacities and initial workloads"""
+        self.env.reset(seed=42)
+        first_capacities = [node.cpu_capacity for node in self.env.nodes]
+        first_workloads = [
+            (
+                workload.cpu_requirement,
+                workload.memory_requirement,
+                workload.bandwidth_requirement,
+                workload.storage_requirement,
+                workload.priority,
+            )
+            for workload in self.env.workload_queue
+        ]
+
+        self.env.reset(seed=42)
+        second_capacities = [node.cpu_capacity for node in self.env.nodes]
+        second_workloads = [
+            (
+                workload.cpu_requirement,
+                workload.memory_requirement,
+                workload.bandwidth_requirement,
+                workload.storage_requirement,
+                workload.priority,
+            )
+            for workload in self.env.workload_queue
+        ]
+
+        self.assertEqual(first_capacities, second_capacities)
+        self.assertEqual(first_workloads, second_workloads)
+
     def test_env_step(self):
         """Test environment step"""
         self.env.reset(seed=42)
@@ -147,6 +186,16 @@ class TestDistributedResourceEnv(unittest.TestCase):
     def test_allocation_logic(self):
         """Test workload allocation logic"""
         self.env.reset(seed=42)
+        self.env.workload_arrival_rate = 0.0
+        self.env.workload_queue = [
+            Workload(
+                id=1,
+                cpu_requirement=5.0,
+                memory_requirement=2.0,
+                bandwidth_requirement=50.0,
+                storage_requirement=10.0
+            )
+        ]
 
         # Create a simple allocation scenario
         # Action: allocate 100% of available resources
@@ -160,6 +209,41 @@ class TestDistributedResourceEnv(unittest.TestCase):
         # Rewards should be non-zero if allocations happened
         if info['completed_workloads'] > 0:
             self.assertTrue(any(r > 0 for r in rewards))
+
+        self.assertEqual(len(self.env.workload_queue), 0)
+
+    def test_processed_workloads_are_not_recounted(self):
+        """Completed and failed workloads should leave the active queue."""
+        self.env.reset(seed=42)
+        self.env.workload_arrival_rate = 0.0
+        self.env.workload_queue = [
+            Workload(
+                id=1,
+                cpu_requirement=5.0,
+                memory_requirement=2.0,
+                bandwidth_requirement=50.0,
+                storage_requirement=10.0
+            ),
+            Workload(
+                id=2,
+                cpu_requirement=5000.0,
+                memory_requirement=2000.0,
+                bandwidth_requirement=50000.0,
+                storage_requirement=10000.0
+            )
+        ]
+
+        actions = [np.array([1.0, 1.0, 1.0, 1.0]) for _ in range(5)]
+        _, _, _, _, first_info = self.env.step(actions)
+        self.assertEqual(first_info['total_workloads'], 2)
+        self.assertEqual(first_info['completed_workloads'], 1)
+        self.assertEqual(first_info['failed_workloads'], 1)
+        self.assertEqual(len(self.env.workload_queue), 0)
+
+        _, _, _, _, second_info = self.env.step(actions)
+        self.assertEqual(second_info['total_workloads'], 2)
+        self.assertEqual(second_info['completed_workloads'], 1)
+        self.assertEqual(second_info['failed_workloads'], 1)
 
     def test_sla_violation_tracking(self):
         """Test SLA violation tracking"""

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This module implements **MADDPG (Multi-Agent Deep Deterministic Policy Gradient)** for intelligent distributed resource allocation in the Novacron system. MADDPG enables multiple agents to cooperatively learn optimal resource allocation policies, achieving **20-40% performance improvements** over traditional greedy allocation.
+This module implements **MADDPG (Multi-Agent Deep Deterministic Policy Gradient)** and **MATD3 (Multi-Agent TD3)** for intelligent distributed resource allocation in the Novacron system. The performance target is a **20-40% reward improvement** over greedy allocation, enforced by the reproducible benchmark gate below.
 
 ## Architecture
 
@@ -14,8 +14,9 @@ This module implements **MADDPG (Multi-Agent Deep Deterministic Policy Gradient)
    - Tracks SLA violations and resource utilization
    - Provides normalized observations to agents
 
-2. **Training (`train.py`)**: MADDPG implementation
+2. **Training (`train.py`)**: MADDPG and MATD3 implementation
    - Actor-Critic architecture with centralized training, decentralized execution
+   - MATD3 twin critics, target policy smoothing, and delayed actor updates
    - Experience replay buffer
    - Ornstein-Uhlenbeck noise for exploration
    - Soft target network updates
@@ -43,33 +44,30 @@ pip install -r requirements.txt
 ### Quick Start
 
 ```bash
-# Train MADDPG agents (10,000 episodes)
-python train.py
+# Train MATD3 agents (10,000 episodes)
+python train.py --algorithm matd3
 ```
 
 ### Configuration
 
-Edit `train.py` to adjust hyperparameters:
+Use CLI flags to adjust the main training parameters:
 
-```python
-trainer = MADDPGTrainer(
-    env=env,
-    hidden_dim=256,        # Hidden layer size
-    lr_actor=1e-4,         # Actor learning rate
-    lr_critic=1e-3,        # Critic learning rate
-    gamma=0.99,            # Discount factor
-    tau=0.01,              # Soft update rate
-    buffer_capacity=100000,# Replay buffer size
-    batch_size=256         # Training batch size
-)
-
-trainer.train(
-    num_episodes=10000,    # Training episodes
-    max_steps=1000,        # Steps per episode
-    warmup_episodes=100,   # Random exploration episodes
-    save_interval=100,     # Model save frequency
-    log_interval=10        # Logging frequency
-)
+```bash
+python train.py \
+  --algorithm matd3 \
+  --episodes 10000 \
+  --max-steps 1000 \
+  --warmup-episodes 100 \
+  --eval-episodes 100 \
+  --num-agents 10 \
+  --hidden-dim 256 \
+  --batch-size 256 \
+  --buffer-capacity 100000 \
+  --action-prior 0.3 \
+  --workload-arrival-rate 5.0 \
+  --seed 42 \
+  --update-interval 1 \
+  --save-dir ./models/matd3
 ```
 
 ### Training Output
@@ -85,32 +83,45 @@ Episode 1000/10000
 ```
 
 Models saved to:
-- `./models/maddpg/best/` - Best performing model
-- `./models/maddpg/checkpoint_*/` - Periodic checkpoints
-- `./models/maddpg/final/` - Final trained model
-- `./models/maddpg/metrics.json` - Training metrics
+- `./models/<algorithm>/best/` - Best performing model
+- `./models/<algorithm>/checkpoint_*/` - Periodic checkpoints
+- `./models/<algorithm>/final/` - Final trained model
+- `./models/<algorithm>/metrics.json` - Training metrics and run metadata
 
 ## Evaluation
 
-### Benchmark Performance
+### Benchmark Gate
 
 ```bash
-# Compare MADDPG vs Greedy vs Random
-python benchmark.py
+# Compare a trained model vs greedy and random; exit non-zero if the target is missed.
+python benchmark.py \
+  --model-path ./models/matd3/best \
+  --algorithm matd3 \
+  --episodes 100 \
+  --max-steps 1000 \
+  --num-agents 10 \
+  --hidden-dim 256 \
+  --workload-arrival-rate 5.0 \
+  --seed 42 \
+  --target-reward-improvement 20.0 \
+  --fail-on-target-miss \
+  --output ./models/matd3/benchmark_results.json
 ```
 
-Expected results:
+For a full train-and-gate run:
 
+```bash
+./verify_performance.sh
 ```
-MADDPG vs GREEDY:
-  Reward Improvement:      +28.4%
-  SLA Violation Reduction: +42.7%
-  Completion Improvement:  +15.3%
 
-MADDPG vs RANDOM:
-  Reward Improvement:      +156.8%
-  SLA Violation Reduction: +89.3%
-  Completion Improvement:  +67.2%
+This runs training, benchmarks `models/<algorithm>/best`, and validates the resulting
+`metrics.json` plus `benchmark_results.json` with `validate_artifact.py`, including
+minimum episodes, steps, and agent count for the selected profile.
+
+For a shorter staging profile, override the shell variables instead of editing code:
+
+```bash
+EPISODES=1000 MAX_STEPS=300 BATCH_SIZE=64 UPDATE_INTERVAL=4 BENCHMARK_EPISODES=30 ./verify_performance.sh
 ```
 
 ### Testing Trained Model
@@ -257,23 +268,23 @@ Input (8*N + 4*N) -> FC(256) -> LayerNorm -> ReLU
 
 where N = number of agents.
 
-## Performance Targets
+## Performance Target
 
-| Metric | Baseline (Greedy) | MADDPG Target | Achieved |
-|--------|------------------|---------------|----------|
-| Average Reward | 950 | 1200+ | **1247** ✓ |
-| SLA Violations | 8.5% | < 5% | **3.2%** ✓ |
-| Completion Rate | 91.5% | > 95% | **96.8%** ✓ |
-| Utilization | 72% | > 80% | **84.7%** ✓ |
-| Improvement | Baseline | 20-40% | **28.4%** ✓ |
+| Metric | Baseline | Target | Gate |
+|--------|----------|--------|------|
+| Reward improvement | Greedy | >= 20% | `benchmark.py --fail-on-target-miss` |
+| SLA violations | Greedy | Lower is better | Recorded in benchmark JSON |
+| Completion rate | Greedy | Higher is better | Recorded in benchmark JSON |
+| Utilization | Greedy | Higher is better | Recorded in benchmark JSON |
 
 ## Key Features
 
 - **Cooperative Learning**: Agents learn to balance load across the system
 - **SLA-Aware**: Prioritizes workloads based on deadlines and priority
 - **Scalable**: Handles heterogeneous node capacities
-- **Production-Ready**: Thread-safe Go integration with metrics
+- **Go Integration**: Thread-safe allocator with metrics and injectable predictors
 - **Efficient**: Centralized training, decentralized execution
+- **Verifiable**: Deterministic seeds, model-backed benchmark, and acceptance gate
 
 ## Troubleshooting
 
@@ -301,11 +312,11 @@ where N = number of agents.
 
 ## Future Enhancements
 
-1. **MATD3**: Multi-Agent TD3 with twin critics for stability
-2. **Prioritized Replay**: Sample important transitions more frequently
-3. **Hindsight Experience Replay**: Learn from failed allocations
-4. **Communication Protocol**: Inter-agent message passing
-5. **Transfer Learning**: Pre-train on simpler environments
+1. **Prioritized Replay**: Sample important transitions more frequently
+2. **Hindsight Experience Replay**: Learn from failed allocations
+3. **Communication Protocol**: Inter-agent message passing
+4. **Transfer Learning**: Pre-train on simpler environments
+5. **Production Trace Training**: Train and gate on captured workload traces
 
 ## References
 

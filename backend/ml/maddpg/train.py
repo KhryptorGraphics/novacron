@@ -2,6 +2,7 @@
 MADDPG (Multi-Agent Deep Deterministic Policy Gradient) Training
 Implements centralized training with decentralized execution
 """
+import argparse
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,21 +13,37 @@ from collections import deque
 import random
 import os
 import json
+import math
 from environment import DistributedResourceEnv
+
+
+def set_random_seeds(seed: int):
+    """Seed Python, NumPy, and Torch RNGs for reproducible training runs."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
 
 class Actor(nn.Module):
     """Actor network for MADDPG (policy network)"""
 
-    def __init__(self, state_dim: int, action_dim: int, hidden_dim: int = 256):
+    def __init__(self, state_dim: int, action_dim: int, hidden_dim: int = 256,
+                 action_prior: float = 0.3):
         super(Actor, self).__init__()
         self.fc1 = nn.Linear(state_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc3 = nn.Linear(hidden_dim, action_dim)
+        self.action_prior = min(max(action_prior, 1e-3), 1.0 - 1e-3)
 
         # Layer normalization for stability
         self.ln1 = nn.LayerNorm(hidden_dim)
         self.ln2 = nn.LayerNorm(hidden_dim)
+        self._initialize_action_prior()
+
+    def _initialize_action_prior(self):
+        prior_logit = math.log(self.action_prior / (1.0 - self.action_prior))
+        nn.init.zeros_(self.fc3.weight)
+        nn.init.constant_(self.fc3.bias, prior_logit)
 
     def forward(self, state):
         x = F.relu(self.ln1(self.fc1(state)))
@@ -118,7 +135,8 @@ class MADDPGAgent:
                  lr_actor: float = 1e-4,
                  lr_critic: float = 1e-3,
                  gamma: float = 0.99,
-                 tau: float = 0.01):
+                 tau: float = 0.01,
+                 action_prior: float = 0.3):
 
         self.agent_id = agent_id
         self.num_agents = num_agents
@@ -126,10 +144,11 @@ class MADDPGAgent:
         self.action_dim = action_dim
         self.gamma = gamma
         self.tau = tau
+        self.action_prior = action_prior
 
         # Actor networks (decentralized - only sees own state)
-        self.actor = Actor(state_dim, action_dim, hidden_dim)
-        self.actor_target = Actor(state_dim, action_dim, hidden_dim)
+        self.actor = Actor(state_dim, action_dim, hidden_dim, action_prior=action_prior)
+        self.actor_target = Actor(state_dim, action_dim, hidden_dim, action_prior=action_prior)
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=lr_actor)
 
@@ -219,7 +238,8 @@ class MADDPGAgent:
         return {
             'critic_loss': critic_loss.item(),
             'actor_loss': actor_loss.item(),
-            'q_value': current_q.mean().item()
+            'q_value': current_q.mean().item(),
+            'target_update': True,
         }
 
     def soft_update(self):
@@ -248,6 +268,151 @@ class MADDPGAgent:
         self.critic_target.load_state_dict(checkpoint['critic_target'])
 
 
+class MATD3Agent(MADDPGAgent):
+    """Multi-agent TD3 agent with twin critics and delayed policy updates."""
+
+    def __init__(self,
+                 agent_id: int,
+                 num_agents: int,
+                 state_dim: int,
+                 action_dim: int,
+                 hidden_dim: int = 256,
+                 lr_actor: float = 1e-4,
+                 lr_critic: float = 1e-3,
+                 gamma: float = 0.99,
+                 tau: float = 0.01,
+                 policy_noise: float = 0.2,
+                 noise_clip: float = 0.5,
+                 policy_delay: int = 2,
+                 action_prior: float = 0.3):
+        super().__init__(
+            agent_id=agent_id,
+            num_agents=num_agents,
+            state_dim=state_dim,
+            action_dim=action_dim,
+            hidden_dim=hidden_dim,
+            lr_actor=lr_actor,
+            lr_critic=lr_critic,
+            gamma=gamma,
+            tau=tau,
+            action_prior=action_prior
+        )
+
+        total_state_dim = state_dim * num_agents
+        total_action_dim = action_dim * num_agents
+        self.critic2 = Critic(total_state_dim, total_action_dim, hidden_dim)
+        self.critic2_target = Critic(total_state_dim, total_action_dim, hidden_dim)
+        self.critic2_target.load_state_dict(self.critic2.state_dict())
+        self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=lr_critic)
+
+        self.policy_noise = policy_noise
+        self.noise_clip = noise_clip
+        self.policy_delay = max(1, policy_delay)
+        self.update_count = 0
+
+    def update(self,
+               agents: List['MADDPGAgent'],
+               states: List[torch.Tensor],
+               actions: List[torch.Tensor],
+               rewards: List[torch.Tensor],
+               next_states: List[torch.Tensor],
+               dones: List[torch.Tensor]):
+        """Update twin critics every step and actor on the delayed TD3 cadence."""
+
+        self.update_count += 1
+
+        all_states = torch.cat(states, dim=1)
+        all_actions = torch.cat(actions, dim=1)
+        all_next_states = torch.cat(next_states, dim=1)
+
+        with torch.no_grad():
+            next_actions = []
+            for i, agent in enumerate(agents):
+                next_action = agent.actor_target(next_states[i])
+                noise = torch.randn_like(next_action) * self.policy_noise
+                noise = noise.clamp(-self.noise_clip, self.noise_clip)
+                next_actions.append((next_action + noise).clamp(0.0, 1.0))
+
+            all_next_actions = torch.cat(next_actions, dim=1)
+            target_q1 = self.critic_target(all_next_states, all_next_actions)
+            target_q2 = self.critic2_target(all_next_states, all_next_actions)
+            target_q = torch.min(target_q1, target_q2)
+            target_q = rewards[self.agent_id] + self.gamma * target_q * (1 - dones[self.agent_id])
+
+        current_q1 = self.critic(all_states, all_actions)
+        current_q2 = self.critic2(all_states, all_actions)
+        critic1_loss = F.mse_loss(current_q1, target_q)
+        critic2_loss = F.mse_loss(current_q2, target_q)
+
+        self.critic_optimizer.zero_grad()
+        critic1_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 1.0)
+        self.critic_optimizer.step()
+
+        self.critic2_optimizer.zero_grad()
+        critic2_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.critic2.parameters(), 1.0)
+        self.critic2_optimizer.step()
+
+        actor_updated = self.update_count % self.policy_delay == 0
+        actor_loss_value = 0.0
+        if actor_updated:
+            current_actions = []
+            for i, agent in enumerate(agents):
+                if i == self.agent_id:
+                    current_actions.append(self.actor(states[i]))
+                else:
+                    current_actions.append(actions[i].detach())
+
+            all_current_actions = torch.cat(current_actions, dim=1)
+            actor_loss = -self.critic(all_states, all_current_actions).mean()
+
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
+            self.actor_optimizer.step()
+            actor_loss_value = actor_loss.item()
+
+        return {
+            'critic_loss': critic1_loss.item(),
+            'critic2_loss': critic2_loss.item(),
+            'actor_loss': actor_loss_value,
+            'q_value': current_q1.mean().item(),
+            'target_update': actor_updated,
+        }
+
+    def soft_update(self):
+        """Soft update actor and both critic target networks."""
+        super().soft_update()
+
+        for target_param, param in zip(self.critic2_target.parameters(), self.critic2.parameters()):
+            target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data)
+
+    def save(self, path: str):
+        """Save MATD3 agent models."""
+        torch.save({
+            'actor': self.actor.state_dict(),
+            'critic': self.critic.state_dict(),
+            'critic2': self.critic2.state_dict(),
+            'actor_target': self.actor_target.state_dict(),
+            'critic_target': self.critic_target.state_dict(),
+            'critic2_target': self.critic2_target.state_dict(),
+        }, path)
+
+    def load(self, path: str):
+        """Load MATD3 agent models, accepting MADDPG checkpoints for actor-only evaluation."""
+        checkpoint = torch.load(path)
+        self.actor.load_state_dict(checkpoint['actor'])
+        self.actor_target.load_state_dict(checkpoint.get('actor_target', checkpoint['actor']))
+
+        if 'critic' in checkpoint:
+            self.critic.load_state_dict(checkpoint['critic'])
+            self.critic_target.load_state_dict(checkpoint.get('critic_target', checkpoint['critic']))
+        if 'critic2' in checkpoint:
+            self.critic2.load_state_dict(checkpoint['critic2'])
+            self.critic2_target.load_state_dict(checkpoint.get('critic2_target', checkpoint['critic2']))
+
+
 class MADDPGTrainer:
     """MADDPG multi-agent trainer"""
 
@@ -259,17 +424,34 @@ class MADDPGTrainer:
                  gamma: float = 0.99,
                  tau: float = 0.01,
                  buffer_capacity: int = 100000,
-                 batch_size: int = 256):
+                 batch_size: int = 256,
+                 action_prior: float = 0.3,
+                 agent_cls=MADDPGAgent,
+                 agent_kwargs=None,
+                 seed: int = None):
 
         self.env = env
+        self.seed = seed
+        if seed is not None:
+            set_random_seeds(seed)
+
         self.num_agents = env.num_agents
         self.state_dim = env.observation_space.shape[0]
         self.action_dim = env.action_space.shape[0]
+        self.hidden_dim = hidden_dim
+        self.lr_actor = lr_actor
+        self.lr_critic = lr_critic
+        self.gamma = gamma
+        self.tau = tau
+        self.buffer_capacity = buffer_capacity
         self.batch_size = batch_size
+        self.action_prior = action_prior
+        self.agent_cls = agent_cls
+        self.agent_kwargs = agent_kwargs or {}
 
         # Create agents
         self.agents = [
-            MADDPGAgent(
+            self.agent_cls(
                 agent_id=i,
                 num_agents=self.num_agents,
                 state_dim=self.state_dim,
@@ -278,7 +460,9 @@ class MADDPGTrainer:
                 lr_actor=lr_actor,
                 lr_critic=lr_critic,
                 gamma=gamma,
-                tau=tau
+                tau=tau,
+                action_prior=action_prior,
+                **self.agent_kwargs
             )
             for i in range(self.num_agents)
         ]
@@ -303,7 +487,8 @@ class MADDPGTrainer:
 
         os.makedirs(save_dir, exist_ok=True)
 
-        print(f"Starting MADDPG training for {num_episodes} episodes...")
+        algorithm_name = self.agent_cls.__name__.replace("Agent", "")
+        print(f"Starting {algorithm_name} training for {num_episodes} episodes...")
         print(f"Agents: {self.num_agents}, State dim: {self.state_dim}, Action dim: {self.action_dim}")
 
         best_reward = -float('inf')
@@ -349,8 +534,8 @@ class MADDPGTrainer:
                             losses[i]['critic'] += metrics['critic_loss']
                             losses[i]['actor'] += metrics['actor_loss']
 
-                            # Soft update target networks
-                            agent.soft_update()
+                            if metrics.get('target_update', True):
+                                agent.soft_update()
 
                 episode_reward += sum(rewards)
                 states = next_states
@@ -363,11 +548,18 @@ class MADDPGTrainer:
             self.episode_sla_violations.append(info['sla_violation_rate'])
             self.episode_completion_rates.append(info['completion_rate'])
 
+            reward_window = min(log_interval, len(self.episode_rewards))
+            avg_reward = np.mean(self.episode_rewards[-reward_window:])
+            saved_best = False
+            if avg_reward > best_reward:
+                best_reward = avg_reward
+                self.save_models(os.path.join(save_dir, 'best'))
+                saved_best = True
+
             # Logging
-            if (episode + 1) % log_interval == 0:
-                avg_reward = np.mean(self.episode_rewards[-log_interval:])
-                avg_sla = np.mean(self.episode_sla_violations[-log_interval:])
-                avg_completion = np.mean(self.episode_completion_rates[-log_interval:])
+            if log_interval > 0 and (episode + 1) % log_interval == 0:
+                avg_sla = np.mean(self.episode_sla_violations[-reward_window:])
+                avg_completion = np.mean(self.episode_completion_rates[-reward_window:])
 
                 print(f"\nEpisode {episode + 1}/{num_episodes}")
                 print(f"  Avg Reward: {avg_reward:.2f}")
@@ -376,21 +568,43 @@ class MADDPGTrainer:
                 print(f"  Noise Scale: {noise_scale:.3f}")
                 print(f"  Buffer Size: {len(self.replay_buffer)}")
 
-                # Save best model
-                if avg_reward > best_reward:
-                    best_reward = avg_reward
-                    self.save_models(os.path.join(save_dir, 'best'))
+                if saved_best:
                     print(f"  ✓ New best model saved (reward: {best_reward:.2f})")
 
             # Periodic save
-            if (episode + 1) % save_interval == 0:
+            if save_interval > 0 and (episode + 1) % save_interval == 0:
                 self.save_models(os.path.join(save_dir, f'checkpoint_{episode + 1}'))
 
         # Save final models
         self.save_models(os.path.join(save_dir, 'final'))
 
         # Save training metrics
-        self.save_metrics(os.path.join(save_dir, 'metrics.json'))
+        self.save_metrics(os.path.join(save_dir, 'metrics.json'), metadata={
+            'algorithm': algorithm_name.lower(),
+            'num_agents': self.num_agents,
+            'state_dim': self.state_dim,
+            'action_dim': self.action_dim,
+            'hidden_dim': self.hidden_dim,
+            'lr_actor': self.lr_actor,
+            'lr_critic': self.lr_critic,
+            'gamma': self.gamma,
+            'tau': self.tau,
+            'buffer_capacity': self.buffer_capacity,
+            'batch_size': self.batch_size,
+            'action_prior': self.action_prior,
+            'workload_arrival_rate': getattr(self.env, 'workload_arrival_rate', None),
+            'episode_length': getattr(self.env, 'episode_length', None),
+            'agent_cls': self.agent_cls.__name__,
+            'agent_kwargs': self.agent_kwargs,
+            'num_episodes': num_episodes,
+            'max_steps': max_steps,
+            'warmup_episodes': warmup_episodes,
+            'update_interval': update_interval,
+            'save_interval': save_interval,
+            'log_interval': log_interval,
+            'seed': self.seed,
+            'best_reward': float(best_reward),
+        })
 
         print("\n✓ Training complete!")
         print(f"Best average reward: {best_reward:.2f}")
@@ -408,9 +622,10 @@ class MADDPGTrainer:
         for i, agent in enumerate(self.agents):
             agent.load(os.path.join(path, f'agent_{i}.pt'))
 
-    def save_metrics(self, path: str):
+    def save_metrics(self, path: str, metadata: Dict[str, Any] = None):
         """Save training metrics"""
         metrics = {
+            'metadata': metadata or {},
             'episode_rewards': self.episode_rewards,
             'episode_sla_violations': self.episode_sla_violations,
             'episode_completion_rates': self.episode_completion_rates,
@@ -459,36 +674,112 @@ class MADDPGTrainer:
         return eval_rewards, eval_sla_violations, eval_completion_rates
 
 
+class MATD3Trainer(MADDPGTrainer):
+    """MATD3 trainer using twin critics, policy smoothing, and delayed actor updates."""
+
+    def __init__(self,
+                 env: DistributedResourceEnv,
+                 hidden_dim: int = 256,
+                 lr_actor: float = 1e-4,
+                 lr_critic: float = 1e-3,
+                 gamma: float = 0.99,
+                 tau: float = 0.01,
+                 buffer_capacity: int = 100000,
+                 batch_size: int = 256,
+                 action_prior: float = 0.3,
+                 policy_noise: float = 0.2,
+                 noise_clip: float = 0.5,
+                 policy_delay: int = 2,
+                 seed: int = None):
+        super().__init__(
+            env=env,
+            hidden_dim=hidden_dim,
+            lr_actor=lr_actor,
+            lr_critic=lr_critic,
+            gamma=gamma,
+            tau=tau,
+            buffer_capacity=buffer_capacity,
+            batch_size=batch_size,
+            action_prior=action_prior,
+            seed=seed,
+            agent_cls=MATD3Agent,
+            agent_kwargs={
+                'policy_noise': policy_noise,
+                'noise_clip': noise_clip,
+                'policy_delay': policy_delay,
+            }
+        )
+
+
 # Main training script
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train MADDPG or MATD3 resource allocation agents.")
+    parser.add_argument("--algorithm", choices=["maddpg", "matd3"], default="maddpg")
+    parser.add_argument("--episodes", type=int, default=10000)
+    parser.add_argument("--max-steps", type=int, default=1000)
+    parser.add_argument("--warmup-episodes", type=int, default=100)
+    parser.add_argument("--eval-episodes", type=int, default=100)
+    parser.add_argument("--num-agents", type=int, default=10)
+    parser.add_argument("--hidden-dim", type=int, default=256)
+    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--buffer-capacity", type=int, default=100000)
+    parser.add_argument("--lr-actor", type=float, default=1e-4)
+    parser.add_argument("--lr-critic", type=float, default=1e-3)
+    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--tau", type=float, default=0.01)
+    parser.add_argument("--action-prior", type=float, default=0.3)
+    parser.add_argument("--workload-arrival-rate", type=float, default=5.0)
+    parser.add_argument("--policy-noise", type=float, default=0.2)
+    parser.add_argument("--noise-clip", type=float, default=0.5)
+    parser.add_argument("--policy-delay", type=int, default=2)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--update-interval", type=int, default=1)
+    parser.add_argument("--save-interval", type=int, default=100)
+    parser.add_argument("--log-interval", type=int, default=10)
+    parser.add_argument("--save-dir", default=None)
+    args = parser.parse_args()
+
+    set_random_seeds(args.seed)
+
     # Create environment
     env = DistributedResourceEnv(
-        num_agents=10,
-        workload_arrival_rate=5.0,
-        episode_length=1000
+        num_agents=args.num_agents,
+        workload_arrival_rate=args.workload_arrival_rate,
+        episode_length=args.max_steps,
+        seed=args.seed
     )
 
     # Create trainer
-    trainer = MADDPGTrainer(
+    trainer_cls = MATD3Trainer if args.algorithm == "matd3" else MADDPGTrainer
+    trainer = trainer_cls(
         env=env,
-        hidden_dim=256,
-        lr_actor=1e-4,
-        lr_critic=1e-3,
-        gamma=0.99,
-        tau=0.01,
-        buffer_capacity=100000,
-        batch_size=256
+        hidden_dim=args.hidden_dim,
+        lr_actor=args.lr_actor,
+        lr_critic=args.lr_critic,
+        gamma=args.gamma,
+        tau=args.tau,
+        buffer_capacity=args.buffer_capacity,
+        batch_size=args.batch_size,
+        action_prior=args.action_prior,
+        **({
+            'policy_noise': args.policy_noise,
+            'noise_clip': args.noise_clip,
+            'policy_delay': args.policy_delay,
+        } if args.algorithm == "matd3" else {}),
+        seed=args.seed
     )
 
     # Train
     rewards, sla_violations, completion_rates = trainer.train(
-        num_episodes=10000,
-        max_steps=1000,
-        warmup_episodes=100,
-        save_interval=100,
-        log_interval=10,
-        save_dir='./models/maddpg'
+        num_episodes=args.episodes,
+        max_steps=args.max_steps,
+        warmup_episodes=args.warmup_episodes,
+        update_interval=args.update_interval,
+        save_interval=args.save_interval,
+        log_interval=args.log_interval,
+        save_dir=args.save_dir or f'./models/{args.algorithm}'
     )
 
     # Evaluate
-    trainer.evaluate(num_episodes=100, render=False)
+    if args.eval_episodes > 0:
+        trainer.evaluate(num_episodes=args.eval_episodes, render=False)

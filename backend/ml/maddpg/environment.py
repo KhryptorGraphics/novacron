@@ -110,10 +110,8 @@ class DistributedResourceEnv(gym.Env):
         self.workload_arrival_rate = workload_arrival_rate
         self.episode_length = episode_length
         self.current_step = 0
-
-        # Set random seed
-        if seed is not None:
-            np.random.seed(seed)
+        self.seed = seed
+        self.rng = np.random.default_rng(seed)
 
         # Define observation and action spaces
         self.observation_space = gym.spaces.Box(
@@ -142,7 +140,7 @@ class DistributedResourceEnv(gym.Env):
         """Initialize compute nodes with heterogeneous capacities"""
         for i in range(self.num_agents):
             # Heterogeneous node capacities (some nodes more powerful than others)
-            capacity_multiplier = np.random.uniform(0.5, 1.5)
+            capacity_multiplier = self.rng.uniform(0.5, 1.5)
             self.nodes.append(Node(
                 id=i,
                 cpu_capacity=100.0 * capacity_multiplier,
@@ -156,19 +154,23 @@ class DistributedResourceEnv(gym.Env):
         self.workload_counter += 1
         return Workload(
             id=self.workload_counter,
-            cpu_requirement=np.random.uniform(5.0, 30.0),
-            memory_requirement=np.random.uniform(2.0, 16.0),
-            bandwidth_requirement=np.random.uniform(50.0, 200.0),
-            storage_requirement=np.random.uniform(10.0, 100.0),
-            priority=np.random.choice([1.0, 2.0, 3.0]),  # Low, medium, high
-            sla_deadline=np.random.uniform(0.5, 2.0)
+            cpu_requirement=self.rng.uniform(5.0, 30.0),
+            memory_requirement=self.rng.uniform(2.0, 16.0),
+            bandwidth_requirement=self.rng.uniform(50.0, 200.0),
+            storage_requirement=self.rng.uniform(10.0, 100.0),
+            priority=self.rng.choice([1.0, 2.0, 3.0]),  # Low, medium, high
+            sla_deadline=self.rng.uniform(0.5, 2.0)
         )
 
     def reset(self, seed=None, options=None) -> Tuple[List[np.ndarray], Dict]:
         """Reset the environment"""
         super().reset(seed=seed)
+        if seed is not None:
+            self.seed = seed
+            self.rng = np.random.default_rng(seed)
 
         # Reset nodes
+        self.nodes = []
         self._initialize_nodes()
 
         # Clear workloads
@@ -184,7 +186,7 @@ class DistributedResourceEnv(gym.Env):
         self.total_workloads = 0
 
         # Generate initial workloads
-        num_initial_workloads = np.random.poisson(self.workload_arrival_rate)
+        num_initial_workloads = self.rng.poisson(self.workload_arrival_rate)
         for _ in range(num_initial_workloads):
             self.workload_queue.append(self._generate_workload())
 
@@ -221,7 +223,7 @@ class DistributedResourceEnv(gym.Env):
         self._update_resource_usage(allocations)
 
         # Generate new workloads (Poisson arrival)
-        num_new_workloads = np.random.poisson(self.workload_arrival_rate / 100.0)
+        num_new_workloads = self.rng.poisson(self.workload_arrival_rate / 100.0)
         for _ in range(num_new_workloads):
             self.workload_queue.append(self._generate_workload())
 
@@ -310,6 +312,8 @@ class DistributedResourceEnv(gym.Env):
                 self.sla_violations += 1
                 self.total_workloads += 1
 
+        self.workload_queue = remaining_workloads
+
         # Add load balancing reward
         if self.num_agents > 1:
             load_variance = np.var([node.cpu_usage / max(node.cpu_capacity, 1e-6)
@@ -350,6 +354,7 @@ class DistributedResourceEnv(gym.Env):
             'total_workloads': self.total_workloads,
             'completed_workloads': len(self.completed_workloads),
             'failed_workloads': len(self.failed_workloads),
+            'sla_violations': self.sla_violations,
             'completion_rate': completion_rate,
             'sla_violation_rate': sla_violation_rate,
             'avg_utilization': avg_utilization,

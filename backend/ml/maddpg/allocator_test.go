@@ -2,9 +2,17 @@ package maddpg
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 )
+
+type staticPredictor struct {
+	actions [][]float64
+	err     error
+}
+
+func (p staticPredictor) Predict(_ [][]float64) ([][]float64, error) {
+	return p.actions, p.err
+}
 
 func TestNodeGetObservation(t *testing.T) {
 	node := &Node{
@@ -111,6 +119,24 @@ func TestMADDPGModelPredict(t *testing.T) {
 	}
 }
 
+func TestHeuristicResourceAllocatorCreation(t *testing.T) {
+	nodes := []*Node{
+		{ID: 0, CPUCapacity: 100, MemoryCapacity: 64, BandwidthCapacity: 1000, StorageCapacity: 500},
+	}
+
+	allocator, err := NewHeuristicResourceAllocator(nodes)
+	if err != nil {
+		t.Fatalf("Failed to create heuristic allocator: %v", err)
+	}
+
+	if len(allocator.nodes) != 1 {
+		t.Errorf("Expected 1 node, got %d", len(allocator.nodes))
+	}
+	if allocator.GetMetrics().TotalAllocations != 0 {
+		t.Errorf("Expected 0 initial allocations")
+	}
+}
+
 func TestResourceAllocatorCreation(t *testing.T) {
 	// Create test nodes
 	nodes := []*Node{
@@ -137,6 +163,69 @@ func TestResourceAllocatorCreation(t *testing.T) {
 	metrics := allocator.GetMetrics()
 	if metrics.TotalAllocations != 0 {
 		t.Errorf("Expected 0 initial allocations, got %d", metrics.TotalAllocations)
+	}
+}
+
+func TestResourceAllocationWithInjectedPredictor(t *testing.T) {
+	nodes := []*Node{
+		{ID: 10, CPUCapacity: 100, MemoryCapacity: 64, BandwidthCapacity: 1000, StorageCapacity: 500},
+		{ID: 11, CPUCapacity: 150, MemoryCapacity: 96, BandwidthCapacity: 1500, StorageCapacity: 750},
+	}
+
+	allocator, err := NewResourceAllocatorWithPredictor(staticPredictor{
+		actions: [][]float64{
+			{0, 0, 0, 0},
+			{1, 1, 1, 1},
+		},
+	}, nodes)
+	if err != nil {
+		t.Fatalf("Failed to create allocator: %v", err)
+	}
+
+	allocations, err := allocator.AllocateResources([]Workload{
+		{ID: 1, CPURequirement: 20, MemoryRequirement: 8, BandwidthRequirement: 100, StorageRequirement: 50},
+	})
+	if err != nil {
+		t.Fatalf("Allocation failed: %v", err)
+	}
+
+	if len(allocations) != 1 {
+		t.Fatalf("Expected 1 allocation, got %d", len(allocations))
+	}
+	if allocations[0].NodeID != 11 {
+		t.Errorf("Expected workload on node 11, got %d", allocations[0].NodeID)
+	}
+
+	metrics := allocator.GetMetrics()
+	if metrics.TotalAllocations != 1 || metrics.SuccessfulAllocs != 1 || metrics.FailedAllocs != 0 {
+		t.Errorf("Unexpected metrics: %+v", metrics)
+	}
+}
+
+func TestResourceAllocatorRejectsMalformedActions(t *testing.T) {
+	nodes := []*Node{
+		{ID: 0, CPUCapacity: 100, MemoryCapacity: 64, BandwidthCapacity: 1000, StorageCapacity: 500},
+	}
+
+	allocator, err := NewResourceAllocatorWithPredictor(staticPredictor{
+		actions: [][]float64{{1, 1}},
+	}, nodes)
+	if err != nil {
+		t.Fatalf("Failed to create allocator: %v", err)
+	}
+
+	_, err = allocator.AllocateResources([]Workload{
+		{ID: 1, CPURequirement: 20, MemoryRequirement: 8, BandwidthRequirement: 100, StorageRequirement: 50},
+	})
+	if err == nil {
+		t.Fatal("Expected malformed action error")
+	}
+}
+
+func TestResourceAllocatorRequiresNodes(t *testing.T) {
+	_, err := NewResourceAllocatorWithPredictor(HeuristicPredictor{}, nil)
+	if err == nil {
+		t.Fatal("Expected empty node set error")
 	}
 }
 
@@ -271,6 +360,25 @@ func TestPerformanceReport(t *testing.T) {
 		if _, ok := report[field]; !ok {
 			t.Errorf("Report missing required field: %s", field)
 		}
+	}
+}
+
+func TestPerformanceReportWithHeuristicPredictor(t *testing.T) {
+	nodes := []*Node{
+		{ID: 0, CPUCapacity: 100, MemoryCapacity: 64, BandwidthCapacity: 1000, StorageCapacity: 500},
+	}
+
+	allocator, err := NewHeuristicResourceAllocator(nodes)
+	if err != nil {
+		t.Fatalf("Failed to create allocator: %v", err)
+	}
+
+	report := allocator.PerformanceReport()
+	if report["model_path"] != "heuristic" {
+		t.Errorf("Expected heuristic model path, got %v", report["model_path"])
+	}
+	if report["num_nodes"] != 1 {
+		t.Errorf("Expected 1 node, got %v", report["num_nodes"])
 	}
 }
 

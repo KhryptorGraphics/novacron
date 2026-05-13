@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -22,15 +23,15 @@ const (
 
 // Node represents a compute node in the distributed system
 type Node struct {
-	ID                 int     `json:"id"`
-	CPUCapacity        float64 `json:"cpu_capacity"`
-	MemoryCapacity     float64 `json:"memory_capacity"`
-	BandwidthCapacity  float64 `json:"bandwidth_capacity"`
-	StorageCapacity    float64 `json:"storage_capacity"`
-	CPUUsage           float64 `json:"cpu_usage"`
-	MemoryUsage        float64 `json:"memory_usage"`
-	BandwidthUsage     float64 `json:"bandwidth_usage"`
-	StorageUsage       float64 `json:"storage_usage"`
+	ID                int     `json:"id"`
+	CPUCapacity       float64 `json:"cpu_capacity"`
+	MemoryCapacity    float64 `json:"memory_capacity"`
+	BandwidthCapacity float64 `json:"bandwidth_capacity"`
+	StorageCapacity   float64 `json:"storage_capacity"`
+	CPUUsage          float64 `json:"cpu_usage"`
+	MemoryUsage       float64 `json:"memory_usage"`
+	BandwidthUsage    float64 `json:"bandwidth_usage"`
+	StorageUsage      float64 `json:"storage_usage"`
 }
 
 // GetObservation returns normalized observation vector for this node
@@ -49,24 +50,41 @@ func (n *Node) GetObservation() []float64 {
 
 // Workload represents a workload to be allocated
 type Workload struct {
-	ID                  int     `json:"id"`
-	CPURequirement      float64 `json:"cpu_requirement"`
-	MemoryRequirement   float64 `json:"memory_requirement"`
+	ID                   int     `json:"id"`
+	CPURequirement       float64 `json:"cpu_requirement"`
+	MemoryRequirement    float64 `json:"memory_requirement"`
 	BandwidthRequirement float64 `json:"bandwidth_requirement"`
-	StorageRequirement  float64 `json:"storage_requirement"`
-	Priority            float64 `json:"priority"`
-	SLADeadline         float64 `json:"sla_deadline"`
+	StorageRequirement   float64 `json:"storage_requirement"`
+	Priority             float64 `json:"priority"`
+	SLADeadline          float64 `json:"sla_deadline"`
 }
 
 // Allocation represents a resource allocation decision
 type Allocation struct {
-	WorkloadID int     `json:"workload_id"`
-	NodeID     int     `json:"node_id"`
-	CPUAlloc   float64 `json:"cpu_alloc"`
-	MemAlloc   float64 `json:"mem_alloc"`
-	BWAlloc    float64 `json:"bw_alloc"`
-	StorageAlloc float64 `json:"storage_alloc"`
-	Timestamp  time.Time `json:"timestamp"`
+	WorkloadID   int       `json:"workload_id"`
+	NodeID       int       `json:"node_id"`
+	CPUAlloc     float64   `json:"cpu_alloc"`
+	MemAlloc     float64   `json:"mem_alloc"`
+	BWAlloc      float64   `json:"bw_alloc"`
+	StorageAlloc float64   `json:"storage_alloc"`
+	Timestamp    time.Time `json:"timestamp"`
+}
+
+// ActionPredictor returns one resource-control action per node state.
+type ActionPredictor interface {
+	Predict(states [][]float64) ([][]float64, error)
+}
+
+// HeuristicPredictor is a deterministic fallback when trained MADDPG weights are unavailable.
+type HeuristicPredictor struct{}
+
+// Predict exposes each node's currently available resources to the allocator.
+func (HeuristicPredictor) Predict(states [][]float64) ([][]float64, error) {
+	actions := make([][]float64, len(states))
+	for i := range states {
+		actions[i] = []float64{1, 1, 1, 1}
+	}
+	return actions, nil
 }
 
 // MADDPGModel represents the trained MADDPG model
@@ -76,6 +94,7 @@ type MADDPGModel struct {
 	StateDim    int
 	ActionDim   int
 	pythonPath  string
+	scriptPath  string
 	mu          sync.RWMutex
 	initialized bool
 }
@@ -99,9 +118,10 @@ func NewMADDPGModel(modelPath string, numAgents int) (*MADDPGModel, error) {
 	model := &MADDPGModel{
 		ModelPath:   modelPath,
 		NumAgents:   numAgents,
-		StateDim:    8,  // From environment observation space
-		ActionDim:   4,  // From environment action space
+		StateDim:    8, // From environment observation space
+		ActionDim:   4, // From environment action space
 		pythonPath:  pythonPath,
+		scriptPath:  resolveInferenceScript(modelPath),
 		initialized: false,
 	}
 
@@ -117,6 +137,10 @@ func NewMADDPGModel(modelPath string, numAgents int) (*MADDPGModel, error) {
 func (m *MADDPGModel) initialize() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if _, err := os.Stat(m.scriptPath); err != nil {
+		return fmt.Errorf("inference script not found: %s", m.scriptPath)
+	}
 
 	// Verify model files exist
 	for i := 0; i < m.NumAgents; i++ {
@@ -158,9 +182,7 @@ func (m *MADDPGModel) Predict(states [][]float64) ([][]float64, error) {
 	}
 	tmpFile.Close()
 
-	// Run Python inference script
-	scriptPath := filepath.Join(filepath.Dir(m.ModelPath), "inference.py")
-	cmd := exec.Command(m.pythonPath, scriptPath, m.ModelPath, tmpFile.Name())
+	cmd := exec.Command(m.pythonPath, m.scriptPath, m.ModelPath, tmpFile.Name())
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -180,21 +202,22 @@ func (m *MADDPGModel) Predict(states [][]float64) ([][]float64, error) {
 
 // ResourceAllocator uses MADDPG for intelligent resource allocation
 type ResourceAllocator struct {
-	model           *MADDPGModel
-	nodes           []*Node
-	mu              sync.RWMutex
+	model             *MADDPGModel
+	predictor         ActionPredictor
+	nodes             []*Node
+	mu                sync.RWMutex
 	allocationHistory []Allocation
-	metrics         AllocationMetrics
+	metrics           AllocationMetrics
 }
 
 // AllocationMetrics tracks allocation performance
 type AllocationMetrics struct {
-	TotalAllocations  int       `json:"total_allocations"`
-	SuccessfulAllocs  int       `json:"successful_allocs"`
-	FailedAllocs      int       `json:"failed_allocs"`
-	SLAViolations     int       `json:"sla_violations"`
-	AvgUtilization    float64   `json:"avg_utilization"`
-	LastUpdate        time.Time `json:"last_update"`
+	TotalAllocations int       `json:"total_allocations"`
+	SuccessfulAllocs int       `json:"successful_allocs"`
+	FailedAllocs     int       `json:"failed_allocs"`
+	SLAViolations    int       `json:"sla_violations"`
+	AvgUtilization   float64   `json:"avg_utilization"`
+	LastUpdate       time.Time `json:"last_update"`
 }
 
 // NewResourceAllocator creates a new MADDPG-based resource allocator
@@ -204,8 +227,35 @@ func NewResourceAllocator(modelPath string, nodes []*Node) (*ResourceAllocator, 
 		return nil, err
 	}
 
+	return newResourceAllocator(model, model, nodes)
+}
+
+// NewResourceAllocatorWithPredictor creates an allocator with an injected predictor.
+func NewResourceAllocatorWithPredictor(predictor ActionPredictor, nodes []*Node) (*ResourceAllocator, error) {
+	return newResourceAllocator(nil, predictor, nodes)
+}
+
+// NewHeuristicResourceAllocator creates an allocator without external model artifacts.
+func NewHeuristicResourceAllocator(nodes []*Node) (*ResourceAllocator, error) {
+	return NewResourceAllocatorWithPredictor(HeuristicPredictor{}, nodes)
+}
+
+func newResourceAllocator(model *MADDPGModel, predictor ActionPredictor, nodes []*Node) (*ResourceAllocator, error) {
+	if predictor == nil {
+		return nil, fmt.Errorf("action predictor is required")
+	}
+	if len(nodes) == 0 {
+		return nil, fmt.Errorf("at least one node is required")
+	}
+	for i, node := range nodes {
+		if node == nil {
+			return nil, fmt.Errorf("node %d is nil", i)
+		}
+	}
+
 	return &ResourceAllocator{
 		model:             model,
+		predictor:         predictor,
 		nodes:             nodes,
 		allocationHistory: make([]Allocation, 0),
 		metrics: AllocationMetrics{
@@ -229,10 +279,12 @@ func (a *ResourceAllocator) AllocateResources(workloads []Workload) ([]Allocatio
 		states[i] = node.GetObservation()
 	}
 
-	// Get actions from MADDPG model
-	actions, err := a.model.Predict(states)
+	actions, err := a.predictor.Predict(states)
 	if err != nil {
-		return nil, fmt.Errorf("model prediction failed: %v", err)
+		return nil, fmt.Errorf("resource action prediction failed: %v", err)
+	}
+	if err := validateActions(actions, len(a.nodes)); err != nil {
+		return nil, err
 	}
 
 	// Allocate workloads based on actions
@@ -260,10 +312,10 @@ func (a *ResourceAllocator) AllocateResources(workloads []Workload) ([]Allocatio
 
 			if canAllocate {
 				// Score based on resource efficiency (lower waste is better)
-				wasteScore := (cpuAvail - workload.CPURequirement) / max(node.CPUCapacity, 1e-6) +
-					(memAvail - workload.MemoryRequirement) / max(node.MemoryCapacity, 1e-6) +
-					(bwAvail - workload.BandwidthRequirement) / max(node.BandwidthCapacity, 1e-6) +
-					(storageAvail - workload.StorageRequirement) / max(node.StorageCapacity, 1e-6)
+				wasteScore := (cpuAvail-workload.CPURequirement)/max(node.CPUCapacity, 1e-6) +
+					(memAvail-workload.MemoryRequirement)/max(node.MemoryCapacity, 1e-6) +
+					(bwAvail-workload.BandwidthRequirement)/max(node.BandwidthCapacity, 1e-6) +
+					(storageAvail-workload.StorageRequirement)/max(node.StorageCapacity, 1e-6)
 				wasteScore /= 4.0
 
 				// Lower waste is better
@@ -317,6 +369,12 @@ func (a *ResourceAllocator) AllocateResources(workloads []Workload) ([]Allocatio
 
 // updateMetrics calculates current allocation metrics
 func (a *ResourceAllocator) updateMetrics() {
+	if len(a.nodes) == 0 {
+		a.metrics.AvgUtilization = 0
+		a.metrics.LastUpdate = time.Now()
+		return
+	}
+
 	// Calculate average utilization
 	totalUtil := 0.0
 	for _, node := range a.nodes {
@@ -365,18 +423,67 @@ func (a *ResourceAllocator) PerformanceReport() map[string]interface{} {
 		slaViolationRate = float64(a.metrics.SLAViolations) / float64(a.metrics.TotalAllocations)
 	}
 
-	return map[string]interface{}{
-		"total_allocations":   a.metrics.TotalAllocations,
-		"successful_allocs":   a.metrics.SuccessfulAllocs,
-		"failed_allocs":       a.metrics.FailedAllocs,
-		"success_rate":        successRate,
-		"sla_violations":      a.metrics.SLAViolations,
-		"sla_violation_rate":  slaViolationRate,
-		"avg_utilization":     a.metrics.AvgUtilization,
-		"last_update":         a.metrics.LastUpdate,
-		"num_nodes":           len(a.nodes),
-		"model_path":          a.model.ModelPath,
+	modelPath := "heuristic"
+	if a.model != nil {
+		modelPath = a.model.ModelPath
 	}
+
+	return map[string]interface{}{
+		"total_allocations":  a.metrics.TotalAllocations,
+		"successful_allocs":  a.metrics.SuccessfulAllocs,
+		"failed_allocs":      a.metrics.FailedAllocs,
+		"success_rate":       successRate,
+		"sla_violations":     a.metrics.SLAViolations,
+		"sla_violation_rate": slaViolationRate,
+		"avg_utilization":    a.metrics.AvgUtilization,
+		"last_update":        a.metrics.LastUpdate,
+		"num_nodes":          len(a.nodes),
+		"model_path":         modelPath,
+	}
+}
+
+func validateActions(actions [][]float64, expected int) error {
+	if len(actions) != expected {
+		return fmt.Errorf("predictor returned %d actions for %d nodes", len(actions), expected)
+	}
+	for i, action := range actions {
+		if len(action) < 4 {
+			return fmt.Errorf("action %d has %d dimensions, expected at least 4", i, len(action))
+		}
+		for j := 0; j < 4; j++ {
+			action[j] = clamp01(action[j])
+		}
+	}
+	return nil
+}
+
+func clamp01(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
+}
+
+func resolveInferenceScript(modelPath string) string {
+	candidates := []string{
+		filepath.Join(modelPath, "inference.py"),
+		filepath.Join(filepath.Dir(modelPath), "inference.py"),
+	}
+
+	_, currentFile, _, ok := runtime.Caller(0)
+	if ok {
+		candidates = append(candidates, filepath.Join(filepath.Dir(currentFile), "inference.py"))
+	}
+
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return candidates[0]
 }
 
 // Helper function

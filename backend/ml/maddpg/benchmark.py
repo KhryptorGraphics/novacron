@@ -3,11 +3,14 @@
 MADDPG Performance Benchmarking
 Compares MADDPG vs Greedy vs Random allocation
 """
+import argparse
 import numpy as np
 import json
+import os
+import sys
 import time
 from environment import DistributedResourceEnv
-from train import MADDPGTrainer
+from train import MADDPGTrainer, MATD3Trainer
 
 
 def greedy_allocate(env, workloads):
@@ -78,25 +81,30 @@ def random_allocate(env, workloads):
     return allocations
 
 
-def benchmark_algorithm(env, algorithm, num_episodes=100):
+def benchmark_algorithm(env, algorithm, trainer=None, num_episodes=100, max_steps=1000, seed=42):
     """Benchmark a single algorithm"""
+    if algorithm in ('maddpg', 'matd3') and trainer is None:
+        raise ValueError(f"{algorithm.upper()} benchmark requires a trainer with loaded model weights")
+
     rewards = []
     sla_violations = []
     completion_rates = []
     execution_times = []
 
     for episode in range(num_episodes):
-        env.reset()
+        episode_seed = seed + episode
+        states, _ = env.reset(seed=episode_seed)
+        env.action_space.seed(episode_seed)
         episode_reward = 0.0
 
         start_time = time.time()
 
-        for step in range(1000):
-            if algorithm == 'maddpg':
-                # Use trained MADDPG
-                states = [node.get_observation() for node in env.nodes]
-                # This would use the trainer's agents
-                actions = [env.action_space.sample() for _ in range(env.num_agents)]
+        for _ in range(max_steps):
+            if algorithm in ('maddpg', 'matd3'):
+                actions = [
+                    agent.select_action(states[i], add_noise=False)
+                    for i, agent in enumerate(trainer.agents)
+                ]
             elif algorithm == 'greedy':
                 # Greedy actions
                 actions = []
@@ -107,8 +115,10 @@ def benchmark_algorithm(env, algorithm, num_episodes=100):
             elif algorithm == 'random':
                 # Random actions
                 actions = [env.action_space.sample() for _ in range(env.num_agents)]
+            else:
+                raise ValueError(f"unknown algorithm: {algorithm}")
 
-            _, rewards_step, terminated, truncated, info = env.step(actions)
+            states, rewards_step, terminated, truncated, info = env.step(actions)
             episode_reward += sum(rewards_step)
 
             if terminated or truncated:
@@ -122,33 +132,103 @@ def benchmark_algorithm(env, algorithm, num_episodes=100):
         execution_times.append(execution_time)
 
     return {
-        'avg_reward': np.mean(rewards),
-        'std_reward': np.std(rewards),
-        'avg_sla_violation': np.mean(sla_violations),
-        'std_sla_violation': np.std(sla_violations),
-        'avg_completion_rate': np.mean(completion_rates),
-        'std_completion_rate': np.std(completion_rates),
-        'avg_execution_time': np.mean(execution_times),
-        'std_execution_time': np.std(execution_times),
+        'avg_reward': float(np.mean(rewards)),
+        'std_reward': float(np.std(rewards)),
+        'avg_sla_violation': float(np.mean(sla_violations)),
+        'std_sla_violation': float(np.std(sla_violations)),
+        'avg_completion_rate': float(np.mean(completion_rates)),
+        'std_completion_rate': float(np.std(completion_rates)),
+        'avg_execution_time': float(np.mean(execution_times)),
+        'std_execution_time': float(np.std(execution_times)),
     }
 
 
-def run_benchmark():
+def calculate_improvements(model_result, baseline_results):
+    """Calculate model improvements over each baseline."""
+    improvements = {}
+
+    for baseline, baseline_result in baseline_results.items():
+        improvements[baseline] = {
+            'reward_improvement_pct': (
+                (model_result['avg_reward'] - baseline_result['avg_reward']) /
+                max(abs(baseline_result['avg_reward']), 1e-6)
+            ) * 100,
+            'sla_violation_reduction_pct': (
+                (baseline_result['avg_sla_violation'] - model_result['avg_sla_violation']) /
+                max(baseline_result['avg_sla_violation'], 1e-6)
+            ) * 100,
+            'completion_improvement_pct': (
+                (model_result['avg_completion_rate'] - baseline_result['avg_completion_rate']) /
+                max(baseline_result['avg_completion_rate'], 1e-6)
+            ) * 100,
+        }
+
+    return improvements
+
+
+def evaluate_acceptance(improvements, target_reward_improvement_pct=20.0):
+    """Evaluate whether model improvements meet the configured benchmark target."""
+    baselines = {}
+    passed = bool(improvements)
+
+    for baseline, improvement in improvements.items():
+        reward_improvement = improvement['reward_improvement_pct']
+        baseline_passed = reward_improvement >= target_reward_improvement_pct
+        baselines[baseline] = {
+            'passed': baseline_passed,
+            'reward_improvement_pct': reward_improvement,
+            'target_reward_improvement_pct': target_reward_improvement_pct,
+        }
+        passed = passed and baseline_passed
+
+    return {
+        'passed': passed,
+        'target_reward_improvement_pct': target_reward_improvement_pct,
+        'baselines': baselines,
+    }
+
+
+def run_benchmark(model_path=None, model_algorithm='maddpg', num_episodes=100, max_steps=1000,
+                  num_agents=10, hidden_dim=256, workload_arrival_rate=5.0, seed=42,
+                  target_reward_improvement_pct=20.0,
+                  output_path='./models/maddpg/benchmark_results.json'):
     """Run full benchmark comparing all algorithms"""
     print("=" * 80)
     print("MADDPG Performance Benchmark")
     print("=" * 80)
 
     # Create environment
-    env = DistributedResourceEnv(num_agents=10, workload_arrival_rate=5.0)
+    env = DistributedResourceEnv(
+        num_agents=num_agents,
+        workload_arrival_rate=workload_arrival_rate,
+        seed=seed
+    )
+
+    trainer = None
+    if model_path:
+        trainer_cls = MATD3Trainer if model_algorithm == 'matd3' else MADDPGTrainer
+        trainer = trainer_cls(env, hidden_dim=hidden_dim)
+        trainer.load_models(model_path)
+        print(f"Loaded {model_algorithm.upper()} model weights from {model_path}")
+    else:
+        print("No --model-path provided; benchmarking baselines only.")
 
     # Benchmark algorithms
-    algorithms = ['random', 'greedy', 'maddpg']
+    algorithms = ['random', 'greedy']
+    if trainer is not None:
+        algorithms.append(model_algorithm)
     results = {}
 
     for algo in algorithms:
         print(f"\nBenchmarking {algo.upper()}...")
-        results[algo] = benchmark_algorithm(env, algo, num_episodes=100)
+        results[algo] = benchmark_algorithm(
+            env,
+            algo,
+            trainer=trainer,
+            num_episodes=num_episodes,
+            max_steps=max_steps,
+            seed=seed
+        )
 
     # Print results
     print("\n" + "=" * 80)
@@ -165,44 +245,88 @@ def run_benchmark():
 
     # Calculate improvements
     print("\n" + "=" * 80)
-    print("MADDPG IMPROVEMENTS OVER BASELINES")
+    print("DRL IMPROVEMENTS OVER BASELINES")
     print("=" * 80)
 
-    maddpg_result = results['maddpg']
+    model_result = results.get(model_algorithm)
+    if model_result is None:
+        print("\nDRL model not benchmarked; provide --model-path to compute improvements.")
+    else:
+        baseline_results = {baseline: results[baseline] for baseline in ['random', 'greedy']}
+        improvements = calculate_improvements(model_result, baseline_results)
+        results['improvements'] = improvements
+        results['acceptance'] = evaluate_acceptance(
+            improvements,
+            target_reward_improvement_pct=target_reward_improvement_pct
+        )
 
-    for baseline in ['random', 'greedy']:
-        baseline_result = results[baseline]
+        for baseline, improvement in improvements.items():
+            reward_improvement = improvement['reward_improvement_pct']
+            sla_improvement = improvement['sla_violation_reduction_pct']
+            completion_improvement = improvement['completion_improvement_pct']
 
-        reward_improvement = (
-            (maddpg_result['avg_reward'] - baseline_result['avg_reward']) /
-            max(abs(baseline_result['avg_reward']), 1e-6)
-        ) * 100
+            print(f"\n{model_algorithm.upper()} vs {baseline.upper()}:")
+            print(f"  Reward Improvement:      {reward_improvement:+.1f}%")
+            print(f"  SLA Violation Reduction: {sla_improvement:+.1f}%")
+            print(f"  Completion Improvement:  {completion_improvement:+.1f}%")
 
-        sla_improvement = (
-            (baseline_result['avg_sla_violation'] - maddpg_result['avg_sla_violation']) /
-            max(baseline_result['avg_sla_violation'], 1e-6)
-        ) * 100
+        status = "PASS" if results['acceptance']['passed'] else "FAIL"
+        print(f"\nAcceptance Gate ({target_reward_improvement_pct:.1f}% reward improvement): {status}")
 
-        completion_improvement = (
-            (maddpg_result['avg_completion_rate'] - baseline_result['avg_completion_rate']) /
-            max(baseline_result['avg_completion_rate'], 1e-6)
-        ) * 100
-
-        print(f"\nMADDPG vs {baseline.upper()}:")
-        print(f"  Reward Improvement:      {reward_improvement:+.1f}%")
-        print(f"  SLA Violation Reduction: {sla_improvement:+.1f}%")
-        print(f"  Completion Improvement:  {completion_improvement:+.1f}%")
+    results['metadata'] = {
+        'model_algorithm': model_algorithm,
+        'model_path': model_path,
+        'num_episodes': num_episodes,
+        'max_steps': max_steps,
+        'num_agents': num_agents,
+        'hidden_dim': hidden_dim,
+        'workload_arrival_rate': workload_arrival_rate,
+        'seed': seed,
+        'target_reward_improvement_pct': target_reward_improvement_pct,
+        'algorithms': algorithms,
+    }
 
     # Save results
-    with open('./models/maddpg/benchmark_results.json', 'w') as f:
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    with open(output_path, 'w') as f:
         json.dump(results, f, indent=2)
 
     print("\n" + "=" * 80)
-    print("✓ Benchmark complete! Results saved to ./models/maddpg/benchmark_results.json")
+    print(f"✓ Benchmark complete! Results saved to {output_path}")
     print("=" * 80)
 
     return results
 
 
 if __name__ == "__main__":
-    results = run_benchmark()
+    parser = argparse.ArgumentParser(description="Benchmark MADDPG resource allocation.")
+    parser.add_argument("--model-path", help="Directory containing trained agent_*.pt weights")
+    parser.add_argument("--algorithm", choices=["maddpg", "matd3"], default="maddpg")
+    parser.add_argument("--episodes", type=int, default=100)
+    parser.add_argument("--max-steps", type=int, default=1000)
+    parser.add_argument("--num-agents", type=int, default=10)
+    parser.add_argument("--hidden-dim", type=int, default=256)
+    parser.add_argument("--workload-arrival-rate", type=float, default=5.0)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--target-reward-improvement", type=float, default=20.0)
+    parser.add_argument("--fail-on-target-miss", action="store_true")
+    parser.add_argument("--output", default="./models/maddpg/benchmark_results.json")
+    args = parser.parse_args()
+
+    results = run_benchmark(
+        model_path=args.model_path,
+        model_algorithm=args.algorithm,
+        num_episodes=args.episodes,
+        max_steps=args.max_steps,
+        num_agents=args.num_agents,
+        hidden_dim=args.hidden_dim,
+        workload_arrival_rate=args.workload_arrival_rate,
+        seed=args.seed,
+        target_reward_improvement_pct=args.target_reward_improvement,
+        output_path=args.output
+    )
+
+    if args.fail_on_target_miss and not results.get('acceptance', {}).get('passed', False):
+        sys.exit(1)

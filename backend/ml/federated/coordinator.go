@@ -31,27 +31,27 @@ type ModelUpdate struct {
 
 // Client represents a federated learning client
 type Client struct {
-	ID               int                  `json:"id"`
-	DataSize         int                  `json:"data_size"`
-	DataDistribution []float64            `json:"data_distribution"`
-	ComputeCapacity  float64              `json:"compute_capacity"`
-	Bandwidth        float64              `json:"bandwidth"`
-	Latency          float64              `json:"latency"`
-	Reliability      float64              `json:"reliability"`
-	CurrentModel     *Model               `json:"current_model,omitempty"`
-	LastUpdate       *ModelUpdate         `json:"last_update,omitempty"`
+	ID               int          `json:"id"`
+	DataSize         int          `json:"data_size"`
+	DataDistribution []float64    `json:"data_distribution"`
+	ComputeCapacity  float64      `json:"compute_capacity"`
+	Bandwidth        float64      `json:"bandwidth"`
+	Latency          float64      `json:"latency"`
+	Reliability      float64      `json:"reliability"`
+	CurrentModel     *Model       `json:"current_model,omitempty"`
+	LastUpdate       *ModelUpdate `json:"last_update,omitempty"`
 }
 
 // TrainingRound represents a federated learning round
 type TrainingRound struct {
-	RoundNumber       int                `json:"round_number"`
-	SelectedClients   []int              `json:"selected_clients"`
-	GlobalModel       *Model             `json:"global_model"`
-	StartTime         time.Time          `json:"start_time"`
-	EndTime           time.Time          `json:"end_time"`
-	AverageAccuracy   float64            `json:"average_accuracy"`
-	CommCost          float64            `json:"communication_cost"`
-	ConvergenceSpeed  float64            `json:"convergence_speed"`
+	RoundNumber      int       `json:"round_number"`
+	SelectedClients  []int     `json:"selected_clients"`
+	GlobalModel      *Model    `json:"global_model"`
+	StartTime        time.Time `json:"start_time"`
+	EndTime          time.Time `json:"end_time"`
+	AverageAccuracy  float64   `json:"average_accuracy"`
+	CommCost         float64   `json:"communication_cost"`
+	ConvergenceSpeed float64   `json:"convergence_speed"`
 }
 
 // FederatedCoordinator manages federated learning process
@@ -59,7 +59,7 @@ type FederatedCoordinator struct {
 	mu                sync.RWMutex
 	clients           map[int]*Client
 	globalModel       *Model
-	topology          *TopologyOptimizer // Python integration
+	topology          TopologyOptimizer // Python integration
 	currentRound      int
 	trainingHistory   []*TrainingRound
 	targetAccuracy    float64
@@ -67,9 +67,9 @@ type FederatedCoordinator struct {
 	aggregationMethod string // "fedavg", "fedprox", "weighted"
 
 	// Channels for async operations
-	updateChan    chan *ModelUpdate
-	errorChan     chan error
-	shutdownChan  chan struct{}
+	updateChan   chan *ModelUpdate
+	errorChan    chan error
+	shutdownChan chan struct{}
 }
 
 // TopologyOptimizer interface for Python integration

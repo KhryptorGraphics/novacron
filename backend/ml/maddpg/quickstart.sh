@@ -35,38 +35,38 @@ python3 test_maddpg.py --quiet 2>&1 | grep -E "(OK|FAILED|ERROR)" || true
 echo "✓ MADDPG tests complete"
 echo ""
 
-# Quick training demo (100 episodes)
-echo "🚀 Running quick training demo (100 episodes)..."
-cat > /tmp/maddpg_demo.py << 'EOF'
-from environment import DistributedResourceEnv
-from train import MADDPGTrainer
+# Quick training demo
+echo "🚀 Running quick MATD3 training demo..."
+python3 train.py \
+  --algorithm matd3 \
+  --episodes 100 \
+  --max-steps 200 \
+  --warmup-episodes 10 \
+  --eval-episodes 20 \
+  --num-agents 5 \
+  --hidden-dim 128 \
+  --batch-size 64 \
+  --buffer-capacity 10000 \
+  --action-prior 0.3 \
+  --workload-arrival-rate 3.0 \
+  --seed 42 \
+  --update-interval 2 \
+  --save-interval 50 \
+  --log-interval 20 \
+  --save-dir ./models/matd3_demo
 
-# Create environment
-env = DistributedResourceEnv(num_agents=5, workload_arrival_rate=3.0, episode_length=200)
-
-# Create trainer
-trainer = MADDPGTrainer(env, hidden_dim=128, buffer_capacity=10000, batch_size=64)
-
-# Quick training
-print("\nTraining MADDPG agents...")
-trainer.train(
-    num_episodes=100,
-    max_steps=200,
-    warmup_episodes=10,
-    save_interval=50,
-    log_interval=20,
-    save_dir='./models/maddpg_demo'
-)
-
-# Evaluate
-print("\nEvaluating trained model...")
-trainer.evaluate(num_episodes=20, render=False)
-
-print("\n✓ Demo complete! Model saved to ./models/maddpg_demo/")
-EOF
-
-python3 /tmp/maddpg_demo.py
-rm /tmp/maddpg_demo.py
+echo "📊 Running demo benchmark without acceptance failure..."
+python3 benchmark.py \
+  --model-path ./models/matd3_demo/best \
+  --algorithm matd3 \
+  --episodes 10 \
+  --max-steps 200 \
+  --num-agents 5 \
+  --hidden-dim 128 \
+  --workload-arrival-rate 3.0 \
+  --seed 42 \
+  --target-reward-improvement 20.0 \
+  --output ./models/matd3_demo/benchmark_results.json
 
 echo ""
 echo "========================================="
@@ -74,7 +74,7 @@ echo "✓ MADDPG Quick Start Complete!"
 echo "========================================="
 echo ""
 echo "Next steps:"
-echo "  1. Train full model: python3 train.py"
-echo "  2. Run benchmarks: python3 benchmark.py"
+echo "  1. Train full model: python3 train.py --algorithm matd3"
+echo "  2. Run acceptance gate: ./verify_performance.sh"
 echo "  3. Integrate with Go: see README.md"
 echo ""
