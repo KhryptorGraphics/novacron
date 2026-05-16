@@ -122,6 +122,80 @@ func NewLoginCommand() *cobra.Command {
 	return cmd
 }
 
+func NewAuthCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "auth",
+		Short: "Inspect CLI authentication state",
+	}
+
+	cmd.AddCommand(newAuthInfoCommand())
+	return cmd
+}
+
+func newAuthInfoCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "info",
+		Short: "Show token status for the current cluster",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			manager, err := config.NewManager(cfgFile)
+			if err != nil {
+				return err
+			}
+
+			cluster, err := manager.GetCurrentCluster()
+			if err != nil {
+				return err
+			}
+
+			writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+			fmt.Fprintf(writer, "CLUSTER\t%s\n", cluster.Name)
+			fmt.Fprintf(writer, "SERVER\t%s\n", cluster.Server)
+			fmt.Fprintf(writer, "AUTH TYPE\t%s\n", cluster.AuthType)
+
+			if !strings.EqualFold(cluster.AuthType, "token") {
+				fmt.Fprintln(writer, "TOKEN STATUS\tnot configured")
+				return writer.Flush()
+			}
+
+			store, err := auth.NewTokenStore()
+			if err != nil {
+				return err
+			}
+			tokenAuth, err := store.Load(cluster.Name)
+			if err != nil {
+				return fmt.Errorf("load auth token for cluster %s: %w", cluster.Name, err)
+			}
+
+			now := time.Now()
+			status := "valid"
+			switch {
+			case tokenAuth.Token == "":
+				status = "missing"
+			case !tokenAuth.ExpiresAt.IsZero() && now.After(tokenAuth.ExpiresAt):
+				status = "expired"
+			case tokenAuth.ExpiresAt.IsZero():
+				status = "unknown"
+			}
+
+			fmt.Fprintf(writer, "TOKEN STATUS\t%s\n", status)
+			if tokenAuth.ExpiresAt.IsZero() {
+				fmt.Fprintln(writer, "EXPIRES AT\tunknown")
+			} else {
+				fmt.Fprintf(writer, "EXPIRES AT\t%s\n", tokenAuth.ExpiresAt.UTC().Format(time.RFC3339))
+			}
+			if tokenAuth.RefreshToken == "" {
+				fmt.Fprintln(writer, "REFRESH TOKEN\tmissing")
+			} else {
+				fmt.Fprintln(writer, "REFRESH TOKEN\tavailable")
+			}
+			if tokenAuth.RefreshURL != "" {
+				fmt.Fprintf(writer, "REFRESH URL\t%s\n", tokenAuth.RefreshURL)
+			}
+			return writer.Flush()
+		},
+	}
+}
+
 func loginToCluster(server string, email string, password string, allowInsecure bool) (*auth.TokenAuth, error) {
 	body, err := json.Marshal(map[string]string{
 		"email":    email,

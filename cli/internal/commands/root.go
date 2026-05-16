@@ -61,6 +61,7 @@ management, migration, monitoring, and cluster administration.`,
 	rootCmd.AddCommand(
 		NewVersionCommand(version, gitCommit, buildDate),
 		NewLoginCommand(),
+		NewAuthCommand(),
 		NewConfigCommand(),
 		NewVMCommand(),
 		NewNodeCommand(),
