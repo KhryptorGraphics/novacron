@@ -1,12 +1,14 @@
 package auth
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -21,9 +23,11 @@ type Authenticator interface {
 
 // TokenAuth implements token-based authentication
 type TokenAuth struct {
-	Token        string    `json:"token"`
-	RefreshToken string    `json:"refreshToken,omitempty"`
-	ExpiresAt    time.Time `json:"expiresAt"`
+	Token        string       `json:"token"`
+	RefreshToken string       `json:"refreshToken,omitempty"`
+	ExpiresAt    time.Time    `json:"expiresAt"`
+	RefreshURL   string       `json:"refreshUrl,omitempty"`
+	HTTPClient   *http.Client `json:"-"`
 }
 
 // Apply applies token authentication to a request
@@ -44,8 +48,68 @@ func (t *TokenAuth) Apply(req *http.Request) error {
 
 // Refresh refreshes the authentication token
 func (t *TokenAuth) Refresh() error {
-	// TODO: Implement token refresh logic
-	return fmt.Errorf("token refresh not implemented")
+	if t.RefreshToken == "" {
+		return fmt.Errorf("refresh token is required")
+	}
+
+	refreshURL := strings.TrimSpace(t.RefreshURL)
+	if refreshURL == "" {
+		refreshURL = strings.TrimSpace(os.Getenv("NOVACRON_AUTH_REFRESH_URL"))
+	}
+	if refreshURL == "" {
+		return fmt.Errorf("refresh URL is not configured")
+	}
+
+	body, err := json.Marshal(map[string]string{
+		"refreshToken": t.RefreshToken,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal refresh request: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, refreshURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create refresh request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := t.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("send refresh request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("refresh request failed with status %d", resp.StatusCode)
+	}
+
+	var refreshResp struct {
+		Token        string    `json:"token"`
+		RefreshToken string    `json:"refreshToken"`
+		ExpiresAt    time.Time `json:"expiresAt"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&refreshResp); err != nil {
+		return fmt.Errorf("decode refresh response: %w", err)
+	}
+	if refreshResp.Token == "" {
+		return fmt.Errorf("refresh response missing token")
+	}
+	if refreshResp.ExpiresAt.IsZero() {
+		return fmt.Errorf("refresh response missing expiresAt")
+	}
+
+	t.Token = refreshResp.Token
+	if refreshResp.RefreshToken != "" {
+		t.RefreshToken = refreshResp.RefreshToken
+	}
+	t.ExpiresAt = refreshResp.ExpiresAt
+	return nil
 }
 
 // APIKeyAuth implements API key authentication
