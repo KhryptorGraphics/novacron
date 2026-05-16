@@ -2,14 +2,13 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"text/tabwriter"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/novacron/dwcp-sdk-go"
+	"github.com/spf13/cobra"
 )
 
 var vmCmd = &cobra.Command{

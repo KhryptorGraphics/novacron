@@ -22,14 +22,14 @@ const (
 	DefaultPort     = 9000
 
 	// Message types
-	MsgTypeAuth           = 0x01
-	MsgTypeVM             = 0x02
-	MsgTypeStream         = 0x03
-	MsgTypeMigration      = 0x04
-	MsgTypeHealth         = 0x05
-	MsgTypeMetrics        = 0x06
-	MsgTypeConfig         = 0x07
-	MsgTypeSnapshot       = 0x08
+	MsgTypeAuth      = 0x01
+	MsgTypeVM        = 0x02
+	MsgTypeStream    = 0x03
+	MsgTypeMigration = 0x04
+	MsgTypeHealth    = 0x05
+	MsgTypeMetrics   = 0x06
+	MsgTypeConfig    = 0x07
+	MsgTypeSnapshot  = 0x08
 
 	// VM operations
 	VMOpCreate   = 0x10
@@ -60,28 +60,28 @@ var (
 
 // Client represents a DWCP client connection
 type Client struct {
-	conn        net.Conn
-	tlsConfig   *tls.Config
-	address     string
-	apiKey      string
+	conn      net.Conn
+	tlsConfig *tls.Config
+	address   string
+	apiKey    string
 
-	mu          sync.RWMutex
-	connected   bool
+	mu            sync.RWMutex
+	connected     bool
 	authenticated bool
 
 	// Streaming support
-	streams     map[string]*Stream
-	streamMu    sync.RWMutex
+	streams  map[string]*Stream
+	streamMu sync.RWMutex
 
 	// Configuration
-	config      ClientConfig
+	config ClientConfig
 
 	// Metrics
-	metrics     *ClientMetrics
+	metrics *ClientMetrics
 
 	// Context management
-	ctx         context.Context
-	cancel      context.CancelFunc
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// Message handling
 	msgHandlers map[uint8]MessageHandler
@@ -343,8 +343,6 @@ func (c *Client) sendRequest(ctx context.Context, msgType uint8, payload interfa
 
 // readLoop continuously reads messages from the connection
 func (c *Client) readLoop() {
-	buffer := make([]byte, c.config.BufferSize)
-
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -458,12 +456,14 @@ func (m *Message) Unmarshal(data []byte) error {
 
 	m.RequestID = string(data[12 : 12+ridLen])
 
+	payloadOffset := int(16 + ridLen)
 	payloadLen := binary.BigEndian.Uint32(data[12+ridLen : 16+ridLen])
-	if len(data) < int(16+ridLen+payloadLen) {
+	payloadEnd := payloadOffset + int(payloadLen)
+	if len(data) < payloadEnd {
 		return errors.New("invalid payload length")
 	}
 
-	m.Payload = data[16+ridLen : 16+ridLen+payloadLen]
+	m.Payload = data[payloadOffset:payloadEnd]
 
 	return nil
 }
@@ -506,13 +506,13 @@ type AuthResponse struct {
 
 // ClientMetrics holds client metrics
 type ClientMetrics struct {
-	ConnectionsTotal  uint64
-	MessagesSent      uint64
-	MessagesReceived  uint64
-	BytesSent         uint64
-	BytesReceived     uint64
-	ErrorsTotal       uint64
-	LastConnected     time.Time
+	ConnectionsTotal uint64
+	MessagesSent     uint64
+	MessagesReceived uint64
+	BytesSent        uint64
+	BytesReceived    uint64
+	ErrorsTotal      uint64
+	LastConnected    time.Time
 
 	mu sync.RWMutex
 }
@@ -532,14 +532,14 @@ func (c *Client) GetMetrics() ClientMetrics {
 
 // Stream represents a bidirectional streaming connection
 type Stream struct {
-	id       string
-	client   *Client
-	ctx      context.Context
-	cancel   context.CancelFunc
-	dataCh   chan []byte
-	errorCh  chan error
-	closed   bool
-	mu       sync.RWMutex
+	id      string
+	client  *Client
+	ctx     context.Context
+	cancel  context.CancelFunc
+	dataCh  chan []byte
+	errorCh chan error
+	closed  bool
+	mu      sync.RWMutex
 }
 
 // NewStream creates a new stream

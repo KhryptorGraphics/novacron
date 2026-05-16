@@ -10,7 +10,6 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"net/url"
 	"sort"
 	"sync"
 	"time"
@@ -43,23 +42,23 @@ const (
 
 // EnhancedClient represents the enhanced NovaCron API client
 type EnhancedClient struct {
-	baseURL                 string
-	httpClient              *http.Client
-	apiToken                string
-	tokenExpiresAt          time.Time
-	userAgent               string
-	redis                   *redis.Client
-	cacheTTL                time.Duration
-	enableAIFeatures        bool
-	cloudProvider           CloudProvider
-	region                  string
-	circuitBreakers         map[string]*gobreaker.CircuitBreaker
-	requestMetrics          map[string][]float64
-	metricsLock             sync.RWMutex
-	enableMetrics           bool
-	tokenRefreshTicker      *time.Ticker
-	tokenRefreshStop        chan bool
-	logger                  Logger
+	baseURL            string
+	httpClient         *http.Client
+	apiToken           string
+	tokenExpiresAt     time.Time
+	userAgent          string
+	redis              *redis.Client
+	cacheTTL           time.Duration
+	enableAIFeatures   bool
+	cloudProvider      CloudProvider
+	region             string
+	circuitBreakers    map[string]*gobreaker.CircuitBreaker
+	requestMetrics     map[string][]float64
+	metricsLock        sync.RWMutex
+	enableMetrics      bool
+	tokenRefreshTicker *time.Ticker
+	tokenRefreshStop   chan bool
+	logger             Logger
 }
 
 // Logger interface for logging
@@ -73,36 +72,44 @@ type Logger interface {
 // DefaultLogger implements a basic logger
 type DefaultLogger struct{}
 
-func (l *DefaultLogger) Info(msg string, fields ...interface{})  { fmt.Printf("INFO: "+msg+"\n", fields...) }
-func (l *DefaultLogger) Warn(msg string, fields ...interface{})  { fmt.Printf("WARN: "+msg+"\n", fields...) }
-func (l *DefaultLogger) Error(msg string, fields ...interface{}) { fmt.Printf("ERROR: "+msg+"\n", fields...) }
-func (l *DefaultLogger) Debug(msg string, fields ...interface{}) { fmt.Printf("DEBUG: "+msg+"\n", fields...) }
+func (l *DefaultLogger) Info(msg string, fields ...interface{}) {
+	fmt.Printf("INFO: "+msg+"\n", fields...)
+}
+func (l *DefaultLogger) Warn(msg string, fields ...interface{}) {
+	fmt.Printf("WARN: "+msg+"\n", fields...)
+}
+func (l *DefaultLogger) Error(msg string, fields ...interface{}) {
+	fmt.Printf("ERROR: "+msg+"\n", fields...)
+}
+func (l *DefaultLogger) Debug(msg string, fields ...interface{}) {
+	fmt.Printf("DEBUG: "+msg+"\n", fields...)
+}
 
 // EnhancedClientConfig holds configuration for the enhanced NovaCron client
 type EnhancedClientConfig struct {
-	BaseURL                   string
-	APIToken                  string
-	Username                  string
-	Password                  string
-	Timeout                   time.Duration
-	UserAgent                 string
-	RedisURL                  string
-	CacheTTL                  time.Duration
-	EnableAIFeatures          bool
-	CloudProvider             CloudProvider
-	Region                    string
-	CircuitBreakerThreshold   uint32
-	CircuitBreakerTimeout     time.Duration
-	EnableMetrics             bool
-	Logger                    Logger
+	BaseURL                 string
+	APIToken                string
+	Username                string
+	Password                string
+	Timeout                 time.Duration
+	UserAgent               string
+	RedisURL                string
+	CacheTTL                time.Duration
+	EnableAIFeatures        bool
+	CloudProvider           CloudProvider
+	Region                  string
+	CircuitBreakerThreshold uint32
+	CircuitBreakerTimeout   time.Duration
+	EnableMetrics           bool
+	Logger                  Logger
 }
 
 // PlacementRecommendation represents AI-powered placement recommendation
 type PlacementRecommendation struct {
-	RecommendedNode   string                     `json:"recommended_node"`
-	ConfidenceScore   float64                    `json:"confidence_score"`
-	Reasoning         string                     `json:"reasoning"`
-	AlternativeNodes  []AlternativeNodeOption    `json:"alternative_nodes"`
+	RecommendedNode  string                  `json:"recommended_node"`
+	ConfidenceScore  float64                 `json:"confidence_score"`
+	Reasoning        string                  `json:"reasoning"`
+	AlternativeNodes []AlternativeNodeOption `json:"alternative_nodes"`
 }
 
 // AlternativeNodeOption represents an alternative node option
@@ -115,12 +122,12 @@ type AlternativeNodeOption struct {
 
 // MigrationSpec represents a migration specification for batch operations
 type MigrationSpec struct {
-	VMID            string `json:"vm_id"`
-	TargetNodeID    string `json:"target_node_id"`
-	Type            string `json:"type,omitempty"`
-	Force           bool   `json:"force,omitempty"`
-	BandwidthLimit  *int   `json:"bandwidth_limit,omitempty"`
-	Compression     bool   `json:"compression,omitempty"`
+	VMID           string `json:"vm_id"`
+	TargetNodeID   string `json:"target_node_id"`
+	Type           string `json:"type,omitempty"`
+	Force          bool   `json:"force,omitempty"`
+	BandwidthLimit *int   `json:"bandwidth_limit,omitempty"`
+	Compression    bool   `json:"compression,omitempty"`
 }
 
 // RequestMetrics represents performance metrics for API requests
@@ -200,11 +207,11 @@ func NewEnhancedClient(config EnhancedClientConfig) (*EnhancedClient, error) {
 			client.logger.Warn("Failed to parse Redis URL: %v", err)
 		} else {
 			client.redis = redis.NewClient(opt)
-			
+
 			// Test connection
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			
+
 			if err := client.redis.Ping(ctx).Err(); err != nil {
 				client.logger.Warn("Redis connection failed: %v", err)
 				client.redis = nil
@@ -225,7 +232,7 @@ func NewEnhancedClient(config EnhancedClientConfig) (*EnhancedClient, error) {
 // startTokenRefresh starts the background token refresh process
 func (c *EnhancedClient) startTokenRefresh() {
 	c.tokenRefreshTicker = time.NewTicker(1 * time.Minute)
-	
+
 	go func() {
 		for {
 			select {
@@ -350,7 +357,7 @@ func (c *EnhancedClient) getCacheKey(method, path string, params interface{}) st
 // request performs an HTTP request with circuit breaker, caching, and metrics
 func (c *EnhancedClient) request(ctx context.Context, method, path string, body interface{}, result interface{}, useCache bool) error {
 	endpoint := fmt.Sprintf("%s:%s", method, path)
-	
+
 	// Get circuit breaker for this endpoint
 	cb := c.getOrCreateCircuitBreaker(endpoint)
 
@@ -482,7 +489,7 @@ func (c *EnhancedClient) GetPredictiveScalingForecast(ctx context.Context, vmID 
 	}
 
 	path := fmt.Sprintf("/api/ai/scaling/%s?forecast_hours=%d", vmID, forecastHours)
-	
+
 	var forecast map[string]interface{}
 	if err := c.request(ctx, "GET", path, nil, &forecast, true); err != nil {
 		return nil, fmt.Errorf("failed to get scaling forecast: %w", err)
@@ -626,7 +633,7 @@ func (c *EnhancedClient) BatchCreateVMs(ctx context.Context, requests []*CreateV
 		wg.Add(1)
 		go func(index int, request *CreateVMRequest) {
 			defer wg.Done()
-			semaphore <- struct{}{} // Acquire
+			semaphore <- struct{}{}        // Acquire
 			defer func() { <-semaphore }() // Release
 
 			vm, err := c.CreateVMWithAIPlacement(ctx, request, useAIPlacement, nil)
@@ -652,7 +659,7 @@ func (c *EnhancedClient) BatchMigrateVMs(ctx context.Context, migrations []Migra
 		wg.Add(1)
 		go func(index int, migrationSpec MigrationSpec) {
 			defer wg.Done()
-			semaphore <- struct{}{} // Acquire
+			semaphore <- struct{}{}        // Acquire
 			defer func() { <-semaphore }() // Release
 
 			req := &MigrationRequest{
@@ -692,7 +699,7 @@ func (c *EnhancedClient) GetRequestMetrics() map[string]*RequestMetrics {
 	for endpoint, timings := range c.requestMetrics {
 		if len(timings) > 0 {
 			sort.Float64s(timings)
-			
+
 			var sum float64
 			for _, t := range timings {
 				sum += t
