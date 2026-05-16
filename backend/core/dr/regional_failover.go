@@ -279,9 +279,6 @@ func (d *DNSManager) updateRoute53(newTarget string) error {
 	d.currentTarget = newTarget
 	log.Printf("Route53 updated: %s -> %s", d.recordName, newTarget)
 
-	// Wait for DNS propagation
-	time.Sleep(30 * time.Second)
-
 	return nil
 }
 
@@ -292,9 +289,6 @@ func (d *DNSManager) updateCloudFlare(newTarget string) error {
 
 	d.currentTarget = newTarget
 	log.Printf("CloudFlare updated: %s -> %s", d.recordName, newTarget)
-
-	// CloudFlare has faster propagation
-	time.Sleep(10 * time.Second)
 
 	return nil
 }

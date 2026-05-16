@@ -1,7 +1,10 @@
 package dwcp
 
 import (
+	"bytes"
 	"context"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -246,9 +249,35 @@ func testMonitoringIntegration(t *testing.T) {
 }
 
 func testDisasterRecovery(t *testing.T) {
-	// Test DR orchestrator (simplified)
+	runGoTest(t, filepath.Join("..", "..", "dr"), "TestDROrchestrator|TestFailoverExecution|TestSplitBrainPrevention|TestRegionalFailover")
+
 	t.Log("✅ Disaster recovery framework validated")
-	// Full DR tests in backend/core/dr/dr_test.go
+}
+
+func runGoTest(t *testing.T, dir, testPattern string) {
+	t.Helper()
+
+	cmd := exec.Command("go", "test", ".", "-run", testPattern, "-count=1", "-timeout", "30s")
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go test failed in %s with pattern %q: %v\n%s", dir, testPattern, err, string(output))
+	}
+
+	if len(output) == 0 {
+		t.Fatalf("go test in %s with pattern %q produced no output", dir, testPattern)
+	}
+
+	if testing.Verbose() {
+		t.Logf("go test passed in %s with pattern %q:\n%s", dir, testPattern, string(output))
+	} else if !containsPassOutput(output) {
+		t.Fatalf("go test in %s with pattern %q did not report a package pass:\n%s", dir, testPattern, string(output))
+	}
+}
+
+func containsPassOutput(output []byte) bool {
+	trimmed := bytes.TrimSpace(output)
+	return len(trimmed) >= 2 && (bytes.HasPrefix(trimmed, []byte("ok")) || bytes.Contains(trimmed, []byte("\nok")) || bytes.Contains(trimmed, []byte("\nPASS\n")) || bytes.Contains(trimmed, []byte("PASS\nok")))
 }
 
 // Benchmark Phase 3 Performance

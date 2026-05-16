@@ -207,6 +207,22 @@ func TestRegionalFailover(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestDNSUpdateDoesNotBlockForPropagation(t *testing.T) {
+	dns := &DNSManager{
+		provider:      "route53",
+		recordName:    "api.novacron.io",
+		currentTarget: "us-east-1",
+	}
+
+	start := time.Now()
+	err := dns.UpdateDNS("us-west-2")
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	assert.Equal(t, "us-west-2", dns.GetCurrentDNSTarget())
+	assert.Less(t, elapsed, time.Second, "DNS update should not block on propagation")
+}
+
 func TestIntegrityChecker(t *testing.T) {
 	config := DefaultDRConfig()
 
