@@ -18,17 +18,17 @@ type DWCPConfig struct {
 	EnableFallback bool `json:"enable_fallback"`
 
 	// AMST settings
-	MinStreams      int `json:"min_streams"`       // Min parallel streams (default: 4)
-	MaxStreams      int `json:"max_streams"`       // Max parallel streams (default: 256)
-	InitialStreams  int `json:"initial_streams"`   // Initial streams (default: 16)
+	MinStreams     int `json:"min_streams"`     // Min parallel streams (default: 4)
+	MaxStreams     int `json:"max_streams"`     // Max parallel streams (default: 256)
+	InitialStreams int `json:"initial_streams"` // Initial streams (default: 16)
 
 	// HDE settings
-	EnableDelta     bool    `json:"enable_delta"`      // Enable delta encoding (default: true)
-	DeltaThreshold  float64 `json:"delta_threshold"`   // Delta efficiency threshold (default: 0.7)
-	EnableDictionary bool   `json:"enable_dictionary"` // Enable dictionary compression (default: true)
+	EnableDelta      bool    `json:"enable_delta"`      // Enable delta encoding (default: true)
+	DeltaThreshold   float64 `json:"delta_threshold"`   // Delta efficiency threshold (default: 0.7)
+	EnableDictionary bool    `json:"enable_dictionary"` // Enable dictionary compression (default: true)
 
 	// Performance targets
-	TargetSpeedup   float64 `json:"target_speedup"`    // Target speedup over baseline (default: 2.5x)
+	TargetSpeedup float64 `json:"target_speedup"` // Target speedup over baseline (default: 2.5x)
 }
 
 // EnhancedLiveMigrationOrchestrator extends the base orchestrator with DWCP capabilities
@@ -40,9 +40,9 @@ type EnhancedLiveMigrationOrchestrator struct {
 	dwcpConfig  DWCPConfig
 
 	// Performance tracking
-	dwcpMigrations   int64
-	dwcpSpeedup      float64
-	dwcpSuccessRate  float64
+	dwcpMigrations  int64
+	dwcpSpeedup     float64
+	dwcpSuccessRate float64
 }
 
 // NewEnhancedLiveMigrationOrchestrator creates a new orchestrator with DWCP support
@@ -72,7 +72,7 @@ func NewEnhancedLiveMigrationOrchestrator(baseConfig MigrationConfig, dwcpConfig
 
 	enhanced := &EnhancedLiveMigrationOrchestrator{
 		LiveMigrationOrchestrator: baseOrchestrator,
-		dwcpConfig:                 dwcpConfig,
+		dwcpConfig:                dwcpConfig,
 	}
 
 	// Create DWCP adapter if enabled
@@ -81,20 +81,20 @@ func NewEnhancedLiveMigrationOrchestrator(baseConfig MigrationConfig, dwcpConfig
 			EnableDWCP:     true,
 			EnableFallback: dwcpConfig.EnableFallback,
 			AMSTConfig: dwcp.AMSTConfig{
-				MinStreams:      dwcpConfig.MinStreams,
-				MaxStreams:      dwcpConfig.MaxStreams,
-				InitialStreams:  dwcpConfig.InitialStreams,
-				EnableAdaptive:  true,
-				BandwidthLimit:  baseConfig.BandwidthLimit,
-				EnablePacing:    true,
+				MinStreams:     dwcpConfig.MinStreams,
+				MaxStreams:     dwcpConfig.MaxStreams,
+				InitialStreams: dwcpConfig.InitialStreams,
+				EnableAdaptive: true,
+				BandwidthLimit: baseConfig.BandwidthLimit,
+				EnablePacing:   true,
 			},
 			HDEConfig: dwcp.HDEConfig{
 				EnableDelta:      dwcpConfig.EnableDelta,
 				DeltaThreshold:   dwcpConfig.DeltaThreshold,
 				EnableDictionary: dwcpConfig.EnableDictionary,
-				LocalLevel:       0,  // Fast compression for local
-				RegionalLevel:    3,  // Balanced for regional
-				GlobalLevel:      9,  // Best compression for WAN
+				LocalLevel:       0, // Fast compression for local
+				RegionalLevel:    3, // Balanced for regional
+				GlobalLevel:      9, // Best compression for WAN
 			},
 			TargetSpeedup: dwcpConfig.TargetSpeedup,
 		}
@@ -121,6 +121,7 @@ func (o *EnhancedLiveMigrationOrchestrator) copyMemoryIterativeWithDWCP(ctx cont
 
 	state := migration.State
 	maxIterations := o.config.MemoryIterations
+	_ = maxIterations
 
 	// Get initial memory size (placeholder - would get from VM)
 	totalMemory := int64(4 * 1024 * 1024 * 1024) // 4GB placeholder
@@ -129,11 +130,11 @@ func (o *EnhancedLiveMigrationOrchestrator) copyMemoryIterativeWithDWCP(ctx cont
 	// Simulate getting memory data (in production, would get from hypervisor)
 	memoryData := make([]byte, totalMemory)
 
-	fmt.Printf("DWCP: Starting optimized memory migration for VM %s\n", migration.VM.ID)
+	fmt.Printf("DWCP: Starting optimized memory migration for VM %s\n", migration.VM.ID())
 	startTime := time.Now()
 
 	// Use DWCP for memory transfer
-	err := o.dwcpAdapter.MigrateVMMemory(ctx, migration.VM.ID, memoryData, migration.DestinationNode,
+	err := o.dwcpAdapter.MigrateVMMemory(ctx, migration.VM.ID(), memoryData, migration.DestinationNode,
 		func(transferred int64) {
 			// Update progress
 			state.BytesTransferred.Store(transferred)
@@ -183,7 +184,7 @@ func (o *EnhancedLiveMigrationOrchestrator) syncDiskWithDWCP(ctx context.Context
 
 	// In production, would get actual disk blocks from storage system
 	diskSize := int64(10 * 1024 * 1024 * 1024) // 10GB placeholder
-	blockSize := 1024 * 1024                    // 1MB blocks
+	blockSize := 1024 * 1024                   // 1MB blocks
 	numBlocks := int(diskSize / int64(blockSize))
 
 	// Simulate disk blocks (in production, would read from storage)
@@ -192,11 +193,11 @@ func (o *EnhancedLiveMigrationOrchestrator) syncDiskWithDWCP(ctx context.Context
 		diskBlocks[i] = make([]byte, blockSize)
 	}
 
-	fmt.Printf("DWCP: Starting optimized disk migration for VM %s\n", migration.VM.ID)
+	fmt.Printf("DWCP: Starting optimized disk migration for VM %s\n", migration.VM.ID())
 	startTime := time.Now()
 
 	// Use DWCP for disk transfer
-	err := o.dwcpAdapter.MigrateVMDisk(ctx, migration.VM.ID, diskBlocks, migration.DestinationNode,
+	err := o.dwcpAdapter.MigrateVMDisk(ctx, migration.VM.ID(), diskBlocks, migration.DestinationNode,
 		func(transferred int64) {
 			// Update progress
 			progress := 0.7 + (float64(transferred)/float64(diskSize))*0.2 // Disk is 20% of migration
@@ -285,7 +286,7 @@ func (o *EnhancedLiveMigrationOrchestrator) executeLiveMigrationWithDWCP(ctx con
 
 	// Clean up DWCP connection
 	if o.dwcpAdapter != nil {
-		o.dwcpAdapter.CleanupConnection(migration.VM.ID, migration.DestinationNode)
+		o.dwcpAdapter.CleanupConnection(migration.VM.ID(), migration.DestinationNode)
 	}
 
 	return nil
@@ -309,7 +310,7 @@ func (o *EnhancedLiveMigrationOrchestrator) transferFinalStateWithDWCP(ctx conte
 	finalData := make([]byte, finalBytes)
 
 	// Use DWCP with highest priority for minimal downtime
-	err := o.dwcpAdapter.MigrateVMMemory(ctx, migration.VM.ID+"_final", finalData,
+	err := o.dwcpAdapter.MigrateVMMemory(ctx, migration.VM.ID()+"_final", finalData,
 		migration.DestinationNode, nil)
 
 	if err != nil && o.dwcpConfig.EnableFallback {
@@ -332,9 +333,9 @@ func (o *EnhancedLiveMigrationOrchestrator) TrainDWCPDictionary(vmType string, s
 // GetDWCPMetrics returns DWCP-specific metrics
 func (o *EnhancedLiveMigrationOrchestrator) GetDWCPMetrics() map[string]interface{} {
 	metrics := map[string]interface{}{
-		"dwcp_enabled":     o.dwcpConfig.EnableDWCP,
-		"dwcp_migrations":  o.dwcpMigrations,
-		"dwcp_speedup":     o.dwcpSpeedup,
+		"dwcp_enabled":      o.dwcpConfig.EnableDWCP,
+		"dwcp_migrations":   o.dwcpMigrations,
+		"dwcp_speedup":      o.dwcpSpeedup,
 		"dwcp_success_rate": o.dwcpSuccessRate,
 	}
 

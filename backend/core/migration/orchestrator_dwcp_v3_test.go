@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,13 +27,13 @@ func TestDWCPv3OrchestratorCreation(t *testing.T) {
 		{
 			name: "Datacenter mode config",
 			config: DWCPv3Config{
-				NetworkMode:      upgrade.ModeDatacenter,
-				EnableAMSTv3:     true,
-				EnableHDEv3:      true,
-				EnablePBAv3:      true,
-				EnableITPv3:      true,
-				EnableASSv3:      true,
-				AutoSwitchMode:   false,
+				NetworkMode:    upgrade.ModeDatacenter,
+				EnableAMSTv3:   true,
+				EnableHDEv3:    true,
+				EnablePBAv3:    true,
+				EnableITPv3:    true,
+				EnableASSv3:    true,
+				AutoSwitchMode: false,
 				DatacenterTargets: &PerformanceTargets{
 					MaxDowntime:      300 * time.Millisecond,
 					TargetThroughput: 40 * 1024 * 1024 * 1024, // 40 Gbps
@@ -85,10 +84,10 @@ func TestDWCPv3OrchestratorCreation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			baseConfig := MigrationConfig{
-				MaxConcurrent:     5,
-				BandwidthLimit:    10 * 1024 * 1024 * 1024, // 10 Gbps
-				MemoryIterations:  10,
-				DirtyPageThreshold: 0.01,
+				MaxConcurrentMigrations: 5,
+				BandwidthLimit:          10 * 1024 * 1024 * 1024, // 10 Gbps
+				MemoryIterations:        10,
+				DirtyPageThreshold:      1000,
 			}
 
 			orchestrator, err := NewDWCPv3Orchestrator(baseConfig, tt.config)
@@ -128,10 +127,10 @@ func TestDWCPv3OrchestratorCreation(t *testing.T) {
 // TestNetworkModeDetection tests automatic network mode detection
 func TestNetworkModeDetection(t *testing.T) {
 	baseConfig := MigrationConfig{
-		MaxConcurrent:     5,
-		BandwidthLimit:    10 * 1024 * 1024 * 1024, // 10 Gbps
-		MemoryIterations:  10,
-		DirtyPageThreshold: 0.01,
+		MaxConcurrentMigrations: 5,
+		BandwidthLimit:          10 * 1024 * 1024 * 1024, // 10 Gbps
+		MemoryIterations:        10,
+		DirtyPageThreshold:      1000,
 	}
 
 	dwcpConfig := DefaultDWCPv3Config()
@@ -186,11 +185,11 @@ func TestDatacenterModeMigration(t *testing.T) {
 	ctx := context.Background()
 
 	baseConfig := MigrationConfig{
-		MaxConcurrent:      5,
-		BandwidthLimit:     40 * 1024 * 1024 * 1024, // 40 Gbps
-		MemoryIterations:   5,
-		DirtyPageThreshold: 0.01,
-		MaxDowntime:        500 * time.Millisecond,
+		MaxConcurrentMigrations: 5,
+		BandwidthLimit:          40 * 1024 * 1024 * 1024, // 40 Gbps
+		MemoryIterations:        5,
+		DirtyPageThreshold:      1000,
+		MaxDowntime:             500 * time.Millisecond,
 	}
 
 	dwcpConfig := DefaultDWCPv3Config()
@@ -219,7 +218,7 @@ func TestDatacenterModeMigration(t *testing.T) {
 
 	// Verify migration properties
 	assert.Equal(t, upgrade.ModeDatacenter, migration.Mode)
-	assert.Equal(t, vmID, migration.VM.ID)
+	assert.Equal(t, vmID, migration.VM.ID())
 	assert.Equal(t, sourceNode, migration.SourceNode)
 	assert.Equal(t, destNode, migration.DestinationNode)
 
@@ -253,11 +252,11 @@ func TestInternetModeMigration(t *testing.T) {
 	ctx := context.Background()
 
 	baseConfig := MigrationConfig{
-		MaxConcurrent:      5,
-		BandwidthLimit:     100 * 1024 * 1024, // 100 Mbps
-		MemoryIterations:   15,
-		DirtyPageThreshold: 0.05,
-		MaxDowntime:        90 * time.Second,
+		MaxConcurrentMigrations: 5,
+		BandwidthLimit:          100 * 1024 * 1024, // 100 Mbps
+		MemoryIterations:        15,
+		DirtyPageThreshold:      1000,
+		MaxDowntime:             90 * time.Second,
 	}
 
 	dwcpConfig := DefaultDWCPv3Config()
@@ -312,11 +311,11 @@ func TestHybridModeWithAutoSwitch(t *testing.T) {
 	ctx := context.Background()
 
 	baseConfig := MigrationConfig{
-		MaxConcurrent:      5,
-		BandwidthLimit:     1 * 1024 * 1024 * 1024, // 1 Gbps
-		MemoryIterations:   10,
-		DirtyPageThreshold: 0.02,
-		MaxDowntime:        5 * time.Second,
+		MaxConcurrentMigrations: 5,
+		BandwidthLimit:          1 * 1024 * 1024 * 1024, // 1 Gbps
+		MemoryIterations:        10,
+		DirtyPageThreshold:      1000,
+		MaxDowntime:             5 * time.Second,
 	}
 
 	dwcpConfig := DefaultDWCPv3Config()
@@ -364,10 +363,10 @@ func TestPredictiveBandwidthAllocation(t *testing.T) {
 	ctx := context.Background()
 
 	baseConfig := MigrationConfig{
-		MaxConcurrent:      5,
-		BandwidthLimit:     1 * 1024 * 1024 * 1024, // 1 Gbps
-		MemoryIterations:   10,
-		DirtyPageThreshold: 0.02,
+		MaxConcurrentMigrations: 5,
+		BandwidthLimit:          1 * 1024 * 1024 * 1024, // 1 Gbps
+		MemoryIterations:        10,
+		DirtyPageThreshold:      1000,
 	}
 
 	dwcpConfig := DefaultDWCPv3Config()
@@ -401,7 +400,7 @@ func TestPredictiveBandwidthAllocation(t *testing.T) {
 	if orchestrator.config.EnablePrefetching {
 		time.Sleep(500 * time.Millisecond)
 		if migration.CurrentPhase == PhaseV3Prefetch ||
-		   migration.CurrentPhase == PhaseV3PreCopy {
+			migration.CurrentPhase == PhaseV3PreCopy {
 			// Some pages might have been prefetched
 			// (In production, this would be > 0)
 		}
@@ -445,10 +444,10 @@ func TestCompressionModes(t *testing.T) {
 			ctx := context.Background()
 
 			baseConfig := MigrationConfig{
-				MaxConcurrent:      5,
-				BandwidthLimit:     1 * 1024 * 1024 * 1024,
-				MemoryIterations:   5,
-				DirtyPageThreshold: 0.02,
+				MaxConcurrentMigrations: 5,
+				BandwidthLimit:          1 * 1024 * 1024 * 1024,
+				MemoryIterations:        5,
+				DirtyPageThreshold:      1000,
 			}
 
 			dwcpConfig := DefaultDWCPv3Config()
@@ -485,15 +484,15 @@ func TestCompressionModes(t *testing.T) {
 	}
 }
 
-// TestConcurrentMigrations tests multiple concurrent migrations
-func TestConcurrentMigrations(t *testing.T) {
+// TestDWCPv3ConcurrentMigrations tests multiple concurrent v3 migrations.
+func TestDWCPv3ConcurrentMigrations(t *testing.T) {
 	ctx := context.Background()
 
 	baseConfig := MigrationConfig{
-		MaxConcurrent:      10,
-		BandwidthLimit:     10 * 1024 * 1024 * 1024, // 10 Gbps shared
-		MemoryIterations:   5,
-		DirtyPageThreshold: 0.02,
+		MaxConcurrentMigrations: 10,
+		BandwidthLimit:          10 * 1024 * 1024 * 1024, // 10 Gbps shared
+		MemoryIterations:        5,
+		DirtyPageThreshold:      1000,
 	}
 
 	dwcpConfig := DefaultDWCPv3Config()
@@ -548,11 +547,11 @@ func TestMigrationFailureRecovery(t *testing.T) {
 	ctx := context.Background()
 
 	baseConfig := MigrationConfig{
-		MaxConcurrent:      5,
-		BandwidthLimit:     1 * 1024 * 1024 * 1024,
-		MemoryIterations:   5,
-		DirtyPageThreshold: 0.02,
-		MaxDowntime:        1 * time.Second,
+		MaxConcurrentMigrations: 5,
+		BandwidthLimit:          1 * 1024 * 1024 * 1024,
+		MemoryIterations:        5,
+		DirtyPageThreshold:      1000,
+		MaxDowntime:             1 * time.Second,
 	}
 
 	dwcpConfig := DefaultDWCPv3Config()
@@ -584,11 +583,12 @@ func TestMigrationFailureRecovery(t *testing.T) {
 
 	// Verify error handling
 	assert.Equal(t, PhaseFailed, migration.State.Phase)
-	assert.NotNil(t, migration.State.Error)
+	assert.NotEmpty(t, migration.State.Errors)
 
 	// Check failure metrics
 	time.Sleep(100 * time.Millisecond)
 	metrics := orchestrator.GetMetrics()
+	assert.NotNil(t, metrics)
 	// Failed migrations counter should eventually increase
 }
 
@@ -597,10 +597,10 @@ func TestMetricsCollection(t *testing.T) {
 	ctx := context.Background()
 
 	baseConfig := MigrationConfig{
-		MaxConcurrent:      5,
-		BandwidthLimit:     1 * 1024 * 1024 * 1024,
-		MemoryIterations:   5,
-		DirtyPageThreshold: 0.02,
+		MaxConcurrentMigrations: 5,
+		BandwidthLimit:          1 * 1024 * 1024 * 1024,
+		MemoryIterations:        5,
+		DirtyPageThreshold:      1000,
 	}
 
 	dwcpConfig := DefaultDWCPv3Config()
@@ -722,10 +722,10 @@ func TestPerformanceTargets(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			baseConfig := MigrationConfig{
-				MaxConcurrent:      5,
-				BandwidthLimit:     10 * 1024 * 1024 * 1024,
-				MemoryIterations:   10,
-				DirtyPageThreshold: 0.02,
+				MaxConcurrentMigrations: 5,
+				BandwidthLimit:          10 * 1024 * 1024 * 1024,
+				MemoryIterations:        10,
+				DirtyPageThreshold:      1000,
 			}
 
 			dwcpConfig := DefaultDWCPv3Config()
@@ -756,10 +756,10 @@ func BenchmarkMigrationThroughput(b *testing.B) {
 	ctx := context.Background()
 
 	baseConfig := MigrationConfig{
-		MaxConcurrent:      10,
-		BandwidthLimit:     10 * 1024 * 1024 * 1024, // 10 Gbps
-		MemoryIterations:   5,
-		DirtyPageThreshold: 0.01,
+		MaxConcurrentMigrations: 10,
+		BandwidthLimit:          10 * 1024 * 1024 * 1024, // 10 Gbps
+		MemoryIterations:        5,
+		DirtyPageThreshold:      1000,
 	}
 
 	modes := []upgrade.NetworkMode{
@@ -769,7 +769,7 @@ func BenchmarkMigrationThroughput(b *testing.B) {
 	}
 
 	for _, mode := range modes {
-		b.Run(string(mode), func(b *testing.B) {
+		b.Run(mode.String(), func(b *testing.B) {
 			dwcpConfig := DefaultDWCPv3Config()
 			dwcpConfig.NetworkMode = mode
 			dwcpConfig.AutoSwitchMode = false
@@ -808,10 +808,10 @@ func BenchmarkMigrationThroughput(b *testing.B) {
 // BenchmarkCompressionOverhead benchmarks compression overhead
 func BenchmarkCompressionOverhead(b *testing.B) {
 	baseConfig := MigrationConfig{
-		MaxConcurrent:      5,
-		BandwidthLimit:     1 * 1024 * 1024 * 1024,
-		MemoryIterations:   5,
-		DirtyPageThreshold: 0.02,
+		MaxConcurrentMigrations: 5,
+		BandwidthLimit:          1 * 1024 * 1024 * 1024,
+		MemoryIterations:        5,
+		DirtyPageThreshold:      1000,
 	}
 
 	scenarios := []struct {
@@ -869,13 +869,11 @@ func BenchmarkCompressionOverhead(b *testing.B) {
 
 // TestMigrationPhaseTracking tests phase duration tracking
 func TestMigrationPhaseTracking(t *testing.T) {
-	ctx := context.Background()
-
 	baseConfig := MigrationConfig{
-		MaxConcurrent:      5,
-		BandwidthLimit:     1 * 1024 * 1024 * 1024,
-		MemoryIterations:   3,
-		DirtyPageThreshold: 0.02,
+		MaxConcurrentMigrations: 5,
+		BandwidthLimit:          1 * 1024 * 1024 * 1024,
+		MemoryIterations:        3,
+		DirtyPageThreshold:      1000,
 	}
 
 	dwcpConfig := DefaultDWCPv3Config()
@@ -887,16 +885,16 @@ func TestMigrationPhaseTracking(t *testing.T) {
 	migration := &DWCPv3Migration{
 		LiveMigration: &LiveMigration{
 			ID:              "test-phase-tracking",
-			VM:              &VM{ID: "vm-001", MemoryMB: 4096},
+			VM:              newDWCPTestVM(t, "vm-001"),
 			SourceNode:      "source",
 			DestinationNode: "dest",
 			State:           NewMigrationState(),
-			Context:         context.Background(),
 		},
 		Mode:           upgrade.ModeHybrid,
 		CurrentPhase:   PhaseV3Init,
 		PhaseStartTime: time.Now(),
 		PhaseDurations: make(map[MigrationPhaseV3]time.Duration),
+		Context:        context.Background(),
 	}
 
 	// Track phases
@@ -935,10 +933,10 @@ func TestMigrationPhaseTracking(t *testing.T) {
 // TestSpeedupCalculation tests speedup calculation accuracy
 func TestSpeedupCalculation(t *testing.T) {
 	baseConfig := MigrationConfig{
-		MaxConcurrent:      5,
-		BandwidthLimit:     1 * 1024 * 1024 * 1024,
-		MemoryIterations:   5,
-		DirtyPageThreshold: 0.02,
+		MaxConcurrentMigrations: 5,
+		BandwidthLimit:          1 * 1024 * 1024 * 1024,
+		MemoryIterations:        5,
+		DirtyPageThreshold:      1000,
 	}
 
 	dwcpConfig := DefaultDWCPv3Config()
@@ -982,8 +980,8 @@ func TestSpeedupCalculation(t *testing.T) {
 			}
 
 			migration.State.TotalBytes.Store(10 * 1024 * 1024 * 1024) // 10 GB
-			migration.State.StartTime = time.Now().Add(-10 * time.Second)
-			migration.State.EndTime = time.Now()
+			migration.StartedAt = time.Now().Add(-10 * time.Second)
+			migration.CompletedAt = time.Now()
 
 			speedup := orchestrator.calculateSpeedup(migration)
 
@@ -992,19 +990,5 @@ func TestSpeedupCalculation(t *testing.T) {
 			assert.InDelta(t, tt.expectedSpeedup, speedup, tolerance,
 				"Speedup calculation off: expected %.2fx, got %.2fx", tt.expectedSpeedup, speedup)
 		})
-	}
-}
-
-// Helper function to create a test migration state
-func NewMigrationState() *MigrationState {
-	return &MigrationState{
-		Phase:            PhaseInit,
-		StartTime:        time.Now(),
-		Progress:         &atomic.Value{},
-		BytesTransferred: &atomic.Int64{},
-		TotalBytes:       &atomic.Int64{},
-		DirtyPages:       &atomic.Int64{},
-		TransferRate:     &atomic.Int64{},
-		Downtime:         &atomic.Int64{},
 	}
 }

@@ -179,9 +179,9 @@ func (f *FallbackMigrationStrategy) OptimizeMigrationStrategy(vmData, networkDat
 // OptimizeCompressionSettings provides simple compression configuration
 func (f *FallbackMigrationStrategy) OptimizeCompressionSettings(dataProfile map[string]interface{}) CompressionConfig {
 	config := CompressionConfig{
-		Type:       CompressionTypeLZ4, // Default to fast compression
-		Level:      5,                  // Medium compression
-		ChunkSize:  1024 * 1024,        // 1MB chunks
+		Type:       CompressionLZ4, // Default to fast compression
+		Level:      5,              // Medium compression
+		ChunkSize:  1024 * 1024,    // 1MB chunks
 		Confidence: 0.5,
 	}
 
@@ -190,15 +190,15 @@ func (f *FallbackMigrationStrategy) OptimizeCompressionSettings(dataProfile map[
 		switch dataType {
 		case "text", "logs":
 			// Text compresses well
-			config.Type = CompressionTypeGzip
+			config.Type = CompressionAdaptive
 			config.Level = 7
 		case "binary", "executable":
 			// Binary data needs different approach
-			config.Type = CompressionTypeZstd
+			config.Type = CompressionZSTD
 			config.Level = 3
 		case "media", "video":
 			// Media is often already compressed
-			config.Type = CompressionTypeLZ4
+			config.Type = CompressionLZ4
 			config.Level = 1
 		}
 	}

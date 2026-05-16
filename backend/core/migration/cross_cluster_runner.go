@@ -13,16 +13,22 @@ import (
 // CrossClusterMigrationRunner orchestrates VM migration between clusters
 type CrossClusterMigrationRunner struct {
 	mu                  sync.RWMutex
-	federationMgr       *federation.FederationManager
-	orchestrator        *Orchestrator
-	wanOptimizer        *vm.WANMigrationOptimizer
+	federationMgr       crossClusterFederationManager
+	orchestrator        interface{}
+	wanOptimizer        interface{}
 	activeMigrations    map[string]*CrossClusterMigration
-	migrationStrategies map[MigrationType]MigrationStrategy
+	migrationStrategies map[MigrationType]CrossClusterMigrationStrategy
 	networkPathSelector *NetworkPathSelector
-	bandwidthManager    *BandwidthManager
+	bandwidthManager    *CrossClusterBandwidthManager
 	securityManager     *MigrationSecurityManager
-	rollbackManager     *RollbackManager
-	metrics             *MigrationMetrics
+	rollbackManager     *CrossClusterRollbackManager
+	metrics             *CrossClusterMigrationMetrics
+}
+
+type crossClusterFederationManager interface {
+	GetVMInfo(ctx context.Context, clusterID, vmID string) (*federation.VMInfo, error)
+	GetClusterResources(ctx context.Context, clusterID string) (*federation.ClusterResources, error)
+	GetClusterEndpoint(ctx context.Context, clusterID string) (string, error)
 }
 
 // CrossClusterMigration represents a cross-cluster migration operation
@@ -48,15 +54,6 @@ type CrossClusterMigration struct {
 	Metrics           *CrossClusterMetrics      `json:"metrics"`
 	RollbackState     *RollbackState            `json:"rollback_state,omitempty"`
 }
-
-type MigrationType string
-
-const (
-	MigrationTypeCold      MigrationType = "cold"
-	MigrationTypeWarm      MigrationType = "warm"
-	MigrationTypeLive      MigrationType = "live"
-	MigrationTypeStreaming MigrationType = "streaming"
-)
 
 type MigrationStatus string
 
@@ -389,8 +386,8 @@ type RollbackThresholds struct {
 	HealthCheckFails int           `json:"health_check_fails"`
 }
 
-// MigrationStrategy interface for different migration strategies
-type MigrationStrategy interface {
+// CrossClusterMigrationStrategy defines a cross-cluster migration strategy.
+type CrossClusterMigrationStrategy interface {
 	Plan(ctx context.Context, migration *CrossClusterMigration) (*MigrationPlan, error)
 	Execute(ctx context.Context, migration *CrossClusterMigration) error
 	Monitor(ctx context.Context, migration *CrossClusterMigration) (*StateTransferProgress, error)
@@ -521,7 +518,7 @@ type NetworkTopologyManager struct {
 	// Network topology management implementation
 }
 
-type BandwidthManager struct {
+type CrossClusterBandwidthManager struct {
 	mu                 sync.RWMutex
 	allocations        map[string]*BandwidthAllocation
 	totalCapacity      float64
@@ -567,7 +564,7 @@ type SecurityAuditLogger struct {
 	// Security audit logging implementation
 }
 
-type RollbackManager struct {
+type CrossClusterRollbackManager struct {
 	mu            sync.RWMutex
 	checkpoints   map[string]*MigrationCheckpoint
 	rollbackQueue chan *RollbackRequest
@@ -575,16 +572,16 @@ type RollbackManager struct {
 }
 
 type MigrationCheckpoint struct {
-	CheckpointID string                 `json:"checkpoint_id"`
-	MigrationID  string                 `json:"migration_id"`
-	Timestamp    time.Time              `json:"timestamp"`
-	VMState      *vm.VMState            `json:"vm_state"`
-	NetworkState *NetworkState          `json:"network_state"`
-	StorageState *StorageState          `json:"storage_state"`
-	Metadata     map[string]interface{} `json:"metadata"`
+	CheckpointID string                    `json:"checkpoint_id"`
+	MigrationID  string                    `json:"migration_id"`
+	Timestamp    time.Time                 `json:"timestamp"`
+	VMState      *vm.VMState               `json:"vm_state"`
+	NetworkState *CrossClusterNetworkState `json:"network_state"`
+	StorageState *StorageState             `json:"storage_state"`
+	Metadata     map[string]interface{}    `json:"metadata"`
 }
 
-type NetworkState struct {
+type CrossClusterNetworkState struct {
 	// Network state snapshot
 }
 
@@ -599,7 +596,7 @@ type RollbackRequest struct {
 	Timestamp   time.Time       `json:"timestamp"`
 }
 
-type MigrationMetrics struct {
+type CrossClusterMigrationMetrics struct {
 	mu                   sync.RWMutex
 	activeMigrations     int
 	completedMigrations  int64
@@ -612,21 +609,21 @@ type MigrationMetrics struct {
 
 // NewCrossClusterMigrationRunner creates a new cross-cluster migration runner
 func NewCrossClusterMigrationRunner(
-	federationMgr *federation.FederationManager,
-	orchestrator *Orchestrator,
-	wanOptimizer *vm.WANMigrationOptimizer) *CrossClusterMigrationRunner {
+	federationMgr crossClusterFederationManager,
+	orchestrator interface{},
+	wanOptimizer interface{}) *CrossClusterMigrationRunner {
 
 	runner := &CrossClusterMigrationRunner{
 		federationMgr:       federationMgr,
 		orchestrator:        orchestrator,
 		wanOptimizer:        wanOptimizer,
 		activeMigrations:    make(map[string]*CrossClusterMigration),
-		migrationStrategies: make(map[MigrationType]MigrationStrategy),
+		migrationStrategies: make(map[MigrationType]CrossClusterMigrationStrategy),
 		networkPathSelector: NewNetworkPathSelector(),
-		bandwidthManager:    NewBandwidthManager(),
+		bandwidthManager:    NewCrossClusterBandwidthManager(),
 		securityManager:     NewMigrationSecurityManager(),
-		rollbackManager:     NewRollbackManager(),
-		metrics:             NewMigrationMetrics(),
+		rollbackManager:     NewCrossClusterRollbackManager(),
+		metrics:             NewCrossClusterMigrationMetrics(),
 	}
 
 	// Register migration strategies
@@ -637,7 +634,7 @@ func NewCrossClusterMigrationRunner(
 
 // MigrateVMCrossCluster initiates a cross-cluster VM migration
 func (r *CrossClusterMigrationRunner) MigrateVMCrossCluster(ctx context.Context,
-	vmID, sourceClusterID, targetClusterID string, options *MigrationOptions) (*CrossClusterMigration, error) {
+	vmID, sourceClusterID, targetClusterID string, options *CrossClusterMigrationOptions) (*CrossClusterMigration, error) {
 
 	// Create migration instance
 	migration := &CrossClusterMigration{
@@ -665,7 +662,7 @@ func (r *CrossClusterMigrationRunner) MigrateVMCrossCluster(ctx context.Context,
 
 // executeMigration executes the migration process
 func (r *CrossClusterMigrationRunner) executeMigration(ctx context.Context,
-	migration *CrossClusterMigration, options *MigrationOptions) {
+	migration *CrossClusterMigration, options *CrossClusterMigrationOptions) {
 
 	defer func() {
 		r.mu.Lock()
@@ -685,6 +682,7 @@ func (r *CrossClusterMigrationRunner) executeMigration(ctx context.Context,
 		r.failMigration(migration, fmt.Sprintf("Migration planning failed: %v", err))
 		return
 	}
+	_ = plan
 
 	// Phase 3: Network Path Selection
 	if err := r.selectNetworkPath(ctx, migration); err != nil {
@@ -820,8 +818,9 @@ func (r *CrossClusterMigrationRunner) checkResourceAvailability(ctx context.Cont
 	}
 
 	// Validate sufficient resources
-	if targetResources.AvailableCPU < vmInfo.AllocatedCPU ||
-		targetResources.AvailableMemory < vmInfo.AllocatedMemory {
+	availableMemoryBytes := int64(targetResources.AvailableMemoryGB) * 1024 * 1024 * 1024
+	if float64(targetResources.AvailableCPU) < vmInfo.AllocatedCPU ||
+		availableMemoryBytes < vmInfo.AllocatedMemory {
 		return fmt.Errorf("insufficient resources in target cluster")
 	}
 
@@ -1023,8 +1022,8 @@ func (s *StreamingMigrationStrategy) EstimateDowntime(migration *CrossClusterMig
 	return 10 * time.Second
 }
 
-// MigrationOptions for configuration
-type MigrationOptions struct {
+// CrossClusterMigrationOptions configures cross-cluster migration behavior.
+type CrossClusterMigrationOptions struct {
 	Type               MigrationType         `json:"type"`
 	Strategy           MigrationStrategyType `json:"strategy"`
 	BandwidthLimit     float64               `json:"bandwidth_limit_mbps"`
@@ -1044,8 +1043,8 @@ func NewNetworkPathSelector() *NetworkPathSelector {
 	}
 }
 
-func NewBandwidthManager() *BandwidthManager {
-	return &BandwidthManager{
+func NewCrossClusterBandwidthManager() *CrossClusterBandwidthManager {
+	return &CrossClusterBandwidthManager{
 		allocations: make(map[string]*BandwidthAllocation),
 	}
 }
@@ -1054,25 +1053,25 @@ func NewMigrationSecurityManager() *MigrationSecurityManager {
 	return &MigrationSecurityManager{}
 }
 
-func NewRollbackManager() *RollbackManager {
-	return &RollbackManager{
+func NewCrossClusterRollbackManager() *CrossClusterRollbackManager {
+	return &CrossClusterRollbackManager{
 		checkpoints:   make(map[string]*MigrationCheckpoint),
 		rollbackQueue: make(chan *RollbackRequest, 100),
 	}
 }
 
-func NewMigrationMetrics() *MigrationMetrics {
-	return &MigrationMetrics{}
+func NewCrossClusterMigrationMetrics() *CrossClusterMigrationMetrics {
+	return &CrossClusterMigrationMetrics{}
 }
 
-func (m *MigrationMetrics) RecordSuccessfulMigration(migration *CrossClusterMigration) {
+func (m *CrossClusterMigrationMetrics) RecordSuccessfulMigration(migration *CrossClusterMigration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.completedMigrations++
 	// Update other metrics
 }
 
-func (m *MigrationMetrics) RecordFailedMigration(migration *CrossClusterMigration) {
+func (m *CrossClusterMigrationMetrics) RecordFailedMigration(migration *CrossClusterMigration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.failedMigrations++
@@ -1091,12 +1090,12 @@ func NewCrossClusterRunner(federationMgr interface{}, orchestrator interface{}, 
 	// Create with minimal parameters for compatibility
 	runner := &CrossClusterMigrationRunner{
 		activeMigrations:    make(map[string]*CrossClusterMigration),
-		migrationStrategies: make(map[MigrationType]MigrationStrategy),
+		migrationStrategies: make(map[MigrationType]CrossClusterMigrationStrategy),
 		networkPathSelector: NewNetworkPathSelector(),
-		bandwidthManager:    NewBandwidthManager(),
+		bandwidthManager:    NewCrossClusterBandwidthManager(),
 		securityManager:     NewMigrationSecurityManager(),
-		rollbackManager:     NewRollbackManager(),
-		metrics:             NewMigrationMetrics(),
+		rollbackManager:     NewCrossClusterRollbackManager(),
+		metrics:             NewCrossClusterMigrationMetrics(),
 	}
 
 	// Register migration strategies

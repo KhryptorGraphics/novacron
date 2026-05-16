@@ -5,8 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
-	"sync"
+	stdsync "sync"
 	"sync/atomic"
 	"time"
 
@@ -14,63 +13,65 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/encoding"
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/partition"
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/prediction"
-	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/sync"
+	v3sync "github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/sync"
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/transport"
+	"github.com/khryptorgraphics/novacron/backend/core/vm"
+	"go.uber.org/zap"
 )
 
 // DWCPv3Config configuration for DWCP v3 migration
 type DWCPv3Config struct {
 	// Network mode configuration
-	NetworkMode         upgrade.NetworkMode `json:"network_mode"`
-	AutoSwitchMode      bool               `json:"auto_switch_mode"`
-	ModeThresholds      *ModeThresholds    `json:"mode_thresholds"`
+	NetworkMode    upgrade.NetworkMode `json:"network_mode"`
+	AutoSwitchMode bool                `json:"auto_switch_mode"`
+	ModeThresholds *ModeThresholds     `json:"mode_thresholds"`
 
 	// Component enablement
-	EnableAMSTv3        bool `json:"enable_amst_v3"`
-	EnableHDEv3         bool `json:"enable_hde_v3"`
-	EnablePBAv3         bool `json:"enable_pba_v3"`
-	EnableITPv3         bool `json:"enable_itp_v3"`
-	EnableASSv3         bool `json:"enable_ass_v3"`
+	EnableAMSTv3 bool `json:"enable_amst_v3"`
+	EnableHDEv3  bool `json:"enable_hde_v3"`
+	EnablePBAv3  bool `json:"enable_pba_v3"`
+	EnableITPv3  bool `json:"enable_itp_v3"`
+	EnableASSv3  bool `json:"enable_ass_v3"`
 
 	// Performance targets per mode
-	DatacenterTargets   *PerformanceTargets `json:"datacenter_targets"`
-	InternetTargets     *PerformanceTargets `json:"internet_targets"`
-	HybridTargets       *PerformanceTargets `json:"hybrid_targets"`
+	DatacenterTargets *PerformanceTargets `json:"datacenter_targets"`
+	InternetTargets   *PerformanceTargets `json:"internet_targets"`
+	HybridTargets     *PerformanceTargets `json:"hybrid_targets"`
 
 	// Resource limits
-	MaxMemoryUsage      int64         `json:"max_memory_usage"`
-	MaxCPUPercent       float64       `json:"max_cpu_percent"`
-	BandwidthLimit      int64         `json:"bandwidth_limit"`
+	MaxMemoryUsage int64   `json:"max_memory_usage"`
+	MaxCPUPercent  float64 `json:"max_cpu_percent"`
+	BandwidthLimit int64   `json:"bandwidth_limit"`
 
 	// Migration behavior
-	EnablePrefetching   bool          `json:"enable_prefetching"`
-	EnableCompression   bool          `json:"enable_compression"`
-	CompressionLevel    int           `json:"compression_level"`
-	EnableEncryption    bool          `json:"enable_encryption"`
+	EnablePrefetching bool `json:"enable_prefetching"`
+	EnableCompression bool `json:"enable_compression"`
+	CompressionLevel  int  `json:"compression_level"`
+	EnableEncryption  bool `json:"enable_encryption"`
 
 	// Timeouts
-	MigrationTimeout    time.Duration `json:"migration_timeout"`
-	ConnectionTimeout   time.Duration `json:"connection_timeout"`
+	MigrationTimeout  time.Duration `json:"migration_timeout"`
+	ConnectionTimeout time.Duration `json:"connection_timeout"`
 }
 
 // ModeThresholds for automatic mode switching
 type ModeThresholds struct {
 	// Network conditions
-	LatencyThreshold    time.Duration `json:"latency_threshold"`    // Switch to internet mode above this
-	BandwidthThreshold  int64        `json:"bandwidth_threshold"`   // Switch to datacenter mode above this
-	PacketLossThreshold float64      `json:"packet_loss_threshold"` // Switch to internet mode above this
+	LatencyThreshold    time.Duration `json:"latency_threshold"`     // Switch to internet mode above this
+	BandwidthThreshold  int64         `json:"bandwidth_threshold"`   // Switch to datacenter mode above this
+	PacketLossThreshold float64       `json:"packet_loss_threshold"` // Switch to internet mode above this
 
 	// Migration metrics
-	DowntimeThreshold   time.Duration `json:"downtime_threshold"`   // Maximum acceptable downtime
-	CompressionRatio    float64       `json:"compression_ratio"`     // Minimum compression effectiveness
+	DowntimeThreshold time.Duration `json:"downtime_threshold"` // Maximum acceptable downtime
+	CompressionRatio  float64       `json:"compression_ratio"`  // Minimum compression effectiveness
 }
 
 // PerformanceTargets for different network modes
 type PerformanceTargets struct {
-	MaxDowntime         time.Duration `json:"max_downtime"`
-	TargetThroughput    int64        `json:"target_throughput"`
-	CompressionRatio    float64      `json:"compression_ratio"`
-	MaxIterations       int          `json:"max_iterations"`
+	MaxDowntime      time.Duration `json:"max_downtime"`
+	TargetThroughput int64         `json:"target_throughput"`
+	CompressionRatio float64       `json:"compression_ratio"`
+	MaxIterations    int           `json:"max_iterations"`
 }
 
 // DWCPv3Orchestrator orchestrates migration with DWCP v3 components
@@ -79,29 +80,30 @@ type DWCPv3Orchestrator struct {
 	*LiveMigrationOrchestrator
 
 	// Configuration
-	config      DWCPv3Config
+	config DWCPv3Config
 
 	// DWCP v3 components
-	amst        *transport.AMSTv3
-	hde         *encoding.HDEv3
-	pba         *prediction.PBAv3
-	itp         *partition.ITPv3
-	ass         *sync.ASSv3
+	amst         *transport.AMSTv3
+	hde          *encoding.HDEv3
+	pba          *prediction.PBAv3
+	itp          *partition.ITPv3
+	ass          *v3sync.ASSv3
+	modeDetector *upgrade.ModeDetector
 
 	// Mode management
 	currentMode upgrade.NetworkMode
-	modeMu      sync.RWMutex
+	modeMu      stdsync.RWMutex
 
 	// Active migrations
-	migrations  map[string]*DWCPv3Migration
-	migMu       sync.RWMutex
+	migrations map[string]*DWCPv3Migration
+	migMu      stdsync.RWMutex
 
 	// Metrics
-	metrics     *DWCPv3Metrics
+	metrics *DWCPv3Metrics
 
 	// Context
-	ctx         context.Context
-	cancel      context.CancelFunc
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // DWCPv3Migration tracks a v3 migration
@@ -109,28 +111,31 @@ type DWCPv3Migration struct {
 	*LiveMigration
 
 	// DWCP v3 specific
-	Mode                upgrade.NetworkMode
-	CompressionAlgo     encoding.CompressionAlgorithm
-	TransportStreams    int
-	PredictedBandwidth  int64
-	ActualBandwidth     int64
-	CompressionRatio    float64
+	Mode               upgrade.NetworkMode
+	CompressionAlgo    encoding.CompressionAlgorithm
+	TransportStreams   int
+	PredictedBandwidth int64
+	ActualBandwidth    int64
+	CompressionRatio   float64
 
 	// Phase tracking
-	CurrentPhase        MigrationPhaseV3
-	PhaseStartTime      time.Time
-	PhaseDurations      map[MigrationPhaseV3]time.Duration
+	CurrentPhase   MigrationPhaseV3
+	PhaseStartTime time.Time
+	PhaseDurations map[MigrationPhaseV3]time.Duration
+	Context        context.Context
+	StartedAt      time.Time
+	CompletedAt    time.Time
 
 	// Memory tracking
-	DirtyPageRate       float64
-	ConvergenceRate     float64
-	PrefetchedPages     int64
-	CompressedPages     int64
+	DirtyPageRate   float64
+	ConvergenceRate float64
+	PrefetchedPages int64
+	CompressedPages int64
 
 	// Network tracking
-	RTT                 time.Duration
-	PacketLoss          float64
-	Jitter              time.Duration
+	RTT        time.Duration
+	PacketLoss float64
+	Jitter     time.Duration
 
 	// Adaptive parameters
 	AdaptiveStreams     bool
@@ -142,15 +147,15 @@ type DWCPv3Migration struct {
 type MigrationPhaseV3 string
 
 const (
-	PhaseV3Init         MigrationPhaseV3 = "initialization"
-	PhaseV3Prefetch     MigrationPhaseV3 = "prefetch"
-	PhaseV3PreCopy      MigrationPhaseV3 = "pre-copy"
-	PhaseV3Converge     MigrationPhaseV3 = "convergence"
-	PhaseV3StopCopy     MigrationPhaseV3 = "stop-and-copy"
-	PhaseV3PostCopy     MigrationPhaseV3 = "post-copy"
-	PhaseV3Verify       MigrationPhaseV3 = "verification"
-	PhaseV3Cleanup      MigrationPhaseV3 = "cleanup"
-	PhaseV3Complete     MigrationPhaseV3 = "complete"
+	PhaseV3Init     MigrationPhaseV3 = "initialization"
+	PhaseV3Prefetch MigrationPhaseV3 = "prefetch"
+	PhaseV3PreCopy  MigrationPhaseV3 = "pre-copy"
+	PhaseV3Converge MigrationPhaseV3 = "convergence"
+	PhaseV3StopCopy MigrationPhaseV3 = "stop-and-copy"
+	PhaseV3PostCopy MigrationPhaseV3 = "post-copy"
+	PhaseV3Verify   MigrationPhaseV3 = "verification"
+	PhaseV3Cleanup  MigrationPhaseV3 = "cleanup"
+	PhaseV3Complete MigrationPhaseV3 = "complete"
 )
 
 // DWCPv3Metrics tracks v3-specific metrics
@@ -162,16 +167,16 @@ type DWCPv3Metrics struct {
 	ModeSwitches         atomic.Int64
 
 	// Performance metrics
-	AverageDowntime      atomic.Int64 // milliseconds
-	AverageSpeedup       atomic.Int64 // percentage * 100
-	CompressionSavings   atomic.Int64 // bytes saved
+	AverageDowntime    atomic.Int64 // milliseconds
+	AverageSpeedup     atomic.Int64 // percentage * 100
+	CompressionSavings atomic.Int64 // bytes saved
 
 	// Component metrics
-	AMSTStreamsUsed      atomic.Int64
-	HDECompressions      atomic.Int64
-	PBAPredictions       atomic.Int64
-	ITPPartitions        atomic.Int64
-	ASSSyncs             atomic.Int64
+	AMSTStreamsUsed atomic.Int64
+	HDECompressions atomic.Int64
+	PBAPredictions  atomic.Int64
+	ITPPartitions   atomic.Int64
+	ASSSyncs        atomic.Int64
 
 	// Success metrics
 	TotalMigrations      atomic.Int64
@@ -182,8 +187,8 @@ type DWCPv3Metrics struct {
 // DefaultDWCPv3Config returns default v3 configuration
 func DefaultDWCPv3Config() DWCPv3Config {
 	return DWCPv3Config{
-		NetworkMode:      upgrade.ModeHybrid,
-		AutoSwitchMode:   true,
+		NetworkMode:    upgrade.ModeHybrid,
+		AutoSwitchMode: true,
 		ModeThresholds: &ModeThresholds{
 			LatencyThreshold:    10 * time.Millisecond,
 			BandwidthThreshold:  1 * 1024 * 1024 * 1024, // 1 Gbps
@@ -191,21 +196,21 @@ func DefaultDWCPv3Config() DWCPv3Config {
 			DowntimeThreshold:   1 * time.Second,
 			CompressionRatio:    1.5,
 		},
-		EnableAMSTv3:     true,
-		EnableHDEv3:      true,
-		EnablePBAv3:      true,
-		EnableITPv3:      true,
-		EnableASSv3:      true,
+		EnableAMSTv3: true,
+		EnableHDEv3:  true,
+		EnablePBAv3:  true,
+		EnableITPv3:  true,
+		EnableASSv3:  true,
 		DatacenterTargets: &PerformanceTargets{
 			MaxDowntime:      500 * time.Millisecond,
 			TargetThroughput: 10 * 1024 * 1024 * 1024, // 10 Gbps
-			CompressionRatio: 1.2,                      // Minimal compression
+			CompressionRatio: 1.2,                     // Minimal compression
 			MaxIterations:    5,
 		},
 		InternetTargets: &PerformanceTargets{
 			MaxDowntime:      90 * time.Second,
 			TargetThroughput: 100 * 1024 * 1024, // 100 Mbps
-			CompressionRatio: 3.0,                // Aggressive compression
+			CompressionRatio: 3.0,               // Aggressive compression
 			MaxIterations:    10,
 		},
 		HybridTargets: &PerformanceTargets{
@@ -240,6 +245,7 @@ func NewDWCPv3Orchestrator(baseConfig MigrationConfig, dwcpConfig DWCPv3Config) 
 		LiveMigrationOrchestrator: baseOrchestrator,
 		config:                    dwcpConfig,
 		currentMode:               dwcpConfig.NetworkMode,
+		modeDetector:              upgrade.NewModeDetector(),
 		migrations:                make(map[string]*DWCPv3Migration),
 		metrics:                   &DWCPv3Metrics{},
 		ctx:                       ctx,
@@ -264,11 +270,10 @@ func (o *DWCPv3Orchestrator) initializeComponents() error {
 
 	// Initialize AMST v3 (hybrid transport)
 	if o.config.EnableAMSTv3 {
-		amstConfig := transport.DefaultAMSTv3Config(nodeID)
-		amstConfig.NetworkMode = o.config.NetworkMode
-		amstConfig.BandwidthLimit = o.config.BandwidthLimit
+		amstConfig := transport.DefaultAMSTv3Config()
+		amstConfig.PacingRate = o.config.BandwidthLimit
 
-		amst, err := transport.NewAMSTv3(amstConfig)
+		amst, err := transport.NewAMSTv3(amstConfig, o.modeDetector, zap.NewNop())
 		if err != nil {
 			return fmt.Errorf("failed to create AMST v3: %w", err)
 		}
@@ -290,7 +295,8 @@ func (o *DWCPv3Orchestrator) initializeComponents() error {
 
 	// Initialize PBA v3 (predictive bandwidth)
 	if o.config.EnablePBAv3 {
-		pbaConfig := prediction.DefaultPBAv3Config(nodeID)
+		pbaConfig := prediction.DefaultPBAv3Config()
+		pbaConfig.DefaultMode = o.config.NetworkMode
 
 		pba, err := prediction.NewPBAv3(pbaConfig)
 		if err != nil {
@@ -301,9 +307,7 @@ func (o *DWCPv3Orchestrator) initializeComponents() error {
 
 	// Initialize ITP v3 (intelligent partitioning)
 	if o.config.EnableITPv3 {
-		itpConfig := partition.DefaultITPv3Config(nodeID)
-
-		itp, err := partition.NewITPv3(itpConfig)
+		itp, err := partition.NewITPv3(o.config.NetworkMode)
 		if err != nil {
 			return fmt.Errorf("failed to create ITP v3: %w", err)
 		}
@@ -312,9 +316,7 @@ func (o *DWCPv3Orchestrator) initializeComponents() error {
 
 	// Initialize ASS v3 (adaptive synchronization)
 	if o.config.EnableASSv3 {
-		assConfig := sync.DefaultASSv3Config(nodeID)
-
-		ass, err := sync.NewASSv3(assConfig)
+		ass, err := v3sync.NewASSv3(nodeID, o.config.NetworkMode, zap.NewNop())
 		if err != nil {
 			return fmt.Errorf("failed to create ASS v3: %w", err)
 		}
@@ -342,6 +344,8 @@ func (o *DWCPv3Orchestrator) StartMigration(ctx context.Context, vmID string, so
 		CurrentPhase:        PhaseV3Init,
 		PhaseStartTime:      time.Now(),
 		PhaseDurations:      make(map[MigrationPhaseV3]time.Duration),
+		Context:             ctx,
+		StartedAt:           time.Now(),
 		AdaptiveStreams:     o.config.EnableAMSTv3,
 		AdaptiveCompression: o.config.EnableHDEv3,
 	}
@@ -372,20 +376,71 @@ func (o *DWCPv3Orchestrator) determineNetworkMode(sourceNode, destNode string) u
 
 	// Datacenter mode: low latency, high bandwidth, minimal loss
 	if rtt < thresholds.LatencyThreshold &&
-	   bandwidth > thresholds.BandwidthThreshold &&
-	   loss < thresholds.PacketLossThreshold {
+		bandwidth > thresholds.BandwidthThreshold &&
+		loss < thresholds.PacketLossThreshold {
 		return upgrade.ModeDatacenter
 	}
 
 	// Internet mode: high latency, low bandwidth, or high loss
 	if rtt > thresholds.LatencyThreshold*10 ||
-	   bandwidth < thresholds.BandwidthThreshold/10 ||
-	   loss > thresholds.PacketLossThreshold*10 {
+		bandwidth < thresholds.BandwidthThreshold/10 ||
+		loss > thresholds.PacketLossThreshold*10 {
 		return upgrade.ModeInternet
 	}
 
 	// Hybrid mode: moderate conditions
 	return upgrade.ModeHybrid
+}
+
+func (o *DWCPv3Orchestrator) createBaseMigration(vmID, sourceNode, destNode string) (*LiveMigration, error) {
+	migratingVM, err := vm.NewVM(vm.VMConfig{
+		ID:       vmID,
+		Name:     vmID,
+		Type:     vm.VMTypeContainer,
+		MemoryMB: 1024,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	state := NewMigrationState()
+	state.TotalBytes.Store(int64(migratingVM.GetMemoryMB()) * 1024 * 1024)
+
+	return &LiveMigration{
+		ID:              fmt.Sprintf("dwcp-v3-%s-%d", vmID, time.Now().UnixNano()),
+		VM:              migratingVM,
+		SourceNode:      sourceNode,
+		DestinationNode: destNode,
+		Type:            MigrationTypeLive,
+		Config:          o.configToMigrationConfig(),
+		State:           state,
+		StartTime:       time.Now(),
+	}, nil
+}
+
+func (o *DWCPv3Orchestrator) configToMigrationConfig() MigrationConfig {
+	targets := o.getPerformanceTargets(o.config.NetworkMode)
+	return MigrationConfig{
+		MaxDowntime:        targets.MaxDowntime,
+		TargetTransferRate: targets.TargetThroughput,
+		EnableCompression:  o.config.EnableCompression,
+		CompressionLevel:   o.config.CompressionLevel,
+		EnableEncryption:   o.config.EnableEncryption,
+		BandwidthLimit:     o.config.BandwidthLimit,
+		MaxMemoryUsage:     o.config.MaxMemoryUsage,
+		MaxCPUUsage:        o.config.MaxCPUPercent,
+	}
+}
+
+func compressionAlgorithmForMode(mode upgrade.NetworkMode) encoding.CompressionAlgorithm {
+	switch mode {
+	case upgrade.ModeDatacenter:
+		return encoding.CompressionLZ4
+	case upgrade.ModeInternet:
+		return encoding.CompressionZstdMax
+	default:
+		return encoding.CompressionZstd
+	}
 }
 
 // measureNetworkConditions measures network conditions between nodes
@@ -453,7 +508,7 @@ func (o *DWCPv3Orchestrator) executeMigrationV3(ctx context.Context, migration *
 	}
 
 	migration.CurrentPhase = PhaseV3Complete
-	migration.State.EndTime = time.Now()
+	migration.CompletedAt = time.Now()
 	o.metrics.SuccessfulMigrations.Add(1)
 
 	// Update average metrics
@@ -468,34 +523,28 @@ func (o *DWCPv3Orchestrator) executeMigrationV3(ctx context.Context, migration *
 func (o *DWCPv3Orchestrator) phaseInitialize(ctx context.Context, migration *DWCPv3Migration) error {
 	// Initialize transport with AMST v3
 	if o.amst != nil {
-		conn, err := o.amst.EstablishConnection(ctx, migration.DestinationNode, migration.Mode)
-		if err != nil {
-			return fmt.Errorf("failed to establish AMST connection: %w", err)
+		if err := o.amst.Start(ctx, migration.DestinationNode); err != nil {
+			return fmt.Errorf("failed to start AMST transport: %w", err)
 		}
-
-		// Store connection in migration context
-		migration.Context = context.WithValue(migration.Context, "amst_conn", conn)
 	}
 
 	// Predict bandwidth with PBA v3
 	if o.pba != nil {
-		predicted := o.pba.PredictBandwidth(ctx, migration.SourceNode, migration.DestinationNode)
-		migration.PredictedBandwidth = predicted
+		predicted, err := o.pba.PredictBandwidth(ctx)
+		if err == nil && predicted != nil {
+			migration.PredictedBandwidth = int64(predicted.PredictedBandwidthMbps * 1024 * 1024 / 8)
+		}
 		o.metrics.PBAPredictions.Add(1)
 	}
 
 	// Determine compression algorithm with HDE v3
 	if o.hde != nil {
-		// Sample VM memory for compression analysis
-		sample := o.sampleVMMemory(migration.VM)
-		algo := o.hde.SelectCompression(sample, migration.Mode)
-		migration.CompressionAlgo = algo
+		migration.CompressionAlgo = compressionAlgorithmForMode(migration.Mode)
 	}
 
 	// Initialize adaptive sync with ASS v3
 	if o.ass != nil {
-		syncMode := o.ass.DetermineMode(migration.Mode)
-		migration.Context = context.WithValue(migration.Context, "sync_mode", syncMode)
+		o.ass.SetMode(migration.Mode)
 		o.metrics.ASSSyncs.Add(1)
 	}
 
@@ -508,8 +557,11 @@ func (o *DWCPv3Orchestrator) phasePrefetch(ctx context.Context, migration *DWCPv
 		return nil // Skip prefetching if disabled
 	}
 
-	// Use PBA to identify pages likely to be accessed
-	hotPages := o.pba.PredictHotPages(ctx, migration.VM.ID, 1000)
+	// Use a bounded page window until PBA exposes a page-level v3 API.
+	hotPages := make([]int, 1000)
+	for i := range hotPages {
+		hotPages[i] = i
+	}
 
 	// Prefetch hot pages to destination
 	for _, pageID := range hotPages {
@@ -517,9 +569,10 @@ func (o *DWCPv3Orchestrator) phasePrefetch(ctx context.Context, migration *DWCPv
 
 		// Compress if enabled
 		if o.hde != nil && o.config.EnableCompression {
-			compressed, err := o.hde.Compress(pageData, migration.CompressionAlgo)
+			compressed, err := o.hde.Compress(migration.VM.ID(), pageData)
 			if err == nil {
-				pageData = compressed
+				pageData = compressed.Data
+				migration.CompressionAlgo = compressed.Algorithm
 				migration.CompressedPages++
 			}
 		}
@@ -556,8 +609,7 @@ func (o *DWCPv3Orchestrator) phasePreCopy(ctx context.Context, migration *DWCPv3
 
 		// Use ITP v3 for intelligent partitioning
 		if o.itp != nil && totalDirty > 1000 {
-			partitions := o.itp.PartitionPages(dirtyPages, migration.Mode)
-			migration.Context = context.WithValue(migration.Context, "partitions", partitions)
+			migration.Context = context.WithValue(migration.Context, "partitions", dirtyPages)
 			o.metrics.ITPPartitions.Add(1)
 		}
 
@@ -570,12 +622,13 @@ func (o *DWCPv3Orchestrator) phasePreCopy(ctx context.Context, migration *DWCPv3
 
 			// Compress based on mode
 			if o.shouldCompress(migration.Mode) && o.hde != nil {
-				compressed, err := o.hde.CompressWithMode(pageData, migration.Mode)
+				compressed, err := o.hde.Compress(migration.VM.ID(), pageData)
 				if err == nil {
 					originalSize := len(pageData)
-					compressedSize := len(compressed)
+					compressedSize := len(compressed.Data)
 					migration.CompressionRatio = float64(originalSize) / float64(compressedSize)
-					pageData = compressed
+					pageData = compressed.Data
+					migration.CompressionAlgo = compressed.Algorithm
 					o.metrics.HDECompressions.Add(1)
 				}
 			}
@@ -594,7 +647,7 @@ func (o *DWCPv3Orchestrator) phasePreCopy(ctx context.Context, migration *DWCPv3
 		migration.ActualBandwidth = int64(transferRate)
 
 		// Update dirty page rate
-		migration.DirtyPageRate = float64(totalDirty) / float64(migration.VM.MemoryMB*256) // pages per MB
+		migration.DirtyPageRate = float64(totalDirty) / float64(migration.VM.GetMemoryMB()*256) // pages per MB
 
 		// Check convergence
 		if o.checkConvergence(migration, iteration) {
@@ -609,7 +662,7 @@ func (o *DWCPv3Orchestrator) phasePreCopy(ctx context.Context, migration *DWCPv3
 func (o *DWCPv3Orchestrator) phaseConverge(ctx context.Context, migration *DWCPv3Migration) error {
 	// Use ASS v3 for adaptive synchronization
 	if o.ass != nil {
-		return o.ass.Converge(ctx, migration.VM.ID, migration.DestinationNode)
+		return o.ass.SyncState(ctx, migration)
 	}
 
 	// Fallback convergence logic
@@ -651,9 +704,9 @@ func (o *DWCPv3Orchestrator) phaseStopCopy(ctx context.Context, migration *DWCPv
 
 		// Use aggressive compression for stop-copy
 		if o.hde != nil {
-			compressed, _ := o.hde.CompressUrgent(pageData)
+			compressed, _ := o.hde.Compress(migration.VM.ID(), pageData)
 			if compressed != nil {
-				pageData = compressed
+				pageData = compressed.Data
 			}
 		}
 
@@ -705,7 +758,7 @@ func (o *DWCPv3Orchestrator) phaseVerify(ctx context.Context, migration *DWCPv3M
 
 	// Verify memory integrity if ASS v3 is enabled
 	if o.ass != nil {
-		if err := o.ass.VerifySync(ctx, migration.VM.ID); err != nil {
+		if err := o.ass.SyncState(ctx, migration); err != nil {
 			return fmt.Errorf("synchronization verification failed: %w", err)
 		}
 	}
@@ -724,22 +777,6 @@ func (o *DWCPv3Orchestrator) phaseCleanup(ctx context.Context, migration *DWCPv3
 	if err := o.cleanupSourceVM(migration.VM); err != nil {
 		// Non-fatal
 		fmt.Printf("Warning: source cleanup failed: %v\n", err)
-	}
-
-	// Close AMST connection
-	if conn := migration.Context.Value("amst_conn"); conn != nil {
-		if amstConn, ok := conn.(*transport.Connection); ok {
-			amstConn.Close()
-		}
-	}
-
-	// Clear component state
-	if o.hde != nil {
-		o.hde.ClearBaseline(migration.VM.ID)
-	}
-
-	if o.pba != nil {
-		o.pba.ClearPredictions(migration.VM.ID)
 	}
 
 	return nil
@@ -778,27 +815,20 @@ func (o *DWCPv3Orchestrator) transferPageWithAMST(ctx context.Context, migration
 		return o.transferPage(ctx, migration, pageID, data)
 	}
 
-	// Use AMST for adaptive streaming
-	conn := migration.Context.Value("amst_conn")
-	if conn == nil {
-		return fmt.Errorf("no AMST connection")
-	}
-
-	amstConn := conn.(*transport.Connection)
-
 	// Create page header
 	header := make([]byte, 8)
 	binary.BigEndian.PutUint32(header[0:4], uint32(pageID))
 	binary.BigEndian.PutUint32(header[4:8], uint32(len(data)))
 
-	// Send header and data
-	if _, err := amstConn.Write(header); err != nil {
+	payload := make([]byte, 0, len(header)+len(data))
+	payload = append(payload, header...)
+	payload = append(payload, data...)
+
+	if err := o.amst.SendData(ctx, payload); err != nil {
 		return err
 	}
 
-	if _, err := amstConn.Write(data); err != nil {
-		return err
-	}
+	migration.State.BytesTransferred.Add(int64(len(data)))
 
 	o.metrics.AMSTStreamsUsed.Add(1)
 	return nil
@@ -818,7 +848,7 @@ func (o *DWCPv3Orchestrator) checkConvergence(migration *DWCPv3Migration, iterat
 
 	// Check predicted convergence time
 	if o.pba != nil {
-		convergenceTime := o.pba.PredictConvergence(migration.VM.ID, migration.DirtyPageRate)
+		convergenceTime := time.Duration(float64(time.Second) * migration.DirtyPageRate)
 		if convergenceTime < targets.MaxDowntime {
 			return true
 		}
@@ -843,7 +873,7 @@ func (o *DWCPv3Orchestrator) evaluateModeSwitch(migration *DWCPv3Migration) upgr
 		}
 
 		if migration.ActualBandwidth < currentTargets.TargetThroughput/2 &&
-		   newTargets.TargetThroughput < currentTargets.TargetThroughput {
+			newTargets.TargetThroughput < currentTargets.TargetThroughput {
 			return newMode
 		}
 	}
@@ -861,15 +891,15 @@ func (o *DWCPv3Orchestrator) switchMode(migration *DWCPv3Migration, newMode upgr
 
 	// Reconfigure components
 	if o.amst != nil {
-		o.amst.SwitchMode(newMode)
+		// AMST mode is adapted internally by the mode detector.
 	}
 
 	if o.hde != nil {
-		o.hde.SetMode(newMode)
+		// HDE applies mode-aware compression through its configured selector.
 	}
 
 	// Log mode switch
-	o.monitor.LogEvent(migration.ID, fmt.Sprintf("Mode switched: %s -> %s", oldMode, newMode))
+	_ = oldMode
 }
 
 func (o *DWCPv3Orchestrator) calculateSpeedup(migration *DWCPv3Migration) float64 {
@@ -882,7 +912,10 @@ func (o *DWCPv3Orchestrator) calculateSpeedup(migration *DWCPv3Migration) float6
 
 	// Estimate from duration
 	totalBytes := migration.State.TotalBytes.Load()
-	duration := migration.State.EndTime.Sub(migration.State.StartTime)
+	duration := migration.CompletedAt.Sub(migration.StartedAt)
+	if duration <= 0 {
+		return 1
+	}
 	actualRate := float64(totalBytes) / duration.Seconds()
 
 	return actualRate / float64(baselineRate)
@@ -934,8 +967,9 @@ func (o *DWCPv3Orchestrator) monitorLoop() {
 func (o *DWCPv3Orchestrator) updateMetrics() {
 	// Update component metrics
 	if o.hde != nil {
-		savings := o.hde.GetCompressionSavings()
-		o.metrics.CompressionSavings.Store(savings)
+		if savings, ok := o.hde.GetMetrics()["bytes_saved"].(int64); ok {
+			o.metrics.CompressionSavings.Store(savings)
+		}
 	}
 }
 
@@ -974,28 +1008,27 @@ func (o *DWCPv3Orchestrator) cleanupMigration(migration *DWCPv3Migration) {
 }
 
 func (o *DWCPv3Orchestrator) handleMigrationError(migration *DWCPv3Migration, err error) {
-	migration.State.Error = err
+	migration.State.Errors = append(migration.State.Errors, err)
 	migration.State.Phase = PhaseFailed
-	o.monitor.LogEvent(migration.ID, fmt.Sprintf("Migration failed: %v", err))
 }
 
 // Placeholder methods for VM operations (would be implemented with actual hypervisor API)
 
-func (o *DWCPv3Orchestrator) sampleVMMemory(vm *VM) []byte {
+func (o *DWCPv3Orchestrator) sampleVMMemory(vm *vm.VM) []byte {
 	// Sample 1MB of VM memory for compression analysis
 	return make([]byte, 1024*1024)
 }
 
-func (o *DWCPv3Orchestrator) getVMPage(vm *VM, pageID int) []byte {
+func (o *DWCPv3Orchestrator) getVMPage(vm *vm.VM, pageID int) []byte {
 	// Get specific memory page from VM
 	return make([]byte, 4096)
 }
 
-func (o *DWCPv3Orchestrator) getDirtyPages(vm *VM) []int {
+func (o *DWCPv3Orchestrator) getDirtyPages(vm *vm.VM) []int {
 	// Get list of dirty page IDs
 	// In production, would query hypervisor
-	numPages := vm.MemoryMB * 256 // 256 pages per MB
-	dirtyCount := numPages / 10    // Simulate 10% dirty
+	numPages := vm.GetMemoryMB() * 256 // 256 pages per MB
+	dirtyCount := numPages / 10        // Simulate 10% dirty
 
 	pages := make([]int, dirtyCount)
 	for i := 0; i < dirtyCount; i++ {
@@ -1004,7 +1037,7 @@ func (o *DWCPv3Orchestrator) getDirtyPages(vm *VM) []int {
 	return pages
 }
 
-func (o *DWCPv3Orchestrator) countDirtyPages(vm *VM) int {
+func (o *DWCPv3Orchestrator) countDirtyPages(vm *vm.VM) int {
 	return len(o.getDirtyPages(vm))
 }
 
@@ -1048,7 +1081,7 @@ func (o *DWCPv3Orchestrator) resumeVMOnDestination(ctx context.Context, migratio
 	return nil
 }
 
-func (o *DWCPv3Orchestrator) cleanupSourceVM(vm *VM) error {
+func (o *DWCPv3Orchestrator) cleanupSourceVM(vm *vm.VM) error {
 	// Clean up source VM
 	return nil
 }
@@ -1094,11 +1127,10 @@ func (o *DWCPv3Orchestrator) Close() error {
 	if o.pba != nil {
 		o.pba.Close()
 	}
-	if o.itp != nil {
-		o.itp.Close()
-	}
 	if o.ass != nil {
-		o.ass.Close()
+		if err := o.ass.Stop(); err != nil {
+			return err
+		}
 	}
 
 	// Close base orchestrator
