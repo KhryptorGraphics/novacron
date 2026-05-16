@@ -1,5 +1,5 @@
 // Package vm provides memory state distribution with delta synchronization
-//go:build novacron_vm_distribution
+//go:build novacron_vm_distribution && novacron_vm_distribution_experimental
 
 package vm
 
@@ -20,37 +20,37 @@ import (
 
 // MemoryStateDistribution manages distributed VM memory state with delta synchronization
 type MemoryStateDistribution struct {
-	mu                 sync.RWMutex
-	logger             *zap.Logger
-	nodeID             string
-	deltaSync          WANMigrationDeltaSync
-	shardingManager    *VMStateShardingManager
-	prefetcher         *PredictivePrefetchingEngine
-	memoryShards       map[string]*MemoryShard
-	coherenceProtocol  *MemoryCoherenceProtocol
-	compressionEngine  *MemoryCompressionEngine
-	accessTracker      *MemoryAccessTracker
-	recoveryManager    *MemoryRecoveryManager
+	mu                  sync.RWMutex
+	logger              *zap.Logger
+	nodeID              string
+	deltaSync           WANMigrationDeltaSync
+	shardingManager     *VMStateShardingManager
+	prefetcher          *PredictivePrefetchingEngine
+	memoryShards        map[string]*MemoryShard
+	coherenceProtocol   *MemoryCoherenceProtocol
+	compressionEngine   *MemoryCompressionEngine
+	accessTracker       *MemoryAccessTracker
+	recoveryManager     *MemoryRecoveryManager
 	migrationStrategies map[string]MigrationStrategy
-	metrics            *MemoryDistributionMetrics
-	bandwidthLimiter   *BandwidthLimiter     // For throttling network usage
-	dirtyBitmap        *DirtyPageBitmap      // Global dirty page tracking
+	metrics             *MemoryDistributionMetrics
+	bandwidthLimiter    *BandwidthLimiter // For throttling network usage
+	dirtyBitmap         *DirtyPageBitmap  // Global dirty page tracking
 }
 
 // MemoryShard represents a distributed memory shard
 type MemoryShard struct {
-	ShardID       string
-	VMID          string
-	StartAddress  uint64
-	EndAddress    uint64
-	Pages         map[uint64]*DistributedMemoryPage
-	ReplicaNodes  []string
-	Version       uint64
-	DirtyBitmap   *DirtyPageBitmap
-	LastSync      time.Time
+	ShardID        string
+	VMID           string
+	StartAddress   uint64
+	EndAddress     uint64
+	Pages          map[uint64]*DistributedMemoryPage
+	ReplicaNodes   []string
+	Version        uint64
+	DirtyBitmap    *DirtyPageBitmap
+	LastSync       time.Time
 	CoherenceState CoherenceState
-	PostCopyMode  bool                     // Whether this shard is in post-copy mode
-	FaultHandler  *PostCopyFaultHandler    // Handler for post-copy page faults
+	PostCopyMode   bool                  // Whether this shard is in post-copy mode
+	FaultHandler   *PostCopyFaultHandler // Handler for post-copy page faults
 }
 
 // DistributedMemoryPage represents a memory page in distributed state
@@ -68,10 +68,10 @@ type DistributedMemoryPage struct {
 	Dirty           bool
 	Locked          bool
 	Owner           string
-	VMID            string          // VM this page belongs to
-	ShardID         string          // Shard this page belongs to
-	LastTransfer    time.Time       // Last time page was transferred
-	TransferVersion uint64          // Version at last transfer
+	VMID            string    // VM this page belongs to
+	ShardID         string    // Shard this page belongs to
+	LastTransfer    time.Time // Last time page was transferred
+	TransferVersion uint64    // Version at last transfer
 }
 
 // PageTemperature indicates access frequency
@@ -101,7 +101,7 @@ type MigrationStrategy interface {
 
 // PreCopyMigration implements pre-copy migration strategy
 type PreCopyMigration struct {
-	maxIterations int
+	maxIterations  int
 	dirtyThreshold float64
 }
 
@@ -112,8 +112,8 @@ type PostCopyMigration struct {
 
 // HybridMigration combines pre-copy and post-copy strategies
 type HybridMigration struct {
-	preCopy  *PreCopyMigration
-	postCopy *PostCopyMigration
+	preCopy     *PreCopyMigration
+	postCopy    *PostCopyMigration
 	aiOptimizer *AIOptimizer
 }
 
@@ -135,18 +135,18 @@ type MemoryCompressionEngine struct {
 
 // MemoryAccessTracker tracks memory access patterns
 type MemoryAccessTracker struct {
-	mu           sync.RWMutex
-	accessLog    *CircularBuffer
-	hotPages     *HotPageTracker
-	coldPages    *ColdPageTracker
-	predictions  *AccessPredictionModel
+	mu          sync.RWMutex
+	accessLog   *CircularBuffer
+	hotPages    *HotPageTracker
+	coldPages   *ColdPageTracker
+	predictions *AccessPredictionModel
 }
 
 // MemoryRecoveryManager handles memory state recovery
 type MemoryRecoveryManager struct {
-	checkpoints     []*MemoryCheckpoint
-	replicaManager  *ReplicaManager
-	recoveryLog     *RecoveryLog
+	checkpoints    []*MemoryCheckpoint
+	replicaManager *ReplicaManager
+	recoveryLog    *RecoveryLog
 }
 
 // NewMemoryStateDistribution creates a new memory state distribution manager
@@ -809,7 +809,7 @@ func (msd *MemoryStateDistribution) transferPages(ctx context.Context, pages []*
 
 	// Batch pages into chunks (1-4MB)
 	const batchSizeBytes = 4 * 1024 * 1024 // 4MB batches
-	const pageSize = 4096                   // Standard page size
+	const pageSize = 4096                  // Standard page size
 
 	batches := msd.createPageBatches(sortedPages, batchSizeBytes/pageSize)
 
@@ -1832,16 +1832,20 @@ type UpdateMessage struct {
 }
 
 type PageFaultHandler struct{}
+
 func NewPageFaultHandler() *PageFaultHandler { return &PageFaultHandler{} }
 
 type AIOptimizer struct{}
+
 func NewAIOptimizer() *AIOptimizer { return &AIOptimizer{} }
 
 type MemoryDeduplicator struct{}
-func NewMemoryDeduplicator() *MemoryDeduplicator { return &MemoryDeduplicator{} }
+
+func NewMemoryDeduplicator() *MemoryDeduplicator               { return &MemoryDeduplicator{} }
 func (m *MemoryDeduplicator) FindDuplicate(data []byte) string { return "" }
 
 type ZeroPageEliminator struct{}
+
 func NewZeroPageEliminator() *ZeroPageEliminator { return &ZeroPageEliminator{} }
 func (z *ZeroPageEliminator) IsZeroPage(data []byte) bool {
 	for _, b := range data {
@@ -1853,7 +1857,10 @@ func (z *ZeroPageEliminator) IsZeroPage(data []byte) bool {
 }
 
 type PatternCompressionDetector struct{}
-func NewPatternCompressionDetector() *PatternCompressionDetector { return &PatternCompressionDetector{} }
+
+func NewPatternCompressionDetector() *PatternCompressionDetector {
+	return &PatternCompressionDetector{}
+}
 func (p *PatternCompressionDetector) DetectPattern(data []byte) PatternCompressor { return nil }
 
 type PatternCompressor interface {
@@ -1866,19 +1873,23 @@ type Compressor interface {
 }
 
 type CircularBuffer struct{}
+
 func NewCircularBuffer(size int) *CircularBuffer { return &CircularBuffer{} }
 
 type HotPageTracker struct{}
+
 func NewHotPageTracker() *HotPageTracker { return &HotPageTracker{} }
 
 type ColdPageTracker struct{}
+
 func NewColdPageTracker() *ColdPageTracker { return &ColdPageTracker{} }
 
 type AccessPredictionModel struct{}
+
 func NewAccessPredictionModel() *AccessPredictionModel { return &AccessPredictionModel{} }
 
 type AccessPredictions struct {
-	HotPages []uint64
+	HotPages  []uint64
 	ColdPages []uint64
 }
 
@@ -1890,18 +1901,20 @@ type MemoryCheckpoint struct {
 }
 
 type ReplicaManager struct{}
+
 func NewReplicaManager() *ReplicaManager { return &ReplicaManager{} }
 
 type RecoveryLog struct{}
+
 func NewRecoveryLog() *RecoveryLog { return &RecoveryLog{} }
 
 type MemoryDistributionMetrics struct {
-	ShardsCreated        atomic.Int64
-	DeltasSynced         atomic.Int64
-	BytesSynced          atomic.Int64
-	PagesTransferred     atomic.Int64
-	MigrationsCompleted  atomic.Int64
-	RecoveriesCompleted  atomic.Int64
+	ShardsCreated       atomic.Int64
+	DeltasSynced        atomic.Int64
+	BytesSynced         atomic.Int64
+	PagesTransferred    atomic.Int64
+	MigrationsCompleted atomic.Int64
+	RecoveriesCompleted atomic.Int64
 }
 
 // Helper methods for WAN delta sync integration

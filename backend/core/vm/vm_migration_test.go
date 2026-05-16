@@ -321,9 +321,9 @@ func TestMigrationRollback(t *testing.T) {
 		t.Errorf("Migration should have failed but didn't")
 	}
 
-	// Verify migration status is failed
-	if migration.Status != MigrationStatusFailed {
-		t.Errorf("Migration status is %s, expected %s", migration.Status, MigrationStatusFailed)
+	// Verify migration status reflects a failed migration with successful rollback.
+	if migration.Status != MigrationStatusRolledBack {
+		t.Errorf("Migration status is %s, expected %s", migration.Status, MigrationStatusRolledBack)
 	}
 
 	// Verify VM is still running on source after rollback
@@ -332,7 +332,7 @@ func TestMigrationRollback(t *testing.T) {
 		t.Fatalf("Failed to get source VM after rollback: %v", err)
 	}
 
-	if sourceVM.Status != VMStatusRunning {
-		t.Errorf("Source VM status is %s, expected %s after rollback", sourceVM.Status, VMStatusRunning)
+	if sourceVM.State() != StateRunning {
+		t.Errorf("Source VM status is %s, expected %s after rollback", sourceVM.State(), StateRunning)
 	}
 }

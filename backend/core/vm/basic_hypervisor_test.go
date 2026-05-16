@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -13,11 +14,11 @@ func TestMockHypervisor(t *testing.T) {
 
 	t.Run("BasicLifecycle", func(t *testing.T) {
 		config := VMConfig{
-			ID:       "test-vm-1",
-			Name:     "Test VM 1",
+			ID:        "test-vm-1",
+			Name:      "Test VM 1",
 			CPUShares: 2,
-			MemoryMB: 512,
-			Tags:     map[string]string{"test": "mock"},
+			MemoryMB:  512,
+			Tags:      map[string]string{"test": "mock"},
 		}
 
 		// Create VM
@@ -92,10 +93,10 @@ func TestMockHypervisor(t *testing.T) {
 		}
 
 		config := VMConfig{
-			ID:       "test-vm-pause",
-			Name:     "Test VM Pause",
+			ID:        "test-vm-pause",
+			Name:      "Test VM Pause",
 			CPUShares: 1,
-			MemoryMB: 256,
+			MemoryMB:  256,
 		}
 
 		vmID, err := mock.Create(ctx, config)
@@ -146,10 +147,10 @@ func TestMockHypervisor(t *testing.T) {
 		}
 
 		config := VMConfig{
-			ID:       "test-vm-snapshot",
-			Name:     "Test VM Snapshot",
+			ID:        "test-vm-snapshot",
+			Name:      "Test VM Snapshot",
 			CPUShares: 1,
-			MemoryMB: 256,
+			MemoryMB:  256,
 		}
 
 		vmID, err := mock.Create(ctx, config)
@@ -188,10 +189,10 @@ func TestMockHypervisor(t *testing.T) {
 		var vmIDs []string
 		for i := 0; i < 3; i++ {
 			config := VMConfig{
-				ID:       fmt.Sprintf("test-vm-list-%d", i),
-				Name:     fmt.Sprintf("Test VM List %d", i),
+				ID:        fmt.Sprintf("test-vm-list-%d", i),
+				Name:      fmt.Sprintf("Test VM List %d", i),
 				CPUShares: 1,
-				MemoryMB: 256,
+				MemoryMB:  256,
 			}
 
 			vmID, err := mock.Create(ctx, config)
@@ -251,10 +252,10 @@ func TestMockHypervisor(t *testing.T) {
 		)
 
 		config := VMConfig{
-			ID:       "test-vm-failure",
-			Name:     "Test VM Failure",
+			ID:        "test-vm-failure",
+			Name:      "Test VM Failure",
 			CPUShares: 1,
-			MemoryMB: 256,
+			MemoryMB:  256,
 		}
 
 		// This should fail due to 100% failure rate
@@ -273,10 +274,10 @@ func TestMockHypervisor(t *testing.T) {
 		var vmIDs []string
 		for i := 0; i < numVMs; i++ {
 			config := VMConfig{
-				ID:       fmt.Sprintf("perf-vm-%d", i),
-				Name:     fmt.Sprintf("Performance VM %d", i),
+				ID:        fmt.Sprintf("perf-vm-%d", i),
+				Name:      fmt.Sprintf("Performance VM %d", i),
 				CPUShares: 1,
-				MemoryMB: 128,
+				MemoryMB:  128,
 			}
 
 			vmID, err := mock.Create(ctx, config)
@@ -289,7 +290,7 @@ func TestMockHypervisor(t *testing.T) {
 
 		creationTime := time.Since(start)
 		avgTime := creationTime / time.Duration(len(vmIDs))
-		
+
 		t.Logf("Created %d VMs in %v (avg: %v per VM)", len(vmIDs), creationTime, avgTime)
 
 		// Cleanup
@@ -376,8 +377,8 @@ func TestDriverFactory(t *testing.T) {
 	})
 }
 
-// TestVMDriverManager tests the VM driver manager
-func TestVMDriverManager(t *testing.T) {
+// TestBasicHypervisorVMDriverManager tests the VM driver manager through the basic hypervisor suite.
+func TestBasicHypervisorVMDriverManager(t *testing.T) {
 	config := DefaultVMDriverConfig("test-manager-node")
 	manager := NewVMDriverManager(config)
 	defer manager.Close()
@@ -417,13 +418,13 @@ func BenchmarkMockHypervisor(b *testing.B) {
 	ctx := context.Background()
 
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		config := VMConfig{
-			ID:       fmt.Sprintf("bench-vm-%d", i),
-			Name:     fmt.Sprintf("Benchmark VM %d", i),
+			ID:        fmt.Sprintf("bench-vm-%d", i),
+			Name:      fmt.Sprintf("Benchmark VM %d", i),
 			CPUShares: 1,
-			MemoryMB: 128,
+			MemoryMB:  128,
 		}
 
 		vmID, err := mock.Create(ctx, config)
@@ -449,17 +450,17 @@ func BenchmarkMockHypervisorWithLatency(b *testing.B) {
 		},
 		MockCapabilities{},
 	)
-	
+
 	ctx := context.Background()
 
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		config := VMConfig{
-			ID:       fmt.Sprintf("bench-latency-vm-%d", i),
-			Name:     fmt.Sprintf("Benchmark Latency VM %d", i),
+			ID:        fmt.Sprintf("bench-latency-vm-%d", i),
+			Name:      fmt.Sprintf("Benchmark Latency VM %d", i),
 			CPUShares: 1,
-			MemoryMB: 128,
+			MemoryMB:  128,
 		}
 
 		vmID, err := mock.Create(ctx, config)

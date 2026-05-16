@@ -49,14 +49,14 @@ type MockSnapshot struct {
 
 // MockCapabilities defines what the mock hypervisor supports
 type MockCapabilities struct {
-	SupportsPause     bool
-	SupportsResume    bool
-	SupportsSnapshot  bool
-	SupportsMigrate   bool
-	MaxVMs            int
-	MaxCPUPerVM       int
-	MaxMemoryPerVM    int64
-	SupportedVMTypes  []VMType
+	SupportsPause    bool
+	SupportsResume   bool
+	SupportsSnapshot bool
+	SupportsMigrate  bool
+	MaxVMs           int
+	MaxCPUPerVM      int
+	MaxMemoryPerVM   int64
+	SupportedVMTypes []VMType
 }
 
 // MockFailureConfig allows injecting failures for testing
@@ -75,13 +75,13 @@ type MockFailureConfig struct {
 
 // MockLatencyConfig simulates network and processing latency
 type MockLatencyConfig struct {
-	CreateLatency   time.Duration
-	StartLatency    time.Duration
-	StopLatency     time.Duration
-	StatusLatency   time.Duration
-	NetworkLatency  time.Duration
-	DiskLatency     time.Duration
-	VariabilityPct  float64 // 0.0 to 1.0 for latency variation
+	CreateLatency  time.Duration
+	StartLatency   time.Duration
+	StopLatency    time.Duration
+	StatusLatency  time.Duration
+	NetworkLatency time.Duration
+	DiskLatency    time.Duration
+	VariabilityPct float64 // 0.0 to 1.0 for latency variation
 }
 
 // NewMockHypervisor creates a new mock hypervisor
@@ -91,10 +91,10 @@ func NewMockHypervisor(nodeID, hypervisorID string) *MockHypervisor {
 		nodeID:       nodeID,
 		hypervisorID: hypervisorID,
 		capabilities: MockCapabilities{
-			SupportsPause:     true,
-			SupportsResume:    true,
-			SupportsSnapshot:  true,
-			SupportsMigrate:   true,
+			SupportsPause:    true,
+			SupportsResume:   true,
+			SupportsSnapshot: true,
+			SupportsMigrate:  true,
 			MaxVMs:           100,
 			MaxCPUPerVM:      16,
 			MaxMemoryPerVM:   32 * 1024, // 32GB in MB
@@ -127,7 +127,7 @@ func NewMockHypervisor(nodeID, hypervisorID string) *MockHypervisor {
 func (m *MockHypervisor) Configure(failures MockFailureConfig, latency MockLatencyConfig, capabilities MockCapabilities) {
 	m.vmLock.Lock()
 	defer m.vmLock.Unlock()
-	
+
 	m.failures = failures
 	m.latencyConfig = latency
 	m.capabilities = capabilities
@@ -155,13 +155,17 @@ func (m *MockHypervisor) simulateFailure(failureRate float64) bool {
 // Create creates a mock VM
 func (m *MockHypervisor) Create(ctx context.Context, config VMConfig) (string, error) {
 	m.simulateLatency(m.latencyConfig.CreateLatency)
-	
+
 	if m.simulateFailure(m.failures.CreateFailureRate) {
 		return "", fmt.Errorf("mock failure: create operation failed")
 	}
 
 	m.vmLock.Lock()
 	defer m.vmLock.Unlock()
+
+	if config.Name == "" || config.ID == "" {
+		return "", fmt.Errorf("VM name and ID are required")
+	}
 
 	// Check VM limits
 	if len(m.vms) >= m.capabilities.MaxVMs {
@@ -178,9 +182,6 @@ func (m *MockHypervisor) Create(ctx context.Context, config VMConfig) (string, e
 	}
 
 	vmID := config.ID
-	if vmID == "" {
-		vmID = fmt.Sprintf("mock-vm-%d", time.Now().UnixNano())
-	}
 
 	if _, exists := m.vms[vmID]; exists {
 		return "", fmt.Errorf("VM with ID %s already exists", vmID)
@@ -204,7 +205,7 @@ func (m *MockHypervisor) Create(ctx context.Context, config VMConfig) (string, e
 // Start starts a mock VM
 func (m *MockHypervisor) Start(ctx context.Context, vmID string) error {
 	m.simulateLatency(m.latencyConfig.StartLatency)
-	
+
 	if m.simulateFailure(m.failures.StartFailureRate) {
 		return fmt.Errorf("mock failure: start operation failed")
 	}
@@ -235,7 +236,7 @@ func (m *MockHypervisor) Start(ctx context.Context, vmID string) error {
 // Stop stops a mock VM
 func (m *MockHypervisor) Stop(ctx context.Context, vmID string) error {
 	m.simulateLatency(m.latencyConfig.StopLatency)
-	
+
 	if m.simulateFailure(m.failures.StopFailureRate) {
 		return fmt.Errorf("mock failure: stop operation failed")
 	}
@@ -263,7 +264,7 @@ func (m *MockHypervisor) Stop(ctx context.Context, vmID string) error {
 // Delete deletes a mock VM
 func (m *MockHypervisor) Delete(ctx context.Context, vmID string) error {
 	m.simulateLatency(m.latencyConfig.CreateLatency / 2) // Delete is typically faster
-	
+
 	if m.simulateFailure(m.failures.CreateFailureRate / 2) { // Lower failure rate for delete
 		return fmt.Errorf("mock failure: delete operation failed")
 	}
@@ -290,7 +291,7 @@ func (m *MockHypervisor) Delete(ctx context.Context, vmID string) error {
 // GetStatus returns the status of a mock VM
 func (m *MockHypervisor) GetStatus(ctx context.Context, vmID string) (VMState, error) {
 	m.simulateLatency(m.latencyConfig.StatusLatency)
-	
+
 	if m.simulateFailure(m.failures.StatusFailureRate) {
 		return StateUnknown, fmt.Errorf("mock failure: status operation failed")
 	}
@@ -319,22 +320,22 @@ func (m *MockHypervisor) GetInfo(ctx context.Context, vmID string) (*VMInfo, err
 	}
 
 	return &VMInfo{
-		ID:           vm.ID,
-		Name:         vm.Config.Name,
-		State:        vm.State,
-		PID:          vm.PID,
-		CPUShares:    vm.Config.CPUShares,
-		MemoryMB:     vm.Config.MemoryMB,
-		CreatedAt:    vm.CreatedAt,
-		StartedAt:    vm.StartedAt,
-		StoppedAt:    vm.StoppedAt,
-		CPUUsage:     vm.CPUUsage,
-		MemoryUsage:  vm.MemoryUsage,
-		NetworkSent:  vm.NetworkTx,
-		NetworkRecv:  vm.NetworkRx,
-		Tags:         vm.Config.Tags,
-		NetworkID:    vm.Config.NetworkID,
-		RootFS:       vm.Config.RootFS,
+		ID:          vm.ID,
+		Name:        vm.Config.Name,
+		State:       vm.State,
+		PID:         vm.PID,
+		CPUShares:   vm.Config.CPUShares,
+		MemoryMB:    vm.Config.MemoryMB,
+		CreatedAt:   vm.CreatedAt,
+		StartedAt:   vm.StartedAt,
+		StoppedAt:   vm.StoppedAt,
+		CPUUsage:    vm.CPUUsage,
+		MemoryUsage: vm.MemoryUsage,
+		NetworkSent: vm.NetworkTx,
+		NetworkRecv: vm.NetworkRx,
+		Tags:        vm.Config.Tags,
+		NetworkID:   vm.Config.NetworkID,
+		RootFS:      vm.Config.RootFS,
 	}, nil
 }
 
@@ -353,20 +354,20 @@ func (m *MockHypervisor) ListVMs(ctx context.Context) ([]VMInfo, error) {
 	vms := make([]VMInfo, 0, len(m.vms))
 	for _, vm := range m.vms {
 		vms = append(vms, VMInfo{
-			ID:           vm.ID,
-			Name:         vm.Config.Name,
-			State:        vm.State,
-			PID:          vm.PID,
-			CPUShares:    vm.Config.CPUShares,
-			MemoryMB:     vm.Config.MemoryMB,
-			CreatedAt:    vm.CreatedAt,
-			StartedAt:    vm.StartedAt,
-			StoppedAt:    vm.StoppedAt,
-			CPUUsage:     vm.CPUUsage,
-			MemoryUsage:  vm.MemoryUsage,
-			Tags:         vm.Config.Tags,
-			NetworkID:    vm.Config.NetworkID,
-			RootFS:       vm.Config.RootFS,
+			ID:          vm.ID,
+			Name:        vm.Config.Name,
+			State:       vm.State,
+			PID:         vm.PID,
+			CPUShares:   vm.Config.CPUShares,
+			MemoryMB:    vm.Config.MemoryMB,
+			CreatedAt:   vm.CreatedAt,
+			StartedAt:   vm.StartedAt,
+			StoppedAt:   vm.StoppedAt,
+			CPUUsage:    vm.CPUUsage,
+			MemoryUsage: vm.MemoryUsage,
+			Tags:        vm.Config.Tags,
+			NetworkID:   vm.Config.NetworkID,
+			RootFS:      vm.Config.RootFS,
 		})
 	}
 
@@ -374,10 +375,34 @@ func (m *MockHypervisor) ListVMs(ctx context.Context) ([]VMInfo, error) {
 }
 
 // Capability checks
-func (m *MockHypervisor) SupportsPause() bool     { return m.capabilities.SupportsPause }
-func (m *MockHypervisor) SupportsResume() bool    { return m.capabilities.SupportsResume }
-func (m *MockHypervisor) SupportsSnapshot() bool  { return m.capabilities.SupportsSnapshot }
-func (m *MockHypervisor) SupportsMigrate() bool   { return m.capabilities.SupportsMigrate }
+func (m *MockHypervisor) SupportsPause() bool          { return m.capabilities.SupportsPause }
+func (m *MockHypervisor) SupportsResume() bool         { return m.capabilities.SupportsResume }
+func (m *MockHypervisor) SupportsSnapshot() bool       { return m.capabilities.SupportsSnapshot }
+func (m *MockHypervisor) SupportsMigrate() bool        { return m.capabilities.SupportsMigrate }
+func (m *MockHypervisor) SupportsLiveMigration() bool  { return m.capabilities.SupportsMigrate }
+func (m *MockHypervisor) SupportsHotPlug() bool        { return false }
+func (m *MockHypervisor) SupportsGPUPassthrough() bool { return false }
+func (m *MockHypervisor) SupportsSRIOV() bool          { return false }
+func (m *MockHypervisor) SupportsNUMA() bool           { return false }
+
+// GetCapabilities returns the mock hypervisor capability set.
+func (m *MockHypervisor) GetCapabilities(ctx context.Context) (*HypervisorCapabilities, error) {
+	m.vmLock.RLock()
+	defer m.vmLock.RUnlock()
+
+	return &HypervisorCapabilities{
+		Type:                  VMTypeKVM,
+		Version:               "mock",
+		SupportsPause:         m.capabilities.SupportsPause,
+		SupportsResume:        m.capabilities.SupportsResume,
+		SupportsSnapshot:      m.capabilities.SupportsSnapshot,
+		SupportsMigrate:       m.capabilities.SupportsMigrate,
+		SupportsLiveMigration: m.capabilities.SupportsMigrate,
+		MaxVCPUs:              m.capabilities.MaxCPUPerVM,
+		MaxMemoryMB:           m.capabilities.MaxMemoryPerVM,
+		SupportedFeatures:     []string{"mock"},
+	}, nil
+}
 
 // Pause pauses a mock VM
 func (m *MockHypervisor) Pause(ctx context.Context, vmID string) error {
@@ -452,7 +477,7 @@ func (m *MockHypervisor) Snapshot(ctx context.Context, vmID, name string, params
 	}
 
 	snapshotID := fmt.Sprintf("snap-%s-%s-%d", vmID, name, time.Now().Unix())
-	
+
 	snapshot := &MockSnapshot{
 		ID:        snapshotID,
 		Name:      name,
@@ -527,12 +552,12 @@ func (m *MockHypervisor) simulateResourceUsage(vmID string) {
 			vm.MemoryUsage = int64(float64(vm.Config.MemoryMB*1024*1024) * (0.3 + rand.Float64()*0.4))
 
 			// Simulate network I/O
-			vm.NetworkRx += int64(rand.Intn(1000000))  // Up to 1MB/s
-			vm.NetworkTx += int64(rand.Intn(500000))   // Up to 500KB/s
+			vm.NetworkRx += int64(rand.Intn(1000000)) // Up to 1MB/s
+			vm.NetworkTx += int64(rand.Intn(500000))  // Up to 500KB/s
 
 			// Simulate disk I/O
-			vm.DiskRead += int64(rand.Intn(10000000))  // Up to 10MB/s
-			vm.DiskWrite += int64(rand.Intn(5000000))  // Up to 5MB/s
+			vm.DiskRead += int64(rand.Intn(10000000)) // Up to 10MB/s
+			vm.DiskWrite += int64(rand.Intn(5000000)) // Up to 5MB/s
 
 			m.vmLock.Unlock()
 		}
@@ -561,24 +586,62 @@ func (m *MockHypervisor) GetSnapshots(vmID string) ([]*MockSnapshot, error) {
 func (m *MockHypervisor) Reset() {
 	m.vmLock.Lock()
 	defer m.vmLock.Unlock()
-	
+
 	m.vms = make(map[string]*MockVM)
 	log.Printf("Mock hypervisor %s: Reset completed", m.hypervisorID)
 }
 
-// GetHypervisorInfo returns information about the mock hypervisor
-func (m *MockHypervisor) GetHypervisorInfo() map[string]interface{} {
+// GetHypervisorInfo returns information about the mock hypervisor.
+func (m *MockHypervisor) GetHypervisorInfo(ctx context.Context) (*HypervisorInfo, error) {
 	m.vmLock.RLock()
 	defer m.vmLock.RUnlock()
 
-	return map[string]interface{}{
-		"node_id":        m.nodeID,
-		"hypervisor_id":  m.hypervisorID,
-		"type":          "mock",
-		"vm_count":      len(m.vms),
-		"max_vms":       m.capabilities.MaxVMs,
-		"capabilities":  m.capabilities,
-		"failure_rates": m.failures,
-		"latency":       m.latencyConfig,
+	capabilities := &HypervisorCapabilities{
+		Type:                  VMTypeKVM,
+		Version:               "mock",
+		SupportsPause:         m.capabilities.SupportsPause,
+		SupportsResume:        m.capabilities.SupportsResume,
+		SupportsSnapshot:      m.capabilities.SupportsSnapshot,
+		SupportsMigrate:       m.capabilities.SupportsMigrate,
+		SupportsLiveMigration: m.capabilities.SupportsMigrate,
+		MaxVCPUs:              m.capabilities.MaxCPUPerVM,
+		MaxMemoryMB:           m.capabilities.MaxMemoryPerVM,
+		SupportedFeatures:     []string{"mock"},
 	}
+
+	return &HypervisorInfo{
+		Type:         VMTypeKVM,
+		Version:      "mock",
+		Hostname:     m.nodeID,
+		CPUCores:     m.capabilities.MaxCPUPerVM,
+		MemoryMB:     m.capabilities.MaxMemoryPerVM,
+		ActiveVMs:    len(m.vms),
+		Capabilities: capabilities,
+		Metadata: map[string]interface{}{
+			"hypervisor_id": m.hypervisorID,
+			"max_vms":       m.capabilities.MaxVMs,
+			"failure_rates": m.failures,
+			"latency":       m.latencyConfig,
+		},
+	}, nil
+}
+
+// HotPlugDevice is a no-op for the mock hypervisor.
+func (m *MockHypervisor) HotPlugDevice(ctx context.Context, vmID string, device *DeviceConfig) error {
+	return fmt.Errorf("hot plug not supported by mock hypervisor")
+}
+
+// HotUnplugDevice is a no-op for the mock hypervisor.
+func (m *MockHypervisor) HotUnplugDevice(ctx context.Context, vmID string, deviceID string) error {
+	return fmt.Errorf("hot unplug not supported by mock hypervisor")
+}
+
+// ConfigureCPUPinning is a no-op for the mock hypervisor.
+func (m *MockHypervisor) ConfigureCPUPinning(ctx context.Context, vmID string, pinning *CPUPinningConfig) error {
+	return fmt.Errorf("CPU pinning not supported by mock hypervisor")
+}
+
+// ConfigureNUMA is a no-op for the mock hypervisor.
+func (m *MockHypervisor) ConfigureNUMA(ctx context.Context, vmID string, topology *NUMATopology) error {
+	return fmt.Errorf("NUMA configuration not supported by mock hypervisor")
 }

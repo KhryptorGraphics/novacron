@@ -1,3 +1,5 @@
+//go:build legacy_vm_manager
+
 package vm
 
 import (

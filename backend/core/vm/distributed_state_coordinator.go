@@ -1,5 +1,5 @@
 // Package vm provides distributed state coordination for VM operations
-//go:build novacron_vm_distribution
+//go:build novacron_vm_distribution && novacron_vm_distribution_experimental
 
 package vm
 
@@ -42,15 +42,15 @@ type DistributedTransactionManager struct {
 
 // DistributedTransaction represents a distributed state transaction
 type DistributedTransaction struct {
-	ID            string
-	Type          TransactionType
-	State         TransactionState
-	Participants  []string
-	Operations    []StateOperation
-	VectorClock   map[string]uint64
-	StartTime     time.Time
-	CommitTime    time.Time
-	RollbackLog   []RollbackOperation
+	ID           string
+	Type         TransactionType
+	State        TransactionState
+	Participants []string
+	Operations   []StateOperation
+	VectorClock  map[string]uint64
+	StartTime    time.Time
+	CommitTime   time.Time
+	RollbackLog  []RollbackOperation
 }
 
 // TransactionType defines the type of transaction
@@ -86,20 +86,20 @@ type ConflictResolver struct {
 
 // GlobalOptimizer optimizes global state placement and migration
 type GlobalOptimizer struct {
-	mu              sync.RWMutex
-	aiPredictor     *AIPredictionEngine
-	costModel       *CostModel
-	placementEngine *PlacementOptimizer
+	mu               sync.RWMutex
+	aiPredictor      *AIPredictionEngine
+	costModel        *CostModel
+	placementEngine  *PlacementOptimizer
 	migrationPlanner *MigrationPlanner
 }
 
 // StateMonitor provides monitoring and observability
 type StateMonitor struct {
-	mu                sync.RWMutex
+	mu                 sync.RWMutex
 	performanceMetrics *PerformanceMetrics
 	consistencyChecker *ConsistencyChecker
-	errorTracker      *ErrorTracker
-	alertManager      *AlertManager
+	errorTracker       *ErrorTracker
+	alertManager       *AlertManager
 }
 
 // RecoveryCoordinator coordinates recovery operations
@@ -589,16 +589,16 @@ type MigrationPlan struct {
 }
 
 type MigrationStep struct {
-	Name string
+	Name   string
 	Action func() error
 }
 
 type OptimizationPlan struct {
-	ID           string
-	Timestamp    time.Time
-	Migrations   []PlannedMigration
-	CostSavings  float64
-	Performance  float64
+	ID          string
+	Timestamp   time.Time
+	Migrations  []PlannedMigration
+	CostSavings float64
+	Performance float64
 }
 
 type PlannedMigration struct {
@@ -677,10 +677,10 @@ type MemoryStatus struct {
 }
 
 type FederationStatus struct {
-	ClusterCount   int
-	NodeCount      int
+	ClusterCount    int
+	NodeCount       int
 	CrossClusterVMs int
-	Bandwidth      int64
+	Bandwidth       int64
 }
 
 type ConsistencyStatus struct {
@@ -697,18 +697,18 @@ type GlobalState struct {
 }
 
 type VMState struct {
-	ID       string
-	Node     string
-	Memory   uint64
-	CPU      int
-	State    string
+	ID     string
+	Node   string
+	Memory uint64
+	CPU    int
+	State  string
 }
 
 type NodeState struct {
-	ID         string
-	Cluster    string
-	Resources  ResourceInfo
-	VMCount    int
+	ID        string
+	Cluster   string
+	Resources ResourceInfo
+	VMCount   int
 }
 
 type ClusterState struct {
@@ -765,11 +765,13 @@ func (m *DistributedTransactionManager) CommitTransaction(tx *DistributedTransac
 }
 
 type DistributedLockManager struct{}
-func NewDistributedLockManager() *DistributedLockManager { return &DistributedLockManager{} }
+
+func NewDistributedLockManager() *DistributedLockManager                        { return &DistributedLockManager{} }
 func (l *DistributedLockManager) AcquireLocks(locks []string) ([]string, error) { return locks, nil }
-func (l *DistributedLockManager) ReleaseLocks(locks []string) {}
+func (l *DistributedLockManager) ReleaseLocks(locks []string)                   {}
 
 type TransactionLog struct{}
+
 func NewTransactionLog() *TransactionLog { return &TransactionLog{} }
 
 func NewConflictResolver() *ConflictResolver {
@@ -802,48 +804,56 @@ func NewGlobalOptimizer() *GlobalOptimizer {
 }
 
 type AIPredictionEngine struct{}
+
 func NewAIPredictionEngine() *AIPredictionEngine { return &AIPredictionEngine{} }
 func (a *AIPredictionEngine) PredictAccessPatterns(state *GlobalState) (*AccessPredictions, error) {
 	return &AccessPredictions{}, nil
 }
 
 type CostModel struct{}
+
 func NewCostModel() *CostModel { return &CostModel{} }
 
 type PlacementOptimizer struct{}
+
 func NewPlacementOptimizer() *PlacementOptimizer { return &PlacementOptimizer{} }
 func (p *PlacementOptimizer) CalculateOptimalPlacement(state *GlobalState, predictions *AccessPredictions) (*OptimizationPlan, error) {
 	return &OptimizationPlan{}, nil
 }
 
 type MigrationPlanner struct{}
+
 func NewMigrationPlanner() *MigrationPlanner { return &MigrationPlanner{} }
 
 func NewStateMonitor() *StateMonitor {
 	return &StateMonitor{
 		performanceMetrics: NewPerformanceMetrics(),
 		consistencyChecker: NewConsistencyChecker(),
-		errorTracker:      NewErrorTracker(),
-		alertManager:      NewAlertManager(),
+		errorTracker:       NewErrorTracker(),
+		alertManager:       NewAlertManager(),
 	}
 }
 
 func (m *StateMonitor) RecordMigration(vmID, targetNode string, duration time.Duration) {}
 
 type PerformanceMetrics struct{}
-func NewPerformanceMetrics() *PerformanceMetrics { return &PerformanceMetrics{} }
+
+func NewPerformanceMetrics() *PerformanceMetrics                         { return &PerformanceMetrics{} }
 func (p *PerformanceMetrics) GetMetrics(vmID string) *PerformanceMetrics { return p }
 
 type ConsistencyChecker struct{}
+
 func NewConsistencyChecker() *ConsistencyChecker { return &ConsistencyChecker{} }
 func (c *ConsistencyChecker) CheckConsistency(vmID string) *ConsistencyStatus {
 	return &ConsistencyStatus{IsConsistent: true, LastCheck: time.Now()}
 }
 
 type ErrorTracker struct{}
+
 func NewErrorTracker() *ErrorTracker { return &ErrorTracker{} }
 
 type AlertManager struct{}
+
 func NewAlertManager() *AlertManager { return &AlertManager{} }
 
 func NewRecoveryCoordinator() *RecoveryCoordinator {
@@ -865,10 +875,12 @@ func (r *RecoveryCoordinator) CreateRecoveryPlan(failure *FailureEvent) (*Recove
 }
 
 type FailureDetector struct{}
-func NewFailureDetector() *FailureDetector { return &FailureDetector{} }
+
+func NewFailureDetector() *FailureDetector              { return &FailureDetector{} }
 func (f *FailureDetector) DetectFailure() *FailureEvent { return nil }
 
 type RecoveryEventLog struct{}
+
 func NewRecoveryEventLog() *RecoveryEventLog { return &RecoveryEventLog{} }
 
 func NewStateAPIServer(coordinator *DistributedStateCoordinator) *StateAPIServer {
@@ -881,13 +893,14 @@ type GRPCServer struct{}
 type RESTServer struct{}
 
 type EventBus struct{}
+
 func NewEventBus() *EventBus { return &EventBus{} }
 
 type CoordinatorMetrics struct {
-	MigrationsCompleted     MetricCounter
-	ConflictsResolved       MetricCounter
-	OptimizationsCompleted  MetricCounter
-	RecoveriesCompleted     MetricCounter
+	MigrationsCompleted    MetricCounter
+	ConflictsResolved      MetricCounter
+	OptimizationsCompleted MetricCounter
+	RecoveriesCompleted    MetricCounter
 }
 
 func NewCoordinatorMetrics() *CoordinatorMetrics {

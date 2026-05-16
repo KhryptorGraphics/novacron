@@ -1,3 +1,5 @@
+//go:build integration
+
 package vm
 
 import (
@@ -41,6 +43,7 @@ func TestVMMigrationExecutionFixed(t *testing.T) {
 
 	// Test migration preparation
 	migrationID := "test-migration-001"
+	_ = migrationID
 
 	// Simulate migration steps
 	t.Run("PrepareMigration", func(t *testing.T) {

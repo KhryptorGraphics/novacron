@@ -1,3 +1,5 @@
+//go:build integration
+
 package vm
 
 import (
@@ -11,11 +13,11 @@ import (
 
 // ContainerIntegrationTest provides comprehensive testing for container drivers
 type ContainerIntegrationTest struct {
-	driver          VMDriver
-	driverType      VMType
-	hasDocker       bool
-	hasContainerd   bool
-	dockerVersion   string
+	driver            VMDriver
+	driverType        VMType
+	hasDocker         bool
+	hasContainerd     bool
+	dockerVersion     string
 	containerdVersion string
 }
 
@@ -106,13 +108,13 @@ func (c *ContainerIntegrationTest) TestContainerLifecycle(t *testing.T) {
 
 	ctx := context.Background()
 	config := VMConfig{
-		ID:       "lifecycle-test-container",
-		Name:     "Lifecycle Test Container",
+		ID:        "lifecycle-test-container",
+		Name:      "Lifecycle Test Container",
 		CPUShares: 2,
-		MemoryMB: 256,
-		RootFS:   "alpine:latest",
-		Command:  "sleep",
-		Args:     []string{"3600"},
+		MemoryMB:  256,
+		RootFS:    "alpine:latest",
+		Command:   "sleep",
+		Args:      []string{"3600"},
 		Env: map[string]string{
 			"TEST_ENV": "lifecycle",
 		},
@@ -194,13 +196,13 @@ func (c *ContainerIntegrationTest) TestContainerPauseResume(t *testing.T) {
 
 	ctx := context.Background()
 	config := VMConfig{
-		ID:       "pause-test-container",
-		Name:     "Pause Test Container",
+		ID:        "pause-test-container",
+		Name:      "Pause Test Container",
 		CPUShares: 1,
-		MemoryMB: 128,
-		RootFS:   "alpine:latest",
-		Command:  "sleep",
-		Args:     []string{"3600"},
+		MemoryMB:  128,
+		RootFS:    "alpine:latest",
+		Command:   "sleep",
+		Args:      []string{"3600"},
 	}
 
 	t.Run("PauseResumeSequence", func(t *testing.T) {
@@ -253,22 +255,22 @@ func (c *ContainerIntegrationTest) TestContainerResourceConstraints(t *testing.T
 	t.Run("ResourceLimits", func(t *testing.T) {
 		configs := []VMConfig{
 			{
-				ID:       "resource-test-small",
-				Name:     "Small Resource Test",
+				ID:        "resource-test-small",
+				Name:      "Small Resource Test",
 				CPUShares: 1,
-				MemoryMB: 64,
-				RootFS:   "alpine:latest",
-				Command:  "sleep",
-				Args:     []string{"60"},
+				MemoryMB:  64,
+				RootFS:    "alpine:latest",
+				Command:   "sleep",
+				Args:      []string{"60"},
 			},
 			{
-				ID:       "resource-test-large",
-				Name:     "Large Resource Test", 
+				ID:        "resource-test-large",
+				Name:      "Large Resource Test",
 				CPUShares: 4,
-				MemoryMB: 512,
-				RootFS:   "alpine:latest",
-				Command:  "sleep",
-				Args:     []string{"60"},
+				MemoryMB:  512,
+				RootFS:    "alpine:latest",
+				Command:   "sleep",
+				Args:      []string{"60"},
 			},
 		}
 
@@ -361,13 +363,13 @@ func (c *ContainerIntegrationTest) TestContainerEnvironmentVariables(t *testing.
 
 	t.Run("EnvironmentVariables", func(t *testing.T) {
 		config := VMConfig{
-			ID:       "env-test-container",
-			Name:     "Environment Test Container",
+			ID:        "env-test-container",
+			Name:      "Environment Test Container",
 			CPUShares: 1,
-			MemoryMB: 128,
-			RootFS:   "alpine:latest",
-			Command:  "sh",
-			Args:     []string{"-c", "echo $TEST_VAR && sleep 60"},
+			MemoryMB:  128,
+			RootFS:    "alpine:latest",
+			Command:   "sh",
+			Args:      []string{"-c", "echo $TEST_VAR && sleep 60"},
 			Env: map[string]string{
 				"TEST_VAR":      "test_value",
 				"CUSTOM_CONFIG": "enabled",
@@ -405,13 +407,13 @@ func (c *ContainerIntegrationTest) TestContainerVolumesMounts(t *testing.T) {
 
 	t.Run("VolumeMounts", func(t *testing.T) {
 		config := VMConfig{
-			ID:       "volume-test-container",
-			Name:     "Volume Test Container",
+			ID:        "volume-test-container",
+			Name:      "Volume Test Container",
 			CPUShares: 1,
-			MemoryMB: 128,
-			RootFS:   "alpine:latest",
-			Command:  "sleep",
-			Args:     []string{"60"},
+			MemoryMB:  128,
+			RootFS:    "alpine:latest",
+			Command:   "sleep",
+			Args:      []string{"60"},
 			Mounts: []Mount{
 				{
 					Source: "/tmp",
@@ -446,13 +448,13 @@ func (c *ContainerIntegrationTest) TestContainerMetrics(t *testing.T) {
 
 	t.Run("MetricsCollection", func(t *testing.T) {
 		config := VMConfig{
-			ID:       "metrics-test-container",
-			Name:     "Metrics Test Container",
+			ID:        "metrics-test-container",
+			Name:      "Metrics Test Container",
 			CPUShares: 2,
-			MemoryMB: 256,
-			RootFS:   "alpine:latest",
-			Command:  "sleep",
-			Args:     []string{"120"},
+			MemoryMB:  256,
+			RootFS:    "alpine:latest",
+			Command:   "sleep",
+			Args:      []string{"120"},
 		}
 
 		vmID, err := c.driver.Create(ctx, config)
@@ -480,7 +482,7 @@ func (c *ContainerIntegrationTest) TestContainerMetrics(t *testing.T) {
 			if metrics == nil {
 				t.Error("Container metrics should not be nil")
 			} else {
-				t.Logf("Container metrics: CPU=%.2f%%, Memory=%d bytes", 
+				t.Logf("Container metrics: CPU=%.2f%%, Memory=%d bytes",
 					metrics.CPUUsage, metrics.MemoryUsage)
 			}
 		}
@@ -504,13 +506,13 @@ func (c *ContainerIntegrationTest) TestContainerConcurrentOperations(t *testing.
 		for i := 0; i < numContainers; i++ {
 			go func(index int) {
 				config := VMConfig{
-					ID:       fmt.Sprintf("concurrent-container-%d", index),
-					Name:     fmt.Sprintf("Concurrent Container %d", index),
+					ID:        fmt.Sprintf("concurrent-container-%d", index),
+					Name:      fmt.Sprintf("Concurrent Container %d", index),
 					CPUShares: 1,
-					MemoryMB: 128,
-					RootFS:   "alpine:latest",
-					Command:  "sleep",
-					Args:     []string{"60"},
+					MemoryMB:  128,
+					RootFS:    "alpine:latest",
+					Command:   "sleep",
+					Args:      []string{"60"},
 				}
 
 				vmID, err := c.driver.Create(ctx, config)
@@ -550,13 +552,13 @@ func (c *ContainerIntegrationTest) TestContainerErrorHandling(t *testing.T) {
 
 	t.Run("InvalidImage", func(t *testing.T) {
 		config := VMConfig{
-			ID:       "invalid-image-test",
-			Name:     "Invalid Image Test",
+			ID:        "invalid-image-test",
+			Name:      "Invalid Image Test",
 			CPUShares: 1,
-			MemoryMB: 128,
-			RootFS:   "nonexistent:invalid-tag",
-			Command:  "sleep",
-			Args:     []string{"60"},
+			MemoryMB:  128,
+			RootFS:    "nonexistent:invalid-tag",
+			Command:   "sleep",
+			Args:      []string{"60"},
 		}
 
 		vmID, err := c.driver.Create(ctx, config)
@@ -609,13 +611,13 @@ func (c *ContainerIntegrationTest) TestContainerListOperations(t *testing.T) {
 
 		// Create test container
 		config := VMConfig{
-			ID:       "list-test-container",
-			Name:     "List Test Container",
+			ID:        "list-test-container",
+			Name:      "List Test Container",
 			CPUShares: 1,
-			MemoryMB: 128,
-			RootFS:   "alpine:latest",
-			Command:  "sleep",
-			Args:     []string{"60"},
+			MemoryMB:  128,
+			RootFS:    "alpine:latest",
+			Command:   "sleep",
+			Args:      []string{"60"},
 		}
 
 		vmID, err := c.driver.Create(ctx, config)
@@ -631,7 +633,7 @@ func (c *ContainerIntegrationTest) TestContainerListOperations(t *testing.T) {
 		} else {
 			newCount := len(containers)
 			t.Logf("Container count: initial=%d, after_create=%d", initialCount, newCount)
-			
+
 			// Check if our container is in the list
 			found := false
 			for _, container := range containers {
@@ -640,7 +642,7 @@ func (c *ContainerIntegrationTest) TestContainerListOperations(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if !found {
 				t.Logf("Warning: Created container %s not found in container list", vmID)
 				// This might be expected for some container runtimes
@@ -715,16 +717,16 @@ func BenchmarkContainerCreation(b *testing.B) {
 	}
 
 	ctx := context.Background()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		config := VMConfig{
-			ID:       fmt.Sprintf("bench-container-%d", i),
-			Name:     fmt.Sprintf("Benchmark Container %d", i),
+			ID:        fmt.Sprintf("bench-container-%d", i),
+			Name:      fmt.Sprintf("Benchmark Container %d", i),
 			CPUShares: 1,
-			MemoryMB: 64,
-			RootFS:   "alpine:latest",
-			Command:  "true", // Minimal command
+			MemoryMB:  64,
+			RootFS:    "alpine:latest",
+			Command:   "true", // Minimal command
 		}
 
 		vmID, err := containerTest.driver.Create(ctx, config)

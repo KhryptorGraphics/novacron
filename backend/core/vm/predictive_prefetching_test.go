@@ -1,3 +1,5 @@
+//go:build novacron_vm_distribution && novacron_vm_distribution_experimental
+
 package vm
 
 import (
@@ -45,7 +47,7 @@ func TestPredictivePrefetchingEngine_PredictMigrationAccess(t *testing.T) {
 
 	ctx := context.Background()
 	vmID := "test-vm-123"
-	
+
 	migrationSpec := &MigrationSpec{
 		Type:               MigrationTypeLive,
 		SourceNode:         "node-1",
@@ -251,7 +253,7 @@ func BenchmarkPredictivePrefetching_PredictAccess(b *testing.B) {
 
 	ctx := context.Background()
 	vmID := "benchmark-vm"
-	
+
 	migrationSpec := &MigrationSpec{
 		Type:               MigrationTypeLive,
 		SourceNode:         "node-1",

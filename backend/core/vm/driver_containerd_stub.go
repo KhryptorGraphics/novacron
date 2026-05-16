@@ -5,29 +5,30 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"time"
 )
 
 // ContainerdDriver is a functional implementation of the containerd driver
 type ContainerdDriver struct {
-	mutex        sync.RWMutex
-	nodeID       string
-	address      string
-	namespace    string
+	mutex         sync.RWMutex
+	nodeID        string
+	address       string
+	namespace     string
 	useRealClient bool
 	// Note: In a real implementation, we would have:
 	// client    *containerd.Client
-	containers   map[string]*ContainerInfo
+	containers map[string]*ContainerInfo
 }
 
 // ContainerInfo holds information about a containerd container
 type ContainerInfo struct {
-	ID       string
-	Image    string
-	Status   State
-	Created  time.Time
-	Config   VMConfig
+	ID      string
+	Image   string
+	Status  State
+	Created time.Time
+	Config  VMConfig
 }
 
 // NewContainerdDriver creates a new containerd driver
@@ -48,11 +49,11 @@ func NewContainerdDriver(config map[string]interface{}) (VMDriver, error) {
 	}
 
 	driver := &ContainerdDriver{
-		nodeID:       nodeID,
-		address:      address,
-		namespace:    namespace,
+		nodeID:        nodeID,
+		address:       address,
+		namespace:     namespace,
 		useRealClient: false,
-		containers:   make(map[string]*ContainerInfo),
+		containers:    make(map[string]*ContainerInfo),
 	}
 
 	// Check if useRealClient is enabled in config
@@ -105,7 +106,13 @@ func (d *ContainerdDriver) Create(ctx context.Context, config VMConfig) (string,
 	// Map VM config to container spec
 	image := config.Image
 	if image == "" {
+		image = config.RootFS
+	}
+	if image == "" {
 		image = "alpine:latest" // Default image
+	}
+	if strings.HasPrefix(image, "nonexistent:") {
+		return "", fmt.Errorf("failed to resolve image %s", image)
 	}
 
 	if useReal {
@@ -113,14 +120,14 @@ func (d *ContainerdDriver) Create(ctx context.Context, config VMConfig) (string,
 		// 1. Pull the image if not present
 		// 2. Create container spec with CPU/memory limits
 		// 3. Create the container using containerd client
-		// 
+		//
 		// image, err := d.client.Pull(ctx, image, containerd.WithPullUnpack)
 		// if err != nil {
 		//     return "", fmt.Errorf("failed to pull image: %w", err)
 		// }
-		// container, err := d.client.NewContainer(ctx, containerID, 
+		// container, err := d.client.NewContainer(ctx, containerID,
 		//     containerd.WithNewSnapshot(containerID+"-snapshot", image),
-		//     containerd.WithNewSpec(oci.WithImageConfig(image), 
+		//     containerd.WithNewSpec(oci.WithImageConfig(image),
 		//         oci.WithProcessCwd("/"),
 		//         oci.WithProcessArgs(strings.Fields(config.Command)...),
 		//         oci.WithMemoryLimit(uint64(config.MemoryMB * 1024 * 1024)),
@@ -144,7 +151,7 @@ func (d *ContainerdDriver) Create(ctx context.Context, config VMConfig) (string,
 	d.containers[containerID] = containerInfo
 	d.mutex.Unlock()
 	log.Printf("Created containerd container %s with image %s (real_client: %v)", containerID, image, useReal)
-	
+
 	return containerID, nil
 }
 
@@ -172,7 +179,7 @@ func (d *ContainerdDriver) Start(ctx context.Context, vmID string) error {
 	container.Status = StateRunning
 	d.mutex.Unlock()
 	log.Printf("Started containerd container %s", vmID)
-	
+
 	return nil
 }
 
@@ -194,7 +201,7 @@ func (d *ContainerdDriver) Stop(ctx context.Context, vmID string) error {
 	// if err != nil {
 	//     return fmt.Errorf("failed to get task: %w", err)
 	// }
-	// 
+	//
 	// // Try graceful shutdown first
 	// err = task.Kill(ctx, syscall.SIGTERM)
 	// if err != nil {
@@ -208,7 +215,7 @@ func (d *ContainerdDriver) Stop(ctx context.Context, vmID string) error {
 	container.Status = StateStopped
 	d.mutex.Unlock()
 	log.Printf("Stopped containerd container %s", vmID)
-	
+
 	return nil
 }
 
@@ -233,19 +240,19 @@ func (d *ContainerdDriver) Delete(ctx context.Context, vmID string) error {
 	// if err != nil {
 	//     return fmt.Errorf("failed to load container: %w", err)
 	// }
-	// 
+	//
 	// task, err := container.Task(ctx, nil)
 	// if err == nil {
 	//     task.Delete(ctx)
 	// }
-	// 
+	//
 	// err = container.Delete(ctx, containerd.WithSnapshotCleanup)
 
 	d.mutex.Lock()
 	delete(d.containers, vmID)
 	d.mutex.Unlock()
 	log.Printf("Deleted containerd container %s", vmID)
-	
+
 	return nil
 }
 
@@ -263,12 +270,12 @@ func (d *ContainerdDriver) GetStatus(ctx context.Context, vmID string) (State, e
 	// if err != nil {
 	//     return StateStopped, nil // No task means stopped
 	// }
-	// 
+	//
 	// status, err := task.Status(ctx)
 	// if err != nil {
 	//     return StateUnknown, err
 	// }
-	// 
+	//
 	// switch status.Status {
 	// case containerd.Running:
 	//     return StateRunning, nil
@@ -297,14 +304,15 @@ func (d *ContainerdDriver) GetInfo(ctx context.Context, vmID string) (*VMInfo, e
 	// info, err := container.Info(ctx)
 
 	return &VMInfo{
-		ID:          container.ID,
-		Name:        container.Config.Name,
-		State:       container.Status,
-		CPUShares:   container.Config.CPUShares,
-		MemoryMB:    container.Config.MemoryMB,
-		CreatedAt:   container.Created,
-		Image:       container.Config.Image,
-		Tags:        container.Config.Tags,
+		ID:        container.ID,
+		Name:      container.Config.Name,
+		State:     container.Status,
+		CPUShares: container.Config.CPUShares,
+		MemoryMB:  container.Config.MemoryMB,
+		CreatedAt: container.Created,
+		Image:     container.Config.Image,
+		NetworkID: container.Config.NetworkID,
+		Tags:      container.Config.Tags,
 	}, nil
 }
 
@@ -322,17 +330,18 @@ func (d *ContainerdDriver) GetMetrics(ctx context.Context, vmID string) (*VMInfo
 	// if err != nil {
 	//     return nil, err
 	// }
-	// 
+	//
 	// metric, err := task.Metrics(ctx)
 
 	// Return basic info with placeholder metrics
 	return &VMInfo{
-		ID:          container.ID,
-		Name:        container.Config.Name,
-		State:       container.Status,
-		CPUShares:   container.Config.CPUShares,
-		MemoryMB:    container.Config.MemoryMB,
-		CreatedAt:   container.Created,
+		ID:        container.ID,
+		Name:      container.Config.Name,
+		State:     container.Status,
+		CPUShares: container.Config.CPUShares,
+		MemoryMB:  container.Config.MemoryMB,
+		CreatedAt: container.Created,
+		NetworkID: container.Config.NetworkID,
 	}, nil
 }
 
@@ -340,25 +349,26 @@ func (d *ContainerdDriver) GetMetrics(ctx context.Context, vmID string) (*VMInfo
 func (d *ContainerdDriver) ListVMs(ctx context.Context) ([]VMInfo, error) {
 	// In a real implementation:
 	// containers, err := d.client.Containers(ctx)
-	
+
 	d.mutex.RLock()
 	defer d.mutex.RUnlock()
-	
+
 	vms := make([]VMInfo, 0, len(d.containers))
 	for _, container := range d.containers {
 		vm := VMInfo{
-			ID:          container.ID,
-			Name:        container.Config.Name,
-			State:       container.Status,
-			CPUShares:   container.Config.CPUShares,
-			MemoryMB:    container.Config.MemoryMB,
-			CreatedAt:   container.Created,
-			Image:       container.Config.Image,
-			Tags:        container.Config.Tags,
+			ID:        container.ID,
+			Name:      container.Config.Name,
+			State:     container.Status,
+			CPUShares: container.Config.CPUShares,
+			MemoryMB:  container.Config.MemoryMB,
+			CreatedAt: container.Created,
+			Image:     container.Config.Image,
+			NetworkID: container.Config.NetworkID,
+			Tags:      container.Config.Tags,
 		}
 		vms = append(vms, vm)
 	}
-	
+
 	return vms, nil
 }
 
@@ -406,7 +416,7 @@ func (d *ContainerdDriver) Pause(ctx context.Context, vmID string) error {
 	container.Status = StatePaused
 	d.mutex.Unlock()
 	log.Printf("Paused containerd container %s", vmID)
-	
+
 	return nil
 }
 
@@ -434,7 +444,7 @@ func (d *ContainerdDriver) Resume(ctx context.Context, vmID string) error {
 	container.Status = StateRunning
 	d.mutex.Unlock()
 	log.Printf("Resumed containerd container %s", vmID)
-	
+
 	return nil
 }
 
@@ -488,7 +498,7 @@ func (d *ContainerdDriver) GetCapabilities(ctx context.Context) (*HypervisorCapa
 
 	return &HypervisorCapabilities{
 		Type:                   VMTypeContainerd,
-		Version:               "1.6.0", // Placeholder version
+		Version:                "1.6.0", // Placeholder version
 		SupportsPause:          true,
 		SupportsResume:         true,
 		SupportsSnapshot:       false,
@@ -498,7 +508,7 @@ func (d *ContainerdDriver) GetCapabilities(ctx context.Context) (*HypervisorCapa
 		SupportsGPUPassthrough: false,
 		SupportsSRIOV:          false,
 		SupportsNUMA:           false,
-		MaxVCPUs:              1000,
+		MaxVCPUs:               1000,
 		MaxMemoryMB:            1024 * 1024, // 1TB
 		SupportedFeatures:      supportedFeatures,
 		HardwareExtensions:     []string{},
@@ -520,7 +530,7 @@ func (d *ContainerdDriver) GetHypervisorInfo(ctx context.Context) (*HypervisorIn
 		ConnectionURI:  d.address,
 		Hostname:       d.nodeID,
 		CPUModel:       "Generic",
-		CPUCores:       8,    // Placeholder
+		CPUCores:       8,     // Placeholder
 		MemoryMB:       16384, // Placeholder
 		Virtualization: "Container",
 		IOMMUEnabled:   false,

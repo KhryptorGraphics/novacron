@@ -7,26 +7,24 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 )
 
 // KVMIntegrationTest provides comprehensive testing for KVM/QEMU hypervisor
 type KVMIntegrationTest struct {
-	driver       VMDriver
-	tempDir      string
-	qemuPath     string
-	hasQEMU      bool
-	hasKVM       bool
+	driver        VMDriver
+	tempDir       string
+	qemuPath      string
+	hasQEMU       bool
+	hasKVM        bool
 	testImagePath string
 }
 
 // NewKVMIntegrationTest creates a new KVM integration test suite
 func NewKVMIntegrationTest(t *testing.T) *KVMIntegrationTest {
 	test := &KVMIntegrationTest{}
-	
+
 	// Create temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "novacron-kvm-test-*")
 	if err != nil {
@@ -36,7 +34,7 @@ func NewKVMIntegrationTest(t *testing.T) *KVMIntegrationTest {
 
 	// Check for QEMU availability
 	test.qemuPath, test.hasQEMU = test.findQEMUBinary()
-	
+
 	// Check for KVM availability
 	test.hasKVM = test.checkKVMAvailability()
 
@@ -46,7 +44,7 @@ func NewKVMIntegrationTest(t *testing.T) *KVMIntegrationTest {
 			"qemu_path": test.qemuPath,
 			"vm_path":   filepath.Join(tempDir, "vms"),
 		}
-		
+
 		driver, err := NewKVMDriver(config)
 		if err != nil {
 			t.Logf("Warning: Failed to create KVM driver: %v", err)
@@ -67,7 +65,7 @@ func (k *KVMIntegrationTest) findQEMUBinary() (string, bool) {
 		"/usr/bin/qemu-system-x86_64",
 		"/usr/local/bin/qemu-system-x86_64",
 		"/opt/homebrew/bin/qemu-system-x86_64", // macOS with Homebrew
-		"qemu-system-x86_64", // PATH lookup
+		"qemu-system-x86_64",                   // PATH lookup
 	}
 
 	for _, path := range candidates {
@@ -101,7 +99,7 @@ func (k *KVMIntegrationTest) checkKVMAvailability() bool {
 // createTestImage creates a minimal test disk image
 func (k *KVMIntegrationTest) createTestImage(t *testing.T) string {
 	imagePath := filepath.Join(k.tempDir, "test-image.qcow2")
-	
+
 	// Create a small test image (64MB)
 	cmd := exec.Command("qemu-img", "create", "-f", "qcow2", imagePath, "64M")
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -163,11 +161,11 @@ func (k *KVMIntegrationTest) TestQMPProtocol(t *testing.T) {
 		// This would test QMP socket connection
 		// For now, we'll test that the monitor socket path is created
 		config := VMConfig{
-			ID:       "qmp-test-vm",
-			Name:     "QMP Test VM",
+			ID:        "qmp-test-vm",
+			Name:      "QMP Test VM",
 			CPUShares: 1,
-			MemoryMB: 128,
-			RootFS:   k.testImagePath,
+			MemoryMB:  128,
+			RootFS:    k.testImagePath,
 		}
 
 		if config.RootFS == "" {
@@ -184,7 +182,7 @@ func (k *KVMIntegrationTest) TestQMPProtocol(t *testing.T) {
 		// Check that monitor socket path exists in VM directory
 		vmDir := filepath.Join(k.tempDir, "vms", vmID)
 		monitorPath := filepath.Join(vmDir, "monitor.sock")
-		
+
 		// The socket won't exist until VM is started, but directory should exist
 		if _, err := os.Stat(vmDir); err != nil {
 			t.Errorf("VM directory should exist: %v", err)
@@ -206,12 +204,12 @@ func (k *KVMIntegrationTest) TestKVMVMLifecycle(t *testing.T) {
 
 	ctx := context.Background()
 	config := VMConfig{
-		ID:       "lifecycle-test-vm",
-		Name:     "Lifecycle Test VM",
+		ID:        "lifecycle-test-vm",
+		Name:      "Lifecycle Test VM",
 		CPUShares: 1,
-		MemoryMB: 256,
-		RootFS:   k.testImagePath,
-		Tags:     map[string]string{"test": "lifecycle"},
+		MemoryMB:  256,
+		RootFS:    k.testImagePath,
+		Tags:      map[string]string{"test": "lifecycle"},
 	}
 
 	t.Run("CreateAndDelete", func(t *testing.T) {
@@ -268,18 +266,18 @@ func (k *KVMIntegrationTest) TestKVMResourceManagement(t *testing.T) {
 	t.Run("ResourceAllocation", func(t *testing.T) {
 		configs := []VMConfig{
 			{
-				ID:       "resource-test-vm-1",
-				Name:     "Small VM",
+				ID:        "resource-test-vm-1",
+				Name:      "Small VM",
 				CPUShares: 1,
-				MemoryMB: 128,
-				RootFS:   k.testImagePath,
+				MemoryMB:  128,
+				RootFS:    k.testImagePath,
 			},
 			{
-				ID:       "resource-test-vm-2", 
-				Name:     "Medium VM",
+				ID:        "resource-test-vm-2",
+				Name:      "Medium VM",
 				CPUShares: 2,
-				MemoryMB: 512,
-				RootFS:   k.testImagePath,
+				MemoryMB:  512,
+				RootFS:    k.testImagePath,
 			},
 		}
 
@@ -351,20 +349,20 @@ func (k *KVMIntegrationTest) TestKVMDiskOperations(t *testing.T) {
 			t.Logf("Could not get disk info: %v", err)
 		} else {
 			var info struct {
-				VirtualSize int64 `json:"virtual-size"`
+				VirtualSize int64  `json:"virtual-size"`
 				Format      string `json:"format"`
 			}
-			
+
 			if err := json.Unmarshal(output, &info); err == nil {
 				expectedSize := int64(config.MemoryMB * 10 * 1024 * 1024) // 10x memory in bytes
 				if config.MemoryMB == 0 {
 					expectedSize = 8192 * 1024 * 1024 // Default 8GB
 				}
-				
+
 				if info.VirtualSize != expectedSize {
 					t.Logf("Disk size: expected %d bytes, got %d bytes", expectedSize, info.VirtualSize)
 				}
-				
+
 				if info.Format != "qcow2" {
 					t.Errorf("Expected qcow2 format, got %s", info.Format)
 				}
@@ -425,14 +423,14 @@ func (k *KVMIntegrationTest) TestKVMPerformanceBenchmarks(t *testing.T) {
 	t.Run("VMCreationBenchmark", func(t *testing.T) {
 		const numVMs = 5
 		configs := make([]VMConfig, numVMs)
-		
+
 		for i := 0; i < numVMs; i++ {
 			configs[i] = VMConfig{
-				ID:       fmt.Sprintf("bench-vm-%d", i),
-				Name:     fmt.Sprintf("Benchmark VM %d", i),
+				ID:        fmt.Sprintf("bench-vm-%d", i),
+				Name:      fmt.Sprintf("Benchmark VM %d", i),
 				CPUShares: 1,
-				MemoryMB: 256,
-				RootFS:   k.testImagePath,
+				MemoryMB:  256,
+				RootFS:    k.testImagePath,
 			}
 		}
 
@@ -470,11 +468,11 @@ func (k *KVMIntegrationTest) TestKVMErrorRecovery(t *testing.T) {
 
 	t.Run("InvalidDiskPath", func(t *testing.T) {
 		config := VMConfig{
-			ID:       "error-test-vm",
-			Name:     "Error Test VM",
+			ID:        "error-test-vm",
+			Name:      "Error Test VM",
 			CPUShares: 1,
-			MemoryMB: 256,
-			RootFS:   "/nonexistent/disk.qcow2",
+			MemoryMB:  256,
+			RootFS:    "/nonexistent/disk.qcow2",
 		}
 
 		vmID, err := k.driver.Create(ctx, config)
@@ -495,10 +493,10 @@ func (k *KVMIntegrationTest) TestKVMErrorRecovery(t *testing.T) {
 
 	t.Run("ExcessiveMemory", func(t *testing.T) {
 		config := VMConfig{
-			ID:       "memory-test-vm",
-			Name:     "Memory Test VM", 
+			ID:        "memory-test-vm",
+			Name:      "Memory Test VM",
 			CPUShares: 1,
-			MemoryMB: 1024 * 1024, // 1TB - should be rejected or cause issues
+			MemoryMB:  1024 * 1024, // 1TB - should be rejected or cause issues
 		}
 
 		_, err := k.driver.Create(ctx, config)
@@ -528,11 +526,11 @@ func (k *KVMIntegrationTest) TestKVMSnapshot(t *testing.T) {
 
 	ctx := context.Background()
 	config := VMConfig{
-		ID:       "snapshot-test-vm",
-		Name:     "Snapshot Test VM",
+		ID:        "snapshot-test-vm",
+		Name:      "Snapshot Test VM",
 		CPUShares: 1,
-		MemoryMB: 256,
-		RootFS:   k.testImagePath,
+		MemoryMB:  256,
+		RootFS:    k.testImagePath,
 	}
 
 	t.Run("SnapshotCreation", func(t *testing.T) {
@@ -595,14 +593,14 @@ func BenchmarkKVMVMCreation(b *testing.B) {
 	}
 
 	ctx := context.Background()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		config := VMConfig{
-			ID:       fmt.Sprintf("bench-vm-%d", i),
-			Name:     fmt.Sprintf("Benchmark VM %d", i),
+			ID:        fmt.Sprintf("bench-vm-%d", i),
+			Name:      fmt.Sprintf("Benchmark VM %d", i),
 			CPUShares: 1,
-			MemoryMB: 256,
+			MemoryMB:  256,
 		}
 
 		vmID, err := kvmTest.driver.Create(ctx, config)

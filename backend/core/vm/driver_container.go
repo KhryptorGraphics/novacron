@@ -33,7 +33,7 @@ func (d *ContainerDriver) Create(ctx context.Context, config VMConfig) (string, 
 	log.Printf("Creating container VM %s", config.Name)
 
 	// Generate a container name based on VM config
-	containerName := fmt.Sprintf("novacron-%s-%s", config.Name, strconv.FormatInt(time.Now().UnixNano(), 16))
+	containerName := fmt.Sprintf("novacron-%s-%s", sanitizeContainerName(config.Name), strconv.FormatInt(time.Now().UnixNano(), 16))
 
 	// Build the docker command to create a container
 	args := []string{
@@ -94,6 +94,30 @@ func (d *ContainerDriver) Create(ctx context.Context, config VMConfig) (string, 
 
 	// Return the container ID as the VM ID
 	return containerName, nil
+}
+
+func sanitizeContainerName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	var builder strings.Builder
+	lastWasSeparator := false
+	for _, r := range name {
+		isAllowed := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '.' || r == '-'
+		if isAllowed {
+			builder.WriteRune(r)
+			lastWasSeparator = false
+			continue
+		}
+		if !lastWasSeparator {
+			builder.WriteByte('-')
+			lastWasSeparator = true
+		}
+	}
+
+	sanitized := strings.Trim(builder.String(), "-_.")
+	if sanitized == "" {
+		return "vm"
+	}
+	return sanitized
 }
 
 // Start starts a container VM
@@ -396,20 +420,20 @@ func (d *ContainerDriver) SupportsNUMA() bool {
 func (d *ContainerDriver) GetCapabilities(ctx context.Context) (*HypervisorCapabilities, error) {
 	return &HypervisorCapabilities{
 		Type:                   VMTypeContainer,
-		Version:               "1.0.0",
-		SupportsPause:         d.SupportsPause(),
-		SupportsResume:        d.SupportsResume(),
-		SupportsSnapshot:      d.SupportsSnapshot(),
-		SupportsMigrate:       d.SupportsMigrate(),
-		SupportsLiveMigration: d.SupportsLiveMigration(),
-		SupportsHotPlug:       d.SupportsHotPlug(),
+		Version:                "1.0.0",
+		SupportsPause:          d.SupportsPause(),
+		SupportsResume:         d.SupportsResume(),
+		SupportsSnapshot:       d.SupportsSnapshot(),
+		SupportsMigrate:        d.SupportsMigrate(),
+		SupportsLiveMigration:  d.SupportsLiveMigration(),
+		SupportsHotPlug:        d.SupportsHotPlug(),
 		SupportsGPUPassthrough: d.SupportsGPUPassthrough(),
-		SupportsSRIOV:         d.SupportsSRIOV(),
-		SupportsNUMA:          d.SupportsNUMA(),
-		MaxVCPUs:              1024,
-		MaxMemoryMB:           1024 * 1024, // 1TB
-		SupportedFeatures:     []string{"containers", "docker"},
-		HardwareExtensions:    []string{},
+		SupportsSRIOV:          d.SupportsSRIOV(),
+		SupportsNUMA:           d.SupportsNUMA(),
+		MaxVCPUs:               1024,
+		MaxMemoryMB:            1024 * 1024, // 1TB
+		SupportedFeatures:      []string{"containers", "docker"},
+		HardwareExtensions:     []string{},
 	}, nil
 }
 
@@ -421,22 +445,22 @@ func (d *ContainerDriver) GetHypervisorInfo(ctx context.Context) (*HypervisorInf
 	}
 
 	return &HypervisorInfo{
-		Type:            VMTypeContainer,
-		Version:         "Docker",
-		ConnectionURI:   "unix:///var/run/docker.sock",
-		Hostname:        "localhost",
-		CPUModel:        "Container",
-		CPUCores:        8,  // Default
-		MemoryMB:        8192, // Default 8GB
-		Virtualization:  "Container",
-		IOMMUEnabled:    false,
-		NUMANodes:       1,
-		GPUDevices:      []GPUDevice{},
-		NetworkDevices:  []NetworkDevice{},
-		StorageDevices:  []StorageDevice{},
-		ActiveVMs:       0,
-		Capabilities:    capabilities,
-		Metadata:        map[string]interface{}{
+		Type:           VMTypeContainer,
+		Version:        "Docker",
+		ConnectionURI:  "unix:///var/run/docker.sock",
+		Hostname:       "localhost",
+		CPUModel:       "Container",
+		CPUCores:       8,    // Default
+		MemoryMB:       8192, // Default 8GB
+		Virtualization: "Container",
+		IOMMUEnabled:   false,
+		NUMANodes:      1,
+		GPUDevices:     []GPUDevice{},
+		NetworkDevices: []NetworkDevice{},
+		StorageDevices: []StorageDevice{},
+		ActiveVMs:      0,
+		Capabilities:   capabilities,
+		Metadata: map[string]interface{}{
 			"runtime": "docker",
 			"driver":  "container",
 		},

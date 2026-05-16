@@ -1,3 +1,5 @@
+//go:build integration
+
 package vm
 
 import (
@@ -10,11 +12,11 @@ import (
 
 // MultiHypervisorTest provides comprehensive testing for multi-hypervisor scenarios
 type MultiHypervisorTest struct {
-	drivers        map[VMType]VMDriver
-	mockDrivers    map[string]*MockHypervisor
-	driverManager  *VMDriverManager
-	testResults    map[string]*HypervisorTestResults
-	mu             sync.RWMutex
+	drivers       map[VMType]VMDriver
+	mockDrivers   map[string]*MockHypervisor
+	driverManager *VMDriverManager
+	testResults   map[string]*HypervisorTestResults
+	mu            sync.RWMutex
 }
 
 // HypervisorTestResults stores test results for a hypervisor
@@ -63,7 +65,7 @@ func (m *MultiHypervisorTest) initializeMockHypervisors() {
 	perfMock := NewMockHypervisor("test-node-2", "mock-performance")
 	perfMock.Configure(
 		MockFailureConfig{}, // No failures
-		MockLatencyConfig{   // Fast operations
+		MockLatencyConfig{ // Fast operations
 			CreateLatency: 50 * time.Millisecond,
 			StartLatency:  500 * time.Millisecond,
 			StopLatency:   200 * time.Millisecond,
@@ -74,9 +76,9 @@ func (m *MultiHypervisorTest) initializeMockHypervisors() {
 			SupportsResume:   true,
 			SupportsSnapshot: true,
 			SupportsMigrate:  true,
-			MaxVMs:          1000,
-			MaxCPUPerVM:     64,
-			MaxMemoryPerVM:  128 * 1024, // 128GB
+			MaxVMs:           1000,
+			MaxCPUPerVM:      64,
+			MaxMemoryPerVM:   128 * 1024, // 128GB
 		},
 	)
 	m.mockDrivers["mock-performance"] = perfMock
@@ -108,9 +110,9 @@ func (m *MultiHypervisorTest) initializeMockHypervisors() {
 			SupportsResume:   true,
 			SupportsSnapshot: false, // Limited capabilities
 			SupportsMigrate:  false,
-			MaxVMs:          50,
-			MaxCPUPerVM:     8,
-			MaxMemoryPerVM:  32 * 1024, // 32GB
+			MaxVMs:           50,
+			MaxCPUPerVM:      8,
+			MaxMemoryPerVM:   32 * 1024, // 32GB
 		},
 	)
 	m.mockDrivers["mock-unreliable"] = unreliableMock
@@ -239,9 +241,9 @@ func (m *MultiHypervisorTest) TestResourceIsolation(t *testing.T) {
 
 	t.Run("ResourceLimits", func(t *testing.T) {
 		resourceConfigs := []struct {
-			name     string
+			name      string
 			cpuShares int
-			memoryMB int
+			memoryMB  int
 		}{
 			{"low-resource", 1, 128},
 			{"medium-resource", 2, 512},
@@ -451,7 +453,7 @@ func (m *MultiHypervisorTest) TestPerformanceComparison(t *testing.T) {
 					result.AvgCreationTime = totalCreationTime / time.Duration(successfulOps)
 					result.AvgStartTime = totalStartTime / time.Duration(successfulOps)
 					result.AvgStopTime = totalStopTime / time.Duration(successfulOps)
-					
+
 					// Calculate performance score (lower is better)
 					result.PerformanceScore = float64(totalCreationTime+totalStartTime+totalStopTime) / float64(successfulOps) / float64(time.Millisecond)
 
@@ -508,7 +510,7 @@ func (m *MultiHypervisorTest) TestErrorHandlingConsistency(t *testing.T) {
 			t.Run(scenario.name, func(t *testing.T) {
 				for driverType, driver := range m.drivers {
 					err := scenario.testFunc(driver)
-					
+
 					if scenario.expectError && err == nil {
 						t.Errorf("Driver %s: expected error for %s but got none", driverType, scenario.name)
 					} else if !scenario.expectError && err != nil {
@@ -526,8 +528,8 @@ func (m *MultiHypervisorTest) TestFeatureParity(t *testing.T) {
 
 	t.Run("FeatureParity", func(t *testing.T) {
 		features := []struct {
-			name     string
-			testFunc func(driver VMDriver, vmID string) error
+			name      string
+			testFunc  func(driver VMDriver, vmID string) error
 			checkFunc func(driver VMDriver) bool
 		}{
 			{
@@ -540,7 +542,7 @@ func (m *MultiHypervisorTest) TestFeatureParity(t *testing.T) {
 				},
 			},
 			{
-				name: "Resume", 
+				name: "Resume",
 				testFunc: func(driver VMDriver, vmID string) error {
 					return driver.Resume(ctx, vmID)
 				},
@@ -563,7 +565,7 @@ func (m *MultiHypervisorTest) TestFeatureParity(t *testing.T) {
 		for _, feature := range features {
 			t.Run(feature.name, func(t *testing.T) {
 				supportingDrivers := make(map[VMType]bool)
-				
+
 				for driverType, driver := range m.drivers {
 					if feature.checkFunc(driver) {
 						supportingDrivers[driverType] = true
@@ -573,7 +575,7 @@ func (m *MultiHypervisorTest) TestFeatureParity(t *testing.T) {
 					}
 				}
 
-				t.Logf("Feature %s supported by %d/%d drivers", 
+				t.Logf("Feature %s supported by %d/%d drivers",
 					feature.name, len(supportingDrivers), len(m.drivers))
 			})
 		}
@@ -666,7 +668,7 @@ func BenchmarkMultiHypervisorComparison(b *testing.B) {
 	for driverType, driver := range multiTest.drivers {
 		b.Run(fmt.Sprintf("Driver-%s", driverType), func(b *testing.B) {
 			b.ResetTimer()
-			
+
 			for i := 0; i < b.N; i++ {
 				config := VMConfig{
 					ID:        fmt.Sprintf("bench-multi-%s-%d", driverType, i),

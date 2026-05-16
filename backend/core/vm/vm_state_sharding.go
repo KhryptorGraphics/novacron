@@ -1,4 +1,4 @@
-//go:build novacron_vm_distribution
+//go:build novacron_vm_distribution && novacron_vm_distribution_experimental
 
 // Package vm provides virtual machine management with distributed state sharding
 package vm
@@ -50,13 +50,13 @@ type VMStateShard struct {
 
 // DistributedVMState stores VM state fragments across nodes
 type DistributedVMState struct {
-	MemoryPages    map[uint64]*MemoryPage
-	DiskBlocks     map[uint64]*DiskBlock
-	NetworkState   *NetworkState
-	Configuration  *VMConfiguration
-	Checkpoints    []*StateCheckpoint
-	Metadata       StateMetadata
-	AccessPattern  *AccessPattern
+	MemoryPages   map[uint64]*MemoryPage
+	DiskBlocks    map[uint64]*DiskBlock
+	NetworkState  *NetworkState
+	Configuration *VMConfiguration
+	Checkpoints   []*StateCheckpoint
+	Metadata      StateMetadata
+	AccessPattern *AccessPattern
 }
 
 // ShardStatus represents the status of a shard
@@ -572,13 +572,13 @@ func (sm *VMStateShardingManager) fetchRemoteState(ctx context.Context, vmID, no
 func (sm *VMStateShardingManager) replicateUpdate(ctx context.Context, shard *VMStateShard) error {
 	// Create incremental update message with full vector clock and version
 	updateMsg := &ShardUpdateMessage{
-		ShardID:      shard.ShardID,
-		Version:      shard.Version,
-		VectorClock:  shard.VectorClock,
-		SourceNode:   sm.localNodeID,
-		Timestamp:    time.Now(),
-		UpdateType:   "incremental",
-		Data:         shard.Data, // Include data for conflict resolution
+		ShardID:     shard.ShardID,
+		Version:     shard.Version,
+		VectorClock: shard.VectorClock,
+		SourceNode:  sm.localNodeID,
+		Timestamp:   time.Now(),
+		UpdateType:  "incremental",
+		Data:        shard.Data, // Include data for conflict resolution
 	}
 
 	// Replicate to all replica nodes with retries
@@ -724,8 +724,8 @@ type DiskBlock struct {
 }
 
 type NetworkState struct {
-	Interfaces []NetworkInterface
-	Routes     []Route
+	Interfaces  []NetworkInterface
+	Routes      []Route
 	Connections []Connection
 }
 
@@ -1420,10 +1420,10 @@ type Route struct {
 }
 
 type Connection struct {
-	Protocol string
-	LocalAddr string
+	Protocol   string
+	LocalAddr  string
 	RemoteAddr string
-	State    string
+	State      string
 }
 
 type DiskConfig struct {
@@ -1512,13 +1512,13 @@ func (sm *VMStateShardingManager) updateRingMembership(currentNodes []string) {
 // Additional types for replication and migration
 
 type ShardUpdateMessage struct {
-	ShardID      string
-	Version      uint64
-	VectorClock  map[string]uint64
-	SourceNode   string
-	Timestamp    time.Time
-	UpdateType   string
-	Payload      interface{}
+	ShardID     string
+	Version     uint64
+	VectorClock map[string]uint64
+	SourceNode  string
+	Timestamp   time.Time
+	UpdateType  string
+	Payload     interface{}
 }
 
 type OwnershipChangeMessage struct {

@@ -1,4 +1,4 @@
-//go:build novacron_vm_distribution
+//go:build novacron_vm_distribution && novacron_vm_distribution_experimental
 
 package vm
 
@@ -15,8 +15,8 @@ import (
 
 // PredictivePrefetchingEngine uses AI to predict and pre-load data for migrations
 type PredictivePrefetchingEngine struct {
-	logger                *logrus.Logger
-	nodeID                string
+	logger               *logrus.Logger
+	nodeID               string
 	aiModel              *MigrationAIModel
 	cacheManager         *PredictiveCache
 	accessPatternTracker *AccessPatternTracker
@@ -34,16 +34,16 @@ type PredictivePrefetchingEngine struct {
 
 // MigrationAIModel implements AI-driven migration prediction
 type MigrationAIModel struct {
-	ModelType            AIModelType
-	ModelVersion         string
-	TrainingDataSize     int64
-	AccuracyScore        float64
-	PredictionLatency    time.Duration
-	NeuralNetwork        *NeuralNetwork
-	FeatureExtractor     *FeatureExtractor
-	PredictionCache      map[string]*PredictionResult
-	LastTrainingTime     time.Time
-	mu                   sync.RWMutex
+	ModelType         AIModelType
+	ModelVersion      string
+	TrainingDataSize  int64
+	AccuracyScore     float64
+	PredictionLatency time.Duration
+	NeuralNetwork     *NeuralNetwork
+	FeatureExtractor  *FeatureExtractor
+	PredictionCache   map[string]*PredictionResult
+	LastTrainingTime  time.Time
+	mu                sync.RWMutex
 }
 
 // AIModelType represents different types of AI models used
@@ -59,86 +59,86 @@ const (
 
 // PredictiveCache manages intelligent caching based on AI predictions
 type PredictiveCache struct {
-	CacheSize           int64
-	CurrentUsage        int64
-	HitRatio            float64
-	MissRatio           float64
-	PredictedEntries    map[string]*CacheEntry
-	AccessFrequency     map[string]int64
-	PredictionScores    map[string]float64
-	EvictionPolicy      EvictionPolicy
-	CacheMetrics        *CacheMetrics
-	mu                  sync.RWMutex
+	CacheSize        int64
+	CurrentUsage     int64
+	HitRatio         float64
+	MissRatio        float64
+	PredictedEntries map[string]*CacheEntry
+	AccessFrequency  map[string]int64
+	PredictionScores map[string]float64
+	EvictionPolicy   EvictionPolicy
+	CacheMetrics     *CacheMetrics
+	mu               sync.RWMutex
 }
 
 // AccessPatternTracker analyzes and learns from VM access patterns
 type AccessPatternTracker struct {
-	PatternHistory      map[string]*AccessPattern
-	SeasonalPatterns    map[string]*SeasonalPattern
-	TrendAnalysis       *TrendAnalysis
-	AnomalyDetector     *AnomalyDetector
-	PatternMetrics      *PatternMetrics
-	CollectionInterval  time.Duration
-	RetentionPeriod     time.Duration
-	mu                  sync.RWMutex
+	PatternHistory     map[string]*AccessPattern
+	SeasonalPatterns   map[string]*SeasonalPattern
+	TrendAnalysis      *TrendAnalysis
+	AnomalyDetector    *AnomalyDetector
+	PatternMetrics     *PatternMetrics
+	CollectionInterval time.Duration
+	RetentionPeriod    time.Duration
+	mu                 sync.RWMutex
 }
 
 // PrefetchingMetrics tracks performance of predictive prefetching
 type PrefetchingMetrics struct {
-	TotalPredictions        int64
-	SuccessfulPredictions   int64
-	FalsePositives          int64
-	FalseNegatives          int64
-	AveragePredictionTime   time.Duration
-	CacheHitRatioImprovement float64
+	TotalPredictions          int64
+	SuccessfulPredictions     int64
+	FalsePositives            int64
+	FalseNegatives            int64
+	AveragePredictionTime     time.Duration
+	CacheHitRatioImprovement  float64
 	MigrationSpeedImprovement float64
-	BandwidthSaved          int64
-	PredictionAccuracy      float64
-	ModelPerformance        map[string]float64
+	BandwidthSaved            int64
+	PredictionAccuracy        float64
+	ModelPerformance          map[string]float64
 }
 
 // Supporting types for AI model
 
 // NeuralNetwork represents the neural network for migration prediction
 type NeuralNetwork struct {
-	Layers          []*NetworkLayer
-	Weights         [][]float64
-	Biases          [][]float64
-	ActivationFunc  ActivationFunction
-	LossFunction    LossFunction
-	Optimizer       Optimizer
-	LearningRate    float64
-	BatchSize       int
-	Epochs          int
+	Layers         []*NetworkLayer
+	Weights        [][]float64
+	Biases         [][]float64
+	ActivationFunc ActivationFunction
+	LossFunction   LossFunction
+	Optimizer      Optimizer
+	LearningRate   float64
+	BatchSize      int
+	Epochs         int
 }
 
 // NetworkLayer represents a layer in the neural network
 type NetworkLayer struct {
-	Type        LayerType
-	Size        int
-	Activation  ActivationFunction
-	Weights     [][]float64
-	Biases      []float64
-	Dropout     float64
+	Type       LayerType
+	Size       int
+	Activation ActivationFunction
+	Weights    [][]float64
+	Biases     []float64
+	Dropout    float64
 }
 
 // FeatureExtractor extracts features from VM and migration data
 type FeatureExtractor struct {
-	Features            []Feature
-	NormalizationParams map[string]*NormalizationParam
-	FeatureImportance   map[string]float64
+	Features              []Feature
+	NormalizationParams   map[string]*NormalizationParam
+	FeatureImportance     map[string]float64
 	DimensionalityReducer *PCAReducer
 }
 
 // PredictionResult contains AI model prediction results
 type PredictionResult struct {
-	PredictionID    string
-	VMData          *VMDataFeatures
-	PredictedAccess []*AccessPrediction
-	Confidence      float64
-	ModelUsed       string
-	PredictionTime  time.Time
-	ExpiresAt       time.Time
+	PredictionID     string
+	VMData           *VMDataFeatures
+	PredictedAccess  []*AccessPrediction
+	Confidence       float64
+	ModelUsed        string
+	PredictionTime   time.Time
+	ExpiresAt        time.Time
 	ValidationResult *ValidationResult
 }
 
@@ -158,26 +158,26 @@ type VMDataFeatures struct {
 
 // AccessPattern represents learned access patterns
 type AccessPattern struct {
-	PatternID      string
-	VMCategory     string
-	Frequency      map[time.Duration]float64
-	MemoryRegions  []MemoryRegion
-	DiskSectors    []DiskSector
-	Seasonality    *SeasonalityInfo
-	Confidence     float64
-	LastUpdated    time.Time
+	PatternID     string
+	VMCategory    string
+	Frequency     map[time.Duration]float64
+	MemoryRegions []MemoryRegion
+	DiskSectors   []DiskSector
+	Seasonality   *SeasonalityInfo
+	Confidence    float64
+	LastUpdated   time.Time
 }
 
 // CacheEntry represents an entry in the predictive cache
 type CacheEntry struct {
-	Key            string
-	Data           []byte
-	PredictionScore float64
-	AccessCount    int64
-	LastAccess     time.Time
-	CreatedAt      time.Time
-	ExpiresAt      time.Time
-	Size           int64
+	Key              string
+	Data             []byte
+	PredictionScore  float64
+	AccessCount      int64
+	LastAccess       time.Time
+	CreatedAt        time.Time
+	ExpiresAt        time.Time
+	Size             int64
 	CompressionRatio float64
 }
 
@@ -185,9 +185,9 @@ type CacheEntry struct {
 const (
 	// TARGET_PREDICTION_ACCURACY is defined in vm.go
 	// TARGET_PREDICTION_LATENCY_MS is defined in vm.go
-	TARGET_CACHE_HIT_IMPROVEMENT = 0.3    // 30% improvement in cache hit ratio
-	TARGET_MIGRATION_SPEED_BOOST = 2.0    // 2x migration speed improvement
-	TARGET_FALSE_POSITIVE_RATE   = 0.1    // 10% max false positive rate
+	TARGET_CACHE_HIT_IMPROVEMENT = 0.3 // 30% improvement in cache hit ratio
+	TARGET_MIGRATION_SPEED_BOOST = 2.0 // 2x migration speed improvement
+	TARGET_FALSE_POSITIVE_RATE   = 0.1 // 10% max false positive rate
 )
 
 // NewPredictivePrefetchingEngine creates a new predictive prefetching engine
@@ -221,9 +221,9 @@ func NewPredictivePrefetchingEngine(logger *logrus.Logger) (*PredictivePrefetchi
 
 	// Initialize training data collector
 	trainingData := &TrainingDataCollector{
-		Samples:         make([]*TrainingSample, 0),
-		MaxSampleSize:   100000, // 100k samples
-		CollectionRate:  0.1,    // 10% sampling rate
+		Samples:        make([]*TrainingSample, 0),
+		MaxSampleSize:  100000, // 100k samples
+		CollectionRate: 0.1,    // 10% sampling rate
 	}
 
 	ppe := &PredictivePrefetchingEngine{
@@ -302,15 +302,15 @@ func (ppe *PredictivePrefetchingEngine) PredictMigrationAccess(
 	ppe.cachePredictionResult(cacheKey, predictionResult)
 
 	predictionLatency := time.Since(startTime)
-	
+
 	// Update metrics
 	ppe.updatePredictionMetrics(predictionResult, predictionLatency)
 
 	logger.WithFields(logrus.Fields{
-		"prediction_count":    len(predictions),
-		"confidence":          confidence,
-		"prediction_latency":  predictionLatency.Milliseconds(),
-		"model_performance":   ppe.aiModel.AccuracyScore,
+		"prediction_count":   len(predictions),
+		"confidence":         confidence,
+		"prediction_latency": predictionLatency.Milliseconds(),
+		"model_performance":  ppe.aiModel.AccuracyScore,
 	}).Info("AI prediction completed successfully")
 
 	return predictionResult, nil
@@ -327,11 +327,11 @@ func (ppe *PredictivePrefetchingEngine) ExecutePredictivePrefetching(
 
 	prefetchStart := time.Now()
 	prefetchingResult := &PrefetchingResult{
-		PredictionID:       predictionResult.PredictionID,
-		PrefetchedItems:    make([]*PrefetchedItem, 0),
+		PredictionID:        predictionResult.PredictionID,
+		PrefetchedItems:     make([]*PrefetchedItem, 0),
 		TotalBytesPreloaded: 0,
 		CacheHitImprovement: 0,
-		StartTime:          prefetchStart,
+		StartTime:           prefetchStart,
 	}
 
 	// Sort predictions by confidence and access probability
@@ -467,12 +467,12 @@ func (ppe *PredictivePrefetchingEngine) extractVMFeatures(
 
 	// Extract temporal features
 	temporalFeatures := &TemporalFeatures{
-		TimeOfDay:    float64(time.Now().Hour()),
-		DayOfWeek:    float64(time.Now().Weekday()),
-		DayOfMonth:   float64(time.Now().Day()),
-		MonthOfYear:  float64(time.Now().Month()),
-		IsWeekend:    time.Now().Weekday() == time.Saturday || time.Now().Weekday() == time.Sunday,
-		IsHoliday:    ppe.isHoliday(time.Now()),
+		TimeOfDay:   float64(time.Now().Hour()),
+		DayOfWeek:   float64(time.Now().Weekday()),
+		DayOfMonth:  float64(time.Now().Day()),
+		MonthOfYear: float64(time.Now().Month()),
+		IsWeekend:   time.Now().Weekday() == time.Saturday || time.Now().Weekday() == time.Sunday,
+		IsHoliday:   ppe.isHoliday(time.Now()),
 	}
 
 	// Extract resource features
@@ -541,13 +541,13 @@ const (
 )
 
 type MigrationSpec struct {
-	Type                MigrationType
-	SourceNode          string
-	DestinationNode     string
-	NetworkBandwidth    int64
-	EstimatedDuration   time.Duration
-	CompressionEnabled  bool
-	EncryptionEnabled   bool
+	Type               MigrationType
+	SourceNode         string
+	DestinationNode    string
+	NetworkBandwidth   int64
+	EstimatedDuration  time.Duration
+	CompressionEnabled bool
+	EncryptionEnabled  bool
 }
 
 type PrefetchPolicy struct {
@@ -569,10 +569,10 @@ type PrefetchingResult struct {
 }
 
 type PrefetchedItem struct {
-	ItemID      string
-	Data        []byte
-	Size        int64
-	Confidence  float64
+	ItemID       string
+	Data         []byte
+	Size         int64
+	Confidence   float64
 	PrefetchTime time.Time
 }
 
@@ -620,22 +620,22 @@ const (
 
 // MigrationIntegration provides hooks for migration workflow integration
 type MigrationIntegration struct {
-	migrationManager    *VMManager
-	deltaSync          *WANMigrationDeltaSync
-	federationManager  *federation.FederationManager
-	predictionCache    map[string]*MigrationPrediction
-	migrationHooks     []MigrationHook
-	mu                 sync.RWMutex
+	migrationManager  *VMManager
+	deltaSync         *WANMigrationDeltaSync
+	federationManager *federation.FederationManager
+	predictionCache   map[string]*MigrationPrediction
+	migrationHooks    []MigrationHook
+	mu                sync.RWMutex
 }
 
 // CrossNodeCoordinator handles cross-node prefetching coordination
 type CrossNodeCoordinator struct {
-	nodeID             string
-	federationComm     *federation.CrossClusterComponents
-	remoteNodes        map[string]*RemoteNodeClient
-	coordinationQueue  chan *PrefetchCoordinationMessage
-	responseHandlers   map[string]chan *CoordinationResponse
-	mu                 sync.RWMutex
+	nodeID            string
+	federationComm    *federation.CrossClusterComponents
+	remoteNodes       map[string]*RemoteNodeClient
+	coordinationQueue chan *PrefetchCoordinationMessage
+	responseHandlers  map[string]chan *CoordinationResponse
+	mu                sync.RWMutex
 }
 
 // MemoryStatePrefetcher extends prefetching to memory state
@@ -650,11 +650,11 @@ type MemoryStatePrefetcher struct {
 
 // PrefetchPerformanceMonitor monitors prefetching effectiveness
 type PrefetchPerformanceMonitor struct {
-	accuracyMetrics    *AccuracyMetrics
-	performanceGains   *PerformanceGains
-	feedbackLoop       *ModelFeedbackLoop
-	alertThresholds    *AlertThresholds
-	reportGenerator    *PerformanceReportGenerator
+	accuracyMetrics  *AccuracyMetrics
+	performanceGains *PerformanceGains
+	feedbackLoop     *ModelFeedbackLoop
+	alertThresholds  *AlertThresholds
+	reportGenerator  *PerformanceReportGenerator
 }
 
 // ModelLifecycleManager manages AI model lifecycle
@@ -669,11 +669,11 @@ type ModelLifecycleManager struct {
 
 // PredictionAPIServer provides real-time prediction APIs
 type PredictionAPIServer struct {
-	grpcServer     *grpc.Server
-	restServer     *http.Server
-	engine         *PredictivePrefetchingEngine
-	rateLimiter    *RateLimiter
-	authManager    *AuthManager
+	grpcServer  *grpc.Server
+	restServer  *http.Server
+	engine      *PredictivePrefetchingEngine
+	rateLimiter *RateLimiter
+	authManager *AuthManager
 }
 
 // Integration with migration operations
@@ -683,9 +683,9 @@ func (engine *PredictivePrefetchingEngine) IntegrateWithMigration(migrationManag
 
 	engine.migrationIntegration = &MigrationIntegration{
 		migrationManager: migrationManager,
-		deltaSync:       engine.deltaSync,
-		predictionCache: make(map[string]*MigrationPrediction),
-		migrationHooks:  []MigrationHook{},
+		deltaSync:        engine.deltaSync,
+		predictionCache:  make(map[string]*MigrationPrediction),
+		migrationHooks:   []MigrationHook{},
 	}
 
 	// Register migration hooks
@@ -1094,16 +1094,16 @@ type CoordinationResponse struct {
 }
 
 type MigrationProgress struct {
-	VMID                string
+	VMID                 string
 	CompletionPercentage float64
-	DataTransferred     int64
-	EstimatedRemaining  time.Duration
+	DataTransferred      int64
+	EstimatedRemaining   time.Duration
 }
 
 type RemoteNodeClient struct {
-	NodeID   string
-	Address  string
-	Client   interface{} // gRPC client
+	NodeID  string
+	Address string
+	Client  interface{} // gRPC client
 }
 
 type MemoryPagePredictor struct {
@@ -1128,9 +1128,9 @@ type AccuracyMetrics struct {
 }
 
 type PerformanceGains struct {
-	CacheHitImprovement   float64
-	MigrationSpeedGain    float64
-	BandwidthSavings      int64
+	CacheHitImprovement float64
+	MigrationSpeedGain  float64
+	BandwidthSavings    int64
 }
 
 type ModelFeedbackLoop struct {
@@ -1145,8 +1145,8 @@ type FeedbackData struct {
 }
 
 type AlertThresholds struct {
-	MinAccuracy    float64
-	MaxLatency     time.Duration
+	MinAccuracy     float64
+	MaxLatency      time.Duration
 	MinCacheHitRate float64
 }
 
@@ -1160,9 +1160,9 @@ type PerformanceReport struct {
 }
 
 type ModelVersion struct {
-	Version    string
-	Model      *MigrationAIModel
-	Timestamp  time.Time
+	Version     string
+	Model       *MigrationAIModel
+	Timestamp   time.Time
 	Performance float64
 }
 
@@ -1171,11 +1171,11 @@ type ABTestingFramework struct {
 }
 
 type ABTest struct {
-	ModelName     string
-	ControlModel  *MigrationAIModel
-	TestModel     *MigrationAIModel
-	TrafficSplit  float64
-	StartTime     time.Time
+	ModelName    string
+	ControlModel *MigrationAIModel
+	TestModel    *MigrationAIModel
+	TrafficSplit float64
+	StartTime    time.Time
 }
 
 type AutoModelUpdater struct {
@@ -1188,11 +1188,11 @@ type ModelRollbackManager struct {
 }
 
 type RollbackEvent struct {
-	ModelName     string
-	FromVersion   string
-	ToVersion     string
-	Timestamp     time.Time
-	Reason        string
+	ModelName   string
+	FromVersion string
+	ToVersion   string
+	Timestamp   time.Time
+	Reason      string
 }
 
 type RateLimiter struct {
@@ -1351,27 +1351,27 @@ type MemoryRegion struct {
 }
 
 type DiskSector struct {
-	SectorID     uint64
-	AccessCount  int64
-	LastAccess   time.Time
-	ReadWrite    string
+	SectorID    uint64
+	AccessCount int64
+	LastAccess  time.Time
+	ReadWrite   string
 }
 
 type SeasonalityInfo struct {
-	Period      time.Duration
-	Amplitude   float64
-	Phase       float64
-	Confidence  float64
+	Period     time.Duration
+	Amplitude  float64
+	Phase      float64
+	Confidence float64
 }
 
 type CacheMetrics struct {
-	HitRate          float64
-	MissRate         float64
-	EvictionRate     float64
-	AverageLoadTime  time.Duration
-	TotalRequests    int64
-	TotalHits        int64
-	TotalMisses      int64
+	HitRate         float64
+	MissRate        float64
+	EvictionRate    float64
+	AverageLoadTime time.Duration
+	TotalRequests   int64
+	TotalHits       int64
+	TotalMisses     int64
 }
 
 type PatternMetrics struct {
@@ -1400,25 +1400,25 @@ type AccessPrediction struct {
 }
 
 type Feature struct {
-	Name        string
-	Type        string
-	Importance  float64
-	Normalizer  func(float64) float64
+	Name       string
+	Type       string
+	Importance float64
+	Normalizer func(float64) float64
 }
 
 type NormalizationParam struct {
-	Mean       float64
-	StdDev     float64
-	Min        float64
-	Max        float64
-	Method     string
+	Mean   float64
+	StdDev float64
+	Min    float64
+	Max    float64
+	Method string
 }
 
 type PCAReducer struct {
-	Components     [][]float64
-	ExplainedVar   []float64
-	MeanVector     []float64
-	TargetDims     int
+	Components   [][]float64
+	ExplainedVar []float64
+	MeanVector   []float64
+	TargetDims   int
 }
 
 // Placeholder implementations for complex methods
@@ -1453,13 +1453,13 @@ func NewMigrationAIModel() (*MigrationAIModel, error) {
 	}
 
 	return &MigrationAIModel{
-		ModelType:           ModelTypeNeuralNetwork,
-		ModelVersion:        "v2.1.0",
-		AccuracyScore:       0.82, // Initial baseline
-		PredictionLatency:   5 * time.Millisecond,
-		NeuralNetwork:       neuralNetwork,
-		FeatureExtractor:    featureExtractor,
-		PredictionCache:     make(map[string]*PredictionResult),
+		ModelType:         ModelTypeNeuralNetwork,
+		ModelVersion:      "v2.1.0",
+		AccuracyScore:     0.82, // Initial baseline
+		PredictionLatency: 5 * time.Millisecond,
+		NeuralNetwork:     neuralNetwork,
+		FeatureExtractor:  featureExtractor,
+		PredictionCache:   make(map[string]*PredictionResult),
 	}, nil
 }
 
@@ -1480,7 +1480,7 @@ func (ppe *PredictivePrefetchingEngine) startContinuousLearning(ctx context.Cont
 		case <-ticker.C:
 			// Collect recent training data
 			recentData := ppe.trainingData.CollectRecentSamples(time.Hour)
-			
+
 			if len(recentData.Samples) > 100 { // Minimum samples for training
 				err := ppe.TrainModel(ctx, recentData)
 				if err != nil {
@@ -1498,7 +1498,7 @@ func (nn *NeuralNetwork) initializeWeights() {
 	for _, layer := range nn.Layers {
 		layer.Weights = make([][]float64, layer.Size)
 		layer.Biases = make([]float64, layer.Size)
-		
+
 		for i := range layer.Weights {
 			layer.Weights[i] = make([]float64, layer.Size)
 			for j := range layer.Weights[i] {
@@ -1512,19 +1512,19 @@ func (nn *NeuralNetwork) Forward(input []float64) ([]float64, error) {
 	// Simplified forward pass implementation
 	output := make([]float64, len(input))
 	copy(output, input)
-	
+
 	// Apply transformation through layers
 	for _, layer := range nn.Layers {
 		output = nn.applyLayerTransform(output, layer)
 	}
-	
+
 	return output, nil
 }
 
 func (nn *NeuralNetwork) applyLayerTransform(input []float64, layer *NetworkLayer) []float64 {
 	// Simplified layer transformation
 	output := make([]float64, len(input))
-	
+
 	for i := range output {
 		if i < len(input) {
 			// Apply activation function
@@ -1538,7 +1538,7 @@ func (nn *NeuralNetwork) applyLayerTransform(input []float64, layer *NetworkLaye
 			}
 		}
 	}
-	
+
 	return output
 }
 
@@ -1551,17 +1551,17 @@ func (nn *NeuralNetwork) Train(
 		// Forward pass and backpropagation would be implemented here
 		// For now, simulate training progress
 		time.Sleep(10 * time.Millisecond)
-		
+
 		if epoch%10 == 0 {
 			// Log training progress
 			fmt.Printf("Epoch %d/%d completed\n", epoch, nn.Epochs)
 		}
-		
+
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 	}
-	
+
 	return nil
 }
 
@@ -1571,45 +1571,45 @@ func (nn *NeuralNetwork) Train(
 func (ppe *PredictivePrefetchingEngine) GetPrefetchingMetrics() *PrefetchingMetrics {
 	ppe.mu.RLock()
 	defer ppe.mu.RUnlock()
-	
+
 	// Calculate derived metrics
 	metrics := *ppe.prefetchMetrics
-	
+
 	if metrics.TotalPredictions > 0 {
 		metrics.PredictionAccuracy = float64(metrics.SuccessfulPredictions) / float64(metrics.TotalPredictions)
 	}
-	
+
 	return &metrics
 }
 
 // ValidatePrefetchingTargets checks if predictive prefetching targets are met
 func (ppe *PredictivePrefetchingEngine) ValidatePrefetchingTargets() error {
 	metrics := ppe.GetPrefetchingMetrics()
-	
+
 	var violations []string
-	
+
 	if metrics.PredictionAccuracy < TARGET_PREDICTION_ACCURACY {
 		violations = append(violations,
 			fmt.Sprintf("Prediction accuracy %.3f below target %.3f",
 				metrics.PredictionAccuracy, TARGET_PREDICTION_ACCURACY))
 	}
-	
+
 	if metrics.CacheHitRatioImprovement < TARGET_CACHE_HIT_IMPROVEMENT {
 		violations = append(violations,
 			fmt.Sprintf("Cache hit improvement %.3f below target %.3f",
 				metrics.CacheHitRatioImprovement, TARGET_CACHE_HIT_IMPROVEMENT))
 	}
-	
+
 	if metrics.AveragePredictionTime.Milliseconds() > TARGET_PREDICTION_LATENCY_MS {
 		violations = append(violations,
 			fmt.Sprintf("Prediction latency %dms exceeds target %dms",
 				metrics.AveragePredictionTime.Milliseconds(), TARGET_PREDICTION_LATENCY_MS))
 	}
-	
+
 	if len(violations) > 0 {
 		return fmt.Errorf("predictive prefetching targets not met: %v", violations)
 	}
-	
+
 	return nil
 }
 
@@ -1658,7 +1658,7 @@ func (ppe *PredictivePrefetchingEngine) executePrefetchOperation(ctx context.Con
 func (ppe *PredictivePrefetchingEngine) updatePredictiveCache(prediction *AccessPrediction, item *PrefetchedItem) error {
 	ppe.cacheManager.mu.Lock()
 	defer ppe.cacheManager.mu.Unlock()
-	
+
 	cacheEntry := &CacheEntry{
 		Key:             prediction.PageID,
 		Data:            item.Data,
@@ -1669,7 +1669,7 @@ func (ppe *PredictivePrefetchingEngine) updatePredictiveCache(prediction *Access
 		ExpiresAt:       time.Now().Add(time.Hour),
 		Size:            item.Size,
 	}
-	
+
 	ppe.cacheManager.PredictedEntries[prediction.PageID] = cacheEntry
 	ppe.cacheManager.CurrentUsage += item.Size
 	return nil
@@ -1678,7 +1678,7 @@ func (ppe *PredictivePrefetchingEngine) updatePredictiveCache(prediction *Access
 func (ppe *PredictivePrefetchingEngine) updateCacheMetrics() {
 	ppe.cacheManager.mu.RLock()
 	defer ppe.cacheManager.mu.RUnlock()
-	
+
 	if len(ppe.cacheManager.PredictedEntries) > 0 {
 		var hitCount float64
 		for _, entry := range ppe.cacheManager.PredictedEntries {
@@ -1693,13 +1693,13 @@ func (ppe *PredictivePrefetchingEngine) updateCacheMetrics() {
 // Additional stub methods for feature extraction
 func (ppe *PredictivePrefetchingEngine) createDefaultAccessPattern(vmID string) *AccessPattern {
 	return &AccessPattern{
-		PatternID:      fmt.Sprintf("default-%s", vmID),
-		VMCategory:     "unknown",
-		Frequency:      make(map[time.Duration]float64),
-		MemoryRegions:  []MemoryRegion{},
-		DiskSectors:    []DiskSector{},
-		Confidence:     0.5,
-		LastUpdated:    time.Now(),
+		PatternID:     fmt.Sprintf("default-%s", vmID),
+		VMCategory:    "unknown",
+		Frequency:     make(map[time.Duration]float64),
+		MemoryRegions: []MemoryRegion{},
+		DiskSectors:   []DiskSector{},
+		Confidence:    0.5,
+		LastUpdated:   time.Now(),
 	}
 }
 
@@ -1786,7 +1786,7 @@ func (ppe *PredictivePrefetchingEngine) classifyWorkloadType(vmID string) string
 func (fe *FeatureExtractor) ConvertToInputVector(features *VMDataFeatures, spec *MigrationSpec) []float64 {
 	// Stub - would convert features to neural network input
 	vector := make([]float64, 50) // 50 features as defined in neural network
-	
+
 	// Simple feature mapping
 	if len(features.CPUUsagePattern) > 0 {
 		vector[0] = features.CPUUsagePattern[0]
@@ -1794,19 +1794,19 @@ func (fe *FeatureExtractor) ConvertToInputVector(features *VMDataFeatures, spec 
 	if len(features.MemoryAccessPattern) > 0 {
 		vector[1] = features.MemoryAccessPattern[0]
 	}
-	
+
 	vector[2] = features.TemporalFeatures.TimeOfDay / 24.0
 	vector[3] = features.TemporalFeatures.DayOfWeek / 7.0
 	vector[4] = features.ResourceFeatures.CPUUtilization
 	vector[5] = features.ResourceFeatures.MemoryUtilization
-	
+
 	return vector
 }
 
 func (model *MigrationAIModel) convertOutputToPredictions(output []float64, vmID string) []*AccessPrediction {
 	// Convert neural network output to access predictions
 	predictions := make([]*AccessPrediction, 0, len(output))
-	
+
 	for i, prob := range output {
 		if prob > 0.1 { // Only include predictions above threshold
 			prediction := &AccessPrediction{
@@ -1821,7 +1821,7 @@ func (model *MigrationAIModel) convertOutputToPredictions(output []float64, vmID
 			predictions = append(predictions, prediction)
 		}
 	}
-	
+
 	return predictions
 }
 
@@ -1829,20 +1829,20 @@ func (ppe *PredictivePrefetchingEngine) prepareTrainingData(dataset *TrainingDat
 	// Stub - would prepare training data for neural network
 	features := make([][]float64, len(dataset.Samples))
 	labels := make([][]float64, len(dataset.Samples))
-	
+
 	for i, sample := range dataset.Samples {
 		// Convert sample to feature vector
 		features[i] = make([]float64, 50)
 		labels[i] = []float64{float64(sample.MigrationResult.DataTransferred) / 1024 / 1024} // Convert to MB
 	}
-	
+
 	return features, labels, nil
 }
 
 func (ppe *PredictivePrefetchingEngine) splitTrainingData(features, labels [][]float64, trainRatio float64) ([][]float64, [][]float64, [][]float64, [][]float64) {
 	// Simple train/validation split
 	splitIdx := int(float64(len(features)) * trainRatio)
-	
+
 	return features[:splitIdx], labels[:splitIdx], features[splitIdx:], labels[splitIdx:]
 }
 
@@ -1854,16 +1854,16 @@ func (ppe *PredictivePrefetchingEngine) evaluateModelPerformance(ctx context.Con
 func (tdc *TrainingDataCollector) CollectRecentSamples(duration time.Duration) *TrainingDataset {
 	tdc.mu.RLock()
 	defer tdc.mu.RUnlock()
-	
+
 	cutoff := time.Now().Add(-duration)
 	recentSamples := make([]*TrainingSample, 0)
-	
+
 	for _, sample := range tdc.Samples {
 		if sample.Timestamp.After(cutoff) {
 			recentSamples = append(recentSamples, sample)
 		}
 	}
-	
+
 	return &TrainingDataset{
 		Samples: recentSamples,
 		Labels:  make([]float64, len(recentSamples)),
@@ -1904,12 +1904,12 @@ func (ppe *PredictivePrefetchingEngine) calculatePredictionConfidence(
 	if len(predictions) == 0 {
 		return 0.0
 	}
-	
+
 	var totalConfidence float64
 	for _, pred := range predictions {
 		totalConfidence += pred.Probability
 	}
-	
+
 	return totalConfidence / float64(len(predictions))
 }
 

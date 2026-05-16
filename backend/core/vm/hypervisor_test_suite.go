@@ -19,18 +19,18 @@ type HypervisorTestSuite struct {
 
 // DriverCapabilities tracks what a driver supports for capability-based testing
 type DriverCapabilities struct {
-	SupportsCreate    bool
-	SupportsStart     bool
-	SupportsStop      bool
-	SupportsDelete    bool
-	SupportsStatus    bool
-	SupportsInfo      bool
-	SupportsMetrics   bool
-	SupportsListVMs   bool
-	SupportsPause     bool
-	SupportsResume    bool
-	SupportsSnapshot  bool
-	SupportsMigrate   bool
+	SupportsCreate   bool
+	SupportsStart    bool
+	SupportsStop     bool
+	SupportsDelete   bool
+	SupportsStatus   bool
+	SupportsInfo     bool
+	SupportsMetrics  bool
+	SupportsListVMs  bool
+	SupportsPause    bool
+	SupportsResume   bool
+	SupportsSnapshot bool
+	SupportsMigrate  bool
 }
 
 // NewHypervisorTestSuite creates a new test suite for a hypervisor driver
@@ -126,10 +126,16 @@ func (s *HypervisorTestSuite) generateTestConfig() VMConfig {
 	return baseConfig
 }
 
+func (s *HypervisorTestSuite) testConfigFor(testName string) VMConfig {
+	config := s.testConfig
+	config.ID = fmt.Sprintf("%s-%d", testName, time.Now().UnixNano())
+	return config
+}
+
 // TestBasicLifecycle tests create, start, stop, delete operations
 func (s *HypervisorTestSuite) TestBasicLifecycle(ctx context.Context) error {
 	s.t.Run("BasicLifecycle", func(t *testing.T) {
-		vmID, err := s.driver.Create(ctx, s.testConfig)
+		vmID, err := s.driver.Create(ctx, s.testConfigFor("basic-lifecycle"))
 		if err != nil {
 			t.Fatalf("Failed to create VM: %v", err)
 		}
@@ -182,7 +188,7 @@ func (s *HypervisorTestSuite) TestPauseResume(ctx context.Context) error {
 	}
 
 	s.t.Run("PauseResume", func(t *testing.T) {
-		vmID, err := s.driver.Create(ctx, s.testConfig)
+		vmID, err := s.driver.Create(ctx, s.testConfigFor("pause-resume"))
 		if err != nil {
 			t.Fatalf("Failed to create VM: %v", err)
 		}
@@ -232,7 +238,7 @@ func (s *HypervisorTestSuite) TestSnapshot(ctx context.Context) error {
 	}
 
 	s.t.Run("Snapshot", func(t *testing.T) {
-		vmID, err := s.driver.Create(ctx, s.testConfig)
+		vmID, err := s.driver.Create(ctx, s.testConfigFor("snapshot"))
 		if err != nil {
 			t.Fatalf("Failed to create VM: %v", err)
 		}
@@ -265,7 +271,7 @@ func (s *HypervisorTestSuite) TestSnapshot(ctx context.Context) error {
 // TestGetInfo tests VM information retrieval
 func (s *HypervisorTestSuite) TestGetInfo(ctx context.Context) error {
 	s.t.Run("GetInfo", func(t *testing.T) {
-		vmID, err := s.driver.Create(ctx, s.testConfig)
+		vmID, err := s.driver.Create(ctx, s.testConfigFor("get-info"))
 		if err != nil {
 			t.Fatalf("Failed to create VM: %v", err)
 		}
@@ -295,7 +301,7 @@ func (s *HypervisorTestSuite) TestGetInfo(ctx context.Context) error {
 // TestGetMetrics tests VM metrics retrieval
 func (s *HypervisorTestSuite) TestGetMetrics(ctx context.Context) error {
 	s.t.Run("GetMetrics", func(t *testing.T) {
-		vmID, err := s.driver.Create(ctx, s.testConfig)
+		vmID, err := s.driver.Create(ctx, s.testConfigFor("get-metrics"))
 		if err != nil {
 			t.Fatalf("Failed to create VM: %v", err)
 		}
@@ -326,7 +332,7 @@ func (s *HypervisorTestSuite) TestListVMs(ctx context.Context) error {
 		initialCount := len(initialVMs)
 
 		// Create test VM
-		vmID, err := s.driver.Create(ctx, s.testConfig)
+		vmID, err := s.driver.Create(ctx, s.testConfigFor("list-vms"))
 		if err != nil {
 			t.Fatalf("Failed to create VM: %v", err)
 		}

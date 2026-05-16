@@ -602,6 +602,11 @@ func (vm *VM) State() State {
 	return vm.state
 }
 
+// GetState returns the VM's current state.
+func (vm *VM) GetState() State {
+	return vm.State()
+}
+
 // SetState sets the VM's state
 func (vm *VM) SetState(state State) {
 	vm.mutex.Lock()
@@ -1007,6 +1012,11 @@ func (vm *VM) Config() VMConfig {
 	vm.mutex.RLock()
 	defer vm.mutex.RUnlock()
 	return vm.config
+}
+
+// GetConfig returns the VM configuration.
+func (vm *VM) GetConfig() VMConfig {
+	return vm.Config()
 }
 
 // ErrorMessage returns the VM's error message

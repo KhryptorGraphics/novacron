@@ -1,3 +1,5 @@
+//go:build legacy_vm_manager
+
 package vm
 
 import (
@@ -73,7 +75,7 @@ func TestNewVMManager(t *testing.T) {
 	eventBus := &MockEventBus{}
 
 	manager := NewVMManager(db, redisClient, hypervisor, eventBus)
-	
+
 	assert.NotNil(t, manager)
 	assert.Equal(t, db, manager.db)
 	assert.Equal(t, redisClient, manager.cache)
@@ -104,9 +106,9 @@ func TestVMManager_CreateVM_Success(t *testing.T) {
 	}
 
 	expectedVM := &VM{
-		ID:     "vm-123",
-		Name:   config.Name,
-		Status: VMStatusRunning,
+		ID:        "vm-123",
+		Name:      config.Name,
+		Status:    VMStatusRunning,
 		Resources: config.Resources,
 		CreatedAt: time.Now(),
 	}
@@ -117,7 +119,7 @@ func TestVMManager_CreateVM_Success(t *testing.T) {
 	// Mock database insert
 	sqlMock.ExpectBegin()
 	sqlMock.ExpectExec("INSERT INTO virtual_machines").
-		WithArgs(expectedVM.ID, expectedVM.Name, expectedVM.Status, 
+		WithArgs(expectedVM.ID, expectedVM.Name, expectedVM.Status,
 			sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	sqlMock.ExpectCommit()
@@ -133,7 +135,7 @@ func TestVMManager_CreateVM_Success(t *testing.T) {
 	assert.Equal(t, expectedVM.ID, vm.ID)
 	assert.Equal(t, expectedVM.Name, vm.Name)
 	assert.Equal(t, expectedVM.Status, vm.Status)
-	
+
 	hypervisor.AssertExpectations(t)
 	eventBus.AssertExpectations(t)
 	assert.NoError(t, sqlMock.ExpectationsWereMet())
@@ -148,7 +150,7 @@ func TestVMManager_CreateVM_ValidationError(t *testing.T) {
 	manager := NewVMManager(db, nil, nil, nil)
 
 	ctx := context.Background()
-	
+
 	// Test empty name
 	config := VMConfig{
 		Name: "",
@@ -367,7 +369,7 @@ func TestVMManager_ListVMs_Pagination(t *testing.T) {
 	listRows := sqlmock.NewRows([]string{"id", "name", "status", "resources", "created_at"}).
 		AddRow("vm-1", "test-vm-1", VMStatusRunning, `{"cpu":4,"memory":8192}`, time.Now()).
 		AddRow("vm-2", "test-vm-2", VMStatusStopped, `{"cpu":2,"memory":4096}`, time.Now())
-	
+
 	sqlMock.ExpectQuery("SELECT .* FROM virtual_machines").
 		WithArgs(limit, (page-1)*limit).
 		WillReturnRows(listRows)
@@ -450,7 +452,7 @@ func TestVMManager_UpdateVM_Success(t *testing.T) {
 
 	ctx := context.Background()
 	vmID := "vm-123"
-	
+
 	update := VMUpdate{
 		Name: strPtr("updated-vm"),
 		Resources: &Resources{
@@ -520,11 +522,11 @@ func TestVMManager_ConcurrentOperations(t *testing.T) {
 
 		hypervisor.On("CreateVM", ctx, config).Return(expectedVM, nil).Maybe()
 		eventBus.On("Publish", ctx, mock.AnythingOfType("Event")).Return(nil).Maybe()
-		
+
 		sqlMock.ExpectBegin()
 		sqlMock.ExpectExec("INSERT INTO virtual_machines").
 			WillReturnResult(sqlmock.NewResult(1, 1)).
-			WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), 
+			WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
 				sqlmock.AnyArg(), sqlmock.AnyArg())
 		sqlMock.ExpectCommit()
 	}

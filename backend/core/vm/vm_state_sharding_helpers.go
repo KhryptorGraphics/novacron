@@ -1,4 +1,4 @@
-//go:build novacron_vm_distribution
+//go:build novacron_vm_distribution && novacron_vm_distribution_experimental
 
 package vm
 
