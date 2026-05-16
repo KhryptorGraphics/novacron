@@ -705,10 +705,25 @@ func NewRolloutCommand() *cobra.Command {
 
 func NewCompletionCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "completion",
+		Use:   "completion [bash|zsh|fish|powershell]",
 		Short: "Generate shell completion scripts",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("completion command not yet implemented")
+			root := cmd.Root()
+			out := cmd.OutOrStdout()
+
+			switch strings.ToLower(args[0]) {
+			case "bash":
+				return root.GenBashCompletion(out)
+			case "zsh":
+				return root.GenZshCompletion(out)
+			case "fish":
+				return root.GenFishCompletion(out, true)
+			case "powershell":
+				return root.GenPowerShellCompletion(out)
+			default:
+				return fmt.Errorf("unsupported shell %q", args[0])
+			}
 		},
 	}
 }
