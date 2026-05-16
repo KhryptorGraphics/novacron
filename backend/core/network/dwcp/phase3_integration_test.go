@@ -141,6 +141,8 @@ func testAdaptiveConsensus(t *testing.T) {
 		t.Errorf("Expected Eventual for high latency, got %v", algo)
 	}
 
+	runGoTest(t, "consensus", "TestACPAlgorithmDecision|TestACPSwitching|TestRaftConsensus|TestPaxosConsensus|TestEPaxosConsensus|TestEventualConsistency|TestHybridConsensus")
+
 	t.Log("✅ Adaptive consensus algorithm selection working")
 }
 
