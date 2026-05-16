@@ -6,8 +6,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-RESULTS_DIR="${PROJECT_ROOT}/docs/phase6/validation-results"
-LOG_DIR="${PROJECT_ROOT}/logs/validation"
+RESULTS_DIR="${RESULTS_DIR:-${PROJECT_ROOT}/docs/phase6/validation-results}"
+LOG_DIR="${LOG_DIR:-${PROJECT_ROOT}/logs/validation}"
 ALERT_WEBHOOK="${ALERT_WEBHOOK:-}"
 
 # Color codes for output
@@ -18,11 +18,12 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-MAX_RETRIES=3
-TEST_TIMEOUT=300 # 5 minutes
-ALERT_ON_FAILURE=true
-SAVE_DETAILED_LOGS=true
-ENABLE_METRICS=true
+MAX_RETRIES="${MAX_RETRIES:-3}"
+TEST_TIMEOUT="${TEST_TIMEOUT:-300}" # 5 minutes
+RETRY_DELAY="${RETRY_DELAY:-60}"
+ALERT_ON_FAILURE="${ALERT_ON_FAILURE:-true}"
+SAVE_DETAILED_LOGS="${SAVE_DETAILED_LOGS:-true}"
+ENABLE_METRICS="${ENABLE_METRICS:-true}"
 
 # Create directories
 mkdir -p "${RESULTS_DIR}" "${LOG_DIR}"
@@ -92,36 +93,36 @@ check_prerequisites() {
 
 # Run validation tests
 run_validation_tests() {
-    local attempt=1
-    local test_result=""
-
-    log "Running production validation tests (attempt ${attempt}/${MAX_RETRIES})..."
+    local attempt
+    local test_result="failure"
+    local test_log=""
+    local results_file=""
 
     cd "${PROJECT_ROOT}/backend/core/network/dwcp/v3/tests"
 
-    local timestamp=$(date +%Y%m%d-%H%M%S)
-    local test_log="${LOG_DIR}/test-${timestamp}.log"
-    local results_file="${RESULTS_DIR}/validation-${timestamp}.json"
+    for attempt in $(seq 1 "${MAX_RETRIES}"); do
+        log "Running production validation tests (attempt ${attempt}/${MAX_RETRIES})..."
 
-    # Run tests with timeout
-    if timeout ${TEST_TIMEOUT} go test -v \
-        -run TestProductionValidationComplete \
-        -timeout ${TEST_TIMEOUT}s \
-        ./... 2>&1 | tee "${test_log}"; then
-        test_result="success"
-        log_success "Validation tests passed"
-    else
-        test_result="failure"
-        log_error "Validation tests failed"
+        local timestamp=$(date +%Y%m%d-%H%M%S)
+        test_log="${LOG_DIR}/test-${timestamp}.log"
+        results_file="${RESULTS_DIR}/validation-${timestamp}.json"
 
-        if [[ ${attempt} -lt ${MAX_RETRIES} ]]; then
-            log "Retrying in 60 seconds..."
-            sleep 60
-            attempt=$((attempt + 1))
-            run_validation_tests
-            return $?
+        # Run tests with timeout
+        if timeout "${TEST_TIMEOUT}" go test -v \
+            -run TestProductionValidationComplete \
+            -timeout "${TEST_TIMEOUT}s" \
+            ./... 2>&1 | tee "${test_log}"; then
+            test_result="success"
+            log_success "Validation tests passed"
+            break
         fi
-    fi
+
+        log_error "Validation tests failed"
+        if [[ ${attempt} -lt ${MAX_RETRIES} ]]; then
+            log "Retrying in ${RETRY_DELAY} seconds..."
+            sleep "${RETRY_DELAY}"
+        fi
+    done
 
     # Parse results
     parse_test_results "${test_log}" "${results_file}"
@@ -141,10 +142,10 @@ parse_test_results() {
 
     log "Parsing test results..."
 
-    local total_tests=$(grep -c "=== RUN" "${test_log}" || echo 0)
-    local passed_tests=$(grep -c "--- PASS:" "${test_log}" || echo 0)
-    local failed_tests=$(grep -c "--- FAIL:" "${test_log}" || echo 0)
-    local skipped_tests=$(grep -c "--- SKIP:" "${test_log}" || echo 0)
+    local total_tests=$(grep -c -- "=== RUN" "${test_log}" || true)
+    local passed_tests=$(grep -c -- "--- PASS:" "${test_log}" || true)
+    local failed_tests=$(grep -c -- "--- FAIL:" "${test_log}" || true)
+    local skipped_tests=$(grep -c -- "--- SKIP:" "${test_log}" || true)
 
     local pass_rate=0
     if [[ ${total_tests} -gt 0 ]]; then
@@ -191,15 +192,32 @@ collect_metrics() {
     log "Collecting system metrics..."
 
     local metrics_file="${RESULTS_DIR}/metrics-$(date +%Y%m%d-%H%M%S).json"
+    local cpu_usage
+    local memory_usage
+    local disk_usage
+    local load_average
+    local active_connections
+
+    cpu_usage=$(top -bn1 | awk -F'id,' '/Cpu\(s\)/ { split($1, parts, ","); sub(/^.* /, "", parts[length(parts)]); printf "%.2f", 100 - parts[length(parts)] }' || echo "0")
+    memory_usage=$(free -m | awk 'NR==2{printf "%.2f", $3*100/$2 }' || echo "0")
+    disk_usage=$(df -h / | awk 'NR==2{print $5}' | sed 's/%//' || echo "0")
+    load_average=$(uptime | awk -F'load average:' '{print $2}' | sed 's/^ *//' || echo "0")
+    if command -v ss >/dev/null 2>&1; then
+        active_connections=$(ss -tan state established | awk 'NR>1 {count++} END {print count+0}')
+    elif command -v netstat >/dev/null 2>&1; then
+        active_connections=$(netstat -an | grep -c -- "ESTABLISHED" || echo "0")
+    else
+        active_connections="0"
+    fi
 
     cat > "${metrics_file}" <<EOF
 {
     "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-    "cpu_usage": "$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}')",
-    "memory_usage": "$(free -m | awk 'NR==2{printf "%.2f", $3*100/$2 }')",
-    "disk_usage": "$(df -h / | awk 'NR==2{print $5}' | sed 's/%//')",
-    "load_average": "$(uptime | awk -F'load average:' '{print $2}')",
-    "active_connections": "$(netstat -an | grep ESTABLISHED | wc -l)"
+    "cpu_usage": "${cpu_usage}",
+    "memory_usage": "${memory_usage}",
+    "disk_usage": "${disk_usage}",
+    "load_average": "${load_average}",
+    "active_connections": "${active_connections}"
 }
 EOF
 
@@ -211,6 +229,41 @@ generate_report() {
     log "Generating validation report..."
 
     local report_file="${RESULTS_DIR}/validation-report-$(date +%Y%m%d-%H%M%S).md"
+    local test_summary="No test results available"
+    local metrics_summary="No metrics available"
+    local recent_results
+    local recommendations
+
+    if compgen -G "${RESULTS_DIR}/validation-*.json" >/dev/null; then
+        test_summary=$(jq -s -r '
+            "- Total Test Runs: \(length)",
+            "- Average Pass Rate: \(map(.pass_rate) | add / length)%",
+            "- Total Tests Executed: \(map(.total_tests) | add)",
+            "- Total Failures: \(map(.failed_tests) | add)"
+        ' "${RESULTS_DIR}"/validation-*.json 2>/dev/null || echo "No test results available")
+    fi
+
+    local latest_metrics
+    latest_metrics=$(ls -t "${RESULTS_DIR}"/metrics-*.json 2>/dev/null | head -1 || true)
+    if [[ -n "${latest_metrics}" ]]; then
+        metrics_summary=$(jq -r '
+            "- CPU Usage: \(.cpu_usage)%",
+            "- Memory Usage: \(.memory_usage)%",
+            "- Disk Usage: \(.disk_usage)%",
+            "- Active Connections: \(.active_connections)"
+        ' "${latest_metrics}" 2>/dev/null || echo "No metrics available")
+    fi
+
+    recent_results=$(tail -20 "${LOG_DIR}/validation.log" 2>/dev/null || echo "No recent logs")
+    if grep -q "FAIL" "${LOG_DIR}/validation.log" 2>/dev/null; then
+        recommendations="- ⚠️ Investigate failed tests immediately
+- Review error logs for root cause analysis
+- Consider rolling back recent changes if failures persist"
+    else
+        recommendations="- ✅ All validation tests passing
+- Continue monitoring system metrics
+- Maintain current deployment configuration"
+    fi
 
     cat > "${report_file}" <<EOF
 # Production Validation Report
@@ -221,39 +274,21 @@ generate_report() {
 
 ## Test Execution Summary
 
-$(cat "${RESULTS_DIR}"/validation-*.json 2>/dev/null | jq -s '.' | jq -r '
-    "- Total Test Runs: \(length)",
-    "- Average Pass Rate: \(map(.pass_rate) | add / length)%",
-    "- Total Tests Executed: \(map(.total_tests) | add)",
-    "- Total Failures: \(map(.failed_tests) | add)"
-' || echo "No test results available")
+${test_summary}
 
 ## System Metrics
 
-$(cat "${RESULTS_DIR}"/metrics-*.json 2>/dev/null | tail -1 | jq -r '
-    "- CPU Usage: \(.cpu_usage)%",
-    "- Memory Usage: \(.memory_usage)%",
-    "- Disk Usage: \(.disk_usage)%",
-    "- Active Connections: \(.active_connections)"
-' || echo "No metrics available")
+${metrics_summary}
 
 ## Recent Test Results
 
 \`\`\`
-$(tail -20 "${LOG_DIR}/validation.log" 2>/dev/null || echo "No recent logs")
+${recent_results}
 \`\`\`
 
 ## Recommendations
 
-$(if grep -q "FAIL" "${LOG_DIR}/validation.log" 2>/dev/null; then
-    echo "- ⚠️ Investigate failed tests immediately"
-    echo "- Review error logs for root cause analysis"
-    echo "- Consider rolling back recent changes if failures persist"
-else
-    echo "- ✅ All validation tests passing"
-    echo "- Continue monitoring system metrics"
-    echo "- Maintain current deployment configuration"
-fi)
+${recommendations}
 
 ---
 *Report generated by DWCP v3 Production Validation System*
