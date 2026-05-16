@@ -185,6 +185,8 @@ func testLoadBalancingFailover(t *testing.T) {
 		t.Error("Should not select unhealthy server")
 	}
 
+	runGoTest(t, "loadbalancing", "TestSelectServerRoundRobin|TestSelectServerLeastConnections|TestSelectServerGeoProximity|TestSelectServerWithSessionAffinity|TestFailoverOnServerFailure|TestNoHealthyServersError|TestRoutingLatency|TestConcurrentRequests|TestHealthCheckerStartStop|TestCircuitBreakerRecovery|TestMetricsAggregation")
+
 	t.Logf("✅ Load balancing failover working (selected: %s)", decision.Server.ID)
 }
 
