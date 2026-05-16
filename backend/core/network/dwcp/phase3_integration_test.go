@@ -106,7 +106,8 @@ func testGlobalStateSync(t *testing.T) {
 		t.Fatal("Expected stored OR-Set to contain running state")
 	}
 
-	// Verify convergence (simplified - in real test would check all engines)
+	runGoTest(t, "sync", "TestCRDTConvergence|TestAntiEntropyConvergence|TestStateConvergenceTime|TestNetworkPartition")
+
 	t.Log("✅ Global state synchronization working")
 }
 
