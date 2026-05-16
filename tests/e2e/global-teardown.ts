@@ -2,6 +2,8 @@ import { FullConfig } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 
+const { summarizePlaywrightReport } = require('./summary-accounting');
+
 /**
  * Global Teardown for Playwright Tests
  *
@@ -131,16 +133,17 @@ async function generateSummaryReport(config: FullConfig): Promise<void> {
 
   try {
     const reportData = JSON.parse(fs.readFileSync(reportPath, 'utf-8'));
+    const aggregate = summarizePlaywrightReport(reportData);
 
     const summary = {
       timestamp: new Date().toISOString(),
       environment: process.env.TEST_ENV || 'local',
-      totalTests: reportData.stats?.expected || 0,
-      passed: reportData.stats?.expected - reportData.stats?.unexpected || 0,
-      failed: reportData.stats?.unexpected || 0,
-      skipped: reportData.stats?.skipped || 0,
-      flaky: reportData.stats?.flaky || 0,
-      duration: reportData.stats?.duration || 0,
+      totalTests: aggregate.totalTests,
+      passed: aggregate.passed,
+      failed: aggregate.failed,
+      skipped: aggregate.skipped,
+      flaky: aggregate.flaky,
+      duration: aggregate.duration,
       projects: config.projects.map(p => p.name),
     };
 
