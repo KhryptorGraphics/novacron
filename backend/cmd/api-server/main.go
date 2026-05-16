@@ -656,8 +656,9 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 	runtimeMonitoringClient := newRuntimeMonitoringReadClientFromEnv()
 	runtimeInventoryClient := newRuntimeInventoryReadClientFromEnv()
+	runtimeOrchestrationClient := newRuntimeOrchestrationClientFromEnv()
 
-	registerOrchestrationDashboardRoutes(router)
+	registerOrchestrationDashboardRoutes(router, runtimeOrchestrationClient)
 	registerMigrationBackupContractRoutes(router)
 	registerNetworkPolicyContractRoutes(router)
 
@@ -1627,7 +1628,7 @@ func normalizeCanonicalAdminRole(raw string) string {
 	}
 }
 
-func registerOrchestrationDashboardRoutes(router *mux.Router) {
+func registerOrchestrationDashboardRoutes(router *mux.Router, runtimeClient *runtimeOrchestrationClient) {
 	var policiesMu sync.RWMutex
 	policies := make(map[string]map[string]interface{})
 
@@ -1640,6 +1641,10 @@ func registerOrchestrationDashboardRoutes(router *mux.Router) {
 	}
 
 	router.HandleFunc("/orchestration/status", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeClient.proxy(w, r, "/internal/runtime/v1/orchestration/status") {
+			return
+		}
+
 		policiesMu.RLock()
 		activePolicies := len(policies)
 		policiesMu.RUnlock()
@@ -1656,10 +1661,18 @@ func registerOrchestrationDashboardRoutes(router *mux.Router) {
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/orchestration/decisions", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeClient.proxy(w, r, "/internal/runtime/v1/orchestration/decisions") {
+			return
+		}
+
 		writeJSON(w, http.StatusOK, []map[string]interface{}{})
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/orchestration/policies", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeClient.proxy(w, r, "/internal/runtime/v1/orchestration/policies") {
+			return
+		}
+
 		policiesMu.RLock()
 		storedPolicies := make([]map[string]interface{}, 0, len(policies))
 		for _, policy := range policies {
@@ -1674,6 +1687,10 @@ func registerOrchestrationDashboardRoutes(router *mux.Router) {
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/orchestration/policies", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeClient.proxy(w, r, "/internal/runtime/v1/orchestration/policies") {
+			return
+		}
+
 		var policy map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&policy); err != nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid request body")
@@ -1698,6 +1715,9 @@ func registerOrchestrationDashboardRoutes(router *mux.Router) {
 
 	router.HandleFunc("/orchestration/policies/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := mux.Vars(r)["id"]
+		if runtimeClient.proxy(w, r, "/internal/runtime/v1/orchestration/policies/"+id) {
+			return
+		}
 
 		policiesMu.RLock()
 		existing, ok := policies[id]
@@ -1729,6 +1749,9 @@ func registerOrchestrationDashboardRoutes(router *mux.Router) {
 
 	router.HandleFunc("/orchestration/policies/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := mux.Vars(r)["id"]
+		if runtimeClient.proxy(w, r, "/internal/runtime/v1/orchestration/policies/"+id) {
+			return
+		}
 
 		policiesMu.Lock()
 		if _, ok := policies[id]; !ok {
@@ -1746,10 +1769,18 @@ func registerOrchestrationDashboardRoutes(router *mux.Router) {
 	}).Methods(http.MethodDelete)
 
 	router.HandleFunc("/orchestration/ml-models", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeClient.proxy(w, r, "/internal/runtime/v1/orchestration/ml-models") {
+			return
+		}
+
 		writeJSON(w, http.StatusOK, []map[string]interface{}{})
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/orchestration/ml-models/{modelType}/retrain", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeClient.proxy(w, r, "/internal/runtime/v1/orchestration/ml-models/"+mux.Vars(r)["modelType"]+"/retrain") {
+			return
+		}
+
 		writeJSON(w, http.StatusAccepted, map[string]interface{}{
 			"status":    "queued",
 			"modelType": mux.Vars(r)["modelType"],
@@ -1757,6 +1788,10 @@ func registerOrchestrationDashboardRoutes(router *mux.Router) {
 	}).Methods(http.MethodPost)
 
 	router.HandleFunc("/orchestration/ml-models/{modelType}/download", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeClient.proxy(w, r, "/internal/runtime/v1/orchestration/ml-models/"+mux.Vars(r)["modelType"]+"/download") {
+			return
+		}
+
 		writeJSON(w, http.StatusNotImplemented, map[string]interface{}{
 			"error":     "model download is not available in the canonical API profile",
 			"modelType": mux.Vars(r)["modelType"],
@@ -1764,6 +1799,10 @@ func registerOrchestrationDashboardRoutes(router *mux.Router) {
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/orchestration/metrics/realtime", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeClient.proxy(w, r, "/internal/runtime/v1/orchestration/metrics/realtime") {
+			return
+		}
+
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"timestamp":            time.Now().UTC().Format(time.RFC3339),
 			"cpu_usage":            0,
@@ -1776,10 +1815,18 @@ func registerOrchestrationDashboardRoutes(router *mux.Router) {
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/orchestration/scaling/metrics", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeClient.proxy(w, r, "/internal/runtime/v1/orchestration/scaling/metrics") {
+			return
+		}
+
 		writeJSON(w, http.StatusOK, []map[string]interface{}{})
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/orchestration/scaling/events", func(w http.ResponseWriter, r *http.Request) {
+		if runtimeClient.proxy(w, r, "/internal/runtime/v1/orchestration/scaling/events") {
+			return
+		}
+
 		writeJSON(w, http.StatusOK, []map[string]interface{}{})
 	}).Methods(http.MethodGet)
 }

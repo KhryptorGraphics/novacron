@@ -993,6 +993,142 @@ func TestRegisterSecureAPIRoutesUsesRuntimeInventoryReadsWhenEnabled(t *testing.
 	}
 }
 
+func TestRegisterSecureAPIRoutesUsesRuntimeOrchestrationWhenEnabled(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	requests := make(chan string, 2)
+	runtimeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+			t.Fatalf("expected canonical runtime orchestration proxy to avoid forwarding Authorization, got %q", authHeader)
+		}
+		if userEmail := r.Header.Get("X-User-Email"); userEmail != "" {
+			t.Fatalf("expected canonical runtime orchestration proxy to avoid forwarding X-User-Email, got %q", userEmail)
+		}
+
+		requests <- r.Method + " " + r.URL.RequestURI()
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/internal/runtime/v1/orchestration/decisions":
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{
+					"id":             "decision-runtime-1",
+					"decisionType":   "scaling",
+					"recommendation": "scale up vm-runtime-1",
+					"score":          0.91,
+					"confidence":     0.88,
+					"status":         "pending",
+					"timestamp":      "2026-05-16T17:00:00Z",
+				},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/internal/runtime/v1/orchestration/ml-models/bandwidth/retrain":
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":    "queued",
+				"modelType": "bandwidth",
+				"jobId":     "runtime-job-1",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer runtimeServer.Close()
+
+	t.Setenv(canonicalRuntimeOrchestrationEnv, "true")
+	t.Setenv(canonicalRuntimeBaseURLEnv, runtimeServer.URL)
+
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	router := mux.NewRouter()
+	apiV1 := router.PathPrefix("/api/v1").Subrouter()
+	apiV1.Use(requireAuth(authManager))
+	registerSecureAPIRoutes(apiV1, db)
+
+	decisionsRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodGet, "/api/v1/orchestration/decisions?limit=1", nil)
+	if decisionsRec.Code != http.StatusOK {
+		t.Fatalf("expected runtime decisions status 200, got %d: %s", decisionsRec.Code, decisionsRec.Body.String())
+	}
+	if got := decisionsRec.Header().Get(novaCronReadSourceHeader); got != novaCronReadSourceRuntime {
+		t.Fatalf("expected %s header %q for runtime decisions, got %q", novaCronReadSourceHeader, novaCronReadSourceRuntime, got)
+	}
+	var decisions []map[string]interface{}
+	if err := json.NewDecoder(decisionsRec.Body).Decode(&decisions); err != nil {
+		t.Fatalf("failed to decode decisions payload: %v", err)
+	}
+	if len(decisions) != 1 || decisions[0]["id"] != "decision-runtime-1" {
+		t.Fatalf("unexpected decisions payload: %#v", decisions)
+	}
+
+	retrainRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPost, "/api/v1/orchestration/ml-models/bandwidth/retrain", map[string]interface{}{
+		"reason": "operator-request",
+	})
+	if retrainRec.Code != http.StatusAccepted {
+		t.Fatalf("expected runtime retrain status 202, got %d: %s", retrainRec.Code, retrainRec.Body.String())
+	}
+	var retrain map[string]interface{}
+	if err := json.NewDecoder(retrainRec.Body).Decode(&retrain); err != nil {
+		t.Fatalf("failed to decode retrain payload: %v", err)
+	}
+	if retrain["jobId"] != "runtime-job-1" {
+		t.Fatalf("unexpected retrain payload: %#v", retrain)
+	}
+
+	for _, want := range []string{
+		"GET /internal/runtime/v1/orchestration/decisions?limit=1",
+		"POST /internal/runtime/v1/orchestration/ml-models/bandwidth/retrain",
+	} {
+		if got := <-requests; got != want {
+			t.Fatalf("expected runtime orchestration request %q, got %q", want, got)
+		}
+	}
+}
+
+func TestRegisterSecureAPIRoutesFallsBackAfterRuntimeOrchestrationPostFailure(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	runtimeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("runtime server should be closed before fallback request")
+	}))
+	runtimeURL := runtimeServer.URL
+	runtimeServer.Close()
+
+	t.Setenv(canonicalRuntimeOrchestrationEnv, "true")
+	t.Setenv(canonicalRuntimeBaseURLEnv, runtimeURL)
+
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	router := mux.NewRouter()
+	apiV1 := router.PathPrefix("/api/v1").Subrouter()
+	apiV1.Use(requireAuth(authManager))
+	registerSecureAPIRoutes(apiV1, db)
+
+	policy := map[string]interface{}{
+		"name":        "Fallback Policy",
+		"description": "runtime proxy failure should preserve request body",
+		"enabled":     true,
+		"priority":    3,
+		"rules":       []interface{}{},
+	}
+
+	createRec := performAuthenticatedAPIRequest(t, router, authManager, http.MethodPost, "/api/v1/orchestration/policies", policy)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected fallback create status 201, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+	var created map[string]interface{}
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode fallback-created policy: %v", err)
+	}
+	if created["name"] != "Fallback Policy" || created["id"] == "" {
+		t.Fatalf("expected fallback-created policy to preserve request body, got %#v", created)
+	}
+}
+
 func TestRegisterSecureAPIRoutesFallsBackToSQLForInventoryReadsWhenRuntimeUnavailable(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
