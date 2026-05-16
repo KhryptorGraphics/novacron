@@ -31,6 +31,9 @@ type ProductionValidationSuite struct {
 
 	securityValidationOnce sync.Once
 	securityValidationErr  error
+
+	validationMu      sync.Mutex
+	validationResults map[string]error
 }
 
 // ValidationResults tracks validation test results
@@ -97,9 +100,10 @@ type AlertThresholds struct {
 // NewProductionValidationSuite creates a new production validation suite
 func NewProductionValidationSuite(t *testing.T) *ProductionValidationSuite {
 	return &ProductionValidationSuite{
-		t:           t,
-		startTime:   time.Now(),
-		projectRoot: findProjectRoot(t),
+		t:                 t,
+		startTime:         time.Now(),
+		projectRoot:       findProjectRoot(t),
+		validationResults: make(map[string]error),
 		results: &ValidationResults{
 			TestResults:     make(map[string]TestResult),
 			Recommendations: make([]string, 0),
@@ -166,6 +170,29 @@ func (s *ProductionValidationSuite) ensureSecurityValidation() error {
 	})
 
 	return s.securityValidationErr
+}
+
+func (s *ProductionValidationSuite) ensureGoTest(relativeDir string, args ...string) error {
+	s.validationMu.Lock()
+	defer s.validationMu.Unlock()
+
+	key := relativeDir + fmt.Sprint(args)
+	if err, ok := s.validationResults[key]; ok {
+		return err
+	}
+
+	cmdArgs := append([]string{"test", "."}, args...)
+	cmdArgs = append(cmdArgs, "-count=1", "-timeout=60s")
+
+	cmd := exec.Command("go", cmdArgs...)
+	cmd.Dir = filepath.Join(s.projectRoot, relativeDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		err = fmt.Errorf("go test failed in %s: %w\n%s", relativeDir, err, string(output))
+	}
+
+	s.validationResults[key] = err
+	return err
 }
 
 // RunAllValidations executes all production validation tests
@@ -503,8 +530,7 @@ func (s *ProductionValidationSuite) runTest(name, component, severity string, fn
 
 // Test implementation functions (stubs for comprehensive coverage)
 func (s *ProductionValidationSuite) testProtocolVersion() error {
-	// Validate protocol version compatibility
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/transport")
 }
 
 func (s *ProductionValidationSuite) testMessageSerialization() error {
@@ -526,43 +552,35 @@ func (s *ProductionValidationSuite) testMessageSerialization() error {
 }
 
 func (s *ProductionValidationSuite) testMessageRouting() error {
-	// Test message routing logic
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/transport")
 }
 
 func (s *ProductionValidationSuite) testConnectionManagement() error {
-	// Test connection pool and lifecycle
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/transport")
 }
 
 func (s *ProductionValidationSuite) testHeartbeat() error {
-	// Test heartbeat mechanism
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/transport")
 }
 
 func (s *ProductionValidationSuite) testProtocolUpgrade() error {
-	// Test protocol upgrade path
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestBackwardCompatibility")
 }
 
 func (s *ProductionValidationSuite) testMessageCompression() error {
-	// Test message compression
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/encoding")
 }
 
 func (s *ProductionValidationSuite) testFlowControl() error {
-	// Test flow control mechanisms
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/transport")
 }
 
 func (s *ProductionValidationSuite) testBackpressure() error {
-	// Test backpressure handling
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/transport")
 }
 
 func (s *ProductionValidationSuite) testProtocolMetrics() error {
-	// Test protocol metrics collection
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/monitoring")
 }
 
 func (s *ProductionValidationSuite) testConsensusParticipation() error {
@@ -672,53 +690,43 @@ func (s *ProductionValidationSuite) testVMCleanup() error {
 }
 
 func (s *ProductionValidationSuite) testNetworkConnectivity() error {
-	// Test network connectivity
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/transport")
 }
 
 func (s *ProductionValidationSuite) testPeerDiscovery() error {
-	// Test peer discovery
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/transport")
 }
 
 func (s *ProductionValidationSuite) testMessageDelivery() error {
-	// Test message delivery reliability
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/transport")
 }
 
 func (s *ProductionValidationSuite) testNetworkLatency() error {
-	// Test network latency
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/transport")
 }
 
 func (s *ProductionValidationSuite) testBandwidth() error {
-	// Test bandwidth utilization
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/transport")
 }
 
 func (s *ProductionValidationSuite) testConnectionPool() error {
-	// Test connection pool
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/transport")
 }
 
 func (s *ProductionValidationSuite) testNetworkPartition() error {
-	// Test network partition handling
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestDisasterRecovery")
 }
 
 func (s *ProductionValidationSuite) testNATTraversal() error {
-	// Test NAT traversal
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/transport")
 }
 
 func (s *ProductionValidationSuite) testNetworkEncryption() error {
-	// Test network encryption
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testDDoSProtection() error {
-	// Test DDoS protection
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testAuthentication() error {
@@ -912,53 +920,43 @@ func (s *ProductionValidationSuite) testServiceContinuity() error {
 }
 
 func (s *ProductionValidationSuite) testMetricsCollection() error {
-	// Test metrics collection
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/monitoring")
 }
 
 func (s *ProductionValidationSuite) testLogAggregation() error {
-	// Test log aggregation
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/monitoring")
 }
 
 func (s *ProductionValidationSuite) testDistributedTracing() error {
-	// Test distributed tracing
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/monitoring")
 }
 
 func (s *ProductionValidationSuite) testAlertGeneration() error {
-	// Test alert generation
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/monitoring")
 }
 
 func (s *ProductionValidationSuite) testHealthChecks() error {
-	// Test health checks
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/monitoring")
 }
 
 func (s *ProductionValidationSuite) testPerformanceMonitoring() error {
-	// Test performance monitoring
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/monitoring")
 }
 
 func (s *ProductionValidationSuite) testErrorTracking() error {
-	// Test error tracking
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/monitoring")
 }
 
 func (s *ProductionValidationSuite) testResourceMonitoring() error {
-	// Test resource monitoring
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/monitoring")
 }
 
 func (s *ProductionValidationSuite) testDashboardAccuracy() error {
-	// Test dashboard accuracy
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/monitoring")
 }
 
 func (s *ProductionValidationSuite) testSLATracking() error {
-	// Test SLA tracking
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/monitoring")
 }
 
 func (s *ProductionValidationSuite) testGDPRCompliance() error {
