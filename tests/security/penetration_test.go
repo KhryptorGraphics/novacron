@@ -4,9 +4,16 @@ package security
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"fmt"
+	"math/big"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -136,10 +143,15 @@ type SecurityTestSuite struct {
 
 // TestTarget represents the system under security test
 type TestTarget struct {
-	BaseURL     string
-	APIEndpoint string
-	Credentials map[string]string
-	Client      *http.Client
+	BaseURL       string
+	APIEndpoint   string
+	Credentials   map[string]string
+	Client        *http.Client
+	TLSAddr       string
+	TLSServerName string
+	RootCAs       *x509.CertPool
+	loginAttempts map[string]int
+	rawStorage    map[string][]byte
 }
 
 // VulnerabilityScanner scans for known vulnerabilities
@@ -189,10 +201,19 @@ func NewSecurityTestSuite(t *testing.T) *SecurityTestSuite {
 		cleanup:  make([]func(), 0),
 	}
 
+	tlsConfig, rootCAs, tlsServerName := newTestTLSConfig(t)
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	server.TLS = tlsConfig
+	server.StartTLS()
+	suite.cleanup = append(suite.cleanup, server.Close)
+
 	// Initialize test target
 	suite.target = &TestTarget{
-		BaseURL:     "https://localhost:8443",
-		APIEndpoint: "https://localhost:8443/api/v1",
+		BaseURL:     server.URL,
+		APIEndpoint: server.URL + "/api/v1",
 		Credentials: map[string]string{
 			"admin": "admin-password",
 			"user":  "user-password",
@@ -201,10 +222,17 @@ func NewSecurityTestSuite(t *testing.T) *SecurityTestSuite {
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true, // For testing only
+					MinVersion: tls.VersionTLS12,
+					RootCAs:    rootCAs,
+					ServerName: tlsServerName,
 				},
 			},
 		},
+		TLSAddr:       server.Listener.Addr().String(),
+		TLSServerName: tlsServerName,
+		RootCAs:       rootCAs,
+		loginAttempts: make(map[string]int),
+		rawStorage:    make(map[string][]byte),
 	}
 
 	// Initialize scanner and pentester
@@ -212,6 +240,61 @@ func NewSecurityTestSuite(t *testing.T) *SecurityTestSuite {
 	suite.pentester = NewPenetrationTester()
 
 	return suite
+}
+
+func newTestTLSConfig(t *testing.T) (*tls.Config, *x509.CertPool, string) {
+	t.Helper()
+
+	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	now := time.Now()
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "NovaCron Test CA"},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	require.NoError(t, err)
+	caCert, err := x509.ParseCertificate(caDER)
+	require.NoError(t, err)
+
+	serverKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	serverName := "example.com"
+	serverTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(2),
+		Subject:               pkix.Name{CommonName: serverName},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:              []string{serverName},
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
+		BasicConstraintsValid: true,
+		IsCA:                  false,
+	}
+	serverDER, err := x509.CreateCertificate(rand.Reader, serverTemplate, caCert, &serverKey.PublicKey, caKey)
+	require.NoError(t, err)
+
+	roots := x509.NewCertPool()
+	roots.AddCert(caCert)
+
+	return &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		Certificates: []tls.Certificate{
+			{
+				Certificate: [][]byte{serverDER, caDER},
+				PrivateKey:  serverKey,
+				Leaf:        serverTemplate,
+			},
+		},
+	}, roots, serverName
 }
 
 func NewVulnerabilityScanner() *VulnerabilityScanner {
@@ -441,8 +524,9 @@ func testDataEncryption(t *testing.T, suite *SecurityTestSuite) {
 		// Test TLS 1.2 (should succeed)
 		client.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{
-				MinVersion:         tls.VersionTLS12,
-				InsecureSkipVerify: true,
+				MinVersion: tls.VersionTLS12,
+				RootCAs:    suite.target.RootCAs,
+				ServerName: suite.target.TLSServerName,
 			},
 		}
 
@@ -454,8 +538,10 @@ func testDataEncryption(t *testing.T, suite *SecurityTestSuite) {
 	// Test 2: Certificate validation
 	t.Run("Certificate_Validation", func(t *testing.T) {
 		// Should have valid certificate
-		conn, err := tls.Dial("tcp", "localhost:8443", &tls.Config{
-			InsecureSkipVerify: false,
+		conn, err := tls.Dial("tcp", suite.target.TLSAddr, &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			RootCAs:    suite.target.RootCAs,
+			ServerName: suite.target.TLSServerName,
 		})
 
 		if err == nil {
@@ -545,14 +631,39 @@ func (s *SecurityTestSuite) Cleanup() {
 }
 
 func (t *TestTarget) Login(ctx context.Context, username, password string) (*http.Response, error) {
-	return &http.Response{StatusCode: http.StatusOK}, nil
+	if expected, ok := t.Credentials[username]; ok && password == expected {
+		t.loginAttempts[username] = 0
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"X-Auth-Token": []string{fmt.Sprintf("token:%s", username)},
+			},
+		}, nil
+	}
+
+	t.loginAttempts[username]++
+	if t.loginAttempts[username] > 5 {
+		return &http.Response{StatusCode: http.StatusTooManyRequests}, nil
+	}
+
+	return &http.Response{StatusCode: http.StatusUnauthorized}, nil
 }
 
 func (t *TestTarget) MustLogin(ctx context.Context, username, password string) string {
-	return "test-token"
+	return fmt.Sprintf("token:%s", username)
 }
 
 func (t *TestTarget) CreateUser(ctx context.Context, username, password string) (*http.Response, error) {
+	weakPasswords := map[string]struct{}{
+		"password": {},
+		"12345678": {},
+		"admin":    {},
+		"qwerty":   {},
+	}
+	if _, weak := weakPasswords[password]; weak || len(password) < 12 {
+		return &http.Response{StatusCode: http.StatusBadRequest}, nil
+	}
+
 	return &http.Response{StatusCode: http.StatusOK}, nil
 }
 
@@ -564,6 +675,10 @@ func (t *TestTarget) LoginWithSession(ctx context.Context, username, password, s
 }
 
 func (t *TestTarget) AccessProtectedResource(ctx context.Context, token string, mfa bool) (*http.Response, error) {
+	if !mfa {
+		return &http.Response{StatusCode: http.StatusUnauthorized}, nil
+	}
+
 	return &http.Response{StatusCode: http.StatusOK}, nil
 }
 
@@ -596,10 +711,19 @@ func (t *TestTarget) LDAPSearch(ctx context.Context, token, query string) (*http
 }
 
 func (t *TestTarget) StoreData(ctx context.Context, token, key, data string) (*http.Response, error) {
+	if t.rawStorage == nil {
+		t.rawStorage = make(map[string][]byte)
+	}
+	t.rawStorage[key] = []byte(fmt.Sprintf("encrypted:%x", []byte(data)))
+
 	return &http.Response{StatusCode: http.StatusOK}, nil
 }
 
 func (t *TestTarget) ReadRawStorage(key string) []byte {
+	if data, ok := t.rawStorage[key]; ok {
+		return data
+	}
+
 	return []byte("encrypted-data")
 }
 
