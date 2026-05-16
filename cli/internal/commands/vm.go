@@ -2,9 +2,12 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/novacron/cli/pkg/api"
@@ -12,7 +15,10 @@ import (
 	"github.com/novacron/cli/pkg/output"
 	"github.com/novacron/cli/pkg/service"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
+
+var waitPollInterval = time.Second
 
 // NewVMCommand creates the VM command
 func NewVMCommand() *cobra.Command {
@@ -387,14 +393,14 @@ func newVMDeleteCommand() *cobra.Command {
 func filterVMsBySelector(vms []api.VirtualMachine, selector string) []api.VirtualMachine {
 	// Parse selector
 	selectors := parseLabels([]string{selector})
-	
+
 	var filtered []api.VirtualMachine
 	for _, vm := range vms {
 		if matchLabels(vm.Metadata.Labels, selectors) {
 			filtered = append(filtered, vm)
 		}
 	}
-	
+
 	return filtered
 }
 
@@ -419,26 +425,163 @@ func matchLabels(vmLabels, selectors map[string]string) bool {
 }
 
 func parseVMManifest(data []byte) (*api.VirtualMachine, error) {
-	// TODO: Implement YAML/JSON parsing
-	return nil, fmt.Errorf("manifest parsing not implemented")
+	var vm api.VirtualMachine
+	if json.Valid(data) {
+		if err := json.Unmarshal(data, &vm); err != nil {
+			return nil, fmt.Errorf("failed to parse VM JSON manifest: %w", err)
+		}
+	} else {
+		var raw interface{}
+		if err := yaml.Unmarshal(data, &raw); err != nil {
+			return nil, fmt.Errorf("failed to parse VM YAML manifest: %w", err)
+		}
+
+		normalized, err := json.Marshal(normalizeYAMLValue(raw))
+		if err != nil {
+			return nil, fmt.Errorf("failed to normalize VM YAML manifest: %w", err)
+		}
+		if err := json.Unmarshal(normalized, &vm); err != nil {
+			return nil, fmt.Errorf("failed to decode VM YAML manifest: %w", err)
+		}
+	}
+
+	if strings.TrimSpace(vm.Name) == "" {
+		return nil, fmt.Errorf("VM manifest name is required")
+	}
+
+	return &vm, nil
 }
 
 func waitForVM(service *service.VMService, namespace, name, targetPhase string, timeout time.Duration) error {
-	// TODO: Implement wait logic
-	return nil
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	lastPhase := "unknown"
+	for {
+		vm, err := service.Get(ctx, namespace, name)
+		if err != nil {
+			if ctx.Err() != nil {
+				return fmt.Errorf("timed out waiting for VM %s/%s to reach %s; last phase %s", namespace, name, targetPhase, lastPhase)
+			}
+			return err
+		}
+		lastPhase = vm.Status.Phase
+		if strings.EqualFold(lastPhase, targetPhase) {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for VM %s/%s to reach %s; last phase %s", namespace, name, targetPhase, lastPhase)
+		case <-time.After(waitPollInterval):
+		}
+	}
 }
 
 func waitForVMDeleted(service *service.VMService, namespace, name string, timeout time.Duration) error {
-	// TODO: Implement wait logic
-	return nil
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	for {
+		_, err := service.Get(ctx, namespace, name)
+		if isNotFoundError(err) {
+			return nil
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return fmt.Errorf("timed out waiting for VM %s/%s to be deleted", namespace, name)
+			}
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for VM %s/%s to be deleted", namespace, name)
+		case <-time.After(waitPollInterval):
+		}
+	}
 }
 
 func printVMTable(vms []api.VirtualMachine, showNodes, wide bool) error {
-	// TODO: Implement table printing
-	fmt.Println("NAME\tSTATUS\tAGE")
+	w := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
+	headers := []string{"NAME", "STATUS", "AGE"}
+	if showNodes {
+		headers = append(headers, "NODE")
+	}
+	if wide {
+		headers = append(headers, "NAMESPACE", "IP", "CPU", "MEMORY", "IMAGE")
+	}
+	fmt.Fprintln(w, strings.Join(headers, "\t"))
+
 	for _, vm := range vms {
 		age := time.Since(vm.CreatedAt).Round(time.Second)
-		fmt.Printf("%s\t%s\t%s\n", vm.Name, vm.Status.Phase, age)
+		row := []string{vm.Name, vm.Status.Phase, age.String()}
+		if showNodes {
+			row = append(row, valueOrDash(vm.Status.NodeName))
+		}
+		if wide {
+			row = append(row,
+				valueOrDash(vm.Namespace),
+				firstOrDash(vm.Status.IPAddresses),
+				fmt.Sprintf("%d", vm.Spec.Template.Spec.Resources.CPU),
+				valueOrDash(vm.Spec.Template.Spec.Resources.Memory),
+				valueOrDash(vm.Spec.Template.Spec.Image.Source),
+			)
+		}
+		fmt.Fprintln(w, strings.Join(row, "\t"))
 	}
-	return nil
+	return w.Flush()
+}
+
+func normalizeYAMLValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		normalized := make(map[string]interface{}, len(typed))
+		for key, val := range typed {
+			normalized[key] = normalizeYAMLValue(val)
+		}
+		return normalized
+	case map[interface{}]interface{}:
+		normalized := make(map[string]interface{}, len(typed))
+		for key, val := range typed {
+			normalized[fmt.Sprint(key)] = normalizeYAMLValue(val)
+		}
+		return normalized
+	case []interface{}:
+		for i, val := range typed {
+			typed[i] = normalizeYAMLValue(val)
+		}
+		return typed
+	default:
+		return value
+	}
+}
+
+func isNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var apiErr *api.ErrorResponse
+	if errors.As(err, &apiErr) {
+		code := strings.ToLower(apiErr.Code)
+		return code == "not_found" || code == "notfound" || code == "404"
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "status 404") || strings.Contains(message, "not found")
+}
+
+func valueOrDash(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func firstOrDash(values []string) string {
+	if len(values) == 0 {
+		return "-"
+	}
+	return valueOrDash(values[0])
 }
