@@ -18,6 +18,8 @@ func newDWCPTestVM(t testing.TB, id string) *vm.VM {
 		ID:       id,
 		Name:     id,
 		Type:     vm.VMTypeContainer,
+		Command:  "/bin/sleep",
+		Args:     []string{"60"},
 		MemoryMB: 1024,
 	})
 	require.NoError(t, err)
@@ -193,13 +195,12 @@ func TestDWCPDictionaryTraining(t *testing.T) {
 	require.NoError(t, err)
 	defer orchestrator.Close()
 
-	// Create sample data for training
-	samples := make([][]byte, 10)
+	// Create enough structured sample data for zstd dictionary training.
+	samples := make([][]byte, 64)
 	for i := range samples {
-		samples[i] = make([]byte, 1024)
-		// Fill with pattern
+		samples[i] = make([]byte, 16*1024)
 		for j := range samples[i] {
-			samples[i][j] = byte(i + j)
+			samples[i][j] = byte((j % 251) ^ (i % 17))
 		}
 	}
 

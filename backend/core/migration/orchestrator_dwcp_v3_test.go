@@ -623,7 +623,8 @@ func TestMetricsCollection(t *testing.T) {
 			upgrade.ModeHybrid,
 		}[i]
 
-		dwcpConfig.NetworkMode = mode
+		orchestrator.config.NetworkMode = mode
+		orchestrator.config.AutoSwitchMode = false
 		orchestrator.currentMode = mode
 
 		migration, err := orchestrator.StartMigration(ctx, vmID, "source", "dest")

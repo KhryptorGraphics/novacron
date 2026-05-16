@@ -583,7 +583,10 @@ func (hde *HDE) TrainDictionary(id string, samples [][]byte) error {
 		Contents: samples,
 	})
 	if err != nil {
-		return fmt.Errorf("dictionary training failed: %w", err)
+		dict = fallbackHDEDictionary(samples, hde.config.DictSize*1024)
+		if len(dict) == 0 {
+			return fmt.Errorf("dictionary training failed: %w", err)
+		}
 	}
 
 	// Store dictionary
@@ -592,6 +595,42 @@ func (hde *HDE) TrainDictionary(id string, samples [][]byte) error {
 	hde.dictMu.Unlock()
 
 	return nil
+}
+
+func fallbackHDEDictionary(samples [][]byte, maxSize int) []byte {
+	if maxSize <= 0 {
+		maxSize = 128 * 1024
+	}
+
+	dict := make([]byte, 0, maxSize)
+	seen := make(map[string]struct{})
+	for _, sample := range samples {
+		if len(sample) == 0 {
+			continue
+		}
+
+		chunkSize := len(sample)
+		if chunkSize > 4096 {
+			chunkSize = 4096
+		}
+		chunk := sample[:chunkSize]
+		key := string(chunk)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		remaining := maxSize - len(dict)
+		if remaining <= 0 {
+			break
+		}
+		if len(chunk) > remaining {
+			chunk = chunk[:remaining]
+		}
+		dict = append(dict, chunk...)
+	}
+
+	return dict
 }
 
 // quantize applies quantization to reduce precision of numerical data

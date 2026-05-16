@@ -792,7 +792,7 @@ func (o *LiveMigrationOrchestrator) canStartMigration() bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	return len(o.activeMigrations) < o.config.MaxConcurrentMigrations
+	return len(o.activeMigrations) <= o.config.MaxConcurrentMigrations
 }
 
 // handleMigrationError handles migration errors

@@ -635,6 +635,8 @@ func (m *MigrationMonitor) getMetricsMap(metrics *MigrationMetrics) map[string]i
 
 // GetDashboardData returns data for the migration dashboard
 func (m *MigrationMonitor) GetDashboardData() *DashboardData {
+	m.updateDashboardData()
+
 	m.dashboardData.mu.RLock()
 	defer m.dashboardData.mu.RUnlock()
 
