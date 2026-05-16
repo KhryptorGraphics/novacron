@@ -19,6 +19,15 @@ func (m staticModeMetrics) GetAverageBandwidth() int64 {
 	return m.bandwidth
 }
 
+type staticModeMetricsWithLoss struct {
+	staticModeMetrics
+	packetLoss float64
+}
+
+func (m staticModeMetricsWithLoss) GetPacketLossRatio() float64 {
+	return m.packetLoss
+}
+
 func TestModeDetectorUsesMetricsCollector(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -65,6 +74,21 @@ func TestModeDetectorUsesMetricsCollector(t *testing.T) {
 				t.Fatalf("DetectMode() = %s, want %s", got, tt.wantMode)
 			}
 		})
+	}
+}
+
+func TestModeDetectorUsesPacketLossWhenCollectorReportsIt(t *testing.T) {
+	detector := NewModeDetector()
+	detector.SetMetricsCollector(staticModeMetricsWithLoss{
+		staticModeMetrics: staticModeMetrics{
+			latency:   5 * time.Millisecond,
+			bandwidth: 2_000_000_000,
+		},
+		packetLoss: 0.02,
+	})
+
+	if got := detector.DetectMode(context.Background()); got != ModeInternet {
+		t.Fatalf("DetectMode() = %s, want %s for high packet loss", got, ModeInternet)
 	}
 }
 

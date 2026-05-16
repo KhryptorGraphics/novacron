@@ -41,11 +41,14 @@ type ModeDetector struct {
 	internetLatencyThreshold     time.Duration // >50ms for internet
 	datacenterBandwidthThreshold int64         // >1 Gbps for datacenter
 	internetBandwidthThreshold   int64         // <1 Gbps for internet
+	datacenterPacketLossMax      float64       // <=0.1% for datacenter
+	internetPacketLossThreshold  float64       // >1% for internet
 
 	// Historical metrics for better detection
-	latencyHistory   []time.Duration
-	bandwidthHistory []int64
-	historySize      int
+	latencyHistory    []time.Duration
+	bandwidthHistory  []int64
+	packetLossHistory []float64
+	historySize       int
 
 	// Metrics collector (interface to avoid circular dependency)
 	metricsCollector interface {
@@ -64,8 +67,11 @@ func NewModeDetector() *ModeDetector {
 		internetLatencyThreshold:     50 * time.Millisecond,
 		datacenterBandwidthThreshold: 1e9, // 1 Gbps
 		internetBandwidthThreshold:   1e9, // 1 Gbps
+		datacenterPacketLossMax:      0.001,
+		internetPacketLossThreshold:  0.01,
 		latencyHistory:               make([]time.Duration, 0, 10),
 		bandwidthHistory:             make([]int64, 0, 10),
+		packetLossHistory:            make([]float64, 0, 10),
 		historySize:                  10,
 	}
 }
@@ -78,22 +84,28 @@ func (md *ModeDetector) DetectMode(ctx context.Context) NetworkMode {
 	// Measure current conditions
 	latency := md.measureLatency(ctx)
 	bandwidth := md.measureBandwidth(ctx)
+	packetLoss := md.measurePacketLoss(ctx)
 
 	// Add to history
-	md.addToHistory(latency, bandwidth)
+	md.addToHistory(latency, bandwidth, packetLoss)
 
 	// Calculate average from history for stability
 	avgLatency := md.averageLatency()
 	avgBandwidth := md.averageBandwidth()
+	avgPacketLoss := md.averagePacketLoss()
 
 	// Datacenter mode: low latency AND high bandwidth
-	if avgLatency < md.datacenterLatencyThreshold && avgBandwidth >= md.datacenterBandwidthThreshold {
+	if avgLatency < md.datacenterLatencyThreshold &&
+		avgBandwidth >= md.datacenterBandwidthThreshold &&
+		avgPacketLoss <= md.datacenterPacketLossMax {
 		md.currentMode = ModeDatacenter
 		return ModeDatacenter
 	}
 
 	// Internet mode: high latency OR low bandwidth
-	if avgLatency > md.internetLatencyThreshold || avgBandwidth < md.internetBandwidthThreshold {
+	if avgLatency > md.internetLatencyThreshold ||
+		avgBandwidth < md.internetBandwidthThreshold ||
+		avgPacketLoss > md.internetPacketLossThreshold {
 		md.currentMode = ModeInternet
 		return ModeInternet
 	}
@@ -140,21 +152,41 @@ func (md *ModeDetector) measureBandwidth(ctx context.Context) int64 {
 	return md.datacenterBandwidthThreshold
 }
 
+// measurePacketLoss measures packet loss ratio from optional collector telemetry.
+func (md *ModeDetector) measurePacketLoss(ctx context.Context) float64 {
+	if md.metricsCollector != nil {
+		if collector, ok := md.metricsCollector.(interface {
+			GetPacketLossRatio() float64
+		}); ok {
+			if packetLoss := collector.GetPacketLossRatio(); packetLoss > 0 {
+				return packetLoss
+			}
+		}
+	}
+
+	if len(md.packetLossHistory) > 0 {
+		return md.averagePacketLoss()
+	}
+
+	return 0
+}
+
 // addToHistory adds measurements to history with circular buffer
-func (md *ModeDetector) addToHistory(latency time.Duration, bandwidth int64) {
-	// Add latency
+func (md *ModeDetector) addToHistory(latency time.Duration, bandwidth int64, packetLoss float64) {
 	if len(md.latencyHistory) >= md.historySize {
-		// Remove oldest
 		md.latencyHistory = md.latencyHistory[1:]
 	}
 	md.latencyHistory = append(md.latencyHistory, latency)
 
-	// Add bandwidth
 	if len(md.bandwidthHistory) >= md.historySize {
-		// Remove oldest
 		md.bandwidthHistory = md.bandwidthHistory[1:]
 	}
 	md.bandwidthHistory = append(md.bandwidthHistory, bandwidth)
+
+	if len(md.packetLossHistory) >= md.historySize {
+		md.packetLossHistory = md.packetLossHistory[1:]
+	}
+	md.packetLossHistory = append(md.packetLossHistory, packetLoss)
 }
 
 // averageLatency calculates average latency from history
@@ -181,6 +213,19 @@ func (md *ModeDetector) averageBandwidth() int64 {
 		sum += bw
 	}
 	return sum / int64(len(md.bandwidthHistory))
+}
+
+// averagePacketLoss calculates average packet loss ratio from history.
+func (md *ModeDetector) averagePacketLoss() float64 {
+	if len(md.packetLossHistory) == 0 {
+		return 0
+	}
+
+	var sum float64
+	for _, loss := range md.packetLossHistory {
+		sum += loss
+	}
+	return sum / float64(len(md.packetLossHistory))
 }
 
 // SetMetricsCollector sets the metrics collector for accurate measurements
