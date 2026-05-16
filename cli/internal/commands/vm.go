@@ -72,9 +72,7 @@ func newVMListCommand() *cobra.Command {
 			}
 
 			// Create API client
-			client, err := api.NewClient(cluster.Server,
-				api.WithInsecure(cluster.Insecure),
-			)
+			client, err := newClusterAPIClient(cluster)
 			if err != nil {
 				return err
 			}
@@ -143,9 +141,7 @@ func newVMGetCommand() *cobra.Command {
 			}
 
 			// Create API client
-			client, err := api.NewClient(cluster.Server,
-				api.WithInsecure(cluster.Insecure),
-			)
+			client, err := newClusterAPIClient(cluster)
 			if err != nil {
 				return err
 			}
@@ -263,9 +259,7 @@ func newVMCreateCommand() *cobra.Command {
 			}
 
 			// Create API client
-			client, err := api.NewClient(cluster.Server,
-				api.WithInsecure(cluster.Insecure),
-			)
+			client, err := newClusterAPIClient(cluster)
 			if err != nil {
 				return err
 			}
@@ -349,9 +343,7 @@ func newVMDeleteCommand() *cobra.Command {
 			}
 
 			// Create API client
-			client, err := api.NewClient(cluster.Server,
-				api.WithInsecure(cluster.Insecure),
-			)
+			client, err := newClusterAPIClient(cluster)
 			if err != nil {
 				return err
 			}

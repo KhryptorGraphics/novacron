@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/novacron/cli/pkg/api"
 	"github.com/novacron/cli/pkg/config"
 	"github.com/novacron/cli/pkg/service"
 	"github.com/spf13/cobra"
@@ -35,9 +34,7 @@ func newVMStartCommand() *cobra.Command {
 			}
 
 			// Create API client
-			client, err := api.NewClient(cluster.Server,
-				api.WithInsecure(cluster.Insecure),
-			)
+			client, err := newClusterAPIClient(cluster)
 			if err != nil {
 				return err
 			}
@@ -100,9 +97,7 @@ func newVMStopCommand() *cobra.Command {
 			}
 
 			// Create API client
-			client, err := api.NewClient(cluster.Server,
-				api.WithInsecure(cluster.Insecure),
-			)
+			client, err := newClusterAPIClient(cluster)
 			if err != nil {
 				return err
 			}
@@ -163,9 +158,7 @@ func newVMRestartCommand() *cobra.Command {
 			}
 
 			// Create API client
-			client, err := api.NewClient(cluster.Server,
-				api.WithInsecure(cluster.Insecure),
-			)
+			client, err := newClusterAPIClient(cluster)
 			if err != nil {
 				return err
 			}
@@ -233,9 +226,7 @@ func newVMMigrateCommand() *cobra.Command {
 			}
 
 			// Create API client
-			client, err := api.NewClient(cluster.Server,
-				api.WithInsecure(cluster.Insecure),
-			)
+			client, err := newClusterAPIClient(cluster)
 			if err != nil {
 				return err
 			}
@@ -310,9 +301,7 @@ func newVMResizeCommand() *cobra.Command {
 			}
 
 			// Create API client
-			client, err := api.NewClient(cluster.Server,
-				api.WithInsecure(cluster.Insecure),
-			)
+			client, err := newClusterAPIClient(cluster)
 			if err != nil {
 				return err
 			}
@@ -363,9 +352,7 @@ func newVMConsoleCommand() *cobra.Command {
 			}
 
 			// Create API client
-			client, err := api.NewClient(cluster.Server,
-				api.WithInsecure(cluster.Insecure),
-			)
+			client, err := newClusterAPIClient(cluster)
 			if err != nil {
 				return err
 			}
