@@ -6,14 +6,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-RESULTS_DIR="${PROJECT_ROOT}/docs/phase6/security-results"
-LOG_DIR="${PROJECT_ROOT}/logs/security"
+RESULTS_DIR="${RESULTS_DIR:-${PROJECT_ROOT}/docs/phase6/security-results}"
+LOG_DIR="${LOG_DIR:-${PROJECT_ROOT}/logs/security}"
 
 # Configuration
-SECURITY_SCAN_ENABLED=true
-COMPLIANCE_CHECK_ENABLED=true
-BYZANTINE_DETECTION_ENABLED=true
-VULNERABILITY_SCAN_ENABLED=true
+SECURITY_SCAN_ENABLED="${SECURITY_SCAN_ENABLED:-true}"
+COMPLIANCE_CHECK_ENABLED="${COMPLIANCE_CHECK_ENABLED:-true}"
+BYZANTINE_DETECTION_ENABLED="${BYZANTINE_DETECTION_ENABLED:-true}"
+VULNERABILITY_SCAN_ENABLED="${VULNERABILITY_SCAN_ENABLED:-true}"
+SECURITY_TEST_TIMEOUT="${SECURITY_TEST_TIMEOUT:-60}"
 
 mkdir -p "${RESULTS_DIR}" "${LOG_DIR}"
 
@@ -37,6 +38,45 @@ log_error() {
 
 log_warning() {
     echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} ⚠️  $*" | tee -a "${LOG_DIR}/security.log"
+}
+
+require_file() {
+    local path="$1"
+    if [[ ! -f "${PROJECT_ROOT}/${path}" ]]; then
+        log_error "Missing required security artifact: ${path}"
+        return 1
+    fi
+}
+
+require_pattern() {
+    local pattern="$1"
+    shift
+
+    local paths=()
+    local path
+    for path in "$@"; do
+        if [[ -e "${PROJECT_ROOT}/${path}" ]]; then
+            paths+=("${PROJECT_ROOT}/${path}")
+        fi
+    done
+
+    if [[ ${#paths[@]} -eq 0 ]]; then
+        log_error "No searchable paths exist for pattern: ${pattern}"
+        return 1
+    fi
+
+    if command -v rg >/dev/null 2>&1; then
+        rg -qi -- "${pattern}" "${paths[@]}"
+    else
+        grep -RIEqi -- "${pattern}" "${paths[@]}"
+    fi
+}
+
+run_backend_core_test() {
+    local package="$1"
+    local pattern="$2"
+
+    (cd "${PROJECT_ROOT}/backend/core" && go test "${package}" -run "${pattern}" -count=1 -timeout "${SECURITY_TEST_TIMEOUT}s")
 }
 
 # Initialize results
@@ -92,23 +132,31 @@ validate_authentication() {
 }
 
 validate_jwt_tokens() {
-    # Simulate JWT validation
-    return 0
+    require_file "backend/core/auth/security_integration.go" &&
+        require_pattern "JWT|jwt" \
+            "backend/core/auth" \
+            "policies/dwcp-v3-security.rego" \
+            "configs/security-hardening.yaml"
 }
 
 validate_tls_certificates() {
-    # Check TLS certificates
-    if command -v openssl &> /dev/null; then
-        # Check certificate expiration
-        # In production, this would check actual certificates
-        return 0
-    fi
-    return 0
+    command -v openssl >/dev/null 2>&1 || {
+        log_error "openssl is required for TLS validation"
+        return 1
+    }
+
+    require_file "backend/core/network/dwcp/v3/security/mode_security.go" &&
+        require_pattern "TLS1\\.2|TLS1\\.3|MinVersion|tls\\.Config" \
+            "backend/core/network/dwcp/v3/security" \
+            "policies/dwcp-v3-security.rego" \
+            "configs/security-hardening.yaml"
 }
 
 validate_api_keys() {
-    # Validate API key security
-    return 0
+    require_pattern "api[_-]?key|APIKey|ApiKey" \
+        "backend/api/security" \
+        "backend/core/security" \
+        "configs/security-hardening.yaml"
 }
 
 # Validate authorization and access control
@@ -150,18 +198,25 @@ validate_authorization() {
 }
 
 validate_rbac() {
-    # Validate RBAC implementation
-    return 0
+    require_file "backend/api/security/rbac_store.go" &&
+        require_pattern "RBAC|Role|Permission" \
+            "backend/api/security" \
+            "backend/core/security" \
+            "configs/security-hardening.yaml"
 }
 
 validate_permissions() {
-    # Validate permission checks
-    return 0
+    require_pattern "HasPermission|CheckPermission|Permission" \
+        "backend/api/security" \
+        "backend/core/security" \
+        "policies/dwcp-v3-security.rego"
 }
 
 validate_resource_access() {
-    # Validate resource-level access control
-    return 0
+    require_pattern "resource|Resource|access control|AccessControl" \
+        "backend/api/security" \
+        "backend/core/security" \
+        "configs/security-hardening.yaml"
 }
 
 # Validate encryption
@@ -203,18 +258,25 @@ validate_encryption() {
 }
 
 validate_encryption_at_rest() {
-    # Validate database encryption
-    return 0
+    require_pattern "at rest|AtRest|encrypt.*rest|database.*encrypt" \
+        "backend/core/security" \
+        "configs/security-hardening.yaml" \
+        "policies/dwcp-v3-security.rego"
 }
 
 validate_encryption_in_transit() {
-    # Validate TLS/SSL for all communications
-    return 0
+    require_pattern "TLS|mTLS|in transit|InTransit" \
+        "backend/core/security" \
+        "backend/core/network/dwcp/v3/security" \
+        "configs/security-hardening.yaml" \
+        "policies/dwcp-v3-security.rego"
 }
 
 validate_key_management() {
-    # Validate key rotation and storage
-    return 0
+    require_file "backend/core/security/secrets_manager.go" &&
+        require_pattern "rotation|Key|secret" \
+            "backend/core/security" \
+            "configs/security-hardening.yaml"
 }
 
 # Validate audit logging
@@ -256,18 +318,24 @@ validate_audit_logging() {
 }
 
 validate_security_events() {
-    # Validate security event capture
-    return 0
+    require_file "backend/core/security/security_event_handlers.go" &&
+        require_pattern "SecurityEvent|security event|LogEvent" \
+            "backend/core/security" \
+            "backend/api/security"
 }
 
 validate_audit_trail() {
-    # Validate audit trail completeness
-    return 0
+    require_file "backend/core/security/audit_logger.go" &&
+        require_pattern "audit|Audit" \
+            "backend/core/security" \
+            "configs/security-hardening.yaml" \
+            "policies/dwcp-v3-security.rego"
 }
 
 validate_log_integrity() {
-    # Validate log tampering protection
-    return 0
+    require_pattern "integrity|tamper|hash|checksum" \
+        "backend/core/security" \
+        "tests/integration/security_e2e_test.go"
 }
 
 # Validate Byzantine fault detection
@@ -309,18 +377,17 @@ validate_byzantine_detection() {
 }
 
 validate_malicious_node_detection() {
-    # Test detection of malicious nodes
-    return 0
+    run_backend_core_test "./network/dwcp/v3/security" "TestByzantineDetector_(InvalidSignature|MultipleViolationTypes)"
 }
 
 validate_byzantine_agreement() {
-    # Validate Byzantine consensus
-    return 0
+    run_backend_core_test "./network/dwcp/v3/security" "TestSecurityIntegration_ConsensusWithByzantine"
 }
 
 validate_fault_tolerance() {
-    # Validate fault tolerance (f < n/3)
-    return 0
+    require_pattern "f < n/3|Byzantine|quorum|threshold" \
+        "backend/core/network/dwcp/v3/security" \
+        "policies/dwcp-v3-security.rego"
 }
 
 # Validate compliance requirements
@@ -362,47 +429,95 @@ validate_compliance() {
 }
 
 validate_gdpr_compliance() {
-    # Validate GDPR requirements
-    return 0
+    require_pattern "GDPR|privacy_by_design|data_subject" \
+        "backend/core/security" \
+        "configs/security-hardening.yaml" \
+        "policies/dwcp-v3-security.rego"
 }
 
 validate_data_retention() {
-    # Validate data retention policies
-    return 0
+    require_pattern "retention" \
+        "configs" \
+        "policies/dwcp-v3-security.rego" \
+        "backend/core/security"
 }
 
 validate_privacy_controls() {
-    # Validate privacy controls
-    return 0
+    require_pattern "privacy|Privacy|PII|anonym" \
+        "backend/core/security" \
+        "configs/security-hardening.yaml" \
+        "policies/dwcp-v3-security.rego"
 }
 
 # Run vulnerability scan
 run_vulnerability_scan() {
     log "Running vulnerability scan..."
 
-    # Simulate vulnerability scan
-    cat > "${RESULTS_DIR}/vulnerability-scan-$(date +%s).json" <<EOF
+    local scan_file="${RESULTS_DIR}/vulnerability-scan-$(date +%s).json"
+    local inventory_file="${RESULTS_DIR}/dependency-inventory-$(date +%s).txt"
+
+    if command -v govulncheck >/dev/null 2>&1; then
+        if (cd "${PROJECT_ROOT}/backend/core" && govulncheck ./... > "${inventory_file}" 2>&1); then
+            cat > "${scan_file}" <<EOF
 {
     "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-    "scan_type": "full_system",
+    "scan_type": "govulncheck",
     "vulnerabilities_found": 0,
     "critical_vulnerabilities": 0,
     "high_vulnerabilities": 0,
     "medium_vulnerabilities": 0,
     "low_vulnerabilities": 0,
-    "scan_duration_seconds": 45,
     "scan_status": "completed",
-    "next_scan": "$(date -u -d '+24 hours' +%Y-%m-%dT%H:%M:%SZ)"
+    "scan_output": "${inventory_file}"
+}
+EOF
+            log_success "govulncheck completed: no reachable vulnerabilities reported"
+            return 0
+        fi
+
+        cat > "${scan_file}" <<EOF
+{
+    "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+    "scan_type": "govulncheck",
+    "vulnerabilities_found": null,
+    "scan_status": "failed",
+    "scan_output": "${inventory_file}"
+}
+EOF
+        log_error "govulncheck reported findings or failed"
+        return 1
+    fi
+
+    (cd "${PROJECT_ROOT}/backend/core" && go list -m all > "${inventory_file}")
+    cat > "${scan_file}" <<EOF
+{
+    "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+    "scan_type": "dependency_inventory",
+    "vulnerabilities_found": null,
+    "scan_status": "scanner_unavailable",
+    "scan_output": "${inventory_file}"
 }
 EOF
 
-    log_success "Vulnerability scan completed: 0 vulnerabilities found"
+    log_warning "govulncheck unavailable; captured dependency inventory only"
     return 0
 }
 
 # Generate security report
 generate_security_report() {
     log "Generating security validation report..."
+
+    local passed_validations="${1:-0}"
+    local total_validations="${2:-6}"
+    local failed_validations=$((total_validations - passed_validations))
+    local overall_status="failed"
+    local security_score=0
+    if [[ ${total_validations} -gt 0 ]]; then
+        security_score=$((passed_validations * 100 / total_validations))
+    fi
+    if [[ ${passed_validations} -eq ${total_validations} ]]; then
+        overall_status="passed"
+    fi
 
     local timestamp=$(date +%s)
     local report_file="${RESULTS_DIR}/security-report-${timestamp}.json"
@@ -411,20 +526,13 @@ generate_security_report() {
 {
     "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
     "environment": "production",
-    "validation_results": {
-        "authentication": "passed",
-        "authorization": "passed",
-        "encryption": "passed",
-        "audit_logging": "passed",
-        "byzantine_detection": "passed",
-        "compliance": "passed"
+    "validation_summary": {
+        "total": ${total_validations},
+        "passed": ${passed_validations},
+        "failed": ${failed_validations}
     },
-    "vulnerability_scan": {
-        "status": "passed",
-        "vulnerabilities_found": 0
-    },
-    "overall_status": "passed",
-    "security_score": 100,
+    "overall_status": "${overall_status}",
+    "security_score": ${security_score},
     "recommendations": [
         "Continue monitoring security events",
         "Review access logs weekly",
@@ -463,7 +571,7 @@ main() {
     fi
 
     # Generate report
-    generate_security_report
+    generate_security_report "${passed_validations}" "${total_validations}"
 
     # Display summary
     echo ""

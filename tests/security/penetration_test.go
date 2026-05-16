@@ -7,7 +7,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -127,12 +126,12 @@ func TestEncryptionValidation(t *testing.T) {
 
 // SecurityTestSuite manages security testing infrastructure
 type SecurityTestSuite struct {
-	t               *testing.T
-	target          *TestTarget
-	scanner         *VulnerabilityScanner
-	pentester       *PenetrationTester
-	findings        []*SecurityFinding
-	cleanup         []func()
+	t         *testing.T
+	target    *TestTarget
+	scanner   *VulnerabilityScanner
+	pentester *PenetrationTester
+	findings  []*SecurityFinding
+	cleanup   []func()
 }
 
 // TestTarget represents the system under security test
@@ -512,7 +511,7 @@ func testSOC2Compliance(t *testing.T, suite *SecurityTestSuite) {
 			name: "Data_Encryption",
 			check: func() bool {
 				return suite.target.HasEncryptionAtRest(ctx) &&
-					   suite.target.HasEncryptionInTransit(ctx)
+					suite.target.HasEncryptionInTransit(ctx)
 			},
 		},
 		{
@@ -604,12 +603,12 @@ func (t *TestTarget) ReadRawStorage(key string) []byte {
 	return []byte("encrypted-data")
 }
 
-func (t *TestTarget) HasAuditLogging(ctx context.Context) bool { return true }
-func (t *TestTarget) HasRBACImplemented(ctx context.Context) bool { return true }
-func (t *TestTarget) HasEncryptionAtRest(ctx context.Context) bool { return true }
+func (t *TestTarget) HasAuditLogging(ctx context.Context) bool        { return true }
+func (t *TestTarget) HasRBACImplemented(ctx context.Context) bool     { return true }
+func (t *TestTarget) HasEncryptionAtRest(ctx context.Context) bool    { return true }
 func (t *TestTarget) HasEncryptionInTransit(ctx context.Context) bool { return true }
-func (t *TestTarget) HasChangeManagement(ctx context.Context) bool { return true }
-func (t *TestTarget) HasMonitoringAlerts(ctx context.Context) bool { return true }
+func (t *TestTarget) HasChangeManagement(ctx context.Context) bool    { return true }
+func (t *TestTarget) HasMonitoringAlerts(ctx context.Context) bool    { return true }
 
 func parseResource(resp *http.Response) *Resource { return &Resource{Owner: "user"} }
 
@@ -618,24 +617,24 @@ type Resource struct {
 }
 
 // Additional test stubs
-func testCSRFProtection(t *testing.T, suite *SecurityTestSuite) {}
-func testXSSPrevention(t *testing.T, suite *SecurityTestSuite) {}
-func testAPISecurity(t *testing.T, suite *SecurityTestSuite) {}
-func testNetworkSecurity(t *testing.T, suite *SecurityTestSuite) {}
-func testBrokenAccessControl(t *testing.T, suite *SecurityTestSuite) {}
-func testCryptographicFailures(t *testing.T, suite *SecurityTestSuite) {}
-func testInjection(t *testing.T, suite *SecurityTestSuite) {}
-func testInsecureDesign(t *testing.T, suite *SecurityTestSuite) {}
-func testSecurityMisconfiguration(t *testing.T, suite *SecurityTestSuite) {}
-func testVulnerableComponents(t *testing.T, suite *SecurityTestSuite) {}
-func testAuthenticationFailures(t *testing.T, suite *SecurityTestSuite) {}
-func testDataIntegrityFailures(t *testing.T, suite *SecurityTestSuite) {}
+func testCSRFProtection(t *testing.T, suite *SecurityTestSuite)            {}
+func testXSSPrevention(t *testing.T, suite *SecurityTestSuite)             {}
+func testAPISecurity(t *testing.T, suite *SecurityTestSuite)               {}
+func testNetworkSecurity(t *testing.T, suite *SecurityTestSuite)           {}
+func testBrokenAccessControl(t *testing.T, suite *SecurityTestSuite)       {}
+func testCryptographicFailures(t *testing.T, suite *SecurityTestSuite)     {}
+func testInjection(t *testing.T, suite *SecurityTestSuite)                 {}
+func testInsecureDesign(t *testing.T, suite *SecurityTestSuite)            {}
+func testSecurityMisconfiguration(t *testing.T, suite *SecurityTestSuite)  {}
+func testVulnerableComponents(t *testing.T, suite *SecurityTestSuite)      {}
+func testAuthenticationFailures(t *testing.T, suite *SecurityTestSuite)    {}
+func testDataIntegrityFailures(t *testing.T, suite *SecurityTestSuite)     {}
 func testLoggingMonitoringFailures(t *testing.T, suite *SecurityTestSuite) {}
-func testSSRF(t *testing.T, suite *SecurityTestSuite) {}
-func testGDPRCompliance(t *testing.T, suite *SecurityTestSuite) {}
-func testHIPAACompliance(t *testing.T, suite *SecurityTestSuite) {}
-func testPCIDSSCompliance(t *testing.T, suite *SecurityTestSuite) {}
-func testTLSConfiguration(t *testing.T, suite *SecurityTestSuite) {}
-func testDataAtRestEncryption(t *testing.T, suite *SecurityTestSuite) {}
-func testDataInTransitEncryption(t *testing.T, suite *SecurityTestSuite) {}
-func testKeyManagement(t *testing.T, suite *SecurityTestSuite) {}
+func testSSRF(t *testing.T, suite *SecurityTestSuite)                      {}
+func testGDPRCompliance(t *testing.T, suite *SecurityTestSuite)            {}
+func testHIPAACompliance(t *testing.T, suite *SecurityTestSuite)           {}
+func testPCIDSSCompliance(t *testing.T, suite *SecurityTestSuite)          {}
+func testTLSConfiguration(t *testing.T, suite *SecurityTestSuite)          {}
+func testDataAtRestEncryption(t *testing.T, suite *SecurityTestSuite)      {}
+func testDataInTransitEncryption(t *testing.T, suite *SecurityTestSuite)   {}
+func testKeyManagement(t *testing.T, suite *SecurityTestSuite)             {}
