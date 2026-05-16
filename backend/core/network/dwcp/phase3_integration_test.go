@@ -69,6 +69,8 @@ func testMultiRegionDeployment(t *testing.T) {
 		t.Errorf("Expected 3 regions, got %d", len(topology.ListRegions()))
 	}
 
+	runGoTest(t, "multiregion", "TestGlobalTopology|TestRoutingEngine|TestTunnelManager|TestTrafficEngineer|TestPathRedundancy|TestBandwidthManager|TestNetworkTelemetry|TestRouteUpdater|TestPerformanceMetrics")
+
 	t.Log("✅ Multi-region deployment successful")
 }
 
