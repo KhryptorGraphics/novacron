@@ -14,6 +14,7 @@ SECURITY_SCAN_ENABLED="${SECURITY_SCAN_ENABLED:-true}"
 COMPLIANCE_CHECK_ENABLED="${COMPLIANCE_CHECK_ENABLED:-true}"
 BYZANTINE_DETECTION_ENABLED="${BYZANTINE_DETECTION_ENABLED:-true}"
 VULNERABILITY_SCAN_ENABLED="${VULNERABILITY_SCAN_ENABLED:-true}"
+SECURITY_PACKAGE_TEST_ENABLED="${SECURITY_PACKAGE_TEST_ENABLED:-true}"
 SECURITY_TEST_TIMEOUT="${SECURITY_TEST_TIMEOUT:-60}"
 
 mkdir -p "${RESULTS_DIR}" "${LOG_DIR}"
@@ -77,6 +78,13 @@ run_backend_core_test() {
     local pattern="$2"
 
     (cd "${PROJECT_ROOT}/backend/core" && go test "${package}" -run "${pattern}" -count=1 -timeout "${SECURITY_TEST_TIMEOUT}s")
+}
+
+run_go_test() {
+    local package="$1"
+    shift
+
+    (cd "${PROJECT_ROOT}" && go test "${package}" "$@" -count=1 -timeout "${SECURITY_TEST_TIMEOUT}s")
 }
 
 # Initialize results
@@ -449,6 +457,13 @@ validate_privacy_controls() {
         "policies/dwcp-v3-security.rego"
 }
 
+# Validate generic penetration, OWASP, compliance, and encryption test package
+validate_security_test_package() {
+    log "Validating generic security test package..."
+
+    run_go_test "./tests/security"
+}
+
 # Run vulnerability scan
 run_vulnerability_scan() {
     log "Running vulnerability scan..."
@@ -556,6 +571,9 @@ main() {
 
     local total_validations=6
     local passed_validations=0
+    if [[ "${SECURITY_PACKAGE_TEST_ENABLED}" == "true" ]]; then
+        total_validations=$((total_validations + 1))
+    fi
 
     # Run all security validations
     validate_authentication && passed_validations=$((passed_validations + 1))
@@ -564,6 +582,9 @@ main() {
     validate_audit_logging && passed_validations=$((passed_validations + 1))
     validate_byzantine_detection && passed_validations=$((passed_validations + 1))
     validate_compliance && passed_validations=$((passed_validations + 1))
+    if [[ "${SECURITY_PACKAGE_TEST_ENABLED}" == "true" ]]; then
+        validate_security_test_package && passed_validations=$((passed_validations + 1))
+    fi
 
     # Run vulnerability scan
     if [[ "${VULNERABILITY_SCAN_ENABLED}" == "true" ]]; then
