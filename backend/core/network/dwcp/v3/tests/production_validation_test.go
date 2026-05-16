@@ -528,7 +528,7 @@ func (s *ProductionValidationSuite) runTest(name, component, severity string, fn
 	s.mu.Unlock()
 }
 
-// Test implementation functions (stubs for comprehensive coverage)
+// Test implementation functions backed by package checks and local assertions.
 func (s *ProductionValidationSuite) testProtocolVersion() error {
 	return s.ensureGoTest("backend/core/network/dwcp/v3/transport")
 }
@@ -584,109 +584,83 @@ func (s *ProductionValidationSuite) testProtocolMetrics() error {
 }
 
 func (s *ProductionValidationSuite) testConsensusParticipation() error {
-	// Test node participation in consensus
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/consensus")
 }
 
 func (s *ProductionValidationSuite) testBlockProduction() error {
-	// Test block production rate
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/consensus/bullshark")
 }
 
 func (s *ProductionValidationSuite) testVotePropagation() error {
-	// Test vote propagation timing
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/consensus")
 }
 
 func (s *ProductionValidationSuite) testFinality() error {
-	// Test transaction finality
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/consensus")
 }
 
 func (s *ProductionValidationSuite) testForkResolution() error {
-	// Test fork resolution logic
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/consensus")
 }
 
 func (s *ProductionValidationSuite) testByzantineDetection() error {
-	// Test Byzantine fault detection
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/consensus", "-run", "TestByzantine|TestThreat")
 }
 
 func (s *ProductionValidationSuite) testLeaderElection() error {
-	// Test leader election mechanism
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/consensus")
 }
 
 func (s *ProductionValidationSuite) testConsensusLatency() error {
-	// Test consensus latency
-	start := time.Now()
-	time.Sleep(10 * time.Millisecond) // Simulate consensus
-	latency := time.Since(start)
-	if latency > 100*time.Millisecond {
-		return fmt.Errorf("consensus latency too high: %v", latency)
-	}
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/consensus", "-run", "TestACPv3_ConsensusLatency")
 }
 
 func (s *ProductionValidationSuite) testStateSync() error {
-	// Test state synchronization
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/sync")
 }
 
 func (s *ProductionValidationSuite) testCheckpoints() error {
-	// Test checkpoint creation
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/consensus", "-run", "TestPBFT_Checkpoint")
 }
 
 func (s *ProductionValidationSuite) testVMInstantiation() error {
-	// Test VM instantiation
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestV3WithMigration")
 }
 
 func (s *ProductionValidationSuite) testVMExecution() error {
-	// Test VM execution
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestV3WithMigration")
 }
 
 func (s *ProductionValidationSuite) testVMStateManagement() error {
-	// Test VM state management
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestV3WithMigration")
 }
 
 func (s *ProductionValidationSuite) testVMMigration() error {
-	// Test VM migration
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestV3WithMigration|TestPhase4_FinalIntegrationValidation")
 }
 
 func (s *ProductionValidationSuite) testVMSnapshot() error {
-	// Test VM snapshot/restore
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestBackwardCompatibilityFinal|TestRollbackProcedure")
 }
 
 func (s *ProductionValidationSuite) testVMResourceLimits() error {
-	// Test VM resource limits
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/optimization")
 }
 
 func (s *ProductionValidationSuite) testVMNetworking() error {
-	// Test VM networking
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestV3WithMigration")
 }
 
 func (s *ProductionValidationSuite) testVMStorage() error {
-	// Test VM storage
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestV3WithMigration|TestBackwardCompatibilityFinal")
 }
 
 func (s *ProductionValidationSuite) testVMMonitoring() error {
-	// Test VM monitoring
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/monitoring")
 }
 
 func (s *ProductionValidationSuite) testVMCleanup() error {
-	// Test VM cleanup
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestV3WithMigration")
 }
 
 func (s *ProductionValidationSuite) testNetworkConnectivity() error {
@@ -770,153 +744,123 @@ func (s *ProductionValidationSuite) testSecurityScanning() error {
 }
 
 func (s *ProductionValidationSuite) testThroughput() error {
-	// Test throughput
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestPerformanceRegression|TestPerformanceTargets|TestPhase5_PerformanceBaseline")
 }
 
 func (s *ProductionValidationSuite) testLatency() error {
-	// Test latency
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestPerformanceRegression|TestPerformanceTargets|TestPhase5_PerformanceBaseline")
 }
 
 func (s *ProductionValidationSuite) testCPUUtilization() error {
-	// Test CPU utilization
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/optimization")
 }
 
 func (s *ProductionValidationSuite) testMemoryUsage() error {
-	// Test memory usage
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/optimization")
 }
 
 func (s *ProductionValidationSuite) testDiskIO() error {
-	// Test disk I/O
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestPerformanceRegression")
 }
 
 func (s *ProductionValidationSuite) testNetworkIO() error {
-	// Test network I/O
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/transport")
 }
 
 func (s *ProductionValidationSuite) testConcurrentOps() error {
-	// Test concurrent operations
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/partition")
 }
 
 func (s *ProductionValidationSuite) testLoadBalancing() error {
-	// Test load balancing
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/partition")
 }
 
 func (s *ProductionValidationSuite) testResourceScaling() error {
-	// Test resource scaling
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestScalabilityRegression")
 }
 
 func (s *ProductionValidationSuite) testPerformanceRegression() error {
-	// Test performance regression
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestPerformanceRegression")
 }
 
 func (s *ProductionValidationSuite) testDataConsistency() error {
-	// Test data consistency
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestBackwardCompatibilityFinal|TestRollbackProcedure")
 }
 
 func (s *ProductionValidationSuite) testChecksums() error {
-	// Test checksums
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestBackwardCompatibilityFinal")
 }
 
 func (s *ProductionValidationSuite) testReplicationIntegrity() error {
-	// Test replication integrity
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/sync")
 }
 
 func (s *ProductionValidationSuite) testACID() error {
-	// Test ACID properties
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/sync")
 }
 
 func (s *ProductionValidationSuite) testCorruptionDetection() error {
-	// Test corruption detection
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestBackwardCompatibilityFinal")
 }
 
 func (s *ProductionValidationSuite) testBackupIntegrity() error {
-	// Test backup integrity
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestDisasterRecovery")
 }
 
 func (s *ProductionValidationSuite) testRecovery() error {
-	// Test recovery procedures
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestDisasterRecovery|TestRollbackProcedure")
 }
 
 func (s *ProductionValidationSuite) testDataVersioning() error {
-	// Test data versioning
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/sync")
 }
 
 func (s *ProductionValidationSuite) testConflictResolution() error {
-	// Test conflict resolution
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/sync")
 }
 
 func (s *ProductionValidationSuite) testDataMigration() error {
-	// Test data migration
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestBackwardCompatibilityFinal|TestV3WithMigration")
 }
 
 func (s *ProductionValidationSuite) testNodeFailover() error {
-	// Test node failover
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestDisasterRecovery|TestPhase5_ChaosEngineering")
 }
 
 func (s *ProductionValidationSuite) testLeaderFailover() error {
-	// Test leader failover
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/consensus")
 }
 
 func (s *ProductionValidationSuite) testNetworkFailover() error {
-	// Test network failover
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestDisasterRecovery|TestPhase5_ChaosEngineering")
 }
 
 func (s *ProductionValidationSuite) testAutoRecovery() error {
-	// Test automatic recovery
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestDisasterRecovery|TestPhase5_ChaosEngineering")
 }
 
 func (s *ProductionValidationSuite) testSplitBrain() error {
-	// Test split brain prevention
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestDisasterRecovery|TestPhase5_ChaosEngineering")
 }
 
 func (s *ProductionValidationSuite) testGracefulShutdown() error {
-	// Test graceful shutdown
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestDisasterRecovery")
 }
 
 func (s *ProductionValidationSuite) testRollingUpgrade() error {
-	// Test rolling upgrades
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestBackwardCompatibility|TestRollbackProcedure")
 }
 
 func (s *ProductionValidationSuite) testDisasterRecovery() error {
-	// Test disaster recovery
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestDisasterRecovery|TestPhase5_ChaosEngineering")
 }
 
 func (s *ProductionValidationSuite) testStateRecovery() error {
-	// Test state recovery
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestDisasterRecovery|TestRollbackProcedure")
 }
 
 func (s *ProductionValidationSuite) testServiceContinuity() error {
-	// Test service continuity
-	return nil
+	return s.ensureGoTest("backend/core/network/dwcp/v3/tests", "-run", "TestDisasterRecovery|TestPhase5_ChaosEngineering")
 }
 
 func (s *ProductionValidationSuite) testMetricsCollection() error {
