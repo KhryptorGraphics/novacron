@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/novacron/cli/pkg/auth"
 	"github.com/novacron/cli/pkg/config"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 // Stub commands - to be implemented
@@ -185,11 +187,187 @@ func firstNonEmpty(values ...string) string {
 }
 
 func NewConfigCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Manage CLI configuration",
+	}
+
+	cmd.AddCommand(
+		newConfigSetClusterCommand(),
+		newConfigUseContextCommand(),
+		newConfigViewCommand(),
+		newConfigGetClustersCommand(),
+		newConfigGetClusterCommand(),
+	)
+
+	return cmd
+}
+
+func newConfigSetClusterCommand() *cobra.Command {
+	var (
+		server    string
+		namespace string
+		authType  string
+		insecure  bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "set-cluster <name>",
+		Short: "Create or update a cluster connection",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("config command not yet implemented")
+			name := strings.TrimSpace(args[0])
+			if name == "" {
+				return fmt.Errorf("cluster name is required")
+			}
+
+			manager, err := config.NewManager(cfgFile)
+			if err != nil {
+				return err
+			}
+
+			existing := manager.Get().Clusters[name]
+			if strings.TrimSpace(server) == "" {
+				server = existing.Server
+			}
+			server = strings.TrimRight(strings.TrimSpace(server), "/")
+			if server == "" {
+				return fmt.Errorf("server is required")
+			}
+
+			if namespace == "" {
+				namespace = existing.Namespace
+			}
+			if namespace == "" {
+				namespace = "default"
+			}
+			if authType == "" {
+				authType = existing.AuthType
+			}
+			if authType == "" {
+				authType = "token"
+			}
+			insecure = insecure || existing.Insecure
+
+			if err := manager.AddCluster(config.Cluster{
+				Name:      name,
+				Server:    server,
+				Insecure:  insecure,
+				Namespace: namespace,
+				AuthType:  authType,
+				AuthData:  existing.AuthData,
+			}); err != nil {
+				return err
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "Cluster %s saved\n", name)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&server, "server", "", "NovaCron API server URL")
+	cmd.Flags().StringVar(&namespace, "namespace", "", "default namespace")
+	cmd.Flags().StringVar(&authType, "auth-type", "", "authentication type")
+	cmd.Flags().BoolVar(&insecure, "insecure", false, "skip TLS certificate verification")
+
+	return cmd
+}
+
+func newConfigUseContextCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "use-context <name>",
+		Short: "Set the current cluster",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			manager, err := config.NewManager(cfgFile)
+			if err != nil {
+				return err
+			}
+			if err := manager.SetCurrentCluster(args[0]); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Current cluster set to %s\n", args[0])
+			return nil
+		},
+	}
+}
+
+func newConfigViewCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "view",
+		Short: "Print CLI configuration",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			manager, err := config.NewManager(cfgFile)
+			if err != nil {
+				return err
+			}
+			data, err := yaml.Marshal(manager.Get())
+			if err != nil {
+				return err
+			}
+			_, err = cmd.OutOrStdout().Write(data)
+			return err
+		},
+	}
+}
+
+func newConfigGetClustersCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "get-clusters",
+		Short: "List configured clusters",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			manager, err := config.NewManager(cfgFile)
+			if err != nil {
+				return err
+			}
+
+			cfg := manager.Get()
+			writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+			fmt.Fprintln(writer, "CURRENT\tNAME\tSERVER\tNAMESPACE\tAUTH")
+			for name, cluster := range cfg.Clusters {
+				current := ""
+				if name == cfg.CurrentCluster {
+					current = "*"
+				}
+				fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", current, cluster.Name, cluster.Server, cluster.Namespace, cluster.AuthType)
+			}
+			return writer.Flush()
+		},
+	}
+}
+
+func newConfigGetClusterCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "get-cluster [name]",
+		Short: "Print a cluster configuration",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			manager, err := config.NewManager(cfgFile)
+			if err != nil {
+				return err
+			}
+
+			var cluster config.Cluster
+			if len(args) == 1 {
+				found, ok := manager.Get().Clusters[args[0]]
+				if !ok {
+					return fmt.Errorf("cluster %s not found", args[0])
+				}
+				cluster = found
+			} else {
+				current, err := manager.GetCurrentCluster()
+				if err != nil {
+					return err
+				}
+				cluster = *current
+			}
+
+			data, err := yaml.Marshal(cluster)
+			if err != nil {
+				return err
+			}
+			_, err = cmd.OutOrStdout().Write(data)
+			return err
 		},
 	}
 }
