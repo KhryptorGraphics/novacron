@@ -2,7 +2,6 @@ package tests
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"sync"
 	"testing"
@@ -64,9 +63,11 @@ func TestV1StillWorks(t *testing.T) {
 		require.NoError(t, err, "v1 HDE should still work")
 		defer hde.Close()
 
-		// Test v1 compression
+		// Test v1 compression with data that should compress under HDE.
 		testData := make([]byte, 1024*1024) // 1MB
-		rand.Read(testData)
+		for i := range testData {
+			testData[i] = byte(i % 32)
+		}
 
 		compressed, err := hde.CompressMemory("test-vm", testData, dwcp.CompressionLocal)
 		require.NoError(t, err, "v1 compression should still work")
@@ -75,7 +76,7 @@ func TestV1StillWorks(t *testing.T) {
 		// Test v1 decompression
 		decompressed, err := hde.Decompress(compressed)
 		require.NoError(t, err, "v1 decompression should still work")
-		assert.NotNil(t, decompressed)
+		assert.Equal(t, testData, decompressed)
 	})
 
 	t.Run("v1_metrics_collection", func(t *testing.T) {

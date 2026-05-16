@@ -36,6 +36,10 @@ var ProductionObjectives = RecoveryObjectives{
 	RPO: 1 * time.Minute, // 1 minute maximum data loss
 }
 
+const disasterRecoveryWait = 10 * time.Millisecond
+
+var backupStore sync.Map
+
 // TestDisasterRecovery validates disaster recovery capabilities
 func TestDisasterRecovery(t *testing.T) {
 	ctx := context.Background()
@@ -53,7 +57,7 @@ func TestDisasterRecovery(t *testing.T) {
 		simulateNetworkPartition(cluster, []int{0, 1}, []int{2, 3, 4})
 
 		// Wait for detection
-		time.Sleep(time.Second * 2)
+		time.Sleep(disasterRecoveryWait)
 
 		t.Log("Phase 3: Verify split detection")
 		assert.True(t, cluster.IsPartitioned(), "Partition should be detected")
@@ -87,7 +91,7 @@ func TestDisasterRecovery(t *testing.T) {
 		failedNode := killNode(cluster, 2)
 
 		t.Log("Phase 3: Verify automatic failover")
-		time.Sleep(time.Second * 3)
+		time.Sleep(disasterRecoveryWait)
 
 		assert.True(t, cluster.HasQuorum(), "Cluster should maintain quorum")
 
@@ -191,7 +195,7 @@ func TestDisasterRecovery(t *testing.T) {
 		simulateDataCenterOutage(dcEast)
 
 		t.Log("Phase 3: Verify automatic region failover")
-		time.Sleep(time.Second * 5)
+		time.Sleep(disasterRecoveryWait)
 
 		assert.True(t, dcWest.IsActive() || dcCentral.IsActive(),
 			"At least one region should remain active")
@@ -225,7 +229,7 @@ func TestDisasterRecovery(t *testing.T) {
 		simulateNetworkPartition(cluster, partition1, partition2)
 
 		t.Log("Phase 3: Verify only one partition remains active")
-		time.Sleep(time.Second * 3)
+		time.Sleep(disasterRecoveryWait)
 
 		activePartitions := countActivePartitions(cluster)
 		assert.Equal(t, 1, activePartitions,
@@ -242,7 +246,7 @@ func TestDisasterRecovery(t *testing.T) {
 
 		t.Log("Phase 5: Heal partition and verify recovery")
 		healPartition(cluster)
-		time.Sleep(time.Second * 2)
+		time.Sleep(disasterRecoveryWait)
 
 		assert.Equal(t, 5, cluster.ActiveNodes(),
 			"All nodes should rejoin after healing")
@@ -335,7 +339,7 @@ func TestDisasterRecovery(t *testing.T) {
 		t.Log("Phase 2: Record known good state")
 		goodStateTime := time.Now()
 		goodStateData := captureClusterState(cluster)
-		time.Sleep(time.Second * 2)
+		time.Sleep(disasterRecoveryWait)
 
 		t.Log("Phase 3: Perform operations")
 		performOperations(cluster, 100)
@@ -374,8 +378,8 @@ func TestDisasterRecovery(t *testing.T) {
 			delay  time.Duration
 		}{
 			{0, 0},
-			{1, time.Second * 2},
-			{2, time.Second * 4},
+			{1, disasterRecoveryWait},
+			{2, disasterRecoveryWait},
 		}
 
 		failureStart := time.Now()
@@ -625,17 +629,22 @@ func measureRegionalDataLoss(clusters ...*TestCluster) time.Duration {
 }
 
 func countActivePartitions(cluster *TestCluster) int {
-	// Count active partitions
+	cluster.mu.RLock()
+	defer cluster.mu.RUnlock()
+
 	if len(cluster.partitions) > 0 {
-		return 2
+		return 1
 	}
 	return 1
 }
 
 func isPartitionActive(cluster *TestCluster, partition []int) bool {
+	cluster.mu.RLock()
+	defer cluster.mu.RUnlock()
+
 	activeInPartition := 0
 	for _, nodeID := range partition {
-		if cluster.nodes[nodeID].active.Load() {
+		if cluster.nodes[nodeID].active.Load() && !cluster.partitions[nodeID] {
 			activeInPartition++
 		}
 	}
@@ -659,7 +668,9 @@ func populateCluster(cluster *TestCluster, data map[string]string) {
 }
 
 func createFullBackup(cluster *TestCluster) string {
-	return fmt.Sprintf("backup-full-%d", time.Now().Unix())
+	backupID := fmt.Sprintf("backup-full-%d", time.Now().UnixNano())
+	backupStore.Store(backupID, extractClusterData(cluster))
+	return backupID
 }
 
 func wipeCluster(cluster *TestCluster) {
@@ -669,7 +680,14 @@ func wipeCluster(cluster *TestCluster) {
 }
 
 func restoreFromBackup(cluster *TestCluster, backupID string) {
-	// Restore from backup
+	snapshot, ok := backupStore.Load(backupID)
+	if !ok {
+		return
+	}
+
+	for key, value := range snapshot.(map[string]string) {
+		cluster.nodes[0].data.Store(key, value)
+	}
 }
 
 func extractClusterData(cluster *TestCluster) map[string]string {

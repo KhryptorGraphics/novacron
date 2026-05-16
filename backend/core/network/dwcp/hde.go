@@ -227,6 +227,9 @@ func NewHDE(config HDEConfig) (*HDE, error) {
 
 // CompressMemory compresses VM memory state with delta encoding
 func (hde *HDE) CompressMemory(vmID string, memoryData []byte, tier CompressionLevel) ([]byte, error) {
+	if vmID == "" {
+		return nil, errors.New("vm id is required")
+	}
 	if len(memoryData) == 0 {
 		return nil, errors.New("no memory data to compress")
 	}
@@ -257,9 +260,11 @@ func (hde *HDE) CompressMemory(vmID string, memoryData []byte, tier CompressionL
 
 	// Choose data to compress
 	dataToCompress := memoryData
+	useDelta := false
 	if deltaEncoded != nil && len(deltaEncoded) < len(memoryData)/2 {
 		// Use delta if it's significantly smaller
 		dataToCompress = deltaEncoded
+		useDelta = true
 	} else {
 		hde.updateDeltaHitRate(false)
 	}
@@ -280,7 +285,7 @@ func (hde *HDE) CompressMemory(vmID string, memoryData []byte, tier CompressionL
 	hde.updateCompressionRatio()
 
 	// Create packet with metadata
-	packet := hde.createPacket(compressed, deltaEncoded != nil, tier)
+	packet := hde.createPacket(compressed, useDelta, tier)
 
 	return packet, nil
 }
@@ -318,8 +323,10 @@ func (hde *HDE) CompressDisk(vmID string, diskData []byte, blockID int, tier Com
 
 	// Choose data to compress
 	dataToCompress := diskData
+	useDelta := false
 	if deltaEncoded != nil && len(deltaEncoded) < len(diskData)/2 {
 		dataToCompress = deltaEncoded
+		useDelta = true
 	} else {
 		hde.updateDeltaHitRate(false)
 	}
@@ -347,7 +354,7 @@ func (hde *HDE) CompressDisk(vmID string, diskData []byte, blockID int, tier Com
 	hde.updateCompressionRatio()
 
 	// Create packet with metadata
-	packet := hde.createPacket(compressed, deltaEncoded != nil, tier)
+	packet := hde.createPacket(compressed, useDelta, tier)
 
 	return packet, nil
 }
@@ -378,9 +385,10 @@ func (hde *HDE) Decompress(data []byte) ([]byte, error) {
 
 	// If it's delta encoded, apply delta to baseline
 	if isDelta {
-		// This would need the baseline ID to be included in the packet
-		// For now, return the decompressed delta
-		// In production, we'd apply the delta to the baseline
+		decompressed, err = hde.applyDelta(decompressed)
+		if err != nil {
+			return nil, fmt.Errorf("delta application failed: %w", err)
+		}
 	}
 
 	return decompressed, nil
@@ -500,6 +508,85 @@ func (hde *HDE) encodeDelta(delta *Delta) ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+func (hde *HDE) applyDelta(encoded []byte) ([]byte, error) {
+	separator := bytes.IndexByte(encoded, 0)
+	if separator <= 0 {
+		return nil, errors.New("invalid delta: missing baseline id")
+	}
+
+	baselineID := string(encoded[:separator])
+	baseline, exists := hde.getBaseline(baselineID)
+	if !exists {
+		return nil, fmt.Errorf("baseline %q not found", baselineID)
+	}
+
+	reader := bytes.NewReader(encoded[separator+1:])
+	var opCount uint32
+	if err := binary.Read(reader, binary.BigEndian, &opCount); err != nil {
+		return nil, fmt.Errorf("invalid delta operation count: %w", err)
+	}
+
+	ops := make([]DeltaOperation, 0, opCount)
+	var resultSize int64
+	for i := uint32(0); i < opCount; i++ {
+		opType, err := reader.ReadByte()
+		if err != nil {
+			return nil, fmt.Errorf("invalid delta operation type: %w", err)
+		}
+
+		op := DeltaOperation{Type: DeltaOpType(opType)}
+		if err := binary.Read(reader, binary.BigEndian, &op.Offset); err != nil {
+			return nil, fmt.Errorf("invalid delta operation offset: %w", err)
+		}
+		if err := binary.Read(reader, binary.BigEndian, &op.Length); err != nil {
+			return nil, fmt.Errorf("invalid delta operation length: %w", err)
+		}
+
+		if op.Type != DeltaOpCopy {
+			var dataLen uint32
+			if err := binary.Read(reader, binary.BigEndian, &dataLen); err != nil {
+				return nil, fmt.Errorf("invalid delta data length: %w", err)
+			}
+			op.Data = make([]byte, dataLen)
+			if _, err := reader.Read(op.Data); err != nil {
+				return nil, fmt.Errorf("invalid delta data: %w", err)
+			}
+		}
+
+		if end := op.Offset + op.Length; end > resultSize {
+			resultSize = end
+		}
+		ops = append(ops, op)
+	}
+
+	result := make([]byte, resultSize)
+	for _, op := range ops {
+		if op.Offset < 0 || op.Length < 0 || op.Offset+op.Length > int64(len(result)) {
+			return nil, errors.New("invalid delta operation bounds")
+		}
+
+		start := int(op.Offset)
+		end := int(op.Offset + op.Length)
+
+		switch op.Type {
+		case DeltaOpCopy:
+			if end > len(baseline.Data) {
+				return nil, errors.New("invalid delta copy bounds")
+			}
+			copy(result[start:end], baseline.Data[start:end])
+		case DeltaOpAdd, DeltaOpModify:
+			if len(op.Data) != int(op.Length) {
+				return nil, errors.New("invalid delta data size")
+			}
+			copy(result[start:end], op.Data)
+		default:
+			return nil, fmt.Errorf("invalid delta operation type %d", op.Type)
+		}
+	}
+
+	return result, nil
 }
 
 // isDeltaEfficient checks if delta encoding is efficient

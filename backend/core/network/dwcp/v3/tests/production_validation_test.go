@@ -1035,7 +1035,8 @@ func (s *ProductionValidationSuite) saveResults() {
 		return
 	}
 
-	filename := fmt.Sprintf("/home/kp/novacron/docs/phase6/validation-results-%s.json",
+	filename := fmt.Sprintf("%s/validation-results-%s.json",
+		s.t.TempDir(),
 		time.Now().Format("20060102-150405"))
 
 	if err := os.WriteFile(filename, data, 0644); err != nil {

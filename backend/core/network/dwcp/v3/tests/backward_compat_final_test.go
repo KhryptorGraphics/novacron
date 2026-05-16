@@ -63,7 +63,7 @@ func testV1AfterPhase3(t *testing.T) {
 		amst.UpdateMetrics(8, 0.001, 10e9)
 		metrics := amst.GetMetrics()
 
-		assert.Equal(t, 8, intMetric(metrics, "active_streams"))
+		assert.Equal(t, 8, intMetric(metrics, "total_streams"))
 		assert.Greater(t, int64Metric(metrics, "transfer_rate"), int64(0))
 	})
 
