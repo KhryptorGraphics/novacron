@@ -1128,6 +1128,7 @@ func newRuntimeRouter(
 	router.HandleFunc("/healthz", handleHealthz).Methods(http.MethodGet)
 	registerRuntimeAuthRoutes(router, runtimeAuth)
 	router.HandleFunc("/internal/runtime/v1/monitoring/metrics", runtimeGetMonitoringMetricsHandler(vmManager)).Methods(http.MethodGet)
+	registerRuntimeOrchestrationRoutes(router, config, vmManager, migrationManager, schedulerService)
 	router.HandleFunc("/internal/runtime/v1/vms", runtimeGetVMsHandler(inventoryStore)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/vms/{id}", runtimeGetVMHandler(inventoryStore)).Methods(http.MethodGet)
 	router.HandleFunc("/internal/runtime/v1/vms/{id}/metrics", runtimeGetVMMetricsHandler(inventoryStore)).Methods(http.MethodGet)
