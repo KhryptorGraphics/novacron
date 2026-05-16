@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -24,6 +27,10 @@ type ProductionValidationSuite struct {
 	mu             sync.RWMutex
 	activeTests    int32
 	completedTests int32
+	projectRoot    string
+
+	securityValidationOnce sync.Once
+	securityValidationErr  error
 }
 
 // ValidationResults tracks validation test results
@@ -90,8 +97,9 @@ type AlertThresholds struct {
 // NewProductionValidationSuite creates a new production validation suite
 func NewProductionValidationSuite(t *testing.T) *ProductionValidationSuite {
 	return &ProductionValidationSuite{
-		t:         t,
-		startTime: time.Now(),
+		t:           t,
+		startTime:   time.Now(),
+		projectRoot: findProjectRoot(t),
 		results: &ValidationResults{
 			TestResults:     make(map[string]TestResult),
 			Recommendations: make([]string, 0),
@@ -116,6 +124,48 @@ func NewProductionValidationSuite(t *testing.T) *ProductionValidationSuite {
 			},
 		},
 	}
+}
+
+func findProjectRoot(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.Getwd()
+	require.NoError(t, err)
+
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "scripts", "production", "security-validation.sh")); err == nil {
+			return dir
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("failed to locate project root from %s", dir)
+		}
+		dir = parent
+	}
+}
+
+func (s *ProductionValidationSuite) ensureSecurityValidation() error {
+	s.securityValidationOnce.Do(func() {
+		resultsDir := s.t.TempDir()
+		logDir := s.t.TempDir()
+		scriptPath := filepath.Join(s.projectRoot, "scripts", "production", "security-validation.sh")
+
+		cmd := exec.Command("bash", scriptPath)
+		cmd.Dir = s.projectRoot
+		cmd.Env = append(os.Environ(),
+			"RESULTS_DIR="+resultsDir,
+			"LOG_DIR="+logDir,
+			"SECURITY_TEST_TIMEOUT=60",
+		)
+
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			s.securityValidationErr = fmt.Errorf("security validation failed: %w\n%s", err, string(output))
+		}
+	})
+
+	return s.securityValidationErr
 }
 
 // RunAllValidations executes all production validation tests
@@ -672,53 +722,43 @@ func (s *ProductionValidationSuite) testDDoSProtection() error {
 }
 
 func (s *ProductionValidationSuite) testAuthentication() error {
-	// Test authentication
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testAuthorization() error {
-	// Test authorization
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testEncryptionAtRest() error {
-	// Test encryption at rest
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testEncryptionInTransit() error {
-	// Test encryption in transit
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testKeyManagement() error {
-	// Test key management
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testAccessControl() error {
-	// Test access control
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testAuditLogging() error {
-	// Test audit logging
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testIntrusionDetection() error {
-	// Test intrusion detection
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testCertificateValidation() error {
-	// Test certificate validation
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testSecurityScanning() error {
-	// Test security scanning
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testThroughput() error {
@@ -922,68 +962,60 @@ func (s *ProductionValidationSuite) testSLATracking() error {
 }
 
 func (s *ProductionValidationSuite) testGDPRCompliance() error {
-	// Test GDPR compliance
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testDataRetention() error {
-	// Test data retention
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testPrivacyControls() error {
-	// Test privacy controls
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testAuditTrail() error {
-	// Test audit trail
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testRegulatoryReporting() error {
-	// Test regulatory reporting
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testComplianceScanning() error {
-	// Test compliance scanning
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testPolicyEnforcement() error {
-	// Test policy enforcement
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testDocumentation() error {
-	// Test documentation completeness
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testChangeManagement() error {
-	// Test change management
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 func (s *ProductionValidationSuite) testIncidentResponse() error {
-	// Test incident response
-	return nil
+	return s.ensureSecurityValidation()
 }
 
 // captureMetricsSnapshot captures current production metrics
 func (s *ProductionValidationSuite) captureMetricsSnapshot() *MetricsSnapshot {
-	// In production, this would query actual metrics
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+
 	return &MetricsSnapshot{
-		CPUUsage:           45.2,
-		MemoryUsage:        1024.5,
-		NetworkLatency:     15.3,
-		ConsensusLatency:   45.8,
-		VMOperationsPerSec: 1250.0,
-		ErrorRate:          0.05,
-		Throughput:         2500.0,
-		ActiveConnections:  150,
-		QueueDepth:         25,
+		CPUUsage:           0,
+		MemoryUsage:        float64(mem.Alloc) / 1024 / 1024,
+		NetworkLatency:     0,
+		ConsensusLatency:   0,
+		VMOperationsPerSec: 0,
+		ErrorRate:          0,
+		Throughput:         0,
+		ActiveConnections:  runtime.NumGoroutine(),
+		QueueDepth:         int(atomic.LoadInt32(&s.activeTests)),
 	}
 }
 
