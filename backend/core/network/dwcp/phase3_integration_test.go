@@ -229,6 +229,8 @@ func testConflictResolution(t *testing.T) {
 		t.Errorf("Expected local map to win ambiguous conflict, got %#v", resultMap)
 	}
 
+	runGoTest(t, "conflict", "TestVectorClockCompare|TestVectorClockConcurrent|TestConflictDetection|TestNoConflictDetection|TestConflictComplexityCalculation|TestConflictCleanup|TestLastWriteWinsStrategy|TestMultiValueRegisterStrategy|TestAutomaticRollbackStrategy|TestConsensusVoteStrategy|TestStrategyRegistry|TestThreeWayMergeIdentical|TestThreeWayMergeLocalChange|TestThreeWayMergeRemoteChange|TestThreeWayMergeConflict|TestMapMerge|TestStructuralDiff")
+
 	t.Log("✅ Conflict resolution working")
 }
 
