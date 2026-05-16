@@ -15,28 +15,24 @@ import (
 )
 
 // sendShardUpdateWithClockMerge sends update and handles clock merging on replica
-func (sm *VMStateShardingManager) sendShardUpdateWithClockMerge(ctx context.Context, update *ShardUpdateMessage, targetNode string) error {
+func (sm *VMStateShardingManager) sendShardUpdateWithClockMerge(ctx context.Context, update *ShardStateUpdateMessage, targetNode string) error {
 	if sm.federation == nil {
 		return errors.New("federation not available")
 	}
 
 	// Create message with full clock and version info
-	msg := &federation.CrossClusterMessage{
-		Type:        "shard_update_with_clock",
-		Source:      sm.localNodeID,
-		Destination: targetNode,
-		Payload: map[string]interface{}{
-			"shard_id":     update.ShardID,
-			"version":      update.Version,
-			"vector_clock": update.VectorClock,
-			"data":         update.Data,
-			"timestamp":    update.Timestamp,
-		},
-		Timestamp: time.Now(),
-	}
+	msg := newShardingMessage("shard_update_with_clock", sm.localNodeID, targetNode, map[string]interface{}{
+		"shard_id":     update.ShardID,
+		"version":      update.Version,
+		"vector_clock": update.VectorClock,
+		"data":         update.Data,
+		"timestamp":    update.Timestamp,
+	})
 
 	// Send through federation
-	if crossCluster, ok := sm.federation.(*federation.CrossClusterComponents); ok {
+	if crossCluster, ok := sm.federation.(interface {
+		SendMessage(context.Context, *federation.CrossClusterMessage) error
+	}); ok {
 		err := crossCluster.SendMessage(ctx, msg)
 		if err != nil {
 			return errors.Wrapf(err, "failed to send update to %s", targetNode)
@@ -119,17 +115,13 @@ func (sm *VMStateShardingManager) fetchRemoteStateWithClock(ctx context.Context,
 		return nil, errors.New("federation not available")
 	}
 
-	msg := &federation.CrossClusterMessage{
-		Type:        "fetch_state_with_clock",
-		Source:      sm.localNodeID,
-		Destination: nodeID,
-		Payload: map[string]interface{}{
-			"vm_id": vmID,
-		},
-		Timestamp: time.Now(),
-	}
+	msg := newShardingMessage("fetch_state_with_clock", sm.localNodeID, nodeID, map[string]interface{}{
+		"vm_id": vmID,
+	})
 
-	if crossCluster, ok := sm.federation.(*federation.CrossClusterComponents); ok {
+	if crossCluster, ok := sm.federation.(interface {
+		SendMessage(context.Context, *federation.CrossClusterMessage) error
+	}); ok {
 		err := crossCluster.SendMessage(ctx, msg)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to fetch state from %s", nodeID)
@@ -163,10 +155,7 @@ func (sm *VMStateShardingManager) performReadRepair(ctx context.Context, shard *
 		} else if sm.isConcurrentClock(shard.VectorClock, stateWithClock.VectorClock) {
 			// Handle concurrent update
 			if sm.recoveryManager != nil {
-				sm.recoveryManager.ReconcileVectorClocks(shard.ShardID, []map[string]uint64{
-					shard.VectorClock,
-					stateWithClock.VectorClock,
-				})
+				_ = sm.recoveryManager.ReconcileVectorClocks(shard)
 			}
 		}
 	}
@@ -178,20 +167,16 @@ func (sm *VMStateShardingManager) repairStaleReplica(ctx context.Context, vmID, 
 		return
 	}
 
-	msg := &federation.CrossClusterMessage{
-		Type:        "repair_stale_state",
-		Source:      sm.localNodeID,
-		Destination: nodeID,
-		Payload: map[string]interface{}{
-			"vm_id":        vmID,
-			"state":        state,
-			"vector_clock": clock,
-			"repair_time":  time.Now(),
-		},
-		Timestamp: time.Now(),
-	}
+	msg := newShardingMessage("repair_stale_state", sm.localNodeID, nodeID, map[string]interface{}{
+		"vm_id":        vmID,
+		"state":        state,
+		"vector_clock": clock,
+		"repair_time":  time.Now(),
+	})
 
-	if crossCluster, ok := sm.federation.(*federation.CrossClusterComponents); ok {
+	if crossCluster, ok := sm.federation.(interface {
+		SendMessage(context.Context, *federation.CrossClusterMessage) error
+	}); ok {
 		err := crossCluster.SendMessage(ctx, msg)
 		if err != nil {
 			sm.logger.Warn("Failed to repair stale replica",
@@ -209,7 +194,7 @@ type ShardStateWithClock struct {
 	Version     uint64
 }
 
-type ShardUpdateMessage struct {
+type ShardStateUpdateMessage struct {
 	ShardID     string
 	Version     uint64
 	VectorClock map[string]uint64
@@ -219,36 +204,36 @@ type ShardUpdateMessage struct {
 	Data        *DistributedVMState
 }
 
-type StateConflict struct {
+type ShardingStateConflict struct {
 	ID        string
-	Type      ConflictType
+	Type      ShardingConflictType
 	States    []interface{}
 	Clocks    []map[string]uint64
 	Timestamp time.Time
 }
 
-type ConflictType int
+type ShardingConflictType int
 
 const (
-	ConflictTypeConcurrentUpdate ConflictType = iota
-	ConflictTypeVersionMismatch
-	ConflictTypeClockDivergence
+	ShardingConflictTypeConcurrentUpdate ShardingConflictType = iota
+	ShardingConflictTypeVersionMismatch
+	ShardingConflictTypeClockDivergence
 )
 
-func (ct ConflictType) String() string {
+func (ct ShardingConflictType) String() string {
 	switch ct {
-	case ConflictTypeConcurrentUpdate:
+	case ShardingConflictTypeConcurrentUpdate:
 		return "concurrent_update"
-	case ConflictTypeVersionMismatch:
+	case ShardingConflictTypeVersionMismatch:
 		return "version_mismatch"
-	case ConflictTypeClockDivergence:
+	case ShardingConflictTypeClockDivergence:
 		return "clock_divergence"
 	default:
 		return "unknown"
 	}
 }
 
-type ConflictResolution struct {
+type ShardingConflictResolution struct {
 	ResolvedState interface{}
 	Method        string
 	Timestamp     time.Time

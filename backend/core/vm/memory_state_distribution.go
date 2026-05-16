@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/khryptorgraphics/novacron/backend/core/federation"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -23,7 +24,7 @@ type MemoryStateDistribution struct {
 	mu                  sync.RWMutex
 	logger              *zap.Logger
 	nodeID              string
-	deltaSync           WANMigrationDeltaSync
+	deltaSync           *WANMigrationDeltaSync
 	shardingManager     *VMStateShardingManager
 	prefetcher          *PredictivePrefetchingEngine
 	memoryShards        map[string]*MemoryShard
@@ -31,8 +32,8 @@ type MemoryStateDistribution struct {
 	compressionEngine   *MemoryCompressionEngine
 	accessTracker       *MemoryAccessTracker
 	recoveryManager     *MemoryRecoveryManager
-	migrationStrategies map[string]MigrationStrategy
-	metrics             *MemoryDistributionMetrics
+	migrationStrategies map[string]MemoryMigrationStrategy
+	metrics             *MemoryStateDistributionMetrics
 	bandwidthLimiter    *BandwidthLimiter // For throttling network usage
 	dirtyBitmap         *DirtyPageBitmap  // Global dirty page tracking
 }
@@ -93,8 +94,16 @@ const (
 	CoherenceStateInvalid
 )
 
-// MigrationStrategy defines memory migration approach
-type MigrationStrategy interface {
+type MemoryMigrationType int
+
+const (
+	MemoryMigrationTypePreCopy MemoryMigrationType = iota
+	MemoryMigrationTypePostCopy
+	MemoryMigrationTypeHybrid
+)
+
+// MemoryMigrationStrategy defines memory migration approach
+type MemoryMigrationStrategy interface {
 	Migrate(ctx context.Context, shard *MemoryShard, targetNode string) error
 	GetType() string
 }
@@ -115,14 +124,15 @@ type HybridMigration struct {
 	preCopy     *PreCopyMigration
 	postCopy    *PostCopyMigration
 	aiOptimizer *AIOptimizer
+	msd         *MemoryStateDistribution
 }
 
 // MemoryCoherenceProtocol manages memory coherence across nodes
 type MemoryCoherenceProtocol struct {
 	mu            sync.RWMutex
 	coherenceMap  map[string]CoherenceState
-	invalidations chan InvalidationMessage
-	updates       chan UpdateMessage
+	invalidations chan MemoryInvalidationMessage
+	updates       chan MemoryUpdateMessage
 }
 
 // MemoryCompressionEngine handles memory-specific compression
@@ -160,7 +170,7 @@ func NewMemoryStateDistribution(logger *zap.Logger, nodeID string, deltaSync *WA
 		compressionEngine:   NewMemoryCompressionEngine(),
 		accessTracker:       NewMemoryAccessTracker(),
 		recoveryManager:     NewMemoryRecoveryManager(),
-		migrationStrategies: make(map[string]MigrationStrategy),
+		migrationStrategies: make(map[string]MemoryMigrationStrategy),
 		metrics:             NewMemoryDistributionMetrics(),
 	}
 
@@ -176,6 +186,7 @@ func NewMemoryStateDistribution(logger *zap.Logger, nodeID string, deltaSync *WA
 		preCopy:     msd.migrationStrategies["pre-copy"].(*PreCopyMigration),
 		postCopy:    msd.migrationStrategies["post-copy"].(*PostCopyMigration),
 		aiOptimizer: NewAIOptimizer(),
+		msd:         msd,
 	}
 
 	return msd
@@ -319,7 +330,7 @@ func (msd *MemoryStateDistribution) syncShardDelta(ctx context.Context, shard *M
 	shard.LastSync = time.Now()
 	shard.Version++
 
-	msd.metrics.DeltasSynced.Inc()
+	msd.metrics.DeltasSynced.Add(1)
 	msd.metrics.BytesSynced.Add(int64(len(dirtyPages) * 4096))
 
 	return nil
@@ -369,7 +380,7 @@ func (msd *MemoryStateDistribution) MigrateLiveMemory(ctx context.Context, vmID,
 	// Use AI to predict access patterns during migration
 	if msd.prefetcher != nil {
 		predictions := msd.prefetcher.PredictAccessPatterns(vmID)
-		msd.optimizeMigrationOrder(shards, predictions)
+		msd.optimizeMigrationOrder(shards, msd.convertPrefetchPredictions(predictions))
 	}
 
 	// Migrate each shard with delta sync support
@@ -408,7 +419,7 @@ func (msd *MemoryStateDistribution) MigrateLiveMemory(ctx context.Context, vmID,
 		}
 	}
 
-	msd.metrics.MigrationsCompleted.Inc()
+	msd.metrics.MigrationsCompleted.Add(1)
 	return nil
 }
 
@@ -518,7 +529,7 @@ func (msd *MemoryStateDistribution) RecoverMemoryState(ctx context.Context, vmID
 		}
 	}
 
-	msd.metrics.RecoveriesCompleted.Inc()
+	msd.metrics.RecoveriesCompleted.Add(1)
 	return nil
 }
 
@@ -600,7 +611,7 @@ func (msd *MemoryStateDistribution) sendDeltaToReplica(ctx context.Context, delt
 	return nil
 }
 
-func (msd *MemoryStateDistribution) optimizeMigrationOrder(shards []*MemoryShard, predictions *AccessPredictions) {
+func (msd *MemoryStateDistribution) optimizeMigrationOrder(shards []*MemoryShard, predictions *MemoryAccessPredictions) {
 	// Use AI predictions to optimize migration order
 	if predictions == nil || len(predictions.PagePredictions) == 0 {
 		// No predictions available, use default order
@@ -611,7 +622,7 @@ func (msd *MemoryStateDistribution) optimizeMigrationOrder(shards []*MemoryShard
 	pagePriorities := make(map[uint64]float64)
 	for _, pred := range predictions.PagePredictions {
 		// Higher access probability = higher priority (migrate last)
-		pagePriorities[pred.PageNumber] = pred.AccessProbability
+		pagePriorities[pred.PageNumber] = pred.Probability
 	}
 
 	// Sort shards based on aggregate priority of their pages
@@ -689,14 +700,14 @@ func (msd *MemoryStateDistribution) recoverShardFromReplicas(ctx context.Context
 }
 
 // performDeltaMigration performs delta-based migration with AI optimization
-func (msd *MemoryStateDistribution) performDeltaMigration(ctx context.Context, shard *MemoryShard, targetNode string, strategy MigrationStrategy) error {
+func (msd *MemoryStateDistribution) performDeltaMigration(ctx context.Context, shard *MemoryShard, targetNode string, strategy MemoryMigrationStrategy) error {
 	// Use AI predictions to determine migration type
 	migrationType := msd.selectMigrationTypeWithAI(shard)
 
 	msd.logger.Info("Performing delta-based migration",
 		zap.String("shardID", shard.ShardID),
 		zap.String("targetNode", targetNode),
-		zap.String("migrationType", string(migrationType)))
+		zap.String("migrationType", fmt.Sprint(migrationType)))
 
 	// Phase 1: Initial bulk transfer (cold pages first)
 	coldPages := msd.filterPagesByTemperature(shard, PageTemperatureCold)
@@ -714,7 +725,7 @@ func (msd *MemoryStateDistribution) performDeltaMigration(ctx context.Context, s
 	hotPages := msd.filterPagesByTemperature(shard, PageTemperatureHot)
 
 	switch migrationType {
-	case MigrationTypePreCopy:
+	case MemoryMigrationTypePreCopy:
 		// Pre-copy: Transfer hot pages multiple times
 		for i := 0; i < 3; i++ {
 			if err := msd.transferPagesWithDelta(ctx, hotPages, targetNode); err != nil {
@@ -724,13 +735,13 @@ func (msd *MemoryStateDistribution) performDeltaMigration(ctx context.Context, s
 			time.Sleep(100 * time.Millisecond)
 		}
 
-	case MigrationTypePostCopy:
+	case MemoryMigrationTypePostCopy:
 		// Post-copy: Transfer minimal set, fetch on demand
 		if err := msd.setupPostCopyFetching(ctx, shard, targetNode); err != nil {
 			return errors.Wrap(err, "failed to setup post-copy")
 		}
 
-	case MigrationTypeHybrid:
+	case MemoryMigrationTypeHybrid:
 		// Hybrid: AI-driven combination
 		if err := msd.performHybridMigration(ctx, shard, targetNode, hotPages); err != nil {
 			return errors.Wrap(err, "failed hybrid migration")
@@ -748,15 +759,15 @@ func (msd *MemoryStateDistribution) performDeltaMigration(ctx context.Context, s
 }
 
 // selectMigrationTypeWithAI uses AI predictions to select optimal migration type
-func (msd *MemoryStateDistribution) selectMigrationTypeWithAI(shard *MemoryShard) MigrationType {
+func (msd *MemoryStateDistribution) selectMigrationTypeWithAI(shard *MemoryShard) MemoryMigrationType {
 	if msd.prefetcher == nil {
-		return MigrationTypeHybrid // Default to hybrid
+		return MemoryMigrationTypeHybrid // Default to hybrid
 	}
 
 	// Get AI predictions for the shard
 	predictions := msd.prefetcher.PredictAccessPatterns(shard.VMID)
-	if predictions == nil || len(predictions.PagePredictions) == 0 {
-		return MigrationTypeHybrid
+	if predictions == nil || (len(predictions.HotPages) == 0 && len(predictions.ColdPages) == 0) {
+		return MemoryMigrationTypeHybrid
 	}
 
 	// Analyze predictions to determine best strategy
@@ -776,13 +787,13 @@ func (msd *MemoryStateDistribution) selectMigrationTypeWithAI(shard *MemoryShard
 	// Decision logic based on AI analysis
 	if hotPageRatio > 0.6 {
 		// Many hot pages - use post-copy to minimize downtime
-		return MigrationTypePostCopy
+		return MemoryMigrationTypePostCopy
 	} else if hotPageRatio < 0.2 {
 		// Few hot pages - use pre-copy for completeness
-		return MigrationTypePreCopy
+		return MemoryMigrationTypePreCopy
 	} else {
 		// Mixed workload - use hybrid approach
-		return MigrationTypeHybrid
+		return MemoryMigrationTypeHybrid
 	}
 }
 
@@ -864,7 +875,7 @@ func (msd *MemoryStateDistribution) transferPages(ctx context.Context, pages []*
 				Checksum:       page.Checksum,
 				CompressedSize: uint32(len(compressedData)),
 				Temperature:    page.Temperature,
-				AccessCount:    page.AccessCount,
+				AccessCount:    uint32(page.AccessCount),
 			}
 
 			// Update page state for transfer
@@ -879,7 +890,7 @@ func (msd *MemoryStateDistribution) transferPages(ctx context.Context, pages []*
 
 		// Track metrics
 		msd.metrics.BytesSynced.Add(totalBytes)
-		msd.metrics.MigrationsCompleted.Inc()
+		msd.metrics.MigrationsCompleted.Add(1)
 
 		// Apply bandwidth throttling if needed
 		if msd.bandwidthLimiter != nil {
@@ -925,7 +936,7 @@ func (msd *MemoryStateDistribution) transferPagesWithDelta(ctx context.Context, 
 	// Use deltaSync if available
 	if msd.deltaSync != nil {
 		// Pre-compute deltas for all pages
-		if err := msd.deltaSync.PreComputeDeltas(pages[0].VMID, pageNumbers); err != nil {
+		if err := msd.deltaSync.PreComputeDeltas(pages[0].VMID, blockIDs); err != nil {
 			msd.logger.Warn("Failed to pre-compute deltas, falling back to full transfer",
 				zap.Error(err))
 		} else {
@@ -1105,9 +1116,9 @@ func (msd *MemoryStateDistribution) performHybridMigration(ctx context.Context, 
 		zap.Int("hotPageCount", len(hotPages)))
 
 	// Use AI predictions to categorize pages
-	var predictions *AccessPredictions
+	var predictions *MemoryAccessPredictions
 	if msd.prefetcher != nil {
-		predictions = msd.prefetcher.PredictAccessPatterns(shard.VMID)
+		predictions = msd.convertPrefetchPredictions(msd.prefetcher.PredictAccessPatterns(shard.VMID))
 	}
 
 	// Categorize pages based on predictions and temperature
@@ -1219,7 +1230,7 @@ func (msd *MemoryStateDistribution) performHybridMigration(ctx context.Context, 
 	}
 
 	// Update migration metrics
-	msd.metrics.MigrationsCompleted.Inc()
+	msd.metrics.MigrationsCompleted.Add(1)
 
 	msd.logger.Info("Hybrid migration completed successfully",
 		zap.String("shardID", shard.ShardID),
@@ -1237,27 +1248,63 @@ func (msd *MemoryStateDistribution) findPage(shard *MemoryShard, pageNumber uint
 }
 
 // convertPageNumbersToBlocks converts page numbers to block IDs for delta sync
-func (msd *MemoryStateDistribution) convertPageNumbersToBlocks(pageNumbers []uint64) []string {
-	blocks := make([]string, len(pageNumbers))
-	for i, pageNum := range pageNumbers {
-		blocks[i] = fmt.Sprintf("page_%d", pageNum)
+func (msd *MemoryStateDistribution) convertPageNumbersToBlocks(pageNumbers []uint64) []uint64 {
+	blocks := make([]uint64, 0, len(pageNumbers))
+	blockMap := make(map[uint64]bool)
+	for _, pageNum := range pageNumbers {
+		block := pageNum / 8
+		if !blockMap[block] {
+			blockMap[block] = true
+			blocks = append(blocks, block)
+		}
 	}
 	return blocks
 }
 
+func (msd *MemoryStateDistribution) convertPrefetchPredictions(predictions *PrefetchAccessPredictions) *MemoryAccessPredictions {
+	if predictions == nil {
+		return nil
+	}
+
+	pagePredictions := make([]*AccessPrediction, 0, len(predictions.HotPages)+len(predictions.ColdPages))
+	for _, page := range predictions.HotPages {
+		pagePredictions = append(pagePredictions, &AccessPrediction{
+			PageNumber:  page,
+			Probability: predictions.Confidence,
+			Priority:    10,
+		})
+	}
+	for _, page := range predictions.ColdPages {
+		pagePredictions = append(pagePredictions, &AccessPrediction{
+			PageNumber:  page,
+			Probability: 1 - predictions.Confidence,
+			Priority:    1,
+		})
+	}
+
+	return &MemoryAccessPredictions{
+		HotPages:        predictions.HotPages,
+		ColdPages:       predictions.ColdPages,
+		PagePredictions: pagePredictions,
+		AccessSequence:  predictions.AccessSequence,
+		Confidence:      predictions.Confidence,
+		PredictionTime:  predictions.Timestamp,
+	}
+}
+
 // Helper functions for page management and transfer
 
-func (msd *MemoryStateDistribution) getPredictionsForPages(pages []*DistributedMemoryPage) *AccessPredictions {
+func (msd *MemoryStateDistribution) getPredictionsForPages(pages []*DistributedMemoryPage) *MemoryAccessPredictions {
 	if msd.prefetcher == nil || len(pages) == 0 {
 		return nil
 	}
 
 	// Get predictions for the VM
 	vmID := pages[0].VMID
-	return msd.prefetcher.PredictAccessPatterns(vmID)
+	return msd.convertPrefetchPredictions(msd.prefetcher.PredictAccessPatterns(vmID))
 }
 
-func (msd *MemoryStateDistribution) sortPagesByPriority(pages []*DistributedMemoryPage, predictions *AccessPredictions) []*DistributedMemoryPage {
+func (msd *MemoryStateDistribution) sortPagesByPriority(pages []*DistributedMemoryPage, predictions *MemoryAccessPredictions) []*DistributedMemoryPage {
 	sorted := make([]*DistributedMemoryPage, len(pages))
 	copy(sorted, pages)
 
@@ -1265,7 +1312,7 @@ func (msd *MemoryStateDistribution) sortPagesByPriority(pages []*DistributedMemo
 	priorityMap := make(map[uint64]float64)
 	if predictions != nil {
 		for _, pred := range predictions.PagePredictions {
-			priorityMap[pred.PageNumber] = pred.AccessProbability
+			priorityMap[pred.PageNumber] = pred.Probability
 		}
 	}
 
@@ -1280,7 +1327,7 @@ func (msd *MemoryStateDistribution) sortPagesByPriority(pages []*DistributedMemo
 	return sorted
 }
 
-func (msd *MemoryStateDistribution) sortPagesByAccessProbability(pages []*DistributedMemoryPage, predictions *AccessPredictions, descending bool) []*DistributedMemoryPage {
+func (msd *MemoryStateDistribution) sortPagesByAccessProbability(pages []*DistributedMemoryPage, predictions *MemoryAccessPredictions, descending bool) []*DistributedMemoryPage {
 	sorted := make([]*DistributedMemoryPage, len(pages))
 	copy(sorted, pages)
 
@@ -1288,7 +1335,7 @@ func (msd *MemoryStateDistribution) sortPagesByAccessProbability(pages []*Distri
 	probMap := make(map[uint64]float64)
 	if predictions != nil {
 		for _, pred := range predictions.PagePredictions {
-			probMap[pred.PageNumber] = pred.AccessProbability
+			probMap[pred.PageNumber] = pred.Probability
 		}
 	}
 
@@ -1326,14 +1373,14 @@ func (msd *MemoryStateDistribution) getPagePriority(page *DistributedMemoryPage,
 	return priority
 }
 
-func (msd *MemoryStateDistribution) getPageAccessProbability(pageNumber uint64, predictions *AccessPredictions) float64 {
+func (msd *MemoryStateDistribution) getPageAccessProbability(pageNumber uint64, predictions *MemoryAccessPredictions) float64 {
 	if predictions == nil {
 		return 0.5 // Default middle probability
 	}
 
 	for _, pred := range predictions.PagePredictions {
 		if pred.PageNumber == pageNumber {
-			return pred.AccessProbability
+			return pred.Probability
 		}
 	}
 
@@ -1393,7 +1440,7 @@ func (msd *MemoryStateDistribution) transferSinglePage(ctx context.Context, page
 			Checksum:       page.Checksum,
 			CompressedSize: uint32(len(compressedData)),
 			Temperature:    page.Temperature,
-			AccessCount:    page.AccessCount,
+			AccessCount:    uint32(page.AccessCount),
 		}},
 	}
 
@@ -1458,7 +1505,7 @@ func (msd *MemoryStateDistribution) maintainCoherenceOnTransfer(ctx context.Cont
 	// Invalidate pages on all other nodes to maintain consistency
 	for _, page := range pages {
 		// Create invalidation message
-		invalidationMsg := InvalidationMessage{
+		invalidationMsg := MemoryInvalidationMessage{
 			PageNumber: page.PageNumber,
 			VMID:       page.VMID,
 			ShardID:    page.ShardID,
@@ -1498,7 +1545,7 @@ func (msd *MemoryStateDistribution) updateCoherenceAfterTransfer(ctx context.Con
 
 	// Update coherence state after successful transfer
 	for _, page := range pages {
-		updateMsg := UpdateMessage{
+		updateMsg := MemoryUpdateMessage{
 			PageNumber: page.PageNumber,
 			VMID:       page.VMID,
 			ShardID:    page.ShardID,
@@ -1634,7 +1681,7 @@ func (bl *BandwidthLimiter) Wait(bytes int64) {
 	bl.lastTransfer = time.Now()
 }
 
-type InvalidationMessage struct {
+type MemoryInvalidationMessage struct {
 	PageNumber uint64
 	VMID       string
 	ShardID    string
@@ -1644,7 +1691,7 @@ type InvalidationMessage struct {
 	Timestamp  time.Time
 }
 
-type UpdateMessage struct {
+type MemoryUpdateMessage struct {
 	PageNumber uint64
 	VMID       string
 	ShardID    string
@@ -1773,8 +1820,8 @@ func (h *HybridMigration) GetType() string {
 func NewMemoryCoherenceProtocol() *MemoryCoherenceProtocol {
 	return &MemoryCoherenceProtocol{
 		coherenceMap:  make(map[string]CoherenceState),
-		invalidations: make(chan InvalidationMessage, 100),
-		updates:       make(chan UpdateMessage, 100),
+		invalidations: make(chan MemoryInvalidationMessage, 100),
+		updates:       make(chan MemoryUpdateMessage, 100),
 	}
 }
 
@@ -1815,20 +1862,8 @@ func (m *MemoryRecoveryManager) GetLatestCheckpoint(vmID string) *MemoryCheckpoi
 	return nil
 }
 
-func NewMemoryDistributionMetrics() *MemoryDistributionMetrics {
-	return &MemoryDistributionMetrics{}
-}
-
-// Stub types
-type InvalidationMessage struct {
-	PageNumber uint64
-	ShardID    string
-}
-
-type UpdateMessage struct {
-	PageNumber uint64
-	ShardID    string
-	Data       []byte
+func NewMemoryDistributionMetrics() *MemoryStateDistributionMetrics {
+	return &MemoryStateDistributionMetrics{}
 }
 
 type PageFaultHandler struct{}
@@ -1888,9 +1923,13 @@ type AccessPredictionModel struct{}
 
 func NewAccessPredictionModel() *AccessPredictionModel { return &AccessPredictionModel{} }
 
-type AccessPredictions struct {
-	HotPages  []uint64
-	ColdPages []uint64
+type MemoryAccessPredictions struct {
+	HotPages        []uint64
+	ColdPages       []uint64
+	PagePredictions []*AccessPrediction
+	AccessSequence  []uint64
+	Confidence      float64
+	PredictionTime  time.Time
 }
 
 type MemoryCheckpoint struct {
@@ -1908,68 +1947,13 @@ type RecoveryLog struct{}
 
 func NewRecoveryLog() *RecoveryLog { return &RecoveryLog{} }
 
-type MemoryDistributionMetrics struct {
+type MemoryStateDistributionMetrics struct {
 	ShardsCreated       atomic.Int64
 	DeltasSynced        atomic.Int64
 	BytesSynced         atomic.Int64
 	PagesTransferred    atomic.Int64
 	MigrationsCompleted atomic.Int64
 	RecoveriesCompleted atomic.Int64
-}
-
-// Helper methods for WAN delta sync integration
-
-// convertPageNumbersToBlocks converts page numbers to block numbers for delta sync
-func (msd *MemoryStateDistribution) convertPageNumbersToBlocks(pages []uint64) []uint64 {
-	blocks := make([]uint64, 0, len(pages))
-	blockMap := make(map[uint64]bool)
-
-	for _, page := range pages {
-		// Convert page to block (assuming 8 pages per block)
-		block := page / 8
-		if !blockMap[block] {
-			blockMap[block] = true
-			blocks = append(blocks, block)
-		}
-	}
-
-	return blocks
-}
-
-// performDeltaMigration performs delta-based shard migration
-func (msd *MemoryStateDistribution) performDeltaMigration(ctx context.Context, shard *MemoryShard, targetNode string, strategy MigrationStrategy) error {
-	// First, send delta to target node
-	if msd.deltaSync != nil {
-		dirtyPages := shard.DirtyBitmap.GetDirtyPages()
-		if len(dirtyPages) > 0 {
-			delta := &MemoryDelta{
-				ShardID:   shard.ShardID,
-				Version:   shard.Version,
-				Timestamp: time.Now(),
-				Pages:     make([]*PageDelta, 0, len(dirtyPages)),
-			}
-
-			// Create page deltas for dirty pages
-			for _, pageNum := range dirtyPages {
-				if page, exists := shard.Pages[pageNum]; exists {
-					delta.Pages = append(delta.Pages, &PageDelta{
-						PageNumber: pageNum,
-						Data:       page.Data,
-						Checksum:   page.Checksum,
-						Version:    page.Version,
-					})
-				}
-			}
-
-			// Send delta via WAN sync
-			if err := msd.deltaSync.SendDelta(ctx, targetNode, delta); err != nil {
-				return errors.Wrap(err, "failed to send delta")
-			}
-		}
-	}
-
-	// Then perform regular migration
-	return strategy.Migrate(ctx, shard, targetNode)
 }
 
 // getAvailableNodesFromFederation gets available nodes from the federation manager
@@ -1979,15 +1963,7 @@ func (msd *MemoryStateDistribution) getAvailableNodesFromFederation() []string {
 		return []string{}
 	}
 
-	// Get clusters from federation
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	clusters, err := msd.shardingManager.federation.ListClusters(ctx)
-	if err != nil {
-		msd.logger.Warn("Failed to list clusters from federation", zap.Error(err))
-		return []string{}
-	}
+	clusters := msd.shardingManager.federation.ListClusters()
 
 	// Extract node IDs from connected clusters
 	nodeIDs := make([]string, 0, len(clusters))
@@ -2000,11 +1976,21 @@ func (msd *MemoryStateDistribution) getAvailableNodesFromFederation() []string {
 	return nodeIDs
 }
 
-// WANMigrationDeltaSync interface for WAN delta synchronization
-type WANMigrationDeltaSync interface {
-	PreComputeDeltas(vmID string, priorityBlocks []uint64) error
-	StartWANSync(ctx context.Context, vmID, targetNode string) error
-	FinalizeSync(ctx context.Context, vmID, targetNode string) error
-	FinalSync(ctx context.Context, vmID, targetNode string) error
-	SendDelta(ctx context.Context, targetNode string, delta *MemoryDelta) error
+// WANMigrationDeltaSync coordinates WAN delta synchronization for experimental memory distribution.
+type WANMigrationDeltaSync struct{}
+
+func (sync *WANMigrationDeltaSync) StartWANSync(ctx context.Context, vmID, targetNode string) error {
+	return nil
+}
+
+func (sync *WANMigrationDeltaSync) FinalizeSync(ctx context.Context, vmID, targetNode string) error {
+	return nil
+}
+
+func (sync *WANMigrationDeltaSync) FinalSync(ctx context.Context, vmID, targetNode string) error {
+	return nil
+}
+
+func (sync *WANMigrationDeltaSync) SendDelta(ctx context.Context, targetNode string, delta *MemoryDelta) error {
+	return nil
 }

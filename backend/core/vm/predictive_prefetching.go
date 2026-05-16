@@ -6,11 +6,14 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/khryptorgraphics/novacron/backend/core/federation"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
 )
 
 // PredictivePrefetchingEngine uses AI to predict and pre-load data for migrations
@@ -18,7 +21,7 @@ type PredictivePrefetchingEngine struct {
 	logger               *logrus.Logger
 	nodeID               string
 	aiModel              *MigrationAIModel
-	cacheManager         *PredictiveCache
+	cacheManager         *PrefetchPredictiveCache
 	accessPatternTracker *AccessPatternTracker
 	prefetchMetrics      *PrefetchingMetrics
 	trainingData         *TrainingDataCollector
@@ -57,8 +60,8 @@ const (
 	ModelTypeTransformer
 )
 
-// PredictiveCache manages intelligent caching based on AI predictions
-type PredictiveCache struct {
+// PrefetchPredictiveCache manages intelligent caching based on AI predictions
+type PrefetchPredictiveCache struct {
 	CacheSize        int64
 	CurrentUsage     int64
 	HitRatio         float64
@@ -73,7 +76,7 @@ type PredictiveCache struct {
 
 // AccessPatternTracker analyzes and learns from VM access patterns
 type AccessPatternTracker struct {
-	PatternHistory     map[string]*AccessPattern
+	PatternHistory     map[string]*PrefetchAccessPattern
 	SeasonalPatterns   map[string]*SeasonalPattern
 	TrendAnalysis      *TrendAnalysis
 	AnomalyDetector    *AnomalyDetector
@@ -156,8 +159,8 @@ type VMDataFeatures struct {
 	BehaviorFeatures    *BehaviorFeatures
 }
 
-// AccessPattern represents learned access patterns
-type AccessPattern struct {
+// PrefetchAccessPattern represents learned access patterns
+type PrefetchAccessPattern struct {
 	PatternID     string
 	VMCategory    string
 	Frequency     map[time.Duration]float64
@@ -199,7 +202,7 @@ func NewPredictivePrefetchingEngine(logger *logrus.Logger) (*PredictivePrefetchi
 	}
 
 	// Initialize predictive cache
-	cacheManager := &PredictiveCache{
+	cacheManager := &PrefetchPredictiveCache{
 		CacheSize:        1024 * 1024 * 1024, // 1GB cache
 		PredictedEntries: make(map[string]*CacheEntry),
 		AccessFrequency:  make(map[string]int64),
@@ -210,7 +213,7 @@ func NewPredictivePrefetchingEngine(logger *logrus.Logger) (*PredictivePrefetchi
 
 	// Initialize access pattern tracker
 	accessPatternTracker := &AccessPatternTracker{
-		PatternHistory:     make(map[string]*AccessPattern),
+		PatternHistory:     make(map[string]*PrefetchAccessPattern),
 		SeasonalPatterns:   make(map[string]*SeasonalPattern),
 		TrendAnalysis:      NewTrendAnalysis(),
 		AnomalyDetector:    NewAnomalyDetector(),
@@ -530,18 +533,18 @@ func (model *MigrationAIModel) PredictAccess(
 
 // Helper methods and supporting types
 
-// MigrationType represents the type of migration
-type MigrationType int
+// PrefetchMigrationType represents the type of migration
+type PrefetchMigrationType int
 
 const (
-	MigrationTypeLive MigrationType = iota
-	MigrationTypeCold
-	MigrationTypeHybrid
-	MigrationTypeIncremental
+	PrefetchMigrationTypeLive PrefetchMigrationType = iota
+	PrefetchMigrationTypeCold
+	PrefetchMigrationTypeHybrid
+	PrefetchMigrationTypeIncremental
 )
 
 type MigrationSpec struct {
-	Type               MigrationType
+	Type               PrefetchMigrationType
 	SourceNode         string
 	DestinationNode    string
 	NetworkBandwidth   int64
@@ -690,9 +693,18 @@ func (engine *PredictivePrefetchingEngine) IntegrateWithMigration(migrationManag
 
 	// Register migration hooks
 	hooks := []MigrationHook{
-		engine.preMigrationPredictionHook,
-		engine.duringMigrationPrefetchHook,
-		engine.postMigrationFeedbackHook,
+		func(ctx context.Context, vmID string, payload interface{}) error {
+			spec, _ := payload.(*MigrationSpec)
+			return engine.preMigrationPredictionHook(ctx, vmID, spec)
+		},
+		func(ctx context.Context, vmID string, payload interface{}) error {
+			progress, _ := payload.(*PrefetchMigrationProgress)
+			return engine.duringMigrationPrefetchHook(ctx, vmID, progress)
+		},
+		func(ctx context.Context, vmID string, payload interface{}) error {
+			result, _ := payload.(*MigrationResult)
+			return engine.postMigrationFeedbackHook(ctx, vmID, result)
+		},
 	}
 
 	for _, hook := range hooks {
@@ -704,10 +716,10 @@ func (engine *PredictivePrefetchingEngine) IntegrateWithMigration(migrationManag
 
 // PredictAccessPatterns provides real-time access pattern prediction
 // This method bridges the API gap for memory_state_distribution.go
-func (engine *PredictivePrefetchingEngine) PredictAccessPatterns(vmID string) *AccessPredictions {
+func (engine *PredictivePrefetchingEngine) PredictAccessPatterns(vmID string) *PrefetchAccessPredictions {
 	// Create a default migration spec for access pattern prediction
 	defaultSpec := &MigrationSpec{
-		Type:               MigrationType(0), // Default migration type
+		Type:               PrefetchMigrationType(0), // Default migration type
 		SourceNode:         engine.nodeID,
 		DestinationNode:    "",
 		NetworkBandwidth:   1000000000, // 1 Gbps default
@@ -720,14 +732,14 @@ func (engine *PredictivePrefetchingEngine) PredictAccessPatterns(vmID string) *A
 	result, err := engine.PredictMigrationAccess(context.Background(), vmID, defaultSpec)
 	if err != nil {
 		engine.logger.WithError(err).Error("Failed to predict access patterns")
-		return &AccessPredictions{
+		return &PrefetchAccessPredictions{
 			VMID:      vmID,
 			Timestamp: time.Now(),
 		}
 	}
 
-	// Convert PredictionResult to AccessPredictions
-	return &AccessPredictions{
+	// Convert PredictionResult to PrefetchAccessPredictions
+	return &PrefetchAccessPredictions{
 		VMID:           vmID,
 		HotPages:       engine.extractHotPagesFromResult(result),
 		ColdPages:      engine.extractColdPagesFromResult(result),
@@ -824,7 +836,7 @@ func (engine *PredictivePrefetchingEngine) preMigrationPredictionHook(ctx contex
 	return nil
 }
 
-func (engine *PredictivePrefetchingEngine) duringMigrationPrefetchHook(ctx context.Context, vmID string, progress *MigrationProgress) error {
+func (engine *PredictivePrefetchingEngine) duringMigrationPrefetchHook(ctx context.Context, vmID string, progress *PrefetchMigrationProgress) error {
 	// Adjust prefetching based on migration progress
 	if progress.CompletionPercentage > 0.5 {
 		// Switch to more aggressive prefetching for remaining data
@@ -836,14 +848,19 @@ func (engine *PredictivePrefetchingEngine) duringMigrationPrefetchHook(ctx conte
 func (engine *PredictivePrefetchingEngine) postMigrationFeedbackHook(ctx context.Context, vmID string, result *MigrationResult) error {
 	// Collect feedback for model improvement
 	engine.migrationIntegration.mu.RLock()
-	prediction, exists := engine.migrationIntegration.predictionCache[vmID]
+	_, exists := engine.migrationIntegration.predictionCache[vmID]
 	engine.migrationIntegration.mu.RUnlock()
 
 	if exists {
+		features, err := engine.extractVMFeatures(ctx, vmID)
+		if err != nil {
+			return fmt.Errorf("extract VM features for migration feedback: %w", err)
+		}
+
 		// Generate training sample from actual migration results
 		sample := &TrainingSample{
 			VMID:            vmID,
-			Features:        engine.extractVMFeatures(vmID),
+			Features:        features,
 			ActualAccess:    engine.convertResultToAccess(result),
 			MigrationResult: result,
 			Timestamp:       time.Now(),
@@ -933,12 +950,6 @@ func (manager *ModelLifecycleManager) RollbackModel(modelName string, targetVers
 	return manager.rollbackManager.RollbackToVersion(modelName, targetVersion)
 }
 
-// Helper methods
-func (engine *PredictivePrefetchingEngine) extractVMFeatures(vmID string) *VMDataFeatures {
-	// Implementation would extract current VM features
-	return &VMDataFeatures{VMID: vmID}
-}
-
 func (engine *PredictivePrefetchingEngine) extractHotPages(predictions []*AccessPrediction) []uint64 {
 	hotPages := []uint64{}
 	for _, pred := range predictions {
@@ -1024,7 +1035,7 @@ func (engine *PredictivePrefetchingEngine) extractPageNumberFromID(pageID string
 	return pageNum
 }
 
-func (engine *PredictivePrefetchingEngine) convertPredictionsToBlocks(predictions *AccessPredictions) []uint64 {
+func (engine *PredictivePrefetchingEngine) convertPredictionsToBlocks(predictions *PrefetchAccessPredictions) []uint64 {
 	// Convert page predictions to block numbers
 	blocks := []uint64{}
 	for _, page := range predictions.HotPages {
@@ -1057,11 +1068,11 @@ type MigrationHook func(context.Context, string, interface{}) error
 
 type MigrationPrediction struct {
 	VMID        string
-	Predictions *AccessPredictions
+	Predictions *PrefetchAccessPredictions
 	Timestamp   time.Time
 }
 
-type AccessPredictions struct {
+type PrefetchAccessPredictions struct {
 	VMID           string
 	HotPages       []uint64
 	ColdPages      []uint64
@@ -1075,7 +1086,7 @@ type PrefetchCoordinationMessage struct {
 	SourceNode  string
 	TargetNode  string
 	VMID        string
-	Predictions *AccessPredictions
+	Predictions *PrefetchAccessPredictions
 	Timestamp   time.Time
 }
 
@@ -1093,7 +1104,7 @@ type CoordinationResponse struct {
 	Timestamp time.Time
 }
 
-type MigrationProgress struct {
+type PrefetchMigrationProgress struct {
 	VMID                 string
 	CompletionPercentage float64
 	DataTransferred      int64
@@ -1170,6 +1181,10 @@ type ABTestingFramework struct {
 	ActiveTests map[string]*ABTest
 }
 
+func (framework *ABTestingFramework) StartABTest(modelName string, model *ModelVersion) error {
+	return nil
+}
+
 type ABTest struct {
 	ModelName    string
 	ControlModel *MigrationAIModel
@@ -1185,6 +1200,16 @@ type AutoModelUpdater struct {
 
 type ModelRollbackManager struct {
 	RollbackHistory []RollbackEvent
+}
+
+func (manager *ModelRollbackManager) RollbackToVersion(modelName string, targetVersion string) error {
+	manager.RollbackHistory = append(manager.RollbackHistory, RollbackEvent{
+		ModelName:   modelName,
+		FromVersion: "",
+		ToVersion:   targetVersion,
+		Timestamp:   time.Now(),
+	})
+	return nil
 }
 
 type RollbackEvent struct {
@@ -1209,7 +1234,7 @@ type GetPredictionsRequest struct {
 
 type GetPredictionsResponse struct {
 	VMID        string
-	Predictions *AccessPredictions
+	Predictions *PrefetchAccessPredictions
 	Timestamp   time.Time
 }
 
@@ -1230,7 +1255,7 @@ func (mp *MemoryStatePrefetcher) PrefetchPagesToNode(vmID string, targetNode str
 	defer mp.mu.Unlock()
 
 	// Implementation would prefetch memory pages to target node
-	for _, pageNum := range pages {
+	for range pages {
 		// Fetch page from memory distribution
 		// Send to target node
 	}
@@ -1390,13 +1415,26 @@ type TrainingDataCollector struct {
 
 // AccessPrediction represents a prediction for memory/data access
 type AccessPrediction struct {
-	PageID        string    `json:"page_id"`
-	PageNumber    uint64    `json:"page_number"` // Direct page number for compatibility
-	Probability   float64   `json:"probability"`
-	AccessTime    time.Time `json:"access_time"`
-	AccessPattern string    `json:"access_pattern"` // "sequential", "random", "temporal"
-	Priority      int       `json:"priority"`       // 1-10 priority scale
-	Size          int64     `json:"size"`           // Size in bytes
+	PageID                string    `json:"page_id"`
+	PageNumber            uint64    `json:"page_number"` // Direct page number for compatibility
+	Probability           float64   `json:"probability"`
+	AccessTime            time.Time `json:"access_time"`
+	AccessPattern         string    `json:"access_pattern,omitempty"`
+	PrefetchAccessPattern string    `json:"access_pattern"` // "sequential", "random", "temporal"
+	Priority              int       `json:"priority"`       // 1-10 priority scale
+	Size                  int64     `json:"size"`           // Size in bytes
+}
+
+type VMMigrationExecutor struct {
+	prefetchingEnabled bool
+}
+
+func NewVMMigrationExecutor(logger *logrus.Logger, migrationDir string) (*VMMigrationExecutor, error) {
+	return &VMMigrationExecutor{prefetchingEnabled: true}, nil
+}
+
+func (executor *VMMigrationExecutor) EnablePredictivePrefetching(enabled bool) {
+	executor.prefetchingEnabled = enabled
 }
 
 type Feature struct {
@@ -1691,8 +1729,8 @@ func (ppe *PredictivePrefetchingEngine) updateCacheMetrics() {
 }
 
 // Additional stub methods for feature extraction
-func (ppe *PredictivePrefetchingEngine) createDefaultAccessPattern(vmID string) *AccessPattern {
-	return &AccessPattern{
+func (ppe *PredictivePrefetchingEngine) createDefaultAccessPattern(vmID string) *PrefetchAccessPattern {
+	return &PrefetchAccessPattern{
 		PatternID:     fmt.Sprintf("default-%s", vmID),
 		VMCategory:    "unknown",
 		Frequency:     make(map[time.Duration]float64),
@@ -1810,13 +1848,13 @@ func (model *MigrationAIModel) convertOutputToPredictions(output []float64, vmID
 	for i, prob := range output {
 		if prob > 0.1 { // Only include predictions above threshold
 			prediction := &AccessPrediction{
-				PageID:        fmt.Sprintf("page_%s_%d", vmID, i),
-				PageNumber:    uint64(i), // Store direct page number
-				Probability:   prob,
-				AccessTime:    time.Now().Add(time.Duration(i) * time.Minute),
-				AccessPattern: "sequential",
-				Priority:      int(prob * 10),
-				Size:          4096, // 4KB page size
+				PageID:                fmt.Sprintf("page_%s_%d", vmID, i),
+				PageNumber:            uint64(i), // Store direct page number
+				Probability:           prob,
+				AccessTime:            time.Now().Add(time.Duration(i) * time.Minute),
+				PrefetchAccessPattern: "sequential",
+				Priority:              int(prob * 10),
+				Size:                  4096, // 4KB page size
 			}
 			predictions = append(predictions, prediction)
 		}
@@ -1888,7 +1926,7 @@ func NewAnomalyDetector() *AnomalyDetector {
 }
 
 func (ppe *PredictivePrefetchingEngine) generatePredictionCacheKey(vmID string, spec *MigrationSpec) string {
-	return fmt.Sprintf("pred-%s-%s-%s", vmID, spec.Type, spec.DestinationNode)
+	return fmt.Sprintf("pred-%s-%v-%s", vmID, spec.Type, spec.DestinationNode)
 }
 
 func (ppe *PredictivePrefetchingEngine) getCachedPrediction(key string) *PredictionResult {

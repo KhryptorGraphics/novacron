@@ -49,7 +49,7 @@ func TestPredictivePrefetchingEngine_PredictMigrationAccess(t *testing.T) {
 	vmID := "test-vm-123"
 
 	migrationSpec := &MigrationSpec{
-		Type:               MigrationTypeLive,
+		Type:               PrefetchMigrationTypeLive,
 		SourceNode:         "node-1",
 		DestinationNode:    "node-2",
 		NetworkBandwidth:   1024 * 1024 * 100, // 100 MB/s
@@ -255,7 +255,7 @@ func BenchmarkPredictivePrefetching_PredictAccess(b *testing.B) {
 	vmID := "benchmark-vm"
 
 	migrationSpec := &MigrationSpec{
-		Type:               MigrationTypeLive,
+		Type:               PrefetchMigrationTypeLive,
 		SourceNode:         "node-1",
 		DestinationNode:    "node-2",
 		NetworkBandwidth:   1024 * 1024 * 100,

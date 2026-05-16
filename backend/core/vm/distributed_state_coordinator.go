@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/khryptorgraphics/novacron/backend/core/shared"
+	"github.com/khryptorgraphics/novacron/backend/core/federation"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -21,7 +21,7 @@ type DistributedStateCoordinator struct {
 	nodeID              string
 	shardingManager     *VMStateShardingManager
 	memoryDistribution  *MemoryStateDistribution
-	federationManager   shared.FederationManager
+	federationManager   federation.FederationManager
 	transactionManager  *DistributedTransactionManager
 	conflictResolver    *ConflictResolver
 	optimizer           *GlobalOptimizer
@@ -81,7 +81,7 @@ type ConflictResolver struct {
 	mu              sync.RWMutex
 	vectorClocks    map[string]map[string]uint64
 	conflictHistory []*ConflictRecord
-	strategies      map[ConflictType]ResolutionStrategy
+	strategies      map[DistributedConflictType]ResolutionStrategy
 }
 
 // GlobalOptimizer optimizes global state placement and migration
@@ -152,7 +152,7 @@ func NewDistributedStateCoordinator(
 }
 
 // MigrateVMState orchestrates VM state migration across nodes and clusters
-func (c *DistributedStateCoordinator) MigrateVMState(ctx context.Context, vmID, targetNode string, options MigrationOptions) error {
+func (c *DistributedStateCoordinator) MigrateVMState(ctx context.Context, vmID, targetNode string, options DistributedMigrationOptions) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -235,7 +235,7 @@ func (c *DistributedStateCoordinator) MigrateVMState(ctx context.Context, vmID, 
 }
 
 // ResolveConflict resolves conflicts in distributed state
-func (c *DistributedStateCoordinator) ResolveConflict(ctx context.Context, conflict *StateConflict) (*ConflictResolution, error) {
+func (c *DistributedStateCoordinator) ResolveConflict(ctx context.Context, conflict *DistributedStateConflict) (*ConflictResolution, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -439,7 +439,7 @@ func (c *DistributedStateCoordinator) runFailureDetector() {
 
 // Helper methods
 
-func (c *DistributedStateCoordinator) prepareMigration(ctx context.Context, vmID, targetNode string, options MigrationOptions) (*MigrationPlan, error) {
+func (c *DistributedStateCoordinator) prepareMigration(ctx context.Context, vmID, targetNode string, options DistributedMigrationOptions) (*MigrationPlan, error) {
 	// Implementation would prepare migration plan
 	return &MigrationPlan{
 		RequiredLocks: []string{vmID, targetNode},
@@ -451,7 +451,7 @@ func (c *DistributedStateCoordinator) migrateVMStateShards(ctx context.Context, 
 	return nil
 }
 
-func (c *DistributedStateCoordinator) migrateMemoryState(ctx context.Context, vmID, targetNode string, options MigrationOptions) error {
+func (c *DistributedStateCoordinator) migrateMemoryState(ctx context.Context, vmID, targetNode string, options DistributedMigrationOptions) error {
 	strategy := "hybrid"
 	if options.Strategy != "" {
 		strategy = options.Strategy
@@ -530,30 +530,30 @@ type RollbackOperation struct {
 	Data      interface{}
 }
 
-type ConflictType int
+type DistributedConflictType int
 
 const (
-	ConflictTypeConcurrentWrite ConflictType = iota
-	ConflictTypeVersionMismatch
-	ConflictTypeNetworkPartition
+	DistributedConflictTypeConcurrentWrite DistributedConflictType = iota
+	DistributedConflictTypeVersionMismatch
+	DistributedConflictTypeNetworkPartition
 )
 
-func (c ConflictType) String() string {
+func (c DistributedConflictType) String() string {
 	switch c {
-	case ConflictTypeConcurrentWrite:
+	case DistributedConflictTypeConcurrentWrite:
 		return "concurrent_write"
-	case ConflictTypeVersionMismatch:
+	case DistributedConflictTypeVersionMismatch:
 		return "version_mismatch"
-	case ConflictTypeNetworkPartition:
+	case DistributedConflictTypeNetworkPartition:
 		return "network_partition"
 	default:
 		return "unknown"
 	}
 }
 
-type StateConflict struct {
+type DistributedStateConflict struct {
 	ID        string
-	Type      ConflictType
+	Type      DistributedConflictType
 	Nodes     []string
 	Timestamp time.Time
 	Data      interface{}
@@ -567,16 +567,16 @@ type ConflictResolution struct {
 }
 
 type ConflictRecord struct {
-	Conflict   *StateConflict
+	Conflict   *DistributedStateConflict
 	Resolution *ConflictResolution
 	Timestamp  time.Time
 }
 
 type ResolutionStrategy interface {
-	Resolve(*StateConflict) (*ConflictResolution, error)
+	Resolve(*DistributedStateConflict) (*ConflictResolution, error)
 }
 
-type MigrationOptions struct {
+type DistributedMigrationOptions struct {
 	Strategy         string
 	Priority         int
 	BandwidthLimit   int64
@@ -690,13 +690,13 @@ type ConsistencyStatus struct {
 }
 
 type GlobalState struct {
-	VMs       map[string]*VMState
+	VMs       map[string]*DistributedCoordinatorVMState
 	Nodes     map[string]*NodeState
-	Clusters  map[string]*ClusterState
+	Clusters  map[string]*DistributedClusterState
 	Timestamp time.Time
 }
 
-type VMState struct {
+type DistributedCoordinatorVMState struct {
 	ID     string
 	Node   string
 	Memory uint64
@@ -711,7 +711,7 @@ type NodeState struct {
 	VMCount   int
 }
 
-type ClusterState struct {
+type DistributedClusterState struct {
 	ID        string
 	Nodes     []string
 	Resources ResourceInfo
@@ -778,15 +778,15 @@ func NewConflictResolver() *ConflictResolver {
 	return &ConflictResolver{
 		vectorClocks:    make(map[string]map[string]uint64),
 		conflictHistory: []*ConflictRecord{},
-		strategies:      make(map[ConflictType]ResolutionStrategy),
+		strategies:      make(map[DistributedConflictType]ResolutionStrategy),
 	}
 }
 
-func (r *ConflictResolver) GetStrategy(conflictType ConflictType) ResolutionStrategy {
+func (r *ConflictResolver) GetStrategy(conflictType DistributedConflictType) ResolutionStrategy {
 	return r.strategies[conflictType]
 }
 
-func (r *ConflictResolver) RecordResolution(conflict *StateConflict, resolution *ConflictResolution) {
+func (r *ConflictResolver) RecordResolution(conflict *DistributedStateConflict, resolution *ConflictResolution) {
 	r.conflictHistory = append(r.conflictHistory, &ConflictRecord{
 		Conflict:   conflict,
 		Resolution: resolution,
@@ -806,8 +806,8 @@ func NewGlobalOptimizer() *GlobalOptimizer {
 type AIPredictionEngine struct{}
 
 func NewAIPredictionEngine() *AIPredictionEngine { return &AIPredictionEngine{} }
-func (a *AIPredictionEngine) PredictAccessPatterns(state *GlobalState) (*AccessPredictions, error) {
-	return &AccessPredictions{}, nil
+func (a *AIPredictionEngine) PredictAccessPatterns(state *GlobalState) (*PrefetchAccessPredictions, error) {
+	return &PrefetchAccessPredictions{}, nil
 }
 
 type CostModel struct{}
@@ -817,7 +817,7 @@ func NewCostModel() *CostModel { return &CostModel{} }
 type PlacementOptimizer struct{}
 
 func NewPlacementOptimizer() *PlacementOptimizer { return &PlacementOptimizer{} }
-func (p *PlacementOptimizer) CalculateOptimalPlacement(state *GlobalState, predictions *AccessPredictions) (*OptimizationPlan, error) {
+func (p *PlacementOptimizer) CalculateOptimalPlacement(state *GlobalState, predictions *PrefetchAccessPredictions) (*OptimizationPlan, error) {
 	return &OptimizationPlan{}, nil
 }
 
