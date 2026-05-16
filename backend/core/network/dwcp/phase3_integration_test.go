@@ -254,6 +254,8 @@ func testMonitoringIntegration(t *testing.T) {
 		t.Error("Expected metrics data")
 	}
 
+	runGoTest(t, "monitoring", "TestMetricsCollector|TestAggregatedMetric|TestTracingSystem|TestNetworkTelemetryMeasureLatencyUsesRecordedSample|TestNetworkTelemetryMeasureLatencyUsesTopology|TestNetworkTelemetryMeasureLatencyUsesTunnelHealth|TestNetworkTelemetryMeasureLatencyUnknownPair|TestDetectAnomalyReportsExpectedAndDeviation|TestDetectAnomalyUsesValueAsExpectedInsideRange|TestMonitoringPipelineStoresRecentAnomalies|TestMonitoringPipelineAnomalyHistoryBound|TestMetricVector_ToSlice|TestIsolationForest_Detection|TestLSTMAutoencoder_Detection|TestZScoreDetector_Detection|TestSeasonalESD_Detection|TestEnsembleDetector_Aggregation|TestMonitoringPipeline_ProcessMetrics")
+
 	t.Log("✅ Monitoring integration working")
 }
 
