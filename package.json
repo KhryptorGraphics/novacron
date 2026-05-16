@@ -50,7 +50,9 @@
 		"auto-spawn": "node src/cli/auto-spawn.js",
 		"auto-spawn:start": "node src/cli/auto-spawn.js start",
 		"auto-spawn:status": "node src/cli/auto-spawn.js status",
-		"auto-spawn:help": "node src/cli/auto-spawn.js help"
+		"auto-spawn:help": "node src/cli/auto-spawn.js help",
+		"gitnexus:post-commit": "bash scripts/gitnexus-post-commit.sh",
+		"test:gitnexus-post-commit": "bash scripts/test-gitnexus-post-commit.sh"
 	},
 	"dependencies": {
 		"@genkit-ai/mcp": "^1.19.2",
