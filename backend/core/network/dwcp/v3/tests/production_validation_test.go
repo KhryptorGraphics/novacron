@@ -3,11 +3,8 @@
 package tests
 
 import (
-	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -31,29 +28,29 @@ type ProductionValidationSuite struct {
 
 // ValidationResults tracks validation test results
 type ValidationResults struct {
-	TotalTests       int                    `json:"total_tests"`
-	PassedTests      int                    `json:"passed_tests"`
-	FailedTests      int                    `json:"failed_tests"`
-	SkippedTests     int                    `json:"skipped_tests"`
-	ExecutionTime    time.Duration          `json:"execution_time_ms"`
-	Timestamp        time.Time              `json:"timestamp"`
-	TestResults      map[string]TestResult  `json:"test_results"`
-	MetricsSnapshot  *MetricsSnapshot       `json:"metrics_snapshot"`
-	Recommendations  []string               `json:"recommendations"`
-	CriticalIssues   []string               `json:"critical_issues"`
-	Warnings         []string               `json:"warnings"`
-	PassRate         float64                `json:"pass_rate"`
+	TotalTests      int                   `json:"total_tests"`
+	PassedTests     int                   `json:"passed_tests"`
+	FailedTests     int                   `json:"failed_tests"`
+	SkippedTests    int                   `json:"skipped_tests"`
+	ExecutionTime   time.Duration         `json:"execution_time_ms"`
+	Timestamp       time.Time             `json:"timestamp"`
+	TestResults     map[string]TestResult `json:"test_results"`
+	MetricsSnapshot *MetricsSnapshot      `json:"metrics_snapshot"`
+	Recommendations []string              `json:"recommendations"`
+	CriticalIssues  []string              `json:"critical_issues"`
+	Warnings        []string              `json:"warnings"`
+	PassRate        float64               `json:"pass_rate"`
 }
 
 // TestResult represents individual test result
 type TestResult struct {
-	Name          string        `json:"name"`
-	Status        string        `json:"status"`
-	Duration      time.Duration `json:"duration_ms"`
-	ErrorMessage  string        `json:"error_message,omitempty"`
-	Severity      string        `json:"severity"`
-	Component     string        `json:"component"`
-	Timestamp     time.Time     `json:"timestamp"`
+	Name         string        `json:"name"`
+	Status       string        `json:"status"`
+	Duration     time.Duration `json:"duration_ms"`
+	ErrorMessage string        `json:"error_message,omitempty"`
+	Severity     string        `json:"severity"`
+	Component    string        `json:"component"`
+	Timestamp    time.Time     `json:"timestamp"`
 }
 
 // MetricsSnapshot captures production metrics at test time
@@ -71,23 +68,23 @@ type MetricsSnapshot struct {
 
 // ProductionConfig holds production validation configuration
 type ProductionConfig struct {
-	Environment           string        `json:"environment"`
-	ClusterSize           int           `json:"cluster_size"`
-	TestTimeout           time.Duration `json:"test_timeout"`
-	MaxConcurrentTests    int           `json:"max_concurrent_tests"`
-	EnableStressTests     bool          `json:"enable_stress_tests"`
-	EnableSecurityTests   bool          `json:"enable_security_tests"`
-	EnableIntegrationTest bool          `json:"enable_integration_test"`
+	Environment           string           `json:"environment"`
+	ClusterSize           int              `json:"cluster_size"`
+	TestTimeout           time.Duration    `json:"test_timeout"`
+	MaxConcurrentTests    int              `json:"max_concurrent_tests"`
+	EnableStressTests     bool             `json:"enable_stress_tests"`
+	EnableSecurityTests   bool             `json:"enable_security_tests"`
+	EnableIntegrationTest bool             `json:"enable_integration_test"`
 	AlertThresholds       *AlertThresholds `json:"alert_thresholds"`
 }
 
 // AlertThresholds defines when to alert on metrics
 type AlertThresholds struct {
-	MaxLatencyMs      float64 `json:"max_latency_ms"`
-	MaxErrorRate      float64 `json:"max_error_rate_percent"`
-	MinThroughput     float64 `json:"min_throughput_ops_per_sec"`
-	MaxMemoryUsageMB  float64 `json:"max_memory_usage_mb"`
-	MaxCPUUsage       float64 `json:"max_cpu_usage_percent"`
+	MaxLatencyMs     float64 `json:"max_latency_ms"`
+	MaxErrorRate     float64 `json:"max_error_rate_percent"`
+	MinThroughput    float64 `json:"min_throughput_ops_per_sec"`
+	MaxMemoryUsageMB float64 `json:"max_memory_usage_mb"`
+	MaxCPUUsage      float64 `json:"max_cpu_usage_percent"`
 }
 
 // NewProductionValidationSuite creates a new production validation suite

@@ -45,7 +45,7 @@ func testV1AfterPhase3(t *testing.T) {
 		require.NoError(t, err)
 		require.Greater(t, len(compressed), 0)
 
-		decompressed, err := hde.DecompressMemory("vm-v1", compressed)
+		decompressed, err := hde.Decompress(compressed)
 		require.NoError(t, err)
 		assert.Equal(t, data, decompressed)
 	})
@@ -63,8 +63,8 @@ func testV1AfterPhase3(t *testing.T) {
 		amst.UpdateMetrics(8, 0.001, 10e9)
 		metrics := amst.GetMetrics()
 
-		assert.Equal(t, 8, metrics.ActiveStreams)
-		assert.Greater(t, metrics.Throughput, 0.0)
+		assert.Equal(t, 8, intMetric(metrics, "active_streams"))
+		assert.Greater(t, int64Metric(metrics, "transfer_rate"), int64(0))
 	})
 
 	t.Run("V1_AllOperations", func(t *testing.T) {
@@ -92,7 +92,7 @@ func testV1AfterPhase3(t *testing.T) {
 			compressed, err := hde.CompressMemory(fmt.Sprintf("vm-%d", level), data, level)
 			require.NoError(t, err)
 
-			decompressed, err := hde.DecompressMemory(fmt.Sprintf("vm-%d", level), compressed)
+			decompressed, err := hde.Decompress(compressed)
 			require.NoError(t, err)
 			assert.Equal(t, data, decompressed)
 		}
@@ -103,7 +103,7 @@ func testV1AfterPhase3(t *testing.T) {
 func testDualModeOperation(t *testing.T) {
 	t.Run("SimultaneousV1V3", func(t *testing.T) {
 		// Configure for 50% rollout
-		upgrade.SetRolloutPercentage("hde", 50)
+		setRolloutPercentage("hde", 50)
 		defer upgrade.DisableAll()
 
 		// Create instances that should use different versions
@@ -155,7 +155,7 @@ func testDualModeOperation(t *testing.T) {
 	})
 
 	t.Run("MixedOperations", func(t *testing.T) {
-		upgrade.SetRolloutPercentage("hde", 50)
+		setRolloutPercentage("hde", 50)
 		defer upgrade.DisableAll()
 
 		config := dwcp.HDEConfig{
@@ -177,7 +177,7 @@ func testDualModeOperation(t *testing.T) {
 			compressed, err := hde.CompressMemory(vmID, data, dwcp.CompressionGlobal)
 			require.NoError(t, err)
 
-			decompressed, err := hde.DecompressMemory(vmID, compressed)
+			decompressed, err := hde.Decompress(compressed)
 			require.NoError(t, err)
 			assert.Equal(t, data, decompressed)
 		}
@@ -190,7 +190,7 @@ func testFeatureFlagRollout(t *testing.T) {
 
 	for _, pct := range percentages {
 		t.Run(fmt.Sprintf("Rollout_%d_Percent", pct), func(t *testing.T) {
-			upgrade.SetRolloutPercentage("hde", pct)
+			setRolloutPercentage("hde", pct)
 			defer upgrade.DisableAll()
 
 			// Test with 1000 node IDs for statistical significance
@@ -367,7 +367,7 @@ func testNoDataLoss(t *testing.T) {
 			compressed, err := hde.CompressMemory(vmID, originalData, dwcp.CompressionGlobal)
 			require.NoError(t, err)
 
-			decompressed, err := hde.DecompressMemory(vmID, compressed)
+			decompressed, err := hde.Decompress(compressed)
 			require.NoError(t, err)
 			assert.Equal(t, originalData, decompressed,
 				"Data for %s should be intact after rollback", vmID)
@@ -405,7 +405,7 @@ func testNoDataLoss(t *testing.T) {
 					return
 				}
 
-				decompressed, err := hde.DecompressMemory(vmID, compressed)
+				decompressed, err := hde.Decompress(compressed)
 				if err != nil {
 					successCount <- false
 					return
@@ -445,7 +445,7 @@ func testNoDataLoss(t *testing.T) {
 func testMixedVersionCluster(t *testing.T) {
 	t.Run("CrossVersionCommunication", func(t *testing.T) {
 		// Simulate 50% v1, 50% v3 cluster
-		upgrade.SetRolloutPercentage("hde", 50)
+		setRolloutPercentage("hde", 50)
 		defer upgrade.DisableAll()
 
 		data := make([]byte, 1024*1024)
@@ -472,7 +472,7 @@ func testMixedVersionCluster(t *testing.T) {
 		require.NoError(t, err)
 		defer hdeV1.Close()
 
-		decompressed, err := hdeV1.DecompressMemory("vm-cross-version", compressed)
+		decompressed, err := hdeV1.Decompress(compressed)
 		require.NoError(t, err)
 		assert.Equal(t, data, decompressed)
 	})
@@ -484,7 +484,7 @@ func testMixedVersionCluster(t *testing.T) {
 		rand.Read(data)
 
 		for _, pct := range percentages {
-			upgrade.SetRolloutPercentage("hde", pct)
+			setRolloutPercentage("hde", pct)
 
 			config := dwcp.HDEConfig{
 				GlobalLevel: 3,
@@ -501,7 +501,7 @@ func testMixedVersionCluster(t *testing.T) {
 				compressed, err := hde.CompressMemory(vmID, data, dwcp.CompressionGlobal)
 				require.NoError(t, err)
 
-				decompressed, err := hde.DecompressMemory(vmID, compressed)
+				decompressed, err := hde.Decompress(compressed)
 				require.NoError(t, err)
 				assert.Equal(t, data, decompressed)
 			}

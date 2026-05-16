@@ -19,6 +19,7 @@ func TestV3WithMigration(t *testing.T) {
 	defer upgrade.DisableAll()
 
 	ctx := context.Background()
+	_ = ctx
 
 	t.Run("migration_with_v3_transport", func(t *testing.T) {
 		// Create AMST v3 for migration
@@ -61,7 +62,9 @@ func TestV3WithMigration(t *testing.T) {
 
 		// Compress VM memory for migration
 		vmMemory := make([]byte, 1024*1024) // 1MB
-		rand.Read(vmMemory)
+		for i := range vmMemory {
+			vmMemory[i] = byte(i % 16)
+		}
 
 		compressed, err := hde.CompressMemory("migration-vm", vmMemory, dwcp.CompressionGlobal)
 		require.NoError(t, err)
@@ -120,6 +123,7 @@ func TestV3WithFederation(t *testing.T) {
 		detector.ForceMode(upgrade.ModeInternet)
 
 		for _, cloud := range clouds {
+			t.Logf("Testing cloud provider: %s", cloud)
 			config := dwcp.AMSTConfig{
 				MinStreams:     4,
 				MaxStreams:     16,
@@ -159,7 +163,9 @@ func TestV3WithFederation(t *testing.T) {
 
 		for _, region := range regions {
 			data := make([]byte, 100*1024)
-			rand.Read(data)
+			for i := range data {
+				data[i] = byte(i % 16)
+			}
 
 			compressed, err := hde.CompressMemory(fmt.Sprintf("region-%s", region), data, dwcp.CompressionGlobal)
 			require.NoError(t, err)
@@ -402,14 +408,14 @@ func TestV3ErrorHandling(t *testing.T) {
 
 		// Simulate progressive network degradation
 		conditions := []struct {
-			latency  int64
-			loss     float64
+			latency   int64
+			loss      float64
 			bandwidth int64
 		}{
-			{5, 0.001, 10e9},     // Good
-			{50, 0.01, 1e9},      // Moderate
-			{200, 0.05, 100e6},   // Poor
-			{500, 0.10, 10e6},    // Critical
+			{5, 0.001, 10e9},   // Good
+			{50, 0.01, 1e9},    // Moderate
+			{200, 0.05, 100e6}, // Poor
+			{500, 0.10, 10e6},  // Critical
 		}
 
 		for _, cond := range conditions {

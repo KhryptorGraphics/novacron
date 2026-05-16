@@ -5,30 +5,31 @@ package tests
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // Phase5ProductionMetrics represents production readiness metrics
 type Phase5ProductionMetrics struct {
-	QuantumReadiness      bool
-	AutonomousHealingRate float64
-	ZeroOpsAutomation     float64
-	PlanetaryAvailability float64
+	QuantumReadiness       bool
+	AutonomousHealingRate  float64
+	ZeroOpsAutomation      float64
+	PlanetaryAvailability  float64
 	NeuromorphicEfficiency float64
-	BlockchainTPS         int
-	ResearchPipeline      bool
-	DeploymentSuccess     bool
+	BlockchainTPS          int
+	ResearchPipeline       bool
+	DeploymentSuccess      bool
 }
 
 // TestPhase5_BenchmarkValidation validates all benchmark results meet targets
 func TestPhase5_BenchmarkValidation(t *testing.T) {
 	ctx := context.Background()
+	_ = ctx
 
 	t.Run("Quantum_Computing_Benchmarks", func(t *testing.T) {
 		t.Run("Circuit_Compilation_Performance", func(t *testing.T) {
@@ -492,8 +493,8 @@ func TestPhase5_ProductionSimulation(t *testing.T) {
 		t.Run("Performance_Degradation", func(t *testing.T) {
 			// Simulate performance degradation
 			errorRate := 0.5
-			latencyP99 := 99.0  // Normal: <50ms, current: 99ms
-			cpuUsage := 95.0     // Normal: <80%, current: 95%
+			latencyP99 := 99.0 // Normal: <50ms, current: 99ms
+			cpuUsage := 95.0   // Normal: <80%, current: 95%
 
 			shouldRollback := checkRollbackConditions(errorRate, latencyP99, cpuUsage)
 			assert.True(t, shouldRollback,
@@ -769,7 +770,7 @@ func TestPhase5_SecurityCompliance(t *testing.T) {
 
 		for _, test := range roles {
 			t.Run(test.role, func(t *testing.T) {
-				permissions := getRole Permissions(test.role)
+				permissions := getRolePermissions(test.role)
 
 				assert.Equal(t, test.canDeploy, permissions.CanDeploy,
 					"Deploy permission mismatch")
@@ -933,11 +934,11 @@ func validateAlertConfiguration(name string) bool {
 
 func collectAllMetrics() map[string]float64 {
 	return map[string]float64{
-		"quantum_compilation_time":        0.3,
-		"autonomous_healing_success_rate": 99.2,
-		"zero_ops_automation_rate":        99.92,
-		"planetary_coverage_percentage":   99.99,
-		"neuromorphic_inference_latency":  0.8,
+		"quantum_compilation_time":           0.3,
+		"autonomous_healing_success_rate":    99.2,
+		"zero_ops_automation_rate":           99.92,
+		"planetary_coverage_percentage":      99.99,
+		"neuromorphic_inference_latency":     0.8,
 		"blockchain_transactions_per_second": 12500,
 	}
 }
@@ -1080,9 +1081,6 @@ func measureDatacenterPerformance() float64 {
 func measureInternetCompression() float64 {
 	return 81.5 // Maintained 80-82% range
 }
-
-// Import for random number generation
-import "math/rand"
 
 func init() {
 	rand.Seed(time.Now().UnixNano())

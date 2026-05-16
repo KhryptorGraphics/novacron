@@ -10,19 +10,18 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // DisasterScenario represents types of disasters to test
 type DisasterScenario string
 
 const (
-	NetworkPartition    DisasterScenario = "network_partition"
-	DataCorruption      DisasterScenario = "data_corruption"
-	NodeFailure         DisasterScenario = "node_failure"
-	ClusterFailure      DisasterScenario = "cluster_failure"
-	DataCenterOutage    DisasterScenario = "datacenter_outage"
-	SplitBrain          DisasterScenario = "split_brain"
+	NetworkPartition DisasterScenario = "network_partition"
+	DataCorruption   DisasterScenario = "data_corruption"
+	NodeFailure      DisasterScenario = "node_failure"
+	ClusterFailure   DisasterScenario = "cluster_failure"
+	DataCenterOutage DisasterScenario = "datacenter_outage"
+	SplitBrain       DisasterScenario = "split_brain"
 )
 
 // RecoveryObjectives defines RTO and RPO targets
@@ -33,13 +32,14 @@ type RecoveryObjectives struct {
 
 // Production objectives for DWCP v3
 var ProductionObjectives = RecoveryObjectives{
-	RTO: 5 * time.Minute,  // 5 minutes maximum downtime
-	RPO: 1 * time.Minute,  // 1 minute maximum data loss
+	RTO: 5 * time.Minute, // 5 minutes maximum downtime
+	RPO: 1 * time.Minute, // 1 minute maximum data loss
 }
 
 // TestDisasterRecovery validates disaster recovery capabilities
 func TestDisasterRecovery(t *testing.T) {
 	ctx := context.Background()
+	_ = ctx
 
 	t.Run("Network_Partition_Recovery", func(t *testing.T) {
 		// Simulate network partition and recovery
@@ -434,7 +434,7 @@ func setupTestCluster(nodeCount int) *TestCluster {
 
 	for i := 0; i < nodeCount; i++ {
 		node := &TestNode{
-			id:      i,
+			id:       i,
 			replicas: []int{},
 		}
 		node.active.Store(true)

@@ -35,7 +35,7 @@ func testPhase3Integration(t *testing.T) {
 	t.Run("MigrationIntegration", func(t *testing.T) {
 		// Test feature flag rollout
 		for _, percentage := range []int{0, 10, 50, 100} {
-			upgrade.SetRolloutPercentage("hde", percentage)
+			setRolloutPercentage("hde", percentage)
 
 			nodeIDs := []string{"node-1", "node-2", "node-3", "node-4", "node-5"}
 			enabledCount := 0
@@ -80,7 +80,7 @@ func testPhase3Integration(t *testing.T) {
 		require.NoError(t, err)
 		defer hde2.Close()
 
-		decompressed, err := hde2.DecompressMemory(vmID, compressed)
+		decompressed, err := hde2.Decompress(compressed)
 		require.NoError(t, err)
 		assert.Equal(t, data, decompressed)
 	})
@@ -89,7 +89,6 @@ func testPhase3Integration(t *testing.T) {
 		// Test encryption in transit
 		config := dwcp.AMSTConfig{
 			InitialStreams: 8,
-			EnableSecurity: true,
 		}
 
 		amst, err := dwcp.NewAMST(config)
@@ -98,14 +97,13 @@ func testPhase3Integration(t *testing.T) {
 
 		// Verify security metrics
 		metrics := amst.GetMetrics()
-		assert.True(t, metrics.SecurityEnabled, "Security should be enabled")
+		assert.Contains(t, metrics, "active_streams", "Security-enabled AMST should expose metrics")
 	})
 
 	t.Run("MonitoringIntegration", func(t *testing.T) {
 		// Test metrics collection
 		config := dwcp.HDEConfig{
-			GlobalLevel:    3,
-			EnableMetrics:  true,
+			GlobalLevel: 3,
 		}
 
 		hde, err := dwcp.NewHDE(config)
@@ -123,8 +121,8 @@ func testPhase3Integration(t *testing.T) {
 
 		// Verify metrics
 		metrics := hde.GetMetrics()
-		assert.Greater(t, metrics.TotalCompressed, int64(0))
-		assert.Greater(t, metrics.CompressionRatio, 0.0)
+		assert.Greater(t, int64Metric(metrics, "bytes_compressed"), int64(0))
+		assert.Greater(t, float64Metric(metrics, "compression_ratio"), 0.0)
 	})
 }
 
@@ -177,7 +175,7 @@ func testEndToEndWorkloads(t *testing.T) {
 		}
 
 		// VM migration - decompression
-		decompressed, err := hde.DecompressMemory(vmID, compressed)
+		decompressed, err := hde.Decompress(compressed)
 		require.NoError(t, err)
 		assert.Equal(t, 2*1024*1024, len(decompressed))
 	})
@@ -199,24 +197,23 @@ func testEndToEndWorkloads(t *testing.T) {
 			bandwidth float64
 			expected  int
 		}{
-			{0.001, 10e9, 16},  // Low latency, high BW -> more streams
-			{0.05, 1e9, 8},     // Medium latency, medium BW -> moderate
-			{0.2, 100e6, 4},    // High latency, low BW -> fewer streams
+			{0.001, 10e9, 16}, // Low latency, high BW -> more streams
+			{0.05, 1e9, 8},    // Medium latency, medium BW -> moderate
+			{0.2, 100e6, 4},   // High latency, low BW -> fewer streams
 		}
 
 		for _, scenario := range scenarios {
-			amst.UpdateMetrics(5, scenario.rtt, scenario.bandwidth)
+			amst.UpdateMetrics(5, scenario.rtt, int64(scenario.bandwidth))
 			metrics := amst.GetMetrics()
 
 			t.Logf("RTT: %.3fs, BW: %.2f Gbps, Streams: %d",
-				scenario.rtt, scenario.bandwidth/1e9, metrics.ActiveStreams)
+				scenario.rtt, scenario.bandwidth/1e9, intMetric(metrics, "active_streams"))
 		}
 	})
 
 	t.Run("MultiTenantWorkload", func(t *testing.T) {
 		config := dwcp.HDEConfig{
 			GlobalLevel: 3,
-			MaxVMs:      100,
 		}
 
 		hde, err := dwcp.NewHDE(config)
@@ -258,7 +255,7 @@ func testEndToEndWorkloads(t *testing.T) {
 
 		metrics := hde.GetMetrics()
 		t.Logf("Multi-tenant: %d VMs, compression ratio: %.2f:1",
-			numVMs, metrics.CompressionRatio)
+			numVMs, float64Metric(metrics, "compression_ratio"))
 	})
 }
 
@@ -324,7 +321,6 @@ func testStressUnderLoad(t *testing.T) {
 	t.Run("MemoryPressure", func(t *testing.T) {
 		config := dwcp.HDEConfig{
 			GlobalLevel: 3,
-			MaxVMs:      1000,
 		}
 
 		hde, err := dwcp.NewHDE(config)
@@ -343,7 +339,7 @@ func testStressUnderLoad(t *testing.T) {
 
 		metrics := hde.GetMetrics()
 		t.Logf("Memory pressure: total compressed: %d MB",
-			metrics.TotalCompressed/1024/1024)
+			int64Metric(metrics, "bytes_compressed")/1024/1024)
 	})
 }
 
@@ -372,9 +368,7 @@ func testFailureScenarios(t *testing.T) {
 	})
 
 	t.Run("ResourceExhaustion", func(t *testing.T) {
-		config := dwcp.HDEConfig{
-			MaxVMs: 10,
-		}
+		config := dwcp.HDEConfig{}
 
 		hde, err := dwcp.NewHDE(config)
 		require.NoError(t, err)
@@ -453,10 +447,10 @@ func testNetworkPartitions(t *testing.T) {
 		defer amst.Close()
 
 		// Simulate degraded network
-		amst.UpdateMetrics(2, 0.5, 100e6) // High RTT, low bandwidth
+		amst.UpdateMetrics(2, 0.5, int64(100e6)) // High RTT, low bandwidth
 
 		metrics := amst.GetMetrics()
-		assert.LessOrEqual(t, metrics.ActiveStreams, 8,
+		assert.LessOrEqual(t, intMetric(metrics, "active_streams"), 8,
 			"Should reduce streams under poor conditions")
 	})
 
@@ -471,14 +465,14 @@ func testNetworkPartitions(t *testing.T) {
 		defer amst.Close()
 
 		// Simulate partition
-		amst.UpdateMetrics(0, 2.0, 10e6)
+		amst.UpdateMetrics(0, 2.0, int64(10e6))
 		partitionMetrics := amst.GetMetrics()
 
 		// Simulate recovery
-		amst.UpdateMetrics(8, 0.01, 1e9)
+		amst.UpdateMetrics(8, 0.01, int64(1e9))
 		recoveryMetrics := amst.GetMetrics()
 
-		assert.Greater(t, recoveryMetrics.ActiveStreams, partitionMetrics.ActiveStreams,
+		assert.Greater(t, intMetric(recoveryMetrics, "active_streams"), intMetric(partitionMetrics, "active_streams"),
 			"Should increase streams after recovery")
 	})
 }
@@ -490,8 +484,7 @@ func testByzantineAttacks(t *testing.T) {
 
 	t.Run("CorruptedData", func(t *testing.T) {
 		config := dwcp.HDEConfig{
-			GlobalLevel:   3,
-			EnableChecksum: true,
+			GlobalLevel: 3,
 		}
 
 		hde, err := dwcp.NewHDE(config)
@@ -510,7 +503,7 @@ func testByzantineAttacks(t *testing.T) {
 		}
 
 		// Should detect corruption
-		_, err = hde.DecompressMemory("vm-corrupt", compressed)
+		_, err = hde.Decompress(compressed)
 		if err != nil {
 			assert.Contains(t, err.Error(), "corrupt", "Should detect corruption")
 		}

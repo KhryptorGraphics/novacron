@@ -13,23 +13,23 @@ import (
 
 // PerformanceMetrics stores comprehensive performance data
 type PerformanceMetrics struct {
-	Name              string
-	TotalOperations   int64
-	TotalBytes        int64
-	Duration          time.Duration
-	Throughput        float64 // MB/s
-	Latency           time.Duration
-	CompressionRatio  float64
-	MemoryUsage       int64
-	CPUUsage          float64
+	Name             string
+	TotalOperations  int64
+	TotalBytes       int64
+	Duration         time.Duration
+	Throughput       float64 // MB/s
+	Latency          time.Duration
+	CompressionRatio float64
+	MemoryUsage      int64
+	CPUUsage         float64
 }
 
 // BenchmarkV1VsV3Datacenter compares v1 and v3 in datacenter mode
 func BenchmarkV1VsV3Datacenter(b *testing.B) {
 	sizes := []int{
-		64 * 1024,      // 64 KB
-		256 * 1024,     // 256 KB
-		1024 * 1024,    // 1 MB
+		64 * 1024,        // 64 KB
+		256 * 1024,       // 256 KB
+		1024 * 1024,      // 1 MB
 		10 * 1024 * 1024, // 10 MB
 	}
 
@@ -111,7 +111,6 @@ func BenchmarkV3InternetMode(b *testing.B) {
 			config := dwcp.HDEConfig{
 				GlobalLevel: 9, // Maximum compression for internet
 				EnableDelta: true,
-				EnableLSTM:  true,
 			}
 
 			hde, err := dwcp.NewHDE(config)
@@ -186,9 +185,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 		upgrade.DisableAll()
 		defer upgrade.DisableAll()
 
-		config := dwcp.HDEConfig{
-			MaxVMs: 100,
-		}
+		config := dwcp.HDEConfig{}
 
 		hde, err := dwcp.NewHDE(config)
 		require.NoError(b, err)
@@ -213,7 +210,6 @@ func BenchmarkMemoryUsage(b *testing.B) {
 		defer upgrade.DisableAll()
 
 		config := dwcp.HDEConfig{
-			MaxVMs:      100,
 			EnableDelta: true,
 		}
 
@@ -270,7 +266,6 @@ func BenchmarkCPUUtilization(b *testing.B) {
 		config := dwcp.HDEConfig{
 			GlobalLevel: 3,
 			EnableDelta: true,
-			EnableLSTM:  true,
 		}
 
 		hde, err := dwcp.NewHDE(config)
@@ -463,7 +458,7 @@ func BenchmarkAMSTPerformance(b *testing.B) {
 			rtt := 0.001 + float64(i%100)*0.0001
 			bandwidth := 1e9 + float64(i%100)*1e8
 
-			amst.UpdateMetrics(8, rtt, bandwidth)
+			amst.UpdateMetrics(8, rtt, int64(bandwidth))
 			_ = amst.GetMetrics()
 		}
 	})

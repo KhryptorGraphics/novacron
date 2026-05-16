@@ -10,32 +10,32 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // PerformanceBaseline represents Phase 3 baseline metrics
 type PerformanceBaseline struct {
-	Throughput        float64       // MB/s
-	Latency           time.Duration // Average latency
-	CompressionRatio  float64       // Compression ratio
-	CPUUsage          float64       // CPU utilization %
-	MemoryUsage       int64         // Memory usage bytes
-	ErrorRate         float64       // Error rate %
+	Throughput       float64       // MB/s
+	Latency          time.Duration // Average latency
+	CompressionRatio float64       // Compression ratio
+	CPUUsage         float64       // CPU utilization %
+	MemoryUsage      int64         // Memory usage bytes
+	ErrorRate        float64       // Error rate %
 }
 
 // Phase3Baseline represents the validated Phase 3 performance
 var Phase3Baseline = PerformanceBaseline{
-	Throughput:       100.0,  // 100 MB/s
+	Throughput:       100.0, // 100 MB/s
 	Latency:          50 * time.Millisecond,
-	CompressionRatio: 3.0,    // 3x compression
-	CPUUsage:         65.0,   // 65% CPU
+	CompressionRatio: 3.0,                    // 3x compression
+	CPUUsage:         65.0,                   // 65% CPU
 	MemoryUsage:      2 * 1024 * 1024 * 1024, // 2GB
-	ErrorRate:        0.001,  // 0.1%
+	ErrorRate:        0.001,                  // 0.1%
 }
 
 // TestPerformanceRegression validates no degradation from Phase 4 optimizations
 func TestPerformanceRegression(t *testing.T) {
 	ctx := context.Background()
+	_ = ctx
 
 	t.Run("Throughput_Regression", func(t *testing.T) {
 		// Test current throughput vs Phase 3 baseline
@@ -354,9 +354,9 @@ func TestScalabilityRegression(t *testing.T) {
 
 	t.Run("Data_Volume_Scaling", func(t *testing.T) {
 		dataSizes := []int64{
-			1024 * 1024,      // 1MB
-			10 * 1024 * 1024, // 10MB
-			100 * 1024 * 1024, // 100MB
+			1024 * 1024,        // 1MB
+			10 * 1024 * 1024,   // 10MB
+			100 * 1024 * 1024,  // 100MB
 			1024 * 1024 * 1024, // 1GB
 		}
 
@@ -527,11 +527,4 @@ func processBatch(itemCount, batchSize int) {
 func simulateConnection() {
 	// Simulate connection establishment
 	time.Sleep(time.Millisecond * 10)
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
