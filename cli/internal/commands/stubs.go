@@ -383,11 +383,88 @@ func NewNodeCommand() *cobra.Command {
 }
 
 func NewClusterCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "cluster",
 		Short: "Manage NovaCron clusters",
+	}
+
+	cmd.AddCommand(
+		newClusterListCommand(),
+		newClusterInfoCommand(),
+	)
+
+	return cmd
+}
+
+func newClusterListCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List configured clusters",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("cluster command not yet implemented")
+			manager, err := config.NewManager(cfgFile)
+			if err != nil {
+				return err
+			}
+
+			cfg := manager.Get()
+			writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+			fmt.Fprintln(writer, "CURRENT\tNAME\tSERVER\tNAMESPACE\tAUTH")
+			for name, cluster := range cfg.Clusters {
+				current := ""
+				if name == cfg.CurrentCluster {
+					current = "*"
+				}
+				fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", current, cluster.Name, cluster.Server, cluster.Namespace, cluster.AuthType)
+			}
+			return writer.Flush()
+		},
+	}
+}
+
+type clusterHealthResponse struct {
+	Status       string    `json:"status"`
+	TotalNodes   int       `json:"total_nodes"`
+	HealthyNodes int       `json:"healthy_nodes"`
+	HasQuorum    bool      `json:"has_quorum"`
+	Leader       string    `json:"leader"`
+	LastUpdated  time.Time `json:"last_updated"`
+}
+
+func newClusterInfoCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "info",
+		Short: "Show current cluster health",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			manager, err := config.NewManager(cfgFile)
+			if err != nil {
+				return err
+			}
+			cluster, err := manager.GetCurrentCluster()
+			if err != nil {
+				return err
+			}
+			client, err := newClusterAPIClient(cluster)
+			if err != nil {
+				return err
+			}
+
+			var health clusterHealthResponse
+			if err := client.Get(cmd.Context(), "/api/cluster/health", &health); err != nil {
+				return err
+			}
+
+			writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+			fmt.Fprintf(writer, "NAME\t%s\n", cluster.Name)
+			fmt.Fprintf(writer, "SERVER\t%s\n", cluster.Server)
+			fmt.Fprintf(writer, "STATUS\t%s\n", health.Status)
+			fmt.Fprintf(writer, "TOTAL NODES\t%d\n", health.TotalNodes)
+			fmt.Fprintf(writer, "HEALTHY NODES\t%d\n", health.HealthyNodes)
+			fmt.Fprintf(writer, "QUORUM\t%t\n", health.HasQuorum)
+			fmt.Fprintf(writer, "LEADER\t%s\n", health.Leader)
+			if !health.LastUpdated.IsZero() {
+				fmt.Fprintf(writer, "LAST UPDATED\t%s\n", health.LastUpdated.Format(time.RFC3339))
+			}
+			return writer.Flush()
 		},
 	}
 }
