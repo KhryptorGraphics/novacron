@@ -151,6 +151,16 @@ func (tp *TaskPartitioner) ReportOutcome(taskID string, decision *partition.Task
 		return
 	}
 
+	if !isValidOutcomeTelemetry(actualThroughput, actualLatency, decision.ExpectedTime) {
+		tp.logger.Warn("Skipping online learning update for task outcome; invalid telemetry",
+			zap.String("task_id", taskID),
+			zap.Bool("success", success),
+			zap.Float64("throughput", actualThroughput),
+			zap.Duration("latency", actualLatency),
+			zap.Duration("expected_time", decision.ExpectedTime))
+		return
+	}
+
 	// If learning components are not initialized, just track basic stats
 	if tp.agent == nil || tp.onlineLearner == nil {
 		tp.logger.Debug("Skipping online learning update for task outcome; learning components not initialized",
@@ -174,6 +184,13 @@ func (tp *TaskPartitioner) ReportOutcome(taskID string, decision *partition.Task
 
 	rewardCalc := partition.NewRewardCalculator()
 	reward := rewardCalc.Calculate(outcome)
+	if math.IsNaN(reward) || math.IsInf(reward, 0) {
+		tp.logger.Warn("Skipping online learning update for task outcome; invalid reward",
+			zap.String("task_id", taskID),
+			zap.Bool("success", success),
+			zap.Float64("reward", reward))
+		return
+	}
 
 	// Update moving average
 	tp.avgReward = 0.95*tp.avgReward + 0.05*reward
@@ -456,6 +473,13 @@ func safeTaskPartitionSuccessRate(value float64) float64 {
 		return 1
 	}
 	return value
+}
+
+func isValidOutcomeTelemetry(actualThroughput float64, actualLatency time.Duration, expectedTime time.Duration) bool {
+	if math.IsNaN(actualThroughput) || math.IsInf(actualThroughput, 0) || actualThroughput < 0 {
+		return false
+	}
+	return actualLatency > 0 && expectedTime > 0
 }
 
 // GetMetrics returns partitioner metrics

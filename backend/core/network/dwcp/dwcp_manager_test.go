@@ -884,6 +884,27 @@ func TestTaskPartitionerReportOutcomeIgnoresInvalidDecisionStreams(t *testing.T)
 	assert.Equal(t, int64(0), metrics["failed_tasks"])
 }
 
+func TestTaskPartitionerReportOutcomeSkipsInvalidTelemetryReward(t *testing.T) {
+	partitioner, err := dwcp.NewTaskPartitioner("", zaptest.NewLogger(t))
+	require.NoError(t, err)
+	defer partitioner.Destroy()
+
+	decision := &partition.TaskPartitionDecision{
+		Action:       partition.ActionStream1,
+		StreamIDs:    []int{0},
+		ChunkSizes:   []int{512},
+		ExpectedTime: 0,
+	}
+
+	partitioner.ReportOutcome("invalid-reward", decision, math.NaN(), time.Millisecond, true)
+
+	metrics := partitioner.GetMetrics()
+	assert.Equal(t, int64(1), metrics["successful_tasks"])
+	require.IsType(t, float64(0), metrics["avg_reward"])
+	assert.False(t, math.IsNaN(metrics["avg_reward"].(float64)))
+	assert.False(t, math.IsInf(metrics["avg_reward"].(float64), 0))
+}
+
 func TestManagerPartitionTaskRejectsNilTask(t *testing.T) {
 	manager := setupTestManager(t)
 	require.NoError(t, manager.Start())
