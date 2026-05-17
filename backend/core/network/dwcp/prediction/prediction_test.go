@@ -144,6 +144,23 @@ func TestDataCollector(t *testing.T) {
 			assert.Empty(t, collector.GetRecentSamples(-1))
 		})
 	})
+
+	t.Run("ExportForTrainingCreatesConfiguredDirectory", func(t *testing.T) {
+		collector := NewDataCollector(1*time.Second, 100)
+		outputPath := filepath.Join(t.TempDir(), "nested", "training.csv")
+		collector.addSample(NetworkSample{
+			Timestamp:     time.Now(),
+			BandwidthMbps: 100,
+			LatencyMs:     20,
+			PacketLoss:    0.01,
+			JitterMs:      2,
+			TimeOfDay:     12,
+			DayOfWeek:     1,
+		})
+
+		require.NoError(t, collector.ExportForTraining(outputPath))
+		require.FileExists(t, outputPath)
+	})
 }
 
 func TestPredictionService(t *testing.T) {

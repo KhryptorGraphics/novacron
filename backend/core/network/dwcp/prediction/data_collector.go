@@ -422,6 +422,10 @@ func (c *DataCollector) ExportForTraining(outputPath string) error {
 	copy(samples, c.samples)
 	c.mu.RUnlock()
 
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+		return fmt.Errorf("failed to create export directory: %w", err)
+	}
+
 	file, err := os.Create(outputPath)
 	if err != nil {
 		return fmt.Errorf("failed to create export file: %w", err)
