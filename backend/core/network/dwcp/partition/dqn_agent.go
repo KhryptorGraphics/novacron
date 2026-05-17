@@ -662,7 +662,12 @@ func (agent *DQNAgent) SaveModel(path string) error {
 	if agent.replayBuffer != nil {
 		agent.replayBuffer.mu.Lock()
 		state.ReplayBuffer.Capacity = agent.replayBuffer.capacity
-		state.ReplayBuffer.Experiences = append([]*Experience(nil), agent.replayBuffer.buffer...)
+		state.ReplayBuffer.Experiences = make([]*Experience, 0, len(agent.replayBuffer.buffer))
+		for _, exp := range agent.replayBuffer.buffer {
+			if isValidReplayExperience(exp) {
+				state.ReplayBuffer.Experiences = append(state.ReplayBuffer.Experiences, cloneExperience(exp))
+			}
+		}
 		agent.replayBuffer.mu.Unlock()
 	}
 
@@ -746,7 +751,20 @@ func isValidReplayExperience(exp *Experience) bool {
 	if exp.Action < 0 || exp.Action >= NumActions {
 		return false
 	}
-	return !math.IsNaN(exp.Reward) && !math.IsInf(exp.Reward, 0)
+	if math.IsNaN(exp.Reward) || math.IsInf(exp.Reward, 0) ||
+		math.IsNaN(exp.TDError) || math.IsInf(exp.TDError, 0) {
+		return false
+	}
+	return finiteFloat32Slice(exp.State) && finiteFloat32Slice(exp.NextState)
+}
+
+func finiteFloat32Slice(values []float32) bool {
+	for _, value := range values {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			return false
+		}
+	}
+	return true
 }
 
 func boundedFloat(value, minValue, maxValue, fallback float64) float64 {

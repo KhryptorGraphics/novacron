@@ -1241,6 +1241,53 @@ func TestDQNAgentSaveModelCreatesParentDirectory(t *testing.T) {
 	}
 }
 
+func TestDQNAgentSaveModelSkipsInvalidReplayExperiences(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer agent.Destroy()
+
+	agent.replayBuffer.Add(&Experience{
+		State:     []float32{1},
+		Action:    ActionStream1,
+		Reward:    1,
+		NextState: []float32{2},
+		TDError:   0.25,
+	})
+	agent.replayBuffer.Add(&Experience{
+		State:     []float32{float32(math.NaN())},
+		Action:    ActionStream1,
+		Reward:    2,
+		NextState: []float32{3},
+	})
+	agent.replayBuffer.Add(&Experience{
+		State:     []float32{1},
+		Action:    ActionStream1,
+		Reward:    3,
+		NextState: []float32{2},
+		TDError:   math.Inf(1),
+	})
+
+	modelPath := filepath.Join(t.TempDir(), "dqn-agent.json")
+	if err := agent.SaveModel(modelPath); err != nil {
+		t.Fatalf("SaveModel should skip invalid replay samples: %v", err)
+	}
+
+	loaded, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer loaded.Destroy()
+
+	if err := loaded.LoadModel(modelPath); err != nil {
+		t.Fatalf("LoadModel failed: %v", err)
+	}
+	if loaded.replayBuffer.Size() != 1 {
+		t.Fatalf("expected only valid replay experience to persist, got %d", loaded.replayBuffer.Size())
+	}
+}
+
 func TestDQNAgentLoadModelFiltersInvalidReplayExperiences(t *testing.T) {
 	modelState := dqnAgentState{
 		Version: dqnAgentStateVersion,
