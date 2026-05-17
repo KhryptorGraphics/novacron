@@ -578,6 +578,13 @@ func (m *Manager) AddTaskPartitioner(modelPath string) error {
 		return fmt.Errorf("failed to create task partitioner: %w", err)
 	}
 
+	if m.partitioner != nil {
+		if err := m.partitioner.Stop(); err != nil {
+			partitioner.Destroy()
+			return fmt.Errorf("failed to stop existing task partitioner: %w", err)
+		}
+	}
+
 	// Store partitioner on the manager so future calls can use it
 	m.partitioner = partitioner
 

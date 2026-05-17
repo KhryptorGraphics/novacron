@@ -269,3 +269,34 @@ func TestStopStopsPreconfiguredPartitionerBeforeManagerStart(t *testing.T) {
 		t.Fatal("Stop should stop a preconfigured partitioner even before manager start")
 	}
 }
+
+func TestAddTaskPartitionerStopsReplacedPartitioner(t *testing.T) {
+	config := DefaultConfig()
+	config.Enabled = true
+	manager, err := NewManager(config, zap.NewNop())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	if err := manager.AddTaskPartitioner(""); err != nil {
+		t.Fatalf("first AddTaskPartitioner failed: %v", err)
+	}
+	first := manager.partitioner
+	t.Cleanup(first.Destroy)
+
+	if err := manager.AddTaskPartitioner(""); err != nil {
+		t.Fatalf("second AddTaskPartitioner failed: %v", err)
+	}
+	second := manager.partitioner
+	t.Cleanup(second.Destroy)
+
+	if first == second {
+		t.Fatal("replacement should install a new partitioner")
+	}
+	if first.IsRunning() {
+		t.Fatal("replaced partitioner should be stopped")
+	}
+	if !second.IsRunning() {
+		t.Fatal("replacement partitioner should remain running")
+	}
+}
