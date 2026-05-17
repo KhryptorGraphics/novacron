@@ -1622,13 +1622,48 @@ type autoscalingThresholds struct {
 }
 
 func NewRolloutCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "rollout",
 		Short: "Manage rollouts",
+	}
+
+	cmd.AddCommand(newRolloutRollbackCommand())
+	return cmd
+}
+
+func newRolloutRollbackCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "rollback <job-id>",
+		Short: "Rollback a migration rollout job",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("rollout command not yet implemented")
+			client, err := currentClusterAPIClient()
+			if err != nil {
+				return err
+			}
+
+			var rollback rolloutRollbackResponse
+			path := "/migration/jobs/" + url.PathEscape(strings.TrimSpace(args[0])) + "/rollback"
+			if err := client.Post(cmd.Context(), path, nil, &rollback); err != nil {
+				return err
+			}
+
+			data, err := yaml.Marshal(rollback)
+			if err != nil {
+				return err
+			}
+			_, err = cmd.OutOrStdout().Write(data)
+			return err
 		},
 	}
+}
+
+type rolloutRollbackResponse struct {
+	JobID      string `json:"jobId,omitempty" yaml:"job_id,omitempty"`
+	RollbackID string `json:"rollbackId,omitempty" yaml:"rollback_id,omitempty"`
+	Status     string `json:"status,omitempty" yaml:"status,omitempty"`
+	CreatedAt  string `json:"createdAt,omitempty" yaml:"created_at,omitempty"`
+	Condition  string `json:"condition,omitempty" yaml:"condition,omitempty"`
 }
 
 func NewCompletionCommand() *cobra.Command {
