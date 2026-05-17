@@ -326,6 +326,12 @@ func (es *EnvironmentSimulator) Step(action Action) (*EnvironmentState, float64,
 		done := es.state == nil || es.state.TaskQueueDepth == 0
 		return es.state, 0, done
 	}
+	if es.state == nil {
+		es.state = NewEnvironmentState()
+	}
+	if es.rewardCalc == nil {
+		es.rewardCalc = NewRewardCalculator()
+	}
 
 	// Simulate action execution
 	outcome := es.simulateAction(action)

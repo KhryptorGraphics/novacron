@@ -657,6 +657,31 @@ func TestEnvironmentSimulatorStepIgnoresInvalidAction(t *testing.T) {
 	}
 }
 
+func TestEnvironmentSimulatorStepInitializesZeroValueSimulator(t *testing.T) {
+	var sim EnvironmentSimulator
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("zero-value simulator should not panic on valid action: %v", recovered)
+		}
+	}()
+
+	nextState, reward, done := sim.Step(ActionStream1)
+
+	if nextState == nil {
+		t.Fatal("zero-value simulator should initialize state")
+	}
+	if sim.rewardCalc == nil {
+		t.Fatal("zero-value simulator should initialize reward calculator")
+	}
+	if math.IsNaN(reward) || math.IsInf(reward, 0) {
+		t.Fatalf("zero-value simulator should return finite reward, got %f", reward)
+	}
+	if done != (nextState.TaskQueueDepth == 0) {
+		t.Fatalf("done mismatch for zero-value simulator: done=%v queue=%d", done, nextState.TaskQueueDepth)
+	}
+}
+
 func TestDQNAgentHeuristic(t *testing.T) {
 	// Test without loading a model (uses heuristic)
 	agent, err := NewDQNAgent("nonexistent_model.onnx")
