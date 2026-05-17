@@ -201,8 +201,12 @@ func (rb *ReplayBuffer) Sample(batchSize int) []*Experience {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 
+	if batchSize <= 0 {
+		return []*Experience{}
+	}
+
 	if len(rb.buffer) < batchSize {
-		return rb.buffer
+		return append([]*Experience(nil), rb.buffer...)
 	}
 
 	// Simple random sampling (can be enhanced with prioritized replay)

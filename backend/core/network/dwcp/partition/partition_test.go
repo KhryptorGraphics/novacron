@@ -184,6 +184,46 @@ func TestReplayBufferAddIgnoresInvalidInput(t *testing.T) {
 	}
 }
 
+func TestReplayBufferSampleHandlesInvalidBatchAndReturnsCopy(t *testing.T) {
+	buffer := NewReplayBuffer(2)
+	first := &Experience{
+		State:     make([]float32, 20),
+		Action:    ActionStream1,
+		Reward:    1,
+		NextState: make([]float32, 20),
+	}
+	buffer.Add(first)
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("invalid sample batch should not panic: %v", recovered)
+		}
+	}()
+
+	if sample := buffer.Sample(-1); len(sample) != 0 {
+		t.Fatalf("negative sample batch should return empty sample, got %d", len(sample))
+	}
+
+	sample := buffer.Sample(2)
+	if len(sample) != 1 {
+		t.Fatalf("oversized sample should return existing entries, got %d", len(sample))
+	}
+	sample[0] = &Experience{
+		State:     make([]float32, 20),
+		Action:    ActionStream2,
+		Reward:    2,
+		NextState: make([]float32, 20),
+	}
+
+	resampled := buffer.Sample(1)
+	if len(resampled) != 1 {
+		t.Fatalf("expected one resampled experience, got %d", len(resampled))
+	}
+	if resampled[0] != first {
+		t.Fatal("sample should not expose internal replay buffer storage")
+	}
+}
+
 func TestOnlineLearnerStopCancelsAutoUpdateLoop(t *testing.T) {
 	agent, err := NewDQNAgent("")
 	if err != nil {
