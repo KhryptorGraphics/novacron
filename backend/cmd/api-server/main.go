@@ -2092,6 +2092,8 @@ func apiInfoHandler(cfg *config.Config) http.HandlerFunc {
 				"/api/ws/logs",
 				"/api/ws/security/events",
 				"/api/ws/console/{vmId}",
+				"/api/ws/vms/{vmId}/copy",
+				"/api/ws/vms/{vmId}/port-forward",
 				"/health",
 			},
 			"compatibility_endpoints": []string{
@@ -2108,6 +2110,8 @@ func apiInfoHandler(cfg *config.Config) http.HandlerFunc {
 				"/ws/metrics",
 				"/ws/alerts",
 				"/ws/logs",
+				"/ws/vms/{vmId}/copy",
+				"/ws/vms/{vmId}/port-forward",
 				"/api/security/events/stream",
 			},
 			"unsupported_endpoints": []string{

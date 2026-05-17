@@ -1259,8 +1259,12 @@ func TestAPIInfoAdvertisesCanonicalContract(t *testing.T) {
 	assertContains("endpoints", endpoints, "/api/admin/security/events/{eventId}/acknowledge")
 	assertContains("endpoints", endpoints, "/graphql")
 	assertContains("endpoints", endpoints, "/api/ws/console/{vmId}")
+	assertContains("endpoints", endpoints, "/api/ws/vms/{vmId}/copy")
+	assertContains("endpoints", endpoints, "/api/ws/vms/{vmId}/port-forward")
 	assertContains("compatibility_endpoints", compatibilityEndpoints, "/api/vms")
 	assertContains("compatibility_endpoints", compatibilityEndpoints, "/ws/metrics")
+	assertContains("compatibility_endpoints", compatibilityEndpoints, "/ws/vms/{vmId}/copy")
+	assertContains("compatibility_endpoints", compatibilityEndpoints, "/ws/vms/{vmId}/port-forward")
 	assertContains("unsupported_endpoints", unsupportedEndpoints, "/api/auth/resend-verification")
 }
 
