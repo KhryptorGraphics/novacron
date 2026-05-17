@@ -131,6 +131,58 @@ func TestRewardCalculator(t *testing.T) {
 	}
 }
 
+func TestRewardCalculatorHandlesInvalidOutcome(t *testing.T) {
+	calc := NewRewardCalculator()
+
+	tests := []struct {
+		name    string
+		outcome *ActionOutcome
+	}{
+		{
+			name:    "nil_outcome",
+			outcome: nil,
+		},
+		{
+			name: "zero_baseline_and_target",
+			outcome: &ActionOutcome{
+				ActualThroughput:   100,
+				BaselineThroughput: 0,
+				ActualLatency:      10,
+				TargetLatency:      0,
+				StreamImbalance:    math.NaN(),
+				Completed:          true,
+				Retransmissions:    -1,
+			},
+		},
+		{
+			name: "non_finite_values",
+			outcome: &ActionOutcome{
+				ActualThroughput:   math.Inf(1),
+				BaselineThroughput: math.NaN(),
+				ActualLatency:      math.Inf(-1),
+				TargetLatency:      math.NaN(),
+				StreamImbalance:    math.Inf(1),
+				Retransmissions:    1,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("invalid reward outcome should not panic: %v", recovered)
+				}
+			}()
+
+			reward := calc.Calculate(tt.outcome)
+			if math.IsNaN(reward) || math.IsInf(reward, 0) {
+				t.Fatalf("invalid reward outcome should produce finite reward, got %v", reward)
+			}
+		})
+	}
+}
+
 func TestReplayBuffer(t *testing.T) {
 	buffer := NewReplayBuffer(100)
 

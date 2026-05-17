@@ -140,9 +140,24 @@ func NewRewardCalculator() *RewardCalculator {
 
 // Calculate computes the reward for an action outcome
 func (rc *RewardCalculator) Calculate(outcome *ActionOutcome) float64 {
-	throughputImprovement := (outcome.ActualThroughput - outcome.BaselineThroughput) / outcome.BaselineThroughput
-	latencyPenalty := math.Max(0, (outcome.ActualLatency-outcome.TargetLatency)/outcome.TargetLatency)
-	imbalance := outcome.StreamImbalance
+	if outcome == nil {
+		return 0
+	}
+
+	actualThroughput := finiteOrDefault(outcome.ActualThroughput, 0)
+	baselineThroughput := positiveOrDefault(outcome.BaselineThroughput, actualThroughput)
+	actualLatency := finiteOrDefault(outcome.ActualLatency, 0)
+	targetLatency := positiveOrDefault(outcome.TargetLatency, actualLatency)
+	imbalance := clampUnit(outcome.StreamImbalance)
+
+	throughputImprovement := 0.0
+	if baselineThroughput > 0 {
+		throughputImprovement = (actualThroughput - baselineThroughput) / baselineThroughput
+	}
+	latencyPenalty := 0.0
+	if targetLatency > 0 {
+		latencyPenalty = math.Max(0, (actualLatency-targetLatency)/targetLatency)
+	}
 
 	reward := rc.AlphaThroughput*throughputImprovement -
 		rc.BetaLatency*latencyPenalty -
@@ -157,6 +172,23 @@ func (rc *RewardCalculator) Calculate(outcome *ActionOutcome) float64 {
 	}
 
 	return reward
+}
+
+func finiteOrDefault(value, fallback float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return fallback
+	}
+	return value
+}
+
+func positiveOrDefault(value, fallback float64) float64 {
+	if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		if fallback > 0 && !math.IsNaN(fallback) && !math.IsInf(fallback, 0) {
+			return fallback
+		}
+		return 0
+	}
+	return value
 }
 
 // ActionOutcome represents the result of executing an action
