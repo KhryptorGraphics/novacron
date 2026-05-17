@@ -1,6 +1,7 @@
 package partition
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -13,21 +14,24 @@ import (
 
 // OnlineLearner manages continuous learning and model updates
 type OnlineLearner struct {
-	agent            *DQNAgent
-	replayBuffer     *ReplayBuffer
-	updateFrequency  time.Duration
-	lastUpdate       time.Time
-	experienceCount  int
-	minExperiences   int
-	trainingScript   string
-	modelPath        string
-	isTraining       bool
-	mu               sync.RWMutex
+	agent           *DQNAgent
+	replayBuffer    *ReplayBuffer
+	updateFrequency time.Duration
+	lastUpdate      time.Time
+	experienceCount int
+	minExperiences  int
+	trainingScript  string
+	modelPath       string
+	isTraining      bool
+	ctx             context.Context
+	cancel          context.CancelFunc
+	stopOnce        sync.Once
+	mu              sync.RWMutex
 
 	// Metrics
-	updateCount      int
-	avgReward        float64
-	performanceGain  float64
+	updateCount     int
+	avgReward       float64
+	performanceGain float64
 }
 
 // OnlineLearnerConfig configures the online learning system
@@ -43,14 +47,15 @@ type OnlineLearnerConfig struct {
 func NewOnlineLearner(agent *DQNAgent, config *OnlineLearnerConfig) *OnlineLearner {
 	if config == nil {
 		config = &OnlineLearnerConfig{
-			UpdateFrequency:  24 * time.Hour,    // Update daily
-			MinExperiences:   1000,              // Minimum experiences before update
+			UpdateFrequency:  24 * time.Hour, // Update daily
+			MinExperiences:   1000,           // Minimum experiences before update
 			TrainingScript:   "training/train_dqn.py",
 			ModelPath:        "models/dqn_online",
 			EnableAutoUpdate: true,
 		}
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	learner := &OnlineLearner{
 		agent:           agent,
 		replayBuffer:    agent.replayBuffer,
@@ -60,6 +65,8 @@ func NewOnlineLearner(agent *DQNAgent, config *OnlineLearnerConfig) *OnlineLearn
 		trainingScript:  config.TrainingScript,
 		modelPath:       config.ModelPath,
 		isTraining:      false,
+		ctx:             ctx,
+		cancel:          cancel,
 		updateCount:     0,
 	}
 
@@ -68,6 +75,15 @@ func NewOnlineLearner(agent *DQNAgent, config *OnlineLearnerConfig) *OnlineLearn
 	}
 
 	return learner
+}
+
+// Stop terminates background online learning checks.
+func (ol *OnlineLearner) Stop() {
+	ol.stopOnce.Do(func() {
+		if ol.cancel != nil {
+			ol.cancel()
+		}
+	})
 }
 
 // CollectExperience adds a new experience to the learning system
@@ -243,13 +259,18 @@ func (ol *OnlineLearner) autoUpdateLoop() {
 	ticker := time.NewTicker(1 * time.Hour) // Check every hour
 	defer ticker.Stop()
 
-	for range ticker.C {
-		ol.mu.RLock()
-		shouldUpdate := ol.shouldUpdate()
-		ol.mu.RUnlock()
+	for {
+		select {
+		case <-ol.ctx.Done():
+			return
+		case <-ticker.C:
+			ol.mu.RLock()
+			shouldUpdate := ol.shouldUpdate()
+			ol.mu.RUnlock()
 
-		if shouldUpdate {
-			ol.triggerUpdate()
+			if shouldUpdate {
+				ol.triggerUpdate()
+			}
 		}
 	}
 }
@@ -358,17 +379,17 @@ func (ol *OnlineLearner) EvaluateModel(episodes int) (*EvaluationResults, error)
 
 // EvaluationResults stores evaluation metrics
 type EvaluationResults struct {
-	Episodes        int
-	Rewards         []float64
-	Throughputs     []float64
-	Latencies       []float64
-	MeanReward      float64
-	StdReward       float64
-	MeanThroughput  float64
-	StdThroughput   float64
-	MeanLatency     float64
-	StdLatency      float64
-	SuccessRate     float64
+	Episodes       int
+	Rewards        []float64
+	Throughputs    []float64
+	Latencies      []float64
+	MeanReward     float64
+	StdReward      float64
+	MeanThroughput float64
+	StdThroughput  float64
+	MeanLatency    float64
+	StdLatency     float64
+	SuccessRate    float64
 }
 
 func (er *EvaluationResults) calculateStats() {

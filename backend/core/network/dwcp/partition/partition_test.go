@@ -3,6 +3,7 @@ package partition
 import (
 	"math"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -128,6 +129,29 @@ func TestReplayBuffer(t *testing.T) {
 	sample := buffer.Sample(32)
 	if len(sample) != 32 {
 		t.Errorf("Expected sample size 32, got %d", len(sample))
+	}
+}
+
+func TestOnlineLearnerStopCancelsAutoUpdateLoop(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("failed to create DQN agent: %v", err)
+	}
+
+	learner := NewOnlineLearner(agent, &OnlineLearnerConfig{
+		UpdateFrequency:  time.Hour,
+		MinExperiences:   1,
+		TrainingScript:   "unused",
+		ModelPath:        filepath.Join(t.TempDir(), "model"),
+		EnableAutoUpdate: true,
+	})
+
+	learner.Stop()
+
+	select {
+	case <-learner.ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not cancel the online learner context")
 	}
 }
 
