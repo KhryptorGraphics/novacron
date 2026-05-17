@@ -295,17 +295,17 @@ func (s *PredictionService) GetOptimalStreamCount() int {
 	// Formula: More streams for higher bandwidth, fewer for high latency
 	optimalStreams := int(bandwidth/20) - int(latency/50)
 
+	// Adjust based on packet loss
+	if pred.PredictedPacketLoss > 0.02 {
+		optimalStreams = optimalStreams * 3 / 4 // Reduce by 25%
+	}
+
 	// Bounds
 	if optimalStreams < 2 {
 		optimalStreams = 2
 	}
 	if optimalStreams > 16 {
 		optimalStreams = 16
-	}
-
-	// Adjust based on packet loss
-	if pred.PredictedPacketLoss > 0.02 {
-		optimalStreams = optimalStreams * 3 / 4 // Reduce by 25%
 	}
 
 	return optimalStreams

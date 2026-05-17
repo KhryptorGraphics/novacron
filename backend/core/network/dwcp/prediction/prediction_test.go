@@ -169,6 +169,24 @@ func TestPredictionService(t *testing.T) {
 		}
 	})
 
+	t.Run("OptimalStreamCountKeepsMinimumAfterPacketLossAdjustment", func(t *testing.T) {
+		service, err := NewPredictionService("", 10*time.Millisecond)
+		require.NoError(t, err)
+		defer service.Stop()
+
+		service.mu.Lock()
+		service.currentPrediction = &BandwidthPrediction{
+			PredictedBandwidthMbps: 20.0,
+			PredictedLatencyMs:     0.0,
+			PredictedPacketLoss:    0.05,
+			Confidence:             0.85,
+			ValidUntil:             time.Now().Add(15 * time.Minute),
+		}
+		service.mu.Unlock()
+
+		assert.Equal(t, 2, service.GetOptimalStreamCount())
+	})
+
 	t.Run("CreateService", func(t *testing.T) {
 		// Note: This test requires a valid ONNX model file
 		// In production, you would have a test model
