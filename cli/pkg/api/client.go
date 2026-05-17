@@ -261,6 +261,11 @@ func (w *WebSocketConn) SendText(data []byte) error {
 	return w.conn.WriteMessage(websocket.TextMessage, data)
 }
 
+// SendBinary sends a raw binary message over the WebSocket.
+func (w *WebSocketConn) SendBinary(data []byte) error {
+	return w.conn.WriteMessage(websocket.BinaryMessage, data)
+}
+
 // Receive receives a message from the WebSocket
 func (w *WebSocketConn) Receive(msg interface{}) error {
 	return w.conn.ReadJSON(msg)
@@ -270,6 +275,11 @@ func (w *WebSocketConn) Receive(msg interface{}) error {
 func (w *WebSocketConn) ReceiveText() ([]byte, error) {
 	_, data, err := w.conn.ReadMessage()
 	return data, err
+}
+
+// ReceiveMessage receives the next raw WebSocket message.
+func (w *WebSocketConn) ReceiveMessage() (int, []byte, error) {
+	return w.conn.ReadMessage()
 }
 
 // Close closes the WebSocket connection

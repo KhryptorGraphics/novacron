@@ -6,14 +6,19 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/novacron/cli/pkg/api"
 	"github.com/novacron/cli/pkg/auth"
 	"github.com/novacron/cli/pkg/config"
@@ -1040,11 +1045,255 @@ func NewCopyCommand() *cobra.Command {
 
 func NewPortForwardCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "port-forward",
+		Use:   "port-forward <vm-id> <local-port:remote-port>",
 		Short: "Forward ports to/from VMs",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("port-forward backend contract is not implemented; see docs/api/vm-io-contracts.md and tracking issue novacron-lmh")
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 2 {
+				return fmt.Errorf("port-forward requires a VM ID and local-port:remote-port mapping")
+			}
+			return nil
 		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := currentClusterAPIClient()
+			if err != nil {
+				return err
+			}
+			return runVMPortForward(cmd.Context(), client, args[0], args[1], cmd.OutOrStdout())
+		},
+	}
+}
+
+type portForwardSpec struct {
+	bind       string
+	localPort  int
+	remotePort int
+}
+
+func runVMPortForward(ctx context.Context, client *api.Client, vmID string, mapping string, output io.Writer) error {
+	spec, err := parsePortForwardSpec(mapping)
+	if err != nil {
+		return err
+	}
+
+	query := url.Values{}
+	query.Set("port", strconv.Itoa(spec.remotePort))
+	query.Set("bind", spec.bind)
+	conn, err := client.WebSocket(ctx, fmt.Sprintf("/api/ws/vms/%s/port-forward?%s", url.PathEscape(vmID), query.Encode()))
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	listener, err := net.Listen("tcp", net.JoinHostPort(spec.bind, strconv.Itoa(spec.localPort)))
+	if err != nil {
+		return fmt.Errorf("listen for local port-forward connections: %w", err)
+	}
+	defer listener.Close()
+
+	actualAddr := listener.Addr().(*net.TCPAddr)
+	fmt.Fprintf(output, "Forwarding from %s:%d -> %s:%d\n", spec.bind, actualAddr.Port, vmID, spec.remotePort)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		<-ctx.Done()
+		_ = listener.Close()
+	}()
+
+	session := &cliPortForwardSession{
+		ctx:         ctx,
+		ws:          conn,
+		connections: make(map[string]net.Conn),
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- session.readWebSocket()
+	}()
+
+	for {
+		localConn, err := listener.Accept()
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			select {
+			case wsErr := <-errCh:
+				if wsErr != nil {
+					return wsErr
+				}
+			default:
+			}
+			return fmt.Errorf("accept local port-forward connection: %w", err)
+		}
+		if err := session.openLocalConnection(vmID, spec.remotePort, localConn); err != nil {
+			_ = localConn.Close()
+			return err
+		}
+	}
+}
+
+func parsePortForwardSpec(mapping string) (portForwardSpec, error) {
+	parts := strings.Split(mapping, ":")
+	spec := portForwardSpec{bind: "127.0.0.1"}
+	switch len(parts) {
+	case 2:
+		localPort, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return spec, fmt.Errorf("local port must be numeric")
+		}
+		remotePort, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return spec, fmt.Errorf("remote port must be numeric")
+		}
+		spec.localPort = localPort
+		spec.remotePort = remotePort
+	case 3:
+		spec.bind = strings.TrimSpace(parts[0])
+		localPort, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return spec, fmt.Errorf("local port must be numeric")
+		}
+		remotePort, err := strconv.Atoi(parts[2])
+		if err != nil {
+			return spec, fmt.Errorf("remote port must be numeric")
+		}
+		spec.localPort = localPort
+		spec.remotePort = remotePort
+	default:
+		return spec, fmt.Errorf("port mapping must be local:remote or bind:local:remote")
+	}
+	if spec.bind == "" {
+		spec.bind = "127.0.0.1"
+	}
+	if spec.localPort < 0 || spec.localPort > 65535 {
+		return spec, fmt.Errorf("local port must be between 0 and 65535")
+	}
+	if spec.remotePort < 1 || spec.remotePort > 65535 {
+		return spec, fmt.Errorf("remote port must be between 1 and 65535")
+	}
+	return spec, nil
+}
+
+type cliPortForwardSession struct {
+	ctx         context.Context
+	ws          *api.WebSocketConn
+	writeMu     sync.Mutex
+	connMu      sync.Mutex
+	connections map[string]net.Conn
+}
+
+func (s *cliPortForwardSession) openLocalConnection(vmID string, remotePort int, localConn net.Conn) error {
+	connectionID := fmt.Sprintf("%s-%d", vmID, time.Now().UnixNano())
+	s.connMu.Lock()
+	s.connections[connectionID] = localConn
+	s.connMu.Unlock()
+
+	openFrame, err := encodeCLIVMIOJSONFrame(cliVMIOFramePortForwardOpen, cliVMPortForwardOpen{
+		ConnectionID: connectionID,
+		Port:         remotePort,
+	})
+	if err != nil {
+		return err
+	}
+	if err := s.sendBinary(openFrame); err != nil {
+		s.closeLocalConnection(connectionID)
+		return err
+	}
+
+	go s.forwardLocalToWebSocket(connectionID, localConn)
+	return nil
+}
+
+func (s *cliPortForwardSession) forwardLocalToWebSocket(connectionID string, localConn net.Conn) {
+	buffer := make([]byte, 32*1024)
+	for {
+		n, err := localConn.Read(buffer)
+		if n > 0 {
+			frame, frameErr := encodeCLIVMPortForwardDataFrame(connectionID, buffer[:n])
+			if frameErr != nil || s.sendBinary(frame) != nil {
+				s.closeLocalConnection(connectionID)
+				return
+			}
+		}
+		if err != nil {
+			closeFrame, frameErr := encodeCLIVMIOJSONFrame(cliVMIOFramePortForwardClose, cliVMPortForwardClose{
+				ConnectionID: connectionID,
+				Reason:       "eof",
+			})
+			if frameErr == nil {
+				_ = s.sendBinary(closeFrame)
+			}
+			s.closeLocalConnection(connectionID)
+			return
+		}
+	}
+}
+
+func (s *cliPortForwardSession) readWebSocket() error {
+	for {
+		messageType, frame, err := s.ws.ReceiveMessage()
+		if err != nil {
+			if s.ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		if messageType != websocket.BinaryMessage {
+			continue
+		}
+		frameType, _, err := decodeCLIVMIOFrame(frame)
+		if err != nil {
+			return err
+		}
+		switch frameType {
+		case cliVMIOFramePortForwardOpen:
+			continue
+		case cliVMIOFramePortForwardData:
+			connectionID, payload, err := decodeCLIVMPortForwardDataFrame(frame)
+			if err != nil {
+				return err
+			}
+			localConn := s.localConnection(connectionID)
+			if localConn != nil && len(payload) > 0 {
+				if _, err := localConn.Write(payload); err != nil {
+					s.closeLocalConnection(connectionID)
+				}
+			}
+		case cliVMIOFramePortForwardClose:
+			var closeFrame cliVMPortForwardClose
+			if _, err := decodeCLIVMIOJSONFrame(frame, &closeFrame); err != nil {
+				return err
+			}
+			s.closeLocalConnection(closeFrame.ConnectionID)
+		case cliVMIOFramePortForwardError:
+			var frameError cliVMIOError
+			if _, err := decodeCLIVMIOJSONFrame(frame, &frameError); err != nil {
+				return err
+			}
+			s.closeLocalConnection(frameError.ConnectionID)
+		}
+	}
+}
+
+func (s *cliPortForwardSession) sendBinary(frame []byte) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.ws.SendBinary(frame)
+}
+
+func (s *cliPortForwardSession) localConnection(connectionID string) net.Conn {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	return s.connections[connectionID]
+}
+
+func (s *cliPortForwardSession) closeLocalConnection(connectionID string) {
+	s.connMu.Lock()
+	localConn := s.connections[connectionID]
+	delete(s.connections, connectionID)
+	s.connMu.Unlock()
+	if localConn != nil {
+		_ = localConn.Close()
 	}
 }
 
