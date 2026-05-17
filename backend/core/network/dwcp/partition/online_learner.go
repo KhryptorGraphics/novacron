@@ -232,16 +232,19 @@ func (ol *OnlineLearner) exportExperiences(path string) error {
 		TDError   float64   `json:"td_error"`
 	}
 
-	data := make([]ExperienceData, len(experiences))
-	for i, exp := range experiences {
-		data[i] = ExperienceData{
+	data := make([]ExperienceData, 0, len(experiences))
+	for _, exp := range experiences {
+		if !isExportableExperience(exp) {
+			continue
+		}
+		data = append(data, ExperienceData{
 			State:     exp.State,
 			Action:    int(exp.Action),
 			Reward:    exp.Reward,
 			NextState: exp.NextState,
 			Done:      exp.Done,
 			TDError:   exp.TDError,
-		}
+		})
 	}
 
 	jsonData, err := json.MarshalIndent(data, "", "  ")
@@ -253,8 +256,22 @@ func (ol *OnlineLearner) exportExperiences(path string) error {
 		return fmt.Errorf("failed to write experiences: %w", err)
 	}
 
-	log.Printf("Exported %d experiences to %s", len(experiences), path)
+	log.Printf("Exported %d/%d experiences to %s", len(data), len(experiences), path)
 	return nil
+}
+
+func isExportableExperience(exp *Experience) bool {
+	if exp == nil || len(exp.State) == 0 || len(exp.NextState) == 0 {
+		return false
+	}
+	if !isValidLearnerAction(exp.Action) {
+		return false
+	}
+	if math.IsNaN(exp.Reward) || math.IsInf(exp.Reward, 0) ||
+		math.IsNaN(exp.TDError) || math.IsInf(exp.TDError, 0) {
+		return false
+	}
+	return true
 }
 
 // runTraining executes the Python training script

@@ -404,6 +404,85 @@ func TestNewOnlineLearnerNormalizesInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestOnlineLearnerExportExperiencesSkipsInvalidSamples(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("failed to create DQN agent: %v", err)
+	}
+
+	learner := NewOnlineLearner(agent, &OnlineLearnerConfig{
+		UpdateFrequency:  time.Hour,
+		MinExperiences:   1,
+		TrainingScript:   "unused",
+		ModelPath:        filepath.Join(t.TempDir(), "model"),
+		EnableAutoUpdate: false,
+	})
+	if learner == nil {
+		t.Fatal("failed to create learner")
+	}
+	defer learner.Stop()
+
+	learner.replayBuffer.Add(&Experience{
+		State:     []float32{1, 2},
+		Action:    ActionStream1,
+		Reward:    1,
+		NextState: []float32{2, 3},
+		TDError:   0.25,
+	})
+	learner.replayBuffer.Add(&Experience{
+		State:     nil,
+		Action:    ActionStream1,
+		Reward:    2,
+		NextState: []float32{2, 3},
+	})
+	learner.replayBuffer.Add(&Experience{
+		State:     []float32{1, 2},
+		Action:    Action(NumActions),
+		Reward:    2,
+		NextState: []float32{2, 3},
+	})
+	learner.replayBuffer.Add(&Experience{
+		State:     []float32{1, 2},
+		Action:    ActionStream1,
+		Reward:    math.NaN(),
+		NextState: []float32{2, 3},
+	})
+	learner.replayBuffer.Add(&Experience{
+		State:     []float32{1, 2},
+		Action:    ActionStream1,
+		Reward:    2,
+		NextState: []float32{2, 3},
+		TDError:   math.Inf(1),
+	})
+
+	exportPath := filepath.Join(t.TempDir(), "experiences.json")
+	if err := learner.exportExperiences(exportPath); err != nil {
+		t.Fatalf("export should skip invalid samples without failing: %v", err)
+	}
+
+	data, err := os.ReadFile(exportPath)
+	if err != nil {
+		t.Fatalf("failed to read exported experiences: %v", err)
+	}
+
+	var exported []struct {
+		State     []float32 `json:"state"`
+		Action    int       `json:"action"`
+		Reward    float64   `json:"reward"`
+		NextState []float32 `json:"next_state"`
+		TDError   float64   `json:"td_error"`
+	}
+	if err := json.Unmarshal(data, &exported); err != nil {
+		t.Fatalf("exported experiences should be valid JSON: %v", err)
+	}
+	if len(exported) != 1 {
+		t.Fatalf("expected only the valid experience to be exported, got %d: %s", len(exported), data)
+	}
+	if exported[0].Action != int(ActionStream1) || exported[0].Reward != 1 || exported[0].TDError != 0.25 {
+		t.Fatalf("unexpected exported experience: %+v", exported[0])
+	}
+}
+
 func TestOnlineLearnerStoppedRejectsModelWork(t *testing.T) {
 	agent, err := NewDQNAgent("")
 	if err != nil {
