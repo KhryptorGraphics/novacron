@@ -1340,13 +1340,83 @@ func newCreateNetworkCommand() *cobra.Command {
 }
 
 func NewUpdateCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "update",
+	var (
+		vmID      string
+		networkID string
+		name      string
+		ipAddress string
+		status    string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "update <resource> <name>",
 		Short: "Update resources",
+		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("update command not yet implemented")
+			resource := strings.ToLower(strings.TrimSpace(args[0]))
+			if resource != "interface" && resource != "interfaces" && resource != "nic" {
+				return fmt.Errorf("unsupported resource %q", args[0])
+			}
+			if strings.TrimSpace(vmID) == "" {
+				return fmt.Errorf("vm is required for interface update")
+			}
+			if strings.TrimSpace(networkID) == "" && strings.TrimSpace(name) == "" && strings.TrimSpace(ipAddress) == "" && strings.TrimSpace(status) == "" {
+				return fmt.Errorf("at least one update field is required")
+			}
+
+			client, err := currentClusterAPIClient()
+			if err != nil {
+				return err
+			}
+
+			req := updateVMInterfaceRequest{
+				NetworkID: strings.TrimSpace(networkID),
+				Name:      strings.TrimSpace(name),
+				IPAddress: strings.TrimSpace(ipAddress),
+				Status:    strings.TrimSpace(status),
+			}
+
+			var updated coreVMInterface
+			path := "/api/v1/vms/" + url.PathEscape(strings.TrimSpace(vmID)) + "/interfaces/" + url.PathEscape(strings.TrimSpace(args[1]))
+			if err := client.Put(cmd.Context(), path, req, &updated); err != nil {
+				return err
+			}
+
+			data, err := yaml.Marshal(updated)
+			if err != nil {
+				return err
+			}
+			_, err = cmd.OutOrStdout().Write(data)
+			return err
 		},
 	}
+
+	cmd.Flags().StringVar(&vmID, "vm", "", "VM ID that owns the interface")
+	cmd.Flags().StringVar(&networkID, "network", "", "Network ID to attach")
+	cmd.Flags().StringVar(&name, "name", "", "Interface name")
+	cmd.Flags().StringVar(&ipAddress, "ip", "", "Interface IP address")
+	cmd.Flags().StringVar(&status, "status", "", "Interface status")
+
+	return cmd
+}
+
+type updateVMInterfaceRequest struct {
+	NetworkID string `json:"network_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	IPAddress string `json:"ip_address,omitempty"`
+	Status    string `json:"status,omitempty"`
+}
+
+type coreVMInterface struct {
+	ID         string `json:"id" yaml:"id"`
+	VMID       string `json:"vm_id" yaml:"vm_id"`
+	NetworkID  string `json:"network_id,omitempty" yaml:"network_id,omitempty"`
+	Name       string `json:"name,omitempty" yaml:"name,omitempty"`
+	MACAddress string `json:"mac_address,omitempty" yaml:"mac_address,omitempty"`
+	IPAddress  string `json:"ip_address,omitempty" yaml:"ip_address,omitempty"`
+	Status     string `json:"status,omitempty" yaml:"status,omitempty"`
+	CreatedAt  string `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+	UpdatedAt  string `json:"updated_at,omitempty" yaml:"updated_at,omitempty"`
 }
 
 func NewScaleCommand() *cobra.Command {
