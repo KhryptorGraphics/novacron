@@ -27,40 +27,43 @@ type AMSTOptimizer struct {
 	maxHistory          int
 
 	// Configuration
-	minStreams int
-	maxStreams int
-	minBuffer  int
-	maxBuffer  int
+	minStreams     int
+	maxStreams     int
+	minBuffer      int
+	maxBuffer      int
 	updateInterval time.Duration
 }
 
 // OptimizationRecord tracks optimization decisions
 type OptimizationRecord struct {
-	Timestamp      time.Time
-	Prediction     BandwidthPrediction
-	Streams        int
-	BufferSize     int
-	ChunkSize      int
-	Confidence     float64
-	Applied        bool
+	Timestamp           time.Time
+	Prediction          BandwidthPrediction
+	Streams             int
+	BufferSize          int
+	ChunkSize           int
+	Confidence          float64
+	Applied             bool
 	ResultingThroughput float64
 }
 
 // AMSTParameters contains optimized transport parameters
 type AMSTParameters struct {
-	NumStreams    int
-	BufferSize    int
-	ChunkSize     int
-	PacingRate    int64
-	WindowSize    int
-	Confidence    float64
-	ValidUntil    time.Time
-	Reason        string
+	NumStreams int
+	BufferSize int
+	ChunkSize  int
+	PacingRate int64
+	WindowSize int
+	Confidence float64
+	ValidUntil time.Time
+	Reason     string
 }
 
 // NewAMSTOptimizer creates a new AMST optimizer
 func NewAMSTOptimizer(predictionService *PredictionService, logger *zap.Logger) *AMSTOptimizer {
 	ctx, cancel := context.WithCancel(context.Background())
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 
 	optimizer := &AMSTOptimizer{
 		predictionService:   predictionService,
@@ -69,7 +72,7 @@ func NewAMSTOptimizer(predictionService *PredictionService, logger *zap.Logger) 
 		cancel:              cancel,
 		minStreams:          2,
 		maxStreams:          256,
-		minBuffer:           16384,  // 16KB
+		minBuffer:           16384,   // 16KB
 		maxBuffer:           1048576, // 1MB
 		updateInterval:      1 * time.Minute,
 		optimizationHistory: make([]OptimizationRecord, 0, 100),
@@ -266,14 +269,14 @@ func (o *AMSTOptimizer) GetCurrentParameters() AMSTParameters {
 	}
 
 	return AMSTParameters{
-		NumStreams:    o.currentStreams,
-		BufferSize:    o.currentBufferSize,
-		ChunkSize:     o.currentChunkSize,
-		PacingRate:    int64(prediction.PredictedBandwidthMbps * 1000000 * 0.95 / 8),
-		WindowSize:    o.currentBufferSize * o.currentStreams,
-		Confidence:    prediction.Confidence,
-		ValidUntil:    prediction.ValidUntil,
-		Reason:        "Current active parameters",
+		NumStreams: o.currentStreams,
+		BufferSize: o.currentBufferSize,
+		ChunkSize:  o.currentChunkSize,
+		PacingRate: int64(prediction.PredictedBandwidthMbps * 1000000 * 0.95 / 8),
+		WindowSize: o.currentBufferSize * o.currentStreams,
+		Confidence: prediction.Confidence,
+		ValidUntil: prediction.ValidUntil,
+		Reason:     "Current active parameters",
 	}
 }
 

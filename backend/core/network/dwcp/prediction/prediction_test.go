@@ -553,29 +553,71 @@ func TestPredictionService(t *testing.T) {
 
 func TestAMSTOptimizer(t *testing.T) {
 	t.Run("CreateOptimizer", func(t *testing.T) {
-		t.Skip("Requires prediction service")
+		service, err := NewPredictionService("", 10*time.Millisecond)
+		require.NoError(t, err)
+		defer service.Stop()
 
-		// Would need a mock prediction service
-		// optimizer := NewAMSTOptimizer(mockService, logger)
-		// assert.NotNil(t, optimizer)
+		optimizer := NewAMSTOptimizer(service, nil)
+		require.NotNil(t, optimizer)
+		defer optimizer.Stop()
+
+		require.NotPanics(t, optimizer.optimizeParameters)
 	})
 
 	t.Run("CalculateOptimalParameters", func(t *testing.T) {
-		t.Skip("Requires prediction service")
+		service, err := NewPredictionService("", 10*time.Millisecond)
+		require.NoError(t, err)
+		defer service.Stop()
 
-		// Test parameter calculation with various predictions
-		// predictions := []BandwidthPrediction{
-		//     {PredictedBandwidthMbps: 100, PredictedLatencyMs: 20},
-		//     {PredictedBandwidthMbps: 500, PredictedLatencyMs: 100},
-		//     {PredictedBandwidthMbps: 50, PredictedLatencyMs: 10, PredictedPacketLoss: 0.05},
-		// }
+		optimizer := NewAMSTOptimizer(service, nil)
+		defer optimizer.Stop()
+
+		tests := []BandwidthPrediction{
+			{PredictedBandwidthMbps: 100, PredictedLatencyMs: 20, PredictedJitterMs: 2, PredictedPacketLoss: 0.001, Confidence: 0.8},
+			{PredictedBandwidthMbps: 500, PredictedLatencyMs: 100, PredictedJitterMs: 5, PredictedPacketLoss: 0.005, Confidence: 0.9},
+			{PredictedBandwidthMbps: 50, PredictedLatencyMs: 10, PredictedJitterMs: 1, PredictedPacketLoss: 0.05, Confidence: 0.85},
+		}
+
+		for _, prediction := range tests {
+			params := optimizer.calculateOptimalParameters(&prediction)
+			assert.GreaterOrEqual(t, params.NumStreams, optimizer.minStreams)
+			assert.LessOrEqual(t, params.NumStreams, optimizer.maxStreams)
+			assert.GreaterOrEqual(t, params.BufferSize, optimizer.minBuffer)
+			assert.LessOrEqual(t, params.BufferSize, optimizer.maxBuffer)
+			assert.GreaterOrEqual(t, params.ChunkSize, 8192)
+			assert.LessOrEqual(t, params.ChunkSize, 131072)
+			assert.NotEmpty(t, params.Reason)
+		}
 	})
 
 	t.Run("PreemptiveOptimization", func(t *testing.T) {
-		t.Skip("Requires prediction service")
+		service, err := NewPredictionService("", 10*time.Millisecond)
+		require.NoError(t, err)
+		defer service.Stop()
 
-		// Test that preemptive optimization only triggers with high confidence
-		// and significant parameter changes
+		optimizer := NewAMSTOptimizer(service, nil)
+		defer optimizer.Stop()
+
+		service.mu.Lock()
+		service.currentPrediction = &BandwidthPrediction{
+			PredictedBandwidthMbps: 500,
+			PredictedLatencyMs:     20,
+			PredictedPacketLoss:    0.001,
+			PredictedJitterMs:      2,
+			Confidence:             0.9,
+			ValidUntil:             time.Now().Add(15 * time.Minute),
+		}
+		service.mu.Unlock()
+
+		params := optimizer.PreemptiveOptimization()
+		require.NotNil(t, params)
+		assert.Greater(t, params.NumStreams, optimizer.currentStreams)
+
+		service.mu.Lock()
+		service.currentPrediction.Confidence = 0.5
+		service.mu.Unlock()
+
+		assert.Nil(t, optimizer.PreemptiveOptimization())
 	})
 }
 
