@@ -1077,13 +1077,107 @@ type monitoringSummary struct {
 }
 
 func NewApplyCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "apply",
+	var file string
+
+	cmd := &cobra.Command{
+		Use:   "apply -f <file>",
 		Short: "Apply configuration from file",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("apply command not yet implemented")
+			if strings.TrimSpace(file) == "" {
+				return fmt.Errorf("file is required")
+			}
+
+			data, err := os.ReadFile(file)
+			if err != nil {
+				return err
+			}
+
+			var manifest applyManifest
+			if err := yaml.Unmarshal(data, &manifest); err != nil {
+				return fmt.Errorf("failed to parse manifest: %w", err)
+			}
+			if strings.TrimSpace(manifest.Metadata.Name) == "" {
+				return fmt.Errorf("metadata.name is required")
+			}
+
+			client, err := currentClusterAPIClient()
+			if err != nil {
+				return err
+			}
+
+			switch strings.ToLower(strings.TrimSpace(manifest.Kind)) {
+			case "vm", "virtualmachine":
+				return applyVMManifest(cmd, client, manifest)
+			case "network":
+				return applyNetworkManifest(cmd, client, manifest)
+			default:
+				return fmt.Errorf("unsupported kind %q", manifest.Kind)
+			}
 		},
 	}
+
+	cmd.Flags().StringVarP(&file, "file", "f", "", "manifest file")
+	return cmd
+}
+
+type applyManifest struct {
+	Kind     string                `yaml:"kind"`
+	Metadata applyManifestMetadata `yaml:"metadata"`
+	Spec     applyManifestSpec     `yaml:"spec"`
+}
+
+type applyManifestMetadata struct {
+	Name string `yaml:"name"`
+}
+
+type applyManifestSpec struct {
+	NodeID    string `yaml:"node_id"`
+	CPUShares int    `yaml:"cpu_shares"`
+	MemoryMB  int    `yaml:"memory_mb"`
+	Type      string `yaml:"type"`
+	Subnet    string `yaml:"subnet"`
+	Gateway   string `yaml:"gateway"`
+}
+
+func applyVMManifest(cmd *cobra.Command, client *api.Client, manifest applyManifest) error {
+	req := createVMRequest{
+		Name:      strings.TrimSpace(manifest.Metadata.Name),
+		NodeID:    strings.TrimSpace(manifest.Spec.NodeID),
+		CPUShares: manifest.Spec.CPUShares,
+		MemoryMB:  manifest.Spec.MemoryMB,
+	}
+
+	var created coreVM
+	if err := client.Post(cmd.Context(), "/api/v1/vms", req, &created); err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(created)
+	if err != nil {
+		return err
+	}
+	_, err = cmd.OutOrStdout().Write(data)
+	return err
+}
+
+func applyNetworkManifest(cmd *cobra.Command, client *api.Client, manifest applyManifest) error {
+	req := createNetworkRequest{
+		Name:    strings.TrimSpace(manifest.Metadata.Name),
+		Type:    strings.TrimSpace(manifest.Spec.Type),
+		Subnet:  strings.TrimSpace(manifest.Spec.Subnet),
+		Gateway: strings.TrimSpace(manifest.Spec.Gateway),
+	}
+
+	var created coreNetwork
+	if err := client.Post(cmd.Context(), "/api/v1/networks", req, &created); err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(created)
+	if err != nil {
+		return err
+	}
+	_, err = cmd.OutOrStdout().Write(data)
+	return err
 }
 
 func NewDeleteCommand() *cobra.Command {
