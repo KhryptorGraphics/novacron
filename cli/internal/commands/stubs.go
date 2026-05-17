@@ -1546,13 +1546,79 @@ type coreVMInterface struct {
 }
 
 func NewScaleCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "scale",
+	replicas := -1
+	targetType := "vm"
+	enabled := true
+
+	cmd := &cobra.Command{
+		Use:   "scale <target-id>",
 		Short: "Scale VM resources",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("scale command not yet implemented")
+			if !cmd.Flags().Changed("replicas") {
+				return fmt.Errorf("replicas is required")
+			}
+			if replicas < 0 {
+				return fmt.Errorf("replicas must be non-negative")
+			}
+
+			client, err := currentClusterAPIClient()
+			if err != nil {
+				return err
+			}
+
+			targetID := strings.TrimSpace(args[0])
+			target := autoscalingTarget{
+				ID:      targetID,
+				Type:    strings.TrimSpace(targetType),
+				Enabled: enabled,
+				Thresholds: &autoscalingThresholds{
+					MinReplicas: replicas,
+					MaxReplicas: replicas,
+				},
+			}
+
+			var updated autoscalingTarget
+			path := "/orchestration/autoscaling/targets/" + url.PathEscape(targetID)
+			if err := client.Put(cmd.Context(), path, target, &updated); err != nil {
+				return err
+			}
+
+			data, err := yaml.Marshal(updated)
+			if err != nil {
+				return err
+			}
+			_, err = cmd.OutOrStdout().Write(data)
+			return err
 		},
 	}
+
+	cmd.Flags().IntVar(&replicas, "replicas", -1, "desired replica count")
+	cmd.Flags().StringVar(&targetType, "type", "vm", "autoscaling target type")
+	cmd.Flags().BoolVar(&enabled, "enabled", true, "whether the autoscaling target is enabled")
+
+	return cmd
+}
+
+type autoscalingTarget struct {
+	ID         string                 `json:"id" yaml:"id"`
+	Type       string                 `json:"type" yaml:"type"`
+	Enabled    bool                   `json:"enabled" yaml:"enabled"`
+	Thresholds *autoscalingThresholds `json:"thresholds,omitempty" yaml:"thresholds,omitempty"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	CreatedAt  string                 `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+	UpdatedAt  string                 `json:"updated_at,omitempty" yaml:"updated_at,omitempty"`
+}
+
+type autoscalingThresholds struct {
+	CPUScaleUpThreshold      float64 `json:"cpu_scale_up_threshold,omitempty" yaml:"cpu_scale_up_threshold,omitempty"`
+	CPUScaleDownThreshold    float64 `json:"cpu_scale_down_threshold,omitempty" yaml:"cpu_scale_down_threshold,omitempty"`
+	MemoryScaleUpThreshold   float64 `json:"memory_scale_up_threshold,omitempty" yaml:"memory_scale_up_threshold,omitempty"`
+	MemoryScaleDownThreshold float64 `json:"memory_scale_down_threshold,omitempty" yaml:"memory_scale_down_threshold,omitempty"`
+	MinReplicas              int     `json:"min_replicas" yaml:"min_replicas"`
+	MaxReplicas              int     `json:"max_replicas" yaml:"max_replicas"`
+	CooldownPeriod           string  `json:"cooldown_period,omitempty" yaml:"cooldown_period,omitempty"`
+	PredictionWeight         float64 `json:"prediction_weight,omitempty" yaml:"prediction_weight,omitempty"`
 }
 
 func NewRolloutCommand() *cobra.Command {
