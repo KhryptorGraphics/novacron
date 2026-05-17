@@ -324,6 +324,9 @@ func (ol *OnlineLearner) EvaluateModel(episodes int) (*EvaluationResults, error)
 	if stopped {
 		return nil, fmt.Errorf("online learner stopped")
 	}
+	if episodes <= 0 {
+		return nil, fmt.Errorf("episodes must be positive")
+	}
 
 	log.Printf("Evaluating model over %d episodes...", episodes)
 
@@ -338,8 +341,8 @@ func (ol *OnlineLearner) EvaluateModel(episodes int) (*EvaluationResults, error)
 	env := NewEnvironmentSimulator()
 
 	// Disable exploration for evaluation
-	originalEpsilon := ol.agent.epsilon
 	ol.agent.mu.Lock()
+	originalEpsilon := ol.agent.epsilon
 	ol.agent.epsilon = 0
 	ol.agent.mu.Unlock()
 

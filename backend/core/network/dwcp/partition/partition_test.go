@@ -181,6 +181,28 @@ func TestOnlineLearnerStoppedRejectsModelWork(t *testing.T) {
 	}
 }
 
+func TestOnlineLearnerEvaluateModelRejectsNonPositiveEpisodes(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("failed to create DQN agent: %v", err)
+	}
+
+	learner := NewOnlineLearner(agent, &OnlineLearnerConfig{
+		UpdateFrequency:  time.Hour,
+		MinExperiences:   2,
+		TrainingScript:   "unused",
+		ModelPath:        filepath.Join(t.TempDir(), "model"),
+		EnableAutoUpdate: false,
+	})
+
+	for _, episodes := range []int{0, -1} {
+		results, err := learner.EvaluateModel(episodes)
+		if err == nil || err.Error() != "episodes must be positive" {
+			t.Fatalf("expected positive episodes error for %d, got results=%v err=%v", episodes, results, err)
+		}
+	}
+}
+
 func TestEnvironmentSimulator(t *testing.T) {
 	sim := NewEnvironmentSimulator()
 
