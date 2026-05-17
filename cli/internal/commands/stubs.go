@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -1786,11 +1787,49 @@ func NewCompletionCommand() *cobra.Command {
 }
 
 func NewPluginCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "plugin",
 		Short: "Manage CLI plugins",
+	}
+
+	cmd.AddCommand(newPluginListCommand())
+	return cmd
+}
+
+func newPluginListCommand() *cobra.Command {
+	pluginDir := "./plugins"
+
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List local plugin artifacts",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("plugin command not yet implemented")
+			entries, err := os.ReadDir(pluginDir)
+			if err != nil {
+				return fmt.Errorf("plugin directory %q: %w", pluginDir, err)
+			}
+
+			plugins := make([]os.DirEntry, 0)
+			for _, entry := range entries {
+				if entry.IsDir() || filepath.Ext(entry.Name()) != ".so" {
+					continue
+				}
+				plugins = append(plugins, entry)
+			}
+			if len(plugins) == 0 {
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), "No plugins found")
+				return err
+			}
+
+			writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+			fmt.Fprintln(writer, "NAME\tPATH")
+			for _, plugin := range plugins {
+				name := strings.TrimSuffix(plugin.Name(), filepath.Ext(plugin.Name()))
+				fmt.Fprintf(writer, "%s\t%s\n", name, filepath.Join(pluginDir, plugin.Name()))
+			}
+			return writer.Flush()
 		},
 	}
+
+	cmd.Flags().StringVar(&pluginDir, "dir", "./plugins", "plugin directory")
+	return cmd
 }
