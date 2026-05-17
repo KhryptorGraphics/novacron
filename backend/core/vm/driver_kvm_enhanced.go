@@ -25,17 +25,18 @@ type KVMDriverEnhanced struct {
 
 // KVMVMInfo stores information about a KVM VM
 type KVMVMInfo struct {
-	ID          string
-	Config      VMConfig
-	Process     *os.Process
-	PID         int
-	State       State
-	DiskPath    string
-	ConfigPath  string
-	MonitorPath string
-	VNCPort     int
-	StartTime   time.Time
-	StoppedTime *time.Time
+	ID            string
+	Config        VMConfig
+	Process       *os.Process
+	PID           int
+	State         State
+	DiskPath      string
+	ConfigPath    string
+	MonitorPath   string
+	AgentSockPath string
+	VNCPort       int
+	StartTime     time.Time
+	StoppedTime   *time.Time
 }
 
 // NewKVMDriver creates a new KVM driver (main entry point)
@@ -119,14 +120,15 @@ func (d *KVMDriverEnhanced) Create(ctx context.Context, config VMConfig) (string
 
 	// Create VM info
 	vmInfo := &KVMVMInfo{
-		ID:          vmID,
-		Config:      config,
-		State:       StateCreated,
-		DiskPath:    diskPath,
-		ConfigPath:  filepath.Join(vmDir, "config.json"),
-		MonitorPath: filepath.Join(vmDir, "monitor.sock"),
-		VNCPort:     5900 + len(d.vms), // Simple VNC port allocation
-		StartTime:   time.Now(),
+		ID:            vmID,
+		Config:        config,
+		State:         StateCreated,
+		DiskPath:      diskPath,
+		ConfigPath:    filepath.Join(vmDir, "config.json"),
+		MonitorPath:   filepath.Join(vmDir, "monitor.sock"),
+		AgentSockPath: filepath.Join(vmDir, "qga.sock"),
+		VNCPort:       5900 + len(d.vms), // Simple VNC port allocation
+		StartTime:     time.Now(),
 	}
 
 	// Save config
@@ -431,6 +433,9 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 		"-device", "virtio-net-pci,netdev=net0",
 		"-vnc", fmt.Sprintf(":%d", vmInfo.VNCPort-5900),
 		"-monitor", fmt.Sprintf("unix:%s,server,nowait", vmInfo.MonitorPath),
+		"-chardev", fmt.Sprintf("socket,path=%s,server=on,wait=off,id=qga0", vmInfo.AgentSockPath),
+		"-device", "virtio-serial-pci",
+		"-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0",
 		"-daemonize",
 		"-pidfile", filepath.Join(filepath.Dir(vmInfo.DiskPath), "qemu.pid"),
 	}
