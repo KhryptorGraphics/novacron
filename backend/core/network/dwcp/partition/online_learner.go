@@ -172,6 +172,10 @@ func (ol *OnlineLearner) shouldUpdate() bool {
 // triggerUpdate initiates the model update process
 func (ol *OnlineLearner) triggerUpdate() {
 	ol.mu.Lock()
+	if ol.ctx.Err() != nil {
+		ol.mu.Unlock()
+		return
+	}
 	if ol.isTraining {
 		ol.mu.Unlock()
 		return

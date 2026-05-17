@@ -543,6 +543,47 @@ func TestOnlineLearnerStoppedRejectsModelWork(t *testing.T) {
 	}
 }
 
+func TestOnlineLearnerStoppedRejectsQueuedUpdate(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("failed to create DQN agent: %v", err)
+	}
+
+	modelPath := filepath.Join(t.TempDir(), "nested", "model")
+	learner := NewOnlineLearner(agent, &OnlineLearnerConfig{
+		UpdateFrequency:  time.Hour,
+		MinExperiences:   1,
+		TrainingScript:   "unused",
+		ModelPath:        modelPath,
+		EnableAutoUpdate: false,
+	})
+	if learner == nil {
+		t.Fatal("failed to create learner")
+	}
+
+	learner.replayBuffer.Add(&Experience{
+		State:     []float32{1},
+		Action:    ActionStream1,
+		Reward:    1,
+		NextState: []float32{2},
+	})
+
+	learner.Stop()
+	learner.triggerUpdate()
+
+	exportPath := modelPath + "_experiences.json"
+	if _, err := os.Stat(exportPath); !os.IsNotExist(err) {
+		t.Fatalf("stopped queued update should not export experiences, stat err=%v", err)
+	}
+	status := learner.GetStatus()
+	if status["is_training"] != false {
+		t.Fatalf("stopped queued update should not leave training active: %v", status)
+	}
+	if status["update_count"] != 0 {
+		t.Fatalf("stopped queued update should not increment updates: %v", status)
+	}
+}
+
 func TestOnlineLearnerStoppedIgnoresCollectedExperience(t *testing.T) {
 	agent, err := NewDQNAgent("")
 	if err != nil {
