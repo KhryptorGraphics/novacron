@@ -215,6 +215,38 @@ func TestOnlineLearnerStoppedIgnoresCollectedExperience(t *testing.T) {
 	}
 }
 
+func TestOnlineLearnerCollectExperienceIgnoresInvalidAction(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("failed to create DQN agent: %v", err)
+	}
+
+	learner := NewOnlineLearner(agent, &OnlineLearnerConfig{
+		UpdateFrequency:  time.Hour,
+		MinExperiences:   2,
+		TrainingScript:   "unused",
+		ModelPath:        filepath.Join(t.TempDir(), "model"),
+		EnableAutoUpdate: false,
+	})
+	before := learner.GetStatus()
+
+	learner.CollectExperience(
+		NewEnvironmentState(),
+		Action(NumActions),
+		1,
+		NewEnvironmentState(),
+		false,
+	)
+
+	after := learner.GetStatus()
+	if after["experience_count"] != before["experience_count"] {
+		t.Fatalf("invalid action should not collect experience: before=%v after=%v", before["experience_count"], after["experience_count"])
+	}
+	if after["buffer_size"] != before["buffer_size"] {
+		t.Fatalf("invalid action should not grow replay buffer: before=%v after=%v", before["buffer_size"], after["buffer_size"])
+	}
+}
+
 func TestOnlineLearnerEvaluateModelRejectsNonPositiveEpisodes(t *testing.T) {
 	agent, err := NewDQNAgent("")
 	if err != nil {

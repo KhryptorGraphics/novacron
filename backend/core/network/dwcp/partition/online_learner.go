@@ -94,6 +94,9 @@ func (ol *OnlineLearner) CollectExperience(state *EnvironmentState, action Actio
 	if ol.ctx.Err() != nil {
 		return
 	}
+	if !isValidLearnerAction(action) {
+		return
+	}
 
 	// Store in agent's memory
 	ol.agent.Remember(state, action, reward, nextState, done)
@@ -105,6 +108,10 @@ func (ol *OnlineLearner) CollectExperience(state *EnvironmentState, action Actio
 	if ol.shouldUpdate() {
 		go ol.triggerUpdate()
 	}
+}
+
+func isValidLearnerAction(action Action) bool {
+	return action >= 0 && action < NumActions
 }
 
 // shouldUpdate determines if model update should be triggered
