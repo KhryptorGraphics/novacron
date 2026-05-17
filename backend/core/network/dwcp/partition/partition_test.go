@@ -367,6 +367,43 @@ func TestNewOnlineLearnerInitializesMissingReplayBuffer(t *testing.T) {
 	}
 }
 
+func TestNewOnlineLearnerNormalizesInvalidConfig(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("failed to create DQN agent: %v", err)
+	}
+
+	learner := NewOnlineLearner(agent, &OnlineLearnerConfig{
+		UpdateFrequency:  -time.Hour,
+		MinExperiences:   -10,
+		TrainingScript:   "",
+		ModelPath:        "",
+		EnableAutoUpdate: false,
+	})
+	if learner == nil {
+		t.Fatal("invalid config should be normalized, not reject learner")
+	}
+	defer learner.Stop()
+
+	status := learner.GetStatus()
+	if status["min_experiences"] != 1000 {
+		t.Fatalf("invalid min experiences should fall back to 1000, got %v", status["min_experiences"])
+	}
+	if learner.updateFrequency != 24*time.Hour {
+		t.Fatalf("invalid update frequency should fall back to 24h, got %s", learner.updateFrequency)
+	}
+	if learner.trainingScript != "training/train_dqn.py" {
+		t.Fatalf("empty training script should fall back to default, got %q", learner.trainingScript)
+	}
+	if learner.modelPath != "models/dqn_online" {
+		t.Fatalf("empty model path should fall back to default, got %q", learner.modelPath)
+	}
+
+	if err := learner.ForceUpdate(); err == nil {
+		t.Fatal("normalized min experiences should prevent force update with empty buffer")
+	}
+}
+
 func TestOnlineLearnerStoppedRejectsModelWork(t *testing.T) {
 	agent, err := NewDQNAgent("")
 	if err != nil {

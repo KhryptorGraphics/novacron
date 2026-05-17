@@ -53,15 +53,7 @@ func NewOnlineLearner(agent *DQNAgent, config *OnlineLearnerConfig) *OnlineLearn
 		agent.replayBuffer = NewReplayBuffer(10000)
 	}
 
-	if config == nil {
-		config = &OnlineLearnerConfig{
-			UpdateFrequency:  24 * time.Hour, // Update daily
-			MinExperiences:   1000,           // Minimum experiences before update
-			TrainingScript:   "training/train_dqn.py",
-			ModelPath:        "models/dqn_online",
-			EnableAutoUpdate: true,
-		}
-	}
+	config = normalizeOnlineLearnerConfig(config)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	learner := &OnlineLearner{
@@ -83,6 +75,35 @@ func NewOnlineLearner(agent *DQNAgent, config *OnlineLearnerConfig) *OnlineLearn
 	}
 
 	return learner
+}
+
+func normalizeOnlineLearnerConfig(config *OnlineLearnerConfig) *OnlineLearnerConfig {
+	normalized := &OnlineLearnerConfig{
+		UpdateFrequency:  24 * time.Hour,
+		MinExperiences:   1000,
+		TrainingScript:   "training/train_dqn.py",
+		ModelPath:        "models/dqn_online",
+		EnableAutoUpdate: true,
+	}
+	if config == nil {
+		return normalized
+	}
+
+	if config.UpdateFrequency > 0 {
+		normalized.UpdateFrequency = config.UpdateFrequency
+	}
+	if config.MinExperiences > 0 {
+		normalized.MinExperiences = config.MinExperiences
+	}
+	if config.TrainingScript != "" {
+		normalized.TrainingScript = config.TrainingScript
+	}
+	if config.ModelPath != "" {
+		normalized.ModelPath = config.ModelPath
+	}
+	normalized.EnableAutoUpdate = config.EnableAutoUpdate
+
+	return normalized
 }
 
 // Stop terminates background online learning checks.
