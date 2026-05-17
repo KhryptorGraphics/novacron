@@ -91,6 +91,10 @@ func (ol *OnlineLearner) CollectExperience(state *EnvironmentState, action Actio
 	ol.mu.Lock()
 	defer ol.mu.Unlock()
 
+	if ol.ctx.Err() != nil {
+		return
+	}
+
 	// Store in agent's memory
 	ol.agent.Remember(state, action, reward, nextState, done)
 
