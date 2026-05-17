@@ -53,21 +53,38 @@ func (es *EnvironmentState) ToVector() []float32 {
 
 	// Stream metrics (16 features)
 	for i := 0; i < 4; i++ {
-		vector[i] = float32(es.StreamBandwidth[i] / 1000.0)    // Normalize to 0-1 (assuming max 1Gbps)
-		vector[4+i] = float32(es.StreamLatency[i] / 100.0)     // Normalize to 0-1 (assuming max 100ms)
-		vector[8+i] = float32(es.StreamCongestion[i])
-		vector[12+i] = float32(es.StreamSuccessRate[i])
+		vector[i] = float32(normalizePositive(es.StreamBandwidth[i], 1000.0)) // Normalize to 0-1 (assuming max 1Gbps)
+		vector[4+i] = float32(normalizePositive(es.StreamLatency[i], 100.0))  // Normalize to 0-1 (assuming max 100ms)
+		vector[8+i] = float32(clampUnit(es.StreamCongestion[i]))
+		vector[12+i] = float32(clampUnit(es.StreamSuccessRate[i]))
 	}
 
 	// Task features (3 features)
-	vector[16] = float32(math.Min(float64(es.TaskQueueDepth)/100.0, 1.0)) // Cap at 100
-	vector[17] = float32(math.Min(float64(es.TaskSize)/1e9, 1.0))         // Normalize to GB
-	vector[18] = float32(es.TaskPriority)
+	vector[16] = float32(normalizePositive(float64(es.TaskQueueDepth), 100.0)) // Cap at 100
+	vector[17] = float32(normalizePositive(float64(es.TaskSize), 1e9))         // Normalize to GB
+	vector[18] = float32(clampUnit(es.TaskPriority))
 
 	// Temporal feature
-	vector[19] = float32(es.TimeOfDay)
+	vector[19] = float32(clampUnit(es.TimeOfDay))
 
 	return vector
+}
+
+func normalizePositive(value, scale float64) float64 {
+	if scale <= 0 || value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0
+	}
+	return math.Min(value/scale, 1.0)
+}
+
+func clampUnit(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
 }
 
 // Action represents a partitioning decision

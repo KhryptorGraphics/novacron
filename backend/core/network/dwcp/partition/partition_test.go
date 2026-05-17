@@ -46,6 +46,31 @@ func TestEnvironmentState(t *testing.T) {
 	}
 }
 
+func TestEnvironmentStateToVectorSanitizesInvalidValues(t *testing.T) {
+	state := NewEnvironmentState()
+	state.StreamBandwidth = [4]float64{math.NaN(), math.Inf(1), -10, 2000}
+	state.StreamLatency = [4]float64{math.NaN(), math.Inf(1), -5, 250}
+	state.StreamCongestion = [4]float64{math.NaN(), math.Inf(1), -1, 2}
+	state.StreamSuccessRate = [4]float64{math.NaN(), math.Inf(1), -0.1, 2}
+	state.TaskQueueDepth = -10
+	state.TaskSize = -1024
+	state.TaskPriority = math.Inf(1)
+	state.TimeOfDay = math.NaN()
+
+	vector := state.ToVector()
+	if len(vector) != 20 {
+		t.Fatalf("Expected vector length 20, got %d", len(vector))
+	}
+	for i, value := range vector {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			t.Fatalf("Vector element %d is non-finite: %f", i, value)
+		}
+		if value < 0 || value > 1 {
+			t.Fatalf("Vector element %d is out of normalized range: %f", i, value)
+		}
+	}
+}
+
 func TestRewardCalculator(t *testing.T) {
 	calc := NewRewardCalculator()
 
