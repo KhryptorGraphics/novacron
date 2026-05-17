@@ -159,6 +159,79 @@ func TestQGAVMCopyServiceValidatesUploadChecksumBeforeCommit(t *testing.T) {
 	}
 }
 
+func TestQGAVMCopyServiceRecordsRateProgressAndAudit(t *testing.T) {
+	guest := &recordingGuestFileClient{handle: 9}
+	auditSink := &recordingVMCopySink{}
+	progressSink := &recordingVMCopySink{}
+	rateLimiter := &recordingVMCopyRateLimiter{}
+	service := NewQGAVMCopyService(
+		staticGuestFileClientResolver{client: guest},
+		WithVMCopyAuditSink(auditSink),
+		WithVMCopyProgressSink(progressSink),
+		WithVMCopyRateLimiter(rateLimiter),
+	)
+	server := newVMCopyTestServer(t, service, VMCopyOptions{
+		Direction: "upload",
+		Path:      "/tmp/file",
+		Overwrite: true,
+		UserID:    "user-7",
+		TenantID:  "tenant-a",
+	})
+	defer server.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+server.URL[len("http"):], nil)
+	if err != nil {
+		t.Fatalf("dial upload websocket: %v", err)
+	}
+	defer conn.Close()
+
+	payload := []byte("hello")
+	metadata, err := EncodeVMIOJSONFrame(VMIOFrameCopyMetadata, VMCopyMetadata{
+		Path:   "/tmp/file",
+		Size:   int64(len(payload)),
+		SHA256: fmt.Sprintf("%x", sha256.Sum256(payload)),
+	})
+	if err != nil {
+		t.Fatalf("encode metadata: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.BinaryMessage, metadata); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("read metadata ack: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.BinaryMessage, EncodeVMIODataFrame(VMIOFrameCopyData, payload)); err != nil {
+		t.Fatalf("write data frame: %v", err)
+	}
+	eofFrame, err := EncodeVMIOJSONFrame(VMIOFrameCopyEOF, VMCopyEOF{
+		Bytes:  int64(len(payload)),
+		SHA256: fmt.Sprintf("%x", sha256.Sum256(payload)),
+	})
+	if err != nil {
+		t.Fatalf("encode eof: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.BinaryMessage, eofFrame); err != nil {
+		t.Fatalf("write eof frame: %v", err)
+	}
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("read final ack: %v", err)
+	}
+
+	if rateLimiter.tenantID != "tenant-a" || rateLimiter.bytes != len(payload) {
+		t.Fatalf("unexpected rate limiter call tenant=%s bytes=%d", rateLimiter.tenantID, rateLimiter.bytes)
+	}
+	if len(progressSink.progressEvents) != 1 || progressSink.progressEvents[0].Bytes != int64(len(payload)) {
+		t.Fatalf("unexpected progress events: %#v", progressSink.progressEvents)
+	}
+	if len(auditSink.auditEvents) != 1 {
+		t.Fatalf("expected one audit event, got %d", len(auditSink.auditEvents))
+	}
+	audit := auditSink.auditEvents[0]
+	if audit.UserID != "user-7" || audit.TenantID != "tenant-a" || audit.VMID != "vm-1" || audit.Path != "/tmp/file" || audit.Result != "success" || audit.Bytes != int64(len(payload)) {
+		t.Fatalf("unexpected audit event: %#v", audit)
+	}
+}
+
 func TestQGAVMCopyServiceDownloadsGuestFileFrames(t *testing.T) {
 	guest := &recordingGuestFileClient{
 		handle:     4,
@@ -330,5 +403,29 @@ func (c *recordingGuestFileClient) RemoveFile(_ context.Context, path string) er
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.removedPath = path
+	return nil
+}
+
+type recordingVMCopySink struct {
+	auditEvents    []VMCopyTransferEvent
+	progressEvents []VMCopyTransferEvent
+}
+
+func (s *recordingVMCopySink) RecordVMCopyAudit(_ context.Context, event VMCopyTransferEvent) {
+	s.auditEvents = append(s.auditEvents, event)
+}
+
+func (s *recordingVMCopySink) RecordVMCopyProgress(_ context.Context, event VMCopyTransferEvent) {
+	s.progressEvents = append(s.progressEvents, event)
+}
+
+type recordingVMCopyRateLimiter struct {
+	tenantID string
+	bytes    int
+}
+
+func (l *recordingVMCopyRateLimiter) Wait(_ context.Context, tenantID string, bytes int) error {
+	l.tenantID = tenantID
+	l.bytes += bytes
 	return nil
 }

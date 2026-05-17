@@ -94,6 +94,8 @@ type VMCopyOptions struct {
 	Path      string
 	Mode      string
 	Overwrite bool
+	UserID    string
+	TenantID  string
 }
 
 // VMPortForwardOptions captures the VM port-forward WebSocket query contract.
@@ -308,6 +310,11 @@ func parseVMCopyOptions(r *http.Request) (VMCopyOptions, error) {
 		Direction: strings.ToLower(strings.TrimSpace(query.Get("direction"))),
 		Path:      strings.TrimSpace(query.Get("path")),
 		Mode:      strings.TrimSpace(query.Get("mode")),
+		UserID:    contextString(r.Context(), "user_id"),
+		TenantID:  contextString(r.Context(), "tenant_id"),
+	}
+	if options.TenantID == "" {
+		options.TenantID = "default"
 	}
 	if options.Direction != "upload" && options.Direction != "download" {
 		return options, fmt.Errorf("direction must be upload or download")
@@ -323,6 +330,14 @@ func parseVMCopyOptions(r *http.Request) (VMCopyOptions, error) {
 		options.Overwrite = parsed
 	}
 	return options, nil
+}
+
+func contextString(ctx context.Context, key string) string {
+	value := ctx.Value(key)
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", value))
 }
 
 func parseVMPortForwardOptions(r *http.Request) (VMPortForwardOptions, error) {

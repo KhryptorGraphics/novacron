@@ -1261,7 +1261,11 @@ func initializeCanonicalServices(cfg *config.Config, db *sql.DB, authManager *au
 	graphqlResolver := graphqlapi.NewResolverWithVolumeStore(vmManager, nil, volumeStore)
 	websocketLogger := logrus.New()
 	websocketLogger.SetLevel(logrus.InfoLevel)
-	copyService := websocketapi.NewQGAVMCopyService(websocketapi.NewQGAGuestFileClientResolver(vmManager))
+	copyService := websocketapi.NewQGAVMCopyService(
+		websocketapi.NewQGAGuestFileClientResolver(vmManager),
+		websocketapi.WithVMCopyAuditSink(websocketapi.NewLogrusVMCopyAuditSink(websocketLogger)),
+		websocketapi.WithVMCopyRateLimiter(websocketapi.NewTenantByteRateLimiter(64*1024*1024)),
+	)
 	portForwardService := websocketapi.NewVMPortForwardService(vmManager)
 	websocketHandler := websocketapi.NewWebSocketHandler(vmManager, nil, copyService, portForwardService, websocketLogger)
 

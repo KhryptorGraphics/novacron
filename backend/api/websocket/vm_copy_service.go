@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/sirupsen/logrus"
 )
 
 const vmCopyChunkSize = 64 * 1024
@@ -35,12 +37,67 @@ type VMGuestFileRemover interface {
 	RemoveFile(ctx context.Context, path string) error
 }
 
-type QGAVMCopyService struct {
-	resolver VMGuestFileClientResolver
+type VMCopyTransferEvent struct {
+	VMID        string
+	UserID      string
+	TenantID    string
+	Path        string
+	Direction   string
+	Bytes       int64
+	Checksum    string
+	Result      string
+	Error       string
+	StartedAt   time.Time
+	CompletedAt time.Time
 }
 
-func NewQGAVMCopyService(resolver VMGuestFileClientResolver) *QGAVMCopyService {
-	return &QGAVMCopyService{resolver: resolver}
+type VMCopyAuditSink interface {
+	RecordVMCopyAudit(ctx context.Context, event VMCopyTransferEvent)
+}
+
+type VMCopyProgressSink interface {
+	RecordVMCopyProgress(ctx context.Context, event VMCopyTransferEvent)
+}
+
+type VMCopyRateLimiter interface {
+	Wait(ctx context.Context, tenantID string, bytes int) error
+}
+
+type QGAVMCopyService struct {
+	resolver     VMGuestFileClientResolver
+	auditSink    VMCopyAuditSink
+	progressSink VMCopyProgressSink
+	rateLimiter  VMCopyRateLimiter
+}
+
+type QGAVMCopyServiceOption func(*QGAVMCopyService)
+
+func WithVMCopyAuditSink(sink VMCopyAuditSink) QGAVMCopyServiceOption {
+	return func(service *QGAVMCopyService) {
+		service.auditSink = sink
+	}
+}
+
+func WithVMCopyProgressSink(sink VMCopyProgressSink) QGAVMCopyServiceOption {
+	return func(service *QGAVMCopyService) {
+		service.progressSink = sink
+	}
+}
+
+func WithVMCopyRateLimiter(limiter VMCopyRateLimiter) QGAVMCopyServiceOption {
+	return func(service *QGAVMCopyService) {
+		service.rateLimiter = limiter
+	}
+}
+
+func NewQGAVMCopyService(resolver VMGuestFileClientResolver, options ...QGAVMCopyServiceOption) *QGAVMCopyService {
+	service := &QGAVMCopyService{resolver: resolver}
+	for _, option := range options {
+		if option != nil {
+			option(service)
+		}
+	}
+	return service
 }
 
 func (s *QGAVMCopyService) HandleVMCopy(ctx context.Context, vmID string, options VMCopyOptions, conn *websocket.Conn) error {
@@ -54,15 +111,34 @@ func (s *QGAVMCopyService) HandleVMCopy(ctx context.Context, vmID string, option
 
 	switch options.Direction {
 	case "upload":
-		return s.handleUpload(ctx, options, client, conn)
+		return s.handleUpload(ctx, vmID, options, client, conn)
 	case "download":
-		return s.handleDownload(ctx, options, client, conn)
+		return s.handleDownload(ctx, vmID, options, client, conn)
 	default:
 		return fmt.Errorf("unsupported vm copy direction %q", options.Direction)
 	}
 }
 
-func (s *QGAVMCopyService) handleUpload(ctx context.Context, options VMCopyOptions, client VMGuestFileClient, conn *websocket.Conn) error {
+func (s *QGAVMCopyService) handleUpload(ctx context.Context, vmID string, options VMCopyOptions, client VMGuestFileClient, conn *websocket.Conn) (err error) {
+	startedAt := time.Now()
+	var writtenTotal int64
+	var auditChecksum string
+	defer func() {
+		s.recordAudit(ctx, VMCopyTransferEvent{
+			VMID:        vmID,
+			UserID:      options.UserID,
+			TenantID:    options.TenantID,
+			Path:        options.Path,
+			Direction:   options.Direction,
+			Bytes:       writtenTotal,
+			Checksum:    auditChecksum,
+			Result:      transferResult(err),
+			Error:       transferError(err),
+			StartedAt:   startedAt,
+			CompletedAt: time.Now(),
+		})
+	}()
+
 	metadata, err := readCopyMetadata(conn)
 	if err != nil {
 		_ = writeVMIOError(conn, "invalid_metadata", err.Error())
@@ -95,7 +171,6 @@ func (s *QGAVMCopyService) handleUpload(ctx context.Context, options VMCopyOptio
 		return err
 	}
 
-	var writtenTotal int64
 	hash := sha256.New()
 	for {
 		messageType, frame, err := conn.ReadMessage()
@@ -116,6 +191,10 @@ func (s *QGAVMCopyService) handleUpload(ctx context.Context, options VMCopyOptio
 
 		switch frameType {
 		case VMIOFrameCopyData:
+			if err := s.waitTransfer(ctx, options.TenantID, len(payload)); err != nil {
+				_ = writeVMIOError(conn, "rate_limited", err.Error())
+				return err
+			}
 			written, _, err := client.FileWrite(ctx, handle, payload)
 			if err != nil {
 				_ = writeVMIOError(conn, "write_failed", err.Error())
@@ -123,6 +202,15 @@ func (s *QGAVMCopyService) handleUpload(ctx context.Context, options VMCopyOptio
 			}
 			writtenTotal += int64(written)
 			_, _ = hash.Write(payload[:written])
+			s.recordProgress(ctx, VMCopyTransferEvent{
+				VMID:      vmID,
+				UserID:    options.UserID,
+				TenantID:  options.TenantID,
+				Path:      options.Path,
+				Direction: options.Direction,
+				Bytes:     writtenTotal,
+				StartedAt: startedAt,
+			})
 		case VMIOFrameCopyEOF:
 			var eof VMCopyEOF
 			if _, err := DecodeVMIOJSONFrame(frame, &eof); err != nil {
@@ -147,6 +235,7 @@ func (s *QGAVMCopyService) handleUpload(ctx context.Context, options VMCopyOptio
 					_ = writeVMIOError(conn, "checksum_mismatch", err.Error())
 					return err
 				}
+				auditChecksum = actualChecksum
 			}
 			if err := client.FileFlush(ctx, handle); err != nil {
 				_ = writeVMIOError(conn, "flush_failed", err.Error())
@@ -170,7 +259,10 @@ func (s *QGAVMCopyService) handleUpload(ctx context.Context, options VMCopyOptio
 				return err
 			}
 			committed = true
-			return writeVMIOAck(conn, writtenTotal)
+			if err := writeVMIOAck(conn, writtenTotal); err != nil {
+				return err
+			}
+			return nil
 		default:
 			err := fmt.Errorf("unexpected upload frame type %#x", frameType)
 			_ = writeVMIOError(conn, "unexpected_frame", err.Error())
@@ -200,7 +292,24 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-func (s *QGAVMCopyService) handleDownload(ctx context.Context, options VMCopyOptions, client VMGuestFileClient, conn *websocket.Conn) error {
+func (s *QGAVMCopyService) handleDownload(ctx context.Context, vmID string, options VMCopyOptions, client VMGuestFileClient, conn *websocket.Conn) (err error) {
+	startedAt := time.Now()
+	var sentTotal int64
+	defer func() {
+		s.recordAudit(ctx, VMCopyTransferEvent{
+			VMID:        vmID,
+			UserID:      options.UserID,
+			TenantID:    options.TenantID,
+			Path:        options.Path,
+			Direction:   options.Direction,
+			Bytes:       sentTotal,
+			Result:      transferResult(err),
+			Error:       transferError(err),
+			StartedAt:   startedAt,
+			CompletedAt: time.Now(),
+		})
+	}()
+
 	handle, err := client.FileOpen(ctx, options.Path, "rb")
 	if err != nil {
 		_ = writeVMIOError(conn, "open_failed", err.Error())
@@ -216,7 +325,6 @@ func (s *QGAVMCopyService) handleDownload(ctx context.Context, options VMCopyOpt
 		return fmt.Errorf("write download metadata: %w", err)
 	}
 
-	var sentTotal int64
 	for {
 		chunk, eof, err := client.FileRead(ctx, handle, vmCopyChunkSize)
 		if err != nil {
@@ -224,19 +332,147 @@ func (s *QGAVMCopyService) handleDownload(ctx context.Context, options VMCopyOpt
 			return err
 		}
 		if len(chunk) > 0 {
+			if err := s.waitTransfer(ctx, options.TenantID, len(chunk)); err != nil {
+				_ = writeVMIOError(conn, "rate_limited", err.Error())
+				return err
+			}
 			if err := conn.WriteMessage(websocket.BinaryMessage, EncodeVMIODataFrame(VMIOFrameCopyData, chunk)); err != nil {
 				return fmt.Errorf("write download data: %w", err)
 			}
 			sentTotal += int64(len(chunk))
+			s.recordProgress(ctx, VMCopyTransferEvent{
+				VMID:      vmID,
+				UserID:    options.UserID,
+				TenantID:  options.TenantID,
+				Path:      options.Path,
+				Direction: options.Direction,
+				Bytes:     sentTotal,
+				StartedAt: startedAt,
+			})
 		}
 		if eof {
 			eofFrame, err := EncodeVMIOJSONFrame(VMIOFrameCopyEOF, VMCopyEOF{Bytes: sentTotal})
 			if err != nil {
 				return err
 			}
-			return conn.WriteMessage(websocket.BinaryMessage, eofFrame)
+			if err := conn.WriteMessage(websocket.BinaryMessage, eofFrame); err != nil {
+				return err
+			}
+			return nil
 		}
 	}
+}
+
+func (s *QGAVMCopyService) waitTransfer(ctx context.Context, tenantID string, bytes int) error {
+	if s != nil && s.rateLimiter != nil && bytes > 0 {
+		return s.rateLimiter.Wait(ctx, tenantID, bytes)
+	}
+	return nil
+}
+
+func (s *QGAVMCopyService) recordProgress(ctx context.Context, event VMCopyTransferEvent) {
+	if s != nil && s.progressSink != nil {
+		s.progressSink.RecordVMCopyProgress(ctx, event)
+	}
+}
+
+func (s *QGAVMCopyService) recordAudit(ctx context.Context, event VMCopyTransferEvent) {
+	if s != nil && s.auditSink != nil {
+		s.auditSink.RecordVMCopyAudit(ctx, event)
+	}
+}
+
+func transferResult(err error) string {
+	if err != nil {
+		return "failure"
+	}
+	return "success"
+}
+
+func transferError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+type LogrusVMCopyAuditSink struct {
+	logger *logrus.Logger
+}
+
+func NewLogrusVMCopyAuditSink(logger *logrus.Logger) *LogrusVMCopyAuditSink {
+	if logger == nil {
+		logger = logrus.New()
+	}
+	return &LogrusVMCopyAuditSink{logger: logger}
+}
+
+func (s *LogrusVMCopyAuditSink) RecordVMCopyAudit(ctx context.Context, event VMCopyTransferEvent) {
+	if s == nil || s.logger == nil {
+		return
+	}
+	s.logger.WithFields(logrus.Fields{
+		"event":        "vm_copy",
+		"vm_id":        event.VMID,
+		"user_id":      event.UserID,
+		"tenant_id":    event.TenantID,
+		"path":         event.Path,
+		"direction":    event.Direction,
+		"bytes":        event.Bytes,
+		"checksum":     event.Checksum,
+		"result":       event.Result,
+		"error":        event.Error,
+		"started_at":   event.StartedAt.UTC().Format(time.RFC3339Nano),
+		"completed_at": event.CompletedAt.UTC().Format(time.RFC3339Nano),
+	}).Info("vm copy transfer audited")
+}
+
+type TenantByteRateLimiter struct {
+	bytesPerSecond int64
+	mu             sync.Mutex
+	nextByTenant   map[string]time.Time
+}
+
+func NewTenantByteRateLimiter(bytesPerSecond int64) *TenantByteRateLimiter {
+	return &TenantByteRateLimiter{
+		bytesPerSecond: bytesPerSecond,
+		nextByTenant:   make(map[string]time.Time),
+	}
+}
+
+func (l *TenantByteRateLimiter) Wait(ctx context.Context, tenantID string, bytes int) error {
+	if l == nil || l.bytesPerSecond <= 0 || bytes <= 0 {
+		return nil
+	}
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	wait := l.reserve(tenantID, bytes)
+	if wait <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (l *TenantByteRateLimiter) reserve(tenantID string, bytes int) time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	next := l.nextByTenant[tenantID]
+	if next.Before(now) {
+		next = now
+	}
+	duration := time.Duration(int64(time.Second) * int64(bytes) / l.bytesPerSecond)
+	l.nextByTenant[tenantID] = next.Add(duration)
+	return next.Sub(now)
 }
 
 func readCopyMetadata(conn *websocket.Conn) (VMCopyMetadata, error) {

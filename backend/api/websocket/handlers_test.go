@@ -212,7 +212,7 @@ func TestVMCopyWebSocketDispatchesToService(t *testing.T) {
 	if copySvc.vmID != "vm-1" {
 		t.Fatalf("expected vm id vm-1, got %s", copySvc.vmID)
 	}
-	if copySvc.options.Direction != "upload" || copySvc.options.Path != "/tmp/file" || copySvc.options.Mode != "0644" || !copySvc.options.Overwrite {
+	if copySvc.options.Direction != "upload" || copySvc.options.Path != "/tmp/file" || copySvc.options.Mode != "0644" || !copySvc.options.Overwrite || copySvc.options.TenantID != "default" {
 		t.Fatalf("unexpected copy options: %#v", copySvc.options)
 	}
 }
