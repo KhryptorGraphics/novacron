@@ -3,6 +3,7 @@ package partition
 import (
 	"math"
 	"testing"
+	"time"
 )
 
 func TestEnvironmentState(t *testing.T) {
@@ -361,6 +362,49 @@ func TestTimeEstimation(t *testing.T) {
 
 	if time1 <= 0 || time2 <= 0 || time4 <= 0 {
 		t.Error("Invalid time estimates")
+	}
+}
+
+func TestDQNAgentHandlesInvalidTelemetry(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer agent.Destroy()
+
+	state := NewEnvironmentState()
+	state.TaskSize = 1024
+	state.TaskPriority = 0.1
+	state.StreamBandwidth = [4]float64{0, -10, math.NaN(), math.Inf(1)}
+	state.StreamLatency = [4]float64{0, -5, math.NaN(), math.Inf(1)}
+	state.StreamCongestion = [4]float64{-1, 2, math.NaN(), math.Inf(1)}
+	state.StreamSuccessRate = [4]float64{0, -0.2, math.NaN(), math.Inf(1)}
+
+	streams := []int{0, 1, 2, 3}
+	chunks := agent.calculateChunkSizes(state.TaskSize, len(streams), streams, state)
+	if len(chunks) != len(streams) {
+		t.Fatalf("Expected %d chunks, got %d", len(streams), len(chunks))
+	}
+
+	total := 0
+	for i, chunk := range chunks {
+		if chunk <= 0 {
+			t.Fatalf("Expected positive chunk %d, got %d", i, chunk)
+		}
+		total += chunk
+	}
+	if total != state.TaskSize {
+		t.Fatalf("Total chunks %d != task size %d", total, state.TaskSize)
+	}
+
+	estimated := agent.estimateTime(state.TaskSize, streams, state)
+	if estimated <= 0 || estimated > time.Hour {
+		t.Fatalf("Expected bounded positive estimate, got %s", estimated)
+	}
+
+	action := agent.heuristicAction(state)
+	if action < 0 || action >= Action(NumActions) {
+		t.Fatalf("Invalid heuristic action: %d", action)
 	}
 }
 

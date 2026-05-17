@@ -3,6 +3,7 @@ package dwcp
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -285,8 +286,12 @@ func (tp *TaskPartitioner) simplePartition(task *Task) *partition.TaskPartitionD
 	bestScore := 0.0
 
 	for i := 0; i < 4; i++ {
-		score := tp.envState.StreamBandwidth[i] * tp.envState.StreamSuccessRate[i] /
-			(tp.envState.StreamLatency[i] * (1 + tp.envState.StreamCongestion[i]))
+		score := taskPartitionStreamScore(
+			tp.envState.StreamBandwidth[i],
+			tp.envState.StreamLatency[i],
+			tp.envState.StreamCongestion[i],
+			tp.envState.StreamSuccessRate[i],
+		)
 
 		if score > bestScore {
 			bestScore = score
@@ -334,8 +339,12 @@ func (tp *TaskPartitioner) getTopNStreams(n int) []int {
 
 	scores := make([]streamScore, 4)
 	for i := 0; i < 4; i++ {
-		score := tp.envState.StreamBandwidth[i] * tp.envState.StreamSuccessRate[i] /
-			(tp.envState.StreamLatency[i] * (1 + tp.envState.StreamCongestion[i]))
+		score := taskPartitionStreamScore(
+			tp.envState.StreamBandwidth[i],
+			tp.envState.StreamLatency[i],
+			tp.envState.StreamCongestion[i],
+			tp.envState.StreamSuccessRate[i],
+		)
 		scores[i] = streamScore{id: i, score: score}
 	}
 
@@ -368,11 +377,11 @@ func (tp *TaskPartitioner) estimateTime(taskSize int, streams []int) time.Durati
 		}
 
 		chunkSize := taskSize / len(streams)
-		bandwidth := tp.envState.StreamBandwidth[streamID] * 1e6 / 8 // Mbps to bytes/s
-		latency := tp.envState.StreamLatency[streamID] / 1000        // ms to seconds
+		bandwidth := safeTaskPartitionBandwidthMbps(tp.envState.StreamBandwidth[streamID]) * 1e6 / 8 // Mbps to bytes/s
+		latency := safeTaskPartitionLatencyMs(tp.envState.StreamLatency[streamID]) / 1000            // ms to seconds
 
-		streamTime := latency + (float64(chunkSize)/bandwidth)*(1+tp.envState.StreamCongestion[streamID])
-		streamTime *= (2 - tp.envState.StreamSuccessRate[streamID]) // Account for retransmissions
+		streamTime := latency + (float64(chunkSize)/bandwidth)*(1+safeTaskPartitionCongestion(tp.envState.StreamCongestion[streamID]))
+		streamTime *= (2 - safeTaskPartitionSuccessRate(tp.envState.StreamSuccessRate[streamID])) // Account for retransmissions
 
 		if streamTime > maxTime {
 			maxTime = streamTime
@@ -391,10 +400,49 @@ func (tp *TaskPartitioner) UpdateNetworkMetrics(streamID int, bandwidth, latency
 		return
 	}
 
-	tp.envState.StreamBandwidth[streamID] = bandwidth
-	tp.envState.StreamLatency[streamID] = latency
-	tp.envState.StreamCongestion[streamID] = congestion
-	tp.envState.StreamSuccessRate[streamID] = successRate
+	tp.envState.StreamBandwidth[streamID] = safeTaskPartitionBandwidthMbps(bandwidth)
+	tp.envState.StreamLatency[streamID] = safeTaskPartitionLatencyMs(latency)
+	tp.envState.StreamCongestion[streamID] = safeTaskPartitionCongestion(congestion)
+	tp.envState.StreamSuccessRate[streamID] = safeTaskPartitionSuccessRate(successRate)
+}
+
+func taskPartitionStreamScore(bandwidth, latency, congestion, successRate float64) float64 {
+	return safeTaskPartitionBandwidthMbps(bandwidth) * safeTaskPartitionSuccessRate(successRate) /
+		(safeTaskPartitionLatencyMs(latency) * (1 + safeTaskPartitionCongestion(congestion)))
+}
+
+func safeTaskPartitionBandwidthMbps(value float64) float64 {
+	if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 1
+	}
+	return value
+}
+
+func safeTaskPartitionLatencyMs(value float64) float64 {
+	if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 1
+	}
+	return value
+}
+
+func safeTaskPartitionCongestion(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
+}
+
+func safeTaskPartitionSuccessRate(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 {
+		return 0.01
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
 }
 
 // GetMetrics returns partitioner metrics

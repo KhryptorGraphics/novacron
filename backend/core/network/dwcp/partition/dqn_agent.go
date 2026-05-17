@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"sync"
@@ -229,10 +230,15 @@ func (agent *DQNAgent) calculateChunkSizes(taskSize int, numStreams int, streams
 
 	for i, streamID := range streams {
 		// Capacity is bandwidth * success rate / (1 + congestion)
-		capacity := state.StreamBandwidth[streamID] * state.StreamSuccessRate[streamID] /
-			(1 + state.StreamCongestion[streamID])
+		capacity := safeBandwidthMbps(state.StreamBandwidth[streamID]) *
+			safeSuccessRate(state.StreamSuccessRate[streamID]) /
+			(1 + safeCongestion(state.StreamCongestion[streamID]))
 		capacities[i] = capacity
 		totalCapacity += capacity
+	}
+
+	if totalCapacity <= 0 || math.IsNaN(totalCapacity) || math.IsInf(totalCapacity, 0) {
+		return splitEvenly(taskSize, numStreams)
 	}
 
 	// Allocate chunks proportionally to capacity
@@ -257,15 +263,15 @@ func (agent *DQNAgent) estimateTime(taskSize int, streams []int, state *Environm
 	maxTime := 0.0
 
 	for i, streamID := range streams {
-		chunkSize := taskSize / len(streams)                   // Simplified for estimation
-		bandwidth := state.StreamBandwidth[streamID] * 1e6 / 8 // Convert Mbps to bytes/s
-		latency := state.StreamLatency[streamID] / 1000        // Convert ms to seconds
+		chunkSize := taskSize / len(streams)                                      // Simplified for estimation
+		bandwidth := safeBandwidthMbps(state.StreamBandwidth[streamID]) * 1e6 / 8 // Convert Mbps to bytes/s
+		latency := safeLatencyMs(state.StreamLatency[streamID]) / 1000            // Convert ms to seconds
 
 		// Time = latency + (size / bandwidth) * (1 + congestion)
-		streamTime := latency + (float64(chunkSize)/bandwidth)*(1+state.StreamCongestion[streamID])
+		streamTime := latency + (float64(chunkSize)/bandwidth)*(1+safeCongestion(state.StreamCongestion[streamID]))
 
 		// Account for potential retransmissions
-		streamTime *= (2 - state.StreamSuccessRate[streamID])
+		streamTime *= (2 - safeSuccessRate(state.StreamSuccessRate[streamID]))
 
 		if i == 0 || streamTime > maxTime {
 			maxTime = streamTime
@@ -288,8 +294,12 @@ func (agent *DQNAgent) heuristicAction(state *EnvironmentState) Action {
 
 	for i := 0; i < 4; i++ {
 		// Score based on bandwidth, latency, and congestion
-		score := state.StreamBandwidth[i] * state.StreamSuccessRate[i] /
-			(state.StreamLatency[i] * (1 + state.StreamCongestion[i]))
+		score := streamScore(
+			state.StreamBandwidth[i],
+			state.StreamLatency[i],
+			state.StreamCongestion[i],
+			state.StreamSuccessRate[i],
+		)
 
 		if score > bestScore {
 			bestScore = score
@@ -303,10 +313,18 @@ func (agent *DQNAgent) heuristicAction(state *EnvironmentState) Action {
 		secondBest := (bestStream + 1) % 4
 		for i := 0; i < 4; i++ {
 			if i != bestStream {
-				score := state.StreamBandwidth[i] * state.StreamSuccessRate[i] /
-					(state.StreamLatency[i] * (1 + state.StreamCongestion[i]))
-				if score > state.StreamBandwidth[secondBest]*state.StreamSuccessRate[secondBest]/
-					(state.StreamLatency[secondBest]*(1+state.StreamCongestion[secondBest])) {
+				score := streamScore(
+					state.StreamBandwidth[i],
+					state.StreamLatency[i],
+					state.StreamCongestion[i],
+					state.StreamSuccessRate[i],
+				)
+				if score > streamScore(
+					state.StreamBandwidth[secondBest],
+					state.StreamLatency[secondBest],
+					state.StreamCongestion[secondBest],
+					state.StreamSuccessRate[secondBest],
+				) {
 					secondBest = i
 				}
 			}
@@ -321,6 +339,62 @@ func (agent *DQNAgent) heuristicAction(state *EnvironmentState) Action {
 	}
 
 	return Action(bestStream)
+}
+
+func splitEvenly(taskSize, numStreams int) []int {
+	chunks := make([]int, numStreams)
+	if numStreams == 0 {
+		return chunks
+	}
+
+	base := taskSize / numStreams
+	remainder := taskSize % numStreams
+	for i := range chunks {
+		chunks[i] = base
+		if i < remainder {
+			chunks[i]++
+		}
+	}
+	return chunks
+}
+
+func streamScore(bandwidth, latency, congestion, successRate float64) float64 {
+	return safeBandwidthMbps(bandwidth) * safeSuccessRate(successRate) /
+		(safeLatencyMs(latency) * (1 + safeCongestion(congestion)))
+}
+
+func safeBandwidthMbps(value float64) float64 {
+	if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 1
+	}
+	return value
+}
+
+func safeLatencyMs(value float64) float64 {
+	if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 1
+	}
+	return value
+}
+
+func safeCongestion(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
+}
+
+func safeSuccessRate(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 {
+		return 0.01
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
 }
 
 // argmax returns the index of the maximum value

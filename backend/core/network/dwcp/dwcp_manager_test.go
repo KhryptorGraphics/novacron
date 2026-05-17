@@ -2,6 +2,7 @@ package dwcp_test
 
 import (
 	"context"
+	"math"
 	"runtime"
 	"sync"
 	"testing"
@@ -747,6 +748,39 @@ func TestPartitionTask(t *testing.T) {
 		}
 		assert.Equal(t, taskSize, total)
 	})
+}
+
+func TestTaskPartitionerFallbackHandlesInvalidTelemetry(t *testing.T) {
+	partitioner, err := dwcp.NewTaskPartitioner("", zaptest.NewLogger(t))
+	require.NoError(t, err)
+	defer partitioner.Destroy()
+
+	require.NoError(t, partitioner.Stop())
+
+	for streamID := 0; streamID < 4; streamID++ {
+		partitioner.UpdateNetworkMetrics(streamID, 0, math.NaN(), math.Inf(1), -1)
+	}
+
+	taskSize := 256 * 1024 * 1024
+	decision, err := partitioner.PartitionTask(&dwcp.Task{
+		ID:       "invalid-telemetry",
+		Size:     taskSize,
+		Priority: 0.1,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, decision)
+
+	require.NotEmpty(t, decision.StreamIDs)
+	require.Equal(t, len(decision.StreamIDs), len(decision.ChunkSizes))
+	assert.Greater(t, decision.ExpectedTime, time.Duration(0))
+	assert.Less(t, decision.ExpectedTime, time.Hour)
+
+	total := 0
+	for _, chunk := range decision.ChunkSizes {
+		assert.Greater(t, chunk, 0)
+		total += chunk
+	}
+	assert.Equal(t, taskSize, total)
 }
 
 // TestConcurrentMetricsCollection tests concurrent metrics collection for race conditions
