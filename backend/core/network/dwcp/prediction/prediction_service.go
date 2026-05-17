@@ -94,6 +94,10 @@ type ABTestResults struct {
 
 // NewPredictionService creates a new prediction service
 func NewPredictionService(modelPath string, updateInterval time.Duration) (*PredictionService, error) {
+	if updateInterval <= 0 {
+		updateInterval = time.Second
+	}
+
 	// Initialize predictor
 	predictor, err := NewLSTMPredictor(modelPath)
 	if err != nil {

@@ -228,6 +228,15 @@ func TestPredictionService(t *testing.T) {
 		assert.False(t, service.IsRunning())
 	})
 
+	t.Run("CreateServiceNormalizesNonPositiveUpdateInterval", func(t *testing.T) {
+		service, err := NewPredictionService("", 0)
+		require.NoError(t, err)
+		require.NotNil(t, service)
+		defer service.Stop()
+
+		assert.Equal(t, time.Second, service.updateInterval)
+	})
+
 	t.Run("UpdateAccuracyIgnoresInvalidActualTelemetry", func(t *testing.T) {
 		service, err := NewPredictionService("", 10*time.Millisecond)
 		require.NoError(t, err)
