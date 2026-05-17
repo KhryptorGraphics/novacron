@@ -1340,6 +1340,40 @@ func TestDQNAgentSaveModelSanitizesNonFiniteState(t *testing.T) {
 	}
 }
 
+func TestDQNAgentSaveModelSanitizesInvalidIntegerState(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer agent.Destroy()
+
+	agent.mu.Lock()
+	agent.updateFreq = -10
+	agent.stepCount = -7
+	agent.mu.Unlock()
+
+	modelPath := filepath.Join(t.TempDir(), "dqn-agent.json")
+	if err := agent.SaveModel(modelPath); err != nil {
+		t.Fatalf("SaveModel failed: %v", err)
+	}
+
+	data, err := os.ReadFile(modelPath)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+
+	var state dqnAgentState
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	if state.UpdateFreq != 1000 {
+		t.Fatalf("expected invalid update frequency to persist as default 1000, got %d", state.UpdateFreq)
+	}
+	if state.StepCount != 0 {
+		t.Fatalf("expected invalid step count to persist as 0, got %d", state.StepCount)
+	}
+}
+
 func TestDQNAgentLoadModelFiltersInvalidReplayExperiences(t *testing.T) {
 	modelState := dqnAgentState{
 		Version: dqnAgentStateVersion,
