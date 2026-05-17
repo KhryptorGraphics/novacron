@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"sync"
@@ -95,6 +96,9 @@ func (ol *OnlineLearner) CollectExperience(state *EnvironmentState, action Actio
 		return
 	}
 	if state == nil || nextState == nil {
+		return
+	}
+	if math.IsNaN(reward) || math.IsInf(reward, 0) {
 		return
 	}
 	if !isValidLearnerAction(action) {

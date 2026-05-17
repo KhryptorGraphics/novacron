@@ -306,6 +306,58 @@ func TestOnlineLearnerCollectExperienceIgnoresNilStates(t *testing.T) {
 	}
 }
 
+func TestOnlineLearnerCollectExperienceIgnoresInvalidRewards(t *testing.T) {
+	tests := []struct {
+		name   string
+		reward float64
+	}{
+		{name: "nan", reward: math.NaN()},
+		{name: "positive_inf", reward: math.Inf(1)},
+		{name: "negative_inf", reward: math.Inf(-1)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent, err := NewDQNAgent("")
+			if err != nil {
+				t.Fatalf("failed to create DQN agent: %v", err)
+			}
+
+			learner := NewOnlineLearner(agent, &OnlineLearnerConfig{
+				UpdateFrequency:  time.Hour,
+				MinExperiences:   2,
+				TrainingScript:   "unused",
+				ModelPath:        filepath.Join(t.TempDir(), "model"),
+				EnableAutoUpdate: false,
+			})
+			before := learner.GetStatus()
+
+			learner.CollectExperience(
+				NewEnvironmentState(),
+				ActionStream1,
+				tt.reward,
+				NewEnvironmentState(),
+				false,
+			)
+
+			after := learner.GetStatus()
+			if after["experience_count"] != before["experience_count"] {
+				t.Fatalf("invalid reward should not collect experience: before=%v after=%v", before["experience_count"], after["experience_count"])
+			}
+			if after["buffer_size"] != before["buffer_size"] {
+				t.Fatalf("invalid reward should not grow replay buffer: before=%v after=%v", before["buffer_size"], after["buffer_size"])
+			}
+			avgReward, ok := after["avg_reward"].(float64)
+			if !ok {
+				t.Fatalf("avg_reward has unexpected type %T", after["avg_reward"])
+			}
+			if math.IsNaN(avgReward) || math.IsInf(avgReward, 0) {
+				t.Fatalf("invalid reward should not poison avg_reward: %v", avgReward)
+			}
+		})
+	}
+}
+
 func TestOnlineLearnerEvaluateModelRejectsNonPositiveEpisodes(t *testing.T) {
 	agent, err := NewDQNAgent("")
 	if err != nil {
