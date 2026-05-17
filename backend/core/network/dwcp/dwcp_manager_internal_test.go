@@ -242,3 +242,30 @@ func TestStartPhase2ComponentsReturnsStartErrors(t *testing.T) {
 		t.Fatalf("expected sync start error, got %v", err)
 	}
 }
+
+func TestStopStopsPreconfiguredPartitionerBeforeManagerStart(t *testing.T) {
+	config := DefaultConfig()
+	config.Enabled = true
+	manager, err := NewManager(config, zap.NewNop())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	if err := manager.AddTaskPartitioner(""); err != nil {
+		t.Fatalf("AddTaskPartitioner failed: %v", err)
+	}
+	partitioner := manager.partitioner
+	t.Cleanup(partitioner.Destroy)
+
+	if !partitioner.IsRunning() {
+		t.Fatal("partitioner should start enabled when added")
+	}
+
+	if err := manager.Stop(); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+
+	if partitioner.IsRunning() {
+		t.Fatal("Stop should stop a preconfigured partitioner even before manager start")
+	}
+}

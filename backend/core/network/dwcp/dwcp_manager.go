@@ -267,6 +267,7 @@ func (m *Manager) Stop() error {
 	defer m.mu.Unlock()
 
 	if !m.started {
+		m.stopPhase1Components()
 		return nil
 	}
 
