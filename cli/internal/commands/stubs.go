@@ -705,12 +705,51 @@ func NewPortForwardCommand() *cobra.Command {
 
 func NewTopCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "top",
+		Use:   "top [system]",
 		Short: "Display resource usage",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return nil
+			}
+			if len(args) == 1 && args[0] == "system" {
+				return nil
+			}
+			return fmt.Errorf("unsupported resource %q", strings.Join(args, " "))
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("top command not yet implemented")
+			client, err := currentClusterAPIClient()
+			if err != nil {
+				return err
+			}
+
+			var summary monitoringSummary
+			if err := client.Get(cmd.Context(), "/api/monitoring/metrics", &summary); err != nil {
+				return err
+			}
+
+			writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+			fmt.Fprintln(writer, "RESOURCE\tUSAGE\tCHANGE\tANALYSIS")
+			fmt.Fprintf(writer, "CPU\t%.2f%%\t%+.2f%%\t%s\n", summary.CurrentCPUUsage, summary.CPUChangePercentage, summary.CPUAnalysis)
+			fmt.Fprintf(writer, "Memory\t%.2f%%\t%+.2f%%\t%s\n", summary.CurrentMemoryUsage, summary.MemoryChangePercentage, summary.MemoryAnalysis)
+			fmt.Fprintf(writer, "Disk\t%.2f%%\t%+.2f%%\t\n", summary.CurrentDiskUsage, summary.DiskChangePercentage)
+			fmt.Fprintf(writer, "Network\t%.2f%%\t%+.2f%%\t\n", summary.CurrentNetworkUsage, summary.NetworkChangePercentage)
+			return writer.Flush()
 		},
 	}
+}
+
+type monitoringSummary struct {
+	CurrentCPUUsage         float64  `json:"currentCpuUsage"`
+	CurrentMemoryUsage      float64  `json:"currentMemoryUsage"`
+	CurrentDiskUsage        float64  `json:"currentDiskUsage"`
+	CurrentNetworkUsage     float64  `json:"currentNetworkUsage"`
+	CPUChangePercentage     float64  `json:"cpuChangePercentage"`
+	MemoryChangePercentage  float64  `json:"memoryChangePercentage"`
+	DiskChangePercentage    float64  `json:"diskChangePercentage"`
+	NetworkChangePercentage float64  `json:"networkChangePercentage"`
+	TimeLabels              []string `json:"timeLabels"`
+	CPUAnalysis             string   `json:"cpuAnalysis"`
+	MemoryAnalysis          string   `json:"memoryAnalysis"`
 }
 
 func NewApplyCommand() *cobra.Command {
