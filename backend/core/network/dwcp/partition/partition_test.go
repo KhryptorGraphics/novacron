@@ -756,6 +756,82 @@ func TestDQNAgentLoadModelFiltersInvalidReplayExperiences(t *testing.T) {
 	}
 }
 
+func TestDQNAgentLoadModelSanitizesInvalidScalarState(t *testing.T) {
+	modelState := dqnAgentState{
+		Version:        dqnAgentStateVersion,
+		Epsilon:        2,
+		EpsilonMin:     -0.1,
+		EpsilonDecay:   -0.5,
+		LearningRate:   -1,
+		Gamma:          1.5,
+		UpdateFreq:     -10,
+		StepCount:      -7,
+		TotalReward:    -5,
+		EpisodeRewards: []float64{1, 3},
+		SuccessRate:    2,
+		ReplayBuffer: replayState{
+			Capacity: 1,
+		},
+	}
+
+	data, err := json.Marshal(modelState)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	modelPath := filepath.Join(t.TempDir(), "dqn-agent.json")
+	if err := os.WriteFile(modelPath, data, 0600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer agent.Destroy()
+
+	if err := agent.LoadModel(modelPath); err != nil {
+		t.Fatalf("LoadModel failed: %v", err)
+	}
+
+	if agent.epsilon != 1 {
+		t.Fatalf("invalid epsilon should fall back to default 1, got %v", agent.epsilon)
+	}
+	if agent.epsilonMin != 0.01 {
+		t.Fatalf("invalid epsilonMin should fall back to default 0.01, got %v", agent.epsilonMin)
+	}
+	if agent.epsilonDecay != 0.995 {
+		t.Fatalf("invalid epsilonDecay should fall back to default 0.995, got %v", agent.epsilonDecay)
+	}
+	if agent.learningRate != 0.001 {
+		t.Fatalf("invalid learningRate should fall back to default 0.001, got %v", agent.learningRate)
+	}
+	if agent.gamma != 0.95 {
+		t.Fatalf("invalid gamma should fall back to default 0.95, got %v", agent.gamma)
+	}
+	if agent.updateFreq != 1000 {
+		t.Fatalf("invalid updateFreq should fall back to default 1000, got %v", agent.updateFreq)
+	}
+	if agent.stepCount != 0 {
+		t.Fatalf("invalid stepCount should fall back to default 0, got %v", agent.stepCount)
+	}
+	if agent.totalReward != -5 {
+		t.Fatalf("finite totalReward should be preserved, got %v", agent.totalReward)
+	}
+	if agent.successRate != 0 {
+		t.Fatalf("invalid successRate should fall back to default 0, got %v", agent.successRate)
+	}
+
+	metrics := agent.GetMetrics()
+	avgReward, ok := metrics["average_reward"].(float64)
+	if !ok {
+		t.Fatalf("average_reward has unexpected type %T", metrics["average_reward"])
+	}
+	if avgReward != 2 {
+		t.Fatalf("expected valid episode rewards to remain average 2, got %v", avgReward)
+	}
+}
+
 func TestActionDecoding(t *testing.T) {
 	agent, err := NewDQNAgent("nonexistent.onnx")
 	if err != nil {

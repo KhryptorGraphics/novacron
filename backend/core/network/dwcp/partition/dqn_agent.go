@@ -670,17 +670,17 @@ func (agent *DQNAgent) LoadModel(path string) error {
 	if agent.inference != nil {
 		_ = agent.inference.Destroy()
 	}
-	agent.epsilon = state.Epsilon
-	agent.epsilonMin = state.EpsilonMin
-	agent.epsilonDecay = state.EpsilonDecay
+	agent.epsilon = boundedFloat(state.Epsilon, 0, 1, agent.epsilon)
+	agent.epsilonMin = boundedFloat(state.EpsilonMin, 0, 1, agent.epsilonMin)
+	agent.epsilonDecay = boundedFloat(state.EpsilonDecay, 0, 1, agent.epsilonDecay)
 	agent.stateBuffer = append([]float32(nil), state.StateBuffer...)
-	agent.learningRate = state.LearningRate
-	agent.gamma = state.Gamma
-	agent.updateFreq = state.UpdateFreq
-	agent.stepCount = state.StepCount
+	agent.learningRate = positiveFloat(state.LearningRate, agent.learningRate)
+	agent.gamma = boundedFloat(state.Gamma, 0, 1, agent.gamma)
+	agent.updateFreq = positiveInt(state.UpdateFreq, agent.updateFreq)
+	agent.stepCount = nonNegativeInt(state.StepCount, agent.stepCount)
 	agent.totalReward = state.TotalReward
 	agent.episodeRewards = append([]float64(nil), state.EpisodeRewards...)
-	agent.successRate = state.SuccessRate
+	agent.successRate = boundedFloat(state.SuccessRate, 0, 1, agent.successRate)
 	agent.replayBuffer = NewReplayBuffer(state.ReplayBuffer.Capacity)
 	for _, exp := range state.ReplayBuffer.Experiences {
 		if isValidReplayExperience(exp) {
@@ -703,6 +703,34 @@ func isValidReplayExperience(exp *Experience) bool {
 		return false
 	}
 	return !math.IsNaN(exp.Reward) && !math.IsInf(exp.Reward, 0)
+}
+
+func boundedFloat(value, minValue, maxValue, fallback float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < minValue || value > maxValue {
+		return fallback
+	}
+	return value
+}
+
+func positiveFloat(value, fallback float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func positiveInt(value, fallback int) int {
+	if value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func nonNegativeInt(value, fallback int) int {
+	if value < 0 {
+		return fallback
+	}
+	return value
 }
 
 func cloneExperience(exp *Experience) *Experience {
