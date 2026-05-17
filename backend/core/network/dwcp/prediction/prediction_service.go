@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"sync"
 	"time"
@@ -371,6 +372,9 @@ func (s *PredictionService) updateAccuracy() {
 		for _, actual := range actualSamples {
 			if actual.Timestamp.Sub(entry.Timestamp) > 0 &&
 				actual.Timestamp.Sub(entry.Timestamp) < 1*time.Minute {
+				if !isValidActualSample(actual) {
+					continue
+				}
 
 				// Calculate error
 				bandwidthError := abs(entry.Prediction.PredictedBandwidthMbps-actual.BandwidthMbps) /
@@ -379,6 +383,9 @@ func (s *PredictionService) updateAccuracy() {
 					actual.LatencyMs
 
 				error := (bandwidthError + latencyError) / 2.0
+				if math.IsNaN(error) || math.IsInf(error, 0) {
+					continue
+				}
 				s.predictionHistory[i].Actual = &actual
 				s.predictionHistory[i].Error = error
 
@@ -525,6 +532,9 @@ func (s *PredictionService) ExportMetrics(outputPath string) error {
 	var errorCount int
 	for _, entry := range s.predictionHistory {
 		if entry.Error > 0 {
+			if math.IsNaN(entry.Error) || math.IsInf(entry.Error, 0) {
+				continue
+			}
 			totalError += entry.Error
 			errorCount++
 		}
@@ -590,4 +600,10 @@ func abs(x float64) float64 {
 		return -x
 	}
 	return x
+}
+
+func isValidActualSample(sample NetworkSample) bool {
+	return sample.BandwidthMbps > 0 && sample.LatencyMs > 0 &&
+		!math.IsNaN(sample.BandwidthMbps) && !math.IsNaN(sample.LatencyMs) &&
+		!math.IsInf(sample.BandwidthMbps, 0) && !math.IsInf(sample.LatencyMs, 0)
 }

@@ -2,6 +2,8 @@ package prediction
 
 import (
 	"context"
+	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -125,6 +127,46 @@ func TestPredictionService(t *testing.T) {
 		assert.True(t, service.IsRunning())
 		require.NoError(t, service.Stop())
 		assert.False(t, service.IsRunning())
+	})
+
+	t.Run("UpdateAccuracyIgnoresInvalidActualTelemetry", func(t *testing.T) {
+		service, err := NewPredictionService("", 10*time.Millisecond)
+		require.NoError(t, err)
+		defer service.Stop()
+
+		predictedAt := time.Now().Add(-30 * time.Second)
+		service.predictionHistory = []PredictionHistoryEntry{
+			{
+				Prediction: BandwidthPrediction{
+					PredictedBandwidthMbps: 100,
+					PredictedLatencyMs:     20,
+				},
+				Timestamp: predictedAt,
+			},
+		}
+		service.collector.addSample(NetworkSample{
+			Timestamp:     predictedAt.Add(time.Second),
+			BandwidthMbps: 0,
+			LatencyMs:     0,
+		})
+
+		service.updateAccuracy()
+
+		outputPath := filepath.Join(t.TempDir(), "metrics.json")
+		require.NoError(t, service.ExportMetrics(outputPath))
+		raw, err := os.ReadFile(outputPath)
+		require.NoError(t, err)
+
+		var metrics map[string]interface{}
+		require.NoError(t, json.Unmarshal(raw, &metrics))
+		if averageError, ok := metrics["average_error"].(float64); ok {
+			assert.False(t, math.IsNaN(averageError))
+			assert.False(t, math.IsInf(averageError, 0))
+		}
+		if accuracy, ok := metrics["accuracy"].(float64); ok {
+			assert.False(t, math.IsNaN(accuracy))
+			assert.False(t, math.IsInf(accuracy, 0))
+		}
 	})
 
 	t.Run("CreateService", func(t *testing.T) {
