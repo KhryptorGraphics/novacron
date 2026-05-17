@@ -329,6 +329,9 @@ func (agent *DQNAgent) Remember(state *EnvironmentState, action Action, reward f
 		Done:      done,
 	}
 
+	agent.mu.Lock()
+	defer agent.mu.Unlock()
+
 	agent.replayBuffer.Add(exp)
 	agent.totalReward += reward
 

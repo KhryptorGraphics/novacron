@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -1551,6 +1552,36 @@ func TestDQNAgentRememberIgnoresInvalidExperience(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDQNAgentRememberConcurrentMetricsAccess(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer agent.Destroy()
+
+	state := NewEnvironmentState()
+	nextState := NewEnvironmentState()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 250; j++ {
+				agent.Remember(state, ActionStream1, 1, nextState, j%10 == 0)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 250; j++ {
+				_ = agent.GetMetrics()
+			}
+		}()
+	}
+
+	wg.Wait()
 }
 
 func TestEpsilonDecay(t *testing.T) {
