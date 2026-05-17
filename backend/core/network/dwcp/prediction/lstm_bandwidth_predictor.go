@@ -2,10 +2,13 @@ package prediction
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"sync"
 	"time"
+
+	ort "github.com/yalue/onnxruntime_go"
 )
 
 // LSTMPredictor handles LSTM-based bandwidth prediction using ONNX runtime
@@ -27,6 +30,19 @@ type LSTMPredictor struct {
 	inferenceCount uint64
 	totalLatency   time.Duration
 	predictions    []PredictionRecord
+
+	inference bandwidthInferenceSession
+}
+
+type bandwidthInferenceSession interface {
+	Run(input []float32) ([]float32, error)
+	Destroy() error
+}
+
+type onnxBandwidthSession struct {
+	session      *ort.AdvancedSession
+	inputTensor  *ort.Tensor[float32]
+	outputTensor *ort.Tensor[float32]
 }
 
 // PredictionRecord stores prediction history for analysis
@@ -54,7 +70,13 @@ func NewLSTMPredictor(modelPath string) (*LSTMPredictor, error) {
 
 	if modelPath != "" {
 		if _, err := os.Stat(modelPath); err == nil {
-			predictor.modelLoaded = true
+			session, err := newONNXBandwidthSession(modelPath, predictor.sequenceLength, predictor.featureCount, predictor.outputCount)
+			if err != nil {
+				log.Printf("Warning: Could not load LSTM bandwidth model from %s, using history forecast fallback: %v", modelPath, err)
+			} else {
+				predictor.inference = session
+				predictor.modelLoaded = true
+			}
 		} else if !os.IsNotExist(err) {
 			return nil, fmt.Errorf("failed to inspect model path %q: %w", modelPath, err)
 		}
@@ -73,12 +95,17 @@ func (p *LSTMPredictor) Predict(history []NetworkSample) (*BandwidthPrediction, 
 	startTime := time.Now()
 
 	// Prepare normalized input vector.
-	_, err := p.prepareInput(history)
+	inputData, err := p.prepareInput(history)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare input: %w", err)
 	}
 
-	prediction, err := p.parseOutput(nil, history)
+	outputData, modelUsed, err := p.runInference(inputData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to run inference: %w", err)
+	}
+
+	prediction, err := p.parseOutput(outputData, history, modelUsed)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse output: %w", err)
 	}
@@ -108,6 +135,25 @@ func (p *LSTMPredictor) Predict(history []NetworkSample) (*BandwidthPrediction, 
 	return prediction, nil
 }
 
+func (p *LSTMPredictor) runInference(input []float32) ([]float32, bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if !p.modelLoaded || p.inference == nil {
+		return nil, false, nil
+	}
+	if len(input) != p.sequenceLength*p.featureCount {
+		return nil, false, fmt.Errorf("invalid LSTM input vector length %d", len(input))
+	}
+
+	output, err := p.inference.Run(input)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return output, true, nil
+}
+
 // prepareInput converts network samples to a normalized tensor-like vector.
 func (p *LSTMPredictor) prepareInput(history []NetworkSample) ([]float32, error) {
 	// Create input array: [batch_size=1, sequence_length=10, features=6]
@@ -132,16 +178,160 @@ func (p *LSTMPredictor) prepareInput(history []NetworkSample) ([]float32, error)
 	return inputData, nil
 }
 
-// parseOutput converts model output to a bandwidth prediction.
-func (p *LSTMPredictor) parseOutput(_ []float32, history []NetworkSample) (*BandwidthPrediction, error) {
-	prediction := p.forecastFromHistory(history)
+// parseOutput converts normalized model output to a bandwidth prediction.
+func (p *LSTMPredictor) parseOutput(output []float32, history []NetworkSample, modelUsed bool) (*BandwidthPrediction, error) {
+	var prediction *BandwidthPrediction
+	if modelUsed {
+		if len(output) != p.outputCount {
+			return nil, fmt.Errorf("invalid LSTM output length %d", len(output))
+		}
+		for i, value := range output {
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				return nil, fmt.Errorf("invalid LSTM output at %d: %f", i, value)
+			}
+		}
+
+		prediction = &BandwidthPrediction{
+			PredictedBandwidthMbps: math.Max(0, float64(output[0])*1000.0),
+			PredictedLatencyMs:     math.Max(0, float64(output[1])*100.0),
+			PredictedPacketLoss:    math.Max(0, math.Min(1, float64(output[2]))),
+			PredictedJitterMs:      math.Max(0, float64(output[3])*50.0),
+			ValidUntil:             time.Now().Add(15 * time.Minute),
+		}
+	} else {
+		prediction = p.forecastFromHistory(history)
+	}
 
 	prediction.Confidence = p.calculateConfidence(prediction)
-	if !p.modelLoaded {
+	if !modelUsed {
 		prediction.Confidence = math.Min(prediction.Confidence, 0.5)
 	}
 
 	return prediction, nil
+}
+
+func newONNXBandwidthSession(modelPath string, sequenceLength, featureCount, outputCount int) (*onnxBandwidthSession, error) {
+	if err := ensurePBAONNXEnvironment(); err != nil {
+		return nil, err
+	}
+
+	inputs, outputs, err := ort.GetInputOutputInfo(modelPath)
+	if err != nil {
+		return nil, fmt.Errorf("inspect ONNX model: %w", err)
+	}
+	if len(inputs) != 1 {
+		return nil, fmt.Errorf("expected one ONNX input, got %d", len(inputs))
+	}
+	if len(outputs) != 1 {
+		return nil, fmt.Errorf("expected one ONNX output, got %d", len(outputs))
+	}
+	if inputs[0].OrtValueType != ort.ONNXTypeTensor || inputs[0].DataType != ort.TensorElementDataTypeFloat {
+		return nil, fmt.Errorf("expected float tensor input, got %s", inputs[0].String())
+	}
+	if outputs[0].OrtValueType != ort.ONNXTypeTensor || outputs[0].DataType != ort.TensorElementDataTypeFloat {
+		return nil, fmt.Errorf("expected float tensor output, got %s", outputs[0].String())
+	}
+	if !lstmInputShapeAllows(inputs[0].Dimensions, sequenceLength, featureCount) {
+		return nil, fmt.Errorf("expected LSTM input shape compatible with [%d,%d], got %s", sequenceLength, featureCount, inputs[0].Dimensions.String())
+	}
+	if !lstmOutputShapeAllows(outputs[0].Dimensions, outputCount) {
+		return nil, fmt.Errorf("expected LSTM output shape compatible with %d targets, got %s", outputCount, outputs[0].Dimensions.String())
+	}
+
+	inputTensor, err := ort.NewTensor[float32](ort.Shape{1, int64(sequenceLength), int64(featureCount)}, make([]float32, sequenceLength*featureCount))
+	if err != nil {
+		return nil, fmt.Errorf("create LSTM input tensor: %w", err)
+	}
+	outputTensor, err := ort.NewTensor[float32](ort.Shape{1, int64(outputCount)}, make([]float32, outputCount))
+	if err != nil {
+		_ = inputTensor.Destroy()
+		return nil, fmt.Errorf("create LSTM output tensor: %w", err)
+	}
+
+	session, err := ort.NewAdvancedSession(
+		modelPath,
+		[]string{inputs[0].Name},
+		[]string{outputs[0].Name},
+		[]ort.Value{inputTensor},
+		[]ort.Value{outputTensor},
+		nil,
+	)
+	if err != nil {
+		_ = inputTensor.Destroy()
+		_ = outputTensor.Destroy()
+		return nil, fmt.Errorf("create LSTM ONNX session: %w", err)
+	}
+
+	return &onnxBandwidthSession{
+		session:      session,
+		inputTensor:  inputTensor,
+		outputTensor: outputTensor,
+	}, nil
+}
+
+var pbaONNXEnvMu sync.Mutex
+
+func ensurePBAONNXEnvironment() error {
+	pbaONNXEnvMu.Lock()
+	defer pbaONNXEnvMu.Unlock()
+
+	if ort.IsInitialized() {
+		return nil
+	}
+	if libraryPath := os.Getenv("ONNXRUNTIME_SHARED_LIBRARY_PATH"); libraryPath != "" {
+		ort.SetSharedLibraryPath(libraryPath)
+	}
+	return ort.InitializeEnvironment()
+}
+
+func lstmInputShapeAllows(shape ort.Shape, sequenceLength, featureCount int) bool {
+	if len(shape) < 2 {
+		return false
+	}
+	return shape[len(shape)-2] == int64(sequenceLength) && shape[len(shape)-1] == int64(featureCount)
+}
+
+func lstmOutputShapeAllows(shape ort.Shape, outputCount int) bool {
+	if len(shape) == 0 {
+		return false
+	}
+	return shape[len(shape)-1] == int64(outputCount)
+}
+
+func (session *onnxBandwidthSession) Run(input []float32) ([]float32, error) {
+	copy(session.inputTensor.GetData(), input)
+	session.outputTensor.ZeroContents()
+
+	if err := session.session.Run(); err != nil {
+		return nil, fmt.Errorf("run LSTM ONNX session: %w", err)
+	}
+
+	output := make([]float32, len(session.outputTensor.GetData()))
+	copy(output, session.outputTensor.GetData())
+	return output, nil
+}
+
+func (session *onnxBandwidthSession) Destroy() error {
+	var err error
+	if session.session != nil {
+		if e := session.session.Destroy(); e != nil {
+			err = e
+		}
+		session.session = nil
+	}
+	if session.inputTensor != nil {
+		if e := session.inputTensor.Destroy(); err == nil && e != nil {
+			err = e
+		}
+		session.inputTensor = nil
+	}
+	if session.outputTensor != nil {
+		if e := session.outputTensor.Destroy(); err == nil && e != nil {
+			err = e
+		}
+		session.outputTensor = nil
+	}
+	return err
 }
 
 func (p *LSTMPredictor) forecastFromHistory(history []NetworkSample) *BandwidthPrediction {
@@ -272,12 +462,21 @@ func (p *LSTMPredictor) GetMetrics() PredictorMetrics {
 
 // ReloadModel reloads the ONNX model from disk
 func (p *LSTMPredictor) ReloadModel(modelPath string) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	if _, err := os.Stat(modelPath); err != nil {
 		return fmt.Errorf("failed to load model %q: %w", modelPath, err)
 	}
+	session, err := newONNXBandwidthSession(modelPath, p.sequenceLength, p.featureCount, p.outputCount)
+	if err != nil {
+		return fmt.Errorf("failed to load model %q: %w", modelPath, err)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.inference != nil {
+		_ = p.inference.Destroy()
+	}
+	p.inference = session
 	p.modelLoaded = true
 	p.modelPath = modelPath
 	p.loadTime = time.Now()
@@ -291,6 +490,10 @@ func (p *LSTMPredictor) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if p.inference != nil {
+		_ = p.inference.Destroy()
+		p.inference = nil
+	}
 	p.modelLoaded = false
 }
 
