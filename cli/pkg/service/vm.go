@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/gorilla/websocket"
 	"github.com/novacron/cli/pkg/api"
 )
 
@@ -178,10 +179,70 @@ func (s *VMService) Exec(ctx context.Context, namespace, name string, command []
 		return fmt.Errorf("failed to send command: %w", err)
 	}
 
-	// Handle streams
-	// This is a simplified implementation
-	// In production, you'd need proper stream multiplexing
-	
+	for {
+		var frame execStreamFrame
+		if err := conn.Receive(&frame); err != nil {
+			if err == io.EOF || websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				return nil
+			}
+			return fmt.Errorf("failed to receive exec stream: %w", err)
+		}
+
+		if frame.Error != "" {
+			return fmt.Errorf("exec failed: %s", frame.Error)
+		}
+		if err := writeExecStream(frame, stdout, stderr); err != nil {
+			return err
+		}
+		if exitCode, ok := frame.exitCode(); ok {
+			if exitCode != 0 {
+				return fmt.Errorf("exec failed with exit status %d", exitCode)
+			}
+			return nil
+		}
+	}
+}
+
+type execStreamFrame struct {
+	Stream      string `json:"stream"`
+	Data        string `json:"data"`
+	Message     string `json:"message"`
+	Error       string `json:"error"`
+	ExitCode    *int   `json:"exitCode"`
+	ExitCodeAlt *int   `json:"exit_code"`
+}
+
+func (f execStreamFrame) exitCode() (int, bool) {
+	if f.ExitCode != nil {
+		return *f.ExitCode, true
+	}
+	if f.ExitCodeAlt != nil {
+		return *f.ExitCodeAlt, true
+	}
+	return 0, false
+}
+
+func writeExecStream(frame execStreamFrame, stdout, stderr io.Writer) error {
+	data := frame.Data
+	if data == "" {
+		data = frame.Message
+	}
+	if data == "" {
+		return nil
+	}
+
+	switch frame.Stream {
+	case "stderr", "err":
+		if stderr != nil {
+			_, err := io.WriteString(stderr, data)
+			return err
+		}
+	default:
+		if stdout != nil {
+			_, err := io.WriteString(stdout, data)
+			return err
+		}
+	}
 	return nil
 }
 
