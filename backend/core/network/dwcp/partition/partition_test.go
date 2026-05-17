@@ -1174,6 +1174,31 @@ func TestDQNAgentLoadModelSanitizesInvalidScalarState(t *testing.T) {
 	}
 }
 
+func TestEvaluationThroughputIgnoresInvalidInputs(t *testing.T) {
+	tests := []struct {
+		name         string
+		taskSize     int
+		expectedTime time.Duration
+	}{
+		{name: "zero_task_size", taskSize: 0, expectedTime: time.Second},
+		{name: "negative_task_size", taskSize: -1, expectedTime: time.Second},
+		{name: "zero_expected_time", taskSize: 100, expectedTime: 0},
+		{name: "negative_expected_time", taskSize: 100, expectedTime: -time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			throughput := evaluationThroughput(tt.taskSize, tt.expectedTime)
+			if throughput != 0 {
+				t.Fatalf("invalid evaluation throughput input should return 0, got %v", throughput)
+			}
+			if math.IsNaN(throughput) || math.IsInf(throughput, 0) {
+				t.Fatalf("invalid evaluation throughput input should remain finite, got %v", throughput)
+			}
+		})
+	}
+}
+
 func TestEvaluationResultsCalculateStatsUsesStandardDeviation(t *testing.T) {
 	results := &EvaluationResults{
 		Episodes:    2,

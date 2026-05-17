@@ -393,7 +393,7 @@ func (ol *OnlineLearner) EvaluateModel(episodes int) (*EvaluationResults, error)
 			nextState, reward, done := env.Step(decision.Action)
 
 			totalReward += reward
-			totalThroughput += float64(state.TaskSize) / decision.ExpectedTime.Seconds()
+			totalThroughput += evaluationThroughput(state.TaskSize, decision.ExpectedTime)
 			totalLatency += decision.ExpectedTime.Seconds()
 
 			state = nextState
@@ -416,6 +416,17 @@ func (ol *OnlineLearner) EvaluateModel(episodes int) (*EvaluationResults, error)
 		results.MeanReward, results.MeanThroughput)
 
 	return results, nil
+}
+
+func evaluationThroughput(taskSize int, expectedTime time.Duration) float64 {
+	if taskSize <= 0 || expectedTime <= 0 {
+		return 0
+	}
+	seconds := expectedTime.Seconds()
+	if seconds <= 0 || math.IsNaN(seconds) || math.IsInf(seconds, 0) {
+		return 0
+	}
+	return float64(taskSize) / seconds
 }
 
 // EvaluationResults stores evaluation metrics
