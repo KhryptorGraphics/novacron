@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"testing"
 
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/partition"
@@ -47,4 +48,71 @@ func newTrainingTestAgent(t *testing.T) *partition.DQNAgent {
 		t.Fatalf("NewDQNAgent failed: %v", err)
 	}
 	return agent
+}
+
+func TestTrainingSimulatorIgnoresMalformedDecisions(t *testing.T) {
+	sim := NewNetworkSimulator()
+	state := partition.NewEnvironmentState()
+	state.TaskSize = 100
+	state.StreamBandwidth = [4]float64{100, 100, 100, 100}
+	state.StreamLatency = [4]float64{10, 10, 10, 10}
+	state.StreamSuccessRate = [4]float64{1, 1, 1, 1}
+	invalidTelemetryState := partition.NewEnvironmentState()
+	invalidTelemetryState.TaskSize = 100
+	invalidTelemetryState.StreamBandwidth = [4]float64{math.NaN(), math.Inf(1), -1, 0}
+	invalidTelemetryState.StreamLatency = [4]float64{math.NaN(), math.Inf(1), -1, 0}
+	invalidTelemetryState.StreamCongestion = [4]float64{math.NaN(), math.Inf(1), -1, 2}
+	invalidTelemetryState.StreamSuccessRate = [4]float64{math.NaN(), math.Inf(1), -1, 2}
+
+	tests := []struct {
+		name     string
+		state    *partition.EnvironmentState
+		decision *partition.TaskPartitionDecision
+	}{
+		{name: "nil_state", state: nil, decision: &partition.TaskPartitionDecision{StreamIDs: []int{0}, ChunkSizes: []int{100}}},
+		{name: "nil_decision", state: state, decision: nil},
+		{name: "negative_stream", state: state, decision: &partition.TaskPartitionDecision{StreamIDs: []int{-1}, ChunkSizes: []int{100}}},
+		{name: "too_large_stream", state: state, decision: &partition.TaskPartitionDecision{StreamIDs: []int{4}, ChunkSizes: []int{100}}},
+		{name: "missing_chunk", state: state, decision: &partition.TaskPartitionDecision{StreamIDs: []int{0}, ChunkSizes: nil}},
+		{name: "zero_task_size", state: partition.NewEnvironmentState(), decision: &partition.TaskPartitionDecision{StreamIDs: []int{0}, ChunkSizes: []int{100}}},
+		{name: "invalid_telemetry", state: invalidTelemetryState, decision: &partition.TaskPartitionDecision{StreamIDs: []int{0, 1, 2, 3}, ChunkSizes: []int{25, 25, 25, 25}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("malformed decision should be ignored without panic: %v", recovered)
+				}
+			}()
+
+			outcome := sim.calculateOutcome(tt.decision, tt.state)
+			if outcome == nil {
+				t.Fatal("expected fallback outcome, got nil")
+			}
+			assertFiniteOutcome(t, outcome)
+
+			nextState := sim.updateState(tt.state, tt.decision, outcome)
+			if nextState == nil {
+				t.Fatal("expected fallback next state, got nil")
+			}
+		})
+	}
+}
+
+func assertFiniteOutcome(t *testing.T, outcome *partition.ActionOutcome) {
+	t.Helper()
+
+	values := map[string]float64{
+		"actual_throughput":   outcome.ActualThroughput,
+		"baseline_throughput": outcome.BaselineThroughput,
+		"actual_latency":      outcome.ActualLatency,
+		"target_latency":      outcome.TargetLatency,
+		"stream_imbalance":    outcome.StreamImbalance,
+	}
+	for name, value := range values {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			t.Fatalf("%s should be finite, got %v", name, value)
+		}
+	}
 }

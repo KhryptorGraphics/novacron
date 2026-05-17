@@ -172,23 +172,28 @@ func (sim *NetworkSimulator) calculateOutcome(decision *partition.TaskPartitionD
 		TargetLatency:      sim.baseLatency,
 	}
 
-	numStreams := len(decision.StreamIDs)
-	if numStreams == 0 {
+	if decision == nil || state == nil || state.TaskSize <= 0 || len(decision.StreamIDs) == 0 {
 		return outcome
 	}
 
 	// Calculate actual throughput and latency
 	totalThroughput := 0.0
 	maxLatency := 0.0
+	loads := make([]float64, 0, len(decision.StreamIDs))
+	successRates := make([]float64, 0, len(decision.StreamIDs))
 
 	for i, streamID := range decision.StreamIDs {
-		if streamID >= 4 {
+		if !validTrainingStream(streamID) || i >= len(decision.ChunkSizes) || decision.ChunkSizes[i] <= 0 {
 			continue
 		}
 
 		// Throughput proportional to chunk size and stream capacity
 		chunkProportion := float64(decision.ChunkSizes[i]) / float64(state.TaskSize)
-		streamThroughput := state.StreamBandwidth[streamID] * state.StreamSuccessRate[streamID] * chunkProportion
+		bandwidth := safeTrainingPositive(state.StreamBandwidth[streamID], sim.baseBandwidth)
+		latency := safeTrainingPositive(state.StreamLatency[streamID], sim.baseLatency)
+		congestion := safeTrainingCongestion(state.StreamCongestion[streamID])
+		successRate := safeTrainingSuccessRate(state.StreamSuccessRate[streamID])
+		streamThroughput := bandwidth * successRate * chunkProportion
 
 		// Add variance
 		streamThroughput *= (0.9 + rand.Float64()*0.2)
@@ -196,30 +201,33 @@ func (sim *NetworkSimulator) calculateOutcome(decision *partition.TaskPartitionD
 		totalThroughput += streamThroughput
 
 		// Latency is max of all streams (parallel transfer)
-		streamLatency := state.StreamLatency[streamID] * (1 + state.StreamCongestion[streamID])
+		streamLatency := latency * (1 + congestion)
 		streamLatency *= (0.9 + rand.Float64()*0.2) // Add variance
 
 		if streamLatency > maxLatency {
 			maxLatency = streamLatency
 		}
+
+		loads = append(loads, congestion)
+		successRates = append(successRates, successRate)
+	}
+
+	if len(successRates) == 0 {
+		return outcome
 	}
 
 	outcome.ActualThroughput = totalThroughput
 	outcome.ActualLatency = maxLatency
 
 	// Calculate stream imbalance
-	if numStreams > 1 {
-		loads := make([]float64, numStreams)
-		for i, streamID := range decision.StreamIDs {
-			loads[i] = state.StreamCongestion[streamID]
-		}
+	if len(loads) > 1 {
 		outcome.StreamImbalance = calculateStdDev(loads)
 	}
 
 	// Simulate completion and retransmissions
 	successProb := 1.0
-	for _, streamID := range decision.StreamIDs {
-		successProb *= state.StreamSuccessRate[streamID]
+	for _, successRate := range successRates {
+		successProb *= successRate
 	}
 
 	outcome.Completed = rand.Float64() < successProb
@@ -231,22 +239,32 @@ func (sim *NetworkSimulator) calculateOutcome(decision *partition.TaskPartitionD
 }
 
 func (sim *NetworkSimulator) updateState(state *partition.EnvironmentState, decision *partition.TaskPartitionDecision, outcome *partition.ActionOutcome) *partition.EnvironmentState {
+	if state == nil {
+		return partition.NewEnvironmentState()
+	}
+	if decision == nil {
+		decision = &partition.TaskPartitionDecision{}
+	}
+	if outcome == nil {
+		outcome = &partition.ActionOutcome{}
+	}
+
 	nextState := *state
 
 	// Update stream congestion based on usage
 	for _, streamID := range decision.StreamIDs {
-		if streamID >= 4 {
+		if !validTrainingStream(streamID) {
 			continue
 		}
 
 		// Increase congestion on used streams
-		nextState.StreamCongestion[streamID] = math.Min(1.0, nextState.StreamCongestion[streamID]+0.05)
+		nextState.StreamCongestion[streamID] = math.Min(1.0, safeTrainingCongestion(nextState.StreamCongestion[streamID])+0.05)
 
 		// Update success rate based on outcome
 		if outcome.Completed {
-			nextState.StreamSuccessRate[streamID] = 0.95*nextState.StreamSuccessRate[streamID] + 0.05
+			nextState.StreamSuccessRate[streamID] = 0.95*safeTrainingSuccessRate(nextState.StreamSuccessRate[streamID]) + 0.05
 		} else {
-			nextState.StreamSuccessRate[streamID] = 0.95*nextState.StreamSuccessRate[streamID] + 0.025
+			nextState.StreamSuccessRate[streamID] = 0.95*safeTrainingSuccessRate(nextState.StreamSuccessRate[streamID]) + 0.025
 		}
 	}
 
@@ -261,7 +279,7 @@ func (sim *NetworkSimulator) updateState(state *partition.EnvironmentState, deci
 		}
 
 		if !isUsed {
-			nextState.StreamCongestion[i] = math.Max(0, nextState.StreamCongestion[i]-0.03)
+			nextState.StreamCongestion[i] = math.Max(0, safeTrainingCongestion(nextState.StreamCongestion[i])-0.03)
 		}
 	}
 
@@ -295,6 +313,31 @@ func (sim *NetworkSimulator) updateState(state *partition.EnvironmentState, deci
 	nextState.TimeOfDay = float64(time.Now().Hour()) / 24.0
 
 	return &nextState
+}
+
+func validTrainingStream(streamID int) bool {
+	return streamID >= 0 && streamID < 4
+}
+
+func safeTrainingPositive(value, fallback float64) float64 {
+	if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return fallback
+	}
+	return value
+}
+
+func safeTrainingCongestion(value float64) float64 {
+	if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0
+	}
+	return math.Min(1, value)
+}
+
+func safeTrainingSuccessRate(value float64) float64 {
+	if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0.01
+	}
+	return math.Min(1, value)
 }
 
 // RunTraining runs full training loop
