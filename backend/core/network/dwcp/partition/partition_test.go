@@ -247,6 +247,65 @@ func TestOnlineLearnerCollectExperienceIgnoresInvalidAction(t *testing.T) {
 	}
 }
 
+func TestOnlineLearnerCollectExperienceIgnoresNilStates(t *testing.T) {
+	tests := []struct {
+		name      string
+		state     *EnvironmentState
+		nextState *EnvironmentState
+	}{
+		{
+			name:      "nil_state",
+			state:     nil,
+			nextState: NewEnvironmentState(),
+		},
+		{
+			name:      "nil_next_state",
+			state:     NewEnvironmentState(),
+			nextState: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent, err := NewDQNAgent("")
+			if err != nil {
+				t.Fatalf("failed to create DQN agent: %v", err)
+			}
+
+			learner := NewOnlineLearner(agent, &OnlineLearnerConfig{
+				UpdateFrequency:  time.Hour,
+				MinExperiences:   2,
+				TrainingScript:   "unused",
+				ModelPath:        filepath.Join(t.TempDir(), "model"),
+				EnableAutoUpdate: false,
+			})
+			before := learner.GetStatus()
+
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("nil states should be ignored without panic: %v", recovered)
+				}
+			}()
+
+			learner.CollectExperience(
+				tt.state,
+				ActionStream1,
+				1,
+				tt.nextState,
+				false,
+			)
+
+			after := learner.GetStatus()
+			if after["experience_count"] != before["experience_count"] {
+				t.Fatalf("nil state should not collect experience: before=%v after=%v", before["experience_count"], after["experience_count"])
+			}
+			if after["buffer_size"] != before["buffer_size"] {
+				t.Fatalf("nil state should not grow replay buffer: before=%v after=%v", before["buffer_size"], after["buffer_size"])
+			}
+		})
+	}
+}
+
 func TestOnlineLearnerEvaluateModelRejectsNonPositiveEpisodes(t *testing.T) {
 	agent, err := NewDQNAgent("")
 	if err != nil {

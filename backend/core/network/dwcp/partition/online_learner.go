@@ -94,6 +94,9 @@ func (ol *OnlineLearner) CollectExperience(state *EnvironmentState, action Actio
 	if ol.ctx.Err() != nil {
 		return
 	}
+	if state == nil || nextState == nil {
+		return
+	}
 	if !isValidLearnerAction(action) {
 		return
 	}
