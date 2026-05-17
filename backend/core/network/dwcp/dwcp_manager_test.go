@@ -795,6 +795,22 @@ func TestTaskPartitionerStopStopsOnlineLearner(t *testing.T) {
 	assert.Equal(t, true, metrics["learner_stopped"])
 }
 
+func TestTaskPartitionerStoppedRejectsModelControl(t *testing.T) {
+	partitioner, err := dwcp.NewTaskPartitioner("", zaptest.NewLogger(t))
+	require.NoError(t, err)
+	defer partitioner.Destroy()
+
+	require.NoError(t, partitioner.Stop())
+
+	err = partitioner.ForceModelUpdate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stopped")
+
+	_, err = partitioner.Evaluate(1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stopped")
+}
+
 // TestConcurrentMetricsCollection tests concurrent metrics collection for race conditions
 func TestConcurrentMetricsCollection(t *testing.T) {
 	// This test is designed to be run with: go test -race -count=100

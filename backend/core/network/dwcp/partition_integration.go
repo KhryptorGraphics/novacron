@@ -488,6 +488,10 @@ func (tp *TaskPartitioner) ForceModelUpdate() error {
 	tp.mu.Lock()
 	defer tp.mu.Unlock()
 
+	if !tp.enabled {
+		return fmt.Errorf("task partitioner stopped")
+	}
+
 	if tp.onlineLearner == nil {
 		return fmt.Errorf("online learner not initialized")
 	}
@@ -499,6 +503,10 @@ func (tp *TaskPartitioner) ForceModelUpdate() error {
 func (tp *TaskPartitioner) Evaluate(episodes int) (*partition.EvaluationResults, error) {
 	tp.mu.RLock()
 	defer tp.mu.RUnlock()
+
+	if !tp.enabled {
+		return nil, fmt.Errorf("task partitioner stopped")
+	}
 
 	if tp.onlineLearner == nil {
 		return nil, fmt.Errorf("online learner not initialized")
