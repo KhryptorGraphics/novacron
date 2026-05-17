@@ -48,6 +48,16 @@ type PredictionService struct {
 	predictionCounter  prometheus.Counter
 }
 
+var (
+	predictionServiceMetricsOnce       sync.Once
+	predictionServiceAccuracy          prometheus.Gauge
+	predictionServiceLatency           prometheus.Histogram
+	predictionServiceModelVersionGauge prometheus.Gauge
+	predictionServiceConfidence        prometheus.Gauge
+	predictionServiceRetrainCounter    prometheus.Counter
+	predictionServicePredictionCounter prometheus.Counter
+)
+
 // BandwidthPrediction contains predicted network metrics
 type BandwidthPrediction struct {
 	PredictedBandwidthMbps float64   `json:"predicted_bandwidth_mbps"`
@@ -110,36 +120,45 @@ func NewPredictionService(modelPath string, updateInterval time.Duration) (*Pred
 
 // initMetrics initializes Prometheus metrics
 func (s *PredictionService) initMetrics() {
-	s.predictionAccuracy = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "dwcp_pba_prediction_accuracy",
-		Help: "Current prediction accuracy (0-1)",
+	predictionServiceMetricsOnce.Do(func() {
+		predictionServiceAccuracy = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "dwcp_pba_prediction_accuracy",
+			Help: "Current prediction accuracy (0-1)",
+		})
+
+		predictionServiceLatency = promauto.NewHistogram(prometheus.HistogramOpts{
+			Name:    "dwcp_pba_prediction_latency_ms",
+			Help:    "Prediction inference latency in milliseconds",
+			Buckets: []float64{1, 2, 5, 10, 20, 50, 100},
+		})
+
+		predictionServiceModelVersionGauge = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "dwcp_pba_model_version",
+			Help: "Current model version number",
+		})
+
+		predictionServiceConfidence = promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "dwcp_pba_confidence",
+			Help: "Current prediction confidence score",
+		})
+
+		predictionServiceRetrainCounter = promauto.NewCounter(prometheus.CounterOpts{
+			Name: "dwcp_pba_retrain_total",
+			Help: "Total number of model retraining events",
+		})
+
+		predictionServicePredictionCounter = promauto.NewCounter(prometheus.CounterOpts{
+			Name: "dwcp_pba_predictions_total",
+			Help: "Total number of predictions made",
+		})
 	})
 
-	s.predictionLatency = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "dwcp_pba_prediction_latency_ms",
-		Help:    "Prediction inference latency in milliseconds",
-		Buckets: []float64{1, 2, 5, 10, 20, 50, 100},
-	})
-
-	s.modelVersionGauge = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "dwcp_pba_model_version",
-		Help: "Current model version number",
-	})
-
-	s.confidenceGauge = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "dwcp_pba_confidence",
-		Help: "Current prediction confidence score",
-	})
-
-	s.retrainCounter = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "dwcp_pba_retrain_total",
-		Help: "Total number of model retraining events",
-	})
-
-	s.predictionCounter = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "dwcp_pba_predictions_total",
-		Help: "Total number of predictions made",
-	})
+	s.predictionAccuracy = predictionServiceAccuracy
+	s.predictionLatency = predictionServiceLatency
+	s.modelVersionGauge = predictionServiceModelVersionGauge
+	s.confidenceGauge = predictionServiceConfidence
+	s.retrainCounter = predictionServiceRetrainCounter
+	s.predictionCounter = predictionServicePredictionCounter
 }
 
 // Start begins the prediction service

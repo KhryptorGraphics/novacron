@@ -75,6 +75,24 @@ func TestDataCollector(t *testing.T) {
 }
 
 func TestPredictionService(t *testing.T) {
+	t.Run("MultipleServicesReuseMetrics", func(t *testing.T) {
+		var first *PredictionService
+		var second *PredictionService
+
+		require.NotPanics(t, func() {
+			var err error
+			first, err = NewPredictionService("", 10*time.Millisecond)
+			require.NoError(t, err)
+			second, err = NewPredictionService("", 10*time.Millisecond)
+			require.NoError(t, err)
+		})
+
+		require.NotNil(t, first)
+		require.NotNil(t, second)
+		require.NoError(t, first.Stop())
+		require.NoError(t, second.Stop())
+	})
+
 	t.Run("StartStopLifecycle", func(t *testing.T) {
 		service, err := NewPredictionService("", 10*time.Millisecond)
 		require.NoError(t, err)
