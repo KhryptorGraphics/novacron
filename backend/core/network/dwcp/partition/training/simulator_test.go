@@ -40,6 +40,39 @@ func TestSimulateEpisodeRejectsInvalidInputs(t *testing.T) {
 	}
 }
 
+func TestRunTrainingRejectsInvalidInputs(t *testing.T) {
+	tests := []struct {
+		name     string
+		agent    *partition.DQNAgent
+		episodes int
+		maxSteps int
+	}{
+		{name: "nil_agent", agent: nil, episodes: 1, maxSteps: 1},
+		{name: "zero_episodes", agent: newTrainingTestAgent(t), episodes: 0, maxSteps: 1},
+		{name: "negative_episodes", agent: newTrainingTestAgent(t), episodes: -1, maxSteps: 1},
+		{name: "zero_steps", agent: newTrainingTestAgent(t), episodes: 1, maxSteps: 0},
+		{name: "negative_steps", agent: newTrainingTestAgent(t), episodes: 1, maxSteps: -1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("invalid training input should return an error without panic: %v", recovered)
+				}
+			}()
+			if tt.agent != nil {
+				defer tt.agent.Destroy()
+			}
+
+			err := NewNetworkSimulator().RunTraining(tt.agent, tt.episodes, tt.maxSteps)
+			if err == nil {
+				t.Fatal("expected invalid training input error")
+			}
+		})
+	}
+}
+
 func newTrainingTestAgent(t *testing.T) *partition.DQNAgent {
 	t.Helper()
 

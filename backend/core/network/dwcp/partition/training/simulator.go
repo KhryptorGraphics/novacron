@@ -342,6 +342,16 @@ func safeTrainingSuccessRate(value float64) float64 {
 
 // RunTraining runs full training loop
 func (sim *NetworkSimulator) RunTraining(agent *partition.DQNAgent, episodes int, maxStepsPerEpisode int) error {
+	if agent == nil {
+		return fmt.Errorf("agent is nil")
+	}
+	if episodes <= 0 {
+		return fmt.Errorf("episodes must be positive, got %d", episodes)
+	}
+	if maxStepsPerEpisode <= 0 {
+		return fmt.Errorf("maxStepsPerEpisode must be positive, got %d", maxStepsPerEpisode)
+	}
+
 	log.Printf("Starting training for %d episodes...", episodes)
 
 	allMetrics := make([]*TrainingMetrics, 0, episodes)
