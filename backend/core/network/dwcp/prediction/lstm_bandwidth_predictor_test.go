@@ -1,6 +1,7 @@
 package prediction
 
 import (
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -139,6 +140,32 @@ func TestLSTMPredictorCloseDestroysInferenceSession(t *testing.T) {
 	if predictor.modelLoaded {
 		t.Fatal("Close() left modelLoaded = true")
 	}
+}
+
+func TestLSTMPredictorPredictCanRunWhileModelVersionChanges(t *testing.T) {
+	predictor, err := NewLSTMPredictor("")
+	if err != nil {
+		t.Fatalf("NewLSTMPredictor() error = %v", err)
+	}
+	history := makeTestNetworkHistory()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 100; i++ {
+			if _, err := predictor.Predict(history); err != nil {
+				t.Errorf("Predict() error = %v", err)
+				return
+			}
+		}
+	}()
+
+	for i := 0; i < 100; i++ {
+		predictor.mu.Lock()
+		predictor.modelVersion = fmt.Sprintf("v%d", i)
+		predictor.mu.Unlock()
+	}
+	<-done
 }
 
 func TestLSTMPredictorUpdateActualIgnoresInvalidTelemetry(t *testing.T) {

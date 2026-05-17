@@ -109,7 +109,6 @@ func (p *LSTMPredictor) Predict(history []NetworkSample) (*BandwidthPrediction, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse output: %w", err)
 	}
-	prediction.ModelVersion = p.modelVersion
 	prediction.PredictionTime = time.Now()
 
 	// Calculate inference time
@@ -117,6 +116,7 @@ func (p *LSTMPredictor) Predict(history []NetworkSample) (*BandwidthPrediction, 
 
 	// Update metrics
 	p.mu.Lock()
+	prediction.ModelVersion = p.modelVersion
 	p.inferenceCount++
 	p.totalLatency += inferenceTime
 
