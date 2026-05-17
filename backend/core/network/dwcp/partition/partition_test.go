@@ -132,6 +132,58 @@ func TestReplayBuffer(t *testing.T) {
 	}
 }
 
+func TestReplayBufferAddIgnoresInvalidInput(t *testing.T) {
+	tests := []struct {
+		name     string
+		capacity int
+		exp      *Experience
+	}{
+		{
+			name:     "nil_experience",
+			capacity: 1,
+			exp:      nil,
+		},
+		{
+			name:     "zero_capacity",
+			capacity: 0,
+			exp: &Experience{
+				State:     make([]float32, 20),
+				Action:    ActionStream1,
+				Reward:    1,
+				NextState: make([]float32, 20),
+			},
+		},
+		{
+			name:     "negative_capacity",
+			capacity: -1,
+			exp: &Experience{
+				State:     make([]float32, 20),
+				Action:    ActionStream1,
+				Reward:    1,
+				NextState: make([]float32, 20),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buffer := NewReplayBuffer(tt.capacity)
+
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("invalid replay input should be ignored without panic: %v", recovered)
+				}
+			}()
+
+			buffer.Add(tt.exp)
+
+			if buffer.Size() != 0 {
+				t.Fatalf("invalid replay input should not grow buffer: got %d", buffer.Size())
+			}
+		})
+	}
+}
+
 func TestOnlineLearnerStopCancelsAutoUpdateLoop(t *testing.T) {
 	agent, err := NewDQNAgent("")
 	if err != nil {

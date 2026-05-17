@@ -172,6 +172,9 @@ type ReplayBuffer struct {
 
 // NewReplayBuffer creates a new replay buffer
 func NewReplayBuffer(capacity int) *ReplayBuffer {
+	if capacity < 0 {
+		capacity = 0
+	}
 	return &ReplayBuffer{
 		buffer:   make([]*Experience, 0, capacity),
 		capacity: capacity,
@@ -182,6 +185,10 @@ func NewReplayBuffer(capacity int) *ReplayBuffer {
 func (rb *ReplayBuffer) Add(exp *Experience) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
+
+	if exp == nil || rb.capacity <= 0 {
+		return
+	}
 
 	if len(rb.buffer) >= rb.capacity {
 		rb.buffer = rb.buffer[1:] // Remove oldest
