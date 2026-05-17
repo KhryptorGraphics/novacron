@@ -2,9 +2,13 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 
+	"github.com/gorilla/websocket"
+	"github.com/novacron/cli/pkg/api"
 	"github.com/novacron/cli/pkg/config"
 	"github.com/novacron/cli/pkg/service"
 	"github.com/spf13/cobra"
@@ -369,19 +373,104 @@ func newVMConsoleCommand() *cobra.Command {
 			}
 			defer conn.Close()
 
-			fmt.Printf("Connected to console of VM %s\n", name)
-			fmt.Println("Press Ctrl+] to exit")
+			fmt.Fprintf(cmd.OutOrStdout(), "Connected to console of VM %s\n", name)
+			fmt.Fprintln(cmd.OutOrStdout(), "Press Ctrl+] to exit")
 
-			// TODO: Implement interactive console handling
-			// This would involve:
-			// 1. Setting up terminal raw mode
-			// 2. Forwarding stdin to WebSocket
-			// 3. Receiving WebSocket data and writing to stdout
-			// 4. Handling escape sequences and signals
-
-			return fmt.Errorf("interactive console not yet implemented")
+			return streamVMConsole(ctx, conn, cmd.InOrStdin(), cmd.OutOrStdout())
 		},
 	}
 
 	return cmd
+}
+
+type vmConsoleMessage struct {
+	Type string `json:"type"`
+	Data string `json:"data"`
+}
+
+func streamVMConsole(ctx context.Context, conn *api.WebSocketConn, input io.Reader, output io.Writer) error {
+	errCh := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		errCh <- forwardConsoleInput(conn, input, done)
+	}()
+
+	for {
+		data, err := conn.ReceiveText()
+		if err != nil {
+			close(done)
+			if err == io.EOF || websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				return nil
+			}
+			return fmt.Errorf("failed to receive console output: %w", err)
+		}
+
+		var message vmConsoleMessage
+		if err := json.Unmarshal(data, &message); err == nil && message.Type == "output" {
+			if _, err := io.WriteString(output, message.Data); err != nil {
+				close(done)
+				return err
+			}
+			continue
+		}
+
+		if _, err := output.Write(data); err != nil {
+			close(done)
+			return err
+		}
+
+		select {
+		case err := <-errCh:
+			if err != nil {
+				close(done)
+				return err
+			}
+		case <-ctx.Done():
+			close(done)
+			return ctx.Err()
+		default:
+		}
+	}
+}
+
+func forwardConsoleInput(conn *api.WebSocketConn, input io.Reader, done <-chan struct{}) error {
+	buffer := make([]byte, 4096)
+	for {
+		n, err := input.Read(buffer)
+		if n > 0 {
+			data := buffer[:n]
+			if index := consoleEscapeIndex(data); index >= 0 {
+				if index > 0 {
+					if sendErr := conn.SendText(data[:index]); sendErr != nil {
+						return sendErr
+					}
+				}
+				return conn.Close()
+			}
+			if sendErr := conn.SendText(data); sendErr != nil {
+				return sendErr
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+
+		select {
+		case <-done:
+			return nil
+		default:
+		}
+	}
+}
+
+func consoleEscapeIndex(data []byte) int {
+	for i, b := range data {
+		if b == 0x1d {
+			return i
+		}
+	}
+	return -1
 }

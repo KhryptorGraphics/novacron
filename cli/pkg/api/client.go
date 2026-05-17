@@ -256,9 +256,20 @@ func (w *WebSocketConn) Send(msg interface{}) error {
 	return w.conn.WriteJSON(msg)
 }
 
+// SendText sends a raw text message over the WebSocket.
+func (w *WebSocketConn) SendText(data []byte) error {
+	return w.conn.WriteMessage(websocket.TextMessage, data)
+}
+
 // Receive receives a message from the WebSocket
 func (w *WebSocketConn) Receive(msg interface{}) error {
 	return w.conn.ReadJSON(msg)
+}
+
+// ReceiveText receives a raw text or binary message from the WebSocket.
+func (w *WebSocketConn) ReceiveText() ([]byte, error) {
+	_, data, err := w.conn.ReadMessage()
+	return data, err
 }
 
 // Close closes the WebSocket connection
