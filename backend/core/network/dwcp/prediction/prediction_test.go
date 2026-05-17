@@ -329,6 +329,33 @@ func TestPredictionService(t *testing.T) {
 		require.NoError(t, service.Stop())
 	})
 
+	t.Run("RetrainCanRunWhileUpdatingPrediction", func(t *testing.T) {
+		service, err := NewPredictionService("", 10*time.Millisecond)
+		require.NoError(t, err)
+		defer service.Stop()
+
+		for _, sample := range makeTestNetworkHistory() {
+			service.collector.addSample(sample)
+		}
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for i := 0; i < 100; i++ {
+				service.updatePrediction()
+			}
+		}()
+
+		for i := 0; i < 100; i++ {
+			service.retrainModel()
+		}
+		<-done
+
+		prediction := service.GetPrediction()
+		require.NotNil(t, prediction)
+		assert.NotEmpty(t, prediction.ModelVersion)
+	})
+
 	t.Run("UpdateAccuracyIgnoresInvalidActualTelemetry", func(t *testing.T) {
 		service, err := NewPredictionService("", 10*time.Millisecond)
 		require.NoError(t, err)

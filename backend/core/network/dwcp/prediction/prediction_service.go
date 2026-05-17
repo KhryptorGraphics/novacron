@@ -247,12 +247,10 @@ func (s *PredictionService) updatePrediction() {
 	s.predictionCounter.Inc()
 	s.confidenceGauge.Set(prediction.Confidence)
 
-	// Set additional metadata
-	prediction.ModelVersion = fmt.Sprintf("v%d", s.modelVersion)
-	prediction.PredictionTime = time.Now()
-
 	// Store prediction
 	s.mu.Lock()
+	prediction.ModelVersion = fmt.Sprintf("v%d", s.modelVersion)
+	prediction.PredictionTime = time.Now()
 	s.currentPrediction = prediction
 
 	// Add to history
@@ -459,12 +457,13 @@ func (s *PredictionService) retrainModel() {
 	s.mu.Lock()
 	s.modelVersion++
 	s.lastRetrain = time.Now()
+	modelVersion := s.modelVersion
 	s.mu.Unlock()
 
-	s.modelVersionGauge.Set(float64(s.modelVersion))
+	s.modelVersionGauge.Set(float64(modelVersion))
 	s.retrainCounter.Inc()
 
-	fmt.Printf("Model retrained: version %d\n", s.modelVersion)
+	fmt.Printf("Model retrained: version %d\n", modelVersion)
 }
 
 // EnableABTesting enables A/B testing with an alternate model
