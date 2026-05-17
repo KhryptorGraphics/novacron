@@ -728,13 +728,39 @@ func BenchmarkCalculateStatistics(b *testing.B) {
 
 func TestIntegrationPredictionPipeline(t *testing.T) {
 	t.Run("EndToEndPrediction", func(t *testing.T) {
-		t.Skip("Requires full setup with ONNX model")
+		service, err := NewPredictionService("", 10*time.Millisecond)
+		require.NoError(t, err)
+		defer service.Stop()
 
-		// This would test the full pipeline:
-		// 1. Data collector gathers samples
-		// 2. Prediction service uses LSTM to predict
-		// 3. AMST optimizer calculates parameters
-		// 4. Parameters are applied to transport
+		for _, sample := range makeTestNetworkHistory() {
+			service.collector.addSample(sample)
+		}
+
+		service.updatePrediction()
+		prediction := service.GetPrediction()
+		require.NotNil(t, prediction)
+		assert.Greater(t, prediction.PredictedBandwidthMbps, 0.0)
+
+		streams := service.GetOptimalStreamCount()
+		bufferSize := service.GetOptimalBufferSize()
+		assert.GreaterOrEqual(t, streams, 2)
+		assert.LessOrEqual(t, streams, 16)
+		assert.GreaterOrEqual(t, bufferSize, 16384)
+		assert.LessOrEqual(t, bufferSize, 1048576)
+
+		service.mu.Lock()
+		service.currentPrediction.Confidence = 0.9
+		service.mu.Unlock()
+
+		optimizer := NewAMSTOptimizer(service, nil)
+		defer optimizer.Stop()
+		optimizer.optimizeParameters()
+
+		params := optimizer.GetCurrentParameters()
+		assert.GreaterOrEqual(t, params.NumStreams, optimizer.minStreams)
+		assert.LessOrEqual(t, params.NumStreams, optimizer.maxStreams)
+		assert.GreaterOrEqual(t, params.BufferSize, optimizer.minBuffer)
+		assert.LessOrEqual(t, params.BufferSize, optimizer.maxBuffer)
 	})
 }
 
