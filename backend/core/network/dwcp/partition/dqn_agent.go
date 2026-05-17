@@ -629,12 +629,12 @@ func (agent *DQNAgent) GetMetrics() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"epsilon":        agent.epsilon,
+		"epsilon":        boundedFloat(agent.epsilon, 0, 1, 0),
 		"buffer_size":    agent.replayBuffer.Size(),
 		"total_episodes": len(agent.episodeRewards),
 		"average_reward": avgReward,
-		"success_rate":   agent.successRate,
-		"steps":          agent.stepCount,
+		"success_rate":   boundedFloat(agent.successRate, 0, 1, 0),
+		"steps":          nonNegativeInt(agent.stepCount, 0),
 	}
 }
 

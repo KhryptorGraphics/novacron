@@ -1538,6 +1538,45 @@ func TestDQNAgentGetMetricsIgnoresNonFiniteEpisodeRewards(t *testing.T) {
 	}
 }
 
+func TestDQNAgentGetMetricsSanitizesInvalidScalarState(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer agent.Destroy()
+
+	agent.mu.Lock()
+	agent.epsilon = math.NaN()
+	agent.successRate = math.Inf(1)
+	agent.stepCount = -7
+	agent.mu.Unlock()
+
+	metrics := agent.GetMetrics()
+	epsilon, ok := metrics["epsilon"].(float64)
+	if !ok {
+		t.Fatalf("epsilon has unexpected type %T", metrics["epsilon"])
+	}
+	if math.IsNaN(epsilon) || math.IsInf(epsilon, 0) || epsilon < 0 || epsilon > 1 {
+		t.Fatalf("epsilon metric should be finite and bounded, got %v", epsilon)
+	}
+
+	successRate, ok := metrics["success_rate"].(float64)
+	if !ok {
+		t.Fatalf("success_rate has unexpected type %T", metrics["success_rate"])
+	}
+	if math.IsNaN(successRate) || math.IsInf(successRate, 0) || successRate < 0 || successRate > 1 {
+		t.Fatalf("success_rate metric should be finite and bounded, got %v", successRate)
+	}
+
+	steps, ok := metrics["steps"].(int)
+	if !ok {
+		t.Fatalf("steps has unexpected type %T", metrics["steps"])
+	}
+	if steps < 0 {
+		t.Fatalf("steps metric should be non-negative, got %d", steps)
+	}
+}
+
 func TestEvaluationThroughputIgnoresInvalidInputs(t *testing.T) {
 	tests := []struct {
 		name         string
