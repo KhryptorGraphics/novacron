@@ -961,13 +961,67 @@ func NewApplyCommand() *cobra.Command {
 }
 
 func NewDeleteCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "delete",
+	var (
+		force bool
+		vmID  string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "delete <resource> <name>",
 		Short: "Delete resources",
+		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("delete command not yet implemented")
+			if !force {
+				return fmt.Errorf("delete %s %s requires --force", args[0], args[1])
+			}
+
+			client, err := currentClusterAPIClient()
+			if err != nil {
+				return err
+			}
+
+			resource := strings.ToLower(strings.TrimSpace(args[0]))
+			name := strings.TrimSpace(args[1])
+
+			path := ""
+			switch resource {
+			case "vm", "vms":
+				path = "/api/v1/vms/" + url.PathEscape(name)
+			case "network", "networks", "net":
+				path = "/api/v1/networks/" + url.PathEscape(name)
+			case "interface", "interfaces", "nic":
+				if strings.TrimSpace(vmID) == "" {
+					return fmt.Errorf("vm is required for interface deletion")
+				}
+				path = "/api/v1/vms/" + url.PathEscape(strings.TrimSpace(vmID)) + "/interfaces/" + url.PathEscape(name)
+			default:
+				return fmt.Errorf("unsupported resource %q", args[0])
+			}
+
+			var response deleteResponse
+			if err := client.Delete(cmd.Context(), path); err != nil {
+				return err
+			}
+			response.ID = name
+			response.Status = "deleted"
+			if resource == "interface" || resource == "interfaces" || resource == "nic" {
+				response.VMID = strings.TrimSpace(vmID)
+				response.Status = "detached"
+			}
+
+			data, err := yaml.Marshal(response)
+			if err != nil {
+				return err
+			}
+			_, err = cmd.OutOrStdout().Write(data)
+			return err
 		},
 	}
+
+	cmd.Flags().BoolVar(&force, "force", false, "Delete without interactive confirmation")
+	cmd.Flags().StringVar(&vmID, "vm", "", "VM ID for interface deletion")
+
+	return cmd
 }
 
 func NewDescribeCommand() *cobra.Command {
@@ -978,6 +1032,12 @@ func NewDescribeCommand() *cobra.Command {
 			return fmt.Errorf("describe command not yet implemented")
 		},
 	}
+}
+
+type deleteResponse struct {
+	ID     string `json:"id" yaml:"id"`
+	VMID   string `json:"vm_id,omitempty" yaml:"vm_id,omitempty"`
+	Status string `json:"status" yaml:"status"`
 }
 
 func NewGetCommand() *cobra.Command {
