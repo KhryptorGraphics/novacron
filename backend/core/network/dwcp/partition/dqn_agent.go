@@ -124,8 +124,8 @@ func (agent *DQNAgent) SelectAction(state *EnvironmentState) (*TaskPartitionDeci
 	// Run inference
 	qValues, err := agent.runInference(stateTensor)
 	if err != nil {
-		log.Printf("Inference error, falling back to random action: %v", err)
-		action := agent.randomAction()
+		log.Printf("Inference error, falling back to heuristic action: %v", err)
+		action := agent.heuristicAction(state)
 		decision.Action = action
 		return agent.decodeAction(action, state, decision), nil
 	}
@@ -145,9 +145,7 @@ func (agent *DQNAgent) runInference(state []float32) ([]float32, error) {
 	}
 
 	_ = state
-	outputData := make([]float32, NumActions)
-
-	return outputData, nil
+	return nil, fmt.Errorf("DQN inference backend unavailable")
 }
 
 // Remember stores an experience in the replay buffer

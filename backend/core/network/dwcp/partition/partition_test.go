@@ -194,6 +194,36 @@ func TestDQNAgentHeuristic(t *testing.T) {
 	}
 }
 
+func TestDQNAgentFallsBackToHeuristicWhenInferenceUnavailable(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer agent.Destroy()
+
+	agent.epsilon = 0
+	agent.modelLoaded = true
+
+	state := NewEnvironmentState()
+	state.StreamBandwidth = [4]float64{10, 20, 30, 400}
+	state.StreamLatency = [4]float64{100, 100, 100, 1}
+	state.StreamCongestion = [4]float64{0.9, 0.9, 0.9, 0}
+	state.StreamSuccessRate = [4]float64{0.5, 0.5, 0.5, 1}
+	state.TaskSize = 1024
+	state.TaskPriority = 0.9
+
+	decision, err := agent.SelectAction(state)
+	if err != nil {
+		t.Fatalf("SelectAction failed: %v", err)
+	}
+	if decision.Action != ActionStream4 {
+		t.Fatalf("Expected heuristic fallback to choose stream 4, got action %d", decision.Action)
+	}
+	if decision.ExplorationUsed {
+		t.Fatal("Expected heuristic fallback without exploration")
+	}
+}
+
 func TestDQNAgentSaveLoadModel(t *testing.T) {
 	agent, err := NewDQNAgent("")
 	if err != nil {
