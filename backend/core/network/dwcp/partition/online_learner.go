@@ -46,6 +46,10 @@ type OnlineLearnerConfig struct {
 
 // NewOnlineLearner creates a new online learning system
 func NewOnlineLearner(agent *DQNAgent, config *OnlineLearnerConfig) *OnlineLearner {
+	if agent == nil {
+		return nil
+	}
+
 	if config == nil {
 		config = &OnlineLearnerConfig{
 			UpdateFrequency:  24 * time.Hour, // Update daily

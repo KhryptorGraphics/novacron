@@ -326,6 +326,19 @@ func TestOnlineLearnerStopCancelsAutoUpdateLoop(t *testing.T) {
 	}
 }
 
+func TestNewOnlineLearnerRejectsNilAgent(t *testing.T) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("nil agent should be rejected without panic: %v", recovered)
+		}
+	}()
+
+	learner := NewOnlineLearner(nil, &OnlineLearnerConfig{EnableAutoUpdate: false})
+	if learner != nil {
+		t.Fatalf("nil agent should not create learner: %#v", learner)
+	}
+}
+
 func TestOnlineLearnerStoppedRejectsModelWork(t *testing.T) {
 	agent, err := NewDQNAgent("")
 	if err != nil {
