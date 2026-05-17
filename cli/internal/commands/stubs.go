@@ -1095,13 +1095,126 @@ func printNetworkDetail(cmd *cobra.Command, client *api.Client, name string) err
 }
 
 func NewCreateCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create resources",
+	}
+
+	cmd.AddCommand(
+		newCreateVMCommand(),
+		newCreateNetworkCommand(),
+	)
+
+	return cmd
+}
+
+type createVMRequest struct {
+	Name      string                 `json:"name"`
+	State     string                 `json:"state,omitempty"`
+	NodeID    string                 `json:"node_id,omitempty"`
+	Tags      map[string]interface{} `json:"tags,omitempty"`
+	CPUShares int                    `json:"cpu_shares,omitempty"`
+	MemoryMB  int                    `json:"memory_mb,omitempty"`
+}
+
+type createNetworkRequest struct {
+	Name    string `json:"name"`
+	Type    string `json:"type,omitempty"`
+	Subnet  string `json:"subnet"`
+	Gateway string `json:"gateway,omitempty"`
+}
+
+func newCreateVMCommand() *cobra.Command {
+	var (
+		nodeID    string
+		cpuShares int
+		memoryMB  int
+	)
+
+	cmd := &cobra.Command{
+		Use:   "vm <name>",
+		Short: "Create a VM",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("create command not yet implemented")
+			client, err := currentClusterAPIClient()
+			if err != nil {
+				return err
+			}
+
+			var vm coreVM
+			req := createVMRequest{
+				Name:      args[0],
+				NodeID:    strings.TrimSpace(nodeID),
+				CPUShares: cpuShares,
+				MemoryMB:  memoryMB,
+			}
+			if err := client.Post(cmd.Context(), "/api/v1/vms", req, &vm); err != nil {
+				return err
+			}
+
+			data, err := yaml.Marshal(vm)
+			if err != nil {
+				return err
+			}
+			_, err = cmd.OutOrStdout().Write(data)
+			return err
 		},
 	}
+
+	cmd.Flags().StringVar(&nodeID, "node", "", "Target node ID")
+	cmd.Flags().IntVar(&cpuShares, "cpu", 0, "CPU shares")
+	cmd.Flags().IntVar(&memoryMB, "memory", 0, "Memory in MB")
+
+	return cmd
+}
+
+func newCreateNetworkCommand() *cobra.Command {
+	var (
+		networkType string
+		subnet      string
+		gateway     string
+	)
+
+	cmd := &cobra.Command{
+		Use:     "network <name>",
+		Aliases: []string{"net"},
+		Short:   "Create a network",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(subnet) == "" {
+				return fmt.Errorf("subnet is required")
+			}
+
+			client, err := currentClusterAPIClient()
+			if err != nil {
+				return err
+			}
+
+			var network coreNetwork
+			req := createNetworkRequest{
+				Name:    args[0],
+				Type:    strings.TrimSpace(networkType),
+				Subnet:  strings.TrimSpace(subnet),
+				Gateway: strings.TrimSpace(gateway),
+			}
+			if err := client.Post(cmd.Context(), "/api/v1/networks", req, &network); err != nil {
+				return err
+			}
+
+			data, err := yaml.Marshal(network)
+			if err != nil {
+				return err
+			}
+			_, err = cmd.OutOrStdout().Write(data)
+			return err
+		},
+	}
+
+	cmd.Flags().StringVar(&networkType, "type", "bridged", "Network type")
+	cmd.Flags().StringVar(&subnet, "subnet", "", "Network subnet in CIDR notation")
+	cmd.Flags().StringVar(&gateway, "gateway", "", "Network gateway")
+
+	return cmd
 }
 
 func NewUpdateCommand() *cobra.Command {
