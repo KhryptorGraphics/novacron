@@ -285,12 +285,12 @@ func (c *DataCollector) GetRecentSamples(n int) []NetworkSample {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if n > len(c.samples) {
-		n = len(c.samples)
+	if n <= 0 {
+		return []NetworkSample{}
 	}
 
-	if n == 0 {
-		return []NetworkSample{}
+	if n > len(c.samples) {
+		n = len(c.samples)
 	}
 
 	// Return copy of recent samples

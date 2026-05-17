@@ -111,6 +111,19 @@ func TestDataCollector(t *testing.T) {
 		require.NoError(t, collector.saveData())
 		require.FileExists(t, collector.dataPath)
 	})
+
+	t.Run("GetRecentSamplesRejectsNegativeCount", func(t *testing.T) {
+		collector := NewDataCollector(1*time.Second, 100)
+		collector.addSample(NetworkSample{
+			Timestamp:     time.Now(),
+			BandwidthMbps: 100,
+			LatencyMs:     20,
+		})
+
+		require.NotPanics(t, func() {
+			assert.Empty(t, collector.GetRecentSamples(-1))
+		})
+	})
 }
 
 func TestPredictionService(t *testing.T) {
