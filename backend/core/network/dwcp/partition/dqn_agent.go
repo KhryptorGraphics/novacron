@@ -9,6 +9,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	ort "github.com/yalue/onnxruntime_go"
 )
 
 // DQNAgent implements a Deep Q-Network agent for task partitioning
@@ -29,13 +31,30 @@ type DQNAgent struct {
 	totalReward    float64
 	episodeRewards []float64
 	successRate    float64
+
+	inference qValueSession
+	modelPath string
 }
+
+type qValueSession interface {
+	Run(input []float32) ([]float32, error)
+	Destroy() error
+}
+
+type onnxDQNSession struct {
+	session      *ort.AdvancedSession
+	inputTensor  *ort.Tensor[float32]
+	outputTensor *ort.Tensor[float32]
+}
+
+var onnxEnvMu sync.Mutex
 
 const dqnAgentStateVersion = 1
 
 type dqnAgentState struct {
 	Version        int         `json:"version"`
 	ModelLoaded    bool        `json:"model_loaded"`
+	ModelPath      string      `json:"model_path,omitempty"`
 	Epsilon        float64     `json:"epsilon"`
 	EpsilonMin     float64     `json:"epsilon_min"`
 	EpsilonDecay   float64     `json:"epsilon_decay"`
@@ -82,7 +101,14 @@ func NewDQNAgent(modelPath string) (*DQNAgent, error) {
 
 	if modelPath != "" {
 		if _, err := os.Stat(modelPath); err == nil {
-			agent.modelLoaded = true
+			session, err := newONNXDQNSession(modelPath)
+			if err != nil {
+				log.Printf("Warning: Could not load DQN model from %s, operating in heuristic-only mode: %v", modelPath, err)
+			} else {
+				agent.inference = session
+				agent.modelLoaded = true
+				agent.modelPath = modelPath
+			}
 		} else if os.IsNotExist(err) {
 			log.Printf("Warning: Could not load model from %s, operating in exploration mode", modelPath)
 		} else {
@@ -140,12 +166,143 @@ func (agent *DQNAgent) SelectAction(state *EnvironmentState) (*TaskPartitionDeci
 
 // runInference runs the neural network inference
 func (agent *DQNAgent) runInference(state []float32) ([]float32, error) {
-	if !agent.modelLoaded {
+	if !agent.modelLoaded || agent.inference == nil {
 		return nil, fmt.Errorf("no model loaded")
 	}
+	if len(state) != 20 {
+		return nil, fmt.Errorf("invalid DQN state vector length %d", len(state))
+	}
 
-	_ = state
-	return nil, fmt.Errorf("DQN inference backend unavailable")
+	qValues, err := agent.inference.Run(state)
+	if err != nil {
+		return nil, err
+	}
+	if len(qValues) != NumActions {
+		return nil, fmt.Errorf("invalid DQN output length %d", len(qValues))
+	}
+	for i, value := range qValues {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			return nil, fmt.Errorf("invalid DQN output at %d: %f", i, value)
+		}
+	}
+
+	return qValues, nil
+}
+
+func newONNXDQNSession(modelPath string) (*onnxDQNSession, error) {
+	if err := ensureONNXEnvironment(); err != nil {
+		return nil, err
+	}
+
+	inputs, outputs, err := ort.GetInputOutputInfo(modelPath)
+	if err != nil {
+		return nil, fmt.Errorf("inspect ONNX model: %w", err)
+	}
+	if len(inputs) != 1 {
+		return nil, fmt.Errorf("expected one ONNX input, got %d", len(inputs))
+	}
+	if len(outputs) != 1 {
+		return nil, fmt.Errorf("expected one ONNX output, got %d", len(outputs))
+	}
+	if inputs[0].OrtValueType != ort.ONNXTypeTensor || inputs[0].DataType != ort.TensorElementDataTypeFloat {
+		return nil, fmt.Errorf("expected float tensor input, got %s", inputs[0].String())
+	}
+	if outputs[0].OrtValueType != ort.ONNXTypeTensor || outputs[0].DataType != ort.TensorElementDataTypeFloat {
+		return nil, fmt.Errorf("expected float tensor output, got %s", outputs[0].String())
+	}
+	if !dqnShapeAllows(inputs[0].Dimensions, 20) {
+		return nil, fmt.Errorf("expected DQN input shape compatible with 20 features, got %s", inputs[0].Dimensions.String())
+	}
+	if !dqnShapeAllows(outputs[0].Dimensions, NumActions) {
+		return nil, fmt.Errorf("expected DQN output shape compatible with %d actions, got %s", NumActions, outputs[0].Dimensions.String())
+	}
+
+	inputTensor, err := ort.NewTensor[float32](ort.Shape{1, 20}, make([]float32, 20))
+	if err != nil {
+		return nil, fmt.Errorf("create DQN input tensor: %w", err)
+	}
+	outputTensor, err := ort.NewTensor[float32](ort.Shape{1, int64(NumActions)}, make([]float32, NumActions))
+	if err != nil {
+		_ = inputTensor.Destroy()
+		return nil, fmt.Errorf("create DQN output tensor: %w", err)
+	}
+
+	session, err := ort.NewAdvancedSession(
+		modelPath,
+		[]string{inputs[0].Name},
+		[]string{outputs[0].Name},
+		[]ort.Value{inputTensor},
+		[]ort.Value{outputTensor},
+		nil,
+	)
+	if err != nil {
+		_ = inputTensor.Destroy()
+		_ = outputTensor.Destroy()
+		return nil, fmt.Errorf("create DQN ONNX session: %w", err)
+	}
+
+	return &onnxDQNSession{
+		session:      session,
+		inputTensor:  inputTensor,
+		outputTensor: outputTensor,
+	}, nil
+}
+
+func ensureONNXEnvironment() error {
+	onnxEnvMu.Lock()
+	defer onnxEnvMu.Unlock()
+
+	if ort.IsInitialized() {
+		return nil
+	}
+	if libraryPath := os.Getenv("ONNXRUNTIME_SHARED_LIBRARY_PATH"); libraryPath != "" {
+		ort.SetSharedLibraryPath(libraryPath)
+	}
+	return ort.InitializeEnvironment()
+}
+
+func dqnShapeAllows(shape ort.Shape, width int) bool {
+	if len(shape) == 0 {
+		return false
+	}
+	last := shape[len(shape)-1]
+	return last == int64(width)
+}
+
+func (session *onnxDQNSession) Run(input []float32) ([]float32, error) {
+	copy(session.inputTensor.GetData(), input)
+	session.outputTensor.ZeroContents()
+
+	if err := session.session.Run(); err != nil {
+		return nil, fmt.Errorf("run DQN ONNX session: %w", err)
+	}
+
+	output := make([]float32, NumActions)
+	copy(output, session.outputTensor.GetData())
+	return output, nil
+}
+
+func (session *onnxDQNSession) Destroy() error {
+	var err error
+	if session.session != nil {
+		if e := session.session.Destroy(); e != nil {
+			err = e
+		}
+		session.session = nil
+	}
+	if session.inputTensor != nil {
+		if e := session.inputTensor.Destroy(); err == nil && e != nil {
+			err = e
+		}
+		session.inputTensor = nil
+	}
+	if session.outputTensor != nil {
+		if e := session.outputTensor.Destroy(); err == nil && e != nil {
+			err = e
+		}
+		session.outputTensor = nil
+	}
+	return err
 }
 
 // Remember stores an experience in the replay buffer
@@ -439,6 +596,7 @@ func (agent *DQNAgent) SaveModel(path string) error {
 	state := dqnAgentState{
 		Version:        dqnAgentStateVersion,
 		ModelLoaded:    agent.modelLoaded,
+		ModelPath:      agent.modelPath,
 		Epsilon:        agent.epsilon,
 		EpsilonMin:     agent.epsilonMin,
 		EpsilonDecay:   agent.epsilonDecay,
@@ -486,7 +644,22 @@ func (agent *DQNAgent) LoadModel(path string) error {
 		state.ReplayBuffer.Capacity = 10000
 	}
 
+	var session qValueSession
+	modelLoaded := false
+	if state.ModelLoaded && state.ModelPath != "" {
+		loaded, err := newONNXDQNSession(state.ModelPath)
+		if err != nil {
+			log.Printf("Warning: Could not restore DQN model from %s, operating in heuristic-only mode: %v", state.ModelPath, err)
+		} else {
+			session = loaded
+			modelLoaded = true
+		}
+	}
+
 	agent.mu.Lock()
+	if agent.inference != nil {
+		_ = agent.inference.Destroy()
+	}
 	agent.epsilon = state.Epsilon
 	agent.epsilonMin = state.EpsilonMin
 	agent.epsilonDecay = state.EpsilonDecay
@@ -500,7 +673,9 @@ func (agent *DQNAgent) LoadModel(path string) error {
 	agent.successRate = state.SuccessRate
 	agent.replayBuffer = NewReplayBuffer(state.ReplayBuffer.Capacity)
 	agent.replayBuffer.buffer = append([]*Experience(nil), state.ReplayBuffer.Experiences...)
-	agent.modelLoaded = true
+	agent.inference = session
+	agent.modelLoaded = modelLoaded
+	agent.modelPath = state.ModelPath
 	agent.mu.Unlock()
 
 	return nil
@@ -509,6 +684,12 @@ func (agent *DQNAgent) LoadModel(path string) error {
 // Destroy cleans up resources
 func (agent *DQNAgent) Destroy() {
 	if agent != nil {
+		agent.mu.Lock()
+		defer agent.mu.Unlock()
+		if agent.inference != nil {
+			_ = agent.inference.Destroy()
+			agent.inference = nil
+		}
 		agent.modelLoaded = false
 	}
 }

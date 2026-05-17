@@ -2,9 +2,25 @@ package partition
 
 import (
 	"math"
+	"os"
 	"testing"
 	"time"
 )
+
+type fakeQValueSession struct {
+	qValues   []float32
+	err       error
+	destroyed bool
+}
+
+func (session *fakeQValueSession) Run(_ []float32) ([]float32, error) {
+	return append([]float32(nil), session.qValues...), session.err
+}
+
+func (session *fakeQValueSession) Destroy() error {
+	session.destroyed = true
+	return nil
+}
 
 func TestEnvironmentState(t *testing.T) {
 	state := NewEnvironmentState()
@@ -224,6 +240,56 @@ func TestDQNAgentFallsBackToHeuristicWhenInferenceUnavailable(t *testing.T) {
 	}
 }
 
+func TestDQNAgentUsesLoadedInferenceSession(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer agent.Destroy()
+
+	qValues := make([]float32, NumActions)
+	qValues[ActionStream4] = 10
+	fakeSession := &fakeQValueSession{qValues: qValues}
+
+	agent.epsilon = 0
+	agent.modelLoaded = true
+	agent.inference = fakeSession
+
+	state := NewEnvironmentState()
+	state.TaskSize = 1024
+
+	decision, err := agent.SelectAction(state)
+	if err != nil {
+		t.Fatalf("SelectAction failed: %v", err)
+	}
+	if decision.Action != ActionStream4 {
+		t.Fatalf("Expected model action stream 4, got %d", decision.Action)
+	}
+	if decision.QValue != 10 {
+		t.Fatalf("Expected Q-value 10, got %f", decision.QValue)
+	}
+}
+
+func TestDQNAgentDoesNotMarkInvalidONNXAsLoaded(t *testing.T) {
+	modelPath := t.TempDir() + "/invalid.onnx"
+	if err := os.WriteFile(modelPath, []byte("not an onnx model"), 0600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	agent, err := NewDQNAgent(modelPath)
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer agent.Destroy()
+
+	if agent.modelLoaded {
+		t.Fatal("Invalid ONNX artifact must not be marked as loaded")
+	}
+	if agent.inference != nil {
+		t.Fatal("Invalid ONNX artifact must not install an inference session")
+	}
+}
+
 func TestDQNAgentSaveLoadModel(t *testing.T) {
 	agent, err := NewDQNAgent("")
 	if err != nil {
@@ -270,8 +336,8 @@ func TestDQNAgentSaveLoadModel(t *testing.T) {
 		t.Fatalf("LoadModel failed: %v", err)
 	}
 
-	if !loaded.modelLoaded {
-		t.Fatal("Expected loaded model flag")
+	if loaded.modelLoaded {
+		t.Fatal("Serialized policy state without an ONNX path must not mark inference as loaded")
 	}
 	if loaded.epsilon != agent.epsilon || loaded.gamma != agent.gamma || loaded.stepCount != agent.stepCount {
 		t.Fatalf("Loaded scalar state mismatch: got epsilon=%v gamma=%v steps=%v", loaded.epsilon, loaded.gamma, loaded.stepCount)
