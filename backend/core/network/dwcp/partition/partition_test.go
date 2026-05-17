@@ -1342,6 +1342,33 @@ func TestEvaluationResultsCalculateStatsUsesStandardDeviation(t *testing.T) {
 	}
 }
 
+func TestEvaluationResultsCalculateStatsHandlesEmptySamples(t *testing.T) {
+	results := &EvaluationResults{}
+
+	results.calculateStats()
+
+	stats := []struct {
+		name  string
+		value float64
+	}{
+		{name: "mean_reward", value: results.MeanReward},
+		{name: "std_reward", value: results.StdReward},
+		{name: "mean_throughput", value: results.MeanThroughput},
+		{name: "std_throughput", value: results.StdThroughput},
+		{name: "mean_latency", value: results.MeanLatency},
+		{name: "std_latency", value: results.StdLatency},
+		{name: "success_rate", value: results.SuccessRate},
+	}
+	for _, stat := range stats {
+		if math.IsNaN(stat.value) || math.IsInf(stat.value, 0) {
+			t.Fatalf("%s should remain finite for empty samples, got %v", stat.name, stat.value)
+		}
+		if stat.value != 0 {
+			t.Fatalf("%s should default to 0 for empty samples, got %v", stat.name, stat.value)
+		}
+	}
+}
+
 func TestActionDecoding(t *testing.T) {
 	agent, err := NewDQNAgent("nonexistent.onnx")
 	if err != nil {

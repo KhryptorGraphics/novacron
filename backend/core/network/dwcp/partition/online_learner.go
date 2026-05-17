@@ -492,6 +492,11 @@ func (er *EvaluationResults) calculateStats() {
 	er.MeanLatency = mean(er.Latencies)
 	er.StdLatency = stddev(er.Latencies, er.MeanLatency)
 
+	if len(er.Rewards) == 0 {
+		er.SuccessRate = 0
+		return
+	}
+
 	// Count successful episodes (positive reward)
 	successCount := 0
 	for _, r := range er.Rewards {
