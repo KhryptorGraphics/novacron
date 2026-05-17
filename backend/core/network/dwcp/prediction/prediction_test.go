@@ -161,6 +161,40 @@ func TestDataCollector(t *testing.T) {
 		require.NoError(t, collector.ExportForTraining(outputPath))
 		require.FileExists(t, outputPath)
 	})
+
+	t.Run("LoadHistoricalDataSkipsMalformedJSONLLine", func(t *testing.T) {
+		collector := NewDataCollector(1*time.Second, 100)
+		collector.dataPath = filepath.Join(t.TempDir(), "samples.jsonl")
+
+		first := NetworkSample{Timestamp: time.Now(), BandwidthMbps: 100, LatencyMs: 20}
+		second := NetworkSample{Timestamp: time.Now(), BandwidthMbps: 200, LatencyMs: 30}
+		firstJSON, err := json.Marshal(first)
+		require.NoError(t, err)
+		secondJSON, err := json.Marshal(second)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(
+			collector.dataPath,
+			[]byte(string(firstJSON)+"\nnot-json\n"+string(secondJSON)+"\n"),
+			0644,
+		))
+
+		done := make(chan error, 1)
+		go func() {
+			done <- collector.loadHistoricalData()
+		}()
+
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("loadHistoricalData did not return after malformed line")
+		}
+
+		samples := collector.GetRecentSamples(10)
+		require.Len(t, samples, 2)
+		assert.Equal(t, 100.0, samples[0].BandwidthMbps)
+		assert.Equal(t, 200.0, samples[1].BandwidthMbps)
+	})
 }
 
 func TestPredictionService(t *testing.T) {

@@ -1,6 +1,7 @@
 package prediction
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -395,10 +396,10 @@ func (c *DataCollector) loadHistoricalData() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	decoder := json.NewDecoder(file)
-	for decoder.More() {
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
 		var sample NetworkSample
-		if err := decoder.Decode(&sample); err != nil {
+		if err := json.Unmarshal(scanner.Bytes(), &sample); err != nil {
 			continue // Skip invalid samples
 		}
 
@@ -411,6 +412,10 @@ func (c *DataCollector) loadHistoricalData() error {
 	// Trim to max samples
 	if len(c.samples) > c.maxSamples {
 		c.samples = c.samples[len(c.samples)-c.maxSamples:]
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("failed to read data file: %w", err)
 	}
 
 	return nil
