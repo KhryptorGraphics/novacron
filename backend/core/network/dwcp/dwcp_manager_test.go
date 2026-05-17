@@ -821,6 +821,42 @@ func TestManagerStartsWithPreconfiguredTaskPartitioner(t *testing.T) {
 	assert.True(t, manager.IsStarted())
 }
 
+func TestTaskPartitionerRejectsNilTask(t *testing.T) {
+	partitioner, err := dwcp.NewTaskPartitioner("", zaptest.NewLogger(t))
+	require.NoError(t, err)
+	defer partitioner.Destroy()
+
+	decision, err := partitioner.PartitionTask(nil)
+	require.Error(t, err)
+	require.Nil(t, decision)
+	assert.Contains(t, err.Error(), "task is required")
+}
+
+func TestTaskPartitionerReportOutcomeHandlesNilDecision(t *testing.T) {
+	partitioner, err := dwcp.NewTaskPartitioner("", zaptest.NewLogger(t))
+	require.NoError(t, err)
+	defer partitioner.Destroy()
+
+	require.NotPanics(t, func() {
+		partitioner.ReportOutcome("nil-decision", nil, 100, time.Millisecond, true)
+	})
+
+	metrics := partitioner.GetMetrics()
+	assert.Equal(t, int64(1), metrics["successful_tasks"])
+	assert.Equal(t, int64(0), metrics["failed_tasks"])
+}
+
+func TestManagerPartitionTaskRejectsNilTask(t *testing.T) {
+	manager := setupTestManager(t)
+	require.NoError(t, manager.Start())
+	defer manager.Stop()
+
+	decision, err := manager.PartitionTask(context.Background(), nil)
+	require.Error(t, err)
+	require.Nil(t, decision)
+	assert.Contains(t, err.Error(), "task is required")
+}
+
 // TestConcurrentMetricsCollection tests concurrent metrics collection for race conditions
 func TestConcurrentMetricsCollection(t *testing.T) {
 	// This test is designed to be run with: go test -race -count=100

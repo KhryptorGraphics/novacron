@@ -85,6 +85,10 @@ func (tp *TaskPartitioner) PartitionTask(task *Task) (*partition.TaskPartitionDe
 	tp.mu.Lock()
 	defer tp.mu.Unlock()
 
+	if task == nil {
+		return nil, fmt.Errorf("task is required")
+	}
+
 	if !tp.enabled {
 		// Fallback to simple heuristic partitioning
 		return tp.simplePartition(task), nil
@@ -136,6 +140,15 @@ func (tp *TaskPartitioner) ReportOutcome(taskID string, decision *partition.Task
 		tp.successfulTasks++
 	} else {
 		tp.failedTasks++
+	}
+
+	if decision == nil {
+		tp.logger.Warn("Skipping online learning update for task outcome; decision is required",
+			zap.String("task_id", taskID),
+			zap.Bool("success", success),
+			zap.Float64("throughput", actualThroughput),
+			zap.Duration("latency", actualLatency))
+		return
 	}
 
 	// If learning components are not initialized, just track basic stats
@@ -554,6 +567,10 @@ func (m *Manager) AddTaskPartitioner(modelPath string) error {
 func (m *Manager) PartitionTask(ctx context.Context, task *Task) (*partition.TaskPartitionDecision, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
+	if task == nil {
+		return nil, fmt.Errorf("task is required")
+	}
 
 	if !m.enabled || !m.started {
 		return nil, fmt.Errorf("DWCP not enabled or not started")
