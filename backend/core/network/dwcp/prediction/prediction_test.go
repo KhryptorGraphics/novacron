@@ -204,6 +204,23 @@ func TestPredictionService(t *testing.T) {
 		assert.Equal(t, 65536, service.GetOptimalBufferSize())
 	})
 
+	t.Run("OptimalBufferSizeClampsHugeFinitePrediction", func(t *testing.T) {
+		service, err := NewPredictionService("", 10*time.Millisecond)
+		require.NoError(t, err)
+		defer service.Stop()
+
+		service.mu.Lock()
+		service.currentPrediction = &BandwidthPrediction{
+			PredictedBandwidthMbps: math.MaxFloat64,
+			PredictedLatencyMs:     1000,
+			PredictedJitterMs:      1000,
+			Confidence:             0.85,
+		}
+		service.mu.Unlock()
+
+		assert.Equal(t, 1048576, service.GetOptimalBufferSize())
+	})
+
 	t.Run("CreateService", func(t *testing.T) {
 		// Note: This test requires a valid ONNX model file
 		// In production, you would have a test model

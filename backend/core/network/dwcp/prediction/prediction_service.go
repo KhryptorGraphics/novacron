@@ -313,36 +313,42 @@ func (s *PredictionService) GetOptimalStreamCount() int {
 
 // GetOptimalBufferSize calculates optimal buffer size based on prediction
 func (s *PredictionService) GetOptimalBufferSize() int {
+	const (
+		defaultBufferSize = 65536
+		minBufferSize     = 16384
+		maxBufferSize     = 1048576
+	)
+
 	pred := s.GetPrediction()
 	if pred == nil {
-		return 65536 // Default 64KB
+		return defaultBufferSize
 	}
 	if !isFiniteNonNegative(pred.PredictedBandwidthMbps) ||
 		!isFiniteNonNegative(pred.PredictedLatencyMs) ||
 		!isFiniteNonNegative(pred.PredictedJitterMs) {
-		return 65536
+		return defaultBufferSize
 	}
 
 	// Calculate bandwidth-delay product
 	bandwidthBps := pred.PredictedBandwidthMbps * 1000000 / 8 // Convert to bytes/sec
-	delaySeconds := pred.PredictedLatencyMs / 1000
+	totalDelaySeconds := (pred.PredictedLatencyMs + pred.PredictedJitterMs) / 1000
 
-	bdp := int(bandwidthBps * delaySeconds)
-
-	// Add buffer for jitter
-	jitterBuffer := int(pred.PredictedJitterMs * bandwidthBps / 1000)
-
-	optimalSize := bdp + jitterBuffer
-
-	// Bounds
-	if optimalSize < 16384 { // Min 16KB
-		optimalSize = 16384
-	}
-	if optimalSize > 1048576 { // Max 1MB
-		optimalSize = 1048576
+	if bandwidthBps <= 0 || totalDelaySeconds <= 0 {
+		return minBufferSize
 	}
 
-	return optimalSize
+	optimalSize := bandwidthBps * totalDelaySeconds
+	if math.IsInf(optimalSize, 1) || optimalSize > maxBufferSize {
+		return maxBufferSize
+	}
+	if math.IsNaN(optimalSize) {
+		return defaultBufferSize
+	}
+	if optimalSize < minBufferSize {
+		return minBufferSize
+	}
+
+	return int(optimalSize)
 }
 
 // accuracyTrackingLoop tracks prediction accuracy
