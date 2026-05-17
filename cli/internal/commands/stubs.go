@@ -1033,7 +1033,7 @@ func NewCopyCommand() *cobra.Command {
 		Use:   "copy",
 		Short: "Copy files to/from VMs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("copy command not yet implemented")
+			return fmt.Errorf("copy backend contract is not implemented; see docs/api/vm-io-contracts.md and tracking issue novacron-lmh")
 		},
 	}
 }
@@ -1043,7 +1043,7 @@ func NewPortForwardCommand() *cobra.Command {
 		Use:   "port-forward",
 		Short: "Forward ports to/from VMs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("port-forward command not yet implemented")
+			return fmt.Errorf("port-forward backend contract is not implemented; see docs/api/vm-io-contracts.md and tracking issue novacron-lmh")
 		},
 	}
 }
