@@ -2,6 +2,8 @@ package prediction
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -71,6 +73,26 @@ func TestDataCollector(t *testing.T) {
 		samples := collector.GetSamplesByTimeRange(rangeStart, rangeEnd)
 
 		assert.Equal(t, 2, len(samples)) // Should get samples at 2 and 3 minutes
+	})
+
+	t.Run("RestartAfterStopCollectsSamples", func(t *testing.T) {
+		collector := NewDataCollector(10*time.Millisecond, 100)
+		collector.dataPath = filepath.Join(t.TempDir(), "samples.jsonl")
+
+		collector.Start()
+		time.Sleep(35 * time.Millisecond)
+		collector.Stop()
+
+		collector.mu.Lock()
+		collector.samples = nil
+		collector.mu.Unlock()
+		require.NoError(t, os.Remove(collector.dataPath))
+
+		collector.Start()
+		time.Sleep(35 * time.Millisecond)
+		defer collector.Stop()
+
+		assert.NotEmpty(t, collector.GetRecentSamples(10))
 	})
 }
 

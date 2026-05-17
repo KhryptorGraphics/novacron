@@ -65,14 +65,10 @@ type DataCollector struct {
 
 // NewDataCollector creates a new data collector
 func NewDataCollector(collectInterval time.Duration, maxSamples int) *DataCollector {
-	ctx, cancel := context.WithCancel(context.Background())
-
 	collector := &DataCollector{
 		samples:         make([]NetworkSample, 0, maxSamples),
 		maxSamples:      maxSamples,
 		collectInterval: collectInterval,
-		ctx:             ctx,
-		cancel:          cancel,
 		dataPath:        "/var/lib/novacron/dwcp/network_samples.jsonl",
 		saveInterval:    5 * time.Minute,
 		pingTargets: []string{
@@ -123,24 +119,33 @@ func (c *DataCollector) initMetrics() {
 
 // Start begins continuous metric collection
 func (c *DataCollector) Start() {
+	c.mu.Lock()
+	if c.ctx != nil && c.ctx.Err() == nil {
+		c.mu.Unlock()
+		return
+	}
+	c.ctx, c.cancel = context.WithCancel(context.Background())
+	ctx := c.ctx
+	c.mu.Unlock()
+
 	// Load historical data
 	c.loadHistoricalData()
 
 	// Start collection goroutine
-	go c.collectLoop()
+	go c.collectLoop(ctx)
 
 	// Start persistence goroutine
-	go c.persistenceLoop()
+	go c.persistenceLoop(ctx)
 }
 
 // collectLoop continuously collects network metrics
-func (c *DataCollector) collectLoop() {
+func (c *DataCollector) collectLoop(ctx context.Context) {
 	ticker := time.NewTicker(c.collectInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			sample := c.collectSample()
@@ -311,13 +316,13 @@ func (c *DataCollector) GetSamplesByTimeRange(start, end time.Time) []NetworkSam
 }
 
 // persistenceLoop periodically saves samples to disk
-func (c *DataCollector) persistenceLoop() {
+func (c *DataCollector) persistenceLoop(ctx context.Context) {
 	ticker := time.NewTicker(c.saveInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-ctx.Done():
 			c.saveData() // Final save
 			return
 		case <-ticker.C:
@@ -435,7 +440,14 @@ func (c *DataCollector) ExportForTraining(outputPath string) error {
 
 // Stop stops the data collector
 func (c *DataCollector) Stop() {
-	c.cancel()
+	c.mu.Lock()
+	cancel := c.cancel
+	c.cancel = nil
+	c.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
 	c.saveData() // Final save
 }
 
