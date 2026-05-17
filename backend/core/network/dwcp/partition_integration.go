@@ -183,6 +183,14 @@ func (tp *TaskPartitioner) ReportOutcome(taskID string, decision *partition.Task
 			zap.Ints("streams", decision.StreamIDs))
 		return
 	}
+	if !isValidPartitionChunkSizes(decision.ChunkSizes, len(decision.StreamIDs)) {
+		tp.logger.Warn("Skipping online learning update for task outcome; invalid chunk sizes",
+			zap.String("task_id", taskID),
+			zap.Bool("success", success),
+			zap.Ints("chunk_sizes", decision.ChunkSizes),
+			zap.Int("stream_count", len(decision.StreamIDs)))
+		return
+	}
 
 	// If learning components are not initialized, just track basic stats
 	if tp.agent == nil || tp.onlineLearner == nil {
@@ -515,6 +523,18 @@ func isValidPartitionStreams(streamIDs []int) bool {
 	}
 	for _, streamID := range streamIDs {
 		if streamID < 0 || streamID >= 4 {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidPartitionChunkSizes(chunkSizes []int, streamCount int) bool {
+	if len(chunkSizes) != streamCount {
+		return false
+	}
+	for _, chunkSize := range chunkSizes {
+		if chunkSize <= 0 {
 			return false
 		}
 	}
