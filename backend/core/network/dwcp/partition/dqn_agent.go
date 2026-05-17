@@ -645,17 +645,17 @@ func (agent *DQNAgent) SaveModel(path string) error {
 		Version:        dqnAgentStateVersion,
 		ModelLoaded:    agent.modelLoaded,
 		ModelPath:      agent.modelPath,
-		Epsilon:        agent.epsilon,
-		EpsilonMin:     agent.epsilonMin,
-		EpsilonDecay:   agent.epsilonDecay,
-		StateBuffer:    append([]float32(nil), agent.stateBuffer...),
-		LearningRate:   agent.learningRate,
-		Gamma:          agent.gamma,
+		Epsilon:        boundedFloat(agent.epsilon, 0, 1, 1),
+		EpsilonMin:     boundedFloat(agent.epsilonMin, 0, 1, 0.01),
+		EpsilonDecay:   boundedFloat(agent.epsilonDecay, 0, 1, 0.995),
+		StateBuffer:    finiteFloat32Values(agent.stateBuffer),
+		LearningRate:   positiveFloat(agent.learningRate, 0.001),
+		Gamma:          boundedFloat(agent.gamma, 0, 1, 0.95),
 		UpdateFreq:     agent.updateFreq,
 		StepCount:      agent.stepCount,
-		TotalReward:    agent.totalReward,
-		EpisodeRewards: append([]float64(nil), agent.episodeRewards...),
-		SuccessRate:    agent.successRate,
+		TotalReward:    finiteFloat(agent.totalReward, 0),
+		EpisodeRewards: finiteFloatValues(agent.episodeRewards),
+		SuccessRate:    boundedFloat(agent.successRate, 0, 1, 0),
 	}
 	agent.mu.RUnlock()
 
@@ -765,6 +765,35 @@ func finiteFloat32Slice(values []float32) bool {
 		}
 	}
 	return true
+}
+
+func finiteFloat32Values(values []float32) []float32 {
+	filtered := make([]float32, 0, len(values))
+	for _, value := range values {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			continue
+		}
+		filtered = append(filtered, value)
+	}
+	return filtered
+}
+
+func finiteFloatValues(values []float64) []float64 {
+	filtered := make([]float64, 0, len(values))
+	for _, value := range values {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			continue
+		}
+		filtered = append(filtered, value)
+	}
+	return filtered
+}
+
+func finiteFloat(value, fallback float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return fallback
+	}
+	return value
 }
 
 func boundedFloat(value, minValue, maxValue, fallback float64) float64 {

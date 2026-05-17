@@ -1288,6 +1288,58 @@ func TestDQNAgentSaveModelSkipsInvalidReplayExperiences(t *testing.T) {
 	}
 }
 
+func TestDQNAgentSaveModelSanitizesNonFiniteState(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer agent.Destroy()
+
+	agent.mu.Lock()
+	agent.epsilon = math.NaN()
+	agent.epsilonMin = math.Inf(1)
+	agent.epsilonDecay = math.Inf(-1)
+	agent.stateBuffer = []float32{1, float32(math.NaN()), 2, float32(math.Inf(1))}
+	agent.learningRate = math.NaN()
+	agent.gamma = math.Inf(1)
+	agent.totalReward = math.NaN()
+	agent.episodeRewards = []float64{1, math.NaN(), math.Inf(1), 3}
+	agent.successRate = math.Inf(-1)
+	agent.mu.Unlock()
+
+	modelPath := filepath.Join(t.TempDir(), "dqn-agent.json")
+	if err := agent.SaveModel(modelPath); err != nil {
+		t.Fatalf("SaveModel should sanitize non-finite state: %v", err)
+	}
+
+	loaded, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer loaded.Destroy()
+
+	if err := loaded.LoadModel(modelPath); err != nil {
+		t.Fatalf("LoadModel failed: %v", err)
+	}
+
+	metrics := loaded.GetMetrics()
+	avgReward, ok := metrics["average_reward"].(float64)
+	if !ok {
+		t.Fatalf("average_reward has unexpected type %T", metrics["average_reward"])
+	}
+	if avgReward != 2 {
+		t.Fatalf("expected persisted finite episode rewards only, got average %v", avgReward)
+	}
+	for i, value := range loaded.stateBuffer {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			t.Fatalf("loaded state buffer index %d should be finite, got %v", i, value)
+		}
+	}
+	if math.IsNaN(loaded.totalReward) || math.IsInf(loaded.totalReward, 0) {
+		t.Fatalf("loaded total reward should be finite, got %v", loaded.totalReward)
+	}
+}
+
 func TestDQNAgentLoadModelFiltersInvalidReplayExperiences(t *testing.T) {
 	modelState := dqnAgentState{
 		Version: dqnAgentStateVersion,
