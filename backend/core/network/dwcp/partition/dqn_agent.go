@@ -307,6 +307,16 @@ func (session *onnxDQNSession) Destroy() error {
 
 // Remember stores an experience in the replay buffer
 func (agent *DQNAgent) Remember(state *EnvironmentState, action Action, reward float64, nextState *EnvironmentState, done bool) {
+	if state == nil || nextState == nil {
+		return
+	}
+	if action < 0 || action >= NumActions {
+		return
+	}
+	if math.IsNaN(reward) || math.IsInf(reward, 0) {
+		return
+	}
+
 	exp := &Experience{
 		State:     state.ToVector(),
 		Action:    action,

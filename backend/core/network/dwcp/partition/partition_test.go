@@ -823,6 +823,81 @@ func TestMemoryStorage(t *testing.T) {
 	}
 }
 
+func TestDQNAgentRememberIgnoresInvalidExperience(t *testing.T) {
+	tests := []struct {
+		name      string
+		state     *EnvironmentState
+		action    Action
+		reward    float64
+		nextState *EnvironmentState
+	}{
+		{
+			name:      "nil_state",
+			state:     nil,
+			action:    ActionStream1,
+			reward:    1,
+			nextState: NewEnvironmentState(),
+		},
+		{
+			name:      "nil_next_state",
+			state:     NewEnvironmentState(),
+			action:    ActionStream1,
+			reward:    1,
+			nextState: nil,
+		},
+		{
+			name:      "invalid_action",
+			state:     NewEnvironmentState(),
+			action:    Action(NumActions),
+			reward:    1,
+			nextState: NewEnvironmentState(),
+		},
+		{
+			name:      "nan_reward",
+			state:     NewEnvironmentState(),
+			action:    ActionStream1,
+			reward:    math.NaN(),
+			nextState: NewEnvironmentState(),
+		},
+		{
+			name:      "infinite_reward",
+			state:     NewEnvironmentState(),
+			action:    ActionStream1,
+			reward:    math.Inf(1),
+			nextState: NewEnvironmentState(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent, err := NewDQNAgent("nonexistent.onnx")
+			if err != nil {
+				t.Skipf("ONNX Runtime not available, skipping: %v", err)
+				return
+			}
+			defer agent.Destroy()
+
+			beforeSize := agent.replayBuffer.Size()
+			beforeReward := agent.totalReward
+
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("invalid experience should be ignored without panic: %v", recovered)
+				}
+			}()
+
+			agent.Remember(tt.state, tt.action, tt.reward, tt.nextState, false)
+
+			if agent.replayBuffer.Size() != beforeSize {
+				t.Fatalf("invalid experience should not grow replay buffer: before=%d after=%d", beforeSize, agent.replayBuffer.Size())
+			}
+			if agent.totalReward != beforeReward {
+				t.Fatalf("invalid experience should not change total reward: before=%v after=%v", beforeReward, agent.totalReward)
+			}
+		})
+	}
+}
+
 func TestEpsilonDecay(t *testing.T) {
 	agent, err := NewDQNAgent("nonexistent.onnx")
 	if err != nil {
