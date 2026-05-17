@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -254,9 +255,11 @@ func newVMMigrateCommand() *cobra.Command {
 
 			// Wait for migration to complete if requested
 			if wait {
-				fmt.Println("Waiting for migration to complete...")
-				// TODO: Implement migration monitoring
-				fmt.Println("Migration completed")
+				fmt.Fprintln(cmd.OutOrStdout(), "Waiting for migration to complete...")
+				if err := waitForVMMigration(vmService, cluster.Namespace, name, targetNode, 10*time.Minute); err != nil {
+					return err
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "Migration completed")
 			}
 
 			return nil
@@ -473,4 +476,63 @@ func consoleEscapeIndex(data []byte) int {
 		}
 	}
 	return -1
+}
+
+func waitForVMMigration(service *service.VMService, namespace, name, targetNode string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	lastState := "unknown"
+	lastNode := "unknown"
+	lastProgress := 0
+	for {
+		vm, err := service.Get(ctx, namespace, name)
+		if err != nil {
+			if ctx.Err() != nil {
+				return fmt.Errorf("timed out waiting for VM %s/%s migration to %s; last state %s progress %d%% node %s", namespace, name, targetNode, lastState, lastProgress, lastNode)
+			}
+			return err
+		}
+
+		lastNode = vm.Status.NodeName
+		if vm.Status.Migration == nil {
+			if strings.EqualFold(lastNode, targetNode) {
+				return nil
+			}
+			lastState = "none"
+		} else {
+			lastState = strings.ToLower(vm.Status.Migration.State)
+			lastProgress = vm.Status.Migration.Progress
+			if isMigrationFailed(lastState) {
+				return fmt.Errorf("migration failed for VM %s/%s to %s; state %s progress %d%% node %s", namespace, name, targetNode, lastState, lastProgress, lastNode)
+			}
+			if isMigrationComplete(lastState) && strings.EqualFold(lastNode, targetNode) {
+				return nil
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for VM %s/%s migration to %s; last state %s progress %d%% node %s", namespace, name, targetNode, lastState, lastProgress, lastNode)
+		case <-time.After(waitPollInterval):
+		}
+	}
+}
+
+func isMigrationComplete(state string) bool {
+	switch strings.ToLower(state) {
+	case "completed", "complete", "succeeded", "success":
+		return true
+	default:
+		return false
+	}
+}
+
+func isMigrationFailed(state string) bool {
+	switch strings.ToLower(state) {
+	case "failed", "error", "cancelled", "canceled", "rolled_back", "rolledback":
+		return true
+	default:
+		return false
+	}
 }

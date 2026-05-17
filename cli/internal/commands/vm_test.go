@@ -209,3 +209,65 @@ func TestWaitForVMTimeoutIncludesLastPhase(t *testing.T) {
 		t.Fatalf("expected timeout with last phase, got %v", err)
 	}
 }
+
+func TestWaitForVMMigrationPollsUntilTargetNode(t *testing.T) {
+	originalInterval := waitPollInterval
+	waitPollInterval = time.Millisecond
+	defer func() { waitPollInterval = originalInterval }()
+
+	var calls atomic.Int32
+	vmService, closeServer := testVMService(t, func(w http.ResponseWriter, r *http.Request) {
+		state := "running"
+		nodeName := "node-a"
+		if calls.Add(1) >= 2 {
+			state = "completed"
+			nodeName = "node-b"
+		}
+		_ = json.NewEncoder(w).Encode(api.VirtualMachine{
+			Name: "vm-a",
+			Status: api.VMStatus{
+				Phase:    "Running",
+				NodeName: nodeName,
+				Migration: &api.MigrationStatus{
+					State:      state,
+					TargetNode: "node-b",
+					Progress:   100,
+				},
+			},
+		})
+	})
+	defer closeServer()
+
+	if err := waitForVMMigration(vmService, "default", "vm-a", "node-b", time.Second); err != nil {
+		t.Fatalf("waitForVMMigration returned error: %v", err)
+	}
+	if calls.Load() < 2 {
+		t.Fatalf("expected polling until migration completion, got %d calls", calls.Load())
+	}
+}
+
+func TestWaitForVMMigrationFailsOnTerminalFailure(t *testing.T) {
+	originalInterval := waitPollInterval
+	waitPollInterval = time.Millisecond
+	defer func() { waitPollInterval = originalInterval }()
+
+	vmService, closeServer := testVMService(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(api.VirtualMachine{
+			Name: "vm-a",
+			Status: api.VMStatus{
+				NodeName: "node-a",
+				Migration: &api.MigrationStatus{
+					State:      "failed",
+					TargetNode: "node-b",
+					Progress:   60,
+				},
+			},
+		})
+	})
+	defer closeServer()
+
+	err := waitForVMMigration(vmService, "default", "vm-a", "node-b", time.Second)
+	if err == nil || !strings.Contains(err.Error(), "migration failed") {
+		t.Fatalf("expected migration failure, got %v", err)
+	}
+}
