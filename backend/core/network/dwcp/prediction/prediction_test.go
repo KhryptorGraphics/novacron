@@ -281,6 +281,54 @@ func TestPredictionService(t *testing.T) {
 		assert.GreaterOrEqual(t, results.PredictionCount, 0)
 	})
 
+	t.Run("EnableABTestingCanRunWhileUpdatingPrediction", func(t *testing.T) {
+		service, err := NewPredictionService("", 10*time.Millisecond)
+		require.NoError(t, err)
+		defer service.Stop()
+
+		for _, sample := range makeTestNetworkHistory() {
+			service.collector.addSample(sample)
+		}
+		require.NoError(t, service.EnableABTesting(""))
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for i := 0; i < 100; i++ {
+				service.updatePrediction()
+			}
+		}()
+
+		for i := 0; i < 100; i++ {
+			require.NoError(t, service.EnableABTesting(""))
+		}
+		<-done
+
+		require.NotNil(t, service.GetPrediction())
+	})
+
+	t.Run("StopCanRunWhileABTestingChanges", func(t *testing.T) {
+		service, err := NewPredictionService("", 10*time.Millisecond)
+		require.NoError(t, err)
+
+		require.NoError(t, service.EnableABTesting(""))
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for i := 0; i < 100; i++ {
+				require.NoError(t, service.EnableABTesting(""))
+			}
+		}()
+
+		for i := 0; i < 100; i++ {
+			require.NoError(t, service.Stop())
+		}
+		<-done
+
+		require.NoError(t, service.Stop())
+	})
+
 	t.Run("UpdateAccuracyIgnoresInvalidActualTelemetry", func(t *testing.T) {
 		service, err := NewPredictionService("", 10*time.Millisecond)
 		require.NoError(t, err)

@@ -266,10 +266,8 @@ func (s *PredictionService) updatePrediction() {
 	}
 	s.mu.Unlock()
 
-	// A/B testing if enabled
-	if s.abTestEnabled && s.alternateModel != nil {
-		go s.runABTest(history)
-	}
+	// A/B testing, if currently enabled.
+	go s.runABTest(history)
 }
 
 // GetPrediction returns the current prediction
@@ -600,6 +598,9 @@ func (s *PredictionService) ExportMetrics(outputPath string) error {
 func (s *PredictionService) Stop() error {
 	s.mu.Lock()
 	cancel := s.cancel
+	alternateModel := s.alternateModel
+	s.alternateModel = nil
+	s.abTestEnabled = false
 	s.mu.Unlock()
 
 	if cancel != nil {
@@ -612,8 +613,8 @@ func (s *PredictionService) Stop() error {
 		s.predictor.Close()
 	}
 
-	if s.alternateModel != nil {
-		s.alternateModel.Close()
+	if alternateModel != nil {
+		alternateModel.Close()
 	}
 
 	s.mu.Lock()
