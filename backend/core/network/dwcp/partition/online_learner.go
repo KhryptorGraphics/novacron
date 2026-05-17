@@ -492,19 +492,23 @@ func (er *EvaluationResults) calculateStats() {
 	er.MeanLatency = mean(er.Latencies)
 	er.StdLatency = stddev(er.Latencies, er.MeanLatency)
 
-	if len(er.Rewards) == 0 {
-		er.SuccessRate = 0
-		return
-	}
-
-	// Count successful episodes (positive reward)
+	finiteRewards := 0
 	successCount := 0
 	for _, r := range er.Rewards {
+		if math.IsNaN(r) || math.IsInf(r, 0) {
+			continue
+		}
+		finiteRewards++
 		if r > 0 {
 			successCount++
 		}
 	}
-	er.SuccessRate = float64(successCount) / float64(len(er.Rewards))
+	if finiteRewards == 0 {
+		er.SuccessRate = 0
+		return
+	}
+
+	er.SuccessRate = float64(successCount) / float64(finiteRewards)
 }
 
 func mean(values []float64) float64 {
@@ -512,10 +516,18 @@ func mean(values []float64) float64 {
 		return 0
 	}
 	sum := 0.0
+	count := 0
 	for _, v := range values {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			continue
+		}
 		sum += v
+		count++
 	}
-	return sum / float64(len(values))
+	if count == 0 {
+		return 0
+	}
+	return sum / float64(count)
 }
 
 func stddev(values []float64, mean float64) float64 {
@@ -523,11 +535,19 @@ func stddev(values []float64, mean float64) float64 {
 		return 0
 	}
 	variance := 0.0
+	count := 0
 	for _, v := range values {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			continue
+		}
 		diff := v - mean
 		variance += diff * diff
+		count++
 	}
-	variance /= float64(len(values))
+	if count == 0 {
+		return 0
+	}
+	variance /= float64(count)
 	return math.Sqrt(variance)
 }
 

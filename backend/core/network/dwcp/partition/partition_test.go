@@ -1369,6 +1369,46 @@ func TestEvaluationResultsCalculateStatsHandlesEmptySamples(t *testing.T) {
 	}
 }
 
+func TestEvaluationResultsCalculateStatsIgnoresNonFiniteSamples(t *testing.T) {
+	results := &EvaluationResults{
+		Rewards:     []float64{2, math.NaN(), math.Inf(1), 4},
+		Throughputs: []float64{10, math.Inf(-1), 14},
+		Latencies:   []float64{1, math.NaN(), 5},
+	}
+
+	results.calculateStats()
+
+	stats := []struct {
+		name  string
+		value float64
+	}{
+		{name: "mean_reward", value: results.MeanReward},
+		{name: "std_reward", value: results.StdReward},
+		{name: "mean_throughput", value: results.MeanThroughput},
+		{name: "std_throughput", value: results.StdThroughput},
+		{name: "mean_latency", value: results.MeanLatency},
+		{name: "std_latency", value: results.StdLatency},
+		{name: "success_rate", value: results.SuccessRate},
+	}
+	for _, stat := range stats {
+		if math.IsNaN(stat.value) || math.IsInf(stat.value, 0) {
+			t.Fatalf("%s should remain finite with non-finite samples, got %v", stat.name, stat.value)
+		}
+	}
+	if results.MeanReward != 3 || results.StdReward != 1 {
+		t.Fatalf("expected reward stats from finite samples only, mean=%v std=%v", results.MeanReward, results.StdReward)
+	}
+	if results.MeanThroughput != 12 || results.StdThroughput != 2 {
+		t.Fatalf("expected throughput stats from finite samples only, mean=%v std=%v", results.MeanThroughput, results.StdThroughput)
+	}
+	if results.MeanLatency != 3 || results.StdLatency != 2 {
+		t.Fatalf("expected latency stats from finite samples only, mean=%v std=%v", results.MeanLatency, results.StdLatency)
+	}
+	if results.SuccessRate != 1 {
+		t.Fatalf("expected success rate from finite rewards only, got %v", results.SuccessRate)
+	}
+}
+
 func TestActionDecoding(t *testing.T) {
 	agent, err := NewDQNAgent("nonexistent.onnx")
 	if err != nil {
