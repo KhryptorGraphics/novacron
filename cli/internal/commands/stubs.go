@@ -710,13 +710,75 @@ type migrationResponse struct {
 }
 
 func NewSnapshotCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "snapshot",
 		Short: "Manage VM snapshots",
+	}
+
+	cmd.AddCommand(newSnapshotCreateCommand())
+	return cmd
+}
+
+func newSnapshotCreateCommand() *cobra.Command {
+	var (
+		description string
+		memory      bool
+		quiesce     bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "create <vm-id> <snapshot-name>",
+		Short: "Create a VM snapshot",
+		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("snapshot command not yet implemented")
+			client, err := currentClusterAPIClient()
+			if err != nil {
+				return err
+			}
+
+			req := createSnapshotRequest{
+				Name:        strings.TrimSpace(args[1]),
+				Description: strings.TrimSpace(description),
+				Memory:      memory,
+				Quiesce:     quiesce,
+			}
+
+			var snapshot snapshotResponse
+			path := "/api/v1/vms/" + url.PathEscape(strings.TrimSpace(args[0])) + "/snapshot"
+			if err := client.Post(cmd.Context(), path, req, &snapshot); err != nil {
+				return err
+			}
+
+			data, err := yaml.Marshal(snapshot)
+			if err != nil {
+				return err
+			}
+			_, err = cmd.OutOrStdout().Write(data)
+			return err
 		},
 	}
+
+	cmd.Flags().StringVar(&description, "description", "", "Snapshot description")
+	cmd.Flags().BoolVar(&memory, "memory", false, "Include VM memory in the snapshot")
+	cmd.Flags().BoolVar(&quiesce, "quiesce", false, "Quiesce guest filesystems before snapshot")
+
+	return cmd
+}
+
+type createSnapshotRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Memory      bool   `json:"memory,omitempty"`
+	Quiesce     bool   `json:"quiesce,omitempty"`
+}
+
+type snapshotResponse struct {
+	SnapshotID string `json:"snapshot_id,omitempty" yaml:"snapshot_id,omitempty"`
+	Status     string `json:"status,omitempty" yaml:"status,omitempty"`
+	Message    string `json:"message,omitempty" yaml:"message,omitempty"`
+	VMID       string `json:"vm_id,omitempty" yaml:"vm_id,omitempty"`
+	Name       string `json:"name,omitempty" yaml:"name,omitempty"`
+	CreatedAt  string `json:"created_at,omitempty" yaml:"created_at,omitempty"`
 }
 
 func NewMonitorCommand() *cobra.Command {
