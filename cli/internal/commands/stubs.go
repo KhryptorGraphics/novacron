@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/novacron/cli/pkg/api"
 	"github.com/novacron/cli/pkg/auth"
 	"github.com/novacron/cli/pkg/config"
 	"github.com/spf13/cobra"
@@ -447,13 +448,102 @@ func newConfigGetClusterCommand() *cobra.Command {
 }
 
 func NewNodeCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "node",
 		Short: "Manage cluster nodes",
+	}
+
+	cmd.AddCommand(
+		newNodeListCommand(),
+		newNodeGetCommand(),
+	)
+
+	return cmd
+}
+
+type clusterNode struct {
+	ID                 string            `json:"id" yaml:"id"`
+	Address            string            `json:"address,omitempty" yaml:"address,omitempty"`
+	Status             string            `json:"status" yaml:"status"`
+	CPU                int               `json:"cpu,omitempty" yaml:"cpu,omitempty"`
+	Memory             int64             `json:"memory,omitempty" yaml:"memory,omitempty"`
+	Disk               int64             `json:"disk,omitempty" yaml:"disk,omitempty"`
+	UsedCPU            int               `json:"used_cpu,omitempty" yaml:"used_cpu,omitempty"`
+	RemainingCPU       int               `json:"remaining_cpu,omitempty" yaml:"remaining_cpu,omitempty"`
+	UsedMemoryMB       int64             `json:"used_memory_mb,omitempty" yaml:"used_memory_mb,omitempty"`
+	RemainingMemoryMB  int64             `json:"remaining_memory_mb,omitempty" yaml:"remaining_memory_mb,omitempty"`
+	UsedDiskGB         int64             `json:"used_disk_gb,omitempty" yaml:"used_disk_gb,omitempty"`
+	RemainingDiskGB    int64             `json:"remaining_disk_gb,omitempty" yaml:"remaining_disk_gb,omitempty"`
+	CPUUsagePercent    float64           `json:"cpu_usage_percent,omitempty" yaml:"cpu_usage_percent,omitempty"`
+	MemoryUsagePercent float64           `json:"memory_usage_percent,omitempty" yaml:"memory_usage_percent,omitempty"`
+	DiskUsagePercent   float64           `json:"disk_usage_percent,omitempty" yaml:"disk_usage_percent,omitempty"`
+	VMCount            int               `json:"vm_count,omitempty" yaml:"vm_count,omitempty"`
+	Schedulable        bool              `json:"schedulable" yaml:"schedulable"`
+	Labels             map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
+}
+
+func newNodeListCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List cluster nodes",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("node command not yet implemented")
+			client, err := currentClusterAPIClient()
+			if err != nil {
+				return err
+			}
+
+			var nodes []clusterNode
+			if err := client.Get(cmd.Context(), "/api/cluster/nodes", &nodes); err != nil {
+				return err
+			}
+
+			writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+			fmt.Fprintln(writer, "NAME\tSTATUS\tCPU\tMEMORY(MB)\tDISK(GB)\tVMS\tSCHEDULABLE")
+			for _, node := range nodes {
+				fmt.Fprintf(writer, "%s\t%s\t%d\t%d\t%d\t%d\t%t\n", node.ID, node.Status, node.CPU, node.Memory, node.Disk, node.VMCount, node.Schedulable)
+			}
+			return writer.Flush()
 		},
 	}
+}
+
+func newNodeGetCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "get <name>",
+		Short: "Get cluster node details",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := currentClusterAPIClient()
+			if err != nil {
+				return err
+			}
+
+			var node clusterNode
+			if err := client.Get(cmd.Context(), "/api/cluster/nodes/"+args[0], &node); err != nil {
+				return err
+			}
+
+			data, err := yaml.Marshal(node)
+			if err != nil {
+				return err
+			}
+			_, err = cmd.OutOrStdout().Write(data)
+			return err
+		},
+	}
+}
+
+func currentClusterAPIClient() (*api.Client, error) {
+	manager, err := config.NewManager(cfgFile)
+	if err != nil {
+		return nil, err
+	}
+	cluster, err := manager.GetCurrentCluster()
+	if err != nil {
+		return nil, err
+	}
+	return newClusterAPIClient(cluster)
 }
 
 func NewClusterCommand() *cobra.Command {
