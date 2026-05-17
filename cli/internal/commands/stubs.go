@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -654,11 +655,95 @@ func NewSnapshotCommand() *cobra.Command {
 }
 
 func NewMonitorCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "monitor",
 		Short: "Monitor cluster resources",
+	}
+
+	cmd.AddCommand(
+		newMonitorMetricsCommand(),
+		newMonitorVMsCommand(),
+	)
+
+	return cmd
+}
+
+type vmMetricsResponse struct {
+	ID          string  `json:"id" yaml:"id"`
+	CPUUsage    float64 `json:"cpu_usage" yaml:"cpu_usage"`
+	MemoryUsage float64 `json:"memory_usage" yaml:"memory_usage"`
+}
+
+type monitoringVM struct {
+	VMID        string  `json:"vmId" yaml:"vm_id"`
+	Name        string  `json:"name" yaml:"name"`
+	Status      string  `json:"status" yaml:"status"`
+	CPUUsage    float64 `json:"cpuUsage" yaml:"cpu_usage"`
+	MemoryUsage float64 `json:"memoryUsage" yaml:"memory_usage"`
+	DiskUsage   float64 `json:"diskUsage" yaml:"disk_usage"`
+	NetworkRx   float64 `json:"networkRx" yaml:"network_rx"`
+	NetworkTx   float64 `json:"networkTx" yaml:"network_tx"`
+	IOPS        float64 `json:"iops" yaml:"iops"`
+}
+
+func newMonitorMetricsCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "metrics <vm-id>",
+		Short: "Show current VM metrics",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("monitor command not yet implemented")
+			client, err := currentClusterAPIClient()
+			if err != nil {
+				return err
+			}
+
+			var metrics vmMetricsResponse
+			path := "/api/v1/vms/" + url.PathEscape(args[0]) + "/metrics"
+			if err := client.Get(cmd.Context(), path, &metrics); err != nil {
+				return err
+			}
+
+			writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+			fmt.Fprintf(writer, "ID\t%s\n", metrics.ID)
+			fmt.Fprintf(writer, "CPU USAGE\t%.2f%%\n", metrics.CPUUsage)
+			fmt.Fprintf(writer, "MEMORY USAGE\t%.2f%%\n", metrics.MemoryUsage)
+			return writer.Flush()
+		},
+	}
+}
+
+func newMonitorVMsCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:     "vms",
+		Aliases: []string{"vm"},
+		Short:   "List monitored VMs",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := currentClusterAPIClient()
+			if err != nil {
+				return err
+			}
+
+			var vms []monitoringVM
+			if err := client.Get(cmd.Context(), "/api/monitoring/vms", &vms); err != nil {
+				return err
+			}
+
+			writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+			fmt.Fprintln(writer, "VM ID\tNAME\tSTATUS\tCPU\tMEMORY\tDISK\tRX\tTX\tIOPS")
+			for _, vm := range vms {
+				fmt.Fprintf(writer, "%s\t%s\t%s\t%.2f%%\t%.2f%%\t%.2f%%\t%.0f\t%.0f\t%.0f\n",
+					vm.VMID,
+					vm.Name,
+					vm.Status,
+					vm.CPUUsage,
+					vm.MemoryUsage,
+					vm.DiskUsage,
+					vm.NetworkRx,
+					vm.NetworkTx,
+					vm.IOPS,
+				)
+			}
+			return writer.Flush()
 		},
 	}
 }
