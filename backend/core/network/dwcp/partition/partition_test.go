@@ -1381,6 +1381,30 @@ func TestDQNAgentLoadModelSanitizesInvalidScalarState(t *testing.T) {
 	}
 }
 
+func TestDQNAgentGetMetricsIgnoresNonFiniteEpisodeRewards(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer agent.Destroy()
+
+	agent.mu.Lock()
+	agent.episodeRewards = []float64{1, math.NaN(), math.Inf(1), 3}
+	agent.mu.Unlock()
+
+	metrics := agent.GetMetrics()
+	avgReward, ok := metrics["average_reward"].(float64)
+	if !ok {
+		t.Fatalf("average_reward has unexpected type %T", metrics["average_reward"])
+	}
+	if math.IsNaN(avgReward) || math.IsInf(avgReward, 0) {
+		t.Fatalf("average_reward should remain finite, got %v", avgReward)
+	}
+	if avgReward != 2 {
+		t.Fatalf("expected average reward from finite samples only, got %v", avgReward)
+	}
+}
+
 func TestEvaluationThroughputIgnoresInvalidInputs(t *testing.T) {
 	tests := []struct {
 		name         string

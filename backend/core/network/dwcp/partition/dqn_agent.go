@@ -614,11 +614,18 @@ func (agent *DQNAgent) GetMetrics() map[string]interface{} {
 	defer agent.mu.RUnlock()
 
 	avgReward := 0.0
+	rewardCount := 0
 	if len(agent.episodeRewards) > 0 {
 		for _, r := range agent.episodeRewards {
+			if math.IsNaN(r) || math.IsInf(r, 0) {
+				continue
+			}
 			avgReward += r
+			rewardCount++
 		}
-		avgReward /= float64(len(agent.episodeRewards))
+		if rewardCount > 0 {
+			avgReward /= float64(rewardCount)
+		}
 	}
 
 	return map[string]interface{}{
