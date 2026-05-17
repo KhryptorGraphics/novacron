@@ -282,6 +282,7 @@ func (ol *OnlineLearner) GetStatus() map[string]interface{} {
 
 	return map[string]interface{}{
 		"is_training":       ol.isTraining,
+		"stopped":           ol.ctx.Err() != nil,
 		"update_count":      ol.updateCount,
 		"experience_count":  ol.experienceCount,
 		"buffer_size":       ol.replayBuffer.Size(),

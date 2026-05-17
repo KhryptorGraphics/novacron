@@ -783,6 +783,18 @@ func TestTaskPartitionerFallbackHandlesInvalidTelemetry(t *testing.T) {
 	assert.Equal(t, taskSize, total)
 }
 
+func TestTaskPartitionerStopStopsOnlineLearner(t *testing.T) {
+	partitioner, err := dwcp.NewTaskPartitioner("", zaptest.NewLogger(t))
+	require.NoError(t, err)
+	defer partitioner.Destroy()
+
+	require.NoError(t, partitioner.Stop())
+
+	metrics := partitioner.GetMetrics()
+	require.Contains(t, metrics, "learner_stopped")
+	assert.Equal(t, true, metrics["learner_stopped"])
+}
+
 // TestConcurrentMetricsCollection tests concurrent metrics collection for race conditions
 func TestConcurrentMetricsCollection(t *testing.T) {
 	// This test is designed to be run with: go test -race -count=100

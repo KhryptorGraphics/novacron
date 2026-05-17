@@ -512,6 +512,10 @@ func (tp *TaskPartitioner) Destroy() {
 	tp.mu.Lock()
 	defer tp.mu.Unlock()
 
+	if tp.onlineLearner != nil {
+		tp.onlineLearner.Stop()
+	}
+
 	if tp.agent != nil {
 		tp.agent.Destroy()
 	}
@@ -602,6 +606,9 @@ func (tp *TaskPartitioner) Stop() error {
 	}
 
 	tp.enabled = false
+	if tp.onlineLearner != nil {
+		tp.onlineLearner.Stop()
+	}
 	tp.logger.Info("Task partitioner stopped successfully")
 
 	return nil
