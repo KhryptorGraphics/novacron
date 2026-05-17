@@ -30,6 +30,7 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/core/audit"
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
 	"github.com/khryptorgraphics/novacron/backend/core/storage"
+	corevm "github.com/khryptorgraphics/novacron/backend/core/vm"
 	"github.com/khryptorgraphics/novacron/backend/pkg/config"
 	"github.com/khryptorgraphics/novacron/backend/pkg/logger"
 )
@@ -1252,10 +1253,16 @@ func initializeCanonicalServices(cfg *config.Config, db *sql.DB, authManager *au
 		return nil, fmt.Errorf("failed to initialize storage-backed volume store: %w", err)
 	}
 
-	graphqlResolver := graphqlapi.NewResolverWithVolumeStore(nil, nil, volumeStore)
+	vmManager, err := corevm.NewVMManager(corevm.DefaultVMManagerConfig())
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize VM manager: %w", err)
+	}
+
+	graphqlResolver := graphqlapi.NewResolverWithVolumeStore(vmManager, nil, volumeStore)
 	websocketLogger := logrus.New()
 	websocketLogger.SetLevel(logrus.InfoLevel)
-	websocketHandler := websocketapi.NewWebSocketHandler(nil, nil, nil, nil, websocketLogger)
+	copyService := websocketapi.NewQGAVMCopyService(websocketapi.NewQGAGuestFileClientResolver(vmManager))
+	websocketHandler := websocketapi.NewWebSocketHandler(vmManager, nil, copyService, websocketLogger)
 
 	return &canonicalServices{
 		twoFactorService: twoFactorService,
@@ -1264,6 +1271,7 @@ func initializeCanonicalServices(cfg *config.Config, db *sql.DB, authManager *au
 		graphqlHandler:   graphqlapi.NewVolumeHTTPHandler(graphqlResolver),
 		shutdown: func() {
 			websocketHandler.Shutdown()
+			vmManager.Shutdown()
 		},
 	}, nil
 }

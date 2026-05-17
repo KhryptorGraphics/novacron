@@ -1714,3 +1714,35 @@ func TestBuildCanonicalServerSupportsLiveStartup(t *testing.T) {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
+
+func TestInitializeCanonicalServicesWiresVMCopyWebSocketService(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	cfg := &config.Config{
+		VM: config.VMConfig{
+			StoragePath: t.TempDir(),
+		},
+	}
+	authManager := auth.NewSimpleAuthManager("test-secret", db)
+
+	services, err := initializeCanonicalServices(cfg, db, authManager)
+	if err != nil {
+		t.Fatalf("failed to initialize canonical services: %v", err)
+	}
+	defer services.shutdown()
+
+	if !services.websocketHandler.SupportsVMCopy() {
+		t.Fatal("expected canonical WebSocket handler to support VM copy")
+	}
+	if services.websocketHandler.SupportsVMPortForward() {
+		t.Fatal("expected VM port-forward to remain gated until a backend is wired")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
