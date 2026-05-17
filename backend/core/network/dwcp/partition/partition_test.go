@@ -155,6 +155,32 @@ func TestOnlineLearnerStopCancelsAutoUpdateLoop(t *testing.T) {
 	}
 }
 
+func TestOnlineLearnerStoppedRejectsModelWork(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("failed to create DQN agent: %v", err)
+	}
+
+	learner := NewOnlineLearner(agent, &OnlineLearnerConfig{
+		UpdateFrequency:  time.Hour,
+		MinExperiences:   2,
+		TrainingScript:   "unused",
+		ModelPath:        filepath.Join(t.TempDir(), "model"),
+		EnableAutoUpdate: false,
+	})
+
+	learner.Stop()
+
+	if err := learner.ForceUpdate(); err == nil || err.Error() != "online learner stopped" {
+		t.Fatalf("expected stopped ForceUpdate error, got %v", err)
+	}
+
+	results, err := learner.EvaluateModel(1)
+	if err == nil || err.Error() != "online learner stopped" {
+		t.Fatalf("expected stopped EvaluateModel error, got results=%v err=%v", results, err)
+	}
+}
+
 func TestEnvironmentSimulator(t *testing.T) {
 	sim := NewEnvironmentSimulator()
 

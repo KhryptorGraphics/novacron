@@ -296,6 +296,11 @@ func (ol *OnlineLearner) GetStatus() map[string]interface{} {
 // ForceUpdate forces an immediate model update
 func (ol *OnlineLearner) ForceUpdate() error {
 	ol.mu.RLock()
+	if ol.ctx.Err() != nil {
+		ol.mu.RUnlock()
+		return fmt.Errorf("online learner stopped")
+	}
+
 	if ol.isTraining {
 		ol.mu.RUnlock()
 		return fmt.Errorf("training already in progress")
@@ -313,6 +318,13 @@ func (ol *OnlineLearner) ForceUpdate() error {
 
 // EvaluateModel evaluates the current model performance
 func (ol *OnlineLearner) EvaluateModel(episodes int) (*EvaluationResults, error) {
+	ol.mu.RLock()
+	stopped := ol.ctx.Err() != nil
+	ol.mu.RUnlock()
+	if stopped {
+		return nil, fmt.Errorf("online learner stopped")
+	}
+
 	log.Printf("Evaluating model over %d episodes...", episodes)
 
 	results := &EvaluationResults{
