@@ -1271,6 +1271,8 @@ func TestChunkSizeCalculationIgnoresInvalidInput(t *testing.T) {
 		{name: "negative_stream", taskSize: 100, numStreams: 1, streams: []int{-1}, state: NewEnvironmentState()},
 		{name: "too_large_stream", taskSize: 100, numStreams: 1, streams: []int{4}, state: NewEnvironmentState()},
 		{name: "mismatched_stream_count", taskSize: 100, numStreams: 2, streams: []int{0}, state: NewEnvironmentState()},
+		{name: "zero_task_size", taskSize: 0, numStreams: 1, streams: []int{0}, state: NewEnvironmentState()},
+		{name: "negative_task_size", taskSize: -100, numStreams: 1, streams: []int{0}, state: NewEnvironmentState()},
 	}
 
 	for _, tt := range tests {
@@ -1340,6 +1342,7 @@ func TestTimeEstimationIgnoresInvalidInput(t *testing.T) {
 		{name: "empty_streams", streams: nil, state: NewEnvironmentState()},
 		{name: "negative_stream", streams: []int{-1}, state: NewEnvironmentState()},
 		{name: "too_large_stream", streams: []int{4}, state: NewEnvironmentState()},
+		{name: "zero_task_size", streams: []int{0}, state: NewEnvironmentState()},
 	}
 
 	for _, tt := range tests {
@@ -1350,7 +1353,11 @@ func TestTimeEstimationIgnoresInvalidInput(t *testing.T) {
 				}
 			}()
 
-			estimated := agent.estimateTime(100, tt.streams, tt.state)
+			taskSize := 100
+			if tt.name == "zero_task_size" {
+				taskSize = 0
+			}
+			estimated := agent.estimateTime(taskSize, tt.streams, tt.state)
 			if estimated != 0 {
 				t.Fatalf("invalid time-estimation input should return zero duration, got %s", estimated)
 			}

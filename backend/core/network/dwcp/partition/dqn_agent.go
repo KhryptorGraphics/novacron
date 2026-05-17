@@ -396,7 +396,7 @@ func (agent *DQNAgent) decodeAction(action Action, state *EnvironmentState, deci
 
 // calculateChunkSizes determines how to split task across streams
 func (agent *DQNAgent) calculateChunkSizes(taskSize int, numStreams int, streams []int, state *EnvironmentState) []int {
-	if !validStreamSelection(state, streams, numStreams) {
+	if taskSize <= 0 || !validStreamSelection(state, streams, numStreams) {
 		return []int{}
 	}
 
@@ -448,7 +448,7 @@ func validStreamSelection(state *EnvironmentState, streams []int, numStreams int
 
 // estimateTime estimates completion time for a partitioning decision
 func (agent *DQNAgent) estimateTime(taskSize int, streams []int, state *EnvironmentState) time.Duration {
-	if !validStreamSelection(state, streams, len(streams)) {
+	if taskSize <= 0 || !validStreamSelection(state, streams, len(streams)) {
 		return 0
 	}
 
