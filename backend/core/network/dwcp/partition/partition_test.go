@@ -720,6 +720,53 @@ func TestEnvironmentSimulatorStepSanitizesInvalidMutableState(t *testing.T) {
 	}
 }
 
+func TestCalculateImbalanceHandlesInvalidInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		state   *EnvironmentState
+		streams []int
+	}{
+		{
+			name:    "nil_state",
+			state:   nil,
+			streams: []int{0, 1},
+		},
+		{
+			name:    "invalid_stream_indices",
+			state:   NewEnvironmentState(),
+			streams: []int{-1, 4},
+		},
+		{
+			name:  "invalid_bandwidth_values",
+			state: &EnvironmentState{StreamBandwidth: [4]float64{0, math.NaN(), math.Inf(1), -1}},
+			streams: []int{
+				0,
+				1,
+				2,
+				3,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("invalid imbalance input should not panic: %v", recovered)
+				}
+			}()
+
+			imbalance := calculateImbalance(tt.state, tt.streams)
+			if math.IsNaN(imbalance) || math.IsInf(imbalance, 0) {
+				t.Fatalf("invalid imbalance input should produce finite result, got %f", imbalance)
+			}
+			if imbalance < 0 {
+				t.Fatalf("imbalance should not be negative, got %f", imbalance)
+			}
+		})
+	}
+}
+
 func TestDQNAgentHeuristic(t *testing.T) {
 	// Test without loading a model (uses heuristic)
 	agent, err := NewDQNAgent("nonexistent_model.onnx")

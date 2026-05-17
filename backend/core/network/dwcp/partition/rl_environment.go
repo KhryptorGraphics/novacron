@@ -523,14 +523,26 @@ func getUsedStreams(action Action) []int {
 }
 
 func calculateImbalance(state *EnvironmentState, streams []int) float64 {
-	if len(streams) <= 1 {
+	if state == nil || len(streams) <= 1 {
 		return 0
 	}
 
 	var loads []float64
 	for _, idx := range streams {
-		load := state.StreamCongestion[idx] / state.StreamBandwidth[idx]
-		loads = append(loads, load)
+		if idx < 0 || idx >= 4 {
+			continue
+		}
+		bandwidth := positiveOrDefault(state.StreamBandwidth[idx], 0)
+		if bandwidth <= 0 {
+			continue
+		}
+		load := state.StreamCongestion[idx] / bandwidth
+		if !math.IsNaN(load) && !math.IsInf(load, 0) {
+			loads = append(loads, load)
+		}
+	}
+	if len(loads) <= 1 {
+		return 0
 	}
 
 	// Calculate standard deviation of loads
