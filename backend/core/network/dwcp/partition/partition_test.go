@@ -1252,6 +1252,43 @@ func TestChunkSizeCalculation(t *testing.T) {
 	}
 }
 
+func TestChunkSizeCalculationIgnoresInvalidInput(t *testing.T) {
+	agent, err := NewDQNAgent("nonexistent.onnx")
+	if err != nil {
+		t.Skipf("ONNX Runtime not available, skipping: %v", err)
+		return
+	}
+	defer agent.Destroy()
+
+	tests := []struct {
+		name       string
+		taskSize   int
+		numStreams int
+		streams    []int
+		state      *EnvironmentState
+	}{
+		{name: "nil_state", taskSize: 100, numStreams: 1, streams: []int{0}, state: nil},
+		{name: "negative_stream", taskSize: 100, numStreams: 1, streams: []int{-1}, state: NewEnvironmentState()},
+		{name: "too_large_stream", taskSize: 100, numStreams: 1, streams: []int{4}, state: NewEnvironmentState()},
+		{name: "mismatched_stream_count", taskSize: 100, numStreams: 2, streams: []int{0}, state: NewEnvironmentState()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("invalid chunk-size input should not panic: %v", recovered)
+				}
+			}()
+
+			chunks := agent.calculateChunkSizes(tt.taskSize, tt.numStreams, tt.streams, tt.state)
+			if len(chunks) != 0 {
+				t.Fatalf("invalid chunk-size input should return no chunks, got %v", chunks)
+			}
+		})
+	}
+}
+
 func TestTimeEstimation(t *testing.T) {
 	agent, err := NewDQNAgent("nonexistent.onnx")
 	if err != nil {
@@ -1283,6 +1320,41 @@ func TestTimeEstimation(t *testing.T) {
 
 	if time1 <= 0 || time2 <= 0 || time4 <= 0 {
 		t.Error("Invalid time estimates")
+	}
+}
+
+func TestTimeEstimationIgnoresInvalidInput(t *testing.T) {
+	agent, err := NewDQNAgent("nonexistent.onnx")
+	if err != nil {
+		t.Skipf("ONNX Runtime not available, skipping: %v", err)
+		return
+	}
+	defer agent.Destroy()
+
+	tests := []struct {
+		name    string
+		streams []int
+		state   *EnvironmentState
+	}{
+		{name: "nil_state", streams: []int{0}, state: nil},
+		{name: "empty_streams", streams: nil, state: NewEnvironmentState()},
+		{name: "negative_stream", streams: []int{-1}, state: NewEnvironmentState()},
+		{name: "too_large_stream", streams: []int{4}, state: NewEnvironmentState()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("invalid time-estimation input should not panic: %v", recovered)
+				}
+			}()
+
+			estimated := agent.estimateTime(100, tt.streams, tt.state)
+			if estimated != 0 {
+				t.Fatalf("invalid time-estimation input should return zero duration, got %s", estimated)
+			}
+		})
 	}
 }
 
