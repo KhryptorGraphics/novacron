@@ -160,6 +160,13 @@ func (tp *TaskPartitioner) ReportOutcome(taskID string, decision *partition.Task
 			zap.Duration("expected_time", decision.ExpectedTime))
 		return
 	}
+	if !isValidPartitionAction(decision.Action) {
+		tp.logger.Warn("Skipping online learning update for task outcome; invalid action",
+			zap.String("task_id", taskID),
+			zap.Bool("success", success),
+			zap.Int("action", int(decision.Action)))
+		return
+	}
 
 	// If learning components are not initialized, just track basic stats
 	if tp.agent == nil || tp.onlineLearner == nil {
@@ -480,6 +487,10 @@ func isValidOutcomeTelemetry(actualThroughput float64, actualLatency time.Durati
 		return false
 	}
 	return actualLatency > 0 && expectedTime > 0
+}
+
+func isValidPartitionAction(action partition.Action) bool {
+	return action >= 0 && action < partition.NumActions
 }
 
 // GetMetrics returns partitioner metrics
