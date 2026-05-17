@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp"
+	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/partition"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -855,6 +856,27 @@ func TestTaskPartitionerReportOutcomeHandlesNilDecision(t *testing.T) {
 
 	require.NotPanics(t, func() {
 		partitioner.ReportOutcome("nil-decision", nil, 100, time.Millisecond, true)
+	})
+
+	metrics := partitioner.GetMetrics()
+	assert.Equal(t, int64(1), metrics["successful_tasks"])
+	assert.Equal(t, int64(0), metrics["failed_tasks"])
+}
+
+func TestTaskPartitionerReportOutcomeIgnoresInvalidDecisionStreams(t *testing.T) {
+	partitioner, err := dwcp.NewTaskPartitioner("", zaptest.NewLogger(t))
+	require.NoError(t, err)
+	defer partitioner.Destroy()
+
+	decision := &partition.TaskPartitionDecision{
+		Action:       partition.ActionStream1,
+		StreamIDs:    []int{-1, 99},
+		ChunkSizes:   []int{512, 512},
+		ExpectedTime: time.Millisecond,
+	}
+
+	require.NotPanics(t, func() {
+		partitioner.ReportOutcome("invalid-streams", decision, 100, time.Millisecond, true)
 	})
 
 	metrics := partitioner.GetMetrics()

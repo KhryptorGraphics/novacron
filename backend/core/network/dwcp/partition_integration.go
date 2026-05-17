@@ -221,7 +221,7 @@ func (tp *TaskPartitioner) createNextState(decision *partition.TaskPartitionDeci
 
 	// Update stream metrics based on usage
 	for _, streamID := range decision.StreamIDs {
-		if streamID >= 4 {
+		if streamID < 0 || streamID >= 4 {
 			continue
 		}
 
@@ -266,7 +266,7 @@ func (tp *TaskPartitioner) calculateStreamImbalance(streamIDs []int) float64 {
 
 	var loads []float64
 	for _, sid := range streamIDs {
-		if sid < 4 {
+		if sid >= 0 && sid < 4 {
 			loads = append(loads, tp.envState.StreamCongestion[sid])
 		}
 	}
@@ -385,7 +385,7 @@ func (tp *TaskPartitioner) estimateTime(taskSize int, streams []int) time.Durati
 	maxTime := 0.0
 
 	for _, streamID := range streams {
-		if streamID >= 4 {
+		if streamID < 0 || streamID >= 4 {
 			continue
 		}
 
