@@ -85,8 +85,8 @@ func (tp *TaskPartitioner) PartitionTask(task *Task) (*partition.TaskPartitionDe
 	tp.mu.Lock()
 	defer tp.mu.Unlock()
 
-	if task == nil {
-		return nil, fmt.Errorf("task is required")
+	if err := validatePartitionTask(task); err != nil {
+		return nil, err
 	}
 
 	if !tp.enabled {
@@ -568,8 +568,8 @@ func (m *Manager) PartitionTask(ctx context.Context, task *Task) (*partition.Tas
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	if task == nil {
-		return nil, fmt.Errorf("task is required")
+	if err := validatePartitionTask(task); err != nil {
+		return nil, err
 	}
 
 	if !m.enabled || !m.started {
@@ -602,6 +602,16 @@ func (m *Manager) PartitionTask(ctx context.Context, task *Task) (*partition.Tas
 	}
 
 	return decision, nil
+}
+
+func validatePartitionTask(task *Task) error {
+	if task == nil {
+		return fmt.Errorf("task is required")
+	}
+	if task.Size <= 0 {
+		return fmt.Errorf("task size must be positive")
+	}
+	return nil
 }
 
 // Start initializes and starts the TaskPartitioner

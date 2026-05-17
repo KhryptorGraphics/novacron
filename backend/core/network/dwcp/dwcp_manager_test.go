@@ -832,6 +832,22 @@ func TestTaskPartitionerRejectsNilTask(t *testing.T) {
 	assert.Contains(t, err.Error(), "task is required")
 }
 
+func TestTaskPartitionerRejectsNonPositiveTaskSize(t *testing.T) {
+	partitioner, err := dwcp.NewTaskPartitioner("", zaptest.NewLogger(t))
+	require.NoError(t, err)
+	defer partitioner.Destroy()
+
+	for _, size := range []int{0, -1} {
+		decision, err := partitioner.PartitionTask(&dwcp.Task{
+			ID:   "invalid-size",
+			Size: size,
+		})
+		require.Error(t, err)
+		require.Nil(t, decision)
+		assert.Contains(t, err.Error(), "task size must be positive")
+	}
+}
+
 func TestTaskPartitionerReportOutcomeHandlesNilDecision(t *testing.T) {
 	partitioner, err := dwcp.NewTaskPartitioner("", zaptest.NewLogger(t))
 	require.NoError(t, err)
@@ -855,6 +871,20 @@ func TestManagerPartitionTaskRejectsNilTask(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, decision)
 	assert.Contains(t, err.Error(), "task is required")
+}
+
+func TestManagerPartitionTaskRejectsNonPositiveTaskSize(t *testing.T) {
+	manager := setupTestManager(t)
+	require.NoError(t, manager.Start())
+	defer manager.Stop()
+
+	decision, err := manager.PartitionTask(context.Background(), &dwcp.Task{
+		ID:   "invalid-size",
+		Size: 0,
+	})
+	require.Error(t, err)
+	require.Nil(t, decision)
+	assert.Contains(t, err.Error(), "task size must be positive")
 }
 
 // TestConcurrentMetricsCollection tests concurrent metrics collection for race conditions
