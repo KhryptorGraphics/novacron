@@ -187,10 +187,13 @@ func (m *Manager) startPhase1Components(ctx context.Context) error {
 
 	// 4. Task Partitioner (ITP) - Intelligent task distribution
 	if m.partitioner != nil {
-		if err := m.partitioner.Start(ctx); err != nil {
+		if m.partitioner.IsRunning() {
+			m.logger.Info("Task partitioner already running")
+		} else if err := m.partitioner.Start(ctx); err != nil {
 			return fmt.Errorf("failed to start task partitioner: %w", err)
+		} else {
+			m.logger.Info("Task partitioner started successfully")
 		}
-		m.logger.Info("Task partitioner started successfully")
 	}
 
 	return nil

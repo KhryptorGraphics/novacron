@@ -811,6 +811,16 @@ func TestTaskPartitionerStoppedRejectsModelControl(t *testing.T) {
 	assert.Contains(t, err.Error(), "stopped")
 }
 
+func TestManagerStartsWithPreconfiguredTaskPartitioner(t *testing.T) {
+	manager := setupTestManager(t)
+	require.NoError(t, manager.AddTaskPartitioner(""))
+
+	require.NoError(t, manager.Start())
+	defer manager.Stop()
+
+	assert.True(t, manager.IsStarted())
+}
+
 // TestConcurrentMetricsCollection tests concurrent metrics collection for race conditions
 func TestConcurrentMetricsCollection(t *testing.T) {
 	// This test is designed to be run with: go test -race -count=100
