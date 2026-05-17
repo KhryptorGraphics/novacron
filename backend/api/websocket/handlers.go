@@ -201,6 +201,8 @@ func (h *WebSocketHandler) RegisterWebSocketRoutes(router *mux.Router, require f
 
 		// Console WebSocket (operator+)
 		wsRouter.Handle("/console/{vmId}", require("operator", h.HandleConsoleWebSocket)).Methods("GET")
+		wsRouter.Handle("/vms/{vmId}/copy", require("operator", h.HandleVMCopyWebSocket)).Methods("GET")
+		wsRouter.Handle("/vms/{vmId}/port-forward", require("operator", h.HandleVMPortForwardWebSocket)).Methods("GET")
 
 		// Metrics streaming (viewer+)
 		wsRouter.Handle("/metrics", require("viewer", h.HandleMetricsWebSocket)).Methods("GET")
@@ -212,6 +214,18 @@ func (h *WebSocketHandler) RegisterWebSocketRoutes(router *mux.Router, require f
 		wsRouter.Handle("/logs", require("admin", h.HandleLogsWebSocket)).Methods("GET")
 		wsRouter.Handle("/logs/{source}", require("admin", h.HandleSourceLogsWebSocket)).Methods("GET")
 	}
+}
+
+// HandleVMCopyWebSocket gates the VM file-copy contract until a backend
+// implementation is available.
+func (h *WebSocketHandler) HandleVMCopyWebSocket(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "VM copy backend contract is not implemented; see docs/api/vm-io-contracts.md and tracking issue novacron-lmh", http.StatusNotImplemented)
+}
+
+// HandleVMPortForwardWebSocket gates the VM port-forward contract until a
+// backend implementation is available.
+func (h *WebSocketHandler) HandleVMPortForwardWebSocket(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "VM port-forward backend contract is not implemented; see docs/api/vm-io-contracts.md and tracking issue novacron-lmh", http.StatusNotImplemented)
 }
 
 // HandleConsoleWebSocket handles /ws/console/{vmId}

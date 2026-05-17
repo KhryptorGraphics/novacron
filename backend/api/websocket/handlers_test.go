@@ -147,6 +147,43 @@ func TestRegisterWebSocketRoutesSupportsCanonicalMetricsPrefix(t *testing.T) {
 	}
 }
 
+func TestRegisterWebSocketRoutesIncludesVMIOContractGates(t *testing.T) {
+	logger := logrus.New()
+	handler := NewWebSocketHandler(nil, nil, logger)
+	defer handler.Shutdown()
+
+	router := mux.NewRouter()
+	handler.RegisterWebSocketRoutes(router, passthroughRoleGuard)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	for _, tc := range []struct {
+		path string
+		want string
+	}{
+		{"/api/ws/vms/vm-1/copy?direction=upload&path=/tmp/file", "VM copy backend contract is not implemented"},
+		{"/api/ws/vms/vm-1/port-forward?port=80", "VM port-forward backend contract is not implemented"},
+		{"/ws/vms/vm-1/copy?direction=download&path=/tmp/file", "VM copy backend contract is not implemented"},
+		{"/ws/vms/vm-1/port-forward?port=80", "VM port-forward backend contract is not implemented"},
+	} {
+		resp, err := http.Get(server.URL + tc.path)
+		if err != nil {
+			t.Fatalf("GET %s failed: %v", tc.path, err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotImplemented {
+			t.Fatalf("expected %s to return 501, got %d", tc.path, resp.StatusCode)
+		}
+		buf := make([]byte, 512)
+		n, _ := resp.Body.Read(buf)
+		if !strings.Contains(string(buf[:n]), tc.want) {
+			t.Fatalf("expected response for %s to contain %q, got %q", tc.path, tc.want, string(buf[:n]))
+		}
+	}
+}
+
 // TestWebSocketAlertsEndpoint tests the /ws/alerts endpoint
 func TestWebSocketAlertsEndpoint(t *testing.T) {
 	logger := logrus.New()
