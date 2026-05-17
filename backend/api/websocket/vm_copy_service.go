@@ -2,8 +2,13 @@ package websocket
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"path"
+	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -20,6 +25,14 @@ type VMGuestFileClient interface {
 
 type VMGuestFileClientResolver interface {
 	ResolveGuestFileClient(ctx context.Context, vmID string) (VMGuestFileClient, error)
+}
+
+type VMGuestFileCommitter interface {
+	CommitUploadedFile(ctx context.Context, sourcePath, destinationPath string, overwrite bool, mode string) error
+}
+
+type VMGuestFileRemover interface {
+	RemoveFile(ctx context.Context, path string) error
 }
 
 type QGAVMCopyService struct {
@@ -61,19 +74,29 @@ func (s *QGAVMCopyService) handleUpload(ctx context.Context, options VMCopyOptio
 		return err
 	}
 
-	mode := "wb"
-	handle, err := client.FileOpen(ctx, options.Path, mode)
+	uploadPath := tempUploadPath(options.Path)
+	handle, err := client.FileOpen(ctx, uploadPath, "wb")
 	if err != nil {
 		_ = writeVMIOError(conn, "open_failed", err.Error())
 		return err
 	}
-	defer client.FileClose(ctx, handle)
+	closed := false
+	committed := false
+	defer func() {
+		if !closed {
+			_ = client.FileClose(ctx, handle)
+		}
+		if !committed {
+			removeGuestFile(ctx, client, uploadPath)
+		}
+	}()
 
 	if err := writeVMIOAck(conn, 0); err != nil {
 		return err
 	}
 
 	var writtenTotal int64
+	hash := sha256.New()
 	for {
 		messageType, frame, err := conn.ReadMessage()
 		if err != nil {
@@ -99,6 +122,7 @@ func (s *QGAVMCopyService) handleUpload(ctx context.Context, options VMCopyOptio
 				return err
 			}
 			writtenTotal += int64(written)
+			_, _ = hash.Write(payload[:written])
 		case VMIOFrameCopyEOF:
 			var eof VMCopyEOF
 			if _, err := DecodeVMIOJSONFrame(frame, &eof); err != nil {
@@ -110,10 +134,42 @@ func (s *QGAVMCopyService) handleUpload(ctx context.Context, options VMCopyOptio
 				_ = writeVMIOError(conn, "byte_count_mismatch", err.Error())
 				return err
 			}
+			if metadata.Size > 0 && metadata.Size != writtenTotal {
+				err := fmt.Errorf("metadata byte count %d does not match received bytes %d", metadata.Size, writtenTotal)
+				_ = writeVMIOError(conn, "byte_count_mismatch", err.Error())
+				return err
+			}
+			expectedChecksum := firstNonEmptyString(eof.SHA256, metadata.SHA256)
+			if expectedChecksum != "" {
+				actualChecksum := hex.EncodeToString(hash.Sum(nil))
+				if !strings.EqualFold(expectedChecksum, actualChecksum) {
+					err := fmt.Errorf("sha256 checksum mismatch")
+					_ = writeVMIOError(conn, "checksum_mismatch", err.Error())
+					return err
+				}
+			}
 			if err := client.FileFlush(ctx, handle); err != nil {
 				_ = writeVMIOError(conn, "flush_failed", err.Error())
 				return err
 			}
+			if err := client.FileClose(ctx, handle); err != nil {
+				_ = writeVMIOError(conn, "close_failed", err.Error())
+				return err
+			}
+			closed = true
+
+			committer, ok := client.(VMGuestFileCommitter)
+			if !ok {
+				err := errors.New("guest file client does not support atomic upload commit")
+				_ = writeVMIOError(conn, "commit_unsupported", err.Error())
+				return err
+			}
+			mode := firstNonEmptyString(options.Mode, metadata.Mode)
+			if err := committer.CommitUploadedFile(ctx, uploadPath, options.Path, options.Overwrite, mode); err != nil {
+				_ = writeVMIOError(conn, "commit_failed", err.Error())
+				return err
+			}
+			committed = true
 			return writeVMIOAck(conn, writtenTotal)
 		default:
 			err := fmt.Errorf("unexpected upload frame type %#x", frameType)
@@ -121,6 +177,27 @@ func (s *QGAVMCopyService) handleUpload(ctx context.Context, options VMCopyOptio
 			return err
 		}
 	}
+}
+
+func tempUploadPath(destination string) string {
+	dir := path.Dir(destination)
+	base := path.Base(destination)
+	return path.Join(dir, fmt.Sprintf(".%s.novacron-upload-%d.tmp", base, time.Now().UnixNano()))
+}
+
+func removeGuestFile(ctx context.Context, client VMGuestFileClient, path string) {
+	if remover, ok := client.(VMGuestFileRemover); ok {
+		_ = remover.RemoveFile(ctx, path)
+	}
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func (s *QGAVMCopyService) handleDownload(ctx context.Context, options VMCopyOptions, client VMGuestFileClient, conn *websocket.Conn) error {

@@ -3,6 +3,8 @@ package commands
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -50,7 +52,8 @@ func TestCopyCommandUploadsLocalFileOverWebSocket(t *testing.T) {
 			t.Errorf("decode metadata frame: %v", err)
 			return
 		}
-		if frameType != cliVMIOFrameCopyMetadata || metadata.Path != "/tmp/local.txt" || metadata.Size != int64(len(sourceContent)) {
+		expectedChecksum := fmt.Sprintf("%x", sha256.Sum256(sourceContent))
+		if frameType != cliVMIOFrameCopyMetadata || metadata.Path != "/tmp/local.txt" || metadata.Size != int64(len(sourceContent)) || metadata.SHA256 != expectedChecksum {
 			t.Errorf("unexpected metadata frame type=%#x metadata=%+v", frameType, metadata)
 			return
 		}
@@ -80,8 +83,8 @@ func TestCopyCommandUploadsLocalFileOverWebSocket(t *testing.T) {
 					t.Errorf("decode eof frame: %v", err)
 					return
 				}
-				if eof.Bytes != int64(len(sourceContent)) {
-					t.Errorf("unexpected eof byte count %d", eof.Bytes)
+				if eof.Bytes != int64(len(sourceContent)) || eof.SHA256 != expectedChecksum {
+					t.Errorf("unexpected eof frame %+v", eof)
 					return
 				}
 				if err := writeCopyAck(conn, int64(got.Len())); err != nil {
@@ -134,9 +137,10 @@ func TestCopyCommandDownloadsRemoteFileOverWebSocket(t *testing.T) {
 		defer conn.Close()
 
 		metadataFrame, err := encodeCLIVMIOJSONFrame(cliVMIOFrameCopyMetadata, cliVMCopyMetadata{
-			Path: "/var/log/app.log",
-			Size: int64(len(remoteContent)),
-			Mode: "0644",
+			Path:   "/var/log/app.log",
+			Size:   int64(len(remoteContent)),
+			Mode:   "0644",
+			SHA256: fmt.Sprintf("%x", sha256.Sum256(remoteContent)),
 		})
 		if err != nil {
 			t.Errorf("encode metadata: %v", err)
@@ -150,7 +154,10 @@ func TestCopyCommandDownloadsRemoteFileOverWebSocket(t *testing.T) {
 			t.Errorf("write data: %v", err)
 			return
 		}
-		eofFrame, err := encodeCLIVMIOJSONFrame(cliVMIOFrameCopyEOF, cliVMCopyEOF{Bytes: int64(len(remoteContent))})
+		eofFrame, err := encodeCLIVMIOJSONFrame(cliVMIOFrameCopyEOF, cliVMCopyEOF{
+			Bytes:  int64(len(remoteContent)),
+			SHA256: fmt.Sprintf("%x", sha256.Sum256(remoteContent)),
+		})
 		if err != nil {
 			t.Errorf("encode eof: %v", err)
 			return

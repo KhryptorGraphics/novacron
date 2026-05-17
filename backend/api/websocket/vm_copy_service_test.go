@@ -2,6 +2,8 @@ package websocket
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -31,7 +33,7 @@ func TestQGAVMCopyServiceUploadsFramesToGuestFile(t *testing.T) {
 		Path:   "/tmp/file",
 		Size:   11,
 		Mode:   "0644",
-		SHA256: "ignored-by-unit-test",
+		SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte("hello world"))),
 	})
 	if err != nil {
 		t.Fatalf("encode metadata: %v", err)
@@ -80,14 +82,80 @@ func TestQGAVMCopyServiceUploadsFramesToGuestFile(t *testing.T) {
 		t.Fatalf("unexpected final ack type=%#x ack=%#v", frameType, finalAck)
 	}
 
-	if guest.openPath != "/tmp/file" || guest.openMode != "wb" {
+	if guest.openPath == "" || guest.openPath == "/tmp/file" || guest.openMode != "wb" {
 		t.Fatalf("unexpected open call path=%s mode=%s", guest.openPath, guest.openMode)
 	}
 	if string(guest.written) != "hello world" {
 		t.Fatalf("expected guest write payload %q, got %q", "hello world", string(guest.written))
 	}
+	if guest.openPath == "/tmp/file" {
+		t.Fatalf("expected upload to open a temporary file, got destination path")
+	}
+	if guest.commitSource != guest.openPath || guest.commitDestination != "/tmp/file" || !guest.commitOverwrite || guest.commitMode != "0644" {
+		t.Fatalf("unexpected commit source=%s destination=%s overwrite=%v mode=%s", guest.commitSource, guest.commitDestination, guest.commitOverwrite, guest.commitMode)
+	}
 	if !guest.flushed || !guest.closed {
 		t.Fatalf("expected guest file to be flushed and closed")
+	}
+}
+
+func TestQGAVMCopyServiceValidatesUploadChecksumBeforeCommit(t *testing.T) {
+	guest := &recordingGuestFileClient{handle: 9}
+	service := NewQGAVMCopyService(staticGuestFileClientResolver{client: guest})
+	server := newVMCopyErrorTestServer(t, service, VMCopyOptions{Direction: "upload", Path: "/tmp/file", Overwrite: true})
+	defer server.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+server.URL[len("http"):], nil)
+	if err != nil {
+		t.Fatalf("dial upload websocket: %v", err)
+	}
+	defer conn.Close()
+
+	metadata, err := EncodeVMIOJSONFrame(VMIOFrameCopyMetadata, VMCopyMetadata{
+		Path:   "/tmp/file",
+		Size:   5,
+		SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte("other"))),
+	})
+	if err != nil {
+		t.Fatalf("encode metadata: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.BinaryMessage, metadata); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("read metadata ack: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.BinaryMessage, EncodeVMIODataFrame(VMIOFrameCopyData, []byte("hello"))); err != nil {
+		t.Fatalf("write data frame: %v", err)
+	}
+	eofFrame, err := EncodeVMIOJSONFrame(VMIOFrameCopyEOF, VMCopyEOF{
+		Bytes:  5,
+		SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte("other"))),
+	})
+	if err != nil {
+		t.Fatalf("encode eof: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.BinaryMessage, eofFrame); err != nil {
+		t.Fatalf("write eof frame: %v", err)
+	}
+
+	_, errorFrame, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read checksum error frame: %v", err)
+	}
+	var frameError VMIOError
+	frameType, err := DecodeVMIOJSONFrame(errorFrame, &frameError)
+	if err != nil {
+		t.Fatalf("decode checksum error: %v", err)
+	}
+	if frameType != VMIOFrameCopyError || frameError.Code != "checksum_mismatch" {
+		t.Fatalf("expected checksum_mismatch error, got type=%#x error=%#v", frameType, frameError)
+	}
+	if guest.commitSource != "" {
+		t.Fatalf("checksum mismatch should not commit temp file")
+	}
+	if guest.removedPath != guest.openPath {
+		t.Fatalf("expected temp file cleanup path %s, got %s", guest.openPath, guest.removedPath)
 	}
 }
 
@@ -171,6 +239,18 @@ func newVMCopyTestServer(t *testing.T, service *QGAVMCopyService, options VMCopy
 	}))
 }
 
+func newVMCopyErrorTestServer(t *testing.T, service *QGAVMCopyService, options VMCopyOptions) *httptest.Server {
+	t.Helper()
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatalf("upgrade websocket: %v", err)
+		}
+		_ = service.HandleVMCopy(r.Context(), "vm-1", options, conn)
+	}))
+}
+
 type staticGuestFileClientResolver struct {
 	client VMGuestFileClient
 }
@@ -180,15 +260,20 @@ func (r staticGuestFileClientResolver) ResolveGuestFileClient(context.Context, s
 }
 
 type recordingGuestFileClient struct {
-	mu         sync.Mutex
-	handle     int
-	openPath   string
-	openMode   string
-	written    []byte
-	flushed    bool
-	closed     bool
-	readChunks [][]byte
-	readIndex  int
+	mu                sync.Mutex
+	handle            int
+	openPath          string
+	openMode          string
+	written           []byte
+	flushed           bool
+	closed            bool
+	commitSource      string
+	commitDestination string
+	commitMode        string
+	commitOverwrite   bool
+	removedPath       string
+	readChunks        [][]byte
+	readIndex         int
 }
 
 func (c *recordingGuestFileClient) FileOpen(_ context.Context, path, mode string) (int, error) {
@@ -228,5 +313,22 @@ func (c *recordingGuestFileClient) FileClose(context.Context, int) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.closed = true
+	return nil
+}
+
+func (c *recordingGuestFileClient) CommitUploadedFile(_ context.Context, sourcePath, destinationPath string, overwrite bool, mode string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.commitSource = sourcePath
+	c.commitDestination = destinationPath
+	c.commitOverwrite = overwrite
+	c.commitMode = mode
+	return nil
+}
+
+func (c *recordingGuestFileClient) RemoveFile(_ context.Context, path string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.removedPath = path
 	return nil
 }

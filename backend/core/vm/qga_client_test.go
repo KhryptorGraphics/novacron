@@ -162,6 +162,66 @@ func TestQGAClientFileOperations(t *testing.T) {
 	}
 }
 
+func TestQGAClientCommitsUploadedFileWithGuestExec(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "qga.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen on unix socket: %v", err)
+	}
+	defer listener.Close()
+
+	responses := []string{
+		`{"return":{"pid":42}}` + "\n",
+		`{"return":{"exited":true,"exitcode":0}}` + "\n",
+		`{"return":{"pid":43}}` + "\n",
+		`{"return":{"exited":true,"exitcode":0}}` + "\n",
+		`{"return":{"pid":44}}` + "\n",
+		`{"return":{"exited":true,"exitcode":0}}` + "\n",
+	}
+	requests := make(chan map[string]interface{}, len(responses))
+	go serveQGATestResponses(listener, requests, responses)
+
+	client := NewQGAClient(socketPath)
+	if err := client.CommitUploadedFile(context.Background(), "/tmp/.file.tmp", "/tmp/file", true, "0640"); err != nil {
+		t.Fatalf("commit uploaded file: %v", err)
+	}
+	if err := client.RemoveFile(context.Background(), "/tmp/.stale.tmp"); err != nil {
+		t.Fatalf("remove stale file: %v", err)
+	}
+
+	commitRequest := <-requests
+	if commitRequest["execute"] != "guest-exec" {
+		t.Fatalf("expected guest-exec commit command, got %#v", commitRequest["execute"])
+	}
+	commitArgs := commitRequest["arguments"].(map[string]interface{})
+	if commitArgs["path"] != "/bin/mv" {
+		t.Fatalf("expected /bin/mv commit path, got %#v", commitArgs["path"])
+	}
+	commitStatus := <-requests
+	if commitStatus["execute"] != "guest-exec-status" {
+		t.Fatalf("expected guest-exec-status, got %#v", commitStatus["execute"])
+	}
+
+	chmodRequest := <-requests
+	if chmodRequest["execute"] != "guest-exec" {
+		t.Fatalf("expected chmod guest-exec command, got %#v", chmodRequest["execute"])
+	}
+	chmodArgs := chmodRequest["arguments"].(map[string]interface{})
+	if chmodArgs["path"] != "/bin/chmod" {
+		t.Fatalf("expected /bin/chmod path, got %#v", chmodArgs["path"])
+	}
+	<-requests
+
+	removeRequest := <-requests
+	if removeRequest["execute"] != "guest-exec" {
+		t.Fatalf("expected remove guest-exec command, got %#v", removeRequest["execute"])
+	}
+	removeArgs := removeRequest["arguments"].(map[string]interface{})
+	if removeArgs["path"] != "/bin/rm" {
+		t.Fatalf("expected /bin/rm remove path, got %#v", removeArgs["path"])
+	}
+}
+
 func assertArgPair(t *testing.T, args []string, flag, value string) {
 	t.Helper()
 	for i := 0; i < len(args)-1; i++ {

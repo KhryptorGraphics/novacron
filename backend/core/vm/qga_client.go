@@ -44,6 +44,16 @@ type qgaFileWriteResult struct {
 	EOF   bool `json:"eof"`
 }
 
+type qgaGuestExecResult struct {
+	PID int `json:"pid"`
+}
+
+type qgaGuestExecStatus struct {
+	Exited   bool   `json:"exited"`
+	ExitCode int    `json:"exitcode"`
+	ErrData  string `json:"err-data,omitempty"`
+}
+
 func NewQGAClient(socketPath string) *QGAClient {
 	return &QGAClient{
 		socketPath: socketPath,
@@ -146,4 +156,62 @@ func (c *QGAClient) FileFlush(ctx context.Context, handle int) error {
 	return c.Execute(ctx, "guest-file-flush", map[string]interface{}{
 		"handle": handle,
 	}, nil)
+}
+
+func (c *QGAClient) CommitUploadedFile(ctx context.Context, sourcePath, destinationPath string, overwrite bool, mode string) error {
+	args := []string{"-f", sourcePath, destinationPath}
+	if !overwrite {
+		args = []string{"-n", sourcePath, destinationPath}
+	}
+	if err := c.GuestExecWait(ctx, "/bin/mv", args); err != nil {
+		return err
+	}
+	if mode != "" {
+		if err := c.GuestExecWait(ctx, "/bin/chmod", []string{mode, destinationPath}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *QGAClient) RemoveFile(ctx context.Context, path string) error {
+	return c.GuestExecWait(ctx, "/bin/rm", []string{"-f", path})
+}
+
+func (c *QGAClient) GuestExecWait(ctx context.Context, path string, args []string) error {
+	var execResult qgaGuestExecResult
+	if err := c.Execute(ctx, "guest-exec", map[string]interface{}{
+		"path":           path,
+		"arg":            args,
+		"capture-output": true,
+	}, &execResult); err != nil {
+		return err
+	}
+	if execResult.PID == 0 {
+		return fmt.Errorf("qga guest-exec %s did not return a pid", path)
+	}
+
+	for {
+		var status qgaGuestExecStatus
+		if err := c.Execute(ctx, "guest-exec-status", map[string]interface{}{"pid": execResult.PID}, &status); err != nil {
+			return err
+		}
+		if status.Exited {
+			if status.ExitCode != 0 {
+				if status.ErrData != "" {
+					return fmt.Errorf("qga guest-exec %s failed with exit code %d: %s", path, status.ExitCode, status.ErrData)
+				}
+				return fmt.Errorf("qga guest-exec %s failed with exit code %d", path, status.ExitCode)
+			}
+			return nil
+		}
+
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }

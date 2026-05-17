@@ -3,7 +3,9 @@ package commands
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1091,6 +1093,10 @@ func uploadVMCopy(ctx context.Context, client *api.Client, localPath string, des
 	if info.IsDir() {
 		return fmt.Errorf("source path must be a file")
 	}
+	checksum, err := fileSHA256(localPath)
+	if err != nil {
+		return err
+	}
 
 	conn, err := client.WebSocket(ctx, vmCopyWebSocketPath(destination.vmID, "upload", destination.path))
 	if err != nil {
@@ -1099,9 +1105,10 @@ func uploadVMCopy(ctx context.Context, client *api.Client, localPath string, des
 	defer conn.Close()
 
 	metadataFrame, err := encodeCLIVMIOJSONFrame(cliVMIOFrameCopyMetadata, cliVMCopyMetadata{
-		Path: destination.path,
-		Size: info.Size(),
-		Mode: fmt.Sprintf("%04o", info.Mode().Perm()),
+		Path:   destination.path,
+		Size:   info.Size(),
+		Mode:   fmt.Sprintf("%04o", info.Mode().Perm()),
+		SHA256: checksum,
 	})
 	if err != nil {
 		return err
@@ -1137,7 +1144,7 @@ func uploadVMCopy(ctx context.Context, client *api.Client, localPath string, des
 		}
 	}
 
-	eofFrame, err := encodeCLIVMIOJSONFrame(cliVMIOFrameCopyEOF, cliVMCopyEOF{Bytes: sent})
+	eofFrame, err := encodeCLIVMIOJSONFrame(cliVMIOFrameCopyEOF, cliVMCopyEOF{Bytes: sent, SHA256: checksum})
 	if err != nil {
 		return err
 	}
@@ -1174,6 +1181,7 @@ func downloadVMCopy(ctx context.Context, client *api.Client, source vmCopyEndpoi
 	if frameType != cliVMIOFrameCopyMetadata {
 		return fmt.Errorf("expected copy metadata frame, got %#x", frameType)
 	}
+	expectedChecksum := strings.TrimSpace(metadata.SHA256)
 
 	localPath := destination
 	if info, statErr := os.Stat(destination); statErr == nil && info.IsDir() {
@@ -1186,6 +1194,7 @@ func downloadVMCopy(ctx context.Context, client *api.Client, source vmCopyEndpoi
 	defer file.Close()
 
 	var received int64
+	hash := sha256.New()
 	for {
 		messageType, frame, err := conn.ReceiveMessage()
 		if err != nil {
@@ -1205,13 +1214,23 @@ func downloadVMCopy(ctx context.Context, client *api.Client, source vmCopyEndpoi
 				return fmt.Errorf("write destination file: %w", err)
 			}
 			received += int64(n)
+			_, _ = hash.Write(payload[:n])
 		case cliVMIOFrameCopyEOF:
 			var eof cliVMCopyEOF
 			if _, err := decodeCLIVMIOJSONFrame(frame, &eof); err != nil {
 				return err
 			}
+			if strings.TrimSpace(eof.SHA256) != "" {
+				expectedChecksum = strings.TrimSpace(eof.SHA256)
+			}
 			if eof.Bytes != 0 && eof.Bytes != received {
 				return fmt.Errorf("copy byte count mismatch: expected %d, wrote %d", eof.Bytes, received)
+			}
+			if expectedChecksum != "" {
+				actualChecksum := hex.EncodeToString(hash.Sum(nil))
+				if !strings.EqualFold(expectedChecksum, actualChecksum) {
+					return fmt.Errorf("copy checksum mismatch: expected %s, wrote %s", expectedChecksum, actualChecksum)
+				}
 			}
 			fmt.Fprintf(output, "Downloaded %d bytes from %s:%s\n", received, source.vmID, source.path)
 			return nil
@@ -1219,6 +1238,20 @@ func downloadVMCopy(ctx context.Context, client *api.Client, source vmCopyEndpoi
 			return decodeVMCopyError(frame)
 		}
 	}
+}
+
+func fileSHA256(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open source file for checksum: %w", err)
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", fmt.Errorf("hash source file: %w", err)
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func vmCopyWebSocketPath(vmID string, direction string, remotePath string) string {
