@@ -332,6 +332,7 @@ func (es *EnvironmentSimulator) Step(action Action) (*EnvironmentState, float64,
 	if es.rewardCalc == nil {
 		es.rewardCalc = NewRewardCalculator()
 	}
+	es.sanitizeState()
 
 	// Simulate action execution
 	outcome := es.simulateAction(action)
@@ -346,6 +347,21 @@ func (es *EnvironmentSimulator) Step(action Action) (*EnvironmentState, float64,
 	done := es.state.TaskQueueDepth == 0
 
 	return es.state, reward, done
+}
+
+func (es *EnvironmentSimulator) sanitizeState() {
+	for i := 0; i < 4; i++ {
+		es.state.StreamBandwidth[i] = positiveOrDefault(es.state.StreamBandwidth[i], es.baseBandwidth)
+		if es.state.StreamBandwidth[i] <= 0 {
+			es.state.StreamBandwidth[i] = 100
+		}
+		es.state.StreamLatency[i] = positiveOrDefault(es.state.StreamLatency[i], es.baseLatency)
+		if es.state.StreamLatency[i] <= 0 {
+			es.state.StreamLatency[i] = 10
+		}
+		es.state.StreamCongestion[i] = clampUnit(es.state.StreamCongestion[i])
+		es.state.StreamSuccessRate[i] = clampUnit(es.state.StreamSuccessRate[i])
+	}
 }
 
 func (es *EnvironmentSimulator) simulateAction(action Action) *ActionOutcome {

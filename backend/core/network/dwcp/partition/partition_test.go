@@ -684,6 +684,8 @@ func TestEnvironmentSimulatorStepInitializesZeroValueSimulator(t *testing.T) {
 
 func TestEnvironmentSimulatorStepSanitizesInvalidMutableState(t *testing.T) {
 	sim := NewEnvironmentSimulator()
+	sim.state.StreamBandwidth = [4]float64{math.NaN(), math.Inf(1), -100, 0}
+	sim.state.StreamLatency = [4]float64{math.NaN(), math.Inf(-1), -5, 0}
 	sim.state.StreamCongestion = [4]float64{math.NaN(), math.Inf(1), -0.5, 2}
 	sim.state.StreamSuccessRate = [4]float64{math.NaN(), math.Inf(-1), -0.25, 2}
 
@@ -699,6 +701,14 @@ func TestEnvironmentSimulatorStepSanitizesInvalidMutableState(t *testing.T) {
 		t.Fatalf("invalid mutable state should produce finite reward, got %f", reward)
 	}
 	for i := 0; i < 4; i++ {
+		if math.IsNaN(nextState.StreamBandwidth[i]) || math.IsInf(nextState.StreamBandwidth[i], 0) ||
+			nextState.StreamBandwidth[i] <= 0 {
+			t.Fatalf("stream %d bandwidth should be finite and positive, got %f", i, nextState.StreamBandwidth[i])
+		}
+		if math.IsNaN(nextState.StreamLatency[i]) || math.IsInf(nextState.StreamLatency[i], 0) ||
+			nextState.StreamLatency[i] <= 0 {
+			t.Fatalf("stream %d latency should be finite and positive, got %f", i, nextState.StreamLatency[i])
+		}
 		if math.IsNaN(nextState.StreamCongestion[i]) || math.IsInf(nextState.StreamCongestion[i], 0) ||
 			nextState.StreamCongestion[i] < 0 || nextState.StreamCongestion[i] > 1 {
 			t.Fatalf("stream %d congestion should be finite and normalized, got %f", i, nextState.StreamCongestion[i])
