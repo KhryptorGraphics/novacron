@@ -142,6 +142,15 @@ func (tp *TaskPartitioner) ReportOutcome(taskID string, decision *partition.Task
 		tp.failedTasks++
 	}
 
+	if !tp.enabled {
+		tp.logger.Debug("Skipping online learning update for task outcome; task partitioner stopped",
+			zap.String("task_id", taskID),
+			zap.Bool("success", success),
+			zap.Float64("throughput", actualThroughput),
+			zap.Duration("latency", actualLatency))
+		return
+	}
+
 	if decision == nil {
 		tp.logger.Warn("Skipping online learning update for task outcome; decision is required",
 			zap.String("task_id", taskID),
