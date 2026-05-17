@@ -198,26 +198,26 @@ func (s *PredictionService) Start(ctx context.Context) error {
 		}
 
 		// Start prediction update loop
-		go s.predictionLoop()
+		go s.predictionLoop(serviceCtx)
 
 		// Start model retraining loop
-		go s.retrainLoop()
+		go s.retrainLoop(serviceCtx)
 
 		// Start accuracy tracking loop
-		go s.accuracyTrackingLoop()
+		go s.accuracyTrackingLoop(serviceCtx)
 	}()
 
 	return nil
 }
 
 // predictionLoop continuously updates predictions
-func (s *PredictionService) predictionLoop() {
+func (s *PredictionService) predictionLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.updateInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			s.updatePrediction()
@@ -358,13 +358,13 @@ func (s *PredictionService) GetOptimalBufferSize() int {
 }
 
 // accuracyTrackingLoop tracks prediction accuracy
-func (s *PredictionService) accuracyTrackingLoop() {
+func (s *PredictionService) accuracyTrackingLoop(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			s.updateAccuracy()
@@ -428,13 +428,13 @@ func (s *PredictionService) updateAccuracy() {
 }
 
 // retrainLoop manages model retraining
-func (s *PredictionService) retrainLoop() {
+func (s *PredictionService) retrainLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.retrainInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			s.retrainModel()

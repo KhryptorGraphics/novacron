@@ -356,6 +356,42 @@ func TestPredictionService(t *testing.T) {
 		assert.NotEmpty(t, prediction.ModelVersion)
 	})
 
+	t.Run("ServiceLoopsCanRunWhileContextChanges", func(t *testing.T) {
+		service, err := NewPredictionService("", time.Millisecond)
+		require.NoError(t, err)
+		defer service.Stop()
+		service.retrainInterval = time.Millisecond
+
+		for _, sample := range makeTestNetworkHistory() {
+			service.collector.addSample(sample)
+		}
+
+		loopCtx, cancel := context.WithCancel(context.Background())
+		service.ctx = loopCtx
+		service.cancel = cancel
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			go service.predictionLoop(loopCtx)
+			go service.retrainLoop(loopCtx)
+			go service.accuracyTrackingLoop(loopCtx)
+
+			for i := 0; i < 100; i++ {
+				nextCtx, nextCancel := context.WithCancel(context.Background())
+				service.mu.Lock()
+				service.ctx = nextCtx
+				service.cancel = nextCancel
+				service.mu.Unlock()
+				nextCancel()
+			}
+		}()
+
+		<-done
+		cancel()
+		require.NoError(t, service.Stop())
+	})
+
 	t.Run("UpdateAccuracyIgnoresInvalidActualTelemetry", func(t *testing.T) {
 		service, err := NewPredictionService("", 10*time.Millisecond)
 		require.NoError(t, err)
