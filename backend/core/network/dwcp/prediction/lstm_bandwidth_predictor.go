@@ -163,7 +163,7 @@ func (p *LSTMPredictor) prepareInput(history []NetworkSample) ([]float32, error)
 	startIdx := len(history) - p.sequenceLength
 
 	for i := 0; i < p.sequenceLength; i++ {
-		sample := history[startIdx+i]
+		sample := sanitizeNetworkSample(history[startIdx+i])
 		baseIdx := i * p.featureCount
 
 		// Normalize features
@@ -337,11 +337,12 @@ func (session *onnxBandwidthSession) Destroy() error {
 func (p *LSTMPredictor) forecastFromHistory(history []NetworkSample) *BandwidthPrediction {
 	startIdx := len(history) - p.sequenceLength
 	recent := history[startIdx:]
-	first := recent[0]
-	last := recent[len(recent)-1]
+	first := sanitizeNetworkSample(recent[0])
+	last := sanitizeNetworkSample(recent[len(recent)-1])
 
 	var bandwidth, latency, packetLoss, jitter float64
 	for _, sample := range recent {
+		sample = sanitizeNetworkSample(sample)
 		bandwidth += sample.BandwidthMbps
 		latency += sample.LatencyMs
 		packetLoss += sample.PacketLoss
@@ -358,10 +359,44 @@ func (p *LSTMPredictor) forecastFromHistory(history []NetworkSample) *BandwidthP
 	return &BandwidthPrediction{
 		PredictedBandwidthMbps: math.Max(0, bandwidth/count+bandwidthTrend),
 		PredictedLatencyMs:     math.Max(0, latency/count+latencyTrend),
-		PredictedPacketLoss:    math.Max(0, packetLoss/count+packetLossTrend),
+		PredictedPacketLoss:    boundedFloat64(packetLoss/count+packetLossTrend, 0, 1, 0),
 		PredictedJitterMs:      math.Max(0, jitter/count+jitterTrend),
 		ValidUntil:             time.Now().Add(15 * time.Minute),
 	}
+}
+
+func sanitizeNetworkSample(sample NetworkSample) NetworkSample {
+	sample.BandwidthMbps = nonNegativeFloat64(sample.BandwidthMbps, 0)
+	sample.LatencyMs = nonNegativeFloat64(sample.LatencyMs, 0)
+	sample.PacketLoss = boundedFloat64(sample.PacketLoss, 0, 1, 0)
+	sample.JitterMs = nonNegativeFloat64(sample.JitterMs, 0)
+	sample.TimeOfDay = clampInt(sample.TimeOfDay, 0, 23)
+	sample.DayOfWeek = clampInt(sample.DayOfWeek, 0, 6)
+	return sample
+}
+
+func nonNegativeFloat64(value, fallback float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return fallback
+	}
+	return value
+}
+
+func boundedFloat64(value, minValue, maxValue, fallback float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < minValue || value > maxValue {
+		return fallback
+	}
+	return value
+}
+
+func clampInt(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
 }
 
 // calculateConfidence estimates prediction confidence

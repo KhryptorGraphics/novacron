@@ -123,6 +123,63 @@ func TestLSTMPredictorRejectsInvalidInferenceOutput(t *testing.T) {
 	}
 }
 
+func TestLSTMPredictorSanitizesInvalidHistoryForFallback(t *testing.T) {
+	predictor, err := NewLSTMPredictor("")
+	if err != nil {
+		t.Fatalf("NewLSTMPredictor() error = %v", err)
+	}
+
+	history := makeTestNetworkHistory()
+	history[2].BandwidthMbps = math.NaN()
+	history[3].LatencyMs = math.Inf(1)
+	history[4].PacketLoss = -1
+	history[5].JitterMs = math.Inf(-1)
+
+	prediction, err := predictor.Predict(history)
+	if err != nil {
+		t.Fatalf("Predict() error = %v", err)
+	}
+
+	assertFiniteNonNegative(t, "bandwidth", prediction.PredictedBandwidthMbps)
+	assertFiniteNonNegative(t, "latency", prediction.PredictedLatencyMs)
+	assertFiniteNonNegative(t, "packet loss", prediction.PredictedPacketLoss)
+	assertFiniteNonNegative(t, "jitter", prediction.PredictedJitterMs)
+	if prediction.PredictedPacketLoss > 1 {
+		t.Fatalf("packet loss = %f, want <= 1", prediction.PredictedPacketLoss)
+	}
+}
+
+func TestLSTMPredictorSanitizesInvalidHistoryForInferenceInput(t *testing.T) {
+	predictor, err := NewLSTMPredictor("")
+	if err != nil {
+		t.Fatalf("NewLSTMPredictor() error = %v", err)
+	}
+	fakeSession := &fakeBandwidthInferenceSession{
+		output: []float32{0.42, 0.18, 0.03, 0.24},
+	}
+	predictor.inference = fakeSession
+	predictor.modelLoaded = true
+
+	history := makeTestNetworkHistory()
+	history[0].BandwidthMbps = math.NaN()
+	history[1].LatencyMs = math.Inf(1)
+	history[2].PacketLoss = math.Inf(-1)
+	history[3].JitterMs = math.NaN()
+
+	if _, err := predictor.Predict(history); err != nil {
+		t.Fatalf("Predict() error = %v", err)
+	}
+
+	for i, value := range fakeSession.inputSeen {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			t.Fatalf("inference input index %d should be finite, got %v", i, value)
+		}
+		if value < 0 {
+			t.Fatalf("inference input index %d should be non-negative, got %v", i, value)
+		}
+	}
+}
+
 func TestLSTMPredictorCloseDestroysInferenceSession(t *testing.T) {
 	predictor, err := NewLSTMPredictor("")
 	if err != nil {
@@ -217,5 +274,12 @@ func assertFloatNear(t *testing.T, got, want, tolerance float64) {
 	t.Helper()
 	if math.Abs(got-want) > tolerance {
 		t.Fatalf("got %f, want %f +/- %f", got, want, tolerance)
+	}
+}
+
+func assertFiniteNonNegative(t *testing.T, label string, value float64) {
+	t.Helper()
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		t.Fatalf("%s = %f, want finite non-negative value", label, value)
 	}
 }
