@@ -317,6 +317,11 @@ func (s *PredictionService) GetOptimalBufferSize() int {
 	if pred == nil {
 		return 65536 // Default 64KB
 	}
+	if !isFiniteNonNegative(pred.PredictedBandwidthMbps) ||
+		!isFiniteNonNegative(pred.PredictedLatencyMs) ||
+		!isFiniteNonNegative(pred.PredictedJitterMs) {
+		return 65536
+	}
 
 	// Calculate bandwidth-delay product
 	bandwidthBps := pred.PredictedBandwidthMbps * 1000000 / 8 // Convert to bytes/sec
@@ -606,4 +611,8 @@ func isValidActualSample(sample NetworkSample) bool {
 	return sample.BandwidthMbps > 0 && sample.LatencyMs > 0 &&
 		!math.IsNaN(sample.BandwidthMbps) && !math.IsNaN(sample.LatencyMs) &&
 		!math.IsInf(sample.BandwidthMbps, 0) && !math.IsInf(sample.LatencyMs, 0)
+}
+
+func isFiniteNonNegative(value float64) bool {
+	return value >= 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
 }
