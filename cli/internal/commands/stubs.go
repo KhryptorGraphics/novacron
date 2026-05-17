@@ -636,13 +636,77 @@ func newClusterInfoCommand() *cobra.Command {
 }
 
 func NewMigrateCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "migrate",
+	var (
+		targetNode  string
+		maxDowntime int
+		bandwidth   int
+		priority    string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "migrate <vm-id>",
 		Short: "Migrate VMs between nodes",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("migrate command not yet implemented")
+			if strings.TrimSpace(targetNode) == "" {
+				return fmt.Errorf("target-node is required")
+			}
+			if maxDowntime < 0 {
+				return fmt.Errorf("max-downtime must be non-negative")
+			}
+			if bandwidth < 0 {
+				return fmt.Errorf("bandwidth must be non-negative")
+			}
+
+			client, err := currentClusterAPIClient()
+			if err != nil {
+				return err
+			}
+
+			req := liveMigrationRequest{
+				TargetNode:  strings.TrimSpace(targetNode),
+				MaxDowntime: maxDowntime,
+				Bandwidth:   bandwidth,
+				Priority:    strings.TrimSpace(priority),
+			}
+
+			var migration migrationResponse
+			path := "/migration/live/" + url.PathEscape(strings.TrimSpace(args[0]))
+			if err := client.Post(cmd.Context(), path, req, &migration); err != nil {
+				return err
+			}
+
+			data, err := yaml.Marshal(migration)
+			if err != nil {
+				return err
+			}
+			_, err = cmd.OutOrStdout().Write(data)
+			return err
 		},
 	}
+
+	cmd.Flags().StringVar(&targetNode, "target-node", "", "target node for migration")
+	cmd.Flags().IntVar(&maxDowntime, "max-downtime", 0, "maximum allowed downtime in milliseconds")
+	cmd.Flags().IntVar(&bandwidth, "bandwidth", 0, "migration bandwidth limit")
+	cmd.Flags().StringVar(&priority, "priority", "", "migration priority")
+
+	return cmd
+}
+
+type liveMigrationRequest struct {
+	TargetNode  string `json:"targetNode"`
+	MaxDowntime int    `json:"maxDowntime,omitempty"`
+	Bandwidth   int    `json:"bandwidth,omitempty"`
+	Priority    string `json:"priority,omitempty"`
+}
+
+type migrationResponse struct {
+	MigrationID string `json:"migrationId,omitempty" yaml:"migration_id,omitempty"`
+	Status      string `json:"status,omitempty" yaml:"status,omitempty"`
+	VMID        string `json:"vmId,omitempty" yaml:"vm_id,omitempty"`
+	TargetNode  string `json:"targetNode,omitempty" yaml:"target_node,omitempty"`
+	Priority    string `json:"priority,omitempty" yaml:"priority,omitempty"`
+	CreatedAt   string `json:"createdAt,omitempty" yaml:"created_at,omitempty"`
 }
 
 func NewSnapshotCommand() *cobra.Command {
