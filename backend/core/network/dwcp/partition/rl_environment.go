@@ -491,7 +491,7 @@ func getTwoStreamIndices(action Action) []int {
 	case ActionSplit34:
 		return []int{2, 3}
 	default:
-		return []int{0, 1}
+		return nil
 	}
 }
 
@@ -506,11 +506,14 @@ func getThreeStreamIndices(action Action) []int {
 	case ActionSplit234:
 		return []int{1, 2, 3}
 	default:
-		return []int{0, 1, 2}
+		return nil
 	}
 }
 
 func getUsedStreams(action Action) []int {
+	if action < 0 || action >= NumActions {
+		return nil
+	}
 	if action <= ActionStream4 {
 		return []int{int(action)}
 	} else if action <= ActionSplit34 {

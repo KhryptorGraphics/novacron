@@ -767,6 +767,26 @@ func TestCalculateImbalanceHandlesInvalidInput(t *testing.T) {
 	}
 }
 
+func TestStreamIndexHelpersIgnoreInvalidActions(t *testing.T) {
+	tests := []struct {
+		name    string
+		streams []int
+	}{
+		{name: "two_stream_helper", streams: getTwoStreamIndices(ActionStream1)},
+		{name: "three_stream_helper", streams: getThreeStreamIndices(ActionSplit12)},
+		{name: "used_streams_negative", streams: getUsedStreams(Action(-1))},
+		{name: "used_streams_too_large", streams: getUsedStreams(Action(NumActions))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if len(tt.streams) != 0 {
+				t.Fatalf("invalid action should not map to streams, got %v", tt.streams)
+			}
+		})
+	}
+}
+
 func TestDQNAgentHeuristic(t *testing.T) {
 	// Test without loading a model (uses heuristic)
 	agent, err := NewDQNAgent("nonexistent_model.onnx")
