@@ -121,6 +121,10 @@ func NewDQNAgent(modelPath string) (*DQNAgent, error) {
 
 // SelectAction selects an action based on the current state using epsilon-greedy policy
 func (agent *DQNAgent) SelectAction(state *EnvironmentState) (*TaskPartitionDecision, error) {
+	if state == nil {
+		return nil, fmt.Errorf("state is nil")
+	}
+
 	agent.mu.Lock()
 	defer agent.mu.Unlock()
 

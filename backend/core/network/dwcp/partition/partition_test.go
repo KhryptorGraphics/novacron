@@ -632,6 +632,28 @@ func TestDQNAgentDoesNotMarkInvalidONNXAsLoaded(t *testing.T) {
 	}
 }
 
+func TestDQNAgentSelectActionRejectsNilState(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer agent.Destroy()
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("nil state should return an error without panic: %v", recovered)
+		}
+	}()
+
+	decision, err := agent.SelectAction(nil)
+	if err == nil {
+		t.Fatalf("expected nil state error, got decision=%v", decision)
+	}
+	if decision != nil {
+		t.Fatalf("nil state should not produce a decision: %#v", decision)
+	}
+}
+
 func TestDQNAgentSaveLoadModel(t *testing.T) {
 	agent, err := NewDQNAgent("")
 	if err != nil {
