@@ -53,6 +53,13 @@ type TrainingMetrics struct {
 
 // SimulateEpisode runs a full training episode
 func (sim *NetworkSimulator) SimulateEpisode(agent *partition.DQNAgent, maxSteps int) (*TrainingMetrics, error) {
+	if agent == nil {
+		return nil, fmt.Errorf("agent is nil")
+	}
+	if maxSteps <= 0 {
+		return nil, fmt.Errorf("maxSteps must be positive, got %d", maxSteps)
+	}
+
 	// Reset environment
 	state := sim.resetEnvironment()
 
