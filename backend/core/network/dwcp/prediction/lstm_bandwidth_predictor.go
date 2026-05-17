@@ -387,10 +387,18 @@ func (p *LSTMPredictor) calculateConfidence(pred *BandwidthPrediction) float64 {
 
 	// Calculate mean absolute error
 	var totalError float64
+	var finiteErrors int
 	for _, err := range recentErrors {
+		if math.IsNaN(err) || math.IsInf(err, 0) {
+			continue
+		}
 		totalError += math.Abs(err)
+		finiteErrors++
 	}
-	avgError := totalError / float64(len(recentErrors))
+	if finiteErrors == 0 {
+		return 0.5
+	}
+	avgError := totalError / float64(finiteErrors)
 
 	// Convert error to confidence (lower error = higher confidence)
 	confidence := math.Max(0.0, math.Min(1.0, 1.0-(avgError/0.2)))
@@ -402,6 +410,12 @@ func (p *LSTMPredictor) calculateConfidence(pred *BandwidthPrediction) float64 {
 func (p *LSTMPredictor) UpdateActual(timestamp time.Time, actual NetworkSample) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	if actual.BandwidthMbps <= 0 || actual.LatencyMs <= 0 ||
+		math.IsNaN(actual.BandwidthMbps) || math.IsNaN(actual.LatencyMs) ||
+		math.IsInf(actual.BandwidthMbps, 0) || math.IsInf(actual.LatencyMs, 0) {
+		return
+	}
 
 	// Find matching prediction
 	for i := len(p.predictions) - 1; i >= 0; i-- {
@@ -436,6 +450,9 @@ func (p *LSTMPredictor) GetMetrics() PredictorMetrics {
 	var errorCount int
 	for _, pred := range p.predictions {
 		if pred.Actual != nil {
+			if math.IsNaN(pred.Error) || math.IsInf(pred.Error, 0) {
+				continue
+			}
 			totalError += pred.Error
 			if pred.Error > maxError {
 				maxError = pred.Error

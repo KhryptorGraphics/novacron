@@ -141,6 +141,35 @@ func TestLSTMPredictorCloseDestroysInferenceSession(t *testing.T) {
 	}
 }
 
+func TestLSTMPredictorUpdateActualIgnoresInvalidTelemetry(t *testing.T) {
+	predictor, err := NewLSTMPredictor("")
+	if err != nil {
+		t.Fatalf("NewLSTMPredictor() error = %v", err)
+	}
+
+	history := makeTestNetworkHistory()
+	prediction, err := predictor.Predict(history)
+	if err != nil {
+		t.Fatalf("Predict() error = %v", err)
+	}
+
+	predictor.UpdateActual(prediction.PredictionTime.Add(time.Second), NetworkSample{
+		Timestamp:     prediction.PredictionTime.Add(time.Second),
+		BandwidthMbps: 0,
+		LatencyMs:     0,
+	})
+
+	metrics := predictor.GetMetrics()
+	if math.IsNaN(metrics.AvgPredictionError) || math.IsInf(metrics.AvgPredictionError, 0) {
+		t.Fatalf("AvgPredictionError = %f, want finite value", metrics.AvgPredictionError)
+	}
+	if math.IsNaN(metrics.Accuracy) || math.IsInf(metrics.Accuracy, 0) {
+		t.Fatalf("Accuracy = %f, want finite value", metrics.Accuracy)
+	}
+	assertFloatNear(t, metrics.AvgPredictionError, 0, 0.001)
+	assertFloatNear(t, metrics.Accuracy, 1, 0.001)
+}
+
 func makeTestNetworkHistory() []NetworkSample {
 	history := make([]NetworkSample, 10)
 	for i := range history {
