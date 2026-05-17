@@ -47,6 +47,8 @@ var (
 type WebSocketHandler struct {
 	vmManager      vmLookup
 	consoleManager consoleService
+	copyService    vmCopyService
+	portService    vmPortForwardService
 	logger         *logrus.Logger
 
 	upgrader websocket.Upgrader
@@ -76,6 +78,28 @@ type consoleService interface {
 	CreateConsoleSession(ctx context.Context, vmID string) (string, error)
 	SendInput(ctx context.Context, sessionID string, input string) error
 	StreamOutput(ctx context.Context, sessionID string, output chan<- string)
+}
+
+type vmCopyService interface {
+	HandleVMCopy(ctx context.Context, vmID string, options VMCopyOptions, conn *websocket.Conn) error
+}
+
+type vmPortForwardService interface {
+	HandleVMPortForward(ctx context.Context, vmID string, options VMPortForwardOptions, conn *websocket.Conn) error
+}
+
+// VMCopyOptions captures the VM file-copy WebSocket query contract.
+type VMCopyOptions struct {
+	Direction string
+	Path      string
+	Mode      string
+	Overwrite bool
+}
+
+// VMPortForwardOptions captures the VM port-forward WebSocket query contract.
+type VMPortForwardOptions struct {
+	Port int
+	Bind string
 }
 
 // WebSocketClient represents a connected WebSocket client
@@ -186,6 +210,14 @@ func NewWebSocketHandler(vmManager vmLookup, consoleManager consoleService, deps
 		ctx:    ctx,
 		cancel: cancel,
 	}
+	for _, dependency := range deps {
+		if candidate, ok := dependency.(vmCopyService); ok && candidate != nil {
+			handler.copyService = candidate
+		}
+		if candidate, ok := dependency.(vmPortForwardService); ok && candidate != nil {
+			handler.portService = candidate
+		}
+	}
 
 	// Start background workers
 	go handler.broadcastWorker()
@@ -219,13 +251,90 @@ func (h *WebSocketHandler) RegisterWebSocketRoutes(router *mux.Router, require f
 // HandleVMCopyWebSocket gates the VM file-copy contract until a backend
 // implementation is available.
 func (h *WebSocketHandler) HandleVMCopyWebSocket(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "VM copy backend contract is not implemented; see docs/api/vm-io-contracts.md and tracking issue novacron-lmh", http.StatusNotImplemented)
+	if h.copyService == nil {
+		http.Error(w, "VM copy backend contract is not implemented; see docs/api/vm-io-contracts.md and tracking issue novacron-lmh", http.StatusNotImplemented)
+		return
+	}
+
+	vars := mux.Vars(r)
+	vmID := vars["vmId"]
+	options, err := parseVMCopyOptions(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	conn, err := h.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to upgrade VM copy WebSocket connection")
+		return
+	}
+	if err := h.copyService.HandleVMCopy(r.Context(), vmID, options, conn); err != nil {
+		h.logger.WithError(err).WithField("vm_id", vmID).Error("VM copy WebSocket failed")
+		_ = conn.Close()
+	}
 }
 
 // HandleVMPortForwardWebSocket gates the VM port-forward contract until a
 // backend implementation is available.
 func (h *WebSocketHandler) HandleVMPortForwardWebSocket(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "VM port-forward backend contract is not implemented; see docs/api/vm-io-contracts.md and tracking issue novacron-lmh", http.StatusNotImplemented)
+	if h.portService == nil {
+		http.Error(w, "VM port-forward backend contract is not implemented; see docs/api/vm-io-contracts.md and tracking issue novacron-lmh", http.StatusNotImplemented)
+		return
+	}
+
+	vars := mux.Vars(r)
+	vmID := vars["vmId"]
+	options, err := parseVMPortForwardOptions(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	conn, err := h.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to upgrade VM port-forward WebSocket connection")
+		return
+	}
+	if err := h.portService.HandleVMPortForward(r.Context(), vmID, options, conn); err != nil {
+		h.logger.WithError(err).WithField("vm_id", vmID).Error("VM port-forward WebSocket failed")
+		_ = conn.Close()
+	}
+}
+
+func parseVMCopyOptions(r *http.Request) (VMCopyOptions, error) {
+	query := r.URL.Query()
+	options := VMCopyOptions{
+		Direction: strings.ToLower(strings.TrimSpace(query.Get("direction"))),
+		Path:      strings.TrimSpace(query.Get("path")),
+		Mode:      strings.TrimSpace(query.Get("mode")),
+	}
+	if options.Direction != "upload" && options.Direction != "download" {
+		return options, fmt.Errorf("direction must be upload or download")
+	}
+	if options.Path == "" || !strings.HasPrefix(options.Path, "/") || strings.Contains(options.Path, "..") {
+		return options, fmt.Errorf("path must be an absolute guest path without traversal")
+	}
+	if overwrite := strings.TrimSpace(query.Get("overwrite")); overwrite != "" {
+		parsed, err := strconv.ParseBool(overwrite)
+		if err != nil {
+			return options, fmt.Errorf("overwrite must be true or false")
+		}
+		options.Overwrite = parsed
+	}
+	return options, nil
+}
+
+func parseVMPortForwardOptions(r *http.Request) (VMPortForwardOptions, error) {
+	query := r.URL.Query()
+	port, err := strconv.Atoi(strings.TrimSpace(query.Get("port")))
+	if err != nil || port < 1 || port > 65535 {
+		return VMPortForwardOptions{}, fmt.Errorf("port must be between 1 and 65535")
+	}
+	return VMPortForwardOptions{
+		Port: port,
+		Bind: strings.TrimSpace(query.Get("bind")),
+	}, nil
 }
 
 // HandleConsoleWebSocket handles /ws/console/{vmId}

@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -182,6 +183,128 @@ func TestRegisterWebSocketRoutesIncludesVMIOContractGates(t *testing.T) {
 			t.Fatalf("expected response for %s to contain %q, got %q", tc.path, tc.want, string(buf[:n]))
 		}
 	}
+}
+
+func TestVMCopyWebSocketDispatchesToService(t *testing.T) {
+	logger := logrus.New()
+	copySvc := &recordingCopyService{done: make(chan struct{}, 1)}
+	handler := NewWebSocketHandler(nil, nil, copySvc, logger)
+	defer handler.Shutdown()
+
+	router := mux.NewRouter()
+	handler.RegisterWebSocketRoutes(router, passthroughRoleGuard)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/ws/vms/vm-1/copy?direction=upload&path=/tmp/file&mode=0644&overwrite=true"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial copy websocket: %v", err)
+	}
+	defer conn.Close()
+
+	select {
+	case <-copySvc.done:
+	case <-time.After(time.Second):
+		t.Fatalf("copy service was not invoked")
+	}
+	if copySvc.vmID != "vm-1" {
+		t.Fatalf("expected vm id vm-1, got %s", copySvc.vmID)
+	}
+	if copySvc.options.Direction != "upload" || copySvc.options.Path != "/tmp/file" || copySvc.options.Mode != "0644" || !copySvc.options.Overwrite {
+		t.Fatalf("unexpected copy options: %#v", copySvc.options)
+	}
+}
+
+func TestVMPortForwardWebSocketDispatchesToService(t *testing.T) {
+	logger := logrus.New()
+	portSvc := &recordingPortForwardService{done: make(chan struct{}, 1)}
+	handler := NewWebSocketHandler(nil, nil, portSvc, logger)
+	defer handler.Shutdown()
+
+	router := mux.NewRouter()
+	handler.RegisterWebSocketRoutes(router, passthroughRoleGuard)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/ws/vms/vm-1/port-forward?port=80&bind=127.0.0.1"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial port-forward websocket: %v", err)
+	}
+	defer conn.Close()
+
+	select {
+	case <-portSvc.done:
+	case <-time.After(time.Second):
+		t.Fatalf("port-forward service was not invoked")
+	}
+	if portSvc.vmID != "vm-1" {
+		t.Fatalf("expected vm id vm-1, got %s", portSvc.vmID)
+	}
+	if portSvc.options.Port != 80 || portSvc.options.Bind != "127.0.0.1" {
+		t.Fatalf("unexpected port-forward options: %#v", portSvc.options)
+	}
+}
+
+func TestVMIOWebSocketValidationBeforeUpgrade(t *testing.T) {
+	logger := logrus.New()
+	handler := NewWebSocketHandler(nil, nil,
+		&recordingCopyService{done: make(chan struct{}, 1)},
+		&recordingPortForwardService{done: make(chan struct{}, 1)},
+		logger,
+	)
+	defer handler.Shutdown()
+
+	router := mux.NewRouter()
+	handler.RegisterWebSocketRoutes(router, passthroughRoleGuard)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	for _, path := range []string{
+		"/api/ws/vms/vm-1/copy?direction=sideways&path=/tmp/file",
+		"/api/ws/vms/vm-1/copy?direction=upload&path=../etc/passwd",
+		"/api/ws/vms/vm-1/port-forward?port=0",
+		"/api/ws/vms/vm-1/port-forward?port=not-a-port",
+	} {
+		resp, err := http.Get(server.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s failed: %v", path, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected %s to return 400, got %d", path, resp.StatusCode)
+		}
+	}
+}
+
+type recordingCopyService struct {
+	done    chan struct{}
+	vmID    string
+	options VMCopyOptions
+}
+
+func (s *recordingCopyService) HandleVMCopy(ctx context.Context, vmID string, options VMCopyOptions, conn *websocket.Conn) error {
+	s.vmID = vmID
+	s.options = options
+	s.done <- struct{}{}
+	return conn.Close()
+}
+
+type recordingPortForwardService struct {
+	done    chan struct{}
+	vmID    string
+	options VMPortForwardOptions
+}
+
+func (s *recordingPortForwardService) HandleVMPortForward(ctx context.Context, vmID string, options VMPortForwardOptions, conn *websocket.Conn) error {
+	s.vmID = vmID
+	s.options = options
+	s.done <- struct{}{}
+	return conn.Close()
 }
 
 // TestWebSocketAlertsEndpoint tests the /ws/alerts endpoint
