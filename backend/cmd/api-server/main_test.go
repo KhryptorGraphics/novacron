@@ -1738,8 +1738,8 @@ func TestInitializeCanonicalServicesWiresVMCopyWebSocketService(t *testing.T) {
 	if !services.websocketHandler.SupportsVMCopy() {
 		t.Fatal("expected canonical WebSocket handler to support VM copy")
 	}
-	if services.websocketHandler.SupportsVMPortForward() {
-		t.Fatal("expected VM port-forward to remain gated until a backend is wired")
+	if !services.websocketHandler.SupportsVMPortForward() {
+		t.Fatal("expected canonical WebSocket handler to support VM port-forward")
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

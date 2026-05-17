@@ -1262,7 +1262,8 @@ func initializeCanonicalServices(cfg *config.Config, db *sql.DB, authManager *au
 	websocketLogger := logrus.New()
 	websocketLogger.SetLevel(logrus.InfoLevel)
 	copyService := websocketapi.NewQGAVMCopyService(websocketapi.NewQGAGuestFileClientResolver(vmManager))
-	websocketHandler := websocketapi.NewWebSocketHandler(vmManager, nil, copyService, websocketLogger)
+	portForwardService := websocketapi.NewVMPortForwardService(vmManager)
+	websocketHandler := websocketapi.NewWebSocketHandler(vmManager, nil, copyService, portForwardService, websocketLogger)
 
 	return &canonicalServices{
 		twoFactorService: twoFactorService,
