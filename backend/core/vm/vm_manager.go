@@ -322,12 +322,16 @@ func (m *VMManager) CountVMsByState() map[VMState]int {
 
 // getDriver gets a driver for a VM type
 func (m *VMManager) getDriver(config VMConfig) (VMDriver, error) { // Takes VMConfig now
+	normalized := config
+	normalizeVMType(&normalized)
+
+	if driver, exists := m.drivers[normalized.Type]; exists {
+		return driver, nil
+	}
+
 	if m.driverFactory == nil { // Assuming driverFactory is part of VMManager struct
 		return nil, errors.New("no driver factory configured")
 	}
-
-	normalized := config
-	normalizeVMType(&normalized)
 
 	return m.driverFactory(normalized) // Pass config
 }
