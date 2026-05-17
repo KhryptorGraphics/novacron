@@ -586,6 +586,77 @@ func TestEnvironmentSimulator(t *testing.T) {
 	}
 }
 
+func TestEnvironmentSimulatorStepIgnoresInvalidAction(t *testing.T) {
+	tests := []struct {
+		name     string
+		action   Action
+		nilState bool
+		wantDone bool
+	}{
+		{name: "negative_action", action: Action(-1)},
+		{name: "too_large_action", action: Action(NumActions)},
+		{name: "nil_state", action: Action(-1), nilState: true, wantDone: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sim := NewEnvironmentSimulator()
+			if tt.nilState {
+				sim.state = nil
+			} else {
+				sim.state = NewEnvironmentState()
+				sim.state.TaskQueueDepth = 3
+				sim.state.TimeOfDay = 0.25
+			}
+
+			var beforeBandwidth, beforeLatency, beforeCongestion, beforeSuccessRate [4]float64
+			var beforeQueueDepth, beforeTaskSize int
+			var beforeTaskPriority, beforeTimeOfDay float64
+			if sim.state != nil {
+				beforeBandwidth = sim.state.StreamBandwidth
+				beforeLatency = sim.state.StreamLatency
+				beforeCongestion = sim.state.StreamCongestion
+				beforeSuccessRate = sim.state.StreamSuccessRate
+				beforeQueueDepth = sim.state.TaskQueueDepth
+				beforeTaskSize = sim.state.TaskSize
+				beforeTaskPriority = sim.state.TaskPriority
+				beforeTimeOfDay = sim.state.TimeOfDay
+			}
+
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("invalid simulator action should not panic: %v", recovered)
+				}
+			}()
+
+			nextState, reward, done := sim.Step(tt.action)
+
+			if nextState != sim.state {
+				t.Fatal("invalid simulator action should return the current state")
+			}
+			if reward != 0 {
+				t.Fatalf("invalid simulator action should return zero reward, got %f", reward)
+			}
+			if done != tt.wantDone {
+				t.Fatalf("invalid simulator action done mismatch: got %v want %v", done, tt.wantDone)
+			}
+			if sim.state == nil {
+				return
+			}
+			if sim.state.StreamBandwidth != beforeBandwidth ||
+				sim.state.StreamLatency != beforeLatency ||
+				sim.state.StreamCongestion != beforeCongestion ||
+				sim.state.StreamSuccessRate != beforeSuccessRate ||
+				sim.state.TaskQueueDepth != beforeQueueDepth ||
+				sim.state.TaskSize != beforeTaskSize ||
+				sim.state.TaskPriority != beforeTaskPriority ||
+				sim.state.TimeOfDay != beforeTimeOfDay {
+				t.Fatal("invalid simulator action should not mutate environment state")
+			}
+		})
+	}
+}
+
 func TestDQNAgentHeuristic(t *testing.T) {
 	// Test without loading a model (uses heuristic)
 	agent, err := NewDQNAgent("nonexistent_model.onnx")

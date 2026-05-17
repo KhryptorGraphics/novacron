@@ -322,6 +322,11 @@ func (es *EnvironmentSimulator) Reset() *EnvironmentState {
 
 // Step executes an action and returns the next state, reward, and done flag
 func (es *EnvironmentSimulator) Step(action Action) (*EnvironmentState, float64, bool) {
+	if action < 0 || action >= NumActions {
+		done := es.state == nil || es.state.TaskQueueDepth == 0
+		return es.state, 0, done
+	}
+
 	// Simulate action execution
 	outcome := es.simulateAction(action)
 
