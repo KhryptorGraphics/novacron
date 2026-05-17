@@ -96,6 +96,21 @@ func TestDataCollector(t *testing.T) {
 
 		assert.NotEmpty(t, collector.GetRecentSamples(10))
 	})
+
+	t.Run("SaveDataCreatesConfiguredDirectory", func(t *testing.T) {
+		collector := NewDataCollector(1*time.Second, 100)
+		collector.dataPath = filepath.Join(t.TempDir(), "nested", "samples.jsonl")
+		collector.addSample(NetworkSample{
+			Timestamp:     time.Now(),
+			BandwidthMbps: 100,
+			LatencyMs:     20,
+			PacketLoss:    0.01,
+			JitterMs:      2,
+		})
+
+		require.NoError(t, collector.saveData())
+		require.FileExists(t, collector.dataPath)
+	})
 }
 
 func TestPredictionService(t *testing.T) {

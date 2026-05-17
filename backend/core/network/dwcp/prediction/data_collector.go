@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -338,8 +339,9 @@ func (c *DataCollector) saveData() error {
 	copy(samples, c.samples)
 	c.mu.RUnlock()
 
-	// Create directory if needed
-	os.MkdirAll("/var/lib/novacron/dwcp", 0755)
+	if err := os.MkdirAll(filepath.Dir(c.dataPath), 0755); err != nil {
+		return fmt.Errorf("failed to create data directory: %w", err)
+	}
 
 	file, err := os.Create(c.dataPath)
 	if err != nil {
