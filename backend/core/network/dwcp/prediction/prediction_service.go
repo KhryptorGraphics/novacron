@@ -494,13 +494,18 @@ func (s *PredictionService) EnableABTesting(alternateModelPath string) error {
 
 // runABTest performs A/B testing between models
 func (s *PredictionService) runABTest(history []NetworkSample) {
-	if s.alternateModel == nil {
+	s.mu.RLock()
+	alternateModel := s.alternateModel
+	abTestEnabled := s.abTestEnabled
+	s.mu.RUnlock()
+
+	if !abTestEnabled || alternateModel == nil {
 		return
 	}
 
 	// Get prediction from alternate model
 	startTime := time.Now()
-	_, altErr := s.alternateModel.Predict(history)
+	_, altErr := alternateModel.Predict(history)
 	if altErr != nil {
 		return
 	}
@@ -508,6 +513,10 @@ func (s *PredictionService) runABTest(history []NetworkSample) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if s.alternateModel != alternateModel || s.abTestResults == nil {
+		return
+	}
 
 	// Update A/B test results
 	s.abTestResults.AlternateLatency = altLatency

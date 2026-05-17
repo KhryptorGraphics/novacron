@@ -255,6 +255,32 @@ func TestPredictionService(t *testing.T) {
 		assert.True(t, previousSession.destroyed)
 	})
 
+	t.Run("EnableABTestingCanRunWhileABEvaluation", func(t *testing.T) {
+		service, err := NewPredictionService("", 10*time.Millisecond)
+		require.NoError(t, err)
+		defer service.Stop()
+
+		history := makeTestNetworkHistory()
+		require.NoError(t, service.EnableABTesting(""))
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for i := 0; i < 100; i++ {
+				service.runABTest(history)
+			}
+		}()
+
+		for i := 0; i < 100; i++ {
+			require.NoError(t, service.EnableABTesting(""))
+		}
+		<-done
+
+		results := service.GetABTestResults()
+		require.NotNil(t, results)
+		assert.GreaterOrEqual(t, results.PredictionCount, 0)
+	})
+
 	t.Run("UpdateAccuracyIgnoresInvalidActualTelemetry", func(t *testing.T) {
 		service, err := NewPredictionService("", 10*time.Millisecond)
 		require.NoError(t, err)
