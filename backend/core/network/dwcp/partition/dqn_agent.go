@@ -682,13 +682,38 @@ func (agent *DQNAgent) LoadModel(path string) error {
 	agent.episodeRewards = append([]float64(nil), state.EpisodeRewards...)
 	agent.successRate = state.SuccessRate
 	agent.replayBuffer = NewReplayBuffer(state.ReplayBuffer.Capacity)
-	agent.replayBuffer.buffer = append([]*Experience(nil), state.ReplayBuffer.Experiences...)
+	for _, exp := range state.ReplayBuffer.Experiences {
+		if isValidReplayExperience(exp) {
+			agent.replayBuffer.Add(cloneExperience(exp))
+		}
+	}
 	agent.inference = session
 	agent.modelLoaded = modelLoaded
 	agent.modelPath = state.ModelPath
 	agent.mu.Unlock()
 
 	return nil
+}
+
+func isValidReplayExperience(exp *Experience) bool {
+	if exp == nil || exp.State == nil || exp.NextState == nil {
+		return false
+	}
+	if exp.Action < 0 || exp.Action >= NumActions {
+		return false
+	}
+	return !math.IsNaN(exp.Reward) && !math.IsInf(exp.Reward, 0)
+}
+
+func cloneExperience(exp *Experience) *Experience {
+	return &Experience{
+		State:     append([]float32(nil), exp.State...),
+		Action:    exp.Action,
+		Reward:    exp.Reward,
+		NextState: append([]float32(nil), exp.NextState...),
+		Done:      exp.Done,
+		TDError:   exp.TDError,
+	}
 }
 
 // Destroy cleans up resources

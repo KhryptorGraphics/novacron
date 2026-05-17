@@ -1,6 +1,7 @@
 package partition
 
 import (
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
@@ -688,6 +689,70 @@ func TestDQNAgentSaveLoadModel(t *testing.T) {
 	}
 	if loaded.replayBuffer.Size() != 1 {
 		t.Fatalf("Expected one replay experience, got %d", loaded.replayBuffer.Size())
+	}
+}
+
+func TestDQNAgentLoadModelFiltersInvalidReplayExperiences(t *testing.T) {
+	modelState := dqnAgentState{
+		Version: dqnAgentStateVersion,
+		ReplayBuffer: replayState{
+			Capacity: 5,
+			Experiences: []*Experience{
+				nil,
+				{
+					State:     nil,
+					Action:    ActionStream1,
+					Reward:    1,
+					NextState: []float32{1, 2},
+				},
+				{
+					State:     []float32{1, 2},
+					Action:    Action(NumActions),
+					Reward:    1,
+					NextState: []float32{3, 4},
+				},
+				{
+					State:     []float32{1, 2},
+					Action:    ActionStream1,
+					Reward:    1,
+					NextState: nil,
+				},
+				{
+					State:     []float32{1, 2},
+					Action:    ActionStream2,
+					Reward:    2,
+					NextState: []float32{3, 4},
+				},
+			},
+		},
+	}
+
+	data, err := json.Marshal(modelState)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	modelPath := filepath.Join(t.TempDir(), "dqn-agent.json")
+	if err := os.WriteFile(modelPath, data, 0600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer agent.Destroy()
+
+	if err := agent.LoadModel(modelPath); err != nil {
+		t.Fatalf("LoadModel failed: %v", err)
+	}
+
+	if agent.replayBuffer.Size() != 1 {
+		t.Fatalf("Expected only valid replay experience to load, got %d", agent.replayBuffer.Size())
+	}
+	loaded := agent.replayBuffer.Sample(1)
+	if len(loaded) != 1 || loaded[0].Action != ActionStream2 || loaded[0].Reward != 2 {
+		t.Fatalf("Loaded replay experience mismatch: %#v", loaded)
 	}
 }
 
