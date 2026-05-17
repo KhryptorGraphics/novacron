@@ -30,6 +30,16 @@ func TestDataCollector(t *testing.T) {
 		})
 	})
 
+	t.Run("CreateCollectorNormalizesNonPositiveInterval", func(t *testing.T) {
+		collector := NewDataCollector(0, 100)
+		require.NotNil(t, collector)
+		assert.Equal(t, time.Second, collector.collectInterval)
+		require.NotPanics(t, func() {
+			collector.Start()
+			collector.Stop()
+		})
+	})
+
 	t.Run("CollectSamples", func(t *testing.T) {
 		collector := NewDataCollector(100*time.Millisecond, 100)
 		collector.Start()
