@@ -251,8 +251,9 @@ func TestPredictionService(t *testing.T) {
 
 		service.updateAccuracy()
 
-		outputPath := filepath.Join(t.TempDir(), "metrics.json")
+		outputPath := filepath.Join(t.TempDir(), "nested", "metrics.json")
 		require.NoError(t, service.ExportMetrics(outputPath))
+		require.FileExists(t, outputPath)
 		raw, err := os.ReadFile(outputPath)
 		require.NoError(t, err)
 

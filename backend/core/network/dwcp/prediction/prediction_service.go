@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -561,7 +562,10 @@ func (s *PredictionService) ExportMetrics(outputPath string) error {
 		metrics["accuracy"] = 1.0 - (totalError / float64(errorCount))
 	}
 
-	// Write to file
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+		return fmt.Errorf("failed to create metrics directory: %w", err)
+	}
+
 	file, err := os.Create(outputPath)
 	if err != nil {
 		return fmt.Errorf("failed to create metrics file: %w", err)
