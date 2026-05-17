@@ -483,6 +483,40 @@ func TestOnlineLearnerExportExperiencesSkipsInvalidSamples(t *testing.T) {
 	}
 }
 
+func TestOnlineLearnerExportExperiencesCreatesParentDirectory(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("failed to create DQN agent: %v", err)
+	}
+
+	learner := NewOnlineLearner(agent, &OnlineLearnerConfig{
+		UpdateFrequency:  time.Hour,
+		MinExperiences:   1,
+		TrainingScript:   "unused",
+		ModelPath:        filepath.Join(t.TempDir(), "model"),
+		EnableAutoUpdate: false,
+	})
+	if learner == nil {
+		t.Fatal("failed to create learner")
+	}
+	defer learner.Stop()
+
+	learner.replayBuffer.Add(&Experience{
+		State:     []float32{1},
+		Action:    ActionStream1,
+		Reward:    1,
+		NextState: []float32{2},
+	})
+
+	exportPath := filepath.Join(t.TempDir(), "nested", "training", "experiences.json")
+	if err := learner.exportExperiences(exportPath); err != nil {
+		t.Fatalf("export should create parent directories: %v", err)
+	}
+	if _, err := os.Stat(exportPath); err != nil {
+		t.Fatalf("exported file missing: %v", err)
+	}
+}
+
 func TestOnlineLearnerStoppedRejectsModelWork(t *testing.T) {
 	agent, err := NewDQNAgent("")
 	if err != nil {

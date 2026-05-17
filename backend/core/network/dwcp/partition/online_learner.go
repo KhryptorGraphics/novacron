@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -250,6 +251,12 @@ func (ol *OnlineLearner) exportExperiences(path string) error {
 	jsonData, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal experiences: %w", err)
+	}
+
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create experience export directory: %w", err)
+		}
 	}
 
 	if err := ioutil.WriteFile(path, jsonData, 0644); err != nil {
