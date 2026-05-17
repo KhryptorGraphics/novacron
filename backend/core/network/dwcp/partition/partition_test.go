@@ -339,6 +339,34 @@ func TestNewOnlineLearnerRejectsNilAgent(t *testing.T) {
 	}
 }
 
+func TestNewOnlineLearnerInitializesMissingReplayBuffer(t *testing.T) {
+	agent := &DQNAgent{}
+	learner := NewOnlineLearner(agent, &OnlineLearnerConfig{
+		UpdateFrequency:  time.Hour,
+		MinExperiences:   1,
+		TrainingScript:   "unused",
+		ModelPath:        filepath.Join(t.TempDir(), "model"),
+		EnableAutoUpdate: false,
+	})
+	if learner == nil {
+		t.Fatal("zero-value agent should create learner with initialized replay buffer")
+	}
+	defer learner.Stop()
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("zero-value agent learner should collect without panic: %v", recovered)
+		}
+	}()
+
+	learner.CollectExperience(NewEnvironmentState(), ActionStream1, 1, NewEnvironmentState(), false)
+
+	status := learner.GetStatus()
+	if status["buffer_size"] != 1 {
+		t.Fatalf("expected initialized replay buffer to collect one experience, got status=%v", status)
+	}
+}
+
 func TestOnlineLearnerStoppedRejectsModelWork(t *testing.T) {
 	agent, err := NewDQNAgent("")
 	if err != nil {

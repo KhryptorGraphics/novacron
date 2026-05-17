@@ -49,6 +49,9 @@ func NewOnlineLearner(agent *DQNAgent, config *OnlineLearnerConfig) *OnlineLearn
 	if agent == nil {
 		return nil
 	}
+	if agent.replayBuffer == nil {
+		agent.replayBuffer = NewReplayBuffer(10000)
+	}
 
 	if config == nil {
 		config = &OnlineLearnerConfig{
