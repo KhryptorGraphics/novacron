@@ -982,12 +982,116 @@ func NewDescribeCommand() *cobra.Command {
 
 func NewGetCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "get",
+		Use:   "get <resource> [name]",
 		Short: "Get resources",
+		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("get command not yet implemented")
+			resource := strings.ToLower(strings.TrimSpace(args[0]))
+			name := ""
+			if len(args) == 2 {
+				name = strings.TrimSpace(args[1])
+			}
+
+			switch resource {
+			case "vm", "vms":
+				client, err := currentClusterAPIClient()
+				if err != nil {
+					return err
+				}
+				if name == "" {
+					return printVMList(cmd, client)
+				}
+				return printVMDetail(cmd, client, name)
+			case "network", "networks", "net":
+				client, err := currentClusterAPIClient()
+				if err != nil {
+					return err
+				}
+				if name == "" {
+					return printNetworkList(cmd, client)
+				}
+				return printNetworkDetail(cmd, client, name)
+			default:
+				return fmt.Errorf("unsupported resource %q", args[0])
+			}
 		},
 	}
+}
+
+type coreVM struct {
+	ID        string `json:"id" yaml:"id"`
+	Name      string `json:"name" yaml:"name"`
+	State     string `json:"state,omitempty" yaml:"state,omitempty"`
+	Status    string `json:"status,omitempty" yaml:"status,omitempty"`
+	NodeID    string `json:"node_id,omitempty" yaml:"node_id,omitempty"`
+	TenantID  string `json:"tenant_id,omitempty" yaml:"tenant_id,omitempty"`
+	CreatedAt string `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty" yaml:"updated_at,omitempty"`
+}
+
+type coreNetwork struct {
+	ID        string `json:"id" yaml:"id"`
+	Name      string `json:"name" yaml:"name"`
+	Type      string `json:"type" yaml:"type"`
+	Subnet    string `json:"subnet" yaml:"subnet"`
+	Gateway   string `json:"gateway,omitempty" yaml:"gateway,omitempty"`
+	Status    string `json:"status" yaml:"status"`
+	CreatedAt string `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty" yaml:"updated_at,omitempty"`
+}
+
+func printVMList(cmd *cobra.Command, client *api.Client) error {
+	var vms []coreVM
+	if err := client.Get(cmd.Context(), "/api/v1/vms", &vms); err != nil {
+		return err
+	}
+
+	writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	fmt.Fprintln(writer, "ID\tNAME\tSTATUS\tNODE\tTENANT")
+	for _, vm := range vms {
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", vm.ID, vm.Name, firstNonEmpty(vm.Status, vm.State), vm.NodeID, vm.TenantID)
+	}
+	return writer.Flush()
+}
+
+func printVMDetail(cmd *cobra.Command, client *api.Client, name string) error {
+	var vm coreVM
+	if err := client.Get(cmd.Context(), "/api/v1/vms/"+url.PathEscape(name), &vm); err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(vm)
+	if err != nil {
+		return err
+	}
+	_, err = cmd.OutOrStdout().Write(data)
+	return err
+}
+
+func printNetworkList(cmd *cobra.Command, client *api.Client) error {
+	var networks []coreNetwork
+	if err := client.Get(cmd.Context(), "/api/v1/networks", &networks); err != nil {
+		return err
+	}
+
+	writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	fmt.Fprintln(writer, "ID\tNAME\tTYPE\tSUBNET\tSTATUS")
+	for _, network := range networks {
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", network.ID, network.Name, network.Type, network.Subnet, network.Status)
+	}
+	return writer.Flush()
+}
+
+func printNetworkDetail(cmd *cobra.Command, client *api.Client, name string) error {
+	var network coreNetwork
+	if err := client.Get(cmd.Context(), "/api/v1/networks/"+url.PathEscape(name), &network); err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(network)
+	if err != nil {
+		return err
+	}
+	_, err = cmd.OutOrStdout().Write(data)
+	return err
 }
 
 func NewCreateCommand() *cobra.Command {
