@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -661,6 +662,12 @@ func (agent *DQNAgent) SaveModel(path string) error {
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
+	}
+
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
 	}
 
 	return os.WriteFile(path, data, 0600)

@@ -1225,6 +1225,22 @@ func TestDQNAgentSaveLoadModel(t *testing.T) {
 	}
 }
 
+func TestDQNAgentSaveModelCreatesParentDirectory(t *testing.T) {
+	agent, err := NewDQNAgent("")
+	if err != nil {
+		t.Fatalf("NewDQNAgent failed: %v", err)
+	}
+	defer agent.Destroy()
+
+	modelPath := filepath.Join(t.TempDir(), "nested", "state", "dqn-agent.json")
+	if err := agent.SaveModel(modelPath); err != nil {
+		t.Fatalf("SaveModel should create parent directories: %v", err)
+	}
+	if _, err := os.Stat(modelPath); err != nil {
+		t.Fatalf("saved model file missing: %v", err)
+	}
+}
+
 func TestDQNAgentLoadModelFiltersInvalidReplayExperiences(t *testing.T) {
 	modelState := dqnAgentState{
 		Version: dqnAgentStateVersion,
