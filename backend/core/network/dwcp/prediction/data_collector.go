@@ -44,6 +44,8 @@ type DataCollector struct {
 	maxSamples      int
 	collectInterval time.Duration
 	mu              sync.RWMutex
+	saveMu          sync.Mutex
+	wg              sync.WaitGroup
 	ctx             context.Context
 	cancel          context.CancelFunc
 
@@ -134,16 +136,23 @@ func (c *DataCollector) Start() {
 	}
 	c.ctx, c.cancel = context.WithCancel(context.Background())
 	ctx := c.ctx
+	c.wg.Add(2)
 	c.mu.Unlock()
 
 	// Load historical data
 	c.loadHistoricalData()
 
 	// Start collection goroutine
-	go c.collectLoop(ctx)
+	go func() {
+		defer c.wg.Done()
+		c.collectLoop(ctx)
+	}()
 
 	// Start persistence goroutine
-	go c.persistenceLoop(ctx)
+	go func() {
+		defer c.wg.Done()
+		c.persistenceLoop(ctx)
+	}()
 }
 
 // collectLoop continuously collects network metrics
@@ -341,6 +350,9 @@ func (c *DataCollector) persistenceLoop(ctx context.Context) {
 
 // saveData saves samples to disk
 func (c *DataCollector) saveData() error {
+	c.saveMu.Lock()
+	defer c.saveMu.Unlock()
+
 	c.mu.RLock()
 	samples := make([]NetworkSample, len(c.samples))
 	copy(samples, c.samples)
@@ -363,7 +375,9 @@ func (c *DataCollector) saveData() error {
 		}
 	}
 
+	c.mu.Lock()
 	c.lastSave = time.Now()
+	c.mu.Unlock()
 	return nil
 }
 
@@ -460,6 +474,8 @@ func (c *DataCollector) Stop() {
 
 	if cancel != nil {
 		cancel()
+		c.wg.Wait()
+		return
 	}
 	c.saveData() // Final save
 }
