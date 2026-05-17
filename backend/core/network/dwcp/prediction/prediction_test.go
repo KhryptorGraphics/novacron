@@ -20,6 +20,16 @@ func TestDataCollector(t *testing.T) {
 		assert.Equal(t, 1000, collector.maxSamples)
 	})
 
+	t.Run("CreateCollectorNormalizesNonPositiveMaxSamples", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			collector := NewDataCollector(1*time.Second, -1)
+			require.NotNil(t, collector)
+			assert.Equal(t, 1, collector.maxSamples)
+			collector.addSample(NetworkSample{Timestamp: time.Now(), BandwidthMbps: 100, LatencyMs: 20})
+			assert.Len(t, collector.GetRecentSamples(10), 1)
+		})
+	})
+
 	t.Run("CollectSamples", func(t *testing.T) {
 		collector := NewDataCollector(100*time.Millisecond, 100)
 		collector.Start()

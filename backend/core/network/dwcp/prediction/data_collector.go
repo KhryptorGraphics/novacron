@@ -66,6 +66,10 @@ type DataCollector struct {
 
 // NewDataCollector creates a new data collector
 func NewDataCollector(collectInterval time.Duration, maxSamples int) *DataCollector {
+	if maxSamples <= 0 {
+		maxSamples = 1
+	}
+
 	collector := &DataCollector{
 		samples:         make([]NetworkSample, 0, maxSamples),
 		maxSamples:      maxSamples,
