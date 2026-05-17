@@ -237,6 +237,24 @@ func TestPredictionService(t *testing.T) {
 		assert.Equal(t, time.Second, service.updateInterval)
 	})
 
+	t.Run("EnableABTestingClosesPreviousAlternateModel", func(t *testing.T) {
+		service, err := NewPredictionService("", 10*time.Millisecond)
+		require.NoError(t, err)
+		defer service.Stop()
+
+		previousSession := &fakeBandwidthInferenceSession{output: []float32{0.1, 0.2, 0.01, 0.03}}
+		service.alternateModel = &LSTMPredictor{
+			modelLoaded:    true,
+			inference:      previousSession,
+			sequenceLength: 10,
+			featureCount:   6,
+			outputCount:    4,
+		}
+
+		require.NoError(t, service.EnableABTesting(""))
+		assert.True(t, previousSession.destroyed)
+	})
+
 	t.Run("UpdateAccuracyIgnoresInvalidActualTelemetry", func(t *testing.T) {
 		service, err := NewPredictionService("", 10*time.Millisecond)
 		require.NoError(t, err)

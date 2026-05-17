@@ -477,12 +477,17 @@ func (s *PredictionService) EnableABTesting(alternateModelPath string) error {
 	}
 
 	s.mu.Lock()
+	previousModel := s.alternateModel
 	s.abTestEnabled = true
 	s.alternateModel = alternateModel
 	s.abTestResults = &ABTestResults{
 		TestStartTime: time.Now(),
 	}
 	s.mu.Unlock()
+
+	if previousModel != nil {
+		previousModel.Close()
+	}
 
 	return nil
 }
