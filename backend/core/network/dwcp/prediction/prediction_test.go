@@ -222,20 +222,14 @@ func TestPredictionService(t *testing.T) {
 	})
 
 	t.Run("CreateService", func(t *testing.T) {
-		// Note: This test requires a valid ONNX model file
-		// In production, you would have a test model
-		t.Skip("Requires ONNX model file")
-
-		service, err := NewPredictionService("test_model.onnx", 1*time.Minute)
+		service, err := NewPredictionService("", 1*time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, service)
 		defer service.Stop()
 	})
 
 	t.Run("OptimalStreamCount", func(t *testing.T) {
-		t.Skip("Requires ONNX model file")
-
-		service, err := NewPredictionService("test_model.onnx", 1*time.Minute)
+		service, err := NewPredictionService("", 1*time.Minute)
 		require.NoError(t, err)
 		defer service.Stop()
 
@@ -256,9 +250,7 @@ func TestPredictionService(t *testing.T) {
 	})
 
 	t.Run("OptimalBufferSize", func(t *testing.T) {
-		t.Skip("Requires ONNX model file")
-
-		service, err := NewPredictionService("test_model.onnx", 1*time.Minute)
+		service, err := NewPredictionService("", 1*time.Minute)
 		require.NoError(t, err)
 		defer service.Stop()
 
