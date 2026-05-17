@@ -868,6 +868,9 @@ func TestTaskPartitionerReportOutcomeIgnoresInvalidDecisionStreams(t *testing.T)
 	require.NoError(t, err)
 	defer partitioner.Destroy()
 
+	before := partitioner.GetMetrics()
+	require.Contains(t, before, "learner_buffer_size")
+
 	decision := &partition.TaskPartitionDecision{
 		Action:       partition.ActionStream1,
 		StreamIDs:    []int{-1, 99},
@@ -882,6 +885,7 @@ func TestTaskPartitionerReportOutcomeIgnoresInvalidDecisionStreams(t *testing.T)
 	metrics := partitioner.GetMetrics()
 	assert.Equal(t, int64(1), metrics["successful_tasks"])
 	assert.Equal(t, int64(0), metrics["failed_tasks"])
+	assert.Equal(t, before["learner_buffer_size"], metrics["learner_buffer_size"])
 }
 
 func TestTaskPartitionerReportOutcomeSkipsInvalidTelemetryReward(t *testing.T) {

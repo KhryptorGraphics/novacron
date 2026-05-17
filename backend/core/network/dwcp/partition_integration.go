@@ -176,6 +176,13 @@ func (tp *TaskPartitioner) ReportOutcome(taskID string, decision *partition.Task
 			zap.Int("action", int(decision.Action)))
 		return
 	}
+	if !isValidPartitionStreams(decision.StreamIDs) {
+		tp.logger.Warn("Skipping online learning update for task outcome; invalid streams",
+			zap.String("task_id", taskID),
+			zap.Bool("success", success),
+			zap.Ints("streams", decision.StreamIDs))
+		return
+	}
 
 	// If learning components are not initialized, just track basic stats
 	if tp.agent == nil || tp.onlineLearner == nil {
@@ -500,6 +507,18 @@ func isValidOutcomeTelemetry(actualThroughput float64, actualLatency time.Durati
 
 func isValidPartitionAction(action partition.Action) bool {
 	return action >= 0 && action < partition.NumActions
+}
+
+func isValidPartitionStreams(streamIDs []int) bool {
+	if len(streamIDs) == 0 {
+		return false
+	}
+	for _, streamID := range streamIDs {
+		if streamID < 0 || streamID >= 4 {
+			return false
+		}
+	}
+	return true
 }
 
 // GetMetrics returns partitioner metrics
