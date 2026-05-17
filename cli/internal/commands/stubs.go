@@ -1026,12 +1026,74 @@ func NewDeleteCommand() *cobra.Command {
 
 func NewDescribeCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "describe",
+		Use:   "describe <resource> <name>",
 		Short: "Describe resources",
+		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("describe command not yet implemented")
+			resource := strings.ToLower(strings.TrimSpace(args[0]))
+			name := strings.TrimSpace(args[1])
+
+			switch resource {
+			case "vm", "vms":
+				client, err := currentClusterAPIClient()
+				if err != nil {
+					return err
+				}
+				return describeVM(cmd, client, name)
+			case "network", "networks", "net":
+				client, err := currentClusterAPIClient()
+				if err != nil {
+					return err
+				}
+				return describeNetwork(cmd, client, name)
+			default:
+				return fmt.Errorf("unsupported resource %q", args[0])
+			}
 		},
 	}
+}
+
+func describeVM(cmd *cobra.Command, client *api.Client, name string) error {
+	var vm coreVM
+	if err := client.Get(cmd.Context(), "/api/v1/vms/"+url.PathEscape(name), &vm); err != nil {
+		return err
+	}
+
+	writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	fmt.Fprintf(writer, "Name:\t%s\n", vm.Name)
+	fmt.Fprintf(writer, "ID:\t%s\n", vm.ID)
+	fmt.Fprintf(writer, "Status:\t%s\n", firstNonEmpty(vm.Status, vm.State))
+	fmt.Fprintf(writer, "Node:\t%s\n", vm.NodeID)
+	fmt.Fprintf(writer, "Tenant:\t%s\n", vm.TenantID)
+	if vm.CreatedAt != "" {
+		fmt.Fprintf(writer, "Created:\t%s\n", vm.CreatedAt)
+	}
+	if vm.UpdatedAt != "" {
+		fmt.Fprintf(writer, "Updated:\t%s\n", vm.UpdatedAt)
+	}
+	return writer.Flush()
+}
+
+func describeNetwork(cmd *cobra.Command, client *api.Client, name string) error {
+	var network coreNetwork
+	if err := client.Get(cmd.Context(), "/api/v1/networks/"+url.PathEscape(name), &network); err != nil {
+		return err
+	}
+
+	writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	fmt.Fprintf(writer, "Name:\t%s\n", network.Name)
+	fmt.Fprintf(writer, "ID:\t%s\n", network.ID)
+	fmt.Fprintf(writer, "Type:\t%s\n", network.Type)
+	fmt.Fprintf(writer, "Subnet:\t%s\n", network.Subnet)
+	fmt.Fprintf(writer, "Gateway:\t%s\n", network.Gateway)
+	fmt.Fprintf(writer, "Status:\t%s\n", network.Status)
+	if network.CreatedAt != "" {
+		fmt.Fprintf(writer, "Created:\t%s\n", network.CreatedAt)
+	}
+	if network.UpdatedAt != "" {
+		fmt.Fprintf(writer, "Updated:\t%s\n", network.UpdatedAt)
+	}
+	return writer.Flush()
 }
 
 type deleteResponse struct {
