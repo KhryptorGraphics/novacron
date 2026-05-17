@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -749,13 +750,125 @@ func newMonitorVMsCommand() *cobra.Command {
 }
 
 func NewLogsCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "logs",
-		Short: "View VM logs",
+	var (
+		count      int
+		level      string
+		components string
+		vmID       string
+		timeout    time.Duration
+	)
+
+	cmd := &cobra.Command{
+		Use:   "logs [source]",
+		Short: "Stream cluster logs",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("logs command not yet implemented")
+			if count <= 0 {
+				return fmt.Errorf("count must be greater than zero")
+			}
+
+			manager, err := config.NewManager(cfgFile)
+			if err != nil {
+				return err
+			}
+			cluster, err := manager.GetCurrentCluster()
+			if err != nil {
+				return err
+			}
+			client, err := newClusterAPIClient(cluster)
+			if err != nil {
+				return err
+			}
+			if strings.EqualFold(cluster.AuthType, "token") {
+				store, err := auth.NewTokenStore()
+				if err != nil {
+					return fmt.Errorf("initialize token store: %w", err)
+				}
+				tokenAuth, err := store.Load(cluster.Name)
+				if err != nil {
+					return fmt.Errorf("load auth token for cluster %s: %w", cluster.Name, err)
+				}
+				client.SetToken(tokenAuth.Token)
+			}
+
+			source := "all"
+			if len(args) == 1 {
+				source = strings.TrimSpace(args[0])
+			}
+			path := "/api/ws/logs"
+			if source != "" && source != "all" {
+				path += "/" + url.PathEscape(source)
+			}
+
+			query := url.Values{}
+			if strings.TrimSpace(level) != "" {
+				query.Set("level", strings.TrimSpace(level))
+			}
+			if strings.TrimSpace(components) != "" {
+				query.Set("components", strings.TrimSpace(components))
+			}
+			if strings.TrimSpace(vmID) != "" {
+				query.Set("vm_id", strings.TrimSpace(vmID))
+			}
+			if encoded := query.Encode(); encoded != "" {
+				path += "?" + encoded
+			}
+
+			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+			defer cancel()
+
+			conn, err := client.WebSocket(ctx, path)
+			if err != nil {
+				return err
+			}
+			defer conn.Close()
+
+			writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+			fmt.Fprintln(writer, "TIME\tSOURCE\tLEVEL\tCOMPONENT\tVM\tMESSAGE")
+			for i := 0; i < count; i++ {
+				var msg logStreamMessage
+				if err := conn.Receive(&msg); err != nil {
+					return fmt.Errorf("receive log entry: %w", err)
+				}
+				fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n",
+					formatLogTimestamp(msg.Timestamp),
+					msg.Source,
+					msg.Level,
+					msg.Component,
+					msg.VMID,
+					msg.Message,
+				)
+			}
+			return writer.Flush()
 		},
 	}
+
+	cmd.Flags().IntVar(&count, "count", 10, "Number of log entries to read before exiting")
+	cmd.Flags().StringVar(&level, "level", "", "Comma-separated log levels to include")
+	cmd.Flags().StringVar(&components, "components", "", "Comma-separated components to include")
+	cmd.Flags().StringVar(&vmID, "vm-id", "", "VM ID filter for VM logs")
+	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "Maximum time to wait for log entries")
+
+	return cmd
+}
+
+type logStreamMessage struct {
+	Type      string                 `json:"type"`
+	Source    string                 `json:"source"`
+	Level     string                 `json:"level"`
+	Message   string                 `json:"message"`
+	Timestamp time.Time              `json:"timestamp"`
+	Component string                 `json:"component,omitempty"`
+	VMID      string                 `json:"vm_id,omitempty"`
+	Labels    map[string]string      `json:"labels,omitempty"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+}
+
+func formatLogTimestamp(timestamp time.Time) string {
+	if timestamp.IsZero() {
+		return ""
+	}
+	return timestamp.Format(time.RFC3339)
 }
 
 func NewExecCommand() *cobra.Command {
