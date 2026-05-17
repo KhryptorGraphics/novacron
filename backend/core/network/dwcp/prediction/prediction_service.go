@@ -287,6 +287,11 @@ func (s *PredictionService) GetOptimalStreamCount() int {
 	if pred == nil || pred.Confidence < 0.5 {
 		return 4 // Default
 	}
+	if !isFiniteNonNegative(pred.PredictedBandwidthMbps) ||
+		!isFiniteNonNegative(pred.PredictedLatencyMs) ||
+		!isFiniteNonNegative(pred.PredictedPacketLoss) {
+		return 4
+	}
 
 	// Calculate based on predicted bandwidth and latency
 	bandwidth := pred.PredictedBandwidthMbps

@@ -187,6 +187,24 @@ func TestPredictionService(t *testing.T) {
 		assert.Equal(t, 2, service.GetOptimalStreamCount())
 	})
 
+	t.Run("OptimalStreamCountFallsBackForInvalidPrediction", func(t *testing.T) {
+		service, err := NewPredictionService("", 10*time.Millisecond)
+		require.NoError(t, err)
+		defer service.Stop()
+
+		service.mu.Lock()
+		service.currentPrediction = &BandwidthPrediction{
+			PredictedBandwidthMbps: math.NaN(),
+			PredictedLatencyMs:     math.Inf(1),
+			PredictedPacketLoss:    -0.1,
+			Confidence:             0.85,
+			ValidUntil:             time.Now().Add(15 * time.Minute),
+		}
+		service.mu.Unlock()
+
+		assert.Equal(t, 4, service.GetOptimalStreamCount())
+	})
+
 	t.Run("OptimalBufferSizeFallsBackForInvalidPrediction", func(t *testing.T) {
 		service, err := NewPredictionService("", 10*time.Millisecond)
 		require.NoError(t, err)
