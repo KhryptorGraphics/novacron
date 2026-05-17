@@ -1035,12 +1035,233 @@ func NewExecCommand() *cobra.Command {
 
 func NewCopyCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "copy",
+		Use:   "copy <source> <destination>",
 		Short: "Copy files to/from VMs",
+		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("copy backend contract is not implemented; see docs/api/vm-io-contracts.md and tracking issue novacron-lmh")
+			client, err := currentClusterAPIClient()
+			if err != nil {
+				return err
+			}
+			return runVMCopy(cmd.Context(), client, args[0], args[1], cmd.OutOrStdout())
 		},
 	}
+}
+
+type vmCopyEndpoint struct {
+	vmID string
+	path string
+}
+
+func runVMCopy(ctx context.Context, client *api.Client, source string, destination string, output io.Writer) error {
+	sourceRemote, sourceEndpoint := parseVMCopyEndpoint(source)
+	destinationRemote, destinationEndpoint := parseVMCopyEndpoint(destination)
+	switch {
+	case !sourceRemote && destinationRemote:
+		return uploadVMCopy(ctx, client, source, destinationEndpoint, output)
+	case sourceRemote && !destinationRemote:
+		return downloadVMCopy(ctx, client, sourceEndpoint, destination, output)
+	case sourceRemote && destinationRemote:
+		return fmt.Errorf("copy between two VMs is not supported")
+	default:
+		return fmt.Errorf("copy requires either source or destination to use vm-id:/path")
+	}
+}
+
+func parseVMCopyEndpoint(value string) (bool, vmCopyEndpoint) {
+	colon := strings.Index(value, ":")
+	if colon <= 0 || colon == len(value)-1 {
+		return false, vmCopyEndpoint{}
+	}
+	path := value[colon+1:]
+	if !strings.HasPrefix(path, "/") {
+		return false, vmCopyEndpoint{}
+	}
+	return true, vmCopyEndpoint{
+		vmID: strings.TrimSpace(value[:colon]),
+		path: path,
+	}
+}
+
+func uploadVMCopy(ctx context.Context, client *api.Client, localPath string, destination vmCopyEndpoint, output io.Writer) error {
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return fmt.Errorf("stat source file: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("source path must be a file")
+	}
+
+	conn, err := client.WebSocket(ctx, vmCopyWebSocketPath(destination.vmID, "upload", destination.path))
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	metadataFrame, err := encodeCLIVMIOJSONFrame(cliVMIOFrameCopyMetadata, cliVMCopyMetadata{
+		Path: destination.path,
+		Size: info.Size(),
+		Mode: fmt.Sprintf("%04o", info.Mode().Perm()),
+	})
+	if err != nil {
+		return err
+	}
+	if err := conn.SendBinary(metadataFrame); err != nil {
+		return fmt.Errorf("send copy metadata: %w", err)
+	}
+	if _, err := receiveVMCopyAck(conn); err != nil {
+		return err
+	}
+
+	file, err := os.Open(localPath)
+	if err != nil {
+		return fmt.Errorf("open source file: %w", err)
+	}
+	defer file.Close()
+
+	var sent int64
+	buffer := make([]byte, 64*1024)
+	for {
+		n, readErr := file.Read(buffer)
+		if n > 0 {
+			if err := conn.SendBinary(encodeCLIVMIODataFrame(cliVMIOFrameCopyData, buffer[:n])); err != nil {
+				return fmt.Errorf("send copy data: %w", err)
+			}
+			sent += int64(n)
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return fmt.Errorf("read source file: %w", readErr)
+		}
+	}
+
+	eofFrame, err := encodeCLIVMIOJSONFrame(cliVMIOFrameCopyEOF, cliVMCopyEOF{Bytes: sent})
+	if err != nil {
+		return err
+	}
+	if err := conn.SendBinary(eofFrame); err != nil {
+		return fmt.Errorf("send copy eof: %w", err)
+	}
+	if _, err := receiveVMCopyAck(conn); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(output, "Uploaded %d bytes to %s:%s\n", sent, destination.vmID, destination.path)
+	return nil
+}
+
+func downloadVMCopy(ctx context.Context, client *api.Client, source vmCopyEndpoint, destination string, output io.Writer) error {
+	conn, err := client.WebSocket(ctx, vmCopyWebSocketPath(source.vmID, "download", source.path))
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	messageType, frame, err := conn.ReceiveMessage()
+	if err != nil {
+		return fmt.Errorf("receive copy metadata: %w", err)
+	}
+	if messageType != websocket.BinaryMessage {
+		return fmt.Errorf("copy metadata frame must be binary")
+	}
+	var metadata cliVMCopyMetadata
+	frameType, err := decodeCLIVMIOJSONFrame(frame, &metadata)
+	if err != nil {
+		return err
+	}
+	if frameType != cliVMIOFrameCopyMetadata {
+		return fmt.Errorf("expected copy metadata frame, got %#x", frameType)
+	}
+
+	localPath := destination
+	if info, statErr := os.Stat(destination); statErr == nil && info.IsDir() {
+		localPath = filepath.Join(destination, filepath.Base(source.path))
+	}
+	file, err := os.Create(localPath)
+	if err != nil {
+		return fmt.Errorf("create destination file: %w", err)
+	}
+	defer file.Close()
+
+	var received int64
+	for {
+		messageType, frame, err := conn.ReceiveMessage()
+		if err != nil {
+			return fmt.Errorf("receive copy frame: %w", err)
+		}
+		if messageType != websocket.BinaryMessage {
+			continue
+		}
+		frameType, payload, err := decodeCLIVMIOFrame(frame)
+		if err != nil {
+			return err
+		}
+		switch frameType {
+		case cliVMIOFrameCopyData:
+			n, err := file.Write(payload)
+			if err != nil {
+				return fmt.Errorf("write destination file: %w", err)
+			}
+			received += int64(n)
+		case cliVMIOFrameCopyEOF:
+			var eof cliVMCopyEOF
+			if _, err := decodeCLIVMIOJSONFrame(frame, &eof); err != nil {
+				return err
+			}
+			if eof.Bytes != 0 && eof.Bytes != received {
+				return fmt.Errorf("copy byte count mismatch: expected %d, wrote %d", eof.Bytes, received)
+			}
+			fmt.Fprintf(output, "Downloaded %d bytes from %s:%s\n", received, source.vmID, source.path)
+			return nil
+		case cliVMIOFrameCopyError:
+			return decodeVMCopyError(frame)
+		}
+	}
+}
+
+func vmCopyWebSocketPath(vmID string, direction string, remotePath string) string {
+	query := url.Values{}
+	query.Set("direction", direction)
+	query.Set("path", remotePath)
+	return fmt.Sprintf("/api/ws/vms/%s/copy?%s", url.PathEscape(vmID), query.Encode())
+}
+
+func receiveVMCopyAck(conn *api.WebSocketConn) (cliVMIOAck, error) {
+	for {
+		messageType, frame, err := conn.ReceiveMessage()
+		if err != nil {
+			return cliVMIOAck{}, fmt.Errorf("receive copy ack: %w", err)
+		}
+		if messageType != websocket.BinaryMessage {
+			continue
+		}
+		frameType, _, err := decodeCLIVMIOFrame(frame)
+		if err != nil {
+			return cliVMIOAck{}, err
+		}
+		switch frameType {
+		case cliVMIOFrameCopyAck:
+			var ack cliVMIOAck
+			if _, err := decodeCLIVMIOJSONFrame(frame, &ack); err != nil {
+				return cliVMIOAck{}, err
+			}
+			return ack, nil
+		case cliVMIOFrameCopyError:
+			return cliVMIOAck{}, decodeVMCopyError(frame)
+		default:
+			return cliVMIOAck{}, fmt.Errorf("expected copy ack frame, got %#x", frameType)
+		}
+	}
+}
+
+func decodeVMCopyError(frame []byte) error {
+	var frameError cliVMIOError
+	if _, err := decodeCLIVMIOJSONFrame(frame, &frameError); err != nil {
+		return err
+	}
+	return fmt.Errorf("copy failed: %s", frameError.Message)
 }
 
 func NewPortForwardCommand() *cobra.Command {

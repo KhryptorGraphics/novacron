@@ -6,30 +6,176 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-func TestCopyCommandReportsMissingBackendContract(t *testing.T) {
-	cmd := NewCopyCommand()
-	cmd.SetArgs([]string{"local.txt", "vm-1:/tmp/local.txt"})
+func TestCopyCommandUploadsLocalFileOverWebSocket(t *testing.T) {
+	withTempHome(t)
 
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatalf("expected copy contract error")
+	sourcePath := filepath.Join(t.TempDir(), "local.txt")
+	sourceContent := []byte("hello world")
+	if err := os.WriteFile(sourcePath, sourceContent, 0o644); err != nil {
+		t.Fatalf("write source file: %v", err)
 	}
-	for _, expected := range []string{
-		"backend contract is not implemented",
-		"docs/api/vm-io-contracts.md",
-		"novacron-lmh",
-	} {
-		if !strings.Contains(err.Error(), expected) {
-			t.Fatalf("expected error to contain %q, got %v", expected, err)
+
+	uploaded := make(chan []byte, 1)
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/ws/vms/vm-1/copy" {
+			t.Fatalf("expected copy websocket path, got %s", r.URL.Path)
 		}
+		if r.URL.Query().Get("direction") != "upload" || r.URL.Query().Get("path") != "/tmp/local.txt" {
+			t.Fatalf("unexpected copy query %s", r.URL.RawQuery)
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatalf("upgrade websocket: %v", err)
+		}
+		defer conn.Close()
+
+		_, frame, err := conn.ReadMessage()
+		if err != nil {
+			t.Errorf("read metadata frame: %v", err)
+			return
+		}
+		var metadata cliVMCopyMetadata
+		frameType, err := decodeCLIVMIOJSONFrame(frame, &metadata)
+		if err != nil {
+			t.Errorf("decode metadata frame: %v", err)
+			return
+		}
+		if frameType != cliVMIOFrameCopyMetadata || metadata.Path != "/tmp/local.txt" || metadata.Size != int64(len(sourceContent)) {
+			t.Errorf("unexpected metadata frame type=%#x metadata=%+v", frameType, metadata)
+			return
+		}
+		if err := writeCopyAck(conn, 0); err != nil {
+			t.Errorf("write metadata ack: %v", err)
+			return
+		}
+
+		var got bytes.Buffer
+		for {
+			_, frame, err := conn.ReadMessage()
+			if err != nil {
+				t.Errorf("read upload frame: %v", err)
+				return
+			}
+			frameType, payload, err := decodeCLIVMIOFrame(frame)
+			if err != nil {
+				t.Errorf("decode upload frame: %v", err)
+				return
+			}
+			switch frameType {
+			case cliVMIOFrameCopyData:
+				got.Write(payload)
+			case cliVMIOFrameCopyEOF:
+				var eof cliVMCopyEOF
+				if _, err := decodeCLIVMIOJSONFrame(frame, &eof); err != nil {
+					t.Errorf("decode eof frame: %v", err)
+					return
+				}
+				if eof.Bytes != int64(len(sourceContent)) {
+					t.Errorf("unexpected eof byte count %d", eof.Bytes)
+					return
+				}
+				if err := writeCopyAck(conn, int64(got.Len())); err != nil {
+					t.Errorf("write final ack: %v", err)
+					return
+				}
+				uploaded <- got.Bytes()
+				return
+			default:
+				t.Errorf("unexpected upload frame type %#x", frameType)
+				return
+			}
+		}
+	}))
+	defer server.Close()
+	addCurrentTestCluster(t, server.URL)
+
+	cmd := NewCopyCommand()
+	cmd.SetArgs([]string{sourcePath, "vm-1:/tmp/local.txt"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("copy upload command failed: %v", err)
+	}
+
+	select {
+	case got := <-uploaded:
+		if !bytes.Equal(got, sourceContent) {
+			t.Fatalf("expected uploaded content %q, got %q", sourceContent, got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("upload was not received by websocket server")
+	}
+}
+
+func TestCopyCommandDownloadsRemoteFileOverWebSocket(t *testing.T) {
+	withTempHome(t)
+
+	remoteContent := []byte("remote data\n")
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/ws/vms/vm-1/copy" {
+			t.Fatalf("expected copy websocket path, got %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("direction") != "download" || r.URL.Query().Get("path") != "/var/log/app.log" {
+			t.Fatalf("unexpected copy query %s", r.URL.RawQuery)
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatalf("upgrade websocket: %v", err)
+		}
+		defer conn.Close()
+
+		metadataFrame, err := encodeCLIVMIOJSONFrame(cliVMIOFrameCopyMetadata, cliVMCopyMetadata{
+			Path: "/var/log/app.log",
+			Size: int64(len(remoteContent)),
+			Mode: "0644",
+		})
+		if err != nil {
+			t.Errorf("encode metadata: %v", err)
+			return
+		}
+		if err := conn.WriteMessage(websocket.BinaryMessage, metadataFrame); err != nil {
+			t.Errorf("write metadata: %v", err)
+			return
+		}
+		if err := conn.WriteMessage(websocket.BinaryMessage, encodeCLIVMIODataFrame(cliVMIOFrameCopyData, remoteContent)); err != nil {
+			t.Errorf("write data: %v", err)
+			return
+		}
+		eofFrame, err := encodeCLIVMIOJSONFrame(cliVMIOFrameCopyEOF, cliVMCopyEOF{Bytes: int64(len(remoteContent))})
+		if err != nil {
+			t.Errorf("encode eof: %v", err)
+			return
+		}
+		if err := conn.WriteMessage(websocket.BinaryMessage, eofFrame); err != nil {
+			t.Errorf("write eof: %v", err)
+			return
+		}
+	}))
+	defer server.Close()
+	addCurrentTestCluster(t, server.URL)
+
+	destinationPath := filepath.Join(t.TempDir(), "app.log")
+	cmd := NewCopyCommand()
+	cmd.SetArgs([]string{"vm-1:/var/log/app.log", destinationPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("copy download command failed: %v", err)
+	}
+
+	got, err := os.ReadFile(destinationPath)
+	if err != nil {
+		t.Fatalf("read downloaded file: %v", err)
+	}
+	if !bytes.Equal(got, remoteContent) {
+		t.Fatalf("expected downloaded content %q, got %q", remoteContent, got)
 	}
 }
 
@@ -173,4 +319,12 @@ func waitForForwardedLocalPort(t *testing.T, output *bytes.Buffer) string {
 	}
 	t.Fatalf("forwarded local port not reported in output:\n%s", output.String())
 	return ""
+}
+
+func writeCopyAck(conn *websocket.Conn, bytes int64) error {
+	frame, err := encodeCLIVMIOJSONFrame(cliVMIOFrameCopyAck, cliVMIOAck{Bytes: bytes})
+	if err != nil {
+		return err
+	}
+	return conn.WriteMessage(websocket.BinaryMessage, frame)
 }

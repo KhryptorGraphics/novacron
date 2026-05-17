@@ -22,6 +22,22 @@ const (
 
 var errCLIVMIOInvalidFrame = errors.New("vm io frame is invalid")
 
+type cliVMCopyMetadata struct {
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	Mode   string `json:"mode,omitempty"`
+	SHA256 string `json:"sha256,omitempty"`
+}
+
+type cliVMCopyEOF struct {
+	SHA256 string `json:"sha256,omitempty"`
+	Bytes  int64  `json:"bytes"`
+}
+
+type cliVMIOAck struct {
+	Bytes int64 `json:"bytes"`
+}
+
 type cliVMPortForwardOpen struct {
 	ConnectionID string `json:"connectionId"`
 	Port         int    `json:"port"`
