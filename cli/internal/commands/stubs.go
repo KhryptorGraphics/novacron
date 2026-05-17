@@ -17,6 +17,7 @@ import (
 	"github.com/novacron/cli/pkg/api"
 	"github.com/novacron/cli/pkg/auth"
 	"github.com/novacron/cli/pkg/config"
+	"github.com/novacron/cli/pkg/service"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -1000,10 +1001,29 @@ func formatLogTimestamp(timestamp time.Time) string {
 
 func NewExecCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "exec",
+		Use:   "exec <vm-id> -- <command> [args...]",
 		Short: "Execute command in VM",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 2 {
+				return fmt.Errorf("exec requires a VM and command")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("exec command not yet implemented")
+			manager, err := config.NewManager(cfgFile)
+			if err != nil {
+				return err
+			}
+			cluster, err := manager.GetCurrentCluster()
+			if err != nil {
+				return err
+			}
+			client, err := newClusterAPIClient(cluster)
+			if err != nil {
+				return err
+			}
+			vmService := service.NewVMService(client)
+			return vmService.Exec(cmd.Context(), cluster.Namespace, args[0], args[1:], nil, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 }
