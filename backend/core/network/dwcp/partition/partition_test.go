@@ -682,6 +682,34 @@ func TestEnvironmentSimulatorStepInitializesZeroValueSimulator(t *testing.T) {
 	}
 }
 
+func TestEnvironmentSimulatorStepSanitizesInvalidMutableState(t *testing.T) {
+	sim := NewEnvironmentSimulator()
+	sim.state.StreamCongestion = [4]float64{math.NaN(), math.Inf(1), -0.5, 2}
+	sim.state.StreamSuccessRate = [4]float64{math.NaN(), math.Inf(-1), -0.25, 2}
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("invalid mutable state should not panic during step: %v", recovered)
+		}
+	}()
+
+	nextState, reward, _ := sim.Step(ActionSplitAll)
+
+	if math.IsNaN(reward) || math.IsInf(reward, 0) {
+		t.Fatalf("invalid mutable state should produce finite reward, got %f", reward)
+	}
+	for i := 0; i < 4; i++ {
+		if math.IsNaN(nextState.StreamCongestion[i]) || math.IsInf(nextState.StreamCongestion[i], 0) ||
+			nextState.StreamCongestion[i] < 0 || nextState.StreamCongestion[i] > 1 {
+			t.Fatalf("stream %d congestion should be finite and normalized, got %f", i, nextState.StreamCongestion[i])
+		}
+		if math.IsNaN(nextState.StreamSuccessRate[i]) || math.IsInf(nextState.StreamSuccessRate[i], 0) ||
+			nextState.StreamSuccessRate[i] < 0 || nextState.StreamSuccessRate[i] > 1 {
+			t.Fatalf("stream %d success rate should be finite and normalized, got %f", i, nextState.StreamSuccessRate[i])
+		}
+	}
+}
+
 func TestDQNAgentHeuristic(t *testing.T) {
 	// Test without loading a model (uses heuristic)
 	agent, err := NewDQNAgent("nonexistent_model.onnx")

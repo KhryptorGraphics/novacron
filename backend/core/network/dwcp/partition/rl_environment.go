@@ -416,6 +416,9 @@ func (es *EnvironmentSimulator) updateState(action Action, outcome *ActionOutcom
 	usedStreams := getUsedStreams(action)
 
 	for _, idx := range usedStreams {
+		es.state.StreamCongestion[idx] = clampUnit(es.state.StreamCongestion[idx])
+		es.state.StreamSuccessRate[idx] = clampUnit(es.state.StreamSuccessRate[idx])
+
 		// Increase congestion on used streams
 		es.state.StreamCongestion[idx] = math.Min(1.0, es.state.StreamCongestion[idx]+0.1)
 
@@ -430,6 +433,8 @@ func (es *EnvironmentSimulator) updateState(action Action, outcome *ActionOutcom
 	// Decay congestion on unused streams
 	for i := 0; i < 4; i++ {
 		if !contains(usedStreams, i) {
+			es.state.StreamCongestion[i] = clampUnit(es.state.StreamCongestion[i])
+			es.state.StreamSuccessRate[i] = clampUnit(es.state.StreamSuccessRate[i])
 			es.state.StreamCongestion[i] = math.Max(0, es.state.StreamCongestion[i]-0.05)
 		}
 	}
