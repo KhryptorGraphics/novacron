@@ -1174,6 +1174,33 @@ func TestDQNAgentLoadModelSanitizesInvalidScalarState(t *testing.T) {
 	}
 }
 
+func TestEvaluationResultsCalculateStatsUsesStandardDeviation(t *testing.T) {
+	results := &EvaluationResults{
+		Episodes:    2,
+		Rewards:     []float64{2, 4},
+		Throughputs: []float64{10, 14},
+		Latencies:   []float64{1, 5},
+	}
+
+	results.calculateStats()
+
+	if results.MeanReward != 3 {
+		t.Fatalf("expected mean reward 3, got %v", results.MeanReward)
+	}
+	if results.StdReward != 1 {
+		t.Fatalf("expected reward stddev 1, got %v", results.StdReward)
+	}
+	if results.StdThroughput != 2 {
+		t.Fatalf("expected throughput stddev 2, got %v", results.StdThroughput)
+	}
+	if results.StdLatency != 2 {
+		t.Fatalf("expected latency stddev 2, got %v", results.StdLatency)
+	}
+	if results.SuccessRate != 1 {
+		t.Fatalf("expected success rate 1, got %v", results.SuccessRate)
+	}
+}
+
 func TestActionDecoding(t *testing.T) {
 	agent, err := NewDQNAgent("nonexistent.onnx")
 	if err != nil {

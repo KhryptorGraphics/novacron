@@ -474,7 +474,7 @@ func stddev(values []float64, mean float64) float64 {
 		variance += diff * diff
 	}
 	variance /= float64(len(values))
-	return variance
+	return math.Sqrt(variance)
 }
 
 func min(a, b int) int {
