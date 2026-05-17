@@ -353,6 +353,13 @@ func (agent *DQNAgent) UpdateEpsilon() {
 
 // decodeAction converts an action to a partition decision
 func (agent *DQNAgent) decodeAction(action Action, state *EnvironmentState, decision *TaskPartitionDecision) *TaskPartitionDecision {
+	if decision == nil {
+		decision = &TaskPartitionDecision{}
+	}
+	if state == nil || action < 0 || action >= NumActions {
+		return decision
+	}
+
 	taskSize := state.TaskSize
 
 	switch {

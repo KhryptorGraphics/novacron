@@ -1175,6 +1175,49 @@ func TestActionDecoding(t *testing.T) {
 	}
 }
 
+func TestActionDecodingIgnoresInvalidInput(t *testing.T) {
+	agent, err := NewDQNAgent("nonexistent.onnx")
+	if err != nil {
+		t.Skipf("ONNX Runtime not available, skipping: %v", err)
+		return
+	}
+	defer agent.Destroy()
+
+	tests := []struct {
+		name        string
+		action      Action
+		state       *EnvironmentState
+		decision    *TaskPartitionDecision
+		wantStreams int
+	}{
+		{name: "nil_state", action: ActionStream1, state: nil, decision: &TaskPartitionDecision{}},
+		{name: "nil_decision", action: ActionStream1, state: NewEnvironmentState(), decision: nil, wantStreams: 1},
+		{name: "negative_action", action: Action(-1), state: NewEnvironmentState(), decision: &TaskPartitionDecision{}},
+		{name: "too_large_action", action: Action(NumActions), state: NewEnvironmentState(), decision: &TaskPartitionDecision{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("invalid decode input should not panic: %v", recovered)
+				}
+			}()
+
+			result := agent.decodeAction(tt.action, tt.state, tt.decision)
+			if result == nil {
+				t.Fatal("invalid decode input should return a decision object")
+			}
+			if len(result.StreamIDs) != tt.wantStreams || len(result.ChunkSizes) != tt.wantStreams {
+				t.Fatalf("decode result stream count mismatch: got streams=%v chunks=%v want=%d", result.StreamIDs, result.ChunkSizes, tt.wantStreams)
+			}
+			if tt.wantStreams == 0 && result.ExpectedTime != 0 {
+				t.Fatalf("invalid decode input should leave expected time empty, got %s", result.ExpectedTime)
+			}
+		})
+	}
+}
+
 func TestChunkSizeCalculation(t *testing.T) {
 	agent, err := NewDQNAgent("nonexistent.onnx")
 	if err != nil {
