@@ -1,6 +1,7 @@
 package prediction
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -74,6 +75,18 @@ func TestDataCollector(t *testing.T) {
 }
 
 func TestPredictionService(t *testing.T) {
+	t.Run("StartStopLifecycle", func(t *testing.T) {
+		service, err := NewPredictionService("", 10*time.Millisecond)
+		require.NoError(t, err)
+		require.NotNil(t, service)
+
+		assert.False(t, service.IsRunning())
+		require.NoError(t, service.Start(context.Background()))
+		assert.True(t, service.IsRunning())
+		require.NoError(t, service.Stop())
+		assert.False(t, service.IsRunning())
+	})
+
 	t.Run("CreateService", func(t *testing.T) {
 		// Note: This test requires a valid ONNX model file
 		// In production, you would have a test model
@@ -125,8 +138,8 @@ func TestPredictionService(t *testing.T) {
 		service.mu.Unlock()
 
 		bufferSize := service.GetOptimalBufferSize()
-		assert.GreaterOrEqual(t, bufferSize, 16384)  // Min 16KB
-		assert.LessOrEqual(t, bufferSize, 1048576)   // Max 1MB
+		assert.GreaterOrEqual(t, bufferSize, 16384) // Min 16KB
+		assert.LessOrEqual(t, bufferSize, 1048576)  // Max 1MB
 	})
 }
 

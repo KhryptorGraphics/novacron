@@ -82,12 +82,9 @@ type ABTestResults struct {
 
 // NewPredictionService creates a new prediction service
 func NewPredictionService(modelPath string, updateInterval time.Duration) (*PredictionService, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-
 	// Initialize predictor
 	predictor, err := NewLSTMPredictor(modelPath)
 	if err != nil {
-		cancel()
 		return nil, fmt.Errorf("failed to create predictor: %w", err)
 	}
 
@@ -98,8 +95,6 @@ func NewPredictionService(modelPath string, updateInterval time.Duration) (*Pred
 		predictor:         predictor,
 		collector:         collector,
 		updateInterval:    updateInterval,
-		ctx:               ctx,
-		cancel:            cancel,
 		modelPath:         modelPath,
 		retrainInterval:   24 * time.Hour, // Daily retraining
 		predictionHistory: make([]PredictionHistoryEntry, 0, 1000),
@@ -153,12 +148,13 @@ func (s *PredictionService) Start(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.ctx != nil {
+	if s.ctx != nil && s.ctx.Err() == nil {
 		return fmt.Errorf("prediction service already started")
 	}
 
 	// Create context for lifecycle management
 	s.ctx, s.cancel = context.WithCancel(ctx)
+	serviceCtx := s.ctx
 
 	// Start data collection
 	if s.collector != nil {
@@ -167,7 +163,14 @@ func (s *PredictionService) Start(ctx context.Context) error {
 
 	// Wait for initial samples (non-blocking)
 	go func() {
-		time.Sleep(2 * time.Minute)
+		timer := time.NewTimer(2 * time.Minute)
+		defer timer.Stop()
+
+		select {
+		case <-serviceCtx.Done():
+			return
+		case <-timer.C:
+		}
 
 		// Start prediction update loop
 		go s.predictionLoop()
@@ -528,8 +531,12 @@ func (s *PredictionService) ExportMetrics(outputPath string) error {
 // Stop stops the prediction service
 // Implements the Lifecycle interface
 func (s *PredictionService) Stop() error {
-	if s.cancel != nil {
-		s.cancel()
+	s.mu.Lock()
+	cancel := s.cancel
+	s.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
 	}
 	if s.collector != nil {
 		s.collector.Stop()
@@ -541,6 +548,10 @@ func (s *PredictionService) Stop() error {
 	if s.alternateModel != nil {
 		s.alternateModel.Close()
 	}
+
+	s.mu.Lock()
+	s.cancel = nil
+	s.mu.Unlock()
 
 	return nil
 }
