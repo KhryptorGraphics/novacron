@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -29,6 +30,7 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/core/audit"
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
 	"github.com/khryptorgraphics/novacron/backend/core/storage"
+	core_vm "github.com/khryptorgraphics/novacron/backend/core/vm"
 	"github.com/khryptorgraphics/novacron/backend/pkg/config"
 	"github.com/khryptorgraphics/novacron/backend/pkg/logger"
 )
@@ -78,7 +80,13 @@ func main() {
 	}
 	defer services.shutdown()
 
-	server := buildCanonicalServer(cfg, db, authManager, services)
+	vmManager := newVMManager(cfg)
+
+	// GATE-1: reconcile persisted VM rows against actually-running qemu processes
+	// (pidfile rediscovery) so a restart reflects reality, not just stale rows.
+	reconcileVMState(db, vmBasePath(cfg))
+
+	server := buildCanonicalServer(cfg, db, authManager, services, vmManager)
 
 	go func() {
 		appLogger.Info("API Server starting", "port", cfg.Server.APIPort)
@@ -103,7 +111,7 @@ func main() {
 	appLogger.Info("Server exited gracefully")
 }
 
-func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.SimpleAuthManager, services *canonicalServices) *http.Server {
+func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.SimpleAuthManager, services *canonicalServices, vmManager *core_vm.VMManager) *http.Server {
 	router := mux.NewRouter()
 	router.StrictSlash(true)
 
@@ -113,11 +121,11 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	apiRouter.Use(requireAuth(authManager))
-	registerSecureAPIRoutes(apiRouter, db)
+	registerSecureAPIRoutes(apiRouter, db, vmManager)
 
 	apiV1Router := router.PathPrefix("/api/v1").Subrouter()
 	apiV1Router.Use(requireAuth(authManager))
-	registerSecureAPIRoutes(apiV1Router, db)
+	registerSecureAPIRoutes(apiV1Router, db, vmManager)
 
 	registerCanonicalSecurityRoutes(router, authManager, services.securityHandlers)
 	registerCanonicalAdminRoutes(router, authManager, db)
@@ -537,7 +545,7 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 	}).Methods(http.MethodPost)
 }
 
-func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
+func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager) {
 	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
 		rows, err := db.Query(`SELECT id, name, state, node_id, tenant_id, created_at, updated_at FROM vms ORDER BY created_at DESC`)
 		if err != nil {
@@ -556,6 +564,9 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 				continue
 			}
 
+			// Reconcile DB metadata with the manager's live runtime state.
+			state = liveVMState(vmManager, id, state)
+
 			vms = append(vms, map[string]interface{}{
 				"id":         id,
 				"name":       name,
@@ -573,12 +584,13 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 
 	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
 		var createReq struct {
-			Name      string                 `json:"name"`
-			State     string                 `json:"state"`
-			NodeID    string                 `json:"node_id"`
-			Tags      map[string]interface{} `json:"tags,omitempty"`
-			CPUShares int                    `json:"cpu_shares,omitempty"`
-			MemoryMB  int                    `json:"memory_mb,omitempty"`
+			Name       string                 `json:"name"`
+			NodeID     string                 `json:"node_id"`
+			Tags       map[string]interface{} `json:"tags,omitempty"`
+			CPUShares  int                    `json:"cpu_shares,omitempty"`
+			MemoryMB   int                    `json:"memory_mb,omitempty"`
+			DiskSizeGB int                    `json:"disk_size_gb,omitempty"`
+			Image      string                 `json:"image,omitempty"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&createReq); err != nil {
@@ -597,26 +609,63 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 			tenantID = "default"
 		}
 
+		// Runtime: actually create the VM (qemu-img + qemu on start) via the
+		// manager. Manager/driver own runtime state; the DB row owns metadata.
+		state := "created"
+		if vmManager != nil {
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+			defer cancel()
+			ownerID := ""
+			if userID > 0 {
+				ownerID = strconv.Itoa(userID)
+			}
+			if _, err := vmManager.CreateVM(ctx, core_vm.CreateVMRequest{
+				Name:                  createReq.Name,
+				AllowMissingOwnership: true, // DB owner_id column is the ownership source of truth
+				Spec: core_vm.VMConfig{
+					ID:         vmID,
+					Name:       createReq.Name,
+					Type:       core_vm.VMTypeKVM,
+					CPUShares:  createReq.CPUShares,
+					MemoryMB:   createReq.MemoryMB,
+					DiskSizeGB: createReq.DiskSizeGB,
+					Image:      createReq.Image,
+					OwnerID:    ownerID,
+					TenantID:   tenantID,
+				},
+			}); err != nil {
+				writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create VM: %v", err))
+				return
+			}
+			state = liveVMState(vmManager, vmID, state)
+		}
+
 		configPayload, _ := json.Marshal(map[string]interface{}{
-			"cpu_shares": createReq.CPUShares,
-			"memory_mb":  createReq.MemoryMB,
-			"tags":       createReq.Tags,
+			"cpu_shares":   createReq.CPUShares,
+			"memory_mb":    createReq.MemoryMB,
+			"disk_size_gb": createReq.DiskSizeGB,
+			"image":        createReq.Image,
+			"tags":         createReq.Tags,
 		})
 
 		_, err := db.Exec(`
 			INSERT INTO vms (id, name, state, node_id, owner_id, tenant_id, config, created_at, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-		`, vmID, createReq.Name, "creating", nullableStringValue(createReq.NodeID), nullableIntValue(userID), tenantID, configPayload)
+		`, vmID, createReq.Name, state, nullableStringValue(createReq.NodeID), nullableIntValue(userID), tenantID, configPayload)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to create VM")
+			// Roll back the runtime VM so we don't leak an untracked qemu/disk.
+			if vmManager != nil {
+				_ = vmManager.DeleteVM(context.Background(), vmID)
+			}
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create VM: %v", err))
 			return
 		}
 
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
 			"id":         vmID,
 			"name":       createReq.Name,
-			"state":      "creating",
-			"status":     "creating",
+			"state":      state,
+			"status":     state,
 			"node_id":    createReq.NodeID,
 			"tenant_id":  tenantID,
 			"created_at": time.Now().UTC().Format(time.RFC3339),
@@ -643,6 +692,8 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 			return
 		}
 
+		state = liveVMState(vmManager, id, state)
+
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"id":         id,
 			"name":       name,
@@ -657,6 +708,19 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 
 	router.HandleFunc("/vms/{id}", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["id"]
+
+		// Stop + remove the real VM (qemu) before dropping metadata.
+		if vmManager != nil {
+			if _, err := vmManager.GetVM(vmID); err == nil {
+				ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+				defer cancel()
+				if err := vmManager.DeleteVM(ctx, vmID); err != nil {
+					writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to delete VM: %v", err))
+					return
+				}
+			}
+		}
+
 		result, err := db.Exec(`DELETE FROM vms WHERE id = $1`, vmID)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to delete VM")
@@ -675,30 +739,8 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 		})
 	}).Methods(http.MethodDelete)
 
-	for action, nextState := range map[string]string{
-		"start": "running",
-		"stop":  "stopped",
-	} {
-		router.HandleFunc("/vms/{id}/"+action, func(w http.ResponseWriter, r *http.Request) {
-			vmID := mux.Vars(r)["id"]
-			result, err := db.Exec(`UPDATE vms SET state = $2, updated_at = NOW() WHERE id = $1`, vmID, nextState)
-			if err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "failed to update VM state")
-				return
-			}
-
-			rowsAffected, _ := result.RowsAffected()
-			if rowsAffected == 0 {
-				writeJSONError(w, http.StatusNotFound, "vm not found")
-				return
-			}
-
-			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"id":     vmID,
-				"status": nextState,
-			})
-		}).Methods(http.MethodPost)
-	}
+	registerVMPowerRoute(router, db, vmManager, "start")
+	registerVMPowerRoute(router, db, vmManager, "stop")
 
 	router.HandleFunc("/vms/{id}/metrics", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["id"]
@@ -1091,6 +1133,150 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 			"status": "detached",
 		})
 	}).Methods(http.MethodDelete)
+}
+
+// vmBasePath is where the KVM driver stores per-VM dirs (disk + qemu.pid).
+func vmBasePath(cfg *config.Config) string {
+	return filepath.Join(cfg.VM.StoragePath, "vms")
+}
+
+// newVMManager builds the real VM manager. No qemu_path is set, so the KVM
+// driver resolves the host-arch binary (qemu-system-aarch64 on arm64) via the
+// arch fix. Returns nil (runtime ops disabled) if the manager can't start.
+func newVMManager(cfg *config.Config) *core_vm.VMManager {
+	vmCfg := core_vm.DefaultVMManagerConfig()
+	vmCfg.Drivers[core_vm.VMTypeKVM] = core_vm.VMDriverConfigManager{
+		Enabled: true,
+		Config:  map[string]interface{}{"vm_path": vmBasePath(cfg)},
+	}
+	m, err := core_vm.NewVMManager(vmCfg)
+	if err != nil {
+		logger.Warn("VM manager init failed; VM runtime operations disabled", "error", err)
+		return nil
+	}
+	return m
+}
+
+// liveVMState overlays the manager's live runtime state onto the DB metadata
+// state when the manager knows the VM; otherwise the stored state stands.
+func liveVMState(vmManager *core_vm.VMManager, vmID, dbState string) string {
+	if vmManager == nil {
+		return dbState
+	}
+	if vm, err := vmManager.GetVM(vmID); err == nil {
+		return string(vm.State())
+	}
+	return dbState
+}
+
+func vmActionStatus(err error) int {
+	if errors.Is(err, core_vm.ErrVMNotFound) {
+		return http.StatusNotFound
+	}
+	return http.StatusInternalServerError
+}
+
+// registerVMPowerRoute wires POST /vms/{id}/{start|stop} to the real manager and
+// persists the ACTUAL resulting state — never a hardcoded constant. On failure
+// it returns an error and writes nothing, so the DB always reflects reality.
+func registerVMPowerRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager, action string) {
+	router.HandleFunc("/vms/{id}/"+action, func(w http.ResponseWriter, r *http.Request) {
+		vmID := mux.Vars(r)["id"]
+		if vmManager == nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "vm manager unavailable")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+
+		var err error
+		if action == "start" {
+			err = vmManager.StartVM(ctx, vmID)
+		} else {
+			err = vmManager.StopVM(ctx, vmID)
+		}
+		if err != nil {
+			writeJSONError(w, vmActionStatus(err), fmt.Sprintf("failed to %s VM: %v", action, err))
+			return
+		}
+
+		vm, gerr := vmManager.GetVM(vmID)
+		if gerr != nil {
+			writeJSONError(w, http.StatusInternalServerError, "vm state unavailable after "+action)
+			return
+		}
+		state := string(vm.State())
+
+		result, err := db.Exec(`UPDATE vms SET state = $2, updated_at = NOW() WHERE id = $1`, vmID, state)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to update VM state")
+			return
+		}
+		if rowsAffected, _ := result.RowsAffected(); rowsAffected == 0 {
+			writeJSONError(w, http.StatusNotFound, "vm not found")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id":     vmID,
+			"state":  state,
+			"status": state,
+		})
+	}).Methods(http.MethodPost)
+}
+
+// reconcileVMState corrects each persisted VM row to match whether its qemu
+// process is actually alive (via the driver's pidfile) after a restart.
+// ponytail: only genuine drift is corrected; driver re-adoption (so a
+// post-restart Stop can signal the rediscovered qemu) is deferred — the
+// manager's in-memory map starts empty each process.
+func reconcileVMState(db *sql.DB, vmBase string) {
+	rows, err := db.Query(`SELECT id, state FROM vms`)
+	if err != nil {
+		logger.Warn("VM reconcile skipped: query failed", "error", err)
+		return
+	}
+	type rec struct{ id, state string }
+	var recs []rec
+	for rows.Next() {
+		var rc rec
+		if err := rows.Scan(&rc.id, &rc.state); err == nil {
+			recs = append(recs, rc)
+		}
+	}
+	rows.Close()
+
+	for _, rc := range recs {
+		alive := pidFileAlive(filepath.Join(vmBase, rc.id, "qemu.pid"))
+		var actual string
+		switch {
+		case alive && rc.state != "running":
+			actual = "running"
+		case !alive && rc.state == "running":
+			actual = "stopped"
+		default:
+			continue
+		}
+		if _, err := db.Exec(`UPDATE vms SET state = $2, updated_at = NOW() WHERE id = $1`, rc.id, actual); err != nil {
+			logger.Warn("VM reconcile update failed", "vm", rc.id, "error", err)
+			continue
+		}
+		logger.Info("VM reconciled to actual qemu state", "vm", rc.id, "from", rc.state, "to", actual)
+	}
+}
+
+// pidFileAlive reports whether the pid recorded in path is a live process.
+func pidFileAlive(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		return false
+	}
+	return syscall.Kill(pid, 0) == nil // signal 0 probes existence only
 }
 
 func initializeCanonicalServices(cfg *config.Config, db *sql.DB, authManager *auth.SimpleAuthManager) (*canonicalServices, error) {

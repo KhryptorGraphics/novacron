@@ -24,6 +24,7 @@ import {
   X
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { createVM } from "@/lib/api/vms";
 
 interface VMCreateDialogProps {
   open: boolean;
@@ -47,6 +48,8 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
   });
 
   const [currentTag, setCurrentTag] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const templates = [
     { id: "ubuntu-22.04", name: "Ubuntu 22.04 LTS", description: "Latest LTS release" },
@@ -62,11 +65,7 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
     { id: "node-03", name: "node-03", cpu: "8 cores", memory: "32 GB", status: "maintenance" }
   ];
 
-  const handleCreate = () => {
-    // Mock VM creation - replace with API call
-    console.log("Creating VM with data:", formData);
-    onOpenChange(false);
-    // Reset form
+  const resetForm = () => {
     setFormData({
       name: "",
       description: "",
@@ -81,6 +80,29 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
       enableBackup: true,
       tags: [],
     });
+  };
+
+  const handleCreate = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      // Map the form onto the fields POST /api/v1/vms accepts. Memory is
+      // collected in GB but the backend expects MB; disk stays GB.
+      await createVM({
+        name: formData.name,
+        type: "kvm",
+        cpu: formData.cpu,
+        memory: formData.memory * 1024,
+        disk: formData.storage,
+        image: formData.template || undefined,
+      });
+      onOpenChange(false);
+      resetForm();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create VM");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const addTag = () => {
@@ -415,15 +437,16 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
           </TabsContent>
         </Tabs>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
+          {error && <span className="text-sm text-destructive sm:mr-auto">{error}</span>}
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Cancel
           </Button>
-          <Button 
+          <Button
             onClick={handleCreate}
-            disabled={!formData.name || !formData.template || !formData.host}
+            disabled={submitting || !formData.name || !formData.template}
           >
-            Create VM
+            {submitting ? "Creating…" : "Create VM"}
           </Button>
         </DialogFooter>
       </DialogContent>

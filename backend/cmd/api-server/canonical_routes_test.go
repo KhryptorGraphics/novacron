@@ -25,8 +25,128 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/core/audit"
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
 	"github.com/khryptorgraphics/novacron/backend/core/storage"
+	core_vm "github.com/khryptorgraphics/novacron/backend/core/vm"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// newStubVMManager builds a real VMManager whose KVM driver falls back to the
+// CoreStubDriver (bogus qemu_path + NOVACRON_ALLOW_STUB_KVM), so VM lifecycle
+// ops exercise the manager/driver path without spawning qemu.
+func newStubVMManager(t *testing.T) *core_vm.VMManager {
+	t.Helper()
+	t.Setenv("NOVACRON_ALLOW_STUB_KVM", "1")
+
+	vmCfg := core_vm.DefaultVMManagerConfig()
+	vmCfg.Drivers[core_vm.VMTypeKVM] = core_vm.VMDriverConfigManager{
+		Enabled: true,
+		Config: map[string]interface{}{
+			"qemu_path": "missing-qemu-for-stub-test",
+			"vm_path":   t.TempDir(),
+		},
+	}
+	m, err := core_vm.NewVMManager(vmCfg)
+	if err != nil {
+		t.Fatalf("new stub vm manager: %v", err)
+	}
+	return m
+}
+
+// seedManagerVM creates a VM directly through the manager so handler power
+// routes can act on a known id.
+func seedManagerVM(t *testing.T, m *core_vm.VMManager, id string) {
+	t.Helper()
+	if _, err := m.CreateVM(context.Background(), core_vm.CreateVMRequest{
+		Name:                  id,
+		AllowMissingOwnership: true,
+		Spec:                  core_vm.VMConfig{ID: id, Name: id, Type: core_vm.VMTypeKVM, TenantID: "default"},
+	}); err != nil {
+		t.Fatalf("seed manager vm %s: %v", id, err)
+	}
+}
+
+// TestCanonicalVMRoutesDriveManagerState proves the VM handlers call the
+// injected manager/driver and persist the ACTUAL resulting runtime state — not
+// a hardcoded constant. The final case (stop on an unknown id) proves the old
+// fake "stopped" write is gone: it errors and touches no rows.
+func TestCanonicalVMRoutesDriveManagerState(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	manager := newStubVMManager(t)
+	defer manager.Stop()
+
+	router := mux.NewRouter()
+	registerSecureAPIRoutes(router, db, manager)
+
+	// Create: manager.CreateVM(stub) succeeds, then a single INSERT with the
+	// manager-derived state (the manager reports "stopped" for a freshly
+	// created, not-yet-started VM), never a hardcoded "creating".
+	mock.ExpectExec("INSERT INTO vms").
+		WithArgs(sqlmock.AnyArg(), "vm-a", "stopped", sqlmock.AnyArg(), sqlmock.AnyArg(), "default", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	createRec := httptest.NewRecorder()
+	router.ServeHTTP(createRec, mustJSONRequest(t, http.MethodPost, "/vms", map[string]interface{}{"name": "vm-a"}))
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d (%s)", createRec.Code, createRec.Body.String())
+	}
+	var created map[string]interface{}
+	decodeJSONBody(t, createRec, &created)
+	vmID, _ := created["id"].(string)
+	if vmID == "" {
+		t.Fatalf("create: missing id, got %#v", created)
+	}
+	if created["state"] != "stopped" {
+		t.Fatalf("create: expected manager-derived state 'stopped', got %#v", created["state"])
+	}
+
+	// Start: manager sets running; handler must persist "running".
+	mock.ExpectExec("UPDATE vms SET state").
+		WithArgs(vmID, "running").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	startRec := httptest.NewRecorder()
+	router.ServeHTTP(startRec, mustJSONRequest(t, http.MethodPost, "/vms/"+vmID+"/start", nil))
+	if startRec.Code != http.StatusOK {
+		t.Fatalf("start: expected 200, got %d (%s)", startRec.Code, startRec.Body.String())
+	}
+	var started map[string]interface{}
+	decodeJSONBody(t, startRec, &started)
+	if started["state"] != "running" {
+		t.Fatalf("start: expected state 'running' from manager, got %#v", started["state"])
+	}
+
+	// Stop: manager sets stopped; handler must persist "stopped".
+	mock.ExpectExec("UPDATE vms SET state").
+		WithArgs(vmID, "stopped").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	stopRec := httptest.NewRecorder()
+	router.ServeHTTP(stopRec, mustJSONRequest(t, http.MethodPost, "/vms/"+vmID+"/stop", nil))
+	if stopRec.Code != http.StatusOK {
+		t.Fatalf("stop: expected 200, got %d (%s)", stopRec.Code, stopRec.Body.String())
+	}
+	var stopped map[string]interface{}
+	decodeJSONBody(t, stopRec, &stopped)
+	if stopped["state"] != "stopped" {
+		t.Fatalf("stop: expected state 'stopped' from manager, got %#v", stopped["state"])
+	}
+
+	// Stop an id the manager does not know: must error WITHOUT any DB write.
+	// No sqlmock expectation is registered — a stray UPDATE would fail the run.
+	unknownRec := httptest.NewRecorder()
+	router.ServeHTTP(unknownRec, mustJSONRequest(t, http.MethodPost, "/vms/does-not-exist/stop", nil))
+	if unknownRec.Code != http.StatusNotFound {
+		t.Fatalf("stop-unknown: expected 404 (no fake write), got %d (%s)", unknownRec.Code, unknownRec.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
 
 func newCanonicalSecurityRouter(t *testing.T, authManager *auth.SimpleAuthManager, handlers *securityapi.SecurityHandlers) *mux.Router {
 	t.Helper()

@@ -34,7 +34,7 @@ func DefaultVMDriverConfig(nodeID string) VMDriverConfig {
 		DockerPath:          "docker",
 		ContainerdAddress:   "/run/containerd/containerd.sock",
 		ContainerdNamespace: "novacron",
-		QEMUBinaryPath:      "qemu-system-x86_64",
+		QEMUBinaryPath:      defaultQEMUBinary(""),
 		VMBasePath:          "/var/lib/novacron/vms",
 		ProcessBasePath:     "/var/lib/novacron/processes",
 	}

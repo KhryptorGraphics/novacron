@@ -8,8 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
-	// "strings" // Currently unused
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -40,9 +41,16 @@ type KVMVMInfo struct {
 
 // NewKVMDriver creates a new KVM driver (main entry point)
 func NewKVMDriver(config map[string]interface{}) (VMDriver, error) {
-	qemuPath := "/usr/bin/qemu-system-x86_64" // Default
+	qemuPath := ""
 	if path, ok := config["qemu_path"].(string); ok {
 		qemuPath = path
+	}
+	// Explicit qemu_path wins; otherwise pick the binary for the configured
+	// target arch, falling back to the host arch inside newKVMDriverEnhanced.
+	if qemuPath == "" {
+		if arch, ok := config["arch"].(string); ok && arch != "" {
+			qemuPath = defaultQEMUBinary(arch)
+		}
 	}
 
 	vmBasePath := "/var/lib/novacron/vms"
@@ -61,9 +69,39 @@ func NewKVMDriverEnhanced(qemuPath string) (VMDriver, error) {
 	return newKVMDriverEnhanced(qemuPath, "/var/lib/novacron/vms")
 }
 
+// defaultQEMUBinary returns the qemu-system binary name for the target
+// architecture, defaulting to the host architecture (runtime.GOARCH) when arch
+// is empty. This is what makes the driver resolve to qemu-system-aarch64 on
+// arm64 hosts instead of the previously hardcoded x86_64 binary.
+func defaultQEMUBinary(arch string) string {
+	if arch == "" {
+		arch = runtime.GOARCH
+	}
+	switch arch {
+	case "arm64", "aarch64":
+		return "qemu-system-aarch64"
+	case "amd64", "x86_64", "x86", "386":
+		return "qemu-system-x86_64"
+	default:
+		return "qemu-system-" + arch
+	}
+}
+
+// kvmAccessible reports whether /dev/kvm is usable for hardware acceleration.
+// When false, callers fall back to TCG so qemu still launches (e.g. when the
+// running user is not in the kvm group).
+func kvmAccessible() bool {
+	f, err := os.OpenFile("/dev/kvm", os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
+}
+
 func newKVMDriverEnhanced(qemuPath, vmBasePath string) (VMDriver, error) {
 	if qemuPath == "" {
-		qemuPath = "/usr/bin/qemu-system-x86_64"
+		qemuPath = defaultQEMUBinary("")
 	}
 	if vmBasePath == "" {
 		vmBasePath = "/var/lib/novacron/vms"
@@ -421,17 +459,38 @@ func (d *KVMDriverEnhanced) Migrate(ctx context.Context, vmID, target string, pa
 // Private helper methods
 
 func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
+	// Machine type is arch-specific: aarch64 uses "virt", x86 uses "pc".
+	machine := "pc"
+	if strings.Contains(d.qemuBinaryPath, "aarch64") {
+		machine = "virt"
+	}
+	// -cpu host only works under KVM; fall back to a generic model for TCG.
+	accel, cpu := "tcg", "max"
+	if kvmAccessible() {
+		accel, cpu = "kvm", "host"
+	}
+	mem := vmInfo.Config.MemoryMB
+	if mem <= 0 {
+		mem = 128 // qemu rejects -m 0
+	}
+	cpus := vmInfo.Config.CPUShares
+	if cpus <= 0 {
+		cpus = 1 // qemu rejects -smp 0
+	}
+
+	// ponytail: no -daemonize — keeps qemu as a tracked child so cmd.Wait()
+	// in monitorVM and driver.Stop reflect the real process; -pidfile still
+	// lets a restarted server rediscover the running qemu.
 	args := []string{
-		"-machine", "pc-i440fx-2.8,accel=kvm",
-		"-cpu", "host",
-		"-m", strconv.Itoa(vmInfo.Config.MemoryMB),
-		"-smp", strconv.Itoa(vmInfo.Config.CPUShares),
+		"-machine", machine + ",accel=" + accel,
+		"-cpu", cpu,
+		"-m", strconv.Itoa(mem),
+		"-smp", strconv.Itoa(cpus),
 		"-drive", fmt.Sprintf("file=%s,format=qcow2,if=virtio", vmInfo.DiskPath),
 		"-netdev", "user,id=net0",
 		"-device", "virtio-net-pci,netdev=net0",
 		"-vnc", fmt.Sprintf(":%d", vmInfo.VNCPort-5900),
 		"-monitor", fmt.Sprintf("unix:%s,server,nowait", vmInfo.MonitorPath),
-		"-daemonize",
 		"-pidfile", filepath.Join(filepath.Dir(vmInfo.DiskPath), "qemu.pid"),
 	}
 

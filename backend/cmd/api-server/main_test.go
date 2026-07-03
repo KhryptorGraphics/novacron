@@ -206,7 +206,7 @@ func TestRegisterSecureAPIRoutesListsVMsOnCanonicalRoute(t *testing.T) {
 	router := mux.NewRouter()
 	apiV1 := router.PathPrefix("/api/v1").Subrouter()
 	apiV1.Use(requireAuth(authManager))
-	registerSecureAPIRoutes(apiV1, db)
+	registerSecureAPIRoutes(apiV1, db, nil)
 
 	now := time.Now().UTC()
 	mock.ExpectQuery(`SELECT id, name, state, node_id, tenant_id, created_at, updated_at FROM vms ORDER BY created_at DESC`).
@@ -254,13 +254,15 @@ func TestRegisterSecureAPIRoutesCreatesVMOnCompatibilityRoute(t *testing.T) {
 	router := mux.NewRouter()
 	apiCompat := router.PathPrefix("/api").Subrouter()
 	apiCompat.Use(requireAuth(authManager))
-	registerSecureAPIRoutes(apiCompat, db)
+	// nil manager exercises the metadata-only path (manager unavailable); the
+	// row is recorded as "created", never the old fake "creating".
+	registerSecureAPIRoutes(apiCompat, db, nil)
 
 	mock.ExpectExec(`INSERT INTO vms`).
 		WithArgs(
 			sqlmock.AnyArg(),
 			"builder",
-			"creating",
+			"created",
 			nil,
 			7,
 			"default",
@@ -291,8 +293,8 @@ func TestRegisterSecureAPIRoutesCreatesVMOnCompatibilityRoute(t *testing.T) {
 	if payload["name"] != "builder" {
 		t.Fatalf("expected name builder, got %#v", payload["name"])
 	}
-	if payload["status"] != "creating" {
-		t.Fatalf("expected status creating, got %#v", payload["status"])
+	if payload["status"] != "created" {
+		t.Fatalf("expected status created, got %#v", payload["status"])
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -311,7 +313,11 @@ func TestRegisterSecureAPIRoutesSupportsStateTransitionsAndMetrics(t *testing.T)
 	router := mux.NewRouter()
 	apiV1 := router.PathPrefix("/api/v1").Subrouter()
 	apiV1.Use(requireAuth(authManager))
-	registerSecureAPIRoutes(apiV1, db)
+	// Start now routes through the real manager; seed vm-42 so it exists.
+	manager := newStubVMManager(t)
+	defer manager.Stop()
+	seedManagerVM(t, manager, "vm-42")
+	registerSecureAPIRoutes(apiV1, db, manager)
 
 	mock.ExpectExec(`UPDATE vms SET state = \$2, updated_at = NOW\(\) WHERE id = \$1`).
 		WithArgs("vm-42", "running").
@@ -637,7 +643,7 @@ func TestBuildCanonicalServerSupportsLiveStartup(t *testing.T) {
 		},
 	}
 
-	server := buildCanonicalServer(cfg, db, authManager, services)
+	server := buildCanonicalServer(cfg, db, authManager, services, nil)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to create listener: %v", err)
