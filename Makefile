@@ -1,6 +1,6 @@
 # NovaCron Makefile - Comprehensive Testing Framework
 
-.PHONY: all test build clean docker-build docker-test help
+.PHONY: all test build clean docker-build docker-test help serve api-build
 
 # Default target
 all: build
@@ -25,6 +25,15 @@ core-test:
 core-serve:
 	@echo "Starting Core Server on :8090"
 	cd backend/cmd/core-server && go run .
+
+# Canonical server targets (primary entrypoint: backend/cmd/api-server)
+serve:
+	@echo "Starting NovaCron API Server (canonical entrypoint) on :8090"
+	cd backend/cmd/api-server && go run .
+
+api-build:
+	@echo "Building NovaCron API Server -> bin/novacron-api"
+	go build -o bin/novacron-api ./backend/cmd/api-server
 
 
 # ============================================================================

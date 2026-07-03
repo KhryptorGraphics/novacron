@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"novacron/backend/core/multicloud/abstraction"
+	"github.com/khryptorgraphics/novacron/backend/core/multicloud/abstraction"
 )
 
 // BurstManager manages cloud bursting operations

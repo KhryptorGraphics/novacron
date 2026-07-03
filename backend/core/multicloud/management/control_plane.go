@@ -6,11 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"novacron/backend/core/multicloud/abstraction"
-	"novacron/backend/core/multicloud/bursting"
-	"novacron/backend/core/multicloud/cost"
-	"novacron/backend/core/multicloud/dr"
-	"novacron/backend/core/multicloud/migration"
+	"github.com/khryptorgraphics/novacron/backend/core/multicloud/abstraction"
+	"github.com/khryptorgraphics/novacron/backend/core/multicloud/bursting"
+	"github.com/khryptorgraphics/novacron/backend/core/multicloud/cost"
+	"github.com/khryptorgraphics/novacron/backend/core/multicloud/dr"
+	"github.com/khryptorgraphics/novacron/backend/core/multicloud/migration"
 )
 
 // ControlPlane provides unified management across all clouds

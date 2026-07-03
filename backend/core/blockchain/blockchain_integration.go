@@ -9,16 +9,16 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 
-	"novacron/backend/core/blockchain/consensus"
-	"novacron/backend/core/blockchain/contracts"
-	"novacron/backend/core/blockchain/crosschain"
-	"novacron/backend/core/blockchain/did"
-	"novacron/backend/core/blockchain/governance"
-	"novacron/backend/core/blockchain/l2"
-	"novacron/backend/core/blockchain/metrics"
-	"novacron/backend/core/blockchain/security"
-	"novacron/backend/core/blockchain/state"
-	"novacron/backend/core/blockchain/tokens"
+	"github.com/khryptorgraphics/novacron/backend/core/blockchain/consensus"
+	"github.com/khryptorgraphics/novacron/backend/core/blockchain/contracts"
+	"github.com/khryptorgraphics/novacron/backend/core/blockchain/crosschain"
+	"github.com/khryptorgraphics/novacron/backend/core/blockchain/did"
+	"github.com/khryptorgraphics/novacron/backend/core/blockchain/governance"
+	"github.com/khryptorgraphics/novacron/backend/core/blockchain/l2"
+	"github.com/khryptorgraphics/novacron/backend/core/blockchain/metrics"
+	"github.com/khryptorgraphics/novacron/backend/core/blockchain/security"
+	"github.com/khryptorgraphics/novacron/backend/core/blockchain/state"
+	"github.com/khryptorgraphics/novacron/backend/core/blockchain/tokens"
 )
 
 // BlockchainIntegration provides unified blockchain integration

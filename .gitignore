@@ -73,3 +73,35 @@ docs/neural_analysis_report_*.json
 # Large files excluded from git
 /architecture.md
 masterdocs/architecture.txt
+
+# --- Phase 0: build artifacts & split-file hacks (do not re-commit) ---
+# Compiled server / test binaries
+/api-server-production
+/novacron-api-enhanced
+/cli/novacron
+/backend/cmd/api-server/api-server-improved
+/backend/cmd/core-server/core-server
+/backend/core/cache-monitor
+/backend/core/network/dwcp/test_config_copy_standalone
+/backend/core/network/dwcp/test_escape
+/tests/coverage/coverage
+bin/
+# Windows executables and SDK archives
+*.exe
+/platform-tools-latest-linux.zip
+# Oversized prompt / knowledge dumps
+/prompt.txt
+/masterdocs/prompt.txt
+# Split-file hacks used to evade GitHub's 100MB cap
+*.part*
+.github/large-files/
+.github/split-files/
+# Frontend build output (node_modules/ and dist/ already covered above)
+.next/
+# Local build outputs left by go build / make (regenerable)
+/api-server
+/core-server
+/backend/core/novacron
+# Session/agent scratch DBs
+/agentdb.rvf
+/agentdb.rvf.lock

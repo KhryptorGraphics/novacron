@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"novacron/backend/core/compliance"
+	"github.com/khryptorgraphics/novacron/backend/core/compliance"
 )
 
 // BlockchainAuditLog implements tamper-proof audit logging using blockchain principles

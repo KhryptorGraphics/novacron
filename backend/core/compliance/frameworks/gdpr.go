@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"novacron/backend/core/compliance"
+	"github.com/khryptorgraphics/novacron/backend/core/compliance"
 )
 
 // GDPREngine implements GDPR compliance automation

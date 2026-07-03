@@ -63,7 +63,7 @@
     "downlevelIteration": true,
     "isolatedModules": true,
     // JSX Options
-    "jsx": "react-jsx",
+    "jsx": "preserve",
     "jsxImportSource": "react",
     // Advanced Options
     "incremental": true,

@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"novacron/backend/core/multicloud/abstraction"
-	"novacron/backend/core/multicloud/bursting"
-	"novacron/backend/core/multicloud/cost"
-	"novacron/backend/core/multicloud/dr"
-	"novacron/backend/core/multicloud/management"
-	"novacron/backend/core/multicloud/migration"
+	"github.com/khryptorgraphics/novacron/backend/core/multicloud/abstraction"
+	"github.com/khryptorgraphics/novacron/backend/core/multicloud/bursting"
+	"github.com/khryptorgraphics/novacron/backend/core/multicloud/cost"
+	"github.com/khryptorgraphics/novacron/backend/core/multicloud/dr"
+	"github.com/khryptorgraphics/novacron/backend/core/multicloud/management"
+	"github.com/khryptorgraphics/novacron/backend/core/multicloud/migration"
 )
 
 // MockProvider implements CloudProvider for testing

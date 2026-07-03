@@ -122,6 +122,7 @@ type Migration struct {
 	CompletedAt      *time.Time `json:"completedAt,omitempty"`
 	BytesTransferred int        `json:"bytesTransferred"`
 	TotalBytes       int        `json:"totalBytes"`
+	Error            string     `json:"error,omitempty"`
 }
 
 // Alert represents a system alert
@@ -213,10 +214,11 @@ type CreateVMInput struct {
 
 // UpdateVMInput represents input for updating a VM
 type UpdateVMInput struct {
-	Name   *string `json:"name,omitempty"`
-	CPU    *int    `json:"cpu,omitempty"`
-	Memory *int    `json:"memory,omitempty"`
-	Disk   *int    `json:"disk,omitempty"`
+	Name   *string           `json:"name,omitempty"`
+	CPU    *int              `json:"cpu,omitempty"`
+	Memory *int              `json:"memory,omitempty"`
+	Disk   *int              `json:"disk,omitempty"`
+	Tags   map[string]string `json:"tags,omitempty"`
 }
 
 // MigrateVMInput represents input for migrating a VM

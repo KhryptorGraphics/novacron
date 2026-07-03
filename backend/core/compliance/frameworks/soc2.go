@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"novacron/backend/core/compliance"
+	"github.com/khryptorgraphics/novacron/backend/core/compliance"
 )
 
 // SOC2Engine implements SOC2 Type II compliance automation

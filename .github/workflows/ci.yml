@@ -7,7 +7,7 @@ on:
     branches: [main, develop]
 
 env:
-  GO_VERSION: "1.21"
+  GO_VERSION: "1.24"
   NODE_VERSION: "20"
 
 jobs:
@@ -36,6 +36,10 @@ jobs:
       - name: Build canonical API server
         run: go build ./backend/cmd/api-server
 
+      # backend/core's real packages compile transitively via the api-server build above.
+      # The module also holds ~105 known-broken experimental trees (quantum, photonic,
+      # planetary, arvr, iot, autonomous, v4/v5, cognitive, ...) that are on no production
+      # path and are intentionally excluded from the gate. See STATUS.md.
       - name: Run canonical backend tests
         run: >
           go test

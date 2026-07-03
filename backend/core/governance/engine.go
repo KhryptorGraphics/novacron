@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"novacron/backend/core/compliance"
+	"github.com/khryptorgraphics/novacron/backend/core/compliance"
 )
 
 // Engine implements governance automation

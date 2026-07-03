@@ -162,7 +162,8 @@ func (r *Resolver) UpdateVM(ctx context.Context, args struct {
 		updateSpec.Memory = &memory
 	}
 	if args.Input.Disk != nil {
-		updateSpec.Disk = args.Input.Disk
+		disk := int64(*args.Input.Disk)
+		updateSpec.Disk = &disk
 	}
 	if args.Input.Tags != nil {
 		updateSpec.Tags = args.Input.Tags
