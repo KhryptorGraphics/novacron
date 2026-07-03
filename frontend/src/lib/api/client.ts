@@ -150,6 +150,14 @@ export class ApiHttpError extends Error {
   constructor(status: number, code: string, message: string, url: string) { super(message); this.status=status; this.code=code; this.url=url; }
 }
 
+// Bearer auth for the core-mode helpers. The canonical api-server authenticates via
+// `Authorization: Bearer <jwt>` (validateJWT/HS256), so send the stored token like the
+// class client and the other api modules do. X-Role/cookies stay as harmless extras.
+function authTokenHeader(): Record<string, string> {
+  const token = typeof window !== 'undefined' ? window.localStorage.getItem('novacron_token') : null;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 /**
  * GET helper for core mode.
  * @param path API path starting with "/" relative to API_BASE
@@ -161,7 +169,7 @@ export async function apiGet<T>(path: string, params?: Record<string, string | n
   try {
     const url = withParams(path, params);
     const role = opts?.role ?? "viewer";
-    const res = await fetch(url, { method: "GET", headers: { Accept: "application/json", "X-Role": role }, credentials: "include" });
+    const res = await fetch(url, { method: "GET", headers: { Accept: "application/json", "X-Role": role, ...authTokenHeader() }, credentials: "include" });
     
     if (!res.ok) {
       return { data: null, error: { code: `HTTP_${res.status}`, message: res.statusText } };
@@ -186,7 +194,7 @@ export async function apiGet<T>(path: string, params?: Record<string, string | n
 export async function apiPost<T>(path: string, body?: unknown, opts?: { role?: "viewer" | "operator" }): Promise<ApiEnvelope<T>> {
   const url = buildApiV1Url(path);
   const role = opts?.role ?? "viewer";
-  const res = await fetch(url, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", "X-Role": role }, body: body!==undefined?JSON.stringify(body):undefined, credentials: "include" });
+  const res = await fetch(url, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", "X-Role": role, ...authTokenHeader() }, body: body!==undefined?JSON.stringify(body):undefined, credentials: "include" });
   const env = await res.json() as ApiEnvelope<T>;
   if (env.error) throw new ApiHttpError(res.status, env.error.code, env.error.message, url);
   return env;
