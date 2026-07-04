@@ -554,8 +554,7 @@ func (o *Optimizer) implementHighPriorityRecommendations(ctx context.Context) {
 
 // implementRecommendation implements a recommendation
 func (o *Optimizer) implementRecommendation(ctx context.Context, rec *Recommendation) error {
-	provider, ok := o.providers[rec.Provider]
-	if !ok {
+	if _, ok := o.providers[rec.Provider]; !ok {
 		return fmt.Errorf("provider not found: %s", rec.Provider)
 	}
 

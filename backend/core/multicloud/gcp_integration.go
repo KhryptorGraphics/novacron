@@ -493,7 +493,7 @@ func (g *GCPIntegration) exportSnapshotsToGCS(ctx context.Context, snapshotNames
 func (g *GCPIntegration) downloadFromGCSWithProgress(ctx context.Context, gcsURIs []string, migration *GCPMigration) ([]string, error) {
 	localPaths := make([]string, len(gcsURIs))
 
-	for i, uri := range gcsURIs {
+	for i := range gcsURIs {
 		localPath := fmt.Sprintf("/tmp/novacron-import/%d.tar.gz", i)
 		localPaths[i] = localPath
 

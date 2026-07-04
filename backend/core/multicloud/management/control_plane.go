@@ -280,7 +280,7 @@ func (cp *ControlPlane) checkPolicyCompliance(ctx context.Context) {
 		}
 
 		// Check VMs against policy
-		for key, vm := range vms {
+		for _, vm := range vms {
 			if violation := cp.evaluatePolicy(policy, vm); violation != nil {
 				cp.policyEngine.mu.Lock()
 				cp.policyEngine.violations = append(cp.policyEngine.violations, violation)
@@ -516,13 +516,9 @@ func (cp *ControlPlane) SearchResources(ctx context.Context, query string, filte
 	results := make([]*abstraction.VM, 0)
 
 	for _, vm := range cp.inventory.vms {
-		// Simple text search in name and tags
-		match := false
-		if query != "" {
-			// Search in name
-			// Search in tags
-			// This is simplified - implement full-text search
-		}
+		// ponytail: query string is accepted but never matched (was a dead
+		// `match` var that no branch read) — filters below are the only
+		// real predicate today. Add text search over name/tags when needed.
 
 		// Apply filters
 		if len(filters) > 0 {

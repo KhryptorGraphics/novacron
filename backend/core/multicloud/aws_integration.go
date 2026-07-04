@@ -2,10 +2,9 @@ package multicloud
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -685,15 +684,4 @@ func (a *AWSIntegration) CalculateCost(ctx context.Context, instanceType string,
 	}
 
 	return rate * hours, nil
-}
-
-// Helper to get filepath.Base functionality
-func filepath.Base(path string) string {
-	// Simple implementation
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' {
-			return path[i+1:]
-		}
-	}
-	return path
 }

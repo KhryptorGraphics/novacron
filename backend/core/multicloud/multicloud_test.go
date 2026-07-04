@@ -564,8 +564,6 @@ func TestControlPlane(t *testing.T) {
 }
 
 func TestPolicyEngine(t *testing.T) {
-	ctx := context.Background()
-
 	providers := map[string]abstraction.CloudProvider{
 		"aws": NewMockProvider("aws", "us-east-1"),
 	}

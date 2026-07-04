@@ -1,3 +1,11 @@
+// ponytail: quarantined 2026-07 — redeclares CloudProvider (as an interface;
+// orchestrator.go redeclares it as a string enum) and MultiCloudConfig
+// (orchestrator.go/config.go have a richer, actually-used version), which
+// blocked compilation of the whole package. Grep across the entire repo
+// found zero callers of NewMultiCloudManager/MultiCloudManager/this
+// CloudProvider interface anywhere — self-contained, never wired in.
+// Un-disable only after confirming it's still needed and renaming the
+// colliding identifiers.
 package multicloud
 
 import (
