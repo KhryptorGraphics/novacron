@@ -65,7 +65,12 @@ which overstate completion and should not be trusted.
   cutover**: once the incoming guest resumes, the destination registers it in its
   manager + DB (so it lists and control ops route there — verified by a `stop` that
   killed the dest qemu), and the source retires it (manager + DB row removed, node
-  accounting released). **Peer discovery** via `NOVACRON_PEERS="node2=host:port,…"`
+  accounting released). **Migrated VMs survive a dest-node restart**: the dest now
+  launches into the canonical `<id>/` runtime dir and persists `config.json`, so
+  reconcile keeps it running and the manager re-adopts the qemu (fixed an
+  orphan-on-restart bug where the old `<id>-incoming/` dir hid it → reconcile wrongly
+  marked it stopped; verified by a post-restart `stop` that killed the qemu).
+  **Peer discovery** via `NOVACRON_PEERS="node2=host:port,…"`
   resolves a bare `target_node` with no `target_addr` (kept out of the scheduler so
   it can't trip placement/admission) — both re-verified on the two-node .53
   microcluster; shared-storage cross-node gets the same registration wiring
