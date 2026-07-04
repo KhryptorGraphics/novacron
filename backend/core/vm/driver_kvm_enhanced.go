@@ -40,6 +40,16 @@ type KVMVMInfo struct {
 	VNCPort     int
 	StartTime   time.Time
 	StoppedTime *time.Time
+
+	// Migration fields (empty/false for normal VMs). RuntimeDir decouples the
+	// per-process sockets/pidfile/console from DiskPath so a migration dest can
+	// share the source's disk+UEFI vars while keeping its own runtime dir.
+	// ShareStorage adds file.locking=off to the writable disk and UEFI vars so
+	// source and dest can open the same files (memory-only migration over
+	// shared storage). IncomingURI, when set, launches qemu with -incoming.
+	RuntimeDir   string
+	ShareStorage bool
+	IncomingURI  string
 }
 
 // NewKVMDriver creates a new KVM driver (main entry point)
@@ -271,12 +281,24 @@ func (d *KVMDriverEnhanced) Start(ctx context.Context, vmID string) error {
 	// Refresh the VNC display to a currently-free port right before qemu binds.
 	vmInfo.VNCPort = freeVNCPort()
 
-	// Build QEMU command
+	return d.launchVM(vmID, vmInfo)
+}
+
+// launchVM builds the QEMU command for vmInfo and starts the process. The
+// caller must hold d.vmLock. Shared by Start and the migration entry points
+// (StartMigrationSource / StartIncoming) so the dest mirrors the source args.
+func (d *KVMDriverEnhanced) launchVM(vmID string, vmInfo *KVMVMInfo) error {
 	args := d.buildQEMUArgs(vmInfo)
 
-	// Start QEMU process
 	cmd := exec.Command(d.qemuBinaryPath, args...)
-	cmd.Dir = filepath.Dir(vmInfo.DiskPath)
+	cmd.Dir = d.runtimeDir(vmInfo)
+	// Capture qemu's stderr; otherwise a dead-on-arrival qemu is a silent
+	// exit-status-1 (its error goes to /dev/null). The child keeps its own dup
+	// of the fd after Start, so closing our copy here is safe.
+	if f, err := os.Create(filepath.Join(cmd.Dir, "qemu-stderr.log")); err == nil {
+		cmd.Stderr = f
+		defer f.Close()
+	}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start QEMU: %w", err)
@@ -456,7 +478,7 @@ func (d *KVMDriverEnhanced) ListVMs(ctx context.Context) ([]VMInfo, error) {
 func (d *KVMDriverEnhanced) SupportsPause() bool    { return true }
 func (d *KVMDriverEnhanced) SupportsResume() bool   { return true }
 func (d *KVMDriverEnhanced) SupportsSnapshot() bool { return true }
-func (d *KVMDriverEnhanced) SupportsMigrate() bool  { return false }
+func (d *KVMDriverEnhanced) SupportsMigrate() bool  { return true }
 
 // Pause pauses a VM
 func (d *KVMDriverEnhanced) Pause(ctx context.Context, vmID string) error {
@@ -528,10 +550,8 @@ func (d *KVMDriverEnhanced) Snapshot(ctx context.Context, vmID, name string, par
 	return snapshotID, nil
 }
 
-// Migrate is not implemented for this basic driver
-func (d *KVMDriverEnhanced) Migrate(ctx context.Context, vmID, target string, params map[string]string) error {
-	return fmt.Errorf("migration not supported by this driver")
-}
+// Migrate, StartMigrationSource, StartIncoming and the QMP client live in
+// driver_kvm_migrate.go.
 
 // Private helper methods
 
@@ -570,19 +590,31 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 	// ponytail: no -daemonize — keeps qemu as a tracked child so cmd.Wait()
 	// in monitorVM and driver.Stop reflect the real process; -pidfile still
 	// lets a restarted server rediscover the running qemu.
+	// Per-process runtime dir (sockets/console/pidfile). Defaults to the disk's
+	// dir; a migration dest overrides it so it can share the source disk while
+	// keeping its own sockets. lock disables the qcow2/pflash write-lock for
+	// shared-storage migration so source and dest can open the same files.
+	sockDir := d.runtimeDir(vmInfo)
+	lock := ""
+	if vmInfo.ShareStorage {
+		lock = ",file.locking=off"
+	}
+
 	args := []string{
 		"-machine", machine + ",accel=" + accel,
 		"-cpu", cpu,
 		"-m", strconv.Itoa(mem),
 		"-smp", strconv.Itoa(cpus),
-		"-drive", fmt.Sprintf("file=%s,format=qcow2,if=virtio", vmInfo.DiskPath),
+		"-drive", fmt.Sprintf("file=%s,format=qcow2,if=virtio%s", vmInfo.DiskPath, lock),
 		"-netdev", "user,id=net0",
 		"-device", "virtio-net-pci,netdev=net0",
 		"-vnc", fmt.Sprintf(":%d", vmInfo.VNCPort-5900),
 		"-monitor", fmt.Sprintf("unix:%s,server,nowait", vmInfo.MonitorPath),
+		// Dedicated QMP socket for programmatic control (migration handshake).
+		"-qmp", fmt.Sprintf("unix:%s,server,nowait", filepath.Join(sockDir, "qmp.sock")),
 		// Capture the guest serial console so boot is observable.
-		"-serial", "file:" + filepath.Join(filepath.Dir(vmInfo.DiskPath), "console.log"),
-		"-pidfile", filepath.Join(filepath.Dir(vmInfo.DiskPath), "qemu.pid"),
+		"-serial", "file:" + filepath.Join(sockDir, "console.log"),
+		"-pidfile", filepath.Join(sockDir, "qemu.pid"),
 	}
 
 	// aarch64 "virt" needs UEFI firmware (pflash) to boot a disk image.
@@ -590,7 +622,7 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 		if code, vars, ok := d.ensureUEFI(filepath.Dir(vmInfo.DiskPath)); ok {
 			args = append(args,
 				"-drive", "if=pflash,format=raw,unit=0,file="+code+",readonly=on",
-				"-drive", "if=pflash,format=raw,unit=1,file="+vars,
+				"-drive", "if=pflash,format=raw,unit=1,file="+vars+lock,
 			)
 		}
 	}
@@ -608,6 +640,11 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 
 	// Add virtio-rng for entropy
 	args = append(args, "-device", "virtio-rng-pci")
+
+	// Migration destination: start paused waiting for the incoming stream.
+	if vmInfo.IncomingURI != "" {
+		args = append(args, "-incoming", vmInfo.IncomingURI)
+	}
 
 	return args
 }
@@ -868,9 +905,10 @@ func (d *KVMDriverEnhanced) stopVMInternal(vmInfo *KVMVMInfo) error {
 	return nil
 }
 
-// SupportsLiveMigration returns whether the driver supports live migration
+// SupportsLiveMigration returns whether the driver supports live migration.
+// Implemented via QEMU's own migrate command over QMP (see driver_kvm_migrate.go).
 func (d *KVMDriverEnhanced) SupportsLiveMigration() bool {
-	return false // Not implemented yet
+	return true
 }
 
 // SupportsHotPlug returns whether the driver supports hot-plugging devices

@@ -26,8 +26,11 @@ which overstate completion and should not be trusted.
 
 ## Not yet real (simulated / in progress)
 
-- **Live VM migration** — simulated today; real QEMU QMP + dirty-bitmap planned
-  (Phase 2).
+- **Live VM migration (engine)** — REAL QMP-driven QEMU live migration in the KVM
+  driver: a running guest transfers with ~10 ms downtime, proven by a localhost
+  two-qemu cutover (counter continuity, no reboot on the destination). Multi-node
+  orchestration (node-name → QEMU-URI resolution, a real second host) is deferred
+  to Phase 3 (federation).
 - **Federation cross-region data plane** — simulated (Phase 3).
 - **Multicloud abstraction** — partially stubbed; real AWS SDK integration exists
   but is not wired behind the common interface (Phase 3).
