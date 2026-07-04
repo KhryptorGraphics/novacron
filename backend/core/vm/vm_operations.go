@@ -1,9 +1,15 @@
 package vm
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net"
+	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -738,6 +744,25 @@ func (m *VMManager) migrateVM(ctx context.Context, vm *VM, driver VMDriver, para
 		migrationType = "live"
 	}
 
+	// Resolve the QEMU migration URI before touching VM state. An explicit uri
+	// (params["uri"]) is honored as-is (same-host tests / manual cross-box);
+	// otherwise the target node's advertised migration_addr is resolved and the
+	// target is asked to stand up an incoming endpoint. This replaces the old
+	// bug of passing a bare node id to the driver as if it were a QEMU URI.
+	uri := params["uri"]
+	if uri == "" {
+		resolved, rerr := m.resolveMigrationURI(ctx, vm, driver, targetNode)
+		if rerr != nil {
+			return &VMOperationResponse{
+				Success:      false,
+				ErrorMessage: fmt.Sprintf("resolve migration target %q: %v", targetNode, rerr),
+				VM:           vm,
+			}, rerr
+		}
+		uri = resolved
+		params["uri"] = uri
+	}
+
 	// Update VM state to migrating
 	vm.mutex.Lock()
 	vm.state = StateMigrating
@@ -752,8 +777,9 @@ func (m *VMManager) migrateVM(ctx context.Context, vm *VM, driver VMDriver, para
 		Message:   fmt.Sprintf("Starting %s migration to node %s", migrationType, targetNode),
 	})
 
-	// Call driver to migrate the VM
-	err := driver.Migrate(ctx, vm.ID(), targetNode, params)
+	// Call driver to migrate the VM. Pass the resolved QEMU URI (params["uri"]
+	// carries it too); never the bare node id.
+	err := driver.Migrate(ctx, vm.ID(), uri, params)
 	if err != nil {
 		// Update state back to previous state on failure
 		vm.mutex.Lock()
@@ -802,6 +828,95 @@ func (m *VMManager) migrateVM(ctx context.Context, vm *VM, driver VMDriver, para
 			"completion_time": time.Now().Format(time.RFC3339),
 		},
 	}, nil
+}
+
+// IncomingMigrationRequest is the body a migration source POSTs to a target's
+// /internal/migrate/incoming endpoint to have it stand up a destination qemu.
+// DiskPath is the source's absolute disk path, opened directly by the target
+// over shared storage (same filesystem); Config mirrors the source so the
+// destination's qemu args match exactly (required for memory-only migration).
+type IncomingMigrationRequest struct {
+	VMID     string   `json:"vm_id"`
+	DiskPath string   `json:"disk_path"`
+	Config   VMConfig `json:"config"`
+}
+
+// IncomingMigrationResponse returns the port the destination qemu is listening
+// on for the incoming migration stream. The source builds the QEMU URI as
+// tcp:<migration_addr host>:<port>.
+type IncomingMigrationResponse struct {
+	Port int `json:"port"`
+}
+
+// resolveMigrationURI turns a target node id into a QEMU migration URI: it reads
+// the node's migration_addr label from the scheduler inventory, then asks that
+// node's /internal/migrate/incoming endpoint to launch a destination and report
+// its listening port.
+func (m *VMManager) resolveMigrationURI(ctx context.Context, vm *VM, driver VMDriver, targetNode string) (string, error) {
+	if m.scheduler == nil {
+		return "", fmt.Errorf("no scheduler configured; pass an explicit uri")
+	}
+	node, err := m.scheduler.GetNode(targetNode)
+	if err != nil {
+		return "", fmt.Errorf("node not registered: %w", err)
+	}
+	addr := ""
+	if node.Labels != nil {
+		addr = node.Labels["migration_addr"]
+	}
+	if addr == "" {
+		return "", fmt.Errorf("node has no migration_addr label")
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", fmt.Errorf("bad migration_addr %q: %w", addr, err)
+	}
+
+	info, err := driver.GetInfo(ctx, vm.ID())
+	if err != nil {
+		return "", fmt.Errorf("source vm info: %w", err)
+	}
+	port, err := requestIncomingMigration(ctx, addr, IncomingMigrationRequest{
+		VMID:     vm.ID(),
+		DiskPath: info.RootFS,
+		Config:   vm.config,
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("tcp:%s:%d", host, port), nil
+}
+
+// requestIncomingMigration POSTs req to the target node's incoming-migration
+// endpoint and returns the destination's listening port.
+func requestIncomingMigration(ctx context.Context, addr string, req IncomingMigrationRequest) (int, error) {
+	body, _ := json.Marshal(req)
+	url := "http://" + addr + "/internal/migrate/incoming"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if secret := os.Getenv("NOVACRON_MIGRATION_SECRET"); secret != "" {
+		httpReq.Header.Set("X-Migration-Secret", secret)
+	}
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return 0, fmt.Errorf("incoming RPC to %s: %w", addr, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return 0, fmt.Errorf("incoming RPC %s: %s: %s", addr, resp.Status, strings.TrimSpace(string(b)))
+	}
+	var out IncomingMigrationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, fmt.Errorf("decode incoming RPC response: %w", err)
+	}
+	if out.Port <= 0 {
+		return 0, fmt.Errorf("incoming RPC returned no port")
+	}
+	return out.Port, nil
 }
 
 // Public API methods for external calls

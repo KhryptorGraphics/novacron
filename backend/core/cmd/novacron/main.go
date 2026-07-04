@@ -460,7 +460,7 @@ func initializeVMManager(config runtimeConfig) (*vm.VMManager, error) {
 		return nil, err
 	}
 
-	if err := registerLocalSchedulerNode(manager, config.Hypervisor.ID, config.Storage.BasePath); err != nil {
+	if err := registerLocalSchedulerNode(manager, config.Hypervisor.ID, config.Storage.BasePath, resolveMigrationAddr(*listenAddress)); err != nil {
 		return nil, fmt.Errorf("register local scheduler node: %w", err)
 	}
 
@@ -471,7 +471,27 @@ func initializeVMManager(config runtimeConfig) (*vm.VMManager, error) {
 	return manager, nil
 }
 
-func registerLocalSchedulerNode(manager *vm.VMManager, nodeID, storagePath string) error {
+// resolveMigrationAddr turns the API listen address into a peer-reachable
+// host:port advertised as the node's migration_addr label. An unspecified bind
+// host (0.0.0.0/::/empty) is replaced with the hostname, falling back to
+// 127.0.0.1 — enough for localhost multi-instance; operators override the bind
+// host for real multi-host deployments.
+func resolveMigrationAddr(listen string) string {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return ""
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		if hn, e := os.Hostname(); e == nil && hn != "" {
+			host = hn
+		} else {
+			host = "127.0.0.1"
+		}
+	}
+	return net.JoinHostPort(host, port)
+}
+
+func registerLocalSchedulerNode(manager *vm.VMManager, nodeID, storagePath, migrationAddr string) error {
 	if manager == nil {
 		return fmt.Errorf("vm manager is required")
 	}
@@ -519,6 +539,9 @@ func registerLocalSchedulerNode(manager *vm.VMManager, nodeID, storagePath strin
 		DiskUsagePercent:   percent(clampInt(usedDiskGB, 0, totalDiskGB), totalDiskGB),
 		Status:             "available",
 		Labels:             map[string]string{"runtime": "novacron", "hypervisor": string(vm.VMTypeKVM)},
+	}
+	if migrationAddr != "" {
+		nodeInfo.Labels["migration_addr"] = migrationAddr
 	}
 
 	return manager.RegisterSchedulerNode(nodeInfo)

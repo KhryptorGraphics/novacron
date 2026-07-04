@@ -26,11 +26,12 @@ which overstate completion and should not be trusted.
 
 ## Not yet real (simulated / in progress)
 
-- **Live VM migration (engine)** — REAL QMP-driven QEMU live migration in the KVM
-  driver: a running guest transfers with ~10 ms downtime, proven by a localhost
-  two-qemu cutover (counter continuity, no reboot on the destination). Multi-node
-  orchestration (node-name → QEMU-URI resolution, a real second host) is deferred
-  to Phase 3 (federation).
+- **Live VM migration** — REAL QMP-driven QEMU live migration, proven single-host
+  AND true cross-node (two processes over HTTP: `POST /vms/{id}/migrate` → node→URI
+  resolution → a target-side `/internal/migrate/incoming` RPC launches the dest →
+  guest cutover, ~10–24 ms downtime, **0 boot markers on the destination console**).
+  Remaining: block migration for non-shared storage; multi-node peer-address
+  discovery (arrives with federation, Phase 3).
 - **Federation cross-region data plane** — simulated (Phase 3).
 - **Multicloud abstraction** — partially stubbed; real AWS SDK integration exists
   but is not wired behind the common interface (Phase 3).

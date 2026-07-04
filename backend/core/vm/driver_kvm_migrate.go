@@ -54,17 +54,37 @@ func (d *KVMDriverEnhanced) StartMigrationSource(ctx context.Context, vmID strin
 	return d.launchVM(vmID, vmInfo)
 }
 
-// StartIncoming launches a migration destination that mirrors srcVMID exactly
-// (same buildQEMUArgs) but waits for an incoming migration on incomingURI. It
-// shares the source's boot disk and UEFI vars (memory-only migration) while
-// using destDir for its own sockets/console/pidfile. Returns the dest VM ID.
+// StartIncoming launches a migration destination that mirrors srcVMID (looked up
+// in this driver) over shared storage. It is a thin wrapper over
+// StartIncomingWithDisk for same-host migration where source and dest live in
+// the same driver; cross-node callers (whose driver has no source entry) call
+// StartIncomingWithDisk directly with the source's disk path + config.
 func (d *KVMDriverEnhanced) StartIncoming(ctx context.Context, srcVMID, destID, destDir, incomingURI string) (string, error) {
+	d.vmLock.RLock()
+	src, ok := d.vms[srcVMID]
+	var diskPath string
+	var config VMConfig
+	if ok {
+		diskPath, config = src.DiskPath, src.Config
+	}
+	d.vmLock.RUnlock()
+	if !ok {
+		return "", fmt.Errorf("source VM %s not found", srcVMID)
+	}
+	return d.StartIncomingWithDisk(ctx, destID, destDir, incomingURI, diskPath, config)
+}
+
+// StartIncomingWithDisk launches a migration destination that opens the given
+// (shared) disk with the given config and waits for an incoming migration on
+// incomingURI, using destDir for its own sockets/console/pidfile. diskPath must
+// be reachable on this host (shared storage / same filesystem as the source)
+// and the source must run with file.locking=off. Returns the dest VM ID.
+func (d *KVMDriverEnhanced) StartIncomingWithDisk(ctx context.Context, destID, destDir, incomingURI, diskPath string, config VMConfig) (string, error) {
 	d.vmLock.Lock()
 	defer d.vmLock.Unlock()
 
-	src, ok := d.vms[srcVMID]
-	if !ok {
-		return "", fmt.Errorf("source VM %s not found", srcVMID)
+	if diskPath == "" {
+		return "", fmt.Errorf("incoming migration requires a shared disk path")
 	}
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create dest dir: %w", err)
@@ -72,9 +92,9 @@ func (d *KVMDriverEnhanced) StartIncoming(ctx context.Context, srcVMID, destID, 
 
 	dest := &KVMVMInfo{
 		ID:           destID,
-		Config:       src.Config,
+		Config:       config,
 		State:        StateCreated,
-		DiskPath:     src.DiskPath, // shared storage (memory-only migration)
+		DiskPath:     diskPath, // shared storage (memory-only migration)
 		ConfigPath:   filepath.Join(destDir, "config.json"),
 		MonitorPath:  filepath.Join(destDir, "monitor.sock"),
 		VNCPort:      freeVNCPort(),
@@ -131,14 +151,23 @@ func waitIncomingReady(qmpSock string, timeout time.Duration) error {
 // target is the QEMU migration URI (e.g. "tcp:127.0.0.1:4444"); params["uri"]
 // overrides it. Returns after the source has been asked to quit.
 func (d *KVMDriverEnhanced) Migrate(ctx context.Context, vmID, target string, params map[string]string) error {
+	_, _, err := d.migrateWithStats(ctx, vmID, target, params)
+	return err
+}
+
+// migrateWithStats is Migrate's implementation, additionally returning the QEMU
+// downtime and total_time (ms) read from query-migrate on completion. Kept
+// separate so callers/tests can observe the recorded migration stats without
+// widening the VMDriver.Migrate interface signature.
+func (d *KVMDriverEnhanced) migrateWithStats(ctx context.Context, vmID, target string, params map[string]string) (downtimeMs, totalMs int64, err error) {
 	d.vmLock.RLock()
 	vmInfo, ok := d.vms[vmID]
 	d.vmLock.RUnlock()
 	if !ok {
-		return fmt.Errorf("VM %s not found", vmID)
+		return 0, 0, fmt.Errorf("VM %s not found", vmID)
 	}
 	if vmInfo.State != StateRunning {
-		return fmt.Errorf("VM %s is not running", vmID)
+		return 0, 0, fmt.Errorf("VM %s is not running", vmID)
 	}
 
 	uri := target
@@ -146,7 +175,7 @@ func (d *KVMDriverEnhanced) Migrate(ctx context.Context, vmID, target string, pa
 		uri = p
 	}
 	if uri == "" {
-		return fmt.Errorf("migration target URI required (target_node is a node id, not a QEMU URI)")
+		return 0, 0, fmt.Errorf("migration target URI required (target_node is a node id, not a QEMU URI)")
 	}
 
 	// Dest readiness is ensured by StartIncoming (it waits for QMP inmigrate).
@@ -156,24 +185,24 @@ func (d *KVMDriverEnhanced) Migrate(ctx context.Context, vmID, target string, pa
 	sock := filepath.Join(d.runtimeDir(vmInfo), "qmp.sock")
 	q, err := qmpDial(sock, 10*time.Second)
 	if err != nil {
-		return fmt.Errorf("connect source QMP %s: %w", sock, err)
+		return 0, 0, fmt.Errorf("connect source QMP %s: %w", sock, err)
 	}
 	defer q.Close()
 
 	if _, err := q.execute("migrate", map[string]interface{}{"uri": uri}); err != nil {
-		return fmt.Errorf("migrate command: %w", err)
+		return 0, 0, fmt.Errorf("migrate command: %w", err)
 	}
 
-	downtimeMs, totalMs, err := q.pollMigration(ctx)
+	downtimeMs, totalMs, err = q.pollMigration(ctx)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 
 	// Migration completed: the source is paused (postmigrate). Quit it so the
 	// process exits and only the destination remains running.
 	_, _ = q.execute("quit", nil)
 	log.Printf("VM %s migrated to %s (downtime %dms, total %dms)", vmID, uri, downtimeMs, totalMs)
-	return nil
+	return downtimeMs, totalMs, nil
 }
 
 // --- minimal QMP (QEMU Machine Protocol) client ---------------------------

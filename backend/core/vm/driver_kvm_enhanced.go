@@ -115,8 +115,10 @@ func kvmAccessible() bool {
 // freeVNCPort probes for a free VNC port (display :N == 5900+N). qemu binds this
 // at Start; a taken port makes qemu exit while Start looks successful, so we
 // bind-test instead of the old `5900+len(vms)` guess (which collided with any
-// external VNC on :0). ponytail: tiny probe->bind TOCTOU race; acceptable for a
-// display port, revisit only if concurrent Starts contend.
+// external VNC on :0). ponytail: a tiny probe->bind TOCTOU race remains; if it
+// is lost, launchVM's liveness confirm detects the dead qemu and retries with a
+// fresh port (see isPortBindError), so a lost race self-heals rather than
+// silently leaving the VM StateRunning-on-dead-qemu.
 func freeVNCPort() int {
 	for port := 5900; port < 6000; port++ {
 		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
@@ -195,6 +197,14 @@ func (d *KVMDriverEnhanced) adoptRunningVMs() {
 		if syscall.Kill(pid, 0) != nil {
 			continue // process is dead
 		}
+		// Guard against a recycled PID: after a host reboot the pidfile can name a
+		// live process that is NOT our qemu (PID reuse). Only adopt when the
+		// process cmdline is actually this VM's qemu, else a later Stop would
+		// signal an unrelated process.
+		if cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err != nil || !containsQEMUAndVMID(string(cmdline), vmID) {
+			log.Printf("Skipping adoption of PID %d for VM %s: not this VM's qemu (stale/recycled pidfile)", pid, vmID)
+			continue
+		}
 
 		proc, _ := os.FindProcess(pid) // never errors on Unix
 		vmInfo := &KVMVMInfo{
@@ -211,7 +221,32 @@ func (d *KVMDriverEnhanced) adoptRunningVMs() {
 			_ = json.Unmarshal(data, &vmInfo.Config)
 		}
 		d.vms[vmID] = vmInfo
+		// Adopted qemu is not our child, so cmd.Wait is unavailable; poll instead
+		// so an adopted VM that dies is noticed (previously only seen on next op).
+		go d.monitorAdoptedVM(vmID, pid)
 		log.Printf("Adopted running KVM VM %s (PID %d) on driver restart", vmID, pid)
+	}
+}
+
+// monitorAdoptedVM polls an adopted qemu (a non-child process, so cmd.Wait can't
+// be used) and marks the VM stopped once its process exits.
+func (d *KVMDriverEnhanced) monitorAdoptedVM(vmID string, pid int) {
+	for {
+		time.Sleep(3 * time.Second)
+		if syscall.Kill(pid, 0) == nil {
+			continue // still alive
+		}
+		d.vmLock.Lock()
+		if vmInfo, ok := d.vms[vmID]; ok && vmInfo.PID == pid && vmInfo.State == StateRunning {
+			now := time.Now()
+			vmInfo.State = StateStopped
+			vmInfo.StoppedTime = &now
+			vmInfo.Process = nil
+			vmInfo.PID = 0
+			log.Printf("Adopted KVM VM %s (PID %d) exited; marked stopped", vmID, pid)
+		}
+		d.vmLock.Unlock()
+		return
 	}
 }
 
@@ -288,32 +323,103 @@ func (d *KVMDriverEnhanced) Start(ctx context.Context, vmID string) error {
 // caller must hold d.vmLock. Shared by Start and the migration entry points
 // (StartMigrationSource / StartIncoming) so the dest mirrors the source args.
 func (d *KVMDriverEnhanced) launchVM(vmID string, vmInfo *KVMVMInfo) error {
-	args := d.buildQEMUArgs(vmInfo)
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		sockDir := d.runtimeDir(vmInfo)
+		qmpSock := filepath.Join(sockDir, "qmp.sock")
+		_ = os.Remove(qmpSock) // drop any stale socket from a prior dead qemu
 
-	cmd := exec.Command(d.qemuBinaryPath, args...)
-	cmd.Dir = d.runtimeDir(vmInfo)
-	// Capture qemu's stderr; otherwise a dead-on-arrival qemu is a silent
-	// exit-status-1 (its error goes to /dev/null). The child keeps its own dup
-	// of the fd after Start, so closing our copy here is safe.
-	if f, err := os.Create(filepath.Join(cmd.Dir, "qemu-stderr.log")); err == nil {
-		cmd.Stderr = f
-		defer f.Close()
+		cmd := exec.Command(d.qemuBinaryPath, d.buildQEMUArgs(vmInfo)...)
+		cmd.Dir = sockDir
+		// Capture qemu's stderr; otherwise a dead-on-arrival qemu is a silent
+		// exit-status-1 (its error goes to /dev/null). The child inherits its own
+		// dup of the fd at Start, so closing our copy afterward is safe.
+		if f, err := os.Create(filepath.Join(cmd.Dir, "qemu-stderr.log")); err == nil {
+			cmd.Stderr = f
+			defer f.Close()
+		}
+
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("failed to start QEMU: %w", err)
+		}
+		vmInfo.Process = cmd.Process
+		vmInfo.PID = cmd.Process.Pid
+		go d.monitorVM(vmID, cmd)
+
+		// Liveness confirm before declaring StateRunning. A qemu that dies on
+		// arrival (bad args, missing firmware, or a VNC-port clash from the
+		// freeVNCPort probe->bind TOCTOU) still returns success from cmd.Start();
+		// only a live qemu opens its QMP socket. This replaces the old optimistic
+		// StateRunning that masked dead-on-arrival launches.
+		if err := waitQMPUp(qmpSock, 3*time.Second); err == nil {
+			vmInfo.State = StateRunning
+			vmInfo.StartTime = time.Now()
+			log.Printf("Started KVM VM %s with PID %d", vmID, vmInfo.PID)
+			return nil
+		} else {
+			lastErr = err
+			stderr := tailQEMUStderr(cmd.Dir)
+			// A lost VNC-port race is recoverable: pick a fresh display and retry.
+			if attempt < maxAttempts && isPortBindError(stderr) {
+				log.Printf("KVM VM %s qemu failed to bind (attempt %d/%d), retrying with fresh VNC port: %s",
+					vmID, attempt, maxAttempts, firstLine(stderr))
+				vmInfo.VNCPort = freeVNCPort()
+				continue
+			}
+			now := time.Now()
+			vmInfo.State = StateFailed
+			vmInfo.StoppedTime = &now
+			return fmt.Errorf("QEMU for VM %s failed to come up: %w; stderr: %s", vmID, err, stderr)
+		}
 	}
+	return fmt.Errorf("QEMU for VM %s failed to come up after %d attempts: %w", vmID, maxAttempts, lastErr)
+}
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start QEMU: %w", err)
+// waitQMPUp waits until qemu has opened its QMP socket (proof it launched and is
+// alive) or the timeout elapses. A successful connect is enough; it does not
+// negotiate, and closes immediately so the real QMP clients connect cleanly.
+func waitQMPUp(qmpSock string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if c, err := net.DialTimeout("unix", qmpSock, 500*time.Millisecond); err == nil {
+			c.Close()
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("QMP socket %s not up within %s", qmpSock, timeout)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
+}
 
-	vmInfo.Process = cmd.Process
-	vmInfo.PID = cmd.Process.Pid
-	vmInfo.State = StateRunning
-	vmInfo.StartTime = time.Now()
+// tailQEMUStderr returns the tail of a VM's captured qemu stderr for diagnostics.
+func tailQEMUStderr(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "qemu-stderr.log"))
+	if err != nil {
+		return "(no stderr)"
+	}
+	if len(data) > 600 {
+		data = data[len(data)-600:]
+	}
+	return strings.TrimSpace(string(data))
+}
 
-	// Monitor the process
-	go d.monitorVM(vmID, cmd)
+// isPortBindError reports whether qemu stderr indicates a socket/port bind
+// failure (e.g. a VNC display already taken), which a fresh port can recover.
+func isPortBindError(stderr string) bool {
+	s := strings.ToLower(stderr)
+	return strings.Contains(s, "could not bind") ||
+		strings.Contains(s, "failed to bind") ||
+		strings.Contains(s, "address already in use") ||
+		(strings.Contains(s, "vnc") && strings.Contains(s, "bind"))
+}
 
-	log.Printf("Started KVM VM %s with PID %d", vmID, vmInfo.PID)
-	return nil
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 // Stop stops a KVM VM

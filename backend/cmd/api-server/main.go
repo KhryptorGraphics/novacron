@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -126,6 +127,10 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	apiV1Router := router.PathPrefix("/api/v1").Subrouter()
 	apiV1Router.Use(requireAuth(authManager))
 	registerSecureAPIRoutes(apiV1Router, db, vmManager)
+
+	// Node-to-node migration RPC: intentionally OFF the JWT router (the peer is a
+	// node, not a user). Gated by an optional shared secret; see the handler.
+	registerInternalMigrationRoutes(router, vmManager, vmBasePath(cfg))
 
 	registerCanonicalSecurityRoutes(router, authManager, services.securityHandlers)
 	registerCanonicalAdminRoutes(router, authManager, db)
@@ -741,6 +746,7 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 
 	registerVMPowerRoute(router, db, vmManager, "start")
 	registerVMPowerRoute(router, db, vmManager, "stop")
+	registerVMMigrateRoute(router, db, vmManager)
 
 	router.HandleFunc("/vms/{id}/metrics", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["id"]
@@ -1226,6 +1232,139 @@ func registerVMPowerRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.VMM
 	}).Methods(http.MethodPost)
 }
 
+// registerInternalMigrationRoutes wires POST /internal/migrate/incoming: the
+// target side of a cross-node migration. It receives the source VM's spec +
+// absolute disk path, launches a destination qemu waiting on a freshly-picked
+// port over shared storage, and returns that port. This is node-to-node (no JWT)
+// and gated by an optional shared secret from NOVACRON_MIGRATION_SECRET.
+// ponytail: static shared-secret header; swap for mTLS if peers aren't trusted.
+func registerInternalMigrationRoutes(router *mux.Router, vmManager *core_vm.VMManager, vmBase string) {
+	router.HandleFunc("/internal/migrate/incoming", func(w http.ResponseWriter, r *http.Request) {
+		if secret := os.Getenv("NOVACRON_MIGRATION_SECRET"); secret != "" && r.Header.Get("X-Migration-Secret") != secret {
+			writeJSONError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		if vmManager == nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "vm manager unavailable")
+			return
+		}
+
+		var req core_vm.IncomingMigrationRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if req.VMID == "" || req.DiskPath == "" {
+			writeJSONError(w, http.StatusBadRequest, "vm_id and disk_path are required")
+			return
+		}
+
+		driver, err := vmManager.GetDriverForConfig(core_vm.VMConfig{Type: core_vm.VMTypeKVM})
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("resolve KVM driver: %v", err))
+			return
+		}
+		kd, ok := driver.(*core_vm.KVMDriverEnhanced)
+		if !ok {
+			writeJSONError(w, http.StatusInternalServerError, "KVM driver unavailable on this node")
+			return
+		}
+
+		port, err := freeMigrationPort()
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("allocate migration port: %v", err))
+			return
+		}
+		destDir := filepath.Join(vmBase, req.VMID+"-incoming")
+		uri := fmt.Sprintf("tcp:0.0.0.0:%d", port)
+
+		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancel()
+		if _, err := kd.StartIncomingWithDisk(ctx, req.VMID, destDir, uri, req.DiskPath, req.Config); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("start incoming destination: %v", err))
+			return
+		}
+
+		writeJSON(w, http.StatusOK, core_vm.IncomingMigrationResponse{Port: port})
+	}).Methods(http.MethodPost)
+}
+
+// freeMigrationPort asks the kernel for an unused TCP port for the incoming
+// migration stream. ponytail: tiny TOCTOU between close and qemu's bind;
+// acceptable, qemu surfaces a bind error if it loses the race.
+func freeMigrationPort() (int, error) {
+	ln, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		return 0, err
+	}
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port, nil
+}
+
+// registerVMMigrateRoute wires POST /vms/{id}/migrate to the real manager's
+// MigrateVM. Body: {target_node, migration_type?, uri?}. An explicit uri (QEMU
+// migration URI, e.g. "tcp:host:port") flows straight through to the KVM driver;
+// otherwise target_node is resolved to a URI inside the manager (see migrateVM).
+// On success the DB row's node_id/state are updated to the observed reality.
+func registerVMMigrateRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager) {
+	router.HandleFunc("/vms/{id}/migrate", func(w http.ResponseWriter, r *http.Request) {
+		vmID := mux.Vars(r)["id"]
+		if vmManager == nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "vm manager unavailable")
+			return
+		}
+
+		var req struct {
+			TargetNode    string `json:"target_node"`
+			MigrationType string `json:"migration_type,omitempty"`
+			URI           string `json:"uri,omitempty"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if strings.TrimSpace(req.TargetNode) == "" {
+			writeJSONError(w, http.StatusBadRequest, "target_node is required")
+			return
+		}
+
+		options := map[string]string{}
+		if req.MigrationType != "" {
+			options["migration_type"] = req.MigrationType
+		}
+		if req.URI != "" {
+			options["uri"] = req.URI // explicit QEMU URI passes straight to the driver
+		}
+
+		// Live migration can take well over 30s; give it a generous ceiling.
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+		defer cancel()
+
+		if err := vmManager.MigrateVM(ctx, vmID, req.TargetNode, options); err != nil {
+			writeJSONError(w, vmActionStatus(err), fmt.Sprintf("failed to migrate VM: %v", err))
+			return
+		}
+
+		vm, gerr := vmManager.GetVM(vmID)
+		state := "running"
+		if gerr == nil {
+			state = string(vm.State())
+		}
+		if _, err := db.Exec(`UPDATE vms SET state = $2, node_id = $3, updated_at = NOW() WHERE id = $1`,
+			vmID, state, nullableStringValue(req.TargetNode)); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "migration succeeded but VM state update failed")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id":      vmID,
+			"state":   state,
+			"status":  state,
+			"node_id": req.TargetNode,
+		})
+	}).Methods(http.MethodPost)
+}
+
 // reconcileVMState corrects each persisted VM row to match whether its qemu
 // process is actually alive (via the driver's pidfile) after a restart, and
 // re-registers every still-running VM with the manager (see adoptManagerVM) so
@@ -1248,7 +1387,7 @@ func reconcileVMState(db *sql.DB, vmBase string, manager *core_vm.VMManager) {
 	rows.Close()
 
 	for _, rc := range recs {
-		alive := pidFileAlive(filepath.Join(vmBase, rc.id, "qemu.pid"))
+		alive := pidFileAlive(filepath.Join(vmBase, rc.id, "qemu.pid"), rc.id)
 		if alive {
 			// Repopulate the manager so post-restart control ops (stop/delete)
 			// route to the driver that re-adopted this qemu instead of 404ing.
@@ -1305,8 +1444,11 @@ func adoptManagerVM(manager *core_vm.VMManager, vmBase, id string) {
 	logger.Info("VM re-adopted into manager after restart", "vm", id)
 }
 
-// pidFileAlive reports whether the pid recorded in path is a live process.
-func pidFileAlive(path string) bool {
+// pidFileAlive reports whether the pid recorded in path is a live process that
+// is actually this VM's qemu. The /proc cmdline check guards against a recycled
+// PID (host reboot / PID reuse): a live-but-unrelated process must not be
+// mistaken for the running VM and later signalled by a Stop/Delete.
+func pidFileAlive(path, vmID string) bool {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false
@@ -1315,7 +1457,14 @@ func pidFileAlive(path string) bool {
 	if err != nil || pid <= 0 {
 		return false
 	}
-	return syscall.Kill(pid, 0) == nil // signal 0 probes existence only
+	if syscall.Kill(pid, 0) != nil { // signal 0 probes existence only
+		return false
+	}
+	cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(cmdline), "qemu") && strings.Contains(string(cmdline), vmID)
 }
 
 func initializeCanonicalServices(cfg *config.Config, db *sql.DB, authManager *auth.SimpleAuthManager) (*canonicalServices, error) {
