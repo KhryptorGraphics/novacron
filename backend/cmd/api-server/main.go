@@ -1264,8 +1264,12 @@ func registerInternalMigrationRoutes(router *mux.Router, vmManager *core_vm.VMMa
 			writeJSONError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if req.VMID == "" || req.DiskPath == "" {
-			writeJSONError(w, http.StatusBadRequest, "vm_id and disk_path are required")
+		if req.VMID == "" {
+			writeJSONError(w, http.StatusBadRequest, "vm_id is required")
+			return
+		}
+		if !req.Block && req.DiskPath == "" {
+			writeJSONError(w, http.StatusBadRequest, "disk_path is required for shared-storage migration")
 			return
 		}
 
@@ -1290,6 +1294,27 @@ func registerInternalMigrationRoutes(router *mux.Router, vmManager *core_vm.VMMa
 
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
+
+		if req.Block {
+			if req.DiskSizeBytes <= 0 {
+				writeJSONError(w, http.StatusBadRequest, "disk_size_bytes is required for block migration")
+				return
+			}
+			host := req.AdvertiseHost
+			if host == "" {
+				host = "127.0.0.1"
+			}
+			_, nbdURI, berr := kd.StartIncomingBlock(ctx, req.VMID, destDir, uri, host, req.DiskSizeBytes, req.Config)
+			if berr != nil {
+				writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("start incoming block destination: %v", berr))
+				return
+			}
+			// Tear the NBD export down once the source finishes (async; background).
+			go kd.AwaitFinishIncomingBlock(req.VMID, 10*time.Minute)
+			writeJSON(w, http.StatusOK, core_vm.IncomingMigrationResponse{Port: port, NBDURI: nbdURI})
+			return
+		}
+
 		if _, err := kd.StartIncomingWithDisk(ctx, req.VMID, destDir, uri, req.DiskPath, req.Config); err != nil {
 			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("start incoming destination: %v", err))
 			return
@@ -1328,6 +1353,7 @@ func registerVMMigrateRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.V
 			TargetNode    string `json:"target_node"`
 			MigrationType string `json:"migration_type,omitempty"`
 			URI           string `json:"uri,omitempty"`
+			TargetAddr    string `json:"target_addr,omitempty"` // dest api host:port for block migration
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid request body")
@@ -1344,6 +1370,9 @@ func registerVMMigrateRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.V
 		}
 		if req.URI != "" {
 			options["uri"] = req.URI // explicit QEMU URI passes straight to the driver
+		}
+		if req.TargetAddr != "" {
+			options["target_addr"] = req.TargetAddr // dest api addr for block migration
 		}
 
 		// Live migration can take well over 30s; give it a generous ceiling.

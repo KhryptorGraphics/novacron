@@ -50,11 +50,6 @@ type KVMVMInfo struct {
 	RuntimeDir   string
 	ShareStorage bool
 	IncomingURI  string
-	// BlockMigrate launches the primary disk as a named -blockdev (node
-	// "migdisk") + virtio-blk-pci so it can be drive-mirror'd (source) and
-	// NBD-exported (dest) for non-shared-storage block migration. Normal and
-	// shared-storage VMs keep the -drive if=virtio form (proven boot path).
-	BlockMigrate bool
 }
 
 // NewKVMDriver creates a new KVM driver (main entry point)
@@ -711,16 +706,15 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 		"-pidfile", filepath.Join(sockDir, "qemu.pid"),
 	}
 
-	// Primary boot disk. Block migration needs it as a named -blockdev so the
-	// disk can be drive-mirror'd (source) and NBD-exported (dest); every other
-	// VM keeps the proven -drive if=virtio boot path untouched.
-	if vmInfo.BlockMigrate {
-		args = append(args,
-			"-blockdev", fmt.Sprintf("node-name=%s,driver=qcow2,file.driver=file,file.filename=%s%s", kvmMigDiskNode, vmInfo.DiskPath, lock),
-			"-device", "virtio-blk-pci,drive="+kvmMigDiskNode)
-	} else {
-		args = append(args, "-drive", fmt.Sprintf("file=%s,format=qcow2,if=virtio%s", vmInfo.DiskPath, lock))
-	}
+	// Primary boot disk as a named -blockdev (not -drive if=virtio) so ANY running
+	// VM can be drive-mirror'd (block-migration source) and NBD-exported (dest) by
+	// node name -- block migration must work on normally-created VMs, and the
+	// source/dest device topology must match for the RAM stream. file.locking=off
+	// (shared-storage migration) rides the file child. Boot with this form is
+	// verified on arm64 virt+UEFI and x86 KVM.
+	args = append(args,
+		"-blockdev", fmt.Sprintf("node-name=%s,driver=qcow2,file.driver=file,file.filename=%s%s", kvmMigDiskNode, vmInfo.DiskPath, lock),
+		"-device", "virtio-blk-pci,drive="+kvmMigDiskNode)
 
 	// aarch64 "virt" needs UEFI firmware (pflash) to boot a disk image.
 	if machine == "virt" {

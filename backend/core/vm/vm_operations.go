@@ -753,6 +753,12 @@ func (m *VMManager) migrateVM(ctx context.Context, vm *VM, driver VMDriver, para
 		migrationType = "live"
 	}
 
+	// Block (non-shared storage) migration has its own flow: the target stands up
+	// a dest with its OWN disk + NBD export and the source drive-mirrors into it.
+	if migrationType == "block" {
+		return m.migrateBlockCrossNode(ctx, vm, driver, targetNode, params)
+	}
+
 	// Resolve the QEMU migration URI before touching VM state. An explicit uri
 	// (params["uri"]) is honored as-is (same-host tests / manual cross-box);
 	// otherwise the target node's advertised migration_addr is resolved and the
@@ -848,6 +854,13 @@ type IncomingMigrationRequest struct {
 	VMID     string   `json:"vm_id"`
 	DiskPath string   `json:"disk_path"`
 	Config   VMConfig `json:"config"`
+	// Block requests non-shared-storage (block) migration: the target creates its
+	// OWN disk of DiskSizeBytes and returns an nbd:// URI (built with AdvertiseHost,
+	// the address the source reaches it on) for the source to drive-mirror into.
+	// DiskPath is unused in block mode.
+	Block         bool   `json:"block,omitempty"`
+	DiskSizeBytes int64  `json:"disk_size_bytes,omitempty"`
+	AdvertiseHost string `json:"advertise_host,omitempty"`
 }
 
 // IncomingMigrationResponse returns the port the destination qemu is listening
@@ -855,6 +868,9 @@ type IncomingMigrationRequest struct {
 // tcp:<migration_addr host>:<port>.
 type IncomingMigrationResponse struct {
 	Port int `json:"port"`
+	// NBDURI is set for block migration: the source drive-mirrors the VM disk here
+	// (the dest's own disk, exposed writable over NBD).
+	NBDURI string `json:"nbd_uri,omitempty"`
 }
 
 // resolveMigrationURI turns a target node id into a QEMU migration URI: it reads
@@ -926,6 +942,107 @@ func requestIncomingMigration(ctx context.Context, addr string, req IncomingMigr
 		return 0, fmt.Errorf("incoming RPC returned no port")
 	}
 	return out.Port, nil
+}
+
+// migrateBlockCrossNode performs non-shared-storage (block) migration to
+// targetNode: it asks the target to stand up a destination with its OWN disk +
+// an NBD export, then drive-mirrors the disk there and cuts over RAM. Requires a
+// KVMDriverEnhanced source. The target address comes from params["target_addr"]
+// (host:port of the dest's HTTP API), falling back to the node's scheduler
+// migration_addr label; target_addr is the escape hatch on the canonical server,
+// which does not register peer nodes yet.
+func (m *VMManager) migrateBlockCrossNode(ctx context.Context, vm *VM, driver VMDriver, targetNode string, params map[string]string) (*VMOperationResponse, error) {
+	kd, ok := driver.(*KVMDriverEnhanced)
+	if !ok {
+		return &VMOperationResponse{Success: false, ErrorMessage: "block migration requires the KVM driver", VM: vm}, nil
+	}
+
+	addr := params["target_addr"]
+	if addr == "" && m.scheduler != nil {
+		if node, err := m.scheduler.GetNode(targetNode); err == nil && node.Labels != nil {
+			addr = node.Labels["migration_addr"]
+		}
+	}
+	if addr == "" {
+		return &VMOperationResponse{Success: false, ErrorMessage: "no target address for block migration (pass target_addr or register the node's migration_addr)", VM: vm}, nil
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return &VMOperationResponse{Success: false, ErrorMessage: fmt.Sprintf("bad target addr %q: %v", addr, err), VM: vm}, err
+	}
+
+	info, err := driver.GetInfo(ctx, vm.ID())
+	if err != nil {
+		return &VMOperationResponse{Success: false, ErrorMessage: fmt.Sprintf("source vm info: %v", err), VM: vm}, err
+	}
+	sizeBytes, err := sourceDiskVirtualSize(ctx, info.RootFS)
+	if err != nil {
+		return &VMOperationResponse{Success: false, ErrorMessage: fmt.Sprintf("source disk size: %v", err), VM: vm}, err
+	}
+
+	port, nbdURI, err := requestIncomingBlockMigration(ctx, addr, IncomingMigrationRequest{
+		VMID: vm.ID(), Config: vm.config, Block: true, DiskSizeBytes: sizeBytes, AdvertiseHost: host,
+	})
+	if err != nil {
+		return &VMOperationResponse{Success: false, ErrorMessage: fmt.Sprintf("target incoming (block): %v", err), VM: vm}, err
+	}
+	ramURI := fmt.Sprintf("tcp:%s:%d", host, port)
+
+	vm.mutex.Lock()
+	vm.state = StateMigrating
+	vm.mutex.Unlock()
+	m.emitEvent(VMEvent{Type: VMEventMigrating, VM: *vm, Timestamp: time.Now(), NodeID: vm.NodeID(),
+		Message: fmt.Sprintf("Starting block migration to node %s", targetNode)})
+
+	if _, _, err := kd.migrateBlockWithStats(ctx, vm.ID(), ramURI, nbdURI); err != nil {
+		vm.mutex.Lock()
+		vm.state = StateRunning
+		vm.mutex.Unlock()
+		msg := fmt.Sprintf("Failed to block-migrate VM: %v", err)
+		m.emitEvent(VMEvent{Type: VMEventError, VM: *vm, Timestamp: time.Now(), NodeID: vm.NodeID(), Message: msg})
+		return &VMOperationResponse{Success: false, ErrorMessage: msg, VM: vm}, err
+	}
+
+	oldNodeID := vm.NodeID()
+	vm.SetNodeID(targetNode)
+	vm.SetState(StateRunning)
+	m.emitEvent(VMEvent{Type: VMEventMigrated, VM: *vm, Timestamp: time.Now(), NodeID: targetNode,
+		Message: fmt.Sprintf("VM block-migrated from node %s to %s", oldNodeID, targetNode)})
+	log.Printf("Block-migrated VM %s from node %s to %s", vm.ID(), oldNodeID, targetNode)
+	return &VMOperationResponse{Success: true, VM: vm, Data: map[string]string{
+		"source_node": oldNodeID, "target_node": targetNode, "migration_type": "block"}}, nil
+}
+
+// requestIncomingBlockMigration POSTs a block IncomingMigrationRequest and returns
+// the destination's RAM port and the nbd:// URI to drive-mirror the disk into.
+func requestIncomingBlockMigration(ctx context.Context, addr string, req IncomingMigrationRequest) (int, string, error) {
+	body, _ := json.Marshal(req)
+	url := "http://" + addr + "/internal/migrate/incoming"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return 0, "", err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if secret := os.Getenv("NOVACRON_MIGRATION_SECRET"); secret != "" {
+		httpReq.Header.Set("X-Migration-Secret", secret)
+	}
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return 0, "", fmt.Errorf("incoming block RPC to %s: %w", addr, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return 0, "", fmt.Errorf("incoming block RPC %s: %s: %s", addr, resp.Status, strings.TrimSpace(string(b)))
+	}
+	var out IncomingMigrationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, "", fmt.Errorf("decode incoming block RPC response: %w", err)
+	}
+	if out.Port <= 0 || out.NBDURI == "" {
+		return 0, "", fmt.Errorf("incoming block RPC returned no port/nbd uri")
+	}
+	return out.Port, out.NBDURI, nil
 }
 
 // Public API methods for external calls

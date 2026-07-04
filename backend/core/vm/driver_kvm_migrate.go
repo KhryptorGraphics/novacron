@@ -317,25 +317,9 @@ func (q *qmpConn) pollMigration(ctx context.Context) (downtimeMs, totalMs int64,
 // NBD target). This is the modern `virsh migrate --copy-storage-all` equivalent;
 // the legacy `migrate -b` capability (deprecated 8.2, removed 9.1) is not used.
 
-// StartMigrationSourceBlock starts an already-created VM in block-migration mode
-// (named -blockdev "migdisk" so its disk can be drive-mirror'd to a destination
-// that has its OWN disk). Unlike StartMigrationSource it does not share storage.
-func (d *KVMDriverEnhanced) StartMigrationSourceBlock(ctx context.Context, vmID string) error {
-	d.vmLock.Lock()
-	defer d.vmLock.Unlock()
-
-	vmInfo, ok := d.vms[vmID]
-	if !ok {
-		return fmt.Errorf("VM %s not found", vmID)
-	}
-	if vmInfo.State == StateRunning {
-		return fmt.Errorf("VM %s is already running", vmID)
-	}
-	vmInfo.BlockMigrate = true
-	vmInfo.VNCPort = freeVNCPort()
-	log.Printf("Starting KVM block-migration source %s (own disk, drive-mirror)", vmID)
-	return d.launchVM(vmID, vmInfo)
-}
+// The primary disk is a named -blockdev ("migdisk") for EVERY VM, so any running
+// VM can be drive-mirror'd without relaunch (block migration = host evacuation of
+// arbitrary VMs); no special source-launch mode is needed.
 
 // StartIncomingBlock launches a block-migration destination: it creates its OWN
 // empty qcow2 of virtualSizeBytes (must equal the source disk's virtual size),
@@ -367,7 +351,6 @@ func (d *KVMDriverEnhanced) StartIncomingBlock(ctx context.Context, destID, dest
 		MonitorPath:  filepath.Join(destDir, "monitor.sock"),
 		VNCPort:      freeVNCPort(),
 		RuntimeDir:   destDir,
-		BlockMigrate: true,
 		IncomingURI:  incomingURI,
 	}
 	d.vms[destID] = dest
@@ -500,6 +483,40 @@ func (d *KVMDriverEnhanced) FinishIncomingBlock(ctx context.Context, destID stri
 		log.Printf("block-migration dest %s: nbd-server-stop warning: %v", destID, err)
 	}
 	return nil
+}
+
+// AwaitFinishIncomingBlock tears down the dest's NBD export once the source has
+// finished. Cross-node, the dest cannot observe the source's async
+// block-job-cancel, so it retries block-export-del (which fails "in use" until
+// the source's mirror client disconnects) until it succeeds or the timeout
+// elapses, then stops the NBD server. Meant to run in a goroutine on the dest
+// after StartIncomingBlock returns.
+func (d *KVMDriverEnhanced) AwaitFinishIncomingBlock(destID string, timeout time.Duration) {
+	d.vmLock.RLock()
+	dest, ok := d.vms[destID]
+	d.vmLock.RUnlock()
+	if !ok {
+		return
+	}
+	qmpSock := filepath.Join(d.runtimeDir(dest), "qmp.sock")
+	deadline := time.Now().Add(timeout)
+	for {
+		if q, err := qmpDial(qmpSock, 5*time.Second); err == nil {
+			_, delErr := q.execute("block-export-del", map[string]interface{}{"id": "exp0"})
+			if delErr == nil {
+				_, _ = q.execute("nbd-server-stop", nil)
+				q.Close()
+				log.Printf("block-migration dest %s: NBD export torn down", destID)
+				return
+			}
+			q.Close()
+		}
+		if time.Now().After(deadline) {
+			log.Printf("block-migration dest %s: NBD export teardown timed out", destID)
+			return
+		}
+		time.Sleep(2 * time.Second)
+	}
 }
 
 // nbdExportDisk starts the QEMU NBD server on the dest QMP socket and exports the

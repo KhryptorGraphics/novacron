@@ -75,8 +75,8 @@ func TestBlockMigrationLocalhostCutover(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create source VM: %v", err)
 	}
-	if err := d.StartMigrationSourceBlock(ctx, srcID); err != nil {
-		t.Fatalf("start block-migration source: %v", err)
+	if err := d.Start(ctx, srcID); err != nil { // normal start -- block migration must work on an ordinary VM
+		t.Fatalf("start source: %v", err)
 	}
 	srcPID := d.vms[srcID].PID
 	srcDisk := d.vms[srcID].DiskPath
