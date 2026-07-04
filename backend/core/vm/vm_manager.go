@@ -1046,6 +1046,31 @@ func (m *VMManager) migrationPeerAddr(nodeID string) string {
 	return m.migrationPeers[nodeID]
 }
 
+// MigrationPeers returns a copy of the configured peer node -> address map, so a
+// cluster coordinator can fan out to every node for capacity/placement.
+func (m *VMManager) MigrationPeers() map[string]string {
+	m.migrationPeersMu.RLock()
+	defer m.migrationPeersMu.RUnlock()
+	out := make(map[string]string, len(m.migrationPeers))
+	for k, v := range m.migrationPeers {
+		out[k] = v
+	}
+	return out
+}
+
+// ClusterUsage reports this node's live VM resource reservation and count, for
+// cluster capacity aggregation and best-fit placement.
+func (m *VMManager) ClusterUsage() (allocatedCPU int, allocatedMemoryMB int64, vmCount int) {
+	m.resourceMutex.RLock()
+	allocatedCPU = m.allocatedCPU
+	allocatedMemoryMB = m.allocatedMemoryMB
+	m.resourceMutex.RUnlock()
+	m.vmsMutex.RLock()
+	vmCount = len(m.vms)
+	m.vmsMutex.RUnlock()
+	return
+}
+
 // RegisterSchedulerNode registers or updates a scheduler node for local admission control.
 func (m *VMManager) RegisterSchedulerNode(nodeInfo *NodeResourceInfo) error {
 	if nodeInfo == nil {

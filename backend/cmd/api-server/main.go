@@ -132,15 +132,19 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	apiRouter.Use(requireAuth(authManager))
-	registerSecureAPIRoutes(apiRouter, db, vmManager)
+	registerSecureAPIRoutes(apiRouter, db, vmManager, vmBasePath(cfg))
 
 	apiV1Router := router.PathPrefix("/api/v1").Subrouter()
 	apiV1Router.Use(requireAuth(authManager))
-	registerSecureAPIRoutes(apiV1Router, db, vmManager)
+	registerSecureAPIRoutes(apiV1Router, db, vmManager, vmBasePath(cfg))
 
 	// Node-to-node migration RPC: intentionally OFF the JWT router (the peer is a
 	// node, not a user). Gated by an optional shared secret; see the handler.
 	registerInternalMigrationRoutes(router, db, vmManager, vmBasePath(cfg))
+
+	// Cross-node cluster: aggregate inventory (/api/cluster) + placement/dispatch
+	// RPCs (/internal/cluster/capacity, /internal/vms/create).
+	registerClusterRoutes(router, apiRouter, db, vmManager, vmBasePath(cfg))
 
 	registerCanonicalSecurityRoutes(router, authManager, services.securityHandlers)
 	registerCanonicalAdminRoutes(router, authManager, db)
@@ -564,7 +568,7 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 	}).Methods(http.MethodPost)
 }
 
-func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager) {
+func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager, storagePath string) {
 	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
 		rows, err := db.Query(`SELECT id, name, state, node_id, tenant_id, created_at, updated_at FROM vms ORDER BY created_at DESC`)
 		if err != nil {
@@ -601,96 +605,10 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 		writeJSON(w, http.StatusOK, vms)
 	}).Methods(http.MethodGet)
 
-	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
-		var createReq struct {
-			Name       string                 `json:"name"`
-			NodeID     string                 `json:"node_id"`
-			Tags       map[string]interface{} `json:"tags,omitempty"`
-			CPUShares  int                    `json:"cpu_shares,omitempty"`
-			MemoryMB   int                    `json:"memory_mb,omitempty"`
-			DiskSizeGB int                    `json:"disk_size_gb,omitempty"`
-			Image      string                 `json:"image,omitempty"`
-		}
-
-		if err := json.NewDecoder(r.Body).Decode(&createReq); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid request body")
-			return
-		}
-		if strings.TrimSpace(createReq.Name) == "" {
-			writeJSONError(w, http.StatusBadRequest, "name is required")
-			return
-		}
-
-		vmID := fmt.Sprintf("vm-%d", time.Now().UnixNano())
-		userID, _ := strconv.Atoi(fmt.Sprintf("%v", r.Context().Value("user_id")))
-		tenantID, _ := r.Context().Value("tenant_id").(string)
-		if tenantID == "" {
-			tenantID = "default"
-		}
-
-		// Runtime: actually create the VM (qemu-img + qemu on start) via the
-		// manager. Manager/driver own runtime state; the DB row owns metadata.
-		state := "created"
-		if vmManager != nil {
-			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-			defer cancel()
-			ownerID := ""
-			if userID > 0 {
-				ownerID = strconv.Itoa(userID)
-			}
-			if _, err := vmManager.CreateVM(ctx, core_vm.CreateVMRequest{
-				Name:                  createReq.Name,
-				AllowMissingOwnership: true, // DB owner_id column is the ownership source of truth
-				Spec: core_vm.VMConfig{
-					ID:         vmID,
-					Name:       createReq.Name,
-					Type:       core_vm.VMTypeKVM,
-					CPUShares:  createReq.CPUShares,
-					MemoryMB:   createReq.MemoryMB,
-					DiskSizeGB: createReq.DiskSizeGB,
-					Image:      createReq.Image,
-					OwnerID:    ownerID,
-					TenantID:   tenantID,
-				},
-			}); err != nil {
-				writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create VM: %v", err))
-				return
-			}
-			state = liveVMState(vmManager, vmID, state)
-		}
-
-		configPayload, _ := json.Marshal(map[string]interface{}{
-			"cpu_shares":   createReq.CPUShares,
-			"memory_mb":    createReq.MemoryMB,
-			"disk_size_gb": createReq.DiskSizeGB,
-			"image":        createReq.Image,
-			"tags":         createReq.Tags,
-		})
-
-		_, err := db.Exec(`
-			INSERT INTO vms (id, name, state, node_id, owner_id, tenant_id, config, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-		`, vmID, createReq.Name, state, nullableStringValue(createReq.NodeID), nullableIntValue(userID), tenantID, configPayload)
-		if err != nil {
-			// Roll back the runtime VM so we don't leak an untracked qemu/disk.
-			if vmManager != nil {
-				_ = vmManager.DeleteVM(context.Background(), vmID)
-			}
-			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create VM: %v", err))
-			return
-		}
-
-		writeJSON(w, http.StatusCreated, map[string]interface{}{
-			"id":         vmID,
-			"name":       createReq.Name,
-			"state":      state,
-			"status":     state,
-			"node_id":    createReq.NodeID,
-			"tenant_id":  tenantID,
-			"created_at": time.Now().UTC().Format(time.RFC3339),
-			"updated_at": time.Now().UTC().Format(time.RFC3339),
-		})
-	}).Methods(http.MethodPost)
+	// Cross-node cluster placement (see cluster.go): node_id ""/"auto"/"cluster"
+	// best-fits across all nodes and dispatches to the chosen one; an explicit peer
+	// id dispatches there; this node's own id or an unknown label creates locally.
+	router.HandleFunc("/vms", clusteredCreateHandler(db, vmManager, storagePath)).Methods(http.MethodPost)
 
 	router.HandleFunc("/vms/{id}", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["id"]
