@@ -2,6 +2,8 @@ package vm
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 )
 
@@ -101,6 +103,23 @@ func (r CreateVMRequest) Normalized() CreateVMRequest {
 }
 
 // Validate checks whether a create request conforms to the canonical VM contract.
+// Resource ceilings guard against disk/memory exhaustion from a single create
+// request. Env-overridable (a positive integer); unset/invalid -> the default.
+// ponytail: read per-call, not cached — Validate isn't hot.
+const maxVMNameLen = 128
+
+func maxDiskSizeGB() int { return envPositiveIntOrDefault("NOVACRON_MAX_DISK_GB", 2048) }      // 2 TB
+func maxMemoryMB() int   { return envPositiveIntOrDefault("NOVACRON_MAX_MEMORY_MB", 1048576) } // 1 TB
+
+func envPositiveIntOrDefault(key string, def int) int {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
+}
+
 func (r CreateVMRequest) Validate() error {
 	name := strings.TrimSpace(r.Name)
 	if name == "" {
@@ -128,6 +147,23 @@ func (r CreateVMRequest) Validate() error {
 	}
 	if r.Spec.DiskSizeGB < 0 {
 		return fmt.Errorf("disk_size_gb cannot be negative")
+	}
+	// Upper ceilings (0 stays valid — the driver treats it as "use default").
+	if r.Spec.DiskSizeGB > maxDiskSizeGB() {
+		return fmt.Errorf("disk_size_gb %d exceeds the maximum of %d", r.Spec.DiskSizeGB, maxDiskSizeGB())
+	}
+	if r.Spec.MemoryMB > maxMemoryMB() {
+		return fmt.Errorf("memory_mb %d exceeds the maximum of %d", r.Spec.MemoryMB, maxMemoryMB())
+	}
+	// Name length + no control characters (defense-in-depth: the name reaches
+	// the DB/logs/tags, though not qemu args or paths since the id is generated).
+	if len(name) > maxVMNameLen {
+		return fmt.Errorf("vm name too long (max %d characters)", maxVMNameLen)
+	}
+	for _, ch := range name {
+		if ch < 0x20 || ch == 0x7f {
+			return fmt.Errorf("vm name contains control characters")
+		}
 	}
 
 	seenVolumeIDs := make(map[string]struct{}, len(r.Spec.VolumeAttachments))

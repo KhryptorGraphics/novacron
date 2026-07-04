@@ -268,6 +268,16 @@ func (d *KVMDriverEnhanced) Create(ctx context.Context, config VMConfig) (string
 		return "", fmt.Errorf("failed to create VM directory: %w", err)
 	}
 
+	// Roll back the freshly-created VM dir on any failure before the VM is
+	// registered in d.vms, so a partial create (disk-image or config-save
+	// failure) leaves no orphaned STORAGE_PATH/vms/<id>/ with no manager entry.
+	created := false
+	defer func() {
+		if !created {
+			os.RemoveAll(vmDir)
+		}
+	}()
+
 	// Create disk image
 	diskPath := filepath.Join(vmDir, "disk.qcow2")
 	if err := d.createDiskImage(ctx, config, diskPath); err != nil {
@@ -292,6 +302,7 @@ func (d *KVMDriverEnhanced) Create(ctx context.Context, config VMConfig) (string
 	}
 
 	d.vms[vmID] = vmInfo
+	created = true
 
 	log.Printf("Created KVM VM %s with disk %s", vmID, diskPath)
 	return vmID, nil
