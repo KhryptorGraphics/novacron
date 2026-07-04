@@ -114,6 +114,12 @@ func TestBlockMigrationLocalhostCutover(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start block-migration dest: %v", err)
 	}
+	// The dest must persist config.json, else a dest-node restart cannot re-adopt
+	// the migrated VM into the manager and its qemu is orphaned. Guards the
+	// saveVMConfig call in the incoming path from being silently dropped.
+	if _, statErr := os.Stat(filepath.Join(destDir, "config.json")); statErr != nil {
+		t.Fatalf("dest config.json not persisted -- migrated VM would not re-adopt on a dest restart: %v", statErr)
+	}
 	destPID := d.vms[destID].PID // capture before Stop zeroes it
 
 	downtimeMs, totalMs, err := d.migrateBlockWithStats(ctx, srcID, ramURI, nbdURI)
