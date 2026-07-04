@@ -5,6 +5,7 @@ package routing
 import (
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"net"
 	"sync"
@@ -919,7 +920,7 @@ func (igr *IntelligentGlobalRouter) updateDDoSProtection() {
 	}
 
 	// Reset rate limit windows
-	for ip, rateLimit := range igr.dDoSProtector.rateLimits {
+	for _, rateLimit := range igr.dDoSProtector.rateLimits {
 		if now.Sub(rateLimit.WindowStart) > rateLimit.WindowDuration {
 			rateLimit.WindowStart = now
 			rateLimit.RequestCount = 0
