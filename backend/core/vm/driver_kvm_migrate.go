@@ -500,7 +500,37 @@ func (d *KVMDriverEnhanced) AwaitFinishIncomingBlock(destID string, timeout time
 	}
 	qmpSock := filepath.Join(d.runtimeDir(dest), "qmp.sock")
 	deadline := time.Now().Add(timeout)
-	for {
+
+	// 1. WAIT for the incoming migration to complete on this dest (it resumes:
+	// query-status inmigrate -> running). Deleting the export before this would
+	// kill the source's in-flight drive-mirror -- the export only reports "in use"
+	// while a client is attached, so a premature delete silently succeeds and
+	// leaves the source mirroring into a dead target.
+	resumed := false
+	for time.Now().Before(deadline) {
+		if q, err := qmpDial(qmpSock, 5*time.Second); err == nil {
+			raw, e := q.execute("query-status", nil)
+			q.Close()
+			if e == nil {
+				var st struct {
+					Status string `json:"status"`
+				}
+				if json.Unmarshal(raw, &st) == nil && st.Status == "running" {
+					resumed = true
+					break
+				}
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !resumed {
+		log.Printf("block-migration dest %s: never resumed; leaving NBD export up", destID)
+		return
+	}
+
+	// 2. Now retry block-export-del until the source's async block-job-cancel
+	// disconnects its NBD client (fails "in use" until then), then stop the server.
+	for time.Now().Before(deadline) {
 		if q, err := qmpDial(qmpSock, 5*time.Second); err == nil {
 			_, delErr := q.execute("block-export-del", map[string]interface{}{"id": "exp0"})
 			if delErr == nil {
@@ -511,12 +541,9 @@ func (d *KVMDriverEnhanced) AwaitFinishIncomingBlock(destID string, timeout time
 			}
 			q.Close()
 		}
-		if time.Now().After(deadline) {
-			log.Printf("block-migration dest %s: NBD export teardown timed out", destID)
-			return
-		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(1 * time.Second)
 	}
+	log.Printf("block-migration dest %s: NBD export teardown timed out", destID)
 }
 
 // nbdExportDisk starts the QEMU NBD server on the dest QMP socket and exports the

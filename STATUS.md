@@ -52,9 +52,19 @@ which overstate completion and should not be trusted.
   at the driver level on **both x86 KVM and arm64 TCG**: a cirros guest writes a
   sentinel to its disk, block-migrates to a dest with **separate** storage, and
   the sentinel plus a live (no-reboot) counter cutover land on the dest's own disk
-  (~190 ms downtime). Remaining: wire it into the cross-node HTTP path (the
-  `/internal/migrate/incoming` RPC + `migrateVM`) for a true two-node cluster;
-  multi-node peer-address discovery (arrives with federation, Phase 3).
+  (~190 ms downtime). **Block migration is now also wired through the cross-node
+  HTTP path and proven on a real two-node x86 KVM microcluster** (two api-server
+  processes, separate Postgres DBs + storage): `POST /api/vms/{id}/migrate
+  {migration_type:"block", target_addr}` → source resolves the target, the dest
+  RPC stands up an own-disk + NBD export, the source drive-mirrors + RAM-cuts-over.
+  Observed: source qemu exits, the dest runs the **same** guest (its cirros
+  metadata-retry counter advances 5→6 across the cutover with **0 boot markers** on
+  the dest console — no reboot), the dest disk is populated on the dest's own
+  storage, downtime 333 ms, and the dest's NBD export tears down cleanly only after
+  the incoming migration resumes (fixing a teardown race). Remaining: multi-node
+  peer-address discovery so `target_addr` isn't needed (arrives with federation,
+  Phase 3); the sync migrate endpoint needs `WRITE_TIMEOUT` raised (default 15 s is
+  shorter than a migration) or an async job API.
 - **Federation cross-region data plane** — build repaired; a REAL Raft-backed
   replication mechanism now exists and is **proven by test** (two instances, one
   Raft group: a write on the leader is applied on the follower via the committed
