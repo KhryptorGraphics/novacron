@@ -14,6 +14,13 @@ which overstate completion and should not be trusted.
   through the HTTP API; x86 selection is unit-tested (live boot via CI matrix).
   Persisted state is the driver's actual state; running VMs are re-adopted into
   the manager after an api-server restart.
+- **Canonical-path hardening (Phase 4)** — the api-server has panic-recovery
+  middleware (clean 500 + one centralized log line; `net/http` already prevents
+  the crash), a request-body-size cap (`http.MaxBytesReader`, env-tunable), and a
+  64 KiB header limit. VM creation rolls back atomically — a failed `Create`
+  leaves no orphaned disk dir or manager entry — and bounds its inputs
+  (`DiskSizeGB`/`MemoryMB` ceilings, name length/charset). All covered by
+  discrimination-proven tests (each bar fails when its fix is removed).
 - **Auth** — JWT (RS256/HS256), TOTP 2FA, OAuth2, RBAC, tenants, Postgres-backed,
   plus GitHub OAuth cluster admission.
 - **Consensus** — Raft leader election + log replication, split-brain detection,
