@@ -63,8 +63,9 @@ which overstate completion and should not be trusted.
   storage, downtime 333 ms, and the dest's NBD export tears down cleanly only after
   the incoming migration resumes (fixing a teardown race). Remaining: multi-node
   peer-address discovery so `target_addr` isn't needed (arrives with federation,
-  Phase 3); the sync migrate endpoint needs `WRITE_TIMEOUT` raised (default 15 s is
-  shorter than a migration) or an async job API.
+  Phase 3); and, only for *large/slow* migrations, the synchronous migrate endpoint
+  can outlast the default 15 s `WRITE_TIMEOUT` (this fast run at 1.07 s did not) —
+  raise the env or move to an async job API.
 - **Federation cross-region data plane** — build repaired; a REAL Raft-backed
   replication mechanism now exists and is **proven by test** (two instances, one
   Raft group: a write on the leader is applied on the follower via the committed
