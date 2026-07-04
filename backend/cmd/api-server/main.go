@@ -84,7 +84,7 @@ func main() {
 
 	// GATE-1: reconcile persisted VM rows against actually-running qemu processes
 	// (pidfile rediscovery) so a restart reflects reality, not just stale rows.
-	reconcileVMState(db, vmBasePath(cfg))
+	reconcileVMState(db, vmBasePath(cfg), vmManager)
 
 	server := buildCanonicalServer(cfg, db, authManager, services, vmManager)
 
@@ -1227,11 +1227,11 @@ func registerVMPowerRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.VMM
 }
 
 // reconcileVMState corrects each persisted VM row to match whether its qemu
-// process is actually alive (via the driver's pidfile) after a restart.
-// ponytail: only genuine drift is corrected; driver re-adoption (so a
-// post-restart Stop can signal the rediscovered qemu) is deferred — the
-// manager's in-memory map starts empty each process.
-func reconcileVMState(db *sql.DB, vmBase string) {
+// process is actually alive (via the driver's pidfile) after a restart, and
+// re-registers every still-running VM with the manager (see adoptManagerVM) so
+// that a post-restart Stop/Delete reaches the re-adopted qemu instead of 404ing
+// on an empty in-memory map.
+func reconcileVMState(db *sql.DB, vmBase string, manager *core_vm.VMManager) {
 	rows, err := db.Query(`SELECT id, state FROM vms`)
 	if err != nil {
 		logger.Warn("VM reconcile skipped: query failed", "error", err)
@@ -1249,6 +1249,11 @@ func reconcileVMState(db *sql.DB, vmBase string) {
 
 	for _, rc := range recs {
 		alive := pidFileAlive(filepath.Join(vmBase, rc.id, "qemu.pid"))
+		if alive {
+			// Repopulate the manager so post-restart control ops (stop/delete)
+			// route to the driver that re-adopted this qemu instead of 404ing.
+			adoptManagerVM(manager, vmBase, rc.id)
+		}
 		var actual string
 		switch {
 		case alive && rc.state != "running":
@@ -1264,6 +1269,40 @@ func reconcileVMState(db *sql.DB, vmBase string) {
 		}
 		logger.Info("VM reconciled to actual qemu state", "vm", rc.id, "from", rc.state, "to", actual)
 	}
+}
+
+// adoptManagerVM rebuilds an in-memory VM object from its persisted config.json
+// and registers it (state Running) with the manager, so that after an
+// api-server restart a stop/delete call finds the VM and routes to the driver
+// that re-adopted its live qemu. Without this the manager's in-memory map is
+// empty on a fresh process and control ops 404 even though the qemu is alive.
+// No-op if the manager already knows the VM or the config cannot be rebuilt.
+func adoptManagerVM(manager *core_vm.VMManager, vmBase, id string) {
+	if manager == nil {
+		return
+	}
+	if _, err := manager.GetVM(id); err == nil {
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(vmBase, id, "config.json"))
+	if err != nil {
+		logger.Warn("VM re-adopt skipped: config unreadable", "vm", id, "error", err)
+		return
+	}
+	var cfg core_vm.VMConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		logger.Warn("VM re-adopt skipped: config unparseable", "vm", id, "error", err)
+		return
+	}
+	cfg.ID = id
+	vm, err := core_vm.NewVM(cfg)
+	if err != nil {
+		logger.Warn("VM re-adopt skipped: rebuild failed", "vm", id, "error", err)
+		return
+	}
+	vm.SetState(core_vm.StateRunning)
+	manager.AddVM(vm)
+	logger.Info("VM re-adopted into manager after restart", "vm", id)
 }
 
 // pidFileAlive reports whether the pid recorded in path is a live process.

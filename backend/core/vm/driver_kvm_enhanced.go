@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -99,6 +102,23 @@ func kvmAccessible() bool {
 	return true
 }
 
+// freeVNCPort probes for a free VNC port (display :N == 5900+N). qemu binds this
+// at Start; a taken port makes qemu exit while Start looks successful, so we
+// bind-test instead of the old `5900+len(vms)` guess (which collided with any
+// external VNC on :0). ponytail: tiny probe->bind TOCTOU race; acceptable for a
+// display port, revisit only if concurrent Starts contend.
+func freeVNCPort() int {
+	for port := 5900; port < 6000; port++ {
+		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err != nil {
+			continue
+		}
+		_ = ln.Close()
+		return port
+	}
+	return 5900 // fall back; qemu will surface the bind error
+}
+
 func newKVMDriverEnhanced(qemuPath, vmBasePath string) (VMDriver, error) {
 	if qemuPath == "" {
 		qemuPath = defaultQEMUBinary("")
@@ -124,11 +144,65 @@ func newKVMDriverEnhanced(qemuPath, vmBasePath string) (VMDriver, error) {
 		return nil, fmt.Errorf("failed to create VM base directory: %w", err)
 	}
 
-	return &KVMDriverEnhanced{
+	d := &KVMDriverEnhanced{
 		qemuBinaryPath: qemuPath,
 		vmBasePath:     vmBasePath,
 		vms:            make(map[string]*KVMVMInfo),
-	}, nil
+	}
+	// Re-adopt any qemu processes that outlived a previous driver instance
+	// (e.g. a server restart) so their in-memory state is not orphaned.
+	d.adoptRunningVMs()
+	return d, nil
+}
+
+// adoptRunningVMs repopulates d.vms from qemu processes that survived a restart
+// of this driver. For each VM directory under vmBasePath it reads qemu.pid and,
+// if that process is still alive, reconstructs a StateRunning KVMVMInfo so the
+// restarted driver manages the live qemu instead of losing track of it.
+// ponytail: called only from construction (single goroutine) so it takes no lock.
+// ponytail: adopted VMs get no monitorVM goroutine, so an adopted qemu that dies
+// on its own is only noticed on the next Stop/GetStatus — fine for restart re-sync.
+func (d *KVMDriverEnhanced) adoptRunningVMs() {
+	entries, err := os.ReadDir(d.vmBasePath)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		vmID := e.Name()
+		vmDir := filepath.Join(d.vmBasePath, vmID)
+
+		pidData, err := os.ReadFile(filepath.Join(vmDir, "qemu.pid"))
+		if err != nil {
+			continue // no pidfile: VM was never started or already cleaned up
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
+		if err != nil || pid <= 0 {
+			continue
+		}
+		if syscall.Kill(pid, 0) != nil {
+			continue // process is dead
+		}
+
+		proc, _ := os.FindProcess(pid) // never errors on Unix
+		vmInfo := &KVMVMInfo{
+			ID:          vmID,
+			Process:     proc,
+			PID:         pid,
+			State:       StateRunning,
+			DiskPath:    filepath.Join(vmDir, "disk.qcow2"),
+			ConfigPath:  filepath.Join(vmDir, "config.json"),
+			MonitorPath: filepath.Join(vmDir, "monitor.sock"),
+			StartTime:   time.Now(), // real start time is unknown; approximate
+		}
+		if data, err := os.ReadFile(vmInfo.ConfigPath); err == nil {
+			_ = json.Unmarshal(data, &vmInfo.Config)
+		}
+		d.vms[vmID] = vmInfo
+		log.Printf("Adopted running KVM VM %s (PID %d) on driver restart", vmID, pid)
+	}
 }
 
 // Create creates a new KVM VM
@@ -163,7 +237,7 @@ func (d *KVMDriverEnhanced) Create(ctx context.Context, config VMConfig) (string
 		DiskPath:    diskPath,
 		ConfigPath:  filepath.Join(vmDir, "config.json"),
 		MonitorPath: filepath.Join(vmDir, "monitor.sock"),
-		VNCPort:     5900 + len(d.vms), // Simple VNC port allocation
+		VNCPort:     freeVNCPort(), // probed free display; refreshed at Start
 		StartTime:   time.Now(),
 	}
 
@@ -193,6 +267,9 @@ func (d *KVMDriverEnhanced) Start(ctx context.Context, vmID string) error {
 	}
 
 	log.Printf("Starting KVM VM %s", vmID)
+
+	// Refresh the VNC display to a currently-free port right before qemu binds.
+	vmInfo.VNCPort = freeVNCPort()
 
 	// Build QEMU command
 	args := d.buildQEMUArgs(vmInfo)
@@ -464,8 +541,13 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 	if strings.Contains(d.qemuBinaryPath, "aarch64") {
 		machine = "virt"
 	}
-	// -cpu host only works under KVM; fall back to a generic model for TCG.
+	// -cpu host only works under KVM. Under TCG use a concrete model: on aarch64
+	// "max"/"cortex-a57" fault stock kernels here (Synchronous Exception at the
+	// EFI stub); cortex-a72 boots stock cloud images (verified with cirros).
 	accel, cpu := "tcg", "max"
+	if machine == "virt" {
+		cpu = "cortex-a72"
+	}
 	if kvmAccessible() {
 		accel, cpu = "kvm", "host"
 	}
@@ -473,9 +555,16 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 	if mem <= 0 {
 		mem = 128 // qemu rejects -m 0
 	}
+	// CPUShares is a scheduling weight (NewVM defaults it to 1024), not a vCPU
+	// count. Passing it verbatim yields e.g. -smp 1024, which qemu rejects
+	// ("max CPUs supported by machine 'virt' is 512") and the VM never boots.
+	// Clamp to the host's logical CPUs so a default create still starts.
+	// ponytail: host-core cap; add a real vCPU field to VMConfig if overcommit is ever needed.
 	cpus := vmInfo.Config.CPUShares
 	if cpus <= 0 {
 		cpus = 1 // qemu rejects -smp 0
+	} else if maxCPUs := runtime.NumCPU(); cpus > maxCPUs {
+		cpus = maxCPUs
 	}
 
 	// ponytail: no -daemonize — keeps qemu as a tracked child so cmd.Wait()
@@ -491,7 +580,19 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 		"-device", "virtio-net-pci,netdev=net0",
 		"-vnc", fmt.Sprintf(":%d", vmInfo.VNCPort-5900),
 		"-monitor", fmt.Sprintf("unix:%s,server,nowait", vmInfo.MonitorPath),
+		// Capture the guest serial console so boot is observable.
+		"-serial", "file:" + filepath.Join(filepath.Dir(vmInfo.DiskPath), "console.log"),
 		"-pidfile", filepath.Join(filepath.Dir(vmInfo.DiskPath), "qemu.pid"),
+	}
+
+	// aarch64 "virt" needs UEFI firmware (pflash) to boot a disk image.
+	if machine == "virt" {
+		if code, vars, ok := d.ensureUEFI(filepath.Dir(vmInfo.DiskPath)); ok {
+			args = append(args,
+				"-drive", "if=pflash,format=raw,unit=0,file="+code+",readonly=on",
+				"-drive", "if=pflash,format=raw,unit=1,file="+vars,
+			)
+		}
 	}
 
 	if vmInfo.Config.CloudInitISO != "" {
@@ -518,24 +619,27 @@ func (d *KVMDriverEnhanced) createDiskImage(ctx context.Context, config VMConfig
 	}
 
 	if baseImagePath != "" {
-		if _, err := os.Stat(baseImagePath); err != nil {
-			return fmt.Errorf("failed to access VM base image %s: %w", baseImagePath, err)
+		// Resolve http(s) image refs to a cached local file (fetched once).
+		resolved, err := d.resolveBootImage(ctx, baseImagePath)
+		if err != nil {
+			return err
 		}
+		baseImagePath = resolved
 
-		args := []string{
-			"create",
-			"-f", "qcow2",
-			"-F", "qcow2",
-			"-b", baseImagePath,
-			diskPath,
-		}
-		if config.DiskSizeGB > 0 {
-			args = append(args, fmt.Sprintf("%dG", config.DiskSizeGB))
-		}
-
-		createCmd := exec.CommandContext(ctx, "qemu-img", args...)
+		// Copy the base into a fresh qcow2 boot disk. convert handles any input
+		// format (raw or qcow2) and leaves no backing-file dependency.
+		// ponytail: full copy, not COW backing — fine for small cloud images;
+		// switch to `-b <base> -F <fmt>` if base images get large.
+		createCmd := exec.CommandContext(ctx, "qemu-img", "convert", "-O", "qcow2", baseImagePath, diskPath)
 		if output, err := createCmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("failed to create disk image from base image: %w, output: %s", err, string(output))
+		}
+
+		if config.DiskSizeGB > 0 {
+			resizeCmd := exec.CommandContext(ctx, "qemu-img", "resize", diskPath, fmt.Sprintf("%dG", config.DiskSizeGB))
+			if output, err := resizeCmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("failed to resize boot disk: %w, output: %s", err, string(output))
+			}
 		}
 
 		return nil
@@ -558,6 +662,136 @@ func (d *KVMDriverEnhanced) createDiskImage(ctx context.Context, config VMConfig
 	}
 
 	return nil
+}
+
+// imageCacheDir is a writable sibling of the VM base dir holding fetched boot
+// images and the padded UEFI firmware.
+func (d *KVMDriverEnhanced) imageCacheDir() string {
+	return filepath.Join(filepath.Dir(d.vmBasePath), "images")
+}
+
+// resolveBootImage returns a local path for image. If image is an http(s) URL it
+// is downloaded once into the image cache and reused thereafter.
+func (d *KVMDriverEnhanced) resolveBootImage(ctx context.Context, image string) (string, error) {
+	if !strings.HasPrefix(image, "http://") && !strings.HasPrefix(image, "https://") {
+		return image, nil // local path
+	}
+	cacheDir := d.imageCacheDir()
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create image cache: %w", err)
+	}
+	dest := filepath.Join(cacheDir, filepath.Base(image))
+	if fi, err := os.Stat(dest); err == nil && fi.Size() > 0 {
+		return dest, nil // cache hit
+	}
+	if err := downloadFile(ctx, image, dest); err != nil {
+		return "", fmt.Errorf("failed to fetch boot image %s: %w", image, err)
+	}
+	log.Printf("Fetched boot image %s -> %s", image, dest)
+	return dest, nil
+}
+
+func downloadFile(ctx context.Context, url, dest string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status %s", resp.Status)
+	}
+	tmp := dest + ".part"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, dest)
+}
+
+// aarch64 "virt" pflash banks are 64 MiB each; firmware must be padded to fit.
+const uefiFlashSize = 64 * 1024 * 1024
+
+// edk2CodePaths are the common locations of the aarch64 UEFI code image.
+var edk2CodePaths = []string{
+	"/usr/share/qemu-efi-aarch64/QEMU_EFI.fd",
+	"/usr/share/AAVMF/AAVMF_CODE.fd",
+	"/usr/share/edk2/aarch64/QEMU_EFI.fd",
+	"/usr/share/edk2/aarch64/QEMU_EFI-silent.fd",
+}
+
+// ensureUEFI returns readonly CODE and per-VM writable VARS pflash images for an
+// aarch64 guest. ok=false (firmware absent) means the caller should skip pflash;
+// the VM still spawns but won't UEFI-boot.
+func (d *KVMDriverEnhanced) ensureUEFI(vmDir string) (code, vars string, ok bool) {
+	var src string
+	for _, p := range edk2CodePaths {
+		if _, err := os.Stat(p); err == nil {
+			src = p
+			break
+		}
+	}
+	if src == "" {
+		return "", "", false
+	}
+
+	cacheDir := d.imageCacheDir()
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return "", "", false
+	}
+	code = filepath.Join(cacheDir, "edk2-aarch64-code-64m.fd")
+	if fi, err := os.Stat(code); err != nil || fi.Size() != uefiFlashSize {
+		if err := padFileTo(src, code, uefiFlashSize); err != nil {
+			log.Printf("UEFI code pad failed: %v", err)
+			return "", "", false
+		}
+	}
+
+	vars = filepath.Join(vmDir, "efivars.fd")
+	if fi, err := os.Stat(vars); err != nil || fi.Size() != uefiFlashSize {
+		f, err := os.Create(vars)
+		if err != nil {
+			return "", "", false
+		}
+		if err := f.Truncate(uefiFlashSize); err != nil {
+			f.Close()
+			return "", "", false
+		}
+		f.Close()
+	}
+	return code, vars, true
+}
+
+// padFileTo copies src to dst and zero-pads it to size bytes.
+func padFileTo(src, dst string, size int64) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if int64(len(data)) > size {
+		return fmt.Errorf("firmware %s (%d bytes) larger than flash size %d", src, len(data), size)
+	}
+	tmp := dst + ".part"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	if err := os.Truncate(tmp, size); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, dst)
 }
 
 func (d *KVMDriverEnhanced) saveVMConfig(vmInfo *KVMVMInfo) error {

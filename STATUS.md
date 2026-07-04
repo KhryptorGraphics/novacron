@@ -8,8 +8,12 @@ which overstate completion and should not be trusted.
 
 ## Works (verified real)
 
-- **Single-node VM lifecycle via KVM** — QEMU-process driver: create / start /
-  stop / delete / snapshot.
+- **Single-node VM lifecycle via KVM through the canonical api-server** —
+  create / start / stop / delete drive a real, arch-aware QEMU driver (not fake
+  DB writes). arm64 verified end-to-end: a cirros guest boots to a login prompt
+  through the HTTP API; x86 selection is unit-tested (live boot via CI matrix).
+  Persisted state is the driver's actual state; running VMs are re-adopted into
+  the manager after an api-server restart.
 - **Auth** — JWT (RS256/HS256), TOTP 2FA, OAuth2, RBAC, tenants, Postgres-backed,
   plus GitHub OAuth cluster admission.
 - **Consensus** — Raft leader election + log replication, split-brain detection,
