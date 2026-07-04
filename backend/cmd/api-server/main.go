@@ -116,6 +116,12 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	router := mux.NewRouter()
 	router.StrictSlash(true)
 
+	// Cross-cutting hardening applied on the root router (gorilla/mux propagates
+	// parent middleware to subrouter routes, parent-outermost): recover panics
+	// into a clean 500 first, then cap request-body size. Auth/RBAC live on the
+	// /api subrouters and run inside these.
+	router.Use(recoverMiddleware, maxBodyBytesMiddleware(maxBodyBytes()))
+
 	corsHandler := buildCORSHandler(cfg)
 
 	registerPublicRoutes(router, authManager, db, services.twoFactorService)
@@ -149,6 +155,10 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 		IdleTimeout:  cfg.Server.IdleTimeout,
+		// 64 KiB: a real 16x reduction from net/http's 1 MiB default (used when 0),
+		// comfortably above any legit JWT+cookie header set; caps slowloris-style
+		// header floods.
+		MaxHeaderBytes: 64 << 10,
 	}
 }
 
