@@ -47,6 +47,7 @@ jobs:
           ./backend/api/graphql
           ./backend/api/security
           ./backend/api/websocket
+          ./backend/pkg/config
 
       # backend/core is a separate Go module, so it needs its own step with a
       # working-directory rather than being appended to the go test line above.
