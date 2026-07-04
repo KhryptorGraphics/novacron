@@ -102,6 +102,35 @@ which overstate completion and should not be trusted.
   EC2/VPC/S3, not cost/monitoring/quotas.
 - **Advanced VM ops** (hot-plug, CPU pinning, NUMA) — not implemented.
 
+## vm sub-package compile gap — quarantined 2026-07-04
+
+Four `backend/core/vm` sub-packages did not compile and were **off the canonical
+production path** (no `api-server`/`core-server`/root-`vm` import; the only
+non-test cross-import was `vm/unified/scheduler.go` → `vm/kata`). They were
+experimental/moonshot code drifting against upstream bindings:
+
+- `vm/drivers/kvm/libvirt_driver.go` — `undefined: libvirt.Connect` etc. (libvirt Go binding missing/mismatched).
+- `vm/kata/driver.go` — `undefined: syscall` (missing import), containerd `ExitStatus` API drift, `VMMetrics` field drift.
+- `vm/unified/scheduler.go` — imports the broken `vm/kata`.
+- `vm/tests/{delta_sync_benchmark,delta_sync_integration,ebpf_migration}_test.go` — bad import path (`novacron/backend/core/vm is not in std`); eBPF page-tracker benchmarks.
+
+Files renamed to `.go.disabled`, matching the repo's existing ~30-file quarantine
+convention in `vm/` (e.g. `driver_kvm_old.go.disabled`, `driver_kata_containers.go.disabled`).
+`ponytail:` ceiling: re-enable only after porting to the current libvirt/containerd
+API and verifying the package compiles in isolation. `ebpf_programs/` (`.bpf.c` +
+`Makefile`) is not a Go package and is left as-is.
+
+Pre-existing, **separate** from the quarantine: the root `vm` package's
+container-driver integration tests (`TestDockerIntegration`,
+`TestContainerdIntegration`, `TestMultiHypervisorIntegration`,
+`TestVMDriverIntegration` in `container_integration_test.go` /
+`vm_driver_integration_test.go`) fail at runtime against the real containerd
+client (e.g. `container_integration_test.go:349` empty network ID, `:570`
+invalid-image not erroring). These fail identically on `72afc2f7` before the
+quarantine and are container-driver experimental-surface bugs, not compile gaps
+and not caused by the quarantine. Tracked as a follow-up, not a release blocker
+(container drivers are dev-environment only per CLAUDE.md).
+
 ## Known-broken / out of scope
 
 The `backend/core` module also contains ~105 experimental "moonshot" packages
