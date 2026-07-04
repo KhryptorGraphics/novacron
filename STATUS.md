@@ -32,9 +32,28 @@ which overstate completion and should not be trusted.
   guest cutover, ~10–24 ms downtime, **0 boot markers on the destination console**).
   Remaining: block migration for non-shared storage; multi-node peer-address
   discovery (arrives with federation, Phase 3).
-- **Federation cross-region data plane** — simulated (Phase 3).
-- **Multicloud abstraction** — partially stubbed; real AWS SDK integration exists
-  but is not wired behind the common interface (Phase 3).
+- **Federation cross-region data plane** — build repaired; a REAL Raft-backed
+  replication mechanism now exists and is **proven by test** (two instances, one
+  Raft group: a write on the leader is applied on the follower via the committed
+  Raft entry and read back; the follower rejects direct writes, so the value
+  arrives solely via Raft). Honest scope: asynchronous replication over one local
+  Raft group — NOT linearizable, NOT true geo-distribution. **Not yet wired into
+  live federation:** nothing constructs `GeoDistributedState` (zero callers), and
+  the federation root is off the canonical build path (behind
+  `//go:build novacron_multicloud`) and does not build on arm64 (an `onnxruntime`
+  transitive pull via `cross_cluster_components_v3.go`). Mechanism proven;
+  live integration deferred (a strategic decision — federation is not on the
+  canonical run path).
+- **Multicloud abstraction** — build repaired: `backend/core/multicloud` now
+  compiles for the first time (a committed syntax error had kept it from *ever*
+  building). Off the canonical path (behind `//go:build novacron_multicloud`).
+  The subsystem holds 3–4 **redundant, mostly-hollow** cloud designs;
+  `abstraction/aws_provider.go` has ~21 real `aws-sdk-go-v2` methods but 22
+  `not implemented` stubs, and `GetQuotas`/`GetUsage` return fabricated/empty
+  data (latent lies, flagged not yet fixed). Needs a **consolidation decision**
+  (which design survives) before any implementation; the honest verification
+  ceiling on this box is low — no cloud credentials, and LocalStack covers only
+  EC2/VPC/S3, not cost/monitoring/quotas.
 - **Advanced VM ops** (hot-plug, CPU pinning, NUMA) — not implemented.
 
 ## Known-broken / out of scope
