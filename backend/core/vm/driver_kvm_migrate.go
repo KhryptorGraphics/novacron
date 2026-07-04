@@ -109,6 +109,11 @@ func (d *KVMDriverEnhanced) StartIncomingWithDisk(ctx context.Context, destID, d
 		IncomingURI:  incomingURI,
 	}
 	d.vms[destID] = dest
+	// Persist config.json so a dest-node restart can re-adopt this migrated VM
+	// into the manager (adoptManagerVM reads it); else the qemu would be orphaned.
+	if err := d.saveVMConfig(dest); err != nil {
+		log.Printf("migration dest %s: could not persist config (won't re-adopt on restart): %v", destID, err)
+	}
 
 	log.Printf("Starting KVM migration dest %s <- incoming %s (disk %s)", destID, incomingURI, dest.DiskPath)
 	if err := d.launchVM(destID, dest); err != nil {
@@ -354,6 +359,11 @@ func (d *KVMDriverEnhanced) StartIncomingBlock(ctx context.Context, destID, dest
 		IncomingURI:  incomingURI,
 	}
 	d.vms[destID] = dest
+	// Persist config.json so a dest-node restart can re-adopt this migrated VM into
+	// the manager (adoptManagerVM reads it); without it the qemu would be orphaned.
+	if err := d.saveVMConfig(dest); err != nil {
+		log.Printf("block-migration dest %s: could not persist config (won't re-adopt on restart): %v", destID, err)
+	}
 
 	log.Printf("Starting KVM block-migration dest %s <- incoming %s (own disk %s)", destID, incomingURI, destDisk)
 	if err := d.launchVM(destID, dest); err != nil {

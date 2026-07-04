@@ -1293,7 +1293,11 @@ func registerInternalMigrationRoutes(router *mux.Router, db *sql.DB, vmManager *
 			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("allocate migration port: %v", err))
 			return
 		}
-		destDir := filepath.Join(vmBase, req.VMID+"-incoming")
+		// Canonical <vmBase>/<id> dir (NOT <id>-incoming): the source is on another
+		// node/vmBase, so there is no collision, and reconcile/adoptManagerVM/driver
+		// adoption all key off <id> -- an -incoming suffix would orphan the migrated
+		// qemu on a dest restart (reconcile looks in <id> and marks it stopped).
+		destDir := filepath.Join(vmBase, req.VMID)
 		uri := fmt.Sprintf("tcp:0.0.0.0:%d", port)
 
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
