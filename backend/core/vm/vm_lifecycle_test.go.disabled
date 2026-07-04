@@ -171,7 +171,7 @@ func TestVMClone(t *testing.T) {
 	}
 
 	// Verify cloned config
-	clonedConfig := clonedVM.GetConfig()
+	clonedConfig := clonedVM.Config()
 	if clonedConfig.CPUShares != config.CPUShares {
 		t.Errorf("Expected cloned VM CPU shares %d, got %d", config.CPUShares, clonedConfig.CPUShares)
 	}
@@ -213,7 +213,7 @@ func TestVMResourceManagement(t *testing.T) {
 	}
 
 	// Verify updated limits
-	updatedConfig := vm.GetConfig()
+	updatedConfig := vm.Config()
 	if updatedConfig.CPUShares != 1024 {
 		t.Errorf("Expected CPU shares to be 1024, got %d", updatedConfig.CPUShares)
 	}
@@ -232,7 +232,7 @@ func TestVMResourceManagement(t *testing.T) {
 func TestVMManagerFixed(t *testing.T) {
 	// Create VM manager
 	config := DefaultVMManagerConfig()
-	manager, err := NewVMManagerFixed(config, "test-node-1")
+	manager, err := NewVMManager(config)
 	if err != nil {
 		t.Fatalf("Failed to create VM manager: %v", err)
 	}
@@ -331,7 +331,7 @@ func TestVMManagerFixed(t *testing.T) {
 
 func TestVMEvents(t *testing.T) {
 	config := DefaultVMManagerConfig()
-	manager, err := NewVMManagerFixed(config, "test-node-events")
+	manager, err := NewVMManager(config)
 	if err != nil {
 		t.Fatalf("Failed to create VM manager: %v", err)
 	}
@@ -378,8 +378,8 @@ func TestVMEvents(t *testing.T) {
 		if createEvent.Type != VMEventCreated {
 			t.Errorf("Expected first event to be %s, got %s", VMEventCreated, createEvent.Type)
 		}
-		if createEvent.VMID != vm.ID() {
-			t.Errorf("Expected event VM ID %s, got %s", vm.ID(), createEvent.VMID)
+		if createEvent.VM.ID() != vm.ID() {
+			t.Errorf("Expected event VM ID %s, got %s", vm.ID(), createEvent.VM.ID())
 		}
 	}
 
@@ -389,7 +389,7 @@ func TestVMEvents(t *testing.T) {
 
 func TestVMListOperations(t *testing.T) {
 	config := DefaultVMManagerConfig()
-	manager, err := NewVMManagerFixed(config, "test-node-list")
+	manager, err := NewVMManager(config)
 	if err != nil {
 		t.Fatalf("Failed to create VM manager: %v", err)
 	}

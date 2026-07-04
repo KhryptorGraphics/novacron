@@ -1,11 +1,11 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RegistrationWizard } from '@/components/auth/RegistrationWizard';
-import { apiService } from '@/lib/api';
+import { authService } from '@/lib/auth';
 
-// Mock the API service
-jest.mock('@/lib/api', () => ({
-  apiService: {
+// The component calls @/lib/auth's authService (not @/lib/api's apiService).
+jest.mock('@/lib/auth', () => ({
+  authService: {
     checkEmailAvailability: jest.fn(),
     register: jest.fn(),
   },
@@ -20,12 +20,29 @@ jest.mock('next/navigation', () => ({
 }));
 
 // Mock framer-motion
-jest.mock('framer-motion', () => ({
-  motion: {
-    div: ({ children, ...props }: any) => <div {...props}>{children}</div>,
-  },
-  AnimatePresence: ({ children }: any) => children,
-}));
+jest.mock('framer-motion', () => {
+  const React = require('react');
+  // Stable passthrough component per motion.<tag> (div, li, span, ...) so list
+  // animations don't render `undefined`, and refs stay stable across renders
+  // (a fresh function each access would remount subtrees and drop fields).
+  const cache: Record<string, any> = {};
+  return {
+    motion: new Proxy(
+      {},
+      {
+        get: (_target, tag: string | symbol) => {
+          if (typeof tag !== 'string') return undefined;
+          if (!cache[tag]) {
+            cache[tag] = ({ children, ...props }: any) =>
+              React.createElement(tag, props, children);
+          }
+          return cache[tag];
+        },
+      }
+    ),
+    AnimatePresence: ({ children }: any) => children,
+  };
+});
 
 describe('RegistrationWizard', () => {
   const mockOnComplete = jest.fn();
@@ -33,8 +50,8 @@ describe('RegistrationWizard', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (apiService.checkEmailAvailability as jest.Mock).mockResolvedValue({ available: true });
-    (apiService.register as jest.Mock).mockResolvedValue({ success: true });
+    (authService.checkEmailAvailability as jest.Mock).mockResolvedValue({ available: true });
+    (authService.register as jest.Mock).mockResolvedValue({ success: true });
   });
 
   it('renders initial step with account type selection', () => {
@@ -58,7 +75,7 @@ describe('RegistrationWizard', () => {
 
     // Step 2: Personal information
     await waitFor(() => {
-      expect(screen.getByText('Step 2 of 3')).toBeInTheDocument();
+      expect(screen.getByText(/Step 2 of 3/)).toBeInTheDocument();
     });
 
     // Fill out personal information
@@ -70,7 +87,7 @@ describe('RegistrationWizard', () => {
 
     // Step 3: Security
     await waitFor(() => {
-      expect(screen.getByText('Step 3 of 3')).toBeInTheDocument();
+      expect(screen.getByText(/Step 3 of 3/)).toBeInTheDocument();
     });
 
     // Fill out password
@@ -85,18 +102,17 @@ describe('RegistrationWizard', () => {
     const completeButton = screen.getByRole('button', { name: /complete registration/i });
     await user.click(completeButton);
 
+    // onComplete is provided, so the component invokes it (not authService.register).
     await waitFor(() => {
-      expect(apiService.register).toHaveBeenCalledWith({
-        firstName: 'John',
-        lastName: 'Doe',
-        email: 'john.doe@test.local',
-        password: 'SecurePassword123!',
-        accountType: 'personal',
-        organizationName: '',
-        organizationSize: '',
-        phone: '',
-        enableTwoFactor: false,
-      });
+      expect(mockOnComplete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          firstName: 'John',
+          lastName: 'Doe',
+          email: 'john.doe@test.local',
+          password: 'SecurePassword123!',
+          accountType: 'personal',
+        })
+      );
     });
   });
 
@@ -107,7 +123,7 @@ describe('RegistrationWizard', () => {
     const orgRadio = screen.getByLabelText('Organization Account');
     await user.click(orgRadio);
 
-    expect(screen.getByText('Step 1 of 4')).toBeInTheDocument();
+    expect(screen.getByText(/Step 1 of 4/)).toBeInTheDocument();
     
     const nextButton = screen.getByRole('button', { name: /next/i });
     await user.click(nextButton);
@@ -121,7 +137,7 @@ describe('RegistrationWizard', () => {
 
     // Should show organization step
     await waitFor(() => {
-      expect(screen.getByText('Step 3 of 4')).toBeInTheDocument();
+      expect(screen.getByText(/Step 3 of 4/)).toBeInTheDocument();
       expect(screen.getByLabelText('Organization Name *')).toBeInTheDocument();
       expect(screen.getByLabelText('Organization Size *')).toBeInTheDocument();
     });
@@ -139,7 +155,7 @@ describe('RegistrationWizard', () => {
   });
 
   it('validates email availability', async () => {
-    (apiService.checkEmailAvailability as jest.Mock).mockResolvedValue({ available: false });
+    (authService.checkEmailAvailability as jest.Mock).mockResolvedValue({ available: false });
     
     render(<RegistrationWizard onComplete={mockOnComplete} />);
     
@@ -156,7 +172,10 @@ describe('RegistrationWizard', () => {
       expect(screen.getByText('This email is already registered')).toBeInTheDocument();
     });
 
-    expect(apiService.checkEmailAvailability).toHaveBeenCalledWith('taken@test.local');
+    // checkEmailAvailability is debounced, so wait for the trailing call.
+    await waitFor(() => {
+      expect(authService.checkEmailAvailability).toHaveBeenCalledWith('taken@test.local');
+    }, { timeout: 3000 });
   });
 
   it('validates password strength', async () => {
@@ -201,7 +220,7 @@ describe('RegistrationWizard', () => {
   });
 
   it('handles registration errors gracefully', async () => {
-    (apiService.register as jest.Mock).mockRejectedValue(new Error('Registration failed'));
+    mockOnComplete.mockRejectedValueOnce(new Error('Registration failed'));
     
     render(<RegistrationWizard onComplete={mockOnComplete} />);
     
@@ -233,12 +252,12 @@ describe('RegistrationWizard', () => {
     await user.click(screen.getByLabelText('Personal Account'));
     await user.click(screen.getByRole('button', { name: /next/i }));
 
-    expect(screen.getByText('Step 2 of 3')).toBeInTheDocument();
+    expect(screen.getByText(/Step 2 of 3/)).toBeInTheDocument();
 
     // Go back to step 1
     const backButton = screen.getByRole('button', { name: /back/i });
     await user.click(backButton);
 
-    expect(screen.getByText('Step 1 of 3')).toBeInTheDocument();
+    expect(screen.getByText(/Step 1 of 3/)).toBeInTheDocument();
   });
 });

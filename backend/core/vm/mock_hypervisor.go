@@ -566,8 +566,8 @@ func (m *MockHypervisor) Reset() {
 	log.Printf("Mock hypervisor %s: Reset completed", m.hypervisorID)
 }
 
-// GetHypervisorInfo returns information about the mock hypervisor
-func (m *MockHypervisor) GetHypervisorInfo() map[string]interface{} {
+// GetHypervisorInfoMap returns debug information about the mock hypervisor
+func (m *MockHypervisor) GetHypervisorInfoMap() map[string]interface{} {
 	m.vmLock.RLock()
 	defer m.vmLock.RUnlock()
 
@@ -581,4 +581,52 @@ func (m *MockHypervisor) GetHypervisorInfo() map[string]interface{} {
 		"failure_rates": m.failures,
 		"latency":       m.latencyConfig,
 	}
+}
+
+// --- VMDriver interface completeness (capability detection + Phase 2 ops) ---
+// These stubs exist only so *MockHypervisor satisfies the VMDriver interface,
+// which grew capability/hot-plug/pinning methods. The hypervisor test suites
+// never invoke them, so no-op/derived values are sufficient.
+
+func (m *MockHypervisor) SupportsLiveMigration() bool  { return m.capabilities.SupportsMigrate }
+func (m *MockHypervisor) SupportsHotPlug() bool        { return false }
+func (m *MockHypervisor) SupportsGPUPassthrough() bool { return false }
+func (m *MockHypervisor) SupportsSRIOV() bool          { return false }
+func (m *MockHypervisor) SupportsNUMA() bool           { return false }
+
+func (m *MockHypervisor) GetCapabilities(ctx context.Context) (*HypervisorCapabilities, error) {
+	return &HypervisorCapabilities{
+		SupportsPause:    m.capabilities.SupportsPause,
+		SupportsResume:   m.capabilities.SupportsResume,
+		SupportsSnapshot: m.capabilities.SupportsSnapshot,
+		SupportsMigrate:  m.capabilities.SupportsMigrate,
+		MaxVCPUs:         m.capabilities.MaxCPUPerVM,
+		MaxMemoryMB:      m.capabilities.MaxMemoryPerVM,
+	}, nil
+}
+
+func (m *MockHypervisor) GetHypervisorInfo(ctx context.Context) (*HypervisorInfo, error) {
+	m.vmLock.RLock()
+	defer m.vmLock.RUnlock()
+	return &HypervisorInfo{
+		Version:   "mock",
+		Hostname:  m.nodeID,
+		ActiveVMs: len(m.vms),
+	}, nil
+}
+
+func (m *MockHypervisor) HotPlugDevice(ctx context.Context, vmID string, device *DeviceConfig) error {
+	return nil
+}
+
+func (m *MockHypervisor) HotUnplugDevice(ctx context.Context, vmID string, deviceID string) error {
+	return nil
+}
+
+func (m *MockHypervisor) ConfigureCPUPinning(ctx context.Context, vmID string, pinning *CPUPinningConfig) error {
+	return nil
+}
+
+func (m *MockHypervisor) ConfigureNUMA(ctx context.Context, vmID string, topology *NUMATopology) error {
+	return nil
 }

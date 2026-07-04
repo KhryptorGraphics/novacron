@@ -55,7 +55,7 @@ func TestVMCompilation(t *testing.T) {
 		t.Fatalf("Failed to update resource limits: %v", err)
 	}
 
-	updatedConfig := vm.GetConfig()
+	updatedConfig := vm.Config()
 	if updatedConfig.CPUShares != 2048 {
 		t.Errorf("Expected updated CPU shares 2048, got %d", updatedConfig.CPUShares)
 	}
@@ -92,7 +92,7 @@ func TestVMCompilation(t *testing.T) {
 func TestVMManagerFixedCompilation(t *testing.T) {
 	// Test VM manager creation
 	config := DefaultVMManagerConfig()
-	manager, err := NewVMManagerFixed(config, "test-node")
+	manager, err := NewVMManager(config)
 	if err != nil {
 		t.Fatalf("Failed to create VM manager: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestVMManagerFixedCompilation(t *testing.T) {
 
 func TestVMEventSystem(t *testing.T) {
 	config := DefaultVMManagerConfig()
-	manager, err := NewVMManagerFixed(config, "event-test-node")
+	manager, err := NewVMManager(config)
 	if err != nil {
 		t.Fatalf("Failed to create VM manager: %v", err)
 	}
@@ -209,8 +209,8 @@ func TestVMEventSystem(t *testing.T) {
 		if event.Type != VMEventCreated {
 			t.Errorf("Expected event type %s, got %s", VMEventCreated, event.Type)
 		}
-		if event.VMID != vm.ID() {
-			t.Errorf("Expected event VM ID %s, got %s", vm.ID(), event.VMID)
+		if event.VM.ID() != vm.ID() {
+			t.Errorf("Expected event VM ID %s, got %s", vm.ID(), event.VM.ID())
 		}
 	}
 

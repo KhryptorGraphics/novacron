@@ -11,7 +11,7 @@ import (
 func TestCompleteVMManagerIntegration(t *testing.T) {
 	config := VMManagerConfig{
 		DefaultDriver: VMTypeKVM,
-		Drivers: map[VMType]VMDriverConfig{
+		Drivers: map[VMType]VMDriverConfigManager{
 			VMTypeKVM: {
 				Enabled: true,
 				Config:  map[string]interface{}{},
@@ -75,19 +75,19 @@ func TestCompleteVMManagerIntegration(t *testing.T) {
 	// Test 3: Verify VM accessor methods work
 	for i, vm := range createdVMs {
 		// Test GetState
-		if vm.GetState() != StateCreated {
+		if vm.State() != StateCreated {
 			t.Errorf("VM %d should be in created state", i)
 		}
 
 		// Test GetConfig
-		config := vm.GetConfig()
+		config := vm.Config()
 		if config.ID != vmConfigs[i].ID {
 			t.Errorf("VM %d config ID mismatch", i)
 		}
 
 		// Test state transitions
 		vm.SetState(StateRunning)
-		if vm.GetState() != StateRunning {
+		if vm.State() != StateRunning {
 			t.Errorf("VM %d should be in running state after SetState", i)
 		}
 
@@ -118,7 +118,7 @@ func TestCompleteVMManagerIntegration(t *testing.T) {
 
 	manager.vmsMutex.RLock()
 	for _, vm := range manager.vms {
-		switch vm.GetState() {
+		switch vm.State() {
 		case StateFailed:
 			failedVMs++
 		case StateRunning:
@@ -160,8 +160,8 @@ func TestCompleteVMManagerIntegration(t *testing.T) {
 	go func() {
 		// Concurrent VM operations
 		for i := 0; i < 10; i++ {
-			vm, exists := manager.GetVM(createdVMs[0].GetConfig().ID)
-			if !exists {
+			vm, getErr := manager.GetVM(createdVMs[0].Config().ID)
+			if getErr != nil {
 				t.Errorf("VM should exist during concurrent access")
 			}
 			vm.SetState(StateRunning)
@@ -188,14 +188,14 @@ func TestCompleteVMManagerIntegration(t *testing.T) {
 
 	// Test 8: Cleanup and verification
 	for _, vm := range createdVMs {
-		manager.RemoveVM(vm.GetConfig().ID)
+		manager.RemoveVM(vm.Config().ID)
 	}
 
 	// Verify VMs were removed
 	for _, vm := range createdVMs {
-		_, exists := manager.GetVM(vm.GetConfig().ID)
-		if exists {
-			t.Errorf("VM %s should not exist after removal", vm.GetConfig().ID)
+		_, getErr := manager.GetVM(vm.Config().ID)
+		if getErr == nil {
+			t.Errorf("VM %s should not exist after removal", vm.Config().ID)
 		}
 	}
 
@@ -209,7 +209,7 @@ func TestCompilationVerification(t *testing.T) {
 
 	config := VMManagerConfig{
 		DefaultDriver: VMTypeKVM,
-		Drivers: map[VMType]VMDriverConfig{
+		Drivers: map[VMType]VMDriverConfigManager{
 			VMTypeKVM: {
 				Enabled: true,
 				Config:  map[string]interface{}{},
@@ -284,8 +284,8 @@ func TestCompilationVerification(t *testing.T) {
 	}
 
 	// Test all accessor methods
-	_ = vm.GetState()
-	_ = vm.GetConfig()
+	_ = vm.State()
+	_ = vm.Config()
 	_ = vm.GetUpdatedAt()
 	vm.SetState(StateRunning)
 	vm.SetStartedAt(time.Now())
@@ -311,7 +311,7 @@ func TestErrorHandlingInFixes(t *testing.T) {
 	// Test valid config
 	validConfig := VMManagerConfig{
 		DefaultDriver: VMTypeKVM,
-		Drivers: map[VMType]VMDriverConfig{
+		Drivers: map[VMType]VMDriverConfigManager{
 			VMTypeKVM: {
 				Enabled: true,
 				Config:  map[string]interface{}{},
@@ -330,8 +330,8 @@ func TestErrorHandlingInFixes(t *testing.T) {
 	defer manager.Shutdown()
 
 	// Test VM operations with non-existent VMs
-	_, exists := manager.GetVM("non-existent-vm")
-	if exists {
+	_, getErr := manager.GetVM("non-existent-vm")
+	if getErr == nil {
 		t.Error("Non-existent VM should not exist")
 	}
 
@@ -367,7 +367,7 @@ func TestErrorHandlingInFixes(t *testing.T) {
 func TestPerformanceOfFixes(t *testing.T) {
 	config := VMManagerConfig{
 		DefaultDriver: VMTypeKVM,
-		Drivers: map[VMType]VMDriverConfig{
+		Drivers: map[VMType]VMDriverConfigManager{
 			VMTypeKVM: {
 				Enabled: true,
 				Config:  map[string]interface{}{},

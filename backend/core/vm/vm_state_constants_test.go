@@ -64,8 +64,8 @@ func TestVMStateTransitions(t *testing.T) {
 	}
 
 	// Test initial state
-	if vm.GetState() != StateCreated {
-		t.Errorf("Initial state should be %s, got %s", StateCreated, vm.GetState())
+	if vm.State() != StateCreated {
+		t.Errorf("Initial state should be %s, got %s", StateCreated, vm.State())
 	}
 
 	// Test state transitions
@@ -86,15 +86,15 @@ func TestVMStateTransitions(t *testing.T) {
 
 	for _, transition := range testTransitions {
 		vm.SetState(transition.from)
-		if vm.GetState() != transition.from {
+		if vm.State() != transition.from {
 			t.Errorf("Failed to set state to %s", transition.from)
 			continue
 		}
 
 		vm.SetState(transition.to)
-		if vm.GetState() != transition.to {
+		if vm.State() != transition.to {
 			t.Errorf("Failed transition %s: expected %s, got %s",
-				transition.desc, transition.to, vm.GetState())
+				transition.desc, transition.to, vm.State())
 		}
 	}
 

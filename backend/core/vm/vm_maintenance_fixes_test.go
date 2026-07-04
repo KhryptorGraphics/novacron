@@ -1,7 +1,7 @@
 package vm
 
 import (
-	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -10,7 +10,7 @@ import (
 func TestVMMaintenanceCompilation(t *testing.T) {
 	config := VMManagerConfig{
 		DefaultDriver: VMTypeKVM,
-		Drivers: map[VMType]VMDriverConfig{
+		Drivers: map[VMType]VMDriverConfigManager{
 			VMTypeKVM: {
 				Enabled: true,
 				Config:  map[string]interface{}{},
@@ -54,13 +54,13 @@ func TestVMMaintenanceCompilation(t *testing.T) {
 	vm.SetState(StateFailed)
 
 	// Verify the VM is in the manager and in failed state
-	retrievedVM, exists := manager.GetVM(vmConfig.ID)
-	if !exists {
+	retrievedVM, getErr := manager.GetVM(vmConfig.ID)
+	if getErr != nil {
 		t.Fatal("VM should exist in manager")
 	}
 
-	if retrievedVM.GetState() != StateFailed {
-		t.Errorf("VM should be in failed state, got %s", retrievedVM.GetState())
+	if retrievedVM.State() != StateFailed {
+		t.Errorf("VM should be in failed state, got %s", retrievedVM.State())
 	}
 
 	// Test that scheduler has GetActiveAllocations method
@@ -76,7 +76,7 @@ func TestVMMaintenanceCompilation(t *testing.T) {
 func TestVMRecoveryScenario(t *testing.T) {
 	config := VMManagerConfig{
 		DefaultDriver: VMTypeKVM,
-		Drivers: map[VMType]VMDriverConfig{
+		Drivers: map[VMType]VMDriverConfigManager{
 			VMTypeKVM: {
 				Enabled: true,
 				Config:  map[string]interface{}{},
@@ -150,15 +150,15 @@ func TestVMRecoveryScenario(t *testing.T) {
 
 	// Verify VMs are in expected states
 	for _, vmConfig := range vmConfigs {
-		vm, exists := manager.GetVM(vmConfig.config.ID)
-		if !exists {
+		vm, getErr := manager.GetVM(vmConfig.config.ID)
+		if getErr != nil {
 			t.Errorf("VM %s should exist", vmConfig.config.ID)
 			continue
 		}
 
-		if vm.GetState() != vmConfig.state {
+		if vm.State() != vmConfig.state {
 			t.Errorf("VM %s should be in state %s, got %s",
-				vmConfig.config.ID, vmConfig.state, vm.GetState())
+				vmConfig.config.ID, vmConfig.state, vm.State())
 		}
 	}
 
@@ -175,7 +175,7 @@ func TestVMRecoveryScenario(t *testing.T) {
 func TestVMStateTransitionsInMaintenance(t *testing.T) {
 	config := VMManagerConfig{
 		DefaultDriver: VMTypeKVM,
-		Drivers: map[VMType]VMDriverConfig{
+		Drivers: map[VMType]VMDriverConfigManager{
 			VMTypeKVM: {
 				Enabled: true,
 				Config:  map[string]interface{}{},
@@ -227,7 +227,7 @@ func TestVMStateTransitionsInMaintenance(t *testing.T) {
 		vm.SetState(transition.fromState)
 
 		// Verify initial state
-		if vm.GetState() != transition.fromState {
+		if vm.State() != transition.fromState {
 			t.Errorf("Failed to set initial state %s for transition: %s",
 				transition.fromState, transition.desc)
 			continue
@@ -241,9 +241,9 @@ func TestVMStateTransitionsInMaintenance(t *testing.T) {
 		vm.SetState(transition.toState)
 
 		// Verify final state
-		if vm.GetState() != transition.toState {
+		if vm.State() != transition.toState {
 			t.Errorf("Transition failed %s: expected %s, got %s",
-				transition.desc, transition.toState, vm.GetState())
+				transition.desc, transition.toState, vm.State())
 		}
 
 		// Verify timestamp was updated
@@ -260,7 +260,7 @@ func TestVMStateTransitionsInMaintenance(t *testing.T) {
 func TestVMManagerConcurrentMaintenance(t *testing.T) {
 	config := VMManagerConfig{
 		DefaultDriver: VMTypeKVM,
-		Drivers: map[VMType]VMDriverConfig{
+		Drivers: map[VMType]VMDriverConfigManager{
 			VMTypeKVM: {
 				Enabled: true,
 				Config:  map[string]interface{}{},
@@ -316,9 +316,9 @@ func TestVMManagerConcurrentMaintenance(t *testing.T) {
 			}
 
 			// Verify final state
-			if testVM.GetState() != StateRunning {
+			if testVM.State() != StateRunning {
 				t.Errorf("VM %d should end in running state, got %s",
-					vmIndex, testVM.GetState())
+					vmIndex, testVM.State())
 			}
 
 			done <- true
@@ -332,12 +332,12 @@ func TestVMManagerConcurrentMaintenance(t *testing.T) {
 
 	// Verify all VMs are still in the manager
 	for i, vm := range vms {
-		retrievedVM, exists := manager.GetVM(vm.GetConfig().ID)
-		if !exists {
+		retrievedVM, getErr := manager.GetVM(vm.Config().ID)
+		if getErr != nil {
 			t.Errorf("VM %d should still exist in manager", i)
 		}
 
-		if retrievedVM.GetState() != StateRunning {
+		if retrievedVM.State() != StateRunning {
 			t.Errorf("VM %d should be in running state after concurrent operations", i)
 		}
 	}
@@ -349,7 +349,7 @@ func TestVMManagerConcurrentMaintenance(t *testing.T) {
 func TestMaintenanceResourceChecking(t *testing.T) {
 	config := VMManagerConfig{
 		DefaultDriver: VMTypeKVM,
-		Drivers: map[VMType]VMDriverConfig{
+		Drivers: map[VMType]VMDriverConfigManager{
 			VMTypeKVM: {
 				Enabled: true,
 				Config:  map[string]interface{}{},
@@ -411,7 +411,7 @@ func TestMaintenanceResourceChecking(t *testing.T) {
 	manager.vmsMutex.RLock()
 	for _, vm := range manager.vms {
 		vmCount++
-		switch vm.GetState() {
+		switch vm.State() {
 		case StateRunning:
 			runningCount++
 		case StateDeleting:

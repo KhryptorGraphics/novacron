@@ -48,6 +48,45 @@ jobs:
           ./backend/api/security
           ./backend/api/websocket
 
+      # backend/core is a separate Go module, so it needs its own step with a
+      # working-directory rather than being appended to the go test line above.
+      # Non-recursive ./vm/ (not ./vm/...) intentionally excludes the pre-existing
+      # broken sibling packages vm/drivers/kvm, vm/kata, vm/unified. -short lets the
+      # docker/containerd/kvm integration tests self-skip on a bare runner.
+      - name: Run vm package tests (separate module)
+        working-directory: backend/core
+        run: go test -short ./vm/
+
+  x86-boot-test:
+    name: x86 KVM Boot Smoke Test
+    runs-on: ubuntu-latest # ubuntu-latest runners are x86_64
+    # Closes the x86-only-unit-tested deferral (driver_kvm_arch_test.go): actually
+    # boot an x86 cirros guest. GitHub runners have no /dev/kvm, so this boots under
+    # TCG software emulation, which is slow and can be flaky -> informational for now.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install qemu-system-x86
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils wget
+
+      - name: Fetch small cirros x86 image
+        run: |
+          wget -q https://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img -O /tmp/cirros-x86.img
+          qemu-img info /tmp/cirros-x86.img
+
+      - name: Boot-test x86 guest and wait for boot marker
+        run: |
+          set -o pipefail
+          timeout 240 qemu-system-x86_64 \
+            -machine q35 -accel tcg -m 256 \
+            -drive file=/tmp/cirros-x86.img,if=virtio,format=qcow2 \
+            -nographic -serial mon:stdio -no-reboot \
+            2>&1 | tee /tmp/boot.log | grep -m1 -E "login:|cirros" \
+            && echo "x86 guest reached boot marker"
+
   canonical-frontend:
     name: Canonical Frontend
     runs-on: ubuntu-latest
@@ -80,6 +119,7 @@ jobs:
           src/__tests__/app/network-page.test.tsx
           src/__tests__/app/admin-layout.test.tsx
           src/__tests__/components/auth/RBACGuard.test.tsx
+          src/__tests__/components/auth/RegistrationWizard.test.tsx
           src/__tests__/hooks/useSecurity.test.tsx
           src/__tests__/hooks/useWebSocket.test.tsx
           src/__tests__/lib/security-api.test.ts

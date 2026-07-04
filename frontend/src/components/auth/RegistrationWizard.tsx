@@ -246,7 +246,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                           : "border-gray-200 dark:border-gray-700 hover:border-gray-300"
                       )}
                     >
-                      <RadioGroupItem value="personal" id="personal" />
+                      <RadioGroupItem value="personal" id="personal" aria-label="Personal Account" />
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <span className="text-2xl">👤</span>
@@ -280,7 +280,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                           : "border-gray-200 dark:border-gray-700 hover:border-gray-300"
                       )}
                     >
-                      <RadioGroupItem value="organization" id="organization" />
+                      <RadioGroupItem value="organization" id="organization" aria-label="Organization Account" />
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <span className="text-2xl">🏢</span>

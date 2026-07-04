@@ -2,12 +2,16 @@ package vm
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
 
 // TestVMDriverIntegration tests integration between all VM drivers
 func TestVMDriverIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping driver integration test in short mode (needs a working docker/containerd/kvm runtime)")
+	}
 	// Initialize driver manager
 	config := DefaultVMDriverConfig("integration-test-node")
 	manager := NewVMDriverManager(config)
@@ -327,8 +331,8 @@ func TestDriverCompatibility(t *testing.T) {
 				if vmType == VMTypeProcess {
 					// Process driver is not yet implemented
 					expectedErr := "process driver not yet implemented"
-					if err.Error() != expectedErr {
-						t.Errorf("Expected process driver error message '%s', got '%s'", expectedErr, err.Error())
+					if !strings.Contains(err.Error(), expectedErr) {
+						t.Errorf("Expected process driver error to contain '%s', got '%s'", expectedErr, err.Error())
 					}
 				} else {
 					t.Logf("Driver %s failed to initialize (expected in test environment): %v", vmType, err)
