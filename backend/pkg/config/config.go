@@ -162,8 +162,8 @@ func Load() (*Config, error) {
 
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
-	if c.Auth.Secret == "" || c.Auth.Secret == "changeme_in_production" {
-		return fmt.Errorf("AUTH_SECRET must be set to a secure value")
+	if c.Auth.Secret == "" || c.Auth.Secret == "changeme_in_production" || len(c.Auth.Secret) < 16 {
+		return fmt.Errorf("AUTH_SECRET must be set to a strong secret of at least 16 characters")
 	}
 	
 	if c.Auth.PasswordMinLength < 6 {
