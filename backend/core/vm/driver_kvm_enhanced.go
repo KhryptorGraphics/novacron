@@ -449,37 +449,10 @@ func (d *KVMDriverEnhanced) Stop(ctx context.Context, vmID string) error {
 
 	log.Printf("Stopping KVM VM %s", vmID)
 
-	// Send SIGTERM to QEMU process
-	if err := vmInfo.Process.Signal(os.Interrupt); err != nil {
-		log.Printf("Failed to send SIGTERM to VM %s: %v, trying SIGKILL", vmID, err)
-		if err := vmInfo.Process.Kill(); err != nil {
-			return fmt.Errorf("failed to kill VM process: %w", err)
-		}
+	// Terminate via the shared poll-based path (reliable for adopted VMs).
+	if err := d.stopVMInternal(vmInfo); err != nil {
+		return err
 	}
-
-	// Wait for process to exit with timeout
-	done := make(chan error, 1)
-	go func() {
-		_, err := vmInfo.Process.Wait()
-		done <- err
-	}()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			log.Printf("VM %s process exited with error: %v", vmID, err)
-		}
-	case <-time.After(30 * time.Second):
-		log.Printf("VM %s did not exit within timeout, force killing", vmID)
-		vmInfo.Process.Kill()
-		<-done
-	}
-
-	now := time.Now()
-	vmInfo.State = StateStopped
-	vmInfo.StoppedTime = &now
-	vmInfo.Process = nil
-	vmInfo.PID = 0
 
 	log.Printf("Stopped KVM VM %s", vmID)
 	return nil
@@ -985,41 +958,69 @@ func (d *KVMDriverEnhanced) monitorVM(vmID string, cmd *exec.Cmd) {
 }
 
 func (d *KVMDriverEnhanced) stopVMInternal(vmInfo *KVMVMInfo) error {
-	if vmInfo.Process == nil {
+	pid := vmInfo.PID
+	if pid <= 0 && vmInfo.Process != nil {
+		pid = vmInfo.Process.Pid
+	}
+	if pid <= 0 {
+		markStopped(vmInfo)
 		return nil
 	}
 
-	// Send SIGTERM
-	if err := vmInfo.Process.Signal(os.Interrupt); err != nil {
-		// Try SIGKILL if SIGTERM fails
-		if err := vmInfo.Process.Kill(); err != nil {
-			return fmt.Errorf("failed to kill VM process: %w", err)
+	// Confirm termination by polling /proc/<pid>, NOT Process.Wait(): a VM
+	// re-adopted after a restart (Process set via os.FindProcess) is not our
+	// child, so Wait() returns ECHILD immediately and falsely reports "exited"
+	// without confirming death or escalating -- leaving a SIGTERM-ignoring qemu
+	// alive while Delete forgets it (orphan). SIGTERM, then escalate to SIGKILL.
+	// ponytail: kill by PID without a cmdline re-check -- same PID-reuse window
+	// as the prior Process.Signal path; add containsQEMUAndVMID if it matters.
+	_ = syscall.Kill(pid, syscall.SIGTERM)
+	if !awaitProcessGone(pid, stopGracePeriod) {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		if !awaitProcessGone(pid, 5*time.Second) {
+			return fmt.Errorf("VM process %d still alive after SIGKILL", pid)
 		}
 	}
 
-	// Wait with timeout
-	done := make(chan error, 1)
-	go func() {
-		_, err := vmInfo.Process.Wait()
-		done <- err
-	}()
+	markStopped(vmInfo)
+	return nil
+}
 
-	select {
-	case <-done:
-		// Process exited
-	case <-time.After(30 * time.Second):
-		// Force kill if timeout
-		vmInfo.Process.Kill()
-		<-done
-	}
+// stopGracePeriod is how long to wait for a graceful SIGTERM exit before
+// escalating to SIGKILL. A package var so tests can shorten it.
+var stopGracePeriod = 15 * time.Second
 
+// markStopped resets a VM's runtime fields once its process is confirmed gone.
+func markStopped(vmInfo *KVMVMInfo) {
 	now := time.Now()
 	vmInfo.State = StateStopped
 	vmInfo.StoppedTime = &now
 	vmInfo.Process = nil
 	vmInfo.PID = 0
+}
 
-	return nil
+// processAlive reports whether a PID is live via /proc -- works for any
+// process, unlike Process.Wait() which only reaps our own children.
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	_, err := os.Stat(fmt.Sprintf("/proc/%d", pid))
+	return err == nil
+}
+
+// awaitProcessGone polls until the PID is gone or the timeout elapses.
+func awaitProcessGone(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if !processAlive(pid) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // SupportsLiveMigration returns whether the driver supports live migration.
