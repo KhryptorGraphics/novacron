@@ -79,7 +79,7 @@ func TestCanonicalVMRoutesDriveManagerState(t *testing.T) {
 	defer manager.Stop()
 
 	router := mux.NewRouter()
-	registerSecureAPIRoutes(router, db, manager)
+	registerSecureAPIRoutes(router, db, manager, t.TempDir())
 
 	// Create: manager.CreateVM(stub) succeeds, then a single INSERT with the
 	// manager-derived state (the manager reports "stopped" for a freshly

@@ -206,7 +206,7 @@ func TestRegisterSecureAPIRoutesListsVMsOnCanonicalRoute(t *testing.T) {
 	router := mux.NewRouter()
 	apiV1 := router.PathPrefix("/api/v1").Subrouter()
 	apiV1.Use(requireAuth(authManager))
-	registerSecureAPIRoutes(apiV1, db, nil)
+	registerSecureAPIRoutes(apiV1, db, nil, t.TempDir())
 
 	now := time.Now().UTC()
 	mock.ExpectQuery(`SELECT id, name, state, node_id, tenant_id, created_at, updated_at FROM vms ORDER BY created_at DESC`).
@@ -256,7 +256,7 @@ func TestRegisterSecureAPIRoutesCreatesVMOnCompatibilityRoute(t *testing.T) {
 	apiCompat.Use(requireAuth(authManager))
 	// nil manager exercises the metadata-only path (manager unavailable); the
 	// row is recorded as "created", never the old fake "creating".
-	registerSecureAPIRoutes(apiCompat, db, nil)
+	registerSecureAPIRoutes(apiCompat, db, nil, t.TempDir())
 
 	mock.ExpectExec(`INSERT INTO vms`).
 		WithArgs(
@@ -317,7 +317,7 @@ func TestRegisterSecureAPIRoutesSupportsStateTransitionsAndMetrics(t *testing.T)
 	manager := newStubVMManager(t)
 	defer manager.Stop()
 	seedManagerVM(t, manager, "vm-42")
-	registerSecureAPIRoutes(apiV1, db, manager)
+	registerSecureAPIRoutes(apiV1, db, manager, t.TempDir())
 
 	mock.ExpectExec(`UPDATE vms SET state = \$2, updated_at = NOW\(\) WHERE id = \$1`).
 		WithArgs("vm-42", "running").

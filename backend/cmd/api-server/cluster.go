@@ -149,6 +149,9 @@ func fetchPeerCapacity(addr string) (NodeCapacity, error) {
 // placeVM picks the reachable node that can fit the request and is least loaded by
 // memory-utilization fraction (proportional balancing across heterogeneous nodes).
 // Returns false if no node has room.
+// ponytail: stateless fetch has a TOCTOU under CONCURRENT auto-creates -- two at
+// once can pick the same node before either reservation lands. Sequential use is
+// exact; add a reserve step only if concurrent cluster placement is needed.
 func placeVM(caps []NodeCapacity, memMB int64, diskGB int) (NodeCapacity, bool) {
 	var best NodeCapacity
 	found := false
