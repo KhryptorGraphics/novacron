@@ -785,20 +785,15 @@ func (p *AWSProvider) DeleteAlert(ctx context.Context, alertID string) error {
 }
 
 func (p *AWSProvider) GetQuotas(ctx context.Context) (*ResourceQuotas, error) {
-	return &ResourceQuotas{
-		MaxVMs:           20,
-		MaxCPUs:          100,
-		MaxMemoryGB:      500,
-		MaxStorageGB:     10000,
-		MaxNetworks:      5,
-		MaxLoadBalancers: 20,
-		MaxSnapshots:     100,
-		MaxPublicIPs:     5,
-	}, nil
+	// ponytail: was fabricating fixed quota numbers and claiming success (a lie);
+	// real values need the AWS Service Quotas API. Error honestly until wired.
+	return nil, fmt.Errorf("not implemented")
 }
 
 func (p *AWSProvider) GetUsage(ctx context.Context) (*ResourceUsage, error) {
-	return &ResourceUsage{}, nil
+	// ponytail: was returning empty usage and claiming success (a lie); real
+	// usage needs Cost Explorer / CloudWatch. Error honestly until wired.
+	return nil, fmt.Errorf("not implemented")
 }
 
 func (p *AWSProvider) HealthCheck(ctx context.Context) error {
