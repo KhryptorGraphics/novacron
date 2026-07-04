@@ -43,8 +43,12 @@ which overstate completion and should not be trusted.
   AND true cross-node (two processes over HTTP: `POST /vms/{id}/migrate` → node→URI
   resolution → a target-side `/internal/migrate/incoming` RPC launches the dest →
   guest cutover, ~10–24 ms downtime, **0 boot markers on the destination console**).
-  Remaining: block migration for non-shared storage; multi-node peer-address
-  discovery (arrives with federation, Phase 3).
+  Shared-storage live migration is a complete, standard posture (the libvirt/KVM
+  default; early vMotion required it too), **not** a correctness gap. Optional
+  future enhancements: block migration for the local-disk (non-shared) deployment
+  model — the real path is NBD `drive-mirror` (`--copy-storage-all` style), since
+  legacy `migrate -b` is deprecated and removed in QEMU 9.1; and multi-node
+  peer-address discovery (arrives with federation, Phase 3).
 - **Federation cross-region data plane** — build repaired; a REAL Raft-backed
   replication mechanism now exists and is **proven by test** (two instances, one
   Raft group: a write on the leader is applied on the follower via the committed
