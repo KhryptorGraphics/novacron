@@ -19,7 +19,13 @@ which overstate completion and should not be trusted.
   the crash), a request-body-size cap (`http.MaxBytesReader`, env-tunable), and a
   64 KiB header limit. VM creation rolls back atomically — a failed `Create`
   leaves no orphaned disk dir or manager entry — and bounds its inputs
-  (`DiskSizeGB`/`MemoryMB` ceilings, name length/charset). All covered by
+  (`DiskSizeGB`/`MemoryMB` ceilings, name length/charset). Wave 2 adds:
+  fail-fast boot on a weak/default `AUTH_SECRET` (a short secret no longer
+  slips through `Validate()`); reliable qemu termination (poll `/proc` +
+  SIGKILL escalation, so a re-adopted SIGTERM-ignoring qemu can't be silently
+  orphaned by a delete); and exactly-once resource accounting on delete (an
+  atomic claim guards the counters against a double-release from an
+  idempotent-Delete driver or a concurrent delete). All covered by
   discrimination-proven tests (each bar fails when its fix is removed).
 - **Auth** — JWT (RS256/HS256), TOTP 2FA, OAuth2, RBAC, tenants, Postgres-backed,
   plus GitHub OAuth cluster admission.
