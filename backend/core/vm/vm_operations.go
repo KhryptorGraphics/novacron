@@ -667,6 +667,20 @@ func (m *VMManager) deleteVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 		}, err
 	}
 
+	// Claim the VM: only the delete that actually removes it from the manager
+	// releases its accounting, so a repeated or concurrent delete -- e.g. via a
+	// driver whose Delete is idempotent (returns nil on an already-gone VM) --
+	// cannot double-subtract the global CPU/memory counters.
+	m.vmsMutex.Lock()
+	_, stillTracked := m.vms[vm.ID()]
+	if stillTracked {
+		delete(m.vms, vm.ID())
+	}
+	m.vmsMutex.Unlock()
+	if !stillTracked {
+		return &VMOperationResponse{Success: true, VM: vm}, nil
+	}
+
 	// Clean up scheduler accounting before removing the VM from the manager.
 	if m.scheduler != nil && vm.ResourceID() != "" && vm.NodeID() != "" {
 		if err := m.scheduler.ReleaseResources(vm.NodeID(), vm); err != nil {
@@ -698,11 +712,6 @@ func (m *VMManager) deleteVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 	m.releaseTenantResources(vm)
 
 	log.Printf("Deallocated resources - CPU units: %d, Memory: %dMB for VM %s", cpuAllocationForConfig(config), config.MemoryMB, vm.ID())
-
-	// Remove VM from manager's map
-	m.vmsMutex.Lock()
-	delete(m.vms, vm.ID())
-	m.vmsMutex.Unlock()
 
 	log.Printf("Deleted VM %s", vm.ID())
 
