@@ -724,6 +724,44 @@ func (m *VMManager) deleteVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 	}, nil
 }
 
+// forgetVM retires a VM from THIS node after it has migrated away: it removes the
+// manager entry and releases this node's resource accounting (scheduler, global
+// CPU/mem, tenant) so the freed capacity is reflected. The driver's runtime entry
+// and the disk are intentionally left untouched -- the source qemu is already gone,
+// and a shared-storage disk still backs the running destination. The source DB row
+// is removed by the migrate route; the destination registers the VM on its side.
+// ponytail: a block-migration source disk is left orphaned under STORAGE_PATH --
+// recoverable; cleaned up when disk lifecycle is owned end-to-end.
+func (m *VMManager) forgetVM(vmID string) {
+	m.vmsMutex.Lock()
+	vm, tracked := m.vms[vmID]
+	if tracked {
+		delete(m.vms, vmID)
+	}
+	m.vmsMutex.Unlock()
+	if !tracked {
+		return
+	}
+	if m.scheduler != nil && vm.ResourceID() != "" && vm.NodeID() != "" {
+		if err := m.scheduler.ReleaseResources(vm.NodeID(), vm); err != nil {
+			log.Printf("forgetVM: release scheduler resources for %s: %v", vmID, err)
+		}
+	}
+	config := vm.Config()
+	m.resourceMutex.Lock()
+	m.allocatedCPU -= cpuAllocationForConfig(config)
+	m.allocatedMemoryMB -= int64(config.MemoryMB)
+	if m.allocatedCPU < 0 {
+		m.allocatedCPU = 0
+	}
+	if m.allocatedMemoryMB < 0 {
+		m.allocatedMemoryMB = 0
+	}
+	m.resourceMutex.Unlock()
+	m.releaseTenantResources(vm)
+	log.Printf("Retired migrated-away VM %s from source node", vmID)
+}
+
 // migrateVM migrates a VM to another node
 func (m *VMManager) migrateVM(ctx context.Context, vm *VM, driver VMDriver, params map[string]string) (*VMOperationResponse, error) {
 	log.Printf("Migrate operation requested for VM %s", vm.ID())
@@ -817,10 +855,13 @@ func (m *VMManager) migrateVM(ctx context.Context, vm *VM, driver VMDriver, para
 		}, err
 	}
 
-	// Update VM's node ID
+	// The VM now runs on targetNode; this (source) node retires it from its manager
+	// map so it no longer lists/routes a guest that has moved away. The destination
+	// registers it on its side (registerMigratedDest); the source DB row is removed
+	// by the migrate route. Disks are left untouched -- for shared storage the disk
+	// is the running dest's disk.
 	oldNodeID := vm.NodeID()
-	vm.SetNodeID(targetNode)  // Update VM's node ID to target node
-	vm.SetState(StateRunning) // Use the proper setter method
+	m.forgetVM(vm.ID())
 
 	// Emit migrated event
 	m.emitEvent(VMEvent{
@@ -861,6 +902,10 @@ type IncomingMigrationRequest struct {
 	Block         bool   `json:"block,omitempty"`
 	DiskSizeBytes int64  `json:"disk_size_bytes,omitempty"`
 	AdvertiseHost string `json:"advertise_host,omitempty"`
+	// TargetNodeID is the node id the source is moving the VM TO (its own label for
+	// this destination). The dest records it as the migrated VM's node_id so its
+	// manager/DB list the guest under the right node after cutover.
+	TargetNodeID string `json:"target_node_id,omitempty"`
 }
 
 // IncomingMigrationResponse returns the port the destination qemu is listening
@@ -902,9 +947,10 @@ func (m *VMManager) resolveMigrationURI(ctx context.Context, vm *VM, driver VMDr
 		return "", fmt.Errorf("source vm info: %w", err)
 	}
 	port, err := requestIncomingMigration(ctx, addr, IncomingMigrationRequest{
-		VMID:     vm.ID(),
-		DiskPath: info.RootFS,
-		Config:   vm.config,
+		VMID:         vm.ID(),
+		DiskPath:     info.RootFS,
+		Config:       vm.config,
+		TargetNodeID: targetNode,
 	})
 	if err != nil {
 		return "", err
@@ -982,6 +1028,7 @@ func (m *VMManager) migrateBlockCrossNode(ctx context.Context, vm *VM, driver VM
 
 	port, nbdURI, err := requestIncomingBlockMigration(ctx, addr, IncomingMigrationRequest{
 		VMID: vm.ID(), Config: vm.config, Block: true, DiskSizeBytes: sizeBytes, AdvertiseHost: host,
+		TargetNodeID: targetNode,
 	})
 	if err != nil {
 		return &VMOperationResponse{Success: false, ErrorMessage: fmt.Sprintf("target incoming (block): %v", err), VM: vm}, err
@@ -1004,8 +1051,7 @@ func (m *VMManager) migrateBlockCrossNode(ctx context.Context, vm *VM, driver VM
 	}
 
 	oldNodeID := vm.NodeID()
-	vm.SetNodeID(targetNode)
-	vm.SetState(StateRunning)
+	m.forgetVM(vm.ID()) // VM now runs on targetNode; source retires it (see shared path)
 	m.emitEvent(VMEvent{Type: VMEventMigrated, VM: *vm, Timestamp: time.Now(), NodeID: targetNode,
 		Message: fmt.Sprintf("VM block-migrated from node %s to %s", oldNodeID, targetNode)})
 	log.Printf("Block-migrated VM %s from node %s to %s", vm.ID(), oldNodeID, targetNode)

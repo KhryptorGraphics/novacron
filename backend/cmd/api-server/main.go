@@ -136,7 +136,7 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 
 	// Node-to-node migration RPC: intentionally OFF the JWT router (the peer is a
 	// node, not a user). Gated by an optional shared secret; see the handler.
-	registerInternalMigrationRoutes(router, vmManager, vmBasePath(cfg))
+	registerInternalMigrationRoutes(router, db, vmManager, vmBasePath(cfg))
 
 	registerCanonicalSecurityRoutes(router, authManager, services.securityHandlers)
 	registerCanonicalAdminRoutes(router, authManager, db)
@@ -1248,7 +1248,7 @@ func registerVMPowerRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.VMM
 // port over shared storage, and returns that port. This is node-to-node (no JWT)
 // and gated by an optional shared secret from NOVACRON_MIGRATION_SECRET.
 // ponytail: static shared-secret header; swap for mTLS if peers aren't trusted.
-func registerInternalMigrationRoutes(router *mux.Router, vmManager *core_vm.VMManager, vmBase string) {
+func registerInternalMigrationRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager, vmBase string) {
 	router.HandleFunc("/internal/migrate/incoming", func(w http.ResponseWriter, r *http.Request) {
 		if secret := os.Getenv("NOVACRON_MIGRATION_SECRET"); secret != "" && r.Header.Get("X-Migration-Secret") != secret {
 			writeJSONError(w, http.StatusForbidden, "forbidden")
@@ -1309,8 +1309,16 @@ func registerInternalMigrationRoutes(router *mux.Router, vmManager *core_vm.VMMa
 				writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("start incoming block destination: %v", berr))
 				return
 			}
-			// Tear the NBD export down once the source finishes (async; background).
-			go kd.AwaitFinishIncomingBlock(req.VMID, 10*time.Minute)
+			// Once the guest resumes here, tear down the NBD export AND register the
+			// migrated VM in this node's manager + DB. Background: not tied to the
+			// request ctx, which is cancelled the moment we respond below.
+			go func() {
+				if err := kd.AwaitFinishIncomingBlock(req.VMID, 10*time.Minute); err != nil {
+					logger.Warn("block incoming did not resume; not registering", "vm", req.VMID, "error", err)
+					return
+				}
+				registerMigratedDest(db, vmManager, req.VMID, req.Config, req.TargetNodeID)
+			}()
 			writeJSON(w, http.StatusOK, core_vm.IncomingMigrationResponse{Port: port, NBDURI: nbdURI})
 			return
 		}
@@ -1319,6 +1327,15 @@ func registerInternalMigrationRoutes(router *mux.Router, vmManager *core_vm.VMMa
 			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("start incoming destination: %v", err))
 			return
 		}
+		// Register the migrated VM in this node's manager + DB once its guest
+		// resumes. Background: not tied to the request ctx (see block branch).
+		go func() {
+			if err := kd.WaitResumed(req.VMID, 10*time.Minute); err != nil {
+				logger.Warn("shared incoming did not resume; not registering", "vm", req.VMID, "error", err)
+				return
+			}
+			registerMigratedDest(db, vmManager, req.VMID, req.Config, req.TargetNodeID)
+		}()
 
 		writeJSON(w, http.StatusOK, core_vm.IncomingMigrationResponse{Port: port})
 	}).Methods(http.MethodPost)
@@ -1334,6 +1351,59 @@ func freeMigrationPort() (int, error) {
 	}
 	defer ln.Close()
 	return ln.Addr().(*net.TCPAddr).Port, nil
+}
+
+// registerMigratedDest registers a VM that has just migrated ONTO this node into
+// the manager (so control ops route) and the DB (so /api/vms lists it), from the
+// config the source sent -- the driver already tracks the running qemu; this is
+// the manager/DB half of ownership transfer. Idempotent via ON CONFLICT. Uses
+// context.Background: it runs after the incoming request has returned.
+// ponytail: does not re-increment this node's resource accounting for the
+// migrated-in VM (AddVM is a pure map add) -- a minor dest-quota under-count,
+// revisited when migration owns accounting end-to-end.
+func registerMigratedDest(db *sql.DB, manager *core_vm.VMManager, vmID string, cfg core_vm.VMConfig, nodeID string) {
+	if manager == nil {
+		return
+	}
+	cfg.ID = vmID
+	vm, err := core_vm.NewVM(cfg)
+	if err != nil {
+		logger.Warn("migrated-VM register skipped: rebuild failed", "vm", vmID, "error", err)
+		return
+	}
+	vm.SetState(core_vm.StateRunning)
+	if nodeID != "" {
+		vm.SetNodeID(nodeID)
+	}
+	manager.AddVM(vm)
+
+	configPayload, _ := json.Marshal(map[string]interface{}{
+		"cpu_shares":   cfg.CPUShares,
+		"memory_mb":    cfg.MemoryMB,
+		"disk_size_gb": cfg.DiskSizeGB,
+		"image":        cfg.Image,
+	})
+	if _, err := db.Exec(`
+		INSERT INTO vms (id, name, state, node_id, owner_id, tenant_id, config, created_at, updated_at)
+		VALUES ($1, $2, 'running', $3, $4, $5, $6, NOW(), NOW())
+		ON CONFLICT (id) DO UPDATE SET state = 'running', node_id = EXCLUDED.node_id, updated_at = NOW()
+	`, vmID, cfg.Name, nullableStringValue(nodeID), parseOwnerID(cfg.OwnerID), cfg.TenantID, configPayload); err != nil {
+		logger.Warn("migrated-VM DB register failed", "vm", vmID, "error", err)
+		return
+	}
+	logger.Info("registered migrated-in VM on destination node", "vm", vmID, "node", nodeID)
+}
+
+// parseOwnerID turns a config OwnerID string into a nullable int for the vms
+// owner_id FK: NULL if absent/unparseable, rather than failing registration.
+func parseOwnerID(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	if n, err := strconv.Atoi(s); err == nil {
+		return n
+	}
+	return nil
 }
 
 // registerVMMigrateRoute wires POST /vms/{id}/migrate to the real manager's
@@ -1384,21 +1454,19 @@ func registerVMMigrateRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.V
 			return
 		}
 
-		vm, gerr := vmManager.GetVM(vmID)
-		state := "running"
-		if gerr == nil {
-			state = string(vm.State())
-		}
-		if _, err := db.Exec(`UPDATE vms SET state = $2, node_id = $3, updated_at = NOW() WHERE id = $1`,
-			vmID, state, nullableStringValue(req.TargetNode)); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "migration succeeded but VM state update failed")
+		// The VM now runs on req.TargetNode; the manager already retired it here
+		// (forgetVM). Remove the source DB row too so this node stops listing a
+		// guest that has moved away -- the destination inserts its own row when the
+		// incoming guest resumes (registerMigratedDest).
+		if _, err := db.Exec(`DELETE FROM vms WHERE id = $1`, vmID); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "migration succeeded but source VM row cleanup failed")
 			return
 		}
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"id":      vmID,
-			"state":   state,
-			"status":  state,
+			"state":   "migrated",
+			"status":  "migrated",
 			"node_id": req.TargetNode,
 		})
 	}).Methods(http.MethodPost)
