@@ -44,11 +44,17 @@ which overstate completion and should not be trusted.
   resolution → a target-side `/internal/migrate/incoming` RPC launches the dest →
   guest cutover, ~10–24 ms downtime, **0 boot markers on the destination console**).
   Shared-storage live migration is a complete, standard posture (the libvirt/KVM
-  default; early vMotion required it too), **not** a correctness gap. Optional
-  future enhancements: block migration for the local-disk (non-shared) deployment
-  model — the real path is NBD `drive-mirror` (`--copy-storage-all` style), since
-  legacy `migrate -b` is deprecated and removed in QEMU 9.1; and multi-node
-  peer-address discovery (arrives with federation, Phase 3).
+  default; early vMotion required it too). **Block (non-shared storage) migration
+  now works too** — the destination gets its OWN empty disk, the source
+  drive-mirrors into it over NBD (`copy-mode=write-blocking`, so no guest write is
+  lost at the RAM cutover) until ready, then RAM cuts over and the source cancels
+  the mirror (the dest owns its disk; pivoting would be wrong). Proven end-to-end
+  at the driver level on **both x86 KVM and arm64 TCG**: a cirros guest writes a
+  sentinel to its disk, block-migrates to a dest with **separate** storage, and
+  the sentinel plus a live (no-reboot) counter cutover land on the dest's own disk
+  (~190 ms downtime). Remaining: wire it into the cross-node HTTP path (the
+  `/internal/migrate/incoming` RPC + `migrateVM`) for a true two-node cluster;
+  multi-node peer-address discovery (arrives with federation, Phase 3).
 - **Federation cross-region data plane** — build repaired; a REAL Raft-backed
   replication mechanism now exists and is **proven by test** (two instances, one
   Raft group: a write on the leader is applied on the follower via the committed
