@@ -87,6 +87,10 @@ func main() {
 	// (pidfile rediscovery) so a restart reflects reality, not just stale rows.
 	reconcileVMState(db, vmBasePath(cfg), vmManager)
 
+	// Register migration peers from NOVACRON_PEERS so a migrate request can resolve
+	// a bare target_node to its address without the caller passing target_addr.
+	registerConfiguredPeers(vmManager)
+
 	server := buildCanonicalServer(cfg, db, authManager, services, vmManager)
 
 	go func() {
@@ -1392,6 +1396,33 @@ func registerMigratedDest(db *sql.DB, manager *core_vm.VMManager, vmID string, c
 		return
 	}
 	logger.Info("registered migrated-in VM on destination node", "vm", vmID, "node", nodeID)
+}
+
+// registerConfiguredPeers registers migration peer nodes from the NOVACRON_PEERS
+// env so a migrate request can resolve a bare target_node to its address, instead
+// of the caller passing target_addr. Format: comma-separated id=host:port pairs,
+// e.g. NOVACRON_PEERS="node2=10.0.0.2:9090,node3=10.0.0.3:9090". ponytail: a static
+// env map -- a real cluster gets a gossip/registry with federation; this removes
+// the manual escape hatch for a known-topology cluster with no new infra.
+func registerConfiguredPeers(vmManager *core_vm.VMManager) {
+	raw := strings.TrimSpace(os.Getenv("NOVACRON_PEERS"))
+	if raw == "" || vmManager == nil {
+		return
+	}
+	for _, pair := range strings.Split(raw, ",") {
+		id, addr, ok := strings.Cut(strings.TrimSpace(pair), "=")
+		id, addr = strings.TrimSpace(id), strings.TrimSpace(addr)
+		if !ok || id == "" || addr == "" {
+			logger.Warn("NOVACRON_PEERS entry ignored (want id=host:port)", "entry", pair)
+			continue
+		}
+		if _, _, err := net.SplitHostPort(addr); err != nil {
+			logger.Warn("NOVACRON_PEERS entry ignored (bad host:port)", "entry", pair, "error", err)
+			continue
+		}
+		vmManager.RegisterMigrationPeer(id, addr)
+		logger.Info("registered migration peer", "node", id, "migration_addr", addr)
+	}
 }
 
 // parseOwnerID turns a config OwnerID string into a nullable int for the vms

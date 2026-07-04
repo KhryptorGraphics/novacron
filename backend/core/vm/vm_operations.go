@@ -923,19 +923,14 @@ type IncomingMigrationResponse struct {
 // node's /internal/migrate/incoming endpoint to launch a destination and report
 // its listening port.
 func (m *VMManager) resolveMigrationURI(ctx context.Context, vm *VM, driver VMDriver, targetNode string) (string, error) {
-	if m.scheduler == nil {
-		return "", fmt.Errorf("no scheduler configured; pass an explicit uri")
-	}
-	node, err := m.scheduler.GetNode(targetNode)
-	if err != nil {
-		return "", fmt.Errorf("node not registered: %w", err)
-	}
-	addr := ""
-	if node.Labels != nil {
-		addr = node.Labels["migration_addr"]
+	addr := m.migrationPeerAddr(targetNode) // NOVACRON_PEERS resolution
+	if addr == "" && m.scheduler != nil {
+		if node, err := m.scheduler.GetNode(targetNode); err == nil && node.Labels != nil {
+			addr = node.Labels["migration_addr"]
+		}
 	}
 	if addr == "" {
-		return "", fmt.Errorf("node has no migration_addr label")
+		return "", fmt.Errorf("no migration address for node %q (register it via NOVACRON_PEERS or pass an explicit uri)", targetNode)
 	}
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -1004,13 +999,16 @@ func (m *VMManager) migrateBlockCrossNode(ctx context.Context, vm *VM, driver VM
 	}
 
 	addr := params["target_addr"]
+	if addr == "" {
+		addr = m.migrationPeerAddr(targetNode) // NOVACRON_PEERS resolution
+	}
 	if addr == "" && m.scheduler != nil {
 		if node, err := m.scheduler.GetNode(targetNode); err == nil && node.Labels != nil {
 			addr = node.Labels["migration_addr"]
 		}
 	}
 	if addr == "" {
-		return &VMOperationResponse{Success: false, ErrorMessage: "no target address for block migration (pass target_addr or register the node's migration_addr)", VM: vm}, nil
+		return &VMOperationResponse{Success: false, ErrorMessage: "no target address for block migration (pass target_addr or register the node via NOVACRON_PEERS)", VM: vm}, nil
 	}
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {

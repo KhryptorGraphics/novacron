@@ -31,6 +31,13 @@ type VMManager struct {
 	tenantQuotas      TenantQuotaConfig
 	tenantUsage       map[string]*tenantResourceUsage
 	tenantMutex       sync.RWMutex
+
+	// migrationPeers maps a peer node id -> its migration RPC address (host:port),
+	// so a migrate request can resolve a bare target_node without an explicit
+	// target_addr. Kept OUT of the scheduler on purpose: registering scheduler
+	// nodes activates CanAdmitVM and would gate local VM creation on placement.
+	migrationPeers   map[string]string
+	migrationPeersMu sync.RWMutex
 }
 
 // VMManagerConfig contains configuration for the VM manager
@@ -1017,6 +1024,26 @@ func (m *VMManager) GetCurrentAllocations() (cpu int, memoryMB int64) {
 	}
 
 	return allocatedCPU, allocatedMemoryMB
+}
+
+// RegisterMigrationPeer records a peer node's migration RPC address (host:port)
+// so migrateVM can resolve a bare target_node without an explicit target_addr.
+// Stored separately from the scheduler so it does not affect admission control.
+func (m *VMManager) RegisterMigrationPeer(nodeID, addr string) {
+	m.migrationPeersMu.Lock()
+	defer m.migrationPeersMu.Unlock()
+	if m.migrationPeers == nil {
+		m.migrationPeers = make(map[string]string)
+	}
+	m.migrationPeers[nodeID] = addr
+}
+
+// migrationPeerAddr returns the registered migration address for a node id, or ""
+// if none is registered (reading a nil map is safe and yields "").
+func (m *VMManager) migrationPeerAddr(nodeID string) string {
+	m.migrationPeersMu.RLock()
+	defer m.migrationPeersMu.RUnlock()
+	return m.migrationPeers[nodeID]
 }
 
 // RegisterSchedulerNode registers or updates a scheduler node for local admission control.
