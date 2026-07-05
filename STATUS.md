@@ -173,10 +173,42 @@ drop and a chaos-engineering ImpactDuration metric that were both dead-code-afte
 return; a storage context leak; firewall case-insensitive-regex no-op; IPv6-unsafe
 address formatting.
 
-Residual (deliberate, documented): `go vet ./...` still reports ~54 warnings, all in
-on-path `vm/vm.go` — the VMEvent-embeds-VM-with-sync.RWMutex copylocks (a pervasive
-struct-shape refactor with regression risk on hot code) + harmless json-tag-on-
-unexported-field style notes. CI gates on targeted `go test`, not `go vet ./...`.
+Residual is now resolved — see "Deliberately-left work completed" below.
+
+## Deliberately-left work completed — 2026-07-05
+
+Both remaining deferrals from the sweeps above are now closed.
+
+**On-path `vm/vm.go` vet warnings — FIXED (45 → 0).** Root cause: `VMEvent.VM`
+held a `VM` by value, and `VM` carries 3 `sync.RWMutex`, so every emit / append /
+handler-dispatch / `json.Marshal` of an event copied a live lock (37 copylocks) —
+and the copy was a torn read of mutex-guarded fields anyway. Changed `VMEvent.VM`
+to `*VM`: lock-free, no torn copy, identical JSON output, and all reads
+(`event.VM.ID()`) work unchanged on a pointer; handlers already run async
+(`go handler(event)`) so no snapshot semantics were lost. Also dropped 7 dead
+json tags on unexported `vm.VM` distributed-state fields (json ignores unexported
+fields — the tags were no-ops). `go vet ./vm/`: 45 → 0; api-server/core-server
+build (CGO on+off); `go test -short ./vm/` ok. Commit d805930a.
+
+**Quarantined DWCP test suites — dispositioned: documented, left disabled.** The
+7 phase/orchestrator suites (~3300 LOC) target redesigned AMST/HDE/multiregion
+APIs (11+ compile errors each). Verified OFF the canonical binary path — neither
+api-server nor core-server imports `network/dwcp` or `migration` — and OFF-CI
+(`ci.yml` never references dwcp). The whole `network/dwcp` tree is experimental
+WAN-protocol scaffolding; rewriting off-path tests against dead APIs is
+speculative investment, so they stay `.go.disabled`.
+
+Discovered in passing: the dwcp package's *active* test suite is itself broadly
+red (pre-existing, off-CI) from two root causes — (1) most failures are the
+multi-stream TCP transport dialing a live peer a unit env can't provide
+(`transport/multi_stream_tcp.go:181` → "failed to create any streams"), and
+(2) real config/validation drift in `config_test.go` / `manager_config_test.go`
+(`TestPredictionValidation`, `TestConsensusValidation`, `TestManagerGetConfig`).
+Per the off-path / don't-invest disposition, only the named `race_test.go` was
+cleaned: its two `Start()`-based tests now skip cleanly when no peer is reachable
+(mirrors the container-driver skip-guards) instead of failing. The
+`dwcp_manager_test.go` / `config_test.go` failures are left as-is and recorded
+here as known off-path debt.
 
 ## Moonshot sweep — done 2026-07-04
 
@@ -230,10 +262,9 @@ construction-failure paths; firewall DPI silently ignored case-insensitive rules
 Remaining test-build failures are ONLY platform/dependency limits, not code to fix:
 ~12 packages need `github.com/yalue/onnxruntime_go` (no arm64 build files) and
 `dwcp/optimization` needs an amd64-only `/simd` assembly package. They need an x86
-host or a build-tag/stub decision. Also deliberately NOT done: ~42 vet "copies lock"
-warnings from `VMEvent` embedding a whole `VM` (contains `sync.RWMutex`) in `vm/` —
-a pervasive struct-shape refactor with regression risk on hot on-path code, latent
-since inception, tracked separately. CI runs targeted `go test`, not `go vet ./...`.
+host or a build-tag/stub decision. (The ~42 vet "copies lock" warnings from
+`VMEvent` embedding a whole `VM` were subsequently fixed — see "Deliberately-left
+work completed — 2026-07-05" above.) CI runs targeted `go test`, not `go vet ./...`.
 
 ## Canonical
 
