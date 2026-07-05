@@ -299,14 +299,14 @@ type VM struct {
 	updatedAt   time.Time
 	processInfo VMProcessInfo
 
-	// Distributed State Management Fields
-	distributedState   *DistributedStateInfo   `json:"distributed_state"`
-	memoryDistribution *MemoryDistributionInfo `json:"memory_distribution"`
-	stateCoordinator   string                  `json:"state_coordinator"`   // Node ID of state coordinator
-	federationContext  *FederationContext      `json:"federation_context"`  // Cross-cluster federation info
-	stateHistory       []StateSnapshot         `json:"state_history"`       // Recent state snapshots
-	conflictResolution *ConflictResolutionInfo `json:"conflict_resolution"` // Conflict handling state
-	performanceMetrics *DistributedMetrics     `json:"performance_metrics"` // Performance tracking
+	// Distributed State Management Fields (unexported: internal tracking, not serialized)
+	distributedState   *DistributedStateInfo
+	memoryDistribution *MemoryDistributionInfo
+	stateCoordinator   string                  // Node ID of state coordinator
+	federationContext  *FederationContext      // Cross-cluster federation info
+	stateHistory       []StateSnapshot         // Recent state snapshots
+	conflictResolution *ConflictResolutionInfo // Conflict handling state
+	performanceMetrics *DistributedMetrics     // Performance tracking
 	stateLock          sync.RWMutex            // Protects distributed state fields
 }
 

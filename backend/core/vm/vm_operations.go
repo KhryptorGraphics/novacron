@@ -202,7 +202,7 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 		// Emit error event
 		m.emitEvent(VMEvent{
 			Type:      VMEventError,
-			VM:        *vm, // Pass the VM object
+			VM:        vm, // Pass the VM object
 			Timestamp: time.Now(),
 			NodeID:    vm.NodeID(), // Use actual VM NodeID
 			Message:   fmt.Sprintf("Failed to create VM: %v", err),
@@ -244,7 +244,7 @@ func (m *VMManager) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, err
 	// Emit created event
 	m.emitEvent(VMEvent{
 		Type:      VMEventCreated,
-		VM:        *vm, // Pass the VM object
+		VM:        vm, // Pass the VM object
 		Timestamp: time.Now(),
 		NodeID:    vm.NodeID(), // Use actual VM NodeID
 	})
@@ -333,11 +333,11 @@ func (m *VMManager) startVM(ctx context.Context, vm *VM, driver VMDriver) (*VMOp
 	// Use driver to start in core mode; update state
 	if err := driver.Start(ctx, vm.ID()); err != nil {
 		errorMessage := fmt.Sprintf("Failed to start VM: %v", err)
-		m.emitEvent(VMEvent{Type: VMEventError, VM: *vm, Timestamp: time.Now(), NodeID: vm.NodeID(), Message: errorMessage})
+		m.emitEvent(VMEvent{Type: VMEventError, VM: vm, Timestamp: time.Now(), NodeID: vm.NodeID(), Message: errorMessage})
 		return &VMOperationResponse{Success: false, ErrorMessage: errorMessage, VM: vm}, err
 	}
 	vm.SetState(StateRunning)
-	m.emitEvent(VMEvent{Type: VMEventStarted, VM: *vm, Timestamp: time.Now(), NodeID: vm.NodeID()})
+	m.emitEvent(VMEvent{Type: VMEventStarted, VM: vm, Timestamp: time.Now(), NodeID: vm.NodeID()})
 	log.Printf("Started VM %s on node %s", vm.ID(), vm.NodeID())
 	return &VMOperationResponse{Success: true, VM: vm}, nil
 }
@@ -354,11 +354,11 @@ func (m *VMManager) stopVM(ctx context.Context, vm *VM, driver VMDriver) (*VMOpe
 	// Use driver to stop in core mode; update state
 	if err := driver.Stop(ctx, vm.ID()); err != nil {
 		errorMessage := fmt.Sprintf("Failed to stop VM: %v", err)
-		m.emitEvent(VMEvent{Type: VMEventError, VM: *vm, Timestamp: time.Now(), NodeID: vm.NodeID(), Message: errorMessage})
+		m.emitEvent(VMEvent{Type: VMEventError, VM: vm, Timestamp: time.Now(), NodeID: vm.NodeID(), Message: errorMessage})
 		return &VMOperationResponse{Success: false, ErrorMessage: errorMessage, VM: vm}, err
 	}
 	vm.SetState(StateStopped)
-	m.emitEvent(VMEvent{Type: VMEventStopped, VM: *vm, Timestamp: time.Now(), NodeID: vm.NodeID()})
+	m.emitEvent(VMEvent{Type: VMEventStopped, VM: vm, Timestamp: time.Now(), NodeID: vm.NodeID()})
 	log.Printf("Stopped VM %s on node %s", vm.ID(), vm.NodeID())
 	return &VMOperationResponse{Success: true, VM: vm}, nil
 }
@@ -397,7 +397,7 @@ func (m *VMManager) restartVM(ctx context.Context, vm *VM, driver VMDriver) (*VM
 	// TODO: Define VMEventRestarted if needed, or rely on Stop/Start events
 	// m.emitEvent(VMEvent{
 	// 	Type:      VMEventRestarted,
-	// 	VM:        *vm,
+	// 	VM:        vm,
 	// 	Timestamp: time.Now(),
 	// 	NodeID:    vm.NodeID(),
 	// 	Message:   "VM restarted successfully",
@@ -446,7 +446,7 @@ func (m *VMManager) pauseVM(ctx context.Context, vm *VM, driver VMDriver) (*VMOp
 		errorMessage := fmt.Sprintf("Failed to pause VM: %v", err)
 		m.emitEvent(VMEvent{
 			Type:      VMEventError,
-			VM:        *vm,
+			VM:        vm,
 			Timestamp: time.Now(),
 			NodeID:    vm.NodeID(),
 			Message:   errorMessage,
@@ -467,7 +467,7 @@ func (m *VMManager) pauseVM(ctx context.Context, vm *VM, driver VMDriver) (*VMOp
 	// Emit paused event
 	m.emitEvent(VMEvent{
 		Type:      VMEventPaused,
-		VM:        *vm,
+		VM:        vm,
 		Timestamp: time.Now(),
 		NodeID:    vm.NodeID(),
 	})
@@ -515,7 +515,7 @@ func (m *VMManager) resumeVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 		errorMessage := fmt.Sprintf("Failed to resume VM: %v", err)
 		m.emitEvent(VMEvent{
 			Type:      VMEventError,
-			VM:        *vm,
+			VM:        vm,
 			Timestamp: time.Now(),
 			NodeID:    vm.NodeID(),
 			Message:   errorMessage,
@@ -536,7 +536,7 @@ func (m *VMManager) resumeVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 	// Emit resumed event
 	m.emitEvent(VMEvent{
 		Type:      VMEventResumed,
-		VM:        *vm,
+		VM:        vm,
 		Timestamp: time.Now(),
 		NodeID:    vm.NodeID(),
 	})
@@ -572,7 +572,7 @@ func (m *VMManager) snapshotVM(ctx context.Context, vm *VM, driver VMDriver, par
 		errorMessage := fmt.Sprintf("Failed to create snapshot: %v", err)
 		m.emitEvent(VMEvent{
 			Type:      VMEventError,
-			VM:        *vm,
+			VM:        vm,
 			Timestamp: time.Now(),
 			NodeID:    vm.NodeID(),
 			Message:   errorMessage,
@@ -588,7 +588,7 @@ func (m *VMManager) snapshotVM(ctx context.Context, vm *VM, driver VMDriver, par
 	// Emit snapshot event
 	m.emitEvent(VMEvent{
 		Type:      VMEventSnapshot,
-		VM:        *vm,
+		VM:        vm,
 		Timestamp: time.Now(),
 		NodeID:    vm.NodeID(),
 		Message:   fmt.Sprintf("Created snapshot %s", snapshotName),
@@ -624,7 +624,7 @@ func (m *VMManager) deleteVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 
 			m.emitEvent(VMEvent{
 				Type:      VMEventError,
-				VM:        *vm,
+				VM:        vm,
 				Timestamp: time.Now(),
 				NodeID:    vm.NodeID(),
 				Message:   errorMessage,
@@ -654,7 +654,7 @@ func (m *VMManager) deleteVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 		errorMessage := fmt.Sprintf("Failed to delete VM: %v", err)
 		m.emitEvent(VMEvent{
 			Type:      VMEventError,
-			VM:        *vm,
+			VM:        vm,
 			Timestamp: time.Now(),
 			NodeID:    vm.NodeID(),
 			Message:   errorMessage,
@@ -691,7 +691,7 @@ func (m *VMManager) deleteVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 	// Emit deleted event
 	m.emitEvent(VMEvent{
 		Type:      VMEventDeleted,
-		VM:        *vm,
+		VM:        vm,
 		Timestamp: time.Now(),
 		NodeID:    vm.NodeID(),
 	})
@@ -824,7 +824,7 @@ func (m *VMManager) migrateVM(ctx context.Context, vm *VM, driver VMDriver, para
 	// Emit migration started event
 	m.emitEvent(VMEvent{
 		Type:      VMEventMigrating,
-		VM:        *vm,
+		VM:        vm,
 		Timestamp: time.Now(),
 		NodeID:    vm.NodeID(),
 		Message:   fmt.Sprintf("Starting %s migration to node %s", migrationType, targetNode),
@@ -842,7 +842,7 @@ func (m *VMManager) migrateVM(ctx context.Context, vm *VM, driver VMDriver, para
 		errorMessage := fmt.Sprintf("Failed to migrate VM: %v", err)
 		m.emitEvent(VMEvent{
 			Type:      VMEventError,
-			VM:        *vm,
+			VM:        vm,
 			Timestamp: time.Now(),
 			NodeID:    vm.NodeID(),
 			Message:   errorMessage,
@@ -866,7 +866,7 @@ func (m *VMManager) migrateVM(ctx context.Context, vm *VM, driver VMDriver, para
 	// Emit migrated event
 	m.emitEvent(VMEvent{
 		Type:      VMEventMigrated,
-		VM:        *vm,
+		VM:        vm,
 		Timestamp: time.Now(),
 		NodeID:    targetNode,
 		Message:   fmt.Sprintf("VM migrated from node %s to %s", oldNodeID, targetNode),
@@ -1036,7 +1036,7 @@ func (m *VMManager) migrateBlockCrossNode(ctx context.Context, vm *VM, driver VM
 	vm.mutex.Lock()
 	vm.state = StateMigrating
 	vm.mutex.Unlock()
-	m.emitEvent(VMEvent{Type: VMEventMigrating, VM: *vm, Timestamp: time.Now(), NodeID: vm.NodeID(),
+	m.emitEvent(VMEvent{Type: VMEventMigrating, VM: vm, Timestamp: time.Now(), NodeID: vm.NodeID(),
 		Message: fmt.Sprintf("Starting block migration to node %s", targetNode)})
 
 	if _, _, err := kd.migrateBlockWithStats(ctx, vm.ID(), ramURI, nbdURI); err != nil {
@@ -1044,13 +1044,13 @@ func (m *VMManager) migrateBlockCrossNode(ctx context.Context, vm *VM, driver VM
 		vm.state = StateRunning
 		vm.mutex.Unlock()
 		msg := fmt.Sprintf("Failed to block-migrate VM: %v", err)
-		m.emitEvent(VMEvent{Type: VMEventError, VM: *vm, Timestamp: time.Now(), NodeID: vm.NodeID(), Message: msg})
+		m.emitEvent(VMEvent{Type: VMEventError, VM: vm, Timestamp: time.Now(), NodeID: vm.NodeID(), Message: msg})
 		return &VMOperationResponse{Success: false, ErrorMessage: msg, VM: vm}, err
 	}
 
 	oldNodeID := vm.NodeID()
 	m.forgetVM(vm.ID()) // VM now runs on targetNode; source retires it (see shared path)
-	m.emitEvent(VMEvent{Type: VMEventMigrated, VM: *vm, Timestamp: time.Now(), NodeID: targetNode,
+	m.emitEvent(VMEvent{Type: VMEventMigrated, VM: vm, Timestamp: time.Now(), NodeID: targetNode,
 		Message: fmt.Sprintf("VM block-migrated from node %s to %s", oldNodeID, targetNode)})
 	log.Printf("Block-migrated VM %s from node %s to %s", vm.ID(), oldNodeID, targetNode)
 	return &VMOperationResponse{Success: true, VM: vm, Data: map[string]string{

@@ -318,7 +318,7 @@ func (m *VMMonitor) createAlert(vm *VM, level AlertLevel, message string) {
 	// Emit event
 	m.eventManager.EmitEvent(VMEvent{
 		Type:      VMEventError,
-		VM:        *vm,
+		VM:        vm,
 		Timestamp: time.Now(),
 		NodeID:    vm.GetNodeID(),
 		Message:   fmt.Sprintf("Alert: %s", message),

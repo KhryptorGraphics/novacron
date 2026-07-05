@@ -277,7 +277,7 @@ func (m *VMHealthManager) emitHealthEvent(vm *VM, health *VMHealth) {
 		// Emit event
 		m.eventManager.EmitEvent(VMEvent{
 			Type:      VMEventUpdated,
-			VM:        *vm,
+			VM:        vm,
 			Timestamp: time.Now(),
 			NodeID:    vm.GetNodeID(),
 			Message:   message,

@@ -894,7 +894,7 @@ func (m *VMManager) UpdateVM(ctx context.Context, vmID string, updateSpec VMUpda
 	// Emit update event
 	m.emitEvent(VMEvent{
 		Type:      VMEventUpdated,
-		VM:        *vm,
+		VM:        vm,
 		Timestamp: time.Now(),
 		NodeID:    vm.NodeID(),
 		Message:   "VM configuration updated",

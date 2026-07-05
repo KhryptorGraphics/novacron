@@ -58,7 +58,7 @@ const (
 // VMEvent represents an event related to a VM
 type VMEvent struct {
 	Type      VMEventType            `json:"type"`
-	VM        VM                     `json:"vm"`
+	VM        *VM                    `json:"vm"`
 	Timestamp time.Time              `json:"timestamp"`
 	NodeID    string                 `json:"node_id"`
 	Message   string                 `json:"message,omitempty"`

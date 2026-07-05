@@ -122,7 +122,7 @@ func (m *VMManager) updateVMStatus(vmID string) {
 	if oldState != status {
 		m.emitEvent(VMEvent{
 			Type:      VMEventUpdated,
-			VM:        *vm,
+			VM:        vm,
 			Timestamp: time.Now(),
 			NodeID:    vm.NodeID(),
 			Message:   "VM state changed",
@@ -214,7 +214,7 @@ func (m *VMManager) cleanupVMs() {
 		if vm, err := m.GetVM(vmID); err == nil {
 			m.emitEvent(VMEvent{
 				Type:      VMEventError,
-				VM:        *vm,
+				VM:        vm,
 				Timestamp: now,
 				NodeID:    vm.NodeID(),
 				Message:   "VM operation timed out",
@@ -268,7 +268,7 @@ func (m *VMManager) tryRecoverVM(vmID string) {
 	// Emit recovered event
 	m.emitEvent(VMEvent{
 		Type:      VMEventStarted,
-		VM:        *vm,
+		VM:        vm,
 		Timestamp: time.Now(),
 		NodeID:    vm.NodeID(),
 		Message:   "VM recovered from error state",
