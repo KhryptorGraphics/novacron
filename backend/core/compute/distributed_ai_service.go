@@ -382,7 +382,7 @@ func (service *DistributedAIService) runWorkloadAnalysis() error {
 	for _, job := range activeJobs {
 		// Convert job to workload pattern request
 		req := ai.WorkloadPatternRequest{
-			WorkloadID: job.JobID,
+			WorkloadID: job.ID,
 			TimeRange: ai.TimeRange{
 				Start: time.Now().Add(-24 * time.Hour),
 				End:   time.Now(),
@@ -397,12 +397,12 @@ func (service *DistributedAIService) runWorkloadAnalysis() error {
 		cancel()
 
 		if err != nil {
-			log.Printf("Failed to analyze workload pattern for job %s: %v", job.JobID, err)
+			log.Printf("Failed to analyze workload pattern for job %s: %v", job.ID, err)
 			continue
 		}
 
 		// Apply workload-specific optimizations
-		service.applyWorkloadOptimizations(job.JobID, resp)
+		service.applyWorkloadOptimizations(job.ID, resp)
 	}
 
 	return nil
@@ -464,6 +464,7 @@ func (service *DistributedAIService) runAnomalyDetection() error {
 		Context: map[string]interface{}{
 			"cluster_type": "distributed_supercompute",
 			"baseline":     service.getBaselineMetrics(),
+			"current":      currentMetrics,
 		},
 	}
 
@@ -520,10 +521,10 @@ func (service *DistributedAIService) collectPerformanceData() map[string]interfa
 		data["memory_utilization"] = snapshot.GlobalMemoryUtilization
 		data["network_utilization"] = snapshot.GlobalNetworkUtilization
 		data["average_latency"] = snapshot.AverageLatency
-		data["throughput"] = snapshot.TotalThroughputMBps
-		data["active_jobs"] = snapshot.ActiveJobs
-		data["queued_jobs"] = snapshot.QueuedJobs
-		data["energy_consumption"] = snapshot.EnergyConsumption
+		data["throughput"] = snapshot.TotalThroughput
+		data["active_jobs"] = snapshot.ActiveWorkloads
+		data["queued_jobs"] = snapshot.TotalJobs
+		data["energy_consumption"] = snapshot.TotalEnergyConsumption
 	}
 
 	return data
@@ -535,13 +536,17 @@ func (service *DistributedAIService) getActiveJobsData() []map[string]interface{
 	if service.jobManager != nil {
 		jobs := service.jobManager.GetActiveJobs()
 		for _, job := range jobs {
+			clusterID := ""
+			if len(job.ClusterPlacements) > 0 {
+				clusterID = job.ClusterPlacements[0].ClusterID
+			}
 			jobsData = append(jobsData, map[string]interface{}{
-				"job_id":      job.JobID,
-				"job_type":    job.JobType,
+				"job_id":      job.ID,
+				"job_type":    job.Type,
 				"priority":    job.Priority,
 				"resources":   job.Resources,
-				"runtime":     time.Since(job.CreatedAt).Seconds(),
-				"cluster_id":  job.ClusterPlacement.ClusterID,
+				"runtime":     time.Since(job.SubmittedAt).Seconds(),
+				"cluster_id":  clusterID,
 			})
 		}
 	}
@@ -566,7 +571,7 @@ func (service *DistributedAIService) convertJobToDataPoints(job *ComputeJob) []a
 	var dataPoints []ai.ResourceDataPoint
 
 	// Generate synthetic data points for the job
-	baseTime := job.CreatedAt
+	baseTime := job.SubmittedAt
 	runtime := time.Since(baseTime)
 	intervals := int(runtime.Hours()) + 1
 
@@ -575,9 +580,9 @@ func (service *DistributedAIService) convertJobToDataPoints(job *ComputeJob) []a
 
 		dataPoints = append(dataPoints, ai.ResourceDataPoint{
 			Timestamp: timestamp,
-			Value:     float64(job.Resources["cpu"].(int)) * (0.6 + 0.4*float64(i%4)/4.0),
+			Value:     job.Resources.CPUCores * (0.6 + 0.4*float64(i%4)/4.0),
 			Metadata: map[string]interface{}{
-				"job_id": job.JobID,
+				"job_id": job.ID,
 				"metric": "cpu_usage",
 			},
 		})
@@ -764,7 +769,7 @@ func (service *DistributedAIService) getCurrentMetrics() map[string]float64 {
 		metrics["memory_utilization"] = snapshot.GlobalMemoryUtilization
 		metrics["network_utilization"] = snapshot.GlobalNetworkUtilization
 		metrics["latency"] = snapshot.AverageLatency
-		metrics["throughput"] = snapshot.TotalThroughputMBps
+		metrics["throughput"] = snapshot.TotalThroughput
 	}
 
 	return metrics

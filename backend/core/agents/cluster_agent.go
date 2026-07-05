@@ -14,7 +14,7 @@ import (
 type ClusterAgent struct {
 	mu                 sync.RWMutex
 	clusterID          string
-	federationManager  *federation.FederationManager
+	federationManager  *federation.FederationManagerImpl
 	localScheduler     *scheduler.Scheduler
 	metricsCollector   *ClusterMetricsCollector
 	healthMonitor      *ClusterHealthMonitor
@@ -283,7 +283,7 @@ type JobExecutionCoordinator struct {
 type FederationJobManager interface {
 	ReceiveJobRequest(ctx context.Context, request *JobRequest) (*JobResponse, error)
 	ReportJobStatus(ctx context.Context, jobID string, status *JobStatus) error
-	RequestResources(ctx context.Context, request *ResourceRequest) (*ResourceAllocation, error)
+	RequestResources(ctx context.Context, request *federation.ResourceRequest) (*ResourceAllocation, error)
 }
 
 type JobRequest struct {
@@ -536,7 +536,7 @@ type AgentMetrics struct {
 }
 
 // NewClusterAgent creates a new cluster agent
-func NewClusterAgent(clusterID string, federationManager *federation.FederationManager,
+func NewClusterAgent(clusterID string, federationManager *federation.FederationManagerImpl,
 	localScheduler *scheduler.Scheduler) *ClusterAgent {
 
 	agent := &ClusterAgent{

@@ -200,7 +200,7 @@ func (adapter *AIIntegrationAdapter) runAIWorkloadAnalysis() error {
 
 		// Build workload pattern request
 		patternReq := ai.WorkloadPatternRequest{
-			WorkloadID: job.JobID,
+			WorkloadID: job.ID,
 			TimeRange: ai.TimeRange{
 				Start: time.Now().Add(-24 * time.Hour),
 				End:   time.Now(),
@@ -215,12 +215,12 @@ func (adapter *AIIntegrationAdapter) runAIWorkloadAnalysis() error {
 		cancel()
 
 		if err != nil {
-			log.Printf("Failed to analyze workload pattern for job %s: %v", job.JobID, err)
+			log.Printf("Failed to analyze workload pattern for job %s: %v", job.ID, err)
 			continue
 		}
 
 		// Process workload analysis results
-		adapter.processWorkloadAnalysisResults(job.JobID, resp)
+		adapter.processWorkloadAnalysisResults(job.ID, resp)
 	}
 
 	return nil
@@ -295,10 +295,10 @@ func (adapter *AIIntegrationAdapter) collectPerformanceData() []PerformanceDataP
 			CPUUtilization:    snapshot.GlobalCPUUtilization,
 			MemoryUtilization: snapshot.GlobalMemoryUtilization,
 			NetworkLatency:    snapshot.AverageLatency,
-			ThroughputMBps:    snapshot.TotalThroughputMBps,
-			ActiveJobs:        snapshot.ActiveJobs,
-			QueueLength:       snapshot.QueuedJobs,
-			EnergyConsumption: snapshot.EnergyConsumption,
+			ThroughputMBps:    snapshot.TotalThroughput,
+			ActiveJobs:        snapshot.ActiveWorkloads,
+			QueueLength:       snapshot.TotalJobs,
+			EnergyConsumption: snapshot.TotalEnergyConsumption,
 		})
 	}
 
@@ -325,11 +325,11 @@ func (adapter *AIIntegrationAdapter) getActiveWorkloads() []map[string]interface
 		activeJobs := adapter.jobManager.GetActiveJobs()
 		for _, job := range activeJobs {
 			workloads = append(workloads, map[string]interface{}{
-				"job_id":          job.JobID,
-				"job_type":        job.JobType,
+				"job_id":          job.ID,
+				"job_type":        job.Type,
 				"priority":        job.Priority,
 				"resource_usage":  job.Resources,
-				"execution_time":  time.Since(job.CreatedAt),
+				"execution_time":  time.Since(job.SubmittedAt),
 			})
 		}
 	}
@@ -341,15 +341,15 @@ func (adapter *AIIntegrationAdapter) convertJobToWorkloadData(job *ComputeJob) [
 	var dataPoints []ai.ResourceDataPoint
 
 	// Convert job resource usage to data points
-	baseTime := job.CreatedAt
+	baseTime := job.SubmittedAt
 	for i := 0; i < 24; i++ { // Generate 24 hours of synthetic data
 		timestamp := baseTime.Add(time.Duration(i) * time.Hour)
 
 		dataPoints = append(dataPoints, ai.ResourceDataPoint{
 			Timestamp: timestamp,
-			Value:     float64(job.Resources["cpu"].(int)) * (0.7 + 0.3*float64(i%6)/6.0), // Simulate variation
+			Value:     job.Resources.CPUCores * (0.7 + 0.3*float64(i%6)/6.0), // Simulate variation
 			Metadata: map[string]interface{}{
-				"job_id": job.JobID,
+				"job_id": job.ID,
 				"type":   "cpu_usage",
 			},
 		})
@@ -390,7 +390,7 @@ func (adapter *AIIntegrationAdapter) getWorkloadMix() map[string]interface{} {
 		jobTypeCounts := make(map[string]int)
 
 		for _, job := range activeJobs {
-			jobTypeCounts[string(job.JobType)]++
+			jobTypeCounts[string(job.Type)]++
 		}
 
 		mix["job_types"] = jobTypeCounts

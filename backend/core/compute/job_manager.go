@@ -622,6 +622,29 @@ func (m *ComputeJobManager) ListJobs(ctx context.Context, filters JobFilters) ([
 	return result, nil
 }
 
+// GetActiveJobs returns all jobs currently running.
+func (m *ComputeJobManager) GetActiveJobs() []*ComputeJob {
+	return m.jobsByStatus(JobStatusRunning)
+}
+
+// GetQueuedJobs returns all jobs waiting in the queue.
+func (m *ComputeJobManager) GetQueuedJobs() []*ComputeJob {
+	return m.jobsByStatus(JobStatusQueued)
+}
+
+func (m *ComputeJobManager) jobsByStatus(status JobStatus) []*ComputeJob {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var result []*ComputeJob
+	for _, job := range m.jobs {
+		if job.Status == status {
+			result = append(result, job)
+		}
+	}
+	return result
+}
+
 // CancelJob cancels a running or queued job
 func (m *ComputeJobManager) CancelJob(ctx context.Context, jobID string) error {
 	m.mu.Lock()
@@ -693,7 +716,7 @@ func (m *ComputeJobManager) validateJob(job *ComputeJob) error {
 	}
 
 	// Validate constraints
-	if job.Constraints.Deadline != nil && job.Constraints.Deadline.Before(time.Now()) {
+	if job.ExecutionConstraints.Deadline != nil && job.ExecutionConstraints.Deadline.Before(time.Now()) {
 		return fmt.Errorf("deadline cannot be in the past")
 	}
 
@@ -1623,7 +1646,7 @@ func (m *ComputeJobManager) submitJobWithMetrics(ctx context.Context, job *Compu
 	prevStatus := job.Status
 
 	// Submit the job
-	if err := m.SubmitJob(ctx, job); err != nil {
+	if _, err := m.SubmitJob(ctx, job); err != nil {
 		return err
 	}
 
@@ -2287,10 +2310,8 @@ func (m *ComputeJobManager) Start(ctx context.Context) error {
 
 	// Initialize performance optimizer
 	if m.performanceOpt != nil {
-		if startable, ok := m.performanceOpt.(interface{ Start(context.Context) error }); ok {
-			if err := startable.Start(ctx); err != nil {
-				return fmt.Errorf("failed to start performance optimizer: %w", err)
-			}
+		if err := m.performanceOpt.Start(); err != nil {
+			return fmt.Errorf("failed to start performance optimizer: %w", err)
 		}
 	}
 
@@ -2321,10 +2342,8 @@ func (m *ComputeJobManager) Stop(ctx context.Context) error {
 
 	// Stop performance optimizer
 	if m.performanceOpt != nil {
-		if stoppable, ok := m.performanceOpt.(interface{ Stop(context.Context) error }); ok {
-			if err := stoppable.Stop(ctx); err != nil {
-				errors = append(errors, fmt.Errorf("failed to stop performance optimizer: %w", err))
-			}
+		if err := m.performanceOpt.Stop(); err != nil {
+			errors = append(errors, fmt.Errorf("failed to stop performance optimizer: %w", err))
 		}
 	}
 
@@ -2955,46 +2974,6 @@ func generateReservationID() string {
 
 // Wrapper methods to handle API compatibility for handlers
 
-// UpdateJob with map[string]interface{} for API compatibility
-func (m *ComputeJobManager) UpdateJob(ctx context.Context, jobID string, updates map[string]interface{}) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	job, exists := m.jobs[jobID]
-	if !exists {
-		return fmt.Errorf("job %s not found", jobID)
-	}
-
-	// Only allow updates for pending or queued jobs
-	if job.Status != JobStatusPending && job.Status != JobStatusQueued {
-		return fmt.Errorf("cannot update job %s in status %s", jobID, job.Status)
-	}
-
-	// Apply partial updates from map
-	if name, ok := updates["name"].(string); ok && name != "" {
-		job.Name = name
-	}
-	if description, ok := updates["description"].(string); ok && description != "" {
-		job.Description = description
-	}
-	if priority, ok := updates["priority"].(int); ok && priority != 0 {
-		job.Priority = JobPriority(priority)
-	}
-	if tags, ok := updates["tags"].(map[string]string); ok && tags != nil {
-		job.Tags = tags
-	}
-	if env, ok := updates["environment"].(map[string]string); ok && env != nil {
-		job.Environment = env
-	}
-	if constraints, ok := updates["constraints"].([]interface{}); ok && constraints != nil {
-		job.Constraints = convertConstraints(constraints)
-	}
-	if timeout, ok := updates["timeout"].(int); ok && timeout > 0 {
-		job.Timeout = time.Duration(timeout) * time.Second
-	}
-
-	return nil
-}
 
 // ListJobsWithParams wrapper for API compatibility with individual parameters
 func (m *ComputeJobManager) ListJobsWithParams(ctx context.Context, queueName, status string, limit, offset int) ([]*ComputeJob, error) {

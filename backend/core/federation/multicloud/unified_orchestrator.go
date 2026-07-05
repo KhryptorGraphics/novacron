@@ -13,7 +13,7 @@ import (
 type UnifiedOrchestrator struct {
 	mu               sync.RWMutex
 	registry         *ProviderRegistry
-	federationMgr    *federation.FederationManager
+	federationMgr    *federation.FederationManagerImpl
 	migrationEngine  *CrossCloudMigrationEngine
 	costOptimizer    *CostOptimizer
 	complianceEngine *ComplianceEngine
@@ -27,7 +27,7 @@ type UnifiedOrchestrator struct {
 }
 
 // NewUnifiedOrchestrator creates a new unified orchestrator
-func NewUnifiedOrchestrator(federationMgr *federation.FederationManager) *UnifiedOrchestrator {
+func NewUnifiedOrchestrator(federationMgr *federation.FederationManagerImpl) *UnifiedOrchestrator {
 	registry := NewProviderRegistry()
 	
 	return &UnifiedOrchestrator{

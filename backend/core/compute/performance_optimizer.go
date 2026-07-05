@@ -2,11 +2,8 @@ package compute
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
-	"math"
-	"sort"
 	"sync"
 	"time"
 
@@ -394,7 +391,7 @@ func (po *PerformanceOptimizer) generatePerformanceSnapshot() PerformanceSnapsho
 	}
 
 	// Get job statistics
-	stats := po.jobManager.GetStatistics(po.ctx)
+	stats, _ := po.jobManager.GetStatistics(po.ctx)
 	if jobStats, ok := stats["jobs"].(map[string]interface{}); ok {
 		if total, ok := jobStats["total"].(int); ok {
 			snapshot.TotalJobs = total
@@ -557,20 +554,20 @@ func (po *PerformanceOptimizer) optimizeLoadBalancing(task *OptimizationTask) (*
 
 	if len(overloadedClusters) > 0 {
 		// Switch to network-aware algorithm for better distribution
-		if currentAlgorithm != LoadBalanceNetworkAware {
+		if currentAlgorithm != AlgorithmNetworkAware {
 			action := OptimizationAction{
 				Type:        "algorithm_change",
-				Description: fmt.Sprintf("Changed load balancing algorithm from %s to %s", currentAlgorithm, LoadBalanceNetworkAware),
+				Description: fmt.Sprintf("Changed load balancing algorithm from %s to %s", currentAlgorithm, AlgorithmNetworkAware),
 				Target:      "load_balancer",
 				Parameters: map[string]interface{}{
 					"from": currentAlgorithm,
-					"to":   LoadBalanceNetworkAware,
+					"to":   AlgorithmNetworkAware,
 				},
 				Timestamp: time.Now(),
 				Success:   false,
 			}
 
-			if err := po.loadBalancer.SetAlgorithm(LoadBalanceNetworkAware); err != nil {
+			if err := po.loadBalancer.SetAlgorithm(AlgorithmNetworkAware); err != nil {
 				action.ErrorMessage = err.Error()
 			} else {
 				action.Success = true
@@ -662,7 +659,7 @@ func (po *PerformanceOptimizer) calculateMigrationScore(workload *WorkloadMetric
 	}
 
 	// Resource availability factor
-	for resourceType, resource := range cluster.Resources {
+	for _, resource := range cluster.Resources {
 		utilization := resource.Used / resource.Capacity
 		if utilization > 0.8 {
 			score *= 0.5 // Penalize overloaded resources
@@ -702,7 +699,7 @@ func (po *PerformanceOptimizer) optimizeResourceAllocation(task *OptimizationTas
 
 	for clusterID, clusterUtil := range utilization {
 		isEfficient := true
-		for resourceType, util := range clusterUtil {
+		for _, util := range clusterUtil {
 			if util > 0.9 || util < 0.1 {
 				isEfficient = false
 				break

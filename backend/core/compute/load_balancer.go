@@ -379,7 +379,7 @@ func (lb *ComputeJobLoadBalancer) leastLoadedAlgorithm(ctx context.Context, job 
 	})
 
 	var placements []ClusterPlacement
-	remainingResources := job.Resources
+	remainingResources := requirementsToAllocation(job.Resources)
 
 	for _, cluster := range clusters {
 		if cluster == nil {
@@ -430,7 +430,7 @@ func (lb *ComputeJobLoadBalancer) weightedRoundRobinAlgorithm(ctx context.Contex
 	}
 
 	var placements []ClusterPlacement
-	remainingResources := job.Resources
+	remainingResources := requirementsToAllocation(job.Resources)
 
 	for _, cluster := range clusters {
 		if cluster == nil || cluster.Load == nil {
@@ -443,7 +443,7 @@ func (lb *ComputeJobLoadBalancer) weightedRoundRobinAlgorithm(ctx context.Contex
 
 		// Allocate based on weight
 		weightRatio := cluster.Load.Weight / totalWeight
-		targetAllocation := lb.scaleResources(job.Resources, weightRatio)
+		targetAllocation := lb.scaleResources(requirementsToAllocation(job.Resources), weightRatio)
 
 		// Constrain by available resources
 		allocation := lb.calculateAllocation(targetAllocation, cluster.AvailableResources)
@@ -485,7 +485,7 @@ func (lb *ComputeJobLoadBalancer) networkAwareAlgorithm(ctx context.Context, job
 	})
 
 	var placements []ClusterPlacement
-	remainingResources := job.Resources
+	remainingResources := requirementsToAllocation(job.Resources)
 
 	for _, item := range scored {
 		if len(placements) >= lb.policy.MaxClustersPerJob {
@@ -522,7 +522,7 @@ func (lb *ComputeJobLoadBalancer) costOptimizedAlgorithm(ctx context.Context, jo
 	})
 
 	var placements []ClusterPlacement
-	remainingResources := job.Resources
+	remainingResources := requirementsToAllocation(job.Resources)
 
 	for _, cluster := range clusters {
 		if len(placements) >= lb.policy.MaxClustersPerJob {
@@ -568,7 +568,7 @@ func (lb *ComputeJobLoadBalancer) performanceBasedAlgorithm(ctx context.Context,
 	})
 
 	var placements []ClusterPlacement
-	remainingResources := job.Resources
+	remainingResources := requirementsToAllocation(job.Resources)
 
 	for _, item := range scored {
 		if len(placements) >= lb.policy.MaxClustersPerJob {
@@ -627,7 +627,7 @@ func (lb *ComputeJobLoadBalancer) mlPredictiveAlgorithm(ctx context.Context, job
 	})
 
 	var placements []ClusterPlacement
-	remainingResources := job.Resources
+	remainingResources := requirementsToAllocation(job.Resources)
 
 	for _, item := range predictions {
 		if len(placements) >= lb.policy.MaxClustersPerJob {
@@ -674,7 +674,7 @@ func (lb *ComputeJobLoadBalancer) hybridAlgorithm(ctx context.Context, job *Comp
 	})
 
 	var placements []ClusterPlacement
-	remainingResources := job.Resources
+	remainingResources := requirementsToAllocation(job.Resources)
 
 	for _, item := range scored {
 		if len(placements) >= lb.policy.MaxClustersPerJob {
@@ -740,6 +740,19 @@ func (lb *ComputeJobLoadBalancer) calculateHybridScore(cluster *ClusterInfo, job
 }
 
 // Helper methods for resource calculations
+// requirementsToAllocation converts a job's ResourceRequirements into the
+// ResourceAllocation shape the load-balancer helpers operate on (shared subset
+// of fields; requirements-only fields like GPUType/DiskIOPS aren't allocatable).
+func requirementsToAllocation(r ResourceRequirements) ResourceAllocation {
+	return ResourceAllocation{
+		CPUCores:    r.CPUCores,
+		MemoryGB:    r.MemoryGB,
+		GPUCount:    r.GPUCount,
+		StorageGB:   r.StorageGB,
+		NetworkMbps: r.NetworkMbps,
+	}
+}
+
 func (lb *ComputeJobLoadBalancer) calculateAllocation(requested, available ResourceAllocation) ResourceAllocation {
 	return ResourceAllocation{
 		CPUCores:    math.Min(requested.CPUCores, available.CPUCores),
@@ -846,7 +859,7 @@ func (lb *ComputeJobLoadBalancer) calculateSecurityScore(cluster *ClusterInfo, j
 	}
 
 	// Check if job has security constraints
-	if job.Constraints.SecurityTags == nil || len(job.Constraints.SecurityTags) == 0 {
+	if job.ExecutionConstraints.SecurityTags == nil || len(job.ExecutionConstraints.SecurityTags) == 0 {
 		return 1.0 // No security requirements
 	}
 
@@ -856,7 +869,7 @@ func (lb *ComputeJobLoadBalancer) calculateSecurityScore(cluster *ClusterInfo, j
 	}
 
 	matchingTags := 0
-	for _, jobTag := range job.Constraints.SecurityTags {
+	for _, jobTag := range job.ExecutionConstraints.SecurityTags {
 		for _, clusterTag := range cluster.SecurityTags {
 			if jobTag == clusterTag {
 				matchingTags++
@@ -865,7 +878,7 @@ func (lb *ComputeJobLoadBalancer) calculateSecurityScore(cluster *ClusterInfo, j
 		}
 	}
 
-	return float64(matchingTags) / float64(len(job.Constraints.SecurityTags))
+	return float64(matchingTags) / float64(len(job.ExecutionConstraints.SecurityTags))
 }
 
 // getAvailableClusters retrieves available clusters from federation with populated capacity information
@@ -882,8 +895,8 @@ func (lb *ComputeJobLoadBalancer) getAvailableClusters(ctx context.Context, job 
 		cluster := &ClusterInfo{
 			ID:     fedCluster.ID,
 			Name:   fedCluster.Name,
-			Region: fedCluster.Region,
-			Zone:   fedCluster.Zone,
+			Region: fedCluster.Metadata["region"],
+			Zone:   fedCluster.Metadata["zone"],
 		}
 
 		// Query cluster resources from federation manager
@@ -1060,7 +1073,7 @@ func (lb *ComputeJobLoadBalancer) initializeClusterCapacities() {
 			AvgJobWaitTime:      0,
 			AvgJobExecutionTime: 0,
 			SuccessRate:         1.0,
-			Health:              ClusterHealthHealthy,
+			Health:              HealthHealthy,
 			LastUpdated:         time.Now(),
 		}
 
@@ -1079,7 +1092,6 @@ func (lb *ComputeJobLoadBalancer) initializeClusterCapacities() {
 		// Initialize performance history
 		lb.performanceHistory[clusterID] = &PerformanceHistory{
 			ClusterID: clusterID,
-			Records:   make([]*PerformanceRecord, 0),
 		}
 	}
 }
@@ -1129,19 +1141,8 @@ func (lb *ComputeJobLoadBalancer) GetClusterMetrics(clusterID string) (*ClusterM
 	}
 
 	// Return a copy to prevent external modification
-	return &ClusterMetrics{
-		ClusterID:           metrics.ClusterID,
-		CPUUtilization:      metrics.CPUUtilization,
-		MemoryUtilization:   metrics.MemoryUtilization,
-		StorageUtilization:  metrics.StorageUtilization,
-		NetworkUtilization:  metrics.NetworkUtilization,
-		ActiveJobs:          metrics.ActiveJobs,
-		QueuedJobs:          metrics.QueuedJobs,
-		AverageResponseTime: metrics.AverageResponseTime,
-		ErrorRate:           metrics.ErrorRate,
-		Availability:        metrics.Availability,
-		LastUpdated:         metrics.LastUpdated,
-	}, nil
+	cp := *metrics
+	return &cp, nil
 }
 
 // GetAllClusterMetrics returns metrics for all clusters
@@ -1151,19 +1152,8 @@ func (lb *ComputeJobLoadBalancer) GetAllClusterMetrics() (map[string]*ClusterMet
 
 	result := make(map[string]*ClusterMetrics)
 	for clusterID, metrics := range lb.clusterMetrics {
-		result[clusterID] = &ClusterMetrics{
-			ClusterID:           metrics.ClusterID,
-			CPUUtilization:      metrics.CPUUtilization,
-			MemoryUtilization:   metrics.MemoryUtilization,
-			StorageUtilization:  metrics.StorageUtilization,
-			NetworkUtilization:  metrics.NetworkUtilization,
-			ActiveJobs:          metrics.ActiveJobs,
-			QueuedJobs:          metrics.QueuedJobs,
-			AverageResponseTime: metrics.AverageResponseTime,
-			ErrorRate:           metrics.ErrorRate,
-			Availability:        metrics.Availability,
-			LastUpdated:         metrics.LastUpdated,
-		}
+		cp := *metrics
+		result[clusterID] = &cp
 	}
 
 	return result, nil
@@ -1184,13 +1174,8 @@ func (lb *ComputeJobLoadBalancer) GetClusterLoad(clusterID string) (*ClusterLoad
 	}
 
 	// Return a copy to prevent external modification
-	return &ClusterLoad{
-		ClusterID:         load.ClusterID,
-		LoadScore:         load.LoadScore,
-		Capacity:          load.Capacity,
-		AvailableCapacity: load.AvailableCapacity,
-		LastUpdated:       load.LastUpdated,
-	}, nil
+	cp := *load
+	return &cp, nil
 }
 
 // GetLoadBalancingPolicy returns the current load balancing policy
@@ -1263,8 +1248,8 @@ func (lb *ComputeJobLoadBalancer) GetClusterRanking(ctx context.Context, jobType
 		rankings = append(rankings, ClusterRanking{
 			ClusterID:    clusterID,
 			Score:        score,
-			Availability: metrics.Availability,
-			LoadScore:    load.LoadScore,
+			Availability: metrics.SuccessRate,
+			LoadScore:    load.CurrentLoad,
 			Capacity:     load.AvailableCapacity,
 			LastUpdated:  metrics.LastUpdated,
 		})
@@ -1295,15 +1280,15 @@ func (lb *ComputeJobLoadBalancer) GetLoadBalancingStats() (*LoadBalancingStats, 
 
 	var totalLoadScore float64
 	for clusterID, metrics := range lb.clusterMetrics {
-		if metrics.Availability > 0.9 { // Consider healthy if > 90% availability
+		if metrics.SuccessRate > 0.9 { // Consider healthy if > 90% availability
 			stats.HealthyClusters++
 		}
 
 		if load, exists := lb.clusterLoad[clusterID]; exists {
 			stats.TotalCapacity += load.Capacity
 			stats.AvailableCapacity += load.AvailableCapacity
-			totalLoadScore += load.LoadScore
-			stats.ClusterDistribution[clusterID] = load.LoadScore
+			totalLoadScore += load.CurrentLoad
+			stats.ClusterDistribution[clusterID] = load.CurrentLoad
 		}
 	}
 
@@ -1333,9 +1318,9 @@ func (lb *ComputeJobLoadBalancer) RebalanceClusters(ctx context.Context) (*Rebal
 	var overloaded, underloaded []string
 
 	for clusterID, load := range lb.clusterLoad {
-		if load.LoadScore > 0.8 { // Consider overloaded if > 80%
+		if load.CurrentLoad > 0.8 { // Consider overloaded if > 80%
 			overloaded = append(overloaded, clusterID)
-		} else if load.LoadScore < 0.3 { // Consider underloaded if < 30%
+		} else if load.CurrentLoad < 0.3 { // Consider underloaded if < 30%
 			underloaded = append(underloaded, clusterID)
 		}
 	}
@@ -1374,16 +1359,16 @@ func (lb *ComputeJobLoadBalancer) RebalanceClusters(ctx context.Context) (*Rebal
 // Helper method to calculate cluster score for ranking
 func (lb *ComputeJobLoadBalancer) calculateClusterScore(metrics *ClusterMetrics, load *ClusterLoad, jobType JobType) float64 {
 	// Base score from availability and inverse load
-	score := metrics.Availability * (1.0 - load.LoadScore)
+	score := metrics.SuccessRate * (1.0 - load.CurrentLoad)
 
 	// Adjust for response time (lower is better)
-	if metrics.AverageResponseTime > 0 {
-		responseTimeFactor := 1.0 / (1.0 + metrics.AverageResponseTime.Seconds())
+	if metrics.AvgJobExecutionTime > 0 {
+		responseTimeFactor := 1.0 / (1.0 + metrics.AvgJobExecutionTime.Seconds())
 		score *= responseTimeFactor
 	}
 
 	// Adjust for error rate (lower is better)
-	errorFactor := 1.0 - metrics.ErrorRate
+	errorFactor := (1.0 - metrics.SuccessRate)
 	score *= errorFactor
 
 	// Job type specific adjustments
@@ -1396,7 +1381,7 @@ func (lb *ComputeJobLoadBalancer) calculateClusterScore(metrics *ClusterMetrics,
 		score *= (1.0 - metrics.CPUUtilization)
 	case JobTypeStream:
 		// Streaming jobs prefer consistent performance
-		if metrics.ErrorRate < 0.01 { // Very low error rate bonus
+		if (1.0 - metrics.SuccessRate) < 0.01 { // Very low error rate bonus
 			score *= 1.2
 		}
 	}
