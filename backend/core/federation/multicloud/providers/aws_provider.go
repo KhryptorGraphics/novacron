@@ -301,69 +301,22 @@ func (p *AWSProvider) RestoreSnapshot(ctx context.Context, snapshotID string) er
 
 // Resource Management
 func (p *AWSProvider) GetResourceQuota(ctx context.Context) (*multicloud.ResourceQuota, error) {
-	// In a real implementation, this would call AWS Service Quotas API
-	return &multicloud.ResourceQuota{
-		MaxVMs:            1000,
-		MaxCPU:            5000,
-		MaxMemory:         1024 * 1024, // 1TB in MB
-		MaxStorage:        10 * 1024,   // 10TB in GB
-		MaxNetworks:       5,
-		MaxSecurityGroups: 500,
-		MaxSnapshots:      10000,
-		MaxFloatingIPs:    5,
-		MaxLoadBalancers:  20,
-	}, nil
+	// ponytail: was fabricating fixed quota numbers and claiming success (a lie);
+	// real limits need the AWS Service Quotas API. Error honestly until wired.
+	return nil, fmt.Errorf("not implemented")
 }
 
 func (p *AWSProvider) GetResourceUsage(ctx context.Context) (*multicloud.ResourceUsage, error) {
-	// In a real implementation, this would aggregate actual usage from AWS APIs
-	return &multicloud.ResourceUsage{
-		UsedVMs:           15,
-		UsedCPU:           45,
-		UsedMemory:        128 * 1024, // 128GB in MB
-		UsedStorage:       500,        // 500GB
-		UsedNetworks:      2,
-		UsedSecurityGroups: 8,
-		UsedSnapshots:     25,
-		UsedFloatingIPs:   2,
-		UsedLoadBalancers: 1,
-		TotalCost:         1250.75,
-	}, nil
+	// ponytail: was fabricating fixed usage + a $1250.75 cost and claiming success
+	// (a lie); real usage needs CloudWatch / Cost Explorer. Error honestly until wired.
+	return nil, fmt.Errorf("not implemented")
 }
 
 func (p *AWSProvider) GetPricing(ctx context.Context, resourceType string, region string) (*multicloud.PricingInfo, error) {
-	// Mock pricing data - in real implementation, would use AWS Pricing API
-	switch resourceType {
-	case "vm":
-		return &multicloud.PricingInfo{
-			ResourceType: resourceType,
-			Region:       region,
-			Currency:     "USD",
-			PricePerHour: 0.0116, // t3.micro price
-			Unit:         "hour",
-			TierPricing: []multicloud.PricingTier{
-				{From: 0, To: 744, Price: 0.0116},   // First 744 hours (month)
-				{From: 744, To: -1, Price: 0.0104}, // Additional hours
-			},
-			SpotPricing: &multicloud.SpotPricingInfo{
-				CurrentPrice: 0.0035,
-				AveragePrice: 0.0040,
-				MinPrice:     0.0025,
-				MaxPrice:     0.0116,
-				LastUpdated:  time.Now(),
-			},
-		}, nil
-	case "storage":
-		return &multicloud.PricingInfo{
-			ResourceType: resourceType,
-			Region:       region,
-			Currency:     "USD",
-			PricePerMonth: 0.10, // EBS gp2 price per GB/month
-			Unit:          "GB/month",
-		}, nil
-	default:
-		return nil, fmt.Errorf("pricing not available for resource type: %s", resourceType)
-	}
+	// ponytail: was returning a single hardcoded t3.micro/gp2 price for ALL vm/storage
+	// requests regardless of instance type (a lie); real prices need the AWS Pricing
+	// API. Error honestly until wired.
+	return nil, fmt.Errorf("not implemented")
 }
 
 // Networking (simplified implementation)
@@ -498,60 +451,17 @@ func (p *AWSProvider) GetProviderHealth(ctx context.Context) (*multicloud.Provid
 
 // Cost Management
 func (p *AWSProvider) GetCostEstimate(ctx context.Context, request *multicloud.CostEstimateRequest) (*multicloud.CostEstimate, error) {
-	// Mock cost estimation
-	totalCost := 0.0
-	var breakdown []multicloud.CostBreakdown
-
-	for _, resource := range request.Resources {
-		switch resource.Type {
-		case "vm":
-			unitCost := 0.0116 // t3.micro hourly rate
-			cost := unitCost * float64(resource.Quantity)
-			totalCost += cost
-			breakdown = append(breakdown, multicloud.CostBreakdown{
-				ResourceType: resource.Type,
-				Cost:         cost,
-				Quantity:     resource.Quantity,
-				UnitCost:     unitCost,
-			})
-		}
-	}
-
-	return &multicloud.CostEstimate{
-		TotalCost: totalCost,
-		Currency:  "USD",
-		Duration:  request.Duration,
-		Breakdown: breakdown,
-		Confidence: 0.95,
-		CreatedAt:  time.Now(),
-	}, nil
+	// ponytail: was computing an estimate from a hardcoded t3.micro rate for every
+	// instance type and reporting a fake 0.95 confidence (a lie); real estimates need
+	// the AWS Pricing API. Error honestly until wired.
+	return nil, fmt.Errorf("not implemented")
 }
 
 func (p *AWSProvider) GetBillingData(ctx context.Context, start, end time.Time) (*multicloud.BillingData, error) {
-	// Mock billing data
-	return &multicloud.BillingData{
-		Provider:  multicloud.ProviderAWS,
-		StartTime: start,
-		EndTime:   end,
-		TotalCost: 1250.75,
-		Currency:  "USD",
-		Resources: []multicloud.ResourceBilling{
-			{
-				ResourceID:   "i-1234567890abcdef0",
-				ResourceType: "vm",
-				Usage:        744, // hours in a month
-				UnitCost:     0.0116,
-				TotalCost:    86.30,
-			},
-			{
-				ResourceID:   "vol-12345678",
-				ResourceType: "storage",
-				Usage:        20, // GB
-				UnitCost:     0.10,
-				TotalCost:    2.00,
-			},
-		},
-	}, nil
+	// ponytail: was fabricating a $1250.75 bill with fake resource IDs and claiming
+	// success (a lie); real billing needs the AWS Cost Explorer / CUR API. Error
+	// honestly until wired.
+	return nil, fmt.Errorf("not implemented")
 }
 
 // Compliance and Security
