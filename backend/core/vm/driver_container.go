@@ -6,10 +6,16 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// dockerNameUnsafe matches any char not allowed in a docker container name
+// (docker permits [a-zA-Z0-9][a-zA-Z0-9_.-]*). We scrub config.Name before
+// interpolating it; the "novacron-" prefix already fixes the leading char.
+var dockerNameUnsafe = regexp.MustCompile(`[^a-zA-Z0-9_.-]+`)
 
 // ContainerDriver implements the VMDriver interface for container-based VMs
 type ContainerDriver struct {
@@ -32,8 +38,9 @@ func NewContainerDriver(config map[string]interface{}) (VMDriver, error) {
 func (d *ContainerDriver) Create(ctx context.Context, config VMConfig) (string, error) {
 	log.Printf("Creating container VM %s", config.Name)
 
-	// Generate a container name based on VM config
-	containerName := fmt.Sprintf("novacron-%s-%s", config.Name, strconv.FormatInt(time.Now().UnixNano(), 16))
+	// Generate a container name based on VM config (scrub chars docker rejects)
+	safeName := dockerNameUnsafe.ReplaceAllString(config.Name, "-")
+	containerName := fmt.Sprintf("novacron-%s-%s", safeName, strconv.FormatInt(time.Now().UnixNano(), 16))
 
 	// Build the docker command to create a container
 	args := []string{
@@ -187,20 +194,11 @@ func (d *ContainerDriver) GetInfo(ctx context.Context, vmID string) (*VMInfo, er
 		return nil, err
 	}
 
-	// Get detailed container info
-	inspectFormat := `{
-		"id": "{{.Id}}",
-		"name": "{{.Name}}",
-		"image": "{{.Config.Image}}",
-		"created": "{{.Created}}",
-		"status": "{{.State.Status}}",
-		"pid": {{.State.Pid}},
-		"memory": {{if .State.MemoryStats}}{{.State.MemoryStats.Usage}}{{else}}0{{end}},
-		"cpu": {{if .State.CPUStats}}{{.State.CPUStats.CPUUsage.TotalUsage}}{{else}}0{{end}},
-		"startTime": "{{.State.StartedAt}}",
-		"networks": {{json .NetworkSettings.Networks}}
-	}`
-
+	// Inspect for the fields we surface. Only .Config.Image and the attached
+	// network name are read from inspect; runtime CPU/mem come from docker stats
+	// below. (The prior template used .State.MemoryStats/.CPUStats — those are
+	// `docker stats` fields, invalid in `docker inspect`, so inspect always errored.)
+	inspectFormat := `{{.Config.Image}}|{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}|{{.HostConfig.CpuShares}}|{{.HostConfig.Memory}}`
 	cmd := exec.CommandContext(ctx, "docker", "inspect", "-f", inspectFormat, vmID)
 	output, err := cmd.CombinedOutput()
 
@@ -209,14 +207,26 @@ func (d *ContainerDriver) GetInfo(ctx context.Context, vmID string) (*VMInfo, er
 		return nil, fmt.Errorf("failed to get container info: %w", err)
 	}
 
-	// Parse output (in a real implementation, we would parse the JSON properly)
-	// For now, we'll create a minimal VMInfo object with the information
-
 	vmInfo := &VMInfo{
 		ID:        vmID,
 		Name:      vmID, // Use container ID as name for now
 		State:     status,
 		CreatedAt: time.Now(),
+	}
+
+	// image|networks|cpuShares|memoryBytes  (limits read back from HostConfig)
+	parts := strings.Split(strings.TrimSpace(string(output)), "|")
+	if len(parts) >= 4 {
+		vmInfo.Image = parts[0]
+		if nets := strings.Fields(parts[1]); len(nets) > 0 {
+			vmInfo.NetworkID = nets[0] // first attached network (e.g. "bridge")
+		}
+		if shares, err := strconv.Atoi(strings.TrimSpace(parts[2])); err == nil {
+			vmInfo.CPUShares = shares
+		}
+		if memBytes, err := strconv.ParseInt(strings.TrimSpace(parts[3]), 10, 64); err == nil {
+			vmInfo.MemoryMB = int(memBytes / (1024 * 1024))
+		}
 	}
 
 	// Get container stats for more accurate resource usage
