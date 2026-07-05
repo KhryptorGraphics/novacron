@@ -255,7 +255,9 @@ func TestRegisterSecureAPIRoutesCreatesVMOnCompatibilityRoute(t *testing.T) {
 	apiCompat := router.PathPrefix("/api").Subrouter()
 	apiCompat.Use(requireAuth(authManager))
 	// nil manager exercises the metadata-only path (manager unavailable); the
-	// row is recorded as "created", never the old fake "creating".
+	// row is recorded as "created", never the old fake "creating". node_id is
+	// this node's selfNodeID() (VM belongs to the creating node) — AnyArg since
+	// it depends on NOVACRON_NODE_ID, matching canonical_routes_test.go.
 	registerSecureAPIRoutes(apiCompat, db, nil, t.TempDir())
 
 	mock.ExpectExec(`INSERT INTO vms`).
@@ -263,7 +265,7 @@ func TestRegisterSecureAPIRoutesCreatesVMOnCompatibilityRoute(t *testing.T) {
 			sqlmock.AnyArg(),
 			"builder",
 			"created",
-			nil,
+			sqlmock.AnyArg(),
 			7,
 			"default",
 			sqlmock.AnyArg(),
