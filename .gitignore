@@ -3,8 +3,8 @@ qdrant_data/
 
 # Node.js dependencies
 node_modules/
-package-lock.json
 pnpm-lock.yaml
+# package-lock.json is committed: CI uses `npm ci`, which requires it
 
 # Python cache
 __pycache__/
