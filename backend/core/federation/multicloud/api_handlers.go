@@ -103,7 +103,6 @@ func (h *APIHandlers) RegisterProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create provider instance based on type
-	var provider CloudProvider
 	switch request.Type {
 	case ProviderAWS:
 		// Would create AWS provider
@@ -121,16 +120,10 @@ func (h *APIHandlers) RegisterProvider(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, fmt.Sprintf("Unsupported provider type: %s", request.Type), nil)
 		return
 	}
-
-	if err := h.orchestrator.RegisterCloudProvider(request.ProviderID, provider, &request.Config); err != nil {
-		h.writeError(w, http.StatusInternalServerError, "Failed to register provider", err)
-		return
-	}
-
-	h.writeJSON(w, http.StatusCreated, map[string]string{
-		"message":     "Provider registered successfully",
-		"provider_id": request.ProviderID,
-	})
+	// ponytail: every case above returns "not implemented" — no concrete cloud
+	// provider is wired yet, so the RegisterCloudProvider path was unreachable dead
+	// code (referenced an unassigned `provider`). Restore it when a provider ctor
+	// replaces one of the stub cases above.
 }
 
 func (h *APIHandlers) GetProvider(w http.ResponseWriter, r *http.Request) {

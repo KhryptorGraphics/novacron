@@ -171,29 +171,29 @@ func (ce *ChaosEngine) injectFaults(ctx context.Context, exp *ChaosExperiment) e
 func (ce *ChaosEngine) injectFault(exp *ChaosExperiment) error {
 	faultStart := time.Now()
 
+	var err error
 	switch exp.FaultType {
 	case FaultNetworkPartition:
-		return ce.injectNetworkPartition(exp)
-
+		err = ce.injectNetworkPartition(exp)
 	case FaultHighLatency:
-		return ce.injectHighLatency(exp)
-
+		err = ce.injectHighLatency(exp)
 	case FaultPacketLoss:
-		return ce.injectPacketLoss(exp)
-
+		err = ce.injectPacketLoss(exp)
 	case FaultBandwidthDegradation:
-		return ce.injectBandwidthDegradation(exp)
-
+		err = ce.injectBandwidthDegradation(exp)
 	case FaultNodeFailure:
-		return ce.injectNodeFailure(exp)
-
+		err = ce.injectNodeFailure(exp)
 	case FaultClockSkew:
-		return ce.injectClockSkew(exp)
-
+		err = ce.injectClockSkew(exp)
 	default:
 		return fmt.Errorf("unsupported fault type: %v", exp.FaultType)
 	}
+	if err != nil {
+		return err
+	}
 
+	// Record how long the fault injection took (previously unreachable — each case
+	// returned directly, so ImpactDuration was never recorded).
 	exp.Metrics.mu.Lock()
 	exp.Metrics.ImpactDuration += time.Since(faultStart)
 	exp.Metrics.mu.Unlock()
