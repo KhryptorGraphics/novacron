@@ -219,7 +219,7 @@ func TestDatacenterModeMigration(t *testing.T) {
 
 	// Verify migration properties
 	assert.Equal(t, upgrade.ModeDatacenter, migration.Mode)
-	assert.Equal(t, vmID, migration.VM.ID)
+	assert.Equal(t, vmID, migration.VM.ID())
 	assert.Equal(t, sourceNode, migration.SourceNode)
 	assert.Equal(t, destNode, migration.DestinationNode)
 

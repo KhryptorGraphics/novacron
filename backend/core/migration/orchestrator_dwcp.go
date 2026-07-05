@@ -120,7 +120,6 @@ func (o *EnhancedLiveMigrationOrchestrator) copyMemoryIterativeWithDWCP(ctx cont
 	}
 
 	state := migration.State
-	maxIterations := o.config.MemoryIterations
 
 	// Get initial memory size (placeholder - would get from VM)
 	totalMemory := int64(4 * 1024 * 1024 * 1024) // 4GB placeholder
@@ -129,11 +128,11 @@ func (o *EnhancedLiveMigrationOrchestrator) copyMemoryIterativeWithDWCP(ctx cont
 	// Simulate getting memory data (in production, would get from hypervisor)
 	memoryData := make([]byte, totalMemory)
 
-	fmt.Printf("DWCP: Starting optimized memory migration for VM %s\n", migration.VM.ID)
+	fmt.Printf("DWCP: Starting optimized memory migration for VM %s\n", migration.VM.ID())
 	startTime := time.Now()
 
 	// Use DWCP for memory transfer
-	err := o.dwcpAdapter.MigrateVMMemory(ctx, migration.VM.ID, memoryData, migration.DestinationNode,
+	err := o.dwcpAdapter.MigrateVMMemory(ctx, migration.VM.ID(), memoryData, migration.DestinationNode,
 		func(transferred int64) {
 			// Update progress
 			state.BytesTransferred.Store(transferred)
@@ -192,11 +191,11 @@ func (o *EnhancedLiveMigrationOrchestrator) syncDiskWithDWCP(ctx context.Context
 		diskBlocks[i] = make([]byte, blockSize)
 	}
 
-	fmt.Printf("DWCP: Starting optimized disk migration for VM %s\n", migration.VM.ID)
+	fmt.Printf("DWCP: Starting optimized disk migration for VM %s\n", migration.VM.ID())
 	startTime := time.Now()
 
 	// Use DWCP for disk transfer
-	err := o.dwcpAdapter.MigrateVMDisk(ctx, migration.VM.ID, diskBlocks, migration.DestinationNode,
+	err := o.dwcpAdapter.MigrateVMDisk(ctx, migration.VM.ID(), diskBlocks, migration.DestinationNode,
 		func(transferred int64) {
 			// Update progress
 			progress := 0.7 + (float64(transferred)/float64(diskSize))*0.2 // Disk is 20% of migration
@@ -285,7 +284,7 @@ func (o *EnhancedLiveMigrationOrchestrator) executeLiveMigrationWithDWCP(ctx con
 
 	// Clean up DWCP connection
 	if o.dwcpAdapter != nil {
-		o.dwcpAdapter.CleanupConnection(migration.VM.ID, migration.DestinationNode)
+		o.dwcpAdapter.CleanupConnection(migration.VM.ID(), migration.DestinationNode)
 	}
 
 	return nil
@@ -309,7 +308,7 @@ func (o *EnhancedLiveMigrationOrchestrator) transferFinalStateWithDWCP(ctx conte
 	finalData := make([]byte, finalBytes)
 
 	// Use DWCP with highest priority for minimal downtime
-	err := o.dwcpAdapter.MigrateVMMemory(ctx, migration.VM.ID+"_final", finalData,
+	err := o.dwcpAdapter.MigrateVMMemory(ctx, migration.VM.ID()+"_final", finalData,
 		migration.DestinationNode, nil)
 
 	if err != nil && o.dwcpConfig.EnableFallback {

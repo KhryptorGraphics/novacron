@@ -14,8 +14,9 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/encoding"
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/partition"
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/prediction"
-	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/sync"
+	assv3sync "github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/sync"
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/v3/transport"
+	"github.com/khryptorgraphics/novacron/backend/core/vm"
 )
 
 // DWCPv3Config configuration for DWCP v3 migration
@@ -86,7 +87,7 @@ type DWCPv3Orchestrator struct {
 	hde         *encoding.HDEv3
 	pba         *prediction.PBAv3
 	itp         *partition.ITPv3
-	ass         *sync.ASSv3
+	ass         *assv3sync.ASSv3
 
 	// Mode management
 	currentMode upgrade.NetworkMode
@@ -312,9 +313,9 @@ func (o *DWCPv3Orchestrator) initializeComponents() error {
 
 	// Initialize ASS v3 (adaptive synchronization)
 	if o.config.EnableASSv3 {
-		assConfig := sync.DefaultASSv3Config(nodeID)
+		assConfig := assv3sync.DefaultASSv3Config(nodeID)
 
-		ass, err := sync.NewASSv3(assConfig)
+		ass, err := assv3sync.NewASSv3(assConfig)
 		if err != nil {
 			return fmt.Errorf("failed to create ASS v3: %w", err)
 		}
@@ -509,7 +510,7 @@ func (o *DWCPv3Orchestrator) phasePrefetch(ctx context.Context, migration *DWCPv
 	}
 
 	// Use PBA to identify pages likely to be accessed
-	hotPages := o.pba.PredictHotPages(ctx, migration.VM.ID, 1000)
+	hotPages := o.pba.PredictHotPages(ctx, migration.VM.ID(), 1000)
 
 	// Prefetch hot pages to destination
 	for _, pageID := range hotPages {
@@ -609,7 +610,7 @@ func (o *DWCPv3Orchestrator) phasePreCopy(ctx context.Context, migration *DWCPv3
 func (o *DWCPv3Orchestrator) phaseConverge(ctx context.Context, migration *DWCPv3Migration) error {
 	// Use ASS v3 for adaptive synchronization
 	if o.ass != nil {
-		return o.ass.Converge(ctx, migration.VM.ID, migration.DestinationNode)
+		return o.ass.Converge(ctx, migration.VM.ID(), migration.DestinationNode)
 	}
 
 	// Fallback convergence logic
@@ -705,7 +706,7 @@ func (o *DWCPv3Orchestrator) phaseVerify(ctx context.Context, migration *DWCPv3M
 
 	// Verify memory integrity if ASS v3 is enabled
 	if o.ass != nil {
-		if err := o.ass.VerifySync(ctx, migration.VM.ID); err != nil {
+		if err := o.ass.VerifySync(ctx, migration.VM.ID()); err != nil {
 			return fmt.Errorf("synchronization verification failed: %w", err)
 		}
 	}
@@ -735,11 +736,11 @@ func (o *DWCPv3Orchestrator) phaseCleanup(ctx context.Context, migration *DWCPv3
 
 	// Clear component state
 	if o.hde != nil {
-		o.hde.ClearBaseline(migration.VM.ID)
+		o.hde.ClearBaseline(migration.VM.ID())
 	}
 
 	if o.pba != nil {
-		o.pba.ClearPredictions(migration.VM.ID)
+		o.pba.ClearPredictions(migration.VM.ID())
 	}
 
 	return nil
@@ -818,7 +819,7 @@ func (o *DWCPv3Orchestrator) checkConvergence(migration *DWCPv3Migration, iterat
 
 	// Check predicted convergence time
 	if o.pba != nil {
-		convergenceTime := o.pba.PredictConvergence(migration.VM.ID, migration.DirtyPageRate)
+		convergenceTime := o.pba.PredictConvergence(migration.VM.ID(), migration.DirtyPageRate)
 		if convergenceTime < targets.MaxDowntime {
 			return true
 		}
@@ -981,17 +982,17 @@ func (o *DWCPv3Orchestrator) handleMigrationError(migration *DWCPv3Migration, er
 
 // Placeholder methods for VM operations (would be implemented with actual hypervisor API)
 
-func (o *DWCPv3Orchestrator) sampleVMMemory(vm *VM) []byte {
+func (o *DWCPv3Orchestrator) sampleVMMemory(vmObj *vm.VM) []byte {
 	// Sample 1MB of VM memory for compression analysis
 	return make([]byte, 1024*1024)
 }
 
-func (o *DWCPv3Orchestrator) getVMPage(vm *VM, pageID int) []byte {
+func (o *DWCPv3Orchestrator) getVMPage(vm *vm.VM, pageID int) []byte {
 	// Get specific memory page from VM
 	return make([]byte, 4096)
 }
 
-func (o *DWCPv3Orchestrator) getDirtyPages(vm *VM) []int {
+func (o *DWCPv3Orchestrator) getDirtyPages(vmObj *vm.VM) []int {
 	// Get list of dirty page IDs
 	// In production, would query hypervisor
 	numPages := vm.MemoryMB * 256 // 256 pages per MB
@@ -1004,7 +1005,7 @@ func (o *DWCPv3Orchestrator) getDirtyPages(vm *VM) []int {
 	return pages
 }
 
-func (o *DWCPv3Orchestrator) countDirtyPages(vm *VM) int {
+func (o *DWCPv3Orchestrator) countDirtyPages(vmObj *vm.VM) int {
 	return len(o.getDirtyPages(vm))
 }
 
@@ -1048,7 +1049,7 @@ func (o *DWCPv3Orchestrator) resumeVMOnDestination(ctx context.Context, migratio
 	return nil
 }
 
-func (o *DWCPv3Orchestrator) cleanupSourceVM(vm *VM) error {
+func (o *DWCPv3Orchestrator) cleanupSourceVM(vmObj *vm.VM) error {
 	// Clean up source VM
 	return nil
 }

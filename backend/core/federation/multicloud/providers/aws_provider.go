@@ -148,7 +148,7 @@ func (p *AWSProvider) CreateVM(ctx context.Context, request *multicloud.VMCreate
 
 	// Set public/private IPs (mock)
 	vm.PrivateIP = "10.0.1.100"
-	if !request.Tags["private_only"] == "true" {
+	if request.Tags["private_only"] != "true" {
 		vm.PublicIP = "54.123.45.67"
 	}
 

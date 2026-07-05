@@ -1236,7 +1236,7 @@ func (p *HTTPMigrationAIProvider) OptimizeCompressionSettings(dataProfile map[st
 	}
 
 	config := CompressionConfig{
-		Type:       CompressionType(resp["type"].(string)),
+		Type:       parseCompressionType(resp["type"].(string)),
 		Level:      int(resp["level"].(float64)),
 		ChunkSize:  int(resp["chunk_size"].(float64)),
 		Confidence: resp["confidence"].(float64),
@@ -1402,7 +1402,6 @@ func (p *HTTPMigrationAIProvider) makeRequest(endpoint string, data map[string]i
 	var lastErr error
 
 	for attempt := 0; attempt < p.retries; attempt++ {
-		start := time.Now()
 
 		jsonData, err := json.Marshal(data)
 		if err != nil {
@@ -1445,10 +1444,6 @@ func (p *HTTPMigrationAIProvider) makeRequest(endpoint string, data map[string]i
 			}
 			break
 		}
-
-		// Track response time for metrics
-		duration := time.Since(start)
-		// Could update metrics here with duration
 
 		return result, nil
 	}
@@ -1745,4 +1740,17 @@ type AIMigrationMetrics struct {
 	AIResponseTime         atomic.Int64 // milliseconds
 	AIFailures            atomic.Int64
 	PredictiveAdjustments atomic.Int64
+}
+// parseCompressionType maps an AI-response compression type name to the enum.
+func parseCompressionType(name string) CompressionType {
+	switch name {
+	case "lz4":
+		return CompressionLZ4
+	case "zstd", "gzip":
+		return CompressionZSTD
+	case "adaptive":
+		return CompressionAdaptive
+	default:
+		return CompressionNone
+	}
 }
