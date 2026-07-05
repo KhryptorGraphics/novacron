@@ -143,14 +143,31 @@ pull. They PASS for the real Docker driver. Making the stub echo fake data to
 pass would be the exact "simulated coat" this effort removes, so it was
 deliberately not done; the honest remaining work is a real containerd driver.
 
-## Known-broken / out of scope
+## Moonshot sweep — done 2026-07-04
 
-The `backend/core` module also contains ~105 experimental "moonshot" packages
-(quantum, photonic, planetary, arvr, iot, autonomous, v4/v5, cognitive, …) that do
-not compile and sit on no production path. They are intentionally excluded from the
-build gate — CI builds the canonical `backend/cmd/api-server`, which transitively
-compiles the real `backend/core` packages. Isolate into a separate module or delete;
-tracked as a follow-up, not a release blocker.
+The `backend/core` module previously carried ~96 experimental "moonshot" packages
+(~344K LOC: quantum, photonic, planetary, arvr, iot, autonomous, v4/v5, cognitive,
+blockchain, edge, research, plus rotted production-named variants cache/ml/security/
+ha/sdn/…) that never compiled and sat on no production path. **All deleted** (two
+reviewable commits). Before deletion, verified none were on the canonical
+api-server/core-server dep closure, in federation/multicloud, behind a build tag, or
+referenced by any `.go.disabled` file; their only importers were themselves already-
+dead off-path code (api/ml, api/admin, `//go:build novacron_secure` main_secure.go,
+cache-monitor, core/compliance, core/governance, examples/policy, dead api tests),
+removed alongside. Root cause across all of them was compile rot (redeclared symbols,
+undefined constants, unused vars, type mismatches) — errors a feature in real use
+physically cannot contain, i.e. never-functioned scaffolding.
+
+Result: **`cd backend/core && go build ./...` now reports 0 broken packages** (was
+96). Canonical api-server + core-server build exit 0; vm gate green. Recoverable via
+git history if any is ever revived.
+
+Residual, pre-existing, out of scope (NOT caused by the sweep, unchanged on `main`):
+`go vet ./...` on `backend/core` still flags ~22 packages (e.g. `audit/types.go`
+unreachable-code, `cmd/novacron/main_test.go` stale `registerLocalSchedulerNode`
+signature) — vet debt in real, building, gate-passing packages. CI does not run
+`go vet ./...` (it runs targeted `go test`); the raw vet-fail count actually dropped
+from 127 → ~22 as a side effect of the sweep. Left as a separate cleanup.
 
 ## Canonical
 
