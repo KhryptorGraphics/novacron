@@ -155,7 +155,14 @@ func (m *MockHypervisor) simulateFailure(failureRate float64) bool {
 // Create creates a mock VM
 func (m *MockHypervisor) Create(ctx context.Context, config VMConfig) (string, error) {
 	m.simulateLatency(m.latencyConfig.CreateLatency)
-	
+
+	// A VM with neither a name nor an id is invalid — real drivers reject it
+	// (kvm: "VM ID is required"; containerd: "container ID is required"), so the
+	// mock must too, else it silently accepts configs the real path refuses.
+	if config.Name == "" && config.ID == "" {
+		return "", fmt.Errorf("invalid config: VM name or ID is required")
+	}
+
 	if m.simulateFailure(m.failures.CreateFailureRate) {
 		return "", fmt.Errorf("mock failure: create operation failed")
 	}

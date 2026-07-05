@@ -38,6 +38,13 @@ func NewContainerDriver(config map[string]interface{}) (VMDriver, error) {
 func (d *ContainerDriver) Create(ctx context.Context, config VMConfig) (string, error) {
 	log.Printf("Creating container VM %s", config.Name)
 
+	// A VM with neither a name nor an id is invalid (matches kvm/containerd
+	// drivers, which require an id). Without this, an empty name scrubs to
+	// "novacron--<hex>" — valid to docker — so a nameless create wrongly succeeds.
+	if config.Name == "" && config.ID == "" {
+		return "", fmt.Errorf("invalid config: VM name or ID is required")
+	}
+
 	// Generate a container name based on VM config (scrub chars docker rejects)
 	safeName := dockerNameUnsafe.ReplaceAllString(config.Name, "-")
 	containerName := fmt.Sprintf("novacron-%s-%s", safeName, strconv.FormatInt(time.Now().UnixNano(), 16))
