@@ -7,6 +7,7 @@ import (
 
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/upgrade"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 func TestDWCPv3MetricsCollector(t *testing.T) {

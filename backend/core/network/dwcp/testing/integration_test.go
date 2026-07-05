@@ -1,7 +1,6 @@
 package testing
 
 import (
-	"fmt"
 	"testing"
 	"time"
 )
@@ -144,7 +143,7 @@ func TestChaosEngineering(t *testing.T) {
 }
 
 // TestReporter tests the test reporter
-func TestReporter(t *testing.T) {
+func TestReporterReport(t *testing.T) {
 	reporter := NewTestReporter()
 
 	// Create mock test results

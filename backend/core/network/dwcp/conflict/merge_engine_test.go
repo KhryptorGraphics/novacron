@@ -163,17 +163,13 @@ func TestStructuralDiff(t *testing.T) {
 	}
 
 	hasModified := false
-	hasAdded := false
-	hasRemoved := false
 
 	for _, change := range diff.Changes {
 		switch change.ChangeType {
 		case "modified":
 			hasModified = true
 		case "added":
-			hasAdded = true
 		case "removed":
-			hasRemoved = true
 		}
 	}
 

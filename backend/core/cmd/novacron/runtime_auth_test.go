@@ -215,7 +215,7 @@ func newRuntimeAuthTestServer(t *testing.T, authConfig runtimeAuthConfig) (*APIS
 		t.Fatalf("NewVMManager returned error: %v", err)
 	}
 
-	if err := registerLocalSchedulerNode(manager, "test-node", t.TempDir()); err != nil {
+	if err := registerLocalSchedulerNode(manager, "test-node", t.TempDir(), "127.0.0.1:9000"); err != nil {
 		manager.Stop()
 		t.Fatalf("registerLocalSchedulerNode returned error: %v", err)
 	}

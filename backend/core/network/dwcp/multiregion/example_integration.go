@@ -285,7 +285,7 @@ func ExampleFailoverScenario() {
 	engine := NewRoutingEngine(topology, StrategyLatency)
 	updater := NewRouteUpdater(topology, NewRoutingTable())
 
-	fmt.Println("=== Failover Scenario Demo ===\n")
+	fmt.Println("=== Failover Scenario Demo ===")
 
 	// Initial route
 	route, _ := engine.ComputeRoute("us-east-1", "ap-south-1")
@@ -329,7 +329,7 @@ func ExampleBandwidthReservation() {
 	bm := NewBandwidthManager(topology)
 	engine := NewRoutingEngine(topology, StrategyBandwidth)
 
-	fmt.Println("=== Bandwidth Reservation Demo ===\n")
+	fmt.Println("=== Bandwidth Reservation Demo ===")
 
 	route, _ := engine.ComputeRoute("us-east-1", "eu-west-1")
 	fmt.Printf("Selected route: %v (bandwidth: %d Mbps)\n", route.Path, route.Metric.Bandwidth)

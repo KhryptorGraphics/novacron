@@ -191,7 +191,7 @@ func TestRegisterLocalSchedulerNodeRegistersInventory(t *testing.T) {
 	}
 	defer manager.Stop()
 
-	if err := registerLocalSchedulerNode(manager, "test-node", t.TempDir()); err != nil {
+	if err := registerLocalSchedulerNode(manager, "test-node", t.TempDir(), "127.0.0.1:9000"); err != nil {
 		t.Fatalf("registerLocalSchedulerNode returned error: %v", err)
 	}
 
@@ -217,7 +217,7 @@ func TestRegisterLocalSchedulerNodeRegistersInventory(t *testing.T) {
 		t.Fatalf("scheduler total disk = %d, want >= 1", node.TotalDiskGB)
 	}
 
-	if err := registerLocalSchedulerNode(manager, "test-node", t.TempDir()); err != nil {
+	if err := registerLocalSchedulerNode(manager, "test-node", t.TempDir(), "127.0.0.1:9000"); err != nil {
 		t.Fatalf("registerLocalSchedulerNode update returned error: %v", err)
 	}
 	if len(manager.ListSchedulerNodes()) != 1 {
@@ -245,7 +245,7 @@ func TestInitializeAPIExposesClusterLocalEndpoints(t *testing.T) {
 	}
 	defer manager.Stop()
 
-	if err := registerLocalSchedulerNode(manager, "test-node", t.TempDir()); err != nil {
+	if err := registerLocalSchedulerNode(manager, "test-node", t.TempDir(), "127.0.0.1:9000"); err != nil {
 		t.Fatalf("registerLocalSchedulerNode returned error: %v", err)
 	}
 

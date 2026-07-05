@@ -3,6 +3,7 @@ package security
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"math/big"
 	"testing"
 	"time"
 
@@ -75,11 +76,6 @@ func TestCertificateManager(t *testing.T) {
 	})
 
 	t.Run("Certificate revocation check", func(t *testing.T) {
-		config := CertificateManagerConfig{
-			AutoRenew:   false,
-			RenewBefore: 30 * 24 * time.Hour,
-		}
-
 		cm := &CertificateManager{
 			logger:       logger,
 			revokedCerts: make(map[string]time.Time),
