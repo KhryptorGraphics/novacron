@@ -1176,13 +1176,15 @@ func (dpi *DPIEngine) checkDPIRule(packet *Packet, rule *DPIRule) bool {
 	// Compile pattern if not already compiled
 	pattern, exists := dpi.patterns[rule.ID]
 	if !exists {
-		flags := 0
+		// Apply case-insensitivity via the (?i) flag when the rule isn't case-sensitive
+		// (previously computed a `flags` int that was never applied — a no-op bug).
+		expr := rule.Pattern
 		if !rule.CaseSensitive {
-			flags = flags // Would add case-insensitive flag
+			expr = "(?i)" + expr
 		}
-		
+
 		var err error
-		pattern, err = regexp.Compile(rule.Pattern)
+		pattern, err = regexp.Compile(expr)
 		if err != nil {
 			log.Printf("Failed to compile DPI pattern %s: %v", rule.Pattern, err)
 			return false

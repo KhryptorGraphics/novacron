@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"net/http"
 	"sync"
 	"time"
@@ -133,7 +134,7 @@ func (hc *HealthChecker) checkServer(server *Server) {
 
 // checkTCP performs TCP connection check
 func (hc *HealthChecker) checkTCP(server *Server) bool {
-	address := fmt.Sprintf("%s:%d", server.Address, server.Port)
+	address := net.JoinHostPort(server.Address, strconv.Itoa(server.Port))
 	conn, err := net.DialTimeout("tcp", address, hc.hcConfig.Timeout)
 	if err != nil {
 		return false

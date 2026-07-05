@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -132,7 +133,7 @@ func (sc *STUNClient) DiscoverExternalAddress() (*ExternalEndpoint, error) {
 }
 
 func (sc *STUNClient) querySTUNServer(server STUNServer) (*ExternalEndpoint, error) {
-	serverAddr := fmt.Sprintf("%s:%d", server.Host, server.Port)
+	serverAddr := net.JoinHostPort(server.Host, strconv.Itoa(server.Port))
 	
 	conn, err := net.DialTimeout("udp", serverAddr, sc.timeout)
 	if err != nil {

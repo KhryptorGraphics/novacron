@@ -304,12 +304,14 @@ func NewDistributedStorageService(
 	// Create encryptor from config
 	encryptor, err := encryption.NewEncryptor(config.EncryptionConfig)
 	if err != nil && config.EncryptionConfig.Algorithm != encryption.EncryptionNone {
+		cancel() // don't leak the context if construction fails before it's stored
 		return nil, fmt.Errorf("failed to create encryptor: %w", err)
 	}
 
 	// Create deduplicator from config
 	deduplicator, err := deduplication.NewDeduplicator(config.DeduplicationConfig)
 	if err != nil && config.DeduplicationConfig.Algorithm != deduplication.DedupNone {
+		cancel() // don't leak the context if construction fails before it's stored
 		return nil, fmt.Errorf("failed to create deduplicator: %w", err)
 	}
 

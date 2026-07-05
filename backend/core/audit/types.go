@@ -148,20 +148,6 @@ func ConvertAuditEntryToAuditEvent(entry AuditEntry) AuditEvent {
 }
 
 func ConvertAuditEventToAuditEntry(event AuditEvent) AuditEntry {
-	return AuditEntry{
-		ID:           event.ID,
-		UserID:       event.UserID,
-		TenantID:     event.TenantID,
-		ResourceType: event.Resource,
-		ResourceID:   event.ResourceID,
-		Action:       string(event.Action),
-		Success:      event.Result == ResultSuccess,
-		Timestamp:    event.Timestamp,
-		IPAddress:    event.IPAddress,
-		UserAgent:    event.UserAgent,
-		AdditionalData: event.Details,
-	}
-
 	// Extract reason if available
 	if event.Details != nil {
 		if reason, ok := event.Details["reason"].(string); ok {

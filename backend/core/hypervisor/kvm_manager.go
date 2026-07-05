@@ -372,12 +372,10 @@ func (m *KVMManager) MigrateVM(ctx context.Context, vmID string, targetHost stri
 	}
 	
 	// Execute migration (using simplified approach for now)
-	// In a real implementation, this would use the appropriate libvirt migration method
+	// ponytail: libvirt migration not wired here — this manager is off the canonical
+	// path (the real migration lives in core/migration + vm/driver_kvm_migrate).
 	log.Printf("Migration would be performed with flags %d to %s", migrationFlags, targetURI)
 	return fmt.Errorf("migration functionality not fully implemented yet")
-	
-	log.Printf("Successfully migrated VM %s to %s", vmID, targetHost)
-	return nil
 }
 
 // --- Snapshot Management ---
@@ -709,39 +707,15 @@ func executeCommand(cmd string) error {
 	return nil
 }
 
-// GetHypervisorMetrics retrieves performance metrics for the KVM host
+// GetHypervisorMetrics retrieves performance metrics for the KVM host.
+// ponytail: stubbed to zero values — node-info retrieval isn't wired in go-libvirt
+// here, and this manager is off the canonical path (real host inventory lives in
+// api-server/cluster.go via /proc + statfs). The unreachable real-metrics body that
+// used to sit below the return is preserved in git history; restore it when this
+// manager is actually used.
 func (m *KVMManager) GetHypervisorMetrics(ctx context.Context) (*KVMResourceInfo, error) {
-	// Use ConnectGetNodeInfo
-	// Node info retrieval not implemented in go-libvirt; set to zero values or implement if needed
 	var nodeInfo KVMResourceInfo
 	return &nodeInfo, nil
-	// allDomains, numDomains, errAll := m.conn.ConnectListAllDomains(1, libvirt.ConnectListDomainsActive|libvirt.ConnectListDomainsInactive)
-	// Get actual hypervisor metrics
-	cpuCores := m.getHostCPUCores()
-	memoryTotal := m.getHostMemoryTotal()
-	
-	// Count VMs
-	domains, _, err := m.conn.ConnectListAllDomains(1, libvirt.ConnectListDomainsActive|libvirt.ConnectListDomainsInactive)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list domains for metrics: %w", err)
-	}
-	
-	totalVMs := len(domains)
-	runningVMs := 0
-	
-	for _, domain := range domains {
-		state, _, _, _, _, err := m.conn.DomainGetInfo(domain)
-		if err == nil && libvirt.DomainState(state) == libvirt.DomainRunning {
-			runningVMs++
-		}
-	}
-	
-	return &KVMResourceInfo{
-		CPUCores:    cpuCores,
-		MemoryTotal: int64(memoryTotal),
-		VMs:         totalVMs,
-		VMsRunning:  runningVMs,
-	}, nil
 }
 
 // --- Helper Functions ---
