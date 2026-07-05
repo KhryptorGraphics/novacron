@@ -3,7 +3,6 @@ package integration_tests
 import (
 	"fmt"
 	"testing"
-	"time"
 )
 
 // Test to validate the fixes have been implemented

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"novacron/backend/core/network/dwcp/optimization/lockfree"
-	"novacron/backend/core/network/dwcp/optimization/simd"
+	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/optimization/lockfree"
+	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/optimization/simd"
 )
 
 // BenchmarkXORDelta benchmarks SIMD vs scalar XOR operations

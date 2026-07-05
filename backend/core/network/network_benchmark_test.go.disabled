@@ -698,7 +698,7 @@ type testDataReader struct {
 	pos  int
 }
 
-func (r *testDataReader) Read(p []byte) (n int, error) {
+func (r *testDataReader) Read(p []byte) (n int, err error) {
 	if r.pos >= len(r.data) {
 		return 0, io.EOF
 	}
@@ -711,7 +711,7 @@ type testDataWriter struct {
 	data []byte
 }
 
-func (w *testDataWriter) Write(p []byte) (n int, error) {
+func (w *testDataWriter) Write(p []byte) (n int, err error) {
 	w.data = append(w.data, p...)
 	return len(p), nil
 }

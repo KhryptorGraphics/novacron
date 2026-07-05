@@ -11,8 +11,8 @@ func TestRaftNode_Creation(t *testing.T) {
 	
 	node := NewRaftNode("node1", peers, transport)
 	
-	if node.id != "node1" {
-		t.Errorf("Expected node ID to be 'node1', got %s", node.id)
+	if node.nodeID != "node1" {
+		t.Errorf("Expected node ID to be 'node1', got %s", node.nodeID)
 	}
 	
 	if node.state != Follower {
@@ -111,11 +111,11 @@ func TestRaftNode_ThreeNodeElection(t *testing.T) {
 	}
 	
 	// Check that all nodes agree on the leader
-	leaderID := leaderNode.id
+	leaderID := leaderNode.nodeID
 	for i := 0; i < 3; i++ {
 		if nodes[i].GetLeader() != leaderID {
 			t.Errorf("Node %s thinks leader is %s, but actual leader is %s",
-				nodes[i].id, nodes[i].GetLeader(), leaderID)
+				nodes[i].nodeID, nodes[i].GetLeader(), leaderID)
 		}
 	}
 }
@@ -197,7 +197,7 @@ func TestRaftNode_LogReplication(t *testing.T) {
 		
 		if logLength != expectedLogLength {
 			t.Errorf("Node %s has log length %d, expected %d",
-				nodes[i].id, logLength, expectedLogLength)
+				nodes[i].nodeID, logLength, expectedLogLength)
 		}
 	}
 }

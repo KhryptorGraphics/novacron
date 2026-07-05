@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"novacron/backend/core/network/dwcp/metrics"
+	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/metrics"
 )
 
 // ExampleInitializeMetrics shows how to initialize the metrics system

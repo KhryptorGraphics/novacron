@@ -1212,7 +1212,7 @@ func (suite *NetworkIsolationTestSuite) setupSecurityGroups() {
 					CreatedAt:   time.Now(),
 					Active:      true,
 				},
-			],
+			},
 			Members:      []string{"web-server-1", "web-server-2"},
 			DefaultAction: SecurityActionDeny,
 			Statistics:   &SecurityGroupStatistics{},
