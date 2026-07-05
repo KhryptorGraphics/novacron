@@ -2295,8 +2295,8 @@ func (m *ComputeJobManager) Start(ctx context.Context) error {
 	}
 
 	// Initialize scheduler
-	if startable, ok := m.scheduler.(interface{ Start(context.Context) error }); ok {
-		if err := startable.Start(ctx); err != nil {
+	if m.scheduler != nil {
+		if err := m.scheduler.Start(); err != nil {
 			return fmt.Errorf("failed to start scheduler: %w", err)
 		}
 	}
@@ -2355,8 +2355,8 @@ func (m *ComputeJobManager) Stop(ctx context.Context) error {
 	}
 
 	// Stop scheduler
-	if stoppable, ok := m.scheduler.(interface{ Stop(context.Context) error }); ok {
-		if err := stoppable.Stop(ctx); err != nil {
+	if m.scheduler != nil {
+		if err := m.scheduler.Stop(); err != nil {
 			errors = append(errors, fmt.Errorf("failed to stop scheduler: %w", err))
 		}
 	}

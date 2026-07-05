@@ -1,6 +1,3 @@
-//go:build amd64
-// +build amd64
-
 package simd
 
 import (
@@ -8,14 +5,6 @@ import (
 
 	"github.com/klauspost/cpuid/v2"
 )
-
-// Assembly function declarations
-//
-//go:noescape
-func crc32CLMUL(data []byte) uint32
-
-//go:noescape
-func crc32cCLMUL(data []byte) uint32
 
 // ChecksumCalculator provides SIMD-accelerated checksum calculation
 type ChecksumCalculator struct {
@@ -139,8 +128,8 @@ func Fletcher32(data []byte) uint32 {
 	return (sum2 << 16) | sum1
 }
 
-// xxHash32 computes xxHash (very fast, good distribution)
-func xxHash32(data []byte, seed uint32) uint32 {
+// XxHash32 computes xxHash (very fast, good distribution)
+func XxHash32(data []byte, seed uint32) uint32 {
 	const (
 		prime1 = 2654435761
 		prime2 = 2246822519

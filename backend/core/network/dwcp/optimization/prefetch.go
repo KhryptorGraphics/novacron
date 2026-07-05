@@ -5,11 +5,9 @@ import (
 	"unsafe"
 )
 
-//go:linkname prefetch runtime.prefetch
-func prefetch(addr unsafe.Pointer)
-
-//go:linkname prefetchw runtime.prefetchw
-func prefetchw(addr unsafe.Pointer)
+// prefetch / prefetchw are provided per-arch: amd64 links to the runtime's
+// hardware PREFETCH intrinsics (prefetch_amd64.go); other arches use no-op
+// stubs (prefetch_generic.go), since Go's runtime.prefetch is amd64-only.
 
 // PrefetchMode defines prefetch strategy
 type PrefetchMode int

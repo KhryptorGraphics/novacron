@@ -2,9 +2,8 @@ package migration
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"net"
-	"sync"
 	"testing"
 	"time"
 

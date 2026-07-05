@@ -1,6 +1,3 @@
-//go:build amd64
-// +build amd64
-
 package simd
 
 import (
@@ -8,14 +5,6 @@ import (
 
 	"github.com/klauspost/cpuid/v2"
 )
-
-// Assembly function declarations
-//
-//go:noescape
-func xorBytesAVX2(dst, src1, src2 []byte)
-
-//go:noescape
-func xorBytesSSSE3(dst, src1, src2 []byte)
 
 // XORDeltaEncoder provides SIMD-accelerated XOR operations for delta encoding
 type XORDeltaEncoder struct {

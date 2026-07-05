@@ -79,7 +79,7 @@ func BenchmarkChecksum(b *testing.B) {
 		b.Run(fmt.Sprintf("xxHash_Size_%d", size), func(b *testing.B) {
 			b.SetBytes(int64(size))
 			for i := 0; i < b.N; i++ {
-				simd.xxHash32(data, 0)
+				simd.XxHash32(data, 0)
 			}
 		})
 	}
