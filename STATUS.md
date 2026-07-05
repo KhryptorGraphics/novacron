@@ -95,11 +95,19 @@ which overstate completion and should not be trusted.
   building). Off the canonical path (behind `//go:build novacron_multicloud`).
   The subsystem holds 3–4 **redundant, mostly-hollow** cloud designs;
   `abstraction/aws_provider.go` has ~21 real `aws-sdk-go-v2` methods but 22
-  `not implemented` stubs, and `GetQuotas`/`GetUsage` return fabricated/empty
-  data (latent lies, flagged not yet fixed). Needs a **consolidation decision**
-  (which design survives) before any implementation; the honest verification
-  ceiling on this box is low — no cloud credentials, and LocalStack covers only
-  EC2/VPC/S3, not cost/monitoring/quotas.
+  `not implemented` stubs. **Latent lies fixed 2026-07-05** (commit `0952bc24`):
+  both AWS providers now error honestly instead of fabricating
+  billing/usage/quota/pricing and claiming success —
+  `abstraction/aws_provider.go` (`GetQuotas`/`GetUsage`/`GetCost`, prior session)
+  and `federation/multicloud/providers/aws_provider.go`
+  (`GetResourceQuota`/`GetResourceUsage`/`GetPricing`/`GetCostEstimate`/`GetBillingData`
+  — the last was fabricating a $1250.75 bill with fake resource IDs). Verification
+  ceiling: inspection + gofmt only — off the canonical path, and an `onnxruntime`
+  transitive pull excludes all Go files on this arm64 box, so no local build gate
+  exists (canonical CI does not build this package either). Still needs a
+  **consolidation decision** (which design survives) before real implementation;
+  no cloud credentials, and LocalStack covers only EC2/VPC/S3, not
+  cost/monitoring/quotas.
 - **Advanced VM ops** (hot-plug, CPU pinning, NUMA) — not implemented.
 
 ## vm sub-package compile gap — quarantined 2026-07-04
@@ -209,6 +217,26 @@ cleaned: its two `Start()`-based tests now skip cleanly when no peer is reachabl
 (mirrors the container-driver skip-guards) instead of failing. The
 `dwcp_manager_test.go` / `config_test.go` failures are left as-is and recorded
 here as known off-path debt.
+
+## Canonical CI gate — GREEN 2026-07-05
+
+The `CI - Canonical Verification` workflow (`.github/workflows/ci.yml`) is
+**green on `main`** — run `28748286801`, commit `d3e26f1f`, all three jobs
+(Canonical Backend, Canonical Frontend, x86 KVM smoke [non-gating,
+`continue-on-error`]). This closed a multi-commit red streak surfaced only on
+push: local checks had run a *subset* of the CI command set. Two root causes,
+both fixed:
+
+- **Backend** — `TestRegisterSecureAPIRoutesCreatesVMOnCompatibilityRoute` failed
+  on a stale sqlmock expectation (`node_id` matched `nil`, but VM-create now
+  records `selfNodeID()` = `"local"` since 219c25d4). Fixed to `sqlmock.AnyArg()`
+  (commit `cb60c022`).
+- **Frontend** — `frontend/package-lock.json` was gitignored and never committed,
+  so setup-node's `cache: npm` + `npm ci` both failed at "Set up Node.js". Un-ignored
+  and committed the 754 KB lockfile (commit `d3e26f1f`).
+
+Lesson recorded: verify the *exact* CI command locally, not a subset — the vm
+`go build` + `-short` test I ran never exercised `go test ./backend/cmd/api-server`.
 
 ## Moonshot sweep — done 2026-07-04
 
