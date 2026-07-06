@@ -62,20 +62,22 @@ func NewContainerIntegrationTest(t *testing.T, driverType VMType) *ContainerInte
 
 // checkContainerRuntimes checks availability of container runtimes
 func (c *ContainerIntegrationTest) checkContainerRuntimes() {
-	// Check Docker
-	if cmd := exec.Command("docker", "--version"); cmd.Run() == nil {
+	// Check Docker. (A command can only be run once: run CombinedOutput and
+	// use its error as the availability signal — the old Run()-then-
+	// CombinedOutput() pair always failed the second call, so the version
+	// string was never captured.)
+	if output, err := exec.Command("docker", "--version").CombinedOutput(); err == nil {
 		c.hasDocker = true
-		if output, err := cmd.CombinedOutput(); err == nil {
-			c.dockerVersion = strings.TrimSpace(string(output))
-		}
+		c.dockerVersion = strings.TrimSpace(string(output))
 	}
 
-	// Check Containerd
-	if cmd := exec.Command("ctr", "--version"); cmd.Run() == nil {
+	// Check Containerd: `ctr version` (no dashes) queries the daemon, so it
+	// only succeeds when the socket is actually reachable by this user —
+	// `ctr --version` merely printed the client version and passed even with
+	// no daemon or no permissions, so the suite then failed at driver init.
+	if output, err := exec.Command("ctr", "version").CombinedOutput(); err == nil {
 		c.hasContainerd = true
-		if output, err := cmd.CombinedOutput(); err == nil {
-			c.containerdVersion = strings.TrimSpace(string(output))
-		}
+		c.containerdVersion = strings.TrimSpace(string(output))
 	}
 }
 
@@ -319,10 +321,12 @@ func (c *ContainerIntegrationTest) TestContainerNetworking(t *testing.T) {
 
 	t.Run("NetworkConfiguration", func(t *testing.T) {
 		if c.driverType == VMTypeContainerd {
-			// driver_containerd_stub.go is an in-memory simulation that does not
-			// attach real networks or echo NetworkID back through GetInfo. Skip
-			// rather than fake it; re-enable when the containerd driver is real.
-			t.Skip("containerd driver is a stub — no real network attachment")
+			// The containerd driver shells out to `ctr`, which runs tasks in the
+			// host network namespace unless CNI plugins (/opt/cni/bin) are
+			// installed and wired via --cni — and even then `ctr` has no notion
+			// of docker-style named networks, so NetworkID can't round-trip
+			// through GetInfo. Skip rather than fake it.
+			t.Skip("ctr-based containerd driver has no named-network attachment (host netns; no CNI wiring)")
 		}
 		config := VMConfig{
 			ID:        "network-test-container",
@@ -555,12 +559,6 @@ func (c *ContainerIntegrationTest) TestContainerErrorHandling(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("InvalidImage", func(t *testing.T) {
-		if c.driverType == VMTypeContainerd {
-			// The containerd stub never pulls or validates an image, so an invalid
-			// image can't surface an error. Skip rather than fake it; re-enable
-			// when the containerd driver actually pulls images.
-			t.Skip("containerd driver is a stub — no real image pull/validation")
-		}
 		config := VMConfig{
 			ID:       "invalid-image-test",
 			Name:     "Invalid Image Test",
