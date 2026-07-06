@@ -314,6 +314,39 @@ host or a build-tag/stub decision. (The ~42 vet "copies lock" warnings from
 `VMEvent` embedding a whole `VM` were subsequently fixed — see "Deliberately-left
 work completed — 2026-07-05" above.) CI runs targeted `go test`, not `go vet ./...`.
 
+## Frontend strict-mode type cleanup — done 2026-07-06
+
+The Next.js frontend's production source is now **type-clean under the strict
+tsconfig** (`strict`, `exactOptionalPropertyTypes`, `noImplicitReturns`,
+`moduleResolution: bundler`) and `npm run build` compiles green
+(`✓ Compiled successfully`). Drove `tsc --noEmit` on production source from **705
+errors → 0** across a multi-session sweep, without loosening a single compiler
+flag. Representative real fixes (not suppressions): added the missing `success`/
+`warning` Badge variants (used across six dashboards); added the missing
+`@/components/ui/avatar` wrapper over the already-installed
+`@radix-ui/react-avatar`; widened optional API-param fields (vms/networks/admin/
+client) to accept explicit `undefined` as `exactOptionalPropertyTypes` requires;
+widened Recharts/chart.js formatter+options signatures at call sites;
+added `return undefined` on the no-op branch of effects (`noImplicitReturns`) and
+`override` modifiers on error-boundary lifecycle methods; reshaped
+`LoadingStates`/`RefreshIndicator` to the wrapper contract their callers already
+used; unified a duplicate `MLModelMetrics` by exporting the panel's type;
+`MetricsCard.value` → `ReactNode`; `lucide` `Memory→MemoryStick`, `CPU→Cpu`, add
+`ArrowRight`; `utils.bytesToSize`.
+
+**CI gate verified locally against the exact command set**: the canonical
+`npm test -- --runTestsByPath <14 curated suites>` → **14 suites / 33 tests pass**,
+and `npm run build` compiles. (Lesson from the 2026-07-05 red streak applied: ran
+the *exact* CI command, not a subset.)
+
+Deliberately left (does NOT gate CI or the production build): ~33 `tsc` errors
+remain in **non-canonical test files** — drift against refactored component/hook
+APIs (`MetricsCard`, `usePerformance`, `validation`), a couple of mock-typing
+mismatches in `distributed-monitoring.*`, and a missing `jest-axe` devDep. None
+are in the canonical `--runTestsByPath` set and `next build` excludes `__tests__`,
+so they are off the gate; a follow-up should either update those tests to the
+current APIs or quarantine them.
+
 ## Canonical
 
 - **Server** — `backend/cmd/api-server`.
