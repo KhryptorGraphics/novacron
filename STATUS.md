@@ -143,13 +143,33 @@ neither Name nor ID, matching the kvm/containerd drivers). Result: `TestDocker
 Integration`, `TestMultiHypervisorIntegration`, `TestVMDriverIntegration` all
 PASS against real docker/qemu; CI `-short` gate stays green.
 
-`TestContainerdIntegration`'s two un-simulatable subtests (`ContainerNetworking`,
-`InvalidImage`) are **honestly `t.Skip`ped** for the containerd driver, because
-`driver_containerd_stub.go` is a pure in-memory simulation (every real containerd
-call commented out) — a stub can't attach a real network or fail on a bad image
-pull. They PASS for the real Docker driver. Making the stub echo fake data to
-pass would be the exact "simulated coat" this effort removes, so it was
-deliberately not done; the honest remaining work is a real containerd driver.
+~~`TestContainerdIntegration`'s two un-simulatable subtests (`ContainerNetworking`,
+`InvalidImage`) are honestly `t.Skip`ped for the containerd driver, because
+`driver_containerd_stub.go` is a pure in-memory simulation~~ — **SUPERSEDED
+2026-07-05**: the stub is deleted and a real containerd driver now exists; see
+"Real containerd driver" section below.
+
+## Real containerd driver + typed VMConfig — done 2026-07-05
+
+Two tracks landed on main (pushed HEAD `d1b22571`), canonical CI GREEN:
+
+- **Track B** (`9476ed67`, `refactor(vm)`): typed `VMConfig` fields for
+  hotplug/NUMA replace the stringly-typed `Config.Tags` encoding; the NUMA/
+  hotplug config JSON survives driver restart instead of JSON-in-Tags. Full
+  unit suite PASS on main after cherry-pick.
+- **Track A** (`d902a34b`, `feat(vm)`): **real containerd driver replacing the
+  simulation stub** — `driver_containerd_stub.go` (pure in-memory, every real
+  call commented out) deleted; new `driver_containerd.go` shells out to `ctr`
+  against live containerd. The previously un-simulatable
+  `TestContainerdIntegration` subtests (`ContainerNetworking`, `InvalidImage`)
+  now run against live containerd instead of being skipped (3 files changed,
+  638 insertions, 577 deletions).
+
+Canonical gate for this push: `CI - Canonical Verification` **success** (run
+28803552345) on `d1b22571`. The simultaneously-failing workflows on that sha
+(`DWCP v3 - CI/CD`, `CI/CD Pipeline`, `NovaCron Production CI/CD`,
+`comprehensive-testing.yml`, `Update Code Memory`) are the pre-existing broken
+legacy pipelines, not regressions from this change and not part of the gate.
 
 ## Whole-module build repair — done 2026-07-05
 
