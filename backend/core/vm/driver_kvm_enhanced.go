@@ -52,6 +52,14 @@ type KVMVMInfo struct {
 	RuntimeDir   string
 	ShareStorage bool
 	IncomingURI  string
+
+	// NUMA, when non-nil, makes buildQEMUArgs emit a -numa topology at launch.
+	// QEMU fixes NUMA at machine init, so ConfigureNUMA stores it here for the
+	// next boot (and refuses a running VM) rather than pretending live reconfig.
+	// ponytail: in-memory only (not persisted to config.json), so it is lost if
+	// the driver restarts between ConfigureNUMA and Start; encode in Config.Tags
+	// if durable-across-restart NUMA is ever needed.
+	NUMA *NUMATopology
 }
 
 // NewKVMDriver creates a new KVM driver (main entry point)
@@ -679,6 +687,25 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 		cpus = maxCPUs
 	}
 
+	// vCPU/memory hotplug headroom is OPT-IN via Config.Tags so a default VM
+	// emits the EXACT same -smp/-m as before (Gate-1 boot / Gate-2 migration must
+	// stay byte-for-byte unaffected). Absent/zero tags -> smpArg/memArg are just
+	// the plain counts. "hotplug.maxvcpus" > cpus adds ,maxcpus=N (query-
+	// hotpluggable-cpus + device_add a vCPU later); "hotplug.maxmem_mb" > mem adds
+	// ,slots=S,maxmem=M (object_add memory-backend-ram + device_add pc-dimm later).
+	smpArg := strconv.Itoa(cpus)
+	if maxVCPUs := tagInt(vmInfo.Config.Tags, "hotplug.maxvcpus"); maxVCPUs > cpus {
+		smpArg = fmt.Sprintf("%d,maxcpus=%d", cpus, maxVCPUs)
+	}
+	memArg := strconv.Itoa(mem)
+	if maxMem := tagInt(vmInfo.Config.Tags, "hotplug.maxmem_mb"); maxMem > mem {
+		slots := tagInt(vmInfo.Config.Tags, "hotplug.mem_slots")
+		if slots <= 0 {
+			slots = 2 // ponytail: default 2 DIMM slots when only maxmem is requested
+		}
+		memArg = fmt.Sprintf("%d,slots=%d,maxmem=%dM", mem, slots, maxMem)
+	}
+
 	// ponytail: no -daemonize — keeps qemu as a tracked child so cmd.Wait()
 	// in monitorVM and driver.Stop reflect the real process; -pidfile still
 	// lets a restarted server rediscover the running qemu.
@@ -695,8 +722,8 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 	args := []string{
 		"-machine", machine + ",accel=" + accel,
 		"-cpu", cpu,
-		"-m", strconv.Itoa(mem),
-		"-smp", strconv.Itoa(cpus),
+		"-m", memArg,
+		"-smp", smpArg,
 		"-netdev", "user,id=net0",
 		"-device", "virtio-net-pci,netdev=net0",
 		"-vnc", fmt.Sprintf(":%d", vmInfo.VNCPort-5900),
@@ -707,6 +734,11 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 		"-serial", "file:" + filepath.Join(sockDir, "console.log"),
 		"-pidfile", filepath.Join(sockDir, "qemu.pid"),
 	}
+
+	// NUMA topology (opt-in; set via ConfigureNUMA before Start). Emitted at
+	// launch because QEMU fixes NUMA at machine init. Nil topology -> no args, so
+	// a default VM is unaffected.
+	args = append(args, numaArgs(vmInfo.NUMA)...)
 
 	// PCIe hotplug slots: the aarch64 "virt" root bus (pcie.0) refuses
 	// hot-plugging, so pre-provision a few pcie-root-ports for HotPlugDevice to
@@ -761,6 +793,46 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 	}
 
 	return args
+}
+
+// tagInt reads an integer opt-in flag from a VM's Config.Tags map, returning 0
+// when the key is absent or unparseable. Tags is used (rather than a new VMConfig
+// field) because VMConfig lives in another file this driver does not own.
+func tagInt(tags map[string]string, key string) int {
+	if tags == nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(tags[key]))
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// numaArgs builds the -numa launch args for a topology, one memory-backend-ram +
+// -numa node per NUMANode. Returns nil for a nil/empty topology (default VM).
+// ponytail: the caller's node memory must sum to the VM's -m size and its node
+// cpus must fall within -smp; QEMU rejects a mismatch at launch (surfaced by
+// launchVM's stderr capture) rather than silently booting wrong.
+func numaArgs(topo *NUMATopology) []string {
+	if topo == nil || len(topo.Nodes) == 0 {
+		return nil
+	}
+	var out []string
+	for _, n := range topo.Nodes {
+		memMB := n.MemoryMB
+		if memMB <= 0 {
+			memMB = 128 // ponytail: qemu rejects a zero-sized memory-backend
+		}
+		backend := fmt.Sprintf("numaram%d", n.ID)
+		out = append(out, "-object", fmt.Sprintf("memory-backend-ram,id=%s,size=%dM", backend, memMB))
+		node := fmt.Sprintf("node,nodeid=%d,memdev=%s", n.ID, backend)
+		if n.CPUs != "" {
+			node += ",cpus=" + n.CPUs
+		}
+		out = append(out, "-numa", node)
+	}
+	return out
 }
 
 func (d *KVMDriverEnhanced) createDiskImage(ctx context.Context, config VMConfig, diskPath string) error {
@@ -1054,8 +1126,12 @@ func (d *KVMDriverEnhanced) SupportsLiveMigration() bool {
 }
 
 // SupportsHotPlug returns whether the driver supports hot-plugging devices.
-// Implemented for disk + network via QMP blockdev-add/netdev_add + device_add
-// (see HotPlugDevice). vCPU/memory hotplug is not (needs launch-time headroom).
+// Implemented for disk + network via QMP blockdev-add/netdev_add + device_add,
+// and for vCPU (device_add into a query-hotpluggable-cpus slot) + memory
+// (object-add memory-backend-ram + device_add pc-dimm) when the VM was launched
+// with the opt-in "hotplug.maxvcpus" / "hotplug.maxmem_mb" headroom tags. Actual
+// vCPU/DIMM hotplug also depends on the guest machine model (e.g. aarch64 "virt"
+// on QEMU 8.2 does not support vCPU hot-plug).
 func (d *KVMDriverEnhanced) SupportsHotPlug() bool {
 	return true
 }
@@ -1070,9 +1146,12 @@ func (d *KVMDriverEnhanced) SupportsSRIOV() bool {
 	return false // Not implemented yet
 }
 
-// SupportsNUMA returns whether the driver supports NUMA configuration
+// SupportsNUMA returns whether the driver supports NUMA configuration. True: a
+// NUMA topology set via ConfigureNUMA before Start is emitted at launch (-numa),
+// verified booting a 2-node guest on aarch64 "virt". Live re-topology is not
+// possible (QEMU fixes NUMA at machine init) and ConfigureNUMA says so.
 func (d *KVMDriverEnhanced) SupportsNUMA() bool {
-	return false // Not implemented yet
+	return true
 }
 
 // GetCapabilities returns the capabilities of the KVM driver
@@ -1176,12 +1255,10 @@ func (d *KVMDriverEnhanced) HotPlugDevice(ctx context.Context, vmID string, devi
 		return hotPlugDisk(q, device)
 	case "network":
 		return hotPlugNetwork(q, device)
-	case "cpu", "memory":
-		// ponytail: real vCPU/DIMM hotplug needs launch-time headroom
-		// (-smp ...,maxcpus=N for cpu; -m size,slots=S,maxmem=M for memory) which
-		// buildQEMUArgs does NOT emit. Wire device_add <cpu-type> / object_add
-		// memory-backend-ram + device_add pc-dimm here once those flags exist.
-		return fmt.Errorf("%s hot-plug unsupported: VM launched without hotplug headroom (needs -smp maxcpus / -m slots,maxmem at boot)", device.Type)
+	case "cpu":
+		return hotPlugCPU(q, device)
+	case "memory":
+		return hotPlugMemory(q, device)
 	default:
 		return fmt.Errorf("unsupported hot-plug device type %q", device.Type)
 	}
@@ -1238,6 +1315,97 @@ func hotPlugNetwork(q *qmpConn, device *DeviceConfig) error {
 		return fmt.Errorf("device_add virtio-net-pci id=%s: %w", device.Name, err)
 	}
 	return nil
+}
+
+// hotPlugCPU hot-plugs a vCPU into the first free query-hotpluggable-cpus slot.
+// It reads the machine's pluggable-CPU layout, picks a slot with no "qom-path"
+// (unplugged), and device_add's device.Name onto it using the slot's own type
+// and topology props (socket/core/thread/cluster ids), which are arch-specific.
+// Requires launch-time headroom (-smp ...,maxcpus=N, opt-in via the
+// "hotplug.maxvcpus" tag) so a free slot exists. Machines that cannot hot-plug
+// CPUs (e.g. aarch64 "virt" on QEMU 8.2) make query-hotpluggable-cpus itself
+// error, which is surfaced verbatim.
+func hotPlugCPU(q *qmpConn, device *DeviceConfig) error {
+	raw, err := q.execute("query-hotpluggable-cpus", nil)
+	if err != nil {
+		return fmt.Errorf("query-hotpluggable-cpus (this machine may not support vCPU hot-plug): %w", err)
+	}
+	var slots []struct {
+		Type    string                 `json:"type"`
+		QOMPath *string                `json:"qom-path"` // present == already plugged
+		Props   map[string]interface{} `json:"props"`
+	}
+	if err := json.Unmarshal(raw, &slots); err != nil {
+		return fmt.Errorf("parse query-hotpluggable-cpus: %w", err)
+	}
+	for _, s := range slots {
+		if s.QOMPath != nil {
+			continue // slot occupied
+		}
+		add := map[string]interface{}{"driver": s.Type, "id": device.Name}
+		for k, v := range s.Props { // socket-id/core-id/thread-id[/cluster-id]
+			add[k] = v
+		}
+		if _, err := q.execute("device_add", add); err != nil {
+			return fmt.Errorf("device_add cpu %s id=%s: %w", s.Type, device.Name, err)
+		}
+		return nil
+	}
+	return fmt.Errorf("no free vCPU slot (all maxcpus in use); raise the \"hotplug.maxvcpus\" headroom")
+}
+
+// hotPlugMemory hot-plugs a pc-dimm backed by an anonymous memory-backend-ram of
+// "size_mb" MiB. Requires launch-time headroom (-m ...,slots=S,maxmem=M, opt-in
+// via the "hotplug.maxmem_mb" tag). The backend object is rolled back if the
+// device attach fails. NOTE: on aarch64 "virt" this needs UEFI firmware loaded
+// (the driver's ensureUEFI) so the machine has an acpi-ged for memory hotplug.
+func hotPlugMemory(q *qmpConn, device *DeviceConfig) error {
+	sizeMB := paramInt(device.Parameters, "size_mb", "size")
+	if sizeMB <= 0 {
+		return fmt.Errorf("memory hot-plug requires a positive \"size_mb\" parameter")
+	}
+	backend := "mem-" + device.Name
+	if _, err := q.execute("object-add", map[string]interface{}{
+		"qom-type": "memory-backend-ram",
+		"id":       backend,
+		"size":     int64(sizeMB) * 1024 * 1024,
+	}); err != nil {
+		return fmt.Errorf("object-add memory-backend-ram (%dMiB): %w", sizeMB, err)
+	}
+	if _, err := q.execute("device_add", map[string]interface{}{
+		"driver": "pc-dimm",
+		"id":     device.Name,
+		"memdev": backend,
+	}); err != nil {
+		// Roll back the now-orphaned backend so its id is reusable on retry.
+		_, _ = q.execute("object-del", map[string]interface{}{"id": backend})
+		return fmt.Errorf("device_add pc-dimm id=%s: %w", device.Name, err)
+	}
+	return nil
+}
+
+// paramInt returns the first parameter present under keys as an int, coercing the
+// JSON number (float64) / int / string forms; 0 if absent or unparseable.
+func paramInt(params map[string]interface{}, keys ...string) int {
+	for _, k := range keys {
+		v, ok := params[k]
+		if !ok {
+			continue
+		}
+		switch n := v.(type) {
+		case float64:
+			return int(n)
+		case int:
+			return n
+		case int64:
+			return int(n)
+		case string:
+			if i, err := strconv.Atoi(strings.TrimSpace(n)); err == nil {
+				return i
+			}
+		}
+	}
+	return 0
 }
 
 // HotUnplugDevice removes a hot-plugged device by its qdev id over QMP. It
@@ -1514,9 +1682,28 @@ func pinIOThreads(q *qmpConn, vmID string, reqs []IOThreadPinning) error {
 	return nil
 }
 
-// ConfigureNUMA configures NUMA topology (not implemented yet)
+// ConfigureNUMA sets a VM's NUMA topology. QEMU fixes NUMA at machine init and
+// CANNOT re-topologize a running guest, so this stores the topology for the next
+// boot (buildQEMUArgs emits -object memory-backend-ram + -numa node per node) and
+// refuses a running VM with a clear error rather than pretending live reconfig
+// works. Configure it before Start (the topology is applied when launchVM runs).
 func (d *KVMDriverEnhanced) ConfigureNUMA(ctx context.Context, vmID string, topology *NUMATopology) error {
-	return fmt.Errorf("NUMA configuration not implemented for KVM driver")
+	if topology == nil || len(topology.Nodes) == 0 {
+		return fmt.Errorf("nil or empty NUMA topology")
+	}
+	d.vmLock.Lock()
+	defer d.vmLock.Unlock()
+
+	vmInfo, ok := d.vms[vmID]
+	if !ok {
+		return fmt.Errorf("VM %s not found", vmID)
+	}
+	if vmInfo.State == StateRunning {
+		return fmt.Errorf("VM %s is running; NUMA topology is fixed at QEMU machine init and cannot be changed on a live VM — stop it and call ConfigureNUMA before Start (buildQEMUArgs applies it at launch)", vmID)
+	}
+	vmInfo.NUMA = topology
+	log.Printf("Stored %d-node NUMA topology for VM %s (applied at next launch)", len(topology.Nodes), vmID)
+	return nil
 }
 
 // GetProcessPID returns the hypervisor process PID for a given VM.
