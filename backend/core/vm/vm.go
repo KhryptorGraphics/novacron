@@ -100,6 +100,17 @@ type VMConfig struct {
 	WorkDir               string                       `yaml:"work_dir" json:"work_dir"`
 	Tags                  map[string]string            `yaml:"tags" json:"tags"`
 	PredictivePrefetching *PredictivePrefetchingConfig `yaml:"predictive_prefetching,omitempty" json:"predictive_prefetching,omitempty"`
+
+	// Advanced KVM opt-in knobs (all zero/nil for a default VM, so buildQEMUArgs
+	// emits identical -smp/-m/-numa). These replace the older Config.Tags string
+	// encoding the KVM driver used to read; the driver still falls back to the
+	// legacy tags when these are unset. MaxVCPUs/MaxMemoryMB are hotplug HEADROOM
+	// ceilings (only take effect when > the plain vCPU/MemoryMB), not host limits.
+	MaxVCPUs    int           `yaml:"max_vcpus,omitempty" json:"max_vcpus,omitempty"`         // -smp N,maxcpus=MaxVCPUs (vCPU hotplug headroom)
+	MaxMemoryMB int           `yaml:"max_memory_mb,omitempty" json:"max_memory_mb,omitempty"` // -m N,slots=..,maxmem=MaxMemoryMB (memory hotplug headroom)
+	MemSlots    int           `yaml:"mem_slots,omitempty" json:"mem_slots,omitempty"`         // DIMM slots for memory hotplug (defaults to 2 when MaxMemoryMB set)
+	IOThreads   int           `yaml:"iothreads,omitempty" json:"iothreads,omitempty"`         // number of -object iothread; primary disk runs on iothread0
+	NUMA        *NUMATopology `yaml:"numa,omitempty" json:"numa,omitempty"`                   // guest NUMA topology (applied at launch; set via ConfigureNUMA)
 }
 
 // PredictivePrefetchingConfig configures AI-driven predictive prefetching for VM migrations

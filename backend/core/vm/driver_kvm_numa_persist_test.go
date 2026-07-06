@@ -11,7 +11,7 @@ import (
 )
 
 // This file exercises CEILING 1: ConfigureNUMA persisting the topology into
-// config.json (Config.Tags["numa.topology"]) so it survives a driver restart
+// config.json (the typed Config.NUMA field) so it survives a driver restart
 // between ConfigureNUMA and Start. The pure test reloads the persisted config the
 // way adopt/reload does (in-memory NUMA field intentionally nil) and inspects the
 // launch args; the real-boot test additionally boots the reloaded VM under qemu.
@@ -45,7 +45,7 @@ func reloadVMFromConfig(t *testing.T, vmID, vmDir string) *KVMVMInfo {
 // Discriminating by construction: the reloaded VM's in-memory NUMA field is nil
 // (asserted), so if buildQEMUArgs read only that field (the pre-fix behaviour) it
 // would emit zero -numa. Two -numa nodes appear only because effectiveNUMA falls
-// back to the persisted Config.Tags["numa.topology"].
+// back to the persisted typed Config.NUMA field.
 func TestConfigureNUMAPersistsAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	vmBase := t.TempDir()
@@ -56,7 +56,8 @@ func TestConfigureNUMAPersistsAcrossRestart(t *testing.T) {
 	}
 
 	// Driver 1: register a created VM (no qemu-img needed — we do not Create a real
-	// disk) and configure NUMA. ConfigureNUMA must JSON-encode into config.json.
+	// disk) and configure NUMA. ConfigureNUMA must persist the typed Config.NUMA
+	// field into config.json.
 	d1 := &KVMDriverEnhanced{
 		qemuBinaryPath: "/usr/bin/qemu-system-x86_64", // "pc" machine; never executed here
 		vmBasePath:     vmBase,
@@ -79,13 +80,17 @@ func TestConfigureNUMAPersistsAcrossRestart(t *testing.T) {
 		t.Fatalf("ConfigureNUMA: %v", err)
 	}
 
-	// The topology must now be on disk, not just in memory.
+	// The topology must now be on disk as the TYPED "numa" field, not the legacy
+	// "numa.topology" string tag.
 	data, err := os.ReadFile(filepath.Join(vmDir, "config.json"))
 	if err != nil {
 		t.Fatalf("read config.json after ConfigureNUMA: %v", err)
 	}
-	if !strings.Contains(string(data), numaTopologyTag) {
-		t.Fatalf("config.json missing %q tag; topology was not persisted:\n%s", numaTopologyTag, data)
+	if !strings.Contains(string(data), `"numa"`) {
+		t.Fatalf("config.json missing typed \"numa\" field; topology was not persisted:\n%s", data)
+	}
+	if strings.Contains(string(data), numaTopologyTag) {
+		t.Fatalf("config.json still uses the deprecated %q tag; ConfigureNUMA should write the typed field:\n%s", numaTopologyTag, data)
 	}
 
 	// Simulate a driver restart: fresh driver, reload the VM from config.json.
@@ -93,6 +98,10 @@ func TestConfigureNUMAPersistsAcrossRestart(t *testing.T) {
 	info2 := reloadVMFromConfig(t, vmID, vmDir)
 	d2.vms[vmID] = info2
 
+	// The typed Config.NUMA field must have round-tripped through config.json.
+	if info2.Config.NUMA == nil || len(info2.Config.NUMA.Nodes) != 2 {
+		t.Fatalf("reloaded Config.NUMA did not round-trip through config.json: %+v", info2.Config.NUMA)
+	}
 	// Discriminating precondition: the in-memory NUMA field was lost by the restart.
 	if info2.NUMA != nil {
 		t.Fatalf("reloaded VM unexpectedly has in-memory NUMA set; test would not discriminate")

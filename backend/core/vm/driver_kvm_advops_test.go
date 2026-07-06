@@ -143,10 +143,8 @@ func TestBuildQEMUArgsHotplugOptIn(t *testing.T) {
 		}
 	}
 
-	// 2. Opt-in headroom via tags flips ONLY -smp/-m.
-	hp := mk(VMConfig{MemoryMB: 512, CPUShares: 1, Tags: map[string]string{
-		"hotplug.maxvcpus": "4", "hotplug.maxmem_mb": "2048", "hotplug.mem_slots": "2",
-	}}, nil)
+	// 2. Opt-in headroom via the TYPED Config fields flips ONLY -smp/-m.
+	hp := mk(VMConfig{MemoryMB: 512, CPUShares: 1, MaxVCPUs: 4, MaxMemoryMB: 2048, MemSlots: 2}, nil)
 	if got := argValue(hp, "-smp"); got != "1,maxcpus=4" {
 		t.Fatalf("opt-in -smp: got %q, want %q", got, "1,maxcpus=4")
 	}
@@ -154,20 +152,41 @@ func TestBuildQEMUArgsHotplugOptIn(t *testing.T) {
 		t.Fatalf("opt-in -m: got %q, want %q", got, "512,slots=2,maxmem=2048M")
 	}
 
-	// 3. A maxvcpus <= cpus (no real headroom) must NOT alter -smp.
-	noop := mk(VMConfig{MemoryMB: 512, CPUShares: 2, Tags: map[string]string{"hotplug.maxvcpus": "2"}}, nil)
+	// 3. A MaxVCPUs <= cpus (no real headroom) must NOT alter -smp.
+	noop := mk(VMConfig{MemoryMB: 512, CPUShares: 2, MaxVCPUs: 2}, nil)
 	if got := argValue(noop, "-smp"); got != "2" {
-		t.Fatalf("maxvcpus<=cpus should not change -smp: got %q", got)
+		t.Fatalf("MaxVCPUs<=cpus should not change -smp: got %q", got)
 	}
 
-	// 4. NUMA topology adds -numa/-object only when present.
-	nu := mk(VMConfig{MemoryMB: 512, CPUShares: 2}, &NUMATopology{Nodes: []NUMANode{
+	// 4. NUMA topology via the TYPED Config.NUMA field adds -numa/-object.
+	nu := mk(VMConfig{MemoryMB: 512, CPUShares: 2, NUMA: &NUMATopology{Nodes: []NUMANode{
 		{ID: 0, CPUs: "0", MemoryMB: 256}, {ID: 1, CPUs: "1", MemoryMB: 256},
-	}})
+	}}}, nil)
 	if n := strings.Count(strings.Join(nu, " "), "-numa "); n != 2 {
-		t.Fatalf("expected 2 -numa nodes, got %d in %v", n, nu)
+		t.Fatalf("expected 2 -numa nodes from Config.NUMA, got %d in %v", n, nu)
 	}
-	t.Logf("PASS: default -smp/-m unchanged; headroom+NUMA are strictly opt-in")
+
+	// 5. Back-compat: the deprecated string tags still work when the typed field
+	// is unset (a caller this driver does not own — e.g. driver_kvm_iothread_test —
+	// still sets Tags["iothreads"], so the fallback must stay).
+	tagOnly := mk(VMConfig{MemoryMB: 512, CPUShares: 1, Tags: map[string]string{
+		"hotplug.maxvcpus": "4", "hotplug.maxmem_mb": "2048", "hotplug.mem_slots": "2",
+	}}, nil)
+	if got := argValue(tagOnly, "-smp"); got != "1,maxcpus=4" {
+		t.Fatalf("tag fallback -smp: got %q, want %q", got, "1,maxcpus=4")
+	}
+	if got := argValue(tagOnly, "-m"); got != "512,slots=2,maxmem=2048M" {
+		t.Fatalf("tag fallback -m: got %q, want %q", got, "512,slots=2,maxmem=2048M")
+	}
+
+	// 6. The typed field takes PRECEDENCE over a conflicting legacy tag.
+	both := mk(VMConfig{MemoryMB: 512, CPUShares: 1, MaxVCPUs: 8,
+		Tags: map[string]string{"hotplug.maxvcpus": "4"}}, nil)
+	if got := argValue(both, "-smp"); got != "1,maxcpus=8" {
+		t.Fatalf("typed field should win over tag: got %q, want %q", got, "1,maxcpus=8")
+	}
+
+	t.Logf("PASS: default -smp/-m unchanged; typed headroom+NUMA opt-in, tags still a fallback, typed wins over tag")
 }
 
 // TestCPUHotplugRealQMP boots a VM with opt-in cpu-hotplug headroom (1 present
@@ -198,7 +217,7 @@ func TestCPUHotplugRealQMP(t *testing.T) {
 	if _, err := d.Create(ctx, VMConfig{
 		ID: vmID, Name: vmID, Type: VMTypeKVM,
 		MemoryMB: 512, CPUShares: 1, Image: cirros,
-		Tags: map[string]string{"hotplug.maxvcpus": "2"}, // opt-in headroom
+		MaxVCPUs: 2, // opt-in headroom (typed field)
 	}); err != nil {
 		t.Fatalf("create VM: %v", err)
 	}
@@ -267,7 +286,7 @@ func TestMemHotplugRealQMP(t *testing.T) {
 	if _, err := d.Create(ctx, VMConfig{
 		ID: vmID, Name: vmID, Type: VMTypeKVM,
 		MemoryMB: 512, CPUShares: 1, Image: cirros,
-		Tags: map[string]string{"hotplug.maxmem_mb": "1024", "hotplug.mem_slots": "2"},
+		MaxMemoryMB: 1024, MemSlots: 2, // opt-in headroom (typed fields)
 	}); err != nil {
 		t.Fatalf("create VM: %v", err)
 	}

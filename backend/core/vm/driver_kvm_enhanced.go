@@ -688,19 +688,20 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 		cpus = maxCPUs
 	}
 
-	// vCPU/memory hotplug headroom is OPT-IN via Config.Tags so a default VM
+	// vCPU/memory hotplug headroom is OPT-IN via the typed Config fields (MaxVCPUs/
+	// MaxMemoryMB/MemSlots), falling back to the legacy string tags, so a default VM
 	// emits the EXACT same -smp/-m as before (Gate-1 boot / Gate-2 migration must
-	// stay byte-for-byte unaffected). Absent/zero tags -> smpArg/memArg are just
-	// the plain counts. "hotplug.maxvcpus" > cpus adds ,maxcpus=N (query-
-	// hotpluggable-cpus + device_add a vCPU later); "hotplug.maxmem_mb" > mem adds
-	// ,slots=S,maxmem=M (object_add memory-backend-ram + device_add pc-dimm later).
+	// stay byte-for-byte unaffected). Zero/absent -> smpArg/memArg are just the
+	// plain counts. MaxVCPUs > cpus adds ,maxcpus=N (query-hotpluggable-cpus +
+	// device_add a vCPU later); MaxMemoryMB > mem adds ,slots=S,maxmem=M (object_add
+	// memory-backend-ram + device_add pc-dimm later).
 	smpArg := strconv.Itoa(cpus)
-	if maxVCPUs := tagInt(vmInfo.Config.Tags, "hotplug.maxvcpus"); maxVCPUs > cpus {
+	if maxVCPUs := cfgInt(vmInfo.Config.MaxVCPUs, vmInfo.Config.Tags, "hotplug.maxvcpus"); maxVCPUs > cpus {
 		smpArg = fmt.Sprintf("%d,maxcpus=%d", cpus, maxVCPUs)
 	}
 	memArg := strconv.Itoa(mem)
-	if maxMem := tagInt(vmInfo.Config.Tags, "hotplug.maxmem_mb"); maxMem > mem {
-		slots := tagInt(vmInfo.Config.Tags, "hotplug.mem_slots")
+	if maxMem := cfgInt(vmInfo.Config.MaxMemoryMB, vmInfo.Config.Tags, "hotplug.maxmem_mb"); maxMem > mem {
+		slots := cfgInt(vmInfo.Config.MemSlots, vmInfo.Config.Tags, "hotplug.mem_slots")
 		if slots <= 0 {
 			slots = 2 // ponytail: default 2 DIMM slots when only maxmem is requested
 		}
@@ -738,17 +739,19 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 
 	// NUMA topology (opt-in; set via ConfigureNUMA before Start). Emitted at
 	// launch because QEMU fixes NUMA at machine init. Nil topology -> no args, so
-	// a default VM is unaffected. effectiveNUMA falls back to the topology persisted
-	// in Config.Tags so it survives a driver restart between ConfigureNUMA and Start.
+	// a default VM is unaffected. effectiveNUMA reads the typed Config.NUMA field
+	// (persisted in config.json) so it survives a driver restart between
+	// ConfigureNUMA and Start.
 	args = append(args, numaArgs(effectiveNUMA(vmInfo))...)
 
-	// IOThreads (opt-in via Config.Tags["iothreads"]=N). Emit N iothread objects
-	// (iothread0..iothreadN-1) so query-iothreads returns them and
-	// ConfigureCPUPinning can actually pin their host threads; the primary disk
-	// below runs its virtio-blk dataplane on iothread0. Absent/zero tag -> no args
-	// AND the disk device string is unchanged, so a default VM (and any migration
-	// cutover, which never sets this tag) is byte-for-byte unaffected.
-	iothreads := tagInt(vmInfo.Config.Tags, "iothreads")
+	// IOThreads (opt-in via typed Config.IOThreads, falling back to the legacy
+	// Config.Tags["iothreads"]=N). Emit N iothread objects (iothread0..iothreadN-1)
+	// so query-iothreads returns them and ConfigureCPUPinning can actually pin their
+	// host threads; the primary disk below runs its virtio-blk dataplane on
+	// iothread0. Absent/zero -> no args AND the disk device string is unchanged, so
+	// a default VM (and any migration cutover, which never sets this) is
+	// byte-for-byte unaffected.
+	iothreads := cfgInt(vmInfo.Config.IOThreads, vmInfo.Config.Tags, "iothreads")
 	args = append(args, iothreadArgs(iothreads)...)
 
 	// PCIe hotplug slots: the aarch64 "virt" root bus (pcie.0) refuses
@@ -814,8 +817,7 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 }
 
 // tagInt reads an integer opt-in flag from a VM's Config.Tags map, returning 0
-// when the key is absent or unparseable. Tags is used (rather than a new VMConfig
-// field) because VMConfig lives in another file this driver does not own.
+// when the key is absent or unparseable.
 func tagInt(tags map[string]string, key string) int {
 	if tags == nil {
 		return 0
@@ -825,6 +827,17 @@ func tagInt(tags map[string]string, key string) int {
 		return 0
 	}
 	return n
+}
+
+// cfgInt resolves an opt-in integer knob: the typed VMConfig field wins when
+// non-zero, otherwise it falls back to the legacy string tag. A default VM (typed
+// field zero, tag absent) yields 0, so buildQEMUArgs emits identical args.
+// ponytail: deprecated string-tag fallback; drop once all callers set the typed field.
+func cfgInt(typed int, tags map[string]string, key string) int {
+	if typed != 0 {
+		return typed
+	}
+	return tagInt(tags, key)
 }
 
 // numaArgs builds the -numa launch args for a topology, one memory-backend-ram +
@@ -853,25 +866,30 @@ func numaArgs(topo *NUMATopology) []string {
 	return out
 }
 
-// numaTopologyTag is the Config.Tags key under which ConfigureNUMA JSON-encodes
-// the NUMA topology so it persists in config.json across a driver restart (Tags
-// is used because VMConfig lives in a file this driver does not own).
+// numaTopologyTag is the legacy Config.Tags key under which older ConfigureNUMA
+// JSON-encoded the topology. Kept only as a read fallback (decodeNUMATag) so VMs
+// whose config.json predates the typed Config.NUMA field still get their topology.
 const numaTopologyTag = "numa.topology"
 
-// effectiveNUMA returns the topology to emit at launch: the in-memory NUMA field
-// if set, else the one persisted in Config.Tags["numa.topology"] by ConfigureNUMA.
-// The tag fallback is what makes NUMA survive a driver restart between
-// ConfigureNUMA and Start (adopt/reload rehydrates Config, not the NUMA field).
-// Returns nil when neither is present, so a default VM emits no -numa.
+// effectiveNUMA returns the topology to emit at launch, in precedence order:
+//  1. the in-memory KVMVMInfo.NUMA field (same-process fast path set by ConfigureNUMA);
+//  2. the typed Config.NUMA field (persisted in config.json, survives a driver restart);
+//  3. the legacy Config.Tags["numa.topology"] JSON (deprecated back-compat).
+//
+// Returns nil when none is present, so a default VM emits no -numa.
 func effectiveNUMA(vmInfo *KVMVMInfo) *NUMATopology {
 	if vmInfo.NUMA != nil {
 		return vmInfo.NUMA
+	}
+	if vmInfo.Config.NUMA != nil && len(vmInfo.Config.NUMA.Nodes) > 0 {
+		return vmInfo.Config.NUMA
 	}
 	return decodeNUMATag(vmInfo.Config.Tags)
 }
 
 // decodeNUMATag decodes the JSON topology persisted under numaTopologyTag, or nil
 // when the tag is absent/empty/unparseable (logged) or has no nodes.
+// ponytail: deprecated string-tag fallback; drop once all callers set the typed field.
 func decodeNUMATag(tags map[string]string) *NUMATopology {
 	raw := tags[numaTopologyTag] // nil map read is "" — no need to nil-check
 	if raw == "" {
@@ -1770,19 +1788,12 @@ func (d *KVMDriverEnhanced) ConfigureNUMA(ctx context.Context, vmID string, topo
 		return fmt.Errorf("VM %s is running; NUMA topology is fixed at QEMU machine init and cannot be changed on a live VM — stop it and call ConfigureNUMA before Start (buildQEMUArgs applies it at launch)", vmID)
 	}
 
-	// Persist the topology into Config.Tags (JSON) and out to config.json so it
-	// survives a driver restart between ConfigureNUMA and Start — adopt/reload
+	// Persist the topology into the typed Config.NUMA field and out to config.json so
+	// it survives a driver restart between ConfigureNUMA and Start — adopt/reload
 	// rehydrates Config from config.json but not the in-memory NUMA field, and
-	// buildQEMUArgs reads the tag (effectiveNUMA) when that field is nil. The
+	// buildQEMUArgs reads Config.NUMA (effectiveNUMA) when that field is nil. The
 	// in-memory field is kept too as the same-process fast path.
-	encoded, err := json.Marshal(topology)
-	if err != nil {
-		return fmt.Errorf("encode NUMA topology: %w", err)
-	}
-	if vmInfo.Config.Tags == nil {
-		vmInfo.Config.Tags = map[string]string{}
-	}
-	vmInfo.Config.Tags[numaTopologyTag] = string(encoded)
+	vmInfo.Config.NUMA = topology
 	vmInfo.NUMA = topology
 	if err := d.saveVMConfig(vmInfo); err != nil {
 		return fmt.Errorf("persist NUMA topology to config.json: %w", err)
