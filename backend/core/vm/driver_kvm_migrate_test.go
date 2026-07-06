@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -155,9 +156,17 @@ func firstInPath(cands ...string) string {
 // this environment. Returns "" when none exists (caller skips).
 func findCirrosImage() string {
 	home, _ := os.UserHomeDir()
+	// arch-aware: cirros images are per-arch and the KVM driver launches
+	// qemu-system-<arch> to match the host, so pick the guest image for this
+	// host arch. Lets the real-qemu tests run on both arm64 and x86_64.
+	arch := "aarch64"
+	if runtime.GOARCH == "amd64" {
+		arch = "x86_64"
+	}
+	img := "cirros-0.6.2-" + arch + "-disk.img"
 	cands := []string{
-		filepath.Join(home, "novacron-run/images/cirros-0.6.2-aarch64-disk.img"),
-		filepath.Join(home, "novacron-e2e/images/cirros-0.6.2-aarch64-disk.img"),
+		filepath.Join(home, "novacron-run/images", img),
+		filepath.Join(home, "novacron-e2e/images", img),
 	}
 	for _, c := range cands {
 		if fi, err := os.Stat(c); err == nil && fi.Size() > 0 {
