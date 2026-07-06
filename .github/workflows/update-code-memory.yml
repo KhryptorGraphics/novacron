@@ -1,10 +1,8 @@
 name: Update Code Memory
 
+# Push/PR triggers removed: indexing every push polluted the main-branch signal.
+# Nightly schedule + manual dispatch is sufficient for code-memory freshness.
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
   schedule:
     - cron: '0 0 * * *'  # Run daily at midnight UTC
@@ -83,7 +81,7 @@ jobs:
           "
           
       - name: Upload report as artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: code-memory-report
           path: code_memory_report.md

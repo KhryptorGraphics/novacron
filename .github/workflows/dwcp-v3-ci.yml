@@ -1,10 +1,8 @@
 name: DWCP v3 - Continuous Integration
 
+# DISABLED on push/PR: deep drift (Node setup/cache failures across all jobs,
+# Trivy SARIF upload requires GH Advanced Security). Canonical signal is ci.yml.
 on:
-  push:
-    branches: [main, develop, 'feature/**', 'dwcp-v3/**']
-  pull_request:
-    branches: [main, develop]
   workflow_dispatch:
 
 env:

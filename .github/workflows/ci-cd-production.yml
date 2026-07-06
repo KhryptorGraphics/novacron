@@ -1,15 +1,9 @@
 name: NovaCron Production CI/CD Pipeline
 
+# DISABLED on push/PR: deep drift (deprecated actions fail at job setup, DB migrations
+# broken, deploy secrets absent). Canonical signal is ci.yml. Run manually if needed.
 on:
-  push:
-    branches:
-      - main
-      - release/*
-    tags:
-      - 'v*'
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io

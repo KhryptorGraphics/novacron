@@ -1,10 +1,9 @@
 name: CI/CD Pipeline
 
+# DISABLED on push/PR: superseded by ci.yml (CI - Canonical Verification).
+# Deep drift (Node setup/cache failures). Run manually via workflow_dispatch if needed.
 on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   test:

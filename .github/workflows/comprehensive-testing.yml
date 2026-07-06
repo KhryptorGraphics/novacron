@@ -1,10 +1,9 @@
 # Comprehensive Testing Pipeline for NovaCron Phase 1
 name: Comprehensive Testing Pipeline
 
+# DISABLED nightly cron: workflow fails at startup (zero jobs planned) — deep drift.
+# Re-enable schedule after the pipeline is repaired; manual runs via workflow_dispatch.
 on:
-  schedule:
-    # Run comprehensive tests daily at 2 AM UTC
-    - cron: '0 2 * * *'
   workflow_dispatch:
 
 env:
