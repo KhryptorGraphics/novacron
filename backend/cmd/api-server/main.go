@@ -679,6 +679,9 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 	registerVMPowerRoute(router, db, vmManager, "start")
 	registerVMPowerRoute(router, db, vmManager, "stop")
 	registerVMMigrateRoute(router, db, vmManager)
+	// Async variant of the migrate route (202 + job id, migration runs in the
+	// background) so large/slow migrations can't trip the request WRITE_TIMEOUT.
+	registerVMMigrateAsyncRoutes(router, db, vmManager)
 
 	router.HandleFunc("/vms/{id}/metrics", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["id"]
