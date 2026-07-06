@@ -640,7 +640,10 @@ func (a *AzureIntegration) Shutdown(ctx context.Context) error {
 
 // CalculateCost calculates estimated Azure costs for a VM
 func (a *AzureIntegration) CalculateCost(ctx context.Context, vmSize string, hours float64) (float64, error) {
-	// Simplified cost calculation - in production, use Azure Pricing API
+	// ponytail: rough ESTIMATE from a static table of published pay-as-you-go
+	// rates — not live pricing; ignores region, reservations, and spot. Good
+	// enough for relative cross-cloud placement comparison, NOT for billing.
+	// Upgrade: Azure Retail Prices API.
 	costPerHour := map[string]float64{
 		"Standard_B1s":   0.0104,
 		"Standard_B2s":   0.0416,

@@ -666,7 +666,10 @@ func (a *AWSIntegration) Shutdown(ctx context.Context) error {
 
 // CalculateCost calculates estimated AWS costs for an instance
 func (a *AWSIntegration) CalculateCost(ctx context.Context, instanceType string, hours float64) (float64, error) {
-	// Simplified cost calculation - in production, use AWS Price List API
+	// ponytail: rough ESTIMATE from a static table of published us-east-1
+	// on-demand rates — not live pricing; ignores region, reserved/savings
+	// plans, and spot. Good enough for relative cross-cloud placement
+	// comparison, NOT for billing. Upgrade: AWS Price List / Pricing API.
 	costPerHour := map[string]float64{
 		"t3.micro":   0.0104,
 		"t3.small":   0.0208,

@@ -614,7 +614,11 @@ func (g *GCPIntegration) Shutdown(ctx context.Context) error {
 
 // CalculateCost calculates estimated GCP costs for an instance
 func (g *GCPIntegration) CalculateCost(ctx context.Context, machineType string, hours float64, preemptible bool) (float64, error) {
-	// Simplified cost calculation - in production, use GCP Pricing API
+	// ponytail: rough ESTIMATE from a static table of published on-demand
+	// rates — not live pricing; ignores region and sustained-use discounts
+	// (preemptible ~-70% approximated below). Good enough for relative
+	// cross-cloud placement comparison, NOT for billing. Upgrade: GCP
+	// Cloud Billing Catalog API.
 	standardCostPerHour := map[string]float64{
 		"e2-micro":      0.0084,
 		"e2-small":      0.0168,
