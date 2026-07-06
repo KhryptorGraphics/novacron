@@ -107,7 +107,7 @@ jobs:
     - name: Run multi-cloud tests
       run: |
         cd backend/tests/multicloud
-        go test -v -timeout 30m -run "Test${{ matrix.cloud | title }}.*" ./...
+        go test -v -timeout 30m -run "(?i)^Test${{ matrix.cloud }}" ./...
 
     - name: Upload test results
       if: always()
