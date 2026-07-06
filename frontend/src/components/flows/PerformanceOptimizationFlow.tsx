@@ -1,35 +1,29 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { 
   TrendingUp,
   TrendingDown,
   Zap,
-  CPU,
+  Cpu,
+  ArrowRight,
   MemoryStick,
   HardDrive,
   Network,
   AlertTriangle,
   CheckCircle,
-  Clock,
-  Target,
   Settings,
   Play,
-  Pause,
   BarChart3,
-  LineChart,
   Activity,
-  Gauge,
   Wrench,
   Lightbulb,
   RefreshCw,
@@ -279,7 +273,7 @@ const mockRecommendations: OptimizationRecommendation[] = [
 
 export function PerformanceOptimizationFlow() {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [selectedVM, setSelectedVM] = useState('vm-001');
+  const [selectedVM, _setSelectedVM] = useState('vm-001');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [selectedRecommendations, setSelectedRecommendations] = useState<string[]>([]);
@@ -310,9 +304,10 @@ export function PerformanceOptimizationFlow() {
           return prev + Math.random() * 8;
         });
       }, 500);
-      
+
       return () => clearInterval(interval);
     }
+    return undefined;
   }, [isAnalyzing, toast]);
 
   // Simulate optimization job progress
@@ -352,9 +347,10 @@ export function PerformanceOptimizationFlow() {
           return { ...prev, progress: newProgress };
         });
       }, 800);
-      
+
       return () => clearInterval(interval);
     }
+    return undefined;
   }, [optimizationJob?.status, selectedRecommendations.length, toast]);
 
   const startAnalysis = () => {
@@ -395,7 +391,7 @@ export function PerformanceOptimizationFlow() {
 
   const getMetricIcon = (category: string) => {
     switch (category) {
-      case 'cpu': return CPU;
+      case 'cpu': return Cpu;
       case 'memory': return MemoryStick;
       case 'disk': return HardDrive;
       case 'network': return Network;

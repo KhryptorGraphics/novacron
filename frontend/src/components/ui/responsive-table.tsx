@@ -6,8 +6,8 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface ResponsiveTableProps {
   children: React.ReactNode;
-  className?: string;
-  containerClassName?: string;
+  className?: string | undefined;
+  containerClassName?: string | undefined;
 }
 
 export function ResponsiveTable({ 
@@ -115,10 +115,10 @@ export function ResponsiveTableRow({
 
 interface ResponsiveTableCellProps {
   children: React.ReactNode;
-  className?: string;
-  mobileLabel?: string;
-  priority?: "high" | "medium" | "low";
-  align?: "left" | "center" | "right";
+  className?: string | undefined;
+  mobileLabel?: string | undefined;
+  priority?: "high" | "medium" | "low" | undefined;
+  align?: "left" | "center" | "right" | undefined;
 }
 
 export function ResponsiveTableCell({ 
@@ -159,12 +159,12 @@ export function ResponsiveTableCell({
 
 interface ResponsiveTableHeadProps {
   children: React.ReactNode;
-  className?: string;
-  priority?: "high" | "medium" | "low";
-  align?: "left" | "center" | "right";
-  sortable?: boolean;
-  sorted?: "asc" | "desc" | null;
-  onSort?: () => void;
+  className?: string | undefined;
+  priority?: "high" | "medium" | "low" | undefined;
+  align?: "left" | "center" | "right" | undefined;
+  sortable?: boolean | undefined;
+  sorted?: "asc" | "desc" | null | undefined;
+  onSort?: (() => void) | undefined;
 }
 
 export function ResponsiveTableHead({ 

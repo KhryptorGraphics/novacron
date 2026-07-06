@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,9 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { FadeIn } from "@/lib/animations";
 import { 
   Database, 
   Search, 
@@ -32,7 +30,6 @@ import {
   Save, 
   X, 
   AlertTriangle,
-  Eye,
   Download,
   Upload,
   RefreshCw
@@ -89,7 +86,7 @@ interface EditingRow {
 
 export function DatabaseEditor() {
   const [selectedTable, setSelectedTable] = useState("users");
-  const [tableData, setTableData] = useState(mockUsers);
+  const [tableData, setTableData] = useState<Record<string, any>[]>(mockUsers);
   const [searchQuery, setSearchQuery] = useState("");
   const [editingRow, setEditingRow] = useState<EditingRow | null>(null);
   const [showDangerZone, setShowDangerZone] = useState(false);

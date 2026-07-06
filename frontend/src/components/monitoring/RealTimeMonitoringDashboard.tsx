@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -17,14 +17,7 @@ import {
   Bell,
   BellOff,
   CheckCircle,
-  Clock,
-  Database,
-  Globe,
-  HardDrive,
   Info,
-  Loader2,
-  MemoryStick,
-  Network,
   RefreshCw,
   Server,
   Settings,
@@ -32,12 +25,9 @@ import {
   TrendingUp,
   Wifi,
   WifiOff,
-  Zap,
-  AlertCircle,
-  BarChart3,
-  LineChart as LineChartIcon
+  AlertCircle
 } from 'lucide-react';
-import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
+import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
 import { useMonitoringWebSocket } from '@/hooks/useWebSocket';
 
 interface Metric {
@@ -83,10 +73,9 @@ const RealTimeMonitoringDashboard: React.FC = () => {
   const [selectedTimeRange, setSelectedTimeRange] = useState('1h');
   const [selectedMetricView, setSelectedMetricView] = useState('grid');
   const [alertFilter, setAlertFilter] = useState('all');
-  const metricsRef = useRef<{ [key: string]: number[] }>({});
 
   // WebSocket connection for real-time data
-  const { data: wsData, isConnected } = useMonitoringWebSocket();
+  const { data: _wsData, isConnected } = useMonitoringWebSocket();
 
   // Generate mock real-time data
   useEffect(() => {
@@ -207,10 +196,12 @@ const RealTimeMonitoringDashboard: React.FC = () => {
         id: `alert-${Date.now()}-${index}`,
         timestamp: new Date(Date.now() - Math.random() * 3600000).toISOString(),
         acknowledged: false,
-        actions: template.severity === 'error' ? [
-          { label: 'Restart Service', action: 'restart' },
-          { label: 'View Logs', action: 'logs' }
-        ] : undefined
+        ...(template.severity === 'error' ? {
+          actions: [
+            { label: 'Restart Service', action: 'restart' },
+            { label: 'View Logs', action: 'logs' }
+          ]
+        } : {})
       }));
     };
 

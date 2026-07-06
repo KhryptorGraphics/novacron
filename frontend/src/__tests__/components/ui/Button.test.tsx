@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@/src/__tests__/utils/test-utils';
+import { render, screen } from '@/__tests__/utils/test-utils';
 import userEvent from '@testing-library/user-event';
 
 // Mock Button component

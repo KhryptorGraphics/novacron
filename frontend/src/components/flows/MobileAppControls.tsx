@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
@@ -27,10 +27,7 @@ import {
   RefreshCw,
   Volume2,
   Vibrate,
-  Eye,
-  EyeOff,
-  Lock,
-  Unlock
+  Lock
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 

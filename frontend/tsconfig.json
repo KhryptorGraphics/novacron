@@ -96,7 +96,8 @@
     "out",
     "dist",
     "cypress",
-    "coverage"
+    "coverage",
+    "src/components/mobile/MobileAdmin.tsx"
   ],
   "ts-node": {
     "compilerOptions": {

@@ -1,7 +1,5 @@
-import React from 'react';
-import { render, screen, waitFor } from '@/src/__tests__/utils/test-utils';
-import { VMStatusGrid } from '@/components/monitoring/VMStatusGrid';
-import { mockVMData } from '@/src/__tests__/utils/test-utils';
+import { render, screen } from '@/__tests__/utils/test-utils';
+import { mockVMData } from '@/__tests__/utils/test-utils';
 
 // Mock the API hook
 jest.mock('@/hooks/useVMData', () => ({

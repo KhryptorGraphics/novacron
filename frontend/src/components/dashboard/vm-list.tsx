@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { OSSelector } from "@/components/dashboard/os-selector";
 import {
   Card,
@@ -33,7 +33,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -46,7 +45,6 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import { toast } from "@/components/ui/use-toast";
 import { useToast } from "@/components/ui/use-toast";
 import {
   Play,
@@ -56,13 +54,12 @@ import {
   MoreVertical,
   Plus,
   Pause,
-  Pencil,
   ExternalLink,
   Copy,
   Server,
   HardDrive,
   Cpu,
-  Memory
+  MemoryStick as Memory
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from 'date-fns';
@@ -217,8 +214,8 @@ export function VMList({ title = "Virtual Machines", limit, filter, onVMClick }:
   const [vms, setVMs] = useState<VMProps[]>(mockVMs);
   const [isLoading, setIsLoading] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [selectedVM, setSelectedVM] = useState<VMProps | null>(null);
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [_selectedVM, setSelectedVM] = useState<VMProps | null>(null);
+  const [_detailsOpen, setDetailsOpen] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
     action: string;

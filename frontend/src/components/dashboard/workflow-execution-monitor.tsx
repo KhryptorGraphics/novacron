@@ -11,10 +11,10 @@ interface ExecutionNode {
   id: string;
   name: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
-  startedAt?: string;
-  completedAt?: string;
-  durationMs?: number;
-  errorMessage?: string;
+  startedAt?: string | undefined;
+  completedAt?: string | undefined;
+  durationMs?: number | undefined;
+  errorMessage?: string | undefined;
 }
 
 export function WorkflowExecutionMonitor({ executionId }: { executionId: string }) {
@@ -30,7 +30,9 @@ export function WorkflowExecutionMonitor({ executionId }: { executionId: string 
         status: nodeExec.status,
         startedAt: nodeExec.startedAt,
         completedAt: nodeExec.completedAt,
-        durationMs: nodeExec.durationMs,
+        durationMs: nodeExec.startedAt && nodeExec.completedAt
+          ? new Date(nodeExec.completedAt).getTime() - new Date(nodeExec.startedAt).getTime()
+          : undefined,
         errorMessage: nodeExec.errorMessage
       }));
       

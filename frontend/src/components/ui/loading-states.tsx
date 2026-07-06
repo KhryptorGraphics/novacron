@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { RefreshCw, Loader2 } from "lucide-react";
 
 // Dashboard skeleton loader
@@ -18,46 +19,72 @@ export function DashboardSkeleton() {
 }
 
 // Refresh indicator
-export function RefreshIndicator({ 
+export function RefreshIndicator({
   isRefreshing = false,
-  size = 16 
-}: { 
+  onRefresh,
+  lastUpdated,
+}: {
   isRefreshing?: boolean;
   size?: number;
+  onRefresh?: (() => void) | (() => Promise<void>);
+  lastUpdated?: Date;
 }) {
   return (
-    <RefreshCw 
-      className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} 
-    />
+    <button
+      type="button"
+      onClick={() => { void onRefresh?.(); }}
+      title={lastUpdated ? `Last updated: ${lastUpdated.toLocaleTimeString()}` : undefined}
+      className="inline-flex items-center text-muted-foreground hover:text-foreground"
+    >
+      <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+    </button>
   );
 }
 
-// Loading states component
+// Loading states component. `state` accepts either the string status or a
+// {isLoading,...} object; while loading it renders `loadingComponent` (or a
+// spinner), otherwise it renders `children`.
+type LoadingStateObject = {
+  isLoading?: boolean;
+  isError?: boolean;
+  isSuccess?: boolean;
+  message?: string;
+};
+
 export function LoadingStates({
   state = "loading",
-  size = "default"
+  size = "default",
+  loadingComponent,
+  children,
 }: {
-  state?: "loading" | "success" | "error" | "idle";
+  state?: "loading" | "success" | "error" | "idle" | LoadingStateObject;
   size?: "small" | "default" | "large";
+  loadingComponent?: React.ReactNode;
+  children?: React.ReactNode;
 }) {
-  const getSizeClass = () => {
-    switch (size) {
-      case "small": return "h-4 w-4";
-      case "large": return "h-8 w-8";
-      default: return "h-6 w-6";
-    }
-  };
+  const sizeClass =
+    size === "small" ? "h-4 w-4" : size === "large" ? "h-8 w-8" : "h-6 w-6";
 
-  const sizeClass = getSizeClass();
+  const isLoading =
+    typeof state === "object" ? state.isLoading === true : state === "loading";
+
+  if (isLoading) {
+    return <>{loadingComponent ?? <Loader2 className={`${sizeClass} animate-spin`} />}</>;
+  }
+
+  if (typeof state === "object") {
+    if (state.isError) {
+      return <div className={`${sizeClass} text-red-500 flex items-center justify-center`}>✗</div>;
+    }
+    return <>{children}</>;
+  }
 
   switch (state) {
-    case "loading":
-      return <Loader2 className={`${sizeClass} animate-spin`} />;
     case "success":
       return <div className={`${sizeClass} text-green-500 flex items-center justify-center`}>✓</div>;
     case "error":
       return <div className={`${sizeClass} text-red-500 flex items-center justify-center`}>✗</div>;
     default:
-      return null;
+      return <>{children}</>;
   }
 }

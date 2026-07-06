@@ -1,5 +1,4 @@
-import React from 'react';
-import { render, screen } from '@/src/__tests__/utils/test-utils';
+import { render, screen } from '@/__tests__/utils/test-utils';
 
 // Mock loading components
 const Spinner = ({ size = 'default' }: { size?: 'sm' | 'default' | 'lg' }) => (

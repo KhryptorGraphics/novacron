@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Clock, ArrowRight, AlertTriangle, CheckCircle, RefreshCw, XCircle } from 'lucide-react';
+import { ArrowRight, RefreshCw, XCircle } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { bytesToSize } from '@/lib/utils';
 import { useToast } from '@/components/ui/use-toast';
@@ -56,7 +56,7 @@ export function MigrationCard({ migration, onCancel, onRetry }: MigrationCardPro
     } catch (error) {
       toast({
         title: "Error cancelling migration",
-        description: `Failed to cancel migration: ${error.message}`,
+        description: `Failed to cancel migration: ${(error as Error).message}`,
         variant: "destructive",
       });
     }
@@ -74,7 +74,7 @@ export function MigrationCard({ migration, onCancel, onRetry }: MigrationCardPro
     } catch (error) {
       toast({
         title: "Error retrying migration",
-        description: `Failed to retry migration: ${error.message}`,
+        description: `Failed to retry migration: ${(error as Error).message}`,
         variant: "destructive",
       });
     }

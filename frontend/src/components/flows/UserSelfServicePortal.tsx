@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,36 +10,24 @@ import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   Plus,
   Clock,
   CheckCircle,
-  XCircle,
-  AlertTriangle,
-  User,
-  Users,
   BarChart3,
   DollarSign,
   FileText,
   MessageSquare,
   Search,
-  Filter,
-  Download,
   Eye,
   Edit,
   Trash2,
-  Calendar,
-  TrendingUp,
   Settings,
-  HelpCircle,
   BookOpen,
   Star,
-  ChevronRight,
   Server,
   Database,
-  Network,
-  Shield
+  Network
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
@@ -968,9 +956,9 @@ export function UserSelfServicePortal() {
                 
                 <div className="space-y-2">
                   <Label>Resource Type *</Label>
-                  <Select 
-                    value={newRequest.type}
-                    onValueChange={(value: 'vm' | 'storage' | 'network' | 'database') => 
+                  <Select
+                    value={newRequest.type ?? ''}
+                    onValueChange={(value: 'vm' | 'storage' | 'network' | 'database') =>
                       setNewRequest(prev => ({ ...prev, type: value }))
                     }
                   >
@@ -1000,9 +988,9 @@ export function UserSelfServicePortal() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Priority</Label>
-                  <Select 
-                    value={newRequest.priority}
-                    onValueChange={(value: 'low' | 'medium' | 'high' | 'urgent') => 
+                  <Select
+                    value={newRequest.priority ?? ''}
+                    onValueChange={(value: 'low' | 'medium' | 'high' | 'urgent') =>
                       setNewRequest(prev => ({ ...prev, priority: value }))
                     }
                   >

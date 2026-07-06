@@ -25,7 +25,6 @@ export const validateEmail = (email: string): ValidationResult => {
     
     // Check for common typos in popular domains
     const domain = email.split('@')[1]?.toLowerCase();
-    const commonDomains = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com'];
     const typos: Record<string, string> = {
       'gmial.com': 'gmail.com',
       'gmai.com': 'gmail.com',

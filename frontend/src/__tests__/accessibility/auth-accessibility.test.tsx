@@ -82,7 +82,7 @@ describe('Authentication Components Accessibility', () => {
   });
 
   it('buttons have appropriate accessible names', () => {
-    const { getByRole } = render(<RegistrationWizard />);
+    render(<RegistrationWizard />);
     
     // Check that buttons have meaningful names
     const buttons = document.querySelectorAll('button');

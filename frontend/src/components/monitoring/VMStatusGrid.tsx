@@ -13,8 +13,7 @@ import {
   RefreshCw,
   MoreVertical,
   Cpu,
-  HardDrive,
-  Activity
+  HardDrive
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -45,7 +44,7 @@ interface VMStatusGridProps {
   loading?: boolean;
 }
 
-export function VMStatusGrid({ vms, onVMAction, loading = false }: VMStatusGridProps) {
+export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
   const [selectedVMs, setSelectedVMs] = useState<string[]>([]);
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
   
@@ -83,7 +82,7 @@ export function VMStatusGrid({ vms, onVMAction, loading = false }: VMStatusGridP
       key: "name",
       header: "VM Name",
       priority: "high" as const,
-      render: (value: string, vm: VM) => (
+      render: (value: string, _vm: VM) => (
         <div className="flex items-center gap-2">
           <Server className="h-4 w-4 text-gray-500" />
           <span className="font-medium">{value}</span>

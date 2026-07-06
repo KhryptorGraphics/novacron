@@ -55,7 +55,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export const networkApi = {
   listNetworks: () => request<CanonicalNetwork[]>('/networks'),
-  createNetwork: (payload: { name: string; type: string; subnet: string; gateway?: string }) =>
+  createNetwork: (payload: { name: string; type: string; subnet: string; gateway?: string | undefined }) =>
     request<CanonicalNetwork>('/networks', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -65,7 +65,7 @@ export const networkApi = {
   listVmInterfaces: (vmId: string) => request<CanonicalVmInterface[]>(`/vms/${vmId}/interfaces`),
   attachVmInterface: (
     vmId: string,
-    payload: { network_id?: string; name: string; mac_address: string; ip_address?: string },
+    payload: { network_id?: string | undefined; name: string; mac_address: string; ip_address?: string | undefined },
   ) =>
     request<CanonicalVmInterface>(`/vms/${vmId}/interfaces`, {
       method: 'POST',

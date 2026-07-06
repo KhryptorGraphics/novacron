@@ -26,6 +26,7 @@ import {
   Sparkles,
   Plus,
   RefreshCw,
+  Download,
 } from "lucide-react"
 
 export const Icons = {
@@ -34,6 +35,8 @@ export const Icons = {
   chevronRight: ChevronRight,
   check: Check,
   cross: X,
+  x: X,
+  download: Download,
   warning: AlertCircle,
   info: Info,
   success: CheckCircle,

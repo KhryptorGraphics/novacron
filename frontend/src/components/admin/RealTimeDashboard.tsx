@@ -10,7 +10,6 @@ import {
   Activity, 
   Users, 
   Server, 
-  Shield, 
   Database,
   Network,
   AlertTriangle,
@@ -34,8 +33,6 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
-  BarChart,
-  Bar,
   PieChart,
   Pie,
   Cell
@@ -67,7 +64,7 @@ const generateRealtimeData = (): RealTimeMetrics => ({
 const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#00ff00'];
 
 export const RealTimeDashboard = () => {
-  const { isConnected, metrics, alerts, connectionState, error } = useAdminRealTimeUpdates();
+  const { isConnected, alerts, connectionState, error } = useAdminRealTimeUpdates();
   const [realtimeData, setRealtimeData] = useState<RealTimeMetrics[]>([]);
   const [isAutoRefresh, setIsAutoRefresh] = useState(true);
   
@@ -82,9 +79,10 @@ export const RealTimeDashboard = () => {
           return updated.slice(-20);
         });
       }, 2000); // Update every 2 seconds
-      
+
       return () => clearInterval(interval);
     }
+    return undefined;
   }, [isAutoRefresh]);
   
   // Initialize with some data
@@ -281,9 +279,9 @@ export const RealTimeDashboard = () => {
                     <YAxis tick={{ fontSize: 10 }} domain={[0, 100]} />
                     <Tooltip 
                       labelFormatter={(value) => formatTime(value as string)}
-                      formatter={(value: number, name: string) => [
-                        `${value.toFixed(1)}%`,
-                        name.replace('_', ' ').toUpperCase()
+                      formatter={(value: any, name: any) => [
+                        `${Number(value).toFixed(1)}%`,
+                        String(name).replace('_', ' ').toUpperCase()
                       ]}
                     />
                     <Line 
@@ -340,9 +338,9 @@ export const RealTimeDashboard = () => {
                     <YAxis tick={{ fontSize: 10 }} />
                     <Tooltip 
                       labelFormatter={(value) => formatTime(value as string)}
-                      formatter={(value: number, name: string) => [
-                        `${value.toFixed(2)} MB/s`,
-                        name.replace('_', ' ').replace('network ', 'Network ').toUpperCase()
+                      formatter={(value: any, name: any) => [
+                        `${Number(value).toFixed(2)} MB/s`,
+                        String(name).replace('_', ' ').replace('network ', 'Network ').toUpperCase()
                       ]}
                     />
                     <Area 
@@ -501,11 +499,11 @@ export const RealTimeDashboard = () => {
                         { name: 'CPU', value: latestMetrics?.cpu_usage || 0 },
                         { name: 'Memory', value: latestMetrics?.memory_usage || 0 },
                         { name: 'Disk', value: latestMetrics?.disk_usage || 0 },
-                      ].map((entry, index) => (
+                      ].map((_entry, index) => (
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip formatter={(value: number) => `${value.toFixed(1)}%`} />
+                    <Tooltip formatter={(value: any) => `${Number(value).toFixed(1)}%`} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>

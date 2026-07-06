@@ -24,27 +24,20 @@ import { FadeIn } from "@/lib/animations";
 import { 
   FileText, 
   Search, 
-  Download, 
-  Filter, 
-  Calendar,
+  Download,
   User,
   Shield,
-  Database,
   Server,
   Settings,
   Eye,
-  AlertTriangle,
   CheckCircle,
   XCircle,
   Clock,
   Globe,
   Activity,
   Lock,
-  Unlock,
   UserPlus,
-  UserMinus,
-  Edit,
-  Trash2
+  UserMinus
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -182,7 +175,7 @@ const severityLevels = [
 ];
 
 export function AuditLogs() {
-  const [logs, setLogs] = useState(auditLogs);
+  const [logs, _setLogs] = useState(auditLogs);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [severityFilter, setSeverityFilter] = useState("all");
@@ -219,14 +212,6 @@ export function AuditLogs() {
     }
   };
 
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case "critical": return "bg-red-500";
-      case "warning": return "bg-yellow-500";
-      case "info": return "bg-blue-500";
-      default: return "bg-gray-500";
-    }
-  };
 
   const getSeverityVariant = (severity: string) => {
     switch (severity) {

@@ -7,13 +7,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { 
   ChevronDown, 
   ChevronRight,
-  Plus,
-  Minus,
   Eye,
   EyeOff,
   Info,
-  Filter,
-  Settings,
   ChevronUp
 } from "lucide-react";
 import { Button } from "./button";
@@ -24,7 +20,7 @@ interface CollapsibleSectionProps {
   title: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
-  badge?: string | number;
+  badge?: string | number | undefined;
   icon?: React.ReactNode;
   className?: string;
   headerClassName?: string;
@@ -168,7 +164,6 @@ interface ShowMoreProps {
 export function ShowMore({
   children,
   maxHeight = 200,
-  maxLines,
   showLabel = "Show more",
   hideLabel = "Show less",
   className,

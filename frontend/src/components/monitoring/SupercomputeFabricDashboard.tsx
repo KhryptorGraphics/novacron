@@ -2,12 +2,11 @@ import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  Globe, Cpu, MemoryStick, HardDrive, Network, Zap, Activity,
-  Server, Cloud, Database, Users, TrendingUp, Gauge, Brain,
+  Globe, Cpu, MemoryStick, Network, Zap, Activity,
+  Server,
   CheckCircle, AlertCircle, Play, Pause, Square, BarChart3
 } from 'lucide-react';
 import { ResourceTreemap } from '@/components/visualizations/ResourceTreemap';
@@ -15,12 +14,56 @@ import { HeatmapChart } from '@/components/visualizations/HeatmapChart';
 import { useSupercomputeFabricWebSocket } from '@/hooks/useWebSocket';
 import type {
   ComputeJob,
-  GlobalResourcePool,
-  MemoryFabric,
-  ProcessingFabric,
-  FabricMetrics,
-  ClusterResourceInventory
+  GlobalResourcePool
 } from '@/lib/api/types';
+
+// Local dashboard shapes (flat mock/visualization models, distinct from API fabric types)
+interface MemoryFabric {
+  totalMemory: number;
+  usedMemory: number;
+  availableMemory: number;
+  memoryPools: Array<{
+    name: string;
+    totalGB: number;
+    usedGB: number;
+    type: string;
+    speed: number;
+    clusters: string[];
+    utilization: number;
+  }>;
+  cacheHitRate: number;
+  memoryCoherence: number;
+  swapUsage: number;
+}
+
+interface ProcessingFabric {
+  totalCores: number;
+  activeCores: number;
+  idleCores: number;
+  totalGPUs: number;
+  activeGPUs: number;
+  idleGPUs: number;
+  workDistribution: Record<string, number>;
+  loadBalancingEfficiency: number;
+  averageUtilization: number;
+  peakUtilization: number;
+  throughputOps: number;
+}
+
+interface ClusterResourceInventory {
+  clusterId: string;
+  clusterName: string;
+  region: string;
+  nodes: number;
+  cpuCores: number;
+  memoryGB: number;
+  storageGB: number;
+  gpuCount: number;
+  networkBandwidthGbps: number;
+  utilization: { cpu: number; memory: number; storage: number; gpu: number; network: number };
+  status: string;
+  specialization: string;
+}
 
 interface SupercomputeFabricDashboardProps {
   globalView?: boolean;
@@ -28,15 +71,11 @@ interface SupercomputeFabricDashboardProps {
   refreshInterval?: number;
 }
 
-export const SupercomputeFabricDashboard: React.FC<SupercomputeFabricDashboardProps> = ({
-  globalView = true,
-  selectedClusters = [],
-  refreshInterval = 5000,
-}) => {
+export const SupercomputeFabricDashboard: React.FC<SupercomputeFabricDashboardProps> = () => {
   const [viewMode, setViewMode] = useState<'global' | 'cluster' | 'job'>('global');
-  const [selectedCluster, setSelectedCluster] = useState<string>('all');
+  const [_selectedCluster, _setSelectedCluster] = useState<string>('all');
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
-  const [timeRange, setTimeRange] = useState<'5min' | '1hr' | '24hr'>('1hr');
+  const [_timeRange, _setTimeRange] = useState<'5min' | '1hr' | '24hr'>('1hr');
 
   // Real-time fabric data from WebSocket with typed payload
   const { data: fabricData, isConnected } = useSupercomputeFabricWebSocket();
@@ -137,7 +176,7 @@ export const SupercomputeFabricDashboard: React.FC<SupercomputeFabricDashboardPr
     {
       id: 'job-analysis-004',
       name: 'Big Data Analytics',
-      type: 'analytics',
+      type: 'analysis',
       status: 'completed',
       priority: 'medium',
       startTime: new Date(Date.now() - 7200000).toISOString(), // 2 hours ago
@@ -278,20 +317,27 @@ export const SupercomputeFabricDashboard: React.FC<SupercomputeFabricDashboardPr
   ];
 
   // Use WebSocket data when available, fallback to mocks
-  const globalResourcePool = useMemo(() =>
-    fabricData?.globalResourcePool ?? mockGlobalResources,
-    [fabricData]
-  );
+  const globalResourcePool = useMemo(() => {
+    const p: GlobalResourcePool = fabricData?.globalResourcePool ?? mockGlobalResources;
+    return {
+      ...p,
+      totalClusters: p.totalClusters ?? 0,
+      totalNodes: p.totalNodes ?? 0,
+      totalCPUCores: p.totalCPUCores ?? 0,
+      totalMemoryGB: p.totalMemoryGB ?? 0,
+      totalStorageTB: p.totalStorageTB ?? 0,
+      totalGPUs: p.totalGPUs ?? 0,
+      utilization: p.utilization ?? { cpu: 0, memory: 0, storage: 0, gpu: 0, network: 0 },
+      availability: p.availability ?? { healthy: 0, degraded: 0, failed: 0 },
+      regions: p.regions ?? [],
+    };
+  }, [fabricData]);
 
-  const computeJobs = useMemo(() =>
+  const computeJobs = useMemo<ComputeJob[]>(() =>
     fabricData?.computeJobs ?? mockComputeJobs,
     [fabricData]
   );
 
-  const fabricMetricsData = useMemo(() =>
-    fabricData?.fabricMetrics ?? null,
-    [fabricData]
-  );
 
   // Calculate fabric-wide metrics
   const fabricMetrics = useMemo(() => {
@@ -300,8 +346,8 @@ export const SupercomputeFabricDashboard: React.FC<SupercomputeFabricDashboardPr
     const queuedJobs = computeJobs.filter(job => job.status === 'queued').length;
     const completedJobs = computeJobs.filter(job => job.status === 'completed').length;
 
-    const totalCost = computeJobs.reduce((sum, job) => sum + job.costEstimate, 0);
-    const avgJobDuration = computeJobs.reduce((sum, job) => sum + job.estimatedDuration, 0) / totalJobs;
+    const totalCost = computeJobs.reduce((sum, job) => sum + (job.costEstimate ?? 0), 0);
+    const avgJobDuration = computeJobs.reduce((sum, job) => sum + (job.estimatedDuration ?? 0), 0) / totalJobs;
 
     return {
       totalJobs,
@@ -469,7 +515,11 @@ export const SupercomputeFabricDashboard: React.FC<SupercomputeFabricDashboardPr
               </CardHeader>
               <CardContent>
                 <ResourceTreemap
-                  data={globalResourcePool.regions.map(region => ({
+                  data={{
+                    id: 'global',
+                    name: 'Global',
+                    value: globalResourcePool.totalNodes,
+                    children: globalResourcePool.regions.map(region => ({
                     id: region.name,
                     name: region.name,
                     value: region.nodes,
@@ -479,7 +529,8 @@ export const SupercomputeFabricDashboard: React.FC<SupercomputeFabricDashboardPr
                       { id: `${region.name}-mem`, name: 'Memory', value: region.nodes * 160, utilization: region.utilization + 5 },
                       { id: `${region.name}-gpu`, name: 'GPU', value: region.nodes * 4, utilization: region.utilization + 15 },
                     ],
-                  }))}
+                  })),
+                  }}
                   height={300}
                 />
               </CardContent>
@@ -494,16 +545,11 @@ export const SupercomputeFabricDashboard: React.FC<SupercomputeFabricDashboardPr
               <CardContent>
                 <HeatmapChart
                   data={mockClusterInventories.map(cluster => ({
-                    x: cluster.region,
-                    y: cluster.clusterName.split(' ').slice(-2).join(' '), // Simplified name
+                    timestamp: cluster.region,
+                    resourceId: cluster.clusterName.split(' ').slice(-2).join(' '), // Simplified name
                     value: cluster.utilization.cpu,
-                    metadata: {
-                      nodes: cluster.nodes,
-                      specialization: cluster.specialization,
-                      status: cluster.status,
-                    },
                   }))}
-                  height={300}
+                  title="Cluster CPU Utilization"
                 />
               </CardContent>
             </Card>
@@ -649,10 +695,10 @@ export const SupercomputeFabricDashboard: React.FC<SupercomputeFabricDashboardPr
                     <div className="flex items-center gap-4">
                       <Badge variant={job.priority === 'high' ? 'destructive' :
                                    job.priority === 'medium' ? 'default' : 'secondary'}>
-                        {job.priority.toUpperCase()}
+                        {String(job.priority).toUpperCase()}
                       </Badge>
                       <div className="text-right">
-                        <p className="font-medium">${job.costEstimate.toFixed(2)}</p>
+                        <p className="font-medium">${(job.costEstimate ?? 0).toFixed(2)}</p>
                         <p className="text-sm text-muted-foreground">
                           {job.status === 'completed' ? 'Completed' :
                            job.status === 'running' ? `${job.progress}%` : 'Queued'}
@@ -669,23 +715,23 @@ export const SupercomputeFabricDashboard: React.FC<SupercomputeFabricDashboardPr
                         <div className="space-y-2 text-sm">
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">CPU Cores:</span>
-                            <span>{job.resourceAllocation.cpuCores}</span>
+                            <span>{job.resourceAllocation?.cpuCores ?? 0}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Memory:</span>
-                            <span>{formatBytes(job.resourceAllocation.memoryGB)}</span>
+                            <span>{formatBytes(job.resourceAllocation?.memoryGB ?? 0)}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">GPUs:</span>
-                            <span>{job.resourceAllocation.gpuCount || 'None'}</span>
+                            <span>{job.resourceAllocation?.gpuCount || 'None'}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Storage:</span>
-                            <span>{formatBytes(job.resourceAllocation.storageGB)}</span>
+                            <span>{formatBytes(job.resourceAllocation?.storageGB ?? 0)}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Network:</span>
-                            <span>{job.resourceAllocation.networkBandwidthMbps} Mbps</span>
+                            <span>{job.resourceAllocation?.networkBandwidthMbps ?? 0} Mbps</span>
                           </div>
                         </div>
                       </div>
@@ -695,19 +741,19 @@ export const SupercomputeFabricDashboard: React.FC<SupercomputeFabricDashboardPr
                         <div className="space-y-2 text-sm">
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Started:</span>
-                            <span>{new Date(job.startTime).toLocaleString()}</span>
+                            <span>{job.startTime ? new Date(job.startTime).toLocaleString() : '—'}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Duration:</span>
-                            <span>{Math.floor(job.estimatedDuration / 3600)}h {Math.floor((job.estimatedDuration % 3600) / 60)}m</span>
+                            <span>{Math.floor((job.estimatedDuration ?? 0) / 3600)}h {Math.floor(((job.estimatedDuration ?? 0) % 3600) / 60)}m</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">ETA:</span>
-                            <span>{job.status === 'completed' ? 'Completed' : new Date(job.completionETA).toLocaleString()}</span>
+                            <span>{job.status === 'completed' ? 'Completed' : job.completionETA ? new Date(job.completionETA).toLocaleString() : '—'}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Clusters:</span>
-                            <span>{job.clustersInvolved.length}</span>
+                            <span>{job.clustersInvolved?.length ?? 0}</span>
                           </div>
                         </div>
 
@@ -726,7 +772,7 @@ export const SupercomputeFabricDashboard: React.FC<SupercomputeFabricDashboardPr
                     <div className="mt-6">
                       <h4 className="text-sm font-medium mb-2">Involved Clusters</h4>
                       <div className="flex flex-wrap gap-2">
-                        {job.clustersInvolved.map((clusterId) => (
+                        {(job.clustersInvolved ?? []).map((clusterId) => (
                           <Badge key={clusterId} variant="outline">
                             {clusterId}
                           </Badge>

@@ -1,5 +1,4 @@
-import React from 'react';
-import { render, screen } from '@/src/__tests__/utils/test-utils';
+import { render, screen } from '@/__tests__/utils/test-utils';
 import { PasswordStrengthIndicator } from '@/components/auth/PasswordStrengthIndicator';
 
 describe('PasswordStrengthIndicator', () => {

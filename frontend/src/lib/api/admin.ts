@@ -171,11 +171,11 @@ export interface SystemConfig {
 export const adminApi = {
   // User Management
   users: {
-    list: (params?: { 
-      page?: number; 
-      page_size?: number; 
-      search?: string; 
-      role?: string;
+    list: (params?: {
+      page?: number | undefined;
+      page_size?: number | undefined;
+      search?: string | undefined;
+      role?: string | undefined;
     }): Promise<UserListResponse> => {
       const query = new URLSearchParams();
       if (params?.page) query.set('page', params.page.toString());

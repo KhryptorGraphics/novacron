@@ -20,8 +20,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import { FadeIn } from "@/lib/animations";
 import { 
   Users, 
@@ -33,16 +31,10 @@ import {
   UserCheck, 
   Eye,
   Edit,
-  Trash2,
-  MoreHorizontal,
-  Calendar,
-  Activity,
   AlertCircle,
   CheckCircle,
-  Clock,
-  Filter
+  Clock
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 // Mock user data
 const mockUsers = [
@@ -115,8 +107,8 @@ export function UserManagement() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [roleFilter, setRoleFilter] = useState("all");
-  const [selectedUser, setSelectedUser] = useState<any>(null);
-  const [showUserModal, setShowUserModal] = useState(false);
+  const [_selectedUser, setSelectedUser] = useState<any>(null);
+  const [_showUserModal, _setShowUserModal] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const filteredUsers = users.filter(user => {
@@ -154,14 +146,6 @@ export function UserManagement() {
     setLoading(false);
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "active": return "bg-green-500";
-      case "suspended": return "bg-red-500";
-      case "pending": return "bg-yellow-500";
-      default: return "bg-gray-500";
-    }
-  };
 
   const getStatusIcon = (status: string) => {
     switch (status) {

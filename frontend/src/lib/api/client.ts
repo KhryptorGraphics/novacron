@@ -1,5 +1,5 @@
-import { API_ORIGIN, API_V1_BASE, buildApiUrl, buildApiV1Url, buildWebSocketUrls } from '@/lib/api/origin';
-import type { ApiError, Pagination, ApiEnvelope } from '@/lib/api/types';
+import { API_V1_BASE, buildApiUrl, buildApiV1Url, buildWebSocketUrls } from '@/lib/api/origin';
+import type { Pagination, ApiEnvelope } from '@/lib/api/types';
 import type {
   NetworkNode,
   NetworkEdge,
@@ -13,7 +13,11 @@ import type {
   ComputeJob,
   GlobalResourcePool,
   MemoryFabric,
-  ProcessingFabric
+  ProcessingFabric,
+  SecurityPolicy,
+  ComplianceReport,
+  AuditLog,
+  SystemConfiguration
 } from '@/lib/api/types';
 
 // API Client for NovaCron Enhanced API
@@ -165,7 +169,7 @@ function authTokenHeader(): Record<string, string> {
  * @param opts Optional options { role } where role defaults to "viewer"
  * @returns ApiEnvelope<T> with pagination populated from X-Pagination header if present
  */
-export async function apiGet<T>(path: string, params?: Record<string, string | number | undefined>, opts?: { role?: "viewer" | "operator" }): Promise<ApiEnvelope<T>> {
+export async function apiGet<T>(path: string, params?: Record<string, string | number | undefined>, opts?: { role?: "viewer" | "operator" | undefined }): Promise<ApiEnvelope<T>> {
   try {
     const url = withParams(path, params);
     const role = opts?.role ?? "viewer";
@@ -191,10 +195,10 @@ export async function apiGet<T>(path: string, params?: Record<string, string | n
  * @param opts Optional options { role } where role defaults to "viewer"
  * @returns ApiEnvelope<T>
  */
-export async function apiPost<T>(path: string, body?: unknown, opts?: { role?: "viewer" | "operator" }): Promise<ApiEnvelope<T>> {
+export async function apiPost<T>(path: string, body?: unknown, opts?: { role?: "viewer" | "operator" | undefined }): Promise<ApiEnvelope<T>> {
   const url = buildApiV1Url(path);
   const role = opts?.role ?? "viewer";
-  const res = await fetch(url, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", "X-Role": role, ...authTokenHeader() }, body: body!==undefined?JSON.stringify(body):undefined, credentials: "include" });
+  const res = await fetch(url, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", "X-Role": role, ...authTokenHeader() }, body: body!==undefined?JSON.stringify(body):null, credentials: "include" });
   const env = await res.json() as ApiEnvelope<T>;
   if (env.error) throw new ApiHttpError(res.status, env.error.code, env.error.message, url);
   return env;

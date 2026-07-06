@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { buildWebSocketUrls } from '@/lib/api/origin';
+import type { PerformanceUpdatePayload } from '@/lib/api/types';
 
 interface WebSocketOptions {
   enabled?: boolean;
@@ -263,7 +264,7 @@ export function useBandwidthMonitoringWebSocket() {
 }
 
 export function usePerformancePredictionWebSocket() {
-  return useWebSocket('/api/ws/metrics?sources=cpu_usage,memory_usage,disk_usage,predictions&interval=30', {
+  return useWebSocket<PerformanceUpdatePayload>('/api/ws/metrics?sources=cpu_usage,memory_usage,disk_usage,predictions&interval=30', {
     heartbeatInterval: 30000,
     reconnectAttempts: 6,
   });

@@ -37,6 +37,7 @@ export function usePerformance() {
 
       return () => observer.disconnect();
     }
+    return undefined;
   }, []);
 
   useEffect(() => {
@@ -58,7 +59,7 @@ export function usePerformance() {
           const entries = list.getEntries();
           entries.forEach((entry) => {
             if (entry.entryType === 'first-input') {
-              const fid = entry.processingStart - entry.startTime;
+              const fid = (entry as PerformanceEventTiming).processingStart - entry.startTime;
               setMetrics(prev => ({ ...prev, fid }));
             }
           });
@@ -86,16 +87,13 @@ export function usePerformance() {
         };
       } catch (error) {
         console.warn('Performance measurement failed:', error);
+        return undefined;
       }
     };
 
-    const cleanup = measureWebVitals();
+    const cleanupPromise = measureWebVitals();
     return () => {
-      if (cleanup instanceof Promise) {
-        cleanup.then(cleanupFn => cleanupFn && cleanupFn());
-      } else if (typeof cleanup === 'function') {
-        cleanup();
-      }
+      cleanupPromise.then(cleanupFn => cleanupFn?.());
     };
   }, [isSupported]);
 

@@ -21,19 +21,9 @@ import {
   Save, 
   RotateCcw, 
   Shield, 
-  Database, 
-  Network,
-  Mail,
+  Database,
   Bell,
-  Clock,
-  HardDrive,
-  Cpu,
-  Memory,
-  Globe,
-  Lock,
-  Key,
   AlertTriangle,
-  CheckCircle,
   Server,
   FileText,
   Upload
@@ -417,8 +407,8 @@ export function SystemConfiguration() {
             <Slider
               value={Array.isArray(value) ? value : [value]}
               onValueChange={(newValue) => updateSetting(setting.key, newValue)}
-              min={setting.min}
-              max={setting.max}
+              min={setting.min ?? 0}
+              max={setting.max ?? 100}
               step={1}
               className="w-full"
             />

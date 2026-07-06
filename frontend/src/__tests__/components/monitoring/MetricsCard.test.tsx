@@ -1,5 +1,4 @@
-import React from 'react';
-import { render, screen } from '@/src/__tests__/utils/test-utils';
+import { render, screen } from '@/__tests__/utils/test-utils';
 import { MetricsCard } from '@/components/monitoring/MetricsCard';
 
 describe('MetricsCard', () => {

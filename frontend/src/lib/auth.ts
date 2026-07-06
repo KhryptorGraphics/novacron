@@ -21,11 +21,11 @@ export interface UserResponse {
   email: string;
   firstName: string;
   lastName: string;
-  tenantId?: string;
+  tenantId?: string | undefined;
   status: string;
-  two_factor_enabled?: boolean;
-  role?: string;
-  roles?: string[];
+  two_factor_enabled?: boolean | undefined;
+  role?: string | undefined;
+  roles?: string[] | undefined;
 }
 
 export interface ClusterSummaryResponse {

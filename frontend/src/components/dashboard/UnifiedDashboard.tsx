@@ -7,7 +7,6 @@ import {
   ArrowRight,
   Database,
   HardDrive,
-  Loader2,
   Network,
   Server,
   Settings,

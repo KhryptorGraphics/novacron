@@ -22,7 +22,7 @@ describe('usePerformance', () => {
   });
 
   it('tracks component mount time', () => {
-    const { result } = renderHook(() => usePerformance('TestComponent'));
+    renderHook(() => usePerformance('TestComponent'));
 
     expect(mockPerformanceMark).toHaveBeenCalledWith('TestComponent-start');
   });

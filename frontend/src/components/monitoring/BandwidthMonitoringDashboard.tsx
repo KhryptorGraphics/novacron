@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -7,8 +7,7 @@ import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  Activity, TrendingUp, TrendingDown, AlertCircle, Network,
-  Globe, Wifi, WifiOff, BarChart3, Gauge, Server, Cloud
+  Activity, TrendingUp, TrendingDown, AlertCircle, Network, Wifi, WifiOff, Gauge, Cloud
 } from 'lucide-react';
 import { PredictiveChart } from '@/components/visualizations/PredictiveChart';
 import { useBandwidthMonitoringWebSocket } from '@/hooks/useWebSocket';
@@ -21,9 +20,7 @@ interface BandwidthMonitoringDashboardProps {
 }
 
 export const BandwidthMonitoringDashboard: React.FC<BandwidthMonitoringDashboardProps> = ({
-  clusterId,
   timeRange: initialTimeRange = '1hr',
-  autoRefresh = true,
 }) => {
   const [timeRange, setTimeRange] = useState(initialTimeRange);
   const [selectedInterface, setSelectedInterface] = useState<string | null>(null);
@@ -65,6 +62,8 @@ export const BandwidthMonitoringDashboard: React.FC<BandwidthMonitoringDashboard
       type: 'ethernet',
       status: 'up',
       speed: 10000, // Mbps
+      capacity: 10000,
+      qosEnabled: true,
       duplex: 'full',
       mtu: 1500,
       utilization: 72,
@@ -80,6 +79,8 @@ export const BandwidthMonitoringDashboard: React.FC<BandwidthMonitoringDashboard
       type: 'ethernet',
       status: 'up',
       speed: 10000,
+      capacity: 10000,
+      qosEnabled: true,
       duplex: 'full',
       mtu: 9000, // Jumbo frames
       utilization: 54,
@@ -95,6 +96,8 @@ export const BandwidthMonitoringDashboard: React.FC<BandwidthMonitoringDashboard
       type: 'vpn',
       status: 'up',
       speed: 1000,
+      capacity: 1000,
+      qosEnabled: false,
       duplex: 'full',
       mtu: 1420,
       utilization: 35,
@@ -111,6 +114,7 @@ export const BandwidthMonitoringDashboard: React.FC<BandwidthMonitoringDashboard
       id: '1',
       source: 'cluster-us-east',
       destination: 'cluster-us-west',
+      target: 'cluster-us-west',
       protocol: 'TCP',
       port: 443,
       bandwidth: 1200, // Mbps
@@ -122,6 +126,7 @@ export const BandwidthMonitoringDashboard: React.FC<BandwidthMonitoringDashboard
       id: '2',
       source: 'vm-web-001',
       destination: 'vm-db-001',
+      target: 'vm-db-001',
       protocol: 'TCP',
       port: 3306,
       bandwidth: 450,
@@ -133,6 +138,7 @@ export const BandwidthMonitoringDashboard: React.FC<BandwidthMonitoringDashboard
       id: '3',
       source: 'cluster-eu-central',
       destination: 'cluster-us-east',
+      target: 'cluster-us-east',
       protocol: 'UDP',
       port: 4789, // VXLAN
       bandwidth: 890,
@@ -374,19 +380,16 @@ export const BandwidthMonitoringDashboard: React.FC<BandwidthMonitoringDashboard
             </CardHeader>
             <CardContent>
               <PredictiveChart
-                data={timeSeriesData.map(d => ({
-                  timestamp: d.timestamp,
-                  actual: d.bandwidth,
-                  predicted: d.bandwidth * (1 + Math.random() * 0.2 - 0.1),
-                  confidence: {
-                    lower: d.bandwidth * 0.8,
-                    upper: d.bandwidth * 1.2,
-                  },
-                }))}
                 title="Network Bandwidth Usage"
-                yAxisLabel="Bandwidth (Mbps)"
-                showConfidence={true}
-                height={300}
+                historicalData={timeSeriesData.map(d => ({ timestamp: d.timestamp, value: d.bandwidth }))}
+                predictedData={timeSeriesData.map(d => ({
+                  timestamp: d.timestamp,
+                  value: d.bandwidth * (1 + Math.random() * 0.2 - 0.1),
+                  lowerBound: d.bandwidth * 0.8,
+                  upperBound: d.bandwidth * 1.2,
+                }))}
+                metricName="Bandwidth"
+                metricUnit="Mbps"
               />
             </CardContent>
           </Card>
@@ -398,16 +401,11 @@ export const BandwidthMonitoringDashboard: React.FC<BandwidthMonitoringDashboard
               </CardHeader>
               <CardContent>
                 <PredictiveChart
-                  data={timeSeriesData.map(d => ({
-                    timestamp: d.timestamp,
-                    actual: d.upload,
-                    predicted: d.download,
-                  }))}
-                  title=""
-                  yAxisLabel="Rate (Mbps)"
-                  actualLabel="Upload"
-                  predictedLabel="Download"
-                  height={200}
+                  title="Upload vs Download"
+                  historicalData={timeSeriesData.map(d => ({ timestamp: d.timestamp, value: d.upload }))}
+                  predictedData={timeSeriesData.map(d => ({ timestamp: d.timestamp, value: d.download }))}
+                  metricName="Rate"
+                  metricUnit="Mbps"
                 />
               </CardContent>
             </Card>
@@ -418,14 +416,11 @@ export const BandwidthMonitoringDashboard: React.FC<BandwidthMonitoringDashboard
               </CardHeader>
               <CardContent>
                 <PredictiveChart
-                  data={timeSeriesData.map(d => ({
-                    timestamp: d.timestamp,
-                    actual: d.utilization,
-                    predicted: Math.min(100, d.utilization + Math.random() * 10),
-                  }))}
-                  title=""
-                  yAxisLabel="Utilization (%)"
-                  height={200}
+                  title="Utilization Rate"
+                  historicalData={timeSeriesData.map(d => ({ timestamp: d.timestamp, value: d.utilization }))}
+                  predictedData={timeSeriesData.map(d => ({ timestamp: d.timestamp, value: Math.min(100, d.utilization + Math.random() * 10) }))}
+                  metricName="Utilization"
+                  metricUnit="%"
                 />
               </CardContent>
             </Card>

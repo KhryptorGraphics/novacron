@@ -2,7 +2,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { 
   apiService, 
-  VMInfo, 
   HealthStatus, 
   CronJob, 
   CreateJobRequest, 
@@ -140,6 +139,7 @@ export function useVMMetrics(vmId: string | null) {
       const interval = setInterval(fetchMetrics, 10000);
       return () => clearInterval(interval);
     }
+    return undefined;
   }, [fetchMetrics, vmId]);
 
   return { metrics, loading, error, refetch: fetchMetrics };
@@ -462,6 +462,7 @@ export function useWorkflowExecution(id: string | null) {
       const interval = setInterval(fetchExecution, 5000);
       return () => clearInterval(interval);
     }
+    return undefined;
   }, [fetchExecution, id]);
 
   return { 
@@ -496,6 +497,7 @@ export function useWebSocket() {
         ws.close();
       };
     }
+    return undefined;
   }, []);
 
   return { connected, lastMessage };

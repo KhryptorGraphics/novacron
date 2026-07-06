@@ -9,8 +9,8 @@ interface ProtectedRouteProps {
   requiredPermissions?: string[];
 }
 
-export function ProtectedRoute({ children, requiredPermissions }: ProtectedRouteProps) {
-  const { user, loading } = useAuth();
+export function ProtectedRoute({ children }: ProtectedRouteProps) {
+  const { user, isLoading: loading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 

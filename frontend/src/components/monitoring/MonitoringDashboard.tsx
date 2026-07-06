@@ -16,7 +16,7 @@ import {
   ArcElement,
 } from 'chart.js';
 import { Line, Bar, Doughnut } from 'react-chartjs-2';
-import { format, addHours, subHours, subDays } from 'date-fns';
+import { format, addHours, subHours } from 'date-fns';
 import {
   Card,
   CardContent,
@@ -42,11 +42,7 @@ import {
   MemoryStick,
   Network,
   Database,
-  Activity,
-  TrendingUp,
-  Zap,
-  BarChart3,
-  GitBranch
+  Activity
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -210,7 +206,7 @@ const MetricCard: React.FC<{
           <div className="h-10 mt-2">
             <Line
               data={{
-                labels: sparklineData.map((_, i) => ''),
+                labels: sparklineData.map((_, _i) => ''),
                 datasets: [
                   {
                     data: sparklineData,
@@ -360,7 +356,7 @@ const MonitoringDashboard: React.FC = () => {
   // API Queries
   const { 
     data: systemMetrics,
-    isLoading: isLoadingMetrics,
+    isLoading: _isLoadingMetrics,
     refetch: refetchMetrics,
   } = useQuery({
     queryKey: ['systemMetrics', timeRange],

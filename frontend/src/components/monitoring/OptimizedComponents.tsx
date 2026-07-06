@@ -1,10 +1,8 @@
 import React, { useMemo, useCallback } from 'react';
-import { Line, Bar, Doughnut } from 'react-chartjs-2';
+import { Line } from 'react-chartjs-2';
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle
 } from '@/components/ui/card';
@@ -33,7 +31,7 @@ export const OptimizedMetricCard = React.memo<{
     if (!sparklineData) return null;
     
     return {
-      labels: sparklineData.map((_, i) => ''),
+      labels: sparklineData.map((_, _i) => ''),
       datasets: [
         {
           data: sparklineData,
@@ -85,7 +83,7 @@ export const OptimizedMetricCard = React.memo<{
         )}
         {chartData && chartOptions && (
           <div className="h-10 mt-2">
-            <Line data={chartData} options={chartOptions} />
+            <Line data={chartData} options={chartOptions as any} />
           </div>
         )}
       </CardContent>

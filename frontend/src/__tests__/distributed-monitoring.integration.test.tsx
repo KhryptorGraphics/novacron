@@ -3,7 +3,6 @@
  * Sprint 6 - Distributed Supercompute Fabric Infrastructure
  */
 
-import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { jest } from '@jest/globals';
 
@@ -367,7 +366,7 @@ describe('Distributed Monitoring Integration Tests', () => {
     test('synchronizes data updates across related components', async () => {
       // This would test that bandwidth updates in the network topology
       // are reflected in the bandwidth monitoring dashboard
-      const container = render(
+      render(
         <div>
           <NetworkTopology showBandwidth={true} />
           <BandwidthMonitoringDashboard />

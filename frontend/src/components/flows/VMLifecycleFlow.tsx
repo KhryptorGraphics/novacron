@@ -8,12 +8,9 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Slider } from '@/components/ui/slider';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Separator } from '@/components/ui/separator';
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -28,10 +25,8 @@ import {
   Info,
   Play,
   Settings,
-  Globe,
   Shield,
-  Clock,
-  Zap
+  Clock
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 

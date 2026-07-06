@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -11,21 +11,15 @@ import {
   Activity,
   Brain,
   Settings,
-  TrendingUp,
   AlertCircle,
   CheckCircle,
   Clock,
-  Cpu,
-  MemoryStick,
-  Network,
-  HardDrive,
-  Zap,
 } from 'lucide-react';
 
 import { PlacementDecisionChart } from './PlacementDecisionChart';
 import { ScalingMetricsChart } from './ScalingMetricsChart';
 import { PolicyManagementPanel } from './PolicyManagementPanel';
-import { MLModelPerformancePanel } from './MLModelPerformancePanel';
+import { MLModelPerformancePanel, type MLModelMetrics } from './MLModelPerformancePanel';
 import { RealTimeMetricsPanel } from './RealTimeMetricsPanel';
 
 // Types for orchestration data
@@ -64,15 +58,6 @@ interface PolicyRule {
   enabled: boolean;
   priority: number;
   parameters: Record<string, any>;
-}
-
-interface MLModelMetrics {
-  modelType: string;
-  accuracy: number;
-  throughput: number;
-  latency: number;
-  lastTraining: string;
-  version: string;
 }
 
 export function OrchestrationDashboard() {

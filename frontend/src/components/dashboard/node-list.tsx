@@ -1,6 +1,5 @@
 "use client";
 
-import React from "react";
 
 interface Node {
   id: string;

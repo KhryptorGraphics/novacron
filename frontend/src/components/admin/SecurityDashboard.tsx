@@ -7,37 +7,21 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import { securityCapabilities } from "@/lib/api/security";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
-} from "@/components/ui/table";
+
+
 import { Progress } from "@/components/ui/progress";
 import { FadeIn } from "@/lib/animations";
 import { 
   Shield, 
   AlertTriangle, 
-  Lock, 
   Unlock,
-  Eye,
-  EyeOff,
   Ban,
-  CheckCircle,
   XCircle,
   Clock,
   Globe,
   User,
-  Key,
   Activity,
-  TrendingUp,
-  TrendingDown,
-  MapPin,
-  Smartphone,
   Monitor,
-  Wifi,
   FileText,
   Download
 } from "lucide-react";
@@ -63,10 +47,10 @@ interface SecurityMetrics {
 
 
 export function SecurityDashboard() {
-  const [activeTab, setActiveTab] = useState("overview");
-  const [selectedAlert, setSelectedAlert] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [_activeTab, _setActiveTab] = useState("overview");
+  const [_selectedAlert, setSelectedAlert] = useState<any>(null);
+  const [_loading, setLoading] = useState(true);
+  const [_error, setError] = useState<string | null>(null);
   const [securityMetrics, setSecurityMetrics] = useState<SecurityMetrics>({
     threatLevel: "low",
     totalAlerts: 0,
@@ -85,7 +69,7 @@ export function SecurityDashboard() {
   const [blockedIPs, setBlockedIPs] = useState<any[]>([]);
 
   // WebSocket for real-time updates
-  const { data: wsData, isConnected } = useWebSocket('/api/ws/security/events');
+  const { data: wsData } = useWebSocket('/api/ws/security/events');
 
   // Fetch security data
   const fetchSecurityData = async () => {
@@ -95,11 +79,11 @@ export function SecurityDashboard() {
 
       // Fetch all security data in parallel
       const [threatsResponse, vulnsResponse, complianceResponse, incidentsResponse, auditStatsResponse] = await Promise.all([
-        apiClient.get('/api/security/threats'),
-        apiClient.get('/api/security/vulnerabilities'),
-        apiClient.get('/api/security/compliance'),
-        apiClient.get('/api/security/incidents'),
-        apiClient.get('/api/security/audit/statistics')
+        apiClient.get<any>('/api/security/threats'),
+        apiClient.get<any>('/api/security/vulnerabilities'),
+        apiClient.get<any>('/api/security/compliance'),
+        apiClient.get<any>('/api/security/incidents'),
+        apiClient.get<any>('/api/security/audit/statistics')
       ]);
 
       // Destructure the actual response shapes from backend
@@ -129,7 +113,7 @@ export function SecurityDashboard() {
 
       // Fetch session and IP data
       const [eventsResponse] = await Promise.all([
-        apiClient.get('/api/security/events')
+        apiClient.get<any>('/api/security/events')
       ]);
 
       const { events = [] } = eventsResponse.data || {};
@@ -247,13 +231,6 @@ export function SecurityDashboard() {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString() + " " + date.toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
-  };
 
   const getTimeAgo = (dateString: string) => {
     const now = new Date();

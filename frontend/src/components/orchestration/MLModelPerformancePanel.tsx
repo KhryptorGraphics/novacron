@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,8 +8,6 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   Brain, 
-  TrendingUp, 
-  Zap, 
   RefreshCw, 
   Download,
   Play,
@@ -17,7 +15,7 @@ import {
   CheckCircle,
 } from 'lucide-react';
 
-interface MLModelMetrics {
+export interface MLModelMetrics {
   modelType: string;
   accuracy: number;
   throughput: number;

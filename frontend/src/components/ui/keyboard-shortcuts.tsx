@@ -1,20 +1,12 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useRef, useState, KeyboardEvent } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { 
   Keyboard,
-  Command,
   Search,
-  Play,
-  Save,
-  Copy,
-  Undo,
-  Redo,
   HelpCircle,
   X
 } from 'lucide-react';
@@ -28,7 +20,7 @@ interface KeyboardShortcut {
   action: () => void;
   global?: boolean; // whether it works globally or only in specific contexts
   disabled?: boolean;
-  context?: string; // specific context where this shortcut applies
+  context?: string | undefined; // specific context where this shortcut applies
 }
 
 interface KeyboardShortcutContextType {

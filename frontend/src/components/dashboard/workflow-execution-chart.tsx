@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useWorkflows } from "@/hooks/useAPI";
 
 export function WorkflowExecutionChart() {
-  const { workflows } = useWorkflows();
+  useWorkflows();
   
   // Calculate execution frequency by day for the last 7 days
   const executionData = Array.from({ length: 7 }, (_, i) => {

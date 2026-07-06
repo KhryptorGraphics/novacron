@@ -10,44 +10,26 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { Textarea } from '@/components/ui/textarea';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { 
   Network,
   Globe,
   Shield,
-  Wifi,
-  Router,
   Server,
   Link,
   Settings,
   Plus,
   Trash2,
   Edit,
-  Save,
-  X,
-  AlertCircle,
-  CheckCircle,
   Activity,
   Layers,
-  Share2,
   Lock,
-  Unlock,
   GitBranch,
-  Cloud,
-  Database,
-  Zap,
   Filter,
   ArrowRight,
   ArrowLeft,
-  ArrowUpDown,
-  MoreVertical,
   Copy,
-  Download,
-  Upload
+  Download
 } from 'lucide-react';
-import { Diagram, Draggable, Portal } from '@/components/ui/diagram';
 
 interface VirtualNetwork {
   id: string;
@@ -131,10 +113,10 @@ const NetworkConfigurationPanel: React.FC = () => {
   const [loadBalancers, setLoadBalancers] = useState<LoadBalancer[]>([]);
   const [networkFlows, setNetworkFlows] = useState<NetworkFlow[]>([]);
   const [selectedNetwork, setSelectedNetwork] = useState<VirtualNetwork | null>(null);
-  const [selectedLB, setSelectedLB] = useState<LoadBalancer | null>(null);
+  const [_selectedLB, _setSelectedLB] = useState<LoadBalancer | null>(null);
   const [createNetworkDialog, setCreateNetworkDialog] = useState(false);
   const [createRuleDialog, setCreateRuleDialog] = useState(false);
-  const [createLBDialog, setCreateLBDialog] = useState(false);
+  const [_createLBDialog, _setCreateLBDialog] = useState(false);
   const [topologyView, setTopologyView] = useState('logical');
 
   // Form states

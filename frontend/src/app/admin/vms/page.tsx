@@ -50,12 +50,9 @@ import {
   HardDrive,
   Cpu,
   MemoryStick,
-  Network,
   Monitor,
   Activity,
-  Zap,
   Download,
-  Upload,
   BarChart3,
   AlertTriangle,
   CheckCircle,
@@ -188,7 +185,7 @@ export default function VMManagementPage() {
     search: ''
   });
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
-  const [showVMDialog, setShowVMDialog] = useState(false);
+  const [_showVMDialog, _setShowVMDialog] = useState(false);
   
   const { data: templates, isLoading: templatesLoading } = useVmTemplates();
   const createTemplate = useCreateVmTemplate();

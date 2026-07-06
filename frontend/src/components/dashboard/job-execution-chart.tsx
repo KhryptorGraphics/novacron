@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useJobs } from "@/hooks/useAPI";
 
 export function JobExecutionChart() {
-  const { jobs } = useJobs();
+  useJobs();
   
   // Calculate execution frequency by hour for the last 24 hours
   const executionData = Array.from({ length: 24 }, (_, i) => {

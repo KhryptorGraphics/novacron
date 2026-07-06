@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useVolumes } from '@/hooks/useVolumes';
+import type { VolumeTier } from '@/lib/graphql/volumes';
 
 const TIER_OPTIONS = ['HOT', 'WARM', 'COLD'] as const;
 
@@ -49,8 +50,8 @@ export default function StorageManagementUI() {
     await createVolume({
       name: formState.name.trim(),
       size: parsedSize,
-      tier: formState.tier,
-      vmId: formState.vmId.trim() || undefined,
+      tier: formState.tier as VolumeTier,
+      ...(formState.vmId.trim() ? { vmId: formState.vmId.trim() } : {}),
     });
     setFormState({
       name: '',
@@ -249,7 +250,7 @@ export default function StorageManagementUI() {
                             value={volume.tier}
                             onValueChange={(tier) => {
                               if (tier !== volume.tier) {
-                                void changeVolumeTier(volume.id, tier);
+                                void changeVolumeTier(volume.id, tier as VolumeTier);
                               }
                             }}
                             disabled={changingTier === volume.id}

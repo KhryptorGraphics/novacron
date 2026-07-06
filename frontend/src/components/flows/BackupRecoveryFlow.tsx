@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,8 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { 
-  Calendar,
+import {
   Clock,
   Save,
   RotateCcw,
@@ -28,10 +27,8 @@ import {
   Archive,
   Database,
   HardDrive,
-  CloudUpload,
   RefreshCw,
   Search,
-  Filter,
   ChevronDown,
   ChevronRight,
   FileText
@@ -84,19 +81,6 @@ interface BackupInstance {
   verificationStatus: 'verified' | 'failed' | 'pending' | 'not_verified';
   restorePoints: number;
   tags: string[];
-}
-
-interface RestoreJob {
-  id: string;
-  backupId: string;
-  targetVM: string;
-  type: 'full' | 'file_level' | 'application';
-  status: 'running' | 'completed' | 'failed' | 'pending';
-  progress: number;
-  startedAt: Date;
-  estimatedCompletion?: Date;
-  selectedFiles?: string[];
-  targetLocation: string;
 }
 
 const mockPolicies: BackupPolicy[] = [
@@ -220,9 +204,9 @@ const mockVMs = [
 
 export function BackupRecoveryFlow() {
   const [activeTab, setActiveTab] = useState('overview');
-  const [selectedPolicy, setSelectedPolicy] = useState<BackupPolicy | null>(null);
-  const [selectedBackup, setSelectedBackup] = useState<BackupInstance | null>(null);
-  const [isCreatingPolicy, setIsCreatingPolicy] = useState(false);
+  const [_selectedPolicy, _setSelectedPolicy] = useState<BackupPolicy | null>(null);
+  const [_selectedBackup, _setSelectedBackup] = useState<BackupInstance | null>(null);
+  const [_isCreatingPolicy, setIsCreatingPolicy] = useState(false);
   const [isRunningBackup, setIsRunningBackup] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [backupProgress, setBackupProgress] = useState(0);
@@ -233,7 +217,7 @@ export function BackupRecoveryFlow() {
   const [expandedBackups, setExpandedBackups] = useState<Set<string>>(new Set());
   
   // New backup policy form state
-  const [newPolicy, setNewPolicy] = useState<Partial<BackupPolicy>>({
+  const [_newPolicy, _setNewPolicy] = useState<Partial<BackupPolicy>>({
     name: '',
     description: '',
     schedule: {
@@ -286,9 +270,10 @@ export function BackupRecoveryFlow() {
           return prev + Math.random() * 5;
         });
       }, 500);
-      
+
       return () => clearInterval(interval);
     }
+    return undefined;
   }, [isRunningBackup, toast]);
 
   // Simulate restore progress
@@ -307,12 +292,13 @@ export function BackupRecoveryFlow() {
           return prev + Math.random() * 3;
         });
       }, 800);
-      
+
       return () => clearInterval(interval);
     }
+    return undefined;
   }, [isRestoring, toast]);
 
-  const runBackupNow = (policyId: string) => {
+  const runBackupNow = (_policyId: string) => {
     setIsRunningBackup(true);
     setBackupProgress(0);
     toast({

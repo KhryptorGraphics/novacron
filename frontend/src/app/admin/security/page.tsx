@@ -31,40 +31,26 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { 
   Shield, 
   AlertTriangle, 
   Eye, 
-  CheckCircle, 
-  XCircle,
-  Clock,
+  CheckCircle,
   Search,
-  Filter,
   Download,
   RefreshCw,
-  Activity,
   Lock,
   Unlock,
   Key,
   Database,
-  Network,
-  Server,
-  User,
-  Settings,
-  Ban,
-  UserCheck,
-  Mail,
-  Globe,
   Smartphone,
   Wifi
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { SecurityAlert, AuditLogEntry } from "@/lib/api/types";
+import { SecurityAlert } from "@/lib/api/types";
 import { FadeIn } from "@/lib/animations";
-import { useForm } from "react-hook-form";
 
 // Mock security data
 const securityMetrics = {
@@ -105,16 +91,14 @@ export default function SecurityCenterPage() {
     page: 1,
     pageSize: 20
   });
-  const [selectedAlert, setSelectedAlert] = useState<SecurityAlert | null>(null);
-  const [showAlertDialog, setShowAlertDialog] = useState(false);
+  const [_selectedAlert, _setSelectedAlert] = useState<SecurityAlert | null>(null);
+  const [_showAlertDialog, _setShowAlertDialog] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   
   const { data: alertsData, isLoading: alertsLoading, refetch: refetchAlerts } = useSecurityAlerts(alertFilters);
-  const { data: auditData } = useAuditLogs({ pageSize: 50 });
+  useAuditLogs({ pageSize: 50 });
   const { data: usersData } = useUsers({ pageSize: 1000 });
   const updateAlert = useUpdateSecurityAlert();
-  
-  const { register, handleSubmit, reset } = useForm();
   
   // Auto-refresh alerts every 30 seconds
   useEffect(() => {
@@ -122,9 +106,10 @@ export default function SecurityCenterPage() {
       const interval = setInterval(() => {
         refetchAlerts();
       }, 30000);
-      
+
       return () => clearInterval(interval);
     }
+    return undefined;
   }, [autoRefresh, refetchAlerts]);
   
   const alerts = alertsData?.alerts || [];

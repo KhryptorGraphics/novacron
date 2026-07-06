@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,6 @@ import {
   RefreshCw,
   AlertTriangle,
   TrendingUp,
-  Clock,
 } from 'lucide-react';
 import { 
   LineChart, 
@@ -91,7 +90,7 @@ export function RealTimeMetricsPanel({ engineStatus }: RealTimeMetricsPanelProps
           if (newMetric.cpuUsage > 80) {
             setAlerts(prev => [...prev, {
               id: `cpu-${Date.now()}`,
-              type: 'warning',
+              type: 'warning' as const,
               message: `High CPU usage detected: ${newMetric.cpuUsage.toFixed(1)}%`,
               timestamp: new Date().toISOString(),
               component: 'CPU',
@@ -101,7 +100,7 @@ export function RealTimeMetricsPanel({ engineStatus }: RealTimeMetricsPanelProps
           if (newMetric.responseTime > 100) {
             setAlerts(prev => [...prev, {
               id: `response-${Date.now()}`,
-              type: 'error',
+              type: 'error' as const,
               message: `High response time: ${newMetric.responseTime.toFixed(0)}ms`,
               timestamp: new Date().toISOString(),
               component: 'Performance',

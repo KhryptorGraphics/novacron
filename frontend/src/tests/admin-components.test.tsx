@@ -1,7 +1,6 @@
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { toast } from '@/components/ui/use-toast';
 import { RealTimeDashboard } from '@/components/admin/RealTimeDashboard';
 import { useAdminRealTimeUpdates } from '@/lib/ws/useAdminWebSocket';
 

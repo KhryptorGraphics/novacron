@@ -1,14 +1,13 @@
 "use client";
 
-import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useRBAC } from '@/contexts/RBACContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Avatar, AvatarFallback, AvatarInitials } from '@/components/ui/avatar';
-import { User, Settings, Shield, LogOut, Eye } from 'lucide-react';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { User, Settings, Shield, LogOut } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,

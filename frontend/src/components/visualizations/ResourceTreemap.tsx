@@ -121,7 +121,7 @@ export const ResourceTreemap: React.FC<ResourceTreemapProps> = ({
           : getCategoryColor(node)
         ),
         children: undefined
-      } as LayoutedNode;
+      } as unknown as LayoutedNode;
     }
     
     // Calculate total value of children

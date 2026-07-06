@@ -1,6 +1,5 @@
 import { renderHook, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { mockApiResponse, mockApiError } from '@/src/__tests__/utils/test-utils';
+import { mockApiResponse, mockApiError } from '@/__tests__/utils/test-utils';
 
 // Mock fetch
 global.fetch = jest.fn();
@@ -8,7 +7,6 @@ const mockFetch = fetch as jest.MockedFunction<typeof fetch>;
 
 // Mock hook implementation
 const useVMs = () => {
-  const queryClient = new QueryClient();
   
   const fetchVMs = async () => {
     const response = await fetch('/api/vms');

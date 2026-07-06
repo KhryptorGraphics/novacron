@@ -9,7 +9,7 @@ import { motion } from "framer-motion";
 
 interface BreadcrumbItem {
   label: string;
-  href?: string;
+  href?: string | undefined;
   icon?: React.ComponentType<{ className?: string }>;
 }
 

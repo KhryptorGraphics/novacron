@@ -176,7 +176,7 @@ class ApiClient {
       {
         ...options,
         method: 'POST',
-        body: data ? JSON.stringify(data) : undefined,
+        ...(data !== undefined ? { body: JSON.stringify(data) } : {}),
       },
       1
     );
@@ -191,7 +191,7 @@ class ApiClient {
       {
         ...options,
         method: 'PUT',
-        body: data ? JSON.stringify(data) : undefined,
+        ...(data !== undefined ? { body: JSON.stringify(data) } : {}),
       },
       1
     );
@@ -213,7 +213,7 @@ class ApiClient {
       {
         ...options,
         method: 'PATCH',
-        body: data ? JSON.stringify(data) : undefined,
+        ...(data !== undefined ? { body: JSON.stringify(data) } : {}),
       },
       1
     );

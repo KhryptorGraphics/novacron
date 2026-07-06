@@ -333,40 +333,76 @@ export type ResourcePrediction = {
 export type WorkloadPattern = {
   id: string;
   name: string;
-  clusterId: string;
-  pattern: Array<{
+  clusterId?: string;
+  pattern?: Array<{
     hour: number;
     cpu: number;
     memory: number;
     network: number;
   }>;
   confidence: number;
-  seasonality: 'daily' | 'weekly' | 'monthly';
+  seasonality?: 'daily' | 'weekly' | 'monthly';
+
+  // Additional fields used in dashboard
+  type?: 'daily' | 'weekly' | 'monthly';
+  description?: string;
+  peakHours?: string[];
+  baselineMultiplier?: number;
+  nextOccurrence?: string;
+  impact?: {
+    cpu: number;
+    memory: number;
+    network: number;
+    storage: number;
+  };
 };
 
 export type MigrationPrediction = {
   vmId: string;
   sourceNode: string;
   targetNode: string;
-  confidence: number;
-  reason: string;
+  confidence?: number;
+  reason?: string;
   estimatedDuration: number;
-  riskScore: number;
+  riskScore?: number;
+
+  // Additional fields used in dashboard
+  vmName?: string;
+  successProbability?: number;
+  expectedDowntime?: number;
+  resourceImpact?: {
+    cpu: number;
+    memory: number;
+    network: number;
+  };
+  recommendation?: string;
+  risks?: string[];
+  optimalTime?: string;
 };
 
 export type ScalingRecommendation = {
   resourceType: string;
-  action: 'scale_up' | 'scale_down' | 'migrate' | 'optimize';
+  action?: 'scale_up' | 'scale_down' | 'migrate' | 'optimize';
   confidence: number;
-  impact: string;
-  priority: 'low' | 'medium' | 'high';
+  impact?: string;
+  priority?: 'low' | 'medium' | 'high';
+
+  // Additional fields used in dashboard
+  type?: 'horizontal' | 'vertical' | 'storage';
+  currentCapacity?: number;
+  recommendedCapacity?: number;
+  costImpact?: number;
+  performanceGain?: number;
+  timeline?: string;
+  reasoning?: string;
+  implementation?: string[];
 };
 
 export type PerformanceOptimization = {
   type?: string;
   description: string;
   impact?: number | 'low' | 'medium' | 'high';
-  implementation?: string;
+  implementation?: string[];
   cost?: number;
 
   // Additional fields used in dashboard
@@ -602,13 +638,23 @@ export type FabricUpdate = {
 };
 
 export type ModelMetrics = {
-  modelId: string;
+  modelId?: string;
   accuracy: number;
   precision: number;
   recall: number;
   f1Score: number;
-  trainingTime: number;
+  trainingTime?: number;
   lastTrained: string;
+
+  // Additional fields used in dashboard
+  trainingDataSize?: number;
+  predictionCount?: number;
+  modelDrift?: number;
+  confidenceDistribution?: {
+    high: number;
+    medium: number;
+    low: number;
+  };
 };
 
 export type PredictionResult = {

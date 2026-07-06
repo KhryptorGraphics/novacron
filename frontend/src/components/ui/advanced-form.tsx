@@ -14,14 +14,11 @@ import {
   Save,
   RotateCcw,
   AlertTriangle,
-  CheckCircle,
   Info,
   X,
   Eye,
   EyeOff,
   Calendar,
-  Clock,
-  Upload,
   FileText,
   Zap
 } from 'lucide-react';
@@ -67,7 +64,7 @@ interface FormContextType {
   isDirty: boolean;
   isSubmitting: boolean;
   autoSaveEnabled: boolean;
-  lastSaved?: Date;
+  lastSaved?: Date | undefined;
   updateField: (name: string, value: any) => void;
   validateField: (name: string) => boolean;
   validateForm: () => boolean;
@@ -383,7 +380,7 @@ export function FormField({ field, className }: FormFieldProps) {
           <Select
             value={value || ''}
             onValueChange={handleChange}
-            disabled={field.disabled}
+            disabled={field.disabled ?? false}
           >
             <SelectTrigger className={hasErrors ? 'border-red-500' : ''}>
               <SelectValue placeholder={field.placeholder} />

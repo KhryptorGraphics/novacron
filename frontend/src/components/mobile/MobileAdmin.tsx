@@ -1,5 +1,5 @@
 // Mobile-first administration interface for NovaCron
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,20 +7,17 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  Modal,
   Alert,
-  Platform,
   Dimensions,
   RefreshControl,
   FlatList,
   Switch,
-  ActivityIndicator,
   SafeAreaView,
   StatusBar,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LineChart, PieChart, BarChart } from 'react-native-chart-kit';
+import { LineChart } from 'react-native-chart-kit';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
@@ -224,9 +221,9 @@ const useVoiceCommands = (onCommand: (command: string) => void) => {
 // Components
 const MobileAdminDashboard: React.FC = () => {
   const queryClient = useQueryClient();
-  const [selectedVM, setSelectedVM] = useState<VM | null>(null);
+  const [_selectedVM, setSelectedVM] = useState<VM | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const { isOffline, queueOperation, pendingSync } = useOfflineSync();
+  const { isOffline, pendingSync } = useOfflineSync();
   
   // Fetch VMs
   const { data: vms, refetch: refetchVMs } = useQuery(
@@ -279,39 +276,8 @@ const MobileAdminDashboard: React.FC = () => {
   const { isListening, startListening, stopListening } = useVoiceCommands(handleVoiceCommand);
 
   // VM operations
-  const startVMMutation = useMutation(
-    (vmId: string) => apiService.makeRequest(`/api/vms/${vmId}/start`, { method: 'POST' }),
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries('vms');
-        showNotification('VM Started', 'success');
-      },
-    }
-  );
 
-  const stopVMMutation = useMutation(
-    (vmId: string) => apiService.makeRequest(`/api/vms/${vmId}/stop`, { method: 'POST' }),
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries('vms');
-        showNotification('VM Stopped', 'success');
-      },
-    }
-  );
 
-  const migrateVMMutation = useMutation(
-    ({ vmId, destination }: { vmId: string; destination: string }) =>
-      apiService.makeRequest(`/api/vms/${vmId}/migrate`, {
-        method: 'POST',
-        body: JSON.stringify({ destination }),
-      }),
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries('vms');
-        showNotification('Migration Started', 'info');
-      },
-    }
-  );
 
   // Refresh handler
   const onRefresh = useCallback(async () => {
@@ -1005,7 +971,7 @@ async function migrateVM(vmId: string) {
   console.log('Migrate VM:', vmId);
 }
 
-function showNotification(message: string, type: 'success' | 'error' | 'info') {
+function showNotification(message: string, _type: 'success' | 'error' | 'info') {
   PushNotification.localNotification({
     title: 'NovaCron',
     message,

@@ -7,7 +7,6 @@ import { Progress } from "@/components/ui/progress";
 import { 
   Server, 
   Play, 
-  Pause, 
   Square, 
   RotateCw, 
   Settings, 

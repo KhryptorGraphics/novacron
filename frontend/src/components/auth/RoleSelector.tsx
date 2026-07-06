@@ -1,10 +1,8 @@
 "use client";
 
-import { useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { useRBAC, Role } from '@/contexts/RBACContext';
 import { Shield, Users, Eye, Settings } from 'lucide-react';
@@ -22,7 +20,7 @@ export default function RoleSelector({
   disabled = false,
   showDescription = true
 }: RoleSelectorProps) {
-  const { userRoles } = useRBAC();
+  useRBAC();
 
   // Available roles - in production, this might be fetched from an API
   const availableRoles: Role[] = [
@@ -67,13 +65,6 @@ export default function RoleSelector({
     }
   };
 
-  const handleRoleToggle = (roleId: string) => {
-    if (selectedRoles.includes(roleId)) {
-      onRoleChange(selectedRoles.filter(id => id !== roleId));
-    } else {
-      onRoleChange([...selectedRoles, roleId]);
-    }
-  };
 
   const selectedRole = availableRoles.find(role => role.id === selectedRoles[0]);
 

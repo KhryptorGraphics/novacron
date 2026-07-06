@@ -409,7 +409,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                 <div className="space-y-2">
                   <Label htmlFor="orgSize">Organization Size *</Label>
                   <Select
-                    value={formData.organizationSize}
+                    value={formData.organizationSize ?? ''}
                     onValueChange={(value) => updateFormData('organizationSize', value)}
                   >
                     <SelectTrigger
@@ -487,7 +487,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                   <div className="flex items-start space-x-3">
                     <Checkbox
                       id="twoFactor"
-                      checked={formData.enableTwoFactor}
+                      checked={formData.enableTwoFactor ?? false}
                       onCheckedChange={(checked) => updateFormData('enableTwoFactor', checked)}
                     />
                     <div className="space-y-1">

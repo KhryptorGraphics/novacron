@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -9,9 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Slider } from '@/components/ui/slider';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  TrendingUp, TrendingDown, Brain, Target, Zap, AlertCircle,
-  BarChart3, PieChart, Activity, Cpu, MemoryStick, HardDrive,
-  Network, Clock, CheckCircle, XCircle, Lightbulb, ArrowRight
+  TrendingUp, Brain, Target, Zap, AlertCircle, Activity, Cpu, MemoryStick, HardDrive,
+  Network, XCircle, Lightbulb
 } from 'lucide-react';
 import { PredictiveChart } from '@/components/visualizations/PredictiveChart';
 import { usePerformancePredictionWebSocket } from '@/hooks/useWebSocket';
@@ -20,8 +19,7 @@ import type {
   WorkloadPattern,
   MigrationPrediction,
   ScalingRecommendation,
-  PerformanceOptimization,
-  ModelMetrics
+  PerformanceOptimization
 } from '@/lib/api/types';
 
 interface PerformancePredictionDashboardProps {
@@ -31,13 +29,12 @@ interface PerformancePredictionDashboardProps {
 }
 
 export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashboardProps> = ({
-  clusterId,
   timeHorizon: initialTimeHorizon = '24hr',
   confidenceThreshold: initialConfidenceThreshold = 80,
 }) => {
   const [timeHorizon, setTimeHorizon] = useState(initialTimeHorizon);
   const [confidenceThreshold, setConfidenceThreshold] = useState(initialConfidenceThreshold);
-  const [selectedScenario, setSelectedScenario] = useState<string>('current');
+  const [_selectedScenario, _setSelectedScenario] = useState<string>('current');
   const [whatIfParams, setWhatIfParams] = useState({
     cpuIncrease: 0,
     memoryIncrease: 0,
@@ -225,8 +222,8 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
       category: 'resource_allocation',
       title: 'Optimize VM Resource Distribution',
       description: 'Rebalance VMs across nodes to improve resource utilization',
-      impact: 'High',
-      effort: 'Medium',
+      impact: 'high',
+      effort: 'medium',
       savings: 320, // USD per month
       performanceGain: 18,
       implementation: [
@@ -242,8 +239,8 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
       category: 'workload_scheduling',
       title: 'Implement Intelligent Workload Scheduling',
       description: 'Schedule batch jobs during low-usage periods to optimize resource usage',
-      impact: 'Medium',
-      effort: 'Low',
+      impact: 'medium',
+      effort: 'low',
       savings: 180,
       performanceGain: 12,
       implementation: [
@@ -259,8 +256,8 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
       category: 'network_optimization',
       title: 'Optimize Network Traffic Patterns',
       description: 'Implement QoS and traffic shaping to reduce network congestion',
-      impact: 'Medium',
-      effort: 'High',
+      impact: 'medium',
+      effort: 'high',
       savings: 240,
       performanceGain: 22,
       implementation: [
@@ -273,7 +270,7 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
     },
   ];
 
-  const mockModelMetrics: ModelMetrics = {
+  const mockModelMetrics = {
     accuracy: 91.5,
     precision: 89.2,
     recall: 93.8,
@@ -533,18 +530,30 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
                   <CardDescription>AI-powered usage prediction over {timeHorizon}</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <PredictiveChart
-                    data={generatePredictionData(prediction.resourceType)}
-                    title=""
-                    yAxisLabel="Usage (%)"
-                    showConfidence={true}
-                    height={200}
-                  />
+                  {(() => {
+                    const series = generatePredictionData(prediction.resourceType);
+                    return (
+                      <PredictiveChart
+                        title=""
+                        historicalData={series
+                          .filter((d): d is typeof d & { actual: number } => d.actual !== undefined)
+                          .map((d) => ({ timestamp: d.timestamp, value: d.actual }))}
+                        predictedData={series.map((d) => ({
+                          timestamp: d.timestamp,
+                          value: d.predicted,
+                          lowerBound: d.confidence.lower,
+                          upperBound: d.confidence.upper,
+                        }))}
+                        metricName={prediction.resourceType ?? ''}
+                        metricUnit="%"
+                      />
+                    );
+                  })()}
 
                   <div className="mt-4">
                     <h4 className="text-sm font-medium mb-2">Key Factors</h4>
                     <div className="space-y-1">
-                      {prediction.factors.map((factor, idx) => (
+                      {(prediction.factors ?? []).map((factor, idx) => (
                         <div key={idx} className="flex items-center gap-2 text-sm">
                           <div className="w-1 h-1 rounded-full bg-primary" />
                           <span className="text-muted-foreground">{factor}</span>
@@ -593,7 +602,7 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Peak Hours:</span>
-                          <span>{pattern.peakHours[0]} - {pattern.peakHours[1]}</span>
+                          <span>{pattern.peakHours?.[0]} - {pattern.peakHours?.[1]}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Multiplier:</span>
@@ -601,7 +610,7 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
                         </div>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Next Occurrence:</span>
-                          <span>{new Date(pattern.nextOccurrence).toLocaleDateString()}</span>
+                          <span>{new Date(pattern.nextOccurrence ?? Date.now()).toLocaleDateString()}</span>
                         </div>
                       </div>
                     </div>
@@ -609,7 +618,7 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
                     <div>
                       <h4 className="text-sm font-medium mb-3">Resource Impact</h4>
                       <div className="space-y-2">
-                        {Object.entries(pattern.impact).map(([resource, impact]) => (
+                        {Object.entries(pattern.impact ?? {}).map(([resource, impact]) => (
                           <div key={resource} className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <span className="text-sm capitalize">{resource}</span>
@@ -644,7 +653,7 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
                       </CardDescription>
                     </div>
                     <div className="text-right">
-                      <Badge variant={migration.successProbability > 90 ? 'default' : 'secondary'}>
+                      <Badge variant={(migration.successProbability ?? 0) > 90 ? 'default' : 'secondary'}>
                         {migration.successProbability}% Success Rate
                       </Badge>
                       <p className="text-sm text-muted-foreground mt-1">
@@ -660,11 +669,11 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Expected Downtime:</span>
-                          <span>{formatDuration(migration.expectedDowntime)}</span>
+                          <span>{formatDuration(migration.expectedDowntime ?? 0)}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Optimal Time:</span>
-                          <span>{new Date(migration.optimalTime).toLocaleString()}</span>
+                          <span>{new Date(migration.optimalTime ?? Date.now()).toLocaleString()}</span>
                         </div>
                       </div>
                     </div>
@@ -672,7 +681,7 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
                     <div>
                       <h4 className="text-sm font-medium mb-3">Resource Impact</h4>
                       <div className="space-y-1">
-                        {Object.entries(migration.resourceImpact).map(([resource, impact]) => (
+                        {Object.entries(migration.resourceImpact ?? {}).map(([resource, impact]) => (
                           <div key={resource} className="flex items-center justify-between text-sm">
                             <span className="text-muted-foreground capitalize">{resource}:</span>
                             <span>+{impact}%</span>
@@ -684,7 +693,7 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
                     <div>
                       <h4 className="text-sm font-medium mb-3">Risk Factors</h4>
                       <div className="space-y-1">
-                        {migration.risks.map((risk, idx) => (
+                        {(migration.risks ?? []).map((risk, idx) => (
                           <div key={idx} className="flex items-start gap-2 text-sm">
                             <AlertCircle className="h-3 w-3 text-yellow-500 mt-0.5 flex-shrink-0" />
                             <span className="text-muted-foreground">{risk}</span>
@@ -753,7 +762,7 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
                     <div>
                       <h4 className="text-sm font-medium mb-3">Implementation Steps</h4>
                       <div className="space-y-2">
-                        {scaling.implementation.map((step, stepIdx) => (
+                        {(scaling.implementation ?? []).map((step, stepIdx) => (
                           <div key={stepIdx} className="flex items-start gap-2 text-sm">
                             <div className="w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center mt-0.5 flex-shrink-0">
                               {stepIdx + 1}
@@ -786,7 +795,7 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
                         <div className="flex items-center justify-between mb-2">
                           <h4 className="text-sm font-medium">{opt.title}</h4>
                           <div className="flex items-center gap-2">
-                            {getImpactIcon(opt.impact)}
+                            {getImpactIcon(String(opt.impact ?? ''))}
                             <Badge variant="outline">{opt.impact} Impact</Badge>
                           </div>
                         </div>
@@ -816,16 +825,16 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
                             <div>
                               <h5 className="text-xs font-medium text-muted-foreground uppercase">Steps</h5>
                               <ul className="text-sm space-y-1 ml-4 list-disc">
-                                {opt.implementation.map((step, idx) => (
+                                {(opt.implementation ?? []).map((step, idx) => (
                                   <li key={idx}>{step}</li>
                                 ))}
                               </ul>
                             </div>
-                            {opt.prerequisites.length > 0 && (
+                            {(opt.prerequisites ?? []).length > 0 && (
                               <div>
                                 <h5 className="text-xs font-medium text-muted-foreground uppercase">Prerequisites</h5>
                                 <ul className="text-sm space-y-1 ml-4 list-disc">
-                                  {opt.prerequisites.map((prereq, idx) => (
+                                  {(opt.prerequisites ?? []).map((prereq, idx) => (
                                     <li key={idx}>{prereq}</li>
                                   ))}
                                 </ul>

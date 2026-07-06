@@ -1,10 +1,10 @@
-import React, { useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useDistributedTopologyWebSocket } from '@/hooks/useWebSocket';
-import { Activity, Globe, Server, Cloud, Network as NetworkIcon } from 'lucide-react';
+import { Activity, Globe, Server } from 'lucide-react';
 
 // Enhanced types for distributed network data
 export interface Node {
@@ -88,9 +88,9 @@ export const NetworkTopology: React.FC<NetworkTopologyProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<ReturnType<typeof requestAnimationFrame>>();
   const [layoutType, setLayoutType] = React.useState<string>('force');
-  const [highlightedNode, setHighlightedNode] = React.useState<string | null>(null);
-  const [selectedCluster, setSelectedCluster] = React.useState<string | null>(null);
-  const [showLabels, setShowLabels] = React.useState(true);
+  const [_highlightedNode, _setHighlightedNode] = React.useState<string | null>(null);
+  const [_selectedCluster, _setSelectedCluster] = React.useState<string | null>(null);
+  const [showLabels, _setShowLabels] = React.useState(true);
   const [detailLevel, setDetailLevel] = React.useState<'low' | 'medium' | 'high'>('medium');
   const [expandedClusters, setExpandedClusters] = React.useState<Set<string>>(new Set());
 
@@ -157,7 +157,6 @@ export const NetworkTopology: React.FC<NetworkTopologyProps> = ({
             y = height / 2 + Math.sin(angle) * radius;
             break;
           case 'hierarchical':
-            const layers = new Map<string, number>();
             let layer = 0;
             if (node.type === 'cluster') layer = 0;
             else if (node.type === 'host') layer = 1;
@@ -227,11 +226,12 @@ export const NetworkTopology: React.FC<NetworkTopologyProps> = ({
     };
     
     // Node status colors
-    const statusColors = {
+    const statusColors: Record<string, string> = {
       healthy: '#10b981', // Green
       warning: '#f59e0b', // Amber
       error: '#ef4444', // Red
       unknown: '#6b7280', // Gray
+      migrating: '#3b82f6', // Blue
     };
     
     // Enhanced edge colors with bandwidth visualization
