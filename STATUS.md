@@ -108,7 +108,7 @@ which overstate completion and should not be trusted.
   **consolidation decision** (which design survives) before real implementation;
   no cloud credentials, and LocalStack covers only EC2/VPC/S3, not
   cost/monitoring/quotas.
-- **Advanced VM ops** — **CPU pinning implemented** (KVM: `query-cpus-fast` over QMP → `sched_setaffinity` on each vCPU/emulator host thread; discriminating real-qemu test proves vcpu affinity narrows to the requested cpu, runs on arm64 TCG). Hot-plug + NUMA still not implemented; iothread pinning is wired but a no-op until `buildQEMUArgs` emits `-object iothread`.
+- **Advanced VM ops** — **CPU pinning + device hot-plug implemented** (KVM). CPU pinning: `query-cpus-fast` over QMP → `sched_setaffinity` per vCPU/emulator host thread. Hot-plug: disk/network via QMP `blockdev-add`/`netdev_add` + `device_add` (and `device_del` unplug); real arm64 PCIe hot-plug needs slots, so `buildQEMUArgs` pre-provisions 4 `pcie-root-port`s on the `virt` machine only (x86 `pc` hot-plugs on `pci.0` natively). Both features have discriminating real-qemu tests that run on arm64 TCG, and the shared-`buildQEMUArgs` root-port change was verified non-regressive (Gate 1 boot + Gate 2 shared/block migration cutover 5/5 green). Still pending: NUMA and cpu/memory hotplug (need launch-time topology/`-smp maxcpus`/`-m slots,maxmem`); iothread pinning wired but no-op until `-object iothread` is emitted.
 
 ## vm sub-package compile gap — quarantined 2026-07-04
 

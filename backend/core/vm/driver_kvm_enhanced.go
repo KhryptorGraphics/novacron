@@ -708,6 +708,19 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 		"-pidfile", filepath.Join(sockDir, "qemu.pid"),
 	}
 
+	// PCIe hotplug slots: the aarch64 "virt" root bus (pcie.0) refuses
+	// hot-plugging, so pre-provision a few pcie-root-ports for HotPlugDevice to
+	// attach disks/NICs onto. x86 "pc" (i440fx) hot-plugs onto pci.0 natively and
+	// needs none, so this is virt-only (pcie-root-port is invalid on i440fx).
+	// ponytail: hotplugRootPortCount fixed ports -> that many concurrent
+	// hot-plugs; raise it (or device_add ports on demand) if more are needed.
+	if machine == "virt" {
+		for i := 0; i < hotplugRootPortCount; i++ {
+			args = append(args, "-device",
+				fmt.Sprintf("pcie-root-port,id=%s%d,chassis=%d", hotplugRootPortPrefix, i, i))
+		}
+	}
+
 	// Primary boot disk as a named -blockdev (not -drive if=virtio) so ANY running
 	// VM can be drive-mirror'd (block-migration source) and NBD-exported (dest) by
 	// node name -- block migration must work on normally-created VMs, and the
@@ -1040,9 +1053,11 @@ func (d *KVMDriverEnhanced) SupportsLiveMigration() bool {
 	return true
 }
 
-// SupportsHotPlug returns whether the driver supports hot-plugging devices
+// SupportsHotPlug returns whether the driver supports hot-plugging devices.
+// Implemented for disk + network via QMP blockdev-add/netdev_add + device_add
+// (see HotPlugDevice). vCPU/memory hotplug is not (needs launch-time headroom).
 func (d *KVMDriverEnhanced) SupportsHotPlug() bool {
-	return false // Not implemented yet
+	return true
 }
 
 // SupportsGPUPassthrough returns whether the driver supports GPU passthrough
@@ -1111,14 +1126,256 @@ func (d *KVMDriverEnhanced) GetHypervisorInfo(ctx context.Context) (*HypervisorI
 	}, nil
 }
 
-// HotPlugDevice hot-plugs a device (not implemented yet)
+// hotplug PCIe-root-port provisioning: buildQEMUArgs pre-adds this many
+// pcie-root-ports (ids "hprp0".."hprpN-1") on the aarch64 "virt" machine so
+// PCIe devices can be hot-plugged onto them (the root bus pcie.0 itself refuses
+// hotplug). HotPlugDevice attaches onto the first free one.
+const (
+	hotplugRootPortPrefix = "hprp"
+	hotplugRootPortCount  = 4
+)
+
+// HotPlugDevice hot-plugs a disk or network device into a running VM over QMP.
+//   - disk:    blockdev-add a qcow2/raw node (path/file from device.Parameters)
+//     then device_add virtio-blk-pci; the block node is rolled back if
+//     device_add fails.
+//   - network: netdev_add (type "user" unless device.Parameters["type"] says
+//     otherwise) then device_add virtio-net-pci.
+//
+// On the "virt" machine the device lands on a free pcie-root-port; on x86 "pc"
+// it lands on the natively-hotpluggable pci.0. The VM must be running.
 func (d *KVMDriverEnhanced) HotPlugDevice(ctx context.Context, vmID string, device *DeviceConfig) error {
-	return fmt.Errorf("hot-plug not implemented for KVM driver")
+	if device == nil {
+		return fmt.Errorf("nil device config")
+	}
+	if device.Name == "" {
+		return fmt.Errorf("device name required (used as the qdev id for hot-unplug)")
+	}
+
+	// Look up + state-check under the lock, then release it before QMP I/O
+	// (mirrors ConfigureCPUPinning / migrateWithStats).
+	d.vmLock.RLock()
+	vmInfo, ok := d.vms[vmID]
+	d.vmLock.RUnlock()
+	if !ok {
+		return fmt.Errorf("VM %s not found", vmID)
+	}
+	if vmInfo.State != StateRunning {
+		return fmt.Errorf("VM %s is not running (state %s); cannot hot-plug", vmID, vmInfo.State)
+	}
+
+	sock := filepath.Join(d.runtimeDir(vmInfo), "qmp.sock")
+	q, err := qmpDial(sock, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("connect QMP %s: %w", sock, err)
+	}
+	defer q.Close()
+
+	switch device.Type {
+	case "disk":
+		return hotPlugDisk(q, device)
+	case "network":
+		return hotPlugNetwork(q, device)
+	case "cpu", "memory":
+		// ponytail: real vCPU/DIMM hotplug needs launch-time headroom
+		// (-smp ...,maxcpus=N for cpu; -m size,slots=S,maxmem=M for memory) which
+		// buildQEMUArgs does NOT emit. Wire device_add <cpu-type> / object_add
+		// memory-backend-ram + device_add pc-dimm here once those flags exist.
+		return fmt.Errorf("%s hot-plug unsupported: VM launched without hotplug headroom (needs -smp maxcpus / -m slots,maxmem at boot)", device.Type)
+	default:
+		return fmt.Errorf("unsupported hot-plug device type %q", device.Type)
+	}
 }
 
-// HotUnplugDevice hot-unplugs a device (not implemented yet)
+// hotPlugDisk blockdev-adds the backing file then attaches a virtio-blk-pci
+// device; the orphan block node is deleted if the device attach fails.
+func hotPlugDisk(q *qmpConn, device *DeviceConfig) error {
+	path := paramString(device.Parameters, "path", "file")
+	if path == "" {
+		return fmt.Errorf("disk hot-plug requires a \"path\" or \"file\" parameter")
+	}
+	format := paramString(device.Parameters, "format")
+	if format == "" {
+		format = "qcow2" // ponytail: qcow2 default; pass "format":"raw" for raw images
+	}
+	node := "blk-" + device.Name
+	if _, err := q.execute("blockdev-add", map[string]interface{}{
+		"node-name": node,
+		"driver":    format,
+		"file":      map[string]interface{}{"driver": "file", "filename": path},
+	}); err != nil {
+		return fmt.Errorf("blockdev-add %s: %w", path, err)
+	}
+	dev := map[string]interface{}{"driver": "virtio-blk-pci", "drive": node, "id": device.Name}
+	if bus := resolveHotplugBus(q, device); bus != "" {
+		dev["bus"] = bus
+	}
+	if _, err := q.execute("device_add", dev); err != nil {
+		// Roll back the now-orphaned block node so its name is reusable on retry.
+		_, _ = q.execute("blockdev-del", map[string]interface{}{"node-name": node})
+		return fmt.Errorf("device_add virtio-blk-pci id=%s: %w", device.Name, err)
+	}
+	return nil
+}
+
+// hotPlugNetwork adds a netdev backend then attaches a virtio-net-pci device;
+// the netdev is removed if the device attach fails.
+func hotPlugNetwork(q *qmpConn, device *DeviceConfig) error {
+	netType := paramString(device.Parameters, "type")
+	if netType == "" {
+		netType = "user" // ponytail: SLIRP user-net default; "tap"/etc. via params
+	}
+	id := "net-" + device.Name
+	if _, err := q.execute("netdev_add", map[string]interface{}{"type": netType, "id": id}); err != nil {
+		return fmt.Errorf("netdev_add %s: %w", netType, err)
+	}
+	dev := map[string]interface{}{"driver": "virtio-net-pci", "netdev": id, "id": device.Name}
+	if bus := resolveHotplugBus(q, device); bus != "" {
+		dev["bus"] = bus
+	}
+	if _, err := q.execute("device_add", dev); err != nil {
+		_, _ = q.execute("netdev_del", map[string]interface{}{"id": id})
+		return fmt.Errorf("device_add virtio-net-pci id=%s: %w", device.Name, err)
+	}
+	return nil
+}
+
+// HotUnplugDevice removes a hot-plugged device by its qdev id over QMP. It
+// issues device_del, waits briefly for the guest to release the PCIe device
+// (device_del is asynchronous), then best-effort deletes the backing block node
+// / netdev HotPlugDevice created (named "blk-<id>" / "net-<id>"). The VM must be
+// running.
 func (d *KVMDriverEnhanced) HotUnplugDevice(ctx context.Context, vmID string, deviceID string) error {
-	return fmt.Errorf("hot-unplug not implemented for KVM driver")
+	if deviceID == "" {
+		return fmt.Errorf("device id required")
+	}
+	d.vmLock.RLock()
+	vmInfo, ok := d.vms[vmID]
+	d.vmLock.RUnlock()
+	if !ok {
+		return fmt.Errorf("VM %s not found", vmID)
+	}
+	if vmInfo.State != StateRunning {
+		return fmt.Errorf("VM %s is not running (state %s); cannot hot-unplug", vmID, vmInfo.State)
+	}
+
+	sock := filepath.Join(d.runtimeDir(vmInfo), "qmp.sock")
+	q, err := qmpDial(sock, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("connect QMP %s: %w", sock, err)
+	}
+	defer q.Close()
+
+	if _, err := q.execute("device_del", map[string]interface{}{"id": deviceID}); err != nil {
+		return fmt.Errorf("device_del %s: %w", deviceID, err)
+	}
+	// device_del is guest-driven and asynchronous; wait for the qdev id to leave
+	// query-pci so the backend can be freed without an "in use" error.
+	awaitDeviceGone(q, deviceID, 10*time.Second)
+	// Best-effort backend cleanup: only one of these matches (disk vs nic); the
+	// other simply errors because that name never existed. A device that never
+	// released leaves its node to be reaped when the VM stops.
+	_, _ = q.execute("blockdev-del", map[string]interface{}{"node-name": "blk-" + deviceID})
+	_, _ = q.execute("netdev_del", map[string]interface{}{"id": "net-" + deviceID})
+	return nil
+}
+
+// resolveHotplugBus returns the QMP bus= for a hot-plugged PCIe device. An
+// explicit device.Bus wins; otherwise the first free pcie-root-port is used. It
+// returns "" when no root port exists (x86 "pc" hot-plugs onto pci.0 natively)
+// or none is free (device_add then fails with a clear "no hotplug bus" error).
+func resolveHotplugBus(q *qmpConn, device *DeviceConfig) string {
+	if device.Bus != "" {
+		return device.Bus
+	}
+	for _, dv := range queryPCITopo(q) {
+		if strings.HasPrefix(dv.qdevID, hotplugRootPortPrefix) && len(dv.children) == 0 {
+			return dv.qdevID
+		}
+	}
+	return ""
+}
+
+// awaitDeviceGone polls query-pci until no device carries qdevID, or timeout.
+// A query error is treated as "gone" (stop waiting) -- the subsequent best-effort
+// cleanup is harmless either way.
+func awaitDeviceGone(q *qmpConn, qdevID string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for {
+		present := false
+		for _, dv := range queryPCITopo(q) {
+			if dv.qdevID == qdevID {
+				present = true
+				break
+			}
+			for _, c := range dv.children {
+				if c == qdevID {
+					present = true
+					break
+				}
+			}
+		}
+		if !present || time.Now().After(deadline) {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// pciTopoDev is one PCI device from query-pci plus, for a pci_bridge (root port),
+// the qdev ids of the devices behind it.
+type pciTopoDev struct {
+	qdevID   string
+	children []string
+}
+
+// queryPCITopo flattens query-pci into the root-bus devices and, for each
+// pci_bridge, its downstream qdev ids. Returns nil on any error (callers treat
+// nil as "nothing found").
+func queryPCITopo(q *qmpConn) []pciTopoDev {
+	raw, err := q.execute("query-pci", nil)
+	if err != nil {
+		return nil
+	}
+	var buses []struct {
+		Devices []struct {
+			QdevID    string `json:"qdev_id"`
+			PCIBridge *struct {
+				Devices []struct {
+					QdevID string `json:"qdev_id"`
+				} `json:"devices"`
+			} `json:"pci_bridge"`
+		} `json:"devices"`
+	}
+	if err := json.Unmarshal(raw, &buses); err != nil {
+		return nil
+	}
+	var out []pciTopoDev
+	for _, b := range buses {
+		for _, dv := range b.Devices {
+			pd := pciTopoDev{qdevID: dv.QdevID}
+			if dv.PCIBridge != nil {
+				for _, k := range dv.PCIBridge.Devices {
+					pd.children = append(pd.children, k.QdevID)
+				}
+			}
+			out = append(out, pd)
+		}
+	}
+	return out
+}
+
+// paramString returns the first parameter present under keys as a non-empty
+// string, else "".
+func paramString(params map[string]interface{}, keys ...string) string {
+	for _, k := range keys {
+		if v, ok := params[k]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 // ConfigureCPUPinning pins a running VM's host threads to physical CPUs via
