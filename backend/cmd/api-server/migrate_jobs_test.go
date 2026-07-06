@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 	"time"
 
@@ -17,7 +19,7 @@ import (
 // start "running", if finish() drops the running->completed/failed transition or
 // the error message, or if eviction does not bound the map.
 func TestMigrateJobStore(t *testing.T) {
-	s := newMigrateJobStore(2)
+	s := newMigrateJobStore(2, nil)
 
 	id1 := s.create("vm-1")
 	if j, ok := s.get(id1); !ok || j.Status != migrateStatusRunning || j.VMID != "vm-1" || j.FinishedAt != nil {
@@ -95,7 +97,7 @@ func waitForTerminal(t *testing.T, router http.Handler, jobID string) migrateJob
 // hardcoded a terminal status the "running before release" check fails, and if
 // finish() were dropped waitForTerminal times out.
 func TestMigrateAsyncHandlerCompletes(t *testing.T) {
-	store := newMigrateJobStore(8)
+	store := newMigrateJobStore(8, nil)
 	release := make(chan struct{})
 	var gotVM, gotTarget string
 	var gotOptions map[string]string
@@ -148,7 +150,7 @@ func TestMigrateAsyncHandlerCompletes(t *testing.T) {
 // TestMigrateAsyncHandlerFails proves a failing migration lands the job in
 // "failed" with the runner's error surfaced, and that an unknown job id is 404.
 func TestMigrateAsyncHandlerFails(t *testing.T) {
-	store := newMigrateJobStore(8)
+	store := newMigrateJobStore(8, nil)
 	run := func(ctx context.Context, vmID, targetNode string, options map[string]string) error {
 		return errors.New("target unreachable")
 	}
@@ -177,7 +179,7 @@ func TestMigrateAsyncHandlerFails(t *testing.T) {
 // TestMigrateAsyncHandlerRejectsMissingTarget proves the async route enforces the
 // same required-field validation as the sync route before creating any job.
 func TestMigrateAsyncHandlerRejectsMissingTarget(t *testing.T) {
-	store := newMigrateJobStore(8)
+	store := newMigrateJobStore(8, nil)
 	called := false
 	run := func(ctx context.Context, vmID, targetNode string, options map[string]string) error {
 		called = true
@@ -224,5 +226,138 @@ func TestRegisterSecureAPIRoutesMountsAsyncMigration(t *testing.T) {
 		if !router.Match(req, &match) {
 			t.Fatalf("registerSecureAPIRoutes did not mount %s %s", c.method, c.path)
 		}
+	}
+}
+
+const (
+	migrateJobInsertSQL = `INSERT INTO migration_jobs (id, vm_id, status, started_at) VALUES ($1, $2, $3, $4)`
+	migrateJobUpdateSQL = `UPDATE migration_jobs SET status = $2, error = $3, finished_at = $4 WHERE id = $1`
+	migrateJobSelectSQL = `SELECT id, vm_id, status, error, started_at, finished_at FROM migration_jobs WHERE id = $1`
+)
+
+// TestMigrateJobStorePersistsCompletedLifecycle proves the DB-backed store writes
+// each transition through: create INSERTs a running row (id/started_at generated,
+// so AnyArg), and finish(nil) UPDATEs it to completed with a NULL error.
+// Discriminating: sqlmock's ordered, argument-checked expectations fail if a
+// statement is skipped, carries the wrong status, or writes an error on success,
+// and ExpectationsWereMet fails if a transition never reaches the DB.
+func TestMigrateJobStorePersistsCompletedLifecycle(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := newMigrateJobStore(8, db)
+
+	mock.ExpectExec(regexp.QuoteMeta(migrateJobInsertSQL)).
+		WithArgs(sqlmock.AnyArg(), "vm-1", migrateStatusRunning, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	id := store.create("vm-1")
+	if id == "" {
+		t.Fatal("create returned an empty job id")
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta(migrateJobUpdateSQL)).
+		WithArgs(id, migrateStatusCompleted, nil, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	store.finish(id, nil)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations for create+finish(nil): %v", err)
+	}
+}
+
+// TestMigrateJobStorePersistsFailure proves finish(err) UPDATEs the persisted row
+// to failed and stores the runner's error message. Discriminating: the WithArgs
+// match fails if the status is not "failed" or the error text is dropped.
+func TestMigrateJobStorePersistsFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := newMigrateJobStore(8, db)
+
+	mock.ExpectExec(regexp.QuoteMeta(migrateJobInsertSQL)).
+		WithArgs(sqlmock.AnyArg(), "vm-x", migrateStatusRunning, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	id := store.create("vm-x")
+
+	mock.ExpectExec(regexp.QuoteMeta(migrateJobUpdateSQL)).
+		WithArgs(id, migrateStatusFailed, "target unreachable", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	store.finish(id, errors.New("target unreachable"))
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations for finish(err): %v", err)
+	}
+}
+
+// TestMigrateJobStoreReadsPersistedRowAfterRestart proves the durability payoff:
+// a fresh store (empty cache) models a just-restarted process, and get() falls
+// through the cache miss to SELECT the persisted row. Discriminating: if get()
+// stopped at the cache it would report not-found, and the field assertions catch
+// a botched scan of the nullable error / finished_at columns.
+func TestMigrateJobStoreReadsPersistedRowAfterRestart(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := newMigrateJobStore(8, db) // empty cache == freshly-restarted process
+
+	startedAt := time.Now().Add(-2 * time.Minute).UTC()
+	finishedAt := time.Now().Add(-1 * time.Minute).UTC()
+	mock.ExpectQuery(regexp.QuoteMeta(migrateJobSelectSQL)).
+		WithArgs("mig-persisted").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "vm_id", "status", "error", "started_at", "finished_at"}).
+			AddRow("mig-persisted", "vm-7", migrateStatusCompleted, nil, startedAt, finishedAt))
+
+	job, ok := store.get("mig-persisted")
+	if !ok {
+		t.Fatal("expected the persisted job to be found via the DB after a cache miss")
+	}
+	if job.ID != "mig-persisted" || job.VMID != "vm-7" || job.Status != migrateStatusCompleted {
+		t.Fatalf("persisted job mismatch: %#v", job)
+	}
+	if job.FinishedAt == nil {
+		t.Fatal("persisted completed job should carry finished_at")
+	}
+	if job.Error != "" {
+		t.Fatalf("completed job should have no error, got %q", job.Error)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+// TestMigrateJobStatusHandlerNotFoundWhenAbsentFromDB proves an id absent from
+// both the cache and the DB yields 404 (not 500) through the status handler.
+func TestMigrateJobStatusHandlerNotFoundWhenAbsentFromDB(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := newMigrateJobStore(8, db)
+	router := jobStatusRouter(store, func(context.Context, string, string, map[string]string) error { return nil })
+
+	mock.ExpectQuery(regexp.QuoteMeta(migrateJobSelectSQL)).
+		WithArgs("mig-nope").
+		WillReturnError(sql.ErrNoRows)
+
+	if code, _ := getJob(t, router, "mig-nope"); code != http.StatusNotFound {
+		t.Fatalf("expected 404 for an id absent from cache and DB, got %d", code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }

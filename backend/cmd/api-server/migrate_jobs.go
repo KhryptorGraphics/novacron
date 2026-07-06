@@ -48,40 +48,48 @@ type migrateJob struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 }
 
-// migrateJobStore is a process-local registry of async migration jobs.
+// migrateJobStore is a registry of async migration jobs.
 //
-// ponytail: in-memory only — a process restart loses all job state (an in-flight
-// migration keeps running via qemu, but its job row disappears). Upgrade path
-// when durability matters: persist to a migration_jobs table and reload on boot.
+// When a database is configured (s.db != nil) the migration_jobs table is the
+// source of truth and job status survives a process restart; the in-memory map
+// is a write-through cache in front of it. With s.db == nil (no database, or
+// tests) the store is memory-only and a restart loses job state.
+//
+// ponytail: a DB hit is not written back into the cache, so every status poll
+// for an evicted / post-restart job re-runs the SELECT. Upgrade = repopulate the
+// cache on read if poll volume for cold jobs ever matters.
 type migrateJobStore struct {
 	mu    sync.Mutex
 	jobs  map[string]*migrateJob
 	order []string // insertion order, for FIFO eviction at capacity
 	cap   int
+	db    *sql.DB // nil = memory-only fallback (see type comment)
 }
 
-func newMigrateJobStore(capacity int) *migrateJobStore {
+func newMigrateJobStore(capacity int, db *sql.DB) *migrateJobStore {
 	if capacity <= 0 {
 		capacity = migrateJobStoreCap
 	}
-	return &migrateJobStore{jobs: make(map[string]*migrateJob), cap: capacity}
+	return &migrateJobStore{jobs: make(map[string]*migrateJob), cap: capacity, db: db}
 }
 
 // migrateJobs is the process-wide store shared by the /api and /api/v1 route
 // trees (registerSecureAPIRoutes runs once per tree), so a job created via either
-// prefix is visible from both.
-var migrateJobs = newMigrateJobStore(migrateJobStoreCap)
+// prefix is visible from both. Its db handle is wired in
+// registerVMMigrateAsyncRoutes once the server's *sql.DB is available.
+var migrateJobs = newMigrateJobStore(migrateJobStoreCap, nil)
 
-// create records a new running job for vmID and returns its id.
+// create records a new running job for vmID and returns its id. When a database
+// is configured the job is also persisted (INSERT) so its status survives a
+// restart.
 //
 // ponytail: FIFO eviction ignores status, so under sustained load a very old
-// still-running job could be dropped; cap is high enough that terminal jobs age
-// out first in practice. Upgrade = DB persistence (see the type comment).
+// still-running job could be dropped from the cache; its DB row survives, so
+// get() still finds it via the read-through path.
 func (s *migrateJobStore) create(vmID string) string {
 	id := newMigrateJobID()
 	now := time.Now().UTC()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for len(s.order) >= s.cap {
 		oldest := s.order[0]
 		s.order = s.order[1:]
@@ -89,38 +97,98 @@ func (s *migrateJobStore) create(vmID string) string {
 	}
 	s.jobs[id] = &migrateJob{ID: id, VMID: vmID, Status: migrateStatusRunning, StartedAt: now}
 	s.order = append(s.order, id)
+	s.mu.Unlock()
+
+	if s.db != nil {
+		// INSERT outside the mutex (no lock held during I/O). created_at fills from
+		// the column default. ponytail: on failure the job stays in the cache so
+		// in-process reads still work — only restart-durability is lost, so this is
+		// a warn, not an error that would abort a migration that has not started.
+		if _, err := s.db.Exec(
+			`INSERT INTO migration_jobs (id, vm_id, status, started_at) VALUES ($1, $2, $3, $4)`,
+			id, vmID, migrateStatusRunning, now,
+		); err != nil {
+			logger.Warn("failed to persist migration job", "job", id, "vm", vmID, "error", err)
+		}
+	}
 	return id
 }
 
-// finish marks a job terminal: completed on a nil error, failed otherwise. It is
-// a no-op if the job was already evicted.
+// finish marks a job terminal: completed on a nil error, failed otherwise. It
+// updates the cache entry (if still present) and, when a database is configured,
+// the persisted row. The DB UPDATE runs even if the cache entry was evicted so
+// the stored terminal state stays correct.
 func (s *migrateJobStore) finish(id string, err error) {
 	now := time.Now().UTC()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	job, ok := s.jobs[id]
-	if !ok {
-		return
-	}
-	job.FinishedAt = &now
+	status := migrateStatusCompleted
+	errMsg := ""
 	if err != nil {
-		job.Status = migrateStatusFailed
-		job.Error = err.Error()
-		return
+		status = migrateStatusFailed
+		errMsg = err.Error()
 	}
-	job.Status = migrateStatusCompleted
+
+	s.mu.Lock()
+	if job, ok := s.jobs[id]; ok {
+		job.FinishedAt = &now
+		job.Status = status
+		job.Error = errMsg
+	}
+	s.mu.Unlock()
+
+	if s.db != nil {
+		errArg := sql.NullString{String: errMsg, Valid: errMsg != ""}
+		if _, e := s.db.Exec(
+			`UPDATE migration_jobs SET status = $2, error = $3, finished_at = $4 WHERE id = $1`,
+			id, status, errArg, now,
+		); e != nil {
+			logger.Warn("failed to persist migration job completion", "job", id, "status", status, "error", e)
+		}
+	}
 }
 
 // get returns a value copy of the job (never the stored pointer) so a reader gets
-// a consistent snapshot without racing finish().
+// a consistent snapshot without racing finish(). A cache miss falls through to
+// the DB (getFromDB), which is what lets status survive a restart.
 func (s *migrateJobStore) get(id string) (migrateJob, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	job, ok := s.jobs[id]
-	if !ok {
+	if job, ok := s.jobs[id]; ok {
+		cp := *job
+		s.mu.Unlock()
+		return cp, true
+	}
+	s.mu.Unlock()
+
+	if s.db == nil {
 		return migrateJob{}, false
 	}
-	return *job, true
+	return s.getFromDB(id)
+}
+
+// getFromDB loads a persisted job by id (the query runs without the mutex held).
+// A missing row — or any query error — is reported as not-found so the status
+// handler returns 404 rather than surfacing a 500.
+func (s *migrateJobStore) getFromDB(id string) (migrateJob, bool) {
+	var job migrateJob
+	var errStr sql.NullString
+	var finished sql.NullTime
+	err := s.db.QueryRow(
+		`SELECT id, vm_id, status, error, started_at, finished_at FROM migration_jobs WHERE id = $1`,
+		id,
+	).Scan(&job.ID, &job.VMID, &job.Status, &errStr, &job.StartedAt, &finished)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			logger.Warn("failed to load migration job", "job", id, "error", err)
+		}
+		return migrateJob{}, false
+	}
+	if errStr.Valid {
+		job.Error = errStr.String
+	}
+	if finished.Valid {
+		t := finished.Time
+		job.FinishedAt = &t
+	}
+	return job, true
 }
 
 func newMigrateJobID() string {
@@ -218,6 +286,12 @@ func newMigrateJobStatusHandler(jobs *migrateJobStore) http.HandlerFunc {
 // the exact same call path as the sync route (VMManager.MigrateVM, then the
 // source-row cleanup) — it does not reimplement any migration logic.
 func registerVMMigrateAsyncRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager) {
+	// Wire the shared store's DB handle here — the single point where db reaches
+	// the async routes. ponytail: plain assignment (no lock) is race-free because
+	// this runs once per route tree at startup, before serving, with the same db
+	// each time; nil db keeps the store on its in-memory fallback.
+	migrateJobs.db = db
+
 	run := func(ctx context.Context, vmID, targetNode string, options map[string]string) error {
 		if vmManager == nil {
 			return errors.New("vm manager unavailable")
