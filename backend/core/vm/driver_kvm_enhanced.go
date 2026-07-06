@@ -56,9 +56,10 @@ type KVMVMInfo struct {
 	// NUMA, when non-nil, makes buildQEMUArgs emit a -numa topology at launch.
 	// QEMU fixes NUMA at machine init, so ConfigureNUMA stores it here for the
 	// next boot (and refuses a running VM) rather than pretending live reconfig.
-	// ponytail: in-memory only (not persisted to config.json), so it is lost if
-	// the driver restarts between ConfigureNUMA and Start; encode in Config.Tags
-	// if durable-across-restart NUMA is ever needed.
+	// ConfigureNUMA also JSON-encodes the topology into Config.Tags["numa.topology"]
+	// and persists config.json, so it survives a driver restart between
+	// ConfigureNUMA and Start (adopt/reload rehydrates Config, not this field);
+	// buildQEMUArgs falls back to that tag via effectiveNUMA when this field is nil.
 	NUMA *NUMATopology
 }
 
@@ -737,8 +738,18 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 
 	// NUMA topology (opt-in; set via ConfigureNUMA before Start). Emitted at
 	// launch because QEMU fixes NUMA at machine init. Nil topology -> no args, so
-	// a default VM is unaffected.
-	args = append(args, numaArgs(vmInfo.NUMA)...)
+	// a default VM is unaffected. effectiveNUMA falls back to the topology persisted
+	// in Config.Tags so it survives a driver restart between ConfigureNUMA and Start.
+	args = append(args, numaArgs(effectiveNUMA(vmInfo))...)
+
+	// IOThreads (opt-in via Config.Tags["iothreads"]=N). Emit N iothread objects
+	// (iothread0..iothreadN-1) so query-iothreads returns them and
+	// ConfigureCPUPinning can actually pin their host threads; the primary disk
+	// below runs its virtio-blk dataplane on iothread0. Absent/zero tag -> no args
+	// AND the disk device string is unchanged, so a default VM (and any migration
+	// cutover, which never sets this tag) is byte-for-byte unaffected.
+	iothreads := tagInt(vmInfo.Config.Tags, "iothreads")
+	args = append(args, iothreadArgs(iothreads)...)
 
 	// PCIe hotplug slots: the aarch64 "virt" root bus (pcie.0) refuses
 	// hot-plugging, so pre-provision a few pcie-root-ports for HotPlugDevice to
@@ -759,9 +770,16 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 	// source/dest device topology must match for the RAM stream. file.locking=off
 	// (shared-storage migration) rides the file child. Boot with this form is
 	// verified on arm64 virt+UEFI and x86 KVM.
+	// Attach the primary disk to iothread0 ONLY when iothreads were requested; the
+	// -device string is otherwise byte-for-byte identical to before (migration
+	// cutover depends on the exact source/dest device topology).
+	blkDev := "virtio-blk-pci,drive=" + kvmMigDiskNode
+	if iothreads > 0 {
+		blkDev += ",iothread=iothread0"
+	}
 	args = append(args,
 		"-blockdev", fmt.Sprintf("node-name=%s,driver=qcow2,file.driver=file,file.filename=%s%s", kvmMigDiskNode, vmInfo.DiskPath, lock),
-		"-device", "virtio-blk-pci,drive="+kvmMigDiskNode)
+		"-device", blkDev)
 
 	// aarch64 "virt" needs UEFI firmware (pflash) to boot a disk image.
 	if machine == "virt" {
@@ -831,6 +849,56 @@ func numaArgs(topo *NUMATopology) []string {
 			node += ",cpus=" + n.CPUs
 		}
 		out = append(out, "-numa", node)
+	}
+	return out
+}
+
+// numaTopologyTag is the Config.Tags key under which ConfigureNUMA JSON-encodes
+// the NUMA topology so it persists in config.json across a driver restart (Tags
+// is used because VMConfig lives in a file this driver does not own).
+const numaTopologyTag = "numa.topology"
+
+// effectiveNUMA returns the topology to emit at launch: the in-memory NUMA field
+// if set, else the one persisted in Config.Tags["numa.topology"] by ConfigureNUMA.
+// The tag fallback is what makes NUMA survive a driver restart between
+// ConfigureNUMA and Start (adopt/reload rehydrates Config, not the NUMA field).
+// Returns nil when neither is present, so a default VM emits no -numa.
+func effectiveNUMA(vmInfo *KVMVMInfo) *NUMATopology {
+	if vmInfo.NUMA != nil {
+		return vmInfo.NUMA
+	}
+	return decodeNUMATag(vmInfo.Config.Tags)
+}
+
+// decodeNUMATag decodes the JSON topology persisted under numaTopologyTag, or nil
+// when the tag is absent/empty/unparseable (logged) or has no nodes.
+func decodeNUMATag(tags map[string]string) *NUMATopology {
+	raw := tags[numaTopologyTag] // nil map read is "" — no need to nil-check
+	if raw == "" {
+		return nil
+	}
+	var topo NUMATopology
+	if err := json.Unmarshal([]byte(raw), &topo); err != nil {
+		log.Printf("ignoring unparseable %s tag: %v", numaTopologyTag, err)
+		return nil
+	}
+	if len(topo.Nodes) == 0 {
+		return nil
+	}
+	return &topo
+}
+
+// iothreadArgs emits N `-object iothread` objects with ids iothread0..iothreadN-1
+// so query-iothreads returns them (see ConfigureCPUPinning / pinIOThreads) and the
+// primary disk can run its dataplane on iothread0. Opt-in via Config.Tags
+// ["iothreads"]; n<=0 (default) -> nil, so a default VM's args are unchanged.
+func iothreadArgs(n int) []string {
+	if n <= 0 {
+		return nil
+	}
+	out := make([]string, 0, n*2)
+	for i := 0; i < n; i++ {
+		out = append(out, "-object", fmt.Sprintf("iothread,id=iothread%d", i))
 	}
 	return out
 }
@@ -1614,10 +1682,10 @@ func (d *KVMDriverEnhanced) ConfigureCPUPinning(ctx context.Context, vmID string
 	}
 
 	// IOThreads: pinned by matching QEMU's "iothread<N>" id from query-iothreads.
-	// ponytail: buildQEMUArgs does not emit `-object iothread` yet, so in practice
-	// query-iothreads returns [] and requested iothread pins are skipped (logged,
-	// not errored). This path goes live the moment the driver launches VMs with
-	// iothreads -- no change needed here.
+	// buildQEMUArgs emits N iothread objects when a VM opts in via
+	// Config.Tags["iothreads"]=N, so query-iothreads returns them and these pins
+	// take effect. A VM launched WITHOUT that tag has no iothreads, so requested
+	// pins are skipped (logged, not errored) rather than failing the call.
 	if len(pinning.IOThreads) > 0 {
 		if err := pinIOThreads(q, vmID, pinning.IOThreads); err != nil {
 			return err
@@ -1701,8 +1769,25 @@ func (d *KVMDriverEnhanced) ConfigureNUMA(ctx context.Context, vmID string, topo
 	if vmInfo.State == StateRunning {
 		return fmt.Errorf("VM %s is running; NUMA topology is fixed at QEMU machine init and cannot be changed on a live VM — stop it and call ConfigureNUMA before Start (buildQEMUArgs applies it at launch)", vmID)
 	}
+
+	// Persist the topology into Config.Tags (JSON) and out to config.json so it
+	// survives a driver restart between ConfigureNUMA and Start — adopt/reload
+	// rehydrates Config from config.json but not the in-memory NUMA field, and
+	// buildQEMUArgs reads the tag (effectiveNUMA) when that field is nil. The
+	// in-memory field is kept too as the same-process fast path.
+	encoded, err := json.Marshal(topology)
+	if err != nil {
+		return fmt.Errorf("encode NUMA topology: %w", err)
+	}
+	if vmInfo.Config.Tags == nil {
+		vmInfo.Config.Tags = map[string]string{}
+	}
+	vmInfo.Config.Tags[numaTopologyTag] = string(encoded)
 	vmInfo.NUMA = topology
-	log.Printf("Stored %d-node NUMA topology for VM %s (applied at next launch)", len(topology.Nodes), vmID)
+	if err := d.saveVMConfig(vmInfo); err != nil {
+		return fmt.Errorf("persist NUMA topology to config.json: %w", err)
+	}
+	log.Printf("Stored %d-node NUMA topology for VM %s (persisted to config.json; applied at next launch)", len(topology.Nodes), vmID)
 	return nil
 }
 
