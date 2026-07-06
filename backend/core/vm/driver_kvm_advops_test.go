@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -23,16 +24,16 @@ import (
 // image path, or skips the test.
 func advOpsSkip(t *testing.T) (string, string) {
 	t.Helper()
-	const qemuBin = "qemu-system-aarch64" // arm64 box; cirros aarch64 image
+	qemuBin := defaultQEMUBinary("") // arch-aware: qemu-system-x86_64 on amd64, -aarch64 on arm64
 	if _, err := exec.LookPath(qemuBin); err != nil {
 		t.Skipf("skip: %s not installed", qemuBin)
 	}
 	if _, err := exec.LookPath("qemu-img"); err != nil {
 		t.Skip("skip: qemu-img not installed")
 	}
-	cirros := findCirrosImage() // defined in driver_kvm_migrate_test.go
+	cirros := findCirrosImage() // arch-aware, defined in driver_kvm_migrate_test.go
 	if cirros == "" {
-		t.Skip("skip: cirros aarch64 image not found in known locations")
+		t.Skip("skip: cirros image not found in known locations")
 	}
 	return qemuBin, cirros
 }
@@ -247,7 +248,9 @@ func TestMemHotplugRealQMP(t *testing.T) {
 	// creates when UEFI firmware is loaded (buildQEMUArgs loads it via ensureUEFI).
 	// Skip if the firmware is absent -- the DIMM device_add would otherwise fail
 	// "memory hotplug is not enabled: missing acpi-ged device".
-	if !advOpsHasAArch64UEFI() {
+	if runtime.GOARCH != "amd64" && !advOpsHasAArch64UEFI() {
+		// x86 "pc" does DIMM hotplug via SeaBIOS/ACPI without UEFI; only the
+		// aarch64 "virt" acpi-ged path needs the edk2 firmware.
 		t.Skip("skip: aarch64 UEFI firmware not found; memory hotplug needs acpi-ged")
 	}
 

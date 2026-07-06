@@ -26,7 +26,7 @@ import (
 // regardless of guest boot state. SKIPS (never fails) when qemu / qemu-img / a
 // cirros image are unavailable, matching the sibling migration/cpu-pinning tests.
 func TestHotPlugDiskRealQMP(t *testing.T) {
-	const qemuBin = "qemu-system-aarch64" // arm64 box; cirros aarch64 image
+	qemuBin := defaultQEMUBinary("") // arch-aware: qemu-system-x86_64 on amd64, -aarch64 on arm64
 
 	if _, err := exec.LookPath(qemuBin); err != nil {
 		t.Skipf("skip: %s not installed", qemuBin)

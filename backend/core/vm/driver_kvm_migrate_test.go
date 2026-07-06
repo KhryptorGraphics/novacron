@@ -33,7 +33,7 @@ import (
 // will not build until that is fixed by the test-owning agent. The same flow was
 // reproduced and observed to PASS via a standalone harness.
 func TestLiveMigrationLocalhostCutover(t *testing.T) {
-	const qemuBin = "qemu-system-aarch64" // this reproduction targets arm64/cirros
+	qemuBin := defaultQEMUBinary("") // arch-aware: host qemu (x86_64 on amd64, aarch64 on arm64)
 
 	if _, err := exec.LookPath(qemuBin); err != nil {
 		t.Skipf("skip: %s not installed", qemuBin)
