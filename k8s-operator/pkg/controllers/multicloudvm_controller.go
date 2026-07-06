@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -14,7 +13,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	novacronv1 "github.com/khryptorgraphics/novacron/k8s-operator/pkg/apis/novacron/v1"
 	"github.com/khryptorgraphics/novacron/k8s-operator/pkg/novacron"
@@ -717,11 +715,7 @@ type ProviderDeployment struct {
 	Template      interface{}
 }
 
-type ResourceRequirements struct {
-	CPU     string
-	Memory  string
-	Storage string
-}
+type ResourceRequirements = providers.ResourceRequirements
 
 type DeploymentResult struct {
 	Provider     string

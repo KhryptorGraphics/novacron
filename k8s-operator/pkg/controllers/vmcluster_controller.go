@@ -218,9 +218,8 @@ func (r *VMClusterReconciler) scaleUp(ctx context.Context, cluster *novacronv1.V
 				},
 			},
 			Spec: novacronv1.VirtualMachineSpec{
-				Name:   vmName,
-				Config: &template.Spec.Config,
-				NodeSelector: cluster.Spec.Template.Namespace,
+				Name:          vmName,
+				Config:        &template.Spec.Config,
 				RestartPolicy: novacronv1.VMRestartPolicyAlways,
 			},
 		}
@@ -436,7 +435,7 @@ func (r *VMClusterReconciler) handleDeletion(ctx context.Context, cluster *novac
 		// Delete all VMs
 		for _, vm := range vmList.Items {
 			if err := r.Delete(ctx, &vm); err != nil {
-				if !client.IgnoreNotFound(err) == nil {
+				if client.IgnoreNotFound(err) != nil {
 					logger.Error(err, "Failed to delete VM during cluster cleanup", "vmName", vm.Name)
 					return ctrl.Result{}, err
 				}

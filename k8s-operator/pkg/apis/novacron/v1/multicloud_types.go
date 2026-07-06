@@ -103,22 +103,22 @@ type AISchedulingPolicySpec struct {
 	PredictionWindow PredictionWindowConfig `json:"predictionWindow,omitempty"`
 
 	// Feedback learning configuration
-	LearningConfig LearningConfig `json:"learningConfig,omitempty"`
+	LearningConfig *LearningConfig `json:"learningConfig,omitempty"`
 }
 
 // AISchedulingPolicyStatus defines the observed state of AI scheduling
 type AISchedulingPolicyStatus struct {
 	// Model status
-	ModelStatus AIModelStatus `json:"modelStatus,omitempty"`
+	ModelStatus *AIModelStatus `json:"modelStatus,omitempty"`
 
 	// Prediction accuracy metrics
-	AccuracyMetrics AccuracyMetrics `json:"accuracyMetrics,omitempty"`
+	AccuracyMetrics *AccuracyMetrics `json:"accuracyMetrics,omitempty"`
 
 	// Recent decisions made by AI
 	RecentDecisions []AISchedulingDecision `json:"recentDecisions,omitempty"`
 
 	// Learning progress
-	LearningProgress LearningProgress `json:"learningProgress,omitempty"`
+	LearningProgress *LearningProgress `json:"learningProgress,omitempty"`
 
 	// Conditions
 	Conditions []AISchedulingPolicyCondition `json:"conditions,omitempty"`
@@ -139,22 +139,22 @@ type CacheIntegrationSpec struct {
 	TTLPolicies []TTLPolicy `json:"ttlPolicies,omitempty"`
 
 	// Cache warming configuration
-	WarmingConfig CacheWarmingConfig `json:"warmingConfig,omitempty"`
+	WarmingConfig *CacheWarmingConfig `json:"warmingConfig,omitempty"`
 
 	// Eviction policies
-	EvictionPolicy CacheEvictionPolicy `json:"evictionPolicy,omitempty"`
+	EvictionPolicy *CacheEvictionPolicy `json:"evictionPolicy,omitempty"`
 }
 
 // CacheIntegrationStatus defines the observed state of cache integration
 type CacheIntegrationStatus struct {
 	// Redis cluster health
-	ClusterHealth RedisClusterHealth `json:"clusterHealth,omitempty"`
+	ClusterHealth *RedisClusterHealth `json:"clusterHealth,omitempty"`
 
 	// Cache performance metrics
-	PerformanceMetrics CachePerformanceMetrics `json:"performanceMetrics,omitempty"`
+	PerformanceMetrics *CachePerformanceMetrics `json:"performanceMetrics,omitempty"`
 
 	// Memory usage across cache nodes
-	MemoryUsage CacheMemoryUsage `json:"memoryUsage,omitempty"`
+	MemoryUsage *CacheMemoryUsage `json:"memoryUsage,omitempty"`
 
 	// Conditions
 	Conditions []CacheIntegrationCondition `json:"conditions,omitempty"`
@@ -392,6 +392,7 @@ type FederationHealthStatus struct {
 
 // AI Scheduling types
 
+// +kubebuilder:object:generate=false
 type AIModelConfig struct {
 	// Model type (neural-network, decision-tree, reinforcement-learning)
 	ModelType string `json:"modelType"`
@@ -400,12 +401,13 @@ type AIModelConfig struct {
 	Version string `json:"version,omitempty"`
 
 	// Training configuration
-	TrainingConfig TrainingConfig `json:"trainingConfig,omitempty"`
+	TrainingConfig *TrainingConfig `json:"trainingConfig,omitempty"`
 
 	// Model parameters
 	Parameters map[string]interface{} `json:"parameters,omitempty"`
 }
 
+// +kubebuilder:object:generate=false
 type SchedulingObjective struct {
 	// Objective type (cost, performance, availability, energy)
 	Type string `json:"type"`
@@ -499,6 +501,7 @@ type AISchedulingDecision struct {
 	Reasoning string `json:"reasoning,omitempty"`
 }
 
+// +kubebuilder:object:generate=false
 type PlacementDecision struct {
 	// Target node or cluster
 	Target string `json:"target"`
@@ -534,10 +537,10 @@ type RedisClusterConfig struct {
 	CredentialsSecret string `json:"credentialsSecret,omitempty"`
 
 	// High availability configuration
-	HA RedisHAConfig `json:"ha,omitempty"`
+	HA *RedisHAConfig `json:"ha,omitempty"`
 
 	// Security configuration
-	Security RedisSecurityConfig `json:"security,omitempty"`
+	Security *RedisSecurityConfig `json:"security,omitempty"`
 }
 
 type CacheStrategy struct {
@@ -578,7 +581,7 @@ type CacheEvictionPolicy struct {
 	Algorithm string `json:"algorithm"`
 
 	// Memory thresholds
-	MemoryThresholds MemoryThresholds `json:"memoryThresholds,omitempty"`
+	MemoryThresholds *MemoryThresholds `json:"memoryThresholds,omitempty"`
 }
 
 type RedisClusterHealth struct {
@@ -737,6 +740,7 @@ type VPNConfiguration struct {
 	Endpoints  []string          `json:"endpoints,omitempty"`
 }
 
+// +kubebuilder:object:generate=false
 type TrainingConfig struct {
 	DatasetSize     int64             `json:"datasetSize,omitempty"`
 	ValidationSplit float64           `json:"validationSplit,omitempty"`
@@ -745,6 +749,7 @@ type TrainingConfig struct {
 	Hyperparameters map[string]interface{} `json:"hyperparameters,omitempty"`
 }
 
+// +kubebuilder:object:generate=false
 type Constraint struct {
 	Name     string      `json:"name"`
 	Operator string      `json:"operator"`

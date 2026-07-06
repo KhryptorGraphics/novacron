@@ -16,7 +16,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -127,7 +126,7 @@ func (r *VirtualMachineReconciler) handleCreate(ctx context.Context, vm *novacro
 	log.Info("Selected node for VM", "node", node)
 
 	// Create VM on selected node
-	vmID, err := r.VMManager.CreateVM(ctx, node, vm.Spec)
+	vmID, err := r.VMManager.CreateVM(ctx, node, vm.Spec.Template.Spec)
 	if err != nil {
 		log.Error(err, "Failed to create VM")
 		vm.Status.Phase = novacronv1alpha1.VMFailed
@@ -253,7 +252,7 @@ func (r *VirtualMachineReconciler) handleRunning(ctx context.Context, vm *novacr
 	// Check health
 	healthy, err := r.VMManager.CheckVMHealth(ctx, vm.Status.VMID)
 	if err != nil || !healthy {
-		log.Warn("VM health check failed", "error", err, "healthy", healthy)
+		log.Info("VM health check failed", "error", err, "healthy", healthy)
 		r.setCondition(vm, novacronv1alpha1.VMReady, corev1.ConditionFalse, "Unhealthy", "VM health check failed")
 	} else {
 		r.setCondition(vm, novacronv1alpha1.VMReady, corev1.ConditionTrue, "Healthy", "VM is healthy")

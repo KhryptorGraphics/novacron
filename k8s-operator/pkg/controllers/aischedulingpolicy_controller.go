@@ -105,7 +105,11 @@ func (r *AISchedulingPolicyReconciler) handleAISchedulingPolicyLifecycle(ctx con
 			return r.updateStatus(ctx, policy, "Training", fmt.Sprintf("Training error: %v", err))
 		}
 		
-		policy.Status.LearningProgress = trainingResult.Progress
+		policy.Status.LearningProgress = &novacronv1.LearningProgress{
+			Iterations:         trainingResult.Progress.Iterations,
+			Loss:               trainingResult.Progress.Loss,
+			ValidationAccuracy: trainingResult.Progress.ValidationAccuracy,
+		}
 		policy.Status.ModelStatus.TrainingProgress = trainingResult.Progress.ValidationAccuracy
 		
 		if trainingResult.Completed {

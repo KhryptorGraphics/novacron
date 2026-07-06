@@ -2,7 +2,6 @@ package v1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // VirtualMachineSpec defines the desired state of VirtualMachine
@@ -341,6 +340,7 @@ type MigrationStatus struct {
 	EstimatedEndTime *metav1.Time `json:"estimatedEndTime,omitempty"`
 }
 
+// +kubebuilder:object:generate=false
 type TemplateParameter struct {
 	Name         string      `json:"name"`
 	Type         string      `json:"type"`
