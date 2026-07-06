@@ -17,6 +17,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // KVMDriverEnhanced implements the VMDriver interface for KVM-based VMs
@@ -1119,9 +1121,140 @@ func (d *KVMDriverEnhanced) HotUnplugDevice(ctx context.Context, vmID string, de
 	return fmt.Errorf("hot-unplug not implemented for KVM driver")
 }
 
-// ConfigureCPUPinning configures CPU pinning (not implemented yet)
+// ConfigureCPUPinning pins a running VM's host threads to physical CPUs via
+// sched_setaffinity(2). It maps each guest vCPU to its host thread-id over QMP
+// (query-cpus-fast), then applies the requested cpuset to that thread; it can
+// also pin the emulator (main qemu process) and any iothreads. The VM must be
+// running (a paused/created VM has no vCPU threads to pin).
 func (d *KVMDriverEnhanced) ConfigureCPUPinning(ctx context.Context, vmID string, pinning *CPUPinningConfig) error {
-	return fmt.Errorf("CPU pinning not implemented for KVM driver")
+	if pinning == nil {
+		return fmt.Errorf("nil CPU pinning config")
+	}
+
+	// Look up + state-check under the lock, then release it: QMP and affinity
+	// syscalls must not run while holding vmLock (mirrors migrateWithStats).
+	d.vmLock.RLock()
+	vmInfo, ok := d.vms[vmID]
+	d.vmLock.RUnlock()
+	if !ok {
+		return fmt.Errorf("VM %s not found", vmID)
+	}
+	if vmInfo.State != StateRunning {
+		return fmt.Errorf("VM %s is not running (state %s); cannot pin vCPUs", vmID, vmInfo.State)
+	}
+
+	sock := filepath.Join(d.runtimeDir(vmInfo), "qmp.sock")
+	q, err := qmpDial(sock, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("connect QMP %s: %w", sock, err)
+	}
+	defer q.Close()
+
+	// Map guest vCPU index -> host thread-id (the kernel TID of that vCPU thread).
+	raw, err := q.execute("query-cpus-fast", nil)
+	if err != nil {
+		return fmt.Errorf("query-cpus-fast: %w", err)
+	}
+	var cpus []struct {
+		CPUIndex int `json:"cpu-index"`
+		ThreadID int `json:"thread-id"`
+	}
+	if err := json.Unmarshal(raw, &cpus); err != nil {
+		return fmt.Errorf("parse query-cpus-fast: %w", err)
+	}
+	vcpuThread := make(map[int]int, len(cpus))
+	for _, c := range cpus {
+		vcpuThread[c.CPUIndex] = c.ThreadID
+	}
+
+	// Pin each requested vCPU to its cpuset.
+	for _, vp := range pinning.VCPUs {
+		tid, ok := vcpuThread[vp.VCPU]
+		if !ok {
+			return fmt.Errorf("vcpu %d not present (guest has %d vcpus)", vp.VCPU, len(cpus))
+		}
+		if err := pinThreadToCPUSet(tid, vp.CPUSet); err != nil {
+			return fmt.Errorf("pin vcpu %d (thread %d) to %q: %w", vp.VCPU, tid, vp.CPUSet, err)
+		}
+	}
+
+	// Pin the emulator (the main qemu process) if requested.
+	if pinning.EmulatorPin != "" {
+		if vmInfo.PID <= 0 {
+			return fmt.Errorf("emulator pin requested but VM %s has no PID", vmID)
+		}
+		if err := pinThreadToCPUSet(vmInfo.PID, pinning.EmulatorPin); err != nil {
+			return fmt.Errorf("pin emulator (pid %d) to %q: %w", vmInfo.PID, pinning.EmulatorPin, err)
+		}
+	}
+
+	// IOThreads: pinned by matching QEMU's "iothread<N>" id from query-iothreads.
+	// ponytail: buildQEMUArgs does not emit `-object iothread` yet, so in practice
+	// query-iothreads returns [] and requested iothread pins are skipped (logged,
+	// not errored). This path goes live the moment the driver launches VMs with
+	// iothreads -- no change needed here.
+	if len(pinning.IOThreads) > 0 {
+		if err := pinIOThreads(q, vmID, pinning.IOThreads); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// pinThreadToCPUSet sets the CPU affinity of one host thread (or process) named
+// by tid to the cpus in a Linux cpulist ("0-3,8,9"). tid is a kernel thread id
+// (QEMU's QMP thread-id) or a pid; Linux sched_setaffinity treats both alike.
+func pinThreadToCPUSet(tid int, cpuset string) error {
+	cpus := parseCPUList(cpuset) // reused from hardware_virtualization.go
+	if len(cpus) == 0 {
+		return fmt.Errorf("empty or unparseable cpuset %q", cpuset)
+	}
+	var set unix.CPUSet
+	set.Zero()
+	for _, c := range cpus {
+		set.Set(c) // ponytail: CPUSet.Set silently ignores c>=1024; a bad cpuset then yields EINVAL below
+	}
+	if set.Count() == 0 {
+		return fmt.Errorf("cpuset %q selected no representable cpus", cpuset)
+	}
+	if err := unix.SchedSetaffinity(tid, &set); err != nil {
+		return fmt.Errorf("sched_setaffinity(%d): %w", tid, err)
+	}
+	return nil
+}
+
+// pinIOThreads pins requested iothreads to their cpusets, matched by QEMU's
+// "iothread<N>" id convention against query-iothreads. iothreads absent from the
+// running VM are skipped (logged), not treated as errors.
+func pinIOThreads(q *qmpConn, vmID string, reqs []IOThreadPinning) error {
+	raw, err := q.execute("query-iothreads", nil)
+	if err != nil {
+		return fmt.Errorf("query-iothreads: %w", err)
+	}
+	var iothreads []struct {
+		ID       string `json:"id"`
+		ThreadID int    `json:"thread-id"`
+	}
+	if err := json.Unmarshal(raw, &iothreads); err != nil {
+		return fmt.Errorf("parse query-iothreads: %w", err)
+	}
+	byID := make(map[string]int, len(iothreads))
+	for _, it := range iothreads {
+		byID[it.ID] = it.ThreadID
+	}
+	for _, req := range reqs {
+		id := fmt.Sprintf("iothread%d", req.IOThread)
+		tid, ok := byID[id]
+		if !ok {
+			log.Printf("VM %s: iothread %s not present, skipping pin to %q", vmID, id, req.CPUSet)
+			continue
+		}
+		if err := pinThreadToCPUSet(tid, req.CPUSet); err != nil {
+			return fmt.Errorf("pin %s (thread %d) to %q: %w", id, tid, req.CPUSet, err)
+		}
+	}
+	return nil
 }
 
 // ConfigureNUMA configures NUMA topology (not implemented yet)

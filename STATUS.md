@@ -108,7 +108,7 @@ which overstate completion and should not be trusted.
   **consolidation decision** (which design survives) before real implementation;
   no cloud credentials, and LocalStack covers only EC2/VPC/S3, not
   cost/monitoring/quotas.
-- **Advanced VM ops** (hot-plug, CPU pinning, NUMA) — not implemented.
+- **Advanced VM ops** — **CPU pinning implemented** (KVM: `query-cpus-fast` over QMP → `sched_setaffinity` on each vCPU/emulator host thread; discriminating real-qemu test proves vcpu affinity narrows to the requested cpu, runs on arm64 TCG). Hot-plug + NUMA still not implemented; iothread pinning is wired but a no-op until `buildQEMUArgs` emits `-object iothread`.
 
 ## vm sub-package compile gap — quarantined 2026-07-04
 
