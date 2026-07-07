@@ -117,7 +117,7 @@ describe('LoginForm', () => {
 
   it('shows loading state during submission', async () => {
     const user = userEvent.setup();
-    let resolveSubmit: () => void;
+    let resolveSubmit: (value?: unknown) => void;
     const mockOnSubmit = jest.fn().mockImplementation(() => 
       new Promise((resolve) => {
         resolveSubmit = resolve;

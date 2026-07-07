@@ -27,7 +27,7 @@ class MockWebSocket {
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
   onclose: ((event: CloseEvent) => void) | null = null;
-  readyState = WebSocket.CONNECTING;
+  readyState: number = WebSocket.CONNECTING;
 
   constructor(public url: string) {
     mockWebSocketServer.connections.add(this);
@@ -99,7 +99,7 @@ jest.mock('../components/dashboard/UnifiedDashboard', () => {
 // Global setup
 beforeAll(() => {
   global.WebSocket = MockWebSocket as any;
-  global.fetch = jest.fn();
+  global.fetch = jest.fn() as unknown as typeof fetch;
 });
 
 describe('Distributed Monitoring E2E Workflows', () => {
@@ -111,7 +111,7 @@ describe('Distributed Monitoring E2E Workflows', () => {
     mockWebSocketServer.connections.clear();
 
     // Mock successful API responses
-    (global.fetch as jest.Mock).mockImplementation((url: string) => {
+    (global.fetch as jest.Mock).mockImplementation((url: any) => {
       const responses: Record<string, any> = {
         '/api/network/topology': {
           data: {

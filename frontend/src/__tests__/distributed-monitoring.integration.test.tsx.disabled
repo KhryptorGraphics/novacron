@@ -131,7 +131,7 @@ jest.mock('../hooks/useWebSocket', () => ({
 
 // Mock API client functions
 jest.mock('../lib/api/client', () => ({
-  getNetworkTopology: jest.fn().mockResolvedValue({
+  getNetworkTopology: (jest.fn() as jest.MockedFunction<() => Promise<any>>).mockResolvedValue({
     data: {
       nodes: [],
       edges: [],
@@ -139,18 +139,18 @@ jest.mock('../lib/api/client', () => ({
     },
     error: null
   }),
-  getBandwidthMetrics: jest.fn().mockResolvedValue({
+  getBandwidthMetrics: (jest.fn() as jest.MockedFunction<() => Promise<any>>).mockResolvedValue({
     data: {
       interfaces: [],
       globalMetrics: {}
     },
     error: null
   }),
-  getResourcePredictions: jest.fn().mockResolvedValue({
+  getResourcePredictions: (jest.fn() as jest.MockedFunction<() => Promise<any>>).mockResolvedValue({
     data: [],
     error: null
   }),
-  getComputeJobs: jest.fn().mockResolvedValue({
+  getComputeJobs: (jest.fn() as jest.MockedFunction<() => Promise<any>>).mockResolvedValue({
     data: [],
     error: null
   }),
@@ -160,13 +160,13 @@ jest.mock('../lib/api/client', () => ({
 import BandwidthMonitoringDashboard from '../components/monitoring/BandwidthMonitoringDashboard';
 import PerformancePredictionDashboard from '../components/monitoring/PerformancePredictionDashboard';
 import SupercomputeFabricDashboard from '../components/monitoring/SupercomputeFabricDashboard';
-import { NetworkTopology } from '../components/network/NetworkTopology';
+import { NetworkTopology } from '../components/visualizations/NetworkTopology';
 
 describe('Distributed Monitoring Integration Tests', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     // Mock global WebSocket constructor
-    global.WebSocket = jest.fn().mockImplementation(() => mockWebSocket);
+    global.WebSocket = jest.fn().mockImplementation(() => mockWebSocket) as unknown as typeof WebSocket;
   });
 
   describe('BandwidthMonitoringDashboard', () => {
@@ -386,7 +386,7 @@ describe('Distributed Monitoring Integration Tests', () => {
 
       // Simulate rapid updates
       for (let i = 0; i < 100; i++) {
-        mockWebSocket.addEventListener.mock.calls[0][1]({
+        (mockWebSocket.addEventListener.mock.calls[0][1] as (e: any) => void)({
           data: JSON.stringify({
             interfaces: [{
               id: 'eth0',

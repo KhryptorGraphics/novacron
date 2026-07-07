@@ -1,74 +1,57 @@
-import { renderHook, act } from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
 import { usePerformance } from '@/hooks/usePerformance';
 
-// Mock performance API
-const mockPerformanceMark = jest.fn();
-const mockPerformanceMeasure = jest.fn();
-const mockPerformanceGetEntriesByType = jest.fn();
+// jsdom does not implement PerformanceObserver; provide a no-op mock so the
+// hook's effects run without throwing.
+beforeAll(() => {
+  class MockPerformanceObserver {
+    constructor(_cb: PerformanceObserverCallback) {}
+    observe() {}
+    disconnect() {}
+    takeRecords() {
+      return [];
+    }
+  }
+  (global as unknown as { PerformanceObserver: unknown }).PerformanceObserver =
+    MockPerformanceObserver;
 
-Object.defineProperty(window, 'performance', {
-  value: {
-    mark: mockPerformanceMark,
-    measure: mockPerformanceMeasure,
-    getEntriesByType: mockPerformanceGetEntriesByType,
-    now: () => Date.now(),
-  },
-  writable: true,
+  // jsdom's performance object lacks getEntriesByType; stub it to an empty list.
+  if (typeof performance.getEntriesByType !== 'function') {
+    (performance as unknown as { getEntriesByType: unknown }).getEntriesByType = () => [];
+  }
 });
 
-describe('usePerformance', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
+describe('usePerformance (Core Web Vitals)', () => {
+  it('exposes the metrics/isSupported/reportMetrics/grade surface', () => {
+    const { result } = renderHook(() => usePerformance());
 
-  it('tracks component mount time', () => {
-    renderHook(() => usePerformance('TestComponent'));
-
-    expect(mockPerformanceMark).toHaveBeenCalledWith('TestComponent-start');
-  });
-
-  it('measures performance on unmount', () => {
-    const { unmount } = renderHook(() => usePerformance('TestComponent'));
-
-    unmount();
-
-    expect(mockPerformanceMark).toHaveBeenCalledWith('TestComponent-end');
-    expect(mockPerformanceMeasure).toHaveBeenCalledWith(
-      'TestComponent-duration',
-      'TestComponent-start',
-      'TestComponent-end'
+    expect(result.current).toEqual(
+      expect.objectContaining({
+        metrics: expect.any(Object),
+        isSupported: expect.any(Boolean),
+        reportMetrics: expect.any(Function),
+        grade: expect.any(String),
+      })
     );
   });
 
-  it('provides manual measurement function', () => {
-    const { result } = renderHook(() => usePerformance('TestComponent'));
+  it('reports the five Core Web Vitals metric keys', () => {
+    const { result } = renderHook(() => usePerformance());
 
-    act(() => {
-      result.current.measurePerformance('custom-operation');
-    });
-
-    expect(mockPerformanceMark).toHaveBeenCalledWith('custom-operation-end');
-    expect(mockPerformanceMeasure).toHaveBeenCalledWith(
-      'custom-operation-duration',
-      'TestComponent-start',
-      'custom-operation-end'
+    (['lcp', 'fid', 'cls', 'fcp', 'ttfb'] as const).forEach((key) =>
+      expect(result.current.metrics).toHaveProperty(key)
     );
   });
 
-  it('returns performance metrics', () => {
-    mockPerformanceGetEntriesByType.mockReturnValue([
-      { name: 'TestComponent-duration', duration: 150 },
-    ]);
+  it('grades as N/A until metrics arrive', () => {
+    const { result } = renderHook(() => usePerformance());
 
-    const { result } = renderHook(() => usePerformance('TestComponent'));
+    expect(result.current.grade).toBe('N/A');
+  });
 
-    act(() => {
-      const metrics = result.current.getMetrics();
-      expect(metrics).toEqual([
-        { name: 'TestComponent-duration', duration: 150 },
-      ]);
-    });
+  it('reportMetrics is a safe no-op without an analytics endpoint', () => {
+    const { result } = renderHook(() => usePerformance());
 
-    expect(mockPerformanceGetEntriesByType).toHaveBeenCalledWith('measure');
+    expect(() => result.current.reportMetrics()).not.toThrow();
   });
 });

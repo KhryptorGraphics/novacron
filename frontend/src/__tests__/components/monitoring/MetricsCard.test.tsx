@@ -2,57 +2,46 @@ import { render, screen } from '@/__tests__/utils/test-utils';
 import { MetricsCard } from '@/components/monitoring/MetricsCard';
 
 describe('MetricsCard', () => {
-  const mockMetric = {
-    title: 'CPU Usage',
-    value: '75%',
-    change: '+5%',
-    trend: 'up' as const,
-    color: 'blue',
-  };
-
-  it('renders metric information correctly', () => {
-    render(<MetricsCard {...mockMetric} />);
+  it('renders title, value and unit', () => {
+    render(<MetricsCard title="CPU Usage" value="75" unit="%" />);
 
     expect(screen.getByText('CPU Usage')).toBeInTheDocument();
-    expect(screen.getByText('75%')).toBeInTheDocument();
-    expect(screen.getByText('+5%')).toBeInTheDocument();
+    expect(screen.getByText('75')).toBeInTheDocument();
+    expect(screen.getByText('%')).toBeInTheDocument();
   });
 
-  it('shows positive trend with up arrow', () => {
-    render(<MetricsCard {...mockMetric} trend="up" />);
+  it('renders the change percentage and change label', () => {
+    render(
+      <MetricsCard title="CPU Usage" value="75" change={5} changeLabel="vs last hour" />
+    );
 
-    const trendIcon = screen.getByTestId('trend-up-icon');
-    expect(trendIcon).toBeInTheDocument();
+    expect(screen.getByText('5%')).toBeInTheDocument();
+    expect(screen.getByText('vs last hour')).toBeInTheDocument();
   });
 
-  it('shows negative trend with down arrow', () => {
-    render(<MetricsCard {...mockMetric} trend="down" change="-3%" />);
+  it('shows the absolute change for negative deltas', () => {
+    render(<MetricsCard title="Errors" value="12" change={-3} />);
 
-    const trendIcon = screen.getByTestId('trend-down-icon');
-    expect(trendIcon).toBeInTheDocument();
-    expect(screen.getByText('-3%')).toBeInTheDocument();
+    expect(screen.getByText('3%')).toBeInTheDocument();
   });
 
-  it('handles missing change data', () => {
-    const { change, ...metricWithoutChange } = mockMetric;
-    render(<MetricsCard {...metricWithoutChange} />);
+  it('omits the change block when no change or changeLabel is given', () => {
+    const { container } = render(<MetricsCard title="CPU Usage" value="75" />);
 
-    expect(screen.getByText('CPU Usage')).toBeInTheDocument();
-    expect(screen.getByText('75%')).toBeInTheDocument();
-    expect(screen.queryByText('+5%')).not.toBeInTheDocument();
+    expect(container.textContent).not.toContain('%');
   });
 
-  it('applies correct color classes', () => {
-    const { container } = render(<MetricsCard {...mockMetric} color="green" />);
+  it('renders a provided icon', () => {
+    render(
+      <MetricsCard title="CPU" value="1" icon={<span data-testid="metric-icon" />} />
+    );
 
-    const card = container.firstChild as HTMLElement;
-    expect(card).toHaveClass('border-green-200');
+    expect(screen.getByTestId('metric-icon')).toBeInTheDocument();
   });
 
-  it('has proper accessibility attributes', () => {
-    render(<MetricsCard {...mockMetric} />);
+  it('shows a status indicator bar for non-neutral status', () => {
+    const { container } = render(<MetricsCard title="CPU" value="1" status="success" />);
 
-    const card = screen.getByRole('article');
-    expect(card).toHaveAttribute('aria-label', 'CPU Usage metric: 75%');
+    expect(container.querySelector('.bg-green-500')).toBeInTheDocument();
   });
 });

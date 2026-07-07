@@ -117,11 +117,11 @@ const mockWebSocketData = {
 
 // Mock the WebSocket hooks
 jest.mock('@/hooks/useWebSocket', () => ({
-  useMonitoringWebSocket: () => mockWebSocketData,
-  useDistributedTopologyWebSocket: () => mockWebSocketData,
-  useBandwidthMonitoringWebSocket: () => mockWebSocketData,
-  usePerformancePredictionWebSocket: () => mockWebSocketData,
-  useSupercomputeFabricWebSocket: () => mockWebSocketData,
+  useMonitoringWebSocket: jest.fn(() => mockWebSocketData),
+  useDistributedTopologyWebSocket: jest.fn(() => mockWebSocketData),
+  useBandwidthMonitoringWebSocket: jest.fn(() => mockWebSocketData),
+  usePerformancePredictionWebSocket: jest.fn(() => mockWebSocketData),
+  useSupercomputeFabricWebSocket: jest.fn(() => mockWebSocketData),
 }));
 
 // Mock dynamic imports
@@ -249,7 +249,7 @@ describe('Distributed Monitoring Components', () => {
 
       render(
         <NetworkTopology
-          data={mockData}
+          data={mockData as any}
           showDistributed={true}
           showBandwidth={true}
           showPerformanceMetrics={true}

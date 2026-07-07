@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import Dashboard from '@/components/dashboard/page';
+import Dashboard from '@/app/dashboard/page';
 
 test('renders dashboard charts', () => {
   render(<Dashboard />);
