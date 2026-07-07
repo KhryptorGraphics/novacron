@@ -13,6 +13,7 @@ const (
 	AlgorithmEPaxos
 	AlgorithmEventual
 	AlgorithmHybrid
+	AlgorithmProBFT
 )
 
 func (a ConsensusAlgorithm) String() string {
@@ -27,6 +28,8 @@ func (a ConsensusAlgorithm) String() string {
 		return "Eventual"
 	case AlgorithmHybrid:
 		return "Hybrid"
+	case AlgorithmProBFT:
+		return "ProBFT"
 	default:
 		return "Unknown"
 	}

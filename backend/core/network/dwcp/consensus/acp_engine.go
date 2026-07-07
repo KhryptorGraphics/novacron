@@ -20,6 +20,7 @@ type ACPEngine struct {
 	epaxos   *EPaxosConsensus
 	eventual *EventualConsistency
 	hybrid   *HybridConsensus
+	proBFT   *ProBFTConsensus
 
 	// Monitoring and decision making
 	networkMonitor  *NetworkMonitor
@@ -70,6 +71,14 @@ func NewACPEngine(nodeID, localRegion string, sm StateMachine) *ACPEngine {
 	acp.eventual = NewEventualConsistency(nodeID, sm)
 	acp.hybrid = NewHybridConsensus(nodeID, localRegion, acp.raft, acp.eventual)
 
+	// Initialize ProBFT
+	var err error
+	acp.proBFT, err = NewProBFTConsensus(nodeID, sm)
+	if err != nil {
+		// Log error but don't fail - ProBFT is optional
+		fmt.Printf("Warning: Failed to initialize ProBFT: %v\n", err)
+	}
+
 	// Initialize optimizer
 	acp.optimizer = NewConsensusOptimizer(100, 10*time.Millisecond)
 
@@ -80,7 +89,15 @@ func NewACPEngine(nodeID, localRegion string, sm StateMachine) *ACPEngine {
 func (acp *ACPEngine) DecideAlgorithm() ConsensusAlgorithm {
 	metrics := acp.networkMonitor.GetMetrics()
 
-	// Decision tree based on network conditions
+	// Check if ProBFT is available
+	proBFTAvailable := acp.proBFT != nil && acp.proBFT.IsRunning()
+
+	// High conflict rate + cross-region with security requirements -> ProBFT
+	// ProBFT provides 33% Byzantine tolerance with probabilistic quorums
+	if proBFTAvailable && metrics.RegionCount > 1 &&
+		(metrics.ConflictRate > 0.2 || (metrics.Stability < 0.7 && metrics.RegionCount > 2)) {
+		return AlgorithmProBFT
+	}
 
 	// Low latency, few regions -> Raft (simple and fast)
 	if metrics.RegionCount <= acp.switchThreshold.MaxRegionsForRaft &&
@@ -104,6 +121,7 @@ func (acp *ACPEngine) DecideAlgorithm() ConsensusAlgorithm {
 		return AlgorithmHybrid
 	}
 
+	// Default for moderate conditions -> Paxos
 	// Default for moderate conditions -> Paxos
 	return AlgorithmPaxos
 }
@@ -253,6 +271,11 @@ func (acp *ACPEngine) loadSnapshotToAlgorithm(algo ConsensusAlgorithm, snapshot 
 		return acp.eventual.LoadSnapshot(snapshot)
 	case AlgorithmHybrid:
 		return acp.hybrid.LoadSnapshot(snapshot)
+	case AlgorithmProBFT:
+		if acp.proBFT != nil {
+			return acp.proBFT.LoadSnapshot(snapshot)
+		}
+		return fmt.Errorf("ProBFT not initialized")
 	default:
 		return fmt.Errorf("unknown algorithm: %v", algo)
 	}
@@ -291,6 +314,15 @@ func (acp *ACPEngine) estimateBenefit(from, to ConsensusAlgorithm) float64 {
 		// Hybrid benefits from multi-region with moderate latency
 		if metrics.RegionCount > acp.switchThreshold.MaxRegionsForRaft {
 			benefit += 0.4
+		}
+
+	case AlgorithmProBFT:
+		// ProBFT benefits from Byzantine risk and cross-region security
+		if metrics.RegionCount > 1 && (metrics.ConflictRate > 0.2 || metrics.Stability < 0.7) {
+			benefit += 0.8
+		}
+		if metrics.RegionCount > 2 {
+			benefit += 0.3
 		}
 	}
 
