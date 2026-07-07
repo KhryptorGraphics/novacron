@@ -244,7 +244,7 @@ class EnhancedBandwidthLSTMTrainer:
 
         # Convert timestamp to datetime
         if 'timestamp' in df.columns:
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+            df['timestamp'] = pd.to_datetime(df['timestamp'], format='%Y-%m-%d %H:%M:%S', errors='coerce')
             df = df.sort_values('timestamp')
             print(f"Date range: {df['timestamp'].min()} to {df['timestamp'].max()}")
 

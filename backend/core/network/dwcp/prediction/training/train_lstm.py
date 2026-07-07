@@ -79,35 +79,35 @@ class BandwidthLSTMTrainer:
         # Read CSV file
         df = pd.read_csv(data_path)
 
-        # Convert timestamp to datetime
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+        df['timestamp'] = pd.to_datetime(df['timestamp'], format='%Y-%m-%d %H:%M:%S', errors='coerce')
+
+        # Add time-based features
+        df['time_of_day'] = df['timestamp'].dt.hour / 23.0  # Normalize 0-1
+        df['day_of_week'] = df['timestamp'].dt.dayofweek / 6.0  # Normalize 0-1
 
         # Sort by timestamp
         df = df.sort_values('timestamp')
 
         print(f"Loaded {len(df)} samples")
         print(f"Date range: {df['timestamp'].min()} to {df['timestamp'].max()}")
-
         return df
 
     def prepare_sequences(self, df, window_size=10):
         """Prepare sequences for LSTM training"""
-        print(f"Preparing sequences with window size {window_size}")
-
-        # Features: bandwidth, latency, packet_loss, jitter, time_of_day, day_of_week
+        # Features: throughput, rtt, packet_loss, jitter, time_of_day, day_of_week
         feature_cols = [
-            'bandwidth_mbps',
-            'latency_ms',
+            'throughput_mbps',
+            'rtt_ms',
             'packet_loss',
             'jitter_ms',
             'time_of_day',
             'day_of_week'
         ]
 
-        # Targets: bandwidth, latency, packet_loss, jitter (future values)
+        # Targets: throughput, rtt, packet_loss, jitter (future values)
         target_cols = [
-            'bandwidth_mbps',
-            'latency_ms',
+            'throughput_mbps',
+            'rtt_ms',
             'packet_loss',
             'jitter_ms'
         ]
@@ -241,21 +241,28 @@ class BandwidthLSTMTrainer:
         """Export model to ONNX format"""
         print(f"Exporting model to ONNX: {output_path}")
 
-        # Convert to ONNX
-        spec = (tf.TensorSpec((None, 10, 6), tf.float32, name="input"),)
-        output_path_str = str(output_path)
+        try:
+            # Convert to ONNX
+            spec = (tf.TensorSpec((None, 10, 6), tf.float32, name="input"),)
+            output_path_str = str(output_path)
 
-        model_proto, _ = tf2onnx.convert.from_keras(
-            self.model,
-            input_signature=spec,
-            opset=13
-        )
+            model_proto, _ = tf2onnx.convert.from_keras(
+                self.model,
+                input_signature=spec,
+                opset=13
+            )
 
-        # Save to file
-        with open(output_path_str, "wb") as f:
-            f.write(model_proto.SerializeToString())
+            # Save to file
+            with open(output_path_str, "wb") as f:
+                f.write(model_proto.SerializeToString())
 
-        print(f"Model exported to {output_path}")
+            print(f"Model exported to {output_path}")
+        except Exception as e:
+            print(f"ONNX export failed: {e}")
+            print("Saving model in Keras format instead")
+            keras_path = str(output_path).replace('.onnx', '.keras')
+            self.model.save(keras_path)
+            print(f"Model saved to {keras_path}")
 
     def save_metadata(self, output_path, metrics):
         """Save model metadata"""

@@ -340,9 +340,11 @@ class IsolationForestTuner:
             fp_rate = fp / (fp + tn) if (fp + tn) > 0 else 0
             f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
 
-            # Prioritize recall >= target, then minimize FP rate
-            if recall >= self.target_recall:
-                if best_metrics['recall'] < self.target_recall or \
+            # Prioritize recall >= target AND fp_rate <= max_fp_rate, then minimize FP rate
+            # Use slightly conservative FP budget on validation (max_fp_rate * 0.8) to account for distribution shift to test
+            val_fp_budget = self.max_fp_rate * 0.8
+            if recall >= self.target_recall and fp_rate <= val_fp_budget:
+                if best_metrics['recall'] < self.target_recall or best_metrics['fp_rate'] > val_fp_budget or \
                    (recall >= best_metrics['recall'] and fp_rate < best_metrics['fp_rate']):
                     best_threshold = threshold
                     best_metrics = {
@@ -351,8 +353,8 @@ class IsolationForestTuner:
                         'f1': f1,
                         'fp_rate': fp_rate
                     }
-            # If we haven't achieved target recall yet, take highest recall
-            elif recall > best_metrics['recall']:
+            # If we haven't achieved target recall AND conservative fp_rate constraint, take highest recall within conservative FP budget
+            elif fp_rate <= val_fp_budget and recall > best_metrics['recall']:
                 best_threshold = threshold
                 best_metrics = {
                     'recall': recall,
@@ -503,9 +505,10 @@ def generate_synthetic_data(n_samples: int = 10000, incident_rate: float = 0.02)
     n_normal = int(n_samples * (1 - incident_rate))
     n_incident = n_samples - n_normal
 
-    # Normal samples
+    # Normal samples - spread over the full time range
+    normal_timestamps = pd.date_range('2024-01-01', periods=n_normal, freq='1min')
     normal_data = {
-        'timestamp': pd.date_range('2024-01-01', periods=n_normal, freq='1min'),
+        'timestamp': normal_timestamps,
         'node_id': np.random.choice([f'node-{i:03d}' for i in range(100)], n_normal),
         'region': np.random.choice(['us-east', 'us-west', 'eu-west'], n_normal),
         'az': np.random.choice(['az1', 'az2', 'az3'], n_normal),
@@ -524,9 +527,11 @@ def generate_synthetic_data(n_samples: int = 10000, incident_rate: float = 0.02)
         'label': np.zeros(n_normal, dtype=int)
     }
 
-    # Incident samples (anomalous patterns)
+    # Incident samples - distribute throughout the time range
+    incident_indices = np.sort(np.random.choice(n_normal, n_incident, replace=False))
+    incident_timestamps = normal_timestamps[incident_indices]
     incident_data = {
-        'timestamp': pd.date_range('2024-01-01', periods=n_incident, freq='1min'),
+        'timestamp': incident_timestamps,
         'node_id': np.random.choice([f'node-{i:03d}' for i in range(100)], n_incident),
         'region': np.random.choice(['us-east', 'us-west', 'eu-west'], n_incident),
         'az': np.random.choice(['az1', 'az2', 'az3'], n_incident),
@@ -549,7 +554,7 @@ def generate_synthetic_data(n_samples: int = 10000, incident_rate: float = 0.02)
     df_incident = pd.DataFrame(incident_data)
 
     df = pd.concat([df_normal, df_incident], ignore_index=True)
-    df = df.sample(frac=1, random_state=42).reset_index(drop=True)  # Shuffle
+    df = df.sort_values('timestamp').reset_index(drop=True)  # Sort by timestamp, don't shuffle
 
     logger.info(f"Generated {len(df)} samples: {n_normal} normal, {n_incident} incidents")
 

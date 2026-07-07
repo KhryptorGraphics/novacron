@@ -165,13 +165,12 @@ class DWCPModelOrchestrator:
             'bandwidth_predictor': {
                 'script': str(base_path / 'core/network/dwcp/prediction/training/train_lstm.py'),
                 'args': [
-                    '--data-path', self.config['data_path'],
-                    '--output', str(output_dir / 'bandwidth_predictor.keras'),
-                    '--target-correlation', str(self.config['target_accuracy']),
-                    '--target-mape', '5.0',
+                    '--data', self.config['data_path'],
+                    '--output', str(output_dir / 'bandwidth_predictor'),
                     '--epochs', str(self.config['epochs']),
                     '--batch-size', str(self.config['batch_size']),
-                    '--seed', str(self.config['seed'])
+                    '--window-size', '10',
+                    '--validation-split', '0.2'
                 ]
             },
             'compression_selector': {
@@ -188,23 +187,22 @@ class DWCPModelOrchestrator:
             'reliability_detector': {
                 'script': str(base_path / 'core/network/dwcp/monitoring/training/train_isolation_forest.py'),
                 'args': [
-                    '--data-path', self.config['data_path'],
-                    '--incidents-path', self.config['incidents_path'],
+                    '--data', self.config['data_path'],
                     '--output', str(output_dir / 'reliability_model.pkl'),
                     '--target-recall', str(self.config['target_accuracy']),
-                    '--target-pr-auc', '0.90',
+                    '--max-fp-rate', '0.05',
                     '--seed', str(self.config['seed'])
                 ]
             },
             'consensus_latency': {
                 'script': str(base_path / 'core/network/dwcp/monitoring/training/train_lstm_autoencoder.py'),
                 'args': [
-                    '--data-path', self.config['data_path'],
-                    '--output', str(output_dir / 'consensus_latency.keras'),
-                    '--target-accuracy', str(self.config['target_accuracy']),
+                    '--output', str(output_dir / 'consensus_latency'),
                     '--epochs', str(self.config['epochs']),
                     '--batch-size', str(self.config['batch_size']),
-                    '--window-size', '20',
+                    '--sequence-length', '20',
+                    '--n-normal', '10000',
+                    '--n-anomalies', '500',
                     '--seed', str(self.config['seed'])
                 ]
             }
@@ -219,23 +217,45 @@ class DWCPModelOrchestrator:
         output_dir = Path(self.config['output_dir'])
         reports = {}
 
-        model_files = {
-            'bandwidth_predictor': 'bandwidth_predictor_report.json',
-            'compression_selector': 'compression_selector_policy_net_report.json',
-            'reliability_detector': 'reliability_model_report.json',
-            'consensus_latency': 'consensus_latency_lstm_autoencoder_report.json'
-        }
+        # Bandwidth predictor generates model_metadata_*.json
+        bandwidth_reports = list(output_dir.glob('*bandwidth_predictor*/model_metadata_*.json'))
+        if bandwidth_reports:
+            latest_report = max(bandwidth_reports, key=lambda p: p.stat().st_mtime)
+            with open(latest_report) as f:
+                metadata = json.load(f)
+            reports['bandwidth_predictor'] = {'success': True, 'metadata': metadata}
+        else:
+            reports['bandwidth_predictor'] = {'success': False, 'error': 'Report not found'}
 
-        for model_name, report_file in model_files.items():
-            report_path = output_dir / report_file
+        # Compression selector
+        comp_reports = list(output_dir.glob('*compression_selector*/model_metadata_*.json'))
+        if comp_reports:
+            latest_report = max(comp_reports, key=lambda p: p.stat().st_mtime)
+            with open(latest_report) as f:
+                metadata = json.load(f)
+            reports['compression_selector'] = {'success': True, 'metadata': metadata}
+        else:
+            reports['compression_selector'] = {'success': False, 'error': 'Report not found'}
 
-            if report_path.exists():
-                with open(report_path, 'r') as f:
-                    reports[model_name] = json.load(f)
-                logger.info(f"Loaded report for {model_name}")
-            else:
-                logger.warning(f"Report not found for {model_name}: {report_path}")
-                reports[model_name] = {'success': False, 'error': 'Report not found'}
+        # Reliability detector
+        rel_reports = list(output_dir.glob('*reliability*/model_metadata_*.json'))
+        if rel_reports:
+            latest_report = max(rel_reports, key=lambda p: p.stat().st_mtime)
+            with open(latest_report) as f:
+                metadata = json.load(f)
+            reports['reliability_detector'] = {'success': True, 'metadata': metadata}
+        else:
+            reports['reliability_detector'] = {'success': False, 'error': 'Report not found'}
+
+        # Consensus latency
+        cons_reports = list(output_dir.glob('*consensus*/model_metadata_*.json'))
+        if cons_reports:
+            latest_report = max(cons_reports, key=lambda p: p.stat().st_mtime)
+            with open(latest_report) as f:
+                metadata = json.load(f)
+            reports['consensus_latency'] = {'success': True, 'metadata': metadata}
+        else:
+            reports['consensus_latency'] = {'success': False, 'error': 'Report not found'}
 
         return reports
 
