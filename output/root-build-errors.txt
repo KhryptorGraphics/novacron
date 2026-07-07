@@ -1,0 +1,257 @@
+github.com/yalue/onnxruntime_go: build constraints exclude all Go files in /home/kp/go/pkg/mod/github.com/yalue/onnxruntime_go@v1.22.0
+# github.com/khryptorgraphics/novacron/backend/community/hackathons
+backend/community/hackathons/innovation_engine.go:733:3: syntax error: unexpected }, expected expression
+backend/community/hackathons/innovation_engine.go:737:1: syntax error: non-declaration statement outside function body
+# github.com/khryptorgraphics/novacron/backend/community/marketplace
+backend/community/marketplace/marketplace_scale_v2.go:525:2: syntax error: non-declaration statement outside function body
+# github.com/khryptorgraphics/novacron/backend/community/certification
+backend/community/certification/advanced_cert.go:47:20: undefined: LabEnvironment
+backend/community/certification/advanced_cert.go:234:43: undefined: CertificationLevel
+backend/community/certification/platform.go:50:21: undefined: CertificationLevel
+backend/community/certification/platform.go:55:23: undefined: CertificationLevel
+backend/community/certification/platform.go:66:20: undefined: CertificationLevel
+backend/community/certification/platform.go:87:23: undefined: Endorsement
+backend/community/certification/platform.go:120:21: undefined: CertificationLevel
+backend/community/certification/platform.go:169:18: undefined: LabEnvironment
+backend/community/certification/platform.go:239:22: undefined: CertificationLevel
+backend/community/certification/platform.go:261:28: undefined: CertificationLevel
+backend/community/certification/platform.go:261:28: too many errors
+# github.com/khryptorgraphics/novacron/backend/api/monitoring
+backend/api/monitoring/export_handlers.go:47:30: undefined: monitoring.ReportGenerator
+backend/api/monitoring/export_handlers.go:51:133: undefined: monitoring.ReportGenerator
+backend/api/monitoring/export_handlers.go:150:4: undefined: writeError
+backend/api/monitoring/export_handlers.go:172:3: undefined: writeError
+backend/api/monitoring/export_handlers.go:179:3: undefined: writeError
+backend/api/monitoring/export_handlers.go:186:3: undefined: writeError
+backend/api/monitoring/export_handlers.go:221:3: undefined: writeError
+backend/api/monitoring/export_handlers.go:231:3: undefined: writeError
+backend/api/monitoring/export_handlers.go:238:3: undefined: writeError
+backend/api/monitoring/export_handlers.go:610:85: undefined: monitoring.ReportSchedule
+backend/api/monitoring/export_handlers.go:238:3: too many errors
+# github.com/khryptorgraphics/novacron/backend/deployment
+backend/deployment/zero_downtime_deploy.go:21:24: undefined: BlueGreenManager
+backend/deployment/zero_downtime_deploy.go:42:29: undefined: BlueGreenConfig
+backend/deployment/gitops_controller.go:528:25: cannot use promauto.NewCounterVec(prometheus.CounterOpts{…}, []string{…}) (value of type *prometheus.CounterVec) as prometheus.CounterVec value in assignment
+backend/deployment/gitops_controller.go:533:21: cannot use promauto.NewCounterVec(prometheus.CounterOpts{…}, []string{…}) (value of type *prometheus.CounterVec) as prometheus.CounterVec value in assignment
+backend/deployment/metrics_collector.go:461:27: cannot use promauto.NewCounterVec(prometheus.CounterOpts{…}, []string{…}) (value of type *prometheus.CounterVec) as prometheus.CounterVec value in assignment
+backend/deployment/metrics_collector.go:466:26: cannot use promauto.NewHistogramVec(prometheus.HistogramOpts{…}, []string{…}) (value of type *prometheus.HistogramVec) as prometheus.HistogramVec value in assignment
+backend/deployment/metrics_collector.go:472:25: cannot use promauto.NewCounterVec(prometheus.CounterOpts{…}, []string{…}) (value of type *prometheus.CounterVec) as prometheus.CounterVec value in assignment
+backend/deployment/metrics_collector.go:477:16: cannot use promauto.NewHistogramVec(prometheus.HistogramOpts{…}, []string{…}) (value of type *prometheus.HistogramVec) as prometheus.HistogramVec value in assignment
+backend/deployment/metrics_collector.go:483:12: cannot use promauto.NewHistogramVec(prometheus.HistogramOpts{…}, []string{…}) (value of type *prometheus.HistogramVec) as prometheus.HistogramVec value in assignment
+backend/deployment/metrics_collector.go:489:25: cannot use promauto.NewGaugeVec(prometheus.GaugeOpts{…}, []string{…}) (value of type *prometheus.GaugeVec) as prometheus.GaugeVec value in assignment
+backend/deployment/metrics_collector.go:489:25: too many errors
+# github.com/khryptorgraphics/novacron/backend/api/gateway
+backend/api/gateway/unified.go:501:17: gw.monitoring.RecordMetric undefined (type *monitoring.UnifiedMonitoringSystem has no field or method RecordMetric)
+backend/api/gateway/unified.go:502:17: gw.monitoring.RecordMetric undefined (type *monitoring.UnifiedMonitoringSystem has no field or method RecordMetric)
+backend/api/gateway/unified.go:505:18: gw.monitoring.RecordMetric undefined (type *monitoring.UnifiedMonitoringSystem has no field or method RecordMetric)
+backend/api/gateway/unified.go:515:30: gw.monitoring.StartTrace undefined (type *monitoring.UnifiedMonitoringSystem has no field or method StartTrace)
+backend/api/gateway/unified.go:537:19: gw.monitoring.RecordMetric undefined (type *monitoring.UnifiedMonitoringSystem has no field or method RecordMetric)
+backend/api/gateway/unified.go:633:17: gw.monitoring.RecordMetric undefined (type *monitoring.UnifiedMonitoringSystem has no field or method RecordMetric)
+backend/api/gateway/unified.go:653:31: not enough arguments in call to gw.server.BaseContext
+	have ()
+	want (net.Listener)
+backend/api/gateway/unified.go:670:27: gw.monitoring.GetSystemMetrics undefined (type *monitoring.UnifiedMonitoringSystem has no field or method GetSystemMetrics)
+backend/api/gateway/unified.go:681:26: gw.monitoring.GetSystemHealth undefined (type *monitoring.UnifiedMonitoringSystem has no field or method GetSystemHealth)
+backend/api/gateway/unified.go:837:17: gw.monitoring.RecordMetric undefined (type *monitoring.UnifiedMonitoringSystem has no field or method RecordMetric)
+backend/api/gateway/unified.go:837:17: too many errors
+# github.com/khryptorgraphics/novacron/adapters/pkg/azure
+adapters/pkg/azure/adapter.go:172:46: unknown field SubscriptionID in struct literal of type compute.VirtualMachinesClient
+adapters/pkg/azure/adapter.go:175:38: unknown field SubscriptionID in struct literal of type compute.DisksClient
+adapters/pkg/azure/adapter.go:178:51: unknown field SubscriptionID in struct literal of type network.VirtualNetworksClient
+adapters/pkg/azure/adapter.go:181:42: unknown field SubscriptionID in struct literal of type network.SubnetsClient
+adapters/pkg/azure/adapter.go:184:46: unknown field SubscriptionID in struct literal of type network.SecurityGroupsClient
+adapters/pkg/azure/adapter.go:187:40: unknown field SubscriptionID in struct literal of type resources.Client
+adapters/pkg/azure/adapter.go:316:69: compute.VirtualMachineInstanceView (type) is not an expression
+adapters/pkg/azure/adapter.go:497:30: undefined: strings
+adapters/pkg/azure/adapter.go:528:28: undefined: strings
+# github.com/khryptorgraphics/novacron/backend/chaos
+backend/chaos/chaos_engineering.go:224:21: undefined: Scheduler
+backend/chaos/chaos_engineering.go:303:17: undefined: NewScheduler
+backend/chaos/chaos_engineering.go:308:5: ce.registerDefaultInjectors undefined (type *ChaosEngine has no field or method registerDefaultInjectors)
+backend/chaos/chaos_engineering.go:311:5: ce.registerDefaultValidators undefined (type *ChaosEngine has no field or method registerDefaultValidators)
+backend/chaos/chaos_engineering.go:337:5: ce.startMonitoring undefined (type *ChaosEngine has no field or method startMonitoring)
+backend/chaos/chaos_engineering.go:340:15: ce.loadScheduledExperiments undefined (type *ChaosEngine has no field or method loadScheduledExperiments)
+backend/chaos/chaos_engineering.go:369:47: undefined: ExperimentSpec
+backend/chaos/injectors.go:25:14: undefined: TCExecutor
+backend/chaos/dashboard.go:888:37: undefined: GameDay
+backend/chaos/dashboard.go:893:46: undefined: GameDay
+backend/chaos/chaos_engineering.go:340:15: too many errors
+# github.com/khryptorgraphics/novacron/backend/ipo/financials
+backend/ipo/financials/financial_readiness.go:48:20: undefined: EquityIncentivePlan
+# github.com/khryptorgraphics/novacron/backend/ml/federated
+backend/ml/federated/coordinator.go:125:15: cannot use optimizer (variable of interface type TopologyOptimizer) as *TopologyOptimizer value in assignment: TopologyOptimizer does not implement *TopologyOptimizer (type *TopologyOptimizer is pointer to interface, not interface)
+backend/ml/federated/coordinator.go:204:37: c.topology.OptimizeTopology undefined (type *TopologyOptimizer is pointer to interface, not interface)
+backend/ml/federated/coordinator.go:523:19: c.topology.UpdateClientPerformance undefined (type *TopologyOptimizer is pointer to interface, not interface)
+# github.com/khryptorgraphics/novacron/backend/enterprise/fortune500
+backend/enterprise/fortune500/enterprise_platform.go:10:2: "crypto/rsa" imported and not used
+backend/enterprise/fortune500/enterprise_platform.go:11:2: "crypto/sha256" imported and not used
+backend/enterprise/fortune500/enterprise_platform.go:12:2: "crypto/x509" imported and not used
+backend/enterprise/fortune500/enterprise_platform.go:15:2: "encoding/pem" imported and not used
+backend/enterprise/fortune500/enterprise_platform.go:17:2: "io" imported and not used
+backend/enterprise/fortune500/enterprise_platform.go:865:31: 0.5 (untyped float constant) truncated to int
+# github.com/khryptorgraphics/novacron/backend/operations/command
+backend/operations/command/global_ops_center.go:463:47: center.aggregatePerformanceMetrics undefined (type *GlobalOperationsCenter has no field or method aggregatePerformanceMetrics)
+backend/operations/command/global_ops_center.go:466:44: center.aggregateCapacityMetrics undefined (type *GlobalOperationsCenter has no field or method aggregateCapacityMetrics)
+backend/operations/command/global_ops_center.go:469:40: center.aggregateCostMetrics undefined (type *GlobalOperationsCenter has no field or method aggregateCostMetrics)
+backend/operations/command/global_ops_center.go:472:45: center.aggregateComplianceStatus undefined (type *GlobalOperationsCenter has no field or method aggregateComplianceStatus)
+backend/operations/command/global_ops_center.go:475:35: center.analyzeTrends undefined (type *GlobalOperationsCenter has no field or method analyzeTrends)
+backend/operations/command/global_ops_center.go:478:40: center.generatePredictions undefined (type *GlobalOperationsCenter has no field or method generatePredictions)
+backend/operations/command/global_ops_center.go:591:12: center.notifyWarRoomActivation undefined (type *GlobalOperationsCenter has no field or method notifyWarRoomActivation)
+backend/operations/command/global_ops_center.go:633:12: center.generateWarRoomPostMortem undefined (type *GlobalOperationsCenter has no field or method generateWarRoomPostMortem)
+backend/operations/command/global_ops_center.go:636:12: center.notifyWarRoomDeactivation undefined (type *GlobalOperationsCenter has no field or method notifyWarRoomDeactivation)
+backend/operations/command/global_ops_center.go:659:11: center.generateComplianceReports undefined (type *GlobalOperationsCenter has no field or method generateComplianceReports)
+backend/operations/command/global_ops_center.go:659:11: too many errors
+# github.com/khryptorgraphics/novacron/backend/operations/onboarding
+backend/operations/onboarding/enterprise_onboarding.go:194:20: StageValidation is not a type
+backend/operations/onboarding/enterprise_onboarding.go:472:25: orchestrator.validateOnboardingRequest undefined (type *EnterpriseOnboardingOrchestrator has no field or method validateOnboardingRequest)
+backend/operations/onboarding/enterprise_onboarding.go:562:4: unknown field TimeToValue in struct literal of type OnboardingSuccessMetrics
+backend/operations/onboarding/enterprise_onboarding.go:563:4: unknown field AdoptionRate in struct literal of type OnboardingSuccessMetrics
+backend/operations/onboarding/enterprise_onboarding.go:564:4: unknown field FeatureUtilization in struct literal of type OnboardingSuccessMetrics
+backend/operations/onboarding/enterprise_onboarding.go:565:4: unknown field SatisfactionScore in struct literal of type OnboardingSuccessMetrics
+backend/operations/onboarding/enterprise_onboarding.go:574:31: orchestrator.createStageTasks undefined (type *EnterpriseOnboardingOrchestrator has no field or method createStageTasks)
+backend/operations/onboarding/enterprise_onboarding.go:575:31: orchestrator.getStageDependencies undefined (type *EnterpriseOnboardingOrchestrator has no field or method getStageDependencies)
+backend/operations/onboarding/enterprise_onboarding.go:576:31: orchestrator.getStageValidations undefined (type *EnterpriseOnboardingOrchestrator has no field or method getStageValidations)
+backend/operations/onboarding/enterprise_onboarding.go:1396:6: StageValidation redeclared in this block
+	backend/operations/onboarding/enterprise_onboarding.go:36:2: other declaration of StageValidation
+backend/operations/onboarding/enterprise_onboarding.go:576:31: too many errors
+# github.com/khryptorgraphics/novacron/backend/ipo/post_ipo
+backend/ipo/post_ipo/public_company_ops.go:486:22: undefined: TradingWindows
+# github.com/khryptorgraphics/novacron/backend/operations/availability
+backend/operations/availability/six_nines_orchestrator.go:28:2: MaxDowntimePerYear redeclared in this block
+	backend/operations/availability/five_nines_orchestrator.go:27:2: other declaration of MaxDowntimePerYear
+backend/operations/availability/six_nines_orchestrator.go:34:2: MaxFailoverTime redeclared in this block
+	backend/operations/availability/five_nines_orchestrator.go:30:2: other declaration of MaxFailoverTime
+backend/operations/availability/six_nines_orchestrator.go:35:2: MaxDataLossRPO redeclared in this block
+	backend/operations/availability/five_nines_orchestrator.go:31:2: other declaration of MaxDataLossRPO
+backend/operations/availability/six_nines_orchestrator.go:36:2: MinZonesPerRegion redeclared in this block
+	backend/operations/availability/five_nines_orchestrator.go:34:2: other declaration of MinZonesPerRegion
+backend/operations/availability/six_nines_orchestrator.go:37:2: MaxZonesPerRegion redeclared in this block
+	backend/operations/availability/five_nines_orchestrator.go:35:2: other declaration of MaxZonesPerRegion
+backend/operations/availability/six_nines_orchestrator.go:41:2: HealthCheckInterval redeclared in this block
+	backend/operations/availability/five_nines_orchestrator.go:38:2: other declaration of HealthCheckInterval
+backend/operations/availability/six_nines_orchestrator.go:42:2: HealthCheckTimeout redeclared in this block
+	backend/operations/availability/five_nines_orchestrator.go:39:2: other declaration of HealthCheckTimeout
+backend/operations/availability/six_nines_orchestrator.go:43:2: ConsecutiveFailuresForFailover redeclared in this block
+	backend/operations/availability/five_nines_orchestrator.go:40:2: other declaration of ConsecutiveFailuresForFailover
+backend/operations/availability/six_nines_orchestrator.go:47:2: ForecastHorizon redeclared in this block
+	backend/operations/availability/five_nines_orchestrator.go:43:2: other declaration of ForecastHorizon
+backend/operations/availability/six_nines_orchestrator.go:48:2: CapacityBuffer redeclared in this block
+	backend/operations/availability/five_nines_orchestrator.go:44:2: other declaration of CapacityBuffer
+backend/operations/availability/six_nines_orchestrator.go:48:2: too many errors
+# google.golang.org/genproto/googleapis/cloud/compute/v1
+../../go/pkg/mod/google.golang.org/genproto@v0.0.0-20250603155806-513f23925822/googleapis/cloud/compute/v1/alias.go:9994:25: undefined: src.ScratchDisks
+# github.com/khryptorgraphics/novacron/backend/tests/ml
+backend/tests/ml/model_testing_framework.go:7:2: "math" imported and not used
+# github.com/khryptorgraphics/novacron/backend/pkg/security
+backend/pkg/security/ratelimit.go:4:2: "encoding/json" imported and not used
+backend/pkg/security/ratelimit.go:220:15: assignment mismatch: 1 variable but rateLimitErr.MarshalJSON returns 2 values
+# github.com/khryptorgraphics/novacron/backend/tests/comprehensive
+backend/tests/comprehensive/test_coordinator.go:365:23: syntax error: unexpected : at end of statement
+# github.com/khryptorgraphics/novacron/backend/operations/runbooks
+backend/operations/runbooks/automated_runbooks.go:319:5: expression in go must be function call
+backend/operations/runbooks/automated_runbooks.go:319:12: system.manageSecurity undefined (type *AutomatedRunbookSystem has no field or method manageSecurity)
+backend/operations/runbooks/automated_runbooks.go:321:1: undefined: Patches
+backend/operations/runbooks/automated_runbooks.go:396:32: system.loadCustomRunbooks undefined (type *AutomatedRunbookSystem has no field or method loadCustomRunbooks)
+backend/operations/runbooks/automated_runbooks.go:610:41: system.hasApproval undefined (type *AutomatedRunbookSystem has no field or method hasApproval)
+backend/operations/runbooks/automated_runbooks.go:636:19: system.recordPreExecutionState undefined (type *AutomatedRunbookSystem has no field or method recordPreExecutionState)
+backend/operations/runbooks/automated_runbooks.go:682:12: system.performRollback undefined (type *AutomatedRunbookSystem has no field or method performRollback)
+backend/operations/runbooks/automated_runbooks.go:692:20: system.validateStepOutput undefined (type *AutomatedRunbookSystem has no field or method validateStepOutput)
+backend/operations/runbooks/automated_runbooks.go:709:32: system.calculateSuccessRate undefined (type *AutomatedRunbookSystem has no field or method calculateSuccessRate)
+backend/operations/runbooks/automated_runbooks.go:727:27: system.learningEngine.learnFromExecution undefined (type *LearningEngine has no field or method learnFromExecution)
+backend/operations/runbooks/automated_runbooks.go:727:27: too many errors
+# github.com/khryptorgraphics/novacron/backend/operations/support
+backend/operations/support/enterprise_support.go:632:19: system.validateTicketRequest undefined (type *EnterpriseSupportSystem has no field or method validateTicketRequest)
+backend/operations/support/enterprise_support.go:656:36: system.priorityEngine.determinePriority undefined (type *PriorityEngine has no field or method determinePriority)
+backend/operations/support/enterprise_support.go:660:40: system.sentimentAnalyzer.analyze undefined (type *SentimentAnalyzer has no field or method analyze)
+backend/operations/support/enterprise_support.go:664:31: system.calculateHealthImpact undefined (type *EnterpriseSupportSystem has no field or method calculateHealthImpact)
+backend/operations/support/enterprise_support.go:667:23: system.findRelevantKBArticles undefined (type *EnterpriseSupportSystem has no field or method findRelevantKBArticles)
+backend/operations/support/enterprise_support.go:671:40: system.aiAssistant.getRecommendations undefined (type *AISuportAssistant has no field or method getRecommendations)
+backend/operations/support/enterprise_support.go:675:33: system.ticketRouter.routeTicket undefined (type *TicketRouter has no field or method routeTicket)
+backend/operations/support/enterprise_support.go:690:39: system.slaManager.initializeSLA undefined (type *SLAManager has no field or method initializeSLA)
+backend/operations/support/enterprise_support.go:708:12: system.sendTicketNotifications undefined (type *EnterpriseSupportSystem has no field or method sendTicketNotifications)
+backend/operations/support/enterprise_support.go:720:14: system.offerVideoSupport undefined (type *EnterpriseSupportSystem has no field or method offerVideoSupport)
+backend/operations/support/enterprise_support.go:720:14: too many errors
+# github.com/khryptorgraphics/novacron
+runtime.main_main·f: function main is undeclared in the main package
+# github.com/khryptorgraphics/novacron/sdk/examples/go
+sdk/examples/go/federated-migration-manager.go:8:2: "context" imported and not used
+sdk/examples/go/federated-migration-manager.go:9:2: "encoding/json" imported and not used
+sdk/examples/go/federated-migration-manager.go:11:2: "log" imported and not used
+sdk/examples/go/federated-migration-manager.go:12:2: "time" imported and not used
+# github.com/khryptorgraphics/novacron/marketplace/server
+marketplace/server/main.go:4:2: "context" imported and not used
+marketplace/server/main.go:202:4: w.WriteStatus undefined (type http.ResponseWriter has no field or method WriteStatus)
+# github.com/khryptorgraphics/novacron/research/business
+research/business/research_revenue.go:14:2: "math" imported and not used
+research/business/research_revenue.go:184:2: declared and not used: baseYear
+research/business/research_revenue.go:185:2: declared and not used: baseRevenue
+# github.com/novacron/dwcp-sdk-go
+sdk/go/client.go:346:2: declared and not used: buffer
+sdk/go/client.go:462:21: invalid operation: 16 + ridLen + payloadLen (mismatched types uint16 and uint32)
+sdk/go/client.go:466:31: invalid operation: 16 + ridLen + payloadLen (mismatched types uint16 and uint32)
+# github.com/khryptorgraphics/novacron/config/performance
+config/performance/memory_optimization.go:1092:49: syntax error: unexpected literal `
+	S3Destination       DestinationType = "s3"
+)
+
+type ReportTemplate struct {
+	Name        string    ` in grouped declaration; possibly missing semicolon or newline or )
+config/performance/memory_optimization.go:1281:44: string not terminated
+# github.com/khryptorgraphics/novacron/backend/deployments/k8s/operator
+backend/deployments/k8s/operator/novacron_operator.go:5:2: "fmt" imported and not used
+backend/deployments/k8s/operator/novacron_operator.go:17:2: "sigs.k8s.io/controller-runtime/pkg/controller" imported and not used
+backend/deployments/k8s/operator/novacron_operator.go:19:2: "sigs.k8s.io/controller-runtime/pkg/handler" imported and not used
+backend/deployments/k8s/operator/novacron_operator.go:21:2: "sigs.k8s.io/controller-runtime/pkg/manager" imported and not used
+backend/deployments/k8s/operator/novacron_operator.go:22:2: "sigs.k8s.io/controller-runtime/pkg/reconcile" imported and not used
+backend/deployments/k8s/operator/novacron_operator.go:23:2: "sigs.k8s.io/controller-runtime/pkg/source" imported and not used
+# github.com/khryptorgraphics/novacron/research/edge-cloud/src
+research/edge-cloud/src/edge_cloud_continuum.go:45:16: undefined: EdgeAIModel
+research/edge-cloud/src/edge_cloud_continuum.go:46:16: undefined: InferenceEngine
+research/edge-cloud/src/edge_cloud_continuum.go:47:16: undefined: LocalCache
+research/edge-cloud/src/edge_cloud_continuum.go:359:16: undefined: SliceSLA
+research/edge-cloud/src/edge_cloud_continuum.go:360:16: undefined: SliceResources
+research/edge-cloud/src/edge_cloud_continuum.go:361:18: undefined: SliceEndpoint
+research/edge-cloud/src/edge_cloud_continuum.go:362:16: undefined: QoSProfile
+research/edge-cloud/src/edge_cloud_continuum.go:398:27: undefined: MECApplication
+research/edge-cloud/src/edge_cloud_continuum.go:399:27: undefined: MECService
+research/edge-cloud/src/edge_cloud_continuum.go:702:16: undefined: ResourceRequirements
+research/edge-cloud/src/edge_cloud_continuum.go:399:27: too many errors
+# github.com/khryptorgraphics/novacron/backend/scaling
+backend/scaling/enterprise_scaler.go:11:5: "log" imported and not used
+backend/scaling/enterprise_scaler.go:16:5: "github.com/golang/protobuf/ptypes" imported and not used
+backend/scaling/enterprise_scaler.go:18:5: api redeclared in this block
+	backend/scaling/enterprise_scaler.go:17:5: other declaration of api
+backend/scaling/enterprise_scaler.go:18:5: "github.com/prometheus/client_golang/api" imported and not used
+backend/scaling/enterprise_scaler.go:23:5: "google.golang.org/grpc" imported and not used
+backend/scaling/enterprise_scaler.go:24:5: "k8s.io/client-go/kubernetes" imported and not used
+backend/scaling/enterprise_scaler.go:88:27: undefined: TrafficAnalyzer
+backend/scaling/enterprise_scaler.go:443:44: cannot use api.Config{…} (value of struct type "github.com/hashicorp/consul/api".Config) as *"github.com/hashicorp/consul/api".Config value in argument to api.NewClient
+backend/scaling/enterprise_scaler.go:458:45: cannot use prometheusClient (variable of type *"github.com/hashicorp/consul/api".Client) as "github.com/prometheus/client_golang/api".Client value in argument to prometheus.NewAPI: *"github.com/hashicorp/consul/api".Client does not implement "github.com/prometheus/client_golang/api".Client (missing method Do)
+backend/scaling/enterprise_scaler.go:830:5: declared and not used: result
+backend/scaling/enterprise_scaler.go:24:5: too many errors
+# github.com/khryptorgraphics/novacron/research/dwcp-v4
+research/dwcp-v4/quic_transport.go:11:2: "net" imported and not used
+# github.com/khryptorgraphics/novacron/temp_main_files
+temp_main_files/quick_validation.go:7:2: "path/filepath" imported and not used
+temp_main_files/quick_validation.go:22:6: main redeclared in this block
+	temp_main_files/phase4_complete.go:7:6: other declaration of main
+temp_main_files/quick_validation.go:142:2: declared and not used: output
+temp_main_files/simple_auth_server.go:96:6: main redeclared in this block
+	temp_main_files/phase4_complete.go:7:6: other declaration of main
+temp_main_files/tmp_rovodev_simple_test_main.go:12:6: main redeclared in this block
+	temp_main_files/phase4_complete.go:7:6: other declaration of main
+# github.com/khryptorgraphics/novacron/research/dwcp-v4/src
+research/dwcp-v4/src/wasm_runtime.go:24:23: undefined: wasmer.Engine
+research/dwcp-v4/src/wasm_runtime.go:25:23: undefined: wasmer.Store
+research/dwcp-v4/src/wasm_runtime.go:26:23: undefined: wasmer.Compiler
+research/dwcp-v4/src/wasm_runtime.go:27:34: undefined: wasmer.Module
+research/dwcp-v4/src/wasm_runtime.go:46:23: undefined: wasmer.Module
+research/dwcp-v4/src/wasm_runtime.go:47:23: undefined: wasmer.Instance
+research/dwcp-v4/src/wasm_runtime.go:48:23: undefined: wasmer.Memory
+research/dwcp-v4/src/wasm_runtime.go:49:33: undefined: wasmer.Exportable
+research/dwcp-v4/src/wasm_runtime.go:466:16: undefined: LatencyTracker
+research/dwcp-v4/src/wasm_runtime.go:467:16: undefined: ThroughputTracker
+research/dwcp-v4/src/wasm_runtime.go:467:16: too many errors
+# github.com/khryptorgraphics/novacron/tests/mle-star-samples/backend/core/security
+tests/mle-star-samples/backend/core/security/compliance_reporting.go:410:27: syntax error: unexpected < in struct type; possibly missing semicolon or newline or }
+tests/mle-star-samples/backend/core/security/compliance_reporting.go:411:25: syntax error: unexpected ] after top level declaration

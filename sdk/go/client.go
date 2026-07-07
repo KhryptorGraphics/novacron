@@ -343,8 +343,6 @@ func (c *Client) sendRequest(ctx context.Context, msgType uint8, payload interfa
 
 // readLoop continuously reads messages from the connection
 func (c *Client) readLoop() {
-	buffer := make([]byte, c.config.BufferSize)
-
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -451,15 +449,15 @@ func (m *Message) Unmarshal(data []byte) error {
 	m.Type = data[1]
 	m.Timestamp = int64(binary.BigEndian.Uint64(data[2:10]))
 
-	ridLen := binary.BigEndian.Uint16(data[10:12])
-	if len(data) < int(12+ridLen+4) {
+	ridLen := int(binary.BigEndian.Uint16(data[10:12]))
+	if len(data) < 12+ridLen+4 {
 		return errors.New("invalid message format")
 	}
 
 	m.RequestID = string(data[12 : 12+ridLen])
 
-	payloadLen := binary.BigEndian.Uint32(data[12+ridLen : 16+ridLen])
-	if len(data) < int(16+ridLen+payloadLen) {
+	payloadLen := int(binary.BigEndian.Uint32(data[12+ridLen : 16+ridLen]))
+	if len(data) < 16+ridLen+payloadLen {
 		return errors.New("invalid payload length")
 	}
 

@@ -10,7 +10,6 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"net/url"
 	"sort"
 	"sync"
 	"time"

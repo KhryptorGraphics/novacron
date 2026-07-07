@@ -1,7 +1,6 @@
 package monitoring
 
 import (
-	"context"
 	"encoding/json"
 	"log"
 	"math"
@@ -28,8 +27,9 @@ type MonitoringHandlers struct {
 // NewMonitoringHandlers creates a new monitoring handlers instance
 func NewMonitoringHandlers(kvmManager *hypervisor.KVMManager) *MonitoringHandlers {
 	return &MonitoringHandlers{
-		kvmManager:     kvmManager,
-		alertManager:   monitoring.NewAlertManager(),
+		kvmManager: kvmManager,
+		// ponytail: nil collector — handlers only read/ack alerts and never Start() the evaluation loop
+		alertManager:   monitoring.NewAlertManager(nil),
 		metricRegistry: monitoring.NewMetricRegistry(),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
@@ -42,8 +42,9 @@ func NewMonitoringHandlers(kvmManager *hypervisor.KVMManager) *MonitoringHandler
 // NewMonitoringHandlersWithVMManager creates monitoring handlers using VM manager as fallback
 func NewMonitoringHandlersWithVMManager(vmManager *vm.VMManager) *MonitoringHandlers {
 	return &MonitoringHandlers{
-		kvmManager:     nil, // No KVM manager available
-		alertManager:   monitoring.NewAlertManager(),
+		kvmManager: nil, // No KVM manager available
+		// ponytail: nil collector — handlers only read/ack alerts and never Start() the evaluation loop
+		alertManager:   monitoring.NewAlertManager(nil),
 		metricRegistry: monitoring.NewMetricRegistry(),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
@@ -112,7 +113,8 @@ func (h *MonitoringHandlers) GetSystemMetrics(w http.ResponseWriter, r *http.Req
 	}
 
 	// Get hypervisor metrics
-	resourceInfo, err := h.kvmManager.GetHypervisorMetrics(r.Context())
+	// ponytail: response data below is simulated; call kept as hypervisor liveness check
+	_, err = h.kvmManager.GetHypervisorMetrics(r.Context())
 	if err != nil {
 		log.Printf("Error getting hypervisor metrics: %v", err)
 		http.Error(w, "Failed to get system metrics", http.StatusInternalServerError)
@@ -179,7 +181,7 @@ func (h *MonitoringHandlers) GetVMMetrics(w http.ResponseWriter, r *http.Request
 	var vmMetrics []VMMetricsResponse
 	for _, vmInfo := range vms {
 		// Get detailed metrics for each VM
-		detailedVM, err := h.kvmManager.GetVMMetrics(ctx, vmInfo.ID)
+		detailedVM, err := h.kvmManager.GetVMMetrics(r.Context(), vmInfo.ID)
 		if err != nil {
 			log.Printf("Error getting metrics for VM %s: %v", vmInfo.ID, err)
 			continue
@@ -215,20 +217,20 @@ func (h *MonitoringHandlers) GetVMMetrics(w http.ResponseWriter, r *http.Request
 // GetAlerts handles GET /api/monitoring/alerts
 func (h *MonitoringHandlers) GetAlerts(w http.ResponseWriter, r *http.Request) {
 	// Get alerts from alert manager
-	alerts := h.alertManager.GetActiveAlerts()
-	
+	alerts := h.alertManager.ListAlertInstances()
+
 	var alertResponses []AlertResponse
 	for _, alert := range alerts {
 		alertResponse := AlertResponse{
-			Id:          alert.ID,
-			Name:        alert.Name,
-			Description: alert.Description,
-			Severity:    string(alert.Severity),
+			Id:          alert.Alert.ID,
+			Name:        alert.Alert.Name,
+			Description: alert.Alert.Description,
+			Severity:    string(alert.Alert.Severity),
 			Status:      string(alert.Status),
 			StartTime:   alert.StartTime.Format(time.RFC3339),
-			Labels:      alert.Labels,
+			Labels:      alert.Alert.Labels,
 			Value:       alert.Value,
-			Resource:    alert.Resource,
+			Resource:    alert.Alert.ID,
 		}
 		
 		if !alert.EndTime.IsZero() {
@@ -248,7 +250,7 @@ func (h *MonitoringHandlers) AcknowledgeAlert(w http.ResponseWriter, r *http.Req
 	vars := mux.Vars(r)
 	alertID := vars["id"]
 	
-	if err := h.alertManager.AcknowledgeAlert(alertID); err != nil {
+	if err := h.alertManager.AcknowledgeAlert(alertID, "api", "acknowledged via API"); err != nil {
 		log.Printf("Error acknowledging alert %s: %v", alertID, err)
 		http.Error(w, "Failed to acknowledge alert", http.StatusInternalServerError)
 		return

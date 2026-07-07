@@ -1,0 +1,28 @@
+github.com/yalue/onnxruntime_go: build constraints exclude all Go files in /home/kp/go/pkg/mod/github.com/yalue/onnxruntime_go@v1.22.0
+# github.com/khryptorgraphics/novacron/backend/api/monitoring
+backend/api/monitoring/handlers.go:4:2: "context" imported and not used
+backend/api/monitoring/handlers.go:32:19: not enough arguments in call to monitoring.NewAlertManager
+	have ()
+	want (*"github.com/khryptorgraphics/novacron/backend/core/monitoring".DistributedMetricCollector)
+backend/api/monitoring/handlers.go:46:19: not enough arguments in call to monitoring.NewAlertManager
+	have ()
+	want (*"github.com/khryptorgraphics/novacron/backend/core/monitoring".DistributedMetricCollector)
+backend/api/monitoring/handlers.go:115:2: declared and not used: resourceInfo
+backend/api/monitoring/handlers.go:182:48: undefined: ctx
+backend/api/monitoring/handlers.go:218:27: h.alertManager.GetActiveAlerts undefined (type *"github.com/khryptorgraphics/novacron/backend/core/monitoring".AlertManager has no field or method GetActiveAlerts)
+backend/api/monitoring/handlers.go:251:44: not enough arguments in call to h.alertManager.AcknowledgeAlert
+	have (string)
+	want (string, string, string)
+# github.com/novacron/dwcp-sdk-go
+sdk/go/client.go:346:2: declared and not used: buffer
+sdk/go/client.go:462:21: invalid operation: 16 + ridLen + payloadLen (mismatched types uint16 and uint32)
+sdk/go/client.go:466:31: invalid operation: 16 + ridLen + payloadLen (mismatched types uint16 and uint32)
+# google.golang.org/genproto/googleapis/cloud/compute/v1
+../../go/pkg/mod/google.golang.org/genproto@v0.0.0-20250603155806-513f23925822/googleapis/cloud/compute/v1/alias.go:9994:25: undefined: src.ScratchDisks
+# github.com/khryptorgraphics/novacron/backend/deployments/k8s/operator
+backend/deployments/k8s/operator/novacron_operator.go:5:2: "fmt" imported and not used
+backend/deployments/k8s/operator/novacron_operator.go:17:2: "sigs.k8s.io/controller-runtime/pkg/controller" imported and not used
+backend/deployments/k8s/operator/novacron_operator.go:19:2: "sigs.k8s.io/controller-runtime/pkg/handler" imported and not used
+backend/deployments/k8s/operator/novacron_operator.go:21:2: "sigs.k8s.io/controller-runtime/pkg/manager" imported and not used
+backend/deployments/k8s/operator/novacron_operator.go:22:2: "sigs.k8s.io/controller-runtime/pkg/reconcile" imported and not used
+backend/deployments/k8s/operator/novacron_operator.go:23:2: "sigs.k8s.io/controller-runtime/pkg/source" imported and not used

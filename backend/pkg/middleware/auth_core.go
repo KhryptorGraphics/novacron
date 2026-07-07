@@ -26,6 +26,19 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
+// Authenticate is an alias for RequireAuth (core mode), matching the
+// JWTMiddleware.Authenticate method name used in experimental mode.
+func (m *AuthMiddleware) Authenticate(next http.Handler) http.Handler {
+	return m.RequireAuth(next)
+}
+
+// Authenticate is a package-level convenience middleware used by API routers
+// (e.g. backend/api/federation). Core mode: tag role from X-Role header.
+func Authenticate(next http.Handler) http.Handler {
+	m := &AuthMiddleware{}
+	return m.RequireAuth(next)
+}
+
 func (m *AuthMiddleware) RequireRole(role string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){

@@ -38,6 +38,9 @@ type Config struct {
 
 // TransportConfig configures the multi-stream transport layer
 type TransportConfig struct {
+	// Remote address to connect to
+	RemoteAddr string `json:"remote_addr" yaml:"remote_addr"`
+
 	// Multi-stream TCP settings
 	MinStreams          int     `json:"min_streams" yaml:"min_streams"`
 	MaxStreams          int     `json:"max_streams" yaml:"max_streams"`
@@ -136,6 +139,7 @@ func DefaultConfig() *Config {
 		Version: DWCPVersion,
 
 		Transport: TransportConfig{
+			RemoteAddr:          "", // Will be set by user
 			MinStreams:          16,
 			MaxStreams:          256,
 			InitialStreams:      32,
@@ -536,11 +540,10 @@ func (c *Config) validatePrediction() error {
 	if pred.HistoryWindow != 0 && pred.HistoryWindow > 24*time.Hour {
 		return &DWCPError{Code: ErrCodeInvalidConfig, Message: "prediction.history_window must be <= 24h"}
 	}
-
-	// Validate confidence level (always validate structure)
-	if pred.ConfidenceLevel != 0.0 && (pred.ConfidenceLevel <= 0.0 || pred.ConfidenceLevel >= 1.0) {
-		return &DWCPError{Code: ErrCodeInvalidConfig, Message: "prediction.confidence_level must be between 0.0 and 1.0"}
-	}
+// Validate confidence level (always validate structure)
+if pred.ConfidenceLevel <= 0.0 || pred.ConfidenceLevel >= 1.0 {
+	return &DWCPError{Code: ErrCodeInvalidConfig, Message: "prediction.confidence_level must be between 0.0 and 1.0"}
+}
 
 	return nil
 }
@@ -587,7 +590,7 @@ func (c *Config) validateConsensus() error {
 	}
 
 	// Validate quorum size (always validate structure)
-	if cons.QuorumSize != 0 && cons.QuorumSize < 1 {
+	if cons.QuorumSize < 1 {
 		return &DWCPError{Code: ErrCodeInvalidConfig, Message: "consensus.quorum_size must be >= 1"}
 	}
 	if cons.QuorumSize > 1000 {

@@ -486,22 +486,22 @@ func (m *Manager) collectMetrics() {
 
 // initializeTransport initializes the AMST transport layer
 func (m *Manager) initializeTransport() error {
-	// TODO: Read transport config from m.config
-	// For now, use defaults with environment-based overrides
+	// Read config without lock - caller (startPhase0Components) holds m.mu.Lock()
+	tc := m.config.Transport
 
 	transportConfig := &transport.TransportConfig{
-		RemoteAddr:          "", // Will be set per-connection
-		ConnectTimeout:      30 * time.Second,
-		MinStreams:          16,
-		MaxStreams:          256,
+		RemoteAddr:          tc.RemoteAddr,
+		ConnectTimeout:      tc.ConnectTimeout,
+		MinStreams:          tc.MinStreams,
+		MaxStreams:          tc.MaxStreams,
 		ChunkSizeKB:         256,
 		AutoTune:            true,
-		PacingEnabled:       true,
-		PacingRate:          1000 * 1024 * 1024, // 1 Gbps
-		EnableRDMA:          false,              // Disabled by default
-		RDMADevice:          "mlx5_0",
-		RDMAPort:            1,
-		CongestionAlgorithm: "bbr",
+		PacingEnabled:       tc.EnablePacing,
+		PacingRate:          tc.PacingRate,
+		EnableRDMA:          tc.EnableRDMA,
+		RDMADevice:          tc.RDMADevice,
+		RDMAPort:            tc.RDMAPort,
+		CongestionAlgorithm: tc.CongestionAlgorithm,
 		EnableRetries:       true,
 		MaxRetries:          3,
 		RetryBackoffMs:      100,

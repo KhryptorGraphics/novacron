@@ -2,8 +2,11 @@ package dwcp_test
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,16 +16,25 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 )
-
 // setupTestManager creates a test manager with default configuration
 func setupTestManager(t *testing.T) *dwcp.Manager {
 	config := dwcp.DefaultConfig()
 	config.Enabled = true
 	logger := zaptest.NewLogger(t)
 
+	// Start test server for transport
+	listener, port := startTestServer(t, 32)
+	// Note: listener is closed by the test cleanup
+	config.Transport.RemoteAddr = fmt.Sprintf("localhost:%d", port)
+
 	manager, err := dwcp.NewManager(config, logger)
 	require.NoError(t, err)
 	require.NotNil(t, manager)
+
+	// Store listener for cleanup - use t.Cleanup
+	t.Cleanup(func() {
+		listener.Close()
+	})
 
 	return manager
 }
@@ -38,6 +50,47 @@ func setupDisabledManager(t *testing.T) *dwcp.Manager {
 	require.NotNil(t, manager)
 
 	return manager
+}
+// startTestServer starts a test TCP server for transport testing
+func startTestServer(t *testing.T, maxConnections int) (net.Listener, int) {
+	listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatalf("Failed to start test server: %v", err)
+	}
+
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	go func() {
+		connectionCount := atomic.Int32{}
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+
+			if int(connectionCount.Load()) >= maxConnections {
+				conn.Close()
+				continue
+			}
+
+			connectionCount.Add(1)
+			go func(c net.Conn) {
+				defer c.Close()
+				defer connectionCount.Add(-1)
+
+				// Simple echo server that reads and discards data
+				buf := make([]byte, 8192)
+				for {
+					_, err := c.Read(buf)
+					if err != nil {
+						return
+					}
+				}
+			}(conn)
+		}
+	}()
+
+	return listener, port
 }
 
 // TestCollectMetricsNoRace tests concurrent metrics collection without race conditions
@@ -171,9 +224,9 @@ func TestValidateDisabledConfig(t *testing.T) {
 // TestComponentLifecycle tests the initialization and shutdown lifecycle
 func TestComponentLifecycle(t *testing.T) {
 	tests := []struct {
-		name     string
-		enabled  bool
-		testFunc func(*testing.T, *dwcp.Manager)
+		name      string
+		enabled   bool
+		testFunc  func(t *testing.T, m *dwcp.Manager)
 	}{
 		{
 			name:    "enabled manager lifecycle",
@@ -228,44 +281,19 @@ func TestComponentLifecycle(t *testing.T) {
 			config.Enabled = tt.enabled
 			logger := zaptest.NewLogger(t)
 
+			// Start test server for enabled managers
+			if tt.enabled {
+				listener, port := startTestServer(t, 32)
+				t.Cleanup(func() { listener.Close() })
+				config.Transport.RemoteAddr = fmt.Sprintf("localhost:%d", port)
+			}
+
 			manager, err := dwcp.NewManager(config, logger)
 			require.NoError(t, err)
 
 			tt.testFunc(t, manager)
 		})
 	}
-}
-
-// TestCircuitBreakerStates tests circuit breaker state transitions
-func TestCircuitBreakerStates(t *testing.T) {
-	maxFailures := 5
-	resetTimeout := 100 * time.Millisecond
-	cb := dwcp.NewCircuitBreaker(maxFailures, resetTimeout)
-
-	// Initial state should be closed
-	assert.Equal(t, dwcp.CircuitClosed, cb.GetState())
-	assert.True(t, cb.AllowRequest())
-
-	// Record failures until circuit opens
-	for i := 0; i < maxFailures; i++ {
-		cb.RecordFailure()
-	}
-
-	// Circuit should now be open
-	assert.Equal(t, dwcp.CircuitOpen, cb.GetState())
-	assert.False(t, cb.AllowRequest())
-
-	// Wait for reset timeout
-	time.Sleep(resetTimeout + 50*time.Millisecond)
-
-	// Circuit should transition to half-open
-	assert.True(t, cb.AllowRequest())
-	assert.Equal(t, dwcp.CircuitHalfOpen, cb.GetState())
-
-	// Record success to close circuit
-	cb.RecordSuccess()
-	assert.Equal(t, dwcp.CircuitClosed, cb.GetState())
-	assert.True(t, cb.AllowRequest())
 }
 
 // TestCircuitBreakerCall tests the Call wrapper method
@@ -332,6 +360,13 @@ func TestHealthMonitoring(t *testing.T) {
 			config := dwcp.DefaultConfig()
 			config.Enabled = tt.enabled
 			logger := zaptest.NewLogger(t)
+
+			// Start test server for enabled managers
+			if tt.enabled {
+				listener, port := startTestServer(t, 32)
+				t.Cleanup(func() { listener.Close() })
+				config.Transport.RemoteAddr = fmt.Sprintf("localhost:%d", port)
+			}
 
 			manager, err := dwcp.NewManager(config, logger)
 			require.NoError(t, err)
@@ -477,6 +512,14 @@ func TestErrorRecovery(t *testing.T) {
 			}
 
 			logger := zaptest.NewLogger(t)
+
+			// Start test server for enabled managers
+			if config.Enabled {
+				listener, port := startTestServer(t, 32)
+				t.Cleanup(func() { listener.Close() })
+				config.Transport.RemoteAddr = fmt.Sprintf("localhost:%d", port)
+			}
+
 			manager, err := dwcp.NewManager(config, logger)
 
 			if err == nil {

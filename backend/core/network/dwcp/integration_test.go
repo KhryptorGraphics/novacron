@@ -316,7 +316,7 @@ func TestPhase0_ConfigurationManagement(t *testing.T) {
 		t.Logf("✅ Correctly caught MaxStreams < MinStreams error: %v", err)
 	}
 
-	// Test 4: Valid custom configuration
+// Test 4: Valid custom configuration
 	customConfig := &dwcp.Config{
 		Enabled: true,
 		Version: dwcp.DWCPVersion,
@@ -327,6 +327,10 @@ func TestPhase0_ConfigurationManagement(t *testing.T) {
 			StreamScalingFactor: 2.0,
 			CongestionAlgorithm: "bbr",
 			ConnectTimeout:      30 * time.Second,
+			ReadTimeout:         60 * time.Second,
+			WriteTimeout:        60 * time.Second,
+			SendBufferSize:      1024 * 1024,    // 1 MB
+			RecvBufferSize:      1024 * 1024,    // 1 MB
 		},
 		Compression: dwcp.CompressionConfig{
 			Enabled:          true,
@@ -335,13 +339,24 @@ func TestPhase0_ConfigurationManagement(t *testing.T) {
 			MaxDeltaChain:    5,
 			BaselineInterval: 10 * time.Minute,
 		},
+		Prediction: dwcp.PredictionConfig{
+			Enabled:           false,
+			ConfidenceLevel:   0.95,
+		},
+		Sync: dwcp.SyncConfig{
+			Enabled:            false,
+		},
+		Consensus: dwcp.ConsensusConfig{
+			Enabled:           false,
+			QuorumSize:        3,
+			ElectionTimeout:   150 * time.Millisecond,
+			HeartbeatInterval: 50 * time.Millisecond,
+		},
 	}
 
 	if err := customConfig.Validate(); err != nil {
 		t.Errorf("Custom config validation failed: %v", err)
 	}
-
-	t.Log("Configuration validation tests passed")
 }
 
 // Helper functions

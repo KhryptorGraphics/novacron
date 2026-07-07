@@ -4,7 +4,25 @@
       "mcp__ruv-swarm",
       "mcp__claude-flow@alpha",
       "mcp__flow-nexus",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(curl -s -o /dev/null -w \"cluster HTTP %{http_code}\\\\n\" --max-time 3 http://192.168.1.64:9090/api/cluster)",
+      "Bash(curl -s -o /dev/null -w \"localhost:8090 HTTP %{http_code}\\\\n\" --max-time 3 http://127.0.0.1:8090/api/cluster)",
+      "Bash(go test *)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(echo \"---EXIT:$?---\")",
+      "Bash(go build *)",
+      "Bash(echo \"---api-server EXIT:$?---\")",
+      "Bash(echo \"---core-orch EXIT:$?---\")",
+      "Bash(echo \"---core-server EXIT:$?---\")",
+      "Bash(echo \"---vm-test EXIT:$?---\")",
+      "Bash(systemctl is-active *)",
+      "Bash(git push *)",
+      "Bash(ps -p 1842095 -o pid,ppid,user,etime,pcpu,pmem,comm,args)",
+      "Bash(ps -o lstart= -p 1842095)",
+      "Bash(echo \"start: $\\(ps -o lstart= -p 1842095 \\)\")",
+      "Bash(ps -eo pid,etime,comm,args)",
+      "Read(//home/kp/novacron-run/harden_vnc/vms/vncclash-vm/**)",
+      "Bash(ps -eo pid,args)"
     ],
     "deny": []
   }

@@ -1,7 +1,6 @@
 package security
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -217,8 +216,8 @@ func RateLimitMiddleware(rateLimiter *RateLimiter) func(http.Handler) http.Handl
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(rateLimitErr.HTTPStatusCode())
 				
-				if err := rateLimitErr.MarshalJSON(); err == nil {
-					w.Write(err)
+				if data, err := rateLimitErr.MarshalJSON(); err == nil {
+					w.Write(data)
 				}
 				return
 			}

@@ -194,21 +194,21 @@ func (h *ComputeAPIHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		Name:        req.Name,
 		Description: req.Description,
 		Type:        compcore.JobType(req.JobType),
-		Priority:    req.Priority,
+		Priority:    compcore.JobPriority(req.Priority),
 		QueueName:   req.QueueName,
 		Command:     req.Command,
 		Environment: req.Environment,
 		Resources: compcore.ResourceRequirements{
 			CPUCores:    req.Resources.CPUCores,
 			MemoryGB:    req.Resources.MemoryGB,
-			DiskGB:      req.Resources.DiskGB,
-			GPUs:        req.Resources.GPUs,
+			StorageGB:   req.Resources.DiskGB,
+			GPUCount:    req.Resources.GPUs,
 			NetworkMbps: req.Resources.NetworkMbps,
 		},
-		Tags:      req.Tags,
-		Timeout:   time.Duration(req.Timeout) * time.Second,
-		CreatedAt: time.Now(),
-		Status:    compcore.JobStatusPending,
+		Tags:        req.Tags,
+		Timeout:     time.Duration(req.Timeout) * time.Second,
+		SubmittedAt: time.Now(),
+		Status:      compcore.JobStatusPending,
 	}
 
 	// Convert constraints
@@ -298,13 +298,13 @@ func (h *ComputeAPIHandler) UpdateJob(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	jobID := vars["id"]
 
-	var updateReq map[string]interface{}
+	var updateReq compcore.ComputeJob
 	if err := json.NewDecoder(r.Body).Decode(&updateReq); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	err := h.jobManager.UpdateJob(h.ctx, jobID, updateReq)
+	err := h.jobManager.UpdateJob(h.ctx, jobID, &updateReq)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to update job: %v", err), http.StatusInternalServerError)
 		return
@@ -853,7 +853,7 @@ func (h *ComputeAPIHandler) AllocateResources(w http.ResponseWriter, r *http.Req
 // Performance and Monitoring Handlers
 
 func (h *ComputeAPIHandler) GetPerformanceMetrics(w http.ResponseWriter, r *http.Request) {
-	metrics, err := h.jobManager.GetPerformanceMetrics(h.ctx)
+	metrics, err := h.jobManager.GetPerformanceMetricsMap(h.ctx)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to get performance metrics: %v", err), http.StatusInternalServerError)
 		return
@@ -910,7 +910,13 @@ func (h *ComputeAPIHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 			}
 			return stats
 		}(),
-		"load_balancer": h.loadBalancer.GetStatistics(),
+		"load_balancer": func() interface{} {
+			stats, err := h.loadBalancer.GetLoadBalancingStats()
+			if err != nil {
+				return map[string]interface{}{"error": err.Error()}
+			}
+			return stats
+		}(),
 		"scheduler": map[string]interface{}{
 			"nodes":       h.scheduler.GetNodesStatus(),
 			"requests":    h.scheduler.GetPendingRequests(),
