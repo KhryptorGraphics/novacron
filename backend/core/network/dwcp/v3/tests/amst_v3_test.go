@@ -1,8 +1,6 @@
 package tests
 
 import (
-	"context"
-	"crypto/rand"
 	"fmt"
 	"sync"
 	"testing"
@@ -16,7 +14,6 @@ import (
 
 // TestAMSTv3HybridTransport tests AMST v3 hybrid transport (TCP + RDMA)
 func TestAMSTv3HybridTransport(t *testing.T) {
-	ctx := context.Background()
 
 	// Enable v3 transport
 	flags := &upgrade.DWCPFeatureFlags{

@@ -111,9 +111,7 @@ func BenchmarkV3InternetMode(b *testing.B) {
 			config := dwcp.HDEConfig{
 				GlobalLevel: 9, // Maximum compression for internet
 				EnableDelta: true,
-				EnableLSTM:  true,
 			}
-
 			hde, err := dwcp.NewHDE(config)
 			require.NoError(b, err)
 			defer hde.Close()
@@ -270,8 +268,7 @@ func BenchmarkCPUUtilization(b *testing.B) {
 		config := dwcp.HDEConfig{
 			GlobalLevel: 3,
 			EnableDelta: true,
-			EnableLSTM:  true,
-		}
+			}
 
 		hde, err := dwcp.NewHDE(config)
 		require.NoError(b, err)

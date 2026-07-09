@@ -7,7 +7,6 @@ import (
 
 	"github.com/khryptorgraphics/novacron/backend/core/network/dwcp/upgrade"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // TestModeSwitching tests datacenter → internet → hybrid mode switching
@@ -15,7 +14,6 @@ func TestModeSwitching(t *testing.T) {
 	upgrade.EnableAll(100)
 	defer upgrade.DisableAll()
 
-	ctx := context.Background()
 
 	t.Run("datacenter_to_internet_switching", func(t *testing.T) {
 		detector := upgrade.NewModeDetector()
