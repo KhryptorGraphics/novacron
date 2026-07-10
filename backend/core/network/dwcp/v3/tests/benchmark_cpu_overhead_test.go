@@ -134,32 +134,44 @@ func BenchmarkCPUOverhead(b *testing.B) {
 		}
 		defer hde.Close()
 
+		// Mixed zero/pattern/random shape, matching generateVMMemoryData's
+		// realistic VM-memory composition elsewhere in this package.
+		// TrainDictionary was fixed this session (novacron-o0e: hde.go was
+		// missing BuildDictOptions.History and a non-zero ID; the
+		// underlying zstd.BuildDict also has a real, separate panic bug
+		// for certain sample shapes — see dictionary_fix_test.go in the
+		// dwcp package — which TrainDictionary now recovers from as a
+		// returned error rather than crashing). This shape is confirmed
+		// via standalone reproduction not to trigger that panic.
 		samples := make([][]byte, 100)
 		for i := range samples {
-			samples[i] = make([]byte, 4096)
-			rand.Read(samples[i])
+			s := make([]byte, 4096)
+			switch i % 3 {
+			case 0:
+				// zero page: leave as-is
+			case 1:
+				for j := range s {
+					s[j] = byte(j % 256)
+				}
+			case 2:
+				rand.Read(s)
+			}
+			samples[i] = s
 		}
 
-		// HDE.TrainDictionary is unconditionally broken, not something a
-		// benchmark-side data change can work around: it calls
-		// zstd.BuildDict with only Contents set, never History (hde.go
-		// builds the concatenated `trainingData` and then never uses it —
-		// evidently meant to be passed as History and the line was
-		// dropped). zstd.BuildDict hard-requires len(History) >= 8 before
-		// touching Contents at all, so this fails for every input with
-		// "dictionary of size 0 < 8". Confirmed by direct reproduction
-		// below. Root-caused and filed as novacron-o0e (also root-causes
-		// the pre-existing quarantined TestHDEv3DictionaryTraining,
-		// hde_v3_test.go:271, t.Skip("...see novacron-v4y")). No exported
-		// API lets a caller supply History, so there is no way to make
-		// this call succeed from this package — matching how Step 5 of
-		// this plan handles MigrationAdapter's receiveMemory/receiveDisk
-		// stubs (novacron-lce): document and skip, don't patch production
-		// code from a benchmark-implementation change.
-		if err := hde.TrainDictionary("vm-type-bench", samples); err == nil {
-			b.Fatal("TrainDictionary unexpectedly succeeded — novacron-o0e may be fixed; remove this b.Skip and restore the real benchmark loop below")
+		b.ReportAllocs()
+		startCPU := cpuTimeNanos()
+		b.ResetTimer()
+
+		for range b.N {
+			if err := hde.TrainDictionary("vm-type-bench", samples); err != nil {
+				b.Fatal(err)
+			}
 		}
-		b.Skip("HDE.TrainDictionary is unconditionally broken (zstd.BuildDict missing required History field) — see novacron-o0e")
+
+		b.StopTimer()
+		endCPU := cpuTimeNanos()
+		b.ReportMetric(float64(endCPU-startCPU)/float64(b.N), "cpu-ns/op")
 	})
 
 	b.Run("amst_transfer_1MB_8streams", func(b *testing.B) {

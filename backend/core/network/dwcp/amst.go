@@ -770,6 +770,31 @@ func (amst *AMST) Close() error {
 	return nil
 }
 
+// singleStreamConn returns the underlying net.Conn of this AMST instance's
+// one active stream. Used by MigrationAdapter to write a small envelope
+// preamble directly on the connection before Transfer/Receive take over —
+// only valid when this AMST was configured for exactly one stream (see
+// NewMigrationAdapter's AMSTConfig override); returns an error otherwise
+// so a future change to that invariant fails loudly instead of silently
+// writing to (or reading the envelope from) the wrong stream.
+func (amst *AMST) singleStreamConn() (net.Conn, error) {
+	amst.mu.RLock()
+	defer amst.mu.RUnlock()
+
+	active := 0
+	var conn net.Conn
+	for _, stream := range amst.streams {
+		if stream.active {
+			active++
+			conn = stream.conn
+		}
+	}
+	if active != 1 {
+		return nil, fmt.Errorf("singleStreamConn requires exactly one active stream, found %d", active)
+	}
+	return conn, nil
+}
+
 // abs returns absolute value of integer
 func abs(x int) int {
 	if x < 0 {

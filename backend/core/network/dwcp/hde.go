@@ -577,10 +577,39 @@ func (hde *HDE) TrainDictionary(id string, samples [][]byte) error {
 		trainingData = append(trainingData, sample...)
 	}
 
-	// Train dictionary using zstd. We mirror the production dictionary trainer
-	// in backend/core/network/dwcp/compression/dictionary_trainer.go.
-	dict, err := zstd.BuildDict(zstd.BuildDictOptions{
+	// Train dictionary using zstd. History seeds the dictionary's reference
+	// window; Contents are the individual samples zstd optimizes entropy
+	// tables against. BuildDict hard-requires len(History) >= 8
+	// (klauspost/compress/zstd/dict.go) — trainingData (the concatenation
+	// of all samples, built above) is exactly what should be passed here.
+	//
+	// ID must be non-zero: BuildDict embeds it verbatim into the output
+	// dictionary bytes, and loadDict (invoked whenever the dictionary is
+	// later parsed for actual use, e.g. via compressWithDict's
+	// zstd.WithEncoderDict) hard-rejects ID 0 with "dictionaries cannot
+	// have ID 0" (klauspost/compress/zstd/dict.go). An all-zero ID would
+	// make TrainDictionary appear to succeed while producing a dictionary
+	// that is permanently unusable. Derived deterministically from id so
+	// the same resource always gets the same dictionary ID.
+	idHash := sha256.Sum256([]byte(id))
+	dictID := binary.BigEndian.Uint32(idHash[:4])
+	if dictID == 0 {
+		dictID = 1
+	}
+	// zstd.BuildDict (klauspost/compress@v1.18.1, and confirmed unfixed in
+	// v1.18.4/v1.18.5) has a real internal bug: it can panic with "integer
+	// divide by zero" (zstd/dict.go buildDictLiterals, avgSize computed
+	// as min(litTotal, ...) can be 0) for certain sample shapes —
+	// confirmed via direct reproduction with small (10x1KB) random
+	// samples and with highly repetitive/patterned samples (smooth byte
+	// ramps, repeated text). Neither input is unreasonable for a real
+	// caller. A third-party library must never be allowed to crash this
+	// process, so the call is isolated and any panic converted to a
+	// returned error.
+	dict, err := buildDictRecoverPanic(zstd.BuildDictOptions{
+		ID:       dictID,
 		Contents: samples,
+		History:  trainingData,
 	})
 	if err != nil {
 		return fmt.Errorf("dictionary training failed: %w", err)
@@ -592,6 +621,25 @@ func (hde *HDE) TrainDictionary(id string, samples [][]byte) error {
 	hde.dictMu.Unlock()
 
 	return nil
+}
+
+// buildDictRecoverPanic calls zstd.BuildDict with panic recovery.
+// zstd.BuildDict (klauspost/compress@v1.18.1 through at least v1.18.5) has
+// a real internal bug: it can panic with "integer divide by zero" for
+// certain sample shapes — confirmed via direct reproduction with small
+// (10x1KB) random samples, highly repetitive/patterned samples, and
+// low-entropy samples (e.g. mostly-zero VM memory pages), all of which
+// are realistic real-world training inputs, not edge cases a caller could
+// reasonably be expected to avoid. A third-party library must never be
+// allowed to crash this process, so the call is isolated here and any
+// panic converted into a returned error.
+func buildDictRecoverPanic(opts zstd.BuildDictOptions) (dict []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("zstd.BuildDict panicked (see klauspost/compress dict.go): %v", r)
+		}
+	}()
+	return zstd.BuildDict(opts)
 }
 
 // quantize applies quantization to reduce precision of numerical data

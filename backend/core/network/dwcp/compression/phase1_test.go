@@ -36,10 +36,29 @@ func TestDeltaEncoder_Phase1_DictionaryTraining(t *testing.T) {
 	stateKey := "vm-memory-001"
 	pattern := []byte("VM_MEMORY_PAGE_DATA_PATTERN_REPEATING_")
 
+	// Mixed zero/pattern/random shape, not a uniform repeating pattern:
+	// confirmed via standalone reproduction that 50 samples of a smooth
+	// repeating text pattern at these dimensions (10KB each) triggers a
+	// real upstream zstd.BuildDict bug ("integer divide by zero" in its
+	// literal-table sizing, klauspost/compress zstd/dict.go, present
+	// through at least v1.18.5). TrainDictionary now recovers from that
+	// panic and returns a clean error rather than crashing the process
+	// (see dictionary_fix_test.go in the parent dwcp package), but this
+	// test exists to prove successful training, so it needs input that
+	// doesn't hit the pathological case. The later testData (below) still
+	// uses the pure repeating pattern deliberately — that goes through
+	// normal Encode/compress, not BuildDict, and is unaffected.
 	for i := 0; i < 50; i++ {
 		data := make([]byte, 10*1024) // 10KB samples
-		for j := 0; j < len(data); j += len(pattern) {
-			copy(data[j:], pattern)
+		switch i % 3 {
+		case 0:
+			// zero page: leave as-is
+		case 1:
+			for j := 0; j < len(data); j += len(pattern) {
+				copy(data[j:], pattern)
+			}
+		case 2:
+			rand.Read(data)
 		}
 
 		// Add sample

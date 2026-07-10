@@ -269,7 +269,6 @@ func TestHDEv3CompressionTargets(t *testing.T) {
 
 // TestHDEv3DictionaryTraining tests dictionary-based compression
 func TestHDEv3DictionaryTraining(t *testing.T) {
-	t.Skip("pre-existing failure, see novacron-v4y")
 	upgrade.EnableAll(100)
 	defer upgrade.DisableAll()
 
@@ -284,14 +283,31 @@ func TestHDEv3DictionaryTraining(t *testing.T) {
 		require.NoError(t, err)
 		defer hde.Close()
 
-		// Create training samples
+		// Create training samples: a realistic zero-page/pattern/random mix
+		// (not a uniform smooth byte ramp) — confirmed via standalone
+		// reproduction that a pure smooth ramp at these dimensions
+		// (10 samples x 10KB) triggers a real upstream zstd.BuildDict bug
+		// ("integer divide by zero" in its literal-table sizing,
+		// klauspost/compress zstd/dict.go, present through at least
+		// v1.18.5) — TrainDictionary now recovers from that panic and
+		// returns a clean error rather than crashing (see
+		// dictionary_fix_test.go), but this test exists to prove
+		// successful training, so it uses input shaped like real VM
+		// memory instead of the pathological pattern.
 		samples := make([][]byte, 10)
 		for i := range samples {
-			samples[i] = make([]byte, 10*1024)
-			// Similar patterns for better dictionary
-			for j := range samples[i] {
-				samples[i][j] = byte((i + j) % 256)
+			s := make([]byte, 10*1024)
+			switch i % 3 {
+			case 0:
+				// zero page: leave as-is
+			case 1:
+				for j := range s {
+					s[j] = byte(j % 256)
+				}
+			case 2:
+				rand.Read(s)
 			}
+			samples[i] = s
 		}
 
 		err = hde.TrainDictionary("test-dict", samples)

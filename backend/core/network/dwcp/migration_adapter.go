@@ -17,22 +17,22 @@ import (
 // High-level API for VM migration service integration
 type MigrationAdapter struct {
 	// Core components
-	amst         *AMST
-	hde          *HDE
-	config       MigrationAdapterConfig
+	amst   *AMST
+	hde    *HDE
+	config MigrationAdapterConfig
 
 	// Connection management
-	connections  map[string]*MigrationConnection
-	connPool     sync.Pool
+	connections map[string]*MigrationConnection
+	connPool    sync.Pool
 
 	// Baseline management
-	vmBaselines  map[string]*VMBaseline
+	vmBaselines map[string]*VMBaseline
 
 	// Performance metrics
-	migrationsCompleted atomic.Int64
-	migrationsFailed    atomic.Int64
+	migrationsCompleted   atomic.Int64
+	migrationsFailed      atomic.Int64
 	totalBytesTransferred atomic.Int64
-	averageSpeedup      atomic.Value // float64
+	averageSpeedup        atomic.Value // float64
 
 	// Synchronization
 	mu     sync.RWMutex
@@ -43,37 +43,98 @@ type MigrationAdapter struct {
 // MigrationAdapterConfig contains configuration for the migration adapter
 type MigrationAdapterConfig struct {
 	// DWCP settings
-	EnableDWCP       bool          // Enable DWCP optimization (default: true)
-	EnableFallback   bool          // Enable fallback to standard TCP (default: true)
+	EnableDWCP     bool // Enable DWCP optimization (default: true)
+	EnableFallback bool // Enable fallback to standard TCP (default: true)
 
 	// AMST configuration
-	AMSTConfig       AMSTConfig
+	AMSTConfig AMSTConfig
 
 	// HDE configuration
-	HDEConfig        HDEConfig
+	HDEConfig HDEConfig
 
 	// Network settings
-	ListenPort       int           // Port for incoming migrations (default: 9876)
+	ListenPort        int           // Port for incoming migrations (default: 9876)
 	ConnectionTimeout time.Duration // Connection timeout (default: 30s)
 
 	// Performance targets
-	TargetSpeedup    float64       // Target speedup over baseline (default: 2.5x)
-	MaxMemoryUsage   int64         // Maximum memory for caching (default: 2GB)
+	TargetSpeedup  float64 // Target speedup over baseline (default: 2.5x)
+	MaxMemoryUsage int64   // Maximum memory for caching (default: 2GB)
 
 	// Monitoring
-	MetricsInterval  time.Duration // Metrics collection interval (default: 10s)
+	MetricsInterval time.Duration // Metrics collection interval (default: 10s)
+
+	// Receive-side hooks. Invoked by receiveMemory/receiveDisk once a
+	// migration has been fully received, reassembled, and (for the DWCP
+	// path) decompressed. Optional: if nil, received data is logged and
+	// counted in metrics but otherwise discarded — this package is a
+	// network transport, not a hypervisor integration; applying received
+	// state to a live VM is the caller's responsibility (see
+	// backend/core/migration/orchestrator_dwcp.go for the intended
+	// caller). data is the fully reconstructed original bytes (already
+	// decompressed for the DWCP path) — never partial, never compressed.
+	OnMemoryReceived func(vmID string, data []byte)
+	OnDiskReceived   func(vmID string, blockID int, data []byte)
+}
+
+// Wire envelope written directly on the raw net.Conn, immediately after
+// connect and before any payload-specific framing, by both the standard
+// and DWCP send paths (migrateMemoryStandard/migrateDiskStandard/
+// MigrateVMMemory/MigrateVMDisk) and read by handleIncomingMigration
+// before dispatch. Format: [protocol:1][vmIDLen:2 big-endian][vmID].
+//
+// Replaces the pre-fix single type byte, which was read unconditionally
+// by handleIncomingMigration but never actually written by ANY sender:
+// migrateMemoryStandard/migrateDiskStandard send an 8-byte size header
+// with no type prefix at all, and the DWCP path (via AMST.Connect+
+// Transfer) never wrote one either — so the receive side has never been
+// able to correctly frame either path (see novacron-lce).
+const (
+	migrateProtoStandardMemory byte = 0
+	migrateProtoStandardDisk   byte = 1
+	migrateProtoDWCPMemory     byte = 2
+	migrateProtoDWCPDisk       byte = 3
+)
+
+// writeMigrateEnvelope writes the protocol+vmID preamble to conn.
+func writeMigrateEnvelope(conn net.Conn, protocol byte, vmID string) error {
+	if len(vmID) > 65535 {
+		return fmt.Errorf("vmID too long for envelope: %d bytes", len(vmID))
+	}
+	buf := make([]byte, 0, 3+len(vmID))
+	buf = append(buf, protocol)
+	buf = binary.BigEndian.AppendUint16(buf, uint16(len(vmID)))
+	buf = append(buf, vmID...)
+	_, err := conn.Write(buf)
+	return err
+}
+
+// readMigrateEnvelope reads the protocol+vmID preamble from conn.
+func readMigrateEnvelope(conn net.Conn) (protocol byte, vmID string, err error) {
+	header := make([]byte, 3)
+	if _, err := io.ReadFull(conn, header); err != nil {
+		return 0, "", fmt.Errorf("failed to read envelope header: %w", err)
+	}
+	protocol = header[0]
+	vmIDLen := binary.BigEndian.Uint16(header[1:3])
+	vmIDBytes := make([]byte, vmIDLen)
+	if vmIDLen > 0 {
+		if _, err := io.ReadFull(conn, vmIDBytes); err != nil {
+			return 0, "", fmt.Errorf("failed to read envelope vmID: %w", err)
+		}
+	}
+	return protocol, string(vmIDBytes), nil
 }
 
 // MigrationConnection represents a DWCP migration connection
 type MigrationConnection struct {
-	ID           string
-	SourceHost   string
-	TargetHost   string
-	AMST         *AMST
-	StartTime    time.Time
-	State        MigrationState
+	ID               string
+	SourceHost       string
+	TargetHost       string
+	AMST             *AMST
+	StartTime        time.Time
+	State            MigrationState
 	BytesTransferred int64
-	mu           sync.Mutex
+	mu               sync.Mutex
 }
 
 // MigrationState represents the state of a migration
@@ -90,11 +151,11 @@ const (
 
 // VMBaseline stores VM state baselines for delta encoding
 type VMBaseline struct {
-	VMID          string
+	VMID           string
 	MemoryBaseline []byte
 	DiskBaselines  map[int][]byte // Block ID to baseline data
-	LastUpdated   time.Time
-	mu            sync.RWMutex
+	LastUpdated    time.Time
+	mu             sync.RWMutex
 }
 
 // NewMigrationAdapter creates a new DWCP migration adapter
@@ -116,14 +177,48 @@ func NewMigrationAdapter(config MigrationAdapterConfig) (*MigrationAdapter, erro
 		config.MetricsInterval = 10 * time.Second
 	}
 
+	// The receive path (receiveMemory/receiveDisk) round-trips through
+	// HDE.Decompress, which cannot correctly reverse everything
+	// HDE.CompressMemory/CompressDisk can produce:
+	//   - EnableDelta: Decompress's isDelta branch returns the raw delta
+	//     bytes as-is, not memory reconstructed against a baseline
+	//     (hde.go Decompress, "For now, return the decompressed delta").
+	//   - EnableDictionary: CompressDisk dict-compresses THEN plain
+	//     zstd-compresses on top (double compression) whenever a trained
+	//     dictionary exists; Decompress only reverses the outer plain
+	//     layer, never the dictionary layer (hde.go CompressDisk).
+	//   - EnableQuantization: quantize() masks off low bits of every byte
+	//     at tier CompressionGlobal — irreversible information loss with
+	//     no dequantize step anywhere in Decompress (hde.go quantize).
+	// All three are forced off here so the receive path is correct by
+	// construction, independent of what a caller passes — see novacron-o0e.
+	config.HDEConfig.EnableDelta = false
+	config.HDEConfig.EnableDictionary = false
+	config.HDEConfig.EnableQuantization = false
+
+	// The receive path correlates one accepted net.Conn to exactly one
+	// migration by relying on AMST using exactly one stream per Transfer
+	// (see the envelope-preamble comment on migrateEnvelope). Multi-stream
+	// receive-side session correlation is real follow-up work, not solved
+	// here — see the "N-stream migration receive" bd issue filed alongside
+	// this fix. MinStreams/MaxStreams must ALL be forced, not just
+	// InitialStreams: NewAMST floors InitialStreams up to MinStreams
+	// (default 4) when MinStreams is unset (amst.go), and EnableAdaptive's
+	// optimize() would otherwise drift streamCount back toward MinStreams
+	// on live traffic (amst.go optimize()).
+	config.AMSTConfig.MinStreams = 1
+	config.AMSTConfig.MaxStreams = 1
+	config.AMSTConfig.InitialStreams = 1
+	config.AMSTConfig.EnableAdaptive = false
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	adapter := &MigrationAdapter{
-		config:       config,
-		connections:  make(map[string]*MigrationConnection),
-		vmBaselines:  make(map[string]*VMBaseline),
-		ctx:          ctx,
-		cancel:       cancel,
+		config:      config,
+		connections: make(map[string]*MigrationConnection),
+		vmBaselines: make(map[string]*VMBaseline),
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 
 	// Initialize average speedup
@@ -167,8 +262,8 @@ func (adapter *MigrationAdapter) MigrateVMMemory(ctx context.Context, vmID strin
 	startTime := time.Now()
 	originalSize := int64(len(memoryData))
 
-	// Get or create connection
-	conn, err := adapter.getOrCreateConnection(ctx, vmID, targetHost)
+	// Create connection (always fresh — see createConnection)
+	conn, err := adapter.createConnection(ctx, vmID, targetHost)
 	if err != nil {
 		if adapter.config.EnableFallback {
 			// Fallback to standard migration
@@ -183,12 +278,32 @@ func (adapter *MigrationAdapter) MigrateVMMemory(ctx context.Context, vmID strin
 	// Compress memory with HDE
 	compressed, err := adapter.hde.CompressMemory(vmID, memoryData, tier)
 	if err != nil {
+		adapter.CleanupConnection(vmID, targetHost)
 		return fmt.Errorf("memory compression failed: %w", err)
 	}
 
 	compressionRatio := float64(originalSize) / float64(len(compressed))
 	fmt.Printf("DWCP: Memory compressed from %d to %d bytes (%.2fx compression)\n",
 		originalSize, len(compressed), compressionRatio)
+
+	// Write the envelope on the connection's single stream immediately
+	// before AMST.Transfer chunk data flows — deliberately AFTER
+	// compression, not before: the receiver's very next read blocks on
+	// the first AMST chunk header, and writing the envelope before a
+	// (potentially long, for large payloads at high compression levels)
+	// CompressMemory call would make the receiver wait out that entire
+	// compression time against its ReadTimeout with nothing having gone
+	// wrong. So the receiver's envelope-read is immediately followed by
+	// data that is already fully ready to send.
+	streamConn, err := conn.AMST.singleStreamConn()
+	if err != nil {
+		adapter.CleanupConnection(vmID, targetHost)
+		return fmt.Errorf("failed to get connection stream: %w", err)
+	}
+	if err := writeMigrateEnvelope(streamConn, migrateProtoDWCPMemory, vmID); err != nil {
+		adapter.CleanupConnection(vmID, targetHost)
+		return fmt.Errorf("failed to send envelope: %w", err)
+	}
 
 	// Transfer using AMST
 	err = conn.AMST.Transfer(ctx, compressed, func(transferred int64) {
@@ -205,6 +320,7 @@ func (adapter *MigrationAdapter) MigrateVMMemory(ctx context.Context, vmID strin
 	if err != nil {
 		conn.State = MigrationStateFailed
 		adapter.migrationsFailed.Add(1)
+		adapter.CleanupConnection(vmID, targetHost)
 		return fmt.Errorf("AMST transfer failed: %w", err)
 	}
 
@@ -225,6 +341,11 @@ func (adapter *MigrationAdapter) MigrateVMMemory(ctx context.Context, vmID strin
 	// Store baseline for future migrations
 	adapter.storeMemoryBaseline(vmID, memoryData)
 
+	// Close and evict this connection: the receive side correlates one
+	// accepted net.Conn to exactly one migration and cannot support a
+	// second Transfer reusing the same connection (see createConnection).
+	adapter.CleanupConnection(vmID, targetHost)
+
 	return nil
 }
 
@@ -240,8 +361,8 @@ func (adapter *MigrationAdapter) MigrateVMDisk(ctx context.Context, vmID string,
 		totalSize += int64(len(block))
 	}
 
-	// Get or create connection
-	conn, err := adapter.getOrCreateConnection(ctx, vmID, targetHost)
+	// Create connection (always fresh — see createConnection)
+	conn, err := adapter.createConnection(ctx, vmID, targetHost)
 	if err != nil {
 		if adapter.config.EnableFallback {
 			return adapter.migrateDiskStandard(ctx, vmID, diskBlocks, targetHost, progressCallback)
@@ -288,6 +409,7 @@ func (adapter *MigrationAdapter) MigrateVMDisk(ctx context.Context, vmID string,
 	// Check for compression errors
 	for err := range errChan {
 		if err != nil {
+			adapter.CleanupConnection(vmID, targetHost)
 			return err
 		}
 	}
@@ -309,6 +431,20 @@ func (adapter *MigrationAdapter) MigrateVMDisk(ctx context.Context, vmID string,
 	fmt.Printf("DWCP: Disk compressed from %d to %d bytes (%.2fx compression)\n",
 		totalSize, len(compressedBlocks), compressionRatio)
 
+	// Write the envelope on the connection's single stream immediately
+	// before AMST.Transfer chunk data flows — deliberately after all
+	// block compression, not before; see the matching comment in
+	// MigrateVMMemory for why.
+	streamConn, err := conn.AMST.singleStreamConn()
+	if err != nil {
+		adapter.CleanupConnection(vmID, targetHost)
+		return fmt.Errorf("failed to get connection stream: %w", err)
+	}
+	if err := writeMigrateEnvelope(streamConn, migrateProtoDWCPDisk, vmID); err != nil {
+		adapter.CleanupConnection(vmID, targetHost)
+		return fmt.Errorf("failed to send envelope: %w", err)
+	}
+
 	// Transfer using AMST
 	transferred := atomic.Int64{}
 	err = conn.AMST.Transfer(ctx, compressedBlocks, func(bytes int64) {
@@ -325,6 +461,7 @@ func (adapter *MigrationAdapter) MigrateVMDisk(ctx context.Context, vmID string,
 	if err != nil {
 		conn.State = MigrationStateFailed
 		adapter.migrationsFailed.Add(1)
+		adapter.CleanupConnection(vmID, targetHost)
 		return fmt.Errorf("disk transfer failed: %w", err)
 	}
 
@@ -345,20 +482,29 @@ func (adapter *MigrationAdapter) MigrateVMDisk(ctx context.Context, vmID string,
 	// Store baselines for future migrations
 	adapter.storeDiskBaselines(vmID, diskBlocks)
 
+	// Close and evict this connection — see the matching comment in
+	// MigrateVMMemory.
+	adapter.CleanupConnection(vmID, targetHost)
+
 	return nil
 }
 
-// getOrCreateConnection gets an existing connection or creates a new one
-func (adapter *MigrationAdapter) getOrCreateConnection(ctx context.Context, vmID string, targetHost string) (*MigrationConnection, error) {
+// createConnection always creates and connects a fresh MigrationConnection.
+// Renamed from getOrCreateConnection: this package no longer reuses a
+// cached connection across multiple migrations. AMST.Connect/Transfer's
+// wire format carries no session or migration identifier (see the
+// migrateEnvelope comment above), so the receive side (handleIncomingMigration)
+// can only correctly correlate one accepted net.Conn to exactly one
+// migration when the sender establishes exactly one fresh connection per
+// migration and MigrateVMMemory/MigrateVMDisk close it via
+// CleanupConnection immediately after Transfer succeeds — see
+// NewMigrationAdapter's single-stream AMSTConfig override for the other
+// half of this invariant.
+func (adapter *MigrationAdapter) createConnection(ctx context.Context, vmID string, targetHost string) (*MigrationConnection, error) {
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
 
 	connID := fmt.Sprintf("%s-%s", vmID, targetHost)
-
-	// Check for existing connection
-	if conn, exists := adapter.connections[connID]; exists && conn.State != MigrationStateFailed {
-		return conn, nil
-	}
 
 	// Create new connection
 	conn := adapter.connPool.Get().(*MigrationConnection)
@@ -369,7 +515,8 @@ func (adapter *MigrationAdapter) getOrCreateConnection(ctx context.Context, vmID
 	conn.State = MigrationStateConnecting
 	conn.BytesTransferred = 0
 
-	// Create new AMST instance for this connection
+	// Create new AMST instance for this connection. adapter.config.AMSTConfig
+	// was forced to exactly one stream in NewMigrationAdapter.
 	amst, err := NewAMST(adapter.config.AMSTConfig)
 	if err != nil {
 		adapter.connPool.Put(conn)
@@ -387,7 +534,9 @@ func (adapter *MigrationAdapter) getOrCreateConnection(ctx context.Context, vmID
 	conn.AMST = amst
 	conn.State = MigrationStateTransferring
 
-	// Store connection
+	// Store connection (briefly, for the in-flight migration's metrics/
+	// cleanup visibility — MigrateVMMemory/MigrateVMDisk remove it via
+	// CleanupConnection right after Transfer succeeds).
 	adapter.connections[connID] = conn
 
 	return conn, nil
@@ -460,6 +609,10 @@ func (adapter *MigrationAdapter) migrateMemoryStandard(ctx context.Context, vmID
 	}
 	defer conn.Close()
 
+	if err := writeMigrateEnvelope(conn, migrateProtoStandardMemory, vmID); err != nil {
+		return fmt.Errorf("failed to send envelope: %w", err)
+	}
+
 	// Send data size
 	header := make([]byte, 8)
 	binary.BigEndian.PutUint64(header, uint64(len(memoryData)))
@@ -500,6 +653,10 @@ func (adapter *MigrationAdapter) migrateDiskStandard(ctx context.Context, vmID s
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 	defer conn.Close()
+
+	if err := writeMigrateEnvelope(conn, migrateProtoStandardDisk, vmID); err != nil {
+		return fmt.Errorf("failed to send envelope: %w", err)
+	}
 
 	totalSize := int64(0)
 	for _, block := range diskBlocks {
@@ -715,38 +872,307 @@ func (adapter *MigrationAdapter) ListenForMigrations(ctx context.Context) error 
 			continue
 		}
 
-		go adapter.handleIncomingMigration(conn)
+		go adapter.handleIncomingMigration(ctx, conn)
 	}
 }
 
-// handleIncomingMigration handles an incoming migration connection
-func (adapter *MigrationAdapter) handleIncomingMigration(conn net.Conn) {
+// handleIncomingMigration handles an incoming migration connection. Reads
+// the wire envelope (see writeMigrateEnvelope) to determine which of the
+// four send paths (standard/DWCP x memory/disk) wrote this connection,
+// then dispatches to the matching receive function.
+func (adapter *MigrationAdapter) handleIncomingMigration(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 
-	// Read migration type
-	typeBuf := make([]byte, 1)
-	if _, err := io.ReadFull(conn, typeBuf); err != nil {
+	// Bound the envelope read so a connection that never sends one (or a
+	// dead/stalled sender) cannot leak this goroutine forever.
+	if adapter.config.ConnectionTimeout > 0 {
+		conn.SetReadDeadline(time.Now().Add(adapter.config.ConnectionTimeout))
+	}
+	protocol, vmID, err := readMigrateEnvelope(conn)
+	conn.SetReadDeadline(time.Time{})
+	if err != nil {
+		fmt.Printf("DWCP: failed to read migration envelope: %v\n", err)
 		return
 	}
 
-	switch typeBuf[0] {
-	case 0: // Memory migration
-		adapter.receiveMemory(conn)
-	case 1: // Disk migration
-		adapter.receiveDisk(conn)
+	switch protocol {
+	case migrateProtoStandardMemory:
+		adapter.receiveMemoryStandard(conn, vmID)
+	case migrateProtoStandardDisk:
+		adapter.receiveDiskStandard(conn, vmID)
+	case migrateProtoDWCPMemory:
+		adapter.receiveMemoryDWCP(ctx, conn, vmID)
+	case migrateProtoDWCPDisk:
+		adapter.receiveDiskDWCP(ctx, conn, vmID)
 	default:
-		fmt.Printf("Unknown migration type: %d\n", typeBuf[0])
+		fmt.Printf("DWCP: unknown migration protocol byte: %d\n", protocol)
 	}
 }
 
-// receiveMemory receives memory data from a migration
-func (adapter *MigrationAdapter) receiveMemory(conn net.Conn) {
-	// Implementation would receive and decompress memory data
-	// This is a placeholder for the actual implementation
+// receiveMemoryStandard receives memory sent by migrateMemoryStandard:
+// an 8-byte big-endian size header followed by that many raw bytes.
+func (adapter *MigrationAdapter) receiveMemoryStandard(conn net.Conn, vmID string) {
+	data, err := readSizePrefixedPayload(conn, adapter.config.ConnectionTimeout, adapter.config.MaxMemoryUsage)
+	if err != nil {
+		adapter.migrationsFailed.Add(1)
+		fmt.Printf("DWCP: standard memory receive failed for vmID %s: %v\n", vmID, err)
+		return
+	}
+	adapter.migrationsCompleted.Add(1)
+	adapter.totalBytesTransferred.Add(int64(len(data)))
+	if adapter.config.OnMemoryReceived != nil {
+		adapter.config.OnMemoryReceived(vmID, data)
+		return
+	}
+	fmt.Printf("DWCP: received %d bytes of standard memory for vmID %s (no OnMemoryReceived callback configured)\n", len(data), vmID)
 }
 
-// receiveDisk receives disk data from a migration
-func (adapter *MigrationAdapter) receiveDisk(conn net.Conn) {
-	// Implementation would receive and decompress disk data
-	// This is a placeholder for the actual implementation
+// receiveDiskStandard receives disk blocks sent by migrateDiskStandard:
+// an 8-byte total-data-size header, then repeated
+// [blockID:4][blockLen:4]+data until that many data bytes are read.
+func (adapter *MigrationAdapter) receiveDiskStandard(conn net.Conn, vmID string) {
+	blocks, err := readSizePrefixedDiskBlocks(conn, adapter.config.ConnectionTimeout, adapter.config.MaxMemoryUsage)
+	if err != nil {
+		adapter.migrationsFailed.Add(1)
+		fmt.Printf("DWCP: standard disk receive failed for vmID %s: %v\n", vmID, err)
+		return
+	}
+	totalBytes := int64(0)
+	for blockID, data := range blocks {
+		totalBytes += int64(len(data))
+		if adapter.config.OnDiskReceived != nil {
+			adapter.config.OnDiskReceived(vmID, blockID, data)
+		}
+	}
+	adapter.migrationsCompleted.Add(1)
+	adapter.totalBytesTransferred.Add(totalBytes)
+	if adapter.config.OnDiskReceived == nil {
+		fmt.Printf("DWCP: received %d standard disk blocks (%d bytes) for vmID %s (no OnDiskReceived callback configured)\n", len(blocks), totalBytes, vmID)
+	}
+}
+
+// receiveMemoryDWCP receives memory sent by MigrateVMMemory: AMST-framed,
+// HDE-compressed bytes on the connection's single stream.
+func (adapter *MigrationAdapter) receiveMemoryDWCP(ctx context.Context, conn net.Conn, vmID string) {
+	if adapter.hde == nil {
+		fmt.Printf("DWCP: received DWCP memory migration for vmID %s but HDE is not initialized\n", vmID)
+		return
+	}
+	compressed, err := receiveViaSingleStreamAMST(ctx, conn, adapter.config.ConnectionTimeout)
+	if err != nil {
+		adapter.migrationsFailed.Add(1)
+		fmt.Printf("DWCP: memory AMST receive failed for vmID %s: %v\n", vmID, err)
+		return
+	}
+	data, err := adapter.hdeDecompressChecked(compressed, "memory", vmID)
+	if err != nil {
+		adapter.migrationsFailed.Add(1)
+		fmt.Printf("DWCP: %v\n", err)
+		return
+	}
+	adapter.migrationsCompleted.Add(1)
+	adapter.totalBytesTransferred.Add(int64(len(data)))
+	if adapter.config.OnMemoryReceived != nil {
+		adapter.config.OnMemoryReceived(vmID, data)
+		return
+	}
+	fmt.Printf("DWCP: received %d bytes of DWCP memory for vmID %s (no OnMemoryReceived callback configured)\n", len(data), vmID)
+}
+
+// receiveDiskDWCP receives disk blocks sent by MigrateVMDisk: AMST-framed
+// bytes on the connection's single stream, reassembling into the
+// [blockID:4][blockLen:4]+HDE-compressed-data layout MigrateVMDisk wrote.
+func (adapter *MigrationAdapter) receiveDiskDWCP(ctx context.Context, conn net.Conn, vmID string) {
+	if adapter.hde == nil {
+		fmt.Printf("DWCP: received DWCP disk migration for vmID %s but HDE is not initialized\n", vmID)
+		return
+	}
+	compressedBlocks, err := receiveViaSingleStreamAMST(ctx, conn, adapter.config.ConnectionTimeout)
+	if err != nil {
+		adapter.migrationsFailed.Add(1)
+		fmt.Printf("DWCP: disk AMST receive failed for vmID %s: %v\n", vmID, err)
+		return
+	}
+
+	totalBytes := int64(0)
+	blockCount := 0
+	offset := 0
+	for offset < len(compressedBlocks) {
+		if offset+8 > len(compressedBlocks) {
+			adapter.migrationsFailed.Add(1)
+			fmt.Printf("DWCP: disk receive for vmID %s: truncated block header at offset %d\n", vmID, offset)
+			return
+		}
+		blockID := int(binary.BigEndian.Uint32(compressedBlocks[offset : offset+4]))
+		blockLen := int(binary.BigEndian.Uint32(compressedBlocks[offset+4 : offset+8]))
+		offset += 8
+		if blockLen < 0 || offset+blockLen > len(compressedBlocks) {
+			adapter.migrationsFailed.Add(1)
+			fmt.Printf("DWCP: disk receive for vmID %s: truncated block %d data\n", vmID, blockID)
+			return
+		}
+		compressedBlockData := compressedBlocks[offset : offset+blockLen]
+		offset += blockLen
+
+		blockData, err := adapter.hdeDecompressChecked(compressedBlockData, fmt.Sprintf("disk block %d", blockID), vmID)
+		if err != nil {
+			adapter.migrationsFailed.Add(1)
+			fmt.Printf("DWCP: %v\n", err)
+			return
+		}
+		totalBytes += int64(len(blockData))
+		blockCount++
+		if adapter.config.OnDiskReceived != nil {
+			adapter.config.OnDiskReceived(vmID, blockID, blockData)
+		}
+	}
+
+	adapter.migrationsCompleted.Add(1)
+	adapter.totalBytesTransferred.Add(totalBytes)
+	if adapter.config.OnDiskReceived == nil {
+		fmt.Printf("DWCP: received %d DWCP disk blocks (%d bytes) for vmID %s (no OnDiskReceived callback configured)\n", blockCount, totalBytes, vmID)
+	}
+}
+
+// hdeDecompressChecked decompresses a received HDE packet, refusing
+// delta-encoded packets rather than silently returning a corrupt
+// reconstruction. EnableDelta is forced off for adapter.hde
+// (NewMigrationAdapter), so no sender using this adapter's own
+// CompressMemory/CompressDisk should ever produce packet[0]==1 — this is
+// defense in depth for if that invariant is ever violated, since
+// HDE.Decompress's isDelta branch returns the raw delta bytes as-is, not
+// memory reconstructed against a baseline (see hde.go Decompress).
+func (adapter *MigrationAdapter) hdeDecompressChecked(compressed []byte, what, vmID string) ([]byte, error) {
+	if len(compressed) > 0 && compressed[0] == 1 {
+		return nil, fmt.Errorf("refusing to decompress delta-encoded %s for vmID %s (delta is disabled for this adapter's HDE)", what, vmID)
+	}
+	data, err := adapter.hde.Decompress(compressed)
+	if err != nil {
+		return nil, fmt.Errorf("%s decompress failed for vmID %s: %w", what, vmID, err)
+	}
+	return data, nil
+}
+
+// stallReadChunkSize bounds each individual read in readFullChunked, so a
+// read-deadline refresh (see readFullChunked) happens often enough to
+// detect a stalled peer without capping total transfer duration.
+const stallReadChunkSize = 64 * 1024
+
+// readFullChunked reads exactly len(buf) bytes from conn in
+// stallReadChunkSize pieces, refreshing conn's read deadline before each
+// piece instead of setting one deadline for the whole read. This makes
+// readTimeout a stall-detection window (max time between chunks of
+// forward progress) rather than a cap on total transfer duration — a
+// single deadline set once before a multi-GB io.ReadFull would make
+// ConnectionTimeout (default 30s) a hard ceiling on total standard-path
+// transfer time regardless of how much data is actively flowing, timing
+// out large payloads on slower-but-healthy links. Matches the model
+// AMST.Receive already uses per chunk. readTimeout <= 0 disables the
+// deadline entirely.
+func readFullChunked(conn net.Conn, buf []byte, readTimeout time.Duration) error {
+	for offset := 0; offset < len(buf); offset += stallReadChunkSize {
+		end := offset + stallReadChunkSize
+		if end > len(buf) {
+			end = len(buf)
+		}
+		if readTimeout > 0 {
+			conn.SetReadDeadline(time.Now().Add(readTimeout))
+		}
+		if _, err := io.ReadFull(conn, buf[offset:end]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// readSizePrefixedPayload reads the wire format migrateMemoryStandard
+// writes: an 8-byte big-endian size header, then that many raw bytes.
+// readTimeout is a stall-detection window, refreshed before every
+// stallReadChunkSize piece (see readFullChunked) — not a cap on total
+// transfer time. maxSize caps the wire-supplied size before allocating —
+// an unbounded make([]byte, size) driven directly by an 8-byte header on
+// the wire would let a garbage or hostile size value attempt a multi-GB
+// allocation and crash the process.
+func readSizePrefixedPayload(conn net.Conn, readTimeout time.Duration, maxSize int64) ([]byte, error) {
+	header := make([]byte, 8)
+	if err := readFullChunked(conn, header, readTimeout); err != nil {
+		return nil, fmt.Errorf("failed to read size header: %w", err)
+	}
+	size := binary.BigEndian.Uint64(header)
+	if maxSize > 0 && size > uint64(maxSize) {
+		return nil, fmt.Errorf("payload size %d exceeds maximum %d", size, maxSize)
+	}
+	data := make([]byte, size)
+	if err := readFullChunked(conn, data, readTimeout); err != nil {
+		return nil, fmt.Errorf("failed to read %d-byte payload: %w", size, err)
+	}
+	return data, nil
+}
+
+// readSizePrefixedDiskBlocks reads the wire format migrateDiskStandard
+// writes: an 8-byte total-data-size header (sum of block data lengths,
+// excluding per-block headers), then repeated
+// [blockID:4][blockLen:4]+data until that many data bytes are read.
+// readTimeout/maxSize as in readSizePrefixedPayload — maxSize bounds
+// both the total and any single block's size.
+func readSizePrefixedDiskBlocks(conn net.Conn, readTimeout time.Duration, maxSize int64) (map[int][]byte, error) {
+	header := make([]byte, 8)
+	if err := readFullChunked(conn, header, readTimeout); err != nil {
+		return nil, fmt.Errorf("failed to read total-size header: %w", err)
+	}
+	totalSize := binary.BigEndian.Uint64(header)
+	if maxSize > 0 && totalSize > uint64(maxSize) {
+		return nil, fmt.Errorf("total disk size %d exceeds maximum %d", totalSize, maxSize)
+	}
+
+	blocks := make(map[int][]byte)
+	var received uint64
+	for received < totalSize {
+		blockHeader := make([]byte, 8)
+		if err := readFullChunked(conn, blockHeader, readTimeout); err != nil {
+			return nil, fmt.Errorf("failed to read block header: %w", err)
+		}
+		blockID := int(binary.BigEndian.Uint32(blockHeader[0:4]))
+		blockLen := binary.BigEndian.Uint32(blockHeader[4:8])
+		if maxSize > 0 && uint64(blockLen) > uint64(maxSize) {
+			return nil, fmt.Errorf("block %d size %d exceeds maximum %d", blockID, blockLen, maxSize)
+		}
+		blockData := make([]byte, blockLen)
+		if err := readFullChunked(conn, blockData, readTimeout); err != nil {
+			return nil, fmt.Errorf("failed to read block %d data: %w", blockID, err)
+		}
+		blocks[blockID] = blockData
+		received += uint64(blockLen)
+	}
+	return blocks, nil
+}
+
+// receiveViaSingleStreamAMST reconstructs a Transfer payload from conn by
+// registering it as the sole stream of a throwaway, receive-only AMST
+// instance. Only valid for a single-stream sender (see
+// NewMigrationAdapter's AMSTConfig override) — with exactly one stream,
+// AMST.Receive's per-stream completion check (totalReceived >= totalSize)
+// fires on that same stream's own last chunk read, so there is no other
+// stream left blocking on a header that will never arrive. readTimeout,
+// when positive, bounds how long a single header/chunk read may block,
+// so a stalled or misbehaving sender cannot hang this goroutine forever.
+func receiveViaSingleStreamAMST(ctx context.Context, conn net.Conn, readTimeout time.Duration) ([]byte, error) {
+	amst, err := NewAMST(AMSTConfig{MinStreams: 1, MaxStreams: 1, InitialStreams: 1, ReadTimeout: readTimeout})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create receive-side AMST: %w", err)
+	}
+	defer amst.Close()
+
+	amst.mu.Lock()
+	amst.streams = append(amst.streams, &Stream{
+		id:         "recv-0",
+		conn:       conn,
+		amst:       amst,
+		active:     true,
+		lastActive: time.Now(),
+	})
+	amst.activeStreams.Add(1)
+	amst.mu.Unlock()
+
+	return amst.Receive(ctx, nil)
 }

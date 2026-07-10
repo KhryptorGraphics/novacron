@@ -1,6 +1,8 @@
 package compression
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -45,12 +47,12 @@ type TrainedDictionary struct {
 
 // DictionaryTrainingConfig configuration for dictionary training
 type DictionaryTrainingConfig struct {
-	Enabled         bool          `json:"enabled" yaml:"enabled"`
-	UpdateInterval  time.Duration `json:"update_interval" yaml:"update_interval"`
-	MaxSamples      int           `json:"max_samples" yaml:"max_samples"`
-	MinSampleSize   int           `json:"min_sample_size" yaml:"min_sample_size"`
-	MaxDictSize     int           `json:"max_dict_size" yaml:"max_dict_size"`
-	StoragePath     string        `json:"storage_path" yaml:"storage_path"`
+	Enabled        bool          `json:"enabled" yaml:"enabled"`
+	UpdateInterval time.Duration `json:"update_interval" yaml:"update_interval"`
+	MaxSamples     int           `json:"max_samples" yaml:"max_samples"`
+	MinSampleSize  int           `json:"min_sample_size" yaml:"min_sample_size"`
+	MaxDictSize    int           `json:"max_dict_size" yaml:"max_dict_size"`
+	StoragePath    string        `json:"storage_path" yaml:"storage_path"`
 }
 
 // DefaultDictionaryTrainingConfig returns sensible defaults
@@ -146,9 +148,41 @@ func (dt *DictionaryTrainer) TrainDictionary(resourceType string) error {
 		zap.String("resource_type", resourceType),
 		zap.Int("sample_count", len(samples)))
 
-	// Train dictionary using Zstandard
-	dict, err := zstd.BuildDict(zstd.BuildDictOptions{
+	// Train dictionary using Zstandard. History seeds the dictionary's
+	// reference window; BuildDict hard-requires len(History) >= 8
+	// (klauspost/compress/zstd/dict.go). Concatenate all samples to build
+	// it — mirrors HDE.TrainDictionary's trainingData in ../hde.go.
+	var totalSize int
+	for _, sample := range samples {
+		totalSize += len(sample)
+	}
+	history := make([]byte, 0, totalSize)
+	for _, sample := range samples {
+		history = append(history, sample...)
+	}
+
+	// ID must be non-zero: BuildDict embeds it verbatim into the output
+	// dictionary bytes, and loadDict (invoked whenever the dictionary is
+	// later parsed for actual use) hard-rejects ID 0 with "dictionaries
+	// cannot have ID 0" (klauspost/compress/zstd/dict.go). Derived
+	// deterministically from resourceType so the same resource always
+	// gets the same dictionary ID — mirrors HDE.TrainDictionary.
+	idHash := sha256.Sum256([]byte(resourceType))
+	dictID := binary.BigEndian.Uint32(idHash[:4])
+	if dictID == 0 {
+		dictID = 1
+	}
+	// zstd.BuildDict (klauspost/compress@v1.18.1 through at least
+	// v1.18.5) has a real internal bug: it can panic with "integer
+	// divide by zero" for certain sample shapes (small sample sets,
+	// repetitive/patterned data, low-entropy data) — all realistic real
+	// -world training inputs, not edge cases a caller could reasonably
+	// avoid. A third-party library must never crash this process, so the
+	// call is isolated and any panic converted to a returned error.
+	dict, err := buildDictRecoverPanic(zstd.BuildDictOptions{
+		ID:       dictID,
 		Contents: samples,
+		History:  history,
 	})
 
 	if err != nil {
@@ -179,6 +213,17 @@ func (dt *DictionaryTrainer) TrainDictionary(resourceType string) error {
 		zap.Int("samples", len(samples)))
 
 	return nil
+}
+
+// buildDictRecoverPanic calls zstd.BuildDict with panic recovery. See the
+// TrainDictionary comment above this call site for why this is necessary.
+func buildDictRecoverPanic(opts zstd.BuildDictOptions) (dict []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("zstd.BuildDict panicked (see klauspost/compress dict.go): %v", r)
+		}
+	}()
+	return zstd.BuildDict(opts)
 }
 
 // GetDictionary retrieves a trained dictionary for a resource type

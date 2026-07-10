@@ -106,3 +106,12 @@ bin/
 /agentdb.rvf
 /agentdb.rvf.lock
 database/database
+# DictionaryTrainer's default StoragePath ("./compression/dictionaries")
+# is relative and not test-isolated (DeltaEncodingConfig has no way to
+# override it — NewDeltaEncoder always calls
+# DefaultDictionaryTrainingConfig()); go test's CWD-per-package resolves
+# this under backend/core/network/dwcp/compression/, and any test that
+# successfully trains a dictionary persists real .dict.json files there.
+# See novacron-hpa notes for the tracked follow-up.
+backend/core/network/dwcp/compression/compression/
+backend/core/network/dwcp/**/dictionaries/*.dict.json
