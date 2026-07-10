@@ -68,12 +68,20 @@ func transferOverLoopback(b *testing.B, payload []byte, streams int) {
 // BenchmarkMigrationPipelinePrimitives measures the real HDE.CompressMemory +
 // real AMST.Transfer PRIMITIVES a VM migration would use, compressed vs
 // uncompressed, over the identical real transfer path. This deliberately
-// does NOT exercise production MigrationAdapter.MigrateVMMemory end-to-end:
-// MigrationAdapter.receiveMemory/receiveDisk (migration_adapter.go:743-752)
-// are empty stubs, so there is no functional receive path to benchmark
-// against — see the Step 5 follow-up issue. This number is real for the
-// compress+transfer primitives; it is NOT a measurement of production
-// migration time, and must not be reported as one.
+// does NOT exercise production MigrationAdapter.MigrateVMMemory end-to-end
+// against a real accept-side listener — it composes the primitives
+// directly into the same draining sink the AMST bandwidth benchmark uses.
+// MigrationAdapter.receiveMemory/receiveDisk (migration_adapter.go) are
+// now fully implemented and verified separately with real loopback-TCP
+// round-trip tests (migration_adapter_roundtrip_test.go, novacron-lce) —
+// this benchmark predates that fix and was never updated to route
+// through it, since MigrationAdapter's real receive path forces
+// EnableDelta/EnableDictionary/EnableQuantization off and single-stream
+// AMST (see NewMigrationAdapter), which would change what these specific
+// primitives measure. This number is real for the compress+transfer
+// primitives against a plain drain sink; it is NOT a measurement of
+// production MigrationAdapter end-to-end migration time, and must not be
+// reported as one.
 func BenchmarkMigrationPipelinePrimitives(b *testing.B) {
 	vmSizes := []int{16 * 1024 * 1024, 64 * 1024 * 1024, 256 * 1024 * 1024}
 

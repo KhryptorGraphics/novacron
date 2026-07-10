@@ -255,9 +255,21 @@ func (hde *HDE) CompressMemory(vmID string, memoryData []byte, tier CompressionL
 		hde.createBaseline(vmID+"_memory", memoryData)
 	}
 
-	// Choose data to compress
+	// Choose data to compress. usedDelta tracks whether deltaEncoded was
+	// actually selected below, NOT merely whether one was computed — a
+	// delta can exist (deltaEncoded != nil) but be rejected for being too
+	// large (>= half of memoryData) and never used. createPacket's isDelta
+	// flag MUST follow usedDelta, not "deltaEncoded != nil": a prior
+	// version passed `deltaEncoded != nil` directly to createPacket, so a
+	// packet whose payload was actually the full (non-delta) data could
+	// still be marked isDelta=true whenever a delta had been computed but
+	// rejected — a latent packet/payload mismatch that would corrupt any
+	// future delta-aware Decompress. Confirmed unreachable for
+	// MigrationAdapter today (EnableDelta forced off, NewMigrationAdapter)
+	// but is real for any other EnableDelta caller.
 	dataToCompress := memoryData
-	if deltaEncoded != nil && len(deltaEncoded) < len(memoryData)/2 {
+	usedDelta := deltaEncoded != nil && len(deltaEncoded) < len(memoryData)/2
+	if usedDelta {
 		// Use delta if it's significantly smaller
 		dataToCompress = deltaEncoded
 	} else {
@@ -280,7 +292,7 @@ func (hde *HDE) CompressMemory(vmID string, memoryData []byte, tier CompressionL
 	hde.updateCompressionRatio()
 
 	// Create packet with metadata
-	packet := hde.createPacket(compressed, deltaEncoded != nil, tier)
+	packet := hde.createPacket(compressed, usedDelta, tier)
 
 	return packet, nil
 }
@@ -316,9 +328,13 @@ func (hde *HDE) CompressDisk(vmID string, diskData []byte, blockID int, tier Com
 		hde.createBaseline(baselineKey, diskData)
 	}
 
-	// Choose data to compress
+	// Choose data to compress. usedDelta tracks whether deltaEncoded was
+	// actually selected, not merely computed — see the matching comment
+	// in CompressMemory for why createPacket must follow this, not
+	// "deltaEncoded != nil" directly.
 	dataToCompress := diskData
-	if deltaEncoded != nil && len(deltaEncoded) < len(diskData)/2 {
+	usedDelta := deltaEncoded != nil && len(deltaEncoded) < len(diskData)/2
+	if usedDelta {
 		dataToCompress = deltaEncoded
 	} else {
 		hde.updateDeltaHitRate(false)
@@ -347,7 +363,7 @@ func (hde *HDE) CompressDisk(vmID string, diskData []byte, blockID int, tier Com
 	hde.updateCompressionRatio()
 
 	// Create packet with metadata
-	packet := hde.createPacket(compressed, deltaEncoded != nil, tier)
+	packet := hde.createPacket(compressed, usedDelta, tier)
 
 	return packet, nil
 }
