@@ -35,7 +35,7 @@ type receivedDiskBlock struct {
 // receiver (self-loopback: MigrateVMMemory/MigrateVMDisk target the
 // adapter's own ListenPort on 127.0.0.1) — a valid, minimal topology for
 // proving the wire protocol round-trips correctly end to end.
-func newLoopbackMigrationAdapter(t *testing.T, enableDWCP bool) (adapter *dwcp.MigrationAdapter, memCh chan receivedMemory, diskCh chan receivedDiskBlock) {
+func newLoopbackMigrationAdapter(t testing.TB, enableDWCP bool) (adapter *dwcp.MigrationAdapter, memCh chan receivedMemory, diskCh chan receivedDiskBlock) {
 	t.Helper()
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -88,7 +88,7 @@ func newLoopbackMigrationAdapter(t *testing.T, enableDWCP bool) (adapter *dwcp.M
 	return adapter, memCh, diskCh
 }
 
-func waitForMemory(t *testing.T, ch chan receivedMemory, timeout time.Duration) receivedMemory {
+func waitForMemory(t testing.TB, ch chan receivedMemory, timeout time.Duration) receivedMemory {
 	t.Helper()
 	select {
 	case m := <-ch:
@@ -99,7 +99,7 @@ func waitForMemory(t *testing.T, ch chan receivedMemory, timeout time.Duration) 
 	}
 }
 
-func waitForDiskBlocks(t *testing.T, ch chan receivedDiskBlock, count int, timeout time.Duration) map[int]receivedDiskBlock {
+func waitForDiskBlocks(t testing.TB, ch chan receivedDiskBlock, count int, timeout time.Duration) map[int]receivedDiskBlock {
 	t.Helper()
 	blocks := make(map[int]receivedDiskBlock, count)
 	deadline := time.After(timeout)
