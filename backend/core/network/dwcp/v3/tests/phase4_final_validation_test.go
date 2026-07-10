@@ -12,7 +12,7 @@ import (
 
 // TestPhase4_FinalIntegrationValidation validates all Phase 1-3 implementations
 func TestPhase4_FinalIntegrationValidation(t *testing.T) {
-	t.Skip("pre-existing failure (HDE_Validation: 1.9x vs required 2.0x compression ratio), see novacron-v4y")
+	t.Skip("Phase2/Phase3/End_To_End subtests below are simulation-only (simulate*/predict*/adapt*/detect*/select* stub helpers never call real DWCP components, see novacron-v4y) - not validated. HDE_Validation was extracted to phase4_hde_validation_test.go:TestPhase4_HDE_Validation_Real after simulateCompression was found to be a hardcoded ratio:=1.0+level*0.3 formula that ignores its data argument entirely, making the old '1.9x vs 2.0x' failure meaningless (not a real compression measurement).")
 
 	t.Run("Phase2_ComponentValidation", func(t *testing.T) {
 		// Test AMST (Adaptive Multi-Stream Transport)
@@ -57,51 +57,6 @@ func TestPhase4_FinalIntegrationValidation(t *testing.T) {
 
 			// Validation criteria: > 100 MB/s with 16 streams
 			assert.Greater(t, throughputMBps, 100.0, "AMST throughput should exceed 100 MB/s")
-		})
-
-		// Test HDE (Hierarchical Delta Encoding)
-		t.Run("HDE_Validation", func(t *testing.T) {
-			// Validate compression ratios
-			testData := make([]byte, 1024*1024) // 1MB test data
-
-			// Fill with compressible pattern
-			for i := range testData {
-				testData[i] = byte(i % 256)
-			}
-
-			// Test Local tier (fast compression)
-			localCompressed := simulateCompression(testData, 0)
-			localRatio := float64(len(testData)) / float64(len(localCompressed))
-			t.Logf("Local compression ratio: %.2fx", localRatio)
-			assert.Greater(t, localRatio, 1.5, "Local compression should achieve > 1.5x")
-
-			// Test Regional tier (balanced)
-			regionalCompressed := simulateCompression(testData, 3)
-			regionalRatio := float64(len(testData)) / float64(len(regionalCompressed))
-			t.Logf("Regional compression ratio: %.2fx", regionalRatio)
-			assert.Greater(t, regionalRatio, 2.0, "Regional compression should achieve > 2x")
-
-			// Test Global tier (best compression)
-			globalCompressed := simulateCompression(testData, 9)
-			globalRatio := float64(len(testData)) / float64(len(globalCompressed))
-			t.Logf("Global compression ratio: %.2fx", globalRatio)
-			assert.Greater(t, globalRatio, 3.0, "Global compression should achieve > 3x")
-
-			// Validate delta encoding efficiency
-			baseline := testData
-			modified := make([]byte, len(testData))
-			copy(modified, baseline)
-
-			// Modify 10% of data
-			modifiedCount := len(testData) / 10
-			for i := 0; i < modifiedCount; i++ {
-				modified[i] = ^modified[i]
-			}
-
-			deltaSize := simulateDeltaEncoding(baseline, modified)
-			deltaEfficiency := 1.0 - (float64(deltaSize) / float64(len(testData)))
-			t.Logf("Delta encoding efficiency: %.1f%% reduction", deltaEfficiency*100)
-			assert.Greater(t, deltaEfficiency, 0.8, "Delta should reduce size by > 80%")
 		})
 
 		// Test PBA (Predictive Bandwidth Allocation)
