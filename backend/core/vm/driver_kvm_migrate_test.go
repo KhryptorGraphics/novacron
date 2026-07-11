@@ -136,11 +136,23 @@ func TestLiveMigrationLocalhostCutover(t *testing.T) {
 	if destTick < srcPre {
 		t.Fatalf("counter went backwards after cutover: dest=%d < src_pre=%d", destTick, srcPre)
 	}
+	// A live cutover must NOT re-run the kernel boot on the destination. The
+	// reliable discriminator is the kernel boot banner ("Linux version"), printed
+	// exactly once at t=0 -- ~30s before the cutover here -- so it was long since
+	// flushed to the SOURCE console and can never still sit in the guest's
+	// migrated serial buffer at cutover. A cold boot on the dest reprints it; a
+	// live cutover never shows it.
+	//
+	// We deliberately do NOT key on late-boot text like "login:" or
+	// "cirros-cloud.net": the getty prompt / cloud-init tail printed in the last
+	// second before cutover can still be sitting in the guest tty buffer + UART
+	// FIFO (migrated as guest RAM + device state) and legitimately flush onto the
+	// DEST console after resume -- observed on ~1/5 real cutovers, source console
+	// never shows it -- which is NOT a cold boot. Keying on those made this test
+	// intermittently fail (bd novacron-vue).
 	if data, _ := os.ReadFile(destConsole); data != nil {
-		for _, marker := range []string{"cirros-cloud.net", "login:"} {
-			if strings.Contains(string(data), marker) {
-				t.Fatalf("destination console shows fresh-boot marker %q: cold boot, not a live cutover", marker)
-			}
+		if strings.Contains(string(data), "Linux version") {
+			t.Fatalf("destination console shows kernel boot banner \"Linux version\": cold boot, not a live cutover")
 		}
 	}
 	t.Logf("PASS: counter continued src=%d -> dest=%d monotonically, no reboot; source qemu exited", srcPre, destTick)

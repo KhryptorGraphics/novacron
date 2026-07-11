@@ -609,14 +609,40 @@ func (m *VMManager) snapshotVM(ctx context.Context, vm *VM, driver VMDriver, par
 }
 
 // deleteVM deletes a VM
+// retrackVM re-inserts a VM into the manager map, undoing deleteVM's early
+// idempotency claim when a delete step fails so the VM is not lost from the
+// manager (it can be listed/retried instead of leaking).
+func (m *VMManager) retrackVM(vm *VM) {
+	m.vmsMutex.Lock()
+	m.vms[vm.ID()] = vm
+	m.vmsMutex.Unlock()
+}
+
 func (m *VMManager) deleteVM(ctx context.Context, vm *VM, driver VMDriver) (*VMOperationResponse, error) {
 	log.Printf("Delete operation requested for VM %s", vm.ID())
+
+	// Idempotency claim: the first concurrent delete to remove this VM from the
+	// manager map owns the deletion. Any other concurrent delete on the same VM
+	// returns success immediately, so it never races driver.Stop/Delete (which
+	// would spuriously error "not running"/"not found") nor double-subtracts the
+	// CPU/memory accounting. The VM is re-tracked below if a step fails, so a
+	// genuine failure still leaves it known to the manager for retry.
+	m.vmsMutex.Lock()
+	_, tracked := m.vms[vm.ID()]
+	if tracked {
+		delete(m.vms, vm.ID())
+	}
+	m.vmsMutex.Unlock()
+	if !tracked {
+		return &VMOperationResponse{Success: true, VM: vm}, nil
+	}
 
 	// If VM is running, stop it first
 	if vm.State() == StateRunning || vm.State() == StatePaused {
 		log.Printf("Stopping VM %s before deletion", vm.ID())
 		stopResp, err := m.stopVM(ctx, vm, driver)
 		if err != nil || !stopResp.Success {
+			m.retrackVM(vm) // undo the claim: stop failed, VM stays managed
 			errorMessage := fmt.Sprintf("Failed to stop VM before deletion: %v", err)
 			if err == nil && !stopResp.Success {
 				errorMessage = fmt.Sprintf("Failed to stop VM before deletion: %s", stopResp.ErrorMessage)
@@ -646,6 +672,7 @@ func (m *VMManager) deleteVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 	// Call driver to delete the VM
 	err := driver.Delete(ctx, vm.ID())
 	if err != nil {
+		m.retrackVM(vm) // undo the claim: delete failed, VM stays managed
 		// Update state to failed on error
 		vm.mutex.Lock()
 		vm.state = StateFailed
@@ -667,19 +694,8 @@ func (m *VMManager) deleteVM(ctx context.Context, vm *VM, driver VMDriver) (*VMO
 		}, err
 	}
 
-	// Claim the VM: only the delete that actually removes it from the manager
-	// releases its accounting, so a repeated or concurrent delete -- e.g. via a
-	// driver whose Delete is idempotent (returns nil on an already-gone VM) --
-	// cannot double-subtract the global CPU/memory counters.
-	m.vmsMutex.Lock()
-	_, stillTracked := m.vms[vm.ID()]
-	if stillTracked {
-		delete(m.vms, vm.ID())
-	}
-	m.vmsMutex.Unlock()
-	if !stillTracked {
-		return &VMOperationResponse{Success: true, VM: vm}, nil
-	}
+	// This delete owns the VM (claimed + removed from the manager map at the top),
+	// so the accounting/scheduler release below runs exactly once.
 
 	// Clean up scheduler accounting before removing the VM from the manager.
 	if m.scheduler != nil && vm.ResourceID() != "" && vm.NodeID() != "" {
@@ -791,10 +807,43 @@ func (m *VMManager) migrateVM(ctx context.Context, vm *VM, driver VMDriver, para
 		migrationType = "live"
 	}
 
+	// Same-VM concurrency guard: claim the VM for migration under its own lock so
+	// a second concurrent migrateVM on the same VM is cleanly rejected rather than
+	// opening a competing QMP migration session. prevState is restored (deferred)
+	// on any non-success so a rejected/aborted attempt never strands the VM in
+	// StateMigrating (which would make it permanently un-migratable).
+	vm.mutex.Lock()
+	if vm.state == StateMigrating {
+		vm.mutex.Unlock()
+		return &VMOperationResponse{
+			Success:      false,
+			ErrorMessage: fmt.Sprintf("VM %s migration already in progress", vm.ID()),
+			VM:           vm,
+		}, nil
+	}
+	prevState := vm.state
+	vm.state = StateMigrating
+	vm.mutex.Unlock()
+
+	migrated := false
+	defer func() {
+		if !migrated {
+			vm.mutex.Lock()
+			if vm.state == StateMigrating {
+				vm.state = prevState
+			}
+			vm.mutex.Unlock()
+		}
+	}()
+
 	// Block (non-shared storage) migration has its own flow: the target stands up
 	// a dest with its OWN disk + NBD export and the source drive-mirrors into it.
 	if migrationType == "block" {
-		return m.migrateBlockCrossNode(ctx, vm, driver, targetNode, params)
+		resp, berr := m.migrateBlockCrossNode(ctx, vm, driver, targetNode, params)
+		if resp != nil && resp.Success {
+			migrated = true // VM handed off to targetNode; do not restore state
+		}
+		return resp, berr
 	}
 
 	// Resolve the QEMU migration URI before touching VM state. An explicit uri
@@ -816,10 +865,7 @@ func (m *VMManager) migrateVM(ctx context.Context, vm *VM, driver VMDriver, para
 		params["uri"] = uri
 	}
 
-	// Update VM state to migrating
-	vm.mutex.Lock()
-	vm.state = StateMigrating
-	vm.mutex.Unlock()
+	// (VM was already claimed as StateMigrating by the concurrency guard above.)
 
 	// Emit migration started event
 	m.emitEvent(VMEvent{
@@ -834,11 +880,7 @@ func (m *VMManager) migrateVM(ctx context.Context, vm *VM, driver VMDriver, para
 	// carries it too); never the bare node id.
 	err := driver.Migrate(ctx, vm.ID(), uri, params)
 	if err != nil {
-		// Update state back to previous state on failure
-		vm.mutex.Lock()
-		vm.state = StateRunning // Assume it was running before migration
-		vm.mutex.Unlock()
-
+		// State is restored to prevState by the deferred guard cleanup.
 		errorMessage := fmt.Sprintf("Failed to migrate VM: %v", err)
 		m.emitEvent(VMEvent{
 			Type:      VMEventError,
@@ -861,6 +903,7 @@ func (m *VMManager) migrateVM(ctx context.Context, vm *VM, driver VMDriver, para
 	// by the migrate route. Disks are left untouched -- for shared storage the disk
 	// is the running dest's disk.
 	oldNodeID := vm.NodeID()
+	migrated = true // success: VM handed off to targetNode; skip deferred state restore
 	m.forgetVM(vm.ID())
 
 	// Emit migrated event

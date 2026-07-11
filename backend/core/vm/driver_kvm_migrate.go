@@ -188,6 +188,9 @@ func (d *KVMDriverEnhanced) migrateWithStats(ctx context.Context, vmID, target s
 	if uri == "" {
 		return 0, 0, fmt.Errorf("migration target URI required (target_node is a node id, not a QEMU URI)")
 	}
+	// dest_vm_id (optional) lets a same-host caller name the destination so a
+	// failed migration can abort the half-started dest qemu (see rollback below).
+	destID := params["dest_vm_id"]
 
 	// Dest readiness is ensured by StartIncoming (it waits for QMP inmigrate).
 	// We must NOT dial the migration URI to probe it: qemu consumes the first
@@ -201,11 +204,18 @@ func (d *KVMDriverEnhanced) migrateWithStats(ctx context.Context, vmID, target s
 	defer q.Close()
 
 	if _, err := q.execute("migrate", map[string]interface{}{"uri": uri}); err != nil {
+		// The migrate never started, but the dest may still be up: roll back so it
+		// is not left orphaned, and make sure the source is running.
+		d.rollbackFailedMigration(q, vmID, destID)
 		return 0, 0, fmt.Errorf("migrate command: %w", err)
 	}
 
 	downtimeMs, totalMs, err = q.pollMigration(ctx)
 	if err != nil {
+		// Migration failed mid-flight (e.g. the dest died): cancel it on the
+		// source, confirm the source guest is running again, and abort the
+		// half-started dest so the failure leaves no paused source / orphan dest.
+		d.rollbackFailedMigration(q, vmID, destID)
 		return 0, 0, err
 	}
 
@@ -310,6 +320,65 @@ func (q *qmpConn) pollMigration(ctx context.Context) (downtimeMs, totalMs int64,
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
+}
+
+// rollbackFailedMigration undoes a migration that did not complete. It is called
+// on any failure of migrateWithStats after the source QMP connection is open:
+//
+//  1. migrate_cancel on the source -- aborts an in-flight migration (no-op if it
+//     already failed/cancelled) and lets QEMU auto-resume the source guest;
+//  2. confirm the source guest is running again, cont'ing it if the failure left
+//     it paused (e.g. it died during the stop-and-copy phase);
+//  3. abort the half-started destination qemu (when destID names a VM in THIS
+//     driver, i.e. same-host) so the failure leaves no orphaned dest holding the
+//     shared disk / migration port.
+//
+// Every step is best-effort so a failing step still lets the others run. q must
+// be the SOURCE QMP connection (still open); the caller keeps ownership of it.
+func (d *KVMDriverEnhanced) rollbackFailedMigration(q *qmpConn, srcVMID, destID string) {
+	// 1. Cancel any in-progress migration on the source.
+	_, _ = q.execute("migrate_cancel", nil)
+
+	// 2. Ensure the source guest is running again.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		raw, e := q.execute("query-status", nil)
+		if e == nil {
+			var st struct {
+				Running bool   `json:"running"`
+				Status  string `json:"status"`
+			}
+			if json.Unmarshal(raw, &st) == nil {
+				if st.Running || st.Status == "running" {
+					break
+				}
+				_, _ = q.execute("cont", nil) // still paused: resume it
+			}
+		}
+		if time.Now().After(deadline) {
+			log.Printf("migration rollback: source %s did not return to running", srcVMID)
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	// 3. Abort the half-started destination (same-host only). Remove it from the
+	// map first, then kill outside the lock: once it is gone from d.vms nothing
+	// else (incl. monitorVM) touches it, so mutating it unlocked is safe and we
+	// do not hold vmLock across the SIGTERM/SIGKILL grace wait.
+	if destID != "" {
+		d.vmLock.Lock()
+		dest, ok := d.vms[destID]
+		if ok {
+			delete(d.vms, destID)
+		}
+		d.vmLock.Unlock()
+		if ok {
+			_ = d.stopVMInternal(dest)
+			log.Printf("migration rollback: aborted half-started dest %s", destID)
+		}
+	}
+	log.Printf("migration rollback complete for source %s", srcVMID)
 }
 
 // --- block (non-shared storage) migration: NBD drive-mirror + RAM ------------
