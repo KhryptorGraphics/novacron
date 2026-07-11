@@ -9,12 +9,12 @@ import (
 
 // DistributedLock represents a distributed lock using Raft consensus
 type DistributedLock struct {
-	raft   *RaftNode
-	key    string
-	owner  string
-	ttl    time.Duration
-	mu     sync.RWMutex
-	cancel context.CancelFunc
+	raft      *RaftNode
+	key       string
+	owner     string
+	ttl       time.Duration
+	expiresAt time.Time // wall-clock expiry (request timestamp + ttl); zero means no TTL
+	mu        sync.RWMutex
 }
 
 // LockManager manages distributed locks across the cluster
@@ -24,6 +24,13 @@ type LockManager struct {
 	mu     sync.RWMutex
 	nodeID string
 
+	// applyCh is this manager's own committed-entry stream, obtained via
+	// RaftNode.Subscribe(). Each LockManager needs its own full copy of the
+	// stream so that several managers backed by the same node build identical
+	// lock state; sharing one channel would split the stream between them and
+	// break conflict detection.
+	applyCh <-chan ApplyMsg
+
 	// done is closed once processCommands has exited, e.g. after the
 	// backing RaftNode is stopped. Exposed via Done() for graceful
 	// shutdown sequencing and tests.
@@ -32,19 +39,19 @@ type LockManager struct {
 
 // LockRequest represents a lock operation command
 type LockRequest struct {
-	Type      string        `json:"type"`       // "acquire", "release", "extend"
-	Key       string        `json:"key"`        // Lock key
-	Owner     string        `json:"owner"`      // Lock owner ID
-	TTL       time.Duration `json:"ttl"`        // Lock TTL
-	Timestamp time.Time     `json:"timestamp"`  // Request timestamp
+	Type      string        `json:"type"`      // "acquire", "release", "extend"
+	Key       string        `json:"key"`       // Lock key
+	Owner     string        `json:"owner"`     // Lock owner ID
+	TTL       time.Duration `json:"ttl"`       // Lock TTL
+	Timestamp time.Time     `json:"timestamp"` // Request timestamp
 }
 
 // LockResponse represents the result of a lock operation
 type LockResponse struct {
-	Success   bool          `json:"success"`
-	Owner     string        `json:"owner,omitempty"`
-	ExpiresAt time.Time     `json:"expires_at,omitempty"`
-	Error     string        `json:"error,omitempty"`
+	Success   bool      `json:"success"`
+	Owner     string    `json:"owner,omitempty"`
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
+	Error     string    `json:"error,omitempty"`
 }
 
 // NewLockManager creates a new distributed lock manager
@@ -55,10 +62,14 @@ func NewLockManager(raft *RaftNode, nodeID string) *LockManager {
 		nodeID: nodeID,
 		done:   make(chan struct{}),
 	}
-	
+
+	// Subscribe synchronously (before returning / before any Acquire) so no
+	// committed entry is missed between construction and the goroutine start.
+	lm.applyCh = raft.Subscribe()
+
 	// Start applying lock commands from Raft
 	go lm.processCommands()
-	
+
 	return lm
 }
 
@@ -74,7 +85,7 @@ func (lm *LockManager) Done() <-chan struct{} {
 func (lm *LockManager) AcquireLock(ctx context.Context, key string, ttl time.Duration) (*DistributedLock, error) {
 	// Generate unique owner ID for this acquisition attempt
 	owner := fmt.Sprintf("%s-%d", lm.nodeID, time.Now().UnixNano())
-	
+
 	request := LockRequest{
 		Type:      "acquire",
 		Key:       key,
@@ -82,40 +93,28 @@ func (lm *LockManager) AcquireLock(ctx context.Context, key string, ttl time.Dur
 		TTL:       ttl,
 		Timestamp: time.Now(),
 	}
-	
+
 	// Submit command to Raft cluster
-	index, term, ok := lm.raft.Submit(request)
+	index, _, ok := lm.raft.Submit(request)
 	if !ok {
 		return nil, fmt.Errorf("failed to submit lock request: not leader")
 	}
-	
+
 	// Wait for command to be applied
 	if !lm.waitForApply(ctx, index) {
 		return nil, fmt.Errorf("timeout waiting for lock command to be applied")
 	}
-	
-	// Check if lock was acquired
+
+	// Check if the lock is now held by this acquisition. If another owner won
+	// (or still holds a live lock), the applied command did not install us.
 	lm.mu.RLock()
 	lock, exists := lm.locks[key]
 	lm.mu.RUnlock()
-	
+
 	if !exists || lock.owner != owner {
 		return nil, fmt.Errorf("failed to acquire lock: already held by another owner")
 	}
-	
-	// Start TTL expiration timer
-	lockCtx, cancel := context.WithCancel(ctx)
-	lock.cancel = cancel
-	go lm.startTTLTimer(lock, lockCtx)
-	
-	// Log successful acquisition
-	lm.raft.stats.mu.Lock()
-	lm.raft.stats.LogEntriesCommitted++
-	lm.raft.stats.mu.Unlock()
-	
-	_ = index // Use index to avoid unused variable warning
-	_ = term  // Use term to avoid unused variable warning
-	
+
 	return lock, nil
 }
 
@@ -127,25 +126,18 @@ func (lm *LockManager) ReleaseLock(ctx context.Context, lock *DistributedLock) e
 		Owner:     lock.owner,
 		Timestamp: time.Now(),
 	}
-	
+
 	// Submit command to Raft cluster
-	index, term, ok := lm.raft.Submit(request)
+	index, _, ok := lm.raft.Submit(request)
 	if !ok {
 		return fmt.Errorf("failed to submit release request: not leader")
 	}
-	
+
 	// Wait for command to be applied
 	if !lm.waitForApply(ctx, index) {
 		return fmt.Errorf("timeout waiting for release command to be applied")
 	}
-	
-	// Cancel TTL timer
-	if lock.cancel != nil {
-		lock.cancel()
-	}
-	
-	_ = term // Use term to avoid unused variable warning
-	
+
 	return nil
 }
 
@@ -158,25 +150,23 @@ func (lm *LockManager) ExtendLock(ctx context.Context, lock *DistributedLock, ne
 		TTL:       newTTL,
 		Timestamp: time.Now(),
 	}
-	
+
 	// Submit command to Raft cluster
-	index, term, ok := lm.raft.Submit(request)
+	index, _, ok := lm.raft.Submit(request)
 	if !ok {
 		return fmt.Errorf("failed to submit extend request: not leader")
 	}
-	
+
 	// Wait for command to be applied
 	if !lm.waitForApply(ctx, index) {
 		return fmt.Errorf("timeout waiting for extend command to be applied")
 	}
-	
+
 	// Update local lock TTL
 	lock.mu.Lock()
 	lock.ttl = newTTL
 	lock.mu.Unlock()
-	
-	_ = term // Use term to avoid unused variable warning
-	
+
 	return nil
 }
 
@@ -184,12 +174,12 @@ func (lm *LockManager) ExtendLock(ctx context.Context, lock *DistributedLock, ne
 func (lm *LockManager) ListLocks() map[string]*DistributedLock {
 	lm.mu.RLock()
 	defer lm.mu.RUnlock()
-	
+
 	result := make(map[string]*DistributedLock)
 	for k, v := range lm.locks {
 		result[k] = v
 	}
-	
+
 	return result
 }
 
@@ -202,7 +192,7 @@ func (lm *LockManager) ListLocks() map[string]*DistributedLock {
 func (lm *LockManager) processCommands() {
 	defer close(lm.done)
 
-	applyCh := lm.raft.GetApplyChan()
+	applyCh := lm.applyCh
 	stopped := lm.raft.Done()
 
 	for {
@@ -231,27 +221,29 @@ func (lm *LockManager) processCommands() {
 func (lm *LockManager) applyLockCommand(request LockRequest) {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
-	
+
 	switch request.Type {
 	case "acquire":
-		// Check if lock is already held
-		if _, exists := lm.locks[request.Key]; exists {
-			// Lock is already held - for now, just reject the request
-			// In a full implementation, we would check TTL expiration time
-			// stored with the lock creation timestamp
+		// Reject only if a still-live lock is held. TTL expiration is lazy:
+		// a lock whose deadline has passed (as of this request's timestamp) is
+		// treated as free and may be taken over here, rather than being reaped
+		// by a background timer. The request timestamp -- not the local clock --
+		// is used so every replica reaches the same decision from the same log.
+		if existingLock, exists := lm.locks[request.Key]; exists && !existingLock.isExpired(request.Timestamp) {
 			return
 		}
-		
-		// Create new lock
+
+		// Create (or take over) the lock.
 		lock := &DistributedLock{
-			raft:  lm.raft,
-			key:   request.Key,
-			owner: request.Owner,
-			ttl:   request.TTL,
+			raft:      lm.raft,
+			key:       request.Key,
+			owner:     request.Owner,
+			ttl:       request.TTL,
+			expiresAt: expiryFor(request),
 		}
-		
+
 		lm.locks[request.Key] = lock
-		
+
 	case "release":
 		// Check if lock exists and is owned by requester
 		if existingLock, exists := lm.locks[request.Key]; exists {
@@ -259,27 +251,45 @@ func (lm *LockManager) applyLockCommand(request LockRequest) {
 				delete(lm.locks, request.Key)
 			}
 		}
-		
+
 	case "extend":
 		// Check if lock exists and is owned by requester
 		if existingLock, exists := lm.locks[request.Key]; exists {
 			if existingLock.owner == request.Owner {
 				existingLock.mu.Lock()
 				existingLock.ttl = request.TTL
+				existingLock.expiresAt = expiryFor(request)
 				existingLock.mu.Unlock()
 			}
 		}
 	}
 }
 
+// expiryFor computes a lock's wall-clock expiry from a request. A non-positive
+// TTL yields a zero time, meaning the lock never expires.
+func expiryFor(request LockRequest) time.Time {
+	if request.TTL <= 0 {
+		return time.Time{}
+	}
+	return request.Timestamp.Add(request.TTL)
+}
+
+// isExpired reports whether the lock's TTL has elapsed as of now. A lock with
+// no TTL (zero expiresAt) never expires.
+func (dl *DistributedLock) isExpired(now time.Time) bool {
+	dl.mu.RLock()
+	defer dl.mu.RUnlock()
+	return !dl.expiresAt.IsZero() && now.After(dl.expiresAt)
+}
+
 // waitForApply waits for a command to be applied by the state machine
 func (lm *LockManager) waitForApply(ctx context.Context, index int64) bool {
 	timeout := time.NewTimer(5 * time.Second)
 	defer timeout.Stop()
-	
+
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -296,33 +306,11 @@ func (lm *LockManager) waitForApply(ctx context.Context, index int64) bool {
 	}
 }
 
-// startTTLTimer starts a timer to automatically release the lock when TTL expires
-func (lm *LockManager) startTTLTimer(lock *DistributedLock, ctx context.Context) {
-	timer := time.NewTimer(lock.ttl)
-	defer timer.Stop()
-	
-	select {
-	case <-ctx.Done():
-		// Lock was released or context cancelled
-		return
-	case <-timer.C:
-		// TTL expired, release the lock
-		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		
-		err := lm.ReleaseLock(releaseCtx, lock)
-		if err != nil {
-			// Log error but don't panic - the lock will eventually be cleaned up
-			fmt.Printf("Failed to auto-release expired lock %s: %v\n", lock.key, err)
-		}
-	}
-}
-
 // GetLock returns information about a specific lock
 func (lm *LockManager) GetLock(key string) (*DistributedLock, bool) {
 	lm.mu.RLock()
 	defer lm.mu.RUnlock()
-	
+
 	lock, exists := lm.locks[key]
 	return lock, exists
 }
@@ -337,7 +325,7 @@ func (lm *LockManager) IsLocked(key string) bool {
 func (dl *DistributedLock) String() string {
 	dl.mu.RLock()
 	defer dl.mu.RUnlock()
-	
+
 	return fmt.Sprintf("Lock{key: %s, owner: %s, ttl: %v}", dl.key, dl.owner, dl.ttl)
 }
 
