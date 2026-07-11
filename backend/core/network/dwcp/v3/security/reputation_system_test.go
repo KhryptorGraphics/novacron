@@ -62,9 +62,16 @@ func TestReputationSystem_ByzantineBehaviorPenalty(t *testing.T) {
 	newScore := rs.GetScore(attacker)
 	penalty := initialScore - newScore
 
-	expectedMinPenalty := 40.0 * rs.config.ByzantinePenaltyMultiplier
-	if penalty < expectedMinPenalty {
-		t.Errorf("Expected penalty >= %.2f, got %.2f", expectedMinPenalty, penalty)
+	// adjustScore clamps Score to [0,100], so a node can never lose more than
+	// its starting score. The observable penalty is therefore capped at
+	// min(severity*multiplier, initialScore); the original >=120 assertion was
+	// unreachable from the default start score of 50 (novacron-e50).
+	expectedPenalty := 40.0 * rs.config.ByzantinePenaltyMultiplier
+	if expectedPenalty > initialScore {
+		expectedPenalty = initialScore
+	}
+	if penalty < expectedPenalty {
+		t.Errorf("Expected penalty >= %.2f, got %.2f", expectedPenalty, penalty)
 	}
 }
 

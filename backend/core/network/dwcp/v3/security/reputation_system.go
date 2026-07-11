@@ -49,6 +49,12 @@ type NodeReputation struct {
 	// Status
 	IsQuarantined bool
 	QuarantinedAt time.Time
+
+	// QuarantineCount is the total number of times this node has been
+	// quarantined. It lives on the reputation record (not the transient
+	// QuarantineRecord) so it survives ReleaseQuarantine and correctly enforces
+	// MaxQuarantineCount for release-then-reoffend nodes (novacron-1h2).
+	QuarantineCount int
 }
 
 // QuarantineRecord tracks quarantined nodes
@@ -331,16 +337,21 @@ func (rs *ReputationSystem) quarantineNodeLocked(nodeID string, reason string) e
 
 	rep := rs.getOrCreateReputation(nodeID)
 
-	// Check max quarantine count
+	// Check max quarantine count. The count lives on the reputation record,
+	// which survives ReleaseQuarantine (that only deletes the transient
+	// QuarantineRecord), so a released node that re-offends keeps accumulating
+	// toward the cap instead of resetting to 1 each cycle (novacron-1h2).
+	if rep.QuarantineCount >= rs.config.MaxQuarantineCount {
+		rs.logger.Error("Node exceeded max quarantine count",
+			zap.String("node_id", nodeID),
+			zap.Int("count", rep.QuarantineCount),
+		)
+		return fmt.Errorf("node exceeded max quarantine count")
+	}
+	rep.QuarantineCount++
+
 	if record, exists := rs.quarantined[nodeID]; exists {
-		if record.ViolationCount >= rs.config.MaxQuarantineCount {
-			rs.logger.Error("Node exceeded max quarantine count",
-				zap.String("node_id", nodeID),
-				zap.Int("count", record.ViolationCount),
-			)
-			return fmt.Errorf("node exceeded max quarantine count")
-		}
-		record.ViolationCount++
+		record.ViolationCount = rep.QuarantineCount
 		record.QuarantinedAt = time.Now()
 		record.Reason = reason
 	} else {
@@ -350,7 +361,7 @@ func (rs *ReputationSystem) quarantineNodeLocked(nodeID string, reason string) e
 			Reason:         reason,
 			CanRecover:     rs.config.AllowRecovery,
 			RecoveryAt:     time.Now().Add(rs.config.QuarantineDuration),
-			ViolationCount: 1,
+			ViolationCount: rep.QuarantineCount,
 		}
 	}
 
