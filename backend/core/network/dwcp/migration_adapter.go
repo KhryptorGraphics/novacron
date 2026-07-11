@@ -4,6 +4,7 @@ package dwcp
 import (
 	"container/list"
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -25,6 +26,13 @@ type MigrationAdapter struct {
 	// Connection management
 	connections map[string]*MigrationConnection
 	connPool    sync.Pool
+
+	// DWCP multi-stream session correlation (novacron-hpa): accumulates
+	// independently-accepted connections (one per AMST stream) that carry
+	// the same sender-generated sessionID until all of them arrive — see
+	// handleIncomingDWCPStream/registerDWCPStream/completeDWCPSession.
+	sessionMu       sync.Mutex
+	pendingSessions map[string]*pendingDWCPSession
 
 	// Baseline management
 	vmBaselines map[string]*VMBaseline
@@ -143,6 +151,73 @@ func readMigrateEnvelope(conn net.Conn) (protocol byte, vmID string, err error) 
 	return protocol, string(vmIDBytes), nil
 }
 
+// dwcpSessionIDLen is the length in bytes of the random session identifier
+// used to correlate the N independently-accepted TCP connections (AMST
+// streams) belonging to one logical DWCP Transfer on the receive side
+// (novacron-hpa). 16 random bytes is plenty to avoid collisions between
+// concurrent migrations hitting the same listener at once — it does not
+// need to be cryptographically unguessable, only unique.
+const dwcpSessionIDLen = 16
+
+// writeDWCPStreamEnvelope writes the full per-stream header for one AMST
+// stream belonging to a DWCP migration onto conn: the standard protocol+
+// vmID envelope (byte-identical to what the non-DWCP path writes, so
+// handleIncomingMigration's first read is unchanged for every protocol),
+// immediately followed by the session correlation fields
+// [sessionID][streamIndex][streamCount] that every stream of an N-stream
+// Transfer carries so the receiver can regroup them into one logical
+// Receive (see handleIncomingDWCPStream). Every stream of one Transfer
+// writes the SAME protocol/vmID/sessionID/streamCount and a unique
+// streamIndex in [0, streamCount).
+func writeDWCPStreamEnvelope(conn net.Conn, protocol byte, vmID string, sessionID [dwcpSessionIDLen]byte, streamIndex, streamCount int) error {
+	if err := writeMigrateEnvelope(conn, protocol, vmID); err != nil {
+		return err
+	}
+	buf := make([]byte, 0, dwcpSessionIDLen+4)
+	buf = append(buf, sessionID[:]...)
+	buf = binary.BigEndian.AppendUint16(buf, uint16(streamIndex))
+	buf = binary.BigEndian.AppendUint16(buf, uint16(streamCount))
+	_, err := conn.Write(buf)
+	return err
+}
+
+// readDWCPStreamCorrelation reads the fields writeDWCPStreamEnvelope wrote
+// immediately after the protocol+vmID envelope, which the caller must
+// already have consumed via readMigrateEnvelope.
+func readDWCPStreamCorrelation(conn net.Conn) (sessionID string, streamIndex, streamCount int, err error) {
+	buf := make([]byte, dwcpSessionIDLen+4)
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		return "", 0, 0, fmt.Errorf("failed to read stream correlation header: %w", err)
+	}
+	sessionID = string(buf[:dwcpSessionIDLen])
+	streamIndex = int(binary.BigEndian.Uint16(buf[dwcpSessionIDLen : dwcpSessionIDLen+2]))
+	streamCount = int(binary.BigEndian.Uint16(buf[dwcpSessionIDLen+2 : dwcpSessionIDLen+4]))
+	return sessionID, streamIndex, streamCount, nil
+}
+
+// writeDWCPEnvelopeToAllStreams generates a fresh session ID and writes the
+// per-stream envelope (see writeDWCPStreamEnvelope) to every active stream
+// of amstInst, so the receiver can correlate all of them — however many
+// there are, including exactly one — back to a single logical Transfer.
+// Must be called after amstInst.Connect and before amstInst.Transfer.
+func writeDWCPEnvelopeToAllStreams(amstInst *AMST, protocol byte, vmID string) error {
+	conns := amstInst.activeStreamConns()
+	if len(conns) == 0 {
+		return errors.New("no active AMST streams to write envelope to")
+	}
+	var sessionID [dwcpSessionIDLen]byte
+	if _, err := rand.Read(sessionID[:]); err != nil {
+		return fmt.Errorf("failed to generate session ID: %w", err)
+	}
+	streamCount := len(conns)
+	for i, c := range conns {
+		if err := writeDWCPStreamEnvelope(c, protocol, vmID, sessionID, i, streamCount); err != nil {
+			return fmt.Errorf("failed to write stream envelope to stream %d/%d: %w", i, streamCount, err)
+		}
+	}
+	return nil
+}
+
 // MigrationConnection represents a DWCP migration connection
 type MigrationConnection struct {
 	ID               string
@@ -235,30 +310,43 @@ func NewMigrationAdapter(config MigrationAdapterConfig) (*MigrationAdapter, erro
 	config.HDEConfig.EnableDictionary = false
 	config.HDEConfig.EnableQuantization = false
 
-	// The receive path correlates one accepted net.Conn to exactly one
-	// migration by relying on AMST using exactly one stream per Transfer
-	// (see the envelope-preamble comment on migrateEnvelope). Multi-stream
-	// receive-side session correlation is real follow-up work, not solved
-	// here — see the "N-stream migration receive" bd issue filed alongside
-	// this fix. MinStreams/MaxStreams must ALL be forced, not just
-	// InitialStreams: NewAMST floors InitialStreams up to MinStreams
-	// (default 4) when MinStreams is unset (amst.go), and EnableAdaptive's
-	// optimize() would otherwise drift streamCount back toward MinStreams
-	// on live traffic (amst.go optimize()).
-	config.AMSTConfig.MinStreams = 1
-	config.AMSTConfig.MaxStreams = 1
-	config.AMSTConfig.InitialStreams = 1
-	config.AMSTConfig.EnableAdaptive = false
+	// The receive path now correlates N independently-accepted net.Conns
+	// (one per AMST stream) back to a single logical migration via an
+	// explicit session ID written on every stream at connect time
+	// (writeDWCPStreamEnvelope/handleIncomingDWCPStream, novacron-hpa) —
+	// so, unlike before, AMSTConfig no longer needs to be forced to
+	// exactly one stream to be correct. Default to single-stream ONLY
+	// when the caller hasn't opted into adaptive multi-stream
+	// (EnableAdaptive) and hasn't explicitly configured stream counts —
+	// this keeps every existing caller that leaves AMSTConfig zero-valued
+	// on today's proven single-connection behavior, while callers that
+	// already configure real multi-stream (e.g.
+	// backend/core/migration/orchestrator_dwcp.go, which sets
+	// MinStreams/MaxStreams/InitialStreams/EnableAdaptive=true and had
+	// every one of those silently clamped to 1 stream by the old
+	// unconditional force) finally get what they asked for.
+	if !config.AMSTConfig.EnableAdaptive {
+		if config.AMSTConfig.MinStreams <= 0 {
+			config.AMSTConfig.MinStreams = 1
+		}
+		if config.AMSTConfig.MaxStreams <= 0 {
+			config.AMSTConfig.MaxStreams = 1
+		}
+		if config.AMSTConfig.InitialStreams <= 0 {
+			config.AMSTConfig.InitialStreams = 1
+		}
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	adapter := &MigrationAdapter{
-		config:      config,
-		connections: make(map[string]*MigrationConnection),
-		vmBaselines: make(map[string]*VMBaseline),
-		baselineLRU: list.New(),
-		ctx:         ctx,
-		cancel:      cancel,
+		config:          config,
+		connections:     make(map[string]*MigrationConnection),
+		pendingSessions: make(map[string]*pendingDWCPSession),
+		vmBaselines:     make(map[string]*VMBaseline),
+		baselineLRU:     list.New(),
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 
 	// Initialize avgThroughputVsBaseline
@@ -326,21 +414,17 @@ func (adapter *MigrationAdapter) MigrateVMMemory(ctx context.Context, vmID strin
 	fmt.Printf("DWCP: Memory compressed from %d to %d bytes (%.2fx compression)\n",
 		originalSize, len(compressed), compressionRatio)
 
-	// Write the envelope on the connection's single stream immediately
-	// before AMST.Transfer chunk data flows — deliberately AFTER
-	// compression, not before: the receiver's very next read blocks on
-	// the first AMST chunk header, and writing the envelope before a
-	// (potentially long, for large payloads at high compression levels)
-	// CompressMemory call would make the receiver wait out that entire
-	// compression time against its ReadTimeout with nothing having gone
-	// wrong. So the receiver's envelope-read is immediately followed by
-	// data that is already fully ready to send.
-	streamConn, err := conn.AMST.singleStreamConn()
-	if err != nil {
-		adapter.CleanupConnection(vmID, targetHost)
-		return fmt.Errorf("failed to get connection stream: %w", err)
-	}
-	if err := writeMigrateEnvelope(streamConn, migrateProtoDWCPMemory, vmID); err != nil {
+	// Write the envelope (+ session correlation header, so N>1 streams can
+	// be regrouped on receive) on every one of this connection's AMST
+	// streams immediately before AMST.Transfer chunk data flows —
+	// deliberately AFTER compression, not before: the receiver's very
+	// next read blocks on the envelope/correlation header, and writing it
+	// before a (potentially long, for large payloads at high compression
+	// levels) CompressMemory call would make the receiver wait out that
+	// entire compression time against its ReadTimeout with nothing having
+	// gone wrong. So the receiver's envelope-read is immediately followed
+	// by data that is already fully ready to send.
+	if err := writeDWCPEnvelopeToAllStreams(conn.AMST, migrateProtoDWCPMemory, vmID); err != nil {
 		adapter.CleanupConnection(vmID, targetHost)
 		return fmt.Errorf("failed to send envelope: %w", err)
 	}
@@ -487,16 +571,11 @@ func (adapter *MigrationAdapter) MigrateVMDisk(ctx context.Context, vmID string,
 	fmt.Printf("DWCP: Disk compressed from %d to %d bytes (%.2fx compression)\n",
 		totalSize, len(compressedBlocks), compressionRatio)
 
-	// Write the envelope on the connection's single stream immediately
-	// before AMST.Transfer chunk data flows — deliberately after all
-	// block compression, not before; see the matching comment in
-	// MigrateVMMemory for why.
-	streamConn, err := conn.AMST.singleStreamConn()
-	if err != nil {
-		adapter.CleanupConnection(vmID, targetHost)
-		return fmt.Errorf("failed to get connection stream: %w", err)
-	}
-	if err := writeMigrateEnvelope(streamConn, migrateProtoDWCPDisk, vmID); err != nil {
+	// Write the envelope (+ session correlation header) to every one of
+	// this connection's AMST streams immediately before AMST.Transfer
+	// chunk data flows — deliberately after all block compression, not
+	// before; see the matching comment in MigrateVMMemory for why.
+	if err := writeDWCPEnvelopeToAllStreams(conn.AMST, migrateProtoDWCPDisk, vmID); err != nil {
 		adapter.CleanupConnection(vmID, targetHost)
 		return fmt.Errorf("failed to send envelope: %w", err)
 	}
@@ -559,15 +638,14 @@ func (adapter *MigrationAdapter) MigrateVMDisk(ctx context.Context, vmID string,
 
 // createConnection always creates and connects a fresh MigrationConnection.
 // Renamed from getOrCreateConnection: this package no longer reuses a
-// cached connection across multiple migrations. AMST.Connect/Transfer's
-// wire format carries no session or migration identifier (see the
-// migrateEnvelope comment above), so the receive side (handleIncomingMigration)
-// can only correctly correlate one accepted net.Conn to exactly one
-// migration when the sender establishes exactly one fresh connection per
-// migration and MigrateVMMemory/MigrateVMDisk close it via
-// CleanupConnection immediately after Transfer succeeds — see
-// NewMigrationAdapter's single-stream AMSTConfig override for the other
-// half of this invariant.
+// cached connection across multiple migrations — each migration dials a
+// brand new set of AMST streams (however many AMSTConfig calls for) and
+// MigrateVMMemory/MigrateVMDisk close all of them via CleanupConnection
+// immediately after Transfer succeeds. The receive side no longer depends
+// on "exactly one connection per migration" to know which accepted
+// net.Conns belong together — see writeDWCPStreamEnvelope/
+// handleIncomingDWCPStream for the session-ID-based correlation that
+// replaced that invariant (novacron-hpa).
 func (adapter *MigrationAdapter) createConnection(ctx context.Context, vmID string, targetHost string) (*MigrationConnection, error) {
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
@@ -583,8 +661,9 @@ func (adapter *MigrationAdapter) createConnection(ctx context.Context, vmID stri
 	conn.State = MigrationStateConnecting
 	conn.BytesTransferred = 0
 
-	// Create new AMST instance for this connection. adapter.config.AMSTConfig
-	// was forced to exactly one stream in NewMigrationAdapter.
+	// Create new AMST instance for this connection, using whatever stream
+	// count/adaptive settings NewMigrationAdapter resolved (defaults to
+	// single-stream unless the caller opted into more — see there).
 	amst, err := NewAMST(adapter.config.AMSTConfig)
 	if err != nil {
 		adapter.connPool.Put(conn)
@@ -960,6 +1039,22 @@ func (adapter *MigrationAdapter) Close() error {
 	}
 	adapter.mu.Unlock()
 
+	// Close any DWCP multi-stream sessions still waiting for the rest of
+	// their streams to arrive.
+	adapter.sessionMu.Lock()
+	for sessionID, session := range adapter.pendingSessions {
+		for _, c := range session.conns {
+			if c != nil {
+				c.Close()
+			}
+		}
+		if session.timer != nil {
+			session.timer.Stop()
+		}
+		delete(adapter.pendingSessions, sessionID)
+	}
+	adapter.sessionMu.Unlock()
+
 	// Close AMST
 	if adapter.amst != nil {
 		adapter.amst.Close()
@@ -1002,10 +1097,12 @@ func (adapter *MigrationAdapter) ListenForMigrations(ctx context.Context) error 
 // handleIncomingMigration handles an incoming migration connection. Reads
 // the wire envelope (see writeMigrateEnvelope) to determine which of the
 // four send paths (standard/DWCP x memory/disk) wrote this connection,
-// then dispatches to the matching receive function.
+// then dispatches to the matching receive function — directly for
+// standard paths (always exactly one connection per migration); via DWCP
+// multi-stream session correlation for DWCP paths, since a DWCP migration
+// may span N independently-accepted connections (see
+// handleIncomingDWCPStream).
 func (adapter *MigrationAdapter) handleIncomingMigration(ctx context.Context, conn net.Conn) {
-	defer conn.Close()
-
 	// Bound the envelope read so a connection that never sends one (or a
 	// dead/stalled sender) cannot leak this goroutine forever.
 	if adapter.config.ConnectionTimeout > 0 {
@@ -1014,21 +1111,194 @@ func (adapter *MigrationAdapter) handleIncomingMigration(ctx context.Context, co
 	protocol, vmID, err := readMigrateEnvelope(conn)
 	conn.SetReadDeadline(time.Time{})
 	if err != nil {
+		conn.Close()
 		fmt.Printf("DWCP: failed to read migration envelope: %v\n", err)
 		return
 	}
 
 	switch protocol {
 	case migrateProtoStandardMemory:
+		defer conn.Close()
 		adapter.receiveMemoryStandard(conn, vmID)
 	case migrateProtoStandardDisk:
+		defer conn.Close()
 		adapter.receiveDiskStandard(conn, vmID)
-	case migrateProtoDWCPMemory:
-		adapter.receiveMemoryDWCP(ctx, conn, vmID)
-	case migrateProtoDWCPDisk:
-		adapter.receiveDiskDWCP(ctx, conn, vmID)
+	case migrateProtoDWCPMemory, migrateProtoDWCPDisk:
+		// conn ownership transfers to the DWCP session machinery from
+		// here: it is either handed to a still-forming session (closed
+		// later by that session's AMST.Close() once Receive() completes,
+		// or by expireDWCPSession on timeout) or, if this call completes
+		// the session, closed the same way once completeDWCPSession's
+		// Receive() returns.
+		adapter.handleIncomingDWCPStream(ctx, conn, protocol, vmID)
 	default:
+		conn.Close()
 		fmt.Printf("DWCP: unknown migration protocol byte: %d\n", protocol)
+	}
+}
+
+// pendingDWCPSession accumulates the N independently-accepted net.Conns
+// (one per AMST stream) that share one sessionID, written by the sender
+// via writeDWCPStreamEnvelope, until all streamCount of them have arrived
+// — see handleIncomingDWCPStream/registerDWCPStream.
+type pendingDWCPSession struct {
+	protocol    byte
+	vmID        string
+	streamCount int
+	conns       []net.Conn // indexed by streamIndex; nil until that stream arrives
+	received    int
+	timer       *time.Timer // fires expireDWCPSession if the session never completes
+}
+
+// handleIncomingDWCPStream reads the session correlation header (written
+// immediately after the protocol+vmID envelope handleIncomingMigration
+// already consumed) from one accepted DWCP connection, registers it into
+// its migration's pendingDWCPSession, and — only for whichever goroutine's
+// registration completes that session — proceeds to actually receive the
+// migration. Every other stream's goroutine returns immediately without
+// closing conn: ownership has transferred to the pending session (or, on
+// error, conn is closed here).
+func (adapter *MigrationAdapter) handleIncomingDWCPStream(ctx context.Context, conn net.Conn, protocol byte, vmID string) {
+	if adapter.config.ConnectionTimeout > 0 {
+		conn.SetReadDeadline(time.Now().Add(adapter.config.ConnectionTimeout))
+	}
+	sessionID, streamIndex, streamCount, err := readDWCPStreamCorrelation(conn)
+	conn.SetReadDeadline(time.Time{})
+	if err != nil {
+		conn.Close()
+		fmt.Printf("DWCP: failed to read stream correlation for vmID %s: %v\n", vmID, err)
+		return
+	}
+
+	session, complete, err := adapter.registerDWCPStream(sessionID, streamCount, protocol, vmID, streamIndex, conn)
+	if err != nil {
+		conn.Close()
+		fmt.Printf("DWCP: %v\n", err)
+		return
+	}
+	if !complete {
+		return
+	}
+
+	adapter.completeDWCPSession(ctx, session)
+}
+
+// registerDWCPStream adds conn to the pending session for sessionID
+// (creating it, and arming its expiry timer, on first arrival), returning
+// the session and whether this call completed it (all streamCount streams
+// now registered). Once complete, the session is removed from
+// pendingSessions and its timer stopped — the caller becomes solely
+// responsible for it.
+func (adapter *MigrationAdapter) registerDWCPStream(sessionID string, streamCount int, protocol byte, vmID string, streamIndex int, conn net.Conn) (*pendingDWCPSession, bool, error) {
+	if streamCount <= 0 || streamIndex < 0 || streamIndex >= streamCount {
+		return nil, false, fmt.Errorf("invalid DWCP stream index/count for vmID %s: index=%d count=%d", vmID, streamIndex, streamCount)
+	}
+
+	adapter.sessionMu.Lock()
+	defer adapter.sessionMu.Unlock()
+
+	session, ok := adapter.pendingSessions[sessionID]
+	if !ok {
+		session = &pendingDWCPSession{
+			protocol:    protocol,
+			vmID:        vmID,
+			streamCount: streamCount,
+			conns:       make([]net.Conn, streamCount),
+		}
+		adapter.pendingSessions[sessionID] = session
+		if adapter.config.ConnectionTimeout > 0 {
+			session.timer = time.AfterFunc(adapter.config.ConnectionTimeout, func() {
+				adapter.expireDWCPSession(sessionID)
+			})
+		}
+	}
+	if session.streamCount != streamCount {
+		return nil, false, fmt.Errorf("DWCP stream count mismatch for vmID %s: session expects %d, stream reports %d", vmID, session.streamCount, streamCount)
+	}
+	if session.conns[streamIndex] != nil {
+		return nil, false, fmt.Errorf("duplicate DWCP stream index %d for vmID %s", streamIndex, vmID)
+	}
+
+	session.conns[streamIndex] = conn
+	session.received++
+	complete := session.received == session.streamCount
+	if complete {
+		delete(adapter.pendingSessions, sessionID)
+		if session.timer != nil {
+			session.timer.Stop()
+		}
+	}
+	return session, complete, nil
+}
+
+// expireDWCPSession evicts and closes a session's partially-arrived
+// streams if it is still pending ConnectionTimeout after its first stream
+// arrived — guards against leaking accepted connections (and the
+// goroutines blocked registering them) forever when a sender dials fewer
+// streams than it announces, or some of its connections never reach this
+// listener at all.
+func (adapter *MigrationAdapter) expireDWCPSession(sessionID string) {
+	adapter.sessionMu.Lock()
+	session, ok := adapter.pendingSessions[sessionID]
+	if ok {
+		delete(adapter.pendingSessions, sessionID)
+	}
+	adapter.sessionMu.Unlock()
+	if !ok {
+		return // already completed (or expired) concurrently
+	}
+
+	fmt.Printf("DWCP: session for vmID %s timed out with %d of %d streams received\n", session.vmID, session.received, session.streamCount)
+	for _, c := range session.conns {
+		if c != nil {
+			c.Close()
+		}
+	}
+}
+
+// completeDWCPSession wraps a fully-arrived session's connections in a
+// receive-only AMST instance (mirroring how Connect wires up a dialed
+// stream: id/conn/active/lastActive set, appended to amst.streams,
+// activeStreams incremented) and dispatches to the matching receive
+// function. Streams that end up receiving zero chunks (N > actual chunk
+// count) are handled by AMST.Receive itself: the sender closes every one
+// of its streams right after a successful Transfer regardless of how many
+// chunks each carried (CleanupConnection -> AMST.Close), so a zero-chunk
+// stream's first header read cleanly hits io.EOF (AMST.Receive's
+// `err == io.EOF` branch) instead of blocking forever.
+func (adapter *MigrationAdapter) completeDWCPSession(ctx context.Context, session *pendingDWCPSession) {
+	amstInst, err := NewAMST(AMSTConfig{
+		MinStreams:     session.streamCount,
+		MaxStreams:     session.streamCount,
+		InitialStreams: session.streamCount,
+		ReadTimeout:    adapter.config.ConnectionTimeout,
+	})
+	if err != nil {
+		fmt.Printf("DWCP: failed to create receive-side AMST for vmID %s: %v\n", session.vmID, err)
+		for _, c := range session.conns {
+			c.Close()
+		}
+		return
+	}
+
+	amstInst.mu.Lock()
+	for i, c := range session.conns {
+		amstInst.streams = append(amstInst.streams, &Stream{
+			id:         fmt.Sprintf("recv-%d", i),
+			conn:       c,
+			amst:       amstInst,
+			active:     true,
+			lastActive: time.Now(),
+		})
+		amstInst.activeStreams.Add(1)
+	}
+	amstInst.mu.Unlock()
+
+	switch session.protocol {
+	case migrateProtoDWCPMemory:
+		adapter.receiveMemoryDWCP(ctx, amstInst, session.vmID)
+	case migrateProtoDWCPDisk:
+		adapter.receiveDiskDWCP(ctx, amstInst, session.vmID)
 	}
 }
 
@@ -1074,14 +1344,19 @@ func (adapter *MigrationAdapter) receiveDiskStandard(conn net.Conn, vmID string)
 	}
 }
 
-// receiveMemoryDWCP receives memory sent by MigrateVMMemory: AMST-framed,
-// HDE-compressed bytes on the connection's single stream.
-func (adapter *MigrationAdapter) receiveMemoryDWCP(ctx context.Context, conn net.Conn, vmID string) {
+// receiveMemoryDWCP receives memory sent by MigrateVMMemory: HDE-compressed
+// bytes, AMST-framed across amstInst's (possibly many) streams. amstInst is
+// already fully populated with every stream of this migration by the time
+// this is called — see completeDWCPSession, which builds it from a
+// fully-arrived pendingDWCPSession before dispatching here.
+func (adapter *MigrationAdapter) receiveMemoryDWCP(ctx context.Context, amstInst *AMST, vmID string) {
+	defer amstInst.Close()
+
 	if adapter.hde == nil {
 		fmt.Printf("DWCP: received DWCP memory migration for vmID %s but HDE is not initialized\n", vmID)
 		return
 	}
-	compressed, err := receiveViaSingleStreamAMST(ctx, conn, adapter.config.ConnectionTimeout)
+	compressed, err := amstInst.Receive(ctx, nil)
 	if err != nil {
 		adapter.migrationsFailed.Add(1)
 		fmt.Printf("DWCP: memory AMST receive failed for vmID %s: %v\n", vmID, err)
@@ -1103,14 +1378,18 @@ func (adapter *MigrationAdapter) receiveMemoryDWCP(ctx context.Context, conn net
 }
 
 // receiveDiskDWCP receives disk blocks sent by MigrateVMDisk: AMST-framed
-// bytes on the connection's single stream, reassembling into the
+// bytes across amstInst's (possibly many) streams, reassembling into the
 // [blockID:4][blockLen:4]+HDE-compressed-data layout MigrateVMDisk wrote.
-func (adapter *MigrationAdapter) receiveDiskDWCP(ctx context.Context, conn net.Conn, vmID string) {
+// amstInst is already fully populated — see receiveMemoryDWCP's doc
+// comment (same contract).
+func (adapter *MigrationAdapter) receiveDiskDWCP(ctx context.Context, amstInst *AMST, vmID string) {
+	defer amstInst.Close()
+
 	if adapter.hde == nil {
 		fmt.Printf("DWCP: received DWCP disk migration for vmID %s but HDE is not initialized\n", vmID)
 		return
 	}
-	compressedBlocks, err := receiveViaSingleStreamAMST(ctx, conn, adapter.config.ConnectionTimeout)
+	compressedBlocks, err := amstInst.Receive(ctx, nil)
 	if err != nil {
 		adapter.migrationsFailed.Add(1)
 		fmt.Printf("DWCP: disk AMST receive failed for vmID %s: %v\n", vmID, err)
@@ -1268,34 +1547,4 @@ func readSizePrefixedDiskBlocks(conn net.Conn, readTimeout time.Duration, maxSiz
 		received += uint64(blockLen)
 	}
 	return blocks, nil
-}
-
-// receiveViaSingleStreamAMST reconstructs a Transfer payload from conn by
-// registering it as the sole stream of a throwaway, receive-only AMST
-// instance. Only valid for a single-stream sender (see
-// NewMigrationAdapter's AMSTConfig override) — with exactly one stream,
-// AMST.Receive's per-stream completion check (totalReceived >= totalSize)
-// fires on that same stream's own last chunk read, so there is no other
-// stream left blocking on a header that will never arrive. readTimeout,
-// when positive, bounds how long a single header/chunk read may block,
-// so a stalled or misbehaving sender cannot hang this goroutine forever.
-func receiveViaSingleStreamAMST(ctx context.Context, conn net.Conn, readTimeout time.Duration) ([]byte, error) {
-	amst, err := NewAMST(AMSTConfig{MinStreams: 1, MaxStreams: 1, InitialStreams: 1, ReadTimeout: readTimeout})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create receive-side AMST: %w", err)
-	}
-	defer amst.Close()
-
-	amst.mu.Lock()
-	amst.streams = append(amst.streams, &Stream{
-		id:         "recv-0",
-		conn:       conn,
-		amst:       amst,
-		active:     true,
-		lastActive: time.Now(),
-	})
-	amst.activeStreams.Add(1)
-	amst.mu.Unlock()
-
-	return amst.Receive(ctx, nil)
 }

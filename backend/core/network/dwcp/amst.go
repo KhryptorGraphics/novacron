@@ -854,29 +854,28 @@ func (amst *AMST) Close() error {
 	return nil
 }
 
-// singleStreamConn returns the underlying net.Conn of this AMST instance's
-// one active stream. Used by MigrationAdapter to write a small envelope
-// preamble directly on the connection before Transfer/Receive take over —
-// only valid when this AMST was configured for exactly one stream (see
-// NewMigrationAdapter's AMSTConfig override); returns an error otherwise
-// so a future change to that invariant fails loudly instead of silently
-// writing to (or reading the envelope from) the wrong stream.
-func (amst *AMST) singleStreamConn() (net.Conn, error) {
+// activeStreamConns returns the underlying net.Conn of every currently
+// active stream, in the order Connect appended them to amst.streams. Used
+// by MigrationAdapter to write a per-stream correlation preamble (session
+// ID + stream index/count — see writeDWCPStreamEnvelope in
+// migration_adapter.go) to every dialed connection before Transfer takes
+// over, so an N-stream Transfer's connections can be regrouped into one
+// logical receive on the other end (novacron-hpa). AMST itself has no
+// notion of "session" — it just dials and moves bytes on whatever streams
+// are in amst.streams; the correlation scheme lives entirely in
+// MigrationAdapter so AMST's own wire format (chunk headers) and its other
+// consumers (e.g. the v3/tests benchmark suite) are unaffected.
+func (amst *AMST) activeStreamConns() []net.Conn {
 	amst.mu.RLock()
 	defer amst.mu.RUnlock()
 
-	active := 0
-	var conn net.Conn
+	conns := make([]net.Conn, 0, len(amst.streams))
 	for _, stream := range amst.streams {
 		if stream.active {
-			active++
-			conn = stream.conn
+			conns = append(conns, stream.conn)
 		}
 	}
-	if active != 1 {
-		return nil, fmt.Errorf("singleStreamConn requires exactly one active stream, found %d", active)
-	}
-	return conn, nil
+	return conns
 }
 
 // abs returns absolute value of integer
