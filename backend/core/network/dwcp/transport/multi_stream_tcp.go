@@ -303,6 +303,9 @@ func (m *MultiStreamTCP) Send(data []byte) error {
 	}
 
 	m.totalBytesSent.Add(uint64(len(data)))
+	// Feed the Prometheus-facing MetricsCollector too; the internal atomic
+	// above is not surfaced by GetMetrics (matches rdma_transport.go).
+	m.metrics.RecordBytesSent(uint64(len(data)))
 	return nil
 }
 
@@ -411,6 +414,7 @@ func (m *MultiStreamTCP) Receive(expectedSize int) ([]byte, error) {
 	}
 
 	m.totalBytesRecv.Add(uint64(len(result)))
+	m.metrics.RecordBytesReceived(uint64(len(result)))
 	return result, nil
 }
 
