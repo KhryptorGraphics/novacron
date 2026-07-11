@@ -249,10 +249,17 @@ func TestBatchPlacement(t *testing.T) {
 		nodeUsage[node.ID]++
 	}
 
-	// Check resource utilization
+	// Check resource utilization is measurably nonzero (catches
+	// updateResourceUtilization never being called after batch placement).
+	// This fixture's own numbers cap the achievable value: 10 VMs requesting
+	// CPU 2+i%3 and memory (4+i%4)GB against createLargeTestCluster()'s 20
+	// nodes (312 total CPU, 624GB total memory) works out to ~8.9% average
+	// utilization at best, regardless of which nodes placement picks -- a
+	// 10% threshold could never pass with this fixture even when the
+	// production code is correct.
 	metrics := itp.GetMetrics()
 	utilization := metrics["resource_utilization"].(float64)
-	if utilization < 0.1 {
+	if utilization < 0.05 {
 		t.Error("Resource utilization too low after batch placement")
 	}
 }
@@ -335,14 +342,16 @@ func TestGeographicOptimization(t *testing.T) {
 		itp.AddRegion(region)
 	}
 
-	// Test VM with region preference
+	// Test VM with region preference. Label key must match what
+	// createGlobalNodes() sets on eu-node-1 ("compliance", not
+	// "data-sovereignty") or no node satisfies the constraint.
 	vm := &VM{
 		ID:              "vm-geo",
 		RequestedCPU:    4,
 		RequestedMemory: 8 * 1e9,
 		RequiredRegions: []string{"europe"},
 		RequiredLabels: map[string]string{
-			"data-sovereignty": "gdpr",
+			"compliance": "gdpr",
 		},
 	}
 
@@ -633,8 +642,10 @@ func createModeSpecificNodes(mode upgrade.NetworkMode) []*Node {
 				Region:          "local",
 				TotalCPU:        64,
 				TotalMemory:     256 * 1e9,
+				TotalGPU:        8,
 				AvailableCPU:    64,
 				AvailableMemory: 256 * 1e9,
+				AvailableGPU:    8, // createVMByType("high-performance") requests 4 GPUs
 				NetworkBandwidth: 100.0,
 				CostPerHour:     5.0,
 			},

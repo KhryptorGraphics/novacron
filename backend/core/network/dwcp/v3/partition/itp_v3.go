@@ -235,27 +235,38 @@ func (i *ITPv3) PlaceVMBatch(ctx context.Context, vms []*VM, constraints *Constr
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	placements := make(map[string]*Node)
-
 	// Sort VMs by priority and resource requirements
 	sortedVMs := i.sortVMsForPlacement(vms)
 
 	// Use appropriate batch placement strategy based on mode
+	var placements map[string]*Node
+	var err error
 	switch i.mode {
 	case upgrade.ModeDatacenter:
 		// Bin packing optimization for datacenter
-		return i.datacenterBatchPlacement(ctx, sortedVMs, constraints)
+		placements, err = i.datacenterBatchPlacement(ctx, sortedVMs, constraints)
 
 	case upgrade.ModeInternet:
 		// Geographic distribution for internet
-		return i.internetBatchPlacement(ctx, sortedVMs, constraints)
+		placements, err = i.internetBatchPlacement(ctx, sortedVMs, constraints)
 
 	case upgrade.ModeHybrid:
 		// Mixed strategy
-		return i.hybridBatchPlacement(ctx, sortedVMs, constraints)
+		placements, err = i.hybridBatchPlacement(ctx, sortedVMs, constraints)
+
+	default:
+		placements = make(map[string]*Node)
 	}
 
-	return placements, nil
+	// Unlike the single-VM PlaceVM path, the per-mode batch placement
+	// strategies never refreshed resource-utilization metrics after
+	// allocating, so GetMetrics().resource_utilization stayed stuck at 0.0
+	// after real batch placements. Refresh once here for all modes.
+	if len(placements) > 0 {
+		i.updateResourceUtilization()
+	}
+
+	return placements, err
 }
 
 // getAvailableNodes returns nodes that can accommodate the VM
@@ -332,10 +343,18 @@ func (i *ITPv3) meetsConstraints(node *Node, vm *VM, constraints *Constraints) b
 		}
 	}
 
-	// Check uptime constraint
+	// Check uptime constraint. RequiredUptime is a fractional SLA-style target
+	// (e.g. 0.99 = 99% availability). node.Uptime is continuous runtime since
+	// last restart, not a historical availability percentage -- comparing it
+	// directly against a fraction of a full year conflates the two and made
+	// near-100% uptime requirements unsatisfiable regardless of a node's
+	// actual reliability (no real node stays up 361+ days straight).
+	// ponytail: approximate availability from FailureRate (failures/year)
+	// instead, since that's the field this system actually tracks for
+	// reliability; swap in real historical-uptime tracking if it's added.
 	if constraints != nil && constraints.RequiredUptime > 0 {
-		uptimeRatio := float64(node.Uptime) / float64(time.Hour * 24 * 365)
-		if uptimeRatio < constraints.RequiredUptime {
+		availabilityRatio := 1.0 / (1.0 + node.FailureRate)
+		if availabilityRatio < constraints.RequiredUptime {
 			return false
 		}
 	}

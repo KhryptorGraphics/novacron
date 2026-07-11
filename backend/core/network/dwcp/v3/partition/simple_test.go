@@ -274,12 +274,15 @@ func TestResourceUtilizationCalculation(t *testing.T) {
 	// Update utilization
 	itp.updateResourceUtilization()
 
-	// Calculate expected utilization
-	// CPU: (8/16 + 24/32) / 2 = (0.5 + 0.75) / 2 = 0.625
-	// Memory: (16/32 + 32/64) / 2 = (0.5 + 0.5) / 2 = 0.5
-	// Average: (0.625 + 0.5) / 2 = 0.5625
+	// Calculate expected utilization. updateResourceUtilization() computes a
+	// cluster-wide weighted aggregate (sum used / sum total across all nodes),
+	// not a per-node average of each node's own ratio -- the two are
+	// different formulas whenever node sizes differ, as they do here.
+	// CPU: (8+24) / (16+32) = 32/48 = 0.6667
+	// Memory: (16+32) / (32+64) = 48/96 = 0.5
+	// Average: (0.6667 + 0.5) / 2 = 0.5833
 
-	expectedUtil := 0.5625
+	expectedUtil := 0.5833
 	actualUtil := itp.resourceUtilization
 
 	if actualUtil < expectedUtil-0.01 || actualUtil > expectedUtil+0.01 {
