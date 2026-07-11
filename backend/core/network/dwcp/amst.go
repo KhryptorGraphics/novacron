@@ -366,6 +366,7 @@ func (amst *AMST) Transfer(ctx context.Context, data []byte, progressCallback fu
 
 	totalSize := int64(len(data))
 	chunkSize := int(amst.chunkSize.Load())
+	start := time.Now()
 
 	// Calculate number of chunks
 	numChunks := (len(data) + chunkSize - 1) / chunkSize
@@ -509,11 +510,15 @@ func (amst *AMST) Transfer(ctx context.Context, data []byte, progressCallback fu
 		return fmt.Errorf("incomplete transfer: %d of %d bytes", transferredBytes.Load(), totalSize)
 	}
 
+	amst.recordTransferRate(transferredBytes.Load(), time.Since(start))
+
 	return nil
 }
 
 // Receive reads data from parallel streams and reconstructs the original data
 func (amst *AMST) Receive(ctx context.Context, progressCallback func(int64)) ([]byte, error) {
+	start := time.Now()
+
 	// Get active streams
 	amst.mu.RLock()
 	activeStreams := make([]*Stream, 0, len(amst.streams))
@@ -648,6 +653,8 @@ func (amst *AMST) Receive(ctx context.Context, progressCallback func(int64)) ([]
 		return nil, fmt.Errorf("incomplete receive: %d of %d bytes", len(result), totalSize)
 	}
 
+	amst.recordTransferRate(receivedBytes.Load(), time.Since(start))
+
 	return result, nil
 }
 
@@ -762,6 +769,33 @@ func (amst *AMST) optimize() {
 
 	amst.optimizer.lastOptimization = time.Now()
 	amst.optimizer.optimizationCount++
+}
+
+// recordTransferRate converts one Transfer or Receive call's real byte count
+// and wall-clock duration into a bytes-per-second sample and feeds it into
+// UpdateMetrics, preserving whatever latency/packetLoss values are already
+// tracked (both are maintained independently elsewhere - Connect measures
+// real dial RTT for latency; nothing measures packet loss yet).
+//
+// Before this fix, transferRate was written exactly once per AMST instance,
+// by Connect() reading its own current value and storing it back unchanged
+// (see the call site there) - so it was permanently 0 for the lifetime of
+// every instance, and optimize()'s currentRate==0 guard always fired,
+// skipping every adaptive stream/chunk recalculation regardless of caller.
+// Transfer() and Receive() are where bytes actually move, so this is where
+// the real rate has to be measured.
+//
+// ponytail: samples once per Transfer()/Receive() call (that call's own byte
+// count and elapsed time), not mid-flight per-chunk. A single very large
+// call only updates transferRate at completion, so optimize() won't react
+// until the call returns. Add ticker-based mid-transfer sampling if a
+// multi-GB single Transfer() needs optimize() to adapt before it finishes.
+func (amst *AMST) recordTransferRate(bytes int64, elapsed time.Duration) {
+	if bytes <= 0 || elapsed <= 0 {
+		return
+	}
+	rate := int64(float64(bytes) / elapsed.Seconds())
+	amst.UpdateMetrics(amst.latency.Load(), amst.packetLoss.Load().(float64), rate)
 }
 
 // UpdateMetrics updates network metrics for optimization
