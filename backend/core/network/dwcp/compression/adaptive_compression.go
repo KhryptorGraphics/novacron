@@ -12,12 +12,12 @@ import (
 // AdaptiveCompressor manages adaptive compression level selection
 type AdaptiveCompressor struct {
 	// Current compression level
-	currentLevel    zstd.EncoderLevel
-	levelMutex      sync.RWMutex
+	currentLevel zstd.EncoderLevel
+	levelMutex   sync.RWMutex
 
 	// Adaptive configuration
-	config          *AdaptiveConfig
-	logger          *zap.Logger
+	config *AdaptiveConfig
+	logger *zap.Logger
 
 	// Performance metrics
 	recentRatios    []float64
@@ -26,18 +26,18 @@ type AdaptiveCompressor struct {
 	metricsWindow   int
 
 	// CPU monitoring
-	lastCPUCheck    time.Time
-	cpuAvailable    float64
+	lastCPUCheck time.Time
+	cpuAvailable float64
 }
 
 // AdaptiveConfig configuration for adaptive compression
 type AdaptiveConfig struct {
-	Enabled             bool    `json:"enabled" yaml:"enabled"`
-	MinCompressionRatio float64 `json:"min_compression_ratio" yaml:"min_compression_ratio"`
-	TargetRatio         float64 `json:"target_ratio" yaml:"target_ratio"`
-	MaxCPUUtilization   float64 `json:"max_cpu_utilization" yaml:"max_cpu_utilization"`
+	Enabled             bool          `json:"enabled" yaml:"enabled"`
+	MinCompressionRatio float64       `json:"min_compression_ratio" yaml:"min_compression_ratio"`
+	TargetRatio         float64       `json:"target_ratio" yaml:"target_ratio"`
+	MaxCPUUtilization   float64       `json:"max_cpu_utilization" yaml:"max_cpu_utilization"`
 	AdjustInterval      time.Duration `json:"adjust_interval" yaml:"adjust_interval"`
-	RatioWindow         int     `json:"ratio_window" yaml:"ratio_window"`
+	RatioWindow         int           `json:"ratio_window" yaml:"ratio_window"`
 }
 
 // DefaultAdaptiveConfig returns sensible defaults
@@ -48,7 +48,7 @@ func DefaultAdaptiveConfig() *AdaptiveConfig {
 		TargetRatio:         10.0, // Target 10x compression
 		MaxCPUUtilization:   0.8,  // Use up to 80% CPU
 		AdjustInterval:      30 * time.Second,
-		RatioWindow:         100,  // Track last 100 operations
+		RatioWindow:         100, // Track last 100 operations
 	}
 }
 
@@ -112,6 +112,13 @@ func (ac *AdaptiveCompressor) RecordCompressionResult(ratio float64, duration ti
 	}
 }
 
+// SmallDataCompressionFloor is the payload size (bytes) below which the
+// adaptive compressor considers zstd overhead not worth it. It is the pure
+// size floor only; the delta encoder relies on this being distinct from the
+// ratio-based ineffectiveness check so that small payloads still flow through
+// normal baseline/delta encoding (see delta_encoder.go Encode).
+const SmallDataCompressionFloor = 512
+
 // ShouldCompress determines if data should be compressed based on characteristics
 func (ac *AdaptiveCompressor) ShouldCompress(dataSize int) bool {
 	if !ac.config.Enabled {
@@ -119,7 +126,7 @@ func (ac *AdaptiveCompressor) ShouldCompress(dataSize int) bool {
 	}
 
 	// Very small data - compression overhead not worth it
-	if dataSize < 512 {
+	if dataSize < SmallDataCompressionFloor {
 		return false
 	}
 
@@ -282,12 +289,12 @@ func (ac *AdaptiveCompressor) GetStats() map[string]interface{} {
 	ac.metricsMutex.Unlock()
 
 	return map[string]interface{}{
-		"enabled":          ac.config.Enabled,
-		"current_level":    ac.levelToString(currentLevel),
-		"avg_ratio":        avgRatio,
-		"avg_duration_ms":  avgDuration.Milliseconds(),
-		"cpu_available":    ac.cpuAvailable,
-		"sample_count":     sampleCount,
-		"target_ratio":     ac.config.TargetRatio,
+		"enabled":         ac.config.Enabled,
+		"current_level":   ac.levelToString(currentLevel),
+		"avg_ratio":       avgRatio,
+		"avg_duration_ms": avgDuration.Milliseconds(),
+		"cpu_available":   ac.cpuAvailable,
+		"sample_count":    sampleCount,
+		"target_ratio":    ac.config.TargetRatio,
 	}
 }

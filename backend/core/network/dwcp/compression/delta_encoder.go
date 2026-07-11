@@ -14,17 +14,17 @@ import (
 // Phase 1: Production-ready with dictionary training and advanced algorithms
 type DeltaEncoder struct {
 	// Baseline management
-	baselineStates  map[string]*BaselineState
-	baselineMutex   sync.RWMutex
+	baselineStates   map[string]*BaselineState
+	baselineMutex    sync.RWMutex
 	baselineInterval time.Duration
 	maxBaselineAge   time.Duration
 
 	// Compression (with dictionary support)
-	compressor   *zstd.Encoder
-	decompressor *zstd.Decoder
-	dictEncoder  *zstd.Encoder // Dictionary-based encoder
-	dictDecoder  *zstd.Decoder // Dictionary-based decoder
-	compressMutex sync.Mutex // Protects concurrent compress/decompress operations
+	compressor    *zstd.Encoder
+	decompressor  *zstd.Decoder
+	dictEncoder   *zstd.Encoder // Dictionary-based encoder
+	dictDecoder   *zstd.Decoder // Dictionary-based decoder
+	compressMutex sync.Mutex    // Protects concurrent compress/decompress operations
 
 	// Phase 1: Advanced features
 	dictionaryTrainer *DictionaryTrainer
@@ -38,35 +38,35 @@ type DeltaEncoder struct {
 	logger *zap.Logger
 
 	// Legacy metrics (kept for backward compatibility)
-	totalEncoded     uint64
-	totalDecoded     uint64
-	deltaHits        uint64
-	baselineRefresh  uint64
-	mu               sync.RWMutex
+	totalEncoded    uint64
+	totalDecoded    uint64
+	deltaHits       uint64
+	baselineRefresh uint64
+	mu              sync.RWMutex
 }
 
 // BaselineState represents a baseline snapshot for delta computation
 type BaselineState struct {
-	Data      []byte
-	Timestamp time.Time
+	Data       []byte
+	Timestamp  time.Time
 	DeltaCount int // Number of deltas computed from this baseline
 }
 
 // DeltaEncodingConfig configuration for delta encoding
 type DeltaEncodingConfig struct {
-	Enabled            bool          `json:"enabled" yaml:"enabled"`
-	BaselineInterval   time.Duration `json:"baseline_interval" yaml:"baseline_interval"`
-	MaxBaselineAge     time.Duration `json:"max_baseline_age" yaml:"max_baseline_age"`
-	MaxDeltaChain      int           `json:"max_delta_chain" yaml:"max_delta_chain"`
-	CompressionLevel   int           `json:"compression_level" yaml:"compression_level"` // Zstandard: 0-9
-	EnableDictionary   bool          `json:"enable_dictionary" yaml:"enable_dictionary"`
+	Enabled          bool          `json:"enabled" yaml:"enabled"`
+	BaselineInterval time.Duration `json:"baseline_interval" yaml:"baseline_interval"`
+	MaxBaselineAge   time.Duration `json:"max_baseline_age" yaml:"max_baseline_age"`
+	MaxDeltaChain    int           `json:"max_delta_chain" yaml:"max_delta_chain"`
+	CompressionLevel int           `json:"compression_level" yaml:"compression_level"` // Zstandard: 0-9
+	EnableDictionary bool          `json:"enable_dictionary" yaml:"enable_dictionary"`
 
 	// Phase 1: Advanced features
-	DeltaAlgorithm     string        `json:"delta_algorithm" yaml:"delta_algorithm"`         // "xor", "rsync", "bsdiff", "auto"
-	AdaptiveThreshold  float64       `json:"adaptive_threshold" yaml:"adaptive_threshold"`   // Auto-adjust compression if ratio < threshold
-	MinCompressionRatio float64      `json:"min_compression_ratio" yaml:"min_compression_ratio"` // Skip compression if ratio < this
-	EnableAdaptive     bool          `json:"enable_adaptive" yaml:"enable_adaptive"`         // Enable adaptive compression
-	EnableBaselineSync bool          `json:"enable_baseline_sync" yaml:"enable_baseline_sync"` // Enable cluster sync
+	DeltaAlgorithm      string  `json:"delta_algorithm" yaml:"delta_algorithm"`             // "xor", "rsync", "bsdiff", "auto"
+	AdaptiveThreshold   float64 `json:"adaptive_threshold" yaml:"adaptive_threshold"`       // Auto-adjust compression if ratio < threshold
+	MinCompressionRatio float64 `json:"min_compression_ratio" yaml:"min_compression_ratio"` // Skip compression if ratio < this
+	EnableAdaptive      bool    `json:"enable_adaptive" yaml:"enable_adaptive"`             // Enable adaptive compression
+	EnableBaselineSync  bool    `json:"enable_baseline_sync" yaml:"enable_baseline_sync"`   // Enable cluster sync
 }
 
 // DefaultDeltaEncodingConfig returns sensible defaults for Phase 1
@@ -76,8 +76,8 @@ func DefaultDeltaEncodingConfig() *DeltaEncodingConfig {
 		BaselineInterval:    5 * time.Minute,
 		MaxBaselineAge:      15 * time.Minute,
 		MaxDeltaChain:       10,
-		CompressionLevel:    3, // Balanced compression (Zstandard level 3)
-		EnableDictionary:    true, // Phase 1: Dictionary training enabled
+		CompressionLevel:    3,      // Balanced compression (Zstandard level 3)
+		EnableDictionary:    true,   // Phase 1: Dictionary training enabled
 		DeltaAlgorithm:      "auto", // Phase 1: Auto-select algorithm
 		AdaptiveThreshold:   3.0,
 		MinCompressionRatio: 1.1,
@@ -176,14 +176,28 @@ func (de *DeltaEncoder) Encode(stateKey string, data []byte) (*EncodedData, erro
 		de.dictionaryTrainer.AddSample(de.extractResourceType(stateKey), data)
 	}
 
-	// Phase 1: Check if compression is worthwhile
-	if de.adaptiveComp != nil && !de.adaptiveComp.ShouldCompress(len(data)) {
+	// Phase 1: Adaptive compression bypass. ShouldCompress returns false in
+	// two cases: (a) payloads below SmallDataCompressionFloor, and (b) larger
+	// payloads whose recent compression ratios show zstd is ineffective
+	// (incompressible data). We only take the raw-passthrough shortcut for
+	// case (b): storing data uncompressed with Raw=true so Decode knows to
+	// skip decompression. Small payloads (case a) must still flow through the
+	// normal baseline/delta path below - otherwise a small state could never
+	// be delta-encoded, and the raw output was previously indistinguishable
+	// from a real zstd baseline (IsDelta=false), making it undecodable
+	// (Decode blindly zstd-decoded raw bytes -> "magic number mismatch").
+	// Raw is only ever set on this IsDelta=false path, never on a delta:
+	// hde_v3 consumes encoded.Data only when IsDelta is true and drops any
+	// Raw flag, so a raw delta would resurface the same bug one layer up.
+	if de.adaptiveComp != nil && len(data) >= SmallDataCompressionFloor &&
+		!de.adaptiveComp.ShouldCompress(len(data)) {
 		de.metrics.RecordIncompressibleSkip()
 		return &EncodedData{
 			Data:           data,
 			OriginalSize:   len(data),
 			CompressedSize: len(data),
 			IsDelta:        false,
+			Raw:            true,
 			BaselineKey:    stateKey,
 			Timestamp:      time.Now(),
 		}, nil
@@ -259,7 +273,11 @@ func (de *DeltaEncoder) Encode(stateKey string, data []byte) (*EncodedData, erro
 // Decode decompresses and applies delta reconstruction
 func (de *DeltaEncoder) Decode(stateKey string, encoded *EncodedData) ([]byte, error) {
 	if !de.config.Enabled || !encoded.IsDelta {
-		// Just decompress
+		// Raw passthrough (adaptive incompressible bypass) was stored
+		// uncompressed; return it as-is. Everything else is zstd.
+		if encoded.Raw {
+			return encoded.Data, nil
+		}
 		return de.decompress(encoded.Data)
 	}
 
@@ -317,12 +335,12 @@ func (de *DeltaEncoder) createBaseline(stateKey string, data []byte) (*EncodedDa
 		zap.Int("compressed", len(compressed)))
 
 	return &EncodedData{
-		Data:          compressed,
-		OriginalSize:  len(data),
+		Data:           compressed,
+		OriginalSize:   len(data),
 		CompressedSize: len(compressed),
-		IsDelta:       false,
-		BaselineKey:   stateKey,
-		Timestamp:     time.Now(),
+		IsDelta:        false,
+		BaselineKey:    stateKey,
+		Timestamp:      time.Now(),
 	}, nil
 }
 
@@ -389,11 +407,11 @@ func (de *DeltaEncoder) compressOnly(data []byte) (*EncodedData, error) {
 	de.mu.Unlock()
 
 	return &EncodedData{
-		Data:          compressed,
-		OriginalSize:  len(data),
+		Data:           compressed,
+		OriginalSize:   len(data),
 		CompressedSize: len(compressed),
-		IsDelta:       false,
-		Timestamp:     time.Now(),
+		IsDelta:        false,
+		Timestamp:      time.Now(),
 	}, nil
 }
 
@@ -595,12 +613,18 @@ func (de *DeltaEncoder) GetDetailedMetrics() map[string]interface{} {
 
 // EncodedData represents compressed and optionally delta-encoded data
 type EncodedData struct {
-	Data          []byte
-	OriginalSize  int
+	Data           []byte
+	OriginalSize   int
 	CompressedSize int
-	IsDelta       bool
-	BaselineKey   string
-	Timestamp     time.Time
+	IsDelta        bool
+	// Raw indicates Data is stored uncompressed (adaptive incompressible
+	// bypass) rather than zstd-compressed. Only ever set on the IsDelta=false
+	// path; Decode returns Data as-is instead of decompressing. Zero value
+	// (false) preserves the compressed-baseline/delta contract for every
+	// other constructor, including cross-package ones (v3/encoding hde_v3).
+	Raw         bool
+	BaselineKey string
+	Timestamp   time.Time
 }
 
 // CompressionRatio returns the compression ratio achieved
