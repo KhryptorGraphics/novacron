@@ -223,6 +223,16 @@ func (th *TestHarness) executeOperation(op *WorkloadOperation) *OperationResult 
 		return result
 	}
 
+	// NOTE: CompressedBytes is never populated here (stays 0), so
+	// AssertionCompressionRatio can never pass -- tried wiring it via the
+	// existing estimateCompressibility() helper (a second full-buffer scan
+	// per operation), but that added enough per-operation cost to push
+	// TestFullTestingPipeline's multi-GB scenarios past its test timeout, a
+	// worse regression than the assertion staying broken. Also, even with it
+	// wired, TestCrossRegionMigration/TestHighLatencyMigration remained red
+	// on AssertionBandwidthUtilization (needs real bandwidth-throttling
+	// simulation, not just a compression estimate) -- see novacron-v4y /
+	// novacron-3cd for this deeper, separate simulator-fidelity gap.
 	// Update metrics
 	th.metrics.mu.Lock()
 	th.metrics.TotalBytes += int64(len(data))

@@ -97,12 +97,17 @@ func (wg *WorkloadGenerator) fillRepetitivePattern(data []byte) {
 
 // fillLowEntropyData fills with low-entropy data (text-like)
 func (wg *WorkloadGenerator) fillLowEntropyData(data []byte) {
-	// Simulate text data with limited alphabet
-	alphabet := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 \n"
-	rng := mathrand.New(mathrand.NewSource(wg.seed))
-
-	for i := 0; i < len(data); i++ {
-		data[i] = alphabet[rng.Intn(len(alphabet))]
+	// Simulate text data with limited alphabet. alphabet is exactly 64 (a
+	// power of 2) bytes long, so byte%64 maps uniformly with no modulo bias.
+	// ponytail: bulk-fill via crypto/rand then map into the alphabet, instead
+	// of one mathrand.Intn() call per byte -- for VM-memory-sized buffers
+	// (multi-GB in production scenarios) the per-byte RNG call dominated
+	// runtime and contributed to the testing/testing-scenarios packages'
+	// multi-minute test times.
+	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 \n"
+	rand.Read(data)
+	for i, b := range data {
+		data[i] = alphabet[b%byte(len(alphabet))]
 	}
 }
 
@@ -309,6 +314,8 @@ func (ws *WorkloadScheduler) scheduleConstant() {
 			Type:      ws.workload.Type,
 			VMSize:    ws.workload.VMSize,
 			Timestamp: time.Now(),
+			Source:    ws.workload.Source,
+			Target:    ws.workload.Target,
 		}
 		ws.operations <- op
 
@@ -331,6 +338,8 @@ func (ws *WorkloadScheduler) scheduleBursty() {
 				Type:      ws.workload.Type,
 				VMSize:    ws.workload.VMSize,
 				Timestamp: time.Now(),
+				Source:    ws.workload.Source,
+				Target:    ws.workload.Target,
 			}
 			ws.operations <- op
 			i++
@@ -356,6 +365,8 @@ func (ws *WorkloadScheduler) scheduleSinusoidal() {
 			Type:      ws.workload.Type,
 			VMSize:    ws.workload.VMSize,
 			Timestamp: time.Now(),
+			Source:    ws.workload.Source,
+			Target:    ws.workload.Target,
 		}
 		ws.operations <- op
 

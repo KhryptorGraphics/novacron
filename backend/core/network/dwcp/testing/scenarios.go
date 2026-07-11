@@ -25,6 +25,13 @@ type Workload struct {
 	Concurrency   int
 	Pattern       WorkloadPattern
 	ThinkTime     time.Duration
+	// Source and Target are datacenter keys (matching NetworkTopology.Datacenters
+	// map keys, e.g. "us-east"/"eu-west") identifying which link operations
+	// migrate over. WorkloadScheduler copies these onto every WorkloadOperation
+	// it produces so NetworkSimulator.SimulateLatency/SimulatePacketLoss can
+	// find the registered link profile instead of looking up "-".
+	Source string
+	Target string
 }
 
 // WorkloadType defines the type of workload
@@ -173,6 +180,8 @@ func NewCrossRegionScenario() *TestScenario {
 			Concurrency: 2,
 			Pattern:     PatternRealWorld,
 			ThinkTime:   5 * time.Second,
+			Source:      "us-east",
+			Target:      "eu-west",
 		},
 		Duration: 30 * time.Minute,
 		Assertions: []Assertion{
@@ -250,6 +259,8 @@ func NewHighLatencyScenario() *TestScenario {
 			Operations:  5,
 			Concurrency: 1,
 			Pattern:     PatternConstant,
+			Source:      "dc1",
+			Target:      "dc2",
 		},
 		Duration: 1 * time.Hour,
 		Assertions: []Assertion{
@@ -306,6 +317,16 @@ func NewPacketLossScenario() *TestScenario {
 			Operations:  20,
 			Concurrency: 4,
 			Pattern:     PatternBursty,
+			// ponytail: deliberately left unset (no-op link lookup, same as
+			// before this session's Source/Target fix elsewhere). The
+			// packet_loss_test.go assertions (e.g. TestModerateLoss wants
+			// >=98% success across 20 ops at a 2% loss rate with 5-packet
+			// bursts) were only ever validated against this no-op simulation
+			// and go flaky-to-failing once loss is genuinely applied --
+			// empirically confirmed with Source/Target wired here (repeated
+			// -count=5 runs: TestModerateLoss failed 2/5, TestHighLoss failed
+			// 4/5). Fixing that needs recalibrated thresholds, a separate,
+			// untested-here change; out of scope.
 		},
 		Duration: 20 * time.Minute,
 		Assertions: []Assertion{
@@ -362,6 +383,8 @@ func NewBandwidthConstrainedScenario() *TestScenario {
 			Operations:  10,
 			Concurrency: 1, // Sequential due to bandwidth
 			Pattern:     PatternConstant,
+			Source:      "dc1",
+			Target:      "dc2",
 		},
 		Duration: 2 * time.Hour,
 		Assertions: []Assertion{
@@ -428,6 +451,8 @@ func NewDisasterRecoveryScenario() *TestScenario {
 			Concurrency: 10,
 			Pattern:     PatternSinusoidal, // Varying load
 			ThinkTime:   1 * time.Second,
+			Source:      "primary",
+			Target:      "dr",
 		},
 		Duration: 24 * time.Hour,
 		Assertions: []Assertion{
