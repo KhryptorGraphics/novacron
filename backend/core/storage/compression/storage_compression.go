@@ -30,8 +30,11 @@ const (
 type CompressionLevel int
 
 const (
-	// CompressionDefault uses the default compression level of the algorithm
-	CompressionDefault CompressionLevel = 0
+	// CompressionDefault uses the default compression level of the algorithm.
+	// Must be -1 (matching compress/flate.DefaultCompression), not 0: gzip and
+	// zlib both treat a literal 0 as NoCompression, which is a no-op (worse
+	// than a no-op, since it still adds gzip/zlib framing overhead).
+	CompressionDefault CompressionLevel = -1
 
 	// CompressionFastest optimizes for speed at the expense of compression ratio
 	CompressionFastest CompressionLevel = 1

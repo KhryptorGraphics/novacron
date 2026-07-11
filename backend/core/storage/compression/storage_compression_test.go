@@ -121,8 +121,11 @@ func TestCompression(t *testing.T) {
 }
 
 func TestCompressionWithMetadata(t *testing.T) {
-	// Create some test data that should compress well
-	testData := bytes.Repeat([]byte("abcdefghijklmnopqrstuvwxyz"), 100)
+	// Create some test data that should compress well. Must be >= the default
+	// config's MinSizeBytes (4KB, see DefaultCompressionConfig) or
+	// ShouldCompress rejects it before compression is even attempted and
+	// CompressWithMetadata reports algorithm "none" instead of gzip.
+	testData := bytes.Repeat([]byte("abcdefghijklmnopqrstuvwxyz"), 200) // 5200 bytes
 
 	// Create compressor with default config
 	compressor := NewCompressor(DefaultCompressionConfig())
