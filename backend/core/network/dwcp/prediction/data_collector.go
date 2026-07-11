@@ -15,6 +15,36 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+// Predictive-bandwidth (PBA) network-condition gauges. Registered once at
+// package load on Prometheus's default registry (served by the /metrics
+// promhttp.Handler in dwcp/metrics/exporter.go), matching the package-level
+// promauto convention used elsewhere (e.g. conflict/detector.go). Making them
+// package-level singletons lets multiple DataCollectors be constructed without
+// the duplicate-registration panic that per-instance promauto.NewGauge caused,
+// while keeping the metrics visible on the default /metrics endpoint.
+var (
+	pbaBandwidthGauge = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "dwcp_pba_current_bandwidth_mbps",
+		Help: "Current measured bandwidth in Mbps",
+	})
+	pbaLatencyGauge = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "dwcp_pba_current_latency_ms",
+		Help: "Current measured latency in milliseconds",
+	})
+	pbaPacketLossGauge = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "dwcp_pba_current_packet_loss_ratio",
+		Help: "Current packet loss ratio (0-1)",
+	})
+	pbaJitterGauge = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "dwcp_pba_current_jitter_ms",
+		Help: "Current network jitter in milliseconds",
+	})
+	pbaSampleCountGauge = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "dwcp_pba_sample_count",
+		Help: "Number of collected network samples",
+	})
+)
+
 // NetworkSample represents a single network measurement
 type NetworkSample struct {
 	Timestamp     time.Time `json:"timestamp"`
@@ -80,32 +110,17 @@ func NewDataCollector(collectInterval time.Duration, maxSamples int) *DataCollec
 	return collector
 }
 
-// initMetrics initializes Prometheus metrics
+// initMetrics wires the process-global PBA gauges into this collector. The
+// gauges are package-level singletons registered once at package load, so
+// constructing multiple DataCollectors no longer panics with "duplicate
+// metrics collector registration" (the previous per-instance
+// promauto.NewGauge calls bound to the global registry and collided).
 func (c *DataCollector) initMetrics() {
-	c.bandwidthGauge = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "dwcp_pba_current_bandwidth_mbps",
-		Help: "Current measured bandwidth in Mbps",
-	})
-
-	c.latencyGauge = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "dwcp_pba_current_latency_ms",
-		Help: "Current measured latency in milliseconds",
-	})
-
-	c.packetLossGauge = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "dwcp_pba_current_packet_loss_ratio",
-		Help: "Current packet loss ratio (0-1)",
-	})
-
-	c.jitterGauge = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "dwcp_pba_current_jitter_ms",
-		Help: "Current network jitter in milliseconds",
-	})
-
-	c.sampleCountGauge = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "dwcp_pba_sample_count",
-		Help: "Number of collected network samples",
-	})
+	c.bandwidthGauge = pbaBandwidthGauge
+	c.latencyGauge = pbaLatencyGauge
+	c.packetLossGauge = pbaPacketLossGauge
+	c.jitterGauge = pbaJitterGauge
+	c.sampleCountGauge = pbaSampleCountGauge
 }
 
 // Start begins continuous metric collection
@@ -230,16 +245,29 @@ func (c *DataCollector) measurePacketLoss() float64 {
 	return rand.Float64() * 0.05 // 0-5% loss
 }
 
-// measureJitter measures network jitter
+// measureJitter estimates network jitter as the standard deviation of recently
+// observed latencies. It reads the existing sample history rather than taking
+// 10 fresh probes with 100ms sleeps between them: the old approach blocked
+// collectSample for ~1s every cycle, stalling the collect loop far beyond
+// collectInterval (e.g. no sample completed within a 500ms window at a 100ms
+// interval). Returns 0 until at least two latency samples exist.
 func (c *DataCollector) measureJitter() float64 {
-	// Measure variance in latency
-	latencies := make([]float64, 10)
-	for i := range latencies {
-		latencies[i] = c.measureLatency()
-		time.Sleep(100 * time.Millisecond)
+	c.mu.RLock()
+	n := len(c.samples)
+	const window = 10
+	if n > window {
+		n = window
+	}
+	latencies := make([]float64, 0, n)
+	for i := len(c.samples) - n; i < len(c.samples); i++ {
+		latencies = append(latencies, c.samples[i].LatencyMs)
+	}
+	c.mu.RUnlock()
+
+	if len(latencies) < 2 {
+		return 0
 	}
 
-	// Calculate standard deviation
 	mean := average(latencies)
 	var variance float64
 	for _, lat := range latencies {
