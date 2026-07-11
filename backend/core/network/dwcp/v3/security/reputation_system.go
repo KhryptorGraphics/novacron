@@ -69,29 +69,29 @@ type ReputationConfig struct {
 	NewNodeGracePeriod time.Duration
 
 	// Scoring
-	ConsensusCorrectBoost    float64
-	ConsensusIncorrectPenalty float64
+	ConsensusCorrectBoost      float64
+	ConsensusIncorrectPenalty  float64
 	ByzantinePenaltyMultiplier float64
-	MessageSuccessBoost      float64
-	MessageFailurePenalty    float64
+	MessageSuccessBoost        float64
+	MessageFailurePenalty      float64
 
 	// Decay
-	DecayEnabled     bool
-	DecayRate        float64 // Points per hour of inactivity
-	DecayInterval    time.Duration
-	MinimumScore     float64 // Floor for decay
+	DecayEnabled  bool
+	DecayRate     float64 // Points per hour of inactivity
+	DecayInterval time.Duration
+	MinimumScore  float64 // Floor for decay
 
 	// Thresholds
-	QuarantineThreshold  float64 // Score below this = quarantine
-	TrustedThreshold     float64 // Score above this = trusted
-	SuspiciousThreshold  float64 // Score below this = suspicious
+	QuarantineThreshold float64 // Score below this = quarantine
+	TrustedThreshold    float64 // Score above this = trusted
+	SuspiciousThreshold float64 // Score below this = suspicious
 
 	// Quarantine
-	QuarantineEnabled   bool
-	QuarantineDuration  time.Duration
-	AllowRecovery       bool
-	RecoveryThreshold   float64 // Score needed to recover
-	MaxQuarantineCount  int     // Max times a node can be quarantined
+	QuarantineEnabled  bool
+	QuarantineDuration time.Duration
+	AllowRecovery      bool
+	RecoveryThreshold  float64 // Score needed to recover
+	MaxQuarantineCount int     // Max times a node can be quarantined
 
 	// Cleanup
 	CleanupInterval     time.Duration
@@ -137,7 +137,7 @@ func DefaultReputationConfig() ReputationConfig {
 		NewNodeGracePeriod: 5 * time.Minute,
 
 		ConsensusCorrectBoost:      2.0,
-		ConsensusIncorrectPenalty:   5.0,
+		ConsensusIncorrectPenalty:  5.0,
 		ByzantinePenaltyMultiplier: 3.0,
 		MessageSuccessBoost:        0.5,
 		MessageFailurePenalty:      1.0,
@@ -320,6 +320,11 @@ func (rs *ReputationSystem) QuarantineNode(nodeID string, reason string) error {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 
+	return rs.quarantineNodeLocked(nodeID, reason)
+}
+
+// quarantineNodeLocked quarantines a node while rs.mu is held.
+func (rs *ReputationSystem) quarantineNodeLocked(nodeID string, reason string) error {
 	if !rs.config.QuarantineEnabled {
 		return fmt.Errorf("quarantine disabled")
 	}
@@ -365,6 +370,12 @@ func (rs *ReputationSystem) QuarantineNode(nodeID string, reason string) error {
 func (rs *ReputationSystem) ReleaseQuarantine(nodeID string) error {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
+
+	return rs.releaseQuarantineLocked(nodeID)
+}
+
+// releaseQuarantineLocked releases a node from quarantine while rs.mu is held.
+func (rs *ReputationSystem) releaseQuarantineLocked(nodeID string) error {
 
 	record, exists := rs.quarantined[nodeID]
 	if !exists {
@@ -460,7 +471,7 @@ func (rs *ReputationSystem) checkQuarantine(rep *NodeReputation) {
 	}
 
 	if rep.Score <= rs.config.QuarantineThreshold && !rep.IsQuarantined {
-		rs.QuarantineNode(rep.NodeID, fmt.Sprintf("Score fell below threshold: %.2f", rep.Score))
+		_ = rs.quarantineNodeLocked(rep.NodeID, fmt.Sprintf("Score fell below threshold: %.2f", rep.Score))
 	}
 }
 
@@ -584,7 +595,7 @@ func (rs *ReputationSystem) cleanup() {
 		if rs.config.AllowRecovery && time.Since(record.QuarantinedAt) > rs.config.QuarantineDuration {
 			rep := rs.reputations[id]
 			if rep != nil && rep.Score >= rs.config.RecoveryThreshold {
-				rs.ReleaseQuarantine(id)
+				_ = rs.releaseQuarantineLocked(id)
 			}
 		}
 	}

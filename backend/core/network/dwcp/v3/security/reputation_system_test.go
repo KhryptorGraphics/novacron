@@ -165,6 +165,52 @@ func TestReputationSystem_MaxQuarantineCount(t *testing.T) {
 	}
 }
 
+// TestReputationSystem_CleanupReleasesExpiredQuarantine is a regression test for
+// the cleanup() self-deadlock (novacron-vax): cleanup() holds rs.mu and, for an
+// expired recoverable quarantine, previously called the public ReleaseQuarantine,
+// which re-locked the same non-reentrant rs.mu. It must now use the lock-free
+// releaseQuarantineLocked and complete without hanging.
+func TestReputationSystem_CleanupReleasesExpiredQuarantine(t *testing.T) {
+	logger := zap.NewNop()
+
+	// Defaults already enable recovery (threshold 50, quarantine 30m); no
+	// post-construction rs.config mutation, which would race the background
+	// decay/cleanup loops NewReputationSystem starts.
+	rs := NewReputationSystem("test-node", logger)
+	defer rs.Stop()
+
+	node := "expired-quarantine-node"
+	if err := rs.QuarantineNode(node, "test"); err != nil {
+		t.Fatalf("QuarantineNode: %v", err)
+	}
+
+	// Give the node a recoverable score and backdate its quarantine so cleanup()
+	// treats it as expired and eligible for release.
+	rs.mu.Lock()
+	rs.reputations[node].Score = 60.0
+	rs.quarantined[node].QuarantinedAt = time.Now().Add(-time.Hour)
+	rs.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		rs.cleanup()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cleanup() deadlocked releasing an expired recoverable quarantine")
+	}
+
+	rs.mu.RLock()
+	_, stillQuarantined := rs.quarantined[node]
+	rs.mu.RUnlock()
+	if stillQuarantined {
+		t.Error("expected cleanup() to release the expired quarantine record")
+	}
+}
+
 func TestReputationSystem_ReputationDecay(t *testing.T) {
 	logger := zap.NewNop()
 
