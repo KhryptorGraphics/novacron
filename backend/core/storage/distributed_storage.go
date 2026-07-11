@@ -6,9 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math/rand"
+	"math/rand/v2"
 	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -99,6 +98,26 @@ type DistributedStorageConfig struct {
 
 // DefaultDistributedStorageConfig returns a default configuration
 func DefaultDistributedStorageConfig() DistributedStorageConfig {
+	// DefaultEncryption is false below, so the embedded EncryptionConfig
+	// must itself be a no-op (Algorithm: EncryptionNone). Otherwise
+	// NewDistributedStorageService unconditionally fails to construct: the
+	// encryption package's own DefaultEncryptionConfig() defaults to AES256
+	// with an empty MasterKey, which NewEncryptor always rejects. Opting
+	// into encryption still works the normal way — set DefaultEncryption
+	// true and supply EncryptionConfig with a real MasterKey.
+	encConfig := encryption.DefaultEncryptionConfig()
+	encConfig.Algorithm = encryption.EncryptionNone
+
+	// Same inconsistency as above: DefaultDeduplication is false below, but
+	// deduplication.DefaultDedupConfig() defaults Algorithm to DedupFixed
+	// with a hardcoded StorePath ("/var/lib/novacron/dedup") that
+	// NewDeduplicator unconditionally mkdir's — failing construction
+	// wherever that path isn't writable, even though dedup is off by
+	// default. Opting in still works normally: set DefaultDeduplication
+	// true and supply a DeduplicationConfig with a real StorePath.
+	dedupConfig := deduplication.DefaultDedupConfig()
+	dedupConfig.Algorithm = deduplication.DedupNone
+
 	return DistributedStorageConfig{
 		RootDir:                  "/var/lib/novacron/distributed",
 		MaxCapacity:              0, // Unlimited
@@ -113,8 +132,8 @@ func DefaultDistributedStorageConfig() DistributedStorageConfig {
 		HealingInterval:          1 * time.Hour,
 		SynchronousReplication:   false,
 		CompressionConfig:        compression.DefaultCompressionConfig(),
-		EncryptionConfig:         encryption.DefaultEncryptionConfig(),
-		DeduplicationConfig:      deduplication.DefaultDedupConfig(),
+		EncryptionConfig:         encConfig,
+		DeduplicationConfig:      dedupConfig,
 	}
 }
 
@@ -289,6 +308,11 @@ type DistributedStorageService struct {
 
 	// Deduplication info per volume (volumeID -> DedupFileInfo)
 	volumeDedupInfo map[string]map[int]*deduplication.DedupFileInfo
+
+	// Replicator transports shard replicas to/from distinct node backends.
+	// Defaults to an in-process LoopbackReplicator; SetReplicator swaps in a
+	// production network transport once one exists.
+	replicator Replicator
 }
 
 // NewDistributedStorageService creates a new distributed storage service
@@ -327,9 +351,17 @@ func NewDistributedStorageService(
 		encryptor:         encryptor,
 		deduplicator:      deduplicator,
 		volumeDedupInfo:   make(map[string]map[int]*deduplication.DedupFileInfo),
+		replicator:        NewLoopbackReplicator(config.RootDir),
 	}
 
 	return service, nil
+}
+
+// SetReplicator overrides the shard replica transport (e.g. to inject a
+// production network transport, or a test double). Must be called before
+// any ReadShard/WriteShard/RepairVolume call to take effect safely.
+func (s *DistributedStorageService) SetReplicator(r Replicator) {
+	s.replicator = r
 }
 
 // Start starts the distributed storage service
@@ -535,10 +567,10 @@ func (s *DistributedStorageService) ReadShard(
 	// Try to read from each node until successful
 	var lastErr error
 	for _, nodeID := range shard.NodeIDs {
-		// In a real implementation, this would connect to the node and read the shard
-		// For now, simulate reading from the local filesystem
-		shardPath := filepath.Join(s.config.RootDir, volumeID, fmt.Sprintf("shard_%d", shardIndex))
-		encryptedData, err := os.ReadFile(shardPath)
+		// Read the replica from this node's distinct backend; on error
+		// (node down, missing data, etc) fall through and try the next
+		// node in shard.NodeIDs — this is the read-failover path.
+		encryptedData, err := s.replicator.ReadReplica(ctx, nodeID, volumeID, shardIndex)
 		if err == nil {
 			log.Printf("Read shard %d from node %s", shardIndex, nodeID)
 
@@ -711,14 +743,10 @@ func (s *DistributedStorageService) WriteShard(
 	var successCount int
 	var lastErr error
 	for _, nodeID := range shard.NodeIDs {
-		// In a real implementation, this would connect to the node and write the shard
-		// For now, simulate writing to the local filesystem
-		shardPath := filepath.Join(s.config.RootDir, volumeID, fmt.Sprintf("shard_%d", shardIndex))
-		if err := os.MkdirAll(filepath.Dir(shardPath), 0755); err != nil {
-			lastErr = err
-			continue
-		}
-		if err := os.WriteFile(shardPath, dataToWrite, 0644); err != nil {
+		// Write the replica to this node's own distinct backend via the
+		// replicator so that R replicas land on R physically separate
+		// backends (previously every "replica" wrote the same local path).
+		if err := s.replicator.WriteReplica(ctx, nodeID, volumeID, shardIndex, dataToWrite); err != nil {
 			lastErr = err
 			continue
 		}
@@ -879,7 +907,7 @@ func (s *DistributedStorageService) repairShard(
 	}
 
 	// Find the best copy of the shard
-	_, err := s.findBestShardCopy(ctx, volume.baseVolume.ID, shardIndex)
+	shardData, err := s.findBestShardCopy(ctx, volume.baseVolume.ID, shardIndex)
 	if err != nil {
 		return fmt.Errorf("no valid copy of shard found: %w", err)
 	}
@@ -899,9 +927,19 @@ func (s *DistributedStorageService) repairShard(
 
 	// Copy to new nodes
 	for i := 0; i < neededReplicas && i < len(candidateNodes); i++ {
-		// In a real implementation, this would copy the shard to the node
 		nodeID := candidateNodes[i].ID
-		log.Printf("Copying shard %d of volume %s to node %s",
+
+		// Actually transfer the shard bytes to the new node's distinct
+		// backend before claiming it as a replica — a NodeIDs entry with
+		// no data behind it is the same class of fabricated-success bug
+		// this fix eliminates from WriteShard.
+		if err := s.replicator.WriteReplica(ctx, nodeID, volume.baseVolume.ID, shardIndex, shardData); err != nil {
+			log.Printf("Failed to copy shard %d of volume %s to node %s: %v",
+				shardIndex, volume.baseVolume.ID, nodeID, err)
+			continue
+		}
+
+		log.Printf("Copied shard %d of volume %s to node %s",
 			shardIndex, volume.baseVolume.ID, nodeID)
 
 		// Add node to shard's node list
@@ -945,11 +983,9 @@ func (s *DistributedStorageService) findBestShardCopy(
 	// In a real implementation, this would retrieve copies from multiple nodes
 	// and perform validation to find the best one
 
-	// For now, just return the first copy we find
+	// Return the first copy found on a reachable, distinct-backend replica.
 	for _, nodeID := range shard.NodeIDs {
-		// Simulate reading from the node
-		shardPath := filepath.Join(s.config.RootDir, volumeID, fmt.Sprintf("shard_%d", shardIndex))
-		data, err := os.ReadFile(shardPath)
+		data, err := s.replicator.ReadReplica(ctx, nodeID, volumeID, shardIndex)
 		if err == nil {
 			log.Printf("Found valid copy of shard %d on node %s", shardIndex, nodeID)
 			return data, nil

@@ -60,6 +60,7 @@ type RaftNode struct {
 	
 	// Communication
 	transport Transport
+	storage   RaftStorage
 	
 	// Synchronization
 	mu sync.RWMutex
@@ -112,6 +113,25 @@ type Transport interface {
 	SendRequestVote(ctx context.Context, nodeID string, req *RequestVoteArgs) (*RequestVoteReply, error)
 	SendAppendEntries(ctx context.Context, nodeID string, req *AppendEntriesArgs) (*AppendEntriesReply, error)
 	SendSnapshot(ctx context.Context, nodeID string, req *InstallSnapshotArgs) (*InstallSnapshotReply, error)
+	// QueryLeaderState asks a peer node whether it currently believes itself
+	// to be the cluster leader. Used by split-brain detection to observe
+	// real remote leader state instead of assuming remote nodes are never
+	// leaders.
+	QueryLeaderState(ctx context.Context, nodeID string) (*LeaderStateReply, error)
+}
+
+// LeaderStateArgs requests a node's current leader-state snapshot.
+type LeaderStateArgs struct {
+	RequesterID string `json:"requester_id"`
+}
+
+// LeaderStateReply reports whether a node currently believes it is the
+// cluster leader, along with its term and its view of the current leader.
+type LeaderStateReply struct {
+	NodeID   string `json:"node_id"`
+	Term     int64  `json:"term"`
+	IsLeader bool   `json:"is_leader"`
+	LeaderID string `json:"leader_id"`
 }
 
 // RPC message types
@@ -158,17 +178,41 @@ type InstallSnapshotReply struct {
 	Term int64 `json:"term"`
 }
 
-// NewRaftNode creates a new Raft node
+// NewRaftNode creates a new Raft node with non-durable (in-memory) storage.
+// Existing callers keep working unmodified; use NewRaftNodeWithStorage for
+// a node whose currentTerm/votedFor/log survive a process restart.
 func NewRaftNode(id string, peers []string, transport Transport) *RaftNode {
+	return NewRaftNodeWithStorage(id, peers, transport, NewInMemoryRaftStorage())
+}
+
+// NewRaftNodeWithStorage creates a new Raft node backed by the given
+// durable storage. On creation it reloads any previously persisted
+// currentTerm, votedFor, and log, so a restart can never forget an
+// already-cast vote (double-vote) or lose committed entries. A nil storage
+// falls back to a fresh, non-durable InMemoryRaftStorage.
+func NewRaftNodeWithStorage(id string, peers []string, transport Transport, storage RaftStorage) *RaftNode {
+	if storage == nil {
+		storage = NewInMemoryRaftStorage()
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
+	currentTerm, votedFor, persistedLog, err := storage.Load()
+	if err != nil {
+		log.Printf("Node %s: failed to load persisted raft state, starting fresh: %v", id, err)
+		currentTerm, votedFor, persistedLog = 0, "", nil
+	}
+	if persistedLog == nil {
+		persistedLog = make([]LogEntry, 0)
+	}
+
 	node := &RaftNode{
 		nodeID:           id,
 		peers:            peers,
 		state:            Follower,
-		currentTerm:      0,
-		votedFor:         "",
-		log:              make([]LogEntry, 0),
+		currentTerm:      currentTerm,
+		votedFor:         votedFor,
+		log:              persistedLog,
 		commitIndex:      0,
 		lastApplied:      0,
 		nextIndex:        make(map[string]int64),
@@ -176,6 +220,7 @@ func NewRaftNode(id string, peers []string, transport Transport) *RaftNode {
 		electionTimeout:  randomElectionTimeout(),
 		heartbeatTimeout: 50 * time.Millisecond,
 		transport:        transport,
+		storage:          storage,
 		applyCh:          make(chan ApplyMsg, 100),
 		ctx:              ctx,
 		cancel:           cancel,
@@ -203,10 +248,62 @@ func (rn *RaftNode) Start() {
 	go rn.applyLoop()
 }
 
-// Stop stops the Raft node
+// Stop stops the Raft node. It cancels the node's context; Done() exposes
+// that cancellation so dependent consumers (e.g. LockManager.processCommands)
+// can select on it and exit cleanly. applyCh itself is intentionally never
+// closed here: applyLoop is the sole writer and closing a channel a
+// still-running writer might send on would risk a send-on-closed-channel
+// panic, so shutdown is coordinated via context cancellation instead.
 func (rn *RaftNode) Stop() {
 	log.Printf("Stopping Raft node %s", rn.nodeID)
 	rn.cancel()
+	if rn.storage != nil {
+		if err := rn.storage.Close(); err != nil {
+			log.Printf("Node %s: failed to close raft storage: %v", rn.nodeID, err)
+		}
+	}
+}
+
+// Done returns a channel that is closed once the node has been stopped.
+// Goroutines that consume node output (e.g. GetApplyChan()) but must not
+// block forever after Stop() should select on this alongside their channel
+// read.
+func (rn *RaftNode) Done() <-chan struct{} {
+	return rn.ctx.Done()
+}
+
+// persistState durably saves currentTerm and votedFor. Callers MUST hold
+// rn.mu. Best-effort: a failure is logged rather than propagated, matching
+// this package's existing non-fatal handling of transport/IO errors.
+func (rn *RaftNode) persistState() {
+	if rn.storage == nil {
+		return
+	}
+	if err := rn.storage.SaveState(rn.currentTerm, rn.votedFor); err != nil {
+		log.Printf("Node %s: failed to persist raft term/vote: %v", rn.nodeID, err)
+	}
+}
+
+// persistAppend durably appends newly-added log entries. Callers MUST hold
+// rn.mu.
+func (rn *RaftNode) persistAppend(entries []LogEntry) {
+	if rn.storage == nil || len(entries) == 0 {
+		return
+	}
+	if err := rn.storage.AppendLog(entries); err != nil {
+		log.Printf("Node %s: failed to persist raft log entries: %v", rn.nodeID, err)
+	}
+}
+
+// persistTruncate discards persisted log entries at and after fromIndex.
+// Callers MUST hold rn.mu.
+func (rn *RaftNode) persistTruncate(fromIndex int64) {
+	if rn.storage == nil {
+		return
+	}
+	if err := rn.storage.TruncateLog(fromIndex); err != nil {
+		log.Printf("Node %s: failed to truncate persisted raft log: %v", rn.nodeID, err)
+	}
 }
 
 // Submit submits a command to the cluster
@@ -227,6 +324,7 @@ func (rn *RaftNode) Submit(command interface{}) (int64, int64, bool) {
 	
 	// Add to log
 	rn.log = append(rn.log, entry)
+	rn.persistAppend([]LogEntry{entry})
 	
 	log.Printf("Node %s: Added command to log at index %d, term %d", 
 		rn.nodeID, entry.Index, entry.Term)
@@ -337,6 +435,7 @@ func (rn *RaftNode) startElection() {
 	rn.state = Candidate
 	rn.currentTerm++
 	rn.votedFor = rn.nodeID
+	rn.persistState()
 	rn.resetElectionTimer()
 	
 	log.Printf("Node %s: Starting election for term %d", rn.nodeID, rn.currentTerm)
@@ -394,6 +493,7 @@ func (rn *RaftNode) startElection() {
 				rn.currentTerm = reply.Term
 				rn.votedFor = ""
 				rn.state = Follower
+				rn.persistState()
 				rn.resetElectionTimer()
 				return
 			}
@@ -539,6 +639,7 @@ func (rn *RaftNode) replicateToPeer(peerID string) {
 		rn.votedFor = ""
 		rn.state = Follower
 		rn.leaderID = ""
+		rn.persistState()
 		rn.resetElectionTimer()
 		return
 	}
@@ -647,6 +748,7 @@ func (rn *RaftNode) HandleRequestVote(args *RequestVoteArgs) *RequestVoteReply {
 		rn.votedFor = ""
 		rn.state = Follower
 		rn.leaderID = ""
+		rn.persistState()
 	}
 	
 	// Update term in reply
@@ -666,6 +768,7 @@ func (rn *RaftNode) HandleRequestVote(args *RequestVoteArgs) *RequestVoteReply {
 		 (args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex)) {
 		
 		rn.votedFor = args.CandidateID
+		rn.persistState()
 		reply.VoteGranted = true
 		rn.resetElectionTimer()
 		
@@ -696,6 +799,7 @@ func (rn *RaftNode) HandleAppendEntries(args *AppendEntriesArgs) *AppendEntriesR
 		rn.currentTerm = args.Term
 		rn.votedFor = ""
 		rn.state = Follower
+		rn.persistState()
 	}
 	
 	// Update leader and reset election timer
@@ -741,18 +845,22 @@ func (rn *RaftNode) HandleAppendEntries(args *AppendEntriesArgs) *AppendEntriesR
 			if rn.log[index-1].Term != entry.Term {
 				// Remove conflicting entries
 				rn.log = rn.log[:index-1]
+				rn.persistTruncate(index)
 				break
 			}
 		}
 	}
 	
 	// Append any new entries not already in the log
+	var appended []LogEntry
 	for i, entry := range args.Entries {
 		index := args.PrevLogIndex + int64(i) + 1
 		if index > int64(len(rn.log)) {
 			rn.log = append(rn.log, entry)
+			appended = append(appended, entry)
 		}
 	}
+	rn.persistAppend(appended)
 	
 	// If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
 	if args.LeaderCommit > rn.commitIndex {
@@ -770,4 +878,18 @@ func min(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+// HandleQueryLeaderState reports this node's current leader-state snapshot.
+// Remote split-brain detection uses this to observe whether a peer actually
+// believes itself to be the leader, instead of assuming it never is.
+func (rn *RaftNode) HandleQueryLeaderState() *LeaderStateReply {
+	rn.mu.RLock()
+	defer rn.mu.RUnlock()
+	return &LeaderStateReply{
+		NodeID:   rn.nodeID,
+		Term:     rn.currentTerm,
+		IsLeader: rn.state == Leader,
+		LeaderID: rn.leaderID,
+	}
 }

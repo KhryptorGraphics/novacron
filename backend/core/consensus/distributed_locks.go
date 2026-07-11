@@ -23,6 +23,11 @@ type LockManager struct {
 	locks  map[string]*DistributedLock
 	mu     sync.RWMutex
 	nodeID string
+
+	// done is closed once processCommands has exited, e.g. after the
+	// backing RaftNode is stopped. Exposed via Done() for graceful
+	// shutdown sequencing and tests.
+	done chan struct{}
 }
 
 // LockRequest represents a lock operation command
@@ -48,12 +53,21 @@ func NewLockManager(raft *RaftNode, nodeID string) *LockManager {
 		raft:   raft,
 		locks:  make(map[string]*DistributedLock),
 		nodeID: nodeID,
+		done:   make(chan struct{}),
 	}
 	
 	// Start applying lock commands from Raft
 	go lm.processCommands()
 	
 	return lm
+}
+
+// Done returns a channel that is closed once processCommands has exited
+// (e.g. after the backing RaftNode is stopped via Stop()). Callers can use
+// this to wait for the lock manager's background goroutine to fully
+// terminate during graceful shutdown or in tests.
+func (lm *LockManager) Done() <-chan struct{} {
+	return lm.done
 }
 
 // AcquireLock attempts to acquire a distributed lock
@@ -179,21 +193,37 @@ func (lm *LockManager) ListLocks() map[string]*DistributedLock {
 	return result
 }
 
-// processCommands processes lock commands from the Raft apply channel
+// processCommands processes lock commands from the Raft apply channel.
+// It exits promptly when the backing RaftNode is stopped: RaftNode.Stop
+// cancels the node's context but deliberately never closes applyCh (the
+// sole writer, applyLoop, could still be mid-send), so this loop also
+// selects on RaftNode.Done() rather than relying solely on `range applyCh`
+// -- otherwise it would block forever after Stop(), leaking the goroutine.
 func (lm *LockManager) processCommands() {
+	defer close(lm.done)
+
 	applyCh := lm.raft.GetApplyChan()
-	
-	for msg := range applyCh {
-		if !msg.CommandValid {
-			continue
+	stopped := lm.raft.Done()
+
+	for {
+		select {
+		case <-stopped:
+			return
+		case msg, ok := <-applyCh:
+			if !ok {
+				return
+			}
+			if !msg.CommandValid {
+				continue
+			}
+
+			request, ok := msg.Command.(LockRequest)
+			if !ok {
+				continue // Not a lock request
+			}
+
+			lm.applyLockCommand(request)
 		}
-		
-		request, ok := msg.Command.(LockRequest)
-		if !ok {
-			continue // Not a lock request
-		}
-		
-		lm.applyLockCommand(request)
 	}
 }
 

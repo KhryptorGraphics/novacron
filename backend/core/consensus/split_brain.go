@@ -258,16 +258,42 @@ func (sbd *SplitBrainDetector) checkMultipleLeaders(partitions []*Partition) int
 	return leadersFound
 }
 
-// isNodeLeader checks if a node believes it's the leader
+// remoteLeaderQueryTimeout bounds how long isNodeLeader waits on a remote
+// QueryLeaderState RPC before treating the node as unreachable.
+const remoteLeaderQueryTimeout = 500 * time.Millisecond
+
+// isNodeLeader checks if a node believes it's the leader. The local node is
+// answered from in-process state; a remote node is answered via a real
+// QueryLeaderState RPC over the Raft transport, so an actual multi-leader
+// partition is observable instead of remote nodes always reading as
+// non-leaders.
 func (sbd *SplitBrainDetector) isNodeLeader(nodeID string) bool {
-	// Check with the Raft node
 	if sbd.raftNode.nodeID == nodeID {
-		return sbd.raftNode.state == Leader
+		sbd.raftNode.mu.RLock()
+		isLeader := sbd.raftNode.state == Leader
+		sbd.raftNode.mu.RUnlock()
+		return isLeader
 	}
-	
-	// For remote nodes, we'd need to query them
-	// For now, return false for remote nodes
-	return false
+
+	sbd.raftNode.mu.RLock()
+	transport := sbd.raftNode.transport
+	sbd.raftNode.mu.RUnlock()
+
+	if transport == nil {
+		return false
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), remoteLeaderQueryTimeout)
+	defer cancel()
+
+	reply, err := transport.QueryLeaderState(ctx, nodeID)
+	if err != nil {
+		// Unreachable/unknown node: it cannot be actively contributing to a
+		// split-brain right now.
+		return false
+	}
+
+	return reply.IsLeader
 }
 
 // resolveSplitBrain attempts to resolve a split-brain scenario
@@ -305,6 +331,7 @@ func (sbd *SplitBrainDetector) forcePartitionStepDown(partition *Partition) {
 				sbd.raftNode.mu.Lock()
 				sbd.raftNode.state = Follower
 				sbd.raftNode.votedFor = ""
+				sbd.raftNode.persistState()
 				sbd.raftNode.mu.Unlock()
 			} else {
 				// Send step-down command to remote node

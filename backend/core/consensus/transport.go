@@ -34,6 +34,7 @@ func NewHTTPTransport(nodeAddresses map[string]string, bindAddr string) *HTTPTra
 	mux.HandleFunc("/raft/request_vote", transport.handleRequestVote)
 	mux.HandleFunc("/raft/append_entries", transport.handleAppendEntries)
 	mux.HandleFunc("/raft/install_snapshot", transport.handleInstallSnapshot)
+	mux.HandleFunc("/raft/leader_state", transport.handleQueryLeaderState)
 	
 	transport.server = &http.Server{
 		Addr:    bindAddr,
@@ -112,6 +113,23 @@ func (t *HTTPTransport) SendSnapshot(ctx context.Context, nodeID string, req *In
 	url := fmt.Sprintf("http://%s/raft/install_snapshot", addr)
 	reply := &InstallSnapshotReply{}
 	err := t.sendRPC(ctx, url, req, reply)
+	return reply, err
+}
+
+// QueryLeaderState asks a peer node whether it currently believes itself to
+// be the cluster leader.
+func (t *HTTPTransport) QueryLeaderState(ctx context.Context, nodeID string) (*LeaderStateReply, error) {
+	t.mu.RLock()
+	addr, exists := t.nodeAddresses[nodeID]
+	t.mu.RUnlock()
+	
+	if !exists {
+		return nil, fmt.Errorf("unknown node: %s", nodeID)
+	}
+	
+	url := fmt.Sprintf("http://%s/raft/leader_state", addr)
+	reply := &LeaderStateReply{}
+	err := t.sendRPC(ctx, url, &LeaderStateArgs{}, reply)
 	return reply, err
 }
 
@@ -274,6 +292,30 @@ func (t *HTTPTransport) handleInstallSnapshot(w http.ResponseWriter, r *http.Req
 	}
 }
 
+func (t *HTTPTransport) handleQueryLeaderState(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	t.mu.RLock()
+	raftNode := t.raftNode
+	t.mu.RUnlock()
+	
+	if raftNode == nil {
+		http.Error(w, "Raft node not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	
+	reply := raftNode.HandleQueryLeaderState()
+	
+	// Send response
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(reply); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
 // HandleInstallSnapshot handles InstallSnapshot RPC
 func (rn *RaftNode) HandleInstallSnapshot(args *InstallSnapshotArgs) *InstallSnapshotReply {
 	rn.mu.Lock()
@@ -294,6 +336,7 @@ func (rn *RaftNode) HandleInstallSnapshot(args *InstallSnapshotArgs) *InstallSna
 		rn.votedFor = ""
 		rn.state = Follower
 		rn.leaderID = args.LeaderID
+		rn.persistState()
 	}
 	
 	rn.resetElectionTimer()
@@ -320,6 +363,12 @@ func (rn *RaftNode) HandleInstallSnapshot(args *InstallSnapshotArgs) *InstallSna
 		// Discard entire log
 		rn.log = make([]LogEntry, 0)
 	}
+	
+	// The snapshot reshapes the whole log (entries are reindexed), so the
+	// persisted log is rebuilt wholesale: discard everything, then persist
+	// the retained/reindexed suffix.
+	rn.persistTruncate(1)
+	rn.persistAppend(rn.log)
 	
 	// Update state
 	rn.commitIndex = args.LastIncludedIndex
@@ -458,6 +507,38 @@ func (t *InMemoryTransport) SendSnapshot(ctx context.Context, nodeID string, req
 	}
 	
 	return raftNode.HandleInstallSnapshot(req), nil
+}
+
+// QueryLeaderState asks a peer node whether it currently believes itself to
+// be the cluster leader.
+func (t *InMemoryTransport) QueryLeaderState(ctx context.Context, nodeID string) (*LeaderStateReply, error) {
+	t.mu.RLock()
+	target, exists := t.nodes[nodeID]
+	t.mu.RUnlock()
+	
+	if !exists {
+		return nil, fmt.Errorf("unknown node: %s", nodeID)
+	}
+	
+	// Simulate network delay
+	if t.delayRange[1] > 0 {
+		delay := t.delayRange[0] + time.Duration(float64(t.delayRange[1]-t.delayRange[0])*0.5)
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	
+	target.mu.RLock()
+	raftNode := target.raftNode
+	target.mu.RUnlock()
+	
+	if raftNode == nil {
+		return nil, fmt.Errorf("target node not initialized")
+	}
+	
+	return raftNode.HandleQueryLeaderState(), nil
 }
 
 // SetNetworkConditions sets network simulation parameters
