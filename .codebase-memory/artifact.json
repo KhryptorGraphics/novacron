@@ -1,11 +1,11 @@
 {
     "schema_version": 1,
-    "commit": "389ce68df0a61064397c74db5f6dba6937eadab2",
-    "indexed_at": "2026-07-11T10:01:29Z",
+    "commit": "12f54f4b8764132831bc7c8f200c34dcb1b720d9",
+    "indexed_at": "2026-07-11T18:38:32Z",
     "project": "home-kp-thordrive-novacron",
-    "nodes": 143952,
-    "edges": 347329,
-    "original_size": 269025280,
-    "compressed_size": 44489182,
+    "nodes": 140208,
+    "edges": 335811,
+    "original_size": 260243456,
+    "compressed_size": 42910600,
     "compression_level": 3
 }
