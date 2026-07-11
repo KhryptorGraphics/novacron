@@ -146,18 +146,18 @@ func (cr ClockRelation) String() string {
 
 // Conflict represents a detected conflict
 type Conflict struct {
-	ID                string
-	Type              ConflictType
-	Severity          ConflictSeverity
-	DetectedAt        time.Time
-	ResourceID        string
-	LocalVersion      *Version
-	RemoteVersion     *Version
-	CausalRelation    ClockRelation
-	ComplexityScore   float64
-	AffectedFields    []string
-	RequiresManual    bool
-	Context           map[string]interface{}
+	ID              string
+	Type            ConflictType
+	Severity        ConflictSeverity
+	DetectedAt      time.Time
+	ResourceID      string
+	LocalVersion    *Version
+	RemoteVersion   *Version
+	CausalRelation  ClockRelation
+	ComplexityScore float64
+	AffectedFields  []string
+	RequiresManual  bool
+	Context         map[string]interface{}
 }
 
 // Version represents a version of data with vector clock
@@ -198,7 +198,11 @@ func DefaultDetectorConfig() DetectorConfig {
 	}
 }
 
-// ConflictClassifier determines the type and severity of conflicts
+// ConflictClassifier determines the type and severity of conflicts. A
+// classifier reports a positive detection of its conflict type by returning a
+// severity above SeverityLow; returning SeverityLow means "no positive
+// detection for these versions" (abstain). DetectConflict selects the
+// highest-Priority() classifier among those that positively detect.
 type ConflictClassifier interface {
 	Classify(local, remote *Version) (ConflictType, ConflictSeverity, []string)
 	Priority() int
@@ -254,16 +258,29 @@ func (cd *ConflictDetector) DetectConflict(ctx context.Context, resourceID strin
 		return nil, nil
 	}
 
-	// Classify conflict
-	var maxSeverity ConflictSeverity
-	var conflictType ConflictType
+	// Classify the conflict. Each classifier either positively detects its
+	// conflict type (severity above SeverityLow) or abstains (SeverityLow).
+	// Among positive detections we pick the highest-Priority() classifier, so a
+	// more specific/authoritative classifier overrides the generic
+	// concurrent-update baseline. Previously this selected by max severity,
+	// which let the unconditional InvariantViolation stub (always Critical)
+	// mask every other classifier for every conflict ever detected.
+	conflictType := ConflictTypeConcurrentUpdate
+	maxSeverity := SeverityMedium
 	var affectedFields []string
+	found := false
+	bestPriority := 0
 
 	for _, classifier := range cd.classifiers {
 		cType, severity, fields := classifier.Classify(local, remote)
-		if severity > maxSeverity {
-			maxSeverity = severity
+		if severity <= SeverityLow {
+			continue // classifier abstained (no positive detection)
+		}
+		if !found || classifier.Priority() > bestPriority {
+			found = true
+			bestPriority = classifier.Priority()
 			conflictType = cType
+			maxSeverity = severity
 			affectedFields = fields
 		}
 	}
@@ -337,13 +354,13 @@ func (c *ConcurrentUpdateClassifier) Priority() int {
 type CausalViolationClassifier struct{}
 
 func (c *CausalViolationClassifier) Classify(local, remote *Version) (ConflictType, ConflictSeverity, []string) {
-	if local.VectorClock != nil && remote.VectorClock != nil {
-		relation := local.VectorClock.Compare(remote.VectorClock)
-		if relation == RelationConcurrent {
-			return ConflictTypeCausalViolation, SeverityHigh, []string{}
-		}
-	}
-	return ConflictTypeConcurrentUpdate, SeverityLow, []string{}
+	// A genuine causal-ordering violation cannot be identified here: by the
+	// time classification runs, DetectConflict has already established the
+	// versions are causally concurrent (it returns no conflict otherwise), and
+	// concurrency is a concurrent update, not a causal violation. Abstain
+	// (SeverityLow) until real causal-violation detection exists rather than
+	// mislabelling every concurrent update as a causal violation.
+	return ConflictTypeCausalViolation, SeverityLow, nil
 }
 
 func (c *CausalViolationClassifier) Priority() int {
@@ -354,8 +371,10 @@ func (c *CausalViolationClassifier) Priority() int {
 type SemanticConflictClassifier struct{}
 
 func (c *SemanticConflictClassifier) Classify(local, remote *Version) (ConflictType, ConflictSeverity, []string) {
-	// Semantic analysis would go here
-	return ConflictTypeSemanticConflict, SeverityMedium, []string{}
+	// Placeholder: semantic analysis is not implemented. Abstain (SeverityLow)
+	// instead of fabricating a SemanticConflict for every conflict, which would
+	// mask genuine classifications under the priority selection.
+	return ConflictTypeSemanticConflict, SeverityLow, nil
 }
 
 func (c *SemanticConflictClassifier) Priority() int {
@@ -366,8 +385,10 @@ func (c *SemanticConflictClassifier) Priority() int {
 type InvariantViolationClassifier struct{}
 
 func (c *InvariantViolationClassifier) Classify(local, remote *Version) (ConflictType, ConflictSeverity, []string) {
-	// Invariant checking would go here
-	return ConflictTypeInvariantViolation, SeverityCritical, []string{}
+	// Placeholder: invariant checking is not implemented. Abstain (SeverityLow)
+	// instead of unconditionally returning Critical, which (with the old
+	// max-severity selection) masked every other classifier for every conflict.
+	return ConflictTypeInvariantViolation, SeverityLow, nil
 }
 
 func (c *InvariantViolationClassifier) Priority() int {

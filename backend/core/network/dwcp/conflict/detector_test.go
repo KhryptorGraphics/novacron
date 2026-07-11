@@ -154,10 +154,16 @@ func TestConflictCleanup(t *testing.T) {
 	config.MaxConflictAge = 100 * time.Millisecond
 	detector := NewConflictDetector(config)
 
-	// Create old conflict
-	vc := NewVectorClock()
-	local := &Version{VectorClock: vc, NodeID: "n1", Timestamp: time.Now()}
-	remote := &Version{VectorClock: vc, NodeID: "n2", Timestamp: time.Now()}
+	// Create old conflict. The two versions must be causally concurrent
+	// (distinct incremented clocks) for DetectConflict to report a conflict;
+	// a single shared never-incremented clock compares RelationEqual and yields
+	// no conflict.
+	vc1 := NewVectorClock()
+	vc1.Increment("n1")
+	vc2 := NewVectorClock()
+	vc2.Increment("n2")
+	local := &Version{VectorClock: vc1, NodeID: "n1", Timestamp: time.Now()}
+	remote := &Version{VectorClock: vc2, NodeID: "n2", Timestamp: time.Now()}
 
 	ctx := context.Background()
 	conflict, _ := detector.DetectConflict(ctx, "res1", local, remote)
@@ -210,5 +216,55 @@ func BenchmarkVectorClockCompare(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		vc1.Compare(vc2)
+	}
+}
+
+// priorityTestClassifier is a test double for exercising DetectConflict's
+// priority-based classifier selection.
+type priorityTestClassifier struct {
+	cType    ConflictType
+	severity ConflictSeverity
+	priority int
+}
+
+func (f *priorityTestClassifier) Classify(local, remote *Version) (ConflictType, ConflictSeverity, []string) {
+	return f.cType, f.severity, nil
+}
+
+func (f *priorityTestClassifier) Priority() int { return f.priority }
+
+// TestConflictDetection_PrioritySelection verifies the classifier selection
+// (novacron-93r): the highest-Priority() classifier that positively detects
+// wins, and a classifier that abstains (SeverityLow) is ignored even at the
+// highest priority - so an unimplemented stub can no longer mask real ones.
+func TestConflictDetection_PrioritySelection(t *testing.T) {
+	detector := NewConflictDetector(DefaultDetectorConfig())
+
+	// Positively detects at priority 99 -> should win over the default
+	// ConcurrentUpdate baseline (priority 10).
+	detector.RegisterClassifier(&priorityTestClassifier{ConflictTypeResourceContention, SeverityHigh, 99})
+	// Abstains (SeverityLow) at a higher priority -> must be skipped despite
+	// outranking everything, exactly the trap the old max-severity stub hit.
+	detector.RegisterClassifier(&priorityTestClassifier{ConflictTypeInvariantViolation, SeverityLow, 1000})
+
+	vc1 := NewVectorClock()
+	vc1.Increment("node1")
+	vc2 := NewVectorClock()
+	vc2.Increment("node2")
+	local := &Version{VectorClock: vc1, NodeID: "node1", Data: "a", Timestamp: time.Now()}
+	remote := &Version{VectorClock: vc2, NodeID: "node2", Data: "b", Timestamp: time.Now()}
+
+	conflict, err := detector.DetectConflict(context.Background(), "res", local, remote)
+	if err != nil {
+		t.Fatalf("DetectConflict: %v", err)
+	}
+	if conflict == nil {
+		t.Fatal("expected a conflict for concurrent versions")
+	}
+	if conflict.Type != ConflictTypeResourceContention {
+		t.Errorf("expected the highest-priority detecting classifier (ResourceContention) to win, got %v", conflict.Type)
+	}
+	if conflict.Severity != SeverityHigh {
+		t.Errorf("expected SeverityHigh from the winning classifier, got %v", conflict.Severity)
 	}
 }
