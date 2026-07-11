@@ -93,21 +93,33 @@ which overstate completion and should not be trusted.
 - **Multicloud abstraction** — build repaired: `backend/core/multicloud` now
   compiles for the first time (a committed syntax error had kept it from *ever*
   building). Off the canonical path (behind `//go:build novacron_multicloud`).
-  The subsystem holds 3–4 **redundant, mostly-hollow** cloud designs;
-  `abstraction/aws_provider.go` has ~21 real `aws-sdk-go-v2` methods but 22
-  `not implemented` stubs. **Latent lies fixed 2026-07-05** (commit `0952bc24`):
-  both AWS providers now error honestly instead of fabricating
-  billing/usage/quota/pricing and claiming success —
-  `abstraction/aws_provider.go` (`GetQuotas`/`GetUsage`/`GetCost`, prior session)
-  and `federation/multicloud/providers/aws_provider.go`
+  **Consolidation done 2026-07-05** (commit `7931b9f9`): of the 3–4 redundant,
+  mostly-hollow cloud designs, kept the only test-covered, self-consistent one
+  (`multicloud/{orchestrator,*_integration,disaster_recovery,config}`, phase7
+  integration tests green — re-verified 2026-07-11) and deleted the dead
+  scaffolding with zero external importers (`federation/multicloud/{api_handlers,
+  compliance_engine,cost_optimizer,cross_cloud_migration,policy_engine,
+  provider_registry,unified_orchestrator}.go` and
+  `multicloud/{bursting,cost,dr,management,migration}/`). **Latent lies fixed
+  2026-07-05** (commits `0952bc24`, `64fa84a9`): both surviving AWS providers now
+  error honestly instead of fabricating billing/usage/quota/pricing and claiming
+  success — `abstraction/aws_provider.go` (`GetQuotas`/`GetUsage`/`GetCost`) and
+  `federation/multicloud/providers/aws_provider.go`
   (`GetResourceQuota`/`GetResourceUsage`/`GetPricing`/`GetCostEstimate`/`GetBillingData`
-  — the last was fabricating a $1250.75 bill with fake resource IDs). Verification
-  ceiling: inspection + gofmt only — off the canonical path, and an `onnxruntime`
-  transitive pull excludes all Go files on this arm64 box, so no local build gate
-  exists (canonical CI does not build this package either). Still needs a
-  **consolidation decision** (which design survives) before real implementation;
-  no cloud credentials, and LocalStack covers only EC2/VPC/S3, not
-  cost/monitoring/quotas.
+  — the last was fabricating a $1250.75 bill with fake resource IDs); the
+  remaining latent lie flagged in the consolidation commit
+  (`multicloud/aws_integration.go` `CalculateCost()` using a hardcoded price
+  table) is now labeled as an explicit static estimate rather than silently
+  passed off as real pricing. **Re-verified 2026-07-11**:
+  `abstraction/aws_provider.go` has ~21 real `aws-sdk-go-v2`-backed methods and
+  25 `not implemented` stubs (recount from 22; no fabrication in any of
+  them — all honestly error), `go build ./multicloud/...` is clean, and
+  `go test ./multicloud/...` (phase7 integration suite) passes. Verification
+  ceiling: inspection + build/test only — off the canonical path, and an
+  `onnxruntime` transitive pull excludes all Go files on this arm64 box under
+  CGO=0 (canonical CI does not build this package either). No cloud
+  credentials, and LocalStack covers only EC2/VPC/S3, not cost/monitoring/quotas,
+  so the stubs stay stubs — implementing them for real is unverifiable here.
 - **Advanced VM ops** — **CPU pinning, device hot-plug (disk/net), cpu+memory hotplug, and NUMA all implemented** (KVM, all QMP-driven). CPU pinning: `query-cpus-fast` → `sched_setaffinity` per vCPU/emulator thread. Device hot-plug: disk/network via `blockdev-add`/`netdev_add` + `device_add` (+ `device_del`); arm64 PCIe hot-plug needs slots so `buildQEMUArgs` pre-provisions 4 `pcie-root-port`s on the `virt` machine only (x86 `pc` uses `pci.0`). CPU/memory hotplug + NUMA are **opt-in** (`VMConfig.Tags["hotplug.maxvcpus"|"hotplug.maxmem_mb"]` → `-smp N,maxcpus=M` / `-m N,slots,maxmem`; `ConfigureNUMA` sets topology before `Start` since NUMA is fixed at machine init → `-numa`), so **default VMs' `-smp`/`-m` are byte-for-byte unchanged** (proven by `TestBuildQEMUArgsHotplugOptIn`). All have discriminating real-qemu tests on arm64 TCG; memory-hotplug + NUMA pass here, cpu-hotplug works on x86 `pc`/`q35` but skips on arm64 `virt` (QEMU 8.2 genuinely can't hot-plug vCPUs there — skipped, not faked). Every shared-`buildQEMUArgs` change verified non-regressive: Gate 1 boot + Gate 2 shared/block migration cutover green across CPU pinning, hot-plug, and advanced-ops changes (one non-reproducible TCG timing flake seen under heavy parallel load, 5/5 on focused re-run). **iothread pinning now works** via opt-in `-object iothread` (`VMConfig.Tags["iothreads"]`, disk attaches to `iothread0`) — `ConfigureCPUPinning`'s iothread branch is live. **NUMA persists across a driver restart** (`ConfigureNUMA` encodes the topology into `Config.Tags["numa.topology"]` + config.json; `buildQEMUArgs` rehydrates it via `effectiveNUMA`). Both opt-in → default VMs' args stay byte-for-byte identical (asserted by tests). **PROVEN ON REAL x86 KVM** (192.168.1.53, 96-core, `/dev/kvm`): after making the real-qemu tests arch-portable (`findCirrosImage` + `defaultQEMUBinary` now pick by `runtime.GOARCH`), CPU pinning (vcpu narrowed across 96 real cores), **CPU hotplug (present vCPU 1→2 — impossible on arm64 `virt`)**, memory hotplug (DIMM), NUMA (2-node), and iothread pinning all PASS on real KVM. Finding (root-caused): x86 hot-**unplug** originally left the device stuck because the test plugged+unplugged within milliseconds of `Start`, before the guest had booted and enumerated the slot — `device_del`'s guest-driven eject is silently lost if issued that early (harmless on slow arm64 TCG, exposed on fast x86 KVM). NOT a machine-type bug — **verified by testing q35 + PCIe root ports on x86, which did NOT fix it, then reverting** (the wrong hypothesis) — and NOT a cirros-x86 guest limitation. Fix is test realism: `TestHotPlugDiskRealQMP` now boots with a cloud-init seed, **waits for the guest to fully boot (first MIGTICK) + a brief enumerate settle before unplugging**, and **hard-asserts the device is REMOVED**. Empirically PASSES with genuine removal on BOTH arm64 TCG (39s) and real x86 KVM (10s). The driver was correct throughout (`HotUnplugDevice` issues `device_del`, waits for the guest to release via `awaitDeviceGone`, then frees the backend). **Net: all 6 advanced-ops tests pass on real x86 KVM, hot-unplug now with a hard removal assertion on both arches.** ~~Still pending: a cleaner `VMConfig.NUMA` field vs. the Tags encoding~~ — **DONE 2026-07-05** (`9476ed67`): typed `VMConfig` fields for hotplug/NUMA replaced the Tags encoding (the `Tags["hotplug.*"]`/`Tags["numa.topology"]` references above describe the historical mechanism; see "Real containerd driver + typed VMConfig" section).
 
 ## vm sub-package compile gap — quarantined 2026-07-04
