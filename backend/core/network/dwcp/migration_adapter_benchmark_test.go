@@ -57,12 +57,18 @@ func generateMixedVMData(size int) []byte {
 //     measures. This benchmark's compressed-path numbers are what
 //     MigrationAdapter can ACTUALLY deliver today, not a best case.
 //  2. Tier: selectCompressionTier (migration_adapter.go) picks a
-//     compression tier from AMST's latency_ms metric, which defaults to
-//     0 unless something calls AMST.UpdateMetrics — nothing in
-//     createConnection does. On loopback this means every subtest here
-//     compresses at CompressionLocal (<10ms bucket), never Regional or
-//     Global, regardless of payload — so even this "real adapter"
-//     number is not WAN-representative on compression tier, only on
+//     compression tier from AMST's latency_ms metric. AMST.Connect now
+//     measures real dial RTT and calls UpdateMetrics with it (fixed
+//     alongside this benchmark work — previously nothing on the
+//     connection path ever called UpdateMetrics, so latency_ms was
+//     permanently 0 in every deployment, not just this benchmark). On
+//     loopback the real measured RTT is sub-millisecond and truncates
+//     to 0ms via time.Duration.Milliseconds(), so every subtest here
+//     still compresses at CompressionLocal (<10ms bucket), never
+//     Regional or Global — the fix makes tier selection correct for
+//     real deployments, it does not (and cannot) change loopback's
+//     actual near-zero latency, so this benchmark's own numbers are
+//     unaffected. Not WAN-representative on compression tier, only on
 //     wire-protocol/framing correctness. A real WAN or latency-emulated
 //     (tc/netem) path is still required before novacron-38p's Go/No-Go
 //     can treat any of these throughput numbers as representative — see

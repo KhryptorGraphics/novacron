@@ -4,10 +4,12 @@ import "testing"
 
 // TestSelectCompressionTier_LatencyThresholds closes a real coverage gap
 // left by the migration_adapter_roundtrip_test.go suite (novacron-lce):
-// every round trip there runs over 127.0.0.1, where the per-connection
-// AMST's latency metric defaults to 0 (nothing in createConnection calls
-// UpdateMetrics), so selectCompressionTier always returns
-// CompressionLocal — none of those tests ever exercise
+// every round trip there runs over 127.0.0.1, where AMST.Connect now
+// measures real dial RTT and calls UpdateMetrics with it (fixed
+// alongside novacron-38p's benchmark work) - but loopback's real RTT is
+// sub-millisecond and truncates to 0ms, so selectCompressionTier still
+// always returns CompressionLocal there in practice — none of those
+// tests ever exercise
 // CompressionRegional or CompressionGlobal. That matters specifically
 // because HDE.CompressMemory only engages EnableQuantization's quantize()
 // (irreversibly lossy, no dequantize anywhere in Decompress) at

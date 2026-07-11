@@ -1,3 +1,57 @@
+> [!WARNING]
+> ## CORRECTION (novacron-38p, 2026-07-11): the numbers below are fabricated
+>
+> This document was traced (novacron-38p session work) to
+> `backend/core/network/dwcp/v3/benchmarks/` (see that directory's
+> `README.md`), a package with **zero imports of the `dwcp` package** -
+> every "benchmark" it produced is a closed-form formula over hardcoded
+> scenario tables, not a real measurement of this codebase. Evidence:
+>
+> - Numbers below are physically impossible: "3,489 GB/s" single-stream
+>   TCP baseline, "1,807,251 GB/s" (>1.8 exabytes/sec) zero-copy transfer
+>   at 16MB. No real network path produces these.
+> - The AMST section is internally self-contradictory: it claims
+>   "PASS - Far exceeded" a >70% bandwidth-*improvement* target, while its
+>   own table shows 8 streams (2,519 GB/s) performing WORSE than 1 stream
+>   (3,489 GB/s baseline) - a regression, not an improvement, spun as a
+>   pass.
+> - The epic-level claim "3.3x faster VM migration" (novacron-ahm) traces
+>   to the "Mixed Workload | gzip-best | 3.3x" row in this document's
+>   compression-ratio table below - a compression ratio, not a migration
+>   speedup, relabeled.
+>
+> **Real, verified numbers exist** (novacron-38p session, real code,
+> real wall-clock measurements, not this document's formulas):
+> - Regional/global-tier compression ratio on realistic VM memory
+>   (1/3 zero pages, 1/3 repeating pattern, 1/3 random - typical guest
+>   memory composition): ~2.99x-3.00x
+>   (`v3/tests/benchmark_hde_compression_test.go`,
+>   `BenchmarkHDECompressionByEntropy`'s `mixed_vm_memory` case;
+>   independently confirmed by
+>   `BenchmarkMigrationWANBandwidthConstrained`'s `typical_vm_memory`
+>   profile). A separate, deliberately non-representative test using a
+>   highly-compressible synthetic pattern measured 2122x-2634x
+>   (`TestPhase4_HDE_Validation_Real`) - real, but on degenerate data
+>   used only to refute the original fake "1.9x" claim on its own terms;
+>   do not cite it as a realistic VM-memory number.
+> - End-to-end WAN-bandwidth-constrained migration time (compress +
+>   throttled transfer + decompress): **2.55x-2.74x faster with
+>   compression** on typical, compressible VM memory (200Mbps regional,
+>   50Mbps global profiles) - but **1.02x-1.07x SLOWER** on
+>   near-incompressible data (encrypted/already-compressed workloads)
+>   even at the same WAN bandwidth
+>   (`v3/tests/benchmark_migration_wan_bandwidth_test.go`,
+>   `BenchmarkMigrationWANBandwidthConstrained`).
+> - On loopback/LAN (no bandwidth constraint), compression is
+>   consistently SLOWER than uncompressed transfer - 1.5x-2.3x, real
+>   production-path measurement
+>   (`migration_adapter_benchmark_test.go`, `BenchmarkMigrationAdapterEndToEnd`).
+>
+> This document is kept (not deleted) as the historical record of what
+> was claimed and why it was wrong - see `novacron-38p` for the full
+> investigation. Do not cite anything below this notice as evidence of
+> DWCP performance.
+
 # DWCP v3 Phase 0 Benchmark Results
 
 **Date:** 2025-11-12T20:10:00Z

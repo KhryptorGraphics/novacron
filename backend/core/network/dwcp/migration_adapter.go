@@ -32,7 +32,19 @@ type MigrationAdapter struct {
 	migrationsCompleted   atomic.Int64
 	migrationsFailed      atomic.Int64
 	totalBytesTransferred atomic.Int64
-	averageSpeedup        atomic.Value // float64
+	// avgThroughputVsBaseline is throughput / a HARDCODED reference
+	// value (20 MB/s memory, 15 MB/s disk - not a measurement of this
+	// deployment's actual non-DWCP throughput on the same link). Renamed
+	// from "averageSpeedup"/"average_speedup" - that name and its "Nx
+	// speedup" log line were misleading: novacron-38p's benchmark work
+	// found this reported 30-103x "speedup" on runs where DWCP was
+	// actually measured 1.02-2.29x SLOWER than uncompressed transfer on
+	// the same link (see BenchmarkMigrationAdapterEndToEnd,
+	// BenchmarkMigrationWANBandwidthConstrained). This field answers
+	// "how does this throughput compare to a fixed reference point,"
+	// not "how does DWCP compare to standard on this link" - do not
+	// read it as the latter.
+	avgThroughputVsBaseline atomic.Value // float64
 
 	// Synchronization
 	mu     sync.RWMutex
@@ -221,8 +233,8 @@ func NewMigrationAdapter(config MigrationAdapterConfig) (*MigrationAdapter, erro
 		cancel:      cancel,
 	}
 
-	// Initialize average speedup
-	adapter.averageSpeedup.Store(float64(1.0))
+	// Initialize avgThroughputVsBaseline
+	adapter.avgThroughputVsBaseline.Store(float64(1.0))
 
 	// Create AMST instance if DWCP is enabled
 	if config.EnableDWCP {
@@ -330,13 +342,16 @@ func (adapter *MigrationAdapter) MigrateVMMemory(ctx context.Context, vmID strin
 	conn.BytesTransferred += originalSize
 	adapter.totalBytesTransferred.Add(originalSize)
 
-	// Calculate speedup
-	baselineThroughput := 20 * 1024 * 1024 // 20 MB/s baseline
-	speedup := throughput / float64(baselineThroughput)
-	adapter.updateAverageSpeedup(speedup)
+	// throughputVsBaseline compares this migration's throughput against
+	// a HARDCODED reference point, not against this deployment's actual
+	// non-DWCP throughput on the same link - see avgThroughputVsBaseline's
+	// doc comment. Do not read this as "DWCP vs standard".
+	baselineThroughput := 20 * 1024 * 1024 // 20 MB/s reference point
+	throughputVsBaseline := throughput / float64(baselineThroughput)
+	adapter.updateAvgThroughputVsBaseline(throughputVsBaseline)
 
-	fmt.Printf("DWCP: Memory migration completed in %.2fs (%.2f MB/s, %.2fx speedup)\n",
-		duration.Seconds(), throughput/1024/1024, speedup)
+	fmt.Printf("DWCP: Memory migration completed in %.2fs (%.2f MB/s, %.2fx vs %d MB/s reference - NOT a standard-vs-DWCP comparison)\n",
+		duration.Seconds(), throughput/1024/1024, throughputVsBaseline, baselineThroughput/1024/1024)
 
 	// Store baseline for future migrations
 	adapter.storeMemoryBaseline(vmID, memoryData)
@@ -471,13 +486,16 @@ func (adapter *MigrationAdapter) MigrateVMDisk(ctx context.Context, vmID string,
 	conn.BytesTransferred += totalSize
 	adapter.totalBytesTransferred.Add(totalSize)
 
-	// Calculate speedup
-	baselineThroughput := 15 * 1024 * 1024 // 15 MB/s baseline for disk
-	speedup := throughput / float64(baselineThroughput)
-	adapter.updateAverageSpeedup(speedup)
+	// throughputVsBaseline compares this migration's throughput against
+	// a HARDCODED reference point, not against this deployment's actual
+	// non-DWCP throughput on the same link - see avgThroughputVsBaseline's
+	// doc comment. Do not read this as "DWCP vs standard".
+	baselineThroughput := 15 * 1024 * 1024 // 15 MB/s reference point for disk
+	throughputVsBaseline := throughput / float64(baselineThroughput)
+	adapter.updateAvgThroughputVsBaseline(throughputVsBaseline)
 
-	fmt.Printf("DWCP: Disk migration completed in %.2fs (%.2f MB/s, %.2fx speedup)\n",
-		duration.Seconds(), throughput/1024/1024, speedup)
+	fmt.Printf("DWCP: Disk migration completed in %.2fs (%.2f MB/s, %.2fx vs %d MB/s reference - NOT a standard-vs-DWCP comparison)\n",
+		duration.Seconds(), throughput/1024/1024, throughputVsBaseline, baselineThroughput/1024/1024)
 
 	// Store baselines for future migrations
 	adapter.storeDiskBaselines(vmID, diskBlocks)
@@ -697,12 +715,14 @@ func (adapter *MigrationAdapter) migrateDiskStandard(ctx context.Context, vmID s
 	return nil
 }
 
-// updateAverageSpeedup updates the running average speedup
-func (adapter *MigrationAdapter) updateAverageSpeedup(speedup float64) {
+// updateAvgThroughputVsBaseline updates the running average
+// throughput-vs-fixed-reference-point ratio (not a DWCP-vs-standard
+// speedup - see avgThroughputVsBaseline's doc comment)
+func (adapter *MigrationAdapter) updateAvgThroughputVsBaseline(ratio float64) {
 	// Exponential moving average
-	current := adapter.averageSpeedup.Load().(float64)
-	newAverage := current*0.8 + speedup*0.2
-	adapter.averageSpeedup.Store(newAverage)
+	current := adapter.avgThroughputVsBaseline.Load().(float64)
+	newAverage := current*0.8 + ratio*0.2
+	adapter.avgThroughputVsBaseline.Store(newAverage)
 }
 
 // metricsLoop periodically collects and reports metrics
@@ -731,11 +751,11 @@ func (adapter *MigrationAdapter) collectMetrics() {
 	}
 
 	successRate := float64(completed) / float64(total)
-	avgSpeedup := adapter.averageSpeedup.Load().(float64)
+	avgThroughputVsBaseline := adapter.avgThroughputVsBaseline.Load().(float64)
 	totalBytes := adapter.totalBytesTransferred.Load()
 
-	fmt.Printf("DWCP Migration Metrics - Success Rate: %.2f%%, Avg Speedup: %.2fx, Total: %.2f GB\n",
-		successRate*100, avgSpeedup, float64(totalBytes)/1024/1024/1024)
+	fmt.Printf("DWCP Migration Metrics - Success Rate: %.2f%%, Avg Throughput vs Reference: %.2fx (NOT vs standard), Total: %.2f GB\n",
+		successRate*100, avgThroughputVsBaseline, float64(totalBytes)/1024/1024/1024)
 
 	// Report AMST metrics if available
 	if adapter.amst != nil {
@@ -801,14 +821,14 @@ func (adapter *MigrationAdapter) GetMetrics() map[string]interface{} {
 	adapter.mu.RUnlock()
 
 	metrics := map[string]interface{}{
-		"migrations_completed":    adapter.migrationsCompleted.Load(),
-		"migrations_failed":       adapter.migrationsFailed.Load(),
-		"total_bytes_transferred": adapter.totalBytesTransferred.Load(),
-		"average_speedup":         adapter.averageSpeedup.Load(),
-		"active_connections":      activeConnections,
-		"baseline_count":          baselineCount,
-		"dwcp_enabled":            adapter.config.EnableDWCP,
-		"fallback_enabled":        adapter.config.EnableFallback,
+		"migrations_completed":             adapter.migrationsCompleted.Load(),
+		"migrations_failed":                adapter.migrationsFailed.Load(),
+		"total_bytes_transferred":          adapter.totalBytesTransferred.Load(),
+		"avg_throughput_vs_reference_ratio": adapter.avgThroughputVsBaseline.Load(),
+		"active_connections":               activeConnections,
+		"baseline_count":                   baselineCount,
+		"dwcp_enabled":                     adapter.config.EnableDWCP,
+		"fallback_enabled":                 adapter.config.EnableFallback,
 	}
 
 	// Add AMST metrics

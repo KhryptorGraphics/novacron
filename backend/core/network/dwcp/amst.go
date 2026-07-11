@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -226,12 +227,24 @@ func NewAMST(config AMSTConfig) (*AMST, error) {
 
 // Connect establishes connections to the target host
 func (amst *AMST) Connect(ctx context.Context, host string, port int) error {
-	target := fmt.Sprintf("%s:%d", host, port)
+	target := net.JoinHostPort(host, strconv.Itoa(port))
 	streamCount := int(amst.streamCount.Load())
 
 	// Create initial streams
 	var wg sync.WaitGroup
 	errChan := make(chan error, streamCount)
+
+	// dialDurations collects each stream's connection-establishment time
+	// (dial start to successful handshake) as a real RTT proxy - the
+	// minimum across streams is used as the network latency estimate
+	// (goroutine scheduling jitter only ever adds delay, never removes
+	// it, so min is closer to true RTT than mean). This is what feeds
+	// UpdateMetrics below, which is what selectCompressionTier
+	// (migration_adapter.go) actually reads - before this fix nothing
+	// on the connection path ever called UpdateMetrics, so every
+	// migration silently compressed at CompressionLocal regardless of
+	// real network conditions.
+	dialDurations := make(chan time.Duration, streamCount)
 
 	for i := 0; i < streamCount; i++ {
 		wg.Add(1)
@@ -249,12 +262,14 @@ func (amst *AMST) Connect(ctx context.Context, host string, port int) error {
 			}
 
 			// Connect with context
+			dialStart := time.Now()
 			conn, err := dialer.DialContext(ctx, "tcp", target)
 			if err != nil {
 				errChan <- fmt.Errorf("stream %d connection failed: %w", streamID, err)
 				amst.streamPool.Put(stream)
 				return
 			}
+			dialDurations <- time.Since(dialStart)
 
 			// Configure TCP options
 			if tcpConn, ok := conn.(*net.TCPConn); ok {
@@ -285,6 +300,7 @@ func (amst *AMST) Connect(ctx context.Context, host string, port int) error {
 
 	wg.Wait()
 	close(errChan)
+	close(dialDurations)
 
 	// Check for errors
 	var errors []error
@@ -303,6 +319,21 @@ func (amst *AMST) Connect(ctx context.Context, host string, port int) error {
 			// All connections failed
 			return fmt.Errorf("failed to establish any streams: %v", errors[0])
 		}
+	}
+
+	// Feed a real latency measurement into UpdateMetrics so
+	// selectCompressionTier (migration_adapter.go) sees actual network
+	// conditions instead of the permanent zero value it read before this
+	// fix (which meant every migration ever compressed at
+	// CompressionLocal regardless of real latency).
+	var minDial time.Duration
+	for d := range dialDurations {
+		if minDial == 0 || d < minDial {
+			minDial = d
+		}
+	}
+	if minDial > 0 {
+		amst.UpdateMetrics(minDial.Milliseconds(), 0, amst.transferRate.Load())
 	}
 
 	return nil
