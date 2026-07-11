@@ -2,9 +2,14 @@ package security
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"fmt"
+	"math/big"
 	"sync"
 	"time"
 
@@ -42,6 +47,9 @@ type ModeAwareSecurity struct {
 	// Adaptive thresholds
 	networkTrust      float64 // 0-1, based on observed behavior
 	adaptiveThreshold float64 // Threshold to switch modes
+
+	// monitoringOnce ensures adaptiveMonitoring is spawned at most once per node.
+	monitoringOnce sync.Once
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -170,7 +178,7 @@ func NewModeAwareSecurity(nodeID string, mode SecurityMode, detector *ByzantineD
 
 	// Start adaptive monitoring for hybrid mode
 	if mode == ModeHybrid {
-		go mas.adaptiveMonitoring()
+		mas.startMonitoring()
 	}
 
 	return mas
@@ -398,13 +406,19 @@ func (mas *ModeAwareSecurity) GetTLSConfig() (*tls.Config, error) {
 func (mas *ModeAwareSecurity) initializeTLS() error {
 	config := mas.internetConfig
 
-	// Create certificate manager
-	mas.certManager = NewCertificateManager(mas.nodeID, mas.logger)
+	// Generate the node identity certificate once and reuse it across mode
+	// switches. Keygen is ECDSA P-256 (microseconds) and happens at most once
+	// per node, so its cost under mas.mu during a switch is negligible.
+	if mas.certManager == nil {
+		mas.certManager = NewCertificateManager(mas.nodeID, mas.logger)
+		if _, err := mas.certManager.GenerateSelfSignedCert(config.CertValidityPeriod); err != nil {
+			return fmt.Errorf("failed to generate certificate: %w", err)
+		}
+	}
 
-	// Generate self-signed cert (in production, use proper CA)
-	cert, err := mas.certManager.GenerateSelfSignedCert(config.CertValidityPeriod)
-	if err != nil {
-		return fmt.Errorf("failed to generate certificate: %w", err)
+	cert := mas.certManager.serverCert
+	if cert == nil || len(cert.Certificate) == 0 {
+		return fmt.Errorf("certificate manager has no usable certificate")
 	}
 
 	// Create TLS config
@@ -469,13 +483,22 @@ func (mas *ModeAwareSecurity) configureHybridMode() {
 		mas.initializeTLS()
 	}
 
-	go mas.adaptiveMonitoring()
+	mas.startMonitoring()
 
 	mas.logger.Info("Configured for hybrid mode",
 		zap.String("node_id", mas.nodeID),
 		zap.Float64("network_trust", mas.networkTrust),
 		zap.Float64("trust_threshold", mas.hybridConfig.TrustThreshold),
 	)
+}
+
+// startMonitoring launches the adaptive monitoring goroutine exactly once for
+// the lifetime of the node, so repeated switches into hybrid mode never leak
+// duplicate monitors. The goroutine runs until Stop() cancels mas.ctx.
+func (mas *ModeAwareSecurity) startMonitoring() {
+	mas.monitoringOnce.Do(func() {
+		go mas.adaptiveMonitoring()
+	})
 }
 
 // adaptiveMonitoring monitors network conditions and adjusts security
@@ -539,23 +562,32 @@ func (mas *ModeAwareSecurity) adjustSecurityLevel() {
 	mas.mu.Lock()
 	defer mas.mu.Unlock()
 
-	if mas.currentMode != ModeHybrid {
+	config := mas.hybridConfig
+
+	// Anti-flap: only change modes once the monitoring window has elapsed since
+	// the last switch.
+	if time.Since(mas.lastModeChange) <= config.MonitoringWindow {
 		return
 	}
 
-	config := mas.hybridConfig
-
-	// Switch to datacenter mode if trust is high
-	if mas.networkTrust > config.TrustThreshold {
-		if time.Since(mas.lastModeChange) > config.MonitoringWindow {
+	switch mas.currentMode {
+	case ModeHybrid:
+		// Relax to datacenter on high trust; harden to internet on low trust.
+		if mas.networkTrust > config.TrustThreshold {
 			mas.switchModeLocked(ModeDatacenter, fmt.Sprintf("High network trust: %.2f", mas.networkTrust))
-		}
-	}
-
-	// Switch to internet mode if trust is low
-	if mas.networkTrust < config.UntrustThreshold {
-		if time.Since(mas.lastModeChange) > config.MonitoringWindow {
+		} else if mas.networkTrust < config.UntrustThreshold {
 			mas.switchModeLocked(ModeInternet, fmt.Sprintf("Low network trust: %.2f", mas.networkTrust))
+		}
+	case ModeDatacenter:
+		// Auto-recover: trust is no longer high enough for minimal checks; return
+		// to hybrid so per-message validation resumes tracking live trust.
+		if mas.networkTrust <= config.TrustThreshold {
+			mas.switchModeLocked(ModeHybrid, fmt.Sprintf("Network trust below datacenter level: %.2f", mas.networkTrust))
+		}
+	case ModeInternet:
+		// Auto-recover: trust rose out of the untrusted band; return to hybrid.
+		if mas.networkTrust >= config.UntrustThreshold {
+			mas.switchModeLocked(ModeHybrid, fmt.Sprintf("Network trust above internet level: %.2f", mas.networkTrust))
 		}
 	}
 }
@@ -613,23 +645,61 @@ func NewCertificateManager(nodeID string, logger *zap.Logger) *CertificateManage
 
 // GenerateSelfSignedCert generates a self-signed certificate
 func (cm *CertificateManager) GenerateSelfSignedCert(validity time.Duration) (*tls.Certificate, error) {
-	// In production, use proper certificate generation
-	// This is a placeholder for the actual implementation
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generate key: %w", err)
+	}
+
+	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serial, err := rand.Int(rand.Reader, serialLimit)
+	if err != nil {
+		return nil, fmt.Errorf("generate serial number: %w", err)
+	}
+
+	notBefore := time.Now()
+	notAfter := notBefore.Add(validity)
+	template := x509.Certificate{
+		SerialNumber:          serial,
+		Subject:               pkix.Name{CommonName: cm.nodeID},
+		DNSNames:              []string{cm.nodeID},
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true, // self-signed: also its own CA for peer verification
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return nil, fmt.Errorf("create certificate: %w", err)
+	}
+
+	leaf, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil, fmt.Errorf("parse certificate: %w", err)
+	}
+
+	cert := &tls.Certificate{
+		Certificate: [][]byte{der},
+		PrivateKey:  priv,
+		Leaf:        leaf,
+	}
+
+	pool := x509.NewCertPool()
+	pool.AddCert(leaf)
 
 	cm.mu.Lock()
-	defer cm.mu.Unlock()
-
-	cm.certValidUntil = time.Now().Add(validity)
+	cm.serverCert = cert
+	cm.caCertPool = pool
+	cm.certValidUntil = notAfter
+	cm.mu.Unlock()
 
 	cm.logger.Info("Certificate generated",
 		zap.String("node_id", cm.nodeID),
-		zap.Time("valid_until", cm.certValidUntil),
+		zap.Time("valid_until", notAfter),
+		zap.String("key_type", "ECDSA-P256"),
 	)
-
-	// Return placeholder cert
-	// In production, generate actual certificate using crypto/x509
-	cert := &tls.Certificate{}
-	cm.serverCert = cert
 
 	return cert, nil
 }

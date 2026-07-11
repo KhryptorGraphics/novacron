@@ -1,6 +1,9 @@
 package security
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"net"
 	"testing"
 	"time"
 
@@ -453,5 +456,132 @@ func BenchmarkModeAwareSecurity_ValidateInternet(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		mas.ValidateMessage("bench-node", "prepare", message, "signature")
+	}
+}
+
+func TestModeAwareSecurity_AdaptiveSecurityRecovery(t *testing.T) {
+	logger := zap.NewNop()
+	reputation := NewReputationSystem("recover-node", logger)
+	detector := NewByzantineDetector("recover-node", reputation, logger)
+
+	config := DefaultHybridConfig()
+	config.TrustThreshold = 0.7
+	config.UntrustThreshold = 0.3
+	config.MonitoringWindow = 0              // disable anti-flap delay for deterministic single-shot checks
+	config.AdaptiveCheckInterval = time.Hour // keep the background ticker from firing during the test
+
+	// Construct in datacenter mode so no monitoring goroutine spawns yet, then
+	// drive adjustSecurityLevel directly for a deterministic, race-free check.
+	mas := NewModeAwareSecurity("recover-node", ModeDatacenter, detector, reputation, logger)
+	defer mas.Stop()
+	defer detector.Stop()
+	defer reputation.Stop()
+
+	mas.mu.Lock()
+	mas.currentMode = ModeHybrid
+	mas.hybridConfig = config
+	mas.mu.Unlock()
+
+	setTrust := func(trust float64) {
+		mas.mu.Lock()
+		mas.networkTrust = trust
+		mas.lastModeChange = time.Now().Add(-time.Hour)
+		mas.mu.Unlock()
+	}
+
+	// High trust: hybrid -> datacenter (relax).
+	setTrust(0.95)
+	mas.adjustSecurityLevel()
+	if got := mas.GetCurrentMode(); got != ModeDatacenter {
+		t.Fatalf("high trust: expected datacenter, got %v", got)
+	}
+
+	// Trust falls back into the adaptive band: datacenter -> hybrid (auto-recover).
+	// novacron-2ub regression: previously a one-way latch left the node in
+	// datacenter forever.
+	setTrust(0.5)
+	mas.adjustSecurityLevel()
+	if got := mas.GetCurrentMode(); got != ModeHybrid {
+		t.Fatalf("trust drop: expected auto-recovery to hybrid, got %v", got)
+	}
+
+	// Low trust: hybrid -> internet (harden).
+	setTrust(0.1)
+	mas.adjustSecurityLevel()
+	if got := mas.GetCurrentMode(); got != ModeInternet {
+		t.Fatalf("low trust: expected internet, got %v", got)
+	}
+
+	// Trust recovers: internet -> hybrid (auto-recover).
+	setTrust(0.5)
+	mas.adjustSecurityLevel()
+	if got := mas.GetCurrentMode(); got != ModeHybrid {
+		t.Fatalf("trust recovery: expected auto-recovery to hybrid, got %v", got)
+	}
+}
+
+func TestModeAwareSecurity_TLSHandshake(t *testing.T) {
+	logger := zap.NewNop()
+	reputation := NewReputationSystem("tls-node", logger)
+	detector := NewByzantineDetector("tls-node", reputation, logger)
+	mas := NewModeAwareSecurity("tls-node", ModeInternet, detector, reputation, logger)
+	defer mas.Stop()
+	defer detector.Stop()
+	defer reputation.Stop()
+
+	serverCfg, err := mas.GetTLSConfig()
+	if err != nil {
+		t.Fatalf("GetTLSConfig: %v", err)
+	}
+	if len(serverCfg.Certificates) == 0 || len(serverCfg.Certificates[0].Certificate) == 0 {
+		t.Fatal("TLS config has no functional certificate (novacron-9yb: stubbed cert)")
+	}
+	if serverCfg.Certificates[0].PrivateKey == nil {
+		t.Fatal("TLS certificate has no private key")
+	}
+
+	// Build a client that both trusts and presents the node's self-signed cert
+	// (the default internet config requires mutual TLS).
+	cert := serverCfg.Certificates[0]
+	leaf := cert.Leaf
+	if leaf == nil {
+		parsed, perr := x509.ParseCertificate(cert.Certificate[0])
+		if perr != nil {
+			t.Fatalf("parse leaf: %v", perr)
+		}
+		leaf = parsed
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(leaf)
+	clientCfg := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      pool,
+		ServerName:   "tls-node",
+		MinVersion:   tls.VersionTLS13,
+	}
+
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	errCh := make(chan error, 2)
+	go func() {
+		srv := tls.Server(serverConn, serverCfg)
+		errCh <- srv.Handshake()
+	}()
+	go func() {
+		cli := tls.Client(clientConn, clientCfg)
+		errCh <- cli.Handshake()
+	}()
+
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("mutual TLS handshake failed: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("TLS handshake timed out")
+		}
 	}
 }
