@@ -13,17 +13,19 @@ import (
 // TestDeltaEncoder_Phase1_DictionaryTraining tests dictionary training functionality
 func TestDeltaEncoder_Phase1_DictionaryTraining(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
+	tmpDir := t.TempDir()
 
 	config := &DeltaEncodingConfig{
-		Enabled:             true,
-		BaselineInterval:    1 * time.Hour,
-		MaxBaselineAge:      2 * time.Hour,
-		MaxDeltaChain:       10,
-		CompressionLevel:    3,
-		EnableDictionary:    true,
-		DeltaAlgorithm:      "xor",
-		EnableAdaptive:      false,
-		EnableBaselineSync:  false,
+		Enabled:               true,
+		BaselineInterval:      1 * time.Hour,
+		MaxBaselineAge:        2 * time.Hour,
+		MaxDeltaChain:         10,
+		CompressionLevel:      3,
+		EnableDictionary:      true,
+		DictionaryStoragePath: tmpDir,
+		DeltaAlgorithm:        "xor",
+		EnableAdaptive:        false,
+		EnableBaselineSync:    false,
 	}
 
 	encoder, err := NewDeltaEncoder(config, logger)
@@ -115,17 +117,19 @@ func TestDeltaEncoder_Phase1_DictionaryTraining(t *testing.T) {
 // TestDeltaEncoder_Phase1_RSyncAlgorithm tests rsync-style delta encoding
 func TestDeltaEncoder_Phase1_RSyncAlgorithm(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
+	tmpDir := t.TempDir()
 
 	config := &DeltaEncodingConfig{
-		Enabled:             true,
-		BaselineInterval:    1 * time.Hour,
-		MaxBaselineAge:      2 * time.Hour,
-		MaxDeltaChain:       10,
-		CompressionLevel:    3,
-		EnableDictionary:    false,
-		DeltaAlgorithm:      "rsync",
-		EnableAdaptive:      false,
-		EnableBaselineSync:  false,
+		Enabled:               true,
+		BaselineInterval:      1 * time.Hour,
+		MaxBaselineAge:        2 * time.Hour,
+		MaxDeltaChain:         10,
+		CompressionLevel:      3,
+		EnableDictionary:      false,
+		DictionaryStoragePath: tmpDir,
+		DeltaAlgorithm:        "rsync",
+		EnableAdaptive:        false,
+		EnableBaselineSync:    false,
 	}
 
 	encoder, err := NewDeltaEncoder(config, logger)
@@ -184,17 +188,19 @@ func TestDeltaEncoder_Phase1_RSyncAlgorithm(t *testing.T) {
 // TestDeltaEncoder_Phase1_BSDiffAlgorithm tests bsdiff binary diff
 func TestDeltaEncoder_Phase1_BSDiffAlgorithm(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
+	tmpDir := t.TempDir()
 
 	config := &DeltaEncodingConfig{
-		Enabled:             true,
-		BaselineInterval:    1 * time.Hour,
-		MaxBaselineAge:      2 * time.Hour,
-		MaxDeltaChain:       10,
-		CompressionLevel:    3,
-		EnableDictionary:    false,
-		DeltaAlgorithm:      "bsdiff",
-		EnableAdaptive:      false,
-		EnableBaselineSync:  false,
+		Enabled:               true,
+		BaselineInterval:      1 * time.Hour,
+		MaxBaselineAge:        2 * time.Hour,
+		MaxDeltaChain:         10,
+		CompressionLevel:      3,
+		EnableDictionary:      false,
+		DictionaryStoragePath: tmpDir,
+		DeltaAlgorithm:        "bsdiff",
+		EnableAdaptive:        false,
+		EnableBaselineSync:    false,
 	}
 
 	encoder, err := NewDeltaEncoder(config, logger)
@@ -250,17 +256,19 @@ func TestDeltaEncoder_Phase1_BSDiffAlgorithm(t *testing.T) {
 // TestDeltaEncoder_Phase1_AdaptiveAlgorithm tests auto-selection
 func TestDeltaEncoder_Phase1_AdaptiveAlgorithm(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
+	tmpDir := t.TempDir()
 
 	config := &DeltaEncodingConfig{
-		Enabled:             true,
-		BaselineInterval:    1 * time.Hour,
-		MaxBaselineAge:      2 * time.Hour,
-		MaxDeltaChain:       10,
-		CompressionLevel:    3,
-		EnableDictionary:    false,
-		DeltaAlgorithm:      "auto",
-		EnableAdaptive:      false,
-		EnableBaselineSync:  false,
+		Enabled:               true,
+		BaselineInterval:      1 * time.Hour,
+		MaxBaselineAge:        2 * time.Hour,
+		MaxDeltaChain:         10,
+		CompressionLevel:      3,
+		EnableDictionary:      false,
+		DictionaryStoragePath: tmpDir,
+		DeltaAlgorithm:        "auto",
+		EnableAdaptive:        false,
+		EnableBaselineSync:    false,
 	}
 
 	encoder, err := NewDeltaEncoder(config, logger)
@@ -303,19 +311,21 @@ func TestDeltaEncoder_Phase1_AdaptiveAlgorithm(t *testing.T) {
 // TestDeltaEncoder_Phase1_AdaptiveCompression tests adaptive level adjustment
 func TestDeltaEncoder_Phase1_AdaptiveCompression(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
+	tmpDir := t.TempDir()
 
 	config := &DeltaEncodingConfig{
-		Enabled:             true,
-		BaselineInterval:    1 * time.Hour,
-		MaxBaselineAge:      2 * time.Hour,
-		MaxDeltaChain:       10,
-		CompressionLevel:    3,
-		EnableDictionary:    false,
-		DeltaAlgorithm:      "xor",
-		EnableAdaptive:      true,
-		AdaptiveThreshold:   10.0,
-		MinCompressionRatio: 1.1,
-		EnableBaselineSync:  false,
+		Enabled:               true,
+		BaselineInterval:      1 * time.Hour,
+		MaxBaselineAge:        2 * time.Hour,
+		MaxDeltaChain:         10,
+		CompressionLevel:      3,
+		EnableDictionary:      false,
+		DictionaryStoragePath: tmpDir,
+		DeltaAlgorithm:        "xor",
+		EnableAdaptive:        true,
+		AdaptiveThreshold:     10.0,
+		MinCompressionRatio:   1.1,
+		EnableBaselineSync:    false,
 	}
 
 	encoder, err := NewDeltaEncoder(config, logger)
@@ -351,19 +361,21 @@ func TestDeltaEncoder_Phase1_AdaptiveCompression(t *testing.T) {
 // TestDeltaEncoder_Phase1_CompressionRatio tests >15x target
 func TestDeltaEncoder_Phase1_CompressionRatio(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
+	tmpDir := t.TempDir()
 
 	config := &DeltaEncodingConfig{
-		Enabled:             true,
-		BaselineInterval:    1 * time.Hour,
-		MaxBaselineAge:      2 * time.Hour,
-		MaxDeltaChain:       10,
-		CompressionLevel:    9, // Max compression
-		EnableDictionary:    true,
-		DeltaAlgorithm:      "auto",
-		EnableAdaptive:      true,
-		AdaptiveThreshold:   15.0,
-		MinCompressionRatio: 1.1,
-		EnableBaselineSync:  false,
+		Enabled:               true,
+		BaselineInterval:      1 * time.Hour,
+		MaxBaselineAge:        2 * time.Hour,
+		MaxDeltaChain:         10,
+		CompressionLevel:      9, // Max compression
+		EnableDictionary:      true,
+		DictionaryStoragePath: tmpDir,
+		DeltaAlgorithm:        "auto",
+		EnableAdaptive:        true,
+		AdaptiveThreshold:     15.0,
+		MinCompressionRatio:   1.1,
+		EnableBaselineSync:    false,
 	}
 
 	encoder, err := NewDeltaEncoder(config, logger)
@@ -424,6 +436,7 @@ func TestDeltaEncoder_Phase1_Metrics(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 
 	config := DefaultDeltaEncodingConfig()
+	config.DictionaryStoragePath = t.TempDir()
 	encoder, err := NewDeltaEncoder(config, logger)
 	if err != nil {
 		t.Fatalf("NewDeltaEncoder failed: %v", err)
@@ -473,15 +486,15 @@ func BenchmarkDeltaEncoder_Phase1_Dictionary(b *testing.B) {
 	logger, _ := zap.NewProduction()
 
 	config := &DeltaEncodingConfig{
-		Enabled:             true,
-		BaselineInterval:    1 * time.Hour,
-		MaxBaselineAge:      2 * time.Hour,
-		MaxDeltaChain:       10,
-		CompressionLevel:    3,
-		EnableDictionary:    true,
-		DeltaAlgorithm:      "xor",
-		EnableAdaptive:      false,
-		EnableBaselineSync:  false,
+		Enabled:            true,
+		BaselineInterval:   1 * time.Hour,
+		MaxBaselineAge:     2 * time.Hour,
+		MaxDeltaChain:      10,
+		CompressionLevel:   3,
+		EnableDictionary:   true,
+		DeltaAlgorithm:     "xor",
+		EnableAdaptive:     false,
+		EnableBaselineSync: false,
 	}
 
 	encoder, _ := NewDeltaEncoder(config, logger)
