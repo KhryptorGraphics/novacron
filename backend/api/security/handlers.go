@@ -95,6 +95,9 @@ func (h *SecurityHandlers) RegisterRoutes(router *mux.Router) {
 
 	// RBAC routes
 	router.HandleFunc("/api/security/rbac/roles", h.GetRoles).Methods("GET")
+	router.HandleFunc("/api/security/rbac/roles", h.CreateRole).Methods("POST")
+	router.HandleFunc("/api/security/rbac/roles/{roleId}", h.UpdateRole).Methods("PUT")
+	router.HandleFunc("/api/security/rbac/roles/{roleId}", h.DeleteRole).Methods("DELETE")
 	router.HandleFunc("/api/security/rbac/permissions", h.GetPermissions).Methods("GET")
 	router.HandleFunc("/api/security/rbac/user/{userId}/roles", h.GetUserRoles).Methods("GET")
 	router.HandleFunc("/api/security/rbac/user/{userId}/roles", h.AssignUserRoles).Methods("POST")
@@ -1724,6 +1727,111 @@ func (h *SecurityHandlers) GetPermissions(w http.ResponseWriter, r *http.Request
 	}
 
 	h.respondJSON(w, http.StatusOK, map[string]interface{}{"permissions": permissions})
+}
+
+// CreateRole creates a new role in the DB-backed catalog
+func (h *SecurityHandlers) CreateRole(w http.ResponseWriter, r *http.Request) {
+	if h.rbacStore == nil {
+		h.respondUnsupported(w, r, "RBAC role management")
+		return
+	}
+
+	var req RoleDefinition
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	role, err := h.rbacStore.CreateRole(r.Context(), req)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "already exists") {
+			status = http.StatusConflict
+		} else if strings.Contains(err.Error(), "required") {
+			status = http.StatusBadRequest
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+
+	h.logAudit(r.Context(), &audit.AuditEvent{
+		Resource:   "role",
+		ResourceID: role.ID,
+		Action:     audit.ActionWrite,
+		Result:     audit.ResultSuccess,
+		Details:    map[string]interface{}{"description": "Role created", "role": role},
+	})
+
+	h.respondJSON(w, http.StatusCreated, role)
+}
+
+// UpdateRole partially updates an existing role in the DB-backed catalog
+func (h *SecurityHandlers) UpdateRole(w http.ResponseWriter, r *http.Request) {
+	if h.rbacStore == nil {
+		h.respondUnsupported(w, r, "RBAC role management")
+		return
+	}
+
+	roleID := mux.Vars(r)["roleId"]
+
+	var req RoleUpdate
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	role, err := h.rbacStore.UpdateRole(r.Context(), roleID, req)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if err == sql.ErrNoRows {
+			status = http.StatusNotFound
+		} else if strings.Contains(err.Error(), "required") {
+			status = http.StatusBadRequest
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+
+	h.logAudit(r.Context(), &audit.AuditEvent{
+		Resource:   "role",
+		ResourceID: role.ID,
+		Action:     audit.ActionUpdate,
+		Result:     audit.ResultSuccess,
+		Details:    map[string]interface{}{"description": "Role updated", "role": role},
+	})
+
+	h.respondJSON(w, http.StatusOK, role)
+}
+
+// DeleteRole removes a role from the DB-backed catalog
+func (h *SecurityHandlers) DeleteRole(w http.ResponseWriter, r *http.Request) {
+	if h.rbacStore == nil {
+		h.respondUnsupported(w, r, "RBAC role management")
+		return
+	}
+
+	roleID := mux.Vars(r)["roleId"]
+
+	if err := h.rbacStore.DeleteRole(r.Context(), roleID); err != nil {
+		status := http.StatusInternalServerError
+		if err == sql.ErrNoRows {
+			status = http.StatusNotFound
+		} else if strings.Contains(err.Error(), "required") {
+			status = http.StatusBadRequest
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+
+	h.logAudit(r.Context(), &audit.AuditEvent{
+		Resource:   "role",
+		ResourceID: roleID,
+		Action:     audit.ActionDelete,
+		Result:     audit.ResultSuccess,
+		Details:    map[string]interface{}{"description": "Role deleted"},
+	})
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // GetUserRoles returns roles for a specific user
