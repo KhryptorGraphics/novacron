@@ -189,6 +189,15 @@ func NewAMST(config AMSTConfig) (*AMST, error) {
 	amst.packetLoss.Store(float64(0))
 
 	// Create rate limiter if bandwidth limit is set
+	if config.BandwidthLimit < 0 {
+		// Negative is nonsensical (no real link has negative bandwidth);
+		// normalize explicitly to the documented 0-sentinel ("unlimited")
+		// rather than letting it fall through the >0 check below
+		// implicitly - same resulting behavior, but self-documenting and
+		// consistent with every other field's explicit <=0 normalization
+		// in this constructor.
+		config.BandwidthLimit = 0
+	}
 	if config.BandwidthLimit > 0 {
 		burstSize := config.BurstSize
 		if burstSize <= 0 {
@@ -326,13 +335,23 @@ func (amst *AMST) Connect(ctx context.Context, host string, port int) error {
 	// conditions instead of the permanent zero value it read before this
 	// fix (which meant every migration ever compressed at
 	// CompressionLocal regardless of real latency).
+	//
+	// sampled tracks whether any dial actually completed, rather than
+	// using minDial==0 as a "not yet set" sentinel - a genuinely fast
+	// dial (sub-microsecond, e.g. against an already-warm local
+	// listener) can legitimately measure as exactly 0, which a
+	// zero-as-sentinel check would silently treat as "no measurement"
+	// and skip UpdateMetrics entirely, reverting to this fix's own
+	// pre-fix broken behavior for that connection.
 	var minDial time.Duration
+	sampled := false
 	for d := range dialDurations {
-		if minDial == 0 || d < minDial {
+		if !sampled || d < minDial {
 			minDial = d
+			sampled = true
 		}
 	}
-	if minDial > 0 {
+	if sampled {
 		amst.UpdateMetrics(minDial.Milliseconds(), 0, amst.transferRate.Load())
 	}
 

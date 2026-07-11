@@ -204,6 +204,17 @@ func NewMigrationAdapter(config MigrationAdapterConfig) (*MigrationAdapter, erro
 	//     no dequantize step anywhere in Decompress (hde.go quantize).
 	// All three are forced off here so the receive path is correct by
 	// construction, independent of what a caller passes — see novacron-o0e.
+	//
+	// EnableQuantization=false is now LOAD-BEARING, not just defensive:
+	// before AMST.Connect measured real dial RTT (added alongside this
+	// session's WAN benchmark work), selectCompressionTier always saw
+	// latency_ms==0 and could never select CompressionGlobal — the only
+	// tier where quantize() runs — so this flag was previously a second,
+	// practically-unreachable layer behind that. Real latency now makes
+	// Global tier reachable, making this the SOLE remaining guard against
+	// irreversible quantization on the receive path. Do not remove this
+	// line without first adding a matching dequantize step to
+	// hde.go Decompress.
 	config.HDEConfig.EnableDelta = false
 	config.HDEConfig.EnableDictionary = false
 	config.HDEConfig.EnableQuantization = false
@@ -338,20 +349,33 @@ func (adapter *MigrationAdapter) MigrateVMMemory(ctx context.Context, vmID strin
 
 	// Update metrics
 	duration := time.Since(startTime)
-	throughput := float64(originalSize) / duration.Seconds()
 	conn.BytesTransferred += originalSize
 	adapter.totalBytesTransferred.Add(originalSize)
 
-	// throughputVsBaseline compares this migration's throughput against
-	// a HARDCODED reference point, not against this deployment's actual
-	// non-DWCP throughput on the same link - see avgThroughputVsBaseline's
-	// doc comment. Do not read this as "DWCP vs standard".
-	baselineThroughput := 20 * 1024 * 1024 // 20 MB/s reference point
-	throughputVsBaseline := throughput / float64(baselineThroughput)
-	adapter.updateAvgThroughputVsBaseline(throughputVsBaseline)
+	// Guard against duration.Seconds() == 0 (coarse clock resolution,
+	// or a pathologically fast transfer) - an unguarded division here
+	// produces +Inf, which permanently poisons avgThroughputVsBaseline's
+	// exponential moving average (Inf*0.2 + x*0.8 == Inf forever, no
+	// recovery short of process restart). Skips only the metric/log
+	// block, not storeMemoryBaseline/CleanupConnection below - an early
+	// return here would leak the AMST connection and skip baseline
+	// storage, a worse bug than the one being guarded against.
+	if duration > 0 {
+		throughput := float64(originalSize) / duration.Seconds()
 
-	fmt.Printf("DWCP: Memory migration completed in %.2fs (%.2f MB/s, %.2fx vs %d MB/s reference - NOT a standard-vs-DWCP comparison)\n",
-		duration.Seconds(), throughput/1024/1024, throughputVsBaseline, baselineThroughput/1024/1024)
+		// throughputVsBaseline compares this migration's throughput against
+		// a HARDCODED reference point, not against this deployment's actual
+		// non-DWCP throughput on the same link - see avgThroughputVsBaseline's
+		// doc comment. Do not read this as "DWCP vs standard".
+		baselineThroughput := 20 * 1024 * 1024 // 20 MB/s reference point
+		throughputVsBaseline := throughput / float64(baselineThroughput)
+		adapter.updateAvgThroughputVsBaseline(throughputVsBaseline)
+
+		fmt.Printf("DWCP: Memory migration completed in %.2fs (%.2f MB/s, %.2fx vs %d MB/s reference - NOT a standard-vs-DWCP comparison)\n",
+			duration.Seconds(), throughput/1024/1024, throughputVsBaseline, baselineThroughput/1024/1024)
+	} else {
+		fmt.Printf("DWCP: Memory migration completed with unmeasurable duration (%d bytes) - skipping throughput metric\n", originalSize)
+	}
 
 	// Store baseline for future migrations
 	adapter.storeMemoryBaseline(vmID, memoryData)
@@ -482,20 +506,29 @@ func (adapter *MigrationAdapter) MigrateVMDisk(ctx context.Context, vmID string,
 
 	// Update metrics
 	duration := time.Since(startTime)
-	throughput := float64(totalSize) / duration.Seconds()
 	conn.BytesTransferred += totalSize
 	adapter.totalBytesTransferred.Add(totalSize)
 
-	// throughputVsBaseline compares this migration's throughput against
-	// a HARDCODED reference point, not against this deployment's actual
-	// non-DWCP throughput on the same link - see avgThroughputVsBaseline's
-	// doc comment. Do not read this as "DWCP vs standard".
-	baselineThroughput := 15 * 1024 * 1024 // 15 MB/s reference point for disk
-	throughputVsBaseline := throughput / float64(baselineThroughput)
-	adapter.updateAvgThroughputVsBaseline(throughputVsBaseline)
+	// Guard against duration.Seconds() == 0 - see the matching comment
+	// in MigrateVMMemory for why (unguarded division -> +Inf ->
+	// permanently poisoned avgThroughputVsBaseline). Skips only the
+	// metric/log block, not storeDiskBaselines/CleanupConnection below.
+	if duration > 0 {
+		throughput := float64(totalSize) / duration.Seconds()
 
-	fmt.Printf("DWCP: Disk migration completed in %.2fs (%.2f MB/s, %.2fx vs %d MB/s reference - NOT a standard-vs-DWCP comparison)\n",
-		duration.Seconds(), throughput/1024/1024, throughputVsBaseline, baselineThroughput/1024/1024)
+		// throughputVsBaseline compares this migration's throughput against
+		// a HARDCODED reference point, not against this deployment's actual
+		// non-DWCP throughput on the same link - see avgThroughputVsBaseline's
+		// doc comment. Do not read this as "DWCP vs standard".
+		baselineThroughput := 15 * 1024 * 1024 // 15 MB/s reference point for disk
+		throughputVsBaseline := throughput / float64(baselineThroughput)
+		adapter.updateAvgThroughputVsBaseline(throughputVsBaseline)
+
+		fmt.Printf("DWCP: Disk migration completed in %.2fs (%.2f MB/s, %.2fx vs %d MB/s reference - NOT a standard-vs-DWCP comparison)\n",
+			duration.Seconds(), throughput/1024/1024, throughputVsBaseline, baselineThroughput/1024/1024)
+	} else {
+		fmt.Printf("DWCP: Disk migration completed with unmeasurable duration (%d bytes) - skipping throughput metric\n", totalSize)
+	}
 
 	// Store baselines for future migrations
 	adapter.storeDiskBaselines(vmID, diskBlocks)
