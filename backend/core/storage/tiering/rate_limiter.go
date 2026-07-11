@@ -100,10 +100,18 @@ func NewMigrationRateLimiterWithConfig(config RateLimiterConfig) *MigrationRateL
 		config:        config,
 	}
 
-	// Create per-tier rate limiters
-	mrl.tierLimiters[TierHot] = NewRateLimiter(config.HotTierMaxBytesPerSecond, 2)
-	mrl.tierLimiters[TierWarm] = NewRateLimiter(config.WarmTierMaxBytesPerSecond, 2)
-	mrl.tierLimiters[TierCold] = NewRateLimiter(config.ColdTierMaxBytesPerSecond, 1)
+	// Create per-tier rate limiters. Concurrency is capped at
+	// config.GlobalMaxConcurrent, not a hardcoded value smaller than it: since
+	// every migration also acquires the global permit (see StartMigration),
+	// the global limiter is already the binding concurrency constraint. A
+	// tier limiter hardcoded below that (e.g. a fixed 2 regardless of a
+	// caller-configured GlobalMaxConcurrent of 3+) silently blocks forever on
+	// AcquirePermit for any caller using a context with no deadline once more
+	// than that hardcoded number of same-tier migrations are outstanding,
+	// even though the global limiter would have allowed it.
+	mrl.tierLimiters[TierHot] = NewRateLimiter(config.HotTierMaxBytesPerSecond, config.GlobalMaxConcurrent)
+	mrl.tierLimiters[TierWarm] = NewRateLimiter(config.WarmTierMaxBytesPerSecond, config.GlobalMaxConcurrent)
+	mrl.tierLimiters[TierCold] = NewRateLimiter(config.ColdTierMaxBytesPerSecond, config.GlobalMaxConcurrent)
 
 	return mrl
 }
