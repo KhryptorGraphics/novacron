@@ -850,6 +850,12 @@ func (s *DistributedStorageService) RebalanceVolume(
 	distVolume.mu.Lock()
 	defer distVolume.mu.Unlock()
 
+	// Reflect the current available node count, same as placeShards does at
+	// creation time. Without this, NodeCount stays frozen at whatever it was
+	// when the volume was created, even though rebalancing just redistributed
+	// shards across the current node set.
+	distVolume.DistInfo.NodeCount = len(availableNodes)
+
 	// Calculate target distribution
 	targetNodesPerShard := min(len(availableNodes), s.config.DefaultReplicationFactor)
 
@@ -965,8 +971,11 @@ func (s *DistributedStorageService) findBestShardCopy(
 		return nil, err
 	}
 
-	distVolume.mu.RLock()
-	defer distVolume.mu.RUnlock()
+	// NOTE: no distVolume.mu.RLock() here. findBestShardCopy's only caller is
+	// repairShard, which is only called by RepairVolume while already holding
+	// distVolume.mu.Lock() (write lock) for the whole repair loop. Taking an
+	// RLock here would deadlock (sync.RWMutex isn't reentrant within one
+	// goroutine) — the caller's write lock already guarantees exclusive access.
 
 	// Check shard index
 	if shardIndex < 0 || shardIndex >= len(distVolume.DistInfo.Shards) {
