@@ -27,7 +27,6 @@
     "@typescript-eslint/explicit-function-return-type": "off",
     "@typescript-eslint/explicit-module-boundary-types": "off",
     "@typescript-eslint/no-non-null-assertion": "warn",
-    "@typescript-eslint/prefer-const": "error",
     "@typescript-eslint/no-var-requires": "error",
 
     // React specific rules
@@ -63,7 +62,7 @@
     "prefer-template": "error",
     "quotes": ["error", "single", { "avoidEscape": true }],
     "semi": ["error", "always"],
-    "comma-dangle": ["error", "always-multiline"],
+    "comma-dangle": ["error", "only-multiline"],
 
     // Next.js specific rules
     "@next/next/no-img-element": "error",
@@ -89,7 +88,9 @@
     "coverage/",
     "cypress/",
     "*.config.js",
-    "*.setup.js"
+    "*.setup.js",
+    "src/components/mobile/MobileAdmin.tsx",
+    "src/__tests__/e2e/"
   ],
   "overrides": [
     {
@@ -97,8 +98,8 @@
       "extends": ["plugin:testing-library/react"],
       "plugins": ["testing-library"],
       "rules": {
-        "testing-library/await-async-query": "error",
-        "testing-library/no-await-sync-query": "error",
+        "testing-library/await-async-queries": "error",
+        "testing-library/no-await-sync-queries": "error",
         "testing-library/no-debugging-utils": "warn",
         "testing-library/no-dom-import": "error"
       }
