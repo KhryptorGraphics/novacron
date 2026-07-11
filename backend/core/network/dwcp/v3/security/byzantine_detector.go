@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -501,28 +502,40 @@ func (bd *ByzantineDetector) calculateSuspicionScore(record *SuspicionRecord) fl
 		totalScore = 100
 	}
 
-	return totalScore
+	// ponytail: round to hundredths. A violation recorded moments ago has age
+	// > 0 by however many nanoseconds elapsed before this function ran, so
+	// decay is always epsilon below 1.0 -- without rounding, a single violation
+	// whose weight exactly equals SuspicionThreshold (e.g. equivocation=40 vs
+	// threshold=40) can never actually reach ">= threshold". Real decay from
+	// genuine age (minutes, per BehaviorWindow) differs far more than 0.01.
+	return math.Round(totalScore*100) / 100
 }
 
-// confirmByzantine marks a node as confirmed Byzantine
+// confirmByzantine marks a node as confirmed Byzantine. It is called again on
+// every subsequent violation once a node is confirmed (calculateSuspicionScore
+// keeps returning >= ByzantineThreshold), so it also keeps the recorded
+// evidence current instead of freezing it at whatever record.Violations
+// happened to contain the first time the threshold was crossed.
 func (bd *ByzantineDetector) confirmByzantine(nodeID string, record *SuspicionRecord) {
-	if _, exists := bd.confirmedBad[nodeID]; exists {
-		return // Already confirmed
-	}
-
-	// Determine attack type
 	attackType := bd.determineAttackType(record)
 
-	evidence := &ByzantineEvidence{
-		NodeID:     nodeID,
-		AttackType: attackType,
-		Evidence:   record.Violations,
-		Confidence: record.SuspicionScore / 100.0,
-		DetectedAt: time.Now(),
-		Violations: record.Violations,
+	evidence, alreadyConfirmed := bd.confirmedBad[nodeID]
+	if !alreadyConfirmed {
+		evidence = &ByzantineEvidence{
+			NodeID:     nodeID,
+			DetectedAt: time.Now(),
+		}
+		bd.confirmedBad[nodeID] = evidence
 	}
 
-	bd.confirmedBad[nodeID] = evidence
+	evidence.AttackType = attackType
+	evidence.Evidence = record.Violations
+	evidence.Violations = record.Violations
+	evidence.Confidence = record.SuspicionScore / 100.0
+
+	if alreadyConfirmed {
+		return
+	}
 
 	bd.logger.Error("Byzantine node confirmed",
 		zap.String("node_id", nodeID),
