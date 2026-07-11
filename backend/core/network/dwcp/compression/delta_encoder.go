@@ -61,6 +61,12 @@ type DeltaEncodingConfig struct {
 	CompressionLevel int           `json:"compression_level" yaml:"compression_level"` // Zstandard: 0-9
 	EnableDictionary bool          `json:"enable_dictionary" yaml:"enable_dictionary"`
 
+	// DictionaryStoragePath overrides where trained dictionaries are persisted.
+	// Empty means use DefaultDictionaryTrainingConfig's relative default
+	// ("./compression/dictionaries"); set it (e.g. to t.TempDir()) to isolate
+	// dictionary files instead of writing to the working tree.
+	DictionaryStoragePath string `json:"dictionary_storage_path" yaml:"dictionary_storage_path"`
+
 	// Phase 1: Advanced features
 	DeltaAlgorithm      string  `json:"delta_algorithm" yaml:"delta_algorithm"`             // "xor", "rsync", "bsdiff", "auto"
 	AdaptiveThreshold   float64 `json:"adaptive_threshold" yaml:"adaptive_threshold"`       // Auto-adjust compression if ratio < threshold
@@ -128,6 +134,12 @@ func NewDeltaEncoder(config *DeltaEncodingConfig, logger *zap.Logger) (*DeltaEnc
 	// Phase 1: Initialize dictionary trainer
 	if config.EnableDictionary {
 		dictConfig := DefaultDictionaryTrainingConfig()
+		// Honor an explicit dictionary storage path override (e.g. a test's
+		// t.TempDir()). Empty keeps DefaultDictionaryTrainingConfig's relative
+		// default, so existing callers are unaffected.
+		if config.DictionaryStoragePath != "" {
+			dictConfig.StoragePath = config.DictionaryStoragePath
+		}
 		de.dictionaryTrainer, err = NewDictionaryTrainer(dictConfig, logger)
 		if err != nil {
 			logger.Warn("Failed to initialize dictionary trainer", zap.Error(err))
