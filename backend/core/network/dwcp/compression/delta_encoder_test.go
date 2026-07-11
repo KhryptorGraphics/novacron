@@ -541,3 +541,55 @@ func BenchmarkDeltaEncoder_Delta(b *testing.B) {
 	}
 }
 
+
+// TestDeltaEncoder_IncompressibleRawRoundTrip covers the adaptive raw-passthrough
+// branch (novacron-asl): a >=512B payload the adaptive compressor judges
+// incompressible is stored uncompressed (Raw=true, IsDelta=false) and must
+// round-trip through Decode's raw branch. The three older tests all use small
+// payloads that now take the normal zstd path, so without this the new raw
+// produce/consume branch ships unexercised.
+func TestDeltaEncoder_IncompressibleRawRoundTrip(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+
+	encoder, err := NewDeltaEncoder(DefaultDeltaEncodingConfig(), logger)
+	if err != nil {
+		t.Fatalf("NewDeltaEncoder failed: %v", err)
+	}
+	defer encoder.Close()
+
+	if encoder.adaptiveComp == nil {
+		t.Fatal("adaptive compressor not initialized (EnableAdaptive is default)")
+	}
+	// A cold encoder reports TargetRatio (10.0) and would compress; seed the
+	// history with sub-MinCompressionRatio samples so ShouldCompress returns
+	// false for a large payload (the incompressible-bypass case).
+	for i := 0; i < 5; i++ {
+		encoder.adaptiveComp.RecordCompressionResult(1.0, time.Millisecond)
+	}
+
+	// Incompressible payload at/above the size floor so the bypass is taken for
+	// the ratio reason, not the small-data reason.
+	data := make([]byte, 4*SmallDataCompressionFloor)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("rand.Read: %v", err)
+	}
+
+	encoded, err := encoder.Encode("vm-incompressible", data)
+	if err != nil {
+		t.Fatalf("Encode failed: %v", err)
+	}
+	if !encoded.Raw {
+		t.Fatalf("expected Raw=true for the incompressible bypass, got Raw=false (IsDelta=%v)", encoded.IsDelta)
+	}
+	if encoded.IsDelta {
+		t.Error("raw bypass must be IsDelta=false")
+	}
+
+	decoded, err := encoder.Decode("vm-incompressible", encoded)
+	if err != nil {
+		t.Fatalf("Decode failed: %v", err)
+	}
+	if !bytes.Equal(decoded, data) {
+		t.Error("raw incompressible payload did not round-trip")
+	}
+}
