@@ -1,0 +1,38 @@
+# NovaCron DB Migration Job
+#
+# Builds and runs database/migrate.go (its own Go module — see
+# docker/migrate.Dockerfile) against the cluster's Postgres before the
+# novacron-api Deployment is expected to serve traffic. Apply this and wait
+# for completion (`kubectl wait --for=condition=complete job/novacron-migrate
+# -n novacron`) as part of your rollout, e.g. a pre-install/pre-upgrade Helm
+# hook or a CI step preceding `kubectl apply -f k8s/novacron-deployment.yaml`.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: novacron-migrate
+  namespace: novacron
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: novacron-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: migrate
+        image: novacron/migrate:latest
+        args: ["-direction=up"]
+        env:
+        - name: DB_URL
+          valueFrom:
+            secretKeyRef:
+              name: novacron-secrets
+              key: db-url
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "250m"

@@ -9,8 +9,9 @@ metadata:
   name: novacron-config
   namespace: novacron
 data:
-  DB_HOST: "novacron-mysql"
-  DB_PORT: "3306"
+  # NOTE: DB_URL (the postgres:// DSN the binary actually reads — see
+  # backend/pkg/config/config.go) lives in the novacron-secrets Secret
+  # because it embeds credentials; it must never be stored in a ConfigMap.
   REDIS_URL: "redis://novacron-redis:6379"
 ---
 apiVersion: apps/v1
@@ -37,21 +38,16 @@ spec:
         - configMapRef:
             name: novacron-config
         env:
-        - name: DB_USER
+        - name: DB_URL
           valueFrom:
             secretKeyRef:
               name: novacron-secrets
-              key: db-user
-        - name: DB_PASSWORD
+              key: db-url
+        - name: NOVACRON_MIGRATION_SECRET
           valueFrom:
             secretKeyRef:
               name: novacron-secrets
-              key: db-password
-        - name: DB_NAME
-          valueFrom:
-            secretKeyRef:
-              name: novacron-secrets
-              key: db-name
+              key: migration-secret
         resources:
           requests:
             memory: "256Mi"
@@ -110,21 +106,11 @@ spec:
         - configMapRef:
             name: novacron-config
         env:
-        - name: DB_USER
+        - name: NOVACRON_MIGRATION_SECRET
           valueFrom:
             secretKeyRef:
               name: novacron-secrets
-              key: db-user
-        - name: DB_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: novacron-secrets
-              key: db-password
-        - name: DB_NAME
-          valueFrom:
-            secretKeyRef:
-              name: novacron-secrets
-              key: db-name
+              key: migration-secret
         securityContext:
           privileged: true
         volumeMounts:

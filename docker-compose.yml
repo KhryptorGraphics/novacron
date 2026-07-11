@@ -155,6 +155,39 @@ services:
           memory: 4G
           cpus: '2.0'
 
+  # DB migration tool - builds & runs database/migrate.go (its own Go module)
+  # against postgres before the API starts, and publishes the migrate-db
+  # binary onto a shared volume so api-entrypoint.sh can defensively re-run
+  # it (idempotent). See docker/migrate.Dockerfile.
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/migrate.Dockerfile
+    image: novacron/migrate:latest
+    restart: "no"
+    user: "1000:1000"
+    environment:
+      # NOTE: sslmode=disable is correct here — the postgres:15-alpine
+      # container in this stack has no TLS cert configured (no ssl=on,
+      # no cert/key mounted); sslmode=require against it fails outright
+      # with "pq: SSL is not enabled on the server" (verified live). This
+      # traffic stays on the internal `novacron-network` bridge only.
+      DB_URL: postgresql://postgres:postgres@postgres:5432/novacron?sslmode=disable
+    volumes:
+      - migrate_bin:/shared/bin:rw
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=50m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - novacron-network
+
   # API service - SECURITY HARDENED
   api:
     build:
@@ -166,7 +199,7 @@ services:
     environment:
       LOG_LEVEL: info
       API_PORT: 8090
-      DB_URL: postgresql://postgres:postgres@postgres:5432/novacron?sslmode=require
+      DB_URL: postgresql://postgres:postgres@postgres:5432/novacron?sslmode=disable
       AUTH_SECRET: ${AUTH_SECRET:-changeme_in_production}
       HYPERVISOR_ADDRS: hypervisor:9000
       # Cache configuration with auth
@@ -179,6 +212,10 @@ services:
       CACHE_DEFAULT_TTL: 15m
       CACHE_VM_STATE_TTL: 30s
       CACHE_VM_METRICS_TTL: 15s
+      # Shared secret validated (fail-closed) by /internal/migrate and
+      # related /internal/* endpoints for cross-node migration coordination.
+      # Generate a real value with: openssl rand -hex 32
+      NOVACRON_MIGRATION_SECRET: ${NOVACRON_MIGRATION_SECRET:-CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32}
     ports:
       - "8090:8090"  # REST API
       - "8091:8091"  # WebSocket API
@@ -191,11 +228,15 @@ services:
     read_only: true
     tmpfs:
       - /tmp:noexec,nosuid,size=100m
+    volumes:
+      - migrate_bin:/shared/bin:ro
     depends_on:
       postgres:
         condition: service_healthy
       redis-master:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - novacron-network
 
@@ -298,3 +339,4 @@ volumes:
   grafana_data:
   redis_data:
   ai_models:  # AI engine models storage
+  migrate_bin:  # shared migrate-db binary (built by the `migrate` service)
