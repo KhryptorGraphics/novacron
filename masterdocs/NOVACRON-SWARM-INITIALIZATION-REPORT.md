@@ -371,6 +371,9 @@ swarm/
 
 ### Expected Outcomes
 
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
+
 | Metric | Target | Current Phase 2 Status |
 |--------|--------|------------------------|
 | **WAN Bandwidth Utilization** | 92% | 🎯 Design validated |
@@ -402,6 +405,9 @@ swarm/
 4. **Team Expertise** - NovaCron team familiar with distributed systems
 
 ### Medium Risk ⚠️
+
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
 
 1. **Performance Targets** - 92% WAN bandwidth ambitious but achievable
 2. **ML Model Training** - PBA/ITP require substantial training data

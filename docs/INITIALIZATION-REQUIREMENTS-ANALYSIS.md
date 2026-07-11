@@ -404,6 +404,9 @@ deployments/                - Kubernetes manifests, Terraform, Ansible
 **Assignee:** None
 **Dependencies:** None
 
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
+
 **Scope:** 22-week integration roadmap across 5 phases
 **Targets:**
 - 92% WAN bandwidth utilization
@@ -503,6 +506,9 @@ deployments/                - Kubernetes manifests, Terraform, Ansible
 ---
 
 ### 4.2 DWCP v3 Component Status
+
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
 
 **Implemented (Phase 1-6):**
 - ✅ AMST v3 - Multi-stream transport (achieved 2,469-2,567 GB/s)

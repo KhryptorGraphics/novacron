@@ -380,6 +380,10 @@ Level 5: Monitoring (depends on all) - PARALLEL
 **Purpose**: DWCP v3-powered multi-cluster coordination
 
 #### Features
+
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
+
 - **Multi-Cloud Support**: AWS EC2, Azure VMs, GCP Compute, Oracle Cloud, On-Premise
 - **Mode-Aware Routing**: Automatic datacenter/internet mode selection per cluster
 - **Regional Caching**: 92% bandwidth savings, 85% hit rate
@@ -401,6 +405,9 @@ Level 5: Monitoring (depends on all) - PARALLEL
 **Lines**: 397 lines
 
 **Purpose**: Optimize cross-region state synchronization
+
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
 
 **Features**:
 - Region-aware baseline storage
@@ -724,6 +731,10 @@ backend/core/init/         # May contain temp files
 ### 10.3 Recommended Git Actions
 
 #### Immediate Actions (Within 24 Hours)
+
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
+
 
 ```bash
 # 1. Track DWCP v3 core implementation

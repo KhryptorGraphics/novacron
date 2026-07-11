@@ -47,6 +47,9 @@ DWCP v3 has **exceeded all performance targets** across all benchmark categories
 
 ### Competitor Comparison - 4GB VM Migration (Internet Mode)
 
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured. The competitive comparison figures (e.g. "faster than VMware vMotion", "lower downtime than competitors") were never backed by a real benchmark against any competing product — treat them as unverified marketing language, not measured results.
+
 | Solution | Migration Time | vs DWCP v3 |
 |----------|---------------|------------|
 | **DWCP v3** | **70.79 seconds** | **Baseline ✅ Under 90s target** |

@@ -68,6 +68,9 @@ The Queen Coordinator has successfully established sovereign control over the No
 **Timeline:** 3 hours
 **Beads Issue:** novacron-38p
 
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
+
 **Tasks:**
 1. Execute benchmark suite for DWCP v3 components:
    - AMST bandwidth utilization (target: >70%, achieved: ~92%)

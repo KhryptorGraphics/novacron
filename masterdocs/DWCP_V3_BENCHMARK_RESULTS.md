@@ -355,6 +355,9 @@ DWCP v3 has been comprehensively benchmarked across all components, end-to-end s
 | KVM/QEMU | 0.3 | 4,000 | 35 | 100 |
 | QEMU NBD | 0.2 | 5,000 | 20 | 80 |
 
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured. The competitive comparison figures (e.g. "faster than VMware vMotion", "lower downtime than competitors") were never backed by a real benchmark against any competing product — treat them as unverified marketing language, not measured results.
+
 **DWCP v3 Improvements:**
 - **5.0x faster** than VMware vMotion
 - **3.3x lower downtime** than competitors
@@ -532,6 +535,9 @@ DWCP v3 has been comprehensively benchmarked across all components, end-to-end s
 | Stress Test Uptime | 100% (72h) | 100% | **Perfect** |
 
 ### 7.2 Competitive Position
+
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured. The competitive comparison figures (e.g. "faster than VMware vMotion", "lower downtime than competitors") were never backed by a real benchmark against any competing product — treat them as unverified marketing language, not measured results.
 
 **DWCP v3 leads the industry in:**
 - **Throughput:** 5x faster than VMware vMotion

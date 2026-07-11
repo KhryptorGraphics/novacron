@@ -476,6 +476,10 @@ log.Printf("Recovered clusters: %d healthy connections", metrics["active_connect
 - View change protocol for leader replacement
 
 ### 3. Cross-Datacenter Optimization
+
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
+
 - Regional baseline caching with 92% bandwidth savings
 - HDE v3 delta encoding with 50-100x compression for similar states
 - AMST v3 multi-streaming with 95%+ bandwidth utilization
@@ -524,6 +528,9 @@ log.Printf("Recovered clusters: %d healthy connections", metrics["active_connect
 ## Conclusion
 
 The DWCP v3 federation integration successfully delivers a production-ready, mode-aware multi-cloud and cross-datacenter federation system with Byzantine tolerance. The implementation provides:
+
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
 
 - **95%+ test coverage** with 22 comprehensive tests
 - **Multi-cloud support** for AWS, Azure, GCP, Oracle with Byzantine fault tolerance

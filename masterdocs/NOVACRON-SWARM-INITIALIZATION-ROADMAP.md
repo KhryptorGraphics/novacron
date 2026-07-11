@@ -452,6 +452,9 @@ dwcp:
 - Resource usage: <10% CPU, <500MB RAM during init ✅
 - Test coverage: >90% ✅
 
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
+
 **DWCP Performance:**
 - WAN bandwidth utilization: >90% (currently 92%) ✅
 - Compression ratio: >25x (currently 28x) ✅

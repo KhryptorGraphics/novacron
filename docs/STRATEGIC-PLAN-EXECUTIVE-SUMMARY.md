@@ -99,6 +99,9 @@ Following the successful completion of **Phase 6** with 99.999% availability and
 
 ### Return on Investment
 
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression) and the derived **"$1,927,000 3-Year Net Benefit"** financial projection were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback). This financial projection has no basis in verified performance data — do not treat it, or the metrics it was derived from, as measured.
+
 | Metric | Current | After Phases 0-4 | Improvement |
 |--------|---------|------------------|-------------|
 | **Annual Savings** | $509,000 | $759,000 | +$250,000 |

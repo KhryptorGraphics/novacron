@@ -201,6 +201,10 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 **Target Boot Time:** 15-25 seconds (2.8-4.4x parallel speedup)
 
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
+
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ Phase 1: Pre-Init (2-5s)                                    │
@@ -283,6 +287,10 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 
 **Week 4-5: DWCP v3 Integration (CRITICAL PATH)**
+
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
+
 ```go
 // Tasks
 1. Implement DWCPComponent Wrapper
@@ -1753,6 +1761,9 @@ watch -n 10 ./scripts/production-rollout/health-checks.sh
 - ✅ Resource usage: <10% CPU, <500MB RAM during init
 - ✅ Test coverage: >90%
 - ✅ Zero failed initializations in 100 test runs
+
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured. The competitive comparison figures (e.g. "faster than VMware vMotion", "lower downtime than competitors") were never backed by a real benchmark against any competing product — treat them as unverified marketing language, not measured results.
 
 **DWCP Performance (Maintained from Phase 6):**
 - ✅ WAN bandwidth utilization: >90% (current: 92%)

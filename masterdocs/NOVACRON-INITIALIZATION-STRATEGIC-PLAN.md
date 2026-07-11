@@ -1044,6 +1044,9 @@ bd sync --message "Update strategic plan issues"
 2. **Priority 2 (high):** PBA (bandwidth), ASS (sync), ACP (congestion)
 3. **Priority 3 (normal):** ITP (task placement)
 
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
+
 **Performance Targets:**
 - WAN bandwidth utilization: >85% (achieved 92% in Phase 6)
 - Compression ratio: >10x (achieved 28x in Phase 6)

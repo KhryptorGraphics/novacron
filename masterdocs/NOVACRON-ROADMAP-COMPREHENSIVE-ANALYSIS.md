@@ -718,6 +718,9 @@ TOTAL: 28 weeks (Nov 11 → May 23) - 4 weeks BETTER than plan
 
 #### Performance Targets (Across All Phases)
 
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
+
 **DWCP Performance (From Phase 5 Benchmarks):**
 - ✅ WAN bandwidth utilization: **92%** (target: >85%)
 - ✅ Compression ratio: **28x** (target: >10x)
@@ -831,6 +834,9 @@ TOTAL: 28 weeks (Nov 11 → May 23) - 4 weeks BETTER than plan
 **Assessment:** ✅ **BUSINESS VALUE TARGETS EXCEEDED BY 5-10x**
 
 ### 5.4 Success Metrics Scorecard
+
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
 
 | Category | Metric | Target | Actual | Status |
 |----------|--------|--------|--------|--------|

@@ -85,6 +85,9 @@ Comprehensive architectural analysis of the NovaCron distributed VM management p
 - GCP Compute: Internet mode, PBFT consensus, Byzantine tolerant
 - Oracle Cloud: Internet mode, PBFT consensus, Byzantine tolerant
 
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
+
 **Regional Caching**: 92% bandwidth savings, 85% hit rate
 
 ### 3. Mode-Aware Live Migration

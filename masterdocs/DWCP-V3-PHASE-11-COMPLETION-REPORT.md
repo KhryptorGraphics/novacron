@@ -467,6 +467,9 @@ type PostQuantumCrypto struct {
 - Dilithium5: NIST Level 5 (256-bit quantum security)
 - SPHINCS+-256f: 256-bit post-quantum security
 
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
+
 **Performance Comparison:**
 | Operation | RSA-4096 | Kyber-1024 | Speedup |
 |-----------|----------|------------|---------|

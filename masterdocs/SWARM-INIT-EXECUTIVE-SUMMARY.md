@@ -140,6 +140,9 @@ Week 9-10: [Deployment]
 - Parallel speedup: 2.8-4.4x
 - Test coverage: >90%
 
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
+
 **DWCP Performance:**
 - WAN bandwidth: >90% (currently 92%)
 - Compression: >25x (currently 28x)

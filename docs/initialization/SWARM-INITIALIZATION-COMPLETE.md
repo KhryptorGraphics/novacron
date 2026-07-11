@@ -69,6 +69,9 @@ The NovaCron distributed VM management platform has been comprehensively analyze
    - Status: Infrastructure ready, upgrade pending
    - Performance: 2,469-5,342 GB/s achieved
 
+> [!WARNING]
+> **[CORRECTION — fabricated metric]** The figures below (92% WAN bandwidth, 28x compression, 3.3x migration) were fabricated (traced to a benchmark package with zero real `dwcp` imports; see `novacron-38p` / `STATUS.md`). Real, code-verified evidence: WAN compression gives ~2.55–2.74x FASTER migration only on compressible VM memory (SLOWER on incompressible data and on LAN/loopback, where it is 1.5–2.3x slower). Do not treat the original numbers below as measured.
+
 2. **HDE v3** (Hierarchical Delta Encoding)
    - Status: Infrastructure ready, upgrade pending
    - Performance: 28x compression achieved
