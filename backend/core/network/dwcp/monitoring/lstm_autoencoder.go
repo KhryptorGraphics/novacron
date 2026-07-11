@@ -129,6 +129,12 @@ func (lam *LSTMAutoencoderModel) Train(ctx context.Context, normalData []*Metric
 	// Set threshold at 95th percentile
 	lam.threshold = percentile(errors, 0.95)
 
+	// Reset the live detection buffer. The loop above reused timeSeriesBuffer
+	// as scratch space and left it holding the last training window, which
+	// bypasses Detect()'s cold-start guard (len >= windowSize) on the very
+	// next call and scores live data against stale training data.
+	lam.timeSeriesBuffer = make([]*MetricVector, 0, lam.windowSize)
+
 	lam.logger.Info("LSTM Autoencoder training completed",
 		zap.Float64("threshold", lam.threshold))
 

@@ -2,6 +2,7 @@ package monitoring
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -276,7 +277,7 @@ func TestDashboardExporter(t *testing.T) {
 
 		// Verify JSON is valid
 		var dashboard GrafanaDashboard
-		if err := unmarshalJSON(dashboardJSON, &dashboard); err != nil {
+		if err := json.Unmarshal(dashboardJSON, &dashboard); err != nil {
 			t.Errorf("Invalid dashboard JSON: %v", err)
 		}
 
@@ -517,12 +518,6 @@ func TestIntegrationScenario(t *testing.T) {
 			}
 		}
 	})
-}
-
-// Helper function for JSON unmarshaling (placeholder)
-func unmarshalJSON(data []byte, v interface{}) error {
-	// Would use json.Unmarshal in production
-	return nil
 }
 
 // Benchmark tests

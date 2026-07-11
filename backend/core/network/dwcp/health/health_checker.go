@@ -190,16 +190,20 @@ func AMSTHealthCheck(activeStreams, minStreams, maxStreams int) CheckFunc {
 			},
 		}
 
-		// Check if streams are within acceptable range
-		if activeStreams < minStreams {
+		// Check if streams are within acceptable range. Zero streams must be
+		// checked before the "< minStreams" case, otherwise it's unreachable
+		// dead code for any minStreams > 0 (always caught by that branch first)
+		// and a fully-dead transport reports merely "Degraded" instead of
+		// "Unhealthy".
+		if activeStreams == 0 {
+			health.Status = StatusUnhealthy
+			health.Message = "No active streams"
+		} else if activeStreams < minStreams {
 			health.Status = StatusDegraded
 			health.Message = fmt.Sprintf("Active streams (%d) below minimum (%d)", activeStreams, minStreams)
 		} else if activeStreams > maxStreams {
 			health.Status = StatusUnhealthy
 			health.Message = fmt.Sprintf("Active streams (%d) exceeds maximum (%d)", activeStreams, maxStreams)
-		} else if activeStreams == 0 {
-			health.Status = StatusUnhealthy
-			health.Message = "No active streams"
 		} else {
 			health.Status = StatusHealthy
 			health.Message = fmt.Sprintf("%d streams active", activeStreams)

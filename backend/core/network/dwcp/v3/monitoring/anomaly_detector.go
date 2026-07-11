@@ -217,8 +217,9 @@ func (ad *AnomalyDetector) CheckCompressionRatio(ratio float64) *Anomaly {
 
 	deviation := ad.compressionModel.calculateDeviation(ratio)
 
-	// Alert on unusually low compression (positive deviation from norm)
-	if deviation > ad.config.CompressionThreshold {
+	// Alert on unusually low compression (negative deviation from norm --
+	// deviation = (value-mean)/stddev, so a below-average ratio is negative).
+	if -deviation > ad.config.CompressionThreshold {
 		confidence := ad.calculateConfidence(deviation, ad.config.CompressionThreshold)
 		if confidence >= ad.config.MinAnomalyConfidence {
 			anomaly := &Anomaly{
@@ -347,7 +348,12 @@ func (ad *AnomalyDetector) getModelForAnomaly(anomaly *Anomaly) *StatisticalMode
 func (ad *AnomalyDetector) calculateConfidence(deviation, threshold float64) float64 {
 	// Confidence increases with deviation beyond threshold
 	// 0.8 at threshold, approaches 1.0 as deviation increases
-	if deviation < threshold {
+	// Callers (e.g. CheckCompressionRatio) may pass a negative deviation when
+	// the anomaly direction is "below normal", so gate on magnitude like the
+	// excess calculation below already does -- comparing the raw signed value
+	// to a positive threshold made confidence permanently 0 for any negative
+	// deviation.
+	if math.Abs(deviation) < threshold {
 		return 0.0
 	}
 

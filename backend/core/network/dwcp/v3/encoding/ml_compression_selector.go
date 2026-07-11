@@ -265,6 +265,30 @@ func (cs *CompressionSelector) analyzeData(data []byte) DataCharacteristics {
 	}
 	chars.Entropy = entropy / 8.0 // Normalize to 0-1
 
+	// Order-0 byte entropy is blind to arithmetic/sequential patterns (a ramp
+	// like 0,1,2,...,255,0,1,... visits every byte value equally often, so it
+	// scores as maximum entropy even though it's perfectly predictable and
+	// highly compressible). Also sample the first-order byte deltas, which
+	// collapse to near-zero entropy for such patterns, and use whichever
+	// signal shows more structure.
+	deltaFreq := make([]int, 256)
+	for i := 1; i < sampleSize; i++ {
+		deltaFreq[data[i]-data[i-1]]++
+	}
+	deltaEntropy := 0.0
+	if sampleSize > 1 {
+		for _, count := range deltaFreq {
+			if count > 0 {
+				p := float64(count) / float64(sampleSize-1)
+				deltaEntropy -= p * log2(p)
+			}
+		}
+		deltaEntropy /= 8.0
+	}
+	if deltaEntropy < chars.Entropy {
+		chars.Entropy = deltaEntropy
+	}
+
 	// Compressibility estimation
 	chars.Compressible = chars.Entropy < 0.85
 

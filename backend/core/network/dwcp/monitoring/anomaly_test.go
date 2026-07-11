@@ -99,12 +99,17 @@ func TestLSTMAutoencoder_Detection(t *testing.T) {
 	err = detector.Train(ctx, timeSeriesData)
 	require.NoError(t, err)
 
-	// Test with normal pattern
+	// Test with normal pattern. Follows the same gentle trend formula as
+	// generateTimeSeriesData's training data (trend = i*0.1): the verification
+	// loop previously ramped 10x steeper than what the model was trained on,
+	// so its own "normal" data fell outside the learned baseline and tripped
+	// the anomaly threshold on the very call where the window first filled.
 	for i := 0; i < 10; i++ {
+		trend := float64(i) * 0.1
 		normalMetric := &MetricVector{
 			Timestamp:   time.Now(),
-			Bandwidth:   100.0 + float64(i),
-			Latency:     10.0 + float64(i)*0.1,
+			Bandwidth:   100.0 + trend,
+			Latency:     10.0 + trend*0.05,
 			PacketLoss:  0.01,
 			Jitter:      1.0,
 			CPUUsage:    50.0,
