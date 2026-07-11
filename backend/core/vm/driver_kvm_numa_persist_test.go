@@ -166,8 +166,10 @@ func TestNUMAPersistRealBootAfterReload(t *testing.T) {
 	}
 	defer func() {
 		_ = d2.Stop(context.Background(), vmID)
-		if p := d2.vms[vmID]; p != nil && p.PID > 0 && syscall.Kill(p.PID, 0) == nil {
-			_ = syscall.Kill(p.PID, syscall.SIGKILL)
+		// Locked read: raw d2.vms[vmID] access here would race monitorVM's
+		// locked PID/State writes on process exit (novacron -race gate).
+		if info, err := d2.GetInfo(context.Background(), vmID); err == nil && info.PID > 0 && syscall.Kill(info.PID, 0) == nil {
+			_ = syscall.Kill(info.PID, syscall.SIGKILL)
 		}
 	}()
 

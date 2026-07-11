@@ -78,13 +78,19 @@ func TestBlockMigrationLocalhostCutover(t *testing.T) {
 	if err := d.Start(ctx, srcID); err != nil { // normal start -- block migration must work on an ordinary VM
 		t.Fatalf("start source: %v", err)
 	}
-	srcPID := d.vms[srcID].PID
-	srcDisk := d.vms[srcID].DiskPath
+	srcInfo, err := d.GetInfo(ctx, srcID)
+	if err != nil {
+		t.Fatalf("get source VM info: %v", err)
+	}
+	srcPID := srcInfo.PID
+	srcDisk := srcInfo.RootFS
 
+	// Locked reads: raw d.vms[destID] here would race monitorVM's locked
+	// PID/State writes.
 	defer func() { // belt-and-suspenders: never leak qemu
 		_ = d.Stop(context.Background(), destID)
-		if p := d.vms[destID]; p != nil && p.PID > 0 {
-			_ = syscall.Kill(p.PID, syscall.SIGKILL)
+		if info, err := d.GetInfo(context.Background(), destID); err == nil && info.PID > 0 {
+			_ = syscall.Kill(info.PID, syscall.SIGKILL)
 		}
 		if syscall.Kill(srcPID, 0) == nil {
 			_ = syscall.Kill(srcPID, syscall.SIGKILL)
@@ -120,7 +126,11 @@ func TestBlockMigrationLocalhostCutover(t *testing.T) {
 	if _, statErr := os.Stat(filepath.Join(destDir, "config.json")); statErr != nil {
 		t.Fatalf("dest config.json not persisted -- migrated VM would not re-adopt on a dest restart: %v", statErr)
 	}
-	destPID := d.vms[destID].PID // capture before Stop zeroes it
+	destInfoBeforeStop, err := d.GetInfo(ctx, destID)
+	if err != nil {
+		t.Fatalf("get dest VM info: %v", err)
+	}
+	destPID := destInfoBeforeStop.PID // capture before Stop zeroes it (locked read)
 
 	downtimeMs, totalMs, err := d.migrateBlockWithStats(ctx, srcID, ramURI, nbdURI)
 	if err != nil {

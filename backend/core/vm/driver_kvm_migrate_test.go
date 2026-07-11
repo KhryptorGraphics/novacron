@@ -76,14 +76,19 @@ func TestLiveMigrationLocalhostCutover(t *testing.T) {
 	if err := d.StartMigrationSource(ctx, srcID); err != nil {
 		t.Fatalf("start migration source: %v", err)
 	}
-	srcPID := d.vms[srcID].PID
+	srcInfo, err := d.GetInfo(ctx, srcID)
+	if err != nil {
+		t.Fatalf("get source VM info: %v", err)
+	}
+	srcPID := srcInfo.PID
 
 	// Belt-and-suspenders cleanup: kill anything still alive so t.TempDir removal
-	// (and the host) is not left with orphaned qemu processes.
+	// (and the host) is not left with orphaned qemu processes. Locked reads: raw
+	// d.vms[destID] here would race monitorVM's locked PID/State writes.
 	defer func() {
 		_ = d.Stop(context.Background(), destID)
-		if p := d.vms[destID]; p != nil && p.PID > 0 {
-			_ = syscall.Kill(p.PID, syscall.SIGKILL)
+		if info, err := d.GetInfo(context.Background(), destID); err == nil && info.PID > 0 {
+			_ = syscall.Kill(info.PID, syscall.SIGKILL)
 		}
 		if syscall.Kill(srcPID, 0) == nil {
 			_ = syscall.Kill(srcPID, syscall.SIGKILL)

@@ -59,7 +59,7 @@ type FederatedCoordinator struct {
 	mu                sync.RWMutex
 	clients           map[int]*Client
 	globalModel       *Model
-	topology          *TopologyOptimizer // Python integration
+	topology          TopologyOptimizer // Python integration
 	currentRound      int
 	trainingHistory   []*TrainingRound
 	targetAccuracy    float64
