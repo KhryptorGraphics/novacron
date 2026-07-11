@@ -24,23 +24,23 @@ type AMSTv3 struct {
 	currentMode  atomic.Value // upgrade.NetworkMode
 
 	// Transport layers
-	datacenterTransport *transport.RDMATransport    // v1 RDMA for datacenter
-	internetTransport   *TCPTransportV3             // v3 TCP for internet
-	congestionCtrl      *CongestionController       // BBR/CUBIC controller
+	datacenterTransport *transport.RDMATransport // v1 RDMA for datacenter
+	internetTransport   *TCPTransportV3          // v3 TCP for internet
+	congestionCtrl      *CongestionController    // BBR/CUBIC controller
 
 	// Metrics and monitoring
-	metrics           *transport.MetricsCollector
-	totalBytesSent    atomic.Uint64
-	totalBytesRecv    atomic.Uint64
-	activeStreams     atomic.Int32
-	modeTransitions   atomic.Uint64
+	metrics         *transport.MetricsCollector
+	totalBytesSent  atomic.Uint64
+	totalBytesRecv  atomic.Uint64
+	activeStreams   atomic.Int32
+	modeTransitions atomic.Uint64
 
 	// Lifecycle management
-	ctx       context.Context
-	cancel    context.CancelFunc
-	mu        sync.RWMutex
-	started   bool
-	logger    *zap.Logger
+	ctx     context.Context
+	cancel  context.CancelFunc
+	mu      sync.RWMutex
+	started bool
+	logger  *zap.Logger
 
 	// Adaptive optimization
 	lastModeCheck     time.Time
@@ -50,9 +50,9 @@ type AMSTv3 struct {
 // AMSTv3Config configuration for hybrid transport
 type AMSTv3Config struct {
 	// Transport selection
-	EnableDatacenter bool   // Enable datacenter mode (RDMA)
-	EnableInternet   bool   // Enable internet mode (TCP)
-	AutoMode         bool   // Automatically detect and switch modes
+	EnableDatacenter bool // Enable datacenter mode (RDMA)
+	EnableInternet   bool // Enable internet mode (TCP)
+	AutoMode         bool // Automatically detect and switch modes
 
 	// Datacenter settings (v1 compatibility)
 	DatacenterStreams int    // 32-512 streams for datacenter
@@ -60,7 +60,7 @@ type AMSTv3Config struct {
 	RDMAPort          int    // RDMA port
 
 	// Internet settings (v3 features)
-	InternetStreams int    // 4-16 streams for internet
+	InternetStreams     int    // 4-16 streams for internet
 	CongestionAlgorithm string // "bbr" or "cubic"
 	PacingEnabled       bool   // Enable packet pacing
 	PacingRate          int64  // bytes per second
@@ -84,8 +84,8 @@ func DefaultAMSTv3Config() *AMSTv3Config {
 		EnableDatacenter:    true,
 		EnableInternet:      true,
 		AutoMode:            true,
-		DatacenterStreams:   64,  // High stream count for datacenter
-		InternetStreams:     8,   // Low stream count for internet
+		DatacenterStreams:   64, // High stream count for datacenter
+		InternetStreams:     8,  // Low stream count for internet
 		CongestionAlgorithm: "bbr",
 		PacingEnabled:       true,
 		PacingRate:          1000 * 1024 * 1024, // 1 Gbps default
@@ -125,8 +125,9 @@ func NewAMSTv3(config *AMSTv3Config, detector *upgrade.ModeDetector, logger *zap
 		lastModeCheck:     time.Now(),
 	}
 
-	// Initialize with hybrid mode
-	amst.currentMode.Store(upgrade.ModeHybrid)
+	// Initialize from the detector's current mode (honours a ForceMode set
+	// before construction) instead of hardcoding hybrid.
+	amst.currentMode.Store(detector.GetCurrentMode())
 
 	// Create metrics collector
 	amst.metrics = transport.NewMetricsCollector("amst-v3", config.RemoteAddr)
@@ -204,6 +205,18 @@ func (a *AMSTv3) Start(ctx context.Context, remoteAddr string) error {
 		zap.String("remote_addr", remoteAddr),
 		zap.Bool("auto_mode", a.config.AutoMode))
 
+	// Persist the dial target and propagate it to the sub-transports. They
+	// captured RemoteAddr at construction from a config that DefaultAMSTv3Config
+	// never populates, so without this every stream dial fails with
+	// "dial tcp: missing address".
+	a.config.RemoteAddr = remoteAddr
+	if a.datacenterTransport != nil {
+		a.datacenterTransport.SetRemoteAddr(remoteAddr)
+	}
+	if a.internetTransport != nil {
+		a.internetTransport.SetRemoteAddr(remoteAddr)
+	}
+
 	// Detect initial mode
 	initialMode := a.modeDetector.DetectMode(ctx)
 	a.currentMode.Store(initialMode)
@@ -214,15 +227,29 @@ func (a *AMSTv3) Start(ctx context.Context, remoteAddr string) error {
 	// Start appropriate transport based on mode
 	switch initialMode {
 	case upgrade.ModeDatacenter:
+		startedDatacenter := false
 		if a.datacenterTransport != nil {
 			if err := a.datacenterTransport.Start(); err != nil {
 				a.logger.Warn("Failed to start datacenter transport, falling back to internet",
 					zap.Error(err))
-				a.currentMode.Store(upgrade.ModeInternet)
-				initialMode = upgrade.ModeInternet
 			} else {
+				startedDatacenter = true
 				a.logger.Info("Datacenter transport (RDMA) started")
 			}
+		}
+		if !startedDatacenter {
+			// Fall back to internet. The previous code flipped currentMode to
+			// Internet here but never started the internet transport, so every
+			// later send failed with "not started".
+			if a.internetTransport == nil {
+				return fmt.Errorf("datacenter transport unavailable and no internet transport to fall back to")
+			}
+			if err := a.internetTransport.Start(ctx); err != nil {
+				return fmt.Errorf("failed to start internet transport (datacenter fallback): %w", err)
+			}
+			a.currentMode.Store(upgrade.ModeInternet)
+			initialMode = upgrade.ModeInternet
+			a.logger.Info("Internet transport (TCP v3) started (datacenter fallback)")
 		}
 	case upgrade.ModeInternet:
 		if a.internetTransport != nil {
@@ -256,9 +283,13 @@ func (a *AMSTv3) Start(ctx context.Context, remoteAddr string) error {
 // SendData sends data using the appropriate transport based on detected mode
 func (a *AMSTv3) SendData(ctx context.Context, data []byte) error {
 	a.mu.RLock()
-	defer a.mu.RUnlock()
+	started := a.started
+	autoMode := a.config.AutoMode
+	lastCheck := a.lastModeCheck
+	interval := a.modeCheckInterval
+	a.mu.RUnlock()
 
-	if !a.started {
+	if !started {
 		return fmt.Errorf("AMST v3 not started")
 	}
 
@@ -266,8 +297,10 @@ func (a *AMSTv3) SendData(ctx context.Context, data []byte) error {
 		return fmt.Errorf("no data to send")
 	}
 
-	// Check if we need to re-detect mode
-	if a.config.AutoMode && time.Since(a.lastModeCheck) > a.modeCheckInterval {
+	// Re-detect/switch mode WITHOUT holding a.mu: checkAndSwitchMode acquires
+	// the write lock (via switchModeLocked), and calling it under the RLock
+	// above would self-deadlock (a Go RWMutex is not upgradable).
+	if autoMode && time.Since(lastCheck) > interval {
 		a.checkAndSwitchMode(ctx)
 	}
 
@@ -426,25 +459,27 @@ func (a *AMSTv3) modeMonitorLoop() {
 // checkAndSwitchMode detects current mode and switches if necessary
 func (a *AMSTv3) checkAndSwitchMode(ctx context.Context) {
 	newMode := a.modeDetector.DetectMode(ctx)
-	currentMode := a.currentMode.Load().(upgrade.NetworkMode)
 
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	currentMode := a.currentMode.Load().(upgrade.NetworkMode)
 	if newMode != currentMode {
 		a.logger.Info("Network mode changed",
 			zap.String("old_mode", currentMode.String()),
 			zap.String("new_mode", newMode.String()))
 
-		a.switchMode(ctx, newMode)
+		a.switchModeLocked(ctx, newMode)
 		a.modeTransitions.Add(1)
 	}
 
 	a.lastModeCheck = time.Now()
 }
 
-// switchMode switches to a different network mode
-func (a *AMSTv3) switchMode(ctx context.Context, newMode upgrade.NetworkMode) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
+// switchModeLocked switches to a different network mode. The caller MUST hold
+// a.mu; it deliberately does not lock, so callers already holding the lock
+// (checkAndSwitchMode) do not self-deadlock.
+func (a *AMSTv3) switchModeLocked(ctx context.Context, newMode upgrade.NetworkMode) {
 	oldMode := a.currentMode.Load().(upgrade.NetworkMode)
 
 	// Stop old transport if exclusive mode

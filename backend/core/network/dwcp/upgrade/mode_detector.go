@@ -11,8 +11,8 @@ type NetworkMode int
 
 const (
 	ModeDatacenter NetworkMode = iota // v1: RDMA, 10-100 Gbps, <10ms latency
-	ModeInternet                       // v3: TCP, 100-900 Mbps, 50-500ms latency
-	ModeHybrid                         // Adaptive switching between modes
+	ModeInternet                      // v3: TCP, 100-900 Mbps, 50-500ms latency
+	ModeHybrid                        // Adaptive switching between modes
 )
 
 // String returns the string representation of NetworkMode
@@ -36,6 +36,10 @@ type ModeDetector struct {
 	// Current detected mode
 	currentMode NetworkMode
 
+	// forced, when true, pins currentMode and makes DetectMode a no-op until
+	// ClearForcedMode is called. Set via ForceMode.
+	forced bool
+
 	// Thresholds for mode detection
 	datacenterLatencyThreshold   time.Duration // <10ms for datacenter
 	internetLatencyThreshold     time.Duration // >50ms for internet
@@ -48,7 +52,7 @@ type ModeDetector struct {
 	historySize      int
 
 	// Metrics collector (interface to avoid circular dependency)
-	metricsCollector interface{
+	metricsCollector interface {
 		GetAverageLatency() time.Duration
 		GetAverageBandwidth() int64
 	}
@@ -72,6 +76,14 @@ func NewModeDetector() *ModeDetector {
 func (md *ModeDetector) DetectMode(ctx context.Context) NetworkMode {
 	md.mu.Lock()
 	defer md.mu.Unlock()
+
+	// A forced mode pins the result: skip measurement and return the pinned
+	// mode until ClearForcedMode is called. Without this, DetectMode would
+	// recompute from measureLatency/measureBandwidth (currently placeholders)
+	// and silently override any ForceMode the instant it runs.
+	if md.forced {
+		return md.currentMode
+	}
 
 	// Measure current conditions
 	latency := md.measureLatency(ctx)
@@ -188,7 +200,7 @@ func (md *ModeDetector) averageBandwidth() int64 {
 }
 
 // SetMetricsCollector sets the metrics collector for accurate measurements
-func (md *ModeDetector) SetMetricsCollector(mc interface{
+func (md *ModeDetector) SetMetricsCollector(mc interface {
 	GetAverageLatency() time.Duration
 	GetAverageBandwidth() int64
 }) {
@@ -217,9 +229,18 @@ func (md *ModeDetector) AutoDetectLoop(ctx context.Context, interval time.Durati
 	}
 }
 
-// ForceMode manually sets the network mode (for testing/debugging)
+// ForceMode manually pins the network mode (for testing/debugging). The mode
+// stays pinned - DetectMode will not override it - until ClearForcedMode.
 func (md *ModeDetector) ForceMode(mode NetworkMode) {
 	md.mu.Lock()
 	defer md.mu.Unlock()
+	md.forced = true
 	md.currentMode = mode
+}
+
+// ClearForcedMode re-enables automatic mode detection after a ForceMode call.
+func (md *ModeDetector) ClearForcedMode() {
+	md.mu.Lock()
+	defer md.mu.Unlock()
+	md.forced = false
 }

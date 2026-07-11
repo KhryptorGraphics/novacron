@@ -2,6 +2,9 @@ package transport
 
 import (
 	"context"
+	"io"
+	"net"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +14,39 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 )
+
+// testServerAddr is the address of a shared loopback TCP listener started in
+// TestMain. The AMST v3 sub-transports do real dials, so tests need a socket
+// to accept connections for streams to count as active.
+var testServerAddr string
+
+// TestMain starts one ephemeral accept-and-drain TCP listener for the whole
+// package (an ephemeral :0 port avoids CI conflicts on a fixed port) and points
+// testServerAddr at it.
+func TestMain(m *testing.M) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		panic("test listener: " + err.Error())
+	}
+	testServerAddr = ln.Addr().String()
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return // listener closed
+			}
+			go func(c net.Conn) {
+				_, _ = io.Copy(io.Discard, c)
+				_ = c.Close()
+			}(conn)
+		}
+	}()
+
+	code := m.Run()
+	_ = ln.Close()
+	os.Exit(code)
+}
 
 // TestAMSTv3_DatacenterMode tests AMST v3 in datacenter mode (v1 RDMA compatibility)
 func TestAMSTv3_DatacenterMode(t *testing.T) {
@@ -39,7 +75,7 @@ func TestAMSTv3_DatacenterMode(t *testing.T) {
 	}
 
 	// Start transport
-	err = amst.Start(ctx, "localhost:9000")
+	err = amst.Start(ctx, testServerAddr)
 	assert.NoError(t, err)
 	defer amst.Close()
 
@@ -69,7 +105,7 @@ func TestAMSTv3_InternetMode(t *testing.T) {
 	assert.True(t, amst.internetTransport != nil)
 
 	// Start transport
-	err = amst.Start(ctx, "localhost:9000")
+	err = amst.Start(ctx, testServerAddr)
 	assert.NoError(t, err)
 	defer amst.Close()
 
@@ -86,12 +122,15 @@ func TestAMSTv3_HybridMode(t *testing.T) {
 
 	detector := upgrade.NewModeDetector()
 	config := DefaultAMSTv3Config()
+	// Shorten the re-detection interval so a forced mode change is picked up
+	// within the test's 100ms window (the 5s default would never fire here).
+	config.ModeCheckInterval = 20 * time.Millisecond
 
 	amst, err := NewAMSTv3(config, detector, logger)
 	require.NoError(t, err)
 	require.NotNil(t, amst)
 
-	err = amst.Start(ctx, "localhost:9000")
+	err = amst.Start(ctx, testServerAddr)
 	require.NoError(t, err)
 	defer amst.Close()
 
@@ -130,7 +169,7 @@ func TestAMSTv3_AdaptiveSend(t *testing.T) {
 	amst, err := NewAMSTv3(config, detector, logger)
 	require.NoError(t, err)
 
-	err = amst.Start(ctx, "localhost:9000")
+	err = amst.Start(ctx, testServerAddr)
 	require.NoError(t, err)
 	defer amst.Close()
 
@@ -156,7 +195,7 @@ func TestAMSTv3_ConcurrentSends(t *testing.T) {
 	amst, err := NewAMSTv3(config, detector, logger)
 	require.NoError(t, err)
 
-	err = amst.Start(ctx, "localhost:9000")
+	err = amst.Start(ctx, testServerAddr)
 	require.NoError(t, err)
 	defer amst.Close()
 
@@ -197,7 +236,7 @@ func TestAMSTv3_ModeSwitchPerformance(t *testing.T) {
 	amst, err := NewAMSTv3(config, detector, logger)
 	require.NoError(t, err)
 
-	err = amst.Start(ctx, "localhost:9000")
+	err = amst.Start(ctx, testServerAddr)
 	require.NoError(t, err)
 	defer amst.Close()
 
@@ -231,7 +270,7 @@ func TestAMSTv3_BackwardCompatibility(t *testing.T) {
 	amst, err := NewAMSTv3(config, detector, logger)
 	require.NoError(t, err)
 
-	err = amst.Start(ctx, "localhost:9000")
+	err = amst.Start(ctx, testServerAddr)
 	require.NoError(t, err)
 	defer amst.Close()
 
@@ -261,7 +300,7 @@ func TestAMSTv3_CongestionControl(t *testing.T) {
 	amst, err := NewAMSTv3(config, detector, logger)
 	require.NoError(t, err)
 
-	err = amst.Start(ctx, "localhost:9000")
+	err = amst.Start(ctx, testServerAddr)
 	require.NoError(t, err)
 	defer amst.Close()
 
@@ -282,7 +321,7 @@ func TestAMSTv3_StreamScaling(t *testing.T) {
 	amst, err := NewAMSTv3(config, detector, logger)
 	require.NoError(t, err)
 
-	err = amst.Start(ctx, "localhost:9000")
+	err = amst.Start(ctx, testServerAddr)
 	require.NoError(t, err)
 	defer amst.Close()
 
@@ -318,7 +357,7 @@ func TestAMSTv3_ErrorHandling(t *testing.T) {
 	assert.Contains(t, err.Error(), "not started")
 
 	// Test nil data
-	err = amst.Start(ctx, "localhost:9000")
+	err = amst.Start(ctx, testServerAddr)
 	require.NoError(t, err)
 	defer amst.Close()
 
@@ -340,7 +379,7 @@ func TestAMSTv3_Metrics(t *testing.T) {
 	amst, err := NewAMSTv3(config, detector, logger)
 	require.NoError(t, err)
 
-	err = amst.Start(ctx, "localhost:9000")
+	err = amst.Start(ctx, testServerAddr)
 	require.NoError(t, err)
 	defer amst.Close()
 
@@ -367,7 +406,7 @@ func BenchmarkAMSTv3_DatacenterThroughput(b *testing.B) {
 	amst, err := NewAMSTv3(config, detector, logger)
 	require.NoError(b, err)
 
-	err = amst.Start(ctx, "localhost:9000")
+	err = amst.Start(ctx, testServerAddr)
 	require.NoError(b, err)
 	defer amst.Close()
 
@@ -393,7 +432,7 @@ func BenchmarkAMSTv3_InternetThroughput(b *testing.B) {
 	amst, err := NewAMSTv3(config, detector, logger)
 	require.NoError(b, err)
 
-	err = amst.Start(ctx, "localhost:9000")
+	err = amst.Start(ctx, testServerAddr)
 	require.NoError(b, err)
 	defer amst.Close()
 
@@ -418,7 +457,7 @@ func BenchmarkAMSTv3_ModeSwitching(b *testing.B) {
 	amst, err := NewAMSTv3(config, detector, logger)
 	require.NoError(b, err)
 
-	err = amst.Start(ctx, "localhost:9000")
+	err = amst.Start(ctx, testServerAddr)
 	require.NoError(b, err)
 	defer amst.Close()
 

@@ -29,7 +29,7 @@ type MultiStreamTCP struct {
 	pacingRate int64 // bytes per second
 
 	// Metrics collection
-	metrics    *MetricsCollector
+	metrics           *MetricsCollector
 	totalBytesSent    atomic.Uint64
 	totalBytesRecv    atomic.Uint64
 	activeStreams     atomic.Int32
@@ -42,8 +42,8 @@ type MultiStreamTCP struct {
 	healthMu          sync.RWMutex
 
 	// In-flight request tracking for graceful shutdown
-	inFlightRequests  atomic.Int64
-	shutdownWg        sync.WaitGroup
+	inFlightRequests atomic.Int64
+	shutdownWg       sync.WaitGroup
 
 	// Synchronization
 	mu     sync.RWMutex
@@ -126,6 +126,14 @@ func NewMultiStreamTCP(remoteAddr string, config *AMSTConfig, logger *zap.Logger
 	return mst, nil
 }
 
+// SetRemoteAddr sets the dial target. Must be called before Start; it does not
+// affect already-established streams.
+func (m *MultiStreamTCP) SetRemoteAddr(addr string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.remoteAddr = addr
+}
+
 // Start initializes all TCP streams to the remote address
 func (m *MultiStreamTCP) Start() error {
 	m.mu.Lock()
@@ -186,8 +194,8 @@ func (m *MultiStreamTCP) createStream(streamID int) error {
 	tcpConn := conn.(*net.TCPConn)
 
 	// Optimize TCP settings
-	_ = tcpConn.SetNoDelay(true)                      // Disable Nagle's algorithm
-	_ = tcpConn.SetKeepAlive(true)                    // Enable keepalive
+	_ = tcpConn.SetNoDelay(true)                     // Disable Nagle's algorithm
+	_ = tcpConn.SetKeepAlive(true)                   // Enable keepalive
 	_ = tcpConn.SetKeepAlivePeriod(30 * time.Second) // Keepalive period
 
 	// Get raw connection for socket options
@@ -491,14 +499,14 @@ func (m *MultiStreamTCP) GetMetrics() map[string]interface{} {
 	totalRecv := m.totalBytesRecv.Load()
 
 	return map[string]interface{}{
-		"active_streams":      m.activeStreams.Load(),
-		"total_streams":       len(m.streams),
-		"total_bytes_sent":    totalSent,
-		"total_bytes_recv":    totalRecv,
-		"bandwidth_utilized":  m.bandwidthUtilized.Load(),
-		"chunk_size":          m.chunkSize,
-		"pacing_enabled":      m.config.PacingEnabled,
-		"pacing_rate_mbps":    float64(m.pacingRate) / (1024 * 1024),
+		"active_streams":     m.activeStreams.Load(),
+		"total_streams":      len(m.streams),
+		"total_bytes_sent":   totalSent,
+		"total_bytes_recv":   totalRecv,
+		"bandwidth_utilized": m.bandwidthUtilized.Load(),
+		"chunk_size":         m.chunkSize,
+		"pacing_enabled":     m.config.PacingEnabled,
+		"pacing_rate_mbps":   float64(m.pacingRate) / (1024 * 1024),
 	}
 }
 

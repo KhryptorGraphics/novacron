@@ -22,10 +22,10 @@ type TCPTransportV3 struct {
 	config *TCPTransportV3Config
 
 	// Connection management
-	remoteAddr     string
-	streams        []*TCPStreamV3
-	numStreams     int
-	activeStreams  atomic.Int32
+	remoteAddr    string
+	streams       []*TCPStreamV3
+	numStreams    int
+	activeStreams atomic.Int32
 
 	// Congestion control
 	congestionCtrl *CongestionController
@@ -39,16 +39,16 @@ type TCPTransportV3 struct {
 	packetLoss     atomic.Value // float64
 
 	// Adaptive tuning
-	autoTune       bool
-	chunkSize      int
-	lastTuneTime   time.Time
+	autoTune     bool
+	chunkSize    int
+	lastTuneTime time.Time
 
 	// Lifecycle
-	ctx      context.Context
-	cancel   context.CancelFunc
-	mu       sync.RWMutex
-	started  bool
-	logger   *zap.Logger
+	ctx     context.Context
+	cancel  context.CancelFunc
+	mu      sync.RWMutex
+	started bool
+	logger  *zap.Logger
 
 	// Health monitoring
 	healthTicker *time.Ticker
@@ -56,28 +56,28 @@ type TCPTransportV3 struct {
 
 // TCPStreamV3 represents a single TCP stream with v3 optimizations
 type TCPStreamV3 struct {
-	conn            *net.TCPConn
-	streamID        int
-	bytesSent       atomic.Uint64
-	bytesRecv       atomic.Uint64
-	lastActive      time.Time
-	healthy         atomic.Bool
-	rawConn         syscall.RawConn
-	rtt             atomic.Int64 // microseconds
-	cwnd            atomic.Int32 // congestion window size
-	mu              sync.Mutex
+	conn       *net.TCPConn
+	streamID   int
+	bytesSent  atomic.Uint64
+	bytesRecv  atomic.Uint64
+	lastActive time.Time
+	healthy    atomic.Bool
+	rawConn    syscall.RawConn
+	rtt        atomic.Int64 // microseconds
+	cwnd       atomic.Int32 // congestion window size
+	mu         sync.Mutex
 }
 
 // TCPTransportV3Config configuration for internet-optimized TCP
 type TCPTransportV3Config struct {
 	RemoteAddr          string
-	MinStreams          int           // 4 for internet
-	MaxStreams          int           // 16 for internet
-	ChunkSizeKB         int           // Adaptive chunk size
-	AutoTune            bool          // Enable auto-tuning
-	PacingEnabled       bool          // Enable packet pacing
-	PacingRate          int64         // bytes per second
-	CongestionAlgorithm string        // "bbr" or "cubic"
+	MinStreams          int    // 4 for internet
+	MaxStreams          int    // 16 for internet
+	ChunkSizeKB         int    // Adaptive chunk size
+	AutoTune            bool   // Enable auto-tuning
+	PacingEnabled       bool   // Enable packet pacing
+	PacingRate          int64  // bytes per second
+	CongestionAlgorithm string // "bbr" or "cubic"
 	ConnectTimeout      time.Duration
 	ReadTimeout         time.Duration
 	WriteTimeout        time.Duration
@@ -143,6 +143,14 @@ func NewTCPTransportV3(config *TCPTransportV3Config, logger *zap.Logger) (*TCPTr
 	}
 
 	return transport, nil
+}
+
+// SetRemoteAddr sets the dial target. Must be called before Start.
+func (t *TCPTransportV3) SetRemoteAddr(addr string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.remoteAddr = addr
+	t.config.RemoteAddr = addr
 }
 
 // Start initializes TCP streams

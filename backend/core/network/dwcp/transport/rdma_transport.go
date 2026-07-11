@@ -89,6 +89,17 @@ func NewRDMATransport(config *TransportConfig, logger *zap.Logger) (*RDMATranspo
 	return rt, nil
 }
 
+// SetRemoteAddr sets the dial target for the (fallback) TCP transport. Must be
+// called before Start.
+func (rt *RDMATransport) SetRemoteAddr(addr string) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.config.RemoteAddr = addr
+	if rt.tcpTransport != nil {
+		rt.tcpTransport.SetRemoteAddr(addr)
+	}
+}
+
 // checkRDMAAvailability checks if RDMA is available on the system
 func (rt *RDMATransport) checkRDMAAvailability() bool {
 	rt.logger.Info("Checking RDMA availability",
