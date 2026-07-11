@@ -234,11 +234,20 @@ func (mas *ModeAwareSecurity) GetCurrentMode() SecurityMode {
 	return mas.currentMode
 }
 
-// SwitchMode switches to a different security mode
+// SwitchMode switches to a different security mode. It acquires mas.mu; callers
+// that already hold the lock (e.g. adjustSecurityLevel) MUST use switchModeLocked
+// instead, because mas.mu is a non-reentrant sync.RWMutex.
 func (mas *ModeAwareSecurity) SwitchMode(newMode SecurityMode, reason string) error {
 	mas.mu.Lock()
 	defer mas.mu.Unlock()
 
+	return mas.switchModeLocked(newMode, reason)
+}
+
+// switchModeLocked performs the mode switch while mas.mu is already held by the
+// caller. It never acquires mas.mu, so it is the only mode-switch entry point
+// safe to call from code paths that already hold the lock.
+func (mas *ModeAwareSecurity) switchModeLocked(newMode SecurityMode, reason string) error {
 	if mas.currentMode == newMode {
 		return nil // Already in this mode
 	}
@@ -357,8 +366,13 @@ func (mas *ModeAwareSecurity) validateInternetMessage(senderID string, messageTy
 
 // validateHybridMessage validates message in hybrid mode (adaptive)
 func (mas *ModeAwareSecurity) validateHybridMessage(senderID string, messageType string, message interface{}, signature string) error {
-	// Use network trust to determine validation level
-	if mas.networkTrust > mas.hybridConfig.TrustThreshold {
+	// Read networkTrust under RLock: the background adaptiveMonitoring goroutine
+	// writes it via updateNetworkTrust.
+	mas.mu.RLock()
+	trust := mas.networkTrust
+	mas.mu.RUnlock()
+
+	if trust > mas.hybridConfig.TrustThreshold {
 		return mas.validateDatacenterMessage(senderID, messageType, message)
 	}
 	return mas.validateInternetMessage(senderID, messageType, message, signature)
@@ -500,16 +514,20 @@ func (mas *ModeAwareSecurity) updateNetworkTrust() {
 	quarantineRatio := float64(quarantinedNodes) / float64(totalNodes)
 
 	// Network trust = trust ratio - quarantine penalty
-	mas.networkTrust = trustRatio - (quarantineRatio * 2.0)
-	if mas.networkTrust < 0 {
-		mas.networkTrust = 0
+	trust := trustRatio - (quarantineRatio * 2.0)
+	if trust < 0 {
+		trust = 0
 	}
-	if mas.networkTrust > 1 {
-		mas.networkTrust = 1
+	if trust > 1 {
+		trust = 1
 	}
 
+	mas.mu.Lock()
+	mas.networkTrust = trust
+	mas.mu.Unlock()
+
 	mas.logger.Debug("Network trust updated",
-		zap.Float64("trust", mas.networkTrust),
+		zap.Float64("trust", trust),
 		zap.Int("trusted", trustedNodes),
 		zap.Int("quarantined", quarantinedNodes),
 		zap.Int("total", totalNodes),
@@ -530,14 +548,14 @@ func (mas *ModeAwareSecurity) adjustSecurityLevel() {
 	// Switch to datacenter mode if trust is high
 	if mas.networkTrust > config.TrustThreshold {
 		if time.Since(mas.lastModeChange) > config.MonitoringWindow {
-			mas.SwitchMode(ModeDatacenter, fmt.Sprintf("High network trust: %.2f", mas.networkTrust))
+			mas.switchModeLocked(ModeDatacenter, fmt.Sprintf("High network trust: %.2f", mas.networkTrust))
 		}
 	}
 
 	// Switch to internet mode if trust is low
 	if mas.networkTrust < config.UntrustThreshold {
 		if time.Since(mas.lastModeChange) > config.MonitoringWindow {
-			mas.SwitchMode(ModeInternet, fmt.Sprintf("Low network trust: %.2f", mas.networkTrust))
+			mas.switchModeLocked(ModeInternet, fmt.Sprintf("Low network trust: %.2f", mas.networkTrust))
 		}
 	}
 }
