@@ -139,8 +139,8 @@ const formatBytes = (bytes: number, decimals = 2): string => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 };
 
-const formatPercentage = (value: number): string => {
-  return `${Math.round(value)}%`;
+const formatPercentage = (value: number | null | undefined): string => {
+  return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)}%` : 'N/A';
 };
 
 const getSeverityColor = (severity: Alert['severity']): string => {
@@ -202,7 +202,7 @@ const MetricCard: React.FC<{
             {change > 0 ? '+' : ''}{change}% from last period
           </p>
         )}
-        {sparklineData && (
+        {sparklineData && sparklineData.length > 0 && (
           <div className="h-10 mt-2">
             <Line
               data={{
@@ -459,10 +459,10 @@ const MonitoringDashboard: React.FC = () => {
   };
 
   // Prepare chart data
-  const cpuData = systemMetrics?.cpuTimeseriesData || Array(24).fill(0).map(() => Math.random() * 100);
-  const memoryData = systemMetrics?.memoryTimeseriesData || Array(24).fill(0).map(() => Math.random() * 100);
-  const diskData = systemMetrics?.diskTimeseriesData || Array(24).fill(0).map(() => Math.random() * 100);
-  const networkData = systemMetrics?.networkTimeseriesData || Array(24).fill(0).map(() => Math.random() * 100);
+  const cpuData = systemMetrics?.cpuTimeseriesData || [];
+  const memoryData = systemMetrics?.memoryTimeseriesData || [];
+  const diskData = systemMetrics?.diskTimeseriesData || [];
+  const networkData = systemMetrics?.networkTimeseriesData || [];
   
   const timeLabels = systemMetrics?.timeLabels || 
     Array(24).fill(0).map((_, i) => format(new Date(Date.now() - (23 - i) * 3600 * 1000), 'HH:mm'));
@@ -597,30 +597,30 @@ const MonitoringDashboard: React.FC = () => {
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <MetricCard
               title="System CPU Usage"
-              value={formatPercentage(systemMetrics?.currentCpuUsage || 45)}
+              value={formatPercentage(systemMetrics?.currentCpuUsage)}
               icon={<Cpu />}
-              change={systemMetrics?.cpuChangePercentage || 5.2}
+              change={systemMetrics?.cpuChangePercentage}
               sparklineData={cpuData.slice(-10)}
             />
             <MetricCard
               title="Memory Usage"
-              value={formatPercentage(systemMetrics?.currentMemoryUsage || 72)}
+              value={formatPercentage(systemMetrics?.currentMemoryUsage)}
               icon={<MemoryStick />}
-              change={systemMetrics?.memoryChangePercentage || -2.1}
+              change={systemMetrics?.memoryChangePercentage}
               sparklineData={memoryData.slice(-10)}
             />
             <MetricCard
               title="Disk Usage"
-              value={formatPercentage(systemMetrics?.currentDiskUsage || 58)}
+              value={formatPercentage(systemMetrics?.currentDiskUsage)}
               icon={<HardDrive />}
-              change={systemMetrics?.diskChangePercentage || 1.8}
+              change={systemMetrics?.diskChangePercentage}
               sparklineData={diskData.slice(-10)}
             />
             <MetricCard
               title="Network Usage"
-              value={`${Math.round(systemMetrics?.currentNetworkUsage || 125)} Mbps`}
+              value={typeof systemMetrics?.currentNetworkUsage === 'number' ? `${Math.round(systemMetrics.currentNetworkUsage)} Mbps` : 'N/A'}
               icon={<Network />}
-              change={systemMetrics?.networkChangePercentage || 12.5}
+              change={systemMetrics?.networkChangePercentage}
               sparklineData={networkData.slice(-10)}
             />
           </div>
@@ -990,43 +990,52 @@ const MonitoringDashboard: React.FC = () => {
                     </div>
                     <div className="mt-2">
                       <p className="text-sm text-muted-foreground">
-                        {systemMetrics?.cpuAnalysis || "CPU usage shows standard workday pattern with peaks during business hours."}
+                        {systemMetrics?.cpuAnalysis || 'No analysis data available.'}
                       </p>
                     </div>
                   </div>
                   <div>
                     <h4 className="font-medium mb-2">Memory Allocation</h4>
                     <div className="h-60">
-                      <Doughnut
-                        data={{
-                          labels: ['In Use', 'Available', 'Reserved', 'Cached'],
-                          datasets: [
-                            {
-                              data: [
-                                systemMetrics?.memoryInUse || 65,
-                                systemMetrics?.memoryAvailable || 15,
-                                systemMetrics?.memoryReserved || 10,
-                                systemMetrics?.memoryCached || 10,
-                              ],
-                              backgroundColor: [
-                                'rgba(153, 102, 255, 0.8)',
-                                'rgba(75, 192, 192, 0.8)',
-                                'rgba(255, 159, 64, 0.8)',
-                                'rgba(54, 162, 235, 0.8)',
-                              ],
-                              borderWidth: 1,
-                            },
-                          ],
-                        }}
-                        options={{
-                          responsive: true,
-                          maintainAspectRatio: false,
-                        }}
-                      />
+                      {typeof systemMetrics?.memoryInUse === 'number' ||
+                      typeof systemMetrics?.memoryAvailable === 'number' ||
+                      typeof systemMetrics?.memoryReserved === 'number' ||
+                      typeof systemMetrics?.memoryCached === 'number' ? (
+                        <Doughnut
+                          data={{
+                            labels: ['In Use', 'Available', 'Reserved', 'Cached'],
+                            datasets: [
+                              {
+                                data: [
+                                  systemMetrics?.memoryInUse ?? 0,
+                                  systemMetrics?.memoryAvailable ?? 0,
+                                  systemMetrics?.memoryReserved ?? 0,
+                                  systemMetrics?.memoryCached ?? 0,
+                                ],
+                                backgroundColor: [
+                                  'rgba(153, 102, 255, 0.8)',
+                                  'rgba(75, 192, 192, 0.8)',
+                                  'rgba(255, 159, 64, 0.8)',
+                                  'rgba(54, 162, 235, 0.8)',
+                                ],
+                                borderWidth: 1,
+                              },
+                            ],
+                          }}
+                          options={{
+                            responsive: true,
+                            maintainAspectRatio: false,
+                          }}
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                          No memory breakdown data available.
+                        </div>
+                      )}
                     </div>
                     <div className="mt-2">
                       <p className="text-sm text-muted-foreground">
-                        {systemMetrics?.memoryAnalysis || "Memory allocation is healthy with sufficient available memory for peak operations."}
+                        {systemMetrics?.memoryAnalysis || 'No analysis data available.'}
                       </p>
                     </div>
                   </div>

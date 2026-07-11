@@ -26,11 +26,19 @@ import { useVolumes } from '@/hooks/useVolumes';
 import { useVMs } from '@/lib/api/hooks/useVMs';
 
 type MonitoringSummary = {
-  currentCpuUsage: number;
-  currentMemoryUsage: number;
-  currentDiskUsage: number;
-  currentNetworkUsage: number;
+  currentCpuUsage: number | null;
+  currentMemoryUsage: number | null;
+  currentDiskUsage: number | null;
+  currentNetworkUsage: number | null;
 };
+
+function formatMetric(value: number | null | undefined, suffix = '%'): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(1)}${suffix}` : 'N/A';
+}
+
+function metricProgress(value: number | null | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
 
 function OverviewCard({
   title,
@@ -165,8 +173,8 @@ export default function UnifiedDashboard() {
         />
         <OverviewCard
           title="Monitoring"
-          value={monitoring ? `${monitoring.currentCpuUsage.toFixed(1)}% CPU` : '…'}
-          description={monitoring ? `${monitoring.currentMemoryUsage.toFixed(1)}% memory in use` : 'Loading canonical metrics'}
+          value={monitoring ? `${formatMetric(monitoring.currentCpuUsage)} CPU` : '…'}
+          description={monitoring ? `${formatMetric(monitoring.currentMemoryUsage)} memory in use` : 'Loading canonical metrics'}
           icon={<Activity className="h-4 w-4 text-muted-foreground" />}
         />
         <OverviewCard
@@ -197,16 +205,16 @@ export default function UnifiedDashboard() {
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
                 <span>CPU usage</span>
-                <span>{monitoring ? `${monitoring.currentCpuUsage.toFixed(1)}%` : 'Loading…'}</span>
+                <span>{monitoring ? formatMetric(monitoring.currentCpuUsage) : 'Loading…'}</span>
               </div>
-              <Progress value={monitoring?.currentCpuUsage ?? 0} />
+              <Progress value={metricProgress(monitoring?.currentCpuUsage)} />
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
                 <span>Memory usage</span>
-                <span>{monitoring ? `${monitoring.currentMemoryUsage.toFixed(1)}%` : 'Loading…'}</span>
+                <span>{monitoring ? formatMetric(monitoring.currentMemoryUsage) : 'Loading…'}</span>
               </div>
-              <Progress value={monitoring?.currentMemoryUsage ?? 0} />
+              <Progress value={metricProgress(monitoring?.currentMemoryUsage)} />
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               <div className="rounded-lg border p-4">

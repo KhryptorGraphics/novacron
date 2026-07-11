@@ -18,11 +18,19 @@ import { useVolumes } from "@/hooks/useVolumes";
 import { useVMs } from "@/lib/api/hooks/useVMs";
 
 type MonitoringSummary = {
-  currentCpuUsage: number;
-  currentMemoryUsage: number;
-  currentDiskUsage: number;
-  currentNetworkUsage: number;
+  currentCpuUsage: number | null;
+  currentMemoryUsage: number | null;
+  currentDiskUsage: number | null;
+  currentNetworkUsage: number | null;
 };
+
+function formatMetric(value: number | null | undefined, suffix = '%'): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(1)}${suffix}` : 'N/A';
+}
+
+function metricProgress(value: number | null | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
 
 function MetricPanel({
   title,
@@ -138,16 +146,16 @@ export default function AnalyticsPage() {
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricPanel
             title="CPU"
-            value={monitoring ? `${monitoring.currentCpuUsage.toFixed(1)}%` : vmsLoading ? '…' : 'n/a'}
+            value={monitoring ? formatMetric(monitoring.currentCpuUsage) : vmsLoading ? '…' : 'n/a'}
             description="Live aggregate CPU usage from `/api/v1/monitoring/metrics`."
-            progress={monitoring?.currentCpuUsage}
+            progress={metricProgress(monitoring?.currentCpuUsage)}
             icon={<Activity className="h-4 w-4 text-muted-foreground" />}
           />
           <MetricPanel
             title="Memory"
-            value={monitoring ? `${monitoring.currentMemoryUsage.toFixed(1)}%` : '…'}
+            value={monitoring ? formatMetric(monitoring.currentMemoryUsage) : '…'}
             description="Current memory allocation on the canonical monitoring surface."
-            progress={monitoring?.currentMemoryUsage}
+            progress={metricProgress(monitoring?.currentMemoryUsage)}
             icon={<Server className="h-4 w-4 text-muted-foreground" />}
           />
           <MetricPanel
@@ -185,13 +193,13 @@ export default function AnalyticsPage() {
               <div className="rounded-lg border p-4">
                 <div className="text-sm text-muted-foreground">Disk usage</div>
                 <div className="mt-2 text-2xl font-semibold">
-                  {monitoring ? `${monitoring.currentDiskUsage.toFixed(1)}%` : '…'}
+                  {monitoring ? formatMetric(monitoring.currentDiskUsage) : '…'}
                 </div>
               </div>
               <div className="rounded-lg border p-4">
                 <div className="text-sm text-muted-foreground">Network usage</div>
                 <div className="mt-2 text-2xl font-semibold">
-                  {monitoring ? `${monitoring.currentNetworkUsage.toFixed(1)}` : '…'}
+                  {monitoring ? formatMetric(monitoring.currentNetworkUsage, '') : '…'}
                 </div>
               </div>
             </CardContent>

@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 
 import AnalyticsPage from '@/app/analytics/page';
+import { networkApi } from '@/lib/api/networks';
 
 jest.mock('@/components/auth/AuthGuard', () => ({
   __esModule: true,
@@ -52,6 +53,7 @@ describe('AnalyticsPage', () => {
         currentNetworkUsage: 12.2,
       }),
     }) as jest.Mock;
+    (networkApi.listNetworks as jest.Mock).mockResolvedValue([{ id: 'net-1', name: 'Production' }]);
   });
 
   afterEach(() => {
@@ -68,5 +70,25 @@ describe('AnalyticsPage', () => {
       expect(screen.getByText('Virtual machines')).toBeInTheDocument();
       expect(screen.getByText('Networks')).toBeInTheDocument();
     });
+  });
+
+  it('renders without crashing when monitoring metrics are null', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        currentCpuUsage: null,
+        currentMemoryUsage: null,
+        currentDiskUsage: null,
+        currentNetworkUsage: null,
+      }),
+    }) as jest.Mock;
+
+    render(<AnalyticsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Virtual machines')).toBeInTheDocument();
+    });
+
+    expect(screen.getAllByText('N/A').length).toBeGreaterThan(0);
   });
 });
