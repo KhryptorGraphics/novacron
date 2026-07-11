@@ -56,6 +56,10 @@ type ModeDetector struct {
 		GetAverageLatency() time.Duration
 		GetAverageBandwidth() int64
 	}
+
+	// onModeChange, when non-nil, is invoked by AutoDetectLoop whenever a
+	// detection cycle changes the mode. Set via SetModeChangeHandler.
+	onModeChange func(oldMode, newMode NetworkMode)
 }
 
 // NewModeDetector creates a new mode detector with default thresholds
@@ -209,6 +213,16 @@ func (md *ModeDetector) SetMetricsCollector(mc interface {
 	md.metricsCollector = mc
 }
 
+// SetModeChangeHandler registers a callback invoked by AutoDetectLoop whenever a
+// detection cycle changes the network mode. Passing nil clears the handler. The
+// handler runs on the AutoDetectLoop goroutine after the detector's lock has been
+// released, so it may safely call back into the detector.
+func (md *ModeDetector) SetModeChangeHandler(fn func(oldMode, newMode NetworkMode)) {
+	md.mu.Lock()
+	defer md.mu.Unlock()
+	md.onModeChange = fn
+}
+
 // AutoDetectLoop continuously detects mode in the background
 func (md *ModeDetector) AutoDetectLoop(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
@@ -219,11 +233,18 @@ func (md *ModeDetector) AutoDetectLoop(ctx context.Context, interval time.Durati
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			mode := md.DetectMode(ctx)
-			// Log mode changes
-			if mode != md.GetCurrentMode() {
-				// TODO: Add structured logging
-				// log.Infof("Network mode changed: %s -> %s", md.currentMode, mode)
+			// Capture the previous mode BEFORE DetectMode, which assigns
+			// currentMode internally; comparing newMode against GetCurrentMode()
+			// after the call would always be equal and the branch would never run.
+			oldMode := md.GetCurrentMode()
+			newMode := md.DetectMode(ctx)
+			if newMode != oldMode {
+				md.mu.RLock()
+				handler := md.onModeChange
+				md.mu.RUnlock()
+				if handler != nil {
+					handler(oldMode, newMode)
+				}
 			}
 		}
 	}
