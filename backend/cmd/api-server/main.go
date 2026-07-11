@@ -706,19 +706,7 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/monitoring/metrics", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"currentCpuUsage":         45.2,
-			"currentMemoryUsage":      72.1,
-			"currentDiskUsage":        58.3,
-			"currentNetworkUsage":     125.7,
-			"cpuChangePercentage":     5.2,
-			"memoryChangePercentage":  -2.1,
-			"diskChangePercentage":    1.8,
-			"networkChangePercentage": 12.5,
-			"timeLabels":              []string{"10:00", "10:30", "11:00", "11:30", "12:00"},
-			"cpuAnalysis":             "CPU usage shows normal workday patterns.",
-			"memoryAnalysis":          "Memory allocation is healthy.",
-		})
+		writeJSON(w, http.StatusOK, hostMetrics(storagePath))
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/monitoring/vms", func(w http.ResponseWriter, r *http.Request) {
@@ -729,24 +717,40 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 		}
 		defer rows.Close()
 
-		vmMetrics := make([]map[string]interface{}, 0)
+		type vmRow struct{ id, name, state string }
+		var base []vmRow
 		for rows.Next() {
-			var id, name, state string
-			if err := rows.Scan(&id, &name, &state); err != nil {
+			var v vmRow
+			if err := rows.Scan(&v.id, &v.name, &v.state); err != nil {
 				continue
 			}
+			base = append(base, v)
+		}
+		rows.Close()
 
-			vmMetrics = append(vmMetrics, map[string]interface{}{
-				"vmId":        id,
-				"name":        name,
-				"cpuUsage":    50.0 + float64(len(id)%20),
-				"memoryUsage": 60.0 + float64(len(name)%30),
-				"diskUsage":   40.0 + float64(len(id)%15),
-				"networkRx":   1024 * 1024,
-				"networkTx":   2048 * 1024,
-				"iops":        100,
-				"status":      state,
-			})
+		// Real per-VM metrics from the vm_metrics table (same source as
+		// /vms/{id}/metrics). Fields are omitted when no sample has been
+		// recorded, rather than serving a fabricated placeholder value.
+		vmMetrics := make([]map[string]interface{}, 0, len(base))
+		for _, v := range base {
+			entry := map[string]interface{}{
+				"vmId":   v.id,
+				"name":   v.name,
+				"status": v.state,
+			}
+			var cpu, mem sql.NullFloat64
+			if err := db.QueryRow(`
+				SELECT cpu_usage, memory_usage FROM vm_metrics
+				WHERE vm_id = $1 ORDER BY timestamp DESC LIMIT 1
+			`, v.id).Scan(&cpu, &mem); err == nil {
+				if cpu.Valid {
+					entry["cpuUsage"] = cpu.Float64
+				}
+				if mem.Valid {
+					entry["memoryUsage"] = mem.Float64
+				}
+			}
+			vmMetrics = append(vmMetrics, entry)
 		}
 
 		writeJSON(w, http.StatusOK, vmMetrics)
@@ -1171,11 +1175,13 @@ func registerVMPowerRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.VMM
 // target side of a cross-node migration. It receives the source VM's spec +
 // absolute disk path, launches a destination qemu waiting on a freshly-picked
 // port over shared storage, and returns that port. This is node-to-node (no JWT)
-// and gated by an optional shared secret from NOVACRON_MIGRATION_SECRET.
+// and gated by a required shared secret from NOVACRON_MIGRATION_SECRET. Fails
+// closed: an unset/empty secret means no incoming migration is accepted; see
+// migrationAuthOK in migration_auth.go for the constant-time comparison.
 // ponytail: static shared-secret header; swap for mTLS if peers aren't trusted.
 func registerInternalMigrationRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager, vmBase string) {
 	router.HandleFunc("/internal/migrate/incoming", func(w http.ResponseWriter, r *http.Request) {
-		if secret := os.Getenv("NOVACRON_MIGRATION_SECRET"); secret != "" && r.Header.Get("X-Migration-Secret") != secret {
+		if !migrationAuthOK(r) {
 			writeJSONError(w, http.StatusForbidden, "forbidden")
 			return
 		}

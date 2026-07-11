@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	// "path/filepath" // Currently unused
 )
 
@@ -44,7 +45,11 @@ func DefaultVMDriverConfig(nodeID string) VMDriverConfig {
 func NewVMDriverFactory(config VMDriverConfig) VMDriverFactory {
 	log.Printf("Creating VM driver factory with node ID %s", config.NodeID)
 
-	// Create a cache of initialized drivers
+	// Create a cache of initialized drivers. The returned factory closure is
+	// invoked concurrently (e.g. by VMManager.getDriver on every
+	// CreateVM/StartVM/StopVM/DeleteVM/RestartVM/PauseVM/ResumeVM request),
+	// so the cache map must be guarded against concurrent reads/writes.
+	var mu sync.Mutex
 	drivers := make(map[VMType]VMDriver)
 
 	// Return the factory function
@@ -56,6 +61,10 @@ func NewVMDriverFactory(config VMDriverConfig) VMDriverFactory {
 				vmType = VMType(t)
 			}
 		}
+
+		mu.Lock()
+		defer mu.Unlock()
+
 		// Check if we have already initialized this driver type
 		if driver, exists := drivers[vmType]; exists {
 			return driver, nil

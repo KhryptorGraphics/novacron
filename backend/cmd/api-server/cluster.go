@@ -37,8 +37,9 @@ func selfNodeID() string {
 }
 
 func internalSecretOK(r *http.Request) bool {
-	secret := os.Getenv("NOVACRON_MIGRATION_SECRET")
-	return secret == "" || r.Header.Get("X-Migration-Secret") == secret
+	// Delegate to the fail-closed migration auth helper (migration_auth.go): a node
+	// with no NOVACRON_MIGRATION_SECRET configured rejects all internal RPCs.
+	return migrationAuthOK(r)
 }
 
 // NodeCapacity is one node's real capacity and live VM reservation. Reported per
