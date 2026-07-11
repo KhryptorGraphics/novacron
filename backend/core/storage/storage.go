@@ -42,10 +42,10 @@ const (
 
 	// VolumeTypeLocal is a local volume (on the host filesystem)
 	VolumeTypeLocal VolumeType = "local"
-	
+
 	// VolumeTypeNFS is an NFS mounted volume
 	VolumeTypeNFS VolumeType = "nfs"
-	
+
 	// VolumeTypeCeph is a Ceph volume
 	VolumeTypeCeph VolumeType = "ceph"
 )
@@ -56,10 +56,10 @@ type VolumeFormat string
 const (
 	// VolumeFormatExt4 is the ext4 filesystem
 	VolumeFormatExt4 VolumeFormat = "ext4"
-	
+
 	// VolumeFormatXFS is the XFS filesystem
 	VolumeFormatXFS VolumeFormat = "xfs"
-	
+
 	// VolumeFormatRAW is a raw block device (no filesystem)
 	VolumeFormatRAW VolumeFormat = "raw"
 )
@@ -149,26 +149,26 @@ type VolumeInfo struct {
 	MBpsWrite int `json:"mbps_write"`
 
 	// Additional fields for storage manager compatibility
-	Format   VolumeFormat `json:"format,omitempty"`   // Filesystem format
-	SizeMB   int          `json:"size_mb,omitempty"`  // Size in MB for backward compatibility
-	Path     string       `json:"path,omitempty"`     // Path to the volume file
-	Status   VolumeStatus `json:"status,omitempty"`   // Volume status for storage manager
-	Labels   map[string]string `json:"labels,omitempty"` // Volume labels
-	Snapshots []VolumeSnapshot `json:"snapshots,omitempty"` // Volume snapshots
-	LastUpdated time.Time `json:"last_updated,omitempty"` // Last update time
-	Available bool `json:"available,omitempty"` // Whether volume is available
-	UsedMB int `json:"used_mb,omitempty"` // Used space in MB
+	Format      VolumeFormat      `json:"format,omitempty"`       // Filesystem format
+	SizeMB      int               `json:"size_mb,omitempty"`      // Size in MB for backward compatibility
+	Path        string            `json:"path,omitempty"`         // Path to the volume file
+	Status      VolumeStatus      `json:"status,omitempty"`       // Volume status for storage manager
+	Labels      map[string]string `json:"labels,omitempty"`       // Volume labels
+	Snapshots   []VolumeSnapshot  `json:"snapshots,omitempty"`    // Volume snapshots
+	LastUpdated time.Time         `json:"last_updated,omitempty"` // Last update time
+	Available   bool              `json:"available,omitempty"`    // Whether volume is available
+	UsedMB      int               `json:"used_mb,omitempty"`      // Used space in MB
 }
 
 // VolumeSnapshot represents a volume snapshot
 type VolumeSnapshot struct {
-	ID         string            `json:"id"`
-	VolumeID   string            `json:"volume_id"`
-	Name       string            `json:"name"`
-	Description string           `json:"description,omitempty"`
-	CreatedAt  time.Time         `json:"created_at"`
-	Size       int64             `json:"size"`
-	Metadata   map[string]string `json:"metadata,omitempty"`
+	ID          string            `json:"id"`
+	VolumeID    string            `json:"volume_id"`
+	Name        string            `json:"name"`
+	Description string            `json:"description,omitempty"`
+	CreatedAt   time.Time         `json:"created_at"`
+	Size        int64             `json:"size"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 // VolumeCreateOptions contains options for creating a volume
@@ -258,7 +258,7 @@ const (
 
 	// VolumeEventSnapshoted is emitted when a volume snapshot is created
 	VolumeEventSnapshoted VolumeEventType = "snapshoted"
-	
+
 	// VolumeEventError is emitted on volume errors
 	VolumeEventError VolumeEventType = "error"
 )
@@ -658,20 +658,22 @@ func (s *BaseStorageService) DetachVolume(ctx context.Context, volumeID string, 
 // ResizeVolume resizes a volume
 func (s *BaseStorageService) ResizeVolume(ctx context.Context, volumeID string, opts VolumeResizeOptions) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	volume, exists := s.volumes[volumeID]
 	if !exists {
+		s.mu.Unlock()
 		return ErrVolumeNotFound
 	}
 
 	// Check if volume is available or attached (can resize attached volumes in some cases)
 	if volume.State != VolumeStateAvailable && volume.State != VolumeStateAttached {
+		s.mu.Unlock()
 		return ErrInvalidOperation
 	}
 
 	// Check if new size is larger
 	if opts.NewSize <= volume.Size {
+		s.mu.Unlock()
 		return fmt.Errorf("new size must be larger than current size")
 	}
 
@@ -680,8 +682,11 @@ func (s *BaseStorageService) ResizeVolume(ctx context.Context, volumeID string, 
 	volume.Size = opts.NewSize
 	volume.UpdatedAt = time.Now()
 	s.volumes[volumeID] = volume
+	s.mu.Unlock()
 
-	// Notify listeners
+	// Notify listeners after releasing the lock: NotifyEvent takes an RLock,
+	// and holding the write lock here while calling it deadlocks (sync.RWMutex
+	// is not reentrant for a single goroutine).
 	s.NotifyEvent(VolumeEvent{
 		Type:       VolumeEventResized,
 		VolumeID:   volumeID,
