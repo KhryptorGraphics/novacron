@@ -1,23 +1,30 @@
 # Build stage
-FROM golang:1.23-alpine AS builder
+# NOTE: backend/core/go.mod requires go >= 1.24.0 (toolchain go1.24.6);
+# golang:1.23-alpine cannot satisfy that with GOTOOLCHAIN=local (the default
+# in a network-restricted build), so this must track backend/core's minimum.
+FROM golang:1.25-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git gcc musl-dev
 
-# Set working directory
-WORKDIR /app
+# Set working directory to the backend/core module root. backend/core has its
+# own go.mod (module github.com/khryptorgraphics/novacron/backend/core) and
+# is therefore NOT part of the root module's package graph — building
+# "./backend/core/cmd/novacron" from /app (root module context) silently
+# excludes it. Building from inside the module fixes that.
+WORKDIR /app/backend/core
 
-# Copy go mod and sum files
-COPY go.mod go.sum ./
-
-# Copy backend directory (needed for local replace directives)
-COPY backend ./backend
+# Copy go mod and sum files for this module first (better layer caching)
+COPY backend/core/go.mod backend/core/go.sum ./
 
 # Download dependencies
 RUN go mod download
 
+# Copy the rest of the module
+COPY backend/core ./
+
 # Build the application
-RUN CGO_ENABLED=1 GOOS=linux go build -a -o novacron-hypervisor ./backend/core/cmd/novacron
+RUN CGO_ENABLED=1 GOOS=linux go build -a -o /app/novacron-hypervisor ./cmd/novacron
 
 # Final stage
 FROM alpine:3.17

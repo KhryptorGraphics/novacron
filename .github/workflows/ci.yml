@@ -36,6 +36,12 @@ jobs:
       - name: Build canonical API server
         run: go build ./backend/cmd/api-server
 
+      - name: Build canonical Docker image (docker/api.Dockerfile)
+        # Validates the repo's declared-canonical image (see docker/api.Dockerfile
+        # header / STATUS.md) actually builds on every PR. Single-arch, no push -
+        # the multi-arch buildx/publish pipeline lives in a separate workflow.
+        run: docker build -f docker/api.Dockerfile -t novacron-api:ci .
+
       # backend/core's real packages compile transitively via the api-server build above.
       # The module also holds ~105 known-broken experimental trees (quantum, photonic,
       # planetary, arvr, iot, autonomous, v4/v5, cognitive, ...) that are on no production
@@ -56,7 +62,11 @@ jobs:
       # docker/containerd/kvm integration tests self-skip on a bare runner.
       - name: Run vm package tests (separate module)
         working-directory: backend/core
-        run: go test -short ./vm/
+        # -race requires cgo. This gate exists to catch driver-factory-style data
+        # races (see novacron-t72) before they regress invisibly.
+        env:
+          CGO_ENABLED: "1"
+        run: go test -short -race ./vm/
 
   x86-boot-test:
     name: x86 KVM Boot Smoke Test
