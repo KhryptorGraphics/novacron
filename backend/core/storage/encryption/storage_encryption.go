@@ -248,11 +248,20 @@ func (e *Encryptor) encryptCBC(data []byte, block cipher.Block, encData *Encrypt
 
 	// Add verification if configured
 	if e.config.IncludeVerification {
-		// Use a fixed plaintext as verification
+		// Use a fixed plaintext as verification. This MUST use its own fresh
+		// CBCEncrypter seeded with iv, not the "mode" object above: CBC's
+		// cipher.BlockMode is stateful across CryptBlocks calls (each block's
+		// chaining input is the previous block's ciphertext), so reusing
+		// "mode" here would encrypt "VERIFIED" chained off the tail of the
+		// real ciphertext instead of off iv. decryptCBC verifies by decrypting
+		// Verification with a fresh CBCDecrypter seeded with the stored iv, so
+		// that mismatch made every CBC decryption fail with "key verification
+		// failed" even for the correct key.
 		verification := []byte("VERIFIED")
 		paddedVerification := padData(verification, aes.BlockSize)
 		verificationCiphertext := make([]byte, len(paddedVerification))
-		mode.CryptBlocks(verificationCiphertext, paddedVerification)
+		verificationMode := cipher.NewCBCEncrypter(block, iv)
+		verificationMode.CryptBlocks(verificationCiphertext, paddedVerification)
 		encData.Verification = verificationCiphertext
 	}
 
