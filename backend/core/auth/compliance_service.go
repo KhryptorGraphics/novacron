@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -157,6 +158,15 @@ type ComplianceService struct {
 	mu           sync.RWMutex
 	auditService AuditService
 	encryption   *EncryptionService
+
+	// Optional real-signal sources for the automated checks below. Each is
+	// nil until wired via the matching SetXxx method; a nil source means
+	// the corresponding checks honestly report NotTested instead of
+	// fabricating a result. See novacron-yvo.
+	passwordService  *PasswordSecurityService
+	twoFactorService *TwoFactorService
+	ztNetworkService *ZeroTrustNetworkService
+	roleService      RoleService
 }
 
 // NewComplianceService creates a new compliance service
@@ -173,6 +183,40 @@ func NewComplianceService(auditService AuditService, encryptionService *Encrypti
 	service.loadDefaultControls()
 
 	return service
+}
+
+// SetPasswordService wires a password-security service so password-policy
+// and default-password checks reflect real configuration instead of
+// assuming compliance.
+func (c *ComplianceService) SetPasswordService(ps *PasswordSecurityService) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.passwordService = ps
+}
+
+// SetTwoFactorService wires an existing 2FA service so the MFA check
+// reflects real adoption instead of assuming it is enabled.
+func (c *ComplianceService) SetTwoFactorService(tfs *TwoFactorService) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.twoFactorService = tfs
+}
+
+// SetZeroTrustNetworkService wires a zero-trust network service so
+// firewall, segmentation, and transmission-encryption checks reflect real
+// policy state instead of assuming compliance.
+func (c *ComplianceService) SetZeroTrustNetworkService(zt *ZeroTrustNetworkService) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ztNetworkService = zt
+}
+
+// SetRoleService wires a role service so RBAC-related checks reflect real
+// role/permission definitions instead of assuming compliance.
+func (c *ComplianceService) SetRoleService(rs RoleService) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.roleService = rs
 }
 
 // CreateAssessment creates a new compliance assessment
@@ -341,18 +385,26 @@ func (c *ComplianceService) testControlCC1_1(assessment *ComplianceAssessment) {
 	}
 
 	// Check if integrity and ethics policies exist
-	policyExists := c.checkPolicyExists("code_of_conduct")
-	trainingExists := c.checkTrainingRecords("ethics")
+	score := 0
+	verified := false
 
-	if policyExists && trainingExists {
+	s, v := applyCheck(result, "Code of conduct policy", c.checkPolicyExists("code_of_conduct"), 50)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Ethics training records", c.checkTrainingRecords("ethics"), 50)
+	score += s
+	verified = verified || v
+
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 100:
 		result.Status = Compliant
-		result.Score = 100
-	} else {
+	default:
 		result.Status = NonCompliant
-		result.Score = 0
-		result.Findings = append(result.Findings, "Missing integrity and ethics policies or training")
 	}
 
+	result.Score = float64(score)
 	result.Tested = true
 	result.TestedAt = time.Now()
 }
@@ -365,18 +417,26 @@ func (c *ComplianceService) testControlCC2_1(assessment *ComplianceAssessment) {
 	}
 
 	// Check if security policies are documented and communicated
-	securityPolicy := c.checkPolicyExists("information_security")
-	communicated := c.checkPolicyCommunication("information_security")
+	score := 0
+	verified := false
 
-	if securityPolicy && communicated {
+	s, v := applyCheck(result, "Information security policy", c.checkPolicyExists("information_security"), 50)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Policy communication", c.checkPolicyCommunication("information_security"), 50)
+	score += s
+	verified = verified || v
+
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 100:
 		result.Status = Compliant
-		result.Score = 100
-	} else {
+	default:
 		result.Status = NonCompliant
-		result.Score = 0
-		result.Findings = append(result.Findings, "Security policies not properly documented or communicated")
 	}
 
+	result.Score = float64(score)
 	result.Tested = true
 	result.TestedAt = time.Now()
 }
@@ -389,34 +449,27 @@ func (c *ComplianceService) testControlCC6_1(assessment *ComplianceAssessment) {
 	}
 
 	// Check logical access controls
-	mfaEnabled := c.checkMFAEnabled()
-	passwordPolicy := c.checkPasswordPolicy()
-	accessReviews := c.checkAccessReviews()
-
 	score := 0
-	if mfaEnabled {
-		score += 40
-	} else {
-		result.Findings = append(result.Findings, "Multi-factor authentication not enabled")
-	}
+	verified := false
 
-	if passwordPolicy {
-		score += 30
-	} else {
-		result.Findings = append(result.Findings, "Password policy not adequate")
-	}
+	s, v := applyCheck(result, "Multi-factor authentication", c.checkMFAEnabled(), 40)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Password policy", c.checkPasswordPolicy(), 30)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Access reviews", c.checkAccessReviews(), 30)
+	score += s
+	verified = verified || v
 
-	if accessReviews {
-		score += 30
-	} else {
-		result.Findings = append(result.Findings, "Access reviews not performed regularly")
-	}
-
-	if score >= 80 {
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 80:
 		result.Status = Compliant
-	} else if score >= 60 {
+	case score >= 60:
 		result.Status = Partial
-	} else {
+	default:
 		result.Status = NonCompliant
 	}
 
@@ -433,18 +486,26 @@ func (c *ComplianceService) testControlCC6_7(assessment *ComplianceAssessment) {
 	}
 
 	// Check data transmission controls
-	tlsEnabled := c.checkTLSEnabled()
-	encryptionInTransit := c.checkEncryptionInTransit()
+	score := 0
+	verified := false
 
-	if tlsEnabled && encryptionInTransit {
+	s, v := applyCheck(result, "TLS enabled", c.checkTLSEnabled(), 50)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Encryption in transit", c.checkEncryptionInTransit(), 50)
+	score += s
+	verified = verified || v
+
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 100:
 		result.Status = Compliant
-		result.Score = 100
-	} else {
+	default:
 		result.Status = NonCompliant
-		result.Score = 0
-		result.Findings = append(result.Findings, "Data transmission not adequately protected")
 	}
 
+	result.Score = float64(score)
 	result.Tested = true
 	result.TestedAt = time.Now()
 }
@@ -457,26 +518,26 @@ func (c *ComplianceService) testControlCC7_1(assessment *ComplianceAssessment) {
 	}
 
 	// Check system monitoring
-	loggingEnabled := c.checkLoggingEnabled()
-	monitoring := c.checkMonitoring()
-	alertingEnabled := c.checkAlertingEnabled()
-
 	score := 0
-	if loggingEnabled {
-		score += 40
-	}
-	if monitoring {
-		score += 40
-	}
-	if alertingEnabled {
-		score += 20
-	}
+	verified := false
 
-	if score >= 80 {
+	s, v := applyCheck(result, "Logging enabled", c.checkLoggingEnabled(), 40)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "System monitoring", c.checkMonitoring(), 40)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Alerting enabled", c.checkAlertingEnabled(), 20)
+	score += s
+	verified = verified || v
+
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 80:
 		result.Status = Compliant
-	} else {
+	default:
 		result.Status = NonCompliant
-		result.Findings = append(result.Findings, "System monitoring not comprehensive")
 	}
 
 	result.Score = float64(score)
@@ -493,18 +554,26 @@ func (c *ComplianceService) testGDPRArticle25(assessment *ComplianceAssessment) 
 	}
 
 	// Check data protection by design
-	privacyByDesign := c.checkPrivacyByDesign()
-	dataMinimization := c.checkDataMinimization()
+	score := 0
+	verified := false
 
-	if privacyByDesign && dataMinimization {
+	s, v := applyCheck(result, "Privacy by design", c.checkPrivacyByDesign(), 50)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Data minimization", c.checkDataMinimization(), 50)
+	score += s
+	verified = verified || v
+
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 100:
 		result.Status = Compliant
-		result.Score = 100
-	} else {
+	default:
 		result.Status = NonCompliant
-		result.Score = 0
-		result.Findings = append(result.Findings, "Data protection by design not implemented")
 	}
 
+	result.Score = float64(score)
 	result.Tested = true
 	result.TestedAt = time.Now()
 }
@@ -517,26 +586,26 @@ func (c *ComplianceService) testGDPRArticle32(assessment *ComplianceAssessment) 
 	}
 
 	// Check security of processing
-	encryption := c.checkEncryptionAtRest()
-	accessControls := c.checkAccessControls()
-	backups := c.checkBackupSecurity()
-
 	score := 0
-	if encryption {
-		score += 40
-	}
-	if accessControls {
-		score += 40
-	}
-	if backups {
-		score += 20
-	}
+	verified := false
 
-	if score >= 80 {
+	s, v := applyCheck(result, "Encryption at rest", c.checkEncryptionAtRest(), 40)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Access controls", c.checkAccessControls(), 40)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Backup security", c.checkBackupSecurity(), 20)
+	score += s
+	verified = verified || v
+
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 80:
 		result.Status = Compliant
-	} else {
+	default:
 		result.Status = Partial
-		result.Findings = append(result.Findings, "Security measures not comprehensive")
 	}
 
 	result.Score = float64(score)
@@ -552,18 +621,26 @@ func (c *ComplianceService) testGDPRArticle33(assessment *ComplianceAssessment) 
 	}
 
 	// Check breach notification procedures
-	breachProcedures := c.checkBreachProcedures()
-	notificationTiming := c.checkNotificationTiming()
+	score := 0
+	verified := false
 
-	if breachProcedures && notificationTiming {
+	s, v := applyCheck(result, "Breach procedures", c.checkBreachProcedures(), 50)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Notification timing", c.checkNotificationTiming(), 50)
+	score += s
+	verified = verified || v
+
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 100:
 		result.Status = Compliant
-		result.Score = 100
-	} else {
+	default:
 		result.Status = NonCompliant
-		result.Score = 0
-		result.Findings = append(result.Findings, "Breach notification procedures inadequate")
 	}
 
+	result.Score = float64(score)
 	result.Tested = true
 	result.TestedAt = time.Now()
 }
@@ -576,18 +653,26 @@ func (c *ComplianceService) testGDPRArticle35(assessment *ComplianceAssessment) 
 	}
 
 	// Check DPIA process
-	dpiaProcess := c.checkDPIAProcess()
-	riskAssessment := c.checkRiskAssessment()
+	score := 0
+	verified := false
 
-	if dpiaProcess && riskAssessment {
+	s, v := applyCheck(result, "DPIA process", c.checkDPIAProcess(), 50)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Risk assessment", c.checkRiskAssessment(), 50)
+	score += s
+	verified = verified || v
+
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 100:
 		result.Status = Compliant
-		result.Score = 100
-	} else {
+	default:
 		result.Status = NonCompliant
-		result.Score = 0
-		result.Findings = append(result.Findings, "DPIA process not established")
 	}
 
+	result.Score = float64(score)
 	result.Tested = true
 	result.TestedAt = time.Now()
 }
@@ -601,26 +686,26 @@ func (c *ComplianceService) testHIPAA164_308(assessment *ComplianceAssessment) {
 	}
 
 	// Check administrative safeguards
-	securityOfficer := c.checkSecurityOfficer()
-	workforceTraining := c.checkWorkforceTraining()
-	accessManagement := c.checkAccessManagement()
-
 	score := 0
-	if securityOfficer {
-		score += 40
-	}
-	if workforceTraining {
-		score += 30
-	}
-	if accessManagement {
-		score += 30
-	}
+	verified := false
 
-	if score >= 80 {
+	s, v := applyCheck(result, "Security officer designated", c.checkSecurityOfficer(), 40)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Workforce training", c.checkWorkforceTraining(), 30)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Access management", c.checkAccessManagement(), 30)
+	score += s
+	verified = verified || v
+
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 80:
 		result.Status = Compliant
-	} else {
+	default:
 		result.Status = Partial
-		result.Findings = append(result.Findings, "Administrative safeguards not comprehensive")
 	}
 
 	result.Score = float64(score)
@@ -636,26 +721,26 @@ func (c *ComplianceService) testHIPAA164_310(assessment *ComplianceAssessment) {
 	}
 
 	// Check physical safeguards
-	facilityAccess := c.checkFacilityAccess()
-	workstationSecurity := c.checkWorkstationSecurity()
-	deviceControls := c.checkDeviceControls()
-
 	score := 0
-	if facilityAccess {
-		score += 40
-	}
-	if workstationSecurity {
-		score += 30
-	}
-	if deviceControls {
-		score += 30
-	}
+	verified := false
 
-	if score >= 80 {
+	s, v := applyCheck(result, "Facility access controls", c.checkFacilityAccess(), 40)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Workstation security", c.checkWorkstationSecurity(), 30)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Device and media controls", c.checkDeviceControls(), 30)
+	score += s
+	verified = verified || v
+
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 80:
 		result.Status = Compliant
-	} else {
+	default:
 		result.Status = Partial
-		result.Findings = append(result.Findings, "Physical safeguards not comprehensive")
 	}
 
 	result.Score = float64(score)
@@ -671,30 +756,29 @@ func (c *ComplianceService) testHIPAA164_312(assessment *ComplianceAssessment) {
 	}
 
 	// Check technical safeguards
-	accessControl := c.checkTechnicalAccessControl()
-	auditControls := c.checkAuditControls()
-	integrity := c.checkDataIntegrity()
-	transmissionSecurity := c.checkTransmissionSecurity()
-
 	score := 0
-	if accessControl {
-		score += 30
-	}
-	if auditControls {
-		score += 25
-	}
-	if integrity {
-		score += 25
-	}
-	if transmissionSecurity {
-		score += 20
-	}
+	verified := false
 
-	if score >= 80 {
+	s, v := applyCheck(result, "Technical access control", c.checkTechnicalAccessControl(), 30)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Audit controls", c.checkAuditControls(), 25)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Data integrity", c.checkDataIntegrity(), 25)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Transmission security", c.checkTransmissionSecurity(), 20)
+	score += s
+	verified = verified || v
+
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 80:
 		result.Status = Compliant
-	} else {
+	default:
 		result.Status = Partial
-		result.Findings = append(result.Findings, "Technical safeguards not comprehensive")
 	}
 
 	result.Score = float64(score)
@@ -710,18 +794,26 @@ func (c *ComplianceService) testHIPAA164_314(assessment *ComplianceAssessment) {
 	}
 
 	// Check organizational requirements
-	businessAssociates := c.checkBusinessAssociates()
-	contractualSafeguards := c.checkContractualSafeguards()
+	score := 0
+	verified := false
 
-	if businessAssociates && contractualSafeguards {
+	s, v := applyCheck(result, "Business associate agreements", c.checkBusinessAssociates(), 50)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Contractual safeguards", c.checkContractualSafeguards(), 50)
+	score += s
+	verified = verified || v
+
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 100:
 		result.Status = Compliant
-		result.Score = 100
-	} else {
+	default:
 		result.Status = NonCompliant
-		result.Score = 0
-		result.Findings = append(result.Findings, "Organizational requirements not met")
 	}
 
+	result.Score = float64(score)
 	result.Tested = true
 	result.TestedAt = time.Now()
 }
@@ -735,18 +827,26 @@ func (c *ComplianceService) testPCIDSS1(assessment *ComplianceAssessment) {
 	}
 
 	// Check firewall configuration
-	firewallConfig := c.checkFirewallConfiguration()
-	networkSegmentation := c.checkNetworkSegmentation()
+	score := 0
+	verified := false
 
-	if firewallConfig && networkSegmentation {
+	s, v := applyCheck(result, "Firewall configuration", c.checkFirewallConfiguration(), 50)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Network segmentation", c.checkNetworkSegmentation(), 50)
+	score += s
+	verified = verified || v
+
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 100:
 		result.Status = Compliant
-		result.Score = 100
-	} else {
+	default:
 		result.Status = NonCompliant
-		result.Score = 0
-		result.Findings = append(result.Findings, "Firewall configuration inadequate")
 	}
 
+	result.Score = float64(score)
 	result.Tested = true
 	result.TestedAt = time.Now()
 }
@@ -758,19 +858,27 @@ func (c *ComplianceService) testPCIDSS2(assessment *ComplianceAssessment) {
 		return
 	}
 
-	// Check default passwords
-	defaultPasswords := c.checkDefaultPasswords()
-	securityParameters := c.checkSecurityParameters()
+	// Check default passwords and security parameters
+	score := 0
+	verified := false
 
-	if !defaultPasswords && securityParameters {
+	s, v := applyCheck(result, "No default passwords", c.checkDefaultPasswords(), 50)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Security parameters", c.checkSecurityParameters(), 50)
+	score += s
+	verified = verified || v
+
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 100:
 		result.Status = Compliant
-		result.Score = 100
-	} else {
+	default:
 		result.Status = NonCompliant
-		result.Score = 0
-		result.Findings = append(result.Findings, "Default passwords or insecure parameters detected")
 	}
 
+	result.Score = float64(score)
 	result.Tested = true
 	result.TestedAt = time.Now()
 }
@@ -783,26 +891,26 @@ func (c *ComplianceService) testPCIDSS3(assessment *ComplianceAssessment) {
 	}
 
 	// Check stored data protection
-	dataEncryption := c.checkStoredDataEncryption()
-	dataRetention := c.checkDataRetention()
-	keyManagement := c.checkKeyManagement()
-
 	score := 0
-	if dataEncryption {
-		score += 50
-	}
-	if dataRetention {
-		score += 25
-	}
-	if keyManagement {
-		score += 25
-	}
+	verified := false
 
-	if score >= 80 {
+	s, v := applyCheck(result, "Stored data encryption", c.checkStoredDataEncryption(), 50)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Data retention", c.checkDataRetention(), 25)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Key management", c.checkKeyManagement(), 25)
+	score += s
+	verified = verified || v
+
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 80:
 		result.Status = Compliant
-	} else {
+	default:
 		result.Status = NonCompliant
-		result.Findings = append(result.Findings, "Stored cardholder data not adequately protected")
 	}
 
 	result.Score = float64(score)
@@ -818,226 +926,448 @@ func (c *ComplianceService) testPCIDSS4(assessment *ComplianceAssessment) {
 	}
 
 	// Check transmission encryption
-	transmissionEncryption := c.checkTransmissionEncryption()
-	strongCrypto := c.checkStrongCryptography()
+	score := 0
+	verified := false
 
-	if transmissionEncryption && strongCrypto {
+	s, v := applyCheck(result, "Transmission encryption", c.checkTransmissionEncryption(), 50)
+	score += s
+	verified = verified || v
+	s, v = applyCheck(result, "Strong cryptography", c.checkStrongCryptography(), 50)
+	score += s
+	verified = verified || v
+
+	switch {
+	case !verified:
+		result.Status = NotTested
+	case score >= 100:
 		result.Status = Compliant
-		result.Score = 100
-	} else {
+	default:
 		result.Status = NonCompliant
-		result.Score = 0
-		result.Findings = append(result.Findings, "Cardholder data transmission not adequately encrypted")
 	}
 
+	result.Score = float64(score)
 	result.Tested = true
 	result.TestedAt = time.Now()
 }
 
-// Helper functions for compliance checks
-func (c *ComplianceService) checkPolicyExists(policyType string) bool {
-	// Implementation would check if specific policies exist
-	return true
+// CheckResult is the outcome of a single automated compliance sub-check. It
+// deliberately supports more than pass/fail: a check with no real signal to
+// evaluate must say so (NotTested) rather than fabricate a result, and a
+// check that structurally cannot apply to a software system (e.g. physical
+// facility access) reports Exempt. See novacron-yvo — every checkXxx below
+// used to unconditionally return true (or, for checkDefaultPasswords,
+// false) regardless of actual system state.
+type CheckResult struct {
+	Status ComplianceStatus
+	Reason string
 }
 
-func (c *ComplianceService) checkTrainingRecords(trainingType string) bool {
-	// Implementation would check training completion records
-	return true
+func passCheck(reason string) CheckResult {
+	return CheckResult{Status: Compliant, Reason: reason}
 }
 
-func (c *ComplianceService) checkPolicyCommunication(policyType string) bool {
-	// Implementation would check policy communication records
-	return true
+func failCheck(reason string) CheckResult {
+	return CheckResult{Status: NonCompliant, Reason: reason}
 }
 
-func (c *ComplianceService) checkMFAEnabled() bool {
-	// Implementation would check MFA configuration
-	return true
+// unknownCheck reports that no automated signal exists yet to evaluate this
+// check. It must never be treated as compliant.
+func unknownCheck(reason string) CheckResult {
+	return CheckResult{Status: NotTested, Reason: reason}
 }
 
-func (c *ComplianceService) checkPasswordPolicy() bool {
-	// Implementation would validate password policy strength
-	return true
+// exemptCheck reports that the check does not apply to this system (e.g. a
+// physical-safeguard control being evaluated for software that manages no
+// physical facility).
+func exemptCheck(reason string) CheckResult {
+	return CheckResult{Status: Exempt, Reason: reason}
 }
 
-func (c *ComplianceService) checkAccessReviews() bool {
-	// Implementation would check access review records
-	return true
+func (r CheckResult) compliant() bool {
+	return r.Status == Compliant
 }
 
-func (c *ComplianceService) checkTLSEnabled() bool {
-	// Implementation would check TLS configuration
-	return true
+// applyCheck scores a single sub-check's contribution to a control test. It
+// awards points only for a genuinely Compliant result, records a
+// human-readable finding for anything else, and reports whether the check
+// produced a real signal at all (false for NotTested/Exempt) so the caller
+// can tell "verified non-compliant" apart from "nothing could be verified".
+// Unknown/Exempt results can only ever withhold points, never award them —
+// that is what keeps this honest.
+func applyCheck(result *ControlResult, label string, cr CheckResult, points int) (scored int, verified bool) {
+	if cr.Status != Compliant {
+		result.Findings = append(result.Findings, fmt.Sprintf("%s: %s", label, cr.Reason))
+	}
+	switch cr.Status {
+	case Compliant:
+		return points, true
+	case NotTested, Exempt:
+		return 0, false
+	default:
+		return 0, true
+	}
 }
 
-func (c *ComplianceService) checkEncryptionInTransit() bool {
-	// Implementation would check encryption settings
-	return true
+// Helper functions for compliance checks.
+//
+// Each check below either reflects real, observable state from a sibling
+// service in this package (wired via the SetXxx methods on
+// ComplianceService), or — where this codebase has no automatable signal —
+// honestly reports NotTested/Exempt with a reason instead of fabricating a
+// result. See novacron-yvo.
+
+func (c *ComplianceService) checkPolicyExists(policyType string) CheckResult {
+	return unknownCheck(fmt.Sprintf("no policy document management system is wired into ComplianceService to verify the %q policy exists", policyType))
 }
 
-func (c *ComplianceService) checkLoggingEnabled() bool {
-	// Implementation would check logging configuration
-	return true
+func (c *ComplianceService) checkTrainingRecords(trainingType string) CheckResult {
+	return unknownCheck(fmt.Sprintf("no training-record system is wired into ComplianceService to verify %q training completion", trainingType))
 }
 
-func (c *ComplianceService) checkMonitoring() bool {
-	// Implementation would check monitoring systems
-	return true
+func (c *ComplianceService) checkPolicyCommunication(policyType string) CheckResult {
+	return unknownCheck(fmt.Sprintf("no policy-communication tracking system is wired into ComplianceService for the %q policy", policyType))
 }
 
-func (c *ComplianceService) checkAlertingEnabled() bool {
-	// Implementation would check alerting configuration
-	return true
+func (c *ComplianceService) checkMFAEnabled() CheckResult {
+	c.mu.RLock()
+	tfs := c.twoFactorService
+	c.mu.RUnlock()
+	if tfs == nil {
+		return unknownCheck("no 2FA service is wired into ComplianceService")
+	}
+	stats := tfs.GetStats()
+	total, _ := stats["total_users"].(int)
+	enabled, _ := stats["enabled_users"].(int)
+	if total == 0 {
+		return unknownCheck("2FA service is wired but no users are enrolled yet")
+	}
+	if enabled == 0 {
+		return failCheck(fmt.Sprintf("0 of %d enrolled users have MFA enabled", total))
+	}
+	return passCheck(fmt.Sprintf("%d of %d enrolled users have MFA enabled", enabled, total))
 }
 
-func (c *ComplianceService) checkPrivacyByDesign() bool {
-	// Implementation would check privacy-by-design implementation
-	return true
+func (c *ComplianceService) checkPasswordPolicy() CheckResult {
+	c.mu.RLock()
+	ps := c.passwordService
+	c.mu.RUnlock()
+	if ps == nil {
+		return unknownCheck("no password security service is wired into ComplianceService")
+	}
+	cfg := ps.config
+	var missing []string
+	if cfg.MinLength < 12 {
+		missing = append(missing, fmt.Sprintf("MinLength=%d (<12)", cfg.MinLength))
+	}
+	if !cfg.RequireUppercase {
+		missing = append(missing, "RequireUppercase=false")
+	}
+	if !cfg.RequireLowercase {
+		missing = append(missing, "RequireLowercase=false")
+	}
+	if !cfg.RequireNumbers {
+		missing = append(missing, "RequireNumbers=false")
+	}
+	if !cfg.RequireSpecialChars {
+		missing = append(missing, "RequireSpecialChars=false")
+	}
+	if len(missing) > 0 {
+		return failCheck("password policy below minimum bar: " + strings.Join(missing, ", "))
+	}
+	return passCheck("password policy enforces length >=12 and all character classes")
 }
 
-func (c *ComplianceService) checkDataMinimization() bool {
-	// Implementation would check data minimization practices
-	return true
+func (c *ComplianceService) checkAccessReviews() CheckResult {
+	return unknownCheck("no periodic access-review record system is wired into ComplianceService")
 }
 
-func (c *ComplianceService) checkEncryptionAtRest() bool {
-	// Implementation would check data-at-rest encryption
-	return true
+// mtlsPolicyConfigured backs every check that ultimately asks the same real
+// question from a different framework's angle: does an enabled zero-trust
+// network policy require mutual TLS for sensitive traffic?
+func (c *ComplianceService) mtlsPolicyConfigured() CheckResult {
+	c.mu.RLock()
+	zt := c.ztNetworkService
+	c.mu.RUnlock()
+	if zt == nil {
+		return unknownCheck("no zero-trust network service is wired into ComplianceService")
+	}
+	for _, policy := range zt.GetPolicies() {
+		if policy.Enabled && policy.Action == NetworkPolicyRequireMTLS {
+			return passCheck(fmt.Sprintf("network policy %q enforces mTLS", policy.ID))
+		}
+	}
+	return failCheck("no enabled network policy requires mTLS")
 }
 
-func (c *ComplianceService) checkAccessControls() bool {
-	// Implementation would check access control systems
-	return true
+func (c *ComplianceService) checkTLSEnabled() CheckResult {
+	return c.mtlsPolicyConfigured()
 }
 
-func (c *ComplianceService) checkBackupSecurity() bool {
-	// Implementation would check backup security measures
-	return true
+func (c *ComplianceService) checkEncryptionInTransit() CheckResult {
+	return c.mtlsPolicyConfigured()
 }
 
-func (c *ComplianceService) checkBreachProcedures() bool {
-	// Implementation would check breach response procedures
-	return true
+// auditLoggingConfigured backs every check that ultimately asks whether an
+// audit trail is actually being recorded.
+func (c *ComplianceService) auditLoggingConfigured() CheckResult {
+	if c.auditService == nil {
+		return failCheck("no audit service is configured")
+	}
+	return passCheck("an audit service is configured and receiving events")
 }
 
-func (c *ComplianceService) checkNotificationTiming() bool {
-	// Implementation would check notification timing compliance
-	return true
+func (c *ComplianceService) checkLoggingEnabled() CheckResult {
+	return c.auditLoggingConfigured()
 }
 
-func (c *ComplianceService) checkDPIAProcess() bool {
-	// Implementation would check DPIA process documentation
-	return true
+func (c *ComplianceService) checkMonitoring() CheckResult {
+	return unknownCheck("no monitoring/metrics subsystem is wired into ComplianceService (see backend/core/monitoring)")
 }
 
-func (c *ComplianceService) checkRiskAssessment() bool {
-	// Implementation would check risk assessment procedures
-	return true
+func (c *ComplianceService) checkAlertingEnabled() CheckResult {
+	return unknownCheck("no alerting subsystem is wired into ComplianceService")
 }
 
-func (c *ComplianceService) checkSecurityOfficer() bool {
-	// Implementation would check security officer designation
-	return true
+func (c *ComplianceService) checkPrivacyByDesign() CheckResult {
+	return unknownCheck("privacy-by-design review is a process/design-review artifact with no automatable signal in this codebase")
 }
 
-func (c *ComplianceService) checkWorkforceTraining() bool {
-	// Implementation would check workforce training records
-	return true
+func (c *ComplianceService) checkDataMinimization() CheckResult {
+	return unknownCheck("no data classification/minimization tracking exists in this codebase")
 }
 
-func (c *ComplianceService) checkAccessManagement() bool {
-	// Implementation would check access management procedures
-	return true
+// encryptionAtRestConfigured backs every check that ultimately asks whether
+// data is actually being encrypted at rest by the wired EncryptionService.
+func (c *ComplianceService) encryptionAtRestConfigured() CheckResult {
+	if c.encryption == nil {
+		return unknownCheck("no encryption service is wired into ComplianceService")
+	}
+	keys := c.encryption.GetActiveKeys()
+	if len(keys) == 0 {
+		return failCheck("no active encryption keys exist")
+	}
+	return passCheck(fmt.Sprintf("%d active encryption key(s)", len(keys)))
 }
 
-func (c *ComplianceService) checkFacilityAccess() bool {
-	// Implementation would check facility access controls
-	return true
+func (c *ComplianceService) checkEncryptionAtRest() CheckResult {
+	return c.encryptionAtRestConfigured()
 }
 
-func (c *ComplianceService) checkWorkstationSecurity() bool {
-	// Implementation would check workstation security measures
-	return true
+// rolesConfigured backs every check that ultimately asks whether real RBAC
+// roles with actual permissions have been defined.
+func (c *ComplianceService) rolesConfigured() CheckResult {
+	c.mu.RLock()
+	rs := c.roleService
+	c.mu.RUnlock()
+	if rs == nil {
+		return unknownCheck("no role service is wired into ComplianceService")
+	}
+	roles, err := rs.List(nil)
+	if err != nil {
+		return unknownCheck(fmt.Sprintf("role service query failed: %v", err))
+	}
+	if len(roles) == 0 {
+		return failCheck("no roles are defined")
+	}
+	for _, role := range roles {
+		if len(role.Permissions) > 0 {
+			return passCheck(fmt.Sprintf("%d role(s) defined, at least one with explicit permissions", len(roles)))
+		}
+	}
+	return failCheck("roles are defined but none grant explicit permissions")
 }
 
-func (c *ComplianceService) checkDeviceControls() bool {
-	// Implementation would check device and media controls
-	return true
+func (c *ComplianceService) checkAccessControls() CheckResult {
+	return c.rolesConfigured()
 }
 
-func (c *ComplianceService) checkTechnicalAccessControl() bool {
-	// Implementation would check technical access controls
-	return true
+func (c *ComplianceService) checkBackupSecurity() CheckResult {
+	return unknownCheck("backup encryption/security lives in backend/core/backup and is not wired into ComplianceService")
 }
 
-func (c *ComplianceService) checkAuditControls() bool {
-	// Implementation would check audit control systems
-	return true
+func (c *ComplianceService) checkBreachProcedures() CheckResult {
+	return unknownCheck("breach-response procedures are a runbook/process artifact with no automatable signal in this codebase")
 }
 
-func (c *ComplianceService) checkDataIntegrity() bool {
-	// Implementation would check data integrity measures
-	return true
+func (c *ComplianceService) checkNotificationTiming() CheckResult {
+	return unknownCheck("breach notification timing is a process record with no automatable signal in this codebase")
 }
 
-func (c *ComplianceService) checkTransmissionSecurity() bool {
-	// Implementation would check transmission security
-	return true
+func (c *ComplianceService) checkDPIAProcess() CheckResult {
+	return unknownCheck("DPIA process documentation has no automatable signal in this codebase")
 }
 
-func (c *ComplianceService) checkBusinessAssociates() bool {
-	// Implementation would check business associate agreements
-	return true
+func (c *ComplianceService) checkRiskAssessment() CheckResult {
+	return unknownCheck("risk assessment procedures are a process/document artifact with no automatable signal in this codebase")
 }
 
-func (c *ComplianceService) checkContractualSafeguards() bool {
-	// Implementation would check contractual safeguards
-	return true
+func (c *ComplianceService) checkSecurityOfficer() CheckResult {
+	return unknownCheck("security officer designation is a personnel/org record with no automatable signal in this codebase")
 }
 
-func (c *ComplianceService) checkFirewallConfiguration() bool {
-	// Implementation would check firewall configuration
-	return true
+func (c *ComplianceService) checkWorkforceTraining() CheckResult {
+	return unknownCheck("no training-record system is wired into ComplianceService")
 }
 
-func (c *ComplianceService) checkNetworkSegmentation() bool {
-	// Implementation would check network segmentation
-	return true
+func (c *ComplianceService) checkAccessManagement() CheckResult {
+	return c.rolesConfigured()
 }
 
-func (c *ComplianceService) checkDefaultPasswords() bool {
-	// Implementation would check for default passwords
-	return false // Default passwords should not exist
+func (c *ComplianceService) checkFacilityAccess() CheckResult {
+	return exemptCheck("physical facility access control is not observable by this software system's compliance automation")
 }
 
-func (c *ComplianceService) checkSecurityParameters() bool {
-	// Implementation would check security parameters
-	return true
+func (c *ComplianceService) checkWorkstationSecurity() CheckResult {
+	return exemptCheck("workstation/endpoint physical security is not observable by this software system's compliance automation")
 }
 
-func (c *ComplianceService) checkStoredDataEncryption() bool {
-	// Implementation would check stored data encryption
-	return true
+func (c *ComplianceService) checkDeviceControls() CheckResult {
+	return exemptCheck("physical device and media controls are not observable by this software system's compliance automation")
 }
 
-func (c *ComplianceService) checkDataRetention() bool {
-	// Implementation would check data retention policies
-	return true
+func (c *ComplianceService) checkTechnicalAccessControl() CheckResult {
+	return c.rolesConfigured()
 }
 
-func (c *ComplianceService) checkKeyManagement() bool {
-	// Implementation would check key management procedures
-	return true
+func (c *ComplianceService) checkAuditControls() CheckResult {
+	return c.auditLoggingConfigured()
 }
 
-func (c *ComplianceService) checkTransmissionEncryption() bool {
-	// Implementation would check transmission encryption
-	return true
+// checkDataIntegrity reuses the encryption-at-rest signal: the only two
+// algorithms EncryptionService supports (AES-256-GCM, ChaCha20Poly1305) are
+// both AEAD ciphers, so authenticity/tamper-detection is inherent to any
+// data they encrypt — it is not a separate mechanism to check.
+func (c *ComplianceService) checkDataIntegrity() CheckResult {
+	result := c.encryptionAtRestConfigured()
+	if result.Status == Compliant {
+		return passCheck(result.Reason + "; both supported algorithms are AEAD ciphers with built-in integrity verification")
+	}
+	return result
 }
 
-func (c *ComplianceService) checkStrongCryptography() bool {
-	// Implementation would check cryptographic strength
-	return true
+func (c *ComplianceService) checkTransmissionSecurity() CheckResult {
+	return c.mtlsPolicyConfigured()
+}
+
+func (c *ComplianceService) checkBusinessAssociates() CheckResult {
+	return unknownCheck("business associate agreements are a legal/contract record with no automatable signal in this codebase")
+}
+
+func (c *ComplianceService) checkContractualSafeguards() CheckResult {
+	return unknownCheck("contractual safeguards are a legal/contract record with no automatable signal in this codebase")
+}
+
+func (c *ComplianceService) checkFirewallConfiguration() CheckResult {
+	c.mu.RLock()
+	zt := c.ztNetworkService
+	c.mu.RUnlock()
+	if zt == nil {
+		return unknownCheck("no zero-trust network service is wired into ComplianceService")
+	}
+	policies := zt.GetPolicies()
+	if len(policies) == 0 {
+		return failCheck("no network policies are configured")
+	}
+	for _, policy := range policies {
+		if policy.Enabled && policy.Action == NetworkPolicyDeny {
+			return passCheck(fmt.Sprintf("%d network policy(ies) configured, including a default-deny rule", len(policies)))
+		}
+	}
+	return failCheck("network policies exist but none deny traffic by default")
+}
+
+func (c *ComplianceService) checkNetworkSegmentation() CheckResult {
+	c.mu.RLock()
+	zt := c.ztNetworkService
+	c.mu.RUnlock()
+	if zt == nil {
+		return unknownCheck("no zero-trust network service is wired into ComplianceService")
+	}
+	segments := zt.GetMicrosegments()
+	if len(segments) == 0 {
+		return failCheck("no network microsegments are defined")
+	}
+	return passCheck(fmt.Sprintf("%d network microsegment(s) defined", len(segments)))
+}
+
+// checkDefaultPasswords reports Compliant when default/common passwords are
+// actively guarded against. This intentionally flips the polarity of the
+// original stub (which returned bare `false` to mean "compliant") so that,
+// like every other check here, Compliant always means "passes".
+func (c *ComplianceService) checkDefaultPasswords() CheckResult {
+	c.mu.RLock()
+	ps := c.passwordService
+	c.mu.RUnlock()
+	if ps == nil {
+		return unknownCheck("no password security service is wired into ComplianceService")
+	}
+	if !ps.config.ForbidCommonPasswords {
+		return failCheck("password policy does not forbid common/default passwords (ForbidCommonPasswords=false)")
+	}
+	if len(ps.commonPasswords) == 0 {
+		return failCheck("ForbidCommonPasswords is enabled but the common-password block-list failed to load")
+	}
+	return passCheck(fmt.Sprintf("common/default password block-list is active (%d entries)", len(ps.commonPasswords)))
+}
+
+func (c *ComplianceService) checkSecurityParameters() CheckResult {
+	strong := c.checkStrongCryptography()
+	c.mu.RLock()
+	ps := c.passwordService
+	c.mu.RUnlock()
+	if ps == nil {
+		if strong.compliant() {
+			return unknownCheck("encryption parameters are strong, but no password service is wired to verify hashing parameters")
+		}
+		return strong
+	}
+	algo := ps.config.HashAlgorithm
+	okHash := algo == "argon2" || (algo == "bcrypt" && ps.config.BcryptCost >= 10)
+	if !okHash {
+		return failCheck(fmt.Sprintf("password hash algorithm %q (cost=%d) is below the secure baseline", algo, ps.config.BcryptCost))
+	}
+	if !strong.compliant() {
+		return strong
+	}
+	return passCheck("password hashing and encryption parameters both meet the secure baseline")
+}
+
+func (c *ComplianceService) checkStoredDataEncryption() CheckResult {
+	return c.encryptionAtRestConfigured()
+}
+
+func (c *ComplianceService) checkDataRetention() CheckResult {
+	return unknownCheck("retention policy enforcement lives in backend/core/backup and is not wired into ComplianceService")
+}
+
+func (c *ComplianceService) checkKeyManagement() CheckResult {
+	if c.encryption == nil {
+		return unknownCheck("no encryption service is wired into ComplianceService")
+	}
+	if c.encryption.config.KeyRotationInterval <= 0 {
+		return failCheck("key rotation interval is not configured")
+	}
+	keys := c.encryption.GetActiveKeys()
+	if len(keys) == 0 {
+		return failCheck("no active encryption keys exist to rotate")
+	}
+	return passCheck(fmt.Sprintf("%d active key(s), rotation interval %s", len(keys), c.encryption.config.KeyRotationInterval))
+}
+
+func (c *ComplianceService) checkTransmissionEncryption() CheckResult {
+	return c.mtlsPolicyConfigured()
+}
+
+func (c *ComplianceService) checkStrongCryptography() CheckResult {
+	if c.encryption == nil {
+		return unknownCheck("no encryption service is wired into ComplianceService")
+	}
+	switch c.encryption.config.DefaultAlgorithm {
+	case "AES-256-GCM", "ChaCha20Poly1305":
+		return passCheck(fmt.Sprintf("default algorithm %s is a strong AEAD cipher", c.encryption.config.DefaultAlgorithm))
+	default:
+		return failCheck(fmt.Sprintf("default algorithm %q is not on the approved strong-cipher list", c.encryption.config.DefaultAlgorithm))
+	}
 }
 
 // updateAssessmentStatus calculates overall assessment status

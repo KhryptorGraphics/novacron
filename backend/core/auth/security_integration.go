@@ -75,6 +75,19 @@ func NewSecurityManager(config SecurityConfiguration, authService AuthService) (
 		}
 	}
 
+	// Wire real signal sources into the compliance service so its automated
+	// checks reflect this SecurityManager's actual state instead of the
+	// honest-unknown default (see novacron-yvo).
+	if complianceService != nil {
+		complianceService.SetPasswordService(passwordService)
+		if roleBackedAuth, ok := authService.(*AuthServiceImpl); ok {
+			complianceService.SetRoleService(roleBackedAuth.roles)
+		}
+		if ztNetworkService != nil {
+			complianceService.SetZeroTrustNetworkService(ztNetworkService)
+		}
+	}
+
 	return &SecurityManager{
 		jwtService:         jwtService,
 		passwordService:    passwordService,
