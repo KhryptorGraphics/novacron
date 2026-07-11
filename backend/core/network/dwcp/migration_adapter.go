@@ -2,6 +2,7 @@
 package dwcp
 
 import (
+	"container/list"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -27,6 +28,11 @@ type MigrationAdapter struct {
 
 	// Baseline management
 	vmBaselines map[string]*VMBaseline
+	// baselineLRU orders vmBaselines by recency for MaxMemoryUsage-bounded
+	// eviction (novacron-y45); baselineBytes tracks total retained baseline
+	// bytes. Both guarded by adapter.mu.
+	baselineLRU   *list.List
+	baselineBytes int64
 
 	// Performance metrics
 	migrationsCompleted   atomic.Int64
@@ -168,6 +174,12 @@ type VMBaseline struct {
 	DiskBaselines  map[int][]byte // Block ID to baseline data
 	LastUpdated    time.Time
 	mu             sync.RWMutex
+	// retainedBytes (len(MemoryBaseline)+sum(DiskBaselines)) and lruElem (this
+	// entry's node in adapter.baselineLRU) are accounting fields for
+	// MaxMemoryUsage-bounded eviction (novacron-y45). They are guarded by
+	// adapter.mu, NOT by the VMBaseline.mu above.
+	retainedBytes int64
+	lruElem       *list.Element
 }
 
 // NewMigrationAdapter creates a new DWCP migration adapter
@@ -195,10 +207,14 @@ func NewMigrationAdapter(config MigrationAdapterConfig) (*MigrationAdapter, erro
 	//   - EnableDelta: Decompress's isDelta branch returns the raw delta
 	//     bytes as-is, not memory reconstructed against a baseline
 	//     (hde.go Decompress, "For now, return the decompressed delta").
-	//   - EnableDictionary: CompressDisk dict-compresses THEN plain
-	//     zstd-compresses on top (double compression) whenever a trained
-	//     dictionary exists; Decompress only reverses the outer plain
-	//     layer, never the dictionary layer (hde.go CompressDisk).
+	//   - EnableDictionary: dictionary compression is now internally correct
+	//     and reversible (novacron-976 — CompressMemory/CompressDisk emit a
+	//     single dictionary-compressed frame that HDE.Decompress reverses via
+	//     a dictionary-aware decoder). It stays off HERE only because the
+	//     receiver is a DIFFERENT process whose HDE has not trained the same
+	//     dictionary: this transport does not distribute dictionaries, so the
+	//     receive-side Decompress would fail with "no dictionary decoder for
+	//     dict ID". Enabling it requires shipping the dictionary to the peer.
 	//   - EnableQuantization: quantize() masks off low bits of every byte
 	//     at tier CompressionGlobal — irreversible information loss with
 	//     no dequantize step anywhere in Decompress (hde.go quantize).
@@ -240,6 +256,7 @@ func NewMigrationAdapter(config MigrationAdapterConfig) (*MigrationAdapter, erro
 		config:      config,
 		connections: make(map[string]*MigrationConnection),
 		vmBaselines: make(map[string]*VMBaseline),
+		baselineLRU: list.New(),
 		ctx:         ctx,
 		cancel:      cancel,
 	}
@@ -599,13 +616,22 @@ func (adapter *MigrationAdapter) selectCompressionTier(conn *MigrationConnection
 	metrics := conn.AMST.GetMetrics()
 	latency := metrics["latency_ms"].(int64)
 
-	// Select tier based on latency
-	if latency < 10 {
+	// Select tier based on latency. On a fast/LAN link, bandwidth is not the
+	// bottleneck and compression CPU is not recovered — measured 2.2x SLOWER
+	// than sending uncompressed (novacron-94l) — so skip compression entirely
+	// below the fast-link threshold. Compression only pays off once the link
+	// is slow enough that fewer bytes on the wire outweigh the compression CPU
+	// (a decisive 2.6-2.78x win on WAN-bandwidth-constrained links).
+	switch {
+	case latency < 5:
+		return CompressionLevelNone // Fast/LAN: don't compress
+	case latency < 10:
 		return CompressionLocal // Fast local network
-	} else if latency < 50 {
+	case latency < 50:
 		return CompressionRegional // Regional network
+	default:
+		return CompressionGlobal // WAN/Internet
 	}
-	return CompressionGlobal // WAN/Internet
 }
 
 // storeMemoryBaseline stores memory baseline for future delta encoding
@@ -623,9 +649,16 @@ func (adapter *MigrationAdapter) storeMemoryBaseline(vmID string, memoryData []b
 	}
 
 	baseline.mu.Lock()
+	delta := int64(len(memoryData)) - int64(len(baseline.MemoryBaseline))
 	baseline.MemoryBaseline = memoryData
 	baseline.LastUpdated = time.Now()
 	baseline.mu.Unlock()
+
+	// Track retained bytes and enforce the MaxMemoryUsage cap (novacron-y45).
+	baseline.retainedBytes += delta
+	adapter.baselineBytes += delta
+	adapter.touchBaselineLocked(baseline)
+	adapter.evictBaselinesLocked()
 }
 
 // storeDiskBaselines stores disk baselines for future delta encoding
@@ -643,11 +676,46 @@ func (adapter *MigrationAdapter) storeDiskBaselines(vmID string, diskBlocks map[
 	}
 
 	baseline.mu.Lock()
+	var delta int64
 	for blockID, blockData := range diskBlocks {
+		delta += int64(len(blockData)) - int64(len(baseline.DiskBaselines[blockID]))
 		baseline.DiskBaselines[blockID] = blockData
 	}
 	baseline.LastUpdated = time.Now()
 	baseline.mu.Unlock()
+
+	// Track retained bytes and enforce the MaxMemoryUsage cap (novacron-y45).
+	baseline.retainedBytes += delta
+	adapter.baselineBytes += delta
+	adapter.touchBaselineLocked(baseline)
+	adapter.evictBaselinesLocked()
+}
+
+// touchBaselineLocked records b as most-recently-used in the eviction LRU.
+// Caller MUST hold adapter.mu (novacron-y45).
+func (adapter *MigrationAdapter) touchBaselineLocked(b *VMBaseline) {
+	if b.lruElem == nil {
+		b.lruElem = adapter.baselineLRU.PushFront(b.VMID)
+	} else {
+		adapter.baselineLRU.MoveToFront(b.lruElem)
+	}
+}
+
+// evictBaselinesLocked evicts least-recently-used VM baselines until the total
+// retained baseline bytes fit within config.MaxMemoryUsage. Caller MUST hold
+// adapter.mu. Bounds adapter.vmBaselines against high VM churn: baselines were
+// previously stored per unique vmID with no eviction and no reader, a pure
+// memory leak (novacron-y45).
+func (adapter *MigrationAdapter) evictBaselinesLocked() {
+	for adapter.baselineBytes > adapter.config.MaxMemoryUsage && adapter.baselineLRU.Len() > 0 {
+		oldest := adapter.baselineLRU.Back()
+		vmID := oldest.Value.(string)
+		if b, ok := adapter.vmBaselines[vmID]; ok {
+			adapter.baselineBytes -= b.retainedBytes
+			delete(adapter.vmBaselines, vmID)
+		}
+		adapter.baselineLRU.Remove(oldest)
+	}
 }
 
 // migrateMemoryStandard performs standard TCP migration without DWCP
@@ -851,6 +919,7 @@ func (adapter *MigrationAdapter) GetMetrics() map[string]interface{} {
 	adapter.mu.RLock()
 	activeConnections := len(adapter.connections)
 	baselineCount := len(adapter.vmBaselines)
+	baselineBytes := adapter.baselineBytes
 	adapter.mu.RUnlock()
 
 	metrics := map[string]interface{}{
@@ -860,6 +929,7 @@ func (adapter *MigrationAdapter) GetMetrics() map[string]interface{} {
 		"avg_throughput_vs_reference_ratio": adapter.avgThroughputVsBaseline.Load(),
 		"active_connections":               activeConnections,
 		"baseline_count":                   baselineCount,
+		"baseline_bytes":                   baselineBytes,
 		"dwcp_enabled":                     adapter.config.EnableDWCP,
 		"fallback_enabled":                 adapter.config.EnableFallback,
 	}

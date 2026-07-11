@@ -19,8 +19,9 @@ import "testing"
 // change re-enabling EnableQuantization would slip past every existing
 // migration test silently, since none of them ever reach Global. This
 // test exercises selectCompressionTier directly against its documented
-// latency thresholds (migration_adapter.go: <10ms local, <50ms regional,
-// else global) so the Global-tier selection path itself stays covered,
+// latency thresholds (migration_adapter.go: <5ms none-skip, <10ms local,
+// <50ms regional, else global) so the None-skip and Global-tier selection
+// paths both stay covered,
 // independent of what tier any specific round-trip test happens to hit.
 func TestSelectCompressionTier_LatencyThresholds(t *testing.T) {
 	adapter, err := NewMigrationAdapter(MigrationAdapterConfig{EnableDWCP: true})
@@ -34,7 +35,9 @@ func TestSelectCompressionTier_LatencyThresholds(t *testing.T) {
 		latencyMs int64
 		want      CompressionLevel
 	}{
-		{"zero_latency", 0, CompressionLocal},
+		{"lan_zero_latency", 0, CompressionLevelNone},
+		{"lan_just_under_none_ceiling", 4, CompressionLevelNone},
+		{"none_local_boundary", 5, CompressionLocal},
 		{"just_under_local_ceiling", 9, CompressionLocal},
 		{"local_regional_boundary", 10, CompressionRegional},
 		{"mid_regional", 30, CompressionRegional},

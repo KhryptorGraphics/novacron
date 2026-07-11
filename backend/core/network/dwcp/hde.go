@@ -31,6 +31,11 @@ type HDE struct {
 
 	// Dictionary management
 	dictionaries map[string][]byte
+	// dictDecoders holds one zstd decoder per trained dictionary, keyed by
+	// dictionary ID (see dictIDFor). Built in TrainDictionary via
+	// WithDecoderDicts so Decompress can reverse dictionary-compressed frames
+	// (novacron-976). Guarded by dictMu alongside dictionaries.
+	dictDecoders map[uint32]*zstd.Decoder
 	dictMu       sync.RWMutex
 
 	// Performance metrics
@@ -78,9 +83,13 @@ type HDEConfig struct {
 type HDECompressionLevel = CompressionLevel
 
 const (
-	CompressionLocal    HDECompressionLevel = iota // Tier 1: Local/Intra-cluster
-	CompressionRegional                            // Tier 2: Regional/Inter-cluster
-	CompressionGlobal                              // Tier 3: Global/WAN
+	// Tiers start at 1 (iota + 1) so value 0 stays free for
+	// CompressionLevelNone (config.go) as a genuine "skip compression" tier,
+	// distinct from any real tier — see novacron-94l, HDE.compressPayload,
+	// and HDE.Decompress.
+	CompressionLocal    HDECompressionLevel = iota + 1 // Tier 1: Local/Intra-cluster
+	CompressionRegional                                // Tier 2: Regional/Inter-cluster
+	CompressionGlobal                                  // Tier 3: Global/WAN
 )
 
 // Baseline represents a reference state for delta encoding
@@ -175,6 +184,7 @@ func NewHDE(config HDEConfig) (*HDE, error) {
 		decoders:     make(map[CompressionLevel]*zstd.Decoder),
 		baselines:    make(map[string]*Baseline),
 		dictionaries: make(map[string][]byte),
+		dictDecoders: make(map[uint32]*zstd.Decoder),
 		ctx:          ctx,
 		cancel:       cancel,
 	}
@@ -281,10 +291,12 @@ func (hde *HDE) CompressMemory(vmID string, memoryData []byte, tier CompressionL
 		dataToCompress = hde.quantize(dataToCompress)
 	}
 
-	// Compress with appropriate level
-	compressed, err := hde.compress(dataToCompress, tier)
+	// Produce the packet payload: a genuine no-compression skip
+	// (novacron-94l), a single dictionary pass when one is trained for this
+	// VM's memory (novacron-976), or plain zstd at the tier's level.
+	compressed, dictID, err := hde.compressPayload(dataToCompress, tier, vmID+"_memory")
 	if err != nil {
-		return nil, fmt.Errorf("compression failed: %w", err)
+		return nil, err
 	}
 
 	// Update metrics
@@ -292,7 +304,7 @@ func (hde *HDE) CompressMemory(vmID string, memoryData []byte, tier CompressionL
 	hde.updateCompressionRatio()
 
 	// Create packet with metadata
-	packet := hde.createPacket(compressed, usedDelta, tier)
+	packet := hde.createPacket(compressed, usedDelta, tier, dictID)
 
 	return packet, nil
 }
@@ -340,22 +352,14 @@ func (hde *HDE) CompressDisk(vmID string, diskData []byte, blockID int, tier Com
 		hde.updateDeltaHitRate(false)
 	}
 
-	// Use dictionary compression if available
-	if hde.config.EnableDictionary {
-		dict, exists := hde.getDictionary(vmID + "_disk")
-		if exists {
-			// Compress with dictionary
-			compressed, err := hde.compressWithDict(dataToCompress, dict, tier)
-			if err == nil {
-				dataToCompress = compressed
-			}
-		}
-	}
-
-	// Compress with appropriate level
-	compressed, err := hde.compress(dataToCompress, tier)
+	// Produce the packet payload: a genuine no-compression skip
+	// (novacron-94l), a single dictionary pass when one is trained for this
+	// VM's disk (novacron-976 — previously this DOUBLE-compressed by running
+	// compressWithDict AND plain zstd on top, which Decompress could not
+	// reverse), or plain zstd at the tier's level.
+	compressed, dictID, err := hde.compressPayload(dataToCompress, tier, vmID+"_disk")
 	if err != nil {
-		return nil, fmt.Errorf("compression failed: %w", err)
+		return nil, err
 	}
 
 	// Update metrics
@@ -363,7 +367,7 @@ func (hde *HDE) CompressDisk(vmID string, diskData []byte, blockID int, tier Com
 	hde.updateCompressionRatio()
 
 	// Create packet with metadata
-	packet := hde.createPacket(compressed, usedDelta, tier)
+	packet := hde.createPacket(compressed, usedDelta, tier, dictID)
 
 	return packet, nil
 }
@@ -374,29 +378,53 @@ func (hde *HDE) Decompress(data []byte) ([]byte, error) {
 		return nil, errors.New("invalid compressed data: too short")
 	}
 
-	// Parse packet header
+	// Parse packet header:
+	//   [isDelta:1][tier:1][reserved:2][dictID:4][dataSize:8][payload]
 	isDelta := data[0] == 1
 	tier := CompressionLevel(data[1])
+	dictID := binary.BigEndian.Uint32(data[4:8])
 	dataSize := binary.BigEndian.Uint64(data[8:16])
 
 	// Currently we don't enforce dataSize, but keep parsing it for forward
 	// compatibility with richer packet formats.
 	_ = dataSize
 
-	// Extract compressed data
-	compressedData := data[16:]
+	// Extract payload
+	payload := data[16:]
 
-	// Decompress
-	decompressed, err := hde.decompress(compressedData, tier)
+	// Genuine "no compression" packets (novacron-94l): compressPayload wrote
+	// the original bytes verbatim when tier == CompressionLevelNone, so there
+	// is no zstd frame to decode — return an independent copy.
+	if tier == CompressionLevelNone {
+		out := make([]byte, len(payload))
+		copy(out, payload)
+		return out, nil
+	}
+
+	// Decompress: dictionary-aware when the packet carries a dictionary ID
+	// (novacron-976), otherwise plain zstd at the packet's tier.
+	var (
+		decompressed []byte
+		err          error
+	)
+	if dictID != 0 {
+		dec, ok := hde.getDictDecoder(dictID)
+		if !ok {
+			return nil, fmt.Errorf("no dictionary decoder for dict ID %d (dictionary not trained on this HDE instance)", dictID)
+		}
+		decompressed, err = dec.DecodeAll(payload, nil)
+	} else {
+		decompressed, err = hde.decompress(payload, tier)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("decompression failed: %w", err)
 	}
 
-	// If it's delta encoded, apply delta to baseline
+	// If it's delta encoded, apply delta to baseline.
 	if isDelta {
-		// This would need the baseline ID to be included in the packet
-		// For now, return the decompressed delta
-		// In production, we'd apply the delta to the baseline
+		// This would need the baseline ID to be included in the packet.
+		// For now, return the decompressed delta.
+		// In production, we'd apply the delta to the baseline.
 	}
 
 	return decompressed, nil
@@ -435,6 +463,52 @@ func (hde *HDE) compressWithDict(data []byte, dict []byte, level HDECompressionL
 	defer encoder.Close()
 
 	return encoder.EncodeAll(data, nil), nil
+}
+
+// compressPayload produces the compressed packet payload for dataToCompress at
+// the given tier, plus the dictionary ID actually used (0 when no dictionary
+// was applied — 0 also marks "no dictionary" in the packet header, see
+// createPacket). Three modes:
+//   - tier == CompressionLevelNone: skip compression entirely (novacron-94l);
+//     the payload is dataToCompress unchanged and dictID is 0.
+//   - EnableDictionary with a dictionary trained for dictKey: a single
+//     dictionary-compressed zstd frame (novacron-976); dictID identifies the
+//     dictionary so Decompress can pick the matching decoder.
+//   - otherwise: plain zstd at the tier's level.
+func (hde *HDE) compressPayload(dataToCompress []byte, tier CompressionLevel, dictKey string) ([]byte, uint32, error) {
+	if tier == CompressionLevelNone {
+		return dataToCompress, 0, nil
+	}
+
+	if hde.config.EnableDictionary {
+		if dict, exists := hde.getDictionary(dictKey); exists {
+			payload, err := hde.compressWithDict(dataToCompress, dict, tier)
+			if err != nil {
+				return nil, 0, fmt.Errorf("dictionary compression failed: %w", err)
+			}
+			return payload, dictIDFor(dictKey), nil
+		}
+	}
+
+	payload, err := hde.compress(dataToCompress, tier)
+	if err != nil {
+		return nil, 0, fmt.Errorf("compression failed: %w", err)
+	}
+	return payload, 0, nil
+}
+
+// dictIDFor derives the deterministic zstd dictionary ID for a resource key.
+// It MUST match the ID TrainDictionary embeds into the dictionary and keys its
+// decoder by, so Decompress can locate that decoder from the packet. zstd
+// rejects dictionary ID 0, so 0 is remapped to 1; that also keeps 0 free as
+// the "no dictionary" marker in packet headers.
+func dictIDFor(id string) uint32 {
+	idHash := sha256.Sum256([]byte(id))
+	dictID := binary.BigEndian.Uint32(idHash[:4])
+	if dictID == 0 {
+		dictID = 1
+	}
+	return dictID
 }
 
 // computeDelta computes the delta between baseline and new data
@@ -576,6 +650,16 @@ func (hde *HDE) getDictionary(id string) ([]byte, bool) {
 	return dict, exists
 }
 
+// getDictDecoder retrieves the dictionary-aware decoder built for dictID by
+// TrainDictionary (novacron-976).
+func (hde *HDE) getDictDecoder(dictID uint32) (*zstd.Decoder, bool) {
+	hde.dictMu.RLock()
+	defer hde.dictMu.RUnlock()
+
+	dec, exists := hde.dictDecoders[dictID]
+	return dec, exists
+}
+
 // TrainDictionary trains a compression dictionary from sample data
 func (hde *HDE) TrainDictionary(id string, samples [][]byte) error {
 	if len(samples) == 0 {
@@ -607,11 +691,7 @@ func (hde *HDE) TrainDictionary(id string, samples [][]byte) error {
 	// make TrainDictionary appear to succeed while producing a dictionary
 	// that is permanently unusable. Derived deterministically from id so
 	// the same resource always gets the same dictionary ID.
-	idHash := sha256.Sum256([]byte(id))
-	dictID := binary.BigEndian.Uint32(idHash[:4])
-	if dictID == 0 {
-		dictID = 1
-	}
+	dictID := dictIDFor(id)
 	// zstd.BuildDict (klauspost/compress@v1.18.1, and confirmed unfixed in
 	// v1.18.4/v1.18.5) has a real internal bug: it can panic with "integer
 	// divide by zero" (zstd/dict.go buildDictLiterals, avgSize computed
@@ -631,9 +711,28 @@ func (hde *HDE) TrainDictionary(id string, samples [][]byte) error {
 		return fmt.Errorf("dictionary training failed: %w", err)
 	}
 
-	// Store dictionary
+	// Build a dictionary-aware decoder keyed by this dictionary's ID so
+	// Decompress can reverse frames compressWithDict produces for it
+	// (novacron-976). The tier-keyed decoders built in NewHDE have no
+	// dictionary and cannot decode dict frames; WithDecoderDicts must be
+	// supplied at decoder-construction time, and only once the dictionary
+	// exists (i.e. here), which is why NewHDE cannot build it.
+	decoder, err := zstd.NewReader(nil,
+		zstd.WithDecoderConcurrency(4),
+		zstd.WithDecoderMaxMemory(uint64(hde.config.MaxMemoryUsage/4)),
+		zstd.WithDecoderDicts(dict),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to build dictionary decoder: %w", err)
+	}
+
+	// Store dictionary and its decoder together.
 	hde.dictMu.Lock()
 	hde.dictionaries[id] = dict
+	if old, exists := hde.dictDecoders[dictID]; exists {
+		old.Close()
+	}
+	hde.dictDecoders[dictID] = decoder
 	hde.dictMu.Unlock()
 
 	return nil
@@ -677,14 +776,16 @@ func (hde *HDE) quantize(data []byte) []byte {
 }
 
 // createPacket creates a packet with metadata
-func (hde *HDE) createPacket(compressed []byte, isDelta bool, tier CompressionLevel) []byte {
+func (hde *HDE) createPacket(compressed []byte, isDelta bool, tier CompressionLevel, dictID uint32) []byte {
 	packet := make([]byte, 16+len(compressed))
 
-	// Header: [isDelta:1][tier:1][reserved:6][dataSize:8][compressed data]
+	// Header: [isDelta:1][tier:1][reserved:2][dictID:4][dataSize:8][payload]
+	// dictID == 0 means the payload is not dictionary-compressed.
 	if isDelta {
 		packet[0] = 1
 	}
 	packet[1] = byte(tier)
+	binary.BigEndian.PutUint32(packet[4:8], dictID)
 	binary.BigEndian.PutUint64(packet[8:16], uint64(len(compressed)))
 
 	copy(packet[16:], compressed)
@@ -799,6 +900,13 @@ func (hde *HDE) Close() error {
 	for _, decoder := range hde.decoders {
 		decoder.Close()
 	}
+
+	// Close dictionary decoders (novacron-976)
+	hde.dictMu.Lock()
+	for _, decoder := range hde.dictDecoders {
+		decoder.Close()
+	}
+	hde.dictMu.Unlock()
 
 	return nil
 }
