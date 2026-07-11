@@ -177,16 +177,13 @@ export function PasswordStrengthIndicator({
               </div>
               <ul className="space-y-1">
                 {strength.suggestions.map((suggestion, index) => (
-                  <motion.li
+                  <li
                     key={suggestion}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: index * 0.1, duration: 0.2 }}
                     className="text-xs text-muted-foreground flex items-start gap-2"
                   >
                     <div className="h-1 w-1 rounded-full bg-muted-foreground mt-2 flex-shrink-0" />
                     <span>{suggestion}</span>
-                  </motion.li>
+                  </li>
                 ))}
               </ul>
             </div>

@@ -196,7 +196,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
             {currentStep}/{totalSteps}
           </div>
         </div>
-        <Progress value={progress} className="h-2" />
+        <Progress value={progress} className="h-2" aria-label="Registration progress" />
       </CardHeader>
       
       <CardContent>
@@ -235,6 +235,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                 <RadioGroup
                   value={formData.accountType}
                   onValueChange={(value) => updateFormData('accountType', value)}
+                  aria-label="Account type"
                 >
                   <div className="grid gap-4">
                     <label
@@ -246,7 +247,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                           : "border-gray-200 dark:border-gray-700 hover:border-gray-300"
                       )}
                     >
-                      <RadioGroupItem value="personal" id="personal" aria-label="Personal Account" />
+                      <RadioGroupItem value="personal" id="personal" aria-label="Personal Account" tabIndex={0} />
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <span className="text-2xl">👤</span>
@@ -280,7 +281,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                           : "border-gray-200 dark:border-gray-700 hover:border-gray-300"
                       )}
                     >
-                      <RadioGroupItem value="organization" id="organization" aria-label="Organization Account" />
+                      <RadioGroupItem value="organization" id="organization" aria-label="Organization Account" tabIndex={0} />
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <span className="text-2xl">🏢</span>
