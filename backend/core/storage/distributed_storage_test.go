@@ -57,7 +57,8 @@ func TestDistributedStorageService_CreateDistributedVolume(t *testing.T) {
 	opts := VolumeCreateOptions{
 		Name:   "test-dist-volume",
 		Type:   VolumeTypeDistributed,
-		Size: 100 * 1024 * 1024, // 100MB in bytes
+		Format: VolumeFormatRAW,
+		Size:   100 * 1024 * 1024, // 100MB in bytes
 	}
 
 	ctx := context.Background()
@@ -132,7 +133,8 @@ func TestDistributedStorageService_ReadWriteShard(t *testing.T) {
 	opts := VolumeCreateOptions{
 		Name:   "test-rw-volume",
 		Type:   VolumeTypeDistributed,
-		Size: 10, // 10MB
+		Format: VolumeFormatRAW,
+		Size:   10, // 10MB
 	}
 
 	ctx := context.Background()
@@ -177,11 +179,11 @@ func TestDistributedStorageService_WithCompression(t *testing.T) {
 	distConfig := DefaultDistributedStorageConfig()
 	distConfig.RootDir = "/tmp/test-distributed-comp"
 	distConfig.CompressionConfig = compression.CompressionConfig{
-		Algorithm: compression.CompressionGzip,
-		Level:     6,
+		Algorithm:    compression.CompressionGzip,
+		Level:        6,
 		MinSizeBytes: 1024,
 		MaxSizeBytes: 1024 * 1024,
-		AutoDetect: true,
+		AutoDetect:   true,
 	}
 
 	// Create distributed storage service
@@ -214,7 +216,8 @@ func TestDistributedStorageService_WithCompression(t *testing.T) {
 	opts := VolumeCreateOptions{
 		Name:   "test-comp-volume",
 		Type:   VolumeTypeDistributed,
-		Size: 10,
+		Format: VolumeFormatRAW,
+		Size:   10,
 	}
 
 	ctx := context.Background()
@@ -271,10 +274,10 @@ func TestDistributedStorageService_WithEncryption(t *testing.T) {
 	distConfig.RootDir = "/tmp/test-distributed-enc"
 	distConfig.DefaultEncryption = true
 	distConfig.EncryptionConfig = encryption.EncryptionConfig{
-		Algorithm: encryption.EncryptionAES256,
-		Mode:      encryption.EncryptionModeGCM,
-		MasterKey: "test-master-key-32-bytes-long!!!",
-		SaltPrefix: "novacron",
+		Algorithm:    encryption.EncryptionAES256,
+		Mode:         encryption.EncryptionModeGCM,
+		MasterKey:    "test-master-key-32-bytes-long!!!",
+		SaltPrefix:   "novacron",
 		Authenticate: true,
 		MinSizeBytes: 1024,
 	}
@@ -309,7 +312,8 @@ func TestDistributedStorageService_WithEncryption(t *testing.T) {
 	opts := VolumeCreateOptions{
 		Name:   "test-enc-volume",
 		Type:   VolumeTypeDistributed,
-		Size: 10,
+		Format: VolumeFormatRAW,
+		Size:   10,
 	}
 
 	ctx := context.Background()
@@ -384,7 +388,8 @@ func TestDistributedStorageService_RepairVolume(t *testing.T) {
 	opts := VolumeCreateOptions{
 		Name:   "test-repair-volume",
 		Type:   VolumeTypeDistributed,
-		Size: 10,
+		Format: VolumeFormatRAW,
+		Size:   10,
 	}
 
 	ctx := context.Background()
@@ -468,7 +473,8 @@ func TestDistributedStorageService_RebalanceVolume(t *testing.T) {
 	opts := VolumeCreateOptions{
 		Name:   "test-rebalance-volume",
 		Type:   VolumeTypeDistributed,
-		Size: 10,
+		Format: VolumeFormatRAW,
+		Size:   10,
 	}
 
 	ctx := context.Background()
@@ -604,7 +610,7 @@ func BenchmarkDistributedStorageService_WriteShard(b *testing.B) {
 	}
 
 	// Create volume
-	opts := VolumeCreateOptions{Name: "bench-volume", Type: VolumeTypeDistributed, Size: 100}
+	opts := VolumeCreateOptions{Name: "bench-volume", Type: VolumeTypeDistributed, Format: VolumeFormatRAW, Size: 100}
 	ctx := context.Background()
 	volume, _ := distService.CreateDistributedVolume(ctx, opts, 1)
 
@@ -654,7 +660,7 @@ func BenchmarkDistributedStorageService_ReadShard(b *testing.B) {
 	}
 
 	// Create volume and write test data
-	opts := VolumeCreateOptions{Name: "bench-volume", Type: VolumeTypeDistributed, Size: 100}
+	opts := VolumeCreateOptions{Name: "bench-volume", Type: VolumeTypeDistributed, Format: VolumeFormatRAW, Size: 100}
 	ctx := context.Background()
 	volume, _ := distService.CreateDistributedVolume(ctx, opts, 1)
 
