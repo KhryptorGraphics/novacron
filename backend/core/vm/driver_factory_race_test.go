@@ -88,10 +88,9 @@ func TestVMDriverFactory_ConcurrentMixedTypes_Race(t *testing.T) {
 	config := DefaultVMDriverConfig("race-test-node-mixed")
 	factory := NewVMDriverFactory(config)
 
-	// Mix a type that always succeeds (container) with one that always
-	// fails fast without external deps (process is "not yet implemented").
-	// Both paths read-then-maybe-write the shared cache map, so failures
-	// must not be allowed to skip the lock either.
+	// Mix two distinct VM types so several cache-miss writes race at once.
+	// Both the success and error paths read-then-maybe-write the shared cache
+	// map, so a failing constructor must not be allowed to skip the lock.
 	types := []VMType{VMTypeContainer, VMTypeProcess}
 
 	const goroutines = 100
@@ -106,7 +105,7 @@ func TestVMDriverFactory_ConcurrentMixedTypes_Race(t *testing.T) {
 				Name: "race-vm-mixed",
 				Tags: map[string]string{"vm_type": string(vmType)},
 			}
-			// Errors are expected for VMTypeProcess; only concurrent cache
+			// Either a driver or an error is fine; only concurrent cache
 			// map access under -race matters here.
 			_, _ = factory(vmConfig)
 		}(vmType)

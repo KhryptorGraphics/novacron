@@ -110,11 +110,6 @@ func NewVMDriverFactory(config VMDriverConfig) VMDriverFactory {
 
 		case VMTypeProcess:
 			log.Printf("Initializing process driver with base path %s", config.ProcessBasePath)
-			// Create the base path if it doesn't exist
-			if err := makeDirectoryIfNotExists(config.ProcessBasePath); err != nil {
-				log.Printf("Warning: Failed to create process base path %s: %v", config.ProcessBasePath, err)
-			}
-			// Process driver implementation coming soon
 			driver, err = NewProcessDriver(map[string]interface{}{
 				"node_id":   config.NodeID,
 				"base_path": config.ProcessBasePath,
@@ -248,9 +243,4 @@ func (m *VMDriverManager) ListSupportedTypes() []VMType {
 		VMTypeKVM,
 		VMTypeProcess,
 	}
-}
-
-// NewProcessDriver creates a new process driver (stub for now)
-func NewProcessDriver(config map[string]interface{}) (VMDriver, error) {
-	return nil, fmt.Errorf("process driver not yet implemented - planned for future release")
 }

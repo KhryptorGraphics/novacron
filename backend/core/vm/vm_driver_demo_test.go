@@ -82,9 +82,6 @@ func testDriverCapabilities(t *testing.T, manager *VMDriverManager, types []VMTy
 		driver, err := manager.GetDriver(vmConfig)
 		if err != nil {
 			log.Printf("   ❌ Driver initialization failed: %v", err)
-			if vmType == VMTypeProcess {
-				log.Printf("   ℹ️  Process driver implementation planned for future release")
-			}
 			continue
 		}
 

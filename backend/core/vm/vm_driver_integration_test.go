@@ -2,7 +2,6 @@ package vm
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 )
@@ -327,16 +326,10 @@ func TestDriverCompatibility(t *testing.T) {
 
 			driver, err := manager.GetDriver(vmConfig)
 			if err != nil {
-				// Some drivers may fail without proper runtime environment
-				if vmType == VMTypeProcess {
-					// Process driver is not yet implemented
-					expectedErr := "process driver not yet implemented"
-					if !strings.Contains(err.Error(), expectedErr) {
-						t.Errorf("Expected process driver error to contain '%s', got '%s'", expectedErr, err.Error())
-					}
-				} else {
-					t.Logf("Driver %s failed to initialize (expected in test environment): %v", vmType, err)
-				}
+				// Some drivers may fail without a proper runtime environment
+				// (e.g. no write access to the driver base path in CI sandboxes,
+				// or a missing qemu/docker binary). That's acceptable here.
+				t.Logf("Driver %s failed to initialize (expected in test environment): %v", vmType, err)
 				return
 			}
 

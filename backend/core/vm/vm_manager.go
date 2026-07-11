@@ -380,11 +380,11 @@ func (m *VMManager) createDriverForType(vmType VMType, config map[string]interfa
 	case VMTypeKVM:
 		return NewKVMDriver(config)
 	case VMTypeContainer:
-		return NewContainerDriverStub(config)
+		return NewContainerDriver(config)
 	case VMTypeContainerd:
 		return NewContainerdDriver(config)
 	case VMTypeProcess:
-		return NewProcessDriverStub(config)
+		return NewProcessDriver(config)
 	default:
 		return nil, fmt.Errorf("unsupported driver type: %s", vmType)
 	}
@@ -393,16 +393,6 @@ func (m *VMManager) createDriverForType(vmType VMType, config map[string]interfa
 // NewKVMDriverStub creates a stub KVM driver
 func NewKVMDriverStub(config map[string]interface{}) (VMDriver, error) {
 	return nil, fmt.Errorf("KVM driver not yet implemented")
-}
-
-// NewContainerDriverStub creates a stub container driver
-func NewContainerDriverStub(config map[string]interface{}) (VMDriver, error) {
-	return nil, fmt.Errorf("Container driver not yet implemented")
-}
-
-// NewProcessDriverStub creates a stub process driver
-func NewProcessDriverStub(config map[string]interface{}) (VMDriver, error) {
-	return nil, fmt.Errorf("Process driver not yet implemented")
 }
 
 // updateLoop runs the VM update loop
