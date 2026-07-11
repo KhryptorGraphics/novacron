@@ -20,6 +20,10 @@ func TestDeduplication(t *testing.T) {
 	config := DefaultDedupConfig()
 	config.StorePath = tempDir
 	config.MinSizeBytes = 1 // Set low to ensure all test data is processed
+	config.BlockSize = 1024 // Must be smaller than the test data below, or
+	// every algorithm degenerates to a single block
+	// spanning the whole input (DefaultBlockSize is
+	// 64KB, far larger than the 10KB test data).
 
 	deduplicator, err := NewDeduplicator(config)
 	if err != nil {

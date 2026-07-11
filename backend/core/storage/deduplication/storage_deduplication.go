@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"sync"
@@ -165,22 +166,45 @@ func (d *Deduplicator) Deduplicate(data []byte) (*DedupFileInfo, error) {
 
 	// Check if the data is large enough to deduplicate
 	if len(data) < d.config.MinSizeBytes {
-		// For small data, just inline it
+		// For small data, store it as a single block. Whether that block is
+		// inlined (data carried in the DedupBlockInfo itself) or persisted to
+		// the block store must still respect InlineSmallBlocks — this path
+		// used to always inline regardless of config, which both ignored the
+		// setting and, since Deduplicate never wrote the block to disk either
+		// way, left RemoveFile's disk cleanup with a block hash that had
+		// nothing to remove.
+		hash := hashBytes(data)
+		block := DedupBlockInfo{
+			Hash:     hash,
+			Size:     len(data),
+			Offset:   0,
+			RefCount: 1,
+			Inlined:  d.config.InlineSmallBlocks,
+		}
+		if d.config.InlineSmallBlocks {
+			block.Data = data
+		} else {
+			d.mu.Lock()
+			if _, exists := d.blockStore[hash]; exists {
+				d.blockRefCount[hash]++
+			} else {
+				d.blockStore[hash] = data
+				d.blockRefCount[hash] = 1
+				if err := d.saveBlockToDisk(hash, data); err != nil {
+					d.mu.Unlock()
+					return nil, err
+				}
+			}
+			block.RefCount = d.blockRefCount[hash]
+			d.mu.Unlock()
+		}
+
 		return &DedupFileInfo{
 			OriginalSize: int64(len(data)),
 			DedupSize:    int64(len(data)),
-			Blocks: []DedupBlockInfo{
-				{
-					Hash:     hashBytes(data),
-					Size:     len(data),
-					Offset:   0,
-					RefCount: 1,
-					Inlined:  true,
-					Data:     data,
-				},
-			},
-			DedupRatio: 1.0,
-			Algorithm:  d.config.Algorithm,
+			Blocks:       []DedupBlockInfo{block},
+			DedupRatio:   1.0,
+			Algorithm:    d.config.Algorithm,
 		}, nil
 	}
 
@@ -241,16 +265,30 @@ func (d *Deduplicator) deduplicateFixedSize(data []byte) ([]DedupBlockInfo, int6
 		// Hash the block
 		hash := hashBytes(block)
 
-		// Check if the block is small enough to inline
-		inlined := false
-		var blockData []byte = nil
-		if d.config.InlineSmallBlocks && blockSize <= 1024 {
-			inlined = true
-			blockData = block
-		}
+		// Check if the block is small enough to inline. "Small" is relative
+		// to the configured block size: a full-size block (blockSize ==
+		// d.config.BlockSize) is a normal block, not a small fragment, even
+		// when BlockSize itself is small (e.g. BlockSize: 1024 in tests).
+		// Only a genuinely undersized block — the last, partial chunk of a
+		// file — is a candidate for inlining. Without the BlockSize
+		// comparison, small-BlockSize configs would inline every full block,
+		// routing them around the block store entirely and defeating
+		// deduplication.
+		inlined := d.config.InlineSmallBlocks && blockSize < d.config.BlockSize && blockSize <= 1024
 
-		// Check if we already have this block
-		if existingBlock, exists := d.blockStore[hash]; exists {
+		var blockData []byte
+		var refCount int
+		if inlined {
+			// Inlined blocks carry their data directly in DedupBlockInfo.Data
+			// and must NOT also be written to the shared block store/disk:
+			// RemoveFile skips inlined blocks when cleaning up, so anything
+			// persisted here would never be reclaimed. They also aren't
+			// deduplicated against the store, so each occurrence counts
+			// fully towards the deduplicated size.
+			blockData = block
+			refCount = 1
+			totalDedupSize += int64(blockSize)
+		} else if existingBlock, exists := d.blockStore[hash]; exists {
 			// Block already exists, increment reference count
 			d.blockRefCount[hash]++
 
@@ -263,6 +301,7 @@ func (d *Deduplicator) deduplicateFixedSize(data []byte) ([]DedupBlockInfo, int6
 			if d.blockRefCount[hash] == 1 {
 				totalDedupSize += int64(blockSize)
 			}
+			refCount = d.blockRefCount[hash]
 		} else {
 			// New block, store it
 			d.blockStore[hash] = block
@@ -273,6 +312,7 @@ func (d *Deduplicator) deduplicateFixedSize(data []byte) ([]DedupBlockInfo, int6
 			if err := d.saveBlockToDisk(hash, block); err != nil {
 				return nil, 0, err
 			}
+			refCount = 1
 		}
 
 		// Add the block info
@@ -280,7 +320,7 @@ func (d *Deduplicator) deduplicateFixedSize(data []byte) ([]DedupBlockInfo, int6
 			Hash:     hash,
 			Size:     blockSize,
 			Offset:   offset,
-			RefCount: d.blockRefCount[hash],
+			RefCount: refCount,
 			Inlined:  inlined,
 			Data:     blockData,
 		})
@@ -320,16 +360,23 @@ func (d *Deduplicator) deduplicateVariableSize(data []byte) ([]DedupBlockInfo, i
 				// Hash the block
 				hash := hashBytes(block)
 
-				// Check if the block is small enough to inline
-				inlined := false
-				var blockData []byte = nil
-				if d.config.InlineSmallBlocks && i <= 1024 {
-					inlined = true
-					blockData = block
-				}
+				// Check if the block is small enough to inline. "Small" is
+				// relative to this algorithm's own minSize floor, not a bare
+				// constant — see deduplicateFixedSize/deduplicateContentDefined
+				// for why a bare "<=1024" check inlines (and thus silently
+				// skips deduplicating) every chunk in small-BlockSize configs.
+				inlined := d.config.InlineSmallBlocks && i < minSize && i <= 1024
 
-				// Check if we already have this block
-				if existingBlock, exists := d.blockStore[hash]; exists {
+				var blockData []byte
+				var refCount int
+				if inlined {
+					// Inlined blocks carry their data directly in
+					// DedupBlockInfo.Data and must NOT also be written to the
+					// shared block store/disk — see deduplicateFixedSize.
+					blockData = block
+					refCount = 1
+					totalDedupSize += int64(i)
+				} else if existingBlock, exists := d.blockStore[hash]; exists {
 					// Block already exists, increment reference count
 					d.blockRefCount[hash]++
 
@@ -342,6 +389,7 @@ func (d *Deduplicator) deduplicateVariableSize(data []byte) ([]DedupBlockInfo, i
 					if d.blockRefCount[hash] == 1 {
 						totalDedupSize += int64(i)
 					}
+					refCount = d.blockRefCount[hash]
 				} else {
 					// New block, store it
 					d.blockStore[hash] = block
@@ -352,6 +400,7 @@ func (d *Deduplicator) deduplicateVariableSize(data []byte) ([]DedupBlockInfo, i
 					if err := d.saveBlockToDisk(hash, block); err != nil {
 						return nil, 0, err
 					}
+					refCount = 1
 				}
 
 				// Add the block info
@@ -359,7 +408,7 @@ func (d *Deduplicator) deduplicateVariableSize(data []byte) ([]DedupBlockInfo, i
 					Hash:     hash,
 					Size:     i,
 					Offset:   offset,
-					RefCount: d.blockRefCount[hash],
+					RefCount: refCount,
 					Inlined:  inlined,
 					Data:     blockData,
 				})
@@ -384,16 +433,21 @@ func (d *Deduplicator) deduplicateVariableSize(data []byte) ([]DedupBlockInfo, i
 			// Hash the block
 			hash := hashBytes(block)
 
-			// Check if the block is small enough to inline
-			inlined := false
-			var blockData []byte = nil
-			if d.config.InlineSmallBlocks && blockSize <= 1024 {
-				inlined = true
-				blockData = block
-			}
+			// Check if the block is small enough to inline. "Small" is
+			// relative to minSize, not a bare constant — see the
+			// boundary-found branch above for the full explanation.
+			inlined := d.config.InlineSmallBlocks && blockSize < minSize && blockSize <= 1024
 
-			// Check if we already have this block
-			if existingBlock, exists := d.blockStore[hash]; exists {
+			var blockData []byte
+			var refCount int
+			if inlined {
+				// Inlined blocks carry their data directly in
+				// DedupBlockInfo.Data and must NOT also be written to the
+				// shared block store/disk — see deduplicateFixedSize.
+				blockData = block
+				refCount = 1
+				totalDedupSize += int64(blockSize)
+			} else if existingBlock, exists := d.blockStore[hash]; exists {
 				// Block already exists, increment reference count
 				d.blockRefCount[hash]++
 
@@ -406,6 +460,7 @@ func (d *Deduplicator) deduplicateVariableSize(data []byte) ([]DedupBlockInfo, i
 				if d.blockRefCount[hash] == 1 {
 					totalDedupSize += int64(blockSize)
 				}
+				refCount = d.blockRefCount[hash]
 			} else {
 				// New block, store it
 				d.blockStore[hash] = block
@@ -416,6 +471,7 @@ func (d *Deduplicator) deduplicateVariableSize(data []byte) ([]DedupBlockInfo, i
 				if err := d.saveBlockToDisk(hash, block); err != nil {
 					return nil, 0, err
 				}
+				refCount = 1
 			}
 
 			// Add the block info
@@ -423,7 +479,7 @@ func (d *Deduplicator) deduplicateVariableSize(data []byte) ([]DedupBlockInfo, i
 				Hash:     hash,
 				Size:     blockSize,
 				Offset:   offset,
-				RefCount: d.blockRefCount[hash],
+				RefCount: refCount,
 				Inlined:  inlined,
 				Data:     blockData,
 			})
@@ -446,18 +502,39 @@ func (d *Deduplicator) deduplicateContentDefined(data []byte) ([]DedupBlockInfo,
 
 	// Parameters for content-defined chunking
 	// These would be tuned based on the workload
-	minSize := d.config.BlockSize / 2
-	// targetSize is the ideal block size (but actual sizes will vary based on content boundaries)
-	// Using targetSize in mask calculation (the mask bit length controls avg chunk size)
-	_ = d.config.BlockSize // Acknowledge that this target is built into the mask value
-	maxSize := d.config.BlockSize * 2
 	windowSize := 16 // Window size for the rolling hash
 
-	// Mask for determining chunk boundaries
-	// Lower values create smaller chunks
-	// Higher values create larger chunks
-	// This should be a power of 2 minus 1
-	mask := uint32(0x00001FFF) // Avg chunk size ~8KB with 13 bits
+	// The average chunk size the mask targets is a fraction of BlockSize, not
+	// BlockSize itself. Boundary detection only works if the [minSize,
+	// maxSize) scan actually turns up a matching window before giving up and
+	// falling back to a forced maxSize cut; with the average pinned to the
+	// full BlockSize, that window was too coarse relative to a single
+	// BlockSize-sized chunk, so a repeated block's boundary routinely wasn't
+	// re-found once its surrounding content (and thus the scan's starting
+	// offset within it) changed — duplicates went undetected even with a
+	// correctly-sized mask. A finer target gives the scan many more chances
+	// to hit a genuine content boundary, which is what makes duplicate
+	// detection actually reliable.
+	target := d.config.BlockSize / 8
+	if target < windowSize*2 {
+		target = windowSize * 2
+	}
+	minSize := target / 2
+	maxSize := d.config.BlockSize
+	if maxSize < target*2 {
+		maxSize = target * 2
+	}
+
+	// Mask for determining chunk boundaries. A boundary is declared once
+	// roughly 1-in-2^popcount(mask) window hashes match, so the average chunk
+	// size is ~2^popcount(mask); the mask must therefore be derived from the
+	// target size above, not hardcoded. It used to be a fixed 13-bit mask
+	// (~8KB average chunks) regardless of config.
+	targetBits := bits.Len(uint(target))
+	if targetBits > 0 {
+		targetBits--
+	}
+	mask := uint32(1)<<uint(targetBits) - 1
 
 	// Acquire write lock since we may modify the block store
 	d.mu.Lock()
@@ -507,16 +584,24 @@ func (d *Deduplicator) deduplicateContentDefined(data []byte) ([]DedupBlockInfo,
 		// Hash the block
 		hash := hashBytes(block)
 
-		// Check if the block is small enough to inline
-		inlined := false
-		var blockData []byte = nil
-		if d.config.InlineSmallBlocks && blockSize <= 1024 {
-			inlined = true
-			blockData = block
-		}
+		// Check if the block is small enough to inline. As in
+		// deduplicateFixedSize, "small" must be relative to this algorithm's
+		// own sizing, not a bare constant — but here that means smaller than
+		// minSize (the floor content-defined chunking targets), not smaller
+		// than BlockSize: maxSize is capped at BlockSize, so nearly every
+		// chunk is already < BlockSize by construction, and comparing against
+		// BlockSize would inline (and thus never deduplicate) almost
+		// everything.
+		inlined := d.config.InlineSmallBlocks && blockSize < minSize && blockSize <= 1024
 
-		// Check if we already have this block
-		if existingBlock, exists := d.blockStore[hash]; exists {
+		var blockData []byte
+		if inlined {
+			// Inlined blocks carry their data directly in DedupBlockInfo.Data
+			// and must NOT also be written to the shared block store/disk —
+			// see deduplicateFixedSize for the full explanation.
+			blockData = block
+			totalDedupSize += int64(blockSize)
+		} else if existingBlock, exists := d.blockStore[hash]; exists {
 			// Block already exists, increment reference count
 			d.blockRefCount[hash]++
 
@@ -541,12 +626,18 @@ func (d *Deduplicator) deduplicateContentDefined(data []byte) ([]DedupBlockInfo,
 			}
 		}
 
-		// Add the block info
+		// Add the block info. Inlined blocks never touch blockRefCount (they
+		// bypass the shared store), so their ref count is always 1 — a map
+		// lookup here would silently read back the zero value instead.
+		refCount := 1
+		if !inlined {
+			refCount = d.blockRefCount[hash]
+		}
 		blocks = append(blocks, DedupBlockInfo{
 			Hash:     hash,
 			Size:     blockSize,
 			Offset:   offset,
-			RefCount: d.blockRefCount[hash],
+			RefCount: refCount,
 			Inlined:  inlined,
 			Data:     blockData,
 		})
@@ -613,20 +704,30 @@ func (d *Deduplicator) RemoveFile(fileInfo *DedupFileInfo) error {
 			continue
 		}
 
-		// Decrement the reference count
-		if count, exists := d.blockRefCount[block.Hash]; exists {
-			if count > 1 {
-				// Decrement the reference count
-				d.blockRefCount[block.Hash] = count - 1
-			} else {
-				// Last reference, remove the block
-				delete(d.blockStore, block.Hash)
-				delete(d.blockRefCount, block.Hash)
+		// Decrement the reference count. If this deduplicator instance never
+		// called Deduplicate for this hash (e.g. it only loaded the block via
+		// Reconstruct after a restart, so loadBlockFromDisk populated
+		// blockStore but not blockRefCount), fall back to the count recorded
+		// in the file's own metadata at the time it was deduplicated — the
+		// best available signal for how many references currently exist.
+		// Without this fallback, RemoveFile silently no-ops for every block
+		// a fresh instance didn't itself create, leaking them on disk forever.
+		count, exists := d.blockRefCount[block.Hash]
+		if !exists {
+			count = block.RefCount
+		}
 
-				// Remove the block from disk
-				if err := d.removeBlockFromDisk(block.Hash); err != nil {
-					return fmt.Errorf("failed to remove block %s: %w", block.Hash, err)
-				}
+		if count > 1 {
+			// Decrement the reference count
+			d.blockRefCount[block.Hash] = count - 1
+		} else {
+			// Last reference, remove the block
+			delete(d.blockStore, block.Hash)
+			delete(d.blockRefCount, block.Hash)
+
+			// Remove the block from disk
+			if err := d.removeBlockFromDisk(block.Hash); err != nil {
+				return fmt.Errorf("failed to remove block %s: %w", block.Hash, err)
 			}
 		}
 	}
