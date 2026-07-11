@@ -160,7 +160,7 @@ func (pe *PolicyEngine) EvaluatePolicies(stats *VolumeStats, context *PolicyCont
 }
 
 // GetMetrics returns current policy engine metrics
-func (pe *PolicyEngine) GetMetrics() PolicyMetrics {
+func (pe *PolicyEngine) GetMetrics() *PolicyMetrics {
 	pe.metrics.mu.RLock()
 	defer pe.metrics.mu.RUnlock()
 
@@ -183,7 +183,7 @@ func (pe *PolicyEngine) GetMetrics() PolicyMetrics {
 		metrics.VolumesMoved[k] = v
 	}
 
-	return metrics
+	return &metrics
 }
 
 // CreateTimeBasedPolicy creates a policy that considers time patterns
