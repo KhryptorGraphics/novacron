@@ -1,57 +1,57 @@
-"use client";
+'use client';
 
 // Disable static generation for this page
 export const dynamic = 'force-dynamic';
 
-import Link from "next/link";
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 
-import { useVM } from "@/lib/api/hooks/useVM";
-import { useVMAction } from "@/lib/api/hooks/useVMAction";
-import { useToast } from "@/components/ui/use-toast";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useVM } from '@/lib/api/hooks/useVM';
+import { useVMAction } from '@/lib/api/hooks/useVMAction';
+import { useToast } from '@/components/ui/use-toast';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 export default function VMDetailPage() {
   const params = useParams<{ id: string }>();
-  const id = typeof params?.id === "string" ? params.id : Array.isArray(params?.id) ? params?.id?.[0] : "";
+  const id = typeof params?.id === 'string' ? params.id : Array.isArray(params?.id) ? params?.id?.[0] : '';
   const { vm, isLoading, error } = useVM(id);
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  const [role, setRole] = useState<"viewer"|"operator">("viewer");
+  const [role, setRole] = useState<'viewer'|'operator'>('viewer');
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("coreRole");
-      if (saved === "viewer" || saved === "operator") setRole(saved as any);
+      const saved = localStorage.getItem('coreRole');
+      if (saved === 'viewer' || saved === 'operator') setRole(saved as any);
     } catch {}
   }, []);
 
-  const disabled = role !== "operator";
+  const disabled = role !== 'operator';
 
-  const start = useVMAction(id, "start", { role });
-  const stop = useVMAction(id, "stop", { role });
-  const restart = useVMAction(id, "restart", { role });
-  const pause = useVMAction(id, "pause", { role });
-  const resume = useVMAction(id, "resume", { role });
+  const start = useVMAction(id, 'start', { role });
+  const stop = useVMAction(id, 'stop', { role });
+  const restart = useVMAction(id, 'restart', { role });
+  const pause = useVMAction(id, 'pause', { role });
+  const resume = useVMAction(id, 'resume', { role });
 
   useEffect(() => {
-    if (start.isSuccess) { toast({ title: "Start requested" }); qc.invalidateQueries({ queryKey: ["vm", id] }); qc.invalidateQueries({ queryKey: ["vms"] }); }
-    if (stop.isSuccess) { toast({ title: "Stop requested" }); qc.invalidateQueries({ queryKey: ["vm", id] }); qc.invalidateQueries({ queryKey: ["vms"] }); }
-    if (restart.isSuccess) { toast({ title: "Restart requested" }); qc.invalidateQueries({ queryKey: ["vm", id] }); qc.invalidateQueries({ queryKey: ["vms"] }); }
-    if (pause.isSuccess) { toast({ title: "Pause requested" }); qc.invalidateQueries({ queryKey: ["vm", id] }); qc.invalidateQueries({ queryKey: ["vms"] }); }
-    if (resume.isSuccess) { toast({ title: "Resume requested" }); qc.invalidateQueries({ queryKey: ["vm", id] }); qc.invalidateQueries({ queryKey: ["vms"] }); }
+    if (start.isSuccess) { toast({ title: 'Start requested' }); qc.invalidateQueries({ queryKey: ['vm', id] }); qc.invalidateQueries({ queryKey: ['vms'] }); }
+    if (stop.isSuccess) { toast({ title: 'Stop requested' }); qc.invalidateQueries({ queryKey: ['vm', id] }); qc.invalidateQueries({ queryKey: ['vms'] }); }
+    if (restart.isSuccess) { toast({ title: 'Restart requested' }); qc.invalidateQueries({ queryKey: ['vm', id] }); qc.invalidateQueries({ queryKey: ['vms'] }); }
+    if (pause.isSuccess) { toast({ title: 'Pause requested' }); qc.invalidateQueries({ queryKey: ['vm', id] }); qc.invalidateQueries({ queryKey: ['vms'] }); }
+    if (resume.isSuccess) { toast({ title: 'Resume requested' }); qc.invalidateQueries({ queryKey: ['vm', id] }); qc.invalidateQueries({ queryKey: ['vms'] }); }
   }, [start.isSuccess, stop.isSuccess, restart.isSuccess, pause.isSuccess, resume.isSuccess, id, toast, qc]);
 
   useEffect(() => {
-    if (start.isError) toast({ title: "Start failed", description: String((start.error as any)?.message ?? start.error), variant: "destructive" as any });
-    if (stop.isError) toast({ title: "Stop failed", description: String((stop.error as any)?.message ?? stop.error), variant: "destructive" as any });
-    if (restart.isError) toast({ title: "Restart failed", description: String((restart.error as any)?.message ?? restart.error), variant: "destructive" as any });
-    if (pause.isError) toast({ title: "Pause failed", description: String((pause.error as any)?.message ?? pause.error), variant: "destructive" as any });
-    if (resume.isError) toast({ title: "Resume failed", description: String((resume.error as any)?.message ?? resume.error), variant: "destructive" as any });
+    if (start.isError) toast({ title: 'Start failed', description: String((start.error as any)?.message ?? start.error), variant: 'destructive' as any });
+    if (stop.isError) toast({ title: 'Stop failed', description: String((stop.error as any)?.message ?? stop.error), variant: 'destructive' as any });
+    if (restart.isError) toast({ title: 'Restart failed', description: String((restart.error as any)?.message ?? restart.error), variant: 'destructive' as any });
+    if (pause.isError) toast({ title: 'Pause failed', description: String((pause.error as any)?.message ?? pause.error), variant: 'destructive' as any });
+    if (resume.isError) toast({ title: 'Resume failed', description: String((resume.error as any)?.message ?? resume.error), variant: 'destructive' as any });
   }, [start.isError, stop.isError, restart.isError, pause.isError, resume.isError, start.error, stop.error, restart.error, pause.error, resume.error, toast]);
 
   return (
@@ -85,7 +85,7 @@ export default function VMDetailPage() {
                 </div>
                 <div>
                   <div className="text-sm text-muted-foreground">Node</div>
-                  <div>{vm.node_id ?? "-"}</div>
+                  <div>{vm.node_id ?? '-'}</div>
                 </div>
                 <div>
                   <div className="text-sm text-muted-foreground">Created</div>
@@ -96,7 +96,7 @@ export default function VMDetailPage() {
                   <div>{vm.updated_at}</div>
                 </div>
               </div>
-              {"tags" in (vm as any) && (vm as any).tags ? (
+              {'tags' in (vm as any) && (vm as any).tags ? (
                 <div>
                   <div className="text-sm text-muted-foreground">Tags</div>
                   <ul className="list-disc ml-6">

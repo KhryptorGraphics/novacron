@@ -163,7 +163,7 @@ export const useAdminWebSocket = () => {
         // Show toast notification for high/critical alerts
         if (['high', 'critical'].includes(message.data.severity)) {
           toast({
-            title: "Security Alert",
+            title: 'Security Alert',
             description: message.data.title,
             variant: message.data.severity === 'critical' ? 'destructive' : 'default'
           });
@@ -176,9 +176,9 @@ export const useAdminWebSocket = () => {
         
         if (message.data.action === 'login_failed' && message.data.count > 5) {
           toast({
-            title: "Suspicious Activity",
+            title: 'Suspicious Activity',
             description: `Multiple failed login attempts detected for ${message.data.email}`,
-            variant: "destructive"
+            variant: 'destructive'
           });
         }
         break;
@@ -203,7 +203,7 @@ export const useAdminWebSocket = () => {
         // Notify about VM state changes
         if (message.data.previous_status && message.data.status !== message.data.previous_status) {
           toast({
-            title: "VM Status Changed",
+            title: 'VM Status Changed',
             description: `${message.data.name}: ${message.data.previous_status} → ${message.data.status}`,
           });
         }
@@ -229,7 +229,7 @@ export const useAdminWebSocket = () => {
         queryClient.invalidateQueries({ queryKey: ADMIN_QUERY_KEYS.SYSTEM_CONFIG });
         
         toast({
-          title: "Configuration Updated",
+          title: 'Configuration Updated',
           description: `${message.data.key} has been changed by ${message.data.updated_by}`,
         });
         break;

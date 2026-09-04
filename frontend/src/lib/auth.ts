@@ -350,7 +350,7 @@ class AuthService {
     });
   }
 
-  async getGitHubAuthorizationUrl(redirectTo: string = '/dashboard'): Promise<OAuthAuthorizationUrlResponse> {
+  async getGitHubAuthorizationUrl(redirectTo = '/dashboard'): Promise<OAuthAuthorizationUrlResponse> {
     return this.request<OAuthAuthorizationUrlResponse>(
       `/api/auth/oauth/github/url?redirect_to=${encodeURIComponent(redirectTo)}`,
     );
@@ -650,7 +650,7 @@ class AuthService {
     if (!user) {
       throw new Error('User not authenticated');
     }
-    const response = await this.request<{ enabled: boolean; setup?: boolean; setup_at?: string; last_used?: string }>('/api/auth/2fa/status?user_id=' + user.id, {
+    const response = await this.request<{ enabled: boolean; setup?: boolean; setup_at?: string; last_used?: string }>(`/api/auth/2fa/status?user_id=${  user.id}`, {
       method: 'GET',
     });
     return {

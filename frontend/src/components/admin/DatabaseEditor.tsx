@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { 
   Table, 
   TableBody, 
@@ -11,16 +11,16 @@ import {
   TableHead, 
   TableHeader, 
   TableRow 
-} from "@/components/ui/table";
+} from '@/components/ui/table';
 import { 
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
+} from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { 
   Database, 
   Search, 
@@ -33,49 +33,49 @@ import {
   Download,
   Upload,
   RefreshCw
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 // Mock database schema
 const databaseTables = [
-  { name: "users", rows: 1247, size: "24.3 MB", description: "User accounts and profiles" },
-  { name: "organizations", rows: 89, size: "2.1 MB", description: "Organization entities" },
-  { name: "vms", rows: 2341, size: "45.7 MB", description: "Virtual machine configurations" },
-  { name: "schedules", rows: 5432, size: "12.8 MB", description: "Scheduled job definitions" },
-  { name: "migrations", rows: 876, size: "156.2 MB", description: "VM migration history" },
-  { name: "audit_logs", rows: 98765, size: "234.5 MB", description: "System audit trail" },
-  { name: "sessions", rows: 456, size: "3.4 MB", description: "User session data" },
-  { name: "configurations", rows: 123, size: "890 KB", description: "System configuration settings" }
+  { name: 'users', rows: 1247, size: '24.3 MB', description: 'User accounts and profiles' },
+  { name: 'organizations', rows: 89, size: '2.1 MB', description: 'Organization entities' },
+  { name: 'vms', rows: 2341, size: '45.7 MB', description: 'Virtual machine configurations' },
+  { name: 'schedules', rows: 5432, size: '12.8 MB', description: 'Scheduled job definitions' },
+  { name: 'migrations', rows: 876, size: '156.2 MB', description: 'VM migration history' },
+  { name: 'audit_logs', rows: 98765, size: '234.5 MB', description: 'System audit trail' },
+  { name: 'sessions', rows: 456, size: '3.4 MB', description: 'User session data' },
+  { name: 'configurations', rows: 123, size: '890 KB', description: 'System configuration settings' }
 ];
 
 // Mock user data for editing
 const mockUsers = [
   { 
     id: 1, 
-    email: "user@organization.com", 
-    name: "John Doe", 
-    role: "user", 
-    status: "active", 
-    created_at: "2024-01-15",
-    last_login: "2024-08-20"
+    email: 'user@organization.com', 
+    name: 'John Doe', 
+    role: 'user', 
+    status: 'active', 
+    created_at: '2024-01-15',
+    last_login: '2024-08-20'
   },
   { 
     id: 2, 
-    email: "admin@novacron.io", 
-    name: "System Admin", 
-    role: "admin", 
-    status: "active", 
-    created_at: "2024-01-01",
-    last_login: "2024-08-24"
+    email: 'admin@novacron.io', 
+    name: 'System Admin', 
+    role: 'admin', 
+    status: 'active', 
+    created_at: '2024-01-01',
+    last_login: '2024-08-24'
   },
   { 
     id: 3, 
-    email: "jane@company.com", 
-    name: "Jane Smith", 
-    role: "moderator", 
-    status: "suspended", 
-    created_at: "2024-02-10",
-    last_login: "2024-08-18"
+    email: 'jane@company.com', 
+    name: 'Jane Smith', 
+    role: 'moderator', 
+    status: 'suspended', 
+    created_at: '2024-02-10',
+    last_login: '2024-08-18'
   }
 ];
 
@@ -85,9 +85,9 @@ interface EditingRow {
 }
 
 export function DatabaseEditor() {
-  const [selectedTable, setSelectedTable] = useState("users");
+  const [selectedTable, setSelectedTable] = useState('users');
   const [tableData, setTableData] = useState<Record<string, any>[]>(mockUsers);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState('');
   const [editingRow, setEditingRow] = useState<EditingRow | null>(null);
   const [showDangerZone, setShowDangerZone] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -124,7 +124,7 @@ export function DatabaseEditor() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Are you sure you want to delete this record? This action cannot be undone.")) {
+    if (!confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
       return;
     }
     
@@ -138,12 +138,12 @@ export function DatabaseEditor() {
     setEditingRow({
       id: null,
       data: {
-        email: "",
-        name: "",
-        role: "user",
-        status: "active",
+        email: '',
+        name: '',
+        role: 'user',
+        status: 'active',
         created_at: new Date().toISOString().split('T')[0],
-        last_login: ""
+        last_login: ''
       }
     });
   };
@@ -154,10 +154,10 @@ export function DatabaseEditor() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "active": return "bg-green-500";
-      case "suspended": return "bg-red-500";
-      case "pending": return "bg-yellow-500";
-      default: return "bg-gray-500";
+      case 'active': return 'bg-green-500';
+      case 'suspended': return 'bg-red-500';
+      case 'pending': return 'bg-yellow-500';
+      default: return 'bg-gray-500';
     }
   };
 
@@ -214,8 +214,8 @@ export function DatabaseEditor() {
                     key={table.name}
                     onClick={() => setSelectedTable(table.name)}
                     className={cn(
-                      "w-full text-left px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors",
-                      selectedTable === table.name && "bg-blue-50 dark:bg-blue-950 border-r-2 border-blue-500"
+                      'w-full text-left px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors',
+                      selectedTable === table.name && 'bg-blue-50 dark:bg-blue-950 border-r-2 border-blue-500'
                     )}
                   >
                     <div className="font-medium">{table.name}</div>
@@ -287,7 +287,7 @@ export function DatabaseEditor() {
                     {/* Editing Row */}
                     {editingRow && (
                       <TableRow className="bg-blue-50 dark:bg-blue-950">
-                        <TableCell>{editingRow.id || "New"}</TableCell>
+                        <TableCell>{editingRow.id || 'New'}</TableCell>
                         <TableCell>
                           <Input
                             value={editingRow.data.email}
@@ -400,12 +400,12 @@ export function DatabaseEditor() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            <div className={cn("h-2 w-2 rounded-full", getStatusColor(row.status))} />
+                            <div className={cn('h-2 w-2 rounded-full', getStatusColor(row.status))} />
                             <span className="capitalize">{row.status}</span>
                           </div>
                         </TableCell>
                         <TableCell>{row.created_at}</TableCell>
-                        <TableCell>{row.last_login || "Never"}</TableCell>
+                        <TableCell>{row.last_login || 'Never'}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
                             <Button

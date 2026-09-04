@@ -146,12 +146,12 @@ func TestRegisterPublicRoutesSupportsCanonicalEmailLogin(t *testing.T) {
 		WithArgs("user@example.com").
 		WillReturnRows(sqlmock.NewRows([]string{"username"}).AddRow("user"))
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, username, email, password_hash, role, tenant_id, created_at, updated_at
+		SELECT id, username, email, password_hash, role, status, created_at, updated_at
 		FROM users WHERE username = $1
 	`)).
 		WithArgs("user").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "tenant_id", "created_at", "updated_at"}).
-			AddRow("7", "user", "user@example.com", string(passwordHash), "admin", "default", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "created_at", "updated_at"}).
+			AddRow("7", "user", "user@example.com", string(passwordHash), "admin", "active", now, now))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"user@example.com","password":"correct-horse-battery-staple"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -209,9 +209,9 @@ func TestRegisterSecureAPIRoutesListsVMsOnCanonicalRoute(t *testing.T) {
 	registerSecureAPIRoutes(apiV1, db, nil, t.TempDir())
 
 	now := time.Now().UTC()
-	mock.ExpectQuery(`SELECT id, name, state, node_id, tenant_id, created_at, updated_at FROM vms ORDER BY created_at DESC`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "state", "node_id", "tenant_id", "created_at", "updated_at"}).
-			AddRow("vm-1", "alpha", "running", "node-a", "default", now, now))
+	mock.ExpectQuery(`SELECT id, name, state, node_id, organization_id, created_at, updated_at FROM vms ORDER BY created_at DESC`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "state", "node_id", "organization_id", "created_at", "updated_at"}).
+			AddRow("vm-1", "alpha", "running", "node-a", nil, now, now))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/vms", nil)
 	req.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
@@ -262,13 +262,15 @@ func TestRegisterSecureAPIRoutesCreatesVMOnCompatibilityRoute(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO vms`).
 		WithArgs(
-			sqlmock.AnyArg(),
+			sqlmock.AnyArg(), // uuid id
 			"builder",
-			"created",
-			sqlmock.AnyArg(),
-			7,
-			"default",
-			sqlmock.AnyArg(),
+			"stopped",
+			1000,             // cpu_cores: request's cpu_shares (scheduling weight)
+			2048,             // memory_mb
+			0,                // disk_gb (0 = driver default)
+			sqlmock.AnyArg(), // os_type (image)
+			"",               // owner_id: non-uuid JWT sub is sanitized to '' (NULLIF -> NULL)
+			sqlmock.AnyArg(), // metadata JSON
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -295,8 +297,8 @@ func TestRegisterSecureAPIRoutesCreatesVMOnCompatibilityRoute(t *testing.T) {
 	if payload["name"] != "builder" {
 		t.Fatalf("expected name builder, got %#v", payload["name"])
 	}
-	if payload["status"] != "created" {
-		t.Fatalf("expected status created, got %#v", payload["status"])
+	if payload["status"] != "stopped" {
+		t.Fatalf("expected status stopped, got %#v", payload["status"])
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -698,12 +700,12 @@ func TestBuildCanonicalServerSupportsLiveStartup(t *testing.T) {
 		WithArgs("admin@example.com").
 		WillReturnRows(sqlmock.NewRows([]string{"username"}).AddRow("admin"))
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, username, email, password_hash, role, tenant_id, created_at, updated_at
+		SELECT id, username, email, password_hash, role, status, created_at, updated_at
 		FROM users WHERE username = $1
 	`)).
 		WithArgs("admin").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "tenant_id", "created_at", "updated_at"}).
-			AddRow("7", "admin", "admin@example.com", string(passwordHash), "admin", "default", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "created_at", "updated_at"}).
+			AddRow("7", "admin", "admin@example.com", string(passwordHash), "admin", "active", now, now))
 
 	loginReq, err := http.NewRequest(http.MethodPost, baseURL+"/api/auth/login", strings.NewReader(`{"email":"admin@example.com","password":"correct-horse-battery-staple"}`))
 	if err != nil {

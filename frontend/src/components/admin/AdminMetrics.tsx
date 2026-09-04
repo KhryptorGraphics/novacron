@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { MetricsCard } from "@/components/monitoring/MetricsCard";
-import { AnimatedCounter, FadeIn } from "@/lib/animations";
+import { useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { MetricsCard } from '@/components/monitoring/MetricsCard';
+import { AnimatedCounter, FadeIn } from '@/lib/animations';
 import { 
   Users, 
   Database, 
@@ -15,10 +15,10 @@ import {
   TrendingUp,
   UserCheck,
   Eye
-} from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
+} from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
 
 // Mock admin metrics data
 const adminMetrics = {
@@ -36,7 +36,7 @@ const adminMetrics = {
     alerts: 5
   },
   system: {
-    uptime: "99.97%",
+    uptime: '99.97%',
     diskUsage: 67,
     memoryUsage: 73,
     cpuUsage: 45,
@@ -51,18 +51,18 @@ const adminMetrics = {
 };
 
 const systemHealth = [
-  { service: "Authentication Service", status: "healthy", uptime: "99.98%", responseTime: "45ms" },
-  { service: "Database Cluster", status: "healthy", uptime: "99.95%", responseTime: "12ms" },
-  { service: "VM Management", status: "warning", uptime: "99.87%", responseTime: "156ms" },
-  { service: "Storage Backend", status: "healthy", uptime: "99.99%", responseTime: "23ms" },
-  { service: "Network Overlay", status: "healthy", uptime: "99.94%", responseTime: "8ms" }
+  { service: 'Authentication Service', status: 'healthy', uptime: '99.98%', responseTime: '45ms' },
+  { service: 'Database Cluster', status: 'healthy', uptime: '99.95%', responseTime: '12ms' },
+  { service: 'VM Management', status: 'warning', uptime: '99.87%', responseTime: '156ms' },
+  { service: 'Storage Backend', status: 'healthy', uptime: '99.99%', responseTime: '23ms' },
+  { service: 'Network Overlay', status: 'healthy', uptime: '99.94%', responseTime: '8ms' }
 ];
 
 const recentAlerts = [
-  { id: 1, type: "security", severity: "high", message: "Multiple failed login attempts detected", time: "2 min ago" },
-  { id: 2, type: "performance", severity: "medium", message: "VM migration queue exceeding threshold", time: "15 min ago" },
-  { id: 3, type: "system", severity: "low", message: "Scheduled maintenance reminder", time: "1 hour ago" },
-  { id: 4, type: "security", severity: "high", message: "Unusual API access pattern detected", time: "2 hours ago" }
+  { id: 1, type: 'security', severity: 'high', message: 'Multiple failed login attempts detected', time: '2 min ago' },
+  { id: 2, type: 'performance', severity: 'medium', message: 'VM migration queue exceeding threshold', time: '15 min ago' },
+  { id: 3, type: 'system', severity: 'low', message: 'Scheduled maintenance reminder', time: '1 hour ago' },
+  { id: 4, type: 'security', severity: 'high', message: 'Unusual API access pattern detected', time: '2 hours ago' }
 ];
 
 export function AdminMetrics() {
@@ -76,10 +76,10 @@ export function AdminMetrics() {
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
-      case "high": return "destructive";
-      case "medium": return "secondary";
-      case "low": return "outline";
-      default: return "outline";
+      case 'high': return 'destructive';
+      case 'medium': return 'secondary';
+      case 'low': return 'outline';
+      default: return 'outline';
     }
   };
 
@@ -95,7 +95,7 @@ export function AdminMetrics() {
             onClick={handleRefreshMetrics}
             disabled={refreshing}
           >
-            {refreshing ? "Refreshing..." : "Refresh Metrics"}
+            {refreshing ? 'Refreshing...' : 'Refresh Metrics'}
           </Button>
         </div>
         

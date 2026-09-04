@@ -1,17 +1,17 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
-import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState } from 'react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Separator } from '@/components/ui/separator';
+import { Badge } from '@/components/ui/badge';
+import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { 
   Server, 
   HardDrive, 
@@ -21,9 +21,9 @@ import {
   Settings,
   Plus,
   X
-} from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { createVM } from "@/lib/api/vms";
+} from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { createVM } from '@/lib/api/vms';
 
 interface VMCreateDialogProps {
   open: boolean;
@@ -32,49 +32,49 @@ interface VMCreateDialogProps {
 
 export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
   const [formData, setFormData] = useState({
-    name: "",
-    description: "",
-    template: "",
-    os: "",
+    name: '',
+    description: '',
+    template: '',
+    os: '',
     cpu: 2,
     memory: 4,
     storage: 50,
-    networkType: "bridged",
-    host: "",
+    networkType: 'bridged',
+    host: '',
     autoStart: true,
     enableBackup: true,
     tags: [] as string[],
   });
 
-  const [currentTag, setCurrentTag] = useState("");
+  const [currentTag, setCurrentTag] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const templates = [
-    { id: "ubuntu-22.04", name: "Ubuntu 22.04 LTS", description: "Latest LTS release" },
-    { id: "centos-8", name: "CentOS Stream 8", description: "Enterprise Linux" },
-    { id: "debian-11", name: "Debian 11", description: "Stable release" },
-    { id: "windows-server-2022", name: "Windows Server 2022", description: "Microsoft Windows Server" },
-    { id: "custom", name: "Custom ISO", description: "Upload your own ISO" }
+    { id: 'ubuntu-22.04', name: 'Ubuntu 22.04 LTS', description: 'Latest LTS release' },
+    { id: 'centos-8', name: 'CentOS Stream 8', description: 'Enterprise Linux' },
+    { id: 'debian-11', name: 'Debian 11', description: 'Stable release' },
+    { id: 'windows-server-2022', name: 'Windows Server 2022', description: 'Microsoft Windows Server' },
+    { id: 'custom', name: 'Custom ISO', description: 'Upload your own ISO' }
   ];
 
   const hosts = [
-    { id: "node-01", name: "node-01", cpu: "16 cores", memory: "64 GB", status: "available" },
-    { id: "node-02", name: "node-02", cpu: "24 cores", memory: "128 GB", status: "available" },
-    { id: "node-03", name: "node-03", cpu: "8 cores", memory: "32 GB", status: "maintenance" }
+    { id: 'node-01', name: 'node-01', cpu: '16 cores', memory: '64 GB', status: 'available' },
+    { id: 'node-02', name: 'node-02', cpu: '24 cores', memory: '128 GB', status: 'available' },
+    { id: 'node-03', name: 'node-03', cpu: '8 cores', memory: '32 GB', status: 'maintenance' }
   ];
 
   const resetForm = () => {
     setFormData({
-      name: "",
-      description: "",
-      template: "",
-      os: "",
+      name: '',
+      description: '',
+      template: '',
+      os: '',
       cpu: 2,
       memory: 4,
       storage: 50,
-      networkType: "bridged",
-      host: "",
+      networkType: 'bridged',
+      host: '',
       autoStart: true,
       enableBackup: true,
       tags: [],
@@ -89,7 +89,7 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
       // collected in GB but the backend expects MB; disk stays GB.
       await createVM({
         name: formData.name,
-        type: "kvm",
+        type: 'kvm',
         cpu: formData.cpu,
         memory: formData.memory * 1024,
         disk: formData.storage,
@@ -98,7 +98,7 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
       onOpenChange(false);
       resetForm();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create VM");
+      setError(e instanceof Error ? e.message : 'Failed to create VM');
     } finally {
       setSubmitting(false);
     }
@@ -110,7 +110,7 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
         ...prev,
         tags: [...prev.tags, currentTag]
       }));
-      setCurrentTag("");
+      setCurrentTag('');
     }
   };
 
@@ -123,9 +123,9 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
 
   const getResourceColor = (value: number, max: number) => {
     const percentage = (value / max) * 100;
-    if (percentage < 50) return "text-green-600";
-    if (percentage < 80) return "text-yellow-600";
-    return "text-red-600";
+    if (percentage < 50) return 'text-green-600';
+    if (percentage < 80) return 'text-yellow-600';
+    return 'text-red-600';
   };
 
   return (
@@ -210,7 +210,7 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
                     <SelectItem 
                       key={host.id} 
                       value={host.id}
-                      disabled={host.status === "maintenance"}
+                      disabled={host.status === 'maintenance'}
                     >
                       <div className="flex items-center justify-between w-full">
                         <div className="flex flex-col">
@@ -220,7 +220,7 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
                           </span>
                         </div>
                         <Badge 
-                          variant={host.status === "available" ? "default" : "secondary"}
+                          variant={host.status === 'available' ? 'default' : 'secondary'}
                           className="ml-2"
                         >
                           {host.status}
@@ -356,14 +356,14 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
                 </div>
                 
                 <div className="text-sm text-muted-foreground">
-                  {formData.networkType === "bridged" && 
-                    "VM will have direct access to the physical network"}
-                  {formData.networkType === "nat" && 
+                  {formData.networkType === 'bridged' && 
+                    'VM will have direct access to the physical network'}
+                  {formData.networkType === 'nat' && 
                     "VM will share host's IP address with port forwarding"}
-                  {formData.networkType === "host-only" && 
-                    "VM can only communicate with host and other VMs"}
-                  {formData.networkType === "isolated" && 
-                    "VM has no network connectivity"}
+                  {formData.networkType === 'host-only' && 
+                    'VM can only communicate with host and other VMs'}
+                  {formData.networkType === 'isolated' && 
+                    'VM has no network connectivity'}
                 </div>
               </CardContent>
             </Card>
@@ -413,7 +413,7 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
                       placeholder="Add tag..."
                       value={currentTag}
                       onChange={(e) => setCurrentTag(e.target.value)}
-                      onKeyPress={(e) => e.key === "Enter" && addTag()}
+                      onKeyPress={(e) => e.key === 'Enter' && addTag()}
                     />
                     <Button type="button" variant="outline" onClick={addTag}>
                       <Plus className="h-4 w-4" />
@@ -445,7 +445,7 @@ export function VMCreateDialog({ open, onOpenChange }: VMCreateDialogProps) {
             onClick={handleCreate}
             disabled={submitting || !formData.name || !formData.template}
           >
-            {submitting ? "Creating…" : "Create VM"}
+            {submitting ? 'Creating…' : 'Create VM'}
           </Button>
         </DialogFooter>
       </DialogContent>

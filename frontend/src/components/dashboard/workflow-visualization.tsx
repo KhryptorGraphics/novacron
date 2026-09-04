@@ -1,17 +1,17 @@
-"use client";
+'use client';
 
-import { useState, useRef } from "react";
-import { useWorkflow, useWorkflowExecution } from "@/hooks/useAPI";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { useState, useRef } from 'react';
+import { useWorkflow, useWorkflowExecution } from '@/hooks/useAPI';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { 
   Dialog, 
   DialogContent, 
   DialogHeader, 
   DialogTitle 
-} from "@/components/ui/dialog";
-import { format } from "date-fns";
+} from '@/components/ui/dialog';
+import { format } from 'date-fns';
 
 interface Node {
   id: string;
@@ -43,7 +43,7 @@ export function WorkflowVisualization({ workflowId }: { workflowId: string }) {
       setIsExecuting(true);
       await executeWorkflow();
     } catch (err) {
-      console.error("Failed to execute workflow:", err);
+      console.error('Failed to execute workflow:', err);
     } finally {
       setIsExecuting(false);
     }
@@ -128,7 +128,7 @@ export function WorkflowVisualization({ workflowId }: { workflowId: string }) {
               disabled={isExecuting}
               variant="default"
             >
-              {isExecuting ? "Executing..." : "Execute"}
+              {isExecuting ? 'Executing...' : 'Execute'}
             </Button>
           </div>
         </div>
@@ -235,11 +235,11 @@ export function WorkflowVisualization({ workflowId }: { workflowId: string }) {
               <div>
                 <h3 className="font-medium">Execution Status</h3>
                 <p className="text-sm text-gray-500">
-                  Started: {execution.startedAt ? format(new Date(execution.startedAt), "MMM dd, yyyy HH:mm:ss") : "N/A"}
+                  Started: {execution.startedAt ? format(new Date(execution.startedAt), 'MMM dd, yyyy HH:mm:ss') : 'N/A'}
                 </p>
                 {execution.completedAt && (
                   <p className="text-sm text-gray-500">
-                    Completed: {format(new Date(execution.completedAt), "MMM dd, yyyy HH:mm:ss")}
+                    Completed: {format(new Date(execution.completedAt), 'MMM dd, yyyy HH:mm:ss')}
                   </p>
                 )}
               </div>
@@ -286,10 +286,10 @@ export function WorkflowVisualization({ workflowId }: { workflowId: string }) {
                         </Badge>
                       </div>
                       {selectedNode.execution.startedAt && (
-                        <p>Started: {format(new Date(selectedNode.execution.startedAt), "MMM dd, yyyy HH:mm:ss")}</p>
+                        <p>Started: {format(new Date(selectedNode.execution.startedAt), 'MMM dd, yyyy HH:mm:ss')}</p>
                       )}
                       {selectedNode.execution.completedAt && (
-                        <p>Completed: {format(new Date(selectedNode.execution.completedAt), "MMM dd, yyyy HH:mm:ss")}</p>
+                        <p>Completed: {format(new Date(selectedNode.execution.completedAt), 'MMM dd, yyyy HH:mm:ss')}</p>
                       )}
                       {selectedNode.execution.durationMs && (
                         <p>Duration: {selectedNode.execution.durationMs}ms</p>

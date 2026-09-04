@@ -7,6 +7,7 @@ using reinforcement learning and predictive analytics.
 
 import logging
 import asyncio
+from enum import Enum
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -36,7 +37,7 @@ class ResourceAction:
     MAINTAIN = "maintain"
 
 
-class OptimizationObjective:
+class OptimizationObjective(str, Enum):
     """Enumeration of optimization objectives."""
     COST = "cost"
     PERFORMANCE = "performance"

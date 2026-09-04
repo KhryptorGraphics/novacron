@@ -364,7 +364,7 @@ export const ResourceTreemap: React.FC<ResourceTreemapProps> = ({
         </div>
         <div className="flex justify-between mt-4">
           <div className="flex items-center">
-            <div className="w-full h-2 bg-gradient-to-r from-[#f7fbff] to-[#084594] rounded mr-2" style={{ width: '100px' }}></div>
+            <div className="w-full h-2 bg-gradient-to-r from-[#f7fbff] to-[#084594] rounded mr-2" style={{ width: '100px' }} />
             <span className="text-xs">Resource Utilization</span>
           </div>
           <div className="text-xs text-muted-foreground">

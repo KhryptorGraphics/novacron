@@ -1,11 +1,11 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { cn } from "@/lib/utils";
-import { ChevronRight, Home } from "lucide-react";
-import { motion } from "framer-motion";
+import * as React from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { cn } from '@/lib/utils';
+import { ChevronRight, Home } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 interface BreadcrumbItem {
   label: string;
@@ -22,19 +22,19 @@ interface BreadcrumbProps {
 
 // Default route mapping for automatic breadcrumbs
 const routeLabels: Record<string, string> = {
-  "/": "Dashboard",
-  "/dashboard": "Dashboard", 
-  "/vms": "Virtual Machines",
-  "/monitoring": "Monitoring",
-  "/storage": "Storage",
-  "/network": "Network",
-  "/security": "Security", 
-  "/analytics": "Analytics",
-  "/users": "Users",
-  "/settings": "Settings",
-  "/auth": "Authentication",
-  "/auth/login": "Sign In",
-  "/auth/register": "Sign Up",
+  '/': 'Dashboard',
+  '/dashboard': 'Dashboard', 
+  '/vms': 'Virtual Machines',
+  '/monitoring': 'Monitoring',
+  '/storage': 'Storage',
+  '/network': 'Network',
+  '/security': 'Security', 
+  '/analytics': 'Analytics',
+  '/users': 'Users',
+  '/settings': 'Settings',
+  '/auth': 'Authentication',
+  '/auth/login': 'Sign In',
+  '/auth/register': 'Sign Up',
 };
 
 function generateBreadcrumbs(pathname: string): BreadcrumbItem[] {
@@ -44,14 +44,14 @@ function generateBreadcrumbs(pathname: string): BreadcrumbItem[] {
   // Add home if not root
   if (segments.length > 0) {
     breadcrumbs.push({
-      label: "Home", 
-      href: "/",
+      label: 'Home', 
+      href: '/',
       icon: Home
     });
   }
   
   // Build breadcrumbs from path segments
-  let currentPath = "";
+  let currentPath = '';
   segments.forEach((segment, index) => {
     currentPath += `/${segment}`;
     const isLast = index === segments.length - 1;
@@ -88,7 +88,7 @@ export function Breadcrumb({
     <nav
       role="navigation"
       aria-label="Breadcrumb"
-      className={cn("flex items-center space-x-1 text-sm", className)}
+      className={cn('flex items-center space-x-1 text-sm', className)}
       {...props}
     >
       <ol className="flex items-center space-x-1">
@@ -114,11 +114,11 @@ export function Breadcrumb({
                 <Link
                   href={item.href}
                   className={cn(
-                    "flex items-center gap-1.5 px-2 py-1 rounded-md",
-                    "text-muted-foreground hover:text-foreground",
-                    "hover:bg-accent hover:text-accent-foreground",
-                    "transition-colors duration-200",
-                    "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                    'flex items-center gap-1.5 px-2 py-1 rounded-md',
+                    'text-muted-foreground hover:text-foreground',
+                    'hover:bg-accent hover:text-accent-foreground',
+                    'transition-colors duration-200',
+                    'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
                   )}
                 >
                   {IconComponent && (
@@ -129,12 +129,12 @@ export function Breadcrumb({
               ) : (
                 <span
                   className={cn(
-                    "flex items-center gap-1.5 px-2 py-1 rounded-md",
+                    'flex items-center gap-1.5 px-2 py-1 rounded-md',
                     isLast
-                      ? "text-foreground font-semibold"
-                      : "text-muted-foreground"
+                      ? 'text-foreground font-semibold'
+                      : 'text-muted-foreground'
                   )}
-                  aria-current={isLast ? "page" : undefined}
+                  aria-current={isLast ? 'page' : undefined}
                 >
                   {IconComponent && (
                     <IconComponent className="h-4 w-4" />
@@ -172,7 +172,7 @@ export function CompactBreadcrumb({
     <nav
       role="navigation"
       aria-label="Breadcrumb"
-      className={cn("flex items-center space-x-1 text-sm", className)}
+      className={cn('flex items-center space-x-1 text-sm', className)}
       {...props}
     >
       <ol className="flex items-center space-x-1">
@@ -223,7 +223,7 @@ export function BreadcrumbWithActions({
   ...breadcrumbProps
 }: BreadcrumbWithActionsProps) {
   return (
-    <div className={cn("space-y-3", className)}>
+    <div className={cn('space-y-3', className)}>
       <Breadcrumb {...breadcrumbProps} />
       
       {(title || description || actions) && (

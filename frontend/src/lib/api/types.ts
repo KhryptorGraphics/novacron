@@ -5,8 +5,8 @@ export type Pagination = {
   pageSize: number;
   total: number;
   totalPages: number;
-  sortBy?: "name" | "createdAt" | "state";
-  sortDir?: "asc" | "desc";
+  sortBy?: 'name' | 'createdAt' | 'state';
+  sortDir?: 'asc' | 'desc';
 };
 
 export type ApiEnvelope<T> = {

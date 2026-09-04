@@ -380,7 +380,7 @@ class APIService {
   // WebSocket connection for real-time updates
   createWebSocket(onMessage: (data: any) => void, onError?: (error: Event) => void): WebSocket | null {
     try {
-      const wsUrl = API_BASE_URL.replace('http', 'ws') + '/ws';
+      const wsUrl = `${API_BASE_URL.replace('http', 'ws')  }/ws`;
       const ws = new WebSocket(wsUrl);
       
       ws.onmessage = (event) => {

@@ -50,14 +50,14 @@ export function MigrationCard({ migration, onCancel, onRetry }: MigrationCardPro
     try {
       await onCancel(migration.migrationId);
       toast({
-        title: "Migration cancelled",
+        title: 'Migration cancelled',
         description: `Cancellation request for ${migration.vmName} has been submitted.`,
       });
     } catch (error) {
       toast({
-        title: "Error cancelling migration",
+        title: 'Error cancelling migration',
         description: `Failed to cancel migration: ${(error as Error).message}`,
-        variant: "destructive",
+        variant: 'destructive',
       });
     }
   };
@@ -68,14 +68,14 @@ export function MigrationCard({ migration, onCancel, onRetry }: MigrationCardPro
     try {
       await onRetry(migration.vmId, migration.targetNodeId);
       toast({
-        title: "Migration retry initiated",
+        title: 'Migration retry initiated',
         description: `Started a new migration for ${migration.vmName}.`,
       });
     } catch (error) {
       toast({
-        title: "Error retrying migration",
+        title: 'Error retrying migration',
         description: `Failed to retry migration: ${(error as Error).message}`,
-        variant: "destructive",
+        variant: 'destructive',
       });
     }
   };

@@ -7,10 +7,12 @@ RUN apk add --no-cache git gcc musl-dev
 # Set working directory
 WORKDIR /app
 
-# Copy go mod and sum files
+# Copy go mod and sum files (sdk/ is a module-replacement target of go.mod)
 COPY go.mod go.sum ./
+COPY sdk/go/go.mod sdk/go/go.sum ./sdk/go/
 
 # Copy backend directory first (needed for module replacement)
+COPY sdk ./sdk
 COPY backend ./backend
 
 # Download dependencies

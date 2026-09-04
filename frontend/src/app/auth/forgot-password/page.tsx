@@ -1,24 +1,24 @@
-"use client";
+'use client';
 
 // Disable static generation for this page
 export const dynamic = 'force-dynamic';
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { useToast } from "@/components/ui/use-toast";
-import { Icons } from "@/components/ui/icons";
-import Link from "next/link";
-import { authService } from "@/lib/auth";
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { useToast } from '@/components/ui/use-toast';
+import { Icons } from '@/components/ui/icons';
+import Link from 'next/link';
+import { authService } from '@/lib/auth';
 
 export default function ForgotPasswordPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
 
   async function onSubmit(event: React.SyntheticEvent) {
@@ -29,16 +29,16 @@ export default function ForgotPasswordPage() {
       await authService.forgotPassword({ email });
       
       toast({
-        title: "Success",
-        description: "Password reset email sent. Please check your inbox.",
+        title: 'Success',
+        description: 'Password reset email sent. Please check your inbox.',
       });
       
       setIsSubmitted(true);
     } catch (error) {
       toast({
-        title: "Error",
-        description: "Failed to send password reset email. Please try again.",
-        variant: "destructive",
+        title: 'Error',
+        description: 'Failed to send password reset email. Please try again.',
+        variant: 'destructive',
       });
     } finally {
       setIsLoading(false);
@@ -52,8 +52,8 @@ export default function ForgotPasswordPage() {
           <CardTitle className="text-2xl text-center">Forgot Password</CardTitle>
           <CardDescription className="text-center">
             {isSubmitted
-              ? "Please check your email for password reset instructions"
-              : "Enter your email to receive password reset instructions"}
+              ? 'Please check your email for password reset instructions'
+              : 'Enter your email to receive password reset instructions'}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -67,7 +67,7 @@ export default function ForgotPasswordPage() {
               </p>
               <Button 
                 className="w-full mt-6" 
-                onClick={() => router.push("/auth/login")}
+                onClick={() => router.push('/auth/login')}
               >
                 Back to Login
               </Button>
@@ -100,7 +100,7 @@ export default function ForgotPasswordPage() {
         </CardContent>
         <CardFooter className="flex flex-col">
           <div className="text-sm text-muted-foreground text-center">
-            Remember your password?{" "}
+            Remember your password?{' '}
             <Link href="/auth/login" className="hover:text-brand underline underline-offset-4">
               Sign in
             </Link>

@@ -189,14 +189,14 @@ export function MobileAppControls() {
       if (success) {
         setBiometricAuthenticated(true);
         toast({
-          title: "Authentication Successful",
-          description: "Biometric authentication completed",
+          title: 'Authentication Successful',
+          description: 'Biometric authentication completed',
         });
       } else {
         toast({
-          title: "Authentication Failed",
-          description: "Please try again or use alternative method",
-          variant: "destructive"
+          title: 'Authentication Failed',
+          description: 'Please try again or use alternative method',
+          variant: 'destructive'
         });
       }
       setShowBiometricPrompt(false);
@@ -252,7 +252,7 @@ export function MobileAppControls() {
 
     // Show notification
     toast({
-      title: "Action Initiated",
+      title: 'Action Initiated',
       description: message,
     });
 
@@ -264,7 +264,7 @@ export function MobileAppControls() {
       type: 'info',
       priority: 'medium',
       timestamp: new Date(),
-      vmId: vmId,
+      vmId,
       actionable: false,
       read: false
     };
@@ -325,7 +325,7 @@ export function MobileAppControls() {
         <div className="flex items-center space-x-1">
           <span>100%</span>
           <div className="w-6 h-3 border border-white rounded-sm">
-            <div className="w-full h-full bg-green-500 rounded-sm"></div>
+            <div className="w-full h-full bg-green-500 rounded-sm" />
           </div>
         </div>
       </div>

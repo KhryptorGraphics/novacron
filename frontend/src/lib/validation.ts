@@ -16,11 +16,11 @@ export const validateEmail = (email: string): ValidationResult => {
   const errors: string[] = [];
   
   if (!email) {
-    errors.push("Email is required");
+    errors.push('Email is required');
   } else {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      errors.push("Please enter a valid email address");
+      errors.push('Please enter a valid email address');
     }
     
     // Check for common typos in popular domains
@@ -51,28 +51,28 @@ export const validatePassword = (password: string): PasswordStrength => {
   if (!password) {
     return {
       score: 0,
-      feedback: "Password is required",
-      suggestions: ["Enter a password"]
+      feedback: 'Password is required',
+      suggestions: ['Enter a password']
     };
   }
   
   // Length check
   if (password.length >= 8) score++;
   if (password.length >= 12) score++;
-  else suggestions.push("Use at least 12 characters for better security");
+  else suggestions.push('Use at least 12 characters for better security');
   
   // Complexity checks
   if (/[a-z]/.test(password)) score += 0.5;
-  else suggestions.push("Include lowercase letters");
+  else suggestions.push('Include lowercase letters');
   
   if (/[A-Z]/.test(password)) score += 0.5;
-  else suggestions.push("Include uppercase letters");
+  else suggestions.push('Include uppercase letters');
   
   if (/[0-9]/.test(password)) score++;
-  else suggestions.push("Include numbers");
+  else suggestions.push('Include numbers');
   
   if (/[^a-zA-Z0-9]/.test(password)) score++;
-  else suggestions.push("Include special characters (!@#$%^&*)");
+  else suggestions.push('Include special characters (!@#$%^&*)');
   
   // Common patterns and dictionary check
   const commonPatterns = [
@@ -91,7 +91,7 @@ export const validatePassword = (password: string): PasswordStrength => {
   const hasCommonPattern = commonPatterns.some(pattern => pattern.test(password));
   if (hasCommonPattern) {
     score = Math.max(0, score - 2);
-    suggestions.push("Avoid common passwords and dictionary words");
+    suggestions.push('Avoid common passwords and dictionary words');
   }
 
   // Sequential or repeated characters penalty
@@ -100,21 +100,21 @@ export const validatePassword = (password: string): PasswordStrength => {
   
   if (hasSequential) {
     score = Math.max(0, score - 1);
-    suggestions.push("Avoid sequential characters (123, abc)");
+    suggestions.push('Avoid sequential characters (123, abc)');
   }
   
   if (hasRepeated) {
     score = Math.max(0, score - 1);
-    suggestions.push("Avoid repeating characters (aaa, 111)");
+    suggestions.push('Avoid repeating characters (aaa, 111)');
   }
   
   // Determine feedback based on score
-  let feedback = "";
-  if (score < 1) feedback = "Very Weak";
-  else if (score < 2) feedback = "Weak";
-  else if (score < 3) feedback = "Fair";
-  else if (score < 4) feedback = "Good";
-  else feedback = "Strong";
+  let feedback = '';
+  if (score < 1) feedback = 'Very Weak';
+  else if (score < 2) feedback = 'Weak';
+  else if (score < 3) feedback = 'Fair';
+  else if (score < 4) feedback = 'Good';
+  else feedback = 'Strong';
   
   return {
     score: Math.min(4, Math.floor(score)),
@@ -152,13 +152,13 @@ export const validateOrganization = (orgName: string): ValidationResult => {
   const errors: string[] = [];
   
   if (!orgName) {
-    errors.push("Organization name is required");
+    errors.push('Organization name is required');
   } else {
     if (orgName.length < 2) {
-      errors.push("Organization name must be at least 2 characters");
+      errors.push('Organization name must be at least 2 characters');
     }
     if (orgName.length > 100) {
-      errors.push("Organization name must be less than 100 characters");
+      errors.push('Organization name must be less than 100 characters');
     }
   }
   
@@ -177,10 +177,10 @@ export const validatePhone = (phone: string): ValidationResult => {
     const digitsOnly = phone.replace(/\D/g, '');
     
     if (digitsOnly.length < 10) {
-      errors.push("Phone number must be at least 10 digits");
+      errors.push('Phone number must be at least 10 digits');
     }
     if (digitsOnly.length > 15) {
-      errors.push("Phone number is too long");
+      errors.push('Phone number is too long');
     }
   }
   
@@ -195,7 +195,7 @@ export const validateTerms = (accepted: boolean): ValidationResult => {
   const errors: string[] = [];
   
   if (!accepted) {
-    errors.push("You must accept the terms and conditions");
+    errors.push('You must accept the terms and conditions');
   }
   
   return {
@@ -228,13 +228,13 @@ export const validateRegistrationStep = (
   switch (step) {
     case 1: // Account Type
       if (!data.accountType) {
-        errors.push("Please select an account type");
+        errors.push('Please select an account type');
       }
       break;
       
     case 2: // Personal Information
-      const firstNameValidation = validateName(data.firstName, "First name");
-      const lastNameValidation = validateName(data.lastName, "Last name");
+      const firstNameValidation = validateName(data.firstName, 'First name');
+      const lastNameValidation = validateName(data.lastName, 'Last name');
       const emailValidation = validateEmail(data.email);
       
       errors.push(...firstNameValidation.errors);
@@ -253,7 +253,7 @@ export const validateRegistrationStep = (
         errors.push(...orgValidation.errors);
         
         if (!data.organizationSize) {
-          errors.push("Please select organization size");
+          errors.push('Please select organization size');
         }
       }
       break;
@@ -261,12 +261,12 @@ export const validateRegistrationStep = (
     case 4: // Security
       const passwordStrength = validatePassword(data.password);
       if (passwordStrength.score < 2) {
-        errors.push("Password is too weak");
+        errors.push('Password is too weak');
         errors.push(...passwordStrength.suggestions);
       }
       
       if (data.password !== data.confirmPassword) {
-        errors.push("Passwords do not match");
+        errors.push('Passwords do not match');
       }
       
       const termsValidation = validateTerms(data.acceptTerms);

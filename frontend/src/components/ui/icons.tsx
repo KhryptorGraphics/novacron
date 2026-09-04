@@ -27,7 +27,7 @@ import {
   Plus,
   RefreshCw,
   Download,
-} from "lucide-react"
+} from 'lucide-react';
 
 export const Icons = {
   spinner: Loader2,
@@ -59,4 +59,4 @@ export const Icons = {
   sparkles: Sparkles,
   plus: Plus,
   refresh: RefreshCw,
-}
+};

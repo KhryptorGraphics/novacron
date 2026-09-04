@@ -477,21 +477,22 @@ func TestRaftNode_ApplyChannel(t *testing.T) {
 	}
 }
 
-// TestRaftNode_NetworkPartition is KNOWN TIMING/RANDOMNESS-SENSITIVE (tracked
-// under novacron-5ng) and is intentionally NOT treated as a deterministic bug.
-// The outcome hinges on where the *initial* election randomly places the leader:
+// TestRaftNode_NetworkPartition: outcome still depends on where the *initial*
+// election randomly places the leader, but both branches now pass:
 //   - initial leader in the majority {node3,node4,node5}: after the split the
 //     majority re-elects (or keeps) a leader and the minority {node1,node2} can
 //     never reach the 3-vote quorum, so it stays leaderless -> PASS.
-//   - initial leader in the minority {node1,node2}: once fully isolated, that
-//     old leader never hears a higher term (this Raft has no leader lease /
-//     check-quorum), so it remains "leader" in its partition -> the line-591
-//     assertion (0 leaders in the minority) fails.
+//   - initial leader in the minority {node1,node2}: raft.go's leader
+//     check-quorum (Raft thesis §9.6, etcd "check-quorum") now demotes a
+//     leader that fails to see a majority of peers ack within one election
+//     timeout after its grace period, so the isolated old leader steps down
+//     instead of serving the minority as a split-brain leader -> PASS.
 //
-// Making this pass every time needs a real feature (leader leases / CheckQuorum
-// step-down), not a test tweak; adding a longer sleep would only mask the
-// randomness. Left as-is deliberately. The election-timer fix in raft.go did
-// remove the separate failure where the majority could not re-elect at all.
+// Known scope limit: check-quorum fixes the *leader* side (no stale leader
+// serving a minority). A deposed minority node re-campaigning with ever
+// higher terms can still disrupt the majority in a one-way partition; the
+// standard mitigation is pre-vote, which needs a new Transport RPC method
+// and is intentionally out of scope here.
 func TestRaftNode_NetworkPartition(t *testing.T) {
 	// Create a 5-node cluster to test network partitions
 	nodes := make([]*RaftNode, 5)

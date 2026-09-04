@@ -85,7 +85,7 @@ func TestCanonicalVMRoutesDriveManagerState(t *testing.T) {
 	// manager-derived state (the manager reports "stopped" for a freshly
 	// created, not-yet-started VM), never a hardcoded "creating".
 	mock.ExpectExec("INSERT INTO vms").
-		WithArgs(sqlmock.AnyArg(), "vm-a", "stopped", sqlmock.AnyArg(), sqlmock.AnyArg(), "default", sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "vm-a", "stopped", 1024, 0, 0, sqlmock.AnyArg(), "", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	createRec := httptest.NewRecorder()
@@ -300,12 +300,12 @@ func TestCanonicalTwoFactorLoginFlow(t *testing.T) {
 		WithArgs("user@example.com").
 		WillReturnRows(sqlmock.NewRows([]string{"username"}).AddRow("user"))
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, username, email, password_hash, role, tenant_id, created_at, updated_at
+		SELECT id, username, email, password_hash, role, status, created_at, updated_at
 		FROM users WHERE username = $1
 	`)).
 		WithArgs("user").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "tenant_id", "created_at", "updated_at"}).
-			AddRow("7", "user", "user@example.com", string(passwordHash), "admin", "default", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "created_at", "updated_at"}).
+			AddRow("7", "user", "user@example.com", string(passwordHash), "admin", "active", now, now))
 
 	loginReq := mustJSONRequest(t, http.MethodPost, "/api/auth/login", map[string]interface{}{
 		"email":    "user@example.com",
@@ -331,12 +331,12 @@ func TestCanonicalTwoFactorLoginFlow(t *testing.T) {
 	}
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, username, email, password_hash, role, tenant_id, created_at, updated_at
+		SELECT id, username, email, password_hash, role, status, created_at, updated_at
 		FROM users WHERE id = $1
 	`)).
 		WithArgs("7").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "tenant_id", "created_at", "updated_at"}).
-			AddRow("7", "user", "user@example.com", string(passwordHash), "admin", "default", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "created_at", "updated_at"}).
+			AddRow("7", "user", "user@example.com", string(passwordHash), "admin", "active", now, now))
 
 	verifyCode, err := totp.GenerateCode(setupPayload.Secret, time.Now().UTC())
 	if err != nil {
@@ -656,10 +656,10 @@ func TestCanonicalSecurityRoutesSupportReleaseAdminMutations(t *testing.T) {
 	}
 
 	incidentReq := mustJSONRequest(t, http.MethodPost, "/api/security/incidents", map[string]interface{}{
-		"title": "Manual investigation",
-		"description": "Operator escalated a suspicious login pattern.",
-		"severity": "high",
-		"type": "manual",
+		"title":           "Manual investigation",
+		"description":     "Operator escalated a suspicious login pattern.",
+		"severity":        "high",
+		"type":            "manual",
 		"affectedSystems": []string{"auth-gateway"},
 	})
 	incidentReq.Header.Set("Authorization", authz)
@@ -904,12 +904,12 @@ func TestCanonicalLiveServerSmoke(t *testing.T) {
 		WithArgs("admin@example.com").
 		WillReturnRows(sqlmock.NewRows([]string{"username"}).AddRow("admin"))
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, username, email, password_hash, role, tenant_id, created_at, updated_at
+		SELECT id, username, email, password_hash, role, status, created_at, updated_at
 		FROM users WHERE username = $1
 	`)).
 		WithArgs("admin").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "tenant_id", "created_at", "updated_at"}).
-			AddRow("7", "admin", "admin@example.com", string(passwordHash), "admin", "default", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "created_at", "updated_at"}).
+			AddRow("7", "admin", "admin@example.com", string(passwordHash), "admin", "active", now, now))
 
 	loginReq, err := http.NewRequest(http.MethodPost, server.URL+"/api/auth/login", strings.NewReader(`{"email":"admin@example.com","password":"correct-horse-battery-staple"}`))
 	if err != nil {

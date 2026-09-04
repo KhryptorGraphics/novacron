@@ -1,16 +1,16 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { apiClient } from "@/lib/api/client";
-import { useWebSocket } from "@/hooks/useWebSocket";
-import { securityCapabilities } from "@/lib/api/security";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { apiClient } from '@/lib/api/client';
+import { useWebSocket } from '@/hooks/useWebSocket';
+import { securityCapabilities } from '@/lib/api/security';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 
 
-import { Progress } from "@/components/ui/progress";
-import { FadeIn } from "@/lib/animations";
+import { Progress } from '@/components/ui/progress';
+import { FadeIn } from '@/lib/animations';
 import { 
   Shield, 
   AlertTriangle, 
@@ -24,8 +24,8 @@ import {
   Monitor,
   FileText,
   Download
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 // Security data types
 interface SecurityMetrics {
@@ -47,12 +47,12 @@ interface SecurityMetrics {
 
 
 export function SecurityDashboard() {
-  const [_activeTab, _setActiveTab] = useState("overview");
+  const [_activeTab, _setActiveTab] = useState('overview');
   const [_selectedAlert, setSelectedAlert] = useState<any>(null);
   const [_loading, setLoading] = useState(true);
   const [_error, setError] = useState<string | null>(null);
   const [securityMetrics, setSecurityMetrics] = useState<SecurityMetrics>({
-    threatLevel: "low",
+    threatLevel: 'low',
     totalAlerts: 0,
     activeThreats: 0,
     blockedAttacks: 0,
@@ -95,7 +95,7 @@ export function SecurityDashboard() {
 
       // Update metrics using the correct response structure
       setSecurityMetrics({
-        threatLevel: threats.length > 10 ? "high" : threats.length > 5 ? "medium" : "low",
+        threatLevel: threats.length > 10 ? 'high' : threats.length > 5 ? 'medium' : 'low',
         totalAlerts: threats.length + incidents.length,
         activeThreats: threats.filter((t: any) => t.status === 'active').length,
         blockedAttacks: threats.filter((t: any) => t.status === 'blocked').length,
@@ -204,30 +204,30 @@ export function SecurityDashboard() {
   // Export audit data
   const getSeverityColor = (severity: string) => {
     switch (severity) {
-      case "critical": return "bg-red-500";
-      case "high": return "bg-orange-500";
-      case "medium": return "bg-yellow-500";
-      case "low": return "bg-blue-500";
-      default: return "bg-gray-500";
+      case 'critical': return 'bg-red-500';
+      case 'high': return 'bg-orange-500';
+      case 'medium': return 'bg-yellow-500';
+      case 'low': return 'bg-blue-500';
+      default: return 'bg-gray-500';
     }
   };
 
   const getSeverityVariant = (severity: string) => {
     switch (severity) {
-      case "critical": return "destructive";
-      case "high": return "destructive";
-      case "medium": return "secondary";
-      case "low": return "outline";
-      default: return "outline";
+      case 'critical': return 'destructive';
+      case 'high': return 'destructive';
+      case 'medium': return 'secondary';
+      case 'low': return 'outline';
+      default: return 'outline';
     }
   };
 
   const getRiskColor = (risk: string) => {
     switch (risk) {
-      case "high": return "text-red-600";
-      case "medium": return "text-yellow-600";
-      case "low": return "text-green-600";
-      default: return "text-gray-600";
+      case 'high': return 'text-red-600';
+      case 'medium': return 'text-yellow-600';
+      case 'low': return 'text-green-600';
+      default: return 'text-gray-600';
     }
   };
 
@@ -258,7 +258,7 @@ export function SecurityDashboard() {
         
         <div className="flex items-center gap-2">
           <Badge 
-            variant={securityMetrics.threatLevel === "high" ? "destructive" : "secondary"}
+            variant={securityMetrics.threatLevel === 'high' ? 'destructive' : 'secondary'}
             className="capitalize"
           >
             {securityMetrics.threatLevel} Threat Level
@@ -350,7 +350,7 @@ export function SecurityDashboard() {
                       className="flex items-start gap-4 p-4 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
                       onClick={() => setSelectedAlert(alert)}
                     >
-                      <div className={cn("h-3 w-3 rounded-full mt-2", getSeverityColor(alert.severity))} />
+                      <div className={cn('h-3 w-3 rounded-full mt-2', getSeverityColor(alert.severity))} />
                       
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between">
@@ -375,10 +375,10 @@ export function SecurityDashboard() {
                           <Badge 
                             variant="outline" 
                             className={cn(
-                              "text-xs",
-                              alert.status === "active" ? "text-red-600" :
-                              alert.status === "blocked" ? "text-blue-600" :
-                              alert.status === "resolved" ? "text-green-600" : "text-gray-600"
+                              'text-xs',
+                              alert.status === 'active' ? 'text-red-600' :
+                              alert.status === 'blocked' ? 'text-blue-600' :
+                              alert.status === 'resolved' ? 'text-green-600' : 'text-gray-600'
                             )}
                           >
                             {alert.status}
@@ -512,7 +512,7 @@ export function SecurityDashboard() {
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-sm">{blocked.ip}</span>
                         <Badge 
-                          variant={blocked.status === "permanent" ? "destructive" : "secondary"}
+                          variant={blocked.status === 'permanent' ? 'destructive' : 'secondary'}
                         >
                           {blocked.status}
                         </Badge>

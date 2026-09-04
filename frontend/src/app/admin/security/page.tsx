@@ -1,11 +1,11 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { useSecurityAlerts, useUpdateSecurityAlert, useAuditLogs, useUsers } from "@/lib/api/hooks/useAdmin";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { useState, useEffect } from 'react';
+import { useSecurityAlerts, useUpdateSecurityAlert, useAuditLogs, useUsers } from '@/lib/api/hooks/useAdmin';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { 
   Table, 
   TableBody, 
@@ -13,16 +13,16 @@ import {
   TableHead, 
   TableHeader, 
   TableRow 
-} from "@/components/ui/table";
+} from '@/components/ui/table';
 import { 
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Progress } from "@/components/ui/progress";
+} from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Progress } from '@/components/ui/progress';
 import { 
   Dialog,
   DialogContent,
@@ -30,9 +30,9 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { useToast } from "@/components/ui/use-toast";
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { useToast } from '@/components/ui/use-toast';
 import { 
   Shield, 
   AlertTriangle, 
@@ -47,10 +47,10 @@ import {
   Database,
   Smartphone,
   Wifi
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import { SecurityAlert } from "@/lib/api/types";
-import { FadeIn } from "@/lib/animations";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { SecurityAlert } from '@/lib/api/types';
+import { FadeIn } from '@/lib/animations';
 
 // Mock security data
 const securityMetrics = {
@@ -62,24 +62,24 @@ const securityMetrics = {
   suspiciousActivities: 12,
   firewallRules: 156,
   activeConnections: 892,
-  sslCertStatus: "valid",
-  lastScan: "2024-08-24T10:30:00Z"
+  sslCertStatus: 'valid',
+  lastScan: '2024-08-24T10:30:00Z'
 };
 
 const threatCategories = [
-  { name: "Malware", count: 45, severity: "high", trend: "decreasing" },
-  { name: "Phishing", count: 23, severity: "medium", trend: "stable" },
-  { name: "Brute Force", count: 12, severity: "high", trend: "increasing" },
-  { name: "Data Breach", count: 2, severity: "critical", trend: "decreasing" },
-  { name: "Unauthorized Access", count: 8, severity: "high", trend: "stable" },
+  { name: 'Malware', count: 45, severity: 'high', trend: 'decreasing' },
+  { name: 'Phishing', count: 23, severity: 'medium', trend: 'stable' },
+  { name: 'Brute Force', count: 12, severity: 'high', trend: 'increasing' },
+  { name: 'Data Breach', count: 2, severity: 'critical', trend: 'decreasing' },
+  { name: 'Unauthorized Access', count: 8, severity: 'high', trend: 'stable' },
 ];
 
 const complianceChecks = [
-  { name: "GDPR Compliance", status: "passing", score: 98, description: "Data protection and privacy" },
-  { name: "SOC2 Type II", status: "passing", score: 96, description: "Security and availability controls" },
-  { name: "ISO 27001", status: "warning", score: 87, description: "Information security management" },
-  { name: "PCI DSS", status: "passing", score: 94, description: "Payment card data security" },
-  { name: "HIPAA", status: "not_applicable", score: null, description: "Healthcare data protection" },
+  { name: 'GDPR Compliance', status: 'passing', score: 98, description: 'Data protection and privacy' },
+  { name: 'SOC2 Type II', status: 'passing', score: 96, description: 'Security and availability controls' },
+  { name: 'ISO 27001', status: 'warning', score: 87, description: 'Information security management' },
+  { name: 'PCI DSS', status: 'passing', score: 94, description: 'Payment card data security' },
+  { name: 'HIPAA', status: 'not_applicable', score: null, description: 'Healthcare data protection' },
 ];
 
 export default function SecurityCenterPage() {
@@ -132,36 +132,36 @@ export default function SecurityCenterPage() {
       await updateAlert.mutateAsync({ id: alertId, status });
       
       toast({
-        title: "Alert updated",
+        title: 'Alert updated',
         description: `Alert has been marked as ${status.replace('_', ' ')}.`
       });
     } catch (error) {
       toast({
-        title: "Failed to update alert",
-        description: "Please try again later.",
-        variant: "destructive"
+        title: 'Failed to update alert',
+        description: 'Please try again later.',
+        variant: 'destructive'
       });
     }
   };
   
   const getSeverityColor = (severity: string) => {
     switch (severity) {
-      case "critical": return "destructive";
-      case "high": return "destructive";
-      case "medium": return "secondary";
-      case "low": return "outline";
-      default: return "outline";
+      case 'critical': return 'destructive';
+      case 'high': return 'destructive';
+      case 'medium': return 'secondary';
+      case 'low': return 'outline';
+      default: return 'outline';
     }
   };
   
   const getSeverityIcon = (severity: string) => {
     switch (severity) {
-      case "critical":
-      case "high":
+      case 'critical':
+      case 'high':
         return <AlertTriangle className="h-4 w-4" />;
-      case "medium":
+      case 'medium':
         return <Eye className="h-4 w-4" />;
-      case "low":
+      case 'low':
         return <CheckCircle className="h-4 w-4" />;
       default:
         return <Eye className="h-4 w-4" />;
@@ -170,19 +170,19 @@ export default function SecurityCenterPage() {
   
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "new": return "text-red-600";
-      case "investigating": return "text-yellow-600";
-      case "resolved": return "text-green-600";
-      case "false_positive": return "text-gray-600";
-      default: return "text-gray-600";
+      case 'new': return 'text-red-600';
+      case 'investigating': return 'text-yellow-600';
+      case 'resolved': return 'text-green-600';
+      case 'false_positive': return 'text-gray-600';
+      default: return 'text-gray-600';
     }
   };
   
   const getComplianceColor = (status: string, score?: number | null) => {
-    if (status === "not_applicable") return "text-gray-600";
-    if (status === "passing" && score && score >= 90) return "text-green-600";
-    if (status === "warning" || (score && score >= 70)) return "text-yellow-600";
-    return "text-red-600";
+    if (status === 'not_applicable') return 'text-gray-600';
+    if (status === 'passing' && score && score >= 90) return 'text-green-600';
+    if (status === 'warning' || (score && score >= 70)) return 'text-yellow-600';
+    return 'text-red-600';
   };
   
   const getSecurityScore = () => {
@@ -400,7 +400,7 @@ export default function SecurityCenterPage() {
               <CardContent>
                 {alertsLoading ? (
                   <div className="flex items-center justify-center h-64">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -445,7 +445,7 @@ export default function SecurityCenterPage() {
                             </TableCell>
                             
                             <TableCell>
-                              <span className={cn("capitalize", getStatusColor(alert.status))}>
+                              <span className={cn('capitalize', getStatusColor(alert.status))}>
                                 {alert.status.replace('_', ' ')}
                               </span>
                             </TableCell>

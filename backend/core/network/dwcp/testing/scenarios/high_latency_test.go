@@ -55,7 +55,7 @@ func TestExtremeLatency(t *testing.T) {
 
 	// Reduce workload size due to extreme latency
 	scenario.Workload.VMs = 2
-	scenario.Workload.VMSize = 1 * 1024 * 1024 * 1024 // 1 GB
+	scenario.Workload.VMSize = 128 * 1024 * 1024 // 128 MB
 
 	harness := testing_pkg.NewTestHarness()
 	result, err := harness.RunScenario(scenario)

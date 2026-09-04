@@ -1,17 +1,17 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { Moon, Sun, Monitor } from "lucide-react";
-import { useTheme } from "next-themes";
-import { Button } from "@/components/ui/button";
+import * as React from 'react';
+import { Moon, Sun, Monitor } from 'lucide-react';
+import { useTheme } from 'next-themes';
+import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { motion, AnimatePresence } from "framer-motion";
-import { cn } from "@/lib/utils";
+} from '@/components/ui/dropdown-menu';
+import { motion, AnimatePresence } from 'framer-motion';
+import { cn } from '@/lib/utils';
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
@@ -34,7 +34,7 @@ export function ThemeToggle() {
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="relative">
           <AnimatePresence mode="wait">
-            {theme === "light" && (
+            {theme === 'light' && (
               <motion.div
                 key="light"
                 initial={{ rotate: -90, opacity: 0 }}
@@ -45,7 +45,7 @@ export function ThemeToggle() {
                 <Sun className="h-5 w-5" />
               </motion.div>
             )}
-            {theme === "dark" && (
+            {theme === 'dark' && (
               <motion.div
                 key="dark"
                 initial={{ rotate: -90, opacity: 0 }}
@@ -56,7 +56,7 @@ export function ThemeToggle() {
                 <Moon className="h-5 w-5" />
               </motion.div>
             )}
-            {theme === "system" && (
+            {theme === 'system' && (
               <motion.div
                 key="system"
                 initial={{ rotate: -90, opacity: 0 }}
@@ -72,15 +72,15 @@ export function ThemeToggle() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => setTheme("light")}>
+        <DropdownMenuItem onClick={() => setTheme('light')}>
           <Sun className="mr-2 h-4 w-4" />
           <span>Light</span>
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("dark")}>
+        <DropdownMenuItem onClick={() => setTheme('dark')}>
           <Moon className="mr-2 h-4 w-4" />
           <span>Dark</span>
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("system")}>
+        <DropdownMenuItem onClick={() => setTheme('system')}>
           <Monitor className="mr-2 h-4 w-4" />
           <span>System</span>
         </DropdownMenuItem>
@@ -101,9 +101,9 @@ export function CompactThemeToggle() {
   if (!mounted) return null;
 
   const toggleTheme = () => {
-    if (theme === "light") setTheme("dark");
-    else if (theme === "dark") setTheme("system");
-    else setTheme("light");
+    if (theme === 'light') setTheme('dark');
+    else if (theme === 'dark') setTheme('system');
+    else setTheme('light');
   };
 
   return (
@@ -122,9 +122,9 @@ export function CompactThemeToggle() {
           transition={{ duration: 0.2 }}
           className="absolute inset-0 flex items-center justify-center"
         >
-          {theme === "light" && <Sun className="h-5 w-5" />}
-          {theme === "dark" && <Moon className="h-5 w-5" />}
-          {theme === "system" && <Monitor className="h-5 w-5" />}
+          {theme === 'light' && <Sun className="h-5 w-5" />}
+          {theme === 'dark' && <Moon className="h-5 w-5" />}
+          {theme === 'system' && <Monitor className="h-5 w-5" />}
         </motion.div>
       </AnimatePresence>
     </Button>
@@ -135,23 +135,23 @@ export function CompactThemeToggle() {
 interface ThemedCardProps {
   children: React.ReactNode;
   className?: string;
-  variant?: "default" | "elevated" | "outlined";
+  variant?: 'default' | 'elevated' | 'outlined';
 }
 
 export function ThemedCard({ 
   children, 
   className,
-  variant = "default" 
+  variant = 'default' 
 }: ThemedCardProps) {
   const variants = {
-    default: "bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700",
-    elevated: "bg-white dark:bg-gray-800 shadow-lg dark:shadow-gray-900/50",
-    outlined: "bg-transparent border-2 border-gray-300 dark:border-gray-600"
+    default: 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700',
+    elevated: 'bg-white dark:bg-gray-800 shadow-lg dark:shadow-gray-900/50',
+    outlined: 'bg-transparent border-2 border-gray-300 dark:border-gray-600'
   };
   
   return (
     <div className={cn(
-      "rounded-lg transition-colors duration-200",
+      'rounded-lg transition-colors duration-200',
       variants[variant],
       className
     )}>
@@ -163,26 +163,26 @@ export function ThemedCard({
 // Color Mode Provider Wrapper
 interface ColorModeProviderProps {
   children: React.ReactNode;
-  defaultTheme?: "light" | "dark" | "system";
+  defaultTheme?: 'light' | 'dark' | 'system';
   storageKey?: string;
 }
 
 export function ColorModeProvider({
   children,
-  defaultTheme = "system",
-  storageKey = "novacron-theme"
+  defaultTheme = 'system',
+  storageKey = 'novacron-theme'
 }: ColorModeProviderProps) {
   React.useEffect(() => {
     const root = window.document.documentElement;
     const theme = localStorage.getItem(storageKey) || defaultTheme;
     
-    if (theme === "system") {
-      const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light";
-      root.setAttribute("data-theme", systemTheme);
+    if (theme === 'system') {
+      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light';
+      root.setAttribute('data-theme', systemTheme);
     } else {
-      root.setAttribute("data-theme", theme);
+      root.setAttribute('data-theme', theme);
     }
   }, [defaultTheme, storageKey]);
   

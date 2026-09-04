@@ -1,14 +1,14 @@
-"use client";
+'use client';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import AuthGuard from "@/components/auth/AuthGuard";
-import TwoFactorSettings from "@/components/auth/TwoFactorSettings";
-import { useAuth } from "@/hooks/useAuth";
-import { KeyRound, Settings, Shield, UserCircle2 } from "lucide-react";
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import AuthGuard from '@/components/auth/AuthGuard';
+import TwoFactorSettings from '@/components/auth/TwoFactorSettings';
+import { useAuth } from '@/hooks/useAuth';
+import { KeyRound, Settings, Shield, UserCircle2 } from 'lucide-react';
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -52,7 +52,7 @@ export default function SettingsPage() {
               <div className="rounded-lg border p-4">
                 <div className="text-sm font-medium text-muted-foreground">Name</div>
                 <div className="mt-1 font-medium">
-                  {[user?.firstName, user?.lastName].filter(Boolean).join(" ") || "Not provided"}
+                  {[user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Not provided'}
                 </div>
               </div>
               <div className="rounded-lg border p-4">

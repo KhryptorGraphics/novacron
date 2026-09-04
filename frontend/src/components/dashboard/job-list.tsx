@@ -1,21 +1,21 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { useJobs } from "@/hooks/useAPI";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { useState } from 'react';
+import { useJobs } from '@/hooks/useAPI';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { 
   Dialog, 
   DialogContent, 
   DialogHeader, 
   DialogTitle, 
   DialogTrigger 
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import { 
   Table, 
   TableBody, 
@@ -23,8 +23,8 @@ import {
   TableHead, 
   TableHeader, 
   TableRow 
-} from "@/components/ui/table";
-import { format } from "date-fns";
+} from '@/components/ui/table';
+import { format } from 'date-fns';
 
 export function JobList() {
   const { jobs, loading, error, createJob, updateJob, deleteJob, executeJob, refetch } = useJobs();
@@ -32,14 +32,14 @@ export function JobList() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingJob, setEditingJob] = useState<any>(null);
   const [newJob, setNewJob] = useState({
-    name: "",
-    schedule: "",
-    timezone: "UTC",
+    name: '',
+    schedule: '',
+    timezone: 'UTC',
     enabled: true,
     priority: 5,
     max_retries: 3,
     timeout: 30000,
-    metadata: ""
+    metadata: ''
   });
 
   const handleCreateJob = async () => {
@@ -51,17 +51,17 @@ export function JobList() {
       });
       setIsCreateDialogOpen(false);
       setNewJob({
-        name: "",
-        schedule: "",
-        timezone: "UTC",
+        name: '',
+        schedule: '',
+        timezone: 'UTC',
         enabled: true,
         priority: 5,
         max_retries: 3,
         timeout: 30000,
-        metadata: ""
+        metadata: ''
       });
     } catch (err) {
-      console.error("Failed to create job:", err);
+      console.error('Failed to create job:', err);
     }
   };
 
@@ -77,16 +77,16 @@ export function JobList() {
       setIsEditDialogOpen(false);
       setEditingJob(null);
     } catch (err) {
-      console.error("Failed to update job:", err);
+      console.error('Failed to update job:', err);
     }
   };
 
   const handleDeleteJob = async (id: string) => {
-    if (confirm("Are you sure you want to delete this job?")) {
+    if (confirm('Are you sure you want to delete this job?')) {
       try {
         await deleteJob(id);
       } catch (err) {
-        console.error("Failed to delete job:", err);
+        console.error('Failed to delete job:', err);
       }
     }
   };
@@ -97,7 +97,7 @@ export function JobList() {
       // Refresh jobs to show updated status
       refetch();
     } catch (err) {
-      console.error("Failed to execute job:", err);
+      console.error('Failed to execute job:', err);
     }
   };
 
@@ -259,12 +259,12 @@ export function JobList() {
                 <TableCell>{job.schedule}</TableCell>
                 <TableCell>{job.timezone}</TableCell>
                 <TableCell>
-                  <Badge variant={job.enabled ? "default" : "destructive"}>
-                    {job.enabled ? "Enabled" : "Disabled"}
+                  <Badge variant={job.enabled ? 'default' : 'destructive'}>
+                    {job.enabled ? 'Enabled' : 'Disabled'}
                   </Badge>
                 </TableCell>
                 <TableCell>
-                  {job.next_run_at ? format(new Date(job.next_run_at), "MMM dd, yyyy HH:mm") : "N/A"}
+                  {job.next_run_at ? format(new Date(job.next_run_at), 'MMM dd, yyyy HH:mm') : 'N/A'}
                 </TableCell>
                 <TableCell>{job.priority}</TableCell>
                 <TableCell>
@@ -275,7 +275,7 @@ export function JobList() {
                       onClick={() => {
                         setEditingJob({
                           ...job,
-                          metadata: job.metadata ? JSON.stringify(job.metadata, null, 2) : ""
+                          metadata: job.metadata ? JSON.stringify(job.metadata, null, 2) : ''
                         });
                         setIsEditDialogOpen(true);
                       }}

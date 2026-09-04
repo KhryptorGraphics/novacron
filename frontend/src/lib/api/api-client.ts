@@ -93,7 +93,7 @@ class ApiClient {
   private async request<T>(
     endpoint: string,
     options: RequestInit = {},
-    retries: number = 0
+    retries = 0
   ): Promise<T> {
     const url = this.baseUrl === API_ORIGIN
       ? buildApiUrl(endpoint)

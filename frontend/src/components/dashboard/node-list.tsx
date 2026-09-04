@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 
 interface Node {
@@ -60,7 +60,7 @@ export function NodeList({ nodes, onAction }: NodeListProps) {
                   <div 
                     className="bg-blue-600 h-2.5 rounded-full" 
                     style={{ width: `${Math.min(100, node.cpu_usage)}%` }}
-                  ></div>
+                   />
                 </div>
                 <span className="text-xs mt-1">{node.cpu_usage.toFixed(1)}%</span>
               </td>
@@ -69,7 +69,7 @@ export function NodeList({ nodes, onAction }: NodeListProps) {
                   <div 
                     className="bg-green-600 h-2.5 rounded-full" 
                     style={{ width: `${Math.min(100, (node.memory_usage / 1024 / 1024 / 1024) * 10)}%` }}
-                  ></div>
+                   />
                 </div>
                 <span className="text-xs mt-1">{(node.memory_usage / 1024 / 1024 / 1024).toFixed(1)} GB</span>
               </td>

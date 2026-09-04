@@ -152,7 +152,7 @@ export interface UsePaginatedApiState<T> extends UseApiState<T> {
 
 export function usePaginatedApi<T>(
   endpoint: string,
-  initialPageSize: number = 20
+  initialPageSize = 20
 ): UsePaginatedApiState<T> {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(initialPageSize);

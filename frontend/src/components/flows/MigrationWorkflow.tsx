@@ -208,14 +208,14 @@ export function MigrationWorkflow() {
     const failedCritical = checks.some(c => c.status === 'failed' && c.critical);
     if (failedCritical) {
       toast({
-        title: "Pre-migration Checks Failed",
-        description: "Critical issues detected. Please resolve before proceeding.",
-        variant: "destructive"
+        title: 'Pre-migration Checks Failed',
+        description: 'Critical issues detected. Please resolve before proceeding.',
+        variant: 'destructive'
       });
     } else {
       toast({
-        title: "Pre-migration Checks Completed",
-        description: "Ready to proceed with migration.",
+        title: 'Pre-migration Checks Completed',
+        description: 'Ready to proceed with migration.',
       });
     }
   };
@@ -288,8 +288,8 @@ export function MigrationWorkflow() {
       addLog('Migration completed successfully!');
       setCurrentPhase('verification');
       toast({
-        title: "Migration Completed",
-        description: "VM has been successfully migrated. Running post-migration verification.",
+        title: 'Migration Completed',
+        description: 'VM has been successfully migrated. Running post-migration verification.',
       });
       
       // Run verification
@@ -300,8 +300,8 @@ export function MigrationWorkflow() {
         setIsMigrating(false);
         
         toast({
-          title: "Migration Verified",
-          description: "VM is running successfully at the target location.",
+          title: 'Migration Verified',
+          description: 'VM is running successfully at the target location.',
         });
       }, 3000);
     }
@@ -311,8 +311,8 @@ export function MigrationWorkflow() {
     setMigrationPaused(true);
     setMigrationLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: Migration paused`]);
     toast({
-      title: "Migration Paused",
-      description: "Migration has been paused and can be resumed at any time.",
+      title: 'Migration Paused',
+      description: 'Migration has been paused and can be resumed at any time.',
     });
   };
 
@@ -320,8 +320,8 @@ export function MigrationWorkflow() {
     setMigrationPaused(false);
     setMigrationLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: Migration resumed`]);
     toast({
-      title: "Migration Resumed",
-      description: "Migration has been resumed.",
+      title: 'Migration Resumed',
+      description: 'Migration has been resumed.',
     });
   };
 
@@ -333,9 +333,9 @@ export function MigrationWorkflow() {
     setMigrationLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: Migration rolled back`]);
     
     toast({
-      title: "Migration Rolled Back",
-      description: "Migration has been cancelled and system restored to original state.",
-      variant: "destructive"
+      title: 'Migration Rolled Back',
+      description: 'Migration has been cancelled and system restored to original state.',
+      variant: 'destructive'
     });
   };
 

@@ -257,16 +257,16 @@ export function UserSelfServicePortal() {
   const submitRequest = () => {
     if (!newRequest.title || !newRequest.description || !newRequest.businessJustification) {
       toast({
-        title: "Missing Information",
-        description: "Please fill in all required fields.",
-        variant: "destructive"
+        title: 'Missing Information',
+        description: 'Please fill in all required fields.',
+        variant: 'destructive'
       });
       return;
     }
 
     toast({
-      title: "Request Submitted",
-      description: "Your resource request has been submitted for approval.",
+      title: 'Request Submitted',
+      description: 'Your resource request has been submitted for approval.',
     });
 
     setIsCreatingRequest(false);
@@ -422,7 +422,7 @@ export function UserSelfServicePortal() {
                     <div key={request.id} className="flex items-center justify-between p-3 rounded-lg border">
                       <div className="flex items-center space-x-3">
                         <div className="p-1 rounded bg-blue-100">
-                          {React.createElement(getTypeIcon(request.type), { className: "h-4 w-4 text-blue-600" })}
+                          {React.createElement(getTypeIcon(request.type), { className: 'h-4 w-4 text-blue-600' })}
                         </div>
                         <div>
                           <p className="font-medium">{request.title}</p>
@@ -558,7 +558,7 @@ export function UserSelfServicePortal() {
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex items-start space-x-4">
                       <div className="p-2 rounded bg-blue-100">
-                        {React.createElement(getTypeIcon(request.type), { className: "h-5 w-5 text-blue-600" })}
+                        {React.createElement(getTypeIcon(request.type), { className: 'h-5 w-5 text-blue-600' })}
                       </div>
                       <div>
                         <h4 className="font-semibold text-lg">{request.title}</h4>

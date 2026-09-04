@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { ResponsiveDataTable } from "@/components/ui/responsive-table";
+import { useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { ResponsiveDataTable } from '@/components/ui/responsive-table';
 import { 
   Server, 
   PlayCircle, 
@@ -14,19 +14,19 @@ import {
   MoreVertical,
   Cpu,
   HardDrive
-} from "lucide-react";
+} from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from '@/components/ui/dropdown-menu';
 
 interface VM {
   id: string;
   name: string;
-  status: "running" | "stopped" | "paused" | "migrating";
+  status: 'running' | 'stopped' | 'paused' | 'migrating';
   cpu: number;
   memory: number;
   disk: number;
@@ -46,19 +46,19 @@ interface VMStatusGridProps {
 
 export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
   const [selectedVMs, setSelectedVMs] = useState<string[]>([]);
-  const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   
-  const getStatusColor = (status: VM["status"]) => {
+  const getStatusColor = (status: VM['status']) => {
     const colors = {
-      running: "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400",
-      stopped: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400",
-      paused: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400",
-      migrating: "bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400"
+      running: 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400',
+      stopped: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400',
+      paused: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400',
+      migrating: 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400'
     };
     return colors[status];
   };
   
-  const getStatusIcon = (status: VM["status"]) => {
+  const getStatusIcon = (status: VM['status']) => {
     const icons = {
       running: <PlayCircle className="h-4 w-4" />,
       stopped: <StopCircle className="h-4 w-4" />,
@@ -79,9 +79,9 @@ export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
   // Table columns configuration
   const columns = [
     {
-      key: "name",
-      header: "VM Name",
-      priority: "high" as const,
+      key: 'name',
+      header: 'VM Name',
+      priority: 'high' as const,
       render: (value: string, _vm: VM) => (
         <div className="flex items-center gap-2">
           <Server className="h-4 w-4 text-gray-500" />
@@ -90,9 +90,9 @@ export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
       )
     },
     {
-      key: "status",
-      header: "Status",
-      priority: "high" as const,
+      key: 'status',
+      header: 'Status',
+      priority: 'high' as const,
       render: (_: any, vm: VM) => (
         <Badge className={getStatusColor(vm.status)}>
           <span className="flex items-center gap-1">
@@ -103,10 +103,10 @@ export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
       )
     },
     {
-      key: "cpu",
-      header: "CPU",
-      priority: "medium" as const,
-      align: "center" as const,
+      key: 'cpu',
+      header: 'CPU',
+      priority: 'medium' as const,
+      align: 'center' as const,
       render: (value: number) => (
         <div className="flex items-center justify-center gap-1">
           <Cpu className="h-3 w-3 text-gray-500" />
@@ -115,17 +115,17 @@ export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
       )
     },
     {
-      key: "memory",
-      header: "Memory",
-      priority: "medium" as const,
-      align: "center" as const,
+      key: 'memory',
+      header: 'Memory',
+      priority: 'medium' as const,
+      align: 'center' as const,
       render: (value: number) => `${value}%`
     },
     {
-      key: "disk",
-      header: "Disk",
-      priority: "low" as const,
-      align: "center" as const,
+      key: 'disk',
+      header: 'Disk',
+      priority: 'low' as const,
+      align: 'center' as const,
       render: (value: number) => (
         <div className="flex items-center justify-center gap-1">
           <HardDrive className="h-3 w-3 text-gray-500" />
@@ -134,9 +134,9 @@ export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
       )
     },
     {
-      key: "host",
-      header: "Host",
-      priority: "low" as const,
+      key: 'host',
+      header: 'Host',
+      priority: 'low' as const,
       render: (value: string) => (
         <span className="text-sm text-gray-600 dark:text-gray-400">
           {value}
@@ -144,10 +144,10 @@ export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
       )
     },
     {
-      key: "actions",
-      header: "Actions",
-      priority: "high" as const,
-      align: "center" as const,
+      key: 'actions',
+      header: 'Actions',
+      priority: 'high' as const,
+      align: 'center' as const,
       render: (_: any, vm: VM) => (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -156,39 +156,39 @@ export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {vm.status === "running" && (
+            {vm.status === 'running' && (
               <>
-                <DropdownMenuItem onClick={() => onVMAction?.(vm.id, "pause")}>
+                <DropdownMenuItem onClick={() => onVMAction?.(vm.id, 'pause')}>
                   <PauseCircle className="mr-2 h-4 w-4" />
                   Pause
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onVMAction?.(vm.id, "stop")}>
+                <DropdownMenuItem onClick={() => onVMAction?.(vm.id, 'stop')}>
                   <StopCircle className="mr-2 h-4 w-4" />
                   Stop
                 </DropdownMenuItem>
               </>
             )}
-            {vm.status === "stopped" && (
-              <DropdownMenuItem onClick={() => onVMAction?.(vm.id, "start")}>
+            {vm.status === 'stopped' && (
+              <DropdownMenuItem onClick={() => onVMAction?.(vm.id, 'start')}>
                 <PlayCircle className="mr-2 h-4 w-4" />
                 Start
               </DropdownMenuItem>
             )}
-            {vm.status === "paused" && (
-              <DropdownMenuItem onClick={() => onVMAction?.(vm.id, "resume")}>
+            {vm.status === 'paused' && (
+              <DropdownMenuItem onClick={() => onVMAction?.(vm.id, 'resume')}>
                 <PlayCircle className="mr-2 h-4 w-4" />
                 Resume
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onVMAction?.(vm.id, "restart")}>
+            <DropdownMenuItem onClick={() => onVMAction?.(vm.id, 'restart')}>
               <RefreshCw className="mr-2 h-4 w-4" />
               Restart
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onVMAction?.(vm.id, "migrate")}>
+            <DropdownMenuItem onClick={() => onVMAction?.(vm.id, 'migrate')}>
               Migrate
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onVMAction?.(vm.id, "console")}>
+            <DropdownMenuItem onClick={() => onVMAction?.(vm.id, 'console')}>
               Console
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -241,13 +241,13 @@ export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
       </div>
       
       <div className="flex gap-2">
-        {vm.status === "running" ? (
+        {vm.status === 'running' ? (
           <>
             <Button
               size="sm"
               variant="outline"
               className="flex-1"
-              onClick={() => onVMAction?.(vm.id, "pause")}
+              onClick={() => onVMAction?.(vm.id, 'pause')}
             >
               <PauseCircle className="mr-1 h-3 w-3" />
               Pause
@@ -256,7 +256,7 @@ export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
               size="sm"
               variant="outline"
               className="flex-1"
-              onClick={() => onVMAction?.(vm.id, "stop")}
+              onClick={() => onVMAction?.(vm.id, 'stop')}
             >
               <StopCircle className="mr-1 h-3 w-3" />
               Stop
@@ -267,7 +267,7 @@ export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
             size="sm"
             variant="outline"
             className="flex-1"
-            onClick={() => onVMAction?.(vm.id, "start")}
+            onClick={() => onVMAction?.(vm.id, 'start')}
           >
             <PlayCircle className="mr-1 h-3 w-3" />
             Start
@@ -276,7 +276,7 @@ export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
         <Button
           size="sm"
           variant="ghost"
-          onClick={() => onVMAction?.(vm.id, "more")}
+          onClick={() => onVMAction?.(vm.id, 'more')}
         >
           <MoreVertical className="h-4 w-4" />
         </Button>
@@ -285,7 +285,7 @@ export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
     );
   };
   
-  if (viewMode === "table") {
+  if (viewMode === 'table') {
     return (
       <Card>
         <CardHeader>
@@ -295,7 +295,7 @@ export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => setViewMode("grid")}
+                onClick={() => setViewMode('grid')}
               >
                 Grid View
               </Button>
@@ -329,7 +329,7 @@ export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setViewMode("table")}
+              onClick={() => setViewMode('table')}
             >
               Table View
             </Button>

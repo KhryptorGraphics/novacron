@@ -6,6 +6,92 @@ reflects the ACTUAL state of the code (verified by build + reading) and
 supersedes the older completion/production-ready reports now in `docs/archive/`,
 which overstate completion and should not be trusted.
 
+## Swarm session — 2026-09-04
+
+### What landed (all verified by build + test + live run today)
+
+- **Raft leader check-quorum (product fix)** — `backend/core/consensus/raft.go`:
+  a leader that cannot confirm majority acks within one electionTimeout
+  (after a grace period) steps down (Raft thesis §9.6 / etcd check-quorum).
+  `TestRaftNode_NetworkPartition` is now deterministic (was ~1/3 flaky: a
+  minority leader held `IsLeader()` forever — a real split-brain window).
+  26/26 post-fix runs; also fixed the `GetStats` copylocks vet warning.
+  Known limit: disruption-on-heal (no pre-vote yet) — filed `novacron-fpg`.
+- **DWCP Bullshark shutdown race (product fix)** — `v3/consensus/bullshark`:
+  `Stop()` no longer closes buffered channels (cancel → `wg.Wait` → drain);
+  `ProposeBlock` is ctx-guarded. The `panic: send on closed channel`
+  (25–40% of runs) is eliminated; 10/10 stress runs clean under `-race`.
+- **DWCP vet copylocks ×4 fixed** — `federation_adapter.go`,
+  `partition_integration.go`, `partition/training/simulator.go`;
+  `go vet ./network/dwcp/...` now exits 0. Also right-sized the 1 GB
+  scenario buffer (128 MiB) in `testing/scenarios/high_latency_test.go`.
+- **api-server boot fixed (product fix)** — `backend/cmd/api-server/main.go`:
+  removed the divergent embedded `runMigrations` DDL (its VARCHAR-id
+  `vm_interfaces` FK was unimplementable against the canonical UUID
+  `vms.id` — the server could not boot against the golang-migrate schema at
+  all). Replaced with a `requireMigratedSchema()` probe + actionable error.
+  golang-migrate (`make db-migrate` / compose migrate service / k8s Job) is
+  the single schema owner. Makefile: 9 `migrate.sh` invocations now run via
+  `bash` (exec bit was missing → `make db-migrate` was broken).
+- **API layer reconciled to canonical schema (product fix)** — VM CRUD,
+  interfaces, admin users, and auth `SimpleAuthManager` rewritten from
+  legacy columns (`tenant_id`/`config`/`networks`/`vm_interfaces`/int ids)
+  to the canonical schema (uuid ids, `organization_id`,
+  `network_interfaces`, `user_role`/`user_status` enums, bcrypt). No new
+  migration needed. Verified LIVE: `/health` 200 healthy; `POST
+  /api/auth/login` 200; `POST /api/vms` 201 (real KVM disk created); GET
+  list/get 200; DELETE 200; teardown clean.
+- **`docker/api.Dockerfile` fixed** — added the missing `sdk/` COPYs (the
+  module-replacement target was never in the build context; canonical
+  backend docker build now passes).
+- **Frontend** — `tsc --noEmit` 0 errors; jest canonical 14/14 suites,
+  34/34 tests; `next build` green; lint errors 986 → 116 (146-file
+  mechanical `eslint --fix` + testing-library overrides in
+  `.eslintrc.json`; remaining 116 are jsx-a11y / no-unescaped-entities /
+  no-case-declarations, warnings-only debt left).
+- **ai_engine (Python)** — `bandwidth_predictor_v3`: fixed the
+  scaled-target training bug (val_loss 25,974,754 → 0.33 datacenter /
+  0.25 internet) + inverse-transform in `predict()` + autocorrelated
+  AR(1)-with-daily-cycle synthetic generators (i.i.d. noise made the 60%
+  internet-accuracy assertion unreachable by construction). All 23 tests
+  pass (was 9/23 + a hang).
+- **ai-engine (Python service)** — pydantic v1→v2 migration complete
+  (imports were fatal: `BaseSettings` moved, dead
+  `FailurePredictionRecord` import); `OptimizationObjective` is now a real
+  Enum; `HTTPException` pass-through in 4 handlers; fixture fixes.
+  `tests/test_api.py` 17/17 (was: could not even collect).
+
+### Canonical gates (run today)
+
+- backend CI command set: 98 pass / 0 fail
+- `vm -short -race`: 67 pass / 12 skip / 0 fail
+- frontend full CI command set: green
+- repo-root `go build ./...`: exit 0; `go build ./backend/...`: exit 0;
+  backend/core `go build ./...`: exit 0
+
+### Still broken (all filed in beads — do not duplicate)
+
+- `novacron-frz`: dwcp scenarios suite hangs (WorkloadGenerator 8 GiB
+  byte-fill; pre-existing).
+- `novacron-slp`: dwcp simulator gates unmeetable (CompressedBytes never
+  populated).
+- `novacron-349`: dwcp Manager components never wired (silent no-op when
+  Enabled).
+- `novacron-5c7`: docker-compose.test.yml references nonexistent
+  Dockerfiles.
+- `novacron-8ba`: verify-email / resend-verification not implemented.
+- `novacron-gwh`: ai-engine needs `NUMBA_DISABLE_CUDA=1` on aarch64.
+- `novacron-fpg`: Raft pre-vote follow-up.
+- `novacron-fb8`: documentation pollution (~4900 .md; 72 fabricated
+  99.999% claims; `masterdocs/` 1231 dupes; `graphify-out/wiki` 2822) —
+  archival NEEDS USER APPROVAL.
+- Residues from schema reconciliation (comment them onto `novacron-ahm` or
+  the relevant bead): `vms.cpu_cores` holds a scheduling weight (1024
+  default), not a vCPU count; the `/api/networks` catalog is honestly
+  empty (501 on create) — per-VM `/vms/{id}/interfaces` is the canonical
+  surface; legacy role labels (`user`, `readonly`, `super-admin`) collapse
+  to the canonical enum on write; admin role typos silently map to viewer.
+
 ## Works (verified real)
 
 - **Single-node VM lifecycle via KVM through the canonical api-server** —
@@ -250,7 +336,7 @@ cleaned: its two `Start()`-based tests now skip cleanly when no peer is reachabl
 `dwcp_manager_test.go` / `config_test.go` failures are left as-is and recorded
 here as known off-path debt.
 
-## Canonical CI gate — GREEN 2026-07-05
+## Canonical CI gate — GREEN 2026-09-04 (canonical gates re-run locally)
 
 The `CI - Canonical Verification` workflow (`.github/workflows/ci.yml`) is
 **green on `main`** — run `28748286801`, commit `d3e26f1f`, all three jobs
@@ -269,6 +355,10 @@ both fixed:
 
 Lesson recorded: verify the *exact* CI command locally, not a subset — the vm
 `go build` + `-short` test I ran never exercised `go test ./backend/cmd/api-server`.
+Re-verified 2026-09-04 (swarm session): backend CI command set 98 pass /
+0 fail; `vm -short -race` 67 pass / 12 skip / 0 fail; frontend full CI
+command set green (tsc 0 errors, jest canonical 14/14 suites 34/34, next
+build green); repo-root and backend/core `go build ./...` exit 0.
 
 ## Moonshot sweep — done 2026-07-04
 

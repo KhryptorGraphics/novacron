@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelType(str, Enum):
@@ -62,8 +62,7 @@ class ModelMetadata(BaseModel):
     feature_names: List[str] = Field(default_factory=list)
     target_names: List[str] = Field(default_factory=list)
     
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class PredictionRequest(BaseModel):

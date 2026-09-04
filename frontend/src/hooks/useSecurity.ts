@@ -39,16 +39,16 @@ export function useSecurityEvents(autoRefresh = true, refreshInterval = 30000) {
     try {
       await securityAPI.acknowledgeSecurityEvent(eventId);
       toast({
-        title: "Event Acknowledged",
-        description: "Security event has been acknowledged",
+        title: 'Event Acknowledged',
+        description: 'Security event has been acknowledged',
       });
       // Refresh events
       fetchEvents();
     } catch (err) {
       toast({
-        title: "Error",
-        description: "Failed to acknowledge security event",
-        variant: "destructive",
+        title: 'Error',
+        description: 'Failed to acknowledge security event',
+        variant: 'destructive',
       });
     }
   }, [fetchEvents, toast]);
@@ -110,16 +110,16 @@ export function useCompliance() {
     try {
       const response = await securityAPI.triggerComplianceCheck(requirementId);
       toast({
-        title: "Compliance Check Started",
+        title: 'Compliance Check Started',
         description: `Check job ${response.jobId} has been initiated`,
       });
       // Refresh after a delay
       setTimeout(fetchRequirements, 2000);
     } catch (err) {
       toast({
-        title: "Error",
-        description: "Failed to start compliance check",
-        variant: "destructive",
+        title: 'Error',
+        description: 'Failed to start compliance check',
+        variant: 'destructive',
       });
     }
   }, [fetchRequirements, toast]);
@@ -163,16 +163,16 @@ export function useVulnerabilityScans() {
     try {
       const response = await securityAPI.startVulnerabilityScan(target, scanType);
       toast({
-        title: "Scan Started",
+        title: 'Scan Started',
         description: `Vulnerability scan ${response.scanId} has been initiated`,
       });
       // Refresh scans
       fetchScans();
     } catch (err) {
       toast({
-        title: "Error",
-        description: "Failed to start vulnerability scan",
-        variant: "destructive",
+        title: 'Error',
+        description: 'Failed to start vulnerability scan',
+        variant: 'destructive',
       });
     }
   }, [fetchScans, toast]);

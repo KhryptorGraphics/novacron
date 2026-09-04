@@ -45,6 +45,12 @@ type RaftNode struct {
 	// Volatile state on leaders (reinitialized after election)
 	nextIndex  map[string]int64
 	matchIndex map[string]int64
+	// Leader check-quorum state. lastAck[peer] records when a peer last
+	// responded to this node's AppendEntries (any reply proves reachability);
+	// leadershipStart anchors the grace period before quorum enforcement
+	// begins. Both are guarded by mu.
+	lastAck         map[string]time.Time
+	leadershipStart time.Time
 
 	// Node identification
 	nodeID   string
@@ -232,6 +238,8 @@ func NewRaftNodeWithStorage(id string, peers []string, transport Transport, stor
 		transport:        transport,
 		storage:          storage,
 		applyCh:          make(chan ApplyMsg, 100),
+		lastAck:          make(map[string]time.Time),
+		leadershipStart:  time.Time{},
 		ctx:              ctx,
 		cancel:           cancel,
 	}
@@ -423,11 +431,24 @@ func (rn *RaftNode) GetLeader() string {
 	return rn.leaderID
 }
 
-// GetStats returns node statistics
+// GetStats returns a snapshot of node statistics.
 func (rn *RaftNode) GetStats() NodeStats {
 	rn.stats.mu.RLock()
 	defer rn.stats.mu.RUnlock()
-	return rn.stats
+	// Field-wise snapshot: NodeStats embeds a sync.RWMutex, so returning the
+	// struct by value copies the lock (go vet "return copies lock value").
+	// Copy only the data fields; the zero-value mutex of the snapshot is
+	// private to the copy.
+	return NodeStats{
+		TermsLeader:         rn.stats.TermsLeader,
+		ElectionsWon:        rn.stats.ElectionsWon,
+		ElectionsLost:       rn.stats.ElectionsLost,
+		HeartbeatsSent:      rn.stats.HeartbeatsSent,
+		HeartbeatsReceived:  rn.stats.HeartbeatsReceived,
+		LogEntriesCommitted: rn.stats.LogEntriesCommitted,
+		LastLeaderElection:  rn.stats.LastLeaderElection,
+		TotalDowntime:       rn.stats.TotalDowntime,
+	}
 }
 
 // Main run loop
@@ -452,9 +473,31 @@ func (rn *RaftNode) run() {
 			return
 		case <-ticker.C:
 			rn.mu.Lock()
-			if rn.state != Leader && time.Since(rn.lastHeartbeat) >= rn.electionTimeout {
-				log.Printf("Node %s: Election timeout, starting election", rn.nodeID)
-				rn.startElection()
+			if rn.state != Leader {
+				// Follower/candidate election-timeout path
+				if time.Since(rn.lastHeartbeat) >= rn.electionTimeout {
+					log.Printf("Node %s: Election timeout, starting election", rn.nodeID)
+					rn.startElection()
+				}
+			} else if rn.leadershipStart.Add(rn.electionTimeout).Before(time.Now()) {
+				// Leader check-quorum (Raft thesis §9.6, etcd "check-quorum"):
+				// after a full election-timeout grace period in office, if a
+				// majority of peers has not acked within one election timeout,
+				// this leadership is no longer backed by quorum. Step down
+				// rather than serve a minority as leader -- the stale-claim
+				// that survives a partition is the split-brain window this
+				// node can otherwise never observe across the partition.
+				acked := 1 // self
+				for _, at := range rn.lastAck {
+					if time.Since(at) < rn.electionTimeout {
+						acked++
+					}
+				}
+				if acked <= len(rn.peers)/2 {
+					log.Printf("Node %s: check-quorum failed (%d/%d acks within %v), stepping down from term %d",
+						rn.nodeID, acked, len(rn.peers), rn.electionTimeout, rn.currentTerm)
+					rn.stepDownToFollower()
+				}
 			}
 			rn.mu.Unlock()
 		}
@@ -589,6 +632,13 @@ func (rn *RaftNode) becomeLeader() {
 
 	rn.state = Leader
 	rn.leaderID = rn.nodeID
+	// Anchor for check-quorum: the grace window before quorum enforcement
+	// begins runs from this instant.
+	rn.leadershipStart = time.Now()
+	// Fresh quorum-tracking state for the new leadership term.
+	for peer := range rn.lastAck {
+		rn.lastAck[peer] = time.Time{}
+	}
 
 	// Initialize leader state
 	lastLogIndex := int64(len(rn.log))
@@ -699,6 +749,11 @@ func (rn *RaftNode) replicateToPeer(peerID string) {
 		return
 	}
 
+	// A reply proves the peer is reachable and still in this term: record
+	// the ack regardless of Success (a log-mismatch reply still proves
+	// liveness), before the state checks below.
+	rn.lastAck[peerID] = time.Now()
+
 	// Update term if newer
 	if reply.Term > rn.currentTerm {
 		rn.currentTerm = reply.Term
@@ -729,6 +784,17 @@ func (rn *RaftNode) replicateToPeer(peerID string) {
 		log.Printf("Node %s: Append entries failed for %s, backing up to %d",
 			rn.nodeID, peerID, rn.nextIndex[peerID])
 	}
+}
+
+// stepDownToFollower demotes the node to follower in its current term. Callers
+// MUST hold rn.mu. currentTerm and votedFor are deliberately untouched: a
+// same-term step-down must not clear votedFor (that would allow double-voting
+// within the term), and the term is unchanged by construction. The election
+// timer IS reset so the demoted node can campaign again.
+func (rn *RaftNode) stepDownToFollower() {
+	rn.state = Follower
+	rn.leaderID = ""
+	rn.resetElectionTimer()
 }
 
 // Update commit index based on match indices

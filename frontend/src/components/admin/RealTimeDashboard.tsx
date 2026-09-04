@@ -1,11 +1,11 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { useAdminRealTimeUpdates, getConnectionStatusInfo } from "@/lib/ws/useAdminWebSocket";
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { useAdminRealTimeUpdates, getConnectionStatusInfo } from '@/lib/ws/useAdminWebSocket';
 import { 
   Activity, 
   Users, 
@@ -20,9 +20,9 @@ import {
   TrendingUp,
   TrendingDown,
   Minus
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import { FadeIn } from "@/lib/animations";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { FadeIn } from '@/lib/animations';
 import {
   LineChart,
   Line,
@@ -36,7 +36,7 @@ import {
   PieChart,
   Pie,
   Cell
-} from "recharts";
+} from 'recharts';
 
 interface RealTimeMetrics {
   timestamp: string;
@@ -99,9 +99,9 @@ export const RealTimeDashboard = () => {
     0;
   
   const getHealthColor = (score: number) => {
-    if (score >= 80) return "text-green-600";
-    if (score >= 60) return "text-yellow-600";
-    return "text-red-600";
+    if (score >= 80) return 'text-green-600';
+    if (score >= 60) return 'text-yellow-600';
+    return 'text-red-600';
   };
   
   const getTrendIcon = (current: number, previous: number) => {
@@ -129,7 +129,7 @@ export const RealTimeDashboard = () => {
             ) : (
               <WifiOff className="h-5 w-5 text-red-600" />
             )}
-            <span className={cn("text-sm font-medium", connectionInfo.color)}>
+            <span className={cn('text-sm font-medium', connectionInfo.color)}>
               {connectionInfo.status}
             </span>
           </div>
@@ -147,12 +147,12 @@ export const RealTimeDashboard = () => {
             size="sm"
             onClick={() => setIsAutoRefresh(!isAutoRefresh)}
             className={cn(
-              "flex items-center gap-2",
-              isAutoRefresh && "bg-green-50 border-green-200 text-green-700"
+              'flex items-center gap-2',
+              isAutoRefresh && 'bg-green-50 border-green-200 text-green-700'
             )}
           >
-            <RefreshCw className={cn("h-4 w-4", isAutoRefresh && "animate-spin")} />
-            {isAutoRefresh ? "Auto-Refresh On" : "Auto-Refresh Off"}
+            <RefreshCw className={cn('h-4 w-4', isAutoRefresh && 'animate-spin')} />
+            {isAutoRefresh ? 'Auto-Refresh On' : 'Auto-Refresh Off'}
           </Button>
         </div>
       </div>
@@ -165,7 +165,7 @@ export const RealTimeDashboard = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">System Health</p>
-                  <p className={cn("text-xl font-bold", getHealthColor(systemHealthScore))}>
+                  <p className={cn('text-xl font-bold', getHealthColor(systemHealthScore))}>
                     {systemHealthScore}%
                   </p>
                   {realtimeData.length > 1 && (
@@ -394,19 +394,19 @@ export const RealTimeDashboard = () => {
                   <div 
                     key={alert.id || index} 
                     className={cn(
-                      "flex items-start gap-3 p-3 rounded-lg border",
-                      alert.severity === 'critical' && "bg-red-50 border-red-200 dark:bg-red-950/50 dark:border-red-800",
-                      alert.severity === 'high' && "bg-orange-50 border-orange-200 dark:bg-orange-950/50 dark:border-orange-800",
-                      alert.severity === 'medium' && "bg-yellow-50 border-yellow-200 dark:bg-yellow-950/50 dark:border-yellow-800",
-                      alert.severity === 'low' && "bg-blue-50 border-blue-200 dark:bg-blue-950/50 dark:border-blue-800"
+                      'flex items-start gap-3 p-3 rounded-lg border',
+                      alert.severity === 'critical' && 'bg-red-50 border-red-200 dark:bg-red-950/50 dark:border-red-800',
+                      alert.severity === 'high' && 'bg-orange-50 border-orange-200 dark:bg-orange-950/50 dark:border-orange-800',
+                      alert.severity === 'medium' && 'bg-yellow-50 border-yellow-200 dark:bg-yellow-950/50 dark:border-yellow-800',
+                      alert.severity === 'low' && 'bg-blue-50 border-blue-200 dark:bg-blue-950/50 dark:border-blue-800'
                     )}
                   >
                     <AlertTriangle className={cn(
-                      "h-4 w-4 mt-0.5",
-                      alert.severity === 'critical' && "text-red-600",
-                      alert.severity === 'high' && "text-orange-600",
-                      alert.severity === 'medium' && "text-yellow-600",
-                      alert.severity === 'low' && "text-blue-600"
+                      'h-4 w-4 mt-0.5',
+                      alert.severity === 'critical' && 'text-red-600',
+                      alert.severity === 'high' && 'text-orange-600',
+                      alert.severity === 'medium' && 'text-yellow-600',
+                      alert.severity === 'low' && 'text-blue-600'
                     )} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
@@ -519,15 +519,15 @@ export const RealTimeDashboard = () => {
             <CardContent className="space-y-3">
               <div className="flex justify-between items-center">
                 <span className="text-sm">WebSocket</span>
-                <Badge variant={isConnected ? "secondary" : "destructive"}>
-                  {isConnected ? "Connected" : "Disconnected"}
+                <Badge variant={isConnected ? 'secondary' : 'destructive'}>
+                  {isConnected ? 'Connected' : 'Disconnected'}
                 </Badge>
               </div>
               
               <div className="flex justify-between items-center">
                 <span className="text-sm">Auto-refresh</span>
-                <Badge variant={isAutoRefresh ? "secondary" : "outline"}>
-                  {isAutoRefresh ? "Active" : "Paused"}
+                <Badge variant={isAutoRefresh ? 'secondary' : 'outline'}>
+                  {isAutoRefresh ? 'Active' : 'Paused'}
                 </Badge>
               </div>
               

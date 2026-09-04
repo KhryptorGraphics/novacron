@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useWorkflows } from "@/hooks/useAPI";
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useWorkflows } from '@/hooks/useAPI';
 
 export function WorkflowExecutionChart() {
   useWorkflows();

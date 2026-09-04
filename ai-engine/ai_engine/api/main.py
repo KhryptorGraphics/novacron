@@ -497,6 +497,8 @@ async def optimize_resources(
             "objective": objective
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Resource optimization failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -536,6 +538,8 @@ async def optimize_single_workload_resources(
                 "objective": objective
             }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Single workload resource optimization failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -590,6 +594,8 @@ async def activate_model(
         
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Model activation failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -621,6 +627,8 @@ async def get_model_performance(
         
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to get model performance: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

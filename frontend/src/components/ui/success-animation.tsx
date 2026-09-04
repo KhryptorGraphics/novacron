@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import { motion } from "framer-motion";
-import { Icons } from "@/components/ui/icons";
-import { cn } from "@/lib/utils";
+import { motion } from 'framer-motion';
+import { Icons } from '@/components/ui/icons';
+import { cn } from '@/lib/utils';
 
 interface SuccessAnimationProps {
   title: string;
@@ -20,12 +20,12 @@ export function SuccessAnimation({
   return (
     <motion.div
       className={cn(
-        "flex flex-col items-center justify-center text-center space-y-4 py-8",
+        'flex flex-col items-center justify-center text-center space-y-4 py-8',
         className
       )}
       initial={{ opacity: 0, scale: 0.8 }}
       animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.5, ease: "easeOut" }}
+      transition={{ duration: 0.5, ease: 'easeOut' }}
       {...(onComplete ? { onAnimationComplete: onComplete } : {})}
     >
       {/* Animated checkmark */}
@@ -35,7 +35,7 @@ export function SuccessAnimation({
         animate={{ scale: 1 }}
         transition={{ 
           delay: 0.2,
-          type: "spring",
+          type: 'spring',
           stiffness: 200,
           damping: 10
         }}
@@ -63,7 +63,7 @@ export function SuccessAnimation({
           transition={{ 
             delay: 0.5,
             duration: 1,
-            ease: "easeOut"
+            ease: 'easeOut'
           }}
         />
       </motion.div>
@@ -114,7 +114,7 @@ export function SuccessAnimation({
               delay: 1 + (i * 0.1),
               duration: 1.5,
               repeat: 1,
-              ease: "easeInOut"
+              ease: 'easeInOut'
             }}
           >
             <Icons.sparkles className="h-4 w-4 text-yellow-400" />

@@ -1,14 +1,14 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useState, useEffect } from 'react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { 
   ArrowRight, 
   Server, 
@@ -18,9 +18,9 @@ import {
   CheckCircle,
   Clock,
   Activity
-} from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Switch } from "@/components/ui/switch";
+} from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Switch } from '@/components/ui/switch';
 
 interface VMMigrationDialogProps {
   open: boolean;
@@ -30,10 +30,10 @@ interface VMMigrationDialogProps {
 
 // Mock data - replace with API calls
 const mockVM = {
-  id: "vm-001",
-  name: "web-server-01",
-  status: "running",
-  currentHost: "node-01",
+  id: 'vm-001',
+  name: 'web-server-01',
+  status: 'running',
+  currentHost: 'node-01',
   cpu: { cores: 4, usage: 45 },
   memory: { total: 8, used: 5.2 },
   disk: { total: 100, used: 32 },
@@ -42,53 +42,53 @@ const mockVM = {
 
 const mockHosts = [
   { 
-    id: "node-01", 
-    name: "node-01", 
+    id: 'node-01', 
+    name: 'node-01', 
     cpu: { total: 16, used: 8 }, 
     memory: { total: 64, used: 28 }, 
     storage: { total: 1000, used: 450 },
-    status: "online",
+    status: 'online',
     load: 0.52,
     isCurrentHost: true
   },
   { 
-    id: "node-02", 
-    name: "node-02", 
+    id: 'node-02', 
+    name: 'node-02', 
     cpu: { total: 24, used: 12 }, 
     memory: { total: 128, used: 48 }, 
     storage: { total: 2000, used: 680 },
-    status: "online",
+    status: 'online',
     load: 0.38,
     isCurrentHost: false
   },
   { 
-    id: "node-03", 
-    name: "node-03", 
+    id: 'node-03', 
+    name: 'node-03', 
     cpu: { total: 8, used: 6 }, 
     memory: { total: 32, used: 24 }, 
     storage: { total: 500, used: 180 },
-    status: "online",
+    status: 'online',
     load: 0.78,
     isCurrentHost: false
   },
   { 
-    id: "node-04", 
-    name: "node-04", 
+    id: 'node-04', 
+    name: 'node-04', 
     cpu: { total: 32, used: 4 }, 
     memory: { total: 256, used: 32 }, 
     storage: { total: 4000, used: 200 },
-    status: "maintenance",
+    status: 'maintenance',
     load: 0.15,
     isCurrentHost: false
   }
 ];
 
 export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialogProps) {
-  const [selectedHost, setSelectedHost] = useState("");
-  const [migrationType, setMigrationType] = useState("live");
-  const [migrationStatus, setMigrationStatus] = useState<"idle" | "preparing" | "migrating" | "completing" | "completed" | "error">("idle");
+  const [selectedHost, setSelectedHost] = useState('');
+  const [migrationType, setMigrationType] = useState('live');
+  const [migrationStatus, setMigrationStatus] = useState<'idle' | 'preparing' | 'migrating' | 'completing' | 'completed' | 'error'>('idle');
   const [migrationProgress, setMigrationProgress] = useState(0);
-  const [estimatedTime, setEstimatedTime] = useState("");
+  const [estimatedTime, setEstimatedTime] = useState('');
   const [bandwidthLimit, setBandwidthLimit] = useState(false);
   const [compressionEnabled, setCompressionEnabled] = useState(true);
   const [validationOnly, setValidationOnly] = useState(false);
@@ -96,10 +96,10 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
   // Reset state when dialog opens/closes
   useEffect(() => {
     if (open) {
-      setSelectedHost("");
-      setMigrationStatus("idle");
+      setSelectedHost('');
+      setMigrationStatus('idle');
       setMigrationProgress(0);
-      setEstimatedTime("");
+      setEstimatedTime('');
     }
   }, [open]);
 
@@ -107,15 +107,15 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
   const startMigration = () => {
     if (!selectedHost) return;
     
-    setMigrationStatus("preparing");
+    setMigrationStatus('preparing');
     setMigrationProgress(0);
     
     // Simulate migration phases
     const phases = [
-      { status: "preparing", duration: 2000, progress: 10 },
-      { status: "migrating", duration: 8000, progress: 90 },
-      { status: "completing", duration: 1000, progress: 100 },
-      { status: "completed", duration: 500, progress: 100 }
+      { status: 'preparing', duration: 2000, progress: 10 },
+      { status: 'migrating', duration: 8000, progress: 90 },
+      { status: 'completing', duration: 1000, progress: 100 },
+      { status: 'completed', duration: 500, progress: 100 }
     ];
     
     let currentPhase = 0;
@@ -151,25 +151,25 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
     
     // Check CPU compatibility
     if (host.cpu.total - host.cpu.used < mockVM.cpu.cores) {
-      issues.push("Insufficient CPU cores");
+      issues.push('Insufficient CPU cores');
       score -= 30;
     }
     
     // Check memory compatibility
     if (host.memory.total - host.memory.used < mockVM.memory.total) {
-      issues.push("Insufficient memory");
+      issues.push('Insufficient memory');
       score -= 30;
     }
     
     // Check load
     if (host.load > 0.8) {
-      issues.push("High system load");
+      issues.push('High system load');
       score -= 20;
     }
     
     // Check status
-    if (host.status !== "online") {
-      issues.push("Host not online");
+    if (host.status !== 'online') {
+      issues.push('Host not online');
       score -= 50;
     }
     
@@ -177,15 +177,15 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
   };
 
   const getCompatibilityColor = (score: number) => {
-    if (score >= 80) return "text-green-600 dark:text-green-400";
-    if (score >= 60) return "text-yellow-600 dark:text-yellow-400";
-    return "text-red-600 dark:text-red-400";
+    if (score >= 80) return 'text-green-600 dark:text-green-400';
+    if (score >= 60) return 'text-yellow-600 dark:text-yellow-400';
+    return 'text-red-600 dark:text-red-400';
   };
 
   const getCompatibilityBadge = (score: number) => {
-    if (score >= 80) return { variant: "default" as const, text: "Excellent" };
-    if (score >= 60) return { variant: "secondary" as const, text: "Good" };
-    return { variant: "destructive" as const, text: "Poor" };
+    if (score >= 80) return { variant: 'default' as const, text: 'Excellent' };
+    if (score >= 60) return { variant: 'secondary' as const, text: 'Good' };
+    return { variant: 'destructive' as const, text: 'Poor' };
   };
 
   const selectedHostData = mockHosts.find(h => h.id === selectedHost);
@@ -193,19 +193,19 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
 
   const getMigrationTypeDescription = (type: string) => {
     switch (type) {
-      case "live":
-        return "Minimal downtime migration with memory pre-copy";
-      case "cold":
-        return "VM stopped during migration for maximum reliability";
-      case "warm":
-        return "Brief pause for final synchronization";
+      case 'live':
+        return 'Minimal downtime migration with memory pre-copy';
+      case 'cold':
+        return 'VM stopped during migration for maximum reliability';
+      case 'warm':
+        return 'Brief pause for final synchronization';
       default:
-        return "";
+        return '';
     }
   };
 
   const getEstimatedMigrationTime = () => {
-    if (!selectedHostData) return "";
+    if (!selectedHostData) return '';
     
     const dataSize = mockVM.memory.used + (mockVM.disk.used * 0.1); // Simplified calculation
     const transferRate = bandwidthLimit ? 100 : 1000; // MB/s
@@ -234,7 +234,7 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
           </DialogDescription>
         </DialogHeader>
 
-        {migrationStatus === "idle" ? (
+        {migrationStatus === 'idle' ? (
           <Tabs defaultValue="destination" className="w-full">
             <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="destination">Destination</TabsTrigger>
@@ -288,7 +288,7 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
                             <SelectItem 
                               key={host.id} 
                               value={host.id}
-                              disabled={host.status !== "online"}
+                              disabled={host.status !== 'online'}
                             >
                               <div className="flex items-center justify-between w-full">
                                 <div className="flex flex-col">
@@ -362,7 +362,7 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
                             </AlertTitle>
                             {compatibility.issues.length > 0 && (
                               <AlertDescription>
-                                Issues: {compatibility.issues.join(", ")}
+                                Issues: {compatibility.issues.join(', ')}
                               </AlertDescription>
                             )}
                           </Alert>
@@ -526,7 +526,7 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
                   <span>{Math.round(migrationProgress)}% complete</span>
                 </div>
 
-                {migrationStatus === "completed" && (
+                {migrationStatus === 'completed' && (
                   <Alert>
                     <CheckCircle className="h-4 w-4" />
                     <AlertTitle>Migration Completed Successfully</AlertTitle>
@@ -538,7 +538,7 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
               </CardContent>
             </Card>
 
-            {migrationStatus !== "completed" && (
+            {migrationStatus !== 'completed' && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-sm font-medium">Current Activity</CardTitle>
@@ -547,9 +547,9 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
                   <div className="flex items-center space-x-3">
                     <Activity className="h-4 w-4 animate-pulse" />
                     <span className="text-sm">
-                      {migrationStatus === "preparing" && "Preparing VM for migration..."}
-                      {migrationStatus === "migrating" && "Transferring VM data..."}
-                      {migrationStatus === "completing" && "Finalizing migration..."}
+                      {migrationStatus === 'preparing' && 'Preparing VM for migration...'}
+                      {migrationStatus === 'migrating' && 'Transferring VM data...'}
+                      {migrationStatus === 'completing' && 'Finalizing migration...'}
                     </span>
                   </div>
                 </CardContent>
@@ -560,14 +560,14 @@ export function VMMigrationDialog({ open, onOpenChange, vmId }: VMMigrationDialo
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            {migrationStatus === "completed" ? "Close" : "Cancel"}
+            {migrationStatus === 'completed' ? 'Close' : 'Cancel'}
           </Button>
-          {migrationStatus === "idle" && (
+          {migrationStatus === 'idle' && (
             <Button 
               onClick={startMigration}
               disabled={!selectedHost}
             >
-              {validationOnly ? "Validate Migration" : "Start Migration"}
+              {validationOnly ? 'Validate Migration' : 'Start Migration'}
             </Button>
           )}
         </DialogFooter>

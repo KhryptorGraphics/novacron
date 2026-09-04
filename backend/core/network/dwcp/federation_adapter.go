@@ -165,6 +165,28 @@ type FederationMetrics struct {
 	DeltaApplications atomic.Uint64
 }
 
+// snapshot returns a point-in-time copy of the metrics as a fresh
+// allocation. Atomic counters are read field-by-field instead of copying
+// the struct, because copying a value containing atomic.Uint64 copies
+// (and later reuses) its embedded alignment state. Keep this in sync when
+// adding fields to FederationMetrics.
+func (m *FederationMetrics) snapshot() *FederationMetrics {
+	out := &FederationMetrics{}
+	out.TotalBytesSent.Store(m.TotalBytesSent.Load())
+	out.TotalBytesReceived.Store(m.TotalBytesReceived.Load())
+	out.CompressedBytes.Store(m.CompressedBytes.Load())
+	out.UncompressedBytes.Store(m.UncompressedBytes.Load())
+	out.AverageLatency.Store(m.AverageLatency.Load())
+	out.CompressionRatio.Store(m.CompressionRatio.Load())
+	out.MessageCount.Store(m.MessageCount.Load())
+	out.ErrorCount.Store(m.ErrorCount.Load())
+	out.SyncOperations.Store(m.SyncOperations.Load())
+	out.SyncFailures.Store(m.SyncFailures.Load())
+	out.BaselineRefreshes.Store(m.BaselineRefreshes.Load())
+	out.DeltaApplications.Store(m.DeltaApplications.Load())
+	return out
+}
+
 // NewFederationAdapter creates a new DWCP federation adapter
 func NewFederationAdapter(logger *zap.Logger, config *FederationConfig) *FederationAdapter {
 	if config == nil {
@@ -528,11 +550,11 @@ func (fa *FederationAdapter) PropagateBaseline(ctx context.Context, baselineID s
 }
 
 // GetMetrics returns current federation metrics
-func (fa *FederationAdapter) GetMetrics() FederationMetrics {
+func (fa *FederationAdapter) GetMetrics() *FederationMetrics {
 	fa.mu.RLock()
 	defer fa.mu.RUnlock()
 
-	metrics := *fa.metrics
+	metrics := fa.metrics.snapshot()
 
 	// Calculate average compression ratio
 	totalRatio := 0.0

@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	core_vm "github.com/khryptorgraphics/novacron/backend/core/vm"
 )
@@ -181,47 +182,64 @@ type clusterCreateSpec struct {
 	DiskSizeGB int                    `json:"disk_size_gb,omitempty"`
 	Image      string                 `json:"image,omitempty"`
 	Tags       map[string]interface{} `json:"tags,omitempty"`
-	OwnerID    int                    `json:"owner_id,omitempty"`
-	TenantID   string                 `json:"tenant_id,omitempty"`
+	OwnerID    string                 `json:"owner_id,omitempty"`
+	// TenantID is accepted on the wire for backward compatibility; the
+	// canonical vms table has no tenancy column, so it is not persisted.
+	TenantID string `json:"tenant_id,omitempty"`
 }
 
 // createVMLocal provisions a VM on THIS node (manager create + DB row) and returns
 // its id and state. Shared by the /vms route (local placement) and the
 // /internal/vms/create dispatch RPC. node_id is stored as this node's id so the
 // row records where the guest actually runs.
+
+// runtimeTenant returns the in-memory quota-accounting bucket for a create.
+// The canonical vms table has no tenancy column, so this label is used only
+// for runtime accounting, never persisted.
+func runtimeTenant(tenantID string) string {
+	if strings.TrimSpace(tenantID) == "" {
+		return "default"
+	}
+	return strings.TrimSpace(tenantID)
+}
 func createVMLocal(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager, spec clusterCreateSpec) (vmID, state string, err error) {
-	vmID = fmt.Sprintf("vm-%d", time.Now().UnixNano())
-	state = "created"
+	vmID = uuid.NewString()
+	state = "stopped" // canonical vm_state enum; reconciled to live state below
+	ownerID := spec.OwnerID
+	if _, err := uuid.Parse(ownerID); err != nil {
+		ownerID = "" // non-uuid ownership is dropped; vms.owner_id is a users FK
+	}
 	if vmManager != nil {
-		ownerID := ""
-		if spec.OwnerID > 0 {
-			ownerID = strconv.Itoa(spec.OwnerID)
-		}
 		if _, cerr := vmManager.CreateVM(ctx, core_vm.CreateVMRequest{
 			Name:                  spec.Name,
 			AllowMissingOwnership: true,
 			Spec: core_vm.VMConfig{
 				ID: vmID, Name: spec.Name, Type: core_vm.VMTypeKVM,
 				CPUShares: spec.CPUShares, MemoryMB: spec.MemoryMB, DiskSizeGB: spec.DiskSizeGB,
-				Image: spec.Image, OwnerID: ownerID, TenantID: spec.TenantID,
+				Image: spec.Image, OwnerID: ownerID,
+				// Runtime quota accounting needs a bucket even though the
+				// canonical vms table has no tenancy column to persist.
+				TenantID: runtimeTenant(spec.TenantID),
 			},
 		}); cerr != nil {
 			return "", "", cerr
 		}
 		state = liveVMState(vmManager, vmID, state)
 	}
-	configPayload, _ := json.Marshal(map[string]interface{}{
+	// cpu_cores is NOT NULL in the canonical schema; 0 would violate the
+	// constraint, so fall back to the same default NewVM applies on the
+	// manager path (1024, which the KVM driver clamps to the host core count).
+	if spec.CPUShares <= 0 {
+		spec.CPUShares = 1024
+	}
+	metadataPayload, _ := json.Marshal(map[string]interface{}{
 		"cpu_shares": spec.CPUShares, "memory_mb": spec.MemoryMB,
 		"disk_size_gb": spec.DiskSizeGB, "image": spec.Image, "tags": spec.Tags,
 	})
-	var owner interface{}
-	if spec.OwnerID > 0 {
-		owner = spec.OwnerID
-	}
 	if _, dberr := db.Exec(`
-		INSERT INTO vms (id, name, state, node_id, owner_id, tenant_id, config, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-	`, vmID, spec.Name, state, selfNodeID(), owner, spec.TenantID, configPayload); dberr != nil {
+		INSERT INTO vms (id, name, state, cpu_cores, memory_mb, disk_gb, os_type, owner_id, metadata, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::uuid, $9, NOW(), NOW())
+	`, vmID, spec.Name, state, spec.CPUShares, spec.MemoryMB, spec.DiskSizeGB, nullableStringValue(spec.Image), ownerID, metadataPayload); dberr != nil {
 		if vmManager != nil {
 			_ = vmManager.DeleteVM(context.Background(), vmID)
 		}
@@ -277,15 +295,16 @@ func clusteredCreateHandler(db *sql.DB, vmManager *core_vm.VMManager, storagePat
 			writeJSONError(w, http.StatusBadRequest, "name is required")
 			return
 		}
-		userID, _ := strconv.Atoi(fmt.Sprintf("%v", r.Context().Value("user_id")))
-		tenantID, _ := r.Context().Value("tenant_id").(string)
-		if tenantID == "" {
-			tenantID = "default"
+		// requireAuth puts the (string) user_id claim on the context; only a
+		// well-formed uuid can own a canonical vms row (owner_id -> users.id).
+		userID, _ := r.Context().Value("user_id").(string)
+		if _, err := uuid.Parse(userID); err != nil {
+			userID = ""
 		}
 		spec := clusterCreateSpec{
 			Name: req.Name, CPUShares: req.CPUShares, MemoryMB: req.MemoryMB,
 			DiskSizeGB: req.DiskSizeGB, Image: req.Image, Tags: req.Tags,
-			OwnerID: userID, TenantID: tenantID,
+			OwnerID: userID,
 		}
 
 		target := strings.TrimSpace(req.NodeID)
@@ -338,7 +357,7 @@ func clusteredCreateHandler(db *sql.DB, vmManager *core_vm.VMManager, storagePat
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
 			"id": vmID, "name": req.Name, "state": state, "status": state,
 			"node_id": selfNodeID(), "placed_on": placedNode, "placed_by": placedBy,
-			"tenant_id": tenantID, "created_at": time.Now().UTC().Format(time.RFC3339),
+			"organization_id": nil,
 		})
 	}
 }

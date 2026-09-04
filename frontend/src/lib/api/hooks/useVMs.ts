@@ -1,12 +1,12 @@
-"use client";
+'use client';
 
-import { useQuery } from "@tanstack/react-query";
-import { listVMs, type ListVMsParams } from "../vms";
-import type { VM } from "../types";
+import { useQuery } from '@tanstack/react-query';
+import { listVMs, type ListVMsParams } from '../vms';
+import type { VM } from '../types';
 
 export function useVMs(params?: ListVMsParams) {
   const { data, isLoading, error } = useQuery({
-    queryKey: ["vms", params],
+    queryKey: ['vms', params],
     queryFn: () => listVMs(params),
     staleTime: 5_000,
   });
@@ -27,7 +27,7 @@ export function useVMs(params?: ListVMsParams) {
   // 401/500 would render as an empty inventory instead of the error state.
   const envelopeError =
     !Array.isArray(payload) && payload?.error
-      ? new Error(payload.error.message || payload.error.code || "Failed to load virtual machines")
+      ? new Error(payload.error.message || payload.error.code || 'Failed to load virtual machines')
       : null;
 
   return {

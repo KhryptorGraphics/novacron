@@ -296,8 +296,8 @@ export function PerformanceOptimizationFlow() {
           if (prev >= 100) {
             setIsAnalyzing(false);
             toast({
-              title: "Analysis Complete",
-              description: "Performance bottlenecks have been identified with optimization recommendations.",
+              title: 'Analysis Complete',
+              description: 'Performance bottlenecks have been identified with optimization recommendations.',
             });
             return 100;
           }
@@ -332,7 +332,7 @@ export function PerformanceOptimizationFlow() {
             };
             
             toast({
-              title: "Optimization Complete",
+              title: 'Optimization Complete',
               description: `Applied ${results.appliedOptimizations} optimizations with ${results.performanceGain}% performance improvement.`,
             });
             
@@ -357,17 +357,17 @@ export function PerformanceOptimizationFlow() {
     setIsAnalyzing(true);
     setAnalysisProgress(0);
     toast({
-      title: "Analysis Started",
-      description: "Running comprehensive performance analysis...",
+      title: 'Analysis Started',
+      description: 'Running comprehensive performance analysis...',
     });
   };
 
   const applyOptimizations = () => {
     if (selectedRecommendations.length === 0) {
       toast({
-        title: "No Recommendations Selected",
-        description: "Please select at least one optimization to apply.",
-        variant: "destructive"
+        title: 'No Recommendations Selected',
+        description: 'Please select at least one optimization to apply.',
+        variant: 'destructive'
       });
       return;
     }
@@ -384,7 +384,7 @@ export function PerformanceOptimizationFlow() {
 
     setOptimizationJob(job);
     toast({
-      title: "Optimization Started",
+      title: 'Optimization Started',
       description: `Applying ${selectedRecommendations.length} optimizations...`,
     });
   };
@@ -561,11 +561,11 @@ export function PerformanceOptimizationFlow() {
                   </div>
                   <Progress value={analysisProgress} className="w-full" />
                   <div className="text-sm text-gray-600">
-                    {analysisProgress < 25 && "Collecting performance metrics..."}
-                    {analysisProgress >= 25 && analysisProgress < 50 && "Analyzing resource utilization patterns..."}
-                    {analysisProgress >= 50 && analysisProgress < 75 && "Identifying performance bottlenecks..."}
-                    {analysisProgress >= 75 && analysisProgress < 100 && "Generating optimization recommendations..."}
-                    {analysisProgress >= 100 && "Analysis complete!"}
+                    {analysisProgress < 25 && 'Collecting performance metrics...'}
+                    {analysisProgress >= 25 && analysisProgress < 50 && 'Analyzing resource utilization patterns...'}
+                    {analysisProgress >= 50 && analysisProgress < 75 && 'Identifying performance bottlenecks...'}
+                    {analysisProgress >= 75 && analysisProgress < 100 && 'Generating optimization recommendations...'}
+                    {analysisProgress >= 100 && 'Analysis complete!'}
                   </div>
                 </div>
               </CardContent>

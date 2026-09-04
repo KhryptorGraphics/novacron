@@ -47,25 +47,25 @@ DB_TEST_URL ?= postgres://postgres:postgres@localhost:5432/novacron_test?sslmode
 # Run database migrations up
 db-migrate:
 	@echo "Running database migrations..."
-	@cd database && DB_URL="$(DB_URL)" ./scripts/migrate.sh up
+	@cd database && DB_URL="$(DB_URL)" bash ./scripts/migrate.sh up
 
 # Rollback last migration
 db-rollback:
 	@echo "Rolling back last migration..."
-	@cd database && DB_URL="$(DB_URL)" ./scripts/migrate.sh down
+	@cd database && DB_URL="$(DB_URL)" bash ./scripts/migrate.sh down
 
 # Create a new migration
 db-migrate-create:
 	@read -p "Enter migration name: " name; \
-	cd database && ./scripts/migrate.sh create $$name
+	cd database && bash ./scripts/migrate.sh create $$name
 
 # Show current migration version
 db-version:
-	@cd database && DB_URL="$(DB_URL)" ./scripts/migrate.sh version
+	@cd database && DB_URL="$(DB_URL)" bash ./scripts/migrate.sh version
 
 # Show migration status
 db-status:
-	@cd database && DB_URL="$(DB_URL)" ./scripts/migrate.sh status
+	@cd database && DB_URL="$(DB_URL)" bash ./scripts/migrate.sh status
 
 # Seed database with development data
 db-seed:
@@ -80,25 +80,25 @@ db-clean:
 # Reset database (drop, migrate, seed)
 db-reset:
 	@echo "Resetting database..."
-	@cd database && DB_URL="$(DB_URL)" ./scripts/migrate.sh drop
+	@cd database && DB_URL="$(DB_URL)" bash ./scripts/migrate.sh drop
 	@$(MAKE) db-migrate
 	@$(MAKE) db-seed
 
 # Setup test database
 db-test-setup:
 	@echo "Setting up test database..."
-	@cd database && DB_URL="$(DB_TEST_URL)" ./scripts/migrate.sh up
+	@cd database && DB_URL="$(DB_TEST_URL)" bash ./scripts/migrate.sh up
 	@cd database && DB_URL="$(DB_TEST_URL)" ./scripts/seed.sh seed
 
 # Clean test database
 db-test-clean:
 	@echo "Cleaning test database..."
-	@cd database && DB_URL="$(DB_TEST_URL)" ./scripts/migrate.sh drop
+	@cd database && DB_URL="$(DB_TEST_URL)" bash ./scripts/migrate.sh drop
 
 # Validate migration files
 db-validate:
 	@echo "Validating migration files..."
-	@cd database && ./scripts/migrate.sh validate
+	@cd database && bash ./scripts/migrate.sh validate
 
 # Database console
 db-console:

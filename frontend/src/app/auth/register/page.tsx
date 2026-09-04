@@ -1,14 +1,14 @@
-"use client";
+'use client';
 
 // Disable static generation for this page
 export const dynamic = 'force-dynamic';
 
-import { useState } from "react";
-import Link from "next/link";
-import { RegistrationWizard } from "@/components/auth/RegistrationWizard";
-import { RegistrationData } from "@/lib/validation";
-import { authService } from "@/lib/auth";
-import { useToast } from "@/components/ui/use-toast";
+import { useState } from 'react';
+import Link from 'next/link';
+import { RegistrationWizard } from '@/components/auth/RegistrationWizard';
+import { RegistrationData } from '@/lib/validation';
+import { authService } from '@/lib/auth';
+import { useToast } from '@/components/ui/use-toast';
 
 export default function RegisterPage() {
   const [, setIsLoading] = useState(false);
@@ -25,11 +25,11 @@ export default function RegisterPage() {
         password: data.password,
       });
     } catch (error) {
-      console.error("Registration error:", error);
+      console.error('Registration error:', error);
       toast({
-        title: "Registration Failed",
-        description: "Unable to create your account. Please try again.",
-        variant: "destructive",
+        title: 'Registration Failed',
+        description: 'Unable to create your account. Please try again.',
+        variant: 'destructive',
       });
       throw error; // Re-throw to be handled by the wizard
     } finally {
@@ -110,7 +110,7 @@ export default function RegisterPage() {
           <RegistrationWizard onComplete={onComplete} />
           
           <p className="text-center text-sm text-muted-foreground mt-4">
-            Already have an account?{" "}
+            Already have an account?{' '}
             <Link
               href="/auth/login"
               className="font-medium text-blue-600 hover:text-blue-500 underline underline-offset-4"

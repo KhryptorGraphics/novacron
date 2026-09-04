@@ -1,11 +1,11 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { useVmTemplates, useCreateVmTemplate, useDeleteVmTemplate } from "@/lib/api/hooks/useAdmin";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { useState } from 'react';
+import { useVmTemplates, useCreateVmTemplate, useDeleteVmTemplate } from '@/lib/api/hooks/useAdmin';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { 
   Table, 
   TableBody, 
@@ -13,16 +13,16 @@ import {
   TableHead, 
   TableHeader, 
   TableRow 
-} from "@/components/ui/table";
+} from '@/components/ui/table';
 import { 
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Progress } from "@/components/ui/progress";
+} from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Progress } from '@/components/ui/progress';
 import { 
   Dialog,
   DialogContent,
@@ -30,10 +30,10 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { useToast } from "@/components/ui/use-toast";
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { useToast } from '@/components/ui/use-toast';
 import { 
   Server, 
   Plus, 
@@ -57,122 +57,122 @@ import {
   AlertTriangle,
   CheckCircle,
   Clock
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import { VmTemplate } from "@/lib/api/types";
-import { FadeIn } from "@/lib/animations";
-import { useForm } from "react-hook-form";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { VmTemplate } from '@/lib/api/types';
+import { FadeIn } from '@/lib/animations';
+import { useForm } from 'react-hook-form';
 
 // Mock VM data for comprehensive management
 const mockVMs = [
   {
-    id: "vm-001",
-    name: "web-server-01",
-    status: "running",
-    template_id: "tmpl-ubuntu-web",
+    id: 'vm-001',
+    name: 'web-server-01',
+    status: 'running',
+    template_id: 'tmpl-ubuntu-web',
     cpu_cores: 4,
     memory_mb: 8192,
     disk_gb: 80,
-    ip_address: "192.168.1.10",
-    node: "node-01",
-    uptime: "15d 4h 23m",
+    ip_address: '192.168.1.10',
+    node: 'node-01',
+    uptime: '15d 4h 23m',
     cpu_usage: 45,
     memory_usage: 62,
     disk_usage: 35,
     network_in: 1.2,
     network_out: 0.8,
-    created_at: "2024-08-10T09:30:00Z",
-    last_backup: "2024-08-23T02:00:00Z"
+    created_at: '2024-08-10T09:30:00Z',
+    last_backup: '2024-08-23T02:00:00Z'
   },
   {
-    id: "vm-002", 
-    name: "database-primary",
-    status: "running",
-    template_id: "tmpl-postgres-db",
+    id: 'vm-002', 
+    name: 'database-primary',
+    status: 'running',
+    template_id: 'tmpl-postgres-db',
     cpu_cores: 8,
     memory_mb: 16384,
     disk_gb: 500,
-    ip_address: "192.168.1.20",
-    node: "node-02",
-    uptime: "30d 12h 45m",
+    ip_address: '192.168.1.20',
+    node: 'node-02',
+    uptime: '30d 12h 45m',
     cpu_usage: 78,
     memory_usage: 89,
     disk_usage: 67,
     network_in: 2.8,
     network_out: 1.5,
-    created_at: "2024-07-25T14:15:00Z",
-    last_backup: "2024-08-24T01:00:00Z"
+    created_at: '2024-07-25T14:15:00Z',
+    last_backup: '2024-08-24T01:00:00Z'
   },
   {
-    id: "vm-003",
-    name: "api-gateway",
-    status: "stopped",
-    template_id: "tmpl-nginx-lb",
+    id: 'vm-003',
+    name: 'api-gateway',
+    status: 'stopped',
+    template_id: 'tmpl-nginx-lb',
     cpu_cores: 2,
     memory_mb: 4096,
     disk_gb: 40,
-    ip_address: "192.168.1.30",
-    node: "node-01", 
-    uptime: "0d 0h 0m",
+    ip_address: '192.168.1.30',
+    node: 'node-01', 
+    uptime: '0d 0h 0m',
     cpu_usage: 0,
     memory_usage: 0,
     disk_usage: 15,
     network_in: 0,
     network_out: 0,
-    created_at: "2024-08-20T11:20:00Z",
-    last_backup: "2024-08-22T02:00:00Z"
+    created_at: '2024-08-20T11:20:00Z',
+    last_backup: '2024-08-22T02:00:00Z'
   },
   {
-    id: "vm-004",
-    name: "monitoring-stack",
-    status: "migrating",
-    template_id: "tmpl-monitoring",
+    id: 'vm-004',
+    name: 'monitoring-stack',
+    status: 'migrating',
+    template_id: 'tmpl-monitoring',
     cpu_cores: 4,
     memory_mb: 8192,
     disk_gb: 120,
-    ip_address: "192.168.1.40",
-    node: "node-03",
-    uptime: "7d 18h 12m",
+    ip_address: '192.168.1.40',
+    node: 'node-03',
+    uptime: '7d 18h 12m',
     cpu_usage: 35,
     memory_usage: 55,
     disk_usage: 42,
     network_in: 0.9,
     network_out: 1.2,
-    created_at: "2024-08-17T16:45:00Z",
-    last_backup: "2024-08-23T03:00:00Z"
+    created_at: '2024-08-17T16:45:00Z',
+    last_backup: '2024-08-23T03:00:00Z'
   }
 ];
 
 const vmOperations = [
   { 
-    id: "bulk-start", 
-    label: "Start Selected", 
+    id: 'bulk-start', 
+    label: 'Start Selected', 
     icon: <Play className="h-4 w-4" />, 
-    variant: "default" as const 
+    variant: 'default' as const 
   },
   { 
-    id: "bulk-stop", 
-    label: "Stop Selected", 
+    id: 'bulk-stop', 
+    label: 'Stop Selected', 
     icon: <Square className="h-4 w-4" />, 
-    variant: "outline" as const 
+    variant: 'outline' as const 
   },
   { 
-    id: "bulk-restart", 
-    label: "Restart Selected", 
+    id: 'bulk-restart', 
+    label: 'Restart Selected', 
     icon: <RotateCcw className="h-4 w-4" />, 
-    variant: "outline" as const 
+    variant: 'outline' as const 
   },
   { 
-    id: "bulk-migrate", 
-    label: "Migrate Selected", 
+    id: 'bulk-migrate', 
+    label: 'Migrate Selected', 
     icon: <Activity className="h-4 w-4" />, 
-    variant: "outline" as const 
+    variant: 'outline' as const 
   },
   { 
-    id: "bulk-backup", 
-    label: "Backup Selected", 
+    id: 'bulk-backup', 
+    label: 'Backup Selected', 
     icon: <Download className="h-4 w-4" />, 
-    variant: "outline" as const 
+    variant: 'outline' as const 
   }
 ];
 
@@ -218,16 +218,16 @@ export default function VMManagementPage() {
   const handleBulkOperation = async (operation: string) => {
     if (selectedVMs.length === 0) {
       toast({
-        title: "No VMs selected",
-        description: "Please select VMs to perform bulk operations.",
-        variant: "destructive"
+        title: 'No VMs selected',
+        description: 'Please select VMs to perform bulk operations.',
+        variant: 'destructive'
       });
       return;
     }
     
     // Simulate API call
     toast({
-      title: "Operation initiated",
+      title: 'Operation initiated',
       description: `${operation.replace('bulk-', '').replace('-', ' ')} operation started for ${selectedVMs.length} VM(s).`
     });
     
@@ -238,44 +238,44 @@ export default function VMManagementPage() {
     try {
       await createTemplate.mutateAsync(data);
       toast({
-        title: "Template created successfully",
+        title: 'Template created successfully',
         description: `${data.name} template has been created.`
       });
       setShowTemplateDialog(false);
       reset();
     } catch (error) {
       toast({
-        title: "Failed to create template",
-        description: "Please check the form and try again.",
-        variant: "destructive"
+        title: 'Failed to create template',
+        description: 'Please check the form and try again.',
+        variant: 'destructive'
       });
     }
   };
   
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "running": return "text-green-600";
-      case "stopped": return "text-red-600";
-      case "paused": return "text-yellow-600";
-      case "migrating": return "text-blue-600";
-      default: return "text-gray-600";
+      case 'running': return 'text-green-600';
+      case 'stopped': return 'text-red-600';
+      case 'paused': return 'text-yellow-600';
+      case 'migrating': return 'text-blue-600';
+      default: return 'text-gray-600';
     }
   };
   
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case "running": return <Play className="h-4 w-4 text-green-600" />;
-      case "stopped": return <Square className="h-4 w-4 text-red-600" />;
-      case "paused": return <Pause className="h-4 w-4 text-yellow-600" />;
-      case "migrating": return <Activity className="h-4 w-4 text-blue-600" />;
+      case 'running': return <Play className="h-4 w-4 text-green-600" />;
+      case 'stopped': return <Square className="h-4 w-4 text-red-600" />;
+      case 'paused': return <Pause className="h-4 w-4 text-yellow-600" />;
+      case 'migrating': return <Activity className="h-4 w-4 text-blue-600" />;
       default: return <AlertTriangle className="h-4 w-4 text-gray-600" />;
     }
   };
   
   const getResourceColor = (usage: number) => {
-    if (usage >= 90) return "text-red-600";
-    if (usage >= 75) return "text-yellow-600";
-    return "text-green-600";
+    if (usage >= 90) return 'text-red-600';
+    if (usage >= 75) return 'text-yellow-600';
+    return 'text-green-600';
   };
   
   return (
@@ -539,7 +539,7 @@ export default function VMManagementPage() {
                           <TableCell>
                             <div className="flex items-center gap-2">
                               {getStatusIcon(vm.status)}
-                              <span className={cn("capitalize font-medium", getStatusColor(vm.status))}>
+                              <span className={cn('capitalize font-medium', getStatusColor(vm.status))}>
                                 {vm.status}
                               </span>
                             </div>
@@ -582,7 +582,7 @@ export default function VMManagementPage() {
                                 <div className="flex-1">
                                   <Progress value={vm.cpu_usage} className="h-1" />
                                 </div>
-                                <span className={cn("text-xs font-medium", getResourceColor(vm.cpu_usage))}>
+                                <span className={cn('text-xs font-medium', getResourceColor(vm.cpu_usage))}>
                                   {vm.cpu_usage}%
                                 </span>
                               </div>
@@ -592,7 +592,7 @@ export default function VMManagementPage() {
                                 <div className="flex-1">
                                   <Progress value={vm.memory_usage} className="h-1" />
                                 </div>
-                                <span className={cn("text-xs font-medium", getResourceColor(vm.memory_usage))}>
+                                <span className={cn('text-xs font-medium', getResourceColor(vm.memory_usage))}>
                                   {vm.memory_usage}%
                                 </span>
                               </div>
@@ -602,7 +602,7 @@ export default function VMManagementPage() {
                                 <div className="flex-1">
                                   <Progress value={vm.disk_usage} className="h-1" />
                                 </div>
-                                <span className={cn("text-xs font-medium", getResourceColor(vm.disk_usage))}>
+                                <span className={cn('text-xs font-medium', getResourceColor(vm.disk_usage))}>
                                   {vm.disk_usage}%
                                 </span>
                               </div>
@@ -674,7 +674,7 @@ export default function VMManagementPage() {
                       <Label htmlFor="template-name">Template Name</Label>
                       <Input 
                         id="template-name"
-                        {...register("name", { required: "Name is required" })}
+                        {...register('name', { required: 'Name is required' })}
                         placeholder="Ubuntu Web Server"
                       />
                       {errors.name && (
@@ -684,7 +684,7 @@ export default function VMManagementPage() {
                     
                     <div>
                       <Label htmlFor="template-os">Operating System</Label>
-                      <Select onValueChange={(value) => register("os").onChange({ target: { value } })}>
+                      <Select onValueChange={(value) => register('os').onChange({ target: { value } })}>
                         <SelectTrigger>
                           <SelectValue placeholder="Select OS" />
                         </SelectTrigger>
@@ -702,7 +702,7 @@ export default function VMManagementPage() {
                     <Label htmlFor="template-description">Description</Label>
                     <Textarea
                       id="template-description"
-                      {...register("description")}
+                      {...register('description')}
                       placeholder="Template description and use case..."
                       rows={3}
                     />
@@ -714,7 +714,7 @@ export default function VMManagementPage() {
                       <Input 
                         id="template-cpu"
                         type="number"
-                        {...register("cpu_cores", { required: "CPU cores required" })}
+                        {...register('cpu_cores', { required: 'CPU cores required' })}
                         placeholder="4"
                         min="1"
                         max="32"
@@ -726,7 +726,7 @@ export default function VMManagementPage() {
                       <Input 
                         id="template-memory"
                         type="number"
-                        {...register("memory_mb", { required: "Memory required" })}
+                        {...register('memory_mb', { required: 'Memory required' })}
                         placeholder="8192"
                         min="512"
                         step="512"
@@ -738,7 +738,7 @@ export default function VMManagementPage() {
                       <Input 
                         id="template-disk"
                         type="number"
-                        {...register("disk_gb", { required: "Disk size required" })}
+                        {...register('disk_gb', { required: 'Disk size required' })}
                         placeholder="80"
                         min="10"
                       />
@@ -757,7 +757,7 @@ export default function VMManagementPage() {
                       Cancel
                     </Button>
                     <Button type="submit" disabled={createTemplate.isPending}>
-                      {createTemplate.isPending ? "Creating..." : "Create Template"}
+                      {createTemplate.isPending ? 'Creating...' : 'Create Template'}
                     </Button>
                   </div>
                 </form>
@@ -770,7 +770,7 @@ export default function VMManagementPage() {
               <CardContent className="p-6">
                 {templatesLoading ? (
                   <div className="flex items-center justify-center h-32">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -778,8 +778,8 @@ export default function VMManagementPage() {
                       <div key={template.id} className="border rounded-lg p-4 space-y-3">
                         <div className="flex items-center justify-between">
                           <h4 className="font-medium">{template.name}</h4>
-                          <Badge variant={template.is_public ? "secondary" : "outline"}>
-                            {template.is_public ? "Public" : "Private"}
+                          <Badge variant={template.is_public ? 'secondary' : 'outline'}>
+                            {template.is_public ? 'Public' : 'Private'}
                           </Badge>
                         </div>
                         

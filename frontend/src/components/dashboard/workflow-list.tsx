@@ -1,21 +1,21 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { useWorkflows } from "@/hooks/useAPI";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { useState } from 'react';
+import { useWorkflows } from '@/hooks/useAPI';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { 
   Dialog, 
   DialogContent, 
   DialogHeader, 
   DialogTitle, 
   DialogTrigger 
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import { 
   Table, 
   TableBody, 
@@ -23,8 +23,8 @@ import {
   TableHead, 
   TableHeader, 
   TableRow 
-} from "@/components/ui/table";
-import { format } from "date-fns";
+} from '@/components/ui/table';
+import { format } from 'date-fns';
 
 export function WorkflowList() {
   const { workflows, loading, error, createWorkflow, updateWorkflow, deleteWorkflow, executeWorkflow, refetch } = useWorkflows();
@@ -32,12 +32,12 @@ export function WorkflowList() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingWorkflow, setEditingWorkflow] = useState<any>(null);
   const [newWorkflow, setNewWorkflow] = useState({
-    name: "",
-    description: "",
+    name: '',
+    description: '',
     enabled: true,
-    nodes: "[]",
-    edges: "[]",
-    metadata: ""
+    nodes: '[]',
+    edges: '[]',
+    metadata: ''
   });
 
   const handleCreateWorkflow = async () => {
@@ -57,15 +57,15 @@ export function WorkflowList() {
       
       setIsCreateDialogOpen(false);
       setNewWorkflow({
-        name: "",
-        description: "",
+        name: '',
+        description: '',
         enabled: true,
-        nodes: "[]",
-        edges: "[]",
-        metadata: ""
+        nodes: '[]',
+        edges: '[]',
+        metadata: ''
       });
     } catch (err) {
-      console.error("Failed to create workflow:", err);
+      console.error('Failed to create workflow:', err);
     }
   };
 
@@ -89,16 +89,16 @@ export function WorkflowList() {
       setIsEditDialogOpen(false);
       setEditingWorkflow(null);
     } catch (err) {
-      console.error("Failed to update workflow:", err);
+      console.error('Failed to update workflow:', err);
     }
   };
 
   const handleDeleteWorkflow = async (id: string) => {
-    if (confirm("Are you sure you want to delete this workflow?")) {
+    if (confirm('Are you sure you want to delete this workflow?')) {
       try {
         await deleteWorkflow(id);
       } catch (err) {
-        console.error("Failed to delete workflow:", err);
+        console.error('Failed to delete workflow:', err);
       }
     }
   };
@@ -109,7 +109,7 @@ export function WorkflowList() {
       // Refresh workflows to show updated status
       refetch();
     } catch (err) {
-      console.error("Failed to execute workflow:", err);
+      console.error('Failed to execute workflow:', err);
     }
   };
 
@@ -245,17 +245,17 @@ export function WorkflowList() {
             {workflows && workflows.map((workflow) => (
               <TableRow key={workflow.id}>
                 <TableCell className="font-medium">{workflow.name}</TableCell>
-                <TableCell>{workflow.description || "No description"}</TableCell>
+                <TableCell>{workflow.description || 'No description'}</TableCell>
                 <TableCell>
-                  <Badge variant={workflow.enabled ? "default" : "destructive"}>
-                    {workflow.enabled ? "Enabled" : "Disabled"}
+                  <Badge variant={workflow.enabled ? 'default' : 'destructive'}>
+                    {workflow.enabled ? 'Enabled' : 'Disabled'}
                   </Badge>
                 </TableCell>
                 <TableCell>
-                  {format(new Date(workflow.createdAt), "MMM dd, yyyy")}
+                  {format(new Date(workflow.createdAt), 'MMM dd, yyyy')}
                 </TableCell>
                 <TableCell>
-                  {format(new Date(workflow.updatedAt), "MMM dd, yyyy")}
+                  {format(new Date(workflow.updatedAt), 'MMM dd, yyyy')}
                 </TableCell>
                 <TableCell>
                   <div className="flex space-x-2">
@@ -267,7 +267,7 @@ export function WorkflowList() {
                           ...workflow,
                           nodes: JSON.stringify(workflow.nodes, null, 2),
                           edges: JSON.stringify(workflow.edges, null, 2),
-                          metadata: workflow.metadata ? JSON.stringify(workflow.metadata, null, 2) : ""
+                          metadata: workflow.metadata ? JSON.stringify(workflow.metadata, null, 2) : ''
                         });
                         setIsEditDialogOpen(true);
                       }}

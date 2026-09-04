@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { usePathname } from "next/navigation";
-import Link from "next/link";
-import { cn } from "@/lib/utils";
+import { useState, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
+import Link from 'next/link';
+import { cn } from '@/lib/utils';
 import {
   Menu,
   X,
@@ -20,9 +20,9 @@ import {
   ChevronRight,
   Moon,
   Sun
-} from "lucide-react";
-import { Button } from "./button";
-import { motion, AnimatePresence } from "framer-motion";
+} from 'lucide-react';
+import { Button } from './button';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface MobileNavigationProps {
   user?: {
@@ -35,64 +35,64 @@ interface MobileNavigationProps {
 
 const navigationItems = [
   {
-    name: "Dashboard",
-    href: "/dashboard",
+    name: 'Dashboard',
+    href: '/dashboard',
     icon: Home,
-    description: "Overview and metrics"
+    description: 'Overview and metrics'
   },
   {
-    name: "VMs",
-    href: "/vms",
+    name: 'VMs',
+    href: '/vms',
     icon: Server,
-    description: "Virtual machine management"
+    description: 'Virtual machine management'
   },
   {
-    name: "Monitoring",
-    href: "/monitoring",
+    name: 'Monitoring',
+    href: '/monitoring',
     icon: Activity,
-    description: "Real-time system monitoring"
+    description: 'Real-time system monitoring'
   },
   {
-    name: "Analytics",
-    href: "/analytics",
+    name: 'Analytics',
+    href: '/analytics',
     icon: LineChart,
-    description: "Read-only operational analytics"
+    description: 'Read-only operational analytics'
   },
   {
-    name: "Network",
-    href: "/network",
+    name: 'Network',
+    href: '/network',
     icon: Network,
-    description: "Network inventory and interfaces"
+    description: 'Network inventory and interfaces'
   },
   {
-    name: "Storage",
-    href: "/storage",
+    name: 'Storage',
+    href: '/storage',
     icon: Database,
-    description: "Storage management"
+    description: 'Storage management'
   },
   {
-    name: "Security",
-    href: "/security",
+    name: 'Security',
+    href: '/security',
     icon: Shield,
-    description: "Security settings"
+    description: 'Security settings'
   },
   {
-    name: "Admin",
-    href: "/admin",
+    name: 'Admin',
+    href: '/admin',
     icon: Shield,
-    description: "Admin panel"
+    description: 'Admin panel'
   },
   {
-    name: "Users",
-    href: "/users",
+    name: 'Users',
+    href: '/users',
     icon: Users,
-    description: "Canonical admin user management"
+    description: 'Canonical admin user management'
   },
   {
-    name: "Settings",
-    href: "/settings",
+    name: 'Settings',
+    href: '/settings',
     icon: Settings,
-    description: "Account and security settings"
+    description: 'Account and security settings'
   },
 ];
 
@@ -110,12 +110,12 @@ export function MobileNavigation({ user, onLogout }: MobileNavigationProps) {
   // Prevent body scroll when menu is open
   useEffect(() => {
     if (isOpen) {
-      document.body.style.overflow = "hidden";
+      document.body.style.overflow = 'hidden';
     } else {
-      document.body.style.overflow = "unset";
+      document.body.style.overflow = 'unset';
     }
     return () => {
-      document.body.style.overflow = "unset";
+      document.body.style.overflow = 'unset';
     };
   }, [isOpen]);
 
@@ -123,8 +123,8 @@ export function MobileNavigation({ user, onLogout }: MobileNavigationProps) {
     setIsDarkMode(!isDarkMode);
     // In a real app, this would update the theme context
     document.documentElement.setAttribute(
-      "data-theme",
-      isDarkMode ? "light" : "dark"
+      'data-theme',
+      isDarkMode ? 'light' : 'dark'
     );
   };
 
@@ -185,10 +185,10 @@ export function MobileNavigation({ user, onLogout }: MobileNavigationProps) {
 
             {/* Slide-out Panel */}
             <motion.div
-              initial={{ x: "-100%" }}
+              initial={{ x: '-100%' }}
               animate={{ x: 0 }}
-              exit={{ x: "-100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
               className="fixed inset-y-0 left-0 z-50 w-72 bg-white dark:bg-gray-900 shadow-xl lg:hidden"
             >
               <div className="flex h-full flex-col">
@@ -240,11 +240,11 @@ export function MobileNavigation({ user, onLogout }: MobileNavigationProps) {
                           key={item.name}
                           href={item.href}
                           className={cn(
-                            "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all",
-                            "hover:bg-gray-100 dark:hover:bg-gray-800",
+                            'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all',
+                            'hover:bg-gray-100 dark:hover:bg-gray-800',
                             isActive
-                              ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400"
-                              : "text-gray-700 dark:text-gray-300"
+                              ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'
+                              : 'text-gray-700 dark:text-gray-300'
                           )}
                         >
                           <Icon className="h-5 w-5 flex-shrink-0" />
@@ -313,11 +313,11 @@ export function MobileNavigation({ user, onLogout }: MobileNavigationProps) {
               key={item.name}
               href={item.href}
               className={cn(
-                "flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-colors",
-                "hover:bg-gray-100 dark:hover:bg-gray-800",
+                'flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-colors',
+                'hover:bg-gray-100 dark:hover:bg-gray-800',
                 isActive
-                  ? "text-blue-600 dark:text-blue-400"
-                  : "text-gray-500 dark:text-gray-400"
+                  ? 'text-blue-600 dark:text-blue-400'
+                  : 'text-gray-500 dark:text-gray-400'
               )}
             >
               <Icon className="h-5 w-5" />
@@ -350,11 +350,11 @@ export function DesktopSidebar({
 
   return (
     <aside className={cn(
-      "hidden lg:flex lg:flex-col",
-      "fixed inset-y-0 left-0 z-30",
-      "border-r bg-white dark:bg-gray-900 dark:border-gray-800",
-      "transition-all duration-300",
-      collapsed ? "w-16" : "w-64"
+      'hidden lg:flex lg:flex-col',
+      'fixed inset-y-0 left-0 z-30',
+      'border-r bg-white dark:bg-gray-900 dark:border-gray-800',
+      'transition-all duration-300',
+      collapsed ? 'w-16' : 'w-64'
     )}>
       {/* Logo */}
       <div className="flex h-16 items-center gap-4 border-b px-4 dark:border-gray-800">
@@ -390,12 +390,12 @@ export function DesktopSidebar({
                 key={item.name}
                 href={item.href}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all",
-                  "hover:bg-gray-100 dark:hover:bg-gray-800",
+                  'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all',
+                  'hover:bg-gray-100 dark:hover:bg-gray-800',
                   isActive
-                    ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400"
-                    : "text-gray-700 dark:text-gray-300",
-                  collapsed && "justify-center px-2"
+                    ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'
+                    : 'text-gray-700 dark:text-gray-300',
+                  collapsed && 'justify-center px-2'
                 )}
                 title={collapsed ? item.name : undefined}
               >

@@ -1,12 +1,12 @@
-"use client";
+'use client';
 
 export const dynamic = 'force-dynamic';
 
-import Link from "next/link";
-import AuthGuard from "@/components/auth/AuthGuard";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { useAuth } from "@/hooks/useAuth";
+import Link from 'next/link';
+import AuthGuard from '@/components/auth/AuthGuard';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { useAuth } from '@/hooks/useAuth';
 
 export default function ClusterAccessPage() {
   const { memberships } = useAuth();

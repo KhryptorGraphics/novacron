@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import * as React from 'react';
+import { cn } from '@/lib/utils';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
 interface ResponsiveTableProps {
   children: React.ReactNode;
@@ -17,11 +17,11 @@ export function ResponsiveTable({
 }: ResponsiveTableProps) {
   return (
     <div className={cn(
-      "w-full overflow-auto rounded-lg border border-gray-200 dark:border-gray-700",
+      'w-full overflow-auto rounded-lg border border-gray-200 dark:border-gray-700',
       containerClassName
     )}>
       <table className={cn(
-        "w-full caption-bottom text-sm",
+        'w-full caption-bottom text-sm',
         className
       )}>
         {children}
@@ -43,8 +43,8 @@ export function ResponsiveTableHeader({
 }: ResponsiveTableHeaderProps) {
   return (
     <thead className={cn(
-      "border-b bg-gray-50 dark:bg-gray-800",
-      sticky && "sticky top-0 z-10",
+      'border-b bg-gray-50 dark:bg-gray-800',
+      sticky && 'sticky top-0 z-10',
       className
     )}>
       {children}
@@ -63,7 +63,7 @@ export function ResponsiveTableBody({
 }: ResponsiveTableBodyProps) {
   return (
     <tbody className={cn(
-      "[&_tr:last-child]:border-0",
+      '[&_tr:last-child]:border-0',
       className
     )}>
       {children}
@@ -89,10 +89,10 @@ export function ResponsiveTableRow({
   return (
     <tr 
       className={cn(
-        "border-b transition-colors",
-        "hover:bg-gray-50 dark:hover:bg-gray-800/50",
-        onClick && "cursor-pointer",
-        expandable && "group",
+        'border-b transition-colors',
+        'hover:bg-gray-50 dark:hover:bg-gray-800/50',
+        onClick && 'cursor-pointer',
+        expandable && 'group',
         className
       )}
       onClick={onClick}
@@ -117,39 +117,39 @@ interface ResponsiveTableCellProps {
   children: React.ReactNode;
   className?: string | undefined;
   mobileLabel?: string | undefined;
-  priority?: "high" | "medium" | "low" | undefined;
-  align?: "left" | "center" | "right" | undefined;
+  priority?: 'high' | 'medium' | 'low' | undefined;
+  align?: 'left' | 'center' | 'right' | undefined;
 }
 
 export function ResponsiveTableCell({ 
   children, 
   className,
   mobileLabel,
-  priority = "medium",
-  align = "left"
+  priority = 'medium',
+  align = 'left'
 }: ResponsiveTableCellProps) {
   const alignClass = {
-    left: "text-left",
-    center: "text-center",
-    right: "text-right"
+    left: 'text-left',
+    center: 'text-center',
+    right: 'text-right'
   }[align];
 
   const priorityClass = {
-    high: "",
-    medium: "hidden sm:table-cell",
-    low: "hidden lg:table-cell"
+    high: '',
+    medium: 'hidden sm:table-cell',
+    low: 'hidden lg:table-cell'
   }[priority];
 
   return (
     <td className={cn(
-      "p-3",
+      'p-3',
       alignClass,
       priorityClass,
       className
     )}>
       {mobileLabel && (
         <span className="font-medium text-gray-600 dark:text-gray-400 sm:hidden">
-          {mobileLabel}:{" "}
+          {mobileLabel}:{' '}
         </span>
       )}
       {children}
@@ -160,40 +160,40 @@ export function ResponsiveTableCell({
 interface ResponsiveTableHeadProps {
   children: React.ReactNode;
   className?: string | undefined;
-  priority?: "high" | "medium" | "low" | undefined;
-  align?: "left" | "center" | "right" | undefined;
+  priority?: 'high' | 'medium' | 'low' | undefined;
+  align?: 'left' | 'center' | 'right' | undefined;
   sortable?: boolean | undefined;
-  sorted?: "asc" | "desc" | null | undefined;
+  sorted?: 'asc' | 'desc' | null | undefined;
   onSort?: (() => void) | undefined;
 }
 
 export function ResponsiveTableHead({ 
   children, 
   className,
-  priority = "medium",
-  align = "left",
+  priority = 'medium',
+  align = 'left',
   sortable = false,
   sorted = null,
   onSort
 }: ResponsiveTableHeadProps) {
   const alignClass = {
-    left: "text-left",
-    center: "text-center",
-    right: "text-right"
+    left: 'text-left',
+    center: 'text-center',
+    right: 'text-right'
   }[align];
 
   const priorityClass = {
-    high: "",
-    medium: "hidden sm:table-cell",
-    low: "hidden lg:table-cell"
+    high: '',
+    medium: 'hidden sm:table-cell',
+    low: 'hidden lg:table-cell'
   }[priority];
 
   return (
     <th className={cn(
-      "h-10 px-3 font-medium text-gray-700 dark:text-gray-300",
+      'h-10 px-3 font-medium text-gray-700 dark:text-gray-300',
       alignClass,
       priorityClass,
-      sortable && "cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-700",
+      sortable && 'cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-700',
       className
     )}
     onClick={sortable ? onSort : undefined}
@@ -204,8 +204,8 @@ export function ResponsiveTableHead({
           <div className="flex flex-col">
             <svg 
               className={cn(
-                "h-3 w-3",
-                sorted === "asc" ? "text-primary-600" : "text-gray-400"
+                'h-3 w-3',
+                sorted === 'asc' ? 'text-primary-600' : 'text-gray-400'
               )} 
               fill="currentColor" 
               viewBox="0 0 20 20"
@@ -214,8 +214,8 @@ export function ResponsiveTableHead({
             </svg>
             <svg 
               className={cn(
-                "h-3 w-3 -mt-1",
-                sorted === "desc" ? "text-primary-600" : "text-gray-400"
+                'h-3 w-3 -mt-1',
+                sorted === 'desc' ? 'text-primary-600' : 'text-gray-400'
               )} 
               fill="currentColor" 
               viewBox="0 0 20 20"
@@ -243,7 +243,7 @@ export function MobileCardView({
 }: MobileCardViewProps) {
   return (
     <div className={cn(
-      "space-y-3 sm:hidden",
+      'space-y-3 sm:hidden',
       className
     )}>
       {items.map((item, index) => (
@@ -264,8 +264,8 @@ interface ResponsiveDataTableProps<T> {
   columns: {
     key: keyof T | string;
     header: string;
-    priority?: "high" | "medium" | "low";
-    align?: "left" | "center" | "right";
+    priority?: 'high' | 'medium' | 'low';
+    align?: 'left' | 'center' | 'right';
     sortable?: boolean;
     render?: (value: any, item: T) => React.ReactNode;
   }[];
@@ -283,7 +283,7 @@ export function ResponsiveDataTable<T>({
 }: ResponsiveDataTableProps<T>) {
   const [sortConfig, setSortConfig] = React.useState<{
     key: string;
-    direction: "asc" | "desc";
+    direction: 'asc' | 'desc';
   } | null>(null);
 
   const sortedData = React.useMemo(() => {
@@ -294,10 +294,10 @@ export function ResponsiveDataTable<T>({
       const bValue = (b as any)[sortConfig.key];
 
       if (aValue < bValue) {
-        return sortConfig.direction === "asc" ? -1 : 1;
+        return sortConfig.direction === 'asc' ? -1 : 1;
       }
       if (aValue > bValue) {
-        return sortConfig.direction === "asc" ? 1 : -1;
+        return sortConfig.direction === 'asc' ? 1 : -1;
       }
       return 0;
     });
@@ -306,12 +306,12 @@ export function ResponsiveDataTable<T>({
   const handleSort = (key: string) => {
     setSortConfig(current => {
       if (current?.key === key) {
-        if (current.direction === "asc") {
-          return { key, direction: "desc" };
+        if (current.direction === 'asc') {
+          return { key, direction: 'desc' };
         }
         return null;
       }
-      return { key, direction: "asc" };
+      return { key, direction: 'asc' };
     });
   };
 

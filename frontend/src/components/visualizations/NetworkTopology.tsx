@@ -130,8 +130,8 @@ export const NetworkTopology: React.FC<NetworkTopologyProps> = ({
       const dpr = window.devicePixelRatio || 1;
       canvas.width = Math.floor(canvas.clientWidth * dpr);
       canvas.height = Math.floor(canvas.clientHeight * dpr);
-      canvas.style.width = canvas.clientWidth + 'px';
-      canvas.style.height = canvas.clientHeight + 'px';
+      canvas.style.width = `${canvas.clientWidth  }px`;
+      canvas.style.height = `${canvas.clientHeight  }px`;
       ctx.scale(dpr, dpr);
     };
 
@@ -1075,33 +1075,33 @@ export const NetworkTopology: React.FC<NetworkTopologyProps> = ({
         </div>
         <div className="flex justify-center mt-4 space-x-4">
           <div className="flex items-center">
-            <div className="w-3 h-3 rounded-full bg-[#4f46e5] mr-2"></div>
+            <div className="w-3 h-3 rounded-full bg-[#4f46e5] mr-2" />
             <span className="text-xs">VM</span>
           </div>
           <div className="flex items-center">
-            <div className="w-3 h-3 rounded-full bg-[#0891b2] mr-2"></div>
+            <div className="w-3 h-3 rounded-full bg-[#0891b2] mr-2" />
             <span className="text-xs">Host</span>
           </div>
           <div className="flex items-center">
-            <div className="w-3 h-3 rounded-full bg-[#7c3aed] mr-2"></div>
+            <div className="w-3 h-3 rounded-full bg-[#7c3aed] mr-2" />
             <span className="text-xs">Storage</span>
           </div>
           <div className="flex items-center">
-            <div className="w-3 h-3 rounded-full bg-[#2563eb] mr-2"></div>
+            <div className="w-3 h-3 rounded-full bg-[#2563eb] mr-2" />
             <span className="text-xs">Network</span>
           </div>
           <div className="flex items-center">
-            <div className="w-3 h-3 rounded-full bg-[#059669] mr-2"></div>
+            <div className="w-3 h-3 rounded-full bg-[#059669] mr-2" />
             <span className="text-xs">Service</span>
           </div>
           {isDistributed && (
             <>
               <div className="flex items-center">
-                <div className="w-3 h-3 rounded-full bg-[#f59e0b] mr-2"></div>
+                <div className="w-3 h-3 rounded-full bg-[#f59e0b] mr-2" />
                 <span className="text-xs">Cluster</span>
               </div>
               <div className="flex items-center">
-                <div className="w-3 h-3 rounded-full bg-[#ec4899] mr-2"></div>
+                <div className="w-3 h-3 rounded-full bg-[#ec4899] mr-2" />
                 <span className="text-xs">Federation</span>
               </div>
             </>

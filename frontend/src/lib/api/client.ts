@@ -137,16 +137,16 @@ function withParams(path: string, params?: Record<string, string | number | unde
   const url = new URL(buildApiV1Url(path));
   const sp = new URLSearchParams();
   if (params) {
-    for (const [k,v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") sp.set(k, String(v));
+    for (const [k,v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') sp.set(k, String(v));
   }
   url.search = sp.toString();
   return url.toString();
 }
 
 function parsePaginationHeader(res: Response): Pagination | undefined {
-  const raw = res.headers.get("X-Pagination");
+  const raw = res.headers.get('X-Pagination');
   if (!raw) return undefined;
-  try { return JSON.parse(raw) as Pagination } catch { return undefined }
+  try { return JSON.parse(raw) as Pagination; } catch { return undefined; }
 }
 
 export class ApiHttpError extends Error {
@@ -169,11 +169,11 @@ function authTokenHeader(): Record<string, string> {
  * @param opts Optional options { role } where role defaults to "viewer"
  * @returns ApiEnvelope<T> with pagination populated from X-Pagination header if present
  */
-export async function apiGet<T>(path: string, params?: Record<string, string | number | undefined>, opts?: { role?: "viewer" | "operator" | undefined }): Promise<ApiEnvelope<T>> {
+export async function apiGet<T>(path: string, params?: Record<string, string | number | undefined>, opts?: { role?: 'viewer' | 'operator' | undefined }): Promise<ApiEnvelope<T>> {
   try {
     const url = withParams(path, params);
-    const role = opts?.role ?? "viewer";
-    const res = await fetch(url, { method: "GET", headers: { Accept: "application/json", "X-Role": role, ...authTokenHeader() }, credentials: "include" });
+    const role = opts?.role ?? 'viewer';
+    const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json', 'X-Role': role, ...authTokenHeader() }, credentials: 'include' });
     
     if (!res.ok) {
       return { data: null, error: { code: `HTTP_${res.status}`, message: res.statusText } };
@@ -184,7 +184,7 @@ export async function apiGet<T>(path: string, params?: Record<string, string | n
     if (env.error) throw new ApiHttpError(res.status, env.error.code, env.error.message, url);
     return env;
   } catch (error) {
-    return { data: null, error: { code: "FETCH_ERROR", message: error instanceof Error ? error.message : "Unknown error" } };
+    return { data: null, error: { code: 'FETCH_ERROR', message: error instanceof Error ? error.message : 'Unknown error' } };
   }
 }
 
@@ -195,10 +195,10 @@ export async function apiGet<T>(path: string, params?: Record<string, string | n
  * @param opts Optional options { role } where role defaults to "viewer"
  * @returns ApiEnvelope<T>
  */
-export async function apiPost<T>(path: string, body?: unknown, opts?: { role?: "viewer" | "operator" | undefined }): Promise<ApiEnvelope<T>> {
+export async function apiPost<T>(path: string, body?: unknown, opts?: { role?: 'viewer' | 'operator' | undefined }): Promise<ApiEnvelope<T>> {
   const url = buildApiV1Url(path);
-  const role = opts?.role ?? "viewer";
-  const res = await fetch(url, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", "X-Role": role, ...authTokenHeader() }, body: body!==undefined?JSON.stringify(body):null, credentials: "include" });
+  const role = opts?.role ?? 'viewer';
+  const res = await fetch(url, { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Role': role, ...authTokenHeader() }, body: body!==undefined?JSON.stringify(body):null, credentials: 'include' });
   const env = await res.json() as ApiEnvelope<T>;
   if (env.error) throw new ApiHttpError(res.status, env.error.code, env.error.message, url);
   return env;

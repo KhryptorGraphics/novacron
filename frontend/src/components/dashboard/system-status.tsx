@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 
 interface SystemStatusProps {
@@ -49,7 +49,7 @@ export function SystemStatus({
               <div 
                 className="bg-green-600 h-2.5 rounded-full" 
                 style={{ width: `${Math.min(100, total_cpu_usage)}%` }}
-              ></div>
+               />
             </div>
             <span>{cpuPercent}%</span>
           </div>
@@ -63,7 +63,7 @@ export function SystemStatus({
               <div 
                 className="bg-yellow-600 h-2.5 rounded-full" 
                 style={{ width: `${memoryPercentage}%` }}
-              ></div>
+               />
             </div>
             <span>{memoryPercentage}%</span>
           </div>
@@ -77,7 +77,7 @@ export function SystemStatus({
               <div 
                 className="bg-red-600 h-2.5 rounded-full" 
                 style={{ width: `${diskPercentage}%` }}
-              ></div>
+               />
             </div>
             <span>{diskPercentage}%</span>
           </div>
@@ -93,7 +93,7 @@ export function SystemStatus({
         <div className="flex justify-between">
           <span className="text-sm text-gray-500 dark:text-gray-400">System Health:</span>
           <span className="text-sm text-green-600 dark:text-green-400">
-            <span className="inline-block w-2 h-2 bg-green-500 rounded-full mr-1"></span>
+            <span className="inline-block w-2 h-2 bg-green-500 rounded-full mr-1" />
             Optimal
           </span>
         </div>

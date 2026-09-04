@@ -5,8 +5,8 @@ Optimized for Python 3.12 with improved type annotations and validation.
 
 import os
 from typing import List, Optional
-from pydantic import BaseSettings, validator, Field
-from pydantic_settings import BaseSettings as PydanticBaseSettings
+from pydantic import Field, ValidationInfo, field_validator
+from pydantic_settings import BaseSettings as PydanticBaseSettings, SettingsConfigDict
 
 
 class DatabaseSettings(PydanticBaseSettings):  # Python 3.12 compatible
@@ -22,7 +22,7 @@ class DatabaseSettings(PydanticBaseSettings):  # Python 3.12 compatible
         env_prefix = "DB_"
 
 
-class RedisSettings(BaseSettings):
+class RedisSettings(PydanticBaseSettings):
     """Redis configuration for caching and queuing."""
     
     url: str = "redis://localhost:6379/0"
@@ -30,11 +30,10 @@ class RedisSettings(BaseSettings):
     retry_on_timeout: bool = True
     socket_timeout: int = 5
     
-    class Config:
-        env_prefix = "REDIS_"
+    model_config = SettingsConfigDict(env_prefix="REDIS_")
 
 
-class MLSettings(BaseSettings):
+class MLSettings(PydanticBaseSettings):
     """Machine learning model configuration."""
     
     # Model paths
@@ -56,11 +55,10 @@ class MLSettings(BaseSettings):
     anomaly_detection_threshold: float = 0.95
     drift_detection_threshold: float = 0.1
     
-    class Config:
-        env_prefix = "ML_"
+    model_config = SettingsConfigDict(env_prefix="ML_", protected_namespaces=())
 
 
-class NovaCronSettings(BaseSettings):
+class NovaCronSettings(PydanticBaseSettings):
     """NovaCron API integration settings."""
     
     api_url: str = "http://localhost:8090"
@@ -74,11 +72,10 @@ class NovaCronSettings(BaseSettings):
     password: str = "changeme"
     jwt_secret: Optional[str] = None
     
-    class Config:
-        env_prefix = "NOVACRON_"
+    model_config = SettingsConfigDict(env_prefix="NOVACRON_")
 
 
-class MonitoringSettings(BaseSettings):
+class MonitoringSettings(PydanticBaseSettings):
     """Monitoring and observability settings."""
     
     # Prometheus metrics
@@ -94,11 +91,10 @@ class MonitoringSettings(BaseSettings):
     health_check_interval: int = 60
     health_check_timeout: int = 10
     
-    class Config:
-        env_prefix = "MONITORING_"
+    model_config = SettingsConfigDict(env_prefix="MONITORING_")
 
 
-class SecuritySettings(BaseSettings):
+class SecuritySettings(PydanticBaseSettings):
     """Security and authentication settings."""
     
     secret_key: str = "changeme_in_production"
@@ -110,15 +106,14 @@ class SecuritySettings(BaseSettings):
     allowed_origins: List[str] = ["http://localhost:8092", "http://localhost:3001"]
     api_key_header: str = "X-API-Key"
     
-    @validator("secret_key")
+    @field_validator("secret_key")
     def validate_secret_key(cls, v: str) -> str:
         """Validate secret key in production."""
         if os.getenv("ENVIRONMENT", "development") == "production" and v == "changeme_in_production":
             raise ValueError("Secret key must be set in production")
         return v
     
-    class Config:
-        env_prefix = "SECURITY_"
+    model_config = SettingsConfigDict(env_prefix="SECURITY_")
 
 
 class Settings(PydanticBaseSettings):  # Python 3.12 optimized
@@ -142,24 +137,21 @@ class Settings(PydanticBaseSettings):  # Python 3.12 optimized
     monitoring: MonitoringSettings = MonitoringSettings()
     security: SecuritySettings = SecuritySettings()
     
-    @validator("debug")
-    def set_debug_mode(cls, v: bool, values: dict) -> bool:
+    @field_validator("debug")
+    def set_debug_mode(cls, v: bool, info: ValidationInfo) -> bool:
         """Set debug mode based on environment."""
-        if values.get("environment") == "development":
+        if info.data.get("environment") == "development":
             return True
         return v
     
-    @validator("workers")
-    def set_workers_count(cls, v: int, values: dict) -> int:
+    @field_validator("workers")
+    def set_workers_count(cls, v: int, info: ValidationInfo) -> int:
         """Set workers based on environment."""
-        if values.get("environment") == "development":
+        if info.data.get("environment") == "development":
             return 1
         return max(1, min(v, os.cpu_count() or 1))
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False)
 
 
 def get_settings() -> Settings:

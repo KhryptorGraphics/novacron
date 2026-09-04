@@ -1,21 +1,21 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
-import { Slider } from "@/components/ui/slider";
-import { Textarea } from "@/components/ui/textarea";
+import { useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { Slider } from '@/components/ui/slider';
+import { Textarea } from '@/components/ui/textarea';
 import { 
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { FadeIn } from "@/lib/animations";
+} from '@/components/ui/select';
+import { FadeIn } from '@/lib/animations';
 import { 
   Settings, 
   Save, 
@@ -27,8 +27,8 @@ import {
   Server,
   FileText,
   Upload
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 // Configuration sections
 interface ConfigSection {
@@ -366,7 +366,7 @@ export function SystemConfiguration() {
               {setting.description}
             </p>
             <Input
-              type={setting.sensitive ? "password" : "text"}
+              type={setting.sensitive ? 'password' : 'text'}
               value={value}
               onChange={(e) => updateSetting(setting.key, e.target.value)}
               className="w-full"
@@ -511,8 +511,8 @@ export function SystemConfiguration() {
                     key={section.id}
                     onClick={() => setActiveSection(section.id)}
                     className={cn(
-                      "w-full text-left px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex items-center gap-3",
-                      activeSection === section.id && "bg-blue-50 dark:bg-blue-950 border-r-2 border-blue-500"
+                      'w-full text-left px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex items-center gap-3',
+                      activeSection === section.id && 'bg-blue-50 dark:bg-blue-950 border-r-2 border-blue-500'
                     )}
                   >
                     {section.icon}

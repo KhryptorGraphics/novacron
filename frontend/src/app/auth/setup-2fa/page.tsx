@@ -1,14 +1,14 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useToast } from "@/components/ui/use-toast";
-import { authService } from "@/lib/auth";
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useToast } from '@/components/ui/use-toast';
+import { authService } from '@/lib/auth';
 
 export default function Setup2FAPage() {
   const [step, setStep] = useState<'setup' | 'verify' | 'complete'>('setup');
@@ -40,16 +40,16 @@ export default function Setup2FAPage() {
       } catch (error) {
         console.error('Failed to initialize 2FA setup:', error);
         toast({
-          title: "Error",
-          description: "Failed to initialize 2FA setup. Please try again.",
-          variant: "destructive",
+          title: 'Error',
+          description: 'Failed to initialize 2FA setup. Please try again.',
+          variant: 'destructive',
         });
         // Fall back to demo data if API fails
-        setQrCodeUrl("https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=otpauth://totp/NovaCron:demo@demo.local?secret=JBSWY3DPEHPK3PXP&issuer=NovaCron");
-        setSecret("JBSWY3DPEHPK3PXP");
+        setQrCodeUrl('https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=otpauth://totp/NovaCron:demo@demo.local?secret=JBSWY3DPEHPK3PXP&issuer=NovaCron');
+        setSecret('JBSWY3DPEHPK3PXP');
         setBackupCodes([
-          "1a2b-3c4d", "5e6f-7g8h", "9i0j-1k2l",
-          "3m4n-5o6p", "7q8r-9s0t", "1u2v-3w4x"
+          '1a2b-3c4d', '5e6f-7g8h', '9i0j-1k2l',
+          '3m4n-5o6p', '7q8r-9s0t', '1u2v-3w4x'
         ]);
       } finally {
         setLoadingSetup(false);
@@ -60,14 +60,14 @@ export default function Setup2FAPage() {
   }, [router, toast]);
 
   const handleSkip = () => {
-    router.push("/dashboard");
+    router.push('/dashboard');
   };
 
   const handleVerifyCode = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!verificationCode || verificationCode.length !== 6) {
-      setError("Please enter a 6-digit verification code");
+      setError('Please enter a 6-digit verification code');
       return;
     }
 
@@ -77,7 +77,7 @@ export default function Setup2FAPage() {
     try {
       const user = authService.getCurrentUser();
       if (!user) {
-        throw new Error("User not authenticated");
+        throw new Error('User not authenticated');
       }
 
       const verifyResponse = await authService.verify2FASetup({
@@ -89,15 +89,15 @@ export default function Setup2FAPage() {
         await authService.enable2FA(verificationCode);
         setStep('complete');
         toast({
-          title: "Two-Factor Authentication Enabled",
-          description: "Your account is now secured with 2FA",
+          title: 'Two-Factor Authentication Enabled',
+          description: 'Your account is now secured with 2FA',
         });
       } else {
-        throw new Error(verifyResponse.error || "Verification failed");
+        throw new Error(verifyResponse.error || 'Verification failed');
       }
     } catch (error) {
       console.error('2FA verification failed:', error);
-      const errorMessage = error instanceof Error ? error.message : "Invalid verification code. Please try again.";
+      const errorMessage = error instanceof Error ? error.message : 'Invalid verification code. Please try again.';
       setError(errorMessage);
     } finally {
       setIsLoading(false);
@@ -105,7 +105,7 @@ export default function Setup2FAPage() {
   };
 
   const handleComplete = () => {
-    router.push("/dashboard");
+    router.push('/dashboard');
   };
 
   return (
@@ -128,7 +128,7 @@ export default function Setup2FAPage() {
             <CardContent className="space-y-4">
               {loadingSetup ? (
                 <div className="flex justify-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
                 </div>
               ) : (
                 <>
@@ -187,7 +187,7 @@ export default function Setup2FAPage() {
                   {error && <p className="text-sm text-red-600">{error}</p>}
                 </div>
                 <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Verifying..." : "Verify and Enable 2FA"}
+                  {isLoading ? 'Verifying...' : 'Verify and Enable 2FA'}
                 </Button>
               </form>
             </CardContent>

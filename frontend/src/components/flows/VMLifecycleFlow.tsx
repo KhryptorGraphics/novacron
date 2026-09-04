@@ -285,9 +285,9 @@ export function VMLifecycleFlow() {
       setCurrentStep(prev => Math.min(prev + 1, STEPS.length - 1));
     } else {
       toast({
-        title: "Validation Error",
-        description: "Please fix the errors before continuing",
-        variant: "destructive"
+        title: 'Validation Error',
+        description: 'Please fix the errors before continuing',
+        variant: 'destructive'
       });
     }
   };
@@ -309,7 +309,7 @@ export function VMLifecycleFlow() {
           clearInterval(progressInterval);
           setIsDeploying(false);
           toast({
-            title: "VM Deployed Successfully",
+            title: 'VM Deployed Successfully',
             description: `${configuration.name} has been created and is starting up`,
           });
           // Clear draft
@@ -329,7 +329,7 @@ export function VMLifecycleFlow() {
     setConfiguration(config);
     setCurrentStep(0);
     toast({
-      title: "Configuration Loaded",
+      title: 'Configuration Loaded',
       description: `Loaded saved configuration for ${config.name}`,
     });
   };
@@ -860,12 +860,12 @@ export function VMLifecycleFlow() {
                     </div>
                     <Progress value={deploymentProgress} className="w-full" />
                     <div className="text-sm text-gray-600">
-                      {deploymentProgress < 20 && "Validating configuration..."}
-                      {deploymentProgress >= 20 && deploymentProgress < 40 && "Allocating resources..."}
-                      {deploymentProgress >= 40 && deploymentProgress < 60 && "Creating VM instance..."}
-                      {deploymentProgress >= 60 && deploymentProgress < 80 && "Installing template..."}
-                      {deploymentProgress >= 80 && deploymentProgress < 100 && "Configuring network..."}
-                      {deploymentProgress >= 100 && "VM deployed successfully!"}
+                      {deploymentProgress < 20 && 'Validating configuration...'}
+                      {deploymentProgress >= 20 && deploymentProgress < 40 && 'Allocating resources...'}
+                      {deploymentProgress >= 40 && deploymentProgress < 60 && 'Creating VM instance...'}
+                      {deploymentProgress >= 60 && deploymentProgress < 80 && 'Installing template...'}
+                      {deploymentProgress >= 80 && deploymentProgress < 100 && 'Configuring network...'}
+                      {deploymentProgress >= 100 && 'VM deployed successfully!'}
                     </div>
                   </div>
                 </CardContent>

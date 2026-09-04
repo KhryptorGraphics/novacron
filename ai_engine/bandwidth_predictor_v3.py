@@ -210,8 +210,9 @@ class BandwidthPredictorV3:
         for i in range(len(normalized_features) - self.config.sequence_length):
             # Input: sequence_length timesteps
             X.append(normalized_features[i:i + self.config.sequence_length])
-            # Output: bandwidth at next timestep
-            y.append(features_array[i + self.config.sequence_length][0])  # bandwidth
+            # Output: bandwidth at next timestep (scaled to match X's feature space;
+            # predict() inverts this with the scaler's column-0 stats)
+            y.append(normalized_features[i + self.config.sequence_length][0])  # bandwidth
 
         return np.array(X), np.array(y)
 
@@ -320,9 +321,9 @@ class BandwidthPredictorV3:
 
         # Prepare input
         X = np.expand_dims(normalized_features, axis=0)
-
-        # Predict
-        prediction = self.model.predict(X, verbose=0)[0][0]
+        # Predict (model outputs scaled bandwidth; invert to Mbps)
+        prediction_scaled = self.model.predict(X, verbose=0)[0][0]
+        prediction = self.scaler.mean_[0] + prediction_scaled * self.scaler.scale_[0]
 
         # Calculate confidence based on recent prediction accuracy
         if return_confidence:
@@ -484,9 +485,23 @@ def generate_synthetic_data(
     base_time = datetime.now()
 
     if mode == 'datacenter':
+        # Stable datacenter traffic: AR(1) load process around a daily
+        # cycle. Real datacenter load is strongly autocorrelated; amplitude
+        # matches the documented range (5000 ± 500 Mbps marginal).
+        mean_bw = 5000.0
+        alpha = 0.95        # AR(1) persistence (slow load drift)
+        sigma = 140.0       # innovation std (marginal std ≈ 450 Mbps)
+        cycle_amp = 300.0   # daily cycle amplitude (±6% of mean)
+        phase0 = 2 * np.pi * (base_time.hour * 3600 + base_time.minute * 60
+                              + base_time.second) / 86400.0
+        prev_bw = mean_bw
         for i in range(num_samples):
-            # Stable datacenter metrics
-            bandwidth = np.random.normal(5000, 500)  # 5 Gbps ± 500 Mbps
+            cycle_mean = mean_bw + cycle_amp * np.sin(phase0 + 2 * np.pi * i / 1440.0)
+            bandwidth = (alpha * prev_bw + (1 - alpha) * cycle_mean
+                         + np.random.normal(0, sigma))
+            bandwidth = max(1000, min(10000, bandwidth))
+            prev_bw = bandwidth
+
             latency = np.random.gamma(2, 2)  # 1-10 ms
             packet_loss = np.random.exponential(0.0001)  # Very low
             jitter = np.random.gamma(1, 0.5)  # 0-2 ms
@@ -494,16 +509,30 @@ def generate_synthetic_data(
 
             data.append(NetworkMetrics(
                 timestamp=base_time + timedelta(seconds=i),
-                bandwidth_mbps=max(1000, min(10000, bandwidth)),
+                bandwidth_mbps=bandwidth,
                 latency_ms=max(0.5, min(10, latency)),
                 packet_loss=min(0.001, packet_loss),
                 jitter_ms=max(0, min(2, jitter)),
                 throughput_mbps=throughput
             ))
     else:  # internet
+        # Variable internet traffic: AR(1) load process around a daily
+        # cycle with the documented amplitude (500 ± 200 Mbps marginal).
+        # Same learnable temporal structure as the datacenter series.
+        mean_bw = 500.0
+        alpha = 0.95        # AR(1) persistence (diurnal load persistence)
+        sigma = 65.0        # innovation std (marginal std ≈ 210 Mbps)
+        cycle_amp = 125.0   # daily cycle amplitude (±25% of mean)
+        phase0 = 2 * np.pi * (base_time.hour * 3600 + base_time.minute * 60
+                              + base_time.second) / 86400.0
+        prev_bw = mean_bw
         for i in range(num_samples):
-            # Variable internet metrics
-            bandwidth = np.random.normal(500, 200)  # 500 Mbps ± 200 Mbps
+            cycle_mean = mean_bw + cycle_amp * np.sin(phase0 + 2 * np.pi * i / 1440.0)
+            bandwidth = (alpha * prev_bw + (1 - alpha) * cycle_mean
+                         + np.random.normal(0, sigma))
+            bandwidth = max(100, min(900, bandwidth))
+            prev_bw = bandwidth
+
             latency = np.random.gamma(10, 10)  # 50-200 ms with variability
             packet_loss = np.random.exponential(0.005)  # Higher loss
             jitter = np.random.gamma(3, 5)  # 5-50 ms
@@ -511,7 +540,7 @@ def generate_synthetic_data(
 
             data.append(NetworkMetrics(
                 timestamp=base_time + timedelta(seconds=i),
-                bandwidth_mbps=max(100, min(900, bandwidth)),
+                bandwidth_mbps=bandwidth,
                 latency_ms=max(10, min(500, latency)),
                 packet_loss=min(0.02, packet_loss),
                 jitter_ms=max(1, min(50, jitter)),

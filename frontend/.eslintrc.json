@@ -101,7 +101,9 @@
         "testing-library/await-async-queries": "error",
         "testing-library/no-await-sync-queries": "error",
         "testing-library/no-debugging-utils": "warn",
-        "testing-library/no-dom-import": "error"
+        "testing-library/no-dom-import": "error",
+        "testing-library/no-node-access": "warn",
+        "testing-library/no-container": "warn"
       }
     },
     {

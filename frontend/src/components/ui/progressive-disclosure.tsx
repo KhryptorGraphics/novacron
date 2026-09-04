@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { useState, useEffect } from "react";
-import { cn } from "@/lib/utils";
-import { motion, AnimatePresence } from "framer-motion";
+import * as React from 'react';
+import { useState, useEffect } from 'react';
+import { cn } from '@/lib/utils';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ChevronDown, 
   ChevronRight,
@@ -11,9 +11,9 @@ import {
   EyeOff,
   Info,
   ChevronUp
-} from "lucide-react";
-import { Button } from "./button";
-import { Badge } from "./badge";
+} from 'lucide-react';
+import { Button } from './button';
+import { Badge } from './badge';
 
 // Collapsible Section Component
 interface CollapsibleSectionProps {
@@ -48,13 +48,13 @@ export function CollapsibleSection({
   };
   
   return (
-    <div className={cn("border rounded-lg", className)}>
+    <div className={cn('border rounded-lg', className)}>
       <button
         onClick={handleToggle}
         className={cn(
-          "w-full px-4 py-3 flex items-center justify-between",
-          "hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors",
-          "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset",
+          'w-full px-4 py-3 flex items-center justify-between',
+          'hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors',
+          'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset',
           headerClassName
         )}
         aria-expanded={isOpen}
@@ -79,12 +79,12 @@ export function CollapsibleSection({
         {isOpen && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
+            animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: "easeInOut" }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
             className="overflow-hidden"
           >
-            <div className={cn("px-4 py-3 border-t", contentClassName)}>
+            <div className={cn('px-4 py-3 border-t', contentClassName)}>
               {children}
             </div>
           </motion.div>
@@ -133,7 +133,7 @@ export function Accordion({
   };
   
   return (
-    <div className={cn("space-y-2", className)}>
+    <div className={cn('space-y-2', className)}>
       {items.map((item) => (
         <CollapsibleSection
           key={item.id}
@@ -164,10 +164,10 @@ interface ShowMoreProps {
 export function ShowMore({
   children,
   maxHeight = 200,
-  showLabel = "Show more",
-  hideLabel = "Show less",
+  showLabel = 'Show more',
+  hideLabel = 'Show less',
   className,
-  gradientColor = "white"
+  gradientColor = 'white'
 }: ShowMoreProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [needsExpansion, setNeedsExpansion] = useState(false);
@@ -183,8 +183,8 @@ export function ShowMore({
   const style = !isExpanded && needsExpansion
     ? {
         maxHeight: `${maxHeight}px`,
-        overflow: "hidden",
-        position: "relative" as const
+        overflow: 'hidden',
+        position: 'relative' as const
       }
     : {};
   
@@ -233,7 +233,7 @@ interface ProgressiveTableProps<T> {
     key: keyof T | string;
     header: string;
     render?: (value: any, item: T) => React.ReactNode;
-    priority?: "always" | "default" | "optional";
+    priority?: 'always' | 'default' | 'optional';
   }[];
   initialRows?: number;
   incrementBy?: number;
@@ -254,13 +254,13 @@ export function ProgressiveTable<T>({
   const hasMore = visibleRows < data.length;
   
   const visibleColumns = columns.filter(col =>
-    col.priority === "always" ||
-    col.priority === "default" ||
-    (col.priority === "optional" && showOptionalColumns)
+    col.priority === 'always' ||
+    col.priority === 'default' ||
+    (col.priority === 'optional' && showOptionalColumns)
   );
   
   const optionalColumnsCount = columns.filter(
-    col => col.priority === "optional"
+    col => col.priority === 'optional'
   ).length;
   
   return (
@@ -351,7 +351,7 @@ export function DetailSummary({
   const [isOpen, setIsOpen] = useState(false);
   
   return (
-    <div className={cn("group", className)}>
+    <div className={cn('group', className)}>
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="w-full text-left focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-lg p-2 -m-2"
@@ -364,8 +364,8 @@ export function DetailSummary({
           </span>
           <ChevronDown 
             className={cn(
-              "h-4 w-4 text-gray-400 transition-transform",
-              isOpen && "rotate-180"
+              'h-4 w-4 text-gray-400 transition-transform',
+              isOpen && 'rotate-180'
             )}
           />
         </div>
@@ -375,7 +375,7 @@ export function DetailSummary({
         {isOpen && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
+            animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.2 }}
             className="overflow-hidden"
@@ -422,7 +422,7 @@ export function LazyTabs({
     
     if (!loadedTabs.has(tabId)) {
       const tab = tabs.find(t => t.id === tabId);
-      if (tab && typeof tab.content === "function") {
+      if (tab && typeof tab.content === 'function') {
         const content = await tab.content();
         setTabContent(prev => ({ ...prev, [tabId]: content }));
       }
@@ -441,11 +441,11 @@ export function LazyTabs({
             key={tab.id}
             onClick={() => handleTabChange(tab.id)}
             className={cn(
-              "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md transition-colors",
-              "focus:outline-none focus:ring-2 focus:ring-blue-500",
+              'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md transition-colors',
+              'focus:outline-none focus:ring-2 focus:ring-blue-500',
               activeTab === tab.id
-                ? "bg-white dark:bg-gray-700 shadow-sm"
-                : "hover:bg-gray-200 dark:hover:bg-gray-700"
+                ? 'bg-white dark:bg-gray-700 shadow-sm'
+                : 'hover:bg-gray-200 dark:hover:bg-gray-700'
             )}
           >
             {tab.icon}
@@ -470,7 +470,7 @@ export function LazyTabs({
             transition={{ duration: 0.2 }}
           >
             {activeTabData && (
-              typeof activeTabData.content === "function"
+              typeof activeTabData.content === 'function'
                 ? tabContent[activeTab] || <div>Loading...</div>
                 : activeTabData.content
             )}

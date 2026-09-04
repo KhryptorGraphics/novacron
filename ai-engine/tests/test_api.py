@@ -4,10 +4,15 @@ Tests for the AI Engine API endpoints.
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import Mock, MagicMock, AsyncMock, patch
 
 from ai_engine.api.main import app
-from ai_engine.models.base import PredictionResponse
+from ai_engine.models.base import PredictionResponse, ModelMetadata, ModelType
+
+
+def _make_metadata(model_id: str, model_type: ModelType) -> ModelMetadata:
+    """Build real pydantic metadata so endpoints can serialize it."""
+    return ModelMetadata(model_id=model_id, model_type=model_type, version="1.0.0")
 
 
 @pytest.fixture
@@ -32,20 +37,22 @@ def mock_services():
             confidence=0.8,
             response_time=0.05
         ))
-        failure_mock.models = {"failure_v1": Mock()}
-        failure_mock.active_model = Mock()
-        failure_mock.active_model.metadata.model_id = "failure_v1"
+        failure_mock.set_active_model = Mock()
+        failure_mock.get_model_metrics = Mock(return_value={})
+        failure_metadata = _make_metadata("failure_v1", ModelType.FAILURE_PREDICTION)
+        failure_mock.models = {"failure_v1": MagicMock(metadata=failure_metadata)}
+        failure_mock.active_model = MagicMock(metadata=failure_metadata)
         
         # Configure placement service mock
         placement_mock.optimize_placement = AsyncMock(return_value=[])
         placement_mock.batch_optimize = AsyncMock(return_value={})
         placement_mock.get_placement_factors = Mock(return_value={})
-        placement_mock.active_model = Mock()
-        placement_mock.active_model.metadata.model_id = "placement_v1"
+        placement_metadata = _make_metadata("placement_v1", ModelType.WORKLOAD_PLACEMENT)
+        placement_mock.active_model = MagicMock(metadata=placement_metadata)
         
         # Configure anomaly service mock  
         anomaly_mock.detect_anomalies = AsyncMock(return_value=PredictionResponse(
-            request_id="test_123",
+            request_id="anomaly_123",
             model_id="anomaly_model", 
             prediction=0,
             confidence=0.9,
@@ -53,15 +60,15 @@ def mock_services():
         ))
         anomaly_mock.batch_detect = AsyncMock(return_value=[])
         anomaly_mock.get_anomaly_trends = AsyncMock(return_value={})
-        anomaly_mock.active_model = Mock()
-        anomaly_mock.active_model.metadata.model_id = "anomaly_v1"
+        anomaly_metadata = _make_metadata("anomaly_v1", ModelType.ANOMALY_DETECTION)
+        anomaly_mock.active_model = MagicMock(metadata=anomaly_metadata)
         
         # Configure resource service mock
         resource_mock.get_optimization_recommendations = AsyncMock(return_value=[])
         resource_mock.optimize_single_workload = AsyncMock(return_value=None)
         resource_mock.get_optimization_summary = AsyncMock(return_value={})
-        resource_mock.active_model = Mock()
-        resource_mock.active_model.metadata.model_id = "resource_v1"
+        resource_metadata = _make_metadata("resource_v1", ModelType.RESOURCE_OPTIMIZATION)
+        resource_mock.active_model = MagicMock(metadata=resource_metadata)
         
         yield {
             'failure': failure_mock,

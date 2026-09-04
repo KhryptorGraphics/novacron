@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -427,7 +427,7 @@ export function RealTimeMetricsPanel({ engineStatus }: RealTimeMetricsPanelProps
                   <div className={`w-2 h-2 rounded-full ${
                     alert.type === 'error' ? 'bg-red-500' :
                     alert.type === 'warning' ? 'bg-yellow-500' : 'bg-blue-500'
-                  }`}></div>
+                  }`} />
                   <div className="flex-1">
                     <div className="flex items-center space-x-2">
                       <Badge variant="outline">{alert.component}</Badge>

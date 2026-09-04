@@ -262,8 +262,8 @@ export function BackupRecoveryFlow() {
           if (prev >= 100) {
             setIsRunningBackup(false);
             toast({
-              title: "Backup Completed",
-              description: "VM backup has been created successfully.",
+              title: 'Backup Completed',
+              description: 'VM backup has been created successfully.',
             });
             return 100;
           }
@@ -284,8 +284,8 @@ export function BackupRecoveryFlow() {
           if (prev >= 100) {
             setIsRestoring(false);
             toast({
-              title: "Restore Completed",
-              description: "VM has been restored successfully.",
+              title: 'Restore Completed',
+              description: 'VM has been restored successfully.',
             });
             return 100;
           }
@@ -302,17 +302,17 @@ export function BackupRecoveryFlow() {
     setIsRunningBackup(true);
     setBackupProgress(0);
     toast({
-      title: "Backup Started",
-      description: "Manual backup job has been initiated.",
+      title: 'Backup Started',
+      description: 'Manual backup job has been initiated.',
     });
   };
 
   const startRestore = () => {
     if (!restoreConfig.backupId || !restoreConfig.targetVM) {
       toast({
-        title: "Invalid Configuration",
-        description: "Please select backup and target VM.",
-        variant: "destructive"
+        title: 'Invalid Configuration',
+        description: 'Please select backup and target VM.',
+        variant: 'destructive'
       });
       return;
     }
@@ -320,8 +320,8 @@ export function BackupRecoveryFlow() {
     setIsRestoring(true);
     setRestoreProgress(0);
     toast({
-      title: "Restore Started",
-      description: "VM restore operation has begun.",
+      title: 'Restore Started',
+      description: 'VM restore operation has begun.',
     });
   };
 

@@ -203,7 +203,21 @@ func (tp *TaskPartitioner) updateEnvironmentState(task *Task) {
 
 // createNextState creates the next state after task execution
 func (tp *TaskPartitioner) createNextState(decision *partition.TaskPartitionDecision, success bool) *partition.EnvironmentState {
-	nextState := *tp.envState
+	// Field-wise copy: EnvironmentState embeds a sync.RWMutex, so copying
+	// the struct value would copy a lock (go vet copylocks). Start from a
+	// fresh zero-mutex state and carry over the observable fields.
+	nextState := partition.NewEnvironmentState()
+	nextState.StreamBandwidth = tp.envState.StreamBandwidth
+	nextState.StreamLatency = tp.envState.StreamLatency
+	nextState.StreamCongestion = tp.envState.StreamCongestion
+	nextState.StreamSuccessRate = tp.envState.StreamSuccessRate
+	nextState.TaskQueueDepth = tp.envState.TaskQueueDepth
+	nextState.TaskSize = tp.envState.TaskSize
+	nextState.TaskPriority = tp.envState.TaskPriority
+	nextState.TimeOfDay = tp.envState.TimeOfDay
+	nextState.CPUUtilization = tp.envState.CPUUtilization
+	nextState.MemoryUtilization = tp.envState.MemoryUtilization
+	nextState.NetworkLoad = tp.envState.NetworkLoad
 
 	// Update stream metrics based on usage
 	for _, streamID := range decision.StreamIDs {
@@ -241,7 +255,7 @@ func (tp *TaskPartitioner) createNextState(decision *partition.TaskPartitionDeci
 		}
 	}
 
-	return &nextState
+	return nextState
 }
 
 // calculateStreamImbalance calculates load imbalance across streams

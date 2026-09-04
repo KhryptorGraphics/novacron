@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { 
   Server, 
   Play, 
@@ -21,7 +21,7 @@ import {
   CheckCircle,
   Clock,
   MoreHorizontal
-} from "lucide-react";
+} from 'lucide-react';
 import { 
   DropdownMenu,
   DropdownMenuContent,
@@ -29,7 +29,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from '@/components/ui/dropdown-menu';
 
 interface VM {
   id: string;
@@ -56,20 +56,20 @@ interface VMDetailsCardProps {
 export function VMDetailsCard({ vm, onAction, onMigration, onSelect }: VMDetailsCardProps) {
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "running": return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
-      case "stopped": return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400";
-      case "error": return "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400";
-      case "starting": return "bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400";
-      default: return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400";
+      case 'running': return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400';
+      case 'stopped': return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400';
+      case 'error': return 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400';
+      case 'starting': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400';
+      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400';
     }
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case "running": return <CheckCircle className="h-4 w-4" />;
-      case "stopped": return <Square className="h-4 w-4" />;
-      case "error": return <AlertCircle className="h-4 w-4" />;
-      case "starting": return <Clock className="h-4 w-4" />;
+      case 'running': return <CheckCircle className="h-4 w-4" />;
+      case 'stopped': return <Square className="h-4 w-4" />;
+      case 'error': return <AlertCircle className="h-4 w-4" />;
+      case 'starting': return <Clock className="h-4 w-4" />;
       default: return <AlertCircle className="h-4 w-4" />;
     }
   };
@@ -171,12 +171,12 @@ export function VMDetailsCard({ vm, onAction, onMigration, onSelect }: VMDetails
         {/* Action Buttons */}
         <div className="flex items-center justify-between pt-2 border-t">
           <div className="flex items-center space-x-2">
-            {vm.status === "running" ? (
+            {vm.status === 'running' ? (
               <>
                 <Button 
                   variant="outline" 
                   size="sm"
-                  onClick={() => onAction(vm.id, "stop")}
+                  onClick={() => onAction(vm.id, 'stop')}
                 >
                   <Square className="h-4 w-4 mr-1" />
                   Stop
@@ -184,17 +184,17 @@ export function VMDetailsCard({ vm, onAction, onMigration, onSelect }: VMDetails
                 <Button 
                   variant="outline" 
                   size="sm"
-                  onClick={() => onAction(vm.id, "restart")}
+                  onClick={() => onAction(vm.id, 'restart')}
                 >
                   <RotateCw className="h-4 w-4 mr-1" />
                   Restart
                 </Button>
               </>
-            ) : vm.status === "stopped" ? (
+            ) : vm.status === 'stopped' ? (
               <Button 
                 variant="outline" 
                 size="sm"
-                onClick={() => onAction(vm.id, "start")}
+                onClick={() => onAction(vm.id, 'start')}
               >
                 <Play className="h-4 w-4 mr-1" />
                 Start

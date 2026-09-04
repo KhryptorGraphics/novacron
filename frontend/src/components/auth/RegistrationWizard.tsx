@@ -1,28 +1,28 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { PasswordInput } from "@/components/ui/password-input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Progress } from "@/components/ui/progress";
-import { Icons } from "@/components/ui/icons";
-import { PasswordStrengthIndicator } from "./PasswordStrengthIndicator";
-import { SuccessAnimation } from "@/components/ui/success-animation";
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Progress } from '@/components/ui/progress';
+import { Icons } from '@/components/ui/icons';
+import { PasswordStrengthIndicator } from './PasswordStrengthIndicator';
+import { SuccessAnimation } from '@/components/ui/success-animation';
 import {
   validateRegistrationStep,
   validateEmail,
   debounce,
   RegistrationData
-} from "@/lib/validation";
-import { authService } from "@/lib/auth";
-import { cn } from "@/lib/utils";
+} from '@/lib/validation';
+import { authService } from '@/lib/auth';
+import { cn } from '@/lib/utils';
 
 interface RegistrationWizardProps {
   onComplete?: (data: RegistrationData) => Promise<void>;
@@ -57,18 +57,18 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
   // Step configuration
   const getStepInfo = () => {
     const steps = [
-      { number: 1, title: "Account Type", description: "Choose your account type" },
-      { number: 2, title: "Personal Info", description: "Tell us about yourself" },
+      { number: 1, title: 'Account Type', description: 'Choose your account type' },
+      { number: 2, title: 'Personal Info', description: 'Tell us about yourself' },
     ];
     
     if (formData.accountType === 'organization') {
-      steps.push({ number: 3, title: "Organization", description: "Organization details" });
+      steps.push({ number: 3, title: 'Organization', description: 'Organization details' });
     }
     
     steps.push({
       number: steps.length + 1,
-      title: "Security",
-      description: "Secure your account"
+      title: 'Security',
+      description: 'Secure your account'
     });
     
     return steps;
@@ -86,9 +86,9 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
       const result = await authService.checkEmailAvailability(email);
       setEmailAvailable(result.available);
     } catch (error) {
-      console.error("Error checking email:", error);
+      console.error('Error checking email:', error);
       // Fallback for demo - check if email contains "taken"
-      setEmailAvailable(!email.includes("taken"));
+      setEmailAvailable(!email.includes('taken'));
     } finally {
       setCheckingEmail(false);
     }
@@ -106,7 +106,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
     }
 
     const redirectTimer = window.setTimeout(() => {
-      router.push("/auth/login?registered=1");
+      router.push('/auth/login?registered=1');
     }, 3000);
 
     return () => window.clearTimeout(redirectTimer);
@@ -145,8 +145,8 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
           finishRegistration();
         }
       } catch (error) {
-        console.error("Registration error:", error);
-        setErrors(["Registration failed. Please try again."]);
+        console.error('Registration error:', error);
+        setErrors(['Registration failed. Please try again.']);
       } finally {
         setIsLoading(false);
       }
@@ -241,10 +241,10 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                     <label
                       htmlFor="personal"
                       className={cn(
-                        "flex items-start space-x-3 p-4 border-2 rounded-lg cursor-pointer transition-all",
+                        'flex items-start space-x-3 p-4 border-2 rounded-lg cursor-pointer transition-all',
                         formData.accountType === 'personal'
-                          ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
-                          : "border-gray-200 dark:border-gray-700 hover:border-gray-300"
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
                       )}
                     >
                       <RadioGroupItem value="personal" id="personal" aria-label="Personal Account" tabIndex={0} />
@@ -275,10 +275,10 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                     <label
                       htmlFor="organization"
                       className={cn(
-                        "flex items-start space-x-3 p-4 border-2 rounded-lg cursor-pointer transition-all",
+                        'flex items-start space-x-3 p-4 border-2 rounded-lg cursor-pointer transition-all',
                         formData.accountType === 'organization'
-                          ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
-                          : "border-gray-200 dark:border-gray-700 hover:border-gray-300"
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
                       )}
                     >
                       <RadioGroupItem value="organization" id="organization" aria-label="Organization Account" tabIndex={0} />
@@ -324,7 +324,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                       placeholder="John"
                       value={formData.firstName}
                       onChange={(e) => updateFormData('firstName', e.target.value)}
-                      className={errors.some(e => e.includes("First name")) ? "border-red-500" : ""}
+                      className={errors.some(e => e.includes('First name')) ? 'border-red-500' : ''}
                     />
                   </div>
                   <div className="space-y-2">
@@ -334,7 +334,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                       placeholder="Doe"
                       value={formData.lastName}
                       onChange={(e) => updateFormData('lastName', e.target.value)}
-                      className={errors.some(e => e.includes("Last name")) ? "border-red-500" : ""}
+                      className={errors.some(e => e.includes('Last name')) ? 'border-red-500' : ''}
                     />
                   </div>
                 </div>
@@ -349,9 +349,9 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                       value={formData.email}
                       onChange={(e) => updateFormData('email', e.target.value)}
                       className={cn(
-                        errors.some(e => e.includes("email")) ? "border-red-500" : "",
-                        emailAvailable === false ? "border-red-500" : "",
-                        emailAvailable === true ? "border-green-500" : ""
+                        errors.some(e => e.includes('email')) ? 'border-red-500' : '',
+                        emailAvailable === false ? 'border-red-500' : '',
+                        emailAvailable === true ? 'border-green-500' : ''
                       )}
                     />
                     {checkingEmail && (
@@ -403,7 +403,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                     placeholder="Acme Corporation"
                     value={formData.organizationName}
                     onChange={(e) => updateFormData('organizationName', e.target.value)}
-                    className={errors.some(e => e.includes("Organization")) ? "border-red-500" : ""}
+                    className={errors.some(e => e.includes('Organization')) ? 'border-red-500' : ''}
                   />
                 </div>
                 
@@ -415,7 +415,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                   >
                     <SelectTrigger
                       id="orgSize"
-                      className={errors.some(e => e.includes("size")) ? "border-red-500" : ""}
+                      className={errors.some(e => e.includes('size')) ? 'border-red-500' : ''}
                     >
                       <SelectValue placeholder="Select organization size" />
                     </SelectTrigger>
@@ -463,7 +463,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                     placeholder="Enter a strong password"
                     value={formData.password}
                     onChange={(e) => updateFormData('password', e.target.value)}
-                    className={errors.some(e => e.includes("Password")) ? "border-red-500" : ""}
+                    className={errors.some(e => e.includes('Password')) ? 'border-red-500' : ''}
                     autoComplete="new-password"
                   />
                   <PasswordStrengthIndicator password={formData.password} />
@@ -476,7 +476,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                     placeholder="Re-enter your password"
                     value={formData.confirmPassword}
                     onChange={(e) => updateFormData('confirmPassword', e.target.value)}
-                    className={errors.some(e => e.includes("match")) ? "border-red-500" : ""}
+                    className={errors.some(e => e.includes('match')) ? 'border-red-500' : ''}
                     autoComplete="new-password"
                   />
                   {formData.confirmPassword && formData.password !== formData.confirmPassword && (
@@ -509,7 +509,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                       id="terms"
                       checked={formData.acceptTerms}
                       onCheckedChange={(checked) => updateFormData('acceptTerms', checked as boolean)}
-                      className={errors.some(e => e.includes("terms")) ? "border-red-500" : ""}
+                      className={errors.some(e => e.includes('terms')) ? 'border-red-500' : ''}
                     />
                     <div className="space-y-1">
                       <label
@@ -519,9 +519,9 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                         I accept the Terms of Service and Privacy Policy *
                       </label>
                       <p className="text-xs text-gray-500">
-                        By creating an account, you agree to our{" "}
+                        By creating an account, you agree to our{' '}
                         <a href="/terms" className="text-blue-600 hover:underline">Terms of Service</a>
-                        {" "}and{" "}
+                        {' '}and{' '}
                         <a href="/privacy" className="text-blue-600 hover:underline">Privacy Policy</a>
                       </p>
                     </div>

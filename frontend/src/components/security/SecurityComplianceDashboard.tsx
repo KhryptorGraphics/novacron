@@ -114,7 +114,7 @@ const SecurityComplianceDashboard: React.FC = () => {
   };
 
   // Functions
-  const handleRunScan = useCallback(async (type: string, target: string = 'production-cluster') => {
+  const handleRunScan = useCallback(async (type: string, target = 'production-cluster') => {
     try {
       await startScan(target, type);
     } catch (error) {
@@ -194,7 +194,7 @@ const SecurityComplianceDashboard: React.FC = () => {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent mx-auto mb-4" />
           <p>Loading security dashboard...</p>
         </div>
       </div>

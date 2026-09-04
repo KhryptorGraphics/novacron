@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { 
   Table, 
   TableBody, 
@@ -12,15 +12,15 @@ import {
   TableHead, 
   TableHeader, 
   TableRow 
-} from "@/components/ui/table";
+} from '@/components/ui/table';
 import { 
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { FadeIn } from "@/lib/animations";
+} from '@/components/ui/select';
+import { FadeIn } from '@/lib/animations';
 import { 
   Users, 
   Search, 
@@ -34,59 +34,59 @@ import {
   AlertCircle,
   CheckCircle,
   Clock
-} from "lucide-react";
+} from 'lucide-react';
 
 // Mock user data
 const mockUsers = [
   {
     id: 1,
-    name: "John Doe",
-    email: "user@organization.com",
-    role: "user",
-    status: "active",
-    created_at: "2024-01-15T10:30:00Z",
-    last_login: "2024-08-23T14:22:00Z",
+    name: 'John Doe',
+    email: 'user@organization.com',
+    role: 'user',
+    status: 'active',
+    created_at: '2024-01-15T10:30:00Z',
+    last_login: '2024-08-23T14:22:00Z',
     login_count: 45,
-    organization: "ACME Corp",
+    organization: 'ACME Corp',
     two_factor: true,
     email_verified: true
   },
   {
     id: 2,
-    name: "Jane Smith",
-    email: "jane@company.com",
-    role: "moderator",
-    status: "suspended",
-    created_at: "2024-02-10T09:15:00Z",
-    last_login: "2024-08-18T16:45:00Z",
+    name: 'Jane Smith',
+    email: 'jane@company.com',
+    role: 'moderator',
+    status: 'suspended',
+    created_at: '2024-02-10T09:15:00Z',
+    last_login: '2024-08-18T16:45:00Z',
     login_count: 123,
-    organization: "Tech Solutions",
+    organization: 'Tech Solutions',
     two_factor: false,
     email_verified: true
   },
   {
     id: 3,
-    name: "Bob Wilson",
-    email: "bob@startup.io",
-    role: "admin",
-    status: "active",
-    created_at: "2024-01-01T08:00:00Z",
-    last_login: "2024-08-24T12:10:00Z",
+    name: 'Bob Wilson',
+    email: 'bob@startup.io',
+    role: 'admin',
+    status: 'active',
+    created_at: '2024-01-01T08:00:00Z',
+    last_login: '2024-08-24T12:10:00Z',
     login_count: 289,
-    organization: "Startup Inc",
+    organization: 'Startup Inc',
     two_factor: true,
     email_verified: true
   },
   {
     id: 4,
-    name: "Alice Johnson",
-    email: "alice.johnson@email.com",
-    role: "user",
-    status: "pending",
-    created_at: "2024-08-20T13:45:00Z",
+    name: 'Alice Johnson',
+    email: 'alice.johnson@email.com',
+    role: 'user',
+    status: 'pending',
+    created_at: '2024-08-20T13:45:00Z',
     last_login: null,
     login_count: 0,
-    organization: "New Company",
+    organization: 'New Company',
     two_factor: false,
     email_verified: false
   }
@@ -104,9 +104,9 @@ const userStats = {
 
 export function UserManagement() {
   const [users, setUsers] = useState(mockUsers);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [roleFilter, setRoleFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [roleFilter, setRoleFilter] = useState('all');
   const [_selectedUser, setSelectedUser] = useState<any>(null);
   const [_showUserModal, _setShowUserModal] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -115,8 +115,8 @@ export function UserManagement() {
     const matchesSearch = user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          user.organization.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === "all" || user.status === statusFilter;
-    const matchesRole = roleFilter === "all" || user.role === roleFilter;
+    const matchesStatus = statusFilter === 'all' || user.status === statusFilter;
+    const matchesRole = roleFilter === 'all' || user.role === roleFilter;
     
     return matchesSearch && matchesStatus && matchesRole;
   });
@@ -149,17 +149,17 @@ export function UserManagement() {
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case "active": return <CheckCircle className="h-4 w-4 text-green-600" />;
-      case "suspended": return <Ban className="h-4 w-4 text-red-600" />;
-      case "pending": return <Clock className="h-4 w-4 text-yellow-600" />;
+      case 'active': return <CheckCircle className="h-4 w-4 text-green-600" />;
+      case 'suspended': return <Ban className="h-4 w-4 text-red-600" />;
+      case 'pending': return <Clock className="h-4 w-4 text-yellow-600" />;
       default: return <AlertCircle className="h-4 w-4 text-gray-600" />;
     }
   };
 
   const formatDate = (dateString: string | null) => {
-    if (!dateString) return "Never";
-    return new Date(dateString).toLocaleDateString() + " " + 
-           new Date(dateString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (!dateString) return 'Never';
+    return `${new Date(dateString).toLocaleDateString()  } ${  
+           new Date(dateString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   };
 
   return (
@@ -348,14 +348,14 @@ export function UserManagement() {
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center gap-1 text-sm">
                             <Mail className="h-3 w-3" />
-                            <span className={user.email_verified ? "text-green-600" : "text-red-600"}>
-                              {user.email_verified ? "Verified" : "Unverified"}
+                            <span className={user.email_verified ? 'text-green-600' : 'text-red-600'}>
+                              {user.email_verified ? 'Verified' : 'Unverified'}
                             </span>
                           </div>
                           <div className="flex items-center gap-1 text-sm">
                             <Shield className="h-3 w-3" />
-                            <span className={user.two_factor ? "text-green-600" : "text-gray-600"}>
-                              {user.two_factor ? "2FA On" : "2FA Off"}
+                            <span className={user.two_factor ? 'text-green-600' : 'text-gray-600'}>
+                              {user.two_factor ? '2FA On' : '2FA Off'}
                             </span>
                           </div>
                         </div>

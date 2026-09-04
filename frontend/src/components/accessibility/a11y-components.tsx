@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { cn } from "@/lib/utils";
-import { AlertCircle, Info, CheckCircle, XCircle } from "lucide-react";
+import * as React from 'react';
+import { cn } from '@/lib/utils';
+import { AlertCircle, Info, CheckCircle, XCircle } from 'lucide-react';
 
 // Skip to Main Content Link
 export function SkipToMain() {
@@ -24,7 +24,7 @@ interface VisuallyHiddenProps {
 
 export function VisuallyHidden({ 
   children, 
-  as: Component = "span" 
+  as: Component = 'span' 
 }: VisuallyHiddenProps) {
   return (
     <Component className="sr-only">
@@ -36,16 +36,16 @@ export function VisuallyHidden({
 // Live Region for Dynamic Updates
 interface LiveRegionProps {
   children: React.ReactNode;
-  mode?: "polite" | "assertive" | "off";
-  relevant?: "additions" | "removals" | "text" | "all";
+  mode?: 'polite' | 'assertive' | 'off';
+  relevant?: 'additions' | 'removals' | 'text' | 'all';
   atomic?: boolean;
   className?: string;
 }
 
 export function LiveRegion({
   children,
-  mode = "polite",
-  relevant = "additions",
+  mode = 'polite',
+  relevant = 'additions',
   atomic = false,
   className
 }: LiveRegionProps) {
@@ -54,7 +54,7 @@ export function LiveRegion({
       aria-live={mode}
       aria-relevant={relevant}
       aria-atomic={atomic}
-      className={cn("sr-only", className)}
+      className={cn('sr-only', className)}
     >
       {children}
     </div>
@@ -63,7 +63,7 @@ export function LiveRegion({
 
 // Accessible Alert Component
 interface AccessibleAlertProps {
-  type?: "info" | "success" | "warning" | "error";
+  type?: 'info' | 'success' | 'warning' | 'error';
   title?: string;
   children: React.ReactNode;
   onClose?: () => void;
@@ -71,7 +71,7 @@ interface AccessibleAlertProps {
 }
 
 export function AccessibleAlert({
-  type = "info",
+  type = 'info',
   title,
   children,
   onClose,
@@ -85,18 +85,18 @@ export function AccessibleAlert({
   };
   
   const colors = {
-    info: "bg-blue-50 text-blue-800 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800",
-    success: "bg-green-50 text-green-800 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800",
-    warning: "bg-yellow-50 text-yellow-800 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-800",
-    error: "bg-red-50 text-red-800 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800"
+    info: 'bg-blue-50 text-blue-800 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800',
+    success: 'bg-green-50 text-green-800 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800',
+    warning: 'bg-yellow-50 text-yellow-800 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-800',
+    error: 'bg-red-50 text-red-800 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800'
   };
   
   return (
     <div
       role="alert"
-      aria-live={type === "error" ? "assertive" : "polite"}
+      aria-live={type === 'error' ? 'assertive' : 'polite'}
       className={cn(
-        "flex gap-3 p-4 rounded-lg border",
+        'flex gap-3 p-4 rounded-lg border',
         colors[type],
         className
       )}
@@ -137,7 +137,7 @@ export function useFocusTrap(ref: React.RefObject<HTMLElement>) {
     const lastFocusable = focusableElements[focusableElements.length - 1] as HTMLElement;
     
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Tab") return;
+      if (e.key !== 'Tab') return;
       
       if (e.shiftKey) {
         if (document.activeElement === firstFocusable) {
@@ -152,11 +152,11 @@ export function useFocusTrap(ref: React.RefObject<HTMLElement>) {
       }
     };
     
-    element.addEventListener("keydown", handleKeyDown);
+    element.addEventListener('keydown', handleKeyDown);
     firstFocusable?.focus();
     
     return () => {
-      element.removeEventListener("keydown", handleKeyDown);
+      element.removeEventListener('keydown', handleKeyDown);
     };
   }, [ref]);
 }
@@ -170,30 +170,30 @@ export function useKeyboardNavigation(
   
   const handleKeyDown = React.useCallback((e: KeyboardEvent) => {
     switch (e.key) {
-      case "ArrowDown":
+      case 'ArrowDown':
         e.preventDefault();
         setFocusedIndex(prev => 
           prev < items.length - 1 ? prev + 1 : 0
         );
         break;
-      case "ArrowUp":
+      case 'ArrowUp':
         e.preventDefault();
         setFocusedIndex(prev => 
           prev > 0 ? prev - 1 : items.length - 1
         );
         break;
-      case "Enter":
-      case " ":
+      case 'Enter':
+      case ' ':
         e.preventDefault();
         if (focusedIndex >= 0 && focusedIndex < items.length) {
           onSelect(items[focusedIndex], focusedIndex);
         }
         break;
-      case "Home":
+      case 'Home':
         e.preventDefault();
         setFocusedIndex(0);
         break;
-      case "End":
+      case 'End':
         e.preventDefault();
         setFocusedIndex(items.length - 1);
         break;
@@ -201,8 +201,8 @@ export function useKeyboardNavigation(
   }, [items, focusedIndex, onSelect]);
   
   React.useEffect(() => {
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
   
   return { focusedIndex, setFocusedIndex };
@@ -230,12 +230,12 @@ export function AccessibleField({
   
   const childWithProps = React.cloneElement(children, {
     id,
-    "aria-invalid": !!error,
-    "aria-describedby": [
+    'aria-invalid': !!error,
+    'aria-describedby': [
       error && errorId,
       description && descriptionId
-    ].filter(Boolean).join(" ") || undefined,
-    "aria-required": required
+    ].filter(Boolean).join(' ') || undefined,
+    'aria-required': required
   });
   
   return (
@@ -269,15 +269,15 @@ export function AccessibleField({
 // Announce Component for Screen Readers
 interface AnnounceProps {
   message: string;
-  priority?: "polite" | "assertive";
+  priority?: 'polite' | 'assertive';
 }
 
-export function Announce({ message, priority = "polite" }: AnnounceProps) {
-  const [announcement, setAnnouncement] = React.useState("");
+export function Announce({ message, priority = 'polite' }: AnnounceProps) {
+  const [announcement, setAnnouncement] = React.useState('');
   
   React.useEffect(() => {
     setAnnouncement(message);
-    const timer = setTimeout(() => setAnnouncement(""), 100);
+    const timer = setTimeout(() => setAnnouncement(''), 100);
     return () => clearTimeout(timer);
   }, [message]);
   
@@ -303,7 +303,7 @@ export function FocusRing({
 }) {
   return (
     <div className={cn(
-      "focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-offset-2 rounded-md",
+      'focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-offset-2 rounded-md',
       className
     )}>
       {children}
@@ -331,7 +331,7 @@ export function useAriaDescriptions() {
     return keys
       .filter(key => descriptions[key])
       .map(key => `desc-${key}`)
-      .join(" ");
+      .join(' ');
   }, [descriptions]);
   
   return { descriptions, addDescription, removeDescription, getDescriptionIds };
@@ -342,16 +342,16 @@ export function useHighContrast() {
   const [isHighContrast, setIsHighContrast] = React.useState(false);
   
   React.useEffect(() => {
-    const mediaQuery = window.matchMedia("(prefers-contrast: high)");
+    const mediaQuery = window.matchMedia('(prefers-contrast: high)');
     
     const handleChange = (e: MediaQueryListEvent) => {
       setIsHighContrast(e.matches);
     };
     
     setIsHighContrast(mediaQuery.matches);
-    mediaQuery.addEventListener("change", handleChange);
+    mediaQuery.addEventListener('change', handleChange);
     
-    return () => mediaQuery.removeEventListener("change", handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
   }, []);
   
   return isHighContrast;
@@ -362,16 +362,16 @@ export function useReducedMotion() {
   const [prefersReducedMotion, setPrefersReducedMotion] = React.useState(false);
   
   React.useEffect(() => {
-    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
     
     const handleChange = (e: MediaQueryListEvent) => {
       setPrefersReducedMotion(e.matches);
     };
     
     setPrefersReducedMotion(mediaQuery.matches);
-    mediaQuery.addEventListener("change", handleChange);
+    mediaQuery.addEventListener('change', handleChange);
     
-    return () => mediaQuery.removeEventListener("change", handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
   }, []);
   
   return prefersReducedMotion;

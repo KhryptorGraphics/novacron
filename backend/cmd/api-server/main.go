@@ -24,6 +24,7 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/sirupsen/logrus"
 
+	"github.com/google/uuid"
 	authapi "github.com/khryptorgraphics/novacron/backend/api/auth"
 	graphqlapi "github.com/khryptorgraphics/novacron/backend/api/graphql"
 	securityapi "github.com/khryptorgraphics/novacron/backend/api/security"
@@ -34,6 +35,7 @@ import (
 	core_vm "github.com/khryptorgraphics/novacron/backend/core/vm"
 	"github.com/khryptorgraphics/novacron/backend/pkg/config"
 	"github.com/khryptorgraphics/novacron/backend/pkg/logger"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type canonicalServices struct {
@@ -217,81 +219,34 @@ func initDatabase(cfg *config.Config) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	if err := runMigrations(db); err != nil {
+	if err := requireMigratedSchema(db); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("failed to run migrations: %w", err)
+		return nil, err
 	}
 
 	return db, nil
 }
 
-func runMigrations(db *sql.DB) error {
-	migrations := []string{
-		`CREATE TABLE IF NOT EXISTS users (
-			id SERIAL PRIMARY KEY,
-			username VARCHAR(255) UNIQUE NOT NULL,
-			email VARCHAR(255) UNIQUE NOT NULL,
-			password_hash VARCHAR(255) NOT NULL,
-			role VARCHAR(50) DEFAULT 'user',
-			active BOOLEAN DEFAULT true,
-			tenant_id VARCHAR(255) DEFAULT 'default',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true`,
-		`CREATE TABLE IF NOT EXISTS vms (
-			id VARCHAR(255) PRIMARY KEY,
-			name VARCHAR(255) NOT NULL,
-			state VARCHAR(50) NOT NULL,
-			node_id VARCHAR(255),
-			owner_id INTEGER REFERENCES users(id),
-			tenant_id VARCHAR(255) DEFAULT 'default',
-			config JSONB,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS vm_metrics (
-			id SERIAL PRIMARY KEY,
-			vm_id VARCHAR(255) REFERENCES vms(id),
-			cpu_usage FLOAT,
-			memory_usage FLOAT,
-			network_sent BIGINT,
-			network_recv BIGINT,
-			timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_vm_metrics_vm_id ON vm_metrics(vm_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_vm_metrics_timestamp ON vm_metrics(timestamp)`,
-		`CREATE TABLE IF NOT EXISTS networks (
-			id VARCHAR(255) PRIMARY KEY,
-			name VARCHAR(255) NOT NULL,
-			type VARCHAR(50) NOT NULL DEFAULT 'bridged',
-			subnet VARCHAR(255) NOT NULL,
-			gateway VARCHAR(255),
-			status VARCHAR(50) NOT NULL DEFAULT 'active',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS vm_interfaces (
-			id VARCHAR(255) PRIMARY KEY,
-			vm_id VARCHAR(255) NOT NULL REFERENCES vms(id) ON DELETE CASCADE,
-			network_id VARCHAR(255) REFERENCES networks(id) ON DELETE SET NULL,
-			name VARCHAR(255) NOT NULL,
-			mac_address VARCHAR(255) NOT NULL,
-			ip_address VARCHAR(255),
-			status VARCHAR(50) NOT NULL DEFAULT 'attached',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_vm_interfaces_vm_id ON vm_interfaces(vm_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_vm_interfaces_network_id ON vm_interfaces(network_id)`,
+// requireMigratedSchema verifies the canonical golang-migrate-managed schema is
+// present (database/migrations, applied by `make db-migrate`, the docker-compose
+// `migrate` init service, or the k8s migrate Job — see docker/api-entrypoint.sh).
+// The server deliberately does NOT create tables: an earlier embedded DDL
+// drifted from the canonical schema (VARCHAR ids, a vm_interfaces table) and
+// could not even boot against it (REFERENCES on the UUID vms.id cannot be
+// implemented for a VARCHAR column), so it was removed rather than forked.
+// One statement probes the two load-bearing canonical tables; anything but a
+// clean zero-row result means the schema is absent or partial.
+func requireMigratedSchema(db *sql.DB) error {
+	var present bool
+	if err := db.QueryRow(
+		`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'vms')
+		 AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'users')`,
+	).Scan(&present); err != nil {
+		return fmt.Errorf("failed to inspect database schema: %w", err)
 	}
-
-	for _, migration := range migrations {
-		if _, err := db.Exec(migration); err != nil {
-			return fmt.Errorf("migration failed: %w", err)
-		}
+	if !present {
+		return fmt.Errorf("canonical database schema not present: apply database/migrations first (make db-migrate, the docker-compose 'migrate' service, or the k8s migrate Job)")
 	}
-
 	return nil
 }
 
@@ -570,7 +525,7 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 
 func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager, storagePath string) {
 	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
-		rows, err := db.Query(`SELECT id, name, state, node_id, tenant_id, created_at, updated_at FROM vms ORDER BY created_at DESC`)
+		rows, err := db.Query(`SELECT id, name, state, node_id, organization_id, created_at, updated_at FROM vms ORDER BY created_at DESC`)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to query VMs")
 			return
@@ -579,11 +534,12 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 
 		vms := make([]map[string]interface{}, 0)
 		for rows.Next() {
-			var id, name, state, tenantID string
+			var id, name, state string
+			var orgID sql.NullString
 			var nodeID sql.NullString
 			var createdAt, updatedAt time.Time
 
-			if err := rows.Scan(&id, &name, &state, &nodeID, &tenantID, &createdAt, &updatedAt); err != nil {
+			if err := rows.Scan(&id, &name, &state, &nodeID, &orgID, &createdAt, &updatedAt); err != nil {
 				continue
 			}
 
@@ -591,14 +547,14 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 			state = liveVMState(vmManager, id, state)
 
 			vms = append(vms, map[string]interface{}{
-				"id":         id,
-				"name":       name,
-				"state":      state,
-				"status":     state,
-				"node_id":    nullableString(nodeID),
-				"tenant_id":  tenantID,
-				"created_at": createdAt.Format(time.RFC3339),
-				"updated_at": updatedAt.Format(time.RFC3339),
+				"id":              id,
+				"name":            name,
+				"state":           state,
+				"status":          state,
+				"node_id":         nullableString(nodeID),
+				"organization_id": nullableString(orgID),
+				"created_at":      createdAt.Format(time.RFC3339),
+				"updated_at":      updatedAt.Format(time.RFC3339),
 			})
 		}
 
@@ -613,13 +569,14 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 	router.HandleFunc("/vms/{id}", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["id"]
 
-		var id, name, state, tenantID string
+		var id, name, state string
+		var orgID sql.NullString
 		var nodeID sql.NullString
 		var createdAt, updatedAt time.Time
 		err := db.QueryRow(`
-			SELECT id, name, state, node_id, tenant_id, created_at, updated_at
+			SELECT id, name, state, node_id, organization_id, created_at, updated_at
 			FROM vms WHERE id = $1
-		`, vmID).Scan(&id, &name, &state, &nodeID, &tenantID, &createdAt, &updatedAt)
+		`, vmID).Scan(&id, &name, &state, &nodeID, &orgID, &createdAt, &updatedAt)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				writeJSONError(w, http.StatusNotFound, "vm not found")
@@ -632,14 +589,14 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 		state = liveVMState(vmManager, id, state)
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"id":         id,
-			"name":       name,
-			"state":      state,
-			"status":     state,
-			"node_id":    nullableString(nodeID),
-			"tenant_id":  tenantID,
-			"created_at": createdAt.Format(time.RFC3339),
-			"updated_at": updatedAt.Format(time.RFC3339),
+			"id":              id,
+			"name":            name,
+			"state":           state,
+			"status":          state,
+			"node_id":         nullableString(nodeID),
+			"organization_id": nullableString(orgID),
+			"created_at":      createdAt.Format(time.RFC3339),
+			"updated_at":      updatedAt.Format(time.RFC3339),
 		})
 	}).Methods(http.MethodGet)
 
@@ -760,144 +717,35 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 		writeJSON(w, http.StatusOK, []map[string]interface{}{})
 	}).Methods(http.MethodGet)
 
+	// Networks: the canonical schema has NO networks catalog table (only the
+	// per-VM network_interfaces table). The catalog routes report the empty
+	// catalog honestly instead of 500ing on a table that does not exist.
 	router.HandleFunc("/networks", func(w http.ResponseWriter, r *http.Request) {
-		rows, err := db.Query(`
-			SELECT id, name, type, subnet, gateway, status, created_at, updated_at
-			FROM networks
-			ORDER BY created_at DESC
-		`)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to query networks")
-			return
-		}
-		defer rows.Close()
-
-		networks := make([]map[string]interface{}, 0)
-		for rows.Next() {
-			var id, name, networkType, subnet, status string
-			var gateway sql.NullString
-			var createdAt, updatedAt time.Time
-
-			if err := rows.Scan(&id, &name, &networkType, &subnet, &gateway, &status, &createdAt, &updatedAt); err != nil {
-				continue
-			}
-
-			networks = append(networks, map[string]interface{}{
-				"id":         id,
-				"name":       name,
-				"type":       networkType,
-				"subnet":     subnet,
-				"gateway":    nullableString(gateway),
-				"status":     status,
-				"created_at": createdAt.Format(time.RFC3339),
-				"updated_at": updatedAt.Format(time.RFC3339),
-			})
-		}
-
-		writeJSON(w, http.StatusOK, networks)
+		writeJSON(w, http.StatusOK, []map[string]interface{}{})
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/networks", func(w http.ResponseWriter, r *http.Request) {
-		var createReq struct {
-			Name    string `json:"name"`
-			Type    string `json:"type"`
-			Subnet  string `json:"subnet"`
-			Gateway string `json:"gateway"`
-		}
-
-		if err := json.NewDecoder(r.Body).Decode(&createReq); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid request body")
-			return
-		}
-
-		if strings.TrimSpace(createReq.Name) == "" || strings.TrimSpace(createReq.Subnet) == "" {
-			writeJSONError(w, http.StatusBadRequest, "name and subnet are required")
-			return
-		}
-
-		if strings.TrimSpace(createReq.Type) == "" {
-			createReq.Type = "bridged"
-		}
-
-		networkID := fmt.Sprintf("net-%d", time.Now().UnixNano())
-		if _, err := db.Exec(`
-			INSERT INTO networks (id, name, type, subnet, gateway, status, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, NULLIF($5, ''), 'active', NOW(), NOW())
-		`, networkID, createReq.Name, createReq.Type, createReq.Subnet, createReq.Gateway); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to create network")
-			return
-		}
-
-		writeJSON(w, http.StatusCreated, map[string]interface{}{
-			"id":         networkID,
-			"name":       createReq.Name,
-			"type":       createReq.Type,
-			"subnet":     createReq.Subnet,
-			"gateway":    emptyStringToNil(createReq.Gateway),
-			"status":     "active",
-			"created_at": time.Now().UTC().Format(time.RFC3339),
-			"updated_at": time.Now().UTC().Format(time.RFC3339),
-		})
+		writeJSONError(w, http.StatusNotImplemented, "no networks catalog in the canonical schema; per-VM interfaces live at /vms/{vm_id}/interfaces")
 	}).Methods(http.MethodPost)
 
 	router.HandleFunc("/networks/{id}", func(w http.ResponseWriter, r *http.Request) {
-		networkID := mux.Vars(r)["id"]
-
-		var id, name, networkType, subnet, status string
-		var gateway sql.NullString
-		var createdAt, updatedAt time.Time
-		err := db.QueryRow(`
-			SELECT id, name, type, subnet, gateway, status, created_at, updated_at
-			FROM networks WHERE id = $1
-		`, networkID).Scan(&id, &name, &networkType, &subnet, &gateway, &status, &createdAt, &updatedAt)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				writeJSONError(w, http.StatusNotFound, "network not found")
-				return
-			}
-			writeJSONError(w, http.StatusInternalServerError, "failed to query network")
-			return
-		}
-
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"id":         id,
-			"name":       name,
-			"type":       networkType,
-			"subnet":     subnet,
-			"gateway":    nullableString(gateway),
-			"status":     status,
-			"created_at": createdAt.Format(time.RFC3339),
-			"updated_at": updatedAt.Format(time.RFC3339),
-		})
+		writeJSONError(w, http.StatusNotFound, "network not found")
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/networks/{id}", func(w http.ResponseWriter, r *http.Request) {
-		networkID := mux.Vars(r)["id"]
-		result, err := db.Exec(`DELETE FROM networks WHERE id = $1`, networkID)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to delete network")
-			return
-		}
-
-		rowsAffected, _ := result.RowsAffected()
-		if rowsAffected == 0 {
-			writeJSONError(w, http.StatusNotFound, "network not found")
-			return
-		}
-
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"id":     networkID,
-			"status": "deleted",
-		})
+		writeJSONError(w, http.StatusNotFound, "network not found")
 	}).Methods(http.MethodDelete)
-
+	// VM network interfaces: the canonical schema's network_interfaces table is
+	// the equivalent of the legacy vm_interfaces table (vm_id, name, mac_address,
+	// ip_address). A bridge/gateway can be attached per-interface; there is no
+	// canonical networks catalog table, so interface rows stand alone.
 	router.HandleFunc("/vms/{vm_id}/interfaces", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["vm_id"]
 
 		rows, err := db.Query(`
-			SELECT id, vm_id, network_id, name, mac_address, ip_address, status, created_at, updated_at
-			FROM vm_interfaces
-			WHERE vm_id = $1
+			SELECT id, vm_id, name, mac_address, ip_address, created_at
+			FROM network_interfaces
+			WHERE vm_id::text = $1
 			ORDER BY created_at DESC
 		`, vmID)
 		if err != nil {
@@ -908,25 +756,29 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 
 		interfaces := make([]map[string]interface{}, 0)
 		for rows.Next() {
-			var id, currentVMID, name, macAddress, status string
-			var networkID, ipAddress sql.NullString
-			var createdAt, updatedAt time.Time
+			var id, name string
+			var currentVMID sql.NullString
+			var macAddress, ipAddress sql.NullString
+			var createdAt time.Time
 
-			if err := rows.Scan(&id, &currentVMID, &networkID, &name, &macAddress, &ipAddress, &status, &createdAt, &updatedAt); err != nil {
+			if err := rows.Scan(&id, &currentVMID, &name, &macAddress, &ipAddress, &createdAt); err != nil {
 				continue
 			}
 
-			interfaces = append(interfaces, map[string]interface{}{
-				"id":         id,
-				"vm_id":      currentVMID,
-				"network_id": nullableString(networkID),
-				"name":       name,
-				"mac_address": macAddress,
-				"ip_address": nullableString(ipAddress),
-				"status":     status,
-				"created_at": createdAt.Format(time.RFC3339),
-				"updated_at": updatedAt.Format(time.RFC3339),
-			})
+			entry := map[string]interface{}{
+				"id":          id,
+				"vm_id":       nullableString(currentVMID),
+				"name":        name,
+				"mac_address": nullableString(macAddress),
+				"ip_address":  nullableString(ipAddress),
+				"status":      "attached",
+				"created_at":  createdAt.Format(time.RFC3339),
+				"updated_at":  createdAt.Format(time.RFC3339),
+			}
+			if r.URL.Query().Get("include") == "network" {
+				entry["network_id"] = nil
+			}
+			interfaces = append(interfaces, entry)
 		}
 
 		writeJSON(w, http.StatusOK, interfaces)
@@ -958,11 +810,15 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 			return
 		}
 
-		interfaceID := fmt.Sprintf("iface-%d", time.Now().UnixNano())
+		var bridgeName interface{}
+		if createReq.NetworkID != "" {
+			bridgeName = createReq.NetworkID // repurposed: legacy network ids were bridge labels
+		}
+		interfaceID := uuid.NewString()
 		if _, err := db.Exec(`
-			INSERT INTO vm_interfaces (id, vm_id, network_id, name, mac_address, ip_address, status, created_at, updated_at)
-			VALUES ($1, $2, NULLIF($3, ''), $4, $5, NULLIF($6, ''), 'attached', NOW(), NOW())
-		`, interfaceID, vmID, createReq.NetworkID, createReq.Name, createReq.MACAddress, createReq.IPAddress); err != nil {
+			INSERT INTO network_interfaces (id, vm_id, name, mac_address, ip_address, bridge_name, created_at)
+			VALUES ($1, $2, $3, $4, NULLIF($5, '')::inet, $6, NOW())
+		`, interfaceID, vmID, createReq.Name, createReq.MACAddress, createReq.IPAddress, bridgeName); err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to attach interface")
 			return
 		}
@@ -984,14 +840,14 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 		vmID := mux.Vars(r)["vm_id"]
 		interfaceID := mux.Vars(r)["id"]
 
-		var id, currentVMID, name, macAddress, status string
-		var networkID, ipAddress sql.NullString
-		var createdAt, updatedAt time.Time
+		var id, name string
+		var currentVMID, macAddress, ipAddress, bridgeName sql.NullString
+		var createdAt time.Time
 		err := db.QueryRow(`
-			SELECT id, vm_id, network_id, name, mac_address, ip_address, status, created_at, updated_at
-			FROM vm_interfaces
-			WHERE vm_id = $1 AND id = $2
-		`, vmID, interfaceID).Scan(&id, &currentVMID, &networkID, &name, &macAddress, &ipAddress, &status, &createdAt, &updatedAt)
+			SELECT id, vm_id, name, mac_address, ip_address, bridge_name, created_at
+			FROM network_interfaces
+			WHERE vm_id::text = $1 AND id = $2
+		`, vmID, interfaceID).Scan(&id, &currentVMID, &name, &macAddress, &ipAddress, &bridgeName, &createdAt)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				writeJSONError(w, http.StatusNotFound, "vm interface not found")
@@ -1003,14 +859,14 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"id":          id,
-			"vm_id":       currentVMID,
-			"network_id":  nullableString(networkID),
+			"vm_id":       nullableString(currentVMID),
+			"network_id":  nullableString(bridgeName),
 			"name":        name,
-			"mac_address": macAddress,
+			"mac_address": nullableString(macAddress),
 			"ip_address":  nullableString(ipAddress),
-			"status":      status,
+			"status":      "attached",
 			"created_at":  createdAt.Format(time.RFC3339),
-			"updated_at":  updatedAt.Format(time.RFC3339),
+			"updated_at":  createdAt.Format(time.RFC3339),
 		})
 	}).Methods(http.MethodGet)
 
@@ -1031,10 +887,12 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 		}
 
 		result, err := db.Exec(`
-			UPDATE vm_interfaces
-			SET network_id = NULLIF($3, ''), name = COALESCE(NULLIF($4, ''), name), ip_address = NULLIF($5, ''), status = COALESCE(NULLIF($6, ''), status), updated_at = NOW()
-			WHERE vm_id = $1 AND id = $2
-		`, vmID, interfaceID, updateReq.NetworkID, updateReq.Name, updateReq.IPAddress, updateReq.Status)
+			UPDATE network_interfaces
+			SET name = COALESCE(NULLIF($3, ''), name),
+				ip_address = COALESCE(NULLIF($4, '')::inet, ip_address),
+				bridge_name = COALESCE(NULLIF($5, ''), bridge_name)
+			WHERE vm_id::text = $1 AND id = $2
+		`, vmID, interfaceID, updateReq.Name, updateReq.IPAddress, updateReq.NetworkID)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to update VM interface")
 			return
@@ -1052,7 +910,7 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 			"network_id": emptyStringToNil(updateReq.NetworkID),
 			"name":       updateReq.Name,
 			"ip_address": emptyStringToNil(updateReq.IPAddress),
-			"status":     updateReq.Status,
+			"status":     "attached",
 		})
 	}).Methods(http.MethodPut)
 
@@ -1060,7 +918,7 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 		vmID := mux.Vars(r)["vm_id"]
 		interfaceID := mux.Vars(r)["id"]
 
-		result, err := db.Exec(`DELETE FROM vm_interfaces WHERE vm_id = $1 AND id = $2`, vmID, interfaceID)
+		result, err := db.Exec(`DELETE FROM network_interfaces WHERE vm_id::text = $1 AND id = $2`, vmID, interfaceID)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to detach VM interface")
 			return
@@ -1319,10 +1177,9 @@ func registerMigratedDest(db *sql.DB, manager *core_vm.VMManager, vmID string, c
 		"image":        cfg.Image,
 	})
 	if _, err := db.Exec(`
-		INSERT INTO vms (id, name, state, node_id, owner_id, tenant_id, config, created_at, updated_at)
-		VALUES ($1, $2, 'running', $3, $4, $5, $6, NOW(), NOW())
-		ON CONFLICT (id) DO UPDATE SET state = 'running', node_id = EXCLUDED.node_id, updated_at = NOW()
-	`, vmID, cfg.Name, nullableStringValue(nodeID), parseOwnerID(cfg.OwnerID), cfg.TenantID, configPayload); err != nil {
+		INSERT INTO vms (id, name, state, node_id, cpu_cores, memory_mb, disk_gb, os_type, owner_id, metadata, created_at, updated_at)
+		VALUES ($1, $2, 'running', $3, $4, $5, $6, $7, NULLIF($8, '')::uuid, $9, NOW(), NOW())
+	`, vmID, cfg.Name, nullableStringValue(nodeID), defaultCPUShares(cfg.CPUShares), cfg.MemoryMB, cfg.DiskSizeGB, nullableStringValue(cfg.Image), parseOwnerID(cfg.OwnerID), configPayload); err != nil {
 		logger.Warn("migrated-VM DB register failed", "vm", vmID, "error", err)
 		return
 	}
@@ -1356,16 +1213,23 @@ func registerConfiguredPeers(vmManager *core_vm.VMManager) {
 	}
 }
 
-// parseOwnerID turns a config OwnerID string into a nullable int for the vms
-// owner_id FK: NULL if absent/unparseable, rather than failing registration.
+// parseOwnerID turns a config OwnerID string into a nullable uuid string for
+// the vms.owner_id FK (users.id): NULL if absent/non-uuid, rather than failing
+// registration.
 func parseOwnerID(s string) interface{} {
-	if s == "" {
+	if _, err := uuid.Parse(strings.TrimSpace(s)); err != nil {
 		return nil
 	}
-	if n, err := strconv.Atoi(s); err == nil {
-		return n
+	return strings.TrimSpace(s)
+}
+
+// defaultCPUShares fills the canonical vms.cpu_cores NOT NULL column with the
+// same 1024 default NewVM applies on the manager path.
+func defaultCPUShares(cpu int) int {
+	if cpu <= 0 {
+		return 1024
 	}
-	return nil
+	return cpu
 }
 
 // registerVMMigrateRoute wires POST /vms/{id}/migrate to the real manager's
@@ -1593,13 +1457,19 @@ func registerCanonicalAdminRoutes(router *mux.Router, authManager *auth.SimpleAu
 }
 
 type canonicalAdminUser struct {
-	ID        int       `json:"id"`
+	ID        string    `json:"id"` // canonical users.id is a uuid
 	Username  string    `json:"username"`
 	Email     string    `json:"email"`
-	Role      string    `json:"role"`
-	Active    bool      `json:"active"`
+	Role      string    `json:"role"`   // canonical user_role enum: admin|operator|viewer
+	Status    string    `json:"status"` // canonical user_status enum
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// active() reports account liveness from the canonical user_status enum; the
+// legacy boolean "active" column does not exist in the canonical schema.
+func (u canonicalAdminUser) active() bool {
+	return u.Status == "active"
 }
 
 type canonicalAdminUserListResponse struct {
@@ -1609,7 +1479,6 @@ type canonicalAdminUserListResponse struct {
 	PageSize   int                  `json:"page_size"`
 	TotalPages int                  `json:"total_pages"`
 }
-
 type canonicalAdminCreateUserRequest struct {
 	Username string `json:"username"`
 	Email    string `json:"email"`
@@ -1633,8 +1502,8 @@ func listCanonicalAdminUsers(db *sql.DB) http.HandlerFunc {
 		}
 
 		search := strings.TrimSpace(r.URL.Query().Get("search"))
-		role := normalizeCanonicalAdminRole(r.URL.Query().Get("role"))
-		if rawRole := strings.TrimSpace(r.URL.Query().Get("role")); rawRole != "" && role == "" {
+		role := canonicalUserRoleForAdmin(r.URL.Query().Get("role"))
+		if rawRole := strings.TrimSpace(r.URL.Query().Get("role")); rawRole != "" && !isCanonicalAdminRoleRaw(rawRole) {
 			writeJSONError(w, http.StatusBadRequest, "invalid role filter")
 			return
 		}
@@ -1665,7 +1534,7 @@ func listCanonicalAdminUsers(db *sql.DB) http.HandlerFunc {
 		}
 
 		listQuery := fmt.Sprintf(`
-			SELECT id, username, email, role, active, created_at, updated_at
+			SELECT id, username, email, role, status, created_at, updated_at
 			FROM users
 			%s
 			ORDER BY created_at DESC
@@ -1683,7 +1552,7 @@ func listCanonicalAdminUsers(db *sql.DB) http.HandlerFunc {
 		users := make([]canonicalAdminUser, 0)
 		for rows.Next() {
 			var user canonicalAdminUser
-			if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.Role, &user.Active, &user.CreatedAt, &user.UpdatedAt); err != nil {
+			if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt); err != nil {
 				writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to scan user: %v", err))
 				return
 			}
@@ -1710,10 +1579,7 @@ func createCanonicalAdminUser(db *sql.DB) http.HandlerFunc {
 
 		req.Username = strings.TrimSpace(req.Username)
 		req.Email = strings.TrimSpace(req.Email)
-		req.Role = normalizeCanonicalAdminRole(req.Role)
-		if req.Role == "" {
-			req.Role = "user"
-		}
+		req.Role = canonicalUserRoleForAdmin(req.Role)
 
 		if req.Username == "" || req.Email == "" || strings.TrimSpace(req.Password) == "" {
 			writeJSONError(w, http.StatusBadRequest, "username, email, and password are required")
@@ -1724,25 +1590,26 @@ func createCanonicalAdminUser(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		passwordHash, err := bcrypt.GenerateFromPassword([]byte(strings.TrimSpace(req.Password)), bcrypt.DefaultCost)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to hash password: %v", err))
+			return
+		}
+
 		var user canonicalAdminUser
-		err := db.QueryRow(`
-			INSERT INTO users (username, email, password_hash, role, active, tenant_id, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, true, 'default', NOW(), NOW())
-			RETURNING id, username, email, role, active, created_at, updated_at
-		`, req.Username, req.Email, req.Password, req.Role).Scan(
+		err = db.QueryRow(`
+			INSERT INTO users (username, email, password_hash, role, status)
+			VALUES ($1, $2, $3, $4, 'active')
+			RETURNING id, username, email, role, status, created_at, updated_at
+		`, req.Username, req.Email, string(passwordHash), req.Role).Scan(
 			&user.ID,
 			&user.Username,
 			&user.Email,
 			&user.Role,
-			&user.Active,
+			&user.Status,
 			&user.CreatedAt,
 			&user.UpdatedAt,
 		)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create user: %v", err))
-			return
-		}
-
 		writeJSON(w, http.StatusCreated, user)
 	}
 }
@@ -1777,17 +1644,18 @@ func updateCanonicalAdminUser(db *sql.DB) http.HandlerFunc {
 			args = append(args, email)
 		}
 		if req.Role != "" {
-			role := normalizeCanonicalAdminRole(req.Role)
-			if role == "" {
-				writeJSONError(w, http.StatusBadRequest, "invalid role")
-				return
-			}
+			role := canonicalUserRoleForAdmin(req.Role)
 			updates = append(updates, fmt.Sprintf("role = $%d", len(args)+1))
 			args = append(args, role)
 		}
 		if req.Active != nil {
-			updates = append(updates, fmt.Sprintf("active = $%d", len(args)+1))
-			args = append(args, *req.Active)
+			// canonical user_status enum replaces the legacy boolean column
+			status := "inactive"
+			if *req.Active {
+				status = "active"
+			}
+			updates = append(updates, fmt.Sprintf("status = $%d", len(args)+1))
+			args = append(args, status)
 		}
 		if len(updates) == 0 {
 			writeJSONError(w, http.StatusBadRequest, "no fields to update")
@@ -1801,7 +1669,7 @@ func updateCanonicalAdminUser(db *sql.DB) http.HandlerFunc {
 			UPDATE users
 			SET %s
 			WHERE id = $%d
-			RETURNING id, username, email, role, active, created_at, updated_at
+			RETURNING id, username, email, role, status, created_at, updated_at
 		`, strings.Join(updates, ", "), len(args))
 
 		var user canonicalAdminUser
@@ -1810,7 +1678,7 @@ func updateCanonicalAdminUser(db *sql.DB) http.HandlerFunc {
 			&user.Username,
 			&user.Email,
 			&user.Role,
-			&user.Active,
+			&user.Status,
 			&user.CreatedAt,
 			&user.UpdatedAt,
 		)
@@ -1870,35 +1738,23 @@ func assignCanonicalAdminUserRoles(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		role := normalizeCanonicalAdminRole(req.Roles[0])
-		if role == "" {
-			writeJSONError(w, http.StatusBadRequest, "invalid role")
-			return
-		}
+		role := canonicalUserRoleForAdmin(req.Roles[0])
 
 		var user canonicalAdminUser
 		err = db.QueryRow(`
 			UPDATE users
 			SET role = $1, updated_at = NOW()
 			WHERE id = $2
-			RETURNING id, username, email, role, active, created_at, updated_at
+			RETURNING id, username, email, role, status, created_at, updated_at
 		`, role, userID).Scan(
 			&user.ID,
 			&user.Username,
 			&user.Email,
 			&user.Role,
-			&user.Active,
+			&user.Status,
 			&user.CreatedAt,
 			&user.UpdatedAt,
 		)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				writeJSONError(w, http.StatusNotFound, "user not found")
-				return
-			}
-			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to assign role: %v", err))
-			return
-		}
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"user":    user,
@@ -1907,20 +1763,39 @@ func assignCanonicalAdminUserRoles(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func canonicalAdminUserID(raw string) (int, error) {
-	userID, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || userID <= 0 {
-		return 0, fmt.Errorf("invalid user ID")
+// isCanonicalAdminRoleRaw reports whether a raw role label is one the admin
+// API accepts (before mapping onto the canonical enum).
+func isCanonicalAdminRoleRaw(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "admin", "operator", "viewer", "user", "readonly", "super-admin":
+		return true
+	default:
+		return false
+	}
+}
+
+// canonicalAdminUserID validates the path id as a canonical users.id (uuid).
+func canonicalAdminUserID(raw string) (string, error) {
+	userID := strings.TrimSpace(raw)
+	if _, err := uuid.Parse(userID); err != nil {
+		return "", fmt.Errorf("invalid user ID")
 	}
 	return userID, nil
 }
 
-func normalizeCanonicalAdminRole(raw string) string {
+// canonicalUserRoleForAdmin maps accepted role labels onto the canonical
+// user_role enum ('admin','operator','viewer'); 'user'/'readonly' collapse to
+// 'viewer' and 'super-admin' to 'admin', matching the RBAC catalog seeds.
+func canonicalUserRoleForAdmin(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "admin", "operator", "viewer", "user", "super-admin":
-		return strings.ToLower(strings.TrimSpace(raw))
+	case "admin", "super-admin":
+		return "admin"
+	case "operator":
+		return "operator"
+	case "viewer", "user", "readonly":
+		return "viewer"
 	default:
-		return ""
+		return "viewer"
 	}
 }
 
@@ -2245,18 +2120,17 @@ func frontendUser(user *auth.User) map[string]interface{} {
 			}
 			roles = append(roles, r.Name)
 		}
-		if len(roles) > 0 {
-			role = roles[0]
-		}
 	}
 
 	return map[string]interface{}{
-		"id":                 user.ID,
-		"email":              user.Email,
-		"firstName":          "",
-		"lastName":           "",
-		"tenantId":           user.TenantID,
-		"tenant_id":          user.TenantID,
+		"id":        user.ID,
+		"email":     user.Email,
+		"firstName": "",
+		"lastName":  "",
+		// Tenancy is not persisted in the canonical schema; the frontend
+		// contract still expects a tenant label, so default it.
+		"tenantId":           defaultTenantLabel(user.TenantID),
+		"tenant_id":          defaultTenantLabel(user.TenantID),
 		"status":             "active",
 		"role":               role,
 		"roles":              roles,
@@ -2264,6 +2138,14 @@ func frontendUser(user *auth.User) map[string]interface{} {
 	}
 }
 
+// defaultTenantLabel fills the tenant claim for API/UI compatibility; the
+// canonical users table has no tenancy column so nothing is persisted.
+func defaultTenantLabel(tenantID string) string {
+	if strings.TrimSpace(tenantID) == "" {
+		return "default"
+	}
+	return strings.TrimSpace(tenantID)
+}
 func hasAnyRole(ctx context.Context, requiredRoles ...string) bool {
 	required := make(map[string]struct{}, len(requiredRoles))
 	for _, role := range requiredRoles {

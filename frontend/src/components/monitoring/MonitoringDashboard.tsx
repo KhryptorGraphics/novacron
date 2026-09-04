@@ -136,7 +136,7 @@ const formatBytes = (bytes: number, decimals = 2): string => {
   
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))  } ${  sizes[i]}`;
 };
 
 const formatPercentage = (value: number | null | undefined): string => {
@@ -831,7 +831,7 @@ const MonitoringDashboard: React.FC = () => {
                 <div className="space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="text-sm flex items-center">
-                      <span className="h-3 w-3 rounded-full bg-red-500 inline-block mr-2"></span>
+                      <span className="h-3 w-3 rounded-full bg-red-500 inline-block mr-2" />
                       Critical
                     </span>
                     <Badge variant="outline" className="bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400">
@@ -840,7 +840,7 @@ const MonitoringDashboard: React.FC = () => {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm flex items-center">
-                      <span className="h-3 w-3 rounded-full bg-orange-500 inline-block mr-2"></span>
+                      <span className="h-3 w-3 rounded-full bg-orange-500 inline-block mr-2" />
                       Error
                     </span>
                     <Badge variant="outline" className="bg-orange-100 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400">
@@ -849,7 +849,7 @@ const MonitoringDashboard: React.FC = () => {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm flex items-center">
-                      <span className="h-3 w-3 rounded-full bg-amber-500 inline-block mr-2"></span>
+                      <span className="h-3 w-3 rounded-full bg-amber-500 inline-block mr-2" />
                       Warning
                     </span>
                     <Badge variant="outline" className="bg-amber-100 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400">
@@ -858,7 +858,7 @@ const MonitoringDashboard: React.FC = () => {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm flex items-center">
-                      <span className="h-3 w-3 rounded-full bg-blue-500 inline-block mr-2"></span>
+                      <span className="h-3 w-3 rounded-full bg-blue-500 inline-block mr-2" />
                       Info
                     </span>
                     <Badge variant="outline" className="bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">

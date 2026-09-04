@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import React from "react";
+import React from 'react';
 
 // This is a simplified example. In a production app, you'd use a more robust charting library
 // like Chart.js or D3.js for more sophisticated visualizations
@@ -93,7 +93,7 @@ export function LineChart({ data, xLabel, yLabel }: LineChartProps) {
               const y = 350 - ((d.y - minY) / range) * 300;
               return `${x},${y}`;
             })
-            .join(" ")}
+            .join(' ')}
           fill="none"
           stroke="#3b82f6"
           strokeWidth="2"
@@ -136,7 +136,7 @@ export function PieChart({ data, label }: PieChartProps) {
   const total = data.reduce((sum, d) => sum + d.value, 0);
   
   // Colors for the pie chart
-  const colors = ["#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"];
+  const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
   
   // Calculate pie segments
   let cumulativeAngle = 0;
@@ -197,7 +197,7 @@ export function PieChart({ data, label }: PieChartProps) {
               <div
                 className="w-3 h-3 mr-1"
                 style={{ backgroundColor: segment.color }}
-              ></div>
+               />
               <div className="text-sm">
                 {segment.name}: {((segment.value / total) * 100).toFixed(1)}%
               </div>

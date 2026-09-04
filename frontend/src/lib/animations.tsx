@@ -1,15 +1,15 @@
-"use client";
+'use client';
 
-import React from "react";
-import { motion } from "framer-motion";
-import { useState, useEffect } from "react";
+import React from 'react';
+import { motion } from 'framer-motion';
+import { useState, useEffect } from 'react';
 
 // FadeIn animation component
 export function FadeIn({
   children,
   delay = 0,
   duration = 0.5,
-  className = "",
+  className = '',
 }: {
   children: React.ReactNode;
   delay?: number;
@@ -32,7 +32,7 @@ export function FadeIn({
 export function AnimatedCounter({
   value,
   duration = 1000,
-  suffix = "",
+  suffix = '',
 }: {
   value: number;
   duration?: number;
@@ -71,7 +71,7 @@ export function AnimatedCounter({
 export function StaggeredList({
   children,
   delay = 0.1,
-  className = "",
+  className = '',
 }: {
   children: React.ReactNode;
   delay?: number;
@@ -97,20 +97,20 @@ export function StaggeredList({
 
 // LoadingSpinner component
 export function LoadingSpinner({
-  size = "md",
-  className = "",
+  size = 'md',
+  className = '',
 }: {
-  size?: "sm" | "md" | "lg";
+  size?: 'sm' | 'md' | 'lg';
   className?: string;
 }) {
   const sizeClasses = {
-    sm: "h-4 w-4",
-    md: "h-8 w-8", 
-    lg: "h-12 w-12"
+    sm: 'h-4 w-4',
+    md: 'h-8 w-8', 
+    lg: 'h-12 w-12'
   };
   
   return (
-    <div className={`animate-spin rounded-full border-4 border-blue-500 border-t-transparent ${sizeClasses[size]} ${className}`}></div>
+    <div className={`animate-spin rounded-full border-4 border-blue-500 border-t-transparent ${sizeClasses[size]} ${className}`} />
   );
 }
 

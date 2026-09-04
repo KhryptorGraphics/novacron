@@ -224,7 +224,21 @@ func (sim *NetworkSimulator) calculateOutcome(decision *partition.TaskPartitionD
 }
 
 func (sim *NetworkSimulator) updateState(state *partition.EnvironmentState, decision *partition.TaskPartitionDecision, outcome *partition.ActionOutcome) *partition.EnvironmentState {
-	nextState := *state
+	// Field-wise copy: EnvironmentState embeds a sync.RWMutex, so copying
+	// the struct value would copy a lock (go vet copylocks). Start from a
+	// fresh zero-mutex state and carry over the observable fields.
+	nextState := partition.NewEnvironmentState()
+	nextState.StreamBandwidth = state.StreamBandwidth
+	nextState.StreamLatency = state.StreamLatency
+	nextState.StreamCongestion = state.StreamCongestion
+	nextState.StreamSuccessRate = state.StreamSuccessRate
+	nextState.TaskQueueDepth = state.TaskQueueDepth
+	nextState.TaskSize = state.TaskSize
+	nextState.TaskPriority = state.TaskPriority
+	nextState.TimeOfDay = state.TimeOfDay
+	nextState.CPUUtilization = state.CPUUtilization
+	nextState.MemoryUtilization = state.MemoryUtilization
+	nextState.NetworkLoad = state.NetworkLoad
 
 	// Update stream congestion based on usage
 	for _, streamID := range decision.StreamIDs {
@@ -287,7 +301,7 @@ func (sim *NetworkSimulator) updateState(state *partition.EnvironmentState, deci
 	// Update time
 	nextState.TimeOfDay = float64(time.Now().Hour()) / 24.0
 
-	return &nextState
+	return nextState
 }
 
 // RunTraining runs full training loop

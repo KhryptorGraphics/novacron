@@ -162,14 +162,14 @@ export const PredictiveChart: React.FC<PredictiveChartProps> = ({
         mode: 'index' as const,
         intersect: false,
         callbacks: {
-          label: function(context: any) {
+          label(context: any) {
             const label = context.dataset.label || '';
             const value = context.parsed.y !== null 
               ? `${context.parsed.y.toFixed(2)} ${metricUnit}` 
               : 'No data';
             return `${label}: ${value}`;
           },
-          afterBody: function(tooltipItems: any[]) {
+          afterBody(tooltipItems: any[]) {
             const label = tooltipItems[0].label;
             
             // Check if there's an anomaly at this point

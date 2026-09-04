@@ -23,10 +23,10 @@ type Bullshark struct {
 	commitQueue    chan *Vertex
 
 	// Metrics
-	txThroughput   int64
-	latency        time.Duration
-	proposalCount  int64
-	commitCount    int64
+	txThroughput  int64
+	latency       time.Duration
+	proposalCount int64
+	commitCount   int64
 
 	// Synchronization
 	mu      sync.RWMutex
@@ -39,19 +39,19 @@ type Bullshark struct {
 // Config holds Bullshark configuration parameters
 type Config struct {
 	// Protocol parameters
-	RoundDuration    time.Duration
-	BatchSize        int
-	CommitteeSize    int
-	QuorumThreshold  float64
+	RoundDuration   time.Duration
+	BatchSize       int
+	CommitteeSize   int
+	QuorumThreshold float64
 
 	// Performance tuning
-	BufferSize       int
-	WorkerCount      int
-	MaxParents       int
+	BufferSize  int
+	WorkerCount int
+	MaxParents  int
 
 	// Timeouts
-	ProposeTimeout   time.Duration
-	CommitTimeout    time.Duration
+	ProposeTimeout time.Duration
+	CommitTimeout  time.Duration
 }
 
 // DefaultConfig returns default Bullshark configuration
@@ -113,16 +113,28 @@ func (b *Bullshark) Stop() error {
 		return fmt.Errorf("bullshark not running")
 	}
 
+	// Cancel the context so workers and ProposeBlock observe shutdown.
+	// The channels are deliberately NOT closed: after the running flag
+	// flips, a racing ProposeBlock may still be inside the select below
+	// (or between it and its caller), and a send on a closed channel is
+	// always ready in a select, so closing would reintroduce the
+	// send-on-closed-channel panic. Draining instead of closing keeps
+	// those sends safe; the buffers are garbage-collected with b.
 	b.cancel()
 
-	// Close channels
-	close(b.proposalBuffer)
-	close(b.commitQueue)
-
-	// Wait for workers
+	// Wait for workers to exit so nothing forwards new vertices while
+	// Stop is returning.
 	b.wg.Wait()
 
-	return nil
+	// Drain any vertices still buffered so queued work is not lost.
+	for {
+		select {
+		case <-b.proposalBuffer:
+		case <-b.commitQueue:
+		default:
+			return nil
+		}
+	}
 }
 
 // ProposeBlock creates and proposes a new block with transactions
@@ -143,7 +155,17 @@ func (b *Bullshark) ProposeBlock(txs []Transaction) (*Vertex, error) {
 		return nil, fmt.Errorf("failed to add vertex to DAG: %w", err)
 	}
 
-	// Queue for proposal
+	// Guard the send on the stop context: Stop cancels ctx before
+	// draining, so a proposal racing shutdown either lands in the buffer
+	// (drained or consumed by a worker) or returns an error — never a
+	// panic. Checking Done() first also guarantees the cancelled case is
+	// taken even when the buffer still has room.
+	select {
+	case <-b.ctx.Done():
+		return nil, fmt.Errorf("bullshark is stopping: context cancelled")
+	default:
+	}
+
 	select {
 	case b.proposalBuffer <- v:
 		atomic.AddInt64(&b.proposalCount, 1)
@@ -342,11 +364,11 @@ func (b *Bullshark) metricsCollector() {
 // GetMetrics returns current consensus metrics
 func (b *Bullshark) GetMetrics() Metrics {
 	return Metrics{
-		Round:          atomic.LoadInt64(&b.round),
-		TxThroughput:   atomic.LoadInt64(&b.txThroughput),
-		ProposalCount:  atomic.LoadInt64(&b.proposalCount),
-		CommitCount:    atomic.LoadInt64(&b.commitCount),
-		DAGMetrics:     b.dag.Metrics(),
+		Round:         atomic.LoadInt64(&b.round),
+		TxThroughput:  atomic.LoadInt64(&b.txThroughput),
+		ProposalCount: atomic.LoadInt64(&b.proposalCount),
+		CommitCount:   atomic.LoadInt64(&b.commitCount),
+		DAGMetrics:    b.dag.Metrics(),
 	}
 }
 

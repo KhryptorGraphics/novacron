@@ -73,7 +73,7 @@ export const HeatmapChart: React.FC<HeatmapProps> = ({
           <div className="min-w-max">
             {/* Y-axis label */}
             <div className="flex mb-2">
-              <div className="w-24 flex-shrink-0"></div>
+              <div className="w-24 flex-shrink-0" />
               <div className="flex-grow text-center text-sm font-medium text-muted-foreground">
                 {xAxisLabel}
               </div>

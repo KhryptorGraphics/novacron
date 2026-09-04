@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import React from "react";
-import { AlertTriangle, RefreshCw, Home, ChevronDown, ChevronUp } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { useRouter } from "next/navigation";
+import React from 'react';
+import { AlertTriangle, RefreshCw, Home, ChevronDown, ChevronUp } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useRouter } from 'next/navigation';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -59,7 +59,7 @@ function DefaultErrorFallback({
           {error && (
             <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800 rounded-lg">
               <p className="text-sm font-mono text-red-800 dark:text-red-300">
-                {error.message || "An unknown error occurred"}
+                {error.message || 'An unknown error occurred'}
               </p>
             </div>
           )}
@@ -75,7 +75,7 @@ function DefaultErrorFallback({
               Try Again
             </Button>
             <Button
-              onClick={() => router.push("/")}
+              onClick={() => router.push('/')}
               className="flex-1"
               variant="outline"
             >
@@ -155,8 +155,8 @@ export class ErrorBoundary extends React.Component<
   
   override componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     // Log error to console in development
-    if (process.env.NODE_ENV === "development") {
-      console.error("Error Boundary caught an error:", error, errorInfo);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error Boundary caught an error:', error, errorInfo);
     }
     
     // Call custom error handler if provided
@@ -317,7 +317,7 @@ export function NotFoundError() {
           <Button onClick={() => router.back()} variant="outline">
             Go Back
           </Button>
-          <Button onClick={() => router.push("/")}>
+          <Button onClick={() => router.push('/')}>
             <Home className="mr-2 h-4 w-4" />
             Go Home
           </Button>
@@ -358,7 +358,7 @@ export function PermissionError({
       <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 text-center max-w-sm">
         {message}
       </p>
-      <Button onClick={() => router.push("/")} size="sm">
+      <Button onClick={() => router.push('/')} size="sm">
         <Home className="mr-2 h-4 w-4" />
         Go to Home
       </Button>

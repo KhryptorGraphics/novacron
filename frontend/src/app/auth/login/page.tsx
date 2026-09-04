@@ -1,28 +1,28 @@
-"use client";
+'use client';
 
 // Disable static generation for this page
 export const dynamic = 'force-dynamic';
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { useToast } from "@/components/ui/use-toast";
-import { Icons } from "@/components/ui/icons";
-import Link from "next/link";
-import { useAuth } from "@/hooks/useAuth";
-import TwoFactorLogin from "@/components/auth/TwoFactorLogin";
-import { authService } from "@/lib/auth";
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { useToast } from '@/components/ui/use-toast';
+import { Icons } from '@/components/ui/icons';
+import Link from 'next/link';
+import { useAuth } from '@/hooks/useAuth';
+import TwoFactorLogin from '@/components/auth/TwoFactorLogin';
+import { authService } from '@/lib/auth';
 
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [isGitHubLoading, setIsGitHubLoading] = useState(false);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const { login, requires2FA, tempToken } = useAuth();
 
   async function onSubmit(event: React.SyntheticEvent) {
@@ -34,17 +34,17 @@ export default function LoginPage() {
 
       if (destination) {
         toast({
-          title: "Success",
-          description: "You have been logged in successfully.",
+          title: 'Success',
+          description: 'You have been logged in successfully.',
         });
         router.push(destination);
       }
     } catch (error) {
       console.error('Login error:', error);
       toast({
-        title: "Error",
-        description: "Invalid email or password. Please try again.",
-        variant: "destructive",
+        title: 'Error',
+        description: 'Invalid email or password. Please try again.',
+        variant: 'destructive',
       });
     } finally {
       setIsLoading(false);
@@ -53,16 +53,16 @@ export default function LoginPage() {
 
   const handle2FASuccess = (destination: string) => {
     toast({
-      title: "Success",
-      description: "You have been logged in successfully.",
+      title: 'Success',
+      description: 'You have been logged in successfully.',
     });
     router.push(destination);
   };
 
   const handle2FACancel = () => {
     // Reset form state to allow new login attempt
-    setEmail("");
-    setPassword("");
+    setEmail('');
+    setPassword('');
   };
 
   async function onGitHubLogin() {
@@ -74,9 +74,9 @@ export default function LoginPage() {
     } catch (error) {
       console.error('GitHub login error:', error);
       toast({
-        title: "GitHub Login Unavailable",
-        description: "GitHub OAuth is not configured or could not be started.",
-        variant: "destructive",
+        title: 'GitHub Login Unavailable',
+        description: 'GitHub OAuth is not configured or could not be started.',
+        variant: 'destructive',
       });
       setIsGitHubLoading(false);
     }
@@ -178,7 +178,7 @@ export default function LoginPage() {
             </Link>
           </div>
           <div className="text-sm text-muted-foreground text-center mt-2">
-            Don't have an account?{" "}
+            Don't have an account?{' '}
             <Link href="/auth/register" className="hover:text-brand underline underline-offset-4">
               Sign up
             </Link>

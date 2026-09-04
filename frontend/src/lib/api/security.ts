@@ -335,8 +335,8 @@ class SecurityAPIService {
 
   // Security Events
   async getSecurityEvents(
-    limit: number = 100,
-    offset: number = 0,
+    limit = 100,
+    offset = 0,
     severity?: string,
     type?: string,
     timeRange?: string
@@ -502,8 +502,8 @@ class SecurityAPIService {
   }
 
   async getThreatTrends(
-    timeRange: string = '24h',
-    granularity: string = '1h'
+    timeRange = '24h',
+    granularity = '1h'
   ): Promise<ThreatTrend[]> {
     void timeRange;
     void granularity;
@@ -547,8 +547,8 @@ class SecurityAPIService {
 
   // Audit Trail
   async getAuditTrail(
-    limit: number = 100,
-    offset: number = 0,
+    limit = 100,
+    offset = 0,
     resource?: string,
     action?: string,
     user?: string,

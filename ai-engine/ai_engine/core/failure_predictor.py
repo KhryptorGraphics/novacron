@@ -23,7 +23,6 @@ from tsfresh.utilities.dataframe_functions import impute
 from ..models.base import BaseMLModel, ModelMetadata, ModelType, PredictionRequest, PredictionResponse
 from ..utils.metrics import MetricsCalculator
 from ..utils.feature_engineering import TimeSeriesFeatureExtractor
-from ..database.models import FailurePredictionRecord
 
 
 logger = logging.getLogger(__name__)

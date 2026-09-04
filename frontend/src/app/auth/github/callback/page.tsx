@@ -1,19 +1,19 @@
-"use client";
+'use client';
 
 export const dynamic = 'force-dynamic';
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   AdmissionResponse,
   ClusterSummaryResponse,
   SessionResponse,
   UserResponse,
   authService,
-} from "@/lib/auth";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Icons } from "@/components/ui/icons";
-import { useToast } from "@/components/ui/use-toast";
+} from '@/lib/auth';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Icons } from '@/components/ui/icons';
+import { useToast } from '@/components/ui/use-toast';
 
 function decodeFragmentPayload<T>(value: string | null): T | null {
   if (!value) {
@@ -54,9 +54,9 @@ export default function GitHubCallbackPage() {
 
     if (!token || !user || !session) {
       toast({
-        title: "GitHub Login Failed",
-        description: "The GitHub callback did not include a valid session.",
-        variant: "destructive",
+        title: 'GitHub Login Failed',
+        description: 'The GitHub callback did not include a valid session.',
+        variant: 'destructive',
       });
       router.replace('/auth/login');
       return;

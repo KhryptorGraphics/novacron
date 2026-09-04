@@ -1,11 +1,11 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { useWorkflowExecution } from "@/hooks/useAPI";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { format } from "date-fns";
+import { useState, useEffect } from 'react';
+import { useWorkflowExecution } from '@/hooks/useAPI';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { format } from 'date-fns';
 
 interface ExecutionNode {
   id: string;
@@ -114,13 +114,13 @@ export function WorkflowExecutionMonitor({ executionId }: { executionId: string 
               {execution.startedAt && (
                 <div>
                   <p className="text-sm text-gray-500">Started</p>
-                  <p>{format(new Date(execution.startedAt), "MMM dd, yyyy HH:mm:ss")}</p>
+                  <p>{format(new Date(execution.startedAt), 'MMM dd, yyyy HH:mm:ss')}</p>
                 </div>
               )}
               {execution.completedAt && (
                 <div>
                   <p className="text-sm text-gray-500">Completed</p>
-                  <p>{format(new Date(execution.completedAt), "MMM dd, yyyy HH:mm:ss")}</p>
+                  <p>{format(new Date(execution.completedAt), 'MMM dd, yyyy HH:mm:ss')}</p>
                 </div>
               )}
               {execution.durationMs && (
@@ -151,13 +151,13 @@ export function WorkflowExecutionMonitor({ executionId }: { executionId: string 
                     {node.startedAt && (
                       <div>
                         <p className="text-gray-500">Started</p>
-                        <p>{format(new Date(node.startedAt), "HH:mm:ss")}</p>
+                        <p>{format(new Date(node.startedAt), 'HH:mm:ss')}</p>
                       </div>
                     )}
                     {node.completedAt && (
                       <div>
                         <p className="text-gray-500">Completed</p>
-                        <p>{format(new Date(node.completedAt), "HH:mm:ss")}</p>
+                        <p>{format(new Date(node.completedAt), 'HH:mm:ss')}</p>
                       </div>
                     )}
                     {node.durationMs && (

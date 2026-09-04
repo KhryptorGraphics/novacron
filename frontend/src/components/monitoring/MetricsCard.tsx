@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import type { ReactNode } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
-import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+import type { ReactNode } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
+import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
 interface MetricsCardProps {
   title: string;
@@ -11,7 +11,7 @@ interface MetricsCardProps {
   unit?: string;
   change?: number;
   changeLabel?: string;
-  status?: "success" | "warning" | "error" | "neutral";
+  status?: 'success' | 'warning' | 'error' | 'neutral';
   icon?: React.ReactNode;
   className?: string;
 }
@@ -22,7 +22,7 @@ export function MetricsCard({
   unit,
   change,
   changeLabel,
-  status = "neutral",
+  status = 'neutral',
   icon,
   className
 }: MetricsCardProps) {
@@ -34,30 +34,30 @@ export function MetricsCard({
   };
   
   const getTrendColor = () => {
-    if (!change) return "text-gray-500";
-    if (status === "success") return change > 0 ? "text-green-600" : "text-red-600";
-    if (status === "error") return change > 0 ? "text-red-600" : "text-green-600";
-    return change > 0 ? "text-blue-600" : "text-orange-600";
+    if (!change) return 'text-gray-500';
+    if (status === 'success') return change > 0 ? 'text-green-600' : 'text-red-600';
+    if (status === 'error') return change > 0 ? 'text-red-600' : 'text-green-600';
+    return change > 0 ? 'text-blue-600' : 'text-orange-600';
   };
   
   const getStatusColor = () => {
     const colors = {
-      success: "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400",
-      warning: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400",
-      error: "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400",
-      neutral: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300"
+      success: 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400',
+      warning: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400',
+      error: 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400',
+      neutral: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
     };
     return colors[status];
   };
   
   return (
-    <Card className={cn("relative overflow-hidden", className)}>
+    <Card className={cn('relative overflow-hidden', className)}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-sm font-medium text-gray-600 dark:text-gray-400">
           {title}
         </CardTitle>
         {icon && (
-          <div className={cn("p-2 rounded-lg", getStatusColor())}>
+          <div className={cn('p-2 rounded-lg', getStatusColor())}>
             {icon}
           </div>
         )}
@@ -75,7 +75,7 @@ export function MetricsCard({
         {(change !== undefined || changeLabel) && (
           <div className="flex items-center gap-2 mt-2">
             {change !== undefined && (
-              <div className={cn("flex items-center gap-1", getTrendColor())}>
+              <div className={cn('flex items-center gap-1', getTrendColor())}>
                 {getTrendIcon()}
                 <span className="text-sm font-medium">
                   {Math.abs(change)}%
@@ -91,12 +91,12 @@ export function MetricsCard({
         )}
         
         {/* Visual indicator bar */}
-        {status !== "neutral" && (
+        {status !== 'neutral' && (
           <div className={cn(
-            "absolute bottom-0 left-0 right-0 h-1",
-            status === "success" && "bg-green-500",
-            status === "warning" && "bg-yellow-500",
-            status === "error" && "bg-red-500"
+            'absolute bottom-0 left-0 right-0 h-1',
+            status === 'success' && 'bg-green-500',
+            status === 'warning' && 'bg-yellow-500',
+            status === 'error' && 'bg-red-500'
           )} />
         )}
       </CardContent>
