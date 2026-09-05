@@ -49,6 +49,10 @@ nothing below is claimed without the cited command having run.
   "deferred" TODOs. Stop drops the layer (Start→Stop→Start rebuilds fresh).
   3 new tests; race gate `go test -race ./network/dwcp/ ./network/dwcp/v3/consensus/bullshark/`
   ok 5/5.
+  Follow-up (2026-09-05): `Stop()` held `m.mu` across `wg.Wait()` while both
+  management loops take `m.mu.RLock` — a latent shutdown deadlock; a 1 ms-tick
+  Start/Stop hammer passes post-fix (see f67c63b5), and Stop now releases the
+  lock around the wait behind a `stopping` guard.
 - **Raft pre-vote (product fix)** — `backend/core/consensus/raft.go`: a
   node that still hears its leader refuses pre-vote probes
   (`RequestVoteArgs.PreVote`, read-only receiver branch, `startPreVote`
@@ -75,6 +79,10 @@ nothing below is claimed without the cited command having run.
   `verify-email` pages (+6 jest tests). Canonical CI package
   `backend/api/security` had pinned the migration chain at 000004 — repaired
   version-relative (assertions unchanged), 5× green.
+  (Integrator run with `SMTP_USE_TLS=false`. A second run that left the TLS
+  default on against the plaintext sink logged "failed to start TLS: 454 TLS
+  not available" and still returned 200 by design; the direct-INSERT token path
+  then re-proved reset 200 → reuse 400 → login 200.)
 - **VM API: real `vcpus`, strict roles (product fix)** — `cpu_cores` now
   stores the requested vCPU count (validated 1..256) instead of the 1024
   scheduling weight (`cpu_shares` stays in metadata); KVM driver derives
@@ -122,6 +130,17 @@ nothing below is claimed without the cited command having run.
   fast), `novacron-5c7` (compose Dockerfiles), `novacron-8ba` (email
   verification + password reset), `novacron-gwh` (NUMBA_DISABLE_CUDA),
   `novacron-fpg` (pre-vote), `novacron-fb8` (docs prune + archive).
+- **CI gate expanded to x86 runner (follow-up 2026-09-05)** — the first x86 run
+  (33936360159) failed the new vet step: `network/dwcp/transport/rdma` compiles
+  its libibverbs cgo variant under `cgo && linux` and ubuntu-latest lacks
+  `libibverbs-dev` (JetPack ships it, so this host never saw it); the workflow
+  and `docker/test-runner.Dockerfile` now install it.
+  First green backend run: 33947046165 — after two more root causes the x86
+  census itself surfaced: the runner's residual `mana`/`mana_en` ibv devices
+  made `rdma_check_availability` report true while port 1 failed
+  `ibv_query_gid` (EINVAL) — the check now requires an ACTIVE port with a
+  queryable GID (f4164577); and two razor-edge test assertions flaked on
+  shared-runner scheduling (aee35351).
 
 ### Known residues (honest, not regressions)
 
@@ -133,7 +152,16 @@ nothing below is claimed without the cited command having run.
   host 11432 — only relevant to `make test-integration-*`, flagged not fixed.
 - `go vet` prints the pre-existing `onnxruntime_go` build-constraint notice
   on the module graph (reproduced at clean HEAD; package builds+tests green).
-- W6 commit message carries a typo ("unlired" for "unwired") — cosmetic.
+- backend/core with `CGO_ENABLED=1` on Linux needs `libibverbs-dev` (rdma
+  transport cgo variant); without it `go vet ./...` and `go test ./...` fail at
+  compile time. Installed in `.github/workflows/ci.yml` and
+  `docker/test-runner.Dockerfile` (2026-09-05).
+- AGENTS.md GitNexus impact/detect_changes could not run in this harness (MCP
+  not mounted; `.gitnexus/` index from 2026-07-09). Session-2's changed
+  backend/frontend files (77 insertions across dwcp manager/tests + CI/env
+  configs) compile, pass the 52-package census and the canonical suites; the
+  blast-radius tooling debt is tracked in a bead rather than blocking the
+  landing.
 
 ## Swarm session — 2026-09-04
 
@@ -198,6 +226,9 @@ nothing below is claimed without the cited command having run.
 - frontend full CI command set: green
 - repo-root `go build ./...`: exit 0; `go build ./backend/...`: exit 0;
   backend/core `go build ./...`: exit 0
+- GitHub canonical CI (x86): the frontend job incl. the new lint step was
+  already green on 8f38990a (run 33936360159); the backend job needed the
+  libibverbs-dev fix above — see the "CI gate expanded" bullet in session 2.
 
 ### Still broken (all filed in beads — do not duplicate)
 
