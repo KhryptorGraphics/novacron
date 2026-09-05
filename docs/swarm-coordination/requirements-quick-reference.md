@@ -1,7 +1,7 @@
 # NovaCron Requirements - Quick Reference
 
 **Date:** 2025-11-11
-**Full Analysis:** [requirements-analysis.md](requirements-analysis.md)
+**Full Analysis:** [requirements-analysis.md](../archive/fabricated-claims/swarm-coordination/requirements-analysis.md) (archived — contains fabricated figures; do not cite)
 
 ---
 
