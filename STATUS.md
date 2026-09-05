@@ -156,12 +156,21 @@ nothing below is claimed without the cited command having run.
   transport cgo variant); without it `go vet ./...` and `go test ./...` fail at
   compile time. Installed in `.github/workflows/ci.yml` and
   `docker/test-runner.Dockerfile` (2026-09-05).
-- AGENTS.md GitNexus impact/detect_changes could not run in this harness (MCP
-  not mounted; `.gitnexus/` index from 2026-07-09). Session-2's changed
-  backend/frontend files (77 insertions across dwcp manager/tests + CI/env
-  configs) compile, pass the 52-package census and the canonical suites; the
-  blast-radius tooling debt is tracked in a bead rather than blocking the
-  landing.
+- AGENTS.md GitNexus impact/detect_changes: the MCP tool is still not
+  mounted in this harness, but the standalone `gitnexus` CLI works directly
+  (no MCP needed) and the stale 2026-07-09 index was refreshed via
+  `gitnexus analyze` (146392 symbols, 233719 edges, current @ `b1ffaaa9`).
+  Spot-checked on this session's edits: `gitnexus impact Stop` (dwcp
+  manager) correctly resolved MEDIUM/9-impacted matching the manual
+  analysis (`stopPhaseNComponents`, `metricsCollectionLoop`,
+  `healthMonitoringLoop`, `checkComponentHealth`, `Start`/`StartWithContext`
+  — exactly the sites touched for the Stop fix). Two real gaps found:
+  struct-field-mediated calls (`lb.pool.GetHealthyServers()`) and cgo call
+  sites (`C.rdma_check_availability()`) both resolve to 0 upstream callers
+  despite real callers existing (verified by grep) — direct package-level
+  Go calls are reliable, these two patterns are not. Use the CLI for
+  future impact checks in this repo; cross-verify field-mediated/cgo
+  targets with grep. `novacron-lh5` closed with this evidence.
 
 ## Swarm session — 2026-09-04
 
