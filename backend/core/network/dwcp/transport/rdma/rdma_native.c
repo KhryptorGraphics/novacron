@@ -22,10 +22,15 @@ const char* rdma_get_error_string(void) {
     return error_buffer;
 }
 
-// Check if RDMA is available
+// Check if RDMA is available: a device exists AND a port reports ACTIVE and
+// can answer a GID query. A bare device count is not enough — the Azure GH
+// runners expose residual mana/mana_en ibv devices (run 33945065155 probe:
+// avail=true, numDevices=2, dev=manae_0/mana_0 with num_ports=0) whose port 1
+// fails ibv_query_gid with EINVAL, so tests gated on a nonzero count tried to
+// init real QPs and failed with "Failed to query GID: Invalid argument".
 int rdma_check_availability(void) {
     struct ibv_device **dev_list;
-    int num_devices;
+    int num_devices, i, port;
 
     dev_list = ibv_get_device_list(&num_devices);
     if (!dev_list || num_devices == 0) {
@@ -33,8 +38,42 @@ int rdma_check_availability(void) {
         return 0;
     }
 
+    int usable = 0;
+    for (i = 0; i < num_devices && !usable; i++) {
+        struct ibv_context *ctx = ibv_open_device(dev_list[i]);
+        if (!ctx) {
+            continue;
+        }
+        struct ibv_device_attr dev_attr;
+        if (ibv_query_device(ctx, &dev_attr)) {
+            ibv_close_device(ctx);
+            continue;
+        }
+        int max_ports = dev_attr.phys_port_cnt;
+        if (max_ports > 4) {
+            max_ports = 4; /* sanity cap */
+        }
+        for (port = 1; port <= max_ports && !usable; port++) {
+            struct ibv_port_attr port_attr;
+            union ibv_gid gid;
+            if (ibv_query_port(ctx, port, &port_attr)) {
+                continue;
+            }
+            if (port_attr.state != IBV_PORT_ACTIVE) {
+                continue;
+            }
+            if (ibv_query_gid(ctx, port, 0, &gid) == 0) {
+                usable = 1;
+            }
+        }
+        ibv_close_device(ctx);
+    }
+
     ibv_free_device_list(dev_list);
-    return num_devices;
+    if (!usable) {
+        set_error("No RDMA device with an ACTIVE port and queryable GID");
+    }
+    return usable;
 }
 
 // Get list of RDMA devices
