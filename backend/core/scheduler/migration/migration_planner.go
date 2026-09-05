@@ -323,10 +323,10 @@ func (p *MigrationPlanner) GetEnhancedProfile(vmID string) (*workload.EnhancedWo
 	if baseProfile != nil {
 		// Create a profile adapter from the base profile
 		adapter := &workload.WorkloadProfileAdapter{
-			VMID: vmID,
+			VMID:            vmID,
 			HistoryDuration: time.Hour * 24, // Default 24 hours
-			LastUpdated: time.Now(),
-			ResourceUsage: make(map[string]workload.ResourceUsageStats),
+			LastUpdated:     time.Now(),
+			ResourceUsage:   make(map[string]workload.ResourceUsageStats),
 		}
 		enhancedProfile.SetWorkloadProfile(adapter)
 	}

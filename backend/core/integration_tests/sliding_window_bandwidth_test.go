@@ -15,7 +15,7 @@ func TestSlidingWindowBandwidthMonitor(t *testing.T) {
 		MonitoringInterval:    1 * time.Second,
 		HistoryRetention:      10 * time.Minute,
 		SlidingWindowDuration: 3 * time.Second,
-		Interfaces:            []string{"eth0"},
+		Interfaces:            []string{"lo"},
 		MaxHistoryPoints:      100,
 	}
 
@@ -32,7 +32,7 @@ func TestSlidingWindowBandwidthMonitor(t *testing.T) {
 	time.Sleep(5 * time.Second)
 
 	// Get measurements
-	measurements, err := monitor.GetHistoricalMeasurements("eth0", time.Now().Add(-5*time.Second))
+	measurements, err := monitor.GetHistoricalMeasurements("lo", time.Now().Add(-5*time.Second))
 	if err != nil {
 		t.Fatalf("Failed to get historical measurements: %v", err)
 	}
@@ -53,20 +53,20 @@ func TestSlidingWindowBandwidthMonitor(t *testing.T) {
 				t.Errorf("Measurement %d missing instant_tx_rate metadata", i)
 			}
 		}
-		t.Logf("Measurement %d: RX=%.2f, TX=%.2f, Util=%.2f%%", 
+		t.Logf("Measurement %d: RX=%.2f, TX=%.2f, Util=%.2f%%",
 			i, m.RXRate, m.TXRate, m.Utilization)
 	}
 
 	// Test threshold alerting with smoothed rates
 	threshold := network.BandwidthThreshold{
-		InterfaceName:     "eth0",
+		InterfaceName:     "lo",
 		WarningThreshold:  50.0,
 		CriticalThreshold: 80.0,
 		AbsoluteLimit:     1000000000, // 1 Gbps
 		Enabled:           true,
 	}
 
-	err = monitor.SetThreshold("eth0", threshold)
+	err = monitor.SetThreshold("lo", threshold)
 	if err != nil {
 		t.Fatalf("Failed to set threshold: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestHistoryRetentionPruning(t *testing.T) {
 		MonitoringInterval:    100 * time.Millisecond,
 		HistoryRetention:      500 * time.Millisecond,
 		SlidingWindowDuration: 300 * time.Millisecond,
-		Interfaces:            []string{"eth0"},
+		Interfaces:            []string{"lo"},
 		MaxHistoryPoints:      10,
 	}
 
@@ -101,7 +101,7 @@ func TestHistoryRetentionPruning(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Get all measurements
-	measurements, err := monitor.GetHistoricalMeasurements("eth0", time.Now().Add(-2*time.Second))
+	measurements, err := monitor.GetHistoricalMeasurements("lo", time.Now().Add(-2*time.Second))
 	if err != nil {
 		t.Fatalf("Failed to get historical measurements: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestHistoryRetentionPruning(t *testing.T) {
 
 	// Verify max history points limit
 	if len(measurements) > config.MaxHistoryPoints {
-		t.Errorf("Measurements exceed max history points: got %d, max %d", 
+		t.Errorf("Measurements exceed max history points: got %d, max %d",
 			len(measurements), config.MaxHistoryPoints)
 	}
 

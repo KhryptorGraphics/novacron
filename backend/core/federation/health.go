@@ -224,6 +224,21 @@ func (hc *HealthCheckerImpl) checkNetworkConnectivity(ctx context.Context, node 
 	timer := prometheus.NewTimer(healthCheckDuration.WithLabelValues(node.ID, "network"))
 	defer timer.ObserveDuration()
 
+	// The local node cannot prove anything by dialing its own advertise
+	// address from inside the same process: nothing in the package listens
+	// there (serving is the API server's job), so the dial fails and marks a
+	// freshly started, perfectly healthy node unhealthy — every heartbeat
+	// tick. Skip the self-dial; remote nodes still get the real TCP check.
+	if hc.config != nil && node.ID == hc.config.NodeID {
+		mu.Lock()
+		check.Services["network"] = ServiceHealth{
+			Name:   "network",
+			Status: "healthy",
+		}
+		mu.Unlock()
+		return nil
+	}
+
 	// Try to establish TCP connection
 	dialer := &net.Dialer{
 		Timeout: 5 * time.Second,
@@ -255,7 +270,7 @@ func (hc *HealthCheckerImpl) checkServices(ctx context.Context, node *Node, chec
 
 	for _, service := range services {
 		health := hc.checkServiceHealth(ctx, node, service)
-		
+
 		mu.Lock()
 		check.Services[service] = health
 		if health.Status != "healthy" {
@@ -269,7 +284,7 @@ func (hc *HealthCheckerImpl) checkServices(ctx context.Context, node *Node, chec
 func (hc *HealthCheckerImpl) checkServiceHealth(ctx context.Context, node *Node, service string) ServiceHealth {
 	// In production, would make actual health check calls to services
 	// For now, simulate
-	
+
 	return ServiceHealth{
 		Name:    service,
 		Status:  "healthy",
@@ -283,9 +298,9 @@ func (hc *HealthCheckerImpl) checkResourceUtilization(ctx context.Context, node 
 
 	// Get resource utilization
 	// In production, would query actual metrics
-	cpuUsage := 0.45      // 45% CPU usage
-	memoryUsage := 0.60   // 60% memory usage
-	diskUsage := 0.30     // 30% disk usage
+	cpuUsage := 0.45    // 45% CPU usage
+	memoryUsage := 0.60 // 60% memory usage
+	diskUsage := 0.30   // 30% disk usage
 
 	mu.Lock()
 	check.CPUUsage = cpuUsage
@@ -324,10 +339,10 @@ func (hc *HealthCheckerImpl) measureNetworkLatency(ctx context.Context, node *No
 
 	for _, targetNode := range nodes {
 		latency := hc.measureLatency(ctx, node, targetNode)
-		
+
 		mu.Lock()
 		check.NetworkLatency[targetNode.ID] = latency
-		
+
 		// Check if latency is too high
 		if latency > 100*time.Millisecond {
 			check.Issues = append(check.Issues, fmt.Sprintf("high latency to %s: %v", targetNode.ID, latency))
@@ -340,7 +355,7 @@ func (hc *HealthCheckerImpl) measureNetworkLatency(ctx context.Context, node *No
 	for _, latency := range check.NetworkLatency {
 		totalLatency += latency
 	}
-	
+
 	if len(check.NetworkLatency) > 0 {
 		avgLatency := totalLatency / time.Duration(len(check.NetworkLatency))
 		mu.Lock()
@@ -387,14 +402,14 @@ func (hc *HealthCheckerImpl) performHealthChecks(ctx context.Context) {
 		wg.Add(1)
 		go func(n *Node) {
 			defer wg.Done()
-			
+
 			_, err := hc.CheckHealth(ctx, n)
 			if err != nil {
 				hc.logger.Error("Health check failed", "node_id", n.ID, "error", err)
 			}
 		}(node)
 	}
-	
+
 	wg.Wait()
 }
 
@@ -435,7 +450,7 @@ func (hc *HealthCheckerImpl) detectFailures() {
 
 func (hc *HealthCheckerImpl) handleSuspectedFailure(node *Node) {
 	hc.logger.Warn("Node suspected failed", "node_id", node.ID)
-	
+
 	failureDetections.WithLabelValues(node.ID, "phi_accrual").Inc()
 
 	// Get latest health check
@@ -546,23 +561,23 @@ func (pad *PhiAccrualDetector) Heartbeat(nodeID string) {
 	defer pad.mu.Unlock()
 
 	now := time.Now()
-	
+
 	if lastHB, exists := pad.lastHeartbeats[nodeID]; exists {
 		interval := now.Sub(lastHB)
-		
+
 		// Add to intervals (keep last 100)
 		if pad.intervals[nodeID] == nil {
 			pad.intervals[nodeID] = make([]time.Duration, 0, 100)
 		}
-		
+
 		pad.intervals[nodeID] = append(pad.intervals[nodeID], interval)
 		if len(pad.intervals[nodeID]) > 100 {
 			pad.intervals[nodeID] = pad.intervals[nodeID][1:]
 		}
 	}
-	
+
 	pad.lastHeartbeats[nodeID] = now
-	
+
 	// Update phi value
 	pad.updatePhi(nodeID)
 }

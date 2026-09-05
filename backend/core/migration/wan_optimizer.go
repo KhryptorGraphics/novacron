@@ -48,37 +48,37 @@ type WANOptimizer struct {
 	compressionLevel int
 	zstdEncoder      *zstd.Encoder
 	zstdDecoder      *zstd.Decoder
-	
+
 	// Bandwidth management
-	bandwidthLimit   int64 // bytes per second, 0 = unlimited
-	rateLimiter      *rate.Limiter
-	adaptiveLimiter  *AdaptiveBandwidthLimiter
-	
+	bandwidthLimit  int64 // bytes per second, 0 = unlimited
+	rateLimiter     *rate.Limiter
+	adaptiveLimiter *AdaptiveBandwidthLimiter
+
 	// QoS
-	qosPriority      QoSPriority
-	tcpOptimizer     *TCPOptimizer
-	
+	qosPriority  QoSPriority
+	tcpOptimizer *TCPOptimizer
+
 	// Delta sync
-	deltaTracker     *DeltaPageTracker
-	pageCache        *PageCache
-	
+	deltaTracker *DeltaPageTracker
+	pageCache    *PageCache
+
 	// Encryption
-	encryptionKey    []byte
-	cipher           cipher.AEAD
-	
+	encryptionKey []byte
+	cipher        cipher.AEAD
+
 	// Metrics
 	bytesCompressed  atomic.Int64
 	bytesTransferred atomic.Int64
 	compressionRatio atomic.Value // float64
 	transferRate     atomic.Int64 // bytes per second
-	
+
 	// Network conditions
-	latency          atomic.Int64 // milliseconds
-	packetLoss       atomic.Value // float64
-	
-	mu               sync.RWMutex
-	ctx              context.Context
-	cancel           context.CancelFunc
+	latency    atomic.Int64 // milliseconds
+	packetLoss atomic.Value // float64
+
+	mu     sync.RWMutex
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // WANOptimizerConfig contains configuration for WAN optimization
@@ -97,7 +97,7 @@ type WANOptimizerConfig struct {
 // NewWANOptimizer creates a new WAN optimizer
 func NewWANOptimizer(config WANOptimizerConfig) (*WANOptimizer, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	w := &WANOptimizer{
 		compressionType:  config.CompressionType,
 		compressionLevel: config.CompressionLevel,
@@ -106,30 +106,30 @@ func NewWANOptimizer(config WANOptimizerConfig) (*WANOptimizer, error) {
 		ctx:              ctx,
 		cancel:           cancel,
 	}
-	
+
 	// Initialize compression
 	if err := w.initCompression(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to initialize compression: %w", err)
 	}
-	
+
 	// Initialize bandwidth limiter
 	if config.BandwidthLimit > 0 {
 		w.rateLimiter = rate.NewLimiter(rate.Limit(config.BandwidthLimit), int(config.BandwidthLimit))
 		w.adaptiveLimiter = NewAdaptiveBandwidthLimiter(config.BandwidthLimit)
 	}
-	
+
 	// Initialize TCP optimizer
 	if config.TCPOptimization {
 		w.tcpOptimizer = NewTCPOptimizer()
 	}
-	
+
 	// Initialize delta sync
 	if config.EnableDeltaSync {
 		w.deltaTracker = NewDeltaPageTracker()
 		w.pageCache = NewPageCache(config.PageCacheSize * 1024 * 1024) // Convert MB to bytes
 	}
-	
+
 	// Initialize encryption
 	if config.EnableEncryption {
 		if err := w.initEncryption(config.EncryptionKey); err != nil {
@@ -137,10 +137,10 @@ func NewWANOptimizer(config WANOptimizerConfig) (*WANOptimizer, error) {
 			return nil, fmt.Errorf("failed to initialize encryption: %w", err)
 		}
 	}
-	
+
 	// Start monitoring goroutine
 	go w.monitorNetworkConditions()
-	
+
 	return w, nil
 }
 
@@ -148,23 +148,40 @@ func NewWANOptimizer(config WANOptimizerConfig) (*WANOptimizer, error) {
 func (w *WANOptimizer) initCompression() error {
 	switch w.compressionType {
 	case CompressionZSTD:
-		encoder, err := zstd.NewWriter(nil, 
+		encoder, err := zstd.NewWriter(nil,
 			zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(w.compressionLevel)))
 		if err != nil {
 			return err
 		}
 		w.zstdEncoder = encoder
-		
+
 		decoder, err := zstd.NewReader(nil)
 		if err != nil {
 			return err
 		}
 		w.zstdDecoder = decoder
-		
-	case CompressionLZ4, CompressionAdaptive:
-		// LZ4 doesn't require initialization
+
+	case CompressionAdaptive:
+		// Adaptive mode initializes both zstd encoder and decoder:
+		// adaptiveCompress selects ZSTD for large/high-latency payloads, and
+		// a nil encoder there is a guaranteed nil dereference at the first
+		// large transfer.
+		encoder, err := zstd.NewWriter(nil,
+			zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(w.compressionLevel)))
+		if err != nil {
+			return err
+		}
+		w.zstdEncoder = encoder
+
+		decoder, err := zstd.NewReader(nil)
+		if err != nil {
+			return err
+		}
+		w.zstdDecoder = decoder
+
+	case CompressionLZ4:
+		// LZ4 needs no initialization.
 	}
-	
 	return nil
 }
 
@@ -177,21 +194,21 @@ func (w *WANOptimizer) initEncryption(key []byte) error {
 			return err
 		}
 	}
-	
+
 	// Hash the key to ensure it's the right size
 	hash := sha256.Sum256(key)
 	w.encryptionKey = hash[:]
-	
+
 	block, err := aes.NewCipher(w.encryptionKey)
 	if err != nil {
 		return err
 	}
-	
+
 	w.cipher, err = cipher.NewGCM(block)
 	if err != nil {
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -200,15 +217,15 @@ func (w *WANOptimizer) CompressData(data []byte) ([]byte, error) {
 	if w.compressionType == CompressionNone {
 		return data, nil
 	}
-	
+
 	// Adaptive compression: choose based on data size and network conditions
 	if w.compressionType == CompressionAdaptive {
 		return w.adaptiveCompress(data)
 	}
-	
+
 	var compressed []byte
 	var err error
-	
+
 	switch w.compressionType {
 	case CompressionLZ4:
 		compressed = make([]byte, lz4.CompressBlockBound(len(data)))
@@ -217,16 +234,16 @@ func (w *WANOptimizer) CompressData(data []byte) ([]byte, error) {
 			return nil, err
 		}
 		compressed = compressed[:n]
-		
+
 	case CompressionZSTD:
 		compressed = w.zstdEncoder.EncodeAll(data, nil)
 	}
-	
+
 	// Update metrics
 	w.bytesCompressed.Add(int64(len(compressed)))
 	ratio := float64(len(compressed)) / float64(len(data))
 	w.compressionRatio.Store(ratio)
-	
+
 	return compressed, err
 }
 
@@ -235,17 +252,17 @@ func (w *WANOptimizer) DecompressData(compressed []byte, originalSize int) ([]by
 	if w.compressionType == CompressionNone {
 		return compressed, nil
 	}
-	
+
 	var decompressed []byte
 	var err error
-	
+
 	// Read compression type from header if adaptive
 	compressionType := w.compressionType
 	if w.compressionType == CompressionAdaptive && len(compressed) > 0 {
 		compressionType = CompressionType(compressed[0])
 		compressed = compressed[1:]
 	}
-	
+
 	switch compressionType {
 	case CompressionLZ4:
 		decompressed = make([]byte, originalSize)
@@ -254,11 +271,11 @@ func (w *WANOptimizer) DecompressData(compressed []byte, originalSize int) ([]by
 			return nil, err
 		}
 		decompressed = decompressed[:n]
-		
+
 	case CompressionZSTD:
 		decompressed, err = w.zstdDecoder.DecodeAll(compressed, nil)
 	}
-	
+
 	return decompressed, err
 }
 
@@ -266,7 +283,7 @@ func (w *WANOptimizer) DecompressData(compressed []byte, originalSize int) ([]by
 func (w *WANOptimizer) adaptiveCompress(data []byte) ([]byte, error) {
 	dataSize := len(data)
 	latency := w.latency.Load()
-	
+
 	// For small data or low latency, use LZ4 for speed
 	// For large data or high latency, use ZSTD for better compression
 	var compressionType CompressionType
@@ -275,7 +292,7 @@ func (w *WANOptimizer) adaptiveCompress(data []byte) ([]byte, error) {
 	} else {
 		compressionType = CompressionZSTD
 	}
-	
+
 	// Compress with selected algorithm
 	var compressed []byte
 	switch compressionType {
@@ -286,16 +303,16 @@ func (w *WANOptimizer) adaptiveCompress(data []byte) ([]byte, error) {
 			return nil, err
 		}
 		compressed = compressed[:n]
-		
+
 	case CompressionZSTD:
 		compressed = w.zstdEncoder.EncodeAll(data, nil)
 	}
-	
+
 	// Prepend compression type for decompression
 	result := make([]byte, len(compressed)+1)
 	result[0] = byte(compressionType)
 	copy(result[1:], compressed)
-	
+
 	return result, nil
 }
 
@@ -308,13 +325,13 @@ func (w *WANOptimizer) TransferWithOptimization(conn net.Conn, data []byte) erro
 			data = delta
 		}
 	}
-	
+
 	// Compress data
 	compressed, err := w.CompressData(data)
 	if err != nil {
 		return fmt.Errorf("compression failed: %w", err)
 	}
-	
+
 	// Encrypt if enabled
 	if w.cipher != nil {
 		compressed, err = w.encryptData(compressed)
@@ -322,35 +339,35 @@ func (w *WANOptimizer) TransferWithOptimization(conn net.Conn, data []byte) erro
 			return fmt.Errorf("encryption failed: %w", err)
 		}
 	}
-	
+
 	// Apply bandwidth limiting
 	if w.rateLimiter != nil {
 		if err := w.rateLimiter.WaitN(w.ctx, len(compressed)); err != nil {
 			return fmt.Errorf("rate limiting failed: %w", err)
 		}
 	}
-	
+
 	// Apply TCP optimizations
 	if w.tcpOptimizer != nil {
 		w.tcpOptimizer.OptimizeConnection(conn)
 	}
-	
+
 	// Send data with length prefix
 	header := make([]byte, 8)
 	binary.BigEndian.PutUint64(header, uint64(len(compressed)))
-	
+
 	if _, err := conn.Write(header); err != nil {
 		return fmt.Errorf("failed to write header: %w", err)
 	}
-	
+
 	written, err := conn.Write(compressed)
 	if err != nil {
 		return fmt.Errorf("failed to write data: %w", err)
 	}
-	
+
 	// Update metrics
 	w.bytesTransferred.Add(int64(written))
-	
+
 	return nil
 }
 
@@ -360,7 +377,7 @@ func (w *WANOptimizer) encryptData(data []byte) ([]byte, error) {
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return nil, err
 	}
-	
+
 	encrypted := w.cipher.Seal(nonce, nonce, data, nil)
 	return encrypted, nil
 }
@@ -370,15 +387,15 @@ func (w *WANOptimizer) decryptData(encrypted []byte) ([]byte, error) {
 	if len(encrypted) < w.cipher.NonceSize() {
 		return nil, errors.New("encrypted data too short")
 	}
-	
+
 	nonce := encrypted[:w.cipher.NonceSize()]
 	ciphertext := encrypted[w.cipher.NonceSize():]
-	
+
 	decrypted, err := w.cipher.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return decrypted, nil
 }
 
@@ -386,7 +403,7 @@ func (w *WANOptimizer) decryptData(encrypted []byte) ([]byte, error) {
 func (w *WANOptimizer) monitorNetworkConditions() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-w.ctx.Done():
@@ -394,9 +411,9 @@ func (w *WANOptimizer) monitorNetworkConditions() {
 		case <-ticker.C:
 			// This would normally measure actual network conditions
 			// For now, we'll use placeholder values
-			w.latency.Store(50) // 50ms latency
+			w.latency.Store(50)       // 50ms latency
 			w.packetLoss.Store(0.001) // 0.1% packet loss
-			
+
 			// Adjust bandwidth limiter based on conditions
 			if w.adaptiveLimiter != nil {
 				w.adaptiveLimiter.AdjustLimit(w.latency.Load(), w.packetLoss.Load().(float64))
@@ -411,12 +428,12 @@ func (w *WANOptimizer) GetMetrics() map[string]interface{} {
 	if val := w.compressionRatio.Load(); val != nil {
 		ratio = val.(float64)
 	}
-	
+
 	packetLoss := 0.0
 	if val := w.packetLoss.Load(); val != nil {
 		packetLoss = val.(float64)
 	}
-	
+
 	return map[string]interface{}{
 		"bytes_compressed":  w.bytesCompressed.Load(),
 		"bytes_transferred": w.bytesTransferred.Load(),
@@ -431,7 +448,7 @@ func (w *WANOptimizer) GetMetrics() map[string]interface{} {
 func (w *WANOptimizer) SetBandwidthLimit(bytesPerSecond int64) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	
+
 	w.bandwidthLimit = bytesPerSecond
 	if bytesPerSecond > 0 {
 		w.rateLimiter = rate.NewLimiter(rate.Limit(bytesPerSecond), int(bytesPerSecond))
@@ -443,11 +460,11 @@ func (w *WANOptimizer) SetBandwidthLimit(bytesPerSecond int64) {
 // Close cleanly shuts down the WAN optimizer
 func (w *WANOptimizer) Close() error {
 	w.cancel()
-	
+
 	if w.zstdEncoder != nil {
 		w.zstdEncoder.Close()
 	}
-	
+
 	return nil
 }
 
@@ -471,19 +488,19 @@ func NewAdaptiveBandwidthLimiter(baseBandwidth int64) *AdaptiveBandwidthLimiter 
 func (a *AdaptiveBandwidthLimiter) AdjustLimit(latencyMs int64, packetLoss float64) {
 	// Reduce bandwidth if latency is high or packet loss is significant
 	adjustment := 1.0
-	
+
 	if latencyMs > 100 {
 		adjustment *= 0.8
 	} else if latencyMs > 200 {
 		adjustment *= 0.6
 	}
-	
+
 	if packetLoss > 0.01 {
 		adjustment *= 0.7
 	} else if packetLoss > 0.05 {
 		adjustment *= 0.5
 	}
-	
+
 	newLimit := int64(float64(a.baseBandwidth) * adjustment)
 	a.currentLimit.Store(newLimit)
 }
@@ -515,22 +532,22 @@ func (t *TCPOptimizer) OptimizeConnection(conn net.Conn) error {
 	if !ok {
 		return errors.New("not a TCP connection")
 	}
-	
+
 	// Set TCP_NODELAY for low latency
 	if err := tcpConn.SetNoDelay(t.noDelay); err != nil {
 		return err
 	}
-	
+
 	// Enable keep-alive
 	if err := tcpConn.SetKeepAlive(t.keepAlive); err != nil {
 		return err
 	}
-	
+
 	// Set keep-alive period
 	if err := tcpConn.SetKeepAlivePeriod(30 * time.Second); err != nil {
 		return err
 	}
-	
+
 	// Set buffer sizes
 	if err := tcpConn.SetReadBuffer(t.bufferSize); err != nil {
 		return err
@@ -538,16 +555,16 @@ func (t *TCPOptimizer) OptimizeConnection(conn net.Conn) error {
 	if err := tcpConn.SetWriteBuffer(t.bufferSize); err != nil {
 		return err
 	}
-	
+
 	return nil
 }
 
 // DeltaPageTracker tracks memory page changes for delta synchronization
 type DeltaPageTracker struct {
-	pageSize     int
-	pageHashes   map[uint64][]byte // page index -> hash
-	dirtyPages   map[uint64]bool
-	mu           sync.RWMutex
+	pageSize   int
+	pageHashes map[uint64][]byte // page index -> hash
+	dirtyPages map[uint64]bool
+	mu         sync.RWMutex
 }
 
 // NewDeltaPageTracker creates a new delta page tracker
@@ -563,24 +580,24 @@ func NewDeltaPageTracker() *DeltaPageTracker {
 func (d *DeltaPageTracker) ComputeDelta(data []byte) []byte {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	
+
 	var delta bytes.Buffer
 	pageCount := (len(data) + d.pageSize - 1) / d.pageSize
-	
+
 	// Write header: number of pages
 	binary.Write(&delta, binary.BigEndian, uint32(pageCount))
-	
+
 	for i := 0; i < pageCount; i++ {
 		start := i * d.pageSize
 		end := start + d.pageSize
 		if end > len(data) {
 			end = len(data)
 		}
-		
+
 		page := data[start:end]
 		hash := sha256.Sum256(page)
 		pageIdx := uint64(i)
-		
+
 		// Check if page has changed
 		if oldHash, exists := d.pageHashes[pageIdx]; exists {
 			if bytes.Equal(oldHash[:], hash[:]) {
@@ -589,16 +606,16 @@ func (d *DeltaPageTracker) ComputeDelta(data []byte) []byte {
 				continue
 			}
 		}
-		
+
 		// Page changed, write page data
 		binary.Write(&delta, binary.BigEndian, uint32(len(page)))
 		delta.Write(page)
-		
+
 		// Update hash
 		d.pageHashes[pageIdx] = hash[:]
 		d.dirtyPages[pageIdx] = true
 	}
-	
+
 	return delta.Bytes()
 }
 
@@ -622,7 +639,7 @@ func NewPageCache(maxSize int) *PageCache {
 func (p *PageCache) Get(pageIdx uint64) ([]byte, bool) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	
+
 	data, exists := p.cache[pageIdx]
 	return data, exists
 }
@@ -631,7 +648,7 @@ func (p *PageCache) Get(pageIdx uint64) ([]byte, bool) {
 func (p *PageCache) Put(pageIdx uint64, data []byte) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	// Check if we need to evict
 	if p.currSize+len(data) > p.maxSize {
 		// Simple eviction: remove first item (could be improved with LRU)
@@ -641,7 +658,7 @@ func (p *PageCache) Put(pageIdx uint64, data []byte) {
 			break
 		}
 	}
-	
+
 	p.cache[pageIdx] = data
 	p.currSize += len(data)
 }

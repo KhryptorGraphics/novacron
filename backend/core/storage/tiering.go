@@ -154,13 +154,13 @@ func DefaultTieringConfig() TieringConfig {
 	return TieringConfig{
 		Tiers: []TierConfig{
 			{
-				Name:               TierHot,
-				CostPerGBMonth:     0.023, // High-performance SSD
+				Name:                   TierHot,
+				CostPerGBMonth:         0.023, // High-performance SSD
 				AccessCostPerOperation: 0.0,
-				MinStorageDuration: 0,
-				AccessLatency:      1 * time.Millisecond,
-				MaxCapacity:        0, // Unlimited
-				DriverName:         "local",
+				MinStorageDuration:     0,
+				AccessLatency:          1 * time.Millisecond,
+				MaxCapacity:            0, // Unlimited
+				DriverName:             "local",
 				PromotionRules: TierPromotionRules{
 					AccessFrequencyThreshold: 10.0, // 10 accesses per hour
 					AccessCountThreshold:     50,
@@ -173,13 +173,13 @@ func DefaultTieringConfig() TieringConfig {
 				},
 			},
 			{
-				Name:               TierWarm,
-				CostPerGBMonth:     0.0125, // Standard SSD
+				Name:                   TierWarm,
+				CostPerGBMonth:         0.0125, // Standard SSD
 				AccessCostPerOperation: 0.0001,
-				MinStorageDuration: 30 * 24 * time.Hour, // 30 days
-				AccessLatency:      10 * time.Millisecond,
-				MaxCapacity:        0,
-				DriverName:         "local",
+				MinStorageDuration:     30 * 24 * time.Hour, // 30 days
+				AccessLatency:          10 * time.Millisecond,
+				MaxCapacity:            0,
+				DriverName:             "local",
 				PromotionRules: TierPromotionRules{
 					AccessFrequencyThreshold: 2.0, // 2 accesses per hour
 					AccessCountThreshold:     10,
@@ -192,13 +192,13 @@ func DefaultTieringConfig() TieringConfig {
 				},
 			},
 			{
-				Name:               TierCold,
-				CostPerGBMonth:     0.004, // Standard HDD
+				Name:                   TierCold,
+				CostPerGBMonth:         0.004, // Standard HDD
 				AccessCostPerOperation: 0.001,
-				MinStorageDuration: 90 * 24 * time.Hour, // 90 days
-				AccessLatency:      100 * time.Millisecond,
-				MaxCapacity:        0,
-				DriverName:         "s3",
+				MinStorageDuration:     90 * 24 * time.Hour, // 90 days
+				AccessLatency:          100 * time.Millisecond,
+				MaxCapacity:            0,
+				DriverName:             "s3",
 				PromotionRules: TierPromotionRules{
 					AccessFrequencyThreshold: 0.1, // 0.1 accesses per hour
 					AccessCountThreshold:     3,
@@ -211,13 +211,13 @@ func DefaultTieringConfig() TieringConfig {
 				},
 			},
 			{
-				Name:               TierArchive,
-				CostPerGBMonth:     0.001, // Archive storage
+				Name:                   TierArchive,
+				CostPerGBMonth:         0.001, // Archive storage
 				AccessCostPerOperation: 0.01,
-				MinStorageDuration: 180 * 24 * time.Hour, // 180 days
-				AccessLatency:      4 * time.Hour,        // Retrieval time
-				MaxCapacity:        0,
-				DriverName:         "s3",
+				MinStorageDuration:     180 * 24 * time.Hour, // 180 days
+				AccessLatency:          4 * time.Hour,        // Retrieval time
+				MaxCapacity:            0,
+				DriverName:             "s3",
 				DemotionRules: TierDemotionRules{
 					InactivityThreshold: 365 * 24 * time.Hour, // 1 year
 					Enabled:             true,
@@ -537,11 +537,13 @@ func (tm *TieringManager) shouldPromote(stats *VolumeAccessStats, accessFrequenc
 		return ""
 	}
 
-	// Find the next higher tier
+	// Find the next higher (hotter) tier. tierOrder is ascending from the
+	// coldest tier, so the next entry up is i+1 (the previous code returned
+	// tierOrder[i-1], which demoted the volume while logging "promoted").
 	tierOrder := []StorageTier{TierArchive, TierCold, TierWarm, TierHot}
 	for i, tier := range tierOrder {
-		if tier == currentTier && i > 0 {
-			return tierOrder[i-1]
+		if tier == currentTier && i < len(tierOrder)-1 {
+			return tierOrder[i+1]
 		}
 	}
 

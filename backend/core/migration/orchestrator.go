@@ -9,6 +9,8 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,9 +22,9 @@ import (
 // LiveMigrationOrchestrator coordinates all aspects of live VM migration
 type LiveMigrationOrchestrator struct {
 	// Core components
-	wanOptimizer     *WANOptimizer
-	rollbackManager  *RollbackManager
-	monitor          *MigrationMonitor
+	wanOptimizer    *WANOptimizer
+	rollbackManager *RollbackManager
+	monitor         *MigrationMonitor
 
 	// Migration state
 	activeMigrations map[string]*LiveMigration
@@ -33,96 +35,101 @@ type LiveMigrationOrchestrator struct {
 	bandwidthManager *BandwidthManager
 
 	// AI integration
-	aiProvider       MigrationAIProvider
-	aiConfig         AIConfig
-	aiMetrics        *AIMigrationMetrics
+	aiProvider MigrationAIProvider
+	aiConfig   AIConfig
+	aiMetrics  *AIMigrationMetrics
 
 	// Configuration
-	config           MigrationConfig
+	config MigrationConfig
 
 	// Metrics and monitoring
-	metrics          *MigrationMetricsCollector
+	metrics *MigrationMetricsCollector
 
 	// Synchronization
-	mu               sync.RWMutex
-	ctx              context.Context
-	cancel           context.CancelFunc
+	mu     sync.RWMutex
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // LiveMigration represents an active live migration
 type LiveMigration struct {
-	ID               string
-	VM               *vm.VM
-	SourceNode       string
-	DestinationNode  string
-	Type             MigrationType
-	Config           MigrationConfig
-	State            *MigrationState
-	Checkpoint       *Checkpoint
-	Connection       net.Conn
-	StartTime        time.Time
-	mu               sync.RWMutex
+	ID              string
+	VM              *vm.VM
+	SourceNode      string
+	DestinationNode string
+	Type            MigrationType
+	Config          MigrationConfig
+	State           *MigrationState
+	Checkpoint      *Checkpoint
+	Connection      net.Conn
+	StartTime       time.Time
+	mu              sync.RWMutex
 }
 
 // MigrationType defines the type of migration
 type MigrationType string
 
 const (
-	MigrationTypeCold      MigrationType = "cold"
-	MigrationTypeWarm      MigrationType = "warm"
-	MigrationTypeLive      MigrationType = "live"
-	MigrationTypeHybrid    MigrationType = "hybrid"
-	MigrationTypePostCopy  MigrationType = "post-copy"
-	MigrationTypePreCopy   MigrationType = "pre-copy"
+	MigrationTypeCold     MigrationType = "cold"
+	MigrationTypeWarm     MigrationType = "warm"
+	MigrationTypeLive     MigrationType = "live"
+	MigrationTypeHybrid   MigrationType = "hybrid"
+	MigrationTypePostCopy MigrationType = "post-copy"
+	MigrationTypePreCopy  MigrationType = "pre-copy"
 )
 
 // MigrationConfig contains configuration for migration
 type MigrationConfig struct {
 	// Performance targets
-	MaxDowntime          time.Duration  `json:"max_downtime"`          // Target: <30s
-	TargetTransferRate   int64          `json:"target_transfer_rate"`  // Target: 20 GB/min
-	SuccessRateTarget    float64        `json:"success_rate_target"`   // Target: 99.9%
-	
+	MaxDowntime        time.Duration `json:"max_downtime"`         // Target: <30s
+	TargetTransferRate int64         `json:"target_transfer_rate"` // Target: 20 GB/min
+	SuccessRateTarget  float64       `json:"success_rate_target"`  // Target: 99.9%
+
 	// Network optimization
-	EnableCompression    bool           `json:"enable_compression"`
-	CompressionType      CompressionType `json:"compression_type"`
-	CompressionLevel     int            `json:"compression_level"`
-	EnableEncryption     bool           `json:"enable_encryption"`
-	EnableDeltaSync      bool           `json:"enable_delta_sync"`
-	
+	EnableCompression bool            `json:"enable_compression"`
+	CompressionType   CompressionType `json:"compression_type"`
+	CompressionLevel  int             `json:"compression_level"`
+	EnableEncryption  bool            `json:"enable_encryption"`
+	EnableDeltaSync   bool            `json:"enable_delta_sync"`
+
 	// Bandwidth management
-	BandwidthLimit       int64          `json:"bandwidth_limit"`       // bytes/second
-	AdaptiveBandwidth    bool           `json:"adaptive_bandwidth"`
-	QoSPriority          QoSPriority    `json:"qos_priority"`
-	
+	BandwidthLimit    int64       `json:"bandwidth_limit"` // bytes/second
+	AdaptiveBandwidth bool        `json:"adaptive_bandwidth"`
+	QoSPriority       QoSPriority `json:"qos_priority"`
+
 	// Memory migration
-	MemoryIterations     int            `json:"memory_iterations"`
-	DirtyPageThreshold   int            `json:"dirty_page_threshold"`
-	ConvergenceTimeout   time.Duration  `json:"convergence_timeout"`
-	
+	MemoryIterations   int           `json:"memory_iterations"`
+	DirtyPageThreshold int           `json:"dirty_page_threshold"`
+	ConvergenceTimeout time.Duration `json:"convergence_timeout"`
+
 	// Reliability
-	EnableCheckpointing  bool           `json:"enable_checkpointing"`
-	CheckpointInterval   time.Duration  `json:"checkpoint_interval"`
-	RetryAttempts        int            `json:"retry_attempts"`
-	RetryDelay           time.Duration  `json:"retry_delay"`
-	
+	EnableCheckpointing bool          `json:"enable_checkpointing"`
+	CheckpointInterval  time.Duration `json:"checkpoint_interval"`
+	RetryAttempts       int           `json:"retry_attempts"`
+	RetryDelay          time.Duration `json:"retry_delay"`
+
 	// Resource limits
-	MaxCPUUsage          float64        `json:"max_cpu_usage"`
-	MaxMemoryUsage       int64          `json:"max_memory_usage"`
-	MaxConcurrentMigrations int         `json:"max_concurrent_migrations"`
+	MaxCPUUsage             float64 `json:"max_cpu_usage"`
+	MaxMemoryUsage          int64   `json:"max_memory_usage"`
+	MaxConcurrentMigrations int     `json:"max_concurrent_migrations"`
+
+	// Storage
+	// CheckpointDir is the directory for rollback checkpoints; empty ⇒
+	// $STORAGE_PATH/checkpoints or /var/lib/novacron/checkpoints.
+	CheckpointDir string `json:"checkpoint_dir,omitempty"`
 }
 
 // MigrationState tracks the state of a migration
 type MigrationState struct {
 	Phase            MigrationPhase
-	Progress         atomic.Value  // float64
+	Progress         atomic.Value // float64
 	BytesTransferred atomic.Int64
 	TotalBytes       atomic.Int64
 	PagesTransferred atomic.Int64
 	DirtyPages       atomic.Int64
 	Iterations       atomic.Int32
 	TransferRate     atomic.Int64
-	Downtime         atomic.Int64  // milliseconds
+	Downtime         atomic.Int64 // milliseconds
 	Errors           []error
 	mu               sync.RWMutex
 }
@@ -144,8 +151,8 @@ type BandwidthManager struct {
 
 // PriorityQueue manages migration queue with priorities
 type PriorityQueue struct {
-	items    []*QueueItem
-	mu       sync.RWMutex
+	items []*QueueItem
+	mu    sync.RWMutex
 }
 
 // QueueItem represents an item in the priority queue
@@ -157,12 +164,12 @@ type QueueItem struct {
 
 // MigrationMetricsCollector collects migration metrics
 type MigrationMetricsCollector struct {
-	totalMigrations     atomic.Int64
-	successfulMigrations atomic.Int64
-	failedMigrations    atomic.Int64
+	totalMigrations       atomic.Int64
+	successfulMigrations  atomic.Int64
+	failedMigrations      atomic.Int64
 	totalBytesTransferred atomic.Int64
-	totalDowntime       atomic.Int64
-	averageTransferRate atomic.Int64
+	totalDowntime         atomic.Int64
+	averageTransferRate   atomic.Int64
 }
 
 // NewLiveMigrationOrchestrator creates a new live migration orchestrator
@@ -191,9 +198,17 @@ func NewLiveMigrationOrchestratorWithAI(config MigrationConfig, aiConfig *AIConf
 		cancel()
 		return nil, fmt.Errorf("failed to create WAN optimizer: %w", err)
 	}
-
-	// Create rollback manager
-	rollbackManager, err := NewRollbackManager("/var/lib/novacron/checkpoints")
+	// Create rollback manager. The checkpoint directory resolves in this
+	// precedence: explicit CheckpointDir → $STORAGE_PATH/checkpoints →
+	checkpointDir := config.CheckpointDir
+	if checkpointDir == "" {
+		if storageRoot := os.Getenv("STORAGE_PATH"); storageRoot != "" {
+			checkpointDir = filepath.Join(storageRoot, "checkpoints")
+		} else {
+			checkpointDir = "/var/lib/novacron/checkpoints"
+		}
+	}
+	rollbackManager, err := NewRollbackManager(checkpointDir)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to create rollback manager: %w", err)
@@ -275,8 +290,8 @@ func (o *LiveMigrationOrchestrator) MigrateVM(ctx context.Context, vmID, sourceN
 	if o.aiConfig.Enabled && o.aiConfig.EnableOptimization {
 		vmData := map[string]interface{}{
 			"vm_id":         vmID,
-			"memory_size":   "4GB", // Placeholder
-			"cpu_cores":     4,      // Placeholder
+			"memory_size":   "4GB",   // Placeholder
+			"cpu_cores":     4,       // Placeholder
 			"disk_size":     "100GB", // Placeholder
 			"workload_type": "general",
 		}
@@ -365,17 +380,17 @@ func (o *LiveMigrationOrchestrator) executeMigration(ctx context.Context, migrat
 			o.handleMigrationPanic(migration.ID, r)
 		}
 	}()
-	
+
 	// Update metrics
 	o.metrics.totalMigrations.Add(1)
-	
+
 	// Allocate bandwidth
 	bandwidth := o.bandwidthManager.Allocate(migration.ID, o.config.BandwidthLimit)
 	defer o.bandwidthManager.Release(migration.ID)
-	
+
 	// Set bandwidth limit on WAN optimizer
 	o.wanOptimizer.SetBandwidthLimit(bandwidth)
-	
+
 	// Establish connection to destination
 	conn, err := o.establishConnection(migration.DestinationNode)
 	if err != nil {
@@ -384,7 +399,7 @@ func (o *LiveMigrationOrchestrator) executeMigration(ctx context.Context, migrat
 	}
 	migration.Connection = conn
 	defer conn.Close()
-	
+
 	// Execute migration based on type
 	switch migration.Type {
 	case MigrationTypeLive:
@@ -398,12 +413,12 @@ func (o *LiveMigrationOrchestrator) executeMigration(ctx context.Context, migrat
 	default:
 		err = fmt.Errorf("unsupported migration type: %s", migration.Type)
 	}
-	
+
 	if err != nil {
 		o.handleMigrationError(migration, err)
 		return
 	}
-	
+
 	// Mark migration as successful
 	o.completeMigration(migration, true)
 }
@@ -411,35 +426,35 @@ func (o *LiveMigrationOrchestrator) executeMigration(ctx context.Context, migrat
 // executeLiveMigration performs a live migration using pre-copy algorithm
 func (o *LiveMigrationOrchestrator) executeLiveMigration(ctx context.Context, migration *LiveMigration) error {
 	state := migration.State
-	
+
 	// Phase 1: Initial memory copy
 	state.Phase = PhaseMemoryCopy
 	if err := o.copyMemoryIterative(ctx, migration); err != nil {
 		return fmt.Errorf("memory copy failed: %w", err)
 	}
-	
+
 	// Phase 2: Disk synchronization (if needed)
 	state.Phase = PhaseDiskCopy
 	if err := o.syncDisk(ctx, migration); err != nil {
 		return fmt.Errorf("disk sync failed: %w", err)
 	}
-	
+
 	// Phase 3: Final synchronization with brief downtime
 	state.Phase = PhaseDowntime
 	downtimeStart := time.Now()
-	
+
 	// Pause VM on source
 	if err := o.pauseVM(migration.VM); err != nil {
 		return fmt.Errorf("failed to pause VM: %w", err)
 	}
-	
+
 	// Transfer final dirty pages
 	if err := o.transferFinalState(ctx, migration); err != nil {
 		// Attempt to resume on source
 		o.resumeVM(migration.VM)
 		return fmt.Errorf("final state transfer failed: %w", err)
 	}
-	
+
 	// Phase 4: Activate on destination
 	state.Phase = PhaseActivation
 	if err := o.activateOnDestination(ctx, migration); err != nil {
@@ -447,23 +462,23 @@ func (o *LiveMigrationOrchestrator) executeLiveMigration(ctx context.Context, mi
 		o.resumeVM(migration.VM)
 		return fmt.Errorf("activation failed: %w", err)
 	}
-	
+
 	// Calculate downtime
 	downtime := time.Since(downtimeStart)
 	state.Downtime.Store(downtime.Milliseconds())
-	
+
 	// Phase 5: Verification
 	state.Phase = PhaseVerification
 	if err := o.verifyMigration(ctx, migration); err != nil {
 		return fmt.Errorf("verification failed: %w", err)
 	}
-	
+
 	// Clean up source
 	if err := o.cleanupSource(ctx, migration); err != nil {
 		// Non-fatal error
 		fmt.Printf("Warning: source cleanup failed: %v\n", err)
 	}
-	
+
 	return nil
 }
 
@@ -471,19 +486,19 @@ func (o *LiveMigrationOrchestrator) executeLiveMigration(ctx context.Context, mi
 func (o *LiveMigrationOrchestrator) copyMemoryIterative(ctx context.Context, migration *LiveMigration) error {
 	state := migration.State
 	maxIterations := o.config.MemoryIterations
-	
+
 	// Get initial memory size
 	totalMemory := int64(4 * 1024 * 1024 * 1024) // 4GB placeholder
 	state.TotalBytes.Store(totalMemory)
-	
+
 	// Track dirty pages
 	dirtyPages := totalMemory / 4096 // Assume all pages dirty initially
 	previousDirtyPages := dirtyPages
 	convergenceCount := 0
-	
+
 	for iteration := 1; iteration <= maxIterations; iteration++ {
 		state.Iterations.Store(int32(iteration))
-		
+
 		// Update progress
 		progress := MigrationProgress{
 			Phase:            PhaseMemoryCopy,
@@ -492,30 +507,30 @@ func (o *LiveMigrationOrchestrator) copyMemoryIterative(ctx context.Context, mig
 			DirtyPages:       dirtyPages,
 			TotalPages:       totalMemory / 4096,
 		}
-		
+
 		// Transfer dirty pages
 		transferStart := time.Now()
 		bytesToTransfer := dirtyPages * 4096
-		
+
 		// Simulate transfer with WAN optimization
 		data := make([]byte, bytesToTransfer)
 		if err := o.wanOptimizer.TransferWithOptimization(migration.Connection, data); err != nil {
 			return fmt.Errorf("iteration %d transfer failed: %w", iteration, err)
 		}
-		
+
 		transferTime := time.Since(transferStart)
 		transferRate := int64(float64(bytesToTransfer) / transferTime.Seconds())
 		state.TransferRate.Store(transferRate)
-		
+
 		// Update metrics
 		state.BytesTransferred.Add(bytesToTransfer)
 		state.PagesTransferred.Add(dirtyPages)
-		
+
 		// Calculate new dirty pages (simulated)
 		// In reality, this would track actual page modifications
 		dirtyPageRate := int64(1000) // pages/second
 		newDirtyPages := dirtyPageRate * int64(transferTime.Seconds())
-		
+
 		// Check convergence
 		if newDirtyPages < int64(o.config.DirtyPageThreshold) {
 			convergenceCount++
@@ -526,7 +541,7 @@ func (o *LiveMigrationOrchestrator) copyMemoryIterative(ctx context.Context, mig
 		} else {
 			convergenceCount = 0
 		}
-		
+
 		// Check if we're making progress
 		if newDirtyPages >= previousDirtyPages*9/10 {
 			// Not converging, may need to stop
@@ -534,18 +549,18 @@ func (o *LiveMigrationOrchestrator) copyMemoryIterative(ctx context.Context, mig
 				return errors.New("migration not converging")
 			}
 		}
-		
+
 		previousDirtyPages = dirtyPages
 		dirtyPages = newDirtyPages
 		state.DirtyPages.Store(dirtyPages)
-		
+
 		// Update progress in monitor
 		progress.BytesTransferred = state.BytesTransferred.Load()
 		progress.TransferRate = transferRate
 		progress.OverallProgress = float64(iteration) / float64(maxIterations) * 70 // Memory copy is 70% of migration
-		
+
 		o.monitor.UpdateProgress(migration.ID, progress)
-		
+
 		// Check for cancellation
 		select {
 		case <-ctx.Done():
@@ -553,7 +568,7 @@ func (o *LiveMigrationOrchestrator) copyMemoryIterative(ctx context.Context, mig
 		default:
 		}
 	}
-	
+
 	return nil
 }
 
@@ -561,35 +576,35 @@ func (o *LiveMigrationOrchestrator) copyMemoryIterative(ctx context.Context, mig
 func (o *LiveMigrationOrchestrator) syncDisk(ctx context.Context, migration *LiveMigration) error {
 	// In a real implementation, this would sync disk blocks
 	// For now, we'll simulate the operation
-	
+
 	diskSize := int64(10 * 1024 * 1024 * 1024) // 10GB placeholder
-	
+
 	// Update progress
 	progress := MigrationProgress{
 		Phase:           PhaseDiskCopy,
 		OverallProgress: 70, // Starting at 70% after memory copy
 	}
-	
+
 	// Simulate disk transfer with delta sync
 	if o.config.EnableDeltaSync {
 		// Only transfer changed blocks
 		diskSize = diskSize / 10 // Assume 10% changed
 	}
-	
+
 	// Transfer disk data
 	chunkSize := int64(1024 * 1024) // 1MB chunks
 	chunks := diskSize / chunkSize
-	
+
 	for i := int64(0); i < chunks; i++ {
 		data := make([]byte, chunkSize)
 		if err := o.wanOptimizer.TransferWithOptimization(migration.Connection, data); err != nil {
 			return fmt.Errorf("disk chunk %d transfer failed: %w", i, err)
 		}
-		
+
 		// Update progress
 		progress.OverallProgress = 70 + float64(i)/float64(chunks)*20 // Disk copy is 20% of migration
 		o.monitor.UpdateProgress(migration.ID, progress)
-		
+
 		// Check for cancellation
 		select {
 		case <-ctx.Done():
@@ -597,7 +612,7 @@ func (o *LiveMigrationOrchestrator) syncDisk(ctx context.Context, migration *Liv
 		default:
 		}
 	}
-	
+
 	return nil
 }
 
@@ -605,25 +620,25 @@ func (o *LiveMigrationOrchestrator) syncDisk(ctx context.Context, migration *Liv
 func (o *LiveMigrationOrchestrator) transferFinalState(ctx context.Context, migration *LiveMigration) error {
 	// This happens during downtime, so it must be fast
 	state := migration.State
-	
+
 	// Get remaining dirty pages
 	dirtyPages := state.DirtyPages.Load()
 	finalBytes := dirtyPages * 4096
-	
+
 	// Transfer with maximum priority
 	o.wanOptimizer.qosPriority = QoSPriorityCritical
-	
+
 	data := make([]byte, finalBytes)
 	if err := o.wanOptimizer.TransferWithOptimization(migration.Connection, data); err != nil {
 		return fmt.Errorf("final state transfer failed: %w", err)
 	}
-	
+
 	// Transfer CPU and device state
 	cpuState := make([]byte, 1024) // Placeholder for CPU state
 	if err := o.wanOptimizer.TransferWithOptimization(migration.Connection, cpuState); err != nil {
 		return fmt.Errorf("CPU state transfer failed: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -646,13 +661,13 @@ func (o *LiveMigrationOrchestrator) activateOnDestination(ctx context.Context, m
 	if _, err := migration.Connection.Write(activationCmd); err != nil {
 		return fmt.Errorf("failed to send activation command: %w", err)
 	}
-	
+
 	// Wait for confirmation
 	response := make([]byte, 1024)
 	if _, err := migration.Connection.Read(response); err != nil {
 		return fmt.Errorf("failed to receive activation confirmation: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -661,14 +676,14 @@ func (o *LiveMigrationOrchestrator) verifyMigration(ctx context.Context, migrati
 	// Verify VM is running on destination
 	// Check network connectivity
 	// Verify application responsiveness
-	
+
 	// Update progress to 100%
 	progress := MigrationProgress{
 		Phase:           PhaseVerification,
 		OverallProgress: 100,
 	}
 	o.monitor.UpdateProgress(migration.ID, progress)
-	
+
 	return nil
 }
 
@@ -690,56 +705,56 @@ func (o *LiveMigrationOrchestrator) executePreCopyMigration(ctx context.Context,
 func (o *LiveMigrationOrchestrator) executePostCopyMigration(ctx context.Context, migration *LiveMigration) error {
 	// Post-copy: migrate minimal state first, then fetch pages on demand
 	// This reduces downtime but may impact performance initially
-	
+
 	state := migration.State
-	
+
 	// Phase 1: Transfer minimal state with VM paused
 	state.Phase = PhaseDowntime
 	downtimeStart := time.Now()
-	
+
 	if err := o.pauseVM(migration.VM); err != nil {
 		return fmt.Errorf("failed to pause VM: %w", err)
 	}
-	
+
 	// Transfer essential state only
 	if err := o.transferEssentialState(ctx, migration); err != nil {
 		o.resumeVM(migration.VM)
 		return fmt.Errorf("essential state transfer failed: %w", err)
 	}
-	
+
 	// Activate on destination immediately
 	state.Phase = PhaseActivation
 	if err := o.activateOnDestination(ctx, migration); err != nil {
 		o.resumeVM(migration.VM)
 		return fmt.Errorf("activation failed: %w", err)
 	}
-	
+
 	downtime := time.Since(downtimeStart)
 	state.Downtime.Store(downtime.Milliseconds())
-	
+
 	// Phase 2: Background page transfer
 	state.Phase = PhaseMemoryCopy
 	go o.backgroundPageTransfer(ctx, migration)
-	
+
 	return nil
 }
 
 // executeHybridMigration performs hybrid migration (combination of pre and post copy)
 func (o *LiveMigrationOrchestrator) executeHybridMigration(ctx context.Context, migration *LiveMigration) error {
 	// Hybrid: Start with pre-copy, switch to post-copy if not converging
-	
+
 	// Try pre-copy first
 	err := o.copyMemoryIterative(ctx, migration)
-	
+
 	if err != nil && err.Error() == "migration not converging" {
 		// Switch to post-copy
 		return o.executePostCopyMigration(ctx, migration)
 	}
-	
+
 	if err != nil {
 		return err
 	}
-	
+
 	// Continue with normal live migration
 	return o.executeLiveMigration(ctx, migration)
 }
@@ -764,16 +779,16 @@ func (o *LiveMigrationOrchestrator) establishConnection(destNode string) (net.Co
 	if conn := o.connectionPool.Get(destNode); conn != nil {
 		return conn, nil
 	}
-	
+
 	// Establish new connection
 	conn, err := net.DialTimeout("tcp", destNode+":9876", 30*time.Second)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Add to pool
 	o.connectionPool.Put(destNode, conn)
-	
+
 	return conn, nil
 }
 
@@ -781,20 +796,22 @@ func (o *LiveMigrationOrchestrator) establishConnection(destNode string) (net.Co
 func (o *LiveMigrationOrchestrator) canStartMigration() bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	
-	return len(o.activeMigrations) < o.config.MaxConcurrentMigrations
+
+	// The migration being placed is already inserted into activeMigrations
+	// by the caller, so the count includes it: == Max means this migration
+	// itself fills the last concurrent slot and should start, not queue.
+	return len(o.activeMigrations) <= o.config.MaxConcurrentMigrations
 }
 
 // handleMigrationError handles migration errors
 func (o *LiveMigrationOrchestrator) handleMigrationError(migration *LiveMigration, err error) {
-	// Update metrics
 	o.metrics.failedMigrations.Add(1)
-	
+
 	// Log error
 	migration.State.mu.Lock()
 	migration.State.Errors = append(migration.State.Errors, err)
 	migration.State.mu.Unlock()
-	
+
 	// Attempt rollback if checkpoint exists
 	if migration.Checkpoint != nil {
 		rollbackErr := o.rollbackManager.ExecuteRollback(context.Background(), migration.ID, migration.Checkpoint.ID)
@@ -802,7 +819,7 @@ func (o *LiveMigrationOrchestrator) handleMigrationError(migration *LiveMigratio
 			fmt.Printf("Rollback failed: %v\n", rollbackErr)
 		}
 	}
-	
+
 	// Complete migration as failed
 	o.completeMigration(migration, false)
 }
@@ -810,11 +827,11 @@ func (o *LiveMigrationOrchestrator) handleMigrationError(migration *LiveMigratio
 // handleMigrationPanic handles panics during migration
 func (o *LiveMigrationOrchestrator) handleMigrationPanic(migrationID string, r interface{}) {
 	fmt.Printf("Migration %s panicked: %v\n", migrationID, r)
-	
+
 	o.mu.RLock()
 	migration, exists := o.activeMigrations[migrationID]
 	o.mu.RUnlock()
-	
+
 	if exists {
 		o.handleMigrationError(migration, fmt.Errorf("migration panicked: %v", r))
 	}
@@ -825,18 +842,18 @@ func (o *LiveMigrationOrchestrator) completeMigration(migration *LiveMigration, 
 	// Update monitor
 	downtime := time.Duration(migration.State.Downtime.Load()) * time.Millisecond
 	o.monitor.CompleteMigration(migration.ID, success, downtime)
-	
+
 	// Update metrics
 	if success {
 		o.metrics.successfulMigrations.Add(1)
 	}
 	o.metrics.totalDowntime.Add(migration.State.Downtime.Load())
-	
+
 	// Remove from active migrations
 	o.mu.Lock()
 	delete(o.activeMigrations, migration.ID)
 	o.mu.Unlock()
-	
+
 	// Process next in queue
 	o.processNextInQueue()
 }
@@ -845,7 +862,7 @@ func (o *LiveMigrationOrchestrator) completeMigration(migration *LiveMigration, 
 func (o *LiveMigrationOrchestrator) queueProcessor() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-o.ctx.Done():
@@ -861,16 +878,16 @@ func (o *LiveMigrationOrchestrator) processNextInQueue() {
 	if !o.canStartMigration() {
 		return
 	}
-	
+
 	item := o.migrationQueue.Pop()
 	if item == nil {
 		return
 	}
-	
+
 	o.mu.RLock()
 	migration, exists := o.activeMigrations[item.MigrationID]
 	o.mu.RUnlock()
-	
+
 	if exists {
 		go o.executeMigration(context.Background(), migration)
 	}
@@ -880,7 +897,7 @@ func (o *LiveMigrationOrchestrator) processNextInQueue() {
 func (o *LiveMigrationOrchestrator) metricsCollector() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-o.ctx.Done():
@@ -897,12 +914,12 @@ func (o *LiveMigrationOrchestrator) collectMetrics() {
 	if total == 0 {
 		return
 	}
-	
+
 	successful := o.metrics.successfulMigrations.Load()
 	successRate := float64(successful) / float64(total)
-	
+
 	avgDowntime := o.metrics.totalDowntime.Load() / total
-	
+
 	// Log metrics
 	fmt.Printf("Migration Metrics - Total: %d, Success Rate: %.2f%%, Avg Downtime: %dms\n",
 		total, successRate*100, avgDowntime)
@@ -918,16 +935,16 @@ func (o *LiveMigrationOrchestrator) CancelMigration(migrationID string) error {
 	o.mu.RLock()
 	migration, exists := o.activeMigrations[migrationID]
 	o.mu.RUnlock()
-	
+
 	if !exists {
 		return errors.New("migration not found")
 	}
-	
+
 	// Trigger rollback if checkpoint exists
 	if migration.Checkpoint != nil {
 		return o.rollbackManager.ExecuteRollback(context.Background(), migrationID, migration.Checkpoint.ID)
 	}
-	
+
 	return errors.New("cannot cancel migration without checkpoint")
 }
 
@@ -936,12 +953,12 @@ func (o *LiveMigrationOrchestrator) GetMetrics() map[string]interface{} {
 	total := o.metrics.totalMigrations.Load()
 	successful := o.metrics.successfulMigrations.Load()
 	failed := o.metrics.failedMigrations.Load()
-	
+
 	successRate := float64(0)
 	if total > 0 {
 		successRate = float64(successful) / float64(total)
 	}
-	
+
 	return map[string]interface{}{
 		"total_migrations":      total,
 		"successful_migrations": successful,
@@ -1321,7 +1338,7 @@ func (p *HTTPMigrationAIProvider) DetectAnomalies(migrationMetrics map[string]in
 // RecommendDynamicAdjustments recommends dynamic adjustments
 func (p *HTTPMigrationAIProvider) RecommendDynamicAdjustments(migrationID string, currentMetrics map[string]interface{}) ([]AdjustmentRecommendation, error) {
 	reqData := map[string]interface{}{
-		"migration_id":     migrationID,
+		"migration_id":    migrationID,
 		"current_metrics": currentMetrics,
 	}
 
@@ -1460,14 +1477,14 @@ func (o *LiveMigrationOrchestrator) GetAIMetrics() map[string]interface{} {
 	accuracy := o.aiMetrics.PredictionAccuracy.Load().(float64)
 
 	return map[string]interface{}{
-		"ai_enabled":            true,
-		"prediction_accuracy":   accuracy,
-		"optimization_success":  o.aiMetrics.OptimizationSuccess.Load(),
-		"anomalies_detected":    o.aiMetrics.AnomaliesDetected.Load(),
-		"adjustments_applied":   o.aiMetrics.AdjustmentsApplied.Load(),
-		"ai_failures":           o.aiMetrics.AIFailures.Load(),
+		"ai_enabled":             true,
+		"prediction_accuracy":    accuracy,
+		"optimization_success":   o.aiMetrics.OptimizationSuccess.Load(),
+		"anomalies_detected":     o.aiMetrics.AnomaliesDetected.Load(),
+		"adjustments_applied":    o.aiMetrics.AdjustmentsApplied.Load(),
+		"ai_failures":            o.aiMetrics.AIFailures.Load(),
 		"predictive_adjustments": o.aiMetrics.PredictiveAdjustments.Load(),
-		"avg_response_time_ms":  o.aiMetrics.AIResponseTime.Load(),
+		"avg_response_time_ms":   o.aiMetrics.AIResponseTime.Load(),
 	}
 }
 
@@ -1503,7 +1520,7 @@ func NewConnectionPool(maxConns int) *ConnectionPool {
 func (cp *ConnectionPool) Get(node string) net.Conn {
 	cp.mu.RLock()
 	defer cp.mu.RUnlock()
-	
+
 	return cp.connections[node]
 }
 
@@ -1511,7 +1528,7 @@ func (cp *ConnectionPool) Get(node string) net.Conn {
 func (cp *ConnectionPool) Put(node string, conn net.Conn) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
-	
+
 	if len(cp.connections) >= cp.maxConns {
 		// Evict oldest connection
 		for k, v := range cp.connections {
@@ -1520,7 +1537,7 @@ func (cp *ConnectionPool) Put(node string, conn net.Conn) {
 			break
 		}
 	}
-	
+
 	cp.connections[node] = conn
 }
 
@@ -1536,20 +1553,20 @@ func NewBandwidthManager(totalBandwidth int64) *BandwidthManager {
 func (bm *BandwidthManager) Allocate(migrationID string, requested int64) int64 {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
-	
+
 	available := bm.totalBandwidth - bm.allocatedBandwidth.Load()
 	if available <= 0 {
 		return 0
 	}
-	
+
 	allocated := requested
 	if allocated > available {
 		allocated = available
 	}
-	
+
 	bm.allocations[migrationID] = allocated
 	bm.allocatedBandwidth.Add(allocated)
-	
+
 	return allocated
 }
 
@@ -1557,7 +1574,7 @@ func (bm *BandwidthManager) Allocate(migrationID string, requested int64) int64 
 func (bm *BandwidthManager) Release(migrationID string) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
-	
+
 	if allocated, exists := bm.allocations[migrationID]; exists {
 		bm.allocatedBandwidth.Add(-allocated)
 		delete(bm.allocations, migrationID)
@@ -1575,7 +1592,7 @@ func NewPriorityQueue() *PriorityQueue {
 func (pq *PriorityQueue) Add(item *QueueItem) {
 	pq.mu.Lock()
 	defer pq.mu.Unlock()
-	
+
 	// Insert in priority order
 	inserted := false
 	for i, existing := range pq.items {
@@ -1585,7 +1602,7 @@ func (pq *PriorityQueue) Add(item *QueueItem) {
 			break
 		}
 	}
-	
+
 	if !inserted {
 		pq.items = append(pq.items, item)
 	}
@@ -1595,14 +1612,14 @@ func (pq *PriorityQueue) Add(item *QueueItem) {
 func (pq *PriorityQueue) Pop() *QueueItem {
 	pq.mu.Lock()
 	defer pq.mu.Unlock()
-	
+
 	if len(pq.items) == 0 {
 		return nil
 	}
-	
+
 	item := pq.items[0]
 	pq.items = pq.items[1:]
-	
+
 	return item
 }
 
@@ -1610,7 +1627,7 @@ func (pq *PriorityQueue) Pop() *QueueItem {
 func (pq *PriorityQueue) Size() int {
 	pq.mu.RLock()
 	defer pq.mu.RUnlock()
-	
+
 	return len(pq.items)
 }
 
@@ -1644,14 +1661,14 @@ type MigrationAIProvider interface {
 
 // AIConfig contains AI-related configuration
 type AIConfig struct {
-	Enabled             bool   `json:"enabled"`
-	Endpoint            string `json:"endpoint"`
-	Timeout             time.Duration `json:"timeout"`
-	ConfidenceThreshold float64 `json:"confidence_threshold"`
-	RetryAttempts       int    `json:"retry_attempts"`
-	EnableOptimization  bool   `json:"enable_optimization"`
-	EnableAnomalyDetection bool `json:"enable_anomaly_detection"`
-	EnablePredictiveAdjustments bool `json:"enable_predictive_adjustments"`
+	Enabled                     bool          `json:"enabled"`
+	Endpoint                    string        `json:"endpoint"`
+	Timeout                     time.Duration `json:"timeout"`
+	ConfidenceThreshold         float64       `json:"confidence_threshold"`
+	RetryAttempts               int           `json:"retry_attempts"`
+	EnableOptimization          bool          `json:"enable_optimization"`
+	EnableAnomalyDetection      bool          `json:"enable_anomaly_detection"`
+	EnablePredictiveAdjustments bool          `json:"enable_predictive_adjustments"`
 }
 
 // HTTPMigrationAIProvider implements MigrationAIProvider using HTTP calls to AI service
@@ -1673,49 +1690,49 @@ type MigrationStrategy struct {
 
 // CompressionConfig represents AI-optimized compression settings
 type CompressionConfig struct {
-	Type      CompressionType `json:"type"`
-	Level     int            `json:"level"`
-	ChunkSize int            `json:"chunk_size"`
-	Confidence float64       `json:"confidence"`
+	Type       CompressionType `json:"type"`
+	Level      int             `json:"level"`
+	ChunkSize  int             `json:"chunk_size"`
+	Confidence float64         `json:"confidence"`
 }
 
 // NetworkConditions represents current network conditions
 type NetworkConditions struct {
-	Bandwidth         int64   `json:"bandwidth"`
-	Latency           int     `json:"latency"`
-	PacketLoss        float64 `json:"packet_loss"`
-	Jitter            int     `json:"jitter"`
-	CongestionLevel   float64 `json:"congestion_level"`
+	Bandwidth          int64   `json:"bandwidth"`
+	Latency            int     `json:"latency"`
+	PacketLoss         float64 `json:"packet_loss"`
+	Jitter             int     `json:"jitter"`
+	CongestionLevel    float64 `json:"congestion_level"`
 	PredictedStability float64 `json:"predicted_stability"`
 }
 
 // AnomalyAlert represents an anomaly detected during migration
 type AnomalyAlert struct {
-	Type        string    `json:"type"`
-	Severity    string    `json:"severity"`
-	Message     string    `json:"message"`
-	Confidence  float64   `json:"confidence"`
-	Timestamp   time.Time `json:"timestamp"`
-	Recommendations []string `json:"recommendations"`
+	Type            string    `json:"type"`
+	Severity        string    `json:"severity"`
+	Message         string    `json:"message"`
+	Confidence      float64   `json:"confidence"`
+	Timestamp       time.Time `json:"timestamp"`
+	Recommendations []string  `json:"recommendations"`
 }
 
 // AdjustmentRecommendation represents AI recommendations for migration adjustments
 type AdjustmentRecommendation struct {
-	Parameter   string      `json:"parameter"`
-	CurrentValue interface{} `json:"current_value"`
+	Parameter        string      `json:"parameter"`
+	CurrentValue     interface{} `json:"current_value"`
 	RecommendedValue interface{} `json:"recommended_value"`
-	Reason      string      `json:"reason"`
-	Confidence  float64     `json:"confidence"`
-	Impact      string      `json:"impact"`
+	Reason           string      `json:"reason"`
+	Confidence       float64     `json:"confidence"`
+	Impact           string      `json:"impact"`
 }
 
 // PatternInsight represents insights from migration pattern analysis
 type PatternInsight struct {
-	Pattern     string    `json:"pattern"`
-	Frequency   int       `json:"frequency"`
-	SuccessRate float64   `json:"success_rate"`
-	AvgDuration time.Duration `json:"avg_duration"`
-	Recommendations []string `json:"recommendations"`
+	Pattern         string        `json:"pattern"`
+	Frequency       int           `json:"frequency"`
+	SuccessRate     float64       `json:"success_rate"`
+	AvgDuration     time.Duration `json:"avg_duration"`
+	Recommendations []string      `json:"recommendations"`
 }
 
 // MigrationRecord represents a historical migration record
@@ -1733,14 +1750,15 @@ type MigrationRecord struct {
 
 // AIMigrationMetrics tracks AI-related migration metrics
 type AIMigrationMetrics struct {
-	PredictionAccuracy     atomic.Value // float64
-	OptimizationSuccess    atomic.Int64
-	AnomaliesDetected      atomic.Int64
-	AdjustmentsApplied     atomic.Int64
-	AIResponseTime         atomic.Int64 // milliseconds
+	PredictionAccuracy    atomic.Value // float64
+	OptimizationSuccess   atomic.Int64
+	AnomaliesDetected     atomic.Int64
+	AdjustmentsApplied    atomic.Int64
+	AIResponseTime        atomic.Int64 // milliseconds
 	AIFailures            atomic.Int64
 	PredictiveAdjustments atomic.Int64
 }
+
 // parseCompressionType maps an AI-response compression type name to the enum.
 func parseCompressionType(name string) CompressionType {
 	switch name {

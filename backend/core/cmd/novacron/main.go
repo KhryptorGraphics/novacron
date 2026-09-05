@@ -379,6 +379,12 @@ func applyDefaultVMManagerDriverConfig(config *vm.VMManagerConfig, nodeID, dataD
 		if vmPathValue, ok := driverConfig.Config["vm_path"].(string); !ok || vmPathValue == "" {
 			driverConfig.Config["vm_path"] = filepath.Join(dataDir, "vms")
 		}
+		// TCG emulation boots slowly; a 3 s QMP liveness bound flaps. 15 s is
+		// still an upper bound (the probe returns as soon as qemu opens the
+		// socket) and is overridable per config.
+		if _, ok := driverConfig.Config["qmp_startup_timeout"].(string); !ok {
+			driverConfig.Config["qmp_startup_timeout"] = "15s"
+		}
 		driverConfig.Enabled = true
 		config.Drivers[vm.VMTypeKVM] = driverConfig
 		return
@@ -387,9 +393,10 @@ func applyDefaultVMManagerDriverConfig(config *vm.VMManagerConfig, nodeID, dataD
 	config.Drivers[vm.VMTypeKVM] = vm.VMDriverConfigManager{
 		Enabled: true,
 		Config: map[string]interface{}{
-			"node_id":   nodeID,
-			"qemu_path": "qemu-system-x86_64",
-			"vm_path":   filepath.Join(dataDir, "vms"),
+			"node_id":             nodeID,
+			"qemu_path":           "qemu-system-x86_64",
+			"vm_path":             filepath.Join(dataDir, "vms"),
+			"qmp_startup_timeout": "15s",
 		},
 	}
 }
@@ -659,9 +666,9 @@ func initializeAPI(
 }
 
 type APIServer struct {
-	server   *http.Server
-	listener net.Listener
-	address  string
+	server      *http.Server
+	listener    net.Listener
+	address     string
 	runtimeAuth *runtimeAuthRuntime
 }
 
@@ -729,12 +736,12 @@ type runtimeNode struct {
 }
 
 type runtimeClusterHealth struct {
-	Status       string    `json:"status"`
-	TotalNodes   int       `json:"total_nodes"`
-	HealthyNodes int       `json:"healthy_nodes"`
-	HasQuorum    bool      `json:"has_quorum"`
-	Leader       string    `json:"leader"`
-	LastUpdated  time.Time `json:"last_updated"`
+	Status       string                   `json:"status"`
+	TotalNodes   int                      `json:"total_nodes"`
+	HealthyNodes int                      `json:"healthy_nodes"`
+	HasQuorum    bool                     `json:"has_quorum"`
+	Leader       string                   `json:"leader"`
+	LastUpdated  time.Time                `json:"last_updated"`
 	Auth         *runtimeAuthHealth       `json:"auth,omitempty"`
 	Federation   *runtimeFederationHealth `json:"federation,omitempty"`
 }
@@ -747,21 +754,21 @@ type runtimeAuthHealth struct {
 }
 
 type runtimeFederationHealth struct {
-	Enabled            bool                         `json:"enabled"`
-	TotalClusters      int                          `json:"totalClusters,omitempty"`
-	ActiveMemberships  int                          `json:"activeMemberships,omitempty"`
-	PendingMemberships int                          `json:"pendingMemberships,omitempty"`
-	RevokedMemberships int                          `json:"revokedMemberships,omitempty"`
-	SelectedClusterID  string                       `json:"selectedClusterId,omitempty"`
-	HighestTier        string                       `json:"highestTier,omitempty"`
+	Enabled            bool                            `json:"enabled"`
+	TotalClusters      int                             `json:"totalClusters,omitempty"`
+	ActiveMemberships  int                             `json:"activeMemberships,omitempty"`
+	PendingMemberships int                             `json:"pendingMemberships,omitempty"`
+	RevokedMemberships int                             `json:"revokedMemberships,omitempty"`
+	SelectedClusterID  string                          `json:"selectedClusterId,omitempty"`
+	HighestTier        string                          `json:"highestTier,omitempty"`
 	Clusters           []runtimeClusterSummaryResponse `json:"clusters,omitempty"`
 }
 
 type runtimeFederationResponse struct {
-	Auth             runtimeAuthHealth          `json:"auth"`
-	Federation       runtimeFederationHealth    `json:"federation"`
-	Memberships      []runtimeAdmissionResponse `json:"memberships,omitempty"`
-	SelectedCluster  *runtimeClusterSummaryResponse `json:"selectedCluster,omitempty"`
+	Auth            runtimeAuthHealth              `json:"auth"`
+	Federation      runtimeFederationHealth        `json:"federation"`
+	Memberships     []runtimeAdmissionResponse     `json:"memberships,omitempty"`
+	SelectedCluster *runtimeClusterSummaryResponse `json:"selectedCluster,omitempty"`
 }
 
 func handleHealthz(w http.ResponseWriter, _ *http.Request) {

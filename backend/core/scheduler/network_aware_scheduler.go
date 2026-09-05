@@ -940,23 +940,11 @@ func (s *NetworkAwareScheduler) getZoneDistribution() (map[string]int, error) {
 
 // RequestPlacement overrides the base method to include network awareness
 func (s *NetworkAwareScheduler) RequestPlacement(vmID string, policy PlacementPolicy, constraints []PlacementConstraint, resources map[string]float64, priority int) (string, error) {
-	// Handle network-aware placement policy
-	if policy == PolicyNetworkAware {
-		// Add network-specific constraints if needed
-		// ...
-
-		// Create a thread-safe copy of the config for this request to avoid mutation
-		tempConfig := s.config
-		tempConfig.NetworkAwarenessWeight = 0.6 // Increase weight for network-aware policy
-
-		// Create a temporary scheduler instance with the modified config
-		tempScheduler := *s
-		tempScheduler.config = tempConfig
-
-		// Call base implementation with the temporary config
-		return tempScheduler.ResourceAwareScheduler.RequestPlacement(vmID, policy, constraints, resources, priority)
-	}
-
-	// Call base implementation with original config
+	// Network-aware placement needs no extra constraints today; the
+	// network-awareness weight it would have adjusted is an outer-struct
+	// field the embedded ResourceAwareScheduler never reads, so the old
+	// dead "temporary scheduler copy" block (which also copied the struct's
+	// sync.RWMutex — go vet copylocks) is gone. Fall through to the base
+	// implementation with the original config in every case.
 	return s.ResourceAwareScheduler.RequestPlacement(vmID, policy, constraints, resources, priority)
 }

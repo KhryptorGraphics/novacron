@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 func TestDistributedStorageService_CreateDistributedVolume(t *testing.T) {
 	// Create base storage manager
 	baseConfig := StorageManagerConfig{
-		BasePath:    "/tmp/test-storage",
+		BasePath:    t.TempDir(),
 		Compression: false,
 		Encryption:  false,
 		Dedup:       false,
@@ -25,7 +26,7 @@ func TestDistributedStorageService_CreateDistributedVolume(t *testing.T) {
 
 	// Create distributed storage config
 	distConfig := DefaultDistributedStorageConfig()
-	distConfig.RootDir = "/tmp/test-distributed"
+	distConfig.RootDir = filepath.Join(t.TempDir(), "distributed")
 
 	// Create distributed storage service
 	distService, err := NewDistributedStorageService(baseManager, distConfig)
@@ -89,7 +90,7 @@ func TestDistributedStorageService_CreateDistributedVolume(t *testing.T) {
 func TestDistributedStorageService_ReadWriteShard(t *testing.T) {
 	// Create base storage manager
 	baseConfig := StorageManagerConfig{
-		BasePath:    "/tmp/test-storage",
+		BasePath:    t.TempDir(),
 		Compression: false,
 		Encryption:  false,
 		Dedup:       false,
@@ -101,7 +102,7 @@ func TestDistributedStorageService_ReadWriteShard(t *testing.T) {
 
 	// Create distributed storage config
 	distConfig := DefaultDistributedStorageConfig()
-	distConfig.RootDir = "/tmp/test-distributed"
+	distConfig.RootDir = filepath.Join(t.TempDir(), "distributed")
 
 	// Create distributed storage service
 	distService, err := NewDistributedStorageService(baseManager, distConfig)
@@ -165,7 +166,7 @@ func TestDistributedStorageService_ReadWriteShard(t *testing.T) {
 func TestDistributedStorageService_WithCompression(t *testing.T) {
 	// Create base storage manager
 	baseConfig := StorageManagerConfig{
-		BasePath:    "/tmp/test-storage",
+		BasePath:    t.TempDir(),
 		Compression: true,
 		Encryption:  false,
 		Dedup:       false,
@@ -177,7 +178,7 @@ func TestDistributedStorageService_WithCompression(t *testing.T) {
 
 	// Create distributed storage config with compression
 	distConfig := DefaultDistributedStorageConfig()
-	distConfig.RootDir = "/tmp/test-distributed-comp"
+	distConfig.RootDir = filepath.Join(t.TempDir(), "distributed-comp")
 	distConfig.CompressionConfig = compression.CompressionConfig{
 		Algorithm:    compression.CompressionGzip,
 		Level:        6,
@@ -259,7 +260,7 @@ func TestDistributedStorageService_WithCompression(t *testing.T) {
 func TestDistributedStorageService_WithEncryption(t *testing.T) {
 	// Create base storage manager
 	baseConfig := StorageManagerConfig{
-		BasePath:    "/tmp/test-storage",
+		BasePath:    t.TempDir(),
 		Compression: false,
 		Encryption:  true,
 		Dedup:       false,
@@ -271,7 +272,7 @@ func TestDistributedStorageService_WithEncryption(t *testing.T) {
 
 	// Create distributed storage config with encryption
 	distConfig := DefaultDistributedStorageConfig()
-	distConfig.RootDir = "/tmp/test-distributed-enc"
+	distConfig.RootDir = filepath.Join(t.TempDir(), "distributed-enc")
 	distConfig.DefaultEncryption = true
 	distConfig.EncryptionConfig = encryption.EncryptionConfig{
 		Algorithm:    encryption.EncryptionAES256,
@@ -344,7 +345,7 @@ func TestDistributedStorageService_WithEncryption(t *testing.T) {
 func TestDistributedStorageService_RepairVolume(t *testing.T) {
 	// Create base storage manager
 	baseConfig := StorageManagerConfig{
-		BasePath:    "/tmp/test-storage",
+		BasePath:    t.TempDir(),
 		Compression: false,
 		Encryption:  false,
 		Dedup:       false,
@@ -356,7 +357,7 @@ func TestDistributedStorageService_RepairVolume(t *testing.T) {
 
 	// Create distributed storage config
 	distConfig := DefaultDistributedStorageConfig()
-	distConfig.RootDir = "/tmp/test-distributed-repair"
+	distConfig.RootDir = filepath.Join(t.TempDir(), "distributed-repair")
 
 	// Create distributed storage service
 	distService, err := NewDistributedStorageService(baseManager, distConfig)
@@ -398,6 +399,18 @@ func TestDistributedStorageService_RepairVolume(t *testing.T) {
 		t.Fatalf("Failed to create distributed volume: %v", err)
 	}
 
+	// Write real shard data before simulating degradation: RepairVolume
+	// copies an existing replica's bytes to the missing backend, so a shard
+	// with no replica anywhere has nothing to heal from. (The test predates
+	// the real per-node Replicator; under the old same-path fake it passed
+	// vacuously.)
+	distConfig.SynchronousReplication = true
+	testData := []byte("repair-volume-shard-payload")
+	err = distService.WriteShard(ctx, volume.ID, 0, testData)
+	if err != nil {
+		t.Fatalf("Failed to write shard: %v", err)
+	}
+
 	// Get the distributed volume and mark some shards as needing healing
 	distVolume, err := distService.GetDistributedVolume(ctx, volume.ID)
 	if err != nil {
@@ -429,7 +442,7 @@ func TestDistributedStorageService_RepairVolume(t *testing.T) {
 func TestDistributedStorageService_RebalanceVolume(t *testing.T) {
 	// Create base storage manager
 	baseConfig := StorageManagerConfig{
-		BasePath:    "/tmp/test-storage",
+		BasePath:    t.TempDir(),
 		Compression: false,
 		Encryption:  false,
 		Dedup:       false,
@@ -441,7 +454,7 @@ func TestDistributedStorageService_RebalanceVolume(t *testing.T) {
 
 	// Create distributed storage config
 	distConfig := DefaultDistributedStorageConfig()
-	distConfig.RootDir = "/tmp/test-distributed-rebalance"
+	distConfig.RootDir = filepath.Join(t.TempDir(), "distributed-rebalance")
 
 	// Create distributed storage service
 	distService, err := NewDistributedStorageService(baseManager, distConfig)
@@ -517,7 +530,7 @@ func TestDistributedStorageService_RebalanceVolume(t *testing.T) {
 func TestDistributedStorageService_NodeManagement(t *testing.T) {
 	// Create base storage manager
 	baseConfig := StorageManagerConfig{
-		BasePath:    "/tmp/test-storage",
+		BasePath:    t.TempDir(),
 		Compression: false,
 		Encryption:  false,
 		Dedup:       false,
@@ -529,7 +542,7 @@ func TestDistributedStorageService_NodeManagement(t *testing.T) {
 
 	// Create distributed storage config
 	distConfig := DefaultDistributedStorageConfig()
-	distConfig.RootDir = "/tmp/test-distributed-nodes"
+	distConfig.RootDir = filepath.Join(t.TempDir(), "distributed-nodes")
 
 	// Create distributed storage service
 	distService, err := NewDistributedStorageService(baseManager, distConfig)
@@ -582,7 +595,7 @@ func TestDistributedStorageService_NodeManagement(t *testing.T) {
 func BenchmarkDistributedStorageService_WriteShard(b *testing.B) {
 	// Create base storage manager
 	baseConfig := StorageManagerConfig{
-		BasePath:    "/tmp/bench-storage",
+		BasePath:    b.TempDir(),
 		Compression: false,
 		Encryption:  false,
 		Dedup:       false,
@@ -591,7 +604,7 @@ func BenchmarkDistributedStorageService_WriteShard(b *testing.B) {
 
 	// Create distributed storage config
 	distConfig := DefaultDistributedStorageConfig()
-	distConfig.RootDir = "/tmp/bench-distributed"
+	distConfig.RootDir = filepath.Join(b.TempDir(), "distributed")
 
 	// Create distributed storage service
 	distService, _ := NewDistributedStorageService(baseManager, distConfig)
@@ -632,7 +645,7 @@ func BenchmarkDistributedStorageService_WriteShard(b *testing.B) {
 func BenchmarkDistributedStorageService_ReadShard(b *testing.B) {
 	// Create base storage manager
 	baseConfig := StorageManagerConfig{
-		BasePath:    "/tmp/bench-storage",
+		BasePath:    b.TempDir(),
 		Compression: false,
 		Encryption:  false,
 		Dedup:       false,
@@ -641,7 +654,7 @@ func BenchmarkDistributedStorageService_ReadShard(b *testing.B) {
 
 	// Create distributed storage config
 	distConfig := DefaultDistributedStorageConfig()
-	distConfig.RootDir = "/tmp/bench-distributed"
+	distConfig.RootDir = filepath.Join(b.TempDir(), "distributed")
 
 	// Create distributed storage service
 	distService, _ := NewDistributedStorageService(baseManager, distConfig)

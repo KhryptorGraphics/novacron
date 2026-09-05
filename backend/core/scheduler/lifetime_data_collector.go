@@ -9,7 +9,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-
 )
 
 var (
@@ -27,10 +26,10 @@ var (
 
 // LifetimeRecord captures VM lifecycle data for training
 type LifetimeRecord struct {
-	VMID           string                              `json:"vm_id"`
-	CreatedAt      time.Time                           `json:"created_at"`
-	DeletedAt      *time.Time                          `json:"deleted_at,omitempty"`
-	ActualLifetime time.Duration                       `json:"actual_lifetime,omitempty"`
+	VMID           string           `json:"vm_id"`
+	CreatedAt      time.Time        `json:"created_at"`
+	DeletedAt      *time.Time       `json:"deleted_at,omitempty"`
+	ActualLifetime time.Duration    `json:"actual_lifetime,omitempty"`
 	Features       LifetimeFeatures `json:"features"`
 }
 

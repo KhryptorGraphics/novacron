@@ -69,13 +69,22 @@ func TestVMManagerCreateUbuntu2404VMUsesBaseImageAndCloudInitISO(t *testing.T) {
 		t.Fatalf("write base image: %v", err)
 	}
 
+	// The QMP socket lives under the VM runtime dir; unix socket paths cap at
+	// 107 bytes and t.TempDir() nests under the long test name, so give the
+	// driver a short, test-scoped vm_path instead.
+	vmDir, err := os.MkdirTemp("/tmp", "nvu24")
+	if err != nil {
+		t.Fatalf("create short vm_path: %v", err)
+	}
+	defer os.RemoveAll(vmDir)
+
 	managerConfig := vm.DefaultVMManagerConfig()
 	managerConfig.Drivers[vm.VMTypeKVM] = vm.VMDriverConfigManager{
 		Enabled: true,
 		Config: map[string]interface{}{
 			"node_id":   "ubuntu-test-node",
 			"qemu_path": "qemu-system-x86_64",
-			"vm_path":   filepath.Join(baseDir, "vms"),
+			"vm_path":   vmDir,
 		},
 	}
 
@@ -170,9 +179,39 @@ func installUbuntu2404TestTools(t *testing.T) string {
 	t.Setenv("NOVACRON_TEST_CLOUD_LOCALDS_LOG", cloudLocalDSArgsPath)
 	t.Setenv("NOVACRON_TEST_QEMU_SYSTEM_LOG", qemuSystemArgsPath)
 
-	writeExecutable(t, filepath.Join(toolsDir, "qemu-system-x86_64"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$NOVACRON_TEST_QEMU_SYSTEM_LOG\"\nexit 0\n")
+	// The fake qemu must honor the driver's launch contract: a real qemu
+	// opens its QMP unix socket ("-qmp unix:<path>,server,nowait") and stays
+	// alive, which is exactly what the driver's waitQMPUp liveness probe
+	// checks. The old log-and-exit stub failed that probe after the liveness
+	// check landed. Parse the -qmp argument, hold the socket open with nc
+	// until a fifo writer closes (3 s), then exit — the driver sees a live
+	// qemu that came up and shut down cleanly after the probe window.
+	writeExecutable(t, filepath.Join(toolsDir, "qemu-system-x86_64"), `#!/bin/sh
+printf '%s\n' "$@" > "$NOVACRON_TEST_QEMU_SYSTEM_LOG"
+qmp_path=""
+prev=""
+for arg in "$@"; do
+  case "$prev" in
+    -qmp) qmp_path="$arg" ;;
+  esac
+  prev="$arg"
+done
+if [ -n "$qmp_path" ]; then
+  sock="${qmp_path#unix:}"
+  sock="${sock%%,*}"
+  fifo="$sock.stub-ctl"
+  mkfifo "$fifo" 2>/dev/null
+  (sleep 3 > "$fifo" 2>/dev/null &)
+  nc -U -l "$sock" < "$fifo" >/dev/null 2>&1
+  rm -f "$fifo"
+fi
+exit 0
+`)
 	writeExecutable(t, filepath.Join(toolsDir, "cloud-localds"), "#!/bin/sh\noutput=\"$1\"\nshift\nprintf '%s\\n' \"$@\" > \"$NOVACRON_TEST_CLOUD_LOCALDS_LOG\"\n: > \"$output\"\n")
-	writeExecutable(t, filepath.Join(toolsDir, "qemu-img"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$NOVACRON_TEST_QEMU_IMG_LOG\"\nprev=''\nlast=''\nfor arg in \"$@\"; do\n  prev=\"$last\"\n  last=\"$arg\"\ndone\ncase \"$last\" in\n  *K|*M|*G|*T) output=\"$prev\" ;;\n  *) output=\"$last\" ;;\nesac\n: > \"$output\"\n")
+	// The disk-create path issues multiple qemu-img invocations (convert from
+	// base, then resize); append every invocation's args so the assertion can
+	// see the base-image convert, and touch the size-detected output file.
+	writeExecutable(t, filepath.Join(toolsDir, "qemu-img"), "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$NOVACRON_TEST_QEMU_IMG_LOG\"\nprev=''\nlast=''\nfor arg in \"$@\"; do\n  prev=\"$last\"\n  last=\"$arg\"\ndone\ncase \"$last\" in\n  *K|*M|*G|*T) output=\"$prev\" ;;\n  *) output=\"$last\" ;;\nesac\n: > \"$output\"\n")
 
 	return toolsDir + string(os.PathListSeparator) + os.Getenv("PATH")
 }

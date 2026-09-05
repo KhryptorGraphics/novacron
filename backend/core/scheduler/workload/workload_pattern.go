@@ -69,7 +69,6 @@ const (
 	DeclinePattern  = "decline"
 )
 
-
 // PatternBasedPredictor uses detected patterns to predict future resource usage
 type PatternBasedPredictor struct {
 	// Patterns contains the detected workload patterns
@@ -511,4 +510,3 @@ type ResourceProfile struct {
 	// PredictionModel contains parameters for usage prediction
 	PredictionModel map[string]interface{}
 }
-
