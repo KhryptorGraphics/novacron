@@ -23,10 +23,11 @@ import (
 
 // KVMDriverEnhanced implements the VMDriver interface for KVM-based VMs
 type KVMDriverEnhanced struct {
-	qemuBinaryPath string
-	vmBasePath     string
-	vms            map[string]*KVMVMInfo
-	vmLock         sync.RWMutex
+	qemuBinaryPath    string
+	vmBasePath        string
+	qmpStartupTimeout time.Duration
+	vms               map[string]*KVMVMInfo
+	vmLock            sync.RWMutex
 }
 
 // KVMVMInfo stores information about a KVM VM
@@ -65,6 +66,12 @@ type KVMVMInfo struct {
 
 // NewKVMDriver creates a new KVM driver (main entry point)
 func NewKVMDriver(config map[string]interface{}) (VMDriver, error) {
+	qmpStartupTimeout := 3 * time.Second // legacy default; TCG boots need more
+	if raw, ok := config["qmp_startup_timeout"].(string); ok && raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			qmpStartupTimeout = d
+		}
+	}
 	qemuPath := ""
 	if path, ok := config["qemu_path"].(string); ok {
 		qemuPath = path
@@ -85,12 +92,12 @@ func NewKVMDriver(config map[string]interface{}) (VMDriver, error) {
 		vmBasePath = path
 	}
 
-	return newKVMDriverEnhanced(qemuPath, vmBasePath)
+	return newKVMDriverEnhanced(qemuPath, vmBasePath, qmpStartupTimeout)
 }
 
 // NewKVMDriverEnhanced creates a new enhanced KVM driver
 func NewKVMDriverEnhanced(qemuPath string) (VMDriver, error) {
-	return newKVMDriverEnhanced(qemuPath, "/var/lib/novacron/vms")
+	return newKVMDriverEnhanced(qemuPath, "/var/lib/novacron/vms", 3*time.Second)
 }
 
 // defaultQEMUBinary returns the qemu-system binary name for the target
@@ -142,7 +149,7 @@ func freeVNCPort() int {
 	return 5900 // fall back; qemu will surface the bind error
 }
 
-func newKVMDriverEnhanced(qemuPath, vmBasePath string) (VMDriver, error) {
+func newKVMDriverEnhanced(qemuPath, vmBasePath string, qmpStartupTimeout time.Duration) (VMDriver, error) {
 	if qemuPath == "" {
 		qemuPath = defaultQEMUBinary("")
 	}
@@ -168,9 +175,10 @@ func newKVMDriverEnhanced(qemuPath, vmBasePath string) (VMDriver, error) {
 	}
 
 	d := &KVMDriverEnhanced{
-		qemuBinaryPath: qemuPath,
-		vmBasePath:     vmBasePath,
-		vms:            make(map[string]*KVMVMInfo),
+		qemuBinaryPath:    qemuPath,
+		vmBasePath:        vmBasePath,
+		qmpStartupTimeout: qmpStartupTimeout,
+		vms:               make(map[string]*KVMVMInfo),
 	}
 	// Re-adopt any qemu processes that outlived a previous driver instance
 	// (e.g. a server restart) so their in-memory state is not orphaned.
@@ -374,7 +382,7 @@ func (d *KVMDriverEnhanced) launchVM(vmID string, vmInfo *KVMVMInfo) error {
 		// freeVNCPort probe->bind TOCTOU) still returns success from cmd.Start();
 		// only a live qemu opens its QMP socket. This replaces the old optimistic
 		// StateRunning that masked dead-on-arrival launches.
-		if err := waitQMPUp(qmpSock, 3*time.Second); err == nil {
+		if err := waitQMPUp(qmpSock, d.qmpStartupTimeout); err == nil {
 			vmInfo.State = StateRunning
 			vmInfo.StartTime = time.Now()
 			log.Printf("Started KVM VM %s with PID %d", vmID, vmInfo.PID)
@@ -402,6 +410,13 @@ func (d *KVMDriverEnhanced) launchVM(vmID string, vmInfo *KVMVMInfo) error {
 // alive) or the timeout elapses. A successful connect is enough; it does not
 // negotiate, and closes immediately so the real QMP clients connect cleanly.
 func waitQMPUp(qmpSock string, timeout time.Duration) error {
+	// A unix socket address is limited to 107 bytes (sun_path). A longer
+	// path can NEVER come up — qemu (and any probe) would fail to bind it —
+	// so report that as the actual defect instead of burning the timeout and
+	// reporting a misleading liveness failure.
+	if len(qmpSock) > 107 {
+		return fmt.Errorf("QMP socket path %s is %d bytes, exceeding the 107-byte unix socket limit; shorten the VM runtime directory", qmpSock, len(qmpSock))
+	}
 	deadline := time.Now().Add(timeout)
 	for {
 		if c, err := net.DialTimeout("unix", qmpSock, 500*time.Millisecond); err == nil {
@@ -677,11 +692,14 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 		mem = 128 // qemu rejects -m 0
 	}
 	// CPUShares is a scheduling weight (NewVM defaults it to 1024), not a vCPU
-	// count. Passing it verbatim yields e.g. -smp 1024, which qemu rejects
-	// ("max CPUs supported by machine 'virt' is 512") and the VM never boots.
-	// Clamp to the host's logical CPUs so a default create still starts.
-	// ponytail: host-core cap; add a real vCPU field to VMConfig if overcommit is ever needed.
-	cpus := vmInfo.Config.CPUShares
+	// count. VCPUs (when set) is the real guest vCPU count; a legacy VM with
+	// VCPUs == 0 keeps the old CPUShares-derivation (clamped to the host's
+	// logical CPUs so a default create still starts; a verbatim 1024 would make
+	// qemu reject the boot: "max CPUs supported by machine 'virt' is 512").
+	cpus := vmInfo.Config.VCPUs
+	if cpus <= 0 {
+		cpus = vmInfo.Config.CPUShares // legacy
+	}
 	if cpus <= 0 {
 		cpus = 1 // qemu rejects -smp 0
 	} else if maxCPUs := runtime.NumCPU(); cpus > maxCPUs {

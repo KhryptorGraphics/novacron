@@ -15,7 +15,7 @@ import (
 // rollback defer in Create, the dir survives and this test fails.
 func TestKVMCreateRollback_NoOrphanOnDiskFailure(t *testing.T) {
 	base := t.TempDir()
-	drv, err := newKVMDriverEnhanced("", base)
+	drv, err := newKVMDriverEnhanced("", base, 3*time.Second)
 	if err != nil {
 		t.Skipf("qemu driver unavailable (%v); rollback test needs a qemu binary", err)
 	}

@@ -177,6 +177,7 @@ func placeVM(caps []NodeCapacity, memMB int64, diskGB int) (NodeCapacity, bool) 
 // /internal/vms/create dispatch RPC.
 type clusterCreateSpec struct {
 	Name       string                 `json:"name"`
+	VCPUs      int                    `json:"vcpus,omitempty"`
 	CPUShares  int                    `json:"cpu_shares,omitempty"`
 	MemoryMB   int                    `json:"memory_mb,omitempty"`
 	DiskSizeGB int                    `json:"disk_size_gb,omitempty"`
@@ -202,6 +203,23 @@ func runtimeTenant(tenantID string) string {
 	}
 	return strings.TrimSpace(tenantID)
 }
+
+// vcpusOrDefault fills the canonical vms.cpu_cores NOT NULL column with the
+// REAL guest vCPU count (the column used to hold the CPUShares scheduling
+// weight). A legacy request without vcpus persists 1 core, which matches what
+// the KVM driver boots when both VCPUs and CPUShares are unset (see
+// driver_kvm_enhanced.go -smp derivation).
+func vcpusOrDefault(vcpus int) int {
+	if vcpus <= 0 {
+		return 1
+	}
+	return vcpus
+}
+
+// createVMLocal provisions a VM on THIS node (manager create + DB row) and returns
+// its id and state. Shared by the /vms route (local placement) and the
+// /internal/vms/create dispatch RPC. node_id is stored as this node's id so the
+// row records where the guest actually runs.
 func createVMLocal(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager, spec clusterCreateSpec) (vmID, state string, err error) {
 	vmID = uuid.NewString()
 	state = "stopped" // canonical vm_state enum; reconciled to live state below
@@ -215,7 +233,7 @@ func createVMLocal(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 			AllowMissingOwnership: true,
 			Spec: core_vm.VMConfig{
 				ID: vmID, Name: spec.Name, Type: core_vm.VMTypeKVM,
-				CPUShares: spec.CPUShares, MemoryMB: spec.MemoryMB, DiskSizeGB: spec.DiskSizeGB,
+				VCPUs: spec.VCPUs, CPUShares: spec.CPUShares, MemoryMB: spec.MemoryMB, DiskSizeGB: spec.DiskSizeGB,
 				Image: spec.Image, OwnerID: ownerID,
 				// Runtime quota accounting needs a bucket even though the
 				// canonical vms table has no tenancy column to persist.
@@ -226,20 +244,22 @@ func createVMLocal(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 		}
 		state = liveVMState(vmManager, vmID, state)
 	}
-	// cpu_cores is NOT NULL in the canonical schema; 0 would violate the
-	// constraint, so fall back to the same default NewVM applies on the
-	// manager path (1024, which the KVM driver clamps to the host core count).
+	// cpu_cores is NOT NULL in the canonical schema and carries the REAL guest
+	// vCPU count (novacron schema residue: it used to store the CPUShares
+	// scheduling weight). vcpusOrDefault keeps the column NOT NULL for legacy
+	// requests that do not set vcpus; cpu_shares stays in metadata.
+	cores := vcpusOrDefault(spec.VCPUs)
 	if spec.CPUShares <= 0 {
-		spec.CPUShares = 1024
+		spec.CPUShares = 1024 // manager-path NewVM default, for the metadata record
 	}
 	metadataPayload, _ := json.Marshal(map[string]interface{}{
-		"cpu_shares": spec.CPUShares, "memory_mb": spec.MemoryMB,
+		"cpu_shares": spec.CPUShares, "vcpus": cores, "memory_mb": spec.MemoryMB,
 		"disk_size_gb": spec.DiskSizeGB, "image": spec.Image, "tags": spec.Tags,
 	})
 	if _, dberr := db.Exec(`
 		INSERT INTO vms (id, name, state, cpu_cores, memory_mb, disk_gb, os_type, owner_id, metadata, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::uuid, $9, NOW(), NOW())
-	`, vmID, spec.Name, state, spec.CPUShares, spec.MemoryMB, spec.DiskSizeGB, nullableStringValue(spec.Image), ownerID, metadataPayload); dberr != nil {
+	`, vmID, spec.Name, state, cores, spec.MemoryMB, spec.DiskSizeGB, nullableStringValue(spec.Image), ownerID, metadataPayload); dberr != nil {
 		if vmManager != nil {
 			_ = vmManager.DeleteVM(context.Background(), vmID)
 		}
@@ -282,6 +302,7 @@ func clusteredCreateHandler(db *sql.DB, vmManager *core_vm.VMManager, storagePat
 			Name       string                 `json:"name"`
 			NodeID     string                 `json:"node_id"`
 			Tags       map[string]interface{} `json:"tags,omitempty"`
+			VCPUs      int                    `json:"vcpus,omitempty"`
 			CPUShares  int                    `json:"cpu_shares,omitempty"`
 			MemoryMB   int                    `json:"memory_mb,omitempty"`
 			DiskSizeGB int                    `json:"disk_size_gb,omitempty"`
@@ -295,6 +316,11 @@ func clusteredCreateHandler(db *sql.DB, vmManager *core_vm.VMManager, storagePat
 			writeJSONError(w, http.StatusBadRequest, "name is required")
 			return
 		}
+		// Upper bound only: runtime.NumCPU clamping stays in the KVM driver.
+		if req.VCPUs > 256 {
+			writeJSONError(w, http.StatusBadRequest, "vcpus must be between 1 and 256")
+			return
+		}
 		// requireAuth puts the (string) user_id claim on the context; only a
 		// well-formed uuid can own a canonical vms row (owner_id -> users.id).
 		userID, _ := r.Context().Value("user_id").(string)
@@ -302,7 +328,7 @@ func clusteredCreateHandler(db *sql.DB, vmManager *core_vm.VMManager, storagePat
 			userID = ""
 		}
 		spec := clusterCreateSpec{
-			Name: req.Name, CPUShares: req.CPUShares, MemoryMB: req.MemoryMB,
+			Name: req.Name, VCPUs: req.VCPUs, CPUShares: req.CPUShares, MemoryMB: req.MemoryMB,
 			DiskSizeGB: req.DiskSizeGB, Image: req.Image, Tags: req.Tags,
 			OwnerID: userID,
 		}
@@ -345,7 +371,6 @@ func clusteredCreateHandler(db *sql.DB, vmManager *core_vm.VMManager, storagePat
 			writeJSON(w, http.StatusCreated, out)
 			return
 		}
-
 		// Local placement.
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
@@ -356,6 +381,7 @@ func clusteredCreateHandler(db *sql.DB, vmManager *core_vm.VMManager, storagePat
 		}
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
 			"id": vmID, "name": req.Name, "state": state, "status": state,
+			"vcpus": vcpusOrDefault(spec.VCPUs), "memory_mb": req.MemoryMB, "disk_gb": req.DiskSizeGB,
 			"node_id": selfNodeID(), "placed_on": placedNode, "placed_by": placedBy,
 			"organization_id": nil,
 		})

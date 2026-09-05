@@ -56,9 +56,11 @@ export function useVMs() {
     }
   }, []);
 
-  const createVM = useCallback(async (vmData: { name: string; cpu_shares: number; memory_mb: number }) => {
+  const createVM = useCallback(async (vmData: { name: string; vcpus?: number; cpu_shares?: number; memory_mb: number }) => {
     try {
-      const result = await apiService.createVM(vmData);
+      // cpu_shares stays optional in the wire type; 1024 is the backend
+      // manager-path default and keeps the metadata record informative.
+      const result = await apiService.createVM({ cpu_shares: 1024, ...vmData });
       await fetchVMs(); // Refresh the list
       return result;
     } catch (err) {

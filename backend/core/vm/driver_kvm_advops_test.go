@@ -143,6 +143,14 @@ func TestBuildQEMUArgsHotplugOptIn(t *testing.T) {
 		}
 	}
 
+	// 1b. VCPUs is the REAL vCPU count and wins over the CPUShares scheduling
+	// weight (which NewVM defaults to 1024): VCPUs:2 must yield -smp 2, not the
+	// clamped weight.
+	vcpu := mk(VMConfig{MemoryMB: 512, VCPUs: 2, CPUShares: 1024}, nil)
+	if got := argValue(vcpu, "-smp"); got != "2" {
+		t.Fatalf("VCPUs ignored: got -smp %q, want %q", got, "2")
+	}
+
 	// 2. Opt-in headroom via the TYPED Config fields flips ONLY -smp/-m.
 	hp := mk(VMConfig{MemoryMB: 512, CPUShares: 1, MaxVCPUs: 4, MaxMemoryMB: 2048, MemSlots: 2}, nil)
 	if got := argValue(hp, "-smp"); got != "1,maxcpus=4" {
@@ -206,7 +214,7 @@ func TestCPUHotplugRealQMP(t *testing.T) {
 
 	base := t.TempDir()
 	vmBase := filepath.Join(base, "vms")
-	drv, err := newKVMDriverEnhanced(qemuBin, vmBase)
+	drv, err := newKVMDriverEnhanced(qemuBin, vmBase, 3*time.Second)
 	if err != nil {
 		t.Skipf("skip: KVM driver init failed: %v", err)
 	}
@@ -277,7 +285,7 @@ func TestMemHotplugRealQMP(t *testing.T) {
 
 	base := t.TempDir()
 	vmBase := filepath.Join(base, "vms")
-	drv, err := newKVMDriverEnhanced(qemuBin, vmBase)
+	drv, err := newKVMDriverEnhanced(qemuBin, vmBase, 3*time.Second)
 	if err != nil {
 		t.Skipf("skip: KVM driver init failed: %v", err)
 	}
@@ -338,7 +346,7 @@ func TestNUMATwoNodeBoot(t *testing.T) {
 
 	base := t.TempDir()
 	vmBase := filepath.Join(base, "vms")
-	drv, err := newKVMDriverEnhanced(qemuBin, vmBase)
+	drv, err := newKVMDriverEnhanced(qemuBin, vmBase, 3*time.Second)
 	if err != nil {
 		t.Skipf("skip: KVM driver init failed: %v", err)
 	}

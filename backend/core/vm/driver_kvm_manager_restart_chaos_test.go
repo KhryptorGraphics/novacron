@@ -48,7 +48,7 @@ func TestManagerRestartReadoptsRunningVM(t *testing.T) {
 	const vmID = "restart-survivor"
 
 	// --- "Node 1": create + start a real VM, then vanish mid-boot. ---
-	drv1, err := newKVMDriverEnhanced(qemuBin, vmBase)
+	drv1, err := newKVMDriverEnhanced(qemuBin, vmBase, 3*time.Second)
 	if err != nil {
 		t.Skipf("skip: KVM driver init failed: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestManagerRestartReadoptsRunningVM(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// --- "Node 1" restarts: a fresh driver instance re-adopts on construction. ---
-	drv2, err := newKVMDriverEnhanced(qemuBin, vmBase)
+	drv2, err := newKVMDriverEnhanced(qemuBin, vmBase, 3*time.Second)
 	if err != nil {
 		t.Fatalf("restarted driver init failed: %v", err)
 	}

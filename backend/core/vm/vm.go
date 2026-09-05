@@ -81,6 +81,7 @@ type VMConfig struct {
 	Type                  VMType                       `yaml:"type" json:"type"`
 	Command               string                       `yaml:"command" json:"command"`
 	Args                  []string                     `yaml:"args" json:"args"`
+	VCPUs                 int                          `yaml:"vcpus,omitempty" json:"vcpus,omitempty"` // number of guest vCPUs; 0 ⇒ legacy behavior (derive from CPUShares clamped to host cores)
 	CPUShares             int                          `yaml:"cpu_shares" json:"cpu_shares"`
 	MemoryMB              int                          `yaml:"memory_mb" json:"memory_mb"`
 	DiskSizeGB            int                          `yaml:"disk_size_gb" json:"disk_size_gb"`

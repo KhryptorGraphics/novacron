@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestCreateRollsBackOnDiskExhaustion is a real resource-exhaustion chaos
@@ -58,7 +59,7 @@ func TestCreateRollsBackOnDiskExhaustion(t *testing.T) {
 		}
 	}()
 
-	drv, err := newKVMDriverEnhanced(qemuBin, vmBase)
+	drv, err := newKVMDriverEnhanced(qemuBin, vmBase, 3*time.Second)
 	if err != nil {
 		t.Skipf("skip: KVM driver init failed: %v", err)
 	}

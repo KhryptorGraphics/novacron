@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -123,7 +124,7 @@ func TestIOThreadPinningRealQMP(t *testing.T) {
 
 	base := t.TempDir()
 	vmBase := filepath.Join(base, "vms")
-	drv, err := newKVMDriverEnhanced(qemuBin, vmBase)
+	drv, err := newKVMDriverEnhanced(qemuBin, vmBase, 3*time.Second)
 	if err != nil {
 		t.Skipf("skip: KVM driver init failed: %v", err)
 	}

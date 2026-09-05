@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // This file exercises CEILING 1: ConfigureNUMA persisting the topology into
@@ -127,7 +128,7 @@ func TestNUMAPersistRealBootAfterReload(t *testing.T) {
 	const memMB = 512
 
 	// Driver 1: create a real VM and persist a 2-node NUMA topology.
-	drv1, err := newKVMDriverEnhanced(qemuBin, vmBase)
+	drv1, err := newKVMDriverEnhanced(qemuBin, vmBase, 3*time.Second)
 	if err != nil {
 		t.Skipf("skip: KVM driver init failed: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestNUMAPersistRealBootAfterReload(t *testing.T) {
 	// Driver 2 = "after restart". Its adoptRunningVMs will NOT pick up this
 	// created-but-not-running VM (no pidfile), so reload it from config.json the
 	// way adopt does — Config rehydrated, in-memory NUMA nil.
-	drv2, err := newKVMDriverEnhanced(qemuBin, vmBase)
+	drv2, err := newKVMDriverEnhanced(qemuBin, vmBase, 3*time.Second)
 	if err != nil {
 		t.Skipf("skip: KVM driver re-init failed: %v", err)
 	}
