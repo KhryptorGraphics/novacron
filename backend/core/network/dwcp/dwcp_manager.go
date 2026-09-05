@@ -42,7 +42,13 @@ type Manager struct {
 	// State
 	enabled bool
 	started bool
-	mu      sync.RWMutex
+	// stopping is true for the whole of Stop(), which releases m.mu around
+	// wg.Wait; Start and the health loop treat a stopping manager as started.
+	stopping bool
+	// metricsInterval is the metricsCollectionLoop tick (5s); tests shorten it
+	// through SetMetricsIntervalForTest to provoke Stop/tick interleavings.
+	metricsInterval time.Duration
+	mu              sync.RWMutex
 }
 
 // NewManager creates a new DWCP manager with the given configuration
@@ -63,13 +69,14 @@ func NewManager(config *Config, logger *zap.Logger) (*Manager, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	m := &Manager{
-		config:         config,
-		logger:         logger,
-		ctx:            ctx,
-		cancel:         cancel,
-		enabled:        config.Enabled,
-		started:        false,
-		circuitBreaker: NewCircuitBreaker(5, 30*time.Second), // 5 failures, 30s timeout
+		config:          config,
+		logger:          logger,
+		ctx:             ctx,
+		cancel:          cancel,
+		enabled:         config.Enabled,
+		started:         false,
+		circuitBreaker:  NewCircuitBreaker(5, 30*time.Second), // 5 failures, 30s timeout
+		metricsInterval: 5 * time.Second,
 		metrics: &DWCPMetrics{
 			Version: DWCPVersion,
 			Enabled: config.Enabled,
@@ -93,7 +100,7 @@ func (m *Manager) StartWithContext(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.started {
+	if m.started || m.stopping {
 		return &DWCPError{Code: "ALREADY_STARTED", Message: "DWCP manager already started"}
 	}
 
@@ -270,32 +277,34 @@ func (m *Manager) cleanup() {
 }
 
 // Stop gracefully shuts down all DWCP components in reverse dependency order
-// Phase 3 → Phase 2 → Phase 1 → Phase 0 (Resilience → Coordination → Intelligence → Core)
 func (m *Manager) Stop() error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if !m.started {
+	if !m.started || m.stopping {
+		m.mu.Unlock()
 		return nil
 	}
-
+	m.stopping = true
 	m.logger.Info("Stopping DWCP manager with lifecycle coordination")
+	cancel := m.cancel
+	m.mu.Unlock()
 
-	// Cancel context to signal all goroutines
-	if m.cancel != nil {
-		m.cancel()
+	// Signal and drain the management loops WITHOUT holding m.mu: both loops
+	// take m.mu.RLock (collectMetrics, checkComponentHealth), so waiting on
+	// them under the write lock deadlocks Stop against an in-flight tick.
+	if cancel != nil {
+		cancel()
 	}
-
-	// Wait for all goroutines to finish
 	m.wg.Wait()
 
-	// Shutdown in reverse order of initialization (Phase 3 → Phase 0)
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.stopPhase3Components()
 	m.stopPhase2Components()
 	m.stopPhase1Components()
 	m.stopPhase0Components()
 
 	m.started = false
+	m.stopping = false
 	m.logger.Info("DWCP manager stopped successfully with all phases")
 
 	return nil
@@ -457,17 +466,11 @@ func (m *Manager) UpdateConfig(newConfig *Config) error {
 // metricsCollectionLoop periodically updates DWCP metrics
 func (m *Manager) metricsCollectionLoop() {
 	defer m.wg.Done()
+	// Stop() releases m.mu before wg.Wait()ing this loop, so collectMetrics'
+	// m.mu.RLock can never deadlock a shutdown. First aggregate collection is
+	// at the first tick; tests poll with assert.Eventually.
 
-	// NOTE: no immediate collectMetrics here. Stop() holds m.mu while
-	// wg.Wait()ing this loop, and collectMetrics acquires m.mu.RLock — an
-	// immediate collect at loop entry would deadlock Stop against the very
-	// first tick (observed as a 10-minute test timeout). The pre-existing
-	// lock-order contract (m.mu before metricsMutex) cannot express "collect
-	// before the first tick" without restructuring Stop; out of scope for
-	// novacron-349. First aggregate collection happens at the first 5 s tick;
-	// tests poll with assert.Eventually.
-
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(m.metricsInterval)
 	defer ticker.Stop()
 
 	for {
@@ -669,7 +672,7 @@ func (m *Manager) checkComponentHealth() error {
 	// Step 1: Collect health check results while holding read lock
 	m.mu.RLock()
 
-	if !m.enabled || !m.started {
+	if !m.enabled || !m.started || m.stopping {
 		m.mu.RUnlock()
 		return nil
 	}

@@ -1154,3 +1154,39 @@ func TestManager_CompressionMetricsCollected(t *testing.T) {
 	}, 10*time.Second, 50*time.Millisecond,
 		"aggregate compression metrics must reflect the HDE engine's observed bytes")
 }
+
+// TestManager_StopDoesNotDeadlockAgainstManagementTicks: Stop used to hold
+// m.mu across wg.Wait while the metrics/health loops take m.mu.RLock; with a
+// 1 ms tick the pre-fix Stop hangs in well under 50 Start/Stop cycles.
+func TestManager_StopDoesNotDeadlockAgainstManagementTicks(t *testing.T) {
+	for i := range 50 {
+		config := dwcp.DefaultConfig()
+		config.Enabled = true
+		config.Compression.Enabled = true
+
+		logger := zaptest.NewLogger(t)
+
+		// Transport init dials RemoteAddr, so the manager needs a live listener
+		// (same requirement as TestManager_CompressionLayerWiredWhenEnabled).
+		listener, port := startTestServer(t, 32)
+		t.Cleanup(func() { listener.Close() })
+		config.Transport.RemoteAddr = fmt.Sprintf("localhost:%d", port)
+
+		m, err := dwcp.NewManager(config, logger)
+		require.NoError(t, err)
+		require.NotNil(t, m)
+
+		dwcp.SetMetricsIntervalForTest(m, time.Millisecond)
+		require.NoError(t, m.StartWithContext(context.Background()))
+		time.Sleep(1 * time.Millisecond)
+		done := make(chan error, 1)
+		go func() { done <- m.Stop() }()
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(10 * time.Second):
+			t.Fatalf("iteration %d: Stop() deadlocked against a management-loop tick (m.mu held across wg.Wait)", i)
+		}
+		require.False(t, m.IsRunning())
+	}
+}
