@@ -101,6 +101,27 @@ func (m *Manager) StartWithContext(ctx context.Context) error {
 		m.logger.Info("DWCP is disabled, skipping initialization")
 		return nil
 	}
+	// Fail fast (novacron-349): prediction, sync, and consensus have no
+	// implementation wired into the manager. Enabling any of them previously
+	// logged a "deferred" TODO at Phase 2 and silently continued without the
+	// component; that lie is now a deterministic startup error. Fixed slice
+	// order guarantees a deterministic error name when several are enabled.
+	for _, c := range []struct {
+		name    string
+		enabled bool
+	}{
+		{"prediction", m.config.Prediction.Enabled},
+		{"sync", m.config.Sync.Enabled},
+		{"consensus", m.config.Consensus.Enabled},
+	} {
+		if c.enabled {
+			return &DWCPError{
+				Code: ErrCodeComponentNotWired,
+				Message: fmt.Sprintf(
+					"dwcp: %s enabled but no implementation is wired (see novacron-349)", c.name),
+			}
+		}
+	}
 
 	m.logger.Info("Starting DWCP manager with lifecycle coordination",
 		zap.String("version", DWCPVersion),
@@ -160,9 +181,18 @@ func (m *Manager) startPhase0Components(ctx context.Context) error {
 		}
 		m.logger.Info("Transport layer started successfully")
 	}
-
 	// 2. Compression Layer (HDE) - Data compression for transport
-	if m.config.Compression.Enabled && m.compression != nil {
+	// Construct the HDE-backed layer when enabled (novacron-349): the field
+	// used to stay nil forever, silently disabling the enabled-by-default
+	// compression configuration.
+	if m.config.Compression.Enabled && m.compression == nil {
+		layer, err := newHDECompressionLayer(m.config.Compression)
+		if err != nil {
+			return fmt.Errorf("failed to construct compression layer: %w", err)
+		}
+		m.compression = layer
+	}
+	if m.compression != nil {
 		if err := m.compression.Start(ctx); err != nil {
 			return fmt.Errorf("failed to start compression layer: %w", err)
 		}
@@ -199,18 +229,11 @@ func (m *Manager) startPhase1Components(ctx context.Context) error {
 func (m *Manager) startPhase2Components(ctx context.Context) error {
 	m.logger.Info("Starting Phase 2: Coordination Layer")
 
-	// 5. Sync Layer (ASS) - State synchronization
-	if m.config.Sync.Enabled {
-		// TODO: Start sync layer when CRDT/Raft implementation is complete
-		m.logger.Info("Sync layer initialization deferred to Phase 3 state sync implementation")
-	}
-
-	// 6. Consensus Layer (ACP) - Distributed consensus
-	if m.config.Consensus.Enabled {
-		// TODO: Start consensus layer when ProBFT/Bullshark implementation is complete
-		m.logger.Info("Consensus layer initialization deferred to Phase 3 consensus implementation")
-	}
-
+	// 5/6. Sync (ASS) and Consensus (ACP) layers: unreachable in practice —
+	// StartWithContext fails fast above when either is enabled (novacron-349),
+	// so no TODO branches remain here. Their nil-safe stop paths live in
+	// stopPhase2Components.
+	_ = ctx
 	return nil
 }
 
@@ -351,6 +374,10 @@ func (m *Manager) stopPhase0Components() {
 		} else {
 			m.logger.Info("Compression layer stopped successfully")
 		}
+		// Drop the stopped layer so the next startPhase0Components call
+		// constructs a fresh one (the adapter rebuilds its HDE engine per
+		// Start; novacron-349).
+		m.compression = nil
 	}
 
 	// 1. Transport Layer (AMST)
@@ -431,6 +458,15 @@ func (m *Manager) UpdateConfig(newConfig *Config) error {
 func (m *Manager) metricsCollectionLoop() {
 	defer m.wg.Done()
 
+	// NOTE: no immediate collectMetrics here. Stop() holds m.mu while
+	// wg.Wait()ing this loop, and collectMetrics acquires m.mu.RLock — an
+	// immediate collect at loop entry would deadlock Stop against the very
+	// first tick (observed as a 10-minute test timeout). The pre-existing
+	// lock-order contract (m.mu before metricsMutex) cannot express "collect
+	// before the first tick" without restructuring Stop; out of scope for
+	// novacron-349. First aggregate collection happens at the first 5 s tick;
+	// tests poll with assert.Eventually.
+
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -453,6 +489,7 @@ func (m *Manager) collectMetrics() {
 	// Step 2: Copy state values to local variables to minimize critical section
 	// This allows us to release m.mu before acquiring metricsMutex
 	enabled := m.enabled
+	compression := m.compression
 
 	// Release state lock early to reduce contention
 	m.mu.RUnlock()
@@ -466,15 +503,18 @@ func (m *Manager) collectMetrics() {
 	m.metrics.Enabled = enabled
 	m.metrics.Version = DWCPVersion
 
+	// Collect compression metrics (novacron-349): the HDE layer is now wired,
+	// so its counters land in the manager's aggregate metrics.
+	if compression != nil {
+		if cm := compression.GetMetrics(); cm != nil {
+			m.metrics.Compression = *cm
+		}
+	}
+
 	// TODO: Collect transport metrics (Phase 0-1)
 	// Safe to use local 'transport' variable here
 	// if transport != nil {
 	//     m.metrics.Transport = transport.GetMetrics()
-	// }
-
-	// TODO: Collect compression metrics (Phase 0-1)
-	// if m.compression != nil {
-	//     m.metrics.Compression = m.compression.GetMetrics()
 	// }
 
 	// TODO: Determine network tier (Phase 1)
@@ -528,6 +568,14 @@ func (m *Manager) GetTransport() transport.Transport {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.transport
+}
+
+// GetCompression returns the compression layer for introspection and tests.
+// Nil until a start constructs it (and nil again after Stop); novacron-349.
+func (m *Manager) GetCompression() CompressionLayer {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.compression
 }
 
 // detectNetworkTier determines the current network tier based on metrics

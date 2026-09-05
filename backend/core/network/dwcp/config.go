@@ -540,10 +540,10 @@ func (c *Config) validatePrediction() error {
 	if pred.HistoryWindow != 0 && pred.HistoryWindow > 24*time.Hour {
 		return &DWCPError{Code: ErrCodeInvalidConfig, Message: "prediction.history_window must be <= 24h"}
 	}
-// Validate confidence level (always validate structure)
-if pred.ConfidenceLevel <= 0.0 || pred.ConfidenceLevel >= 1.0 {
-	return &DWCPError{Code: ErrCodeInvalidConfig, Message: "prediction.confidence_level must be between 0.0 and 1.0"}
-}
+	// Validate confidence level (always validate structure)
+	if pred.ConfidenceLevel <= 0.0 || pred.ConfidenceLevel >= 1.0 {
+		return &DWCPError{Code: ErrCodeInvalidConfig, Message: "prediction.confidence_level must be between 0.0 and 1.0"}
+	}
 
 	return nil
 }

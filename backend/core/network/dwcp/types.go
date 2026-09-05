@@ -97,4 +97,7 @@ const (
 	ErrCodeInvalidConfig       = "INVALID_CONFIG"
 	ErrCodeNetworkTimeout      = "NETWORK_TIMEOUT"
 	ErrCodeCircuitOpen         = "CIRCUIT_OPEN"
+	// ErrCodeComponentNotWired: a component is enabled in configuration but
+	// has no implementation wired into the Manager (novacron-349).
+	ErrCodeComponentNotWired = "COMPONENT_NOT_WIRED"
 )

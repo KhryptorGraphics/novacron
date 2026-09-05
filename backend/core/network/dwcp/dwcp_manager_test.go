@@ -1,6 +1,7 @@
 package dwcp_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 )
+
 // setupTestManager creates a test manager with default configuration
 func setupTestManager(t *testing.T) *dwcp.Manager {
 	config := dwcp.DefaultConfig()
@@ -51,6 +53,7 @@ func setupDisabledManager(t *testing.T) *dwcp.Manager {
 
 	return manager
 }
+
 // startTestServer starts a test TCP server for transport testing
 func startTestServer(t *testing.T, maxConnections int) (net.Listener, int) {
 	listener, err := net.Listen("tcp", "localhost:0")
@@ -224,9 +227,9 @@ func TestValidateDisabledConfig(t *testing.T) {
 // TestComponentLifecycle tests the initialization and shutdown lifecycle
 func TestComponentLifecycle(t *testing.T) {
 	tests := []struct {
-		name      string
-		enabled   bool
-		testFunc  func(t *testing.T, m *dwcp.Manager)
+		name     string
+		enabled  bool
+		testFunc func(t *testing.T, m *dwcp.Manager)
 	}{
 		{
 			name:    "enabled manager lifecycle",
@@ -1008,4 +1011,146 @@ func TestRaceDetectorStress(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+// TestManager_CompressionLayerWiredWhenEnabled verifies that an enabled
+// compression configuration actually constructs and starts the HDE-backed
+// CompressionLayer (novacron-349). Pre-fix, the field stayed nil forever and
+// DefaultConfig()'s Compression.Enabled == true silently did nothing.
+func TestManager_CompressionLayerWiredWhenEnabled(t *testing.T) {
+	config := dwcp.DefaultConfig()
+	config.Enabled = true
+	config.Compression.Enabled = true
+
+	logger := zaptest.NewLogger(t)
+
+	// Transport init dials RemoteAddr, so the manager needs a live listener
+	// (same requirement as TestComponentLifecycle).
+	listener, port := startTestServer(t, 32)
+	t.Cleanup(func() { listener.Close() })
+	config.Transport.RemoteAddr = fmt.Sprintf("localhost:%d", port)
+
+	manager, err := dwcp.NewManager(config, logger)
+	require.NoError(t, err)
+	require.NotNil(t, manager)
+
+	err = manager.StartWithContext(context.Background())
+	require.NoError(t, err)
+
+	layer := manager.GetCompression()
+	require.NotNil(t, layer, "compression layer must be constructed when Compression.Enabled")
+	require.True(t, layer.IsRunning(), "compression layer must be running after manager start")
+	require.True(t, layer.IsHealthy(), "compression layer must be healthy after manager start")
+
+	// Encode a highly compressible payload; HDE must actually shrink it.
+	payload := bytes.Repeat([]byte("abc"), 4096)
+	encoded, err := layer.Encode("test-vm-memory", payload, int(dwcp.CompressionLevelBalanced))
+	require.NoError(t, err)
+	require.NotNil(t, encoded)
+	assert.Equal(t, len(payload), encoded.OriginalSize)
+	assert.Less(t, encoded.CompressedSize, encoded.OriginalSize,
+		"compression must reduce a highly compressible payload")
+	assert.Equal(t, int(dwcp.CompressionLevelBalanced), encoded.Tier)
+	assert.False(t, encoded.Timestamp.IsZero())
+
+	// Round-trip: Decode must reproduce the input byte-identically.
+	decoded, err := layer.Decode("test-vm-memory", encoded)
+	require.NoError(t, err)
+	assert.True(t, bytes.Equal(payload, decoded), "decode must round-trip byte-identically")
+
+	// Aggregate metrics must now carry real compression counters.
+	err = manager.Stop()
+	require.NoError(t, err)
+	assert.Nil(t, manager.GetCompression(), "compression layer must be released after stop")
+}
+
+// TestManager_FailsFastWhenPredictionEnabledUnwired verifies the fail-fast
+// behavior for components with no wired implementation (novacron-349):
+// enabling prediction must abort startup with COMPONENT_NOT_WIRED instead of
+// logging a deferred TODO and continuing without the component.
+func TestManager_FailsFastWhenPredictionEnabledUnwired(t *testing.T) {
+	config := dwcp.DefaultConfig()
+	config.Enabled = true
+	config.Prediction.Enabled = true
+
+	// No test server needed: the fail-fast check runs before Phase 0, so the
+	// transport is never initialized. This also proves ordering.
+	logger := zaptest.NewLogger(t)
+	manager, err := dwcp.NewManager(config, logger)
+	require.NoError(t, err)
+
+	startErr := manager.StartWithContext(context.Background())
+	require.Error(t, startErr, "startup must fail when prediction is enabled with no wired implementation")
+
+	var dwcpErr *dwcp.DWCPError
+	require.ErrorAs(t, startErr, &dwcpErr)
+	assert.Equal(t, dwcp.ErrCodeComponentNotWired, dwcpErr.Code)
+	assert.Contains(t, dwcpErr.Message, "prediction")
+
+	// Startup aborted before any component (or the manager itself) started.
+	assert.False(t, manager.IsRunning())
+	assert.False(t, manager.IsStarted())
+
+	// Sync and consensus must fail fast the same way, in deterministic order.
+	for _, c := range []struct {
+		name   string
+		enable func(*dwcp.Config)
+	}{
+		{"sync", func(c *dwcp.Config) { c.Sync.Enabled = true }},
+		{"consensus", func(c *dwcp.Config) { c.Consensus.Enabled = true }},
+	} {
+		cfg := dwcp.DefaultConfig()
+		cfg.Enabled = true
+		c.enable(cfg)
+		m, err := dwcp.NewManager(cfg, zaptest.NewLogger(t))
+		require.NoError(t, err)
+		startErr := m.StartWithContext(context.Background())
+		require.Error(t, startErr, "startup must fail when %s is enabled with no wired implementation", c.name)
+		var e *dwcp.DWCPError
+		require.ErrorAs(t, startErr, &e)
+		assert.Equal(t, dwcp.ErrCodeComponentNotWired, e.Code)
+		assert.Contains(t, e.Message, c.name)
+		assert.False(t, m.IsRunning())
+	}
+}
+
+// TestManager_CompressionMetricsCollected verifies collectMetrics now lands
+// real HDE counters in the manager's aggregate metrics (novacron-349).
+func TestManager_CompressionMetricsCollected(t *testing.T) {
+	config := dwcp.DefaultConfig()
+	config.Enabled = true
+	config.Compression.Enabled = true
+
+	logger := zaptest.NewLogger(t)
+	listener, port := startTestServer(t, 32)
+	t.Cleanup(func() { listener.Close() })
+	config.Transport.RemoteAddr = fmt.Sprintf("localhost:%d", port)
+
+	manager, err := dwcp.NewManager(config, logger)
+	require.NoError(t, err)
+
+	err = manager.StartWithContext(context.Background())
+	require.NoError(t, err)
+	defer func() { require.NoError(t, manager.Stop()) }()
+
+	layer := manager.GetCompression()
+	require.NotNil(t, layer)
+	// Compress some data so the HDE engine has nonzero counters, then wait
+	// for the manager's collection loop to pick them up (it now collects
+	// once immediately on start; novacron-349).
+	payload := bytes.Repeat([]byte("xyz"), 2048)
+	_, err = layer.Encode("metrics-vm", payload, int(dwcp.CompressionLevelBalanced))
+	require.NoError(t, err)
+
+	// collectMetrics must land the HDE engine's counters in the manager's
+	// aggregate metrics (previously a commented-out TODO; novacron-349).
+	assert.Eventually(t, func() bool {
+		metrics := manager.GetMetrics()
+		return metrics != nil &&
+			metrics.Compression.BytesIn > 0 &&
+			metrics.Compression.BytesOut > 0 &&
+			metrics.Compression.CompressionRatio > 1.0 &&
+			metrics.Compression.Level == dwcp.CompressionLevelBalanced
+	}, 10*time.Second, 50*time.Millisecond,
+		"aggregate compression metrics must reflect the HDE engine's observed bytes")
 }
