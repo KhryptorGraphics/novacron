@@ -63,7 +63,7 @@ export default function ForgotPasswordPage() {
                 <Icons.check className="h-8 w-8 text-green-600" />
               </div>
               <p className="mt-4 text-sm text-muted-foreground">
-                We've sent password reset instructions to <strong>{email}</strong>
+                We&apos;ve sent password reset instructions to <strong>{email}</strong>
               </p>
               <Button 
                 className="w-full mt-6" 

@@ -143,9 +143,14 @@ func TestRBACMigrationSeedsDefaultRoles(t *testing.T) {
 		t.Fatalf("expected 11 default permissions after fresh migrate, got %d: %#v", len(permissions), permissions)
 	}
 
-	// Down migration must cleanly remove the RBAC tables.
-	if err := m.Steps(-1); err != nil {
-		t.Fatalf("migrate down: %v", err)
+	// Down migration must cleanly remove the RBAC tables. The traversal is
+	// version-relative, not "one step": migration 000005_auth_tokens (added
+	// 2026-09-04, novacron-8ba) tops the chain, so a single Steps(-1) removes
+	// auth_tokens and leaves roles in place. Step down to version 3 (the
+	// state below 000004_add_rbac_roles) regardless of how many migrations
+	// later sit above it; the ListRoles assertion below is unchanged.
+	if err := m.Migrate(3); err != nil {
+		t.Fatalf("migrate down to version 3: %v", err)
 	}
 	if _, err := store.ListRoles(ctx); err == nil {
 		t.Fatal("expected ListRoles to fail after the rbac migration was rolled back (roles table should be gone)")

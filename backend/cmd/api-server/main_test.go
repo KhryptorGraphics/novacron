@@ -134,7 +134,7 @@ func TestRegisterPublicRoutesSupportsCanonicalEmailLogin(t *testing.T) {
 
 	authManager := auth.NewSimpleAuthManager("test-secret", db)
 	router := mux.NewRouter()
-	registerPublicRoutes(router, authManager, db, nil)
+	registerPublicRoutes(router, authManager, db, nil, nil)
 
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte("correct-horse-battery-staple"), bcrypt.DefaultCost)
 	if err != nil {
@@ -209,9 +209,9 @@ func TestRegisterSecureAPIRoutesListsVMsOnCanonicalRoute(t *testing.T) {
 	registerSecureAPIRoutes(apiV1, db, nil, t.TempDir())
 
 	now := time.Now().UTC()
-	mock.ExpectQuery(`SELECT id, name, state, node_id, organization_id, created_at, updated_at FROM vms ORDER BY created_at DESC`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "state", "node_id", "organization_id", "created_at", "updated_at"}).
-			AddRow("vm-1", "alpha", "running", "node-a", nil, now, now))
+	mock.ExpectQuery(`SELECT id, name, state, node_id, organization_id, cpu_cores, memory_mb, disk_gb, created_at, updated_at FROM vms ORDER BY created_at DESC`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "state", "node_id", "organization_id", "cpu_cores", "memory_mb", "disk_gb", "created_at", "updated_at"}).
+			AddRow("vm-1", "alpha", "running", "node-a", nil, 2, 512, 10, now, now))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/vms", nil)
 	req.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
@@ -259,13 +259,12 @@ func TestRegisterSecureAPIRoutesCreatesVMOnCompatibilityRoute(t *testing.T) {
 	// this node's selfNodeID() (VM belongs to the creating node) — AnyArg since
 	// it depends on NOVACRON_NODE_ID, matching canonical_routes_test.go.
 	registerSecureAPIRoutes(apiCompat, db, nil, t.TempDir())
-
 	mock.ExpectExec(`INSERT INTO vms`).
 		WithArgs(
 			sqlmock.AnyArg(), // uuid id
 			"builder",
 			"stopped",
-			1000,             // cpu_cores: request's cpu_shares (scheduling weight)
+			1,                // cpu_cores: REAL vCPU count; request without vcpus persists 1
 			2048,             // memory_mb
 			0,                // disk_gb (0 = driver default)
 			sqlmock.AnyArg(), // os_type (image)

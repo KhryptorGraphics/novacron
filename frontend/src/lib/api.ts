@@ -6,6 +6,7 @@ export interface VMInfo {
   id: string;
   name: string;
   state: string;
+  vcpus?: number;
   cpu_shares: number;
   memory_mb: number;
   cpu_usage?: number;
@@ -24,6 +25,7 @@ export interface HealthStatus {
 
 export interface CreateVMRequest {
   name: string;
+  vcpus?: number;
   cpu_shares: number;
   memory_mb: number;
   root_fs?: string;

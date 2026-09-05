@@ -25,7 +25,7 @@ export default function AuthGuard({
     if (isLoading) return;
 
     // Public routes that don't require authentication
-    const publicRoutes = ['/auth/login', '/auth/register', '/auth/forgot-password', '/auth/reset-password'];
+    const publicRoutes = ['/auth/login', '/auth/register', '/auth/forgot-password', '/auth/reset-password', '/auth/verify-email'];
     const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route));
 
     if (requireAuth && !isAuthenticated && !requires2FA && !isPublicRoute) {

@@ -64,7 +64,10 @@ func (m *SimpleAuthManager) CreateUser(username, email, password, role, tenantID
 		return nil, fmt.Errorf("failed to hash password: %w", err)
 	}
 
-	role = canonicalUserRole(role)
+	role, ok := canonicalUserRole(role)
+	if !ok {
+		return nil, fmt.Errorf("invalid role: %s (valid: admin, operator, viewer; aliases: super-admin, user, readonly)", role)
+	}
 
 	// Insert user into database
 	var userID string
@@ -98,16 +101,18 @@ func (m *SimpleAuthManager) CreateUser(username, email, password, role, tenantID
 }
 
 // canonicalUserRole maps incoming role labels onto the canonical user_role
-// enum values ('admin','operator','viewer'); anything unrecognized defaults
-// to the column's 'viewer' default.
-func canonicalUserRole(role string) string {
+// enum values ('admin','operator','viewer'); anything unrecognized is rejected
+// (ok=false) instead of silently collapsing to 'viewer'.
+func canonicalUserRole(role string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "admin", "super-admin":
-		return "admin"
+		return "admin", true
 	case "operator":
-		return "operator"
-	default: // viewer, user, readonly, "", unknown
-		return "viewer"
+		return "operator", true
+	case "viewer", "user", "readonly":
+		return "viewer", true
+	default:
+		return "", false
 	}
 }
 
@@ -168,7 +173,6 @@ func (m *SimpleAuthManager) scanUser(row *sql.Row) (*User, error) {
 
 	return &user, nil
 }
-
 
 // generateJWTToken generates a JWT token for a user
 func (m *SimpleAuthManager) generateJWTToken(user *User) (string, error) {

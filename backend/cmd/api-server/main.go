@@ -4,10 +4,14 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -21,11 +25,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
-	_ "github.com/lib/pq"
 	"github.com/sirupsen/logrus"
 
 	"github.com/google/uuid"
-	authapi "github.com/khryptorgraphics/novacron/backend/api/auth"
 	graphqlapi "github.com/khryptorgraphics/novacron/backend/api/graphql"
 	securityapi "github.com/khryptorgraphics/novacron/backend/api/security"
 	websocketapi "github.com/khryptorgraphics/novacron/backend/api/websocket"
@@ -128,9 +130,26 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	// /api subrouters and run inside these.
 	router.Use(recoverMiddleware, maxBodyBytesMiddleware(maxBodyBytes()))
 
+	// Email delivery is optional: cfg.Email.SMTPHost == "" disables it and the
+	// auth token routes fail closed with 503 before touching the database.
+	var emailService *auth.EmailService
+	if cfg.Email.SMTPHost != "" {
+		emailService = auth.NewEmailService(auth.EmailConfig{
+			SMTPHost:    cfg.Email.SMTPHost,
+			SMTPPort:    cfg.Email.SMTPPort,
+			Username:    cfg.Email.SMTPUsername,
+			Password:    cfg.Email.SMTPPassword,
+			FromAddress: cfg.Email.SMTPFromAddress,
+			FromName:    cfg.Email.SMTPFromName,
+			UseTLS:      cfg.Email.SMTPUseTLS,
+			UseSSL:      cfg.Email.SMTPUseSSL,
+			FrontendURL: cfg.Email.FrontendURL,
+		})
+	}
+
 	corsHandler := buildCORSHandler(cfg)
 
-	registerPublicRoutes(router, authManager, db, services.twoFactorService)
+	registerPublicRoutes(router, authManager, db, services.twoFactorService, emailService)
 
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	apiRouter.Use(requireAuth(authManager))
@@ -308,9 +327,9 @@ func requireRoleHandler(requiredRole string, next http.HandlerFunc) http.Handler
 	return requireAnyRole(requiredRole)(next)
 }
 
-func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManager, db *sql.DB, twoFactorService *auth.TwoFactorService) {
-	passwordResetHandler := authapi.NewHandler(nil)
-
+func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManager, db *sql.DB, twoFactorService *auth.TwoFactorService, emailService *auth.EmailService) {
+	// emailService carries optional SMTP delivery for the auth token routes;
+	// nil means email is unconfigured and those routes fail closed with 503.
 	loginHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var loginReq struct {
 			Username string `json:"username"`
@@ -422,6 +441,15 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 		}
 
 		writeJSON(w, http.StatusCreated, resp)
+
+		if emailService != nil && email != "" {
+			// Best-effort verification email: never fail the registration over it.
+			if rawToken, err := insertAuthToken(db, user.ID, "email_verification", 24*time.Hour); err != nil {
+				log.Printf("registration: verification token for %s not created: %v", email, err)
+			} else if err := emailService.SendAccountVerification(email, user.Username, rawToken, 24); err != nil {
+				log.Printf("registration: verification email to %s failed: %v", email, err)
+			}
+		}
 	})
 
 	checkEmailHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -449,10 +477,207 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 	}
 	router.Handle("/api/auth/check-email", checkEmailHandler).Methods(http.MethodGet)
 
-	router.Handle("/api/auth/verify-email", notImplementedJSON("email verification is not wired in the canonical server yet"))
-	router.Handle("/api/auth/forgot-password", http.HandlerFunc(passwordResetHandler.ForgotPassword)).Methods(http.MethodPost)
-	router.Handle("/api/auth/reset-password", http.HandlerFunc(passwordResetHandler.ResetPassword)).Methods(http.MethodPost)
-	router.Handle("/api/auth/resend-verification", notImplementedJSON("email verification is not wired in the canonical server yet"))
+	forgotPasswordHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Email string `json:"email"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		email := strings.TrimSpace(req.Email)
+		if email == "" {
+			writeJSONError(w, http.StatusBadRequest, "email is required")
+			return
+		}
+
+		if emailService == nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "email delivery is not configured (set SMTP_HOST)")
+			return
+		}
+
+		var userID, username string
+		err := db.QueryRow(`SELECT id, username FROM users WHERE email = $1`, email).Scan(&userID, &username)
+		if err == nil && userID != "" {
+			// One live reset token per user: invalidate any outstanding one first.
+			if rawToken, terr := insertAuthToken(db, userID, "password_reset", 60*time.Minute); terr != nil {
+				log.Printf("forgot-password: reset token for %s not created: %v", email, terr)
+			} else if serr := emailService.SendPasswordReset(email, username, rawToken, 60); serr != nil {
+				// Still 200: the response must not leak whether the account exists.
+				log.Printf("forgot-password: reset email to %s failed: %v", email, serr)
+			}
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{
+			"message": "If an account exists for that email, a reset link has been sent",
+		})
+	})
+
+	resetPasswordHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Token    string `json:"token"`
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		token := strings.TrimSpace(req.Token)
+		password := strings.TrimSpace(req.Password)
+		if token == "" {
+			writeJSONError(w, http.StatusBadRequest, "token is required")
+			return
+		}
+		if err := validateCanonicalPassword(password); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		tokenHash := authTokenSHA256Hex(token)
+		var userID string
+		err := db.QueryRow(`
+			SELECT user_id FROM auth_tokens
+			WHERE token_hash = $1 AND purpose = 'password_reset' AND used_at IS NULL AND expires_at > NOW()
+		`, tokenHash).Scan(&userID)
+		if err != nil {
+			if err != sql.ErrNoRows {
+				writeJSONError(w, http.StatusInternalServerError, "failed to look up reset token")
+				return
+			}
+			writeJSONError(w, http.StatusBadRequest, "invalid or expired token")
+			return
+		}
+
+		passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to hash password")
+			return
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to begin password reset transaction")
+			return
+		}
+		defer tx.Rollback()
+
+		if _, err := tx.Exec(`UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`, string(passwordHash), userID); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to update password")
+			return
+		}
+		if _, err := tx.Exec(`UPDATE auth_tokens SET used_at = NOW() WHERE token_hash = $1 AND purpose = 'password_reset'`, tokenHash); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to mark token used")
+			return
+		}
+		if _, err := tx.Exec(`DELETE FROM sessions WHERE user_id = $1`, userID); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to revoke sessions")
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to commit password reset")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{"message": "Password reset successfully"})
+	})
+
+	verifyEmailHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		token := strings.TrimSpace(req.Token)
+		if token == "" {
+			writeJSONError(w, http.StatusBadRequest, "token is required")
+			return
+		}
+
+		tokenHash := authTokenSHA256Hex(token)
+		var userID string
+		err := db.QueryRow(`
+			SELECT user_id FROM auth_tokens
+			WHERE token_hash = $1 AND purpose = 'email_verification' AND used_at IS NULL AND expires_at > NOW()
+		`, tokenHash).Scan(&userID)
+		if err != nil {
+			if err != sql.ErrNoRows {
+				writeJSONError(w, http.StatusInternalServerError, "failed to look up verification token")
+				return
+			}
+			writeJSONError(w, http.StatusBadRequest, "invalid or expired token")
+			return
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to begin email verification transaction")
+			return
+		}
+		defer tx.Rollback()
+
+		if _, err := tx.Exec(`
+			UPDATE users
+			SET email_verified = TRUE,
+			    status = CASE WHEN status = 'pending' THEN 'active'::user_status ELSE status END,
+			    updated_at = NOW()
+			WHERE id = $1
+		`, userID); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to verify email")
+			return
+		}
+		if _, err := tx.Exec(`UPDATE auth_tokens SET used_at = NOW() WHERE token_hash = $1 AND purpose = 'email_verification'`, tokenHash); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to mark token used")
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to commit email verification")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+	})
+
+	resendVerificationHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Email string `json:"email"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		email := strings.TrimSpace(req.Email)
+		if email == "" {
+			writeJSONError(w, http.StatusBadRequest, "email is required")
+			return
+		}
+
+		if emailService == nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "email delivery is not configured (set SMTP_HOST)")
+			return
+		}
+
+		var userID, username string
+		var emailVerified bool
+		err := db.QueryRow(`SELECT id, username, email_verified FROM users WHERE email = $1`, email).Scan(&userID, &username, &emailVerified)
+		if err == nil && userID != "" && !emailVerified {
+			if rawToken, terr := insertAuthToken(db, userID, "email_verification", 24*time.Hour); terr != nil {
+				log.Printf("resend-verification: token for %s not created: %v", email, terr)
+			} else if serr := emailService.SendAccountVerification(email, username, rawToken, 24); serr != nil {
+				log.Printf("resend-verification: email to %s failed: %v", email, serr)
+			}
+		}
+
+		writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+	})
+
+	router.Handle("/api/auth/forgot-password", forgotPasswordHandler).Methods(http.MethodPost)
+	router.Handle("/api/auth/reset-password", resetPasswordHandler).Methods(http.MethodPost)
+	router.Handle("/api/auth/verify-email", verifyEmailHandler).Methods(http.MethodPost)
+	router.Handle("/api/auth/resend-verification", resendVerificationHandler).Methods(http.MethodPost)
 
 	router.HandleFunc("/api/auth/2fa/verify-login", func(w http.ResponseWriter, r *http.Request) {
 		if twoFactorService == nil {
@@ -525,7 +750,7 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 
 func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager, storagePath string) {
 	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
-		rows, err := db.Query(`SELECT id, name, state, node_id, organization_id, created_at, updated_at FROM vms ORDER BY created_at DESC`)
+		rows, err := db.Query(`SELECT id, name, state, node_id, organization_id, cpu_cores, memory_mb, disk_gb, created_at, updated_at FROM vms ORDER BY created_at DESC`)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to query VMs")
 			return
@@ -537,9 +762,10 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 			var id, name, state string
 			var orgID sql.NullString
 			var nodeID sql.NullString
+			var cpuCores, memoryMB, diskGB int
 			var createdAt, updatedAt time.Time
 
-			if err := rows.Scan(&id, &name, &state, &nodeID, &orgID, &createdAt, &updatedAt); err != nil {
+			if err := rows.Scan(&id, &name, &state, &nodeID, &orgID, &cpuCores, &memoryMB, &diskGB, &createdAt, &updatedAt); err != nil {
 				continue
 			}
 
@@ -551,6 +777,9 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 				"name":            name,
 				"state":           state,
 				"status":          state,
+				"vcpus":           cpuCores,
+				"memory_mb":       memoryMB,
+				"disk_gb":         diskGB,
 				"node_id":         nullableString(nodeID),
 				"organization_id": nullableString(orgID),
 				"created_at":      createdAt.Format(time.RFC3339),
@@ -572,11 +801,12 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 		var id, name, state string
 		var orgID sql.NullString
 		var nodeID sql.NullString
+		var cpuCores, memoryMB, diskGB int
 		var createdAt, updatedAt time.Time
 		err := db.QueryRow(`
-			SELECT id, name, state, node_id, organization_id, created_at, updated_at
+			SELECT id, name, state, node_id, organization_id, cpu_cores, memory_mb, disk_gb, created_at, updated_at
 			FROM vms WHERE id = $1
-		`, vmID).Scan(&id, &name, &state, &nodeID, &orgID, &createdAt, &updatedAt)
+		`, vmID).Scan(&id, &name, &state, &nodeID, &orgID, &cpuCores, &memoryMB, &diskGB, &createdAt, &updatedAt)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				writeJSONError(w, http.StatusNotFound, "vm not found")
@@ -593,6 +823,9 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 			"name":            name,
 			"state":           state,
 			"status":          state,
+			"vcpus":           cpuCores,
+			"memory_mb":       memoryMB,
+			"disk_gb":         diskGB,
 			"node_id":         nullableString(nodeID),
 			"organization_id": nullableString(orgID),
 			"created_at":      createdAt.Format(time.RFC3339),
@@ -1172,6 +1405,7 @@ func registerMigratedDest(db *sql.DB, manager *core_vm.VMManager, vmID string, c
 
 	configPayload, _ := json.Marshal(map[string]interface{}{
 		"cpu_shares":   cfg.CPUShares,
+		"vcpus":        vcpusOrDefault(cfg.VCPUs),
 		"memory_mb":    cfg.MemoryMB,
 		"disk_size_gb": cfg.DiskSizeGB,
 		"image":        cfg.Image,
@@ -1179,7 +1413,7 @@ func registerMigratedDest(db *sql.DB, manager *core_vm.VMManager, vmID string, c
 	if _, err := db.Exec(`
 		INSERT INTO vms (id, name, state, node_id, cpu_cores, memory_mb, disk_gb, os_type, owner_id, metadata, created_at, updated_at)
 		VALUES ($1, $2, 'running', $3, $4, $5, $6, $7, NULLIF($8, '')::uuid, $9, NOW(), NOW())
-	`, vmID, cfg.Name, nullableStringValue(nodeID), defaultCPUShares(cfg.CPUShares), cfg.MemoryMB, cfg.DiskSizeGB, nullableStringValue(cfg.Image), parseOwnerID(cfg.OwnerID), configPayload); err != nil {
+	`, vmID, cfg.Name, nullableStringValue(nodeID), vcpusOrDefault(cfg.VCPUs), cfg.MemoryMB, cfg.DiskSizeGB, nullableStringValue(cfg.Image), parseOwnerID(cfg.OwnerID), configPayload); err != nil {
 		logger.Warn("migrated-VM DB register failed", "vm", vmID, "error", err)
 		return
 	}
@@ -1221,15 +1455,6 @@ func parseOwnerID(s string) interface{} {
 		return nil
 	}
 	return strings.TrimSpace(s)
-}
-
-// defaultCPUShares fills the canonical vms.cpu_cores NOT NULL column with the
-// same 1024 default NewVM applies on the manager path.
-func defaultCPUShares(cpu int) int {
-	if cpu <= 0 {
-		return 1024
-	}
-	return cpu
 }
 
 // registerVMMigrateRoute wires POST /vms/{id}/migrate to the real manager's
@@ -1502,10 +1727,14 @@ func listCanonicalAdminUsers(db *sql.DB) http.HandlerFunc {
 		}
 
 		search := strings.TrimSpace(r.URL.Query().Get("search"))
-		role := canonicalUserRoleForAdmin(r.URL.Query().Get("role"))
-		if rawRole := strings.TrimSpace(r.URL.Query().Get("role")); rawRole != "" && !isCanonicalAdminRoleRaw(rawRole) {
-			writeJSONError(w, http.StatusBadRequest, "invalid role filter")
-			return
+		filterRole := ""
+		if rawRole := strings.TrimSpace(r.URL.Query().Get("role")); rawRole != "" {
+			role, ok := canonicalUserRoleForAdmin(rawRole)
+			if !ok {
+				writeJSONError(w, http.StatusBadRequest, "invalid role filter")
+				return
+			}
+			filterRole = role
 		}
 
 		offset := (page - 1) * pageSize
@@ -1516,9 +1745,9 @@ func listCanonicalAdminUsers(db *sql.DB) http.HandlerFunc {
 			whereParts = append(whereParts, fmt.Sprintf("(username ILIKE $%d OR email ILIKE $%d)", len(args)+1, len(args)+2))
 			args = append(args, "%"+search+"%", "%"+search+"%")
 		}
-		if role != "" {
+		if filterRole != "" {
 			whereParts = append(whereParts, fmt.Sprintf("role = $%d", len(args)+1))
-			args = append(args, role)
+			args = append(args, filterRole)
 		}
 
 		whereClause := ""
@@ -1579,7 +1808,15 @@ func createCanonicalAdminUser(db *sql.DB) http.HandlerFunc {
 
 		req.Username = strings.TrimSpace(req.Username)
 		req.Email = strings.TrimSpace(req.Email)
-		req.Role = canonicalUserRoleForAdmin(req.Role)
+		if req.Role == "" {
+			req.Role = "viewer" // column default; empty means "no explicit role"
+		}
+		role, ok := canonicalUserRoleForAdmin(req.Role)
+		if !ok {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("invalid role: %s (valid: admin, operator, viewer; aliases: super-admin, user, readonly)", req.Role))
+			return
+		}
+		req.Role = role
 
 		if req.Username == "" || req.Email == "" || strings.TrimSpace(req.Password) == "" {
 			writeJSONError(w, http.StatusBadRequest, "username, email, and password are required")
@@ -1644,7 +1881,11 @@ func updateCanonicalAdminUser(db *sql.DB) http.HandlerFunc {
 			args = append(args, email)
 		}
 		if req.Role != "" {
-			role := canonicalUserRoleForAdmin(req.Role)
+			role, ok := canonicalUserRoleForAdmin(req.Role)
+			if !ok {
+				writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("invalid role: %s (valid: admin, operator, viewer; aliases: super-admin, user, readonly)", req.Role))
+				return
+			}
 			updates = append(updates, fmt.Sprintf("role = $%d", len(args)+1))
 			args = append(args, role)
 		}
@@ -1738,8 +1979,11 @@ func assignCanonicalAdminUserRoles(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		role := canonicalUserRoleForAdmin(req.Roles[0])
-
+		role, ok := canonicalUserRoleForAdmin(req.Roles[0])
+		if !ok {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("invalid role: %s (valid: admin, operator, viewer; aliases: super-admin, user, readonly)", req.Roles[0]))
+			return
+		}
 		var user canonicalAdminUser
 		err = db.QueryRow(`
 			UPDATE users
@@ -1763,17 +2007,6 @@ func assignCanonicalAdminUserRoles(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-// isCanonicalAdminRoleRaw reports whether a raw role label is one the admin
-// API accepts (before mapping onto the canonical enum).
-func isCanonicalAdminRoleRaw(raw string) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "admin", "operator", "viewer", "user", "readonly", "super-admin":
-		return true
-	default:
-		return false
-	}
-}
-
 // canonicalAdminUserID validates the path id as a canonical users.id (uuid).
 func canonicalAdminUserID(raw string) (string, error) {
 	userID := strings.TrimSpace(raw)
@@ -1786,16 +2019,18 @@ func canonicalAdminUserID(raw string) (string, error) {
 // canonicalUserRoleForAdmin maps accepted role labels onto the canonical
 // user_role enum ('admin','operator','viewer'); 'user'/'readonly' collapse to
 // 'viewer' and 'super-admin' to 'admin', matching the RBAC catalog seeds.
-func canonicalUserRoleForAdmin(raw string) string {
+// Anything unrecognized returns ok=false so callers reject the request (400)
+// instead of silently creating a viewer.
+func canonicalUserRoleForAdmin(raw string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "admin", "super-admin":
-		return "admin"
+		return "admin", true
 	case "operator":
-		return "operator"
+		return "operator", true
 	case "viewer", "user", "readonly":
-		return "viewer"
+		return "viewer", true
 	default:
-		return "viewer"
+		return "", false
 	}
 }
 
@@ -2218,6 +2453,68 @@ func impliedRoles(role string) []string {
 	default:
 		return nil
 	}
+}
+
+// authTokenSHA256Hex derives the stored token_hash for a raw auth token:
+// sha256 hex of the raw token. The raw token exists only in the delivered
+// email; the database never stores it.
+func authTokenSHA256Hex(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// insertAuthToken invalidates any live token of the same purpose for the user
+// (one live token per (user, purpose)), then stores the sha256 of a fresh
+// 32-byte random token. It returns the raw token for delivery by email.
+func insertAuthToken(db *sql.DB, userID, purpose string, validity time.Duration) (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate token: %w", err)
+	}
+	rawToken := hex.EncodeToString(raw)
+
+	if _, err := db.Exec(`UPDATE auth_tokens SET used_at = NOW() WHERE user_id = $1 AND purpose = $2 AND used_at IS NULL`, userID, purpose); err != nil {
+		return "", fmt.Errorf("invalidate live tokens: %w", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO auth_tokens (user_id, token_hash, purpose, expires_at)
+		VALUES ($1, $2, $3, NOW() + make_interval(secs => $4::int))
+	`, userID, authTokenSHA256Hex(rawToken), purpose, int(validity.Seconds())); err != nil {
+		return "", fmt.Errorf("insert token: %w", err)
+	}
+	return rawToken, nil
+}
+
+// validateCanonicalPassword applies the same password policy the canonical
+// registration flow enforces (config defaults: >=8 chars, mixed case, a
+// number, and a special character).
+func validateCanonicalPassword(password string) error {
+	if len(password) < 8 {
+		return fmt.Errorf("password must be at least 8 characters long")
+	}
+	hasUpper, hasLower, hasNumber, hasSpecial := false, false, false, false
+	for _, ch := range password {
+		switch {
+		case ch >= 'A' && ch <= 'Z':
+			hasUpper = true
+		case ch >= 'a' && ch <= 'z':
+			hasLower = true
+		case ch >= '0' && ch <= '9':
+			hasNumber = true
+		default:
+			hasSpecial = true
+		}
+	}
+	if !hasUpper || !hasLower {
+		return fmt.Errorf("password must contain both uppercase and lowercase characters")
+	}
+	if !hasNumber {
+		return fmt.Errorf("password must contain at least one number")
+	}
+	if !hasSpecial {
+		return fmt.Errorf("password must contain at least one special character")
+	}
+	return nil
 }
 
 func notImplementedJSON(message string) http.Handler {

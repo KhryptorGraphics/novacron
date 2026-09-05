@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -83,9 +86,11 @@ func TestCanonicalVMRoutesDriveManagerState(t *testing.T) {
 
 	// Create: manager.CreateVM(stub) succeeds, then a single INSERT with the
 	// manager-derived state (the manager reports "stopped" for a freshly
-	// created, not-yet-started VM), never a hardcoded "creating".
+	// created, not-yet-started VM), never a hardcoded "creating". cpu_cores is
+	// the REAL vCPU count now: a request without vcpus persists 1 (was: the
+	// 1024 CPUShares scheduling weight).
 	mock.ExpectExec("INSERT INTO vms").
-		WithArgs(sqlmock.AnyArg(), "vm-a", "stopped", 1024, 0, 0, sqlmock.AnyArg(), "", sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "vm-a", "stopped", 1, 0, 0, sqlmock.AnyArg(), "", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	createRec := httptest.NewRecorder()
@@ -176,46 +181,36 @@ func decodeJSONBody(t *testing.T, rec *httptest.ResponseRecorder, target interfa
 	}
 }
 
-func TestCanonicalPasswordResetRoutesAreLive(t *testing.T) {
+// TestCanonicalPasswordResetRoutesFailClosedWithoutEmail proves the token
+// routes refuse with 503 before touching any database when SMTP is not
+// configured (emailService == nil) — the honest replacement for the old fake
+// "success without doing anything" handlers.
+func TestCanonicalPasswordResetRoutesFailClosedWithoutEmail(t *testing.T) {
 	authManager := auth.NewSimpleAuthManager("test-secret", nil)
 
 	router := mux.NewRouter()
-	registerPublicRoutes(router, authManager, nil, nil)
+	registerPublicRoutes(router, authManager, nil, nil, nil)
 
 	tests := []struct {
 		name       string
 		path       string
 		payload    map[string]string
 		wantStatus int
-		wantMsg    string
+		wantErr    string
 	}{
 		{
 			name:       "forgot password",
 			path:       "/api/auth/forgot-password",
 			payload:    map[string]string{"email": "user@example.com"},
-			wantStatus: http.StatusOK,
-			wantMsg:    "Password reset email sent",
+			wantStatus: http.StatusServiceUnavailable,
+			wantErr:    "email delivery is not configured (set SMTP_HOST)",
 		},
 		{
-			name:       "reset password",
-			path:       "/api/auth/reset-password",
-			payload:    map[string]string{"token": "reset-token", "password": "SecurePassword123!"},
-			wantStatus: http.StatusOK,
-			wantMsg:    "Password reset successfully",
-		},
-		{
-			name:       "verify email remains deferred",
-			path:       "/api/auth/verify-email",
-			payload:    map[string]string{"token": "verify-token"},
-			wantStatus: http.StatusNotImplemented,
-			wantMsg:    "email verification is not wired in the canonical server yet",
-		},
-		{
-			name:       "resend verification remains deferred",
+			name:       "resend verification",
 			path:       "/api/auth/resend-verification",
 			payload:    map[string]string{"email": "user@example.com"},
-			wantStatus: http.StatusNotImplemented,
-			wantMsg:    "email verification is not wired in the canonical server yet",
+			wantStatus: http.StatusServiceUnavailable,
+			wantErr:    "email delivery is not configured (set SMTP_HOST)",
 		},
 	}
 
@@ -232,8 +227,8 @@ func TestCanonicalPasswordResetRoutesAreLive(t *testing.T) {
 
 			var payload map[string]interface{}
 			decodeJSONBody(t, rec, &payload)
-			if payload["message"] != tc.wantMsg {
-				t.Fatalf("expected message %q, got %#v", tc.wantMsg, payload["message"])
+			if payload["error"] != tc.wantErr {
+				t.Fatalf("expected error %q, got %#v", tc.wantErr, payload["error"])
 			}
 		})
 	}
@@ -251,7 +246,7 @@ func TestCanonicalTwoFactorLoginFlow(t *testing.T) {
 	handlers := securityapi.NewSecurityHandlers(twoFactorService, audit.NewSimpleAuditLogger())
 
 	router := mux.NewRouter()
-	registerPublicRoutes(router, authManager, db, twoFactorService)
+	registerPublicRoutes(router, authManager, db, twoFactorService, nil)
 	registerCanonicalSecurityRoutes(router, authManager, handlers)
 
 	setupReq := mustJSONRequest(t, http.MethodPost, "/api/auth/2fa/setup", map[string]interface{}{
@@ -378,7 +373,7 @@ func TestCanonicalTwoFactorVerifyLoginRejectsInvalidOrMismatchedTempToken(t *tes
 	twoFactorService := auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret()))
 
 	router := mux.NewRouter()
-	registerPublicRoutes(router, authManager, nil, twoFactorService)
+	registerPublicRoutes(router, authManager, nil, twoFactorService, nil)
 
 	invalidTokenReq := mustJSONRequest(t, http.MethodPost, "/api/auth/2fa/verify-login", map[string]interface{}{
 		"code":       "123456",
@@ -883,7 +878,7 @@ func TestCanonicalLiveServerSmoke(t *testing.T) {
 	defer wsHandler.Shutdown()
 
 	router := mux.NewRouter()
-	registerPublicRoutes(router, authManager, db, twoFactorService)
+	registerPublicRoutes(router, authManager, db, twoFactorService, nil)
 	registerCanonicalSecurityRoutes(router, authManager, securityHandlers)
 	registerCanonicalGraphQLRoute(router, authManager, graphqlHandler)
 	wsHandler.RegisterWebSocketRoutes(router, func(required string, next http.HandlerFunc) http.Handler {
@@ -1204,5 +1199,497 @@ func TestCanonicalSecurityWebSocketAliasesRejectNonAdminUsers(t *testing.T) {
 	}
 	if resp == nil || resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected 403 for non-admin security websocket, got resp=%v err=%v", resp, err)
+	}
+}
+
+// TestCanonicalVMCreatePersistsVCPUs proves the API contract residue fix: the
+// create request's "vcpus" is persisted as the REAL cpu_cores value (not the
+// CPUShares scheduling weight the column used to hold), defaults to 1 without
+// vcpus, and the create response reports "vcpus". The KVM driver maps
+// VCPUs straight to -smp (vm package tests cover that side).
+func TestCanonicalVMCreatePersistsVCPUs(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	manager := newStubVMManager(t)
+	defer manager.Stop()
+
+	router := mux.NewRouter()
+	registerSecureAPIRoutes(router, db, manager, t.TempDir())
+
+	// Explicit vcpus=2: cpu_cores arg must be 2, and cpu_shares stays in
+	// metadata only (arg 5 is os_type; the metadata JSON is arg 9).
+	mock.ExpectExec("INSERT INTO vms").
+		WithArgs(sqlmock.AnyArg(), "vcpu-vm", "stopped", 2, 512, 1, sqlmock.AnyArg(), "", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, mustJSONRequest(t, http.MethodPost, "/vms", map[string]interface{}{
+		"name": "vcpu-vm", "vcpus": 2, "memory_mb": 512, "disk_size_gb": 1,
+	}))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var created map[string]interface{}
+	decodeJSONBody(t, rec, &created)
+	if created["vcpus"] != float64(2) {
+		t.Fatalf("create response: expected vcpus 2, got %#v", created["vcpus"])
+	}
+	if created["memory_mb"] != float64(512) || created["disk_gb"] != float64(1) {
+		t.Fatalf("create response: expected memory_mb 512 disk_gb 1, got %#v", created)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+// TestCanonicalVMCreateRejectsVCPUsOver256 proves the create upper bound: a
+// vcpus value above 256 is rejected 400 before any DB write (no sqlmock
+// expectation registered — a stray INSERT would fail the run).
+func TestCanonicalVMCreateRejectsVCPUsOver256(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	manager := newStubVMManager(t)
+	defer manager.Stop()
+
+	router := mux.NewRouter()
+	registerSecureAPIRoutes(router, db, manager, t.TempDir())
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, mustJSONRequest(t, http.MethodPost, "/vms", map[string]interface{}{
+		"name": "toobig", "vcpus": 257, "memory_mb": 512,
+	}))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for vcpus=257, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "vcpus must be between 1 and 256") {
+		t.Fatalf("expected vcpus bound error, got %s", rec.Body.String())
+	}
+}
+
+// TestCanonicalVMGetExposesVCPUs proves the get handler SELECTs cpu_cores/
+// memory_mb/disk_gb and reports them as vcpus/memory_mb/disk_gb.
+func TestCanonicalVMGetExposesVCPUs(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	manager := newStubVMManager(t)
+	defer manager.Stop()
+
+	router := mux.NewRouter()
+	registerSecureAPIRoutes(router, db, manager, t.TempDir())
+
+	now := time.Now().UTC()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+			SELECT id, name, state, node_id, organization_id, cpu_cores, memory_mb, disk_gb, created_at, updated_at
+			FROM vms WHERE id = $1
+		`)).
+		WithArgs("vm-9").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "state", "node_id", "organization_id", "cpu_cores", "memory_mb", "disk_gb", "created_at", "updated_at"}).
+			AddRow("vm-9", "getter", "stopped", nil, nil, 4, 1024, 20, now, now))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, mustJSONRequest(t, http.MethodGet, "/vms/vm-9", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get: expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var got map[string]interface{}
+	decodeJSONBody(t, rec, &got)
+	if got["vcpus"] != float64(4) {
+		t.Fatalf("get: expected vcpus 4, got %#v", got["vcpus"])
+	}
+	if got["memory_mb"] != float64(1024) || got["disk_gb"] != float64(20) {
+		t.Fatalf("get: expected memory_mb 1024 disk_gb 20, got %#v", got)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+// TestCanonicalAdminUserUpdateRejectsInvalidRole proves strict role validation:
+// an unknown label is rejected 400 with the canonical alias hint, and NO UPDATE
+// is executed (no sqlmock expectation is registered — a stray UPDATE would
+// fail the run). Previously a typo like "ghost" silently became "viewer".
+func TestCanonicalAdminUserUpdateRejectsInvalidRole(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	router := mux.NewRouter()
+	adminRouter := router.PathPrefix("/api/admin").Subrouter()
+	adminRouter.Use(requireAuth(authManager))
+	adminRouter.Use(requireAnyRoleMiddleware("admin", "super-admin"))
+	registerCanonicalAdminRoutes(router, authManager, db)
+
+	rec := httptest.NewRecorder()
+	req := mustJSONRequest(t, http.MethodPut, "/api/admin/users/00000000-0000-0000-0000-000000000001", map[string]interface{}{"role": "ghost"})
+	req.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for role ghost, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	want := "invalid role: ghost (valid: admin, operator, viewer; aliases: super-admin, user, readonly)"
+	if !strings.Contains(rec.Body.String(), want) {
+		t.Fatalf("expected error %q, got %s", want, rec.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations (an unexpected UPDATE ran): %v", err)
+	}
+}
+
+// TestCanonicalAdminUserUpdateAcceptsSuperAdminAlias proves the six accepted
+// labels still map: super-admin -> admin in the DB write.
+func TestCanonicalAdminUserUpdateAcceptsSuperAdminAlias(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	router := mux.NewRouter()
+	registerCanonicalAdminRoutes(router, authManager, db)
+
+	now := time.Now().UTC()
+	// updateCanonicalAdminUser issues ONE QueryRow("UPDATE users ... RETURNING
+	// ...") — sqlmock models it as ExpectQuery, not ExpectExec.
+	mock.ExpectQuery(regexp.QuoteMeta(`
+			UPDATE users
+			SET role = $1, updated_at = NOW()
+			WHERE id = $2
+			RETURNING id, username, email, role, status, created_at, updated_at
+		`)).
+		WithArgs("admin", "00000000-0000-0000-0000-000000000001").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "role", "status", "created_at", "updated_at"}).
+			AddRow("00000000-0000-0000-0000-000000000001", "u", "u@e.com", "admin", "active", now, now))
+	rec := httptest.NewRecorder()
+	req := mustJSONRequest(t, http.MethodPut, "/api/admin/users/00000000-0000-0000-0000-000000000001", map[string]interface{}{"role": "super-admin"})
+	req.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for role super-admin, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+// newAuthTokenTestRouter builds a router whose public auth token routes run
+// against a sqlmock DB and an *auth.EmailService pointed at an unreachable
+// SMTP host (the send is best-effort; handlers still return their status).
+func newAuthTokenTestRouter(t *testing.T, db *sql.DB) (*mux.Router, sqlmock.Sqlmock, *auth.SimpleAuthManager) {
+	t.Helper()
+
+	authManager := auth.NewSimpleAuthManager("test-secret", db)
+	emailService := auth.NewEmailService(auth.EmailConfig{
+		SMTPHost:    "127.0.0.1",
+		SMTPPort:    1, // nothing listens here; sends fail fast and are logged
+		FromAddress: "test@novacron.local",
+		FromName:    "NovaCron",
+		FrontendURL: "http://localhost:8092",
+	})
+
+	router := mux.NewRouter()
+	registerPublicRoutes(router, authManager, db, nil, emailService)
+	return router, nil, authManager
+}
+
+// sha256HexForTest mirrors authTokenSHA256Hex (same package; kept local for
+// readability in expectations).
+func sha256HexForTest(t *testing.T, raw string) string {
+	t.Helper()
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
+}
+
+// TestCanonicalResetPasswordHappyPath proves a live reset token rotates the
+// password, revokes sessions, and marks the token used inside one transaction.
+func TestCanonicalResetPasswordHappyPath(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	router, _, _ := newAuthTokenTestRouter(t, db)
+
+	rawToken := "0000000000000000000000000000000000000000000000000000000000000abc"
+	tokenHash := sha256HexForTest(t, rawToken)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+			SELECT user_id FROM auth_tokens
+			WHERE token_hash = $1 AND purpose = 'password_reset' AND used_at IS NULL AND expires_at > NOW()
+		`)).WithArgs(tokenHash).
+		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow("11111111-1111-1111-1111-111111111111"))
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`)).
+		WithArgs(sqlmock.AnyArg(), "11111111-1111-1111-1111-111111111111").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE auth_tokens SET used_at = NOW() WHERE token_hash = $1 AND purpose = 'password_reset'`)).
+		WithArgs(tokenHash).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM sessions WHERE user_id = $1`)).
+		WithArgs("11111111-1111-1111-1111-111111111111").
+		WillReturnResult(sqlmock.NewResult(0, 3))
+	mock.ExpectCommit()
+
+	req := mustJSONRequest(t, http.MethodPost, "/api/auth/reset-password", map[string]string{
+		"token":    rawToken,
+		"password": "NewPassw0rd!",
+	})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var payload map[string]string
+	decodeJSONBody(t, rec, &payload)
+	if payload["message"] != "Password reset successfully" {
+		t.Fatalf("expected success message, got %#v", payload)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+// TestCanonicalResetPasswordExpiredToken proves an unknown/expired token is a
+// 400 and never reaches the users/sessions tables.
+func TestCanonicalResetPasswordExpiredToken(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	router, _, _ := newAuthTokenTestRouter(t, db)
+
+	tokenHash := sha256HexForTest(t, "stale-or-unknown-token")
+	mock.ExpectQuery(regexp.QuoteMeta(`
+			SELECT user_id FROM auth_tokens
+			WHERE token_hash = $1 AND purpose = 'password_reset' AND used_at IS NULL AND expires_at > NOW()
+		`)).WithArgs(tokenHash).
+		WillReturnError(sql.ErrNoRows)
+
+	req := mustJSONRequest(t, http.MethodPost, "/api/auth/reset-password", map[string]string{
+		"token":    "stale-or-unknown-token",
+		"password": "NewPassw0rd!",
+	})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var payload map[string]string
+	decodeJSONBody(t, rec, &payload)
+	if payload["error"] != "invalid or expired token" {
+		t.Fatalf("expected invalid-or-expired error, got %#v", payload)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+// TestCanonicalVerifyEmailHappyPath proves a live verification token flips
+// email_verified and promotes a pending user to active.
+func TestCanonicalVerifyEmailHappyPath(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	router, _, _ := newAuthTokenTestRouter(t, db)
+
+	rawToken := "abcdef0000000000000000000000000000000000000000000000000000000012"
+	tokenHash := sha256HexForTest(t, rawToken)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+			SELECT user_id FROM auth_tokens
+			WHERE token_hash = $1 AND purpose = 'email_verification' AND used_at IS NULL AND expires_at > NOW()
+		`)).WithArgs(tokenHash).
+		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow("22222222-2222-2222-2222-222222222222"))
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`
+			UPDATE users
+			SET email_verified = TRUE,
+			    status = CASE WHEN status = 'pending' THEN 'active'::user_status ELSE status END,
+			    updated_at = NOW()
+			WHERE id = $1
+		`)).WithArgs("22222222-2222-2222-2222-222222222222").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE auth_tokens SET used_at = NOW() WHERE token_hash = $1 AND purpose = 'email_verification'`)).
+		WithArgs(tokenHash).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	req := mustJSONRequest(t, http.MethodPost, "/api/auth/verify-email", map[string]string{"token": rawToken})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var payload map[string]bool
+	decodeJSONBody(t, rec, &payload)
+	if payload["success"] != true {
+		t.Fatalf("expected success true, got %#v", payload)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+// TestCanonicalForgotPasswordConfiguredReturns200AfterSendFailure proves the
+// configured path responds 200 (no enumeration) even when the SMTP send fails.
+func TestCanonicalForgotPasswordConfiguredReturns200AfterSendFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	router, _, _ := newAuthTokenTestRouter(t, db)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, username FROM users WHERE email = $1`)).
+		WithArgs("known@novacron.local").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username"}).
+			AddRow("33333333-3333-3333-3333-333333333333", "knownuser"))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE auth_tokens SET used_at = NOW() WHERE user_id = $1 AND purpose = $2 AND used_at IS NULL`)).
+		WithArgs("33333333-3333-3333-3333-333333333333", "password_reset").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO auth_tokens (user_id, token_hash, purpose, expires_at)
+		VALUES ($1, $2, $3, NOW() + make_interval(secs => $4::int))
+		`)).
+		WithArgs("33333333-3333-3333-3333-333333333333", sqlmock.AnyArg(), "password_reset", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	req := mustJSONRequest(t, http.MethodPost, "/api/auth/forgot-password", map[string]string{"email": "known@novacron.local"})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 (no enumeration), got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var payload map[string]string
+	decodeJSONBody(t, rec, &payload)
+	if payload["message"] != "If an account exists for that email, a reset link has been sent" {
+		t.Fatalf("expected generic message, got %#v", payload)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+// TestCanonicalForgotPasswordUnknownEmailStillGeneric proves a miss on the
+// users lookup still returns the same 200 generic message (and runs no token
+// writes) — no account enumeration.
+func TestCanonicalForgotPasswordUnknownEmailStillGeneric(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	router, _, _ := newAuthTokenTestRouter(t, db)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, username FROM users WHERE email = $1`)).
+		WithArgs("nobody@novacron.local").
+		WillReturnError(sql.ErrNoRows)
+
+	req := mustJSONRequest(t, http.MethodPost, "/api/auth/forgot-password", map[string]string{"email": "nobody@novacron.local"})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+// TestCanonicalResendVerificationGenericSuccess proves resend returns
+// success:true for a known unverified user and issues a fresh token.
+func TestCanonicalResendVerificationGenericSuccess(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	router, _, _ := newAuthTokenTestRouter(t, db)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, username, email_verified FROM users WHERE email = $1`)).
+		WithArgs("pending@novacron.local").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email_verified"}).
+			AddRow("44444444-4444-4444-4444-444444444444", "pendinguser", false))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE auth_tokens SET used_at = NOW() WHERE user_id = $1 AND purpose = $2 AND used_at IS NULL`)).
+		WithArgs("44444444-4444-4444-4444-444444444444", "email_verification").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO auth_tokens (user_id, token_hash, purpose, expires_at)
+		VALUES ($1, $2, $3, NOW() + make_interval(secs => $4::int))
+		`)).
+		WithArgs("44444444-4444-4444-4444-444444444444", sqlmock.AnyArg(), "email_verification", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	req := mustJSONRequest(t, http.MethodPost, "/api/auth/resend-verification", map[string]string{"email": "pending@novacron.local"})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var payload map[string]bool
+	decodeJSONBody(t, rec, &payload)
+	if payload["success"] != true {
+		t.Fatalf("expected success true, got %#v", payload)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+// TestCanonicalResetPasswordRejectsWeakPassword proves the reset route applies
+// the canonical registration password policy before touching the database.
+func TestCanonicalResetPasswordRejectsWeakPassword(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	router, _, _ := newAuthTokenTestRouter(t, db)
+
+	req := mustJSONRequest(t, http.MethodPost, "/api/auth/reset-password", map[string]string{
+		"token":    "some-token",
+		"password": "short",
+	})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for weak password, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("weak password must not touch the DB: %v", err)
 	}
 }

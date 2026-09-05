@@ -37,12 +37,12 @@ type EmailConfig struct {
 // DefaultEmailConfig returns a default email configuration
 func DefaultEmailConfig() EmailConfig {
 	return EmailConfig{
-		SMTPHost:      "localhost",
-		SMTPPort:      587,
-		FromAddress:   "notifications@giggahost.com",
-		FromName:      "NovaCron",
-		UseTLS:        true,
-		FrontendURL:   "http://localhost:8092",
+		SMTPHost:    "localhost",
+		SMTPPort:    587,
+		FromAddress: "notifications@giggahost.com",
+		FromName:    "NovaCron",
+		UseTLS:      true,
+		FrontendURL: "http://localhost:8092",
 	}
 }
 
@@ -256,20 +256,26 @@ func (s *EmailService) SendWithHTML(to, subject, textBody, htmlBody string) erro
 	// Connect to SMTP server
 	addr := fmt.Sprintf("%s:%d", s.config.SMTPHost, s.config.SMTPPort)
 
-	auth := smtp.PlainAuth("", s.config.Username, s.config.Password, s.config.SMTPHost)
+	// nil auth when no credentials are configured: a nil smtp.Auth skips AUTH
+	// (both client paths already guard on it) so unconfigured relays like a
+	// local debugging sink work without username/password.
+	var smtpAuth smtp.Auth
+	if s.config.Username != "" || s.config.Password != "" {
+		smtpAuth = smtp.PlainAuth("", s.config.Username, s.config.Password, s.config.SMTPHost)
+	}
 
 	if s.config.UseSSL {
 		// Implicit TLS (port 465)
-		return s.sendWithSSL(addr, auth, s.config.FromAddress, to, msg.Bytes())
+		return s.sendWithSSL(addr, smtpAuth, s.config.FromAddress, to, msg.Bytes())
 	}
 
 	if s.config.UseTLS {
 		// STARTTLS (port 587)
-		return s.sendWithTLS(addr, auth, s.config.FromAddress, to, msg.Bytes())
+		return s.sendWithTLS(addr, smtpAuth, s.config.FromAddress, to, msg.Bytes())
 	}
 
 	// Plain SMTP
-	return smtp.SendMail(addr, auth, s.config.FromAddress, []string{to}, msg.Bytes())
+	return smtp.SendMail(addr, smtpAuth, s.config.FromAddress, []string{to}, msg.Bytes())
 }
 
 // sendWithTLS sends email using STARTTLS

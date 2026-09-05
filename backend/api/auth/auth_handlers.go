@@ -38,8 +38,8 @@ type LoginRequest struct {
 
 // AuthResponse represents an authentication response
 type AuthResponse struct {
-	Token     string    `json:"token"`
-	ExpiresAt time.Time `json:"expiresAt"`
+	Token     string        `json:"token"`
+	ExpiresAt time.Time     `json:"expiresAt"`
 	User      *UserResponse `json:"user"`
 }
 
@@ -191,66 +191,4 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	// Write response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
-}
-
-// ForgotPassword handles POST /auth/forgot-password
-func (h *Handler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
-	// Parse request
-	var request struct {
-		Email string `json:"email" validate:"required,email"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// Validate request
-	if request.Email == "" {
-		http.Error(w, "Email is required", http.StatusBadRequest)
-		return
-	}
-
-	// In a real implementation, you would:
-	// 1. Check if user exists
-	// 2. Generate password reset token
-	// 3. Send email with reset link
-	// 4. Store token with expiration
-
-	// For now, we'll just return success
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "Password reset email sent"})
-}
-
-// ResetPassword handles POST /auth/reset-password
-func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
-	// Parse request
-	var request struct {
-		Token    string `json:"token" validate:"required"`
-		Password string `json:"password" validate:"required,min=8"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// Validate request
-	if request.Token == "" || request.Password == "" {
-		http.Error(w, "Token and password are required", http.StatusBadRequest)
-		return
-	}
-
-	// In a real implementation, you would:
-	// 1. Validate token
-	// 2. Check token expiration
-	// 3. Hash new password
-	// 4. Update user password
-	// 5. Invalidate token
-
-	// For now, we'll just return success
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "Password reset successfully"})
 }

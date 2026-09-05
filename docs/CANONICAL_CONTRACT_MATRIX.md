@@ -33,10 +33,10 @@ Treat older README sections, feature reports, and alternate entrypoints as histo
 | `GET/POST /api/auth/2fa/backup-codes` | live | Authenticated route. |
 | `POST /auth/login` | compat | Legacy alias retained during gradual cutover. |
 | `POST /auth/register` | compat | Legacy alias retained during gradual cutover. |
-| `POST /api/auth/forgot-password` | live | Canonical password-reset request route. Returns a generic success message. |
-| `POST /api/auth/reset-password` | live | Canonical password-reset completion route. Returns a generic success message. |
-| `POST /api/auth/verify-email` | deferred | Canonical server still returns not implemented; the routed registration flow does not depend on it. |
-| `POST /api/auth/resend-verification` | deferred | Canonical server still returns not implemented; the routed registration flow does not depend on it. |
+| `POST /api/auth/forgot-password` | live | Issues a single-use `password_reset` token (sha256-hashed in `auth_tokens`), emails a reset link; always returns a generic success message. 503 when SMTP is unconfigured. |
+| `POST /api/auth/reset-password` | live | Consumes a live `password_reset` token: rotates the password hash, revokes sessions, marks the token used. |
+| `POST /api/auth/verify-email` | live | Consumes a live `email_verification` token: sets `email_verified = TRUE` and promotes `pending` users to `active`. |
+| `POST /api/auth/resend-verification` | live | Re-issues a verification email for unverified accounts; always returns `{"success":true}`. 503 when SMTP is unconfigured. |
 | `GET/POST /api/v1/vms` | live | Canonical VM list/create route set. |
 | `GET/DELETE /api/v1/vms/{id}` | live | Canonical VM detail/delete route set. |
 | `POST /api/v1/vms/{id}/start` | live | Canonical VM action route. |

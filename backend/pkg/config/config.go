@@ -16,6 +16,22 @@ type Config struct {
 	VM       VMConfig       `json:"vm"`
 	Logging  LoggingConfig  `json:"logging"`
 	CORS     CORSConfig     `json:"cors"`
+	Email    EmailSettings  `json:"email"`
+}
+
+// EmailSettings holds SMTP configuration for transactional email delivery
+// (password reset, email verification). SMTPHost == "" disables email
+// delivery; auth token routes then fail closed with 503.
+type EmailSettings struct {
+	SMTPHost        string `json:"smtp_host"`
+	SMTPPort        int    `json:"smtp_port"`
+	SMTPUsername    string `json:"smtp_username"`
+	SMTPPassword    string `json:"-"`
+	SMTPFromAddress string `json:"smtp_from_address"`
+	SMTPFromName    string `json:"smtp_from_name"`
+	SMTPUseTLS      bool   `json:"smtp_use_tls"`
+	SMTPUseSSL      bool   `json:"smtp_use_ssl"`
+	FrontendURL     string `json:"frontend_url"`
 }
 
 // ServerConfig holds HTTP server configuration
@@ -50,11 +66,11 @@ type AuthConfig struct {
 
 // VMConfig holds VM management configuration
 type VMConfig struct {
-	StoragePath         string   `json:"storage_path" env:"STORAGE_PATH" default:"/var/lib/novacron/vms"`
-	HypervisorAddrs     []string `json:"hypervisor_addrs" env:"HYPERVISOR_ADDRS" default:"localhost:9000"`
-	DefaultCPUShares    int      `json:"default_cpu_shares" env:"VM_DEFAULT_CPU_SHARES" default:"1024"`
-	DefaultMemoryMB     int      `json:"default_memory_mb" env:"VM_DEFAULT_MEMORY_MB" default:"512"`
-	MaxVMsPerNode       int      `json:"max_vms_per_node" env:"VM_MAX_PER_NODE" default:"100"`
+	StoragePath         string        `json:"storage_path" env:"STORAGE_PATH" default:"/var/lib/novacron/vms"`
+	HypervisorAddrs     []string      `json:"hypervisor_addrs" env:"HYPERVISOR_ADDRS" default:"localhost:9000"`
+	DefaultCPUShares    int           `json:"default_cpu_shares" env:"VM_DEFAULT_CPU_SHARES" default:"1024"`
+	DefaultMemoryMB     int           `json:"default_memory_mb" env:"VM_DEFAULT_MEMORY_MB" default:"512"`
+	MaxVMsPerNode       int           `json:"max_vms_per_node" env:"VM_MAX_PER_NODE" default:"100"`
 	HealthCheckInterval time.Duration `json:"health_check_interval" env:"VM_HEALTH_CHECK_INTERVAL" default:"30s"`
 }
 
@@ -76,7 +92,7 @@ type CORSConfig struct {
 // Load creates a new Config instance with values loaded from environment variables
 func Load() (*Config, error) {
 	config := &Config{}
-	
+
 	// Load server configuration
 	config.Server = ServerConfig{
 		APIPort:         getEnvOrDefault("API_PORT", "8090"),
@@ -86,7 +102,7 @@ func Load() (*Config, error) {
 		IdleTimeout:     getEnvDurationOrDefault("IDLE_TIMEOUT", 60*time.Second),
 		ShutdownTimeout: getEnvDurationOrDefault("SHUTDOWN_TIMEOUT", 30*time.Second),
 	}
-	
+
 	// Load database configuration
 	config.Database = DatabaseConfig{
 		URL:             getEnvOrDefault("DB_URL", "postgresql://postgres:postgres@localhost:5432/novacron"),
@@ -94,13 +110,13 @@ func Load() (*Config, error) {
 		ConnMaxLifetime: getEnvDurationOrDefault("DB_CONN_MAX_LIFETIME", 5*time.Minute),
 		ConnMaxIdleTime: getEnvDurationOrDefault("DB_CONN_MAX_IDLE_TIME", 1*time.Minute),
 	}
-	
+
 	// Load auth configuration
 	authSecret := getEnvOrDefault("AUTH_SECRET", "changeme_in_production")
 	if authSecret == "changeme_in_production" {
 		return nil, fmt.Errorf("AUTH_SECRET must be set to a secure value in production")
 	}
-	
+
 	config.Auth = AuthConfig{
 		Secret:                authSecret,
 		SessionExpiry:         getEnvDurationOrDefault("AUTH_SESSION_EXPIRY", 24*time.Hour),
@@ -111,13 +127,14 @@ func Load() (*Config, error) {
 		RequirePasswordNumber: getEnvBoolOrDefault("AUTH_REQUIRE_PASSWORD_NUMBER", true),
 		RequirePasswordSymbol: getEnvBoolOrDefault("AUTH_REQUIRE_PASSWORD_SYMBOL", true),
 	}
-	
+
 	// Load VM configuration
 	hypervisorAddrs := strings.Split(getEnvOrDefault("HYPERVISOR_ADDRS", "localhost:9000"), ",")
+
 	for i, addr := range hypervisorAddrs {
 		hypervisorAddrs[i] = strings.TrimSpace(addr)
 	}
-	
+
 	config.VM = VMConfig{
 		StoragePath:         getEnvOrDefault("STORAGE_PATH", "/var/lib/novacron/vms"),
 		HypervisorAddrs:     hypervisorAddrs,
@@ -126,7 +143,20 @@ func Load() (*Config, error) {
 		MaxVMsPerNode:       getEnvIntOrDefault("VM_MAX_PER_NODE", 100),
 		HealthCheckInterval: getEnvDurationOrDefault("VM_HEALTH_CHECK_INTERVAL", 30*time.Second),
 	}
-	
+
+	// Load email configuration (SMTP_HOST empty disables email delivery)
+	config.Email = EmailSettings{
+		SMTPHost:        getEnvOrDefault("SMTP_HOST", ""),
+		SMTPPort:        getEnvIntOrDefault("SMTP_PORT", 587),
+		SMTPUsername:    getEnvOrDefault("SMTP_USERNAME", ""),
+		SMTPPassword:    os.Getenv("SMTP_PASSWORD"),
+		SMTPFromAddress: getEnvOrDefault("SMTP_FROM_ADDRESS", "notifications@novacron.local"),
+		SMTPFromName:    getEnvOrDefault("SMTP_FROM_NAME", "NovaCron"),
+		SMTPUseTLS:      getEnvBoolOrDefault("SMTP_USE_TLS", true),
+		SMTPUseSSL:      getEnvBoolOrDefault("SMTP_USE_SSL", false),
+		FrontendURL:     getEnvOrDefault("FRONTEND_URL", "http://localhost:8092"),
+	}
+
 	// Load logging configuration
 	config.Logging = LoggingConfig{
 		Level:      getEnvOrDefault("LOG_LEVEL", "info"),
@@ -134,29 +164,29 @@ func Load() (*Config, error) {
 		Output:     getEnvOrDefault("LOG_OUTPUT", "stdout"),
 		Structured: getEnvBoolOrDefault("LOG_STRUCTURED", true),
 	}
-	
+
 	// Load CORS configuration
 	allowedOrigins := strings.Split(getEnvOrDefault("CORS_ALLOWED_ORIGINS", "http://localhost:8092,http://localhost:3001"), ",")
 	for i, origin := range allowedOrigins {
 		allowedOrigins[i] = strings.TrimSpace(origin)
 	}
-	
+
 	allowedMethods := strings.Split(getEnvOrDefault("CORS_ALLOWED_METHODS", "GET,POST,PUT,DELETE,OPTIONS"), ",")
 	for i, method := range allowedMethods {
 		allowedMethods[i] = strings.TrimSpace(method)
 	}
-	
+
 	allowedHeaders := strings.Split(getEnvOrDefault("CORS_ALLOWED_HEADERS", "Content-Type,Authorization"), ",")
 	for i, header := range allowedHeaders {
 		allowedHeaders[i] = strings.TrimSpace(header)
 	}
-	
+
 	config.CORS = CORSConfig{
 		AllowedOrigins: allowedOrigins,
 		AllowedMethods: allowedMethods,
 		AllowedHeaders: allowedHeaders,
 	}
-	
+
 	return config, nil
 }
 
@@ -165,19 +195,19 @@ func (c *Config) Validate() error {
 	if c.Auth.Secret == "" || c.Auth.Secret == "changeme_in_production" || len(c.Auth.Secret) < 16 {
 		return fmt.Errorf("AUTH_SECRET must be set to a strong secret of at least 16 characters")
 	}
-	
+
 	if c.Auth.PasswordMinLength < 6 {
 		return fmt.Errorf("AUTH_PASSWORD_MIN_LENGTH must be at least 6")
 	}
-	
+
 	if c.Database.URL == "" {
 		return fmt.Errorf("DB_URL must be set")
 	}
-	
+
 	if len(c.VM.HypervisorAddrs) == 0 {
 		return fmt.Errorf("at least one hypervisor address must be configured")
 	}
-	
+
 	validLogLevels := []string{"debug", "info", "warn", "error"}
 	validLevel := false
 	for _, level := range validLogLevels {
@@ -189,7 +219,7 @@ func (c *Config) Validate() error {
 	if !validLevel {
 		return fmt.Errorf("LOG_LEVEL must be one of: %s", strings.Join(validLogLevels, ", "))
 	}
-	
+
 	return nil
 }
 
