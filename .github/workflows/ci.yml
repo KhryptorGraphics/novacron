@@ -7,7 +7,7 @@ on:
     branches: [main, develop]
 
 env:
-  GO_VERSION: "1.24"
+  GO_VERSION: "1.25"
   NODE_VERSION: "20"
 
 jobs:
@@ -42,10 +42,8 @@ jobs:
         # the multi-arch buildx/publish pipeline lives in a separate workflow.
         run: docker build -f docker/api.Dockerfile -t novacron-api:ci .
 
-      # backend/core's real packages compile transitively via the api-server build above.
-      # The module also holds ~105 known-broken experimental trees (quantum, photonic,
-      # planetary, arvr, iot, autonomous, v4/v5, cognitive, ...) that are on no production
-      # path and are intentionally excluded from the gate. See STATUS.md.
+      # backend/core builds and its -short suite is fully green as of 2026-09-04;
+      # the full census is gated below.
       - name: Run canonical backend tests
         run: >
           go test
@@ -67,6 +65,21 @@ jobs:
         env:
           CGO_ENABLED: "1"
         run: go test -short -race ./vm/
+
+      # The full backend/core census: every package compiles and its -short suite
+      # is green (integration tests needing qemu/Docker self-skip on a bare runner;
+      # the vm -race step above stays as the race gate).
+      - name: Vet backend/core
+        working-directory: backend/core
+        env:
+          CGO_ENABLED: "1"
+        run: go vet ./...
+
+      - name: Run backend/core short suite (full census)
+        working-directory: backend/core
+        env:
+          CGO_ENABLED: "1"
+        run: go test -short -timeout 30m ./...
 
   x86-boot-test:
     name: x86 KVM Boot Smoke Test
@@ -137,6 +150,10 @@ jobs:
           src/__tests__/lib/auth.test.ts
           src/__tests__/lib/auth-phase3.test.ts
           --coverage=false
+
+      - name: Lint frontend
+        working-directory: frontend
+        run: npm run lint
 
       - name: Build canonical frontend
         working-directory: frontend
