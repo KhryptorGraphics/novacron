@@ -9,6 +9,14 @@ import (
 // ServerPool manages a pool of backend servers across multiple regions
 type ServerPool struct {
 	servers map[string]*Server
+	// order is the insertion-ordered server list. GetHealthyServers walks this
+	// instead of ranging sp.servers directly: Go randomizes map iteration
+	// order per run, so a caller doing rrIndex % len(GetHealthyServers())
+	// (round-robin) would see the counter walk a different server ORDER each
+	// process even with an unchanged, non-randomized rrIndex sequence —
+	// randomizing per-cycle distribution far past what the counter alone
+	// guarantees (novacron-s64: a 30-request sample deviated 14/5/1).
+	order   []*Server
 	regions map[string][]*Server
 	mu      sync.RWMutex
 	config  *LoadBalancerConfig
@@ -40,6 +48,7 @@ func (sp *ServerPool) AddServer(server *Server) error {
 	server.LastHealthCheck = time.Now()
 
 	sp.servers[server.ID] = server
+	sp.order = append(sp.order, server)
 
 	// Add to region index
 	sp.regions[server.Region] = append(sp.regions[server.Region], server)
@@ -109,6 +118,14 @@ func (sp *ServerPool) forceRemoveServer(serverID string) {
 		}
 	}
 
+	// Remove from the insertion-ordered list (see ServerPool.order doc)
+	for i, s := range sp.order {
+		if s.ID == serverID {
+			sp.order = append(sp.order[:i], sp.order[i+1:]...)
+			break
+		}
+	}
+
 	delete(sp.servers, serverID)
 }
 
@@ -130,8 +147,8 @@ func (sp *ServerPool) GetHealthyServers() []*Server {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
 
-	var healthy []*Server
-	for _, server := range sp.servers {
+	healthy := make([]*Server, 0, len(sp.order))
+	for _, server := range sp.order {
 		server.mu.RLock()
 		if server.Health == ServerHealthy && server.CircuitBreakerState == CircuitClosed {
 			healthy = append(healthy, server)
