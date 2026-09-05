@@ -59,10 +59,10 @@ export function connectEvents(onWelcome?: (msg: unknown) => void): WebSocket {
     console.error('Failed to create WebSocket:', error);
     // Return a mock WebSocket that won't cause crashes
     return {
-      close: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      send: () => {},
+      close: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      send: () => undefined,
       readyState: WebSocket.CLOSED
     } as unknown as WebSocket;
   }

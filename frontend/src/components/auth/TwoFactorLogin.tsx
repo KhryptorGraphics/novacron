@@ -157,7 +157,7 @@ export default function TwoFactorLogin({ tempToken, onSuccess, onCancel }: TwoFa
             </Button>
 
             <div className="text-xs text-gray-500">
-              <p>Can't access your authenticator app?</p>
+              <p>Can&apos;t access your authenticator app?</p>
               <p>Use one of your backup codes to sign in.</p>
             </div>
           </div>

@@ -345,10 +345,13 @@ export function SecurityDashboard() {
               <CardContent>
                 <div className="space-y-4">
                   {securityAlerts.map((alert) => (
-                    <div 
-                      key={alert.id} 
+                    <div
+                      key={alert.id}
+                      role="button"
+                      tabIndex={0}
                       className="flex items-start gap-4 p-4 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
                       onClick={() => setSelectedAlert(alert)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedAlert(alert); } }}
                     >
                       <div className={cn('h-3 w-3 rounded-full mt-2', getSeverityColor(alert.severity))} />
                       

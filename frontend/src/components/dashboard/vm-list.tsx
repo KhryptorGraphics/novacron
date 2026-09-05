@@ -677,7 +677,7 @@ export function VMList({ title = 'Virtual Machines', limit, filter, onVMClick }:
           <div className="text-sm text-muted-foreground">
             Showing {vms.length} virtual machines
           </div>
-          <Button variant="outline" size="sm" onClick={() => {}}>
+          <Button variant="outline" size="sm" onClick={() => undefined}>
             View All
           </Button>
         </CardFooter>

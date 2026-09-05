@@ -531,7 +531,7 @@ export function RegistrationWizard({ onComplete }: RegistrationWizardProps) {
                 {formData.enableTwoFactor && (
                   <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
                     <p className="text-sm text-green-800 dark:text-green-200">
-                      📱 You'll set up two-factor authentication after creating your account
+                      📱 You&apos;ll set up two-factor authentication after creating your account
                     </p>
                   </div>
                 )}

@@ -232,20 +232,21 @@ export const validateRegistrationStep = (
       }
       break;
       
-    case 2: // Personal Information
+    case 2: { // Personal Information
       const firstNameValidation = validateName(data.firstName, 'First name');
       const lastNameValidation = validateName(data.lastName, 'Last name');
       const emailValidation = validateEmail(data.email);
-      
+
       errors.push(...firstNameValidation.errors);
       errors.push(...lastNameValidation.errors);
       errors.push(...emailValidation.errors);
-      
+
       if (data.phone) {
         const phoneValidation = validatePhone(data.phone);
         errors.push(...phoneValidation.errors);
       }
       break;
+    }
       
     case 3: // Organization Details (if applicable)
       if (data.accountType === 'organization') {
@@ -258,20 +259,21 @@ export const validateRegistrationStep = (
       }
       break;
       
-    case 4: // Security
+    case 4: { // Security
       const passwordStrength = validatePassword(data.password);
       if (passwordStrength.score < 2) {
         errors.push('Password is too weak');
         errors.push(...passwordStrength.suggestions);
       }
-      
+
       if (data.password !== data.confirmPassword) {
         errors.push('Passwords do not match');
       }
-      
+
       const termsValidation = validateTerms(data.acceptTerms);
       errors.push(...termsValidation.errors);
       break;
+    }
   }
   
   return {

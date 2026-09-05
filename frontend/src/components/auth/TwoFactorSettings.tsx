@@ -252,7 +252,7 @@ Keep these codes safe and secure!`;
             <ul className="text-sm text-gray-600 space-y-1">
               <li>• Keep your authenticator app updated and backed up</li>
               <li>• Store backup codes in a secure location</li>
-              <li>• Generate new backup codes if you think they've been compromised</li>
+              <li>• Generate new backup codes if you think they&apos;ve been compromised</li>
               <li>• Consider using multiple authenticator apps for redundancy</li>
             </ul>
           </div>

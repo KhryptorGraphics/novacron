@@ -599,9 +599,12 @@ export function BackupRecoveryFlow() {
               <div className="space-y-2">
                 {filteredBackups.map(backup => (
                   <div key={backup.id} className="border rounded-lg">
-                    <div 
+                    <div
+                      role="button"
+                      tabIndex={0}
                       className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50"
                       onClick={() => toggleBackupExpansion(backup.id)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleBackupExpansion(backup.id); } }}
                     >
                       <div className="flex items-center space-x-4">
                         <div className="flex items-center space-x-2">

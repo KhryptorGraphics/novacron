@@ -858,8 +858,9 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
-                    <label className="text-sm font-medium">CPU Increase (%)</label>
+                    <label htmlFor="pred-cpu-increase" className="text-sm font-medium">CPU Increase (%)</label>
                     <Slider
+                      id="pred-cpu-increase"
                       value={[whatIfParams.cpuIncrease]}
                       onValueChange={([value]) => setWhatIfParams(prev => ({ ...prev, cpuIncrease: value }))}
                       min={-50}
@@ -873,8 +874,9 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
                   </div>
 
                   <div>
-                    <label className="text-sm font-medium">Memory Increase (%)</label>
+                    <label htmlFor="pred-memory-increase" className="text-sm font-medium">Memory Increase (%)</label>
                     <Slider
+                      id="pred-memory-increase"
                       value={[whatIfParams.memoryIncrease]}
                       onValueChange={([value]) => setWhatIfParams(prev => ({ ...prev, memoryIncrease: value }))}
                       min={-50}
@@ -888,8 +890,9 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
                   </div>
 
                   <div>
-                    <label className="text-sm font-medium">Workload Increase (%)</label>
+                    <label htmlFor="pred-workload-increase" className="text-sm font-medium">Workload Increase (%)</label>
                     <Slider
+                      id="pred-workload-increase"
                       value={[whatIfParams.workloadIncrease]}
                       onValueChange={([value]) => setWhatIfParams(prev => ({ ...prev, workloadIncrease: value }))}
                       min={-50}
@@ -903,8 +906,9 @@ export const PerformancePredictionDashboard: React.FC<PerformancePredictionDashb
                   </div>
 
                   <div>
-                    <label className="text-sm font-medium">Scenario Description</label>
+                    <label htmlFor="pred-scenario-description" className="text-sm font-medium">Scenario Description</label>
                     <Textarea
+                      id="pred-scenario-description"
                       placeholder="Describe the scenario you want to analyze..."
                       value={whatIfParams.description}
                       onChange={(e) => setWhatIfParams(prev => ({ ...prev, description: e.target.value }))}

@@ -51,7 +51,7 @@ function DefaultErrorFallback({
               Oops! Something went wrong
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
-              We encountered an unexpected error. Don't worry, your data is safe.
+              We encountered an unexpected error. Don&apos;t worry, your data is safe.
             </p>
           </div>
           
@@ -246,7 +246,7 @@ export function AsyncErrorBoundary({
             Failed to load content
           </h2>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 text-center">
-            We couldn't load this section. Please check your connection and try again.
+            We couldn&apos;t load this section. Please check your connection and try again.
           </p>
           <Button onClick={resetError} size="sm">
             <RefreshCw className="mr-2 h-4 w-4" />
@@ -311,7 +311,7 @@ export function NotFoundError() {
           Page Not Found
         </h2>
         <p className="text-gray-600 dark:text-gray-400 mb-8 max-w-md">
-          The page you're looking for doesn't exist or has been moved.
+          The page you&apos;re looking for doesn&apos;t exist or has been moved.
         </p>
         <div className="flex gap-4 justify-center">
           <Button onClick={() => router.back()} variant="outline">

@@ -168,6 +168,8 @@ export function WizardHeader({ className, showProgress = true }: WizardHeaderPro
             return (
               <React.Fragment key={step.id}>
                 <div
+                  role="button"
+                  tabIndex={0}
                   className={cn(
                     'flex items-center space-x-2 px-3 py-2 rounded-lg transition-all cursor-pointer min-w-fit',
                     isCurrent && 'bg-blue-100 text-blue-800 ring-2 ring-blue-500',
@@ -175,7 +177,8 @@ export function WizardHeader({ className, showProgress = true }: WizardHeaderPro
                     !isCurrent && !isCompleted && isAccessible && 'bg-gray-100 text-gray-600 hover:bg-gray-200',
                     !isAccessible && 'bg-gray-50 text-gray-400 cursor-not-allowed opacity-60'
                   )}
-                  onClick={() => isAccessible && step.id}
+                  onClick={() => { void (isAccessible && step.id); }}
+                  onKeyDown={(e) => { if (isAccessible && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); void (isAccessible && step.id); } }}
                 >
                   {isCompleted ? (
                     <CheckCircle className="h-4 w-4" />

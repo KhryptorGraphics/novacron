@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -133,7 +134,7 @@ export default function Setup2FAPage() {
               ) : (
                 <>
                   <div className="flex justify-center">
-                    <img src={qrCodeUrl} alt="2FA QR Code" className="w-48 h-48" />
+                    <Image src={qrCodeUrl} alt="2FA QR code" width={200} height={200} className="w-48 h-48" unoptimized />
                   </div>
                   <div className="text-center">
                     <p className="text-sm text-gray-600 mb-2">Or enter this code manually:</p>

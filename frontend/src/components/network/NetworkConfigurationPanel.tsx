@@ -432,10 +432,13 @@ const NetworkConfigurationPanel: React.FC = () => {
                   {networks.map((network) => (
                     <div
                       key={network.id}
+                      role="button"
+                      tabIndex={0}
                       className={`border rounded-lg p-4 hover:bg-accent cursor-pointer transition-colors ${
                         selectedNetwork?.id === network.id ? 'ring-2 ring-primary' : ''
                       }`}
                       onClick={() => setSelectedNetwork(network)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedNetwork(network); } }}
                     >
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">

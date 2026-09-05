@@ -1,6 +1,7 @@
 import { API_V1_BASE, buildApiUrl, buildApiV1Url, buildWebSocketUrls } from '@/lib/api/origin';
-import type { Pagination, ApiEnvelope } from '@/lib/api/types';
 import type {
+  Pagination,
+  ApiEnvelope,
   NetworkNode,
   NetworkEdge,
   ClusterTopology,

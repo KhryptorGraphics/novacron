@@ -5,9 +5,8 @@ import { usePerformance } from '@/hooks/usePerformance';
 // hook's effects run without throwing.
 beforeAll(() => {
   class MockPerformanceObserver {
-    constructor(_cb: PerformanceObserverCallback) {}
-    observe() {}
-    disconnect() {}
+    observe = jest.fn();
+    disconnect = jest.fn();
     takeRecords() {
       return [];
     }

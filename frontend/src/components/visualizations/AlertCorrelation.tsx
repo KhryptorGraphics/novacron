@@ -369,9 +369,12 @@ export const AlertCorrelation: React.FC<AlertCorrelationProps> = ({
               
               return (
                 <div key={resource} className="border-b border-border last:border-b-0">
-                  <div 
+                  <div
+                    role="button"
+                    tabIndex={0}
                     className="flex items-center justify-between p-3 cursor-pointer hover:bg-muted/50"
                     onClick={() => toggleGroup(resource)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGroup(resource); } }}
                   >
                     <div className="font-medium flex items-center">
                       {expandedGroups[resource] ? <ChevronDown className="h-4 w-4 mr-1" /> : <ChevronRight className="h-4 w-4 mr-1" />}
@@ -385,8 +388,10 @@ export const AlertCorrelation: React.FC<AlertCorrelationProps> = ({
                   {expandedGroups[resource] && (
                     <div className="pl-4">
                       {filteredResourceAlerts.map(alert => (
-                        <div 
-                          key={alert.id} 
+                        <div
+                          key={alert.id}
+                          role="button"
+                          tabIndex={0}
                           className={`p-2 border-l-2 mb-1 ml-2 cursor-pointer hover:bg-muted/50 ${
                             selectedAlert === alert.id ? 'bg-muted border-primary' : `border-transparent ${getSeverityColor(alert.severity)}`
                           }`}
@@ -394,6 +399,7 @@ export const AlertCorrelation: React.FC<AlertCorrelationProps> = ({
                             setSelectedAlert(alert.id);
                             if (onAlertClick) onAlertClick(alert);
                           }}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedAlert(alert.id); if (onAlertClick) onAlertClick(alert); } }}
                         >
                           <div className="flex items-start">
                             <div className="flex-shrink-0 mt-0.5">

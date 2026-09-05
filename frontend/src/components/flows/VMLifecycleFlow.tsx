@@ -252,7 +252,7 @@ export function VMLifecycleFlow() {
           errors.template = 'Please select a template';
         }
         break;
-      case 2: // Resources
+      case 2: { // Resources
         const selectedTemplate = templates.find(t => t.id === configuration.template);
         if (selectedTemplate) {
           if (configuration.resources.cpu < selectedTemplate.minCpu) {
@@ -266,6 +266,7 @@ export function VMLifecycleFlow() {
           }
         }
         break;
+      }
       case 3: // Network
         if (!configuration.network.vlan) {
           errors.vlan = 'Please select a VLAN';
@@ -449,7 +450,7 @@ export function VMLifecycleFlow() {
           </div>
         );
 
-      case 2: // Resources
+      case 2: { // Resources
         const selectedTemplate = templates.find(t => t.id === configuration.template);
         return (
           <div className="space-y-6">
@@ -569,6 +570,7 @@ export function VMLifecycleFlow() {
             </Card>
           </div>
         );
+      }
 
       case 3: // Network
         return (
@@ -783,7 +785,7 @@ export function VMLifecycleFlow() {
           </div>
         );
 
-      case 5: // Review
+      case 5: { // Review
         const selectedTemplateForReview = templates.find(t => t.id === configuration.template);
         const selectedTierForReview = storageTiers.find(t => t.id === configuration.resources.storageTier);
         
@@ -873,6 +875,7 @@ export function VMLifecycleFlow() {
             )}
           </div>
         );
+      }
 
       default:
         return null;

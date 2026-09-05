@@ -105,9 +105,10 @@ export const NetworkTopology: React.FC<NetworkTopologyProps> = ({
   useEffect(() => setIsMetrics(showPerformanceMetrics), [showPerformanceMetrics]);
 
   // Use WebSocket for real-time updates when distributed mode is enabled
-  const { data: wsData, isConnected } = isDistributed ?
-    useDistributedTopologyWebSocket() :
-    { data: null, isConnected: false };
+  // Hook must be called unconditionally (react-hooks/rules-of-hooks); gate the data instead.
+  const topologyChannel = useDistributedTopologyWebSocket();
+  const wsData = isDistributed ? topologyChannel.data : null;
+  const isConnected = isDistributed && topologyChannel.isConnected;
 
   // Merge WebSocket data with initial data
   const data = React.useMemo(() => {
@@ -150,13 +151,14 @@ export const NetworkTopology: React.FC<NetworkTopologyProps> = ({
         let x, y;
 
         switch (layoutType) {
-          case 'circular':
+          case 'circular': {
             const angle = (index / data.nodes.length) * 2 * Math.PI;
             const radius = Math.min(width, height) * 0.3;
             x = width / 2 + Math.cos(angle) * radius;
             y = height / 2 + Math.sin(angle) * radius;
             break;
-          case 'hierarchical':
+          }
+          case 'hierarchical': {
             let layer = 0;
             if (node.type === 'cluster') layer = 0;
             else if (node.type === 'host') layer = 1;
@@ -176,7 +178,8 @@ export const NetworkTopology: React.FC<NetworkTopologyProps> = ({
             x = (width / (nodesInLayer.length + 1)) * (layerIndex + 1);
             y = (height / 5) * (layer + 1);
             break;
-          case 'geographic':
+          }
+          case 'geographic': {
             // Use region data if available
             const regionCoords = {
               'us-east-1': { x: width * 0.8, y: height * 0.3 },
@@ -188,6 +191,7 @@ export const NetworkTopology: React.FC<NetworkTopologyProps> = ({
             x = coords?.x || Math.random() * width;
             y = coords?.y || Math.random() * height;
             break;
+          }
           case 'clustered':
             if (node.clusterId && data.clusters) {
               const cluster = data.clusters.find(c => c.id === node.clusterId);

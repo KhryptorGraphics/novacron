@@ -211,9 +211,9 @@ function unavailableRealtimeChannel<T = any>(message: string): WebSocketState<T>
     data: null,
     isConnected: false,
     error: new Error(message),
-    send: () => {},
-    close: () => {},
-    reconnect: () => {},
+    send: () => undefined,
+    close: () => undefined,
+    reconnect: () => undefined,
   };
 }
 

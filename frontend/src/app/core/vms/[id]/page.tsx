@@ -27,7 +27,7 @@ export default function VMDetailPage() {
     try {
       const saved = localStorage.getItem('coreRole');
       if (saved === 'viewer' || saved === 'operator') setRole(saved as any);
-    } catch {}
+    } catch { /* ignore parse/access errors, fall through to default role */ }
   }, []);
 
   const disabled = role !== 'operator';

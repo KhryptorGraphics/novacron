@@ -21,6 +21,7 @@ jest.mock('next/navigation', () => ({
 
 // Mock framer-motion
 jest.mock('framer-motion', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires -- require inside a jest.mock factory cannot be a top-level import
   const React = require('react');
   // Stable passthrough component per motion.<tag> (div, li, span, ...) so list
   // animations don't render `undefined`, and refs stay stable across renders

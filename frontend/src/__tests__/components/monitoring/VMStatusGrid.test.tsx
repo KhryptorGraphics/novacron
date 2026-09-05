@@ -1,5 +1,4 @@
-import { render, screen } from '@/__tests__/utils/test-utils';
-import { mockVMData } from '@/__tests__/utils/test-utils';
+import { render, screen, mockVMData } from '@/__tests__/utils/test-utils';
 
 // Mock the API hook
 jest.mock('@/hooks/useVMData', () => ({

@@ -204,12 +204,13 @@ export function AdvancedForm({
           }
           break;
         
-        case 'email':
+        case 'email': {
           const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
           if (typeof value === 'string' && value && !emailPattern.test(value)) {
             fieldErrors.push({ field: name, message: rule.message, type: 'error' });
           }
           break;
+        }
         
         case 'url':
           try {

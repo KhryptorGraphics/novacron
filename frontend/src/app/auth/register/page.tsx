@@ -89,7 +89,7 @@ export default function RegisterPage() {
           
           <blockquote className="border-l-2 border-blue-500 pl-4 space-y-2">
             <p className="text-lg italic">
-              "NovaCron has revolutionized how we manage our distributed infrastructure. The automation capabilities are unmatched."
+              &quot;NovaCron has revolutionized how we manage our distributed infrastructure. The automation capabilities are unmatched.&quot;
             </p>
             <footer className="text-sm text-gray-400">— Sofia Davis, CTO at TechCorp</footer>
           </blockquote>

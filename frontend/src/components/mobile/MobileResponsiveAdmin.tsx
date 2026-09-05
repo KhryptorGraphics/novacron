@@ -694,7 +694,7 @@ export const MobileResponsiveAdmin: React.FC = () => {
       {!isOnline && (
         <div className="fixed bottom-20 left-4 right-4 bg-destructive text-destructive-foreground p-3 rounded-lg text-center text-sm">
           <WifiOff className="h-4 w-4 inline mr-2" />
-          You're offline. {offlineQueue.length > 0 && `${offlineQueue.length} actions queued.`}
+          You&apos;re offline. {offlineQueue.length > 0 && `${offlineQueue.length} actions queued.`}
         </div>
       )}
 

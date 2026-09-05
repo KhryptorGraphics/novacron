@@ -348,8 +348,11 @@ export function VMStatusGrid({ vms, onVMAction }: VMStatusGridProps) {
             return (
               <div
                 key={vm.id}
+                role="button"
+                tabIndex={0}
                 className="p-4 rounded-lg border bg-white dark:bg-gray-800 dark:border-gray-700 hover:shadow-md transition-shadow cursor-pointer"
                 onClick={() => handleSelectVM(vm.id)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelectVM(vm.id); } }}
               >
                 {renderMobileCard(vm)}
               </div>

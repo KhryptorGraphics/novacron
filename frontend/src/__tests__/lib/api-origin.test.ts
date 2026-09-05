@@ -14,6 +14,7 @@ describe('API origin helpers', () => {
     process.env.NEXT_PUBLIC_API_URL = 'http://localhost:8090/api';
     delete process.env.NEXT_PUBLIC_WS_URL;
 
+    // eslint-disable-next-line @typescript-eslint/no-var-requires -- require-after-env-mutation is the point of this test
     const { buildWebSocketUrls } = require('../../lib/api/origin');
 
     expect(buildWebSocketUrls('/api/ws/security/events')).toEqual([
@@ -26,6 +27,7 @@ describe('API origin helpers', () => {
     process.env.NEXT_PUBLIC_API_URL = 'http://localhost:8090/api';
     delete process.env.NEXT_PUBLIC_WS_URL;
 
+    // eslint-disable-next-line @typescript-eslint/no-var-requires -- require-after-env-mutation is the point of this test
     const { buildApiUrl } = require('../../lib/api/origin');
 
     expect(buildApiUrl('/api/security/events')).toBe(
@@ -37,6 +39,7 @@ describe('API origin helpers', () => {
     process.env.NEXT_PUBLIC_API_URL = 'http://localhost:8090/api';
     process.env.NEXT_PUBLIC_API_BASE_URL = 'https://legacy.example.invalid/api/v1';
 
+    // eslint-disable-next-line @typescript-eslint/no-var-requires -- require-after-env-mutation is the point of this test
     const { buildApiV1Url, API_V1_BASE } = require('../../lib/api/origin');
 
     expect(API_V1_BASE).toBe('http://localhost:8090/api/v1');
