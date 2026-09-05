@@ -27,6 +27,13 @@ func NewWorkloadGenerator(pattern WorkloadPattern, size int64) *WorkloadGenerato
 
 // GenerateVMMemory generates VM memory data based on the pattern
 func (wg *WorkloadGenerator) GenerateVMMemory(size int64) []byte {
+	// Guardrail against reintroducing the multi-GiB allocation hang
+	// (novacron-frz): callers must generate a bounded sample and scale to
+	// the logical VM size instead of materializing whole VM images.
+	if size > workloadSampleCap {
+		panic(fmt.Sprintf("GenerateVMMemory: %d bytes exceeds the %d byte sample cap; sample and scale instead", size, workloadSampleCap))
+	}
+
 	data := make([]byte, size)
 
 	switch wg.pattern {
@@ -272,6 +279,11 @@ type WorkloadOperation struct {
 	Timestamp time.Time
 	Source    string
 	Target    string
+	// SimulatedStart is the operation's start offset on the scenario's
+	// simulated timeline. The scheduler advances a simulated clock for
+	// think-time pacing (not the wall clock); the harness treats scenario
+	// Duration as a budget on this timeline.
+	SimulatedStart time.Duration
 }
 
 // NewWorkloadScheduler creates a new workload scheduler
@@ -308,20 +320,26 @@ func (ws *WorkloadScheduler) scheduleConstant() {
 		interval = 5 * time.Second
 	}
 
+	// Think-time pacing advances the scenario's SIMULATED timeline, not the
+	// wall clock: each operation is stamped with its start offset and the
+	// harness enforces the scenario Duration as a budget on that timeline
+	// (see executeWorkload). Sleeping in real time would force every
+	// multi-minute scenario (think time of seconds per operation across
+	// tens of operations) to consume its full duration of wall time.
+	var simClock time.Duration
 	for i := 0; i < ws.workload.Operations; i++ {
 		op := &WorkloadOperation{
-			ID:        i,
-			Type:      ws.workload.Type,
-			VMSize:    ws.workload.VMSize,
-			Timestamp: time.Now(),
-			Source:    ws.workload.Source,
-			Target:    ws.workload.Target,
+			ID:             i,
+			Type:           ws.workload.Type,
+			VMSize:         ws.workload.VMSize,
+			Timestamp:      time.Now(),
+			Source:         ws.workload.Source,
+			Target:         ws.workload.Target,
+			SimulatedStart: simClock,
 		}
 		ws.operations <- op
 
-		if i < ws.workload.Operations-1 {
-			time.Sleep(interval)
-		}
+		simClock += interval
 	}
 }
 
@@ -330,16 +348,19 @@ func (ws *WorkloadScheduler) scheduleBursty() {
 	burstSize := ws.workload.Concurrency * 2
 	burstInterval := ws.workload.ThinkTime * 5
 
+	// Simulated-timeline pacing (see scheduleConstant).
+	var simClock time.Duration
 	for i := 0; i < ws.workload.Operations; {
 		// Send burst
 		for j := 0; j < burstSize && i < ws.workload.Operations; j++ {
 			op := &WorkloadOperation{
-				ID:        i,
-				Type:      ws.workload.Type,
-				VMSize:    ws.workload.VMSize,
-				Timestamp: time.Now(),
-				Source:    ws.workload.Source,
-				Target:    ws.workload.Target,
+				ID:             i,
+				Type:           ws.workload.Type,
+				VMSize:         ws.workload.VMSize,
+				Timestamp:      time.Now(),
+				Source:         ws.workload.Source,
+				Target:         ws.workload.Target,
+				SimulatedStart: simClock,
 			}
 			ws.operations <- op
 			i++
@@ -347,7 +368,7 @@ func (ws *WorkloadScheduler) scheduleBursty() {
 
 		// Wait before next burst
 		if i < ws.workload.Operations {
-			time.Sleep(burstInterval)
+			simClock += burstInterval
 		}
 	}
 }
@@ -359,14 +380,17 @@ func (ws *WorkloadScheduler) scheduleSinusoidal() {
 		baseInterval = 5 * time.Second
 	}
 
+	// Simulated-timeline pacing (see scheduleConstant).
+	var simClock time.Duration
 	for i := 0; i < ws.workload.Operations; i++ {
 		op := &WorkloadOperation{
-			ID:        i,
-			Type:      ws.workload.Type,
-			VMSize:    ws.workload.VMSize,
-			Timestamp: time.Now(),
-			Source:    ws.workload.Source,
-			Target:    ws.workload.Target,
+			ID:             i,
+			Type:           ws.workload.Type,
+			VMSize:         ws.workload.VMSize,
+			Timestamp:      time.Now(),
+			Source:         ws.workload.Source,
+			Target:         ws.workload.Target,
+			SimulatedStart: simClock,
 		}
 		ws.operations <- op
 
@@ -375,7 +399,7 @@ func (ws *WorkloadScheduler) scheduleSinusoidal() {
 			phase := float64(i) / float64(ws.workload.Operations) * 2 * math.Pi
 			factor := 0.5 + 0.5*math.Sin(phase)
 			interval := time.Duration(float64(baseInterval) * factor)
-			time.Sleep(interval)
+			simClock += interval
 		}
 	}
 }

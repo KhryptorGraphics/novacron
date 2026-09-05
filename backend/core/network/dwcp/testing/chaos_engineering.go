@@ -69,13 +69,13 @@ type ChaosMetrics struct {
 
 // ChaosEngine manages chaos experiments
 type ChaosEngine struct {
-	experiments   []*ChaosExperiment
-	simulator     *NetworkSimulator
-	tcController  *TrafficController
-	running       map[string]bool
-	ctx           context.Context
-	cancel        context.CancelFunc
-	mu            sync.RWMutex
+	experiments  []*ChaosExperiment
+	simulator    *NetworkSimulator
+	tcController *TrafficController
+	running      map[string]bool
+	ctx          context.Context
+	cancel       context.CancelFunc
+	mu           sync.RWMutex
 }
 
 // NewChaosEngine creates a new chaos engine

@@ -130,16 +130,16 @@ func BenchmarkWorkloadPatterns(b *testing.B) {
 	}
 }
 
-// BenchmarkVMSizes benchmarks migration of different VM sizes
+// BenchmarkVMSizes benchmarks migration of different VM sizes. Sizes are
+// bounded by workloadSampleCap: benchmarks measure the generator and the
+// sample-and-scale harness, not RAM (novacron-frz).
 func BenchmarkVMSizes(b *testing.B) {
 	harness := setupBenchmarkHarness()
 
 	sizes := []int64{
-		1 * 1024 * 1024 * 1024,  // 1 GB
-		2 * 1024 * 1024 * 1024,  // 2 GB
-		4 * 1024 * 1024 * 1024,  // 4 GB
-		8 * 1024 * 1024 * 1024,  // 8 GB
-		16 * 1024 * 1024 * 1024, // 16 GB
+		16 << 20, // 16 MiB
+		32 << 20, // 32 MiB
+		64 << 20, // 64 MiB (workloadSampleCap)
 	}
 
 	for _, size := range sizes {
@@ -155,13 +155,14 @@ func BenchmarkVMSizes(b *testing.B) {
 	}
 }
 
-// BenchmarkCompressionEfficiency benchmarks compression performance
+// BenchmarkCompressionEfficiency benchmarks compression performance at the
+// workloadSampleCap sample size (the generator's maximum; novacron-frz).
 func BenchmarkCompressionEfficiency(b *testing.B) {
-	generator := NewWorkloadGenerator(PatternRealWorld, 4*1024*1024*1024)
+	generator := NewWorkloadGenerator(PatternRealWorld, 64<<20)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		data := generator.GenerateVMMemory(4 * 1024 * 1024 * 1024)
+		data := generator.GenerateVMMemory(64 << 20)
 		_ = data // Use data to prevent optimization
 	}
 }
@@ -246,6 +247,9 @@ func formatConcurrency(n int) string {
 }
 
 func formatSize(bytes int64) string {
-	gb := bytes / (1024 * 1024 * 1024)
-	return fmt.Sprintf("%dGB", gb)
+	const miB = 1024 * 1024
+	if bytes >= 1024*1024*1024 {
+		return fmt.Sprintf("%dGB", bytes/(1024*1024*1024))
+	}
+	return fmt.Sprintf("%dMiB", bytes/miB)
 }

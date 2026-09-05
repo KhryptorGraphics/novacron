@@ -9,15 +9,15 @@ import (
 
 // ContinuousTesting manages continuous testing pipeline
 type ContinuousTesting struct {
-	scenarios    []*TestScenario
-	harness      *TestHarness
-	reporter     *TestReporter
-	schedule     *TestSchedule
-	running      bool
-	ctx          context.Context
-	cancel       context.CancelFunc
-	mu           sync.RWMutex
-	results      []*TestRun
+	scenarios []*TestScenario
+	harness   *TestHarness
+	reporter  *TestReporter
+	schedule  *TestSchedule
+	running   bool
+	ctx       context.Context
+	cancel    context.CancelFunc
+	mu        sync.RWMutex
+	results   []*TestRun
 }
 
 // TestSchedule defines the testing schedule
@@ -254,10 +254,10 @@ func (ct *ContinuousTesting) GetTrendAnalysis() *TrendAnalysis {
 	}
 
 	analysis := &TrendAnalysis{
-		Runs:            len(ct.results),
-		AverageSuccess:  0,
-		SuccessTrend:    "stable",
-		DurationTrend:   "stable",
+		Runs:           len(ct.results),
+		AverageSuccess: 0,
+		SuccessTrend:   "stable",
+		DurationTrend:  "stable",
 	}
 
 	var totalSuccess float64
@@ -371,11 +371,11 @@ func (ct *ContinuousTesting) GetStatus() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"running":          ct.running,
-		"scenarios":        len(ct.scenarios),
-		"total_runs":       len(ct.results),
-		"schedule_enabled": ct.schedule.Enabled,
+		"running":           ct.running,
+		"scenarios":         len(ct.scenarios),
+		"total_runs":        len(ct.results),
+		"schedule_enabled":  ct.schedule.Enabled,
 		"schedule_interval": ct.schedule.Interval.String(),
-		"latest_summary":   latestSummary,
+		"latest_summary":    latestSummary,
 	}
 }

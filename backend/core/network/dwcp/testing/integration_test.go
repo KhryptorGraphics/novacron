@@ -215,7 +215,9 @@ func TestWorkloadGenerator(t *testing.T) {
 		PatternRealWorld,
 	}
 
-	size := int64(100 * 1024 * 1024) // 100 MB
+	// Must stay within workloadSampleCap (64 MiB): the generator refuses
+	// larger allocations by design (novacron-frz).
+	size := int64(64 * 1024 * 1024)
 
 	for _, pattern := range patterns {
 		t.Run(string(pattern), func(t *testing.T) {

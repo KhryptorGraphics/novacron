@@ -41,7 +41,7 @@ type TestReport struct {
 
 // TrendData represents testing trends
 type TrendData struct {
-	SuccessRateTrend    string  // "improving", "stable", "declining"
+	SuccessRateTrend    string // "improving", "stable", "declining"
 	PerformanceTrend    string
 	LatestSuccessRate   float64
 	PreviousSuccessRate float64
@@ -105,9 +105,9 @@ func (tr *TestReporter) updatePrometheusMetrics(report *TestReport) {
 func (tr *TestReporter) sendToGrafana(report *TestReport) error {
 	// Convert report to Grafana annotation format
 	annotation := map[string]interface{}{
-		"time":    report.Timestamp.Unix() * 1000, // milliseconds
-		"text":    fmt.Sprintf("Test Run: %d passed, %d failed", report.PassedTests, report.FailedTests),
-		"tags":    []string{"dwcp", "testing", "automated"},
+		"time": report.Timestamp.Unix() * 1000, // milliseconds
+		"text": fmt.Sprintf("Test Run: %d passed, %d failed", report.PassedTests, report.FailedTests),
+		"tags": []string{"dwcp", "testing", "automated"},
 	}
 
 	data, err := json.Marshal(annotation)
