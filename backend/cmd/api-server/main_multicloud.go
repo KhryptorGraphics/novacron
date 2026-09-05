@@ -16,11 +16,11 @@ import (
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
-	"github.com/lib/pq"
 	"github.com/khryptorgraphics/novacron/backend/api/monitoring"
 	"github.com/khryptorgraphics/novacron/backend/api/vm"
-	"github.com/khryptorgraphics/novacron/backend/core/hypervisor"
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
+	"github.com/khryptorgraphics/novacron/backend/core/hypervisor"
+	"github.com/lib/pq"
 	// "github.com/khryptorgraphics/novacron/backend/core/federation"
 	// "github.com/khryptorgraphics/novacron/backend/core/federation/multicloud"
 	// "github.com/khryptorgraphics/novacron/backend/core/federation/multicloud/providers"
@@ -70,9 +70,9 @@ func main() {
 	// Initialize VM manager with default configuration
 	vmConfig := core_vm.VMManagerConfig{
 		DefaultDriver: core_vm.VMTypeKVM,
-		Drivers: make(map[core_vm.VMType]core_vm.VMDriverConfigManager),
+		Drivers:       make(map[core_vm.VMType]core_vm.VMDriverConfigManager),
 		Scheduler: core_vm.VMSchedulerConfig{
-			Type: "round-robin",
+			Type:   "round-robin",
 			Config: make(map[string]interface{}),
 		},
 	}
@@ -105,7 +105,7 @@ func main() {
 		federation.PrimaryCluster,
 		federation.HierarchicalMode,
 	)
-	
+
 	// Start federation manager
 	if err := federationMgr.Start(); err != nil {
 		appLogger.Error("Failed to start federation manager", "error", err)
@@ -243,7 +243,7 @@ func registerDefaultCloudProviders(orchestrator *multicloud.UnifiedOrchestrator,
 		},
 		Options: map[string]interface{}{
 			"retry_attempts": 3,
-			"timeout":       30,
+			"timeout":        30,
 		},
 	}
 
@@ -265,16 +265,16 @@ func registerDefaultCloudProviders(orchestrator *multicloud.UnifiedOrchestrator,
 // createOnPremiseConfig creates configuration for on-premise provider
 func createOnPremiseConfig() *multicloud.CloudProviderConfig {
 	return &multicloud.CloudProviderConfig{
-		Type: multicloud.ProviderOnPremise,
-		Name: "On-Premise KVM",
+		Type:          multicloud.ProviderOnPremise,
+		Name:          "On-Premise KVM",
 		DefaultRegion: "datacenter-1",
-		Regions: []string{"datacenter-1", "datacenter-2"},
+		Regions:       []string{"datacenter-1", "datacenter-2"},
 		Endpoints: map[string]string{
 			"api": "qemu:///system",
 		},
 		Options: map[string]interface{}{
 			"virtualization": "kvm",
-			"storage_pool":  "default",
+			"storage_pool":   "default",
 		},
 	}
 }
@@ -393,7 +393,7 @@ func runMigrations(db *sql.DB) error {
 }
 
 // The rest of the functions remain the same as in the original main.go
-// registerMockMonitoringHandlers, registerMockVMHandlers, registerPublicRoutes, 
+// registerMockMonitoringHandlers, registerMockVMHandlers, registerPublicRoutes,
 // healthCheckHandler, apiInfoHandler
 
 // registerMockMonitoringHandlers provides mock monitoring endpoints for development
@@ -551,10 +551,10 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.AuthManager) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"token": token,
 			"user": map[string]interface{}{
-				"id":       user.ID,
-				"username": user.Username,
-				"email":    user.Email,
-				"role":     user.Role,
+				"id":        user.ID,
+				"username":  user.Username,
+				"email":     user.Email,
+				"role":      user.Role,
 				"tenant_id": user.TenantID,
 			},
 		})
@@ -628,7 +628,7 @@ func apiInfoHandler() http.HandlerFunc {
 				"Resource monitoring",
 			},
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(response)

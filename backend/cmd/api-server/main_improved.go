@@ -112,7 +112,7 @@ func (l *Logger) Info(msg string, keysAndValues ...interface{}) {
 		"message":   msg,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
-	
+
 	// Add key-value pairs
 	for i := 0; i < len(keysAndValues); i += 2 {
 		if i+1 < len(keysAndValues) {
@@ -120,7 +120,7 @@ func (l *Logger) Info(msg string, keysAndValues ...interface{}) {
 			entry[key] = keysAndValues[i+1]
 		}
 	}
-	
+
 	data, _ := json.Marshal(entry)
 	fmt.Println(string(data))
 }
@@ -131,14 +131,14 @@ func (l *Logger) Warn(msg string, keysAndValues ...interface{}) {
 		"message":   msg,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
-	
+
 	for i := 0; i < len(keysAndValues); i += 2 {
 		if i+1 < len(keysAndValues) {
 			key := fmt.Sprintf("%v", keysAndValues[i])
 			entry[key] = keysAndValues[i+1]
 		}
 	}
-	
+
 	data, _ := json.Marshal(entry)
 	fmt.Println(string(data))
 }
@@ -149,14 +149,14 @@ func (l *Logger) Error(msg string, keysAndValues ...interface{}) {
 		"message":   msg,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
-	
+
 	for i := 0; i < len(keysAndValues); i += 2 {
 		if i+1 < len(keysAndValues) {
 			key := fmt.Sprintf("%v", keysAndValues[i])
 			entry[key] = keysAndValues[i+1]
 		}
 	}
-	
+
 	data, _ := json.Marshal(entry)
 	fmt.Println(string(data))
 }
@@ -171,7 +171,7 @@ func corsMiddleware(allowedOrigins, allowedMethods, allowedHeaders []string) fun
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
-			
+
 			// Check if origin is allowed
 			allowed := false
 			for _, allowedOrigin := range allowedOrigins {
@@ -180,20 +180,20 @@ func corsMiddleware(allowedOrigins, allowedMethods, allowedHeaders []string) fun
 					break
 				}
 			}
-			
+
 			if allowed {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 			}
-			
+
 			w.Header().Set("Access-Control-Allow-Methods", strings.Join(allowedMethods, ", "))
 			w.Header().Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
 			w.Header().Set("Access-Control-Max-Age", "86400")
-			
+
 			if r.Method == "OPTIONS" {
 				w.WriteHeader(http.StatusOK)
 				return
 			}
-			
+
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -206,7 +206,7 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 		if requestID == "" {
 			requestID = fmt.Sprintf("req_%d", time.Now().UnixNano())
 		}
-		
+
 		w.Header().Set("X-Request-ID", requestID)
 		next.ServeHTTP(w, r)
 	})
@@ -217,15 +217,15 @@ func loggingMiddleware(logger *Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
-			
+
 			// Wrap response writer to capture status code
 			wrapped := &responseWriter{ResponseWriter: w, statusCode: 200}
-			
+
 			next.ServeHTTP(wrapped, r)
-			
+
 			duration := time.Since(start)
 			requestID := w.Header().Get("X-Request-ID")
-			
+
 			logger.Info("HTTP Request",
 				"method", r.Method,
 				"path", r.URL.Path,
@@ -257,7 +257,7 @@ func healthCheckHandler() http.HandlerFunc {
 			"version":   "1.0.0",
 			"service":   "novacron-api",
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(response)
@@ -279,7 +279,7 @@ func apiInfoHandler() http.HandlerFunc {
 				"/api/monitoring/alerts",
 			},
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(response)

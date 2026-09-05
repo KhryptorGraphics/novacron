@@ -15,16 +15,16 @@ import (
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
-	"github.com/lib/pq"
 	"github.com/khryptorgraphics/novacron/backend/api/admin"
 	"github.com/khryptorgraphics/novacron/backend/api/monitoring"
 	"github.com/khryptorgraphics/novacron/backend/api/vm"
-	"github.com/khryptorgraphics/novacron/backend/core/hypervisor"
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
+	"github.com/khryptorgraphics/novacron/backend/core/hypervisor"
 	core_vm "github.com/khryptorgraphics/novacron/backend/core/vm"
 	"github.com/khryptorgraphics/novacron/backend/pkg/config"
 	"github.com/khryptorgraphics/novacron/backend/pkg/logger"
 	"github.com/khryptorgraphics/novacron/backend/pkg/middleware"
+	"github.com/lib/pq"
 )
 
 func main() {
@@ -72,7 +72,7 @@ func main() {
 	// Initialize VM manager
 	vmConfig := core_vm.VMManagerConfig{
 		DefaultDriver: core_vm.VMTypeKVM,
-		Drivers: make(map[core_vm.VMType]core_vm.VMDriverConfigManager),
+		Drivers:       make(map[core_vm.VMType]core_vm.VMDriverConfigManager),
 		Scheduler: core_vm.VMSchedulerConfig{
 			Type:   "round-robin",
 			Config: make(map[string]interface{}),
@@ -108,7 +108,7 @@ func main() {
 	databaseHandlers := admin.NewDatabaseHandlers(db)
 	securityHandlers := admin.NewSecurityHandlers(db)
 	configHandlers := admin.NewConfigHandlers("/etc/novacron")
-	
+
 	var monitoringHandlers *monitoring.MonitoringHandlers
 	if kvmManager != nil {
 		monitoringHandlers = monitoring.NewMonitoringHandlers(kvmManager)
@@ -137,7 +137,7 @@ func main() {
 	// Public routes (no authentication required)
 	router.HandleFunc("/api/auth/login", authLoginHandler(authManager)).Methods("POST", "OPTIONS")
 	router.HandleFunc("/api/auth/register", authRegisterHandler(authManager)).Methods("POST", "OPTIONS")
-	
+
 	// Create API router with authentication middleware
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	apiRouter.Use(middleware.AuthMiddleware(authManager))
@@ -159,7 +159,7 @@ func main() {
 		apiRouter.HandleFunc("/monitoring/vms", monitoringHandlers.GetVMMetrics).Methods("GET")
 		apiRouter.HandleFunc("/monitoring/alerts", monitoringHandlers.GetAlerts).Methods("GET")
 		apiRouter.HandleFunc("/monitoring/alerts/{id}/acknowledge", monitoringHandlers.AcknowledgeAlert).Methods("POST")
-		
+
 		// WebSocket endpoint for real-time monitoring
 		router.HandleFunc("/ws/monitoring", monitoringHandlers.HandleWebSocket).Methods("GET")
 	}
@@ -386,7 +386,7 @@ func apiInfoHandler() http.HandlerFunc {
 			"description": "Enhanced NovaCron Distributed VM Management System",
 			"features": []string{
 				"VM Management",
-				"User Administration", 
+				"User Administration",
 				"Security Dashboard",
 				"Database Administration",
 				"System Configuration",
@@ -413,24 +413,24 @@ func getVMsHandler(vmManager *core_vm.VMManager) http.HandlerFunc {
 		// Mock VM data for now
 		vms := []map[string]interface{}{
 			{
-				"id":       1,
-				"name":     "web-server-01",
-				"driver":   "kvm",
-				"status":   "running",
-				"cpu":      2,
-				"memory":   2048,
-				"disk":     20,
-				"node":     "node1",
+				"id":     1,
+				"name":   "web-server-01",
+				"driver": "kvm",
+				"status": "running",
+				"cpu":    2,
+				"memory": 2048,
+				"disk":   20,
+				"node":   "node1",
 			},
 			{
-				"id":       2,
-				"name":     "database-01",
-				"driver":   "container",
-				"status":   "stopped",
-				"cpu":      4,
-				"memory":   4096,
-				"disk":     50,
-				"node":     "node2",
+				"id":     2,
+				"name":   "database-01",
+				"driver": "container",
+				"status": "stopped",
+				"cpu":    4,
+				"memory": 4096,
+				"disk":   50,
+				"node":   "node2",
 			},
 		}
 
@@ -458,7 +458,7 @@ func getVMHandler(vmManager *core_vm.VMManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		vmID := vars["id"]
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      vmID,
@@ -528,20 +528,20 @@ func authLoginHandler(authManager *auth.SimpleAuthManager) http.HandlerFunc {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
+
 		var req struct {
 			Username string `json:"username"`
 			Password string `json:"password"`
 		}
-		
+
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-		
+
 		// Mock authentication for now
 		token := "mock-jwt-token"
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"token": token,
@@ -560,7 +560,7 @@ func authRegisterHandler(authManager *auth.SimpleAuthManager) http.HandlerFunc {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]interface{}{

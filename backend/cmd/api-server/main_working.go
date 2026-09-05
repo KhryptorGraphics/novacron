@@ -17,7 +17,7 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
-	
+
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
 	"github.com/khryptorgraphics/novacron/backend/pkg/config"
 	"github.com/khryptorgraphics/novacron/backend/pkg/logger"
@@ -263,9 +263,9 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"token": token,
 			"user": map[string]interface{}{
-				"id":       user.ID,
-				"username": user.Username,
-				"email":    user.Email,
+				"id":        user.ID,
+				"username":  user.Username,
+				"email":     user.Email,
 				"tenant_id": user.TenantID,
 			},
 		})
@@ -299,9 +299,9 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"user": map[string]interface{}{
-				"id":       user.ID,
-				"username": user.Username,
-				"email":    user.Email,
+				"id":        user.ID,
+				"username":  user.Username,
+				"email":     user.Email,
 				"tenant_id": user.TenantID,
 			},
 		})
@@ -313,7 +313,7 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 	// VM Management endpoints
 	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		
+
 		// Get VMs from database
 		rows, err := db.Query("SELECT id, name, state, node_id, created_at, updated_at FROM vms ORDER BY created_at DESC")
 		if err != nil {
@@ -326,12 +326,12 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 		for rows.Next() {
 			var id, name, state, nodeID string
 			var createdAt, updatedAt time.Time
-			
+
 			err := rows.Scan(&id, &name, &state, &nodeID, &createdAt, &updatedAt)
 			if err != nil {
 				continue
 			}
-			
+
 			vms = append(vms, map[string]interface{}{
 				"id":         id,
 				"name":       name,
@@ -360,7 +360,7 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 
 		// Generate a simple VM ID
 		vmID := fmt.Sprintf("vm-%d", time.Now().Unix())
-		
+
 		// Insert VM into database
 		_, err := db.Exec(`
 			INSERT INTO vms (id, name, state, node_id, owner_id, created_at, updated_at)
@@ -389,17 +389,17 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB) {
 		w.Header().Set("Content-Type", "application/json")
 		// Return mock system metrics
 		response := map[string]interface{}{
-			"currentCpuUsage":        45.2,
-			"currentMemoryUsage":     72.1,
-			"currentDiskUsage":       58.3,
-			"currentNetworkUsage":    125.7,
-			"cpuChangePercentage":    5.2,
-			"memoryChangePercentage": -2.1,
-			"diskChangePercentage":   1.8,
+			"currentCpuUsage":         45.2,
+			"currentMemoryUsage":      72.1,
+			"currentDiskUsage":        58.3,
+			"currentNetworkUsage":     125.7,
+			"cpuChangePercentage":     5.2,
+			"memoryChangePercentage":  -2.1,
+			"diskChangePercentage":    1.8,
 			"networkChangePercentage": 12.5,
-			"timeLabels":             []string{"10:00", "10:30", "11:00", "11:30", "12:00"},
-			"cpuAnalysis":            "CPU usage shows normal workday patterns.",
-			"memoryAnalysis":         "Memory allocation is healthy.",
+			"timeLabels":              []string{"10:00", "10:30", "11:00", "11:30", "12:00"},
+			"cpuAnalysis":             "CPU usage shows normal workday patterns.",
+			"memoryAnalysis":          "Memory allocation is healthy.",
 		}
 		json.NewEncoder(w).Encode(response)
 	}).Methods("GET")
