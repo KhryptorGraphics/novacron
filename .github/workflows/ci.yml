@@ -66,6 +66,12 @@ jobs:
           CGO_ENABLED: "1"
         run: go test -short -race ./vm/
 
+      - name: Install backend/core cgo prerequisites
+        # network/dwcp/transport/rdma compiles its real libibverbs variant whenever
+        # cgo && linux (rdma_cgo.go: `#cgo LDFLAGS: -libverbs`; rdma_native.c includes
+        # <infiniband/verbs.h>). ubuntu-latest lacks the headers; JetPack hosts ship them.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libibverbs-dev
+
       # The full backend/core census: every package compiles and its -short suite
       # is green (integration tests needing qemu/Docker self-skip on a bare runner;
       # the vm -race step above stays as the race gate).
