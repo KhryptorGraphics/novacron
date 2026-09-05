@@ -6,6 +6,135 @@ reflects the ACTUAL state of the code (verified by build + reading) and
 supersedes the older completion/production-ready reports now in `docs/archive/`,
 which overstate completion and should not be trusted.
 
+## Documentation layout
+
+- Canonical top-level docs: `STATUS.md`, `CLAUDE.md`, `README.md` (note: its
+  body still carries the stale MLE-Star template content — known-stale, out of
+  scope), `docs/agents/*`, `docs/CANONICAL_CONTRACT_MATRIX.md`.
+- Historical/unreviewed material lives under `docs/archive/`:
+  `docs/archive/masterdocs/` (the remainder of the deleted root `masterdocs/`
+  duplicate tree) and `docs/archive/fabricated-claims/` (documents flagged by
+  commit `3a75b5d1` as containing fabricated figures — do not cite).
+- Generator output (`graphify-out/`, `.memdb/`, `frontend/coverage/`) is
+  untracked and gitignored.
+
+
+## Swarm session 2 — 2026-09-04
+
+All eight defect beads + the prematurely-closed consensus bead closed with
+evidence this session; work ran as nine parallel workstreams plus an
+integration pass. Verification commands and outputs are quoted per item;
+nothing below is claimed without the cited command having run.
+
+### What landed (all verified 2026-09-04)
+
+- **DWCP testing harness rebuilt (product fix)** — `backend/core/network/dwcp/testing/`:
+  sample-and-scale design (≤64 MiB zstd-measured sample scaled to the logical
+  multi-GiB `VMSize`, simulated transfer timeline, utilization =
+  Σtransfer/Σ(transfer+latency)) replaces the full 8 GiB byte-fill that hung the
+  suite. `GenerateVMMemory` now panics above the sample cap so the hang cannot
+  return. Compression thresholds recalibrated to the measured real-zstd ratio
+  (3.336×, 10 independent 64 MiB runs; documented at each threshold). A
+  pre-existing data race in `ContinuousTesting.runTestSuite` (shared
+  harness state across concurrent scenarios) fixed; both packages pass `-race`.
+  `go test -count=1 -timeout 600s ./network/dwcp/testing/ ./network/dwcp/testing/scenarios/`
+  → ok 13.6s + ok 35.5s (was: hang).
+- **DWCP Manager compression wired; unwired components fail fast (product
+  fix)** — `backend/core/network/dwcp/`: new `compression_layer_hde.go` adapts
+  the root HDE onto the `CompressionLayer` interface; `DefaultConfig()`
+  `Compression.Enabled=true` now constructs and starts the layer for real and
+  its counters surface in `DWCPMetrics.Compression`. Enabling
+  prediction/sync/consensus without an implementation now fails startup
+  deterministically with `ErrCodeComponentNotWired` instead of logging
+  "deferred" TODOs. Stop drops the layer (Start→Stop→Start rebuilds fresh).
+  3 new tests; race gate `go test -race ./network/dwcp/ ./network/dwcp/v3/consensus/bullshark/`
+  ok 5/5.
+- **Raft pre-vote (product fix)** — `backend/core/consensus/raft.go`: a
+  node that still hears its leader refuses pre-vote probes
+  (`RequestVoteArgs.PreVote`, read-only receiver branch, `startPreVote`
+  wired into the election-timeout branch). Liveness gate reads a dedicated
+  `lastLeaderContact` (bumped only by leader-originated messages) — using the
+  brief's `lastHeartbeat` provably deadlocks re-election (resetElectionTimer
+  writes it). Regression `TestRaftNode_PreVotePreventsDisruptionOnHeal`
+  discriminated pre-fix (majority leader term 3→19 deposed on heal; minority
+  reached 19) and passes post-fix. Full non-short consensus suite ok 5
+  consecutive runs; `-race` partition/pre-vote gates ok. Closes `novacron-fpg`
+  and the reopened-then-reclosed `novacron-5ng` (all 4 named tests pass; the
+  bead's `testing.Short()` premise was stale — no Short() guards exist).
+- **Real email verification + password reset (product fix)** — api-server:
+  the four auth routes left as `notImplementedJSON`/no-op-success now work:
+  `auth_tokens` table (migration `000005`, sha256-hashed 32-byte tokens, one
+  live token per purpose), no-account-enumeration 200 responses, session
+  revocation on reset, `pending→active` promotion on verify, best-effort
+  verification email on registration; the fake `ForgotPassword`/`ResetPassword`
+  (returned success without doing anything) deleted. `SMTP_HOST` empty ⇒
+  fail-closed 503. LIVE-verified against a local SMTP sink: forgot-password
+  200 + mail with `/auth/reset-password?token=<hex64>`; reset 200 → token
+  reuse 400 → login with new password 200; verify-email `{"success":true}` →
+  psql `email_verified=t|active`. Frontend: new `reset-password` and
+  `verify-email` pages (+6 jest tests). Canonical CI package
+  `backend/api/security` had pinned the migration chain at 000004 — repaired
+  version-relative (assertions unchanged), 5× green.
+- **VM API: real `vcpus`, strict roles (product fix)** — `cpu_cores` now
+  stores the requested vCPU count (validated 1..256) instead of the 1024
+  scheduling weight (`cpu_shares` stays in metadata); KVM driver derives
+  `-smp` from `VMConfig.VCPUs` when set (default VMs byte-identical —
+  `TestBuildQEMUArgs*` green). Role writes reject unknown labels with the
+  valid-labels message instead of silently mapping to viewer (empty role
+  still defaults to viewer). LIVE-verified: `POST /api/vms {"vcpus":2}` → 201
+  `"vcpus":2`, psql `cpu_cores=2`, GET includes it, DELETE 200;
+  `{"role":"ghost"}` → 400; `{"role":"super-admin"}` → 200, DB role `admin`.
+- **backend/core `-short` census green (product fixes)** — 52 packages ok,
+  0 FAIL (baseline: 7 FAIL packages). Highlights: a real `local`
+  `StorageDriver` exists (`storage/driver_local.go`; tiering's
+  `shouldPromote` was demoting volumes toward archive — fixed); migration
+  checkpoints resolve `$STORAGE_PATH/checkpoints` instead of hardcoded
+  `/var/lib/novacron` (EACCES killed every orchestrator test), adaptive
+  compression no longer nil-derefs, each Prometheus exporter owns its
+  registry; `cmd/novacron` QMP failures were unix-socket `sun_path` overflow
+  from nested `t.TempDir()` paths (now reported honestly) + `qmp_startup_timeout`
+  knob + test stub honoring the liveness contract; bandwidth tests use `lo`;
+  federation no longer marks a freshly started node unhealthy by TCP-dialing
+  its own advertise address.
+- **Frontend lint 117 → 0 errors** — 36 files (hooks-order bug in
+  NetworkTopology, case-declaration braces, unescaped entities, unused vars,
+  a11y key handlers + label/heading fixes, next/image QR, no-op-function
+  hygiene). Warnings preserved at 352 (none converted to errors, none
+  disabled). `tsc --noEmit` 0; `next build` green; canonical jest 14 suites /
+  34 tests green; `npm run lint` exit 0.
+- **Infra/compose (product fixes)** — `docker-compose.test.yml` referenced
+  four nonexistent Dockerfiles (api-server/chaos/ml + frontend
+  `./frontend/Dockerfile`): now builds real images via
+  `docker/api.Dockerfile` + `docker/frontend.Dockerfile` (whose own
+  build-breaking defect was fixed); chaos/ml services deleted;
+  `docker/test-runner.Dockerfile` created; Makefile on `docker compose` v2
+  spelling + `redis-master` target; `scripts/init-test-db.sql` was an empty
+  root-owned directory (never a committed file) — the real extensions-only
+  file created; ai-engine gets `NUMBA_DISABLE_CUDA=1` (compose + Dockerfile);
+  `.gitignore` covers `graphify-out/`, `.memdb/`, `frontend/coverage/`,
+  `ruvector.db`; `.env.example` gains DB_PASSWORD + the SMTP block.
+  `docker compose config -q` green for test/prod/ai; test-runner+api-server+
+  frontend images build.
+- **Session-2 closures** — the session-1 "Still broken" beads were all
+  closed on 2026-09-04 (session 2) with evidence; details in the "Swarm
+  session 2" section above: `novacron-frz`/`novacron-slp` (dwcp testing
+  harness), `novacron-349` (dwcp Manager compression wired, others fail
+  fast), `novacron-5c7` (compose Dockerfiles), `novacron-8ba` (email
+  verification + password reset), `novacron-gwh` (NUMBA_DISABLE_CUDA),
+  `novacron-fpg` (pre-vote), `novacron-fb8` (docs prune + archive).
+
+### Known residues (honest, not regressions)
+
+- Pre-existing frontend suite `VMStatusGrid.test.tsx` (NOT in the canonical
+  CI list) fails on its own: it mocks `@/hooks/useVMData`, a module that has
+  never existed in git history (mock dates to 2025). Untouched this session.
+- Makefile `DB_TEST_URL`/integration DB targets still point at
+  `localhost:5432` (host postgres) while the test compose remaps postgres to
+  host 11432 — only relevant to `make test-integration-*`, flagged not fixed.
+- `go vet` prints the pre-existing `onnxruntime_go` build-constraint notice
+  on the module graph (reproduced at clean HEAD; package builds+tests green).
+- W6 commit message carries a typo ("unlired" for "unwired") — cosmetic.
+
 ## Swarm session — 2026-09-04
 
 ### What landed (all verified by build + test + live run today)
@@ -16,7 +145,8 @@ which overstate completion and should not be trusted.
   `TestRaftNode_NetworkPartition` is now deterministic (was ~1/3 flaky: a
   minority leader held `IsLeader()` forever — a real split-brain window).
   26/26 post-fix runs; also fixed the `GetStats` copylocks vet warning.
-  Known limit: disruption-on-heal (no pre-vote yet) — filed `novacron-fpg`.
+  Known limit: disruption-on-heal — closed by session 2 (pre-vote landed,
+  see above).
 - **DWCP Bullshark shutdown race (product fix)** — `v3/consensus/bullshark`:
   `Stop()` no longer closes buffered channels (cancel → `wg.Wait` → drain);
   `ProposeBlock` is ctx-guarded. The `panic: send on closed channel`
