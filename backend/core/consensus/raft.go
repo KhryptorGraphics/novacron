@@ -67,6 +67,21 @@ type RaftNode struct {
 	heartbeatTimeout time.Duration
 	lastHeartbeat    time.Time
 
+	// lastLeaderContact is the pre-vote liveness clock: the last time this
+	// node processed a message from a sitting leader (AppendEntries /
+	// InstallSnapshot with term >= currentTerm). It is deliberately separate
+	// from lastHeartbeat, which resetElectionTimer() also bumps on the node's
+	// OWN campaign activity (startElection/startPreVote) and on granted votes
+	// -- using it for the pre-vote freshness check would make a campaigning
+	// node look leader-fed and refuse peers' probes, deadlocking re-election
+	// after leader death. Guarded by mu. Zero value => probe-granting (a
+	// freshly started node has no leader to protect).
+	lastLeaderContact time.Time
+
+	// preVoteInFlight is true while a pre-vote campaign is being fanned out.
+	// Guarded by mu. Cleared on every term adoption and state transition.
+	preVoteInFlight bool
+
 	// Communication
 	transport Transport
 	storage   RaftStorage
@@ -156,6 +171,13 @@ type RequestVoteArgs struct {
 	CandidateID  string `json:"candidate_id"`
 	LastLogIndex int64  `json:"last_log_index"`
 	LastLogTerm  int64  `json:"last_log_term"`
+	// PreVote marks this RequestVote as a pre-vote probe: a pre-vote is
+	// answered from a read-only snapshot of the receiver's state and NEVER
+	// mutates currentTerm, votedFor, state, leaderID, or the election timer,
+	// so a partitioned candidate cannot inflate its term through rejected
+	// probes and the healed majority's leader keeps its term. (Beads
+	// novacron-fpg, novacron-5ng.)
+	PreVote bool `json:"pre_vote"`
 }
 
 type RequestVoteReply struct {
@@ -476,8 +498,8 @@ func (rn *RaftNode) run() {
 			if rn.state != Leader {
 				// Follower/candidate election-timeout path
 				if time.Since(rn.lastHeartbeat) >= rn.electionTimeout {
-					log.Printf("Node %s: Election timeout, starting election", rn.nodeID)
-					rn.startElection()
+					log.Printf("Node %s: Election timeout, starting pre-vote", rn.nodeID)
+					rn.startPreVote()
 				}
 			} else if rn.leadershipStart.Add(rn.electionTimeout).Before(time.Now()) {
 				// Leader check-quorum (Raft thesis §9.6, etcd "check-quorum"):
@@ -602,6 +624,7 @@ func (rn *RaftNode) startElection() {
 				rn.currentTerm = reply.Term
 				rn.votedFor = ""
 				rn.state = Follower
+				rn.preVoteInFlight = false
 				rn.persistState()
 				rn.resetElectionTimer()
 				return
@@ -622,6 +645,115 @@ func (rn *RaftNode) startElection() {
 	}
 }
 
+// startPreVote runs the pre-vote phase of an election (beads novacron-fpg,
+// novacron-5ng). Callers MUST hold rn.mu (run()'s tick path holds it; the
+// pre-vote reply path re-enters under lock).
+//
+// Instead of blindly incrementing the term, the node first probes the
+// cluster with PreVote RequestVote RPCs (Term = currentTerm + 1, answered
+// read-only by receivers). Only when a majority grants the probes does the
+// node proceed to a real startElection() -- at which point its term
+// increment can actually win. A minority partition can therefore never
+// inflate its term past a majority the majority itself would grant: each
+// probe is refused by any receiver that still hears its leader, so the
+// healed cluster keeps the majority leader's term. If the probe round is
+// denied or times out, the flag clears and the next election timeout
+// retries the probe; the term is untouched either way.
+func (rn *RaftNode) startPreVote() {
+	if rn.preVoteInFlight {
+		return
+	}
+	rn.preVoteInFlight = true
+	rn.resetElectionTimer()
+
+	log.Printf("Node %s: Starting pre-vote for prospective term %d", rn.nodeID, rn.currentTerm+1)
+
+	proposedTerm := rn.currentTerm + 1
+	lastLogIndex := int64(len(rn.log))
+	lastLogTerm := int64(0)
+	if lastLogIndex > 0 {
+		lastLogTerm = rn.log[lastLogIndex-1].Term
+	}
+
+	needed := len(rn.peers)/2 + 1
+	// Single node (or no quorum possible with no peers beyond self): go
+	// straight to the real election -- the term increment is safe because
+	// there is nobody to disrupt.
+	if needed <= 1 {
+		rn.preVoteInFlight = false
+		rn.startElection()
+		return
+	}
+
+	granted := 1 // self
+	responded := 0
+	peerCount := len(rn.peers) - 1
+
+	for _, peer := range rn.peers {
+		if peer == rn.nodeID {
+			continue
+		}
+
+		go func(peerID string) {
+			req := &RequestVoteArgs{
+				Term:         proposedTerm,
+				CandidateID:  rn.nodeID,
+				LastLogIndex: lastLogIndex,
+				LastLogTerm:  lastLogTerm,
+				PreVote:      true,
+			}
+
+			ctx, cancel := context.WithTimeout(rn.ctx, 100*time.Millisecond)
+			defer cancel()
+
+			reply, err := rn.transport.SendRequestVote(ctx, peerID, req)
+
+			rn.mu.Lock()
+			defer rn.mu.Unlock()
+
+			// The campaign is over if it was superseded (leader won
+			// elsewhere / a real election started / term adopted).
+			if !rn.preVoteInFlight || rn.state == Leader {
+				return
+			}
+
+			if err == nil && reply.Term > rn.currentTerm {
+				// A peer is in a term we have not seen: adopt it. This is
+				// the only pre-vote outcome that moves our term, and it is
+				// driven by REAL information (the peer's current term), not
+				// by our own speculative increment.
+				rn.currentTerm = reply.Term
+				rn.votedFor = ""
+				rn.state = Follower
+				rn.preVoteInFlight = false
+				rn.persistState()
+				rn.resetElectionTimer()
+				return
+			}
+
+			if err == nil && reply.VoteGranted {
+				granted++
+			}
+
+			responded++
+			switch {
+			case granted >= needed:
+				// Majority of the cluster would grant a real vote in
+				// proposedTerm: run the real election. granted/responded
+				// are dead after this, and preVoteInFlight=false makes any
+				// straggler reply a no-op.
+				rn.preVoteInFlight = false
+				rn.startElection()
+			case responded == peerCount:
+				// All peers answered but quorum denied: back off until the
+				// next election timeout.
+				rn.preVoteInFlight = false
+				rn.resetElectionTimer()
+			}
+		}(peer)
+	}
+}
+
 // Become leader
 func (rn *RaftNode) becomeLeader() {
 	if rn.state != Candidate {
@@ -632,7 +764,10 @@ func (rn *RaftNode) becomeLeader() {
 
 	rn.state = Leader
 	rn.leaderID = rn.nodeID
-	// Anchor for check-quorum: the grace window before quorum enforcement
+	// Defensive: a leadership can only begin via startElection (the pre-vote
+	// campaign already cleared its flag), but keep the invariant explicit --
+	// no pre-vote may be in flight while leading.
+	rn.preVoteInFlight = false
 	// begins runs from this instant.
 	rn.leadershipStart = time.Now()
 	// Fresh quorum-tracking state for the new leadership term.
@@ -682,7 +817,18 @@ func (rn *RaftNode) sendHeartbeats() {
 	}
 }
 
-// Replicate to all followers
+// stepDownToFollower demotes the node to follower in its current term. Callers
+// MUST hold rn.mu. currentTerm and votedFor are deliberately untouched: a
+// same-term step-down must not clear votedFor (that would allow double-voting
+// within the term), and the term is unchanged by construction. The election
+// timer IS reset so the demoted node can campaign again. Any in-flight
+// pre-vote campaign is abandoned with the leadership.
+func (rn *RaftNode) stepDownToFollower() {
+	rn.state = Follower
+	rn.leaderID = ""
+	rn.preVoteInFlight = false
+	rn.resetElectionTimer()
+}
 func (rn *RaftNode) replicateToAll() {
 	rn.mu.RLock()
 	if rn.state != Leader {
@@ -760,6 +906,7 @@ func (rn *RaftNode) replicateToPeer(peerID string) {
 		rn.votedFor = ""
 		rn.state = Follower
 		rn.leaderID = ""
+		rn.preVoteInFlight = false
 		rn.persistState()
 		rn.resetElectionTimer()
 		return
@@ -784,17 +931,6 @@ func (rn *RaftNode) replicateToPeer(peerID string) {
 		log.Printf("Node %s: Append entries failed for %s, backing up to %d",
 			rn.nodeID, peerID, rn.nextIndex[peerID])
 	}
-}
-
-// stepDownToFollower demotes the node to follower in its current term. Callers
-// MUST hold rn.mu. currentTerm and votedFor are deliberately untouched: a
-// same-term step-down must not clear votedFor (that would allow double-voting
-// within the term), and the term is unchanged by construction. The election
-// timer IS reset so the demoted node can campaign again.
-func (rn *RaftNode) stepDownToFollower() {
-	rn.state = Follower
-	rn.leaderID = ""
-	rn.resetElectionTimer()
 }
 
 // Update commit index based on match indices
@@ -871,11 +1007,46 @@ func (rn *RaftNode) HandleRequestVote(args *RequestVoteArgs) *RequestVoteReply {
 		VoteGranted: false,
 	}
 
-	// Reply false if term < currentTerm
+	// Reply false if term < currentTerm (stale candidate). Computed BEFORE
+	// the pre-vote branch: a pre-vote is answered from a read-only snapshot
+	// and must not advance the receiver's term.
 	if args.Term < rn.currentTerm {
 		return reply
 	}
 
+	// Compute the receiver's log recency exactly as the real-vote grant
+	// check below does; the pre-vote branch needs it too.
+	lastLogIndex := int64(len(rn.log))
+	lastLogTerm := int64(0)
+	if lastLogIndex > 0 {
+		lastLogTerm = rn.log[lastLogIndex-1].Term
+	}
+
+	// Pre-vote probe: answered read-only. The grant mirrors the real-vote
+	// log-recency rule but adds two liveness conditions -- the receiver must
+	// not currently be leading, and it must not currently believe it has a
+	// living leader. Leader liveness is measured on lastLeaderContact, the
+	// clock bumped ONLY by leader-originated messages (see the field comment):
+	// lastHeartbeat is also bumped by the node's own campaign activity and
+	// would make a campaigning node look leader-fed. A pre-vote NEVER mutates
+	// currentTerm, votedFor, state, leaderID, or the election timer: a node
+	// still hearing its leader refuses, so a partitioned candidate cannot
+	// inflate terms and disrupt the majority on heal (beads novacron-fpg,
+	// novacron-5ng).
+	if args.PreVote {
+		grantsLog := args.LastLogTerm > lastLogTerm ||
+			(args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex)
+		// Zero lastLeaderContact means "no leader contact ever observed":
+		// a fresh node must grant probes so a cluster can elect its first
+		// leader (and re-elect after this node restarts).
+		noLeaderContact := rn.lastLeaderContact.IsZero() ||
+			time.Since(rn.lastLeaderContact) >= rn.electionTimeout
+		reply.VoteGranted = args.Term >= rn.currentTerm &&
+			rn.state != Leader &&
+			noLeaderContact &&
+			grantsLog
+		return reply
+	}
 	// If RPC request or response contains term T > currentTerm:
 	// set currentTerm = T, convert to follower
 	if args.Term > rn.currentTerm {
@@ -883,17 +1054,12 @@ func (rn *RaftNode) HandleRequestVote(args *RequestVoteArgs) *RequestVoteReply {
 		rn.votedFor = ""
 		rn.state = Follower
 		rn.leaderID = ""
+		rn.preVoteInFlight = false
 		rn.persistState()
 	}
 
 	// Update term in reply
 	reply.Term = rn.currentTerm
-
-	lastLogIndex := int64(len(rn.log))
-	lastLogTerm := int64(0)
-	if lastLogIndex > 0 {
-		lastLogTerm = rn.log[lastLogIndex-1].Term
-	}
 
 	// Grant vote if:
 	// - Haven't voted for anyone else in this term
@@ -934,12 +1100,16 @@ func (rn *RaftNode) HandleAppendEntries(args *AppendEntriesArgs) *AppendEntriesR
 		rn.currentTerm = args.Term
 		rn.votedFor = ""
 		rn.state = Follower
+		rn.preVoteInFlight = false
 		rn.persistState()
 	}
 
-	// Update leader and reset election timer
+	// Update leader and reset election timer. This is genuine leader
+	// contact: it feeds both the election timer and the pre-vote liveness
+	// clock lastLeaderContact, which the pre-vote receiver branch reads.
 	rn.leaderID = args.LeaderID
 	rn.state = Follower
+	rn.lastLeaderContact = time.Now()
 	rn.resetElectionTimer()
 
 	rn.stats.mu.Lock()

@@ -10,60 +10,60 @@ import (
 // SplitBrainDetector detects and resolves split-brain scenarios
 type SplitBrainDetector struct {
 	mu sync.RWMutex
-	
+
 	// Core components
-	raftNode      *RaftNode
-	membership    *ClusterMembership
-	
+	raftNode   *RaftNode
+	membership *ClusterMembership
+
 	// Detection state
-	partitionMap  map[string]*Partition
-	lastLeaderSeen time.Time
+	partitionMap    map[string]*Partition
+	lastLeaderSeen  time.Time
 	multipleLeaders []string
-	
+
 	// Configuration
-	config        SplitBrainConfig
-	
+	config SplitBrainConfig
+
 	// Resolution strategies
-	resolver      ResolutionStrategy
-	
+	resolver ResolutionStrategy
+
 	// Monitoring
-	stopChan      chan struct{}
-	metrics       SplitBrainMetrics
-	
+	stopChan chan struct{}
+	metrics  SplitBrainMetrics
+
 	// Witness nodes for tie-breaking
-	witnesses     []string
+	witnesses []string
 }
 
 // Partition represents a network partition
 type Partition struct {
-	ID            string
-	Nodes         []string
-	Leader        string
-	Size          int
-	LastContact   time.Time
-	HasQuorum     bool
-	DataVersion   int64
+	ID          string
+	Nodes       []string
+	Leader      string
+	Size        int
+	LastContact time.Time
+	HasQuorum   bool
+	DataVersion int64
 }
 
 // SplitBrainConfig contains configuration for split-brain detection
 type SplitBrainConfig struct {
-	DetectionInterval   time.Duration
-	LeaderTimeout       time.Duration
-	PartitionThreshold  time.Duration
-	EnableAutoResolution bool
+	DetectionInterval     time.Duration
+	LeaderTimeout         time.Duration
+	PartitionThreshold    time.Duration
+	EnableAutoResolution  bool
 	PreferLargerPartition bool
-	UseWitnessNodes     bool
-	MaxLeaderElections  int
+	UseWitnessNodes       bool
+	MaxLeaderElections    int
 }
 
 // SplitBrainMetrics tracks split-brain related metrics
 type SplitBrainMetrics struct {
-	DetectionsCount     int64
-	ResolutionsCount    int64
-	LastDetection       time.Time
-	LastResolution      time.Time
-	FalsePositives      int64
-	ResolutionFailures  int64
+	DetectionsCount       int64
+	ResolutionsCount      int64
+	LastDetection         time.Time
+	LastResolution        time.Time
+	FalsePositives        int64
+	ResolutionFailures    int64
 	AverageResolutionTime time.Duration
 }
 
@@ -99,7 +99,7 @@ func NewSplitBrainDetector(raftNode *RaftNode, membership *ClusterMembership, co
 	if config.PartitionThreshold == 0 {
 		config.PartitionThreshold = 30 * time.Second
 	}
-	
+
 	sbd := &SplitBrainDetector{
 		raftNode:     raftNode,
 		membership:   membership,
@@ -108,7 +108,7 @@ func NewSplitBrainDetector(raftNode *RaftNode, membership *ClusterMembership, co
 		stopChan:     make(chan struct{}),
 		witnesses:    make([]string, 0),
 	}
-	
+
 	// Select resolution strategy based on configuration
 	if config.UseWitnessNodes {
 		sbd.resolver = &WitnessBasedResolver{witnesses: sbd.witnesses}
@@ -117,7 +117,7 @@ func NewSplitBrainDetector(raftNode *RaftNode, membership *ClusterMembership, co
 	} else {
 		sbd.resolver = &QuorumBasedResolver{minQuorumSize: membership.quorumNodes}
 	}
-	
+
 	return sbd
 }
 
@@ -135,7 +135,7 @@ func (sbd *SplitBrainDetector) Stop() {
 func (sbd *SplitBrainDetector) AddWitnessNode(nodeAddress string) {
 	sbd.mu.Lock()
 	defer sbd.mu.Unlock()
-	
+
 	sbd.witnesses = append(sbd.witnesses, nodeAddress)
 }
 
@@ -143,7 +143,7 @@ func (sbd *SplitBrainDetector) AddWitnessNode(nodeAddress string) {
 func (sbd *SplitBrainDetector) detectionLoop() {
 	ticker := time.NewTicker(sbd.config.DetectionInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -158,20 +158,20 @@ func (sbd *SplitBrainDetector) detectionLoop() {
 func (sbd *SplitBrainDetector) detectSplitBrain() {
 	sbd.mu.Lock()
 	defer sbd.mu.Unlock()
-	
+
 	// Get current cluster state
 	nodes := sbd.membership.GetAllNodes()
-	
+
 	// Identify partitions
 	partitions := sbd.identifyPartitions(nodes)
-	
+
 	// Check for multiple leaders
 	leadersFound := sbd.checkMultipleLeaders(partitions)
-	
+
 	if leadersFound > 1 {
 		sbd.metrics.DetectionsCount++
 		sbd.metrics.LastDetection = time.Now()
-		
+
 		if sbd.config.EnableAutoResolution {
 			sbd.resolveSplitBrain(partitions)
 		} else {
@@ -185,31 +185,31 @@ func (sbd *SplitBrainDetector) detectSplitBrain() {
 func (sbd *SplitBrainDetector) identifyPartitions(nodes map[string]*NodeInfo) []*Partition {
 	partitions := make([]*Partition, 0)
 	visited := make(map[string]bool)
-	
+
 	for nodeID, node := range nodes {
 		if visited[nodeID] {
 			continue
 		}
-		
+
 		// Create a new partition starting from this node
 		partition := &Partition{
 			ID:          fmt.Sprintf("partition-%d", len(partitions)),
 			Nodes:       []string{nodeID},
 			LastContact: node.LastHeartbeat,
 		}
-		
+
 		visited[nodeID] = true
-		
+
 		// Find all nodes reachable from this node
 		sbd.expandPartition(partition, nodes, visited)
-		
+
 		// Determine if this partition has quorum
 		partition.HasQuorum = len(partition.Nodes) > len(nodes)/2
 		partition.Size = len(partition.Nodes)
-		
+
 		partitions = append(partitions, partition)
 	}
-	
+
 	return partitions
 }
 
@@ -217,19 +217,19 @@ func (sbd *SplitBrainDetector) identifyPartitions(nodes map[string]*NodeInfo) []
 func (sbd *SplitBrainDetector) expandPartition(partition *Partition, nodes map[string]*NodeInfo, visited map[string]bool) {
 	// In a real implementation, this would check actual network connectivity
 	// For now, we'll use heartbeat timing to determine reachability
-	
+
 	threshold := time.Now().Add(-sbd.config.PartitionThreshold)
-	
+
 	for nodeID, node := range nodes {
 		if visited[nodeID] {
 			continue
 		}
-		
+
 		// Check if this node is reachable (recent heartbeat)
 		if node.LastHeartbeat.After(threshold) {
 			partition.Nodes = append(partition.Nodes, nodeID)
 			visited[nodeID] = true
-			
+
 			// Update partition's last contact time
 			if node.LastHeartbeat.After(partition.LastContact) {
 				partition.LastContact = node.LastHeartbeat
@@ -242,7 +242,7 @@ func (sbd *SplitBrainDetector) expandPartition(partition *Partition, nodes map[s
 func (sbd *SplitBrainDetector) checkMultipleLeaders(partitions []*Partition) int {
 	leadersFound := 0
 	sbd.multipleLeaders = []string{}
-	
+
 	for _, partition := range partitions {
 		// Check if any node in this partition thinks it's a leader
 		for _, nodeID := range partition.Nodes {
@@ -254,7 +254,7 @@ func (sbd *SplitBrainDetector) checkMultipleLeaders(partitions []*Partition) int
 			}
 		}
 	}
-	
+
 	return leadersFound
 }
 
@@ -299,7 +299,7 @@ func (sbd *SplitBrainDetector) isNodeLeader(nodeID string) bool {
 // resolveSplitBrain attempts to resolve a split-brain scenario
 func (sbd *SplitBrainDetector) resolveSplitBrain(partitions []*Partition) {
 	startTime := time.Now()
-	
+
 	// Use the configured resolution strategy
 	winningPartition, err := sbd.resolver.Resolve(partitions)
 	if err != nil {
@@ -307,18 +307,18 @@ func (sbd *SplitBrainDetector) resolveSplitBrain(partitions []*Partition) {
 		fmt.Printf("Failed to resolve split-brain: %v\n", err)
 		return
 	}
-	
+
 	// Force non-winning partitions to step down
 	for _, partition := range partitions {
 		if partition.ID != winningPartition.ID {
 			sbd.forcePartitionStepDown(partition)
 		}
 	}
-	
+
 	sbd.metrics.ResolutionsCount++
 	sbd.metrics.LastResolution = time.Now()
 	sbd.metrics.AverageResolutionTime = time.Since(startTime)
-	
+
 	fmt.Printf("Split-brain resolved: partition %s selected as authoritative\n", winningPartition.ID)
 }
 
@@ -346,7 +346,7 @@ func (sbd *SplitBrainDetector) forcePartitionStepDown(partition *Partition) {
 func (sbd *SplitBrainDetector) GetMetrics() SplitBrainMetrics {
 	sbd.mu.RLock()
 	defer sbd.mu.RUnlock()
-	
+
 	return sbd.metrics
 }
 
@@ -354,7 +354,7 @@ func (sbd *SplitBrainDetector) GetMetrics() SplitBrainMetrics {
 func (sbd *SplitBrainDetector) IsInSplitBrain() bool {
 	sbd.mu.RLock()
 	defer sbd.mu.RUnlock()
-	
+
 	return len(sbd.multipleLeaders) > 1
 }
 
@@ -362,12 +362,12 @@ func (sbd *SplitBrainDetector) IsInSplitBrain() bool {
 func (sbd *SplitBrainDetector) GetPartitions() []*Partition {
 	sbd.mu.RLock()
 	defer sbd.mu.RUnlock()
-	
+
 	partitions := make([]*Partition, 0, len(sbd.partitionMap))
 	for _, partition := range sbd.partitionMap {
 		partitions = append(partitions, partition)
 	}
-	
+
 	return partitions
 }
 
@@ -380,22 +380,22 @@ func (qbr *QuorumBasedResolver) Resolve(partitions []*Partition) (*Partition, er
 			return partition, nil
 		}
 	}
-	
+
 	// If no partition has quorum, select the largest
 	var largest *Partition
 	maxSize := 0
-	
+
 	for _, partition := range partitions {
 		if partition.Size > maxSize {
 			largest = partition
 			maxSize = partition.Size
 		}
 	}
-	
+
 	if largest != nil {
 		return largest, nil
 	}
-	
+
 	return nil, fmt.Errorf("no valid partition found")
 }
 
@@ -403,18 +403,18 @@ func (qbr *QuorumBasedResolver) Resolve(partitions []*Partition) (*Partition, er
 func (mbr *MajorityBasedResolver) Resolve(partitions []*Partition) (*Partition, error) {
 	var largest *Partition
 	maxSize := 0
-	
+
 	for _, partition := range partitions {
 		if partition.Size > maxSize {
 			largest = partition
 			maxSize = partition.Size
 		}
 	}
-	
+
 	if largest != nil {
 		return largest, nil
 	}
-	
+
 	return nil, fmt.Errorf("no valid partition found")
 }
 
@@ -427,7 +427,7 @@ func (wbr *WitnessBasedResolver) Resolve(partitions []*Partition) (*Partition, e
 			return partition, nil
 		}
 	}
-	
+
 	// Fallback to largest partition
 	return (&MajorityBasedResolver{}).Resolve(partitions)
 }
@@ -436,18 +436,18 @@ func (wbr *WitnessBasedResolver) Resolve(partitions []*Partition) (*Partition, e
 func (dvr *DataVersionResolver) Resolve(partitions []*Partition) (*Partition, error) {
 	var newest *Partition
 	maxVersion := int64(0)
-	
+
 	for _, partition := range partitions {
 		if partition.DataVersion > maxVersion {
 			newest = partition
 			maxVersion = partition.DataVersion
 		}
 	}
-	
+
 	if newest != nil {
 		return newest, nil
 	}
-	
+
 	return nil, fmt.Errorf("no valid partition found")
 }
 
@@ -455,13 +455,13 @@ func (dvr *DataVersionResolver) Resolve(partitions []*Partition) (*Partition, er
 func (sbd *SplitBrainDetector) FenceNode(nodeID string) error {
 	sbd.mu.Lock()
 	defer sbd.mu.Unlock()
-	
+
 	// Remove the node from membership
 	err := sbd.membership.RemoveNode(nodeID, "Fenced due to split-brain prevention")
 	if err != nil {
 		return fmt.Errorf("failed to fence node %s: %v", nodeID, err)
 	}
-	
+
 	// If it's the local node, step down
 	if nodeID == sbd.raftNode.nodeID {
 		sbd.raftNode.mu.Lock()
@@ -469,7 +469,7 @@ func (sbd *SplitBrainDetector) FenceNode(nodeID string) error {
 		sbd.raftNode.votedFor = ""
 		sbd.raftNode.mu.Unlock()
 	}
-	
+
 	return nil
 }
 
@@ -478,7 +478,7 @@ func (sbd *SplitBrainDetector) PreventSplitBrain(ctx context.Context) error {
 	// Check if we're about to lose quorum
 	healthyNodes := sbd.membership.GetHealthyNodes()
 	totalNodes := len(sbd.membership.GetAllNodes())
-	
+
 	if len(healthyNodes) <= totalNodes/2 {
 		// About to lose quorum - take preventive action
 		if sbd.raftNode.state == Leader {
@@ -487,10 +487,10 @@ func (sbd *SplitBrainDetector) PreventSplitBrain(ctx context.Context) error {
 			sbd.raftNode.state = Follower
 			sbd.raftNode.votedFor = ""
 			sbd.raftNode.mu.Unlock()
-			
+
 			return fmt.Errorf("stepped down to prevent split-brain: only %d/%d nodes healthy", len(healthyNodes), totalNodes)
 		}
 	}
-	
+
 	return nil
 }

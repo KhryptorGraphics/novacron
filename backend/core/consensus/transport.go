@@ -28,19 +28,19 @@ func NewHTTPTransport(nodeAddresses map[string]string, bindAddr string) *HTTPTra
 			Timeout: 200 * time.Millisecond,
 		},
 	}
-	
+
 	// Create HTTP server
 	mux := http.NewServeMux()
 	mux.HandleFunc("/raft/request_vote", transport.handleRequestVote)
 	mux.HandleFunc("/raft/append_entries", transport.handleAppendEntries)
 	mux.HandleFunc("/raft/install_snapshot", transport.handleInstallSnapshot)
 	mux.HandleFunc("/raft/leader_state", transport.handleQueryLeaderState)
-	
+
 	transport.server = &http.Server{
 		Addr:    bindAddr,
 		Handler: mux,
 	}
-	
+
 	return transport
 }
 
@@ -73,11 +73,11 @@ func (t *HTTPTransport) SendRequestVote(ctx context.Context, nodeID string, req 
 	t.mu.RLock()
 	addr, exists := t.nodeAddresses[nodeID]
 	t.mu.RUnlock()
-	
+
 	if !exists {
 		return nil, fmt.Errorf("unknown node: %s", nodeID)
 	}
-	
+
 	url := fmt.Sprintf("http://%s/raft/request_vote", addr)
 	reply := &RequestVoteReply{}
 	err := t.sendRPC(ctx, url, req, reply)
@@ -89,11 +89,11 @@ func (t *HTTPTransport) SendAppendEntries(ctx context.Context, nodeID string, re
 	t.mu.RLock()
 	addr, exists := t.nodeAddresses[nodeID]
 	t.mu.RUnlock()
-	
+
 	if !exists {
 		return nil, fmt.Errorf("unknown node: %s", nodeID)
 	}
-	
+
 	url := fmt.Sprintf("http://%s/raft/append_entries", addr)
 	reply := &AppendEntriesReply{}
 	err := t.sendRPC(ctx, url, req, reply)
@@ -105,11 +105,11 @@ func (t *HTTPTransport) SendSnapshot(ctx context.Context, nodeID string, req *In
 	t.mu.RLock()
 	addr, exists := t.nodeAddresses[nodeID]
 	t.mu.RUnlock()
-	
+
 	if !exists {
 		return nil, fmt.Errorf("unknown node: %s", nodeID)
 	}
-	
+
 	url := fmt.Sprintf("http://%s/raft/install_snapshot", addr)
 	reply := &InstallSnapshotReply{}
 	err := t.sendRPC(ctx, url, req, reply)
@@ -122,11 +122,11 @@ func (t *HTTPTransport) QueryLeaderState(ctx context.Context, nodeID string) (*L
 	t.mu.RLock()
 	addr, exists := t.nodeAddresses[nodeID]
 	t.mu.RUnlock()
-	
+
 	if !exists {
 		return nil, fmt.Errorf("unknown node: %s", nodeID)
 	}
-	
+
 	url := fmt.Sprintf("http://%s/raft/leader_state", addr)
 	reply := &LeaderStateReply{}
 	err := t.sendRPC(ctx, url, &LeaderStateArgs{}, reply)
@@ -140,36 +140,36 @@ func (t *HTTPTransport) sendRPC(ctx context.Context, url string, request interfa
 	if err != nil {
 		return fmt.Errorf("failed to marshal request: %v", err)
 	}
-	
+
 	// Create HTTP request
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	// Send request
 	resp, err := t.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %v", err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("request failed with status: %d", resp.StatusCode)
 	}
-	
+
 	// Read response
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response: %v", err)
 	}
-	
+
 	// Unmarshal response
 	if err := json.Unmarshal(responseBody, response); err != nil {
 		return fmt.Errorf("failed to unmarshal response: %v", err)
 	}
-	
+
 	return nil
 }
 
@@ -180,33 +180,33 @@ func (t *HTTPTransport) handleRequestVote(w http.ResponseWriter, r *http.Request
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	// Read request body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read body", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Parse request
 	var req RequestVoteArgs
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "Failed to parse request", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Process request
 	t.mu.RLock()
 	raftNode := t.raftNode
 	t.mu.RUnlock()
-	
+
 	if raftNode == nil {
 		http.Error(w, "Raft node not initialized", http.StatusServiceUnavailable)
 		return
 	}
-	
+
 	reply := raftNode.HandleRequestVote(&req)
-	
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(reply); err != nil {
@@ -219,33 +219,33 @@ func (t *HTTPTransport) handleAppendEntries(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	// Read request body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read body", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Parse request
 	var req AppendEntriesArgs
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "Failed to parse request", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Process request
 	t.mu.RLock()
 	raftNode := t.raftNode
 	t.mu.RUnlock()
-	
+
 	if raftNode == nil {
 		http.Error(w, "Raft node not initialized", http.StatusServiceUnavailable)
 		return
 	}
-	
+
 	reply := raftNode.HandleAppendEntries(&req)
-	
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(reply); err != nil {
@@ -258,33 +258,33 @@ func (t *HTTPTransport) handleInstallSnapshot(w http.ResponseWriter, r *http.Req
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	// Read request body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read body", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Parse request
 	var req InstallSnapshotArgs
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "Failed to parse request", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Process request
 	t.mu.RLock()
 	raftNode := t.raftNode
 	t.mu.RUnlock()
-	
+
 	if raftNode == nil {
 		http.Error(w, "Raft node not initialized", http.StatusServiceUnavailable)
 		return
 	}
-	
+
 	reply := raftNode.HandleInstallSnapshot(&req)
-	
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(reply); err != nil {
@@ -297,18 +297,18 @@ func (t *HTTPTransport) handleQueryLeaderState(w http.ResponseWriter, r *http.Re
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	t.mu.RLock()
 	raftNode := t.raftNode
 	t.mu.RUnlock()
-	
+
 	if raftNode == nil {
 		http.Error(w, "Raft node not initialized", http.StatusServiceUnavailable)
 		return
 	}
-	
+
 	reply := raftNode.HandleQueryLeaderState()
-	
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(reply); err != nil {
@@ -320,31 +320,35 @@ func (t *HTTPTransport) handleQueryLeaderState(w http.ResponseWriter, r *http.Re
 func (rn *RaftNode) HandleInstallSnapshot(args *InstallSnapshotArgs) *InstallSnapshotReply {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
-	
+
 	reply := &InstallSnapshotReply{
 		Term: rn.currentTerm,
 	}
-	
+
 	// Reply immediately if term < currentTerm
 	if args.Term < rn.currentTerm {
 		return reply
 	}
-	
+
 	// Convert to follower if newer term
 	if args.Term > rn.currentTerm {
 		rn.currentTerm = args.Term
 		rn.votedFor = ""
 		rn.state = Follower
 		rn.leaderID = args.LeaderID
+		rn.preVoteInFlight = false
 		rn.persistState()
 	}
-	
+
+	// A snapshot from the sitting leader is genuine leader contact: it feeds
+	// both the election timer and the pre-vote liveness clock.
+	rn.lastLeaderContact = time.Now()
 	rn.resetElectionTimer()
 	reply.Term = rn.currentTerm
-	
+
 	// Save snapshot data (in a real implementation, this would be more sophisticated)
 	// For now, we'll just truncate the log and update indices
-	
+
 	// If existing log entry has same index and term as snapshot's last included entry,
 	// retain log entries following it
 	if args.LastIncludedIndex <= int64(len(rn.log)) {
@@ -363,29 +367,29 @@ func (rn *RaftNode) HandleInstallSnapshot(args *InstallSnapshotArgs) *InstallSna
 		// Discard entire log
 		rn.log = make([]LogEntry, 0)
 	}
-	
+
 	// The snapshot reshapes the whole log (entries are reindexed), so the
 	// persisted log is rebuilt wholesale: discard everything, then persist
 	// the retained/reindexed suffix.
 	rn.persistTruncate(1)
 	rn.persistAppend(rn.log)
-	
+
 	// Update state
 	rn.commitIndex = args.LastIncludedIndex
 	rn.lastApplied = args.LastIncludedIndex
-	
+
 	return reply
 }
 
 // InMemoryTransport implements Transport for testing
 type InMemoryTransport struct {
-	nodes map[string]*InMemoryTransport
-	id    string
+	nodes    map[string]*InMemoryTransport
+	id       string
 	raftNode *RaftNode
-	mu    sync.RWMutex
-	
+	mu       sync.RWMutex
+
 	// Simulate network conditions
-	dropRate   float64 // Probability of dropping messages
+	dropRate   float64          // Probability of dropping messages
 	delayRange [2]time.Duration // Min and max delay
 }
 
@@ -401,9 +405,9 @@ func NewInMemoryTransport(id string) *InMemoryTransport {
 func (t *InMemoryTransport) Connect(other *InMemoryTransport) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	
+
 	t.nodes[other.id] = other
-	
+
 	other.mu.Lock()
 	defer other.mu.Unlock()
 	other.nodes[t.id] = t
@@ -421,11 +425,11 @@ func (t *InMemoryTransport) SendRequestVote(ctx context.Context, nodeID string, 
 	t.mu.RLock()
 	target, exists := t.nodes[nodeID]
 	t.mu.RUnlock()
-	
+
 	if !exists {
 		return nil, fmt.Errorf("unknown node: %s", nodeID)
 	}
-	
+
 	// Simulate network delay
 	if t.delayRange[1] > 0 {
 		delay := t.delayRange[0] + time.Duration(float64(t.delayRange[1]-t.delayRange[0])*0.5)
@@ -435,15 +439,15 @@ func (t *InMemoryTransport) SendRequestVote(ctx context.Context, nodeID string, 
 			return nil, ctx.Err()
 		}
 	}
-	
+
 	target.mu.RLock()
 	raftNode := target.raftNode
 	target.mu.RUnlock()
-	
+
 	if raftNode == nil {
 		return nil, fmt.Errorf("target node not initialized")
 	}
-	
+
 	return raftNode.HandleRequestVote(req), nil
 }
 
@@ -452,11 +456,11 @@ func (t *InMemoryTransport) SendAppendEntries(ctx context.Context, nodeID string
 	t.mu.RLock()
 	target, exists := t.nodes[nodeID]
 	t.mu.RUnlock()
-	
+
 	if !exists {
 		return nil, fmt.Errorf("unknown node: %s", nodeID)
 	}
-	
+
 	// Simulate network delay
 	if t.delayRange[1] > 0 {
 		delay := t.delayRange[0] + time.Duration(float64(t.delayRange[1]-t.delayRange[0])*0.5)
@@ -466,15 +470,15 @@ func (t *InMemoryTransport) SendAppendEntries(ctx context.Context, nodeID string
 			return nil, ctx.Err()
 		}
 	}
-	
+
 	target.mu.RLock()
 	raftNode := target.raftNode
 	target.mu.RUnlock()
-	
+
 	if raftNode == nil {
 		return nil, fmt.Errorf("target node not initialized")
 	}
-	
+
 	return raftNode.HandleAppendEntries(req), nil
 }
 
@@ -483,11 +487,11 @@ func (t *InMemoryTransport) SendSnapshot(ctx context.Context, nodeID string, req
 	t.mu.RLock()
 	target, exists := t.nodes[nodeID]
 	t.mu.RUnlock()
-	
+
 	if !exists {
 		return nil, fmt.Errorf("unknown node: %s", nodeID)
 	}
-	
+
 	// Simulate network delay
 	if t.delayRange[1] > 0 {
 		delay := t.delayRange[0] + time.Duration(float64(t.delayRange[1]-t.delayRange[0])*0.5)
@@ -497,15 +501,15 @@ func (t *InMemoryTransport) SendSnapshot(ctx context.Context, nodeID string, req
 			return nil, ctx.Err()
 		}
 	}
-	
+
 	target.mu.RLock()
 	raftNode := target.raftNode
 	target.mu.RUnlock()
-	
+
 	if raftNode == nil {
 		return nil, fmt.Errorf("target node not initialized")
 	}
-	
+
 	return raftNode.HandleInstallSnapshot(req), nil
 }
 
@@ -515,11 +519,11 @@ func (t *InMemoryTransport) QueryLeaderState(ctx context.Context, nodeID string)
 	t.mu.RLock()
 	target, exists := t.nodes[nodeID]
 	t.mu.RUnlock()
-	
+
 	if !exists {
 		return nil, fmt.Errorf("unknown node: %s", nodeID)
 	}
-	
+
 	// Simulate network delay
 	if t.delayRange[1] > 0 {
 		delay := t.delayRange[0] + time.Duration(float64(t.delayRange[1]-t.delayRange[0])*0.5)
@@ -529,15 +533,15 @@ func (t *InMemoryTransport) QueryLeaderState(ctx context.Context, nodeID string)
 			return nil, ctx.Err()
 		}
 	}
-	
+
 	target.mu.RLock()
 	raftNode := target.raftNode
 	target.mu.RUnlock()
-	
+
 	if raftNode == nil {
 		return nil, fmt.Errorf("target node not initialized")
 	}
-	
+
 	return raftNode.HandleQueryLeaderState(), nil
 }
 
@@ -545,7 +549,7 @@ func (t *InMemoryTransport) QueryLeaderState(ctx context.Context, nodeID string)
 func (t *InMemoryTransport) SetNetworkConditions(dropRate float64, minDelay, maxDelay time.Duration) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	
+
 	t.dropRate = dropRate
 	t.delayRange[0] = minDelay
 	t.delayRange[1] = maxDelay

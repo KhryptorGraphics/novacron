@@ -490,9 +490,11 @@ func TestRaftNode_ApplyChannel(t *testing.T) {
 //
 // Known scope limit: check-quorum fixes the *leader* side (no stale leader
 // serving a minority). A deposed minority node re-campaigning with ever
-// higher terms can still disrupt the majority in a one-way partition; the
-// standard mitigation is pre-vote, which needs a new Transport RPC method
-// and is intentionally out of scope here.
+// higher terms could still disrupt the majority in a one-way partition; the
+// standard mitigation is pre-vote, which landed 2026-09-04 as a flag on the
+// existing RequestVote RPC (RequestVoteArgs.PreVote + startPreVote in
+// raft.go) and is covered by TestRaftNode_PreVotePreventsDisruptionOnHeal
+// below.
 func TestRaftNode_NetworkPartition(t *testing.T) {
 	// Create a 5-node cluster to test network partitions
 	nodes := make([]*RaftNode, 5)
@@ -612,6 +614,129 @@ func TestRaftNode_NetworkPartition(t *testing.T) {
 		_, _, ok := majorityLeader.Submit("during_partition")
 		if !ok {
 			t.Error("Majority leader should be able to accept commands")
+		}
+	}
+}
+
+// TestRaftNode_PreVotePreventsDisruptionOnHeal is the pre-vote regression
+// test (beads novacron-fpg, novacron-5ng). Without pre-vote, a partitioned
+// minority re-campaigns on every election timeout with an ever-higher term;
+// when the partition heals, those inflated terms depose the majority's
+// stable leader. With pre-vote (flag on the existing RequestVote RPC), the
+// minority can never inflate its term -- a node that still hears its leader
+// refuses the pre-vote probe -- so the heal is non-disruptive.
+//
+// Pre-fix expectation (verified 2026-09-04 against the pre-change tree):
+// the test FAILS on the untouched code -- the minority terms inflate by
+// roughly one per 150-300ms election timeout and the heal changes the
+// majority leader's term (or deposes it). The test therefore discriminates.
+func TestRaftNode_PreVotePreventsDisruptionOnHeal(t *testing.T) {
+	// 5-node cluster, same setup as TestRaftNode_NetworkPartition.
+	nodes := make([]*RaftNode, 5)
+	transports := make([]*InMemoryTransport, 5)
+
+	peers := []string{"node1", "node2", "node3", "node4", "node5"}
+
+	for i := range 5 {
+		nodeID := peers[i]
+		transports[i] = NewInMemoryTransport(nodeID)
+		nodes[i] = NewRaftNode(nodeID, peers, transports[i])
+		transports[i].SetRaftNode(nodes[i])
+	}
+
+	// Connect transports (full mesh).
+	for i := range 5 {
+		for j := range 5 {
+			if i != j {
+				transports[i].Connect(transports[j])
+			}
+		}
+	}
+
+	for i := range 5 {
+		nodes[i].Start()
+	}
+	defer func() {
+		for i := range 5 {
+			nodes[i].Stop()
+		}
+	}()
+
+	// Wait for initial leader election.
+	time.Sleep(600 * time.Millisecond)
+
+	// Partition {0,1} from {2,3,4} (same mechanics as NetworkPartition).
+	for i := range 2 {
+		transports[i].mu.Lock()
+		newNodes := make(map[string]*InMemoryTransport)
+		for j := range 2 {
+			if i != j {
+				newNodes[peers[j]] = transports[j]
+			}
+		}
+		transports[i].nodes = newNodes
+		transports[i].mu.Unlock()
+	}
+	for i := 2; i < 5; i++ {
+		transports[i].mu.Lock()
+		newNodes := make(map[string]*InMemoryTransport)
+		for j := 2; j < 5; j++ {
+			if i != j {
+				newNodes[peers[j]] = transports[j]
+			}
+		}
+		transports[i].nodes = newNodes
+		transports[i].mu.Unlock()
+	}
+
+	// Wait for the majority partition to settle on a leader.
+	time.Sleep(1500 * time.Millisecond)
+
+	majorityLeaderCount := 0
+	majorityLeaderIdx := -1
+	for i := 2; i < 5; i++ {
+		if nodes[i].IsLeader() {
+			majorityLeaderCount++
+			majorityLeaderIdx = i
+		}
+	}
+	if majorityLeaderCount != 1 || majorityLeaderIdx < 0 {
+		t.Fatalf("expected exactly 1 leader in majority partition, got %d", majorityLeaderCount)
+	}
+	leaderTerm, _ := nodes[majorityLeaderIdx].GetState()
+
+	// Let the isolated minority hit >= 3 election timeouts (timeouts are
+	// 150-300ms, so 2s is >= 6 timeouts). Without pre-vote this inflates
+	// the minority terms past the leader's; with pre-vote it cannot.
+	time.Sleep(2000 * time.Millisecond)
+
+	// Heal the partition by restoring every transport's full nodes map.
+	for i := range 5 {
+		transports[i].mu.Lock()
+		full := make(map[string]*InMemoryTransport)
+		for j := range 5 {
+			if i != j {
+				full[peers[j]] = transports[j]
+			}
+		}
+		transports[i].nodes = full
+		transports[i].mu.Unlock()
+	}
+
+	// Give the healed cluster time to converge (or, pre-vote, fail to disrupt).
+	time.Sleep(1500 * time.Millisecond)
+
+	if !nodes[majorityLeaderIdx].IsLeader() {
+		t.Errorf("majority leader %s was deposed after the partition healed (pre-vote regression)", peers[majorityLeaderIdx])
+	}
+	termAfterHeal, _ := nodes[majorityLeaderIdx].GetState()
+	if termAfterHeal != leaderTerm {
+		t.Errorf("majority leader term changed after heal: %d -> %d (pre-vote regression)", leaderTerm, termAfterHeal)
+	}
+	for i := range 2 {
+		minorityTerm, _ := nodes[i].GetState()
+		if minorityTerm > leaderTerm {
+			t.Errorf("minority node %s term %d exceeded the majority leader term %d (pre-vote regression)", peers[i], minorityTerm, leaderTerm)
 		}
 	}
 }
