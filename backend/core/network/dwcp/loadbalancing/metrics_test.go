@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestMetricsCollectorCreation(t *testing.T) {
@@ -199,13 +201,19 @@ func TestMetricsAggregation(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Wait for aggregation
-	time.Sleep(150 * time.Millisecond)
+	// Wait for aggregation. Poll rather than sleep: a fixed sleep spans 1-2
+	// idle aggregation windows AFTER the last request, and the final idle
+	// window stores rps=0 (runMetricsAggregation divides the tick's request
+	// delta by the window; an empty window stores 0) — overwriting the
+	// ~100 rps the last request-bearing tick computed. That sampling race
+	// flaked this test whenever the idle tick landed in the final window
+	// (observed on the x86 CI runner and ~3/5 locally).
+	require.Eventually(t, func() bool {
+		return mc.GetMetrics().RequestsPerSecond > 0
+	}, 2*time.Second, 10*time.Millisecond)
 
 	metrics := mc.GetMetrics()
 
 	// RPS should be calculated
-	if metrics.RequestsPerSecond == 0 {
-		t.Error("Expected non-zero requests per second")
-	}
+	require.Positive(t, metrics.RequestsPerSecond, "requests per second")
 }
