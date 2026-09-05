@@ -48,8 +48,8 @@ services:
   # NovaCron Frontend
   novacron-frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: docker/frontend.Dockerfile
     ports:
       - "3000:3000"
     environment:

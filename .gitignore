@@ -115,3 +115,9 @@ database/database
 # See novacron-hpa notes for the tracked follow-up.
 backend/core/network/dwcp/compression/compression/
 backend/core/network/dwcp/**/dictionaries/*.dict.json
+
+# tooling/generator output (2026-09-04)
+graphify-out/
+.memdb/
+frontend/coverage/
+ruvector.db

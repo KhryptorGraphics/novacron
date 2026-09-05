@@ -13,7 +13,10 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      # Host 5432 is taken by a host-native postgres on this dev box; map to
+      # the repo-canonical non-colliding external port (docker-compose.yml
+      # uses 11432 for the same purpose).
+      - "11432:5432"
     volumes:
       - postgres_test_data:/var/lib/postgresql/data
       - ./scripts/init-test-db.sql:/docker-entrypoint-initdb.d/init.sql
@@ -31,7 +34,8 @@ services:
     container_name: novacron-test-redis-master
     command: redis-server --port 6379 --appendonly yes
     ports:
-      - "6379:6379"
+      # Host 6379 is taken by a host-native redis-server on this dev box.
+      - "16379:6379"
     volumes:
       - redis_master_data:/data
     healthcheck:
@@ -145,7 +149,7 @@ services:
   api-server:
     build:
       context: .
-      dockerfile: docker/api-server.Dockerfile
+      dockerfile: docker/api.Dockerfile
     container_name: novacron-test-api-server
     environment:
       - DB_URL=postgresql://postgres:postgres@postgres:5432/novacron_test?sslmode=disable
@@ -158,9 +162,11 @@ services:
       - PROMETHEUS_PORT=9100
       - TEST_MODE=true
     ports:
-      - "8090:8090"
-      - "8091:8091"
-      - "9100:9100"
+      # Host 8090/8091 are squatted by unrelated host processes on this dev
+      # box (uvicorn on 8090, another listener on 8091); remap host side.
+      - "8095:8090"
+      - "18091:8091"
+      - "19100:9100"
     depends_on:
       postgres:
         condition: service_healthy
@@ -173,7 +179,8 @@ services:
       retries: 3
       start_period: 60s
     volumes:
-      - ./backend:/app
+      # No ./backend bind mount: the image ships a compiled binary plus the
+      # /app/api Python service; a host bind mount would shadow it.
       - api_logs:/var/log/novacron
 
   hypervisor-service:
@@ -204,8 +211,8 @@ services:
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: docker/frontend.Dockerfile
     container_name: novacron-test-frontend
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8090
@@ -239,6 +246,7 @@ services:
     volumes:
       - ./backend:/app
       - ./test-results:/test-results
+      - go_mod_cache:/go/pkg/mod
     depends_on:
       postgres:
         condition: service_healthy
@@ -248,27 +256,6 @@ services:
         condition: service_healthy
     profiles:
       - testing
-
-  chaos-engineering:
-    build:
-      context: .
-      dockerfile: docker/chaos.Dockerfile
-    container_name: novacron-chaos-engineer
-    privileged: true
-    environment:
-      - TARGET_SERVICES=redis-master,api-server,hypervisor-service
-      - CHAOS_DURATION=5m
-      - RECOVERY_TIMEOUT=2m
-    volumes:
-      - ./backend/tests/chaos:/chaos-tests
-      - ./chaos-results:/results
-      - /var/run/docker.sock:/var/run/docker.sock
-    depends_on:
-      - redis-master
-      - api-server
-      - hypervisor-service
-    profiles:
-      - chaos
 
   load-tester:
     image: grafana/k6:latest
@@ -329,26 +316,6 @@ services:
       - multicloud
 
   # ============================================================================
-  # ML Model Testing Environment
-  # ============================================================================
-  ml-test-environment:
-    build:
-      context: .
-      dockerfile: docker/ml-testing.Dockerfile
-    container_name: novacron-ml-tester
-    environment:
-      - MODEL_PATH=/models
-      - TEST_DATA_PATH=/test-data
-      - PYTHON_PATH=/app
-    volumes:
-      - ./models:/models:ro
-      - ./test-data/ml:/test-data:ro
-      - ./backend/tests/ml:/app
-      - ./ml-test-results:/results
-    profiles:
-      - ml-testing
-
-  # ============================================================================
   # Network Testing & Simulation
   # ============================================================================
   network-simulator:
@@ -383,6 +350,8 @@ volumes:
     driver: local
   hypervisor_data:
     driver: local
+  go_mod_cache:
+    driver: local
   localstack_data:
     driver: local
 
@@ -401,9 +370,7 @@ networks:
 # Profiles for Different Testing Scenarios
 # ============================================================================
 # Usage Examples:
-# docker-compose -f docker-compose.test.yml --profile testing up -d
-# docker-compose -f docker-compose.test.yml --profile chaos up chaos-engineering
-# docker-compose -f docker-compose.test.yml --profile load-testing up load-tester
-# docker-compose -f docker-compose.test.yml --profile security up security-scanner
-# docker-compose -f docker-compose.test.yml --profile multicloud up mock-aws-service
-# docker-compose -f docker-compose.test.yml --profile ml-testing up ml-test-environment
+# docker compose -f docker-compose.test.yml --profile testing up -d
+# docker compose -f docker-compose.test.yml --profile load-testing up load-tester
+# docker compose -f docker-compose.test.yml --profile security up security-scanner
+# docker compose -f docker-compose.test.yml --profile multicloud up mock-aws-service

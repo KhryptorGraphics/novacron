@@ -8,7 +8,7 @@ all: build
 # Build all components
 build:
 	@echo "Building NovaCron components..."
-	docker-compose build
+	docker compose build
 
 
 # Build a stable core subset (orchestration and minimal VM types) without experimental modules
@@ -171,13 +171,13 @@ test-integration:
 
 test-integration-setup:
 	@echo "Setting up integration test environment..."
-	docker-compose -f docker-compose.test.yml up -d postgres redis
+	docker compose -f docker-compose.test.yml up -d postgres redis-master
 	@echo "Waiting for services to be ready..."
 	@sleep 10
 
 test-integration-teardown:
 	@echo "Tearing down integration test environment..."
-	docker-compose -f docker-compose.test.yml down
+	docker compose -f docker-compose.test.yml down
 
 # ============================================================================
 # Multi-Cloud Testing
@@ -440,18 +440,18 @@ vulnerability-check:
 
 test-env-up:
 	@echo "Starting test environment..."
-	docker-compose -f docker-compose.test.yml up -d
+	docker compose -f docker-compose.test.yml up -d
 	@echo "Waiting for services to be ready..."
 	@sleep 15
 	@echo "Test environment ready"
 
 test-env-down:
 	@echo "Stopping test environment..."
-	docker-compose -f docker-compose.test.yml down -v
+	docker compose -f docker-compose.test.yml down -v
 
 test-env-logs:
 	@echo "Showing test environment logs..."
-	docker-compose -f docker-compose.test.yml logs -f
+	docker compose -f docker-compose.test.yml logs -f
 
 test-env-reset:
 	@echo "Resetting test environment..."
@@ -523,16 +523,16 @@ run-example:
 
 docker-build:
 	@echo "Building Docker images..."
-	docker-compose build
+	docker compose build
 
 docker-test:
 	@echo "Running tests in Docker environment..."
-	docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit
-	docker-compose -f docker-compose.test.yml down
+	docker compose -f docker-compose.test.yml up --build --abort-on-container-exit
+	docker compose -f docker-compose.test.yml down
 
 docker-test-env:
 	@echo "Starting Docker test environment..."
-	docker-compose -f docker-compose.test.yml up -d
+	docker compose -f docker-compose.test.yml up -d
 
 # ============================================================================
 # Cleanup

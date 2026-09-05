@@ -7,7 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    # numba/stumpy CUDA init segfaults at import on GPU-less aarch64
+    # (novacron-gwh); override to 0 only with a working CUDA toolkit.
+    NUMBA_DISABLE_CUDA=1
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \

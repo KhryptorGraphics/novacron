@@ -9,6 +9,9 @@ services:
     image: novacron/ai-engine:latest
     restart: unless-stopped
     environment:
+      # numba/stumpy CUDA init segfaults at import on GPU-less aarch64;
+      # override to 0 only with a working CUDA toolkit (novacron-gwh)
+      NUMBA_DISABLE_CUDA: "1"
       # Environment
       ENVIRONMENT: ${ENVIRONMENT:-development}
       DEBUG: ${DEBUG:-false}
@@ -56,11 +59,8 @@ services:
     volumes:
       - ai_models:/var/lib/novacron/ai-models
       - ai_logs:/var/log/novacron-ai
-    
     depends_on:
-      - postgres
       - redis
-      - api
     
     networks:
       - novacron-network
