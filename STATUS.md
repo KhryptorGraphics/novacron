@@ -19,6 +19,135 @@ which overstate completion and should not be trusted.
   untracked and gitignored.
 
 
+## Fabric session — 2026-09-20 (P2P compute fabric, bandwidth-aware)
+
+Goal: make NovaCron a bandwidth-aware, peer-to-peer compute fabric — nodes join,
+users submit jobs/VMs, work is placed and moved with bytes-crossing-slow-links
+minimised and every transfer admitted against a MEASURED budget. Everything
+below was run live on this arm64 host; numbers are observed, not projected.
+
+### What landed (all verified live unless stated)
+
+- **Signed cluster join (P1/G1)** — `backend/cmd/api-server/cluster_join.go`,
+  migration `000006_cluster_peers`. `POST /internal/cluster/join` carries
+  `{node_id, addr, ts}` + `X-Join-Signature` = HMAC-SHA256(secret,
+  `node_id|addr|ts`); the receiver verifies constant-time, rejects |now-ts| >= 60s,
+  and MUST reach the joiner back at its advertised address before registering
+  (an unreachable joiner is 403 — no peer-map poisoning). Membership persists in
+  `cluster_peers`; a 30 s heartbeat refreshes `last_heartbeat`/`last_rtt_ms` and
+  the `link` JSONB. `NOVACRON_PEERS` stays as the static operator override.
+  Verified live: node-b joined node-a with zero env peer entries; restart without
+  the join env reloaded the persisted peer; `GET /api/cluster/nodes` showed both
+  nodes with link profiles. NAT case: a node in a netns behind a real
+  MASQUERADE+DNAT gateway joined and stayed reachable (published 10.99.0.2:18092,
+  gateway DNAT rule 2 pkts, private 10.100.0.2 unreachable from the host).
+- **Throughput probe + link profiles (P3)** — `/internal/cluster/probe?bytes=N`
+  serves incompressible payload; the heartbeat measures bytes/wall-time.
+  Measured on the same veth pair: **21.78 Gbps** unshaped (LAN), **186.1 Mbps**
+  under `tc tbf rate 200mbit`, **47.9 Mbps** under `50mbit` — each cross-checked
+  with an independent curl (`23848345 B/s`, `5972733 B/s`). Profiles decay:
+  a stale (>5 min) throughput is ignored by placement. `GET /api/cluster/links`
+  exposes {rtt_ms, throughput_bps, measured_at, stale}.
+- **Fabric compute jobs (P2/G2)** — `backend/cmd/api-server/fabric_jobs.go`,
+  migration `000007_fabric_jobs`. A job IS a Process VM: placement → create +
+  start (local or `/internal/vms/create` dispatch) → status/logs/cancel. No second
+  executor. Placement decision is explicit: pin > locality (inputs_node_id) >
+  cost (bytes/measured-link + run-time proxy) > default. Job outcome is DRIVER
+  truth (pid liveness + a new `exit.code` written by the Process driver's Wait
+  goroutine), because the manager's cached-state path is inert (`updateVMs`
+  iterates a never-seeded `vmCache` and its loop is a placeholder) — a finished
+  process would otherwise read "running" forever. Remote jobs resolve through
+  `/internal/fabric/vm-status/{id}` and `/internal/fabric/vm-logs/{id}`.
+  Verified live: pinned job on node-b returned `completed` with remotely-fetched
+  stdout `JOB-ON-B/mail/job-done`; an exit-3 job reported `failed` with its
+  stderr; a cost-placed job chose node-a with `cost_estimate_s=2.397`; an
+  `inputs_node_id=node-b` job chose node-b by locality; cancel flipped both
+  nodes' rows to `cancelled`.
+- **Admission + per-transfer decision (P3/G3)** —
+  `backend/cmd/api-server/fabric_transfers.go`. One transfer per link at a time;
+  a second is QUEUED with an ETA computed from the active transfer's remaining
+  bytes over the measured rate. Verified live: T1 running, T2 `queued`,
+  `queue_position: 1`, `eta_seconds: 16.8` — T2 then ran automatically when T1
+  finished. The compression rule (link < 500 Mbps AND sampled ratio > 1.3 ⇒
+  zstd-multifd, else none) fired on all three live branches: compressible disk at
+  47.9 Mbps ⇒ zstd; incompressible cirros disk (ratio 1.09) at 47.8 Mbps ⇒ none;
+  LAN at 21.8 Gbps ⇒ none. The KVM driver applies the mode via QMP
+  (`migrate-set-capabilities` multifd/xbzrle + `migrate-set-parameters`), probing
+  `query-migrate-parameters` first so a QEMU without `multifd-compression-level`
+  (8.2.2 here) is not sent an unsupported key.
+- **Cross-node migration fixes found by running it** — (a) the destination now
+  matches the source's accel/CPU (launch hints in the migration request); without
+  it a TCG `cortex-a72` source into a KVM `host` dest failed the CPU-state load
+  (`cpreg_vmstate_array_len 270 vs <=269`); (b) a compression destination launches
+  with `-incoming defer` and enables the same capability before `migrate-incoming`
+  (a plain `-incoming` leaves multifd off and the source dies with "Unable to
+  write to socket: Broken pipe"); (c) a source-side failure now aborts the
+  half-started destination (`/internal/migrate/abort` + the no-resume watchdog),
+  which otherwise left a locked dest disk; (d) `registerMigratedDest` no longer
+  writes the free-form cluster id into the UUID `vms.node_id` column nor a foreign
+  owner into `owner_id` (both made the registration INSERT fail silently and the
+  migrated VM invisible to the destination API); (e) cross-node creates with an
+  owner that exists only on the submitting node now store NULL + the requested id
+  in metadata instead of failing the FK.
+- **User surfaces (P4/G4)** — CLI (`novacron fabric nodes|jobs|job submit|status|
+  cancel|transfers|transfer`), TypeScript SDK (`FabricClient`, HTTP + Bearer,
+  submit/status/cancel/list), and a `/fabric` frontend page (nodes + link
+  profiles, jobs with submit form/log tails/cancel, transfers with decision
+  inputs), plus nav entries. Independently re-verified: CLI `go build/vet/test`
+  14 tests + 30 subtests pass; SDK build + 21 jest tests pass; frontend `tsc`
+  clean, lint 0 errors, fabric-page 4/4, canonical 14 suites/34 tests, `next build`
+  with the `/fabric` route.
+
+### Measured migration numbers (50 Mbit shaped link, tc tbf)
+
+| VM | RAM | disk sample ratio | compression | wall time |
+|---|---|---|---|---|
+| 1b4c193c | 512 MB | 1.60 | zstd-multifd | 26.1 s, 26.8 s |
+| 1b4c193c | 512 MB | 1.60 | none (override) | 26.7 s |
+| f3d438a2 | 256 MB | 1.09 | none | 30.7 s, 30.8 s |
+| 56bbac31 | 256 MB | 1.09 | none | 31.9 s |
+
+Honest reading: compression WORKS and does not slow the migration, but **no
+speedup was measurable in this configuration** — the wall time is dominated by
+fixed costs (destination qemu startup + the uncompressed drive-mirror disk
+phase), which multifd's RAM compression does not touch. Do not cite a
+compression speedup for QEMU multifd from this session.
+
+### Not done / residues (all filed in beads)
+
+- `novacron-be2` — the compression path's remaining failure for some VMs
+  ("Need a root block node" from drive-mirror on the dest-export path); the
+  "never completed" title is retracted in the bead's notes.
+- `novacron-h71` — 8 MiB raw-image VMs fail drive-mirror the same way.
+- `novacron-sv9` — dest NBD "Permission conflict on node migdisk" when the VM id
+  already has a disk on the destination (A→B→A).
+- `novacron-hgc` — shared-storage migration: a stray connection consumes the
+  `-incoming` stream ("Extra incoming migration connection").
+- `novacron-05h` — an async migration job stays "running" forever if the
+  api-server restarts mid-migration (the VM itself is not orphaned; the job row
+  is never finalised).
+- `novacron-z59` — pre-fix sources have no `launch.json`, so accel/CPU hints are
+  empty and the mismatch can still occur.
+- `novacron-nxy` — orphan cleanup is best-effort; the no-resume watchdog fires
+  only after 10 minutes.
+- `novacron-yxm` — `sch_netem` is absent on this kernel (6.8.12-tegra), so the
+  40 ms delay half of a netem proof is NOT reproducible here; only `tbf` rate
+  shaping was used and is what the numbers above rest on.
+- `novacron-ok7` — the canonical UUID schema vs free-form cluster ids / foreign
+  owners (node_id column stays unused; ownership is not federated).
+- `novacron-sdu` — ai-engine's pinned requirements cannot build on py3.13/arm64;
+  native boot verified with a subset install.
+
+### G0 gate (unchanged, re-verified this session)
+
+`cd backend/core && go build ./... && go vet ./...` exit 0; the canonical root
+test set (api-server, api/graphql, api/security, api/websocket, pkg/config) green;
+`go test -short -race ./vm/` green (144.8 s); the backend/core `-short` census
+exit 0 (after fixing a real dedup bug: `RemoveFile` removed a repeated block from
+disk twice — regression test added); frontend jest/lint/build green; api-server
+boots healthy against a freshly migrated database; ai-engine boots and serves
+`/health` with a real timestamp.
+
 ## Swarm session 2 — 2026-09-04
 
 All eight defect beads + the prematurely-closed consensus bead closed with
