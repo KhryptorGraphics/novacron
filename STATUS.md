@@ -19,6 +19,191 @@ which overstate completion and should not be trusted.
   untracked and gitignored.
 
 
+## Fabric trustworthiness session — 2026-09-20 (migration fixes, identity model, robustness)
+
+Goal: make the fabric trustworthy and self-verifying — fix every open cross-node
+migration/identity defect so all VM shapes migrate, decide one coherent
+node-id/owner identity model, and build an automated two-node fabric test living
+in the repo + CI. Follows directly from the Fabric session below (same day, same
+arm64 host); everything here is run live, not projected. Commits
+`40a6b34a..bebc0071`.
+
+### P1 — repo-owned two-node acceptance harness
+
+`scripts/fabric/two-node-fabric-test.sh`: provisions two real api-server
+processes (separate DBs, separate storage, node B inside a network namespace
+behind a veth pair with `tc`-shaped bandwidth), joins them through the signed
+join protocol, and asserts end to end: (1) membership + a measured link profile,
+(2) a job dispatched to the peer completes with fetched stdout, (3) a second
+transfer to a busy link is queued with an `eta_seconds`, (4) a cross-node
+migration lands the VM running on the target. Honest SKIP/FAIL/PASS accounting;
+`FABRIC_REQUIRE_ALL=1` for CI (a missing prerequisite is a failure, not a silent
+pass); full cleanup trap. Wired into `.github/workflows/ci.yml` as
+`fabric-acceptance` (postgres service container, `qemu-system-x86` installed
+explicitly, `FABRIC_REQUIRE_ALL=1`).
+
+Six real bugs were found and fixed while building and debugging it against the
+live environment (the syntax checker cannot catch any of these): netns/veth/tc
+mutations run without `sudo`; node B unreachable at `$ADDR_A` instead of its own
+`$ADDR_B` (both the auth-login loop and the `api()` helper); a broken bash
+indirect-variable expansion for `NOVACRON_JOIN_ADDR`; a `PGPORT_SOCAT_B` /
+`PORT_SOCAT_B` typo; throughput polled once immediately after join instead of
+across the server's 30 s heartbeat tick; assertion 4 matching an ambiguous
+`vm_id` instead of tracking T1's own `transfer_id` (T2 is a deliberately
+redundant queued migration for the same VM and correctly fails once T1 has
+already moved it — not a bug). Also found and fixed a real cleanup bug: node
+B's process runs under `sudo -E ip netns exec ... setsid nohup`, which detaches
+into a new session, so killing the captured `$!` PID (sudo's own PID) never
+reached the actual api-server or its qemu children; `cleanup()` now also does a
+host-side (never `ip netns exec`-wrapped — that trap is explicitly documented in
+`CLAUDE.md`) `pkill -f "$WORK"` targeting the run's own unique temp-dir path.
+Verified: `bash scripts/fabric/two-node-fabric-test.sh` — **10/10 PASS**, twice
+in a row, with confirmed clean self-teardown (no orphaned
+qemu/api-server/netns/db).
+
+### P2 — three cross-node migration defects fixed
+
+- **novacron-h71** (root-block-node drive-mirror failure, small raw image):
+  could not reproduce on current in-tree code via the real driver path
+  (`Create → Start → StartIncomingBlock → migrateBlockWithStats`) with an 8 MiB
+  raw image and `DiskSizeGB=0`, matching the bead's exact repro — drive-mirror
+  succeeds cleanly, confirmed 5x non-flaky. Likely already fixed as a side
+  effect of the `-incoming defer` ordering fix from the prior session. Added
+  `driver_kvm_block_migrate_smallimage_test.go` as a permanent regression test
+  per the bead's own request. **novacron-be2**'s acceptance criteria (a
+  compressed cross-node block migration completing) were already met by the
+  prior session's measured 2.17x/2.2x-fewer-bytes A/B proof; closed alongside.
+- **novacron-sv9** (A→B→A stale dest disk / "Permission conflict on node
+  migdisk"): real root cause found — `migrateBlockWithStats` issued the QMP
+  `quit` command and returned immediately without waiting for the source qemu
+  process to actually exit, confirmed live via log timestamps (a B→A leg's new
+  dest process on node A started before the original A-residency process had
+  finished exiting). Fixed: it now waits (`awaitProcessGone`, 10 s) for the
+  source PID to vanish before reporting the migration complete.
+  `driver_kvm_block_migrate_roundtrip_test.go` proves an A→B→A round trip with
+  two independent driver instances, confirmed 3x.
+- **novacron-hgc** (shared-storage stray incoming connection): real root cause
+  found — only COMPRESSED migrations deferred the incoming listener; every
+  other migration (including plain shared-storage) launched with a plain
+  auto-accepting `-incoming tcp:0.0.0.0:<port>`, which starts accepting the
+  very first TCP connection the instant qemu launches. Fixed: every migration
+  destination is now always launched deferred; nothing listens until
+  `completeDeferredIncoming` explicitly issues `migrate-incoming` over QMP once
+  the driver has finished standing up the dest.
+  `driver_kvm_migrate_incoming_defer_test.go` proves both the block and
+  shared-storage destinations are launched deferred (`/proc/<pid>/cmdline`
+  inspection), for both migration shapes.
+
+Verification: full `backend/core` build+vet+`-short` census green (`vm` package
+154.7 s); a dedicated 5-test migration regression suite (shared-storage,
+shared-storage rollback, block/cirros, block/tiny-raw, block A→B→A) all PASS;
+the P1 harness 10/10 PASS, twice.
+
+### P3 — one coherent cluster-node / owner identity model (novacron-ok7)
+
+Decision: cluster node identity is the free-form TEXT string already used by
+`cluster_peers.node_id` / `NOVACRON_NODE_ID`, not the legacy UUID `nodes`
+table. Confirmed live before deciding: `nodes` has zero rows and zero
+INSERT/UPDATE/SELECT anywhere in the canonical api-server binary (the only
+importers of code that queries it, `backend/api/vm`, build under
+`novacron_enhanced`/`novacron_multicloud` tags that are never part of the
+canonical build). `vms.node_id` being a UUID FK to that always-empty table
+meant it could only ever legally be NULL, so neither `createVMLocal` nor
+`registerMigratedDest` ever wrote it — both write paths stashed the cluster
+node id in `metadata.cluster_node_id` JSON instead, with zero readers anywhere.
+
+Migration `000009_cluster_node_identity`: `vms.node_id` UUID→TEXT (FK
+dropped); new `vms.requested_owner_id` UUID (no FK) — a migrated/cross-node
+VM's real owner when it does not exist in this node's local `users` table
+(`owner_id` is then NULL, unchanged local-ownership behaviour), replacing what
+used to be `metadata.requested_owner_id` JSON; `migrations.source_node_id`/
+`target_node_id` UUID→TEXT for consistency (that table has no live writer yet
+— fabric transfers are tracked in-memory — but the bead calls out the same
+class of gap). `createVMLocal` and `registerMigratedDest` now write real
+`node_id`/`requested_owner_id` columns instead of duplicating them into
+metadata; `GET /vms` and `GET /vms/{id}` (already scanning `node_id` into
+`sql.NullString`, type-agnostic) now report a real node_id for the first time.
+
+Verified end to end with real postgres, not sqlmock (two independently
+migrated databases): a VM created on "node A" with a real local owner records
+`node_id=node-a-test`, `owner_id=<uuid>`, `requested_owner_id=NULL`; the same
+VM registered as migrated-in on "node B" (whose `users` table has no such
+owner) records `node_id=node-b-test`, `owner_id=NULL` (local FK correctly
+refuses the foreign UUID), `requested_owner_id=<the original uuid, preserved>`.
+`TestClusterIdentityModelCrossNodeForeignOwner`, confirmed non-flaky 3x. Three
+existing sqlmock tests asserting the old 9-arg INSERT shape were updated to the
+new 11-arg shape (a changed-contract fix, not new coverage). Full canonical
+root test set green; P1 harness 10/10 PASS.
+
+### P4 — four robustness fixes
+
+- **novacron-k8p** (process-driver liveness false-positives on pid reuse): the
+  Process driver (fabric jobs) decided liveness from a pidfile + `processAlive`
+  alone; a pid reused by an unrelated process after a restart read "running"
+  forever. Fixed: the pidfile now records `pid starttime` (field 22 of
+  `/proc/<pid>/stat`); a pid alive but with a different starttime is provably a
+  different process. Also closes a more serious latent issue: `Stop()` used
+  the same check before signalling, so it could previously have sent
+  SIGTERM/SIGKILL to a completely unrelated process holding a reused pid.
+  `TestProcessDriverDetectsPIDReuse` proves the exact false positive and the
+  fix; a legacy pid-only pidfile still degrades gracefully.
+- **novacron-nxy** (orphaned-dest cleanup hardening): (1) `StartIncomingBlock`/
+  `StartIncomingWithDisk` now evict a still-tracked previous incoming attempt
+  for the same VM id before standing up a new one, so a retry after an
+  interrupted migration self-heals instead of colliding with the orphan's held
+  disk lock (QEMU's opaque "Failed to get write lock"); (2) `abortIncomingDest`
+  now retries (3 attempts, 1 s/2 s backoff) instead of one fire-and-forget
+  POST with the error discarded. Testing (1) found a **real, separate
+  concurrency bug**: `monitorVM`'s background goroutine matched
+  `d.vms[vmID]` by string key only, so a retry that reused a vmID could have
+  its OLD (evicted) process's exit goroutine wake up later and clobber the
+  NEW, still-running dest's `State`/`PID`/`Process` fields — reproduced live
+  as a freshly-retried migration destination reporting `State=stopped, PID=0`
+  seconds after a successful launch, in 2 of 3 runs. Fixed: `monitorVM` now
+  takes the exact `*KVMVMInfo` pointer it was launched for and only mutates
+  the map entry if it is STILL that same instance (pointer identity). This is
+  a correctness fix for VM lifecycle tracking generally, not just migration.
+  `TestStaleIncomingDestEvictedOnRetry` (flaky 2/3 before the `monitorVM` fix,
+  solid 8/8 after) plus two `abortIncomingDest` retry tests.
+- **novacron-z59** (accel/CPU hints absent for pre-hints-feature VMs): a
+  source VM with no `launch.json` (created before the hints file existed) left
+  `MigrationCPUHints` returning nil, so the destination silently picked its own
+  accel/CPU default and could hit the same cross-accel CPU-state-load failure
+  the parent fix targeted. Fixed: falls back to reading the source's OWN
+  running qemu process's actual `-machine`/`-cpu` arguments straight from
+  `/proc/<pid>/cmdline` — exact, not a guess. `migrationDestConfig` now also
+  logs a warning in the residual case (process also gone) instead of silently
+  guessing. `TestMigrationCPUHintsFallsBackToLiveProcess` proves exact recovery
+  (stable 3x); `TestMigrationCPUHintsNilWhenProcessGone` proves no fabrication.
+- **novacron-05h** (async migration job / dest reconcile): the source-side half
+  (`reconcileInterruptedJobs`, boot-time) was already correctly implemented and
+  verified still wired in. The destination-side half was a real, unaddressed
+  gap: a migration dest whose `registerMigratedDest` goroutine died with a
+  prior api-server process (before its INSERT ran) has a live qemu and a
+  `config.json` but NO `vms` row at all — `reconcileVMState`'s
+  `SELECT id, state FROM vms` never even sees a row-less orphan. Fixed: new
+  `reconcileOrphanedMigrationDests`, called at boot right after
+  `reconcileVMState`, diffs `vmBase` directories against the `vms` table and
+  re-registers (via `registerMigratedDest` itself, idempotent) any directory
+  with a live process and no row. `TestReconcileOrphanedMigrationDestsAdopts
+  UnregisteredLiveVM` reproduces the exact scenario against a real migrated
+  postgres database and proves the row is created and the VM adopted into the
+  manager (stable 3x); a sibling test proves a directory with no live process
+  is correctly left alone.
+
+Verification: full `backend/core` build+vet+`-short` census green after every
+fix (`vm` package 148–157 s across runs); the P1 harness 10/10 PASS after the
+full P2+P3+P4 fix set, including the boot-sequence change in P4/05h, with
+confirmed clean self-teardown.
+
+### G0 gate (re-verified this session)
+
+`cd backend/core && go build ./... && go vet ./...` exit 0; the canonical root
+test set (api-server, api/graphql, api/security, api/websocket, pkg/config)
+green; `go test -short -race ./vm/` green (157.5 s); the backend/core `-short`
+census exit 0; frontend `tsc --noEmit` clean, `npm run lint` 0 errors.
+
+
 ## Fabric session — 2026-09-20 (P2P compute fabric, bandwidth-aware)
 
 Goal: make NovaCron a bandwidth-aware, peer-to-peer compute fabric — nodes join,
