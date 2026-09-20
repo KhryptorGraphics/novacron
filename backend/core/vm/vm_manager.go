@@ -1028,6 +1028,15 @@ func (m *VMManager) RegisterMigrationPeer(nodeID, addr string) {
 	m.migrationPeers[nodeID] = addr
 }
 
+// UnregisterMigrationPeer removes a peer node's registered address (cluster
+// leave). A peer with no entry resolves to "" again, which migrateVM and the
+// cluster inventory already treat as "not registered".
+func (m *VMManager) UnregisterMigrationPeer(nodeID string) {
+	m.migrationPeersMu.Lock()
+	defer m.migrationPeersMu.Unlock()
+	delete(m.migrationPeers, nodeID)
+}
+
 // migrationPeerAddr returns the registered migration address for a node id, or ""
 // if none is registered (reading a nil map is safe and yields "").
 func (m *VMManager) migrationPeerAddr(nodeID string) string {

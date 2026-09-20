@@ -95,6 +95,14 @@ func main() {
 	// a bare target_node to its address without the caller passing target_addr.
 	registerConfiguredPeers(vmManager)
 
+	// Fabric membership (P1/G1): persisted peers (signed-join protocol) load
+	// after the static env map, and a heartbeat loop keeps link profiles
+	// fresh until shutdown.
+	loadPersistedPeers(vmManager, db)
+	fabricCtx, fabricCancel := context.WithCancel(context.Background())
+	defer fabricCancel()
+	go clusterHeartbeatLoop(fabricCtx, db, vmManager)
+
 	server := buildCanonicalServer(cfg, db, authManager, services, vmManager)
 
 	go func() {
@@ -103,6 +111,23 @@ func main() {
 			appLogger.Fatal("Server failed to start", "error", err)
 		}
 	}()
+
+	// Join AFTER the listener is up: the seed's mandatory reachability probe
+	// calls this node back at NOVACRON_JOIN_ADDR, so a pre-listen join is
+	// always rejected 403 (connection refused on the callback). A dial probe
+	// of our own addr is belt-and-braces for slow listener starts.
+	joinDeadline := time.Now().Add(10 * time.Second)
+	for {
+		if probe, err := net.DialTimeout("tcp", selfJoinAddr(), time.Second); err == nil {
+			probe.Close()
+			break
+		} else if time.Now().After(joinDeadline) {
+			appLogger.Warn("fabric join skipped: own listener not ready", "addr", selfJoinAddr())
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	joinAtBoot(fabricCtx, selfNodeID(), vmManager, db)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -158,6 +183,9 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	apiV1Router := router.PathPrefix("/api/v1").Subrouter()
 	apiV1Router.Use(requireAuth(authManager))
 	registerSecureAPIRoutes(apiV1Router, db, vmManager, vmBasePath(cfg))
+	// Signed fabric join/leave RPCs (node-to-node) and the authed
+	// /api/cluster/nodes inventory with live link profiles.
+	registerClusterJoinRoutes(router, apiRouter, db, vmManager, vmBasePath(cfg))
 
 	// Node-to-node migration RPC: intentionally OFF the JWT router (the peer is a
 	// node, not a user). Gated by an optional shared secret; see the handler.

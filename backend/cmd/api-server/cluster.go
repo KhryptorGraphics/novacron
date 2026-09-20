@@ -148,6 +148,29 @@ func fetchPeerCapacity(addr string) (NodeCapacity, error) {
 	return c, err
 }
 
+// fetchPeerCapacityWithSecret is fetchPeerCapacity with the internal secret
+// supplied by the caller (the join/heartbeat paths must use the configured
+// secret explicitly rather than re-reading env at call time).
+func fetchPeerCapacityWithSecret(addr, secret string) (NodeCapacity, error) {
+	var c NodeCapacity
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+"/internal/cluster/capacity", nil)
+	if secret != "" {
+		req.Header.Set("X-Migration-Secret", secret)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return c, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return c, fmt.Errorf("capacity RPC %s: %s", addr, resp.Status)
+	}
+	err = json.NewDecoder(resp.Body).Decode(&c)
+	return c, err
+}
+
 // placeVM picks the reachable node that can fit the request and is least loaded by
 // memory-utilization fraction (proportional balancing across heterogeneous nodes).
 // Returns false if no node has room.
