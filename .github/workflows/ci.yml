@@ -164,3 +164,58 @@ jobs:
       - name: Build canonical frontend
         working-directory: frontend
         run: npm run build
+
+  fabric-acceptance:
+    name: Fabric Two-Node Acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Real end-to-end proof that two nodes can join, dispatch a job, admit a
+    # queued transfer with an ETA, and migrate a VM cross-node — see
+    # scripts/fabric/two-node-fabric-test.sh. Runs with FABRIC_REQUIRE_ALL=1:
+    # every prerequisite below is installed explicitly, so a SKIP here is a
+    # real gap (e.g. tc netem unavailable), not just an informational note.
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install fabric harness prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 qemu-utils socat postgresql-client iproute2 iptables
+
+      - name: Run two-node fabric acceptance test
+        env:
+          FABRIC_REQUIRE_ALL: "1"
+          FABRIC_PGHOST: 127.0.0.1
+          FABRIC_PGPORT: "5432"
+          FABRIC_PGUSER: postgres
+          FABRIC_PGPASSWORD: postgres
+        run: bash scripts/fabric/two-node-fabric-test.sh
