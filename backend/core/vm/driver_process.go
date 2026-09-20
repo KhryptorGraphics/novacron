@@ -97,6 +97,61 @@ func (d *ProcessDriver) metaFile(vmID string) string {
 	return filepath.Join(d.vmDir(vmID), "metadata.json")
 }
 
+// processStartTimeTicks returns the kernel-tracked start time of pid (field
+// 22 of /proc/<pid>/stat, in clock ticks since boot) and true, or (0, false)
+// if the process is gone or /proc is unreadable. Combined with the pid, this
+// uniquely identifies a process instance: the kernel never reuses a pid
+// without also advancing its own clock, so a pid whose CURRENT starttime
+// differs from the one recorded at launch is provably a different, unrelated
+// process -- the pid-reuse false positive novacron-k8p describes.
+//
+// comm (the second field) is parenthesized and may itself contain spaces or
+// parens, so this finds the LAST ")" before splitting the remainder by
+// whitespace; starttime is then the 20th field after comm (state, ppid,
+// pgrp, session, tty_nr, tpgid, flags, minflt, cminflt, majflt, cmajflt,
+// utime, stime, cutime, cstime, priority, nice, num_threads, itrealvalue,
+// starttime -- see proc(5)).
+func processStartTimeTicks(pid int) (uint64, bool) {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0, false
+	}
+	line := string(data)
+	closeParen := strings.LastIndexByte(line, ')')
+	if closeParen < 0 || closeParen+2 >= len(line) {
+		return 0, false
+	}
+	fields := strings.Fields(line[closeParen+2:])
+	const starttimeIdx = 19 // 0-indexed field after comm; see doc comment above
+	if len(fields) <= starttimeIdx {
+		return 0, false
+	}
+	ticks, err := strconv.ParseUint(fields[starttimeIdx], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return ticks, true
+}
+
+// pidStillMatches reports whether pid is alive AND is the same process
+// instance that startTicks was recorded for. startTicks == 0 means the pid
+// file predates this check (old format, no recorded start time) -- falls
+// back to a plain liveness check rather than treating every pre-upgrade VM
+// as dead.
+func pidStillMatches(pid int, startTicks uint64) bool {
+	if !processAlive(pid) {
+		return false
+	}
+	if startTicks == 0 {
+		return true
+	}
+	current, ok := processStartTimeTicks(pid)
+	if !ok {
+		return false // pid vanished between the alive check and the stat read
+	}
+	return current == startTicks
+}
+
 func validProcessID(vmID string) bool {
 	return vmID != "" && !processIDUnsafe.MatchString(vmID)
 }
@@ -181,7 +236,12 @@ func (d *ProcessDriver) Start(ctx context.Context, vmID string) error {
 		return fmt.Errorf("failed to start process VM %s: %w", vmID, err)
 	}
 	pid := cmd.Process.Pid
-	if err := os.WriteFile(d.pidFile(vmID), []byte(strconv.Itoa(pid)), 0644); err != nil {
+	// Record starttime alongside the pid: this is the pid-reuse defence
+	// (novacron-k8p). ticks==0 (proc read raced the just-spawned process) is
+	// written as-is -- pidStillMatches treats 0 as "unknown, fall back to a
+	// plain liveness check", which is strictly no worse than before this fix.
+	ticks, _ := processStartTimeTicks(pid)
+	if err := os.WriteFile(d.pidFile(vmID), []byte(fmt.Sprintf("%d %d", pid, ticks)), 0644); err != nil {
 		_ = cmd.Process.Kill()
 		return fmt.Errorf("failed to write pid file for %s: %w", vmID, err)
 	}
@@ -210,12 +270,15 @@ func (d *ProcessDriver) Start(ctx context.Context, vmID string) error {
 // Stop terminates the process (SIGTERM, then SIGKILL after a grace period) and
 // removes the pid file. It is idempotent.
 func (d *ProcessDriver) Stop(ctx context.Context, vmID string) error {
-	pid, ok := d.readPID(vmID)
+	pid, startTicks, ok := d.readPIDRecord(vmID)
 	if !ok {
 		return nil // nothing recorded as running
 	}
 
-	if processAlive(pid) {
+	// Only signal if this is still the SAME process instance -- pid reuse
+	// after a restart must never let Stop() kill an unrelated process that
+	// happens to have inherited the recorded pid (novacron-k8p).
+	if pidStillMatches(pid, startTicks) {
 		signalProcess(pid, syscall.SIGTERM)
 		if !awaitProcessGone(pid, 5*time.Second) {
 			signalProcess(pid, syscall.SIGKILL)
@@ -250,14 +313,15 @@ func (d *ProcessDriver) GetStatus(ctx context.Context, vmID string) (State, erro
 		return StateUnknown, err
 	}
 
-	pid, ok := d.readPID(vmID)
+	pid, startTicks, ok := d.readPIDRecord(vmID)
 	if !ok {
 		return StateStopped, nil // created but not started, or already stopped
 	}
-	if processAlive(pid) {
+	if pidStillMatches(pid, startTicks) {
 		return StateRunning, nil
 	}
-	// Stale pid file: the process exited on its own. Clean it up.
+	// Stale pid file: the process exited (or the pid was reused by an
+	// unrelated process -- novacron-k8p). Clean it up either way.
 	_ = os.Remove(d.pidFile(vmID))
 	return StateStopped, nil
 }
@@ -281,7 +345,7 @@ func (d *ProcessDriver) GetInfo(ctx context.Context, vmID string) (*VMInfo, erro
 		MemoryMB:  meta.MemoryMB,
 		CreatedAt: meta.CreatedAt,
 	}
-	if pid, ok := d.readPID(vmID); ok && status == StateRunning {
+	if pid, _, ok := d.readPIDRecord(vmID); ok && status == StateRunning {
 		info.PID = pid
 	}
 	return info, nil
@@ -343,16 +407,26 @@ func (d *ProcessDriver) readMetadata(vmID string) (processMetadata, error) {
 	return meta, nil
 }
 
-func (d *ProcessDriver) readPID(vmID string) (int, bool) {
+// readPIDRecord parses the pid file, which holds "pid starttime" (current
+// format) or a bare "pid" (format written before novacron-k8p's fix --
+// startTicks is 0 in that case, meaning "unknown", see pidStillMatches).
+func (d *ProcessDriver) readPIDRecord(vmID string) (pid int, startTicks uint64, ok bool) {
 	data, err := os.ReadFile(d.pidFile(vmID))
 	if err != nil {
-		return 0, false
+		return 0, 0, false
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	fields := strings.Fields(string(data))
+	if len(fields) == 0 {
+		return 0, 0, false
+	}
+	pid, err = strconv.Atoi(fields[0])
 	if err != nil || pid <= 0 {
-		return 0, false
+		return 0, 0, false
 	}
-	return pid, true
+	if len(fields) >= 2 {
+		startTicks, _ = strconv.ParseUint(fields[1], 10, 64) // unparseable -> 0 (unknown), not an error
+	}
+	return pid, startTicks, true
 }
 
 // processEnv builds the child environment: the parent env plus any overrides.
