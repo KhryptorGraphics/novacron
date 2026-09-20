@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -72,6 +73,26 @@ func NewProcessDriver(config map[string]interface{}) (VMDriver, error) {
 
 func (d *ProcessDriver) vmDir(vmID string) string   { return filepath.Join(d.basePath, vmID) }
 func (d *ProcessDriver) pidFile(vmID string) string { return filepath.Join(d.vmDir(vmID), "vm.pid") }
+
+// exitCodeFile records the reaped child's exit status (written once by the
+// Wait goroutine; absent while the process runs and for VMs never started).
+func (d *ProcessDriver) exitCodeFile(vmID string) string {
+	return filepath.Join(d.vmDir(vmID), "exit.code")
+}
+
+// ExitCode reports the recorded exit status for a finished process VM.
+// ok is false when the process has not exited (or never ran).
+func (d *ProcessDriver) ExitCode(vmID string) (code int, ok bool) {
+	b, err := os.ReadFile(d.exitCodeFile(vmID))
+	if err != nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
 func (d *ProcessDriver) metaFile(vmID string) string {
 	return filepath.Join(d.vmDir(vmID), "metadata.json")
 }
@@ -164,10 +185,23 @@ func (d *ProcessDriver) Start(ctx context.Context, vmID string) error {
 		_ = cmd.Process.Kill()
 		return fmt.Errorf("failed to write pid file for %s: %w", vmID, err)
 	}
-	// Reap the child when it exits so it doesn't linger as a zombie. The pid
-	// file remains the source of truth for status; a stale entry is detected by
-	// the liveness check in GetStatus.
-	go func() { _ = cmd.Wait() }()
+	// Reap the child when it exits so it doesn't linger as a zombie, and record
+	// its exit status so callers can distinguish success from failure (the
+	// pid file alone only says "finished"). One atomic write; the file is
+	// removed with the VM directory on Delete.
+	go func() {
+		waitErr := cmd.Wait()
+		code := 0
+		if waitErr != nil {
+			var exitErr *exec.ExitError
+			if errors.As(waitErr, &exitErr) {
+				code = exitErr.ExitCode()
+			} else {
+				code = -1 // failed to wait / not started
+			}
+		}
+		_ = os.WriteFile(d.exitCodeFile(vmID), []byte(strconv.Itoa(code)), 0644)
+	}()
 
 	log.Printf("Started process VM %s (pid %d)", vmID, pid)
 	return nil

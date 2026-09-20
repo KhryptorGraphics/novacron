@@ -187,6 +187,11 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	// /api/cluster/nodes inventory with live link profiles.
 	registerClusterJoinRoutes(router, apiRouter, db, vmManager, vmBasePath(cfg))
 
+	// Fabric compute jobs (P2/G2): submit/status/logs/cancel on the authed
+	// router; the start/stop/delete/log node helpers on the internal one.
+	registerFabricJobRoutes(apiRouter, db, vmManager, vmBasePath(cfg))
+	registerFabricNodeRPCs(router, db, vmManager, vmBasePath(cfg))
+
 	// Node-to-node migration RPC: intentionally OFF the JWT router (the peer is a
 	// node, not a user). Gated by an optional shared secret; see the handler.
 	registerInternalMigrationRoutes(router, db, vmManager, vmBasePath(cfg))
@@ -1212,6 +1217,15 @@ func newVMManager(cfg *config.Config) *core_vm.VMManager {
 	vmCfg.Drivers[core_vm.VMTypeKVM] = core_vm.VMDriverConfigManager{
 		Enabled: true,
 		Config:  map[string]interface{}{"vm_path": vmBasePath(cfg)},
+	}
+	// Fabric jobs run as Process VMs. Configure the driver explicitly (rather
+	// than relying on the factory default /var/lib/novacron/processes) so each
+	// node's processes live under its own storage root — otherwise a second
+	// node with a different STORAGE_PATH would run its jobs out of the first
+	// node's directory. Path: <StoragePath>/vms/processes/<vmID>/.
+	vmCfg.Drivers[core_vm.VMTypeProcess] = core_vm.VMDriverConfigManager{
+		Enabled: true,
+		Config:  map[string]interface{}{"base_path": filepath.Join(vmBasePath(cfg), "processes")},
 	}
 	m, err := core_vm.NewVMManager(vmCfg)
 	if err != nil {

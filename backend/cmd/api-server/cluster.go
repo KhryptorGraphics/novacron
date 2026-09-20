@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"runtime"
@@ -210,6 +211,12 @@ type clusterCreateSpec struct {
 	// TenantID is accepted on the wire for backward compatibility; the
 	// canonical vms table has no tenancy column, so it is not persisted.
 	TenantID string `json:"tenant_id,omitempty"`
+	// Fabric job (P2/G2): when Command is non-empty the Process driver runs
+	// it instead of booting a KVM guest — the thinnest executor surface that
+	// reuses VM create/dispatch/start/stop/logs end to end.
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 // createVMLocal provisions a VM on THIS node (manager create + DB row) and returns
@@ -255,9 +262,13 @@ func createVMLocal(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 			Name:                  spec.Name,
 			AllowMissingOwnership: true,
 			Spec: core_vm.VMConfig{
-				ID: vmID, Name: spec.Name, Type: core_vm.VMTypeKVM,
+				ID: vmID, Name: spec.Name,
+				// A fabric job (spec.Command set) runs as a Process VM; a
+				// plain VM create boots a KVM guest as before.
+				Type:  vmTypeForSpec(spec),
 				VCPUs: spec.VCPUs, CPUShares: spec.CPUShares, MemoryMB: spec.MemoryMB, DiskSizeGB: spec.DiskSizeGB,
 				Image: spec.Image, OwnerID: ownerID,
+				Command: spec.Command, Args: spec.Args, Env: spec.Env,
 				// Runtime quota accounting needs a bucket even though the
 				// canonical vms table has no tenancy column to persist.
 				TenantID: runtimeTenant(spec.TenantID),
@@ -289,6 +300,15 @@ func createVMLocal(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 		return "", "", dberr
 	}
 	return vmID, state, nil
+}
+
+// vmTypeForSpec picks the VM type for a create: a fabric job (Command set)
+// runs as a Process VM; anything else boots a KVM guest as before.
+func vmTypeForSpec(spec clusterCreateSpec) core_vm.VMType {
+	if strings.TrimSpace(spec.Command) != "" {
+		return core_vm.VMTypeProcess
+	}
+	return core_vm.VMTypeKVM
 }
 
 // dispatchCreateToPeer sends a create to a chosen peer's /internal/vms/create and
@@ -478,6 +498,19 @@ func registerClusterRoutes(root, apiRouter *mux.Router, db *sql.DB, vmManager *c
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create VM: %v", err))
 			return
+		}
+		// A dispatched fabric job is recorded HERE too, so the node actually
+		// running the work shows it in its own job list (and a remote cancel
+		// can mark it cancelled locally). Best-effort: the submitter keeps the
+		// authoritative row, so a failure here only costs local visibility.
+		if jobID, _ := spec.Tags["fabric_job_id"].(string); jobID != "" && db != nil {
+			if _, jerr := db.ExecContext(ctx, `
+				INSERT INTO fabric_jobs (id, vm_id, node_id, command, status, placed_by, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+				ON CONFLICT (id) DO NOTHING
+			`, jobID, vmID, selfNodeID(), spec.Command, jobStatusRunning, "dispatched"); jerr != nil {
+				log.Printf("fabric job row for dispatched %s not recorded: %v", jobID, jerr)
+			}
 		}
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
 			"id": vmID, "name": spec.Name, "state": state, "status": state, "node_id": selfNodeID(),
