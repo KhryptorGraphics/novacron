@@ -90,6 +90,14 @@ func main() {
 	// GATE-1: reconcile persisted VM rows against actually-running qemu processes
 	// (pidfile rediscovery) so a restart reflects reality, not just stale rows.
 	reconcileVMState(db, vmBasePath(cfg), vmManager)
+	// GATE-1b: a migration destination whose registerMigratedDest goroutine
+	// died with a prior api-server process (killed/restarted before the
+	// guest resumed, or between resuming and that goroutine running) has a
+	// live qemu and a config.json but NO vms row at all -- reconcileVMState
+	// above never sees it (its query only covers rows that already exist).
+	// Must run after reconcileVMState, whose adoptManagerVM calls already
+	// cover every id that DOES have a row (novacron-05h).
+	reconcileOrphanedMigrationDests(db, vmBasePath(cfg), vmManager)
 
 	// Register migration peers from NOVACRON_PEERS so a migrate request can resolve
 	// a bare target_node to its address without the caller passing target_addr.
@@ -1698,6 +1706,60 @@ func reconcileVMState(db *sql.DB, vmBase string, manager *core_vm.VMManager) {
 			continue
 		}
 		logger.Info("VM reconciled to actual qemu state", "vm", rc.id, "from", rc.state, "to", actual)
+	}
+}
+
+// reconcileOrphanedMigrationDests finds VM directories under vmBase with a
+// live qemu process but NO corresponding vms row at all -- a migration
+// destination whose registerMigratedDest goroutine died with the prior
+// api-server process before it ever ran (killed/restarted between the guest
+// resuming and that goroutine reaching its INSERT). reconcileVMState above
+// cannot see these: its query only iterates rows that already exist.
+// Reuses registerMigratedDest itself (idempotent via ON CONFLICT) rather
+// than duplicating its owner-resolution and INSERT logic (novacron-05h).
+func reconcileOrphanedMigrationDests(db *sql.DB, vmBase string, manager *core_vm.VMManager) {
+	if db == nil {
+		return
+	}
+	known := map[string]bool{}
+	rows, err := db.Query(`SELECT id FROM vms`)
+	if err != nil {
+		logger.Warn("orphaned migration dest reconcile skipped: query failed", "error", err)
+		return
+	}
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			known[id] = true
+		}
+	}
+	rows.Close()
+
+	entries, err := os.ReadDir(vmBase)
+	if err != nil {
+		return // no vmBase directory yet (fresh node) is not an error
+	}
+	for _, e := range entries {
+		if !e.IsDir() || known[e.Name()] {
+			continue
+		}
+		id := e.Name()
+		if !pidFileAlive(filepath.Join(vmBase, id, "qemu.pid"), id) {
+			continue // no live process either -- not an orphan this reconcile owns
+		}
+		data, err := os.ReadFile(filepath.Join(vmBase, id, "config.json"))
+		if err != nil {
+			logger.Warn("orphaned migration dest has a live process but no readable config.json; cannot re-register it", "vm", id, "error", err)
+			continue
+		}
+		var cfg core_vm.VMConfig
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			logger.Warn("orphaned migration dest has a live process but an unparseable config.json; cannot re-register it", "vm", id, "error", err)
+			continue
+		}
+		cfg.ID = id
+		logger.Warn("adopting an orphaned migration destination with no DB row (its registerMigratedDest goroutine likely died with a prior api-server process)", "vm", id)
+		registerMigratedDest(db, manager, id, cfg, selfNodeID())
 	}
 }
 
