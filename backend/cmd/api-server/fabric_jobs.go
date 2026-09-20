@@ -255,9 +255,9 @@ func submitFabricJob(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManag
 	}
 	if db != nil {
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO fabric_jobs (id, vm_id, node_id, command, status, placed_by, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-		`, job.ID, job.VMID, job.NodeID, job.Command, job.Status, job.PlacedBy); err != nil {
+			INSERT INTO fabric_jobs (id, vm_id, node_id, command, name, status, placed_by, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, $7, NOW(), NOW())
+		`, job.ID, job.VMID, job.NodeID, job.Command, job.Name, job.Status, job.PlacedBy); err != nil {
 			// Created and started, but not recorded: stop it so no untracked
 			// process keeps running, and surface the failure.
 			if node.NodeID == selfNodeID() {
@@ -589,9 +589,9 @@ func getFabricJob(ctx context.Context, db *sql.DB, id string) (*fabricJob, error
 	var j fabricJob
 	var created time.Time
 	err := db.QueryRowContext(ctx, `
-		SELECT id, vm_id, node_id, command, status, COALESCE(error,''), COALESCE(placed_by,''), created_at
+		SELECT id, vm_id, node_id, command, COALESCE(name,''), status, COALESCE(error,''), COALESCE(placed_by,''), created_at
 		FROM fabric_jobs WHERE id = $1`, id).
-		Scan(&j.ID, &j.VMID, &j.NodeID, &j.Command, &j.Status, &j.Error, &j.PlacedBy, &created)
+		Scan(&j.ID, &j.VMID, &j.NodeID, &j.Command, &j.Name, &j.Status, &j.Error, &j.PlacedBy, &created)
 	if err != nil {
 		return nil, err
 	}
@@ -605,7 +605,7 @@ func listFabricJobs(ctx context.Context, db *sql.DB) ([]fabricJob, error) {
 		return nil, errors.New("no database")
 	}
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, vm_id, node_id, command, status, COALESCE(error,''), COALESCE(placed_by,''), created_at
+		SELECT id, vm_id, node_id, command, COALESCE(name,''), status, COALESCE(error,''), COALESCE(placed_by,''), created_at
 		FROM fabric_jobs ORDER BY created_at DESC LIMIT 200`)
 	if err != nil {
 		return nil, err
@@ -614,7 +614,7 @@ func listFabricJobs(ctx context.Context, db *sql.DB) ([]fabricJob, error) {
 	out := make([]fabricJob, 0, 16)
 	for rows.Next() {
 		var j fabricJob
-		if err := rows.Scan(&j.ID, &j.VMID, &j.NodeID, &j.Command, &j.Status, &j.Error, &j.PlacedBy, &j.CreatedAt); err != nil {
+		if err := rows.Scan(&j.ID, &j.VMID, &j.NodeID, &j.Command, &j.Name, &j.Status, &j.Error, &j.PlacedBy, &j.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, j)
