@@ -431,7 +431,7 @@ func (d *KVMDriverEnhanced) launchVM(vmID string, vmInfo *KVMVMInfo) error {
 		}
 		vmInfo.Process = cmd.Process
 		vmInfo.PID = cmd.Process.Pid
-		go d.monitorVM(vmID, cmd)
+		go d.monitorVM(vmID, vmInfo, cmd)
 
 		// Liveness confirm before declaring StateRunning. A qemu that dies on
 		// arrival (bad args, missing firmware, or a VNC-port clash from the
@@ -1205,13 +1205,26 @@ func (d *KVMDriverEnhanced) saveVMConfig(vmInfo *KVMVMInfo) error {
 	return nil
 }
 
-func (d *KVMDriverEnhanced) monitorVM(vmID string, cmd *exec.Cmd) {
+// monitorVM waits for a launched qemu process to exit and records its
+// terminal state. launchedInfo is the EXACT *KVMVMInfo this goroutine was
+// started for (captured at launch, not looked up again here): a retry that
+// reuses the same vmID (e.g. evictStaleIncomingDestLocked stopping an
+// orphaned migration dest before standing up a fresh one for the same id --
+// novacron-nxy) replaces d.vms[vmID] with a NEW struct for the NEW process
+// while this goroutine is still blocked in cmd.Wait() for the OLD one. If
+// this only matched by vmID string, the stale goroutine would eventually
+// wake up and clobber the NEW, still-running dest's State/PID/Process fields
+// with the OLD process's exit -- observed live as a freshly-retried
+// migration destination reported State=stopped, PID=0 seconds after a
+// successful launch, even though its qemu was still alive. The identity
+// check makes a stale goroutine a no-op once its vmID has moved on.
+func (d *KVMDriverEnhanced) monitorVM(vmID string, launchedInfo *KVMVMInfo, cmd *exec.Cmd) {
 	err := cmd.Wait()
 
 	d.vmLock.Lock()
 	defer d.vmLock.Unlock()
 
-	if vmInfo, exists := d.vms[vmID]; exists {
+	if vmInfo, exists := d.vms[vmID]; exists && vmInfo == launchedInfo {
 		now := time.Now()
 		vmInfo.StoppedTime = &now
 

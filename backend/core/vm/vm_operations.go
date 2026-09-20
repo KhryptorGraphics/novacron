@@ -1148,29 +1148,50 @@ func migrationDestConfig(cfg VMConfig, kd *KVMDriverEnhanced, vmID string, param
 }
 
 // abortIncomingDest tells a migration destination to release a half-started
-// incoming VM (see the dest's /internal/migrate/abort handler). Best-effort:
-// the dest's own no-resume watchdog is the backstop if this call is lost.
+// incoming VM (see the dest's /internal/migrate/abort handler). Retries a
+// few times with backoff -- a single lost/timed-out attempt used to degrade
+// straight to the 10-minute no-resume watchdog with no second chance
+// (novacron-nxy; evictStaleIncomingDestLocked is the other half of that fix,
+// a dest-side pre-flight that no longer needs the abort to have landed
+// before a retry). Still best-effort: the watchdog remains the backstop if
+// every attempt is lost.
 func abortIncomingDest(addr, vmID string) {
 	body, _ := json.Marshal(map[string]string{"vm_id": vmID})
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+addr+"/internal/migrate/abort", bytes.NewReader(body))
-	if err != nil {
-		return
+	const attempts = 3
+	backoff := time.Second
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+addr+"/internal/migrate/abort", bytes.NewReader(body))
+		if err != nil {
+			cancel()
+			log.Printf("abort incoming dest %s for %s: build request: %v", addr, vmID, err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if secret := os.Getenv("NOVACRON_MIGRATION_SECRET"); secret != "" {
+			req.Header.Set("X-Migration-Secret", secret)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		cancel()
+		if err != nil {
+			lastErr = err
+		} else {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				if attempt > 1 {
+					log.Printf("abort incoming dest %s for %s: succeeded on attempt %d/%d", addr, vmID, attempt, attempts)
+				}
+				return
+			}
+			lastErr = fmt.Errorf("%s", resp.Status)
+		}
+		if attempt < attempts {
+			time.Sleep(backoff)
+			backoff *= 2
+		}
 	}
-	req.Header.Set("Content-Type", "application/json")
-	if secret := os.Getenv("NOVACRON_MIGRATION_SECRET"); secret != "" {
-		req.Header.Set("X-Migration-Secret", secret)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Printf("abort incoming dest %s for %s: %v", addr, vmID, err)
-		return
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("abort incoming dest %s for %s: %s", addr, vmID, resp.Status)
-	}
+	log.Printf("abort incoming dest %s for %s: failed after %d attempts (dest's no-resume watchdog is the backstop): %v", addr, vmID, attempts, lastErr)
 }
 
 // requestIncomingBlockMigration POSTs a block IncomingMigrationRequest and returns

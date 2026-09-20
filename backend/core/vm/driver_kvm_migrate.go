@@ -81,6 +81,25 @@ func (d *KVMDriverEnhanced) StartIncoming(ctx context.Context, srcVMID, destID, 
 	return d.StartIncomingWithDisk(ctx, destID, destDir, incomingURI, diskPath, config)
 }
 
+// evictStaleIncomingDestLocked stops and forgets a previous incoming-migration
+// destination for destID, if one is still tracked. Retrying a migration for a
+// VM id whose earlier attempt was interrupted (source died before the
+// no-resume watchdog fired) used to collide with that orphaned dest: its qemu
+// still held the disk file open, and the retry's own qemu failed to open it
+// with QEMU's opaque "Failed to get write lock" (novacron-nxy). Called at the
+// top of StartIncomingBlock/StartIncomingWithDisk with d.vmLock already held.
+func (d *KVMDriverEnhanced) evictStaleIncomingDestLocked(destID string) {
+	stale, ok := d.vms[destID]
+	if !ok {
+		return
+	}
+	log.Printf("incoming migration dest %s: evicting a stale prior attempt before starting a new one", destID)
+	if err := d.stopVMInternal(stale); err != nil {
+		log.Printf("incoming migration dest %s: stopping the stale prior attempt failed (continuing anyway): %v", destID, err)
+	}
+	delete(d.vms, destID)
+}
+
 // StartIncomingWithDisk launches a migration destination that opens the given
 // (shared) disk with the given config and waits for an incoming migration on
 // incomingURI, using destDir for its own sockets/console/pidfile. diskPath must
@@ -89,6 +108,7 @@ func (d *KVMDriverEnhanced) StartIncoming(ctx context.Context, srcVMID, destID, 
 func (d *KVMDriverEnhanced) StartIncomingWithDisk(ctx context.Context, destID, destDir, incomingURI, diskPath string, config VMConfig) (string, error) {
 	d.vmLock.Lock()
 	defer d.vmLock.Unlock()
+	d.evictStaleIncomingDestLocked(destID)
 
 	if diskPath == "" {
 		return "", fmt.Errorf("incoming migration requires a shared disk path")
@@ -563,6 +583,7 @@ func (d *KVMDriverEnhanced) rollbackFailedMigration(q *qmpConn, srcVMID, destID 
 func (d *KVMDriverEnhanced) StartIncomingBlock(ctx context.Context, destID, destDir, incomingURI, advertiseHost string, virtualSizeBytes int64, config VMConfig) (string, string, error) {
 	d.vmLock.Lock()
 	defer d.vmLock.Unlock()
+	d.evictStaleIncomingDestLocked(destID)
 
 	if virtualSizeBytes <= 0 {
 		return "", "", fmt.Errorf("block-migration dest requires the source disk virtual size")
