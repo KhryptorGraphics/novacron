@@ -984,10 +984,14 @@ func (m *VMManager) resolveMigrationURI(ctx context.Context, vm *VM, driver VMDr
 	if err != nil {
 		return "", fmt.Errorf("source vm info: %w", err)
 	}
+	destCfg := vm.config
+	if kd, ok := driver.(*KVMDriverEnhanced); ok {
+		destCfg = migrationDestConfig(vm.config, kd, vm.ID(), nil)
+	}
 	port, err := requestIncomingMigration(ctx, addr, IncomingMigrationRequest{
 		VMID:         vm.ID(),
 		DiskPath:     info.RootFS,
-		Config:       vm.config,
+		Config:       destCfg,
 		TargetNodeID: targetNode,
 	})
 	if err != nil {
@@ -1068,7 +1072,7 @@ func (m *VMManager) migrateBlockCrossNode(ctx context.Context, vm *VM, driver VM
 	}
 
 	port, nbdURI, err := requestIncomingBlockMigration(ctx, addr, IncomingMigrationRequest{
-		VMID: vm.ID(), Config: vm.config, Block: true, DiskSizeBytes: sizeBytes, AdvertiseHost: host,
+		VMID: vm.ID(), Config: migrationDestConfig(vm.config, kd, vm.ID(), params), Block: true, DiskSizeBytes: sizeBytes, AdvertiseHost: host,
 		TargetNodeID: targetNode,
 	})
 	if err != nil {
@@ -1082,10 +1086,14 @@ func (m *VMManager) migrateBlockCrossNode(ctx context.Context, vm *VM, driver VM
 	m.emitEvent(VMEvent{Type: VMEventMigrating, VM: vm, Timestamp: time.Now(), NodeID: vm.NodeID(),
 		Message: fmt.Sprintf("Starting block migration to node %s", targetNode)})
 
-	if _, _, err := kd.migrateBlockWithStats(ctx, vm.ID(), ramURI, nbdURI); err != nil {
+	if _, _, err := kd.migrateBlockWithStats(ctx, vm.ID(), ramURI, nbdURI, params); err != nil {
 		vm.mutex.Lock()
 		vm.state = StateRunning
 		vm.mutex.Unlock()
+		// The dest already stood up its own disk + qemu; a source-side failure
+		// (bad compression parameters, mirror error) must release it NOW rather
+		// than leaving a locked, unreferenced dest until the 10-minute watchdog.
+		abortIncomingDest(addr, vm.ID())
 		msg := fmt.Sprintf("Failed to block-migrate VM: %v", err)
 		m.emitEvent(VMEvent{Type: VMEventError, VM: vm, Timestamp: time.Now(), NodeID: vm.NodeID(), Message: msg})
 		return &VMOperationResponse{Success: false, ErrorMessage: msg, VM: vm}, err
@@ -1098,6 +1106,71 @@ func (m *VMManager) migrateBlockCrossNode(ctx context.Context, vm *VM, driver VM
 	log.Printf("Block-migrated VM %s from node %s to %s", vm.ID(), oldNodeID, targetNode)
 	return &VMOperationResponse{Success: true, VM: vm, Data: map[string]string{
 		"source_node": oldNodeID, "target_node": targetNode, "migration_type": "block"}}, nil
+}
+
+// migrationDestConfig copies the source VM's config for an incoming-migration
+// request, adding the accel/CPU the source actually launched with so the
+// destination can match it. A dest that picks its own accel (e.g. KVM host
+// against a TCG cortex-a72 source) fails the CPU-state load outright
+// ("cpreg_vmstate_array_len" mismatch, observed live).
+func migrationDestConfig(cfg VMConfig, kd *KVMDriverEnhanced, vmID string, params map[string]string) VMConfig {
+	hints := kd.MigrationCPUHints(vmID)
+	comp := strings.TrimSpace(params["compression"])
+	if len(hints) == 0 && (comp == "" || comp == "none") {
+		return cfg
+	}
+	tags := make(map[string]string, len(cfg.Tags)+6)
+	for k, v := range cfg.Tags {
+		tags[k] = v
+	}
+	if v := hints["accel"]; v != "" {
+		tags["migrate.accel"] = v
+	}
+	if v := hints["cpu_model"]; v != "" {
+		tags["migrate.cpu_model"] = v
+	}
+	// The destination must enable the SAME compression before accepting the
+	// stream (see completeDeferredIncoming); advertise the mode and its knobs.
+	if comp != "" && comp != "none" {
+		tags["migrate.compression"] = comp
+		if v := strings.TrimSpace(params["multifd_channels"]); v != "" {
+			tags["migrate.multifd_channels"] = v
+		}
+		if v := strings.TrimSpace(params["multifd_compression_level"]); v != "" {
+			tags["migrate.multifd_compression_level"] = v
+		}
+		if v := strings.TrimSpace(params["xbzrle_cache_size"]); v != "" {
+			tags["migrate.xbzrle_cache_size"] = v
+		}
+	}
+	cfg.Tags = tags
+	return cfg
+}
+
+// abortIncomingDest tells a migration destination to release a half-started
+// incoming VM (see the dest's /internal/migrate/abort handler). Best-effort:
+// the dest's own no-resume watchdog is the backstop if this call is lost.
+func abortIncomingDest(addr, vmID string) {
+	body, _ := json.Marshal(map[string]string{"vm_id": vmID})
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+addr+"/internal/migrate/abort", bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if secret := os.Getenv("NOVACRON_MIGRATION_SECRET"); secret != "" {
+		req.Header.Set("X-Migration-Secret", secret)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("abort incoming dest %s for %s: %v", addr, vmID, err)
+		return
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("abort incoming dest %s for %s: %s", addr, vmID, resp.Status)
+	}
 }
 
 // requestIncomingBlockMigration POSTs a block IncomingMigrationRequest and returns

@@ -349,12 +349,68 @@ func (d *KVMDriverEnhanced) Start(ctx context.Context, vmID string) error {
 	return d.launchVM(vmID, vmInfo)
 }
 
+// persistLaunchHints writes the accel/CPU pair this VM is being launched with
+// into its runtime dir (launch.json), so a later migration can ask the source
+// what the destination must match.
+func (d *KVMDriverEnhanced) persistLaunchHints(vmInfo *KVMVMInfo) {
+	accel, cpu := d.launchAccelCPU(vmInfo)
+	payload, err := json.Marshal(map[string]string{"accel": accel, "cpu_model": cpu})
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(d.runtimeDir(vmInfo), "launch.json"), payload, 0644)
+}
+
+// MigrationCPUHints reports the accel/CPU pair this VM was launched with, for
+// building an incoming-migration request whose destination must match it.
+// Empty map when unknown (older VMs launched before hints were recorded).
+func (d *KVMDriverEnhanced) MigrationCPUHints(vmID string) map[string]string {
+	d.vmLock.RLock()
+	vmInfo, ok := d.vms[vmID]
+	d.vmLock.RUnlock()
+	if !ok {
+		return nil
+	}
+	raw, err := os.ReadFile(filepath.Join(d.runtimeDir(vmInfo), "launch.json"))
+	if err != nil {
+		return nil
+	}
+	var hints map[string]string
+	if err := json.Unmarshal(raw, &hints); err != nil {
+		return nil
+	}
+	return hints
+}
+
+// launchAccelCPU is the single source of truth for the accel/CPU pair a launch
+// will use: the VM's migrate.* tags (set on a destination so it matches its
+// source) win, else the host default.
+func (d *KVMDriverEnhanced) launchAccelCPU(vmInfo *KVMVMInfo) (string, string) {
+	accel, cpu := "tcg", "max"
+	if strings.Contains(d.qemuBinaryPath, "aarch64") {
+		cpu = "cortex-a72"
+	}
+	if kvmAccessible() {
+		accel, cpu = "kvm", "host"
+	}
+	if v := strings.TrimSpace(vmInfo.Config.Tags["migrate.accel"]); v != "" {
+		accel = v
+	}
+	if v := strings.TrimSpace(vmInfo.Config.Tags["migrate.cpu_model"]); v != "" {
+		cpu = v
+	}
+	return accel, cpu
+}
+
 // launchVM builds the QEMU command for vmInfo and starts the process. The
 // caller must hold d.vmLock. Shared by Start and the migration entry points
 // (StartMigrationSource / StartIncoming) so the dest mirrors the source args.
 func (d *KVMDriverEnhanced) launchVM(vmID string, vmInfo *KVMVMInfo) error {
 	const maxAttempts = 3
 	var lastErr error
+	// Record the accel/CPU this launch actually uses, so a migration source can
+	// tell its destination which pair to match (see MigrationCPUHints).
+	d.persistLaunchHints(vmInfo)
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		sockDir := d.runtimeDir(vmInfo)
 		qmpSock := filepath.Join(sockDir, "qmp.sock")
@@ -680,13 +736,14 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 	// -cpu host only works under KVM. Under TCG use a concrete model: on aarch64
 	// "max"/"cortex-a57" fault stock kernels here (Synchronous Exception at the
 	// EFI stub); cortex-a72 boots stock cloud images (verified with cirros).
-	accel, cpu := "tcg", "max"
-	if machine == "virt" {
-		cpu = "cortex-a72"
-	}
-	if kvmAccessible() {
-		accel, cpu = "kvm", "host"
-	}
+	// A migration DESTINATION must match the source's CPU model and accel
+	// exactly: the incoming state carries cpreg_vmstate_array_len etc., and a
+	// TCG cortex-a72 source into a KVM host dest fails the load with
+	// "Invalid value 270 expecting positive value <= 269 / load of migration
+	// failed" (observed live). The source advertises its actual launch choice
+	// via the migrate.* tags (see MigrationCPUHints); when present they win
+	// over the local default. Absent tags = unchanged behaviour.
+	accel, cpu := d.launchAccelCPU(vmInfo)
 	mem := vmInfo.Config.MemoryMB
 	if mem <= 0 {
 		mem = 128 // qemu rejects -m 0
@@ -827,8 +884,18 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 	args = append(args, "-device", "virtio-rng-pci")
 
 	// Migration destination: start paused waiting for the incoming stream.
+	// With a compression mode requested, the dest must NOT auto-accept: QEMU
+	// negotiates multifd/xbzrle only when the destination enables the same
+	// capability BEFORE the stream arrives (plain -incoming leaves multifd off,
+	// so the source's multifd stream dies with "Unable to write to socket:
+	// Broken pipe" and the dest logs nothing — observed live). "-incoming defer"
+	// + QMP capability setup + migrate-incoming is the QEMU-documented order.
 	if vmInfo.IncomingURI != "" {
-		args = append(args, "-incoming", vmInfo.IncomingURI)
+		if comp := strings.TrimSpace(vmInfo.Config.Tags["migrate.compression"]); comp != "" && comp != "none" {
+			args = append(args, "-incoming", "defer")
+		} else {
+			args = append(args, "-incoming", vmInfo.IncomingURI)
+		}
 	}
 
 	return args

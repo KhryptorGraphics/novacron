@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -43,6 +44,25 @@ func internalSecretOK(r *http.Request) bool {
 	// with no NOVACRON_MIGRATION_SECRET configured rejects all internal RPCs.
 	return migrationAuthOK(r)
 }
+
+// maxProbeBytes caps a single throughput probe payload (the heartbeat asks for
+// NOVACRON_PROBE_BYTES, default 1 MiB; the cap bounds a hostile request).
+const maxProbeBytes = 8 << 20
+
+// probePayload is a fixed pool of incompressible bytes served by
+// /internal/cluster/probe. Random content keeps transparent compression in the
+// path from inflating a measured rate; generated once (lazily) and shared.
+var probePayload = func() []byte {
+	b := make([]byte, maxProbeBytes)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand failing is fatal-grade; a deterministic fill still gives
+		// the probe a payload, and the measurement stays honest about bytes.
+		for i := range b {
+			b[i] = byte(i * 7)
+		}
+	}
+	return b
+}()
 
 // NodeCapacity is one node's real capacity and live VM reservation. Reported per
 // node -- the cluster aggregate is a SUM of these, not a shared pool a single VM
@@ -257,6 +277,17 @@ func createVMLocal(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 	if _, err := uuid.Parse(ownerID); err != nil {
 		ownerID = "" // non-uuid ownership is dropped; vms.owner_id is a users FK
 	}
+	// Cross-node creates land in the PEER's database, which has its own users
+	// table: an owner that exists only on the submitting node would violate
+	// vms_owner_id_fkey. Ownership is a local-directory concept, so when the
+	// local DB has no such user the column is NULL and the requested owner is
+	// preserved in the row metadata instead (never silently invented).
+	if ownerID != "" && db != nil {
+		var ownerExists bool
+		if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`, ownerID).Scan(&ownerExists); err != nil || !ownerExists {
+			ownerID = ""
+		}
+	}
 	if vmManager != nil {
 		if _, cerr := vmManager.CreateVM(ctx, core_vm.CreateVMRequest{
 			Name:                  spec.Name,
@@ -289,6 +320,7 @@ func createVMLocal(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 	metadataPayload, _ := json.Marshal(map[string]interface{}{
 		"cpu_shares": spec.CPUShares, "vcpus": cores, "memory_mb": spec.MemoryMB,
 		"disk_size_gb": spec.DiskSizeGB, "image": spec.Image, "tags": spec.Tags,
+		"requested_owner_id": spec.OwnerID,
 	})
 	if _, dberr := db.Exec(`
 		INSERT INTO vms (id, name, state, cpu_cores, memory_mb, disk_gb, os_type, owner_id, metadata, created_at, updated_at)
@@ -474,6 +506,28 @@ func registerClusterRoutes(root, apiRouter *mux.Router, db *sql.DB, vmManager *c
 			return
 		}
 		writeJSON(w, http.StatusOK, localNodeCapacity(vmManager, storagePath))
+	}).Methods(http.MethodGet)
+
+	// GET /internal/cluster/probe?bytes=N -- N bytes of incompressible payload
+	// for the heartbeat's throughput measurement. Capped; 0 disables.
+	root.HandleFunc("/internal/cluster/probe", func(w http.ResponseWriter, r *http.Request) {
+		if !internalSecretOK(r) {
+			writeJSONError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		n, _ := strconv.Atoi(r.URL.Query().Get("bytes"))
+		if n < 0 {
+			n = 0
+		}
+		if n > maxProbeBytes {
+			n = maxProbeBytes
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", strconv.Itoa(n))
+		w.WriteHeader(http.StatusOK)
+		if n > 0 {
+			_, _ = w.Write(probePayload[:n])
+		}
 	}).Methods(http.MethodGet)
 
 	// POST /internal/vms/create -- a coordinator dispatches a create here; we create

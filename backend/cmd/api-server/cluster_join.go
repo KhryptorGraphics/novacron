@@ -36,6 +36,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -88,9 +89,21 @@ func verifyJoin(r *http.Request, req joinRequest) bool {
 	return true
 }
 
-// upsertClusterPeer persists (or refreshes) a peer's membership row.
-func upsertClusterPeer(ctx context.Context, db *sql.DB, nodeID, addr string, rttMS float64) error {
-	link, _ := json.Marshal(map[string]interface{}{"rtt_ms": rttMS})
+// upsertClusterPeer persists (or refreshes) a peer's membership row. The link
+// JSONB carries the measured RTT and (when the probe ran) the measured
+// throughput of the heartbeat probe, plus when it was taken.
+func upsertClusterPeer(ctx context.Context, db *sql.DB, nodeID, addr string, rttMS float64, throughputBps *float64, probeBytes int) error {
+	link := map[string]interface{}{"rtt_ms": rttMS, "measured_at": time.Now().UTC().Format(time.RFC3339)}
+	if throughputBps != nil {
+		link["throughput_bps"] = *throughputBps
+		link["probe_bytes"] = probeBytes
+	}
+	payload, _ := json.Marshal(link)
+	// A join carries no throughput measurement, so it must NOT clobber a
+	// previously measured one: the row keeps the last measured blob until the
+	// heartbeat replaces it with a fresh measurement (≤30s later). Without this
+	// the placement/decision briefly reads "unmeasured" after every peer
+	// restart — observed live as a compression decision flipping to none.
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO cluster_peers (node_id, addr, last_heartbeat, last_rtt_ms, link, updated_at)
 		VALUES ($1, $2, NOW(), $3, $4, NOW())
@@ -98,9 +111,12 @@ func upsertClusterPeer(ctx context.Context, db *sql.DB, nodeID, addr string, rtt
 			addr = EXCLUDED.addr,
 			last_heartbeat = EXCLUDED.last_heartbeat,
 			last_rtt_ms = EXCLUDED.last_rtt_ms,
-			link = EXCLUDED.link,
+			link = CASE
+				WHEN EXCLUDED.link ? 'throughput_bps' THEN EXCLUDED.link
+				ELSE COALESCE(cluster_peers.link, '{}'::jsonb)
+			END,
 			updated_at = NOW()
-	`, nodeID, addr, rttMS, link)
+	`, nodeID, addr, rttMS, payload)
 	return err
 }
 
@@ -193,7 +209,7 @@ func registerClusterJoinRoutes(root *mux.Router, apiRouter *mux.Router, db *sql.
 
 		vmManager.RegisterMigrationPeer(req.NodeID, req.Addr)
 		if db != nil {
-			if err := upsertClusterPeer(r.Context(), db, req.NodeID, req.Addr, rttMS); err != nil {
+			if err := upsertClusterPeer(r.Context(), db, req.NodeID, req.Addr, rttMS, nil, 0); err != nil {
 				log.Printf("cluster_peers upsert failed for %s: %v", req.NodeID, err)
 			}
 		}
@@ -250,6 +266,27 @@ func registerClusterJoinRoutes(root *mux.Router, apiRouter *mux.Router, db *sql.
 		nodes := nodeProfiles(vmManager, storagePath, db)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"nodes": nodes})
 	}).Methods(http.MethodGet)
+
+	// GET /api/cluster/links — the measured link profile per peer, in the
+	// shape placement and the user surface consume: rtt + throughput + age.
+	apiRouter.HandleFunc("/cluster/links", func(w http.ResponseWriter, r *http.Request) {
+		nodes := nodeProfiles(vmManager, storagePath, db)
+		links := make([]map[string]interface{}, 0, len(nodes))
+		for _, n := range nodes {
+			entry := map[string]interface{}{"node_id": n.NodeID, "addr": n.Addr, "reachable": n.Reachable}
+			if n.Link != nil {
+				entry["rtt_ms"] = n.Link.RTTMS
+				entry["stale"] = n.Link.Stale
+				entry["measured_at"] = n.Link.MeasuredAt
+				if n.Link.ThroughputBps != nil {
+					entry["throughput_bps"] = *n.Link.ThroughputBps
+					entry["probe_bytes"] = n.Link.ProbeBytes
+				}
+			}
+			links = append(links, entry)
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"links": links})
+	}).Methods(http.MethodGet)
 }
 
 // nodeProfile extends NodeCapacity with the persisted link profile.
@@ -259,11 +296,16 @@ type nodeProfile struct {
 }
 
 // linkProfile is the measured link state from the heartbeat loop (nil for a
-// peer that has never been probed).
+// peer that has never been probed). ThroughputBps is nil until a probe with a
+// non-zero payload has run; placement must treat nil as unmeasured, never as
+// zero.
 type linkProfile struct {
-	RTTMS         float64 `json:"rtt_ms"`
-	LastHeartbeat string  `json:"last_heartbeat"`
-	Stale         bool    `json:"stale"`
+	RTTMS         float64  `json:"rtt_ms"`
+	ThroughputBps *float64 `json:"throughput_bps,omitempty"`
+	ProbeBytes    int      `json:"probe_bytes,omitempty"`
+	MeasuredAt    string   `json:"measured_at,omitempty"`
+	LastHeartbeat string   `json:"last_heartbeat"`
+	Stale         bool     `json:"stale"`
 }
 
 // linkProfileStaleness: a profile older than this is marked stale; placement
@@ -277,17 +319,30 @@ func nodeProfiles(vmManager *core_vm.VMManager, storagePath string, db *sql.DB) 
 	caps := allNodeCapacities(vmManager, storagePath)
 	profiles := map[string]*linkProfile{}
 	if db != nil {
-		if rows, err := db.Query(`SELECT node_id, last_rtt_ms, last_heartbeat FROM cluster_peers`); err == nil {
+		if rows, err := db.Query(`SELECT node_id, last_rtt_ms, last_heartbeat, COALESCE(link, '{}'::jsonb) FROM cluster_peers`); err == nil {
 			for rows.Next() {
 				var id string
 				var rtt sql.NullFloat64
 				var beat sql.NullTime
-				if err := rows.Scan(&id, &rtt, &beat); err != nil {
+				var raw []byte
+				if err := rows.Scan(&id, &rtt, &beat, &raw); err != nil {
 					continue
 				}
 				p := &linkProfile{}
 				if rtt.Valid {
 					p.RTTMS = rtt.Float64
+				}
+				// The link blob carries the throughput probe's measurement;
+				// malformed JSON degrades to RTT-only, never to a wrong number.
+				var measured struct {
+					ThroughputBps *float64 `json:"throughput_bps"`
+					ProbeBytes    int      `json:"probe_bytes"`
+					MeasuredAt    string   `json:"measured_at"`
+				}
+				if err := json.Unmarshal(raw, &measured); err == nil {
+					p.ThroughputBps = measured.ThroughputBps
+					p.ProbeBytes = measured.ProbeBytes
+					p.MeasuredAt = measured.MeasuredAt
 				}
 				if beat.Valid {
 					p.LastHeartbeat = beat.Time.UTC().Format(time.RFC3339)
@@ -325,18 +380,86 @@ func beatOnce(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager) {
 		return
 	}
 	secret := os.Getenv("NOVACRON_MIGRATION_SECRET")
+	probeBytes := probeBytesFromEnv()
 	for id, addr := range vmManager.MigrationPeers() {
 		start := time.Now()
 		if _, err := fetchPeerCapacityWithSecret(addr, secret); err != nil {
 			continue // unreachable peer stays in the map; inventory reports it honestly
 		}
 		rttMS := float64(time.Since(start).Microseconds()) / 1000.0
-		bctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		if err := upsertClusterPeer(bctx, db, id, addr, rttMS); err != nil {
+
+		// Throughput: pull a bounded payload and measure bytes/wall-time. The
+		// RTT is excluded so a high-latency link doesn't read as low-rate for
+		// small probes. A failed/absent probe leaves the previous value alone
+		// (upsert with nil keeps RTT-only), never a fabricated number.
+		var throughputBps *float64
+		if probeBytes > 0 {
+			if bps, err := measurePeerThroughput(addr, secret, probeBytes); err == nil {
+				throughputBps = &bps
+			} else {
+				log.Printf("throughput probe %s failed: %v", id, err)
+			}
+			probeBytes = probeBytesFromEnv() // re-read: env may change between beats
+		}
+
+		bctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		if err := upsertClusterPeer(bctx, db, id, addr, rttMS, throughputBps, probeBytes); err != nil {
 			log.Printf("heartbeat upsert failed for %s: %v", id, err)
 		}
 		cancel()
 	}
+}
+
+// probeBytesFromEnv reads NOVACRON_PROBE_BYTES (bytes per throughput probe;
+// 0 disables). Default 1 MiB: big enough to time meaningfully on a 20 Mbps
+// link (~0.4 s), small enough to leave a heartbeat cheap on a LAN.
+func probeBytesFromEnv() int {
+	raw := strings.TrimSpace(os.Getenv("NOVACRON_PROBE_BYTES"))
+	if raw == "" {
+		return 1 << 20
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 1 << 20
+	}
+	return n
+}
+
+// measurePeerThroughput downloads n bytes from the peer's probe endpoint and
+// returns the observed rate in bits per second. The connection is reused
+// within one measurement only; keep-alive across beats is left to net/http.
+func measurePeerThroughput(addr, secret string, n int) (float64, error) {
+	if n <= 0 {
+		return 0, fmt.Errorf("probe disabled")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("http://%s/internal/cluster/probe?bytes=%d", addr, n), nil)
+	if err != nil {
+		return 0, err
+	}
+	if secret != "" {
+		req.Header.Set("X-Migration-Secret", secret)
+	}
+	start := time.Now()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("probe %s: %s", addr, resp.Status)
+	}
+	got, err := io.Copy(io.Discard, resp.Body)
+	elapsed := time.Since(start)
+	if err != nil {
+		return 0, err
+	}
+	if elapsed <= 0 || got == 0 {
+		return 0, fmt.Errorf("probe %s: no bytes/elapsed", addr)
+	}
+	return float64(got) * 8 / elapsed.Seconds(), nil
 }
 
 // joinOutcome is what a successful join to one seed gave back.

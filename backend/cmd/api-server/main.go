@@ -192,6 +192,10 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	registerFabricJobRoutes(apiRouter, db, vmManager, vmBasePath(cfg))
 	registerFabricNodeRPCs(router, db, vmManager, vmBasePath(cfg))
 
+	// Fabric transfers (P3/G3): admission-controlled migrations with the
+	// measured link budget + compression decision recorded per transfer.
+	registerFabricTransferRoutes(apiRouter, db, vmManager, vmBasePath(cfg))
+
 	// Node-to-node migration RPC: intentionally OFF the JWT router (the peer is a
 	// node, not a user). Gated by an optional shared secret; see the handler.
 	registerInternalMigrationRoutes(router, db, vmManager, vmBasePath(cfg))
@@ -222,6 +226,30 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 		// header floods.
 		MaxHeaderBytes: 64 << 10,
 	}
+}
+
+// cleanupOrphanedIncoming stops and removes a half-started migration
+// destination whose guest never resumed (source died or was interrupted).
+// Without it the dest keeps a paused qemu holding the disk lock, the VM id is
+// unusable for a retry, and nothing in the DB references it — an orphan that
+// only manual cleanup finds (observed live 2026-09-20: an interrupted transfer
+// left a locked dest disk that failed the next attempt with "Failed to get
+// write lock").
+func cleanupOrphanedIncoming(kd *core_vm.KVMDriverEnhanced, vmID, destDir string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := kd.Stop(ctx, vmID); err != nil {
+		log.Printf("orphan cleanup: stop %s: %v", vmID, err)
+	}
+	if err := kd.Delete(ctx, vmID); err != nil {
+		log.Printf("orphan cleanup: delete %s: %v", vmID, err)
+	}
+	// Defensive: Delete removes the driver's runtime dir; RemoveAll covers a
+	// dest dir created before the driver registered the VM.
+	if err := os.RemoveAll(destDir); err != nil {
+		log.Printf("orphan cleanup: remove %s: %v", destDir, err)
+	}
+	log.Printf("orphan cleanup: removed half-started migration dest %s", vmID)
 }
 
 func buildCORSHandler(cfg *config.Config) mux.MiddlewareFunc {
@@ -1382,7 +1410,8 @@ func registerInternalMigrationRoutes(router *mux.Router, db *sql.DB, vmManager *
 			// request ctx, which is cancelled the moment we respond below.
 			go func() {
 				if err := kd.AwaitFinishIncomingBlock(req.VMID, 10*time.Minute); err != nil {
-					logger.Warn("block incoming did not resume; not registering", "vm", req.VMID, "error", err)
+					logger.Warn("block incoming did not resume; cleaning up orphaned dest", "vm", req.VMID, "error", err)
+					cleanupOrphanedIncoming(kd, req.VMID, destDir)
 					return
 				}
 				registerMigratedDest(db, vmManager, req.VMID, req.Config, req.TargetNodeID)
@@ -1399,13 +1428,40 @@ func registerInternalMigrationRoutes(router *mux.Router, db *sql.DB, vmManager *
 		// resumes. Background: not tied to the request ctx (see block branch).
 		go func() {
 			if err := kd.WaitResumed(req.VMID, 10*time.Minute); err != nil {
-				logger.Warn("shared incoming did not resume; not registering", "vm", req.VMID, "error", err)
+				logger.Warn("shared incoming did not resume; cleaning up orphaned dest", "vm", req.VMID, "error", err)
+				cleanupOrphanedIncoming(kd, req.VMID, destDir)
 				return
 			}
 			registerMigratedDest(db, vmManager, req.VMID, req.Config, req.TargetNodeID)
 		}()
 
 		writeJSON(w, http.StatusOK, core_vm.IncomingMigrationResponse{Port: port})
+	}).Methods(http.MethodPost)
+
+	// POST /internal/migrate/abort -- the source tells this dest to release a
+	// half-started incoming VM after a source-side failure (e.g. unsupported
+	// compression parameters). Without it the dest keeps a paused qemu holding
+	// the disk lock until the no-resume watchdog fires.
+	router.HandleFunc("/internal/migrate/abort", func(w http.ResponseWriter, r *http.Request) {
+		if !migrationAuthOK(r) {
+			writeJSONError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		var req struct {
+			VMID string `json:"vm_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.VMID) == "" {
+			writeJSONError(w, http.StatusBadRequest, "vm_id is required")
+			return
+		}
+		drv, derr := vmManager.GetDriverForConfig(core_vm.VMConfig{Type: core_vm.VMTypeKVM})
+		kd, ok := drv.(*core_vm.KVMDriverEnhanced)
+		if derr != nil || !ok {
+			writeJSONError(w, http.StatusServiceUnavailable, "kvm driver unavailable")
+			return
+		}
+		cleanupOrphanedIncoming(kd, req.VMID, filepath.Join(vmBase, req.VMID))
+		writeJSON(w, http.StatusOK, map[string]interface{}{"aborted": true, "vm_id": req.VMID})
 	}).Methods(http.MethodPost)
 }
 
@@ -1445,21 +1501,53 @@ func registerMigratedDest(db *sql.DB, manager *core_vm.VMManager, vmID string, c
 	}
 	manager.AddVM(vm)
 
+	// The migrating VM's owner exists in the SOURCE node's user directory, not
+	// necessarily here; vms.owner_id is a local FK, so a foreign owner must
+	// become NULL with the requested id preserved in metadata (same rule as
+	// createVMLocal). Without this the whole registration INSERT failed and the
+	// migrated VM stayed invisible to this node's API (observed live).
+	owner := parseOwnerID(cfg.OwnerID)
+	if owner != nil && db != nil {
+		var exists bool
+		if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`, owner).Scan(&exists); err != nil || !exists {
+			owner = nil
+		}
+	}
+	// vms.node_id is a UUID FK to the canonical nodes table, but the cluster
+	// layer keys nodes by the free-form NOVACRON_NODE_ID string ("node-b").
+	// Writing that string into the UUID column made every registration INSERT
+	// fail ("invalid input syntax for type uuid") and left the migrated VM
+	// invisible to this node's API — observed live. The cluster id therefore
+	// lives in metadata (cluster_node_id), like the rest of the cluster layer.
 	configPayload, _ := json.Marshal(map[string]interface{}{
-		"cpu_shares":   cfg.CPUShares,
-		"vcpus":        vcpusOrDefault(cfg.VCPUs),
-		"memory_mb":    cfg.MemoryMB,
-		"disk_size_gb": cfg.DiskSizeGB,
-		"image":        cfg.Image,
+		"cpu_shares":         cfg.CPUShares,
+		"vcpus":              vcpusOrDefault(cfg.VCPUs),
+		"memory_mb":          cfg.MemoryMB,
+		"disk_size_gb":       cfg.DiskSizeGB,
+		"image":              cfg.Image,
+		"requested_owner_id": cfg.OwnerID,
+		"cluster_node_id":    nodeID,
 	})
 	if _, err := db.Exec(`
-		INSERT INTO vms (id, name, state, node_id, cpu_cores, memory_mb, disk_gb, os_type, owner_id, metadata, created_at, updated_at)
-		VALUES ($1, $2, 'running', $3, $4, $5, $6, $7, NULLIF($8, '')::uuid, $9, NOW(), NOW())
-	`, vmID, cfg.Name, nullableStringValue(nodeID), vcpusOrDefault(cfg.VCPUs), cfg.MemoryMB, cfg.DiskSizeGB, nullableStringValue(cfg.Image), parseOwnerID(cfg.OwnerID), configPayload); err != nil {
+		INSERT INTO vms (id, name, state, cpu_cores, memory_mb, disk_gb, os_type, owner_id, metadata, created_at, updated_at)
+		VALUES ($1, $2, 'running', $3, $4, $5, $6, NULLIF($7, '')::uuid, $8, NOW(), NOW())
+		ON CONFLICT (id) DO UPDATE SET state = 'running', metadata = EXCLUDED.metadata, updated_at = NOW()
+	`, vmID, cfg.Name, vcpusOrDefault(cfg.VCPUs), cfg.MemoryMB, cfg.DiskSizeGB, nullableStringValue(cfg.Image), ownerString(owner), configPayload); err != nil {
 		logger.Warn("migrated-VM DB register failed", "vm", vmID, "error", err)
 		return
 	}
 	logger.Info("registered migrated-in VM on destination node", "vm", vmID, "node", nodeID)
+}
+
+// ownerString renders a parsed owner for the SQL NULLIF($8,”)::uuid idiom.
+func ownerString(owner interface{}) string {
+	if owner == nil {
+		return ""
+	}
+	if s, ok := owner.(string); ok {
+		return s
+	}
+	return ""
 }
 
 // registerConfiguredPeers registers migration peer nodes from the NOVACRON_PEERS

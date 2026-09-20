@@ -132,7 +132,7 @@ func TestBlockMigrationLocalhostCutover(t *testing.T) {
 	}
 	destPID := destInfoBeforeStop.PID // capture before Stop zeroes it (locked read)
 
-	downtimeMs, totalMs, err := d.migrateBlockWithStats(ctx, srcID, ramURI, nbdURI)
+	downtimeMs, totalMs, err := d.migrateBlockWithStats(ctx, srcID, ramURI, nbdURI, nil)
 	if err != nil {
 		t.Fatalf("block migrate did not complete: %v", err)
 	}

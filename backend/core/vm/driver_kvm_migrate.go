@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -120,6 +121,11 @@ func (d *KVMDriverEnhanced) StartIncomingWithDisk(ctx context.Context, destID, d
 		delete(d.vms, destID)
 		return "", err
 	}
+	if err := d.completeDeferredIncoming(dest); err != nil {
+		_ = d.stopVMInternal(dest)
+		delete(d.vms, destID)
+		return "", err
+	}
 
 	// Block until the dest is actually waiting for the incoming stream (QMP
 	// status "inmigrate"), so the caller can issue migrate without racing the
@@ -130,6 +136,36 @@ func (d *KVMDriverEnhanced) StartIncomingWithDisk(ctx context.Context, destID, d
 		return "", fmt.Errorf("dest %s not ready for incoming: %w", destID, err)
 	}
 	return destID, nil
+}
+
+// completeDeferredIncoming finishes a "-incoming defer" destination: it enables
+// the compression capability/parameters the source will use, then issues
+// migrate-incoming so the stream is accepted under those settings. No-op when
+// the destination was launched with a plain -incoming URI.
+func (d *KVMDriverEnhanced) completeDeferredIncoming(dest *KVMVMInfo) error {
+	comp := strings.TrimSpace(dest.Config.Tags["migrate.compression"])
+	if dest.IncomingURI == "" || comp == "" || comp == "none" {
+		return nil
+	}
+	q, err := qmpDial(filepath.Join(d.runtimeDir(dest), "qmp.sock"), 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("dest QMP for deferred incoming: %w", err)
+	}
+	defer q.Close()
+
+	params := map[string]string{
+		"compression":               comp,
+		"multifd_channels":          dest.Config.Tags["migrate.multifd_channels"],
+		"multifd_compression_level": dest.Config.Tags["migrate.multifd_compression_level"],
+		"xbzrle_cache_size":         dest.Config.Tags["migrate.xbzrle_cache_size"],
+	}
+	if err := applyMigrationCompression(q, params); err != nil {
+		return fmt.Errorf("dest compression setup: %w", err)
+	}
+	if _, err := q.execute("migrate-incoming", map[string]interface{}{"uri": dest.IncomingURI}); err != nil {
+		return fmt.Errorf("migrate-incoming: %w", err)
+	}
+	return nil
 }
 
 // waitIncomingReady polls the destination QMP socket until the VM reports it is
@@ -203,6 +239,11 @@ func (d *KVMDriverEnhanced) migrateWithStats(ctx context.Context, vmID, target s
 	}
 	defer q.Close()
 
+	if err := applyMigrationCompression(q, params); err != nil {
+		d.rollbackFailedMigration(q, vmID, destID)
+		return 0, 0, err
+	}
+
 	if _, err := q.execute("migrate", map[string]interface{}{"uri": uri}); err != nil {
 		// The migrate never started, but the dest may still be up: roll back so it
 		// is not left orphaned, and make sure the source is running.
@@ -224,6 +265,121 @@ func (d *KVMDriverEnhanced) migrateWithStats(ctx context.Context, vmID, target s
 	_, _ = q.execute("quit", nil)
 	log.Printf("VM %s migrated to %s (downtime %dms, total %dms)", vmID, uri, downtimeMs, totalMs)
 	return downtimeMs, totalMs, nil
+}
+
+// --- migration compression (opt-in) ----------------------------------------
+
+// applyMigrationCompression sets the QEMU migration compression mode requested
+// by params["compression"] BEFORE the migrate command runs. Absent/"" /"none"
+// issues no QMP at all, so an unconfigured migration is byte-for-byte the
+// behaviour it had before this existed.
+//
+// Modes:
+//
+//	zstd-multifd — multifd capability + multifd-compression=zstd (parallel
+//	               streams, each zstd-compressed). Both ends must support it.
+//	xbzrle       — xbzrle capability + cache size (delta-based RAM encoding).
+//
+// A QEMU rejection is returned as an error, not swallowed: silently migrating
+// uncompressed after the caller decided compression wins would make the
+// recorded decision a lie.
+func applyMigrationCompression(q *qmpConn, params map[string]string) error {
+	mode := strings.ToLower(strings.TrimSpace(params["compression"]))
+	switch mode {
+	case "", "none":
+		return nil
+	case "zstd-multifd", "multifd":
+		channels := 4
+		if v := strings.TrimSpace(params["multifd_channels"]); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 16 {
+				channels = n
+			}
+		}
+		level := 1
+		if v := strings.TrimSpace(params["multifd_compression_level"]); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 22 {
+				level = n
+			}
+		}
+		if _, err := q.execute("migrate-set-capabilities", map[string]interface{}{
+			"capabilities": []map[string]interface{}{{"capability": "multifd", "state": true}},
+		}); err != nil {
+			return fmt.Errorf("enable multifd: %w", err)
+		}
+		// Only send parameters this QEMU actually exposes: multifd-compression
+		// exists since 7.0, multifd-compression-level only in newer builds
+		// (8.2.2 rejects it outright: "Parameter 'multifd-compression-level' is
+		// unexpected"). Probing query-migrate-parameters keeps the call
+		// version-adaptive instead of guessing.
+		supported, err := qmpSupportedMigrateParams(q)
+		if err != nil {
+			return fmt.Errorf("query-migrate-parameters: %w", err)
+		}
+		setParams := map[string]interface{}{}
+		if supported["multifd-channels"] {
+			setParams["multifd-channels"] = channels
+		}
+		if supported["multifd-compression"] {
+			setParams["multifd-compression"] = "zstd"
+		}
+		if supported["multifd-compression-level"] {
+			setParams["multifd-compression-level"] = level
+		}
+		if _, ok := setParams["multifd-compression"]; !ok {
+			return fmt.Errorf("this QEMU (%s) has no multifd-compression parameter; cannot honour zstd-multifd", qmpVersionString())
+		}
+		if _, err := q.execute("migrate-set-parameters", setParams); err != nil {
+			return fmt.Errorf("set multifd zstd parameters: %w", err)
+		}
+		return nil
+	case "xbzrle":
+		cacheSize := int64(64 << 20)
+		if v := strings.TrimSpace(params["xbzrle_cache_size"]); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				cacheSize = n
+			}
+		}
+		if _, err := q.execute("migrate-set-capabilities", map[string]interface{}{
+			"capabilities": []map[string]interface{}{{"capability": "xbzrle", "state": true}},
+		}); err != nil {
+			return fmt.Errorf("enable xbzrle: %w", err)
+		}
+		if _, err := q.execute("migrate-set-parameters", map[string]interface{}{
+			"xbzrle-cache-size": cacheSize,
+		}); err != nil {
+			return fmt.Errorf("set xbzrle cache size: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown migration compression mode %q", mode)
+	}
+}
+
+// qmpSupportedMigrateParams returns the set of migrate-parameter names this
+// QEMU exposes (query-migrate-parameters). Used to send only supported keys.
+func qmpSupportedMigrateParams(q *qmpConn) (map[string]bool, error) {
+	raw, err := q.execute("query-migrate-parameters", nil)
+	if err != nil {
+		return nil, err
+	}
+	var params map[string]interface{}
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(params))
+	for k := range params {
+		out[k] = true
+	}
+	return out, nil
+}
+
+// qmpVersionString reports the QEMU version when known (best effort, for error
+// messages); empty string when unavailable.
+func qmpVersionString() string {
+	if v := os.Getenv("NOVACRON_QEMU_VERSION"); v != "" {
+		return v
+	}
+	return "unknown"
 }
 
 // --- minimal QMP (QEMU Machine Protocol) client ---------------------------
@@ -417,15 +573,15 @@ func (d *KVMDriverEnhanced) StartIncomingBlock(ctx context.Context, destID, dest
 	}
 
 	dest := &KVMVMInfo{
-		ID:           destID,
-		Config:       config,
-		State:        StateCreated,
-		DiskPath:     destDisk, // its OWN disk (not shared)
-		ConfigPath:   filepath.Join(destDir, "config.json"),
-		MonitorPath:  filepath.Join(destDir, "monitor.sock"),
-		VNCPort:      freeVNCPort(),
-		RuntimeDir:   destDir,
-		IncomingURI:  incomingURI,
+		ID:          destID,
+		Config:      config,
+		State:       StateCreated,
+		DiskPath:    destDisk, // its OWN disk (not shared)
+		ConfigPath:  filepath.Join(destDir, "config.json"),
+		MonitorPath: filepath.Join(destDir, "monitor.sock"),
+		VNCPort:     freeVNCPort(),
+		RuntimeDir:  destDir,
+		IncomingURI: incomingURI,
 	}
 	d.vms[destID] = dest
 	// Persist config.json so a dest-node restart can re-adopt this migrated VM into
@@ -436,6 +592,11 @@ func (d *KVMDriverEnhanced) StartIncomingBlock(ctx context.Context, destID, dest
 
 	log.Printf("Starting KVM block-migration dest %s <- incoming %s (own disk %s)", destID, incomingURI, destDisk)
 	if err := d.launchVM(destID, dest); err != nil {
+		delete(d.vms, destID)
+		return "", "", err
+	}
+	if err := d.completeDeferredIncoming(dest); err != nil {
+		_ = d.stopVMInternal(dest)
 		delete(d.vms, destID)
 		return "", "", err
 	}
@@ -468,7 +629,7 @@ func (d *KVMDriverEnhanced) StartIncomingBlock(ctx context.Context, destID, dest
 // cancel the mirror -> quit the source. Returns QEMU downtime/total (ms). The
 // caller must invoke FinishIncomingBlock on the dest afterwards to tear down the
 // export. nbdURI comes from StartIncomingBlock.
-func (d *KVMDriverEnhanced) migrateBlockWithStats(ctx context.Context, vmID, ramURI, nbdURI string) (downtimeMs, totalMs int64, err error) {
+func (d *KVMDriverEnhanced) migrateBlockWithStats(ctx context.Context, vmID, ramURI, nbdURI string, params map[string]string) (downtimeMs, totalMs int64, err error) {
 	d.vmLock.RLock()
 	vmInfo, ok := d.vms[vmID]
 	d.vmLock.RUnlock()
@@ -514,6 +675,10 @@ func (d *KVMDriverEnhanced) migrateBlockWithStats(ctx context.Context, vmID, ram
 	// Generous downtime ceiling so a slow (TCG) guest still converges in one
 	// stop-and-copy; harmless under KVM (actual downtime stays small).
 	_, _ = q.execute("migrate-set-parameters", map[string]interface{}{"downtime-limit": 5000})
+
+	if err := applyMigrationCompression(q, params); err != nil {
+		return 0, 0, err
+	}
 
 	if _, err := q.execute("migrate", map[string]interface{}{"uri": ramURI}); err != nil {
 		return 0, 0, fmt.Errorf("migrate command: %w", err)

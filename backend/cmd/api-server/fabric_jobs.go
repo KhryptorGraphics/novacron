@@ -358,11 +358,14 @@ func estimatedMoveCostS(n nodeProfile, spec fabricJobSpec) float64 {
 	return transfer + run
 }
 
-// rttToBps converts the measured heartbeat RTT to a rough capacity estimate.
-// ponytail: RTT-based estimation is a documented placeholder — it ranks LAN
-// links ahead of WAN ones correctly, which is what placement needs today; the
-// P3 throughput probe replaces the estimate with a measured value.
+// rttToBps converts a link profile to a capacity estimate for placement:
+// a FRESH measured throughput wins; otherwise the estimate degrades to the
+// RTT heuristic (documented placeholder: it ranks LAN ahead of WAN, which is
+// what ordering needs), and an unmeasured link ranks as fast-local.
 func rttToBps(n nodeProfile) float64 {
+	if n.Link != nil && n.Link.ThroughputBps != nil && !n.Link.Stale && *n.Link.ThroughputBps > 0 {
+		return *n.Link.ThroughputBps
+	}
 	if n.Link == nil || n.Link.RTTMS <= 0 {
 		return 1e9 // unknown link: treat as fast local, not as zero
 	}
@@ -376,10 +379,20 @@ func rttToBps(n nodeProfile) float64 {
 }
 
 func linkBandwidthLabel(n nodeProfile) string {
-	if n.Link == nil || n.Link.RTTMS <= 0 {
+	if n.Link == nil {
 		return "unmeasured"
 	}
-	return fmt.Sprintf("rtt %.2fms", n.Link.RTTMS)
+	if n.Link.ThroughputBps != nil {
+		state := "measured"
+		if n.Link.Stale {
+			state = "stale"
+		}
+		return fmt.Sprintf("%s %.1f Mbps", state, *n.Link.ThroughputBps/1e6)
+	}
+	if n.Link.RTTMS > 0 {
+		return fmt.Sprintf("rtt %.2fms (throughput unmeasured)", n.Link.RTTMS)
+	}
+	return "unmeasured"
 }
 
 func clampJobMemory(mb int) int {
