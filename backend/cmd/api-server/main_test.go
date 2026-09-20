@@ -268,7 +268,9 @@ func TestRegisterSecureAPIRoutesCreatesVMOnCompatibilityRoute(t *testing.T) {
 			2048,             // memory_mb
 			0,                // disk_gb (0 = driver default)
 			sqlmock.AnyArg(), // os_type (image)
+			sqlmock.AnyArg(), // node_id: selfNodeID(), depends on NOVACRON_NODE_ID
 			"",               // owner_id: non-uuid JWT sub is sanitized to '' (NULLIF -> NULL)
+			sqlmock.AnyArg(), // requested_owner_id
 			sqlmock.AnyArg(), // metadata JSON
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))

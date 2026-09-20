@@ -268,8 +268,9 @@ func vcpusOrDefault(vcpus int) int {
 
 // createVMLocal provisions a VM on THIS node (manager create + DB row) and returns
 // its id and state. Shared by the /vms route (local placement) and the
-// /internal/vms/create dispatch RPC. node_id is stored as this node's id so the
-// row records where the guest actually runs.
+// /internal/vms/create dispatch RPC. node_id is stored as selfNodeID() (the
+// cluster node id, not a nodes(id) UUID -- see novacron-ok7) so the row
+// records where the guest actually runs and is queryable via plain SQL.
 func createVMLocal(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager, spec clusterCreateSpec) (vmID, state string, err error) {
 	vmID = uuid.NewString()
 	state = "stopped" // canonical vm_state enum; reconciled to live state below
@@ -277,16 +278,24 @@ func createVMLocal(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 	if _, err := uuid.Parse(ownerID); err != nil {
 		ownerID = "" // non-uuid ownership is dropped; vms.owner_id is a users FK
 	}
+	// requestedOwnerID is set only when a validly-formatted owner UUID could
+	// not be honoured locally (see the existence check below); owner_id
+	// itself already answers "who owns this" when the owner does resolve, so
+	// duplicating it into requested_owner_id there would be redundant.
+	requestedOwnerID := ownerID
 	// Cross-node creates land in the PEER's database, which has its own users
 	// table: an owner that exists only on the submitting node would violate
 	// vms_owner_id_fkey. Ownership is a local-directory concept, so when the
 	// local DB has no such user the column is NULL and the requested owner is
-	// preserved in the row metadata instead (never silently invented).
+	// preserved in vms.requested_owner_id instead (never silently invented).
 	if ownerID != "" && db != nil {
 		var ownerExists bool
 		if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`, ownerID).Scan(&ownerExists); err != nil || !ownerExists {
 			ownerID = ""
 		}
+	}
+	if ownerID != "" {
+		requestedOwnerID = "" // resolved locally: no divergence to record
 	}
 	if vmManager != nil {
 		if _, cerr := vmManager.CreateVM(ctx, core_vm.CreateVMRequest{
@@ -320,12 +329,11 @@ func createVMLocal(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 	metadataPayload, _ := json.Marshal(map[string]interface{}{
 		"cpu_shares": spec.CPUShares, "vcpus": cores, "memory_mb": spec.MemoryMB,
 		"disk_size_gb": spec.DiskSizeGB, "image": spec.Image, "tags": spec.Tags,
-		"requested_owner_id": spec.OwnerID,
 	})
 	if _, dberr := db.Exec(`
-		INSERT INTO vms (id, name, state, cpu_cores, memory_mb, disk_gb, os_type, owner_id, metadata, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::uuid, $9, NOW(), NOW())
-	`, vmID, spec.Name, state, cores, spec.MemoryMB, spec.DiskSizeGB, nullableStringValue(spec.Image), ownerID, metadataPayload); dberr != nil {
+		INSERT INTO vms (id, name, state, cpu_cores, memory_mb, disk_gb, os_type, node_id, owner_id, requested_owner_id, metadata, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, NULLIF($10, '')::uuid, $11, NOW(), NOW())
+	`, vmID, spec.Name, state, cores, spec.MemoryMB, spec.DiskSizeGB, nullableStringValue(spec.Image), selfNodeID(), ownerID, requestedOwnerID, metadataPayload); dberr != nil {
 		if vmManager != nil {
 			_ = vmManager.DeleteVM(context.Background(), vmID)
 		}

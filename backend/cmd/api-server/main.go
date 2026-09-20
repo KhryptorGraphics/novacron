@@ -1503,36 +1503,39 @@ func registerMigratedDest(db *sql.DB, manager *core_vm.VMManager, vmID string, c
 
 	// The migrating VM's owner exists in the SOURCE node's user directory, not
 	// necessarily here; vms.owner_id is a local FK, so a foreign owner must
-	// become NULL with the requested id preserved in metadata (same rule as
-	// createVMLocal). Without this the whole registration INSERT failed and the
-	// migrated VM stayed invisible to this node's API (observed live).
+	// become NULL with the requested id preserved in vms.requested_owner_id
+	// (same rule as createVMLocal). Without this the whole registration INSERT
+	// failed and the migrated VM stayed invisible to this node's API (observed
+	// live).
 	owner := parseOwnerID(cfg.OwnerID)
+	requestedOwner := owner
 	if owner != nil && db != nil {
 		var exists bool
 		if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`, owner).Scan(&exists); err != nil || !exists {
 			owner = nil
 		}
 	}
-	// vms.node_id is a UUID FK to the canonical nodes table, but the cluster
-	// layer keys nodes by the free-form NOVACRON_NODE_ID string ("node-b").
-	// Writing that string into the UUID column made every registration INSERT
-	// fail ("invalid input syntax for type uuid") and left the migrated VM
-	// invisible to this node's API — observed live. The cluster id therefore
-	// lives in metadata (cluster_node_id), like the rest of the cluster layer.
+	if owner != nil {
+		requestedOwner = nil // resolved locally: no divergence to record
+	}
+	// vms.node_id is the cluster node id string (NOVACRON_NODE_ID /
+	// cluster_peers.node_id), not a nodes(id) UUID -- see novacron-ok7. It is
+	// now written for real, so "which node is this VM on" is queryable via
+	// plain SQL instead of every consumer having to parse metadata JSON.
 	configPayload, _ := json.Marshal(map[string]interface{}{
-		"cpu_shares":         cfg.CPUShares,
-		"vcpus":              vcpusOrDefault(cfg.VCPUs),
-		"memory_mb":          cfg.MemoryMB,
-		"disk_size_gb":       cfg.DiskSizeGB,
-		"image":              cfg.Image,
-		"requested_owner_id": cfg.OwnerID,
-		"cluster_node_id":    nodeID,
+		"cpu_shares":   cfg.CPUShares,
+		"vcpus":        vcpusOrDefault(cfg.VCPUs),
+		"memory_mb":    cfg.MemoryMB,
+		"disk_size_gb": cfg.DiskSizeGB,
+		"image":        cfg.Image,
 	})
 	if _, err := db.Exec(`
-		INSERT INTO vms (id, name, state, cpu_cores, memory_mb, disk_gb, os_type, owner_id, metadata, created_at, updated_at)
-		VALUES ($1, $2, 'running', $3, $4, $5, $6, NULLIF($7, '')::uuid, $8, NOW(), NOW())
-		ON CONFLICT (id) DO UPDATE SET state = 'running', metadata = EXCLUDED.metadata, updated_at = NOW()
-	`, vmID, cfg.Name, vcpusOrDefault(cfg.VCPUs), cfg.MemoryMB, cfg.DiskSizeGB, nullableStringValue(cfg.Image), ownerString(owner), configPayload); err != nil {
+		INSERT INTO vms (id, name, state, cpu_cores, memory_mb, disk_gb, os_type, node_id, owner_id, requested_owner_id, metadata, created_at, updated_at)
+		VALUES ($1, $2, 'running', $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, '')::uuid, NULLIF($9, '')::uuid, $10, NOW(), NOW())
+		ON CONFLICT (id) DO UPDATE SET
+			state = 'running', node_id = EXCLUDED.node_id, owner_id = EXCLUDED.owner_id,
+			requested_owner_id = EXCLUDED.requested_owner_id, metadata = EXCLUDED.metadata, updated_at = NOW()
+	`, vmID, cfg.Name, vcpusOrDefault(cfg.VCPUs), cfg.MemoryMB, cfg.DiskSizeGB, nullableStringValue(cfg.Image), nodeID, ownerString(owner), ownerString(requestedOwner), configPayload); err != nil {
 		logger.Warn("migrated-VM DB register failed", "vm", vmID, "error", err)
 		return
 	}
