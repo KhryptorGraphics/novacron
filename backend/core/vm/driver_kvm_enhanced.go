@@ -363,7 +363,15 @@ func (d *KVMDriverEnhanced) persistLaunchHints(vmInfo *KVMVMInfo) {
 
 // MigrationCPUHints reports the accel/CPU pair this VM was launched with, for
 // building an incoming-migration request whose destination must match it.
-// Empty map when unknown (older VMs launched before hints were recorded).
+// launch.json is the fast path (every VM launched since novacron-z59's
+// parent fix writes one); accelCPUFromLiveProcess is the fallback for a VM
+// started before that -- it reads the ACTUAL running qemu's own -machine/-cpu
+// args from /proc/<pid>/cmdline, so it is exact, not a guess, and needs
+// nothing to have been recorded ahead of time. Only a VM with no launch.json
+// AND no live, readable process (already stopped, or /proc is inaccessible)
+// returns nil -- the destination then falls back to its own host default,
+// same as before this fix, and the caller (migrationDestConfig) is the
+// right place to decide whether that is acceptable.
 func (d *KVMDriverEnhanced) MigrationCPUHints(vmID string) map[string]string {
 	d.vmLock.RLock()
 	vmInfo, ok := d.vms[vmID]
@@ -372,14 +380,54 @@ func (d *KVMDriverEnhanced) MigrationCPUHints(vmID string) map[string]string {
 		return nil
 	}
 	raw, err := os.ReadFile(filepath.Join(d.runtimeDir(vmInfo), "launch.json"))
+	if err == nil {
+		var hints map[string]string
+		if json.Unmarshal(raw, &hints) == nil && hints["accel"] != "" {
+			return hints
+		}
+	}
+	pid := vmInfo.PID
+	if pid <= 0 && vmInfo.Process != nil {
+		pid = vmInfo.Process.Pid
+	}
+	if pid <= 0 {
+		return nil
+	}
+	accel, cpu, ok := accelCPUFromLiveProcess(pid)
+	if !ok {
+		return nil
+	}
+	log.Printf("migration CPU hints for %s: no launch.json (pre-fix VM); recovered accel=%s cpu_model=%s from the live process (pid %d)", vmID, accel, cpu, pid)
+	return map[string]string{"accel": accel, "cpu_model": cpu}
+}
+
+// accelCPUFromLiveProcess reads pid's own qemu -machine/-cpu arguments
+// straight from /proc/<pid>/cmdline (NUL-separated argv). Returns ok=false
+// if the process is gone, unreadable, or does not look like a qemu launched
+// by buildQEMUArgs (-machine <type>,accel=<accel> -cpu <cpu>, see there).
+func accelCPUFromLiveProcess(pid int) (accel, cpu string, ok bool) {
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
 	if err != nil {
-		return nil
+		return "", "", false
 	}
-	var hints map[string]string
-	if err := json.Unmarshal(raw, &hints); err != nil {
-		return nil
+	args := strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
+	for i, a := range args {
+		switch a {
+		case "-machine":
+			if i+1 < len(args) {
+				for _, kv := range strings.Split(args[i+1], ",") {
+					if v, found := strings.CutPrefix(kv, "accel="); found {
+						accel = v
+					}
+				}
+			}
+		case "-cpu":
+			if i+1 < len(args) {
+				cpu = args[i+1]
+			}
+		}
 	}
-	return hints
+	return accel, cpu, accel != "" && cpu != ""
 }
 
 // launchAccelCPU is the single source of truth for the accel/CPU pair a launch

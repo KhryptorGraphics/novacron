@@ -1116,8 +1116,16 @@ func (m *VMManager) migrateBlockCrossNode(ctx context.Context, vm *VM, driver VM
 func migrationDestConfig(cfg VMConfig, kd *KVMDriverEnhanced, vmID string, params map[string]string) VMConfig {
 	hints := kd.MigrationCPUHints(vmID)
 	comp := strings.TrimSpace(params["compression"])
-	if len(hints) == 0 && (comp == "" || comp == "none") {
-		return cfg
+	if len(hints) == 0 {
+		// Both the launch.json fast path and the live-process /proc/<pid>/cmdline
+		// fallback (novacron-z59) came up empty -- the source's own process is
+		// gone or unreadable. The destination will pick its own host default,
+		// which silently risks the exact cross-accel CPU-state load failure
+		// this function exists to prevent; at minimum, say so.
+		log.Printf("migration CPU hints for %s: accel/CPU pair could not be determined (no launch.json, source process unreadable); destination will pick its own default and may mismatch the source", vmID)
+		if comp == "" || comp == "none" {
+			return cfg
+		}
 	}
 	tags := make(map[string]string, len(cfg.Tags)+6)
 	for k, v := range cfg.Tags {
