@@ -884,18 +884,22 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 	args = append(args, "-device", "virtio-rng-pci")
 
 	// Migration destination: start paused waiting for the incoming stream.
-	// With a compression mode requested, the dest must NOT auto-accept: QEMU
-	// negotiates multifd/xbzrle only when the destination enables the same
-	// capability BEFORE the stream arrives (plain -incoming leaves multifd off,
-	// so the source's multifd stream dies with "Unable to write to socket:
-	// Broken pipe" and the dest logs nothing — observed live). "-incoming defer"
-	// + QMP capability setup + migrate-incoming is the QEMU-documented order.
+	// ALWAYS deferred (never a plain auto-accepting -incoming URI): a plain
+	// listener starts accepting the moment qemu launches, before the driver
+	// has even returned the dest's address to the source, so the FIRST
+	// connection anything makes to that port (a stray probe, a health check,
+	// a leftover client) gets consumed as the migration stream and the real
+	// source's connections are rejected with "Extra incoming migration
+	// connection; ignoring" — observed live on the shared-storage path
+	// (novacron-hgc). It also mishandles compression: QEMU only negotiates
+	// multifd/xbzrle when the destination enables the same capability BEFORE
+	// the stream arrives (observed live as "Unable to write to socket: Broken
+	// pipe" on the source, nothing logged on the dest). "-incoming defer" +
+	// QMP capability setup + migrate-incoming, issued only once the driver
+	// has finished standing up the dest (completeDeferredIncoming), is the
+	// QEMU-documented order that closes both windows.
 	if vmInfo.IncomingURI != "" {
-		if comp := strings.TrimSpace(vmInfo.Config.Tags["migrate.compression"]); comp != "" && comp != "none" {
-			args = append(args, "-incoming", "defer")
-		} else {
-			args = append(args, "-incoming", vmInfo.IncomingURI)
-		}
+		args = append(args, "-incoming", "defer")
 	}
 
 	return args

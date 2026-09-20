@@ -103,10 +103,23 @@ api() { # api <node: a|b> <method> <path> [json-body]
 cleanup() {
   local rc=$?
   head2 "cleanup"
+  # node-$n.pid only names the immediate child bash forked ($! for node b is
+  # `sudo`'s own PID, not the api-server: `sudo -E ip netns exec ... setsid
+  # nohup $BIN` detaches into a brand new session, so killing that PID does
+  # NOT reach the actual binary or any qemu child it spawned -- observed
+  # live as an orphaned node-b api-server + qemu surviving a "clean" run).
+  # $WORK is unique per run (contains this script's own PID), so a plain
+  # host-side pkill -f on that exact path safely targets only this run's
+  # processes regardless of which netns they're in -- /proc is not
+  # namespaced by `ip netns`, so this must NOT be wrapped in `ip netns
+  # exec` (that scans the same global /proc and adds no isolation, it only
+  # invites running the pattern match somewhere the operator didn't intend).
   for n in a b; do
     [ -f "$WORK/node-$n.pid" ] && sudo kill "$(cat "$WORK/node-$n.pid")" 2>/dev/null
   done
+  sudo pkill -TERM -f "$WORK" 2>/dev/null
   sleep 1
+  sudo pkill -KILL -f "$WORK" 2>/dev/null
   if [ "$KEEP" = "1" ]; then
     say "  FABRIC_KEEP=1 — leaving nodes, netns ($NS_B), veth pair and databases ($DB_A, $DB_B) in place"
     say "  logs: $WORK"

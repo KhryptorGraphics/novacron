@@ -139,12 +139,14 @@ func (d *KVMDriverEnhanced) StartIncomingWithDisk(ctx context.Context, destID, d
 }
 
 // completeDeferredIncoming finishes a "-incoming defer" destination: it enables
-// the compression capability/parameters the source will use, then issues
-// migrate-incoming so the stream is accepted under those settings. No-op when
-// the destination was launched with a plain -incoming URI.
+// whatever compression capability/parameters the source will use (a no-op
+// when none was requested -- applyMigrationCompression returns nil for
+// mode "" / "none"), then issues migrate-incoming so the stream starts being
+// accepted only now, under those settings. Every migration destination is
+// launched deferred (see buildQEMUArgs), so this always has work to do when
+// IncomingURI is set; it is a no-op only for a normal (non-migration) VM.
 func (d *KVMDriverEnhanced) completeDeferredIncoming(dest *KVMVMInfo) error {
-	comp := strings.TrimSpace(dest.Config.Tags["migrate.compression"])
-	if dest.IncomingURI == "" || comp == "" || comp == "none" {
+	if dest.IncomingURI == "" {
 		return nil
 	}
 	q, err := qmpDial(filepath.Join(d.runtimeDir(dest), "qmp.sock"), 10*time.Second)
@@ -153,6 +155,7 @@ func (d *KVMDriverEnhanced) completeDeferredIncoming(dest *KVMVMInfo) error {
 	}
 	defer q.Close()
 
+	comp := strings.TrimSpace(dest.Config.Tags["migrate.compression"])
 	params := map[string]string{
 		"compression":               comp,
 		"multifd_channels":          dest.Config.Tags["migrate.multifd_channels"],
@@ -700,6 +703,15 @@ func (d *KVMDriverEnhanced) migrateBlockWithStats(ctx context.Context, vmID, ram
 		log.Printf("block-migration %s: mirror job did not conclude cleanly: %v", vmID, err)
 	}
 	_, _ = q.execute("quit", nil)
+	// Wait for the process to actually exit before reporting the migration
+	// complete: `quit` over QMP is async, and a caller who immediately
+	// migrates this VM back to this same node (A->B->A) would otherwise race
+	// StartIncomingBlock's fresh disk/socket creation against this qemu still
+	// holding write permission on the same paths -- observed live as
+	// "Permission conflict on node 'migdisk'" (novacron-sv9).
+	if vmInfo.PID > 0 && !awaitProcessGone(vmInfo.PID, 10*time.Second) {
+		log.Printf("block-migration %s: source qemu PID %d did not exit within 10s of quit; a migration back to this node could race its still-open disk/sockets", vmID, vmInfo.PID)
+	}
 	log.Printf("VM %s block-migrated to %s (nbd %s, downtime %dms, total %dms)", vmID, ramURI, nbdURI, downtimeMs, totalMs)
 	return downtimeMs, totalMs, nil
 }
