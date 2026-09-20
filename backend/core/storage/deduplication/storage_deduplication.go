@@ -691,19 +691,39 @@ func (d *Deduplicator) Reconstruct(fileInfo *DedupFileInfo) ([]byte, error) {
 	return result, nil
 }
 
-// RemoveFile decrements reference counts for blocks in a file
+// RemoveFile decrements reference counts for blocks in a file.
+//
+// A file's Blocks carry one entry per occurrence, so a hash repeated N times
+// appears N times with per-occurrence RefCounts [1..N]. The previous
+// per-entry loop mixed those metadata counts with the shared blockRefCount
+// map: on a fresh instance (restart path, counts seeded from metadata), a
+// hash occurring 3+ times got its disk block removed twice — the second
+// removal failed with ENOENT. Aggregate by unique hash first so each
+// physical block is decremented by the number of its occurrences in this
+// file and removed from disk exactly once.
 func (d *Deduplicator) RemoveFile(fileInfo *DedupFileInfo) error {
 	// Acquire write lock since we're modifying reference counts
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	// For each block in the file
+	// occurrences[hash] = how many times this file references the block.
+	// maxMeta[hash] = the highest per-occurrence RefCount in the file's
+	// metadata for this hash — for a hash the instance itself deduplicated,
+	// that equals the total refcount at dedup time.
+	occurrences := make(map[string]int)
+	maxMeta := make(map[string]int)
 	for _, block := range fileInfo.Blocks {
 		// Skip inlined blocks as they don't affect the block store
 		if block.Inlined {
 			continue
 		}
+		occurrences[block.Hash]++
+		if block.RefCount > maxMeta[block.Hash] {
+			maxMeta[block.Hash] = block.RefCount
+		}
+	}
 
+	for hash, n := range occurrences {
 		// Decrement the reference count. If this deduplicator instance never
 		// called Deduplicate for this hash (e.g. it only loaded the block via
 		// Reconstruct after a restart, so loadBlockFromDisk populated
@@ -712,22 +732,23 @@ func (d *Deduplicator) RemoveFile(fileInfo *DedupFileInfo) error {
 		// best available signal for how many references currently exist.
 		// Without this fallback, RemoveFile silently no-ops for every block
 		// a fresh instance didn't itself create, leaking them on disk forever.
-		count, exists := d.blockRefCount[block.Hash]
+		count, exists := d.blockRefCount[hash]
 		if !exists {
-			count = block.RefCount
+			count = maxMeta[hash]
 		}
+		count -= n
 
-		if count > 1 {
-			// Decrement the reference count
-			d.blockRefCount[block.Hash] = count - 1
+		if count > 0 {
+			// References remain, keep the block
+			d.blockRefCount[hash] = count
 		} else {
-			// Last reference, remove the block
-			delete(d.blockStore, block.Hash)
-			delete(d.blockRefCount, block.Hash)
+			// Last references, remove the block
+			delete(d.blockStore, hash)
+			delete(d.blockRefCount, hash)
 
-			// Remove the block from disk
-			if err := d.removeBlockFromDisk(block.Hash); err != nil {
-				return fmt.Errorf("failed to remove block %s: %w", block.Hash, err)
+			// Remove the block from disk exactly once
+			if err := d.removeBlockFromDisk(hash); err != nil {
+				return fmt.Errorf("failed to remove block %s: %w", hash, err)
 			}
 		}
 	}
