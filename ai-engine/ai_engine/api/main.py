@@ -6,6 +6,7 @@ workload optimization, anomaly detection, and resource optimization.
 """
 
 import logging
+from datetime import datetime, timezone
 import asyncio
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
@@ -178,7 +179,7 @@ async def health_check():
     try:
         health_status = {
             "status": "healthy",
-            "timestamp": "2024-01-01T00:00:00Z",  # Would use actual timestamp
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "services": {
                 "failure_prediction": {
                     "status": "healthy" if failure_service and failure_service.active_model else "no_model",
