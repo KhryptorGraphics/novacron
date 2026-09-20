@@ -31,6 +31,11 @@ const (
 	migrateStatusRunning   = "running"
 	migrateStatusCompleted = "completed"
 	migrateStatusFailed    = "failed"
+	// migrateStatusInterrupted marks a job whose owning api-server died before
+	// it could finalise the job. It is deliberately NOT "failed": the migration
+	// itself is QEMU-native and may well have completed — the row simply cannot
+	// know. Callers must inspect the VM's actual node.
+	migrateStatusInterrupted = "interrupted"
 
 	// migrateJobStoreCap bounds the in-memory job map; oldest jobs are evicted.
 	migrateJobStoreCap = 1024
@@ -191,6 +196,34 @@ func (s *migrateJobStore) getFromDB(id string) (migrateJob, bool) {
 	return job, true
 }
 
+// reconcileInterruptedJobs finalises jobs left in "running" by a previous
+// process. A job's finishing goroutine dies with the api-server, so without
+// this the row reads "running" forever (observed live 2026-09-20: a job still
+// reported running long after its migration window had passed). The status is
+// "interrupted", not "failed": the migration is QEMU-native and may have
+// completed — the row cannot know, and the VM's actual node is the truth.
+// Returns how many rows were closed.
+func (s *migrateJobStore) reconcileInterruptedJobs() int {
+	if s.db == nil {
+		return 0
+	}
+	const note = "api-server restarted while this migration job was in flight; the QEMU migration may have completed — check which node actually runs the VM"
+	res, err := s.db.Exec(
+		`UPDATE migration_jobs SET status = $1, error = $2, finished_at = NOW()
+		 WHERE status = $3 AND finished_at IS NULL`,
+		migrateStatusInterrupted, note, migrateStatusRunning,
+	)
+	if err != nil {
+		logger.Warn("migration job reconcile failed", "error", err)
+		return 0
+	}
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		logger.Info("reconciled interrupted migration jobs", "count", n)
+	}
+	return int(n)
+}
+
 func newMigrateJobID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -291,6 +324,9 @@ func registerVMMigrateAsyncRoutes(router *mux.Router, db *sql.DB, vmManager *cor
 	// this runs once per route tree at startup, before serving, with the same db
 	// each time; nil db keeps the store on its in-memory fallback.
 	migrateJobs.db = db
+	// A previous process may have died mid-job; close those rows honestly
+	// (status "interrupted") instead of leaving them "running" forever.
+	migrateJobs.reconcileInterruptedJobs()
 
 	run := func(ctx context.Context, vmID, targetNode string, options map[string]string) error {
 		if vmManager == nil {

@@ -98,6 +98,22 @@ below was run live on this arm64 host; numbers are observed, not projected.
   clean, lint 0 errors, fabric-page 4/4, canonical 14 suites/34 tests, `next build`
   with the `/fabric` route.
 
+### The 50 Mbps / 40 ms condition, honestly constructed
+
+`tc tbf` supplies the rate (real tc, no netem available on this kernel); the
+delay comes from a latency-only userspace relay (`+20 ms` per direction,
+applied once per connection, no bandwidth cap) placed in front of node-b, with
+node-a's peer entry pointing at it. The fabric's own heartbeat then measured
+**rtt = 41.2 ms at throughput = 47.9 Mbps** over the shaped veth — the goal's
+condition, measured by the system itself. Caveats that travel with any claim:
+the delay is NOT netem (`sch_netem` is absent from 6.8.12-tegra — `novacron-yxm`),
+and it delays only connections routed through the relay (control plane,
+heartbeat, probe, dispatch): QEMU's migration data stream dials the
+destination's advertised ports directly and therefore carries only the
+tc-shaped rate. Under this condition a fabric job dispatched to node-b ran and
+returned its stdout (`over-40ms-relay`), and a block migration completed in
+**31.0 s** (raw — the incompressible cirros sample correctly chose `none`).
+
 ### Measured migration numbers (50 Mbit shaped link, tc tbf)
 
 | VM | RAM | disk sample ratio | compression | wall time |
@@ -123,9 +139,13 @@ compression speedup for QEMU multifd from this session.
   already has a disk on the destination (A→B→A).
 - `novacron-hgc` — shared-storage migration: a stray connection consumes the
   `-incoming` stream ("Extra incoming migration connection").
-- `novacron-05h` — an async migration job stays "running" forever if the
-  api-server restarts mid-migration (the VM itself is not orphaned; the job row
-  is never finalised).
+- `novacron-05h` — FIXED this session and verified live: boot now reconciles
+  jobs left in "running" by a dead process to `status: "interrupted"` with an
+  explanatory error ("...the QEMU migration may have completed — check which
+  node actually runs the VM") and a finished_at stamp. Live: job
+  mig-f48fd0f7… read `interrupted` after the owning node was restarted 5 s into
+  its migration, instead of "running" forever; the VM was still on node-a,
+  exactly as the message advises.
 - `novacron-z59` — pre-fix sources have no `launch.json`, so accel/CPU hints are
   empty and the mismatch can still occur.
 - `novacron-nxy` — orphan cleanup is best-effort; the no-resume watchdog fires
