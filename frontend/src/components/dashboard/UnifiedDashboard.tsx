@@ -141,6 +141,7 @@ export default function UnifiedDashboard() {
     { href: '/security', label: 'Security', description: 'Review live security posture and compliance', icon: Shield },
     { href: '/users', label: 'Users', description: 'Admin user management on the canonical `/api/admin/users*` surface', icon: Users },
     { href: '/network', label: 'Network', description: 'Minimal network inventory and VM interface operations', icon: Network },
+    { href: '/fabric', label: 'Fabric', description: 'Peer fabric: nodes, compute jobs, and admitted transfers', icon: Network },
     { href: '/analytics', label: 'Analytics', description: 'Current-state operational analytics without fabricated trends', icon: Database },
     { href: '/settings', label: 'Settings', description: 'Account and security preferences only', icon: Settings },
   ];

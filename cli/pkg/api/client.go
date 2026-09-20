@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -144,14 +145,41 @@ func (c *Client) Request(ctx context.Context, method, path string, body interfac
 	// Check for errors
 	if resp.StatusCode >= 400 {
 		defer resp.Body.Close()
-		var apiErr ErrorResponse
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
-			return nil, fmt.Errorf("request failed with status %d", resp.StatusCode)
-		}
-		return nil, &apiErr
+		return nil, errorFromResponse(resp)
 	}
 
 	return resp, nil
+}
+
+// errorFromResponse turns a non-2xx response into an error. The API reports most
+// failures as {"error":"..."} while the DWCP handlers use {"code","message",...};
+// both are accepted, and an unrecognized body is surfaced verbatim rather than
+// reduced to a bare status code.
+func errorFromResponse(resp *http.Response) error {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil {
+		return fmt.Errorf("request failed with status %d", resp.StatusCode)
+	}
+
+	var apiErr ErrorResponse
+	apiErr.StatusCode = resp.StatusCode
+	if err := json.Unmarshal(body, &apiErr); err == nil && apiErr.message() != "" {
+		return &apiErr
+	}
+
+	if msg := strings.TrimSpace(string(body)); msg != "" {
+		return fmt.Errorf("request failed with status %d: %s", resp.StatusCode, msg)
+	}
+
+	return statusError(resp.StatusCode)
+}
+
+// statusError describes a failure whose response carried no message.
+func statusError(status int) error {
+	if text := http.StatusText(status); text != "" {
+		return fmt.Errorf("request failed with status %d (%s)", status, text)
+	}
+	return fmt.Errorf("request failed with status %d", status)
 }
 
 // Get makes a GET request
@@ -271,12 +299,33 @@ type ErrorResponse struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Details string `json:"details,omitempty"`
+	// ErrorText carries the {"error":"..."} shape used by the API's JSON error
+	// helper (the fabric and cluster handlers).
+	ErrorText string `json:"error,omitempty"`
+	// StatusCode is the HTTP status the error was returned with.
+	StatusCode int `json:"-"`
+}
+
+// message returns the error detail from whichever shape the server used.
+func (e *ErrorResponse) message() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	return e.ErrorText
 }
 
 // Error implements the error interface
 func (e *ErrorResponse) Error() string {
-	if e.Details != "" {
-		return fmt.Sprintf("%s: %s (%s)", e.Code, e.Message, e.Details)
+	msg := e.message()
+	if msg == "" {
+		return statusError(e.StatusCode).Error()
 	}
-	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+
+	if e.Code == "" {
+		return msg
+	}
+	if e.Details != "" {
+		return fmt.Sprintf("%s: %s (%s)", e.Code, msg, e.Details)
+	}
+	return fmt.Sprintf("%s: %s", e.Code, msg)
 }

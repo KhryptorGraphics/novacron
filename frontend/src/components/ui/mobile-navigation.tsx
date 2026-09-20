@@ -19,8 +19,7 @@ import {
   LogOut,
   ChevronRight,
   Moon,
-  Sun
-} from 'lucide-react';
+  Sun, Share2} from 'lucide-react';
 import { Button } from './button';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -63,6 +62,12 @@ const navigationItems = [
     href: '/network',
     icon: Network,
     description: 'Network inventory and interfaces'
+  },
+  {
+    name: 'Fabric',
+    href: '/fabric',
+    icon: Share2,
+    description: 'Peer fabric: nodes, jobs, transfers'
   },
   {
     name: 'Storage',

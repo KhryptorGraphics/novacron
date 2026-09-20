@@ -28,6 +28,7 @@ const routeLabels: Record<string, string> = {
   '/monitoring': 'Monitoring',
   '/storage': 'Storage',
   '/network': 'Network',
+  '/fabric': 'Fabric',
   '/security': 'Security', 
   '/analytics': 'Analytics',
   '/users': 'Users',

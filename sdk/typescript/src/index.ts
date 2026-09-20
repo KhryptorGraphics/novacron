@@ -57,5 +57,35 @@ export {
   SnapshotOptions,
 } from './vm';
 
+export {
+  // Fabric client
+  FabricClient,
+  FabricClientConfig,
+  FabricAPIError,
+  DEFAULT_FABRIC_TIMEOUT,
+
+  // Fabric inventory
+  FabricNode,
+  FabricLink,
+
+  // Fabric jobs
+  FabricJob,
+  FabricJobRequest,
+  FabricJobSubmission,
+  FabricJobStatus,
+  FabricJobLogs,
+  FabricJobCancelResult,
+  FabricPlacement,
+
+  // Transfers
+  Transfer,
+  TransferRequest,
+  TransferSubmission,
+  TransferStatus,
+  TransferKind,
+  TransferCompression,
+  TransferDecisionInputs,
+} from './fabric';
+
 // Version
 export const VERSION = '3.0.0';
