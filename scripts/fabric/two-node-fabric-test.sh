@@ -246,12 +246,19 @@ start_node() { # start_node <a|b>
     API_PORT="$port"
     WS_PORT="$((port+1000))"
     NOVACRON_NODE_ID="fab-$n"
-    NOVACRON_JOIN_ADDR="$([ "$n" = a ] && echo "$ADDR_A" || echo "$ADDR_B"):$port"
     NOVACRON_PROBE_BYTES=2097152
   )
+
+  local join_addr
+  if [ "$n" = "a" ]; then
+    join_addr="$ADDR_A"
+  else
+    join_addr="$ADDR_B"
+  fi
   [ -n "$host_env" ] && env_common+=("$host_env")
   [ "$n" = "b" ] && env_common+=("NOVACRON_JOIN_PEERS=$ADDR_A:$PORT_A")
-  if [ -n "${REDIS_URL_AVAILABLE:-}" ]; then env_common+=("REDIS_URL=$REDIS_URL_AVAILABLE"); fi
+  [ -n "${REDIS_URL_AVAILABLE:-}" ] && env_common+=("REDIS_URL=$REDIS_URL_AVAILABLE")
+  env_common+=("NOVACRON_JOIN_ADDR=$join_addr:$port")
 
   if [ "$n" = "a" ]; then
     env "${env_common[@]}" setsid nohup "$BIN" >"$WORK/node-a.log" 2>&1 < /dev/null &
@@ -266,7 +273,7 @@ start_node() { # start_node <a|b>
 PORT_SOCAT_B="$((PGPORT+10000))"
 socat TCP-LISTEN:"$PORT_SOCAT_B",bind="$ADDR_A",fork,reuseaddr TCP:127.0.0.1:"$PGPORT" >"$WORK/socat-pg.log" 2>&1 &
 echo $! > "$WORK/socat-pg.pid"
-if redis-cli ping >/dev/null 2>&1; then
+if command -v redis-cli >/dev/null 2>&1; then
   REDIS_FWD="$((PGPORT+10001))"
   REDIS_URL_AVAILABLE="redis://$ADDR_A:$REDIS_FWD"
   socat TCP-LISTEN:"$REDIS_FWD",bind="$ADDR_A",fork,reuseaddr TCP:127.0.0.1:6379 >"$WORK/socat-redis.log" 2>&1 &

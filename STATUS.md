@@ -17,6 +17,86 @@ which overstate completion and should not be trusted.
   commit `3a75b5d1` as containing fabricated figures — do not cite).
 - Generator output (`graphify-out/`, `.memdb/`, `frontend/coverage/`) is
   untracked and gitignored.
+- Research artifacts (profitability analysis, market research, etc.) live in
+  `research/` — these are NOT part of the canonical build/test surface, but
+  are primary sources for decisions made about business direction.
+
+## Profitability research session — 2026-09-21 (business model research, market analysis)
+
+Six research reports generated via parallel agent investigation, with all
+claims source-tagged and evidence-linked. Full files live in `research/profitability/`.
+
+### Key findings — cross-correlated across all six reports
+
+1. **NovaCron's only genuinely defensible differentiator is the fabric itself**
+   (technical-audit.md §5): bandwidth-aware transfer admission + adaptive
+   compression decision on measured (not assumed) link state; cross-node
+   non-shared-storage block migration with crash-safe handoff; signed
+   reachability-verified cluster join. Everything else in the repo (multi-tenancy,
+   billing engine, marketplace, GPU passthrough, backup/DR as wired infrastructure)
+   is either NOT wired into the running binary or is entirely missing.
+
+2. **The GPU/AI angle is real but CANNOT be "live GPU migration"** (ai-gpu-angle.md
+   §5): no active driver supports GPU passthrough (`SupportsGPUPassthrough()` =
+   `false` in every compiled driver). Even if added, raw VFIO passthrough
+   CANNOT be live-migrated without NVIDIA's licensed vGPU Manager mediation layer.
+   The honest pitch is bandwidth-aware orchestration of the CPU/network side of
+   distributed AI inference (routers, gateways, control planes, stateless workers).
+
+3. **Real market data** (market-demand.md, competitive-landscape.md,
+   monetization-models.md): Akash Network's live total lifetime compute spend is
+   ~\$6.2M (annualized ~\$3.3M — tiny); Vast.ai has ~3,824 GPUs at \$1.9M/month
+   aggregate ceiling; sovereign/private IaaS commands a 15-40% premium over public
+   cloud; cloud repatriation is measurable (23% of workloads moved back per
+   Flexera 2026, N=753); CPU/RAM/disk server prices cluster at \$5-50/vCPU-month
+   (Fly.io, Railway) while H100 GPU-hours span \$1.73-6.16 across 5 live providers.
+
+4. **The revenue model that matches reality from a standing start**
+   (business-models.md): a four-layer hybrid starting with usage-metered utility
+   billing on the fabric's EXISTING telemetry (bandwidth per transfer, RTT
+   probes, migration admission eta) — no external liquidity required because the
+   first customer pays for bytes moved across links, not for seats or tokens.
+
+### What is NOT viable from a standing start
+
+- **Marketplace take-rate**: requires a critical mass of external node operators
+  that does not exist today (confirmed in business-models.md §3, liquidity is the
+  decisive factor).
+- **SaaS hosted control plane**: two-sided market problem — control plane
+  without nodes is valueless and vice versa (fit score 1.5/5).
+- **Decentralized token model**: Akash's move to token-based settlement in
+  March 2026 was an admission that the take-rate model wasn't working at scale;
+  NovaCron has no native settlement token and no oracle infrastructure.
+
+### Immediate actionable findings
+
+- The existing `backend/enterprise/billing/advanced_billing.go` (a 1,160-line
+  stub with "\$100M+ ARR" marketing in the header and zero callers in the
+  canonical import graph) should be replaced with a real, persisted metering
+  model built on the fabric's own telemetry, not deleted as "dead code" — its
+  in-memory-only status is precisely the problem to fix.
+- The schema for multi-tenant attribution already exists
+  (`organizations` + `users.organization_id` in migration 000001) but is never
+  enforced by the canonical auth manager (STUB, per technical-audit.md §2).
+  Wiring this is the concrete first step toward usage-metered billing.
+- `GET /api/cluster/links` already exposes `{rtt_ms, throughput_bps,
+  measured_at, stale}` — this is the instrumentation foundation for usage-based
+  egress billing and should be extended, not replaced.
+
+### Files in `research/profitability/`
+
+- `market-demand.md` — Akash live spend, Vast.ai live pricing, sovereign/edge
+  market sizes, cloud repatriation evidence (all source-tagged, 429-resilient)
+- `competitive-landscape.md` — 14 competitors with verified or [INFERENCE]-
+  labelled pricing, three-cluster analysis (on-prem, PaaS, GPU marketplaces)
+- `monetization-models.md` — open-core, SaaS, marketplace take-rate, enterprise
+  licence analysis with real pricing anchors
+- `business-models.md` — four-model comparison with fit scores and a layered
+  hybrid recommendation
+- `ai-gpu-angle.md` — GPU market data + honest assessment of live GPU migration
+  vs current capabilities
+- `technical-audit.md` — which features are REAL vs STUB vs FABRICATED in
+  the canonical binary (with file:line evidence)
 
 
 ## Fabric trustworthiness session — 2026-09-20 (migration fixes, identity model, robustness)
