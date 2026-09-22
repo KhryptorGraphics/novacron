@@ -326,6 +326,48 @@ var transfers = newTransferStore(512, nil)
 func registerFabricTransferRoutes(apiRouter *mux.Router, db *sql.DB, vmManager *core_vm.VMManager, storagePath string) {
 	transfers.vmMgr = vmManager
 	transfers.runFn = migrationTransferRunner(storagePath)
+	// Usage metering: every finished transfer (completed OR failed with bytes
+	// actually moved) is billable egress for the VM's organization.
+	transfers.onFinish = func(t *fabricTransfer) {
+		if t.BytesMoved > 0 {
+			orgID := usageOrgForVM(context.Background(), db, t.VMID)
+			var startedAt time.Time
+			if t.StartedAt != nil { startedAt = *t.StartedAt }
+			duration := time.Since(startedAt).Seconds()
+			if duration < 0 { duration = 0 }
+			recordUsageEvent(context.Background(), db, usageEvent{
+				OrganizationID: orgID,
+				EventType: "egress_bytes",
+				VMID:       t.VMID,
+				TargetNodeID: t.TargetNode,
+				Quantity:   float64(t.BytesMoved),
+				Unit:       "bytes",
+				OccurredAt: time.Now().UTC(),
+				Metadata: map[string]interface{}{
+					"transfer_id": t.ID, "kind": t.Kind, "compression": t.Compression,
+					"duration_s": duration, "measured_bps": t.MeasuredBps,
+					"decision": t.Decision,
+				},
+			})
+			// Only count migrations that completed successfully as chargeable
+			// migrations — a failed one still moved bytes (counted above).
+			if t.Kind == "migration" && t.Status == transferCompleted {
+				recordUsageEvent(context.Background(), db, usageEvent{
+					OrganizationID: orgID,
+					EventType: "migration",
+					VMID:       t.VMID,
+					TargetNodeID: t.TargetNode,
+					Quantity:   1,
+					Unit:       "count",
+					OccurredAt: time.Now().UTC(),
+					Metadata: map[string]interface{}{
+						"transfer_id": t.ID, "bytes_moved": t.BytesMoved,
+						"compression": t.Compression,
+					},
+				})
+			}
+		}
+	}
 
 	apiRouter.HandleFunc("/transfers", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {

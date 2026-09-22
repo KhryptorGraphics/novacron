@@ -460,6 +460,28 @@ else
   fi
 fi
 
+# --- assertion 5: usage metering recorded the fabric's real activity ---------
+
+head2 "assertion 5: billing usage reflects measured migration egress"
+BILL_OK=0; BILL_EGRESS=0; BILL_MIGRATIONS=0
+summary_json="$(api a GET /api/billing/usage/summary)"
+if [ -n "$summary_json" ] && [ "$summary_json" != "null" ]; then
+  BILL_EGRESS="$(json_get 'd.get("totals",{}).get("egress_bytes",0)' "$summary_json")"
+  BILL_MIGRATIONS="$(json_get 'd.get("totals",{}).get("migrations",0)' "$summary_json")"
+fi
+# float-aware comparison: any positive measured egress proves the metering
+# chain (transfer completion -> usage_events row -> summary aggregation).
+if awk -v e="$BILL_EGRESS" 'BEGIN{exit !(e>0)}' 2>/dev/null; then
+  ok "usage metering recorded egress_bytes=$(awk "BEGIN{printf \"%.1f\", $BILL_EGRESS/1048576}") MiB from real transfers"
+  if awk -v m="$BILL_MIGRATIONS" 'BEGIN{exit !(m>=1)}' 2>/dev/null; then
+    ok "usage metering recorded $BILL_MIGRATIONS completed migration(s)"
+  else
+    bad "usage summary shows egress but zero completed migrations (attribution gap)"
+  fi
+else
+  bad "usage metering recorded no egress for a session that moved a VM cross-node"
+fi
+
 # --- summary ----------------------------------------------------------------
 
 head2 "summary"

@@ -93,6 +93,7 @@ between nodes as transfers with measured throughput.`,
 		newFabricJobCommand(),
 		newFabricTransfersCommand(),
 		newFabricTransferCommand(),
+		newFabricUsageCommand(),
 	)
 
 	return cmd
@@ -344,6 +345,66 @@ func newFabricTransferCommand() *cobra.Command {
 			return printFabricTransfer(cmd.OutOrStdout(), transfer)
 		},
 	}
+}
+
+// newFabricUsageCommand creates the fabric usage summary command. It reads
+// the metered consumption the fabric already measures (transfer egress, job
+// seconds, migrations) for the caller's organization.
+func newFabricUsageCommand() *cobra.Command {
+	var orgID string
+	cmd := &cobra.Command{
+		Use:   "usage",
+		Short: "Show measured usage and estimated cost",
+		Long: `Show the measured consumption the fabric recorded for an organization.
+
+The metering is real: egress bytes come from completed transfers, job seconds
+from finished jobs, migrations from successful moves. The cost estimate uses
+the operator's rate card; a zero rate means unpriced, not free.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			svc, err := newFabricService()
+			if err != nil {
+				return err
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), fabricReadTimeout)
+			defer cancel()
+
+			summary, err := svc.UsageSummary(ctx, orgID)
+			if err != nil {
+				return err
+			}
+
+			return printFabricPayload(cmd, summary, func(w io.Writer) error {
+				return printFabricUsage(w, summary)
+			})
+		},
+	}
+	cmd.Flags().StringVar(&orgID, "org", "", "organization id (admin only; default: your own org)")
+	return cmd
+}
+
+// printFabricUsage writes the usage summary as labeled fields.
+func printFabricUsage(w io.Writer, s *api.FabricUsageSummary) error {
+	if s == nil {
+		return nil
+	}
+	fabricField(w, "Window", s.From+" -> "+s.To)
+	if s.OrgID != "" {
+		fabricField(w, "Org", s.OrgID)
+	}
+	fabricField(w, "Egress", fmt.Sprintf("%.2f GiB (%.0f bytes)", s.Totals.EgressGB, s.Totals.EgressBytes))
+	fabricField(w, "Migrations", fmt.Sprintf("%.0f", s.Totals.Migrations))
+	fabricField(w, "Job time", fmt.Sprintf("%.1fs", s.Totals.JobSeconds))
+	fabricField(w, "vCPU time", fmt.Sprintf("%.2f hours", s.Totals.VCPUHours))
+	fabricField(w, "Est. cost", fmt.Sprintf("$%.4f", s.Totals.EstimatedCost))
+	fabricField(w, "Rates", fmt.Sprintf("egress $%.3f/GiB, vCPU $%.3f/h, job $%.4f/s, migration $%.2f",
+		s.RateCard.PerGBEgress, s.RateCard.PerVCPUHour, s.RateCard.PerJobSecond, s.RateCard.PerMigration))
+	if s.Note != "" {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, s.Note)
+	}
+	return nil
 }
 
 // buildFabricJobSpec validates the submit flags and turns them into the API

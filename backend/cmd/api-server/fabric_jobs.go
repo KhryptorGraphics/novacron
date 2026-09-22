@@ -106,7 +106,7 @@ func registerFabricJobRoutes(apiRouter *mux.Router, db *sql.DB, vmManager *core_
 	}).Methods(http.MethodPost)
 
 	apiRouter.HandleFunc("/compute/jobs", func(w http.ResponseWriter, r *http.Request) {
-		jobs, err := listFabricJobs(r.Context(), db)
+		jobs, err := listFabricJobs(r.Context(), db, vmManager)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -600,7 +600,7 @@ func getFabricJob(ctx context.Context, db *sql.DB, id string) (*fabricJob, error
 }
 
 // listFabricJobs returns the most recent jobs, newest first.
-func listFabricJobs(ctx context.Context, db *sql.DB) ([]fabricJob, error) {
+func listFabricJobs(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager) ([]fabricJob, error) {
 	if db == nil {
 		return nil, errors.New("no database")
 	}
@@ -616,6 +616,18 @@ func listFabricJobs(ctx context.Context, db *sql.DB) ([]fabricJob, error) {
 		var j fabricJob
 		if err := rows.Scan(&j.ID, &j.VMID, &j.NodeID, &j.Command, &j.Name, &j.Status, &j.Error, &j.PlacedBy, &j.CreatedAt); err != nil {
 			return nil, err
+		}
+		// Meter once when a job reaches a terminal state. The stored job row
+		// never flips from 'running' — the status is computed fresh from the
+		// driver on every read — so we gate on a usage_events marker keyed on
+		// the job's ID to avoid double-billing on retries.
+		if j.ID != "" {
+			status := liveJobStatus(vmManager, &j)
+			if j.Status != status && (status == jobStatusCompleted || status == jobStatusFailed) {
+				maybeMeterJobOnce(db, &j, status, vmManager)
+				// Advance the row to match the observed terminal state.
+				_, _ = db.ExecContext(context.Background(), `UPDATE fabric_jobs SET status = $1, updated_at = NOW() WHERE id = $2`, status, j.ID)
+			}
 		}
 		out = append(out, j)
 	}

@@ -69,11 +69,12 @@ func (m *SimpleAuthManager) CreateUser(username, email, password, role, tenantID
 		return nil, fmt.Errorf("invalid role: %s (valid: admin, operator, viewer; aliases: super-admin, user, readonly)", role)
 	}
 
-	// Insert user into database
+	// Insert user into database. organization_id: the seeded "default" org is
+	// the attribution base for all self-registered users (see migration 000010).
 	var userID string
 	err = m.db.QueryRow(`
-		INSERT INTO users (username, email, password_hash, role, status)
-		VALUES ($1, $2, $3, $4, 'active')
+		INSERT INTO users (username, email, password_hash, role, status, organization_id)
+		VALUES ($1, $2, $3, $4, 'active', '00000000-0000-0000-0000-000000000001')
 		RETURNING id
 	`, username, email, string(passwordHash), role).Scan(&userID)
 
@@ -119,7 +120,7 @@ func canonicalUserRole(role string) (string, bool) {
 // GetUser gets a user by ID
 func (m *SimpleAuthManager) GetUser(userID string) (*User, error) {
 	return m.scanUser(m.db.QueryRow(`
-		SELECT id, username, email, password_hash, role, status, created_at, updated_at
+		SELECT id, username, email, password_hash, role, status, created_at, updated_at, organization_id
 		FROM users WHERE id = $1
 	`, userID))
 }
@@ -127,18 +128,19 @@ func (m *SimpleAuthManager) GetUser(userID string) (*User, error) {
 // getUserByUsername gets a user by username
 func (m *SimpleAuthManager) getUserByUsername(username string) (*User, error) {
 	return m.scanUser(m.db.QueryRow(`
-		SELECT id, username, email, password_hash, role, status, created_at, updated_at
+		SELECT id, username, email, password_hash, role, status, created_at, updated_at, organization_id
 		FROM users WHERE username = $1
 	`, username))
 }
 
 // scanUser builds a User from a canonical users row: uuid id, user_role enum,
-// user_status enum. Tenancy is not persisted in the canonical schema; session
-// middleware defaults the tenant claim when it is empty.
+// user_status enum, organization_id (nullable, in canonical schema). Tenancy
+// is the seeded default org until org management APIs move users out.
 func (m *SimpleAuthManager) scanUser(row *sql.Row) (*User, error) {
 	var user User
 	var role, status string
 	var createdAt, updatedAt time.Time
+	var orgID sql.NullString
 
 	err := row.Scan(
 		&user.ID,
@@ -149,6 +151,7 @@ func (m *SimpleAuthManager) scanUser(row *sql.Row) (*User, error) {
 		&status,
 		&createdAt,
 		&updatedAt,
+		&orgID,
 	)
 
 	if err != nil {
@@ -162,6 +165,12 @@ func (m *SimpleAuthManager) scanUser(row *sql.Row) (*User, error) {
 	user.UpdatedAt = updatedAt
 	user.Status = UserStatus(status)
 	user.RoleIDs = []string{role}
+	// organization_id comes back as NULL only in pre-migration edge cases;
+	// default to the shared org so we never emit an empty tenant_id claim.
+	user.TenantID = orgID.String
+	if !orgID.Valid || user.TenantID == "" {
+		user.TenantID = "00000000-0000-0000-0000-000000000001"
+	}
 
 	// Load user roles (simplified - just use the role field for now)
 	user.Roles = []*Role{

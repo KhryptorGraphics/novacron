@@ -21,6 +21,97 @@ which overstate completion and should not be trusted.
   `research/` — these are NOT part of the canonical build/test surface, but
   are primary sources for decisions made about business direction.
 
+## Usage metering session — 2026-09-21 (billing foundation built and proven live)
+
+Implements the #1 actionable finding of the profitability research
+(research/profitability/business-models.md): usage-metered utility billing on
+the fabric's EXISTING telemetry, from a standing start with zero external
+liquidity requirements.
+
+### What was built (all in the canonical binary and CI-gated)
+
+1. **`database/migrations/000010_usage_events`** — persisted metering table
+   (`usage_events`: org, user, event_type ∈ {egress_bytes, migration,
+   job_seconds, vcpu_seconds}, quantity, unit, metadata JSONB, occurred_at)
+   plus the seeded Default Organization
+   (`00000000-0000-0000-0000-000000000001`) every event attributes to before
+   full tenant isolation lands. Billing gaps on write failures are logged
+   warns, never hot-path errors.
+
+2. **`backend/cmd/api-server/billing_usage.go`** — best-effort
+   `recordUsageEvent` writer; org resolution (`usageOrgForVM` from
+   `vms.organization_id`, default fallback); operator rate card
+   (env `NOVACRON_RATE_PER_GB_EGRESS` / `_PER_VCPU_HOUR` /
+   `_PER_JOB_SECOND` / `_PER_MIGRATION`, all defaulting to **0 = unpriced,
+   not free**; negative/garbage values are rejected to zero so a
+   misconfigured env can never invent revenue); and two authenticated read
+   endpoints: `GET /api/billing/usage` (raw events) and
+   `GET /api/billing/usage/summary` (totals + estimated cost). Non-admins are
+   forced to their own organization; admins may pass `?org_id=`.
+
+3. **Metering writers wired into the fabric's real paths**:
+   - transfer completion → `egress_bytes` (measured bytes moved, compression,
+     link decision recorded in metadata) and, for completed migrations, one
+     `migration` event — `fabric_transfers.go` `onFinish` hook (previously
+     declared but never set).
+   - job terminal transition observed at read → `job_seconds` (wall clock
+     since create, honestly labeled) and the stored row is advanced to the
+     terminal status so it can never double-bill — `fabric_jobs.go`
+     `listFabricJobs`.
+
+4. **Organization attribution** (the STUB the technical audit flagged):
+   - `CreateUser` now persists `users.organization_id` (seeded default org);
+     previously the column was never written — every user had NULL org.
+   - `scanUser` reads `organization_id` and carries it as the JWT `tenant_id`
+     claim → `requireAuth` now also exposes it as `organization_id` on the
+     request context.
+   - `GET /api/vms` filters by the caller's organization for non-admins
+     (admins unfiltered; unfiltered path stays byte-identical to the old
+     query).
+   - Note: `vms.organization_id` is still NULL on create (full org stamping
+     through `clusterCreateSpec` is the remaining attribution step); usage
+     events therefore attribute via the default org today, which the billing
+   endpoints scope correctly.
+
+5. **Surfaces**: `novacron fabric usage [--org <id>]` CLI command
+   (cli/internal/commands/fabric.go) and `FabricClient.usageSummary(orgId?)`
+   in the TypeScript SDK with 2 new jest tests.
+
+### Verification (all commands actually run this session)
+
+- `go build ./cmd/api-server/`, `go vet` on api-server and core/auth: clean.
+- New unit tests: `TestComputeUsageTotalsZeroRates`,
+  `TestComputeUsageTotalsPricing` (each rate term contributes its unit
+  price), `TestLoadUsageRatesRejectsGarbage` (negative/non-numeric rates
+  forced to 0), `TestRecordUsageEventGuards` (nil-db/non-positive quantities
+  silently dropped) — PASS.
+- Full canonical suites: `cmd/api-server` (`-short`) **ok** (mocks updated
+  for the new 9-column user scan; `TestRegisterPublicRoutesSupportsCanonicalEmailLogin`
+  now asserts the real default-org UUID instead of the old "default" label),
+  `api/graphql`, `api/security`, `api/websocket`, `pkg/config` — all ok.
+  `core/auth` — ok. `core/vm` — ok.
+- CLI: `go build ./...` + `go test ./...` — ok.
+- SDK: `npm test` 23/23, `tsc --noEmit` clean.
+- **Two-node acceptance harness (`scripts/fabric/two-node-fabric-test.sh`)
+  with new assertion 5: 12/12 PASS, 0 SKIP**, including:
+  `PASS usage metering recorded egress_bytes=256.0 MiB from real transfers`
+  `PASS usage metering recorded 1 completed migration(s)`
+  — the metering chain (transfer completion → usage_events row →
+  /api/billing/usage/summary aggregation) is proven live against real QEMU
+  cross-node migration traffic on a tc-shaped veth, twice this session.
+
+### Honest scope boundaries
+
+- `backend/enterprise/billing/advanced_billing.go` ("$100M+ ARR" stub) is
+  still unwired dead code — this session built the metering plane it always
+  lacked, NOT payment collection. Invoicing/dunning/Stripe remain
+  deliberately unbuilt.
+- Rates default to 0: the product MEASURES from day one but invents no
+  revenue. An operator opts into pricing via env.
+- Full per-tenant query isolation (every endpoint, RLS) and org stamping on
+  VM create remain open work tracked under novacron-ok7.
+
+
 ## Profitability research session — 2026-09-21 (business model research, market analysis)
 
 Six research reports generated via parallel agent investigation, with all

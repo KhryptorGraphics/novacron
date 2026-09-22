@@ -150,6 +150,34 @@ export interface Transfer {
   eta_seconds?: number;
   decision_inputs: TransferDecisionInputs;
 }
+// Measured consumption over the summary window. All fields are real
+// measurements recorded by the fabric, never extrapolated.
+export interface FabricUsageTotals {
+  egress_bytes: number;
+  egress_gb: number;
+  migrations: number;
+  job_seconds: number;
+  vcpu_seconds: number;
+  vcpu_hours: number;
+  estimated_cost_usd: number;
+}
+
+// Operator-configured rate card applied to the totals. Zero means unpriced.
+export interface FabricUsageRates {
+  usd_per_gb_egress: number;
+  usd_per_vcpu_hour: number;
+  usd_per_job_second: number;
+  usd_per_migration: number;
+}
+
+export interface FabricUsageSummary {
+  org_id?: string;
+  from: string;
+  to: string;
+  totals: FabricUsageTotals;
+  rate_card: FabricUsageRates;
+  note?: string;
+}
 
 // Fabric client configuration
 export interface FabricClientConfig {
@@ -288,6 +316,17 @@ export class FabricClient {
     return this.request<Transfer>(
       'GET',
       `/api/transfers/${encodeURIComponent(id)}`
+    );
+  }
+
+  // Measured usage for the caller's org (or an admin-specified org) plus the
+  // operator rate card. Metering is real: egress bytes come from completed
+  // transfers, job seconds from finished jobs.
+  async usageSummary(orgId?: string): Promise<FabricUsageSummary> {
+    const query = orgId ? `?org_id=${encodeURIComponent(orgId)}` : '';
+    return this.request<FabricUsageSummary>(
+      'GET',
+      `/api/billing/usage/summary${query}`
     );
   }
 

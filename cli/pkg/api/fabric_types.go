@@ -100,3 +100,34 @@ type FabricTransfer struct {
 	ETASeconds     *float64               `json:"eta_seconds,omitempty"`
 	DecisionInputs map[string]interface{} `json:"decision_inputs,omitempty"`
 }
+
+// FabricUsageTotals is one org's measured consumption over the summary
+// window, plus the cost estimate from the operator's rate card. A zero rate
+// card means "measured but unpriced", not "free".
+type FabricUsageTotals struct {
+	EgressBytes   float64 `json:"egress_bytes"`
+	EgressGB      float64 `json:"egress_gb"`
+	Migrations    float64 `json:"migrations"`
+	JobSeconds    float64 `json:"job_seconds"`
+	VCPUSeconds   float64 `json:"vcpu_seconds"`
+	VCPUHours     float64 `json:"vcpu_hours"`
+	EstimatedCost float64 `json:"estimated_cost_usd"`
+}
+
+// FabricUsageRates is the operator-configured rate card applied to the totals.
+type FabricUsageRates struct {
+	PerGBEgress  float64 `json:"usd_per_gb_egress"`
+	PerVCPUHour  float64 `json:"usd_per_vcpu_hour"`
+	PerJobSecond float64 `json:"usd_per_job_second"`
+	PerMigration float64 `json:"usd_per_migration"`
+}
+
+// FabricUsageSummary is the billing summary endpoint's payload.
+type FabricUsageSummary struct {
+	OrgID    string             `json:"org_id,omitempty"`
+	From     string             `json:"from"`
+	To       string             `json:"to"`
+	Totals   FabricUsageTotals   `json:"totals"`
+	RateCard FabricUsageRates   `json:"rate_card"`
+	Note     string             `json:"note,omitempty"`
+}

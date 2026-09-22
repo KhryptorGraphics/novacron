@@ -118,6 +118,22 @@ func (s *FabricService) GetTransfer(ctx context.Context, id string) (*api.Fabric
 	return &out, nil
 }
 
+// UsageSummary returns the caller's (or, for admins with orgID set, that
+// org's) measured consumption for the trailing window, with the operator
+// rate card applied. An empty orgID asks the server to use the caller's own
+// organization scope.
+func (s *FabricService) UsageSummary(ctx context.Context, orgID string) (*api.FabricUsageSummary, error) {
+	path := "/api/billing/usage/summary"
+	if orgID != "" {
+		path += "?org_id=" + url.QueryEscape(orgID)
+	}
+	var out api.FabricUsageSummary
+	if err := s.client.Get(ctx, path, &out); err != nil {
+		return nil, fmt.Errorf("failed to fetch usage summary: %w", err)
+	}
+	return &out, nil
+}
+
 func fabricJobPath(id string) string {
 	return "/api/compute/jobs/" + url.PathEscape(id)
 }

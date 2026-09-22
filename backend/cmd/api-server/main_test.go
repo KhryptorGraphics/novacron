@@ -146,12 +146,12 @@ func TestRegisterPublicRoutesSupportsCanonicalEmailLogin(t *testing.T) {
 		WithArgs("user@example.com").
 		WillReturnRows(sqlmock.NewRows([]string{"username"}).AddRow("user"))
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, username, email, password_hash, role, status, created_at, updated_at
+		SELECT id, username, email, password_hash, role, status, created_at, updated_at, organization_id
 		FROM users WHERE username = $1
 	`)).
 		WithArgs("user").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "created_at", "updated_at"}).
-			AddRow("7", "user", "user@example.com", string(passwordHash), "admin", "active", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "created_at", "updated_at", "organization_id"}).
+			AddRow("7", "user", "user@example.com", string(passwordHash), "admin", "active", now, now, "00000000-0000-0000-0000-000000000001"))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"user@example.com","password":"correct-horse-battery-staple"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -186,8 +186,8 @@ func TestRegisterPublicRoutesSupportsCanonicalEmailLogin(t *testing.T) {
 	if payload.User.Role != "admin" {
 		t.Fatalf("expected role admin, got %q", payload.User.Role)
 	}
-	if payload.User.TenantID != "default" {
-		t.Fatalf("expected tenantId default, got %q", payload.User.TenantID)
+	if payload.User.TenantID != "00000000-0000-0000-0000-000000000001" {
+		t.Fatalf("expected tenantId to be the seeded default org UUID, got %q", payload.User.TenantID)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -701,12 +701,12 @@ func TestBuildCanonicalServerSupportsLiveStartup(t *testing.T) {
 		WithArgs("admin@example.com").
 		WillReturnRows(sqlmock.NewRows([]string{"username"}).AddRow("admin"))
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, username, email, password_hash, role, status, created_at, updated_at
+		SELECT id, username, email, password_hash, role, status, created_at, updated_at, organization_id
 		FROM users WHERE username = $1
 	`)).
 		WithArgs("admin").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "created_at", "updated_at"}).
-			AddRow("7", "admin", "admin@example.com", string(passwordHash), "admin", "active", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "created_at", "updated_at", "organization_id"}).
+			AddRow("7", "admin", "admin@example.com", string(passwordHash), "admin", "active", now, now, "00000000-0000-0000-0000-000000000001"))
 
 	loginReq, err := http.NewRequest(http.MethodPost, baseURL+"/api/auth/login", strings.NewReader(`{"email":"admin@example.com","password":"correct-horse-battery-staple"}`))
 	if err != nil {

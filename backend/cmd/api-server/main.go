@@ -204,6 +204,11 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	// measured link budget + compression decision recorded per transfer.
 	registerFabricTransferRoutes(apiRouter, db, vmManager, vmBasePath(cfg))
 
+	// Usage-metered billing read API (PR-1): measured egress, migrations, job
+	// seconds, vCPU-seconds per org; metering data comes from the fabric and
+	// is persisted by migration 000010.
+	registerBillingUsageRoutes(apiRouter, db)
+
 	// Node-to-node migration RPC: intentionally OFF the JWT router (the peer is a
 	// node, not a user). Gated by an optional shared secret; see the handler.
 	registerInternalMigrationRoutes(router, db, vmManager, vmBasePath(cfg))
@@ -365,6 +370,7 @@ func requireAuth(authManager *auth.SimpleAuthManager) func(http.Handler) http.Ha
 
 			ctx := context.WithValue(r.Context(), "user_id", userID)
 			ctx = context.WithValue(ctx, "tenant_id", stringClaim(claims, "tenant_id"))
+			ctx = context.WithValue(ctx, "organization_id", stringClaim(claims, "tenant_id"))
 			ctx = context.WithValue(ctx, "role", stringClaim(claims, "role"))
 			ctx = context.WithValue(ctx, "roles", stringSliceClaim(claims, "roles"))
 
@@ -819,7 +825,27 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 
 func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager, storagePath string) {
 	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
-		rows, err := db.Query(`SELECT id, name, state, node_id, organization_id, cpu_cores, memory_mb, disk_gb, created_at, updated_at FROM vms ORDER BY created_at DESC`)
+		// Org filtering: admin/super-admin roles see everything; everyone else
+		// only sees VMs whose org matches the user context's organization_id.
+		// This is still soft — it prevents cross-org data leaks in the UI; a
+		// hard-enforcement layer (row-level security in Postgres RLS) is a
+		// separate bead (novacron-ok7).
+		orgID, _ := r.Context().Value("organization_id").(string)
+		isAdmin := false
+		if role, ok := r.Context().Value("role").(string); ok {
+			isAdmin = role == "admin" || role == "super-admin"
+		}
+
+		// Unfiltered path stays byte-identical to the pre-org query so
+		// existing callers (and mocks) are unaffected; the filtered path is
+		// a distinct statement only when a non-admin org scope is present.
+		var rows *sql.Rows
+		var err error
+		if orgID != "" && !isAdmin {
+			rows, err = db.Query(`SELECT id, name, state, node_id, organization_id, cpu_cores, memory_mb, disk_gb, created_at, updated_at FROM vms WHERE organization_id = $1 ORDER BY created_at DESC`, orgID)
+		} else {
+			rows, err = db.Query(`SELECT id, name, state, node_id, organization_id, cpu_cores, memory_mb, disk_gb, created_at, updated_at FROM vms ORDER BY created_at DESC`)
+		}
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to query VMs")
 			return

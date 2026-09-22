@@ -450,6 +450,54 @@ describe('FabricClient transfers', () => {
   });
 });
 
+describe('FabricClient usage', () => {
+  it('fetches the usage summary for the caller org', async () => {
+    const summary = {
+      from: '2026-09-21T00:00:00Z',
+      to: '2026-09-22T00:00:00Z',
+      totals: {
+        egress_bytes: 268435456,
+        egress_gb: 0.25,
+        migrations: 1,
+        job_seconds: 12.5,
+        vcpu_seconds: 75000,
+        vcpu_hours: 20.83,
+        estimated_cost_usd: 0.56,
+      },
+      rate_card: {
+        usd_per_gb_egress: 0.04,
+        usd_per_vcpu_hour: 0.027,
+        usd_per_job_second: 0,
+        usd_per_migration: 0.5,
+      },
+    };
+    const server = await startMockServer(() => ({ body: summary }));
+    const client = new FabricClient({ baseUrl: server.url, token: 'jwt-1' });
+
+    const fetched = await client.usageSummary();
+
+    expect(server.requests[0]).toMatchObject({
+      method: 'GET',
+      path: '/api/billing/usage/summary',
+    });
+    expect(fetched.totals.egress_bytes).toBe(268435456);
+    expect(fetched.totals.migrations).toBe(1);
+  });
+
+  it('scopes the summary to a specific org when asked', async () => {
+    const server = await startMockServer(() => ({
+      body: { from: 'x', to: 'y', totals: {}, rate_card: {} },
+    }));
+    const client = new FabricClient({ baseUrl: server.url, token: 'jwt-1' });
+
+    await client.usageSummary('00000000-0000-0000-0000-000000000001');
+
+    expect(server.requests[0].path).toBe(
+      '/api/billing/usage/summary?org_id=00000000-0000-0000-0000-000000000001'
+    );
+  });
+});
+
 describe('FabricClient errors', () => {
   it('throws FabricAPIError carrying the 400 status and message', async () => {
     const server = await startMockServer(() => ({
