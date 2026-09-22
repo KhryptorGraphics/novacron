@@ -90,7 +90,7 @@ func TestCanonicalVMRoutesDriveManagerState(t *testing.T) {
 	// the REAL vCPU count now: a request without vcpus persists 1 (was: the
 	// 1024 CPUShares scheduling weight).
 	mock.ExpectExec("INSERT INTO vms").
-		WithArgs(sqlmock.AnyArg(), "vm-a", "stopped", 1, 0, 0, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "vm-a", "stopped", 1, 0, 0, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	createRec := httptest.NewRecorder()
@@ -1223,7 +1223,7 @@ func TestCanonicalVMCreatePersistsVCPUs(t *testing.T) {
 	// Explicit vcpus=2: cpu_cores arg must be 2, and cpu_shares stays in
 	// metadata only (arg 5 is os_type; the metadata JSON is the last arg).
 	mock.ExpectExec("INSERT INTO vms").
-		WithArgs(sqlmock.AnyArg(), "vcpu-vm", "stopped", 2, 512, 1, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "vcpu-vm", "stopped", 2, 512, 1, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	rec := httptest.NewRecorder()

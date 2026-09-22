@@ -40,9 +40,11 @@ func selfNodeID() string {
 }
 
 func internalSecretOK(r *http.Request) bool {
-	// Delegate to the fail-closed migration auth helper (migration_auth.go): a node
-	// with no NOVACRON_MIGRATION_SECRET configured rejects all internal RPCs.
-	return migrationAuthOK(r)
+	// Fail-closed gate for every inbound node-to-node RPC: this node's own
+	// NOVACRON_NODE_SECRETS credential when configured, plus the fabric-wide
+	// NOVACRON_MIGRATION_SECRET while the fabric is mid-rollout. See
+	// internalAuthOK in cluster_join.go for the credential model.
+	return internalAuthOK(r)
 }
 
 // maxProbeBytes caps a single throughput probe payload (the heartbeat asks for
@@ -139,7 +141,7 @@ func allNodeCapacities(vmManager *core_vm.VMManager, storagePath string) []NodeC
 		return caps
 	}
 	for id, addr := range vmManager.MigrationPeers() {
-		if c, err := fetchPeerCapacity(addr); err == nil {
+		if c, err := fetchPeerCapacityFor(id, addr); err == nil {
 			c.NodeID, c.Addr = id, addr
 			caps = append(caps, c)
 		} else {
@@ -149,29 +151,18 @@ func allNodeCapacities(vmManager *core_vm.VMManager, storagePath string) []NodeC
 	return caps
 }
 
-func fetchPeerCapacity(addr string) (NodeCapacity, error) {
-	var c NodeCapacity
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+"/internal/cluster/capacity", nil)
-	if secret := os.Getenv("NOVACRON_MIGRATION_SECRET"); secret != "" {
-		req.Header.Set("X-Migration-Secret", secret)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return c, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return c, fmt.Errorf("capacity RPC %s: %s", addr, resp.Status)
-	}
-	err = json.NewDecoder(resp.Body).Decode(&c)
-	return c, err
+// fetchPeerCapacityFor fetches a peer's capacity, authenticating with the
+// credential that belongs to that peer (NOVACRON_NODE_SECRETS entry when
+// configured, else the cluster-wide secret): the peer accepts only its own
+// credential once where relevant, so the node id is required, not optional.
+func fetchPeerCapacityFor(nodeID, addr string) (NodeCapacity, error) {
+	secret, _ := nodeCredential(nodeID)
+	return fetchPeerCapacityWithSecret(addr, secret)
 }
 
-// fetchPeerCapacityWithSecret is fetchPeerCapacity with the internal secret
-// supplied by the caller (the join/heartbeat paths must use the configured
-// secret explicitly rather than re-reading env at call time).
+// fetchPeerCapacityWithSecret is fetchPeerCapacityFor with the credential
+// supplied by the caller (the join/heartbeat paths must use the credential
+// they resolved explicitly rather than re-reading env at call time).
 func fetchPeerCapacityWithSecret(addr, secret string) (NodeCapacity, error) {
 	var c NodeCapacity
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -228,6 +219,13 @@ type clusterCreateSpec struct {
 	Image      string                 `json:"image,omitempty"`
 	Tags       map[string]interface{} `json:"tags,omitempty"`
 	OwnerID    string                 `json:"owner_id,omitempty"`
+	// OrganizationID is the creating identity's org (the JWT tenant claim
+	// requireAuth exposes on the request context), carried over the
+	// /internal/vms/create dispatch too so a peer stamps the SAME org the VM
+	// and every usage event derived from it are attributed to. Whether this
+	// node can stamp it is decided against its OWN organizations table (see
+	// createVMLocal).
+	OrganizationID string `json:"organization_id,omitempty"`
 	// TenantID is accepted on the wire for backward compatibility; the
 	// canonical vms table has no tenancy column, so it is not persisted.
 	TenantID string `json:"tenant_id,omitempty"`
@@ -264,6 +262,19 @@ func vcpusOrDefault(vcpus int) int {
 		return 1
 	}
 	return vcpus
+}
+
+// orgLabelForVM normalizes an org claim for the uuid vms.organization_id
+// column: whitespace is trimmed and a non-uuid tenant label (legacy tokens
+// carry e.g. "default") is dropped instead of reaching a ::uuid cast, which
+// would fail the whole create. Whether this node's organizations directory can
+// actually resolve the id is decided by createVMLocal's INSERT.
+func orgLabelForVM(raw string) string {
+	org := strings.TrimSpace(raw)
+	if _, err := uuid.Parse(org); err != nil {
+		return ""
+	}
+	return org
 }
 
 // createVMLocal provisions a VM on THIS node (manager create + DB row) and returns
@@ -330,10 +341,19 @@ func createVMLocal(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 		"cpu_shares": spec.CPUShares, "vcpus": cores, "memory_mb": spec.MemoryMB,
 		"disk_size_gb": spec.DiskSizeGB, "image": spec.Image, "tags": spec.Tags,
 	})
+	// organization_id is an FK to the LOCAL organizations directory -- the same
+	// trap owner_id above documents: a create dispatched from a peer can name an
+	// org this node has never seen, and a legacy token carries a non-UUID tenant
+	// label (e.g. "default"). Resolving the column inside the INSERT (scalar
+	// subquery) keeps the FK honest without a second roundtrip: an org this node
+	// cannot resolve is stamped NULL instead of failing the whole create, and
+	// usageOrgForVM then attributes the row to the default org.
+	orgID := orgLabelForVM(spec.OrganizationID)
 	if _, dberr := db.Exec(`
-		INSERT INTO vms (id, name, state, cpu_cores, memory_mb, disk_gb, os_type, node_id, owner_id, requested_owner_id, metadata, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, NULLIF($10, '')::uuid, $11, NOW(), NOW())
-	`, vmID, spec.Name, state, cores, spec.MemoryMB, spec.DiskSizeGB, nullableStringValue(spec.Image), selfNodeID(), ownerID, requestedOwnerID, metadataPayload); dberr != nil {
+		INSERT INTO vms (id, name, state, cpu_cores, memory_mb, disk_gb, os_type, node_id, owner_id, requested_owner_id, organization_id, metadata, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, NULLIF($10, '')::uuid,
+			(SELECT o.id FROM organizations o WHERE o.id = NULLIF($11, '')::uuid), $12, NOW(), NOW())
+	`, vmID, spec.Name, state, cores, spec.MemoryMB, spec.DiskSizeGB, nullableStringValue(spec.Image), selfNodeID(), ownerID, requestedOwnerID, orgID, metadataPayload); dberr != nil {
 		if vmManager != nil {
 			_ = vmManager.DeleteVM(context.Background(), vmID)
 		}
@@ -351,15 +371,27 @@ func vmTypeForSpec(spec clusterCreateSpec) core_vm.VMType {
 	return core_vm.VMTypeKVM
 }
 
-// dispatchCreateToPeer sends a create to a chosen peer's /internal/vms/create and
-// returns its {id, node_id, state}.
+// dispatchCreateToPeer sends a create to a chosen peer's /internal/vms/create
+// and returns its {id, node_id, state}. This entry point carries no peer node
+// id, so it can only authenticate with the fabric-wide secret; callers that
+// know the id (clusteredCreateHandler) use dispatchCreateToPeerAs so the peer's
+// own NOVACRON_NODE_SECRETS credential is presented when configured.
 func dispatchCreateToPeer(addr string, spec clusterCreateSpec) (map[string]interface{}, error) {
+	return dispatchCreateToPeerAs("", addr, spec)
+}
+
+// dispatchCreateToPeerAs dispatches a create to nodeID at addr, authenticating
+// with the credential that belongs to that node (nodeCredential): its
+// NOVACRON_NODE_SECRETS entry when configured, else the cluster-wide secret.
+// A peer whose credential we do not hold cannot be driven — its inbound gate
+// accepts only its own credential (and the cluster secret while set).
+func dispatchCreateToPeerAs(nodeID, addr string, spec clusterCreateSpec) (map[string]interface{}, error) {
 	body, _ := json.Marshal(spec)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+addr+"/internal/vms/create", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	if secret := os.Getenv("NOVACRON_MIGRATION_SECRET"); secret != "" {
+	if secret, ok := nodeCredential(nodeID); ok {
 		req.Header.Set("X-Migration-Secret", secret)
 	}
 	resp, err := http.DefaultClient.Do(req)
@@ -410,10 +442,18 @@ func clusteredCreateHandler(db *sql.DB, vmManager *core_vm.VMManager, storagePat
 		if _, err := uuid.Parse(userID); err != nil {
 			userID = ""
 		}
+		// Org attribution: requireAuth exposes the JWT tenant claim as
+		// organization_id, so the row -- and every usage event derived from it --
+		// is attributed to the org that asked for the VM, on whichever node
+		// placement picks (the org rides the dispatch payload). A label that is
+		// not a uuid is dropped here exactly as createVMLocal drops it: legacy
+		// tokens carry labels like "default", which the uuid column cannot hold.
+		orgID, _ := r.Context().Value("organization_id").(string)
+		orgID = orgLabelForVM(orgID)
 		spec := clusterCreateSpec{
 			Name: req.Name, VCPUs: req.VCPUs, CPUShares: req.CPUShares, MemoryMB: req.MemoryMB,
 			DiskSizeGB: req.DiskSizeGB, Image: req.Image, Tags: req.Tags,
-			OwnerID: userID,
+			OwnerID: userID, OrganizationID: orgID,
 		}
 
 		target := strings.TrimSpace(req.NodeID)
@@ -444,7 +484,7 @@ func clusteredCreateHandler(db *sql.DB, vmManager *core_vm.VMManager, storagePat
 
 		// Remote placement: dispatch to the chosen peer, pass its result through.
 		if dispatchAddr != "" {
-			out, err := dispatchCreateToPeer(dispatchAddr, spec)
+			out, err := dispatchCreateToPeerAs(placedNode, dispatchAddr, spec)
 			if err != nil {
 				writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("cluster dispatch failed: %v", err))
 				return
@@ -466,7 +506,7 @@ func clusteredCreateHandler(db *sql.DB, vmManager *core_vm.VMManager, storagePat
 			"id": vmID, "name": req.Name, "state": state, "status": state,
 			"vcpus": vcpusOrDefault(spec.VCPUs), "memory_mb": req.MemoryMB, "disk_gb": req.DiskSizeGB,
 			"node_id": selfNodeID(), "placed_on": placedNode, "placed_by": placedBy,
-			"organization_id": nil,
+			"organization_id": nullableStringValue(orgID),
 		})
 	}
 }
@@ -576,6 +616,9 @@ func registerClusterRoutes(root, apiRouter *mux.Router, db *sql.DB, vmManager *c
 		}
 		writeJSON(w, http.StatusCreated, map[string]interface{}{
 			"id": vmID, "name": spec.Name, "state": state, "status": state, "node_id": selfNodeID(),
+			// Echoed so a dispatched create reports the same attribution the
+			// submitting node's local path does.
+			"organization_id": nullableStringValue(orgLabelForVM(spec.OrganizationID)),
 		})
 	}).Methods(http.MethodPost)
 }

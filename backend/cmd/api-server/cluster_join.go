@@ -4,7 +4,9 @@ package main
 //
 // A joining node POSTs /internal/cluster/join to any known node with
 // {node_id, addr, ts} and an HMAC-SHA256 signature over "node_id|addr|ts"
-// keyed by the shared NOVACRON_MIGRATION_SECRET. The receiver:
+// keyed by the CLAIMED NODE ID's credential: that node's own
+// NOVACRON_NODE_SECRETS entry when the operator configured one, else the
+// fabric-wide NOVACRON_MIGRATION_SECRET (see nodeCredential). The receiver:
 //   1. verifies the signature (constant-time) and freshness (|now-ts| < 60s),
 //   2. calls the joiner back at addr (/internal/cluster/capacity, same
 //      secret) — an unreachable joiner is REJECTED so a bogus address can
@@ -20,6 +22,23 @@ package main
 // every peer; /api/cluster/nodes exposes the live capacity + link profile
 // per node.
 //
+// Credentials. NOVACRON_MIGRATION_SECRET is the fabric-wide secret and stays
+// the trust root when nothing else is configured. NOVACRON_NODE_SECRETS
+// ("node-id=secret,node-id2=secret2") layers a credential PER NODE on top of
+// it and is the single source of truth for "what is node N's credential":
+//   - a join from a node id listed in the map is verified ONLY against that
+//     node's entry — the cluster-wide secret is rejected for it, so a leaked
+//     cluster secret can no longer impersonate a configured node (verifyJoin);
+//   - an outbound RPC to a peer presents the PEER's entry, so a node can only
+//     drive peers whose credential the operator handed it (nodeCredential);
+//   - an inbound RPC is accepted when it presents THIS node's entry, plus the
+//     cluster-wide secret while the fabric is mid-rollout (internalAuthOK).
+// One leaked credential is therefore scoped to one node instead of the whole
+// fabric, and a node can be re-keyed or revoked without rotating every other
+// node. Give every node an entry and unset NOVACRON_MIGRATION_SECRET to retire
+// the shared trust root entirely: a node id with no entry then fails closed on
+// both sides instead of falling back to the cluster-wide secret.
+//
 // NOVACRON_PEERS remains a static bootstrap override (loaded first, so an
 // operator can always pin a seed); NOVACRON_JOIN_PEERS is the new-node
 // convenience: a comma list of known-node addrs to POST the join to at boot.
@@ -28,6 +47,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -36,6 +56,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -52,6 +73,129 @@ const joinTimestampWindow = 60 * time.Second
 // honest); the loop only refreshes the persisted link profile.
 const heartbeatInterval = 30 * time.Second
 
+// nodeSecretsEnv configures per-node credentials, layered on top of the
+// fabric-wide NOVACRON_MIGRATION_SECRET. Format:
+// "node-id=secret,node-id2=secret2".
+const nodeSecretsEnv = "NOVACRON_NODE_SECRETS"
+
+// parseNodeSecrets reads a NOVACRON_NODE_SECRETS value into node id -> secret,
+// plus the problems worth logging once at boot. Half-written entries (no id or
+// no secret) are DROPPED, never treated as a credential for "": an empty key
+// would let a request claiming a blank node id match a blank secret.
+// Whitespace around both fields is trimmed; the secret may itself contain '='
+// (base64), so only the FIRST '=' separates a pair. A repeated id keeps the
+// LAST value (a re-key appended at the end wins) and says so — a silent drop
+// would leave an operator believing a node's new credential is in force.
+func parseNodeSecrets(raw string) (map[string]string, []string) {
+	var problems []string
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	creds := map[string]string{}
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		id, secret, hasSep := strings.Cut(entry, "=")
+		id, secret = strings.TrimSpace(id), strings.TrimSpace(secret)
+		if !hasSep || id == "" || secret == "" {
+			problems = append(problems, fmt.Sprintf("ignoring malformed entry %q (want node-id=secret)", entry))
+			continue
+		}
+		if _, dup := creds[id]; dup {
+			problems = append(problems, fmt.Sprintf("duplicate entry for %q — the last value wins", id))
+		}
+		creds[id] = secret
+	}
+	return creds, problems
+}
+
+// nodeSecrets is parseNodeSecrets against the live env. Read per call: env is
+// the config source and tests flip it at runtime. Problems are reported once
+// at boot by logNodeSecretConfig, never on the request path.
+func nodeSecrets() map[string]string {
+	creds, _ := parseNodeSecrets(os.Getenv(nodeSecretsEnv))
+	return creds
+}
+
+// nodeCredential is the credential that belongs to nodeID: its own
+// NOVACRON_NODE_SECRETS entry when the operator configured one, else the
+// fabric-wide NOVACRON_MIGRATION_SECRET. ok=false means no credential is
+// configured for that node at all, and every caller must then fail closed
+// rather than send or accept an unauthenticated request. nodeID "" (a call
+// site with no known peer identity) resolves to the fabric-wide secret only.
+func nodeCredential(nodeID string) (secret string, ok bool) {
+	if s, found := nodeSecrets()[strings.TrimSpace(nodeID)]; found {
+		return s, true
+	}
+	if s := os.Getenv("NOVACRON_MIGRATION_SECRET"); s != "" {
+		return s, true
+	}
+	return "", false
+}
+
+// clusterSecretOK reports whether the request presents the fabric-wide
+// NOVACRON_MIGRATION_SECRET. Fail closed (no configured secret => false) and
+// constant time, so a mismatch cannot be timed byte by byte.
+func clusterSecretOK(r *http.Request) bool {
+	secret := os.Getenv("NOVACRON_MIGRATION_SECRET")
+	if secret == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(secret), []byte(r.Header.Get("X-Migration-Secret"))) == 1
+}
+
+// internalAuthOK is the fail-closed gate for every inbound node-to-node RPC
+// (join/leave, capacity, probe, dispatch, /internal/migrate/*). Accepted
+// credentials, both in constant time:
+//
+//   - THIS node's own credential (NOVACRON_NODE_SECRETS[selfNodeID()]): a peer
+//     presents the credential of the node it is talking to, because the header
+//     carries no caller identity of its own, and
+//   - the fabric-wide NOVACRON_MIGRATION_SECRET, kept so nodes that have no
+//     per-node entry yet keep working during rollout.
+//
+// Neither configured => false. With NOVACRON_NODE_SECRETS unset this is
+// exactly the previous single-secret behaviour.
+func internalAuthOK(r *http.Request) bool {
+	provided := r.Header.Get("X-Migration-Secret")
+	if provided == "" {
+		return false
+	}
+	if cred, ok := nodeCredential(selfNodeID()); ok {
+		if subtle.ConstantTimeCompare([]byte(cred), []byte(provided)) == 1 {
+			return true
+		}
+	}
+	return clusterSecretOK(r)
+}
+
+// logNodeSecretConfig records which node ids have a per-node credential and
+// whether this node has one of its own — node ids only, NEVER a secret value.
+// A node whose own id is missing from NOVACRON_NODE_SECRETS keeps signing with
+// the cluster-wide secret and is then rejected by every peer that lists it:
+// that asymmetry is the first thing to check when a fabric stops converging,
+// so it is called out explicitly.
+func logNodeSecretConfig() {
+	creds, problems := parseNodeSecrets(os.Getenv(nodeSecretsEnv))
+	for _, p := range problems {
+		log.Printf("%s: %s", nodeSecretsEnv, p)
+	}
+	if len(creds) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(creds))
+	for id := range creds {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	log.Printf("%s: per-node credentials configured for: %s", nodeSecretsEnv, strings.Join(ids, ","))
+	if _, ok := creds[selfNodeID()]; !ok {
+		log.Printf("%s: this node (%s) has no per-node entry — it still authenticates with NOVACRON_MIGRATION_SECRET", nodeSecretsEnv, selfNodeID())
+	}
+}
+
 // joinRequest is the signed join payload.
 type joinRequest struct {
 	NodeID string `json:"node_id"`
@@ -66,16 +210,20 @@ func joinSignature(secret, nodeID, addr string, ts int64) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// verifyJoin authenticates a join request: correct HMAC over the exact
-// payload fields, constant-time compare, timestamp inside the freshness
-// window. Empty configured secret fails closed (no secret, no joins).
+// verifyJoin authenticates a join request: the HMAC over the exact payload
+// fields must be keyed by the credential that belongs to the CLAIMED node id
+// (nodeCredential) — a node id listed in NOVACRON_NODE_SECRETS is checked
+// against its own entry ONLY, so the cluster-wide secret does not authenticate
+// it even when that secret is still configured — plus a constant-time compare
+// and a timestamp inside the freshness window. No configured credential for
+// the claimed node fails closed (no credential, no joins).
 func verifyJoin(r *http.Request, req joinRequest) bool {
-	secret := os.Getenv("NOVACRON_MIGRATION_SECRET")
-	if secret == "" {
-		return false
-	}
 	got := r.Header.Get("X-Join-Signature")
 	if got == "" {
+		return false
+	}
+	secret, ok := nodeCredential(req.NodeID)
+	if !ok {
 		return false
 	}
 	want := joinSignature(secret, req.NodeID, req.Addr, req.TS)
@@ -173,6 +321,8 @@ func selfJoinAddr() string {
 // registerClusterJoinRoutes wires the join/leave node-to-node RPCs and the
 // authed /api/cluster/nodes inventory with live link profiles.
 func registerClusterJoinRoutes(root *mux.Router, apiRouter *mux.Router, db *sql.DB, vmManager *core_vm.VMManager, storagePath string) {
+	logNodeSecretConfig()
+
 	// POST /internal/cluster/join — signed node-to-node.
 	root.HandleFunc("/internal/cluster/join", func(w http.ResponseWriter, r *http.Request) {
 		var req joinRequest
@@ -195,12 +345,21 @@ func registerClusterJoinRoutes(root *mux.Router, apiRouter *mux.Router, db *sql.
 			return
 		}
 
-		// Verify the joiner is actually reachable and answering with the
-		// shared secret BEFORE touching the peer map — a bogus addr must
-		// never poison cluster dispatch. The measured round trip doubles as
-		// the initial link-profile RTT.
+		// Verify the joiner is actually reachable and answering with ITS OWN
+		// credential BEFORE touching the peer map — a bogus addr must never
+		// poison cluster dispatch. The callback therefore presents the joiner's
+		// credential (the same one its signature was verified against), so a
+		// per-node fabric never falls back to the shared secret mid-handshake.
+		// The measured round trip doubles as the initial link-profile RTT.
+		joinCred, haveCred := nodeCredential(req.NodeID)
+		if !haveCred {
+			// Unreachable in practice: verifyJoin only passes with a credential.
+			// Kept so a future reorder cannot send an unauthenticated callback.
+			writeJSONError(w, http.StatusForbidden, "no credential configured for this node")
+			return
+		}
 		start := time.Now()
-		cap, err := fetchPeerCapacityWithSecret(req.Addr, os.Getenv("NOVACRON_MIGRATION_SECRET"))
+		cap, err := fetchPeerCapacityWithSecret(req.Addr, joinCred)
 		if err != nil {
 			writeJSONError(w, http.StatusForbidden, fmt.Sprintf("joiner not reachable at %s: %v", req.Addr, err))
 			return
@@ -379,9 +538,16 @@ func beatOnce(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager) {
 	if vmManager == nil || db == nil {
 		return
 	}
-	secret := os.Getenv("NOVACRON_MIGRATION_SECRET")
 	probeBytes := probeBytesFromEnv()
 	for id, addr := range vmManager.MigrationPeers() {
+		// Per-peer credential: the peer's own NOVACRON_NODE_SECRETS entry when
+		// configured, else the cluster-wide secret. A peer we hold no credential
+		// for cannot answer us (its gate is fail-closed too), so skip it rather
+		// than send an unauthenticated probe.
+		secret, ok := nodeCredential(id)
+		if !ok {
+			continue
+		}
 		start := time.Now()
 		if _, err := fetchPeerCapacityWithSecret(addr, secret); err != nil {
 			continue // unreachable peer stays in the map; inventory reports it honestly
@@ -469,8 +635,10 @@ type joinOutcome struct {
 }
 
 // sendJoin POSTs a signed join to one known node and registers every peer
-// it reports back (including that seed node itself). Returns the seed's
-// identity on success.
+// it reports back (including that seed node itself). secret must be THIS
+// node's own credential (nodeCredential(selfID)) — the seed verifies the
+// signature against the credential it holds for the claimed node id. Returns
+// the seed's identity on success.
 func sendJoin(ctx context.Context, targetAddr, selfID, selfAddr, secret string, vmManager *core_vm.VMManager) (*joinOutcome, error) {
 	body := joinRequest{NodeID: selfID, Addr: selfAddr, TS: time.Now().Unix()}
 	payload, err := json.Marshal(body)
@@ -521,9 +689,13 @@ func joinAtBoot(ctx context.Context, selfID string, vmManager *core_vm.VMManager
 	if raw == "" {
 		return
 	}
-	secret := os.Getenv("NOVACRON_MIGRATION_SECRET")
-	if secret == "" {
-		log.Printf("NOVACRON_JOIN_PEERS set but NOVACRON_MIGRATION_SECRET is not — skipping join (fail closed)")
+	// Join under THIS node's own credential: its NOVACRON_NODE_SECRETS entry
+	// when configured, else the cluster-wide secret. Neither configured means
+	// we cannot authenticate at all — stay a single-node fabric rather than
+	// emit a join every seed will reject (fail closed).
+	secret, ok := nodeCredential(selfID)
+	if !ok {
+		log.Printf("NOVACRON_JOIN_PEERS set but neither %s[%s] nor NOVACRON_MIGRATION_SECRET is configured — skipping join (fail closed)", nodeSecretsEnv, selfID)
 		return
 	}
 	selfAddr := selfJoinAddr()

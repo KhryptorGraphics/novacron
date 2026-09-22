@@ -10,7 +10,9 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -271,6 +273,7 @@ func TestRegisterSecureAPIRoutesCreatesVMOnCompatibilityRoute(t *testing.T) {
 			sqlmock.AnyArg(), // node_id: selfNodeID(), depends on NOVACRON_NODE_ID
 			"",               // owner_id: non-uuid JWT sub is sanitized to '' (NULLIF -> NULL)
 			sqlmock.AnyArg(), // requested_owner_id
+			"",               // organization_id: JWT tenant_id "default" is not a uuid, so it is dropped
 			sqlmock.AnyArg(), // metadata JSON
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -870,5 +873,279 @@ func TestBuildCanonicalServerSupportsLiveStartup(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+
+// Login rate limiting --------------------------------------------------------
+//
+// POST /api/auth/login has no other guard, so these tests pin the properties
+// that make the limiter worth having: it blocks past the limit, it does so per
+// client IP, and a forged forwarding header cannot mint a fresh bucket.
+
+// newRateLimitedLoginTestRouter builds the public routes over a sqlmock-backed
+// database with no expectations, so every login attempt fails its user lookup
+// and returns 401 unless the limiter rejects it first. It returns the router as
+// well, for tests that need the /auth/login compatibility mount point.
+func newRateLimitedLoginTestRouter(t *testing.T) (*mux.Router, func(remoteAddr string) *httptest.ResponseRecorder) {
+	t.Helper()
+
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	authManager := auth.NewSimpleAuthManager("test-secret", db)
+	router := mux.NewRouter()
+	registerPublicRoutes(router, authManager, db, nil, nil)
+
+	return router, func(remoteAddr string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
+			strings.NewReader(`{"email":"user@example.com","password":"correct-horse-battery-staple"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = remoteAddr
+
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+}
+
+func TestLoginRateLimiterSlidingWindow(t *testing.T) {
+	limiter := newLoginRateLimiter(2, time.Minute)
+	if limiter == nil {
+		t.Fatal("newLoginRateLimiter(2, time.Minute) returned nil; want an enabled limiter")
+	}
+
+	now := time.Unix(1700000000, 0)
+	limiter.now = func() time.Time { return now }
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		if allowed, _ := limiter.allow("203.0.113.7"); !allowed {
+			t.Fatalf("attempt %d rejected inside the limit of 2", attempt)
+		}
+	}
+
+	allowed, retryAfter := limiter.allow("203.0.113.7")
+	if allowed {
+		t.Fatal("attempt past the limit allowed; want rejected")
+	}
+	if want := time.Minute; retryAfter != want {
+		t.Fatalf("retryAfter = %v, want %v (time until the oldest attempt leaves the window)", retryAfter, want)
+	}
+
+	// A rejected attempt is not recorded, so a client that keeps hammering
+	// cannot push its own block out further than one window.
+	now = now.Add(30 * time.Second)
+	allowed, retryAfter = limiter.allow("203.0.113.7")
+	if allowed {
+		t.Fatal("attempt allowed 30s into the block; want rejected")
+	}
+	if retryAfter != 30*time.Second {
+		t.Fatalf("retryAfter = %v, want 30s: rejected attempts must not extend the block", retryAfter)
+	}
+
+	// The window slides: once the recorded attempts age out, the IP is free.
+	now = now.Add(31 * time.Second)
+	if allowed, _ := limiter.allow("203.0.113.7"); !allowed {
+		t.Fatal("attempt rejected after the window slid past every recorded attempt")
+	}
+
+	if allowed, _ := limiter.allow("203.0.113.8"); !allowed {
+		t.Fatal("a second client was rejected; the limiter is not bucketing per IP")
+	}
+}
+
+func TestLoginRateLimiterBoundsTrackedClients(t *testing.T) {
+	limiter := newLoginRateLimiter(1, time.Minute)
+	if limiter == nil {
+		t.Fatal("limiter disabled")
+	}
+	limiter.now = func() time.Time { return time.Unix(1700000000, 0) }
+
+	// An unauthenticated caller can present as many source addresses as it
+	// likes; the tracked-IP map must not grow with them.
+	for i := range loginRateMaxClients + 16 {
+		limiter.allow(fmt.Sprintf("198.51.%d.%d", i/256, i%256))
+	}
+
+	limiter.mu.Lock()
+	tracked := len(limiter.hits)
+	limiter.mu.Unlock()
+
+	if tracked > loginRateMaxClients {
+		t.Fatalf("limiter tracks %d clients, want at most %d", tracked, loginRateMaxClients)
+	}
+}
+
+func TestLoginRateLimiterEnvKnobs(t *testing.T) {
+	cases := []struct {
+		name         string
+		limit        string
+		windowS      string
+		wantDisabled bool
+		wantLimit    int
+		wantWindow   time.Duration
+	}{
+		{"unset uses the documented defaults", "", "", false, defaultLoginRateLimit, defaultLoginRateWindow},
+		{"explicit values are honored", "3", "120", false, 3, 120 * time.Second},
+		{"limit 0 disables the limiter", "0", "", true, 0, 0},
+		{"unparsable values fall back to the defaults", "lots", "soon", false, defaultLoginRateLimit, defaultLoginRateWindow},
+		{"non-positive window falls back to the default", "5", "0", false, 5, defaultLoginRateWindow},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("NOVACRON_LOGIN_RATE_LIMIT", tc.limit)
+			t.Setenv("NOVACRON_LOGIN_RATE_WINDOW_S", tc.windowS)
+
+			limiter := newLoginRateLimiterFromEnv()
+			if tc.wantDisabled {
+				if limiter != nil {
+					t.Fatalf("NOVACRON_LOGIN_RATE_LIMIT=%q: limiter enabled, want nil (disabled)", tc.limit)
+				}
+				return
+			}
+			if limiter == nil {
+				t.Fatalf("NOVACRON_LOGIN_RATE_LIMIT=%q: limiter nil, want enabled", tc.limit)
+			}
+			if limiter.limit != tc.wantLimit || limiter.window != tc.wantWindow {
+				t.Fatalf("limit/window = %d/%v, want %d/%v", limiter.limit, limiter.window, tc.wantLimit, tc.wantWindow)
+			}
+		})
+	}
+}
+
+func TestRegisterPublicRoutesRateLimitsLoginByIP(t *testing.T) {
+	t.Setenv("NOVACRON_LOGIN_RATE_LIMIT", "3")
+	t.Setenv("NOVACRON_LOGIN_RATE_WINDOW_S", "60")
+	t.Setenv("NOVACRON_TRUSTED_PROXIES", "")
+
+	router, login := newRateLimitedLoginTestRouter(t)
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		if rec := login("203.0.113.9:34567"); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: got HTTP %d, want 401 (the limiter must not block inside the limit)", attempt, rec.Code)
+		}
+	}
+
+	rec := login("203.0.113.9:34567")
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("attempt past the limit: got HTTP %d, want 429", rec.Code)
+	}
+	retryAfter, err := strconv.Atoi(rec.Header().Get("Retry-After"))
+	if err != nil {
+		t.Fatalf("429 without a numeric Retry-After header: %q", rec.Header().Get("Retry-After"))
+	}
+	if retryAfter < 1 || retryAfter > 60 {
+		t.Fatalf("Retry-After = %d, want 1..60 (the configured window)", retryAfter)
+	}
+
+	if rec := login("203.0.113.10:34567"); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("another client got HTTP %d, want 401: the limit is not bucketed per IP", rec.Code)
+	}
+
+	// /auth/login is the same handler on a compatibility path, so a blocked
+	// client stays blocked there instead of getting a second allowance.
+	compat := httptest.NewRequest(http.MethodPost, "/auth/login",
+		strings.NewReader(`{"email":"user@example.com","password":"correct-horse-battery-staple"}`))
+	compat.Header.Set("Content-Type", "application/json")
+	compat.RemoteAddr = "203.0.113.9:34567"
+	compatRec := httptest.NewRecorder()
+	router.ServeHTTP(compatRec, compat)
+	if compatRec.Code != http.StatusTooManyRequests {
+		t.Fatalf("blocked client on /auth/login got HTTP %d, want 429 (both mount points must share one bucket)", compatRec.Code)
+	}
+}
+
+func TestRegisterPublicRoutesLoginUnlimitedWhenLimitZero(t *testing.T) {
+	t.Setenv("NOVACRON_LOGIN_RATE_LIMIT", "0")
+	t.Setenv("NOVACRON_TRUSTED_PROXIES", "")
+
+	_, login := newRateLimitedLoginTestRouter(t)
+
+	for attempt := 1; attempt <= 12; attempt++ {
+		if rec := login("203.0.113.9:34567"); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d with NOVACRON_LOGIN_RATE_LIMIT=0: got HTTP %d, want 401 (limiter must be off)", attempt, rec.Code)
+		}
+	}
+}
+
+func TestLoginRateLimiterClientIPIgnoresForwardedHeadersByDefault(t *testing.T) {
+	limiter := newLoginRateLimiter(1, time.Minute)
+	if limiter == nil {
+		t.Fatal("limiter disabled")
+	}
+
+	// A client-supplied X-Forwarded-For must not mint a new bucket: with no
+	// trusted proxy configured the limiter keys on the peer address only.
+	forged := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	forged.RemoteAddr = "203.0.113.11:34567"
+	forged.Header.Set("X-Forwarded-For", "198.51.100.1")
+	if got := limiter.clientIP(forged); got != "203.0.113.11" {
+		t.Fatalf("clientIP = %q, want the peer address 203.0.113.11", got)
+	}
+
+	t.Setenv("NOVACRON_TRUSTED_PROXIES", "127.0.0.1, 10.0.0.0/8")
+	trusted := newLoginRateLimiterFromEnv()
+	if trusted == nil {
+		t.Fatal("limiter disabled with default settings")
+	}
+
+	proxied := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	proxied.RemoteAddr = "127.0.0.1:44321"
+	proxied.Header.Set("X-Forwarded-For", "198.51.100.7, 127.0.0.1")
+	if got := trusted.clientIP(proxied); got != "198.51.100.7" {
+		t.Fatalf("clientIP = %q, want the first forwarded entry 198.51.100.7", got)
+	}
+
+	// A peer outside the trusted list cannot use the header either.
+	untrusted := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	untrusted.RemoteAddr = "203.0.113.12:34567"
+	untrusted.Header.Set("X-Forwarded-For", "198.51.100.9")
+	if got := trusted.clientIP(untrusted); got != "203.0.113.12" {
+		t.Fatalf("clientIP = %q, want the untrusted peer address 203.0.113.12", got)
+	}
+
+	// CIDR entries cover a proxy on a fabric/private network.
+	cidr := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	cidr.RemoteAddr = "10.96.0.2:34567"
+	cidr.Header.Set("X-Forwarded-For", "198.51.100.11")
+	if got := trusted.clientIP(cidr); got != "198.51.100.11" {
+		t.Fatalf("clientIP = %q, want 198.51.100.11 via the trusted 10.0.0.0/8 prefix", got)
+	}
+}
+
+func TestLoginRateLimiterConcurrentAttempts(t *testing.T) {
+	const limit = 8
+
+	limiter := newLoginRateLimiter(limit, time.Minute)
+	if limiter == nil {
+		t.Fatal("limiter disabled")
+	}
+
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		allowed int
+	)
+	for range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if ok, _ := limiter.allow("203.0.113.13"); ok {
+				mu.Lock()
+				allowed++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Concurrent callers must not be able to exceed the limit between them;
+	// run under -race, this also pins the lock around the hits map.
+	if allowed != limit {
+		t.Fatalf("allowed = %d of 64 concurrent attempts, want exactly %d", allowed, limit)
 	}
 }

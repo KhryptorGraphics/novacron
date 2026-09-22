@@ -1,0 +1,40 @@
+# NovaCron AI Operations Engine — ML / data-science stack (heavy, not needed to boot)
+#
+# Optional extras for model training, deep-learning detectors, time-series
+# feature extraction and drift monitoring. ai_engine imports all of these lazily,
+# so the API boots and serves the sklearn/xgboost/lightgbm prediction paths
+# without them; install this file for training or for pyod/tensorflow-backed
+# detectors.
+
+# --- Deep learning detector (anomaly_detector LSTM/autoencoder) ---
+tensorflow>=2.20.0,<3.0.0    # FIX(novacron-sdu): was >=2.13.0 — 2.20.0 is the first release with
+                             # cp313 wheels (2.13–2.19 ship no cp313 wheel for any platform, so the
+                             # old pin forced a source build of TensorFlow, which has no build support)
+
+# --- Outlier detectors (anomaly_detector LOF/OCSVM/autoencoder) ---
+pyod>=2.0.5,<3.0.0          # FIX: was >=1.1.0,<2.0.0 — the 1.x line publishes no wheel of any kind,
+                            # so <2.0.0 resolves to an sdist-only release; 2.0.5 is the lowest wheel
+# pyod >= 2 implements pyod.models.auto_encoder with torch (pyod 1.x used keras), and
+# torch is not part of this stack, so AnomalyDetectionModel trains without that one
+# detector and logs "Autoencoder detector unavailable (...); skipping it". LOF and
+# OCSVM (the other pyod detectors) need no extra. Add `torch>=2.6.0,<3.0.0`
+# (cp313 + manylinux aarch64 wheels exist) if you want the autoencoder back.
+
+# --- Feature engineering & time series ---
+feature-engine>=1.5.0,<2.0.0
+tsfresh>=0.20.0,<1.0.0
+tslearn>=0.6.0,<1.0.0
+statsmodels>=0.14.3,<1.0.0  # FIX: was >=0.14.0 — 0.14.3 is the lowest release with cp313/aarch64 wheels
+
+# --- Model monitoring & drift detection ---
+evidently>=0.4.0,<1.0.0
+
+# alibi-detect is NOT installable on CPython 3.13 from wheels and is therefore
+# gated to older interpreters (it stays enabled on the 3.12 container image):
+#   * it hard-requires numba<0.60.0, and numba added Python 3.13 support only in
+#     0.60/0.61, so no numba release satisfying that pin accepts cp313;
+#   * it hard-requires scikit-image<0.25, and scikit-image only started shipping
+#     cp313/aarch64 wheels at 0.25.0, so pip falls back to a source build
+#     (meson/pythran) which fails on this host.
+# Upstream blocker: https://github.com/SeldonIO/alibi-detect (no 3.13 support yet).
+alibi-detect>=0.11.0,<1.0.0; python_version < "3.13"

@@ -12,6 +12,11 @@
 #   2. a job dispatched to the peer completes and its stdout is fetched back
 #   3. a second transfer to a busy link is QUEUED with an ETA, not started
 #   4. a VM migrated cross-node ends up owned by the target node
+#   5. billing usage reflects the measured migration egress
+#   6. the SAME VM migrates back B->A over A's stale dest state (bounce-back)
+#   7. killing node A mid-migration and restarting it reconciles honestly:
+#      the durable job row reads "interrupted" (never "running"), exactly one
+#      node owns the live guest, and A's VM state matches its qemu's liveness
 #
 # Everything is real: real api-server processes, real postgres, real qemu, real
 # tc shaping. There are no mocks; a missing prerequisite produces an explicit
@@ -22,6 +27,7 @@
 #          FABRIC_DELAY_MS=40     delay to add when netem is available
 #          FABRIC_REQUIRE_ALL=1   treat SKIPs as failures (used in CI)
 #          FABRIC_KEEP=1          leave nodes/netns/databases behind for inspection
+#          FABRIC_ROUNDTRIP=0     skip assertions 6-7 (round trip + crash reconcile)
 #
 # Exit codes: 0 = every assertion passed (skips allowed unless FABRIC_REQUIRE_ALL),
 #             1 = at least one assertion failed, 2 = harness misconfiguration.
@@ -53,6 +59,10 @@ SHAPE_MBIT="${FABRIC_SHAPE_MBIT:-50}"
 DELAY_MS="${FABRIC_DELAY_MS:-40}"
 REQUIRE_ALL="${FABRIC_REQUIRE_ALL:-0}"
 KEEP="${FABRIC_KEEP:-0}"
+# Assertions 6-7 (bounce-back migration + crash reconcile) are on by default;
+# FABRIC_ROUNDTRIP=0 is the escape hatch for a quick run or a host where the
+# extra qemu work they add is not wanted.
+ROUNDTRIP="${FABRIC_ROUNDTRIP:-1}"
 HEARTBEAT_WAIT="${FABRIC_HEARTBEAT_WAIT:-45}"
 
 AUTH_SECRET="$(openssl rand -hex 32)"
@@ -100,6 +110,19 @@ api() { # api <node: a|b> <method> <path> [json-body]
   fi
 }
 
+# Parent pid straight out of /proc: it is field 2 after the "(comm)" field,
+# which can itself contain spaces and parens, so strip through the last ')' and
+# split what is left instead of splitting the raw line. Linux-only, like the
+# netns/tc machinery this exists to serve.
+ppid_of() {
+  local s
+  s="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1
+  s="${s##*)}"
+  local _state ppid
+  read -r _state ppid _ <<< "$s"
+  printf '%s' "$ppid"
+}
+
 cleanup() {
   local rc=$?
   head2 "cleanup"
@@ -108,18 +131,50 @@ cleanup() {
   # nohup $BIN` detaches into a brand new session, so killing that PID does
   # NOT reach the actual binary or any qemu child it spawned -- observed
   # live as an orphaned node-b api-server + qemu surviving a "clean" run).
-  # $WORK is unique per run (contains this script's own PID), so a plain
-  # host-side pkill -f on that exact path safely targets only this run's
-  # processes regardless of which netns they're in -- /proc is not
-  # namespaced by `ip netns`, so this must NOT be wrapped in `ip netns
-  # exec` (that scans the same global /proc and adds no isolation, it only
-  # invites running the pattern match somewhere the operator didn't intend).
+  # $WORK is unique per run (contains this script's own PID), so matching
+  # host-wide on that exact path safely targets only this run's processes
+  # regardless of which netns they're in -- /proc is not namespaced by
+  # `ip netns`, so this must NOT be wrapped in `ip netns exec` (that scans the
+  # same global /proc and adds no isolation, it only invites running the
+  # pattern match somewhere the operator didn't intend).
+  #
+  # Enumerated with pgrep instead of `pkill -f "$WORK"`: sudo's own argv
+  # carries the -f pattern, so pkill matched and SIGKILLed *its own parent*,
+  # which is the "line N: <pid> Killed" line a CI log ends on -- the sweep only
+  # completed because pkill got its signals out before it was shot, and it
+  # would have been cut short entirely under `set -e`. The hit list is filtered
+  # against this shell's own ancestry: this script and its parents (the CI step,
+  # the runner) are never this run's nodes, while every node is a *child* of
+  # this shell, so none of them can be filtered out by accident.
   for n in a b; do
     [ -f "$WORK/node-$n.pid" ] && sudo kill "$(cat "$WORK/node-$n.pid")" 2>/dev/null
   done
-  sudo pkill -TERM -f "$WORK" 2>/dev/null
-  sleep 1
-  sudo pkill -KILL -f "$WORK" 2>/dev/null
+  # socat's argv holds only the port pair, never $WORK, so it is invisible to
+  # the argv sweep below; reap it by the pids recorded at startup instead.
+  for f in "$WORK"/socat-*.pid; do
+    [ -f "$f" ] && kill "$(cat "$f")" 2>/dev/null
+  done
+
+  local exclude=" $$ " p pid
+  p=$$
+  while :; do
+    p="$(ppid_of "$p")" || break
+    case "$p" in ''|0|1|*[!0-9]*) break;; esac
+    exclude="$exclude$p "
+  done
+
+  local victims=()
+  while read -r pid; do
+    [ -n "$pid" ] || continue
+    case "$exclude" in *" $pid "*) continue;; esac
+    victims+=("$pid")
+  done < <(sudo pgrep -f "$WORK" 2>/dev/null)
+
+  if [ "${#victims[@]}" -gt 0 ]; then
+    sudo kill -TERM "${victims[@]}" 2>/dev/null
+    sleep 1
+    sudo kill -KILL "${victims[@]}" 2>/dev/null
+  fi
   if [ "$KEEP" = "1" ]; then
     say "  FABRIC_KEEP=1 — leaving nodes, netns ($NS_B), veth pair and databases ($DB_A, $DB_B) in place"
     say "  logs: $WORK"
@@ -480,6 +535,356 @@ if awk -v e="$BILL_EGRESS" 'BEGIN{exit !(e>0)}' 2>/dev/null; then
   fi
 else
   bad "usage metering recorded no egress for a session that moved a VM cross-node"
+fi
+
+# --- live-guest probes ------------------------------------------------------
+# Assertions 6-7 need ground truth about which node actually RUNS the guest.
+# The API's state is a DB row overlaid by the manager's in-memory view, so a node
+# that migrated a VM away can still answer "running" from its stale row -- that
+# is exactly the ambiguity a bounce-back and a crash test must not inherit. So
+# these helpers ask the guest's own qemu over QMP (read-only commands only: a
+# probe must never perturb a live migration) and, where process liveness is the
+# question, reuse the api-server's own PID-reuse-safe rule (pid alive AND
+# /proc/<pid>/cmdline still names this VM) instead of inventing a second one.
+
+# qmp_call <unix-socket> <json-command> prints the command's "return" payload, or
+# "" when the socket is absent/busy or the command errors. Callers MUST read ""
+# as "probe inconclusive", never as a pass. The probe runs under sudo because
+# node B's api-server -- and therefore its qemu -- runs inside the netns as root,
+# and Linux requires WRITE permission on a unix socket's inode to connect: QEMU
+# leaves the socket at 0755 root:root, so a non-root probe of node B gets EACCES
+# and reads as "unprobeable" (observed live: node A returned "running" while node
+# B returned "" for the very same probe).
+qmp_call() {
+  [ -S "$1" ] || { printf ''; return; }
+  sudo python3 - "$1" "$2" <<'PY'
+import json, socket, sys
+sock, cmd = sys.argv[1], json.loads(sys.argv[2])
+try:
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(5)
+    s.connect(sock)
+    f = s.makefile("rwb")
+    f.readline()  # QMP greeting
+    f.write(b'{"execute":"qmp_capabilities"}\n'); f.flush()
+    while True:
+        line = f.readline()
+        if not line:
+            raise OSError("qmp closed before capabilities reply")
+        if "return" in json.loads(line):
+            break
+    f.write((json.dumps(cmd) + "\n").encode()); f.flush()
+    while True:
+        line = f.readline()
+        if not line:
+            raise OSError("qmp closed before command reply")
+        m = json.loads(line)
+        if "error" in m:
+            raise OSError(str(m["error"]))
+        if "return" in m:
+            print(json.dumps(m["return"]))
+            break
+except Exception:
+    print("")
+PY
+}
+
+# vm_qmp_note <a|b> <vm-id>: one line of evidence for WHY a probe came back
+# inconclusive (path, ownership, connect error) -- a skip must explain itself
+# rather than hide a broken probe behind "unprobeable".
+vm_qmp_note() {
+  sudo python3 - "$WORK/storage-$1/vms/$2/qmp.sock" <<'PY'
+import os, socket, sys
+p = sys.argv[1]
+if not os.path.exists(p):
+    print("no socket file at %s" % p); raise SystemExit
+st = os.stat(p)
+try:
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.settimeout(5); s.connect(p)
+    print("connected to %s (mode %o owner %d:%d) but got no usable reply" % (p, st.st_mode & 0o777, st.st_uid, st.st_gid))
+except Exception as e:
+    print("connect to %s failed: %r (mode %o owner %d:%d)" % (p, e, st.st_mode & 0o777, st.st_uid, st.st_gid))
+PY
+}
+
+# vm_qemu_status <a|b> <vm-id>: that node's guest-qemu state ("running",
+# "inmigrate", "paused", ...) or "" when it cannot be probed. A node whose qemu
+# says "running" is the node actually running the guest.
+vm_qemu_status() {
+  qmp_call "$WORK/storage-$1/vms/$2/qmp.sock" '{"execute":"query-status"}' | python3 -c 'import json,sys
+try:
+    print(json.loads(sys.stdin.read()).get("status",""))
+except Exception:
+    print("")'
+}
+
+# vm_qemu_block_jobs <a|b> <vm-id>: that node's live block jobs as JSON. A
+# drive-mirror in flight appears here -- the only positive proof that a block
+# migration is copying bytes, as opposed to merely having been admitted.
+vm_qemu_block_jobs() {
+  local out
+  out="$(qmp_call "$WORK/storage-$1/vms/$2/qmp.sock" '{"execute":"query-block-jobs"}')"
+  [ -n "$out" ] || out='[]'
+  printf '%s' "$out"
+}
+
+# pidfile_alive <pidfile> <vm-id>: the api-server's boot-reconcile rule (pid
+# alive AND /proc/<pid>/cmdline still names this VM), so the harness judges
+# liveness exactly as the product does -- including a recycled PID.
+pidfile_alive() {
+  local pid
+  [ -r "$1" ] || return 1
+  pid="$(tr -dc '0-9' < "$1")"
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q -- "$2"
+}
+
+# --- assertion 6: bounce-back migration B -> A ------------------------------
+
+head2 "assertion 6: round-trip migration (B -> A) over node A's stale dest state"
+# Assertion 4 landed the VM on B. Migrating the SAME VM straight back is the
+# shape that used to fail with QEMU's "Permission conflict on node 'migdisk'"
+# (novacron-sv9): node A still holds the disk image, the runtime dir and the DB
+# row from the VM's first residency, so the returning dest must evict that stale
+# state instead of colliding with it. A bounce-back is only meaningful here
+# because that state really does exist on A -- the disk is not new.
+ROUNDTRIP_OK=0; ROUNDTRIP_MSG=""
+if [ "$ROUNDTRIP" != "1" ]; then
+  skip "round-trip migration" "FABRIC_ROUNDTRIP=0"
+elif [ "$HAVE_QEMU" = "0" ]; then
+  skip "round-trip migration" "qemu not installed"
+elif [ -z "${VM_ID:-}" ] || [ "${MIG_OK:-0}" != "1" ]; then
+  skip "round-trip migration" "no VM landed on the target (see the migration assertion above)"
+else
+  say "    node A still holds $WORK/storage-a/vms/$VM_ID/disk.qcow2: $([ -f "$WORK/storage-a/vms/$VM_ID/disk.qcow2" ] && echo yes || echo NO)"
+  t4="$(api b POST /api/transfers "{\"kind\":\"migration\",\"vm_id\":\"$VM_ID\",\"target_node\":\"fab-a\",\"migration_type\":\"block\"}")"
+  T4_ID="$(json_get 'd.get("transfer_id","")' "$t4")"
+  s4="$(json_get 'd.get("status","")' "$t4")"
+  if [ -z "$T4_ID" ]; then
+    ROUNDTRIP_MSG="node B refused the round-trip transfer: $t4"
+  else
+    say "    round-trip transfer $T4_ID submitted on node B (status $s4)"
+    deadline=$(( $(date +%s) + 600 ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+      t4_detail="$(api b GET "/api/transfers/$T4_ID")"
+      st="$(json_get 'd.get("status","")' "$t4_detail")"
+      case "$st" in
+        completed) ROUNDTRIP_MSG="transfer completed"; break;;
+        failed) ROUNDTRIP_MSG="transfer failed: $(json_get 'd.get("error","")' "$t4_detail")"; break;;
+      esac
+      sleep 5
+    done
+    [ -n "$ROUNDTRIP_MSG" ] || ROUNDTRIP_MSG="round-trip transfer neither completed nor failed within 600s"
+  fi
+  if [ "$ROUNDTRIP_MSG" = "transfer completed" ]; then
+    a_view="$(api a GET "/api/vms/$VM_ID")"
+    a_state="$(json_get 'd.get("state") or d.get("error") or ""' "$a_view")"
+    a_owner="$(json_get 'd.get("node_id") or ""' "$a_view")"
+    qmp_a="$(vm_qemu_status a "$VM_ID")"
+    say "    node A after the round trip: state=${a_state:-?} node_id=${a_owner:-?} qemu=${qmp_a:-<unprobeable>}"
+    if [ "$a_state" = "running" ] && [ "$a_owner" = "fab-a" ]; then
+      ROUNDTRIP_OK=1
+    else
+      ROUNDTRIP_MSG="transfer completed but node A reports state='${a_state:-?}' node_id='${a_owner:-?}'"
+    fi
+  fi
+  if [ "$ROUNDTRIP_OK" = "1" ]; then
+    ok "round-trip migration: VM $VM_ID runs on node A again (transfer $T4_ID, qemu ${qmp_a:-unprobed})"
+  else
+    # The sv9 signature specifically, so a regression names itself.
+    if grep -qi "permission conflict" "$WORK/node-a.log" 2>/dev/null; then
+      say "    node A log: $(grep -i -m1 "permission conflict" "$WORK/node-a.log" | cut -c1-200)"
+    fi
+    bad "round-trip migration: $ROUNDTRIP_MSG"
+  fi
+fi
+
+# --- assertion 7: crash reconcile -------------------------------------------
+
+head2 "assertion 7: node A killed mid-migration reconciles honestly on restart"
+# The crash is driven through the ASYNC MIGRATION JOB route, not /api/transfers,
+# and that choice is forced by the product, not by convenience: a fabric transfer
+# record is in-memory by design (fabric_transfers.go:9-16 -- "a transfer record
+# does not [survive a restart]"), so it cannot come back "interrupted". The
+# durable record of an in-flight migration is the migration_jobs row that the
+# async route persists and the boot reconcile closes (novacron-05h). What must
+# hold after the crash, and what this assertion tests:
+#   a. the durable job row reads "interrupted" (or "failed"), never "running";
+#   b. no node reports a transfer still RUNNING (no phantom in-flight work);
+#   c. node A's reported VM state matches its qemu's real liveness (the boot
+#      reconcile's contract: pidfile alive => running, dead => stopped);
+#   d. exactly ONE node actually runs the guest (no split brain);
+#   e. node A comes back and the fabric view of both nodes is restored.
+CRASH_OK=0; CRASH_MSG=""
+if [ "$ROUNDTRIP" != "1" ]; then
+  skip "crash reconcile" "FABRIC_ROUNDTRIP=0"
+elif [ "$HAVE_QEMU" = "0" ]; then
+  skip "crash reconcile" "qemu not installed"
+elif [ "${ROUNDTRIP_OK:-0}" != "1" ]; then
+  skip "crash reconcile" "no VM running on node A to migrate (see the round-trip assertion)"
+else
+  job_json="$(api a POST "/api/vms/$VM_ID/migrate/async" "{\"target_node\":\"fab-b\",\"migration_type\":\"block\",\"target_addr\":\"$ADDR_B:$PORT_B\"}")"
+  JOB_ID="$(json_get 'd.get("job_id","")' "$job_json")"
+  if [ -z "$JOB_ID" ]; then
+    CRASH_MSG="node A refused the async migration: $job_json"
+  else
+    say "    migration job $JOB_ID accepted; waiting until it is genuinely in flight"
+    job_start="$(date +%s)"
+    INFLIGHT=0; INFLIGHT_SRC=""; jst=""
+    deadline=$(( $(date +%s) + 45 ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+      jst="$(json_get 'd.get("status","")' "$(api a GET "/api/migrate/jobs/$JOB_ID")")"
+      [ "$jst" = "running" ] || break
+      if [ "$(vm_qemu_block_jobs a "$VM_ID")" != "[]" ]; then
+        INFLIGHT=1; INFLIGHT_SRC="drive-mirror block job running on node A's qemu"
+        break  # the source qemu is mirroring right now
+      fi
+      # Fallback proof the DEST side is up for THIS job: its qemu dir appeared
+      # after the job started (a stale dir from an earlier migration must not
+      # count as "in flight").
+      for f in "$WORK/storage-b/vms/$VM_ID/qmp.sock" "$WORK/storage-b/vms/$VM_ID/qemu.pid"; do
+        if [ -e "$f" ] && [ "$(stat -c %Y "$f" 2>/dev/null || echo 0)" -ge "$job_start" ]; then
+          INFLIGHT=1; INFLIGHT_SRC="fresh dest qemu state on node B ($(basename "$f"))"
+        fi
+      done
+      [ "$INFLIGHT" = "1" ] && break
+      sleep 2
+    done
+    if [ "$INFLIGHT" != "1" ]; then
+      case "$jst" in
+        completed)
+          # No crash happened: the migration finished inside the observation
+          # window, so there is nothing to crash-test. Honest skip, not a pass.
+          skip "crash reconcile" "migration completed before the kill (nothing was mid-flight to crash)" ;;
+        failed)
+          # Not a crash-test problem: the migration itself failed before any
+          # crash, which is a real product observation.
+          bad "crash reconcile: the migration failed before any crash (job ${JOB_ID}: $(json_get 'd.get("error","")' "$(api a GET "/api/migrate/jobs/$JOB_ID")"))" ;;
+        *)
+          CRASH_MSG="migration never showed in-flight evidence (job status '${jst:-unknown}', no block job, no fresh dest qemu dir)" ;;
+      esac
+    fi
+  fi
+  if [ -z "$CRASH_MSG" ] && [ "$INFLIGHT" = "1" ]; then
+    A_PID="$(tr -dc '0-9' < "$WORK/node-a.pid")"
+    say "    in flight ($INFLIGHT_SRC); SIGKILLing node A's api-server (pid ${A_PID:-?}) -- its qemu keeps running, which is the point"
+    kill -KILL "$A_PID" 2>/dev/null
+    A_DEAD=0
+    deadline=$(( $(date +%s) + 20 ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+      code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://$ADDR_A:$PORT_A/health" 2>/dev/null)"
+      if [ "$code" != "200" ]; then A_DEAD=1; break; fi
+      sleep 1
+    done
+    if [ "$A_DEAD" != "1" ]; then
+      CRASH_MSG="node A's api-server survived SIGKILL (health still 200) -- crash test inconclusive"
+    else
+      # Keep the dying process's log: start_node truncates node-a.log on restart
+      # and the reconcile lines in it are the evidence.
+      cp "$WORK/node-a.log" "$WORK/node-a-precrash.log" 2>/dev/null
+      say "    restarting node A with the same env/DB (log: $WORK/node-a.log)"
+      start_node a
+      if ! wait_health "$ADDR_A:$PORT_A" 30; then
+        CRASH_MSG="node A did not become healthy again within 30s of the restart"
+      fi
+    fi
+  fi
+
+  if [ -n "$CRASH_MSG" ]; then
+    bad "crash reconcile: $CRASH_MSG"
+  elif [ "$INFLIGHT" = "1" ]; then
+    FAILED_PARTS=""
+
+    # (a) the durable job row: the boot reconcile must have closed it.
+    jst=""; jerr=""
+    deadline=$(( $(date +%s) + 60 ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+      jdetail="$(api a GET "/api/migrate/jobs/$JOB_ID")"
+      jst="$(json_get 'd.get("status","")' "$jdetail")"
+      jerr="$(json_get 'd.get("error","")' "$jdetail")"
+      case "$jst" in interrupted|failed) break;; esac
+      sleep 2
+    done
+    say "    job $JOB_ID after restart: status=${jst:-<none>} error=${jerr:-<none>}"
+    case "$jst" in
+      interrupted|failed) ;;
+      *) FAILED_PARTS="$FAILED_PARTS job-status(${jst:-none})";;
+    esac
+
+    # (b) nothing is still reported in flight anywhere.
+    for n in a b; do
+      rt="$(json_get 'len([t for t in d.get("transfers",[]) if t.get("status")=="running"])' "$(api $n GET /api/transfers)")"
+      say "    node $n transfers still running after the crash: ${rt:-?}"
+      [ "${rt:-0}" = "0" ] || FAILED_PARTS="$FAILED_PARTS node-$n-running-transfers($rt)"
+    done
+    # Why the durable-status check above uses the migration_jobs row and not
+    # /api/transfers/<id>: a fabric transfer record is in-memory by design
+    # (fabric_transfers.go:9-16), so a crash does not leave one "running" -- it
+    # leaves NONE. Show that on the parent-visible surface (T1 completed on node
+    # A before the crash) instead of asserting it, so persisting transfers later
+    # would not have to fight this test.
+    if [ -n "${T1_ID:-}" ]; then
+      t1_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+        -H "Authorization: Bearer $(cat "$WORK/token-a" 2>/dev/null)" \
+        "http://$ADDR_A:$PORT_A/api/transfers/$T1_ID")"
+      say "    GET /api/transfers/$T1_ID on restarted node A: HTTP ${t1_code:-?} (completed before the crash; the store is in-memory, so it is gone rather than 'interrupted')"
+    fi
+
+    # (c) A's reported state must match its qemu's REAL liveness.
+    PA=0; pidfile_alive "$WORK/storage-a/vms/$VM_ID/qemu.pid" "$VM_ID" && PA=1
+    a_state="$(json_get 'd.get("state") or ""' "$(api a GET "/api/vms/$VM_ID")")"
+    want="running"; [ "$PA" = "1" ] || want="stopped"
+    say "    node A: qemu.pid alive=$PA, API state=${a_state:-<none>}, reconcile expects=$want"
+    [ "$a_state" = "$want" ] || FAILED_PARTS="$FAILED_PARTS a-state(${a_state:-none}!=${want})"
+
+    # (d) exactly one node actually runs the guest.
+    # The API's "state" is NOT ownership ground truth: liveVMState falls back to
+    # the stored row when this node's manager no longer knows the VM
+    # (main.go:1300-1310), and only the migrate ROUTES delete the source row
+    # (main.go:1679, migrate_jobs.go:340) -- the fabric transfer runner does not
+    # (fabric_transfers.go migrationTransferRunner). So a node that migrated the
+    # VM away can still answer "running". Print both rows beside the qemu states
+    # so the difference is visible instead of being asserted.
+    for n in a b; do
+      vdb="$DB_A"; [ "$n" = "b" ] && vdb="$DB_B"
+      vrow="$(psql_q -c "SELECT coalesce(node_id,'-') || ':' || state FROM vms WHERE id = '$VM_ID'" "$vdb" 2>&1 | tr '\n' ' ' | cut -c1-120)"
+      say "    node $n vms row: ${vrow:-<none>}"
+    done
+    qa="$(vm_qemu_status a "$VM_ID")"; qb="$(vm_qemu_status b "$VM_ID")"
+    QA_NOTE=""; [ -n "$qa" ] || QA_NOTE=" ($(vm_qmp_note a "$VM_ID"))"
+    QB_NOTE=""; [ -n "$qb" ] || QB_NOTE=" ($(vm_qmp_note b "$VM_ID"))"
+    say "    qemu query-status: node A=${qa:-<unprobeable>$QA_NOTE} node B=${qb:-<unprobeable>$QB_NOTE}"
+    OWN_BASIS="unprobed"
+    if [ -n "$qa" ] && [ -n "$qb" ]; then
+      OWN=0; OWN_NODES=""
+      [ "$qa" = "running" ] && { OWN=$((OWN+1)); OWN_NODES="fab-a"; }
+      [ "$qb" = "running" ] && { OWN=$((OWN+1)); OWN_NODES="${OWN_NODES:+$OWN_NODES,}fab-b"; }
+      OWN_BASIS="qemu running on ${OWN_NODES:-none}"
+      [ "$OWN" = "1" ] || FAILED_PARTS="$FAILED_PARTS live-owners($OWN:${OWN_NODES:-none})"
+    else
+      skip "live-guest ownership" "qemu QMP probe inconclusive (A='${qa:-}'$QA_NOTE, B='${qb:-}'$QB_NOTE)"
+    fi
+
+    # (e) A is back and the fabric view is restored both ways.
+    a_seen=""; b_seen=""; REG=0
+    deadline=$(( $(date +%s) + 30 ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+      a_seen="$(json_get '[n.get("reachable") for n in d.get("nodes",[]) if n.get("node_id")=="fab-b"][0] if [n for n in d.get("nodes",[]) if n.get("node_id")=="fab-b"] else False' "$(api a GET /api/cluster/nodes)")"
+      b_seen="$(json_get '[n.get("reachable") for n in d.get("nodes",[]) if n.get("node_id")=="fab-a"][0] if [n for n in d.get("nodes",[]) if n.get("node_id")=="fab-a"] else False' "$(api b GET /api/cluster/nodes)")"
+      [ "$a_seen" = "True" ] && [ "$b_seen" = "True" ] && { REG=1; break; }
+      sleep 3
+    done
+    say "    fabric view after restart: A sees fab-b reachable=$a_seen, B sees fab-a reachable=$b_seen"
+    [ "$REG" = "1" ] || FAILED_PARTS="$FAILED_PARTS fabric-view(A=$a_seen,B=$b_seen)"
+
+    if [ -z "$FAILED_PARTS" ]; then
+      CRASH_OK=1
+      ok "crash reconcile: job $JOB_ID reads '${jst}' (never running), no transfer survives as running, VM $VM_ID state=${a_state} matches its qemu (alive=$PA), live ownership: $OWN_BASIS, fabric view restored"
+    else
+      bad "crash reconcile after node A's crash:$FAILED_PARTS"
+    fi
+  fi
 fi
 
 # --- summary ----------------------------------------------------------------

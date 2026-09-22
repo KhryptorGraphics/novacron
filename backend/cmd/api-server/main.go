@@ -544,8 +544,13 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 		writeJSON(w, http.StatusOK, map[string]bool{"available": !exists})
 	})
 
+	// Login is the one unauthenticated route that spends a bcrypt comparison and
+	// a database round trip per request, so the per-IP limiter wraps the handler
+	// itself: both mount points (/auth/login and its /api alias) then share one
+	// bucket per client, and an over-limit attempt never reaches Authenticate.
+	rateLimitedLogin := loginRateLimitMiddleware(newLoginRateLimiterFromEnv())(loginHandler)
 	for _, path := range []string{"/auth/login", "/api/auth/login"} {
-		router.Handle(path, loginHandler).Methods(http.MethodPost)
+		router.Handle(path, rateLimitedLogin).Methods(http.MethodPost)
 	}
 	for _, path := range []string{"/auth/register", "/api/auth/register"} {
 		router.Handle(path, registerHandler).Methods(http.MethodPost)
@@ -1568,7 +1573,15 @@ func registerMigratedDest(db *sql.DB, manager *core_vm.VMManager, vmID string, c
 		VALUES ($1, $2, 'running', $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, '')::uuid, NULLIF($9, '')::uuid, $10, NOW(), NOW())
 		ON CONFLICT (id) DO UPDATE SET
 			state = 'running', node_id = EXCLUDED.node_id, owner_id = EXCLUDED.owner_id,
-			requested_owner_id = EXCLUDED.requested_owner_id, metadata = EXCLUDED.metadata, updated_at = NOW()
+			requested_owner_id = EXCLUDED.requested_owner_id, metadata = EXCLUDED.metadata,
+			-- organization_id is deliberately absent from the INSERT column list:
+			-- the migration wire (IncomingMigrationRequest) carries no org and the
+			-- source deletes its row at cutover, so the destination cannot know it
+			-- -- but this UPSERT is idempotent, and a re-registration must never
+			-- wipe an org the row already carries (EXCLUDED is NULL here, so
+			-- COALESCE keeps ours). An unattributed migrated row falls back to the
+			-- default org in usageOrgForVM, never to a made-up one.
+			organization_id = COALESCE(EXCLUDED.organization_id, vms.organization_id), updated_at = NOW()
 	`, vmID, cfg.Name, vcpusOrDefault(cfg.VCPUs), cfg.MemoryMB, cfg.DiskSizeGB, nullableStringValue(cfg.Image), nodeID, ownerString(owner), ownerString(requestedOwner), configPayload); err != nil {
 		logger.Warn("migrated-VM DB register failed", "vm", vmID, "error", err)
 		return

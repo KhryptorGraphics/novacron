@@ -21,6 +21,76 @@ which overstate completion and should not be trusted.
   `research/` — these are NOT part of the canonical build/test surface, but
   are primary sources for decisions made about business direction.
 
+## Production-readiness session — 2026-09-21 (adversarial swarm: 10 slices landed, verified live)
+
+An adversarial reviewer first discredited the naive shortlist (three of its
+five premises were false), then nine implementation slices + one verifier
+were fanned out in parallel. Every slice's claimed acceptance was re-run
+against the working tree by the verifier, not taken on trust.
+
+### What landed (each with evidence in its agent artifact)
+
+- **Fabric trust**: `scripts/fabric/two-node-fabric-test.sh` gains assertion 6
+  (round-trip migration A→B→A — novacron-sv9 stale-dest path exercised) and
+  assertion 7 (SIGKILL node A mid-migration → restart → job row reads
+  `interrupted`, never `running`; VM ownership ground-truthed via QMP). Final
+  live run: **14/14 PASS, 0 SKIP** (`bg_2`, 124.8 s).
+- **Org attribution end-to-end (novacron-wot)**: `clusterCreateSpec.OrganizationID`
+  → `createVMLocal` INSERT stamps `vms.organization_id`; peer dispatch carries
+  it; `registerMigratedDest` preserves it on re-register; fabric jobs inherit
+  the submitter's org. New unit tests incl. an end-to-end create-through-auth test.
+- **CI honesty**: x86 boot smoke fixed (root cause: `grep -m1` + pipefail SIGPIPE
+  kills its own step, not a qemu boot failure) and made honestly blocking;
+  harness cleanup() no longer kills its own PID (CI exit code is now
+  trustworthy); postgres password unified through one masked secret expression.
+- **Login rate limiting**: per-IP sliding-window limiter on `/api/auth/login`
+  (env `NOVACRON_LOGIN_RATE_LIMIT`/`_WINDOW_S`/`_TRUSTED_PROXIES`; default
+  10/5min; 0 disables; 7 tests incl. race + forged-XFF cases). Token-log audit
+  came back clean.
+- **Per-node fabric credentials**: `NOVACRON_NODE_SECRETS`
+  (`node-id=secret,...`) layered over the cluster secret — a leaked node can no
+  longer impersonate any configured node; empty map preserves today's behavior.
+  12 new tests; existing join/migration tests unchanged and green.
+- **Dead code removed**: 33 files / 25,751 lines (backend/business, corporate,
+  competitive, partners, ecosystem, sustainability, sales, enterprise/billing,
+  six `main_*.go` alternate binaries) with grep-verified zero reachable imports
+  into the canonical binary; 4 already-noncompiling test files removed.
+- **Deployment scaffold**: `deploy/` (hardened systemd units — no MemoryMax
+  OOM trap, no phantom AppArmor profile, ReadWritePaths for storage; no
+  CAP_SYS_ADMIN because the KVM driver uses `-netdev user`/SLIRP),
+  install/join/backup/restore scripts, `deploy/README.md` with an honest
+  node-loss drill (no fabricated HA).
+- **Billing surface**: `/billing` frontend page reading the usage summary
+  (loading/error/empty states; 3 jest tests; build+lint+typecheck green).
+- **Docs**: README rewritten from verified state (117 lines, zero MLE-Star
+  residue).
+- **ai-engine**: requirements split (core boots on py3.13/arm64 in a clean
+  venv; 17 pytest green; lightgbm floor bumped to 4.6.0 for sklearn 1.9;
+  heavy ML libs split to requirements-ml.txt; pyod's torch dependency made
+  optional).
+
+### Verification (all run against the merged working tree this session)
+
+- `go build ./...` (backend + core), `go vet` on the changed packages: clean.
+- Canonical root test set (api-server, api/graphql, api/security,
+  api/websocket, pkg/config): green. `core/auth`: green.
+- New billing + auth-rate-limit tests green; CLI `go test ./...` green;
+  frontend `tsc` 0 errors, `next build` green.
+- Independent verifier (reviewer agent): 8 slices VERIFIED, 2 PARTIAL
+  (AIFix criterion wording — heavy libs still in core because core services
+  import them; OrgStamp registerMigratedDest stamps via COALESCE — verified by
+  re-reading the code). Remaining known residues: pyod-on-torch optional
+  detector; four `tests/` files delete-verified by hand here.
+
+### What was deliberately NOT done
+
+- No payment rails (Stripe/Lago) — no customer exists to bill; the metering
+  plane + rate card is the honest scope.
+- No false-failover accounting: the node-loss drill documents that a dead
+  node's guests do not auto-restart; the harness proves control-plane
+  reconciliation (interrupted rows, single-owner ground truth) instead.
+- fb8's archived-claims archive question untouched (user-approval-gated).
+
 ## Usage metering session — 2026-09-21 (billing foundation built and proven live)
 
 Implements the #1 actionable finding of the profitability research

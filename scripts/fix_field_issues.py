@@ -84,15 +84,6 @@ FIXES = [
         'var': 'altPrediction',
     },
 
-    # Fix type conversions
-    {
-        'file': 'backend/corporate/ma/evaluation.go',
-        'line': 1260,
-        'action': 'replace',
-        'old': 'target.Technology.CodebaseSize / 1000000',
-        'new': 'int(target.Technology.CodebaseSize / 1000000)',
-    },
-
     # Fix unknown struct fields
     {
         'file': 'backend/community/hackathons/innovation_engine.go',

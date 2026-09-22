@@ -1,4 +1,4 @@
-# Multi-stage Docker build for improved NovaCron API server
+# Multi-stage Docker build for the canonical NovaCron API server
 FROM golang:1.23-alpine AS builder
 
 # Install build dependencies
@@ -16,13 +16,13 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the improved API server
+# Build the canonical API server
 WORKDIR /app/backend/cmd/api-server
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags='-w -s -extldflags "-static"' \
     -a -installsuffix cgo \
-    -o api-server-improved \
-    main_improved.go
+    -o api-server \
+    .
 
 # Production stage
 FROM scratch
@@ -32,7 +32,7 @@ COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 # Copy the binary
-COPY --from=builder /app/backend/cmd/api-server/api-server-improved /api-server
+COPY --from=builder /app/backend/cmd/api-server/api-server /api-server
 
 # Set environment variables
 ENV TZ=UTC

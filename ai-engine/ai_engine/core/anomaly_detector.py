@@ -8,21 +8,23 @@ ensemble methods, statistical analysis, and deep learning approaches.
 import logging
 import asyncio
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.metrics import classification_report, f1_score, precision_recall_curve
-from pyod.models.lof import LOF
-from pyod.models.ocsvm import OCSVM
-from pyod.models.abod import ABOD
-from pyod.models.auto_encoder import AutoEncoder
 from scipy import stats
-import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+
+if TYPE_CHECKING:
+    # Optional heavy detector stack (requirements-ml.txt). Imported lazily at the
+    # point of use so a core-only install can still boot the API and serve the
+    # scikit-learn based detectors.
+    import tensorflow as tf
+    from pyod.models.auto_encoder import AutoEncoder
+    from pyod.models.lof import LOF
+    from pyod.models.ocsvm import OCSVM
 
 from ..models.base import BaseMLModel, ModelMetadata, ModelType, PredictionRequest, PredictionResponse
 from ..utils.metrics import MetricsCalculator
@@ -304,7 +306,9 @@ class AnomalyDetectionModel(BaseMLModel):
                                 X_val: Optional[np.ndarray], y_val: Optional[pd.Series],
                                 is_supervised: bool) -> Dict[str, float]:
         """Train ensemble of anomaly detectors."""
-        
+        from pyod.models.lof import LOF
+        from pyod.models.ocsvm import OCSVM
+
         metrics = {}
         
         # Isolation Forest
@@ -335,16 +339,23 @@ class AnomalyDetectionModel(BaseMLModel):
         )
         self._ocsvm_detector.fit(X_train)
         
-        # Autoencoder
+        # Autoencoder (pyod >= 2 backs this detector with torch, not keras, so it
+        # is optional in the same way as the LSTM detector below)
         logger.info("Training Autoencoder...")
-        self._autoencoder = AutoEncoder(
-            contamination=self._contamination_rate,
-            hidden_neurons=[128, 64, 32, 64, 128],
-            epochs=100,
-            batch_size=32,
-            verbose=0
-        )
-        self._autoencoder.fit(X_train)
+        try:
+            from pyod.models.auto_encoder import AutoEncoder
+
+            self._autoencoder = AutoEncoder(
+                contamination=self._contamination_rate,
+                hidden_neurons=[128, 64, 32, 64, 128],
+                epochs=100,
+                batch_size=32,
+                verbose=0
+            )
+            self._autoencoder.fit(X_train)
+        except ImportError as e:
+            logger.warning(f"Autoencoder detector unavailable ({e}); skipping it")
+            self._autoencoder = None
         
         # LSTM for time-series anomalies
         logger.info("Training LSTM detector...")
@@ -398,9 +409,12 @@ class AnomalyDetectionModel(BaseMLModel):
                 'upper_bound': q3 + 1.5 * iqr
             }
     
-    def _build_lstm_detector(self, input_dim: int) -> Optional[tf.keras.Model]:
+    def _build_lstm_detector(self, input_dim: int) -> "Optional[tf.keras.Model]":
         """Build LSTM model for time-series anomaly detection."""
         try:
+            from tensorflow.keras.layers import LSTM, Dense, Dropout
+            from tensorflow.keras.models import Sequential
+
             model = Sequential([
                 LSTM(64, return_sequences=True, input_shape=(1, input_dim)),
                 Dropout(0.2),
@@ -583,6 +597,8 @@ class AnomalyDetectionModel(BaseMLModel):
         # Load LSTM model if available
         if 'lstm_model_path' in model_data:
             try:
+                import tensorflow as tf
+
                 self._lstm_detector = tf.keras.models.load_model(model_data['lstm_model_path'])
             except Exception as e:
                 logger.warning(f"Failed to load LSTM model: {str(e)}")

@@ -42,7 +42,7 @@ api-build:
 
 # Database URL configuration
 DB_URL ?= postgres://postgres:postgres@localhost:5432/novacron?sslmode=disable
-DB_TEST_URL ?= postgres://postgres:postgres@localhost:5432/novacron_test?sslmode=disable
+DB_TEST_URL ?= postgres://postgres:postgres@localhost:11432/novacron_test?sslmode=disable
 
 # Run database migrations up
 db-migrate:
@@ -165,7 +165,7 @@ test-integration:
 	@echo "Running integration tests..."
 	docker run --rm -v $(PWD):/app -w /app \
 		--network host \
-		-e DB_URL="postgresql://postgres:postgres@localhost:5432/novacron_test" \
+		-e DB_URL="postgresql://postgres:postgres@localhost:11432/novacron_test" \
 		-e REDIS_URL="redis://localhost:6379" \
 		golang:1.19 go test ./backend/tests/integration/... -v -timeout 10m
 

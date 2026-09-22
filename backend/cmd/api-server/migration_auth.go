@@ -2,31 +2,27 @@
 
 package main
 
-import (
-	"crypto/subtle"
-	"net/http"
-	"os"
-)
+import "net/http"
 
-// migrationAuthOK enforces the shared-secret check that gates every
-// /internal/migrate/* handler (currently just the incoming-migration target
-// endpoint in registerInternalMigrationRoutes). It FAILS CLOSED: with no
-// NOVACRON_MIGRATION_SECRET configured, no request is authorized. A node
-// with no configured migration secret does not accept incoming migrations --
-// correct for a single-node deployment, which never receives them. Without
-// this, any peer able to reach the api-server port could POST an
-// attacker-controlled IncomingMigrationRequest and make the node launch an
-// arbitrary qemu process (pre-auth RCE-class).
+// migrationAuthOK enforces the credential check that gates every
+// /internal/migrate/* handler (the incoming-migration target endpoint and the
+// abort endpoint in registerInternalMigrationRoutes). It FAILS CLOSED: with
+// neither NOVACRON_MIGRATION_SECRET nor a NOVACRON_NODE_SECRETS entry for this
+// node configured, no request is authorized. A node with no configured
+// credential does not accept incoming migrations -- correct for a single-node
+// deployment, which never receives them. Without this, any peer able to reach
+// the api-server port could POST an attacker-controlled
+// IncomingMigrationRequest and make the node launch an arbitrary qemu process
+// (pre-auth RCE-class).
 //
-// When a secret IS configured, the caller must present a matching
-// X-Migration-Secret header; the comparison runs in constant time via
-// crypto/subtle.ConstantTimeCompare so a mismatch can't be timed to recover
-// the secret byte by byte.
+// The check itself lives in internalAuthOK (cluster_join.go), so every inbound
+// node-to-node RPC shares one implementation: it accepts THIS node's own
+// per-node credential when NOVACRON_NODE_SECRETS configures one, plus the
+// fabric-wide NOVACRON_MIGRATION_SECRET while the fabric is mid-rollout, and
+// compares in constant time via crypto/subtle so a mismatch can't be timed to
+// recover the secret byte by byte. The caller must present the credential in
+// the X-Migration-Secret header; with NOVACRON_NODE_SECRETS unset this is
+// exactly the previous single-secret behaviour.
 func migrationAuthOK(r *http.Request) bool {
-	secret := os.Getenv("NOVACRON_MIGRATION_SECRET")
-	if secret == "" {
-		return false
-	}
-	provided := r.Header.Get("X-Migration-Secret")
-	return subtle.ConstantTimeCompare([]byte(secret), []byte(provided)) == 1
+	return internalAuthOK(r)
 }

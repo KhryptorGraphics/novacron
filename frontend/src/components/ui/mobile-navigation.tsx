@@ -19,7 +19,9 @@ import {
   LogOut,
   ChevronRight,
   Moon,
-  Sun, Share2} from 'lucide-react';
+  Sun,
+  Share2,
+  Receipt} from 'lucide-react';
 import { Button } from './button';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -68,6 +70,12 @@ const navigationItems = [
     href: '/fabric',
     icon: Share2,
     description: 'Peer fabric: nodes, jobs, transfers'
+  },
+  {
+    name: 'Billing',
+    href: '/billing',
+    icon: Receipt,
+    description: 'Metered usage and estimated cost'
   },
   {
     name: 'Storage',

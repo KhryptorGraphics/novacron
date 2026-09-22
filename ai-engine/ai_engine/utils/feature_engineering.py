@@ -12,9 +12,6 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from scipy import stats
-from tsfresh import extract_features
-from tsfresh.feature_extraction import ComprehensiveFCParameters
-from tsfresh.utilities.dataframe_functions import impute
 
 
 logger = logging.getLogger(__name__)
@@ -25,7 +22,9 @@ class TimeSeriesFeatureExtractor:
     
     def __init__(self):
         """Initialize time-series feature extractor."""
-        self.fc_parameters = ComprehensiveFCParameters()
+        # tsfresh ships in requirements-ml.txt and is imported on first use, so
+        # this extractor can be constructed from a core-only install.
+        self.fc_parameters: Optional[Any] = None
         self._scaler = StandardScaler()
     
     def extract_features(self, df: pd.DataFrame, column_id: str = 'node_id', 
@@ -42,6 +41,13 @@ class TimeSeriesFeatureExtractor:
             DataFrame with extracted features
         """
         try:
+            from tsfresh import extract_features
+            from tsfresh.feature_extraction import ComprehensiveFCParameters
+            from tsfresh.utilities.dataframe_functions import impute
+
+            if self.fc_parameters is None:
+                self.fc_parameters = ComprehensiveFCParameters()
+
             # Ensure we have the required columns
             if column_id not in df.columns:
                 df[column_id] = 'default_id'

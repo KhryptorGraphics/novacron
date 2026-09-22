@@ -1,5 +1,5 @@
-# Simple single-stage Docker build for improved NovaCron API server
-FROM golang:1.23-alpine AS builder
+# Simple single-stage Docker build for the canonical NovaCron API server
+FROM golang:1.25-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata
@@ -7,19 +7,19 @@ RUN apk add --no-cache git ca-certificates tzdata
 # Set working directory
 WORKDIR /app
 
-# Copy the specific main file and build it directly
-COPY backend/cmd/api-server/main_improved.go .
+# Copy go mod and sum files (sdk/ is a module-replacement target of go.mod)
+COPY go.mod go.sum ./
+COPY sdk/go/go.mod sdk/go/go.sum ./sdk/go/
 
-# Initialize a simple module for this specific build
-RUN go mod init novacron-api-simple && \
-    go get github.com/gorilla/mux@latest
+# Copy backend directory first (needed for module replacement)
+COPY sdk ./sdk
+COPY backend ./backend
 
-# Build the improved API server
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags='-w -s -extldflags "-static"' \
-    -a -installsuffix cgo \
-    -o api-server-simple \
-    main_improved.go
+# Download dependencies
+RUN go mod download
+
+# Build the canonical API server
+RUN CGO_ENABLED=0 GOOS=linux go build -a -o api-server-simple ./backend/cmd/api-server
 
 # Production stage
 FROM scratch

@@ -17,8 +17,6 @@ from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, roc_auc_score
 import xgboost as xgb
-from tsfresh import extract_features, select_features
-from tsfresh.utilities.dataframe_functions import impute
 
 from ..models.base import BaseMLModel, ModelMetadata, ModelType, PredictionRequest, PredictionResponse
 from ..utils.metrics import MetricsCalculator
@@ -196,7 +194,9 @@ class FailurePredictionModel(BaseMLModel):
     
     def _select_features(self, X: pd.DataFrame, y: pd.Series) -> Tuple[np.ndarray, np.ndarray]:
         """Select most informative features."""
-        # Use tsfresh feature selection
+        # Use tsfresh feature selection (tsfresh ships in requirements-ml.txt)
+        from tsfresh import select_features
+
         features_filtered = select_features(X, y)
         selected_indices = [X.columns.get_loc(col) for col in features_filtered.columns]
         

@@ -29,7 +29,8 @@ RUN groupadd -r aiengine && useradd -r -g aiengine aiengine
 WORKDIR /app
 
 # Copy requirements first for better caching
-COPY requirements.txt .
+# (requirements.txt includes requirements-{core,ml,dev}.txt, so all four ship)
+COPY requirements*.txt ./
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt

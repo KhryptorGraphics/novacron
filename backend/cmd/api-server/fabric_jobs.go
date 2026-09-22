@@ -203,7 +203,12 @@ func submitFabricJob(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManag
 	}
 
 	// The job's VM is created with the Process driver (Command non-empty), on
-	// the selected node: local create, or dispatch RPC to the peer.
+	// the selected node: local create, or dispatch RPC to the peer. The
+	// submitting identity's org (requireAuth's organization_id context value --
+	// this is called with r.Context()) rides with the VM either way, so the
+	// job_seconds/vcpu_seconds metered off it attribute to the org that
+	// submitted the work instead of falling back to the default org.
+	submitterOrg, _ := ctx.Value("organization_id").(string)
 	createSpec := clusterCreateSpec{
 		Name:     fabricJobName(spec, jobID),
 		MemoryMB: spec.MemoryMB,
@@ -212,6 +217,8 @@ func submitFabricJob(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManag
 		Args:     spec.Args,
 		Env:      spec.Env,
 		Tags:     map[string]interface{}{"fabric_job_id": jobID},
+
+		OrganizationID: orgLabelForVM(submitterOrg),
 	}
 
 	var vmID string
@@ -223,7 +230,9 @@ func submitFabricJob(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManag
 		}
 		_ = state
 	} else {
-		out, derr := dispatchCreateToPeer(node.Addr, createSpec)
+		// As (not the cluster-secret-only wrapper): the job lands on a KNOWN
+		// node, and that peer's gate expects its own credential.
+		out, derr := dispatchCreateToPeerAs(node.NodeID, node.Addr, createSpec)
 		if derr != nil {
 			return nil, nil, fmt.Errorf("failed to dispatch job to %s: %w", node.NodeID, derr)
 		}

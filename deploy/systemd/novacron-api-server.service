@@ -1,0 +1,83 @@
+[Unit]
+Description=NovaCron control-plane API (api-server)
+Documentation=file:///opt/novacron/deploy/README.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+# StartLimit* belong to [Unit] (systemd >= 229); listed under [Service] they are
+# ignored, so a crash-looping unit would retry forever instead of backing off.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=novacron
+Group=novacron
+# qemu-system-* runs as a child of this unit: it opens /dev/kvm, which every
+# distro ships as root:kvm 0660, so the unit needs the kvm group.
+SupplementaryGroups=kvm
+WorkingDirectory=/opt/novacron
+# Role defaults. EnvironmentFile entries win over Environment= entries, so an
+# operator can move the ports without editing the unit.
+Environment=API_PORT=8090
+Environment=WS_PORT=8091
+# Written by deploy/scripts/install-node.sh (0600 root:root — systemd reads it
+# as root and passes the variables to the service): DB_URL, AUTH_SECRET,
+# NOVACRON_MIGRATION_SECRET, NOVACRON_NODE_ID, STORAGE_PATH, NOVACRON_JOIN_ADDR.
+EnvironmentFile=/etc/novacron/novacron.env
+# Installed by deploy/scripts/install-node.sh (built from ./backend/cmd/api-server).
+# The path matches apparmor/novacron-api, which confines exactly this binary.
+ExecStart=/opt/novacron/bin/api-server
+
+# --- hardening that holds for this workload ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+# ProtectSystem=strict makes /var read-only as well, so the VM disk roots (and
+# the file-log sink, when LOG_OUTPUT points at one) must be listed explicitly.
+ReadWritePaths=/var/lib/novacron /var/log/novacron
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Only CAP_NET_BIND_SERVICE: the default API ports are unprivileged, but keeping
+# this one lets an operator move the API to 443 without editing the unit. The
+# bounding set is inherited by every child, so it is also what guarantees a
+# fabric job or a qemu process can never hold a capability we did not name.
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# --- deliberately absent, each for a reason (see deploy/README.md) ---
+# MemoryMax= / CPUQuota=: qemu children stay in this unit's cgroup, so any limit
+#   sized for the API process throttles or OOM-kills the guests it runs. Cap
+#   guests through per-VM configuration, not through the control plane's unit.
+# PrivateDevices=yes: would hide /dev/kvm from those children.
+# MemoryDenyWriteExecute=yes: qemu's TCG path (no /dev/kvm) JITs guest code.
+# AppArmorProfile=: systemd fails the start unless the profile is already
+#   loaded in the kernel. Load apparmor/novacron-api (it names
+#   /opt/novacron/bin/api-server) and opt in with a drop-in instead.
+# SystemCallFilter= / RestrictAddressFamilies=: qemu's device and network paths
+#   need a wider surface than can be verified on real guests here.
+# ExecReload=: the server handles SIGTERM/SIGINT only, so `kill -HUP` would kill
+#   it and let Restart= bring it back — reload is `systemctl restart`.
+
+LimitNOFILE=65536
+TasksMax=16384
+# Must exceed SHUTDOWN_TIMEOUT (30s default) so the drain finishes before
+# systemd escalates to SIGKILL.
+TimeoutStopSec=45
+Restart=on-failure
+RestartSec=5
+# control-group: a stop/restart also stops the qemu children this unit started.
+# Leaving them behind (KillMode=process) would put guests outside systemd's
+# supervision; qemu that outlives a crash is re-adopted by the reconcile paths
+# in the api-server on the next start.
+KillMode=control-group
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=novacron-api
+
+[Install]
+WantedBy=multi-user.target
