@@ -121,3 +121,4 @@ graphify-out/
 .memdb/
 frontend/coverage/
 ruvector.db
+.memtrace/
