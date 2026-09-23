@@ -271,10 +271,13 @@ func vcpusOrDefault(vcpus int) int {
 // actually resolve the id is decided by createVMLocal's INSERT.
 func orgLabelForVM(raw string) string {
 	org := strings.TrimSpace(raw)
-	if _, err := uuid.Parse(org); err != nil {
+	if u, err := uuid.Parse(org); err != nil {
 		return ""
+	} else {
+		// Canonical (lowercase, dashed) form so a claim compares textually
+		// equal to the value postgres stores/returns for the uuid column.
+		return u.String()
 	}
-	return org
 }
 
 // createVMLocal provisions a VM on THIS node (manager create + DB row) and returns
@@ -422,6 +425,10 @@ func clusteredCreateHandler(db *sql.DB, vmManager *core_vm.VMManager, storagePat
 			MemoryMB   int                    `json:"memory_mb,omitempty"`
 			DiskSizeGB int                    `json:"disk_size_gb,omitempty"`
 			Image      string                 `json:"image,omitempty"`
+			// OrganizationID is advisory for admins ONLY (they may provision
+			// into a named org); for everyone else the JWT claim owns the org
+			// and a mismatching body value is a 403, not an override.
+			OrganizationID string `json:"organization_id,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid request body")
@@ -450,6 +457,19 @@ func clusteredCreateHandler(db *sql.DB, vmManager *core_vm.VMManager, storagePat
 		// tokens carry labels like "default", which the uuid column cannot hold.
 		orgID, _ := r.Context().Value("organization_id").(string)
 		orgID = orgLabelForVM(orgID)
+		// Tenancy: the claim owns the org. A non-admin body organization_id
+		// may only CONFIRM the claimed org (after normalization); anything
+		// else is a cross-org provisioning attempt (403). Admins pass and may
+		// provision into an explicitly named org.
+		if bodyOrg := strings.TrimSpace(req.OrganizationID); bodyOrg != "" {
+			role, _ := r.Context().Value("role").(string)
+			if role == "admin" || role == "super-admin" {
+				orgID = orgLabelForVM(bodyOrg)
+			} else if orgLabelForVM(bodyOrg) != orgID {
+				writeJSONError(w, http.StatusForbidden, "organization_id must match your organization")
+				return
+			}
+		}
 		spec := clusterCreateSpec{
 			Name: req.Name, VCPUs: req.VCPUs, CPUShares: req.CPUShares, MemoryMB: req.MemoryMB,
 			DiskSizeGB: req.DiskSizeGB, Image: req.Image, Tags: req.Tags,

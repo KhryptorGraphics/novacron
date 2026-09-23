@@ -48,6 +48,11 @@ type canonicalServices struct {
 	shutdown         func()
 }
 
+// restartSupervisor is package-level because route registration happens inside
+// registerSecureAPIRoutes (a separate function called by main) — handlers
+// check this pointer (never nil from within a running server).
+var restartSupervisor *core_vm.RestartSupervisor
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -86,6 +91,12 @@ func main() {
 	defer services.shutdown()
 
 	vmManager := newVMManager(cfg)
+
+	// PATH-3: watch for actions that crash the process and restart them per
+	// tenant policy (default on_failure). Supervisor polls at 5s; a failed VM
+	// is restared from its recorded config (see 000012_vm_restart_state).
+	restartSupervisor = core_vm.NewRestartSupervisor(vmManager, db, 5*time.Second)
+	restartSupervisor.Start(context.Background())
 
 	// GATE-1: reconcile persisted VM rows against actually-running qemu processes
 	// (pidfile rediscovery) so a restart reflects reality, not just stale rows.
@@ -140,6 +151,10 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+
+	if restartSupervisor != nil {
+		restartSupervisor.Stop() // stop watcher cleanly before the manager itself goes down
+	}
 
 	appLogger.Info("Shutting down server...")
 
@@ -203,6 +218,10 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	// Fabric transfers (P3/G3): admission-controlled migrations with the
 	// measured link budget + compression decision recorded per transfer.
 	registerFabricTransferRoutes(apiRouter, db, vmManager, vmBasePath(cfg))
+
+	// Node lifecycle (drain): per-node detail + POST drain, which moves every
+	// drainable VM off the node through the transfer machinery above.
+	registerNodeAdminRoutes(apiRouter, db, vmManager, vmBasePath(cfg))
 
 	// Usage-metered billing read API (PR-1): measured egress, migrations, job
 	// seconds, vCPU-seconds per org; metering data comes from the fabric and
@@ -828,28 +847,92 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 	}).Methods(http.MethodPost)
 }
 
+// requireOrgScope resolves the tenancy scope of the authenticated caller from
+// the verified JWT claims requireAuth put on the request context and -- when
+// db and vmID are both given -- authorizes that one VM against it.
+//
+// SEMANTIC: the org filter HIDES EXISTENCE. A VM (or fabric job) outside the
+// caller's scope does not exist for them: single-resource reads answer 404
+// (never 403), lists omit it entirely, and writes act as if the row were
+// absent -- the API must never confirm that an id belongs to another org.
+// Callers therefore treat visible=false as "respond 404", indistinguishable
+// from the row genuinely not existing.
+//
+//   - admin/super-admin roles pass unscoped (isAdmin=true, orgID=""): they see
+//     and act on every org, and NO query is issued for them -- row-level
+//     visibility for an admin falls out of the caller's own lookup, keeping
+//     the unscoped statements byte-identical to the pre-hardening queries.
+//   - every other caller is scoped: orgID is the normalized uuid
+//     organization_id claim (orgLabelForVM). A legacy/non-uuid tenant label
+//     (or no claims at all, e.g. a handler invoked without the middleware)
+//     normalizes to "" and scopes to NULL-organization rows -- exactly the
+//     rows such a caller's own creates stamp, and never another org's rows.
+//   - with db+vmID set, a scoped caller's check is one indexed existence
+//     probe (`SELECT EXISTS ... AND <org predicate>`), used where a decision
+//     must be made BEFORE touching the real VM (delete) or where no row
+//     payload is needed. Statement-level callers instead fold the same
+//     predicate into their own query and pass (nil, "").
+func requireOrgScope(ctx context.Context, db *sql.DB, vmID string) (orgID string, isAdmin bool, visible bool) {
+	role, _ := ctx.Value("role").(string)
+	if role == "admin" || role == "super-admin" {
+		return "", true, true
+	}
+	claim, _ := ctx.Value("organization_id").(string)
+	orgID = orgLabelForVM(claim)
+	if db == nil || vmID == "" {
+		return orgID, false, true // scope resolution only
+	}
+	var exists bool
+	var err error
+	if orgID != "" {
+		err = db.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM vms WHERE id = $1 AND organization_id = $2)`,
+			vmID, orgID).Scan(&exists)
+	} else {
+		err = db.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM vms WHERE id = $1 AND organization_id IS NULL)`,
+			vmID).Scan(&exists)
+	}
+	if err != nil {
+		return orgID, false, false // a failed probe must fail closed (404)
+	}
+	return orgID, false, exists
+}
+
+// orgVisible reports whether a vms row carrying rowOrg falls inside the
+// caller's scope: a uuid scope matches rows stamped with that same org, and
+// the legacy/NULL scope matches rows whose organization_id is NULL.
+func orgVisible(scopeOrg string, rowOrg sql.NullString) bool {
+	if scopeOrg == "" {
+		return !rowOrg.Valid || rowOrg.String == ""
+	}
+	return rowOrg.Valid && rowOrg.String == scopeOrg
+}
+
 func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager, storagePath string) {
 	router.HandleFunc("/vms", func(w http.ResponseWriter, r *http.Request) {
 		// Org filtering: admin/super-admin roles see everything; everyone else
-		// only sees VMs whose org matches the user context's organization_id.
-		// This is still soft — it prevents cross-org data leaks in the UI; a
-		// hard-enforcement layer (row-level security in Postgres RLS) is a
-		// separate bead (novacron-ok7).
-		orgID, _ := r.Context().Value("organization_id").(string)
-		isAdmin := false
-		if role, ok := r.Context().Value("role").(string); ok {
-			isAdmin = role == "admin" || role == "super-admin"
-		}
+		// is scoped by requireOrgScope. VMs outside the caller's scope are
+		// INVISIBLE, not denied (see requireOrgScope's 404-hides-existence
+		// semantics); defense-in-depth RLS remains a separate bead (novacron-ok7).
+		scopeOrg, isAdmin, _ := requireOrgScope(r.Context(), nil, "")
 
-		// Unfiltered path stays byte-identical to the pre-org query so
-		// existing callers (and mocks) are unaffected; the filtered path is
-		// a distinct statement only when a non-admin org scope is present.
+		// Unfiltered (admin) and uuid-org statements stay byte-identical to
+		// the pre-org queries so existing callers (and mocks) are unaffected.
+		// The NULL-org variant is the legacy/claim-less scope: those callers
+		// see only unattributed rows, never another org's. (This also fixes a
+		// live bug: the old code passed a non-uuid tenant label like
+		// "default" into `organization_id = $1`, which Postgres rejects --
+		// uuid has no text equality operator -- 500ing every legacy list.)
 		var rows *sql.Rows
 		var err error
-		if orgID != "" && !isAdmin {
-			rows, err = db.Query(`SELECT id, name, state, node_id, organization_id, cpu_cores, memory_mb, disk_gb, created_at, updated_at FROM vms WHERE organization_id = $1 ORDER BY created_at DESC`, orgID)
-		} else {
+		switch {
+		case isAdmin:
 			rows, err = db.Query(`SELECT id, name, state, node_id, organization_id, cpu_cores, memory_mb, disk_gb, created_at, updated_at FROM vms ORDER BY created_at DESC`)
+		case scopeOrg != "":
+			rows, err = db.Query(`SELECT id, name, state, node_id, organization_id, cpu_cores, memory_mb, disk_gb, created_at, updated_at FROM vms WHERE organization_id = $1 ORDER BY created_at DESC`, scopeOrg)
+		default:
+			rows, err = db.Query(`SELECT id, name, state, node_id, organization_id, cpu_cores, memory_mb, disk_gb, created_at, updated_at FROM vms WHERE organization_id IS NULL ORDER BY created_at DESC`)
 		}
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to query VMs")
@@ -916,6 +999,16 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 			return
 		}
 
+		// Tenancy: a VM outside the caller's org scope is invisible -- 404,
+		// exactly as if the id did not exist (see requireOrgScope). The row
+		// was already loaded, so the decision is made against rowOrg instead
+		// of a second probe.
+		scopeOrg, isAdmin, _ := requireOrgScope(r.Context(), nil, "")
+		if !isAdmin && !orgVisible(scopeOrg, orgID) {
+			writeJSONError(w, http.StatusNotFound, "vm not found")
+			return
+		}
+
 		state = liveVMState(vmManager, id, state)
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -936,6 +1029,17 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 	router.HandleFunc("/vms/{id}", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["id"]
 
+		// Tenancy: decide visibility BEFORE the manager is allowed to touch
+		// the real guest -- a scoped caller probing another org's id stops a
+		// live VM otherwise. A cross-org VM answers 404 (never 403) as if it
+		// did not exist, and the DELETE carries the same org predicate so a
+		// race between probe and delete cannot delete out of scope either.
+		scopeOrg, isAdmin, visible := requireOrgScope(r.Context(), db, vmID)
+		if !visible {
+			writeJSONError(w, http.StatusNotFound, "vm not found")
+			return
+		}
+
 		// Stop + remove the real VM (qemu) before dropping metadata.
 		if vmManager != nil {
 			if _, err := vmManager.GetVM(vmID); err == nil {
@@ -948,7 +1052,17 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 			}
 		}
 
-		result, err := db.Exec(`DELETE FROM vms WHERE id = $1`, vmID)
+		var result sql.Result
+		var err error
+		switch {
+		case isAdmin:
+			// Byte-identical to the pre-hardening statement.
+			result, err = db.Exec(`DELETE FROM vms WHERE id = $1`, vmID)
+		case scopeOrg != "":
+			result, err = db.Exec(`DELETE FROM vms WHERE id = $1 AND organization_id = $2`, vmID, scopeOrg)
+		default:
+			result, err = db.Exec(`DELETE FROM vms WHERE id = $1 AND organization_id IS NULL`, vmID)
+		}
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to delete VM")
 			return
@@ -1338,8 +1452,14 @@ func registerVMPowerRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.VMM
 		var err error
 		if action == "start" {
 			err = vmManager.StartVM(ctx, vmID)
+			if err == nil && restartSupervisor != nil {
+				restartSupervisor.RecordStart(ctx, vmID) // declare to the supervisor: this VM runs now
+			}
 		} else {
 			err = vmManager.StopVM(ctx, vmID)
+			if err == nil && restartSupervisor != nil {
+				restartSupervisor.RecordStop(ctx, vmID) // not crashed — an intentional stop (never restarted under policy=always)
+			}
 		}
 		if err != nil {
 			writeJSONError(w, vmActionStatus(err), fmt.Sprintf("failed to %s VM: %v", action, err))
@@ -1453,7 +1573,7 @@ func registerInternalMigrationRoutes(router *mux.Router, db *sql.DB, vmManager *
 					cleanupOrphanedIncoming(kd, req.VMID, destDir)
 					return
 				}
-				registerMigratedDest(db, vmManager, req.VMID, req.Config, req.TargetNodeID)
+				registerMigratedDest(db, vmManager, req.VMID, req.Config, req.TargetNodeID, req.OrganizationID)
 			}()
 			writeJSON(w, http.StatusOK, core_vm.IncomingMigrationResponse{Port: port, NBDURI: nbdURI})
 			return
@@ -1471,7 +1591,7 @@ func registerInternalMigrationRoutes(router *mux.Router, db *sql.DB, vmManager *
 				cleanupOrphanedIncoming(kd, req.VMID, destDir)
 				return
 			}
-			registerMigratedDest(db, vmManager, req.VMID, req.Config, req.TargetNodeID)
+			registerMigratedDest(db, vmManager, req.VMID, req.Config, req.TargetNodeID, req.OrganizationID)
 		}()
 
 		writeJSON(w, http.StatusOK, core_vm.IncomingMigrationResponse{Port: port})
@@ -1524,11 +1644,21 @@ func freeMigrationPort() (int, error) {
 // ponytail: does not re-increment this node's resource accounting for the
 // migrated-in VM (AddVM is a pure map add) -- a minor dest-quota under-count,
 // revisited when migration owns accounting end-to-end.
-func registerMigratedDest(db *sql.DB, manager *core_vm.VMManager, vmID string, cfg core_vm.VMConfig, nodeID string) {
+// registerMigratedDest persists a migrated VM into the destination node's
+// manager and vms table. OrganizationID comes from the incoming-migration
+// wire field OR from VMConfig.OrganizationID — without it the migrated row
+// has NULL organization and is invisible to the destination's scoped
+// listings (only admins see it), defeating cross-node tenant placement.
+func registerMigratedDest(db *sql.DB, manager *core_vm.VMManager, vmID string, cfg core_vm.VMConfig, nodeID string, orgID string) {
 	if manager == nil {
 		return
 	}
 	cfg.ID = vmID
+	// Fold the wire-level request field (explicit preference) into the config so
+	// the SQL INSERT reads from one place, not two.
+	if orgID == "" && cfg.OrganizationID != "" {
+		orgID = cfg.OrganizationID
+	}
 	vm, err := core_vm.NewVM(cfg)
 	if err != nil {
 		logger.Warn("migrated-VM register skipped: rebuild failed", "vm", vmID, "error", err)
@@ -1569,20 +1699,16 @@ func registerMigratedDest(db *sql.DB, manager *core_vm.VMManager, vmID string, c
 		"image":        cfg.Image,
 	})
 	if _, err := db.Exec(`
-		INSERT INTO vms (id, name, state, cpu_cores, memory_mb, disk_gb, os_type, node_id, owner_id, requested_owner_id, metadata, created_at, updated_at)
-		VALUES ($1, $2, 'running', $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, '')::uuid, NULLIF($9, '')::uuid, $10, NOW(), NOW())
+		INSERT INTO vms (id, name, state, cpu_cores, memory_mb, disk_gb, os_type, node_id, owner_id, requested_owner_id, metadata, organization_id, created_at, updated_at)
+		VALUES ($1, $2, 'running', $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, '')::uuid, NULLIF($9, '')::uuid, $10, NULLIF($11, '')::uuid, NOW(), NOW())
 		ON CONFLICT (id) DO UPDATE SET
 			state = 'running', node_id = EXCLUDED.node_id, owner_id = EXCLUDED.owner_id,
 			requested_owner_id = EXCLUDED.requested_owner_id, metadata = EXCLUDED.metadata,
-			-- organization_id is deliberately absent from the INSERT column list:
-			-- the migration wire (IncomingMigrationRequest) carries no org and the
-			-- source deletes its row at cutover, so the destination cannot know it
-			-- -- but this UPSERT is idempotent, and a re-registration must never
-			-- wipe an org the row already carries (EXCLUDED is NULL here, so
-			-- COALESCE keeps ours). An unattributed migrated row falls back to the
-			-- default org in usageOrgForVM, never to a made-up one.
+			-- org passes source->dest via the migrate wire (novacron-wot): the
+			-- destination stamps org from the IncomingMigrationRequest so a
+			-- migrated VM lands inside its owner's org scope, never invisible.
 			organization_id = COALESCE(EXCLUDED.organization_id, vms.organization_id), updated_at = NOW()
-	`, vmID, cfg.Name, vcpusOrDefault(cfg.VCPUs), cfg.MemoryMB, cfg.DiskSizeGB, nullableStringValue(cfg.Image), nodeID, ownerString(owner), ownerString(requestedOwner), configPayload); err != nil {
+	`, vmID, cfg.Name, vcpusOrDefault(cfg.VCPUs), cfg.MemoryMB, cfg.DiskSizeGB, nullableStringValue(cfg.Image), nodeID, ownerString(owner), ownerString(requestedOwner), configPayload, orgID); err != nil {
 		logger.Warn("migrated-VM DB register failed", "vm", vmID, "error", err)
 		return
 	}
@@ -1798,7 +1924,7 @@ func reconcileOrphanedMigrationDests(db *sql.DB, vmBase string, manager *core_vm
 		}
 		cfg.ID = id
 		logger.Warn("adopting an orphaned migration destination with no DB row (its registerMigratedDest goroutine likely died with a prior api-server process)", "vm", id)
-		registerMigratedDest(db, manager, id, cfg, selfNodeID())
+		registerMigratedDest(db, manager, id, cfg, selfNodeID(), cfg.OrganizationID)
 	}
 }
 

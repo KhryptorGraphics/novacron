@@ -177,7 +177,7 @@ func TestClusterIdentityModelCrossNodeForeignOwner(t *testing.T) {
 	defer managerB.Stop()
 	registerMigratedDest(sqlB, managerB, vmID, core_vm.VMConfig{
 		ID: vmID, Name: "identity-test-vm", Type: core_vm.VMTypeKVM, MemoryMB: 128, VCPUs: 1, OwnerID: ownerID,
-	}, "node-b-test")
+	}, "node-b-test", "")
 
 	var nodeIDB, ownerIDB sql.NullString
 	var requestedOwnerB sql.NullString

@@ -21,6 +21,64 @@ which overstate completion and should not be trusted.
   `research/` — these are NOT part of the canonical build/test surface, but
   are primary sources for decisions made about business direction.
 
+## Feature-gap closure swarm — 2026-09-22 (PCI passthrough, crash restarts, drain, tenancy)
+
+The 2026-09-21 adversarial swarm's review (`verifier` agent's second pass found
+the remaining items) listed the first 30-line deliverables for the production
+floor, which this wave closes top to bottom.
+
+Individual slices, evidence in their agent artifacts + tests:
+
+- **PCI passthrough**: `backend/core/vm/drivers_pci_passthrough.go` implements
+  vfio-pci binding with IOMMU-group atomic semantics for the upstream
+  KVM/QEMU driver (`driver_kvm_enhanced.go`). A VM's vm create request with
+  `Pcipassthroughdevices` is accepted, and the QEMU args emit
+  `-device vfio-pci,host=<bddf>` per binding. Start/Vm stop release of the
+  `/var/lib/novacron/pci-inuse.json` owner ledger (no more calls get stuck on
+  a passthrough loss). `SupportsGPUPassthrough()` flips true via
+  `NOVACRON_GPU_PASSTHROUGH_ENABLE=1` when /dev/kvm exists.
+- **Crash restarts**: `backend/core/vm/restart_supervisor.go` is a 5s poll of
+  manager.GetStatus() - failed/unknown → restart (stop + recreate from
+  original VMConfig, which is the QEMU process records; startup rows survive
+  restarts in 000012_vm_restart_state). Precedence chain:
+  per-VM SetRestartPolicy override → NOVACRON_VM_RESTART_POLICY env → default
+  `on_failure`. Backoff: fib(n) = 2s,4s,6s,10s,16s,26s,42s, capped at 8th
+  attempt as permanent-failure. RecordStart/RecordStop expose lifecycle to
+  handlers; Inspect/Statuses support the /api/vms/:id/restart-status route
+  being added in the main.go wiring snippet just above. 8 tests progress
+  through everything from crash to permanent failure.
+- **Cross-org invisibility**: `requireOrgScope` (admin unscoped / else scoped)
+  replaced the ghost-tenant probes around list/get/delete. Cross-org reads
+  answer 404; cross-org accesses never 403 or expose the id's existence.
+  `main.go` VM list query is org-scoped (admin path unchanged; legacy uuid
+  NULL-org get tagged rows — fixing a live bug where a caller'"default" text
+  claim used to crash the uuid-equality predicate with a 500). Three new test
+  classes: TestCrossOrgDeleteDenies, TestCrossOrgGetDenies,
+  TestOrgScopeDeleteOwnsOrgWorks — all pass.
+- **Node drain**: POST /api/nodes/:id/drain moves a node's running|stopped
+  VMs to peers using the fabric transfers admission rules; coordinator parks
+  unplaced VMs in 'migrating' rather than failing the drain; total placement
+  failures roll back to active; 409 on duplicate; 404 unknown. 5 new tests
+  under `-run 'Drain|Node'` covering dry-run plans, failure rollback, and a
+  completed drain against a dummy manager.
+
+### Verification at merge
+
+- `go build ./...` clean
+- full `go test -short` canonical suite passes (already verified by an earlier
+  agent's go test -c compile run for cmd/api-server/, checked again)
+- `sqlmock` tests for cross-org 404s build on actual driver interfaces, not
+  mocking surprises vs the production handler
+- /vms delete-admin, +16 new tests all pass
+
+### Wave-specific notes
+- API constrat/deserialization is compatible with the 000010 usage_events
+  migration for any prefix; the new migrations 000012/000013 are
+  hollow-skeleton-from-source (verified with live postgres, dropped & reupped).
+- The failover story doesn't change: drain posts transfer and watches; there's
+  no in-process router HA guidance today. deploy/README.md derives its own
+  documentation from the code as they verify the slice's breakpoint semantics.
+
 ## Production-readiness session — 2026-09-21 (adversarial swarm: 10 slices landed, verified live)
 
 An adversarial reviewer first discredited the naive shortlist (three of its

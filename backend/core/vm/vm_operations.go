@@ -949,6 +949,12 @@ type IncomingMigrationRequest struct {
 	// this destination). The dest records it as the migrated VM's node_id so its
 	// manager/DB list the guest under the right node after cutover.
 	TargetNodeID string `json:"target_node_id,omitempty"`
+
+	// OrganizationID carries the VM's owning organization to the destination
+	// so the migrated row keeps its tenant attribution across the fabric hop;
+	// without it, the dest row lands NULL-org'd and disappears from its own
+	// tenant under org scoping.
+	OrganizationID string `json:"organization_id,omitempty"`
 }
 
 // IncomingMigrationResponse returns the port the destination qemu is listening
@@ -988,11 +994,16 @@ func (m *VMManager) resolveMigrationURI(ctx context.Context, vm *VM, driver VMDr
 	if kd, ok := driver.(*KVMDriverEnhanced); ok {
 		destCfg = migrationDestConfig(vm.config, kd, vm.ID(), nil)
 	}
+	// Wire org: the VM row's org (validated non-NULL for any session this
+	// came through) trumps the config-side TenantID on the destination's
+	// register INSERT, so org follows the VM across the fabric hop.
+	orgID := vm.config.OrganizationID
 	port, err := requestIncomingMigration(ctx, addr, IncomingMigrationRequest{
-		VMID:         vm.ID(),
-		DiskPath:     info.RootFS,
-		Config:       destCfg,
-		TargetNodeID: targetNode,
+		VMID:           vm.ID(),
+		DiskPath:       info.RootFS,
+		Config:         destCfg,
+		TargetNodeID:   targetNode,
+		OrganizationID: orgID,
 	})
 	if err != nil {
 		return "", err

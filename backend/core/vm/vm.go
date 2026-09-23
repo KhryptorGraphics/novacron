@@ -92,6 +92,10 @@ type VMConfig struct {
 	Env                   map[string]string            `yaml:"env" json:"env"`
 	NetworkID             string                       `yaml:"network_id" json:"network_id"`
 	OwnerID               string                       `yaml:"owner_id,omitempty" json:"owner_id,omitempty"`
+	// OrganizationID carries the VM's org so a create that crosses a peer
+	// (/internal/vms/create or /internal/migrate/incoming) arrives at the far
+	// end with the same tenant stamp it started with (novacron-wot).
+	OrganizationID        string                       `yaml:"organization_id,omitempty" json:"organization_id,omitempty"`
 	TenantID              string                       `yaml:"tenant_id,omitempty" json:"tenant_id,omitempty"`
 	VolumeAttachments     []VMVolumeAttachment         `yaml:"volume_attachments,omitempty" json:"volume_attachments,omitempty"`
 	NetworkAttachments    []VMNetworkAttachment        `yaml:"network_attachments,omitempty" json:"network_attachments,omitempty"`
@@ -112,6 +116,12 @@ type VMConfig struct {
 	MemSlots    int           `yaml:"mem_slots,omitempty" json:"mem_slots,omitempty"`         // DIMM slots for memory hotplug (defaults to 2 when MaxMemoryMB set)
 	IOThreads   int           `yaml:"iothreads,omitempty" json:"iothreads,omitempty"`         // number of -object iothread; primary disk runs on iothread0
 	NUMA        *NUMATopology `yaml:"numa,omitempty" json:"numa,omitempty"`                   // guest NUMA topology (applied at launch; set via ConfigureNUMA)
+
+	// PCIPassthroughDevices lists host PCI devices by BDF ("0000:01:00.0") to
+	// bind to vfio-pci and pass through to the guest at launch (one
+	// -device vfio-pci,host=<BDF> each). Empty for a default VM. At most 8
+	// devices; the cap and BDF format are validated at Create.
+	PCIPassthroughDevices []string `yaml:"pci_devices,omitempty" json:"pci_devices,omitempty"`
 }
 
 // PredictivePrefetchingConfig configures AI-driven predictive prefetching for VM migrations

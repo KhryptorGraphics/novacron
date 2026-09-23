@@ -28,6 +28,9 @@ type KVMDriverEnhanced struct {
 	qmpStartupTimeout time.Duration
 	vms               map[string]*KVMVMInfo
 	vmLock            sync.RWMutex
+	// pciOwnerNonce is a random per-process token stamped into pci-inuse.json
+	// records so Teardown only unbinds what THIS api-server run bound.
+	pciOwnerNonce string
 }
 
 // KVMVMInfo stores information about a KVM VM
@@ -179,6 +182,7 @@ func newKVMDriverEnhanced(qemuPath, vmBasePath string, qmpStartupTimeout time.Du
 		vmBasePath:        vmBasePath,
 		qmpStartupTimeout: qmpStartupTimeout,
 		vms:               make(map[string]*KVMVMInfo),
+		pciOwnerNonce:     newPCIOwnerNonce(),
 	}
 	// Re-adopt any qemu processes that outlived a previous driver instance
 	// (e.g. a server restart) so their in-memory state is not orphaned.
@@ -278,6 +282,14 @@ func (d *KVMDriverEnhanced) Create(ctx context.Context, config VMConfig) (string
 	if vmID == "" {
 		return "", fmt.Errorf("VM ID is required")
 	}
+
+	// PCI passthrough: validate + normalize BDFs and enforce the max-8-device
+	// cap at construction so a misconfigured VM can never reach launch.
+	normPCI, err := normalizePCIPassthroughDevices(config.PCIPassthroughDevices)
+	if err != nil {
+		return "", err
+	}
+	config.PCIPassthroughDevices = normPCI
 
 	log.Printf("Creating KVM VM %s (%s)", config.Name, vmID)
 
@@ -454,6 +466,30 @@ func (d *KVMDriverEnhanced) launchAccelCPU(vmInfo *KVMVMInfo) (string, string) {
 // caller must hold d.vmLock. Shared by Start and the migration entry points
 // (StartMigrationSource / StartIncoming) so the dest mirrors the source args.
 func (d *KVMDriverEnhanced) launchVM(vmID string, vmInfo *KVMVMInfo) error {
+	// PCI passthrough: bind every requested BDF (plus its IOMMU-group peers,
+	// all-or-none) to vfio-pci BEFORE qemu starts; abort — naming the offending
+	// BDF — on any failure, leaving no half-bound group behind.
+	pciBound := false
+	if len(vmInfo.Config.PCIPassthroughDevices) > 0 {
+		if err := d.bindPCIDevices(vmID, vmInfo.Config.PCIPassthroughDevices); err != nil {
+			return err
+		}
+		pciBound = true
+	}
+	if err := d.launchVMProcess(vmID, vmInfo); err != nil {
+		if pciBound {
+			d.releasePCIDevices(vmID)
+		}
+		return err
+	}
+	return nil
+}
+
+// launchVMProcess builds the QEMU command for vmInfo and starts the process.
+// The caller must hold d.vmLock. Shared by Start and the migration entry points
+// (StartMigrationSource / StartIncoming) so the dest mirrors the source args.
+// PCI bindings, when requested, are handled by launchVM before this runs.
+func (d *KVMDriverEnhanced) launchVMProcess(vmID string, vmInfo *KVMVMInfo) error {
 	const maxAttempts = 3
 	var lastErr error
 	// Record the accel/CPU this launch actually uses, so a migration source can
@@ -606,6 +642,10 @@ func (d *KVMDriverEnhanced) Delete(ctx context.Context, vmID string) error {
 	}
 
 	log.Printf("Deleting KVM VM %s", vmID)
+
+	// A stopped VM may still hold vfio-pci bindings (e.g. a crash left state);
+	// release-only-ours makes this safe for adopted/foreign bindings.
+	d.releasePCIDevices(vmID)
 
 	// Remove VM directory
 	vmDir := filepath.Dir(vmInfo.DiskPath)
@@ -930,6 +970,13 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 
 	// Add virtio-rng for entropy
 	args = append(args, "-device", "virtio-rng-pci")
+
+	// PCI passthrough (opt-in, validated at Create, bound to vfio-pci by
+	// launchVM before qemu starts): one vfio-pci device per requested BDF.
+	// Empty for a default VM -> args unchanged.
+	for _, bdf := range vmInfo.Config.PCIPassthroughDevices {
+		args = append(args, "-device", "vfio-pci,host="+bdf)
+	}
 
 	// Migration destination: start paused waiting for the incoming stream.
 	// ALWAYS deferred (never a plain auto-accepting -incoming URI): a plain
@@ -1286,6 +1333,11 @@ func (d *KVMDriverEnhanced) monitorVM(vmID string, launchedInfo *KVMVMInfo, cmd 
 
 		vmInfo.Process = nil
 		vmInfo.PID = 0
+
+		// Release any vfio-pci bindings this run created for the VM (owner-checked
+		// against the ledger, so an adopted VM bound by a previous process is
+		// left untouched).
+		d.releasePCIDevices(vmID)
 	}
 }
 
@@ -1296,6 +1348,7 @@ func (d *KVMDriverEnhanced) stopVMInternal(vmInfo *KVMVMInfo) error {
 	}
 	if pid <= 0 {
 		markStopped(vmInfo)
+		d.releasePCIDevices(vmInfo.ID)
 		return nil
 	}
 
@@ -1315,6 +1368,8 @@ func (d *KVMDriverEnhanced) stopVMInternal(vmInfo *KVMVMInfo) error {
 	}
 
 	markStopped(vmInfo)
+	// Release any vfio-pci bindings this run created for the VM (owner-checked).
+	d.releasePCIDevices(vmInfo.ID)
 	return nil
 }
 
@@ -1372,9 +1427,11 @@ func (d *KVMDriverEnhanced) SupportsHotPlug() bool {
 	return true
 }
 
-// SupportsGPUPassthrough returns whether the driver supports GPU passthrough
+// SupportsGPUPassthrough returns whether the driver supports GPU passthrough.
+// True (vfio-pci binding implemented, see drivers_pci_passthrough.go) unless an
+// operator explicitly disabled the advertisement via NOVACRON_GPU_PASSTHROUGH.
 func (d *KVMDriverEnhanced) SupportsGPUPassthrough() bool {
-	return false // Not implemented yet
+	return gpuPassthroughSupported()
 }
 
 // SupportsSRIOV returns whether the driver supports SR-IOV

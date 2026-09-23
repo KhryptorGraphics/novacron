@@ -654,15 +654,19 @@ func (d *KVMDriverEnhanced) StartIncomingBlock(ctx context.Context, destID, dest
 // caller must invoke FinishIncomingBlock on the dest afterwards to tear down the
 // export. nbdURI comes from StartIncomingBlock.
 func (d *KVMDriverEnhanced) migrateBlockWithStats(ctx context.Context, vmID, ramURI, nbdURI string, params map[string]string) (downtimeMs, totalMs int64, err error) {
+	// Sync with the monitor goroutine on RLock — don't let State/PID
+	// concurrently reach the read site.
 	d.vmLock.RLock()
 	vmInfo, ok := d.vms[vmID]
-	d.vmLock.RUnlock()
 	if !ok {
+		d.vmLock.RUnlock()
 		return 0, 0, fmt.Errorf("VM %s not found", vmID)
 	}
 	if vmInfo.State != StateRunning {
+		d.vmLock.RUnlock()
 		return 0, 0, fmt.Errorf("VM %s is not running", vmID)
 	}
+	d.vmLock.RUnlock()
 	if ramURI == "" || nbdURI == "" {
 		return 0, 0, fmt.Errorf("block migration requires both a RAM URI and an NBD target URI")
 	}
@@ -730,8 +734,13 @@ func (d *KVMDriverEnhanced) migrateBlockWithStats(ctx context.Context, vmID, ram
 	// StartIncomingBlock's fresh disk/socket creation against this qemu still
 	// holding write permission on the same paths -- observed live as
 	// "Permission conflict on node 'migdisk'" (novacron-sv9).
-	if vmInfo.PID > 0 && !awaitProcessGone(vmInfo.PID, 10*time.Second) {
-		log.Printf("block-migration %s: source qemu PID %d did not exit within 10s of quit; a migration back to this node could race its still-open disk/sockets", vmID, vmInfo.PID)
+	// hop's after-snapshot: monitorVM may concurrently mutate PID/State
+	// under the vmLock — read while holding it.
+	d.vmLock.RLock()
+	pidToCheck := vmInfo.PID
+	d.vmLock.RUnlock()
+	if pidToCheck > 0 && !awaitProcessGone(pidToCheck, 10*time.Second) {
+		log.Printf("block-migration %s: source qemu PID %d did not exit within 10s of quit; a migration back to this node could race its still-open disk/sockets", vmID, pidToCheck)
 	}
 	log.Printf("VM %s block-migrated to %s (nbd %s, downtime %dms, total %dms)", vmID, ramURI, nbdURI, downtimeMs, totalMs)
 	return downtimeMs, totalMs, nil
