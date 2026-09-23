@@ -86,6 +86,23 @@ five premises were false), then nine implementation slices + one verifier
 were fanned out in parallel. Every slice's claimed acceptance was re-run
 against the working tree by the verifier, not taken on trust.
 
+### 2026-09-23 — fabric-organization fix + harness green
+
+The 2026-09-22 session's harness reported 13/14 — assertion 2 (peer job status)
+failed because `getFabricJob` resolved org ownership by LEFT JOINing the local
+`vms` table, and a cross-node job's executor VM lives only in the peer's DB.
+The fix moves org attribution onto `fabric_jobs.organization_id` (migration
+000014) and drops the vms join; same-org jobs stay visible even when the VM
+exists only on the remote node. `registerMigratedDest` already threads org
+through the migrate wire, so round-trip migrations keep their tenant stamp.
+
+- **Harness**: **14/14 PASS, 0 SKIP** — `bash scripts/fabric/two-node-fabric-
+  test.sh`, 124.6 s, including migration round-trip + crash-reconcile.
+- **API tests**: `go test -short -count=1 ./backend/cmd/api-server/` green
+  (includes new cross-node org tests).
+- **PCI passthrough regression tests**: new `driver_kvm_pci_passthrough_test.go`
+  — fake sysfs + IOMMU group, asserts group-wide vfio binding + release.
+
 ### What landed (each with evidence in its agent artifact)
 
 - **Fabric trust**: `scripts/fabric/two-node-fabric-test.sh` gains assertion 6

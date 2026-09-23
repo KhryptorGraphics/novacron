@@ -1,7 +1,11 @@
 package main
 
 import (
+	"regexp"
 	"testing"
+	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 // nodeProfile fixtures: a fast local link and a slow remote one.
@@ -88,5 +92,72 @@ func TestFabricJobNameStable(t *testing.T) {
 	}
 	if named := fabricJobName(fabricJobSpec{Command: "x", Name: "explicit"}, "01234567-89ab-cdef-0123-456789abcdef"); named != "explicit" {
 		t.Fatalf("explicit name not honored: %q", named)
+	}
+}
+
+// Cross-node jobs have no executor VM row in the submitter's database. Their
+// persisted organization must still be returned for tenant authorization.
+func TestGetFabricJobUsesPersistedOrganization(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	created := time.Now().UTC()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT j.id, j.vm_id, j.node_id, j.command, COALESCE(j.name,''), j.status, COALESCE(j.error,''), COALESCE(j.placed_by,''), j.created_at,
+		       j.organization_id
+		FROM fabric_jobs j
+		WHERE j.id = $1`)).
+		WithArgs("job-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "vm_id", "node_id", "command", "name", "status", "error", "placed_by", "created_at", "organization_id",
+		}).AddRow("job-1", "vm-on-peer", "node-b", "echo hi", "job", jobStatusRunning, "", "pin", created, "org-a"))
+
+	job, org, err := getFabricJob(t.Context(), db, "job-1")
+	if err != nil {
+		t.Fatalf("getFabricJob: %v", err)
+	}
+	if job.VMID != "vm-on-peer" || org.String != "org-a" || !org.Valid {
+		t.Fatalf("cross-node job ownership = vm %q org %#v, want vm-on-peer/org-a", job.VMID, org)
+	}
+	if !orgVisible("org-a", org) || orgVisible("org-b", org) {
+		t.Fatalf("job org visibility should allow org-a and hide org-b")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+// Scoped listings retain jobs whose VM lives only in a remote node's database.
+func TestListFabricJobsFiltersByPersistedOrganization(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	query := regexp.QuoteMeta(`
+		SELECT id, vm_id, node_id, command, COALESCE(name,''), status, COALESCE(error,''), COALESCE(placed_by,''), created_at
+		FROM fabric_jobs WHERE organization_id = $1
+		ORDER BY created_at DESC LIMIT 200`)
+	created := time.Now().UTC()
+	mock.ExpectQuery(query).WithArgs("org-a").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "vm_id", "node_id", "command", "name", "status", "error", "placed_by", "created_at"}).
+			AddRow("job-1", "vm-on-peer", "node-b", "echo hi", "job", jobStatusRunning, "", "pin", created))
+	mock.ExpectQuery(query).WithArgs("org-b").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "vm_id", "node_id", "command", "name", "status", "error", "placed_by", "created_at"}))
+
+	jobs, err := listFabricJobs(t.Context(), db, nil, "org-a", false)
+	if err != nil || len(jobs) != 1 || jobs[0].VMID != "vm-on-peer" {
+		t.Fatalf("org-a cross-node jobs = %#v, err=%v", jobs, err)
+	}
+	jobs, err = listFabricJobs(t.Context(), db, nil, "org-b", false)
+	if err != nil || len(jobs) != 0 {
+		t.Fatalf("org-b should not see org-a job: %#v, err=%v", jobs, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }

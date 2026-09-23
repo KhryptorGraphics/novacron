@@ -321,7 +321,7 @@ func createVMLocal(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 				// plain VM create boots a KVM guest as before.
 				Type:  vmTypeForSpec(spec),
 				VCPUs: spec.VCPUs, CPUShares: spec.CPUShares, MemoryMB: spec.MemoryMB, DiskSizeGB: spec.DiskSizeGB,
-				Image: spec.Image, OwnerID: ownerID,
+				Image: spec.Image, OwnerID: ownerID, OrganizationID: orgLabelForVM(spec.OrganizationID),
 				Command: spec.Command, Args: spec.Args, Env: spec.Env,
 				// Runtime quota accounting needs a bucket even though the
 				// canonical vms table has no tenancy column to persist.
@@ -627,10 +627,10 @@ func registerClusterRoutes(root, apiRouter *mux.Router, db *sql.DB, vmManager *c
 		// authoritative row, so a failure here only costs local visibility.
 		if jobID, _ := spec.Tags["fabric_job_id"].(string); jobID != "" && db != nil {
 			if _, jerr := db.ExecContext(ctx, `
-				INSERT INTO fabric_jobs (id, vm_id, node_id, command, status, placed_by, created_at, updated_at)
-				VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+				INSERT INTO fabric_jobs (id, vm_id, node_id, command, status, placed_by, organization_id, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, '')::uuid, NOW(), NOW())
 				ON CONFLICT (id) DO NOTHING
-			`, jobID, vmID, selfNodeID(), spec.Command, jobStatusRunning, "dispatched"); jerr != nil {
+			`, jobID, vmID, selfNodeID(), spec.Command, jobStatusRunning, "dispatched", orgLabelForVM(spec.OrganizationID)); jerr != nil {
 				log.Printf("fabric job row for dispatched %s not recorded: %v", jobID, jerr)
 			}
 		}

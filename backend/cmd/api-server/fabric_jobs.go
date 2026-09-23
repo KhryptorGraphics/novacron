@@ -106,9 +106,8 @@ func registerFabricJobRoutes(apiRouter *mux.Router, db *sql.DB, vmManager *core_
 	}).Methods(http.MethodPost)
 
 	apiRouter.HandleFunc("/compute/jobs", func(w http.ResponseWriter, r *http.Request) {
-		// Tenancy: a caller's job list contains only jobs whose executor VM
-		// carries their organization (join is in listFabricJobs; fabric_jobs
-		// itself has no org column).
+		// Tenancy: fabric_jobs persists the submitter's organization so the
+		// executing VM may live on a different node/database.
 		scopeOrg, isAdmin, _ := requireOrgScope(r.Context(), nil, "")
 		jobs, err := listFabricJobs(r.Context(), db, vmManager, scopeOrg, isAdmin)
 		if err != nil {
@@ -135,8 +134,8 @@ func registerFabricJobRoutes(apiRouter *mux.Router, db *sql.DB, vmManager *core_
 			writeJSONError(w, http.StatusNotFound, "job not found")
 			return
 		}
-		// Tenancy: a job running under another org's VM is invisible -- 404,
-		// never 403, exactly like a nonexistent id (see requireOrgScope).
+		// Tenancy: a job is visible only within the organization recorded at
+		// submission, regardless of which node hosts its executor VM.
 		scopeOrg, isAdmin, _ := requireOrgScope(r.Context(), nil, "")
 		if !isAdmin && !orgVisible(scopeOrg, jobOrg) {
 			writeJSONError(w, http.StatusNotFound, "job not found")
@@ -170,8 +169,7 @@ func registerFabricJobRoutes(apiRouter *mux.Router, db *sql.DB, vmManager *core_
 			writeJSONError(w, http.StatusNotFound, "job not found")
 			return
 		}
-		// Tenancy: cancel is scoped the same as read -- a caller may only act
-		// on jobs their org submitted (the check precedes any VM stop).
+		// Tenancy: cancellation is scoped to the job's submitter organization.
 		scopeOrg, isAdmin, _ := requireOrgScope(r.Context(), nil, "")
 		if !isAdmin && !orgVisible(scopeOrg, jobOrg) {
 			writeJSONError(w, http.StatusNotFound, "job not found")
@@ -282,9 +280,9 @@ func submitFabricJob(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManag
 	}
 	if db != nil {
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO fabric_jobs (id, vm_id, node_id, command, name, status, placed_by, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, $7, NOW(), NOW())
-		`, job.ID, job.VMID, job.NodeID, job.Command, job.Name, job.Status, job.PlacedBy); err != nil {
+			INSERT INTO fabric_jobs (id, vm_id, node_id, command, name, status, placed_by, organization_id, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, $7, NULLIF($8, '')::uuid, NOW(), NOW())
+		`, job.ID, job.VMID, job.NodeID, job.Command, job.Name, job.Status, job.PlacedBy, orgLabelForVM(submitterOrg)); err != nil {
 			// Created and started, but not recorded: stop it so no untracked
 			// process keeps running, and surface the failure.
 			if node.NodeID == selfNodeID() {
@@ -608,11 +606,8 @@ func localVMStatus(vmManager *core_vm.VMManager, vmID string) remoteVMStatus {
 	return out
 }
 
-// getFabricJob loads one job row. fabric_jobs has no organization_id column
-// (migration 000007), so org attribution is resolved in the SAME query through
-// the executor VM: LEFT JOIN vms on vm_id (vms.id is uuid, fabric_jobs.vm_id
-// is text -- hence ::text). A job whose VM row is gone carries a NULL org,
-// which orgVisible treats as the legacy/unattributed scope.
+// getFabricJob loads one job row. Organization ownership is stored on the job
+// itself because the executor VM may live on a peer with a separate database.
 func getFabricJob(ctx context.Context, db *sql.DB, id string) (*fabricJob, sql.NullString, error) {
 	if db == nil {
 		return nil, sql.NullString{}, errors.New("no database")
@@ -622,8 +617,8 @@ func getFabricJob(ctx context.Context, db *sql.DB, id string) (*fabricJob, sql.N
 	var created time.Time
 	err := db.QueryRowContext(ctx, `
 		SELECT j.id, j.vm_id, j.node_id, j.command, COALESCE(j.name,''), j.status, COALESCE(j.error,''), COALESCE(j.placed_by,''), j.created_at,
-		       v.organization_id
-		FROM fabric_jobs j LEFT JOIN vms v ON v.id::text = j.vm_id
+		       j.organization_id
+		FROM fabric_jobs j
 		WHERE j.id = $1`, id).
 		Scan(&j.ID, &j.VMID, &j.NodeID, &j.Command, &j.Name, &j.Status, &j.Error, &j.PlacedBy, &created, &org)
 	if err != nil {
@@ -633,14 +628,9 @@ func getFabricJob(ctx context.Context, db *sql.DB, id string) (*fabricJob, sql.N
 	return &j, org, nil
 }
 
-// listFabricJobs returns the most recent jobs, newest first. Scoped (non-
-// admin) callers only see jobs whose executor VM carries THEIR organization_id
-// -- resolved by the same join as getFabricJob (fabric_jobs has no org
-// column), with the org looked up once per row in the join rather than per
-// job in Go. The unscoped (admin) statement stays byte-identical to the
-// pre-hardening query; a uuid scope joins INNER (an orphaned job row cannot
-// be attributed); the legacy/NULL scope uses LEFT JOIN + IS NULL so legacy
-// callers still see their own and orphan jobs.
+// listFabricJobs returns the most recent jobs, newest first. Scoped callers
+// filter on the submitter organization stored in fabric_jobs, independent of
+// where the executor VM resides.
 func listFabricJobs(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager, scopeOrg string, isAdmin bool) ([]fabricJob, error) {
 	if db == nil {
 		return nil, errors.New("no database")
@@ -654,15 +644,14 @@ func listFabricJobs(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManage
 		FROM fabric_jobs ORDER BY created_at DESC LIMIT 200`)
 	case scopeOrg != "":
 		rows, err = db.QueryContext(ctx, `
-		SELECT j.id, j.vm_id, j.node_id, j.command, COALESCE(j.name,''), j.status, COALESCE(j.error,''), COALESCE(j.placed_by,''), j.created_at
-		FROM fabric_jobs j JOIN vms v ON v.id::text = j.vm_id AND v.organization_id = $1
-		ORDER BY j.created_at DESC LIMIT 200`, scopeOrg)
+		SELECT id, vm_id, node_id, command, COALESCE(name,''), status, COALESCE(error,''), COALESCE(placed_by,''), created_at
+		FROM fabric_jobs WHERE organization_id = $1
+		ORDER BY created_at DESC LIMIT 200`, scopeOrg)
 	default:
 		rows, err = db.QueryContext(ctx, `
-		SELECT j.id, j.vm_id, j.node_id, j.command, COALESCE(j.name,''), j.status, COALESCE(j.error,''), COALESCE(j.placed_by,''), j.created_at
-		FROM fabric_jobs j LEFT JOIN vms v ON v.id::text = j.vm_id
-		WHERE v.organization_id IS NULL
-		ORDER BY j.created_at DESC LIMIT 200`)
+		SELECT id, vm_id, node_id, command, COALESCE(name,''), status, COALESCE(error,''), COALESCE(placed_by,''), created_at
+		FROM fabric_jobs WHERE organization_id IS NULL
+		ORDER BY created_at DESC LIMIT 200`)
 	}
 	if err != nil {
 		return nil, err
