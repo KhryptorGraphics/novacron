@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -69,6 +70,22 @@ func withFakePCISysfs(t *testing.T, devices map[string]string, write func(string
 	return &KVMDriverEnhanced{vmBasePath: filepath.Join(base, "vms"), pciOwnerNonce: "owner-test"}
 }
 
+// readPCILedger decodes the ledger into a NEW map every call: json.Unmarshal
+// into a reused map keeps stale keys, which is exactly what produced the
+// false "release left ledger entries" reading in the first cut of this file.
+func readPCILedger(t *testing.T, d *KVMDriverEnhanced) map[string]pciBindingRecord {
+	t.Helper()
+	raw, err := os.ReadFile(d.pciStateFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger := map[string]pciBindingRecord{}
+	if err := json.Unmarshal(raw, &ledger); err != nil {
+		t.Fatal(err)
+	}
+	return ledger
+}
+
 func TestBindPCIDevicesBindsWholeNonNVMeGroupAndReleases(t *testing.T) {
 	const requested = "0000:01:00.0"
 	const peer = "0000:01:00.1"
@@ -89,6 +106,14 @@ func TestBindPCIDevicesBindsWholeNonNVMeGroupAndReleases(t *testing.T) {
 	if containsWrite(writes, "vfio-pci/bind="+nvme) {
 		t.Fatalf("NVMe peer must not be bound to vfio-pci: %#v", writes)
 	}
+	ledger := readPCILedger(t, d)
+	if len(ledger) != 2 || ledger[requested].VMID != "vm-a" || ledger[peer].VMID != "vm-a" ||
+		ledger[requested].PreviousDriver != "nvidia" || ledger[peer].IOMMUGroup != "7" {
+		t.Fatalf("ledger after bind should hold requested+peer for vm-a with driver/group detail: %#v", ledger)
+	}
+	if _, ok := ledger[nvme]; ok {
+		t.Fatal("NVMe group peer must never enter the vfio ledger")
+	}
 	d.releasePCIDevices("vm-a")
 	// Verify release emits unbind + original driver restore for both non-NVMe devices.
 	releaseWrites := writes[len(writes)-4:]
@@ -97,6 +122,9 @@ func TestBindPCIDevicesBindsWholeNonNVMeGroupAndReleases(t *testing.T) {
 		!containsWrite(releaseWrites, "vfio-pci/unbind="+peer) ||
 		!containsWrite(releaseWrites, "nvidia/bind="+peer) {
 		t.Fatalf("release should unbind and restore both non-NVMe devices; release writes=%#v", releaseWrites)
+	}
+	if got := readPCILedger(t, d); len(got) != 0 {
+		t.Fatalf("release must forget every ledger entry it owned: %#v", got)
 	}
 }
 
@@ -114,11 +142,54 @@ func TestBindPCIDevicesRollsBackWholeGroupAfterPeerFailure(t *testing.T) {
 	if err := d.bindPCIDevices("vm-fail", []string{requested}); err == nil {
 		t.Fatal("group bind should fail when one peer cannot bind")
 	}
-	// Only the requested device was successfully bound; rollback restores only it.
-	if !containsWrite(writes, "nvidia/bind="+requested) {
-		t.Fatalf("rollback must restore original driver for successfully bound device: %#v", writes)
+	// Both group members were detached from nvidia before the peer's vfio bind
+	// failed; rollback must hand BOTH back, not just the one that fully bound.
+	if !containsWrite(writes, "nvidia/bind="+requested) || !containsWrite(writes, "nvidia/bind="+peer) {
+		t.Fatalf("rollback must restore the original driver for every detached group member: %#v", writes)
 	}
-	// Peer was unbound but bind failed; current implementation does not restore it (known gap).
+	if got := readPCILedger(t, d); len(got) != 0 {
+		t.Fatalf("failed group bind left ledger entries: %#v", got)
+	}
+}
+
+// The peer sorts first in the IOMMU group listing, so it fully binds and
+// enriches the ledger before the requested device's vfio bind fails. Rollback
+// must both rebind the peer to nvidia AND drop its ledger entry -- the old
+// rollback swept only the requested BDFs, so the peer stayed "already bound for
+// VM vm-late" and poisoned every later launch touching that group.
+func TestBindPCIDevicesRollbackForgetsPeerLedgerEntries(t *testing.T) {
+	const peer = "0000:03:00.0"      // sorts first -> binds first
+	const requested = "0000:03:00.1" // fails
+	var writes []string
+	failed := false // one-shot: the retry below must be able to bind requested
+	d := withFakePCISysfs(t, map[string]string{requested: "0x030000", peer: "0x030000"}, func(path, value string) error {
+		writes = append(writes, filepath.Base(filepath.Dir(path))+"/"+filepath.Base(path)+"="+value)
+		if !failed && strings.HasSuffix(path, "/vfio-pci/bind") && value == requested {
+			failed = true
+			return errors.New("injected requested-device bind failure")
+		}
+		return nil
+	})
+	if err := d.bindPCIDevices("vm-late", []string{requested}); err == nil {
+		t.Fatal("group bind should fail when the requested device cannot bind")
+	}
+	// The peer's own bind succeeded before the failure (proves ordering).
+	if !containsWrite(writes, "vfio-pci/bind="+peer) {
+		t.Fatalf("peer should have bound before the requested device failed: %#v", writes)
+	}
+	for _, want := range []string{"vfio-pci/unbind=" + peer, "nvidia/bind=" + peer, "nvidia/bind=" + requested} {
+		if !containsWrite(writes, want) {
+			t.Fatalf("rollback missing %q: %#v", want, writes)
+		}
+	}
+	if got := readPCILedger(t, d); len(got) != 0 {
+		t.Fatalf("rollback left ledger entries (peer enrichment not swept): %#v", got)
+	}
+	// A second launch on the same group must not be refused by a stale entry.
+	writes = nil
+	if err := d.bindPCIDevices("vm-retry", []string{peer}); err != nil {
+		t.Fatalf("group should be bindable again after rollback: %v", err)
+	}
 }
 
 func TestBuildQEMUArgsIncludesRequestedPCIDevices(t *testing.T) {

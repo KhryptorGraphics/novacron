@@ -213,14 +213,11 @@ func (d *KVMDriverEnhanced) bindPCIDevices(vmID string, devices []string) error 
 				_ = pciWriteSys(filepath.Join(pciSysfsBusDir, "drivers", b.PreviousDriver, "bind"), b.BDF)
 			}
 		}
-		_ = d.withPCILedger(func(rec map[string]pciBindingRecord) (map[string]pciBindingRecord, error) {
-			for _, bdf := range devices {
-				if r, ok := rec[bdf]; ok && r.Owner == d.pciOwnerNonce {
-					delete(rec, bdf)
-				}
-			}
-			return rec, nil
-		})
+		// Forget EVERY ledger entry this call made for the VM -- the requested
+		// BDFs' reservations and the group peers bindOnePCIDevice enriched. The
+		// old per-`devices` loop left peer entries behind, so the next launch
+		// touching that group failed "already bound for VM <this same vm>".
+		_, _ = d.sweepPCILedger(vmID)
 		return cause
 	}
 
@@ -258,8 +255,9 @@ func (d *KVMDriverEnhanced) bindPCIDevices(vmID string, devices []string) error 
 	return nil
 }
 
-// bindOnePCIDevice moves one BDF to vfio-pci and appends it to bound (the
-// caller's rollback trail).
+// bindOnePCIDevice moves one BDF to vfio-pci. It appends the device to bound (the caller's
+// rollback trail) the moment the device is detached from its original driver, not after a
+// successful vfio-pci bind.
 func (d *KVMDriverEnhanced) bindOnePCIDevice(vmID, bdf, group string, bound *[]pciBindingRecord) error {
 	devDir := filepath.Join(pciSysfsBusDir, "devices", bdf)
 
@@ -283,11 +281,20 @@ func (d *KVMDriverEnhanced) bindOnePCIDevice(vmID, bdf, group string, bound *[]p
 			return err
 		}
 	}
-	if prev != "" {
+if prev != "" {
 		if err := pciWriteSys(filepath.Join(pciSysfsBusDir, "drivers", prev, "unbind"), bdf); err != nil {
 			return err
 		}
 	}
+	// The device is now detached from its original driver: put it on the
+	// rollback trail BEFORE attempting the vfio-pci bind, so a failed bind or
+	// post-bind check is rebound to prev by the caller's rollback instead of
+	// being left driver-less (observed live: peer unbound from nvidia, vfio
+	// bind failed, rollback restored only the devices that had fully bound).
+	*bound = append(*bound, pciBindingRecord{
+		BDF: bdf, VMID: vmID, Owner: d.pciOwnerNonce,
+		PreviousDriver: prev, IOMMUGroup: group, BoundAt: time.Now(),
+	})
 	if err := pciWriteSys(filepath.Join(pciSysfsBusDir, "drivers", "vfio-pci", "bind"), bdf); err != nil {
 		return err
 	}
@@ -300,10 +307,6 @@ func (d *KVMDriverEnhanced) bindOnePCIDevice(vmID, bdf, group string, bound *[]p
 		}
 	}
 
-	*bound = append(*bound, pciBindingRecord{
-		BDF: bdf, VMID: vmID, Owner: d.pciOwnerNonce,
-		PreviousDriver: prev, IOMMUGroup: group, BoundAt: time.Now(),
-	})
 	// Enrich the reservation with driver/group detail.
 	return d.withPCILedger(func(rec map[string]pciBindingRecord) (map[string]pciBindingRecord, error) {
 		rec[bdf] = (*bound)[len(*bound)-1]
@@ -311,10 +314,12 @@ func (d *KVMDriverEnhanced) bindOnePCIDevice(vmID, bdf, group string, bound *[]p
 	})
 }
 
-// releasePCIDevices unbinds every ledger entry for vmID — but ONLY those whose
-// Owner is this driver process (an adopted VM bound by a previous api-server
-// run is left untouched). Errors are logged, never fatal to VM stop.
-func (d *KVMDriverEnhanced) releasePCIDevices(vmID string) {
+// sweepPCILedger removes and returns every ledger record for vmID that THIS
+// driver process owns (Owner == d.pciOwnerNonce). Shared by releasePCIDevices
+// and bindPCIDevices' rollback so both forget exactly the same set: the
+// requested BDFs' reservations AND every IOMMU-group peer bindOnePCIDevice
+// enriched. Records owned by another process (adopted VMs) are left alone.
+func (d *KVMDriverEnhanced) sweepPCILedger(vmID string) ([]pciBindingRecord, error) {
 	var owned []pciBindingRecord
 	err := d.withPCILedger(func(rec map[string]pciBindingRecord) (map[string]pciBindingRecord, error) {
 		for bdf, r := range rec {
@@ -325,6 +330,14 @@ func (d *KVMDriverEnhanced) releasePCIDevices(vmID string) {
 		}
 		return rec, nil
 	})
+	return owned, err
+}
+
+// releasePCIDevices unbinds every ledger entry for vmID — but ONLY those whose
+// Owner is this driver process (an adopted VM bound by a previous api-server
+// run is left untouched). Errors are logged, never fatal to VM stop.
+func (d *KVMDriverEnhanced) releasePCIDevices(vmID string) {
+	owned, err := d.sweepPCILedger(vmID)
 	if err != nil {
 		log.Printf("PCI passthrough: cannot open ledger to release VM %s: %v", vmID, err)
 		return
