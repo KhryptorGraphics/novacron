@@ -22,17 +22,24 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	graphqlapi "github.com/khryptorgraphics/novacron/backend/api/graphql"
 	securityapi "github.com/khryptorgraphics/novacron/backend/api/security"
 	websocketapi "github.com/khryptorgraphics/novacron/backend/api/websocket"
+	orchestrationapi "github.com/khryptorgraphics/novacron/backend/api/orchestration"
 	"github.com/khryptorgraphics/novacron/backend/core/audit"
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
+	"github.com/khryptorgraphics/novacron/backend/core/orchestration"
+	"github.com/khryptorgraphics/novacron/backend/core/orchestration/autoscaling"
+	"github.com/khryptorgraphics/novacron/backend/core/orchestration/events"
+	"github.com/khryptorgraphics/novacron/backend/core/orchestration/healing"
+	"github.com/khryptorgraphics/novacron/backend/core/orchestration/policy"
+	"github.com/khryptorgraphics/novacron/backend/core/orchestration/placement"
 	"github.com/khryptorgraphics/novacron/backend/core/storage"
 	core_vm "github.com/khryptorgraphics/novacron/backend/core/vm"
 	"github.com/khryptorgraphics/novacron/backend/pkg/config"
@@ -41,11 +48,13 @@ import (
 )
 
 type canonicalServices struct {
-	twoFactorService *auth.TwoFactorService
-	securityHandlers *securityapi.SecurityHandlers
-	websocketHandler *websocketapi.WebSocketHandler
-	graphqlHandler   http.Handler
-	shutdown         func()
+	twoFactorService    *auth.TwoFactorService
+	securityHandlers    *securityapi.SecurityHandlers
+	websocketHandler    *websocketapi.WebSocketHandler
+	graphqlHandler      http.Handler
+	orchestrationAPI    *orchestrationapi.OrchestrationAPI
+	orchestrationEngine *orchestration.DefaultOrchestrationEngine
+	shutdown            func()
 }
 
 // restartSupervisor is package-level because route registration happens inside
@@ -237,14 +246,20 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	registerClusterRoutes(router, apiRouter, db, vmManager, vmBasePath(cfg))
 
 	registerCanonicalSecurityRoutes(router, authManager, services.securityHandlers)
+	registerSecurityWebSocketAliases(router, authManager, services.securityHandlers)
 	registerCanonicalAdminRoutes(router, authManager, db)
 	registerCanonicalGraphQLRoute(router, authManager, services.graphqlHandler)
 	services.websocketHandler.RegisterWebSocketRoutes(router, func(required string, next http.HandlerFunc) http.Handler {
 		return requireAuth(authManager)(requireRoleHandler(required, next))
 	})
-	registerSecurityWebSocketAliases(router, authManager, services.securityHandlers)
+	// Register orchestration API routes under /api/orchestration
+	if services.orchestrationAPI != nil {
+		orchRouter := apiRouter.PathPrefix("/orchestration").Subrouter()
+		services.orchestrationAPI.RegisterRoutes(orchRouter)
+	}
 
 	router.HandleFunc("/health", healthCheckHandler(cfg, db)).Methods(http.MethodGet)
+
 	router.HandleFunc("/api/info", apiInfoHandler()).Methods(http.MethodGet)
 
 	return &http.Server{
@@ -2149,13 +2164,62 @@ func initializeCanonicalServices(cfg *config.Config, db *sql.DB, authManager *au
 	websocketLogger.SetLevel(logrus.InfoLevel)
 	websocketHandler := websocketapi.NewWebSocketHandler(nil, nil, nil, nil, websocketLogger)
 
+	// Initialize orchestration components
+	orchLogger := logrus.New()
+	orchLogger.SetLevel(logrus.InfoLevel)
+
+	// Create event bus (noop for now, can be swapped for NATS)
+	eventBus := events.NewNoopEventBus()
+
+	// Create orchestration engine
+	orchEngine := orchestration.NewDefaultOrchestrationEngine(orchLogger)
+	orchEngine.SetEvacuationHandler(nil) // Can be wired later if needed
+
+	// Create sub-components
+	placementEngine := placement.NewDefaultPlacementEngine(orchLogger)
+	autoScaler := autoscaling.NewDefaultAutoScaler(orchLogger, eventBus)
+	healingController := healing.NewDefaultHealingController(orchLogger, eventBus)
+	policyEngine := policy.NewDefaultPolicyEngine(orchLogger, eventBus)
+
+	// Wire components to orchestration engine
+	// Note: The engine internally creates its own placement/eventbus but we can inject ours
+	// For now, start the sub-components
+	ctx := context.Background()
+	if err := autoScaler.StartMonitoring(); err != nil {
+		orchLogger.Warnf("Failed to start auto-scaler monitoring: %v", err)
+	}
+	if err := healingController.StartMonitoring(); err != nil {
+		orchLogger.Warnf("Failed to start healing controller monitoring: %v", err)
+	}
+	if err := orchEngine.Start(ctx); err != nil {
+		orchLogger.Warnf("Failed to start orchestration engine: %v", err)
+	}
+
+	// Create orchestration API handler
+	orchAPI := orchestrationapi.NewOrchestrationAPI(
+		orchLogger,
+		orchEngine,
+		autoScaler,
+		healingController,
+		policyEngine,
+		placementEngine,
+	)
+
 	return &canonicalServices{
-		twoFactorService: twoFactorService,
-		securityHandlers: securityHandlers,
-		websocketHandler: websocketHandler,
-		graphqlHandler:   graphqlapi.NewVolumeHTTPHandler(graphqlResolver),
+		twoFactorService:    twoFactorService,
+		securityHandlers:    securityHandlers,
+		websocketHandler:    websocketHandler,
+		graphqlHandler:      graphqlapi.NewVolumeHTTPHandler(graphqlResolver),
+		orchestrationAPI:    orchAPI,
+		orchestrationEngine: orchEngine,
 		shutdown: func() {
 			websocketHandler.Shutdown()
+			// Gracefully stop orchestration components
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			healingController.StopMonitoring()
+			autoScaler.StopMonitoring()
+			orchEngine.Stop(shutdownCtx)
 		},
 	}, nil
 }

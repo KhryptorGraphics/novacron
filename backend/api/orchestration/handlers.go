@@ -1,11 +1,9 @@
-//go:build experimental
 
 package orchestration
 
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -119,13 +117,12 @@ func (api *OrchestrationAPI) CreatePlacementRequest(w http.ResponseWriter, r *ht
 // GetPlacementDecision gets a placement decision by ID
 func (api *OrchestrationAPI) GetPlacementDecision(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	id := vars["id"]
+	_ = vars["id"]
 
 	// This would typically retrieve from a store
 	// For now, return a mock response
 	api.writeErrorResponse(w, http.StatusNotImplemented, "Not implemented", nil)
 }
-
 // Auto-scaling Handlers
 
 // GetAutoScalingStatus returns the status of the auto-scaler

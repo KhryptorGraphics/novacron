@@ -8,21 +8,30 @@ import (
 type HealingController interface {
 	// StartMonitoring begins health monitoring
 	StartMonitoring() error
-	
+
 	// StopMonitoring stops all monitoring activities
 	StopMonitoring() error
-	
+
 	// RegisterTarget registers a target for health monitoring
 	RegisterTarget(target *HealingTarget) error
-	
+
 	// UnregisterTarget removes a target from monitoring
 	UnregisterTarget(targetID string) error
-	
+
 	// GetHealthStatus gets the current health status of a target
 	GetHealthStatus(targetID string) (*HealthStatus, error)
-	
+
 	// TriggerHealing manually triggers healing for a target
 	TriggerHealing(targetID string, reason string) (*HealingDecision, error)
+
+	// GetStatus returns the current status of the healing controller
+	GetStatus() *HealingControllerStatus
+
+	// GetTargets returns all registered targets
+	GetTargets() map[string]*HealingTarget
+
+	// GetHealingHistory returns the healing history for a target
+	GetHealingHistory(targetID string, limit int) ([]*HealingDecision, error)
 }
 
 // FailureDetector defines interface for failure detection algorithms

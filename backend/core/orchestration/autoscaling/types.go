@@ -8,18 +8,30 @@ import (
 type AutoScaler interface {
 	// StartMonitoring begins monitoring and prediction
 	StartMonitoring() error
-	
+
 	// StopMonitoring stops all monitoring activities
 	StopMonitoring() error
-	
+
 	// GetScalingDecision gets a scaling decision based on current metrics
 	GetScalingDecision(targetID string) (*ScalingDecision, error)
-	
+
 	// GetPrediction gets a prediction for future resource needs
 	GetPrediction(targetID string, horizonMinutes int) (*ResourcePrediction, error)
-	
+
 	// UpdateMetrics updates the metrics store with new data
 	UpdateMetrics(metrics *MetricsData) error
+
+	// GetStatus returns the current status of the auto-scaler
+	GetStatus() *AutoScalerStatus
+
+	// GetTargets returns all auto-scaling targets
+	GetTargets() map[string]*AutoScalerTarget
+
+	// AddTarget adds a new auto-scaling target
+	AddTarget(target *AutoScalerTarget) error
+
+	// RemoveTarget removes an auto-scaling target
+	RemoveTarget(targetID string) error
 }
 
 // MetricsCollector defines interface for collecting time-series metrics
