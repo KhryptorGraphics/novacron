@@ -272,10 +272,10 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	services.websocketHandler.RegisterWebSocketRoutes(router, func(required string, next http.HandlerFunc) http.Handler {
 		return requireAuth(authManager, db)(requireRoleHandler(required, next))
 	})
-	// Register orchestration API routes under /api/orchestration
+	// Register orchestration API routes directly on /api — the handlers already
+	// register /orchestration/status, /orchestration/policies, etc.
 	if services.orchestrationAPI != nil {
-		orchRouter := apiRouter.PathPrefix("/orchestration").Subrouter()
-		services.orchestrationAPI.RegisterRoutes(orchRouter)
+		services.orchestrationAPI.RegisterRoutes(apiRouter)
 	}
 
 	router.HandleFunc("/health", healthCheckHandler(cfg, db)).Methods(http.MethodGet)
