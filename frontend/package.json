@@ -22,6 +22,7 @@
     "test:puppeteer": "npm run test:e2e"
   },
   "dependencies": {
+    "@playwright/test": "^1.63.0",
     "@radix-ui/react-avatar": "^1.0.3",
     "@radix-ui/react-checkbox": "^1.3.3",
     "@radix-ui/react-dialog": "^1.0.4",
