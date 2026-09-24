@@ -1,35 +1,31 @@
-# NovaCron Quick‑Start Guide
+# NovaCron User Guide
 
 ## Prerequisites
-- Docker & Docker‑Compose
-- Go 1.22
-- Node.js 20
 
-## Development Setup
+- Go **1.25.0** or newer (see `go.mod`)
+- PostgreSQL 15+ reachable through a `DB_URL` connection string
+- A strong `AUTH_SECRET` (>= 32 random hex chars)
+
+## Quick start
+
 ```bash
-make test   # run all Go tests
-go mod tidy   # one-time module sync for the Go backend
-npm install
-cd frontend && npm ci
-npm run dev   # repo root: canonical Go API (main.go) on :8090 + frontend on :8092
+# Database
+make db-migrate            # applies backend/database/migrations/*.up.sql
+
+# Canonical API server
+make serve                  # go run ./backend/cmd/api-server (port 8090)
+
+# Frontend
+npm run start:frontend     # Next.js on port 8092 (same-origin by default)
 ```
 
-If you only need the frontend:
-```bash
-cd frontend && npm ci && npm run dev
-```
+## Features
 
-## Deployment
-```bash
-./scripts/deploy_production.sh   # systemd services, TLS, HA failover
-```
+- VM CRUD, migration (sync/async), fabric compute jobs, drain, transfers
+- Org-scoped auth (admin/super-admin bypass) on /api/* and /api/v1/*
+- Security operations: scan, compliance, RBAC, 2FA, audit export
+- GraphQL at /graphql for volume-aware queries
+- WebSockets: metrics, alerts, logs, console, security events
 
-## API Reference
-See `docs/CANONICAL_CONTRACT_MATRIX.md` for the current shipped route and websocket status matrix.
-`config/novacron/api.yaml` is not the source of truth for the canonical control-plane surface.
-
-## Monitoring
-Dashboard available at `http://localhost:8092/dashboard`.
-
-## Security
-Run `go run ./security/hardening.go` to initialize secret management and audit logging.
+Full endpoint inventory is in [CANONICAL_CONTRACT_MATRIX.md](CANONICAL_CONTRACT_MATRIX.md).
+Deployment is described in [../deploy/README.md](../deploy/README.md).
