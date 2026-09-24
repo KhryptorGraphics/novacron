@@ -9,9 +9,9 @@ metadata:
   name: novacron-config
   namespace: novacron
 data:
-  # NOTE: DB_URL (the postgres:// DSN the binary actually reads — see
-  # backend/pkg/config/config.go) lives in the novacron-secrets Secret
-  # because it embeds credentials; it must never be stored in a ConfigMap.
+  # REDIS_URL is consumed only by backend/core/cmd/novacron's auth persistence
+  # (runtime_auth_persistence.go). The canonical api-server does not read it;
+  # leaving it here keeps hypervisor.auth working without dead-config noise.
   REDIS_URL: "redis://novacron-redis:6379"
 ---
 apiVersion: apps/v1
@@ -38,6 +38,11 @@ spec:
         - configMapRef:
             name: novacron-config
         env:
+        - name: AUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: novacron-secrets
+              key: auth-secret
         - name: DB_URL
           valueFrom:
             secretKeyRef:
@@ -101,16 +106,7 @@ spec:
       - name: hypervisor
         image: novacron/hypervisor:latest
         ports:
-        - containerPort: 8091
-        envFrom:
-        - configMapRef:
-            name: novacron-config
-        env:
-        - name: NOVACRON_MIGRATION_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: novacron-secrets
-              key: migration-secret
+        - containerPort: 9000
         securityContext:
           privileged: true
         volumeMounts:
@@ -144,9 +140,14 @@ spec:
   ports:
     - protocol: TCP
       port: 80
-      targetPort: 8091
+      targetPort: 9000
   type: ClusterIP
 ---
+# Canonical api-server's frontend is a Next.js build that needs
+# NEXT_PUBLIC_API_URL baked at build time (runtime env has no effect on the
+# compiled bundle). Set it to the service DNS name browsers can resolve from
+# inside the cluster. The api service sits on port 80 (targetPort 8090), so
+# the frontend reaches it at novacron-api.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -167,9 +168,8 @@ spec:
         image: novacron/frontend:latest
         ports:
         - containerPort: 3000
-        env:
-        - name: NEXT_PUBLIC_API_URL
-          value: "http://novacron-api"
+        # No NEXT_PUBLIC_* env injection — the image's Dockerfile bakes
+        # NEXT_PUBLIC_API_URL/NEXT_PUBLIC_WS_URL from build-time ARGs.
         resources:
           requests:
             memory: "128Mi"
@@ -192,13 +192,13 @@ spec:
       targetPort: 3000
   type: ClusterIP
 ---
+# No /api rewrite: the canonical api-server registers the /api/* tree
+# itself, so the ingress passes it through unchanged.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: novacron-ingress
   namespace: novacron
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
   rules:
   - host: novacron.example.com
@@ -211,10 +211,4 @@ spec:
             name: novacron-frontend
             port:
               number: 80
-      - path: /api
-        pathType: Prefix
-        backend:
-          service:
-            name: novacron-api
-            port:
-              number: 80
+

@@ -229,11 +229,11 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	registerPublicRoutes(router, authManager, db, services.twoFactorService, emailService)
 
 	apiRouter := router.PathPrefix("/api").Subrouter()
-	apiRouter.Use(requireAuth(authManager))
+	apiRouter.Use(requireAuth(authManager, db))
 	registerSecureAPIRoutes(apiRouter, db, vmManager, vmBasePath(cfg))
 
 	apiV1Router := router.PathPrefix("/api/v1").Subrouter()
-	apiV1Router.Use(requireAuth(authManager))
+	apiV1Router.Use(requireAuth(authManager, db))
 	registerSecureAPIRoutes(apiV1Router, db, vmManager, vmBasePath(cfg))
 	// Signed fabric join/leave RPCs (node-to-node) and the authed
 	// /api/cluster/nodes inventory with live link profiles.
@@ -265,12 +265,12 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	// RPCs (/internal/cluster/capacity, /internal/vms/create).
 	registerClusterRoutes(router, apiRouter, db, vmManager, vmBasePath(cfg))
 
-	registerCanonicalSecurityRoutes(router, authManager, services.securityHandlers)
-	registerSecurityWebSocketAliases(router, authManager, services.securityHandlers)
+	registerCanonicalSecurityRoutes(router, authManager, db, services.securityHandlers)
+	registerSecurityWebSocketAliases(router, authManager, db, services.securityHandlers)
 	registerCanonicalAdminRoutes(router, authManager, db)
-	registerCanonicalGraphQLRoute(router, authManager, services.graphqlHandler)
+	registerCanonicalGraphQLRoute(router, authManager, db, services.graphqlHandler)
 	services.websocketHandler.RegisterWebSocketRoutes(router, func(required string, next http.HandlerFunc) http.Handler {
-		return requireAuth(authManager)(requireRoleHandler(required, next))
+		return requireAuth(authManager, db)(requireRoleHandler(required, next))
 	})
 	// Register orchestration API routes under /api/orchestration
 	if services.orchestrationAPI != nil {
@@ -427,7 +427,7 @@ func requireMigratedSchema(db *sql.DB) error {
 	return nil
 }
 
-func requireAuth(authManager *auth.SimpleAuthManager) func(http.Handler) http.Handler {
+func requireAuth(authManager *auth.SimpleAuthManager, db *sql.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tokenString, err := extractBearerToken(r.Header.Get("Authorization"))
@@ -450,6 +450,24 @@ func requireAuth(authManager *auth.SimpleAuthManager) func(http.Handler) http.Ha
 			if userID == "" {
 				writeJSONError(w, http.StatusUnauthorized, "token missing user identity")
 				return
+			}
+
+			// Session revocation: if the user's record has been bumped since this
+			// token was issued (password reset, role change, admin edit), the
+			// token is no longer valid. This is a stateless-JWT pattern — the DB
+			// check is a sub-millisecond indexed lookup, so the extra round trip is
+			// free against reality.
+			if db != nil {
+				var updatedAt time.Time
+				if err := db.QueryRowContext(r.Context(),
+					`SELECT updated_at FROM users WHERE id = $1`, userID).Scan(&updatedAt); err == nil {
+					if iat, err := claims.GetIssuedAt(); err == nil && iat != nil {
+						if iat.Before(updatedAt.UTC()) {
+							writeJSONError(w, http.StatusUnauthorized, "token revoked (session invalidated by profile change)")
+							return
+						}
+					}
+				}
 			}
 
 			ctx := context.WithValue(r.Context(), "user_id", userID)
@@ -2244,9 +2262,9 @@ func initializeCanonicalServices(cfg *config.Config, db *sql.DB, authManager *au
 	}, nil
 }
 
-func registerCanonicalSecurityRoutes(router *mux.Router, authManager *auth.SimpleAuthManager, handlers *securityapi.SecurityHandlers) {
+func registerCanonicalSecurityRoutes(router *mux.Router, authManager *auth.SimpleAuthManager, db *sql.DB, handlers *securityapi.SecurityHandlers) {
 	twoFactorRouter := router.PathPrefix("/api/auth/2fa").Subrouter()
-	twoFactorRouter.Use(requireAuth(authManager))
+	twoFactorRouter.Use(requireAuth(authManager, db))
 	twoFactorRouter.HandleFunc("/setup", handlers.Setup2FA).Methods(http.MethodPost)
 	twoFactorRouter.HandleFunc("/qr", handlers.GenerateQRCode).Methods(http.MethodGet)
 	twoFactorRouter.HandleFunc("/verify", handlers.Verify2FA).Methods(http.MethodPost)
@@ -2256,13 +2274,13 @@ func registerCanonicalSecurityRoutes(router *mux.Router, authManager *auth.Simpl
 	twoFactorRouter.HandleFunc("/backup-codes", handlers.GetBackupCodes).Methods(http.MethodGet)
 	twoFactorRouter.HandleFunc("/backup-codes", handlers.RegenerateBackupCodes).Methods(http.MethodPost)
 
-	registerSecurityRouteSet(router.PathPrefix("/api/security").Subrouter(), authManager, handlers)
-	registerSecurityRouteSet(router.PathPrefix("/api/admin/security").Subrouter(), authManager, handlers)
+	registerSecurityRouteSet(router.PathPrefix("/api/security").Subrouter(), authManager, db, handlers)
+	registerSecurityRouteSet(router.PathPrefix("/api/admin/security").Subrouter(), authManager, db, handlers)
 }
 
 func registerCanonicalAdminRoutes(router *mux.Router, authManager *auth.SimpleAuthManager, db *sql.DB) {
 	adminRouter := router.PathPrefix("/api/admin").Subrouter()
-	adminRouter.Use(requireAuth(authManager))
+	adminRouter.Use(requireAuth(authManager, db))
 	adminRouter.Use(requireAnyRoleMiddleware("admin", "super-admin"))
 
 	adminRouter.HandleFunc("/users", listCanonicalAdminUsers(db)).Methods(http.MethodGet)
@@ -2658,8 +2676,8 @@ func canonicalUserRoleForAdmin(raw string) (string, bool) {
 	}
 }
 
-func registerSecurityRouteSet(router *mux.Router, authManager *auth.SimpleAuthManager, handlers *securityapi.SecurityHandlers) {
-	router.Use(requireAuth(authManager))
+func registerSecurityRouteSet(router *mux.Router, authManager *auth.SimpleAuthManager, db *sql.DB, handlers *securityapi.SecurityHandlers) {
+	router.Use(requireAuth(authManager, db))
 	router.Use(requireAnyRoleMiddleware("admin", "super-admin"))
 
 	router.HandleFunc("/threats", handlers.GetThreats).Methods(http.MethodGet)
@@ -2687,16 +2705,16 @@ func registerSecurityRouteSet(router *mux.Router, authManager *auth.SimpleAuthMa
 	router.HandleFunc("/rbac/user/{userId}/permissions", handlers.GetUserPermissions).Methods(http.MethodGet)
 }
 
-func registerCanonicalGraphQLRoute(router *mux.Router, authManager *auth.SimpleAuthManager, handler http.Handler) {
-	router.Handle("/graphql", requireAuth(authManager)(handler)).Methods(http.MethodPost)
+func registerCanonicalGraphQLRoute(router *mux.Router, authManager *auth.SimpleAuthManager, db *sql.DB, handler http.Handler) {
+	router.Handle("/graphql", requireAuth(authManager, db)(handler)).Methods(http.MethodPost)
 }
 
-func registerSecurityWebSocketAliases(router *mux.Router, authManager *auth.SimpleAuthManager, handlers *securityapi.SecurityHandlers) {
-	securityStream := requireAuth(authManager)(requireRoleHandler("admin", handlers.StreamSecurityEvents))
+func registerSecurityWebSocketAliases(router *mux.Router, authManager *auth.SimpleAuthManager, db *sql.DB, handlers *securityapi.SecurityHandlers) {
+	securityStream := requireAuth(authManager, db)(requireRoleHandler("admin", handlers.StreamSecurityEvents))
 	router.Handle("/api/ws/security/events", securityStream).Methods(http.MethodGet)
 
 	compatSecurityRouter := router.PathPrefix("/api/security").Subrouter()
-	compatSecurityRouter.Use(requireAuth(authManager))
+	compatSecurityRouter.Use(requireAuth(authManager, db))
 	compatSecurityRouter.Handle("/events/stream", requireRoleHandler("admin", handlers.StreamSecurityEvents)).Methods(http.MethodGet)
 }
 

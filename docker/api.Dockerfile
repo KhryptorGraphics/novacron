@@ -82,12 +82,17 @@ USER root
 RUN chmod +x /usr/local/bin/api-entrypoint.sh
 USER novacron
 
-# Health check
+# Canonical api-server registers GET /health (no /api prefix). Healthcheck
+# used to probe /api/health — a path that does not exist — causing perpetual
+# unhealthy flaps. Also feed the exec directly to the application: the
+# previous " --config /etc/novacron/config.yaml" argument was dropped by the
+# binary (no flag parsing exists in backend/cmd/api-server) but misled
+# operators into thinking a config file was load-bearing.
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD wget -q -O /dev/null http://localhost:8090/api/health || exit 1
+    CMD wget -q -O /dev/null http://localhost:8090/health || exit 1
 
 # Set entrypoint
 ENTRYPOINT ["api-entrypoint.sh"]
 
 # Default command
-CMD ["novacron-api", "--config", "/etc/novacron/config.yaml"]
+CMD ["novacron-api"]

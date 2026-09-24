@@ -165,7 +165,7 @@ func newCanonicalSecurityRouter(t *testing.T, authManager *auth.SimpleAuthManage
 	t.Helper()
 
 	router := mux.NewRouter()
-	registerCanonicalSecurityRoutes(router, authManager, handlers)
+	registerCanonicalSecurityRoutes(router, authManager, nil, handlers)
 	return router
 }
 
@@ -255,7 +255,7 @@ func TestCanonicalTwoFactorLoginFlow(t *testing.T) {
 
 	router := mux.NewRouter()
 	registerPublicRoutes(router, authManager, db, twoFactorService, nil)
-	registerCanonicalSecurityRoutes(router, authManager, handlers)
+	registerCanonicalSecurityRoutes(router, authManager, nil, handlers)
 
 	setupReq := mustJSONRequest(t, http.MethodPost, "/api/auth/2fa/setup", map[string]interface{}{
 		"account_name": "user@example.com",
@@ -424,7 +424,7 @@ func TestCanonicalTwoFactorRoutesUseAuthenticatedPrincipal(t *testing.T) {
 	handlers := securityapi.NewSecurityHandlers(twoFactorService, audit.NewSimpleAuditLogger())
 
 	router := mux.NewRouter()
-	registerCanonicalSecurityRoutes(router, authManager, handlers)
+	registerCanonicalSecurityRoutes(router, authManager, nil, handlers)
 
 	setupReq := mustJSONRequest(t, http.MethodPost, "/api/auth/2fa/setup", map[string]interface{}{
 		"user_id":      "attacker-selected-user",
@@ -770,7 +770,7 @@ func TestCanonicalGraphQLRouteServesStorageBackedVolumeOperations(t *testing.T) 
 	handler := graphqlapi.NewVolumeHTTPHandler(resolver)
 
 	router := mux.NewRouter()
-	registerCanonicalGraphQLRoute(router, authManager, handler)
+	registerCanonicalGraphQLRoute(router, authManager, nil, handler)
 
 	createReq := mustJSONRequest(t, http.MethodPost, "/graphql", map[string]interface{}{
 		"query": `mutation CreateVolume($input: CreateVolumeInput!) { createVolume(input: $input) { id name size tier } }`,
@@ -887,12 +887,12 @@ func TestCanonicalLiveServerSmoke(t *testing.T) {
 
 	router := mux.NewRouter()
 	registerPublicRoutes(router, authManager, db, twoFactorService, nil)
-	registerCanonicalSecurityRoutes(router, authManager, securityHandlers)
-	registerCanonicalGraphQLRoute(router, authManager, graphqlHandler)
+	registerCanonicalSecurityRoutes(router, authManager, nil, securityHandlers)
+	registerCanonicalGraphQLRoute(router, authManager, nil, graphqlHandler)
 	wsHandler.RegisterWebSocketRoutes(router, func(required string, next http.HandlerFunc) http.Handler {
-		return requireAuth(authManager)(requireRoleHandler(required, next))
+		return requireAuth(authManager, nil)(requireRoleHandler(required, next))
 	})
-	registerSecurityWebSocketAliases(router, authManager, securityHandlers)
+	registerSecurityWebSocketAliases(router, authManager, nil, securityHandlers)
 
 	server := httptest.NewServer(router)
 	defer server.Close()
@@ -1099,7 +1099,7 @@ func TestCanonicalAndCompatibilityWebSocketMetricsRoutes(t *testing.T) {
 
 	router := mux.NewRouter()
 	wsHandler.RegisterWebSocketRoutes(router, func(required string, next http.HandlerFunc) http.Handler {
-		return requireAuth(authManager)(requireRoleHandler(required, next))
+		return requireAuth(authManager, nil)(requireRoleHandler(required, next))
 	})
 
 	server := httptest.NewServer(router)
@@ -1143,7 +1143,7 @@ func TestCanonicalAndCompatibilityWebSocketMetricsRoutesRejectUserRole(t *testin
 
 	router := mux.NewRouter()
 	wsHandler.RegisterWebSocketRoutes(router, func(required string, next http.HandlerFunc) http.Handler {
-		return requireAuth(authManager)(requireRoleHandler(required, next))
+		return requireAuth(authManager, nil)(requireRoleHandler(required, next))
 	})
 
 	server := httptest.NewServer(router)
@@ -1168,7 +1168,7 @@ func TestCanonicalSecurityWebSocketAliasesUpgrade(t *testing.T) {
 	handlers := securityapi.NewSecurityHandlers(auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret())), audit.NewSimpleAuditLogger())
 
 	router := mux.NewRouter()
-	registerSecurityWebSocketAliases(router, authManager, handlers)
+	registerSecurityWebSocketAliases(router, authManager, nil, handlers)
 
 	server := httptest.NewServer(router)
 	defer server.Close()
@@ -1191,7 +1191,7 @@ func TestCanonicalSecurityWebSocketAliasesRejectNonAdminUsers(t *testing.T) {
 	handlers := securityapi.NewSecurityHandlers(auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret())), audit.NewSimpleAuditLogger())
 
 	router := mux.NewRouter()
-	registerSecurityWebSocketAliases(router, authManager, handlers)
+	registerSecurityWebSocketAliases(router, authManager, nil, handlers)
 
 	server := httptest.NewServer(router)
 	defer server.Close()
@@ -1340,7 +1340,7 @@ func TestCanonicalAdminUserUpdateRejectsInvalidRole(t *testing.T) {
 	authManager := auth.NewSimpleAuthManager("test-secret", nil)
 	router := mux.NewRouter()
 	adminRouter := router.PathPrefix("/api/admin").Subrouter()
-	adminRouter.Use(requireAuth(authManager))
+	adminRouter.Use(requireAuth(authManager, nil))
 	adminRouter.Use(requireAnyRoleMiddleware("admin", "super-admin"))
 	registerCanonicalAdminRoutes(router, authManager, db)
 
@@ -1767,7 +1767,7 @@ func TestVMMigrateCleanupFailureReportsMovedLocation(t *testing.T) {
 	authManager := auth.NewSimpleAuthManager("test-secret", nil)
 	router := mux.NewRouter()
 	api := router.PathPrefix("/api").Subrouter()
-	api.Use(requireAuth(authManager))
+	api.Use(requireAuth(authManager, nil))
 	migrated := false
 	registerVMMigrateRouteWithExecutor(api, db, func(context.Context, string, string, map[string]string) error {
 		migrated = true
@@ -1805,7 +1805,7 @@ func TestVMMigrateCrossOrgReturns404BeforeManager(t *testing.T) {
 	authManager := auth.NewSimpleAuthManager("test-secret", nil)
 	router := mux.NewRouter()
 	api := router.PathPrefix("/api").Subrouter()
-	api.Use(requireAuth(authManager))
+	api.Use(requireAuth(authManager, nil))
 	migrateCalled := false
 	registerVMMigrateRouteWithExecutor(api, db, func(context.Context, string, string, map[string]string) error {
 		migrateCalled = true
@@ -1867,7 +1867,7 @@ func TestVMDeleteDriverFailurePreservesDatabaseRow(t *testing.T) {
 	authManager := auth.NewSimpleAuthManager("test-secret", nil)
 	router := mux.NewRouter()
 	api := router.PathPrefix("/api").Subrouter()
-	api.Use(requireAuth(authManager))
+	api.Use(requireAuth(authManager, nil))
 	registerVMDeleteRouteWithDeleter(api, db, func(context.Context, string) error {
 		return errors.New("disk removal failed")
 	})

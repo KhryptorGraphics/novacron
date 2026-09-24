@@ -57,7 +57,7 @@ func TestRequireAuthRejectsInvalidToken(t *testing.T) {
 
 	router := mux.NewRouter()
 	protected := router.PathPrefix("/api").Subrouter()
-	protected.Use(requireAuth(authManager))
+	protected.Use(requireAuth(authManager, nil))
 	protected.HandleFunc("/v1/vms", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -78,7 +78,7 @@ func TestRequireAuthAcceptsValidToken(t *testing.T) {
 
 	router := mux.NewRouter()
 	protected := router.PathPrefix("/api").Subrouter()
-	protected.Use(requireAuth(authManager))
+	protected.Use(requireAuth(authManager, nil))
 	protected.HandleFunc("/v1/vms", func(w http.ResponseWriter, r *http.Request) {
 		payload := map[string]interface{}{
 			"user_id":   r.Context().Value("user_id"),
@@ -207,7 +207,7 @@ func TestRegisterSecureAPIRoutesListsVMsOnCanonicalRoute(t *testing.T) {
 	authManager := auth.NewSimpleAuthManager("test-secret", nil)
 	router := mux.NewRouter()
 	apiV1 := router.PathPrefix("/api/v1").Subrouter()
-	apiV1.Use(requireAuth(authManager))
+	apiV1.Use(requireAuth(authManager, nil))
 	registerSecureAPIRoutes(apiV1, db, nil, t.TempDir())
 
 	now := time.Now().UTC()
@@ -255,7 +255,7 @@ func TestRegisterSecureAPIRoutesCreatesVMOnCompatibilityRoute(t *testing.T) {
 	authManager := auth.NewSimpleAuthManager("test-secret", nil)
 	router := mux.NewRouter()
 	apiCompat := router.PathPrefix("/api").Subrouter()
-	apiCompat.Use(requireAuth(authManager))
+	apiCompat.Use(requireAuth(authManager, nil))
 	// nil manager exercises the metadata-only path (manager unavailable); the
 	// row is recorded as "created", never the old fake "creating". node_id is
 	// this node's selfNodeID() (VM belongs to the creating node) — AnyArg since
@@ -320,7 +320,7 @@ func TestRegisterSecureAPIRoutesSupportsStateTransitionsAndMetrics(t *testing.T)
 	authManager := auth.NewSimpleAuthManager("test-secret", nil)
 	router := mux.NewRouter()
 	apiV1 := router.PathPrefix("/api/v1").Subrouter()
-	apiV1.Use(requireAuth(authManager))
+	apiV1.Use(requireAuth(authManager, nil))
 	// Start now routes through the real manager; seed vm-42 so it exists.
 	manager := newStubVMManager(t)
 	defer manager.Stop()
@@ -465,7 +465,7 @@ func TestRegisterCanonicalSecurityRoutesServesDashboardEndpoints(t *testing.T) {
 
 	handlers := securityapi.NewSecurityHandlers(twoFactorService, auditLogger).WithRBACStore(securityapi.NewPostgresRBACStore(db))
 	router := mux.NewRouter()
-	registerCanonicalSecurityRoutes(router, authManager, handlers)
+	registerCanonicalSecurityRoutes(router, authManager, nil, handlers)
 
 	token := signedBearerToken(t, authManager, "7", "default", "admin")
 	for _, endpoint := range []string{
@@ -541,6 +541,7 @@ func TestRegisterCanonicalGraphQLRouteSupportsVolumeOperations(t *testing.T) {
 	registerCanonicalGraphQLRoute(
 		router,
 		authManager,
+		nil,
 		graphqlapi.NewVolumeHTTPHandler(graphqlapi.NewResolverWithVolumeStore(nil, nil, volumeStore)),
 	)
 
