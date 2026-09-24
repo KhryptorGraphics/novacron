@@ -32,6 +32,31 @@ func getTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+
+func TestSimpleAuthManagerAuthenticateRejectsInactiveUser(t *testing.T) {
+	db := getTestDB(t)
+	if db == nil {
+		return
+	}
+	defer db.Close()
+
+	manager := NewSimpleAuthManager("test-secret", db)
+	username := "inactive_auth_" + time.Now().Format("20060102150405.000000000")
+	user, err := manager.CreateUser(username, authGeneratedEmail(), "ValidPassword123!", "viewer", "")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	defer db.Exec(`DELETE FROM users WHERE id = $1`, user.ID)
+
+	if _, err := db.Exec(`UPDATE users SET status = 'inactive' WHERE id = $1`, user.ID); err != nil {
+		t.Fatalf("deactivate user: %v", err)
+	}
+
+	authenticated, token, err := manager.Authenticate(username, "ValidPassword123!")
+	if err == nil || authenticated != nil || token != "" {
+		t.Fatalf("inactive user authenticated: user=%v token=%q err=%v", authenticated, token, err)
+	}
+}
 func TestPostgresUserStore_Create(t *testing.T) {
 	db := getTestDB(t)
 	if db == nil {

@@ -2134,7 +2134,7 @@ func pidFileAlive(path, vmID string) bool {
 
 func initializeCanonicalServices(cfg *config.Config, db *sql.DB, authManager *auth.SimpleAuthManager) (*canonicalServices, error) {
 	auditLogger := audit.NewSimpleAuditLogger()
-	twoFactorService := auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret()))
+	twoFactorService := auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret()), db)
 	securityHandlers := securityapi.NewSecurityHandlers(twoFactorService, auditLogger).WithRBACStore(securityapi.NewPostgresRBACStore(db))
 
 	volumeStore, err := storage.NewStorageManager(storage.StorageManagerConfig{

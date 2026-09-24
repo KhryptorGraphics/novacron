@@ -3,7 +3,9 @@ package auth
 import (
 	"crypto/rand"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -23,6 +25,7 @@ type TwoFactorService struct {
 	rateLimiter   map[string]*RateLimit
 	issuer        string
 	encryptionKey []byte
+	db            *sql.DB
 }
 
 // UserTwoFactor stores 2FA data for a user
@@ -76,15 +79,85 @@ const (
 	BackupCodeCount         = 10
 )
 
-// NewTwoFactorService creates a new 2FA service
-func NewTwoFactorService(issuer string, encryptionKey []byte) *TwoFactorService {
-	return &TwoFactorService{
+// NewTwoFactorService creates a new 2FA service. An optional database enables
+// persistence; without one, state remains in memory.
+func NewTwoFactorService(issuer string, encryptionKey []byte, db ...*sql.DB) *TwoFactorService {
+	service := &TwoFactorService{
 		userSecrets:   make(map[string]*UserTwoFactor),
 		backupCodes:   make(map[string][]string),
 		rateLimiter:   make(map[string]*RateLimit),
 		issuer:        issuer,
 		encryptionKey: encryptionKey,
 	}
+	if len(db) > 0 {
+		service.db = db[0]
+	}
+	return service
+}
+
+// loadUser retrieves 2FA state lazily so new service instances recover
+// enrollment state without eagerly scanning every user at startup.
+func (tfs *TwoFactorService) loadUser(userID string) (*UserTwoFactor, error) {
+	tfs.mu.RLock()
+	user, exists := tfs.userSecrets[userID]
+	tfs.mu.RUnlock()
+	if exists {
+		return user, nil
+	}
+	if tfs.db == nil {
+		return nil, sql.ErrNoRows
+	}
+
+	var backupCodesJSON []byte
+	user = &UserTwoFactor{UserID: userID}
+	err := tfs.db.QueryRow(`
+		SELECT secret, enabled, setup_at, last_used, backup_codes,
+		       algorithm, digits, period
+		FROM user_two_factor WHERE user_id = $1
+	`, userID).Scan(
+		&user.Secret, &user.Enabled, &user.SetupAt, &user.LastUsed,
+		&backupCodesJSON, &user.Algorithm, &user.Digits, &user.Period,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(backupCodesJSON, &user.BackupCodes); err != nil {
+		return nil, fmt.Errorf("decode stored 2FA backup codes: %w", err)
+	}
+
+	tfs.mu.Lock()
+	if cached, found := tfs.userSecrets[userID]; found {
+		user = cached
+	} else {
+		tfs.userSecrets[userID] = user
+	}
+	tfs.mu.Unlock()
+	return user, nil
+}
+
+func (tfs *TwoFactorService) saveUser(user *UserTwoFactor) error {
+	if tfs.db == nil {
+		return nil
+	}
+	backupCodes, err := json.Marshal(user.BackupCodes)
+	if err != nil {
+		return fmt.Errorf("encode 2FA backup codes: %w", err)
+	}
+	_, err = tfs.db.Exec(`
+		INSERT INTO user_two_factor
+			(user_id, secret, enabled, setup_at, last_used, backup_codes, algorithm, digits, period)
+		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9)
+		ON CONFLICT (user_id) DO UPDATE SET
+			secret = EXCLUDED.secret, enabled = EXCLUDED.enabled,
+			setup_at = EXCLUDED.setup_at, last_used = EXCLUDED.last_used,
+			backup_codes = EXCLUDED.backup_codes, algorithm = EXCLUDED.algorithm,
+			digits = EXCLUDED.digits, period = EXCLUDED.period
+	`, user.UserID, user.Secret, user.Enabled, user.SetupAt, user.LastUsed,
+		string(backupCodes), user.Algorithm, user.Digits, user.Period)
+	if err != nil {
+		return fmt.Errorf("persist 2FA state: %w", err)
+	}
+	return nil
 }
 
 // SetupTwoFactor initiates 2FA setup for a user
@@ -112,9 +185,8 @@ func (tfs *TwoFactorService) SetupTwoFactor(userID, accountName string) (*TwoFac
 		return nil, fmt.Errorf("failed to generate backup codes: %w", err)
 	}
 
-	// Store user 2FA data (not enabled yet)
-	tfs.mu.Lock()
-	tfs.userSecrets[userID] = &UserTwoFactor{
+	// Store user 2FA data (not enabled yet).
+	userTwoFactor := &UserTwoFactor{
 		UserID:      userID,
 		Secret:      key.Secret(),
 		Enabled:     false,
@@ -124,6 +196,11 @@ func (tfs *TwoFactorService) SetupTwoFactor(userID, accountName string) (*TwoFac
 		Digits:      int(otp.DigitsSix),
 		Period:      30,
 	}
+	if err := tfs.saveUser(userTwoFactor); err != nil {
+		return nil, err
+	}
+	tfs.mu.Lock()
+	tfs.userSecrets[userID] = userTwoFactor
 	tfs.mu.Unlock()
 
 	// Generate manual entry key (formatted for user convenience)
@@ -142,11 +219,8 @@ func (tfs *TwoFactorService) SetupTwoFactor(userID, accountName string) (*TwoFac
 
 // GenerateQRCode generates a QR code image for the setup
 func (tfs *TwoFactorService) GenerateQRCode(userID string) ([]byte, error) {
-	tfs.mu.RLock()
-	userTwoFactor, exists := tfs.userSecrets[userID]
-	tfs.mu.RUnlock()
-
-	if !exists {
+	userTwoFactor, err := tfs.loadUser(userID)
+	if err != nil {
 		return nil, fmt.Errorf("2FA not set up for user %s", userID)
 	}
 
@@ -187,11 +261,14 @@ func (tfs *TwoFactorService) VerifyAndEnable(userID, code string) error {
 
 	// Enable 2FA
 	tfs.mu.Lock()
-	if userTwoFactor, exists := tfs.userSecrets[userID]; exists {
-		userTwoFactor.Enabled = true
-		userTwoFactor.LastUsed = time.Now()
-	}
+	userTwoFactor := tfs.userSecrets[userID]
+	userTwoFactor.Enabled = true
+	userTwoFactor.LastUsed = time.Now()
+	err = tfs.saveUser(userTwoFactor)
 	tfs.mu.Unlock()
+	if err != nil {
+		return err
+	}
 
 	// Reset rate limiting on successful enable
 	tfs.resetRateLimit(userID)
@@ -233,8 +310,12 @@ func (tfs *TwoFactorService) VerifyCode(req TwoFactorVerifyRequest) (*TwoFactorV
 	tfs.mu.Lock()
 	if userTwoFactor, exists := tfs.userSecrets[req.UserID]; exists {
 		userTwoFactor.LastUsed = time.Now()
+		err = tfs.saveUser(userTwoFactor)
 	}
 	tfs.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 
 	// Get remaining backup codes count
 	remainingCodes := tfs.getRemainingBackupCodesCount(req.UserID)
@@ -247,12 +328,12 @@ func (tfs *TwoFactorService) VerifyCode(req TwoFactorVerifyRequest) (*TwoFactorV
 
 // verifyCode internal method to verify codes
 func (tfs *TwoFactorService) verifyCode(userID, code string, isBackupCode bool) (bool, error) {
-	tfs.mu.RLock()
-	userTwoFactor, exists := tfs.userSecrets[userID]
-	tfs.mu.RUnlock()
-
-	if !exists {
-		return false, fmt.Errorf("2FA not set up for user")
+	userTwoFactor, err := tfs.loadUser(userID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, fmt.Errorf("2FA not set up for user")
+		}
+		return false, fmt.Errorf("failed to load 2FA state: %w", err)
 	}
 
 	if !userTwoFactor.Enabled && !isBackupCode {
@@ -297,10 +378,15 @@ func (tfs *TwoFactorService) verifyBackupCode(userID, code string) (bool, error)
 	for i, backupCode := range userTwoFactor.BackupCodes {
 		if subtle.ConstantTimeCompare([]byte(code), []byte(backupCode)) == 1 {
 			// Remove the used backup code
+			previousCodes := append([]string(nil), userTwoFactor.BackupCodes...)
 			userTwoFactor.BackupCodes = append(
 				userTwoFactor.BackupCodes[:i],
 				userTwoFactor.BackupCodes[i+1:]...,
 			)
+			if err := tfs.saveUser(userTwoFactor); err != nil {
+				userTwoFactor.BackupCodes = previousCodes
+				return false, err
+			}
 			log.Printf("Backup code used for user: %s, remaining: %d", userID, len(userTwoFactor.BackupCodes))
 			return true, nil
 		}
@@ -311,13 +397,12 @@ func (tfs *TwoFactorService) verifyBackupCode(userID, code string) (bool, error)
 
 // RegenerateBackupCodes generates new backup codes for a user
 func (tfs *TwoFactorService) RegenerateBackupCodes(userID string) ([]string, error) {
-	tfs.mu.Lock()
-	defer tfs.mu.Unlock()
-
-	userTwoFactor, exists := tfs.userSecrets[userID]
-	if !exists {
+	userTwoFactor, err := tfs.loadUser(userID)
+	if err != nil {
 		return nil, fmt.Errorf("2FA not set up for user")
 	}
+	tfs.mu.Lock()
+	defer tfs.mu.Unlock()
 
 	if !userTwoFactor.Enabled {
 		return nil, fmt.Errorf("2FA not enabled for user")
@@ -328,71 +413,74 @@ func (tfs *TwoFactorService) RegenerateBackupCodes(userID string) ([]string, err
 		return nil, fmt.Errorf("failed to generate backup codes: %w", err)
 	}
 
+	previousCodes := userTwoFactor.BackupCodes
 	userTwoFactor.BackupCodes = backupCodes
+	if err := tfs.saveUser(userTwoFactor); err != nil {
+		userTwoFactor.BackupCodes = previousCodes
+		return nil, err
+	}
 	log.Printf("Backup codes regenerated for user: %s", userID)
-
 	return backupCodes, nil
 }
 
 // GetBackupCodes returns the current backup codes for a user
 func (tfs *TwoFactorService) GetBackupCodes(userID string) ([]string, error) {
-	tfs.mu.RLock()
-	defer tfs.mu.RUnlock()
-
-	userTwoFactor, exists := tfs.userSecrets[userID]
-	if !exists {
+	userTwoFactor, err := tfs.loadUser(userID)
+	if err != nil {
 		return nil, fmt.Errorf("2FA not set up for user")
 	}
+	tfs.mu.RLock()
+	defer tfs.mu.RUnlock()
 
 	if !userTwoFactor.Enabled {
 		return nil, fmt.Errorf("2FA not enabled for user")
 	}
-
-	// Return a copy to prevent modification
-	codes := make([]string, len(userTwoFactor.BackupCodes))
-	copy(codes, userTwoFactor.BackupCodes)
-
-	return codes, nil
+	return append([]string(nil), userTwoFactor.BackupCodes...), nil
 }
 
 // DisableTwoFactor disables 2FA for a user
 func (tfs *TwoFactorService) DisableTwoFactor(userID string) error {
+	userTwoFactor, err := tfs.loadUser(userID)
+	if err != nil {
+		return fmt.Errorf("2FA not set up for user")
+	}
 	tfs.mu.Lock()
 	defer tfs.mu.Unlock()
 
-	userTwoFactor, exists := tfs.userSecrets[userID]
-	if !exists {
-		return fmt.Errorf("2FA not set up for user")
-	}
-
+	wasEnabled := userTwoFactor.Enabled
+	previousCodes := userTwoFactor.BackupCodes
 	userTwoFactor.Enabled = false
 	userTwoFactor.BackupCodes = nil
+	if err := tfs.saveUser(userTwoFactor); err != nil {
+		userTwoFactor.Enabled = wasEnabled
+		userTwoFactor.BackupCodes = previousCodes
+		return err
+	}
 
-	// Clean up rate limiting
 	delete(tfs.rateLimiter, userID)
-
 	log.Printf("2FA disabled for user: %s", userID)
 	return nil
 }
 
 // IsEnabled checks if 2FA is enabled for a user
 func (tfs *TwoFactorService) IsEnabled(userID string) bool {
+	userTwoFactor, err := tfs.loadUser(userID)
+	if err != nil {
+		return false
+	}
 	tfs.mu.RLock()
 	defer tfs.mu.RUnlock()
-
-	userTwoFactor, exists := tfs.userSecrets[userID]
-	return exists && userTwoFactor.Enabled
+	return userTwoFactor.Enabled
 }
 
 // GetUserTwoFactorInfo returns 2FA information for a user (without secrets)
 func (tfs *TwoFactorService) GetUserTwoFactorInfo(userID string) (*UserTwoFactor, error) {
-	tfs.mu.RLock()
-	defer tfs.mu.RUnlock()
-
-	userTwoFactor, exists := tfs.userSecrets[userID]
-	if !exists {
+	userTwoFactor, err := tfs.loadUser(userID)
+	if err != nil {
 		return nil, fmt.Errorf("2FA not set up for user")
 	}
+	tfs.mu.RLock()
+	defer tfs.mu.RUnlock()
 
 	// Return sanitized copy without secrets
 	info := &UserTwoFactor{

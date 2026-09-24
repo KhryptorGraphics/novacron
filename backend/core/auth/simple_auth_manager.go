@@ -38,11 +38,15 @@ func (m *SimpleAuthManager) Authenticate(username, password string) (*User, stri
 		return nil, "", errors.New("invalid credentials")
 	}
 
+	// Only active users may authenticate; all other schema statuses are non-login states.
+	if user.Status != UserStatusActive {
+		return nil, "", errors.New("invalid credentials")
+	}
+
 	// Verify password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		return nil, "", errors.New("invalid credentials")
 	}
-
 	// Generate JWT token
 	token, err := m.generateJWTToken(user)
 	if err != nil {
