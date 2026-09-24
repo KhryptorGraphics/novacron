@@ -1,5 +1,3 @@
-const DEFAULT_API_ORIGIN = 'http://localhost:8090';
-
 function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, '');
 }
@@ -17,7 +15,11 @@ function toWebSocketOrigin(value: string): string {
   return value.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
 }
 
-const configuredApiOrigin = process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_ORIGIN;
+// Default to same-origin when no env var is provided.
+// In the browser, window.location.origin gives us the current origin.
+// During SSR/build, process.env.NEXT_PUBLIC_API_URL may be undefined, so we use '' which
+// will resolve to same-origin when used with URL constructor in buildApiUrl/buildWebSocketUrls.
+const configuredApiOrigin = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? window.location.origin : '');
 const deprecatedWsOrigin = process.env.NEXT_PUBLIC_WS_URL;
 
 export const API_ORIGIN = originFromUrl(configuredApiOrigin);

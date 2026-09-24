@@ -201,98 +201,10 @@ class APIService {
   async getVMMetrics(id: string): Promise<{ id: string; cpu_usage: number; memory_usage: number }> {
     return this.request<{ id: string; cpu_usage: number; memory_usage: number }>(`/api/v1/vms/${id}/metrics`);
   }
-
-  // Job Management
-  async listJobs(): Promise<CronJob[]> {
-    const response = await this.request<{ success: boolean; data: CronJob[] }>('/api/jobs');
-    return response.data;
-  }
-
-  async getJob(id: string): Promise<CronJob> {
-    const response = await this.request<{ success: boolean; data: CronJob }>(`/api/jobs/${id}`);
-    return response.data;
-  }
-
-  async createJob(jobData: CreateJobRequest): Promise<CronJob> {
-    const response = await this.request<{ success: boolean; data: CronJob }>('/api/jobs', {
-      method: 'POST',
-      body: JSON.stringify(jobData),
-    });
-    return response.data;
-  }
-
-  async updateJob(id: string, jobData: Partial<CreateJobRequest>): Promise<CronJob> {
-    const response = await this.request<{ success: boolean; data: CronJob }>(`/api/jobs/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(jobData),
-    });
-    return response.data;
-  }
-
-  async deleteJob(id: string): Promise<boolean> {
-    const response = await this.request<{ success: boolean }> (`/api/jobs/${id}`, {
-      method: 'DELETE',
-    });
-    return response.success;
-  }
-
-  async executeJob(id: string): Promise<any> {
-    const response = await this.request<{ success: boolean; data: any }> (`/api/jobs/${id}/execute`, {
-      method: 'POST',
-    });
-    return response.data;
-  }
-
-  async getJobExecutions(id: string): Promise<JobExecution[]> {
-    const response = await this.request<{ success: boolean; data: JobExecution[] }> (`/api/jobs/${id}/executions`);
-    return response.data;
-  }
-
-  // Workflow Management
-  async listWorkflows(): Promise<Workflow[]> {
-    const response = await this.request<{ success: boolean; data: Workflow[] }>('/api/workflows');
-    return response.data;
-  }
-
-  async getWorkflow(id: string): Promise<Workflow> {
-    const response = await this.request<{ success: boolean; data: Workflow }>(`/api/workflows/${id}`);
-    return response.data;
-  }
-
-  async createWorkflow(workflowData: CreateWorkflowRequest): Promise<Workflow> {
-    const response = await this.request<{ success: boolean; data: Workflow }>('/api/workflows', {
-      method: 'POST',
-      body: JSON.stringify(workflowData),
-    });
-    return response.data;
-  }
-
-  async updateWorkflow(id: string, workflowData: Partial<CreateWorkflowRequest>): Promise<Workflow> {
-    const response = await this.request<{ success: boolean; data: Workflow }>(`/api/workflows/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(workflowData),
-    });
-    return response.data;
-  }
-
-  async deleteWorkflow(id: string): Promise<boolean> {
-    const response = await this.request<{ success: boolean }> (`/api/workflows/${id}`, {
-      method: 'DELETE',
-    });
-    return response.success;
-  }
-
-  async executeWorkflow(id: string): Promise<WorkflowExecution> {
-    const response = await this.request<{ success: boolean; data: WorkflowExecution }> (`/api/workflows/${id}/execute`, {
-      method: 'POST',
-    });
-    return response.data;
-  }
-
-  async getWorkflowExecution(id: string): Promise<WorkflowExecution> {
-    const response = await this.request<{ success: boolean; data: WorkflowExecution }>(`/api/workflows/executions/${id}`);
-    return response.data;
-  }
+//   // Job Management - REMOVED: /api/jobs endpoint does not exist in canonical backend
+//   // Use fabricApi from '@/lib/api/fabric' for /api/compute/jobs instead
+//
+//   // Workflow Management - REMOVED: /api/workflows endpoint does not exist in canonical backend
 
     // Authentication
   async register(userData: {

@@ -30,11 +30,14 @@ services:
     build:
       context: .
       dockerfile: docker/frontend.Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8090}/api
+        - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-ws://localhost:8091}/ws
     ports:
       - "8092:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8090/api
-      - NEXT_PUBLIC_WS_URL=ws://localhost:8091/ws
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8090}/api
+      - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-ws://localhost:8091}/ws
     volumes:
       - ./frontend:/app
       - /app/node_modules

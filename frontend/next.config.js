@@ -55,6 +55,13 @@ const nextConfig = {
   generateBuildId: async () => {
     return 'build-' + Date.now()
   },
+
+  // Runtime environment variables - these take precedence over build-time
+  // NEXT_PUBLIC_* vars when running in a Node.js server context (not static export)
+  runtimeEnv: {
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8090',
+    NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8091',
+  },
 };
 
 module.exports = nextConfig;

@@ -2,13 +2,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { 
   apiService, 
-  HealthStatus, 
-  CronJob, 
-  CreateJobRequest, 
-  Workflow, 
-  CreateWorkflowRequest, 
-  WorkflowExecution 
+  HealthStatus 
 } from '@/lib/api';
+import { fabricApi, type FabricJob, type FabricJobRequest } from '@/lib/api/fabric';
 
 export function useHealth() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
@@ -30,9 +26,6 @@ export function useHealth() {
 
   useEffect(() => {
     checkHealth();
-    // Check health every 30 seconds
-    const interval = setInterval(checkHealth, 30000);
-    return () => clearInterval(interval);
   }, [checkHealth]);
 
   return { health, loading, error, refetch: checkHealth };
@@ -147,9 +140,9 @@ export function useVMMetrics(vmId: string | null) {
   return { metrics, loading, error, refetch: fetchMetrics };
 }
 
-// Job Hooks
-export function useJobs() {
-  const [jobs, setJobs] = useState<CronJob[] | null>(null);
+// Fabric Job Hooks (using /api/compute/jobs canonical backend endpoint)
+export function useFabricJobs() {
+  const [jobs, setJobs] = useState<FabricJob[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -157,53 +150,34 @@ export function useJobs() {
     try {
       setLoading(true);
       setError(null);
-      const jobData = await apiService.listJobs();
+      const jobData = await fabricApi.listJobs();
       setJobs(jobData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch jobs');
+      setError(err instanceof Error ? err.message : 'Failed to fetch fabric jobs');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const createJob = useCallback(async (jobData: CreateJobRequest) => {
+  const submitJob = useCallback(async (jobData: FabricJobRequest) => {
     try {
-      const result = await apiService.createJob(jobData);
+      const result = await fabricApi.submitJob(jobData);
       await fetchJobs(); // Refresh the list
       return result;
     } catch (err) {
-      throw new Error(err instanceof Error ? err.message : 'Failed to create job');
+      throw new Error(err instanceof Error ? err.message : 'Failed to submit fabric job');
     }
   }, [fetchJobs]);
 
-  const updateJob = useCallback(async (id: string, jobData: Partial<CreateJobRequest>) => {
+  const cancelJob = useCallback(async (jobId: string) => {
     try {
-      const result = await apiService.updateJob(id, jobData);
+      const result = await fabricApi.cancelJob(jobId);
       await fetchJobs(); // Refresh the list
       return result;
     } catch (err) {
-      throw new Error(err instanceof Error ? err.message : 'Failed to update job');
+      throw new Error(err instanceof Error ? err.message : 'Failed to cancel fabric job');
     }
   }, [fetchJobs]);
-
-  const deleteJob = useCallback(async (id: string) => {
-    try {
-      const result = await apiService.deleteJob(id);
-      await fetchJobs(); // Refresh the list
-      return result;
-    } catch (err) {
-      throw new Error(err instanceof Error ? err.message : 'Failed to delete job');
-    }
-  }, [fetchJobs]);
-
-  const executeJob = useCallback(async (id: string) => {
-    try {
-      const result = await apiService.executeJob(id);
-      return result;
-    } catch (err) {
-      throw new Error(err instanceof Error ? err.message : 'Failed to execute job');
-    }
-  }, []);
 
   useEffect(() => {
     fetchJobs();
@@ -214,293 +188,109 @@ export function useJobs() {
     loading, 
     error, 
     refetch: fetchJobs,
-    createJob,
-    updateJob,
-    deleteJob,
-    executeJob
+    submitJob,
+    cancelJob
   };
 }
 
-export function useJob(id: string | null) {
-  const [job, setJob] = useState<CronJob | null>(null);
+export function useFabricJob(jobId: string | null) {
+  const [job, setJob] = useState<FabricJob | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchJob = useCallback(async () => {
-    if (!id) return;
+    if (!jobId) return;
     
     try {
       setLoading(true);
       setError(null);
-      const jobData = await apiService.getJob(id);
+      const jobData = await fabricApi.getJob(jobId);
       setJob(jobData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch job');
+      setError(err instanceof Error ? err.message : 'Failed to fetch fabric job');
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [jobId]);
 
-  const updateJob = useCallback(async (jobData: Partial<CreateJobRequest>) => {
-    if (!id) return;
+  const cancelJob = useCallback(async () => {
+    if (!jobId) return;
     
     try {
-      const result = await apiService.updateJob(id, jobData);
-      setJob(result);
+      const result = await fabricApi.cancelJob(jobId);
+      setJob(prev => prev ? { ...prev, status: 'cancelled' } : null);
       return result;
     } catch (err) {
-      throw new Error(err instanceof Error ? err.message : 'Failed to update job');
+      throw new Error(err instanceof Error ? err.message : 'Failed to cancel fabric job');
     }
-  }, [id]);
-
-  const deleteJob = useCallback(async () => {
-    if (!id) return;
-    
-    try {
-      const result = await apiService.deleteJob(id);
-      return result;
-    } catch (err) {
-      throw new Error(err instanceof Error ? err.message : 'Failed to delete job');
-    }
-  }, [id]);
-
-  const executeJob = useCallback(async () => {
-    if (!id) return;
-    
-    try {
-      const result = await apiService.executeJob(id);
-      return result;
-    } catch (err) {
-      throw new Error(err instanceof Error ? err.message : 'Failed to execute job');
-    }
-  }, [id]);
+  }, [jobId]);
 
   useEffect(() => {
-    if (id) {
+    if (jobId) {
       fetchJob();
     }
-  }, [fetchJob, id]);
+  }, [fetchJob, jobId]);
 
   return { 
     job, 
     loading, 
     error, 
     refetch: fetchJob,
-    updateJob,
-    deleteJob,
-    executeJob
-  };
-}
-
-// Workflow Hooks
-export function useWorkflows() {
-  const [workflows, setWorkflows] = useState<Workflow[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchWorkflows = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const workflowData = await apiService.listWorkflows();
-      setWorkflows(workflowData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch workflows');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const createWorkflow = useCallback(async (workflowData: CreateWorkflowRequest) => {
-    try {
-      const result = await apiService.createWorkflow(workflowData);
-      await fetchWorkflows(); // Refresh the list
-      return result;
-    } catch (err) {
-      throw new Error(err instanceof Error ? err.message : 'Failed to create workflow');
-    }
-  }, [fetchWorkflows]);
-
-  const updateWorkflow = useCallback(async (id: string, workflowData: Partial<CreateWorkflowRequest>) => {
-    try {
-      const result = await apiService.updateWorkflow(id, workflowData);
-      await fetchWorkflows(); // Refresh the list
-      return result;
-    } catch (err) {
-      throw new Error(err instanceof Error ? err.message : 'Failed to update workflow');
-    }
-  }, [fetchWorkflows]);
-
-  const deleteWorkflow = useCallback(async (id: string) => {
-    try {
-      const result = await apiService.deleteWorkflow(id);
-      await fetchWorkflows(); // Refresh the list
-      return result;
-    } catch (err) {
-      throw new Error(err instanceof Error ? err.message : 'Failed to delete workflow');
-    }
-  }, [fetchWorkflows]);
-
-  const executeWorkflow = useCallback(async (id: string) => {
-    try {
-      const result = await apiService.executeWorkflow(id);
-      return result;
-    } catch (err) {
-      throw new Error(err instanceof Error ? err.message : 'Failed to execute workflow');
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchWorkflows();
-  }, [fetchWorkflows]);
-
-  return { 
-    workflows, 
-    loading, 
-    error, 
-    refetch: fetchWorkflows,
-    createWorkflow,
-    updateWorkflow,
-    deleteWorkflow,
-    executeWorkflow
-  };
-}
-
-export function useWorkflow(id: string | null) {
-  const [workflow, setWorkflow] = useState<Workflow | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchWorkflow = useCallback(async () => {
-    if (!id) return;
-    
-    try {
-      setLoading(true);
-      setError(null);
-      const workflowData = await apiService.getWorkflow(id);
-      setWorkflow(workflowData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch workflow');
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
-
-  const updateWorkflow = useCallback(async (workflowData: Partial<CreateWorkflowRequest>) => {
-    if (!id) return;
-    
-    try {
-      const result = await apiService.updateWorkflow(id, workflowData);
-      setWorkflow(result);
-      return result;
-    } catch (err) {
-      throw new Error(err instanceof Error ? err.message : 'Failed to update workflow');
-    }
-  }, [id]);
-
-  const deleteWorkflow = useCallback(async () => {
-    if (!id) return;
-    
-    try {
-      const result = await apiService.deleteWorkflow(id);
-      return result;
-    } catch (err) {
-      throw new Error(err instanceof Error ? err.message : 'Failed to delete workflow');
-    }
-  }, [id]);
-
-  const executeWorkflow = useCallback(async () => {
-    if (!id) return;
-    
-    try {
-      const result = await apiService.executeWorkflow(id);
-      return result;
-    } catch (err) {
-      throw new Error(err instanceof Error ? err.message : 'Failed to execute workflow');
-    }
-  }, [id]);
-
-  useEffect(() => {
-    if (id) {
-      fetchWorkflow();
-    }
-  }, [fetchWorkflow, id]);
-
-  return { 
-    workflow, 
-    loading, 
-    error, 
-    refetch: fetchWorkflow,
-    updateWorkflow,
-    deleteWorkflow,
-    executeWorkflow
-  };
-}
-
-export function useWorkflowExecution(id: string | null) {
-  const [execution, setExecution] = useState<WorkflowExecution | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchExecution = useCallback(async () => {
-    if (!id) return;
-    
-    try {
-      setLoading(true);
-      setError(null);
-      const executionData = await apiService.getWorkflowExecution(id);
-      setExecution(executionData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch execution');
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
-
-  useEffect(() => {
-    if (id) {
-      fetchExecution();
-      // Poll for updates every 5 seconds
-      const interval = setInterval(fetchExecution, 5000);
-      return () => clearInterval(interval);
-    }
-    return undefined;
-  }, [fetchExecution, id]);
-
-  return { 
-    execution, 
-    loading, 
-    error, 
-    refetch: fetchExecution
+    cancelJob
   };
 }
 
 export function useWebSocket() {
   const [connected, setConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState<any>(null);
+  const [error, setError] = useState<Event | null>(null);
 
   useEffect(() => {
-    const ws = apiService.createWebSocket(
-      (data) => {
-        setLastMessage(data);
-        setConnected(true);
-      },
-      (error) => {
-        console.error('WebSocket error:', error);
-        setConnected(false);
+    let ws: WebSocket | null = null;
+    
+    const connect = () => {
+      try {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/api/ws/metrics`;
+        
+        ws = new WebSocket(wsUrl);
+        
+        ws.onopen = () => {
+          setConnected(true);
+          setError(null);
+        };
+        
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            setLastMessage(data);
+          } catch (e) {
+            setLastMessage(event.data);
+          }
+        };
+        
+        ws.onerror = (err) => {
+          setError(err);
+        };
+        
+        ws.onclose = () => {
+          setConnected(false);
+          // Reconnect after 5 seconds
+          setTimeout(connect, 5000);
+        };
+      } catch (err) {
+        setError(err instanceof Event ? err : null);
       }
-    );
+    };
 
-    if (ws) {
-      ws.onopen = () => setConnected(true);
-      ws.onclose = () => setConnected(false);
-      
-      return () => {
+    connect();
+
+    return () => {
+      if (ws) {
         ws.close();
-      };
-    }
-    return undefined;
+      }
+    };
   }, []);
 
-  return { connected, lastMessage };
+  return { connected, lastMessage, error };
 }
