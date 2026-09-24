@@ -1089,6 +1089,11 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 
 	router.HandleFunc("/vms/{id}/metrics", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["id"]
+		_, _, visible := requireOrgScope(r.Context(), db, vmID)
+		if !visible {
+			writeJSONError(w, http.StatusNotFound, "vm not found")
+			return
+		}
 
 		var cpuUsage, memoryUsage float64
 		err := db.QueryRow(`
@@ -1114,7 +1119,17 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/monitoring/vms", func(w http.ResponseWriter, r *http.Request) {
-		rows, err := db.Query(`SELECT id, name, state FROM vms ORDER BY created_at DESC`)
+		scopeOrg, isAdmin, _ := requireOrgScope(r.Context(), nil, "")
+		var rows *sql.Rows
+		var err error
+		switch {
+		case isAdmin:
+			rows, err = db.Query(`SELECT id, name, state FROM vms ORDER BY created_at DESC`)
+		case scopeOrg != "":
+			rows, err = db.Query(`SELECT id, name, state, organization_id FROM vms WHERE organization_id = $1 ORDER BY created_at DESC`, scopeOrg)
+		default:
+			rows, err = db.Query(`SELECT id, name, state, organization_id FROM vms WHERE organization_id IS NULL ORDER BY created_at DESC`)
+		}
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to query VMs")
 			return
@@ -1125,12 +1140,18 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 		var base []vmRow
 		for rows.Next() {
 			var v vmRow
-			if err := rows.Scan(&v.id, &v.name, &v.state); err != nil {
-				continue
+			if isAdmin {
+				if err := rows.Scan(&v.id, &v.name, &v.state); err != nil {
+					continue
+				}
+			} else {
+				var rowOrg sql.NullString
+				if err := rows.Scan(&v.id, &v.name, &v.state, &rowOrg); err != nil || !orgVisible(scopeOrg, rowOrg) {
+					continue
+				}
 			}
 			base = append(base, v)
 		}
-		rows.Close()
 
 		// Real per-VM metrics from the vm_metrics table (same source as
 		// /vms/{id}/metrics). Fields are omitted when no sample has been
@@ -1188,6 +1209,11 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 	// canonical networks catalog table, so interface rows stand alone.
 	router.HandleFunc("/vms/{vm_id}/interfaces", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["vm_id"]
+		_, _, visible := requireOrgScope(r.Context(), db, vmID)
+		if !visible {
+			writeJSONError(w, http.StatusNotFound, "vm not found")
+			return
+		}
 
 		rows, err := db.Query(`
 			SELECT id, vm_id, name, mac_address, ip_address, created_at
@@ -1233,6 +1259,11 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 
 	router.HandleFunc("/vms/{vm_id}/interfaces", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["vm_id"]
+		_, _, visible := requireOrgScope(r.Context(), db, vmID)
+		if !visible {
+			writeJSONError(w, http.StatusNotFound, "vm not found")
+			return
+		}
 
 		var createReq struct {
 			NetworkID  string `json:"network_id"`
@@ -1251,11 +1282,6 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 			return
 		}
 
-		var vmExists bool
-		if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM vms WHERE id = $1)`, vmID).Scan(&vmExists); err != nil || !vmExists {
-			writeJSONError(w, http.StatusNotFound, "vm not found")
-			return
-		}
 
 		var bridgeName interface{}
 		if createReq.NetworkID != "" {
@@ -1286,6 +1312,10 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 	router.HandleFunc("/vms/{vm_id}/interfaces/{id}", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["vm_id"]
 		interfaceID := mux.Vars(r)["id"]
+		if _, _, visible := requireOrgScope(r.Context(), db, vmID); !visible {
+			writeJSONError(w, http.StatusNotFound, "vm not found")
+			return
+		}
 
 		var id, name string
 		var currentVMID, macAddress, ipAddress, bridgeName sql.NullString
@@ -1320,6 +1350,10 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 	router.HandleFunc("/vms/{vm_id}/interfaces/{id}", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["vm_id"]
 		interfaceID := mux.Vars(r)["id"]
+		if _, _, visible := requireOrgScope(r.Context(), db, vmID); !visible {
+			writeJSONError(w, http.StatusNotFound, "vm not found")
+			return
+		}
 
 		var updateReq struct {
 			NetworkID string `json:"network_id"`
@@ -1364,6 +1398,10 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 	router.HandleFunc("/vms/{vm_id}/interfaces/{id}", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["vm_id"]
 		interfaceID := mux.Vars(r)["id"]
+		if _, _, visible := requireOrgScope(r.Context(), db, vmID); !visible {
+			writeJSONError(w, http.StatusNotFound, "vm not found")
+			return
+		}
 
 		result, err := db.Exec(`DELETE FROM network_interfaces WHERE vm_id::text = $1 AND id = $2`, vmID, interfaceID)
 		if err != nil {
@@ -1441,6 +1479,11 @@ func vmActionStatus(err error) int {
 func registerVMPowerRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager, action string) {
 	router.HandleFunc("/vms/{id}/"+action, func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["id"]
+		scopeOrg, isAdmin, visible := requireOrgScope(r.Context(), db, vmID)
+		if !visible {
+			writeJSONError(w, http.StatusNotFound, "vm not found")
+			return
+		}
 		if vmManager == nil {
 			writeJSONError(w, http.StatusServiceUnavailable, "vm manager unavailable")
 			return
@@ -1473,7 +1516,14 @@ func registerVMPowerRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.VMM
 		}
 		state := string(vm.State())
 
-		result, err := db.Exec(`UPDATE vms SET state = $2, updated_at = NOW() WHERE id = $1`, vmID, state)
+		var result sql.Result
+		if isAdmin {
+			result, err = db.Exec(`UPDATE vms SET state = $2, updated_at = NOW() WHERE id = $1`, vmID, state)
+		} else if scopeOrg != "" {
+			result, err = db.Exec(`UPDATE vms SET state = $2, updated_at = NOW() WHERE id = $1 AND organization_id = $3`, vmID, state, scopeOrg)
+		} else {
+			result, err = db.Exec(`UPDATE vms SET state = $2, updated_at = NOW() WHERE id = $1 AND organization_id IS NULL`, vmID, state)
+		}
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to update VM state")
 			return
@@ -1771,6 +1821,11 @@ func parseOwnerID(s string) interface{} {
 func registerVMMigrateRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager) {
 	router.HandleFunc("/vms/{id}/migrate", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["id"]
+		scopeOrg, isAdmin, visible := requireOrgScope(r.Context(), db, vmID)
+		if !visible {
+			writeJSONError(w, http.StatusNotFound, "vm not found")
+			return
+		}
 		if vmManager == nil {
 			writeJSONError(w, http.StatusServiceUnavailable, "vm manager unavailable")
 			return
@@ -1815,9 +1870,24 @@ func registerVMMigrateRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.V
 		// (forgetVM). Remove the source DB row too so this node stops listing a
 		// guest that has moved away -- the destination inserts its own row when the
 		// incoming guest resumes (registerMigratedDest).
-		if _, err := db.Exec(`DELETE FROM vms WHERE id = $1`, vmID); err != nil {
+		var result sql.Result
+		var err error
+		if isAdmin {
+			result, err = db.Exec(`DELETE FROM vms WHERE id = $1`, vmID)
+		} else if scopeOrg != "" {
+			result, err = db.Exec(`DELETE FROM vms WHERE id = $1 AND organization_id = $2`, vmID, scopeOrg)
+		} else {
+			result, err = db.Exec(`DELETE FROM vms WHERE id = $1 AND organization_id IS NULL`, vmID)
+		}
+		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "migration succeeded but source VM row cleanup failed")
 			return
+		}
+		if !isAdmin {
+			if rowsAffected, _ := result.RowsAffected(); rowsAffected == 0 {
+				writeJSONError(w, http.StatusNotFound, "vm not found")
+				return
+			}
 		}
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{

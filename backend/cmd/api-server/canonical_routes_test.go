@@ -108,8 +108,12 @@ func TestCanonicalVMRoutesDriveManagerState(t *testing.T) {
 		t.Fatalf("create: expected manager-derived state 'stopped', got %#v", created["state"])
 	}
 
-	// Start: manager sets running; handler must persist "running".
-	mock.ExpectExec("UPDATE vms SET state").
+	// Start: manager sets running; handler must persist "running". The scope
+	// guard runs first (EXISTS probe) then the org-qualified UPDATE.
+	mock.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM vms WHERE id = \$1 AND organization_id IS NULL\)`).
+		WithArgs(vmID).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectExec(`UPDATE vms SET state`).
 		WithArgs(vmID, "running").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
@@ -125,7 +129,10 @@ func TestCanonicalVMRoutesDriveManagerState(t *testing.T) {
 	}
 
 	// Stop: manager sets stopped; handler must persist "stopped".
-	mock.ExpectExec("UPDATE vms SET state").
+	mock.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM vms WHERE id = \$1 AND organization_id IS NULL\)`).
+		WithArgs(vmID).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectExec(`UPDATE vms SET state`).
 		WithArgs(vmID, "stopped").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 

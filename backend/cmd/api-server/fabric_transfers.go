@@ -159,6 +159,10 @@ type fabricTransfer struct {
 	CreatedAt      time.Time              `json:"created_at"`
 	StartedAt      *time.Time             `json:"started_at,omitempty"`
 	FinishedAt     *time.Time             `json:"finished_at,omitempty"`
+	// OrganizationID is the VM's organization at admission time.
+	// It is intentionally NOT serialized to JSON — tenancy is enforced
+	// by the API layer, and this field must never leak across the wire.
+	OrganizationID string `json:"-"`
 }
 
 // linkAdmission serializes transfers per target link: one active, FIFO waiters.
@@ -402,10 +406,28 @@ func registerFabricTransferRoutes(apiRouter *mux.Router, db *sql.DB, vmManager *
 			writeJSONError(w, http.StatusBadRequest, "job_id applies to kind=job transfers, which are not implemented")
 			return
 		}
+		// Enforce tenancy: the caller must have visibility into the VM.
+		// requireOrgScope returns (orgID, isAdmin, visible). For non-admin,
+		// visible=false means the VM is outside their org scope — hide existence.
+		_, _, visible := requireOrgScope(r.Context(), db, req.VMID)
+		if db == nil || !visible {
+			writeJSONError(w, http.StatusNotFound, "vm not found on this node")
+			return
+		}
 
 		// The VM must exist on THIS node: a transfer moves a local VM.
 		vm, err := vmManager.GetVM(req.VMID)
 		if err != nil {
+			writeJSONError(w, http.StatusNotFound, "vm not found on this node")
+			return
+		}
+		// Load the VM's actual organization_id from the database to bind
+		// transfer ownership. This works even when an admin submits on
+		// behalf of another tenant — the transfer inherits the VM's org.
+		var vmOrg sql.NullString
+		if err := db.QueryRowContext(r.Context(),
+			`SELECT organization_id FROM vms WHERE id = $1`, req.VMID).Scan(&vmOrg); err != nil {
+			// Missing or failed query must fail closed: no transfer enqueued.
 			writeJSONError(w, http.StatusNotFound, "vm not found on this node")
 			return
 		}
@@ -467,6 +489,7 @@ func registerFabricTransferRoutes(apiRouter *mux.Router, db *sql.DB, vmManager *
 			Compression:    mode,
 			BytesEstimated: bytesEst,
 			CreatedAt:      time.Now().UTC(),
+			OrganizationID: vmOrg.String, // empty string if NULL; tenancy enforced by API layer
 			Decision: transferDecisionInputs{
 				LinkBps: linkBps, LinkMeasured: linkMeasured,
 				SampleRatio: ratio, SampleBytes: sampled,
@@ -487,12 +510,31 @@ func registerFabricTransferRoutes(apiRouter *mux.Router, db *sql.DB, vmManager *
 	}).Methods(http.MethodPost)
 
 	apiRouter.HandleFunc("/transfers", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"transfers": transfers.list()})
+		// Resolve caller's org scope for list filtering.
+		scopeOrg, isAdmin, _ := requireOrgScope(r.Context(), nil, "")
+		all := transfers.list()
+		if isAdmin {
+			writeJSON(w, http.StatusOK, map[string]interface{}{"transfers": all})
+			return
+		}
+		filtered := make([]fabricTransfer, 0, len(all))
+		for _, t := range all {
+			if orgVisible(scopeOrg, sql.NullString{String: t.OrganizationID, Valid: t.OrganizationID != ""}) {
+				filtered = append(filtered, t)
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"transfers": filtered})
 	}).Methods(http.MethodGet)
 
 	apiRouter.HandleFunc("/transfers/{id}", func(w http.ResponseWriter, r *http.Request) {
 		t, ok := transfers.get(mux.Vars(r)["id"])
 		if !ok {
+			writeJSONError(w, http.StatusNotFound, "transfer not found")
+			return
+		}
+		// Enforce tenancy on detail read.
+		scopeOrg, isAdmin, _ := requireOrgScope(r.Context(), nil, "")
+		if !isAdmin && !orgVisible(scopeOrg, sql.NullString{String: t.OrganizationID, Valid: t.OrganizationID != ""}) {
 			writeJSONError(w, http.StatusNotFound, "transfer not found")
 			return
 		}

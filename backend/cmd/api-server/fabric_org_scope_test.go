@@ -14,17 +14,25 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
+	core_vm "github.com/khryptorgraphics/novacron/backend/core/vm"
 )
 
 // newOrgScopeRouter wires only the VM routes under test so requireOrgScope
 // runs in isolation. Returns the manager so tests can sign matching tokens.
 func newOrgScopeRouter(t *testing.T, db *sql.DB) (*mux.Router, *auth.SimpleAuthManager) {
+	return newOrgScopeRouterWithManager(t, db, nil)
+}
+
+// newOrgScopeRouterWithManager wires the org-scope router with a real
+// (stubbed) VM manager — required for power-route tests, which exercise the
+// manager's live state, not just the DB.
+func newOrgScopeRouterWithManager(t *testing.T, db *sql.DB, vmManager *core_vm.VMManager) (*mux.Router, *auth.SimpleAuthManager) {
 	t.Helper()
 	authMgr := auth.NewSimpleAuthManager("test-secret", db)
 	router := mux.NewRouter()
 	api := router.PathPrefix("/api").Subrouter()
 	api.Use(requireAuth(authMgr))
-	registerSecureAPIRoutes(api, db, nil, t.TempDir())
+	registerSecureAPIRoutes(api, db, vmManager, t.TempDir())
 	return router, authMgr
 }
 

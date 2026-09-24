@@ -21,7 +21,7 @@ import (
 func TestMigrateJobStore(t *testing.T) {
 	s := newMigrateJobStore(2, nil)
 
-	id1 := s.create("vm-1")
+	id1 := s.create("vm-1", "")
 	if j, ok := s.get(id1); !ok || j.Status != migrateStatusRunning || j.VMID != "vm-1" || j.FinishedAt != nil {
 		t.Fatalf("create should record a running job with no finish time, got %#v ok=%v", j, ok)
 	}
@@ -38,7 +38,7 @@ func TestMigrateJobStore(t *testing.T) {
 		t.Fatalf("completed job must carry no error, got %q", j.Error)
 	}
 
-	id2 := s.create("vm-2")
+	id2 := s.create("vm-2", "")
 	s.finish(id2, errors.New("kaboom"))
 	j2, _ := s.get(id2)
 	if j2.Status != migrateStatusFailed || j2.Error != "kaboom" {
@@ -46,7 +46,7 @@ func TestMigrateJobStore(t *testing.T) {
 	}
 
 	// Capacity is 2: adding a third job evicts the oldest (id1).
-	id3 := s.create("vm-3")
+	id3 := s.create("vm-3", "")
 	if _, ok := s.get(id1); ok {
 		t.Fatalf("oldest job should be evicted once at capacity")
 	}
@@ -57,11 +57,17 @@ func TestMigrateJobStore(t *testing.T) {
 
 // jobStatusRouter mounts the two async handlers against an injected runner so the
 // migration outcome is deterministic (no hypervisor).
-func jobStatusRouter(store *migrateJobStore, run migrateRunner) *mux.Router {
+func jobStatusRouter(store *migrateJobStore, db *sql.DB, run migrateRunner) *mux.Router {
 	router := mux.NewRouter()
-	router.HandleFunc("/vms/{id}/migrate/async", newMigrateAsyncHandler(store, run)).Methods(http.MethodPost)
+	router.HandleFunc("/vms/{id}/migrate/async", newMigrateAsyncHandler(store, db, run)).Methods(http.MethodPost)
 	router.HandleFunc("/migrate/jobs/{job_id}", newMigrateJobStatusHandler(store)).Methods(http.MethodGet)
 	return router
+}
+
+func requestWithOrg(req *http.Request, orgID string) *http.Request {
+	ctx := context.WithValue(req.Context(), "organization_id", orgID)
+	ctx = context.WithValue(ctx, "role", "user")
+	return req.WithContext(ctx)
 }
 
 func getJob(t *testing.T, router http.Handler, jobID string) (int, migrateJob) {
@@ -101,12 +107,12 @@ func TestMigrateAsyncHandlerCompletes(t *testing.T) {
 	release := make(chan struct{})
 	var gotVM, gotTarget string
 	var gotOptions map[string]string
-	run := func(ctx context.Context, vmID, targetNode string, options map[string]string) error {
+	run := func(ctx context.Context, vmID, targetNode string, options map[string]string, orgID string, isAdmin bool) error {
 		gotVM, gotTarget, gotOptions = vmID, targetNode, options
 		<-release // hold the job in "running" until the test lets it finish
 		return nil
 	}
-	router := jobStatusRouter(store, run)
+	router := jobStatusRouter(store, nil, run)
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, mustJSONRequest(t, http.MethodPost, "/vms/vm-async/migrate/async",
@@ -151,10 +157,10 @@ func TestMigrateAsyncHandlerCompletes(t *testing.T) {
 // "failed" with the runner's error surfaced, and that an unknown job id is 404.
 func TestMigrateAsyncHandlerFails(t *testing.T) {
 	store := newMigrateJobStore(8, nil)
-	run := func(ctx context.Context, vmID, targetNode string, options map[string]string) error {
+	run := func(ctx context.Context, vmID, targetNode string, options map[string]string, orgID string, isAdmin bool) error {
 		return errors.New("target unreachable")
 	}
-	router := jobStatusRouter(store, run)
+	router := jobStatusRouter(store, nil, run)
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, mustJSONRequest(t, http.MethodPost, "/vms/vm-x/migrate/async",
@@ -181,11 +187,11 @@ func TestMigrateAsyncHandlerFails(t *testing.T) {
 func TestMigrateAsyncHandlerRejectsMissingTarget(t *testing.T) {
 	store := newMigrateJobStore(8, nil)
 	called := false
-	run := func(ctx context.Context, vmID, targetNode string, options map[string]string) error {
+	run := func(ctx context.Context, vmID, targetNode string, options map[string]string, orgID string, isAdmin bool) error {
 		called = true
 		return nil
 	}
-	router := jobStatusRouter(store, run)
+	router := jobStatusRouter(store, nil, run)
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, mustJSONRequest(t, http.MethodPost, "/vms/vm-x/migrate/async", map[string]string{}))
@@ -230,9 +236,13 @@ func TestRegisterSecureAPIRoutesMountsAsyncMigration(t *testing.T) {
 }
 
 const (
-	migrateJobInsertSQL = `INSERT INTO migration_jobs (id, vm_id, status, started_at) VALUES ($1, $2, $3, $4)`
-	migrateJobUpdateSQL = `UPDATE migration_jobs SET status = $2, error = $3, finished_at = $4 WHERE id = $1`
-	migrateJobSelectSQL = `SELECT id, vm_id, status, error, started_at, finished_at FROM migration_jobs WHERE id = $1`
+	migrateJobInsertSQL = `INSERT INTO migration_jobs (id, vm_id, status, started_at, organization_id) VALUES ($1, $2, $3, $4, $5)`
+	migrateJobUpdateSQL = `UPDATE migration_jobs
+			 SET status = $2, error = $3, finished_at = $4,
+			     organization_id = COALESCE(organization_id,
+			         (SELECT organization_id FROM vms WHERE id::text = migration_jobs.vm_id))
+			 WHERE id = $1`
+	migrateJobSelectSQL = `SELECT id, vm_id, status, error, started_at, finished_at, organization_id FROM migration_jobs WHERE id = $1`
 )
 
 // TestMigrateJobStorePersistsCompletedLifecycle proves the DB-backed store writes
@@ -250,11 +260,12 @@ func TestMigrateJobStorePersistsCompletedLifecycle(t *testing.T) {
 
 	store := newMigrateJobStore(8, db)
 
+	const orgID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	mock.ExpectExec(regexp.QuoteMeta(migrateJobInsertSQL)).
-		WithArgs(sqlmock.AnyArg(), "vm-1", migrateStatusRunning, sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "vm-1", migrateStatusRunning, sqlmock.AnyArg(), orgID).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	id := store.create("vm-1")
+	id := store.create("vm-1", orgID)
 	if id == "" {
 		t.Fatal("create returned an empty job id")
 	}
@@ -283,10 +294,10 @@ func TestMigrateJobStorePersistsFailure(t *testing.T) {
 	store := newMigrateJobStore(8, db)
 
 	mock.ExpectExec(regexp.QuoteMeta(migrateJobInsertSQL)).
-		WithArgs(sqlmock.AnyArg(), "vm-x", migrateStatusRunning, sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "vm-x", migrateStatusRunning, sqlmock.AnyArg(), nil).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	id := store.create("vm-x")
+	id := store.create("vm-x", "")
 
 	mock.ExpectExec(regexp.QuoteMeta(migrateJobUpdateSQL)).
 		WithArgs(id, migrateStatusFailed, "target unreachable", sqlmock.AnyArg()).
@@ -317,8 +328,8 @@ func TestMigrateJobStoreReadsPersistedRowAfterRestart(t *testing.T) {
 	finishedAt := time.Now().Add(-1 * time.Minute).UTC()
 	mock.ExpectQuery(regexp.QuoteMeta(migrateJobSelectSQL)).
 		WithArgs("mig-persisted").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "vm_id", "status", "error", "started_at", "finished_at"}).
-			AddRow("mig-persisted", "vm-7", migrateStatusCompleted, nil, startedAt, finishedAt))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "vm_id", "status", "error", "started_at", "finished_at", "organization_id"}).
+			AddRow("mig-persisted", "vm-7", migrateStatusCompleted, nil, startedAt, finishedAt, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
 
 	job, ok := store.get("mig-persisted")
 	if !ok {
@@ -329,6 +340,9 @@ func TestMigrateJobStoreReadsPersistedRowAfterRestart(t *testing.T) {
 	}
 	if job.FinishedAt == nil {
 		t.Fatal("persisted completed job should carry finished_at")
+	}
+	if job.OrganizationID != "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" {
+		t.Fatalf("persisted job organization mismatch: %q", job.OrganizationID)
 	}
 	if job.Error != "" {
 		t.Fatalf("completed job should have no error, got %q", job.Error)
@@ -348,7 +362,7 @@ func TestMigrateJobStatusHandlerNotFoundWhenAbsentFromDB(t *testing.T) {
 	defer db.Close()
 
 	store := newMigrateJobStore(8, db)
-	router := jobStatusRouter(store, func(context.Context, string, string, map[string]string) error { return nil })
+	router := jobStatusRouter(store, db, func(context.Context, string, string, map[string]string, string, bool) error { return nil })
 
 	mock.ExpectQuery(regexp.QuoteMeta(migrateJobSelectSQL)).
 		WithArgs("mig-nope").
@@ -356,6 +370,67 @@ func TestMigrateJobStatusHandlerNotFoundWhenAbsentFromDB(t *testing.T) {
 
 	if code, _ := getJob(t, router, "mig-nope"); code != http.StatusNotFound {
 		t.Fatalf("expected 404 for an id absent from cache and DB, got %d", code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMigrateJobStatusIsOrganizationScoped(t *testing.T) {
+	const (
+		orgA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+		orgB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	)
+	store := newMigrateJobStore(8, nil)
+	jobID := store.create("vm-removed-after-migration", orgA)
+	router := mux.NewRouter()
+	router.HandleFunc("/migrate/jobs/{job_id}", newMigrateJobStatusHandler(store)).Methods(http.MethodGet)
+
+	sameOrg := requestWithOrg(httptest.NewRequest(http.MethodGet, "/migrate/jobs/"+jobID, nil), orgA)
+	sameRec := httptest.NewRecorder()
+	router.ServeHTTP(sameRec, sameOrg)
+	if sameRec.Code != http.StatusOK {
+		t.Fatalf("same-org status should be readable after VM removal, got %d (%s)", sameRec.Code, sameRec.Body.String())
+	}
+
+	otherOrg := requestWithOrg(httptest.NewRequest(http.MethodGet, "/migrate/jobs/"+jobID, nil), orgB)
+	otherRec := httptest.NewRecorder()
+	router.ServeHTTP(otherRec, otherOrg)
+	if otherRec.Code != http.StatusNotFound {
+		t.Fatalf("cross-org status should be hidden as 404, got %d (%s)", otherRec.Code, otherRec.Body.String())
+	}
+}
+
+func TestMigrateAsyncHandlerRejectsCrossOrganizationVMBeforeRunner(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	const orgA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	store := newMigrateJobStore(8, nil)
+	called := false
+	run := func(context.Context, string, string, map[string]string, string, bool) error {
+		called = true
+		return nil
+	}
+	router := jobStatusRouter(store, db, run)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM vms WHERE id = $1 AND organization_id = $2)`)).
+		WithArgs("vm-other-org", orgA).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+
+	req := mustJSONRequest(t, http.MethodPost, "/vms/vm-other-org/migrate/async", map[string]string{"target_node": "node-b"})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, requestWithOrg(req, orgA))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("cross-org async POST should be hidden as 404, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if called {
+		t.Fatal("runner must not be invoked for a cross-org VM")
+	}
+	if len(store.jobs) != 0 {
+		t.Fatalf("cross-org async POST must not create a job, found %d", len(store.jobs))
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

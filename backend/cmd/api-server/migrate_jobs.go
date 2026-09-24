@@ -41,16 +41,17 @@ const (
 	migrateJobStoreCap = 1024
 )
 
-// migrateJob is the externally-visible status of one async migration. Field tags
-// match the documented response shape: {id, vm_id, status, error?, started_at,
-// finished_at?}.
+// migrateJob is the externally-visible status of one async migration. The
+// organization_id is deliberately internal: it authorizes status reads but is
+// not part of the public status response.
 type migrateJob struct {
-	ID         string     `json:"id"`
-	VMID       string     `json:"vm_id"`
-	Status     string     `json:"status"` // running | completed | failed
-	Error      string     `json:"error,omitempty"`
-	StartedAt  time.Time  `json:"started_at"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	ID             string     `json:"id"`
+	VMID           string     `json:"vm_id"`
+	Status         string     `json:"status"` // running | completed | failed
+	Error          string     `json:"error,omitempty"`
+	StartedAt      time.Time  `json:"started_at"`
+	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	OrganizationID string     `json:"-"`
 }
 
 // migrateJobStore is a registry of async migration jobs.
@@ -83,15 +84,16 @@ func newMigrateJobStore(capacity int, db *sql.DB) *migrateJobStore {
 // prefix is visible from both. Its db handle is wired in
 // registerVMMigrateAsyncRoutes once the server's *sql.DB is available.
 var migrateJobs = newMigrateJobStore(migrateJobStoreCap, nil)
-
 // create records a new running job for vmID and returns its id. When a database
 // is configured the job is also persisted (INSERT) so its status survives a
-// restart.
+// restart. orgID is the normalized organization that owns the source VM; it is
+// empty for NULL-org VMs and is stored on the row so the completed job remains
+// readable by its tenant after the source VM row is removed.
 //
 // ponytail: FIFO eviction ignores status, so under sustained load a very old
 // still-running job could be dropped from the cache; its DB row survives, so
 // get() still finds it via the read-through path.
-func (s *migrateJobStore) create(vmID string) string {
+func (s *migrateJobStore) create(vmID, orgID string) string {
 	id := newMigrateJobID()
 	now := time.Now().UTC()
 	s.mu.Lock()
@@ -100,7 +102,7 @@ func (s *migrateJobStore) create(vmID string) string {
 		s.order = s.order[1:]
 		delete(s.jobs, oldest)
 	}
-	s.jobs[id] = &migrateJob{ID: id, VMID: vmID, Status: migrateStatusRunning, StartedAt: now}
+	s.jobs[id] = &migrateJob{ID: id, VMID: vmID, Status: migrateStatusRunning, StartedAt: now, OrganizationID: orgID}
 	s.order = append(s.order, id)
 	s.mu.Unlock()
 
@@ -109,9 +111,13 @@ func (s *migrateJobStore) create(vmID string) string {
 		// the column default. ponytail: on failure the job stays in the cache so
 		// in-process reads still work — only restart-durability is lost, so this is
 		// a warn, not an error that would abort a migration that has not started.
+		var orgArg interface{}
+		if orgID != "" {
+			orgArg = orgID
+		}
 		if _, err := s.db.Exec(
-			`INSERT INTO migration_jobs (id, vm_id, status, started_at) VALUES ($1, $2, $3, $4)`,
-			id, vmID, migrateStatusRunning, now,
+			`INSERT INTO migration_jobs (id, vm_id, status, started_at, organization_id) VALUES ($1, $2, $3, $4, $5)`,
+			id, vmID, migrateStatusRunning, now, orgArg,
 		); err != nil {
 			logger.Warn("failed to persist migration job", "job", id, "vm", vmID, "error", err)
 		}
@@ -143,7 +149,11 @@ func (s *migrateJobStore) finish(id string, err error) {
 	if s.db != nil {
 		errArg := sql.NullString{String: errMsg, Valid: errMsg != ""}
 		if _, e := s.db.Exec(
-			`UPDATE migration_jobs SET status = $2, error = $3, finished_at = $4 WHERE id = $1`,
+			`UPDATE migration_jobs
+			 SET status = $2, error = $3, finished_at = $4,
+			     organization_id = COALESCE(organization_id,
+			         (SELECT organization_id FROM vms WHERE id::text = migration_jobs.vm_id))
+			 WHERE id = $1`,
 			id, status, errArg, now,
 		); e != nil {
 			logger.Warn("failed to persist migration job completion", "job", id, "status", status, "error", e)
@@ -176,10 +186,11 @@ func (s *migrateJobStore) getFromDB(id string) (migrateJob, bool) {
 	var job migrateJob
 	var errStr sql.NullString
 	var finished sql.NullTime
+	var orgID sql.NullString
 	err := s.db.QueryRow(
-		`SELECT id, vm_id, status, error, started_at, finished_at FROM migration_jobs WHERE id = $1`,
+		`SELECT id, vm_id, status, error, started_at, finished_at, organization_id FROM migration_jobs WHERE id = $1`,
 		id,
-	).Scan(&job.ID, &job.VMID, &job.Status, &errStr, &job.StartedAt, &finished)
+	).Scan(&job.ID, &job.VMID, &job.Status, &errStr, &job.StartedAt, &finished, &orgID)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			logger.Warn("failed to load migration job", "job", id, "error", err)
@@ -192,6 +203,9 @@ func (s *migrateJobStore) getFromDB(id string) (migrateJob, bool) {
 	if finished.Valid {
 		t := finished.Time
 		job.FinishedAt = &t
+	}
+	if orgID.Valid {
+		job.OrganizationID = orgID.String
 	}
 	return job, true
 }
@@ -234,17 +248,26 @@ func newMigrateJobID() string {
 	return "mig-" + hex.EncodeToString(b[:])
 }
 
-// migrateRunner runs one migration to completion and returns its terminal error
-// (nil on success). Production wires this to VMManager.MigrateVM + source-row
-// cleanup (see registerVMMigrateAsyncRoutes); tests inject a deterministic stub.
-type migrateRunner func(ctx context.Context, vmID, targetNode string, options map[string]string) error
+// migrateRunner executes one migration and removes its source row using the
+// same organization scope authorized by the request.
+type migrateRunner func(ctx context.Context, vmID, targetNode string, options map[string]string, orgID string, isAdmin bool) error
 
 // newMigrateAsyncHandler builds POST /vms/{id}/migrate/async: it validates the
-// same body as the synchronous route, registers a running job, kicks the
+// same body as the synchronous route, authorizes the VM against the caller's
+// organization scope, registers a running job with the authorized org, kicks the
 // migration off on a background goroutine, and returns 202 immediately.
-func newMigrateAsyncHandler(jobs *migrateJobStore, run migrateRunner) http.HandlerFunc {
+// Out-of-scope VMs return 404 (hidden existence) and the runner is never invoked.
+func newMigrateAsyncHandler(jobs *migrateJobStore, db *sql.DB, run migrateRunner) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["id"]
+
+		// Authorize the VM against the caller's organization scope before any
+		// side effects. Hidden-existence semantics: out-of-scope returns 404.
+		orgID, isAdmin, visible := requireOrgScope(r.Context(), db, vmID)
+		if !visible {
+			writeJSONError(w, http.StatusNotFound, "vm not found")
+			return
+		}
 
 		// ponytail: mirrors registerVMMigrateRoute's body decode + option building
 		// inline, deliberately kept separate so the synchronous route stays
@@ -275,7 +298,22 @@ func newMigrateAsyncHandler(jobs *migrateJobStore, run migrateRunner) http.Handl
 			options["target_addr"] = req.TargetAddr
 		}
 
-		jobID := jobs.create(vmID)
+		// Admins are unscoped, but the persisted job still needs the source VM's
+		// organization so its tenant can read it after source-row cleanup.
+		if isAdmin && db != nil {
+			var sourceOrg sql.NullString
+			err := db.QueryRowContext(r.Context(),
+				`SELECT organization_id FROM vms WHERE id = $1`, vmID).Scan(&sourceOrg)
+			if err != nil {
+				writeJSONError(w, http.StatusNotFound, "vm not found")
+				return
+			}
+			if sourceOrg.Valid {
+				orgID = sourceOrg.String
+			}
+		}
+
+		jobID := jobs.create(vmID, orgID)
 
 		go func() {
 			// context.Background (NOT r.Context): the request returns immediately, so
@@ -284,7 +322,7 @@ func newMigrateAsyncHandler(jobs *migrateJobStore, run migrateRunner) http.Handl
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
 
-			err := run(ctx, vmID, req.TargetNode, options)
+			err := run(ctx, vmID, req.TargetNode, options, orgID, isAdmin)
 			jobs.finish(jobID, err)
 			if err != nil {
 				logger.Warn("async migration failed", "job", jobID, "vm", vmID, "target", req.TargetNode, "error", err)
@@ -302,22 +340,28 @@ func newMigrateAsyncHandler(jobs *migrateJobStore, run migrateRunner) http.Handl
 }
 
 // newMigrateJobStatusHandler builds GET /migrate/jobs/{job_id}.
+// It returns 404 (hidden existence) for jobs outside the caller's org.
 func newMigrateJobStatusHandler(jobs *migrateJobStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		jobID := mux.Vars(r)["job_id"]
-		job, ok := jobs.get(jobID)
+		job, ok := jobs.get(mux.Vars(r)["job_id"])
 		if !ok {
 			writeJSONError(w, http.StatusNotFound, "migration job not found")
 			return
 		}
+		scopeOrg, isAdmin, _ := requireOrgScope(r.Context(), nil, "")
+		if !isAdmin {
+			var rowOrg sql.NullString
+			if job.OrganizationID != "" {
+				rowOrg = sql.NullString{String: job.OrganizationID, Valid: true}
+			}
+			if !orgVisible(scopeOrg, rowOrg) {
+				writeJSONError(w, http.StatusNotFound, "migration job not found")
+				return
+			}
+		}
 		writeJSON(w, http.StatusOK, job)
 	}
 }
-
-// registerVMMigrateAsyncRoutes wires the async POST + status GET onto the secure
-// subrouter, right beside the sync migrate route. The production runner reuses
-// the exact same call path as the sync route (VMManager.MigrateVM, then the
-// source-row cleanup) — it does not reimplement any migration logic.
 func registerVMMigrateAsyncRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager) {
 	// Wire the shared store's DB handle here — the single point where db reaches
 	// the async routes. ponytail: plain assignment (no lock) is race-free because
@@ -328,21 +372,40 @@ func registerVMMigrateAsyncRoutes(router *mux.Router, db *sql.DB, vmManager *cor
 	// (status "interrupted") instead of leaving them "running" forever.
 	migrateJobs.reconcileInterruptedJobs()
 
-	run := func(ctx context.Context, vmID, targetNode string, options map[string]string) error {
+	run := func(ctx context.Context, vmID, targetNode string, options map[string]string, orgID string, isAdmin bool) error {
 		if vmManager == nil {
 			return errors.New("vm manager unavailable")
 		}
 		if err := vmManager.MigrateVM(ctx, vmID, targetNode, options); err != nil {
 			return err
 		}
-		// Mirror the sync route: the guest now runs on targetNode, so drop the source
-		// DB row (the destination inserts its own via registerMigratedDest).
-		if _, err := db.Exec(`DELETE FROM vms WHERE id = $1`, vmID); err != nil {
+		// Remove only the source row previously authorized for this caller.
+		// Admins are deliberately unscoped; tenant cleanup repeats the scope in
+		// the mutation so a changed/mismatched row cannot be deleted cross-org.
+		if db == nil {
+			return nil
+		}
+		var (
+			result sql.Result
+			err    error
+		)
+		switch {
+		case isAdmin:
+			result, err = db.ExecContext(ctx, `DELETE FROM vms WHERE id = $1`, vmID)
+		case orgID != "":
+			result, err = db.ExecContext(ctx, `DELETE FROM vms WHERE id = $1 AND organization_id = $2`, vmID, orgID)
+		default:
+			result, err = db.ExecContext(ctx, `DELETE FROM vms WHERE id = $1 AND organization_id IS NULL`, vmID)
+		}
+		if err != nil {
 			return fmt.Errorf("migration succeeded but source VM row cleanup failed: %w", err)
+		}
+		if affected, err := result.RowsAffected(); err == nil && affected == 0 {
+			return errors.New("migration succeeded but authorized source VM row was not found")
 		}
 		return nil
 	}
 
-	router.HandleFunc("/vms/{id}/migrate/async", newMigrateAsyncHandler(migrateJobs, run)).Methods(http.MethodPost)
+	router.HandleFunc("/vms/{id}/migrate/async", newMigrateAsyncHandler(migrateJobs, db, run)).Methods(http.MethodPost)
 	router.HandleFunc("/migrate/jobs/{job_id}", newMigrateJobStatusHandler(migrateJobs)).Methods(http.MethodGet)
 }
