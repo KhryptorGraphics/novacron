@@ -295,7 +295,7 @@ services:
     restart: unless-stopped
     user: "472:0"  # grafana user
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: 'false'
       GF_INSTALL_PLUGINS: grafana-piechart-panel
       GF_SECURITY_DISABLE_GRAVATAR: 'true'
