@@ -43,7 +43,11 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/core/storage"
 	core_vm "github.com/khryptorgraphics/novacron/backend/core/vm"
 	"github.com/khryptorgraphics/novacron/backend/pkg/config"
+	"github.com/khryptorgraphics/novacron/backend/pkg/database"
 	"github.com/khryptorgraphics/novacron/backend/pkg/logger"
+	monitoring_svc "github.com/khryptorgraphics/novacron/backend/pkg/services"
+	_ "github.com/lib/pq"
+	"github.com/jmoiron/sqlx"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -100,6 +104,22 @@ func main() {
 	defer services.shutdown()
 
 	vmManager := newVMManager(cfg)
+
+	// Wire the VM metrics collector against the canonical manager: samples are
+	// inserted into vm_metrics on a 30s tick so /vms/{id}/metrics and
+	// /monitoring/vms stop reporting empty results. DeferStop until server
+	// shutdown. The canonical path uses *sql.DB; MonitoringService needs the
+	// sqlx-backed wrapper, so bridge via sqlx.NewDb on the existing handle.
+	sqlxDB := sqlx.NewDb(db, "postgres")
+	dbWrapper := &database.DB{DB: sqlxDB}
+	metricsSvc := monitoring_svc.NewMonitoringService(dbWrapper, nil, vmManager)
+	if err := metricsSvc.Start(); err != nil {
+		appLogger.Warn("Failed to start metrics collector", "error", err)
+	} else {
+		defer func() {
+			_ = metricsSvc.Stop()
+		}()
+	}
 
 	// PATH-3: watch for actions that crash the process and restart them per
 	// tenant policy (default on_failure). Supervisor polls at 5s; a failed VM
