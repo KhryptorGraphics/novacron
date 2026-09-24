@@ -2797,8 +2797,6 @@ func apiInfoHandler() http.HandlerFunc {
 				"/api/security/events/stream",
 			},
 			"unsupported_endpoints": []string{
-				"/api/auth/resend-verification",
-				"/api/auth/verify-email",
 				"unsupported GraphQL operations outside storage-backed volume queries and mutations",
 			},
 		})

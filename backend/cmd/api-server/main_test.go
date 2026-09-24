@@ -426,7 +426,14 @@ func TestAPIInfoAdvertisesCanonicalContract(t *testing.T) {
 	assertContains("endpoints", endpoints, "/api/ws/console/{vmId}")
 	assertContains("compatibility_endpoints", compatibilityEndpoints, "/api/vms")
 	assertContains("compatibility_endpoints", compatibilityEndpoints, "/ws/metrics")
-	assertContains("unsupported_endpoints", unsupportedEndpoints, "/api/auth/resend-verification")
+	// novacron-8t1: resend-verification and verify-email ARE implemented
+	// (registered at main.go:823-824 and covered by canonical_routes_test.go) —
+	// they must not be reported as unsupported.
+	for _, ep := range unsupportedEndpoints {
+		if ep == "/api/auth/resend-verification" || ep == "/api/auth/verify-email" {
+			t.Fatalf("%q must not appear in unsupported_endpoints (it is implemented and registered)", ep)
+		}
+	}
 }
 
 func TestRegisterCanonicalSecurityRoutesServesDashboardEndpoints(t *testing.T) {
