@@ -2,7 +2,7 @@
 Description=NovaCron Distributed VM Management System
 Documentation=https://github.com/khryptorgraphics/novacron
 Requires=postgresql.service
-After=multi-user.target postgresql.service
+After=multi-user.target postgresql.service novacron-api.service
 AllowIsolate=yes
 
 [Install]
