@@ -128,3 +128,28 @@ func TestOrgScopeMonitoringVMListExcludesOtherOrganizations(t *testing.T) {
 	}
 }
 
+func TestOrgScopeMetricsReturnsNoContentWhenNoSampleExists(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	orgID := "22222222-2222-2222-2222-222222222222"
+	vmID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	router, authMgr := newOrgScopeRouter(t, db)
+	mock.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM vms WHERE id = \$1 AND organization_id = \$2\)`).
+		WithArgs(vmID, orgID).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(`SELECT COALESCE\(cpu_usage, 0\), COALESCE\(memory_usage, 0\)\s+FROM vm_metrics WHERE vm_id = \$1\s+ORDER BY timestamp DESC\s+LIMIT 1`).
+		WithArgs(vmID).WillReturnRows(sqlmock.NewRows([]string{"cpu_usage", "memory_usage"}))
+	req := httptest.NewRequest(http.MethodGet, "/api/vms/"+vmID+"/metrics", nil)
+	req.Header.Set("Authorization", "Bearer "+orgScopeToken(t, authMgr, "u-user", orgID, "viewer"))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+		t.Fatalf("missing metric sample must not return fake zero payload, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
+}

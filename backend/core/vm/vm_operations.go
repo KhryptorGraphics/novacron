@@ -1011,6 +1011,33 @@ func (m *VMManager) resolveMigrationURI(ctx context.Context, vm *VM, driver VMDr
 	return fmt.Sprintf("tcp:%s:%d", host, port), nil
 }
 
+// migrationCredentialForTarget follows the migration sender contract: an
+// explicitly configured cluster secret takes precedence; otherwise use the
+// credential assigned to the destination node.
+func migrationCredentialForTarget(targetNodeID string) (string, bool) {
+	if secret := os.Getenv("NOVACRON_MIGRATION_SECRET"); secret != "" {
+		return secret, true
+	}
+	targetNodeID = strings.TrimSpace(targetNodeID)
+
+	for _, entry := range strings.Split(os.Getenv("NOVACRON_NODE_SECRETS"), ",") {
+		id, secret, ok := strings.Cut(strings.TrimSpace(entry), "=")
+		if !ok || strings.TrimSpace(id) != targetNodeID {
+			continue
+		}
+		if secret = strings.TrimSpace(secret); secret != "" {
+			return secret, true
+		}
+	}
+	return "", false
+}
+
+func setMigrationCredential(req *http.Request, targetNodeID string) {
+	if secret, ok := migrationCredentialForTarget(targetNodeID); ok {
+		req.Header.Set("X-Migration-Secret", secret)
+	}
+}
+
 // requestIncomingMigration POSTs req to the target node's incoming-migration
 // endpoint and returns the destination's listening port.
 func requestIncomingMigration(ctx context.Context, addr string, req IncomingMigrationRequest) (int, error) {
@@ -1021,9 +1048,7 @@ func requestIncomingMigration(ctx context.Context, addr string, req IncomingMigr
 		return 0, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if secret := os.Getenv("NOVACRON_MIGRATION_SECRET"); secret != "" {
-		httpReq.Header.Set("X-Migration-Secret", secret)
-	}
+	setMigrationCredential(httpReq, req.TargetNodeID)
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
 		return 0, fmt.Errorf("incoming RPC to %s: %w", addr, err)
@@ -1223,9 +1248,7 @@ func requestIncomingBlockMigration(ctx context.Context, addr string, req Incomin
 		return 0, "", err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if secret := os.Getenv("NOVACRON_MIGRATION_SECRET"); secret != "" {
-		httpReq.Header.Set("X-Migration-Secret", secret)
-	}
+	setMigrationCredential(httpReq, req.TargetNodeID)
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
 		return 0, "", fmt.Errorf("incoming block RPC to %s: %w", addr, err)

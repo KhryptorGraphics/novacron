@@ -260,6 +260,36 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	}
 }
 
+const incomingMigrationMarker = ".novacron-incoming-migration"
+
+func prepareIncomingMigrationDir(destDir string) error {
+	if err := os.Mkdir(destDir, 0o700); err != nil {
+		return err
+	}
+	marker, err := os.OpenFile(filepath.Join(destDir, incomingMigrationMarker), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		_ = os.Remove(destDir)
+		return err
+	}
+	if err := marker.Close(); err != nil {
+		_ = os.Remove(filepath.Join(destDir, incomingMigrationMarker))
+		_ = os.Remove(destDir)
+		return err
+	}
+	return nil
+}
+
+func incomingMigrationMarkerExists(destDir string) bool {
+	info, err := os.Lstat(filepath.Join(destDir, incomingMigrationMarker))
+	return err == nil && info.Mode().IsRegular()
+}
+
+func clearIncomingMigrationMarker(destDir string) {
+	if err := os.Remove(filepath.Join(destDir, incomingMigrationMarker)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("incoming migration: remove marker %s: %v", destDir, err)
+	}
+}
+
 // cleanupOrphanedIncoming stops and removes a half-started migration
 // destination whose guest never resumed (source died or was interrupted).
 // Without it the dest keeps a paused qemu holding the disk lock, the VM id is
@@ -1026,59 +1056,7 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 		})
 	}).Methods(http.MethodGet)
 
-	router.HandleFunc("/vms/{id}", func(w http.ResponseWriter, r *http.Request) {
-		vmID := mux.Vars(r)["id"]
-
-		// Tenancy: decide visibility BEFORE the manager is allowed to touch
-		// the real guest -- a scoped caller probing another org's id stops a
-		// live VM otherwise. A cross-org VM answers 404 (never 403) as if it
-		// did not exist, and the DELETE carries the same org predicate so a
-		// race between probe and delete cannot delete out of scope either.
-		scopeOrg, isAdmin, visible := requireOrgScope(r.Context(), db, vmID)
-		if !visible {
-			writeJSONError(w, http.StatusNotFound, "vm not found")
-			return
-		}
-
-		// Stop + remove the real VM (qemu) before dropping metadata.
-		if vmManager != nil {
-			if _, err := vmManager.GetVM(vmID); err == nil {
-				ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-				defer cancel()
-				if err := vmManager.DeleteVM(ctx, vmID); err != nil {
-					writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to delete VM: %v", err))
-					return
-				}
-			}
-		}
-
-		var result sql.Result
-		var err error
-		switch {
-		case isAdmin:
-			// Byte-identical to the pre-hardening statement.
-			result, err = db.Exec(`DELETE FROM vms WHERE id = $1`, vmID)
-		case scopeOrg != "":
-			result, err = db.Exec(`DELETE FROM vms WHERE id = $1 AND organization_id = $2`, vmID, scopeOrg)
-		default:
-			result, err = db.Exec(`DELETE FROM vms WHERE id = $1 AND organization_id IS NULL`, vmID)
-		}
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to delete VM")
-			return
-		}
-
-		rowsAffected, _ := result.RowsAffected()
-		if rowsAffected == 0 {
-			writeJSONError(w, http.StatusNotFound, "vm not found")
-			return
-		}
-
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"id":     vmID,
-			"status": "deleted",
-		})
-	}).Methods(http.MethodDelete)
+	registerVMDeleteRoute(router, db, vmManager)
 
 	registerVMPowerRoute(router, db, vmManager, "start")
 	registerVMPowerRoute(router, db, vmManager, "stop")
@@ -1102,7 +1080,11 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 			ORDER BY timestamp DESC
 			LIMIT 1
 		`, vmID).Scan(&cpuUsage, &memoryUsage)
-		if err != nil && err != sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to query VM metrics")
 			return
 		}
@@ -1473,9 +1455,67 @@ func vmActionStatus(err error) int {
 	return http.StatusInternalServerError
 }
 
-// registerVMPowerRoute wires POST /vms/{id}/{start|stop} to the real manager and
-// persists the ACTUAL resulting state — never a hardcoded constant. On failure
-// it returns an error and writes nothing, so the DB always reflects reality.
+// registerVMDeleteRoute drops source metadata only after the real driver has
+// deleted a managed VM; a driver failure leaves the database row intact.
+func registerVMDeleteRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager) {
+	var deleteVM func(context.Context, string) error
+	if vmManager != nil {
+		deleteVM = func(ctx context.Context, vmID string) error {
+			if _, err := vmManager.GetVM(vmID); err != nil {
+				return nil
+			}
+			return vmManager.DeleteVM(ctx, vmID)
+		}
+	}
+	registerVMDeleteRouteWithDeleter(router, db, deleteVM)
+}
+
+func registerVMDeleteRouteWithDeleter(router *mux.Router, db *sql.DB, deleteVM func(context.Context, string) error) {
+	router.HandleFunc("/vms/{id}", func(w http.ResponseWriter, r *http.Request) {
+		vmID := mux.Vars(r)["id"]
+		scopeOrg, isAdmin, visible := requireOrgScope(r.Context(), db, vmID)
+		if !visible {
+			writeJSONError(w, http.StatusNotFound, "vm not found")
+			return
+		}
+
+		if deleteVM != nil {
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+			defer cancel()
+			if err := deleteVM(ctx, vmID); err != nil {
+				writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to delete VM: %v", err))
+				return
+			}
+		}
+
+		var result sql.Result
+		var err error
+		switch {
+		case isAdmin:
+			result, err = db.Exec(`DELETE FROM vms WHERE id = $1`, vmID)
+		case scopeOrg != "":
+			result, err = db.Exec(`DELETE FROM vms WHERE id = $1 AND organization_id = $2`, vmID, scopeOrg)
+		default:
+			result, err = db.Exec(`DELETE FROM vms WHERE id = $1 AND organization_id IS NULL`, vmID)
+		}
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to delete VM")
+			return
+		}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to confirm VM deletion")
+			return
+		}
+		if rowsAffected == 0 {
+			writeJSONError(w, http.StatusNotFound, "vm not found")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{"id": vmID, "status": "deleted"})
+	}).Methods(http.MethodDelete)
+}
+
 func registerVMPowerRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager, action string) {
 	router.HandleFunc("/vms/{id}/"+action, func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["id"]
@@ -1573,6 +1613,10 @@ func registerInternalMigrationRoutes(router *mux.Router, db *sql.DB, vmManager *
 			writeJSONError(w, http.StatusBadRequest, "disk_path is required for shared-storage migration")
 			return
 		}
+		if req.Block && req.DiskSizeBytes <= 0 {
+			writeJSONError(w, http.StatusBadRequest, "disk_size_bytes is required for block migration")
+			return
+		}
 
 		driver, err := vmManager.GetDriverForConfig(core_vm.VMConfig{Type: core_vm.VMTypeKVM})
 		if err != nil {
@@ -1599,18 +1643,19 @@ func registerInternalMigrationRoutes(router *mux.Router, db *sql.DB, vmManager *
 
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
+		if err := prepareIncomingMigrationDir(destDir); err != nil {
+			writeJSONError(w, http.StatusConflict, fmt.Sprintf("incoming VM destination is not available: %v", err))
+			return
+		}
 
 		if req.Block {
-			if req.DiskSizeBytes <= 0 {
-				writeJSONError(w, http.StatusBadRequest, "disk_size_bytes is required for block migration")
-				return
-			}
 			host := req.AdvertiseHost
 			if host == "" {
 				host = "127.0.0.1"
 			}
 			_, nbdURI, berr := kd.StartIncomingBlock(ctx, req.VMID, destDir, uri, host, req.DiskSizeBytes, req.Config)
 			if berr != nil {
+				cleanupOrphanedIncoming(kd, req.VMID, destDir)
 				writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("start incoming block destination: %v", berr))
 				return
 			}
@@ -1623,13 +1668,14 @@ func registerInternalMigrationRoutes(router *mux.Router, db *sql.DB, vmManager *
 					cleanupOrphanedIncoming(kd, req.VMID, destDir)
 					return
 				}
+				clearIncomingMigrationMarker(destDir)
 				registerMigratedDest(db, vmManager, req.VMID, req.Config, req.TargetNodeID, req.OrganizationID)
 			}()
 			writeJSON(w, http.StatusOK, core_vm.IncomingMigrationResponse{Port: port, NBDURI: nbdURI})
 			return
 		}
-
 		if _, err := kd.StartIncomingWithDisk(ctx, req.VMID, destDir, uri, req.DiskPath, req.Config); err != nil {
+			cleanupOrphanedIncoming(kd, req.VMID, destDir)
 			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("start incoming destination: %v", err))
 			return
 		}
@@ -1641,6 +1687,7 @@ func registerInternalMigrationRoutes(router *mux.Router, db *sql.DB, vmManager *
 				cleanupOrphanedIncoming(kd, req.VMID, destDir)
 				return
 			}
+			clearIncomingMigrationMarker(destDir)
 			registerMigratedDest(db, vmManager, req.VMID, req.Config, req.TargetNodeID, req.OrganizationID)
 		}()
 
@@ -1663,13 +1710,32 @@ func registerInternalMigrationRoutes(router *mux.Router, db *sql.DB, vmManager *
 			writeJSONError(w, http.StatusBadRequest, "vm_id is required")
 			return
 		}
+		if vmManager == nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "vm manager unavailable")
+			return
+		}
+		if vm, err := vmManager.GetVM(req.VMID); err == nil && vm.State() == core_vm.StateRunning {
+			writeJSONError(w, http.StatusConflict, "cannot abort migration for a running VM")
+			return
+		}
 		drv, derr := vmManager.GetDriverForConfig(core_vm.VMConfig{Type: core_vm.VMTypeKVM})
 		kd, ok := drv.(*core_vm.KVMDriverEnhanced)
 		if derr != nil || !ok {
 			writeJSONError(w, http.StatusServiceUnavailable, "kvm driver unavailable")
 			return
 		}
-		cleanupOrphanedIncoming(kd, req.VMID, filepath.Join(vmBase, req.VMID))
+		statusCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if state, err := kd.GetStatus(statusCtx, req.VMID); err == nil && state == core_vm.StateRunning {
+			writeJSONError(w, http.StatusConflict, "cannot abort migration for a running VM")
+			return
+		}
+		destDir := filepath.Join(vmBase, req.VMID)
+		if !incomingMigrationMarkerExists(destDir) {
+			writeJSONError(w, http.StatusNotFound, "incoming migration not found")
+			return
+		}
+		cleanupOrphanedIncoming(kd, req.VMID, destDir)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"aborted": true, "vm_id": req.VMID})
 	}).Methods(http.MethodPost)
 }
@@ -1819,6 +1885,14 @@ func parseOwnerID(s string) interface{} {
 // otherwise target_node is resolved to a URI inside the manager (see migrateVM).
 // On success the DB row's node_id/state are updated to the observed reality.
 func registerVMMigrateRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.VMManager) {
+	var migrateVM func(context.Context, string, string, map[string]string) error
+	if vmManager != nil {
+		migrateVM = vmManager.MigrateVM
+	}
+	registerVMMigrateRouteWithExecutor(router, db, migrateVM)
+}
+
+func registerVMMigrateRouteWithExecutor(router *mux.Router, db *sql.DB, migrateVM func(context.Context, string, string, map[string]string) error) {
 	router.HandleFunc("/vms/{id}/migrate", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["id"]
 		scopeOrg, isAdmin, visible := requireOrgScope(r.Context(), db, vmID)
@@ -1826,7 +1900,7 @@ func registerVMMigrateRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.V
 			writeJSONError(w, http.StatusNotFound, "vm not found")
 			return
 		}
-		if vmManager == nil {
+		if migrateVM == nil {
 			writeJSONError(w, http.StatusServiceUnavailable, "vm manager unavailable")
 			return
 		}
@@ -1861,7 +1935,7 @@ func registerVMMigrateRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.V
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 		defer cancel()
 
-		if err := vmManager.MigrateVM(ctx, vmID, req.TargetNode, options); err != nil {
+		if err := migrateVM(ctx, vmID, req.TargetNode, options); err != nil {
 			writeJSONError(w, vmActionStatus(err), fmt.Sprintf("failed to migrate VM: %v", err))
 			return
 		}
@@ -1880,14 +1954,17 @@ func registerVMMigrateRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.V
 			result, err = db.Exec(`DELETE FROM vms WHERE id = $1 AND organization_id IS NULL`, vmID)
 		}
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "migration succeeded but source VM row cleanup failed")
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("migration succeeded to node %s but source VM row cleanup failed: %v", req.TargetNode, err))
 			return
 		}
-		if !isAdmin {
-			if rowsAffected, _ := result.RowsAffected(); rowsAffected == 0 {
-				writeJSONError(w, http.StatusNotFound, "vm not found")
-				return
-			}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("migration succeeded to node %s but source VM row cleanup result could not be confirmed: %v", req.TargetNode, err))
+			return
+		}
+		if rowsAffected == 0 {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("migration succeeded to node %s but source VM row cleanup failed: no source row was deleted", req.TargetNode))
+			return
 		}
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -2217,6 +2294,10 @@ func listCanonicalAdminUsers(db *sql.DB) http.HandlerFunc {
 			}
 			users = append(users, user)
 		}
+		if err := rows.Err(); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to list users: %v", err))
+			return
+		}
 
 		writeJSON(w, http.StatusOK, canonicalAdminUserListResponse{
 			Users:      users,
@@ -2277,6 +2358,14 @@ func createCanonicalAdminUser(db *sql.DB) http.HandlerFunc {
 			&user.CreatedAt,
 			&user.UpdatedAt,
 		)
+		if err != nil {
+			if canonicalAdminNotFoundError(err) {
+				writeJSONError(w, http.StatusNotFound, "user not found")
+				return
+			}
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create user: %v", err))
+			return
+		}
 		writeJSON(w, http.StatusCreated, user)
 	}
 }
@@ -2354,7 +2443,7 @@ func updateCanonicalAdminUser(db *sql.DB) http.HandlerFunc {
 			&user.UpdatedAt,
 		)
 		if err != nil {
-			if err == sql.ErrNoRows {
+			if canonicalAdminNotFoundError(err) {
 				writeJSONError(w, http.StatusNotFound, "user not found")
 				return
 			}
@@ -2376,10 +2465,18 @@ func deleteCanonicalAdminUser(db *sql.DB) http.HandlerFunc {
 
 		result, err := db.Exec(`DELETE FROM users WHERE id = $1`, userID)
 		if err != nil {
+			if canonicalAdminNotFoundError(err) {
+				writeJSONError(w, http.StatusNotFound, "user not found")
+				return
+			}
 			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to delete user: %v", err))
 			return
 		}
-		rowsAffected, _ := result.RowsAffected()
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to confirm user deletion: %v", err))
+			return
+		}
 		if rowsAffected == 0 {
 			writeJSONError(w, http.StatusNotFound, "user not found")
 			return
@@ -2429,6 +2526,14 @@ func assignCanonicalAdminUserRoles(db *sql.DB) http.HandlerFunc {
 			&user.CreatedAt,
 			&user.UpdatedAt,
 		)
+		if err != nil {
+			if canonicalAdminNotFoundError(err) {
+				writeJSONError(w, http.StatusNotFound, "user not found")
+				return
+			}
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to assign user role: %v", err))
+			return
+		}
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"user":    user,
@@ -2444,6 +2549,11 @@ func canonicalAdminUserID(raw string) (string, error) {
 		return "", fmt.Errorf("invalid user ID")
 	}
 	return userID, nil
+}
+// canonicalAdminNotFoundError maps missing-row query results and database
+// errors that explicitly report a missing user to the hidden 404 response.
+func canonicalAdminNotFoundError(err error) bool {
+	return errors.Is(err, sql.ErrNoRows) || strings.Contains(strings.ToLower(err.Error()), "not found")
 }
 
 // canonicalUserRoleForAdmin maps accepted role labels onto the canonical

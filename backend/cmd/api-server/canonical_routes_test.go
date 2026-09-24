@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -1698,5 +1699,186 @@ func TestCanonicalResetPasswordRejectsWeakPassword(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("weak password must not touch the DB: %v", err)
+	}
+}
+func TestCanonicalAdminMutationsDoNotFabricateSuccessOnDatabaseErrors(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	router := mux.NewRouter()
+	registerCanonicalAdminRoutes(router, authManager, db)
+
+	mock.ExpectQuery("INSERT INTO users").WillReturnError(errors.New("database unavailable"))
+	createReq := mustJSONRequest(t, http.MethodPost, "/api/admin/users", map[string]string{
+		"username": "new-user", "email": "new@example.com", "password": "password123", "role": "viewer",
+	})
+	createReq.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+	createRec := httptest.NewRecorder()
+	router.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusInternalServerError || strings.Contains(createRec.Body.String(), `"id":""`) {
+		t.Fatalf("failed insert must not fabricate user success, got %d body=%s", createRec.Code, createRec.Body.String())
+	}
+	mock.ExpectQuery("INSERT INTO users").WillReturnError(sql.ErrNoRows)
+	missingCreateReq := mustJSONRequest(t, http.MethodPost, "/api/admin/users", map[string]string{
+		"username": "missing-user", "email": "missing@example.com", "password": "password123", "role": "viewer",
+	})
+	missingCreateReq.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+	missingCreateRec := httptest.NewRecorder()
+	router.ServeHTTP(missingCreateRec, missingCreateReq)
+	if missingCreateRec.Code != http.StatusNotFound || !strings.Contains(missingCreateRec.Body.String(), "user not found") {
+		t.Fatalf("missing insert result must return 404, got %d body=%s", missingCreateRec.Code, missingCreateRec.Body.String())
+	}
+
+	mock.ExpectQuery("UPDATE users").WillReturnError(sql.ErrNoRows)
+	assignReq := mustJSONRequest(t, http.MethodPost, "/api/admin/users/00000000-0000-0000-0000-000000000001/roles", map[string][]string{"roles": {"admin"}})
+	assignReq.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+	assignRec := httptest.NewRecorder()
+	router.ServeHTTP(assignRec, assignReq)
+	if assignRec.Code != http.StatusNotFound || !strings.Contains(assignRec.Body.String(), "user not found") {
+		t.Fatalf("missing role target must return 404, got %d body=%s", assignRec.Code, assignRec.Body.String())
+	}
+	mock.ExpectQuery("UPDATE users").WillReturnError(errors.New("database unavailable"))
+	assignFailureReq := mustJSONRequest(t, http.MethodPost, "/api/admin/users/00000000-0000-0000-0000-000000000001/roles", map[string][]string{"roles": {"admin"}})
+	assignFailureReq.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+	assignFailureRec := httptest.NewRecorder()
+	router.ServeHTTP(assignFailureRec, assignFailureReq)
+	if assignFailureRec.Code != http.StatusInternalServerError || strings.Contains(assignFailureRec.Body.String(), `"message":"roles updated"`) {
+		t.Fatalf("failed role update must not fabricate success, got %d body=%s", assignFailureRec.Code, assignFailureRec.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestVMMigrateCleanupFailureReportsMovedLocation(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	vmID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	orgID := "11111111-1111-1111-1111-111111111111"
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	router := mux.NewRouter()
+	api := router.PathPrefix("/api").Subrouter()
+	api.Use(requireAuth(authManager))
+	migrated := false
+	registerVMMigrateRouteWithExecutor(api, db, func(context.Context, string, string, map[string]string) error {
+		migrated = true
+		return nil
+	})
+
+	mock.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM vms WHERE id = \$1 AND organization_id = \$2\)`).
+		WithArgs(vmID, orgID).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectExec(`DELETE FROM vms WHERE id = \$1 AND organization_id = \$2`).
+		WithArgs(vmID, orgID).WillReturnResult(sqlmock.NewResult(0, 0))
+	req := mustJSONRequest(t, http.MethodPost, "/api/vms/"+vmID+"/migrate", map[string]string{"target_node": "node-dest"})
+	req.Header.Set("Authorization", signedBearerToken(t, authManager, "u-user", orgID, "viewer"))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if !migrated {
+		t.Fatal("migration executor was not called for an in-scope VM")
+	}
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "migration succeeded to node node-dest") || strings.Contains(rec.Body.String(), "vm not found") {
+		t.Fatalf("zero-row cleanup must report successful move and cleanup failure, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestVMMigrateCrossOrgReturns404BeforeManager(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	vmID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	orgID := "22222222-2222-2222-2222-222222222222"
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	router := mux.NewRouter()
+	api := router.PathPrefix("/api").Subrouter()
+	api.Use(requireAuth(authManager))
+	migrateCalled := false
+	registerVMMigrateRouteWithExecutor(api, db, func(context.Context, string, string, map[string]string) error {
+		migrateCalled = true
+		return nil
+	})
+	mock.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM vms WHERE id = \$1 AND organization_id = \$2\)`).
+		WithArgs(vmID, orgID).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	req := mustJSONRequest(t, http.MethodPost, "/api/vms/"+vmID+"/migrate", map[string]string{"target_node": "node-dest"})
+	req.Header.Set("Authorization", signedBearerToken(t, authManager, "u-user", orgID, "viewer"))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound || migrateCalled {
+		t.Fatalf("cross-org migrate must return 404 before manager call, got %d called=%t body=%s", rec.Code, migrateCalled, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestInternalMigrateAbortPreservesRunningVMDirectory(t *testing.T) {
+	t.Setenv("NOVACRON_MIGRATION_SECRET", "test-migration-secret")
+	manager := newStubVMManager(t)
+	defer manager.Stop()
+	vmID := "live-abort-guard"
+	seedManagerVM(t, manager, vmID)
+	if err := manager.StartVM(context.Background(), vmID); err != nil {
+		t.Fatalf("start VM: %v", err)
+	}
+	vmBase := t.TempDir()
+	vmDir := filepath.Join(vmBase, vmID)
+	if err := os.MkdirAll(vmDir, 0o700); err != nil {
+		t.Fatalf("create VM dir: %v", err)
+	}
+	disk := filepath.Join(vmDir, "disk.qcow2")
+	if err := os.WriteFile(disk, []byte("live disk"), 0o600); err != nil {
+		t.Fatalf("write disk: %v", err)
+	}
+
+	router := mux.NewRouter()
+	registerInternalMigrationRoutes(router, nil, manager, vmBase)
+	req := mustJSONRequest(t, http.MethodPost, "/internal/migrate/abort", map[string]string{"vm_id": vmID})
+	req.Header.Set("X-Migration-Secret", "test-migration-secret")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("abort of a running VM must be rejected, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(disk); err != nil {
+		t.Fatalf("abort removed the running VM disk: %v", err)
+	}
+}
+func TestVMDeleteDriverFailurePreservesDatabaseRow(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	authManager := auth.NewSimpleAuthManager("test-secret", nil)
+	router := mux.NewRouter()
+	api := router.PathPrefix("/api").Subrouter()
+	api.Use(requireAuth(authManager))
+	registerVMDeleteRouteWithDeleter(api, db, func(context.Context, string) error {
+		return errors.New("disk removal failed")
+	})
+	req := httptest.NewRequest(http.MethodDelete, "/api/vms/vm-delete", nil)
+	req.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "disk removal failed") {
+		t.Fatalf("driver deletion failure must return 500, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("driver failure must preserve DB row without issuing DELETE: %v", err)
 	}
 }

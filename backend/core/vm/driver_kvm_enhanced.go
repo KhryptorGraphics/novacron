@@ -650,7 +650,7 @@ func (d *KVMDriverEnhanced) Delete(ctx context.Context, vmID string) error {
 	// Remove VM directory
 	vmDir := filepath.Dir(vmInfo.DiskPath)
 	if err := os.RemoveAll(vmDir); err != nil {
-		log.Printf("Warning: Failed to remove VM directory %s: %v", vmDir, err)
+		return fmt.Errorf("failed to remove VM directory %s: %w", vmDir, err)
 	}
 
 	delete(d.vms, vmID)
