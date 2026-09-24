@@ -205,7 +205,7 @@ func TestClusterCreateStampsCallerOrganization(t *testing.T) {
 			authManager := auth.NewSimpleAuthManager("test-secret", nil)
 			router := mux.NewRouter()
 			protected := router.PathPrefix("/api").Subrouter()
-			protected.Use(requireAuth(authManager))
+			protected.Use(requireAuth(authManager, nil))
 			// nil manager: metadata-only create, no qemu/driver in the way.
 			registerSecureAPIRoutes(protected, db, nil, t.TempDir())
 

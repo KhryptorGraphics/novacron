@@ -31,7 +31,7 @@ func newOrgScopeRouterWithManager(t *testing.T, db *sql.DB, vmManager *core_vm.V
 	authMgr := auth.NewSimpleAuthManager("test-secret", db)
 	router := mux.NewRouter()
 	api := router.PathPrefix("/api").Subrouter()
-	api.Use(requireAuth(authMgr))
+	api.Use(requireAuth(authMgr, nil))
 	registerSecureAPIRoutes(api, db, vmManager, t.TempDir())
 	return router, authMgr
 }

@@ -29,7 +29,7 @@ func newTransferRouterWithVMManager(t *testing.T, db *sql.DB, vmManager *core_vm
 	authMgr := auth.NewSimpleAuthManager("test-secret", db)
 	router := mux.NewRouter()
 	api := router.PathPrefix("/api").Subrouter()
-	api.Use(requireAuth(authMgr))
+	api.Use(requireAuth(authMgr, nil))
 	registerFabricTransferRoutes(api, db, vmManager, t.TempDir())
 	return router, authMgr
 }
