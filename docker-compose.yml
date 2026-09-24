@@ -200,16 +200,11 @@ services:
       DB_URL: postgresql://postgres:postgres@postgres:5432/novacron?sslmode=disable
       AUTH_SECRET: ${AUTH_SECRET}
       HYPERVISOR_ADDRS: hypervisor:9000
-      # Cache configuration (optional)
-      REDIS_ADDR: redis-master:6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-      CACHE_ENABLED: "true"
-      CACHE_L1_ENABLED: "true"
-      CACHE_L2_ENABLED: "true"
-      CACHE_L3_ENABLED: "false"
-      CACHE_DEFAULT_TTL: 15m
-      CACHE_VM_STATE_TTL: 30s
-      CACHE_VM_METRICS_TTL: 15s
+      # NOTE: the canonical api-server reads no REDIS_*/CACHE_* keys
+      # (backend/pkg/config/config.go has no consumers); they were removed so
+      # operators stop believing the API caches through Redis. The redis
+      # service is still started for the hypervisor's auth persistence and
+      # the AI engine.
       # Shared secret validated (fail-closed) by /internal/migrate and
       # related /internal/* endpoints for cross-node migration coordination.
       # Generate a real value with: openssl rand -hex 32

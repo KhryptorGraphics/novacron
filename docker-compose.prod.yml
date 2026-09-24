@@ -150,15 +150,7 @@ services:
       DB_URL: postgresql://${POSTGRES_USER:-novacron}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-novacron}?sslmode=require
       AUTH_SECRET: ${AUTH_SECRET}
       HYPERVISOR_ADDRS: hypervisor:9000
-      REDIS_ADDR: redis:6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-      CACHE_ENABLED: "true"
-      CACHE_L1_ENABLED: "true"
-      CACHE_L2_ENABLED: "true"
-      CACHE_L3_ENABLED: "false"
-      CACHE_DEFAULT_TTL: 15m
-      CACHE_VM_STATE_TTL: 30s
-      CACHE_VM_METRICS_TTL: 15s
+      # No REDIS_*/CACHE_* keys: the canonical api-server consumes none.
       NOVACRON_MIGRATION_SECRET: ${NOVACRON_MIGRATION_SECRET}
     ports:
       - "8090:8090"

@@ -77,8 +77,10 @@ ENV NODE_ID=node1 \
 ENTRYPOINT ["hypervisor-entrypoint.sh"]
 
 # Health check
+# The novacron binary registers GET /healthz (backend/core/cmd/novacron/main.go);
+# /health does not exist on this listener.
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD wget -q -O /dev/null http://localhost:9000/health || exit 1
+    CMD wget -q -O /dev/null http://localhost:9000/healthz || exit 1
 
 # Default command
 CMD ["novacron-hypervisor", "--config", "/etc/novacron/config.yaml"]
