@@ -495,10 +495,10 @@ func (e *DefaultPolicyEvaluator) regexMatches(value, pattern interface{}) (bool,
 }
 
 func (e *DefaultPolicyEvaluator) isRuleScheduleActive(schedule *RuleSchedule) bool {
-	return scheduleActiveAt(schedule, time.Now())
+	return e.scheduleActiveAt(schedule, time.Now())
 }
 
-func scheduleActiveAt(schedule *RuleSchedule, now time.Time) bool {
+func (e *DefaultPolicyEvaluator) scheduleActiveAt(schedule *RuleSchedule, now time.Time) bool {
 	if schedule == nil || !schedule.Enabled {
 		return false
 	}
@@ -515,14 +515,15 @@ func scheduleActiveAt(schedule *RuleSchedule, now time.Time) bool {
 	if expression == "" {
 		return true
 	}
-	return cronMatches(expression, schedule.Timezone, now)
+	return e.cronMatches(expression, schedule.Timezone, now)
 }
 
-func cronMatches(expression, timezone string, now time.Time) bool {
+func (e *DefaultPolicyEvaluator) cronMatches(expression, timezone string, now time.Time) bool {
 	location := time.UTC
 	if timezone != "" {
 		loaded, err := time.LoadLocation(timezone)
 		if err != nil {
+			e.logger.WithError(err).WithField("cron", expression).Warn("Invalid timezone in policy schedule")
 			return false
 		}
 		location = loaded
@@ -530,6 +531,7 @@ func cronMatches(expression, timezone string, now time.Time) bool {
 
 	sched, err := policyCronParser.Parse(expression)
 	if err != nil {
+		e.logger.WithError(err).WithField("cron", expression).Warn("Invalid cron expression in policy schedule")
 		return false
 	}
 
