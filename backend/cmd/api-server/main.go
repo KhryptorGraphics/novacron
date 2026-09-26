@@ -287,6 +287,115 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 		services.orchestrationAPI.RegisterRoutes(apiRouter)
 	}
 
+	// GET /api/auth/me - returns current user with memberships
+	meHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := r.Context().Value("user_id").(string)
+		if !ok || userID == "" {
+			writeJSONError(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+
+		user, err := authManager.GetUser(userID)
+		if err != nil {
+			writeJSONError(w, http.StatusUnauthorized, "user not found")
+			return
+		}
+
+		// Get user's cluster memberships
+		rows, err := db.Query(`
+			SELECT ca.cluster_id, ca.admitted, ca.role, ca.source, ca.admitted_at, ca.tenant_id, ca.selected,
+			       c.name, c.tier, c.performance_score, c.interconnect_latency_ms,
+			       c.interconnect_bandwidth_mbps, c.current_node_count, c.max_supported_node_count,
+			       c.growth_state, c.federation_state, c.degraded, c.last_evaluated_at,
+			       c.edge_latency_ms, c.edge_bandwidth_mbps
+			FROM cluster_admissions ca
+			JOIN clusters c ON ca.cluster_id = c.id
+			WHERE ca.user_id = $1
+			ORDER BY ca.created_at DESC
+		`, userID)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to query cluster admissions")
+			return
+		}
+		defer rows.Close()
+
+		type AdmissionResponse struct {
+			Admitted     bool   `json:"admitted"`
+			State        string `json:"state,omitempty"`
+			ClusterID    string `json:"cluster_id"`
+			Role         string `json:"role,omitempty"`
+			Source       string `json:"source,omitempty"`
+			AdmittedAt   string `json:"admitted_at,omitempty"`
+			TenantID     string `json:"tenant_id,omitempty"`
+			Selected     bool   `json:"selected,omitempty"`
+			Cluster      *ClusterSummaryResponse `json:"cluster,omitempty"`
+		}
+
+		var memberships []AdmissionResponse
+		var selectedCluster *ClusterSummaryResponse
+		for rows.Next() {
+			var adm AdmissionResponse
+			var cluster ClusterSummaryResponse
+			var admittedAt sql.NullTime
+			var tenantID sql.NullString
+			err := rows.Scan(
+				&adm.ClusterID, &adm.Admitted, &adm.Role, &adm.Source, &admittedAt, &tenantID, &adm.Selected,
+				&cluster.Name, &cluster.Tier, &cluster.PerformanceScore,
+				&cluster.InterconnectLatencyMs, &cluster.InterconnectBandwidthMbps,
+				&cluster.CurrentNodeCount, &cluster.MaxSupportedNodeCount,
+				&cluster.GrowthState, &cluster.FederationState, &cluster.Degraded,
+				&cluster.LastEvaluatedAt, &cluster.EdgeLatencyMs, &cluster.EdgeBandwidthMbps,
+			)
+			if err != nil {
+				writeJSONError(w, http.StatusInternalServerError, "failed to scan cluster admission")
+				return
+			}
+			// adm.Admitted is already set from scan
+			if admittedAt.Valid {
+				adm.AdmittedAt = admittedAt.Time.Format(time.RFC3339)
+			}
+			if tenantID.Valid {
+				adm.TenantID = tenantID.String
+			}
+			if adm.Selected {
+				selectedCluster = &cluster
+			}
+		}
+
+		// Get session info
+		var sessionID, sessionExpiresAt string
+		db.QueryRow(`
+			SELECT id, expires_at FROM sessions WHERE user_id = $1 AND revoked_at IS NULL
+			ORDER BY created_at DESC LIMIT 1
+		`, userID).Scan(&sessionID, &sessionExpiresAt)
+
+		// Build response
+		userResp := frontendUser(user)
+		admission := AdmissionResponse{}
+		if selectedCluster != nil {
+			admission = AdmissionResponse{
+				Admitted:  true,
+				ClusterID: selectedCluster.ID,
+				Cluster:   selectedCluster,
+				Selected:  true,
+			}
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"user":              userResp,
+			"admission":         admission,
+			"memberships":       memberships,
+			"selectedCluster":   selectedCluster,
+			"session": map[string]interface{}{
+				"id":             sessionID,
+				"expiresAt":      sessionExpiresAt,
+				"createdAt":      time.Now().UTC().Format(time.RFC3339),
+				"lastAccessedAt": time.Now().UTC().Format(time.RFC3339),
+			},
+		})
+	})
+	router.HandleFunc("/api/auth/me", meHandler).Methods(http.MethodGet)
+
 	router.HandleFunc("/health", healthCheckHandler(cfg, db)).Methods(http.MethodGet)
 
 	router.HandleFunc("/api/info", apiInfoHandler()).Methods(http.MethodGet)
@@ -303,6 +412,26 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 		MaxHeaderBytes: 64 << 10,
 	}
 }
+
+
+// ClusterSummaryResponse represents cluster summary information for API responses
+type ClusterSummaryResponse struct {
+	ID                         string    `json:"id"`
+	Name                       string    `json:"name"`
+	Tier                       string    `json:"tier"`
+	PerformanceScore           float64   `json:"performanceScore"`
+	InterconnectLatencyMs      float64   `json:"interconnectLatencyMs"`
+	InterconnectBandwidthMbps  float64   `json:"interconnectBandwidthMbps"`
+	CurrentNodeCount           int       `json:"currentNodeCount"`
+	MaxSupportedNodeCount      int       `json:"maxSupportedNodeCount"`
+	GrowthState                string    `json:"growthState"`
+	FederationState            string    `json:"federationState"`
+	Degraded                   bool      `json:"degraded"`
+	LastEvaluatedAt            time.Time `json:"lastEvaluatedAt"`
+	EdgeLatencyMs              float64   `json:"edgeLatencyMs,omitempty"`
+	EdgeBandwidthMbps          float64   `json:"edgeBandwidthMbps,omitempty"`
+}
+
 
 const incomingMigrationMarker = ".novacron-incoming-migration"
 
