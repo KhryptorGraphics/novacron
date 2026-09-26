@@ -339,8 +339,9 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 		for rows.Next() {
 			var adm AdmissionResponse
 			var cluster ClusterSummaryResponse
+			var tenantID sql.NullString
 			err := rows.Scan(
-				&adm.ClusterID, &adm.State, &adm.Role, &adm.Source, &adm.AdmittedAt, &adm.TenantID,
+				&adm.ClusterID, &adm.State, &adm.Role, &adm.Source, &adm.AdmittedAt, &tenantID,
 				&cluster.ID, &cluster.Name, &cluster.Tier, &cluster.PerformanceScore,
 				&cluster.InterconnectLatencyMs, &cluster.InterconnectBandwidthMbps,
 				&cluster.CurrentNodeCount, &cluster.MaxSupportedNodeCount,
@@ -353,6 +354,9 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 			}
 			// Derive admitted from state
 			adm.Admitted = (adm.State == "active")
+			if tenantID.Valid {
+				adm.TenantID = tenantID.String
+			}
 			adm.Selected = false
 			memberships = append(memberships, adm)
 
