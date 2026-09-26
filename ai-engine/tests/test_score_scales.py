@@ -96,6 +96,48 @@ def test_isolation_forest_inlier_scores_below_outlier():
     assert scores[1] > scores[0]
 
 
+def test_missing_optional_detectors_do_not_shrink_the_score():
+    """A full outlier stays a full ensemble vote when AE and LSTM are absent."""
+    model = _anomaly_model()
+    model.mark_trained(object())
+    model._feature_names = ["cpu"]
+    model._detector_score_range["isolation_forest"] = (-0.4, 0.4)
+    model._statistical_thresholds = {}
+
+    class _IdentityExtractor:
+        def extract_features(self, frame):
+            return frame
+
+    class _IdentityScaler:
+        def transform(self, frame):
+            return frame.to_numpy(dtype=float)
+
+    class _Forest:
+        def decision_function(self, _scaled):
+            return np.array([-0.4])
+
+    model._feature_extractor = _IdentityExtractor()
+    model._scaler = _IdentityScaler()
+    model._isolation_forest = _Forest()
+    model._lof_detector = None
+    model._ocsvm_detector = None
+    model._autoencoder = None
+    model._lstm_detector = None
+
+    alone = model.decision_function(pd.DataFrame({"cpu": [9.0]}))
+
+    class _Outlier:
+        def decision_function(self, _scaled):
+            return np.array([0.4])
+
+    model._detector_score_range["lof"] = (-0.4, 0.4)
+    model._lof_detector = _Outlier()
+    with_lof = model.decision_function(pd.DataFrame({"cpu": [9.0]}))
+
+    assert alone[0] == 0.8
+    assert with_lof[0] == 0.8
+
+
 def test_statistical_anomalies_use_scaled_feature_values():
     model = _anomaly_model()
     model._feature_names = ["cpu"]

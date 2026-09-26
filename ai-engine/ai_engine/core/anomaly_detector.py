@@ -219,8 +219,17 @@ class AnomalyDetectionModel(BaseMLModel):
         X_features = self._feature_extractor.extract_features(X)
         X_scaled = self._scaler.transform(X_features)
         
-        # Get ensemble predictions
-        scores = []
+        # Get ensemble predictions. Optional detectors (autoencoder, LSTM)
+        # are often absent. Divide by the weights that voted so a missing
+        # detector does not shrink every anomaly score.
+        weighted_scores = []
+        active_weight = 0.0
+
+        def add_detector(name: str, values: np.ndarray) -> None:
+            nonlocal active_weight
+            weight = float(self._ensemble_weights[name])
+            weighted_scores.append(weight * np.asarray(values, dtype=float))
+            active_weight += weight
         
         # Isolation Forest
         if self._isolation_forest:
@@ -228,31 +237,31 @@ class AnomalyDetectionModel(BaseMLModel):
             # sklearn scores are higher for inliers. pyod detectors already
             # score higher for outliers, so only this detector is inverted.
             iso_scores = 1.0 - self._normalize_scores(iso_scores, "isolation_forest")
-            scores.append(self._ensemble_weights['isolation_forest'] * iso_scores)
+            add_detector("isolation_forest", iso_scores)
         
         # Local Outlier Factor
         if self._lof_detector:
             lof_scores = self._lof_detector.decision_function(X_scaled)
             lof_scores = self._normalize_scores(lof_scores, "lof")
-            scores.append(self._ensemble_weights['lof'] * lof_scores)
+            add_detector("lof", lof_scores)
         
         # One-Class SVM
         if self._ocsvm_detector:
             svm_scores = self._ocsvm_detector.decision_function(X_scaled)
             svm_scores = self._normalize_scores(svm_scores, "ocsvm")
-            scores.append(self._ensemble_weights['ocsvm'] * svm_scores)
+            add_detector("ocsvm", svm_scores)
         
         # Autoencoder
         if self._autoencoder:
             ae_scores = self._autoencoder.decision_function(X_scaled)
             ae_scores = self._normalize_scores(ae_scores, "autoencoder")
-            scores.append(self._ensemble_weights['autoencoder'] * ae_scores)
+            add_detector("autoencoder", ae_scores)
         
         # LSTM detector
         if self._lstm_detector:
             lstm_scores = self._predict_lstm_anomalies(X_scaled)
             lstm_scores = self._normalize_scores(lstm_scores, "lstm")
-            scores.append(self._ensemble_weights['lstm'] * lstm_scores)
+            add_detector("lstm", lstm_scores)
         
         # Statistical thresholds were fit on the scaled training matrix.
         stat_scores = self._detect_statistical_anomalies(
@@ -260,8 +269,8 @@ class AnomalyDetectionModel(BaseMLModel):
         )
         
         # Combine all scores
-        if scores:
-            ensemble_scores = np.sum(scores, axis=0)
+        if weighted_scores and active_weight > 0:
+            ensemble_scores = np.sum(weighted_scores, axis=0) / active_weight
             # Combine with statistical scores
             final_scores = 0.8 * ensemble_scores + 0.2 * stat_scores
         else:
