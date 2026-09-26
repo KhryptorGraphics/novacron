@@ -120,7 +120,7 @@ services:
     restart: "no"
     user: "1000:1000"
     environment:
-      DB_URL: postgresql://${POSTGRES_USER:-novacron}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-novacron}?sslmode=require
+      DB_URL: postgresql://${POSTGRES_USER:-novacron}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-novacron}?sslmode=disable
     volumes:
       - migrate_bin:/shared/bin:rw
     cap_drop:
@@ -147,7 +147,7 @@ services:
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-warn}
       API_PORT: 8090
-      DB_URL: postgresql://${POSTGRES_USER:-novacron}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-novacron}?sslmode=require
+      DB_URL: postgresql://${POSTGRES_USER:-novacron}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-novacron}?sslmode=disable
       AUTH_SECRET: ${AUTH_SECRET}
       HYPERVISOR_ADDRS: hypervisor:9000
       # No REDIS_*/CACHE_* keys: the canonical api-server consumes none.
