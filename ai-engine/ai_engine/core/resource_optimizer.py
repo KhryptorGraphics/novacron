@@ -20,6 +20,7 @@ from sklearn.metrics import mean_squared_error, r2_score
 import lightgbm as lgb
 
 from ..models.base import BaseMLModel, ModelMetadata, ModelType, PredictionRequest, PredictionResponse
+from ..integrations.novacron_client import NovaCronAPIError, NovaCronClient, fetch_resource_frame
 from ..utils.feature_engineering import ResourceFeatureExtractor
 from ..utils.metrics import MetricsCalculator
 
@@ -711,6 +712,7 @@ class ResourceOptimizationService:
         self.models: Dict[str, ResourceOptimizationModel] = {}
         self.active_model: Optional[ResourceOptimizationModel] = None
         self._optimization_task: Optional[asyncio.Task] = None
+        self._novacron_client: Optional[NovaCronClient] = None
         
         # Metrics calculator
         self.metrics_calculator = MetricsCalculator()
@@ -718,6 +720,17 @@ class ResourceOptimizationService:
         # Recommendation history
         self._recommendation_history: List[Dict[str, Any]] = []
         self._max_history_size = 1000
+    
+    def _get_novacron_client(self) -> NovaCronClient:
+        """Lazy NovaCron API client shared across optimization cycles."""
+        if self._novacron_client is None:
+            self._novacron_client = NovaCronClient(self.settings.novacron)
+        return self._novacron_client
+    
+    async def _close_novacron_client(self) -> None:
+        if self._novacron_client is not None:
+            await self._novacron_client.aclose()
+            self._novacron_client = None
     
     async def initialize(self) -> None:
         """Initialize the service and load models."""
@@ -811,7 +824,8 @@ class ResourceOptimizationService:
                 await self._optimization_task
             except asyncio.CancelledError:
                 pass
-            logger.info("Resource optimization monitoring stopped")
+        await self._close_novacron_client()
+        logger.info("Resource optimization monitoring stopped")
     
     async def get_optimization_summary(self, time_window: timedelta = timedelta(hours=24)) -> Dict[str, Any]:
         """
@@ -906,10 +920,22 @@ class ResourceOptimizationService:
                 await asyncio.sleep(300)  # Wait 5 minutes before retry
     
     async def _fetch_current_resource_states(self) -> Optional[pd.DataFrame]:
-        """Fetch current resource states from NovaCron API."""
-        # This would integrate with the NovaCron monitoring API
-        # For now, return mock data structure
-        return None
+        """Fetch current resource states from the NovaCron monitoring API.
+
+        Returns a host-level utilization frame (0-1 fractions). Only
+        measurements the backend actually samples are included; per-VM rows
+        are omitted because the canonical backend does not collect per-VM
+        disk utilization, and the optimizer's analysis requires all three
+        axes. Returns None when the host is not fully sampled or the API is
+        unreachable, so the loop backs off.
+        """
+        client = self._get_novacron_client()
+        try:
+            host = await client.get_host_metrics()
+        except NovaCronAPIError as exc:
+            logger.warning(f"NovaCron metrics fetch failed: {exc}")
+            return None
+        return fetch_resource_frame(host)
     
     async def _process_optimization_recommendation(self, recommendation: ResourceRecommendation,
                                                  resource_data: pd.DataFrame) -> None:

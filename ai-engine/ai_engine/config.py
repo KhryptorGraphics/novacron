@@ -5,7 +5,7 @@ Optimized for Python 3.12 with improved type annotations and validation.
 
 import os
 from typing import List, Optional
-from pydantic import Field, ValidationInfo, field_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings as PydanticBaseSettings, SettingsConfigDict
 
 
@@ -106,13 +106,6 @@ class SecuritySettings(PydanticBaseSettings):
     allowed_origins: List[str] = ["http://localhost:8092", "http://localhost:3001"]
     api_key_header: str = "X-API-Key"
     
-    @field_validator("secret_key")
-    def validate_secret_key(cls, v: str) -> str:
-        """Validate secret key in production."""
-        if os.getenv("ENVIRONMENT", "development") == "production" and v == "changeme_in_production":
-            raise ValueError("Secret key must be set in production")
-        return v
-    
     model_config = SettingsConfigDict(env_prefix="SECURITY_")
 
 
@@ -150,6 +143,30 @@ class Settings(PydanticBaseSettings):  # Python 3.12 optimized
         if info.data.get("environment") == "development":
             return 1
         return max(1, min(v, os.cpu_count() or 1))
+    
+    @model_validator(mode="after")
+    def require_real_secrets_in_production(self) -> "Settings":
+        """Reject placeholder credentials in production.
+
+        Single decision point: unlike the removed os.getenv("ENVIRONMENT")
+        check on SecuritySettings, this reads Settings.environment, which
+        pydantic sources from env vars and .env alike.
+        """
+        if self.environment.lower() != "production":
+            return self
+        problems = []
+        if self.security.secret_key == "changeme_in_production":
+            problems.append("SECURITY_SECRET_KEY")
+        if self.novacron.password in ("changeme", ""):
+            problems.append("NOVACRON_PASSWORD")
+        if not self.novacron.jwt_secret:
+            problems.append("NOVACRON_JWT_SECRET")
+        if problems:
+            raise ValueError(
+                "placeholder credentials are not allowed in production; set: "
+                + ", ".join(problems)
+            )
+        return self
     
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False)
 

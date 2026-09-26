@@ -19,6 +19,7 @@ from sklearn.metrics import classification_report, roc_auc_score
 import xgboost as xgb
 
 from ..models.base import BaseMLModel, ModelMetadata, ModelType, PredictionRequest, PredictionResponse
+from ..integrations.novacron_client import NovaCronAPIError, NovaCronClient, fetch_metric_rows
 from ..utils.metrics import MetricsCalculator
 from ..utils.feature_engineering import TimeSeriesFeatureExtractor
 
@@ -323,9 +324,21 @@ class FailurePredictionService:
         self.models: Dict[str, FailurePredictionModel] = {}
         self.active_model: Optional[FailurePredictionModel] = None
         self._monitoring_task: Optional[asyncio.Task] = None
+        self._novacron_client: Optional[NovaCronClient] = None
         
         # Metrics calculator
         self.metrics_calculator = MetricsCalculator()
+    
+    def _get_novacron_client(self) -> NovaCronClient:
+        """Lazy NovaCron API client shared across monitoring cycles."""
+        if self._novacron_client is None:
+            self._novacron_client = NovaCronClient(self.settings.novacron)
+        return self._novacron_client
+    
+    async def _close_novacron_client(self) -> None:
+        if self._novacron_client is not None:
+            await self._novacron_client.aclose()
+            self._novacron_client = None
     
     async def initialize(self) -> None:
         """Initialize the service and load models."""
@@ -461,7 +474,8 @@ class FailurePredictionService:
                 await self._monitoring_task
             except asyncio.CancelledError:
                 pass
-            logger.info("Failure monitoring stopped")
+        await self._close_novacron_client()
+        logger.info("Failure monitoring stopped")
     
     async def _monitoring_loop(self) -> None:
         """Main monitoring loop for continuous failure prediction."""
@@ -504,10 +518,21 @@ class FailurePredictionService:
                 await asyncio.sleep(60)
     
     async def _fetch_current_metrics(self) -> Optional[List[Dict[str, Any]]]:
-        """Fetch current system metrics from NovaCron API."""
-        # This would integrate with the NovaCron monitoring API
-        # For now, return mock data structure
-        return None
+        """Fetch current metrics from the NovaCron monitoring API.
+
+        Returns rows keyed by ``node_id`` (host plus per-VM samples) with only
+        measured metrics included. Returns None on API failure so the
+        monitoring loop backs off instead of predicting on nothing.
+        """
+        client = self._get_novacron_client()
+        try:
+            host, vms = await asyncio.gather(
+                client.get_host_metrics(), client.get_vm_metrics()
+            )
+        except NovaCronAPIError as exc:
+            logger.warning(f"NovaCron metrics fetch failed: {exc}")
+            return None
+        return fetch_metric_rows(host, vms)
     
     async def _store_prediction(self, request: PredictionRequest, response: PredictionResponse) -> None:
         """Store prediction result in database."""
