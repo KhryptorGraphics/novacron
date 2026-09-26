@@ -23,6 +23,7 @@ type VMManager struct {
 	mutex          sync.RWMutex
 	ctx            context.Context
 	cancel         context.CancelFunc
+	config         *VMManagerConfig
 
 	// Resource accounting fields
 	allocatedCPU      int
@@ -112,6 +113,7 @@ func NewVMManager(config VMManagerConfig) (*VMManager, error) {
 		cancel:         cancel,
 		tenantQuotas:   normalizeTenantQuotaConfig(config.TenantQuota),
 		tenantUsage:    make(map[string]*tenantResourceUsage),
+		config:         &config,
 	}
 
 	// Initialize driver factory with default config
@@ -395,16 +397,111 @@ func NewKVMDriverStub(config map[string]interface{}) (VMDriver, error) {
 	return nil, fmt.Errorf("KVM driver not yet implemented")
 }
 
-// updateLoop runs the VM update loop
+// updateLoop runs the VM update loop - polls driver state and syncs local cache
 func (m *VMManager) updateLoop() {
-	// Placeholder for update loop implementation
+	updateInterval := time.Duration(30 * time.Second)
+	if m.config != nil && m.config.UpdateInterval > 0 {
+		updateInterval = m.config.UpdateInterval
+	}
+	ticker := time.NewTicker(updateInterval)
+	defer ticker.Stop()
+
 	log.Println("VM Manager update loop started")
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			log.Println("VM Manager update loop stopped")
+			return
+		case <-ticker.C:
+			m.syncVMStates()
+		}
+	}
 }
 
-// cleanupLoop runs the VM cleanup loop
+// cleanupLoop runs the VM cleanup loop - removes stale entries and reclaims resources
 func (m *VMManager) cleanupLoop() {
-	// Placeholder for cleanup loop implementation
+	cleanupInterval := time.Duration(5 * time.Minute)
+	if m.config != nil && m.config.CleanupInterval > 0 {
+		cleanupInterval = m.config.CleanupInterval
+	}
+	ticker := time.NewTicker(cleanupInterval)
+	defer ticker.Stop()
+
 	log.Println("VM Manager cleanup loop started")
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			log.Println("VM Manager cleanup loop stopped")
+			return
+		case <-ticker.C:
+			m.cleanupStaleResources()
+		}
+	}
+}
+
+// syncVMStates iterates all managed VMs and reconciles their state with the driver
+func (m *VMManager) syncVMStates() {
+	m.vmsMutex.RLock()
+	vms := make([]*VM, 0, len(m.vms))
+	for _, vm := range m.vms {
+		vms = append(vms, vm)
+	}
+	m.vmsMutex.RUnlock()
+
+	for _, vm := range vms {
+		driver, err := m.getDriverForVM(vm)
+		if err != nil {
+			log.Printf("VM %s: no driver available for state sync: %v", vm.config.ID, err)
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
+		driverState, err := driver.GetStatus(ctx, vm.config.ID)
+		cancel()
+		if err != nil {
+			log.Printf("VM %s: failed to get driver status: %v", vm.config.ID, err)
+			continue
+		}
+
+		localState := vm.State()
+		if driverState != localState {
+			log.Printf("VM %s: state drift detected (local=%s, driver=%s), reconciling",
+				vm.config.ID, localState, driverState)
+			// Update local VM state to match driver
+			vm.SetState(driverState)
+			// Update cache
+			m.mutex.Lock()
+			if info, ok := m.vmCache[vm.config.ID]; ok {
+				info.State = driverState
+				m.vmCache[vm.config.ID] = info
+			}
+			m.mutex.Unlock()
+			m.emitEvent(VMEvent{
+				Type:      VMEventUpdated,
+				VM:        vm,
+				Timestamp: time.Now(),
+				NodeID:    "",
+				Message:   "State reconciled with driver",
+				Data:      map[string]interface{}{"old_state": localState, "new_state": driverState},
+			})
+		}
+	}
+}
+
+// cleanupStaleResources removes VMs that are in terminal states and cleans up cache
+func (m *VMManager) cleanupStaleResources() {
+	m.mutex.Lock()
+	for vmID, info := range m.vmCache {
+		if info.State == StateFailed {
+			delete(m.vmCache, vmID)
+			log.Printf("Cleaned up stale cache entry for VM %s (state: %s)", vmID, info.State)
+		}
+	}
+	m.mutex.Unlock()
+
+	// TODO: Also reclaim resources for VMs that are stopped/failed but still in vms map
 }
 
 // AddVM adds a VM to the manager
