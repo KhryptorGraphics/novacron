@@ -98,8 +98,8 @@ func (r *RestartRecoveryStrategy) Recover(failure *FailureInfo, target *HealingT
 	startTime := time.Now()
 	result := &RecoveryResult{
 		ActionsExecuted: []string{},
-		Errors:         []string{},
-		Metadata:       make(map[string]interface{}),
+		Errors:          []string{},
+		Metadata:        make(map[string]interface{}),
 	}
 
 	// Simulate restart process based on target type
@@ -203,8 +203,8 @@ func (m *MigrateRecoveryStrategy) Recover(failure *FailureInfo, target *HealingT
 	startTime := time.Now()
 	result := &RecoveryResult{
 		ActionsExecuted: []string{},
-		Errors:         []string{},
-		Metadata:       make(map[string]interface{}),
+		Errors:          []string{},
+		Metadata:        make(map[string]interface{}),
 	}
 
 	// Simulate migration process
@@ -292,8 +292,8 @@ func (s *ScaleRecoveryStrategy) Recover(failure *FailureInfo, target *HealingTar
 	startTime := time.Now()
 	result := &RecoveryResult{
 		ActionsExecuted: []string{},
-		Errors:         []string{},
-		Metadata:       make(map[string]interface{}),
+		Errors:          []string{},
+		Metadata:        make(map[string]interface{}),
 	}
 
 	// Simulate scaling process
@@ -373,8 +373,8 @@ func (f *FailoverRecoveryStrategy) Recover(failure *FailureInfo, target *Healing
 	startTime := time.Now()
 	result := &RecoveryResult{
 		ActionsExecuted: []string{},
-		Errors:         []string{},
-		Metadata:       make(map[string]interface{}),
+		Errors:          []string{},
+		Metadata:        make(map[string]interface{}),
 	}
 
 	// Check if failover target exists
@@ -415,117 +415,45 @@ func (f *FailoverRecoveryStrategy) EstimateTime(failure *FailureInfo) time.Durat
 // Private helper methods for each strategy
 
 func (r *RestartRecoveryStrategy) restartVM(target *HealingTarget, result *RecoveryResult) error {
-	// Simulate VM restart
-	result.ActionsExecuted = append(result.ActionsExecuted, "stop_vm")
-	time.Sleep(100 * time.Millisecond) // Simulate work
-
-	result.ActionsExecuted = append(result.ActionsExecuted, "start_vm")
-	time.Sleep(100 * time.Millisecond) // Simulate work
-
-	result.ActionsExecuted = append(result.ActionsExecuted, "verify_vm_health")
-	result.Metadata["vm_restart_method"] = "graceful"
-	
-	return nil
+	// VM restart not implemented: requires VMManager access
+	result.ActionsExecuted = append(result.ActionsExecuted, "restart_vm_not_implemented")
+	return fmt.Errorf("restartVM not implemented: requires VMManager integration")
 }
 
 func (r *RestartRecoveryStrategy) restartService(target *HealingTarget, result *RecoveryResult) error {
-	// Simulate service restart
-	result.ActionsExecuted = append(result.ActionsExecuted, "stop_service")
-	time.Sleep(50 * time.Millisecond) // Simulate work
-
-	result.ActionsExecuted = append(result.ActionsExecuted, "start_service")
-	time.Sleep(50 * time.Millisecond) // Simulate work
-
-	result.ActionsExecuted = append(result.ActionsExecuted, "verify_service_health")
-	result.Metadata["service_restart_method"] = "systemctl"
-	
-	return nil
+	// Service restart not implemented: requires service manager integration
+	result.ActionsExecuted = append(result.ActionsExecuted, "restart_service_not_implemented")
+	return fmt.Errorf("restartService not implemented: requires service manager integration")
 }
 
 func (r *RestartRecoveryStrategy) restartNode(target *HealingTarget, result *RecoveryResult) error {
-	// Simulate node restart (more complex)
-	result.ActionsExecuted = append(result.ActionsExecuted, "drain_node")
-	time.Sleep(200 * time.Millisecond) // Simulate work
-
-	result.ActionsExecuted = append(result.ActionsExecuted, "restart_node")
-	time.Sleep(300 * time.Millisecond) // Simulate work
-
-	result.ActionsExecuted = append(result.ActionsExecuted, "rejoin_cluster")
-	result.Metadata["node_restart_method"] = "graceful_reboot"
-	
-	return nil
+	// Node restart not implemented: requires cluster manager integration
+	result.ActionsExecuted = append(result.ActionsExecuted, "restart_node_not_implemented")
+	return fmt.Errorf("restartNode not implemented: requires cluster manager integration")
 }
 
 func (m *MigrateRecoveryStrategy) migrateVM(target *HealingTarget, result *RecoveryResult) error {
-	// Simulate VM migration
-	result.ActionsExecuted = append(result.ActionsExecuted, "find_target_node")
-	time.Sleep(100 * time.Millisecond) // Simulate work
-
-	result.ActionsExecuted = append(result.ActionsExecuted, "prepare_migration")
-	time.Sleep(200 * time.Millisecond) // Simulate work
-
-	result.ActionsExecuted = append(result.ActionsExecuted, "execute_migration")
-	time.Sleep(500 * time.Millisecond) // Simulate work
-
-	result.ActionsExecuted = append(result.ActionsExecuted, "verify_migration")
-	result.Metadata["migration_type"] = "live"
-	result.Metadata["target_node"] = "node-02"
-	
-	return nil
+	// VM migration not implemented: requires VMManager and cluster integration
+	result.ActionsExecuted = append(result.ActionsExecuted, "migrate_vm_not_implemented")
+	return fmt.Errorf("migrateVM not implemented: requires VMManager and cluster integration")
 }
 
 func (m *MigrateRecoveryStrategy) migrateService(target *HealingTarget, result *RecoveryResult) error {
-	// Simulate service migration
-	result.ActionsExecuted = append(result.ActionsExecuted, "create_service_backup")
-	time.Sleep(100 * time.Millisecond) // Simulate work
-
-	result.ActionsExecuted = append(result.ActionsExecuted, "deploy_to_new_node")
-	time.Sleep(300 * time.Millisecond) // Simulate work
-
-	result.ActionsExecuted = append(result.ActionsExecuted, "update_load_balancer")
-	result.Metadata["migration_method"] = "blue_green"
-	
-	return nil
+	// Service migration not implemented: requires service manager and load balancer integration
+	result.ActionsExecuted = append(result.ActionsExecuted, "migrate_service_not_implemented")
+	return fmt.Errorf("migrateService not implemented: requires service manager and load balancer integration")
 }
 
 func (s *ScaleRecoveryStrategy) scaleService(target *HealingTarget, failure *FailureInfo, result *RecoveryResult) error {
-	// Simulate service scaling
-	result.ActionsExecuted = append(result.ActionsExecuted, "calculate_scale_factor")
-	time.Sleep(50 * time.Millisecond) // Simulate work
-
-	result.ActionsExecuted = append(result.ActionsExecuted, "provision_resources")
-	time.Sleep(200 * time.Millisecond) // Simulate work
-
-	result.ActionsExecuted = append(result.ActionsExecuted, "update_service_replicas")
-	time.Sleep(100 * time.Millisecond) // Simulate work
-
-	// Determine scale factor based on failure type
-	scaleFactor := 1.5
-	if failure.FailureType == FailureTypeResourceExhaustion {
-		scaleFactor = 2.0
-	}
-
-	result.Metadata["scale_factor"] = scaleFactor
-	result.Metadata["new_replicas"] = 6 // Simulated
-	
-	return nil
+	// Service scaling not implemented: requires orchestrator integration
+	result.ActionsExecuted = append(result.ActionsExecuted, "scale_service_not_implemented")
+	return fmt.Errorf("scaleService not implemented: requires orchestrator integration")
 }
 
 func (s *ScaleRecoveryStrategy) scaleCluster(target *HealingTarget, failure *FailureInfo, result *RecoveryResult) error {
-	// Simulate cluster scaling
-	result.ActionsExecuted = append(result.ActionsExecuted, "assess_cluster_capacity")
-	time.Sleep(100 * time.Millisecond) // Simulate work
-
-	result.ActionsExecuted = append(result.ActionsExecuted, "provision_new_nodes")
-	time.Sleep(400 * time.Millisecond) // Simulate work
-
-	result.ActionsExecuted = append(result.ActionsExecuted, "join_nodes_to_cluster")
-	time.Sleep(200 * time.Millisecond) // Simulate work
-
-	result.Metadata["nodes_added"] = 2
-	result.Metadata["cluster_size"] = 8 // Simulated
-	
-	return nil
+	// Cluster scaling not implemented: requires cluster manager integration
+	result.ActionsExecuted = append(result.ActionsExecuted, "scale_cluster_not_implemented")
+	return fmt.Errorf("scaleCluster not implemented: requires cluster manager integration")
 }
 
 func (f *FailoverRecoveryStrategy) hasFailoverTarget(target *HealingTarget) bool {
@@ -548,10 +476,10 @@ func (f *FailoverRecoveryStrategy) executeFailover(target *HealingTarget, result
 	time.Sleep(150 * time.Millisecond) // Simulate work
 
 	result.ActionsExecuted = append(result.ActionsExecuted, "verify_failover")
-	
+
 	failoverTarget := target.Metadata["failover_target"].(string)
 	result.Metadata["failover_target"] = failoverTarget
 	result.Metadata["failover_type"] = "hot_standby"
-	
+
 	return nil
 }
