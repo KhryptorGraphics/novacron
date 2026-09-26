@@ -331,15 +331,16 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 			Cluster      *ClusterSummaryResponse `json:"cluster,omitempty"`
 		}
 
-		var memberships []AdmissionResponse
+		memberships := make([]AdmissionResponse, 0)
 		var selectedCluster *ClusterSummaryResponse
 		for rows.Next() {
 			var adm AdmissionResponse
 			var cluster ClusterSummaryResponse
 			var admittedAt sql.NullTime
 			var tenantID sql.NullString
+			var source sql.NullString
 			err := rows.Scan(
-				&adm.ClusterID, &adm.Admitted, &adm.Role, &adm.Source, &admittedAt, &tenantID, &adm.Selected,
+				&adm.ClusterID, &adm.Admitted, &adm.Role, &source, &admittedAt, &tenantID, &adm.Selected,
 				&cluster.Name, &cluster.Tier, &cluster.PerformanceScore,
 				&cluster.InterconnectLatencyMs, &cluster.InterconnectBandwidthMbps,
 				&cluster.CurrentNodeCount, &cluster.MaxSupportedNodeCount,
@@ -356,6 +357,9 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 			}
 			if tenantID.Valid {
 				adm.TenantID = tenantID.String
+			}
+			if source.Valid {
+				adm.Source = source.String
 			}
 			if adm.Selected {
 				selectedCluster = &cluster
