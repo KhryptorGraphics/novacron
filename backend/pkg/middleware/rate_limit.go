@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/khryptorgraphics/novacron/backend/pkg/security"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/time/rate"
 )
@@ -29,6 +29,8 @@ type RateLimitConfig struct {
 	RedisClient *redis.Client
 	// ExcludedIPs are IPs exempt from rate limiting (e.g., internal services)
 	ExcludedIPs []string
+	// TrustedProxies are CIDR ranges of trusted proxies for X-Forwarded-For/X-Real-IP
+	TrustedProxies []string
 	// SkipPaths are paths exempt from rate limiting
 	SkipPaths []string
 	// IdentifyByToken if true, uses JWT user ID instead of IP for rate limiting
@@ -75,7 +77,7 @@ func (rl *RateLimiter) Limit(next http.Handler) http.Handler {
 		clientID := rl.getClientID(r)
 
 		// Check if IP is excluded
-		clientIP := getClientIP(r)
+		clientIP := security.GetClientIP(r, rl.config.TrustedProxies)
 		for _, excludedIP := range rl.config.ExcludedIPs {
 			if clientIP == excludedIP {
 				next.ServeHTTP(w, r)
@@ -109,7 +111,7 @@ func (rl *RateLimiter) getClientID(r *http.Request) string {
 	}
 
 	// Fall back to IP-based identification
-	return "ip:" + getClientIP(r)
+	return "ip:" + security.GetClientIP(r, rl.config.TrustedProxies)
 }
 
 // checkLimit checks if the client is within rate limits
@@ -205,34 +207,7 @@ func (rl *RateLimiter) writeRateLimitError(w http.ResponseWriter, remaining int,
 	_ = json.NewEncoder(w).Encode(response)
 }
 
-// getClientIP extracts the client IP from the request
-func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header (for proxied requests)
-	xff := r.Header.Get("X-Forwarded-For")
-	if xff != "" {
-		// Get the first IP in the list
-		ips := strings.Split(xff, ",")
-		if len(ips) > 0 {
-			ip := strings.TrimSpace(ips[0])
-			if ip != "" {
-				return ip
-			}
-		}
-	}
 
-	// Check X-Real-IP header
-	xri := r.Header.Get("X-Real-IP")
-	if xri != "" {
-		return xri
-	}
-
-	// Fall back to RemoteAddr
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return ip
-}
 
 // PresetRateLimiters provides common rate limiter configurations
 

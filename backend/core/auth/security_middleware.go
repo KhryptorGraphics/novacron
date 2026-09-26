@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -51,6 +52,9 @@ type SecurityConfig struct {
 	BotProtectionEnabled bool
 	UserAgentBlacklist   []string
 	HoneypotEnabled      bool
+
+	// Trust proxy headers (X-Forwarded-For, X-Real-IP)
+	TrustedProxies []string
 
 	// Audit logging
 	AuditLogging     bool
@@ -453,25 +457,53 @@ func (s *SecurityMiddleware) setSecurityHeaders(w http.ResponseWriter) {
 	// Remove server info
 	header.Set("Server", "NovaCron")
 }
-
 // getClientIP extracts the real client IP from the request
+// Only trusts X-Forwarded-For and X-Real-IP when behind a trusted proxy
 func (s *SecurityMiddleware) getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// Take the first IP in the chain
-		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
+	// Get the raw remote IP
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return host
 	}
 
-	// Check X-Real-IP header
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
+	// Check if the remote IP is in our trusted proxies list
+	trusted := false
+	for _, cidr := range s.config.TrustedProxies {
+		_, network, err := net.ParseCIDR(cidr)
+		if err == nil && network.Contains(ip) {
+			trusted = true
+			break
+		}
+	}
+
+	// Only trust X-Forwarded-For and X-Real-IP if the request came from a trusted proxy
+	if trusted {
+		// Check X-Forwarded-For header
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			if len(parts) > 0 {
+				hdrIP := strings.TrimSpace(parts[0])
+				if parsed := net.ParseIP(hdrIP); parsed != nil {
+					return parsed.String()
+				}
+			}
+		}
+
+		// Check X-Real-IP header
+		if xri := r.Header.Get("X-Real-IP"); xri != "" {
+			if parsed := net.ParseIP(xri); parsed != nil {
+				return parsed.String()
+			}
+		}
 	}
 
 	// Fall back to RemoteAddr
-	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-	return ip
+	return host
 }
+
+
+
 
 // extractAuthToken extracts authentication token from the request
 func (s *SecurityMiddleware) extractAuthToken(r *http.Request) string {
@@ -488,6 +520,16 @@ func (s *SecurityMiddleware) extractAuthToken(r *http.Request) string {
 
 	// Check query parameter (less secure, but sometimes necessary)
 	return r.URL.Query().Get("token")
+}
+
+// scrubTokenFromURL removes sensitive query parameters from URL before logging
+func scrubTokenFromURL(u *url.URL) string {
+	// Create a copy to avoid modifying the original
+	u2 := *u
+	q := u2.Query()
+	q.Del("token")
+	u2.RawQuery = q.Encode()
+	return u2.String()
 }
 
 // logSecurityEvent logs a security event
@@ -509,7 +551,7 @@ func (s *SecurityMiddleware) logSecurityEvent(event string, secCtx *SecurityCont
 		UserAgent:    secCtx.UserAgent,
 		AdditionalData: map[string]interface{}{
 			"method":       r.Method,
-			"url":          r.URL.String(),
+			"url":          scrubTokenFromURL(r.URL),
 			"threat_level": secCtx.ThreatLevel,
 			"risk_factors": secCtx.RiskFactors,
 		},
@@ -648,5 +690,6 @@ func DefaultSecurityConfig() SecurityConfig {
 		HoneypotEnabled:  true,
 		AuditLogging:     true,
 		LogSensitiveData: false,
+		TrustedProxies:   []string{},
 	}
 }
