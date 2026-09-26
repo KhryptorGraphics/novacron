@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -479,29 +480,43 @@ func (fbm *FederatedBackupManager) executeReplication(job *ReplicationJob, manif
 			job.Status = "completed"
 		}
 	}()
-	
+
 	// Get remote client
 	fbm.mutex.RLock()
 	client, exists := fbm.remoteBackupClients[targetClusterID]
 	fbm.mutex.RUnlock()
-	
+
 	if !exists || !client.Healthy {
 		job.Status = "failed"
 		job.Error = "target cluster not available"
 		return
 	}
-	
-	// TODO: Implement actual backup replication logic
-	// This would involve:
-	// 1. Reading the local backup data
-	// 2. Streaming it to the remote cluster
-	// 3. Verifying the replication
-	// 4. Updating progress throughout the process
-	
-	// Simulate replication for now
-	time.Sleep(5 * time.Second)
-	job.ReplicatedBytes = job.TotalBytes
-	job.Progress = 100
+
+	// Read local backup data
+	localBackupData, err := fbm.localBackupManager.GetBackupData(manifest.BackupID)
+	if err != nil {
+		job.Status = "failed"
+		job.Error = fmt.Sprintf("failed to read local backup: %v", err)
+		return
+	}
+
+	// Transport to remote cluster
+	tcpConn, err := net.Dial("tcp", client.Address)
+	if err != nil {
+		job.Status = "failed"
+		job.Error = fmt.Sprintf("failed to connect to remote cluster: %v", err)
+		return
+	}
+	defer tcpConn.Close()
+
+	if _, err := tcpConn.Write(localBackupData); err != nil {
+		job.Status = "failed"
+		job.Error = fmt.Sprintf("failed to write backup data: %v", err)
+		return
+	}
+
+	job.ReplicatedBytes = int64(len(localBackupData))
+
 }
 
 func (fbm *FederatedBackupManager) waitForReplication(jobIDs []string, consistencyLevel ConsistencyLevel) error {
