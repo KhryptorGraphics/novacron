@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -120,6 +121,7 @@ type AuthServiceImpl struct {
 	roles        RoleService
 	tenants      TenantService
 	auditLog     AuditLogService
+	mu           sync.RWMutex
 	sessions     map[string]*Session // sessionID -> Session
 	userSessions map[string][]string // userID -> []sessionID
 }
@@ -227,6 +229,7 @@ func (s *AuthServiceImpl) Login(username, password string) (*Session, error) {
 	}
 
 	// Store the session
+	s.mu.Lock()
 	s.sessions[sessionID] = session
 
 	// Add to user sessions
@@ -242,6 +245,7 @@ func (s *AuthServiceImpl) Login(username, password string) (*Session, error) {
 		delete(s.sessions, oldestSessionID)
 		s.userSessions[user.ID] = s.userSessions[user.ID][1:]
 	}
+	s.mu.Unlock()
 
 	// Update last login time
 	user.LastLogin = now
@@ -259,8 +263,10 @@ func (s *AuthServiceImpl) Login(username, password string) (*Session, error) {
 
 // Logout invalidates a session
 func (s *AuthServiceImpl) Logout(sessionID string) error {
+	s.mu.Lock()
 	session, exists := s.sessions[sessionID]
 	if !exists {
+		s.mu.Unlock()
 		return fmt.Errorf("session not found")
 	}
 
@@ -277,6 +283,7 @@ func (s *AuthServiceImpl) Logout(sessionID string) error {
 		}
 		s.userSessions[session.UserID] = newSessions
 	}
+	s.mu.Unlock()
 
 	s.auditLog.Log(AuditEntry{
 		Action:      "logout",
@@ -290,6 +297,9 @@ func (s *AuthServiceImpl) Logout(sessionID string) error {
 
 // ValidateSession validates a session
 func (s *AuthServiceImpl) ValidateSession(sessionID, token string) (*Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	session, exists := s.sessions[sessionID]
 	if !exists {
 		return nil, fmt.Errorf("session not found")
@@ -332,7 +342,9 @@ func (s *AuthServiceImpl) RefreshSession(sessionID, token string) (*Session, err
 	}
 
 	// Update session expiry time
+	s.mu.Lock()
 	session.ExpiresAt = time.Now().Add(s.config.SessionExpiryTime)
+	s.mu.Unlock()
 
 	s.auditLog.Log(AuditEntry{
 		Action:      "session_refresh",

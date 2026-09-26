@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -175,6 +176,7 @@ func NewUser(username, email, tenantID string) *User {
 
 // UserMemoryStore is an in-memory implementation of UserService
 type UserMemoryStore struct {
+	mu    sync.RWMutex
 	users map[string]*User
 }
 
@@ -187,6 +189,9 @@ func NewUserMemoryStore() *UserMemoryStore {
 
 // Create creates a new user
 func (s *UserMemoryStore) Create(user *User, password string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if _, exists := s.users[user.ID]; exists {
 		return fmt.Errorf("user already exists: %s", user.ID)
 	}
@@ -215,6 +220,9 @@ func (s *UserMemoryStore) Create(user *User, password string) error {
 
 // Get gets a user by ID
 func (s *UserMemoryStore) Get(id string) (*User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	user, exists := s.users[id]
 	if !exists {
 		return nil, fmt.Errorf("user not found: %s", id)
@@ -224,6 +232,9 @@ func (s *UserMemoryStore) Get(id string) (*User, error) {
 
 // GetByUsername gets a user by username
 func (s *UserMemoryStore) GetByUsername(username string) (*User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	for _, user := range s.users {
 		if user.Username == username {
 			return user, nil
@@ -234,6 +245,9 @@ func (s *UserMemoryStore) GetByUsername(username string) (*User, error) {
 
 // GetByEmail gets a user by email
 func (s *UserMemoryStore) GetByEmail(email string) (*User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	for _, user := range s.users {
 		if user.Email == email {
 			return user, nil
@@ -244,6 +258,9 @@ func (s *UserMemoryStore) GetByEmail(email string) (*User, error) {
 
 // List lists users with optional filtering
 func (s *UserMemoryStore) List(filter map[string]interface{}) ([]*User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	users := make([]*User, 0, len(s.users))
 
 	for _, user := range s.users {
@@ -282,6 +299,9 @@ func (s *UserMemoryStore) List(filter map[string]interface{}) ([]*User, error) {
 
 // Update updates a user
 func (s *UserMemoryStore) Update(user *User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if _, exists := s.users[user.ID]; !exists {
 		return fmt.Errorf("user not found: %s", user.ID)
 	}
@@ -309,6 +329,9 @@ func (s *UserMemoryStore) Update(user *User) error {
 
 // Delete deletes a user
 func (s *UserMemoryStore) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if _, exists := s.users[id]; !exists {
 		return fmt.Errorf("user not found: %s", id)
 	}
@@ -318,6 +341,9 @@ func (s *UserMemoryStore) Delete(id string) error {
 
 // SetPassword sets a user's password
 func (s *UserMemoryStore) SetPassword(id string, password string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	user, exists := s.users[id]
 	if !exists {
 		return fmt.Errorf("user not found: %s", id)
@@ -338,6 +364,9 @@ func (s *UserMemoryStore) SetPassword(id string, password string) error {
 
 // VerifyPassword verifies a user's password
 func (s *UserMemoryStore) VerifyPassword(id string, password string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	user, exists := s.users[id]
 	if !exists {
 		return false, fmt.Errorf("user not found: %s", id)
@@ -348,6 +377,9 @@ func (s *UserMemoryStore) VerifyPassword(id string, password string) (bool, erro
 
 // UpdateStatus updates a user's status
 func (s *UserMemoryStore) UpdateStatus(id string, status UserStatus) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	user, exists := s.users[id]
 	if !exists {
 		return fmt.Errorf("user not found: %s", id)
@@ -360,6 +392,9 @@ func (s *UserMemoryStore) UpdateStatus(id string, status UserStatus) error {
 
 // AddRole adds a role to a user
 func (s *UserMemoryStore) AddRole(userID string, roleID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	user, exists := s.users[userID]
 	if !exists {
 		return fmt.Errorf("user not found: %s", userID)
@@ -379,6 +414,9 @@ func (s *UserMemoryStore) AddRole(userID string, roleID string) error {
 
 // RemoveRole removes a role from a user
 func (s *UserMemoryStore) RemoveRole(userID string, roleID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	user, exists := s.users[userID]
 	if !exists {
 		return fmt.Errorf("user not found: %s", userID)
@@ -398,6 +436,9 @@ func (s *UserMemoryStore) RemoveRole(userID string, roleID string) error {
 
 // GetRoles gets a user's roles
 func (s *UserMemoryStore) GetRoles(userID string) ([]*Role, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	// This is just a stub, in a real implementation we would look up the roles
 	// For now, we'll return empty roles with just the IDs filled in
 	user, exists := s.users[userID]

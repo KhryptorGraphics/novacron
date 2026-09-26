@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"sync"
 	"time"
 )
 
@@ -70,6 +71,7 @@ type AuditLogService = AuditService
 
 // InMemoryAuditService is an in-memory implementation of AuditService
 type InMemoryAuditService struct {
+	mu      sync.RWMutex
 	entries []*AuditEntry
 }
 
@@ -85,7 +87,9 @@ func (s *InMemoryAuditService) LogAccess(entry *AuditEntry) error {
 	if entry.ID == "" {
 		entry.ID = time.Now().Format(time.RFC3339Nano)
 	}
+	s.mu.Lock()
 	s.entries = append(s.entries, entry)
+	s.mu.Unlock()
 	return nil
 }
 
@@ -93,6 +97,8 @@ func (s *InMemoryAuditService) LogAccess(entry *AuditEntry) error {
 func (s *InMemoryAuditService) GetAuditTrail(userID, tenantID, resourceType, resourceID string, startTime, endTime time.Time, limit, offset int) ([]*AuditEntry, error) {
 	var results []*AuditEntry
 
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	for _, entry := range s.entries {
 		if (userID == "" || entry.UserID == userID) &&
 			(tenantID == "" || entry.TenantID == tenantID) &&
