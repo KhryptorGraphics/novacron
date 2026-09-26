@@ -129,9 +129,12 @@ class ResourceOptimizationModel(BaseMLModel):
         start_time = datetime.utcnow()
         
         try:
-            # Extract resource optimization features
+            # Extract resource optimization features. Labels such as
+            # workload_type are not numeric and cannot be scaled.
             logger.info("Extracting resource optimization features...")
-            X_features = self._feature_extractor.extract_features(X)
+            X_features = self._numeric_features(
+                self._feature_extractor.extract_features(X), fit=True
+            )
             
             # Split data if validation not provided
             if validation_data is None:
@@ -140,7 +143,10 @@ class ResourceOptimizationModel(BaseMLModel):
                 )
             else:
                 X_train, y_train = X_features, y
-                X_val_features = self._feature_extractor.extract_features(validation_data[0])
+                X_val_features = self._numeric_features(
+                    self._feature_extractor.extract_features(validation_data[0]),
+                    fit=False,
+                )
                 X_val, y_val = X_val_features, validation_data[1]
             
             # Scale features
@@ -239,8 +245,10 @@ class ResourceOptimizationModel(BaseMLModel):
         if not self.is_trained:
             raise ValueError("Model must be trained before making recommendations")
         
-        # Process features
-        X_features = self._feature_extractor.extract_features(X)
+        # Process features. Match the numeric columns the scaler was fit on.
+        X_features = self._numeric_features(
+            self._feature_extractor.extract_features(X), fit=False
+        )
         X_scaled = self._scaler.transform(X_features)
         
         # Get predictions for all objectives
@@ -356,6 +364,17 @@ class ResourceOptimizationModel(BaseMLModel):
             metrics['overall_r2'] = np.mean(r2_scores)
         
         return metrics
+
+    def _numeric_features(self, frame: pd.DataFrame, *, fit: bool) -> pd.DataFrame:
+        """Drop non-numeric labels before StandardScaler fit or transform."""
+        numeric = frame.select_dtypes(include=["number", "bool"]).astype("float64")
+        if numeric.empty:
+            raise ValueError("resource features contain no numeric columns")
+        if fit:
+            self._feature_names = list(numeric.columns)
+            return numeric
+        columns = self._feature_names or list(numeric.columns)
+        return numeric.reindex(columns=columns, fill_value=0.0)
     
     def _generate_recommendation(self, original_features: pd.Series, processed_features: pd.Series,
                                predictions: Dict[str, float], objective: str) -> Optional[ResourceRecommendation]:
