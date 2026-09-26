@@ -8,66 +8,73 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/sirupsen/logrus"
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration/events"
+	"github.com/sirupsen/logrus"
 )
 
 // DefaultHealingController implements the HealingController interface
 type DefaultHealingController struct {
-	mu                sync.RWMutex
-	logger            *logrus.Logger
-	eventBus          events.EventBus
-	failureDetector   FailureDetector
+	mu                 sync.RWMutex
+	logger             *logrus.Logger
+	eventBus           events.EventBus
+	failureDetector    FailureDetector
 	recoveryStrategies map[string]RecoveryStrategy
-	
+
 	// Configuration
-	monitoringInterval time.Duration
+	monitoringInterval   time.Duration
 	maxConcurrentHealing int
-	
+
 	// State
-	running           bool
-	targets           map[string]*HealingTarget
-	healthStatuses    map[string]*HealthStatus
-	activeHealings    map[string]*HealingDecision
-	healingHistory    map[string][]*HealingDecision
-	
+	running        bool
+	targets        map[string]*HealingTarget
+	healthStatuses map[string]*HealthStatus
+	activeHealings map[string]*HealingDecision
+	healingHistory map[string][]*HealingDecision
+
+	// HealthSource provides measured health samples. Nil = not configured.
+	healthSource HealthSource
+
 	// Context for lifecycle management
 	ctx    context.Context
 	cancel context.CancelFunc
-	
+
 	// Metrics
 	healingAttempts   uint64
 	successfulHealing uint64
 	failedHealing     uint64
 }
 
+// HealthSource returns one measured health sample for a target.
+// Nil and errors are not stored and are not delivered to the failure detector.
+type HealthSource func(targetID string) (*HealthSample, error)
+
 // NewDefaultHealingController creates a new healing controller
 func NewDefaultHealingController(logger *logrus.Logger, eventBus events.EventBus) *DefaultHealingController {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	// Initialize failure detector
 	failureDetector := NewPhiAccrualFailureDetector(logger)
-	
+
 	// Initialize recovery strategies
 	strategies := make(map[string]RecoveryStrategy)
 	strategies["restart"] = NewRestartRecoveryStrategy(logger)
 	strategies["migrate"] = NewMigrateRecoveryStrategy(logger)
 	strategies["scale"] = NewScaleRecoveryStrategy(logger)
 	strategies["failover"] = NewFailoverRecoveryStrategy(logger)
-	
+
 	return &DefaultHealingController{
-		logger:             logger,
-		eventBus:           eventBus,
-		failureDetector:    failureDetector,
-		recoveryStrategies: strategies,
-		monitoringInterval: 30 * time.Second,
+		logger:               logger,
+		eventBus:             eventBus,
+		failureDetector:      failureDetector,
+		recoveryStrategies:   strategies,
+		monitoringInterval:   30 * time.Second,
 		maxConcurrentHealing: 5,
-		ctx:                ctx,
-		cancel:             cancel,
-		targets:            make(map[string]*HealingTarget),
-		healthStatuses:     make(map[string]*HealthStatus),
-		activeHealings:     make(map[string]*HealingDecision),
-		healingHistory:     make(map[string][]*HealingDecision),
+		ctx:                  ctx,
+		cancel:               cancel,
+		targets:              make(map[string]*HealingTarget),
+		healthStatuses:       make(map[string]*HealthStatus),
+		activeHealings:       make(map[string]*HealingDecision),
+		healingHistory:       make(map[string][]*HealingDecision),
 	}
 }
 
@@ -81,7 +88,7 @@ func (hc *DefaultHealingController) StartMonitoring() error {
 	}
 
 	hc.logger.Info("Starting healing controller monitoring")
-	
+
 	hc.running = true
 	go hc.monitoringLoop()
 	go hc.healthCheckLoop()
@@ -118,6 +125,13 @@ func (hc *DefaultHealingController) StopMonitoring() error {
 	hc.logger.Info("Healing controller monitoring stopped")
 
 	return nil
+}
+
+// SetHealthSource installs the measured sample provider.
+func (hc *DefaultHealingController) SetHealthSource(source HealthSource) {
+	hc.mu.Lock()
+	defer hc.mu.Unlock()
+	hc.healthSource = source
 }
 
 // RegisterTarget registers a target for health monitoring
@@ -238,7 +252,7 @@ func (hc *DefaultHealingController) TriggerHealing(targetID string, reason strin
 	hc.mu.Lock()
 	target, targetExists := hc.targets[targetID]
 	status, statusExists := hc.healthStatuses[targetID]
-	
+
 	// Check if healing is already active
 	if _, healing := hc.activeHealings[targetID]; healing {
 		hc.mu.Unlock()
@@ -401,6 +415,9 @@ func (hc *DefaultHealingController) performHealthChecks() {
 	// Perform health checks for each target
 	for _, target := range targets {
 		healthSample := hc.collectHealthSample(target)
+		if healthSample == nil {
+			continue
+		}
 		if err := hc.failureDetector.AddSample(target.ID, healthSample); err != nil {
 			hc.logger.WithError(err).WithField("target_id", target.ID).
 				Error("Failed to add health sample")
@@ -409,28 +426,27 @@ func (hc *DefaultHealingController) performHealthChecks() {
 }
 
 func (hc *DefaultHealingController) collectHealthSample(target *HealingTarget) *HealthSample {
-	// Simulate health check based on target type
-	// In real implementation, this would perform actual health checks
-	
-	healthy := hc.simulateHealthCheck(target)
-	responseTime := hc.simulateResponseTime(target, healthy)
-	
-	sample := &HealthSample{
-		TargetID:     target.ID,
-		Timestamp:    time.Now(),
-		Healthy:      healthy,
-		ResponseTime: responseTime,
-		Metrics: map[string]float64{
-			"cpu_usage":    hc.simulateMetric("cpu", 0.0, 1.0),
-			"memory_usage": hc.simulateMetric("memory", 0.0, 1.0),
-			"response_time": float64(responseTime.Milliseconds()),
-		},
+	hc.mu.RLock()
+	source := hc.healthSource
+	hc.mu.RUnlock()
+
+	if source == nil {
+		hc.logger.WithField("target_id", target.ID).Warn("Health source not configured; skipping health check")
+		return nil
 	}
 
-	if !healthy {
-		sample.ErrorMessage = "Simulated health check failure"
+	sample, err := source(target.ID)
+	if err != nil {
+		hc.logger.WithError(err).WithField("target_id", target.ID).Error("Health source error")
+		return nil
 	}
-
+	if sample == nil {
+		hc.logger.WithField("target_id", target.ID).Warn("Health source returned no sample")
+		return nil
+	}
+	if sample.Timestamp.IsZero() {
+		sample.Timestamp = time.Now()
+	}
 	return sample
 }
 
@@ -444,7 +460,7 @@ func (hc *DefaultHealingController) evaluateTargetHealth(target *HealingTarget) 
 	// Update health status
 	hc.mu.Lock()
 	status := hc.healthStatuses[target.ID]
-	
+
 	previouslyHealthy := status.Healthy
 	status.Healthy = assessment.Healthy
 	status.HealthScore = assessment.HealthScore
@@ -461,7 +477,7 @@ func (hc *DefaultHealingController) evaluateTargetHealth(target *HealingTarget) 
 
 	// Calculate uptime percentage (simplified)
 	status.UptimePercentage = assessment.HealthScore * 100
-	
+
 	hc.mu.Unlock()
 
 	// Check if healing is needed
@@ -540,15 +556,15 @@ func (hc *DefaultHealingController) executeHealing(target *HealingTarget, status
 
 	// Create healing decision
 	decision := &HealingDecision{
-		ID:           uuid.New().String(),
-		TargetID:     target.ID,
-		DecisionTime: time.Now(),
-		FailureInfo:  failure,
-		Strategy:     strategy.GetName(),
+		ID:            uuid.New().String(),
+		TargetID:      target.ID,
+		DecisionTime:  time.Now(),
+		FailureInfo:   failure,
+		Strategy:      strategy.GetName(),
 		EstimatedTime: strategy.EstimateTime(failure),
-		Confidence:   hc.calculateHealingConfidence(failure, strategy),
-		Reason:       fmt.Sprintf("Auto-healing triggered for %s failure", failure.FailureType),
-		Status:       HealingStatusPending,
+		Confidence:    hc.calculateHealingConfidence(failure, strategy),
+		Reason:        fmt.Sprintf("Auto-healing triggered for %s failure", failure.FailureType),
+		Status:        HealingStatusPending,
 		Actions: []HealingAction{
 			{
 				Type:   ActionRestart, // Simplified
@@ -561,7 +577,7 @@ func (hc *DefaultHealingController) executeHealing(target *HealingTarget, status
 	hc.mu.Lock()
 	hc.activeHealings[target.ID] = decision
 	hc.healingAttempts++
-	
+
 	// Update recovery status
 	if status.RecoveryStatus == nil {
 		status.RecoveryStatus = &RecoveryStatus{}
@@ -603,14 +619,14 @@ func (hc *DefaultHealingController) performHealing(target *HealingTarget, decisi
 
 	// Execute recovery
 	result, _ := strategy.Recover(decision.FailureInfo, target)
-	
+
 	// Update decision with result
 	decision.Result = &HealingResult{
 		Success:             result.Success,
-		TotalTime:          result.Duration,
+		TotalTime:           result.Duration,
 		StrategiesAttempted: []string{strategy.GetName()},
-		FinalStrategy:      strategy.GetName(),
-		RecoveryResults:    []*RecoveryResult{result},
+		FinalStrategy:       strategy.GetName(),
+		RecoveryResults:     []*RecoveryResult{result},
 	}
 
 	hc.mu.Lock()
@@ -620,7 +636,7 @@ func (hc *DefaultHealingController) performHealing(target *HealingTarget, decisi
 	if result.Success {
 		decision.Status = HealingStatusSuccessful
 		hc.successfulHealing++
-		
+
 		// Update recovery status
 		if status, exists := hc.healthStatuses[target.ID]; exists && status.RecoveryStatus != nil {
 			status.RecoveryStatus.InProgress = false
@@ -629,7 +645,7 @@ func (hc *DefaultHealingController) performHealing(target *HealingTarget, decisi
 	} else {
 		decision.Status = HealingStatusFailed
 		hc.failedHealing++
-		
+
 		// Update recovery status
 		if status, exists := hc.healthStatuses[target.ID]; exists && status.RecoveryStatus != nil {
 			status.RecoveryStatus.InProgress = false
@@ -642,7 +658,7 @@ func (hc *DefaultHealingController) performHealing(target *HealingTarget, decisi
 
 	// Add to history
 	hc.healingHistory[target.ID] = append(hc.healingHistory[target.ID], decision)
-	
+
 	// Keep only last 50 healing decisions
 	if len(hc.healingHistory[target.ID]) > 50 {
 		hc.healingHistory[target.ID] = hc.healingHistory[target.ID][1:]
@@ -696,52 +712,6 @@ func (hc *DefaultHealingController) selectRecoveryStrategy(failure *FailureInfo,
 	return candidates[0]
 }
 
-// Helper methods for simulation
-
-func (hc *DefaultHealingController) simulateHealthCheck(target *HealingTarget) bool {
-	// Simulate varying health based on target type and time
-	now := time.Now()
-	
-	// Base health probability
-	healthProb := 0.95
-	
-	// Vary based on target type
-	switch target.Type {
-	case TargetTypeNode:
-		healthProb = 0.98 // Nodes are generally more stable
-	case TargetTypeService:
-		healthProb = 0.93 // Services may have more issues
-	case TargetTypeVM:
-		healthProb = 0.95 // VMs are moderately stable
-	}
-	
-	// Add some time-based variation
-	if now.Hour() >= 9 && now.Hour() <= 17 {
-		healthProb -= 0.02 // Slightly less stable during business hours
-	}
-	
-	// Use a simple pseudo-random check
-	random := float64(now.UnixNano()%1000) / 1000.0
-	return random < healthProb
-}
-
-func (hc *DefaultHealingController) simulateResponseTime(target *HealingTarget, healthy bool) time.Duration {
-	base := 50 * time.Millisecond
-	
-	if !healthy {
-		base *= 5 // Unhealthy targets respond slower
-	}
-	
-	// Add some variation
-	variation := time.Duration(time.Now().UnixNano()%int64(base/2))
-	return base + variation
-}
-
-func (hc *DefaultHealingController) simulateMetric(metricType string, min, max float64) float64 {
-	random := float64(time.Now().UnixNano()%1000) / 1000.0
-	return min + (max-min)*random
-}
-
 func (hc *DefaultHealingController) determineFailureType(assessment *HealthAssessment) FailureType {
 	// Determine failure type based on assessment reasons
 	for _, reason := range assessment.Reasons {
@@ -766,7 +736,7 @@ func (hc *DefaultHealingController) determineSeverity(status *HealthStatus, asse
 
 func (hc *DefaultHealingController) calculateHealingConfidence(failure *FailureInfo, strategy RecoveryStrategy) float64 {
 	baseConfidence := 0.8
-	
+
 	// Adjust based on failure severity
 	switch failure.Severity {
 	case SeverityLow:
@@ -778,14 +748,14 @@ func (hc *DefaultHealingController) calculateHealingConfidence(failure *FailureI
 	case SeverityCritical:
 		baseConfidence -= 0.2
 	}
-	
+
 	// Adjust based on strategy priority
 	if strategy.GetPriority() > 7 {
 		baseConfidence += 0.1
 	} else if strategy.GetPriority() < 4 {
 		baseConfidence -= 0.1
 	}
-	
+
 	return baseConfidence
 }
 
