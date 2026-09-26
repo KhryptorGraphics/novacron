@@ -6,6 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/khryptorgraphics/novacron/backend/core v0.0.0-20250830173050-fe55263834f3
 	github.com/nats-io/nats.go v1.37.0
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/sirupsen/logrus v1.9.4
 	github.com/stretchr/testify v1.11.1
 	gopkg.in/yaml.v2 v2.4.0

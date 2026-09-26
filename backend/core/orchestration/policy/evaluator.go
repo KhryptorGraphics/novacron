@@ -9,7 +9,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"github.com/sirupsen/logrus"
+)
+
+// policyCronParser accepts five-field cron and descriptors such as @hourly.
+// An empty timezone is UTC so the same expression means the same minute on every node.
+var policyCronParser = cron.NewParser(
+	cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
 )
 
 // DefaultPolicyEvaluator implements the PolicyEvaluator interface
@@ -148,10 +155,10 @@ func (e *DefaultPolicyEvaluator) EvaluateCondition(condition *RuleCondition, con
 func (e *DefaultPolicyEvaluator) EvaluateExpression(expression string, context *PolicyEvaluationContext) (interface{}, error) {
 	// Simplified CEL expression evaluator
 	// In a real implementation, you would use the CEL library
-	
+
 	// Replace context variables in the expression
 	processedExpression := e.replaceContextVariables(expression, context)
-	
+
 	// Simple expression evaluation
 	return e.evaluateSimpleExpression(processedExpression)
 }
@@ -488,13 +495,14 @@ func (e *DefaultPolicyEvaluator) regexMatches(value, pattern interface{}) (bool,
 }
 
 func (e *DefaultPolicyEvaluator) isRuleScheduleActive(schedule *RuleSchedule) bool {
-	if !schedule.Enabled {
+	return scheduleActiveAt(schedule, time.Now())
+}
+
+func scheduleActiveAt(schedule *RuleSchedule, now time.Time) bool {
+	if schedule == nil || !schedule.Enabled {
 		return false
 	}
 
-	now := time.Now()
-
-	// Check time bounds
 	if schedule.StartTime != nil && now.Before(*schedule.StartTime) {
 		return false
 	}
@@ -503,14 +511,32 @@ func (e *DefaultPolicyEvaluator) isRuleScheduleActive(schedule *RuleSchedule) bo
 		return false
 	}
 
-	// TODO: Implement cron expression evaluation
-	// For now, if cron expression is specified, assume it's always active
-	if schedule.CronExpression != "" {
+	expression := strings.TrimSpace(schedule.CronExpression)
+	if expression == "" {
 		return true
 	}
+	return cronMatches(expression, schedule.Timezone, now)
+}
 
-	// If no specific schedule constraints, it's active
-	return true
+func cronMatches(expression, timezone string, now time.Time) bool {
+	location := time.UTC
+	if timezone != "" {
+		loaded, err := time.LoadLocation(timezone)
+		if err != nil {
+			return false
+		}
+		location = loaded
+	}
+
+	sched, err := policyCronParser.Parse(expression)
+	if err != nil {
+		return false
+	}
+
+	localNow := now.In(location)
+	minute := localNow.Truncate(time.Minute)
+	next := sched.Next(minute.Add(-time.Second))
+	return !next.Before(minute) && next.Before(minute.Add(time.Minute))
 }
 
 func (e *DefaultPolicyEvaluator) replaceContextVariables(expression string, context *PolicyEvaluationContext) string {
@@ -549,7 +575,7 @@ func (e *DefaultPolicyEvaluator) replaceContextVariables(expression string, cont
 func (e *DefaultPolicyEvaluator) evaluateSimpleExpression(expression string) (interface{}, error) {
 	// Simplified expression evaluator
 	// In a real implementation, you would use a proper expression parser
-	
+
 	expression = strings.TrimSpace(expression)
 
 	// Handle boolean literals
