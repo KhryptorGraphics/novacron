@@ -3,6 +3,7 @@ package autoscaling
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ type DefaultMetricsCollector struct {
 	logger          *logrus.Logger
 	metricsStore    map[string][]*MetricsData // targetID -> metrics history
 	subscribers     []MetricsHandler
+	source          MetricsSource
 	collectInterval time.Duration
 	maxHistorySize  int
 	ctx             context.Context
@@ -25,7 +27,7 @@ type DefaultMetricsCollector struct {
 // NewDefaultMetricsCollector creates a new metrics collector
 func NewDefaultMetricsCollector(logger *logrus.Logger) *DefaultMetricsCollector {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &DefaultMetricsCollector{
 		logger:          logger,
 		metricsStore:    make(map[string][]*MetricsData),
@@ -37,27 +39,38 @@ func NewDefaultMetricsCollector(logger *logrus.Logger) *DefaultMetricsCollector 
 	}
 }
 
-// CollectMetrics collects current metrics from the system
+// MetricsSource returns one measured sample. Nil and errors are not stored
+// and are not delivered to subscribers.
+type MetricsSource func() (*MetricsData, error)
+
+// SetSource installs the only sample the collector will publish.
+func (c *DefaultMetricsCollector) SetSource(source MetricsSource) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.source = source
+}
+
+// CollectMetrics collects one measured sample and publishes it.
+// Without a source it returns an error and does not notify subscribers.
 func (c *DefaultMetricsCollector) CollectMetrics() (*MetricsData, error) {
-	// Simulate metric collection - in real implementation, this would
-	// connect to monitoring systems like Prometheus, InfluxDB, etc.
-	
-	metrics := &MetricsData{
-		Timestamp:   time.Now(),
-		TargetID:    "cluster-default",
-		TargetType:  "cluster",
-		CPUUsage:    c.simulateCPUUsage(),
-		MemoryUsage: c.simulateMemoryUsage(),
-		NetworkIO:   c.simulateNetworkIO(),
-		DiskIO:      c.simulateDiskIO(),
-		ActiveVMs:   c.simulateActiveVMs(),
-		CustomMetrics: map[string]float64{
-			"queue_length":   float64(c.simulateQueueLength()),
-			"response_time":  c.simulateResponseTime(),
-		},
+	c.mu.RLock()
+	source := c.source
+	c.mu.RUnlock()
+	if source == nil {
+		return nil, fmt.Errorf("metrics source is not configured")
 	}
 
-	// Store metrics in history
+	metrics, err := source()
+	if err != nil {
+		return nil, err
+	}
+	if metrics == nil {
+		return nil, fmt.Errorf("metrics source returned no sample")
+	}
+	if metrics.Timestamp.IsZero() {
+		metrics.Timestamp = time.Now()
+	}
+
 	c.storeMetrics(metrics)
 
 	// Notify subscribers
@@ -79,25 +92,22 @@ func (c *DefaultMetricsCollector) GetHistoricalMetrics(start, end time.Time) ([]
 	defer c.mu.RUnlock()
 
 	var result []*MetricsData
-	
-	// For simplicity, return all metrics for cluster-default
-	// In real implementation, this would filter by target ID and time range
-	targetID := "cluster-default"
-	
-	if metrics, exists := c.metricsStore[targetID]; exists {
+	for _, metrics := range c.metricsStore {
 		for _, m := range metrics {
-			if (m.Timestamp.After(start) || m.Timestamp.Equal(start)) && 
-			   (m.Timestamp.Before(end) || m.Timestamp.Equal(end)) {
+			if (m.Timestamp.After(start) || m.Timestamp.Equal(start)) &&
+				(m.Timestamp.Before(end) || m.Timestamp.Equal(end)) {
 				result = append(result, m)
 			}
 		}
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Timestamp.Before(result[j].Timestamp)
+	})
 
 	c.logger.WithFields(logrus.Fields{
-		"target_id": targetID,
-		"start":     start,
-		"end":       end,
-		"count":     len(result),
+		"start": start,
+		"end":   end,
+		"count": len(result),
 	}).Debug("Historical metrics retrieved")
 
 	return result, nil
@@ -113,9 +123,9 @@ func (c *DefaultMetricsCollector) Subscribe(handler MetricsHandler) error {
 	defer c.mu.Unlock()
 
 	c.subscribers = append(c.subscribers, handler)
-	
+
 	c.logger.WithField("subscribers_count", len(c.subscribers)).Info("New subscriber added")
-	
+
 	return nil
 }
 
@@ -127,12 +137,15 @@ func (c *DefaultMetricsCollector) StartCollection() error {
 	if c.running {
 		return fmt.Errorf("metrics collection already running")
 	}
+	if c.source == nil {
+		return fmt.Errorf("metrics source is not configured")
+	}
 
 	c.running = true
 	go c.collectLoop()
 
 	c.logger.WithField("interval", c.collectInterval).Info("Metrics collection started")
-	
+
 	return nil
 }
 
@@ -149,7 +162,7 @@ func (c *DefaultMetricsCollector) StopCollection() error {
 	c.running = false
 
 	c.logger.Info("Metrics collection stopped")
-	
+
 	return nil
 }
 
@@ -159,7 +172,7 @@ func (c *DefaultMetricsCollector) SetCollectionInterval(interval time.Duration) 
 	defer c.mu.Unlock()
 
 	c.collectInterval = interval
-	
+
 	c.logger.WithField("new_interval", interval).Info("Collection interval updated")
 }
 
@@ -201,7 +214,7 @@ func (c *DefaultMetricsCollector) storeMetrics(metrics *MetricsData) {
 	defer c.mu.Unlock()
 
 	targetID := metrics.TargetID
-	
+
 	// Initialize metrics array for target if not exists
 	if _, exists := c.metricsStore[targetID]; !exists {
 		c.metricsStore[targetID] = make([]*MetricsData, 0, c.maxHistorySize)
@@ -231,99 +244,6 @@ func (c *DefaultMetricsCollector) notifySubscribers(metrics *MetricsData) {
 			}
 		}(handler)
 	}
-}
-
-// Simulation methods - in real implementation, these would query actual systems
-
-func (c *DefaultMetricsCollector) simulateCPUUsage() float64 {
-	// Simulate CPU usage with some patterns
-	hour := time.Now().Hour()
-	base := 0.3
-
-	// Business hours pattern
-	if hour >= 9 && hour <= 17 {
-		base = 0.6
-	} else if hour >= 18 && hour <= 22 {
-		base = 0.4
-	}
-
-	// Add some randomness
-	variation := (c.randomFloat() - 0.5) * 0.2
-	usage := base + variation
-
-	// Ensure within valid range
-	if usage < 0 {
-		usage = 0
-	} else if usage > 1 {
-		usage = 1
-	}
-
-	return usage
-}
-
-func (c *DefaultMetricsCollector) simulateMemoryUsage() float64 {
-	// Memory usage typically correlates with CPU but is more stable
-	cpuUsage := c.simulateCPUUsage()
-	memUsage := cpuUsage * 0.8 + 0.1 // Usually 80% of CPU pattern plus base
-
-	variation := (c.randomFloat() - 0.5) * 0.1
-	memUsage += variation
-
-	if memUsage < 0 {
-		memUsage = 0
-	} else if memUsage > 1 {
-		memUsage = 1
-	}
-
-	return memUsage
-}
-
-func (c *DefaultMetricsCollector) simulateNetworkIO() float64 {
-	// Network IO in MB/s
-	base := 10.0
-	variation := (c.randomFloat() - 0.5) * 5.0
-	
-	return base + variation
-}
-
-func (c *DefaultMetricsCollector) simulateDiskIO() float64 {
-	// Disk IO in IOPS
-	base := 100.0
-	variation := (c.randomFloat() - 0.5) * 50.0
-	
-	return base + variation
-}
-
-func (c *DefaultMetricsCollector) simulateActiveVMs() int {
-	base := 10
-	variation := int((c.randomFloat() - 0.5) * 4)
-	
-	result := base + variation
-	if result < 1 {
-		result = 1
-	}
-	
-	return result
-}
-
-func (c *DefaultMetricsCollector) simulateQueueLength() int {
-	cpuUsage := c.simulateCPUUsage()
-	queueLength := int(cpuUsage * 20) // Higher CPU = longer queue
-	
-	return queueLength
-}
-
-func (c *DefaultMetricsCollector) simulateResponseTime() float64 {
-	cpuUsage := c.simulateCPUUsage()
-	responseTime := 50.0 + (cpuUsage * 200.0) // Base 50ms + up to 200ms based on load
-	
-	return responseTime
-}
-
-func (c *DefaultMetricsCollector) randomFloat() float64 {
-	// Simple pseudo-random number generator
-	// In production, use a proper random number generator
-	return float64(time.Now().UnixNano()%1000) / 1000.0
 }
 
 // MetricsHandlerFunc is a function adapter for MetricsHandler

@@ -1,6 +1,7 @@
 package autoscaling
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -16,6 +17,12 @@ func TestDefaultAutoScaler(t *testing.T) {
 
 	eventBus := events.NewNATSEventBus(logger)
 	autoScaler := NewDefaultAutoScaler(logger, eventBus)
+	require.NoError(t, autoScaler.SetMetricsSource(func() (*MetricsData, error) {
+		return &MetricsData{
+			Timestamp: time.Now(), TargetID: "test", TargetType: "node",
+			CPUUsage: 0.1, MemoryUsage: 0.2,
+		}, nil
+	}))
 
 	t.Run("StartAndStopMonitoring", func(t *testing.T) {
 		err := autoScaler.StartMonitoring()
@@ -95,19 +102,73 @@ func TestDefaultAutoScaler(t *testing.T) {
 	})
 }
 
+func fixedSample() *MetricsData {
+	return &MetricsData{
+		Timestamp:   time.Now(),
+		TargetID:    "host",
+		TargetType:  "node",
+		CPUUsage:    0.42,
+		MemoryUsage: 0.55,
+		NetworkIO:   1.5,
+	}
+}
+
 func TestMetricsCollector(t *testing.T) {
 	logger := logrus.New()
 	logger.SetLevel(logrus.ErrorLevel)
 
 	collector := NewDefaultMetricsCollector(logger)
 
+	t.Run("CollectMetricsWithoutSource", func(t *testing.T) {
+		called := false
+		require.NoError(t, collector.Subscribe(MetricsHandlerFunc(func(*MetricsData) error {
+			called = true
+			return nil
+		})))
+
+		metrics, err := collector.CollectMetrics()
+		require.Error(t, err)
+		assert.Nil(t, metrics)
+		time.Sleep(20 * time.Millisecond)
+		assert.False(t, called)
+
+		err = collector.StartCollection()
+		require.Error(t, err)
+	})
+
+	collector.SetSource(func() (*MetricsData, error) {
+		sample := fixedSample()
+		return sample, nil
+	})
+
 	t.Run("CollectMetrics", func(t *testing.T) {
 		metrics, err := collector.CollectMetrics()
 		require.NoError(t, err)
 		assert.NotNil(t, metrics)
-		assert.NotEmpty(t, metrics.TargetID)
-		assert.True(t, metrics.CPUUsage >= 0 && metrics.CPUUsage <= 1)
-		assert.True(t, metrics.MemoryUsage >= 0 && metrics.MemoryUsage <= 1)
+		assert.Equal(t, "host", metrics.TargetID)
+		assert.Equal(t, 0.42, metrics.CPUUsage)
+		assert.Equal(t, 0.55, metrics.MemoryUsage)
+	})
+
+	t.Run("SourceErrorIsNotPublished", func(t *testing.T) {
+		collector.SetSource(func() (*MetricsData, error) {
+			return nil, fmt.Errorf("host cpu was not measured")
+		})
+		t.Cleanup(func() {
+			collector.SetSource(func() (*MetricsData, error) {
+				return fixedSample(), nil
+			})
+		})
+		called := false
+		require.NoError(t, collector.Subscribe(MetricsHandlerFunc(func(*MetricsData) error {
+			called = true
+			return nil
+		})))
+		metrics, err := collector.CollectMetrics()
+		require.Error(t, err)
+		assert.Nil(t, metrics)
+		time.Sleep(20 * time.Millisecond)
+		assert.False(t, called)
 	})
 
 	t.Run("GetHistoricalMetrics", func(t *testing.T) {

@@ -48,3 +48,31 @@ func TestHostMetricsAreRealNotFabricated(t *testing.T) {
 		}
 	}
 }
+
+func TestMetricsDataFromHostUsesMeasuredFractions(t *testing.T) {
+	data, err := metricsDataFromHost(map[string]interface{}{
+		"currentCpuUsage":     80.0,
+		"currentMemoryUsage":  40.0,
+		"currentNetworkUsage": 1.25,
+		"currentDiskUsage":    70.0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.CPUUsage != 0.8 || data.MemoryUsage != 0.4 {
+		t.Fatalf("fractions = %v %v", data.CPUUsage, data.MemoryUsage)
+	}
+	if data.NetworkIO != 1.25 || data.DiskIO != 0 {
+		t.Fatalf("io = net %v disk %v", data.NetworkIO, data.DiskIO)
+	}
+	if data.CustomMetrics["disk_usage"] != 0.7 {
+		t.Fatalf("disk usage = %v", data.CustomMetrics["disk_usage"])
+	}
+
+	if _, err := metricsDataFromHost(map[string]interface{}{
+		"currentCpuUsage":    nil,
+		"currentMemoryUsage": 40.0,
+	}); err == nil {
+		t.Fatal("missing cpu was published")
+	}
+}

@@ -2,11 +2,14 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/khryptorgraphics/novacron/backend/core/orchestration/autoscaling"
 )
 
 const netSampleWindow = 120 * time.Millisecond
@@ -199,4 +202,44 @@ func diskUsagePercent(path string) (float64, bool) {
 		return 0, false
 	}
 	return (1 - avail/total) * 100, true
+}
+
+// metricsDataFromHost converts a hostMetrics map into the autoscaler sample.
+// CPU and memory are percents in the map and fractions in MetricsData.
+// A missing measurement is an error so the collector does not publish a guess.
+func metricsDataFromHost(sample map[string]interface{}) (*autoscaling.MetricsData, error) {
+	cpu, okCPU := metricNumber(sample["currentCpuUsage"])
+	mem, okMem := metricNumber(sample["currentMemoryUsage"])
+	if !okCPU || !okMem {
+		return nil, fmt.Errorf("host cpu or memory was not measured")
+	}
+	data := &autoscaling.MetricsData{
+		Timestamp:   time.Now().UTC(),
+		TargetID:    "host",
+		TargetType:  "node",
+		CPUUsage:    cpu / 100,
+		MemoryUsage: mem / 100,
+	}
+	if net, ok := metricNumber(sample["currentNetworkUsage"]); ok {
+		data.NetworkIO = net
+	}
+	if disk, ok := metricNumber(sample["currentDiskUsage"]); ok {
+		data.CustomMetrics = map[string]float64{"disk_usage": disk / 100}
+	}
+	return data, nil
+}
+
+func metricNumber(v interface{}) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	default:
+		return 0, false
+	}
 }

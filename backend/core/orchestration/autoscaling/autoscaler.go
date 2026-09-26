@@ -64,6 +64,16 @@ func NewDefaultAutoScaler(logger *logrus.Logger, eventBus events.EventBus) *Defa
 	}
 }
 
+// SetMetricsSource installs the measured sample used by collection and decisions.
+func (as *DefaultAutoScaler) SetMetricsSource(source MetricsSource) error {
+	collector, ok := as.metricsCollector.(*DefaultMetricsCollector)
+	if !ok {
+		return fmt.Errorf("auto-scaler metrics collector does not accept a source")
+	}
+	collector.SetSource(source)
+	return nil
+}
+
 // StartMonitoring begins monitoring and prediction
 func (as *DefaultAutoScaler) StartMonitoring() error {
 	as.mu.Lock()

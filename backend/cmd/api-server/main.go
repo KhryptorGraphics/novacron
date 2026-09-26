@@ -28,18 +28,19 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	graphqlapi "github.com/khryptorgraphics/novacron/backend/api/graphql"
+	orchestrationapi "github.com/khryptorgraphics/novacron/backend/api/orchestration"
 	securityapi "github.com/khryptorgraphics/novacron/backend/api/security"
 	websocketapi "github.com/khryptorgraphics/novacron/backend/api/websocket"
-	orchestrationapi "github.com/khryptorgraphics/novacron/backend/api/orchestration"
 	"github.com/khryptorgraphics/novacron/backend/core/audit"
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration"
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration/autoscaling"
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration/events"
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration/healing"
-	"github.com/khryptorgraphics/novacron/backend/core/orchestration/policy"
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration/placement"
+	"github.com/khryptorgraphics/novacron/backend/core/orchestration/policy"
 	"github.com/khryptorgraphics/novacron/backend/core/storage"
 	core_vm "github.com/khryptorgraphics/novacron/backend/core/vm"
 	"github.com/khryptorgraphics/novacron/backend/pkg/config"
@@ -47,7 +48,6 @@ import (
 	"github.com/khryptorgraphics/novacron/backend/pkg/logger"
 	monitoring_svc "github.com/khryptorgraphics/novacron/backend/pkg/services"
 	_ "github.com/lib/pq"
-	"github.com/jmoiron/sqlx"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -1317,7 +1317,6 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 			return
 		}
 
-
 		var bridgeName interface{}
 		if createReq.NetworkID != "" {
 			bridgeName = createReq.NetworkID // repurposed: legacy network ids were bridge labels
@@ -2216,6 +2215,11 @@ func initializeCanonicalServices(cfg *config.Config, db *sql.DB, authManager *au
 	// Create sub-components
 	placementEngine := placement.NewDefaultPlacementEngine(orchLogger)
 	autoScaler := autoscaling.NewDefaultAutoScaler(orchLogger, eventBus)
+	if err := autoScaler.SetMetricsSource(func() (*autoscaling.MetricsData, error) {
+		return metricsDataFromHost(hostMetrics(vmBasePath(cfg)))
+	}); err != nil {
+		orchLogger.Warnf("Failed to set auto-scaler metrics source: %v", err)
+	}
 	healingController := healing.NewDefaultHealingController(orchLogger, eventBus)
 	policyEngine := policy.NewDefaultPolicyEngine(orchLogger, eventBus)
 
@@ -2652,6 +2656,7 @@ func canonicalAdminUserID(raw string) (string, error) {
 	}
 	return userID, nil
 }
+
 // canonicalAdminNotFoundError maps missing-row query results and database
 // errors that explicitly report a missing user to the hidden 404 response.
 func canonicalAdminNotFoundError(err error) bool {
