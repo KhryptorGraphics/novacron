@@ -122,3 +122,11 @@ graphify-out/
 frontend/coverage/
 ruvector.db
 .memtrace/
+
+# Local secrets (never commit)
+.omp/secrets.yml
+
+# Test/coverage artifacts from ai-engine pytest runs
+.coverage
+coverage.xml
+htmlcov/
