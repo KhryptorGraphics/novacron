@@ -519,6 +519,18 @@ func (hc *DefaultHealingController) considerHealing(target *HealingTarget, statu
 		return nil
 	}
 
+	// Check if max recovery attempts exceeded
+	if target.RecoveryConfig != nil && target.RecoveryConfig.MaxRecoveryAttempts > 0 {
+		if status.RecoveryStatus != nil && status.RecoveryStatus.Attempts >= target.RecoveryConfig.MaxRecoveryAttempts {
+			hc.logger.WithFields(logrus.Fields{
+				"target_id":    target.ID,
+				"attempts":     status.RecoveryStatus.Attempts,
+				"max_attempts": target.RecoveryConfig.MaxRecoveryAttempts,
+			}).Warn("Max recovery attempts exceeded; skipping healing")
+			return nil
+		}
+	}
+
 	// Create failure info
 	failureInfo := &FailureInfo{
 		TargetID:        target.ID,

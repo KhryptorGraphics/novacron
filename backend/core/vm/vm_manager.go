@@ -501,7 +501,8 @@ func (m *VMManager) cleanupStaleResources() {
 	}
 	m.mutex.Unlock()
 
-	// TODO: Also reclaim resources for VMs that are stopped/failed but still in vms map
+	// NOTE: Failed VMs (StateFailed) are retained in cache for operator inspection.
+	// Only VMs in StateDeleting (deliberate removal) are reaped.
 }
 
 // AddVM adds a VM to the manager
