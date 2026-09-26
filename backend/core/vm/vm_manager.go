@@ -494,7 +494,7 @@ func (m *VMManager) syncVMStates() {
 func (m *VMManager) cleanupStaleResources() {
 	m.mutex.Lock()
 	for vmID, info := range m.vmCache {
-		if info.State == StateFailed {
+		if info.State == StateDeleting {
 			delete(m.vmCache, vmID)
 			log.Printf("Cleaned up stale cache entry for VM %s (state: %s)", vmID, info.State)
 		}

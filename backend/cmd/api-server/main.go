@@ -105,6 +105,15 @@ func main() {
 
 	vmManager := newVMManager(cfg)
 
+	// Start the VM manager loops so updateLoop/cleanupLoop run
+	if vmManager != nil {
+		if err := vmManager.Start(); err != nil {
+			appLogger.Warn("Failed to start VM manager", "error", err)
+		} else {
+			defer func() { _ = vmManager.Stop() }()
+		}
+	}
+
 	// Wire the VM metrics collector against the canonical manager: samples are
 	// inserted into vm_metrics on a 30s tick so /vms/{id}/metrics and
 	// /monitoring/vms stop reporting empty results. DeferStop until server

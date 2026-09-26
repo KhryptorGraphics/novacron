@@ -33,6 +33,15 @@ func main() {
 	vmManager, err := core_vm.NewVMManager(vmCfg)
 	if err != nil { appLogger.Warn("VMManager init failed", "error", err); }
 
+	// Start the VM manager loops so updateLoop/cleanupLoop run
+	if vmManager != nil {
+		if err := vmManager.Start(); err != nil {
+			appLogger.Warn("Failed to start VM manager", "error", err)
+		}
+		// Note: core-server doesn't have a graceful shutdown hook here;
+		// the process exits on signal and loops cancel via context.
+	}
+
 	// Orchestration engine (noop event bus in core mode)
 	orchLogger := logrus.New()
 	engine := orchestration.NewDefaultOrchestrationEngine(orchLogger)
