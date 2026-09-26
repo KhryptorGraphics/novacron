@@ -102,6 +102,31 @@ class TestRootEndpoints:
         assert "services" in data
         assert len(data["services"]) == 4  # All AI services
 
+    def test_health_is_unavailable_when_no_model_is_loaded(self, client):
+        """An empty model directory must fail the container health check."""
+        with patch('ai_engine.api.main.failure_service') as failure_mock, \
+             patch('ai_engine.api.main.placement_service') as placement_mock, \
+             patch('ai_engine.api.main.anomaly_service') as anomaly_mock, \
+             patch('ai_engine.api.main.resource_service') as resource_mock:
+            failure_mock.active_model = None
+            placement_mock.active_model = None
+            anomaly_mock.active_model = None
+            resource_mock.active_model = None
+
+            response = client.get("/health")
+
+        assert response.status_code == 503
+        assert response.json()["status"] == "unhealthy"
+
+    def test_metrics_returns_prometheus_text(self, client, mock_services):
+        """Prometheus exposition must not be JSON-encoded."""
+        response = client.get("/metrics")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/plain")
+        assert response.text.startswith("#")
+        assert not response.text.startswith('"')
+
 
 class TestFailurePredictionAPI:
     """Test failure prediction API endpoints."""

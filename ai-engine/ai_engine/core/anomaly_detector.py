@@ -61,6 +61,9 @@ class AnomalyDetectionModel(BaseMLModel):
         
         # Statistical detectors
         self._statistical_thresholds: Dict[str, Dict[str, float]] = {}
+        # Training decision_function range per detector. Request min/max
+        # collapses a one-row detect to 0.5 and drops the detector score.
+        self._detector_score_range: Dict[str, Tuple[float, float]] = {}
         
         # Feature processing
         self._scaler: Optional[StandardScaler] = None
@@ -222,35 +225,37 @@ class AnomalyDetectionModel(BaseMLModel):
         # Isolation Forest
         if self._isolation_forest:
             iso_scores = self._isolation_forest.decision_function(X_scaled)
-            iso_scores = self._normalize_scores(iso_scores)
+            iso_scores = self._normalize_scores(iso_scores, "isolation_forest")
             scores.append(self._ensemble_weights['isolation_forest'] * iso_scores)
         
         # Local Outlier Factor
         if self._lof_detector:
             lof_scores = self._lof_detector.decision_function(X_scaled)
-            lof_scores = self._normalize_scores(lof_scores)
+            lof_scores = self._normalize_scores(lof_scores, "lof")
             scores.append(self._ensemble_weights['lof'] * lof_scores)
         
         # One-Class SVM
         if self._ocsvm_detector:
             svm_scores = self._ocsvm_detector.decision_function(X_scaled)
-            svm_scores = self._normalize_scores(svm_scores)
+            svm_scores = self._normalize_scores(svm_scores, "ocsvm")
             scores.append(self._ensemble_weights['ocsvm'] * svm_scores)
         
         # Autoencoder
         if self._autoencoder:
             ae_scores = self._autoencoder.decision_function(X_scaled)
-            ae_scores = self._normalize_scores(ae_scores)
+            ae_scores = self._normalize_scores(ae_scores, "autoencoder")
             scores.append(self._ensemble_weights['autoencoder'] * ae_scores)
         
         # LSTM detector
         if self._lstm_detector:
             lstm_scores = self._predict_lstm_anomalies(X_scaled)
-            lstm_scores = self._normalize_scores(lstm_scores)
+            lstm_scores = self._normalize_scores(lstm_scores, "lstm")
             scores.append(self._ensemble_weights['lstm'] * lstm_scores)
         
-        # Statistical anomalies
-        stat_scores = self._detect_statistical_anomalies(X_features)
+        # Statistical thresholds were fit on the scaled training matrix.
+        stat_scores = self._detect_statistical_anomalies(
+            pd.DataFrame(X_scaled, columns=self._feature_names)
+        )
         
         # Combine all scores
         if scores:
@@ -322,6 +327,9 @@ class AnomalyDetectionModel(BaseMLModel):
             n_jobs=-1
         )
         self._isolation_forest.fit(X_train)
+        self._remember_score_range(
+            "isolation_forest", self._isolation_forest.decision_function(X_train)
+        )
         
         # Local Outlier Factor
         logger.info("Training LOF detector...")
@@ -330,6 +338,9 @@ class AnomalyDetectionModel(BaseMLModel):
             n_neighbors=20
         )
         self._lof_detector.fit(X_train)
+        self._remember_score_range(
+            "lof", self._lof_detector.decision_function(X_train)
+        )
         
         # One-Class SVM
         logger.info("Training One-Class SVM...")
@@ -339,6 +350,9 @@ class AnomalyDetectionModel(BaseMLModel):
             gamma='scale'
         )
         self._ocsvm_detector.fit(X_train)
+        self._remember_score_range(
+            "ocsvm", self._ocsvm_detector.decision_function(X_train)
+        )
         
         # Autoencoder (pyod >= 2 backs this detector with torch, not keras, so it
         # is optional in the same way as the LSTM detector below)
@@ -354,6 +368,9 @@ class AnomalyDetectionModel(BaseMLModel):
                 verbose=0
             )
             self._autoencoder.fit(X_train)
+            self._remember_score_range(
+                "autoencoder", self._autoencoder.decision_function(X_train)
+            )
         except ImportError as e:
             logger.warning(f"Autoencoder detector unavailable ({e}); skipping it")
             self._autoencoder = None
@@ -363,6 +380,9 @@ class AnomalyDetectionModel(BaseMLModel):
         self._lstm_detector = self._build_lstm_detector(X_train.shape[1])
         if self._lstm_detector:
             self._train_lstm_detector(X_train, y_train)
+            self._remember_score_range(
+                "lstm", self._predict_lstm_anomalies(X_train)
+            )
         
         # Calculate validation metrics if available
         if is_supervised and X_val is not None and y_val is not None:
@@ -484,9 +504,13 @@ class AnomalyDetectionModel(BaseMLModel):
             feature_data = X[feature_name].values
             thresholds = self._statistical_thresholds[feature_name]
             
-            # Z-score anomalies
-            z_scores = np.abs((feature_data - thresholds['mean']) / thresholds['std'])
-            z_anomalies = z_scores > thresholds['z_threshold']
+            # Z-score anomalies. A zero training std means the feature was constant.
+            std = thresholds['std']
+            if not np.isfinite(std) or std == 0:
+                z_anomalies = feature_data != thresholds['mean']
+            else:
+                z_scores = np.abs((feature_data - thresholds['mean']) / std)
+                z_anomalies = z_scores > thresholds['z_threshold']
             
             # IQR anomalies
             iqr_anomalies = (
@@ -500,15 +524,29 @@ class AnomalyDetectionModel(BaseMLModel):
         
         return scores
     
-    def _normalize_scores(self, scores: np.ndarray) -> np.ndarray:
-        """Normalize scores to [0, 1] range."""
-        min_score = np.min(scores)
-        max_score = np.max(scores)
-        
-        if max_score == min_score:
-            return np.ones_like(scores) * 0.5
-        
-        return (scores - min_score) / (max_score - min_score)
+    def _remember_score_range(self, detector: str, scores: np.ndarray) -> None:
+        """Store the training score range used to scale later requests."""
+        values = np.asarray(scores, dtype=float).ravel()
+        if values.size == 0 or not np.isfinite(values).any():
+            return
+        finite = values[np.isfinite(values)]
+        self._detector_score_range[detector] = (float(np.min(finite)), float(np.max(finite)))
+
+    def _normalize_scores(self, scores: np.ndarray, detector: str = "") -> np.ndarray:
+        """Map detector scores onto [0, 1] using the training range.
+
+        A one-row request has no internal min/max. Returning 0.5 there drops
+        the detector score, so a stored training range is used instead.
+        """
+        scores = np.asarray(scores, dtype=float)
+        bounds = self._detector_score_range.get(detector)
+        if bounds is not None and bounds[1] > bounds[0]:
+            low, high = bounds
+            return np.clip((scores - low) / (high - low), 0.0, 1.0)
+        span = float(np.nanmax(scores) - np.nanmin(scores)) if scores.size else 0.0
+        if not np.isfinite(span) or span == 0.0:
+            return 1.0 / (1.0 + np.exp(-np.clip(scores, -60.0, 60.0)))
+        return (scores - np.nanmin(scores)) / span
     
     def _train_anomaly_classifiers(self, X_train: np.ndarray, y_train: pd.Series) -> None:
         """Train classifiers for different anomaly types."""
@@ -566,6 +604,7 @@ class AnomalyDetectionModel(BaseMLModel):
             'scaler': self._scaler,
             'feature_names': self._feature_names,
             'statistical_thresholds': self._statistical_thresholds,
+            'detector_score_range': self._detector_score_range,
             'ensemble_weights': self._ensemble_weights,
             'contamination_rate': self._contamination_rate,
             'metadata': self.metadata.dict()
@@ -596,6 +635,11 @@ class AnomalyDetectionModel(BaseMLModel):
         self._scaler = model_data['scaler']
         self._feature_names = model_data['feature_names']
         self._statistical_thresholds = model_data['statistical_thresholds']
+        stored_ranges = model_data.get('detector_score_range') or {}
+        self._detector_score_range = {
+            name: (float(bounds[0]), float(bounds[1]))
+            for name, bounds in stored_ranges.items()
+        }
         self._ensemble_weights = model_data['ensemble_weights']
         self._contamination_rate = model_data['contamination_rate']
         

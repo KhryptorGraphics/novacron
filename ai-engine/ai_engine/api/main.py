@@ -15,7 +15,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from prometheus_client import Counter, Histogram, Gauge, generate_latest
 from prometheus_client import CollectorRegistry, CONTENT_TYPE_LATEST
 
@@ -209,6 +209,8 @@ async def health_check():
         else:
             health_status["status"] = "unhealthy"
         
+        if health_status["status"] == "unhealthy":
+            return JSONResponse(status_code=503, content=health_status)
         return health_status
         
     except Exception as e:
@@ -246,10 +248,7 @@ async def metrics():
             active_models.labels(model_type="resource_optimization").set(0)
         
         metrics_output = generate_latest(registry)
-        return JSONResponse(
-            content=metrics_output.decode('utf-8'),
-            media_type=CONTENT_TYPE_LATEST
-        )
+        return Response(content=metrics_output, media_type=CONTENT_TYPE_LATEST)
         
     except Exception as e:
         logger.error(f"Metrics generation failed: {str(e)}")

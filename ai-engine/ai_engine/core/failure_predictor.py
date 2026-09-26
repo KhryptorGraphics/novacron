@@ -50,6 +50,10 @@ class FailurePredictionModel(BaseMLModel):
         self._ensemble_weights = {'xgb': 0.5, 'rf': 0.3, 'isolation': 0.2}
         self._prediction_horizon = 30  # minutes
         self._lookback_window = 24  # hours
+        # IsolationForest decision_function range on the training matrix.
+        # Request min/max collapses to NaN when a predict call has one row.
+        self._isolation_score_low: Optional[float] = None
+        self._isolation_score_high: Optional[float] = None
     
     def train(self, X: pd.DataFrame, y: pd.Series, 
               validation_data: Optional[Tuple[pd.DataFrame, pd.Series]] = None) -> Dict[str, float]:
@@ -245,6 +249,9 @@ class FailurePredictionModel(BaseMLModel):
             random_state=42
         )
         self._isolation_forest.fit(X_train)
+        train_scores = self._isolation_forest.decision_function(X_train)
+        self._isolation_score_low = float(np.min(train_scores))
+        self._isolation_score_high = float(np.max(train_scores))
         self.mark_trained(self._xgb_model)
         
         # Calculate validation metrics
@@ -271,15 +278,19 @@ class FailurePredictionModel(BaseMLModel):
         return metrics
     
     def _scores_to_proba(self, scores: np.ndarray) -> np.ndarray:
-        """Convert isolation forest scores to probabilities."""
-        # Normalize scores to [0, 1] range
-        scores_norm = (scores - scores.min()) / (scores.max() - scores.min())
-        
-        # Convert to probability format [normal_prob, failure_prob]
-        failure_prob = 1 - scores_norm
-        normal_prob = scores_norm
-        
-        return np.column_stack([normal_prob, failure_prob])
+        """Convert isolation forest scores to probabilities.
+
+        Higher decision_function values are more normal. The scale is the
+        training score range so a one-row request cannot divide by zero.
+        """
+        scores = np.asarray(scores, dtype=float)
+        low = self._isolation_score_low
+        high = self._isolation_score_high
+        if low is None or high is None or high == low:
+            normal_prob = 1.0 / (1.0 + np.exp(-np.clip(scores, -60.0, 60.0)))
+        else:
+            normal_prob = np.clip((scores - low) / (high - low), 0.0, 1.0)
+        return np.column_stack([normal_prob, 1.0 - normal_prob])
     
     def save_model(self, filepath: str) -> None:
         """Save the ensemble model."""
@@ -292,6 +303,8 @@ class FailurePredictionModel(BaseMLModel):
             'scaler': self._scaler,
             'feature_names': self._feature_names,
             'ensemble_weights': self._ensemble_weights,
+            'isolation_score_low': self._isolation_score_low,
+            'isolation_score_high': self._isolation_score_high,
             'metadata': self.metadata.dict()
         }
         
@@ -310,6 +323,8 @@ class FailurePredictionModel(BaseMLModel):
         self._scaler = model_data['scaler']
         self._feature_names = model_data['feature_names']
         self._ensemble_weights = model_data['ensemble_weights']
+        self._isolation_score_low = model_data.get('isolation_score_low')
+        self._isolation_score_high = model_data.get('isolation_score_high')
         
         self.mark_trained(self._xgb_model)
         logger.info(f"Model loaded from {filepath}")
