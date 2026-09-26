@@ -301,20 +301,19 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 			return
 		}
 
-		// Get user's cluster memberships
+		// Get user's cluster memberships from runtime tables (created by runtime_auth persistence)
 		rows, err := db.Query(`
-			SELECT ca.cluster_id, ca.admitted, ca.role, ca.source, ca.admitted_at, ca.tenant_id, ca.selected,
-			       c.name, c.tier, c.performance_score, c.interconnect_latency_ms,
+			SELECT m.cluster_id, m.state, m.role, m.source, m.created_at, m.tenant_id,
+			       c.id, c.name, c.tier, c.performance_score, c.interconnect_latency_ms,
 			       c.interconnect_bandwidth_mbps, c.current_node_count, c.max_supported_node_count,
-			       c.growth_state, c.federation_state, c.degraded, c.last_evaluated_at,
-			       c.edge_latency_ms, c.edge_bandwidth_mbps
-			FROM cluster_admissions ca
-			JOIN clusters c ON ca.cluster_id = c.id
-			WHERE ca.user_id = $1
-			ORDER BY ca.created_at DESC
+			       c.growth_state, c.federation_state, c.degraded, c.last_evaluated_at
+			FROM runtime_cluster_memberships m
+			JOIN runtime_clusters c ON m.cluster_id = c.id
+			WHERE m.user_id = $1
+			ORDER BY m.created_at DESC
 		`, userID)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to query cluster admissions")
+			writeJSONError(w, http.StatusInternalServerError, "failed to query cluster memberships")
 			return
 		}
 		defer rows.Close()
@@ -333,38 +332,39 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 
 		memberships := make([]AdmissionResponse, 0)
 		var selectedCluster *ClusterSummaryResponse
+		// Track best cluster for selectedCluster (highest performance_score)
+		var bestCluster *ClusterSummaryResponse
+		bestScore := -1.0
+
 		for rows.Next() {
 			var adm AdmissionResponse
 			var cluster ClusterSummaryResponse
-			var admittedAt sql.NullTime
-			var tenantID sql.NullString
-			var source sql.NullString
 			err := rows.Scan(
-				&adm.ClusterID, &adm.Admitted, &adm.Role, &source, &admittedAt, &tenantID, &adm.Selected,
-				&cluster.Name, &cluster.Tier, &cluster.PerformanceScore,
+				&adm.ClusterID, &adm.State, &adm.Role, &adm.Source, &adm.AdmittedAt, &adm.TenantID,
+				&cluster.ID, &cluster.Name, &cluster.Tier, &cluster.PerformanceScore,
 				&cluster.InterconnectLatencyMs, &cluster.InterconnectBandwidthMbps,
 				&cluster.CurrentNodeCount, &cluster.MaxSupportedNodeCount,
 				&cluster.GrowthState, &cluster.FederationState, &cluster.Degraded,
-				&cluster.LastEvaluatedAt, &cluster.EdgeLatencyMs, &cluster.EdgeBandwidthMbps,
+				&cluster.LastEvaluatedAt,
 			)
 			if err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "failed to scan cluster admission")
+				writeJSONError(w, http.StatusInternalServerError, "failed to scan cluster membership")
 				return
 			}
-			// adm.Admitted is already set from scan
-			if admittedAt.Valid {
-				adm.AdmittedAt = admittedAt.Time.Format(time.RFC3339)
-			}
-			if tenantID.Valid {
-				adm.TenantID = tenantID.String
-			}
-			if source.Valid {
-				adm.Source = source.String
-			}
-			if adm.Selected {
-				selectedCluster = &cluster
+			// Derive admitted from state
+			adm.Admitted = (adm.State == "active")
+			adm.Selected = false
+			memberships = append(memberships, adm)
+
+			// Track best cluster for selectedCluster (highest performance_score)
+			if cluster.PerformanceScore > bestScore {
+				bestScore = cluster.PerformanceScore
+				bestCluster = &cluster
 			}
 		}
+
+		// Determine selected cluster (highest performance score among memberships)
+		selectedCluster = bestCluster
 
 		// Get session info
 		var sessionID, sessionExpiresAt string
