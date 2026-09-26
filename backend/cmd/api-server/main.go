@@ -1124,6 +1124,7 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 	registerVMPowerRoute(router, db, vmManager, "stop")
 	registerVMPowerRoute(router, db, vmManager, "pause")
 	registerVMPowerRoute(router, db, vmManager, "resume")
+	registerVMPowerRoute(router, db, vmManager, "restart")
 	registerVMMigrateRoute(router, db, vmManager)
 	// Async variant of the migrate route (202 + job id, migration runs in the
 	// background) so large/slow migrations can't trip the request WRITE_TIMEOUT.
