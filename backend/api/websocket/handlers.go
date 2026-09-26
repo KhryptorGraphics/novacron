@@ -792,7 +792,12 @@ func (h *WebSocketHandler) metricsReadPump(client *WebSocketClient) {
 
 func (h *WebSocketHandler) metricsWritePump(client *WebSocketClient) {
 	ticker := time.NewTicker(54 * time.Second)
-	interval := client.Filters["interval"].(int)
+	interval := 5 // default
+	if intervalVal, ok := client.Filters["interval"].(int); ok {
+		if intervalVal >= 1 && intervalVal <= 300 {
+			interval = intervalVal
+		}
+	}
 	metricsTicker := time.NewTicker(time.Duration(interval) * time.Second)
 
 	defer func() {
@@ -1072,7 +1077,7 @@ func (h *WebSocketHandler) getUserIDFromRequest(r *http.Request) string {
 	if userID, ok := r.Context().Value("user_id").(string); ok && strings.TrimSpace(userID) != "" {
 		return strings.TrimSpace(userID)
 	}
-	return strings.TrimSpace(r.Header.Get("X-User-ID"))
+	return ""
 }
 
 func (h *WebSocketHandler) getUserRolesFromRequest(r *http.Request) []string {
