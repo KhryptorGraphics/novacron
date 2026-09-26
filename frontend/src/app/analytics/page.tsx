@@ -16,6 +16,7 @@ import { networkApi } from '@/lib/api/networks';
 import { useSecurityMetrics } from '@/hooks/useSecurity';
 import { useVolumes } from '@/hooks/useVolumes';
 import { useVMs } from '@/lib/api/hooks/useVMs';
+import { authService } from '@/lib/auth';
 
 type MonitoringSummary = {
   currentCpuUsage: number | null;
@@ -73,8 +74,11 @@ export default function AnalyticsPage() {
 
     async function loadAnalytics() {
       try {
+        const token = authService.getToken();
         const [metricsResponse, networks] = await Promise.all([
-          fetch(buildApiV1Url('/monitoring/metrics')),
+          fetch(buildApiV1Url('/monitoring/metrics'), {
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          }),
           networkApi.listNetworks().catch(() => []),
         ]);
 

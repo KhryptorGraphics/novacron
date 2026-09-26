@@ -24,6 +24,7 @@ import { networkApi } from '@/lib/api/networks';
 import { useSecurityMetrics } from '@/hooks/useSecurity';
 import { useVolumes } from '@/hooks/useVolumes';
 import { useVMs } from '@/lib/api/hooks/useVMs';
+import { authService } from '@/lib/auth';
 
 type MonitoringSummary = {
   currentCpuUsage: number | null;
@@ -79,7 +80,10 @@ export default function UnifiedDashboard() {
 
     async function loadOverview() {
       try {
-        const metricsResponse = await fetch(buildApiV1Url('/monitoring/metrics'));
+        const token = authService.getToken();
+        const metricsResponse = await fetch(buildApiV1Url('/monitoring/metrics'), {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
         if (!metricsResponse.ok) {
           throw new Error(`Monitoring request failed with ${metricsResponse.status}`);
         }

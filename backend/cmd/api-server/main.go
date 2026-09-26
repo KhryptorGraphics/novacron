@@ -1122,6 +1122,8 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 
 	registerVMPowerRoute(router, db, vmManager, "start")
 	registerVMPowerRoute(router, db, vmManager, "stop")
+	registerVMPowerRoute(router, db, vmManager, "pause")
+	registerVMPowerRoute(router, db, vmManager, "resume")
 	registerVMMigrateRoute(router, db, vmManager)
 	// Async variant of the migrate route (202 + job id, migration runs in the
 	// background) so large/slow migrations can't trip the request WRITE_TIMEOUT.
@@ -1599,11 +1601,26 @@ func registerVMPowerRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.VMM
 			if err == nil && restartSupervisor != nil {
 				restartSupervisor.RecordStart(ctx, vmID) // declare to the supervisor: this VM runs now
 			}
-		} else {
+		} else if action == "stop" {
 			err = vmManager.StopVM(ctx, vmID)
 			if err == nil && restartSupervisor != nil {
 				restartSupervisor.RecordStop(ctx, vmID) // not crashed — an intentional stop (never restarted under policy=always)
 			}
+		} else if action == "pause" {
+			err = vmManager.PauseVM(ctx, vmID)
+		} else if action == "resume" {
+			err = vmManager.ResumeVM(ctx, vmID)
+		} else if action == "restart" {
+			// Restart is implemented as stop then start
+			err = vmManager.StopVM(ctx, vmID)
+			if err == nil {
+				err = vmManager.StartVM(ctx, vmID)
+				if err == nil && restartSupervisor != nil {
+					restartSupervisor.RecordStart(ctx, vmID)
+				}
+			}
+		} else {
+			err = fmt.Errorf("unsupported action: %s", action)
 		}
 		if err != nil {
 			writeJSONError(w, vmActionStatus(err), fmt.Sprintf("failed to %s VM: %v", action, err))
