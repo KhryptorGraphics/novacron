@@ -4,30 +4,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/khryptorgraphics/novacron/backend/core/orchestration/events"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/khryptorgraphics/novacron/backend/core/orchestration/events"
 )
 
 func TestDefaultAutoScaler(t *testing.T) {
 	logger := logrus.New()
 	logger.SetLevel(logrus.ErrorLevel) // Reduce noise in tests
-	
+
 	eventBus := events.NewNATSEventBus(logger)
 	autoScaler := NewDefaultAutoScaler(logger, eventBus)
 
 	t.Run("StartAndStopMonitoring", func(t *testing.T) {
 		err := autoScaler.StartMonitoring()
 		require.NoError(t, err)
-		
+
 		// Try to start again - should fail
 		err = autoScaler.StartMonitoring()
 		assert.Error(t, err)
-		
+
 		err = autoScaler.StopMonitoring()
 		require.NoError(t, err)
-		
+
 		// Try to stop again - should fail
 		err = autoScaler.StopMonitoring()
 		assert.Error(t, err)
@@ -98,7 +98,7 @@ func TestDefaultAutoScaler(t *testing.T) {
 func TestMetricsCollector(t *testing.T) {
 	logger := logrus.New()
 	logger.SetLevel(logrus.ErrorLevel)
-	
+
 	collector := NewDefaultMetricsCollector(logger)
 
 	t.Run("CollectMetrics", func(t *testing.T) {
@@ -118,7 +118,7 @@ func TestMetricsCollector(t *testing.T) {
 
 		end := time.Now()
 		start := end.Add(-1 * time.Hour)
-		
+
 		metrics, err := collector.GetHistoricalMetrics(start, end)
 		require.NoError(t, err)
 		assert.True(t, len(metrics) >= 1)
@@ -137,7 +137,7 @@ func TestMetricsCollector(t *testing.T) {
 
 		// Collect metrics to trigger handler
 		collector.CollectMetrics()
-		
+
 		// Give handler time to be called
 		time.Sleep(10 * time.Millisecond)
 		assert.True(t, called)
@@ -158,7 +158,7 @@ func TestMetricsCollector(t *testing.T) {
 func TestScalingDecisionEngine(t *testing.T) {
 	logger := logrus.New()
 	logger.SetLevel(logrus.ErrorLevel)
-	
+
 	engine := NewDefaultScalingDecisionEngine(logger)
 
 	t.Run("SetGetThresholds", func(t *testing.T) {
@@ -183,11 +183,11 @@ func TestScalingDecisionEngine(t *testing.T) {
 
 	t.Run("MakeDecisionScaleUp", func(t *testing.T) {
 		prediction := &ResourcePrediction{
-			TargetID:         "test-target",
-			PredictedCPU:     0.9,
-			PredictedMemory:  0.8,
-			Confidence:       0.8,
-			TrendDirection:   TrendIncreasing,
+			TargetID:        "test-target",
+			PredictedCPU:    0.9,
+			PredictedMemory: 0.8,
+			Confidence:      0.8,
+			TrendDirection:  TrendIncreasing,
 		}
 
 		current := &MetricsData{
@@ -207,13 +207,13 @@ func TestScalingDecisionEngine(t *testing.T) {
 	t.Run("MakeDecisionScaleDown", func(t *testing.T) {
 		// Create a fresh engine to avoid state interference
 		freshEngine := NewDefaultScalingDecisionEngine(logger)
-		
+
 		// Set thresholds that will allow scale down
 		thresholds := &ScalingThresholds{
 			CPUScaleUpThreshold:      0.8,
-			CPUScaleDownThreshold:    0.2,  // Set higher than test data
+			CPUScaleDownThreshold:    0.2, // Set higher than test data
 			MemoryScaleUpThreshold:   0.8,
-			MemoryScaleDownThreshold: 0.2,  // Set higher than test data
+			MemoryScaleDownThreshold: 0.2, // Set higher than test data
 			MinReplicas:              1,
 			MaxReplicas:              10,
 			CooldownPeriod:           2 * time.Minute,
@@ -221,19 +221,19 @@ func TestScalingDecisionEngine(t *testing.T) {
 		}
 		err := freshEngine.SetThresholds(thresholds)
 		require.NoError(t, err)
-		
+
 		prediction := &ResourcePrediction{
-			TargetID:         "test-target",
-			PredictedCPU:     0.1,
-			PredictedMemory:  0.1,
-			Confidence:       0.8,
-			TrendDirection:   TrendDecreasing,
+			TargetID:        "test-target",
+			PredictedCPU:    0.1,
+			PredictedMemory: 0.1,
+			Confidence:      0.8,
+			TrendDirection:  TrendDecreasing,
 		}
 
 		current := &MetricsData{
 			TargetID:    "test-target",
-			CPUUsage:    0.1,  // Below both CPU and Memory thresholds
-			MemoryUsage: 0.1,  // Below both thresholds
+			CPUUsage:    0.1, // Below both CPU and Memory thresholds
+			MemoryUsage: 0.1, // Below both thresholds
 			ActiveVMs:   5,
 		}
 
@@ -245,11 +245,11 @@ func TestScalingDecisionEngine(t *testing.T) {
 
 	t.Run("MakeDecisionNoAction", func(t *testing.T) {
 		prediction := &ResourcePrediction{
-			TargetID:         "test-target",
-			PredictedCPU:     0.5,
-			PredictedMemory:  0.4,
-			Confidence:       0.8,
-			TrendDirection:   TrendStable,
+			TargetID:        "test-target",
+			PredictedCPU:    0.5,
+			PredictedMemory: 0.4,
+			Confidence:      0.8,
+			TrendDirection:  TrendStable,
 		}
 
 		current := &MetricsData{
@@ -272,11 +272,11 @@ func TestScalingDecisionEngine(t *testing.T) {
 		engine.SetThresholds(thresholds)
 
 		prediction := &ResourcePrediction{
-			TargetID:         "cooldown-target",
-			PredictedCPU:     0.9,
-			PredictedMemory:  0.8,
-			Confidence:       0.8,
-			TrendDirection:   TrendIncreasing,
+			TargetID:        "cooldown-target",
+			PredictedCPU:    0.9,
+			PredictedMemory: 0.8,
+			Confidence:      0.8,
+			TrendDirection:  TrendIncreasing,
 		}
 
 		current := &MetricsData{
@@ -309,15 +309,15 @@ func TestScalingDecisionEngine(t *testing.T) {
 	t.Run("GetScaleState", func(t *testing.T) {
 		// Trigger a scaling decision first
 		prediction := &ResourcePrediction{
-			TargetID:         "state-target",
-			PredictedCPU:     0.9,
-			Confidence:       0.8,
+			TargetID:     "state-target",
+			PredictedCPU: 0.9,
+			Confidence:   0.8,
 		}
 
 		current := &MetricsData{
-			TargetID:    "state-target",
-			CPUUsage:    0.85,
-			ActiveVMs:   2,
+			TargetID:  "state-target",
+			CPUUsage:  0.85,
+			ActiveVMs: 2,
 		}
 
 		engine.MakeDecision(prediction, current)
@@ -349,11 +349,11 @@ func TestARIMAPredictor(t *testing.T) {
 
 	t.Run("Predict", func(t *testing.T) {
 		predictor.Train(testData)
-		
+
 		current := testData[len(testData)-1]
 		prediction, err := predictor.Predict(current, 30)
 		require.NoError(t, err)
-		
+
 		assert.Equal(t, current.TargetID, prediction.TargetID)
 		assert.Equal(t, 30, prediction.HorizonMinutes)
 		assert.True(t, prediction.PredictedCPU >= 0)
@@ -363,7 +363,7 @@ func TestARIMAPredictor(t *testing.T) {
 	t.Run("PredictWithoutTraining", func(t *testing.T) {
 		freshPredictor := NewARIMAPredictor(ARIMAOrder{P: 1, D: 1, Q: 1})
 		current := testData[0]
-		
+
 		_, err := freshPredictor.Predict(current, 30)
 		assert.Error(t, err)
 	})
@@ -371,7 +371,7 @@ func TestARIMAPredictor(t *testing.T) {
 	t.Run("GetModelInfo", func(t *testing.T) {
 		predictor.Train(testData)
 		info := predictor.GetModelInfo()
-		
+
 		assert.Equal(t, "ARIMA", info.ModelType)
 		assert.NotZero(t, info.DataPoints)
 		assert.True(t, info.Accuracy >= 0 && info.Accuracy <= 1)
@@ -398,11 +398,11 @@ func TestNeuralNetworkPredictor(t *testing.T) {
 
 	t.Run("Predict", func(t *testing.T) {
 		predictor.Train(testData)
-		
+
 		current := testData[len(testData)-1]
 		prediction, err := predictor.Predict(current, 30)
 		require.NoError(t, err)
-		
+
 		assert.Equal(t, current.TargetID, prediction.TargetID)
 		assert.Equal(t, 30, prediction.HorizonMinutes)
 		assert.True(t, prediction.PredictedCPU >= 0)
@@ -412,7 +412,7 @@ func TestNeuralNetworkPredictor(t *testing.T) {
 	t.Run("GetModelInfo", func(t *testing.T) {
 		predictor.Train(testData)
 		info := predictor.GetModelInfo()
-		
+
 		assert.Equal(t, "NeuralNetwork", info.ModelType)
 		assert.NotZero(t, info.DataPoints)
 		assert.True(t, info.Accuracy >= 0 && info.Accuracy <= 1)
@@ -424,25 +424,53 @@ func TestNeuralNetworkPredictor(t *testing.T) {
 func generateTestMetrics(count int) []*MetricsData {
 	metrics := make([]*MetricsData, count)
 	baseTime := time.Now().Add(-time.Duration(count) * time.Minute)
-	
+
 	for i := 0; i < count; i++ {
 		// Generate somewhat realistic CPU usage pattern
 		cpuUsage := 0.3 + 0.4*float64(i%10)/10.0 // Oscillating pattern
 		if i > count/2 {
 			cpuUsage += 0.2 // Trend upward
 		}
-		
+
 		metrics[i] = &MetricsData{
-			Timestamp:    baseTime.Add(time.Duration(i) * time.Minute),
-			TargetID:     "test-target",
-			TargetType:   "vm",
-			CPUUsage:     cpuUsage,
-			MemoryUsage:  cpuUsage * 0.8, // Memory correlates with CPU
-			NetworkIO:    10.0 + float64(i%5),
-			DiskIO:       100.0 + float64(i%10)*10,
-			ActiveVMs:    3 + i%3,
+			Timestamp:   baseTime.Add(time.Duration(i) * time.Minute),
+			TargetID:    "test-target",
+			TargetType:  "vm",
+			CPUUsage:    cpuUsage,
+			MemoryUsage: cpuUsage * 0.8, // Memory correlates with CPU
+			NetworkIO:   10.0 + float64(i%5),
+			DiskIO:      100.0 + float64(i%10)*10,
+			ActiveVMs:   3 + i%3,
 		}
 	}
-	
+
 	return metrics
+}
+func TestHandleMetricsConcurrentWithTargetMutation(t *testing.T) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.ErrorLevel)
+	autoScaler := NewDefaultAutoScaler(logger, events.NewNATSEventBus(logger))
+
+	require.NoError(t, autoScaler.AddTarget(&AutoScalerTarget{
+		ID: "seed", Type: "vm", Enabled: true,
+	}))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			id := "t"
+			_ = autoScaler.AddTarget(&AutoScalerTarget{ID: id, Type: "vm", Enabled: true})
+			_ = autoScaler.HandleMetrics(&MetricsData{
+				TargetID: id, CPUUsage: 0.99, MemoryUsage: 0.99,
+			})
+			_ = autoScaler.RemoveTarget(id)
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		require.NoError(t, autoScaler.HandleMetrics(&MetricsData{
+			TargetID: "seed", CPUUsage: 0.99, MemoryUsage: 0.99,
+		}))
+	}
+	<-done
 }

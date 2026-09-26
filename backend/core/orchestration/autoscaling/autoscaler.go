@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration/events"
+	"github.com/sirupsen/logrus"
 )
 
 // DefaultAutoScaler implements the AutoScaler interface
@@ -18,38 +18,38 @@ type DefaultAutoScaler struct {
 	predictor        Predictor
 	decisionEngine   ScalingDecisionEngine
 	eventBus         events.EventBus
-	
+
 	// Configuration
 	monitoringInterval time.Duration
 	predictionHorizon  int // minutes
-	
+
 	// State
-	running    bool
-	ctx        context.Context
-	cancel     context.CancelFunc
-	targets    map[string]*AutoScalerTarget // targetID -> target config
-	
+	running bool
+	ctx     context.Context
+	cancel  context.CancelFunc
+	targets map[string]*AutoScalerTarget // targetID -> target config
+
 	// Metrics
-	decisionsCount  uint64
+	decisionsCount   uint64
 	predictionsCount uint64
 	lastDecisionTime time.Time
 }
 
 // AutoScalerTarget represents a target for auto-scaling
 type AutoScalerTarget struct {
-	ID          string                 `json:"id"`
-	Type        string                 `json:"type"`
-	Enabled     bool                   `json:"enabled"`
-	Thresholds  *ScalingThresholds     `json:"thresholds"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
+	ID         string                 `json:"id"`
+	Type       string                 `json:"type"`
+	Enabled    bool                   `json:"enabled"`
+	Thresholds *ScalingThresholds     `json:"thresholds"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt  time.Time              `json:"created_at"`
+	UpdatedAt  time.Time              `json:"updated_at"`
 }
 
 // NewDefaultAutoScaler creates a new auto-scaler
 func NewDefaultAutoScaler(logger *logrus.Logger, eventBus events.EventBus) *DefaultAutoScaler {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &DefaultAutoScaler{
 		logger:             logger,
 		eventBus:           eventBus,
@@ -158,16 +158,16 @@ func (as *DefaultAutoScaler) GetScalingDecision(targetID string) (*ScalingDecisi
 		as.logger.WithError(err).Warn("Failed to get prediction, using current metrics only")
 		// Create a simple prediction based on current metrics
 		prediction = &ResourcePrediction{
-			TargetID:         targetID,
-			PredictionTime:   time.Now(),
-			HorizonMinutes:   as.predictionHorizon,
-			PredictedCPU:     currentMetrics.CPUUsage,
-			PredictedMemory:  currentMetrics.MemoryUsage,
-			PredictedLoad:    currentMetrics.CPUUsage,
-			Confidence:       0.5,
-			TrendDirection:   TrendStable,
-			SeasonalFactor:   1.0,
-			AnomalyScore:     0.0,
+			TargetID:        targetID,
+			PredictionTime:  time.Now(),
+			HorizonMinutes:  as.predictionHorizon,
+			PredictedCPU:    currentMetrics.CPUUsage,
+			PredictedMemory: currentMetrics.MemoryUsage,
+			PredictedLoad:   currentMetrics.CPUUsage,
+			Confidence:      0.5,
+			TrendDirection:  TrendStable,
+			SeasonalFactor:  1.0,
+			AnomalyScore:    0.0,
 		}
 	}
 
@@ -241,21 +241,26 @@ func (as *DefaultAutoScaler) HandleMetrics(metrics *MetricsData) error {
 		"memory_usage": metrics.MemoryUsage,
 	}).Debug("Processing new metrics")
 
-	// Check if any targets need immediate attention
+	// Snapshot under the read lock. AddTarget and RemoveTarget write as.targets
+	// from request goroutines while the collector calls HandleMetrics.
+	as.mu.RLock()
+	enabled := make([]string, 0, len(as.targets))
 	for targetID, target := range as.targets {
-		if !target.Enabled {
-			continue
+		if target.Enabled {
+			enabled = append(enabled, targetID)
 		}
+	}
+	as.mu.RUnlock()
 
-		// Check for threshold breaches that need immediate action
-		thresholds := as.decisionEngine.GetThresholds()
-		if metrics.CPUUsage > thresholds.CPUScaleUpThreshold*1.2 || 
-		   metrics.MemoryUsage > thresholds.MemoryScaleUpThreshold*1.2 {
-			
-			// Publish threshold breach event
-			if err := as.publishScalingEvent(EventTypeThresholdsBreach, targetID, nil, nil); err != nil {
-				as.logger.WithError(err).Error("Failed to publish threshold breach event")
-			}
+	thresholds := as.decisionEngine.GetThresholds()
+	if metrics.CPUUsage <= thresholds.CPUScaleUpThreshold*1.2 &&
+		metrics.MemoryUsage <= thresholds.MemoryScaleUpThreshold*1.2 {
+		return nil
+	}
+
+	for _, targetID := range enabled {
+		if err := as.publishScalingEvent(EventTypeThresholdsBreach, targetID, nil, nil); err != nil {
+			as.logger.WithError(err).Error("Failed to publish threshold breach event")
 		}
 	}
 
