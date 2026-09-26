@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1163,56 +1161,16 @@ func (d *KVMDriverEnhanced) imageCacheDir() string {
 	return filepath.Join(filepath.Dir(d.vmBasePath), "images")
 }
 
-// resolveBootImage returns a local path for image. If image is an http(s) URL it
-// is downloaded once into the image cache and reused thereafter.
+// resolveBootImage returns a local path for image. Only local paths are supported.
+// http(s) URLs are rejected to prevent SSRF. Use a pre-seeded cache entry instead.
 func (d *KVMDriverEnhanced) resolveBootImage(ctx context.Context, image string) (string, error) {
-	if !strings.HasPrefix(image, "http://") && !strings.HasPrefix(image, "https://") {
-		return image, nil // local path
+	if strings.HasPrefix(image, "http://") || strings.HasPrefix(image, "https://") {
+		return "", fmt.Errorf("http(s) boot images are not supported; use a local path or pre-seeded cache entry")
 	}
-	cacheDir := d.imageCacheDir()
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create image cache: %w", err)
-	}
-	dest := filepath.Join(cacheDir, filepath.Base(image))
-	if fi, err := os.Stat(dest); err == nil && fi.Size() > 0 {
-		return dest, nil // cache hit
-	}
-	if err := downloadFile(ctx, image, dest); err != nil {
-		return "", fmt.Errorf("failed to fetch boot image %s: %w", image, err)
-	}
-	log.Printf("Fetched boot image %s -> %s", image, dest)
-	return dest, nil
+	return image, nil // local path
 }
 
-func downloadFile(ctx context.Context, url, dest string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status %s", resp.Status)
-	}
-	tmp := dest + ".part"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return os.Rename(tmp, dest)
-}
+
 
 // aarch64 "virt" pflash banks are 64 MiB each; firmware must be padded to fit.
 const uefiFlashSize = 64 * 1024 * 1024
