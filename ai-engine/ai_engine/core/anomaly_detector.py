@@ -225,7 +225,9 @@ class AnomalyDetectionModel(BaseMLModel):
         # Isolation Forest
         if self._isolation_forest:
             iso_scores = self._isolation_forest.decision_function(X_scaled)
-            iso_scores = self._normalize_scores(iso_scores, "isolation_forest")
+            # sklearn scores are higher for inliers. pyod detectors already
+            # score higher for outliers, so only this detector is inverted.
+            iso_scores = 1.0 - self._normalize_scores(iso_scores, "isolation_forest")
             scores.append(self._ensemble_weights['isolation_forest'] * iso_scores)
         
         # Local Outlier Factor

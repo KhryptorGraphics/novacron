@@ -64,6 +64,38 @@ def test_constant_anomaly_score_is_not_forced_to_one_half():
     assert scores[0] != 0.5
 
 
+def test_isolation_forest_inlier_scores_below_outlier():
+    """A healthy IsolationForest point must not outrank a real outlier."""
+    model = _anomaly_model()
+    model.mark_trained(object())
+    model._feature_names = ["cpu"]
+    model._detector_score_range["isolation_forest"] = (-0.4, 0.4)
+    model._statistical_thresholds = {}
+
+    class _IdentityExtractor:
+        def extract_features(self, frame):
+            return frame
+
+    class _IdentityScaler:
+        def transform(self, frame):
+            return frame.to_numpy(dtype=float)
+
+    class _Forest:
+        def decision_function(self, _scaled):
+            # sklearn: positive is an inlier, negative is an outlier.
+            return np.array([0.4, -0.4])
+
+    model._feature_extractor = _IdentityExtractor()
+    model._scaler = _IdentityScaler()
+    model._isolation_forest = _Forest()
+
+    scores = model.decision_function(pd.DataFrame({"cpu": [0.2, 9.0]}))
+
+    assert scores[0] < scores[1]
+    assert scores[0] < 0.5
+    assert scores[1] > scores[0]
+
+
 def test_statistical_anomalies_use_scaled_feature_values():
     model = _anomaly_model()
     model._feature_names = ["cpu"]
