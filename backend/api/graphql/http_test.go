@@ -114,6 +114,60 @@ func TestNewVolumeHTTPHandlerSupportsVolumeLifecycle(t *testing.T) {
 	}
 }
 
+func TestVolumeListHonorsOptionalPagination(t *testing.T) {
+	t.Parallel()
+
+	store, err := corestorage.NewStorageManager(corestorage.StorageManagerConfig{
+		BasePath: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create storage manager: %v", err)
+	}
+
+	handler := NewVolumeHTTPHandler(NewResolverWithVolumeStore(nil, nil, store))
+	createBody := requestEnvelope{
+		Query: "mutation CreateVolume($input: CreateVolumeInput!) { createVolume(input: $input) { id } }",
+		Variables: map[string]interface{}{
+			"input": map[string]interface{}{
+				"name": "paged-volume",
+				"size": 4,
+				"tier": "HOT",
+			},
+		},
+	}
+	createReq := httptest.NewRequest(http.MethodPost, "/graphql", marshalEnvelope(t, createBody))
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected create volume 200, got %d (%s)", createRec.Code, createRec.Body.String())
+	}
+
+	for _, variables := range []map[string]interface{}{
+		{"pagination": map[string]interface{}{}},
+		{"pagination": map[string]interface{}{"page": 0}},
+		{"pagination": map[string]interface{}{"page": 0, "pageSize": 10}},
+	} {
+		listBody := requestEnvelope{
+			Query:     "query Volumes($pagination: PaginationInput) { volumes(pagination: $pagination) { id } }",
+			Variables: variables,
+		}
+		listReq := httptest.NewRequest(http.MethodPost, "/graphql", marshalEnvelope(t, listBody))
+		listRec := httptest.NewRecorder()
+		handler.ServeHTTP(listRec, listReq)
+		if listRec.Code != http.StatusOK {
+			t.Fatalf("pagination %#v: expected 200, got %d (%s)", variables, listRec.Code, listRec.Body.String())
+		}
+		var listResp responseEnvelope
+		if err := json.NewDecoder(listRec.Body).Decode(&listResp); err != nil {
+			t.Fatalf("decode list response: %v", err)
+		}
+		volumes, ok := listResp.Data["volumes"].([]interface{})
+		if !ok || len(volumes) != 1 {
+			t.Fatalf("pagination %#v: expected one volume, got %#v", variables, listResp.Data["volumes"])
+		}
+	}
+}
+
 func TestNewVolumeHTTPHandlerRejectsUnsupportedOperations(t *testing.T) {
 	t.Parallel()
 

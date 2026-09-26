@@ -112,7 +112,7 @@ class FailurePredictionModel(BaseMLModel):
                 **metrics
             )
             
-            self._is_trained = True
+            self.mark_trained(self._xgb_model)
             logger.info(f"Model training completed in {training_duration:.2f} seconds")
             
             return metrics
@@ -244,6 +244,7 @@ class FailurePredictionModel(BaseMLModel):
             random_state=42
         )
         self._isolation_forest.fit(X_train)
+        self.mark_trained(self._xgb_model)
         
         # Calculate validation metrics
         metrics = self._calculate_metrics(X_val, y_val)
@@ -281,8 +282,8 @@ class FailurePredictionModel(BaseMLModel):
     
     def save_model(self, filepath: str) -> None:
         """Save the ensemble model."""
-        import joblib
-        
+        from ..models.persistence import dump_typed_model
+
         model_data = {
             'xgb_model': self._xgb_model,
             'rf_model': self._rf_model,
@@ -293,14 +294,14 @@ class FailurePredictionModel(BaseMLModel):
             'metadata': self.metadata.dict()
         }
         
-        joblib.dump(model_data, filepath)
+        dump_typed_model(filepath, "failure_prediction", model_data)
         logger.info(f"Model saved to {filepath}")
     
     def load_model(self, filepath: str) -> None:
         """Load the ensemble model."""
-        import joblib
-        
-        model_data = joblib.load(filepath)
+        from ..models.persistence import load_typed_model
+
+        model_data = load_typed_model(filepath, "failure_prediction")
         
         self._xgb_model = model_data['xgb_model']
         self._rf_model = model_data['rf_model']
@@ -309,7 +310,7 @@ class FailurePredictionModel(BaseMLModel):
         self._feature_names = model_data['feature_names']
         self._ensemble_weights = model_data['ensemble_weights']
         
-        self._is_trained = True
+        self.mark_trained(self._xgb_model)
         logger.info(f"Model loaded from {filepath}")
 
 
@@ -374,7 +375,11 @@ class FailurePredictionService:
         self.models[model_id] = model
         
         # Save model to disk
-        model_path = f"{self.settings.ml.model_storage_path}/{model_id}.joblib"
+        from pathlib import Path
+
+        model_dir = Path(self.settings.ml.model_storage_path)
+        model_dir.mkdir(parents=True, exist_ok=True)
+        model_path = str(model_dir / f"{model_id}.joblib")
         model.save_model(model_path)
         
         logger.info(f"Trained failure prediction model {model_id} with metrics: {metrics}")
@@ -520,8 +525,19 @@ class FailurePredictionService:
     
     async def _load_models(self) -> None:
         """Load existing models from storage."""
-        # Implementation would scan model storage directory and load models
-        pass
+        from ..models.persistence import load_stored_models
+
+        self.models = load_stored_models(
+            self.settings.ml.model_storage_path,
+            lambda model_id: FailurePredictionModel(ModelMetadata(
+                model_id=model_id,
+                model_type=ModelType.FAILURE_PREDICTION,
+                version="1.0.0",
+            )),
+            "failure_prediction",
+        )
+        if self.models and self.active_model is None:
+            self.active_model = next(reversed(self.models.values()))
     
     def set_active_model(self, model_id: str) -> None:
         """Set the active model for predictions."""

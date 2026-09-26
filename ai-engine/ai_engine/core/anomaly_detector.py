@@ -158,7 +158,7 @@ class AnomalyDetectionModel(BaseMLModel):
                 **metrics
             )
             
-            self._is_trained = True
+            self.mark_trained(self._isolation_forest)
             logger.info(f"Model training completed in {training_duration:.2f} seconds")
             
             return metrics
@@ -365,6 +365,7 @@ class AnomalyDetectionModel(BaseMLModel):
         
         # Calculate validation metrics if available
         if is_supervised and X_val is not None and y_val is not None:
+            self.mark_trained(self._isolation_forest)
             X_val_scaled = self._scaler.transform(X_val)
             val_predictions = self.predict(pd.DataFrame(X_val_scaled, columns=self._feature_names))
             
@@ -554,8 +555,8 @@ class AnomalyDetectionModel(BaseMLModel):
     
     def save_model(self, filepath: str) -> None:
         """Save the anomaly detection model."""
-        import joblib
-        
+        from ..models.persistence import dump_typed_model
+
         model_data = {
             'isolation_forest': self._isolation_forest,
             'lof_detector': self._lof_detector,
@@ -569,20 +570,23 @@ class AnomalyDetectionModel(BaseMLModel):
             'metadata': self.metadata.dict()
         }
         
-        # Save LSTM model separately
+        # Save the LSTM sidecar by file name so it still resolves if the
+        # model directory is mounted at a different path later.
         if self._lstm_detector:
-            lstm_path = filepath.replace('.joblib', '_lstm.h5')
-            self._lstm_detector.save(lstm_path)
-            model_data['lstm_model_path'] = lstm_path
+            from pathlib import Path
+
+            lstm_path = Path(filepath).with_name(Path(filepath).stem + "_lstm.h5")
+            self._lstm_detector.save(str(lstm_path))
+            model_data['lstm_model_path'] = lstm_path.name
         
-        joblib.dump(model_data, filepath)
+        dump_typed_model(filepath, "anomaly_detection", model_data)
         logger.info(f"Model saved to {filepath}")
     
     def load_model(self, filepath: str) -> None:
         """Load the anomaly detection model."""
-        import joblib
-        
-        model_data = joblib.load(filepath)
+        from ..models.persistence import load_typed_model
+
+        model_data = load_typed_model(filepath, "anomaly_detection")
         
         self._isolation_forest = model_data['isolation_forest']
         self._lof_detector = model_data['lof_detector']
@@ -594,17 +598,22 @@ class AnomalyDetectionModel(BaseMLModel):
         self._ensemble_weights = model_data['ensemble_weights']
         self._contamination_rate = model_data['contamination_rate']
         
-        # Load LSTM model if available
+        # Load LSTM model if available. Fall back to the sidecar next to this
+        # joblib when the stored path was absolute on another host.
         if 'lstm_model_path' in model_data:
+            from pathlib import Path
+
+            stored = Path(str(model_data['lstm_model_path']))
+            candidate = stored if stored.is_file() else Path(filepath).parent / stored.name
             try:
                 import tensorflow as tf
 
-                self._lstm_detector = tf.keras.models.load_model(model_data['lstm_model_path'])
+                self._lstm_detector = tf.keras.models.load_model(str(candidate))
             except Exception as e:
                 logger.warning(f"Failed to load LSTM model: {str(e)}")
                 self._lstm_detector = None
-        
-        self._is_trained = True
+
+        self.mark_trained(self._isolation_forest)
         logger.info(f"Model loaded from {filepath}")
 
 
@@ -890,8 +899,19 @@ class AnomalyDetectionService:
     
     async def _load_models(self) -> None:
         """Load existing models from storage."""
-        # Implementation would scan model storage directory and load models
-        pass
+        from ..models.persistence import load_stored_models
+
+        self.models = load_stored_models(
+            self.settings.ml.model_storage_path,
+            lambda model_id: AnomalyDetectionModel(ModelMetadata(
+                model_id=model_id,
+                model_type=ModelType.ANOMALY_DETECTION,
+                version="1.0.0",
+            )),
+            "anomaly_detection",
+        )
+        if self.models and self.active_model is None:
+            self.active_model = next(reversed(self.models.values()))
     
     def set_active_model(self, model_id: str) -> None:
         """Set the active model for anomaly detection."""

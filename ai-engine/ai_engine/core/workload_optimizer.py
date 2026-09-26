@@ -127,7 +127,7 @@ class WorkloadPlacementModel(BaseMLModel):
                 **metrics
             )
             
-            self._is_trained = True
+            self.mark_trained(self._performance_model)
             logger.info(f"Model training completed in {training_duration:.2f} seconds")
             
             return metrics
@@ -486,8 +486,8 @@ class WorkloadPlacementModel(BaseMLModel):
     
     def save_model(self, filepath: str) -> None:
         """Save the multi-objective model."""
-        import joblib
-        
+        from ..models.persistence import dump_typed_model
+
         model_data = {
             'performance_model': self._performance_model,
             'resource_model': self._resource_model,
@@ -500,14 +500,14 @@ class WorkloadPlacementModel(BaseMLModel):
             'metadata': self.metadata.dict()
         }
         
-        joblib.dump(model_data, filepath)
+        dump_typed_model(filepath, "workload_placement", model_data)
         logger.info(f"Model saved to {filepath}")
     
     def load_model(self, filepath: str) -> None:
         """Load the multi-objective model."""
-        import joblib
-        
-        model_data = joblib.load(filepath)
+        from ..models.persistence import load_typed_model
+
+        model_data = load_typed_model(filepath, "workload_placement")
         
         self._performance_model = model_data['performance_model']
         self._resource_model = model_data['resource_model']
@@ -518,7 +518,7 @@ class WorkloadPlacementModel(BaseMLModel):
         self._placement_factors = model_data['placement_factors']
         self._objective_weights = model_data['objective_weights']
         
-        self._is_trained = True
+        self.mark_trained(self._performance_model)
         logger.info(f"Model loaded from {filepath}")
 
 
@@ -710,8 +710,19 @@ class WorkloadPlacementService:
     
     async def _load_models(self) -> None:
         """Load existing models from storage."""
-        # Implementation would scan model storage and load models
-        pass
+        from ..models.persistence import load_stored_models
+
+        self.models = load_stored_models(
+            self.settings.ml.model_storage_path,
+            lambda model_id: WorkloadPlacementModel(ModelMetadata(
+                model_id=model_id,
+                model_type=ModelType.WORKLOAD_PLACEMENT,
+                version="1.0.0",
+            )),
+            "workload_placement",
+        )
+        if self.models and self.active_model is None:
+            self.active_model = next(reversed(self.models.values()))
     
     def set_active_model(self, model_id: str) -> None:
         """Set the active model for optimizations."""

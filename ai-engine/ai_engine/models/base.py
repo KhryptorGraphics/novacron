@@ -103,7 +103,19 @@ class BaseMLModel(ABC):
     def is_trained(self) -> bool:
         """Check if model is trained and ready for predictions."""
         return self._is_trained and self._model is not None
-    
+
+    def mark_trained(self, estimator: Any) -> None:
+        """Record the estimator produced by train() or load_model().
+
+        Concrete models keep their fitted objects on their own attributes.
+        The readiness gate still requires one of those objects, so callers
+        pass the primary estimator here instead of only flipping a flag.
+        """
+        if estimator is None:
+            return
+        self._model = estimator
+        self._is_trained = True
+
     @property
     def feature_names(self) -> List[str]:
         """Get feature names used by the model."""

@@ -133,17 +133,26 @@ func decodeCreateVolumeInput(raw map[string]interface{}) (CreateVolumeInput, err
 	return input, nil
 }
 
+const defaultPageSize = 50
+
 func decodePaginationInput(raw map[string]interface{}) (*PaginationInput, error) {
-	pagination := &PaginationInput{}
+	pagination := &PaginationInput{PageSize: defaultPageSize}
 
 	if pageValue, ok := raw["page"].(float64); ok {
-		pagination.Page = int(pageValue)
+		page := int(pageValue)
+		if page < 0 {
+			return nil, fmt.Errorf("pagination values must be non-negative")
+		}
+		pagination.Page = page
 	}
 	if pageSizeValue, ok := raw["pageSize"].(float64); ok {
-		pagination.PageSize = int(pageSizeValue)
-	}
-	if pagination.Page < 0 || pagination.PageSize < 0 {
-		return nil, fmt.Errorf("pagination values must be non-negative")
+		pageSize := int(pageSizeValue)
+		if pageSize < 0 {
+			return nil, fmt.Errorf("pagination values must be non-negative")
+		}
+		if pageSize > 0 {
+			pagination.PageSize = pageSize
+		}
 	}
 
 	return pagination, nil

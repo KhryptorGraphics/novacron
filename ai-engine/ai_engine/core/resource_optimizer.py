@@ -167,7 +167,7 @@ class ResourceOptimizationModel(BaseMLModel):
                 **metrics
             )
             
-            self._is_trained = True
+            self.mark_trained(self._cost_model)
             logger.info(f"Model training completed in {training_duration:.2f} seconds")
             
             return metrics
@@ -664,8 +664,8 @@ class ResourceOptimizationModel(BaseMLModel):
     
     def save_model(self, filepath: str) -> None:
         """Save the resource optimization model."""
-        import joblib
-        
+        from ..models.persistence import dump_typed_model
+
         model_data = {
             'cost_model': self._cost_model,
             'performance_model': self._performance_model,
@@ -679,14 +679,14 @@ class ResourceOptimizationModel(BaseMLModel):
             'metadata': self.metadata.dict()
         }
         
-        joblib.dump(model_data, filepath)
+        dump_typed_model(filepath, "resource_optimization", model_data)
         logger.info(f"Model saved to {filepath}")
     
     def load_model(self, filepath: str) -> None:
         """Load the resource optimization model."""
-        import joblib
-        
-        model_data = joblib.load(filepath)
+        from ..models.persistence import load_typed_model
+
+        model_data = load_typed_model(filepath, "resource_optimization")
         
         self._cost_model = model_data['cost_model']
         self._performance_model = model_data['performance_model']
@@ -698,7 +698,7 @@ class ResourceOptimizationModel(BaseMLModel):
         self._optimization_objectives = model_data['optimization_objectives']
         self._resource_constraints = model_data['resource_constraints']
         
-        self._is_trained = True
+        self.mark_trained(self._cost_model)
         logger.info(f"Model loaded from {filepath}")
 
 
@@ -949,8 +949,19 @@ class ResourceOptimizationService:
     
     async def _load_models(self) -> None:
         """Load existing models from storage."""
-        # Implementation would scan model storage directory and load models
-        pass
+        from ..models.persistence import load_stored_models
+
+        self.models = load_stored_models(
+            self.settings.ml.model_storage_path,
+            lambda model_id: ResourceOptimizationModel(ModelMetadata(
+                model_id=model_id,
+                model_type=ModelType.RESOURCE_OPTIMIZATION,
+                version="1.0.0",
+            )),
+            "resource_optimization",
+        )
+        if self.models and self.active_model is None:
+            self.active_model = next(reversed(self.models.values()))
     
     def set_active_model(self, model_id: str) -> None:
         """Set the active model for optimization."""
