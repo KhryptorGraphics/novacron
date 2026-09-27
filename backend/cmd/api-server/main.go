@@ -1700,7 +1700,7 @@ func registerInternalMigrationRoutes(router *mux.Router, db *sql.DB, vmManager *
 			return
 		}
 
-		port, err := freeMigrationPort()
+		port, err := core_vm.AllocateMigrationPort()
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("allocate migration port: %v", err))
 			return
@@ -1811,17 +1811,6 @@ func registerInternalMigrationRoutes(router *mux.Router, db *sql.DB, vmManager *
 	}).Methods(http.MethodPost)
 }
 
-// freeMigrationPort asks the kernel for an unused TCP port for the incoming
-// migration stream. ponytail: tiny TOCTOU between close and qemu's bind;
-// acceptable, qemu surfaces a bind error if it loses the race.
-func freeMigrationPort() (int, error) {
-	ln, err := net.Listen("tcp", "0.0.0.0:0")
-	if err != nil {
-		return 0, err
-	}
-	defer ln.Close()
-	return ln.Addr().(*net.TCPAddr).Port, nil
-}
 
 // registerMigratedDest registers a VM that has just migrated ONTO this node into
 // the manager (so control ops route) and the DB (so /api/vms lists it), from the

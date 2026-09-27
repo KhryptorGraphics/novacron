@@ -17,6 +17,7 @@ Treat older README sections, feature reports, and alternate entrypoints as histo
 | `CORS_ALLOWED_ORIGINS` | live | Comma-separated browser origins for CORS and the WebSocket `Origin` check (no-Origin and same-origin requests are always allowed; `*` allows all). |
 | `NOVACRON_TRUSTED_PROXIES` | live | Comma-separated IPs/CIDRs of reverse proxies. Only a peer in this list may supply `X-Forwarded-For`/`X-Real-IP`; the client IP is the first untrusted hop walking `X-Forwarded-For` right to left. Unset = trust nobody (the peer address is the client). MUST be set wherever a proxy fronts the API, or every client shares the proxy's login rate-limit bucket. |
 | `NOVACRON_LOGIN_RATE_LIMIT` / `NOVACRON_LOGIN_RATE_WINDOW_S` | live | Per-client login attempts per window (default 10 per 300 s; `0` disables). |
+| `NOVACRON_MIGRATION_PORT_RANGE` | live | Inclusive LO-HI TCP range for incoming QEMU migration and NBD block-migration listeners; default 49152-49215 (libvirt's default range). Keep it a power-of-two-aligned block so deploy/p2pnet QoS classifies it with one mask. |
 
 ## HTTP Surface
 

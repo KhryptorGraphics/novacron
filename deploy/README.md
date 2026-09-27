@@ -30,7 +30,7 @@ KVM-capable unit.
 | `psql` client | every node | migrations, `backup-db.sh`, `restore-db.sh`. |
 | `socat`, `tc` (`iproute2`), `curl`, `openssl` | every node | `tc`/`socat` are what the acceptance harness shapes and routes with; `openssl` signs joins and generates secrets; `curl` carries health and join requests. |
 | Go toolchain | install host (unless `--binary`/`--skip-build`) | `install-node.sh` builds `api-server` and the embedded-migration `novacron-migrate` from source. |
-| Two port ranges per node | firewall | the API port (peers and users must reach it) **and** an ephemeral TCP port per migration: the destination allocates a free local port for `-incoming`, so either allow the node's ephemeral range or keep migrations on a trusted network. |
+| Two port ranges per node | firewall | the API port (peers and users must reach it) **and** the migration range `NOVACRON_MIGRATION_PORT_RANGE` (default 49152-49215; incoming migration and NBD listeners). |
 | kernel netem / tbf | optional | only the harness needs shaping. netem is not required: it falls back to `tbf`, and if neither exists the run reports a `SKIP` instead of pretending to measure a shaped link. |
 
 No libvirt, no docker, no redis, no external `migrate` CLI are required.

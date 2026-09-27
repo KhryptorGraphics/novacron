@@ -632,7 +632,7 @@ func (d *KVMDriverEnhanced) StartIncomingBlock(ctx context.Context, destID, dest
 		return "", "", fmt.Errorf("dest %s not ready for incoming: %w", destID, err)
 	}
 
-	nbdPort, err := freeMigrationPort()
+	nbdPort, err := AllocateMigrationPort()
 	if err != nil {
 		_ = d.stopVMInternal(dest)
 		delete(d.vms, destID)
@@ -981,14 +981,4 @@ func sourceDiskVirtualSize(ctx context.Context, diskPath string) (int64, error) 
 		return 0, fmt.Errorf("qemu-img info returned non-positive virtual-size for %s", diskPath)
 	}
 	return info.VirtualSize, nil
-}
-
-// freeMigrationPort asks the kernel for an unused TCP port for the NBD server.
-func freeMigrationPort() (int, error) {
-	ln, err := net.Listen("tcp", "0.0.0.0:0")
-	if err != nil {
-		return 0, err
-	}
-	defer ln.Close()
-	return ln.Addr().(*net.TCPAddr).Port, nil
 }
