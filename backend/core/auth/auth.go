@@ -247,9 +247,11 @@ func (s *AuthServiceImpl) Login(username, password string) (*Session, error) {
 	}
 	s.mu.Unlock()
 
-	// Update last login time
-	user.LastLogin = now
-	s.users.Update(user)
+	// Record the login timestamp directly on the store, instead of
+	// mutating this already-fetched copy and full-object Update()-ing it —
+	// the latter could revert a concurrent status/role/password change
+	// that landed on the real record after this copy was fetched.
+	s.users.RecordLogin(user.ID, now)
 
 	s.auditLog.Log(AuditEntry{
 		Action:      "login_success",

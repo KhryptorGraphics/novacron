@@ -8,22 +8,32 @@ Treat older README sections, feature reports, and alternate entrypoints as histo
 | Key | Status | Notes |
 | --- | --- | --- |
 | `NEXT_PUBLIC_API_URL` | live | Single supported frontend origin input. Example: `http://localhost:8090`. |
-| `NEXT_PUBLIC_WS_URL` | compat | Temporary override only. The frontend should derive websocket origins from `NEXT_PUBLIC_API_URL` by default. |
+| `NEXT_PUBLIC_WS_URL` | compat | Deprecated override still honored by `frontend/src/lib/api/origin.ts`; no deployment sets it. WebSocket origins derive from `NEXT_PUBLIC_API_URL`. |
 | `NEXT_PUBLIC_API_BASE_URL` | retired | Do not use for new code. `/api/v1` is derived from `NEXT_PUBLIC_API_URL`. |
 | `AUTH_SECRET` | live | Required by the canonical Go API server. |
 | `DB_URL` | live | Required by the canonical Go API server. |
 | `STORAGE_PATH` | live | Required by the canonical Go API server. |
+| `API_PORT` | live | Single listener (default `8090`) serving HTTP, GraphQL and every WebSocket route. There is no separate WebSocket port; `WS_PORT` is retired. |
+| `CORS_ALLOWED_ORIGINS` | live | Comma-separated browser origins for CORS and the WebSocket `Origin` check (no-Origin and same-origin requests are always allowed; `*` allows all). |
+| `NOVACRON_TRUSTED_PROXIES` | live | Comma-separated IPs/CIDRs of reverse proxies. Only a peer in this list may supply `X-Forwarded-For`/`X-Real-IP`; the client IP is the first untrusted hop walking `X-Forwarded-For` right to left. Unset = trust nobody (the peer address is the client). MUST be set wherever a proxy fronts the API, or every client shares the proxy's login rate-limit bucket. |
+| `NOVACRON_LOGIN_RATE_LIMIT` / `NOVACRON_LOGIN_RATE_WINDOW_S` | live | Per-client login attempts per window (default 10 per 300 s; `0` disables). |
 
 ## HTTP Surface
 
 | Route | Status | Notes |
 | --- | --- | --- |
 | `GET /health` | live | Canonical health endpoint. |
-| `GET /api/info` | live | Canonical service metadata endpoint. |
-| `POST /api/auth/login` | live | Canonical login route. |
+| `GET /api/info` | live | Canonical service metadata endpoint. `auth.providers` lists enabled login providers (`["password"]` on this server); the frontend shows provider buttons only for advertised providers. |
+| `POST /api/auth/login` | live | Canonical login route. Returns the frontend `AuthResponse`: `token` (HS256 access token carrying a `sid` session claim), `refreshToken` (opaque; only its SHA-256 is stored), `expiresAt`, `user`, `admission`, `memberships`, `selectedCluster`, `session`. The local fabric is the single admitted cluster. |
 | `POST /api/auth/register` | live | Canonical registration route. |
 | `GET /api/auth/check-email` | live | Canonical email availability route. |
-| `POST /api/auth/2fa/verify-login` | live | Completes pending 2FA login challenge. |
+| `POST /api/auth/2fa/verify-login` | live | Completes pending 2FA login challenge; returns the same `AuthResponse` as login. Pending-2FA tokens are rejected by every other authenticated route. |
+| `GET /api/auth/me` | live | Authenticated. Current user, memberships, selected cluster and session; requires a token with a live `sid` session. |
+| `POST /api/auth/refresh` | live | Public (called when the access token is missing/expired). Body `{refreshToken}`. Rotates the refresh token (compare-and-swap); reusing a rotated token revokes the session. Re-reads the user row: inactive users or credentials changed after the session started → 401. |
+| `POST /api/auth/logout` | live | Public. Revokes the session identified by `{refreshToken}`, falling back to the bearer token's `sid`, so logout works with an expired access token. |
+| `GET /api/auth/sessions` | live | Authenticated. The caller's unrevoked, unexpired sessions. |
+| `GET /api/cluster/admissions` | live | Authenticated. Cluster admissions for the caller (the local fabric). |
+| `POST /api/cluster/admissions/select` | live | Authenticated. Selects the admitted cluster for the session. |
 | `POST /api/auth/2fa/setup` | live | Authenticated route. |
 | `GET /api/auth/2fa/qr` | live | Authenticated route. |
 | `POST /api/auth/2fa/verify` | live | Authenticated route. |
@@ -41,13 +51,17 @@ Treat older README sections, feature reports, and alternate entrypoints as histo
 | `GET/DELETE /api/v1/vms/{id}` | live | Canonical VM detail/delete route set. |
 | `POST /api/v1/vms/{id}/start` | live | Canonical VM action route. |
 | `POST /api/v1/vms/{id}/stop` | live | Canonical VM action route. |
+| `POST /api/v1/vms/{id}/pause` | live | Canonical VM action route. |
+| `POST /api/v1/vms/{id}/resume` | live | Canonical VM action route. |
+| `POST /api/v1/vms/{id}/restart` | live | Canonical VM action route. |
 | `GET /api/v1/vms/{id}/metrics` | live | Canonical VM metrics route. |
 | `GET /api/v1/monitoring/metrics` | live | Canonical monitoring summary route used by the routed monitoring dashboard. |
 | `GET /api/v1/monitoring/vms` | live | Canonical monitoring VM summary route used by the routed monitoring dashboard. |
-| `GET /api/v1/monitoring/alerts` | live | Canonical monitoring alert route used by the routed monitoring dashboard. |
+| `GET /api/v1/monitoring/alerts` | live | Recent alerts from the in-process alert store (VM errors and healing events), the same events pushed on `/api/ws/alerts`. |
 | `POST /api/v1/monitoring/alerts/{id}/acknowledge` | deferred | Frontend should present this as unavailable until the canonical server exposes it. |
-| `GET/POST /api/v1/networks` | live | Canonical network inventory surface. |
-| `GET/DELETE /api/v1/networks/{id}` | live | Canonical network detail/delete route set. |
+| `GET /api/v1/networks` | live | Honest empty catalog: the canonical schema has no networks table. |
+| `POST /api/v1/networks` | deferred | Returns 501; per-VM interfaces live at `/api/v1/vms/{vm_id}/interfaces`. |
+| `GET/DELETE /api/v1/networks/{id}` | live | Always 404 (no catalog). |
 | `GET/POST /api/v1/vms/{vm_id}/interfaces` | live | Canonical VM interface list/attach route set. |
 | `GET/PUT/DELETE /api/v1/vms/{vm_id}/interfaces/{id}` | live | Canonical VM interface detail/update/delete route set. |
 | `/api/vms*` and `/api/monitoring/*` | compat | Legacy secure aliases retained during gradual cutover. |
@@ -55,16 +69,19 @@ Treat older README sections, feature reports, and alternate entrypoints as histo
 | `/api/security/*` | live | Canonical admin/security surface. Requires auth and admin/super-admin roles. Includes event acknowledgement, compliance recheck/export, manual incidents, audit export, and RBAC assignment. |
 | `/api/admin/security/*` | live | Canonical alias for admin/security UI. Requires auth and admin/super-admin roles and mirrors `/api/security/*`. |
 | `/api/admin/users*` | live | Canonical admin-only user management surface. Supports list/create/update/delete plus role assignment. |
-| `POST /graphql` | live | Public release GraphQL surface is storage-backed volume operations only: `volumes`, `createVolume`, and `changeVolumeTier`. |
+| `POST /graphql` | live | Public release GraphQL surface is storage-backed volume operations only: `volumes`, `createVolume`, and `changeVolumeTier`. VM/cluster resolvers, subscriptions and `schema.graphql` were removed. |
+| `/api/orchestration/*` | live | Admin/super-admin only (autoscaling, policies, placement, healing). Healing: only VM targets are healed: restart goes through the VM restart supervisor (honors user stops, restart policy `no`, and exhausted retries); migrate queues a fabric transfer to a reachable peer. Service/node/cluster targets, scaling and failover return an explicit unsupported error. |
 
 ## WebSocket Surface
+
+WebSocket routes are served on `API_PORT`. Authentication: an `Authorization: Bearer <token>` header, or, for browsers (which cannot set handshake headers), the subprotocol pair `Sec-WebSocket-Protocol: bearer, <token>`; the server echoes `bearer`. Tokens in query strings are not accepted. Same fail-closed rules as HTTP (expired/revoked/pending-2FA tokens → 401 before upgrade). The `Origin` header must be absent, same-origin, or listed in `CORS_ALLOWED_ORIGINS`.
 
 | Route | Status | Notes |
 | --- | --- | --- |
 | `GET /api/ws/console/{vmId}` | live | Canonical console channel. |
-| `GET /api/ws/metrics` | live | Canonical metrics stream. |
-| `GET /api/ws/alerts` | live | Canonical alert stream. |
-| `GET /api/ws/logs` | live | Canonical log stream. |
+| `GET /api/ws/metrics` | live | Canonical metrics stream: `{type:"metric", source, metrics, timestamp}` per client at `?interval=` (1–300 s), filtered by `?sources=`. Host metrics are sampled by one shared sampler. |
+| `GET /api/ws/alerts` | live | Canonical alert stream: `{type, data, timestamp}` with `type` `security_alert` (VM errors, healing events) or `vm_status` (`data.id/status/previous_status`). Fanned out to every subscriber; slow clients are disconnected. |
+| `GET /api/ws/logs` | live | Canonical log stream (fan-out wired; no in-process log producer publishes yet). |
 | `GET /api/ws/logs/{source}` | live | Canonical source-scoped log stream. |
 | `GET /api/ws/security/events` | live | Canonical security event stream. |
 | `/ws/console/*`, `/ws/metrics`, `/ws/alerts`, `/ws/logs*` | compat | Legacy websocket aliases retained during gradual cutover. |
@@ -91,3 +108,5 @@ Treat older README sections, feature reports, and alternate entrypoints as histo
 - The routed storage surface is volume-only. Pools, snapshots, backups, deletion, and storage realtime channels are intentionally out of scope for the release candidate.
 - New backend work should extend canonical paths first and add compat aliases only when required by the gradual cutover plan.
 - If a route or channel is not marked `live` or `compat` here, treat it as unsupported until it is explicitly implemented and promoted.
+- The API server refuses to boot unless golang-migrate's `schema_migrations` reports a clean (non-dirty) version at or above the migration it requires (currently `000017_session_refresh_tokens`). Apply `database/migrations` first (the `novacron/migrate` image / `database/migrate.go`).
+- `backend/cmd/api-server` is the only control-plane server binary. `backend/cmd/core-server` and its `backend/api/vm` handlers were retired; `backend/core/cmd/novacron` is the hypervisor node agent (`-listen`, health at `/healthz`).

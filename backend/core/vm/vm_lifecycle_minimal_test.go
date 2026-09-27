@@ -255,7 +255,8 @@ func TestKVMDriverEnhancedMinimal(t *testing.T) {
 		Args:      []string{"test"},
 		CPUShares: 1024,
 		MemoryMB:  512,
-		RootFS:    "/tmp",
+		// Empty RootFS: KVM treats RootFS as a boot-image path, and a directory
+		// such as "/tmp" is not a file qemu-img can convert. A blank qcow2 is enough.
 	}
 
 	ctx := context.Background()

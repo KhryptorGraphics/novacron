@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -194,6 +195,7 @@ var _ TokenRevocationService = (*RedisTokenRevocation)(nil)
 
 // InMemoryTokenRevocation is a simple in-memory implementation for testing
 type InMemoryTokenRevocation struct {
+	mu      sync.Mutex
 	revoked map[string]RevocationInfo
 }
 
@@ -209,8 +211,15 @@ func (m *InMemoryTokenRevocation) RevokeToken(jti string, expiresAt time.Time) e
 	return m.RevokeTokenWithReason(jti, expiresAt, "token_revoked")
 }
 
-// RevokeTokenWithReason adds a token to blacklist with a reason
+// RevokeTokenWithReason adds a token to blacklist with a reason. Expired
+// entries are swept lazily on every write, bounding the map's growth without
+// a background goroutine.
 func (m *InMemoryTokenRevocation) RevokeTokenWithReason(jti string, expiresAt time.Time, reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.sweepExpiredLocked()
+
 	m.revoked[jti] = RevocationInfo{
 		JTI:       jti,
 		Reason:    reason,
@@ -220,8 +229,14 @@ func (m *InMemoryTokenRevocation) RevokeTokenWithReason(jti string, expiresAt ti
 	return nil
 }
 
-// IsRevoked checks if a token JTI is in the blacklist
+// IsRevoked checks if a token JTI is in the blacklist. It takes the write
+// lock (not a read lock) because it deletes the entry on read when expired —
+// closing the race where a concurrent RevokeTokenWithReason could observe a
+// half-deleted map.
 func (m *InMemoryTokenRevocation) IsRevoked(jti string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	info, exists := m.revoked[jti]
 	if !exists {
 		return false, nil
@@ -245,6 +260,9 @@ func (m *InMemoryTokenRevocation) RevokeAllUserTokens(userID string, reason stri
 
 // GetRevocationReason gets the reason a token was revoked
 func (m *InMemoryTokenRevocation) GetRevocationReason(jti string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	info, exists := m.revoked[jti]
 	if !exists {
 		return "", fmt.Errorf("token not revoked: %s", jti)
@@ -254,13 +272,22 @@ func (m *InMemoryTokenRevocation) GetRevocationReason(jti string) (string, error
 
 // CleanupExpired removes expired entries
 func (m *InMemoryTokenRevocation) CleanupExpired() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.sweepExpiredLocked()
+	return nil
+}
+
+// sweepExpiredLocked deletes every entry whose ExpiresAt has passed. The
+// caller must hold m.mu.
+func (m *InMemoryTokenRevocation) sweepExpiredLocked() {
 	now := time.Now()
 	for jti, info := range m.revoked {
 		if now.After(info.ExpiresAt) {
 			delete(m.revoked, jti)
 		}
 	}
-	return nil
 }
 
 // Ensure InMemoryTokenRevocation implements TokenRevocationService

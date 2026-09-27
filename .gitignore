@@ -80,7 +80,6 @@ masterdocs/architecture.txt
 /novacron-api-enhanced
 /cli/novacron
 /backend/cmd/api-server/api-server-improved
-/backend/cmd/core-server/core-server
 /backend/core/cache-monitor
 /backend/core/network/dwcp/test_config_copy_standalone
 /backend/core/network/dwcp/test_escape

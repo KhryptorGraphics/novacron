@@ -81,9 +81,10 @@ export default function UnifiedDashboard() {
     async function loadOverview() {
       try {
         const token = authService.getToken();
-        const metricsResponse = await fetch(buildApiV1Url('/monitoring/metrics'), {
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        });
+        const metricsResponse = await fetch(
+          buildApiV1Url('/monitoring/metrics'),
+          token ? { headers: { Authorization: `Bearer ${token}` } } : {},
+        );
         if (!metricsResponse.ok) {
           throw new Error(`Monitoring request failed with ${metricsResponse.status}`);
         }

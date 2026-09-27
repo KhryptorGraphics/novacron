@@ -82,6 +82,7 @@ type EventBusMetrics struct {
 	EventsReceived    uint64 `json:"events_received"`
 	EventsProcessed   uint64 `json:"events_processed"`
 	EventsFailed      uint64 `json:"events_failed"`
+	EventsDropped     uint64 `json:"events_dropped"` // bounded-queue drops, distinct from handler errors
 	SubscriptionCount int    `json:"subscription_count"`
 	ConnectionUptime  time.Duration `json:"connection_uptime"`
 	LastEventTime     time.Time `json:"last_event_time"`

@@ -101,3 +101,79 @@ func TestConsiderHealingRespectsMaxAttempts(t *testing.T) {
 	// Attempts should remain 2 (not incremented) because max is 2
 	assert.Equal(t, 2, status.RecoveryStatus.Attempts)
 }
+
+func TestHealthSourceDrivesHealingToRealVMController(t *testing.T) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.ErrorLevel)
+	hc := NewDefaultHealingController(logger, events.NewNoopEventBus())
+
+	fake := &fakeVMController{}
+	hc.SetVMController(fake)
+
+	// SetHealthSource wiring is exercised through performHealthChecks (proves
+	// the configured source is actually invoked and its sample reaches
+	// AddSample). The unhealthy verdict that drives healing is asserted via
+	// considerHealing directly, matching TestConsiderHealingRespectsMaxAttempts
+	// above — PhiAccrualFailureDetector.IsHealthy needs MinSamplesForDecision
+	// (5) real-time-spaced samples before it will report unhealthy from a
+	// single boolean sample, which this unit test should not depend on.
+	sourceCalls := 0
+	hc.SetHealthSource(func(id string) (*HealthSample, error) {
+		sourceCalls++
+		return &HealthSample{TargetID: id, Healthy: false, Timestamp: time.Now()}, nil
+	})
+
+	target := &HealingTarget{
+		ID:                "vm-1",
+		Type:              TargetTypeVM,
+		Enabled:           true,
+		HealthCheckConfig: &HealthCheckConfig{FailureThreshold: 1, CheckType: HealthCheckTypeMetrics},
+		RecoveryConfig:    &RecoveryConfig{EnableAutoRecovery: true, MaxRecoveryAttempts: 1},
+	}
+	require.NoError(t, hc.RegisterTarget(target))
+
+	hc.performHealthChecks()
+	assert.Equal(t, 1, sourceCalls, "the configured health source must be invoked")
+
+	status := &HealthStatus{ConsecutiveFailures: 1}
+	assessment := &HealthAssessment{Healthy: false, Reasons: []string{"forced unhealthy for test"}}
+	require.NoError(t, hc.considerHealing(target, status, assessment))
+
+	require.Eventually(t, func() bool {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return len(fake.restartCalls) == 1
+	}, time.Second, 5*time.Millisecond)
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	assert.Equal(t, "vm-1", fake.restartCalls[0])
+}
+
+func TestTriggerHealingManualSelectsRestartForVM(t *testing.T) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.ErrorLevel)
+	hc := NewDefaultHealingController(logger, events.NewNoopEventBus())
+
+	fake := &fakeVMController{}
+	hc.SetVMController(fake)
+
+	target := &HealingTarget{
+		ID:                "vm-1",
+		Type:              TargetTypeVM,
+		Enabled:           true,
+		HealthCheckConfig: &HealthCheckConfig{FailureThreshold: 1, CheckType: HealthCheckTypeMetrics},
+		RecoveryConfig:    &RecoveryConfig{EnableAutoRecovery: true, MaxRecoveryAttempts: 1},
+	}
+	require.NoError(t, hc.RegisterTarget(target))
+
+	decision, err := hc.TriggerHealing("vm-1", "operator")
+	require.NoError(t, err)
+	require.NotNil(t, decision)
+	assert.Equal(t, "restart", decision.Strategy)
+
+	require.Eventually(t, func() bool {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return len(fake.restartCalls) == 1 && fake.restartCalls[0] == "vm-1"
+	}, time.Second, 5*time.Millisecond)
+}

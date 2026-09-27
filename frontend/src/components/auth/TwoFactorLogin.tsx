@@ -8,19 +8,23 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Icons } from '@/components/ui/icons';
 import { useToast } from '@/components/ui/use-toast';
 import { authService } from '@/lib/auth';
+import { useAuth } from '@/hooks/useAuth';
 
+// The pending-2FA temp token lives in useAuth state (set by login()); this
+// component only collects the code.
 interface TwoFactorLoginProps {
-  tempToken: string;
-  onSuccess: (token: string) => void;
+  // Receives the post-login destination path (not a token).
+  onSuccess: (destination: string) => void;
   onCancel: () => void;
 }
 
-export default function TwoFactorLogin({ tempToken, onSuccess, onCancel }: TwoFactorLoginProps) {
+export default function TwoFactorLogin({ onSuccess, onCancel }: TwoFactorLoginProps) {
   const [code, setCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [useBackupCode, setUseBackupCode] = useState(false);
   const { toast } = useToast();
+  const { verify2FA } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,29 +38,17 @@ export default function TwoFactorLogin({ tempToken, onSuccess, onCancel }: TwoFa
     setError(null);
 
     try {
-      // For login flow, we might not have a current user yet, so we'll need to handle this differently
-      // The backend should be able to identify the user from the temp_token
-      const response = await authService.verify2FALogin({
-        user_id: '', // Empty for login flow, backend should derive from temp_token
-        code,
-        is_backup_code: useBackupCode,
-        temp_token: tempToken,
+      // useAuth().verify2FA sends the temp token, applies the full
+      // AuthResponse (token, refresh token, memberships, selected cluster,
+      // session) and resolves where to go next.
+      const destination = await verify2FA(code, useBackupCode);
+
+      toast({
+        title: 'Login Successful',
+        description: 'You have been authenticated successfully.',
       });
 
-      if (response.token) {
-        // Store the real token
-        authService.setToken(response.token, response.user);
-        authService.removeTempToken();
-
-        toast({
-          title: 'Login Successful',
-          description: 'You have been authenticated successfully.',
-        });
-
-        onSuccess(response.token);
-      } else {
-        throw new Error('Authentication failed');
-      }
+      onSuccess(destination);
     } catch (error) {
       console.error('2FA login verification failed:', error);
       const errorMessage = error instanceof Error ? error.message : 'Invalid code. Please try again.';

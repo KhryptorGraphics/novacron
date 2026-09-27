@@ -34,7 +34,7 @@ func BenchmarkVMCreation(b *testing.B) {
 func BenchmarkVMManagerOperations(b *testing.B) {
 	// Create VM manager
 	config := vm.DefaultVMManagerConfig()
-	manager, err := vm.NewVMManagerFixed(config, "benchmark-node")
+	manager, err := vm.NewVMManager(config)
 	if err != nil {
 		b.Fatalf("Failed to create VM manager: %v", err)
 	}
@@ -61,7 +61,7 @@ func BenchmarkVMManagerOperations(b *testing.B) {
 				RootFS:    "/tmp",
 			}
 
-			vm, err := manager.CreateVM(ctx, vmConfig)
+			vm, err := manager.CreateVM(ctx, vm.CreateVMRequest{Name: vmConfig.Name, Spec: vmConfig})
 			if err != nil {
 				b.Fatalf("Failed to create VM: %v", err)
 			}
@@ -84,7 +84,7 @@ func BenchmarkVMManagerOperations(b *testing.B) {
 				MemoryMB:  512,
 				RootFS:    "/tmp",
 			}
-			manager.CreateVM(ctx, vmConfig)
+			manager.CreateVM(ctx, vm.CreateVMRequest{Name: vmConfig.Name, Spec: vmConfig})
 		}
 
 		b.ResetTimer()
@@ -104,7 +104,7 @@ func BenchmarkVMManagerOperations(b *testing.B) {
 // BenchmarkConcurrentVMOperations benchmarks concurrent VM operations
 func BenchmarkConcurrentVMOperations(b *testing.B) {
 	config := vm.DefaultVMManagerConfig()
-	manager, err := vm.NewVMManagerFixed(config, "concurrent-benchmark-node")
+	manager, err := vm.NewVMManager(config)
 	if err != nil {
 		b.Fatalf("Failed to create VM manager: %v", err)
 	}
@@ -130,7 +130,7 @@ func BenchmarkConcurrentVMOperations(b *testing.B) {
 				RootFS:    "/tmp",
 			}
 
-			vm, err := manager.CreateVM(ctx, vmConfig)
+			vm, err := manager.CreateVM(ctx, vm.CreateVMRequest{Name: vmConfig.Name, Spec: vmConfig})
 			if err != nil {
 				b.Errorf("Failed to create VM: %v", err)
 				continue

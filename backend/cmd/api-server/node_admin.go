@@ -145,14 +145,23 @@ type drainCoordinator struct {
 }
 
 func newDrainCoordinator(db *sql.DB, vmManager *core_vm.VMManager, storagePath string, store *transferStore) *drainCoordinator {
-	c := &drainCoordinator{
+	return &drainCoordinator{
 		db:           db,
 		vmManager:    vmManager,
 		storagePath:  storagePath,
 		store:        store,
 		pollInterval: drainPollInterval,
+		candidates:   migrationCandidatesFunc(vmManager, storagePath, db),
 	}
-	c.candidates = func(excludeNode string) []drainCandidate {
+}
+
+// migrationCandidatesFunc builds the reachable-peer candidate list drain and
+// healing migrations both place onto: nodeProfiles filtered to REACHABLE
+// peers other than excludeNode. Deliberately not allNodeCapacities/placeVM:
+// their list starts with the local node, whose own MigrationPeers() entry is
+// empty.
+func migrationCandidatesFunc(vmManager *core_vm.VMManager, storagePath string, db *sql.DB) func(excludeNode string) []drainCandidate {
+	return func(excludeNode string) []drainCandidate {
 		var out []drainCandidate
 		for _, n := range nodeProfiles(vmManager, storagePath, db) {
 			if !n.Reachable || n.NodeID == excludeNode {
@@ -170,7 +179,6 @@ func newDrainCoordinator(db *sql.DB, vmManager *core_vm.VMManager, storagePath s
 		}
 		return out
 	}
-	return c
 }
 
 // --- DB helpers ------------------------------------------------------------
@@ -262,38 +270,44 @@ func transferInFlightFor(store *transferStore, vmID string) bool {
 	return false
 }
 
-// queueDrainTransfer admits one migration transfer for a drained VM. Mirrors
-// the /transfers route's guards that don't need an HTTP request (peer holds a
-// real addr; VM exists on this node).
-func (c *drainCoordinator) queueDrainTransfer(vm drainVM, targetNode string) (string, error) {
-	store := c.transferStoreFor()
-	if transferInFlightFor(store, vm.ID) {
+// queueMigrationTransfer admits one migration transfer for vmID to target,
+// shared by node drain and VM healing. Mirrors the /transfers route's
+// guards that don't need an HTTP request (peer holds a real addr; VM exists
+// on this node); a VM with an in-flight transfer already moving it is a
+// no-op duplicate (errDrainDuplicate), not a second admission.
+func queueMigrationTransfer(store *transferStore, vmManager *core_vm.VMManager, vmID string, memoryMB int64, targetNode, reason string) (string, error) {
+	if transferInFlightFor(store, vmID) {
 		return "", errDrainDuplicate
 	}
-	if _, err := c.vmManager.GetVM(vm.ID); err != nil {
-		return "", fmt.Errorf("vm %s not managed by this node: %w", vm.ID, err)
+	if _, err := vmManager.GetVM(vmID); err != nil {
+		return "", fmt.Errorf("vm %s not managed by this node: %w", vmID, err)
 	}
-	if c.vmManager.MigrationPeers()[targetNode] == "" {
+	if vmManager.MigrationPeers()[targetNode] == "" {
 		return "", fmt.Errorf("target node %q is not a registered peer", targetNode)
 	}
-	bytesEst := vm.MemoryMB << 20
+	bytesEst := memoryMB << 20
 	if bytesEst <= 0 {
 		bytesEst = 1 << 20
 	}
 	t := &fabricTransfer{
 		ID:             uuid.NewString(),
 		Kind:           "migration",
-		VMID:           vm.ID,
+		VMID:           vmID,
 		TargetNode:     targetNode,
 		BytesEstimated: bytesEst,
 		CreatedAt:      time.Now().UTC(),
-		Decision: transferDecisionInputs{
-			Reason: fmt.Sprintf("node drain of %s — target auto-picked by median-bandwidth placement", selfNodeID()),
-		},
+		Decision:       transferDecisionInputs{Reason: reason},
 	}
 	store.admit(t)
 	snapshot, _ := store.get(t.ID)
 	return snapshot.ID, nil
+}
+
+// queueDrainTransfer admits one migration transfer for a drained VM: the
+// node-drain caller of queueMigrationTransfer.
+func (c *drainCoordinator) queueDrainTransfer(vm drainVM, targetNode string) (string, error) {
+	reason := fmt.Sprintf("node drain of %s — target auto-picked by median-bandwidth placement", selfNodeID())
+	return queueMigrationTransfer(c.transferStoreFor(), c.vmManager, vm.ID, vm.MemoryMB, targetNode, reason)
 }
 
 var errDrainDuplicate = fmt.Errorf("transfer already in flight for this vm")

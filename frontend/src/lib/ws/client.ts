@@ -15,28 +15,20 @@ function getAuthToken(): string | null {
 }
 
 /**
- * Connect to WebSocket with authentication
+ * Connect to WebSocket with authentication. The token travels as a
+ * `Sec-WebSocket-Protocol: bearer, <token>` negotiation (never a `?token=`
+ * query param, which would leak into proxy access logs) because browsers
+ * cannot set an Authorization header on a WebSocket handshake.
  */
 export function connectEvents(onWelcome?: (msg: unknown) => void): WebSocket {
   try {
-    // Get auth token and add to URL
     const token = getAuthToken();
-    const baseUrl = buildWebSocketUrls(EVENT_STREAM_PATH)[0] || WS_URL;
-    const wsUrl = token ? `${baseUrl}?token=${encodeURIComponent(token)}` : baseUrl;
-
-    const ws = new WebSocket(wsUrl);
+    const wsUrl = buildWebSocketUrls(EVENT_STREAM_PATH)[0] || WS_URL;
+    const ws = token ? new WebSocket(wsUrl, ['bearer', token]) : new WebSocket(wsUrl);
     let first = true;
 
     ws.addEventListener('open', () => {
       console.log('WS connected');
-
-      // Send authentication message if token exists
-      if (token) {
-        ws.send(JSON.stringify({
-          type: 'auth',
-          token
-        }));
-      }
     });
 
     ws.addEventListener('error', (error) => console.warn('WS error:', error));

@@ -4,35 +4,31 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
-	"strings"
 	"time"
 )
 
 // SecurityConfiguration holds all security service configurations
 type SecurityConfiguration struct {
-	JWT                JWTConfiguration
-	PasswordSecurity   PasswordSecurityConfig
-	Encryption         EncryptionConfig
-	SecurityMiddleware SecurityConfig
-	OAuth2             map[string]OAuth2Config // Provider name -> config
-	Compliance         bool
-	ZeroTrust          bool
-	AuditLogging       bool
+	JWT              JWTConfiguration
+	PasswordSecurity PasswordSecurityConfig
+	Encryption       EncryptionConfig
+	OAuth2           map[string]OAuth2Config // Provider name -> config
+	Compliance       bool
+	ZeroTrust        bool
+	AuditLogging     bool
 }
 
 // SecurityManager manages all security services
 type SecurityManager struct {
-	jwtService         *JWTService
-	passwordService    *PasswordSecurityService
-	encryptionService  *EncryptionService
-	securityMiddleware *SecurityMiddleware
-	oauth2Services     map[string]*OAuth2Service
-	complianceService  *ComplianceService
-	ztNetworkService   *ZeroTrustNetworkService
-	authService        AuthService
-	auditService       AuditService
-	config             SecurityConfiguration
+	jwtService        *JWTService
+	passwordService   *PasswordSecurityService
+	encryptionService *EncryptionService
+	oauth2Services    map[string]*OAuth2Service
+	complianceService *ComplianceService
+	ztNetworkService  *ZeroTrustNetworkService
+	authService       AuthService
+	auditService      AuditService
+	config            SecurityConfiguration
 }
 
 // NewSecurityManager creates a new security manager with all services
@@ -48,9 +44,6 @@ func NewSecurityManager(config SecurityConfiguration, authService AuthService) (
 
 	// Initialize password security service
 	passwordService := NewPasswordSecurityService(config.PasswordSecurity)
-
-	// Initialize security middleware
-	securityMiddleware := NewSecurityMiddleware(config.SecurityMiddleware, auditService, encryptionService)
 
 	// Initialize OAuth2 services
 	oauth2Services := make(map[string]*OAuth2Service)
@@ -89,22 +82,16 @@ func NewSecurityManager(config SecurityConfiguration, authService AuthService) (
 	}
 
 	return &SecurityManager{
-		jwtService:         jwtService,
-		passwordService:    passwordService,
-		encryptionService:  encryptionService,
-		securityMiddleware: securityMiddleware,
-		oauth2Services:     oauth2Services,
-		complianceService:  complianceService,
-		ztNetworkService:   ztNetworkService,
-		authService:        authService,
-		auditService:       auditService,
-		config:             config,
+		jwtService:        jwtService,
+		passwordService:   passwordService,
+		encryptionService: encryptionService,
+		oauth2Services:    oauth2Services,
+		complianceService: complianceService,
+		ztNetworkService:  ztNetworkService,
+		authService:       authService,
+		auditService:      auditService,
+		config:            config,
 	}, nil
-}
-
-// GetSecurityMiddleware returns the security middleware for HTTP integration
-func (sm *SecurityManager) GetSecurityMiddleware() func(http.Handler) http.Handler {
-	return sm.securityMiddleware.Middleware(sm.authService)
 }
 
 // AuthenticateWithJWT authenticates a user and returns JWT tokens
@@ -400,9 +387,6 @@ func (sm *SecurityManager) CleanupExpiredTokens() {
 		oauth2Service.CleanupExpiredStates()
 	}
 
-	// Cleanup rate limiting entries
-	sm.securityMiddleware.CleanupRateLimits()
-
 	// Rotate encryption keys if needed
 	sm.encryptionService.RotateKeys()
 
@@ -556,116 +540,14 @@ func DefaultSecurityConfiguration() (SecurityConfiguration, error) {
 	oauth2Configs := GetProviderConfigs()
 
 	return SecurityConfiguration{
-		JWT:                jwtConfig,
-		PasswordSecurity:   DefaultPasswordSecurityConfig(),
-		Encryption:         DefaultEncryptionConfig(),
-		SecurityMiddleware: DefaultSecurityConfig(),
-		OAuth2:             oauth2Configs,
-		Compliance:         true,
-		ZeroTrust:          true,
-		AuditLogging:       true,
+		JWT:              jwtConfig,
+		PasswordSecurity: DefaultPasswordSecurityConfig(),
+		Encryption:       DefaultEncryptionConfig(),
+		OAuth2:           oauth2Configs,
+		Compliance:       true,
+		ZeroTrust:        true,
+		AuditLogging:     true,
 	}, nil
-}
-
-// SecureHTTPHandler wraps an HTTP handler with comprehensive security
-func (sm *SecurityManager) SecureHTTPHandler(handler http.Handler) http.Handler {
-	return sm.GetSecurityMiddleware()(handler)
-}
-
-// ExtractUserFromContext extracts user information from security context
-func (sm *SecurityManager) ExtractUserFromContext(ctx context.Context) (*User, error) {
-	secCtx, exists := GetSecurityContext(ctx)
-	if !exists || secCtx.UserID == "" {
-		return nil, fmt.Errorf("no authenticated user in context")
-	}
-
-	return sm.authService.(*AuthServiceImpl).users.Get(secCtx.UserID)
-}
-
-// RequirePermission creates a middleware that requires specific permissions
-func (sm *SecurityManager) RequirePermission(resource, action string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			secCtx, exists := GetSecurityContext(r.Context())
-			if !exists || secCtx.UserID == "" {
-				http.Error(w, "Authentication required", http.StatusUnauthorized)
-				return
-			}
-
-			// Check if user has required permission
-			permissionStr := fmt.Sprintf("%s:%s", resource, action)
-			for _, perm := range secCtx.Permissions {
-				if perm == permissionStr || perm == "*:*" {
-					next.ServeHTTP(w, r)
-					return
-				}
-			}
-
-			// Check with auth service as fallback
-			hasPermission, err := sm.authService.HasPermission(secCtx.UserID, resource, action)
-			if err != nil || !hasPermission {
-				sm.auditService.LogAccess(&AuditEntry{
-					UserID:       secCtx.UserID,
-					TenantID:     secCtx.TenantID,
-					ResourceType: resource,
-					ResourceID:   r.URL.Path,
-					Action:       "permission_denied",
-					Success:      false,
-					Reason:       fmt.Sprintf("Missing permission: %s:%s", resource, action),
-					Timestamp:    time.Now(),
-					IPAddress:    secCtx.ClientIP,
-				})
-				http.Error(w, "Insufficient permissions", http.StatusForbidden)
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// RequireRole creates a middleware that requires specific roles
-func (sm *SecurityManager) RequireRole(requiredRoles ...string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			secCtx, exists := GetSecurityContext(r.Context())
-			if !exists || secCtx.UserID == "" {
-				http.Error(w, "Authentication required", http.StatusUnauthorized)
-				return
-			}
-
-			// Get user roles
-			userRoles, err := sm.authService.GetUserRoles(secCtx.UserID)
-			if err != nil {
-				http.Error(w, "Failed to get user roles", http.StatusInternalServerError)
-				return
-			}
-
-			// Check if user has any of the required roles
-			for _, userRole := range userRoles {
-				for _, requiredRole := range requiredRoles {
-					if userRole.Name == requiredRole || userRole.Name == "admin" {
-						next.ServeHTTP(w, r)
-						return
-					}
-				}
-			}
-
-			sm.auditService.LogAccess(&AuditEntry{
-				UserID:       secCtx.UserID,
-				TenantID:     secCtx.TenantID,
-				ResourceType: "role",
-				ResourceID:   strings.Join(requiredRoles, ","),
-				Action:       "role_denied",
-				Success:      false,
-				Reason:       fmt.Sprintf("Missing required roles: %v", requiredRoles),
-				Timestamp:    time.Now(),
-				IPAddress:    secCtx.ClientIP,
-			})
-
-			http.Error(w, "Insufficient role privileges", http.StatusForbidden)
-		})
-	}
 }
 
 // LogSecurityEvent logs a security event through the audit service

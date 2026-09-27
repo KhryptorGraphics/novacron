@@ -6,7 +6,6 @@ packages:
   - "./backend/core/auth"
   - "./backend/core/vm"
   - "./backend/core/cache"
-  - "./backend/api/rest"
   - "./backend/pkg/logger"
 
 # Files to exclude from mutation testing
@@ -191,11 +190,6 @@ package_config:
   "backend/core/vm":
     min_mutation_score: 85
     timeout: "60s"        # VM operations may take longer
-  
-  "backend/api/rest":
-    min_mutation_score: 80
-    mutations:
-      function_call: false # Don't modify API function calls
   
   # Less critical packages
   "backend/pkg/logger":

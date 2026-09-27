@@ -17,7 +17,7 @@ func TestResolverVolumeLifecycleUsesStorageManager(t *testing.T) {
 		t.Fatalf("create storage manager: %v", err)
 	}
 
-	resolver := NewResolverWithVolumeStore(nil, nil, store)
+	resolver := NewResolverWithVolumeStore(store)
 	vmID := "vm-123"
 
 	created, err := resolver.CreateVolume(context.Background(), struct{ Input CreateVolumeInput }{
@@ -92,7 +92,7 @@ func TestResolverVolumesPagination(t *testing.T) {
 		t.Fatalf("create storage manager: %v", err)
 	}
 
-	resolver := NewResolverWithVolumeStore(nil, nil, store)
+	resolver := NewResolverWithVolumeStore(store)
 	ctx := context.Background()
 
 	for _, name := range []string{"vol-a", "vol-b", "vol-c"} {
@@ -132,7 +132,7 @@ func TestResolverVolumesPagination(t *testing.T) {
 func TestResolverVolumeOperationsRequireStore(t *testing.T) {
 	t.Parallel()
 
-	resolver := NewResolver(nil, nil)
+	resolver := NewResolver()
 
 	_, err := resolver.Volumes(context.Background(), struct{ Pagination *PaginationInput }{})
 	if err == nil {

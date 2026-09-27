@@ -25,7 +25,7 @@ interface AuthContextType {
   hasClusterAccess: boolean;
   login: (email: string, password: string) => Promise<string | null>;
   logout: () => Promise<void>;
-  verify2FA: (code: string) => Promise<string>;
+  verify2FA: (code: string, isBackupCode?: boolean) => Promise<string>;
   selectCluster: (clusterId: string) => Promise<string>;
 }
 
@@ -118,7 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return authService.resolvePostLoginPath(response.memberships, response.selectedCluster);
   };
 
-  const verify2FA = async (code: string) => {
+  const verify2FA = async (code: string, isBackupCode = false) => {
     if (!tempToken) {
       throw new Error('No temporary token available');
     }
@@ -126,6 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const response = await authService.verify2FALogin({
       user_id: '',
       code,
+      is_backup_code: isBackupCode,
       temp_token: tempToken,
     });
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -43,6 +44,19 @@ var (
 	}, []string{"endpoint"})
 )
 
+// AllowedOrigins configures the browser Origins permitted to open a
+// cross-origin WebSocket connection (mirrors cfg.CORS.AllowedOrigins /
+// buildCORSHandler's "*" convention). Passed as a NewWebSocketHandler dep.
+type AllowedOrigins []string
+
+// MetricsProvider returns one host-metrics sample, or nil when unavailable.
+// Passed as a NewWebSocketHandler dep.
+type MetricsProvider func() map[string]interface{}
+
+// MetricsInterval overrides the default metrics broadcast cadence. Passed as
+// a NewWebSocketHandler dep.
+type MetricsInterval time.Duration
+
 // WebSocketHandler manages WebSocket connections for real-time features
 type WebSocketHandler struct {
 	vmManager      vmLookup
@@ -50,6 +64,17 @@ type WebSocketHandler struct {
 	logger         *logrus.Logger
 
 	upgrader websocket.Upgrader
+
+	allowedOrigins  []string
+	metricsProvider MetricsProvider
+	metricsInterval time.Duration // sampling cadence for the shared cache below
+
+	// metricsCache holds the one shared sample every metrics client's own
+	// pump reads at its own interval (per Resolution (a): per-client
+	// interval/sources semantics are kept; only alerts/logs use broadcast
+	// fan-out).
+	metricsCacheMu sync.RWMutex
+	metricsCache   map[string]interface{}
 
 	// Connection pools
 	consoleClients map[string][]*WebSocketClient
@@ -59,10 +84,10 @@ type WebSocketHandler struct {
 
 	clientsMutex sync.RWMutex
 
-	// Broadcasting channels
-	metricsBroadcast chan MetricsMessage
-	alertsBroadcast  chan AlertMessage
-	logsBroadcast    chan LogMessage
+	// Broadcasting channels (alerts/logs only — metrics uses the per-client
+	// paced metricsWritePump + shared cache below instead; see Resolution (a)).
+	alertsBroadcast chan AlertMessage
+	logsBroadcast   chan LogMessage
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -83,15 +108,28 @@ type WebSocketClient struct {
 	ID           string
 	Connection   *websocket.Conn
 	ClientType   string
-	Filters      map[string]interface{}
+	Filters      map[string]interface{} // access ONLY via getFilters/setFilters below (read/written across pump + broadcast goroutines)
 	LastActivity time.Time
 	ConnectedAt  time.Time
 	UserID       string
 	Roles        []string
 
-	send   chan []byte
-	ctx    context.Context
-	cancel context.CancelFunc
+	filtersMu sync.RWMutex
+	send      chan []byte
+	ctx       context.Context
+	cancel    context.CancelFunc
+}
+
+func (c *WebSocketClient) getFilters() map[string]interface{} {
+	c.filtersMu.RLock()
+	defer c.filtersMu.RUnlock()
+	return c.Filters
+}
+
+func (c *WebSocketClient) setFilters(f map[string]interface{}) {
+	c.filtersMu.Lock()
+	defer c.filtersMu.Unlock()
+	c.Filters = f
 }
 
 // ConsoleMessage represents console output message
@@ -112,17 +150,24 @@ type MetricsMessage struct {
 	Labels    map[string]string      `json:"labels,omitempty"`
 }
 
-// AlertMessage represents alert notification message
+// AlertMessage represents an alert notification message. Shape matches
+// frontend/src/lib/ws/useAdminWebSocket.ts's AdminWebSocketMessage contract:
+// {type, data, timestamp}. Type is one of useAdminWebSocket's union; Data
+// carries the type-specific payload it reads (e.g. data.severity/data.title
+// for "security_alert", data.id/data.status/data.previous_status for
+// "vm_status").
 type AlertMessage struct {
-	Type        string                 `json:"type"`
-	AlertID     string                 `json:"alert_id"`
-	Severity    string                 `json:"severity"`
-	Title       string                 `json:"title"`
-	Description string                 `json:"description"`
-	Source      string                 `json:"source"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Labels      map[string]string      `json:"labels,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	Type      string                 `json:"type"`
+	Data      map[string]interface{} `json:"data"`
+	Timestamp time.Time              `json:"timestamp"`
+}
+
+// VMStatusMessage is PublishVMStatus's typed input.
+type VMStatusMessage struct {
+	ID             string `json:"id"`
+	Name           string `json:"name,omitempty"`
+	Status         string `json:"status"`
+	PreviousStatus string `json:"previous_status,omitempty"`
 }
 
 // LogMessage represents log streaming message
@@ -151,9 +196,25 @@ type WebSocketMessage struct {
 func NewWebSocketHandler(vmManager vmLookup, consoleManager consoleService, deps ...interface{}) *WebSocketHandler {
 	ctx, cancel := context.WithCancel(context.Background())
 	var logger *logrus.Logger
+	var allowedOrigins []string
+	var metricsProvider MetricsProvider
+	metricsInterval := 5 * time.Second
 	for _, dependency := range deps {
-		if candidate, ok := dependency.(*logrus.Logger); ok && candidate != nil {
-			logger = candidate
+		switch candidate := dependency.(type) {
+		case *logrus.Logger:
+			if candidate != nil {
+				logger = candidate
+			}
+		case AllowedOrigins:
+			allowedOrigins = []string(candidate)
+		case MetricsProvider:
+			if candidate != nil {
+				metricsProvider = candidate
+			}
+		case MetricsInterval:
+			if candidate > 0 {
+				metricsInterval = time.Duration(candidate)
+			}
 		}
 	}
 	if logger == nil {
@@ -165,13 +226,19 @@ func NewWebSocketHandler(vmManager vmLookup, consoleManager consoleService, deps
 		consoleManager: consoleManager,
 		logger:         logger,
 
+		allowedOrigins:  allowedOrigins,
+		metricsProvider: metricsProvider,
+		metricsInterval: metricsInterval,
+
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
-			CheckOrigin: func(r *http.Request) bool {
-				// In production, implement proper origin checking
-				return true
-			},
+			// "bearer" lets a browser WebSocket handshake (which cannot set an
+			// Authorization header) authenticate via
+			// `Sec-WebSocket-Protocol: bearer, <token>` instead; the caller's
+			// auth middleware validates the token and this upgrader echoes the
+			// subprotocol back so the browser accepts the handshake.
+			Subprotocols: []string{"bearer"},
 		},
 
 		consoleClients: make(map[string][]*WebSocketClient),
@@ -179,19 +246,49 @@ func NewWebSocketHandler(vmManager vmLookup, consoleManager consoleService, deps
 		alertClients:   make([]*WebSocketClient, 0),
 		logClients:     make(map[string][]*WebSocketClient),
 
-		metricsBroadcast: make(chan MetricsMessage, 100),
-		alertsBroadcast:  make(chan AlertMessage, 100),
+		alertsBroadcast: make(chan AlertMessage, 100),
 		logsBroadcast:    make(chan LogMessage, 100),
 
 		ctx:    ctx,
 		cancel: cancel,
 	}
+	handler.upgrader.CheckOrigin = handler.checkOrigin
 
 	// Start background workers
 	go handler.broadcastWorker()
 	go handler.cleanupWorker()
+	go handler.metricsProducerLoop()
 
 	return handler
+}
+
+// checkOrigin rejects cross-site WebSocket hijacking (CSWSH): requests
+// without an Origin header (non-browser clients) and same-origin requests are
+// allowed; everything else must appear in the configured allowedOrigins list
+// (or that list must contain "*", matching buildCORSHandler's convention).
+func (h *WebSocketHandler) checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	o, err := url.Parse(origin)
+	if err != nil || o.Host == "" {
+		return false
+	}
+	if strings.EqualFold(o.Host, r.Host) {
+		return true
+	}
+	for _, allowed := range h.allowedOrigins {
+		allowed = strings.TrimSpace(allowed)
+		if allowed == "*" || strings.EqualFold(allowed, origin) {
+			return true
+		}
+		if a, err := url.Parse(allowed); err == nil && a.Host != "" &&
+			strings.EqualFold(a.Scheme, o.Scheme) && strings.EqualFold(a.Host, o.Host) {
+			return true
+		}
+	}
+	return false
 }
 
 // RegisterWebSocketRoutes registers WebSocket API routes
@@ -428,7 +525,7 @@ func (h *WebSocketHandler) HandleAlertsWebSocket(w http.ResponseWriter, r *http.
 	}).Info("Alerts WebSocket client connected")
 
 	// Start client handlers
-	go h.alertsWritePump(client)
+	go h.genericWritePump(client, "alerts")
 	go h.alertsReadPump(client)
 }
 
@@ -567,7 +664,7 @@ func (h *WebSocketHandler) handleLogsWebSocket(w http.ResponseWriter, r *http.Re
 	}).Info("Logs WebSocket client connected")
 
 	// Start client handlers
-	go h.logsWritePump(client, source)
+	go h.genericWritePump(client, "logs")
 	go h.logsReadPump(client, source)
 }
 
@@ -609,7 +706,7 @@ func (h *WebSocketHandler) removeClient(client *WebSocketClient) {
 
 	switch client.ClientType {
 	case "console":
-		vmID, ok := client.Filters["vm_id"].(string)
+		vmID, ok := client.getFilters()["vm_id"].(string)
 		if ok {
 			clients := h.consoleClients[vmID]
 			for i, c := range clients {
@@ -643,7 +740,7 @@ func (h *WebSocketHandler) removeClient(client *WebSocketClient) {
 		activeConnections.WithLabelValues("alerts", "notification").Dec()
 
 	case "logs":
-		source, ok := client.Filters["source"].(string)
+		source, ok := client.getFilters()["source"].(string)
 		if ok {
 			clients := h.logClients[source]
 			for i, c := range clients {
@@ -780,69 +877,12 @@ func (h *WebSocketHandler) metricsReadPump(client *WebSocketClient) {
 			var controlMsg WebSocketMessage
 			if err := json.Unmarshal(message, &controlMsg); err == nil {
 				if controlMsg.Type == "update_filters" {
-					client.Filters = controlMsg.Filters
+				client.setFilters(controlMsg.Filters)
 				}
 			}
 
 			messagesReceived.WithLabelValues("metrics", "control").Inc()
 			client.LastActivity = time.Now()
-		}
-	}
-}
-
-func (h *WebSocketHandler) metricsWritePump(client *WebSocketClient) {
-	ticker := time.NewTicker(54 * time.Second)
-	interval := 5 // default
-	if intervalVal, ok := client.Filters["interval"].(int); ok {
-		if intervalVal >= 1 && intervalVal <= 300 {
-			interval = intervalVal
-		}
-	}
-	metricsTicker := time.NewTicker(time.Duration(interval) * time.Second)
-
-	defer func() {
-		ticker.Stop()
-		metricsTicker.Stop()
-		client.Connection.Close()
-	}()
-
-	for {
-		select {
-		case <-client.ctx.Done():
-			return
-
-		case <-metricsTicker.C:
-			// Collect and send metrics
-			sources, _ := client.Filters["sources"].([]string)
-			metrics := h.collectMetrics(sources)
-
-			msg := MetricsMessage{
-				Type:      "metrics_update",
-				Source:    "system",
-				Metrics:   metrics,
-				Timestamp: time.Now(),
-			}
-
-			data, _ := json.Marshal(msg)
-			select {
-			case client.send <- data:
-				messagesSent.WithLabelValues("metrics", "update").Inc()
-			default:
-				close(client.send)
-				return
-			}
-
-		case message := <-client.send:
-			client.Connection.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := client.Connection.WriteMessage(websocket.TextMessage, message); err != nil {
-				return
-			}
-
-		case <-ticker.C:
-			client.Connection.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := client.Connection.WriteMessage(websocket.PingMessage, nil); err != nil {
-				return
-			}
 		}
 	}
 }
@@ -879,52 +919,12 @@ func (h *WebSocketHandler) alertsReadPump(client *WebSocketClient) {
 			var controlMsg WebSocketMessage
 			if err := json.Unmarshal(message, &controlMsg); err == nil {
 				if controlMsg.Type == "update_filters" {
-					client.Filters = controlMsg.Filters
+					client.setFilters(controlMsg.Filters)
 				}
 			}
 
 			messagesReceived.WithLabelValues("alerts", "control").Inc()
 			client.LastActivity = time.Now()
-		}
-	}
-}
-
-func (h *WebSocketHandler) alertsWritePump(client *WebSocketClient) {
-	ticker := time.NewTicker(54 * time.Second)
-	defer func() {
-		ticker.Stop()
-		client.Connection.Close()
-	}()
-
-	for {
-		select {
-		case <-client.ctx.Done():
-			return
-
-		case alert := <-h.alertsBroadcast:
-			// Apply filters
-			if h.matchesAlertFilters(alert, client.Filters) {
-				data, _ := json.Marshal(alert)
-				select {
-				case client.send <- data:
-					messagesSent.WithLabelValues("alerts", "notification").Inc()
-				default:
-					close(client.send)
-					return
-				}
-			}
-
-		case message := <-client.send:
-			client.Connection.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := client.Connection.WriteMessage(websocket.TextMessage, message); err != nil {
-				return
-			}
-
-		case <-ticker.C:
-			client.Connection.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := client.Connection.WriteMessage(websocket.PingMessage, nil); err != nil {
-				return
-			}
 		}
 	}
 }
@@ -961,7 +961,7 @@ func (h *WebSocketHandler) logsReadPump(client *WebSocketClient, source string) 
 			var controlMsg WebSocketMessage
 			if err := json.Unmarshal(message, &controlMsg); err == nil {
 				if controlMsg.Type == "update_filters" {
-					client.Filters = controlMsg.Filters
+					client.setFilters(controlMsg.Filters)
 				}
 			}
 
@@ -971,37 +971,28 @@ func (h *WebSocketHandler) logsReadPump(client *WebSocketClient, source string) 
 	}
 }
 
-func (h *WebSocketHandler) logsWritePump(client *WebSocketClient, source string) {
+
+// genericWritePump is the shared write loop for metrics/alerts/logs clients:
+// drain client.send (fed exclusively by the fan-out in broadcastTo*Clients,
+// itself fed exclusively by broadcastWorker) and ping on an idle timer. The
+// per-channel broadcast reads that used to compete with this loop for
+// h.metricsBroadcast/h.alertsBroadcast/h.logsBroadcast are gone — those
+// channels now have exactly one consumer (broadcastWorker).
+func (h *WebSocketHandler) genericWritePump(client *WebSocketClient, endpoint string) {
 	ticker := time.NewTicker(54 * time.Second)
 	defer func() {
 		ticker.Stop()
 		client.Connection.Close()
 	}()
-
 	for {
 		select {
 		case <-client.ctx.Done():
 			return
-
-		case logMsg := <-h.logsBroadcast:
-			// Apply filters
-			if h.matchesLogFilters(logMsg, source, client.Filters) {
-				data, _ := json.Marshal(logMsg)
-				select {
-				case client.send <- data:
-					messagesSent.WithLabelValues("logs", "entry").Inc()
-				default:
-					close(client.send)
-					return
-				}
-			}
-
 		case message := <-client.send:
 			client.Connection.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := client.Connection.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
-
 		case <-ticker.C:
 			client.Connection.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := client.Connection.WriteMessage(websocket.PingMessage, nil); err != nil {
@@ -1010,14 +1001,11 @@ func (h *WebSocketHandler) logsWritePump(client *WebSocketClient, source string)
 		}
 	}
 }
-
 func (h *WebSocketHandler) broadcastWorker() {
 	for {
 		select {
 		case <-h.ctx.Done():
 			return
-		case metric := <-h.metricsBroadcast:
-			h.broadcastToMetricsClients(metric)
 		case alert := <-h.alertsBroadcast:
 			h.broadcastToAlertClients(alert)
 		case logMsg := <-h.logsBroadcast:
@@ -1120,36 +1108,143 @@ func (h *WebSocketHandler) parseIntWithDefault(str string, defaultVal int) int {
 	return defaultVal
 }
 
-func (h *WebSocketHandler) collectMetrics(sources []string) map[string]interface{} {
-	result := make(map[string]interface{})
+// sampleMetrics reads the injected provider. A nil provider, or one that
+// returns nil, yields status "no_data" — never fabricated zeros.
+func (h *WebSocketHandler) sampleMetrics() map[string]interface{} {
+	if h.metricsProvider == nil {
+		return map[string]interface{}{"timestamp": time.Now().UnixMilli(), "status": "no_data"}
+	}
+	sample := h.metricsProvider()
+	if sample == nil {
+		return map[string]interface{}{"timestamp": time.Now().UnixMilli(), "status": "no_data"}
+	}
+	return sample
+}
 
-	// If no specific sources requested, collect common metrics
+// currentMetrics returns a shallow copy of the shared cached sample (never
+// mutated by callers, so a copy avoids any cross-client aliasing).
+func (h *WebSocketHandler) currentMetrics() map[string]interface{} {
+	h.metricsCacheMu.RLock()
+	defer h.metricsCacheMu.RUnlock()
+	if h.metricsCache == nil {
+		return map[string]interface{}{"timestamp": time.Now().UnixMilli(), "status": "no_data"}
+	}
+	out := make(map[string]interface{}, len(h.metricsCache))
+	for k, v := range h.metricsCache {
+		out[k] = v
+	}
+	return out
+}
+
+// filterMetrics narrows sample to the requested sources when any are given.
+// Host-level snapshots aren't naturally source-keyed, so an unmatched source
+// name is simply absent rather than an error; if NONE of the requested
+// sources match anything in the sample, the unfiltered sample is returned
+// rather than silently emptying the response.
+func filterMetrics(sample map[string]interface{}, sources []string) map[string]interface{} {
 	if len(sources) == 0 {
-		sources = []string{"cpu_usage", "memory_usage", "disk_usage", "network_io", "bandwidth", "qos"}
+		return sample
 	}
-
-	// Add current timestamp
-	result["timestamp"] = time.Now().UnixMilli()
-
-	// If no real metrics found, return some system metrics
-	if len(result) <= 1 {
-		// Fall back to basic system info if registry is empty
-		result["cpu_usage"] = 0.0
-		result["memory_usage"] = 0.0
-		result["disk_usage"] = 0.0
-		result["network_io"] = 0.0
-		result["status"] = "no_data"
+	out := map[string]interface{}{}
+	if ts, ok := sample["timestamp"]; ok {
+		out["timestamp"] = ts
 	}
+	if st, ok := sample["status"]; ok {
+		out["status"] = st
+	}
+	matched := false
+	for _, s := range sources {
+		if v, ok := sample[s]; ok {
+			out[s] = v
+			matched = true
+		}
+	}
+	if !matched {
+		return sample
+	}
+	return out
+}
 
-	return result
+// metricsProducerLoop keeps the shared metricsCache fresh. Each connected
+// metrics client's own metricsWritePump reads it independently, at its own
+// configured interval, filtered to its own requested sources (Resolution
+// (a): per-client interval/sources semantics are kept; only alerts/logs use
+// broadcast fan-out).
+func (h *WebSocketHandler) metricsProducerLoop() {
+	ticker := time.NewTicker(h.metricsInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-h.ctx.Done():
+			return
+		case <-ticker.C:
+			sample := h.sampleMetrics()
+			h.metricsCacheMu.Lock()
+			h.metricsCache = sample
+			h.metricsCacheMu.Unlock()
+		}
+	}
+}
+
+// metricsWritePump is the metrics endpoint's own per-client write loop:
+// unlike alerts/logs (broadcast fan-out via genericWritePump), each metrics
+// client reads the shared cache at its OWN configured interval (1-300s,
+// default 5) and applies its OWN requested source filter.
+func (h *WebSocketHandler) metricsWritePump(client *WebSocketClient) {
+	interval := 5
+	filters := client.getFilters()
+	sources, _ := filters["sources"].([]string)
+	if iv, ok := filters["interval"].(int); ok && iv >= 1 && iv <= 300 {
+		interval = iv
+	}
+	metricsTicker := time.NewTicker(time.Duration(interval) * time.Second)
+	pingTicker := time.NewTicker(54 * time.Second)
+	defer func() {
+		metricsTicker.Stop()
+		pingTicker.Stop()
+		client.Connection.Close()
+	}()
+
+	for {
+		select {
+		case <-client.ctx.Done():
+			return
+		case <-metricsTicker.C:
+			msg := MetricsMessage{Type: "metric", Source: "system", Metrics: filterMetrics(h.currentMetrics(), sources), Timestamp: time.Now()}
+			data, err := json.Marshal(msg)
+			if err != nil {
+				h.logger.WithError(err).Error("marshal metrics message")
+				continue
+			}
+			select {
+			case client.send <- data:
+				messagesSent.WithLabelValues("metrics", "update").Inc()
+			default:
+				h.logger.WithField("client_id", client.ID).Warn("client send queue full; disconnecting slow client")
+				client.cancel()
+				return
+			}
+		case message := <-client.send:
+			client.Connection.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := client.Connection.WriteMessage(websocket.TextMessage, message); err != nil {
+				return
+			}
+		case <-pingTicker.C:
+			client.Connection.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := client.Connection.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
 }
 
 func (h *WebSocketHandler) matchesAlertFilters(alert AlertMessage, filters map[string]interface{}) bool {
+	severity, _ := alert.Data["severity"].(string)
 	severities, ok := filters["severities"].([]string)
 	if ok && len(severities) > 0 {
 		found := false
 		for _, sev := range severities {
-			if sev == alert.Severity {
+			if sev == severity {
 				found = true
 				break
 			}
@@ -1159,11 +1254,12 @@ func (h *WebSocketHandler) matchesAlertFilters(alert AlertMessage, filters map[s
 		}
 	}
 
+	source, _ := alert.Data["source"].(string)
 	sources, ok := filters["sources"].([]string)
 	if ok && len(sources) > 0 {
 		found := false
 		for _, src := range sources {
-			if src == alert.Source {
+			if src == source {
 				found = true
 				break
 			}
@@ -1221,14 +1317,91 @@ func (h *WebSocketHandler) matchesLogFilters(logMsg LogMessage, source string, f
 	return true
 }
 
-func (h *WebSocketHandler) broadcastToMetricsClients(metric MetricsMessage) {
-	// Implementation would broadcast to all metrics clients
+// deliver enqueues data on the client's bounded send buffer. A full buffer
+// means the client is too slow to keep up: it is disconnected rather than
+// left to block the broadcaster or any other client.
+func (h *WebSocketHandler) deliver(c *WebSocketClient, data []byte, endpoint string) {
+	select {
+	case c.send <- data:
+		messagesSent.WithLabelValues(endpoint, "broadcast").Inc()
+	default:
+		h.logger.WithField("client_id", c.ID).Warn("client send queue full; disconnecting slow client")
+		c.cancel()
+		// Unblocks the read pump's pending ReadMessage promptly; its deferred
+		// cleanup calls removeClient — matches consoleReadPump's pattern.
+		c.Connection.Close()
+	}
+}
+
+
+// PublishAlert queues an alert for broadcast.
+func (h *WebSocketHandler) PublishAlert(msg AlertMessage) {
+	select {
+	case h.alertsBroadcast <- msg:
+	default:
+		h.logger.Warn("alerts broadcast channel full; dropping")
+	}
+}
+
+// PublishLog queues a log entry for broadcast.
+func (h *WebSocketHandler) PublishLog(msg LogMessage) {
+	select {
+	case h.logsBroadcast <- msg:
+	default:
+		h.logger.Warn("logs broadcast channel full; dropping")
+	}
+}
+
+// PublishVMStatus is a typed convenience wrapper around PublishAlert for
+// vm_status events (frontend/src/lib/ws/useAdminWebSocket.ts's "vm_status"
+// case reads data.id/data.status/data.previous_status).
+func (h *WebSocketHandler) PublishVMStatus(msg VMStatusMessage) {
+	h.PublishAlert(AlertMessage{Type: "vm_status", Timestamp: time.Now(), Data: map[string]interface{}{
+		"id": msg.ID, "name": msg.Name, "status": msg.Status, "previous_status": msg.PreviousStatus,
+	}})
 }
 
 func (h *WebSocketHandler) broadcastToAlertClients(alert AlertMessage) {
-	// Implementation would broadcast to all alert clients
+	h.clientsMutex.RLock()
+	clients := append([]*WebSocketClient(nil), h.alertClients...)
+	h.clientsMutex.RUnlock()
+	for _, c := range clients {
+		if !h.matchesAlertFilters(alert, c.getFilters()) {
+			continue
+		}
+		data, err := json.Marshal(alert)
+		if err != nil {
+			h.logger.WithError(err).Error("marshal alert message")
+			return
+		}
+		h.deliver(c, data, "alerts")
+	}
 }
 
 func (h *WebSocketHandler) broadcastToLogClients(logMsg LogMessage) {
-	// Implementation would broadcast to all log clients
+	h.clientsMutex.RLock()
+	seen := make(map[string]bool)
+	var clients []*WebSocketClient
+	for _, pool := range h.logClients {
+		for _, c := range pool {
+			if !seen[c.ID] {
+				seen[c.ID] = true
+				clients = append(clients, c)
+			}
+		}
+	}
+	h.clientsMutex.RUnlock()
+	for _, c := range clients {
+		filters := c.getFilters()
+		source, _ := filters["source"].(string)
+		if !h.matchesLogFilters(logMsg, source, filters) {
+			continue
+		}
+		data, err := json.Marshal(logMsg)
+		if err != nil {
+			h.logger.WithError(err).Error("marshal log message")
+			return
+		}
+		h.deliver(c, data, "logs")
+	}
 }

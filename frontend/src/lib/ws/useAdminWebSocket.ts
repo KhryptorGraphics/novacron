@@ -34,12 +34,17 @@ export const useAdminWebSocket = () => {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
   
   const socketUrl = buildWebSocketUrls('/api/ws/alerts')[0];
-  
+  const authToken = typeof window !== 'undefined' ? localStorage.getItem('novacron_token') : null;
+  const authProtocolsOpt = authToken ? { protocols: ['bearer', authToken] } : {};
+
   const {
     sendMessage,
     readyState,
     getWebSocket
   } = useWebSocket(socketUrl, {
+    // Token travels via the Sec-WebSocket-Protocol handshake (browsers can't
+    // set Authorization on a WS upgrade); no post-connect auth message needed.
+    ...authProtocolsOpt,
     onOpen: () => {
       console.log('Admin WebSocket connected');
       setConnectionState(prev => ({
@@ -49,16 +54,7 @@ export const useAdminWebSocket = () => {
         error: null,
         reconnectAttempts: 0
       }));
-      
-      // Send authentication token if available
-      const token = localStorage.getItem('novacron_token');
-      if (token) {
-        sendMessage(JSON.stringify({
-          type: 'auth',
-          token
-        }));
-      }
-      
+
       // Subscribe to admin events
       sendMessage(JSON.stringify({
         type: 'subscribe',

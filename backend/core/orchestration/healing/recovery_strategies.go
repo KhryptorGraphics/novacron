@@ -1,7 +1,9 @@
 package healing
 
 import (
+	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -11,12 +13,19 @@ import (
 type RestartRecoveryStrategy struct {
 	logger   *logrus.Logger
 	priority int
+
+	mu           sync.RWMutex
+	vmController VMController
 }
 
 // MigrateRecoveryStrategy implements recovery by migrating the target
 type MigrateRecoveryStrategy struct {
 	logger   *logrus.Logger
 	priority int
+
+	mu             sync.RWMutex
+	vmController   VMController
+	targetSelector MigrationTargetSelector
 }
 
 // ScaleRecoveryStrategy implements recovery by scaling the target
@@ -63,6 +72,29 @@ func NewFailoverRecoveryStrategy(logger *logrus.Logger) *FailoverRecoveryStrateg
 	}
 }
 
+// SetVMController injects the real VM control backend. Safe to call at any
+// time; Recover reads it under mu. Nil means "not yet wired" (Recover then
+// returns an explicit error rather than a fake success).
+func (r *RestartRecoveryStrategy) SetVMController(vc VMController) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.vmController = vc
+}
+
+// SetVMController injects the real VM control backend for migration.
+func (m *MigrateRecoveryStrategy) SetVMController(vc VMController) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.vmController = vc
+}
+
+// SetMigrationTargetSelector injects the destination-picking backend.
+func (m *MigrateRecoveryStrategy) SetMigrationTargetSelector(sel MigrationTargetSelector) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.targetSelector = sel
+}
+
 // Restart Recovery Strategy Implementation
 
 // GetName returns the strategy name
@@ -82,12 +114,20 @@ func (r *RestartRecoveryStrategy) CanRecover(failure *FailureInfo) bool {
 	case FailureTypeNetworkIssue:
 		// Restart won't help with network issues
 		return false
+	case FailureTypeCustom:
+		// Manual operator trigger (TriggerHealing): restart is the least invasive real action.
+		// VM restarts still go through RestartSupervisor.RequestRestart, which refuses
+		// user-stopped, restart-policy=no and exhausted VMs.
+		return true
 	default:
 		return false
 	}
 }
 
-// Recover executes the restart recovery action
+// Recover executes the restart recovery action against the injected VM
+// controller. Only VM targets have a real backend; every other target type
+// (service/node/cluster) returns an explicit unsupported-target error instead
+// of a simulated success.
 func (r *RestartRecoveryStrategy) Recover(failure *FailureInfo, target *HealingTarget) (*RecoveryResult, error) {
 	r.logger.WithFields(logrus.Fields{
 		"target_id":    target.ID,
@@ -102,40 +142,33 @@ func (r *RestartRecoveryStrategy) Recover(failure *FailureInfo, target *HealingT
 		Metadata:        make(map[string]interface{}),
 	}
 
-	// Simulate restart process based on target type
-	switch target.Type {
-	case TargetTypeVM:
-		if err := r.restartVM(target, result); err != nil {
-			result.Success = false
-			result.Message = "Failed to restart VM"
-			result.Errors = append(result.Errors, err.Error())
-			return result, err
-		}
-
-	case TargetTypeService:
-		if err := r.restartService(target, result); err != nil {
-			result.Success = false
-			result.Message = "Failed to restart service"
-			result.Errors = append(result.Errors, err.Error())
-			return result, err
-		}
-
-	case TargetTypeNode:
-		if err := r.restartNode(target, result); err != nil {
-			result.Success = false
-			result.Message = "Failed to restart node"
-			result.Errors = append(result.Errors, err.Error())
-			return result, err
-		}
-
-	default:
-		err := fmt.Errorf("restart not supported for target type %s", target.Type)
+	if target.Type != TargetTypeVM {
+		err := fmt.Errorf("restart not supported for target type %q: only vm targets have a real backend", target.Type)
 		result.Success = false
 		result.Message = err.Error()
 		result.Errors = append(result.Errors, err.Error())
 		return result, err
 	}
 
+	r.mu.RLock()
+	vc := r.vmController
+	r.mu.RUnlock()
+	if vc == nil {
+		err := fmt.Errorf("restart strategy has no VM controller configured")
+		result.Success = false
+		result.Message = err.Error()
+		result.Errors = append(result.Errors, err.Error())
+		return result, err
+	}
+
+	if err := vc.RestartVM(context.Background(), target.ID); err != nil {
+		result.Success = false
+		result.Message = "Failed to restart VM"
+		result.Errors = append(result.Errors, err.Error())
+		return result, err
+	}
+
+	result.ActionsExecuted = append(result.ActionsExecuted, "restart_vm")
 	result.Success = true
 	result.Message = "Restart completed successfully"
 	result.Duration = time.Since(startTime)
@@ -192,7 +225,9 @@ func (m *MigrateRecoveryStrategy) CanRecover(failure *FailureInfo) bool {
 	}
 }
 
-// Recover executes the migrate recovery action
+// Recover executes the migrate recovery action: the injected target selector
+// picks a destination and the injected VM controller performs the move. Only
+// VM targets have a real backend.
 func (m *MigrateRecoveryStrategy) Recover(failure *FailureInfo, target *HealingTarget) (*RecoveryResult, error) {
 	m.logger.WithFields(logrus.Fields{
 		"target_id":    target.ID,
@@ -207,32 +242,43 @@ func (m *MigrateRecoveryStrategy) Recover(failure *FailureInfo, target *HealingT
 		Metadata:        make(map[string]interface{}),
 	}
 
-	// Simulate migration process
-	switch target.Type {
-	case TargetTypeVM:
-		if err := m.migrateVM(target, result); err != nil {
-			result.Success = false
-			result.Message = "Failed to migrate VM"
-			result.Errors = append(result.Errors, err.Error())
-			return result, err
-		}
-
-	case TargetTypeService:
-		if err := m.migrateService(target, result); err != nil {
-			result.Success = false
-			result.Message = "Failed to migrate service"
-			result.Errors = append(result.Errors, err.Error())
-			return result, err
-		}
-
-	default:
-		err := fmt.Errorf("migration not supported for target type %s", target.Type)
+	if target.Type != TargetTypeVM {
+		err := fmt.Errorf("migration not supported for target type %q: only vm targets have a real backend", target.Type)
 		result.Success = false
 		result.Message = err.Error()
 		result.Errors = append(result.Errors, err.Error())
 		return result, err
 	}
 
+	m.mu.RLock()
+	vc, sel := m.vmController, m.targetSelector
+	m.mu.RUnlock()
+	if vc == nil || sel == nil {
+		err := fmt.Errorf("migrate strategy has no VM controller/target selector configured")
+		result.Success = false
+		result.Message = err.Error()
+		result.Errors = append(result.Errors, err.Error())
+		return result, err
+	}
+
+	ctx := context.Background()
+	targetNode, err := sel.SelectTarget(ctx, target.ID)
+	if err != nil {
+		result.Success = false
+		result.Message = "Failed to select migration target"
+		result.Errors = append(result.Errors, err.Error())
+		return result, err
+	}
+
+	if err := vc.MigrateVM(ctx, target.ID, targetNode, nil); err != nil {
+		result.Success = false
+		result.Message = "Failed to migrate VM"
+		result.Errors = append(result.Errors, err.Error())
+		return result, err
+	}
+
+	result.ActionsExecuted = append(result.ActionsExecuted, "migrate_vm")
+	result.Metadata["target_node"] = targetNode
 	result.Success = true
 	result.Message = "Migration completed successfully"
 	result.Duration = time.Since(startTime)
@@ -412,37 +458,9 @@ func (f *FailoverRecoveryStrategy) EstimateTime(failure *FailureInfo) time.Durat
 	return 1 * time.Minute
 }
 
-// Private helper methods for each strategy
-
-func (r *RestartRecoveryStrategy) restartVM(target *HealingTarget, result *RecoveryResult) error {
-	// VM restart not implemented: requires VMManager access
-	result.ActionsExecuted = append(result.ActionsExecuted, "restart_vm_not_implemented")
-	return fmt.Errorf("restartVM not implemented: requires VMManager integration")
-}
-
-func (r *RestartRecoveryStrategy) restartService(target *HealingTarget, result *RecoveryResult) error {
-	// Service restart not implemented: requires service manager integration
-	result.ActionsExecuted = append(result.ActionsExecuted, "restart_service_not_implemented")
-	return fmt.Errorf("restartService not implemented: requires service manager integration")
-}
-
-func (r *RestartRecoveryStrategy) restartNode(target *HealingTarget, result *RecoveryResult) error {
-	// Node restart not implemented: requires cluster manager integration
-	result.ActionsExecuted = append(result.ActionsExecuted, "restart_node_not_implemented")
-	return fmt.Errorf("restartNode not implemented: requires cluster manager integration")
-}
-
-func (m *MigrateRecoveryStrategy) migrateVM(target *HealingTarget, result *RecoveryResult) error {
-	// VM migration not implemented: requires VMManager and cluster integration
-	result.ActionsExecuted = append(result.ActionsExecuted, "migrate_vm_not_implemented")
-	return fmt.Errorf("migrateVM not implemented: requires VMManager and cluster integration")
-}
-
-func (m *MigrateRecoveryStrategy) migrateService(target *HealingTarget, result *RecoveryResult) error {
-	// Service migration not implemented: requires service manager and load balancer integration
-	result.ActionsExecuted = append(result.ActionsExecuted, "migrate_service_not_implemented")
-	return fmt.Errorf("migrateService not implemented: requires service manager and load balancer integration")
-}
+// Private helper methods for scale and failover strategies (restart and
+// migrate delegate to the injected VMController/MigrationTargetSelector
+// directly in Recover, above).
 
 func (s *ScaleRecoveryStrategy) scaleService(target *HealingTarget, failure *FailureInfo, result *RecoveryResult) error {
 	// Service scaling not implemented: requires orchestrator integration

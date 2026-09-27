@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -197,7 +198,7 @@ func TestCanonicalPasswordResetRoutesFailClosedWithoutEmail(t *testing.T) {
 	authManager := auth.NewSimpleAuthManager("test-secret", nil)
 
 	router := mux.NewRouter()
-	registerPublicRoutes(router, authManager, nil, nil, nil)
+	registerPublicRoutes(router, authManager, nil, nil, nil, nil)
 
 	tests := []struct {
 		name       string
@@ -254,7 +255,7 @@ func TestCanonicalTwoFactorLoginFlow(t *testing.T) {
 	handlers := securityapi.NewSecurityHandlers(twoFactorService, audit.NewSimpleAuditLogger())
 
 	router := mux.NewRouter()
-	registerPublicRoutes(router, authManager, db, twoFactorService, nil)
+	registerPublicRoutes(router, authManager, db, twoFactorService, nil, nil)
 	registerCanonicalSecurityRoutes(router, authManager, nil, handlers)
 
 	setupReq := mustJSONRequest(t, http.MethodPost, "/api/auth/2fa/setup", map[string]interface{}{
@@ -340,6 +341,7 @@ func TestCanonicalTwoFactorLoginFlow(t *testing.T) {
 		WithArgs("7").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "created_at", "updated_at", "organization_id"}).
 			AddRow("7", "user", "user@example.com", string(passwordHash), "admin", "active", now, now, "00000000-0000-0000-0000-000000000001"))
+	expectSessionInsert(mock, "7", testSessionID)
 
 	verifyCode, err := totp.GenerateCode(setupPayload.Secret, time.Now().UTC())
 	if err != nil {
@@ -358,17 +360,32 @@ func TestCanonicalTwoFactorLoginFlow(t *testing.T) {
 	}
 
 	var verifyPayload struct {
-		Token string `json:"token"`
-		User  struct {
-			ID string `json:"id"`
+		Token        string `json:"token"`
+		RefreshToken string `json:"refreshToken"`
+		User         struct {
+			ID               string `json:"id"`
+			TwoFactorEnabled bool   `json:"two_factor_enabled"`
 		} `json:"user"`
+		Admission            AdmissionResponse   `json:"admission"`
+		Memberships          []AdmissionResponse `json:"memberships"`
+		Session              SessionResponse     `json:"session"`
+		RemainingBackupCodes *int                `json:"remaining_backup_codes"`
 	}
 	decodeJSONBody(t, verifyRec, &verifyPayload)
-	if verifyPayload.Token == "" {
-		t.Fatal("expected session token after successful 2FA verification")
+	if verifyPayload.Token == "" || verifyPayload.RefreshToken == "" {
+		t.Fatalf("expected session token and refresh token after successful 2FA verification, got %#v", verifyPayload)
 	}
-	if verifyPayload.User.ID != "7" {
-		t.Fatalf("expected verified user 7, got %q", verifyPayload.User.ID)
+	if verifyPayload.User.ID != "7" || !verifyPayload.User.TwoFactorEnabled {
+		t.Fatalf("expected verified user 7 with 2FA enabled, got %#v", verifyPayload.User)
+	}
+	if !verifyPayload.Admission.Admitted || len(verifyPayload.Memberships) != 1 || verifyPayload.Session.ID != testSessionID {
+		t.Fatalf("expected AuthResponse admission/membership/session, got %#v", verifyPayload)
+	}
+	if verifyPayload.RemainingBackupCodes == nil {
+		t.Fatal("expected remaining_backup_codes after 2FA verification")
+	}
+	if claims, err := validateJWT(verifyPayload.Token, authManager.GetJWTSecret()); err != nil || stringClaim(claims, "sid") != testSessionID || stringClaim(claims, "purpose") != "" {
+		t.Fatalf("expected a plain access token bound to session %s, got %#v (%v)", testSessionID, claims, err)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -381,7 +398,7 @@ func TestCanonicalTwoFactorVerifyLoginRejectsInvalidOrMismatchedTempToken(t *tes
 	twoFactorService := auth.NewTwoFactorService("NovaCron", []byte(authManager.GetJWTSecret()))
 
 	router := mux.NewRouter()
-	registerPublicRoutes(router, authManager, nil, twoFactorService, nil)
+	registerPublicRoutes(router, authManager, nil, twoFactorService, nil, nil)
 
 	invalidTokenReq := mustJSONRequest(t, http.MethodPost, "/api/auth/2fa/verify-login", map[string]interface{}{
 		"code":       "123456",
@@ -450,6 +467,67 @@ func TestCanonicalTwoFactorRoutesUseAuthenticatedPrincipal(t *testing.T) {
 	decodeJSONBody(t, statusRec, &statusPayload)
 	if setup, _ := statusPayload["setup"].(bool); !setup {
 		t.Fatalf("expected authenticated user's 2FA setup to be returned, got %#v", statusPayload)
+	}
+
+	// enable / backup-codes / disable must likewise bind to the authenticated
+	// principal ("7"), not the attacker-supplied user_id: the code below is
+	// only valid for user 7's secret, and the attacker id was never set up.
+	var setupPayload struct {
+		Secret string `json:"secret"`
+	}
+	decodeJSONBody(t, setupRec, &setupPayload)
+	enableCode, err := totp.GenerateCode(setupPayload.Secret, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("generate enable code: %v", err)
+	}
+	enableReq := mustJSONRequest(t, http.MethodPost, "/api/auth/2fa/enable", map[string]interface{}{
+		"user_id": "attacker-selected-user",
+		"code":    enableCode,
+	})
+	enableReq.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+	enableRec := httptest.NewRecorder()
+	router.ServeHTTP(enableRec, enableReq)
+	if enableRec.Code != http.StatusOK {
+		t.Fatalf("expected enable 200, got %d (%s)", enableRec.Code, enableRec.Body.String())
+	}
+	if !twoFactorService.IsEnabled("7") || twoFactorService.IsEnabled("attacker-selected-user") {
+		t.Fatal("expected 2FA enabled for the authenticated user only")
+	}
+
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		codesReq := mustJSONRequest(t, method, "/api/auth/2fa/backup-codes?user_id=someone-else", map[string]interface{}{
+			"user_id": "attacker-selected-user",
+		})
+		codesReq.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+		codesRec := httptest.NewRecorder()
+		router.ServeHTTP(codesRec, codesReq)
+		if codesRec.Code != http.StatusOK {
+			t.Fatalf("expected %s backup-codes 200, got %d (%s)", method, codesRec.Code, codesRec.Body.String())
+		}
+		var codesPayload struct {
+			BackupCodes []string `json:"backup_codes"`
+		}
+		decodeJSONBody(t, codesRec, &codesPayload)
+		own, err := twoFactorService.GetBackupCodes("7")
+		if err != nil {
+			t.Fatalf("backup codes for user 7: %v", err)
+		}
+		if len(codesPayload.BackupCodes) == 0 || !reflect.DeepEqual(codesPayload.BackupCodes, own) {
+			t.Fatalf("%s backup-codes must return the authenticated user's codes, got %#v want %#v", method, codesPayload.BackupCodes, own)
+		}
+	}
+
+	disableReq := mustJSONRequest(t, http.MethodPost, "/api/auth/2fa/disable", map[string]interface{}{
+		"user_id": "attacker-selected-user",
+	})
+	disableReq.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
+	disableRec := httptest.NewRecorder()
+	router.ServeHTTP(disableRec, disableReq)
+	if disableRec.Code != http.StatusOK {
+		t.Fatalf("expected disable 200, got %d (%s)", disableRec.Code, disableRec.Body.String())
+	}
+	if twoFactorService.IsEnabled("7") {
+		t.Fatal("expected disable to act on the authenticated user")
 	}
 }
 
@@ -766,7 +844,7 @@ func TestCanonicalGraphQLRouteServesStorageBackedVolumeOperations(t *testing.T) 
 		t.Fatalf("create volume store: %v", err)
 	}
 
-	resolver := graphqlapi.NewResolverWithVolumeStore(nil, nil, volumeStore)
+	resolver := graphqlapi.NewResolverWithVolumeStore(volumeStore)
 	handler := graphqlapi.NewVolumeHTTPHandler(resolver)
 
 	router := mux.NewRouter()
@@ -880,13 +958,13 @@ func TestCanonicalLiveServerSmoke(t *testing.T) {
 		t.Fatalf("create volume store: %v", err)
 	}
 
-	resolver := graphqlapi.NewResolverWithVolumeStore(nil, nil, volumeStore)
+	resolver := graphqlapi.NewResolverWithVolumeStore(volumeStore)
 	graphqlHandler := graphqlapi.NewVolumeHTTPHandler(resolver)
 	wsHandler := websocketapi.NewWebSocketHandler(nil, nil, nil, nil, logrus.New())
 	defer wsHandler.Shutdown()
 
 	router := mux.NewRouter()
-	registerPublicRoutes(router, authManager, db, twoFactorService, nil)
+	registerPublicRoutes(router, authManager, db, twoFactorService, nil, nil)
 	registerCanonicalSecurityRoutes(router, authManager, nil, securityHandlers)
 	registerCanonicalGraphQLRoute(router, authManager, nil, graphqlHandler)
 	wsHandler.RegisterWebSocketRoutes(router, func(required string, next http.HandlerFunc) http.Handler {
@@ -913,6 +991,7 @@ func TestCanonicalLiveServerSmoke(t *testing.T) {
 		WithArgs("admin").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "created_at", "updated_at", "organization_id"}).
 			AddRow("7", "admin", "admin@example.com", string(passwordHash), "admin", "active", now, now, "00000000-0000-0000-0000-000000000001"))
+	expectSessionInsert(mock, "7", testSessionID)
 
 	loginReq, err := http.NewRequest(http.MethodPost, server.URL+"/api/auth/login", strings.NewReader(`{"email":"admin@example.com","password":"correct-horse-battery-staple"}`))
 	if err != nil {
@@ -1094,7 +1173,7 @@ func TestCanonicalLiveServerSmoke(t *testing.T) {
 
 func TestCanonicalAndCompatibilityWebSocketMetricsRoutes(t *testing.T) {
 	authManager := auth.NewSimpleAuthManager("test-secret", nil)
-	wsHandler := websocketapi.NewWebSocketHandler(nil, nil, nil, nil, logrus.New())
+	wsHandler := websocketapi.NewWebSocketHandler(nil, nil, nil, nil, websocketapi.MetricsInterval(50*time.Millisecond), logrus.New())
 	defer wsHandler.Shutdown()
 
 	router := mux.NewRouter()
@@ -1127,9 +1206,9 @@ func TestCanonicalAndCompatibilityWebSocketMetricsRoutes(t *testing.T) {
 			conn.Close()
 			t.Fatalf("decode %s message: %v", route, err)
 		}
-		if payload["type"] != "metrics_update" {
+		if payload["type"] != "metric" {
 			conn.Close()
-			t.Fatalf("expected metrics_update on %s, got %#v", route, payload["type"])
+			t.Fatalf("expected metric on %s, got %#v", route, payload["type"])
 		}
 
 		_ = conn.Close()
@@ -1344,6 +1423,7 @@ func TestCanonicalAdminUserUpdateRejectsInvalidRole(t *testing.T) {
 	adminRouter.Use(requireAnyRoleMiddleware("admin", "super-admin"))
 	registerCanonicalAdminRoutes(router, authManager, db)
 
+	expectAuthLookup(mock, "7", "", time.Now().Add(-time.Hour), "active", false)
 	rec := httptest.NewRecorder()
 	req := mustJSONRequest(t, http.MethodPut, "/api/admin/users/00000000-0000-0000-0000-000000000001", map[string]interface{}{"role": "ghost"})
 	req.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
@@ -1376,6 +1456,7 @@ func TestCanonicalAdminUserUpdateAcceptsSuperAdminAlias(t *testing.T) {
 	registerCanonicalAdminRoutes(router, authManager, db)
 
 	now := time.Now().UTC()
+	expectAuthLookup(mock, "7", "", now.Add(-time.Hour), "active", false)
 	// updateCanonicalAdminUser issues ONE QueryRow("UPDATE users ... RETURNING
 	// ...") — sqlmock models it as ExpectQuery, not ExpectExec.
 	mock.ExpectQuery(regexp.QuoteMeta(`
@@ -1413,7 +1494,7 @@ func newAuthTokenTestRouter(t *testing.T, db *sql.DB) (*mux.Router, sqlmock.Sqlm
 	})
 
 	router := mux.NewRouter()
-	registerPublicRoutes(router, authManager, db, nil, emailService)
+	registerPublicRoutes(router, authManager, db, nil, emailService, nil)
 	return router, nil, authManager
 }
 
@@ -1712,6 +1793,8 @@ func TestCanonicalAdminMutationsDoNotFabricateSuccessOnDatabaseErrors(t *testing
 	router := mux.NewRouter()
 	registerCanonicalAdminRoutes(router, authManager, db)
 
+	authLookup := func() { expectAuthLookup(mock, "7", "", time.Now().Add(-time.Hour), "active", false) }
+	authLookup()
 	mock.ExpectQuery("INSERT INTO users").WillReturnError(errors.New("database unavailable"))
 	createReq := mustJSONRequest(t, http.MethodPost, "/api/admin/users", map[string]string{
 		"username": "new-user", "email": "new@example.com", "password": "password123", "role": "viewer",
@@ -1722,6 +1805,7 @@ func TestCanonicalAdminMutationsDoNotFabricateSuccessOnDatabaseErrors(t *testing
 	if createRec.Code != http.StatusInternalServerError || strings.Contains(createRec.Body.String(), `"id":""`) {
 		t.Fatalf("failed insert must not fabricate user success, got %d body=%s", createRec.Code, createRec.Body.String())
 	}
+	authLookup()
 	mock.ExpectQuery("INSERT INTO users").WillReturnError(sql.ErrNoRows)
 	missingCreateReq := mustJSONRequest(t, http.MethodPost, "/api/admin/users", map[string]string{
 		"username": "missing-user", "email": "missing@example.com", "password": "password123", "role": "viewer",
@@ -1733,6 +1817,7 @@ func TestCanonicalAdminMutationsDoNotFabricateSuccessOnDatabaseErrors(t *testing
 		t.Fatalf("missing insert result must return 404, got %d body=%s", missingCreateRec.Code, missingCreateRec.Body.String())
 	}
 
+	authLookup()
 	mock.ExpectQuery("UPDATE users").WillReturnError(sql.ErrNoRows)
 	assignReq := mustJSONRequest(t, http.MethodPost, "/api/admin/users/00000000-0000-0000-0000-000000000001/roles", map[string][]string{"roles": {"admin"}})
 	assignReq.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))
@@ -1741,6 +1826,7 @@ func TestCanonicalAdminMutationsDoNotFabricateSuccessOnDatabaseErrors(t *testing
 	if assignRec.Code != http.StatusNotFound || !strings.Contains(assignRec.Body.String(), "user not found") {
 		t.Fatalf("missing role target must return 404, got %d body=%s", assignRec.Code, assignRec.Body.String())
 	}
+	authLookup()
 	mock.ExpectQuery("UPDATE users").WillReturnError(errors.New("database unavailable"))
 	assignFailureReq := mustJSONRequest(t, http.MethodPost, "/api/admin/users/00000000-0000-0000-0000-000000000001/roles", map[string][]string{"roles": {"admin"}})
 	assignFailureReq.Header.Set("Authorization", signedBearerToken(t, authManager, "7", "default", "admin"))

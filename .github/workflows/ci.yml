@@ -45,8 +45,12 @@ jobs:
       # backend/core builds and its -short suite is fully green as of 2026-09-04;
       # the full census is gated below.
       - name: Run canonical backend tests
+        # -race (cgo) guards the shared auth/session, WebSocket hub fan-out and
+        # healing/event-bus paths against data races.
+        env:
+          CGO_ENABLED: "1"
         run: >
-          go test
+          go test -race
           ./backend/cmd/api-server
           ./backend/api/graphql
           ./backend/api/security
@@ -58,19 +62,35 @@ jobs:
       # Non-recursive ./vm/ (not ./vm/...) intentionally excludes the pre-existing
       # broken sibling packages vm/drivers/kvm, vm/kata, vm/unified. -short lets the
       # docker/containerd/kvm integration tests self-skip on a bare runner.
-      - name: Run vm package tests (separate module)
+      - name: Run vm/auth/netutil package tests (separate module)
         working-directory: backend/core
         # -race requires cgo. This gate exists to catch driver-factory-style data
-        # races (see novacron-t72) before they regress invisibly.
+        # races (see novacron-t72) and auth-store/client-IP races before they
+        # regress invisibly.
         env:
           CGO_ENABLED: "1"
-        run: go test -short -race ./vm/
+        run: go test -short -race ./vm/ ./auth/... ./netutil/... ./audit/...
 
       - name: Install backend/core cgo prerequisites
         # network/dwcp/transport/rdma compiles its real libibverbs variant whenever
         # cgo && linux (rdma_cgo.go: `#cgo LDFLAGS: -libverbs`; rdma_native.c includes
         # <infiniband/verbs.h>). ubuntu-latest lacks the headers; JetPack hosts ship them.
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libibverbs-dev
+
+      # Root module (backend/cmd, backend/api, backend/pkg, backend/tests, tests/):
+      # every package, including test-only packages, must type-check.
+      - name: Vet root module
+        env:
+          CGO_ENABLED: "1"
+        run: go vet ./...
+
+      # backend/core/orchestration is its own module, so the backend/core ./...
+      # census below never reaches it.
+      - name: Vet and race-test backend/core/orchestration (separate module)
+        working-directory: backend/core/orchestration
+        env:
+          CGO_ENABLED: "1"
+        run: go vet ./... && go test -short -race ./...
 
       # The full backend/core census: every package compiles and its -short suite
       # is green (integration tests needing qemu/Docker self-skip on a bare runner;

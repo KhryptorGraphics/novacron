@@ -76,7 +76,10 @@ export function useWebSocket<T = any>(
 
     try {
       const fullUrl = candidateUrls[Math.min(candidateIndex.current, candidateUrls.length - 1)];
-      ws.current = new WebSocket(fullUrl);
+      // Token travels via the Sec-WebSocket-Protocol handshake (browsers
+      // can't set an Authorization header on a WS upgrade).
+      const authToken = typeof window !== 'undefined' ? localStorage.getItem('novacron_token') : null;
+      ws.current = authToken ? new WebSocket(fullUrl, ['bearer', authToken]) : new WebSocket(fullUrl);
 
       ws.current.onopen = () => {
         openedOnce.current = true;
@@ -267,13 +270,6 @@ export function usePerformancePredictionWebSocket() {
   return useWebSocket<PerformanceUpdatePayload>('/api/ws/metrics?sources=cpu_usage,memory_usage,disk_usage,predictions&interval=30', {
     heartbeatInterval: 30000,
     reconnectAttempts: 6,
-  });
-}
-
-export function useSupercomputeFabricWebSocket() {
-  return useWebSocket('/api/ws/metrics?sources=fabric,compute_jobs,memory_fabric,processing&interval=20', {
-    heartbeatInterval: 20000,
-    reconnectAttempts: 10,
   });
 }
 

@@ -58,6 +58,9 @@ type canonicalServices struct {
 	graphqlHandler      http.Handler
 	orchestrationAPI    *orchestrationapi.OrchestrationAPI
 	orchestrationEngine *orchestration.DefaultOrchestrationEngine
+	healingController   *healing.DefaultHealingController
+	eventBus            events.EventBus
+	orchLogger          *logrus.Logger
 	shutdown            func()
 }
 
@@ -87,7 +90,6 @@ func main() {
 	appLogger.Info("Starting NovaCron API Server...",
 		"version", "1.0.0",
 		"api_port", cfg.Server.APIPort,
-		"ws_port", cfg.Server.WSPort,
 	)
 
 	db, err := initDatabase(cfg)
@@ -95,6 +97,9 @@ func main() {
 		appLogger.Fatal("Failed to initialize database", "error", err)
 	}
 	defer db.Close()
+	// Session retention: expired sessions rows (refresh token past its TTL)
+	// are deleted hourly; see auth_session.go.
+	defer startSessionSweeper(context.Background(), db, sessionSweepInterval)()
 
 	authManager := auth.NewSimpleAuthManager(cfg.Auth.Secret, db)
 	services, err := initializeCanonicalServices(cfg, db, authManager)
@@ -235,7 +240,7 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 
 	corsHandler := buildCORSHandler(cfg)
 
-	registerPublicRoutes(router, authManager, db, services.twoFactorService, emailService)
+	registerPublicRoutes(router, authManager, db, services.twoFactorService, emailService, vmManager)
 
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	apiRouter.Use(requireAuth(authManager, db))
@@ -279,130 +284,17 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	registerCanonicalAdminRoutes(router, authManager, db)
 	registerCanonicalGraphQLRoute(router, authManager, db, services.graphqlHandler)
 	services.websocketHandler.RegisterWebSocketRoutes(router, func(required string, next http.HandlerFunc) http.Handler {
-		return requireAuth(authManager, db)(requireRoleHandler(required, next))
+		return wsAuthMiddleware(authManager, db)(requireRoleHandler(required, next))
 	})
-	// Register orchestration API routes directly on /api — the handlers already
-	// register /orchestration/status, /orchestration/policies, etc.
+	services.wireVMManager(vmManager, db, vmBasePath(cfg))
+	// Orchestration API (/api/orchestration/*), admin-only.
 	if services.orchestrationAPI != nil {
-		services.orchestrationAPI.RegisterRoutes(apiRouter)
+		registerOrchestrationRoutes(apiRouter, services.orchestrationAPI)
 	}
 
-	// GET /api/auth/me - returns current user with memberships
-	meHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userID, ok := r.Context().Value("user_id").(string)
-		if !ok || userID == "" {
-			writeJSONError(w, http.StatusUnauthorized, "authentication required")
-			return
-		}
-
-		user, err := authManager.GetUser(userID)
-		if err != nil {
-			writeJSONError(w, http.StatusUnauthorized, "user not found")
-			return
-		}
-
-		// Get user's cluster memberships from runtime tables (created by runtime_auth persistence)
-		rows, err := db.Query(`
-			SELECT m.cluster_id, m.state, m.role, m.source, m.created_at, m.tenant_id,
-			       c.id, c.name, c.tier, c.performance_score, c.interconnect_latency_ms,
-			       c.interconnect_bandwidth_mbps, c.current_node_count, c.max_supported_node_count,
-			       c.growth_state, c.federation_state, c.degraded, c.last_evaluated_at
-			FROM runtime_cluster_memberships m
-			JOIN runtime_clusters c ON m.cluster_id = c.id
-			WHERE m.user_id = $1
-			ORDER BY m.created_at DESC
-		`, userID)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to query cluster memberships")
-			return
-		}
-		defer rows.Close()
-
-		type AdmissionResponse struct {
-			Admitted     bool   `json:"admitted"`
-			State        string `json:"state,omitempty"`
-			ClusterID    string `json:"cluster_id"`
-			Role         string `json:"role,omitempty"`
-			Source       string `json:"source,omitempty"`
-			AdmittedAt   string `json:"admitted_at,omitempty"`
-			TenantID     string `json:"tenant_id,omitempty"`
-			Selected     bool   `json:"selected,omitempty"`
-			Cluster      *ClusterSummaryResponse `json:"cluster,omitempty"`
-		}
-
-		memberships := make([]AdmissionResponse, 0)
-		var selectedCluster *ClusterSummaryResponse
-		// Track best cluster for selectedCluster (highest performance_score)
-		var bestCluster *ClusterSummaryResponse
-		bestScore := -1.0
-
-		for rows.Next() {
-			var adm AdmissionResponse
-			var cluster ClusterSummaryResponse
-			var tenantID sql.NullString
-			err := rows.Scan(
-				&adm.ClusterID, &adm.State, &adm.Role, &adm.Source, &adm.AdmittedAt, &tenantID,
-				&cluster.ID, &cluster.Name, &cluster.Tier, &cluster.PerformanceScore,
-				&cluster.InterconnectLatencyMs, &cluster.InterconnectBandwidthMbps,
-				&cluster.CurrentNodeCount, &cluster.MaxSupportedNodeCount,
-				&cluster.GrowthState, &cluster.FederationState, &cluster.Degraded,
-				&cluster.LastEvaluatedAt,
-			)
-			if err != nil {
-				writeJSONError(w, http.StatusInternalServerError, "failed to scan cluster membership")
-				return
-			}
-			// Derive admitted from state
-			adm.Admitted = (adm.State == "active")
-			if tenantID.Valid {
-				adm.TenantID = tenantID.String
-			}
-			adm.Selected = false
-			memberships = append(memberships, adm)
-
-			// Track best cluster for selectedCluster (highest performance_score)
-			if cluster.PerformanceScore > bestScore {
-				bestScore = cluster.PerformanceScore
-				bestCluster = &cluster
-			}
-		}
-
-		// Determine selected cluster (highest performance score among memberships)
-		selectedCluster = bestCluster
-
-		// Get session info
-		var sessionID, sessionExpiresAt string
-		db.QueryRow(`
-			SELECT id, expires_at FROM sessions WHERE user_id = $1 AND revoked_at IS NULL
-			ORDER BY created_at DESC LIMIT 1
-		`, userID).Scan(&sessionID, &sessionExpiresAt)
-
-		// Build response
-		userResp := frontendUser(user)
-		admission := AdmissionResponse{}
-		if selectedCluster != nil {
-			admission = AdmissionResponse{
-				Admitted:  true,
-				ClusterID: selectedCluster.ID,
-				Cluster:   selectedCluster,
-				Selected:  true,
-			}
-		}
-
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"user":              userResp,
-			"admission":         admission,
-			"memberships":       memberships,
-			"selectedCluster":   selectedCluster,
-			"session": map[string]interface{}{
-				"id":             sessionID,
-				"expiresAt":      sessionExpiresAt,
-				"createdAt":      time.Now().UTC().Format(time.RFC3339),
-				"lastAccessedAt": time.Now().UTC().Format(time.RFC3339),
-			},
-		})
-	})
-	router.HandleFunc("/api/auth/me", meHandler).Methods(http.MethodGet)
+	// Session-backed auth contract (/api/auth/me, refresh, logout, sessions,
+	// cluster admissions) — auth_session.go.
+	registerAuthSessionRoutes(router, authManager, db, vmManager, services.twoFactorService)
 
 	router.HandleFunc("/health", healthCheckHandler(cfg, db)).Methods(http.MethodGet)
 
@@ -420,26 +312,6 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 		MaxHeaderBytes: 64 << 10,
 	}
 }
-
-
-// ClusterSummaryResponse represents cluster summary information for API responses
-type ClusterSummaryResponse struct {
-	ID                         string    `json:"id"`
-	Name                       string    `json:"name"`
-	Tier                       string    `json:"tier"`
-	PerformanceScore           float64   `json:"performanceScore"`
-	InterconnectLatencyMs      float64   `json:"interconnectLatencyMs"`
-	InterconnectBandwidthMbps  float64   `json:"interconnectBandwidthMbps"`
-	CurrentNodeCount           int       `json:"currentNodeCount"`
-	MaxSupportedNodeCount      int       `json:"maxSupportedNodeCount"`
-	GrowthState                string    `json:"growthState"`
-	FederationState            string    `json:"federationState"`
-	Degraded                   bool      `json:"degraded"`
-	LastEvaluatedAt            time.Time `json:"lastEvaluatedAt"`
-	EdgeLatencyMs              float64   `json:"edgeLatencyMs,omitempty"`
-	EdgeBandwidthMbps          float64   `json:"edgeBandwidthMbps,omitempty"`
-}
-
 
 const incomingMigrationMarker = ".novacron-incoming-migration"
 
@@ -550,29 +422,46 @@ func initDatabase(cfg *config.Config) (*sql.DB, error) {
 	return db, nil
 }
 
-// requireMigratedSchema verifies the canonical golang-migrate-managed schema is
-// present (database/migrations, applied by `make db-migrate`, the docker-compose
-// `migrate` init service, or the k8s migrate Job — see docker/api-entrypoint.sh).
-// The server deliberately does NOT create tables: an earlier embedded DDL
-// drifted from the canonical schema (VARCHAR ids, a vm_interfaces table) and
-// could not even boot against it (REFERENCES on the UUID vms.id cannot be
-// implemented for a VARCHAR column), so it was removed rather than forked.
-// One statement probes the two load-bearing canonical tables; anything but a
-// clean zero-row result means the schema is absent or partial.
+// requiredSchemaVersion is the golang-migrate version (database/migrations)
+// this binary's SQL is written against: 000017 added the session refresh
+// token/revocation columns that auth_session.go reads on every request.
+const requiredSchemaVersion = 17
+
+// sqlSchemaMigrationState reads golang-migrate's bookkeeping table
+// (database/migrate.go, postgres driver default table name).
+const sqlSchemaMigrationState = `SELECT version, dirty FROM schema_migrations LIMIT 1`
+
+// requireMigratedSchema verifies the canonical golang-migrate-managed schema
+// (database/migrations, applied by `make db-migrate`, the docker-compose
+// `migrate` init service, or the k8s migrate Job — see
+// docker/api-entrypoint.sh) is applied through requiredSchemaVersion and not
+// dirty. The server deliberately does NOT create tables: an earlier embedded
+// DDL drifted from the canonical schema (VARCHAR ids, a vm_interfaces table)
+// and could not even boot against it, so it was removed rather than forked.
+// A missing schema_migrations table, a dirty (half-applied) migration, or a
+// version behind what this binary's queries need all refuse to boot.
 func requireMigratedSchema(db *sql.DB) error {
-	var present bool
-	if err := db.QueryRow(
-		`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'vms')
-		 AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'users')`,
-	).Scan(&present); err != nil {
-		return fmt.Errorf("failed to inspect database schema: %w", err)
+	var version int64
+	var dirty bool
+	err := db.QueryRow(sqlSchemaMigrationState).Scan(&version, &dirty)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("canonical database schema not present (schema_migrations is empty): apply database/migrations first (make db-migrate, the docker-compose 'migrate' service, or the k8s migrate Job)")
 	}
-	if !present {
-		return fmt.Errorf("canonical database schema not present: apply database/migrations first (make db-migrate, the docker-compose 'migrate' service, or the k8s migrate Job)")
+	if err != nil {
+		return fmt.Errorf("canonical database schema not present or unreadable (%v): apply database/migrations first (make db-migrate, the docker-compose 'migrate' service, or the k8s migrate Job)", err)
+	}
+	if dirty {
+		return fmt.Errorf("database schema is dirty at migration %d: a migration failed half-way; repair it (migrate force) before starting the server", version)
+	}
+	if version < requiredSchemaVersion {
+		return fmt.Errorf("database schema at migration %d, this server requires %d: apply database/migrations (make db-migrate) before starting", version, requiredSchemaVersion)
 	}
 	return nil
 }
 
+// requireAuth guards a route with a bearer access token; the verification
+// itself is authenticateToken (auth_session.go), shared with the WebSocket
+// subprotocol adapter so every entry point applies the same fail-closed rules.
 func requireAuth(authManager *auth.SimpleAuthManager, db *sql.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -581,50 +470,28 @@ func requireAuth(authManager *auth.SimpleAuthManager, db *sql.DB) func(http.Hand
 				writeJSONError(w, http.StatusUnauthorized, err.Error())
 				return
 			}
-
-			claims, err := validateJWT(tokenString, authManager.GetJWTSecret())
+			ctx, status, err := authenticateToken(r.Context(), authManager, db, tokenString)
 			if err != nil {
-				writeJSONError(w, http.StatusUnauthorized, "invalid or expired token")
-				return
-			}
-			if stringClaim(claims, "purpose") == "pending_2fa" {
-				writeJSONError(w, http.StatusUnauthorized, "two-factor authentication is not complete")
-				return
-			}
-
-			userID := stringClaim(claims, "user_id", "sub")
-			if userID == "" {
-				writeJSONError(w, http.StatusUnauthorized, "token missing user identity")
-				return
-			}
-
-			// Session revocation: if the user's record has been bumped since this
-			// token was issued (password reset, role change, admin edit), the
-			// token is no longer valid. This is a stateless-JWT pattern — the DB
-			// check is a sub-millisecond indexed lookup, so the extra round trip is
-			// free against reality.
-			if db != nil {
-				var updatedAt time.Time
-				if err := db.QueryRowContext(r.Context(),
-					`SELECT updated_at FROM users WHERE id = $1`, userID).Scan(&updatedAt); err == nil {
-					if iat, err := claims.GetIssuedAt(); err == nil && iat != nil {
-						if iat.Before(updatedAt.UTC()) {
-							writeJSONError(w, http.StatusUnauthorized, "token revoked (session invalidated by profile change)")
-							return
-						}
-					}
+				if status == http.StatusServiceUnavailable {
+					log.Printf("requireAuth: %v", err)
+					writeJSONError(w, status, "authentication temporarily unavailable")
+					return
 				}
+				writeJSONError(w, status, err.Error())
+				return
 			}
-
-			ctx := context.WithValue(r.Context(), "user_id", userID)
-			ctx = context.WithValue(ctx, "tenant_id", stringClaim(claims, "tenant_id"))
-			ctx = context.WithValue(ctx, "organization_id", stringClaim(claims, "tenant_id"))
-			ctx = context.WithValue(ctx, "role", stringClaim(claims, "role"))
-			ctx = context.WithValue(ctx, "roles", stringSliceClaim(claims, "roles"))
-
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// registerOrchestrationRoutes mounts the orchestration API (/orchestration/*)
+// on the authenticated /api router, restricted to admins: healing targets are
+// caller-chosen and healing restarts or migrates real VMs across tenants.
+func registerOrchestrationRoutes(apiRouter *mux.Router, api *orchestrationapi.OrchestrationAPI) {
+	orchestrationRouter := apiRouter.NewRoute().Subrouter()
+	orchestrationRouter.Use(requireAnyRoleMiddleware("admin", "super-admin"))
+	api.RegisterRoutes(orchestrationRouter)
 }
 
 func requireAnyRoleMiddleware(requiredRoles ...string) mux.MiddlewareFunc {
@@ -650,9 +517,11 @@ func requireRoleHandler(requiredRole string, next http.HandlerFunc) http.Handler
 	return requireAnyRole(requiredRole)(next)
 }
 
-func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManager, db *sql.DB, twoFactorService *auth.TwoFactorService, emailService *auth.EmailService) {
+func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManager, db *sql.DB, twoFactorService *auth.TwoFactorService, emailService *auth.EmailService, vmManager *core_vm.VMManager) {
 	// emailService carries optional SMTP delivery for the auth token routes;
 	// nil means email is unconfigured and those routes fail closed with 503.
+	// vmManager only informs the cluster summary in the login response.
+	trustedProxies := trustedProxiesFromEnv()
 	loginHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var loginReq struct {
 			Username string `json:"username"`
@@ -680,7 +549,9 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 			return
 		}
 
-		user, token, err := authManager.Authenticate(username, loginReq.Password)
+		// Authenticate's own token is discarded: the access token the client
+		// receives is minted by issueSessionToken with the session's sid.
+		user, _, err := authManager.Authenticate(username, loginReq.Password)
 		if err != nil {
 			writeJSONError(w, http.StatusUnauthorized, "invalid credentials")
 			return
@@ -706,11 +577,7 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"token":     token,
-			"expiresAt": time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
-			"user":      userPayload,
-		})
+		issueAuthResponse(w, r, authManager, db, vmManager, twoFactorService, trustedProxies, user, nil)
 	})
 
 	registerHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1059,20 +926,8 @@ func registerPublicRoutes(router *mux.Router, authManager *auth.SimpleAuthManage
 			return
 		}
 
-		sessionToken, err := issueSessionToken(authManager.GetJWTSecret(), user)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to create session token")
-			return
-		}
-
-		userPayload := frontendUser(user)
-		userPayload["two_factor_enabled"] = true
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"token":                  sessionToken,
-			"expiresAt":              time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
-			"user":                   userPayload,
-			"remaining_backup_codes": verifyResponse.RemainingCodes,
-		})
+		remaining := verifyResponse.RemainingCodes
+		issueAuthResponse(w, r, authManager, db, vmManager, twoFactorService, trustedProxies, user, &remaining)
 	}).Methods(http.MethodPost)
 }
 
@@ -1366,7 +1221,7 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/monitoring/alerts", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, []map[string]interface{}{})
+		writeJSON(w, http.StatusOK, recentAlerts.list())
 	}).Methods(http.MethodGet)
 
 	// Networks: the canonical schema has NO networks catalog table (only the
@@ -2360,21 +2215,28 @@ func initializeCanonicalServices(cfg *config.Config, db *sql.DB, authManager *au
 		return nil, fmt.Errorf("failed to initialize storage-backed volume store: %w", err)
 	}
 
-	graphqlResolver := graphqlapi.NewResolverWithVolumeStore(nil, nil, volumeStore)
+	graphqlResolver := graphqlapi.NewResolverWithVolumeStore(volumeStore)
 	websocketLogger := logrus.New()
 	websocketLogger.SetLevel(logrus.InfoLevel)
-	websocketHandler := websocketapi.NewWebSocketHandler(nil, nil, nil, nil, websocketLogger)
+	websocketHandler := websocketapi.NewWebSocketHandler(nil, nil,
+		websocketapi.AllowedOrigins(cfg.CORS.AllowedOrigins),
+		websocketapi.MetricsProvider(func() map[string]interface{} { return hostMetrics(vmBasePath(cfg)) }),
+		websocketLogger)
 
 	// Initialize orchestration components
 	orchLogger := logrus.New()
 	orchLogger.SetLevel(logrus.InfoLevel)
 
-	// Create event bus (noop for now, can be swapped for NATS)
-	eventBus := events.NewNoopEventBus()
+	// In-process event bus: no NATS config exists in config.Config, so this is
+	// the only real (non-Noop) bus available to api-server; shared by
+	// autoscaler/healing/policy below and by the orchestration engine's own
+	// internal subscription (SetEventBus, right after orchEngine is built).
+	eventBus := events.NewInProcessEventBus(orchLogger)
 
 	// Create orchestration engine
 	orchEngine := orchestration.NewDefaultOrchestrationEngine(orchLogger)
 	orchEngine.SetEvacuationHandler(nil) // Can be wired later if needed
+	orchEngine.SetEventBus(eventBus)     // shares the bus with autoscaler/healing/policy below
 
 	// Create sub-components
 	placementEngine := placement.NewDefaultPlacementEngine(orchLogger)
@@ -2418,6 +2280,9 @@ func initializeCanonicalServices(cfg *config.Config, db *sql.DB, authManager *au
 		graphqlHandler:      graphqlapi.NewVolumeHTTPHandler(graphqlResolver),
 		orchestrationAPI:    orchAPI,
 		orchestrationEngine: orchEngine,
+		healingController:   healingController,
+		eventBus:            eventBus,
+		orchLogger:          orchLogger,
 		shutdown: func() {
 			websocketHandler.Shutdown()
 			// Gracefully stop orchestration components
@@ -2878,12 +2743,74 @@ func registerCanonicalGraphQLRoute(router *mux.Router, authManager *auth.SimpleA
 	router.Handle("/graphql", requireAuth(authManager, db)(handler)).Methods(http.MethodPost)
 }
 
+// wsAuthMiddleware authenticates WebSocket upgrade requests through the same
+// authenticateToken rules requireAuth uses, but sources the bearer token
+// differently: browsers cannot set an Authorization header on a WS
+// handshake, so when one is absent this reads the token from the
+// Sec-WebSocket-Protocol negotiation (`Sec-WebSocket-Protocol: bearer,
+// <token>`) instead — never a `?token=` query parameter, which would leak
+// into proxy access logs. The header path still works for non-browser
+// clients (tests, CLIs) that set Authorization on the handshake.
+func wsAuthMiddleware(authManager *auth.SimpleAuthManager, db *sql.DB) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var tokenString string
+			if authz := r.Header.Get("Authorization"); authz != "" {
+				var err error
+				tokenString, err = extractBearerToken(authz)
+				if err != nil {
+					writeJSONError(w, http.StatusUnauthorized, err.Error())
+					return
+				}
+			} else {
+				tok, ok := bearerSubprotocolToken(r)
+				if !ok {
+					writeJSONError(w, http.StatusUnauthorized, "missing bearer token")
+					return
+				}
+				tokenString = tok
+			}
+
+			ctx, status, err := authenticateToken(r.Context(), authManager, db, tokenString)
+			if err != nil {
+				if status == http.StatusServiceUnavailable {
+					log.Printf("wsAuthMiddleware: %v", err)
+					writeJSONError(w, status, "authentication temporarily unavailable")
+					return
+				}
+				writeJSONError(w, status, err.Error())
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// bearerSubprotocolToken extracts the token from a `Sec-WebSocket-Protocol:
+// bearer, <token>` negotiation list (comma-separated, and RFC 7230 §3.2.2
+// allows the header to repeat instead of being comma-joined, so every
+// occurrence is folded together before splitting).
+func bearerSubprotocolToken(r *http.Request) (string, bool) {
+	raw := strings.Join(r.Header.Values("Sec-WebSocket-Protocol"), ",")
+	parts := strings.Split(raw, ",")
+	for i, p := range parts {
+		if strings.TrimSpace(p) == "bearer" && i+1 < len(parts) {
+			token := strings.TrimSpace(parts[i+1])
+			if token != "" {
+				return token, true
+			}
+		}
+	}
+	return "", false
+}
+
 func registerSecurityWebSocketAliases(router *mux.Router, authManager *auth.SimpleAuthManager, db *sql.DB, handlers *securityapi.SecurityHandlers) {
-	securityStream := requireAuth(authManager, db)(requireRoleHandler("admin", handlers.StreamSecurityEvents))
+	wsAuth := wsAuthMiddleware(authManager, db)
+	securityStream := wsAuth(requireRoleHandler("admin", handlers.StreamSecurityEvents))
 	router.Handle("/api/ws/security/events", securityStream).Methods(http.MethodGet)
 
 	compatSecurityRouter := router.PathPrefix("/api/security").Subrouter()
-	compatSecurityRouter.Use(requireAuth(authManager, db))
+	compatSecurityRouter.Use(wsAuth)
 	compatSecurityRouter.Handle("/events/stream", requireRoleHandler("admin", handlers.StreamSecurityEvents)).Methods(http.MethodGet)
 }
 
@@ -2930,10 +2857,21 @@ func apiInfoHandler() http.HandlerFunc {
 			"name":        "NovaCron API",
 			"version":     "1.0.0",
 			"description": "Distributed VM Management System",
+			// Identity providers this server actually serves; the frontend
+			// hides sign-in buttons for anything not listed (no OAuth here).
+			"auth": map[string]interface{}{
+				"providers": []string{"password"},
+			},
 			"endpoints": []string{
 				"/api/auth/login",
 				"/api/auth/register",
 				"/api/auth/check-email",
+				"/api/auth/me",
+				"/api/auth/refresh",
+				"/api/auth/logout",
+				"/api/auth/sessions",
+				"/api/cluster/admissions",
+				"/api/cluster/admissions/select",
 				"/api/auth/forgot-password",
 				"/api/auth/reset-password",
 				"/api/auth/2fa/setup",
@@ -3108,9 +3046,17 @@ func validatePending2FAToken(tokenString, secret string) (jwt.MapClaims, error) 
 	return claims, nil
 }
 
-func issueSessionToken(secret string, user *auth.User) (string, error) {
+// issueSessionToken is the ONE access-token minting path for the canonical
+// server (login, 2FA verify-login, refresh). HS256 with the api-server
+// secret, carrying exactly the claims authenticateToken reads (user_id/sub,
+// tenant_id, role, roles, iat, exp) plus "sid": the sessions row this token
+// belongs to, so a logout or refresh-token reuse revokes it before exp.
+func issueSessionToken(secret string, user *auth.User, sessionID string) (string, error) {
 	if user == nil {
 		return "", fmt.Errorf("user is required")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return "", fmt.Errorf("session id is required")
 	}
 
 	role := primaryRole(user)
@@ -3119,6 +3065,7 @@ func issueSessionToken(secret string, user *auth.User) (string, error) {
 		roles = []string{role}
 	}
 
+	now := time.Now()
 	claims := jwt.MapClaims{
 		"user_id":   user.ID,
 		"sub":       user.ID,
@@ -3127,8 +3074,9 @@ func issueSessionToken(secret string, user *auth.User) (string, error) {
 		"role":      role,
 		"roles":     roles,
 		"tenant_id": user.TenantID,
-		"exp":       time.Now().Add(24 * time.Hour).Unix(),
-		"iat":       time.Now().Unix(),
+		"sid":       sessionID,
+		"exp":       now.Add(accessTokenTTL).Unix(),
+		"iat":       now.Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

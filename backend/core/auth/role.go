@@ -2,6 +2,7 @@ package auth
 
 import (
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -143,8 +144,44 @@ var SystemRoles = map[string]*Role{
 	},
 }
 
+// clonePermissions returns an independent copy of perms, deep-copying each
+// permission's Conditions map so a caller cannot mutate a store's internal
+// state through a returned slice/element.
+func clonePermissions(perms []Permission) []Permission {
+	if perms == nil {
+		return nil
+	}
+	out := make([]Permission, len(perms))
+	for i, p := range perms {
+		out[i] = p
+		if p.Conditions != nil {
+			out[i].Conditions = make(map[string]interface{}, len(p.Conditions))
+			for k, v := range p.Conditions {
+				out[i].Conditions[k] = v
+			}
+		}
+	}
+	return out
+}
+
+// cloneRole returns a deep copy of r (Permissions and Metadata included), so a
+// caller mutating the result cannot affect the store's internal state.
+func cloneRole(r *Role) *Role {
+	if r == nil {
+		return nil
+	}
+	clone := *r
+	clone.Permissions = clonePermissions(r.Permissions)
+	clone.Metadata = make(map[string]interface{}, len(r.Metadata))
+	for k, v := range r.Metadata {
+		clone.Metadata[k] = v
+	}
+	return &clone
+}
+
 // RoleMemoryStore is an in-memory implementation of RoleService
 type RoleMemoryStore struct {
+	mu    sync.RWMutex
 	roles map[string]*Role
 }
 
@@ -154,9 +191,11 @@ func NewRoleMemoryStore() *RoleMemoryStore {
 		roles: make(map[string]*Role),
 	}
 
-	// Add system roles
+	// Add system roles. Each store instance gets its own independent copy so
+	// mutating one store's "admin" role (e.g. via AddPermission) cannot leak
+	// into every other store sharing the package-level SystemRoles map.
 	for _, role := range SystemRoles {
-		store.roles[role.ID] = role
+		store.roles[role.ID] = cloneRole(role)
 	}
 
 	return store
@@ -164,6 +203,9 @@ func NewRoleMemoryStore() *RoleMemoryStore {
 
 // Create creates a new role
 func (s *RoleMemoryStore) Create(role *Role) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if _, exists := s.roles[role.ID]; exists {
 		return fmt.Errorf("role already exists: %s", role.ID)
 	}
@@ -173,21 +215,27 @@ func (s *RoleMemoryStore) Create(role *Role) error {
 		return fmt.Errorf("cannot override system role: %s", systemRole.Name)
 	}
 
-	s.roles[role.ID] = role
+	s.roles[role.ID] = cloneRole(role)
 	return nil
 }
 
 // Get gets a role by ID
 func (s *RoleMemoryStore) Get(id string) (*Role, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	role, exists := s.roles[id]
 	if !exists {
 		return nil, fmt.Errorf("role not found: %s", id)
 	}
-	return role, nil
+	return cloneRole(role), nil
 }
 
 // List lists roles with optional filtering
 func (s *RoleMemoryStore) List(filter map[string]interface{}) ([]*Role, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	roles := make([]*Role, 0, len(s.roles))
 
 	for _, role := range s.roles {
@@ -205,7 +253,7 @@ func (s *RoleMemoryStore) List(filter map[string]interface{}) ([]*Role, error) {
 			}
 		}
 		if match {
-			roles = append(roles, role)
+			roles = append(roles, cloneRole(role))
 		}
 	}
 
@@ -214,6 +262,9 @@ func (s *RoleMemoryStore) List(filter map[string]interface{}) ([]*Role, error) {
 
 // Update updates a role
 func (s *RoleMemoryStore) Update(role *Role) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if _, exists := s.roles[role.ID]; !exists {
 		return fmt.Errorf("role not found: %s", role.ID)
 	}
@@ -223,12 +274,15 @@ func (s *RoleMemoryStore) Update(role *Role) error {
 		return fmt.Errorf("cannot modify system role: %s", systemRole.Name)
 	}
 
-	s.roles[role.ID] = role
+	s.roles[role.ID] = cloneRole(role)
 	return nil
 }
 
 // Delete deletes a role
 func (s *RoleMemoryStore) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if _, exists := s.roles[id]; !exists {
 		return fmt.Errorf("role not found: %s", id)
 	}
@@ -244,6 +298,9 @@ func (s *RoleMemoryStore) Delete(id string) error {
 
 // AddPermission adds a permission to a role
 func (s *RoleMemoryStore) AddPermission(roleID string, permission Permission) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	role, exists := s.roles[roleID]
 	if !exists {
 		return fmt.Errorf("role not found: %s", roleID)
@@ -255,11 +312,13 @@ func (s *RoleMemoryStore) AddPermission(roleID string, permission Permission) er
 	}
 
 	// Check if the permission already exists
-	for _, p := range role.Permissions {
+	for i, p := range role.Permissions {
 		if p.Resource == permission.Resource && p.Action == permission.Action {
-			// Update the permission
-			p.Effect = permission.Effect
-			p.Conditions = permission.Conditions
+			// Update the permission in place — indexing into the slice
+			// (rather than ranging over a copy) so the change actually
+			// persists onto the stored role.
+			role.Permissions[i].Effect = permission.Effect
+			role.Permissions[i].Conditions = permission.Conditions
 			return nil
 		}
 	}
@@ -271,6 +330,9 @@ func (s *RoleMemoryStore) AddPermission(roleID string, permission Permission) er
 
 // RemovePermission removes a permission from a role
 func (s *RoleMemoryStore) RemovePermission(roleID string, resource string, action string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	role, exists := s.roles[roleID]
 	if !exists {
 		return fmt.Errorf("role not found: %s", roleID)
@@ -294,6 +356,9 @@ func (s *RoleMemoryStore) RemovePermission(roleID string, resource string, actio
 
 // HasPermission checks if a role has a specific permission
 func (s *RoleMemoryStore) HasPermission(roleID string, resource string, action string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	role, exists := s.roles[roleID]
 	if !exists {
 		return false, fmt.Errorf("role not found: %s", roleID)

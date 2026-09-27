@@ -25,6 +25,9 @@ const (
 
 // TestThroughputValidation validates system throughput under various loads
 func TestThroughputValidation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping long-running performance validation in short mode")
+	}
 	suite := NewPerformanceTestSuite(t)
 	defer suite.Cleanup()
 
@@ -55,6 +58,9 @@ func TestThroughputValidation(t *testing.T) {
 
 // TestLatencyValidation validates latency under various conditions
 func TestLatencyValidation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping long-running performance validation in short mode")
+	}
 	suite := NewPerformanceTestSuite(t)
 	defer suite.Cleanup()
 
@@ -99,6 +105,9 @@ func TestScalabilityValidation(t *testing.T) {
 
 // TestStressValidation validates system under extreme stress
 func TestStressValidation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping long-running performance validation in short mode")
+	}
 	suite := NewPerformanceTestSuite(t)
 	defer suite.Cleanup()
 
@@ -217,7 +226,7 @@ func testSequentialWriteThroughput(t *testing.T, suite *PerformanceTestSuite) {
 
 	// Test configuration
 	blockSize := 4 * 1024 * 1024 // 4MB blocks
-	totalData := 1024 * 1024 * 1024 * 1024 // 1TB
+	totalData := int64(1024) * 1024 * 1024 * 1024 // 1TB
 	numThreads := 128
 
 	// Create test volumes
@@ -283,7 +292,7 @@ func testSequentialReadThroughput(t *testing.T, suite *PerformanceTestSuite) {
 	ctx := context.Background()
 
 	blockSize := 4 * 1024 * 1024 // 4MB blocks
-	totalData := 1024 * 1024 * 1024 * 1024 // 1TB
+	totalData := int64(1024) * 1024 * 1024 * 1024 // 1TB
 	numThreads := 128
 
 	// Use pre-populated volumes from write test or create new ones

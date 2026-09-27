@@ -2,7 +2,6 @@ package maddpg
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 )
 

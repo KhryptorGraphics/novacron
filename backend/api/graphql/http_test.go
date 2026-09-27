@@ -23,7 +23,7 @@ func TestNewVolumeHTTPHandlerSupportsVolumeLifecycle(t *testing.T) {
 		t.Fatalf("create storage manager: %v", err)
 	}
 
-	handler := NewVolumeHTTPHandler(NewResolverWithVolumeStore(nil, nil, store))
+	handler := NewVolumeHTTPHandler(NewResolverWithVolumeStore(store))
 
 	createBody := requestEnvelope{
 		Query: "mutation CreateVolume($input: CreateVolumeInput!) { createVolume(input: $input) { id name size tier vmId } }",
@@ -124,7 +124,7 @@ func TestVolumeListHonorsOptionalPagination(t *testing.T) {
 		t.Fatalf("create storage manager: %v", err)
 	}
 
-	handler := NewVolumeHTTPHandler(NewResolverWithVolumeStore(nil, nil, store))
+	handler := NewVolumeHTTPHandler(NewResolverWithVolumeStore(store))
 	createBody := requestEnvelope{
 		Query: "mutation CreateVolume($input: CreateVolumeInput!) { createVolume(input: $input) { id } }",
 		Variables: map[string]interface{}{
@@ -171,7 +171,7 @@ func TestVolumeListHonorsOptionalPagination(t *testing.T) {
 func TestNewVolumeHTTPHandlerRejectsUnsupportedOperations(t *testing.T) {
 	t.Parallel()
 
-	handler := NewVolumeHTTPHandler(NewResolver(nil, nil))
+	handler := NewVolumeHTTPHandler(NewResolver())
 
 	body := requestEnvelope{
 		Query: "query Unsupported { vm(id: \"1\") { id } }",

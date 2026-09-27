@@ -28,19 +28,22 @@ export interface UserResponse {
   roles?: string[] | undefined;
 }
 
+// Mirrors ClusterSummaryResponse in backend/cmd/api-server/auth_session.go:
+// api-server serves one cluster (the local fabric) and only reports fields it
+// can actually measure; everything else is absent rather than invented.
 export interface ClusterSummaryResponse {
   id: string;
   name: string;
-  tier: string;
-  performanceScore: number;
-  interconnectLatencyMs: number;
-  interconnectBandwidthMbps: number;
+  tier?: string;
+  performanceScore?: number;
+  interconnectLatencyMs?: number;
+  interconnectBandwidthMbps?: number;
   currentNodeCount: number;
-  maxSupportedNodeCount: number;
-  growthState: string;
-  federationState: string;
-  degraded: boolean;
-  lastEvaluatedAt: string;
+  maxSupportedNodeCount?: number;
+  growthState?: string;
+  federationState?: string;
+  degraded?: boolean;
+  lastEvaluatedAt?: string;
   edgeLatencyMs?: number;
   edgeBandwidthMbps?: number;
 }
@@ -84,6 +87,13 @@ export interface CurrentUserResponse {
   memberships: AdmissionResponse[];
   selectedCluster?: ClusterSummaryResponse;
   session: SessionResponse;
+}
+
+export interface ServerInfoResponse {
+  name: string;
+  version: string;
+  description: string;
+  auth?: { providers: string[] };
 }
 
 interface OAuthAuthorizationUrlResponse {
@@ -371,10 +381,14 @@ class AuthService {
   }
 
   async logout(): Promise<void> {
+    // The refresh token is the primary revocation handle: it outlives the
+    // access token, so logout still revokes the server session after the
+    // access token expired. The server falls back to the bearer token's sid.
+    const refreshToken = this.getRefreshToken();
     try {
       await this.request('/api/auth/logout', {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify(refreshToken ? { refreshToken } : {}),
       });
     } catch (error) {
       console.warn('Runtime logout failed, clearing local auth state:', error);
@@ -434,6 +448,10 @@ class AuthService {
 
   async checkEmailAvailability(email: string): Promise<{ available: boolean }> {
     return this.request<{ available: boolean }>(`/api/auth/check-email?email=${encodeURIComponent(email)}`);
+  }
+
+  async getServerInfo(): Promise<ServerInfoResponse> {
+    return this.request<ServerInfoResponse>('/api/info', { method: 'GET' });
   }
 
   async forgotPassword(data: ForgotPasswordRequest): Promise<{ message: string }> {

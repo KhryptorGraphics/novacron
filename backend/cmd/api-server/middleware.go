@@ -3,7 +3,6 @@
 package main
 
 import (
-	"net"
 	"net/http"
 	"net/netip"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/khryptorgraphics/novacron/backend/core/netutil"
 	"github.com/khryptorgraphics/novacron/backend/pkg/logger"
 )
 
@@ -134,7 +134,7 @@ func newLoginRateLimiter(limit int, window time.Duration) *loginRateLimiter {
 // newLoginRateLimiterFromEnv resolves NOVACRON_LOGIN_RATE_LIMIT (attempts per
 // window, 0 disables) and NOVACRON_LOGIN_RATE_WINDOW_S (seconds), falling back
 // to the defaults above for unset or unparsable values, plus
-// NOVACRON_TRUSTED_PROXIES (see parseTrustedProxies).
+// NOVACRON_TRUSTED_PROXIES (see netutil.ParseTrustedProxies).
 func newLoginRateLimiterFromEnv() *loginRateLimiter {
 	limit := defaultLoginRateLimit
 	if v := os.Getenv("NOVACRON_LOGIN_RATE_LIMIT"); v != "" {
@@ -152,7 +152,7 @@ func newLoginRateLimiterFromEnv() *loginRateLimiter {
 
 	limiter := newLoginRateLimiter(limit, window)
 	if limiter != nil {
-		limiter.trustedProxies = parseTrustedProxies(os.Getenv("NOVACRON_TRUSTED_PROXIES"))
+		limiter.trustedProxies = netutil.ParseTrustedProxies(os.Getenv("NOVACRON_TRUSTED_PROXIES"))
 	}
 	return limiter
 }
@@ -234,69 +234,14 @@ func (l *loginRateLimiter) makeRoomLocked(now time.Time) {
 	}
 }
 
-// clientIP is the limiter's bucket key. X-Forwarded-For/X-Real-IP are honored
-// only when the immediate peer is listed in NOVACRON_TRUSTED_PROXIES: those
-// headers are client-supplied, so believing them by default would let one
-// caller mint a new bucket per request and bypass the limit entirely.
+// clientIP is the limiter's bucket key, resolved via the shared netutil
+// client-IP algorithm. "unknown" is a rate-limiter-only bucket fallback for
+// when no address resolves at all; it is never treated as a real IP.
 func (l *loginRateLimiter) clientIP(r *http.Request) string {
-	remote := hostOf(r.RemoteAddr)
-	if remote != "" && l.isTrustedProxy(remote) {
-		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-			if first := strings.TrimSpace(strings.Split(forwarded, ",")[0]); first != "" {
-				return first
-			}
-		}
-		if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
-			return realIP
-		}
-	}
-	if remote != "" {
-		return remote
+	if ip := netutil.ClientIPString(r, l.trustedProxies); ip != "" {
+		return ip
 	}
 	return "unknown"
-}
-
-func (l *loginRateLimiter) isTrustedProxy(remote string) bool {
-	addr, err := netip.ParseAddr(remote)
-	if err != nil {
-		return false
-	}
-	for _, prefix := range l.trustedProxies {
-		if prefix.Contains(addr) {
-			return true
-		}
-	}
-	return false
-}
-
-// parseTrustedProxies parses NOVACRON_TRUSTED_PROXIES — a comma-separated list
-// of IPs or CIDR blocks. Entries that do not parse are ignored, so a typo
-// narrows trust rather than widening it.
-func parseTrustedProxies(raw string) []netip.Prefix {
-	var proxies []netip.Prefix
-	for _, entry := range strings.Split(raw, ",") {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		if prefix, err := netip.ParsePrefix(entry); err == nil {
-			proxies = append(proxies, prefix.Masked())
-			continue
-		}
-		if addr, err := netip.ParseAddr(entry); err == nil {
-			proxies = append(proxies, netip.PrefixFrom(addr, addr.BitLen()))
-		}
-	}
-	return proxies
-}
-
-// hostOf strips the port from a RemoteAddr, tolerating the portless forms
-// (bare IP) that tests and unix-socket peers produce.
-func hostOf(remoteAddr string) string {
-	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
-		return host
-	}
-	return strings.TrimSpace(remoteAddr)
 }
 
 // pruneOlderThan drops attempts at or before cutoff. hits is append-ordered, so

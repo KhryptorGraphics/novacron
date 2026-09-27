@@ -37,7 +37,6 @@ type EmailSettings struct {
 // ServerConfig holds HTTP server configuration
 type ServerConfig struct {
 	APIPort         string        `json:"api_port" env:"API_PORT" default:"8090"`
-	WSPort          string        `json:"ws_port" env:"WS_PORT" default:"8091"`
 	ReadTimeout     time.Duration `json:"read_timeout" env:"READ_TIMEOUT" default:"15s"`
 	WriteTimeout    time.Duration `json:"write_timeout" env:"WRITE_TIMEOUT" default:"15s"`
 	IdleTimeout     time.Duration `json:"idle_timeout" env:"IDLE_TIMEOUT" default:"60s"`
@@ -96,7 +95,6 @@ func Load() (*Config, error) {
 	// Load server configuration
 	config.Server = ServerConfig{
 		APIPort:         getEnvOrDefault("API_PORT", "8090"),
-		WSPort:          getEnvOrDefault("WS_PORT", "8091"),
 		ReadTimeout:     getEnvDurationOrDefault("READ_TIMEOUT", 15*time.Second),
 		WriteTimeout:    getEnvDurationOrDefault("WRITE_TIMEOUT", 15*time.Second),
 		IdleTimeout:     getEnvDurationOrDefault("IDLE_TIMEOUT", 60*time.Second),

@@ -136,7 +136,7 @@ func TestRegisterPublicRoutesSupportsCanonicalEmailLogin(t *testing.T) {
 
 	authManager := auth.NewSimpleAuthManager("test-secret", db)
 	router := mux.NewRouter()
-	registerPublicRoutes(router, authManager, db, nil, nil)
+	registerPublicRoutes(router, authManager, db, nil, nil, nil)
 
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte("correct-horse-battery-staple"), bcrypt.DefaultCost)
 	if err != nil {
@@ -154,6 +154,7 @@ func TestRegisterPublicRoutesSupportsCanonicalEmailLogin(t *testing.T) {
 		WithArgs("user").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "created_at", "updated_at", "organization_id"}).
 			AddRow("7", "user", "user@example.com", string(passwordHash), "admin", "active", now, now, "00000000-0000-0000-0000-000000000001"))
+	expectSessionInsert(mock, "7", testSessionID)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"user@example.com","password":"correct-horse-battery-staple"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -166,14 +167,19 @@ func TestRegisterPublicRoutesSupportsCanonicalEmailLogin(t *testing.T) {
 	}
 
 	var payload struct {
-		Token string `json:"token"`
-		User  struct {
+		Token        string `json:"token"`
+		RefreshToken string `json:"refreshToken"`
+		User         struct {
 			ID       string   `json:"id"`
 			Email    string   `json:"email"`
 			Role     string   `json:"role"`
 			Roles    []string `json:"roles"`
 			TenantID string   `json:"tenantId"`
 		} `json:"user"`
+		Admission       AdmissionResponse       `json:"admission"`
+		Memberships     []AdmissionResponse     `json:"memberships"`
+		SelectedCluster *ClusterSummaryResponse `json:"selectedCluster"`
+		Session         SessionResponse         `json:"session"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
@@ -190,6 +196,19 @@ func TestRegisterPublicRoutesSupportsCanonicalEmailLogin(t *testing.T) {
 	}
 	if payload.User.TenantID != "00000000-0000-0000-0000-000000000001" {
 		t.Fatalf("expected tenantId to be the seeded default org UUID, got %q", payload.User.TenantID)
+	}
+	if payload.RefreshToken == "" {
+		t.Fatal("expected refreshToken in login response")
+	}
+	if !payload.Admission.Admitted || len(payload.Memberships) != 1 || payload.SelectedCluster == nil || payload.SelectedCluster.ID == "" {
+		t.Fatalf("expected the local-fabric admission in the login response, got admission=%#v memberships=%#v selected=%#v", payload.Admission, payload.Memberships, payload.SelectedCluster)
+	}
+	if payload.Session.ID != testSessionID {
+		t.Fatalf("expected session %s, got %#v", testSessionID, payload.Session)
+	}
+	claims, err := validateJWT(payload.Token, authManager.GetJWTSecret())
+	if err != nil || stringClaim(claims, "sid") != testSessionID {
+		t.Fatalf("expected access token bound to session %s, got %#v (%v)", testSessionID, claims, err)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -542,7 +561,7 @@ func TestRegisterCanonicalGraphQLRouteSupportsVolumeOperations(t *testing.T) {
 		router,
 		authManager,
 		nil,
-		graphqlapi.NewVolumeHTTPHandler(graphqlapi.NewResolverWithVolumeStore(nil, nil, volumeStore)),
+		graphqlapi.NewVolumeHTTPHandler(graphqlapi.NewResolverWithVolumeStore(volumeStore)),
 	)
 
 	createReq := httptest.NewRequest(http.MethodPost, "/graphql", bytes.NewBufferString(`{
@@ -638,7 +657,7 @@ func TestBuildCanonicalServerSupportsLiveStartup(t *testing.T) {
 		securityHandlers: securityHandlers,
 		websocketHandler: wsHandler,
 		graphqlHandler: graphqlapi.NewVolumeHTTPHandler(
-			graphqlapi.NewResolverWithVolumeStore(nil, nil, volumeStore),
+			graphqlapi.NewResolverWithVolumeStore(volumeStore),
 		),
 		shutdown: func() {
 			wsHandler.Shutdown()
@@ -718,6 +737,12 @@ func TestBuildCanonicalServerSupportsLiveStartup(t *testing.T) {
 		WithArgs("admin").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "created_at", "updated_at", "organization_id"}).
 			AddRow("7", "admin", "admin@example.com", string(passwordHash), "admin", "active", now, now, "00000000-0000-0000-0000-000000000001"))
+	expectSessionInsert(mock, "7", testSessionID)
+	// Every authenticated request below (compliance, websocket, three GraphQL
+	// calls) now hits the fail-closed users/sessions lookup.
+	for range 5 {
+		expectAuthLookup(mock, "7", testSessionID, now.Add(-time.Minute), "active", true)
+	}
 
 	loginReq, err := http.NewRequest(http.MethodPost, baseURL+"/api/auth/login", strings.NewReader(`{"email":"admin@example.com","password":"correct-horse-battery-staple"}`))
 	if err != nil {
@@ -906,7 +931,7 @@ func newRateLimitedLoginTestRouter(t *testing.T) (*mux.Router, func(remoteAddr s
 
 	authManager := auth.NewSimpleAuthManager("test-secret", db)
 	router := mux.NewRouter()
-	registerPublicRoutes(router, authManager, db, nil, nil)
+	registerPublicRoutes(router, authManager, db, nil, nil, nil)
 
 	return router, func(remoteAddr string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/login",

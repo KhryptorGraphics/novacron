@@ -76,9 +76,10 @@ export default function AnalyticsPage() {
       try {
         const token = authService.getToken();
         const [metricsResponse, networks] = await Promise.all([
-          fetch(buildApiV1Url('/monitoring/metrics'), {
-            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-          }),
+          fetch(
+            buildApiV1Url('/monitoring/metrics'),
+            token ? { headers: { Authorization: `Bearer ${token}` } } : {},
+          ),
           networkApi.listNetworks().catch(() => []),
         ]);
 

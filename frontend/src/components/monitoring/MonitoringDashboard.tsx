@@ -403,8 +403,14 @@ const MonitoringDashboard: React.FC = () => {
     refetchInterval: 30000, // Refetch every 30 seconds
   });
 
-  // WebSocket for real-time updates
+  // WebSocket for real-time updates. Token travels via the
+  // Sec-WebSocket-Protocol handshake (browsers can't set an Authorization
+  // header on a WS upgrade).
+  const wsAuthToken = typeof window !== 'undefined' ? localStorage.getItem('novacron_token') : null;
+  const wsProtocolsOpt = wsAuthToken ? { protocols: ['bearer', wsAuthToken] } : {};
+
   const { lastMessage } = useWebSocket(buildWebSocketUrls('/api/ws/metrics')[0], {
+    ...wsProtocolsOpt,
     onOpen: () => {
       console.log('WebSocket connected');
     },
@@ -419,35 +425,41 @@ const MonitoringDashboard: React.FC = () => {
     shouldReconnect: () => true,
   });
 
-  // Process WebSocket messages
+  // Alerts arrive on a separate channel ({type, data, timestamp} shape) —
+  // they never arrive on /api/ws/metrics.
+  const { lastMessage: lastAlertMessage } = useWebSocket(buildWebSocketUrls('/api/ws/alerts')[0], {
+    ...wsProtocolsOpt,
+    shouldReconnect: () => true,
+  });
+
+  // Process metrics WebSocket messages
   useEffect(() => {
     if (lastMessage !== null) {
       const data = JSON.parse(lastMessage.data);
-      
-      // Handle different message types
-      switch (data.type) {
-        case 'metric':
-          // Update metrics in real-time
-          refetchMetrics();
-          break;
-        case 'alert':
-          // Show toast for new alerts and refetch alerts list
-          if (data.alert && data.alert.status === 'firing') {
-            toast({
-              title: `${data.alert.severity.toUpperCase()}: ${data.alert.name}`,
-              description: data.alert.description,
-              variant: 'destructive',
-            });
-          }
-          refetchAlerts();
-          break;
-        case 'vm':
-          // Update VM metrics
-          refetchVMs();
-          break;
+      if (data.type === 'metric') {
+        refetchMetrics();
       }
     }
-  }, [lastMessage, refetchMetrics, refetchAlerts, refetchVMs, toast]);
+  }, [lastMessage, refetchMetrics]);
+
+  // Process alerts WebSocket messages
+  useEffect(() => {
+    if (lastAlertMessage !== null) {
+      const msg = JSON.parse(lastAlertMessage.data);
+      if (msg.type === 'security_alert') {
+        if (msg.data?.status === 'firing') {
+          toast({
+            title: `${String(msg.data.severity ?? '').toUpperCase()}: ${msg.data.title ?? ''}`,
+            description: msg.data.description,
+            variant: 'destructive',
+          });
+        }
+        refetchAlerts();
+      } else if (msg.type === 'vm_status') {
+        refetchVMs();
+      }
+    }
+  }, [lastAlertMessage, refetchAlerts, refetchVMs, toast]);
 
   // Handle alert acknowledgment
   const handleAcknowledgeAlert = async (alertId: string) => {

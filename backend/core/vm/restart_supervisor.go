@@ -74,6 +74,14 @@ type VMRestartStatus struct {
 	UpdatedAt     time.Time     `json:"updated_at"`
 }
 
+// IsRecordStopped reports whether this row was intentionally stopped via
+// RecordStop (never auto-restarted regardless of policy).
+func (s VMRestartStatus) IsRecordStopped() bool { return s.State == restartStateStopped }
+
+// IsPermanentFailure reports whether this row exhausted its restart
+// attempts and stopped retrying.
+func (s VMRestartStatus) IsPermanentFailure() bool { return s.State == restartStatePermanentFailure }
+
 // vmRestartRecord is the supervisor's live per-VM state.
 type vmRestartRecord struct {
 	policy        RestartPolicy
@@ -194,6 +202,58 @@ func (s *RestartSupervisor) RecordStart(ctx context.Context, vmID string) {
 	upsert := rec
 	s.recMu.Unlock()
 	s.persist(ctx, vmID, upsert)
+}
+
+// RequestRestart immediately attempts to restart vmID, enforcing the same
+// rules tickVM's scheduled path does: refuses when the VM has been
+// RecordStop'd, when its policy is "no", or when it has already exhausted
+// its restart attempts (permanent-failure). Used by healing's restart
+// strategy so an ad-hoc healing-triggered restart can never bypass
+// supervisor policy. A successful restart re-arms the VM via RecordStart
+// (resets the crash-spree counter, same as the scheduled restart path).
+func (s *RestartSupervisor) RequestRestart(ctx context.Context, vmID string) error {
+	vm, err := s.manager.GetVM(vmID)
+	if err != nil {
+		return err
+	}
+	driver, err := s.manager.getDriverForVM(vm)
+	if err != nil {
+		return fmt.Errorf("no driver for VM %s: %w", vmID, err)
+	}
+
+	s.recMu.Lock()
+	rec := s.recordLocked(vmID, ctx)
+	switch rec.state {
+	case restartStateStopped:
+		s.recMu.Unlock()
+		return fmt.Errorf("vm %s was intentionally stopped; refusing restart", vmID)
+	case restartStatePermanentFailure:
+		s.recMu.Unlock()
+		return fmt.Errorf("vm %s has exhausted its restart attempts (%d); refusing restart", vmID, restartMaxAttempts)
+	}
+	if rec.policy == RestartPolicyNo {
+		s.recMu.Unlock()
+		return fmt.Errorf("vm %s restart policy is %q; refusing restart", vmID, RestartPolicyNo)
+	}
+	s.recMu.Unlock()
+
+	if err := s.restartVM(ctx, vm, driver); err != nil {
+		now := s.now()
+		s.recMu.Lock()
+		if rec2 := s.records[vmID]; rec2 != nil {
+			rec2.lastError = err.Error()
+			rec2.updatedAt = now
+			row := *rec2
+			s.recMu.Unlock()
+			s.persist(ctx, vmID, &row)
+		} else {
+			s.recMu.Unlock()
+		}
+		return err
+	}
+
+	s.RecordStart(ctx, vmID)
+	return nil
 }
 
 // RecordStop marks a VM intentionally stopped so the supervisor will not

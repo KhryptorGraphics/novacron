@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -386,8 +387,15 @@ func (a *DefaultAuditLogger) calculateEventHash(event AuditEvent) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// SimpleAuditLogger is a basic implementation for backward compatibility
+// simpleAuditLoggerMaxEvents bounds the in-memory history kept by
+// SimpleAuditLogger; the oldest events are discarded first so a long-running
+// server's memory stays flat.
+const simpleAuditLoggerMaxEvents = 10000
+
+// SimpleAuditLogger is a basic in-memory implementation for backward compatibility.
+// It is safe for concurrent use.
 type SimpleAuditLogger struct {
+	mu     sync.RWMutex
 	events []AuditEvent
 }
 
@@ -406,7 +414,13 @@ func (l *SimpleAuditLogger) LogEvent(ctx context.Context, event *AuditEvent) err
 	if event.ID == "" {
 		event.ID = uuid.New().String()
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.events = append(l.events, *event)
+	if overflow := len(l.events) - simpleAuditLoggerMaxEvents; overflow > 0 {
+		// Copy into a fresh slice so the discarded prefix is released.
+		l.events = append(make([]AuditEvent, 0, simpleAuditLoggerMaxEvents), l.events[overflow:]...)
+	}
 	return nil
 }
 
@@ -485,6 +499,8 @@ func (l *SimpleAuditLogger) LogConfigChange(ctx context.Context, actor, resource
 }
 
 func (l *SimpleAuditLogger) Query(ctx context.Context, filter AuditFilter) ([]AuditEvent, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	var filtered []AuditEvent
 
 	for _, event := range l.events {
@@ -496,17 +512,22 @@ func (l *SimpleAuditLogger) Query(ctx context.Context, filter AuditFilter) ([]Au
 }
 
 func (l *SimpleAuditLogger) VerifyIntegrity(ctx context.Context, startTime, endTime time.Time) (*IntegrityReport, error) {
+	l.mu.RLock()
+	total := len(l.events)
+	l.mu.RUnlock()
 	return &IntegrityReport{
 		Valid:        true,
 		StartTime:    startTime,
 		EndTime:      endTime,
-		TotalRecords: len(l.events),
-		ValidRecords: len(l.events),
+		TotalRecords: total,
+		ValidRecords: total,
 	}, nil
 }
 
 // QueryEvents queries audit events
 func (l *SimpleAuditLogger) QueryEvents(ctx context.Context, filter *AuditFilter) ([]*AuditEvent, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	var filtered []*AuditEvent
 
 	for _, event := range l.events {

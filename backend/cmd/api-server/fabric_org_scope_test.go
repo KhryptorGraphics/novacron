@@ -45,6 +45,7 @@ func orgScopeToken(t *testing.T, authMgr *auth.SimpleAuthManager, userID, orgID,
 		"role":      role,
 		"roles":     []string{role},
 		"exp":       time.Now().Add(time.Hour).Unix(),
+		"iat":       time.Now().Unix(),
 	})
 	signed, err := token.SignedString([]byte(authMgr.GetJWTSecret()))
 	if err != nil {

@@ -590,7 +590,8 @@ func (o *V5OpsCenter) printOperationalStatus() {
 	fmt.Printf("Availability:       %.6f%%\n", o.metrics.CurrentAvailability*100)
 	fmt.Printf("Average MTTR:       %v\n", o.metrics.AverageMTTR)
 	fmt.Printf("Prediction Accuracy: %.2f%%\n", o.metrics.PredictionAccuracy*100)
-	fmt.Println("========================================\n")
+	fmt.Println("========================================")
+	fmt.Println()
 }
 
 // Supporting types and constructors

@@ -354,6 +354,12 @@ func TestRestartSupervisorPermanentFailureAfterMaxAttempts(t *testing.T) {
 	if status.LastError == "" {
 		t.Fatal("permanent failure carried no last error")
 	}
+	if !status.IsPermanentFailure() {
+		t.Fatalf("IsPermanentFailure() = false for state %q", status.State)
+	}
+	if status.IsRecordStopped() {
+		t.Fatal("IsRecordStopped() should be false for a permanent-failure row")
+	}
 
 	// Once permanent-failure, further observation changes nothing.
 	nBefore, _, _ := fake.callCounts("vm-doomed")
@@ -389,6 +395,12 @@ func TestRestartSupervisorRecordStopSuppressesAlways(t *testing.T) {
 	status, _ := sup.Inspect(ctx, "vm-stopped")
 	if status.State != restartStateStopped {
 		t.Fatalf("state = %q, want %q", status.State, restartStateStopped)
+	}
+	if !status.IsRecordStopped() {
+		t.Fatal("IsRecordStopped() = false for a RecordStop'd row")
+	}
+	if status.IsPermanentFailure() {
+		t.Fatal("IsPermanentFailure() should be false for a RecordStop'd row")
 	}
 
 	// A fresh RecordStart re-arms supervision.
@@ -444,5 +456,95 @@ func TestRestartSupervisorBackoffSequence(t *testing.T) {
 		if got := restartBackoff(i + 1); got != w*time.Second {
 			t.Fatalf("backoff(%d) = %v, want %v", i+1, got, w*time.Second)
 		}
+	}
+}
+
+func TestRequestRestartCallsDriverAndReArms(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeCrashDriver()
+	clock := newFakeClock()
+	_, sup := newSupervisedVM(t, "vm-adhoc", fake, clock)
+	sup.RecordStart(ctx, "vm-adhoc")
+
+	if err := sup.RequestRestart(ctx, "vm-adhoc"); err != nil {
+		t.Fatalf("RequestRestart: %v", err)
+	}
+
+	starts, stops, _ := fake.callCounts("vm-adhoc")
+	if starts != 1 || stops != 1 {
+		t.Fatalf("starts=%d stops=%d, want 1/1", starts, stops)
+	}
+	status, ok := sup.Inspect(ctx, "vm-adhoc")
+	if !ok {
+		t.Fatal("Inspect did not find supervised VM")
+	}
+	if status.State != restartStateWatching {
+		t.Fatalf("state = %q, want %q after RequestRestart", status.State, restartStateWatching)
+	}
+	if status.Attempts != 0 {
+		t.Fatalf("attempts = %d, want 0 (RequestRestart re-arms via RecordStart)", status.Attempts)
+	}
+}
+
+func TestRequestRestartRefusesAfterRecordStop(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeCrashDriver()
+	clock := newFakeClock()
+	_, sup := newSupervisedVM(t, "vm-stopped-adhoc", fake, clock)
+	sup.RecordStart(ctx, "vm-stopped-adhoc")
+	sup.RecordStop(ctx, "vm-stopped-adhoc")
+
+	if err := sup.RequestRestart(ctx, "vm-stopped-adhoc"); err == nil {
+		t.Fatal("expected RequestRestart to refuse a RecordStop'd VM")
+	}
+	if starts, _, _ := fake.callCounts("vm-stopped-adhoc"); starts != 0 {
+		t.Fatalf("driver Start called %d times, want 0", starts)
+	}
+}
+
+func TestRequestRestartRefusesUnderPolicyNo(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeCrashDriver()
+	clock := newFakeClock()
+	_, sup := newSupervisedVM(t, "vm-policy-no-adhoc", fake, clock)
+	sup.SetRestartPolicy("vm-policy-no-adhoc", RestartPolicyNo)
+	sup.RecordStart(ctx, "vm-policy-no-adhoc")
+
+	if err := sup.RequestRestart(ctx, "vm-policy-no-adhoc"); err == nil {
+		t.Fatal("expected RequestRestart to refuse under policy=no")
+	}
+	if starts, _, _ := fake.callCounts("vm-policy-no-adhoc"); starts != 0 {
+		t.Fatalf("driver Start called %d times, want 0", starts)
+	}
+}
+
+func TestRequestRestartRefusesAfterPermanentFailure(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeCrashDriver()
+	fake.failStart = true
+	fake.failCreate = true
+	clock := newFakeClock()
+	_, sup := newSupervisedVM(t, "vm-doomed-adhoc", fake, clock)
+
+	sup.RecordStart(ctx, "vm-doomed-adhoc")
+	if err := sup.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer sup.Stop()
+
+	fake.flip("vm-doomed-adhoc", StateStopped)
+	waitForState(t, sup, "vm-doomed-adhoc", restartStateBackingOff)
+	for attempt := 1; attempt <= restartMaxAttempts; attempt++ {
+		clock.advance(60 * time.Second)
+		waitForStarts(t, fake, "vm-doomed-adhoc", attempt)
+	}
+	waitForState(t, sup, "vm-doomed-adhoc", restartStatePermanentFailure)
+
+	startsBefore, _, _ := fake.callCounts("vm-doomed-adhoc")
+	if err := sup.RequestRestart(ctx, "vm-doomed-adhoc"); err == nil {
+		t.Fatal("expected RequestRestart to refuse a permanently-failed VM")
+	}
+	if startsAfter, _, _ := fake.callCounts("vm-doomed-adhoc"); startsAfter != startsBefore {
+		t.Fatalf("RequestRestart should refuse before touching the driver: starts %d -> %d", startsBefore, startsAfter)
 	}
 }

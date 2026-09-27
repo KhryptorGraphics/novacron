@@ -409,6 +409,31 @@ func (s *PostgresUserStore) Update(user *User) error {
 	return nil
 }
 
+// RecordLogin stamps last_login_at directly, without the read-modify-write
+// round trip Update() requires — so it cannot revert a concurrent status or
+// role change made through a separately-fetched *User. Note: the users table
+// has a BEFORE UPDATE trigger that also bumps updated_at on this write (see
+// database/migrations/000001_init_schema.up.sql); callers that mint a token
+// keyed to a second-precision updated_at must issue it after RecordLogin, or
+// avoid comparing to updated_at at all.
+func (s *PostgresUserStore) RecordLogin(id string, at time.Time) error {
+	result, err := s.db.Exec(`UPDATE users SET last_login_at = $2 WHERE id = $1`, id, at)
+	if err != nil {
+		return fmt.Errorf("failed to record login: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("user not found: %s", id)
+	}
+
+	return nil
+}
+
 // Delete deletes a user
 func (s *PostgresUserStore) Delete(id string) error {
 	query := `DELETE FROM users WHERE id = $1`

@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration/events"
+	"github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHandleNodeFailurePublishesHealingAndInvokesEvacuation(t *testing.T) {
@@ -87,6 +88,36 @@ func TestHandleNodeMetricsUpdatesState(t *testing.T) {
 	if !st.Healthy {
 		t.Fatal("expected node to be marked healthy")
 	}
+}
+
+// TestSetEventBusMakesNodeFailureSubscriptionLive proves the gap SetEventBus
+// closes: before it existed, Start subscribed handleNodeFailure/etc to the
+// engine's own internal NoopEventBus, so a NodeFailure event published on the
+// bus shared with autoscaler/healing/policy never reached this engine at all.
+// With SetEventBus, Start's subscription is against the SAME bus, so a
+// published event is actually delivered.
+func TestSetEventBusMakesNodeFailureSubscriptionLive(t *testing.T) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.ErrorLevel)
+	e := NewDefaultOrchestrationEngine(logger)
+
+	sharedBus := events.NewInProcessEventBus(logger)
+	e.SetEventBus(sharedBus)
+
+	require.NoError(t, e.Start(context.Background()))
+	defer e.Stop(context.Background())
+
+	require.NoError(t, sharedBus.Publish(context.Background(), &events.OrchestrationEvent{
+		Type:      events.EventTypeNodeFailure,
+		Timestamp: time.Now(),
+		Data:      map[string]interface{}{"node_id": "node-shared"},
+	}))
+
+	require.Eventually(t, func() bool {
+		statuses := e.GetNodeStatuses()
+		st, ok := statuses["node-shared"]
+		return ok && !st.Healthy
+	}, time.Second, 5*time.Millisecond, "handleNodeFailure should have marked node-shared unhealthy via the shared bus subscription")
 }
 
 type stubEventBus struct{ publishFn func(ctx context.Context, ev *events.OrchestrationEvent) error }

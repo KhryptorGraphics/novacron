@@ -2,6 +2,7 @@ package auth
 
 import (
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -98,8 +99,37 @@ var DefaultResourceQuotas = map[string]int64{
 	"api.rate_limit": 100,
 }
 
+// cloneResourceQuotas returns an independent copy of q, so callers cannot
+// mutate a store's internal quota map through a returned reference.
+func cloneResourceQuotas(q map[string]int64) map[string]int64 {
+	if q == nil {
+		return nil
+	}
+	out := make(map[string]int64, len(q))
+	for k, v := range q {
+		out[k] = v
+	}
+	return out
+}
+
+// cloneTenant returns a deep copy of t (Metadata and ResourceQuotas included),
+// so a caller mutating the result cannot affect the store's internal state.
+func cloneTenant(t *Tenant) *Tenant {
+	if t == nil {
+		return nil
+	}
+	clone := *t
+	clone.Metadata = make(map[string]interface{}, len(t.Metadata))
+	for k, v := range t.Metadata {
+		clone.Metadata[k] = v
+	}
+	clone.ResourceQuotas = cloneResourceQuotas(t.ResourceQuotas)
+	return &clone
+}
+
 // TenantMemoryStore is an in-memory implementation of TenantService
 type TenantMemoryStore struct {
+	mu      sync.RWMutex
 	tenants map[string]*Tenant
 }
 
@@ -111,7 +141,7 @@ func NewTenantMemoryStore() *TenantMemoryStore {
 		Name:           "Default Tenant",
 		Description:    "Default tenant for the system",
 		Status:         TenantStatusActive,
-		ResourceQuotas: DefaultResourceQuotas,
+		ResourceQuotas: cloneResourceQuotas(DefaultResourceQuotas),
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 		Metadata:       make(map[string]interface{}),
@@ -126,33 +156,38 @@ func NewTenantMemoryStore() *TenantMemoryStore {
 
 // Create creates a new tenant
 func (s *TenantMemoryStore) Create(tenant *Tenant) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if _, exists := s.tenants[tenant.ID]; exists {
 		return fmt.Errorf("tenant already exists: %s", tenant.ID)
 	}
 
 	if tenant.ResourceQuotas == nil {
-		tenant.ResourceQuotas = make(map[string]int64)
-		// Apply default quotas
-		for resource, quota := range DefaultResourceQuotas {
-			tenant.ResourceQuotas[resource] = quota
-		}
+		tenant.ResourceQuotas = cloneResourceQuotas(DefaultResourceQuotas)
 	}
 
-	s.tenants[tenant.ID] = tenant
+	s.tenants[tenant.ID] = cloneTenant(tenant)
 	return nil
 }
 
 // Get gets a tenant by ID
 func (s *TenantMemoryStore) Get(id string) (*Tenant, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	tenant, exists := s.tenants[id]
 	if !exists {
 		return nil, fmt.Errorf("tenant not found: %s", id)
 	}
-	return tenant, nil
+	return cloneTenant(tenant), nil
 }
 
 // List lists tenants with optional filtering
 func (s *TenantMemoryStore) List(filter map[string]interface{}) ([]*Tenant, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	tenants := make([]*Tenant, 0, len(s.tenants))
 
 	for _, tenant := range s.tenants {
@@ -170,7 +205,7 @@ func (s *TenantMemoryStore) List(filter map[string]interface{}) ([]*Tenant, erro
 			}
 		}
 		if match {
-			tenants = append(tenants, tenant)
+			tenants = append(tenants, cloneTenant(tenant))
 		}
 	}
 
@@ -179,23 +214,29 @@ func (s *TenantMemoryStore) List(filter map[string]interface{}) ([]*Tenant, erro
 
 // Update updates a tenant
 func (s *TenantMemoryStore) Update(tenant *Tenant) error {
-	if _, exists := s.tenants[tenant.ID]; !exists {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existingTenant, exists := s.tenants[tenant.ID]
+	if !exists {
 		return fmt.Errorf("tenant not found: %s", tenant.ID)
 	}
 
 	// Preserve resource quotas if not provided
-	existingTenant := s.tenants[tenant.ID]
 	if tenant.ResourceQuotas == nil {
-		tenant.ResourceQuotas = existingTenant.ResourceQuotas
+		tenant.ResourceQuotas = cloneResourceQuotas(existingTenant.ResourceQuotas)
 	}
 
 	tenant.UpdatedAt = time.Now()
-	s.tenants[tenant.ID] = tenant
+	s.tenants[tenant.ID] = cloneTenant(tenant)
 	return nil
 }
 
 // Delete deletes a tenant
 func (s *TenantMemoryStore) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if _, exists := s.tenants[id]; !exists {
 		return fmt.Errorf("tenant not found: %s", id)
 	}
@@ -210,6 +251,9 @@ func (s *TenantMemoryStore) Delete(id string) error {
 
 // UpdateStatus updates a tenant's status
 func (s *TenantMemoryStore) UpdateStatus(id string, status TenantStatus) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	tenant, exists := s.tenants[id]
 	if !exists {
 		return fmt.Errorf("tenant not found: %s", id)
@@ -222,6 +266,9 @@ func (s *TenantMemoryStore) UpdateStatus(id string, status TenantStatus) error {
 
 // SetResourceQuota sets a resource quota for a tenant
 func (s *TenantMemoryStore) SetResourceQuota(id string, resource string, quota int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	tenant, exists := s.tenants[id]
 	if !exists {
 		return fmt.Errorf("tenant not found: %s", id)
@@ -238,6 +285,9 @@ func (s *TenantMemoryStore) SetResourceQuota(id string, resource string, quota i
 
 // GetResourceQuota gets a resource quota for a tenant
 func (s *TenantMemoryStore) GetResourceQuota(id string, resource string) (int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	tenant, exists := s.tenants[id]
 	if !exists {
 		return 0, fmt.Errorf("tenant not found: %s", id)
@@ -253,12 +303,15 @@ func (s *TenantMemoryStore) GetResourceQuota(id string, resource string) (int64,
 
 // GetResourceQuotas gets all resource quotas for a tenant
 func (s *TenantMemoryStore) GetResourceQuotas(id string) (map[string]int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	tenant, exists := s.tenants[id]
 	if !exists {
 		return nil, fmt.Errorf("tenant not found: %s", id)
 	}
 
-	return tenant.ResourceQuotas, nil
+	return cloneResourceQuotas(tenant.ResourceQuotas), nil
 }
 
 // NewTenant creates a new tenant with default values

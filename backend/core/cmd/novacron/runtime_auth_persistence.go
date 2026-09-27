@@ -26,6 +26,7 @@ type runtimeAuthConfig struct {
 	FrontendURL      string                          `yaml:"frontend_url"`
 	DefaultTenantID  string                          `yaml:"default_tenant_id"`
 	DefaultClusterID string                          `yaml:"default_cluster_id"`
+	TrustedProxies   string                          `yaml:"trusted_proxies"`
 	OAuth            runtimeOAuthConfig              `yaml:"oauth"`
 	Persistence      runtimeAuthPersistenceConfig    `yaml:"persistence"`
 	Session          runtimeAuthSessionConfig        `yaml:"session"`
@@ -174,6 +175,7 @@ func defaultRuntimeAuthConfig() runtimeAuthConfig {
 		FrontendURL:      getenvFirst("NOVACRON_AUTH_FRONTEND_URL", "NOVACRON_FRONTEND_URL"),
 		DefaultTenantID:  getenvFirst("NOVACRON_AUTH_DEFAULT_TENANT_ID"),
 		DefaultClusterID: getenvFirst("NOVACRON_CLUSTER_ID"),
+		TrustedProxies:   getenvFirst("NOVACRON_TRUSTED_PROXIES"),
 		OAuth: runtimeOAuthConfig{
 			GitHub: runtimeGitHubOAuthConfig{
 				ClientID:     getenvFirst("NOVACRON_GITHUB_CLIENT_ID"),
@@ -571,6 +573,24 @@ func (s *runtimeUserStore) Update(user *coreauth.User) error {
 	return err
 }
 
+func (s *runtimeUserStore) RecordLogin(id string, at time.Time) error {
+	if s.db == nil {
+		return s.memory.RecordLogin(id, at)
+	}
+	result, err := s.db.Exec(`UPDATE users SET last_login = $2, updated_at = $3 WHERE id = $1`, id, at, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("user not found: %s", id)
+	}
+	return nil
+}
+
 func (s *runtimeUserStore) Delete(id string) error {
 	if s.db == nil {
 		return s.memory.Delete(id)
@@ -798,7 +818,11 @@ func (s *runtimeTenantStore) GetResourceQuotas(id string) (map[string]int64, err
 	if s.db == nil {
 		return s.memory.GetResourceQuotas(id)
 	}
-	return coreauth.DefaultResourceQuotas, nil
+	quotas := make(map[string]int64, len(coreauth.DefaultResourceQuotas))
+	for k, v := range coreauth.DefaultResourceQuotas {
+		quotas[k] = v
+	}
+	return quotas, nil
 }
 
 type runtimeSessionStore struct {

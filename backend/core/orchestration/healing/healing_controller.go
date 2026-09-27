@@ -55,12 +55,14 @@ func NewDefaultHealingController(logger *logrus.Logger, eventBus events.EventBus
 	// Initialize failure detector
 	failureDetector := NewPhiAccrualFailureDetector(logger)
 
-	// Initialize recovery strategies
+	// Initialize recovery strategies. Scale/failover strategies are excluded
+	// from the auto-selection map (selectRecoveryStrategy only ever sees the
+	// VM-backed restart/migrate strategies); their types remain directly
+	// usable/testable, and calling Recover on them returns an explicit
+	// unsupported-target error rather than a simulated success.
 	strategies := make(map[string]RecoveryStrategy)
 	strategies["restart"] = NewRestartRecoveryStrategy(logger)
 	strategies["migrate"] = NewMigrateRecoveryStrategy(logger)
-	strategies["scale"] = NewScaleRecoveryStrategy(logger)
-	strategies["failover"] = NewFailoverRecoveryStrategy(logger)
 
 	return &DefaultHealingController{
 		logger:               logger,
@@ -132,6 +134,33 @@ func (hc *DefaultHealingController) SetHealthSource(source HealthSource) {
 	hc.mu.Lock()
 	defer hc.mu.Unlock()
 	hc.healthSource = source
+}
+
+// SetVMController injects the real VM control backend into the restart and
+// migrate strategies. Safe to call at any time (including after
+// StartMonitoring); each strategy guards its own field with its own lock.
+func (hc *DefaultHealingController) SetVMController(vc VMController) {
+	hc.mu.RLock()
+	restart, okR := hc.recoveryStrategies["restart"].(*RestartRecoveryStrategy)
+	migrate, okM := hc.recoveryStrategies["migrate"].(*MigrateRecoveryStrategy)
+	hc.mu.RUnlock()
+	if okR {
+		restart.SetVMController(vc)
+	}
+	if okM {
+		migrate.SetVMController(vc)
+	}
+}
+
+// SetMigrationTargetSelector injects the destination-picking backend into the
+// migrate strategy.
+func (hc *DefaultHealingController) SetMigrationTargetSelector(sel MigrationTargetSelector) {
+	hc.mu.RLock()
+	migrate, ok := hc.recoveryStrategies["migrate"].(*MigrateRecoveryStrategy)
+	hc.mu.RUnlock()
+	if ok {
+		migrate.SetMigrationTargetSelector(sel)
+	}
 }
 
 // RegisterTarget registers a target for health monitoring
@@ -579,7 +608,7 @@ func (hc *DefaultHealingController) executeHealing(target *HealingTarget, status
 		Status:        HealingStatusPending,
 		Actions: []HealingAction{
 			{
-				Type:   ActionRestart, // Simplified
+				Type:   healingActionForStrategy(strategy.GetName()),
 				Target: target.ID,
 			},
 		},
@@ -722,6 +751,24 @@ func (hc *DefaultHealingController) selectRecoveryStrategy(failure *FailureInfo,
 
 	// Return highest priority strategy
 	return candidates[0]
+}
+
+// healingActionForStrategy maps a selected strategy's name to the
+// HealingAction it actually performs, so HealingDecision.Actions reflects
+// what will run instead of always claiming a restart.
+func healingActionForStrategy(name string) HealingActionType {
+	switch name {
+	case "restart":
+		return ActionRestart
+	case "migrate":
+		return ActionMigrate
+	case "scale":
+		return ActionScale
+	case "failover":
+		return ActionFailover
+	default:
+		return ActionNotify
+	}
 }
 
 func (hc *DefaultHealingController) determineFailureType(assessment *HealthAssessment) FailureType {

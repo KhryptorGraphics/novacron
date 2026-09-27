@@ -65,9 +65,11 @@ export default function ClusterSelectionPage() {
                 <CardHeader>
                   <CardTitle className="flex items-center justify-between gap-4">
                     <span>{cluster.name}</span>
-                    <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium uppercase tracking-wide">
-                      {cluster.tier}
-                    </span>
+                    {cluster.tier && (
+                      <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium uppercase tracking-wide">
+                        {cluster.tier}
+                      </span>
+                    )}
                   </CardTitle>
                   <CardDescription>
                     Cluster ID: {cluster.id}
@@ -76,26 +78,35 @@ export default function ClusterSelectionPage() {
                 <CardContent className="space-y-3 text-sm text-muted-foreground">
                   <div className="flex items-center justify-between">
                     <span>Performance Score</span>
-                    <span className="font-medium text-foreground">{cluster.performanceScore.toFixed(2)}</span>
+                    <span className="font-medium text-foreground">
+                      {typeof cluster.performanceScore === 'number' ? cluster.performanceScore.toFixed(2) : '—'}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span>Interconnect Latency</span>
-                    <span className="font-medium text-foreground">{cluster.interconnectLatencyMs} ms</span>
+                    <span className="font-medium text-foreground">
+                      {typeof cluster.interconnectLatencyMs === 'number' ? `${cluster.interconnectLatencyMs} ms` : '—'}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span>Interconnect Bandwidth</span>
-                    <span className="font-medium text-foreground">{cluster.interconnectBandwidthMbps} Mbps</span>
+                    <span className="font-medium text-foreground">
+                      {typeof cluster.interconnectBandwidthMbps === 'number' ? `${cluster.interconnectBandwidthMbps} Mbps` : '—'}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span>Nodes</span>
                     <span className="font-medium text-foreground">
-                      {cluster.currentNodeCount} / {cluster.maxSupportedNodeCount}
+                      {cluster.currentNodeCount}
+                      {typeof cluster.maxSupportedNodeCount === 'number' ? ` / ${cluster.maxSupportedNodeCount}` : ''}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span>Growth State</span>
-                    <span className="font-medium capitalize text-foreground">{cluster.growthState.replace(/_/g, ' ')}</span>
-                  </div>
+                  {cluster.growthState && (
+                    <div className="flex items-center justify-between">
+                      <span>Growth State</span>
+                      <span className="font-medium capitalize text-foreground">{cluster.growthState.replace(/_/g, ' ')}</span>
+                    </div>
+                  )}
                   {typeof cluster.edgeLatencyMs === 'number' && typeof cluster.edgeBandwidthMbps === 'number' && (
                     <div className="rounded-md border bg-muted/30 p-3">
                       <div className="font-medium text-foreground">Your Edge Metrics</div>

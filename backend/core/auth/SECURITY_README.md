@@ -54,19 +54,7 @@ This comprehensive security system provides enterprise-grade authentication, aut
 - Token refresh and revocation support
 - JWKS-based signature verification (production-ready hooks)
 
-### 5. Security Middleware (`security_middleware.go`)
-- **Rate Limiting**: IP, user, and tenant-based rate limiting with burst protection
-- **Input Validation**: SQL injection and XSS detection with regex patterns
-- **Security Headers**: Comprehensive HTTP security headers (HSTS, CSP, X-Frame-Options)
-- **Threat Detection**: Bot detection and geolocation-based restrictions
-
-**Protection Mechanisms:**
-- Real-time threat scoring (0-100 scale)
-- Automatic IP blocking for violations
-- Request size limits and content-type validation
-- Audit trail for all security events
-
-### 6. Zero-Trust Network Policies (`zero_trust_network.go`)
+### 5. Zero-Trust Network Policies (`zero_trust_network.go`)
 - **Policy Engine**: Priority-based network access control
 - **Microsegmentation**: Network isolation with configurable isolation levels
 - **Device Trust**: Device compliance scoring and validation
@@ -78,7 +66,7 @@ This comprehensive security system provides enterprise-grade authentication, aut
 - Device fingerprinting and compliance checking
 - Dynamic policy evaluation with context awareness
 
-### 7. Compliance Validation (`compliance_service.go`)
+### 6. Compliance Validation (`compliance_service.go`)
 - **Multi-Framework Support**: SOC2, GDPR, HIPAA, PCI-DSS, ISO27001, NIST
 - **Automated Testing**: Comprehensive control testing with scoring
 - **Evidence Management**: Structured evidence collection and verification
@@ -90,7 +78,7 @@ This comprehensive security system provides enterprise-grade authentication, aut
 - Policy lifecycle management with version control
 - Audit trail for all compliance activities
 
-### 8. Security Integration (`security_integration.go`)
+### 7. Security Integration (`security_integration.go`)
 - **Unified Security Manager**: Central orchestration of all security services
 - **HTTP Integration**: Middleware integration with existing APIs
 - **Health Monitoring**: Periodic security health checks and metrics
@@ -101,11 +89,6 @@ This comprehensive security system provides enterprise-grade authentication, aut
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    NovaCron APIs                        │
-├─────────────────────────────────────────────────────────┤
-│              Security Middleware                        │
-│  ┌──────────┬──────────┬──────────┬─────────────┐      │
-│  │Rate Limit│Input Val.│IP Filter │Bot Detection│      │
-│  └──────────┴──────────┴──────────┴─────────────┘      │
 ├─────────────────────────────────────────────────────────┤
 │                Security Manager                         │
 │  ┌─────────────────┬─────────────────┬─────────────────┐│
@@ -129,7 +112,7 @@ This comprehensive security system provides enterprise-grade authentication, aut
 The security middleware integrates seamlessly with the existing NovaCron load balancer at `/home/kp/novacron/backend/core/network/loadbalancer/`. Security policies are applied before traffic reaches backend services.
 
 ### API Security
-- **REST API Protection**: All REST endpoints at `:8090` are protected with security middleware
+- **REST API Protection**: All REST endpoints at `:8090` are authenticated via JWT-based `requireAuth` middleware
 - **WebSocket Security**: Real-time connections at `:8091` include JWT-based authentication
 - **GraphQL Security**: Schema-level security with field-level authorization
 
@@ -152,11 +135,6 @@ JWT_REFRESH_TOKEN_TTL=168h
 ENCRYPTION_ALGORITHM=AES-256-GCM
 KEY_ROTATION_INTERVAL=720h
 
-# Security Middleware
-RATE_LIMIT_REQUESTS=1000
-RATE_LIMIT_WINDOW=1h
-MAX_REQUEST_SIZE=10485760
-
 # OAuth2
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
@@ -176,7 +154,6 @@ HIPAA_ENABLED=true
 package main
 
 import (
-    "net/http"
     "github.com/novacron/backend/core/auth"
 )
 
@@ -205,20 +182,6 @@ func main() {
     
     // Setup periodic security tasks
     securityManager.SetupPeriodicTasks()
-    
-    // Create protected handler
-    protectedHandler := securityManager.RequirePermission("vm", "read")(
-        http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            w.Write([]byte("Protected resource accessed"))
-        }),
-    )
-    
-    // Apply security middleware
-    secureHandler := securityManager.SecureHTTPHandler(protectedHandler)
-    
-    // Start server
-    http.Handle("/api/vms", secureHandler)
-    log.Fatal(http.ListenAndServe(":8090", nil))
 }
 ```
 
@@ -273,7 +236,6 @@ go test -bench=. -v
 - **Password Security**: Policy validation, hashing, verification, and generation
 - **Encryption**: Data encryption/decryption, key management, TLS certificates
 - **OAuth2**: Authorization flows, token exchange, user provisioning
-- **Security Middleware**: Rate limiting, input validation, security headers
 - **Zero-Trust**: Policy evaluation, device trust, network connections
 - **Compliance**: Automated testing, assessment creation, report generation
 

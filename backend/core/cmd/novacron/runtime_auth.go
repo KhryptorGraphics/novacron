@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"sort"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/gorilla/mux"
 	coreauth "github.com/khryptorgraphics/novacron/backend/core/auth"
+	"github.com/khryptorgraphics/novacron/backend/core/netutil"
 	"github.com/google/uuid"
 )
 
@@ -25,6 +27,7 @@ type runtimeAuthRuntime struct {
 	tenantStore     *runtimeTenantStore
 	roleStore       *coreauth.RoleMemoryStore
 	persistence     *runtimeAuthPersistence
+	trustedProxies  []netip.Prefix
 }
 
 type runtimeAuthRegisterRequest struct {
@@ -150,6 +153,7 @@ func initializeRuntimeAuth(config runtimeAuthConfig) (*runtimeAuthRuntime, error
 		return nil, err
 	}
 	runtime.config = config
+	runtime.trustedProxies = netutil.ParseTrustedProxies(config.TrustedProxies)
 
 	persistence, err := newRuntimeAuthPersistence(config)
 	if err != nil {
@@ -349,7 +353,7 @@ func (r *runtimeAuthRuntime) authenticatePasswordLogin(email string, password st
 		ExpiresAt:      time.Now().UTC().Add(time.Duration(tokenPair.ExpiresIn) * time.Second),
 		CreatedAt:      session.CreatedAt,
 		LastAccessedAt: time.Now().UTC(),
-		ClientIP:       clientIP(req),
+		ClientIP:       r.clientIP(req),
 		UserAgent:      req.UserAgent(),
 		Metadata:       runtimeSessionMetadata(user, ""),
 	}
@@ -512,7 +516,7 @@ func (r *runtimeAuthRuntime) handleGitHubCallback(w http.ResponseWriter, req *ht
 		TenantID:       user.TenantID,
 		CreatedAt:      time.Now().UTC(),
 		LastAccessedAt: time.Now().UTC(),
-		ClientIP:       clientIP(req),
+		ClientIP:       r.clientIP(req),
 		UserAgent:      req.UserAgent(),
 	}
 	tokenPair, err := r.securityManager.IssueJWTForUser(user, session.ID, runtimeSessionMetadata(user, ""))
@@ -1191,12 +1195,11 @@ func getenvFirst(keys ...string) string {
 	return ""
 }
 
-func clientIP(req *http.Request) string {
-	if req == nil {
-		return ""
-	}
-	if forwarded := strings.TrimSpace(req.Header.Get("X-Forwarded-For")); forwarded != "" {
-		return strings.TrimSpace(strings.Split(forwarded, ",")[0])
-	}
-	return strings.TrimSpace(req.RemoteAddr)
+// clientIP resolves the caller's address via the shared netutil algorithm,
+// trusting X-Forwarded-For/X-Real-IP only from peers in r.trustedProxies
+// (NOVACRON_TRUSTED_PROXIES). Always a bare IP literal or "" — never a
+// host:port pair — so it can be inserted directly into the
+// sessions.ip_address ::inet column.
+func (r *runtimeAuthRuntime) clientIP(req *http.Request) string {
+	return netutil.ClientIPString(req, r.trustedProxies)
 }

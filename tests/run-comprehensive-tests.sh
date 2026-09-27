@@ -438,7 +438,7 @@ run_mutation_tests() {
     cd "${PROJECT_ROOT}"
     
     # Test critical packages with mutation testing
-    critical_packages=("./backend/core/auth" "./backend/core/vm" "./backend/api/rest")
+    critical_packages=("./backend/core/auth" "./backend/core/vm")
     
     for package in "${critical_packages[@]}"; do
         log "Running mutation tests for $package..."

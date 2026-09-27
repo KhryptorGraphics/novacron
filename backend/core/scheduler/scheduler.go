@@ -925,10 +925,15 @@ func (s *Scheduler) allocateResources() {
 			continue
 		}
 
-		// Store the allocation
+		// Store the allocation and retire the request: leaving it in
+		// s.requests would re-allocate it (and double-count node usage) on
+		// every tick, and GetPendingRequests would keep reporting it.
 		s.allocationMutex.Lock()
 		s.allocations[request.ID] = allocation
 		s.allocationMutex.Unlock()
+		s.requestMutex.Lock()
+		delete(s.requests, request.ID)
+		s.requestMutex.Unlock()
 
 		// Update node resources
 		s.nodeMutex.Lock()

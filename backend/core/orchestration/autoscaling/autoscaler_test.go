@@ -2,6 +2,7 @@ package autoscaling
 
 import (
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -119,10 +120,13 @@ func TestMetricsCollector(t *testing.T) {
 
 	collector := NewDefaultMetricsCollector(logger)
 
+	// Subscribers registered by one subtest stay subscribed and are invoked
+	// from notifySubscribers goroutines during later subtests, so every
+	// "called" flag is atomic.
 	t.Run("CollectMetricsWithoutSource", func(t *testing.T) {
-		called := false
+		var called atomic.Bool
 		require.NoError(t, collector.Subscribe(MetricsHandlerFunc(func(*MetricsData) error {
-			called = true
+			called.Store(true)
 			return nil
 		})))
 
@@ -130,7 +134,7 @@ func TestMetricsCollector(t *testing.T) {
 		require.Error(t, err)
 		assert.Nil(t, metrics)
 		time.Sleep(20 * time.Millisecond)
-		assert.False(t, called)
+		assert.False(t, called.Load())
 
 		err = collector.StartCollection()
 		require.Error(t, err)
@@ -159,16 +163,16 @@ func TestMetricsCollector(t *testing.T) {
 				return fixedSample(), nil
 			})
 		})
-		called := false
+		var called atomic.Bool
 		require.NoError(t, collector.Subscribe(MetricsHandlerFunc(func(*MetricsData) error {
-			called = true
+			called.Store(true)
 			return nil
 		})))
 		metrics, err := collector.CollectMetrics()
 		require.Error(t, err)
 		assert.Nil(t, metrics)
 		time.Sleep(20 * time.Millisecond)
-		assert.False(t, called)
+		assert.False(t, called.Load())
 	})
 
 	t.Run("GetHistoricalMetrics", func(t *testing.T) {
@@ -186,10 +190,10 @@ func TestMetricsCollector(t *testing.T) {
 	})
 
 	t.Run("Subscribe", func(t *testing.T) {
-		called := false
+		var called atomic.Bool
 		handler := MetricsHandlerFunc(func(metrics *MetricsData) error {
-			called = true
 			assert.NotNil(t, metrics)
+			called.Store(true)
 			return nil
 		})
 
@@ -199,9 +203,7 @@ func TestMetricsCollector(t *testing.T) {
 		// Collect metrics to trigger handler
 		collector.CollectMetrics()
 
-		// Give handler time to be called
-		time.Sleep(10 * time.Millisecond)
-		assert.True(t, called)
+		assert.Eventually(t, called.Load, time.Second, 5*time.Millisecond)
 	})
 
 	t.Run("StartStopCollection", func(t *testing.T) {

@@ -125,6 +125,12 @@ type UserService interface {
 	// UpdateStatus updates a user's status
 	UpdateStatus(id string, status UserStatus) error
 
+	// RecordLogin stamps a user's LastLogin without a read-mutate-write
+	// round trip through the caller, so a concurrent status change or
+	// password reset (based on a separately-fetched copy) cannot be
+	// reverted by a stale Login() persisting every other field alongside it.
+	RecordLogin(id string, at time.Time) error
+
 	// AddRole adds a role to a user
 	AddRole(userID string, roleID string) error
 
@@ -174,6 +180,32 @@ func NewUser(username, email, tenantID string) *User {
 	}
 }
 
+// cloneUser returns a deep copy of u, so a caller mutating the result cannot
+// affect the store's internal state (and, symmetrically, cannot observe a
+// concurrent mutation made by another goroutine through the live object).
+func cloneUser(u *User) *User {
+	if u == nil {
+		return nil
+	}
+	clone := *u
+	if u.Metadata != nil {
+		clone.Metadata = make(map[string]interface{}, len(u.Metadata))
+		for k, v := range u.Metadata {
+			clone.Metadata[k] = v
+		}
+	}
+	if u.RoleIDs != nil {
+		clone.RoleIDs = append([]string(nil), u.RoleIDs...)
+	}
+	if u.Roles != nil {
+		clone.Roles = append([]*Role(nil), u.Roles...)
+	}
+	if u.Tenants != nil {
+		clone.Tenants = append([]*Tenant(nil), u.Tenants...)
+	}
+	return &clone
+}
+
 // UserMemoryStore is an in-memory implementation of UserService
 type UserMemoryStore struct {
 	mu    sync.RWMutex
@@ -214,7 +246,7 @@ func (s *UserMemoryStore) Create(user *User, password string) error {
 	user.PasswordSalt = salt
 	user.PasswordHash = HashPassword(password, salt)
 
-	s.users[user.ID] = user
+	s.users[user.ID] = cloneUser(user)
 	return nil
 }
 
@@ -227,7 +259,7 @@ func (s *UserMemoryStore) Get(id string) (*User, error) {
 	if !exists {
 		return nil, fmt.Errorf("user not found: %s", id)
 	}
-	return user, nil
+	return cloneUser(user), nil
 }
 
 // GetByUsername gets a user by username
@@ -237,7 +269,7 @@ func (s *UserMemoryStore) GetByUsername(username string) (*User, error) {
 
 	for _, user := range s.users {
 		if user.Username == username {
-			return user, nil
+			return cloneUser(user), nil
 		}
 	}
 	return nil, fmt.Errorf("user not found: %s", username)
@@ -250,7 +282,7 @@ func (s *UserMemoryStore) GetByEmail(email string) (*User, error) {
 
 	for _, user := range s.users {
 		if user.Email == email {
-			return user, nil
+			return cloneUser(user), nil
 		}
 	}
 	return nil, fmt.Errorf("user not found: %s", email)
@@ -290,7 +322,7 @@ func (s *UserMemoryStore) List(filter map[string]interface{}) ([]*User, error) {
 			}
 		}
 		if match {
-			users = append(users, user)
+			users = append(users, cloneUser(user))
 		}
 	}
 
@@ -323,7 +355,7 @@ func (s *UserMemoryStore) Update(user *User) error {
 	user.LastPasswordChange = existingUser.LastPasswordChange
 
 	user.UpdatedAt = time.Now()
-	s.users[user.ID] = user
+	s.users[user.ID] = cloneUser(user)
 	return nil
 }
 
@@ -386,6 +418,24 @@ func (s *UserMemoryStore) UpdateStatus(id string, status UserStatus) error {
 	}
 
 	user.Status = status
+	user.UpdatedAt = time.Now()
+	return nil
+}
+
+// RecordLogin stamps a user's LastLogin directly on the internally-owned map
+// entry under the write lock — no separate Get()+Update() round trip, so it
+// cannot lose or revert a concurrent status/password/role change the way a
+// stale copy's full-object Update() would.
+func (s *UserMemoryStore) RecordLogin(id string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user, exists := s.users[id]
+	if !exists {
+		return fmt.Errorf("user not found: %s", id)
+	}
+
+	user.LastLogin = at
 	user.UpdatedAt = time.Now()
 	return nil
 }

@@ -69,14 +69,11 @@ Microservices architecture with Go backend and Next.js frontend, using PostgreSQ
 novacron/
 ├── backend/                 # Go backend services
 │   ├── cmd/                # Entry points for different services
-│   │   ├── api-server/     # Main API server (PORT 8080)
-│   │   ├── core-server/    # Core services server
+│   │   ├── api-server/     # Main API server (canonical, PORT 8090)
 │   │   └── workers/        # Background workers
 │   ├── api/                # HTTP handlers and routes
-│   │   ├── rest/          # REST endpoints
-│   │   ├── graphql/       # GraphQL resolvers
-│   │   ├── websocket/     # WebSocket handlers
-│   │   └── vm/            # VM-specific handlers (LARGE - needs refactoring)
+│   │   ├── graphql/       # GraphQL resolvers (volume operations only)
+│   │   └── websocket/     # WebSocket handlers
 │   ├── core/              # Core business logic
 │   │   ├── vm/            # VM management
 │   │   ├── migration/     # Migration logic (complex state machine)
@@ -130,8 +127,8 @@ Database schema defined in raw SQL (no ORM):
 - JSONB used extensively for flexible attributes
 
 ### API Specifications
-- **REST API**: Defined in `backend/api/rest/handlers.go`
-- **GraphQL Schema**: `backend/api/graphql/schema.graphql` (if exists)
+- **REST API**: Served directly by `backend/cmd/api-server` (no separate `api/rest` package)
+- **GraphQL Schema**: `backend/api/graphql/schema.volume.graphql` (volume operations only)
 - **WebSocket Events**: Real-time updates for VM status, metrics
 - **No OpenAPI Spec**: API documentation needs to be generated
 

@@ -53,7 +53,6 @@ This document provides a **complete, step-by-step integration roadmap** for impl
 
 ✅ **AI/ML Infrastructure**
 - `backend/core/ai/` - AI integration layer
-- `backend/core/compute/distributed_ai_service.go` - Distributed AI service
 - `ai_engine/` - Python-based ML models (bandwidth predictor, performance optimizer)
 
 ✅ **Migration Infrastructure**

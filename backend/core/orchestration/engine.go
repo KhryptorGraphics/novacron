@@ -129,6 +129,20 @@ func (e *DefaultOrchestrationEngine) EventBus() events.EventBus {
 	return e.eventBus
 }
 
+// SetEventBus swaps the engine's event bus, so the internal handler
+// subscription set up in Start (VM/node/scaling events) can share a real bus
+// with other orchestration components (autoscaler, healing, policy engine)
+// instead of each holding its own always-empty NoopEventBus. Call before
+// Start (Start Connects and Subscribes against whatever bus is set at that
+// time).
+func (e *DefaultOrchestrationEngine) SetEventBus(bus events.EventBus) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if bus != nil {
+		e.eventBus = bus
+	}
+}
+
 
 
 // EvacuateNode invokes the configured evacuation handler for the node
