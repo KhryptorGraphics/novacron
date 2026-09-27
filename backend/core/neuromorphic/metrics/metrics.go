@@ -7,8 +7,6 @@ import (
 
 // NeuromorphicMetrics tracks neuromorphic computing metrics
 type NeuromorphicMetrics struct {
-	mu sync.RWMutex
-
 	// Spike metrics
 	TotalSpikes      int64   `json:"total_spikes"`
 	SpikeRate        float64 `json:"spike_rate_hz"`

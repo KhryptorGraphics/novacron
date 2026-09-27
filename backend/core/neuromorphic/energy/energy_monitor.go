@@ -163,6 +163,10 @@ func (em *EnergyMonitor) GetMetrics() *EnergyMetrics {
 func (em *EnergyMonitor) monitor() {
 	ticker := time.NewTicker(em.samplingRate)
 	defer ticker.Stop()
+	// monitor is the sole sender on metricsChannel, so it must also be the
+	// sole closer: closing it from Close() concurrently with a send here
+	// races (and can panic with "send on closed channel").
+	defer close(em.metricsChannel)
 
 	for {
 		select {
@@ -259,6 +263,5 @@ func (em *EnergyMonitor) GetEnergyReport() map[string]interface{} {
 // Close stops the energy monitor
 func (em *EnergyMonitor) Close() error {
 	close(em.stopChannel)
-	close(em.metricsChannel)
 	return nil
 }

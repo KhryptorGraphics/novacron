@@ -61,6 +61,22 @@ func DefaultDRConfig() *DRConfig {
 			TransactionLog:    true,             // Continuous
 			SnapshotInterval:  1 * time.Hour,
 		},
+		BackupLocations: []BackupLocation{
+			{
+				ID:       "primary-s3",
+				Type:     "s3",
+				Region:   "us-east-1",
+				Bucket:   "novacron-dr-backups-us-east-1",
+				Priority: 1,
+			},
+			{
+				ID:       "secondary-s3",
+				Type:     "s3",
+				Region:   "us-west-2",
+				Bucket:   "novacron-dr-backups-us-west-2",
+				Priority: 2,
+			},
+		},
 		RetentionPolicy: RetentionPolicy{
 			HourlyRetentionDays:  7,
 			DailyRetentionDays:   30,
@@ -99,6 +115,8 @@ func DefaultDRConfig() *DRConfig {
 		AutoFailover:      true,
 		RequireApproval:   false,
 		MinActiveRegions:  2,
+		PrimaryRegion:     "us-east-1",
+		SecondaryRegions:  []string{"us-west-2"},
 		HealthChecks: []HealthCheck{
 			{
 				Level:              1,

@@ -59,7 +59,12 @@ func RunMultiTenantExample() {
 	rbacScheduler := scheduler.NewRBACScheduler(networkScheduler, authManager)
 
 	// Set up the network topology and nodes (same as in network_aware_example.go)
-	setupMTNetworkTopology(factory.GetNetworkTopology())
+	// NetworkAwareScheduler's factory-owned topology now lives in the
+	// network/topology discovery-engine package, which has no manual
+	// construction API; build a standalone scheduler/network topology here
+	// purely to illustrate placement, independent of the factory's topology.
+	demoTopology := network.NewNetworkTopology()
+	setupMTNetworkTopology(demoTopology)
 	setupMTNodes(networkScheduler)
 
 	// Set up multi-tenancy example with users and tenants
@@ -118,6 +123,47 @@ func (s *dummyTenantService) Update(tenant *auth.Tenant) error {
 func (s *dummyTenantService) Delete(id string) error {
 	delete(s.tenants, id)
 	return nil
+}
+
+func (s *dummyTenantService) UpdateStatus(id string, status auth.TenantStatus) error {
+	tenant, exists := s.tenants[id]
+	if !exists {
+		return fmt.Errorf("tenant not found: %s", id)
+	}
+	tenant.Status = status
+	return nil
+}
+
+func (s *dummyTenantService) SetResourceQuota(id string, resource string, quota int64) error {
+	tenant, exists := s.tenants[id]
+	if !exists {
+		return fmt.Errorf("tenant not found: %s", id)
+	}
+	if tenant.ResourceQuotas == nil {
+		tenant.ResourceQuotas = make(map[string]int64)
+	}
+	tenant.ResourceQuotas[resource] = quota
+	return nil
+}
+
+func (s *dummyTenantService) GetResourceQuota(id string, resource string) (int64, error) {
+	tenant, exists := s.tenants[id]
+	if !exists {
+		return 0, fmt.Errorf("tenant not found: %s", id)
+	}
+	return tenant.ResourceQuotas[resource], nil
+}
+
+func (s *dummyTenantService) GetResourceQuotas(id string) (map[string]int64, error) {
+	tenant, exists := s.tenants[id]
+	if !exists {
+		return nil, fmt.Errorf("tenant not found: %s", id)
+	}
+	quotas := make(map[string]int64, len(tenant.ResourceQuotas))
+	for k, v := range tenant.ResourceQuotas {
+		quotas[k] = v
+	}
+	return quotas, nil
 }
 
 func (s *dummyTenantService) AddUser(tenantID, userID string) error {

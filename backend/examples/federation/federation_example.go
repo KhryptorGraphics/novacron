@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
@@ -33,7 +34,7 @@ func main() {
 }
 
 // createLocalCluster creates a federation manager for the local cluster
-func createLocalCluster() *federation.FederationManager {
+func createLocalCluster() *federation.FederationManagerImpl {
 	fmt.Println("\n--- Creating Local Cluster ---")
 
 	// Create a federation manager
@@ -44,7 +45,7 @@ func createLocalCluster() *federation.FederationManager {
 	)
 
 	// Start the federation manager
-	err := manager.Start()
+	err := manager.Start(context.Background())
 	if err != nil {
 		log.Fatalf("Failed to start federation manager: %v", err)
 	}
@@ -54,7 +55,7 @@ func createLocalCluster() *federation.FederationManager {
 }
 
 // addRemoteClusters adds remote clusters to the federation
-func addRemoteClusters(manager *federation.FederationManager) {
+func addRemoteClusters(manager *federation.FederationManagerImpl) {
 	fmt.Println("\n--- Adding Remote Clusters ---")
 
 	// Create and add the first remote cluster
@@ -158,7 +159,7 @@ func addRemoteClusters(manager *federation.FederationManager) {
 }
 
 // createFederationPolicies creates federation policies
-func createFederationPolicies(manager *federation.FederationManager) {
+func createFederationPolicies(manager *federation.FederationManagerImpl) {
 	fmt.Println("\n--- Creating Federation Policies ---")
 
 	// Create resource sharing policy
@@ -242,7 +243,7 @@ func createFederationPolicies(manager *federation.FederationManager) {
 }
 
 // createResourcePool creates a federated resource pool
-func createResourcePool(manager *federation.FederationManager) {
+func createResourcePool(manager *federation.FederationManagerImpl) {
 	fmt.Println("\n--- Creating Federated Resource Pool ---")
 
 	// Create a federated resource pool
@@ -347,7 +348,7 @@ func createResourcePool(manager *federation.FederationManager) {
 }
 
 // simulateCrossClusterMigration simulates a cross-cluster migration
-func simulateCrossClusterMigration(manager *federation.FederationManager) {
+func simulateCrossClusterMigration(manager *federation.FederationManagerImpl) {
 	fmt.Println("\n--- Simulating Cross-Cluster Migration ---")
 
 	// Create a migration job
@@ -369,8 +370,12 @@ func simulateCrossClusterMigration(manager *federation.FederationManager) {
 		},
 	}
 
-	// Start the migration
-	err := manager.crossClusterMigration.StartMigration(job)
+	// Start the migration via a dedicated cross-cluster migration component
+	// (crossClusterMigration is unexported on FederationManagerImpl, so this
+	// example constructs its own using the manager it already has, which
+	// satisfies the federation.FederationManager interface).
+	migrator := federation.NewCrossClusterMigration(manager)
+	err := migrator.StartMigration(job)
 	if err != nil {
 		log.Fatalf("Failed to start cross-cluster migration: %v", err)
 	}
@@ -386,7 +391,7 @@ func simulateCrossClusterMigration(manager *federation.FederationManager) {
 			state = "completed"
 		}
 
-		err = manager.crossClusterMigration.NotifyMigrationProgress("migration-job-1", progress, state, "")
+		err = migrator.NotifyMigrationProgress("migration-job-1", progress, state, "")
 		if err != nil {
 			log.Fatalf("Failed to update migration progress: %v", err)
 		}
@@ -394,7 +399,7 @@ func simulateCrossClusterMigration(manager *federation.FederationManager) {
 	}
 
 	// Get final migration status
-	updatedJob, err := manager.crossClusterMigration.GetMigrationJob("migration-job-1")
+	updatedJob, err := migrator.GetMigrationJob("migration-job-1")
 	if err != nil {
 		log.Fatalf("Failed to get migration job: %v", err)
 	}
@@ -403,7 +408,7 @@ func simulateCrossClusterMigration(manager *federation.FederationManager) {
 }
 
 // printFederationStatus prints the status of the federation
-func printFederationStatus(manager *federation.FederationManager) {
+func printFederationStatus(manager *federation.FederationManagerImpl) {
 	fmt.Println("\n--- Federation Status ---")
 
 	// Get all clusters

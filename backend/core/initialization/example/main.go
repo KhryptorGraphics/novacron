@@ -114,10 +114,7 @@ func main() {
 	}
 
 	// Register custom components
-	container := init.GetContainer()
-	logger := init.GetLogger()
 	cfg := init.GetConfig()
-
 	// Example: Register and initialize custom components
 	// This demonstrates how to extend the initialization system
 

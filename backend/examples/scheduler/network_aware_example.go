@@ -34,7 +34,11 @@ func RunNetworkAwareExample() {
 	defer networkScheduler.Stop()
 
 	// Get network topology for configuration
-	networkTopology := factory.GetNetworkTopology()
+	// NetworkAwareScheduler's factory-owned topology now lives in the
+	// network/topology discovery-engine package, which has no manual
+	// construction API; build a standalone scheduler/network topology here
+	// purely to illustrate placement, independent of the factory's topology.
+	networkTopology := network.NewNetworkTopology()
 
 	// Define network nodes with locations
 	setupNetworkTopology(networkTopology)

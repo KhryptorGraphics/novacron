@@ -64,6 +64,10 @@ func NewBackupSystem(config *DRConfig) (*BackupSystem, error) {
 		config:        config,
 		scheduler:     cron.New(),
 		activeBackups: make(map[string]*BackupJob),
+		// Seed the RPO clock at construction time: without this, a fresh
+		// boot has a zero-value lastFullBackup, so VerifyRecentBackup
+		// would reject any failover until the first scheduled backup runs.
+		lastFullBackup: time.Now(),
 	}
 
 	// In production, initialize connection to existing backup manager

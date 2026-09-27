@@ -365,7 +365,9 @@ func (o *Orchestrator) HealthCheck(ctx context.Context) error {
 
 // buildInitOrder builds initialization order using topological sort
 func (o *Orchestrator) buildInitOrder() ([]string, error) {
-	// Build dependency graph
+	// Build dependency graph: edges point from a dependency to the
+	// component(s) that depend on it, so popping a zero-in-degree node
+	// means all of its own dependencies are already satisfied.
 	graph := make(map[string][]string)
 	inDegree := make(map[string]int)
 
@@ -375,14 +377,14 @@ func (o *Orchestrator) buildInitOrder() ([]string, error) {
 		}
 
 		deps := info.Component.Dependencies()
-		graph[name] = deps
+		inDegree[name] += len(deps)
 
 		for _, dep := range deps {
 			// Verify dependency exists
 			if _, exists := o.components[dep]; !exists {
 				return nil, fmt.Errorf("component %s depends on unknown component: %s", name, dep)
 			}
-			inDegree[dep]++
+			graph[dep] = append(graph[dep], name)
 		}
 	}
 
@@ -403,7 +405,7 @@ func (o *Orchestrator) buildInitOrder() ([]string, error) {
 		queue = queue[1:]
 		order = append(order, current)
 
-		// Process dependencies
+		// Process dependents (components that depend on `current`)
 		for _, neighbor := range graph[current] {
 			inDegree[neighbor]--
 			if inDegree[neighbor] == 0 {

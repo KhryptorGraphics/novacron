@@ -27,12 +27,19 @@ type Neuron struct {
 	LastSpikeTime   float64     `json:"last_spike_time"`
 
 	// Izhikevich parameters
-	A, B, C, D      float64     `json:"a,b,c,d"`
-	U               float64     `json:"u"` // recovery variable
+	A               float64 `json:"a"`
+	B               float64 `json:"b"`
+	C               float64 `json:"c"`
+	D               float64 `json:"d"`
+	U               float64 `json:"u"` // recovery variable
 
 	// Hodgkin-Huxley parameters
-	GNa, GK, GL     float64     `json:"g_na,g_k,g_l"`
-	M, N, H         float64     `json:"m,n,h"`
+	GNa             float64 `json:"g_na"`
+	GK              float64 `json:"g_k"`
+	GL              float64 `json:"g_l"`
+	M               float64 `json:"m"`
+	N               float64 `json:"n"`
+	H               float64 `json:"h"`
 }
 
 // Synapse represents a connection between neurons

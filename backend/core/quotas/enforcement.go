@@ -29,6 +29,10 @@ type EnforcementEngine struct {
 	
 	// Synchronization
 	mu sync.RWMutex
+
+	// Metrics synchronization (kept off EnforcementMetrics so GetMetrics can
+	// return a plain data copy without copying a lock)
+	metricsMu sync.RWMutex
 }
 
 // EnforcementCache provides fast quota lookup and enforcement decisions
@@ -141,9 +145,6 @@ type EnforcementMetrics struct {
 	EnforcementErrors  int64 `json:"enforcement_errors"`
 	CircuitBreakerTrips int64 `json:"circuit_breaker_trips"`
 	RateLimitHits      int64 `json:"rate_limit_hits"`
-	
-	// Synchronization
-	mu sync.RWMutex
 }
 
 // DefaultEnforcementConfig returns a default enforcement configuration
@@ -257,17 +258,17 @@ func (e *EnforcementEngine) EnforceQuota(ctx context.Context, entityID string, r
 		e.updateMetrics(duration)
 	}()
 
-	e.metrics.mu.Lock()
+	e.metricsMu.Lock()
 	e.metrics.TotalRequests++
-	e.metrics.mu.Unlock()
+	e.metricsMu.Unlock()
 
 	// Check rate limiter first
 	if e.config.RateLimitEnabled {
 		if !e.checkRateLimit(resourceType) {
-			e.metrics.mu.Lock()
+			e.metricsMu.Lock()
 			e.metrics.RateLimitHits++
 			e.metrics.DeniedRequests++
-			e.metrics.mu.Unlock()
+			e.metricsMu.Unlock()
 			
 			return &QuotaCheckResult{
 				Allowed: false,
@@ -279,27 +280,27 @@ func (e *EnforcementEngine) EnforceQuota(ctx context.Context, entityID string, r
 	// Check cache if enabled
 	if e.config.CacheEnabled {
 		if result := e.checkCache(entityID, resourceType, amount); result != nil {
-			e.metrics.mu.Lock()
+			e.metricsMu.Lock()
 			e.metrics.CacheHits++
 			if result.Allowed {
 				e.metrics.AllowedRequests++
 			} else {
 				e.metrics.DeniedRequests++
 			}
-			e.metrics.mu.Unlock()
+			e.metricsMu.Unlock()
 			return result, nil
 		}
-		e.metrics.mu.Lock()
+		e.metricsMu.Lock()
 		e.metrics.CacheMisses++
-		e.metrics.mu.Unlock()
+		e.metricsMu.Unlock()
 	}
 
 	// Perform actual quota check
 	result, err := e.manager.CheckQuota(ctx, entityID, resourceType, amount)
 	if err != nil {
-		e.metrics.mu.Lock()
+		e.metricsMu.Lock()
 		e.metrics.EnforcementErrors++
-		e.metrics.mu.Unlock()
+		e.metricsMu.Unlock()
 		return nil, err
 	}
 
@@ -309,13 +310,13 @@ func (e *EnforcementEngine) EnforceQuota(ctx context.Context, entityID string, r
 	}
 
 	// Update metrics
-	e.metrics.mu.Lock()
+	e.metricsMu.Lock()
 	if result.Allowed {
 		e.metrics.AllowedRequests++
 	} else {
 		e.metrics.DeniedRequests++
 	}
-	e.metrics.mu.Unlock()
+	e.metricsMu.Unlock()
 
 	return result, nil
 }
@@ -563,8 +564,8 @@ func (cb *CircuitBreaker) Execute(fn func() error) error {
 // Metrics methods
 
 func (e *EnforcementEngine) updateMetrics(duration time.Duration) {
-	e.metrics.mu.Lock()
-	defer e.metrics.mu.Unlock()
+	e.metricsMu.Lock()
+	defer e.metricsMu.Unlock()
 
 	// Update average check time (simple moving average)
 	if e.metrics.AverageCheckTime == 0 {
@@ -580,8 +581,8 @@ func (e *EnforcementEngine) updateMetrics(duration time.Duration) {
 }
 
 func (e *EnforcementEngine) GetMetrics() *EnforcementMetrics {
-	e.metrics.mu.RLock()
-	defer e.metrics.mu.RUnlock()
+	e.metricsMu.RLock()
+	defer e.metricsMu.RUnlock()
 
 	// Return a copy
 	metrics := *e.metrics
@@ -589,8 +590,8 @@ func (e *EnforcementEngine) GetMetrics() *EnforcementMetrics {
 }
 
 func (e *EnforcementEngine) ResetMetrics() {
-	e.metrics.mu.Lock()
-	defer e.metrics.mu.Unlock()
+	e.metricsMu.Lock()
+	defer e.metricsMu.Unlock()
 
 	e.metrics.TotalRequests = 0
 	e.metrics.AllowedRequests = 0

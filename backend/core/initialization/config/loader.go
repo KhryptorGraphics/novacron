@@ -436,7 +436,7 @@ func GenerateDefault(path string) error {
 			BindPort:       9090,
 			MaxConnections: 10000,
 			ConnTimeout:    30 * time.Second,
-			EnableTLS:      true,
+			EnableTLS:      false,
 		},
 		Storage: StorageConfig{
 			Backend:        "sqlite",

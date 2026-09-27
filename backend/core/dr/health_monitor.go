@@ -91,6 +91,11 @@ func NewHealthMonitor(config *DRConfig) *HealthMonitor {
 		}
 	}
 
+	// Seed the global health score immediately so callers observing
+	// GetGlobalHealth shortly after Start() don't see a zero-value score
+	// for up to aggregateHealth's 30s tick interval.
+	hm.calculateGlobalHealth()
+
 	return hm
 }
 

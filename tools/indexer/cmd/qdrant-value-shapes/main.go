@@ -17,9 +17,6 @@ func main() {
 	v1 := &qdrant.Value{Kind: &qdrant.Value_StringValue{StringValue: "test"}}
 	fmt.Printf("v1: %+v\n", v1)
 
-	v2 := &qdrant.Value{Value: &qdrant.Value_StringValue{StringValue: "test"}}
-	fmt.Printf("v2: %+v\n", v2)
-
 	// Try vectors
 	vec := make(map[string]*qdrant.Vector)
 	vec["default"] = &qdrant.Vector{Data: []float32{1.0, 2.0, 3.0}}
@@ -33,7 +30,11 @@ func main() {
 				Num: 42,
 			},
 		},
-		Vectors: vec,
+		Vectors: &qdrant.Vectors{
+			VectorsOptions: &qdrant.Vectors_Vectors{
+				Vectors: &qdrant.NamedVectors{Vectors: vec},
+			},
+		},
 	}
 
 	fmt.Printf("Point: %+v\n", point)

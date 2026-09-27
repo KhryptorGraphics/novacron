@@ -85,9 +85,7 @@ func queryCommand() {
 					Key: "path",
 					Match: &qdrant.Match{
 						MatchValue: &qdrant.Match_Text{
-							Text: &qdrant.MatchText{
-								Text: filter,
-							},
+							Text: filter,
 						},
 					},
 				},
@@ -107,9 +105,7 @@ func queryCommand() {
 					Key: "extension",
 					Match: &qdrant.Match{
 						MatchValue: &qdrant.Match_Keyword{
-							Keyword: &qdrant.MatchKeyword{
-								Keyword: ext,
-							},
+							Keyword: ext,
 						},
 					},
 				},
@@ -124,9 +120,7 @@ func queryCommand() {
 		}
 	}
 
-	// Prepare a map for the vector search
-	vectorMap := make(map[string]*qdrant.Vector)
-	vectorMap[""] = &qdrant.Vector{Data: queryEmbedding}
+	// (queryEmbedding is passed directly to SearchPoints.Vector below)
 
 	vectorName := ""
 	threshold := float32(MinScoreThreshold)
@@ -134,7 +128,7 @@ func queryCommand() {
 	// Search Qdrant
 	searchParams := qdrant.SearchPoints{
 		CollectionName: CollectionName,
-		Vector:         vectorMap[""],
+		Vector:         queryEmbedding,
 		Limit:          uint64(SearchLimit),
 		WithPayload: &qdrant.WithPayloadSelector{
 			SelectorOptions: &qdrant.WithPayloadSelector_Include{

@@ -23,9 +23,11 @@ func main() {
 // and encryption with the distributed storage system.
 func StorageEfficiencyDemo() {
 	// 1. Create a base storage manager
-	baseManager := &storage.StorageManager{
-		// In a real application, you would initialize this properly
-		Volumes: make(map[string]*storage.Volume),
+	baseManager, err := storage.NewStorageManager(storage.StorageManagerConfig{
+		BasePath: "/var/lib/novacron/storage",
+	})
+	if err != nil {
+		log.Fatalf("Failed to create base storage manager: %v", err)
 	}
 
 	// 2. Create configuration for each component
@@ -33,9 +35,8 @@ func StorageEfficiencyDemo() {
 	// Deduplication config
 	dedupConfig := deduplication.DefaultDedupConfig()
 	dedupConfig.Algorithm = deduplication.DedupContent
-	dedupConfig.MinBlockSize = 4 * 1024     // 4 KB minimum
-	dedupConfig.TargetBlockSize = 64 * 1024 // 64 KB target
-	dedupConfig.Enabled = true
+	dedupConfig.BlockSize = 64 * 1024   // 64 KB target block size
+	dedupConfig.MinSizeBytes = 4 * 1024 // 4 KB minimum before deduplicating
 
 	// Compression config
 	compConfig := compression.DefaultCompressionConfig()
@@ -88,11 +89,11 @@ func StorageEfficiencyDemo() {
 
 	// 6. Create a volume
 	ctx := context.Background()
-	volumeSpec := storage.VolumeSpec{
-		Name:   "efficient-volume",
-		SizeMB: 1024, // 1 GB
-		Type:   storage.VolumeTypeCeph,
-		Options: map[string]string{
+	volumeSpec := storage.VolumeCreateOptions{
+		Name: "efficient-volume",
+		Size: 1024 * 1024 * 1024, // 1 GB, in bytes
+		Type: storage.VolumeTypeCeph,
+		Metadata: map[string]string{
 			"description": "Volume with deduplication, compression, and encryption",
 		},
 	}
