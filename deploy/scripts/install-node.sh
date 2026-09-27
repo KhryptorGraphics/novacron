@@ -228,6 +228,9 @@ if [ ! -e "$ENV_FILE" ] || [ "$FORCE_ENV" = "1" ]; then
     printf 'STORAGE_PATH=%s\n' "$STORAGE_PATH"
     printf 'LOG_LEVEL=info\n'
     printf 'LOG_FORMAT=json\n'
+    printf '\n# Set when a reverse proxy (e.g. a local nginx) fronts this node, so the login\n'
+    printf '# rate limiter trusts its X-Forwarded-For. Unset = fail closed (peer address).\n'
+    printf '# NOVACRON_TRUSTED_PROXIES=127.0.0.1/32,::1/128\n'
     printf '\n# Optional usage-metering rate card (defaults are 0 = recorded, unpriced).\n'
     printf '# NOVACRON_RATE_PER_VCPU_HOUR=0\n'
     printf '# NOVACRON_RATE_PER_GB_EGRESS=0\n'

@@ -101,6 +101,15 @@ build_application() {
     
     # Install binary
     install -m 755 api-server-real "$INSTALL_PREFIX/bin/api-server"
+    rm -f api-server-real
+
+    # Migration tool: database/migrate.go is its own Go module with the
+    # canonical migrations embedded. The api-server refuses to boot against
+    # an unmigrated schema, so it must run before the first start.
+    cd "$PROJECT_ROOT/database"
+    CGO_ENABLED=0 go build -o novacron-migrate -ldflags "-s -w" .
+    install -m 755 novacron-migrate "$INSTALL_PREFIX/bin/novacron-migrate"
+    rm -f novacron-migrate
     
     echo "✅ Application built and installed"
 }
@@ -130,51 +139,48 @@ EOF
         echo "❌ Database setup failed"
         exit 1
     fi
+
+    # Apply the canonical schema (database/migrations via golang-migrate);
+    # the api-server refuses to boot against an unmigrated database.
+    DB_URL="postgresql://novacron:novacron123@localhost:5432/novacron?sslmode=disable" \
+        "$INSTALL_PREFIX/bin/novacron-migrate" -direction=up
+    echo "✅ Database migrations applied"
 }
 
 # Function to install configuration
 install_configuration() {
     echo "⚙️  Installing configuration files..."
     
-    # Create environment configuration
-    cat > "$CONFIG_DIR/environment" <<EOF
+    # Environment file read by systemd/novacron-api.service
+    # (EnvironmentFile=/etc/novacron/novacron.env). Only keys that
+    # backend/pkg/config/config.go consumes; REST and WebSocket share API_PORT.
+    cat > "$CONFIG_DIR/novacron.env" <<EOF
 # NovaCron Environment Configuration
-NODE_ENV=production
 LOG_LEVEL=info
 
 # Database Configuration
 DB_URL=postgresql://novacron:novacron123@localhost:5432/novacron
 
-# API Configuration
-API_HOST=0.0.0.0
+# API Configuration (single listener: REST + WebSocket)
 API_PORT=8090
-WS_PORT=8091
 
 # Authentication
-AUTH_SECRET=changeme_in_production_$(openssl rand -base64 32)
+AUTH_SECRET=$(openssl rand -hex 32)
+
+# Fabric shared secret for /internal/* node-to-node calls (fail-closed).
+NOVACRON_MIGRATION_SECRET=$(openssl rand -hex 32)
 
 # Storage Configuration
 STORAGE_PATH=$DATA_DIR/vms
-CACHE_PATH=$DATA_DIR/cache
 
-# Hypervisor Configuration
-HYPERVISOR_DRIVER=kvm
-LIBVIRT_URI=qemu:///system
-
-# Monitoring
-METRICS_ENABLED=true
-METRICS_PORT=9090
-
-# Redis Configuration
-REDIS_URL=redis://localhost:6379
-
-# Logging
-LOG_DIR=$LOG_DIR
+# Set when a reverse proxy (e.g. a local nginx) fronts this node, so the login
+# rate limiter trusts its X-Forwarded-For. Unset = fail closed (peer address).
+# NOVACRON_TRUSTED_PROXIES=127.0.0.1/32,::1/128
 EOF
     
-    # Set permissions
-    chmod 600 "$CONFIG_DIR/environment"
-    chown root:$GROUP "$CONFIG_DIR/environment"
+    # Set permissions (systemd reads it as root)
+    chmod 600 "$CONFIG_DIR/novacron.env"
+    chown root:root "$CONFIG_DIR/novacron.env"
     
     echo "✅ Configuration installed"
 }
@@ -323,8 +329,7 @@ print_summary() {
     echo "  - System user: $USER"
     echo ""
     echo "🌐 Service URLs:"
-    echo "  - API Server: http://localhost:8090"
-    echo "  - WebSocket: ws://localhost:8091"
+    echo "  - API Server (REST + WebSocket): http://localhost:8090"
     echo "  - Health Check: http://localhost:8090/health"
     echo "  - API Info: http://localhost:8090/api/info"
     echo ""
@@ -341,7 +346,7 @@ print_summary() {
     echo "  - List NovaCron profiles: ufw app list | grep NovaCron"
     echo ""
     echo "📚 Configuration files:"
-    echo "  - Environment: $CONFIG_DIR/environment"
+    echo "  - Environment: $CONFIG_DIR/novacron.env"
     echo "  - UFW profiles: /etc/ufw/applications.d/novacron"
     echo ""
     echo "🔐 Default credentials:"

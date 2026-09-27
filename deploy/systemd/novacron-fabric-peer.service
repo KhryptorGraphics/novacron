@@ -20,7 +20,6 @@ WorkingDirectory=/opt/novacron
 # compute-only node from colliding with a control plane on the same host.
 # EnvironmentFile wins, so /etc/novacron/novacron.env still has the last word.
 Environment=API_PORT=9000
-Environment=WS_PORT=9001
 EnvironmentFile=/etc/novacron/novacron.env
 ExecStart=/opt/novacron/bin/api-server
 

@@ -21,19 +21,9 @@ rule_files:
 
 # Scrape configurations
 scrape_configs:
-  # NovaCron API Server
-  - job_name: 'novacron-api'
-    static_configs:
-      - targets: ['api-server:8080']
-    metrics_path: '/metrics'
-    scrape_interval: 10s
-
-  # NovaCron Core Server
-  - job_name: 'novacron-core'
-    static_configs:
-      - targets: ['core-server:8090']
-    metrics_path: '/metrics'
-    scrape_interval: 10s
+  # The canonical api-server (backend/cmd/api-server) exposes GET /health
+  # (JSON) on API_PORT 8090 and no Prometheus /metrics endpoint, so there is
+  # no api-server scrape job. There is no separate core server.
 
   # PostgreSQL Database
   - job_name: 'postgresql'
@@ -78,13 +68,9 @@ scrape_configs:
         replacement: $1:$2
         target_label: __address__
 
-# Storage configuration
-storage:
-  tsdb:
-    path: /prometheus
-    retention:
-      time: 30d
-      size: 100GB
+# Storage is configured by flags, not config keys:
+#   --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=30d
+#   --storage.tsdb.retention.size=100GB
 
 # Remote write for long-term storage (optional)
 # remote_write:

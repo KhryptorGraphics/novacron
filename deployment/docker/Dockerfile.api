@@ -1,57 +1,46 @@
 # NovaCron API Server Production Dockerfile
-# Multi-stage build for security and optimization
+# Multi-stage build: api-server (root module) + migrate tool (database module).
 
-# Build stage
+# Build stage: canonical api-server (backend/cmd/api-server)
 FROM golang:1.25-alpine AS builder
 
-# Build arguments
-ARG VERSION=dev
-ARG COMMIT_SHA=unknown
-ARG BUILD_DATE=unknown
+RUN apk add --no-cache git ca-certificates tzdata
 
-# Install build dependencies
-RUN apk add --no-cache \
-    git \
-    ca-certificates \
-    tzdata \
-    gcc \
-    musl-dev
-
-# Set working directory
 WORKDIR /build
 
-# Copy go modules files first for better caching
+# go.mod replaces several modules with local directories (backend/core,
+# backend/core/orchestration, backend/pkg/logger, sdk/go, ...), so those trees
+# must be present before `go mod download` (same as docker/api.Dockerfile).
 COPY go.mod go.sum ./
-COPY backend/core/go.mod backend/core/go.sum ./backend/core/
-COPY backend/core/orchestration/go.mod backend/core/orchestration/go.sum ./backend/core/orchestration/
+COPY sdk ./sdk
+COPY backend ./backend
 
-# Download dependencies
 RUN go mod download
 
-# Copy source code
-COPY . .
+# CGO off (pure-Go build, same as docker/api.Dockerfile); GOARCH follows the
+# build platform so arm64 hosts / buildx --platform work.
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -a \
+    -o /build/api-server ./backend/cmd/api-server
 
-# Build the application
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-w -s \
-    -X 'main.Version=${VERSION}' \
-    -X 'main.CommitSHA=${COMMIT_SHA}' \
-    -X 'main.BuildDate=${BUILD_DATE}'" \
-    -a -installsuffix cgo \
-    -o /build/api-server \
-    ./backend/cmd/api-server
+# Build stage: migration tool. database/migrate.go is its own Go module
+# (database/go.mod) with the canonical migrations embedded, so it cannot be
+# built from the root-module stage above (mirrors docker/migrate.Dockerfile).
+FROM golang:1.25-alpine AS migrate-builder
 
-# Build migration tool
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-w -s" \
-    -a -installsuffix cgo \
-    -o /build/migrate \
-    ./backend/cmd/migrate
+RUN apk add --no-cache git
+
+WORKDIR /build/database
+
+COPY database/go.mod database/go.sum ./
+RUN go mod download
+
+COPY database ./
+
+RUN CGO_ENABLED=0 GOOS=linux go build -a -o /build/bin/migrate .
 
 # Production stage
 FROM alpine:3.18
 
-# Install runtime dependencies
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
@@ -68,28 +57,22 @@ RUN mkdir -p /app /var/lib/novacron /var/log/novacron \
     && chown -R novacron:novacron /app /var/lib/novacron /var/log/novacron
 
 # Copy built binaries
-COPY --from=builder /build/api-server /app/
-COPY --from=builder /build/migrate /app/
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /build/api-server /app/api-server
+COPY --from=migrate-builder /build/bin/migrate /app/migrate
 
-# Copy migration files
-COPY backend/migrations /app/migrations/
+RUN chmod +x /app/api-server /app/migrate
 
-# Set permissions
-RUN chmod +x /app/novacron-api /app/migrate /app/migrations/run_migrations.sh
-
-# Switch to non-root user
 USER novacron
 
-# Set working directory
 WORKDIR /app
 
-# Health check
+# The api-server serves REST and WebSocket on the single API_PORT listener
+# (default 8090) and registers GET /health.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8091/health || exit 1
+    CMD curl -f http://localhost:8090/health || exit 1
 
-# Expose ports
-EXPOSE 8091 8093 9090
+EXPOSE 8090
 
-# Default command
+# Migrations: `/app/migrate -direction=up` with DB_URL set (see the k8s
+# initContainer in deployment/kubernetes/deployments.yaml).
 CMD ["./api-server"]

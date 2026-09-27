@@ -82,5 +82,6 @@ ENTRYPOINT ["hypervisor-entrypoint.sh"]
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD wget -q -O /dev/null http://localhost:9000/healthz || exit 1
 
-# Default command
-CMD ["novacron-hypervisor", "--config", "/etc/novacron/config.yaml"]
+# Default command: the entrypoint expands a bare "novacron-hypervisor" into
+# the flag set (-config/-data-dir/-listen 0.0.0.0:9000/-node-id).
+CMD ["novacron-hypervisor"]

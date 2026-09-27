@@ -75,7 +75,7 @@ done
 echo "Starting NovaCron API Service..."
 echo "Log Level: ${LOG_LEVEL:-info}"
 echo "API Port: ${API_PORT:-8090}"
-echo "Database URL: ${DB_URL:-postgresql://postgres:postgres@postgres:5432/novacron}"
+echo "Database Host: ${DB_HOST:-<DB_URL unset>}"
 echo "Hypervisor Addresses: ${HYPERVISOR_ADDRS:-novacron-hypervisor:9000}"
 
 # Start the application

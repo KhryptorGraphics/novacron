@@ -29,17 +29,33 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Improved API service with enhanced configuration
+  # Applies database/migrations (golang-migrate) before the API starts; the
+  # api-server refuses to boot against an unmigrated schema.
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/migrate.Dockerfile
+    image: novacron/migrate:latest
+    restart: "no"
+    environment:
+      DB_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-novacron}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - novacron-network
+
+  # API service. docker/api.Dockerfile (not the FROM-scratch api-simple image,
+  # which has no shell or wget and so can never pass a compose healthcheck).
   api:
     build:
       context: .
-      dockerfile: docker/api-simple.Dockerfile
-    image: novacron-api-simple:latest
+      dockerfile: docker/api.Dockerfile
+    image: novacron/api:latest
     restart: unless-stopped
     environment:
-      # Server configuration
-      API_PORT: ${API_PORT:-8090}
-      WS_PORT: ${WS_PORT:-8091}
+      # Server configuration (REST and WebSocket share the API_PORT listener)
+      API_PORT: 8090
       READ_TIMEOUT: ${READ_TIMEOUT:-15s}
       WRITE_TIMEOUT: ${WRITE_TIMEOUT:-15s}
       IDLE_TIMEOUT: ${IDLE_TIMEOUT:-60s}
@@ -51,7 +67,7 @@ services:
       DB_CONN_MAX_LIFETIME: ${DB_CONN_MAX_LIFETIME:-5m}
       
       # Authentication configuration
-      AUTH_SECRET: ${AUTH_SECRET:-changeme_in_production}
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required (openssl rand -hex 32)}
       AUTH_SESSION_EXPIRY: ${AUTH_SESSION_EXPIRY:-24h}
       AUTH_PASSWORD_MIN_LENGTH: ${AUTH_PASSWORD_MIN_LENGTH:-8}
       
@@ -72,12 +88,13 @@ services:
       
     ports:
       - "${API_PORT:-8090}:8090"
-      - "${WS_PORT:-8091}:8091"
     volumes:
       - api_logs:/var/log/novacron
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - novacron-network
     healthcheck:

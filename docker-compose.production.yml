@@ -71,6 +71,12 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
       NOVACRON_MIGRATION_SECRET: ${NOVACRON_MIGRATION_SECRET:?NOVACRON_MIGRATION_SECRET is required}
       STORAGE_PATH: /var/lib/novacron/vms
+      # nginx (the only ingress) appends $proxy_add_x_forwarded_for; the
+      # login rate limiter only trusts XFF from these peers. The value is the
+      # compose network's pinned subnet (see `networks:` below), so nginx's
+      # hop is trusted. Must stay set: unset, every request carries nginx's
+      # address and the whole deployment shares one login-limiter bucket.
+      NOVACRON_TRUSTED_PROXIES: ${NOVACRON_NETWORK_SUBNET:-172.28.0.0/16}
     volumes:
       - migrate_bin:/shared/bin:ro
     depends_on:
@@ -95,7 +101,6 @@ services:
       # browser talks to nginx, which proxies /api to the api service.
       args:
         NEXT_PUBLIC_API_URL: ""
-        NEXT_PUBLIC_WS_URL: ""
     image: novacron/frontend:latest
     container_name: novacron-frontend
     restart: unless-stopped
@@ -137,3 +142,7 @@ volumes:
 networks:
   novacron-network:
     driver: bridge
+    # Pinned so the api service's NOVACRON_TRUSTED_PROXIES can name it.
+    ipam:
+      config:
+        - subnet: ${NOVACRON_NETWORK_SUBNET:-172.28.0.0/16}

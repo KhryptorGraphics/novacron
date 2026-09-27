@@ -41,10 +41,13 @@ FROM python:3.12-slim
 # Set working directory
 WORKDIR /app
 
-# Install runtime dependencies
+# Install runtime dependencies (wget: HEALTHCHECK; netcat: api-entrypoint.sh's
+# DB/hypervisor readiness polls — without it every `nc -z` fails and the
+# entrypoint burns its 30 retries on each boot).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     wget \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # Create novacron user

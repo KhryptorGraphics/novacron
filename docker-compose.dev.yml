@@ -1,6 +1,47 @@
 version: '3.8'
 
+# Developer stack: api-server + migrations + postgres + redis + frontend dev
+# server with monitoring. Env names follow backend/pkg/config/config.go
+# (API_PORT, DB_URL, AUTH_SECRET, LOG_LEVEL, ...). The api-server serves REST
+# and WebSocket on the single API_PORT listener.
+#
+#   AUTH_SECRET=$(openssl rand -hex 32) docker compose -f docker-compose.dev.yml up
+
 services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: novacron
+    ports:
+      - "11432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - novacron-network
+    restart: unless-stopped
+
+  # Applies database/migrations (golang-migrate) before the API starts; the
+  # api-server refuses to boot against an unmigrated schema.
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/migrate.Dockerfile
+    restart: "no"
+    environment:
+      DB_URL: postgresql://postgres:postgres@postgres:5432/novacron?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - novacron-network
+
   # Backend API Service
   novacron-api:
     build:
@@ -9,35 +50,45 @@ services:
     ports:
       - "8090:8090"
     environment:
-      - LIBVIRT_URI=qemu:///system
       - LOG_LEVEL=debug
-    volumes:
-      - /var/run/libvirt/libvirt-sock:/var/run/libvirt/libvirt-sock
-      - ./backend:/app/backend
+      - API_PORT=8090
+      - DB_URL=postgresql://postgres:postgres@postgres:5432/novacron?sslmode=disable
+      - AUTH_SECRET=${AUTH_SECRET:?AUTH_SECRET is required (openssl rand -hex 32)}
+      - CORS_ALLOWED_ORIGINS=http://localhost:8092,http://localhost:3001
     depends_on:
-      - redis
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
     networks:
       - novacron-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      # docker/api.Dockerfile's runtime stage installs wget, not curl.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8090/health"]
       interval: 30s
       timeout: 10s
       retries: 3
 
-  # Frontend Development Service
+  # Frontend development server (hot reload from the bind-mounted source).
+  # docker/frontend.Dockerfile's builder stage has the full dependency tree;
+  # `next dev` writes its build output into ./frontend/.next on the host.
   novacron-frontend:
     build:
       context: .
       dockerfile: docker/frontend.Dockerfile
+      target: builder
       args:
-        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8090}/api
-        - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-ws://localhost:8091}/ws
+        # Host-published API origin (browsers cannot resolve compose names).
+        # The WebSocket origin is derived from it by lib/api/origin.ts.
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8090}
+    command: ["npm", "run", "dev", "--", "--hostname", "0.0.0.0", "--port", "3000"]
     ports:
       - "8092:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8090}/api
-      - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-ws://localhost:8091}/ws
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8090}
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -47,7 +98,8 @@ services:
       - novacron-network
     restart: unless-stopped
 
-  # Redis for caching and session management
+  # Redis: used by the hypervisor's auth persistence and the AI engine; the
+  # canonical api-server reads no REDIS_* keys.
   redis:
     image: redis:7-alpine
     ports:
@@ -65,7 +117,8 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./deployment/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deployment/monitoring/alerting-rules.yml:/etc/prometheus/alerting-rules.yml:ro
       - prometheus-data:/prometheus
     networks:
       - novacron-network
@@ -87,13 +140,12 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
     networks:
       - novacron-network
     restart: unless-stopped
 
 volumes:
+  postgres-data:
   redis-data:
   prometheus-data:
   grafana-data:

@@ -1,83 +1,49 @@
 #!/bin/sh
 # NovaCron Hypervisor Entrypoint Script
+#
+# backend/core/cmd/novacron is flag-driven (-config, -node-id, -data-dir,
+# -listen). Its optional -config YAML uses the `storage:`/`hypervisor:`/
+# `vm_manager:`/`scheduler:`/`auth:` schema of runtimeConfigFile (main.go);
+# when the file is absent the built-in defaults apply, so this entrypoint no
+# longer fabricates one. Environment (all optional):
+#   NODE_ID          node id (default: container hostname)
+#   STORAGE_PATH     data dir (default /var/lib/novacron/vms)
+#   HYPERVISOR_LISTEN listen address (default 0.0.0.0:9000 — the port the
+#                    api-server dials via HYPERVISOR_ADDRS, and the port the
+#                    image's HEALTHCHECK probes at /healthz)
+#   NOVACRON_AUTH_POSTGRES_URL / NOVACRON_AUTH_REDIS_URL / NOVACRON_TRUSTED_PROXIES
+#                    read directly by the binary's runtime-auth stack
 set -e
 
-# Check if we're running with sufficient privileges
-if [ ! -e /dev/kvm ] && [ ! -e /dev/null/kvm ]; then
-    echo "WARNING: KVM device not found. Hardware virtualization may not be available."
-    echo "         Container may need to be run with --privileged flag."
+STORAGE_PATH="${STORAGE_PATH:-/var/lib/novacron/vms}"
+HYPERVISOR_LISTEN="${HYPERVISOR_LISTEN:-0.0.0.0:9000}"
+
+if [ ! -e /dev/kvm ]; then
+    echo "WARNING: /dev/kvm not found. Hardware virtualization is unavailable;"
+    echo "         KVM guests will not start (pass --device /dev/kvm)."
 fi
 
-# Create config file if it doesn't exist
-if [ ! -f /etc/novacron/config.yaml ]; then
-    echo "Creating default configuration file..."
-    mkdir -p /etc/novacron
-    cat > /etc/novacron/config.yaml << EOF
-# NovaCron Hypervisor Configuration
-nodeId: ${NODE_ID:-node1}
-logLevel: ${LOG_LEVEL:-info}
-storagePath: ${STORAGE_PATH:-/var/lib/novacron/vms}
-clusterAddr: ${CLUSTER_ADDR:-novacron-api:8090}
-api:
-  host: 0.0.0.0
-  port: 9000
-  tlsEnabled: false
-vm:
-  defaultMemory: 2048
-  defaultCpus: 2
-  defaultDiskSize: 20
-  supportedDrivers:
-    - kvm
-    - containerd
-  memoryOvercommitRatio: 1.2
-migration:
-  storagePath: ${STORAGE_PATH:-/var/lib/novacron/vms}/migrations
-  defaultType: cold
-  liveIterations: 5
-  compressionLevel: 6
-  defaultBandwidthLimit: 0
-EOF
-    echo "Configuration file created at /etc/novacron/config.yaml"
+if [ ! -d "$STORAGE_PATH" ]; then
+    echo "Creating VM storage directory $STORAGE_PATH..."
+    mkdir -p "$STORAGE_PATH"
 fi
 
-# Create storage directory if it doesn't exist
-if [ ! -d ${STORAGE_PATH:-/var/lib/novacron/vms} ]; then
-    echo "Creating VM storage directory..."
-    mkdir -p ${STORAGE_PATH:-/var/lib/novacron/vms}
-    mkdir -p ${STORAGE_PATH:-/var/lib/novacron/vms}/migrations
-fi
-
-# Check libvirt connectivity
-if which virsh >/dev/null 2>&1; then
-    echo "Checking libvirt connectivity..."
-    if ! virsh -c qemu:///system list >/dev/null 2>&1; then
-        echo "WARNING: Cannot connect to libvirt. KVM-based VMs will not be available."
-        echo "         Please ensure libvirt is properly configured."
-    else
-        echo "Libvirt connection successful."
-    fi
-else
-    echo "WARNING: virsh not found. KVM management will not be available."
-fi
-
-# Check containerd connectivity
-if which ctr >/dev/null 2>&1; then
-    echo "Checking containerd connectivity..."
-    if ! ctr version >/dev/null 2>&1; then
-        echo "WARNING: Cannot connect to containerd. Container-based VMs will not be available."
-    else
-        echo "Containerd connection successful."
-    fi
-else
-    echo "INFO: ctr not found. Container-based VMs may not be available."
-fi
-
-# Print startup message
 echo "Starting NovaCron Hypervisor..."
-echo "Node ID: ${NODE_ID:-node1}"
-echo "Log Level: ${LOG_LEVEL:-info}"
-echo "Storage Path: ${STORAGE_PATH:-/var/lib/novacron/vms}"
+echo "Node ID: ${NODE_ID:-$(hostname)}"
+echo "Storage Path: $STORAGE_PATH"
+echo "Listen: $HYPERVISOR_LISTEN"
 echo "Cluster Address: ${CLUSTER_ADDR:-novacron-api:8090}"
 
-# Start the application
+# Default command: run the binary with the flags derived above. Any explicit
+# CMD/args override this entirely.
+if [ "$#" -eq 0 ] || { [ "$#" -eq 1 ] && [ "$1" = "novacron-hypervisor" ]; }; then
+    set -- novacron-hypervisor \
+        -config /etc/novacron/config.yaml \
+        -data-dir "$STORAGE_PATH" \
+        -listen "$HYPERVISOR_LISTEN"
+    if [ -n "${NODE_ID:-}" ]; then
+        set -- "$@" -node-id "$NODE_ID"
+    fi
+fi
+
 exec "$@"

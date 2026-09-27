@@ -4,13 +4,12 @@ FROM node:18-alpine AS builder
 # Set working directory
 WORKDIR /app
 
-# Build args for optional runtime configuration (no defaults - same-origin fallback at runtime)
+# Build arg for optional API origin (no default - same-origin fallback at
+# runtime; the WebSocket origin is derived from it by lib/api/origin.ts).
 ARG NEXT_PUBLIC_API_URL
-ARG NEXT_PUBLIC_WS_URL
 
-# Expose build args as env vars for the build (empty if not provided)
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-} \
-    NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-}
+# Expose the build arg as an env var for the build (empty if not provided)
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}
 
 # Copy package.json and package-lock.json
 COPY frontend/package.json frontend/package-lock.json* ./
@@ -37,10 +36,9 @@ RUN addgroup --system --gid 1001 nodejs && \
 # Set environment variables (runtime values take precedence over build-time)
 ENV NODE_ENV=production \
     PORT=3000 \
-    # NEXT_PUBLIC_API_URL and NEXT_PUBLIC_WS_URL are baked in at build time
-    # from ARGs above. No defaults here - origin.ts falls back to same-origin.
-    NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-} \
-    NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-}
+    # NEXT_PUBLIC_API_URL is baked in at build time from the ARG above.
+    # No default here - origin.ts falls back to same-origin.
+    NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}
 
 # Copy build artifacts from builder stage.
 # NOTE (novacron-5c7): frontend/next.config.js does not enable

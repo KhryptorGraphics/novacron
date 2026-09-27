@@ -266,8 +266,7 @@ $(generate_webhook_urls)
 
 # Domain Configuration
 DOMAIN_NAME=novacron.local
-API_PORT=8091
-WS_PORT=8093
+API_PORT=8090
 METRICS_PORT=9090
 
 # Security Configuration

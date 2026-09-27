@@ -326,6 +326,7 @@ spec:
     - Ingress
     - Egress
   ingress:
+    # Single listener: REST + WebSocket on 8090; no metrics port.
     # Allow traffic from frontend
     - from:
         - podSelector:
@@ -333,9 +334,7 @@ spec:
               app.kubernetes.io/component: frontend
       ports:
         - protocol: TCP
-          port: 8091
-        - protocol: TCP
-          port: 8093
+          port: 8090
     
     # Allow traffic from ingress controller
     - from:
@@ -344,18 +343,16 @@ spec:
               name: ingress-nginx
       ports:
         - protocol: TCP
-          port: 8091
-        - protocol: TCP
-          port: 8093
+          port: 8090
     
-    # Allow monitoring
+    # Allow monitoring (health probes / future scrapes hit the API port)
     - from:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: monitoring
       ports:
         - protocol: TCP
-          port: 9090
+          port: 8090
   
   egress:
     # Allow DNS

@@ -6,24 +6,14 @@ metadata:
   labels:
     app.kubernetes.io/name: novacron
     app.kubernetes.io/component: api
-  annotations:
-    service.beta.kubernetes.io/aws-load-balancer-type: nlb
-    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: tcp
 spec:
   type: ClusterIP
+  # Single listener: REST and WebSocket on API_PORT (8090); no /metrics.
   ports:
-    - port: 8091
+    - port: 8090
       targetPort: http-api
       protocol: TCP
       name: http-api
-    - port: 8093
-      targetPort: websocket
-      protocol: TCP
-      name: websocket
-    - port: 9090
-      targetPort: metrics
-      protocol: TCP
-      name: metrics
   selector:
     app.kubernetes.io/name: novacron
     app.kubernetes.io/component: api
@@ -39,15 +29,14 @@ metadata:
     app.kubernetes.io/component: frontend
 spec:
   type: ClusterIP
+  # Cluster-facing port 80 maps by name to the container's `http` port
+  # (3000, `next start`); the frontend serves no TLS itself (the Ingress
+  # terminates it).
   ports:
     - port: 80
       targetPort: http
       protocol: TCP
       name: http
-    - port: 443
-      targetPort: https
-      protocol: TCP
-      name: https
   selector:
     app.kubernetes.io/name: novacron
     app.kubernetes.io/component: frontend
@@ -113,62 +102,6 @@ spec:
   selector:
     app.kubernetes.io/name: prometheus
     app.kubernetes.io/component: monitoring
-
----
-# Load Balancer Service (for external access)
-apiVersion: v1
-kind: Service
-metadata:
-  name: novacron-loadbalancer
-  namespace: novacron
-  labels:
-    app.kubernetes.io/name: novacron
-    app.kubernetes.io/component: loadbalancer
-  annotations:
-    service.beta.kubernetes.io/aws-load-balancer-type: nlb
-    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
-    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: tcp
-    service.beta.kubernetes.io/aws-load-balancer-ssl-cert: "arn:aws:acm:region:account:certificate/cert-id"
-    service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "https"
-spec:
-  type: LoadBalancer
-  loadBalancerSourceRanges:
-    - 10.0.0.0/8
-    - 172.16.0.0/12
-    - 192.168.0.0/16
-  ports:
-    - port: 80
-      targetPort: http
-      protocol: TCP
-      name: http
-    - port: 443
-      targetPort: https
-      protocol: TCP
-      name: https
-  selector:
-    app.kubernetes.io/name: novacron
-    app.kubernetes.io/component: frontend
-
----
-# Service Monitor for Prometheus
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: novacron-api
-  namespace: novacron
-  labels:
-    app.kubernetes.io/name: novacron
-    app.kubernetes.io/component: api
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: novacron
-      app.kubernetes.io/component: api
-  endpoints:
-    - port: metrics
-      interval: 30s
-      path: /metrics
-      honorLabels: true
 
 ---
 apiVersion: monitoring.coreos.com/v1

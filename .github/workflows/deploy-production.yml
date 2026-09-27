@@ -52,30 +52,42 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
 
+      # All three Dockerfiles expect the repo root as build context.
       - name: Build and push API server
         uses: docker/build-push-action@v5
         with:
-          context: ./backend
-          file: ./backend/Dockerfile.api
+          context: .
+          file: docker/api.Dockerfile
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build and push Core server
+      - name: Build and push Migrate tool
         uses: docker/build-push-action@v5
         with:
-          context: ./backend
-          file: ./backend/Dockerfile.core
+          context: .
+          file: docker/migrate.Dockerfile
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/core:${{ github.sha }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/migrate:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Hypervisor
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/hypervisor.Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/hypervisor:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Build and push Frontend
         uses: docker/build-push-action@v5
         with:
-          context: ./frontend
+          context: .
+          file: docker/frontend.Dockerfile
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }}
           cache-from: type=gha
@@ -101,24 +113,19 @@ jobs:
       - name: Run Blue-Green Deployment
         env:
           IMAGE_TAG: ${{ github.sha }}
+          API_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api
+          MIGRATE_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/migrate
+          FRONTEND_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend
+          API_URL: https://novacron.io
+          FRONTEND_URL: https://novacron.io
         run: |
-          chmod +x deployment/blue-green/deploy.sh
+          chmod +x deployment/blue-green/deploy.sh deployment/smoke-tests.sh
           deployment/blue-green/deploy.sh
 
-      - name: Health Check
-        run: |
-          for i in {1..30}; do
-            if curl -f https://novacron.io/health; then
-              echo "Health check passed"
-              exit 0
-            fi
-            echo "Waiting for service to be healthy..."
-            sleep 10
-          done
-          echo "Health check failed"
-          exit 1
-
       - name: Smoke Tests
+        env:
+          API_URL: https://novacron.io
+          FRONTEND_URL: https://novacron.io
         run: |
           chmod +x deployment/smoke-tests.sh
           deployment/smoke-tests.sh
@@ -143,8 +150,11 @@ jobs:
       - name: Run Canary Deployment
         env:
           IMAGE_TAG: ${{ github.sha }}
+          API_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api
+          MIGRATE_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/migrate
+          FRONTEND_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend
         run: |
-          chmod +x deployment/canary/canary-deploy.sh
+          chmod +x deployment/canary/canary-deploy.sh deployment/smoke-tests.sh
           deployment/canary/canary-deploy.sh
 
   notify:

@@ -8,7 +8,9 @@ set -e
 # Configuration
 API_HOST="${API_HOST:-localhost}"
 API_PORT="${API_PORT:-8090}"
-WS_PORT="${WS_PORT:-8091}"
+# WebSocket routes are served on the API port and require a bearer token,
+# sent as the `Sec-WebSocket-Protocol: bearer, <token>` subprotocol pair.
+NOVACRON_TOKEN="${NOVACRON_TOKEN:-}"
 TIMEOUT="${TIMEOUT:-5}"
 
 # Colors for output
@@ -56,7 +58,7 @@ test_websocket_connection() {
 
     if [ "$WSCAT_AVAILABLE" = true ]; then
         # Use timeout to limit connection time
-        result=$(timeout ${TIMEOUT} wscat -c "ws://${API_HOST}:${WS_PORT}${endpoint}" -x '{"type":"ping"}' 2>&1 || true)
+        result=$(timeout ${TIMEOUT} wscat ${NOVACRON_TOKEN:+-s bearer -s "$NOVACRON_TOKEN"} -c "ws://${API_HOST}:${API_PORT}${endpoint}" -x '{"type":"ping"}' 2>&1 || true)
 
         if echo "$result" | grep -q "error\|failed\|ECONNREFUSED"; then
             echo -e "${RED}FAILED${NC}"
@@ -85,7 +87,8 @@ test_websocket_upgrade() {
         -H "Upgrade: websocket" \
         -H "Sec-WebSocket-Version: 13" \
         -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
-        "http://${API_HOST}:${WS_PORT}${endpoint}" 2>&1)
+        ${NOVACRON_TOKEN:+-H "Sec-WebSocket-Protocol: bearer, $NOVACRON_TOKEN"} \
+        "http://${API_HOST}:${API_PORT}${endpoint}" 2>&1)
 
     if [ "$response" = "101" ]; then
         echo -e "${GREEN}OK (101 Switching Protocols)${NC}"
@@ -133,9 +136,10 @@ else
     echo -e "${YELLOW}Skipping WebSocket tests - backend not available${NC}"
     echo ""
     echo "To run these tests:"
-    echo "  1. Start the backend: make core-serve (or docker-compose up)"
-    echo "  2. Ensure ports ${API_PORT} and ${WS_PORT} are accessible"
-    echo "  3. Run this script again"
+    echo "  1. Start the backend: docker compose up (or go run ./backend/cmd/api-server)"
+    echo "  2. Ensure port ${API_PORT} is accessible"
+    echo "  3. Export NOVACRON_TOKEN=<access token from POST /api/auth/login>"
+    echo "  4. Run this script again"
 fi
 
 echo ""

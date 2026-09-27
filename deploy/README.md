@@ -11,8 +11,8 @@ role they configure:
 
 | Unit | Role | Port | Use |
 |---|---|---|---|
-| `novacron-api-server.service` | control plane | 8090 (`WS_PORT` 8091) | API/UI + fabric seed; accepts joins |
-| `novacron-fabric-peer.service` | compute node | 9000 (`WS_PORT` 9001) | joins a seed, runs jobs and VMs |
+| `novacron-api-server.service` | control plane | 8090 | API/UI + fabric seed; accepts joins |
+| `novacron-fabric-peer.service` | compute node | 9000 | joins a seed, runs jobs and VMs |
 
 Run **one role per host**. `deploy/systemd/novacron-api-server.service` is the
 canonical control-plane unit; `systemd/novacron-api.service` at the repo root is
@@ -49,10 +49,15 @@ No libvirt, no docker, no redis, no external `migrate` CLI are required.
 Recognised environment (the env file wins over the unit's `Environment=`
 defaults): `DB_URL`, `AUTH_SECRET`, `NOVACRON_MIGRATION_SECRET`,
 `NOVACRON_NODE_ID`, `NOVACRON_JOIN_ADDR`, `NOVACRON_JOIN_PEERS`, `API_PORT`,
-`WS_PORT`, `STORAGE_PATH`, `LOG_LEVEL`, `LOG_FORMAT`, `LOG_OUTPUT`, plus the
+`STORAGE_PATH`, `LOG_LEVEL`, `LOG_FORMAT`, `LOG_OUTPUT`, plus the
 usage-metering rate card (`NOVACRON_RATE_PER_VCPU_HOUR`,
 `NOVACRON_RATE_PER_GB_EGRESS`, `NOVACRON_RATE_PER_JOB_SECOND`,
-`NOVACRON_RATE_PER_MIGRATION` — default `0` records usage without pricing it).
+`NOVACRON_RATE_PER_MIGRATION` — default `0` records usage without pricing it),
+and `NOVACRON_TRUSTED_PROXIES` (comma-separated IPs/CIDRs whose
+`X-Forwarded-For` the login rate limiter trusts; unset = fail closed, the peer
+address is used). Set it to `127.0.0.1/32,::1/128` when a local nginx fronts
+the unit — otherwise every request carries nginx's address and the whole node
+shares one login-limiter bucket.
 
 `AUTH_SECRET` is per node (it signs that node's sessions). Only
 `NOVACRON_MIGRATION_SECRET` must be identical across the fabric; it is checked
@@ -137,7 +142,7 @@ curl -sS http://127.0.0.1:8090/health
 process can still serve control-plane traffic. `status` is `unhealthy` while
 `state` is `degraded` in the payload — check `checks` before alerting on
 `status` alone. The WebSocket endpoint is served by the same HTTP server on the
-API port; `WS_PORT` is only a log line in this build.
+API port; there is no separate WebSocket port or `WS_PORT` variable.
 
 Fleet-level checks after a start: `GET /api/cluster/nodes` and
 `GET /api/cluster/links` (operator JWT) show per-peer capacity, measured RTT and

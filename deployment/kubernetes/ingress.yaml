@@ -19,14 +19,10 @@ metadata:
     nginx.ingress.kubernetes.io/cors-allow-headers: "Authorization, Content-Type, X-CSRF-Token"
     nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
     
-    # Rate Limiting
-    nginx.ingress.kubernetes.io/rate-limit: "100"
-    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
-    nginx.ingress.kubernetes.io/rate-limit-connections: "10"
-    
-    # Specific rate limits for auth endpoints
-    nginx.ingress.kubernetes.io/limit-rps: "5"
-    nginx.ingress.kubernetes.io/limit-connections: "3"
+    # Rate limiting: login attempts are limited by the api-server itself
+    # (NOVACRON_LOGIN_RATE_LIMIT, keyed by client IP via
+    # NOVACRON_TRUSTED_PROXIES); no ingress-wide per-IP limit, which would
+    # also throttle static asset bursts from the frontend.
     
     # Security Headers
     nginx.ingress.kubernetes.io/configuration-snippet: |
@@ -41,11 +37,13 @@ metadata:
     nginx.ingress.kubernetes.io/ssl-protocols: "TLSv1.2 TLSv1.3"
     nginx.ingress.kubernetes.io/ssl-ciphers: "ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384"
     
-    # Performance
+    # Performance. WebSocket upgrades need no special ingress-nginx
+    # annotation (Upgrade/Connection are proxied automatically) but the
+    # read/send timeouts must exceed the 60s default or idle sockets drop.
     nginx.ingress.kubernetes.io/proxy-body-size: "100m"
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     
     # Load Balancing
     nginx.ingress.kubernetes.io/upstream-hash-by: "$remote_addr"
@@ -77,25 +75,33 @@ spec:
                 port:
                   number: 80
           
-          # API endpoints
+          # API endpoints (REST + /api/ws/* WebSocket aliases, single port)
           - path: /api
             pathType: Prefix
             backend:
               service:
                 name: novacron-api
                 port:
-                  number: 8091
+                  number: 8090
           
-          # WebSocket endpoints
+          - path: /graphql
+            pathType: Prefix
+            backend:
+              service:
+                name: novacron-api
+                port:
+                  number: 8090
+          
+          # WebSocket endpoints (/ws/*), same listener
           - path: /ws
             pathType: Prefix
             backend:
               service:
                 name: novacron-api
                 port:
-                  number: 8093
+                  number: 8090
     
-    # API Subdomain
+    # API Subdomain (the api-server serves /ws on the same port)
     - host: api.novacron.local
       http:
         paths:
@@ -105,16 +111,7 @@ spec:
               service:
                 name: novacron-api
                 port:
-                  number: 8091
-          
-          # WebSocket on API subdomain
-          - path: /ws
-            pathType: Prefix
-            backend:
-              service:
-                name: novacron-api
-                port:
-                  number: 8093
+                  number: 8090
     
     # Admin Interface
     - host: admin.novacron.local
@@ -127,51 +124,6 @@ spec:
                 name: novacron-frontend
                 port:
                   number: 80
-
----
-# WebSocket Ingress (separate for better control)
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: novacron-websocket-ingress
-  namespace: novacron
-  labels:
-    app.kubernetes.io/name: novacron
-    app.kubernetes.io/component: websocket-ingress
-  annotations:
-    kubernetes.io/ingress.class: nginx
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-    
-    # WebSocket specific settings
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-    nginx.ingress.kubernetes.io/connection-proxy-header: "keep-alive"
-    nginx.ingress.kubernetes.io/upgrade-header: "websocket"
-    nginx.ingress.kubernetes.io/websocket-services: "novacron-api"
-    
-    # Rate limiting for WebSocket connections
-    nginx.ingress.kubernetes.io/limit-connections: "50"
-    nginx.ingress.kubernetes.io/limit-rate-after: "1000"
-    nginx.ingress.kubernetes.io/limit-rate: "100k"
-    
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-spec:
-  tls:
-    - hosts:
-        - ws.novacron.local
-      secretName: novacron-ws-tls-cert
-  rules:
-    - host: ws.novacron.local
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: novacron-api
-                port:
-                  number: 8093
 
 ---
 # Monitoring Ingress (Internal Access Only)
@@ -201,7 +153,6 @@ spec:
   tls:
     - hosts:
         - prometheus.novacron.local
-        - grafana.novacron.local
       secretName: novacron-monitoring-tls-cert
   rules:
     # Prometheus
@@ -215,18 +166,6 @@ spec:
                 name: prometheus
                 port:
                   number: 9090
-    
-    # Grafana
-    - host: grafana.novacron.local
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: grafana
-                port:
-                  number: 3000
 
 ---
 # Basic Auth Secret for Monitoring

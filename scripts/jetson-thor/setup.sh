@@ -14,7 +14,6 @@ POSTGRES_PORT="${POSTGRES_PORT:-15432}"
 REDIS_PORT="${REDIS_PORT:-16379}"
 QDRANT_PORT="${QDRANT_PORT:-16333}"
 API_PORT="${API_PORT:-8090}"
-WS_PORT="${WS_PORT:-8091}"
 FRONTEND_PORT="${FRONTEND_PORT:-8092}"
 
 # Security: Generate secure passwords if not provided
@@ -212,7 +211,6 @@ QDRANT_PORT=${QDRANT_PORT}
 # API Configuration
 API_HOST=0.0.0.0
 API_PORT=${API_PORT}
-WS_PORT=${WS_PORT}
 FRONTEND_PORT=${FRONTEND_PORT}
 
 # JWT Configuration
@@ -346,7 +344,7 @@ print_summary() {
     echo "  - Redis: localhost:${REDIS_PORT}"
     echo "  - Qdrant: localhost:${QDRANT_PORT}"
     echo "  - API: localhost:${API_PORT}"
-    echo "  - WebSocket: localhost:${WS_PORT}"
+    echo "  - WebSocket: localhost:${API_PORT} (/api/ws/*)"
     echo "  - Frontend: localhost:${FRONTEND_PORT}"
     echo ""
     echo "Quick Commands:"

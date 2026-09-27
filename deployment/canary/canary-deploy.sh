@@ -1,177 +1,123 @@
 #!/bin/bash
-# Canary Deployment Script for NovaCron
-# Progressive rollout with automated rollback on errors
+# Canary deployment for the NovaCron api-server on Kubernetes.
+#
+# There is no service mesh, no canary Deployment and no ingress canary
+# annotation in deployment/kubernetes, and the api-server exports no
+# Prometheus error-rate/latency metrics, so this canary is built on the
+# Deployment rollout itself:
+#
+#   1. set the new image with maxSurge=1,maxUnavailable=0
+#   2. pause the rollout as soon as the first new pod is Ready
+#   3. smoke-test that pod directly via port-forward (deployment/smoke-tests.sh)
+#   4. resume and wait for the full rollout, or undo on failure
+#
+# Environment:
+#   NAMESPACE        target namespace (default novacron)
+#   IMAGE_TAG        tag to deploy (default latest)
+#   API_IMAGE        api-server image repository (default novacron/api-server)
+#   MIGRATE_IMAGE    migrate-tool image repository (default novacron/migrate)
+#   ROLLOUT_TIMEOUT  kubectl rollout status timeout (default 10m)
+#   CANARY_PORT      local port for the port-forward (default 18090)
 
-set -e
+set -euo pipefail
 
-CANARY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$CANARY_DIR/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SMOKE_TESTS="$PROJECT_ROOT/deployment/smoke-tests.sh"
 
-# Colors
 GREEN='\033[0;32m'
+BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-# Configuration
 NAMESPACE="${NAMESPACE:-novacron}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
-CANARY_STAGES=(1 10 50 100)  # Percentage of traffic
-STAGE_DURATION=900  # 15 minutes per stage
-MONITOR_INTERVAL=60  # 1 minute
-ERROR_THRESHOLD=0.01  # 1% error rate
-LATENCY_THRESHOLD=0.5  # 500ms p95 latency
+API_IMAGE="${API_IMAGE:-novacron/api-server}"
+MIGRATE_IMAGE="${MIGRATE_IMAGE:-novacron/migrate}"
+ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-10m}"
+CANARY_PORT="${CANARY_PORT:-18090}"
 
-echo -e "${YELLOW}========================================${NC}"
-echo -e "${YELLOW}  NovaCron Canary Deployment${NC}"
-echo -e "${YELLOW}========================================${NC}"
+DEPLOYMENT="novacron-api"
+CONTAINER="api-server"
+POD_SELECTOR="app.kubernetes.io/name=novacron,app.kubernetes.io/component=api"
+
+PF_PID=""
+cleanup() {
+    if [ -n "$PF_PID" ]; then
+        kill "$PF_PID" 2>/dev/null || true
+        wait "$PF_PID" 2>/dev/null || true
+        PF_PID=""
+    fi
+}
+trap cleanup EXIT
+
+abort() {
+    echo -e "${RED}$1${NC}"
+    cleanup
+    kubectl rollout resume "deployment/$DEPLOYMENT" -n "$NAMESPACE" 2>/dev/null || true
+    kubectl rollout undo "deployment/$DEPLOYMENT" -n "$NAMESPACE"
+    kubectl rollout status "deployment/$DEPLOYMENT" -n "$NAMESPACE" --timeout="$ROLLOUT_TIMEOUT" || true
+    echo -e "${YELLOW}Rolled back to the previous revision${NC}"
+    exit 1
+}
+
+echo -e "${BLUE}========================================${NC}"
+echo -e "${BLUE}  NovaCron Canary Deployment${NC}"
+echo -e "${BLUE}========================================${NC}"
 echo ""
 echo -e "Namespace: ${GREEN}$NAMESPACE${NC}"
-echo -e "Image Tag: ${GREEN}$IMAGE_TAG${NC}"
-echo -e "Canary Stages: ${GREEN}${CANARY_STAGES[@]}%${NC}"
-echo -e "Stage Duration: ${GREEN}${STAGE_DURATION}s (15 minutes)${NC}"
+echo -e "API image: ${GREEN}$API_IMAGE:$IMAGE_TAG${NC}"
 echo ""
 
-# Deploy canary version
-echo -e "${YELLOW}Step 1: Deploying canary version...${NC}"
+# Step 1: one new pod at a time, never below the current replica count
+echo -e "${YELLOW}Step 1: Starting canary rollout...${NC}"
+kubectl patch "deployment/$DEPLOYMENT" -n "$NAMESPACE" --type=merge \
+    -p '{"spec":{"strategy":{"type":"RollingUpdate","rollingUpdate":{"maxSurge":1,"maxUnavailable":0}}}}'
+# `migration` is the schema initContainer; it rolls with the api-server.
+kubectl set image "deployment/$DEPLOYMENT" \
+    "$CONTAINER=$API_IMAGE:$IMAGE_TAG" "migration=$MIGRATE_IMAGE:$IMAGE_TAG" -n "$NAMESPACE"
+kubectl annotate "deployment/$DEPLOYMENT" -n "$NAMESPACE" --overwrite \
+    "kubernetes.io/change-cause=canary $IMAGE_TAG ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
 
-kubectl set image deployment/novacron-api-canary \
-  api-server=ghcr.io/novacron/api:$IMAGE_TAG \
-  -n $NAMESPACE
-
-kubectl set image deployment/novacron-core-canary \
-  core-server=ghcr.io/novacron/core:$IMAGE_TAG \
-  -n $NAMESPACE
-
-# Wait for canary deployment
-echo "Waiting for canary deployment to complete..."
-kubectl rollout status deployment/novacron-api-canary -n $NAMESPACE --timeout=10m
-kubectl rollout status deployment/novacron-core-canary -n $NAMESPACE --timeout=10m
-
-echo -e "${GREEN}✓ Canary deployment completed${NC}"
-echo ""
-
-# Function to check metrics
-check_metrics() {
-    local stage=$1
-
-    echo "Checking canary metrics..."
-
-    # Get error rate
-    local error_rate=$(curl -s "http://prometheus:9090/api/v1/query?query=sum(rate(novacron_api_errors_total{version=\"canary\"}[5m]))/sum(rate(novacron_api_requests_total{version=\"canary\"}[5m]))" | jq -r '.data.result[0].value[1]' 2>/dev/null || echo "0")
-
-    # Get latency
-    local latency_p95=$(curl -s "http://prometheus:9090/api/v1/query?query=histogram_quantile(0.95,sum(rate(novacron_api_request_duration_seconds_bucket{version=\"canary\"}[5m]))by(le))" | jq -r '.data.result[0].value[1]' 2>/dev/null || echo "0")
-
-    echo "  Error Rate: $error_rate (threshold: $ERROR_THRESHOLD)"
-    echo "  P95 Latency: ${latency_p95}s (threshold: ${LATENCY_THRESHOLD}s)"
-
-    # Check thresholds
-    if (( $(echo "$error_rate > $ERROR_THRESHOLD" | bc -l) )); then
-        echo -e "${RED}✗ Error rate exceeds threshold${NC}"
-        return 1
-    fi
-
-    if (( $(echo "$latency_p95 > $LATENCY_THRESHOLD" | bc -l) )); then
-        echo -e "${RED}✗ Latency exceeds threshold${NC}"
-        return 1
-    fi
-
-    echo -e "${GREEN}✓ Metrics within acceptable range${NC}"
-    return 0
-}
-
-# Function to set canary traffic weight
-set_traffic_weight() {
-    local weight=$1
-
-    echo "Setting canary traffic to $weight%..."
-
-    # Update Istio VirtualService or Nginx Ingress
-    kubectl patch virtualservice novacron-api -n $NAMESPACE --type=json -p="[{\"op\": \"replace\", \"path\": \"/spec/http/0/route/1/weight\", \"value\": $weight}]" 2>/dev/null || \
-    kubectl annotate ingress novacron-api -n $NAMESPACE nginx.ingress.kubernetes.io/canary-weight="$weight" --overwrite
-
-    echo -e "${GREEN}✓ Traffic weight updated to $weight%${NC}"
-}
-
-# Progressive rollout
-for stage in "${CANARY_STAGES[@]}"; do
-    echo ""
-    echo -e "${YELLOW}========================================${NC}"
-    echo -e "${YELLOW}  Stage: ${stage}% Traffic${NC}"
-    echo -e "${YELLOW}========================================${NC}"
-    echo ""
-
-    # Set traffic weight
-    set_traffic_weight $stage
-
-    # Monitor for stage duration
-    echo "Monitoring for $((STAGE_DURATION / 60)) minutes..."
-
-    ITERATIONS=$((STAGE_DURATION / MONITOR_INTERVAL))
-    for i in $(seq 1 $ITERATIONS); do
-        echo ""
-        echo "Monitoring iteration $i/$ITERATIONS ($(($i * MONITOR_INTERVAL))s / ${STAGE_DURATION}s)..."
-
-        if ! check_metrics $stage; then
-            echo -e "${RED}✗ Canary deployment failed at ${stage}% stage${NC}"
-            echo "Rolling back..."
-
-            # Rollback: Set traffic to 0%
-            set_traffic_weight 0
-
-            # Scale down canary
-            kubectl scale deployment/novacron-api-canary -n $NAMESPACE --replicas=0
-            kubectl scale deployment/novacron-core-canary -n $NAMESPACE --replicas=0
-
-            echo -e "${GREEN}✓ Rolled back to stable version${NC}"
-            exit 1
-        fi
-
-        if [ $i -lt $ITERATIONS ]; then
-            sleep $MONITOR_INTERVAL
-        fi
-    done
-
-    echo -e "${GREEN}✓ Stage ${stage}% completed successfully${NC}"
-
-    # Don't wait after 100% stage
-    if [ "$stage" != "100" ]; then
-        echo "Waiting 2 minutes before next stage..."
-        sleep 120
-    fi
+# Step 2: wait for the first pod running the new image, then pause
+echo -e "${YELLOW}Step 2: Waiting for the first canary pod...${NC}"
+CANARY_POD=""
+for _ in $(seq 1 60); do
+    CANARY_POD=$(kubectl get pods -n "$NAMESPACE" -l "$POD_SELECTOR" \
+        -o jsonpath="{range .items[*]}{.metadata.name}{' '}{.spec.containers[?(@.name=='$CONTAINER')].image}{'\n'}{end}" \
+        | awk -v img="$API_IMAGE:$IMAGE_TAG" '$2 == img {print $1; exit}')
+    [ -n "$CANARY_POD" ] && break
+    sleep 5
 done
+[ -n "$CANARY_POD" ] || abort "✗ No pod with image $API_IMAGE:$IMAGE_TAG appeared"
 
-# Success - Promote canary to stable
+kubectl rollout pause "deployment/$DEPLOYMENT" -n "$NAMESPACE"
+echo -e "Canary pod: ${GREEN}$CANARY_POD${NC} (rollout paused)"
+kubectl wait --for=condition=Ready "pod/$CANARY_POD" -n "$NAMESPACE" --timeout=5m \
+    || abort "✗ Canary pod never became Ready"
+
+# Step 3: smoke-test the canary pod directly
+echo -e "${YELLOW}Step 3: Smoke-testing the canary pod...${NC}"
+kubectl port-forward -n "$NAMESPACE" "pod/$CANARY_POD" "$CANARY_PORT:8090" >/dev/null 2>&1 &
+PF_PID=$!
+sleep 3
+if ! API_URL="http://127.0.0.1:$CANARY_PORT" FRONTEND_URL="" "$SMOKE_TESTS"; then
+    abort "✗ Canary smoke tests failed"
+fi
+cleanup
+echo -e "${GREEN}✓ Canary healthy${NC}"
+
+# Step 4: promote by resuming the rollout
+echo -e "${YELLOW}Step 4: Promoting canary (resuming rollout)...${NC}"
+kubectl rollout resume "deployment/$DEPLOYMENT" -n "$NAMESPACE"
+kubectl rollout status "deployment/$DEPLOYMENT" -n "$NAMESPACE" --timeout="$ROLLOUT_TIMEOUT" \
+    || abort "✗ Full rollout failed"
+
 echo ""
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  Canary Deployment Successful!${NC}"
+echo -e "${GREEN}  Canary $IMAGE_TAG promoted${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
-
-echo "Promoting canary to stable..."
-
-# Update stable deployment
-kubectl set image deployment/novacron-api \
-  api-server=ghcr.io/novacron/api:$IMAGE_TAG \
-  -n $NAMESPACE
-
-kubectl set image deployment/novacron-core \
-  core-server=ghcr.io/novacron/core:$IMAGE_TAG \
-  -n $NAMESPACE
-
-kubectl rollout status deployment/novacron-api -n $NAMESPACE --timeout=10m
-kubectl rollout status deployment/novacron-core -n $NAMESPACE --timeout=10m
-
-# Set traffic back to 100% stable
-set_traffic_weight 0
-
-# Scale down canary
-kubectl scale deployment/novacron-api-canary -n $NAMESPACE --replicas=1
-kubectl scale deployment/novacron-core-canary -n $NAMESPACE --replicas=1
-
-echo -e "${GREEN}✓ Canary promoted to stable${NC}"
-echo ""
-echo "Deployment completed successfully!"
-echo "Total time: $((${#CANARY_STAGES[@]} * STAGE_DURATION / 60)) minutes"
-echo ""
+echo "Rollback command (if needed):"
+echo "  kubectl rollout undo deployment/$DEPLOYMENT -n $NAMESPACE"

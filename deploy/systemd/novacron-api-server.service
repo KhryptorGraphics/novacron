@@ -16,13 +16,15 @@ Group=novacron
 # distro ships as root:kvm 0660, so the unit needs the kvm group.
 SupplementaryGroups=kvm
 WorkingDirectory=/opt/novacron
-# Role defaults. EnvironmentFile entries win over Environment= entries, so an
-# operator can move the ports without editing the unit.
+# Role default. EnvironmentFile entries win over Environment= entries, so an
+# operator can move the port without editing the unit. REST and WebSocket
+# share this one listener; there is no separate WebSocket port.
 Environment=API_PORT=8090
-Environment=WS_PORT=8091
 # Written by deploy/scripts/install-node.sh (0600 root:root — systemd reads it
 # as root and passes the variables to the service): DB_URL, AUTH_SECRET,
-# NOVACRON_MIGRATION_SECRET, NOVACRON_NODE_ID, STORAGE_PATH, NOVACRON_JOIN_ADDR.
+# NOVACRON_MIGRATION_SECRET, NOVACRON_NODE_ID, STORAGE_PATH, NOVACRON_JOIN_ADDR,
+# and NOVACRON_TRUSTED_PROXIES=127.0.0.1/32,::1/128 when a local nginx fronts
+# this unit (otherwise the login rate limiter sees only nginx's address).
 EnvironmentFile=/etc/novacron/novacron.env
 # Installed by deploy/scripts/install-node.sh (built from ./backend/cmd/api-server).
 # The path matches apparmor/novacron-api, which confines exactly this binary.

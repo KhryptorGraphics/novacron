@@ -299,7 +299,6 @@ start_node() { # start_node <a|b>
     DB_URL="$db_url"
     STORAGE_PATH="$storage"
     API_PORT="$port"
-    WS_PORT="$((port+1000))"
     NOVACRON_NODE_ID="fab-$n"
     NOVACRON_PROBE_BYTES=2097152
   )
