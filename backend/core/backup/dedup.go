@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -32,7 +31,7 @@ type DeduplicationEngine struct {
 	basePath     string
 	chunkStore   *ChunkStore
 	index        *DedupIndex
-	rabinPoly    uint64
+	rabinPoly    rabinkarp64.Pol
 	minChunkSize int
 	avgChunkSize int
 	maxChunkSize int
@@ -235,7 +234,7 @@ func (e *DeduplicationEngine) chunkData(data []byte) [][]byte {
 	start := 0
 	
 	// Initialize Rabin hash
-	hash := rabinkarp64.NewFromPoly(e.rabinPoly)
+	hash := rabinkarp64.NewFromPol(e.rabinPoly)
 	
 	for i := e.minChunkSize; i < len(data); i++ {
 		hash.Write([]byte{data[i]})
@@ -246,7 +245,7 @@ func (e *DeduplicationEngine) chunkData(data []byte) [][]byte {
 		if shouldBreak {
 			chunks = append(chunks, data[start:i])
 			start = i
-			hash = rabinkarp64.NewFromPoly(e.rabinPoly)
+			hash = rabinkarp64.NewFromPol(e.rabinPoly)
 		}
 	}
 	

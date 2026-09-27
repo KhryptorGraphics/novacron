@@ -12,11 +12,11 @@ type BackupIntegrationManager struct {
 	// Core NovaCron components
 	authManager     AuthService
 	storageManager  StorageService
-	monitoringSystem *MonitoringSystem
+	monitoringSystem MonitoringSystem
 	
 	// Backup system components
 	backupManager             *BackupManager
-	cbtTracker               *CBTTracker
+	cbtTracker               *PluggableCBTTracker
 	incrementalEngine        *IncrementalBackupEngine
 	multiCloudStorage        *MultiCloudStorageManager
 	disasterRecovery         *DisasterRecoveryOrchestrator
@@ -245,7 +245,7 @@ type BackupAuthIntegration struct {
 
 // BackupMonitoringIntegration handles monitoring integration
 type BackupMonitoringIntegration struct {
-	monitoringSystem    *MonitoringSystem
+	monitoringSystem    MonitoringSystem
 	metricsCollector    interface{} // Placeholder for metrics collector
 	alertManager        interface{} // Placeholder for alert manager
 	
@@ -312,7 +312,7 @@ type IntegrationMetrics struct {
 func NewBackupIntegrationManager(
 	authManager AuthService,
 	storageManager StorageService,
-	monitoringSystem *MonitoringSystem,
+	monitoringSystem MonitoringSystem,
 	config *IntegrationConfig,
 ) *BackupIntegrationManager {
 	
@@ -347,16 +347,6 @@ func (bim *BackupIntegrationManager) Initialize(ctx context.Context) error {
 	// Initialize backup system components
 	if err := bim.initializeBackupSystem(ctx); err != nil {
 		return fmt.Errorf("failed to initialize backup system: %w", err)
-	}
-	
-	// Setup integrations
-	if err := bim.setupIntegrations(ctx); err != nil {
-		return fmt.Errorf("failed to setup integrations: %w", err)
-	}
-	
-	// Start monitoring
-	if err := bim.startMonitoring(ctx); err != nil {
-		return fmt.Errorf("failed to start monitoring: %w", err)
 	}
 	
 	bim.initialized = true
@@ -467,7 +457,7 @@ func (bim *BackupIntegrationManager) initializeBackupComponents() {
 	cbtStorage := NewLocalCBTStorage("/var/lib/novacron/backup/cbt")
 	
 	// Initialize CBT tracker
-	bim.cbtTracker = NewCBTTracker(cbtStorage)
+	bim.cbtTracker = NewPluggableCBTTracker(cbtStorage)
 	
 	// Initialize backup manager
 	bim.backupManager = NewBackupManager()
@@ -561,41 +551,7 @@ func (bim *BackupIntegrationManager) initializeBackupSystem(ctx context.Context)
 	if err := bim.backupManager.RegisterProvider(localProvider); err != nil {
 		return fmt.Errorf("failed to register local provider: %w", err)
 	}
-	
-	// Initialize cloud providers if enabled
-	if bim.integrationConfig.FeatureFlags.CloudProviderIntegration {
-		// Register cloud providers...
-	}
-	
-	return nil
-}
 
-func (bim *BackupIntegrationManager) setupIntegrations(ctx context.Context) error {
-	// Setup security integration
-	if err := bim.setupSecurityIntegration(ctx); err != nil {
-		return fmt.Errorf("failed to setup security integration: %w", err)
-	}
-	
-	// Setup storage integration
-	if err := bim.setupStorageIntegration(ctx); err != nil {
-		return fmt.Errorf("failed to setup storage integration: %w", err)
-	}
-	
-	// Setup auth integration
-	if err := bim.setupAuthIntegration(ctx); err != nil {
-		return fmt.Errorf("failed to setup auth integration: %w", err)
-	}
-	
-	// Setup monitoring integration
-	if err := bim.setupMonitoringIntegration(ctx); err != nil {
-		return fmt.Errorf("failed to setup monitoring integration: %w", err)
-	}
-	
-	// Setup API integration
-	if err := bim.setupAPIIntegration(ctx); err != nil {
-		return fmt.Errorf("failed to setup API integration: %w", err)
-	}
-	
 	return nil
 }
 
@@ -647,59 +603,6 @@ func (bim *BackupIntegrationManager) stopBackupComponents(ctx context.Context) e
 
 func (bim *BackupIntegrationManager) stopIntegrationComponents(ctx context.Context) error {
 	// Stop integration components
-	return nil
-}
-
-func (bim *BackupIntegrationManager) startMonitoring(ctx context.Context) error {
-	// Start health checks and monitoring
-	return nil
-}
-
-func (bim *BackupIntegrationManager) setupSecurityIntegration(ctx context.Context) error {
-	if bim.integrationConfig.SecurityConfig.EncryptionEnabled {
-		// Setup encryption integration
-	}
-	
-	if bim.integrationConfig.SecurityConfig.RBACIntegration {
-		// Setup RBAC integration
-	}
-	
-	return nil
-}
-
-func (bim *BackupIntegrationManager) setupStorageIntegration(ctx context.Context) error {
-	if bim.integrationConfig.StorageConfig.StorageBackendIntegration {
-		// Setup storage backend integration
-	}
-	
-	if bim.integrationConfig.StorageConfig.DeduplicationEnabled {
-		// Setup deduplication integration
-	}
-	
-	return nil
-}
-
-func (bim *BackupIntegrationManager) setupAuthIntegration(ctx context.Context) error {
-	if bim.integrationConfig.AuthConfig.AuthServiceIntegration {
-		// Setup auth service integration
-	}
-	
-	return nil
-}
-
-func (bim *BackupIntegrationManager) setupMonitoringIntegration(ctx context.Context) error {
-	if bim.integrationConfig.MonitoringConfig.MetricsIntegration {
-		// Setup metrics integration
-	}
-	
-	return nil
-}
-
-func (bim *BackupIntegrationManager) setupAPIIntegration(ctx context.Context) error {
-	if bim.integrationConfig.APIConfig.RESTAPIEnabled {
-		// Setup REST API integration
-	}
-	
 	return nil
 }
 

@@ -70,7 +70,7 @@ func RunLocalProviderExample() {
 			Expression: "manual",
 			TimeZone:   "UTC",
 		},
-		Retention: &backup.RetentionPolicy{
+		Retention: &backup.JobRetentionPolicy{
 			KeepLast:  5,
 			KeepDaily: 7,
 		},

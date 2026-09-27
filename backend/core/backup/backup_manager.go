@@ -65,6 +65,9 @@ const (
 
 	// FileStorage represents file storage (e.g., NFS)
 	FileStorage StorageType = "file"
+
+	// RemoteStorage represents remote storage reached over SFTP/NFS/SMB
+	RemoteStorage StorageType = "remote"
 )
 
 // BackupTarget represents a target for backup
@@ -112,7 +115,7 @@ type BackupJob struct {
 	Schedule *Schedule `json:"schedule"`
 
 	// Retention is the retention policy
-	Retention *RetentionPolicy `json:"retention"`
+	Retention *JobRetentionPolicy `json:"retention"`
 
 	// Enabled indicates if the job is enabled
 	Enabled bool `json:"enabled"`
@@ -181,8 +184,8 @@ type Schedule struct {
 	TimeZone string `json:"time_zone,omitempty"`
 }
 
-// RetentionPolicy represents a backup retention policy
-type RetentionPolicy struct {
+// JobRetentionPolicy represents a backup retention policy
+type JobRetentionPolicy struct {
 	// KeepLast specifies the number of backups to keep
 	KeepLast int `json:"keep_last"`
 
@@ -727,10 +730,10 @@ func (m *BackupManager) ListBackupsFiltered(ctx context.Context, filter BackupFi
 		}
 		
 		// Filter by date range
-		if !filter.StartDate.IsZero() && backup.CreatedAt.Before(filter.StartDate) {
+		if !filter.StartDate.IsZero() && backup.StartedAt.Before(filter.StartDate) {
 			continue
 		}
-		if !filter.EndDate.IsZero() && backup.CreatedAt.After(filter.EndDate) {
+		if !filter.EndDate.IsZero() && backup.StartedAt.After(filter.EndDate) {
 			continue
 		}
 		
@@ -1226,6 +1229,10 @@ type BackupScheduler struct {
 	// stopChan is used to stop the scheduler
 	stopChan chan struct{}
 
+	// running reports whether the run loop is active; guarded by lifecycleMu
+	running     bool
+	lifecycleMu sync.Mutex
+
 	// wg is used to wait for the scheduler to stop
 	wg sync.WaitGroup
 }
@@ -1239,17 +1246,31 @@ func NewBackupScheduler(manager *BackupManager) *BackupScheduler {
 	}
 }
 
-// Start starts the scheduler
+// Start starts the scheduler. It is idempotent: the scheduler is shared by
+// BackupManager and EnhancedBackupScheduler, so a second Start is a no-op.
 func (s *BackupScheduler) Start() error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.running {
+		return nil
+	}
+	s.stopChan = make(chan struct{})
+	s.running = true
 	s.wg.Add(1)
-	go s.run()
+	go s.run(s.stopChan)
 	return nil
 }
 
-// Stop stops the scheduler
+// Stop stops the scheduler. Stopping a scheduler that is not running is a no-op.
 func (s *BackupScheduler) Stop() error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if !s.running {
+		return nil
+	}
 	close(s.stopChan)
 	s.wg.Wait()
+	s.running = false
 	return nil
 }
 
@@ -1275,7 +1296,7 @@ func (s *BackupScheduler) UnscheduleJob(jobID string) {
 }
 
 // run is the main scheduler loop
-func (s *BackupScheduler) run() {
+func (s *BackupScheduler) run(stopChan <-chan struct{}) {
 	defer s.wg.Done()
 
 	ticker := time.NewTicker(1 * time.Minute)
@@ -1283,7 +1304,7 @@ func (s *BackupScheduler) run() {
 
 	for {
 		select {
-		case <-s.stopChan:
+		case <-stopChan:
 			return
 		case <-ticker.C:
 			s.checkAndRunDueJobs()

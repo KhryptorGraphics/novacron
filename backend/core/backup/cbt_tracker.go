@@ -10,11 +10,9 @@ import (
 	"time"
 )
 
-// CBTBlockSize represents the size of blocks tracked by CBT (4KB default)
-const CBTBlockSize = 4096
 
-// CBTTracker manages Changed Block Tracking for incremental backups
-type CBTTracker struct {
+// PluggableCBTTracker manages Changed Block Tracking for incremental backups
+type PluggableCBTTracker struct {
 	// blockMap tracks the hash of each block for a resource
 	blockMap map[string]map[int64]string // resourceID -> blockIndex -> hash
 	
@@ -72,9 +70,9 @@ type CBTStorage interface {
 	LoadDelta(ctx context.Context, sourceID, targetID string) (*CBTDelta, error)
 }
 
-// NewCBTTracker creates a new Changed Block Tracker
-func NewCBTTracker(storage CBTStorage) *CBTTracker {
-	return &CBTTracker{
+// NewPluggableCBTTracker creates a new Changed Block Tracker
+func NewPluggableCBTTracker(storage CBTStorage) *PluggableCBTTracker {
+	return &PluggableCBTTracker{
 		blockMap:          make(map[string]map[int64]string),
 		changeLog:         make(map[string]map[int64]time.Time),
 		baselineTimestamp: make(map[string]time.Time),
@@ -83,7 +81,7 @@ func NewCBTTracker(storage CBTStorage) *CBTTracker {
 }
 
 // InitializeResource initializes CBT tracking for a resource
-func (cbt *CBTTracker) InitializeResource(ctx context.Context, resourceID string, resourceSize int64) error {
+func (cbt *PluggableCBTTracker) InitializeResource(ctx context.Context, resourceID string, resourceSize int64) error {
 	cbt.mutex.Lock()
 	defer cbt.mutex.Unlock()
 	
@@ -122,7 +120,7 @@ func (cbt *CBTTracker) InitializeResource(ctx context.Context, resourceID string
 }
 
 // UpdateBlock updates a block and marks it as changed
-func (cbt *CBTTracker) UpdateBlock(ctx context.Context, resourceID string, blockIndex int64, blockData []byte) error {
+func (cbt *PluggableCBTTracker) UpdateBlock(ctx context.Context, resourceID string, blockIndex int64, blockData []byte) error {
 	cbt.mutex.Lock()
 	defer cbt.mutex.Unlock()
 	
@@ -154,7 +152,7 @@ func (cbt *CBTTracker) UpdateBlock(ctx context.Context, resourceID string, block
 }
 
 // GetChangedBlocks returns blocks that changed since the given timestamp
-func (cbt *CBTTracker) GetChangedBlocks(ctx context.Context, resourceID string, since time.Time) ([]CBTBlock, error) {
+func (cbt *PluggableCBTTracker) GetChangedBlocks(ctx context.Context, resourceID string, since time.Time) ([]CBTBlock, error) {
 	cbt.mutex.RLock()
 	defer cbt.mutex.RUnlock()
 	
@@ -184,7 +182,7 @@ func (cbt *CBTTracker) GetChangedBlocks(ctx context.Context, resourceID string, 
 }
 
 // CreateSnapshot creates a point-in-time snapshot of tracked blocks
-func (cbt *CBTTracker) CreateSnapshot(ctx context.Context, resourceID string) (*CBTSnapshot, error) {
+func (cbt *PluggableCBTTracker) CreateSnapshot(ctx context.Context, resourceID string) (*CBTSnapshot, error) {
 	cbt.mutex.RLock()
 	defer cbt.mutex.RUnlock()
 	
@@ -231,7 +229,7 @@ func (cbt *CBTTracker) CreateSnapshot(ctx context.Context, resourceID string) (*
 }
 
 // CalculateDelta calculates the difference between two snapshots
-func (cbt *CBTTracker) CalculateDelta(ctx context.Context, sourceSnapshotID, targetSnapshotID string) (*CBTDelta, error) {
+func (cbt *PluggableCBTTracker) CalculateDelta(ctx context.Context, sourceSnapshotID, targetSnapshotID string) (*CBTDelta, error) {
 	// Load snapshots
 	sourceSnapshot, err := cbt.storage.LoadSnapshot(ctx, sourceSnapshotID)
 	if err != nil {
@@ -298,7 +296,7 @@ func (cbt *CBTTracker) CalculateDelta(ctx context.Context, sourceSnapshotID, tar
 }
 
 // OptimizeForBackup returns the optimal blocks to backup based on CBT data
-func (cbt *CBTTracker) OptimizeForBackup(ctx context.Context, resourceID string, backupType BackupType, lastBackupTime *time.Time) ([]CBTBlock, error) {
+func (cbt *PluggableCBTTracker) OptimizeForBackup(ctx context.Context, resourceID string, backupType BackupType, lastBackupTime *time.Time) ([]CBTBlock, error) {
 	switch backupType {
 	case FullBackup:
 		// For full backups, return all blocks
@@ -321,7 +319,7 @@ func (cbt *CBTTracker) OptimizeForBackup(ctx context.Context, resourceID string,
 }
 
 // GetChangeRate returns the change rate for a resource (blocks changed per hour)
-func (cbt *CBTTracker) GetChangeRate(ctx context.Context, resourceID string, duration time.Duration) (float64, error) {
+func (cbt *PluggableCBTTracker) GetChangeRate(ctx context.Context, resourceID string, duration time.Duration) (float64, error) {
 	cbt.mutex.RLock()
 	defer cbt.mutex.RUnlock()
 	
@@ -349,7 +347,7 @@ func (cbt *CBTTracker) GetChangeRate(ctx context.Context, resourceID string, dur
 }
 
 // EstimateBackupSize estimates the size of a backup based on CBT data
-func (cbt *CBTTracker) EstimateBackupSize(ctx context.Context, resourceID string, backupType BackupType, lastBackupTime *time.Time) (int64, error) {
+func (cbt *PluggableCBTTracker) EstimateBackupSize(ctx context.Context, resourceID string, backupType BackupType, lastBackupTime *time.Time) (int64, error) {
 	blocks, err := cbt.OptimizeForBackup(ctx, resourceID, backupType, lastBackupTime)
 	if err != nil {
 		return 0, err
@@ -364,7 +362,7 @@ func (cbt *CBTTracker) EstimateBackupSize(ctx context.Context, resourceID string
 }
 
 // Cleanup removes old CBT data for a resource
-func (cbt *CBTTracker) Cleanup(ctx context.Context, resourceID string) error {
+func (cbt *PluggableCBTTracker) Cleanup(ctx context.Context, resourceID string) error {
 	cbt.mutex.Lock()
 	defer cbt.mutex.Unlock()
 	
@@ -390,7 +388,7 @@ func (cbt *CBTTracker) Cleanup(ctx context.Context, resourceID string) error {
 }
 
 // getAllBlocks returns all blocks for a resource
-func (cbt *CBTTracker) getAllBlocks(ctx context.Context, resourceID string) ([]CBTBlock, error) {
+func (cbt *PluggableCBTTracker) getAllBlocks(ctx context.Context, resourceID string) ([]CBTBlock, error) {
 	cbt.mutex.RLock()
 	defer cbt.mutex.RUnlock()
 	

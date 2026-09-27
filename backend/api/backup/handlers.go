@@ -1,7 +1,6 @@
 package backup
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -435,7 +434,7 @@ func (s *BackupAPIServer) getBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	backup, err := s.backupManager.GetBackup(backupID)
+	b, err := s.backupManager.GetBackup(backupID)
 	if err != nil {
 		if errors.Is(err, backup.ErrBackupNotFound) {
 			http.Error(w, fmt.Sprintf("Backup not found: %v", err), http.StatusNotFound)
@@ -446,20 +445,20 @@ func (s *BackupAPIServer) getBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	compressionRatio := float64(1.0)
-	compressedSize := backup.Size // Placeholder
+	compressedSize := b.Size // Placeholder
 	
 	backupInfo := BackupInfo{
-		ID:               backup.ID,
+		ID:               b.ID,
 		VMID:             manifest.VMID, // Use VMID from manifest, not JobID
-		Type:             string(backup.Type),
-		Size:             backup.Size,
+		Type:             string(b.Type),
+		Size:             b.Size,
 		CompressedSize:   compressedSize,
-		CreatedAt:        backup.StartedAt,
-		ParentID:         backup.ParentID,
+		CreatedAt:        b.StartedAt,
+		ParentID:         b.ParentID,
 		BlockCount:       0, // Not available in basic Backup
 		ChangedBlocks:    0, // Not available in basic Backup
 		CompressionRatio: compressionRatio,
-		Metadata:         backup.Metadata,
+		Metadata:         b.Metadata,
 	}
 	
 	w.Header().Set("Content-Type", "application/json")
@@ -625,7 +624,7 @@ func (s *BackupAPIServer) createRestore(w http.ResponseWriter, r *http.Request) 
 		RestoreType:    req.RestoreType,
 		TargetPath:     req.TargetPath,
 		SelectiveFiles: req.SelectiveFiles,
-		Options: backup.RestoreOptions{
+		Options: backup.RestoreRequestOptions{
 			VerifyRestore:       req.VerifyRestore,
 			OverwriteExisting:   req.OverwriteExisting,
 			EnableDecompression: true,

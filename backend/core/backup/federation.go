@@ -2,7 +2,6 @@ package backup
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"sync"
@@ -17,7 +16,7 @@ type FederatedBackupManager struct {
 	federationManager    shared.FederationManagerInterface
 	distributionConfig   *DistributionConfig
 	remoteBackupClients  map[string]*RemoteBackupClient
-	replicationJobs      map[string]*ReplicationJob
+	replicationJobs      map[string]*FederatedReplicationJob
 	mutex                sync.RWMutex
 }
 
@@ -25,8 +24,8 @@ type FederatedBackupManager struct {
 type DistributionConfig struct {
 	EnableReplication     bool                  `json:"enable_replication"`
 	ReplicationFactor     int                   `json:"replication_factor"`
-	ReplicationStrategy   ReplicationStrategy   `json:"replication_strategy"`
-	ConsistencyLevel      ConsistencyLevel      `json:"consistency_level"`
+	ReplicationStrategy   ClusterReplicationStrategy   `json:"replication_strategy"`
+	ConsistencyLevel      ClusterConsistencyLevel      `json:"consistency_level"`
 	CrossClusterBackup    bool                  `json:"cross_cluster_backup"`
 	BackupDistribution    BackupDistribution    `json:"backup_distribution"`
 	ReplicationRetries    int                   `json:"replication_retries"`
@@ -36,23 +35,23 @@ type DistributionConfig struct {
 	ExcludedTargets       []string              `json:"excluded_targets"`
 }
 
-// ReplicationStrategy defines how backups are replicated across clusters
-type ReplicationStrategy string
+// ClusterReplicationStrategy defines how backups are replicated across clusters
+type ClusterReplicationStrategy string
 
 const (
-	ReplicationStrategySimple     ReplicationStrategy = "simple"     // Round-robin replication
-	ReplicationStrategyWeighted   ReplicationStrategy = "weighted"   // Based on cluster capacity
-	ReplicationStrategyGeographic ReplicationStrategy = "geographic" // Based on geographic distribution
-	ReplicationStrategyLatency    ReplicationStrategy = "latency"    // Based on network latency
+	ReplicationStrategySimple     ClusterReplicationStrategy = "simple"     // Round-robin replication
+	ReplicationStrategyWeighted   ClusterReplicationStrategy = "weighted"   // Based on cluster capacity
+	ReplicationStrategyGeographic ClusterReplicationStrategy = "geographic" // Based on geographic distribution
+	ReplicationStrategyLatency    ClusterReplicationStrategy = "latency"    // Based on network latency
 )
 
-// ConsistencyLevel defines the consistency requirements for distributed backups
-type ConsistencyLevel string
+// ClusterConsistencyLevel defines the consistency requirements for distributed backups
+type ClusterConsistencyLevel string
 
 const (
-	ConsistencyLevelEventual ConsistencyLevel = "eventual" // Eventually consistent
-	ConsistencyLevelStrong   ConsistencyLevel = "strong"   // Strong consistency
-	ConsistencyLevelQuorum   ConsistencyLevel = "quorum"   // Quorum-based consistency
+	ConsistencyLevelEventual ClusterConsistencyLevel = "eventual" // Eventually consistent
+	ConsistencyLevelStrong   ClusterConsistencyLevel = "strong"   // Strong consistency
+	ConsistencyLevelQuorum   ClusterConsistencyLevel = "quorum"   // Quorum-based consistency
 )
 
 // BackupDistribution defines how backups are distributed across clusters
@@ -75,8 +74,8 @@ type RemoteBackupClient struct {
 	mutex       sync.RWMutex
 }
 
-// ReplicationJob tracks backup replication across clusters
-type ReplicationJob struct {
+// FederatedReplicationJob tracks backup replication across clusters
+type FederatedReplicationJob struct {
 	ID              string            `json:"id"`
 	BackupID        string            `json:"backup_id"`
 	SourceCluster   string            `json:"source_cluster"`
@@ -99,7 +98,7 @@ type FederatedBackupRequest struct {
 	BackupType          BackupType          `json:"backup_type"`
 	ReplicationFactor   int                 `json:"replication_factor"`
 	PreferredTargets    []string            `json:"preferred_targets"`
-	ConsistencyLevel    ConsistencyLevel    `json:"consistency_level"`
+	ConsistencyLevel    ClusterConsistencyLevel    `json:"consistency_level"`
 	Metadata            map[string]string   `json:"metadata"`
 }
 
@@ -150,7 +149,7 @@ func NewFederatedBackupManager(
 		federationManager:   federationManager,
 		distributionConfig:  config,
 		remoteBackupClients: make(map[string]*RemoteBackupClient),
-		replicationJobs:     make(map[string]*ReplicationJob),
+		replicationJobs:     make(map[string]*FederatedReplicationJob),
 	}
 	
 	// Initialize remote backup clients for each cluster
@@ -246,7 +245,7 @@ func (fbm *FederatedBackupManager) RestoreFromFederatedBackup(ctx context.Contex
 		BackupID:    backupID,
 		RestoreType: RestoreTypeFull,
 		TargetPath:  targetPath,
-		Options: RestoreOptions{
+		Options: RestoreRequestOptions{
 			VerifyRestore:       true,
 			OverwriteExisting:   true,
 			EnableDecompression: true,
@@ -352,8 +351,8 @@ func (fbm *FederatedBackupManager) initializeRemoteClients() error {
 			LastHealthCheck: time.Time{},
 		}
 		
-		if cluster.AuthInfo != nil {
-			client.AuthToken = cluster.AuthInfo.AuthToken
+		if token, ok := cluster.Metadata["auth_token"]; ok {
+			client.AuthToken = token
 		}
 		
 		fbm.remoteBackupClients[cluster.ID] = client
@@ -449,8 +448,8 @@ func (fbm *FederatedBackupManager) selectReplicationTargets(req *FederatedBackup
 	return targets, nil
 }
 
-func (fbm *FederatedBackupManager) startReplicationJob(manifest *BackupManifest, targetClusterID string) (*ReplicationJob, error) {
-	job := &ReplicationJob{
+func (fbm *FederatedBackupManager) startReplicationJob(manifest *BackupManifest, targetClusterID string) (*FederatedReplicationJob, error) {
+	job := &FederatedReplicationJob{
 		ID:             fmt.Sprintf("repl-%s-%s-%d", manifest.BackupID, targetClusterID, time.Now().Unix()),
 		BackupID:       manifest.BackupID,
 		SourceCluster:  fbm.federationManager.GetLocalClusterID(),
@@ -473,7 +472,7 @@ func (fbm *FederatedBackupManager) startReplicationJob(manifest *BackupManifest,
 	return job, nil
 }
 
-func (fbm *FederatedBackupManager) executeReplication(job *ReplicationJob, manifest *BackupManifest, targetClusterID string) {
+func (fbm *FederatedBackupManager) executeReplication(job *FederatedReplicationJob, manifest *BackupManifest, targetClusterID string) {
 	defer func() {
 		job.CompletedAt = time.Now()
 		if job.Status == "running" {
@@ -501,7 +500,7 @@ func (fbm *FederatedBackupManager) executeReplication(job *ReplicationJob, manif
 	}
 
 	// Transport to remote cluster
-	tcpConn, err := net.Dial("tcp", client.Address)
+	tcpConn, err := net.Dial("tcp", client.Endpoint)
 	if err != nil {
 		job.Status = "failed"
 		job.Error = fmt.Sprintf("failed to connect to remote cluster: %v", err)
@@ -519,7 +518,7 @@ func (fbm *FederatedBackupManager) executeReplication(job *ReplicationJob, manif
 
 }
 
-func (fbm *FederatedBackupManager) waitForReplication(jobIDs []string, consistencyLevel ConsistencyLevel) error {
+func (fbm *FederatedBackupManager) waitForReplication(jobIDs []string, consistencyLevel ClusterConsistencyLevel) error {
 	timeout := fbm.distributionConfig.ReplicationTimeout
 	start := time.Now()
 	

@@ -1,8 +1,6 @@
 package backup
 
 import (
-	"bufio"
-	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -13,7 +11,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -23,9 +20,6 @@ import (
 const (
 	// CBT block size for change tracking (4KB)
 	CBTBlockSize = 4096
-	
-	// Maximum number of incremental backups before forcing a full backup
-	MaxIncrementals = 10
 	
 	// CBT metadata file extension
 	CBTMetaExt = ".cbt"
@@ -627,6 +621,19 @@ func (m *IncrementalBackupManager) GetBackupManifest(backupID string) (*BackupMa
 	}
 	
 	return &manifest, nil
+}
+
+// GetBackupData reads the raw on-disk backup image for a backup ID.
+func (m *IncrementalBackupManager) GetBackupData(backupID string) ([]byte, error) {
+	if _, err := m.GetBackupManifest(backupID); err != nil {
+		return nil, err
+	}
+	dataPath := filepath.Join(m.config.BasePath, "data", backupID, "disk.img")
+	data, err := os.ReadFile(dataPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read backup data for %s: %w", backupID, err)
+	}
+	return data, nil
 }
 
 // GetCBTStats returns CBT statistics for a VM

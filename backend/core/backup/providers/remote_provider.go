@@ -3,7 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -122,14 +122,11 @@ func (p *RemoteStorageProvider) CreateBackup(ctx context.Context, job *backup.Ba
 	b := &backup.Backup{
 		ID:              backupID,
 		JobID:           job.ID,
-		Name:            job.Name,
-		Description:     job.Description,
 		Type:            job.Type,
 		State:           backup.BackupPending,
 		StorageLocation: backupPath,
-		StorageType:     backup.RemoteStorage,
 		TenantID:        job.TenantID,
-		CreatedAt:       time.Now(),
+		StartedAt:       time.Now(),
 		Metadata: map[string]string{
 			"remote_storage_type": string(p.storageType),
 			"remote_connection":   p.connectionString,
@@ -250,7 +247,7 @@ type RemoteBackupSession struct {
 // NewRemoteBackupSession creates a new remote backup session
 func (p *RemoteStorageProvider) NewRemoteBackupSession(b *backup.Backup, targetID string) (*RemoteBackupSession, error) {
 	// Create a temporary directory for staging files
-	tempDir, err := ioutil.TempDir("", fmt.Sprintf("novacron-backup-%s-%s-", b.ID, targetID))
+	tempDir, err := os.MkdirTemp("", fmt.Sprintf("novacron-backup-%s-%s-", b.ID, targetID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temporary directory: %w", err)
 	}
@@ -267,7 +264,7 @@ func (p *RemoteStorageProvider) NewRemoteBackupSession(b *backup.Backup, targetI
 func (s *RemoteBackupSession) WriteFile(filename string, data []byte) error {
 	// Write the file to the temporary directory
 	tempFilePath := filepath.Join(s.tempDir, filename)
-	if err := ioutil.WriteFile(tempFilePath, data, 0644); err != nil {
+	if err := os.WriteFile(tempFilePath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write file to temporary directory: %w", err)
 	}
 
@@ -277,7 +274,7 @@ func (s *RemoteBackupSession) WriteFile(filename string, data []byte) error {
 // CopyFile copies a file from a source path to the backup
 func (s *RemoteBackupSession) CopyFile(sourcePath, destFilename string) error {
 	// Read the source file
-	data, err := ioutil.ReadFile(sourcePath)
+	data, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return fmt.Errorf("failed to read source file: %w", err)
 	}
@@ -307,7 +304,7 @@ func (s *RemoteBackupSession) Complete() error {
 	s.backup.Metadata[fmt.Sprintf("target_%s_size", s.targetID)] = fmt.Sprintf("%d", totalSize)
 
 	// Clean up temporary directory
-	if err := ioutil.RemoveAll(s.tempDir); err != nil {
+	if err := os.RemoveAll(s.tempDir); err != nil {
 		return fmt.Errorf("failed to clean up temporary directory: %w", err)
 	}
 

@@ -87,7 +87,7 @@ job := &backup.BackupJob{
         Expression: "0 2 * * *", // Daily at 2 AM
         TimeZone:   "UTC",
     },
-    Retention: &backup.RetentionPolicy{
+    Retention: &backup.JobRetentionPolicy{
         KeepLast:    30,
         KeepDaily:   7,
         KeepWeekly:  4,

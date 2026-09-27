@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,18 +18,9 @@ import (
 
 // TestBackupAPIServer tests the backup API server functionality
 func TestBackupAPIServer(t *testing.T) {
-	// Create temporary directory for test data
 	tmpDir := t.TempDir()
-	
-	// Create mock managers
-	backupManager := backup.NewIncrementalBackupManager(
-		tmpDir,
-		backup.NewDeduplicationEngine(tmpDir),
-		backup.DefaultCompressionLevel,
-	)
-	retentionManager := backup.NewRetentionManager(tmpDir)
-	restoreManager := backup.NewRestoreManager(tmpDir, 2)
-	
+	backupManager, retentionManager, restoreManager := newTestBackupComponents(t, tmpDir)
+
 	// Create API server
 	server := NewBackupAPIServer(backupManager, retentionManager, restoreManager)
 	
@@ -52,7 +44,7 @@ func TestBackupAPIServer(t *testing.T) {
 // TestCreateBackupAPI tests the backup creation API endpoint
 func TestCreateBackupAPI(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := setupTestServer(tmpDir)
+	server := setupTestServer(t, tmpDir)
 	
 	// Create test request
 	req := BackupCreateRequest{
@@ -107,7 +99,7 @@ func TestCreateBackupAPI(t *testing.T) {
 // TestListBackupsAPI tests the backup listing API endpoint
 func TestListBackupsAPI(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := setupTestServer(tmpDir)
+	server := setupTestServer(t, tmpDir)
 	
 	// Test list backups without VM ID filter
 	httpReq := httptest.NewRequest("GET", "/api/v1/backup/backups", nil)
@@ -115,9 +107,16 @@ func TestListBackupsAPI(t *testing.T) {
 	
 	server.Router().ServeHTTP(recorder, httpReq)
 	
-	// Should return not implemented for now
-	if recorder.Code != http.StatusNotImplemented {
-		t.Errorf("Expected 501 for unfiltered list, got %d", recorder.Code)
+	// Unfiltered listing is served from the backup manager's catalogue
+	if recorder.Code != http.StatusOK {
+		t.Errorf("Expected 200 for unfiltered list, got %d", recorder.Code)
+	}
+	var unfiltered BackupListResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &unfiltered); err != nil {
+		t.Fatalf("Failed to parse unfiltered response: %v", err)
+	}
+	if unfiltered.Total != 0 {
+		t.Errorf("Expected 0 backups in unfiltered list, got %d", unfiltered.Total)
 	}
 	
 	// Test list backups with VM ID filter
@@ -146,7 +145,7 @@ func TestListBackupsAPI(t *testing.T) {
 // TestGetBackupAPI tests the get backup API endpoint
 func TestGetBackupAPI(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := setupTestServer(tmpDir)
+	server := setupTestServer(t, tmpDir)
 	
 	// Test get non-existent backup
 	httpReq := httptest.NewRequest("GET", "/api/v1/backup/backups/non-existent-backup", nil)
@@ -162,7 +161,7 @@ func TestGetBackupAPI(t *testing.T) {
 // TestInitializeCBTAPI tests the CBT initialization API endpoint
 func TestInitializeCBTAPI(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := setupTestServer(tmpDir)
+	server := setupTestServer(t, tmpDir)
 	
 	// Create test request
 	req := struct {
@@ -223,7 +222,7 @@ func TestInitializeCBTAPI(t *testing.T) {
 // TestCreateRestoreAPI tests the restore creation API endpoint
 func TestCreateRestoreAPI(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := setupTestServer(tmpDir)
+	server := setupTestServer(t, tmpDir)
 	
 	// Create test request
 	req := RestoreCreateRequest{
@@ -269,7 +268,7 @@ func TestCreateRestoreAPI(t *testing.T) {
 // TestRetentionPolicyAPI tests retention policy API endpoints
 func TestRetentionPolicyAPI(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := setupTestServer(tmpDir)
+	server := setupTestServer(t, tmpDir)
 	
 	// Create test retention policy
 	policy := RetentionPolicyRequest{
@@ -278,7 +277,7 @@ func TestRetentionPolicyAPI(t *testing.T) {
 		Rules: &backup.RetentionRules{
 			MaxAge:      30 * 24 * time.Hour,
 			MaxCount:    100,
-			MinReplicas: 1,
+			MinCount:    1,
 		},
 		GFSConfig: &backup.GFSConfig{
 			DailyRetention:   7,
@@ -367,7 +366,7 @@ func TestRetentionPolicyAPI(t *testing.T) {
 // TestPointInTimeRestoreAPI tests point-in-time restore API endpoint
 func TestPointInTimeRestoreAPI(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := setupTestServer(tmpDir)
+	server := setupTestServer(t, tmpDir)
 	
 	// Create test request
 	req := struct {
@@ -411,7 +410,7 @@ func TestPointInTimeRestoreAPI(t *testing.T) {
 // TestHealthStatusAPI tests the health status API endpoint
 func TestHealthStatusAPI(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := setupTestServer(tmpDir)
+	server := setupTestServer(t, tmpDir)
 	
 	// Test health status
 	httpReq := httptest.NewRequest("GET", "/api/v1/backup/health", nil)
@@ -450,7 +449,7 @@ func TestHealthStatusAPI(t *testing.T) {
 // TestBackupStatsAPI tests the backup statistics API endpoint
 func TestBackupStatsAPI(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := setupTestServer(tmpDir)
+	server := setupTestServer(t, tmpDir)
 	
 	// Test backup stats
 	httpReq := httptest.NewRequest("GET", "/api/v1/backup/stats", nil)
@@ -480,7 +479,7 @@ func TestBackupStatsAPI(t *testing.T) {
 // TestDedupStatsAPI tests the deduplication statistics API endpoint
 func TestDedupStatsAPI(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := setupTestServer(tmpDir)
+	server := setupTestServer(t, tmpDir)
 	
 	// Test deduplication stats
 	httpReq := httptest.NewRequest("GET", "/api/v1/backup/dedup/stats", nil)
@@ -510,7 +509,7 @@ func TestDedupStatsAPI(t *testing.T) {
 // TestDeleteBackupAPI tests the backup deletion API endpoint with typed error handling
 func TestDeleteBackupAPI(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := setupTestServer(tmpDir)
+	server := setupTestServer(t, tmpDir)
 	
 	// Test delete non-existent backup (should return 404 with typed error)
 	httpReq := httptest.NewRequest("DELETE", "/api/v1/backup/backups/non-existent-backup", nil)
@@ -529,22 +528,21 @@ func TestDeleteBackupAPI(t *testing.T) {
 		t.Errorf("Expected 'Backup not found' error message, got: %s", body)
 	}
 	
-	// Test delete with invalid backup ID format
+	// An empty backup ID segment does not match the {backup_id} route
 	httpReq = httptest.NewRequest("DELETE", "/api/v1/backup/backups/", nil)
-	httpReq = mux.SetURLVars(httpReq, map[string]string{"backup_id": ""})
 	recorder = httptest.NewRecorder()
 	
 	server.Router().ServeHTTP(recorder, httpReq)
 	
-	if recorder.Code != http.StatusBadRequest {
-		t.Errorf("Expected 400 for empty backup ID, got %d", recorder.Code)
+	if recorder.Code != http.StatusNotFound {
+		t.Errorf("Expected 404 for empty backup ID, got %d", recorder.Code)
 	}
 }
 
 // TestBackupVerificationAPI tests the backup verification API endpoint
 func TestBackupVerificationAPI(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := setupTestServer(tmpDir)
+	server := setupTestServer(t, tmpDir)
 	
 	// Test verify non-existent backup
 	httpReq := httptest.NewRequest("POST", "/api/v1/backup/backups/non-existent-backup/verify", nil)
@@ -561,7 +559,7 @@ func TestBackupVerificationAPI(t *testing.T) {
 // TestRequestContextUsage tests that request context is properly used in handlers
 func TestRequestContextUsage(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := setupTestServer(tmpDir)
+	server := setupTestServer(t, tmpDir)
 	
 	// Test with cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -603,7 +601,7 @@ func TestRequestContextUsage(t *testing.T) {
 // TestErrorHandlingTypes tests that proper typed errors are returned
 func TestErrorHandlingTypes(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := setupTestServer(tmpDir)
+	server := setupTestServer(t, tmpDir)
 	
 	testCases := []struct {
 		name           string
@@ -675,31 +673,6 @@ func TestErrorHandlingTypes(t *testing.T) {
 	}
 }
 
-// TestNotImplementedEndpoints tests endpoints that return not implemented
-func TestNotImplementedEndpoints(t *testing.T) {
-	tmpDir := t.TempDir()
-	server := setupTestServer(tmpDir)
-	
-	notImplementedEndpoints := []struct {
-		method string
-		path   string
-	}{
-		{"POST", "/api/v1/backup/backups/test-backup/verify"},
-	}
-	
-	for _, endpoint := range notImplementedEndpoints {
-		httpReq := httptest.NewRequest(endpoint.method, endpoint.path, nil)
-		httpReq = mux.SetURLVars(httpReq, map[string]string{"backup_id": "test-backup"})
-		recorder := httptest.NewRecorder()
-		
-		server.Router().ServeHTTP(recorder, httpReq)
-		
-		if recorder.Code != http.StatusNotImplemented {
-			t.Errorf("Expected 501 for %s %s, got %d", endpoint.method, endpoint.path, recorder.Code)
-		}
-	}
-}
-
 // TestJSONReaderHelper tests the JSON reader helper function
 func TestJSONReaderHelper(t *testing.T) {
 	testData := map[string]string{
@@ -734,16 +707,64 @@ func TestJSONReaderHelper(t *testing.T) {
 	}
 }
 
-// Helper function to set up test server
-func setupTestServer(tmpDir string) *BackupAPIServer {
-	backupManager := backup.NewIncrementalBackupManager(
-		tmpDir,
-		backup.NewDeduplicationEngine(tmpDir),
-		backup.DefaultCompressionLevel,
-	)
-	retentionManager := backup.NewRetentionManager(tmpDir)
-	restoreManager := backup.NewRestoreManager(tmpDir, 2)
-	
+// newTestBackupComponents builds the real backup, retention and restore managers
+// against tmpDir-scoped configs (the nil-config defaults point at /var/lib/novacron).
+func newTestBackupComponents(tb testing.TB, tmpDir string) (*backup.BackupManager, *backup.RetentionManager, *backup.RestoreManager) {
+	tb.Helper()
+	backupManager := backup.NewBackupManager()
+
+	dedupEngine, err := backup.NewDeduplicationEngine(filepath.Join(tmpDir, "dedup"))
+	if err != nil {
+		tb.Fatalf("failed to create dedup engine: %v", err)
+	}
+
+	incrManager, err := backup.NewIncrementalBackupManager(&backup.IncrementalConfig{
+		BasePath:          filepath.Join(tmpDir, "incremental"),
+		EnableCompression: true,
+		EnableDedup:       true,
+		CompressionLevel:  3,
+		MaxIncrementals:   backup.MaxIncrementals,
+		CBTBlockSize:      backup.CBTBlockSize,
+		WorkerThreads:     2,
+		BufferSize:        1024 * 1024,
+	})
+	if err != nil {
+		tb.Fatalf("failed to create incremental backup manager: %v", err)
+	}
+
+	retentionManager, err := backup.NewRetentionManager(&backup.RetentionConfig{
+		BasePath:              filepath.Join(tmpDir, "retention"),
+		DefaultPolicy:         "default-gfs",
+		CleanupInterval:       time.Hour,
+		EnableGFS:             true,
+		MaxStorageQuota:       100 * 1024 * 1024 * 1024,
+		StorageWarningPercent: 85,
+	}, incrManager)
+	if err != nil {
+		tb.Fatalf("failed to create retention manager: %v", err)
+	}
+
+	restoreManager, err := backup.NewRestoreManager(&backup.RestoreConfig{
+		BasePath:              filepath.Join(tmpDir, "restore"),
+		TempPath:              filepath.Join(tmpDir, "restore-tmp"),
+		MaxConcurrentRestores: 5,
+		VerifyAfterRestore:    true,
+		WorkerThreads:         2,
+		BufferSize:            1024 * 1024,
+		RestoreTimeout:        2 * time.Hour,
+		EnableDecompression:   true,
+		EnableRecoveryTests:   true,
+	}, incrManager, dedupEngine)
+	if err != nil {
+		tb.Fatalf("failed to create restore manager: %v", err)
+	}
+
+	return backupManager, retentionManager, restoreManager
+}
+
+// setupTestServer builds a BackupAPIServer over real managers rooted at tmpDir
+func setupTestServer(tb testing.TB, tmpDir string) *BackupAPIServer {
+	backupManager, retentionManager, restoreManager := newTestBackupComponents(tb, tmpDir)
 	return NewBackupAPIServer(backupManager, retentionManager, restoreManager)
 }
 
@@ -752,7 +773,7 @@ func setupTestServer(tmpDir string) *BackupAPIServer {
 // BenchmarkCreateBackupAPI benchmarks the backup creation API
 func BenchmarkCreateBackupAPI(b *testing.B) {
 	tmpDir := b.TempDir()
-	server := setupTestServer(tmpDir)
+	server := setupTestServer(b, tmpDir)
 	
 	req := BackupCreateRequest{
 		VMID:       "bench-vm",
@@ -782,7 +803,7 @@ func BenchmarkCreateBackupAPI(b *testing.B) {
 // BenchmarkListBackupsAPI benchmarks the backup listing API
 func BenchmarkListBackupsAPI(b *testing.B) {
 	tmpDir := b.TempDir()
-	server := setupTestServer(tmpDir)
+	server := setupTestServer(b, tmpDir)
 	
 	b.ResetTimer()
 	

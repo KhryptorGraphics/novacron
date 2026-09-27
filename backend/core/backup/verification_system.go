@@ -2,9 +2,11 @@ package backup
 
 import (
 	"context"
+	"crypto/md5"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"hash/crc32"
 	"sync"
 	"time"
 )
@@ -150,7 +152,7 @@ type BackupTestRunner struct {
 	testEnvironments map[string]*TestEnvironment
 	
 	// testResults stores test results
-	testResults map[string][]*TestResult
+	testResults map[string][]*VerificationTestResult
 	
 	// testDataGenerator generates test data
 	testDataGenerator *TestDataGenerator
@@ -296,7 +298,7 @@ type RestoreValidationResult struct {
 	Duration        time.Duration             `json:"duration"`
 	
 	// Test results
-	TestResults     []*TestResult             `json:"test_results"`
+	TestResults     []*VerificationTestResult             `json:"test_results"`
 	PassedTests     int                       `json:"passed_tests"`
 	FailedTests     int                       `json:"failed_tests"`
 	SkippedTests    int                       `json:"skipped_tests"`
@@ -763,7 +765,7 @@ func (rv *RestoreValidator) ValidateRestore(ctx context.Context, restoreJobID st
 		ValidationRules: rules,
 		Status:          ValidationStatusRunning,
 		StartedAt:       startTime,
-		TestResults:     make([]*TestResult, 0),
+		TestResults:     make([]*VerificationTestResult, 0),
 		ValidationDetails: make([]*ValidationDetail, 0),
 		Issues:          make([]*ValidationIssue, 0),
 		Recommendations: make([]string, 0),
@@ -773,11 +775,11 @@ func (rv *RestoreValidator) ValidateRestore(ctx context.Context, restoreJobID st
 	// Execute validation rules
 	for _, ruleID := range rules {
 		if rule, exists := rv.validationRules[ruleID]; exists {
-			testResult := &TestResult{
+			testResult := &VerificationTestResult{
 				TestID:      generateTestID(),
 				TestName:    rule.Name,
 				TestType:    string(rule.Type),
-				Status:      TestStatusPassed,
+				Status:      VerificationTestStatusPassed,
 				StartedAt:   time.Now(),
 				CompletedAt: time.Now(),
 				Duration:    time.Millisecond * 100,
@@ -849,7 +851,7 @@ func NewBackupTestRunner() *BackupTestRunner {
 	return &BackupTestRunner{
 		testSuites:        make(map[string]*TestSuite),
 		testEnvironments:  make(map[string]*TestEnvironment),
-		testResults:       make(map[string][]*TestResult),
+		testResults:       make(map[string][]*VerificationTestResult),
 		testDataGenerator: &TestDataGenerator{},
 		scenarioRunner:    &TestScenarioRunner{},
 	}
@@ -882,19 +884,11 @@ func createChecksumCalculators() map[string]ChecksumCalculator {
 }
 
 func createIntegrityAlgorithms() map[string]IntegrityAlgorithm {
-	return map[string]IntegrityAlgorithm{
-		"checksum": &ChecksumIntegrityAlgorithm{},
-		"block":    &BlockIntegrityAlgorithm{},
-		"file":     &FileIntegrityAlgorithm{},
-	}
+	return map[string]IntegrityAlgorithm{}
 }
 
 func createCorruptionDetectionAlgorithms() map[string]CorruptionDetectionAlgorithm {
-	return map[string]CorruptionDetectionAlgorithm{
-		"pattern": &PatternCorruptionDetector{},
-		"entropy": &EntropyCorruptionDetector{},
-		"anomaly": &AnomalyCorruptionDetector{},
-	}
+	return map[string]CorruptionDetectionAlgorithm{}
 }
 
 func createCorruptionPatterns() []*CorruptionPattern {
@@ -935,18 +929,38 @@ func (s *SHA256ChecksumAlgorithm) Verify(data []byte, expectedChecksum string) b
 	return actualChecksum == expectedChecksum
 }
 
-// Placeholder types and implementations
 type MD5ChecksumAlgorithm struct{}
+
+func (m *MD5ChecksumAlgorithm) Name() string {
+	return "MD5"
+}
+
+func (m *MD5ChecksumAlgorithm) Calculate(data []byte) string {
+	hash := md5.Sum(data)
+	return hex.EncodeToString(hash[:])
+}
+
+func (m *MD5ChecksumAlgorithm) Verify(data []byte, expectedChecksum string) bool {
+	return m.Calculate(data) == expectedChecksum
+}
+
 type CRC32ChecksumAlgorithm struct{}
+
+func (c *CRC32ChecksumAlgorithm) Name() string {
+	return "CRC32"
+}
+
+func (c *CRC32ChecksumAlgorithm) Calculate(data []byte) string {
+	return fmt.Sprintf("%08x", crc32.ChecksumIEEE(data))
+}
+
+func (c *CRC32ChecksumAlgorithm) Verify(data []byte, expectedChecksum string) bool {
+	return c.Calculate(data) == expectedChecksum
+}
+
 type SHA256Calculator struct{}
 type MD5Calculator struct{}
 type CRC32Calculator struct{}
-type ChecksumIntegrityAlgorithm struct{}
-type BlockIntegrityAlgorithm struct{}
-type FileIntegrityAlgorithm struct{}
-type PatternCorruptionDetector struct{}
-type EntropyCorruptionDetector struct{}
-type AnomalyCorruptionDetector struct{}
 type LocalChecksumStore struct{}
 type ChecksumCache struct{}
 type CorruptionPattern struct {
@@ -1006,6 +1020,31 @@ func (s *SHA256Calculator) GetAlgorithm() string {
 
 func (s *SHA256Calculator) GetType() ChecksumType {
 	return ChecksumTypeSHA256
+}
+
+func (m *MD5Calculator) Calculate(ctx context.Context, data []byte) (string, error) {
+	hash := md5.Sum(data)
+	return hex.EncodeToString(hash[:]), nil
+}
+
+func (m *MD5Calculator) GetAlgorithm() string {
+	return "MD5"
+}
+
+func (m *MD5Calculator) GetType() ChecksumType {
+	return ChecksumTypeMD5
+}
+
+func (c *CRC32Calculator) Calculate(ctx context.Context, data []byte) (string, error) {
+	return fmt.Sprintf("%08x", crc32.ChecksumIEEE(data)), nil
+}
+
+func (c *CRC32Calculator) GetAlgorithm() string {
+	return "CRC32"
+}
+
+func (c *CRC32Calculator) GetType() ChecksumType {
+	return ChecksumTypeCRC32
 }
 
 // Implementations for ChecksumStore interface methods

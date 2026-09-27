@@ -10,10 +10,10 @@ import (
 // IncrementalBackupEngine handles incremental backup operations
 type IncrementalBackupEngine struct {
 	// cbtTracker manages changed block tracking
-	cbtTracker *CBTTracker
+	cbtTracker *PluggableCBTTracker
 	
 	// backupChains tracks backup chains for each resource
-	backupChains map[string]*BackupChain
+	backupChains map[string]*EngineBackupChain
 	
 	// vmManager interface for VM operations
 	vmManager VMManagerInterface
@@ -28,7 +28,7 @@ type IncrementalBackupEngine struct {
 	encryptionProvider EncryptionProvider
 	
 	// deduplicationEngine for block-level deduplication
-	deduplicationEngine *DeduplicationEngine
+	deduplicationEngine *EngineDeduplicationEngine
 	
 	// mutex protects concurrent access
 	mutex sync.RWMutex
@@ -62,8 +62,8 @@ type VMDisk struct {
 	Type     string `json:"type"`
 }
 
-// BackupChain represents a chain of related backups
-type BackupChain struct {
+// EngineBackupChain represents a chain of related backups
+type EngineBackupChain struct {
 	ResourceID   string              `json:"resource_id"`
 	FullBackups  []string            `json:"full_backups"`    // List of full backup IDs
 	Incrementals map[string][]string `json:"incrementals"`    // fullBackupID -> []incrementalBackupIDs
@@ -88,8 +88,8 @@ type EncryptionProvider interface {
 	RotateKey(ctx context.Context, oldKeyID, newKeyID string) error
 }
 
-// DeduplicationEngine handles block-level deduplication
-type DeduplicationEngine struct {
+// EngineDeduplicationEngine handles block-level deduplication
+type EngineDeduplicationEngine struct {
 	blockStore   map[string][]byte // hash -> block data
 	refCounts    map[string]int    // hash -> reference count
 	hashToBlocks map[string][]string // hash -> list of backup IDs using this block
@@ -124,7 +124,7 @@ type RestoreResult struct {
 
 // NewIncrementalBackupEngine creates a new incremental backup engine
 func NewIncrementalBackupEngine(
-	cbtTracker *CBTTracker,
+	cbtTracker *PluggableCBTTracker,
 	vmManager VMManagerInterface,
 	storageManager StorageManagerInterface,
 	compressionProvider CompressionProvider,
@@ -132,12 +132,12 @@ func NewIncrementalBackupEngine(
 ) *IncrementalBackupEngine {
 	return &IncrementalBackupEngine{
 		cbtTracker:          cbtTracker,
-		backupChains:        make(map[string]*BackupChain),
+		backupChains:        make(map[string]*EngineBackupChain),
 		vmManager:           vmManager,
 		storageManager:      storageManager,
 		compressionProvider: compressionProvider,
 		encryptionProvider:  encryptionProvider,
-		deduplicationEngine: NewDeduplicationEngine(),
+		deduplicationEngine: NewEngineDeduplicationEngine(),
 	}
 }
 
@@ -202,7 +202,8 @@ func (engine *IncrementalBackupEngine) CreateIncrementalBackup(ctx context.Conte
 		changedBlocks += diskResult.ChangedBlocks
 	}
 	
-	// Update backup chain
+	// Update backup chain; the previous chain head is this backup's parent
+	parentBackupID := chain.LastBackup
 	backupID := generateBackupID()
 	err = engine.updateBackupChain(chain, backupID, backupType)
 	if err != nil {
@@ -230,8 +231,8 @@ func (engine *IncrementalBackupEngine) CreateIncrementalBackup(ctx context.Conte
 		Throughput:         throughputMbps,
 	}
 	
-	if backupType == IncrementalBackup && chain.LastBackup != "" {
-		result.ParentBackupID = chain.LastBackup
+	if backupType == IncrementalBackup && parentBackupID != "" {
+		result.ParentBackupID = parentBackupID
 	}
 	
 	return result, nil
@@ -355,7 +356,7 @@ type BackupChainStatus struct {
 
 // Helper methods
 
-func (engine *IncrementalBackupEngine) getOrCreateBackupChain(resourceID string) (*BackupChain, error) {
+func (engine *IncrementalBackupEngine) getOrCreateBackupChain(resourceID string) (*EngineBackupChain, error) {
 	engine.mutex.Lock()
 	defer engine.mutex.Unlock()
 	
@@ -364,7 +365,7 @@ func (engine *IncrementalBackupEngine) getOrCreateBackupChain(resourceID string)
 	}
 	
 	// Create new backup chain
-	chain := &BackupChain{
+	chain := &EngineBackupChain{
 		ResourceID:   resourceID,
 		FullBackups:  make([]string, 0),
 		Incrementals: make(map[string][]string),
@@ -376,7 +377,7 @@ func (engine *IncrementalBackupEngine) getOrCreateBackupChain(resourceID string)
 	return chain, nil
 }
 
-func (engine *IncrementalBackupEngine) determineBackupType(job *BackupJob, chain *BackupChain) BackupType {
+func (engine *IncrementalBackupEngine) determineBackupType(job *BackupJob, chain *EngineBackupChain) BackupType {
 	// If explicitly specified, use job type
 	if job.Type == FullBackup || job.Type == IncrementalBackup || job.Type == DifferentialBackup {
 		// But ensure we have a full backup first for incremental/differential
@@ -423,7 +424,7 @@ func (engine *IncrementalBackupEngine) createConsistentSnapshot(ctx context.Cont
 	return snapshotID, err
 }
 
-func (engine *IncrementalBackupEngine) backupDisk(ctx context.Context, disk VMDisk, backupType BackupType, chain *BackupChain) (*IncrementalBackupResult, error) {
+func (engine *IncrementalBackupEngine) backupDisk(ctx context.Context, disk VMDisk, backupType BackupType, chain *EngineBackupChain) (*IncrementalBackupResult, error) {
 	// Get changed blocks for the disk based on backup type
 	var lastBackupTime *time.Time
 	if backupType == IncrementalBackup && chain.LastBackup != "" {
@@ -466,7 +467,7 @@ func (engine *IncrementalBackupEngine) backupDisk(ctx context.Context, disk VMDi
 	}, nil
 }
 
-func (engine *IncrementalBackupEngine) updateBackupChain(chain *BackupChain, backupID string, backupType BackupType) error {
+func (engine *IncrementalBackupEngine) updateBackupChain(chain *EngineBackupChain, backupID string, backupType BackupType) error {
 	engine.mutex.Lock()
 	defer engine.mutex.Unlock()
 	
@@ -529,13 +530,13 @@ func (engine *IncrementalBackupEngine) verifyRestoreIntegrity(ctx context.Contex
 	return nil
 }
 
-func (engine *IncrementalBackupEngine) consolidateIncrementals(ctx context.Context, chain *BackupChain) error {
+func (engine *IncrementalBackupEngine) consolidateIncrementals(ctx context.Context, chain *EngineBackupChain) error {
 	// In a real implementation, this would create a synthetic full backup
 	// by applying all incrementals to the base full backup
 	return nil
 }
 
-func (engine *IncrementalBackupEngine) calculateChainLength(chain *BackupChain) int {
+func (engine *IncrementalBackupEngine) calculateChainLength(chain *EngineBackupChain) int {
 	if chain.LastFull == "" {
 		return 0
 	}
@@ -546,9 +547,9 @@ func generateBackupID() string {
 	return fmt.Sprintf("backup-%d", time.Now().UnixNano())
 }
 
-// NewDeduplicationEngine creates a new deduplication engine
-func NewDeduplicationEngine() *DeduplicationEngine {
-	return &DeduplicationEngine{
+// NewEngineDeduplicationEngine creates a new deduplication engine
+func NewEngineDeduplicationEngine() *EngineDeduplicationEngine {
+	return &EngineDeduplicationEngine{
 		blockStore:   make(map[string][]byte),
 		refCounts:    make(map[string]int),
 		hashToBlocks: make(map[string][]string),
@@ -556,7 +557,7 @@ func NewDeduplicationEngine() *DeduplicationEngine {
 }
 
 // Deduplicate performs block-level deduplication on data
-func (de *DeduplicationEngine) Deduplicate(data []byte) ([]byte, float64) {
+func (de *EngineDeduplicationEngine) Deduplicate(data []byte) ([]byte, float64) {
 	de.mutex.Lock()
 	defer de.mutex.Unlock()
 	

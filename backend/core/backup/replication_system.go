@@ -720,6 +720,11 @@ func (crrs *CrossRegionReplicationSystem) CreateReplicationPolicy(ctx context.Co
 	return crrs.replicationManager.CreatePolicy(ctx, policy)
 }
 
+// RegisterReplicationTarget registers a target that replication jobs may be assigned to
+func (crrs *CrossRegionReplicationSystem) RegisterReplicationTarget(ctx context.Context, target *ReplicationTarget) error {
+	return crrs.replicationManager.RegisterTarget(ctx, target)
+}
+
 // StartReplication starts replication for a backup
 func (crrs *CrossRegionReplicationSystem) StartReplication(ctx context.Context, backupID string, policyID string) (*ReplicationJobV2, error) {
 	return crrs.replicationManager.StartReplication(ctx, backupID, policyID)
@@ -766,6 +771,23 @@ func (rm *ReplicationManager) CreatePolicy(ctx context.Context, policy *Replicat
 	policy.UpdatedAt = time.Now()
 	rm.replicationPolicies[policy.ID] = policy
 	
+	return nil
+}
+
+// RegisterTarget adds a replication target; targets are selected by StartReplication.
+func (rm *ReplicationManager) RegisterTarget(ctx context.Context, target *ReplicationTarget) error {
+	if target == nil || target.ID == "" {
+		return fmt.Errorf("replication target must have an ID")
+	}
+
+	rm.mutex.Lock()
+	defer rm.mutex.Unlock()
+
+	if _, exists := rm.replicationTargets[target.ID]; exists {
+		return fmt.Errorf("replication target %s already registered", target.ID)
+	}
+	rm.replicationTargets[target.ID] = target
+
 	return nil
 }
 
@@ -864,7 +886,7 @@ func (rm *ReplicationManager) selectTargets(policy *ReplicationPolicy) ([]*Repli
 
 func (rm *ReplicationManager) executeReplicationJob(ctx context.Context, job *ReplicationJobV2, policy *ReplicationPolicy) {
 	// Execute replication job
-	job.Status = JobStatusRunning
+	job.Status = ReplicationJobStatusRunning
 	
 	// Simulate replication process
 	for i := 0; i <= 100; i += 10 {
@@ -873,13 +895,13 @@ func (rm *ReplicationManager) executeReplicationJob(ctx context.Context, job *Re
 		
 		select {
 		case <-ctx.Done():
-			job.Status = JobStatusCancelled
+			job.Status = ReplicationJobStatusCancelled
 			return
 		default:
 		}
 	}
 	
-	job.Status = JobStatusCompleted
+	job.Status = ReplicationJobStatusCompleted
 	completedAt := time.Now()
 	job.CompletedAt = &completedAt
 }

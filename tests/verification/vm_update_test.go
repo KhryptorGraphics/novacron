@@ -3,7 +3,6 @@ package verification
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/khryptorgraphics/novacron/backend/core/vm"
 )
@@ -76,6 +75,7 @@ func TestVMManagerUpdateWithResourceClamping(t *testing.T) {
 		CPUShares: 2048,
 		MemoryMB:  1024,
 		Type:      vm.VMTypeProcess,
+		TenantID:  "test-tenant",
 	}
 
 	testVM, err := vm.NewVM(config)

@@ -93,12 +93,12 @@ type RestoreRequest struct {
 	TargetPath   string            `json:"target_path"`
 	PointInTime  time.Time         `json:"point_in_time,omitempty"`
 	SelectiveFiles []string        `json:"selective_files,omitempty"`
-	Options      RestoreOptions    `json:"options"`
+	Options      RestoreRequestOptions    `json:"options"`
 	Metadata     map[string]string `json:"metadata"`
 }
 
-// RestoreOptions contains restore operation options
-type RestoreOptions struct {
+// RestoreRequestOptions contains restore operation options
+type RestoreRequestOptions struct {
 	VerifyRestore     bool          `json:"verify_restore"`
 	OverwriteExisting bool          `json:"overwrite_existing"`
 	RestorePermissions bool         `json:"restore_permissions"`
@@ -148,7 +148,7 @@ type RestoreVerificationResult struct {
 // RestoreWorkerPool manages restore worker threads
 type RestoreWorkerPool struct {
 	workers  []*RestoreWorker
-	jobQueue chan *RestoreJob
+	jobQueue chan *restoreWorkItem
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
 }
@@ -156,13 +156,13 @@ type RestoreWorkerPool struct {
 // RestoreWorker represents a restore worker
 type RestoreWorker struct {
 	id       int
-	jobQueue chan *RestoreJob
+	jobQueue chan *restoreWorkItem
 	stopCh   chan struct{}
 	manager  *RestoreManager
 }
 
-// RestoreJob represents a restore job for the worker pool
-type RestoreJob struct {
+// restoreWorkItem represents a restore job for the worker pool
+type restoreWorkItem struct {
 	Operation *RestoreOperation
 	Request   *RestoreRequest
 }
@@ -202,7 +202,7 @@ func NewRestoreManager(config *RestoreConfig, backupManager *IncrementalBackupMa
 	
 	// Initialize worker pool
 	workerPool := &RestoreWorkerPool{
-		jobQueue: make(chan *RestoreJob, config.MaxConcurrentRestores*2),
+		jobQueue: make(chan *restoreWorkItem, config.MaxConcurrentRestores*2),
 		stopCh:   make(chan struct{}),
 	}
 	
@@ -300,7 +300,7 @@ func (rm *RestoreManager) CreateRestoreOperation(req *RestoreRequest) (*RestoreO
 	rm.mutex.Unlock()
 	
 	// Queue restore job
-	job := &RestoreJob{
+	job := &restoreWorkItem{
 		Operation: operation,
 		Request:   req,
 	}
@@ -381,7 +381,7 @@ func (rm *RestoreManager) RestoreFromPointInTime(vmID string, pointInTime time.T
 		RestoreType: RestoreTypeFull,
 		TargetPath:  targetPath,
 		PointInTime: pointInTime,
-		Options: RestoreOptions{
+		Options: RestoreRequestOptions{
 			VerifyRestore:       true,
 			OverwriteExisting:   true,
 			RestorePermissions:  true,
@@ -478,7 +478,7 @@ func (rm *RestoreManager) TestRecovery(backupID string, testType string) (*Recov
 		BackupID:    backupID,
 		RestoreType: RestoreTypeFull,
 		TargetPath:  testPath,
-		Options: RestoreOptions{
+		Options: RestoreRequestOptions{
 			VerifyRestore:       true,
 			OverwriteExisting:   true,
 			EnableDecompression: true,
@@ -555,7 +555,7 @@ func (worker *RestoreWorker) start(wg *sync.WaitGroup) {
 	}
 }
 
-func (worker *RestoreWorker) processJob(job *RestoreJob) {
+func (worker *RestoreWorker) processJob(job *restoreWorkItem) {
 	operation := job.Operation
 	request := job.Request
 	
@@ -641,7 +641,7 @@ func (worker *RestoreWorker) performRestore(operation *RestoreOperation, request
 	
 	// Restore each backup in the chain
 	var totalRestored int64
-	for i, backupID := range backupChain {
+	for _, backupID := range backupChain {
 		select {
 		case <-operation.ctx.Done():
 			return operation.ctx.Err()
@@ -694,8 +694,7 @@ func (worker *RestoreWorker) restoreBackup(backupID string, targetFile *os.File,
 	
 	// Read and restore blocks
 	var totalRestored int64
-	buffer := make([]byte, worker.manager.config.BufferSize)
-	
+
 	for {
 		select {
 		case <-operation.ctx.Done():
