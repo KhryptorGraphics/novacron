@@ -22,6 +22,7 @@ from ..models.base import BaseMLModel, ModelMetadata, ModelType, PredictionReque
 from ..integrations.novacron_client import NovaCronAPIError, NovaCronClient, fetch_metric_rows
 from ..utils.metrics import MetricsCalculator
 from ..utils.feature_engineering import TimeSeriesFeatureExtractor
+from ..utils.clock import utc_now, utc_now_naive
 
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,7 @@ class FailurePredictionModel(BaseMLModel):
             Training metrics
         """
         logger.info(f"Training failure prediction model with {len(X)} samples")
-        start_time = datetime.utcnow()
+        start_time = utc_now()
         
         try:
             # Extract time-series features
@@ -106,10 +107,10 @@ class FailurePredictionModel(BaseMLModel):
             )
             
             # Update metadata
-            training_duration = (datetime.utcnow() - start_time).total_seconds()
+            training_duration = (utc_now() - start_time).total_seconds()
             self.update_metadata(
                 training_status="completed",
-                trained_at=datetime.utcnow(),
+                trained_at=utc_now_naive(),
                 training_duration=training_duration,
                 training_samples=len(X_train),
                 validation_samples=len(X_val),
@@ -305,7 +306,7 @@ class FailurePredictionModel(BaseMLModel):
             'ensemble_weights': self._ensemble_weights,
             'isolation_score_low': self._isolation_score_low,
             'isolation_score_high': self._isolation_score_high,
-            'metadata': self.metadata.dict()
+            'metadata': self.metadata.model_dump()
         }
         
         dump_typed_model(filepath, "failure_prediction", model_data)
@@ -379,7 +380,7 @@ class FailurePredictionService:
             Trained model instance
         """
         if model_id is None:
-            model_id = f"failure_pred_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+            model_id = f"failure_pred_{utc_now().strftime('%Y%m%d_%H%M%S')}"
         
         # Create model metadata
         metadata = ModelMetadata(
@@ -427,7 +428,7 @@ class FailurePredictionService:
         if not self.active_model or not self.active_model.is_trained:
             raise ValueError("No active trained model available for prediction")
         
-        start_time = datetime.utcnow()
+        start_time = utc_now()
         
         # Convert features to DataFrame
         features_df = pd.DataFrame([request.features])
@@ -444,7 +445,7 @@ class FailurePredictionService:
         confidence = max(probabilities[0])
         
         # Prepare response
-        response_time = (datetime.utcnow() - start_time).total_seconds()
+        response_time = (utc_now() - start_time).total_seconds()
         
         response = PredictionResponse(
             request_id=request.request_id,
@@ -506,7 +507,7 @@ class FailurePredictionService:
                 # Make predictions for each node
                 for node_data in metrics_data:
                     request = PredictionRequest(
-                        request_id=f"monitor_{node_data['node_id']}_{datetime.utcnow().isoformat()}",
+                        request_id=f"monitor_{node_data['node_id']}_{utc_now().isoformat()}",
                         features=node_data
                     )
                     
@@ -592,4 +593,4 @@ class FailurePredictionService:
         if model_id not in self.models:
             raise ValueError(f"Model {model_id} not found")
         
-        return self.models[model_id].metadata.dict()
+        return self.models[model_id].metadata.model_dump()

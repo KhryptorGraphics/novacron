@@ -17,6 +17,8 @@ from sklearn.metrics import (
     mean_squared_error, r2_score, mean_absolute_error
 )
 
+from .clock import utc_now
+
 
 logger = logging.getLogger(__name__)
 
@@ -528,7 +530,7 @@ class SystemMetricsCollector:
             confidence: Prediction confidence
         """
         metric_record = {
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': utc_now().isoformat(),
             'service_type': service_type,
             'model_id': model_id,
             'response_time': response_time,
@@ -555,7 +557,7 @@ class SystemMetricsCollector:
         Returns:
             Service performance summary
         """
-        cutoff_time = datetime.utcnow() - time_window
+        cutoff_time = utc_now() - time_window
         
         # Filter metrics for service and time window
         relevant_metrics = [

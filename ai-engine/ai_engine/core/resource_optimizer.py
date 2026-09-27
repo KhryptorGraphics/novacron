@@ -23,6 +23,7 @@ from ..models.base import BaseMLModel, ModelMetadata, ModelType, PredictionReque
 from ..integrations.novacron_client import NovaCronAPIError, NovaCronClient, fetch_resource_frame
 from ..utils.feature_engineering import ResourceFeatureExtractor
 from ..utils.metrics import MetricsCalculator
+from ..utils.clock import utc_now, utc_now_naive
 
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ class ResourceRecommendation:
         self.confidence = confidence
         self.reasoning = reasoning
         self.priority = priority
-        self.timestamp = datetime.utcnow()
+        self.timestamp = utc_now_naive()
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert recommendation to dictionary."""
@@ -126,7 +127,7 @@ class ResourceOptimizationModel(BaseMLModel):
             Training metrics
         """
         logger.info(f"Training resource optimization model with {len(X)} samples")
-        start_time = datetime.utcnow()
+        start_time = utc_now()
         
         try:
             # Extract resource optimization features. Labels such as
@@ -163,10 +164,10 @@ class ResourceOptimizationModel(BaseMLModel):
             )
             
             # Update metadata
-            training_duration = (datetime.utcnow() - start_time).total_seconds()
+            training_duration = (utc_now() - start_time).total_seconds()
             self.update_metadata(
                 training_status="completed",
-                trained_at=datetime.utcnow(),
+                trained_at=utc_now_naive(),
                 training_duration=training_duration,
                 training_samples=len(X_train),
                 validation_samples=len(X_val),
@@ -696,7 +697,7 @@ class ResourceOptimizationModel(BaseMLModel):
             'feature_names': self._feature_names,
             'optimization_objectives': self._optimization_objectives,
             'resource_constraints': self._resource_constraints,
-            'metadata': self.metadata.dict()
+            'metadata': self.metadata.model_dump()
         }
         
         dump_typed_model(filepath, "resource_optimization", model_data)
@@ -856,7 +857,7 @@ class ResourceOptimizationService:
         Returns:
             Optimization summary statistics
         """
-        cutoff_time = datetime.utcnow() - time_window
+        cutoff_time = utc_now_naive() - time_window
         
         # Filter recent recommendations
         recent_recommendations = [

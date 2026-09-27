@@ -22,6 +22,7 @@ import lightgbm as lgb
 from ..models.base import BaseMLModel, ModelMetadata, ModelType, PredictionRequest, PredictionResponse
 from ..utils.feature_engineering import WorkloadFeatureExtractor
 from ..utils.metrics import MetricsCalculator
+from ..utils.clock import utc_now, utc_now_naive
 
 
 logger = logging.getLogger(__name__)
@@ -81,7 +82,7 @@ class WorkloadPlacementModel(BaseMLModel):
             Training metrics
         """
         logger.info(f"Training workload placement model with {len(X)} samples")
-        start_time = datetime.utcnow()
+        start_time = utc_now()
         
         try:
             # Engineer placement features
@@ -116,10 +117,10 @@ class WorkloadPlacementModel(BaseMLModel):
             )
             
             # Update metadata
-            training_duration = (datetime.utcnow() - start_time).total_seconds()
+            training_duration = (utc_now() - start_time).total_seconds()
             self.update_metadata(
                 training_status="completed",
-                trained_at=datetime.utcnow(),
+                trained_at=utc_now_naive(),
                 training_duration=training_duration,
                 training_samples=len(X_train),
                 validation_samples=len(X_val),
@@ -497,7 +498,7 @@ class WorkloadPlacementModel(BaseMLModel):
             'feature_names': self._feature_names,
             'placement_factors': self._placement_factors,
             'objective_weights': self._objective_weights,
-            'metadata': self.metadata.dict()
+            'metadata': self.metadata.model_dump()
         }
         
         dump_typed_model(filepath, "workload_placement", model_data)

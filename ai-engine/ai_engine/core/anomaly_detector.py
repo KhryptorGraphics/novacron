@@ -30,6 +30,7 @@ from ..models.base import BaseMLModel, ModelMetadata, ModelType, PredictionReque
 from ..integrations.novacron_client import NovaCronAPIError, NovaCronClient, fetch_metric_rows
 from ..utils.metrics import MetricsCalculator
 from ..utils.feature_engineering import AnomalyFeatureExtractor
+from ..utils.clock import utc_now, utc_now_naive
 
 
 logger = logging.getLogger(__name__)
@@ -99,7 +100,7 @@ class AnomalyDetectionModel(BaseMLModel):
             Training metrics
         """
         logger.info(f"Training anomaly detection model with {len(X)} samples")
-        start_time = datetime.utcnow()
+        start_time = utc_now()
         
         try:
             # Extract advanced features
@@ -151,10 +152,10 @@ class AnomalyDetectionModel(BaseMLModel):
                 self._train_anomaly_classifiers(X_train_scaled, y_train)
             
             # Update metadata
-            training_duration = (datetime.utcnow() - start_time).total_seconds()
+            training_duration = (utc_now() - start_time).total_seconds()
             self.update_metadata(
                 training_status="completed",
-                trained_at=datetime.utcnow(),
+                trained_at=utc_now_naive(),
                 training_duration=training_duration,
                 training_samples=len(X_train),
                 validation_samples=len(X_val) if X_val is not None else 0,
@@ -303,7 +304,7 @@ class AnomalyDetectionModel(BaseMLModel):
                     'anomaly_types': anomaly_types,
                     'severity': self._calculate_severity(score),
                     'confidence': min(score * 2, 1.0),  # Simple confidence calculation
-                    'timestamp': datetime.utcnow().isoformat()
+                    'timestamp': utc_now_naive().isoformat()
                 }
             else:
                 result = {
@@ -312,7 +313,7 @@ class AnomalyDetectionModel(BaseMLModel):
                     'anomaly_types': [],
                     'severity': 'normal',
                     'confidence': 1.0 - score,
-                    'timestamp': datetime.utcnow().isoformat()
+                    'timestamp': utc_now_naive().isoformat()
                 }
             
             results.append(result)
@@ -618,7 +619,7 @@ class AnomalyDetectionModel(BaseMLModel):
             'detector_score_range': self._detector_score_range,
             'ensemble_weights': self._ensemble_weights,
             'contamination_rate': self._contamination_rate,
-            'metadata': self.metadata.dict()
+            'metadata': self.metadata.model_dump()
         }
         
         # Save the LSTM sidecar by file name so it still resolves if the
@@ -726,7 +727,7 @@ class AnomalyDetectionService:
         if not self.active_model or not self.active_model.is_trained:
             raise ValueError("No active trained model available for detection")
         
-        start_time = datetime.utcnow()
+        start_time = utc_now()
         
         # Convert features to DataFrame
         features_df = pd.DataFrame([request.features])
@@ -735,7 +736,7 @@ class AnomalyDetectionService:
         anomaly_results = self.active_model.detect_anomaly_type(features_df)[0]
         
         # Prepare response
-        response_time = (datetime.utcnow() - start_time).total_seconds()
+        response_time = (utc_now() - start_time).total_seconds()
         
         response = PredictionResponse(
             request_id=request.request_id,
@@ -830,7 +831,7 @@ class AnomalyDetectionService:
         Returns:
             Anomaly trend statistics
         """
-        cutoff_time = datetime.utcnow() - time_window
+        cutoff_time = utc_now() - time_window
         
         # Filter recent anomalies
         recent_anomalies = [
@@ -938,7 +939,7 @@ class AnomalyDetectionService:
         """Store anomaly in history buffer."""
         anomaly_record = {
             'request_id': request.request_id,
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': utc_now().isoformat(),
             'anomaly_score': anomaly_details['anomaly_score'],
             'anomaly_types': anomaly_details['anomaly_types'],
             'severity': anomaly_details['severity'],

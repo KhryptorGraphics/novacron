@@ -547,8 +547,10 @@ class AnomalyFeatureExtractor:
         """Extract temporal features."""
         features = {}
         
-        # Time-based features
-        timestamp = row.get('timestamp', pd.Timestamp.now())
+        # Time-based features. Row timestamps arrive as RFC 3339 UTC strings
+        # from the NovaCron API, so the fallback must be UTC too; a local-time
+        # fallback would shift hour_of_day/is_business_hours by the host offset.
+        timestamp = row.get('timestamp', pd.Timestamp.now(tz='UTC'))
         if isinstance(timestamp, str):
             timestamp = pd.to_datetime(timestamp)
         

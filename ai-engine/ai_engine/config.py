@@ -18,8 +18,7 @@ class DatabaseSettings(PydanticBaseSettings):  # Python 3.12 compatible
     pool_timeout: int = 30
     pool_recycle: int = 3600
     
-    class Config:
-        env_prefix = "DB_"
+    model_config = SettingsConfigDict(env_prefix="DB_")
 
 
 class RedisSettings(PydanticBaseSettings):
@@ -62,7 +61,7 @@ class NovaCronSettings(PydanticBaseSettings):
     """NovaCron API integration settings."""
     
     api_url: str = "http://localhost:8090"
-    ws_url: str = "ws://localhost:8091"
+    ws_url: str = "ws://localhost:8090"
     api_timeout: int = 30
     max_retries: int = 3
     retry_backoff: float = 1.0

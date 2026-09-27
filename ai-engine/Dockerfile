@@ -22,8 +22,10 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN groupadd -r aiengine && useradd -r -g aiengine aiengine
+# Create non-root user. The uid/gid are pinned to 1000 because the compose
+# files run this image as user "1000:1000" and the model/log directories
+# below must be writable by that uid.
+RUN groupadd -r -g 1000 aiengine && useradd -r -u 1000 -g aiengine aiengine
 
 # Set working directory
 WORKDIR /app

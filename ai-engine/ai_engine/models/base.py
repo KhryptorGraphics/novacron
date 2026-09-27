@@ -9,6 +9,8 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..utils.clock import utc_now, utc_now_naive
+
 
 class ModelType(str, Enum):
     """Supported model types."""
@@ -69,7 +71,7 @@ class PredictionRequest(BaseModel):
     """Base prediction request."""
     
     request_id: str = Field(..., description="Unique request identifier")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)
     features: Dict[str, Any] = Field(..., description="Input features for prediction")
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
@@ -85,7 +87,7 @@ class PredictionResponse(BaseModel):
     
     # Response metadata
     response_time: float = Field(..., description="Processing time in seconds")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now_naive)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 

@@ -296,7 +296,7 @@ async def list_failure_models(
             model_info = {
                 "model_id": model_id,
                 "is_active": service.active_model and service.active_model.metadata.model_id == model_id,
-                "metadata": model.metadata.dict()
+                "metadata": model.metadata.model_dump()
             }
             models.append(model_info)
         

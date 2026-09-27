@@ -172,9 +172,9 @@ def fetch_metric_rows(host: Dict[str, Any], vms: List[Dict[str, Any]],
     no row carries any measurement, so callers back off instead of training or
     predicting on empty shells.
     """
-    now = now or datetime.utcnow()
+    now = now or datetime.now(timezone.utc)
     timestamp = host.get("timestamp") if isinstance(host.get("timestamp"), str) else None
-    timestamp = timestamp or now.isoformat()
+    timestamp = timestamp or now.isoformat().replace("+00:00", "Z")
 
     rows: List[Dict[str, Any]] = []
 

@@ -15,6 +15,8 @@ from pathlib import Path
 
 import structlog
 
+from .clock import utc_now_iso_z
+
 
 def setup_logging(level: str = "INFO", format: str = "json", 
                  log_file: Optional[str] = None) -> None:
@@ -100,7 +102,7 @@ class JSONFormatter(logging.Formatter):
         
         # Base log structure
         log_entry = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": utc_now_iso_z(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),

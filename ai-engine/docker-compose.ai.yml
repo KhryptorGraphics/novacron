@@ -38,7 +38,7 @@ services:
       
       # NovaCron API integration
       NOVACRON_API_URL: http://api:8090
-      NOVACRON_WS_URL: ws://api:8091
+      NOVACRON_WS_URL: ws://api:8090
       NOVACRON_USERNAME: ai-engine
       NOVACRON_PASSWORD: ${AI_ENGINE_PASSWORD:-changeme}
       
