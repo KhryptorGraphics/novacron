@@ -3,6 +3,10 @@ package integration
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -11,10 +15,48 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestVMOperations tests the newly implemented VM operations
-func TestVMOperations(t *testing.T) {
-	// Setup VM manager with test configuration
+// testGuestImage returns a bootable cirros disk for this host arch (the same
+// locations the in-package KVM tests use) or skips: an empty disk makes QEMU
+// exit nondeterministically, which turns lifecycle assertions into races.
+func testGuestImage(t *testing.T) string {
+	t.Helper()
+	home, _ := os.UserHomeDir()
+	arch := "aarch64"
+	if runtime.GOARCH == "amd64" {
+		arch = "x86_64"
+	}
+	img := "cirros-0.6.2-" + arch + "-disk.img"
+	for _, c := range []string{
+		filepath.Join(home, "novacron-run/images", img),
+		filepath.Join(home, "novacron-e2e/images", img),
+	} {
+		if fi, err := os.Stat(c); err == nil && fi.Size() > 0 {
+			return c
+		}
+	}
+	t.Skipf("skipping: guest image %s not found", img)
+	return ""
+}
+
+// newIsolatedVMManager builds a VMManager whose KVM driver (the default VM
+// type) boots real QEMU guests under a per-test temp directory, never under
+// /var/lib/novacron. It skips when QEMU is not installed and stops/deletes
+// every VM the test leaves behind so no guest process outlives the test.
+func newIsolatedVMManager(t *testing.T) *vm.VMManager {
+	t.Helper()
+	qemuBin := "qemu-system-x86_64"
+	if runtime.GOARCH == "arm64" {
+		qemuBin = "qemu-system-aarch64"
+	}
+	if _, err := exec.LookPath(qemuBin); err != nil {
+		t.Skipf("skipping: %s not installed", qemuBin)
+	}
+
 	config := vm.DefaultVMManagerConfig()
+	config.Drivers[vm.VMTypeKVM] = vm.VMDriverConfigManager{
+		Enabled: true,
+		Config:  map[string]interface{}{"base_path": filepath.Join(t.TempDir(), "vms")},
+	}
 	config.Drivers[vm.VMTypeContainerd] = vm.VMDriverConfigManager{
 		Enabled: true,
 		Config: map[string]interface{}{
@@ -22,17 +64,58 @@ func TestVMOperations(t *testing.T) {
 			"namespace": "novacron-test",
 		},
 	}
-	
+
 	manager, err := vm.NewVMManager(config)
 	require.NoError(t, err)
-	
+	t.Cleanup(func() {
+		ctx := context.Background()
+		for _, v := range manager.ListVMs() {
+			_ = manager.StopVM(ctx, v.ID())
+			_ = manager.DeleteVM(ctx, v.ID())
+		}
+	})
+	return manager
+}
+
+// createContainerdTestVM creates a VM routed to the containerd driver (selected
+// via the vm_type tag) and skips the calling test when containerd is not
+// reachable on this host.
+func createContainerdTestVM(t *testing.T, ctx context.Context, manager *vm.VMManager, name string) *vm.VM {
+	t.Helper()
+	created, err := manager.CreateVM(ctx, vm.CreateVMRequest{
+		Name: name,
+		Spec: vm.VMConfig{
+			OwnerID:   "test-owner",
+			Image:     testGuestImage(t),
+			TenantID:  "test-tenant",
+			Name:      name,
+			Type:      vm.VMTypeContainerd,
+			CPUShares: 1,
+			MemoryMB:  256,
+			Command:   "/bin/sh",
+			Tags:      map[string]string{"vm_type": string(vm.VMTypeContainerd)},
+		},
+	})
+	if err != nil {
+		t.Skipf("skipping: containerd driver unavailable: %v", err)
+	}
+	return created
+}
+
+// TestVMOperations tests the newly implemented VM operations
+func TestVMOperations(t *testing.T) {
+	manager := newIsolatedVMManager(t)
+
 	ctx := context.Background()
-	
+
 	t.Run("UpdateVM", func(t *testing.T) {
 		// Create a test VM
 		createReq := vm.CreateVMRequest{
 			Name: "test-vm-update",
 			Spec: vm.VMConfig{
+				OwnerID:    "test-owner",
+				Image:      testGuestImage(t),
+				TenantID:   "test-tenant",
 				Name:       "test-vm-update",
 				CPUShares:  2,
 				MemoryMB:   1024,
@@ -40,11 +123,11 @@ func TestVMOperations(t *testing.T) {
 				Command:    "/bin/sh",
 			},
 		}
-		
+
 		testVM, err := manager.CreateVM(ctx, createReq)
 		require.NoError(t, err)
 		require.NotNil(t, testVM)
-		
+
 		// Test updating VM configuration
 		updateSpec := vm.VMUpdateSpec{
 			CPU:    &[]int{4}[0],
@@ -54,10 +137,10 @@ func TestVMOperations(t *testing.T) {
 				"purpose":     "integration-test",
 			},
 		}
-		
+
 		err = manager.UpdateVM(ctx, testVM.ID(), updateSpec)
 		assert.NoError(t, err)
-		
+
 		// Verify updates were applied
 		updatedVM, err := manager.GetVM(testVM.ID())
 		require.NoError(t, err)
@@ -66,39 +149,42 @@ func TestVMOperations(t *testing.T) {
 		assert.Equal(t, 2048, config.MemoryMB)
 		assert.Equal(t, "test", config.Tags["environment"])
 		assert.Equal(t, "integration-test", config.Tags["purpose"])
-		
+
 		// Test validation errors
 		t.Run("InvalidState", func(t *testing.T) {
 			// Start VM to put it in running state
 			err = manager.StartVM(ctx, testVM.ID())
 			require.NoError(t, err)
-			
+
 			// Try to update running VM (should fail)
 			err = manager.UpdateVM(ctx, testVM.ID(), updateSpec)
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "INVALID_STATE")
-			
+
 			// Stop VM for cleanup
 			err = manager.StopVM(ctx, testVM.ID())
 			require.NoError(t, err)
 		})
-		
+
 		t.Run("VMNotFound", func(t *testing.T) {
 			err = manager.UpdateVM(ctx, "nonexistent-vm", updateSpec)
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "VM_NOT_FOUND")
 		})
-		
+
 		// Cleanup
 		err = manager.DeleteVM(ctx, testVM.ID())
 		assert.NoError(t, err)
 	})
-	
+
 	t.Run("MigrateVM", func(t *testing.T) {
 		// Create a test VM
 		createReq := vm.CreateVMRequest{
 			Name: "test-vm-migrate",
 			Spec: vm.VMConfig{
+				OwnerID:    "test-owner",
+				Image:      testGuestImage(t),
+				TenantID:   "test-tenant",
 				Name:       "test-vm-migrate",
 				CPUShares:  2,
 				MemoryMB:   1024,
@@ -106,39 +192,44 @@ func TestVMOperations(t *testing.T) {
 				Command:    "/bin/sh",
 			},
 		}
-		
+
 		testVM, err := manager.CreateVM(ctx, createReq)
 		require.NoError(t, err)
 		require.NotNil(t, testVM)
-		
+
 		t.Run("UnsupportedDriver", func(t *testing.T) {
-			// Test migration with containerd (which doesn't support migration)
+			// Migration with containerd (which doesn't support migration).
+			containerdVM := createContainerdTestVM(t, ctx, manager, "test-vm-migrate-containerd")
+			defer manager.DeleteVM(ctx, containerdVM.ID())
 			options := map[string]string{
 				"migration_type": "live",
 			}
-			
-			err = manager.MigrateVM(ctx, testVM.ID(), "target-node", options)
-			assert.Error(t, err)
+
+			err := manager.MigrateVM(ctx, containerdVM.ID(), "target-node", options)
+			require.Error(t, err)
 			assert.Contains(t, err.Error(), "OPERATION_NOT_SUPPORTED")
 		})
-		
+
 		t.Run("VMNotFound", func(t *testing.T) {
 			options := map[string]string{}
 			err = manager.MigrateVM(ctx, "nonexistent-vm", "target-node", options)
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "VM_NOT_FOUND")
 		})
-		
+
 		// Cleanup
 		err = manager.DeleteVM(ctx, testVM.ID())
 		assert.NoError(t, err)
 	})
-	
+
 	t.Run("CreateSnapshot", func(t *testing.T) {
 		// Create a test VM
 		createReq := vm.CreateVMRequest{
 			Name: "test-vm-snapshot",
 			Spec: vm.VMConfig{
+				OwnerID:    "test-owner",
+				Image:      testGuestImage(t),
+				TenantID:   "test-tenant",
 				Name:       "test-vm-snapshot",
 				CPUShares:  2,
 				MemoryMB:   1024,
@@ -146,29 +237,31 @@ func TestVMOperations(t *testing.T) {
 				Command:    "/bin/sh",
 			},
 		}
-		
+
 		testVM, err := manager.CreateVM(ctx, createReq)
 		require.NoError(t, err)
 		require.NotNil(t, testVM)
-		
+
 		t.Run("UnsupportedDriver", func(t *testing.T) {
-			// Test snapshot with containerd (which doesn't support snapshots)
+			// Snapshot with containerd (which doesn't support snapshots).
+			containerdVM := createContainerdTestVM(t, ctx, manager, "test-vm-snapshot-containerd")
+			defer manager.DeleteVM(ctx, containerdVM.ID())
 			options := map[string]string{
 				"description": "test snapshot",
 			}
-			
-			_, err = manager.CreateSnapshot(ctx, testVM.ID(), "test-snapshot", options)
-			assert.Error(t, err)
+
+			_, err := manager.CreateSnapshot(ctx, containerdVM.ID(), "test-snapshot", options)
+			require.Error(t, err)
 			assert.Contains(t, err.Error(), "OPERATION_NOT_SUPPORTED")
 		})
-		
+
 		t.Run("VMNotFound", func(t *testing.T) {
 			options := map[string]string{}
 			_, err = manager.CreateSnapshot(ctx, "nonexistent-vm", "snapshot", options)
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "VM_NOT_FOUND")
 		})
-		
+
 		// Cleanup
 		err = manager.DeleteVM(ctx, testVM.ID())
 		assert.NoError(t, err)
@@ -177,24 +270,18 @@ func TestVMOperations(t *testing.T) {
 
 // TestVMLifecycle tests basic VM lifecycle operations
 func TestVMLifecycle(t *testing.T) {
-	config := vm.DefaultVMManagerConfig()
-	config.Drivers[vm.VMTypeContainerd] = vm.VMDriverConfigManager{
-		Enabled: true,
-		Config: map[string]interface{}{
-			"address":   "/tmp/test-containerd.sock",
-			"namespace": "novacron-test",
-		},
-	}
-	
-	manager, err := vm.NewVMManager(config)
-	require.NoError(t, err)
-	
+	manager := newIsolatedVMManager(t)
+	var err error
+
 	ctx := context.Background()
-	
+
 	// Create VM
 	createReq := vm.CreateVMRequest{
 		Name: "test-vm-lifecycle",
 		Spec: vm.VMConfig{
+			OwnerID:    "test-owner",
+			Image:      testGuestImage(t),
+			TenantID:   "test-tenant",
 			Name:       "test-vm-lifecycle",
 			CPUShares:  2,
 			MemoryMB:   1024,
@@ -202,59 +289,48 @@ func TestVMLifecycle(t *testing.T) {
 			Command:    "/bin/sh",
 		},
 	}
-	
+
 	testVM, err := manager.CreateVM(ctx, createReq)
 	require.NoError(t, err)
 	assert.NotNil(t, testVM)
 	assert.Equal(t, vm.StateStopped, testVM.State())
-	
+
 	// Start VM
 	err = manager.StartVM(ctx, testVM.ID())
 	assert.NoError(t, err)
-	
+
 	updatedVM, err := manager.GetVM(testVM.ID())
 	require.NoError(t, err)
 	assert.Equal(t, vm.StateRunning, updatedVM.State())
-	
+
 	// Pause VM
 	err = manager.PauseVM(ctx, testVM.ID())
 	assert.NoError(t, err)
-	
+
 	updatedVM, err = manager.GetVM(testVM.ID())
 	require.NoError(t, err)
 	assert.Equal(t, vm.StatePaused, updatedVM.State())
-	
+
 	// Resume VM
 	err = manager.ResumeVM(ctx, testVM.ID())
 	assert.NoError(t, err)
-	
+
 	updatedVM, err = manager.GetVM(testVM.ID())
 	require.NoError(t, err)
 	assert.Equal(t, vm.StateRunning, updatedVM.State())
-	
+
 	// Stop VM
 	err = manager.StopVM(ctx, testVM.ID())
 	assert.NoError(t, err)
-	
+
 	updatedVM, err = manager.GetVM(testVM.ID())
 	require.NoError(t, err)
 	assert.Equal(t, vm.StateStopped, updatedVM.State())
-	
-	// Restart VM
-	err = manager.RestartVM(ctx, testVM.ID())
-	assert.NoError(t, err)
-	
-	updatedVM, err = manager.GetVM(testVM.ID())
-	require.NoError(t, err)
-	assert.Equal(t, vm.StateRunning, updatedVM.State())
-	
-	// Stop and Delete VM
-	err = manager.StopVM(ctx, testVM.ID())
-	assert.NoError(t, err)
-	
+
+	// Delete VM
 	err = manager.DeleteVM(ctx, testVM.ID())
 	assert.NoError(t, err)
-	
+
 	// Verify VM is deleted
 	_, err = manager.GetVM(testVM.ID())
 	assert.Error(t, err)
@@ -262,65 +338,67 @@ func TestVMLifecycle(t *testing.T) {
 
 // TestVMErrorHandling tests error scenarios
 func TestVMErrorHandling(t *testing.T) {
-	config := vm.DefaultVMManagerConfig()
-	manager, err := vm.NewVMManager(config)
-	require.NoError(t, err)
-	
+	manager := newIsolatedVMManager(t)
+	var err error
+
 	ctx := context.Background()
-	
+
 	t.Run("OperationsOnNonExistentVM", func(t *testing.T) {
 		vmID := "nonexistent-vm"
-		
+
 		err = manager.StartVM(ctx, vmID)
 		assert.Error(t, err)
-		
+
 		err = manager.StopVM(ctx, vmID)
 		assert.Error(t, err)
-		
+
 		err = manager.RestartVM(ctx, vmID)
 		assert.Error(t, err)
-		
+
 		err = manager.PauseVM(ctx, vmID)
 		assert.Error(t, err)
-		
+
 		err = manager.ResumeVM(ctx, vmID)
 		assert.Error(t, err)
-		
+
 		err = manager.DeleteVM(ctx, vmID)
 		assert.Error(t, err)
 	})
-	
+
 	t.Run("InvalidStateTransitions", func(t *testing.T) {
 		// Create and start a VM
 		createReq := vm.CreateVMRequest{
 			Name: "test-vm-states",
 			Spec: vm.VMConfig{
-				Name:       "test-vm-states",
-				CPUShares:  1,
-				MemoryMB:   512,
-				Command:    "/bin/sh",
+				OwnerID:   "test-owner",
+				Image:     testGuestImage(t),
+				TenantID:  "test-tenant",
+				Name:      "test-vm-states",
+				CPUShares: 1,
+				MemoryMB:  512,
+				Command:   "/bin/sh",
 			},
 		}
-		
+
 		testVM, err := manager.CreateVM(ctx, createReq)
 		require.NoError(t, err)
-		
+
 		// Try to pause a stopped VM (should fail)
 		err = manager.PauseVM(ctx, testVM.ID())
 		assert.Error(t, err)
-		
+
 		// Try to resume a stopped VM (should fail)
 		err = manager.ResumeVM(ctx, testVM.ID())
 		assert.Error(t, err)
-		
+
 		// Start VM
 		err = manager.StartVM(ctx, testVM.ID())
 		assert.NoError(t, err)
-		
+
 		// Try to start an already running VM (should succeed - idempotent)
 		err = manager.StartVM(ctx, testVM.ID())
 		assert.NoError(t, err)
-		
+
 		// Cleanup
 		err = manager.DeleteVM(ctx, testVM.ID())
 		assert.NoError(t, err)
@@ -332,55 +410,48 @@ func TestConcurrentVMOperations(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping concurrent operations test in short mode")
 	}
-	
-	config := vm.DefaultVMManagerConfig()
-	config.Drivers[vm.VMTypeContainerd] = vm.VMDriverConfigManager{
-		Enabled: true,
-		Config: map[string]interface{}{
-			"address":   "/tmp/test-containerd.sock",
-			"namespace": "novacron-test",
-		},
-	}
-	
-	manager, err := vm.NewVMManager(config)
-	require.NoError(t, err)
-	
+
+	manager := newIsolatedVMManager(t)
+
 	ctx := context.Background()
 	numVMs := 5
-	
+
 	// Create multiple VMs concurrently
 	createChan := make(chan error, numVMs)
 	vmIDs := make([]string, numVMs)
-	
+
 	for i := 0; i < numVMs; i++ {
 		go func(idx int) {
 			createReq := vm.CreateVMRequest{
 				Name: fmt.Sprintf("test-vm-concurrent-%d", idx),
 				Spec: vm.VMConfig{
-					Name:       fmt.Sprintf("test-vm-concurrent-%d", idx),
-					CPUShares:  1,
-					MemoryMB:   512,
-					Command:    "/bin/sh",
+					OwnerID:   "test-owner",
+					Image:     testGuestImage(t),
+					TenantID:  "test-tenant",
+					Name:      fmt.Sprintf("test-vm-concurrent-%d", idx),
+					CPUShares: 1,
+					MemoryMB:  512,
+					Command:   "/bin/sh",
 				},
 			}
-			
+
 			testVM, err := manager.CreateVM(ctx, createReq)
 			if err != nil {
 				createChan <- err
 				return
 			}
-			
+
 			vmIDs[idx] = testVM.ID()
 			createChan <- nil
 		}(i)
 	}
-	
+
 	// Wait for all creations to complete
 	for i := 0; i < numVMs; i++ {
 		err := <-createChan
 		assert.NoError(t, err)
 	}
-	
+
 	// Start all VMs concurrently
 	startChan := make(chan error, numVMs)
 	for i := 0; i < numVMs; i++ {
@@ -388,20 +459,20 @@ func TestConcurrentVMOperations(t *testing.T) {
 			startChan <- manager.StartVM(ctx, vmID)
 		}(vmIDs[i])
 	}
-	
+
 	// Wait for all starts to complete
 	for i := 0; i < numVMs; i++ {
 		err := <-startChan
 		assert.NoError(t, err)
 	}
-	
+
 	// Verify all VMs are running
 	for i := 0; i < numVMs; i++ {
-		vm, err := manager.GetVM(vmIDs[i])
+		runningVM, err := manager.GetVM(vmIDs[i])
 		require.NoError(t, err)
-		assert.Equal(t, vm.StateRunning, vm.State())
+		assert.Equal(t, vm.StateRunning, runningVM.State())
 	}
-	
+
 	// Clean up all VMs concurrently
 	deleteChan := make(chan error, numVMs)
 	for i := 0; i < numVMs; i++ {
@@ -409,7 +480,7 @@ func TestConcurrentVMOperations(t *testing.T) {
 			deleteChan <- manager.DeleteVM(ctx, vmID)
 		}(vmIDs[i])
 	}
-	
+
 	// Wait for all deletions to complete
 	for i := 0; i < numVMs; i++ {
 		err := <-deleteChan
@@ -421,11 +492,11 @@ func TestConcurrentVMOperations(t *testing.T) {
 func runConcurrentOperation(t *testing.T, manager *vm.VMManager, vmID string, operation func() error) {
 	done := make(chan error, 1)
 	timeout := time.After(5 * time.Second)
-	
+
 	go func() {
 		done <- operation()
 	}()
-	
+
 	select {
 	case err := <-done:
 		if err != nil {

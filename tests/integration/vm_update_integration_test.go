@@ -20,6 +20,8 @@ func TestVMUpdateEncapsulation(t *testing.T) {
 	config := vm.VMConfig{
 		ID:        "test-vm",
 		Name:      "test",
+		OwnerID:   "test-owner",
+		TenantID:  "test-tenant",
 		Command:   "sleep",
 		Args:      []string{"3600"},
 		CPUShares: 1024,

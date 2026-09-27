@@ -112,7 +112,7 @@ func TestSchedulerAIFallback(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, predictions)
 		assert.Less(t, elapsed, 6*time.Second) // Should timeout quickly
-		assert.Equal(t, 0.6, confidence)        // Fallback confidence
+		assert.Equal(t, 0.6, confidence)       // Fallback confidence
 	})
 
 	t.Run("SchedulerWithoutAI", func(t *testing.T) {
@@ -381,10 +381,10 @@ func TestE2EWithoutAI(t *testing.T) {
 
 		// Initialize migration orchestrator without AI
 		migConfig := migration.MigrationConfig{
-			MaxDowntime:          30 * time.Second,
-			TargetTransferRate:   100 * 1024 * 1024,
-			EnableCompression:    true,
-			EnableCheckpointing:  true,
+			MaxDowntime:             30 * time.Second,
+			TargetTransferRate:      100 * 1024 * 1024,
+			EnableCompression:       true,
+			EnableCheckpointing:     true,
 			MaxConcurrentMigrations: 2,
 		}
 		migOrchestrator, err := migration.NewLiveMigrationOrchestrator(migConfig)
@@ -411,9 +411,12 @@ func TestE2EWithoutAI(t *testing.T) {
 			assert.NotNil(t, status)
 		}
 
-		// Verify system still functions
-		metrics := migOrchestrator.GetMetrics()
-		assert.NotNil(t, metrics)
-		assert.GreaterOrEqual(t, metrics["total_migrations"].(int64), int64(3))
+		// Verify system still functions. Migrations execute (and are counted)
+		// asynchronously, so wait for the counter rather than reading it once.
+		assert.Eventually(t, func() bool {
+			metrics := migOrchestrator.GetMetrics()
+			total, _ := metrics["total_migrations"].(int64)
+			return total >= 3
+		}, 10*time.Second, 100*time.Millisecond, "all three migrations should be counted")
 	})
 }

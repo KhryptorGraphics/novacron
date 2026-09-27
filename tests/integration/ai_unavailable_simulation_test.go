@@ -26,6 +26,10 @@ func TestRealWorldAIUnavailableScenarios(t *testing.T) {
 		aiConfig.MaxRetries = 1
 
 		sched := scheduler.NewSchedulerWithAI(config, aiConfig)
+		// Mirror NewSchedulerWithAI's wiring so the test can inspect the fallback metrics.
+		aiProvider := scheduler.NewSafeAIProvider(
+			scheduler.NewHTTPAIProvider(aiConfig.AIEngineURL, aiConfig.RequestTimeout, aiConfig.MaxRetries), config)
+		sched.SetAIProvider(aiProvider)
 		err := sched.Start()
 		require.NoError(t, err)
 		defer sched.Stop()
@@ -53,11 +57,10 @@ func TestRealWorldAIUnavailableScenarios(t *testing.T) {
 
 		// Verify AI metrics show failures
 		aiMetrics := sched.GetAIMetrics()
-		if aiProvider, ok := sched.GetAIProvider().(*scheduler.SafeAIProvider); ok {
-			fallbackMetrics := aiProvider.GetMetrics()
-			assert.Greater(t, fallbackMetrics["fallback_calls"].(int64), int64(0))
-			assert.Greater(t, fallbackMetrics["ai_failures"].(int64), int64(0))
-		}
+		assert.Equal(t, true, aiMetrics["ai_provider_available"])
+		fallbackMetrics := aiProvider.GetMetrics()
+		assert.Greater(t, fallbackMetrics["fallback_calls"].(int64), int64(0))
+		assert.Greater(t, fallbackMetrics["ai_failures"].(int64), int64(0))
 	})
 
 	t.Run("AIServiceSlowResponseScenario", func(t *testing.T) {
@@ -122,30 +125,29 @@ func TestRealWorldAIUnavailableScenarios(t *testing.T) {
 		aiConfig.Enabled = true
 		aiConfig.AIEngineURL = server.URL
 		aiConfig.RequestTimeout = 5 * time.Second
-		aiConfig.MaxRetries = 1
+		aiConfig.MaxRetries = 0 // single attempt per call, so every odd call is a recorded AI failure
 
 		sched := scheduler.NewSchedulerWithAI(config, aiConfig)
+		safeProvider := scheduler.NewSafeAIProvider(
+			scheduler.NewHTTPAIProvider(aiConfig.AIEngineURL, aiConfig.RequestTimeout, aiConfig.MaxRetries), config)
+		sched.SetAIProvider(safeProvider)
 
 		// Make multiple requests - should handle intermittent failures gracefully
 		for i := 0; i < 5; i++ {
-			if safeProvider, ok := sched.GetAIProvider().(*scheduler.SafeAIProvider); ok {
-				predictions, confidence, err := safeProvider.PredictResourceDemand(
-					"node1", scheduler.ResourceCPU, 60)
+			predictions, confidence, err := safeProvider.PredictResourceDemand(
+				"node1", scheduler.ResourceCPU, 60)
 
-				// Should never fail due to fallback
-				assert.NoError(t, err)
-				assert.NotEmpty(t, predictions)
-				assert.Greater(t, confidence, 0.0)
-			}
+			// Should never fail due to fallback
+			assert.NoError(t, err)
+			assert.NotEmpty(t, predictions)
+			assert.Greater(t, confidence, 0.0)
 		}
 
 		// Verify some AI calls succeeded and some failed
-		if safeProvider, ok := sched.GetAIProvider().(*scheduler.SafeAIProvider); ok {
-			metrics := safeProvider.GetMetrics()
-			assert.Greater(t, metrics["total_calls"].(int64), int64(0))
-			// Should have some AI failures due to intermittent issues
-			assert.Greater(t, metrics["ai_failures"].(int64), int64(0))
-		}
+		metrics := safeProvider.GetMetrics()
+		assert.Greater(t, metrics["total_calls"].(int64), int64(0))
+		// Should have some AI failures due to intermittent issues
+		assert.Greater(t, metrics["ai_failures"].(int64), int64(0))
 	})
 }
 
@@ -368,8 +370,8 @@ func TestFallbackStrategyComprehensive(t *testing.T) {
 
 		// Test performance optimization
 		clusterData := map[string]interface{}{
-			"cpu_usage":   0.85,
-			"node_count":  4,
+			"cpu_usage":  0.85,
+			"node_count": 4,
 		}
 		recommendations := fallback.OptimizePerformance(clusterData)
 		assert.Contains(t, recommendations, "scale_up")

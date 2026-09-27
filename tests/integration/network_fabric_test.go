@@ -2,6 +2,8 @@ package integration
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net"
 	"os"
 	"testing"
@@ -138,11 +140,11 @@ func TestNetworkFabricIntegration(t *testing.T) {
 	t.Run("QoS Policy Enforcement", func(t *testing.T) {
 		// Create QoS manager config
 		qosConfig := &network.QoSManagerConfig{
-			EnableTrafficShaping: false, // Disable tc commands for testing
-			EnableDSCPMarking:    true,
-			UpdateInterval:       5 * time.Second,
-			DefaultPolicies:      []*network.QoSPolicy{},
-			StatisticsRetention:  1 * time.Hour,
+			EnableTrafficShaping:    false, // Disable tc commands for testing
+			EnableDSCPMarking:       true,
+			UpdateInterval:          5 * time.Second,
+			DefaultPolicies:         []*network.QoSPolicy{},
+			StatisticsRetention:     1 * time.Hour,
 			MaxPoliciesPerInterface: 10,
 		}
 
@@ -160,11 +162,11 @@ func TestNetworkFabricIntegration(t *testing.T) {
 			Priority:      1,
 			Rules: []network.ClassificationRule{
 				{
-					Name:       "test-rule",
-					SourceIP:   "192.168.1.0/24",
-					DestPort:   80,
-					Protocol:   "tcp",
-					Match:      "source_ip",
+					Name:     "test-rule",
+					SourceIP: "192.168.1.0/24",
+					DestPort: 80,
+					Protocol: "tcp",
+					Match:    "source_ip",
 				},
 			},
 			Actions: []network.QoSAction{
@@ -233,7 +235,9 @@ func TestNetworkFabricIntegration(t *testing.T) {
 		// Get network topology info
 		topology := service.GetNetworkTopologyInfo()
 		assert.NotNil(t, topology)
-		assert.Equal(t, "test-node-1", topology["peer_id"])
+		// The DHT peer ID is the SHA-256 of the configured node ID.
+		expectedPeerID := sha256.Sum256([]byte("test-node-1"))
+		assert.Equal(t, hex.EncodeToString(expectedPeerID[:]), topology["peer_id"])
 
 		// Get bandwidth capabilities
 		capabilities := service.GetBandwidthCapabilities()

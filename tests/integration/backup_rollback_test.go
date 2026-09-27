@@ -3,275 +3,212 @@ package integration
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/khryptorgraphics/novacron/backend/core/backup"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
-// MockFailingBackupProvider is a mock that fails on delete operations
-type MockFailingBackupProvider struct {
-	mock.Mock
+// scriptedBackupProvider is a backup.BackupProvider whose CreateBackup returns a
+// backup pre-registered per job ID and whose DeleteBackup can be made to fail.
+type scriptedBackupProvider struct {
+	mu        sync.Mutex
+	byJob     map[string]*backup.Backup
+	backups   map[string]*backup.Backup
+	deleteErr map[string]error
+	deleted   []string
 }
 
-func (m *MockFailingBackupProvider) CreateBackup(ctx context.Context, backup *backup.Backup) error {
-	args := m.Called(ctx, backup)
-	return args.Error(0)
-}
-
-func (m *MockFailingBackupProvider) GetBackup(ctx context.Context, backupID string) (*backup.Backup, error) {
-	args := m.Called(ctx, backupID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
+func newScriptedBackupProvider() *scriptedBackupProvider {
+	return &scriptedBackupProvider{
+		byJob:     make(map[string]*backup.Backup),
+		backups:   make(map[string]*backup.Backup),
+		deleteErr: make(map[string]error),
 	}
-	return args.Get(0).(*backup.Backup), args.Error(1)
 }
 
-func (m *MockFailingBackupProvider) ListBackups(ctx context.Context) ([]*backup.Backup, error) {
-	args := m.Called(ctx)
-	return args.Get(0).([]*backup.Backup), args.Error(1)
+func (p *scriptedBackupProvider) ID() string               { return "scripted" }
+func (p *scriptedBackupProvider) Name() string             { return "Scripted Provider" }
+func (p *scriptedBackupProvider) Type() backup.StorageType { return backup.LocalStorage }
+
+func (p *scriptedBackupProvider) CreateBackup(ctx context.Context, job *backup.BackupJob) (*backup.Backup, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	b, ok := p.byJob[job.ID]
+	if !ok {
+		return nil, fmt.Errorf("no scripted backup for job %s", job.ID)
+	}
+	b.JobID = job.ID
+	b.TenantID = job.TenantID
+	p.backups[b.ID] = b
+	return b, nil
 }
 
-func (m *MockFailingBackupProvider) DeleteBackup(ctx context.Context, backupID string) error {
-	args := m.Called(ctx, backupID)
-	return args.Error(0)
+func (p *scriptedBackupProvider) DeleteBackup(ctx context.Context, backupID string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.deleteErr[backupID]; err != nil {
+		return err
+	}
+	delete(p.backups, backupID)
+	p.deleted = append(p.deleted, backupID)
+	return nil
 }
 
-func (m *MockFailingBackupProvider) UpdateBackup(ctx context.Context, backup *backup.Backup) error {
-	args := m.Called(ctx, backup)
-	return args.Error(0)
+func (p *scriptedBackupProvider) RestoreBackup(ctx context.Context, job *backup.RestoreJob) error {
+	return nil
 }
 
-func (m *MockFailingBackupProvider) GetStorageUsage(ctx context.Context) (int64, error) {
-	args := m.Called(ctx)
-	return args.Get(0).(int64), args.Error(1)
+func (p *scriptedBackupProvider) ListBackups(ctx context.Context, filter map[string]interface{}) ([]*backup.Backup, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]*backup.Backup, 0, len(p.backups))
+	for _, b := range p.backups {
+		out = append(out, b)
+	}
+	return out, nil
 }
 
-func (m *MockFailingBackupProvider) ValidateBackup(ctx context.Context, backupID string) error {
-	args := m.Called(ctx, backupID)
-	return args.Error(0)
+func (p *scriptedBackupProvider) GetBackup(ctx context.Context, backupID string) (*backup.Backup, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	b, ok := p.backups[backupID]
+	if !ok {
+		return nil, fmt.Errorf("backup %s not found", backupID)
+	}
+	return b, nil
 }
 
-func (m *MockFailingBackupProvider) RestoreBackup(ctx context.Context, backupID string, targetPath string) error {
-	args := m.Called(ctx, backupID, targetPath)
-	return args.Error(0)
+func (p *scriptedBackupProvider) ValidateBackup(ctx context.Context, backupID string) error {
+	return nil
 }
 
-func (m *MockFailingBackupProvider) GetProviderType() string {
-	return "mock"
-}
+// runScriptedBackup registers a job whose provider run yields the given backup
+// and executes it through the manager, so the backup enters the manager's
+// registry the same way production backups do.
+func runScriptedBackup(t *testing.T, ctx context.Context, manager *backup.BackupManager, provider *scriptedBackupProvider, tenantID string, b *backup.Backup) {
+	t.Helper()
+	jobID := "job-" + b.ID
+	provider.mu.Lock()
+	provider.byJob[jobID] = b
+	provider.mu.Unlock()
 
-func (m *MockFailingBackupProvider) GetCapabilities() []string {
-	return []string{"backup", "restore", "delete"}
+	require.NoError(t, manager.CreateBackupJob(&backup.BackupJob{
+		ID:       jobID,
+		Name:     jobID,
+		Type:     b.Type,
+		Enabled:  true,
+		TenantID: tenantID,
+		Storage:  &backup.StorageConfig{Type: backup.LocalStorage},
+	}))
+	got, err := manager.RunBackupJob(ctx, jobID)
+	require.NoError(t, err)
+	require.Equal(t, b.ID, got.ID)
 }
 
 func TestBackupDeletionRollback(t *testing.T) {
 	ctx := context.Background()
-	
-	// Create backup manager
-	manager := backup.NewBackupManager()
-	
-	// Create mock provider that will fail on delete
-	mockProvider := new(MockFailingBackupProvider)
-	manager.RegisterProvider("mock", mockProvider)
-	
-	// Create parent backup
-	parentBackup := &backup.Backup{
-		ID:        "parent-backup",
-		VMID:      "vm-123",
-		TenantID:  "tenant-456",
-		Type:      backup.FullBackup,
-		State:     backup.BackupCompleted,
-		CreatedAt: time.Now().Add(-2 * time.Hour),
-		Size:      1024 * 1024 * 100, // 100MB
-	}
-	
-	// Create child backup that references parent
-	childBackup := &backup.Backup{
-		ID:        "child-backup",
-		VMID:      "vm-123",
-		TenantID:  "tenant-456",
-		Type:      backup.IncrementalBackup,
-		State:     backup.BackupCompleted,
-		ParentID:  "parent-backup",
-		CreatedAt: time.Now().Add(-1 * time.Hour),
-		Size:      1024 * 1024 * 10, // 10MB
-	}
-	
-	// Create another child backup
-	childBackup2 := &backup.Backup{
-		ID:        "child-backup-2",
-		VMID:      "vm-123",
-		TenantID:  "tenant-456",
-		Type:      backup.IncrementalBackup,
-		State:     backup.BackupCompleted,
-		ParentID:  "parent-backup",
-		CreatedAt: time.Now(),
-		Size:      1024 * 1024 * 5, // 5MB
-	}
-	
-	// Register backups with manager
-	err := manager.CreateBackup(ctx, parentBackup)
-	assert.NoError(t, err)
-	
-	err = manager.CreateBackup(ctx, childBackup)
-	assert.NoError(t, err)
-	
-	err = manager.CreateBackup(ctx, childBackup2)
-	assert.NoError(t, err)
-	
-	// Set up mock to return backups when queried
-	mockProvider.On("GetBackup", ctx, "parent-backup").Return(parentBackup, nil)
-	mockProvider.On("GetBackup", ctx, "child-backup").Return(childBackup, nil)
-	mockProvider.On("GetBackup", ctx, "child-backup-2").Return(childBackup2, nil)
-	
+	now := time.Now()
+
 	t.Run("Provider delete failure should not modify chain", func(t *testing.T) {
-		// Configure mock to fail on delete
-		mockProvider.On("DeleteBackup", ctx, "parent-backup").Return(errors.New("provider delete failed"))
-		
-		// Attempt to delete parent backup
+		manager := backup.NewBackupManager()
+		provider := newScriptedBackupProvider()
+		require.NoError(t, manager.RegisterProvider(provider))
+
+		parent := &backup.Backup{ID: "parent-backup", VMID: "vm-123", Type: backup.FullBackup, State: backup.BackupCompleted, StartedAt: now.Add(-2 * time.Hour), Size: 100 << 20}
+		child1 := &backup.Backup{ID: "child-backup", VMID: "vm-123", Type: backup.IncrementalBackup, State: backup.BackupCompleted, ParentID: "parent-backup", StartedAt: now.Add(-time.Hour), Size: 10 << 20}
+		child2 := &backup.Backup{ID: "child-backup-2", VMID: "vm-123", Type: backup.IncrementalBackup, State: backup.BackupCompleted, ParentID: "parent-backup", StartedAt: now, Size: 5 << 20}
+		for _, b := range []*backup.Backup{parent, child1, child2} {
+			runScriptedBackup(t, ctx, manager, provider, "tenant-456", b)
+		}
+
+		provider.deleteErr["parent-backup"] = errors.New("provider delete failed")
+
 		err := manager.DeleteBackup(ctx, "parent-backup")
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "provider delete failed")
-		
-		// Verify that child backups still reference the parent
-		child1, err := manager.GetBackup("child-backup")
-		assert.NoError(t, err)
-		assert.Equal(t, "parent-backup", child1.ParentID)
-		
-		child2, err := manager.GetBackup("child-backup-2")
-		assert.NoError(t, err)
-		assert.Equal(t, "parent-backup", child2.ParentID)
-		
-		// Parent should still exist
-		parent, err := manager.GetBackup("parent-backup")
-		assert.NoError(t, err)
-		assert.NotNil(t, parent)
+
+		// Children still reference the parent and the parent still exists.
+		for _, id := range []string{"child-backup", "child-backup-2"} {
+			c, err := manager.GetBackup(id)
+			require.NoError(t, err)
+			assert.Equal(t, "parent-backup", c.ParentID)
+		}
+		p, err := manager.GetBackup("parent-backup")
+		require.NoError(t, err)
+		assert.NotNil(t, p)
+		assert.Empty(t, provider.deleted, "provider must not record a delete that failed")
 	})
-	
+
 	t.Run("Successful delete should update chain", func(t *testing.T) {
-		// Create a new isolated test case
-		manager2 := backup.NewBackupManager()
-		mockProvider2 := new(MockFailingBackupProvider)
-		manager2.RegisterProvider("mock", mockProvider2)
-		
-		// Create backups
-		parent := &backup.Backup{
-			ID:        "parent-2",
-			VMID:      "vm-456",
-			TenantID:  "tenant-789",
-			Type:      backup.FullBackup,
-			State:     backup.BackupCompleted,
-			CreatedAt: time.Now().Add(-2 * time.Hour),
+		manager := backup.NewBackupManager()
+		provider := newScriptedBackupProvider()
+		require.NoError(t, manager.RegisterProvider(provider))
+
+		parent := &backup.Backup{ID: "parent-2", VMID: "vm-456", Type: backup.FullBackup, State: backup.BackupCompleted, StartedAt: now.Add(-2 * time.Hour)}
+		child := &backup.Backup{ID: "child-3", VMID: "vm-456", Type: backup.IncrementalBackup, State: backup.BackupCompleted, ParentID: "parent-2", StartedAt: now.Add(-time.Hour)}
+		grandchild := &backup.Backup{ID: "grandchild-1", VMID: "vm-456", Type: backup.IncrementalBackup, State: backup.BackupCompleted, ParentID: "child-3", StartedAt: now}
+		for _, b := range []*backup.Backup{parent, child, grandchild} {
+			runScriptedBackup(t, ctx, manager, provider, "tenant-789", b)
 		}
-		
-		child := &backup.Backup{
-			ID:        "child-3",
-			VMID:      "vm-456",
-			TenantID:  "tenant-789",
-			Type:      backup.IncrementalBackup,
-			State:     backup.BackupCompleted,
-			ParentID:  "parent-2",
-			CreatedAt: time.Now().Add(-1 * time.Hour),
+
+		// Delete the middle backup.
+		require.NoError(t, manager.DeleteBackup(ctx, "child-3"))
+
+		gc, err := manager.GetBackup("grandchild-1")
+		require.NoError(t, err)
+		assert.Equal(t, "parent-2", gc.ParentID, "grandchild should reference the parent after the middle backup is deleted")
+
+		_, err = manager.GetBackup("child-3")
+		assert.Error(t, err, "deleted backup must no longer be resolvable")
+		assert.Equal(t, []string{"child-3"}, provider.deleted)
+
+		tenantBackups, err := manager.ListBackups("tenant-789", "")
+		require.NoError(t, err)
+		ids := make([]string, 0, len(tenantBackups))
+		for _, b := range tenantBackups {
+			ids = append(ids, b.ID)
 		}
-		
-		grandchild := &backup.Backup{
-			ID:        "grandchild-1",
-			VMID:      "vm-456",
-			TenantID:  "tenant-789",
-			Type:      backup.IncrementalBackup,
-			State:     backup.BackupCompleted,
-			ParentID:  "child-3",
-			CreatedAt: time.Now(),
-		}
-		
-		// Register backups
-		manager2.CreateBackup(ctx, parent)
-		manager2.CreateBackup(ctx, child)
-		manager2.CreateBackup(ctx, grandchild)
-		
-		// Configure mock to succeed on delete
-		mockProvider2.On("GetBackup", ctx, "child-3").Return(child, nil)
-		mockProvider2.On("DeleteBackup", ctx, "child-3").Return(nil)
-		
-		// Delete middle backup (child)
-		err := manager2.DeleteBackup(ctx, "child-3")
-		assert.NoError(t, err)
-		
-		// Verify grandchild now references the parent directly
-		gc, err := manager2.GetBackup("grandchild-1")
-		assert.NoError(t, err)
-		assert.Equal(t, "parent-2", gc.ParentID, "Grandchild should now reference the parent after middle backup deletion")
-		
-		// Child should be deleted
-		_, err = manager2.GetBackup("child-3")
-		assert.Error(t, err)
+		assert.ElementsMatch(t, []string{"parent-2", "grandchild-1"}, ids)
 	})
 }
 
-// TestBackupChainIntegrity tests that backup chains maintain integrity
+// TestBackupChainIntegrity verifies a full→incremental chain keeps its parent
+// links when registered through the manager.
 func TestBackupChainIntegrity(t *testing.T) {
 	ctx := context.Background()
 	manager := backup.NewBackupManager()
-	
-	// Create a chain of backups
-	fullBackup := &backup.Backup{
-		ID:        "full-1",
-		VMID:      "vm-chain",
-		TenantID:  "tenant-chain",
-		Type:      backup.FullBackup,
-		State:     backup.BackupCompleted,
-		CreatedAt: time.Now().Add(-4 * time.Hour),
+	provider := newScriptedBackupProvider()
+	require.NoError(t, manager.RegisterProvider(provider))
+
+	now := time.Now()
+	chain := []*backup.Backup{
+		{ID: "full-1", VMID: "vm-chain", Type: backup.FullBackup, State: backup.BackupCompleted, StartedAt: now.Add(-4 * time.Hour)},
+		{ID: "inc-1", VMID: "vm-chain", Type: backup.IncrementalBackup, State: backup.BackupCompleted, ParentID: "full-1", StartedAt: now.Add(-3 * time.Hour)},
+		{ID: "inc-2", VMID: "vm-chain", Type: backup.IncrementalBackup, State: backup.BackupCompleted, ParentID: "inc-1", StartedAt: now.Add(-2 * time.Hour)},
+		{ID: "inc-3", VMID: "vm-chain", Type: backup.IncrementalBackup, State: backup.BackupCompleted, ParentID: "inc-2", StartedAt: now.Add(-time.Hour)},
 	}
-	
-	inc1 := &backup.Backup{
-		ID:        "inc-1",
-		VMID:      "vm-chain",
-		TenantID:  "tenant-chain",
-		Type:      backup.IncrementalBackup,
-		State:     backup.BackupCompleted,
-		ParentID:  "full-1",
-		CreatedAt: time.Now().Add(-3 * time.Hour),
+	for _, b := range chain {
+		runScriptedBackup(t, ctx, manager, provider, "tenant-chain", b)
 	}
-	
-	inc2 := &backup.Backup{
-		ID:        "inc-2",
-		VMID:      "vm-chain",
-		TenantID:  "tenant-chain",
-		Type:      backup.IncrementalBackup,
-		State:     backup.BackupCompleted,
-		ParentID:  "inc-1",
-		CreatedAt: time.Now().Add(-2 * time.Hour),
+
+	expectedParent := map[string]string{"full-1": "", "inc-1": "full-1", "inc-2": "inc-1", "inc-3": "inc-2"}
+	for id, parent := range expectedParent {
+		b, err := manager.GetBackup(id)
+		require.NoError(t, err)
+		assert.Equal(t, parent, b.ParentID, "parent link of %s", id)
 	}
-	
-	inc3 := &backup.Backup{
-		ID:        "inc-3",
-		VMID:      "vm-chain",
-		TenantID:  "tenant-chain",
-		Type:      backup.IncrementalBackup,
-		State:     backup.BackupCompleted,
-		ParentID:  "inc-2",
-		CreatedAt: time.Now().Add(-1 * time.Hour),
-	}
-	
-	// Create all backups
-	assert.NoError(t, manager.CreateBackup(ctx, fullBackup))
-	assert.NoError(t, manager.CreateBackup(ctx, inc1))
-	assert.NoError(t, manager.CreateBackup(ctx, inc2))
-	assert.NoError(t, manager.CreateBackup(ctx, inc3))
-	
-	// Verify initial chain
-	b3, _ := manager.GetBackup("inc-3")
+
+	// Deleting the head of the chain re-parents its only child to the root.
+	require.NoError(t, manager.DeleteBackup(ctx, "inc-1"))
+	b2, err := manager.GetBackup("inc-2")
+	require.NoError(t, err)
+	assert.Equal(t, "full-1", b2.ParentID)
+	b3, err := manager.GetBackup("inc-3")
+	require.NoError(t, err)
 	assert.Equal(t, "inc-2", b3.ParentID)
-	
-	b2, _ := manager.GetBackup("inc-2")
-	assert.Equal(t, "inc-1", b2.ParentID)
-	
-	b1, _ := manager.GetBackup("inc-1")
-	assert.Equal(t, "full-1", b1.ParentID)
-	
-	// The chain should be maintained through operations
-	// This test verifies the chain structure is preserved
 }

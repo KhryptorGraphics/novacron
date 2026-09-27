@@ -16,8 +16,8 @@ import (
 // VMLifecycleTestSuite tests VM lifecycle operations
 type VMLifecycleTestSuite struct {
 	suite.Suite
-	env    *helpers.TestEnvironment
-	mockGen *helpers.MockDataGenerator
+	env      *helpers.TestEnvironment
+	mockGen  *helpers.MockDataGenerator
 	tenantID string
 	userID   int
 	token    string
@@ -30,7 +30,7 @@ func (suite *VMLifecycleTestSuite) SetupSuite() {
 	suite.mockGen = helpers.NewMockDataGenerator()
 	suite.tenantID = "tenant-1"
 	suite.userID = 1
-	
+
 	// Login as admin for setup
 	suite.token = suite.env.LoginAsAdmin(suite.T())
 	suite.env.APIClient.SetAuthToken(suite.token)
@@ -146,10 +146,10 @@ func (suite *VMLifecycleTestSuite) TestVMLifecycleStates() {
 
 	// Test state transitions: created -> running -> stopped -> running -> paused -> running
 	stateTests := []struct {
-		action       string
+		action        string
 		expectedState string
-		endpoint     string
-		method       string
+		endpoint      string
+		method        string
 	}{
 		{"start", "running", fmt.Sprintf("/api/vms/%s/start", vmID), "POST"},
 		{"stop", "stopped", fmt.Sprintf("/api/vms/%s/stop", vmID), "POST"},
@@ -188,7 +188,7 @@ func (suite *VMLifecycleTestSuite) TestVMLifecycleStates() {
 	// Clean up: stop and delete VM
 	suite.env.APIClient.POST(suite.T(), fmt.Sprintf("/api/vms/%s/stop", vmID), nil)
 	suite.env.WaitForVMState(suite.T(), vmID, "stopped", 30*time.Second)
-	
+
 	deleteResp := suite.env.APIClient.DELETE(suite.T(), "/api/vms/"+vmID)
 	defer deleteResp.Body.Close()
 	suite.env.APIClient.ExpectStatus(suite.T(), deleteResp, http.StatusNoContent)
@@ -256,7 +256,7 @@ func (suite *VMLifecycleTestSuite) TestVMUpdate() {
 				// Check updated fields
 				for key, expectedValue := range tt.updateData {
 					if key != "metadata" {
-						assert.Equal(t, expectedValue, updatedVM[key], 
+						assert.Equal(t, expectedValue, updatedVM[key],
 							"Field %s should be updated", key)
 					}
 				}
@@ -317,7 +317,7 @@ func (suite *VMLifecycleTestSuite) TestVMList() {
 
 			vms, ok := result["vms"].([]interface{})
 			require.True(t, ok, "Response should contain vms array")
-			assert.GreaterOrEqual(t, len(vms), tt.wantMin, 
+			assert.GreaterOrEqual(t, len(vms), tt.wantMin,
 				"Should have at least %d VMs", tt.wantMin)
 
 			// Verify VM structure
@@ -341,18 +341,18 @@ func (suite *VMLifecycleTestSuite) TestVMList() {
 func (suite *VMLifecycleTestSuite) TestVMMetrics() {
 	// Create and start a test VM
 	vmID := suite.env.CreateTestVM(suite.T(), "test-vm-metrics", suite.tenantID)
-	
+
 	// Start the VM to generate metrics
 	startResp := suite.env.APIClient.POST(suite.T(), "/api/vms/"+vmID+"/start", nil)
 	defer startResp.Body.Close()
 	suite.env.APIClient.ExpectStatus(suite.T(), startResp, http.StatusOK)
-	
+
 	// Wait for VM to start
 	suite.env.WaitForVMState(suite.T(), vmID, "running", 30*time.Second)
-	
+
 	// Give some time for metrics to be collected
 	time.Sleep(5 * time.Second)
-	
+
 	tests := []struct {
 		name     string
 		endpoint string
@@ -374,24 +374,24 @@ func (suite *VMLifecycleTestSuite) TestVMMetrics() {
 			wantCode: http.StatusOK,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		suite.T().Run(tt.name, func(t *testing.T) {
 			resp := suite.env.APIClient.GET(t, tt.endpoint)
 			defer resp.Body.Close()
-			
+
 			assert.Equal(t, tt.wantCode, resp.StatusCode)
-			
+
 			if tt.wantCode == http.StatusOK {
 				var metrics map[string]interface{}
 				suite.env.APIClient.ParseJSON(t, resp, &metrics)
-				
+
 				assert.NotEmpty(t, metrics, "Metrics should not be empty")
 				assert.Contains(t, metrics, "vm_id", "Metrics should contain VM ID")
 			}
 		})
 	}
-	
+
 	// Cleanup
 	suite.env.APIClient.POST(suite.T(), "/api/vms/"+vmID+"/stop", nil)
 	suite.env.WaitForVMState(suite.T(), vmID, "stopped", 30*time.Second)
@@ -404,15 +404,15 @@ func (suite *VMLifecycleTestSuite) TestVMConcurrentOperations() {
 	if testing.Short() {
 		suite.T().Skip("Skipping concurrent operations test in short mode")
 	}
-	
+
 	numVMs := 5
 	vmIDs := make([]string, numVMs)
-	
+
 	// Create multiple VMs concurrently
 	suite.T().Run("Concurrent VM Creation", func(t *testing.T) {
 		done := make(chan string, numVMs)
 		errors := make(chan error, numVMs)
-		
+
 		for i := 0; i < numVMs; i++ {
 			go func(index int) {
 				vmData := map[string]interface{}{
@@ -423,32 +423,28 @@ func (suite *VMLifecycleTestSuite) TestVMConcurrentOperations() {
 					"image":     "ubuntu:20.04",
 					"tenant_id": suite.tenantID,
 				}
-				
+
 				resp := suite.env.APIClient.POST(t, "/api/vms", vmData)
 				defer resp.Body.Close()
-				
+
 				if resp.StatusCode != http.StatusCreated {
 					errors <- fmt.Errorf("failed to create VM %d: status %d", index, resp.StatusCode)
 					return
 				}
-				
+
 				var result map[string]interface{}
-				err := suite.env.APIClient.ParseJSON(t, resp, &result)
-				if err != nil {
-					errors <- fmt.Errorf("failed to parse response for VM %d: %v", index, err)
-					return
-				}
-				
+				suite.env.APIClient.ParseJSON(t, resp, &result)
+
 				vmID, ok := result["id"].(string)
 				if !ok {
 					errors <- fmt.Errorf("no VM ID for VM %d", index)
 					return
 				}
-				
+
 				done <- vmID
 			}(i)
 		}
-		
+
 		// Collect results
 		for i := 0; i < numVMs; i++ {
 			select {
@@ -460,29 +456,29 @@ func (suite *VMLifecycleTestSuite) TestVMConcurrentOperations() {
 				t.Fatalf("Timeout waiting for VM %d to be created", i)
 			}
 		}
-		
+
 		assert.Equal(t, numVMs, len(vmIDs), "All VMs should be created")
 	})
-	
+
 	// Start all VMs concurrently
 	suite.T().Run("Concurrent VM Start", func(t *testing.T) {
 		done := make(chan bool, numVMs)
 		errors := make(chan error, numVMs)
-		
+
 		for _, vmID := range vmIDs {
 			go func(id string) {
 				resp := suite.env.APIClient.POST(t, "/api/vms/"+id+"/start", nil)
 				defer resp.Body.Close()
-				
+
 				if resp.StatusCode != http.StatusOK {
 					errors <- fmt.Errorf("failed to start VM %s: status %d", id, resp.StatusCode)
 					return
 				}
-				
+
 				done <- true
 			}(vmID)
 		}
-		
+
 		// Wait for all start operations
 		for i := 0; i < numVMs; i++ {
 			select {
@@ -495,7 +491,7 @@ func (suite *VMLifecycleTestSuite) TestVMConcurrentOperations() {
 			}
 		}
 	})
-	
+
 	// Cleanup: Delete all VMs
 	for _, vmID := range vmIDs {
 		if vmID != "" {

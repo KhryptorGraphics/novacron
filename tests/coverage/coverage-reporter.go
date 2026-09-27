@@ -563,7 +563,7 @@ func generateRecommendations(coverage *Coverage, config *ReportConfig) []string 
 	// Package-specific recommendations
 	for _, pkg := range coverage.Packages {
 		if pkg.Importance == "Critical" && pkg.Coverage.Percent < 90 {
-			recommendations = append(recommendations, fmt.Sprintf("Critical package '%s' has insufficient coverage (%.1f%%). Aim for 90%+ coverage.", pkg.Name, pkg.Coverage.Percent))
+			recommendations = append(recommendations, fmt.Sprintf("Critical package '%s' has insufficient coverage (%.1f%%). Aim for 90%%+ coverage.", pkg.Name, pkg.Coverage.Percent))
 		}
 		
 		if pkg.Coverage.Percent < 60 {
