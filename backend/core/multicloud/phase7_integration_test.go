@@ -43,13 +43,13 @@ func TestPhase7_AWSIntegration(t *testing.T) {
 // TestPhase7_AzureIntegration tests Azure integration with live migration
 func TestPhase7_AzureIntegration(t *testing.T) {
 	config := AzureConfig{
-		SubscriptionID:   "test-subscription",
-		TenantID:         "test-tenant",
-		ClientID:         "test-client",
-		ClientSecret:     "test-secret",
-		ResourceGroup:    "novacron-test-rg",
-		Location:         "eastus",
-		StorageAccount:   "novacronteststorage",
+		SubscriptionID: "test-subscription",
+		TenantID:       "test-tenant",
+		ClientID:       "test-client",
+		ClientSecret:   "test-secret",
+		ResourceGroup:  "novacron-test-rg",
+		Location:       "eastus",
+		StorageAccount: "novacronteststorage",
 	}
 
 	integration, err := NewAzureIntegration(config)
@@ -67,11 +67,25 @@ func TestPhase7_AzureIntegration(t *testing.T) {
 
 		migration, err := integration.ImportVM(ctx, "azure-vm-test-001", options)
 		if err != nil {
-			t.Errorf("ImportVM with live migration failed: %v", err)
+			t.Fatalf("ImportVM with live migration failed: %v", err)
 		}
 
-		if len(migration.Checkpoints) == 0 {
-			t.Log("Checkpoints will be created during migration")
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			status, err := integration.GetMigrationStatus(migration.MigrationID)
+			if err != nil {
+				t.Fatalf("GetMigrationStatus failed: %v", err)
+			}
+			if len(status.Checkpoints) > 0 {
+				if status.Checkpoints[0].Phase != "pre-migration" {
+					t.Fatalf("unexpected first checkpoint phase: %s", status.Checkpoints[0].Phase)
+				}
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("migration did not create its pre-migration checkpoint")
+			}
+			time.Sleep(time.Millisecond)
 		}
 	})
 }

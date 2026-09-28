@@ -1,6 +1,11 @@
 package prediction
 
 import (
+	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,6 +78,47 @@ func TestDataCollector(t *testing.T) {
 	})
 }
 
+func TestDataCollectorStopRacingPersistence(t *testing.T) {
+	collector := NewDataCollector(time.Hour, 1)
+	collector.dataPath = filepath.Join(t.TempDir(), "samples.jsonl")
+	// Keep periodic saves active while Stop begins shutting the collector down.
+	collector.saveInterval = time.Nanosecond
+
+	nodeID := strings.Repeat("node", 1<<18)
+	collector.addSample(NetworkSample{
+		Timestamp: time.Now(),
+		NodeID:    nodeID,
+	})
+	collector.Start()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		info, err := os.Stat(collector.dataPath)
+		if err == nil && info.Size() > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			collector.Stop()
+			t.Fatal("persistence loop did not write a sample")
+		}
+		time.Sleep(time.Microsecond)
+	}
+
+	collector.Stop()
+
+	file, err := os.Open(collector.dataPath)
+	require.NoError(t, err)
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	var got NetworkSample
+	require.NoError(t, decoder.Decode(&got))
+	assert.Equal(t, nodeID, got.NodeID)
+
+	var extra NetworkSample
+	assert.ErrorIs(t, decoder.Decode(&extra), io.EOF)
+}
+
 func TestPredictionService(t *testing.T) {
 	t.Run("CreateService", func(t *testing.T) {
 		// Note: This test requires a valid ONNX model file
@@ -125,8 +171,8 @@ func TestPredictionService(t *testing.T) {
 		service.mu.Unlock()
 
 		bufferSize := service.GetOptimalBufferSize()
-		assert.GreaterOrEqual(t, bufferSize, 16384)  // Min 16KB
-		assert.LessOrEqual(t, bufferSize, 1048576)   // Max 1MB
+		assert.GreaterOrEqual(t, bufferSize, 16384) // Min 16KB
+		assert.LessOrEqual(t, bufferSize, 1048576)  // Max 1MB
 	})
 }
 

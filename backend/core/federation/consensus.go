@@ -42,6 +42,8 @@ type RaftConsensus struct {
 	// Timers
 	electionTimer  *time.Timer
 	heartbeatTimer *time.Timer
+	timerMu        sync.Mutex
+	runWG          sync.WaitGroup
 
 	// State machine
 	stateMachine map[string][]byte
@@ -97,7 +99,11 @@ func (r *RaftConsensus) Start(ctx context.Context) error {
 	r.becomeFollower(0)
 
 	// Start main loop
-	go r.run(ctx)
+	r.runWG.Add(1)
+	go func() {
+		defer r.runWG.Done()
+		r.run(ctx)
+	}()
 
 	r.isRunning.Store(true)
 
@@ -115,13 +121,16 @@ func (r *RaftConsensus) Stop(ctx context.Context) error {
 	close(r.stopCh)
 
 	// Stop timers
+	r.timerMu.Lock()
 	if r.electionTimer != nil {
 		r.electionTimer.Stop()
 	}
 	if r.heartbeatTimer != nil {
 		r.heartbeatTimer.Stop()
 	}
+	r.timerMu.Unlock()
 
+	r.runWG.Wait()
 	r.isRunning.Store(false)
 
 	return nil
@@ -229,9 +238,13 @@ func (r *RaftConsensus) RemoveNode(ctx context.Context, nodeID string) error {
 // Main Raft loop
 func (r *RaftConsensus) run(ctx context.Context) {
 	for {
-		electionTimerCh := timerChannel(r.electionTimer)
-		heartbeatTimerCh := timerChannel(r.heartbeatTimer)
+		r.timerMu.Lock()
+		electionTimer := r.electionTimer
+		heartbeatTimer := r.heartbeatTimer
+		r.timerMu.Unlock()
 
+		electionTimerCh := timerChannel(electionTimer)
+		heartbeatTimerCh := timerChannel(heartbeatTimer)
 		select {
 		case <-ctx.Done():
 			return
@@ -695,6 +708,9 @@ func (r *RaftConsensus) sendAppendResponse(peerID string, msg *RaftMessage) {
 // Timer management
 
 func (r *RaftConsensus) resetElectionTimer() {
+	r.timerMu.Lock()
+	defer r.timerMu.Unlock()
+
 	timeout := r.config.ElectionTimeout +
 		time.Duration(rand.Intn(int(r.config.ElectionTimeout)))
 
@@ -707,6 +723,9 @@ func (r *RaftConsensus) resetElectionTimer() {
 }
 
 func (r *RaftConsensus) resetHeartbeatTimer() {
+	r.timerMu.Lock()
+	defer r.timerMu.Unlock()
+
 	if r.heartbeatTimer == nil {
 		r.heartbeatTimer = time.NewTimer(r.config.HeartbeatInterval)
 	} else {

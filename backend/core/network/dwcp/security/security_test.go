@@ -15,7 +15,7 @@ func TestTLSManager(t *testing.T) {
 
 	t.Run("Initialize with defaults", func(t *testing.T) {
 		config := SecurityConfig{
-			TLSEnabled:    true,
+			TLSEnabled:       true,
 			SessionCacheSize: 128,
 		}
 
@@ -238,19 +238,19 @@ func TestSecurityAuditor(t *testing.T) {
 	t.Run("Alert handlers", func(t *testing.T) {
 		auditor := NewSecurityAuditor(logger, 100)
 
-		alertCalled := false
+		alertCalled := make(chan struct{}, 1)
 		auditor.RegisterAlertHandler(func(event SecurityEvent) {
-			alertCalled = true
+			alertCalled <- struct{}{}
 		})
 
 		// Trigger an error event (should call alert handler)
 		auditor.AuditCustomEvent("critical_event", "error", "critical issue", nil)
 
-		// Give handler time to execute (it runs in goroutine)
-		time.Sleep(100 * time.Millisecond)
-
-		if !alertCalled {
-			t.Error("Alert handler was not called")
+		// Wait for the handler goroutine to complete its observable work.
+		select {
+		case <-alertCalled:
+		case <-time.After(time.Second):
+			t.Fatal("Alert handler was not called")
 		}
 	})
 

@@ -51,6 +51,7 @@ type CrossClusterComponentsV3 struct {
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 // FederationV3Config contains configuration for v3 federation
@@ -288,9 +289,19 @@ func NewCrossClusterComponentsV3(logger *zap.Logger, config *FederationV3Config)
 	}
 
 	// Start background tasks
-	go cc.healthMonitorLoop()
-	go cc.metricsCollectionLoop()
-	go cc.adaptiveModeLoop()
+	cc.wg.Add(3)
+	go func() {
+		defer cc.wg.Done()
+		cc.healthMonitorLoop()
+	}()
+	go func() {
+		defer cc.wg.Done()
+		cc.metricsCollectionLoop()
+	}()
+	go func() {
+		defer cc.wg.Done()
+		cc.adaptiveModeLoop()
+	}()
 
 	logger.Info("Cross-cluster components v3 initialized",
 		zap.String("node_id", config.NodeID),
@@ -322,6 +333,9 @@ func DefaultFederationV3Config(nodeID string) *FederationV3Config {
 func (cc *CrossClusterComponentsV3) ConnectClusterV3(ctx context.Context, cluster *ClusterConnectionV3) error {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
+	if err := cc.ctx.Err(); err != nil {
+		return err
+	}
 
 	cluster.NetworkMode = cc.resolveNetworkMode(cluster)
 
@@ -377,7 +391,11 @@ func (cc *CrossClusterComponentsV3) ConnectClusterV3(ctx context.Context, cluste
 	cc.updateRegionManagerV3(cluster)
 
 	// Start connection monitoring
-	go cc.monitorConnectionV3(cluster)
+	cc.wg.Add(1)
+	go func() {
+		defer cc.wg.Done()
+		cc.monitorConnectionV3(cluster)
+	}()
 
 	cc.logger.Info("Cluster connected successfully",
 		zap.String("cluster", cluster.ClusterID),
@@ -646,7 +664,10 @@ func (cc *CrossClusterComponentsV3) GetMetricsV3() map[string]interface{} {
 	metrics["datacenter_operations"] = cc.metrics.DatacenterOperations.Load()
 	metrics["internet_operations"] = cc.metrics.InternetOperations.Load()
 	metrics["mode_changes"] = cc.metrics.ModeChanges.Load()
-	metrics["current_mode"] = cc.mode.String()
+	cc.mu.RLock()
+	mode := cc.mode
+	cc.mu.RUnlock()
+	metrics["current_mode"] = mode.String()
 
 	// Component metrics
 	metrics["hde_v3"] = cc.hdeEngine.GetMetrics()
@@ -663,8 +684,10 @@ func (cc *CrossClusterComponentsV3) Close() error {
 
 	cc.cancel()
 
-	// Close all connections
+	// Serialize against new connection monitors before waiting for all loops.
 	cc.mu.Lock()
+
+	// Close all connections
 	for _, conn := range cc.clusterConnections {
 		if conn.transport != nil {
 			conn.transport.Close()
@@ -672,6 +695,7 @@ func (cc *CrossClusterComponentsV3) Close() error {
 	}
 	cc.clusterConnections = make(map[string]*ClusterConnectionV3)
 	cc.mu.Unlock()
+	cc.wg.Wait()
 
 	// Close components
 	if cc.hdeEngine != nil {
@@ -782,7 +806,10 @@ func (cc *CrossClusterComponentsV3) collectMetrics() {
 }
 
 func (cc *CrossClusterComponentsV3) adaptiveModeLoop() {
-	if cc.mode != upgrade.ModeHybrid {
+	cc.mu.RLock()
+	mode := cc.mode
+	cc.mu.RUnlock()
+	if mode != upgrade.ModeHybrid {
 		return // Only run in hybrid mode
 	}
 

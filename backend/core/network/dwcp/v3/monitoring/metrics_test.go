@@ -238,9 +238,9 @@ func TestAnomalyDetector(t *testing.T) {
 	})
 
 	t.Run("AlertCallback", func(t *testing.T) {
-		callbackFired := false
+		callbackFired := make(chan struct{}, 1)
 		detector.RegisterAlertCallback(func(a *Anomaly) {
-			callbackFired = true
+			callbackFired <- struct{}{}
 		})
 
 		// Build baseline and trigger anomaly
@@ -249,10 +249,11 @@ func TestAnomalyDetector(t *testing.T) {
 		}
 		detector.CheckConsensusLatency(1000.0)
 
-		time.Sleep(100 * time.Millisecond) // Wait for goroutine
-
-		if !callbackFired {
-			t.Errorf("Expected alert callback to fire")
+		// Wait for the callback goroutine to complete its observable work.
+		select {
+		case <-callbackFired:
+		case <-time.After(time.Second):
+			t.Fatal("Expected alert callback to fire")
 		}
 	})
 }

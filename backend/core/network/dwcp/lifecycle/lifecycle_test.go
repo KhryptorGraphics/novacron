@@ -25,7 +25,7 @@ type MockComponent struct {
 	failInit   bool
 	failStart  bool
 	failStop   bool
-	failHealth bool
+	failHealth atomic.Bool
 
 	// Timing control
 	startDelay time.Duration
@@ -95,7 +95,7 @@ func (m *MockComponent) Shutdown(ctx context.Context, timeout time.Duration) err
 func (m *MockComponent) HealthCheck(ctx context.Context) error {
 	m.healthCalled.Add(1)
 
-	if m.failHealth {
+	if m.failHealth.Load() {
 		return errors.New("health check failed")
 	}
 
@@ -174,7 +174,7 @@ func TestHealthChecking(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Simulate health check failure
-	component.failHealth = true
+	component.failHealth.Store(true)
 	err = component.HealthCheck(context.Background())
 	assert.Error(t, err)
 }
@@ -335,7 +335,7 @@ func TestHealthMonitoring(t *testing.T) {
 	assert.NoError(t, status["test"])
 
 	// Simulate health failure
-	comp.failHealth = true
+	comp.failHealth.Store(true)
 	time.Sleep(300 * time.Millisecond)
 
 	// Health should be failing

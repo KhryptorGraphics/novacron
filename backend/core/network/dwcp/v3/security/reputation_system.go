@@ -26,6 +26,7 @@ type ReputationSystem struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 // NodeReputation tracks a node's reputation score
@@ -116,8 +117,14 @@ const (
 	ReputationHighlyTrusted
 )
 
-// NewReputationSystem creates a new reputation system
+// NewReputationSystem creates a new reputation system with the default config.
 func NewReputationSystem(nodeID string, logger *zap.Logger) *ReputationSystem {
+	return NewReputationSystemWithConfig(nodeID, DefaultReputationConfig(), logger)
+}
+
+// NewReputationSystemWithConfig creates a reputation system with the supplied
+// config before its background loops start.
+func NewReputationSystemWithConfig(nodeID string, config ReputationConfig, logger *zap.Logger) *ReputationSystem {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	rs := &ReputationSystem{
@@ -125,11 +132,12 @@ func NewReputationSystem(nodeID string, logger *zap.Logger) *ReputationSystem {
 		logger:      logger,
 		reputations: make(map[string]*NodeReputation),
 		quarantined: make(map[string]*QuarantineRecord),
-		config:      DefaultReputationConfig(),
+		config:      config,
 		ctx:         ctx,
 		cancel:      cancel,
 	}
 
+	rs.wg.Add(2)
 	go rs.decayLoop()
 	go rs.cleanupLoop()
 
@@ -511,6 +519,7 @@ func (rs *ReputationSystem) getOrCreateReputation(nodeID string) *NodeReputation
 
 // decayLoop periodically decays inactive node scores
 func (rs *ReputationSystem) decayLoop() {
+	defer rs.wg.Done()
 	if !rs.config.DecayEnabled {
 		return
 	}
@@ -569,6 +578,7 @@ func (rs *ReputationSystem) applyDecay() {
 
 // cleanupLoop periodically cleans up old reputation data
 func (rs *ReputationSystem) cleanupLoop() {
+	defer rs.wg.Done()
 	ticker := time.NewTicker(rs.config.CleanupInterval)
 	defer ticker.Stop()
 
@@ -612,9 +622,10 @@ func (rs *ReputationSystem) cleanup() {
 	}
 }
 
-// Stop stops the reputation system
+// Stop stops the reputation system and joins its background loops.
 func (rs *ReputationSystem) Stop() {
 	rs.cancel()
+	rs.wg.Wait()
 }
 
 // GetStats returns reputation statistics

@@ -46,6 +46,7 @@ type Manager struct {
 	isRunning     atomic.Bool
 	stopCh        chan struct{}
 	eventCh       chan interface{}
+	workers       sync.WaitGroup
 	metrics       *FederationMetrics
 	logger        Logger
 }
@@ -171,13 +172,25 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	// Update local node state
+	m.nodesMu.Lock()
 	m.localNode.State = NodeStateJoining
+	m.nodesMu.Unlock()
 	m.addNode(m.localNode)
 
 	// Start background workers
-	go m.eventProcessor(ctx)
-	go m.nodeMaintenanceLoop(ctx)
-	go m.metricsCollector(ctx)
+	m.workers.Add(3)
+	go func() {
+		defer m.workers.Done()
+		m.eventProcessor(ctx)
+	}()
+	go func() {
+		defer m.workers.Done()
+		m.nodeMaintenanceLoop(ctx)
+	}()
+	go func() {
+		defer m.workers.Done()
+		m.metricsCollector(ctx)
+	}()
 
 	m.isRunning.Store(true)
 
@@ -191,8 +204,10 @@ func (m *Manager) Start(ctx context.Context) error {
 		}()
 	} else {
 		// Bootstrap as single-node federation
+		m.nodesMu.Lock()
 		m.localNode.State = NodeStateActive
 		m.localNode.Role = RoleLeader
+		m.nodesMu.Unlock()
 		if raft, ok := m.consensus.(*RaftConsensus); ok {
 			raft.becomeLeader()
 		}
@@ -229,6 +244,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 	}
 
 	close(m.stopCh)
+	m.workers.Wait()
 	m.isRunning.Store(false)
 
 	m.logger.Info("Federation manager stopped")
@@ -267,7 +283,9 @@ func (m *Manager) JoinFederation(ctx context.Context, joinAddresses []string) er
 	}
 
 	// Update local node state
+	m.nodesMu.Lock()
 	m.localNode.State = NodeStateActive
+	m.nodesMu.Unlock()
 
 	m.logger.Info("Successfully joined federation", "nodes", len(discoveredNodes))
 	federationRequests.WithLabelValues("join_success").Inc()
@@ -283,7 +301,9 @@ func (m *Manager) LeaveFederation(ctx context.Context) error {
 	m.logger.Info("Leaving federation")
 
 	// Update local node state
+	m.nodesMu.Lock()
 	m.localNode.State = NodeStateLeaving
+	m.nodesMu.Unlock()
 
 	// Notify other nodes
 	m.broadcastNodeLeave()
@@ -308,7 +328,9 @@ func (m *Manager) LeaveFederation(ctx context.Context) error {
 		m.logger.Warn("Failed to unregister from discovery", "error", err)
 	}
 
+	m.nodesMu.Lock()
 	m.localNode.State = NodeStateOffline
+	m.nodesMu.Unlock()
 	federationRequests.WithLabelValues("leave_success").Inc()
 
 	return nil
@@ -416,14 +438,18 @@ func (m *Manager) GetHealth(ctx context.Context) (*HealthCheck, error) {
 // OnNodeHealthy handles healthy node events
 func (m *Manager) OnNodeHealthy(node *Node) {
 	m.logger.Debug("Node healthy", "node_id", node.ID)
+	m.nodesMu.Lock()
 	node.State = NodeStateActive
+	m.nodesMu.Unlock()
 	federationNodes.WithLabelValues("healthy").Inc()
 }
 
 // OnNodeUnhealthy handles unhealthy node events
 func (m *Manager) OnNodeUnhealthy(node *Node, issues []string) {
 	m.logger.Warn("Node unhealthy", "node_id", node.ID, "issues", issues)
+	m.nodesMu.Lock()
 	node.State = NodeStateUnhealthy
+	m.nodesMu.Unlock()
 	federationNodes.WithLabelValues("unhealthy").Inc()
 	federationNodes.WithLabelValues("healthy").Dec()
 }
@@ -431,7 +457,9 @@ func (m *Manager) OnNodeUnhealthy(node *Node, issues []string) {
 // OnNodeOffline handles offline node events
 func (m *Manager) OnNodeOffline(node *Node) {
 	m.logger.Warn("Node offline", "node_id", node.ID)
+	m.nodesMu.Lock()
 	node.State = NodeStateOffline
+	m.nodesMu.Unlock()
 	federationNodes.WithLabelValues("offline").Inc()
 	federationNodes.WithLabelValues("healthy").Dec()
 
@@ -543,25 +571,23 @@ func (m *Manager) nodeMaintenanceLoop(ctx context.Context) {
 }
 
 func (m *Manager) performNodeMaintenance() {
-	m.nodesMu.RLock()
-	nodes := make([]*Node, 0, len(m.nodes))
-	for _, node := range m.nodes {
-		nodes = append(nodes, node)
-	}
-	m.nodesMu.RUnlock()
-
+	m.nodesMu.Lock()
 	now := time.Now()
-	for _, node := range nodes {
-		// Check for stale nodes
+	offlineNodes := make([]string, 0)
+	for _, node := range m.nodes {
 		if now.Sub(node.LastSeen) > 5*m.config.HeartbeatInterval {
 			m.logger.Warn("Node appears stale", "node_id", node.ID, "last_seen", node.LastSeen)
 			node.State = NodeStateUnhealthy
 		}
 
-		// Clean up offline nodes
 		if node.State == NodeStateOffline && now.Sub(node.LastSeen) > 10*m.config.HeartbeatInterval {
-			m.removeNode(node.ID)
+			offlineNodes = append(offlineNodes, node.ID)
 		}
+	}
+	m.nodesMu.Unlock()
+
+	for _, nodeID := range offlineNodes {
+		m.removeNode(nodeID)
 	}
 }
 

@@ -222,8 +222,13 @@ func TestModeAwareSecurity_AdaptiveSecurityAdjustment(t *testing.T) {
 	config.TrustThreshold = 0.7
 	config.UntrustThreshold = 0.3
 
-	mas := NewModeAwareSecurity("test-node", ModeHybrid, detector, reputation, logger)
+	mas := NewModeAwareSecurity("test-node", ModeDatacenter, detector, reputation, logger)
+	mas.mu.Lock()
 	mas.hybridConfig = config
+	mas.mu.Unlock()
+	if err := mas.SwitchMode(ModeHybrid, "test setup"); err != nil {
+		t.Fatalf("Failed to start hybrid mode: %v", err)
+	}
 	defer mas.Stop()
 	defer detector.Stop()
 	defer reputation.Stop()
@@ -350,7 +355,7 @@ func TestModeAwareSecurity_ConcurrentValidation(t *testing.T) {
 		go func(id int) {
 			nodeID := "concurrent-node-" + string(rune('0'+id))
 			for j := 0; j < 100; j++ {
-				mas.ValidateMessage(nodeID, "prepare", map[string]string{"seq": string(rune('0'+j))}, "sig")
+				mas.ValidateMessage(nodeID, "prepare", map[string]string{"seq": string(rune('0' + j))}, "sig")
 			}
 			done <- true
 		}(i)

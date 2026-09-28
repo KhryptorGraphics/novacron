@@ -111,8 +111,7 @@ func TestReputationSystem_QuarantineRecovery(t *testing.T) {
 	config.AllowRecovery = true
 	config.RecoveryThreshold = 45.0
 
-	rs := NewReputationSystem("test-node", logger)
-	rs.config = config
+	rs := NewReputationSystemWithConfig("test-node", config, logger)
 	defer rs.Stop()
 
 	recoverer := "recovering-node"
@@ -144,8 +143,7 @@ func TestReputationSystem_MaxQuarantineCount(t *testing.T) {
 	config := DefaultReputationConfig()
 	config.MaxQuarantineCount = 3
 
-	rs := NewReputationSystem("test-node", logger)
-	rs.config = config
+	rs := NewReputationSystemWithConfig("test-node", config, logger)
 	defer rs.Stop()
 
 	repeat := "repeat-offender"
@@ -227,8 +225,7 @@ func TestReputationSystem_ReputationDecay(t *testing.T) {
 	config.DecayRate = 5.0 // 5 points per interval
 	config.NewNodeGracePeriod = 100 * time.Millisecond
 
-	rs := NewReputationSystem("test-node", logger)
-	rs.config = config
+	rs := NewReputationSystemWithConfig("test-node", config, logger)
 	defer rs.Stop()
 
 	inactive := "inactive-node"
@@ -440,8 +437,7 @@ func TestReputationSystem_CleanupInactiveNodes(t *testing.T) {
 	config.RemoveAfterInactive = 500 * time.Millisecond
 	config.CleanupInterval = 200 * time.Millisecond
 
-	rs := NewReputationSystem("test-node", logger)
-	rs.config = config
+	rs := NewReputationSystemWithConfig("test-node", config, logger)
 	defer rs.Stop()
 
 	// Create inactive node

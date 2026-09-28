@@ -27,7 +27,7 @@ type ModeAwareSecurity struct {
 	logger *zap.Logger
 
 	// Current mode
-	currentMode SecurityMode
+	currentMode    SecurityMode
 	lastModeChange time.Time
 
 	// Components
@@ -35,9 +35,9 @@ type ModeAwareSecurity struct {
 	reputationSystem  *ReputationSystem
 
 	// TLS configuration
-	tlsConfig     *tls.Config
-	certManager   *CertificateManager
-	tlsEnabled    bool
+	tlsConfig   *tls.Config
+	certManager *CertificateManager
+	tlsEnabled  bool
 
 	// Mode-specific settings
 	datacenterConfig *DatacenterSecurityConfig
@@ -49,7 +49,10 @@ type ModeAwareSecurity struct {
 	adaptiveThreshold float64 // Threshold to switch modes
 
 	// monitoringOnce ensures adaptiveMonitoring is spawned at most once per node.
-	monitoringOnce sync.Once
+	monitoringOnce     sync.Once
+	monitorLifecycleMu sync.Mutex
+	monitorWG          sync.WaitGroup
+	monitorStopped     bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -72,57 +75,57 @@ type DatacenterSecurityConfig struct {
 	FastConsensusPath       bool
 
 	// Basic checks only
-	ValidateMessageFormat   bool
-	CheckNodeIdentity       bool
+	ValidateMessageFormat bool
+	CheckNodeIdentity     bool
 
 	// Timeouts (shorter for low latency)
-	MessageTimeout    time.Duration
-	ConsensusTimeout  time.Duration
+	MessageTimeout   time.Duration
+	ConsensusTimeout time.Duration
 }
 
 // InternetSecurityConfig for untrusted internet deployments
 type InternetSecurityConfig struct {
 	// Full security
-	RequireTLS              bool
-	RequireMutualTLS        bool
-	RequireSignatures       bool
+	RequireTLS               bool
+	RequireMutualTLS         bool
+	RequireSignatures        bool
 	EnableByzantineDetection bool
-	EnableReputationSystem  bool
+	EnableReputationSystem   bool
 
 	// Strict validation
-	ValidateAllMessages    bool
-	StrictConsensusChecks  bool
-	QuarantineAggressive   bool
+	ValidateAllMessages   bool
+	StrictConsensusChecks bool
+	QuarantineAggressive  bool
 
 	// Timeouts (longer for high latency)
-	MessageTimeout       time.Duration
-	ConsensusTimeout     time.Duration
-	HandshakeTimeout     time.Duration
+	MessageTimeout   time.Duration
+	ConsensusTimeout time.Duration
+	HandshakeTimeout time.Duration
 
 	// TLS settings
-	MinTLSVersion        uint16
-	RequireClientCerts   bool
-	AllowedCipherSuites  []uint16
-	CertValidityPeriod   time.Duration
+	MinTLSVersion       uint16
+	RequireClientCerts  bool
+	AllowedCipherSuites []uint16
+	CertValidityPeriod  time.Duration
 }
 
 // HybridSecurityConfig for adaptive security
 type HybridSecurityConfig struct {
 	// Thresholds for mode switching
-	TrustThreshold          float64 // > this = datacenter mode
-	UntrustThreshold        float64 // < this = internet mode
+	TrustThreshold   float64 // > this = datacenter mode
+	UntrustThreshold float64 // < this = internet mode
 
 	// Monitoring
-	MonitoringWindow        time.Duration
-	AdaptiveCheckInterval   time.Duration
+	MonitoringWindow      time.Duration
+	AdaptiveCheckInterval time.Duration
 
 	// Gradual security adjustment
-	GradualTransition       bool
-	TransitionSteps         int
+	GradualTransition bool
+	TransitionSteps   int
 
 	// Fallback
-	DefaultMode             SecurityMode
-	FallbackOnAmbiguous     bool
+	DefaultMode         SecurityMode
+	FallbackOnAmbiguous bool
 }
 
 // CertificateManager manages TLS certificates
@@ -133,9 +136,9 @@ type CertificateManager struct {
 	logger *zap.Logger
 
 	// Certificates
-	serverCert   *tls.Certificate
-	clientCerts  map[string]*x509.Certificate
-	caCertPool   *x509.CertPool
+	serverCert  *tls.Certificate
+	clientCerts map[string]*x509.Certificate
+	caCertPool  *x509.CertPool
 
 	// Rotation
 	certValidUntil   time.Time
@@ -496,14 +499,28 @@ func (mas *ModeAwareSecurity) configureHybridMode() {
 // the lifetime of the node, so repeated switches into hybrid mode never leak
 // duplicate monitors. The goroutine runs until Stop() cancels mas.ctx.
 func (mas *ModeAwareSecurity) startMonitoring() {
+	mas.monitorLifecycleMu.Lock()
+	defer mas.monitorLifecycleMu.Unlock()
+	if mas.monitorStopped {
+		return
+	}
+
 	mas.monitoringOnce.Do(func() {
-		go mas.adaptiveMonitoring()
+		mas.monitorWG.Add(1)
+		go func() {
+			defer mas.monitorWG.Done()
+			mas.adaptiveMonitoring()
+		}()
 	})
 }
 
 // adaptiveMonitoring monitors network conditions and adjusts security
 func (mas *ModeAwareSecurity) adaptiveMonitoring() {
-	ticker := time.NewTicker(mas.hybridConfig.AdaptiveCheckInterval)
+	mas.mu.RLock()
+	interval := mas.hybridConfig.AdaptiveCheckInterval
+	mas.mu.RUnlock()
+
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -606,12 +623,17 @@ func (mas *ModeAwareSecurity) modeString(mode SecurityMode) string {
 	}
 }
 
-// Stop stops the mode-aware security system
+// Stop stops the mode-aware security system and joins its background monitor.
 func (mas *ModeAwareSecurity) Stop() {
+	mas.monitorLifecycleMu.Lock()
+	mas.monitorStopped = true
 	mas.cancel()
+	mas.monitorLifecycleMu.Unlock()
+	mas.monitorWG.Wait()
 	if mas.certManager != nil {
 		mas.certManager.Stop()
 	}
+
 }
 
 // GetStats returns security statistics
@@ -620,9 +642,9 @@ func (mas *ModeAwareSecurity) GetStats() map[string]interface{} {
 	defer mas.mu.RUnlock()
 
 	return map[string]interface{}{
-		"current_mode":    mas.modeString(mas.currentMode),
-		"tls_enabled":     mas.tlsEnabled,
-		"network_trust":   mas.networkTrust,
+		"current_mode":     mas.modeString(mas.currentMode),
+		"tls_enabled":      mas.tlsEnabled,
+		"network_trust":    mas.networkTrust,
 		"last_mode_change": mas.lastModeChange,
 	}
 }

@@ -10,72 +10,72 @@ import (
 
 // AzureIntegration provides Azure cloud integration capabilities
 type AzureIntegration struct {
-	config         AzureConfig
-	mutex          sync.RWMutex
+	config          AzureConfig
+	mutex           sync.RWMutex
 	virtualMachines map[string]*AzureVM
-	migrations     map[string]*AzureMigration
-	ctx            context.Context
-	cancel         context.CancelFunc
+	migrations      map[string]*AzureMigration
+	ctx             context.Context
+	cancel          context.CancelFunc
 }
 
 // AzureConfig contains Azure-specific configuration
 type AzureConfig struct {
-	SubscriptionID     string            `json:"subscription_id"`
-	TenantID           string            `json:"tenant_id"`
-	ClientID           string            `json:"client_id"`
-	ClientSecret       string            `json:"client_secret"`
-	ResourceGroup      string            `json:"resource_group"`
-	Location           string            `json:"location"`
-	VirtualNetwork     string            `json:"virtual_network"`
-	Subnet             string            `json:"subnet"`
-	SecurityGroup      string            `json:"security_group"`
-	StorageAccount     string            `json:"storage_account"`
-	StorageContainer   string            `json:"storage_container"`
-	Tags               map[string]string `json:"tags"`
+	SubscriptionID   string            `json:"subscription_id"`
+	TenantID         string            `json:"tenant_id"`
+	ClientID         string            `json:"client_id"`
+	ClientSecret     string            `json:"client_secret"`
+	ResourceGroup    string            `json:"resource_group"`
+	Location         string            `json:"location"`
+	VirtualNetwork   string            `json:"virtual_network"`
+	Subnet           string            `json:"subnet"`
+	SecurityGroup    string            `json:"security_group"`
+	StorageAccount   string            `json:"storage_account"`
+	StorageContainer string            `json:"storage_container"`
+	Tags             map[string]string `json:"tags"`
 }
 
 // AzureVM represents an Azure Virtual Machine managed by NovaCron
 type AzureVM struct {
-	VMID             string                 `json:"vm_id"`
-	NovaCronVMID     string                 `json:"novacron_vm_id"`
-	Name             string                 `json:"name"`
-	ResourceGroup    string                 `json:"resource_group"`
-	Location         string                 `json:"location"`
-	VMSize           string                 `json:"vm_size"`
-	ProvisioningState string                `json:"provisioning_state"`
-	PowerState       string                 `json:"power_state"`
-	OSDiskID         string                 `json:"os_disk_id"`
-	DataDisks        []string               `json:"data_disks"`
-	NetworkInterfaces []string              `json:"network_interfaces"`
-	PrivateIP        string                 `json:"private_ip"`
-	PublicIP         string                 `json:"public_ip"`
-	Tags             map[string]string      `json:"tags"`
-	Metadata         map[string]interface{} `json:"metadata"`
-	CreatedTime      time.Time              `json:"created_time"`
+	VMID              string                 `json:"vm_id"`
+	NovaCronVMID      string                 `json:"novacron_vm_id"`
+	Name              string                 `json:"name"`
+	ResourceGroup     string                 `json:"resource_group"`
+	Location          string                 `json:"location"`
+	VMSize            string                 `json:"vm_size"`
+	ProvisioningState string                 `json:"provisioning_state"`
+	PowerState        string                 `json:"power_state"`
+	OSDiskID          string                 `json:"os_disk_id"`
+	DataDisks         []string               `json:"data_disks"`
+	NetworkInterfaces []string               `json:"network_interfaces"`
+	PrivateIP         string                 `json:"private_ip"`
+	PublicIP          string                 `json:"public_ip"`
+	Tags              map[string]string      `json:"tags"`
+	Metadata          map[string]interface{} `json:"metadata"`
+	CreatedTime       time.Time              `json:"created_time"`
 }
 
 // AzureMigration represents a VM migration to/from Azure
 type AzureMigration struct {
-	MigrationID  string                 `json:"migration_id"`
-	Direction    MigrationDirection     `json:"direction"`
-	VMID         string                 `json:"vm_id"`
-	AzureVMID    string                 `json:"azure_vm_id,omitempty"`
-	Status       MigrationStatus        `json:"status"`
-	Progress     float64                `json:"progress"`
-	StartTime    time.Time              `json:"start_time"`
-	EndTime      time.Time              `json:"end_time,omitempty"`
-	Error        string                 `json:"error,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata"`
-	Checkpoints  []MigrationCheckpoint  `json:"checkpoints"`
+	MigrationID string                 `json:"migration_id"`
+	Direction   MigrationDirection     `json:"direction"`
+	VMID        string                 `json:"vm_id"`
+	AzureVMID   string                 `json:"azure_vm_id,omitempty"`
+	Status      MigrationStatus        `json:"status"`
+	Progress    float64                `json:"progress"`
+	StartTime   time.Time              `json:"start_time"`
+	EndTime     time.Time              `json:"end_time,omitempty"`
+	Error       string                 `json:"error,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata"`
+	Checkpoints []MigrationCheckpoint  `json:"checkpoints"`
 }
 
 // MigrationCheckpoint represents a migration checkpoint for rollback
 type MigrationCheckpoint struct {
-	Timestamp   time.Time              `json:"timestamp"`
-	Phase       string                 `json:"phase"`
-	Progress    float64                `json:"progress"`
-	Data        map[string]interface{} `json:"data"`
-	Reversible  bool                   `json:"reversible"`
+	Timestamp  time.Time              `json:"timestamp"`
+	Phase      string                 `json:"phase"`
+	Progress   float64                `json:"progress"`
+	Data       map[string]interface{} `json:"data"`
+	Reversible bool                   `json:"reversible"`
 }
 
 // NewAzureIntegration creates a new Azure integration instance
@@ -151,12 +151,13 @@ func (a *AzureIntegration) ImportVM(ctx context.Context, vmID string, options ma
 		AzureVMID:   vmID,
 		Status:      MigrationStatusPending,
 		StartTime:   time.Now(),
-		Metadata:    options,
+		Metadata:    cloneMigrationMetadata(options),
 		Checkpoints: make([]MigrationCheckpoint, 0),
 	}
 
 	a.mutex.Lock()
 	a.migrations[migration.MigrationID] = migration
+	initialSnapshot := cloneAzureMigration(migration)
 	a.mutex.Unlock()
 
 	// Execute migration asynchronously with live migration support
@@ -176,7 +177,7 @@ func (a *AzureIntegration) ImportVM(ctx context.Context, vmID string, options ma
 		}
 	}()
 
-	return migration, nil
+	return initialSnapshot, nil
 }
 
 // executeImportMigration performs Azure VM to NovaCron migration
@@ -197,7 +198,7 @@ func (a *AzureIntegration) executeImportMigration(ctx context.Context, migration
 
 	a.updateMigrationStatus(migration, MigrationStatusPreparing, 10)
 	a.createCheckpoint(migration, "validation-complete", 10, map[string]interface{}{
-		"vm_size": vm.VMSize,
+		"vm_size":  vm.VMSize,
 		"location": vm.Location,
 	}, true)
 
@@ -285,14 +286,15 @@ func (a *AzureIntegration) executeImportMigration(ctx context.Context, migration
 
 	// Complete migration
 	a.updateMigrationStatus(migration, MigrationStatusCompleted, 100)
+	a.mutex.Lock()
 	migration.EndTime = time.Now()
+	a.mutex.Unlock()
 
 	log.Printf("Successfully migrated Azure VM %s to NovaCron VM %s with live migration",
 		vm.VMID, replicaID)
 	return nil
 }
 
-// ExportVM exports a NovaCron VM to Azure
 func (a *AzureIntegration) ExportVM(ctx context.Context, vmID string, options map[string]interface{}) (*AzureMigration, error) {
 	migration := &AzureMigration{
 		MigrationID: fmt.Sprintf("azure-export-%s-%d", vmID, time.Now().Unix()),
@@ -300,12 +302,13 @@ func (a *AzureIntegration) ExportVM(ctx context.Context, vmID string, options ma
 		VMID:        vmID,
 		Status:      MigrationStatusPending,
 		StartTime:   time.Now(),
-		Metadata:    options,
+		Metadata:    cloneMigrationMetadata(options),
 		Checkpoints: make([]MigrationCheckpoint, 0),
 	}
 
 	a.mutex.Lock()
 	a.migrations[migration.MigrationID] = migration
+	initialSnapshot := cloneAzureMigration(migration)
 	a.mutex.Unlock()
 
 	// Execute migration asynchronously
@@ -325,7 +328,7 @@ func (a *AzureIntegration) ExportVM(ctx context.Context, vmID string, options ma
 		}
 	}()
 
-	return migration, nil
+	return initialSnapshot, nil
 }
 
 // executeExportMigration performs NovaCron VM to Azure migration
@@ -384,7 +387,9 @@ func (a *AzureIntegration) executeExportMigration(ctx context.Context, migration
 		return fmt.Errorf("failed to create Azure VM: %w", err)
 	}
 
+	a.mutex.Lock()
 	migration.AzureVMID = azureVMID
+	a.mutex.Unlock()
 	a.createCheckpoint(migration, "azure-vm-created", 90, map[string]interface{}{
 		"azure_vm_id": azureVMID,
 	}, false)
@@ -405,7 +410,9 @@ func (a *AzureIntegration) executeExportMigration(ctx context.Context, migration
 
 	// Complete migration
 	a.updateMigrationStatus(migration, MigrationStatusCompleted, 100)
+	a.mutex.Lock()
 	migration.EndTime = time.Now()
+	a.mutex.Unlock()
 
 	log.Printf("Successfully exported NovaCron VM %s to Azure VM %s", migration.VMID, azureVMID)
 	return nil
@@ -464,9 +471,7 @@ func (a *AzureIntegration) GetMigrationStatus(migrationID string) (*AzureMigrati
 		return nil, fmt.Errorf("migration %s not found", migrationID)
 	}
 
-	// Return copy
-	migrationCopy := *migration
-	return &migrationCopy, nil
+	return cloneAzureMigration(migration), nil
 }
 
 // GetAzureMonitorMetrics retrieves Azure Monitor metrics for a VM
@@ -489,6 +494,31 @@ type MetricDataPoint struct {
 }
 
 // Helper methods
+
+func cloneMigrationMetadata(metadata map[string]interface{}) map[string]interface{} {
+	if metadata == nil {
+		return nil
+	}
+
+	clone := make(map[string]interface{}, len(metadata))
+	for key, value := range metadata {
+		clone[key] = value
+	}
+	return clone
+}
+
+func cloneAzureMigration(migration *AzureMigration) *AzureMigration {
+	clone := *migration
+	clone.Metadata = cloneMigrationMetadata(migration.Metadata)
+	if migration.Checkpoints != nil {
+		clone.Checkpoints = make([]MigrationCheckpoint, len(migration.Checkpoints))
+		for i, checkpoint := range migration.Checkpoints {
+			clone.Checkpoints[i] = checkpoint
+			clone.Checkpoints[i].Data = cloneMigrationMetadata(checkpoint.Data)
+		}
+	}
+	return &clone
+}
 
 func (a *AzureIntegration) updateMigrationStatus(migration *AzureMigration, status MigrationStatus, progress float64) {
 	a.mutex.Lock()
@@ -597,9 +627,9 @@ func (a *AzureIntegration) deleteNovaCronVM(ctx context.Context, vmID string) er
 func (a *AzureIntegration) getNovaCronVMDetails(ctx context.Context, vmID string) (map[string]interface{}, error) {
 	// Placeholder - get VM metadata from NovaCron
 	metadata := map[string]interface{}{
-		"vm_id":    vmID,
-		"cpu":      2,
-		"memory":   4096,
+		"vm_id":     vmID,
+		"cpu":       2,
+		"memory":    4096,
 		"disk_size": 50,
 	}
 	return metadata, nil
@@ -645,8 +675,8 @@ func (a *AzureIntegration) CalculateCost(ctx context.Context, vmSize string, hou
 	// enough for relative cross-cloud placement comparison, NOT for billing.
 	// Upgrade: Azure Retail Prices API.
 	costPerHour := map[string]float64{
-		"Standard_B1s":   0.0104,
-		"Standard_B2s":   0.0416,
+		"Standard_B1s":    0.0104,
+		"Standard_B2s":    0.0416,
 		"Standard_D2s_v3": 0.096,
 		"Standard_D4s_v3": 0.192,
 		"Standard_E2s_v3": 0.126,

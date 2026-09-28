@@ -64,8 +64,11 @@ type DataCollector struct {
 	maxSamples      int
 	collectInterval time.Duration
 	mu              sync.RWMutex
-	ctx             context.Context
-	cancel          context.CancelFunc
+	// Serializes periodic and final persistence operations.
+	saveMu sync.Mutex
+	loops  sync.WaitGroup
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// Network measurement tools
 	pingTargets   []string
@@ -129,10 +132,16 @@ func (c *DataCollector) Start() {
 	c.loadHistoricalData()
 
 	// Start collection goroutine
-	go c.collectLoop()
-
-	// Start persistence goroutine
-	go c.persistenceLoop()
+	// Track both loops so Stop can wait for any in-flight collection or save.
+	c.loops.Add(2)
+	go func() {
+		defer c.loops.Done()
+		c.collectLoop()
+	}()
+	go func() {
+		defer c.loops.Done()
+		c.persistenceLoop()
+	}()
 }
 
 // collectLoop continuously collects network metrics
@@ -334,7 +343,7 @@ func (c *DataCollector) persistenceLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
-			c.saveData() // Final save
+			// Stop waits for this loop before writing the final snapshot.
 			return
 		case <-ticker.C:
 			c.saveData()
@@ -344,6 +353,9 @@ func (c *DataCollector) persistenceLoop() {
 
 // saveData saves samples to disk
 func (c *DataCollector) saveData() error {
+	c.saveMu.Lock()
+	defer c.saveMu.Unlock()
+
 	c.mu.RLock()
 	samples := make([]NetworkSample, len(c.samples))
 	copy(samples, c.samples)
@@ -452,7 +464,8 @@ func (c *DataCollector) ExportForTraining(outputPath string) error {
 // Stop stops the data collector
 func (c *DataCollector) Stop() {
 	c.cancel()
-	c.saveData() // Final save
+	c.loops.Wait()
+	_ = c.saveData()
 }
 
 // getNodeID returns the current node identifier

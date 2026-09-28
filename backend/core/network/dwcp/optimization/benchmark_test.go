@@ -297,10 +297,10 @@ func BenchmarkDeltaCompression(b *testing.B) {
 // BenchmarkThroughput measures overall throughput
 func BenchmarkThroughput(b *testing.B) {
 	sizes := []int{
-		1024,      // 1KB
-		65536,     // 64KB
-		1048576,   // 1MB
-		16777216,  // 16MB
+		1024,     // 1KB
+		65536,    // 64KB
+		1048576,  // 1MB
+		16777216, // 16MB
 	}
 
 	for _, size := range sizes {
@@ -461,6 +461,10 @@ func BenchmarkCacheMissRate(b *testing.B) {
 // TestPerformanceGoals validates performance targets
 func TestPerformanceGoals(t *testing.T) {
 	t.Run("Sub-Microsecond_Latency", func(t *testing.T) {
+		if raceBuild {
+			t.Skip("race detector instrumentation invalidates the sub-microsecond latency measurement")
+		}
+
 		encoder := simd.NewXORDeltaEncoder()
 		src1 := make([]byte, 1024)
 		src2 := make([]byte, 1024)

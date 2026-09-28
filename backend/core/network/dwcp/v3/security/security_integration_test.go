@@ -180,8 +180,7 @@ func TestSecurityIntegration_RecoveryScenario(t *testing.T) {
 	config.AllowRecovery = true
 	config.RecoveryThreshold = 45.0
 
-	reputation := NewReputationSystem("test-node", logger)
-	reputation.config = config
+	reputation := NewReputationSystemWithConfig("test-node", config, logger)
 	detector := NewByzantineDetector("test-node", reputation, logger)
 	modeSec := NewModeAwareSecurity("test-node", ModeInternet, detector, reputation, logger)
 	metrics := NewSecurityMetrics("test-node", detector, reputation, modeSec, logger)

@@ -583,8 +583,8 @@ func (m *MigrationMonitor) CompleteMigration(migrationID string, success bool, d
 // GetMigrationStatus returns the status of a migration
 func (m *MigrationMonitor) GetMigrationStatus(migrationID string) (map[string]interface{}, error) {
 	m.mu.RLock()
+	defer m.mu.RUnlock()
 	migration, exists := m.activeMigrations[migrationID]
-	m.mu.RUnlock()
 
 	if !exists {
 		return nil, errors.New("migration not found")

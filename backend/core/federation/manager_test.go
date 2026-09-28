@@ -3,6 +3,7 @@ package federation
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,23 +13,32 @@ import (
 
 // MockLogger implements the Logger interface for testing
 type MockLogger struct {
+	mu   sync.Mutex
 	logs []string
 }
 
 func (m *MockLogger) Debug(msg string, args ...interface{}) {
+	m.mu.Lock()
 	m.logs = append(m.logs, "DEBUG: "+msg)
+	m.mu.Unlock()
 }
 
 func (m *MockLogger) Info(msg string, args ...interface{}) {
+	m.mu.Lock()
 	m.logs = append(m.logs, "INFO: "+msg)
+	m.mu.Unlock()
 }
 
 func (m *MockLogger) Warn(msg string, args ...interface{}) {
+	m.mu.Lock()
 	m.logs = append(m.logs, "WARN: "+msg)
+	m.mu.Unlock()
 }
 
 func (m *MockLogger) Error(msg string, args ...interface{}) {
+	m.mu.Lock()
 	m.logs = append(m.logs, "ERROR: "+msg)
+	m.mu.Unlock()
 }
 
 func TestNewManager(t *testing.T) {

@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,7 +14,6 @@ import (
 func TestModeSwitching(t *testing.T) {
 	upgrade.EnableAll(100)
 	defer upgrade.DisableAll()
-
 
 	t.Run("datacenter_to_internet_switching", func(t *testing.T) {
 		detector := upgrade.NewModeDetector()
@@ -269,17 +269,19 @@ func TestModeSwitchingPerformance(t *testing.T) {
 		detector := upgrade.NewModeDetector()
 
 		// Start operations
-		operationCount := 0
-		stopOps := make(chan bool)
+		var operationCount atomic.Int64
+		stopOps := make(chan struct{})
+		done := make(chan struct{})
 
 		go func() {
+			defer close(done)
 			for {
 				select {
 				case <-stopOps:
 					return
 				default:
 					_ = detector.GetCurrentMode()
-					operationCount++
+					operationCount.Add(1)
 					time.Sleep(1 * time.Millisecond)
 				}
 			}
@@ -294,11 +296,13 @@ func TestModeSwitchingPerformance(t *testing.T) {
 
 		time.Sleep(50 * time.Millisecond)
 		close(stopOps)
+		<-done
 
 		// All operations should have completed
-		assert.Greater(t, operationCount, 50, "Operations should continue during mode switch")
+		count := operationCount.Load()
+		assert.Greater(t, count, int64(50), "Operations should continue during mode switch")
 
-		t.Logf("✅ Zero data loss: %d operations during mode switches", operationCount)
+		t.Logf("✅ Zero data loss: %d operations during mode switches", count)
 	})
 
 	t.Run("mode_switch_latency", func(t *testing.T) {
