@@ -64,8 +64,8 @@ zrepl_install() {
         local dropin_dir="/etc/systemd/system/p2pnet-zrepl@${job}.timer.d"
         install_file - "$dropin_dir/10-interval.conf" 0644 <<EOF
 [Timer]
-OnUnitInactiveSec=
-OnUnitInactiveSec=${interval}min
+OnUnitActiveSec=
+OnUnitActiveSec=${interval}min
 EOF
         IFS=',' read -r -a target_array <<< "$targets"
         for target in "${target_array[@]}"; do

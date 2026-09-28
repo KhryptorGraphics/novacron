@@ -124,7 +124,7 @@ Install and verify one component at a time, in this order, on every node before 
      <interface type='network'><source network='p2p-l2'/><model type='virtio'/></interface>
      ```
 
-     The `p2p-l2` network XML has no `<mtu>` element, because libvirt rejects `<mtu>` for `forward mode='bridge'` networks. `l2` sets `VXLAN_MTU` on `br-p2p` and `vxlan0`; libvirt gives each guest tap the bridge's MTU and passes it to virtio guests as `host_mtu`. Check it inside the guest with `ip link`. If the guest NIC still shows 1500 (a non-virtio model, or a driver without MTU negotiation), set the guest MTU to `VXLAN_MTU` there, or add `<mtu size='1390'/>` (your `VXLAN_MTU`) to the interface. Then, with the guest running:
+     The `p2p-l2` network XML has no `<mtu>` element, because libvirt rejects `<mtu>` for `forward mode='bridge'` networks. `l2` sets `VXLAN_MTU` on `br-p2p` and `vxlan0`, and libvirt derives each guest tap's MTU from the bridge, so the host side of the path carries `VXLAN_MTU` (T9 asserts this on the running guest's tap). **The guest does not adopt it automatically.** virtio-net exposes the host MTU to the guest as an advisory value, and the Linux driver does not apply it: a stock guest booted on `p2p-l2` reports `MTU:1500` while its tap on the host is at `VXLAN_MTU`. Until the guest is configured, it will either fragment or black-hole anything larger than 1500 on the overlay. Set the MTU inside the guest from your image's own mechanism (cloud-init `runcmd`, a network config, or `ip link set dev eth0 mtu <VXLAN_MTU>`), and verify with `ip link show eth0`. Then, with the guest running:
 
      ```bash
      sudo p2pnet migrate plan DOMAIN node-b [--json]
@@ -273,7 +273,7 @@ Migration bandwidth is `B = PATH × 0.95 / 8000` MB/s: 107 MB/s on a 1 Gbit/s pa
 - **IPv6 overlay classification.** IPv6 overlay traffic has no size or pure-ACK rules, so large IPv6 packets on 22/8090/9000 are shaped as control.
 - **NAT on both sides.** If both peers are behind NAT without a port-forward, no direct WireGuard path exists. Inventory validation rejects that topology; a relay is out of scope.
 - **Docker and br_netfilter.** If Docker's FORWARD drop policy and `br_netfilter` are both active, bridged VM frames are dropped. `l2 verify` warns and prints the remediation, `iptables -I DOCKER-USER -i br-p2p -o br-p2p -j ACCEPT`; persist it in your firewall policy.
-- **Guest MTU.** Guest MTU must not exceed `VXLAN_MTU`; see step 8.
+- **Guest MTU.** The host path (bridge, VXLAN and the guest's tap) is `VXLAN_MTU` and is asserted by the lab, but a guest keeps its own NIC at 1500 until its image configures it. Guests must set an MTU no larger than `VXLAN_MTU`; see step 8.
 - **Seeded images.** Seeded swarm images are immutable. Replace one by publishing a new image name or version.
 - **Inventory changes.** Changes can restart wg0 (`wg install` restarts the tunnel when the rendered config changes), which drops peer traffic and re-applies QoS. Apply them during a maintenance window, one node at a time.
 - **mptcp-exec fallback.** `mptcp-exec` degrades to ordinary TCP when kernel support or `mptcpize` is unavailable. It cannot create paths that do not exist.

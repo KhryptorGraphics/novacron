@@ -193,6 +193,23 @@ class_bytes() {
     local node=$1 classid=$2
     remote "$node" "tc -s class show dev wg0 classid $classid | awk '/Sent/ {print \$2; exit}'"
 }
+
+# guest_tap_mtu prints the MTU of the tap libvirt created on the overlay bridge
+# for the running test guest. libvirt derives it from the bridge, so this proves
+# the overlay MTU reaches the guest's NIC; the guest kernel must still adopt it
+# itself (see the guest-MTU note in the README).
+guest_tap_mtu() {
+    local node=$1 domain=$2
+    remote "$node" "set -a; . /etc/p2pnet/generated/node.env; set +a
+dev=\$(virsh domiflist $domain | awk '\$1 ~ /^[vt]/ {print \$1; exit}')
+[ -n \"\$dev\" ] || { echo '$domain has no interface' >&2; exit 1; }
+[ -e \"/sys/class/net/\$dev\" ] || { echo \"guest interface \$dev does not exist\" >&2; exit 1; }
+mtu=\$(cat /sys/class/net/\$dev/mtu)
+master=\$(basename \"\$(readlink -f /sys/class/net/\$dev/master)\")
+[ \"\$master\" = \"\$P2P_BRIDGE\" ] || { echo \"guest interface \$dev is on \$master, not \$P2P_BRIDGE\" >&2; exit 1; }
+[ \"\$mtu\" = \"\$P2P_VXLAN_MTU\" ] || { echo \"guest tap \$dev MTU \$mtu != overlay MTU \$P2P_VXLAN_MTU\" >&2; exit 1; }
+echo \"guest tap \$dev MTU \$mtu on \$master\""
+}
 T9() {
     install_all libvirt && verify_all libvirt
     local arch machine cpu console emulator before after n
@@ -208,6 +225,7 @@ T9() {
     printf '%s\n' "$xml" >"$RUN_DIR/cirros.xml"
     scp_node node1 "$RUN_DIR/cirros.xml" /tmp/cirros.xml
     remote node1 'virsh define /tmp/cirros.xml && virsh start cirros'
+    guest_tap_mtu node1 cirros || return 1
     remote node1 'p2pnet migrate plan cirros node2'
     before=$(class_bytes node1 1:20)
     remote node1 'p2pnet migrate run cirros node2 --profile multifd --copy-storage'

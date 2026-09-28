@@ -67,14 +67,24 @@ EOF
 _mptcp_endpoint_present() {
   ip mptcp endpoint show | grep -Eq "(^|[[:space:]])${P2P_PLANE2_IP//./\\.}([[:space:]]|$).*id 51|id 51.*${P2P_PLANE2_IP//./\\.}"
 }
-
+_mptcp_limits_ok() {
+  ip mptcp limits show 2>/dev/null | grep -Eq 'subflows[[:space:]]+8.*add_addr_accepted[[:space:]]+8|add_addr_accepted[[:space:]]+8.*subflows[[:space:]]+8'
+}
 _mptcp_apply() {
   require_root
   load_env
-  local limits_before endpoint_before=0
-  limits_before=$(ip mptcp limits show 2>/dev/null || true)
-  if ! grep -Eq 'subflows[[:space:]]+8.*add_addr_accepted[[:space:]]+8|add_addr_accepted[[:space:]]+8.*subflows[[:space:]]+8' <<<"$limits_before"; then
-    ip mptcp limits set subflows 8 add_addr_accepted 8
+  local endpoint_before=0
+  if ! _mptcp_limits_ok; then
+    # A single `ip mptcp limits set` can apply subflows but leave
+    # add_addr_accepted at 0 when MPTCP sockets from a previous run are still
+    # closing, so confirm the result and retry instead of assuming success.
+    local attempt
+    for attempt in 1 2 3 4 5; do
+      ip mptcp limits set subflows 8 add_addr_accepted 8 || true
+      _mptcp_limits_ok && break
+      sleep 1
+    done
+    _mptcp_limits_ok || die "could not set MPTCP limits to subflows 8 add_addr_accepted 8 after $attempt attempts (now: $(ip mptcp limits show 2>/dev/null))"
     CHANGED=$((CHANGED + 1))
   fi
   if _mptcp_dualwan; then

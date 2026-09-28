@@ -2,10 +2,20 @@
 Description=p2pnet ZFS replication timer %i
 
 [Timer]
-OnBootSec=2min
-# OnUnitInactiveSec only elapses after a first run; OnActiveSec seeds it when enabled after boot.
+# Deliberately no OnBootSec: a boot-relative trigger is already in the past
+# when the timer is enabled after boot (p2pnet zrepl install in a maintenance
+# window), and systemd then leaves the timer with no pending trigger at all --
+# replication silently never runs. OnActiveSec is relative to timer activation,
+# so it covers both boot-time and later enablement.
+# Start-to-start, not finish-to-start: OnUnitInactiveSec would add each run's
+# duration to the interval, so the effective cadence drifts longer than
+# `cluster.replication_defaults.interval_min` and `p2pnet health` (which allows
+# 2x interval) would flag healthy nodes as stale. systemd still never runs a
+# second instance while one is active, and zrepl.sh holds a flock.
+# OnUnitActiveSec only elapses after a first activation; OnActiveSec seeds it
+# when the timer is enabled long after boot.
 OnActiveSec=1min
-OnUnitInactiveSec=15min
+OnUnitActiveSec=15min
 Unit=p2pnet-zrepl@%i.service
 
 [Install]
