@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# shellcheck disable=SC1091
+source /opt/p2pnet/libexec/common.sh
+
+_usage() {
+  printf 'usage: plane2-routes {up|down}\n' >&2
+  exit 2
+}
+
+_route_wan() {
+  local table=$1 iface=$2 gateway=$3 addr network
+  [[ -n $iface ]] || return 0
+  [[ -d "/sys/class/net/$iface" ]] || die "WAN interface does not exist: $iface"
+  addr=$(ip -4 -j addr show dev "$iface" | jq -er '[.[].addr_info[] | select(.family == "inet" and .scope != "host")][0] | .local + "/" + (.prefixlen|tostring)') || die "no IPv4 address on $iface"
+  network=$("$P2P_PY" -c 'import ipaddress,sys; print(ipaddress.ip_interface(sys.argv[1]).network)' "$addr")
+  ip route replace table "$table" "$network" dev "$iface" src "${addr%/*}" scope link
+  if [[ -n $gateway && $gateway != null ]]; then
+    ip route replace table "$table" default via "$gateway" dev "$iface" src "${addr%/*}"
+  fi
+}
+
+_add_rule() {
+  local priority=$1 mark=$2 lookup=$3
+  if ! ip -4 rule show | grep -Fq "$priority:"; then
+    ip -4 rule add priority "$priority" fwmark "$mark" lookup "$lookup"
+  fi
+}
+
+_up() {
+  require_root
+  load_env
+  need_cmd ip jq
+  _route_wan p2p-wan1 "${P2P_WAN_IF:-}" "${P2P_WAN_GW:-}"
+  _route_wan p2p-wan2 "${P2P_WAN2_IF:-}" "${P2P_WAN2_GW:-}"
+  if [[ -n ${P2P_WAN2_IF:-} ]]; then
+    ip -4 route replace table p2p-plane2 "$P2P_OVL4_CIDR" dev wg1
+    _add_rule 10101 0x5101 p2p-wan1
+    _add_rule 10102 0x5201 p2p-wan2
+    if ! ip -4 rule show | grep -Fq '10103:'; then
+      ip -4 rule add priority 10103 from "$P2P_PLANE2_IP" lookup p2p-plane2
+    fi
+  fi
+}
+
+_down() {
+  require_root
+  ip -4 rule del priority 10101 2>/dev/null || true
+  ip -4 rule del priority 10102 2>/dev/null || true
+  ip -4 rule del priority 10103 2>/dev/null || true
+  ip -4 route flush table p2p-wan1 2>/dev/null || true
+  ip -4 route flush table p2p-wan2 2>/dev/null || true
+  ip -4 route flush table p2p-plane2 2>/dev/null || true
+}
+
+case ${1:-} in
+  up) (($# == 1)) || _usage; _up ;;
+  down) (($# == 1)) || _usage; _down ;;
+  *) _usage ;;
+esac

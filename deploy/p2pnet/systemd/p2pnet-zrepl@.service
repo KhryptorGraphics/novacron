@@ -1,0 +1,9 @@
+[Unit]
+Description=p2pnet ZFS replication job %i
+After=network-online.target wg-quick@wg0.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/p2pnet/bin/p2pnet zrepl run %i
+Nice=10

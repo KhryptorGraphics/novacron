@@ -1,0 +1,12 @@
+[Unit]
+Description=Configure p2pnet MPTCP limits and overlay endpoints
+Wants=wg-quick@wg0.service
+After=wg-quick@wg0.service wg-quick@wg1.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/p2pnet/bin/p2pnet mptcp apply
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

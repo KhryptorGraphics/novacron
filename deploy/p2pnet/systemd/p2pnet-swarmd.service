@@ -1,0 +1,22 @@
+[Unit]
+Description=p2pnet private image swarm
+After=wg-quick@wg0.service
+BindsTo=wg-quick@wg0.service
+
+[Service]
+Type=simple
+User=p2pbulk
+Group=p2pbulk
+EnvironmentFile=/etc/p2pnet/generated/node.env
+RuntimeDirectory=p2pnet-swarm
+RuntimeDirectoryMode=0755
+ExecStart=/opt/p2pnet/libexec/mptcp-exec /usr/bin/python3 /opt/p2pnet/libexec/swarmd.py
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/p2pnet/images /var/lib/p2pnet/public/torrents /var/lib/p2pnet/swarm /run/p2pnet-swarm
+
+[Install]
+WantedBy=wg-quick@wg0.service

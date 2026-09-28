@@ -1,0 +1,19 @@
+#cloud-config
+hostname: __HOSTNAME__
+manage_etc_hosts: true
+users:
+  - name: ubuntu
+    gecos: p2pnet lab user
+    groups: [adm, sudo]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - __SSH_PUBKEY__
+packages: [rsync]
+ssh_pwauth: false
+write_files:
+  - path: /etc/sysctl.d/90-p2pnet-lab.conf
+    permissions: '0644'
+    content: |
+      net.ipv4.conf.all.arp_ignore = 1
+      net.ipv4.conf.all.arp_announce = 2

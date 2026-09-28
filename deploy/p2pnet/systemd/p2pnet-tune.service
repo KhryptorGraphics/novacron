@@ -1,0 +1,13 @@
+[Unit]
+Description=Apply p2pnet WAN queue discipline
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/p2pnet/generated/node.env
+ExecStart=/opt/p2pnet/bin/p2pnet tune apply-qdisc
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

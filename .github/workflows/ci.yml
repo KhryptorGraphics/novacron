@@ -206,6 +206,20 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+  p2pnet-toolkit:
+    name: p2pnet toolkit (lint + unit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends shellcheck bats python3-yaml
+      - name: shellcheck
+        run: shellcheck -x -P deploy/p2pnet/libexec deploy/p2pnet/bin/p2pnet deploy/p2pnet/install.sh deploy/p2pnet/libexec/*.sh deploy/p2pnet/libexec/mptcp-exec deploy/p2pnet/libexec/plane2-routes deploy/p2pnet/libexec/ssh-p2p deploy/p2pnet/libexec/zrepl-guard deploy/p2pnet/lab/lab.sh
+      - name: Python unit tests
+        run: /usr/bin/python3 -m unittest discover -s deploy/p2pnet/tests/python -v
+      - name: bats
+        run: bats deploy/p2pnet/tests/bats
+
   fabric-acceptance:
     name: Fabric Two-Node Acceptance
     runs-on: ubuntu-latest

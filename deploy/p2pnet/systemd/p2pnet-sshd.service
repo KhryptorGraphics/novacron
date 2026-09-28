@@ -1,0 +1,15 @@
+[Unit]
+Description=p2pnet overlay-only SSH transport
+After=wg-quick@wg0.service
+BindsTo=wg-quick@wg0.service
+
+[Service]
+Type=simple
+ExecStartPre=/usr/sbin/sshd -t -f /etc/p2pnet/sshd_config
+ExecStart=/opt/p2pnet/libexec/mptcp-exec /usr/sbin/sshd -D -e -f /etc/p2pnet/sshd_config
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=wg-quick@wg0.service

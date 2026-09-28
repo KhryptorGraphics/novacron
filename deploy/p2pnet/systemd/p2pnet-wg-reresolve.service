@@ -1,0 +1,7 @@
+[Unit]
+Description=Refresh stale DNS endpoints for p2pnet WireGuard peers
+After=wg-quick@wg0.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/p2pnet/bin/p2pnet wg reresolve

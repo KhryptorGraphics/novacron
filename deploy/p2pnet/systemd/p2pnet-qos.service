@@ -1,0 +1,12 @@
+[Unit]
+Description=p2pnet overlay traffic shaping
+After=wg-quick@wg0.service wg-quick@wg1.service
+PartOf=wg-quick@wg0.service wg-quick@wg1.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/p2pnet/bin/p2pnet qos apply --profile auto
+
+[Install]
+WantedBy=wg-quick@wg0.service wg-quick@wg1.service

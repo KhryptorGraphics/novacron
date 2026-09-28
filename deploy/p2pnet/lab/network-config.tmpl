@@ -1,0 +1,18 @@
+version: 2
+ethernets:
+  mgmt:
+    match:
+      macaddress: '52:54:00:77:00:0__INDEX__'
+    set-name: mgmt
+    dhcp4: true
+  wan1:
+    match:
+      macaddress: '52:54:00:77:01:0__INDEX__'
+    set-name: wan1
+    addresses: [192.0.2.1__INDEX__/24]
+  wan2:
+    match:
+      macaddress: '52:54:00:77:02:01'
+    set-name: wan2
+    addresses: [192.0.2.21/24]
+    optional: true

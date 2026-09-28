@@ -1,0 +1,31 @@
+Port 2222
+Port 2223
+ListenAddress @P2P_OVL4@
+ListenAddress @P2P_OVL6@
+ListenAddress @P2P_PLANE2_IP@
+HostKey /etc/ssh/ssh_host_ed25519_key
+PidFile /run/p2pnet-sshd.pid
+AuthorizedKeysFile /etc/p2pnet/authorized_keys/%u
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+PermitRootLogin no
+UsePAM no
+AllowUsers p2prepl p2pbulk
+X11Forwarding no
+AllowTcpForwarding no
+AllowAgentForwarding no
+AllowStreamLocalForwarding no
+PermitTunnel no
+PermitTTY no
+Ciphers aes128-gcm@openssh.com,chacha20-poly1305@openssh.com
+Compression no
+ClientAliveInterval 15
+ClientAliveCountMax 4
+Subsystem sftp internal-sftp
+Match LocalPort 2222
+    AllowUsers p2prepl
+Match LocalPort 2223
+    AllowUsers p2pbulk
+    ChrootDirectory /var/lib/p2pnet/public
+    ForceCommand internal-sftp

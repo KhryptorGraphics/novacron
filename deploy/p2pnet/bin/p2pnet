@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+prefix=/opt/p2pnet
+usage() {
+    printf 'usage: p2pnet <component> <action> [args]\ncomponents: deps init keys inventory wg l2 tune bench mptcp mptcp-run sshd qos libvirt migrate zrepl swarm dedup schedule place health all\n' >&2
+}
+component=${1:-}
+[[ -n $component ]] || { usage; exit 2; }
+shift
+case $component in
+    inventory) exec /usr/bin/python3 "$prefix/libexec/inventory.py" "$@" ;;
+    place) exec /usr/bin/python3 "$prefix/libexec/inventory.py" place "$@" ;;
+    mptcp-run)
+        [[ ${1:-} == -- ]] && shift
+        (($#)) || { printf 'usage: p2pnet mptcp-run -- CMD [ARG...]\n' >&2; exit 2; }
+        exec "$prefix/libexec/mptcp-exec" "$@"
+        ;;
+    all)
+        action=${1:-}; shift || true
+        case $action in
+            verify)
+                (($# == 0)) || { printf 'usage: p2pnet all verify\n' >&2; exit 2; }
+                # Verify is read-only: report every component, then fail if any of them failed.
+                status=0
+                for part in tune wg l2 mptcp bench sshd qos libvirt zrepl swarm dedup schedule; do
+                    "$prefix/bin/p2pnet" "$part" verify || status=1
+                done
+                exit "$status"
+                ;;
+            uninstall)
+                [[ $# -eq 0 || ( $# -eq 1 && $1 == --purge ) ]] || { printf 'usage: p2pnet all uninstall [--purge]\n' >&2; exit 2; }
+                # Dependents first; stop at the first component that refuses (e.g. l2 with VM ports on the bridge).
+                for part in schedule dedup swarm zrepl libvirt qos sshd bench mptcp l2 wg tune; do
+                    "$prefix/bin/p2pnet" "$part" uninstall "$@"
+                done
+                ;;
+            *) printf 'usage: p2pnet all {verify|uninstall [--purge]}\n' >&2; exit 2 ;;
+        esac
+        ;;
+    deps|init|keys|wg|l2|tune|bench|mptcp|sshd|qos|libvirt|migrate|zrepl|swarm|dedup|schedule|health)
+        script="$prefix/libexec/$component.sh"
+        [[ -x $script ]] || { printf 'p2pnet: component %s is not installed in this toolkit build\n' "$component" >&2; exit 1; }
+        exec "$script" "$@"
+        ;;
+    *) usage; exit 2 ;;
+esac

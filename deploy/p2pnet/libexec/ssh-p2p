@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+exec ssh \
+  -i "${P2PNET_SSH_KEY:-/etc/p2pnet/ssh/id_ed25519}" \
+  -o UserKnownHostsFile=/etc/p2pnet/ssh/known_hosts \
+  -o GlobalKnownHostsFile=/dev/null \
+  -o StrictHostKeyChecking=yes \
+  -o BatchMode=yes \
+  -o Compression=no \
+  -c aes128-gcm@openssh.com \
+  -o ServerAliveInterval=15 \
+  -o ServerAliveCountMax=4 \
+  "$@"

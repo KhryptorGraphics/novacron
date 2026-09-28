@@ -1,0 +1,12 @@
+[Unit]
+Description=p2pnet VXLAN layer-2 bridge
+Wants=wg-quick@wg0.service
+After=wg-quick@wg0.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/p2pnet/bin/p2pnet l2 apply
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodically refresh stale p2pnet WireGuard DNS endpoints
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=60s
+Unit=p2pnet-wg-reresolve.service
+
+[Install]
+WantedBy=timers.target

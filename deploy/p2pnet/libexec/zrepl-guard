@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# shellcheck disable=SC1090
+source "${P2PNET_COMMON:-/opt/p2pnet/libexec/common.sh}"
+
+peer=${1:-}
+[[ $peer =~ ^[a-z0-9][a-z0-9-]{0,30}$ ]] || { printf 'denied\n' >&2; exit 1; }
+P2PNET_NODE_ENV=${P2PNET_NODE_ENV:-$P2P_ETC/generated/node.env}
+[[ -r $P2PNET_NODE_ENV ]] || { printf 'denied\n' >&2; exit 1; }
+load_env
+root=${P2P_REPLICA_ROOT:-}
+[[ $root =~ ^[A-Za-z0-9_.:-]+(/[A-Za-z0-9_.:-]+)*$ ]] || { printf 'denied\n' >&2; exit 1; }
+IFS=/ read -r -a root_components <<< "$root"
+for component in "${root_components[@]}"; do
+    [[ $component != . && $component != .. ]] || { printf 'denied\n' >&2; exit 1; }
+done
+
+valid_replica_path() {
+    local candidate=$1 prefix component
+    prefix="$root/$peer/"
+    [[ $candidate == "$root/$peer/"* && $candidate != *'@'* ]] || return 1
+    local suffix=${candidate#"$prefix"}
+    [[ -n $suffix ]] || return 1
+    [[ $suffix != /* && $suffix != */ ]] || return 1
+    local IFS=/
+    read -r -a components <<< "$suffix"
+    for component in "${components[@]}"; do
+        [[ -n $component && $component != . && $component != .. && $component =~ ^[A-Za-z0-9_.:-]+$ ]] || return 1
+    done
+}
+
+deny() { printf 'denied\n' >&2; logger -t p2pnet-zrepl -- "denied peer=$peer command=${SSH_ORIGINAL_COMMAND:-}" 2>/dev/null || true; exit 1; }
+command_text=${SSH_ORIGINAL_COMMAND:-}
+# shellcheck disable=SC1003
+[[ -n $command_text && $command_text != *$'\n'* && $command_text != *$'\r'* && $command_text != *';'* && $command_text != *'|'* && $command_text != *'&'* && $command_text != *'$'* && $command_text != *'`'* && $command_text != *'<'* && $command_text != *'>'* && $command_text != *'\\'* && $command_text != *'"'* && $command_text != *"'"* ]] || deny
+IFS=' ' read -r -a args <<< "$command_text"
+for arg in "${args[@]}"; do [[ -n $arg ]] || deny; done
+[[ ${args[*]} == "$command_text" ]] || deny
+
+case ${args[0]:-} in
+    state)
+        ((${#args[@]} == 2)) || deny
+        path=${args[1]}; valid_replica_path "$path" || deny
+        token=$(zfs get -H -p -o value receive_resume_token "$path" 2>/dev/null || printf '-')
+        [[ $token != - && -n $token ]] || token=-
+        if latest=$(zfs list -H -t snapshot -o name,createtxg -s createtxg -r "$path" 2>/dev/null | while IFS=$'\t' read -r snap _; do [[ $snap == *@p2pnet-* ]] && printf '%s\n' "${snap##*@}"; done | /usr/bin/python3 -c 'import sys; a=[x.strip() for x in sys.stdin if x.strip()]; print(a[-1] if a else "-")'); then
+            :
+        else
+            latest=-
+        fi
+        printf 'token=%s\nlatest=%s\n' "$token" "$latest"
+        ;;
+    recv)
+        ((${#args[@]} == 2)) || deny
+        path=${args[1]}; valid_replica_path "$path" || deny
+        if [[ ${DRY_RUN:-0} == 1 ]]; then
+            printf 'zfs create -p -u %q\nmbuffer -q -s 128k -m 256M | zfs receive -s -u -- %q\n' "$(dirname "$path")" "$path"
+            exit 0
+        fi
+        if ! zfs list -H -o name -- "$path" >/dev/null 2>&1; then zfs create -p -u "$(dirname "$path")"; fi
+        set +e
+        mbuffer -q -s 128k -m 256M | zfs receive -s -u -- "$path"
+        statuses=("${PIPESTATUS[@]}")
+        set -e
+        for status in "${statuses[@]}"; do (( status == 0 )) || exit "$status"; done
+        ;;
+    abort)
+        ((${#args[@]} == 2)) || deny
+        path=${args[1]}; valid_replica_path "$path" || deny
+        if [[ ${DRY_RUN:-0} == 1 ]]; then printf 'zfs receive -A %q\n' "$path"; else zfs receive -A "$path"; fi
+        ;;
+    prune)
+        ((${#args[@]} == 4)) || deny
+        path=${args[1]}; keep_last=${args[2]}; keep_daily=${args[3]}
+        valid_replica_path "$path" || deny
+        [[ $keep_last =~ ^[0-9]+$ && $keep_daily =~ ^[0-9]+$ ]] || deny
+        ((keep_last <= 100000 && keep_daily <= 100000)) || deny
+        if [[ ${DRY_RUN:-0} == 1 ]]; then printf 'zfs list -H -t snapshot -o name -r %q\n' "$path"; exit 0; fi
+        while IFS= read -r dataset; do
+            mapfile -t snapshots < <(zfs list -H -t snapshot -o name -s creation "$dataset" | while IFS= read -r snap; do [[ $snap == *@p2pnet-* ]] && printf '%s\n' "$snap"; done)
+            mapfile -t destroy < <(/usr/bin/python3 /opt/p2pnet/libexec/zrepl_retention.py "${snapshots[@]}" --keep-last "$keep_last" --keep-daily "$keep_daily")
+            for snap in "${destroy[@]}"; do zfs destroy "$snap"; done
+        done < <(zfs list -H -o name -r -t filesystem,volume "$path")
+        ;;
+    *) deny ;;
+esac

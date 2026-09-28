@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if (($# == 0)); then
+  printf 'usage: mptcp-exec CMD [ARG ...]\n' >&2
+  exit 2
+fi
+
+sysctl_path=${P2PNET_MPTCP_SYSCTL:-/proc/sys/net/mptcp/enabled}
+if [[ -r $sysctl_path ]] && [[ $(<"$sysctl_path") == 1 ]] && command -v mptcpize >/dev/null 2>&1; then
+  exec mptcpize run "$@"
+fi
+if [[ ! -r $sysctl_path ]]; then
+  reason="kernel MPTCP sysctl $sysctl_path is unavailable"
+elif [[ $(<"$sysctl_path") != 1 ]]; then
+  reason='net.mptcp.enabled is not 1'
+else
+  reason='mptcpize is not installed'
+fi
+printf 'p2pnet: MPTCP unavailable (%s); running over plain TCP\n' "$reason" >&2
+exec "$@"

@@ -1,0 +1,12 @@
+[Unit]
+Description=p2pnet ZFS replication timer %i
+
+[Timer]
+OnBootSec=2min
+# OnUnitInactiveSec only elapses after a first run; OnActiveSec seeds it when enabled after boot.
+OnActiveSec=1min
+OnUnitInactiveSec=15min
+Unit=p2pnet-zrepl@%i.service
+
+[Install]
+WantedBy=timers.target
