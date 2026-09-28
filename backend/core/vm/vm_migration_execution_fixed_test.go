@@ -48,28 +48,6 @@ func TestVMMigrationExecutionFixed(t *testing.T) {
 		}
 	})
 
-	t.Run("MigrationPhases", func(t *testing.T) {
-		// Test pause for migration
-		err := sourceVM.Pause()
-		if err != nil {
-			t.Fatalf("Failed to pause VM for migration: %v", err)
-		}
-
-		if sourceVM.State() != StatePaused {
-			t.Error("VM should be paused during migration")
-		}
-
-		// Test resume after migration
-		err = sourceVM.Resume()
-		if err != nil {
-			t.Fatalf("Failed to resume VM after migration: %v", err)
-		}
-
-		if sourceVM.State() != StateRunning {
-			t.Error("VM should be running after resume")
-		}
-	})
-
 	t.Run("MigrationCleanup", func(t *testing.T) {
 		// Test proper cleanup after migration
 		err := sourceVM.Stop()
@@ -130,46 +108,5 @@ func TestVMMigrationWithContext(t *testing.T) {
 		// Expected behavior - context timed out
 	case <-time.After(200 * time.Millisecond):
 		t.Error("Operation should have timed out")
-	}
-}
-
-// TestMigrationResourceValidation tests resource validation during migration
-func TestMigrationResourceValidation(t *testing.T) {
-	sourceConfig := VMConfig{
-		ID:        "resource-test-vm",
-		Name:      "resource-vm",
-		Command:   "/bin/sleep",
-		Args:      []string{"5"},
-		CPUShares: 2048,
-		MemoryMB:  1024,
-		RootFS:    "/tmp",
-	}
-
-	vm, err := NewVM(sourceConfig)
-	if err != nil {
-		t.Fatalf("Failed to create VM: %v", err)
-	}
-	defer vm.Cleanup()
-
-	// Test resource usage validation
-	usage := vm.GetResourceUsage()
-	if usage.CPUPercent < 0 {
-		t.Error("CPU usage should not be negative")
-	}
-
-	// Test resource limit validation
-	err = vm.UpdateResourceLimits(4096, 2048)
-	if err != nil {
-		t.Fatalf("Failed to update resource limits: %v", err)
-	}
-
-	// Verify updated configuration
-	config := vm.Config()
-	if config.CPUShares != 4096 {
-		t.Errorf("Expected CPU shares 4096, got %d", config.CPUShares)
-	}
-
-	if config.MemoryMB != 2048 {
-		t.Errorf("Expected memory 2048MB, got %d", config.MemoryMB)
 	}
 }

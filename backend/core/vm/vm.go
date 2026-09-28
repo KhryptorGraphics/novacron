@@ -36,6 +36,9 @@ const (
 	// StateProvisioning represents a VM that is being provisioned
 	StateProvisioning State = "provisioning"
 
+	// StateStarting represents a VM that is being started
+	StateStarting State = "starting"
+
 	// StateRunning means the VM is currently running
 	StateRunning State = "running"
 

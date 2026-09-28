@@ -495,10 +495,9 @@ Level 5: Monitoring (depends on all) - PARALLEL
 
 **Key Components**:
 - `vm_manager.go`: Central VM orchestration
-- `vm_lifecycle_operations.go`: Create, start, stop, delete
+- `vm_operations.go`: Create, start, stop, delete (dispatched to the per-type `VMDriver`)
 - `vm_migration_execution.go`: Live migration coordination
 - `vm_scheduler.go`: Resource allocation and placement
-- `vm_health.go`: Health checking and auto-recovery
 
 ### 7.3 Hardware Virtualization
 

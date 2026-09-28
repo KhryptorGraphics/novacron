@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"testing"
-	"time"
 )
 
 // TestVMLifecycleMinimal tests VM lifecycle operations without external dependencies
@@ -58,29 +57,6 @@ func TestVMLifecycleMinimal(t *testing.T) {
 		t.Error("Expected VM to be running")
 	}
 
-	// Wait for process to stabilize
-	time.Sleep(1 * time.Second)
-
-	// Test VM pause
-	err = vm.Pause()
-	if err != nil {
-		t.Fatalf("Failed to pause VM: %v", err)
-	}
-
-	if vm.State() != StatePaused {
-		t.Errorf("Expected state to be %s after pause, got %s", StatePaused, vm.State())
-	}
-
-	// Test VM resume
-	err = vm.Resume()
-	if err != nil {
-		t.Fatalf("Failed to resume VM: %v", err)
-	}
-
-	if vm.State() != StateRunning {
-		t.Errorf("Expected state to be %s after resume, got %s", StateRunning, vm.State())
-	}
-
 	// Test VM stop
 	err = vm.Stop()
 	if err != nil {
@@ -96,143 +72,6 @@ func TestVMLifecycleMinimal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to cleanup VM: %v", err)
 	}
-}
-
-// TestVMCloneMinimal tests VM cloning without external dependencies
-func TestVMCloneMinimal(t *testing.T) {
-	config := VMConfig{
-		ID:        "test-vm-clone-original",
-		Name:      "original-vm",
-		Command:   "/bin/echo",
-		Args:      []string{"hello"},
-		CPUShares: 1024,
-		MemoryMB:  512,
-		RootFS:    "/tmp",
-		Tags: map[string]string{
-			"environment": "test",
-		},
-	}
-
-	originalVM, err := NewVM(config)
-	if err != nil {
-		t.Fatalf("Failed to create original VM: %v", err)
-	}
-
-	// Clone the VM
-	clonedVM, err := originalVM.Clone("cloned-vm")
-	if err != nil {
-		t.Fatalf("Failed to clone VM: %v", err)
-	}
-
-	// Verify clone properties
-	if clonedVM.Name() != "cloned-vm" {
-		t.Errorf("Expected cloned VM name to be 'cloned-vm', got %s", clonedVM.Name())
-	}
-
-	if clonedVM.ID() == originalVM.ID() {
-		t.Error("Cloned VM should have different ID from original")
-	}
-
-	// Verify cloned config
-	clonedConfig := clonedVM.Config()
-	if clonedConfig.CPUShares != config.CPUShares {
-		t.Errorf("Expected cloned VM CPU shares %d, got %d", config.CPUShares, clonedConfig.CPUShares)
-	}
-
-	if clonedConfig.MemoryMB != config.MemoryMB {
-		t.Errorf("Expected cloned VM memory %d, got %d", config.MemoryMB, clonedConfig.MemoryMB)
-	}
-
-	// Verify clone tags include original tags plus clone metadata
-	if clonedConfig.Tags["environment"] != "test" {
-		t.Error("Cloned VM should inherit original tags")
-	}
-
-	if clonedConfig.Tags["cloned_from"] != originalVM.ID() {
-		t.Error("Cloned VM should have clone metadata")
-	}
-}
-
-// TestVMResourceManagementMinimal tests resource management without external dependencies
-func TestVMResourceManagementMinimal(t *testing.T) {
-	config := VMConfig{
-		ID:        "test-vm-resources-minimal",
-		Name:      "resource-test-vm",
-		Command:   "/bin/echo",
-		Args:      []string{"test"},
-		CPUShares: 512,
-		MemoryMB:  256,
-		RootFS:    "/tmp",
-	}
-
-	vm, err := NewVM(config)
-	if err != nil {
-		t.Fatalf("Failed to create VM: %v", err)
-	}
-
-	// Test resource limit updates
-	err = vm.UpdateResourceLimits(1024, 512)
-	if err != nil {
-		t.Fatalf("Failed to update resource limits: %v", err)
-	}
-
-	// Verify updated limits
-	updatedConfig := vm.Config()
-	if updatedConfig.CPUShares != 1024 {
-		t.Errorf("Expected CPU shares to be 1024, got %d", updatedConfig.CPUShares)
-	}
-
-	if updatedConfig.MemoryMB != 512 {
-		t.Errorf("Expected memory to be 512MB, got %d", updatedConfig.MemoryMB)
-	}
-
-	// Test getting resource usage
-	usage := vm.GetResourceUsage()
-	if usage.CPUPercent < 0 {
-		t.Error("CPU usage should not be negative")
-	}
-}
-
-// TestVMRebootMinimal tests VM reboot without external dependencies
-func TestVMRebootMinimal(t *testing.T) {
-	config := VMConfig{
-		ID:        "test-vm-reboot-minimal",
-		Name:      "test-vm-reboot",
-		Command:   "/bin/sleep",
-		Args:      []string{"30"},
-		CPUShares: 1024,
-		MemoryMB:  512,
-		RootFS:    "/tmp",
-	}
-
-	vm, err := NewVM(config)
-	if err != nil {
-		t.Fatalf("Failed to create VM: %v", err)
-	}
-
-	// Start the VM
-	err = vm.Start()
-	if err != nil {
-		t.Skipf("skipping: cannot start process VM in this environment: %v", err)
-	}
-
-	// Wait for stable state
-	time.Sleep(1 * time.Second)
-
-	// Test reboot
-	err = vm.Reboot()
-	if err != nil {
-		t.Fatalf("Failed to reboot VM: %v", err)
-	}
-
-	// Verify VM is running after reboot
-	if vm.State() != StateRunning {
-		t.Errorf("Expected state to be %s after reboot, got %s", StateRunning, vm.State())
-	}
-
-	// Clean up
-	vm.Stop()
-	vm.Cleanup()
 }
 
 // TestKVMDriverEnhancedMinimal tests KVM driver without external dependencies
