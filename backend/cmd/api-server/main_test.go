@@ -294,6 +294,7 @@ func TestRegisterSecureAPIRoutesCreatesVMOnCompatibilityRoute(t *testing.T) {
 			sqlmock.AnyArg(), // requested_owner_id
 			"",               // organization_id: JWT tenant_id "default" is not a uuid, so it is dropped
 			sqlmock.AnyArg(), // metadata JSON
+			"",               // network_id (none requested)
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 

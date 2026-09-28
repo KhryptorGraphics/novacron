@@ -46,10 +46,14 @@ func TestH71SmallRawImageRootBlockNode(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create source VM: %v", err)
 	}
+	// Registered before Start and after t.TempDir, so it runs first (LIFO)
+	// even when Start or a later step fails: Stop returns only once the qemu
+	// is reaped and its exit fully recorded, so nothing still writes under
+	// base when t.TempDir removes it ("directory not empty", novacron-c0p).
+	stopAtCleanup(t, d, srcID)
 	if err := d.Start(ctx, srcID); err != nil {
 		t.Fatalf("start source: %v", err)
 	}
-	defer func() { _ = d.Stop(context.Background(), srcID) }()
 
 	srcInfo, err := d.GetInfo(ctx, srcID)
 	if err != nil {
@@ -75,7 +79,7 @@ func TestH71SmallRawImageRootBlockNode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start block-migration dest: %v", err)
 	}
-	defer func() { _ = d.Stop(context.Background(), destID) }()
+	stopAtCleanup(t, d, destID)
 
 	downtimeMs, totalMs, err := d.migrateBlockWithStats(ctx, srcID, ramURI, nbdURI, nil)
 	if err != nil {
@@ -85,4 +89,15 @@ func TestH71SmallRawImageRootBlockNode(t *testing.T) {
 		t.Fatalf("block migrate FAILED (this is the h71 repro if it says 'Need a root block node'): %v\n--- src stderr ---\n%s\n--- dst stderr ---\n%s", err, srcErr, dstErr)
 	}
 	t.Logf("block migrate completed downtime=%dms total=%dms", downtimeMs, totalMs)
+}
+
+// stopAtCleanup stops vmID when the test ends, reporting a failed Stop -- a
+// qemu it could not stop would outlive the test into its t.TempDir removal.
+func stopAtCleanup(t *testing.T, d *KVMDriverEnhanced, vmID string) {
+	t.Helper()
+	t.Cleanup(func() {
+		if err := d.Stop(context.Background(), vmID); err != nil {
+			t.Errorf("cleanup: stop %s: %v", vmID, err)
+		}
+	})
 }

@@ -19,7 +19,8 @@ package main
 //      converges on the complete membership (gossip fan-out in one hop).
 //
 // A background heartbeat loop keeps last_heartbeat/last_rtt_ms fresh for
-// every peer; /api/cluster/nodes exposes the live capacity + link profile
+// every peer and reports peer failure/recovery on the orchestration event bus
+// (peerLiveness); /api/cluster/nodes exposes the live capacity + link profile
 // per node.
 //
 // Credentials. NOVACRON_MIGRATION_SECRET is the fabric-wide secret and stays
@@ -62,6 +63,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/khryptorgraphics/novacron/backend/core/orchestration/events"
 	core_vm "github.com/khryptorgraphics/novacron/backend/core/vm"
 )
 
@@ -69,9 +71,14 @@ import (
 const joinTimestampWindow = 60 * time.Second
 
 // heartbeatInterval is how often the heartbeat loop probes every peer.
-// Liveness is judged per-use by the live capacity fetch (Reachable=false is
-// honest); the loop only refreshes the persisted link profile.
+// Placement still judges reachability per-use by the live capacity fetch
+// (Reachable=false is honest); the loop refreshes the persisted link profile
+// and feeds peerLiveness.
 const heartbeatInterval = 30 * time.Second
+
+// peerFailureThreshold is how many consecutive failed heartbeat probes mark a
+// peer failed (3 x heartbeatInterval = 90s): one missed beat is a blip.
+const peerFailureThreshold = 3
 
 // nodeSecretsEnv configures per-node credentials, layered on top of the
 // fabric-wide NOVACRON_MIGRATION_SECRET. Format:
@@ -521,7 +528,7 @@ func nodeProfiles(vmManager *core_vm.VMManager, storagePath string, db *sql.DB) 
 
 // clusterHeartbeatLoop refreshes last_heartbeat/last_rtt_ms for every peer
 // until ctx is done. Best-effort: DB failures log and continue.
-func clusterHeartbeatLoop(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager) {
+func clusterHeartbeatLoop(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager, liveness *peerLiveness) {
 	t := time.NewTicker(heartbeatInterval)
 	defer t.Stop()
 	for {
@@ -529,17 +536,19 @@ func clusterHeartbeatLoop(ctx context.Context, db *sql.DB, vmManager *core_vm.VM
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			beatOnce(ctx, db, vmManager)
+			beatOnce(ctx, db, vmManager, liveness)
 		}
 	}
 }
 
-func beatOnce(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager) {
+func beatOnce(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager, liveness *peerLiveness) {
 	if vmManager == nil || db == nil {
 		return
 	}
 	probeBytes := probeBytesFromEnv()
-	for id, addr := range vmManager.MigrationPeers() {
+	peers := vmManager.MigrationPeers()
+	liveness.forgetExcept(peers)
+	for id, addr := range peers {
 		// Per-peer credential: the peer's own NOVACRON_NODE_SECRETS entry when
 		// configured, else the cluster-wide secret. A peer we hold no credential
 		// for cannot answer us (its gate is fail-closed too), so skip it rather
@@ -550,9 +559,12 @@ func beatOnce(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager) {
 		}
 		start := time.Now()
 		if _, err := fetchPeerCapacityWithSecret(addr, secret); err != nil {
-			continue // unreachable peer stays in the map; inventory reports it honestly
+			// Unreachable peer stays in the map; inventory reports it honestly.
+			liveness.observe(ctx, id, err)
+			continue
 		}
 		rttMS := float64(time.Since(start).Microseconds()) / 1000.0
+		liveness.observe(ctx, id, nil)
 
 		// Throughput: pull a bounded payload and measure bytes/wall-time. The
 		// RTT is excluded so a high-latency link doesn't read as low-rate for
@@ -573,6 +585,69 @@ func beatOnce(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager) {
 			log.Printf("heartbeat upsert failed for %s: %v", id, err)
 		}
 		cancel()
+	}
+}
+
+// peerLiveness turns heartbeat probe outcomes into orchestration node
+// lifecycle events on the shared bus: after peerFailureThreshold consecutive
+// failed probes it publishes events.EventTypeNodeFailure once, and on the
+// next successful probe of that peer events.EventTypeNodeRecovered. Only the
+// heartbeat goroutine touches it.
+type peerLiveness struct {
+	bus    events.EventBus
+	misses map[string]int  // consecutive failed probes per peer
+	failed map[string]bool // peers a NodeFailure was published for
+}
+
+func newPeerLiveness(bus events.EventBus) *peerLiveness {
+	return &peerLiveness{bus: bus, misses: make(map[string]int), failed: make(map[string]bool)}
+}
+
+func (p *peerLiveness) observe(ctx context.Context, nodeID string, probeErr error) {
+	if probeErr == nil {
+		delete(p.misses, nodeID)
+		if p.failed[nodeID] {
+			delete(p.failed, nodeID)
+			p.publish(ctx, events.EventTypeNodeRecovered, events.PriorityNormal, nodeID, map[string]interface{}{"node_id": nodeID})
+		}
+		return
+	}
+	p.misses[nodeID]++
+	if p.failed[nodeID] || p.misses[nodeID] < peerFailureThreshold {
+		return
+	}
+	p.failed[nodeID] = true
+	p.publish(ctx, events.EventTypeNodeFailure, events.PriorityCritical, nodeID, map[string]interface{}{
+		"node_id":              nodeID,
+		"reason":               probeErr.Error(),
+		"consecutive_failures": p.misses[nodeID],
+	})
+}
+
+// forgetExcept drops state for peers no longer in the peer map.
+func (p *peerLiveness) forgetExcept(peers map[string]string) {
+	for id := range p.misses {
+		if _, ok := peers[id]; !ok {
+			delete(p.misses, id)
+		}
+	}
+	for id := range p.failed {
+		if _, ok := peers[id]; !ok {
+			delete(p.failed, id)
+		}
+	}
+}
+
+func (p *peerLiveness) publish(ctx context.Context, t events.EventType, prio events.EventPriority, nodeID string, data map[string]interface{}) {
+	if err := p.bus.Publish(ctx, &events.OrchestrationEvent{
+		Type:      t,
+		Source:    "cluster-heartbeat",
+		Target:    nodeID,
+		Timestamp: time.Now(),
+		Data:      data,
+		Priority:  prio,
+	}); err != nil {
+		log.Printf("heartbeat: publish %s for %s failed: %v", t, nodeID, err)
 	}
 }
 

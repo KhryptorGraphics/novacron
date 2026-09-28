@@ -11,6 +11,8 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gorilla/mux"
+
+	"github.com/khryptorgraphics/novacron/backend/core/orchestration/events"
 )
 
 // nodeCredentialsTestEnv pins both credential knobs for the duration of a test:
@@ -562,7 +564,7 @@ func TestBeatOnceUsesPeerCredential(t *testing.T) {
 	// never got that far (the stub peer answers 403 to any other credential).
 	mock.ExpectExec("INSERT INTO cluster_peers").WillReturnResult(sqlmock.NewResult(0, 1))
 
-	beatOnce(t.Context(), db, vmManager)
+	beatOnce(t.Context(), db, vmManager, newPeerLiveness(events.NewNoopEventBus()))
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("heartbeat persisted no probe result: %v", err)

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -79,6 +80,9 @@ type LoggingConfig struct {
 	Format     string `json:"format" env:"LOG_FORMAT" default:"json"`
 	Output     string `json:"output" env:"LOG_OUTPUT" default:"stdout"`
 	Structured bool   `json:"structured" env:"LOG_STRUCTURED" default:"true"`
+	// StreamLevel is the minimum level of api-server log entries streamed to
+	// /api/ws/logs clients (entries must also pass Level to be emitted at all).
+	StreamLevel string `json:"stream_level" env:"LOG_STREAM_LEVEL" default:"info"`
 }
 
 // CORSConfig holds CORS configuration
@@ -157,10 +161,11 @@ func Load() (*Config, error) {
 
 	// Load logging configuration
 	config.Logging = LoggingConfig{
-		Level:      getEnvOrDefault("LOG_LEVEL", "info"),
-		Format:     getEnvOrDefault("LOG_FORMAT", "json"),
-		Output:     getEnvOrDefault("LOG_OUTPUT", "stdout"),
-		Structured: getEnvBoolOrDefault("LOG_STRUCTURED", true),
+		Level:       getEnvOrDefault("LOG_LEVEL", "info"),
+		Format:      getEnvOrDefault("LOG_FORMAT", "json"),
+		Output:      getEnvOrDefault("LOG_OUTPUT", "stdout"),
+		Structured:  getEnvBoolOrDefault("LOG_STRUCTURED", true),
+		StreamLevel: getEnvOrDefault("LOG_STREAM_LEVEL", "info"),
 	}
 
 	// Load CORS configuration
@@ -207,15 +212,12 @@ func (c *Config) Validate() error {
 	}
 
 	validLogLevels := []string{"debug", "info", "warn", "error"}
-	validLevel := false
-	for _, level := range validLogLevels {
-		if c.Logging.Level == level {
-			validLevel = true
-			break
-		}
-	}
-	if !validLevel {
+	if !slices.Contains(validLogLevels, c.Logging.Level) {
 		return fmt.Errorf("LOG_LEVEL must be one of: %s", strings.Join(validLogLevels, ", "))
+	}
+	// Empty means the Load default (info) for configs built without Load.
+	if c.Logging.StreamLevel != "" && !slices.Contains(validLogLevels, c.Logging.StreamLevel) {
+		return fmt.Errorf("LOG_STREAM_LEVEL must be one of: %s", strings.Join(validLogLevels, ", "))
 	}
 
 	return nil

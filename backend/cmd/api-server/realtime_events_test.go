@@ -5,16 +5,21 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 
 	websocketapi "github.com/khryptorgraphics/novacron/backend/api/websocket"
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
+	"github.com/khryptorgraphics/novacron/backend/core/orchestration"
+	"github.com/khryptorgraphics/novacron/backend/core/orchestration/autoscaling"
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration/events"
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration/healing"
 	core_vm "github.com/khryptorgraphics/novacron/backend/core/vm"
@@ -209,4 +214,161 @@ func TestAlertStoreListNewestFirstAndBounded(t *testing.T) {
 	if list[0].Data["i"] != 4 || list[2].Data["i"] != 2 {
 		t.Fatalf("expected newest-first order [4,3,2], got %+v", list)
 	}
+}
+
+// pollUntil fails the test unless cond turns true within 3s.
+func pollUntil(t *testing.T, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal(msg)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func hasRecentAlert(title string) bool {
+	for _, a := range recentAlerts.list() {
+		if a.Data["title"] == title {
+			return true
+		}
+	}
+	return false
+}
+
+// TestHeartbeatPeerFailureReachesEngineAndAlerts runs the node-failure path
+// api-server wires: peerLiveness publishes node.failure on the shared bus
+// only after peerFailureThreshold consecutive failed heartbeat probes, and
+// only once; the orchestration engine marks the peer unhealthy and the
+// realtime bridge raises an alert. The next good probe publishes
+// node.recovered and the engine marks the peer healthy again.
+func TestHeartbeatPeerFailureReachesEngineAndAlerts(t *testing.T) {
+	nodeCredentialsTestEnv(t, "cluster-wide-secret", "")
+	t.Setenv("NOVACRON_PROBE_BYTES", "0")
+	const peerID = "peer-hb-fail"
+
+	var up atomic.Bool
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !up.Load() || r.URL.Path != "/internal/cluster/capacity" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(NodeCapacity{NodeID: peerID, Reachable: true})
+	}))
+	defer peer.Close()
+
+	vmManager := newStubVMManager(t)
+	defer vmManager.Stop()
+	vmManager.RegisterMigrationPeer(peerID, joinTestRequestAddr(t, peer.URL))
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	logger := logrus.New()
+	logger.SetLevel(logrus.ErrorLevel)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	bus := events.NewInProcessEventBus(logger)
+	engine := orchestration.NewDefaultOrchestrationEngine(logger)
+	engine.SetEventBus(bus)
+	if err := engine.Start(ctx); err != nil {
+		t.Fatalf("engine start: %v", err)
+	}
+	defer engine.Stop(context.Background())
+	ws := websocketapi.NewWebSocketHandler(nil, nil, logger)
+	defer ws.Shutdown()
+	newRealtimeEventBridge(ws, logger).subscribe(ctx, bus)
+
+	// One subscription sees node lifecycle events and a marker in publish
+	// order, so "nothing published by this beat" is checked, not slept on.
+	const marker = events.EventType("test.marker")
+	seen := make(chan events.EventType, 16)
+	if _, err := bus.Subscribe(ctx, []events.EventType{events.EventTypeNodeFailure, events.EventTypeNodeRecovered, marker},
+		events.NewEventHandlerFunc("recorder", "recorder", func(_ context.Context, e *events.OrchestrationEvent) error {
+			seen <- e.Type
+			return nil
+		})); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	liveness := newPeerLiveness(bus)
+	// beat runs one heartbeat and returns what it published, in order.
+	beat := func() []events.EventType {
+		beatOnce(ctx, db, vmManager, liveness)
+		if err := bus.Publish(ctx, &events.OrchestrationEvent{Type: marker}); err != nil {
+			t.Fatalf("publish marker: %v", err)
+		}
+		var out []events.EventType
+		for {
+			select {
+			case typ := <-seen:
+				if typ == marker {
+					return out
+				}
+				out = append(out, typ)
+			case <-time.After(3 * time.Second):
+				t.Fatal("marker never delivered")
+			}
+		}
+	}
+
+	for i := 1; i < peerFailureThreshold; i++ {
+		if got := beat(); len(got) != 0 {
+			t.Fatalf("failed probe %d of %d published %v", i, peerFailureThreshold, got)
+		}
+	}
+	if got := beat(); len(got) != 1 || got[0] != events.EventTypeNodeFailure {
+		t.Fatalf("probe %d published %v, want [node.failure]", peerFailureThreshold, got)
+	}
+	if got := beat(); len(got) != 0 {
+		t.Fatalf("a still-failed peer published %v again", got)
+	}
+	pollUntil(t, func() bool {
+		st, ok := engine.GetNodeStatuses()[peerID]
+		return ok && !st.Healthy
+	}, "engine never marked the failed peer unhealthy")
+	pollUntil(t, func() bool { return hasRecentAlert("Node unreachable: " + peerID) }, "no node-unreachable alert")
+
+	up.Store(true)
+	mock.ExpectExec("INSERT INTO cluster_peers").WillReturnResult(sqlmock.NewResult(0, 1))
+	if got := beat(); len(got) != 1 || got[0] != events.EventTypeNodeRecovered {
+		t.Fatalf("recovered probe published %v, want [node.recovered]", got)
+	}
+	pollUntil(t, func() bool { return engine.GetNodeStatuses()[peerID].Healthy }, "engine never marked the recovered peer healthy")
+	pollUntil(t, func() bool { return hasRecentAlert("Node reachable: " + peerID) }, "no node-reachable alert")
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("recovered peer's heartbeat was not persisted: %v", err)
+	}
+}
+
+// TestRealtimeBridgeAlertsOnTriggeredScaling: a real scale-up decision from
+// the autoscaler reaches the alerts store through scaling.triggered.
+func TestRealtimeBridgeAlertsOnTriggeredScaling(t *testing.T) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.ErrorLevel)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	bus := events.NewInProcessEventBus(logger)
+	ws := websocketapi.NewWebSocketHandler(nil, nil, logger)
+	defer ws.Shutdown()
+	newRealtimeEventBridge(ws, logger).subscribe(ctx, bus)
+
+	scaler := autoscaling.NewDefaultAutoScaler(logger, bus)
+	if err := scaler.SetMetricsSource(func() (*autoscaling.MetricsData, error) {
+		return &autoscaling.MetricsData{Timestamp: time.Now(), TargetID: "host", TargetType: "node", CPUUsage: 0.95, MemoryUsage: 0.5, ActiveVMs: 2}, nil
+	}); err != nil {
+		t.Fatalf("SetMetricsSource: %v", err)
+	}
+	if err := scaler.AddTarget(&autoscaling.AutoScalerTarget{ID: "scale-alert-target", Type: "vm", Enabled: true}); err != nil {
+		t.Fatalf("AddTarget: %v", err)
+	}
+	decision, err := scaler.GetScalingDecision("scale-alert-target")
+	if err != nil || decision.Action != autoscaling.ScalingActionScaleUp {
+		t.Fatalf("decision = %+v, %v; want scale_up", decision, err)
+	}
+	want := "Scaling scale_up: scale-alert-target -> " + strconv.Itoa(decision.TargetScale)
+	pollUntil(t, func() bool { return hasRecentAlert(want) }, "no alert "+want)
 }

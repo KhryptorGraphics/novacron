@@ -197,6 +197,13 @@ func (as *DefaultAutoScaler) GetScalingDecision(targetID string) (*ScalingDecisi
 	if err := as.publishScalingEvent(EventTypeScalingDecisionMade, targetID, decision, prediction); err != nil {
 		as.logger.WithError(err).Error("Failed to publish scaling decision event")
 	}
+	// Only an actual scale_up/scale_down triggers scaling; no_action (within
+	// thresholds, cooldown, bounds) is audit-only via decision_made above.
+	if decision.Action != ScalingActionNoAction {
+		if err := as.publishScalingEvent(EventType(events.EventTypeScalingTriggered), targetID, decision, prediction); err != nil {
+			as.logger.WithError(err).Error("Failed to publish scaling triggered event")
+		}
+	}
 
 	return decision, nil
 }

@@ -158,6 +158,7 @@ func TestCreateVMLocalStampsOrganization(t *testing.T) {
 					"",               // requested_owner_id
 					tc.wantArg,       // organization_id
 					sqlmock.AnyArg(), // metadata JSON
+					"",               // network_id (none requested)
 				).
 				WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -219,6 +220,7 @@ func TestClusterCreateStampsCallerOrganization(t *testing.T) {
 					"",               // requested_owner_id
 					tc.wantArg,       // organization_id
 					sqlmock.AnyArg(), // metadata JSON
+					"",               // network_id (none requested)
 				).
 				WillReturnResult(sqlmock.NewResult(1, 1))
 

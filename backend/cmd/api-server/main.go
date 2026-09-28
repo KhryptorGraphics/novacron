@@ -35,6 +35,7 @@ import (
 	websocketapi "github.com/khryptorgraphics/novacron/backend/api/websocket"
 	"github.com/khryptorgraphics/novacron/backend/core/audit"
 	"github.com/khryptorgraphics/novacron/backend/core/auth"
+	"github.com/khryptorgraphics/novacron/backend/core/network/provision"
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration"
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration/autoscaling"
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration/events"
@@ -61,7 +62,10 @@ type canonicalServices struct {
 	healingController   *healing.DefaultHealingController
 	eventBus            events.EventBus
 	orchLogger          *logrus.Logger
-	shutdown            func()
+	// networkProvisioner realises the /networks catalog on this host (see
+	// networks.go); shared by the routes and the boot reconcile.
+	networkProvisioner provision.Provisioner
+	shutdown           func()
 }
 
 // restartSupervisor is package-level because route registration happens inside
@@ -107,6 +111,10 @@ func main() {
 		appLogger.Fatal("Failed to initialize canonical backend services", "error", err)
 	}
 	defer services.shutdown()
+
+	// Catalog networks are host bridges, which do not survive a reboot:
+	// re-provision them before any guest on them can be (re)started.
+	reconcileNetworks(db, services.networkProvisioner)
 
 	vmManager := newVMManager(cfg)
 
@@ -163,7 +171,7 @@ func main() {
 	loadPersistedPeers(vmManager, db)
 	fabricCtx, fabricCancel := context.WithCancel(context.Background())
 	defer fabricCancel()
-	go clusterHeartbeatLoop(fabricCtx, db, vmManager)
+	go clusterHeartbeatLoop(fabricCtx, db, vmManager, newPeerLiveness(services.eventBus))
 
 	server := buildCanonicalServer(cfg, db, authManager, services, vmManager)
 
@@ -245,10 +253,12 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	apiRouter.Use(requireAuth(authManager, db))
 	registerSecureAPIRoutes(apiRouter, db, vmManager, vmBasePath(cfg))
+	registerNetworkRoutes(apiRouter, db, services.networkProvisioner)
 
 	apiV1Router := router.PathPrefix("/api/v1").Subrouter()
 	apiV1Router.Use(requireAuth(authManager, db))
 	registerSecureAPIRoutes(apiV1Router, db, vmManager, vmBasePath(cfg))
+	registerNetworkRoutes(apiV1Router, db, services.networkProvisioner)
 	// Signed fabric join/leave RPCs (node-to-node) and the authed
 	// /api/cluster/nodes inventory with live link profiles.
 	registerClusterJoinRoutes(router, apiRouter, db, vmManager, vmBasePath(cfg))
@@ -423,9 +433,9 @@ func initDatabase(cfg *config.Config) (*sql.DB, error) {
 }
 
 // requiredSchemaVersion is the golang-migrate version (database/migrations)
-// this binary's SQL is written against: 000017 added the session refresh
-// token/revocation columns that auth_session.go reads on every request.
-const requiredSchemaVersion = 17
+// this binary's SQL is written against: 000018 added the networks catalog
+// (networks table, vms.network_id) behind /networks and VM create.
+const requiredSchemaVersion = 18
 
 // sqlSchemaMigrationState reads golang-migrate's bookkeeping table
 // (database/migrate.go, postgres driver default table name).
@@ -1224,28 +1234,13 @@ func registerSecureAPIRoutes(router *mux.Router, db *sql.DB, vmManager *core_vm.
 		writeJSON(w, http.StatusOK, recentAlerts.list())
 	}).Methods(http.MethodGet)
 
-	// Networks: the canonical schema has NO networks catalog table (only the
-	// per-VM network_interfaces table). The catalog routes report the empty
-	// catalog honestly instead of 500ing on a table that does not exist.
-	router.HandleFunc("/networks", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, []map[string]interface{}{})
-	}).Methods(http.MethodGet)
-
-	router.HandleFunc("/networks", func(w http.ResponseWriter, r *http.Request) {
-		writeJSONError(w, http.StatusNotImplemented, "no networks catalog in the canonical schema; per-VM interfaces live at /vms/{vm_id}/interfaces")
-	}).Methods(http.MethodPost)
-
-	router.HandleFunc("/networks/{id}", func(w http.ResponseWriter, r *http.Request) {
-		writeJSONError(w, http.StatusNotFound, "network not found")
-	}).Methods(http.MethodGet)
-
-	router.HandleFunc("/networks/{id}", func(w http.ResponseWriter, r *http.Request) {
-		writeJSONError(w, http.StatusNotFound, "network not found")
-	}).Methods(http.MethodDelete)
+	// Networks catalog: registerNetworkRoutes (networks.go), wired next to
+	// this function in buildCanonicalServer with the host provisioner.
 	// VM network interfaces: the canonical schema's network_interfaces table is
 	// the equivalent of the legacy vm_interfaces table (vm_id, name, mac_address,
-	// ip_address). A bridge/gateway can be attached per-interface; there is no
-	// canonical networks catalog table, so interface rows stand alone.
+	// ip_address). A bridge/gateway can be attached per-interface; these rows
+	// are bookkeeping only and independent of the /networks catalog (a VM's
+	// catalog attachment is vms.network_id, chosen at create).
 	router.HandleFunc("/vms/{vm_id}/interfaces", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["vm_id"]
 		_, _, visible := requireOrgScope(r.Context(), db, vmID)
@@ -2211,6 +2206,9 @@ func initializeCanonicalServices(cfg *config.Config, db *sql.DB, authManager *au
 		websocketapi.AllowedOrigins(cfg.CORS.AllowedOrigins),
 		websocketapi.MetricsProvider(func() map[string]interface{} { return hostMetrics(vmBasePath(cfg)) }),
 		websocketLogger)
+	// Stream api-server log entries to /api/ws/logs clients. Removed first on
+	// shutdown, before the websocket handler stops draining its log queue.
+	removeLogSink := logger.GlobalLogger.AddSink(newWSLogSink(websocketHandler, logger.LevelFromString(cfg.Logging.StreamLevel)))
 
 	// Initialize orchestration components
 	orchLogger := logrus.New()
@@ -2272,7 +2270,9 @@ func initializeCanonicalServices(cfg *config.Config, db *sql.DB, authManager *au
 		healingController:   healingController,
 		eventBus:            eventBus,
 		orchLogger:          orchLogger,
+		networkProvisioner:  newNetworkProvisioner(),
 		shutdown: func() {
+			removeLogSink()
 			websocketHandler.Shutdown()
 			// Gracefully stop orchestration components
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

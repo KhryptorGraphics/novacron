@@ -19,6 +19,7 @@ export type CreateVMBody = {
   disk?: number | undefined;      // GB
   image?: string | undefined;
   tags?: Record<string, string> | undefined;
+  network_id?: string | undefined; // catalog network (GET /networks) to bridge the primary NIC onto
 };
 
 export const listVMs = (params?: ListVMsParams) => apiGet<VM[]>('/vms', params);

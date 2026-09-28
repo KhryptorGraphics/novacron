@@ -333,17 +333,21 @@ func TestRestartSupervisorPermanentFailureAfterMaxAttempts(t *testing.T) {
 	_, sup := newSupervisedVM(t, "vm-doomed", fake, clock)
 
 	sup.RecordStart(ctx, "vm-doomed")
-	if err := sup.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	defer sup.Stop()
-
 	fake.flip("vm-doomed", StateStopped)
-	waitForState(t, sup, "vm-doomed", restartStateBackingOff)
-	// Each attempt becomes due after its fib backoff; walk all 8 deterministically.
+	// Drive tickVM directly alongside the fake clock. A real ticker races each
+	// clock advance and made this backoff test intermittently wait five seconds
+	// for an attempt that was already due.
+	sup.tickVM(ctx, "vm-doomed")
 	for attempt := 1; attempt <= restartMaxAttempts; attempt++ {
 		clock.advance(60 * time.Second) // comfortably past every remaining backoff
-		waitForStarts(t, fake, "vm-doomed", attempt)
+		sup.tickVM(ctx, "vm-doomed")
+		starts, _, _ := fake.callCounts("vm-doomed")
+		if starts != attempt {
+			t.Fatalf("starts = %d, want %d", starts, attempt)
+		}
+	}
+	if status, _ := sup.Inspect(ctx, "vm-doomed"); status.State != restartStatePermanentFailure {
+		t.Fatalf("after max attempts: state=%q, want %q", status.State, restartStatePermanentFailure)
 	}
 	waitForState(t, sup, "vm-doomed", restartStatePermanentFailure)
 
@@ -527,18 +531,15 @@ func TestRequestRestartRefusesAfterPermanentFailure(t *testing.T) {
 	_, sup := newSupervisedVM(t, "vm-doomed-adhoc", fake, clock)
 
 	sup.RecordStart(ctx, "vm-doomed-adhoc")
-	if err := sup.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	defer sup.Stop()
-
 	fake.flip("vm-doomed-adhoc", StateStopped)
-	waitForState(t, sup, "vm-doomed-adhoc", restartStateBackingOff)
+	sup.tickVM(ctx, "vm-doomed-adhoc")
 	for attempt := 1; attempt <= restartMaxAttempts; attempt++ {
 		clock.advance(60 * time.Second)
-		waitForStarts(t, fake, "vm-doomed-adhoc", attempt)
+		sup.tickVM(ctx, "vm-doomed-adhoc")
 	}
-	waitForState(t, sup, "vm-doomed-adhoc", restartStatePermanentFailure)
+	if status, _ := sup.Inspect(ctx, "vm-doomed-adhoc"); status.State != restartStatePermanentFailure {
+		t.Fatalf("after max attempts: state=%q, want %q", status.State, restartStatePermanentFailure)
+	}
 
 	startsBefore, _, _ := fake.callCounts("vm-doomed-adhoc")
 	if err := sup.RequestRestart(ctx, "vm-doomed-adhoc"); err == nil {

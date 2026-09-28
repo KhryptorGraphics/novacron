@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -66,6 +67,54 @@ type Logger struct {
 	structured bool
 	service    string
 	version    string
+	sinks      *sinkSet // shared with every Logger derived via WithContext
+}
+
+// Sink receives every entry a Logger emits (entries below the logger's level
+// never reach it), after the entry is written to the logger's own output.
+// WriteEntry runs synchronously on the logging goroutine, so it must not
+// block, must treat Entry.Fields as read-only, and must never log through the
+// Logger it is attached to (that would recurse).
+type Sink interface {
+	WriteEntry(Entry)
+}
+
+type sinkReg struct{ sink Sink }
+
+// sinkSet is copy-on-write: emit iterates a snapshot without holding the
+// lock, so a sink may add or remove sinks without deadlocking.
+type sinkSet struct {
+	mu   sync.RWMutex
+	regs []*sinkReg
+}
+
+func (s *sinkSet) emit(entry Entry) {
+	s.mu.RLock()
+	regs := s.regs
+	s.mu.RUnlock()
+	for _, r := range regs {
+		r.sink.WriteEntry(entry)
+	}
+}
+
+// AddSink attaches sink to l and to every Logger derived from it. The
+// returned func detaches it; calling it more than once is a no-op.
+func (l *Logger) AddSink(sink Sink) (remove func()) {
+	reg := &sinkReg{sink: sink}
+	l.sinks.mu.Lock()
+	l.sinks.regs = append(l.sinks.regs[:len(l.sinks.regs):len(l.sinks.regs)], reg)
+	l.sinks.mu.Unlock()
+	return func() {
+		l.sinks.mu.Lock()
+		defer l.sinks.mu.Unlock()
+		kept := make([]*sinkReg, 0, len(l.sinks.regs))
+		for _, r := range l.sinks.regs {
+			if r != reg {
+				kept = append(kept, r)
+			}
+		}
+		l.sinks.regs = kept
+	}
 }
 
 // Entry represents a log entry
@@ -120,6 +169,7 @@ func New(config Config) *Logger {
 		structured: config.Structured,
 		service:    config.Service,
 		version:    config.Version,
+		sinks:      &sinkSet{},
 	}
 }
 
@@ -143,6 +193,7 @@ func (l *Logger) WithContext(ctx context.Context) *Logger {
 		structured: l.structured,
 		service:    l.service,
 		version:    l.version,
+		sinks:      l.sinks,
 	}
 }
 
@@ -249,6 +300,7 @@ func (l *Logger) log(level Level, msg string, keysAndValues ...interface{}) {
 	} else {
 		l.outputPlain(entry)
 	}
+	l.sinks.emit(entry)
 }
 
 // outputPlain outputs a plain text log entry

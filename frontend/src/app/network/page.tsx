@@ -13,17 +13,50 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/components/ui/use-toast';
-import { networkApi, type CanonicalNetwork, type CanonicalVmInterface } from '@/lib/api/networks';
+import { useAuth } from '@/hooks/useAuth';
+import { networkApi, type CanonicalNetwork, type CanonicalVmInterface, type CreateNetworkPayload } from '@/lib/api/networks';
 import { useVMs } from '@/lib/api/hooks/useVMs';
 
 type InterfaceMap = Record<string, CanonicalVmInterface[]>;
 
+// Numeric fields stay strings while editing so an empty box means "omit".
 const emptyNetworkForm = {
   name: '',
-  type: 'bridged',
-  subnet: '',
+  cidr: '',
   gateway: '',
+  vlanId: '',
+  mtu: '',
 };
+
+// Mirrors the server's name rule (POST /networks rejects anything else).
+const NETWORK_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
+
+/** Builds the POST /networks body; returns an error message for fields the server would reject. */
+function networkPayload(form: typeof emptyNetworkForm): CreateNetworkPayload | string {
+  const name = form.name.trim();
+  if (!NETWORK_NAME_PATTERN.test(name)) {
+    return "Name must be 1-63 letters, digits, '.', '_' or '-', starting with a letter or digit.";
+  }
+  const payload: CreateNetworkPayload = { name, cidr: form.cidr.trim() };
+  if (form.gateway.trim()) {
+    payload.gateway = form.gateway.trim();
+  }
+  if (form.vlanId.trim()) {
+    const vlan = Number(form.vlanId);
+    if (!Number.isInteger(vlan) || vlan < 1 || vlan > 4094) {
+      return 'VLAN ID must be a whole number between 1 and 4094.';
+    }
+    payload.vlan_id = vlan;
+  }
+  if (form.mtu.trim()) {
+    const mtu = Number(form.mtu);
+    if (!Number.isInteger(mtu) || mtu < 576 || mtu > 9000) {
+      return 'MTU must be a whole number between 576 and 9000.';
+    }
+    payload.mtu = mtu;
+  }
+  return payload;
+}
 
 const emptyInterfaceForm = {
   vmId: '',
@@ -35,6 +68,9 @@ const emptyInterfaceForm = {
 
 export default function NetworkPage() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const userRoles = new Set([user?.role, ...(user?.roles || [])].filter(Boolean));
+  const canManageNetworks = userRoles.has('admin') || userRoles.has('super-admin');
   const [networks, setNetworks] = useState<CanonicalNetwork[]>([]);
   const [interfacesByVm, setInterfacesByVm] = useState<InterfaceMap>({});
   const [loading, setLoading] = useState(true);
@@ -93,27 +129,27 @@ export default function NetworkPage() {
 
     return {
       totalNetworks: networks.length,
-      activeNetworks: networks.filter((entry) => entry.status === 'active').length,
+      attachedVMs: networks.reduce((sum, entry) => sum + entry.vm_count, 0),
       totalInterfaces: interfaceCount,
       utilizedNetworks: attachedNetworks.size,
     };
   }, [interfacesByVm, networks]);
 
   const createNetwork = async () => {
+    const payload = networkPayload(networkForm);
+    if (typeof payload === 'string') {
+      toast({ title: 'Invalid network', description: payload, variant: 'destructive' });
+      return;
+    }
     setSaving(true);
     try {
-      const createdNetwork = await networkApi.createNetwork({
-        name: networkForm.name,
-        type: networkForm.type,
-        subnet: networkForm.subnet,
-        gateway: networkForm.gateway || undefined,
-      });
+      const createdNetwork = await networkApi.createNetwork(payload);
       setNetworks((current) => [createdNetwork, ...current]);
       setNetworkForm(emptyNetworkForm);
       setNetworkDialogOpen(false);
       toast({
         title: 'Network created',
-        description: `${createdNetwork.name} is now available on the canonical network surface.`,
+        description: `${createdNetwork.name} is provisioned as bridge ${createdNetwork.bridge}.`,
       });
     } catch (createError) {
       toast({
@@ -136,7 +172,7 @@ export default function NetworkPage() {
       setNetworks((current) => current.filter((entry) => entry.id !== selectedNetwork.id));
       toast({
         title: 'Network deleted',
-        description: `${selectedNetwork.name} was removed from the canonical inventory.`,
+        description: `${selectedNetwork.name} and its bridge ${selectedNetwork.bridge} were removed.`,
       });
     } catch (deleteError) {
       toast({
@@ -209,7 +245,8 @@ export default function NetworkPage() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Network</h1>
             <p className="text-muted-foreground">
-              Canonical network inventory and VM interface management backed by `/api/v1/networks*`.
+              Canonical network inventory and VM interface management backed by `/api/v1/networks*`. Each network is a
+              host bridge that new VMs can be attached to.
             </p>
           </div>
           <div className="flex gap-2">
@@ -217,10 +254,12 @@ export default function NetworkPage() {
               <Link2 className="mr-2 h-4 w-4" />
               Attach Interface
             </Button>
-            <Button onClick={() => setNetworkDialogOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add Network
-            </Button>
+            {canManageNetworks ? (
+              <Button onClick={() => setNetworkDialogOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Network
+              </Button>
+            ) : null}
           </div>
         </div>
 
@@ -236,11 +275,11 @@ export default function NetworkPage() {
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Active</CardTitle>
-              <Badge variant="secondary">{stats.activeNetworks}</Badge>
+              <CardTitle className="text-sm font-medium">Attached VMs</CardTitle>
+              <Badge variant="secondary">{stats.attachedVMs}</Badge>
             </CardHeader>
             <CardContent>
-              <div className="text-sm text-muted-foreground">Inventory only. Topology and QoS analytics stay deferred.</div>
+              <div className="text-sm text-muted-foreground">VMs created on a catalog network. Topology and QoS analytics stay deferred.</div>
             </CardContent>
           </Card>
           <Card>
@@ -266,7 +305,10 @@ export default function NetworkPage() {
         <Card>
           <CardHeader>
             <CardTitle>Networks</CardTitle>
-            <CardDescription>Only live inventory and interface operations remain on this route.</CardDescription>
+            <CardDescription>
+              Host bridges managed by NovaCron. Only administrators can create or delete networks; a network with VMs
+              attached cannot be deleted.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -283,11 +325,13 @@ export default function NetworkPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Name</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Subnet</TableHead>
+                    <TableHead>Bridge</TableHead>
+                    <TableHead>CIDR</TableHead>
                     <TableHead>Gateway</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead>VLAN</TableHead>
+                    <TableHead>MTU</TableHead>
+                    <TableHead>VMs</TableHead>
+                    {canManageNetworks ? <TableHead className="text-right">Actions</TableHead> : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -295,19 +339,27 @@ export default function NetworkPage() {
                     <TableRow key={entry.id}>
                       <TableCell className="font-medium">{entry.name}</TableCell>
                       <TableCell>
-                        <Badge variant="outline">{entry.type}</Badge>
+                        <Badge variant="outline">{entry.bridge}</Badge>
                       </TableCell>
-                      <TableCell>{entry.subnet}</TableCell>
-                      <TableCell>{entry.gateway || '-'}</TableCell>
-                      <TableCell>
-                        <Badge variant={entry.status === 'active' ? 'secondary' : 'outline'}>{entry.status}</Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button size="sm" variant="outline" onClick={() => deleteNetwork(entry)}>
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Delete
-                        </Button>
-                      </TableCell>
+                      <TableCell>{entry.cidr}</TableCell>
+                      <TableCell>{entry.gateway || 'none (L2 only)'}</TableCell>
+                      <TableCell>{entry.vlan_id ?? 'untagged'}</TableCell>
+                      <TableCell>{entry.mtu}</TableCell>
+                      <TableCell>{entry.vm_count}</TableCell>
+                      {canManageNetworks ? (
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => deleteNetwork(entry)}
+                            disabled={entry.vm_count > 0}
+                            title={entry.vm_count > 0 ? 'Delete the VMs on this network first' : undefined}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete
+                          </Button>
+                        </TableCell>
+                      ) : null}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -367,7 +419,10 @@ export default function NetworkPage() {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Create Network</DialogTitle>
-              <DialogDescription>Add a canonical network inventory record.</DialogDescription>
+              <DialogDescription>
+                Creates a host bridge on this node. With a gateway the host joins the network at that address; leave it
+                empty for a pure layer-2 network.
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
@@ -379,30 +434,16 @@ export default function NetworkPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="network-type">Type</Label>
-                <Select value={networkForm.type} onValueChange={(value) => setNetworkForm((current) => ({ ...current, type: value }))}>
-                  <SelectTrigger id="network-type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="bridged">Bridged</SelectItem>
-                    <SelectItem value="isolated">Isolated</SelectItem>
-                    <SelectItem value="nat">NAT</SelectItem>
-                    <SelectItem value="host-only">Host Only</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="network-subnet">Subnet</Label>
+                <Label htmlFor="network-cidr">CIDR</Label>
                 <Input
-                  id="network-subnet"
-                  value={networkForm.subnet}
-                  onChange={(event) => setNetworkForm((current) => ({ ...current, subnet: event.target.value }))}
+                  id="network-cidr"
+                  value={networkForm.cidr}
+                  onChange={(event) => setNetworkForm((current) => ({ ...current, cidr: event.target.value }))}
                   placeholder="192.168.10.0/24"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="network-gateway">Gateway</Label>
+                <Label htmlFor="network-gateway">Gateway (optional)</Label>
                 <Input
                   id="network-gateway"
                   value={networkForm.gateway}
@@ -410,10 +451,32 @@ export default function NetworkPage() {
                   placeholder="192.168.10.1"
                 />
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="network-vlan">VLAN ID (optional)</Label>
+                  <Input
+                    id="network-vlan"
+                    inputMode="numeric"
+                    value={networkForm.vlanId}
+                    onChange={(event) => setNetworkForm((current) => ({ ...current, vlanId: event.target.value }))}
+                    placeholder="1-4094"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="network-mtu">MTU (optional)</Label>
+                  <Input
+                    id="network-mtu"
+                    inputMode="numeric"
+                    value={networkForm.mtu}
+                    onChange={(event) => setNetworkForm((current) => ({ ...current, mtu: event.target.value }))}
+                    placeholder="1500"
+                  />
+                </div>
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setNetworkDialogOpen(false)}>Cancel</Button>
-              <Button onClick={createNetwork} disabled={saving || !networkForm.name || !networkForm.subnet}>
+              <Button onClick={createNetwork} disabled={saving || !networkForm.name.trim() || !networkForm.cidr.trim()}>
                 {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Create Network
               </Button>

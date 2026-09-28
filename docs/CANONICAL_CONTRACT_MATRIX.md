@@ -60,9 +60,10 @@ Treat older README sections, feature reports, and alternate entrypoints as histo
 | `GET /api/v1/monitoring/vms` | live | Canonical monitoring VM summary route used by the routed monitoring dashboard. |
 | `GET /api/v1/monitoring/alerts` | live | Recent alerts from the in-process alert store (VM errors and healing events), the same events pushed on `/api/ws/alerts`. |
 | `POST /api/v1/monitoring/alerts/{id}/acknowledge` | deferred | Frontend should present this as unavailable until the canonical server exposes it. |
-| `GET /api/v1/networks` | live | Honest empty catalog: the canonical schema has no networks table. |
-| `POST /api/v1/networks` | deferred | Returns 501; per-VM interfaces live at `/api/v1/vms/{vm_id}/interfaces`. |
-| `GET/DELETE /api/v1/networks/{id}` | live | Always 404 (no catalog). |
+| `GET /api/v1/networks` | live | Networks catalog (migration `000018_networks`): NovaCron-managed host bridges of this node. `vm_count` is org-scoped for non-admins. |
+| `POST /api/v1/networks` | live | Admin/super-admin. Body `{name, cidr, gateway?, vlan_id?, mtu?}`; inserts the row and provisions the bridge (`ncbr-<id prefix>`, optional 802.1Q port on `NOVACRON_NETWORK_UPLINK`, qemu-bridge-helper ACL) in one transaction. 409 on duplicate name / overlapping CIDR / host conflicts. |
+| `GET/DELETE /api/v1/networks/{id}` | live | Delete is admin-only and refused (409, `vm_ids`) while any VM has `network_id` set to it; otherwise removes the bridge and the row together. |
+| `POST /api/v1/vms` `network_id` | live | Bridges the KVM guest's primary NIC onto that catalog network (`-netdev bridge`); persisted in `vms.network_id`. Forces local placement (the catalog is node-local). |
 | `GET/POST /api/v1/vms/{vm_id}/interfaces` | live | Canonical VM interface list/attach route set. |
 | `GET/PUT/DELETE /api/v1/vms/{vm_id}/interfaces/{id}` | live | Canonical VM interface detail/update/delete route set. |
 | `/api/vms*` and `/api/monitoring/*` | compat | Legacy secure aliases retained during gradual cutover. |
@@ -81,8 +82,8 @@ WebSocket routes are served on `API_PORT`. Authentication: an `Authorization: Be
 | --- | --- | --- |
 | `GET /api/ws/console/{vmId}` | live | Canonical console channel. |
 | `GET /api/ws/metrics` | live | Canonical metrics stream: `{type:"metric", source, metrics, timestamp}` per client at `?interval=` (1–300 s), filtered by `?sources=`. Host metrics are sampled by one shared sampler. |
-| `GET /api/ws/alerts` | live | Canonical alert stream: `{type, data, timestamp}` with `type` `security_alert` (VM errors, healing events) or `vm_status` (`data.id/status/previous_status`). Fanned out to every subscriber; slow clients are disconnected. |
-| `GET /api/ws/logs` | live | Canonical log stream (fan-out wired; no in-process log producer publishes yet). |
+| `GET /api/ws/alerts` | live | Canonical alert stream: `{type, data, timestamp}` with `type` `security_alert` (VM errors, healing events, heartbeat-detected node unreachable/reachable after 3 missed/1 good probe, triggered autoscaler scale-up/down) or `vm_status` (`data.id/status/previous_status`). Fanned out to every subscriber; slow clients are disconnected. |
+| `GET /api/ws/logs` | live | Canonical log stream: api-server log entries at or above `LOG_STREAM_LEVEL` (default `info`) as `{type:"log", source:"system", level, message, timestamp, component:"api-server", vm_id?, labels}`; filters `?level=`, `?components=`, `?vm_id=`. Best-effort: entries are dropped when the broadcast queue is full. |
 | `GET /api/ws/logs/{source}` | live | Canonical source-scoped log stream. |
 | `GET /api/ws/security/events` | live | Canonical security event stream. |
 | `/ws/console/*`, `/ws/metrics`, `/ws/alerts`, `/ws/logs*` | compat | Legacy websocket aliases retained during gradual cutover. |
@@ -109,5 +110,6 @@ WebSocket routes are served on `API_PORT`. Authentication: an `Authorization: Be
 - The routed storage surface is volume-only. Pools, snapshots, backups, deletion, and storage realtime channels are intentionally out of scope for the release candidate.
 - New backend work should extend canonical paths first and add compat aliases only when required by the gradual cutover plan.
 - If a route or channel is not marked `live` or `compat` here, treat it as unsupported until it is explicitly implemented and promoted.
-- The API server refuses to boot unless golang-migrate's `schema_migrations` reports a clean (non-dirty) version at or above the migration it requires (currently `000017_session_refresh_tokens`). Apply `database/migrations` first (the `novacron/migrate` image / `database/migrate.go`).
+- The API server refuses to boot unless golang-migrate's `schema_migrations` reports a clean (non-dirty) version at or above the migration it requires (currently `000018_networks`). Apply `database/migrations` first (the `novacron/migrate` image / `database/migrate.go`).
+- Catalog networks are re-provisioned at api-server boot (`reconcileNetworks`), since host bridges do not survive a reboot. Provisioning needs `CAP_NET_ADMIN`; the qemu-bridge-helper allow list is kept under `NOVACRON_QEMU_BRIDGE_ACL_DIR` (default `/etc/qemu`, `none` to manage `bridge.conf` by hand).
 - `backend/cmd/api-server` is the only control-plane server binary. `backend/cmd/core-server` and its `backend/api/vm` handlers were retired; `backend/core/cmd/novacron` is the hypervisor node agent (`-listen`, health at `/healthz`).

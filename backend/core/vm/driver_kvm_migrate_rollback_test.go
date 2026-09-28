@@ -60,6 +60,7 @@ func TestLiveMigrationRollbackOnDestFailure(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create source VM: %v", err)
 	}
+	stopAtCleanup(t, d, srcID)
 	if err := d.StartMigrationSource(ctx, srcID); err != nil {
 		t.Fatalf("start migration source: %v", err)
 	}
@@ -68,16 +69,15 @@ func TestLiveMigrationRollbackOnDestFailure(t *testing.T) {
 		t.Fatalf("get source VM info: %v", err)
 	}
 	srcPID := srcInfo.PID
-
-	defer func() {
-		_ = d.Stop(context.Background(), destID)
-		if info, err := d.GetInfo(context.Background(), destID); err == nil && info.PID > 0 {
-			_ = syscall.Kill(info.PID, syscall.SIGKILL)
+	var destPID int
+	t.Cleanup(func() {
+		if err := d.Stop(context.Background(), destID); err != nil && destPID > 0 && syscall.Kill(destPID, 0) == nil {
+			_ = syscall.Kill(destPID, syscall.SIGKILL)
+			if !waitProcessGone(destPID, 10*time.Second) {
+				t.Errorf("cleanup: destination qemu PID %d still alive", destPID)
+			}
 		}
-		if syscall.Kill(srcPID, 0) == nil {
-			_ = syscall.Kill(srcPID, syscall.SIGKILL)
-		}
-	}()
+	})
 
 	// Wait for the source guest to boot (emit the counter).
 	srcConsole := filepath.Join(vmBase, srcID, "console.log")
@@ -97,7 +97,7 @@ func TestLiveMigrationRollbackOnDestFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get dest VM info: %v", err)
 	}
-	destPID := destInfo.PID
+	destPID = destInfo.PID
 
 	// Throttle the source migration so the dest-kill lands mid-transfer.
 	srcQMP := filepath.Join(vmBase, srcID, "qmp.sock")

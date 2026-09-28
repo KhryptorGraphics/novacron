@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -229,6 +230,12 @@ type clusterCreateSpec struct {
 	// TenantID is accepted on the wire for backward compatibility; the
 	// canonical vms table has no tenancy column, so it is not persisted.
 	TenantID string `json:"tenant_id,omitempty"`
+	// NetworkID names the catalog network (networks.id on THIS node) the
+	// guest's primary NIC is bridged onto; empty = isolated user-mode NIC.
+	// Persisted in vms.network_id, which blocks deleting the network while
+	// the VM exists. Node-local: a VM on a catalog network is always placed
+	// locally (see clusteredCreateHandler).
+	NetworkID string `json:"network_id,omitempty"`
 	// Fabric job (P2/G2): when Command is non-empty the Process driver runs
 	// it instead of booting a KVM guest — the thinnest executor surface that
 	// reuses VM create/dispatch/start/stop/logs end to end.
@@ -311,6 +318,17 @@ func createVMLocal(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 	if ownerID != "" {
 		requestedOwnerID = "" // resolved locally: no divergence to record
 	}
+	// A catalog network must exist on THIS node before the guest is built
+	// around its bridge (and before the FK insert below would refuse it).
+	networkID := ""
+	if strings.TrimSpace(spec.NetworkID) != "" {
+		if db == nil {
+			return "", "", fmt.Errorf("%w: no networks catalog", errUnknownNetwork)
+		}
+		if networkID, err = resolveCatalogNetwork(ctx, db, spec.NetworkID); err != nil {
+			return "", "", err
+		}
+	}
 	if vmManager != nil {
 		if _, cerr := vmManager.CreateVM(ctx, core_vm.CreateVMRequest{
 			Name:                  spec.Name,
@@ -323,6 +341,9 @@ func createVMLocal(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 				VCPUs: spec.VCPUs, CPUShares: spec.CPUShares, MemoryMB: spec.MemoryMB, DiskSizeGB: spec.DiskSizeGB,
 				Image: spec.Image, OwnerID: ownerID, OrganizationID: orgLabelForVM(spec.OrganizationID),
 				Command: spec.Command, Args: spec.Args, Env: spec.Env,
+				// Bridges the KVM guest's primary NIC onto the catalog
+				// network (core/vm kvmNICArgs).
+				NetworkID: networkID,
 				// Runtime quota accounting needs a bucket even though the
 				// canonical vms table has no tenancy column to persist.
 				TenantID: runtimeTenant(spec.TenantID),
@@ -353,10 +374,10 @@ func createVMLocal(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 	// usageOrgForVM then attributes the row to the default org.
 	orgID := orgLabelForVM(spec.OrganizationID)
 	if _, dberr := db.Exec(`
-		INSERT INTO vms (id, name, state, cpu_cores, memory_mb, disk_gb, os_type, node_id, owner_id, requested_owner_id, organization_id, metadata, created_at, updated_at)
+		INSERT INTO vms (id, name, state, cpu_cores, memory_mb, disk_gb, os_type, node_id, owner_id, requested_owner_id, organization_id, metadata, network_id, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, NULLIF($10, '')::uuid,
-			(SELECT o.id FROM organizations o WHERE o.id = NULLIF($11, '')::uuid), $12, NOW(), NOW())
-	`, vmID, spec.Name, state, cores, spec.MemoryMB, spec.DiskSizeGB, nullableStringValue(spec.Image), selfNodeID(), ownerID, requestedOwnerID, orgID, metadataPayload); dberr != nil {
+			(SELECT o.id FROM organizations o WHERE o.id = NULLIF($11, '')::uuid), $12, NULLIF($13, '')::uuid, NOW(), NOW())
+	`, vmID, spec.Name, state, cores, spec.MemoryMB, spec.DiskSizeGB, nullableStringValue(spec.Image), selfNodeID(), ownerID, requestedOwnerID, orgID, metadataPayload, networkID); dberr != nil {
 		if vmManager != nil {
 			_ = vmManager.DeleteVM(context.Background(), vmID)
 		}
@@ -429,6 +450,9 @@ func clusteredCreateHandler(db *sql.DB, vmManager *core_vm.VMManager, storagePat
 			// into a named org); for everyone else the JWT claim owns the org
 			// and a mismatching body value is a 403, not an override.
 			OrganizationID string `json:"organization_id,omitempty"`
+			// NetworkID attaches the guest to a catalog network of THIS
+			// node (GET /networks), so it forces local placement.
+			NetworkID string `json:"network_id,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid request body")
@@ -442,6 +466,23 @@ func clusteredCreateHandler(db *sql.DB, vmManager *core_vm.VMManager, storagePat
 		if req.VCPUs > 256 {
 			writeJSONError(w, http.StatusBadRequest, "vcpus must be between 1 and 256")
 			return
+		}
+		networkID := strings.TrimSpace(req.NetworkID)
+		if networkID != "" {
+			if db == nil {
+				writeJSONError(w, http.StatusBadRequest, "network_id: no networks catalog")
+				return
+			}
+			resolved, err := resolveCatalogNetwork(r.Context(), db, networkID)
+			if errors.Is(err, errUnknownNetwork) {
+				writeJSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if err != nil {
+				writeJSONError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			networkID = resolved
 		}
 		// requireAuth puts the (string) user_id claim on the context; only a
 		// well-formed uuid can own a canonical vms row (owner_id -> users.id).
@@ -473,11 +514,20 @@ func clusteredCreateHandler(db *sql.DB, vmManager *core_vm.VMManager, storagePat
 		spec := clusterCreateSpec{
 			Name: req.Name, VCPUs: req.VCPUs, CPUShares: req.CPUShares, MemoryMB: req.MemoryMB,
 			DiskSizeGB: req.DiskSizeGB, Image: req.Image, Tags: req.Tags,
-			OwnerID: userID, OrganizationID: orgID,
+			OwnerID: userID, OrganizationID: orgID, NetworkID: networkID,
 		}
 
 		target := strings.TrimSpace(req.NodeID)
 		auto := target == "" || target == "auto" || target == "cluster"
+		if networkID != "" {
+			// The catalog is node-local: the bridge exists here, not on a
+			// peer, so a networked VM is placed on this node.
+			if !auto && target != selfNodeID() {
+				writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("network_id names a network of node %s; node_id %q cannot host it", selfNodeID(), target))
+				return
+			}
+			auto, target = false, selfNodeID()
+		}
 		peers := map[string]string{}
 		if vmManager != nil {
 			peers = vmManager.MigrationPeers()

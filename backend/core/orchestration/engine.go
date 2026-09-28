@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/khryptorgraphics/novacron/backend/core/orchestration/autoscaling"
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration/events"
 	"github.com/khryptorgraphics/novacron/backend/core/orchestration/placement"
 )
@@ -82,9 +83,10 @@ type DefaultOrchestrationEngine struct {
 	logger          *logrus.Logger
 
 	// Metrics
-	eventsProcessed uint64
-	decisionsCount  uint64
-	metrics         map[string]interface{}
+	eventsProcessed  uint64
+	decisionsCount   uint64
+	scalingTriggered uint64
+	metrics          map[string]interface{}
 
 	// Node tracking and healing hooks
 	nodeStatuses    map[string]NodeStatus
@@ -213,7 +215,7 @@ func (e *DefaultOrchestrationEngine) Start(ctx context.Context) error {
 	)
 
 	eventHandler.AddHandler(
-		[]events.EventType{events.EventTypeNodeMetrics, events.EventTypeNodeFailure},
+		[]events.EventType{events.EventTypeNodeMetrics, events.EventTypeNodeFailure, events.EventTypeNodeRecovered},
 		events.NewEventHandlerFunc("node-events", "Node Event Handler", e.handleNodeEvent),
 	)
 
@@ -507,6 +509,8 @@ func (e *DefaultOrchestrationEngine) handleNodeEvent(ctx context.Context, event 
 	switch event.Type {
 	case events.EventTypeNodeFailure:
 		return e.handleNodeFailure(ctx, event)
+	case events.EventTypeNodeRecovered:
+		return e.handleNodeRecovered(ctx, event)
 	case events.EventTypeNodeMetrics:
 		return e.handleNodeMetrics(ctx, event)
 	}
@@ -514,19 +518,32 @@ func (e *DefaultOrchestrationEngine) handleNodeEvent(ctx context.Context, event 
 	return nil
 }
 
-// handleScalingEvent handles scaling-related events
+// handleScalingEvent records a triggered (scale_up/scale_down) autoscaler
+// decision in the engine's status metrics, so /orchestration/status reports
+// the latest triggered scaling per autoscaling target.
 func (e *DefaultOrchestrationEngine) handleScalingEvent(ctx context.Context, event *events.OrchestrationEvent) error {
+	decision, _ := event.Data["decision"].(*autoscaling.ScalingDecision)
+	if decision == nil || event.Target == "" {
+		return fmt.Errorf("scaling event %s carries no target decision", event.ID)
+	}
+
 	e.mu.Lock()
 	e.eventsProcessed++
+	e.scalingTriggered++
+	e.metrics["scaling_triggered_total"] = e.scalingTriggered
+	e.metrics[fmt.Sprintf("scaling.%s.action", event.Target)] = string(decision.Action)
+	e.metrics[fmt.Sprintf("scaling.%s.current_scale", event.Target)] = decision.CurrentScale
+	e.metrics[fmt.Sprintf("scaling.%s.target_scale", event.Target)] = decision.TargetScale
+	e.metrics[fmt.Sprintf("scaling.%s.triggered_at", event.Target)] = decision.DecisionTime
 	e.mu.Unlock()
 
 	e.logger.WithFields(logrus.Fields{
-		"event_id":   event.ID,
-		"event_type": event.Type,
-		"source":     event.Source,
-	}).Debug("Handling scaling event")
-
-	// TODO: Implement scaling logic
+		"target_id":     event.Target,
+		"action":        decision.Action,
+		"current_scale": decision.CurrentScale,
+		"target_scale":  decision.TargetScale,
+		"reason":        decision.Reason,
+	}).Info("Scaling triggered")
 	return nil
 }
 
@@ -582,11 +599,21 @@ func (e *DefaultOrchestrationEngine) handleNodeFailure(ctx context.Context, even
 
 	e.logger.WithField("node_id", nodeID).Warn("Node failure detected")
 
-	// TODO: Implement node failure handling:
-	// - Migrate VMs from failed node
-	// - Update node status
-	// - Trigger healing policies
+	return nil
+}
 
+// handleNodeRecovered marks a node healthy again after a NodeFailure.
+func (e *DefaultOrchestrationEngine) handleNodeRecovered(ctx context.Context, event *events.OrchestrationEvent) error {
+	nid, _ := event.Data["node_id"].(string)
+	if nid == "" {
+		return nil
+	}
+	e.mu.Lock()
+	e.nodeStatuses[nid] = NodeStatus{ID: nid, Healthy: true, LastChange: time.Now(), Reason: "recovered_event"}
+	e.lastNodeEvents[nid] = time.Now()
+	e.mu.Unlock()
+
+	e.logger.WithField("node_id", nid).Info("Node recovered")
 	return nil
 }
 

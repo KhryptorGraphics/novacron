@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -193,8 +194,8 @@ func newKVMDriverEnhanced(qemuPath, vmBasePath string, qmpStartupTimeout time.Du
 // if that process is still alive, reconstructs a StateRunning KVMVMInfo so the
 // restarted driver manages the live qemu instead of losing track of it.
 // ponytail: called only from construction (single goroutine) so it takes no lock.
-// ponytail: adopted VMs get no monitorVM goroutine, so an adopted qemu that dies
-// on its own is only noticed on the next Stop/GetStatus — fine for restart re-sync.
+// An adopted qemu is not our child, so it gets monitorAdoptedVM (polling)
+// instead of monitorVM (cmd.Wait) to observe it exiting on its own.
 func (d *KVMDriverEnhanced) adoptRunningVMs() {
 	entries, err := os.ReadDir(d.vmBasePath)
 	if err != nil {
@@ -250,7 +251,11 @@ func (d *KVMDriverEnhanced) adoptRunningVMs() {
 }
 
 // monitorAdoptedVM polls an adopted qemu (a non-child process, so cmd.Wait can't
-// be used) and marks the VM stopped once its process exits.
+// be used) and marks the VM stopped once its process exits -- in any state
+// (running or paused), as long as the VM still tracks THAT pid; once Stop has
+// already recorded the exit (PID=0) or a relaunch took over, it is a no-op.
+// No pci release here: an adopted VM's bindings are owned by the previous
+// driver process, which releasePCIDevices never touches.
 func (d *KVMDriverEnhanced) monitorAdoptedVM(vmID string, pid int) {
 	for {
 		time.Sleep(3 * time.Second)
@@ -258,12 +263,8 @@ func (d *KVMDriverEnhanced) monitorAdoptedVM(vmID string, pid int) {
 			continue // still alive
 		}
 		d.vmLock.Lock()
-		if vmInfo, ok := d.vms[vmID]; ok && vmInfo.PID == pid && vmInfo.State == StateRunning {
-			now := time.Now()
-			vmInfo.State = StateStopped
-			vmInfo.StoppedTime = &now
-			vmInfo.Process = nil
-			vmInfo.PID = 0
+		if vmInfo, ok := d.vms[vmID]; ok && vmInfo.PID == pid {
+			markStopped(vmInfo)
 			log.Printf("Adopted KVM VM %s (PID %d) exited; marked stopped", vmID, pid)
 		}
 		d.vmLock.Unlock()
@@ -527,6 +528,17 @@ func (d *KVMDriverEnhanced) launchVMProcess(vmID string, vmInfo *KVMVMInfo) erro
 			return nil
 		} else {
 			lastErr = err
+			// Never leave the abandoned qemu behind. One that is merely slow to
+			// open QMP (a loaded host) would otherwise keep the disk locked and
+			// its runtime dir busy while the driver reports StateFailed -- and a
+			// migration dest's caller drops it from d.vms, orphaning it for good
+			// (novacron-c0p). Killed first so its stderr log is complete.
+			if kerr := killAbandonedLaunch(vmInfo); kerr != nil {
+				now := time.Now()
+				vmInfo.State = StateFailed
+				vmInfo.StoppedTime = &now
+				return fmt.Errorf("QEMU for VM %s failed to come up: %w; %v", vmID, err, kerr)
+			}
 			stderr := tailQEMUStderr(cmd.Dir)
 			// A lost VNC-port race is recoverable: pick a fresh display and retry.
 			if attempt < maxAttempts && isPortBindError(stderr) {
@@ -542,6 +554,23 @@ func (d *KVMDriverEnhanced) launchVMProcess(vmID string, vmInfo *KVMVMInfo) erro
 		}
 	}
 	return fmt.Errorf("QEMU for VM %s failed to come up after %d attempts: %w", vmID, maxAttempts, lastErr)
+}
+
+// killAbandonedLaunch SIGKILLs the qemu of a launch being abandoned, waits
+// until monitorVM has reaped it, and clears the VM's process fields so that
+// monitorVM treats the exit as already handled. Signalled via os.Process
+// (pidfd-backed), so a qemu that already died and was reaped is reported as
+// ErrProcessDone rather than a recycled PID being killed. Caller holds d.vmLock
+// (monitorVM reaps before taking it, so the wait cannot deadlock).
+func killAbandonedLaunch(vmInfo *KVMVMInfo) error {
+	if p := vmInfo.Process; p != nil {
+		if err := p.Signal(syscall.SIGKILL); !errors.Is(err, os.ErrProcessDone) && !awaitProcessGone(p.Pid, 5*time.Second) {
+			return fmt.Errorf("abandoned qemu PID %d still alive after SIGKILL", p.Pid)
+		}
+	}
+	vmInfo.Process = nil
+	vmInfo.PID = 0
+	return nil
 }
 
 // waitQMPUp waits until qemu has opened its QMP socket (proof it launched and is
@@ -597,7 +626,14 @@ func firstLine(s string) string {
 	return s
 }
 
-// Stop stops a KVM VM
+// Stop stops a KVM VM. It is idempotent: a VM with no qemu process -- never
+// started, already stopped, a failed launch (whose qemu launchVMProcess
+// killed), or one whose qemu exited on its own (monitorVM / monitorAdoptedVM
+// recorded the exit) -- is already stopped, so Stop succeeds without
+// signalling anything instead of failing "not running" (novacron-3pw). A
+// crashed VM (StateFailed) is acknowledged as StateStopped, matching the
+// manager, which records the VM stopped once Stop succeeds. A VM that still
+// has a qemu process -- running or paused -- is terminated.
 func (d *KVMDriverEnhanced) Stop(ctx context.Context, vmID string) error {
 	d.vmLock.Lock()
 	defer d.vmLock.Unlock()
@@ -607,8 +643,11 @@ func (d *KVMDriverEnhanced) Stop(ctx context.Context, vmID string) error {
 		return fmt.Errorf("VM %s not found", vmID)
 	}
 
-	if vmInfo.State != StateRunning {
-		return fmt.Errorf("VM %s is not running", vmID)
+	if vmInfo.Process == nil && vmInfo.PID <= 0 {
+		if vmInfo.State == StateFailed {
+			vmInfo.State = StateStopped
+		}
+		return nil
 	}
 
 	log.Printf("Stopping KVM VM %s", vmID)
@@ -632,10 +671,13 @@ func (d *KVMDriverEnhanced) Delete(ctx context.Context, vmID string) error {
 		return fmt.Errorf("VM %s not found", vmID)
 	}
 
-	// Stop the VM if it's running
-	if vmInfo.State == StateRunning {
+	// Stop any qemu still tracked -- running or paused -- before removing its
+	// files. One whose exit monitorVM already recorded (Process=nil) has
+	// nothing left to stop. A qemu that cannot be stopped fails the delete and
+	// stays tracked rather than being forgotten while it still runs.
+	if vmInfo.Process != nil || vmInfo.PID > 0 {
 		if err := d.stopVMInternal(vmInfo); err != nil {
-			log.Printf("Warning: Failed to stop VM %s before deletion: %v", vmID, err)
+			return fmt.Errorf("failed to stop VM %s before deletion: %w", vmID, err)
 		}
 	}
 
@@ -887,16 +929,19 @@ func (d *KVMDriverEnhanced) buildQEMUArgs(vmInfo *KVMVMInfo) []string {
 		"-cpu", cpu,
 		"-m", memArg,
 		"-smp", smpArg,
-		"-netdev", "user,id=net0",
-		"-device", "virtio-net-pci,netdev=net0",
+	}
+	// Primary NIC: bridged onto the VM's catalog network, else the isolated
+	// user-mode NIC (see kvmNICArgs).
+	args = append(args, kvmNICArgs(vmInfo.ID, vmInfo.Config.NetworkID)...)
+	args = append(args,
 		"-vnc", fmt.Sprintf(":%d", vmInfo.VNCPort-5900),
 		"-monitor", fmt.Sprintf("unix:%s,server,nowait", vmInfo.MonitorPath),
 		// Dedicated QMP socket for programmatic control (migration handshake).
 		"-qmp", fmt.Sprintf("unix:%s,server,nowait", filepath.Join(sockDir, "qmp.sock")),
 		// Capture the guest serial console so boot is observable.
-		"-serial", "file:" + filepath.Join(sockDir, "console.log"),
+		"-serial", "file:"+filepath.Join(sockDir, "console.log"),
 		"-pidfile", filepath.Join(sockDir, "qemu.pid"),
-	}
+	)
 
 	// NUMA topology (opt-in; set via ConfigureNUMA before Start). Emitted at
 	// launch because QEMU fixes NUMA at machine init. Nil topology -> no args, so
@@ -1259,25 +1304,29 @@ func (d *KVMDriverEnhanced) saveVMConfig(vmInfo *KVMVMInfo) error {
 }
 
 // monitorVM waits for a launched qemu process to exit and records its
-// terminal state. launchedInfo is the EXACT *KVMVMInfo this goroutine was
-// started for (captured at launch, not looked up again here): a retry that
-// reuses the same vmID (e.g. evictStaleIncomingDestLocked stopping an
-// orphaned migration dest before standing up a fresh one for the same id --
+// terminal state -- but only while launchedInfo still tracks THAT process.
+// launchedInfo is the EXACT *KVMVMInfo this goroutine was started for
+// (captured at launch, not looked up again here): a retry that reuses the
+// same vmID (e.g. evictStaleIncomingDestLocked stopping an orphaned
+// migration dest before standing up a fresh one for the same id --
 // novacron-nxy) replaces d.vms[vmID] with a NEW struct for the NEW process
-// while this goroutine is still blocked in cmd.Wait() for the OLD one. If
-// this only matched by vmID string, the stale goroutine would eventually
-// wake up and clobber the NEW, still-running dest's State/PID/Process fields
-// with the OLD process's exit -- observed live as a freshly-retried
-// migration destination reported State=stopped, PID=0 seconds after a
-// successful launch, even though its qemu was still alive. The identity
-// check makes a stale goroutine a no-op once its vmID has moved on.
+// while this goroutine is still blocked in cmd.Wait() for the OLD one --
+// observed live as a freshly-retried migration destination reported
+// State=stopped, PID=0 seconds after a successful launch. The same struct
+// can also move on to a different process: Stop -> Start relaunches into it,
+// and launchVMProcess's VNC-port retry replaces Process in place. And once
+// Stop/stopVMInternal has already recorded this exit (Process=nil), a late
+// monitor must not flip the explicit stop to StateFailed nor redo the
+// pci-inuse ledger writes after Stop returned -- those writes landed in a
+// test's t.TempDir mid-RemoveAll ("directory not empty", novacron-c0p). The
+// struct + process identity check makes a stale goroutine a no-op.
 func (d *KVMDriverEnhanced) monitorVM(vmID string, launchedInfo *KVMVMInfo, cmd *exec.Cmd) {
 	err := cmd.Wait()
 
 	d.vmLock.Lock()
 	defer d.vmLock.Unlock()
 
-	if vmInfo, exists := d.vms[vmID]; exists && vmInfo == launchedInfo {
+	if vmInfo, exists := d.vms[vmID]; exists && vmInfo == launchedInfo && vmInfo.Process == cmd.Process {
 		now := time.Now()
 		vmInfo.StoppedTime = &now
 
@@ -1318,6 +1367,9 @@ func (d *KVMDriverEnhanced) stopVMInternal(vmInfo *KVMVMInfo) error {
 	// ponytail: kill by PID without a cmdline re-check -- same PID-reuse window
 	// as the prior Process.Signal path; add containsQEMUAndVMID if it matters.
 	_ = syscall.Kill(pid, syscall.SIGTERM)
+	// A paused VM is SIGSTOPped and would only act on the pending SIGTERM once
+	// continued; without this it always waited out the grace period for SIGKILL.
+	_ = syscall.Kill(pid, syscall.SIGCONT)
 	if !awaitProcessGone(pid, stopGracePeriod) {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 		if !awaitProcessGone(pid, 5*time.Second) {

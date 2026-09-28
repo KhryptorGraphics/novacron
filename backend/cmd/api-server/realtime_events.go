@@ -72,13 +72,10 @@ func publishAndStoreAlert(ws *websocketapi.WebSocketHandler, alertType, severity
 // --- eventBus -> alerts bridge ---------------------------------------------
 
 // realtimeEventBridge subscribes to real, reachable orchestration events and
-// republishes them as alerts-channel messages. It intentionally does NOT
-// subscribe to events.EventTypeNodeFailure/EventTypeScalingTriggered:
-// grep-verified, nothing in the canonical api-server path ever Publishes
-// those two — only engine_test.go publishes NodeFailure manually, and the
-// autoscaler emits its OWN autoscaling.EventTypeScalingDecisionMade instead
-// of events.EventTypeScalingTriggered. Wiring unreachable types would be a
-// fake/misleading "supported" claim.
+// republishes them as alerts-channel messages: healing health/recovery
+// events, heartbeat-detected node failure/recovery (peerLiveness), and
+// triggered (scale_up/scale_down) autoscaler decisions — no_action decisions
+// (decision_made only) are not alerts.
 type realtimeEventBridge struct {
 	ws     *websocketapi.WebSocketHandler
 	logger *logrus.Logger
@@ -102,7 +99,9 @@ func (b *realtimeEventBridge) subscribe(ctx context.Context, bus events.EventBus
 	register(events.EventType(healing.EventTypeHealthRestored), b.handleHealthRestored)
 	register(events.EventType(healing.EventTypeRecoveryStarted), b.handleRecoveryStarted)
 	register(events.EventType(healing.EventTypeRecoveryCompleted), b.handleRecoveryCompleted)
-	register(events.EventType(autoscaling.EventTypeScalingDecisionMade), b.handleScalingDecision)
+	register(events.EventTypeScalingTriggered, b.handleScalingTriggered)
+	register(events.EventTypeNodeFailure, b.handleNodeFailure)
+	register(events.EventTypeNodeRecovered, b.handleNodeRecovered)
 }
 
 func (b *realtimeEventBridge) handleHealthDegraded(e *events.OrchestrationEvent) {
@@ -152,14 +151,27 @@ func (b *realtimeEventBridge) handleRecoveryCompleted(e *events.OrchestrationEve
 	publishAndStoreAlert(b.ws, "security_alert", severity, title, desc, "healing-controller", status)
 }
 
-func (b *realtimeEventBridge) handleScalingDecision(e *events.OrchestrationEvent) {
+func (b *realtimeEventBridge) handleScalingTriggered(e *events.OrchestrationEvent) {
 	decision, _ := e.Data["decision"].(*autoscaling.ScalingDecision)
 	if decision == nil {
 		return
 	}
 	publishAndStoreAlert(b.ws, "security_alert", "low",
-		fmt.Sprintf("Scaling %s: %s -> %d", decision.Action, decision.TargetID, decision.TargetScale),
+		fmt.Sprintf("Scaling %s: %s -> %d", decision.Action, e.Target, decision.TargetScale),
 		decision.Reason, "autoscaler", "firing")
+}
+
+func (b *realtimeEventBridge) handleNodeFailure(e *events.OrchestrationEvent) {
+	desc := fmt.Sprintf("Node %s missed %v consecutive heartbeats", e.Target, e.Data["consecutive_failures"])
+	if reason, _ := e.Data["reason"].(string); reason != "" {
+		desc += ": " + reason
+	}
+	publishAndStoreAlert(b.ws, "security_alert", "high", fmt.Sprintf("Node unreachable: %s", e.Target), desc, "cluster-heartbeat", "firing")
+}
+
+func (b *realtimeEventBridge) handleNodeRecovered(e *events.OrchestrationEvent) {
+	publishAndStoreAlert(b.ws, "security_alert", "low", fmt.Sprintf("Node reachable: %s", e.Target),
+		fmt.Sprintf("Node %s answers heartbeats again", e.Target), "cluster-heartbeat", "resolved")
 }
 
 // --- VMManager -> vm_status / VM-error alerts -------------------------------
