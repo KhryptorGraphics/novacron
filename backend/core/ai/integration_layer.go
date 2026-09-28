@@ -46,10 +46,12 @@ type AIMetrics struct {
 	TotalRequests      atomic.Int64
 	SuccessfulRequests atomic.Int64
 	FailedRequests     atomic.Int64
-	AverageResponseTime atomic.Int64 // milliseconds
+	AverageResponseTime atomic.Int64 // milliseconds, mean over successful requests
 	CircuitBreakerTrips atomic.Int64
 	CacheHits          atomic.Int64
 	CacheMisses        atomic.Int64
+
+	totalResponseTime atomic.Int64 // milliseconds, sum over successful requests
 }
 
 // CircuitBreaker implements circuit breaker pattern for AI service calls
@@ -249,6 +251,8 @@ type SeasonalityInfo struct {
 
 // NewAIIntegrationLayer creates a new AI integration layer
 func NewAIIntegrationLayer(endpoint, apiKey string, config AIConfig) *AIIntegrationLayer {
+	config = config.withDefaults()
+
 	client := &http.Client{
 		Timeout: config.Timeout,
 		Transport: &http.Transport{
@@ -305,6 +309,35 @@ func DefaultAIConfig() AIConfig {
 		CacheSize:               1000,
 		CacheTTL:                5 * time.Minute,
 	}
+}
+
+// withDefaults replaces zero or negative fields with DefaultAIConfig values.
+// A zero MaxConnections would reject every request and a zero Retries would
+// never attempt one.
+func (c AIConfig) withDefaults() AIConfig {
+	d := DefaultAIConfig()
+	if c.Timeout <= 0 {
+		c.Timeout = d.Timeout
+	}
+	if c.Retries <= 0 {
+		c.Retries = d.Retries
+	}
+	if c.MaxConnections <= 0 {
+		c.MaxConnections = d.MaxConnections
+	}
+	if c.CircuitBreakerThreshold <= 0 {
+		c.CircuitBreakerThreshold = d.CircuitBreakerThreshold
+	}
+	if c.CircuitBreakerTimeout <= 0 {
+		c.CircuitBreakerTimeout = d.CircuitBreakerTimeout
+	}
+	if c.CacheSize <= 0 {
+		c.CacheSize = d.CacheSize
+	}
+	if c.CacheTTL <= 0 {
+		c.CacheTTL = d.CacheTTL
+	}
+	return c
 }
 
 // PredictResourceDemand predicts resource demand for a node
@@ -488,113 +521,91 @@ func (ai *AIIntegrationLayer) makeRequest(ctx context.Context, req AIRequest) (*
 		return nil, fmt.Errorf("circuit breaker is open")
 	}
 
-	// Rate limiting
-	if ai.activeRequests.Load() >= int32(ai.maxConnections) {
+	// Rate limiting: reserve a slot atomically so concurrent callers cannot
+	// overshoot maxConnections between a load and an increment.
+	if ai.activeRequests.Add(1) > int32(ai.maxConnections) {
+		ai.activeRequests.Add(-1)
 		return nil, fmt.Errorf("too many active requests")
 	}
-
-	ai.activeRequests.Add(1)
 	defer ai.activeRequests.Add(-1)
 
+	jsonData, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
 	var lastErr error
-	for attempt := 0; attempt < ai.retries; attempt++ {
-		// Check context cancellation
-		select {
-		case <-ctx.Done():
+	for attempt := range ai.retries {
+		if attempt > 0 {
+			// Linear backoff that still honours caller cancellation.
+			backoff := time.NewTimer(time.Duration(attempt) * time.Second)
+			select {
+			case <-ctx.Done():
+				backoff.Stop()
+				ai.metrics.FailedRequests.Add(1)
+				return nil, ctx.Err()
+			case <-backoff.C:
+			}
+		}
+
+		aiResp, err := ai.attempt(ctx, jsonData, attempt)
+		if err == nil {
+			ai.circuitBreaker.RecordSuccess()
+			successful := ai.metrics.SuccessfulRequests.Add(1)
+			total := ai.metrics.totalResponseTime.Add(time.Since(start).Milliseconds())
+			ai.metrics.AverageResponseTime.Store(total / successful)
+			return aiResp, nil
+		}
+
+		if ctx.Err() != nil {
+			// The caller gave up; that says nothing about service health, so
+			// neither retry nor count it against the circuit breaker.
+			ai.metrics.FailedRequests.Add(1)
 			return nil, ctx.Err()
-		default:
 		}
 
-		// Marshal request
-		jsonData, err := json.Marshal(req)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal request: %w", err)
-		}
-
-		// Create HTTP request
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", ai.endpoint+"/api/v1/process", bytes.NewBuffer(jsonData))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-		}
-
-		// Set headers
-		httpReq.Header.Set("Content-Type", "application/json")
-		if ai.apiKey != "" {
-			httpReq.Header.Set("Authorization", "Bearer "+ai.apiKey)
-		}
-
-		// Make request
-		resp, err := ai.client.Do(httpReq)
-		if err != nil {
-			lastErr = fmt.Errorf("HTTP request failed (attempt %d): %w", attempt+1, err)
-			ai.circuitBreaker.RecordFailure()
-			if attempt < ai.retries-1 {
-				time.Sleep(time.Duration(attempt+1) * time.Second)
-				continue
-			}
-			break
-		}
-
-		// Read response
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-
-		if err != nil {
-			lastErr = fmt.Errorf("failed to read response body: %w", err)
-			ai.circuitBreaker.RecordFailure()
-			if attempt < ai.retries-1 {
-				time.Sleep(time.Duration(attempt+1) * time.Second)
-				continue
-			}
-			break
-		}
-
-		// Check status code
-		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("AI service returned status %d: %s", resp.StatusCode, string(body))
-			ai.circuitBreaker.RecordFailure()
-			if attempt < ai.retries-1 {
-				time.Sleep(time.Duration(attempt+1) * time.Second)
-				continue
-			}
-			break
-		}
-
-		// Parse response
-		var aiResp AIResponse
-		if err := json.Unmarshal(body, &aiResp); err != nil {
-			lastErr = fmt.Errorf("failed to parse AI response: %w", err)
-			ai.circuitBreaker.RecordFailure()
-			if attempt < ai.retries-1 {
-				time.Sleep(time.Duration(attempt+1) * time.Second)
-				continue
-			}
-			break
-		}
-
-		// Check if AI processing was successful
-		if !aiResp.Success {
-			lastErr = fmt.Errorf("AI processing failed: %s", aiResp.Error)
-			ai.circuitBreaker.RecordFailure()
-			if attempt < ai.retries-1 {
-				time.Sleep(time.Duration(attempt+1) * time.Second)
-				continue
-			}
-			break
-		}
-
-		// Success
-		ai.circuitBreaker.RecordSuccess()
-		ai.metrics.SuccessfulRequests.Add(1)
-
-		duration := time.Since(start).Milliseconds()
-		ai.metrics.AverageResponseTime.Store(duration)
-
-		return &aiResp, nil
+		lastErr = err
+		ai.circuitBreaker.RecordFailure()
 	}
 
 	ai.metrics.FailedRequests.Add(1)
 	return nil, lastErr
+}
+
+// attempt performs a single POST to the AI service and validates the reply.
+func (ai *AIIntegrationLayer) attempt(ctx context.Context, body []byte, attempt int) (*AIResponse, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ai.endpoint+"/api/v1/process", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	if ai.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+ai.apiKey)
+	}
+
+	resp, err := ai.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP request failed (attempt %d): %w", attempt+1, err)
+	}
+	respBody, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("AI service returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var aiResp AIResponse
+	if err := json.Unmarshal(respBody, &aiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse AI response: %w", err)
+	}
+	if !aiResp.Success {
+		return nil, fmt.Errorf("AI processing failed: %s", aiResp.Error)
+	}
+	return &aiResp, nil
 }
 
 // Circuit breaker methods

@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -78,7 +79,7 @@ type PeerConnection struct {
 	Quality          ConnectionQuality `json:"quality"`
 	Established      bool              `json:"established"`
 	LastActivity     time.Time         `json:"last_activity"`
-	conn    net.Conn          // Can be *net.UDPConn or *net.TCPConn
+	conn    net.Conn          // Owned stream of a direct TCP peer; nil for NAT-traversal and relay peers
 }
 
 type STUNClient struct {
@@ -108,77 +109,121 @@ func NewSTUNClient(servers []STUNServer, logger *zap.Logger) *STUNClient {
 	}
 }
 
+// DiscoverExternalAddress returns the mapped address reported by the first
+// STUN server that answers.
 func (sc *STUNClient) DiscoverExternalAddress() (*ExternalEndpoint, error) {
+	conn, err := net.ListenUDP("udp", sc.localAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open STUN socket: %w", err)
+	}
+	defer conn.Close()
+
+	endpoint, _, err := sc.firstMappedAddress(conn, sc.servers)
+	return endpoint, err
+}
+
+// firstMappedAddress queries servers in order from conn and returns the first
+// mapped address together with the index of the server that reported it.
+func (sc *STUNClient) firstMappedAddress(conn *net.UDPConn, servers []STUNServer) (*ExternalEndpoint, int, error) {
 	var lastErr error
 
-	for _, server := range sc.servers {
-		endpoint, err := sc.querySTUNServer(server)
+	for i, server := range servers {
+		addr := net.JoinHostPort(server.Host, strconv.Itoa(server.Port))
+		endpoint, err := sc.querySTUNServer(conn, server)
 		if err != nil {
-			sc.logger.Warn("STUN server query failed", 
-				zap.String("server", fmt.Sprintf("%s:%d", server.Host, server.Port)),
+			sc.logger.Warn("STUN server query failed",
+				zap.String("server", addr),
 				zap.Error(err))
 			lastErr = err
 			continue
 		}
 
-		sc.logger.Info("Successfully discovered external address", 
-			zap.String("server", fmt.Sprintf("%s:%d", server.Host, server.Port)),
+		sc.logger.Info("Successfully discovered external address",
+			zap.String("server", addr),
 			zap.String("external_ip", endpoint.IP.String()),
 			zap.Int("external_port", endpoint.Port))
 
-		return endpoint, nil
+		return endpoint, i, nil
 	}
 
-	return nil, fmt.Errorf("all STUN servers failed, last error: %w", lastErr)
+	return nil, -1, fmt.Errorf("all STUN servers failed, last error: %w", lastErr)
 }
 
-func (sc *STUNClient) querySTUNServer(server STUNServer) (*ExternalEndpoint, error) {
+// querySTUNServer sends a binding request from conn and returns the address the
+// server observed. Datagrams that do not answer this request (unparseable or
+// carrying another transaction ID) are discarded, as RFC 5389 §7.3 requires.
+func (sc *STUNClient) querySTUNServer(conn *net.UDPConn, server STUNServer) (*ExternalEndpoint, error) {
 	serverAddr := net.JoinHostPort(server.Host, strconv.Itoa(server.Port))
-	
-	conn, err := net.DialTimeout("udp", serverAddr, sc.timeout)
+	raddr, err := sc.resolveServer(server)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to STUN server: %w", err)
+		return nil, fmt.Errorf("failed to resolve STUN server: %w", err)
 	}
-	defer conn.Close()
 
-	msg := sc.createBindingRequest()
-	data := sc.marshalSTUNMessage(msg)
-
-	_, err = conn.Write(data)
-	if err != nil {
+	request := sc.createBindingRequest()
+	if _, err := conn.WriteToUDP(sc.marshalSTUNMessage(request), raddr); err != nil {
 		return nil, fmt.Errorf("failed to send STUN request: %w", err)
 	}
 
-	conn.SetReadDeadline(time.Now().Add(sc.timeout))
-	
+	if err := conn.SetReadDeadline(time.Now().Add(sc.timeout)); err != nil {
+		return nil, fmt.Errorf("failed to set STUN read deadline: %w", err)
+	}
+
 	buffer := make([]byte, 1024)
-	n, err := conn.Read(buffer)
+	for {
+		n, _, err := conn.ReadFromUDP(buffer)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read STUN response: %w", err)
+		}
+
+		response, err := sc.parseSTUNMessage(buffer[:n])
+		if err != nil || response.TransactionID != request.TransactionID {
+			continue
+		}
+
+		if response.Type == STUN_ERROR_RESPONSE {
+			return nil, fmt.Errorf("STUN server returned error")
+		}
+
+		if response.Type != STUN_BINDING_RESPONSE {
+			return nil, fmt.Errorf("unexpected STUN response type: %d", response.Type)
+		}
+
+		endpoint, err := sc.extractExternalAddress(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract external address: %w", err)
+		}
+
+		endpoint.ServerUsed = serverAddr
+		endpoint.LastUpdated = time.Now()
+
+		return endpoint, nil
+	}
+}
+
+// resolveServer resolves server within the client timeout, preferring IPv4 as
+// net.ResolveUDPAddr does so IPv4-only sockets can reach it.
+func (sc *STUNClient) resolveServer(server STUNServer) (*net.UDPAddr, error) {
+	if server.Port <= 0 || server.Port > 65535 {
+		return nil, fmt.Errorf("invalid port %d", server.Port)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), sc.timeout)
+	defer cancel()
+
+	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", server.Host)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read STUN response: %w", err)
+		return nil, err
 	}
 
-	response, err := sc.parseSTUNMessage(buffer[:n])
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse STUN response: %w", err)
+	ip := ips[0]
+	for _, candidate := range ips {
+		if candidate.Unmap().Is4() {
+			ip = candidate
+			break
+		}
 	}
 
-	if response.Type == STUN_ERROR_RESPONSE {
-		return nil, fmt.Errorf("STUN server returned error")
-	}
-
-	if response.Type != STUN_BINDING_RESPONSE {
-		return nil, fmt.Errorf("unexpected STUN response type: %d", response.Type)
-	}
-
-	endpoint, err := sc.extractExternalAddress(response)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract external address: %w", err)
-	}
-
-	endpoint.ServerUsed = serverAddr
-	endpoint.LastUpdated = time.Now()
-
-	return endpoint, nil
+	return net.UDPAddrFromAddrPort(netip.AddrPortFrom(ip.Unmap(), uint16(server.Port))), nil
 }
 
 func (sc *STUNClient) createBindingRequest() *STUNMessage {
@@ -295,11 +340,14 @@ func (sc *STUNClient) parseAddressAttribute(attr *STUNAttribute, isXOR bool, tra
 			return nil, fmt.Errorf("IPv4 address attribute too short")
 		}
 		
-		ipBytes := attr.Value[4:8]
+		// Decode into a fresh slice: XOR-ing attr.Value in place would corrupt
+		// the message and alias the returned IP to the receive buffer.
+		ipBytes := make([]byte, 4)
+		copy(ipBytes, attr.Value[4:8])
 		if isXOR {
 			magicBytes := make([]byte, 4)
 			binary.BigEndian.PutUint32(magicBytes, STUN_MAGIC_COOKIE)
-			for i := 0; i < 4; i++ {
+			for i := range 4 {
 				ipBytes[i] ^= magicBytes[i]
 			}
 		}
@@ -345,50 +393,52 @@ func NewNATTypeDetector(stunClient *STUNClient, logger *zap.Logger) *NATTypeDete
 	}
 }
 
+// DetectNATType compares the mappings two STUN servers report for the same
+// local socket. A cone NAT keeps one mapping per socket, so both servers see
+// the same external endpoint; a symmetric NAT allocates one per destination.
 func (ntd *NATTypeDetector) DetectNATType() (int, error) {
-	endpoint1, err := ntd.stunClient.DiscoverExternalAddress()
+	sc := ntd.stunClient
+
+	conn, err := net.ListenUDP("udp", sc.localAddr)
+	if err != nil {
+		return NAT_TYPE_UNKNOWN, fmt.Errorf("failed to open STUN socket: %w", err)
+	}
+	defer conn.Close()
+
+	endpoint1, used, err := sc.firstMappedAddress(conn, sc.servers)
 	if err != nil {
 		return NAT_TYPE_UNKNOWN, fmt.Errorf("failed to discover external address: %w", err)
 	}
 
-	if len(ntd.stunClient.servers) < 2 {
+	remaining := sc.servers[used+1:]
+	if len(remaining) == 0 {
 		ntd.logger.Warn("Not enough STUN servers for comprehensive NAT type detection")
 		return NAT_TYPE_UNKNOWN, nil
 	}
 
-	// Create a copy of servers to avoid mutating shared state (thread-safety fix)
-	serversCopy := make([]STUNServer, len(ntd.stunClient.servers))
-	copy(serversCopy, ntd.stunClient.servers)
-	
-	// Query second server directly without modifying the shared client
-	endpoint2, err := ntd.querySpecificSTUNServer(serversCopy[1])
-	
+	endpoint2, _, err := sc.firstMappedAddress(conn, remaining)
 	if err != nil {
 		ntd.logger.Warn("Failed to query second STUN server for NAT type detection", zap.Error(err))
 		return NAT_TYPE_UNKNOWN, nil
 	}
 
 	if !endpoint1.IP.Equal(endpoint2.IP) || endpoint1.Port != endpoint2.Port {
-		ntd.logger.Info("Detected Symmetric NAT", 
-			zap.String("endpoint1", fmt.Sprintf("%s:%d", endpoint1.IP, endpoint1.Port)),
-			zap.String("endpoint2", fmt.Sprintf("%s:%d", endpoint2.IP, endpoint2.Port)))
+		ntd.logger.Info("Detected Symmetric NAT",
+			zap.String("endpoint1", net.JoinHostPort(endpoint1.IP.String(), strconv.Itoa(endpoint1.Port))),
+			zap.String("endpoint2", net.JoinHostPort(endpoint2.IP.String(), strconv.Itoa(endpoint2.Port))))
 		return NAT_TYPE_SYMMETRIC, nil
 	}
 
-	ntd.logger.Info("Detected Cone NAT", 
-		zap.String("external_endpoint", fmt.Sprintf("%s:%d", endpoint1.IP, endpoint1.Port)))
-	
-	return NAT_TYPE_FULL_CONE, nil
-}
+	ntd.logger.Info("Detected Cone NAT",
+		zap.String("external_endpoint", net.JoinHostPort(endpoint1.IP.String(), strconv.Itoa(endpoint1.Port))))
 
-// querySpecificSTUNServer queries a specific STUN server without mutating client state
-func (ntd *NATTypeDetector) querySpecificSTUNServer(server STUNServer) (*ExternalEndpoint, error) {
-	return ntd.stunClient.querySTUNServer(server)
+	return NAT_TYPE_FULL_CONE, nil
 }
 
 type UDPHolePuncher struct {
 	localAddr    *net.UDPAddr
 	connections  map[string]*PeerConnection
+	pending      map[*PeerConnection]chan struct{} // handshakes awaiting HANDSHAKE_ACK; guarded by mu
 	logger       *zap.Logger
 	mu           sync.RWMutex
 	receiver     *net.UDPConn // Single UDP conn for both receiving and sending
@@ -397,6 +447,10 @@ type UDPHolePuncher struct {
 	pendingPings map[uint64]time.Time // Track pending PINGs for RTT correlation
 	pongCh       map[uint64]chan time.Duration // Channels for PONG RTT responses
 	pingsMu      sync.Mutex           // Mutex for pendingPings and pongCh maps
+
+	handshakeAttempts int           // HANDSHAKE datagrams sent before giving up
+	handshakeInterval time.Duration // wait for HANDSHAKE_ACK after each attempt
+	pingTimeout       time.Duration // wait for PONG before reporting packet loss
 }
 
 func NewUDPHolePuncher(localAddr *net.UDPAddr, logger *zap.Logger) (*UDPHolePuncher, error) {
@@ -405,15 +459,19 @@ func NewUDPHolePuncher(localAddr *net.UDPAddr, logger *zap.Logger) (*UDPHolePunc
 	if err != nil {
 		return nil, fmt.Errorf("failed to create UDP listener: %w", err)
 	}
-	
+
 	uhp := &UDPHolePuncher{
-		localAddr:    localAddr,
-		connections:  make(map[string]*PeerConnection),
-		logger:       logger,
-		receiver:     listener,
-		stopReceiver: make(chan struct{}),
-		pendingPings: make(map[uint64]time.Time),
-		pongCh:       make(map[uint64]chan time.Duration),
+		localAddr:         localAddr,
+		connections:       make(map[string]*PeerConnection),
+		pending:           make(map[*PeerConnection]chan struct{}),
+		logger:            logger,
+		receiver:          listener,
+		stopReceiver:      make(chan struct{}),
+		pendingPings:      make(map[uint64]time.Time),
+		pongCh:            make(map[uint64]chan time.Duration),
+		handshakeAttempts: 5,
+		handshakeInterval: 500 * time.Millisecond,
+		pingTimeout:       2 * time.Second,
 	}
 	// Start the receiver goroutine
 	go uhp.receiverLoop()
@@ -421,33 +479,46 @@ func NewUDPHolePuncher(localAddr *net.UDPAddr, logger *zap.Logger) (*UDPHolePunc
 }
 
 func (uhp *UDPHolePuncher) EstablishConnection(peerID string, remoteAddr *net.UDPAddr) (*PeerConnection, error) {
-	uhp.mu.Lock()
-	defer uhp.mu.Unlock()
-
-	if conn, exists := uhp.connections[peerID]; exists && conn.Established {
-		return conn, nil
-	}
-
-	// Use the existing receiver connection for sending and receiving
-	// This avoids port conflicts and EADDRINUSE errors
+	// All UDP traffic goes through the puncher's single socket, which its
+	// receiverLoop reads and which is unconnected. It is therefore not handed out
+	// as the peer's conn: a per-peer reader, Write or Close on it would break
+	// every other peer.
 	peerConn := &PeerConnection{
 		PeerID:         peerID,
 		LocalEndpoint:  uhp.localAddr,
 		RemoteEndpoint: remoteAddr,
-		ConnectionType: "nat_traversal", // Fixed: correctly label as NAT traversal
+		ConnectionType: "nat_traversal",
 		Established:    false,
 		LastActivity:   time.Now(),
-		conn:           uhp.receiver,  // Use the shared receiver connection
 	}
+	acked := make(chan struct{})
 
-	if err := uhp.performHandshake(peerConn); err != nil {
+	uhp.mu.Lock()
+	if conn, exists := uhp.connections[peerID]; exists && conn.Established {
+		uhp.mu.Unlock()
+		return conn, nil
+	}
+	// Register the handshake so the receiver loop can match the peer's ACK. mu is
+	// released while waiting because the receiver loop needs it to deliver the ACK.
+	uhp.pending[peerConn] = acked
+	uhp.mu.Unlock()
+
+	err := uhp.performHandshake(peerConn, acked)
+
+	uhp.mu.Lock()
+	delete(uhp.pending, peerConn)
+	if err == nil && atomic.LoadInt32(&uhp.stopped) == 1 {
+		err = fmt.Errorf("stopped")
+	}
+	if err != nil {
+		uhp.mu.Unlock()
 		return nil, fmt.Errorf("handshake failed: %w", err)
 	}
-
 	peerConn.Established = true
 	uhp.connections[peerID] = peerConn
+	uhp.mu.Unlock()
 
-	uhp.logger.Info("UDP hole punching successful", 
+	uhp.logger.Info("UDP hole punching successful",
 		zap.String("peer_id", peerID),
 		zap.String("remote_addr", remoteAddr.String()))
 
@@ -456,43 +527,53 @@ func (uhp *UDPHolePuncher) EstablishConnection(peerID string, remoteAddr *net.UD
 	return peerConn, nil
 }
 
-func (uhp *UDPHolePuncher) performHandshake(conn *PeerConnection) error {
-	// Check if stopped before each write
-	if atomic.LoadInt32(&uhp.stopped) == 1 {
-		return fmt.Errorf("stopped")
-	}
-
+// performHandshake sends HANDSHAKE datagrams until acked is closed by the
+// receiver loop, the puncher stops, or every attempt times out.
+func (uhp *UDPHolePuncher) performHandshake(conn *PeerConnection, acked <-chan struct{}) error {
 	handshakeMsg := []byte("{\"type\":\"HANDSHAKE\",\"peer_id\":\"" + conn.PeerID + "\"}")
 
-	for i := 0; i < 5; i++ {
+	for range uhp.handshakeAttempts {
 		// Check if stopped before each write
 		if atomic.LoadInt32(&uhp.stopped) == 1 {
 			return fmt.Errorf("stopped")
 		}
 
 		// Use WriteToUDP for sending via the shared receiver connection
-		_, err := uhp.receiver.WriteToUDP(handshakeMsg, conn.RemoteEndpoint)
-		if err != nil {
+		if _, err := uhp.receiver.WriteToUDP(handshakeMsg, conn.RemoteEndpoint); err != nil {
 			return fmt.Errorf("failed to send handshake: %w", err)
 		}
 
-		// Wait for response (handled by receiverLoop)
-		time.Sleep(500 * time.Millisecond)
-		
-		// Check if connection was established
-		if conn.Established {
+		wait := time.NewTimer(uhp.handshakeInterval)
+		select {
+		case <-acked:
+			wait.Stop()
 			return nil
+		case <-uhp.stopReceiver:
+			wait.Stop()
+			return fmt.Errorf("stopped")
+		case <-wait.C:
 		}
 	}
 
 	return fmt.Errorf("handshake timeout")
 }
 
+// measureConnectionQuality refreshes conn's RTT every 30s until the puncher
+// stops or the connection is closed or replaced.
 func (uhp *UDPHolePuncher) measureConnectionQuality(conn *PeerConnection) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
+	for {
+		select {
+		case <-uhp.stopReceiver:
+			return
+		case <-ticker.C:
+		}
+		if current, ok := uhp.GetConnection(conn.PeerID); !ok || current != conn {
+			return
+		}
+
 		quality, err := uhp.measureRTT(conn)
 		if err != nil {
 			uhp.logger.Warn("Failed to measure connection quality",
@@ -540,13 +621,13 @@ func (uhp *UDPHolePuncher) measureRTT(conn *PeerConnection) (*ConnectionQuality,
 	uhp.pongCh[pingID] = pongChan
 	uhp.pingsMu.Unlock()
 
-	// Clean up on return
+	// Clean up on return. pongChan is never closed here: Stop closes every
+	// registered channel, and closing it twice would panic.
 	defer func() {
 		uhp.pingsMu.Lock()
 		delete(uhp.pendingPings, pingID)
 		delete(uhp.pongCh, pingID)
 		uhp.pingsMu.Unlock()
-		close(pongChan)
 	}()
 
 	// Send PING message
@@ -566,7 +647,10 @@ func (uhp *UDPHolePuncher) measureRTT(conn *PeerConnection) (*ConnectionQuality,
 
 	// Wait for PONG response with actual RTT measurement
 	select {
-	case rtt := <-pongChan:
+	case rtt, ok := <-pongChan:
+		if !ok {
+			return nil, fmt.Errorf("stopped")
+		}
 		// Received actual RTT from PONG
 		quality := &ConnectionQuality{
 			RTT:          rtt,
@@ -575,7 +659,7 @@ func (uhp *UDPHolePuncher) measureRTT(conn *PeerConnection) (*ConnectionQuality,
 		}
 		return quality, nil
 
-	case <-time.After(2 * time.Second):
+	case <-time.After(uhp.pingTimeout):
 		// Timeout - indicate packet loss and use degraded RTT
 		quality := &ConnectionQuality{
 			RTT:          previousRTT + 50*time.Millisecond, // Increase RTT on timeout
@@ -637,7 +721,7 @@ func (uhp *UDPHolePuncher) CloseConnection(peerID string) error {
 		return fmt.Errorf("connection to peer %s not found", peerID)
 	}
 
-	// Don't close conn.conn since it's the shared receiver
+	// The shared socket stays open for the remaining peers.
 	delete(uhp.connections, peerID)
 
 	uhp.logger.Info("Connection closed", zap.String("peer_id", peerID))
@@ -904,10 +988,17 @@ func (uhp *UDPHolePuncher) handleIncomingMessage(message string, addr *net.UDPAd
 		response := []byte("{\"type\":\"HANDSHAKE_ACK\"}")
 		uhp.receiver.WriteToUDP(response, addr)
 	} else if strings.Contains(message, "HANDSHAKE_ACK") || strings.Contains(message, "\"type\":\"HANDSHAKE_ACK\"") {
-		// Mark connection as established
+		remote := addr.String()
 		uhp.mu.Lock()
+		// Wake every handshake in flight to this address.
+		for pendingConn, acked := range uhp.pending {
+			if pendingConn.RemoteEndpoint != nil && pendingConn.RemoteEndpoint.String() == remote {
+				close(acked)
+				delete(uhp.pending, pendingConn)
+			}
+		}
 		for _, conn := range uhp.connections {
-			if conn.RemoteEndpoint != nil && conn.RemoteEndpoint.String() == addr.String() {
+			if conn.RemoteEndpoint != nil && conn.RemoteEndpoint.String() == remote {
 				conn.Established = true
 				conn.LastActivity = time.Now()
 				break

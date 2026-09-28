@@ -141,7 +141,8 @@ func (bm *BandwidthMonitor) Start() error {
 		monitor := &InterfaceMonitor{
 			name:         ifaceName,
 			measurements: make([]BandwidthMeasurement, 0, bm.config.MaxHistoryPoints),
-			thresholds:   bm.config.DefaultThresholds,
+			// Each interface owns its thresholds; SetThreshold must not leak across interfaces.
+			thresholds:   append([]BandwidthThreshold(nil), bm.config.DefaultThresholds...),
 			maxHistory:   bm.config.MaxHistoryPoints,
 		}
 		bm.interfaces[ifaceName] = monitor
@@ -204,27 +205,17 @@ func (bm *BandwidthMonitor) collectMetrics() {
 		}
 
 		iface.mu.Lock()
-		
-		if iface.lastMeasure != nil {
-			timeDelta := measurement.Timestamp.Sub(iface.lastMeasure.Timestamp).Seconds()
+
+		// Counters that went backwards were reset (e.g. the link was re-created);
+		// a wrapped delta would report an absurd rate, so this sample gets none.
+		if last := iface.lastMeasure; last != nil &&
+			measurement.RXBytes >= last.RXBytes && measurement.TXBytes >= last.TXBytes {
+			timeDelta := measurement.Timestamp.Sub(last.Timestamp).Seconds()
 			if timeDelta > 0 {
-				// Store instantaneous rates for metadata if needed - add nil check
-				if measurement.Metadata == nil {
-					measurement.Metadata = make(map[string]string)
-				}
-				instantRXRate := float64(measurement.RXBytes-iface.lastMeasure.RXBytes) * 8 / timeDelta
-				instantTXRate := float64(measurement.TXBytes-iface.lastMeasure.TXBytes) * 8 / timeDelta
-				measurement.Metadata["instant_rx_rate"] = fmt.Sprintf("%.2f", instantRXRate)
-				measurement.Metadata["instant_tx_rate"] = fmt.Sprintf("%.2f", instantTXRate)
-				
-				// Initially set to instantaneous rates, will be overridden by smoothed rates
-				measurement.RXRate = instantRXRate
-				measurement.TXRate = instantTXRate
-				
-				if measurement.LinkSpeed > 0 {
-					totalRate := measurement.RXRate + measurement.TXRate
-					measurement.Utilization = (totalRate / float64(measurement.LinkSpeed)) * 100
-				}
+				measurement.RXRate = float64(measurement.RXBytes-last.RXBytes) * 8 / timeDelta
+				measurement.TXRate = float64(measurement.TXBytes-last.TXBytes) * 8 / timeDelta
+				measurement.Metadata["instant_rx_rate"] = fmt.Sprintf("%.2f", measurement.RXRate)
+				measurement.Metadata["instant_tx_rate"] = fmt.Sprintf("%.2f", measurement.TXRate)
 			}
 		}
 
@@ -243,28 +234,20 @@ func (bm *BandwidthMonitor) collectMetrics() {
 		if len(iface.measurements) > iface.maxHistory {
 			iface.measurements = iface.measurements[1:]
 		}
-		
-		// Calculate smoothed rates using sliding window
-		if len(iface.measurements) > 1 {
-			effectiveWindow := bm.config.SlidingWindowDuration
-			if effectiveWindow == 0 {
-				effectiveWindow = 3 * bm.config.MonitoringInterval
-			}
-			iface.mu.Unlock()
-			rxbps, txbps := bm.windowedRate(iface, effectiveWindow)
-			iface.mu.Lock()
-			
-			if rxbps > 0 || txbps > 0 {
-				measurement.RXRate = rxbps
-				measurement.TXRate = txbps
-				
-				if measurement.LinkSpeed > 0 {
-					totalRate := measurement.RXRate + measurement.TXRate
-					measurement.Utilization = (totalRate / float64(measurement.LinkSpeed)) * 100
-				}
-			}
+
+		// Smooth over the sliding window once it spans more than one sample.
+		effectiveWindow := bm.config.SlidingWindowDuration
+		if effectiveWindow == 0 {
+			effectiveWindow = 3 * bm.config.MonitoringInterval
 		}
-		
+		if rxbps, txbps, ok := windowedRate(iface.measurements, effectiveWindow); ok {
+			measurement.RXRate = rxbps
+			measurement.TXRate = txbps
+		}
+		if measurement.LinkSpeed > 0 {
+			measurement.Utilization = (measurement.RXRate + measurement.TXRate) / float64(measurement.LinkSpeed) * 100
+		}
+
 		iface.lastMeasure = measurement
 		iface.mu.Unlock()
 
@@ -522,7 +505,12 @@ func (bm *BandwidthMonitor) handleAlert(alert *BandwidthAlert) {
 }
 
 func (bm *BandwidthMonitor) triggerQoSHooks(ifaceName string, utilization float64) {
-	for _, hook := range bm.qosHooks {
+	// AddQoSHook may run concurrently (e.g. a QoS manager created after Start).
+	bm.mu.RLock()
+	hooks := bm.qosHooks
+	bm.mu.RUnlock()
+
+	for _, hook := range hooks {
 		hook(ifaceName, utilization)
 	}
 }
@@ -687,30 +675,33 @@ func (bm *BandwidthMonitor) getLinkSpeedBps(ifaceName string) (uint64, error) {
 	return speedMbps * 1_000_000, nil
 }
 
-// windowedRate calculates average rates over a time window
-func (bm *BandwidthMonitor) windowedRate(iface *InterfaceMonitor, window time.Duration) (rxbps, txbps float64) {
-	iface.mu.RLock()
-	defer iface.mu.RUnlock()
-	
-	if len(iface.measurements) < 2 {
-		return 0, 0
+// windowedRate returns the RX/TX rate in bits/s across the samples that fall
+// within window of the newest one. It uses the byte counters of the oldest and
+// newest sample, so uneven sampling intervals are weighted correctly and a
+// sample without a predecessor does not drag the average down. ok is false when
+// the window holds fewer than two samples or spans a counter reset. samples must
+// be in time order.
+func windowedRate(samples []BandwidthMeasurement, window time.Duration) (rxbps, txbps float64, ok bool) {
+	if len(samples) < 2 {
+		return 0, 0, false
 	}
-	
-	cutoff := time.Now().Add(-window)
-	var rxSum, txSum float64
-	var count int
-	
-	for _, m := range iface.measurements {
-		if m.Timestamp.After(cutoff) {
-			rxSum += m.RXRate
-			txSum += m.TXRate
-			count++
+
+	newest := samples[len(samples)-1]
+	cutoff := newest.Timestamp.Add(-window)
+	oldest := newest
+	for _, m := range samples[:len(samples)-1] {
+		if !m.Timestamp.Before(cutoff) {
+			oldest = m
+			break
 		}
 	}
-	
-	if count > 0 {
-		return rxSum / float64(count), txSum / float64(count)
+
+	elapsed := newest.Timestamp.Sub(oldest.Timestamp).Seconds()
+	if elapsed <= 0 || newest.RXBytes < oldest.RXBytes || newest.TXBytes < oldest.TXBytes {
+		return 0, 0, false
 	}
-	
-	return 0, 0
+
+	return float64(newest.RXBytes-oldest.RXBytes) * 8 / elapsed,
+		float64(newest.TXBytes-oldest.TXBytes) * 8 / elapsed,
+		true
 }

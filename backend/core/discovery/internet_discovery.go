@@ -369,11 +369,13 @@ func (s *InternetDiscoveryService) ConnectToPeer(peer PeerInfo) error {
 	s.peerConnections[peer.ID] = peerConn
 	s.connectionsMutex.Unlock()
 
-	// Start handling messages from this peer
-	go s.handlePeerConnection(peer.ID, peerConn.conn)
-
-	// Start connection quality monitoring
-	go s.monitorConnectionQuality(peer.ID)
+	// Only connections that own a stream (direct TCP) get a reader and pinger.
+	// NAT-traversal peers are serviced by the hole puncher's shared socket, and
+	// a per-peer reader or Close on it would break every other peer.
+	if peerConn.conn != nil {
+		go s.handlePeerConnection(peer.ID, peerConn.conn)
+		go s.monitorConnectionQuality(peer.ID)
+	}
 
 	s.logger.Info("Peer connection established", 
 		zap.String("peer", peer.ID),

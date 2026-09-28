@@ -189,6 +189,7 @@ type TrafficShaper struct {
 	interfaces map[string]*InterfaceShaper
 	logger     *zap.Logger
 	mu         sync.RWMutex
+	runTC      func(args ...string) error // executes tc with args; replaceable in tests
 }
 
 type InterfaceShaper struct {
@@ -196,7 +197,6 @@ type InterfaceShaper struct {
 	classes     map[string]*TrafficClass
 	queues      map[string]*QueueConfig
 	htbHandle   string
-	rootQdiscSetup bool // Track if root qdisc has been set up to prevent repeated setup
 	mu          sync.RWMutex
 }
 
@@ -204,6 +204,9 @@ func NewTrafficShaper(logger *zap.Logger) *TrafficShaper {
 	return &TrafficShaper{
 		interfaces: make(map[string]*InterfaceShaper),
 		logger:     logger,
+		runTC: func(args ...string) error {
+			return exec.Command("tc", args...).Run()
+		},
 	}
 }
 
@@ -214,68 +217,45 @@ func (ts *TrafficShaper) SetupInterface(interfaceName string) error {
 	if _, exists := ts.interfaces[interfaceName]; exists {
 		return fmt.Errorf("interface %s already configured", interfaceName)
 	}
+	return ts.setupInterfaceLocked(interfaceName, 0)
+}
 
-	shaper := &InterfaceShaper{
+// ensureInterface configures interfaceName on first use and is a no-op once the
+// interface is registered. rateBps sets the default class rate (0 = 1000mbit).
+func (ts *TrafficShaper) ensureInterface(interfaceName string, rateBps uint64) error {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	if _, exists := ts.interfaces[interfaceName]; exists {
+		return nil
+	}
+	return ts.setupInterfaceLocked(interfaceName, rateBps)
+}
+
+// setupInterfaceLocked installs the root HTB qdisc and its default class, then
+// registers the interface. The caller holds ts.mu.
+func (ts *TrafficShaper) setupInterfaceLocked(interfaceName string, rateBps uint64) error {
+	defaultRate := "1000mbit"
+	if rateBps > 0 {
+		defaultRate = bpsToTcRate(rateBps)
+	}
+
+	if err := ts.runTC("qdisc", "add", "dev", interfaceName, "root", "handle", "1:", "htb", "default", "999"); err != nil {
+		return fmt.Errorf("failed to setup root qdisc: failed to add root htb qdisc: %w", err)
+	}
+
+	if err := ts.runTC("class", "add", "dev", interfaceName, "parent", "1:", "classid", "1:999", "htb", "rate", defaultRate); err != nil {
+		ts.logger.Warn("Failed to add default class", zap.Error(err))
+	}
+
+	ts.interfaces[interfaceName] = &InterfaceShaper{
 		name:      interfaceName,
 		classes:   make(map[string]*TrafficClass),
 		queues:    make(map[string]*QueueConfig),
 		htbHandle: "1:",
 	}
 
-	if err := ts.setupRootQdisc(interfaceName); err != nil {
-		return fmt.Errorf("failed to setup root qdisc: %w", err)
-	}
-
-	ts.interfaces[interfaceName] = shaper
-	
-	ts.logger.Info("Traffic shaping configured for interface", 
-		zap.String("interface", interfaceName))
-	
-	return nil
-}
-
-func (ts *TrafficShaper) setupRootQdisc(interfaceName string) error {
-	return ts.setupRootQdiscWithRate(interfaceName, 0)
-}
-
-func (ts *TrafficShaper) setupRootQdiscWithRate(interfaceName string, rateBps uint64) error {
-	ts.mu.RLock()
-	shaper, exists := ts.interfaces[interfaceName]
-	ts.mu.RUnlock()
-	
-	if !exists {
-		return fmt.Errorf("interface %s not found", interfaceName)
-	}
-	
-	shaper.mu.Lock()
-	defer shaper.mu.Unlock()
-	
-	// Prevent repeated root qdisc setup
-	if shaper.rootQdiscSetup {
-		ts.logger.Debug("Root qdisc already set up for interface", zap.String("interface", interfaceName))
-		return nil
-	}
-	
-	// Determine the default rate
-	defaultRate := "1000mbit"
-	if rateBps > 0 {
-		defaultRate = bpsToTcRate(rateBps)
-	}
-	
-	cmd := exec.Command("tc", "qdisc", "add", "dev", interfaceName, "root", "handle", "1:", "htb", "default", "999")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to add root htb qdisc: %w", err)
-	}
-
-	cmd = exec.Command("tc", "class", "add", "dev", interfaceName, "parent", "1:", "classid", "1:999", "htb", "rate", defaultRate)
-	if err := cmd.Run(); err != nil {
-		ts.logger.Warn("Failed to add default class", zap.Error(err))
-	}
-
-	// Mark root qdisc as set up
-	shaper.rootQdiscSetup = true
-
-	ts.logger.Info("Root qdisc configured",
+	ts.logger.Info("Traffic shaping configured for interface",
 		zap.String("interface", interfaceName),
 		zap.String("default_rate", defaultRate))
 
@@ -306,10 +286,8 @@ func (ts *TrafficShaper) AddTrafficClass(interfaceName string, class *TrafficCla
 	minRate := bpsToTcRate(class.MinBandwidth)
 	maxRate := bpsToTcRate(class.MaxBandwidth)
 
-	cmd := exec.Command("tc", "class", "add", "dev", interfaceName, "parent", "1:", 
-		"classid", classID, "htb", "rate", minRate, "ceil", maxRate, "prio", strconv.Itoa(class.Priority))
-	
-	if err := cmd.Run(); err != nil {
+	if err := ts.runTC("class", "add", "dev", interfaceName, "parent", "1:",
+		"classid", classID, "htb", "rate", minRate, "ceil", maxRate, "prio", strconv.Itoa(class.Priority)); err != nil {
 		return fmt.Errorf("failed to add traffic class: %w", err)
 	}
 
@@ -318,8 +296,7 @@ func (ts *TrafficShaper) AddTrafficClass(interfaceName string, class *TrafficCla
 		qdisc = class.QueueType
 	}
 
-	cmd = exec.Command("tc", "qdisc", "add", "dev", interfaceName, "parent", classID, qdisc)
-	if err := cmd.Run(); err != nil {
+	if err := ts.runTC("qdisc", "add", "dev", interfaceName, "parent", classID, qdisc); err != nil {
 		ts.logger.Warn("Failed to add queue discipline", 
 			zap.String("interface", interfaceName),
 			zap.String("class_id", classID),
@@ -355,43 +332,18 @@ func (ts *TrafficShaper) ApplyRateLimit(interfaceName, classID string, rate, bur
 	// Store the old rate for logging
 	oldRate := class.MaxBandwidth
 	class.MaxBandwidth = rate
-	
-	// Get the tc class ID that was assigned when the class was created
-	tcClassID := ""
-	for i, c := range shaper.classes {
-		if c.ID == classID {
-			// The tc class ID was assigned as "1:X" where X = 10 + index
-			classIndex := 0
-			for id := range shaper.classes {
-				if id == i {
-					break
-				}
-				classIndex++
-			}
-			tcClassID = fmt.Sprintf("1:%d", 10+classIndex)
-			break
-		}
-	}
+	tcClassID := class.TcClassID
 	shaper.mu.Unlock()
-	
-	if tcClassID == "" {
-		return fmt.Errorf("could not determine tc class ID for class %s", classID)
-	}
-	
+
 	// Apply the rate limit to the kernel using tc command
 	// This actually enforces the rate limit at the kernel level
-	rateStr := bpsToTcRate(rate)
-	
-	// Use 'tc class change' to update the existing class rate
-	cmd := exec.Command("tc", "class", "change", "dev", interfaceName,
-		"parent", "1:", "classid", tcClassID, "htb", "rate", rateStr)
-	
+	args := []string{"class", "change", "dev", interfaceName,
+		"parent", "1:", "classid", tcClassID, "htb", "rate", bpsToTcRate(rate)}
 	if burst > 0 {
-		burstStr := fmt.Sprintf("%d", burst)
-		cmd.Args = append(cmd.Args, "burst", burstStr)
+		args = append(args, "burst", strconv.FormatUint(burst, 10))
 	}
-	
-	if err := cmd.Run(); err != nil {
+
+	if err := ts.runTC(args...); err != nil {
 		// Log the error but don't fail completely
 		ts.logger.Error("Failed to apply rate limit in kernel",
 			zap.String("interface", interfaceName),
@@ -588,30 +540,7 @@ func (qm *QoSManager) addPolicyUnsafe(policy *QoSPolicy) error {
 	}
 	policy.UpdatedAt = time.Now()
 
-	if qm.config.EnableTrafficShaping && policy.InterfaceName != "" {
-		// Setup interface with configured default rate if available
-		if qm.config.DefaultRateBps > 0 {
-			// Use setupRootQdiscWithRate to configure with specific rate
-			if err := qm.shaper.setupRootQdiscWithRate(policy.InterfaceName, qm.config.DefaultRateBps); err != nil {
-				qm.logger.Warn("Failed to setup traffic shaping with configured rate", 
-					zap.String("interface", policy.InterfaceName),
-					zap.Uint64("rate_bps", qm.config.DefaultRateBps),
-					zap.Error(err))
-				// Fall back to regular setup
-				if err := qm.shaper.SetupInterface(policy.InterfaceName); err != nil {
-					qm.logger.Warn("Failed to setup traffic shaping for interface", 
-						zap.String("interface", policy.InterfaceName),
-						zap.Error(err))
-				}
-			}
-		} else {
-			if err := qm.shaper.SetupInterface(policy.InterfaceName); err != nil {
-				qm.logger.Warn("Failed to setup traffic shaping for interface", 
-					zap.String("interface", policy.InterfaceName),
-					zap.Error(err))
-			}
-		}
-	}
+	qm.ensureShaping(policy)
 
 	for _, rule := range policy.Rules {
 		if err := qm.classifier.AddRule(policy.InterfaceName, rule); err != nil {
@@ -751,36 +680,45 @@ func (qm *QoSManager) collectPolicyStatistics(policy *QoSPolicy) (*QoSStatistics
 	return stats, nil
 }
 
+// handleBandwidthAlert throttles every enabled rate-limited policy on the
+// congested interface by 20% once utilization exceeds 80%.
 func (qm *QoSManager) handleBandwidthAlert(interfaceName string, utilization float64) {
-	policies := qm.GetInterfacePolicies(interfaceName)
-	
-	qm.logger.Info("Handling bandwidth alert for QoS adjustment", 
+	qm.logger.Info("Handling bandwidth alert for QoS adjustment",
 		zap.String("interface", interfaceName),
-		zap.Float64("utilization", utilization),
-		zap.Int("policies", len(policies)))
+		zap.Float64("utilization", utilization))
 
-	for _, policy := range policies {
-		for _, action := range policy.Actions {
-			if action.Type == "rate_limit" && utilization > 80 {
-				if action.RateLimit > 0 {
-					newRate := uint64(float64(action.RateLimit) * 0.8)
-					qm.logger.Info("Reducing rate limit due to congestion", 
+	if utilization <= 80 {
+		return
+	}
+
+	qm.mu.Lock()
+	defer qm.mu.Unlock()
+
+	for _, policy := range qm.policies {
+		if policy.InterfaceName != interfaceName || !policy.Enabled {
+			continue
+		}
+		for i := range policy.Actions {
+			action := &policy.Actions[i]
+			if action.Type != "rate_limit" || action.RateLimit == 0 {
+				continue
+			}
+			newRate := uint64(float64(action.RateLimit) * 0.8)
+			qm.logger.Info("Reducing rate limit due to congestion",
+				zap.String("interface", interfaceName),
+				zap.String("policy", policy.Name),
+				zap.Uint64("old_rate", action.RateLimit),
+				zap.Uint64("new_rate", newRate))
+
+			action.RateLimit = newRate
+
+			// Apply the new rate limit via traffic control
+			if classID, exists := qm.appliedClasses[policy.ID]; exists {
+				if err := qm.shaper.ApplyRateLimit(interfaceName, classID, newRate, action.BurstLimit); err != nil {
+					qm.logger.Error("Failed to apply rate limit",
 						zap.String("interface", interfaceName),
 						zap.String("policy", policy.Name),
-						zap.Uint64("old_rate", action.RateLimit),
-						zap.Uint64("new_rate", newRate))
-					
-					action.RateLimit = newRate
-					
-					// Apply the new rate limit via traffic control
-					if classID, exists := qm.appliedClasses[policy.ID]; exists {
-						if err := qm.shaper.ApplyRateLimit(interfaceName, classID, newRate, action.BurstLimit); err != nil {
-							qm.logger.Error("Failed to apply rate limit",
-								zap.String("interface", interfaceName),
-								zap.String("policy", policy.Name),
-								zap.Error(err))
-						}
-					}
+						zap.Error(err))
 				}
 			}
 		}
@@ -888,32 +826,48 @@ func (qm *QoSManager) reconciliationLoop() {
 	}
 }
 
-// reconcileState ensures the desired QoS state matches the actual state
+// reconcileState re-applies rate limits whose traffic class was never
+// installed, e.g. because tc failed when the policy was added.
 func (qm *QoSManager) reconcileState() {
-	qm.mu.RLock()
-	policies := make([]*QoSPolicy, 0, len(qm.policies))
+	qm.mu.Lock()
+	defer qm.mu.Unlock()
+
 	for _, policy := range qm.policies {
-		if policy.Enabled {
-			policies = append(policies, policy)
+		if !policy.Enabled {
+			continue
 		}
-	}
-	qm.mu.RUnlock()
-	
-	for _, policy := range policies {
-		// Check if policy is still applied
-		if _, exists := qm.appliedClasses[policy.ID]; !exists {
-			// Re-apply the policy
+		// appliedClasses tracks rate-limit classes only, so only those can be missing.
+		if _, exists := qm.appliedClasses[policy.ID]; exists {
+			continue
+		}
+		for _, action := range policy.Actions {
+			if action.Type != "rate_limit" {
+				continue
+			}
 			qm.logger.Info("Re-applying QoS policy during reconciliation",
 				zap.String("policy", policy.Name))
-			
-			for _, action := range policy.Actions {
-				if err := qm.applyQoSAction(policy, action); err != nil {
-					qm.logger.Error("Failed to re-apply QoS action",
-						zap.String("policy", policy.Name),
-						zap.Error(err))
-				}
+
+			qm.ensureShaping(policy)
+			if err := qm.applyQoSAction(policy, action); err != nil {
+				qm.logger.Error("Failed to re-apply QoS action",
+					zap.String("policy", policy.Name),
+					zap.Error(err))
 			}
 		}
+	}
+}
+
+// ensureShaping prepares the policy's interface for traffic shaping, using the
+// configured root rate when set.
+func (qm *QoSManager) ensureShaping(policy *QoSPolicy) {
+	if !qm.config.EnableTrafficShaping || policy.InterfaceName == "" {
+		return
+	}
+	if err := qm.shaper.ensureInterface(policy.InterfaceName, qm.config.DefaultRateBps); err != nil {
+		qm.logger.Warn("Failed to setup traffic shaping for interface",
+			zap.String("interface", policy.InterfaceName),
+			zap.Uint64("rate_bps", qm.config.DefaultRateBps),
+			zap.Error(err))
 	}
 }
 
@@ -933,25 +887,4 @@ func generateID() string {
 	bytes := make([]byte, 8)
 	rand.Read(bytes)
 	return hex.EncodeToString(bytes)
-}
-
-// applyRateLimitWithTC applies rate limiting using tc (traffic control) command
-func (qm *QoSManager) applyRateLimitWithTC(interfaceName, classID string, rateKbps uint64) error {
-	// Convert rate to tc format
-	rateStr := fmt.Sprintf("%dkbit", rateKbps)
-
-	// Apply rate limit using tc command
-	cmd := exec.Command("tc", "class", "change", "dev", interfaceName,
-		"parent", "1:", "classid", classID, "htb", "rate", rateStr)
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to apply rate limit with tc: %w", err)
-	}
-
-	qm.logger.Info("Rate limit applied with tc",
-		zap.String("interface", interfaceName),
-		zap.String("class", classID),
-		zap.String("rate", rateStr))
-
-	return nil
 }
