@@ -540,7 +540,8 @@ func TraceMLInference(ctx context.Context, modelType, modelVersion string) (cont
 ### Jaeger Deployment Configuration
 
 ```yaml
-# deployments/kubernetes/jaeger-deployment.yml
+# illustrative only — no such manifest exists in the repository; Jaeger is installed by
+# deployments/monitoring/deploy-monitoring-stack.sh via the jaegertracing helm chart
 apiVersion: apps/v1
 kind: Deployment
 metadata:

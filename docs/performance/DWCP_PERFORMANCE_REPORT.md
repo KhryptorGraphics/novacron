@@ -395,17 +395,20 @@ helm install grafana grafana/grafana
 
 1. **Deploy Prometheus Configuration**:
 ```bash
-kubectl apply -f deployments/kubernetes/prometheus-config.yml
+# The DWCP v3 monitoring stack is deployed by deployments/monitoring/deploy-monitoring-stack.sh
+# (kubectl+helm) with the ConfigMaps in deployments/k8s/dwcp-v3-monitoring.yaml; the
+# deployments/kubernetes/*.yml files named below never existed in the repository.
+kubectl apply -f deployments/k8s/dwcp-v3-monitoring.yaml
 ```
 
 2. **Deploy VictoriaMetrics**:
 ```bash
-kubectl apply -f deployments/kubernetes/victoriametrics-cluster.yml
+# no VictoriaMetrics manifest exists in the repository; deploy-monitoring-stack.sh installs Thanos for long-term storage
 ```
 
 3. **Deploy Jaeger**:
 ```bash
-kubectl apply -f deployments/kubernetes/jaeger-deployment.yml
+# no Jaeger manifest exists; deploy-monitoring-stack.sh installs the jaegertracing helm chart
 ```
 
 4. **Import Grafana Dashboards**:
@@ -417,8 +420,9 @@ curl -X POST http://grafana:3000/api/dashboards/import \
 
 5. **Configure Alerting**:
 ```bash
-kubectl apply -f deployments/kubernetes/prometheus-alerts.yml
-kubectl apply -f deployments/kubernetes/alertmanager-config.yml
+# alert rules: deployments/monitoring/alerts-production.yml, alertmanager: deployments/monitoring/alertmanager-production.yml
+kubectl create configmap dwcp-v3-alerts -n dwcp-v3-monitoring --from-file=deployments/monitoring/alerts-production.yml
+kubectl create configmap alertmanager-config -n dwcp-v3-monitoring --from-file=deployments/monitoring/alertmanager-production.yml
 ```
 
 ### Verification

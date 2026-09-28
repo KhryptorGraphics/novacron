@@ -185,9 +185,10 @@ psql -h standby.novacron.io -U postgres -c "SELECT EXTRACT(EPOCH FROM (now() - p
 
 **Steps:**
 
-1. **Provision new database server:**
+1. **Provision new database server** (the `novacron-postgres` StatefulSet):
    ```bash
-   kubectl apply -f k8s/postgres-restore.yaml
+   kubectl apply -f deployment/kubernetes/deployments.yaml
+   kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=postgres -n novacron --timeout=300s
    ```
 
 2. **Download latest backup:**

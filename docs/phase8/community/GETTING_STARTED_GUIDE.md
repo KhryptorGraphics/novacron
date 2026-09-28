@@ -1625,7 +1625,7 @@ dwcp deploy finalize
 
 ```bash
 # Deploy to Kubernetes
-kubectl apply -f k8s/
+kubectl apply -f deployment/kubernetes/
 
 # Check rollout status
 kubectl rollout status statefulset/dwcp-node -n dwcp

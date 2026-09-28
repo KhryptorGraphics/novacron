@@ -476,7 +476,7 @@ Upgrade DWCP from v1.0 (datacenter-only) to v3.0 (hybrid datacenter + internet) 
 **Purpose:** Complete CI/CD pipeline automation
 
 **Deliverables:**
-1. **CI Pipeline** (`.github/workflows/dwcp-v3-ci.yml` - 425 lines)
+1. **CI Pipeline** (`.github/workflows/dwcp-v3-ci.yml` - 425 lines; deleted in novacron-br7, canonical CI is `ci.yml`)
    - Build & test (Linux/macOS/Windows)
    - Security scanning (gosec, Trivy, CodeQL)
    - Performance benchmarks
@@ -496,7 +496,7 @@ Upgrade DWCP from v1.0 (datacenter-only) to v3.0 (hybrid datacenter + internet) 
    - Non-root user execution
    - Health checks
 
-4. **Kubernetes Manifests** (`deployments/kubernetes/` - 505 lines)
+4. **Kubernetes Manifests** (`deployments/k8s/dwcp-v3-*.yaml` - 547 lines)
    - Deployment (3 replicas, rolling update)
    - Service (ClusterIP)
    - HPA (50-80% CPU target, 3-10 replicas)

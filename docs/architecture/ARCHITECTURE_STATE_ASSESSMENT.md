@@ -755,7 +755,7 @@ M package.json                         # Package updates
 **GitHub Workflows (CI/CD):**
 ```
 ?? .github/workflows/dwcp-v3-cd.yml    # DWCP v3 continuous deployment
-?? .github/workflows/dwcp-v3-ci.yml    # DWCP v3 continuous integration
+?? .github/workflows/dwcp-v3-ci.yml    # DWCP v3 continuous integration (since deleted, novacron-br7)
 ?? .github/workflows/e2e-nightly.yml   # Nightly E2E tests
 ?? .github/workflows/e2e-tests.yml     # E2E test suite
 ?? .github/workflows/e2e-visual-regression.yml

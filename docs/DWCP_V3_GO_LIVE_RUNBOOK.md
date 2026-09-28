@@ -87,7 +87,8 @@ cosign sign registry.novacron.io/dwcp-v3:prod-${VERSION}
 #### Staging Environment Testing
 ```bash
 # 1. Deploy to staging
-kubectl apply -f k8s/staging/ --namespace=dwcp-staging
+# DWCP v3 manifests live in deployments/k8s/ (the root k8s/ tree was retired, novacron-qz5)
+kubectl apply -f deployments/k8s/ --namespace=dwcp-staging
 
 # 2. Run smoke tests
 ./scripts/smoke-tests.sh staging
@@ -249,10 +250,10 @@ curl https://novacron.io/health
 **2.1.1 Deploy Core Services**
 ```bash
 # Apply Kubernetes manifests
-kubectl apply -f k8s/production/namespace.yaml
-kubectl apply -f k8s/production/configmaps.yaml
-kubectl apply -f k8s/production/secrets.yaml
-kubectl apply -f k8s/production/dwcp-core.yaml
+# Namespace, ConfigMap, Secret, Deployment, Service and PVC for DWCP v3 are
+# all in deployments/k8s/dwcp-v3-deployment.yaml (there is no k8s/production/ tree)
+kubectl apply -f deployments/k8s/dwcp-v3-deployment.yaml
+kubectl apply -f deployments/k8s/dwcp-v3-monitoring.yaml
 
 # Wait for pods to be ready
 kubectl wait --for=condition=ready pod \
@@ -270,7 +271,8 @@ kubectl get pods -l app=dwcp-core
 
 **2.1.2 Deploy Federation Services**
 ```bash
-kubectl apply -f k8s/production/federation.yaml
+# No federation manifest exists in the repository (the only DWCP v3 manifests are
+# deployments/k8s/dwcp-v3-*.yaml, which label everything app=dwcp-v3)
 
 kubectl wait --for=condition=ready pod \
   -l app=dwcp-federation \
@@ -281,7 +283,7 @@ kubectl wait --for=condition=ready pod \
 
 **2.1.3 Deploy Migration Services**
 ```bash
-kubectl apply -f k8s/production/migration.yaml
+# No migration manifest exists in the repository (see note in 2.1.2)
 
 kubectl wait --for=condition=ready pod \
   -l app=dwcp-migration \

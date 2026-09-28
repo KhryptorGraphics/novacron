@@ -1000,7 +1000,8 @@ func (cts *ChaosTestSuite) ValidateChaosResults(results *ChaosTestResults) []Cha
 ### 3.1 Master Testing Pipeline
 
 ```yaml
-# .github/workflows/comprehensive-testing.yml
+# proposed design only — the former .github/workflows/comprehensive-testing.yml was deleted
+# (novacron-br7); the live pipeline is .github/workflows/ci.yml
 name: Comprehensive Testing Pipeline
 
 on:

@@ -257,6 +257,13 @@ Verification (30s) → Notification
 
 ## Quick Reference: Deployment Commands
 
+> **Note:** the `deployments/kubernetes/*` manifests referenced in these commands never
+> existed in the repository (the `deployments/kubernetes/` directory held only the retired
+> onboarding manifests and has been removed). The DWCP v3 manifests that do exist are
+> `deployments/k8s/dwcp-v3-*.yaml`; the monitoring stack is installed by
+> `deployments/monitoring/deploy-monitoring-stack.sh`; canary rollout is scripted in
+> `deployment/canary/canary-deploy.sh`. Treat the commands below as a design sketch.
+
 ### Pre-Deployment Preparation
 
 ```bash

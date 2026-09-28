@@ -49,13 +49,6 @@ novacron/
 │       ├── security-init.test.js
 │       ├── error-scenarios.test.js
 │       └── cleanup-rollback.test.js
-├── deployments/
-│   ├── docker/
-│   │   ├── onboarding.Dockerfile    # Multi-stage production build
-│   │   └── entrypoint.sh            # Container startup script
-│   └── kubernetes/
-│       ├── namespace.yaml
-│       └── onboarding-deployment.yaml
 └── docs/
     └── implementation/
         ├── init-implementation.md   # Implementation documentation
@@ -425,9 +418,19 @@ API:
 
 ## 6. Deployment Infrastructure
 
+> **Retired.** The onboarding image and manifests described in this section
+> (`deployments/docker/onboarding.Dockerfile`, `deployments/docker/entrypoint.sh`,
+> `deployments/kubernetes/namespace.yaml`,
+> `deployments/kubernetes/onboarding-deployment.yaml`,
+> `.github/workflows/onboarding-system-ci.yml`) built a
+> `backend/cmd/onboarding` binary that never existed in the repository and were
+> deleted. The only supported deployment surfaces are `deploy/README.md`
+> (systemd), the root `docker-compose*.yml` (from `docker/*.Dockerfile`) and
+> `deployment/kubernetes/`. The text below is kept for history only.
+
 ### 6.1 Docker Configuration
 
-**File:** `deployments/docker/onboarding.Dockerfile`
+**File:** `deployments/docker/onboarding.Dockerfile` (deleted)
 
 **Multi-Stage Build:**
 
@@ -461,7 +464,7 @@ FROM alpine:3.19
 
 ### 6.2 Kubernetes Deployment
 
-**File:** `deployments/kubernetes/onboarding-deployment.yaml`
+**File:** `deployments/kubernetes/onboarding-deployment.yaml` (deleted)
 
 **Key Features:**
 
@@ -1166,10 +1169,10 @@ getSafeConfig() {
 
 | File Path | Purpose | Lines | Status |
 |-----------|---------|-------|--------|
-| `deployments/docker/onboarding.Dockerfile` | Multi-stage Docker build | 103 | ✅ Complete |
-| `deployments/docker/entrypoint.sh` | Container entrypoint | ? | ⚠️ Not read |
-| `deployments/kubernetes/onboarding-deployment.yaml` | K8s deployment | 224 | ✅ Complete |
-| `deployments/kubernetes/namespace.yaml` | K8s namespace | ? | ⚠️ Not read |
+| `deployments/docker/onboarding.Dockerfile` | Multi-stage Docker build | 103 | ❌ Deleted (phantom `backend/cmd/onboarding`) |
+| `deployments/docker/entrypoint.sh` | Container entrypoint | ? | ❌ Deleted |
+| `deployments/kubernetes/onboarding-deployment.yaml` | K8s deployment | 224 | ❌ Deleted |
+| `deployments/kubernetes/namespace.yaml` | K8s namespace | ? | ❌ Deleted |
 
 ---
 
@@ -1222,12 +1225,11 @@ npm run build:backend
 # Build frontend
 npm run build:frontend
 
-# Build Docker image
-docker build -f deployments/docker/onboarding.Dockerfile -t novacron/onboarding:latest .
+# Build Docker images (canonical Dockerfiles; the onboarding image was retired)
+docker compose -f docker-compose.yml build
 
-# Deploy to Kubernetes
-kubectl apply -f deployments/kubernetes/namespace.yaml
-kubectl apply -f deployments/kubernetes/onboarding-deployment.yaml
+# Deploy to Kubernetes (canonical tree)
+kubectl apply -f deployment/kubernetes/
 ```
 
 ### Development

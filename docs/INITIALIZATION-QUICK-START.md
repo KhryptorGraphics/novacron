@@ -246,7 +246,7 @@ npx bd ready
 ```
 
 ### Key GitHub Workflows
-- `.github/workflows/dwcp-v3-ci.yml` (315 lines)
+- `.github/workflows/ci.yml` (canonical verification; `dwcp-v3-ci.yml` was deleted in novacron-br7)
 - `.github/workflows/dwcp-v3-cd.yml` (302 lines)
 - `.github/workflows/e2e-tests.yml` (427 lines)
 

@@ -281,8 +281,9 @@ docker run -d \
 **Option C: Kubernetes Deployment**
 
 ```bash
-# Apply manifests
-kubectl apply -f deployments/kubernetes/dwcp-manager/
+# Apply manifests (no dwcp-manager manifest exists in the repository; the DWCP v3
+# manifests are deployments/k8s/dwcp-v3-*.yaml)
+kubectl apply -f deployments/k8s/dwcp-v3-deployment.yaml
 
 # Verify deployment
 kubectl rollout status deployment/dwcp-manager -n dwcp

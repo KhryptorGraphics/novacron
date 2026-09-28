@@ -21,7 +21,7 @@ Phase 4 has successfully delivered comprehensive CI/CD pipelines and deployment 
 ### Files Created
 
 **GitHub Actions:**
-- `.github/workflows/dwcp-v3-ci.yml` (425 lines)
+- `.github/workflows/dwcp-v3-ci.yml` (425 lines) — deleted in novacron-br7; canonical CI is `ci.yml`
 - `.github/workflows/dwcp-v3-cd.yml` (402 lines)
 
 **Docker:**

@@ -264,7 +264,7 @@ BenchmarkConnectionPool-8      1000000     1876 ns/op    (vs 18765 ns/op no pool
 
 ### Deliverables
 
-#### 1. CI Pipeline (`.github/workflows/dwcp-v3-ci.yml`)
+#### 1. CI Pipeline (`.github/workflows/dwcp-v3-ci.yml` — deleted in novacron-br7; canonical CI is `ci.yml`)
 **Lines:** 425
 **Purpose:** Continuous integration with testing, security scanning, and benchmarks
 
@@ -340,7 +340,7 @@ BenchmarkConnectionPool-8      1000000     1876 ns/op    (vs 18765 ns/op no pool
 - Non-root user execution
 - Health checks configured
 
-#### 4. Kubernetes Manifests (`deployments/kubernetes/`)
+#### 4. Kubernetes Manifests (`deployments/k8s/dwcp-v3-*.yaml`)
 **Lines:** 505 total
 - `deployment.yaml` (178 lines): DWCP v3 deployment (3 replicas, rolling update)
 - `service.yaml` (89 lines): ClusterIP service

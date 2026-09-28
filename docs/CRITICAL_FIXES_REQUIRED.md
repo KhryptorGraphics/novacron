@@ -128,24 +128,21 @@ export function getCurrentUser(): User | null {
 
 ---
 
-### 4. Database Schema Inconsistencies ⛔
-**Status:** HIGH RISK  
+### 4. Database Schema Inconsistencies ✅ RESOLVED
+**Status:** RESOLVED (novacron-1fx)
 **Impact:** Data corruption, migration failures
 
-**Problem:**
-Multiple conflicting schema definitions:
-- `backend/database/schema.sql`
-- `backend/pkg/database/migrations.sql`
+**Problem (historical):**
+Multiple conflicting schema definitions coexisted:
+- `backend/database/schema.sql` (deleted)
+- `backend/pkg/database/migrations.sql` (deleted)
+- `backend/migrations/` and `backend/database/migrations/` (deleted)
 - `database/migrations/000001_init_schema.up.sql`
 
-**Fix Required:**
-1. Choose ONE authoritative schema source
-2. Remove duplicate definitions
-3. Add schema validation on startup
-4. Test all migrations
-
-**Estimated Time:** 2 days  
-**Assigned To:** Database Team
+**Resolution:**
+`database/migrations` (golang-migrate, `make db-migrate`) is the single
+schema source; the legacy lineages were deleted and the api-server refuses to
+boot on an unmigrated schema.
 
 ---
 

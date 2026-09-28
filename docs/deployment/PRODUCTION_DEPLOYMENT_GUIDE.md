@@ -156,13 +156,19 @@ kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=postgres -n nov
 
 ### 3. Run Database Migrations
 
+Migrations are the golang-migrate lineage in `database/migrations` (000001-…).
+The `novacron-api` Deployment in `deployment/kubernetes/deployments.yaml`
+runs them automatically through its `migration` initContainer
+(`novacron/migrate`, built from `docker/migrate.Dockerfile`) against the
+`database-url` key of `novacron-db-secrets`; the api-server refuses to boot on
+an unmigrated schema. To run them by hand instead:
+
 ```bash
 # Port forward to database for initial setup
 kubectl port-forward svc/novacron-postgres 5432:5432 -n novacron &
 
-# Run migrations
-cd backend/migrations
-DATABASE_URL="postgres://username:password@localhost:5432/novacron?sslmode=require" ./run_migrations.sh migrate
+# Run migrations (same tool the initContainer uses)
+DB_URL="postgres://username:password@localhost:5432/novacron?sslmode=require" make db-migrate
 
 # Kill port forward
 kill %1
@@ -247,13 +253,21 @@ Access Grafana at https://grafana.novacron.local and import dashboards:
 
 ### 1. Configure Backup Service
 
-```bash
-# Review backup configuration
-vim backend/configs/production/app.yaml
+The backup image (`deployment/docker/Dockerfile.backup`, entrypoint
+`deployment/docker/backup-entrypoint.sh`) is configured purely by environment
+variables — there is no YAML config file to edit:
 
-# Apply backup CronJob
-kubectl apply -f deployment/kubernetes/cronjobs.yaml
-```
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | database to dump (same value as `DB_URL`) |
+| `S3_ENABLED` | `true` to upload dumps |
+| `S3_BUCKET` | target bucket when `S3_ENABLED=true` |
+
+No CronJob manifest ships in `deployment/kubernetes/`; only the
+`novacron-backup` service account and role (`rbac.yaml`) do. Write a
+`CronJob` named `novacron-backup` that runs the backup image under that service
+account with the variables above, then apply it. For systemd/bare-metal
+installs use `deploy/scripts/backup-db.sh` instead (see `deploy/README.md`).
 
 ### 2. Test Backup
 

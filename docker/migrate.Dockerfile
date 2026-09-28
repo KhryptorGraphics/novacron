@@ -6,8 +6,8 @@
 #     runs before the api service starts and also publishes the built binary
 #     onto a shared volume so docker/api-entrypoint.sh can defensively re-run
 #     it (idempotent: golang-migrate's Up() is a no-op when already current).
-#   - a Kubernetes Job (see k8s/migrate-job.yaml) run before/alongside the
-#     novacron-api Deployment.
+#   - the `migration` initContainer of the novacron-api Deployment in
+#     deployment/kubernetes/deployments.yaml.
 
 # Build stage
 FROM golang:1.23-alpine AS builder

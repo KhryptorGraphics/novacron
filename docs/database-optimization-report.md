@@ -1,5 +1,7 @@
 # NovaCron Database Query Optimization Report
 
+> **Status: historical design report.** The SQL it describes (`backend/database/migrations/001_performance_indexes.sql`, `002_materialized_views.sql`, `003_timescaledb_optimization.sql`) and the "optimized" Go handlers were never wired into the api-server and have been removed. The canonical schema is `database/migrations` (golang-migrate, applied with `make db-migrate`); it contains none of the indexes, materialized views, or TimescaleDB hypertables below, so the response times in this report do not describe the current system.
+
 ## Executive Summary
 
 This report documents the comprehensive database query optimization implementation for NovaCron, achieving significant performance improvements across all critical queries.
@@ -201,41 +203,22 @@ ORDER BY bucket DESC
 
 ## Implementation Guide
 
-### 1. Apply Index Migrations
+None of the DDL above ships in the canonical migrations. To adopt an optimization, add it as a golang-migrate up/down pair under `database/migrations` and apply it with the standard targets:
+
 ```bash
-psql -d novacron -f migrations/001_performance_indexes.sql
+make db-migrate-create   # prompts for a name, creates database/migrations/NNNNNN_<name>.{up,down}.sql
+make db-migrate          # applies pending migrations to $(DB_URL)
 ```
 
-### 2. Create Materialized Views
-```bash
-psql -d novacron -f migrations/002_materialized_views.sql
-```
-
-### 3. Enable TimescaleDB
-```bash
-psql -d novacron -f migrations/003_timescaledb_optimization.sql
-```
-
-### 4. Deploy Optimized Code
-```go
-// Use optimized database connection
-db, _ := database.NewOptimized(dbURL, database.DefaultPoolConfig())
-
-// Use optimized handlers
-handler := vm.NewOptimizedHandler(db)
-handler.RegisterOptimizedRoutes(router)
-```
-
-### 5. Monitor Performance
+Verify the effect with PostgreSQL's built-in statistics views:
 ```sql
 -- Check index usage
-SELECT * FROM index_usage;
+SELECT relname, indexrelname, idx_scan
+FROM pg_stat_user_indexes
+ORDER BY idx_scan;
 
 -- Monitor cache hit rate
 SELECT * FROM pg_stat_database WHERE datname = 'novacron';
-
--- Check materialized view refresh
-SELECT * FROM continuous_aggregate_stats;
 ```
 
 ## Monitoring and Maintenance

@@ -127,14 +127,15 @@ Comprehensive deployment infrastructure designed and documented for NovaCron pro
 
 ### Existing Assets
 
-**GitHub Actions Workflows (7 total):**
-- ✅ `ci-cd-production.yml` - Comprehensive pipeline with security
+**GitHub Actions Workflows (current set):**
+- ✅ `ci.yml` - Canonical verification (backend build/vet/test, frontend, fabric acceptance)
+- ✅ `deploy-production.yml` - Production deployment from `docker/*.Dockerfile`
 - ✅ `dwcp-phase1-deploy.yml` - DWCP-specific deployment
+- ✅ `dwcp-v3-cd.yml` - DWCP v3 continuous deployment
 - ✅ `integration-tests.yml` - Integration test suite
-- ✅ `comprehensive-testing.yml` - Full test coverage
-- ✅ `ci.yml` - Basic CI
-- ✅ `ci-cd.yml` - Standard CI/CD
+- ✅ `e2e-tests.yml`, `e2e-nightly.yml`, `e2e-visual-regression.yml` - Playwright E2E
 - ✅ `update-code-memory.yml` - Code memory updates
+- ❌ `ci-cd.yml`, `ci-cd-production.yml`, `comprehensive-testing.yml`, `dwcp-v3-ci.yml` - deleted (novacron-br7; drifted, workflow_dispatch-only)
 
 **Deployment Scripts (14 total):**
 - Production deployment scripts (multiple variants)

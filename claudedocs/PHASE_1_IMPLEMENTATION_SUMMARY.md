@@ -89,7 +89,7 @@ Phase 1 of the NovaCron Universal Compute Fabric has been **successfully impleme
 
 **Key Files:**
 - `/backend/tests/` - Complete testing framework
-- `.github/workflows/comprehensive-testing.yml` - CI/CD pipeline
+- `.github/workflows/ci.yml` - CI/CD pipeline (`comprehensive-testing.yml` was deleted in novacron-br7)
 - `docker-compose.test.yml` - Test environment infrastructure
 
 ## 📊 Performance Achievements

@@ -31,7 +31,7 @@ The NovaCron system shows a **moderately healthy** state with critical infrastru
 | Default Config | ✅ Valid | `/src/config/config.default.json` | Development settings |
 | Production Config | ✅ Valid | `/src/config/config.production.json` | Production overrides |
 | Docker Compose | ✅ Present | Multiple files | 20+ compose configurations |
-| Kubernetes | ✅ Valid | `/deployments/kubernetes/` | Production-ready K8s manifests |
+| Kubernetes | ✅ Valid | `deployment/kubernetes/` | Canonical K8s manifests (root `k8s/` and `deployments/kubernetes/` retired) |
 
 **Details:**
 - Go modules verified successfully: `all modules verified`

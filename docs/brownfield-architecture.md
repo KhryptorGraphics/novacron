@@ -19,7 +19,7 @@ Comprehensive documentation of the entire NovaCron system, focusing on the exist
 ### Critical Files for Understanding the System
 
 - **Backend Entry**: `backend/cmd/api-server/main.go` - Main API server
-- **Configuration**: `backend/configs/`, environment-specific configs
+- **Configuration**: environment variables only (`backend/pkg/config/config.go`; contract in `docs/CANONICAL_CONTRACT_MATRIX.md`)
 - **Core Business Logic**: `backend/core/` - All core services
 - **API Definitions**: `backend/api/` - REST, GraphQL, WebSocket handlers
 - **Database Models**: Embedded in service files (no ORM)
@@ -122,7 +122,7 @@ novacron/
 
 ### Data Models
 Database schema defined in raw SQL (no ORM):
-- See migration files in `backend/migrations/` (if exists)
+- See the golang-migrate lineage in `database/migrations/` (applied by `make db-migrate`)
 - Primary models embedded in service files
 - JSONB used extensively for flexible attributes
 

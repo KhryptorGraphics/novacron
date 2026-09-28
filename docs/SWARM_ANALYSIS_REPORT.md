@@ -92,7 +92,9 @@ hashedPassword := "$argon2id$v=19$m=65536,t=3,p=2$..." // Retrieved from databas
 ```
 
 ### 1.4 Database Schema Inconsistencies
-**Severity:** HIGH  
+**Severity:** HIGH — **RESOLVED** (novacron-1fx): `backend/database/schema.sql`,
+`backend/pkg/database/migrations.sql`, `backend/migrations/` and
+`backend/database/migrations/` were deleted; `database/migrations` is the only lineage.
 **Impact:** Data corruption risk, migration failures
 
 **Problems:**

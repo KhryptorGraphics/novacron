@@ -16,41 +16,14 @@ Before starting, ensure you have:
 
 ### 1. Configure Environment
 
-Create or update your configuration file `/backend/configs/config.yaml`:
+The api-server is configured only through environment variables (there is no
+config YAML; see `docs/CANONICAL_CONTRACT_MATRIX.md` for the full list):
 
-```yaml
-server:
-  api_port: "8090"
-  ws_port: "8091"
-  read_timeout: 30s
-  write_timeout: 30s
-  idle_timeout: 120s
-  shutdown_timeout: 30s
-
-database:
-  url: "postgres://username:password@localhost:5432/novacron?sslmode=disable"
-  max_connections: 50
-  conn_max_lifetime: 30m
-  conn_max_idle_time: 10m
-
-auth:
-  secret: "your-secret-key-change-this-in-production"
-
-logging:
-  level: "info"
-  format: "json"
-  output: "stdout"
-  structured: true
-
-vm:
-  storage_path: "/var/lib/novacron/vms"
-```
-
-Or set environment variables:
 ```bash
-export DATABASE_URL="postgres://username:password@localhost:5432/novacron?sslmode=disable"
-export AUTH_SECRET="your-secret-key-change-this-in-production"
-export API_PORT="8090"
+export DB_URL="postgres://username:password@localhost:5432/novacron?sslmode=disable"
+export AUTH_SECRET="your-secret-key-change-this-in-production"   # >= 16 chars
+export STORAGE_PATH="/var/lib/novacron/vms"
+export API_PORT="8090"   # single listener: HTTP, GraphQL and WebSocket routes
 ```
 
 ### 2. Start Backend Server
@@ -255,8 +228,8 @@ lsof -i :8090
 
 **Migrations Failed:**
 ```bash
-# Manually run migrations
-psql -h localhost -U username -d novacron -f backend/migrations/schema.sql
+# Manually run the canonical golang-migrate lineage (database/migrations)
+DB_URL="postgres://username:password@localhost:5432/novacron?sslmode=disable" make db-migrate
 ```
 
 ### Frontend Issues

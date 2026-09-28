@@ -241,14 +241,15 @@ Gap: 15% ❌
 
 ### CI/CD Pipeline Assessment ✅
 
-**Active Workflows** (7 total):
-1. ✅ `dwcp-v3-ci.yml` - Comprehensive CI with quality checks
-2. ✅ `dwcp-v3-cd.yml` - Continuous deployment pipeline
-3. ✅ `e2e-tests.yml` - E2E test automation
-4. ✅ `e2e-nightly.yml` - Nightly regression tests
-5. ✅ `e2e-visual-regression.yml` - Visual regression testing
-6. ✅ `ci-cd-production.yml` - Production deployment
-7. ✅ `comprehensive-testing.yml` - Full test suite
+**Active Workflows** (current set; `dwcp-v3-ci.yml`, `ci-cd-production.yml`
+and `comprehensive-testing.yml` were deleted in novacron-br7):
+1. ✅ `ci.yml` - Canonical verification (backend build/vet/test, frontend, fabric acceptance)
+2. ✅ `integration-tests.yml` - Integration test suite
+3. ✅ `deploy-production.yml` - Production deployment
+4. ✅ `dwcp-v3-cd.yml` - DWCP v3 continuous deployment
+5. ✅ `e2e-tests.yml` - E2E test automation
+6. ✅ `e2e-nightly.yml` - Nightly regression tests
+7. ✅ `e2e-visual-regression.yml` - Visual regression testing
 
 **CI Pipeline Quality**:
 - ✅ Code quality checks (ESLint, Prettier, TypeScript)

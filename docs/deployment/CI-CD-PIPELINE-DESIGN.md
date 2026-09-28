@@ -57,14 +57,18 @@ This document defines the comprehensive CI/CD pipeline for NovaCron with DWCP v3
 
 ### Existing CI/CD Components
 
-**1. GitHub Actions Workflows (7 workflows identified):**
-- `ci-cd-production.yml` - Comprehensive production pipeline with security scanning
+**1. GitHub Actions Workflows (current set):**
+- `ci.yml` - Canonical verification (backend build/vet/test, frontend, fabric acceptance)
+- `deploy-production.yml` - Production deployment from `docker/*.Dockerfile`
 - `dwcp-phase1-deploy.yml` - DWCP-specific deployment workflow
+- `dwcp-v3-cd.yml` - DWCP v3 continuous deployment
 - `integration-tests.yml` - Integration test suite
-- `comprehensive-testing.yml` - Full test coverage
-- `ci.yml` - Basic continuous integration
-- `ci-cd.yml` - Standard CI/CD workflow
+- `e2e-tests.yml`, `e2e-nightly.yml`, `e2e-visual-regression.yml` - Playwright E2E
 - `update-code-memory.yml` - Code memory updates
+
+(`ci-cd.yml`, `ci-cd-production.yml`, `comprehensive-testing.yml` and
+`dwcp-v3-ci.yml` were deleted in novacron-br7 as workflow_dispatch-only
+pipelines drifted from the canonical build.)
 
 **2. Deployment Scripts (14 scripts):**
 - Production deployment scripts (multiple variants)

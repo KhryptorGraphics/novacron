@@ -10,7 +10,7 @@
 
 ```bash
 # Database
-make db-migrate            # applies backend/database/migrations/*.up.sql
+make db-migrate            # applies database/migrations/*.up.sql
 
 # Canonical API server
 make serve                  # go run ./backend/cmd/api-server (port 8090)

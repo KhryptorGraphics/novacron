@@ -9,17 +9,14 @@ This guide helps you quickly deploy and use the DWCP performance monitoring and 
 ### 1. Deploy Monitoring Stack
 
 ```bash
-# Deploy Prometheus
-kubectl apply -f deployments/kubernetes/prometheus-config.yml
+# The DWCP v3 monitoring stack is deployed by deployments/monitoring/deploy-monitoring-stack.sh
+# (kubectl+helm) with the ConfigMaps in deployments/k8s/dwcp-v3-monitoring.yaml; the
+# deployments/kubernetes/*.yml files named below never existed in the repository.
+# Deploy the monitoring stack (Prometheus, Grafana, alerting) via helm
+./deployments/monitoring/deploy-monitoring-stack.sh
 
-# Deploy VictoriaMetrics for long-term storage
-kubectl apply -f deployments/kubernetes/victoriametrics-cluster.yml
-
-# Deploy Jaeger for distributed tracing
-kubectl apply -f deployments/kubernetes/jaeger-deployment.yml
-
-# Deploy Grafana
-kubectl apply -f deployments/kubernetes/grafana-deployment.yml
+# Apply the DWCP v3 dashboards / alert rules / scrape config ConfigMaps
+kubectl apply -f deployments/k8s/dwcp-v3-monitoring.yaml
 ```
 
 ### 2. Import Dashboards

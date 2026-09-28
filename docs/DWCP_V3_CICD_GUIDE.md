@@ -69,7 +69,11 @@ DWCP v3 uses a comprehensive CI/CD pipeline built with GitHub Actions, container
 
 ## GitHub Actions Workflows
 
-### CI Pipeline (.github/workflows/dwcp-v3-ci.yml)
+### CI Pipeline (`.github/workflows/dwcp-v3-ci.yml` — deleted in novacron-br7; historical)
+
+This workflow was workflow_dispatch-only and had drifted from the canonical
+`docker/*.Dockerfile` build; it was removed. Canonical CI is
+`.github/workflows/ci.yml`. The description below is retained for history.
 
 **Triggers:**
 - Push to `main`, `develop`, `feature/**`, `dwcp-v3/**` branches

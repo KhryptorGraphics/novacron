@@ -220,8 +220,9 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ### Kubernetes Deployment
 ```bash
-kubectl apply -f k8s/
+kubectl apply -f deployment/kubernetes/
 ```
+See `docs/deployment/PRODUCTION_DEPLOYMENT_GUIDE.md` for the ordered walkthrough.
 
 ### Environment Variables
 

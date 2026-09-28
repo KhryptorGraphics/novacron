@@ -51,7 +51,7 @@
 ├── docker/                    # Docker-related files
 ├── docs/                      # Documentation (250+ MD files)
 ├── frontend/                  # Frontend codebase (React/Next.js)
-├── k8s/                       # Kubernetes manifests
+├── deployment/kubernetes/     # Kubernetes manifests (canonical)
 ├── k8s-operator/              # Kubernetes operator implementation
 ├── marketplace/               # Marketplace integrations
 ├── memory/                    # Memory store configurations
@@ -250,18 +250,19 @@ sdk/ - Client Libraries:
 └── partners/                  # Partner SDK
 ```
 
-### Kubernetes (`/k8s/` & `/k8s-operator/`)
+### Kubernetes (`/deployment/kubernetes/` & `/k8s-operator/`)
 
 ```
-k8s/ - Manifests:
-├── novacron-deployment.yaml  # Main deployment
-├── novacron-secrets.yaml     # Secrets
+deployment/kubernetes/ - Manifests (the retired root k8s/ tree was deleted in novacron-qz5):
+├── namespace.yaml            # Namespace + network policy
+├── rbac.yaml                 # Service accounts, roles
+├── configmap.yaml            # Non-secret config
+├── secrets.yaml              # Secret templates
+├── external-secrets-setup.yaml
+├── deployments.yaml          # api-server (+migrate initContainer), frontend, postgres, prometheus
+├── services.yaml             # Services
 ├── ingress.yaml              # Ingress
-├── redis-deployment.yaml     # Redis
-├── mysql-deployment.yaml     # MySQL
-├── redis-cluster.yaml        # Redis cluster
-├── scheduler-deployment.yaml # Scheduler
-└── worker-deployment.yaml    # Worker nodes
+└── prometheus-exporters.yaml # Exporters
 
 k8s-operator/ - Kubernetes Operator:
 ├── deploy/
@@ -617,7 +618,7 @@ docker-compose -f docker-compose.prod.yml up -d
 
 **Option 2: Kubernetes**
 ```bash
-kubectl apply -f k8s/
+kubectl apply -f deployment/kubernetes/
 kubectl apply -f k8s-operator/deploy/crds/
 ```
 

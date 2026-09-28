@@ -16,7 +16,7 @@ All critical security issues identified by the Test Architect have been successf
 
 **Evidence**:
 - `backend/core/security/audit_logger.go` - Full audit logging system
-- `backend/migrations/002_audit_logs.up.sql` - Database schema for audit persistence
+- ~~`backend/migrations/002_audit_logs.up.sql`~~ — legacy lineage deleted (novacron-1fx); audit tables live in `database/migrations/000001_init_schema.up.sql`
 - Complete audit trail for all secret operations
 - Security alerting on failures
 - Compliance reporting integration
@@ -56,7 +56,7 @@ All critical security issues identified by the Test Architect have been successf
 **Resolution**: Complete externalization with no defaults
 
 **Evidence**:
-- `backend/configs/secrets.yaml` - Comprehensive configuration file
+- ~~`backend/configs/secrets.yaml`~~ — deleted (novacron-qz5); nothing in Go read it. Runtime configuration is environment variables only (`docs/CANONICAL_CONTRACT_MATRIX.md`)
 - `backend/core/security/secrets_manager_enhanced.go` - Configuration-driven implementation
 - **NO hardcoded defaults** for critical settings
 - Environment variable support with validation

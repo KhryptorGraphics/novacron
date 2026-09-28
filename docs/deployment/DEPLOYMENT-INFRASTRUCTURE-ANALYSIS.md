@@ -30,13 +30,13 @@ This comprehensive analysis evaluates NovaCron's deployment infrastructure, CI/C
 ### 1.1 GitHub Actions Workflows (Grade: A+)
 
 **Workflows Implemented:**
-1. **`dwcp-v3-ci.yml`** - Continuous Integration (315 lines)
+1. ~~**`dwcp-v3-ci.yml`** - Continuous Integration (315 lines)~~ — deleted in novacron-br7 (drifted, workflow_dispatch-only); canonical CI is `ci.yml`
 2. **`dwcp-v3-cd.yml`** - Continuous Deployment (302 lines)
 3. **`e2e-tests.yml`** - End-to-end Testing (465 lines)
 4. **`e2e-nightly.yml`** - Nightly Comprehensive Tests (400 lines)
 5. **`e2e-visual-regression.yml`** - Visual Testing (342 lines)
 
-#### 1.1.1 CI Pipeline (`dwcp-v3-ci.yml`)
+#### 1.1.1 CI Pipeline (`dwcp-v3-ci.yml`, deleted — historical assessment)
 
 **Strengths:**
 - ✅ **Comprehensive testing matrix**:

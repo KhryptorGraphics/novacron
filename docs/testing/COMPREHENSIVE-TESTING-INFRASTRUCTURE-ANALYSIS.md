@@ -448,28 +448,30 @@ Performance Targets:
 
 ## 7. CI/CD Integration & Test Automation
 
-### 7.1 GitHub Actions Workflows (12 workflows)
+### 7.1 GitHub Actions Workflows (9 workflows)
 
 #### Workflow Inventory
 ```
 .github/workflows/
-├── comprehensive-testing.yml          Full test suite on PR
-├── dwcp-v3-ci.yml                     DWCP v3 specific CI
+├── ci.yml                             Canonical verification (build/vet/test, frontend, fabric)
+├── deploy-production.yml              Production deployment (docker/*.Dockerfile)
+├── dwcp-phase1-deploy.yml             Phase 1 deployment
 ├── dwcp-v3-cd.yml                     DWCP v3 deployment
 ├── e2e-tests.yml                      Playwright E2E tests
 ├── e2e-nightly.yml                    Nightly E2E runs
 ├── e2e-visual-regression.yml          Visual regression testing
 ├── integration-tests.yml              Integration test suite
-├── ci.yml                             Basic CI pipeline
-├── ci-cd.yml                          Full CI/CD pipeline
-├── ci-cd-production.yml               Production deployment
-├── dwcp-phase1-deploy.yml             Phase 1 deployment
 └── update-code-memory.yml             Code memory updates
 ```
 
+`comprehensive-testing.yml`, `ci-cd.yml`, `ci-cd-production.yml` and
+`dwcp-v3-ci.yml` were deleted in novacron-br7 (workflow_dispatch-only, drifted
+from the canonical build). The `dwcp-v3-ci.yml` job description below is kept
+for historical context only.
+
 ### 7.2 CI/CD Test Execution Matrix
 
-#### DWCP v3 CI Pipeline (`dwcp-v3-ci.yml`)
+#### DWCP v3 CI Pipeline (`dwcp-v3-ci.yml`, deleted — historical)
 
 **Jobs Executed**:
 1. **Code Quality** - ESLint, Prettier, TypeScript checking

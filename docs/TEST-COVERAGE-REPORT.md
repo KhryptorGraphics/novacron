@@ -172,7 +172,8 @@ backend/core/network/dwcp/v3/
 
 **Location**: `backend/core/network/`
 
-- `qos_test.go` - Quality of Service
+- `qos_manager_test.go` - Quality of Service (tc programming, reconciliation, congestion throttling)
+- `bandwidth_monitor_test.go` - Bandwidth thresholds, alerts, sliding-window rates
 - `openvswitch_test.go` - Open vSwitch integration
 - `network_benchmark_test.go` - Network performance
 - `isolation_test.go` - Network isolation
@@ -289,11 +290,15 @@ go test -bench=. -benchmem -timeout 30m
 
 | Workflow | Purpose | Status |
 |----------|---------|--------|
-| comprehensive-testing.yml | Full test suite | ✅ Active |
-| ci-cd-production.yml | Production deployment | ✅ Active |
+| ci.yml | Canonical verification (build, vet, unit tests) | ✅ Active |
 | integration-tests.yml | Integration testing | ✅ Active |
-| ci.yml | Basic CI | ✅ Active |
+| e2e-tests.yml / e2e-nightly.yml | Playwright E2E (release smoke, nightly) | ✅ Active |
+| deploy-production.yml | Production deployment | ✅ Active |
 | dwcp-phase1-deploy.yml | DWCP deployment | ✅ Active |
+
+`comprehensive-testing.yml`, `ci-cd.yml`, `ci-cd-production.yml` and
+`dwcp-v3-ci.yml` were deleted (novacron-br7): workflow_dispatch-only and
+drifted from the canonical `docker/*.Dockerfile` build.
 
 **CI/CD Features**:
 - ✅ Unit tests on every PR

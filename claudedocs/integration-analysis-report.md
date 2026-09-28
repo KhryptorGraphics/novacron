@@ -18,7 +18,7 @@ NovaCron is a sophisticated distributed VM management system with advanced migra
 ## Database Architecture Analysis
 
 ### Schema Completeness ✅ EXCELLENT
-The PostgreSQL schema (`backend/database/schema.sql`) is comprehensive and production-ready:
+The PostgreSQL schema (`database/migrations/000001_init_schema.up.sql`; the former `backend/database/schema.sql` was deleted in novacron-1fx) is comprehensive and production-ready:
 
 #### Strengths:
 - **Complete Entity Model**: All major entities (users, organizations, VMs, nodes, migrations, alerts) properly defined

@@ -136,7 +136,7 @@ echo ""
 echo -e "${YELLOW}🚀 Checking CI/CD Configuration...${NC}"
 echo ""
 
-check_file "$PROJECT_ROOT/.github/workflows/comprehensive-testing.yml" "GitHub Actions E2E workflow"
+check_file "$PROJECT_ROOT/.github/workflows/e2e-tests.yml" "GitHub Actions E2E workflow"
 check_directory "$PROJECT_ROOT/.github/workflows" "GitHub workflows directory"
 
 echo ""

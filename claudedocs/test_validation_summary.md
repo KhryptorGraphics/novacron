@@ -84,12 +84,11 @@
 ## 🔧 Test Automation Scripts
 
 ### Backend Test Scripts
-1. `scripts/fix_backend_tests.sh` - Fixes compilation issues and adds comprehensive test coverage
-2. `scripts/comprehensive_test_suite.sh` - Full integration testing suite
+1. `scripts/comprehensive_test_suite.sh` - Full integration testing suite
 
 ### Frontend Test Scripts  
-3. `scripts/create_frontend_unit_tests.sh` - Complete frontend test framework setup
-4. `scripts/frontend_e2e_tests.sh` - Playwright E2E test implementation
+2. `scripts/create_frontend_unit_tests.sh` - Complete frontend test framework setup
+3. `scripts/frontend_e2e_tests.sh` - Playwright E2E test implementation
 
 ### Enhanced Makefile Commands
 ```bash
