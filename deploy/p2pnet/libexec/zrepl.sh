@@ -62,10 +62,15 @@ zrepl_install() {
         [[ $interval =~ ^[0-9]+$ && $interval -ge 1 && $interval -le 1440 ]] || die "invalid interval for zrepl job $job"
         need_cmd zfs
         local dropin_dir="/etc/systemd/system/p2pnet-zrepl@${job}.timer.d"
+        # An empty assignment resets the whole [Timer] section's On*Sec settings,
+        # which also discards the template's OnActiveSec seed and leaves the
+        # timer permanently elapsed ("active (elapsed)", Trigger: n/a) so
+        # replication never runs. Re-state the seed in the drop-in.
         install_file - "$dropin_dir/10-interval.conf" 0644 <<EOF
 [Timer]
 OnUnitActiveSec=
 OnUnitActiveSec=${interval}min
+OnActiveSec=1min
 EOF
         IFS=',' read -r -a target_array <<< "$targets"
         for target in "${target_array[@]}"; do

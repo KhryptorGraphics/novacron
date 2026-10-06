@@ -67,8 +67,9 @@ EOF
 _mptcp_endpoint_present() {
   ip mptcp endpoint show | grep -Eq "(^|[[:space:]])${P2P_PLANE2_IP//./\\.}([[:space:]]|$).*id 51|id 51.*${P2P_PLANE2_IP//./\\.}"
 }
+_mptcp_limits_show() { ip mptcp limits show 2>/dev/null | tr '\n' ' '; }
 _mptcp_limits_ok() {
-  ip mptcp limits show 2>/dev/null | grep -Eq 'subflows[[:space:]]+8.*add_addr_accepted[[:space:]]+8|add_addr_accepted[[:space:]]+8.*subflows[[:space:]]+8'
+  _mptcp_limits_show | grep -Eq 'subflows[[:space:]]+8[[:space:]]+add_addr_accepted[[:space:]]+8|add_addr_accepted[[:space:]]+8[[:space:]]+subflows[[:space:]]+8'
 }
 _mptcp_apply() {
   require_root
@@ -84,7 +85,7 @@ _mptcp_apply() {
       _mptcp_limits_ok && break
       sleep 1
     done
-    _mptcp_limits_ok || die "could not set MPTCP limits to subflows 8 add_addr_accepted 8 after $attempt attempts (now: $(ip mptcp limits show 2>/dev/null))"
+    _mptcp_limits_ok || log WARN "could not confirm MPTCP limits subflows 8 add_addr_accepted 8 after $attempt attempts (now: $(_mptcp_limits_show)); continuing so the component still installs"
     CHANGED=$((CHANGED + 1))
   fi
   if _mptcp_dualwan; then
@@ -110,8 +111,8 @@ _mptcp_verify() {
     actual=$(sysctl -n "$key" 2>/dev/null || true)
     if [[ $actual == "$expected" ]]; then check PASS "sysctl.$key" "$actual"; else check FAIL "sysctl.$key" "actual='$actual' expected='$expected'"; fail=1; fi
   done
-  limits=$(ip mptcp limits show 2>/dev/null || true)
-  if grep -Eq 'subflows[[:space:]]+8.*add_addr_accepted[[:space:]]+8|add_addr_accepted[[:space:]]+8.*subflows[[:space:]]+8' <<<"$limits"; then
+  limits=$(_mptcp_limits_show)
+  if _mptcp_limits_ok; then
     check PASS mptcp.limits 'subflows 8 add_addr_accepted 8'
   else check FAIL mptcp.limits "unexpected limits: $limits"; fail=1; fi
   if _mptcp_dualwan; then

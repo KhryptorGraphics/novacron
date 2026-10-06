@@ -13,7 +13,7 @@
   <devices>
     <emulator>__EMULATOR__</emulator>
     <disk type='file' device='disk'><driver name='qemu' type='qcow2'/><source file='/var/lib/libvirt/images/cirros-data.qcow2'/><target dev='vda' bus='virtio'/></disk>
-    <interface type='network'><source network='p2p-l2'/><model type='virtio'/></interface>
+    <interface type='network'><source network='p2p-l2'/><model type='virtio'/><mtu size='__MTU__'/></interface>
     <serial type='pty'><target port='0'/></serial><console type='pty'><target type='serial' port='0'/></console>
   </devices>
 </domain>

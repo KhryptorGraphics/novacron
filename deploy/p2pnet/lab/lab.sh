@@ -194,10 +194,12 @@ class_bytes() {
     remote "$node" "tc -s class show dev wg0 classid $classid | awk '/Sent/ {print \$2; exit}'"
 }
 
-# guest_tap_mtu prints the MTU of the tap libvirt created on the overlay bridge
-# for the running test guest. libvirt derives it from the bridge, so this proves
-# the overlay MTU reaches the guest's NIC; the guest kernel must still adopt it
-# itself (see the guest-MTU note in the README).
+# guest_tap_mtu asserts the MTU of the tap libvirt created on the overlay bridge
+# for the running test guest, against the inventory's VXLAN_MTU. libvirt derives
+# the tap MTU from the bridge, so this covers the bridge -> tap half of the path.
+# The guest half is covered by the interface's <mtu size=.../>: libvirt turns it
+# into QEMU's host_mtu, virtio-net advertises it to the guest, and the guest NIC
+# then comes up at VXLAN_MTU (measured: 1500 without it, VXLAN_MTU with it).
 guest_tap_mtu() {
     local node=$1 domain=$2
     remote "$node" "set -a; . /etc/p2pnet/generated/node.env; set +a
@@ -211,8 +213,13 @@ master=\$(basename \"\$(readlink -f /sys/class/net/\$dev/master)\")
 echo \"guest tap \$dev MTU \$mtu on \$master\""
 }
 T9() {
+    # T9 relies on the documented suite order: T2 builds the overlay (wg), T3 the
+    # bridge (l2), T7 the SSH trust store (sshd) and T8 the HTB classes (qos).
+    # Re-installing them here restarts node1's tunnels mid-suite and destroys the
+    # dual-WAN MPTCP state, which breaks T6/T14. `lab.sh test T9` alone therefore
+    # needs T1-T8 first.
     install_all libvirt && verify_all libvirt
-    local arch machine cpu console emulator before after n
+    local arch machine cpu console emulator before after n mtu
     if [[ $ARCH == aarch64 ]]; then arch=aarch64; machine=virt; cpu="<cpu mode='maximum' check='none'/>"; console=ttyAMA0; emulator=/usr/bin/qemu-system-aarch64; else arch=x86_64; machine=q35; cpu="<cpu mode='custom'><model>qemu64</model></cpu>"; console=ttyS0; emulator=/usr/bin/qemu-system-x86_64; fi
     for n in node1 node2; do
         remote "$n" 'if virsh dominfo cirros >/dev/null 2>&1; then virsh destroy cirros >/dev/null 2>&1 || true; virsh undefine cirros; fi; rm -f /var/lib/libvirt/images/cirros-data.qcow2'
@@ -220,8 +227,15 @@ T9() {
     remote node1 'qemu-img create -f qcow2 /var/lib/libvirt/images/cirros-data.qcow2 64M'
     remote node1 'qemu-io -f qcow2 -c "write -P 0x5a 0 4096" /var/lib/libvirt/images/cirros-data.qcow2'
     remote node2 'qemu-img create -f qcow2 /var/lib/libvirt/images/cirros-data.qcow2 64M'
+    # The guest's MTU must be set on the interface: without <mtu> libvirt sends
+    # QEMU no host_mtu, so a virtio guest keeps its own 1500 default even though
+    # its tap sits on a 1390 bridge. Read the value from the node's inventory
+    # rather than hardcoding 1390.
+    # shellcheck disable=SC2016
+    mtu=$(remote node1 'set -a; . /etc/p2pnet/generated/node.env; set +a; printf "%s" "$P2P_VXLAN_MTU"')
+    [[ $mtu =~ ^[0-9]+$ ]] || { echo "could not read P2P_VXLAN_MTU from node1 (got '$mtu')" >&2; return 1; }
     local xml
-    xml=$(sed -e "s/__ARCH__/$arch/g" -e "s/__MACHINE__/$machine/g" -e "s|__CPU_XML__|$cpu|g" -e "s/__CONSOLE__/$console/g" -e "s|__EMULATOR__|$emulator|g" "$P2PNET_SRC/lab/cirros-domain.xml.tmpl")
+    xml=$(sed -e "s/__ARCH__/$arch/g" -e "s/__MACHINE__/$machine/g" -e "s|__CPU_XML__|$cpu|g" -e "s/__CONSOLE__/$console/g" -e "s|__EMULATOR__|$emulator|g" -e "s/__MTU__/$mtu/g" "$P2PNET_SRC/lab/cirros-domain.xml.tmpl")
     printf '%s\n' "$xml" >"$RUN_DIR/cirros.xml"
     scp_node node1 "$RUN_DIR/cirros.xml" /tmp/cirros.xml
     remote node1 'virsh define /tmp/cirros.xml && virsh start cirros'
