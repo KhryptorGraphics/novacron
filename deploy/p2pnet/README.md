@@ -59,6 +59,8 @@ If the inventory sets `overlay.ipv6_cidr`, the same port rules are added for IPv
    sudo p2pnet deps verify
    ```
 
+   `deps install` disables the distribution MPTCP daemon units (`mptcp.service` and `mptcpd.service`) when present. p2pnet uses the kernel path manager; leaving a competing userspace manager active can reset the configured MPTCP limits.
+
 3. Set the node identity, then create keys:
 
    ```bash

@@ -19,7 +19,10 @@ deps_main() {
             esac
             if ! DEBIAN_FRONTEND=noninteractive apt-get install -y "linux-tools-$(uname -r)"; then log WARN "linux-tools-$(uname -r) unavailable; bench --perf will refuse"; fi
             if ! DEBIAN_FRONTEND=noninteractive apt-get install -y "linux-modules-extra-$(uname -r)"; then log WARN "linux-modules-extra-$(uname -r) unavailable; sch_netem and ifb may be absent"; fi
-            if systemctl list-unit-files mptcpd.service --no-legend 2>/dev/null | grep -q '^mptcpd\.service'; then systemctl disable --now mptcpd.service; fi
+            local unit
+            for unit in mptcpd.service mptcp.service; do
+                if systemctl list-unit-files "$unit" --no-legend 2>/dev/null | grep -Fq "$unit"; then systemctl disable --now "$unit"; fi
+            done
             mark_installed deps
             printf 'p2pnet[deps] install complete: changed=%s\n' "$CHANGED"
             ;;
