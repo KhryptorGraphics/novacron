@@ -443,13 +443,13 @@ func retryWorkUnit(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 		return errWorkUnitRunning
 	}
 	var attempts, limit int
-	var vmID, nodeID, checkpointPath string
+	var vmID, nodeID string
 	err := db.QueryRowContext(ctx, `
 		UPDATE fabric_jobs
 		SET attempts = attempts + 1, status = $2, error = NULL, updated_at = NOW()
 		WHERE id = $1 AND work_unit AND attempts < attempt_limit
-		RETURNING attempts, attempt_limit, vm_id, node_id, COALESCE(checkpoint_path, '')
-	`, rec.ID, jobStatusRunning).Scan(&attempts, &limit, &vmID, &nodeID, &checkpointPath)
+		RETURNING attempts, attempt_limit, vm_id, node_id
+	`, rec.ID, jobStatusRunning).Scan(&attempts, &limit, &vmID, &nodeID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return errWorkUnitAttemptsExhausted
 	}
@@ -467,7 +467,7 @@ func retryWorkUnit(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 		return fmt.Errorf("work unit cannot resume: %w", err)
 	}
 	if local {
-		err = restartLocalWorkUnitVM(ctx, vmManager, vmID)
+		err = vmManager.StartVM(ctx, vmID)
 	} else if node.Addr == "" {
 		err = fmt.Errorf("work unit's node %q is not registered", nodeID)
 	} else {
@@ -478,30 +478,13 @@ func retryWorkUnit(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 			rec.ID, jobStatusFailed, err.Error())
 		return fmt.Errorf("failed to restart work unit: %w", err)
 	}
-	if _, err := os.Stat(checkpointPath); err == nil {
+	// The checkpoint lives on the EXECUTING node, so a local os.Stat would be
+	// meaningless for a remote unit (and silently wrong when both nodes share a
+	// filesystem). Ask the owner through the same helper the detail endpoint uses.
+	if workUnitCheckpointState(vmManager, storagePath, rec).Available {
 		_, _ = db.ExecContext(ctx, `UPDATE fabric_jobs SET checkpoint_state = $2, updated_at = NOW() WHERE id = $1`,
 			rec.ID, "consumed")
 	}
-	return nil
-}
-
-// restartLocalWorkUnitVM re-runs a finished executor process. It drives the
-// driver directly instead of VMManager.StartVM because the manager's cached VM
-// state is frozen at "running" (its maintenance loop is inert), so StartVM
-// would report success without spawning the retry.
-func restartLocalWorkUnitVM(ctx context.Context, vmManager *core_vm.VMManager, vmID string) error {
-	vm, err := vmManager.GetVM(vmID)
-	if err != nil {
-		return err
-	}
-	drv, err := vmManager.GetDriverForConfig(vm.Config())
-	if err != nil {
-		return err
-	}
-	if err := drv.Start(ctx, vmID); err != nil {
-		return err
-	}
-	vm.SetState(core_vm.StateRunning)
 	return nil
 }
 

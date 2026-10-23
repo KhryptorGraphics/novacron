@@ -203,8 +203,8 @@ exit 0`
 	// The atomic attempt reservation is the only thing that authorizes a run.
 	mock.ExpectQuery("UPDATE fabric_jobs").
 		WithArgs(submitted.WorkUnitID, jobStatusRunning).
-		WillReturnRows(sqlmock.NewRows([]string{"attempts", "attempt_limit", "vm_id", "node_id", "checkpoint_path"}).
-			AddRow(2, 2, submitted.VMID, "node-a", checkpointPath))
+		WillReturnRows(sqlmock.NewRows([]string{"attempts", "attempt_limit", "vm_id", "node_id"}).
+			AddRow(2, 2, submitted.VMID, "node-a"))
 	mock.ExpectExec("UPDATE fabric_jobs").
 		WithArgs(submitted.WorkUnitID, "consumed").
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -351,7 +351,7 @@ func TestWorkUnitRetryRefusesExhaustedBudget(t *testing.T) {
 	mock.ExpectQuery("SELECT id, vm_id, node_id, command").WithArgs(id).WillReturnRows(row(jobStatusFailed))
 	// The atomic guard refuses the third attempt: no row returned.
 	mock.ExpectQuery("UPDATE fabric_jobs").WithArgs(id, jobStatusRunning).
-		WillReturnRows(sqlmock.NewRows([]string{"attempts", "attempt_limit", "vm_id", "node_id", "checkpoint_path"}))
+		WillReturnRows(sqlmock.NewRows([]string{"attempts", "attempt_limit", "vm_id", "node_id"}))
 
 	apiRouter := mux.NewRouter()
 	registerFabricWorkUnitRoutes(mux.NewRouter(), apiRouter, db, vmManager, storagePath)
