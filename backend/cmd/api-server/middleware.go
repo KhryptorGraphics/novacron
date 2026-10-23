@@ -19,8 +19,8 @@ import (
 // defaultMaxBodyBytes caps request bodies at 1 MiB unless NOVACRON_MAX_BODY_BYTES
 // overrides it. No canonical handler wrapped r.Body in a MaxBytesReader, so a
 // single oversized POST could buffer unbounded memory; this bounds it centrally.
-// ponytail: no >1MB body route exists today (create/restore use JSON+path params);
-// bump the env var if a large-upload route is added.
+// Streamed binary routes are exempt (see binaryUploadPath): they are bounded by
+// their own handlers, and this cap would otherwise truncate them mid-body.
 const defaultMaxBodyBytes int64 = 1 << 20
 
 // recoverMiddleware turns a handler panic into a clean HTTP 500 plus one
@@ -60,12 +60,28 @@ func recoverMiddleware(next http.Handler) http.Handler {
 func maxBodyBytesMiddleware(limit int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Body != nil {
+			if r.Body != nil && !binaryUploadPath(r.URL.Path) {
 				r.Body = http.MaxBytesReader(w, r.Body, limit)
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// binaryUploadPath reports whether p is a streamed binary route that enforces
+// its own byte limit: the node-to-node throughput probe (maxProbeBytes) and the
+// work-unit artifact cache (maxWorkUnitArtifactBytes). These carry real payloads
+// by design — a 2 MiB probe, a multi-gigabyte input — so the JSON body cap must
+// not wrap them; it truncated bodies mid-transfer, which surfaced as a 400 on
+// the probe and would reject every artifact over 1 MiB.
+func binaryUploadPath(p string) bool {
+	// Suffix matching keeps this correct under every mount prefix (/api,
+	// /api/v1, or a bare test router) without listing each one.
+	if strings.HasSuffix(p, "/internal/cluster/probe") ||
+		strings.HasSuffix(p, "/compute/work-units/artifacts") {
+		return true
+	}
+	return strings.Contains(p, "/internal/fabric/work-units/artifacts/")
 }
 
 // maxBodyBytes resolves the configured request-body cap, honoring

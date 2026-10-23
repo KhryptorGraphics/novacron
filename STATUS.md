@@ -544,7 +544,10 @@ below was run live on this arm64 host; numbers are observed, not projected.
   gateway DNAT rule 2 pkts, private 10.100.0.2 unreachable from the host).
 - **Directional throughput probes + link profiles (P3)** — GET downloads from a
   peer and measures peer → local body throughput after response headers; POST
-  uploads and uses receiver-side local → peer elapsed time. Each rate has its
+  uploads and uses receiver-side local → peer elapsed time. Both are exempt from
+  the global 1 MiB JSON body cap (`binaryUploadPath`), which had been truncating
+  a 2 MiB probe mid-body — the receiver answered 400, so the outbound rate was
+  never recorded and placement fell back to the RTT estimate. Each rate has its
   own timestamp and goes stale after five minutes. Placement and migration use
   only fresh outbound rates; stale/missing rates fall back to fresh RTT or an
   explicit conservative unknown-link estimate. `GET /api/cluster/links`

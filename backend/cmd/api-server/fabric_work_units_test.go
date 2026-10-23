@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -603,5 +605,67 @@ func TestWorkUnitIsVisibleAndCancellableThroughJobAPI(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet SQL expectations: %v", err)
+	}
+}
+
+// The harness runs with NOVACRON_PROBE_BYTES=2MiB, above the 1 MiB global JSON
+// cap. That cap wrapped this binary stream and truncated it mid-body, which read
+// as a 400 at the receiver and silently killed the outbound measurement. This
+// pins the exemption at the middleware level, not just the handler.
+func TestProbeAcceptsBodyAboveTheJSONCap(t *testing.T) {
+	nodeCredentialsTestEnv(t, "cluster-secret", "")
+	const n = 2 << 20
+	if n <= int(defaultMaxBodyBytes) {
+		t.Fatalf("test body %d must exceed the JSON cap %d", n, defaultMaxBodyBytes)
+	}
+
+	router := mux.NewRouter()
+	router.Use(maxBodyBytesMiddleware(maxBodyBytes()))
+	router.HandleFunc("/internal/cluster/probe", clusterProbeHandler).Methods(http.MethodGet, http.MethodPost)
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/cluster/probe", bytes.NewReader(make([]byte, n)))
+	req.Header.Set("X-Migration-Secret", "cluster-secret")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+	if response.Code != http.StatusOK {
+		t.Fatalf("probe status = %d, body %s; want 200 for a body above the JSON cap", response.Code, response.Body)
+	}
+	var receipt probeReceipt
+	if err := json.Unmarshal(response.Body.Bytes(), &receipt); err != nil {
+		t.Fatalf("decode probe receipt: %v", err)
+	}
+	if receipt.BytesReceived != n || receipt.ElapsedNS <= 0 {
+		t.Fatalf("receipt = %+v, want all %d bytes received", receipt, n)
+	}
+}
+
+// A work-unit input larger than the JSON cap must hash as the bytes actually
+// sent: a truncated body would otherwise be stored under the wrong address.
+func TestWorkUnitArtifactUploadAboveTheJSONCapIsNotTruncated(t *testing.T) {
+	storagePath := t.TempDir()
+	artifact := bytes.Repeat([]byte("payload-"), (2<<20)/8)
+	want := sha256.Sum256(artifact)
+
+	rootRouter, apiRouter := mux.NewRouter(), mux.NewRouter()
+	rootRouter.Use(maxBodyBytesMiddleware(maxBodyBytes()))
+	apiRouter.Use(maxBodyBytesMiddleware(maxBodyBytes()))
+	registerFabricWorkUnitRoutes(rootRouter, apiRouter, nil, nil, storagePath)
+
+	response := httptest.NewRecorder()
+	apiRouter.ServeHTTP(response, workUnitAdminRequest(
+		httptest.NewRequest(http.MethodPost, "/compute/work-units/artifacts", bytes.NewReader(artifact))))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("artifact upload status = %d, body %s", response.Code, response.Body)
+	}
+	var body struct {
+		SHA256    string `json:"sha256"`
+		SizeBytes int64  `json:"size_bytes"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
+	if body.SHA256 != hex.EncodeToString(want[:]) || body.SizeBytes != int64(len(artifact)) {
+		t.Fatalf("upload = %s/%d bytes, want %s/%d; the body was truncated",
+			body.SHA256, body.SizeBytes, hex.EncodeToString(want[:]), len(artifact))
 	}
 }
