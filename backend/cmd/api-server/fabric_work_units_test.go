@@ -530,3 +530,78 @@ func TestPruneWorkUnitArtifactsDoesNothingWithoutProvenReferences(t *testing.T) 
 		t.Fatalf("a truncated reference scan must prune nothing: %v", err)
 	}
 }
+
+// A work unit IS a fabric_jobs row, so the pre-existing job API must keep
+// working for it: that is how an operator watches and cancels an expensive unit.
+// The status assertion also pins the in-flight rule — a Process VM with no
+// exit.code has not finished, and must not read as completed.
+func TestWorkUnitIsVisibleAndCancellableThroughJobAPI(t *testing.T) {
+	t.Setenv("NOVACRON_NODE_ID", "node-a")
+	storagePath := t.TempDir()
+
+	vmCfg := core_vm.DefaultVMManagerConfig()
+	vmCfg.Drivers[core_vm.VMTypeProcess] = core_vm.VMDriverConfigManager{
+		Enabled: true, Config: map[string]interface{}{"base_path": t.TempDir()},
+	}
+	vmManager, err := core_vm.NewVMManager(vmCfg)
+	if err != nil {
+		t.Fatalf("new vm manager: %v", err)
+	}
+	defer vmManager.Stop()
+	vm, err := vmManager.CreateVM(t.Context(), core_vm.CreateVMRequest{
+		Name:                  "work-unit-executor",
+		AllowMissingOwnership: true,
+		Spec: core_vm.VMConfig{
+			Type: core_vm.VMTypeProcess, Command: "/bin/true", TenantID: "default",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create executor VM: %v", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	const id = "5f2a7c1e-3d4b-4a9f-8e6d-2b1c0d9e8f7a"
+	created := time.Now().UTC()
+	jobRow := func() *sqlmock.Rows {
+		return sqlmock.NewRows([]string{
+			"id", "vm_id", "node_id", "command", "name", "status", "error", "placed_by", "created_at", "organization_id",
+		}).AddRow(id, vm.ID(), "node-a", "/bin/true", "unit", jobStatusRunning, "", "default", created, nil)
+	}
+	mock.ExpectQuery("SELECT j.id, j.vm_id").WithArgs(id).WillReturnRows(jobRow())
+	mock.ExpectQuery("SELECT j.id, j.vm_id").WithArgs(id).WillReturnRows(jobRow())
+	mock.ExpectExec("UPDATE fabric_jobs").WithArgs(jobStatusCancelled, id).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	apiRouter := mux.NewRouter()
+	registerFabricJobRoutes(apiRouter, db, vmManager, storagePath)
+
+	detail := httptest.NewRecorder()
+	apiRouter.ServeHTTP(detail, workUnitAdminRequest(
+		httptest.NewRequest(http.MethodGet, "/compute/jobs/"+id, nil)))
+	if detail.Code != http.StatusOK {
+		t.Fatalf("GET /compute/jobs/{id} status = %d, body %s", detail.Code, detail.Body)
+	}
+	var shown struct {
+		VMID   string `json:"vm_id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(detail.Body.Bytes(), &shown); err != nil {
+		t.Fatalf("decode job detail: %v", err)
+	}
+	if shown.VMID != vm.ID() || shown.Status != jobStatusRunning {
+		t.Fatalf("job detail = %+v, want the unit's VM and an in-flight status", shown)
+	}
+
+	cancel := httptest.NewRecorder()
+	apiRouter.ServeHTTP(cancel, workUnitAdminRequest(
+		httptest.NewRequest(http.MethodPost, "/compute/jobs/"+id+"/cancel", nil)))
+	if cancel.Code != http.StatusOK {
+		t.Fatalf("cancel status = %d, body %s", cancel.Code, cancel.Body)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
+	}
+}

@@ -592,7 +592,10 @@ below was run live on this arm64 host; numbers are observed, not projected.
   retries cannot both start), re-verifies the inputs are still cached, rewrites
   the attempt file, and restarts the SAME VM so the workload resumes from its
   own checkpoint; `GET /api/compute/work-units/{id}` reports driver-truth
-  status, attempts/limit, input bytes, and checkpoint availability.
+  status, attempts/limit, input bytes, and checkpoint availability. Because a
+  unit IS a `fabric_jobs` row with the same id, the existing
+  `/api/compute/jobs/{id}` and `/{id}/cancel` already watch and cancel it —
+  pinned by a test, so an expensive unit stays cancellable.
   Verified by a real-ProcessDriver test: attempt 1 writes a checkpoint and exits
   3, the retry advances to attempt 2, finds the checkpoint, and completes;
   a corrupt artifact body is rejected before it can enter the cache.
