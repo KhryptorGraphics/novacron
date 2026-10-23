@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -258,6 +259,58 @@ func waitForWorkUnitStatus(t *testing.T, vmManager *core_vm.VMManager, storagePa
 				workUnitLiveStatus(vmManager, rec), want, processLogTails(storagePath, rec.VMID))
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestStageWorkUnitArtifactsTransfersOnlyMissingInputs(t *testing.T) {
+	t.Setenv("NOVACRON_NODE_ID", "node-a")
+	nodeCredentialsTestEnv(t, "cluster-secret", "peer-b=peer-secret")
+	storagePath := t.TempDir()
+
+	held := []byte("already on the peer\n")
+	missing := []byte("must be transferred\n")
+	heldHash, _, _, err := storeWorkUnitArtifact(storagePath, bytes.NewReader(held))
+	if err != nil {
+		t.Fatalf("seed held artifact: %v", err)
+	}
+	missingHash, _, _, err := storeWorkUnitArtifact(storagePath, bytes.NewReader(missing))
+	if err != nil {
+		t.Fatalf("seed missing artifact: %v", err)
+	}
+
+	var transfers []string
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Migration-Secret") != "peer-secret" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		hash := strings.TrimPrefix(r.URL.Path, "/internal/fabric/work-units/artifacts/")
+		switch r.Method {
+		case http.MethodHead:
+			if hash == heldHash {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		case http.MethodPut:
+			body, _ := io.ReadAll(r.Body)
+			if hash != missingHash || string(body) != string(missing) {
+				t.Errorf("transfer %s carried %q; want %s's bytes", hash, body, missingHash)
+			}
+			transfers = append(transfers, hash)
+			w.WriteHeader(http.StatusCreated)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer peer.Close()
+
+	node := NodeCapacity{NodeID: "peer-b", Addr: joinTestRequestAddr(t, peer.URL)}
+	if err := stageWorkUnitArtifacts(node, storagePath, []string{heldHash, missingHash}); err != nil {
+		t.Fatalf("stage artifacts: %v", err)
+	}
+	if len(transfers) != 1 || transfers[0] != missingHash {
+		t.Fatalf("transfers = %v, want exactly the missing artifact", transfers)
 	}
 }
 
