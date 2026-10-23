@@ -141,7 +141,7 @@ exit 0`
 	mock.ExpectExec("INSERT INTO fabric_jobs").
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "node-a", "/bin/sh", sqlmock.AnyArg(),
 			jobStatusRunning, "default", sqlmock.AnyArg(), sqlmock.AnyArg(), int64(len(artifact)),
-			1, 2, sqlmock.AnyArg(), "available").
+			1, 2, sqlmock.AnyArg(), "none").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	apiRouter := mux.NewRouter()

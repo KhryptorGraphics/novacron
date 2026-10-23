@@ -50,6 +50,7 @@ var (
 	errWorkUnitInputTooLarge        = errors.New("work-unit inputs exceed the 4 GiB limit")
 	errWorkUnitAttemptsExhausted    = errors.New("work-unit attempt limit is exhausted")
 	errWorkUnitRunning              = errors.New("work unit is still running")
+	errWorkUnitInternal             = errors.New("work-unit storage failure")
 )
 
 // Work-unit environment contract. These keys are reserved: a caller cannot set
@@ -312,11 +313,22 @@ func workUnitErrorStatus(err error) int {
 		return http.StatusRequestEntityTooLarge
 	case errors.Is(err, errWorkUnitAttemptsExhausted), errors.Is(err, errWorkUnitRunning):
 		return http.StatusConflict
+	case errors.Is(err, errWorkUnitInternal):
+		return http.StatusInternalServerError
 	case errors.Is(err, errNoNodeFits), errors.Is(err, errPinnedNodeUnreachable):
 		return http.StatusServiceUnavailable
 	default:
 		return http.StatusBadRequest
 	}
+}
+
+// placementBytes converts an input total for the placement cost without
+// overflowing a 32-bit int; the cost only ranks nodes, so the clamp is safe.
+func placementBytes(total int64) int {
+	if int64(int(total)) != total {
+		return int(^uint(0) >> 1)
+	}
+	return int(total)
 }
 
 // submitWorkUnit places, stages, and starts one unit. Order matters: artifacts
@@ -347,7 +359,7 @@ func submitWorkUnit(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManage
 	jobSpec := fabricJobSpec{
 		Name: spec.Name, Command: spec.Command, Args: spec.Args, Env: spec.Env,
 		NodeID: spec.NodeID, InputsNodeID: spec.InputsNodeID,
-		BytesToMove: int(inputBytes), MemoryMB: spec.MemoryMB, VCPUs: spec.VCPUs,
+		BytesToMove: placementBytes(inputBytes), MemoryMB: spec.MemoryMB, VCPUs: spec.VCPUs,
 	}
 	node, decision, err := placeFabricJob(db, vmManager, storagePath, jobSpec)
 	if err != nil {
@@ -392,16 +404,16 @@ func submitWorkUnit(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManage
 			TRUE, $9, $10, $11, $12, NULLIF($13, ''), $14, NOW(), NOW())
 	`, workUnitID, vmID, node.NodeID, spec.Command, spec.Name, jobStatusRunning, decision.Decision,
 		orgLabelForVM(submitterOrg), hashesJSON, inputBytes, 1, attemptLimit,
-		env[envWorkUnitCheckpoint], "available",
+		env[envWorkUnitCheckpoint], "none",
 	); err != nil {
 		rollbackJobVM(node, vmManager, vmID)
-		return nil, nil, fmt.Errorf("failed to persist work unit: %w", err)
+		return nil, nil, fmt.Errorf("%w: persist work unit: %v", errWorkUnitInternal, err)
 	}
 	return &workUnitRecord{
 		ID: workUnitID, VMID: vmID, NodeID: node.NodeID, Command: spec.Command, Name: spec.Name,
 		Status: jobStatusRunning, Attempts: 1, AttemptLimit: attemptLimit,
 		ArtifactHashes: hashes, InputBytes: inputBytes,
-		CheckpointPath: env[envWorkUnitCheckpoint], CheckpointState: "available",
+		CheckpointPath: env[envWorkUnitCheckpoint], CheckpointState: "none",
 		CreatedAt: time.Now().UTC(), Organization: sql.NullString{String: orgLabelForVM(submitterOrg), Valid: submitterOrg != ""},
 	}, decision, nil
 }
@@ -430,7 +442,7 @@ func retryWorkUnit(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager
 		return errWorkUnitAttemptsExhausted
 	}
 	if err != nil {
-		return fmt.Errorf("reserve work-unit attempt: %w", err)
+		return fmt.Errorf("%w: reserve attempt: %v", errWorkUnitInternal, err)
 	}
 
 	node := NodeCapacity{NodeID: nodeID, Addr: vmManager.MigrationPeers()[nodeID]}
