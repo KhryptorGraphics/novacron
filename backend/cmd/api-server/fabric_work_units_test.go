@@ -447,3 +447,86 @@ func TestWorkUnitPeerCacheVerifiesAndPreparesArtifacts(t *testing.T) {
 		t.Fatalf("prepared environment = %#v", prepared.Env)
 	}
 }
+
+func TestPruneWorkUnitArtifactsKeepsReferencedAndRecentInputs(t *testing.T) {
+	t.Setenv("NOVACRON_WORK_UNIT_CACHE_BYTES", "10") // bytes: any artifact exceeds it
+	storagePath := t.TempDir()
+
+	referenced, _, _, err := storeWorkUnitArtifact(storagePath, bytes.NewReader([]byte("referenced input\n")))
+	if err != nil {
+		t.Fatalf("seed referenced artifact: %v", err)
+	}
+	oldest, _, _, err := storeWorkUnitArtifact(storagePath, bytes.NewReader([]byte("old unreferenced\n")))
+	if err != nil {
+		t.Fatalf("seed oldest artifact: %v", err)
+	}
+	fresh, _, _, err := storeWorkUnitArtifact(storagePath, bytes.NewReader([]byte("fresh unreferenced\n")))
+	if err != nil {
+		t.Fatalf("seed fresh artifact: %v", err)
+	}
+	// Both unreferenced inputs must be evictable by age, but only the fresh one
+	// stays inside the grace window — that is the race guard under test.
+	stale := time.Now().Add(-2 * workUnitCacheEvictGrace)
+	for _, hash := range []string{referenced, oldest} {
+		if err := os.Chtimes(workUnitArtifactPath(storagePath, hash), stale, stale); err != nil {
+			t.Fatalf("backdate %s: %v", hash, err)
+		}
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	hashesJSON, _ := json.Marshal([]string{referenced})
+	mock.ExpectQuery("SELECT artifact_hashes FROM fabric_jobs").
+		WithArgs(workUnitCacheScanLimit + 1).
+		WillReturnRows(sqlmock.NewRows([]string{"artifact_hashes"}).AddRow(hashesJSON))
+
+	pruneWorkUnitArtifacts(t.Context(), db, storagePath)
+
+	if _, err := os.Lstat(workUnitArtifactPath(storagePath, referenced)); err != nil {
+		t.Fatalf("a referenced artifact must never be evicted: %v", err)
+	}
+	if _, err := os.Lstat(workUnitArtifactPath(storagePath, fresh)); err != nil {
+		t.Fatalf("an artifact inside the grace window must survive: %v", err)
+	}
+	if _, err := os.Lstat(workUnitArtifactPath(storagePath, oldest)); !os.IsNotExist(err) {
+		t.Fatalf("the oldest unreferenced artifact should be evicted (stat err = %v)", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
+	}
+}
+
+func TestPruneWorkUnitArtifactsDoesNothingWithoutProvenReferences(t *testing.T) {
+	t.Setenv("NOVACRON_WORK_UNIT_CACHE_BYTES", "10")
+	storagePath := t.TempDir()
+	hash, _, _, err := storeWorkUnitArtifact(storagePath, bytes.NewReader([]byte("input\n")))
+	if err != nil {
+		t.Fatalf("seed artifact: %v", err)
+	}
+	stale := time.Now().Add(-2 * workUnitCacheEvictGrace)
+	if err := os.Chtimes(workUnitArtifactPath(storagePath, hash), stale, stale); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	// A truncated scan cannot prove anything is unreferenced.
+	rows := sqlmock.NewRows([]string{"artifact_hashes"})
+	for i := 0; i <= workUnitCacheScanLimit; i++ {
+		rows.AddRow([]byte("[]"))
+	}
+	mock.ExpectQuery("SELECT artifact_hashes FROM fabric_jobs").
+		WithArgs(workUnitCacheScanLimit + 1).WillReturnRows(rows)
+
+	pruneWorkUnitArtifacts(t.Context(), db, storagePath)
+
+	if _, err := os.Lstat(workUnitArtifactPath(storagePath, hash)); err != nil {
+		t.Fatalf("a truncated reference scan must prune nothing: %v", err)
+	}
+}

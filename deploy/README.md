@@ -170,7 +170,14 @@ curl -sS -X POST "$API/api/compute/work-units/<id>/retry" -H "Authorization: Bea
 
 A retry restarts the same VM with the same checkpoint path and an advanced
 attempt number (read it from `$NOVACRON_ATTEMPT_FILE`), so the workload resumes
-where it stopped. Submission and retry are admin-only: the executor is the
+where it stopped.
+
+Each node keeps inputs in a content-addressed cache under
+`$STORAGE_PATH/fabric/artifacts`. It is bounded by
+`NOVACRON_WORK_UNIT_CACHE_BYTES` (default 10 GiB): after an upload the oldest
+artifacts are evicted, but never one that a work-unit row still references, and
+never one younger than 10 minutes (it may be an upload whose submit is in
+flight). Submission and retry are admin-only: the executor is the
 Process driver running a native command as the api-server's account.
 
 ## 6. Backups and restore

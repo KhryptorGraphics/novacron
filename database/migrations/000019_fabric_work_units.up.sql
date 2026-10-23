@@ -6,7 +6,9 @@
 -- `artifact_hashes` is the JSONB list of input artifact digests, `input_bytes`
 -- the total input size, `attempts`/`attempt_limit` the retry budget, and
 -- `checkpoint_path`/`checkpoint_state` the executor's resume point
--- ('none' | 'available' | 'consumed'). Jobs that are not work units keep
+-- ('none' = never written; 'consumed' = a retry resumed from it). The detail
+-- endpoint reports LIVE availability from the filesystem, so the column is
+-- history, not a cache of the current file state. Jobs that are not work units keep
 -- work_unit = FALSE and the defaults below, so existing rows stay valid.
 
 ALTER TABLE fabric_jobs

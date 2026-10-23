@@ -603,6 +603,11 @@ below was run live on this arm64 host; numbers are observed, not projected.
   Retry drives the driver directly: `VMManager.StartVM` short-circuits on its
   frozen cached state, and `ProcessDriver.Start` now clears the previous run's
   `exit.code` so a restarted unit cannot be judged by its last attempt.
+  The artifact cache is bounded: after an upload, `pruneWorkUnitArtifacts` keeps
+  it under `NOVACRON_WORK_UNIT_CACHE_BYTES` (default 10 GiB) by deleting the
+  oldest artifacts that no work-unit row references and that are older than a
+  10-minute grace window; an errored or truncated reference scan prunes nothing,
+  because deleting a referenced input would break a later retry.
 - **Cross-node migration fixes found by running it** — (a) the destination now
   matches the source's accel/CPU (launch hints in the migration request); without
   it a TCG `cortex-a72` source into a KVM `host` dest failed the CPU-state load

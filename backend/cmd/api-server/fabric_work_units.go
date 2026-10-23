@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +43,16 @@ const (
 	maxWorkUnitInputBytes    int64 = 4 << 30
 	maxWorkUnitArtifacts           = 64
 	maxWorkUnitAttempts            = 10
+
+	// defaultWorkUnitCacheBytes bounds the per-node artifact cache. Without a
+	// bound the cache grows by one copy of every input ever submitted.
+	defaultWorkUnitCacheBytes int64 = 10 << 30
+	// workUnitCacheEvictGrace keeps an artifact that was uploaded but not yet
+	// submitted: eviction only considers files older than this.
+	workUnitCacheEvictGrace = 10 * time.Minute
+	// workUnitCacheScanLimit bounds the reference lookup; a truncated scan
+	// cannot prove an artifact unreferenced, so it prunes nothing.
+	workUnitCacheScanLimit = 5000
 )
 
 var (
@@ -217,6 +228,7 @@ func registerFabricWorkUnitRoutes(root, apiRouter *mux.Router, db *sql.DB, vmMan
 			writeJSONError(w, workUnitErrorStatus(err), err.Error())
 			return
 		}
+		pruneWorkUnitArtifacts(r.Context(), db, storagePath)
 		status := http.StatusCreated
 		if cached {
 			status = http.StatusOK
@@ -904,4 +916,102 @@ func verifyWorkUnitArtifact(storagePath, expectedHash string) (int64, error) {
 		return 0, fmt.Errorf("cached artifact %s failed SHA-256 verification", expectedHash)
 	}
 	return size, nil
+}
+
+// workUnitCacheBudget is the cache ceiling from NOVACRON_WORK_UNIT_CACHE_BYTES.
+// Zero, negative or unparseable values fall back to the 10 GiB default; there is
+// no "unlimited" value, because that is the failure this exists to prevent.
+func workUnitCacheBudget() int64 {
+	raw := strings.TrimSpace(os.Getenv("NOVACRON_WORK_UNIT_CACHE_BYTES"))
+	if raw == "" {
+		return defaultWorkUnitCacheBytes
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n <= 0 {
+		return defaultWorkUnitCacheBytes
+	}
+	return n
+}
+
+// pruneWorkUnitArtifacts keeps the artifact cache under its byte budget by
+// deleting the oldest artifacts that no work-unit row references.
+//
+// Fail-safe by construction: if the reference lookup errors or is truncated, if
+// the cache cannot be listed, or if a file is still inside the grace window, the
+// artifact stays. Deleting a referenced input would break a later retry, and
+// deleting a freshly uploaded one would race a submit that already validated it.
+func pruneWorkUnitArtifacts(ctx context.Context, db *sql.DB, storagePath string) {
+	if db == nil || strings.TrimSpace(storagePath) == "" {
+		return
+	}
+	budget := workUnitCacheBudget()
+
+	type cachedArtifact struct {
+		hash    string
+		size    int64
+		modTime time.Time
+	}
+	entries, err := os.ReadDir(workUnitArtifactDir(storagePath))
+	if err != nil {
+		return
+	}
+	artifacts := make([]cachedArtifact, 0, len(entries))
+	var total int64
+	for _, entry := range entries {
+		if entry.IsDir() || !validWorkUnitArtifactHash(entry.Name()) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		artifacts = append(artifacts, cachedArtifact{hash: entry.Name(), size: info.Size(), modTime: info.ModTime()})
+		total += info.Size()
+	}
+	if total <= budget {
+		return
+	}
+
+	rows, err := db.QueryContext(ctx,
+		`SELECT artifact_hashes FROM fabric_jobs WHERE work_unit LIMIT $1`, workUnitCacheScanLimit+1)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	referenced := make(map[string]struct{})
+	seen := 0
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return
+		}
+		seen++
+		var hashes []string
+		if err := json.Unmarshal(raw, &hashes); err != nil {
+			continue
+		}
+		for _, hash := range hashes {
+			referenced[hash] = struct{}{}
+		}
+	}
+	if rows.Err() != nil || seen > workUnitCacheScanLimit {
+		return // incomplete view: prune nothing rather than guess
+	}
+
+	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].modTime.Before(artifacts[j].modTime) })
+	now := time.Now()
+	for _, artifact := range artifacts {
+		if total <= budget {
+			return
+		}
+		if _, inUse := referenced[artifact.hash]; inUse {
+			continue
+		}
+		if now.Sub(artifact.modTime) < workUnitCacheEvictGrace {
+			continue
+		}
+		if err := os.Remove(workUnitArtifactPath(storagePath, artifact.hash)); err == nil {
+			total -= artifact.size
+		}
+	}
 }
