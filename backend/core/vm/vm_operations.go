@@ -324,7 +324,16 @@ func (m *VMManager) PerformVMOperation(ctx context.Context, req VMOperationReque
 // startVM starts a VM
 func (m *VMManager) startVM(ctx context.Context, vm *VM, driver VMDriver) (*VMOperationResponse, error) {
 	if vm.State() == StateRunning {
-		return &VMOperationResponse{Success: true, VM: vm}, nil
+		// The manager's maintenance loop is inert, so the cached state is only
+		// as fresh as the last create/start. A VM whose process or guest has
+		// since exited still reads StateRunning here; returning success on that
+		// cache would report a start that never happened. Confirm with the
+		// driver, and treat an unconfirmable or non-running VM as stale: drop
+		// the cached state and fall through to a real start.
+		if status, err := driver.GetStatus(ctx, vm.ID()); err == nil && status == StateRunning {
+			return &VMOperationResponse{Success: true, VM: vm}, nil
+		}
+		vm.SetState(StateStopped)
 	}
 	if vm.State() != StateStopped && vm.State() != StateCreated && vm.State() != StateFailed {
 		return &VMOperationResponse{Success: false, ErrorMessage: fmt.Sprintf("VM %s is in state %s, cannot start", vm.ID(), vm.State())}, nil

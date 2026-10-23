@@ -606,9 +606,11 @@ below was run live on this arm64 host; numbers are observed, not projected.
   runs a native command as the api-server's account — this is trusted-operator
   execution, not a sandbox, and resumability is the workload's contract (the
   platform guarantees the checkpoint path is unchanged, not what it contains).
-  Retry drives the driver directly: `VMManager.StartVM` short-circuits on its
-  frozen cached state, and `ProcessDriver.Start` now clears the previous run's
-  `exit.code` so a restarted unit cannot be judged by its last attempt.
+  `ProcessDriver.Start` now clears the previous run's `exit.code`, and
+  `VMManager.startVM` confirms its cached `StateRunning` against the driver
+  instead of short-circuiting on it — so a retry through the ordinary `StartVM`
+  really re-runs the workload, and an exited process can no longer be judged by
+  its previous attempt's status.
   The artifact cache is bounded: after an upload, `pruneWorkUnitArtifacts` keeps
   it under `NOVACRON_WORK_UNIT_CACHE_BYTES` (default 10 GiB) by deleting the
   oldest artifacts that no work-unit row references and that are older than a
