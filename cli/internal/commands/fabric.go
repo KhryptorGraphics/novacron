@@ -471,7 +471,7 @@ func printFabricNodes(w io.Writer, nodes []api.FabricNode) error {
 	}
 
 	tw := newFabricTable(w)
-	fmt.Fprintln(tw, "NODE\tADDR\tARCH\tCORES\tMEM FREE\tSTORAGE FREE\tREACHABLE\tRTT")
+	fmt.Fprintln(tw, "NODE\tADDR\tARCH\tCORES\tMEM FREE\tSTORAGE FREE\tREACHABLE\tLINK")
 	for _, node := range nodes {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
 			orDash(node.NodeID),
@@ -631,17 +631,27 @@ func writeFabricLogTail(w io.Writer, name, content string) {
 	}
 }
 
-// formatNodeLink renders a node's measured link to the local node. The local
-// node and never-probed peers have no profile; a stale profile is flagged
-// because placement must re-probe before trusting it.
+// formatNodeLink renders each measured direction to a peer independently.
 func formatNodeLink(link *api.FabricLinkProfile) string {
 	if link == nil {
 		return "-"
 	}
-	if link.Stale {
-		return fmt.Sprintf("%.2fms (stale)", link.RTTMS)
+	rtt := fmt.Sprintf("%.2fms", link.RTTMS)
+	if link.RTTStale {
+		rtt += " (stale)"
 	}
-	return fmt.Sprintf("%.2fms", link.RTTMS)
+	return fmt.Sprintf("%s; out %s; in %s", rtt, formatNodeLinkRate(link.Outbound), formatNodeLinkRate(link.Inbound))
+}
+
+func formatNodeLinkRate(rate *api.FabricLinkDirection) string {
+	if rate == nil {
+		return "unmeasured"
+	}
+	formatted := fmt.Sprintf("%.1f Mbps", rate.ThroughputBps/1e6)
+	if rate.Stale {
+		formatted += " (stale)"
+	}
+	return formatted
 }
 
 // formatBytes renders a byte count in binary units, matching the MiB/GiB the

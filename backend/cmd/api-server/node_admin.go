@@ -168,8 +168,9 @@ func migrationCandidatesFunc(vmManager *core_vm.VMManager, storagePath string, d
 				continue
 			}
 			bps := 0.0
-			if n.Link != nil && !n.Link.Stale && n.Link.ThroughputBps != nil {
-				bps = *n.Link.ThroughputBps
+			if n.Link != nil && n.Link.Outbound != nil &&
+				!n.Link.Outbound.Stale && n.Link.Outbound.ThroughputBps > 0 {
+				bps = n.Link.Outbound.ThroughputBps
 			}
 			out = append(out, drainCandidate{
 				NodeID:    n.NodeID,

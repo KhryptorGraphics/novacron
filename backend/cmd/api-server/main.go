@@ -268,6 +268,10 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 	registerFabricJobRoutes(apiRouter, db, vmManager, vmBasePath(cfg))
 	registerFabricNodeRPCs(router, db, vmManager, vmBasePath(cfg))
 
+	// Fabric work units: content-addressed inputs, checkpoint/retry, and the
+	// admin-only submit/detail/retry surface on the authed router.
+	registerFabricWorkUnitRoutes(router, apiRouter, db, vmManager, vmBasePath(cfg))
+
 	// Fabric transfers (P3/G3): admission-controlled migrations with the
 	// measured link budget + compression decision recorded per transfer.
 	registerFabricTransferRoutes(apiRouter, db, vmManager, vmBasePath(cfg))
@@ -434,8 +438,10 @@ func initDatabase(cfg *config.Config) (*sql.DB, error) {
 
 // requiredSchemaVersion is the golang-migrate version (database/migrations)
 // this binary's SQL is written against: 000018 added the networks catalog
-// (networks table, vms.network_id) behind /networks and VM create.
-const requiredSchemaVersion = 18
+// (networks table, vms.network_id) behind /networks and VM create, and 000019
+// added the fabric work-unit columns (work_unit, artifact_hashes, input_bytes,
+// attempts, attempt_limit, checkpoint_path, checkpoint_state).
+const requiredSchemaVersion = 19
 
 // sqlSchemaMigrationState reads golang-migrate's bookkeeping table
 // (database/migrate.go, postgres driver default table name).

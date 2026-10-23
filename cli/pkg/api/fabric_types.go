@@ -19,12 +19,23 @@ type FabricNode struct {
 	Link           *FabricLinkProfile `json:"link"`
 }
 
-// FabricLinkProfile is the heartbeat-measured link state to a peer. It is null
-// for the local node and for peers that have never been probed.
-type FabricLinkProfile struct {
-	RTTMS         float64 `json:"rtt_ms"`
-	LastHeartbeat string  `json:"last_heartbeat"`
+// FabricLinkDirection is a bandwidth measurement in one direction relative to
+// the reporting node.
+type FabricLinkDirection struct {
+	ThroughputBps float64 `json:"throughput_bps"`
+	ProbeBytes    int     `json:"probe_bytes"`
+	MeasuredAt    string  `json:"measured_at"`
 	Stale         bool    `json:"stale"`
+}
+
+// FabricLinkProfile reports inbound and outbound peer rates independently.
+type FabricLinkProfile struct {
+	RTTMS         float64              `json:"rtt_ms"`
+	LastHeartbeat string               `json:"last_heartbeat"`
+	RTTStale      bool                 `json:"rtt_stale"`
+	Inbound       *FabricLinkDirection `json:"inbound,omitempty"`
+	Outbound      *FabricLinkDirection `json:"outbound,omitempty"`
+	Stale         bool                 `json:"stale"`
 }
 
 // FabricJobSpec is the POST /api/compute/jobs request body.

@@ -21,6 +21,7 @@ import {
   type FabricJob,
   type FabricJobDetail,
   type FabricJobRequest,
+  type FabricLinkProfile,
   type FabricNode,
   type FabricTransfer,
   type FabricTransferDetail,
@@ -64,6 +65,14 @@ function formatBytes(value: number | null | undefined): string {
   }
 
   return `${unit === 0 ? scaled : scaled.toFixed(1)} ${BYTE_UNITS[unit]}`;
+}
+
+function formatLinkRate(direction: FabricLinkProfile['outbound']): string {
+  if (!direction) {
+    return 'unmeasured';
+  }
+  const rate = `${(direction.throughput_bps / 1e6).toFixed(1)} Mbps`;
+  return direction.stale ? `${rate} (stale)` : rate;
 }
 
 type JobFormState = {
@@ -505,15 +514,21 @@ export default function FabricPage() {
                       <TableCell>
                         {!node.link ? (
                           <Badge variant="warning">No link profile</Badge>
-                        ) : node.link.stale ? (
-                          <div className="space-y-1">
-                            <div>{node.link.rtt_ms.toFixed(2)} ms</div>
-                            <Badge variant="warning">Stale link profile</Badge>
-                          </div>
                         ) : (
-                          <div>
-                            <div>{node.link.rtt_ms.toFixed(2)} ms</div>
-                            <div className="text-xs text-muted-foreground">heartbeat {node.link.last_heartbeat}</div>
+                          <div className="space-y-1">
+                            <div>
+                              {node.link.rtt_ms.toFixed(2)} ms RTT
+                              {node.link.rtt_stale ? ' (stale)' : ''}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              outbound {formatLinkRate(node.link.outbound)} · inbound {formatLinkRate(node.link.inbound)}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              heartbeat {node.link.last_heartbeat}
+                            </div>
+                            {node.link.stale && (
+                              <Badge variant="warning">Directional rates stale or incomplete</Badge>
+                            )}
                           </div>
                         )}
                       </TableCell>

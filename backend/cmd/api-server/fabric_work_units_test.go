@@ -1,0 +1,396 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/gorilla/mux"
+
+	core_vm "github.com/khryptorgraphics/novacron/backend/core/vm"
+)
+
+func workUnitAdminRequest(req *http.Request) *http.Request {
+	return req.WithContext(context.WithValue(req.Context(), "role", "admin"))
+}
+
+func TestWorkUnitArtifactUploadIsContentAddressedAndAdminOnly(t *testing.T) {
+	storagePath := t.TempDir()
+	rootRouter, apiRouter := mux.NewRouter(), mux.NewRouter()
+	registerFabricWorkUnitRoutes(rootRouter, apiRouter, nil, nil, storagePath)
+
+	artifact := []byte("checkpointed workload input\n")
+	upload := func(role string) (*httptest.ResponseRecorder, struct {
+		SHA256    string `json:"sha256"`
+		SizeBytes int64  `json:"size_bytes"`
+		Cached    bool   `json:"cached"`
+	}) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/compute/work-units/artifacts", bytes.NewReader(artifact))
+		req.Header.Set("Content-Type", "application/octet-stream")
+		if role != "" {
+			req = req.WithContext(context.WithValue(req.Context(), "role", role))
+		}
+		response := httptest.NewRecorder()
+		apiRouter.ServeHTTP(response, req)
+		var body struct {
+			SHA256    string `json:"sha256"`
+			SizeBytes int64  `json:"size_bytes"`
+			Cached    bool   `json:"cached"`
+		}
+		if response.Code == http.StatusCreated || response.Code == http.StatusOK {
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode artifact upload response: %v", err)
+			}
+		}
+		return response, body
+	}
+
+	if response, _ := upload(""); response.Code != http.StatusForbidden {
+		t.Fatalf("unauthorized artifact upload status = %d, want 403", response.Code)
+	}
+	first, firstBody := upload("admin")
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first artifact upload status = %d, body %s", first.Code, first.Body)
+	}
+	if firstBody.SHA256 != "5267c7d8ee36f743375cbbbd21f3eb73b0bc87c2b8b2d1e8a944514d93237a32" ||
+		firstBody.SizeBytes != int64(len(artifact)) || firstBody.Cached {
+		t.Fatalf("first upload = %+v, want the known digest, exact size, and cache miss", firstBody)
+	}
+
+	second, secondBody := upload("admin")
+	if second.Code != http.StatusOK {
+		t.Fatalf("repeat artifact upload status = %d, body %s", second.Code, second.Body)
+	}
+	if secondBody.SHA256 != firstBody.SHA256 || secondBody.SizeBytes != firstBody.SizeBytes || !secondBody.Cached {
+		t.Fatalf("repeat upload = %+v, want the same digest and size with a cache hit", secondBody)
+	}
+}
+func TestWorkUnitResumesFromCheckpointAfterFailure(t *testing.T) {
+	t.Setenv("NOVACRON_NODE_ID", "node-a")
+	nodeCredentialsTestEnv(t, "cluster-secret", "")
+	storagePath := t.TempDir()
+
+	vmCfg := core_vm.DefaultVMManagerConfig()
+	vmCfg.Drivers[core_vm.VMTypeProcess] = core_vm.VMDriverConfigManager{
+		Enabled: true,
+		Config:  map[string]interface{}{"base_path": t.TempDir()},
+	}
+	vmManager, err := core_vm.NewVMManager(vmCfg)
+	if err != nil {
+		t.Fatalf("new vm manager: %v", err)
+	}
+	defer vmManager.Stop()
+
+	artifact := []byte("checkpointed workload input\n")
+	digest, _, _, err := storeWorkUnitArtifact(storagePath, bytes.NewReader(artifact))
+	if err != nil {
+		t.Fatalf("seed artifact cache: %v", err)
+	}
+
+	// Attempt 1 verifies the staged input, writes a checkpoint, and fails.
+	// Attempt 2 must find that checkpoint and finish the second phase; it exits
+	// non-zero if the input digest is wrong or the checkpoint is missing.
+	script := `set -eu
+hash=$(printf '%s' "$NOVACRON_ARTIFACTS" | cut -d, -f1)
+staged="$NOVACRON_ARTIFACT_DIR/$hash"
+digest=$(sha256sum "$staged" | cut -d' ' -f1)
+if [ "$digest" != "$hash" ]; then
+  echo "artifact digest mismatch: $digest != $hash" >&2
+  exit 9
+fi
+dir=$(dirname "$NOVACRON_CHECKPOINT_PATH")
+attempt=$(cat "$NOVACRON_ATTEMPT_FILE")
+echo "attempt=$attempt digest=$digest"
+if [ "$attempt" = "1" ]; then
+  echo half > "$NOVACRON_CHECKPOINT_PATH"
+  echo phase-one >> "$dir/progress.log"
+  echo "interrupted after first phase" >&2
+  exit 3
+fi
+grep -q half "$NOVACRON_CHECKPOINT_PATH"
+echo done > "$dir/result.txt"
+echo phase-two >> "$dir/progress.log"
+exit 0`
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	// Placement: no peers, so the one reachable node is this node ("default").
+	mock.ExpectQuery("SELECT node_id, last_rtt_ms").
+		WillReturnRows(sqlmock.NewRows([]string{"node_id", "last_rtt_ms", "last_heartbeat", "link"}))
+	// createVMLocal
+	mock.ExpectExec("INSERT INTO vms").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "node-a", sqlmock.AnyArg(),
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	// work-unit record
+	mock.ExpectExec("INSERT INTO fabric_jobs").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "node-a", "/bin/sh", sqlmock.AnyArg(),
+			jobStatusRunning, "default", sqlmock.AnyArg(), sqlmock.AnyArg(), int64(len(artifact)),
+			1, 2, sqlmock.AnyArg(), "available").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	apiRouter := mux.NewRouter()
+	registerFabricWorkUnitRoutes(mux.NewRouter(), apiRouter, db, vmManager, storagePath)
+
+	submitBody, err := json.Marshal(workUnitSpec{
+		Command: "/bin/sh", Args: []string{"-c", script},
+		ArtifactHashes: []string{digest}, AttemptLimit: 2, MemoryMB: 128,
+	})
+	if err != nil {
+		t.Fatalf("marshal submit: %v", err)
+	}
+	response := httptest.NewRecorder()
+	apiRouter.ServeHTTP(response, workUnitAdminRequest(
+		httptest.NewRequest(http.MethodPost, "/compute/work-units", bytes.NewReader(submitBody))))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("submit status = %d, body %s", response.Code, response.Body)
+	}
+	var submitted struct {
+		WorkUnitID string   `json:"work_unit_id"`
+		VMID       string   `json:"vm_id"`
+		NodeID     string   `json:"node_id"`
+		Status     string   `json:"status"`
+		Attempts   int      `json:"attempts"`
+		Limit      int      `json:"attempt_limit"`
+		Hashes     []string `json:"artifact_hashes"`
+		InputBytes int64    `json:"input_bytes"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &submitted); err != nil {
+		t.Fatalf("decode submit: %v", err)
+	}
+	if submitted.NodeID != "node-a" || submitted.Attempts != 1 || submitted.Limit != 2 ||
+		submitted.InputBytes != int64(len(artifact)) || len(submitted.Hashes) != 1 || submitted.Hashes[0] != digest {
+		t.Fatalf("submission = %+v, want one attempt reserved and the artifact recorded", submitted)
+	}
+
+	rec := &workUnitRecord{ID: submitted.WorkUnitID, VMID: submitted.VMID, NodeID: submitted.NodeID, Status: jobStatusRunning}
+	waitForWorkUnitStatus(t, vmManager, storagePath, rec, jobStatusFailed)
+
+	workUnitDir := filepath.Join(storagePath, "fabric", "work-units", submitted.WorkUnitID)
+	checkpointPath := filepath.Join(workUnitDir, "checkpoint")
+	if data, err := os.ReadFile(checkpointPath); err != nil || string(data) != "half\n" {
+		t.Fatalf("checkpoint after attempt 1 = %q, %v; want a resumable marker", data, err)
+	}
+
+	hashesJSON, _ := json.Marshal([]string{digest})
+	failedRow := func(attempts int) *sqlmock.Rows {
+		return sqlmock.NewRows([]string{
+			"id", "vm_id", "node_id", "command", "name", "status", "error",
+			"attempts", "attempt_limit", "artifact_hashes", "input_bytes",
+			"checkpoint_path", "checkpoint_state", "created_at", "organization_id",
+		}).AddRow(submitted.WorkUnitID, submitted.VMID, "node-a", "/bin/sh", "", jobStatusFailed, "",
+			attempts, 2, hashesJSON, len(artifact), checkpointPath, "available", time.Now().UTC(), nil)
+	}
+	mock.ExpectQuery("SELECT id, vm_id, node_id, command").
+		WithArgs(submitted.WorkUnitID).WillReturnRows(failedRow(1))
+	// The atomic attempt reservation is the only thing that authorizes a run.
+	mock.ExpectQuery("UPDATE fabric_jobs").
+		WithArgs(submitted.WorkUnitID, jobStatusRunning).
+		WillReturnRows(sqlmock.NewRows([]string{"attempts", "attempt_limit", "vm_id", "node_id", "checkpoint_path"}).
+			AddRow(2, 2, submitted.VMID, "node-a", checkpointPath))
+	mock.ExpectExec("UPDATE fabric_jobs").
+		WithArgs(submitted.WorkUnitID, "consumed").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery("SELECT id, vm_id, node_id, command").
+		WithArgs(submitted.WorkUnitID).WillReturnRows(failedRow(2))
+
+	retry := httptest.NewRecorder()
+	apiRouter.ServeHTTP(retry, workUnitAdminRequest(
+		httptest.NewRequest(http.MethodPost, "/compute/work-units/"+submitted.WorkUnitID+"/retry", nil)))
+	if retry.Code != http.StatusOK {
+		t.Fatalf("retry status = %d, body %s", retry.Code, retry.Body)
+	}
+	var retried struct {
+		Status   string `json:"status"`
+		Attempts int    `json:"attempts"`
+		Limit    int    `json:"attempt_limit"`
+	}
+	if err := json.Unmarshal(retry.Body.Bytes(), &retried); err != nil {
+		t.Fatalf("decode retry: %v", err)
+	}
+	if retried.Attempts != 2 || retried.Limit != 2 {
+		t.Fatalf("retry = %+v, want attempt 2 of 2", retried)
+	}
+
+	rec.Status = jobStatusRunning
+	waitForWorkUnitStatus(t, vmManager, storagePath, rec, jobStatusCompleted)
+
+	// Resume proof: phase two ran, with the phase-one checkpoint still in place
+	// and the attempt counter advanced. A fresh run would have failed the
+	// grep or written phase-one twice.
+	if data, err := os.ReadFile(filepath.Join(workUnitDir, "progress.log")); err != nil || string(data) != "phase-one\nphase-two\n" {
+		t.Fatalf("progress log = %q, %v; want both phases in order", data, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(workUnitDir, "result.txt")); err != nil || string(data) != "done\n" {
+		t.Fatalf("result = %q, %v; want the completed output", data, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(workUnitDir, "attempt")); err != nil || string(data) != "2" {
+		t.Fatalf("attempt file = %q, %v; want the advanced attempt number", data, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
+	}
+}
+
+func waitForWorkUnitStatus(t *testing.T, vmManager *core_vm.VMManager, storagePath string, rec *workUnitRecord, want string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if got := workUnitLiveStatus(vmManager, rec); got == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("work unit %s status = %q, want %q; logs: %v", rec.ID,
+				workUnitLiveStatus(vmManager, rec), want, processLogTails(storagePath, rec.VMID))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestWorkUnitRetryRefusesExhaustedBudget(t *testing.T) {
+	t.Setenv("NOVACRON_NODE_ID", "node-a")
+	nodeCredentialsTestEnv(t, "cluster-secret", "")
+	storagePath := t.TempDir()
+
+	vmCfg := core_vm.DefaultVMManagerConfig()
+	vmCfg.Drivers[core_vm.VMTypeProcess] = core_vm.VMDriverConfigManager{
+		Enabled: true, Config: map[string]interface{}{"base_path": t.TempDir()},
+	}
+	vmManager, err := core_vm.NewVMManager(vmCfg)
+	if err != nil {
+		t.Fatalf("new vm manager: %v", err)
+	}
+	defer vmManager.Stop()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	const id = "0b3b7f5e-8a41-4d1a-9c2e-1f0a2b3c4d5e"
+	hashesJSON, _ := json.Marshal([]string{"5267c7d8ee36f743375cbbbd21f3eb73b0bc87c2b8b2d1e8a944514d93237a32"})
+	row := func(status string) *sqlmock.Rows {
+		return sqlmock.NewRows([]string{
+			"id", "vm_id", "node_id", "command", "name", "status", "error",
+			"attempts", "attempt_limit", "artifact_hashes", "input_bytes",
+			"checkpoint_path", "checkpoint_state", "created_at", "organization_id",
+		}).AddRow(id, "vm-gone", "node-a", "/bin/sh", "", status, "attempt 2 failed",
+			2, 2, hashesJSON, int64(28), filepath.Join(storagePath, "fabric", "work-units", id, "checkpoint"),
+			"consumed", time.Now().UTC(), nil)
+	}
+	mock.ExpectQuery("SELECT id, vm_id, node_id, command").WithArgs(id).WillReturnRows(row(jobStatusFailed))
+	// The atomic guard refuses the third attempt: no row returned.
+	mock.ExpectQuery("UPDATE fabric_jobs").WithArgs(id, jobStatusRunning).
+		WillReturnRows(sqlmock.NewRows([]string{"attempts", "attempt_limit", "vm_id", "node_id", "checkpoint_path"}))
+
+	apiRouter := mux.NewRouter()
+	registerFabricWorkUnitRoutes(mux.NewRouter(), apiRouter, db, vmManager, storagePath)
+	response := httptest.NewRecorder()
+	apiRouter.ServeHTTP(response, workUnitAdminRequest(
+		httptest.NewRequest(http.MethodPost, "/compute/work-units/"+id+"/retry", nil)))
+	if response.Code != http.StatusConflict {
+		t.Fatalf("exhausted retry status = %d, body %s; want 409", response.Code, response.Body)
+	}
+	if !strings.Contains(response.Body.String(), "attempt limit") {
+		t.Fatalf("exhausted retry body = %s, want the attempt limit stated", response.Body)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
+	}
+}
+
+func TestWorkUnitArtifactTransferRejectsCorruptBody(t *testing.T) {
+	t.Setenv("NOVACRON_NODE_ID", "node-a")
+	nodeCredentialsTestEnv(t, "cluster-secret", "node-a=node-a-secret")
+	storagePath := t.TempDir()
+	rootRouter, apiRouter := mux.NewRouter(), mux.NewRouter()
+	registerFabricWorkUnitRoutes(rootRouter, apiRouter, nil, nil, storagePath)
+
+	const digest = "5267c7d8ee36f743375cbbbd21f3eb73b0bc87c2b8b2d1e8a944514d93237a32"
+	req := httptest.NewRequest(http.MethodPut, "/internal/fabric/work-units/artifacts/"+digest,
+		strings.NewReader("this is not the addressed content\n"))
+	req.Header.Set("X-Migration-Secret", "node-a-secret")
+	response := httptest.NewRecorder()
+	rootRouter.ServeHTTP(response, req)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("corrupt transfer status = %d, want 400", response.Code)
+	}
+	if _, err := os.Lstat(workUnitArtifactPath(storagePath, digest)); !os.IsNotExist(err) {
+		t.Fatalf("a body that failed its digest check must not enter the cache (stat err = %v)", err)
+	}
+}
+
+func TestWorkUnitPeerCacheVerifiesAndPreparesArtifacts(t *testing.T) {
+	t.Setenv("NOVACRON_NODE_ID", "node-a")
+	nodeCredentialsTestEnv(t, "cluster-secret", "node-a=node-a-secret")
+	storagePath := t.TempDir()
+	rootRouter, apiRouter := mux.NewRouter(), mux.NewRouter()
+	registerFabricWorkUnitRoutes(rootRouter, apiRouter, nil, nil, storagePath)
+
+	const digest = "5267c7d8ee36f743375cbbbd21f3eb73b0bc87c2b8b2d1e8a944514d93237a32"
+	const workUnitID = "7d54a1f7-a2df-4c4b-badd-cadee8a0a011"
+	artifact := []byte("checkpointed workload input\n")
+	request := func(method, path, secret string, body []byte) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, path, bytes.NewReader(body))
+		if secret != "" {
+			req.Header.Set("X-Migration-Secret", secret)
+		}
+		response := httptest.NewRecorder()
+		rootRouter.ServeHTTP(response, req)
+		return response
+	}
+
+	if response := request(http.MethodHead, "/internal/fabric/work-units/artifacts/"+digest, "", nil); response.Code != http.StatusForbidden {
+		t.Fatalf("unauthenticated cache probe status = %d, want 403", response.Code)
+	}
+	if response := request(http.MethodHead, "/internal/fabric/work-units/artifacts/"+digest, "node-a-secret", nil); response.Code != http.StatusNotFound {
+		t.Fatalf("cache miss status = %d, want 404", response.Code)
+	}
+	if response := request(http.MethodPut, "/internal/fabric/work-units/artifacts/"+digest, "node-a-secret", artifact); response.Code != http.StatusCreated {
+		t.Fatalf("artifact transfer status = %d, body %s", response.Code, response.Body)
+	}
+	if response := request(http.MethodHead, "/internal/fabric/work-units/artifacts/"+digest, "node-a-secret", nil); response.Code != http.StatusOK {
+		t.Fatalf("cache hit status = %d, want 200", response.Code)
+	}
+
+	prepareBody, err := json.Marshal(map[string]interface{}{
+		"work_unit_id":    workUnitID,
+		"artifact_hashes": []string{digest},
+		"env":             map[string]string{"WORK_MODE": "test"},
+	})
+	if err != nil {
+		t.Fatalf("marshal prepare request: %v", err)
+	}
+	response := request(http.MethodPost, "/internal/fabric/work-units/prepare", "node-a-secret", prepareBody)
+	if response.Code != http.StatusOK {
+		t.Fatalf("work-unit prepare status = %d, body %s", response.Code, response.Body)
+	}
+	var prepared struct {
+		Env map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &prepared); err != nil {
+		t.Fatalf("decode prepare response: %v", err)
+	}
+	if prepared.Env["WORK_MODE"] != "test" ||
+		prepared.Env["NOVACRON_ARTIFACT_DIR"] != workUnitArtifactDir(storagePath) ||
+		prepared.Env["NOVACRON_ARTIFACTS"] != digest ||
+		prepared.Env["NOVACRON_CHECKPOINT_PATH"] != filepath.Join(storagePath, "fabric", "work-units", workUnitID, "checkpoint") {
+		t.Fatalf("prepared environment = %#v", prepared.Env)
+	}
+}

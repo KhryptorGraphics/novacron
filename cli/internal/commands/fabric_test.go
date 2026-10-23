@@ -85,17 +85,19 @@ func TestFabricNodesOutput(t *testing.T) {
 				{"node_id":"node-b","addr":"127.0.0.1:18091","arch":"arm64","cores":8,
 				 "mem_total_mb":65536,"mem_allocated_mb":0,"storage_total_gb":1000,
 				 "storage_free_gb":500,"vm_count":0,"reachable":true,
-				 "link":{"rtt_ms":0.341,"last_heartbeat":"2026-09-20T11:29:24Z","stale":false}}
+				 "link":{"rtt_ms":0.341,"last_heartbeat":"2026-09-20T11:29:24Z","rtt_stale":false,"stale":false,
+				 "outbound":{"throughput_bps":100000000,"probe_bytes":1048576,"measured_at":"2026-09-20T11:29:24Z","stale":false},
+				 "inbound":{"throughput_bps":90000000,"probe_bytes":1048576,"measured_at":"2026-09-20T11:29:24Z","stale":false}}}
 			]}`,
-			want: "NODE    ADDR             ARCH   CORES  MEM FREE   STORAGE FREE  REACHABLE  RTT\n" +
+			want: "NODE    ADDR             ARCH   CORES  MEM FREE   STORAGE FREE  REACHABLE  LINK\n" +
 				"node-a  -                arm64  14     118.8 GiB  912.0 GiB     yes        -\n" +
-				"node-b  127.0.0.1:18091  arm64  8      64.0 GiB   500.0 GiB     yes        0.34ms\n",
+				"node-b  127.0.0.1:18091  arm64  8      64.0 GiB   500.0 GiB     yes        0.34ms; out 100.0 Mbps; in 90.0 Mbps\n",
 		},
 		{
 			name:    "unreachable peer with no capacity reported",
-			payload: `{"nodes":[{"node_id":"node-c","addr":"10.0.0.5:18091","arch":"","cores":0,"mem_total_mb":0,"mem_allocated_mb":0,"storage_total_gb":0,"storage_free_gb":0,"vm_count":0,"reachable":false,"link":{"rtt_ms":12.5,"last_heartbeat":"2026-09-20T10:00:00Z","stale":true}}]}`,
-			want: "NODE    ADDR            ARCH  CORES  MEM FREE  STORAGE FREE  REACHABLE  RTT\n" +
-				"node-c  10.0.0.5:18091  -     0      0 B       0 B           no         12.50ms (stale)\n",
+			payload: `{"nodes":[{"node_id":"node-c","addr":"10.0.0.5:18091","arch":"","cores":0,"mem_total_mb":0,"mem_allocated_mb":0,"storage_total_gb":0,"storage_free_gb":0,"vm_count":0,"reachable":false,"link":{"rtt_ms":12.5,"last_heartbeat":"2026-09-20T10:00:00Z","rtt_stale":true,"stale":true,"outbound":{"throughput_bps":12000000,"probe_bytes":1048576,"measured_at":"2026-09-20T09:00:00Z","stale":true}}}]}`,
+			want: "NODE    ADDR            ARCH  CORES  MEM FREE  STORAGE FREE  REACHABLE  LINK\n" +
+				"node-c  10.0.0.5:18091  -     0      0 B       0 B           no         12.50ms (stale); out 12.0 Mbps (stale); in unmeasured\n",
 		},
 		{
 			name:    "no nodes",

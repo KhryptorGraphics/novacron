@@ -1,14 +1,19 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/gorilla/mux"
 )
 
-// nodeProfile fixtures: a fast local link and a slow remote one.
+// nodeProfile fixtures: RTT-only fallback rates with a fresh RTT sample.
 func fastLink() *linkProfile { return &linkProfile{RTTMS: 0.4} }
 func slowLink() *linkProfile { return &linkProfile{RTTMS: 40} }
 
@@ -31,14 +36,44 @@ func TestEstimatedMoveCostPrefersFastLink(t *testing.T) {
 	}
 }
 
-// TestRTTToBpsFloorsAndDefaults: an unmeasured link is treated as fast (not
-// zero, which would divide to +Inf), and a huge RTT never goes below the floor.
-func TestRTTToBpsFloorsAndDefaults(t *testing.T) {
-	if got := rttToBps(nodeProfile{}); got <= 0 {
-		t.Fatalf("unmeasured link must yield a positive rate, got %v", got)
+// TestOutboundBpsEstimateUsesDirectionAndFallback rejects inbound substitution,
+// ignores stale outbound rates, and keeps unknown peers conservative.
+func TestOutboundBpsEstimateUsesDirectionAndFallback(t *testing.T) {
+	t.Setenv("NOVACRON_NODE_ID", "local")
+	fresh := nodeProfile{
+		NodeCapacity: NodeCapacity{NodeID: "peer"},
+		Link: &linkProfile{
+			RTTMS:    2,
+			RTTStale: false,
+			Inbound:  &linkDirection{ThroughputBps: 9e9},
+			Outbound: &linkDirection{ThroughputBps: 80e6},
+		},
 	}
-	if got := rttToBps(nodeProfile{Link: &linkProfile{RTTMS: 100000}}); got < 1e7 {
-		t.Fatalf("rate floor violated: %v", got)
+	if got := outboundBpsEstimate(fresh); got != 80e6 {
+		t.Fatalf("fresh outbound rate = %v, want 80 Mbps despite 9 Gbps inbound", got)
+	}
+
+	stale := nodeProfile{
+		NodeCapacity: NodeCapacity{NodeID: "peer"},
+		Link: &linkProfile{
+			RTTMS:     100,
+			RTTStale:  false,
+			Inbound:   &linkDirection{ThroughputBps: 1e9},
+			Outbound:  &linkDirection{ThroughputBps: 2e9, Stale: true},
+		},
+	}
+	if got := outboundBpsEstimate(stale); got != 1e7 {
+		t.Fatalf("stale outbound estimate = %v, want 10 Mbps RTT fallback", got)
+	}
+	if got := outboundBpsEstimate(nodeProfile{NodeCapacity: NodeCapacity{NodeID: "peer"}}); got != 1e7 {
+		t.Fatalf("unknown peer estimate = %v, want conservative 10 Mbps", got)
+	}
+	stale.Link.RTTStale = true
+	if got := outboundBpsEstimate(stale); got != 1e7 {
+		t.Fatalf("stale RTT fallback = %v, want conservative 10 Mbps", got)
+	}
+	if got := outboundBpsEstimate(nodeProfile{NodeCapacity: NodeCapacity{NodeID: "local"}}); got != 1e9 {
+		t.Fatalf("local estimate = %v, want local 1 Gbps baseline", got)
 	}
 }
 
@@ -159,5 +194,99 @@ func TestListFabricJobsFiltersByPersistedOrganization(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+func TestFabricJobSubmissionUsesFreshOutboundMeasurement(t *testing.T) {
+	t.Setenv("NOVACRON_NODE_ID", "local")
+	nodeCredentialsTestEnv(t, "cluster-secret", "peer-a=peer-secret")
+
+	now := time.Now().UTC()
+	link, err := json.Marshal(struct {
+		Inbound  linkMeasurement `json:"inbound"`
+		Outbound linkMeasurement `json:"outbound"`
+	}{
+		Inbound: linkMeasurement{
+			ThroughputBps: 4e6,
+			ProbeBytes:    1 << 20,
+			MeasuredAt:    now.Format(time.RFC3339Nano),
+		},
+		Outbound: linkMeasurement{
+			ThroughputBps: 2e9,
+			ProbeBytes:    1 << 20,
+			MeasuredAt:    now.Format(time.RFC3339Nano),
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal link profile: %v", err)
+	}
+
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secret := r.Header.Get("X-Migration-Secret")
+		if secret != "peer-secret" && secret != "cluster-secret" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		switch r.URL.Path {
+		case "/internal/cluster/capacity":
+			_ = json.NewEncoder(w).Encode(NodeCapacity{
+				NodeID: "peer-a", Cores: 4, MemTotalMB: 8192, Reachable: true,
+			})
+		case "/internal/vms/create":
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"id": "remote-job-vm", "node_id": "peer-a", "state": "stopped",
+			})
+		case "/internal/fabric/vm-start":
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer peer.Close()
+
+	vmManager := newStubVMManager(t)
+	defer vmManager.Stop()
+	vmManager.RegisterMigrationPeer("peer-a", joinTestRequestAddr(t, peer.URL))
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT node_id, last_rtt_ms, last_heartbeat, COALESCE(link, '{}'::jsonb) FROM cluster_peers`)).
+		WillReturnRows(sqlmock.NewRows([]string{"node_id", "last_rtt_ms", "last_heartbeat", "link"}).
+			AddRow("peer-a", 1.0, now, link))
+	mock.ExpectExec("INSERT INTO fabric_jobs").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	apiRouter := mux.NewRouter()
+	registerFabricJobRoutes(apiRouter, db, vmManager, t.TempDir())
+	requestBody, err := json.Marshal(fabricJobSpec{
+		Command: "/bin/true", BytesToMove: 1 << 30, MemoryMB: 128,
+	})
+	if err != nil {
+		t.Fatalf("marshal job request: %v", err)
+	}
+	response := httptest.NewRecorder()
+	apiRouter.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/compute/jobs", bytes.NewReader(requestBody)))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("POST /compute/jobs status = %d, body %s", response.Code, response.Body)
+	}
+
+	var got struct {
+		NodeID    string           `json:"node_id"`
+		Placement placementDecision `json:"placement"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode job submission: %v", err)
+	}
+	if got.NodeID != "peer-a" || got.Placement.Decision != "cost" ||
+		got.Placement.Reason != "lowest estimated cost (0.662s): transfer 1073741824 bytes over outbound measured 2000.0 Mbps link" {
+		t.Fatalf("placement = %+v, want peer-a chosen from 2 Gbps outbound (not 4 Mbps inbound)", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
 	}
 }

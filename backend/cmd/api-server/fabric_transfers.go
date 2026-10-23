@@ -2,9 +2,9 @@ package main
 
 // Fabric transfers (P3/G3): the admission-controlled byte movers.
 //
-// A transfer is a migration admitted against the MEASURED link budget:
+// A transfer is a migration admitted against the MEASURED outbound link budget:
 //
-//	link_bps   = the heartbeat's fresh throughput probe for the target node
+//	link_bps   = the heartbeat's fresh local -> target throughput probe
 //	sample_ratio = compressibility of up to 64 MiB of the VM's disk image
 //	compression = zstd-multifd when link_bps < 500 Mbps AND ratio > 1.3,
 //	              otherwise none (QEMU then runs byte-identical to before)
@@ -437,15 +437,16 @@ func registerFabricTransferRoutes(apiRouter *mux.Router, db *sql.DB, vmManager *
 			return
 		}
 
-		// Measured link rate for the target (fresh profile only).
+		// The measured direction used here is local -> target.
 		var linkBps float64
 		linkMeasured := false
 		for _, n := range nodeProfiles(vmManager, storagePath, db) {
 			if n.NodeID != req.TargetNode {
 				continue
 			}
-			if n.Link != nil && n.Link.ThroughputBps != nil && !n.Link.Stale {
-				linkBps = *n.Link.ThroughputBps
+			if n.Link != nil && n.Link.Outbound != nil &&
+				!n.Link.Outbound.Stale && n.Link.Outbound.ThroughputBps > 0 {
+				linkBps = n.Link.Outbound.ThroughputBps
 				linkMeasured = true
 			}
 			break

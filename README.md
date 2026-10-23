@@ -113,6 +113,12 @@ state record and supersedes `docs/archive/**` (fabricated figures; do not cite).
   multi-cloud/federation code are real code with tests, but no import path
   reaches them from `api-server`; the fabric's own link telemetry
   (`GET /api/cluster/links`) is the live observability.
+- **Work units run trusted commands, not sandboxes.** `POST
+  /api/compute/work-units` is admin-only: the executor is the existing Process
+  driver, so a unit is a native command running as the api-server's account.
+  Input artifacts are SHA-256-addressed and verified on arrival, and retries
+  reuse the same checkpoint path, but the platform cannot validate what your
+  workload wrote into that checkpoint.
 - **Marketplace: absent.** `marketplace/` holds a single text listing, no code.
 - Anything here older than 2026-09-20 is unverified by the current sessions
   (check STATUS.md).

@@ -211,6 +211,11 @@ func (d *ProcessDriver) Start(ctx context.Context, vmID string) error {
 		return err
 	}
 
+	// A restart (work-unit retry) must not let status readers observe the
+	// PREVIOUS run's exit status during the window before the new process is
+	// reaped; the Wait goroutine writes the fresh code on exit.
+	_ = os.Remove(d.exitCodeFile(vmID))
+
 	stdout, err := os.OpenFile(filepath.Join(d.vmDir(vmID), "stdout.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open stdout log for %s: %w", vmID, err)

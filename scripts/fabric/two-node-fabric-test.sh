@@ -390,17 +390,17 @@ if [ "$JOINED" = "1" ]; then
   tp_deadline=$(( $(date +%s) + HEARTBEAT_WAIT ))
   while [ "$(date +%s)" -lt "$tp_deadline" ]; do
     links_json="$(api a GET /api/cluster/links)"
-    tp="$(json_get '[(l.get("throughput_bps") or 0) for l in d.get("links",[]) if l.get("node_id")=="fab-b"][0] if [l for l in d.get("links",[]) if l.get("node_id")=="fab-b"] else 0' "$links_json")"
+    tp="$(json_get '[(l.get("outbound") or {}).get("throughput_bps", 0) if not (l.get("outbound") or {}).get("stale", True) else 0 for l in d.get("links",[]) if l.get("node_id")=="fab-b"][0] if [l for l in d.get("links",[]) if l.get("node_id")=="fab-b"] else 0' "$links_json")"
     rtt="$(json_get '[(l.get("rtt_ms") or 0) for l in d.get("links",[]) if l.get("node_id")=="fab-b"][0] if [l for l in d.get("links",[]) if l.get("node_id")=="fab-b"] else 0' "$links_json")"
     python3 -c "import sys; sys.exit(0 if float('${tp:-0}')>0 else 1)" && break
     sleep 3
   done
   tp_mbps="$(python3 -c "print(f'{float('$tp')/1e6:.1f}')" 2>/dev/null || echo 0)"
-  say "    measured link: ${tp_mbps} Mbps, rtt ${rtt} ms (shaping: $SHAPING_MODE)"
+  say "    measured outbound link: ${tp_mbps} Mbps local->fab-b, rtt ${rtt} ms (shaping: $SHAPING_MODE)"
   if python3 -c "import sys; sys.exit(0 if float('${tp:-0}')>0 else 1)"; then
-    ok "link profile carries a measured throughput (${tp_mbps} Mbps)"
+    ok "link profile carries a fresh outbound throughput (${tp_mbps} Mbps)"
   else
-    bad "link profile has no measured throughput after ${HEARTBEAT_WAIT}s"
+    bad "link profile has no fresh outbound throughput after ${HEARTBEAT_WAIT}s"
   fi
 else
   bad "node B never became reachable from A"

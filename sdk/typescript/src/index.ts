@@ -67,6 +67,7 @@ export {
   // Fabric inventory
   FabricNode,
   FabricLink,
+  FabricLinkDirection,
 
   // Fabric jobs
   FabricJob,

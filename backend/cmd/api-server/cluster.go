@@ -51,6 +51,10 @@ func internalSecretOK(r *http.Request) bool {
 // maxProbeBytes caps a single throughput probe payload (the heartbeat asks for
 // NOVACRON_PROBE_BYTES, default 1 MiB; the cap bounds a hostile request).
 const maxProbeBytes = 8 << 20
+type probeReceipt struct {
+	BytesReceived int64 `json:"bytes_received"`
+	ElapsedNS     int64 `json:"elapsed_ns"`
+}
 
 // probePayload is a fixed pool of incompressible bytes served by
 // /internal/cluster/probe. Random content keeps transparent compression in the
@@ -626,27 +630,45 @@ func registerClusterRoutes(root, apiRouter *mux.Router, db *sql.DB, vmManager *c
 		writeJSON(w, http.StatusOK, localNodeCapacity(vmManager, storagePath))
 	}).Methods(http.MethodGet)
 
-	// GET /internal/cluster/probe?bytes=N -- N bytes of incompressible payload
-	// for the heartbeat's throughput measurement. Capped; 0 disables.
+	// GET downloads the probe payload to measure peer -> local capacity. POST
+	// measures local -> peer capacity and reports receiver-side elapsed time.
 	root.HandleFunc("/internal/cluster/probe", func(w http.ResponseWriter, r *http.Request) {
 		if !internalSecretOK(r) {
 			writeJSONError(w, http.StatusForbidden, "forbidden")
 			return
 		}
-		n, _ := strconv.Atoi(r.URL.Query().Get("bytes"))
-		if n < 0 {
-			n = 0
+		if r.Method == http.MethodGet {
+			n, _ := strconv.Atoi(r.URL.Query().Get("bytes"))
+			if n < 0 {
+				n = 0
+			}
+			if n > maxProbeBytes {
+				n = maxProbeBytes
+			}
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Length", strconv.Itoa(n))
+			w.WriteHeader(http.StatusOK)
+			if n > 0 {
+				_, _ = w.Write(probePayload[:n])
+			}
+			return
 		}
-		if n > maxProbeBytes {
-			n = maxProbeBytes
+		if r.ContentLength <= 0 || r.ContentLength > maxProbeBytes {
+			writeJSONError(w, http.StatusBadRequest, "probe body must be between 1 byte and the configured limit")
+			return
 		}
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Length", strconv.Itoa(n))
-		w.WriteHeader(http.StatusOK)
-		if n > 0 {
-			_, _ = w.Write(probePayload[:n])
+		started := time.Now()
+		received, err := io.CopyN(io.Discard, r.Body, r.ContentLength)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "incomplete probe body")
+			return
 		}
-	}).Methods(http.MethodGet)
+		elapsed := time.Since(started)
+		if elapsed <= 0 {
+			elapsed = time.Nanosecond
+		}
+		writeJSON(w, http.StatusOK, probeReceipt{BytesReceived: received, ElapsedNS: elapsed.Nanoseconds()})
+	}).Methods(http.MethodGet, http.MethodPost)
 
 	// POST /internal/vms/create -- a coordinator dispatches a create here; we create
 	// it locally and return {id, node_id, state}.

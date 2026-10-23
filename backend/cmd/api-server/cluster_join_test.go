@@ -1,7 +1,9 @@
 package main
 
 import (
+	"database/sql/driver"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -527,14 +529,47 @@ func TestDispatchCreateToPeerUsesPeerCredential(t *testing.T) {
 	})
 }
 
-// TestBeatOnceUsesPeerCredential: the heartbeat probes a peer with THAT peer's
-// own credential — the stub peer's gate accepts only its own, so a credential
-// regression here would leave every per-node peer permanently unreachable in
-// the inventory and its link profile (which placement reads) stale.
+type directionalLinkPayloadMatcher struct {
+	t *testing.T
+}
+
+func (m directionalLinkPayloadMatcher) Match(value driver.Value) bool {
+	raw, ok := value.([]byte)
+	if !ok {
+		m.t.Errorf("persisted link payload type = %T, want []byte", value)
+		return false
+	}
+	var profile struct {
+		Inbound  *linkMeasurement `json:"inbound"`
+		Outbound *linkMeasurement `json:"outbound"`
+	}
+	if err := json.Unmarshal(raw, &profile); err != nil {
+		m.t.Errorf("decode persisted link payload: %v", err)
+		return false
+	}
+	for direction, measurement := range map[string]*linkMeasurement{
+		"inbound": profile.Inbound, "outbound": profile.Outbound,
+	} {
+		if measurement == nil || measurement.ProbeBytes != 1024 || measurement.ThroughputBps <= 0 {
+			m.t.Errorf("%s persisted measurement = %+v, want a positive 1024-byte sample", direction, measurement)
+			return false
+		}
+		if _, err := time.Parse(time.RFC3339Nano, measurement.MeasuredAt); err != nil {
+			m.t.Errorf("%s measurement timestamp %q is invalid: %v", direction, measurement.MeasuredAt, err)
+			return false
+		}
+	}
+	return true
+}
+
+// TestBeatOnceUsesPeerCredential: heartbeat capacity and both directional link
+// probes must use THAT peer's own credential. The peer gate accepts only its
+// own credential, so a credential regression leaves the inventory unreachable.
 func TestBeatOnceUsesPeerCredential(t *testing.T) {
 	nodeCredentialsTestEnv(t, "cluster-wide-secret", "peer-a=peer-a-secret")
 	t.Setenv("NOVACRON_PROBE_BYTES", "1024")
 
+	var inboundProbes, outboundProbes int
 	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Migration-Secret") != "peer-a-secret" {
 			w.WriteHeader(http.StatusForbidden)
@@ -544,7 +579,23 @@ func TestBeatOnceUsesPeerCredential(t *testing.T) {
 		case "/internal/cluster/capacity":
 			_ = json.NewEncoder(w).Encode(NodeCapacity{NodeID: "peer-a", Cores: 2, MemTotalMB: 1024, Reachable: true})
 		case "/internal/cluster/probe":
-			_, _ = w.Write(make([]byte, 1024))
+			switch r.Method {
+			case http.MethodGet:
+				inboundProbes++
+				_, _ = w.Write(make([]byte, 1024))
+			case http.MethodPost:
+				outboundProbes++
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Errorf("read outbound probe: %v", err)
+				}
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"bytes_received": len(body),
+					"elapsed_ns":    int64(time.Millisecond),
+				})
+			default:
+				w.WriteHeader(http.StatusMethodNotAllowed)
+			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -560,13 +611,126 @@ func TestBeatOnceUsesPeerCredential(t *testing.T) {
 		t.Fatalf("sqlmock: %v", err)
 	}
 	defer db.Close()
-	// One upsert per reachable peer; the assertion below fails if the probe
-	// never got that far (the stub peer answers 403 to any other credential).
-	mock.ExpectExec("INSERT INTO cluster_peers").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO cluster_peers").
+		WithArgs("peer-a", joinTestRequestAddr(t, peer.URL), sqlmock.AnyArg(), directionalLinkPayloadMatcher{t: t}).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	beatOnce(t.Context(), db, vmManager, newPeerLiveness(events.NewNoopEventBus()))
 
+	if inboundProbes != 1 || outboundProbes != 1 {
+		t.Fatalf("directional probes = inbound %d, outbound %d; want one of each", inboundProbes, outboundProbes)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("heartbeat persisted no probe result: %v", err)
+	}
+}
+func TestClusterNodesUsePerDirectionMeasurementAge(t *testing.T) {
+	t.Setenv("NOVACRON_NODE_ID", "local")
+	nodeCredentialsTestEnv(t, "cluster-secret", "peer-a=peer-secret")
+
+	now := time.Now().UTC()
+	link, err := json.Marshal(struct {
+		Inbound  linkMeasurement `json:"inbound"`
+		Outbound linkMeasurement `json:"outbound"`
+	}{
+		Inbound: linkMeasurement{
+			ThroughputBps: 60e6,
+			ProbeBytes:    1 << 20,
+			MeasuredAt:    now.Add(-time.Minute).Format(time.RFC3339Nano),
+		},
+		Outbound: linkMeasurement{
+			ThroughputBps: 2e9,
+			ProbeBytes:    1 << 20,
+			MeasuredAt:    now.Add(-linkProfileStaleness - time.Second).Format(time.RFC3339Nano),
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal link profile: %v", err)
+	}
+
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/internal/cluster/capacity" || r.Header.Get("X-Migration-Secret") != "peer-secret" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(NodeCapacity{
+			NodeID: "peer-a", Cores: 2, MemTotalMB: 8192, Reachable: true,
+		})
+	}))
+	defer peer.Close()
+
+	vmManager := newStubVMManager(t)
+	defer vmManager.Stop()
+	vmManager.RegisterMigrationPeer("peer-a", joinTestRequestAddr(t, peer.URL))
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT node_id, last_rtt_ms").
+		WillReturnRows(sqlmock.NewRows([]string{"node_id", "last_rtt_ms", "last_heartbeat", "link"}).
+			AddRow("peer-a", 17.5, now, link))
+
+	rootRouter, apiRouter := mux.NewRouter(), mux.NewRouter()
+	registerClusterJoinRoutes(rootRouter, apiRouter, db, vmManager, t.TempDir())
+	response := httptest.NewRecorder()
+	apiRouter.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/cluster/nodes", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /cluster/nodes status = %d, body %s", response.Code, response.Body)
+	}
+
+	var payload struct {
+		Nodes []struct {
+			NodeID string `json:"node_id"`
+			Link   *struct {
+				RTTStale bool `json:"rtt_stale"`
+				Stale    bool `json:"stale"`
+				Inbound  *struct {
+					ThroughputBps float64 `json:"throughput_bps"`
+					Stale         bool    `json:"stale"`
+				} `json:"inbound"`
+				Outbound *struct {
+					ThroughputBps float64 `json:"throughput_bps"`
+					Stale         bool    `json:"stale"`
+				} `json:"outbound"`
+			} `json:"link"`
+		} `json:"nodes"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode /cluster/nodes response: %v", err)
+	}
+	var peerNode *struct {
+		RTTStale bool `json:"rtt_stale"`
+		Stale    bool `json:"stale"`
+		Inbound  *struct {
+			ThroughputBps float64 `json:"throughput_bps"`
+			Stale         bool    `json:"stale"`
+		} `json:"inbound"`
+		Outbound *struct {
+			ThroughputBps float64 `json:"throughput_bps"`
+			Stale         bool    `json:"stale"`
+		} `json:"outbound"`
+	}
+	for i := range payload.Nodes {
+		if payload.Nodes[i].NodeID == "peer-a" {
+			peerNode = payload.Nodes[i].Link
+			break
+		}
+	}
+	if peerNode == nil || peerNode.Inbound == nil || peerNode.Outbound == nil {
+		t.Fatalf("peer directional profile missing: %+v", payload.Nodes)
+	}
+	if peerNode.Inbound.ThroughputBps != 60e6 || peerNode.Inbound.Stale {
+		t.Fatalf("inbound profile = %+v, want fresh 60 Mbps", peerNode.Inbound)
+	}
+	if peerNode.Outbound.ThroughputBps != 2e9 || !peerNode.Outbound.Stale {
+		t.Fatalf("outbound profile = %+v, want stale 2 Gbps", peerNode.Outbound)
+	}
+	if !peerNode.Stale || peerNode.RTTStale {
+		t.Fatalf("aggregate staleness = link:%v RTT:%v, want stale directional profile and fresh RTT", peerNode.Stale, peerNode.RTTStale)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
 	}
 }

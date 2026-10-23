@@ -145,8 +145,33 @@ process can still serve control-plane traffic. `status` is `unhealthy` while
 API port; there is no separate WebSocket port or `WS_PORT` variable.
 
 Fleet-level checks after a start: `GET /api/cluster/nodes` and
-`GET /api/cluster/links` (operator JWT) show per-peer capacity, measured RTT and
-throughput; the link profile is refreshed by a heartbeat every ~30s.
+`GET /api/cluster/links` (operator JWT) show per-peer capacity, RTT freshness,
+and separate inbound/outbound rates with per-measurement timestamps.
+
+Fabric work units (admin JWT) build on the same peer link telemetry:
+
+```bash
+# 1. Store an input; the response's sha256 is its cache address.
+curl -sS -X POST "$API/api/compute/work-units/artifacts" \
+  -H "Authorization: Bearer $TOKEN" --data-binary @input.tar
+# {"sha256":"<64 hex>","size_bytes":1234,"cached":false}
+
+# 2. Submit. The unit is placed, inputs are staged only where missing, and the
+#    runner gets NOVACRON_ARTIFACT_DIR / _ARTIFACTS / _CHECKPOINT_PATH /
+#    _ATTEMPT_FILE / _WORK_UNIT_ID. `attempt_limit` caps retries.
+curl -sS -X POST "$API/api/compute/work-units" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{
+    "command":"/usr/local/bin/my-job","artifact_hashes":["<64 hex>"],"attempt_limit":3}'
+
+# 3. Inspect (driver-truth status, attempts, checkpoint availability), then retry.
+curl -sS "$API/api/compute/work-units/<id>" -H "Authorization: Bearer $TOKEN"
+curl -sS -X POST "$API/api/compute/work-units/<id>/retry" -H "Authorization: Bearer $TOKEN"
+```
+
+A retry restarts the same VM with the same checkpoint path and an advanced
+attempt number (read it from `$NOVACRON_ATTEMPT_FILE`), so the workload resumes
+where it stopped. Submission and retry are admin-only: the executor is the
+Process driver running a native command as the api-server's account.
 
 ## 6. Backups and restore
 

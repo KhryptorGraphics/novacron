@@ -20,10 +20,21 @@ import {
 // Default request timeout, mirroring the DWCP client's defaultConfig.
 export const DEFAULT_FABRIC_TIMEOUT = 60000;
 
+// One measured direction relative to the node reporting the link profile.
+export interface FabricLinkDirection {
+  throughput_bps: number;
+  probe_bytes: number;
+  measured_at: string;
+  stale: boolean;
+}
+
 // Link profile of a peer, as measured by the cluster heartbeat loop.
 export interface FabricLink {
   rtt_ms: number;
   last_heartbeat: string;
+  rtt_stale: boolean;
+  inbound?: FabricLinkDirection;
+  outbound?: FabricLinkDirection;
   stale: boolean;
 }
 

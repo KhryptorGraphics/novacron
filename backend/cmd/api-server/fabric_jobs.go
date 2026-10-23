@@ -213,7 +213,7 @@ func submitFabricJob(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManag
 		jobVCPUs = 1
 	}
 
-	node, decision, err := placeFabricJob(vmManager, storagePath, spec)
+	node, decision, err := placeFabricJob(db, vmManager, storagePath, spec)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -237,40 +237,9 @@ func submitFabricJob(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManag
 		OrganizationID: orgLabelForVM(submitterOrg),
 	}
 
-	var vmID string
-	if node.Addr == "" || node.NodeID == selfNodeID() {
-		var state string
-		vmID, state, err = createVMLocal(ctx, db, vmManager, createSpec)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create job VM locally: %w", err)
-		}
-		_ = state
-	} else {
-		// As (not the cluster-secret-only wrapper): the job lands on a KNOWN
-		// node, and that peer's gate expects its own credential.
-		out, derr := dispatchCreateToPeerAs(node.NodeID, node.Addr, createSpec)
-		if derr != nil {
-			return nil, nil, fmt.Errorf("failed to dispatch job to %s: %w", node.NodeID, derr)
-		}
-		vmID, _ = out["id"].(string)
-		if vmID == "" {
-			return nil, nil, fmt.Errorf("peer %s returned no VM id for the job", node.NodeID)
-		}
-	}
-
-	// Start it: local start, or the peer's own start RPC.
-	if node.Addr == "" || node.NodeID == selfNodeID() {
-		if err := vmManager.StartVM(ctx, vmID); err != nil {
-			// Roll back the orphaned VM so a failed start leaves no debris.
-			_ = vmManager.DeleteVM(context.Background(), vmID)
-			if db != nil {
-				_, _ = db.ExecContext(ctx, `DELETE FROM vms WHERE id = $1`, vmID)
-			}
-			return nil, nil, fmt.Errorf("failed to start job VM: %w", err)
-		}
-	} else if err := startRemoteJob(node.Addr, vmID); err != nil {
-		_ = deleteRemoteJob(node.Addr, vmID)
-		return nil, nil, fmt.Errorf("failed to start job on %s: %w", node.NodeID, err)
+	vmID, err := createAndStartJobVM(ctx, db, vmManager, node, createSpec)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	job := &fabricJob{
@@ -296,6 +265,57 @@ func submitFabricJob(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManag
 	return job, decision, nil
 }
 
+// createAndStartJobVM creates and starts the Process-driver VM for a job on the
+// placed node and rolls back an orphan when the start fails. It is shared by
+// plain fabric jobs and work units so both keep one dispatch path.
+func createAndStartJobVM(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManager, node NodeCapacity, createSpec clusterCreateSpec) (string, error) {
+	local := node.Addr == "" || node.NodeID == selfNodeID()
+	var vmID string
+	if local {
+		var state string
+		var err error
+		vmID, state, err = createVMLocal(ctx, db, vmManager, createSpec)
+		if err != nil {
+			return "", fmt.Errorf("failed to create job VM locally: %w", err)
+		}
+		_ = state
+		if err := vmManager.StartVM(ctx, vmID); err != nil {
+			// Roll back the orphaned VM so a failed start leaves no debris.
+			_ = vmManager.DeleteVM(context.Background(), vmID)
+			if db != nil {
+				_, _ = db.ExecContext(ctx, `DELETE FROM vms WHERE id = $1`, vmID)
+			}
+			return "", fmt.Errorf("failed to start job VM: %w", err)
+		}
+		return vmID, nil
+	}
+	// As (not the cluster-secret-only wrapper): the job lands on a KNOWN node,
+	// and that peer's gate expects its own credential.
+	out, err := dispatchCreateToPeerAs(node.NodeID, node.Addr, createSpec)
+	if err != nil {
+		return "", fmt.Errorf("failed to dispatch job to %s: %w", node.NodeID, err)
+	}
+	vmID, _ = out["id"].(string)
+	if vmID == "" {
+		return "", fmt.Errorf("peer %s returned no VM id for the job", node.NodeID)
+	}
+	if err := startRemoteJob(node.Addr, vmID); err != nil {
+		_ = deleteRemoteJob(node.Addr, vmID)
+		return "", fmt.Errorf("failed to start job on %s: %w", node.NodeID, err)
+	}
+	return vmID, nil
+}
+
+// rollbackJobVM removes an executor VM whose job record could not be persisted,
+// so a failed bookkeeping write never leaves an untracked process running.
+func rollbackJobVM(node NodeCapacity, vmManager *core_vm.VMManager, vmID string) {
+	if node.Addr == "" || node.NodeID == selfNodeID() {
+		_ = vmManager.StopVM(context.Background(), vmID)
+		return
+	}
+	_ = cancelRemoteJob(node.Addr, vmID)
+}
+
 // placeFabricJob picks the execution node. Order of precedence:
 //  1. explicit pin (node_id) — data-locality floor: the caller knows where the
 //     work must run; an unreachable pin is an error, never a silent move.
@@ -304,8 +324,8 @@ func submitFabricJob(ctx context.Context, db *sql.DB, vmManager *core_vm.VMManag
 //     makes the transfer dominate (see estimatedMoveCostS).
 //  3. cost-optimal: min estimated transfer time over reachable nodes that fit.
 //  4. single reachable node → it (default).
-func placeFabricJob(vmManager *core_vm.VMManager, storagePath string, spec fabricJobSpec) (NodeCapacity, *placementDecision, error) {
-	nodes := nodeProfiles(vmManager, storagePath, nil)
+func placeFabricJob(db *sql.DB, vmManager *core_vm.VMManager, storagePath string, spec fabricJobSpec) (NodeCapacity, *placementDecision, error) {
+	nodes := nodeProfiles(vmManager, storagePath, db)
 	byID := make(map[string]nodeProfile, len(nodes))
 	for _, n := range nodes {
 		byID[n.NodeID] = n
@@ -368,12 +388,10 @@ func placeFabricJob(vmManager *core_vm.VMManager, storagePath string, spec fabri
 	}, nil
 }
 
-// estimatedMoveCostS is bytes/link_bps plus a fixed run-time proxy. The link
-// term uses the measured RTT as the only live signal available on this path
-// today; when a throughput probe lands (P3) it replaces rttToBps verbatim.
+// estimatedMoveCostS is bytes/outbound_bps plus a fixed run-time proxy.
 func estimatedMoveCostS(n nodeProfile, spec fabricJobSpec) float64 {
 	bytes := float64(spec.BytesToMove)
-	linkBps := rttToBps(n)
+	linkBps := outboundBpsEstimate(n)
 	transfer := 0.0
 	if bytes > 0 {
 		transfer = bytes / linkBps
@@ -383,41 +401,47 @@ func estimatedMoveCostS(n nodeProfile, spec fabricJobSpec) float64 {
 	return transfer + run
 }
 
-// rttToBps converts a link profile to a capacity estimate for placement:
-// a FRESH measured throughput wins; otherwise the estimate degrades to the
-// RTT heuristic (documented placeholder: it ranks LAN ahead of WAN, which is
-// what ordering needs), and an unmeasured link ranks as fast-local.
-func rttToBps(n nodeProfile) float64 {
-	if n.Link != nil && n.Link.ThroughputBps != nil && !n.Link.Stale && *n.Link.ThroughputBps > 0 {
-		return *n.Link.ThroughputBps
+type linkRateEstimate struct {
+	Bps    float64
+	Source string
+}
+
+// outboundLinkEstimate describes local -> peer capacity. Inbound measurements
+// must never be substituted for the direction a job dispatch or migration uses.
+func outboundLinkEstimate(n nodeProfile) linkRateEstimate {
+	if n.NodeID == selfNodeID() {
+		return linkRateEstimate{Bps: 1e9, Source: "local"}
 	}
-	if n.Link == nil || n.Link.RTTMS <= 0 {
-		return 1e9 // unknown link: treat as fast local, not as zero
+	if n.Link != nil && n.Link.Outbound != nil &&
+		!n.Link.Outbound.Stale && n.Link.Outbound.ThroughputBps > 0 {
+		return linkRateEstimate{Bps: n.Link.Outbound.ThroughputBps, Source: "measured"}
 	}
-	// 1 Gbps at ≤1ms, degrading inversely with RTT; floor at 10 Mbps so a huge
-	// RTT never produces division-by-tiny.
-	est := 1e9 * (1.0 / n.Link.RTTMS)
-	if est < 1e7 {
-		est = 1e7
+	if n.Link != nil && !n.Link.RTTStale && n.Link.RTTMS > 0 {
+		bps := 1e9 / n.Link.RTTMS
+		if bps < 1e7 {
+			bps = 1e7
+		}
+		return linkRateEstimate{Bps: bps, Source: "rtt"}
 	}
-	return est
+	return linkRateEstimate{Bps: 1e7, Source: "unknown"}
+}
+
+func outboundBpsEstimate(n nodeProfile) float64 {
+	return outboundLinkEstimate(n).Bps
 }
 
 func linkBandwidthLabel(n nodeProfile) string {
-	if n.Link == nil {
-		return "unmeasured"
+	estimate := outboundLinkEstimate(n)
+	switch estimate.Source {
+	case "local":
+		return "local"
+	case "measured":
+		return fmt.Sprintf("outbound measured %.1f Mbps", estimate.Bps/1e6)
+	case "rtt":
+		return fmt.Sprintf("outbound RTT estimate %.1f Mbps", estimate.Bps/1e6)
+	default:
+		return "outbound unmeasured (10 Mbps conservative fallback)"
 	}
-	if n.Link.ThroughputBps != nil {
-		state := "measured"
-		if n.Link.Stale {
-			state = "stale"
-		}
-		return fmt.Sprintf("%s %.1f Mbps", state, *n.Link.ThroughputBps/1e6)
-	}
-	if n.Link.RTTMS > 0 {
-		return fmt.Sprintf("rtt %.2fms (throughput unmeasured)", n.Link.RTTMS)
-	}
-	return "unmeasured"
 }
 
 func clampJobMemory(mb int) int {
@@ -495,6 +519,15 @@ func localJobStatus(vmManager *core_vm.VMManager, job *fabricJob) string {
 				}
 				return jobStatusFailed
 			}
+			// A Process VM writes exit.code exactly once per run, and Start
+			// clears the previous one before spawning. Its absence therefore
+			// means the current run has not been reaped yet — the window
+			// between spawn and pid-file write, or between exit and the Wait
+			// goroutine — so claiming completion here would be premature.
+			if job.Status == jobStatusRunning {
+				return jobStatusRunning
+			}
+			return job.Status
 		}
 		if job.Status == jobStatusRunning {
 			return jobStatusCompleted

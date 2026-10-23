@@ -1,9 +1,19 @@
 import { buildApiUrl } from '@/lib/api/origin';
 import { authService } from '@/lib/auth';
 
+export type FabricLinkDirection = {
+  throughput_bps: number;
+  probe_bytes: number;
+  measured_at: string;
+  stale: boolean;
+};
+
 export type FabricLinkProfile = {
   rtt_ms: number;
   last_heartbeat: string;
+  rtt_stale: boolean;
+  inbound?: FabricLinkDirection;
+  outbound?: FabricLinkDirection;
   stale: boolean;
 };
 

@@ -315,9 +315,9 @@ claims source-tagged and evidence-linked. Full files live in `research/profitabi
   (`organizations` + `users.organization_id` in migration 000001) but is never
   enforced by the canonical auth manager (STUB, per technical-audit.md §2).
   Wiring this is the concrete first step toward usage-metered billing.
-- `GET /api/cluster/links` already exposes `{rtt_ms, throughput_bps,
-  measured_at, stale}` — this is the instrumentation foundation for usage-based
-  egress billing and should be extended, not replaced.
+- `GET /api/cluster/links` exposes `{rtt_ms, rtt_stale, inbound, outbound,
+  stale}`. Each direction carries `throughput_bps`, `probe_bytes`, its own
+  `measured_at`, and `stale`; rate freshness is independent of heartbeat age.
 
 ### Files in `research/profitability/`
 
@@ -542,13 +542,13 @@ below was run live on this arm64 host; numbers are observed, not projected.
   nodes with link profiles. NAT case: a node in a netns behind a real
   MASQUERADE+DNAT gateway joined and stayed reachable (published 10.99.0.2:18092,
   gateway DNAT rule 2 pkts, private 10.100.0.2 unreachable from the host).
-- **Throughput probe + link profiles (P3)** — `/internal/cluster/probe?bytes=N`
-  serves incompressible payload; the heartbeat measures bytes/wall-time.
-  Measured on the same veth pair: **21.78 Gbps** unshaped (LAN), **186.1 Mbps**
-  under `tc tbf rate 200mbit`, **47.9 Mbps** under `50mbit` — each cross-checked
-  with an independent curl (`23848345 B/s`, `5972733 B/s`). Profiles decay:
-  a stale (>5 min) throughput is ignored by placement. `GET /api/cluster/links`
-  exposes {rtt_ms, throughput_bps, measured_at, stale}.
+- **Directional throughput probes + link profiles (P3)** — GET downloads from a
+  peer and measures peer → local body throughput after response headers; POST
+  uploads and uses receiver-side local → peer elapsed time. Each rate has its
+  own timestamp and goes stale after five minutes. Placement and migration use
+  only fresh outbound rates; stale/missing rates fall back to fresh RTT or an
+  explicit conservative unknown-link estimate. `GET /api/cluster/links`
+  exposes independent `{inbound, outbound}` measurements plus RTT freshness.
 - **Fabric compute jobs (P2/G2)** — `backend/cmd/api-server/fabric_jobs.go`,
   migration `000007_fabric_jobs`. A job IS a Process VM: placement → create +
   start (local or `/internal/vms/create` dispatch) → status/logs/cancel. No second
@@ -576,6 +576,33 @@ below was run live on this arm64 host; numbers are observed, not projected.
   (`migrate-set-capabilities` multifd/xbzrle + `migrate-set-parameters`), probing
   `query-migrate-parameters` first so a QEMU without `multifd-compression-level`
   (8.2.2 here) is not sent an unsupported key.
+- **Work units: content-addressed inputs, checkpoint/retry (P4)** —
+  `backend/cmd/api-server/fabric_work_units.go`, migration
+  `000019_fabric_work_units`. A work unit IS a fabric job (same Process-VM
+  executor, placement, dispatch, status) plus inputs and a resume point.
+  `POST /api/compute/work-units/artifacts` stores an input under its SHA-256
+  and reports `cached`; `POST /api/compute/work-units` validates the inputs in
+  the submitter's cache, places the unit, stages only the artifacts the chosen
+  node lacks (a HEAD probe per hash, then a PUT whose body must re-hash to the
+  address), prepares that node's paths, and starts the VM. The workload gets
+  `NOVACRON_ARTIFACT_DIR`, `NOVACRON_ARTIFACTS`, `NOVACRON_CHECKPOINT_PATH`,
+  `NOVACRON_ATTEMPT_FILE`, `NOVACRON_WORK_UNIT_ID`; those keys are reserved.
+  `POST /api/compute/work-units/{id}/retry` reserves an attempt with one
+  `UPDATE ... WHERE attempts < attempt_limit RETURNING` (so two concurrent
+  retries cannot both start), re-verifies the inputs are still cached, rewrites
+  the attempt file, and restarts the SAME VM so the workload resumes from its
+  own checkpoint; `GET /api/compute/work-units/{id}` reports driver-truth
+  status, attempts/limit, input bytes, and checkpoint availability.
+  Verified by a real-ProcessDriver test: attempt 1 writes a checkpoint and exits
+  3, the retry advances to attempt 2, finds the checkpoint, and completes;
+  a corrupt artifact body is rejected before it can enter the cache.
+  Honest scope: submission and retry are admin-only because the Process driver
+  runs a native command as the api-server's account — this is trusted-operator
+  execution, not a sandbox, and resumability is the workload's contract (the
+  platform guarantees the checkpoint path is unchanged, not what it contains).
+  Retry drives the driver directly: `VMManager.StartVM` short-circuits on its
+  frozen cached state, and `ProcessDriver.Start` now clears the previous run's
+  `exit.code` so a restarted unit cannot be judged by its last attempt.
 - **Cross-node migration fixes found by running it** — (a) the destination now
   matches the source's accel/CPU (launch hints in the migration request); without
   it a TCG `cortex-a72` source into a KVM `host` dest failed the CPU-state load
