@@ -329,9 +329,33 @@ func buildCanonicalServer(cfg *config.Config, db *sql.DB, authManager *auth.Simp
 
 const incomingMigrationMarker = ".novacron-incoming-migration"
 
-func prepareIncomingMigrationDir(destDir string) error {
+// prepareIncomingMigrationDir creates the destination directory for an
+// incoming migration and marks it in flight.
+//
+// The source node intentionally keeps <vmBase>/<id> after a successful
+// migration, so migrating a VM BACK to a node it previously left finds a stale
+// directory. That leftover is replaced — but only when nothing owns it: a
+// marker means a migration is already in flight, and vmPresent means the disk
+// belongs to a VM that still exists here, so both are conflicts rather than
+// something to delete.
+func prepareIncomingMigrationDir(destDir string, vmPresent bool) error {
 	if err := os.Mkdir(destDir, 0o700); err != nil {
-		return err
+		if !errors.Is(err, os.ErrExist) {
+			return err
+		}
+		if incomingMigrationMarkerExists(destDir) {
+			return fmt.Errorf("an incoming migration for this VM is already in progress")
+		}
+		if vmPresent {
+			return fmt.Errorf("a VM with this id already exists on this node")
+		}
+		// Stale leftover from a VM that has left this node: purge and recreate.
+		if err := os.RemoveAll(destDir); err != nil {
+			return fmt.Errorf("remove stale destination directory: %w", err)
+		}
+		if err := os.Mkdir(destDir, 0o700); err != nil {
+			return err
+		}
 	}
 	marker, err := os.OpenFile(filepath.Join(destDir, incomingMigrationMarker), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
@@ -344,6 +368,32 @@ func prepareIncomingMigrationDir(destDir string) error {
 		return err
 	}
 	return nil
+}
+
+// incomingVMIsLive reports whether a VM with this id is genuinely RUNNING on
+// this node, which is the only thing that makes its directory untouchable.
+//
+// A vms row is deliberately NOT used: after a successful migration the source's
+// manager forgets the VM but its row and disk stay behind, so row-existence
+// would make a bounce-back impossible. The driver is the authority — a stopped
+// or unknown VM has no process holding the disk.
+func incomingVMIsLive(vmManager *core_vm.VMManager, vmID string) bool {
+	if vmManager == nil {
+		return false
+	}
+	vm, err := vmManager.GetVM(vmID)
+	if err != nil {
+		return false
+	}
+	driver, err := vmManager.GetDriverForConfig(vm.Config())
+	if err != nil {
+		return false
+	}
+	status, err := driver.GetStatus(context.Background(), vmID)
+	if err != nil {
+		return false
+	}
+	return status == core_vm.StateRunning || status == core_vm.StateStarting
 }
 
 func incomingMigrationMarkerExists(destDir string) bool {
@@ -1715,7 +1765,7 @@ func registerInternalMigrationRoutes(router *mux.Router, db *sql.DB, vmManager *
 
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
-		if err := prepareIncomingMigrationDir(destDir); err != nil {
+		if err := prepareIncomingMigrationDir(destDir, incomingVMIsLive(vmManager, req.VMID)); err != nil {
 			writeJSONError(w, http.StatusConflict, fmt.Sprintf("incoming VM destination is not available: %v", err))
 			return
 		}
@@ -1811,7 +1861,6 @@ func registerInternalMigrationRoutes(router *mux.Router, db *sql.DB, vmManager *
 		writeJSON(w, http.StatusOK, map[string]interface{}{"aborted": true, "vm_id": req.VMID})
 	}).Methods(http.MethodPost)
 }
-
 
 // registerMigratedDest registers a VM that has just migrated ONTO this node into
 // the manager (so control ops route) and the DB (so /api/vms lists it), from the
