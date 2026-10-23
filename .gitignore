@@ -132,3 +132,6 @@ htmlcov/
 
 # Code-graph tool runtime state (memory.db, checkpoints, screenshots)
 .ccg
+
+# Build artifact: every build writes bin/novacron-api, a container path, or $BIN_DIR
+backend/api-server

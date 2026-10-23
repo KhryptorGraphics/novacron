@@ -608,6 +608,27 @@ below was run live on this arm64 host; numbers are observed, not projected.
   oldest artifacts that no work-unit row references and that are older than a
   10-minute grace window; an errored or truncated reference scan prunes nothing,
   because deleting a referenced input would break a later retry.
+  Isolation is a stated non-goal for now, not an oversight. Work units are
+  trusted-operator execution: an admin submits a command, the Process driver runs
+  it as the api-server's account, and the only boundaries are admission control
+  (admin JWT), reserved paths, and SHA-256 input verification.
+  It was investigated and NOT implemented, because it cannot be verified on the
+  hosts this repo is tested on: `unshare -Urn true` fails with
+  `write failed /proc/self/uid_map: Operation not permitted`, and
+  `bwrap ... --unshare-net` fails with
+  `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`. Unprivileged
+  user namespaces are denied, so a bubblewrap/nsjail wrapper would be unverified
+  security — worse than none, because it invites trust. Running bwrap under the
+  passwordless sudo this host does grant would execute customer workloads as
+  root, and is rejected.
+  Options once a host or CI can enforce namespaces: bubblewrap/nsjail per unit
+  (mount+pid+net+userns; needs `unprivileged_userns_clone=1`); a container per
+  unit on the existing `ContainerDriver` (runtime dependency, seconds of startup);
+  or keep admin-only native execution (current). Acceptance test to write before
+  either is enabled: a unit reads its own artifacts, cannot write outside its
+  work directory, cannot open a socket, and a sandbox that fails to set up FAILS
+  the submission instead of silently falling back to native execution.
+
 - **Cross-node migration fixes found by running it** — (a) the destination now
   matches the source's accel/CPU (launch hints in the migration request); without
   it a TCG `cortex-a72` source into a KVM `host` dest failed the CPU-state load
