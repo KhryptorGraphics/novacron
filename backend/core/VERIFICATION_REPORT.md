@@ -159,16 +159,17 @@ func (qm *QoSManager) applyQoSAction(policy *QoSPolicy, action QoSAction) error 
 }
 ```
 
-## Test Files Created
+## Test Coverage
 
-### Integration Tests
-Created comprehensive integration tests in `/home/kp/novacron/backend/core/integration_tests/`:
+The QoS, STUN and UDP hole-punching suites originally written under
+`integration_tests/` exercised unexported members and have been replaced by
+in-package tests (loopback UDP only, `tc` replaced by a recorder):
 
-1. **sliding_window_bandwidth_test.go** - Tests sliding window rate calculations and history pruning
-2. **stun_parsing_test.go** - Tests STUN address parsing for IPv4/IPv6 with various formats
-3. **udp_hole_punching_test.go** - Tests UDP receiver and bidirectional message handling
-4. **qos_enforcement_test.go** - Tests QoS policy enforcement and reconciliation
-5. **basic_validation_test.go** - Validation test documenting all implemented fixes
+1. **network/bandwidth_monitor_test.go** - Threshold matching, per-kind alert rate limiting, QoS hooks, sliding-window rates over loopback traffic
+2. **network/qos_manager_test.go** - tc programming, root rate, reconciliation, congestion throttling, classification
+3. **discovery/nat_traversal_test.go** - STUN encoding/parsing, loopback STUN servers, NAT type detection, hole-punch handshake, RTT, shutdown
+4. **integration_tests/sliding_window_bandwidth_test.go** - Sliding window rate calculations and history pruning
+5. **integration_tests/basic_validation_test.go** - Validation test documenting all implemented fixes
 
 ## Verification Results
 

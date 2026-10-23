@@ -1,3 +1,6 @@
 advisors:
   - name: Advisor 3
-    model: openrouter/z-ai/glm-5.3:max
+    model: nvidia/z-ai/glm-5.3:max
+  - name: Advisor 2
+    model: nvidia/moonshotai/kimi-k3:max
+  - name: Advisor 4

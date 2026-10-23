@@ -224,7 +224,7 @@ Docker:
   $ docker run -p 5002:5002 novacron/reliability-predictor:latest
 
 Kubernetes:
-  $ kubectl apply -f deployments/kubernetes/reliability-predictor.yaml
+  (no manifest exists in the repository; deployments/kubernetes/ was retired)
 
 Resources:
   Replicas: 3

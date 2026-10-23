@@ -159,9 +159,8 @@ docker run -p 5002:5002 novacron/reliability-predictor:latest
 ```
 
 ### Kubernetes
-```bash
-kubectl apply -f deployments/kubernetes/reliability-predictor.yaml
-```
+No manifest for this service exists in the repository (`deployments/kubernetes/` was
+retired); run it via the Docker image above or add a Deployment under `deployment/kubernetes/`.
 
 ---
 

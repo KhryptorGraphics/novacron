@@ -129,3 +129,6 @@ ruvector.db
 .coverage
 coverage.xml
 htmlcov/
+
+# Code-graph tool runtime state (memory.db, checkpoints, screenshots)
+.ccg
