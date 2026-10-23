@@ -79,9 +79,14 @@ check_iperf() {
     fi
     rm -f "$errfile"
     if (( mbit >= target )); then
-        emit PASS "iperf.overlay.$peer" "${mbit}Mbit" ">=${target}Mbit" "RTT=${rtt:-unknown}ms"
+        # Name BOTH ends: health runs on every node and the check id only
+        # carries the peer, so "throughput below target on node3" used to be
+        # ambiguous between node3->node1 and node1->node3.
+        local path="${P2P_NODE:-unknown}->${peer}"
+        emit PASS "iperf.overlay.$peer" "${mbit}Mbit" ">=${target}Mbit" "RTT=${rtt:-unknown}ms; path ${path}"
     else
-        emit FAIL "iperf.overlay.$peer" "${mbit}Mbit" ">=${target}Mbit" "RTT=${rtt:-unknown}ms; overlay throughput below the inventory-derived target"
+        local path="${P2P_NODE:-unknown}->${peer}"
+        emit FAIL "iperf.overlay.$peer" "${mbit}Mbit" ">=${target}Mbit" "RTT=${rtt:-unknown}ms; path ${path}; overlay throughput below the inventory-derived target"
     fi
 }
 
