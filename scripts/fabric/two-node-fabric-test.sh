@@ -13,6 +13,9 @@
 #   3. a second transfer to a busy link is QUEUED with an ETA, not started
 #   4. a VM migrated cross-node ends up owned by the target node
 #   5. billing usage reflects the measured migration egress
+#   5b. the work-unit API stages a >1 MiB artifact to the peer, runs a workload
+#      that verifies it, and completes a retry from the failed attempt's
+#      checkpoint (a >1 MiB body is what the old JSON cap truncated)
 #   6. the SAME VM migrates back B->A over A's stale dest state (bounce-back)
 #   7. killing node A mid-migration and restarting it reconciles honestly:
 #      the durable job row reads "interrupted" (never "running"), exactly one
@@ -534,6 +537,157 @@ if awk -v e="$BILL_EGRESS" 'BEGIN{exit !(e>0)}' 2>/dev/null; then
   fi
 else
   bad "usage metering recorded no egress for a session that moved a VM cross-node"
+fi
+
+# --- assertion 5b: work-unit API across the veth -----------------------------
+# The work-unit surface is the fabric's data plane for real inputs: the caller
+# uploads an artifact by content, the platform stages it to the node that will
+# run the work, that node verifies the bytes before executing, and a failed
+# attempt leaves a checkpoint the retry resumes from. Two things only a live
+# two-node run can prove: (a) a body larger than 1 MiB survives the request-body
+# middleware end to end -- the old 1 MiB JSON cap truncated it mid-upload, so
+# the server hashed a prefix and the digest came back different; (b) the input
+# genuinely crossed the veth, because the unit is pinned to fab-b and node B's
+# api-server runs inside the netns (it still shares this mount namespace, so
+# $WORK is visible to the workload).
+
+# wait_work_unit <id> <target-status> <seconds>: poll GET until the live status
+# equals <target-status> and print the last JSON read. Returns 0 on a match, 1 on
+# timeout (the printed JSON is then the diagnosis). Callers capture stdout into
+# a variable, so nothing else may print inside the loop.
+wait_work_unit() {
+  local id="$1" want="$2" deadline=$(( $(date +%s) + $3 ))
+  local body="" status=""
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    body="$(api a GET "/api/compute/work-units/$id")"
+    status="$(json_get 'd.get("status","")' "$body")"
+    [ "$status" = "$want" ] && break
+    sleep 2
+  done
+  printf '%s' "$body"
+  [ "$status" = "$want" ]
+}
+
+# wu_diag <json>: a work-unit response in a form that fits a FAIL line. The GET
+# payload carries up to 64 KiB of stdout/stderr per stream, so each log tail is
+# elided past 200 bytes; every other field is printed verbatim (a future failure
+# needs status/error/attempts/checkpoint/work_unit_id, not a wall of logs). A
+# non-JSON body -- an error the handler did not format as expected -- is passed
+# through truncated instead of vanishing.
+wu_diag() {
+  python3 -c 'import json,sys
+raw=sys.stdin.read()
+try:
+    d=json.loads(raw)
+except Exception:
+    print(raw[:400]); sys.exit(0)
+if isinstance(d,dict) and isinstance(d.get("logs"),dict):
+    for k,v in list(d["logs"].items()):
+        if isinstance(v,str) and len(v)>200:
+            d["logs"][k]=v[:200]+"...<%d bytes elided>"%(len(v)-200)
+print(json.dumps(d,sort_keys=True))
+' <<<"$1"
+}
+
+head2 "assertion 5b: work-unit API stages a >1 MiB input and resumes from its checkpoint"
+# The submit/artifact/retry routes are admin-only (workUnitAdmin ->
+# requireOrgScope, which reads the JWT "role" claim), while /api/auth/register
+# hard-codes role "user" -> viewer. Promote the harness's own operator row in
+# node A's throwaway database and mint a fresh token: the role is baked into the
+# JWT at login, and the users BEFORE UPDATE trigger bumps updated_at, which
+# revokes the pre-promotion token anyway.
+psql_q -d "$DB_A" -c "UPDATE users SET role = 'admin' WHERE email = '$ADMIN_EMAIL'" >/dev/null 2>&1
+login_resp="$(curl -sS --max-time 20 -X POST "http://$ADDR_A:$PORT_A/api/auth/login" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASS\"}")"
+tok="$(json_get 'd.get("token","")' "$login_resp")"
+[ -n "$tok" ] && echo "$tok" > "$WORK/token-a"
+
+WU_INPUT="$WORK/work-unit-input.bin"
+head -c 1572864 /dev/urandom > "$WU_INPUT"
+WU_SHA="$(sha256sum "$WU_INPUT" | cut -d' ' -f1)"
+WU_BYTES="$(wc -c < "$WU_INPUT" | tr -d ' ')"
+wu_upload="$(curl -sS --max-time 60 -X POST "http://$ADDR_A:$PORT_A/api/compute/work-units/artifacts" \
+  -H "Authorization: Bearer $(cat "$WORK/token-a" 2>/dev/null)" \
+  --data-binary "@$WU_INPUT")"
+WU_SHA_GOT="$(json_get 'd.get("sha256","")' "$wu_upload")"
+WU_BYTES_GOT="$(json_get 'd.get("size_bytes","")' "$wu_upload")"
+if [ "$WU_SHA_GOT" = "$WU_SHA" ] && [ "$WU_BYTES_GOT" = "$WU_BYTES" ]; then
+  ok "work-unit artifact: $WU_BYTES-byte body survived upload with sha256=$WU_SHA"
+else
+  # A 403 lands here too: the response body names the reason.
+  bad "work-unit artifact upload mismatched (local sha256=$WU_SHA size=$WU_BYTES): $wu_upload"
+  skip "work-unit checkpoint resume" "artifact upload failed (see above)"
+fi
+
+if [ "$WU_SHA_GOT" = "$WU_SHA" ] && [ "$WU_BYTES_GOT" = "$WU_BYTES" ]; then
+  # The workload itself: verify the staged artifact by digest, then fail attempt
+  # 1 with a checkpoint and complete attempt 2 from that checkpoint. The
+  # platform owns the five NOVACRON_* variables and rewrites the attempt file on
+  # every retry; resumability is otherwise the workload's own responsibility.
+  WU_SCRIPT="$WORK/work-unit-$RUN_ID.sh"
+  cat > "$WU_SCRIPT" <<'WU'
+#!/bin/sh
+set -u
+expected="$1"
+input="$NOVACRON_ARTIFACT_DIR/$NOVACRON_ARTIFACTS"
+actual="$(sha256sum "$input" | cut -d' ' -f1)"
+[ "$actual" = "$expected" ] || exit 9
+attempt="$(cat "$NOVACRON_ATTEMPT_FILE")"
+case "$attempt" in
+  1)
+    printf 'attempt-1 marker\n' > "$NOVACRON_CHECKPOINT_PATH" || exit 5
+    exit 3
+    ;;
+  2)
+    grep -q 'attempt-1 marker' "$NOVACRON_CHECKPOINT_PATH" || exit 4
+    printf 'resumed after checkpoint\n' > "$NOVACRON_CHECKPOINT_PATH.result" || exit 5
+    exit 0
+    ;;
+  *)
+    exit 6
+    ;;
+esac
+WU
+  chmod 0755 "$WU_SCRIPT"
+
+  # attempt_limit must be >= 2: submit defaults it to 1, and a retry would then
+  # be refused with 409 "attempt limit is exhausted".
+  wu_submit="$(api a POST /api/compute/work-units \
+    "{\"name\":\"fabric-work-unit-$RUN_ID\",\"command\":\"$WU_SCRIPT\",\"args\":[\"$WU_SHA\"],\"artifact_hashes\":[\"$WU_SHA\"],\"node_id\":\"fab-b\",\"attempt_limit\":2}")"
+  WU_ID="$(json_get 'd.get("work_unit_id","")' "$wu_submit")"
+  WU_NODE="$(json_get 'd.get("node_id","")' "$wu_submit")"
+  if [ -z "$WU_ID" ]; then
+    bad "work-unit submit pinned to fab-b failed: $wu_submit"
+    skip "work-unit checkpoint resume" "work unit was never submitted (see above)"
+  elif [ "$WU_NODE" != "fab-b" ]; then
+    bad "work unit pinned to fab-b was placed on '$WU_NODE': $wu_submit"
+    skip "work-unit checkpoint resume" "the unit did not land on node B (see above)"
+  else
+    wu_body="$(wait_work_unit "$WU_ID" failed 90)"; WU_RC=$?
+    WU_ATTEMPTS="$(json_get 'd.get("attempts",0)' "$wu_body")"
+    WU_CKPT="$(json_get 'd.get("checkpoint",{}).get("available",False)' "$wu_body")"
+    if [ "$WU_RC" = "0" ] && [ "$WU_ATTEMPTS" = "1" ] && [ "$WU_CKPT" = "True" ]; then
+      ok "work unit failed on attempt 1 and left its checkpoint available"
+      wu_retry="$(api a POST "/api/compute/work-units/$WU_ID/retry")"
+      wu_body="$(wait_work_unit "$WU_ID" completed 90)"; WU_RC=$?
+      WU_ATTEMPTS="$(json_get 'd.get("attempts",0)' "$wu_body")"
+      # The workload writes next to the checkpoint, inside node B's 0700 state
+      # dir (owned by the root api-server in the netns) -- hence sudo to read it.
+      # Work-unit state (artifacts, checkpoint, attempt) lives under the VM
+      # BASE path (STORAGE/vms/fabric/...), because the routes are wired with
+      # vmBasePath -- not at STORAGE/fabric/....
+      WU_RESULT_FILE="$WORK/storage-b/vms/fabric/work-units/$WU_ID/checkpoint.result"
+      WU_RESULT="$(sudo cat "$WU_RESULT_FILE" 2>/dev/null)"
+      if [ "$WU_RC" = "0" ] && [ "$WU_ATTEMPTS" = "2" ] && [ "$WU_RESULT" = "resumed after checkpoint" ]; then
+        ok "work unit resumed on attempt 2 and completed ($WU_RESULT)"
+      else
+        bad "work unit did not complete attempt 2 (retry=$wu_retry result='$WU_RESULT' file=$WU_RESULT_FILE): $(wu_diag "$wu_body")"
+      fi
+    else
+      bad "work unit did not reach failed with attempts=1 and checkpoint.available=true on node $WU_NODE: $(wu_diag "$wu_body")"
+      skip "work-unit checkpoint resume" "attempt 1 did not leave the expected failed+checkpoint state"
+    fi
+  fi
 fi
 
 # --- live-guest probes ------------------------------------------------------

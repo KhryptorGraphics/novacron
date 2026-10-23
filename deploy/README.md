@@ -173,7 +173,8 @@ attempt number (read it from `$NOVACRON_ATTEMPT_FILE`), so the workload resumes
 where it stopped.
 
 Each node keeps inputs in a content-addressed cache under
-`$STORAGE_PATH/fabric/artifacts`. It is bounded by
+`$STORAGE_PATH/vms/fabric/artifacts` (the routes are wired with the VM base
+path, `<STORAGE_PATH>/vms`). It is bounded by
 `NOVACRON_WORK_UNIT_CACHE_BYTES` (default 10 GiB): after an upload the oldest
 artifacts are evicted, but never one that a work-unit row still references, and
 never one younger than 10 minutes (it may be an upload whose submit is in
