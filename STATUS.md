@@ -20,7 +20,7 @@ which overstate completion and should not be trusted.
 - Research artifacts (profitability analysis, market research, etc.) live in
   `research/` — these are NOT part of the canonical build/test surface, but
   are primary sources for decisions made about business direction.
-## Production-readiness pass — 2026-10-29 (all 8 criteria met)
+## Production-readiness pass — 2026-10-29 (all 8 criteria met; see "Known open items" below)
 
 Commits: `4acbf8f2` (harness + tests), `0bedfdfc` (p2pnet T14), `cf9454d9` (a11y + CardTitle heading), `6b797335`/`7e5d13b6` (assertion 7 deterministic), `a474e6d5` (arm64 CI job), `5da1fdc7` (RDMA usable-device selection), `dc0ab95f` (harness transcript), `095ce03f`/`8a1ae14c`/`3bfa0599`/`4e9273ec` (STATUS records), `689ce3e8` (T14 evidence). **[read]** = verified by reading code/tests; **[ran]** = executed locally this session; **[open]** = not yet satisfied.
 
@@ -35,6 +35,46 @@ Evidence files live in `docs/evidence/`: `fabric-harness-2026-10-29.log` (criter
 - **Criterion 6: Open Beads** — [ran] All four beads were already CLOSED with regression-test citations before this session and the live harness run corroborates them: `novacron-sv9` (CLOSED, commit `8514e3c6`, `awaitProcessGone` fix; harness assertion 6 passes the round-trip B→A with `state=running node_id=fab-a qemu=running` and no "permission conflict" match), `novacron-h71` (CLOSED, 8 MiB raw-image drive-mirror does not reproduce, 5x non-flaky, `driver_kvm_block_migrate_smallimage_test.go`), `novacron-be2` (CLOSED, compressed cross-node block migration proven, 2.17x faster / 2.2x fewer bytes), `novacron-hgc` (CLOSED, every migration dest now launched `-incoming defer`, `driver_kvm_migrate_incoming_defer_test.go`). **`novacron-yxm`** (CLOSED): `sch_netem` is absent on this host (kernel 6.8.12-1021-tegra), so `tc` provides tbf rate shaping only — the 40 ms delay component of the WAN proof is not reproducible here and no latency-emulated result is claimed. The harness transcript records `shaping: tbf 50mbit (netem unavailable on this kernel)`.
 - **Criterion 7: Deploy Scaffold** — [ran] `systemd-analyze verify` passes for both units (`deploy/systemd/novacron-api-server.service`, `novacron-fabric-peer.service`), exit 0 (the verify output only carries warnings from unrelated host units). **Backup → wipe → restore → verify passed end to end** against a real migrated postgres database: `deploy/scripts/backup-db.sh` wrote a verified custom-format dump with its sha256; the public schema was dropped and recreated (0 tables); `deploy/scripts/restore-db.sh --force` restored it (28 public tables) and the seeded VM row came back identical (`restore-probe-vm` / `stopped`). **Soak canary passed**: `deploy/scripts/soak-test.sh --iterations 2 --consecutive 2 --min-pass 18 --clean` reports `SOAK: PASS — 2 consecutive clean run(s) (pass>=18, fail=0, skip=0)` — both iteration logs are committed under `docs/evidence/`. **Node-loss drill**: the drill documented in `deploy/README.md` §7 has no automated script — it is a manual procedure. Its substance was exercised live by the harness's assertion 7 (node A SIGKILLed mid-migration, restarted, and the durable job row read `interrupted` rather than `running`, with the VM's reported state matching its qemu and exactly one node owning the guest), which is the reconcile-on-restart half of the drill. The drill's remaining half — "the dead node's guests do not auto-restart on a peer" — was confirmed as a documented non-goal rather than a behaviour change.
 - **Criterion 8: Frontend Accessibility** — [ran] `Progress` sets `aria-valuenow`/`aria-valuetext` for determinate values and `aria-busy` for indeterminate (frontend/src/components/ui/progress.tsx). `jest-axe` assertions added to the `/fabric`, `/billing` and `/dashboard` page tests; the audit exposed a real heading-order defect — `CardTitle` rendered `<h3>` directly under the page `<h1>`, skipping a level — fixed by rendering `<h2>` (frontend/src/components/ui/card.tsx). `auth-accessibility.test.tsx` passes 12/12. The three page tests, `auth-accessibility.test.tsx`, `fabric-page.test.tsx` and `billing-page.test.tsx` were added to `ci.yml`'s canonical frontend list; that list now runs 17 suites / 58 tests, all green. `tsc --noEmit` exits 0; `npm run lint` reports warnings only, no errors. A pre-existing stale assertion in `fabric-page.test.tsx` (it pinned "Stale link profile" from before `b35a3520` renamed the copy) was corrected to the current UI text.
+## Known open items — 2026-10-29 (not covered by the 8 acceptance criteria)
+
+These are real and open. They are recorded here so that "all 8 criteria met" is not
+read as "the project has no remaining quality debt".
+
+- **SonarCloud quality gate is RED on `main`.** The `SonarCloud Code Analysis`
+  check fails at HEAD (`6b0777f0`, and also red on `eb2f520a` and `9c9acaa4`):
+  **408 security hotspots**, **Security Rating E on new code** (required ≥ A) and
+  **Reliability Rating E on new code** (required ≥ A); new-code duplication 9.5%.
+  The scanner is configured externally (SonarQube Cloud project
+  `KhryptorGraphics_novacron`) — there is no `sonar-project.properties` and no
+  scanner step in `.github/workflows/`, so the analysis is driven by the external
+  integration, not by this repo. This does not affect criterion 5, which is
+  scoped to `.github/workflows/ci.yml` (that workflow's six jobs are all green),
+  but it is a red check on the default branch and the hotspots have not been
+  triaged. Note also that `main` has **no branch protection**, so this failing
+  check is not currently blocking merges.
+- **Criterion 2 wording not fully implemented.** The criterion asks for the
+  admin-only submission to be enforced "with an explicit
+  `X-NovaCron-Trusted-Operator` header check, documented as a non-sandboxed
+  trust boundary". The admin-role gate is implemented and tested
+  (`workUnitAdmin` → 403 for viewer/user/anonymous; `TestFabricJobSubmissionRejectsNonAdmin`),
+  but **no trusted-operator header handling exists anywhere in the codebase** —
+  the "or sandbox" branch of the criterion was not taken either, so work units
+  remain trusted-operator native execution with no sandbox and no header.
+- **Criterion 5's arm64 job does not run the `-race` vm gate.** The criterion
+  lists `go test -short -race ./vm/` among the required commands. That gate runs
+  in the x86 `Canonical Backend` job only; the `arm64-build` job builds the
+  api-server, vets the root module, builds `backend/core`, and runs the
+  canonical root test set, but does not run `go test -short -race ./vm/` and
+  does not run `backend/core`'s suite at all.
+- **Criterion 7 has no committed drill report.** The backup → wipe → restore →
+  verify cycle is proven end to end, and the drill's substance is exercised by
+  the harness's assertion 7 (node A SIGKILLed mid-migration → the durable job
+  row reads `interrupted`, the VM's reported state matches its qemu, exactly one
+  node owns the guest), but `docs/evidence/` contains no drill artifact and
+  `deploy/README.md` §7 remains a manual procedure with no script behind it.
+- **`README.md` still carries the stale MLE-Star template body.** Flagged as
+  known-stale above; out of scope for this pass, still worth correcting.
+
 ## Fix pass — 2026-10-25 (arch gate, MADDPG repair, p2pnet lab defects)
 
 All changes below are UNCOMMITTED in the working tree when written. **[ran]** = run in this pass.
