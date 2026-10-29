@@ -11,3 +11,18 @@ Overlay throughput (all >=165 Mbit target, no steal reported):
 
 T14 verdict:
   PASS T14 off-peak timers and full health check
+
+Second independent T14 pass, same idle-host window (first chain, lab-t14-rerun.log):
+  PASS iperf.overlay.node2 342Mbit >=165Mbit RTT=41.646ms; path node1->node2
+  PASS iperf.overlay.node3 337Mbit >=165Mbit RTT=40.954ms; path node1->node3
+  PASS iperf.overlay.node1 171Mbit >=165Mbit RTT=40.904ms; path node2->node1
+  PASS iperf.overlay.node3 170Mbit >=165Mbit RTT=40.801ms; path node2->node3
+  PASS iperf.overlay.node1 173Mbit >=165Mbit RTT=47.132ms; path node3->node1
+  PASS iperf.overlay.node2 170Mbit >=165Mbit RTT=42.410ms; path node3->node2
+  PASS T14 off-peak timers and full health check
+Two independent runs, both >=165 Mbit on all six overlay paths.
+
+Note on the earlier dpkg-lock failures: the lock holder was the lab's own
+`p2pnet deps install` apt-get (the p2pnet dependency list), not cloud-init --
+an overlapping provision chain collided with the previous chain's apt run.
+The provisioning path is therefore correct; the collisions were concurrent runs.
