@@ -25,5 +25,19 @@
       "Bash(ps -eo pid,args)"
     ],
     "deny": []
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/kp/anaconda3/bin/headroom wrap selfheal --marker headroom-wrap-selfheal",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
   }
 }

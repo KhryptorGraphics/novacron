@@ -1,6 +1,9 @@
 advisors:
   - name: Advisor 3
-    model: nvidia/z-ai/glm-5.3:max
+    model: Ghost-cli/claude-fable-5.1:high
   - name: Advisor 2
-    model: nvidia/moonshotai/kimi-k3:max
+    model: Ghost-cli/gpt-6-astra:max
   - name: Advisor 4
+    model: ollama-cloud/minimax-m3.1-flash:high
+  - name: Advisor 4
+    model: ollama-cloud/deepseek-v4.1-flash:1017:max

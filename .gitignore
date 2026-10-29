@@ -135,3 +135,6 @@ htmlcov/
 
 # Build artifact: every build writes bin/novacron-api, a container path, or $BIN_DIR
 backend/api-server
+
+# Built api-server binary (docker/api-improved.Dockerfile builds its own in a builder stage)
+/backend/cmd/api-server/api-server
