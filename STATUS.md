@@ -20,9 +20,11 @@ which overstate completion and should not be trusted.
 - Research artifacts (profitability analysis, market research, etc.) live in
   `research/` — these are NOT part of the canonical build/test surface, but
   are primary sources for decisions made about business direction.
-## Production-readiness pass — 2026-10-29 (criteria 1–4 done; 5–8 partially open)
+## Production-readiness pass — 2026-10-29 (criteria 1, 2, 4–8 met; criterion 3 NOT met)
 
-Commits: `4acbf8f2` (harness + tests), `0bedfdfc` (p2pnet T14), `7c82fdb5` (harness transcript), `131a2c13` (Progress a11y + STATUS), `5365b3ca` (beads sync). **[read]** = verified by reading code/tests; **[ran]** = executed locally this session; **[open]** = not yet satisfied.
+Commits: `4acbf8f2` (harness + tests), `0bedfdfc` (p2pnet T14), `cf9454d9` (a11y + CardTitle heading), `6b797335`/`7e5d13b6` (assertion 7 deterministic), `a474e6d5` (arm64 CI job), `5da1fdc7` (RDMA usable-device selection), `dc0ab95f` (harness transcript), `095ce03f`/`8a1ae14c`/`3bfa0599`/`4e9273ec` (STATUS records), `689ce3e8` (T14 evidence). **[read]** = verified by reading code/tests; **[ran]** = executed locally this session; **[open]** = not yet satisfied.
+
+Evidence files live in `docs/evidence/`: `fabric-harness-2026-10-29.log` (criterion 4 billing), `fabric-harness-2026-10-29-require-all-pass.log` (criterion 5, `pass=18 fail=0 skip=0`), `soak-20261029T090638Z-1084393-iter{1,2}.log` (criterion 7 soak canary), `p2pnet-lab-T14-2026-10-29.txt` (criterion 3, NOT met).
 
 - **Criterion 1: Tenant Isolation (novacron-ok7)** — [ran] `TestOrgScopeTwoOrgCreateReadDeleteRoundTrip` added to `fabric_org_scope_test.go`: creates a VM as org A, reads it back with org A stamp, confirms org B gets 404 on read and delete, and deletes successfully as org A. `createVMLocal` stamps `organization_id` via scalar subquery against the local `organizations` table (cluster.go:381-384); `requireOrgScope` enforces 404-hides-existence on all VM routes. Real-postgres variant (`TestOrgStampRealPostgresTwoOrgRoundTrip`) added to `cluster_identity_test.go` but skips on hosts without reachable postgres.
 - **Criterion 2: Work Unit Executor Isolation** — [ran] Advisor 4 bypass closed: `POST /api/compute/jobs` now gated by `workUnitAdmin` (fabric_jobs.go:83-86), matching the existing gate on `/compute/work-units`. `TestFabricJobSubmissionRejectsNonAdmin` proves viewer/user/unauthenticated requests return 403. `TestWorkUnitArtifactUploadIsContentAddressedAndAdminOnly` already proved artifact upload rejection. CLI (`cli/pkg/service/fabric.go:40`), SDK (`sdk/typescript/src/fabric.ts:281`), and frontend (`frontend/src/lib/api/fabric.ts:165`) all call the same endpoint, so the gate applies uniformly.
