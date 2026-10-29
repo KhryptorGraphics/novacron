@@ -11,3 +11,11 @@ T14 lab run 2026-10-29 (arm64 host, /dev/kvm present, KVM accel=kvm):
 
 Host load average during the run: 167-225 on 14 CPUs (shared host, other workloads).
 All overlay components were installed (T1-T13 prerequisites PASS).
+
+Bounded host-load wait after the T14 run (6 samples, 60s apart):
+  225.45, 189.20, 163.43, 200.60, 192.40, 195.98  (loadavg 1-min, on 14 CPUs)
+The load never dropped toward the point where the <10% guest-steal precondition
+could hold, so T14 was not re-run: the lab was torn down (0 qemu processes,
+no fabtest netns, no veth, run dir removed) and the criterion's throughput
+target was NOT demonstrated on node1->node3. The remaining load belongs to
+other workloads on this shared host, not to the lab.
