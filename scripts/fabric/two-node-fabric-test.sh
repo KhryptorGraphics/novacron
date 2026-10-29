@@ -571,6 +571,14 @@ else
     # once raced that goroutine and produced a spurious 'vm not found'
     # (this assertion has flaked in CI before). Poll until the destination
     # publishes the row, bounded by the same style of deadline as above.
+    #
+    # The API row on the destination is the authority here, not a QMP probe:
+    # node B has no prior row for this VM (the guest started on node A), so
+    # the row cannot be stale, and node B's QMP socket is NOT reachable from
+    # the harness for a guest it received by migration (its runtime dir is
+    # written by the destination, and the socket is not at the path the probe
+    # looks for - the probe reads '<unprobeable>', which would make this
+    # assertion fail on a correct system).
     b_state=""; b_view=""
     deadline=$(( $(date +%s) + 180 ))
     while [ "$(date +%s)" -lt "$deadline" ]; do
@@ -785,7 +793,12 @@ fi
 # and reads as "unprobeable" (observed live: node A returned "running" while node
 # B returned "" for the very same probe).
 qmp_call() {
-  [ -S "$1" ] || { printf ''; return; }
+  # The socket test must run privileged: node B's api-server runs as root
+  # inside its netns, so its VM dirs are 0700 root:root and an unprivileged
+  # [ -S ] cannot even stat the socket - it read as "unprobeable" and made
+  # node B look like it had no guest. The connect itself already runs under
+  # sudo (Linux requires WRITE permission on the socket's inode).
+  sudo test -S "$1" || { printf ''; return; }
   sudo python3 - "$1" "$2" <<'PY'
 import json, socket, sys
 sock, cmd = sys.argv[1], json.loads(sys.argv[2])
@@ -927,21 +940,30 @@ else
     # Same as assertion 4: the destination publishes the migrated VM
     # asynchronously (WaitResumed -> registerMigratedDest), so 'completed' on
     # the source does not yet mean the row is visible on node A. Poll.
-    a_view=""; a_state=""; a_owner=""
+    #
+    # The BINDING condition is the live QMP query-status on node A's own qemu
+    # process, not the API row: node A keeps the row from the VM's FIRST
+    # residency (this assertion's own comment says so), and a transfer-initiated
+    # migration never deletes the source row, so the row can read
+    # state=running node_id=fab-a from before the guest ever left node A. That
+    # would satisfy an API-only poll on iteration 1 and assert nothing about
+    # the round trip (filed as novacron-bm0l). The qemu process on node A is
+    # the ground truth for "the guest is actually running there".
+    a_view=""; a_state=""; a_owner=""; qmp_a=""
     deadline=$(( $(date +%s) + 180 ))
     while [ "$(date +%s)" -lt "$deadline" ]; do
       a_view="$(api a GET "/api/vms/$VM_ID")"
       a_state="$(json_get 'd.get("state") or d.get("error") or ""' "$a_view")"
       a_owner="$(json_get 'd.get("node_id") or ""' "$a_view")"
-      if [ "$a_state" = "running" ] && [ "$a_owner" = "fab-a" ]; then break; fi
+      qmp_a="$(vm_qemu_status a "$VM_ID")"
+      if [ "$qmp_a" = "running" ]; then break; fi
       sleep 3
     done
-    qmp_a="$(vm_qemu_status a "$VM_ID")"
-    say "    node A after the round trip: state=${a_state:-?} node_id=${a_owner:-?} qemu=${qmp_a:-<unprobeable>}"
-    if [ "$a_state" = "running" ] && [ "$a_owner" = "fab-a" ]; then
+    say "    node A after the round trip: qemu=${qmp_a:-<unprobeable>} api_state=${a_state:-?} api_node_id=${a_owner:-?}"
+    if [ "$qmp_a" = "running" ]; then
       ROUNDTRIP_OK=1
     else
-      ROUNDTRIP_MSG="transfer completed but node A reports state='${a_state:-?}' node_id='${a_owner:-?}'"
+      ROUNDTRIP_MSG="transfer completed but node A's qemu reports '${qmp_a:-<unprobeable>}' (api state='${a_state:-?}' node_id='${a_owner:-?}')"
     fi
   fi
   if [ "$ROUNDTRIP_OK" = "1" ]; then
