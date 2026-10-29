@@ -1,0 +1,13 @@
+T14 lab run 2026-10-29 (arm64 host, /dev/kvm present, KVM accel=kvm):
+  PASS wg.handshake.node2 35s; PASS wg.plane2.handshake.node2 77s
+  PASS iperf.overlay.node2 197Mbit >=165Mbit (RTT=46.4ms, path node1->node2)
+  PASS mptcp.node2 subflows=1; PASS zrepl.labjob.node2 59s; PASS migrate.last 321ms
+  PASS wg.handshake.node3 40s; PASS wg.plane2.handshake.node3 23s
+  FAIL iperf.overlay.node3 94Mbit >=165Mbit (RTT=41.6ms, path node1->node3)
+       -> guest CPU steal 29.4% during the run
+  PASS mptcp.node3 subflows=1; PASS zrepl.labjob.node3 59s
+  PASS qos.wg0/qos.wg1 htb rates within 1%; PASS l2.fdb; PASS l2.mtu; PASS tune.cc bbr/fq
+  FAIL T14 (one overlay throughput path below target under host contention)
+
+Host load average during the run: 167-225 on 14 CPUs (shared host, other workloads).
+All overlay components were installed (T1-T13 prerequisites PASS).
