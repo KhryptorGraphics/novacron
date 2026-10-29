@@ -1,8 +1,4 @@
 advisors:
-  - name: Advisor 3
-    model: Ghost-cli/claude-fable-5.1:high
-  - name: Advisor 2
-    model: Ghost-cli/gpt-6-astra:max
   - name: Advisor 4
     model: ollama-cloud/minimax-m3.1-flash:high
   - name: Advisor 4
