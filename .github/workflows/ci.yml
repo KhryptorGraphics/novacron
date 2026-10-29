@@ -176,6 +176,10 @@ jobs:
         run: go build ./...
 
       - name: Run canonical backend tests (arm64)
+        # No postgres service on this leg, so the real-postgres tests (the
+        # reconcile-scoping regression and the org-stamp round trip) self-skip
+        # here; the x86 Canonical Backend leg provisions a postgres service and
+        # runs them for real. The sqlmock query-pin test does run on both legs.
         env:
           CGO_ENABLED: "1"
         run: >
