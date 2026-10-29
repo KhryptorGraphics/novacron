@@ -1,0 +1,98 @@
+
+=== prerequisites
+  toolchain, sudo, postgres: ok
+  qemu: ok (qemu-system-aarch64)
+  socat: ok
+
+=== build
+  built /tmp/fabric-test-1084408/api-server
+
+=== databases
+NOTICE:  database "novacron_fab_a_1084408" does not exist, skipping
+NOTICE:  database "novacron_fab_b_1084408" does not exist, skipping
+  novacron_fab_a_1084408 and novacron_fab_b_1084408 created and migrated
+
+=== network
+  veth-fh-1084408=10.96.0.1 <-> fabtest-b-1084408:veth-fn-1084408=10.96.0.2
+  PASS  inter-node path traverses the veth (ip route get 10.96.0.2 -> dev veth-fh-1084408)
+  shaping: tbf 50mbit (netem unavailable on this kernel)
+
+=== start nodes
+  PASS  node A healthy on 10.96.0.1:18200
+  PASS  node B healthy on 10.96.0.2:18201 (inside fabtest-b-1084408)
+  PASS  operator account usable on both nodes
+
+=== assertion 1: membership and link profile
+  PASS  node B joined and is reachable from A (GET /api/cluster/nodes)
+    measured outbound link: 38.4 Mbps local->fab-b, rtt 0.478 ms (shaping: tbf 50mbit (netem unavailable on this kernel))
+  PASS  link profile carries a fresh outbound throughput (38.4 Mbps)
+
+=== assertion 2: job dispatched to the peer
+  PASS  job 760e0494-9bbd-4ac2-a6e1-52cbb836d12f placed on the peer (node_id=fab-b)
+  PASS  job completed on the peer and its stdout was fetched back through node A
+
+=== assertion 3: second transfer to a busy link is queued with an ETA
+  PASS  transfer admission: T1 running, T2 queued with eta_seconds=13.989008767999998
+
+=== assertion 4: cross-node migration moves the VM to the target
+  PASS  VM 3a65eff6-b967-4a16-a3ed-84f552049206 is running on the target node (GET /api/vms/3a65eff6-b967-4a16-a3ed-84f552049206 on node B)
+
+=== assertion 5: billing usage reflects measured migration egress
+  PASS  usage metering recorded egress_bytes=256.0 MiB from real transfers
+  PASS  usage metering recorded 1 completed migration(s)
+  PASS  billing summary reports estimated_cost_usd=0.51 with rate usd_per_gb_egress=0.04
+
+=== assertion 5b: work-unit API stages a >1 MiB input and resumes from its checkpoint
+  PASS  work-unit artifact: 1572864-byte body survived upload with sha256=669ade45f7aac15fcdc93be01d300675caa1c01c7cf4baacf651b347e20996b2
+  PASS  work unit failed on attempt 1 and left its checkpoint available
+  PASS  work unit resumed on attempt 2 and completed (resumed after checkpoint)
+
+=== assertion 6: round-trip migration (B -> A) over node A's stale dest state
+    node A still holds /tmp/fabric-test-1084408/storage-a/vms/3a65eff6-b967-4a16-a3ed-84f552049206/disk.qcow2: yes
+    round-trip transfer ea9ed2b5-20ed-4b46-9933-a8544e765466 submitted on node B (status running)
+    node A after the round trip: state=running node_id=fab-a qemu=running
+  PASS  round-trip migration: VM 3a65eff6-b967-4a16-a3ed-84f552049206 runs on node A again (transfer ea9ed2b5-20ed-4b46-9933-a8544e765466, qemu running)
+
+=== assertion 7: node A killed mid-migration reconciles honestly on restart
+  reshaping link: tbf 2mbit (netem unavailable on this kernel)
+    migration job mig-7ffbde1adb8464b9d5d20587b6cd13e4 accepted; waiting until it is genuinely in flight
+    in flight (node B holds the incoming-migration marker for 3a65eff6-b967-4a16-a3ed-84f552049206); SIGKILLing node A's api-server (pid 1084827) -- its qemu keeps running, which is the point
+/home/kp/thordrive/novacron/scripts/fabric/two-node-fabric-test.sh: line 1109: 1084827 Killed                  env "${env_common[@]}" setsid nohup "$BIN" > "$WORK/node-a.log" 2>&1 < /dev/null
+    restarting node A with the same env/DB (log: /tmp/fabric-test-1084408/node-a.log)
+    job mig-7ffbde1adb8464b9d5d20587b6cd13e4 after restart: status=interrupted error=api-server restarted while this migration job was in flight; the QEMU migration may have completed — check which node actually runs the VM
+    node a transfers still running after the crash: 0
+    node b transfers still running after the crash: 0
+    GET /api/transfers/dec83ba1-09a6-4d27-b620-c7588d47dbae on restarted node A: HTTP 404 (completed before the crash; the store is in-memory, so it is gone rather than 'interrupted')
+    node A: qemu.pid alive=1, API state=running, reconcile expects=running
+    node a vms row: fab-a:running 
+    node b vms row: fab-b:running 
+    qemu query-status: node A=running node B=inmigrate
+    fabric view after restart: A sees fab-b reachable=True, B sees fab-a reachable=True
+  PASS  crash reconcile: job mig-7ffbde1adb8464b9d5d20587b6cd13e4 reads 'interrupted' (never running), no transfer survives as running, VM 3a65eff6-b967-4a16-a3ed-84f552049206 state=running matches its qemu (alive=1), live ownership: qemu running on fab-a, fabric view restored
+
+=== summary
+  PASS  inter-node path traverses the veth (ip route get 10.96.0.2 -> dev veth-fh-1084408)
+  PASS  node A healthy on 10.96.0.1:18200
+  PASS  node B healthy on 10.96.0.2:18201 (inside fabtest-b-1084408)
+  PASS  operator account usable on both nodes
+  PASS  node B joined and is reachable from A (GET /api/cluster/nodes)
+  PASS  link profile carries a fresh outbound throughput (38.4 Mbps)
+  PASS  job 760e0494-9bbd-4ac2-a6e1-52cbb836d12f placed on the peer (node_id=fab-b)
+  PASS  job completed on the peer and its stdout was fetched back through node A
+  PASS  transfer admission: T1 running, T2 queued with eta_seconds=13.989008767999998
+  PASS  VM 3a65eff6-b967-4a16-a3ed-84f552049206 is running on the target node (GET /api/vms/3a65eff6-b967-4a16-a3ed-84f552049206 on node B)
+  PASS  usage metering recorded egress_bytes=256.0 MiB from real transfers
+  PASS  usage metering recorded 1 completed migration(s)
+  PASS  billing summary reports estimated_cost_usd=0.51 with rate usd_per_gb_egress=0.04
+  PASS  work-unit artifact: 1572864-byte body survived upload with sha256=669ade45f7aac15fcdc93be01d300675caa1c01c7cf4baacf651b347e20996b2
+  PASS  work unit failed on attempt 1 and left its checkpoint available
+  PASS  work unit resumed on attempt 2 and completed (resumed after checkpoint)
+  PASS  round-trip migration: VM 3a65eff6-b967-4a16-a3ed-84f552049206 runs on node A again (transfer ea9ed2b5-20ed-4b46-9933-a8544e765466, qemu running)
+  PASS  crash reconcile: job mig-7ffbde1adb8464b9d5d20587b6cd13e4 reads 'interrupted' (never running), no transfer survives as running, VM 3a65eff6-b967-4a16-a3ed-84f552049206 state=running matches its qemu (alive=1), live ownership: qemu running on fab-a, fabric view restored
+
+  shaping used: tbf 2mbit (netem unavailable on this kernel)
+  pass=18 fail=0 skip=0
+RESULT: PASS (0 skipped)
+
+=== cleanup
+  nodes stopped, netns/veth removed, test databases dropped
