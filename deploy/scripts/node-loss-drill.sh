@@ -74,7 +74,20 @@ if [ -n "$REPORT" ]; then
   # temp path and the old report is preserved untouched.
   TMP_REPORT="$(mktemp "${TMPDIR:-/tmp}/node-loss-drill.XXXXXX.txt")"
   set +e
-  bash "$HARNESS" 2>&1 | tee "$TMP_REPORT"
+  {
+    # Provenance header: tie the transcript to the revision that produced it,
+    # so a reader never has to infer which binary ran.
+    printf '=== drill provenance\n'
+    printf '  revision: %s\n' "$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+    if [ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]; then
+      printf '  working tree: DIRTY\n'
+    else
+      printf '  working tree: clean\n'
+    fi
+    printf '  generated: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '=== end provenance\n'
+    bash "$HARNESS" 2>&1
+  } | tee "$TMP_REPORT"
   RC="${PIPESTATUS[0]}"
   set -e
   if [ "$RC" -eq 0 ]; then
