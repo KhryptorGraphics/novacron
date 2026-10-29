@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"runtime"
 	"sort"
 	"time"
 
@@ -167,6 +168,13 @@ func migrationCandidatesFunc(vmManager *core_vm.VMManager, storagePath string, d
 			if !n.Reachable || n.NodeID == excludeNode {
 				continue
 			}
+			// Live migration is same-architecture only: a KNOWN mismatch is
+			// skipped (unknown arch stays a candidate; see migration_arch_gate.go).
+			if archsIncompatible(runtime.GOARCH, n.Arch) {
+				log.Printf("migration candidates: skipping %s (arch %s; this node is %s)",
+					n.NodeID, normalizeArch(n.Arch), normalizeArch(runtime.GOARCH))
+				continue
+			}
 			bps := 0.0
 			if n.Link != nil && n.Link.Outbound != nil &&
 				!n.Link.Outbound.Stale && n.Link.Outbound.ThroughputBps > 0 {
@@ -283,8 +291,14 @@ func queueMigrationTransfer(store *transferStore, vmManager *core_vm.VMManager, 
 	if _, err := vmManager.GetVM(vmID); err != nil {
 		return "", fmt.Errorf("vm %s not managed by this node: %w", vmID, err)
 	}
-	if vmManager.MigrationPeers()[targetNode] == "" {
+	targetAddr := vmManager.MigrationPeers()[targetNode]
+	if targetAddr == "" {
 		return "", fmt.Errorf("target node %q is not a registered peer", targetNode)
+	}
+	// Same-architecture gate: drain/healing candidate selection already skips
+	// incompatible peers; this refuses a direct caller that names one.
+	if _, mismatch := checkMigrationArch(vmManager, targetNode, targetAddr); mismatch != nil {
+		return "", mismatch
 	}
 	bytesEst := memoryMB << 20
 	if bytesEst <= 0 {
@@ -457,7 +471,7 @@ func registerNodeAdminRoutesWithCoordinator(apiRouter *mux.Router, coord *drainC
 			// so the node is not stuck 'draining' forever and a retry is legal.
 			_ = setNodeDrainState(db, nodeID, nodeDrainActive)
 			writeJSONError(w, http.StatusServiceUnavailable,
-				fmt.Sprintf("drain failed: no peer had capacity for any of the %d VMs on this node", len(vms)))
+				fmt.Sprintf("drain failed: no peer had capacity for any of the %d VMs on this node (peers of a different CPU architecture are excluded: live migration is same-architecture only)", len(vms)))
 			return
 		}
 

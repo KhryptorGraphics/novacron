@@ -1,5 +1,12 @@
 # MADDPG Performance Report
 
+> **UNVERIFIED — do not cite these numbers.** This report (added 2025-11-15) names no command, seed, or
+> artifact that reproduces it. From commit `7cc31a73` (2026-07-08) until the fixes dated 2026-10-25,
+> `train.py` was a stub that could not be imported, so no training in this tree could have run, and
+> `environment.py` had two dynamics bugs that distort any reward figure: `reset()` doubled the node count,
+> and processed workloads stayed in the queue and were re-allocated and re-rewarded every step.
+> Re-derive any claim below with `benchmark.py` against a freshly trained model before relying on it.
+
 ## Summary
 
 Multi-Agent Deep Deterministic Policy Gradient (MADDPG) implementation for distributed resource allocation in Novacron, achieving **28.4% performance improvement** over greedy baseline with **96.8% workload completion rate**.

@@ -437,19 +437,29 @@ func registerFabricTransferRoutes(apiRouter *mux.Router, db *sql.DB, vmManager *
 			return
 		}
 
-		// The measured direction used here is local -> target.
+		// The measured direction used here is local -> target. The same live
+		// profile carries the target's reported arch for the gate below.
 		var linkBps float64
 		linkMeasured := false
+		var targetArch string
 		for _, n := range nodeProfiles(vmManager, storagePath, db) {
 			if n.NodeID != req.TargetNode {
 				continue
 			}
+			targetArch = n.Arch
 			if n.Link != nil && n.Link.Outbound != nil &&
 				!n.Link.Outbound.Stale && n.Link.Outbound.ThroughputBps > 0 {
 				linkBps = n.Link.Outbound.ThroughputBps
 				linkMeasured = true
 			}
 			break
+		}
+
+		// Refuse a cross-architecture migration before it is queued.
+		archWarning, mismatch := decideMigrationArch(req.TargetNode, targetArch)
+		if mismatch != nil {
+			mismatch.write(w)
+			return
 		}
 
 		// Compressibility sample from the VM's disk image (real bytes; the only
@@ -500,14 +510,14 @@ func registerFabricTransferRoutes(apiRouter *mux.Router, db *sql.DB, vmManager *
 		}
 		transfers.admit(t)
 		snapshot, _ := transfers.get(t.ID)
-		writeJSON(w, http.StatusAccepted, map[string]interface{}{
+		writeJSON(w, http.StatusAccepted, withMigrationWarning(map[string]interface{}{
 			"transfer_id":     snapshot.ID,
 			"status":          snapshot.Status,
 			"eta_seconds":     snapshot.EtaSeconds,
 			"queue_position":  snapshot.QueuePosition,
 			"compression":     snapshot.Compression,
 			"decision_inputs": snapshot.Decision,
-		})
+		}, archWarning))
 	}).Methods(http.MethodPost)
 
 	apiRouter.HandleFunc("/transfers", func(w http.ResponseWriter, r *http.Request) {

@@ -1,11 +1,11 @@
 [Unit]
 Description=p2pnet overlay iperf3 server
-After=wg-quick@wg0.service
+After=wg-quick@wg0.service wg-quick@wg1.service
 BindsTo=wg-quick@wg0.service
 
 [Service]
 EnvironmentFile=/etc/p2pnet/generated/node.env
-ExecStart=/opt/p2pnet/libexec/mptcp-exec /usr/bin/iperf3 -s -B ${P2P_OVL4} -p 5201
+ExecStart=/opt/p2pnet/libexec/iperf3-serve.sh
 Restart=always
 
 [Install]

@@ -140,6 +140,8 @@ class DistributedResourceEnv(gym.Env):
 
     def _initialize_nodes(self):
         """Initialize compute nodes with heterogeneous capacities"""
+        # reset() calls this again; without clearing, nodes accumulate (2x agents after the first reset).
+        self.nodes = []
         for i in range(self.num_agents):
             # Heterogeneous node capacities (some nodes more powerful than others)
             capacity_multiplier = np.random.uniform(0.5, 1.5)
@@ -167,6 +169,9 @@ class DistributedResourceEnv(gym.Env):
     def reset(self, seed=None, options=None) -> Tuple[List[np.ndarray], Dict]:
         """Reset the environment"""
         super().reset(seed=seed)
+        if seed is not None:
+            # The env samples from the global np.random; gym's reset(seed=) only seeds self.np_random.
+            np.random.seed(seed)
 
         # Reset nodes
         self._initialize_nodes()
@@ -318,6 +323,10 @@ class DistributedResourceEnv(gym.Env):
             for i in range(self.num_agents):
                 rewards[i] += balance_reward
 
+        # Every queued workload was either allocated or failed above; drop them so the next step
+        # does not re-allocate, re-reward and re-count the same workloads.
+        self.workload_queue = remaining_workloads
+
         self.total_reward += sum(rewards)
 
         return rewards, allocations
@@ -351,6 +360,7 @@ class DistributedResourceEnv(gym.Env):
             'completed_workloads': len(self.completed_workloads),
             'failed_workloads': len(self.failed_workloads),
             'completion_rate': completion_rate,
+            'sla_violations': self.sla_violations,
             'sla_violation_rate': sla_violation_rate,
             'avg_utilization': avg_utilization,
             'total_reward': self.total_reward,

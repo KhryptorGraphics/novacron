@@ -1999,10 +1999,16 @@ func registerVMMigrateRoute(router *mux.Router, db *sql.DB, vmManager *core_vm.V
 	if vmManager != nil {
 		migrateVM = vmManager.MigrateVM
 	}
-	registerVMMigrateRouteWithExecutor(router, db, migrateVM)
+	registerVMMigrateRouteWithPreflight(router, db, migrateVM, newMigrationPreflight(vmManager))
 }
 
 func registerVMMigrateRouteWithExecutor(router *mux.Router, db *sql.DB, migrateVM func(context.Context, string, string, map[string]string) error) {
+	registerVMMigrateRouteWithPreflight(router, db, migrateVM, nil)
+}
+
+// registerVMMigrateRouteWithPreflight is the route body; preflight is the
+// same-architecture admission gate (migration_arch_gate.go), nil only in tests.
+func registerVMMigrateRouteWithPreflight(router *mux.Router, db *sql.DB, migrateVM func(context.Context, string, string, map[string]string) error, preflight migrationPreflight) {
 	router.HandleFunc("/vms/{id}/migrate", func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["id"]
 		scopeOrg, isAdmin, visible := requireOrgScope(r.Context(), db, vmID)
@@ -2041,6 +2047,13 @@ func registerVMMigrateRouteWithExecutor(router *mux.Router, db *sql.DB, migrateV
 			options["target_addr"] = req.TargetAddr // dest api addr for block migration
 		}
 
+		// Refuse a cross-architecture migration before anything starts.
+		archWarning, mismatch := preflight.check(req.TargetNode, req.TargetAddr)
+		if mismatch != nil {
+			mismatch.write(w)
+			return
+		}
+
 		// Live migration can take well over 30s; give it a generous ceiling.
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 		defer cancel()
@@ -2077,12 +2090,12 @@ func registerVMMigrateRouteWithExecutor(router *mux.Router, db *sql.DB, migrateV
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, withMigrationWarning(map[string]interface{}{
 			"id":      vmID,
 			"state":   "migrated",
 			"status":  "migrated",
 			"node_id": req.TargetNode,
-		})
+		}, archWarning))
 	}).Methods(http.MethodPost)
 }
 

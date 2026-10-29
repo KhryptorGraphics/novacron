@@ -537,6 +537,8 @@ summary_json="$(api a GET /api/billing/usage/summary)"
 if [ -n "$summary_json" ] && [ "$summary_json" != "null" ]; then
   BILL_EGRESS="$(json_get 'd.get("totals",{}).get("egress_bytes",0)' "$summary_json")"
   BILL_MIGRATIONS="$(json_get 'd.get("totals",{}).get("migrations",0)' "$summary_json")"
+  BILL_RATE="$(json_get 'd.get("rate_card",{}).get("usd_per_gb_egress",0)' "$summary_json")"
+  BILL_COST="$(json_get 'd.get("totals",{}).get("estimated_cost_usd",0)' "$summary_json")"
 fi
 # float-aware comparison: any positive measured egress proves the metering
 # chain (transfer completion -> usage_events row -> summary aggregation).
@@ -549,6 +551,17 @@ if awk -v e="$BILL_EGRESS" 'BEGIN{exit !(e>0)}' 2>/dev/null; then
   fi
 else
   bad "usage metering recorded no egress for a session that moved a VM cross-node"
+fi
+# Criterion 4: non-zero rate card produces non-zero estimated cost. This runs
+# BEFORE admin promotion so the token is still viewer-scoped (caller-org path).
+if awk -v r="$BILL_RATE" 'BEGIN{exit !(r>0)}' 2>/dev/null; then
+  if awk -v c="$BILL_COST" 'BEGIN{exit !(c>0)}' 2>/dev/null; then
+    ok "billing summary reports estimated_cost_usd=$BILL_COST with rate usd_per_gb_egress=$BILL_RATE"
+  else
+    bad "billing summary estimated_cost_usd=${BILL_COST:-0} — expected >0 with rate=$BILL_RATE and real transfers"
+  fi
+else
+  bad "billing summary rate_card.usd_per_gb_egress=${BILL_RATE:-0} — expected >0 with NOVACRON_RATE_PER_GB_EGRESS set"
 fi
 
 # --- assertion 5b: work-unit API across the veth -----------------------------
@@ -691,25 +704,6 @@ WU
       skip "work-unit checkpoint resume" "attempt 1 did not leave the expected failed+checkpoint state"
     fi
   fi
-fi
-
-# --- billing usage summary with non-zero rates --------------------------------
-# Rate card env vars are injected into start_node (NOVACRON_RATE_PER_*). The
-# metering plane records egress_bytes and migration events from real transfers;
-# this assertion proves the summary endpoint returns a non-zero estimated_cost_usd
-# when rates are configured, closing criterion 4 at the harness level.
-head2 "billing: usage summary reflects non-zero rate card"
-usage_summary="$(api a GET /api/billing/usage/summary)"
-rate_egress="$(json_get 'd.get("rate_card",{}).get("usd_per_gb_egress",0)' "$usage_summary")"
-total_usd="$(json_get 'd.get("totals",{}).get("estimated_cost_usd",0)' "$usage_summary")"
-if python3 -c "import sys; sys.exit(0 if float('${rate_egress:-0}') > 0 else 1)" 2>/dev/null; then
-  if python3 -c "import sys; sys.exit(0 if float('${total_usd:-0}') > 0 else 1)" 2>/dev/null; then
-    ok "billing usage summary reports estimated_cost_usd=$total_usd with rate usd_per_gb_egress=$rate_egress"
-  else
-    bad "billing usage summary estimated_cost_usd=${total_usd:-0} — expected >0 with rate_card.usd_per_gb_egress=$rate_egress and real transfers"
-  fi
-else
-  bad "billing usage summary rate_card.usd_per_gb_egress=${rate_egress:-0} — expected >0 with NOVACRON_RATE_PER_GB_EGRESS set"
 fi
 # --- live-guest probes ------------------------------------------------------
 # Assertions 6-7 need ground truth about which node actually RUNS the guest.

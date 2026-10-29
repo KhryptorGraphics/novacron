@@ -258,6 +258,13 @@ type migrateRunner func(ctx context.Context, vmID, targetNode string, options ma
 // migration off on a background goroutine, and returns 202 immediately.
 // Out-of-scope VMs return 404 (hidden existence) and the runner is never invoked.
 func newMigrateAsyncHandler(jobs *migrateJobStore, db *sql.DB, run migrateRunner) http.HandlerFunc {
+	return newMigrateAsyncHandlerWithPreflight(jobs, db, run, nil)
+}
+
+// newMigrateAsyncHandlerWithPreflight is the handler body; preflight is the
+// same-architecture admission gate (migration_arch_gate.go), nil only in tests.
+// It runs BEFORE the job is created so a refused migration leaves no job behind.
+func newMigrateAsyncHandlerWithPreflight(jobs *migrateJobStore, db *sql.DB, run migrateRunner, preflight migrationPreflight) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vmID := mux.Vars(r)["id"]
 
@@ -313,6 +320,12 @@ func newMigrateAsyncHandler(jobs *migrateJobStore, db *sql.DB, run migrateRunner
 			}
 		}
 
+		archWarning, mismatch := preflight.check(req.TargetNode, req.TargetAddr)
+		if mismatch != nil {
+			mismatch.write(w)
+			return
+		}
+
 		jobID := jobs.create(vmID, orgID)
 
 		go func() {
@@ -331,11 +344,11 @@ func newMigrateAsyncHandler(jobs *migrateJobStore, db *sql.DB, run migrateRunner
 			logger.Info("async migration completed", "job", jobID, "vm", vmID, "target", req.TargetNode)
 		}()
 
-		writeJSON(w, http.StatusAccepted, map[string]interface{}{
+		writeJSON(w, http.StatusAccepted, withMigrationWarning(map[string]interface{}{
 			"job_id": jobID,
 			"vm_id":  vmID,
 			"status": migrateStatusRunning,
-		})
+		}, archWarning))
 	}
 }
 
@@ -406,6 +419,6 @@ func registerVMMigrateAsyncRoutes(router *mux.Router, db *sql.DB, vmManager *cor
 		return nil
 	}
 
-	router.HandleFunc("/vms/{id}/migrate/async", newMigrateAsyncHandler(migrateJobs, db, run)).Methods(http.MethodPost)
+	router.HandleFunc("/vms/{id}/migrate/async", newMigrateAsyncHandlerWithPreflight(migrateJobs, db, run, newMigrationPreflight(vmManager))).Methods(http.MethodPost)
 	router.HandleFunc("/migrate/jobs/{job_id}", newMigrateJobStatusHandler(migrateJobs)).Methods(http.MethodGet)
 }

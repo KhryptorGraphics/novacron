@@ -19,13 +19,14 @@ require_host() {
     [[ -r /dev/kvm && -w /dev/kvm ]] || { echo 'lab: /dev/kvm is unavailable to this user' >&2; exit 1; }
 }
 node_port() { echo $((2230 + ${1#node})); }
-ssh_node() { local n=$1; shift; ssh "${SSH_OPTS[@]}" -p "$(node_port "$n")" "ubuntu@127.0.0.1" "$@"; }
+# -n: a caller's loop must keep its stdin (ssh otherwise drains it, which once left T14 checking node1 only).
+ssh_node() { local n=$1; shift; ssh -n "${SSH_OPTS[@]}" -p "$(node_port "$n")" "ubuntu@127.0.0.1" "$@"; }
 scp_node() { local n=$1 source=$2 destination=$3; scp "${SSH_OPTS[@]}" -P "$(node_port "$n")" "$source" "ubuntu@127.0.0.1:$destination"; }
 remote() { local n=$1 cmd=$2; ssh_node "$n" "sudo bash -lc $(printf '%q' "$cmd")"; }
 pass() { printf 'PASS %s %s\n' "$1" "$2" | tee -a "$LOG"; }
 fail() { printf 'FAIL %s %s\n' "$1" "$2" | tee -a "$LOG" >&2; exit 1; }
 all_nodes() { printf '%s\n' node1 node2 node3; }
-for_nodes() { local n; while IFS= read -r n; do "$1" "$n"; done < <(all_nodes); }
+for_nodes() { local n; for n in $(all_nodes); do "$1" "$n"; done; }
 wait_ssh() {
     local n=$1 deadline=$((SECONDS + 900))
     until ssh_node "$n" 'cloud-init status --wait >/dev/null 2>&1 && true'; do
@@ -249,8 +250,23 @@ T9() {
     (( after - before >= 1048576 ))
     remote node2 'virsh destroy cirros >/dev/null && qemu-io -r -f qcow2 -c "read -P 0x5a 0 4096" /var/lib/libvirt/images/cirros-data.qcow2'
 }
+# The 5-minute labjob timer runs the same job, and `zrepl run` returns 0 without doing anything when the job lock is
+# held, so a timer run overlapping a manual one silently skipped T10's interrupted-send/resume steps. Stop the timer
+# and wait for the lock itself (a oneshot unit is "activating", not "active", while it runs).
+zrepl_timers() {
+    local n
+    for n in node1 node2 node3; do
+        if [[ $1 == stop ]]; then
+            remote "$n" 'systemctl stop p2pnet-zrepl@labjob.timer || true; mkdir -p /run/p2pnet; flock -w 300 /run/p2pnet/zrepl-labjob.lock true'
+        else
+            remote "$n" 'systemctl start p2pnet-zrepl@labjob.timer || true'
+        fi
+    done
+}
 T10() {
     install_all zrepl
+    zrepl_timers stop
+    trap 'zrepl_timers start' EXIT
     remote node1 'p2pnet zrepl run labjob && p2pnet zrepl run labjob'
     remote node1 'dd if=/dev/urandom of=/dev/zvol/tank/vms/vm1 bs=1M count=200 conv=notrunc status=none'
     local log_offset target
@@ -258,7 +274,10 @@ T10() {
     remote node1 'p2pnet zrepl run labjob' >"$RUN_DIR/zrepl-interrupt.log" 2>&1 & local sender=$!
     # zfs send drains fast into the 1 GiB mbuffer; interrupt the WAN leg instead.
     # shellcheck disable=SC2016
-    ssh_node node1 'for i in $(seq 240); do pgrep -x mbuffer >/dev/null && break; sleep 0.25; done; sleep 2'
+    # Interrupt only once the big zvol receive has really started: the first mbuffers belong to the tiny
+    # tank/vms and files streams, and a kill in the first second of the zvol stream leaves no resume token.
+    # shellcheck disable=SC2016
+    ssh_node node2 'for i in $(seq 480); do [ "$(sudo zfs get -Hp -o value referenced tank/p2p-replicas/node1/vms/vm1/%recv 2>/dev/null || echo 0)" -ge 8388608 ] && break; sleep 0.25; done'
     ssh_node node1 'sudo pkill -x mbuffer || true'
     ssh_node node2 'sudo pkill -x mbuffer || true'
     wait "$sender" || true
