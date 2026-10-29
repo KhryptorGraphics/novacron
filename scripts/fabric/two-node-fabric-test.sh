@@ -101,8 +101,8 @@ print("" if v is None else v)' "$1" <<<"$2"
 psql_do() { PGPASSWORD="$PGPASS" psql -h "$PGHOST_ADDR" -p "$PGPORT" -U "$PGUSER" -v ON_ERROR_STOP=1 "$@"; }
 psql_q()  { PGPASSWORD="$PGPASS" psql -h "$PGHOST_ADDR" -p "$PGPORT" -U "$PGUSER" -tAq "$@"; }
 
-api() { # api <node: a|b> <method> <path> [json-body]
-  local node="$1" method="$2" path="$3" body="${4:-}" port addr token trusted=()
+api() { # api <node: a|b> <method> <path> [json-body] [timeout-seconds]
+  local node="$1" method="$2" path="$3" body="${4:-}" timeout="${5:-30}" port addr token trusted=()
   case "$node" in a) port="$PORT_A"; addr="$ADDR_A";; b) port="$PORT_B"; addr="$ADDR_B";; *) return 2;; esac
   token="$(cat "$WORK/token-$node" 2>/dev/null)"
   # The fabric job / work-unit submit routes run the workload as a native
@@ -113,10 +113,10 @@ api() { # api <node: a|b> <method> <path> [json-body]
       trusted=(-H "X-NovaCron-Trusted-Operator: 1") ;;
   esac
   if [ -n "$body" ]; then
-    curl -sS --max-time 30 -X "$method" "http://$addr:$port$path" \
+    curl -sS --max-time "$timeout" -X "$method" "http://$addr:$port$path" \
       -H "Authorization: Bearer $token" -H 'Content-Type: application/json' "${trusted[@]}" -d "$body"
   else
-    curl -sS --max-time 30 -X "$method" "http://$addr:$port$path" \
+    curl -sS --max-time "$timeout" -X "$method" "http://$addr:$port$path" \
       -H "Authorization: Bearer $token" "${trusted[@]}"
   fi
 }
@@ -1196,10 +1196,33 @@ if [ "${FABRIC_DRILL:-0}" = "1" ]; then
 import json,sys
 print(json.dumps({"name":"drill-vm","image":sys.argv[1],"memory_mb":256,"vcpus":1,"disk_size_gb":1,"node_id":"fab-b"}))
 ' "$drill_img")"
-    drill_vm="$(api b POST /api/vms "$drill_body")"
-    DRILL_VM="$(json_get 'd.get("id","")' "$drill_vm")"
+    # Create the guest on node B, retrying a transient failure. The drill runs
+    # immediately after the crash-reconcile assertion, which SIGKILLs and
+    # restarts node A's api-server; node B can be briefly unresponsive while
+    # it re-establishes the peer view, and a single failed POST would then
+    # abort the whole drill for a reason unrelated to what the drill proves.
+    # The retry is bounded and every attempt is reported, so a genuine fault
+    # still fails the drill - and now with node B's log tail attached.
+    drill_vm=""; DRILL_VM=""
+    drill_attempt=0
+    while [ "$drill_attempt" -lt 3 ]; do
+      drill_attempt=$((drill_attempt + 1))
+      drill_vm="$(api b POST /api/vms "$drill_body" 120 2>&1)" || true
+      DRILL_VM="$(json_get 'd.get("id","")' "$drill_vm")"
+      if [ -n "$DRILL_VM" ]; then
+        say "    drill guest created on node B (attempt $drill_attempt)"
+        break
+      fi
+      say "    drill guest create attempt $drill_attempt did not return an id: ${drill_vm:0:200}"
+      # Is node B even answering? A dead/unhealthy server must not be retried
+      # silently - report it and let the drill fail with that evidence.
+      drill_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$ADDR_B:$PORT_B/health" 2>/dev/null)"
+      say "    node B health after the failed create: http ${drill_code:-none}"
+      sleep 5
+    done
     if [ -z "$DRILL_VM" ]; then
-      bad "node-loss drill: could not create the drill's guest on node B: $drill_vm (the drill did not run)"
+      say "    node B log tail:"; tail -12 "$WORK/node-b.log" 2>/dev/null | cut -c1-200
+      bad "node-loss drill: could not create the drill's guest on node B after $drill_attempt attempt(s): ${drill_vm:0:200} (the drill did not run)"
     else
       # Create and start on the OWNING node: a create pinned to fab-b is
       # dispatched to node B, so its row lands in DB_B and node A has no row
@@ -1207,7 +1230,11 @@ print(json.dumps({"name":"drill-vm","image":sys.argv[1],"memory_mb":256,"vcpus":
       api b POST "/api/vms/$DRILL_VM/start" >/dev/null 2>&1 || true
       sleep 6
       # Confirm node B really runs it (the pidfile is the authority).
-      deadline=$(( $(date +%s) + 60 )); drill_owned=""
+      # 180s, not 60s: CI runners have no /dev/kvm, so the guest boots under
+      # TCG software emulation, which is far slower than the KVM path this
+      # host uses. A 60s budget was marginal there and failed the drill on a
+      # healthy system.
+      deadline=$(( $(date +%s) + 180 )); drill_owned=""
       while [ "$(date +%s)" -lt "$deadline" ]; do
         if pidfile_alive_root "$WORK/storage-b/vms/$DRILL_VM/qemu.pid" "$DRILL_VM"; then drill_owned=1; break; fi
         sleep 2
