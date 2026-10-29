@@ -80,6 +80,10 @@ type placementDecision struct {
 // registerFabricJobRoutes wires the fabric job API on the authed /api router.
 func registerFabricJobRoutes(apiRouter *mux.Router, db *sql.DB, vmManager *core_vm.VMManager, storagePath string) {
 	apiRouter.HandleFunc("/compute/jobs", func(w http.ResponseWriter, r *http.Request) {
+		if !workUnitAdmin(r.Context()) {
+			writeJSONError(w, http.StatusForbidden, "job submission is restricted to admins")
+			return
+		}
 		var spec fabricJobSpec
 		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&spec); err != nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid request body")

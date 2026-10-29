@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -270,7 +271,7 @@ func TestFabricJobSubmissionUsesFreshOutboundMeasurement(t *testing.T) {
 		t.Fatalf("marshal job request: %v", err)
 	}
 	response := httptest.NewRecorder()
-	apiRouter.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/compute/jobs", bytes.NewReader(requestBody)))
+	apiRouter.ServeHTTP(response, workUnitAdminRequest(httptest.NewRequest(http.MethodPost, "/compute/jobs", bytes.NewReader(requestBody))))
 	if response.Code != http.StatusCreated {
 		t.Fatalf("POST /compute/jobs status = %d, body %s", response.Code, response.Body)
 	}
@@ -288,5 +289,33 @@ func TestFabricJobSubmissionUsesFreshOutboundMeasurement(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet SQL expectations: %v", err)
+	}
+}
+
+// TestFabricJobSubmissionRejectsNonAdmin proves the admin-only gate on
+// POST /compute/jobs: a viewer (or unauthenticated) request is rejected with
+// 403 before any placement or DB work occurs. This locks in the fix for the
+// Advisor 4 bypass where /compute/jobs was an unguarded Process-driver entry.
+func TestFabricJobSubmissionRejectsNonAdmin(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	apiRouter := mux.NewRouter()
+	registerFabricJobRoutes(apiRouter, db, nil, t.TempDir())
+
+	body, _ := json.Marshal(fabricJobSpec{Command: "/bin/true", MemoryMB: 128})
+	for _, role := range []string{"", "viewer", "user"} {
+		req := httptest.NewRequest(http.MethodPost, "/compute/jobs", bytes.NewReader(body))
+		if role != "" {
+			req = req.WithContext(context.WithValue(req.Context(), "role", role))
+		}
+		rec := httptest.NewRecorder()
+		apiRouter.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("role=%q: expected 403, got %d body=%s", role, rec.Code, rec.Body.String())
+		}
 	}
 }

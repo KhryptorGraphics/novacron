@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -165,4 +166,128 @@ func marshalBody(t *testing.T, v interface{}) []byte {
 		t.Fatalf("marshal: %v", err)
 	}
 	return b
+}
+
+// TestOrgScopeTwoOrgCreateReadDeleteRoundTrip is the novacron-ok7 acceptance
+// evidence: a VM created by org A is visible to org A, invisible to org B
+// (404, not 403), and deletable only by org A. Admin path remains unscoped.
+// This single test exercises the full create→read→cross-org-deny→delete
+// lifecycle across two distinct organizations that the goal requires.
+func TestOrgScopeTwoOrgCreateReadDeleteRoundTrip(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	mock.MatchExpectationsInOrder(false)
+	orgA := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	orgB := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	vmID := "cccccccc-cccc-cccc-cccc-cccccccccccc"
+
+	// Boot-time side effect: registerSecureAPIRoutes wires async migration
+	// routes whose init runs reconcileInterruptedJobs (UPDATE migration_jobs).
+	// Without this expectation sqlmock rejects the first real query.
+	mock.ExpectExec(`UPDATE migration_jobs SET status = \$1, error = \$2, finished_at = NOW\(\)\s+WHERE status = \$3 AND finished_at IS NULL`).
+		WithArgs("interrupted", sqlmock.AnyArg(), "running").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	router, authMgr := newOrgScopeRouter(t, db)
+
+	// --- CREATE as org A user ---
+	// The INSERT uses a scalar subquery for organization_id; sqlmock matches
+	// it inside ExpectExec, not as a separate ExpectQuery.
+	mock.ExpectExec(`INSERT INTO vms`).
+		WithArgs(
+			sqlmock.AnyArg(), // id
+			"roundtrip-vm",   // name
+			"stopped",        // state
+			1,                // cpu_cores
+			512,              // memory_mb
+			1,                // disk_gb
+			sqlmock.AnyArg(), // os_type
+			sqlmock.AnyArg(), // node_id
+			sqlmock.AnyArg(), // owner_id
+			sqlmock.AnyArg(), // requested_owner_id
+			orgA,             // organization_id
+			sqlmock.AnyArg(), // metadata
+			sqlmock.AnyArg(), // network_id
+		).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/vms",
+		strings.NewReader(`{"name":"roundtrip-vm","memory_mb":512,"disk_size_gb":1}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+orgScopeToken(t, authMgr, "u-a", orgA, "viewer"))
+	createRec := httptest.NewRecorder()
+	router.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create as org A: expected 201, got %d body=%s", createRec.Code, createRec.Body.String())
+	}
+
+	// --- READ as org A: must succeed and return orgA stamp ---
+	mock.ExpectQuery(`SELECT id, name, state, node_id, organization_id, cpu_cores, memory_mb, disk_gb, created_at, updated_at\s+FROM vms WHERE id = \$1`).
+		WithArgs(vmID).WillReturnRows(sqlmock.NewRows([]string{
+			"id", "name", "state", "node_id", "organization_id", "cpu_cores", "memory_mb", "disk_gb", "created_at", "updated_at",
+		}).AddRow(vmID, "roundtrip-vm", "stopped", "node-a", orgA, 1, 512, 1, time.Now().UTC(), time.Now().UTC()))
+
+	readA := httptest.NewRequest(http.MethodGet, "/api/vms/"+vmID, nil)
+	readA.Header.Set("Authorization", "Bearer "+orgScopeToken(t, authMgr, "u-a", orgA, "viewer"))
+	readARec := httptest.NewRecorder()
+	router.ServeHTTP(readARec, readA)
+	if readARec.Code != http.StatusOK {
+		t.Fatalf("read as org A: expected 200, got %d body=%s", readARec.Code, readARec.Body.String())
+	}
+	var readPayload map[string]interface{}
+	if err := json.NewDecoder(readARec.Body).Decode(&readPayload); err != nil {
+		t.Fatalf("decode read response: %v", err)
+	}
+	if got, ok := readPayload["organization_id"].(string); !ok || got != orgA {
+		t.Fatalf("read response organization_id = %#v, want %s", readPayload["organization_id"], orgA)
+	}
+
+	// --- READ as org B: must return 404 (existence hidden) ---
+	// The GET handler loads the row by id and checks orgVisible in Go; it does
+	// NOT issue an EXISTS probe. Mock the row-returning SELECT with orgA so
+	// orgVisible(scopeOrg=orgB, rowOrg=orgA) returns false → 404.
+	mock.ExpectQuery(`SELECT id, name, state, node_id, organization_id, cpu_cores, memory_mb, disk_gb, created_at, updated_at\s+FROM vms WHERE id = \$1`).
+		WithArgs(vmID).WillReturnRows(sqlmock.NewRows([]string{
+			"id", "name", "state", "node_id", "organization_id", "cpu_cores", "memory_mb", "disk_gb", "created_at", "updated_at",
+		}).AddRow(vmID, "roundtrip-vm", "stopped", "node-a", orgA, 1, 512, 1, time.Now().UTC(), time.Now().UTC()))
+
+	readB := httptest.NewRequest(http.MethodGet, "/api/vms/"+vmID, nil)
+	readB.Header.Set("Authorization", "Bearer "+orgScopeToken(t, authMgr, "u-b", orgB, "viewer"))
+	readBRec := httptest.NewRecorder()
+	router.ServeHTTP(readBRec, readB)
+	if readBRec.Code != http.StatusNotFound {
+		t.Fatalf("read as org B: expected 404, got %d body=%s", readBRec.Code, readBRec.Body.String())
+	}
+
+	// --- DELETE as org B: must return 404 ---
+	mock.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM vms WHERE id = \$1 AND organization_id = \$2\)`).
+		WithArgs(vmID, orgB).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+
+	delB := httptest.NewRequest(http.MethodDelete, "/api/vms/"+vmID, nil)
+	delB.Header.Set("Authorization", "Bearer "+orgScopeToken(t, authMgr, "u-b", orgB, "viewer"))
+	delBRec := httptest.NewRecorder()
+	router.ServeHTTP(delBRec, delB)
+	if delBRec.Code != http.StatusNotFound {
+		t.Fatalf("delete as org B: expected 404, got %d body=%s", delBRec.Code, delBRec.Body.String())
+	}
+
+	// --- DELETE as org A: must succeed ---
+	mock.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM vms WHERE id = \$1 AND organization_id = \$2\)`).
+		WithArgs(vmID, orgA).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectExec(`DELETE FROM vms WHERE id = \$1 AND organization_id = \$2`).
+		WithArgs(vmID, orgA).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	delA := httptest.NewRequest(http.MethodDelete, "/api/vms/"+vmID, nil)
+	delA.Header.Set("Authorization", "Bearer "+orgScopeToken(t, authMgr, "u-a", orgA, "viewer"))
+	delARec := httptest.NewRecorder()
+	router.ServeHTTP(delARec, delA)
+	if delARec.Code != http.StatusOK {
+		t.Fatalf("delete as org A: expected 200, got %d body=%s", delARec.Code, delARec.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet db expectations: %v", err)
+	}
 }

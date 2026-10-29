@@ -196,3 +196,93 @@ func TestClusterIdentityModelCrossNodeForeignOwner(t *testing.T) {
 	}
 	t.Logf("node B row: node_id=%s owner_id=NULL requested_owner_id=%s (foreign owner preserved, not silently invented)", nodeIDB.String, requestedOwnerB.String)
 }
+
+// TestOrgStampRealPostgresTwoOrgRoundTrip is the novacron-ok7 acceptance
+// evidence that sqlmock cannot provide: it drives createVMLocal against a
+// REAL migrated postgres database, decodes the minted VM id from the INSERT,
+// and verifies the organization_id stamp survives a read-back. A second org
+// is seeded but never stamped onto this VM, proving the cross-org NULL-stamp
+// path (the scalar subquery in cluster.go:384 resolves only the local org).
+func TestOrgStampRealPostgresTwoOrgRoundTrip(t *testing.T) {
+	admin, err := sql.Open("postgres", pgAdminDSN())
+	if err != nil {
+		t.Skipf("skip: cannot open postgres admin connection: %v", err)
+	}
+	if err := admin.Ping(); err != nil {
+		admin.Close()
+		t.Skipf("skip: postgres not reachable: %v", err)
+	}
+
+	const dbName = "novacron_org_stamp_test"
+	_, _ = admin.Exec(`DROP DATABASE IF EXISTS "` + dbName + `"`)
+	if _, err := admin.Exec(`CREATE DATABASE "` + dbName + `"`); err != nil {
+		t.Fatalf("create database %s: %v", dbName, err)
+	}
+	applyMigrations(t, dbDSN(dbName), dbName)
+
+	db, err := sql.Open("postgres", dbDSN(dbName))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Close()
+		_, _ = admin.Exec(`DROP DATABASE IF EXISTS "` + dbName + `"`)
+		admin.Close()
+	})
+
+	orgA := uuid.NewString()
+	orgB := uuid.NewString()
+	for _, oid := range []string{orgA, orgB} {
+		if _, err := db.Exec(`INSERT INTO organizations (id, name, slug) VALUES ($1, $2, $3)`, oid, "org-"+oid[:8], "org-"+oid[:8]); err != nil {
+			t.Fatalf("seed org %s: %v", oid, err)
+		}
+	}
+
+	t.Setenv("NOVACRON_NODE_ID", "node-stamp-test")
+	manager := newStubVMManager(t)
+	defer manager.Stop()
+
+	gotVMID, _, err := createVMLocal(context.Background(), db, manager, clusterCreateSpec{
+		Name:           "org-stamp-vm",
+		MemoryMB:       128,
+		VCPUs:          1,
+		OrganizationID: orgA,
+	})
+	if err != nil {
+		t.Fatalf("createVMLocal: %v", err)
+	}
+	if gotVMID == "" {
+		t.Fatal("createVMLocal returned empty vmID")
+	}
+
+	var nodeID, orgID sql.NullString
+	if err := db.QueryRow(`SELECT node_id, organization_id::text FROM vms WHERE id = $1`, gotVMID).
+		Scan(&nodeID, &orgID); err != nil {
+		t.Fatalf("query created VM row: %v", err)
+	}
+	if nodeID.String != "node-stamp-test" {
+		t.Fatalf("expected node_id=node-stamp-test, got %q", nodeID.String)
+	}
+	if orgID.String != orgA {
+		t.Fatalf("expected organization_id=%s, got %q", orgA, orgID.String)
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM vms WHERE organization_id = $1`, orgB).Scan(&count); err != nil {
+		t.Fatalf("cross-org count query: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected 0 VMs stamped with orgB, got %d", count)
+	}
+
+	if _, err := db.Exec(`DELETE FROM vms WHERE id = $1`, gotVMID); err != nil {
+		t.Fatalf("delete created VM: %v", err)
+	}
+	var exists bool
+	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM vms WHERE id = $1)`, gotVMID).Scan(&exists); err != nil {
+		t.Fatalf("verify deletion: %v", err)
+	}
+	if exists {
+		t.Fatal("VM still exists after delete")
+	}
+}

@@ -304,6 +304,10 @@ start_node() { # start_node <a|b>
     API_PORT="$port"
     NOVACRON_NODE_ID="fab-$n"
     NOVACRON_PROBE_BYTES=2097152
+    NOVACRON_RATE_PER_GB_EGRESS=0.04
+    NOVACRON_RATE_PER_VCPU_HOUR=0.027
+    NOVACRON_RATE_PER_JOB_SECOND=0.001
+    NOVACRON_RATE_PER_MIGRATION=0.50
   )
 
   local join_addr
@@ -408,9 +412,17 @@ if [ "$JOINED" = "1" ]; then
 else
   bad "node B never became reachable from A"
 fi
-
+# Promote the harness operator to admin BEFORE assertion 2: POST /compute/jobs
+# is now admin-only (workUnitAdmin gate), and the pre-promotion token carries
+# role "viewer" (register hard-codes it). The users BEFORE UPDATE trigger also
+# bumps updated_at, which revokes the old token via authenticateToken's
+# issued-before-updated_at check, so we must re-login regardless.
+psql_q -d "$DB_A" -c "UPDATE users SET role = 'admin' WHERE email = '$ADMIN_EMAIL'" >/dev/null 2>&1
+login_resp="$(curl -sS --max-time 20 -X POST "http://$ADDR_A:$PORT_A/api/auth/login" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASS\"}")"
+tok="$(json_get 'd.get("token","")' "$login_resp")"
+[ -n "$tok" ] && echo "$tok" > "$WORK/token-a"
 # --- assertion 2: job dispatched to the peer --------------------------------
-
 head2 "assertion 2: job dispatched to the peer"
 JOB_MARKER="fabric-job-$RUN_ID"
 job_json="$(api a POST /api/compute/jobs "{\"name\":\"acceptance-$RUN_ID\",\"command\":\"sh\",\"args\":[\"-c\",\"echo $JOB_MARKER; hostname\"],\"node_id\":\"fab-b\"}")"
@@ -590,17 +602,8 @@ print(json.dumps(d,sort_keys=True))
 }
 
 head2 "assertion 5b: work-unit API stages a >1 MiB input and resumes from its checkpoint"
-# The submit/artifact/retry routes are admin-only (workUnitAdmin ->
-# requireOrgScope, which reads the JWT "role" claim), while /api/auth/register
-# hard-codes role "user" -> viewer. Promote the harness's own operator row in
-# node A's throwaway database and mint a fresh token: the role is baked into the
-# JWT at login, and the users BEFORE UPDATE trigger bumps updated_at, which
-# revokes the pre-promotion token anyway.
-psql_q -d "$DB_A" -c "UPDATE users SET role = 'admin' WHERE email = '$ADMIN_EMAIL'" >/dev/null 2>&1
-login_resp="$(curl -sS --max-time 20 -X POST "http://$ADDR_A:$PORT_A/api/auth/login" -H 'Content-Type: application/json' \
-  -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASS\"}")"
-tok="$(json_get 'd.get("token","")' "$login_resp")"
-[ -n "$tok" ] && echo "$tok" > "$WORK/token-a"
+# Admin promotion already happened before assertion 2 (POST /compute/jobs is
+# admin-only); the token in $WORK/token-a is current and valid here.
 
 WU_INPUT="$WORK/work-unit-input.bin"
 head -c 1572864 /dev/urandom > "$WU_INPUT"
@@ -690,6 +693,24 @@ WU
   fi
 fi
 
+# --- billing usage summary with non-zero rates --------------------------------
+# Rate card env vars are injected into start_node (NOVACRON_RATE_PER_*). The
+# metering plane records egress_bytes and migration events from real transfers;
+# this assertion proves the summary endpoint returns a non-zero estimated_cost_usd
+# when rates are configured, closing criterion 4 at the harness level.
+head2 "billing: usage summary reflects non-zero rate card"
+usage_summary="$(api a GET /api/billing/usage/summary)"
+rate_egress="$(json_get 'd.get("rate_card",{}).get("usd_per_gb_egress",0)' "$usage_summary")"
+total_usd="$(json_get 'd.get("totals",{}).get("estimated_cost_usd",0)' "$usage_summary")"
+if python3 -c "import sys; sys.exit(0 if float('${rate_egress:-0}') > 0 else 1)" 2>/dev/null; then
+  if python3 -c "import sys; sys.exit(0 if float('${total_usd:-0}') > 0 else 1)" 2>/dev/null; then
+    ok "billing usage summary reports estimated_cost_usd=$total_usd with rate usd_per_gb_egress=$rate_egress"
+  else
+    bad "billing usage summary estimated_cost_usd=${total_usd:-0} — expected >0 with rate_card.usd_per_gb_egress=$rate_egress and real transfers"
+  fi
+else
+  bad "billing usage summary rate_card.usd_per_gb_egress=${rate_egress:-0} — expected >0 with NOVACRON_RATE_PER_GB_EGRESS set"
+fi
 # --- live-guest probes ------------------------------------------------------
 # Assertions 6-7 need ground truth about which node actually RUNS the guest.
 # The API's state is a DB row overlaid by the manager's in-memory view, so a node
