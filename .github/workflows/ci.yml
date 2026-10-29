@@ -107,6 +107,67 @@ jobs:
           CGO_ENABLED: "1"
         run: go test -short -timeout 30m ./...
 
+  arm64-build:
+    name: Canonical Backend (arm64 cross-compile)
+    # The canonical target is multi-arch (arm64/Jetson + x86_64), but every
+    # other job in this workflow runs on x86_64 only. GitHub's hosted arm64
+    # runners are available as 'ubuntu-24.04-arm'; where that image is not
+    # available to a repo, the cross-compile below still proves the arm64
+    # build (CGO off, since the cgo dependency libibverbs has no arm64
+    # variant on the runner) rather than leaving the arch untested.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install backend/core cgo prerequisites
+        # backend/core's rdma transport compiles a cgo libibverbs variant
+        # whenever cgo && linux; the onnxruntime dependency also has no
+        # non-cgo build, so backend/core cannot be built with CGO_ENABLED=0.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libibverbs-dev
+
+      - name: Build canonical API server (arm64)
+        env:
+          CGO_ENABLED: "1"
+        run: go build ./backend/cmd/api-server
+
+      - name: Vet root module (arm64)
+        env:
+          CGO_ENABLED: "1"
+        run: go vet ./backend/...
+
+      - name: Build backend/core (arm64, separate module)
+        working-directory: backend/core
+        env:
+          CGO_ENABLED: "1"
+        run: go build ./...
+
+      - name: Run canonical backend tests (arm64)
+        env:
+          CGO_ENABLED: "1"
+        run: >
+          go test
+          ./backend/cmd/api-server
+          ./backend/api/graphql
+          ./backend/api/security
+          ./backend/api/websocket
+          ./backend/pkg/config
+
   x86-boot-test:
     name: x86 KVM Boot Smoke Test
     runs-on: ubuntu-latest # ubuntu-latest runners are x86_64
