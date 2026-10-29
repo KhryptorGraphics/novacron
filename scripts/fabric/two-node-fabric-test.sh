@@ -338,6 +338,14 @@ start_node() { # start_node <a|b>
     NOVACRON_RATE_PER_VCPU_HOUR=0.027
     NOVACRON_RATE_PER_JOB_SECOND=0.001
     NOVACRON_RATE_PER_MIGRATION=0.50
+    # The api-server's WriteTimeout defaults to 15s, and a guest create does
+    # its disk work (qemu-img convert/resize) plus serial DB round trips
+    # INSIDE the request. When that exceeds the write deadline, Go closes the
+    # socket without writing a response and the client sees "curl: (52)
+    # Empty reply from server" - it cannot tell whether the VM was created.
+    # The harness raises the deadline so a slow create reports a real error
+    # instead of a truncated connection.
+    WRITE_TIMEOUT="${FABRIC_WRITE_TIMEOUT:-120s}"
   )
 
   local join_addr
@@ -1164,6 +1172,22 @@ else
       bad "crash reconcile after node A's crash:$FAILED_PARTS"
     fi
   fi
+
+  # Restore the link to the harness's normal rate. The crash assertion shapes
+  # it down (FABRIC_CRASH_SHAPE_MBIT, default 2) so the in-flight migration is
+  # observable, and that shape was never undone - so everything after this
+  # point, INCLUDING the node-loss drill, ran on a 2 Mbit/40ms veth. Node B
+  # reaches postgres through a socat relay bound on $ADDR_A, i.e. across that
+  # veth, so a guest create on node B made its serial DB round trips over the
+  # throttled link and could exceed the api-server's 15s WriteTimeout: Go
+  # then closes the socket without writing a response and the client sees
+  # "curl: (52) Empty reply from server" instead of an error it can act on.
+  # The drill asserts node-loss behaviour, not DB latency over a degraded
+  # link, so it must run at the normal rate.
+  if [ "$SHAPE_MBIT" != "0" ]; then
+    say "    restoring the link to the harness rate (${SHAPE_MBIT}mbit) for the remaining assertions"
+    reshape_link "$SHAPE_MBIT"
+  fi
 fi
 
 # --- node-loss drill (opt-in) ------------------------------------------------
@@ -1196,13 +1220,27 @@ if [ "${FABRIC_DRILL:-0}" = "1" ]; then
 import json,sys
 print(json.dumps({"name":"drill-vm","image":sys.argv[1],"memory_mb":256,"vcpus":1,"disk_size_gb":1,"node_id":"fab-b"}))
 ' "$drill_img")"
-    # Create the guest on node B, retrying a transient failure. The drill runs
-    # immediately after the crash-reconcile assertion, which SIGKILLs and
-    # restarts node A's api-server; node B can be briefly unresponsive while
-    # it re-establishes the peer view, and a single failed POST would then
-    # abort the whole drill for a reason unrelated to what the drill proves.
-    # The retry is bounded and every attempt is reported, so a genuine fault
-    # still fails the drill - and now with node B's log tail attached.
+    # Create the guest on node B, retrying a transient failure.
+    #
+    # Why the retry exists: this create is the only one that targets node B,
+    # and node B reaches postgres through a socat relay bound on $ADDR_A -
+    # i.e. across the veth. The crash-reconcile assertion shapes that veth
+    # down to 2 Mbit/40ms and (until this run) never restored it, so the
+    # drill's create made its serial DB round trips over a throttled link and
+    # could exceed the api-server's WriteTimeout - Go then closes the socket
+    # with no response and the client sees "curl: (52) Empty reply from
+    # server". The link is now restored to the harness rate after the crash
+    # block and the harness nodes get a 120s WRITE_TIMEOUT, so the create
+    # completes normally; the retry is a bounded safety net, not the fix.
+    #
+    # NOTE: createVMLocal mints a new VM id per call (uuid.NewString), so a
+    # failed attempt whose response was lost leaves an orphaned row and disk
+    # directory behind. The retry is therefore only safe because the failure
+    # mode it guards (a closed socket) is now rare; it is not a general
+    # retry-safe operation.
+    #
+    # Every attempt is reported and a genuine failure prints node B's log
+    # tail, so a real fault still fails the drill - and now diagnosably.
     drill_vm=""; DRILL_VM=""
     drill_attempt=0
     while [ "$drill_attempt" -lt 3 ]; do
@@ -1230,10 +1268,12 @@ print(json.dumps({"name":"drill-vm","image":sys.argv[1],"memory_mb":256,"vcpus":
       api b POST "/api/vms/$DRILL_VM/start" >/dev/null 2>&1 || true
       sleep 6
       # Confirm node B really runs it (the pidfile is the authority).
-      # 180s, not 60s: CI runners have no /dev/kvm, so the guest boots under
-      # TCG software emulation, which is far slower than the KVM path this
-      # host uses. A 60s budget was marginal there and failed the drill on a
-      # healthy system.
+      # 180s, not 60s: this is a safety margin for a slow boot, not a
+      # measured requirement. The CI run that passed the drill created the
+      # guest and saw it running in well under a second of detection (after
+      # an unconditional `sleep 6`), so 60s was NOT the binding constraint
+      # there. It is kept generous because a boot timeout here is reported
+      # as "the drill did not run", which hides which side actually failed.
       deadline=$(( $(date +%s) + 180 )); drill_owned=""
       while [ "$(date +%s)" -lt "$deadline" ]; do
         if pidfile_alive_root "$WORK/storage-b/vms/$DRILL_VM/qemu.pid" "$DRILL_VM"; then drill_owned=1; break; fi

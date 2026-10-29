@@ -1885,6 +1885,21 @@ func registerMigratedDest(db *sql.DB, manager *core_vm.VMManager, vmID string, c
 	if orgID == "" && cfg.OrganizationID != "" {
 		orgID = cfg.OrganizationID
 	}
+	// vms.node_id records where the guest ACTUALLY runs, so it must be this
+	// node's own id - not the target the SOURCE claimed. The source's claim
+	// can differ from reality (a target_addr override points at a different
+	// node than target_node), and a wrong node_id is now load-bearing: the boot
+	// reconcile only repairs rows this node owns (reconcileVMState scopes its
+	// SELECT to node_id = selfNodeID()), so a guest stamped with someone else's
+	// id would be skipped by its own node's reconcile and stay 'running'
+	// forever after a power loss - the mirror image of the bug that scoping
+	// fixed. The claimed id is kept only for the warning.
+	self := selfNodeID()
+	if nodeID != "" && nodeID != self {
+		logger.Warn("migrated-in VM claimed a different destination than this node; stamping the receiving node",
+			"vm", vmID, "claimed_node", nodeID, "actual_node", self)
+	}
+	nodeID = self
 	vm, err := core_vm.NewVM(cfg)
 	if err != nil {
 		logger.Warn("migrated-VM register skipped: rebuild failed", "vm", vmID, "error", err)
