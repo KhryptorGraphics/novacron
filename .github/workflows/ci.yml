@@ -14,6 +14,24 @@ jobs:
   canonical-backend:
     name: Canonical Backend
     runs-on: ubuntu-latest
+    # A throwaway postgres so the real-postgres tests actually RUN here
+    # instead of self-skipping. The reconcile-scoping regression
+    # (TestReconcileVMStateOnlyTouchesOwnRows) needs a real database: it is
+    # the only guard that proves a peer-owned 'running' row is not rewritten
+    # by another node's boot reconcile. Without a database it skipped, and
+    # the only CI coverage was the sqlmock query-pin.
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD || 'postgres' }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
 
     steps:
       - uses: actions/checkout@v4
