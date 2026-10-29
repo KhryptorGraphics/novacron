@@ -927,12 +927,16 @@ else
     INFLIGHT=0; INFLIGHT_SRC=""; jst=""
     deadline=$(( $(date +%s) + 45 ))
     while [ "$(date +%s)" -lt "$deadline" ]; do
-      # Read the STRONG evidence first: a live drive-mirror block job on the
-      # source qemu proves the migration is genuinely copying bytes. The old
-      # order read the job status first and broke out of the loop the moment
-      # it was no longer "running", so a migration that completed inside one
-      # poll interval was misreported as "completed before the kill" and the
-      # assertion skipped instead of running.
+      # Read the STRONG evidence first. The product itself marks an incoming
+      # migration in flight by creating .novacron-incoming-migration in the
+      # destination dir (main.go:330 prepareIncomingMigrationDir), so that
+      # file appearing on node B IS the product's own "a migration is being
+      # accepted right now" signal -- present from the moment the dest RPC
+      # is served, long before the block copy is visible.
+      if sudo test -e "$WORK/storage-b/vms/$VM_ID/.novacron-incoming-migration" 2>/dev/null; then
+        INFLIGHT=1; INFLIGHT_SRC="node B holds the incoming-migration marker for $VM_ID"
+        break
+      fi
       if [ "$(vm_qemu_block_jobs a "$VM_ID")" != "[]" ]; then
         INFLIGHT=1; INFLIGHT_SRC="drive-mirror block job running on node A's qemu"
         break  # the source qemu is mirroring right now
@@ -941,7 +945,11 @@ else
       # after the job started (a stale dir from an earlier migration must not
       # count as "in flight").
       for f in "$WORK/storage-b/vms/$VM_ID/qmp.sock" "$WORK/storage-b/vms/$VM_ID/qemu.pid"; do
-        if [ -e "$f" ] && [ "$(stat -c %Y "$f" 2>/dev/null || echo 0)" -ge "$job_start" ]; then
+        # sudo: node B's api-server runs as root inside the netns, so its
+        # dest dir is 0700 root:root -- the harness (as the invoking user)
+        # cannot stat anything inside it.
+        if sudo test -e "$f" 2>/dev/null \
+           && [ "$(sudo stat -c %Y "$f" 2>/dev/null || echo 0)" -ge "$job_start" ]; then
           INFLIGHT=1; INFLIGHT_SRC="fresh dest qemu state on node B ($(basename "$f"))"
         fi
       done
@@ -1053,6 +1061,20 @@ else
     qa="$(vm_qemu_status a "$VM_ID")"; qb="$(vm_qemu_status b "$VM_ID")"
     QA_NOTE=""; [ -n "$qa" ] || QA_NOTE=" ($(vm_qmp_note a "$VM_ID"))"
     QB_NOTE=""; [ -n "$qb" ] || QB_NOTE=" ($(vm_qmp_note b "$VM_ID"))"
+    # A node whose guest was retired by the migration leaves a DEAD qmp.sock
+    # behind: the socket file still exists (mode 755, root-owned) but nothing
+    # is listening on it, so the QMP connect succeeds and the query times out.
+    # That is a definitive "this node does not run the guest", not an
+    # inconclusive probe -- so it must count as "not running" rather than
+    # skipping the ownership assertion. The pidfile is the authority: if the
+    # guest process is gone, there is no guest to own.
+    if [ -z "$qb" ]; then
+      PB=0; pidfile_alive "$WORK/storage-b/vms/$VM_ID/qemu.pid" "$VM_ID" && PB=1
+      if [ "$PB" = "0" ]; then
+        qb="stopped"
+        QB_NOTE=" (no live guest process on node B: its qmp.sock is a leftover from the migration; counted as not-running)"
+      fi
+    fi
     say "    qemu query-status: node A=${qa:-<unprobeable>$QA_NOTE} node B=${qb:-<unprobeable>$QB_NOTE}"
     OWN_BASIS="unprobed"
     if [ -n "$qa" ] && [ -n "$qb" ]; then
