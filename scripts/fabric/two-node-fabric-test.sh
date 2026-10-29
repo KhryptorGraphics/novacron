@@ -555,8 +555,22 @@ else
     sleep 5
   done
   if [ "$MIG_OK" = "1" ]; then
-    b_view="$(api b GET "/api/vms/$VM_ID")"
-    b_state="$(json_get 'd.get("state") or d.get("error") or ""' "$b_view")"
+    # The source marks the transfer 'completed' as soon as the data is on the
+    # wire, but the DESTINATION registers the migrated VM asynchronously: its
+    # incoming handler waits for the guest to resume (WaitResumed) and only
+    # then calls registerMigratedDest (main.go). So 'completed' on the source
+    # does NOT yet mean 'visible in the destination's VM list'. Querying node B
+    # once raced that goroutine and produced a spurious 'vm not found'
+    # (this assertion has flaked in CI before). Poll until the destination
+    # publishes the row, bounded by the same style of deadline as above.
+    b_state=""; b_view=""
+    deadline=$(( $(date +%s) + 180 ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+      b_view="$(api b GET "/api/vms/$VM_ID")"
+      b_state="$(json_get 'd.get("state") or d.get("error") or ""' "$b_view")"
+      [ "$b_state" = "running" ] && break
+      sleep 3
+    done
     if [ "$b_state" = "running" ]; then
       ok "VM $VM_ID is running on the target node (GET /api/vms/$VM_ID on node B)"
     else
@@ -902,9 +916,18 @@ else
     [ -n "$ROUNDTRIP_MSG" ] || ROUNDTRIP_MSG="round-trip transfer neither completed nor failed within 600s"
   fi
   if [ "$ROUNDTRIP_MSG" = "transfer completed" ]; then
-    a_view="$(api a GET "/api/vms/$VM_ID")"
-    a_state="$(json_get 'd.get("state") or d.get("error") or ""' "$a_view")"
-    a_owner="$(json_get 'd.get("node_id") or ""' "$a_view")"
+    # Same as assertion 4: the destination publishes the migrated VM
+    # asynchronously (WaitResumed -> registerMigratedDest), so 'completed' on
+    # the source does not yet mean the row is visible on node A. Poll.
+    a_view=""; a_state=""; a_owner=""
+    deadline=$(( $(date +%s) + 180 ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+      a_view="$(api a GET "/api/vms/$VM_ID")"
+      a_state="$(json_get 'd.get("state") or d.get("error") or ""' "$a_view")"
+      a_owner="$(json_get 'd.get("node_id") or ""' "$a_view")"
+      if [ "$a_state" = "running" ] && [ "$a_owner" = "fab-a" ]; then break; fi
+      sleep 3
+    done
     qmp_a="$(vm_qemu_status a "$VM_ID")"
     say "    node A after the round trip: state=${a_state:-?} node_id=${a_owner:-?} qemu=${qmp_a:-<unprobeable>}"
     if [ "$a_state" = "running" ] && [ "$a_owner" = "fab-a" ]; then
