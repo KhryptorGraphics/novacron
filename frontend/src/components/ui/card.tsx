@@ -30,10 +30,12 @@ const CardHeader = React.forwardRef<
 CardHeader.displayName = 'CardHeader';
 
 const CardTitle = React.forwardRef<
-  HTMLParagraphElement,
+  React.ElementRef<'h2'>,
   React.HTMLAttributes<HTMLHeadingElement>
 >(({ className, children, ...props }, ref) => (
-  <h3
+  // h2, not h3: cards sit directly under a page's h1, so an h3 skipped a
+  // level and axe flagged heading-order on every carded page.
+  <h2
     ref={ref}
     className={cn(
       'text-2xl font-semibold leading-none tracking-tight',
@@ -42,7 +44,7 @@ const CardTitle = React.forwardRef<
     {...props}
   >
     {children}
-  </h3>
+  </h2>
 ));
 CardTitle.displayName = 'CardTitle';
 

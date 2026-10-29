@@ -1,7 +1,10 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { axe, toHaveNoViolations } from 'jest-axe';
 
 import FabricPage from '@/app/fabric/page';
+
+expect.extend(toHaveNoViolations);
 
 jest.mock('@/components/auth/AuthGuard', () => ({
   __esModule: true,
@@ -159,7 +162,9 @@ describe('FabricPage', () => {
     expect(screen.getByText('reachable')).toBeInTheDocument();
     expect(screen.getByText('unreachable')).toBeInTheDocument();
     expect(screen.getByText('No link profile')).toBeInTheDocument();
-    expect(screen.getByText('Stale link profile')).toBeInTheDocument();
+    // The page's stale-link copy changed in b35a3520 ("directional link
+    // estimates"); this assertion still pinned the pre-b35a3520 wording.
+    expect(screen.getByText('Directional rates stale or incomplete')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'job-1' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'tr-1' })).toBeInTheDocument();
   });
@@ -233,5 +238,16 @@ describe('FabricPage', () => {
         expect.objectContaining({ method: 'POST' }),
       );
     });
+  });
+
+  it('has no detectable accessibility violations', async () => {
+    mockFabricFetch();
+    const { container } = render(<FabricPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('10.0.0.5:18090')).toBeInTheDocument();
+    });
+
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

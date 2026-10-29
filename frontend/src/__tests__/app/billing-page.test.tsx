@@ -1,6 +1,9 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import { axe, toHaveNoViolations } from 'jest-axe';
 
 import BillingPage from '@/app/billing/page';
+
+expect.extend(toHaveNoViolations);
 
 jest.mock('@/components/auth/AuthGuard', () => ({
   __esModule: true,
@@ -137,5 +140,20 @@ describe('BillingPage', () => {
 
     expect(screen.getAllByText('$0.00').length).toBeGreaterThanOrEqual(5);
     expect(screen.queryByText('Billing usage load failed')).not.toBeInTheDocument();
+  });
+
+  it('has no detectable accessibility violations', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(jsonResponse(summaryFixture)) as unknown as typeof fetch;
+    global.fetch = fetchMock;
+
+    const { container } = render(<BillingPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Billing')).toBeInTheDocument();
+    });
+
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

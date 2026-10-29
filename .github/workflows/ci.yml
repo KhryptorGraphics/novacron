@@ -183,12 +183,15 @@ jobs:
         run: >
           npm test -- --runTestsByPath
           src/__tests__/app/dashboard-page.test.tsx
+          src/__tests__/app/fabric-page.test.tsx
+          src/__tests__/app/billing-page.test.tsx
           src/__tests__/app/vms-page.test.tsx
           src/__tests__/app/analytics-page.test.tsx
           src/__tests__/app/settings-page.test.tsx
           src/__tests__/app/users-page.test.tsx
           src/__tests__/app/network-page.test.tsx
           src/__tests__/app/admin-layout.test.tsx
+          src/__tests__/accessibility/auth-accessibility.test.tsx
           src/__tests__/components/auth/RBACGuard.test.tsx
           src/__tests__/components/auth/RegistrationWizard.test.tsx
           src/__tests__/hooks/useSecurity.test.tsx
