@@ -148,3 +148,6 @@ deploy/p2pnet/agentdb.rvf.idmap.json
 
 # Generated Spec Kit scaffold (per-checkout init output, not repo source)
 novacron/
+
+# claude-flow tool metrics (regenerated locally, not repo state)
+.claude-flow/metrics/
