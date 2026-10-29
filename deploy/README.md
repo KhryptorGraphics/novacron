@@ -217,6 +217,23 @@ failure on a compute node. Nothing in this repo replicates guest disks.
 
 ## 7. Node-loss drill
 
+This procedure is executable: `deploy/scripts/node-loss-drill.sh` runs it
+against a real two-node fabric and writes the transcript to a report file.
+
+```bash
+deploy/scripts/node-loss-drill.sh --report docs/evidence/node-loss-drill-$(date -u +%F).txt
+```
+
+The drill is implemented as an env-gated section of the acceptance harness
+(`FABRIC_DRILL=1`) rather than a standalone fabric of its own, because it needs
+a LIVE two-node fabric and the harness's cleanup kills the node processes even
+under `FABRIC_KEEP=1`. The wrapper sets the flag and tees the transcript. The
+last run is committed at `docs/evidence/node-loss-drill-2026-10-29.txt`
+(`pass=20 fail=0 skip=0`).
+
+It asserts the behaviour documented below, including the parts that are
+deliberately not automatic.
+
 There is **no automatic failover of a guest today**. What actually happens when
 a node dies with a VM on it:
 
