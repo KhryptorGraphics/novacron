@@ -5,37 +5,37 @@
   socat: ok
 
 === build
-  built /tmp/fabric-test-2520417/api-server
+  built /tmp/fabric-test-2577250/api-server
 
 === databases
-NOTICE:  database "novacron_fab_a_2520417" does not exist, skipping
-NOTICE:  database "novacron_fab_b_2520417" does not exist, skipping
-  novacron_fab_a_2520417 and novacron_fab_b_2520417 created and migrated
+NOTICE:  database "novacron_fab_a_2577250" does not exist, skipping
+NOTICE:  database "novacron_fab_b_2577250" does not exist, skipping
+  novacron_fab_a_2577250 and novacron_fab_b_2577250 created and migrated
 
 === network
-  veth-fh-2520417=10.96.0.1 <-> fabtest-b-2520417:veth-fn-2520417=10.96.0.2
-  PASS  inter-node path traverses the veth (ip route get 10.96.0.2 -> dev veth-fh-2520417)
+  veth-fh-2577250=10.96.0.1 <-> fabtest-b-2577250:veth-fn-2577250=10.96.0.2
+  PASS  inter-node path traverses the veth (ip route get 10.96.0.2 -> dev veth-fh-2577250)
   shaping: tbf 50mbit (netem unavailable on this kernel)
 
 === start nodes
   PASS  node A healthy on 10.96.0.1:18190
-  PASS  node B healthy on 10.96.0.2:18191 (inside fabtest-b-2520417)
+  PASS  node B healthy on 10.96.0.2:18191 (inside fabtest-b-2577250)
   PASS  operator account usable on both nodes
 
 === assertion 1: membership and link profile
   PASS  node B joined and is reachable from A (GET /api/cluster/nodes)
-    measured outbound link: 38.3 Mbps local->fab-b, rtt 0.449 ms (shaping: tbf 50mbit (netem unavailable on this kernel))
-  PASS  link profile carries a fresh outbound throughput (38.3 Mbps)
+    measured outbound link: 44.4 Mbps local->fab-b, rtt 0.409 ms (shaping: tbf 50mbit (netem unavailable on this kernel))
+  PASS  link profile carries a fresh outbound throughput (44.4 Mbps)
 
 === assertion 2: job dispatched to the peer
-  PASS  job f7a58d37-13af-4c5f-9e8c-24ace75867d5 placed on the peer (node_id=fab-b)
+  PASS  job 15030086-9767-4e81-977e-d363c289f98c placed on the peer (node_id=fab-b)
   PASS  job completed on the peer and its stdout was fetched back through node A
 
 === assertion 3: second transfer to a busy link is queued with an ETA
-  PASS  transfer admission: T1 running, T2 queued with eta_seconds=14.012728288
+  PASS  transfer admission: T1 running, T2 queued with eta_seconds=12.092366656000001
 
 === assertion 4: cross-node migration moves the VM to the target
-  PASS  VM cd558eab-0f75-40a6-8ec4-c1256997b1de is running on the target node (GET /api/vms/cd558eab-0f75-40a6-8ec4-c1256997b1de on node B)
+  PASS  VM 3316795b-821b-43ce-b679-a4a630986a33 is running on the target node (GET /api/vms/3316795b-821b-43ce-b679-a4a630986a33 on node B)
 
 === assertion 5: billing usage reflects measured migration egress
   PASS  usage metering recorded egress_bytes=256.0 MiB from real transfers
@@ -43,65 +43,66 @@ NOTICE:  database "novacron_fab_b_2520417" does not exist, skipping
   PASS  billing summary reports estimated_cost_usd=0.51 with rate usd_per_gb_egress=0.04
 
 === assertion 5b: work-unit API stages a >1 MiB input and resumes from its checkpoint
-  PASS  work-unit artifact: 1572864-byte body survived upload with sha256=2473b95fc2db12ac23127527a3151a02ab96f4cfc9907d25364130cb6f8728b9
+  PASS  work-unit artifact: 1572864-byte body survived upload with sha256=70064784b62a6c10e4998c267003f00667086dbdb526f6cb72edd9dd743fb9f7
   PASS  work unit failed on attempt 1 and left its checkpoint available
   PASS  work unit resumed on attempt 2 and completed (resumed after checkpoint)
 
 === assertion 6: round-trip migration (B -> A) over node A's stale dest state
-    node A still holds /tmp/fabric-test-2520417/storage-a/vms/cd558eab-0f75-40a6-8ec4-c1256997b1de/disk.qcow2: yes
-    round-trip transfer 488cbf8c-e260-4547-9335-4c5b7f0e3b88 submitted on node B (status running)
+    node A still holds /tmp/fabric-test-2577250/storage-a/vms/3316795b-821b-43ce-b679-a4a630986a33/disk.qcow2: yes
+    round-trip transfer de74b772-e732-4a05-9709-780d5e2af951 submitted on node B (status running)
     node A after the round trip: state=running node_id=fab-a qemu=running
-  PASS  round-trip migration: VM cd558eab-0f75-40a6-8ec4-c1256997b1de runs on node A again (transfer 488cbf8c-e260-4547-9335-4c5b7f0e3b88, qemu running)
+  PASS  round-trip migration: VM 3316795b-821b-43ce-b679-a4a630986a33 runs on node A again (transfer de74b772-e732-4a05-9709-780d5e2af951, qemu running)
 
 === assertion 7: node A killed mid-migration reconciles honestly on restart
   reshaping link: tbf 2mbit (netem unavailable on this kernel)
-    migration job mig-6c883919a47547e4bd9a0302fc8d22ab accepted; waiting until it is genuinely in flight
-    in flight (node B holds the incoming-migration marker for cd558eab-0f75-40a6-8ec4-c1256997b1de); SIGKILLing node A's api-server (pid 2521062) -- its qemu keeps running, which is the point
-/home/kp/thordrive/novacron/scripts/fabric/two-node-fabric-test.sh: line 1142: 2521062 Killed                  env "${env_common[@]}" setsid nohup "$BIN" > "$WORK/node-a.log" 2>&1 < /dev/null
-    restarting node A with the same env/DB (log: /tmp/fabric-test-2520417/node-a.log)
-    job mig-6c883919a47547e4bd9a0302fc8d22ab after restart: status=interrupted error=api-server restarted while this migration job was in flight; the QEMU migration may have completed — check which node actually runs the VM
+    migration job mig-108f304eb8734e74db586f5b81d650ea accepted; waiting until it is genuinely in flight
+    in flight (fresh dest qemu state on node B (qemu.pid)); SIGKILLing node A's api-server (pid 2577979) -- its qemu keeps running, which is the point
+/home/kp/thordrive/novacron/scripts/fabric/two-node-fabric-test.sh: line 1142: 2577979 Killed                  env "${env_common[@]}" setsid nohup "$BIN" > "$WORK/node-a.log" 2>&1 < /dev/null
+    restarting node A with the same env/DB (log: /tmp/fabric-test-2577250/node-a.log)
+    job mig-108f304eb8734e74db586f5b81d650ea after restart: status=interrupted error=api-server restarted while this migration job was in flight; the QEMU migration may have completed — check which node actually runs the VM
     node a transfers still running after the crash: 0
     node b transfers still running after the crash: 0
-    GET /api/transfers/250d7a81-4a7c-4323-8f16-50302e1a22e3 on restarted node A: HTTP 404 (completed before the crash; the store is in-memory, so it is gone rather than 'interrupted')
+    GET /api/transfers/ff52ba2a-2e17-4187-ab50-952a3c4797e2 on restarted node A: HTTP 404 (completed before the crash; the store is in-memory, so it is gone rather than 'interrupted')
     node A: qemu.pid alive=1, API state=running, reconcile expects=running
     node a vms row: fab-a:running 
     node b vms row: fab-b:running 
     qemu query-status: node A=running node B=stopped
     fabric view after restart: A sees fab-b reachable=True, B sees fab-a reachable=True
-  PASS  crash reconcile: job mig-6c883919a47547e4bd9a0302fc8d22ab reads 'interrupted' (never running), no transfer survives as running, VM cd558eab-0f75-40a6-8ec4-c1256997b1de state=running matches its qemu (alive=1), live ownership: qemu running on fab-a, fabric view restored
+  PASS  crash reconcile: job mig-108f304eb8734e74db586f5b81d650ea reads 'interrupted' (never running), no transfer survives as running, VM 3316795b-821b-43ce-b679-a4a630986a33 state=running matches its qemu (alive=1), live ownership: qemu running on fab-a, fabric view restored
 
 === node-loss drill: what happens when a node dies with a VM on it
-  PASS  node-loss drill: guest 6ba625a9-4bee-4e2e-826a-55996f309eea is running on node B
-    SIGKILLing node B's api-server (pid 2521083) -- its qemu keeps running, which is the point
-/home/kp/thordrive/novacron/scripts/fabric/two-node-fabric-test.sh: line 1221: 2521064 Killed                  sudo -E ip netns exec "$NS_B" env "${env_common[@]}" setsid nohup "$BIN" > "$WORK/node-b.log" 2>&1 < /dev/null
+  PASS  node-loss drill: guest 386e4eea-ea5a-42e2-9094-3fbcdb62b4ba is running on node B
+    SIGKILLing node B's api-server (pid 2577999) -- its qemu keeps running, which is the point
     node A reports fab-b reachable=False
-    node B's vms row for the lost guest: running:fab-b 
+/home/kp/thordrive/novacron/scripts/fabric/two-node-fabric-test.sh: line 1231: 2577981 Killed                  sudo -E ip netns exec "$NS_B" env "${env_common[@]}" setsid nohup "$BIN" > "$WORK/node-b.log" 2>&1 < /dev/null
+    node B's vms row for the lost guest: running:fab-b
     no qemu for the guest runs on node A (it stayed on the dead node)
-    node B after the restart: row=running 
-    the row reads 'running ' after the restart (reconcile-on-restart, no auto-restart)
+    killing node B's guest qemu (pid 2585280) as a host power loss would
+    node B after the restart: row=stopped
+    the 'running' row with no live qemu was reconciled to 'stopped' (repair, not failover)
     the guest was not auto-restarted on the peer (the documented single point of failure stands)
   PASS  node-loss drill: no automatic failover; the dead node's guest stayed put; reconcile-on-restart only
 
 === summary
-  PASS  inter-node path traverses the veth (ip route get 10.96.0.2 -> dev veth-fh-2520417)
+  PASS  inter-node path traverses the veth (ip route get 10.96.0.2 -> dev veth-fh-2577250)
   PASS  node A healthy on 10.96.0.1:18190
-  PASS  node B healthy on 10.96.0.2:18191 (inside fabtest-b-2520417)
+  PASS  node B healthy on 10.96.0.2:18191 (inside fabtest-b-2577250)
   PASS  operator account usable on both nodes
   PASS  node B joined and is reachable from A (GET /api/cluster/nodes)
-  PASS  link profile carries a fresh outbound throughput (38.3 Mbps)
-  PASS  job f7a58d37-13af-4c5f-9e8c-24ace75867d5 placed on the peer (node_id=fab-b)
+  PASS  link profile carries a fresh outbound throughput (44.4 Mbps)
+  PASS  job 15030086-9767-4e81-977e-d363c289f98c placed on the peer (node_id=fab-b)
   PASS  job completed on the peer and its stdout was fetched back through node A
-  PASS  transfer admission: T1 running, T2 queued with eta_seconds=14.012728288
-  PASS  VM cd558eab-0f75-40a6-8ec4-c1256997b1de is running on the target node (GET /api/vms/cd558eab-0f75-40a6-8ec4-c1256997b1de on node B)
+  PASS  transfer admission: T1 running, T2 queued with eta_seconds=12.092366656000001
+  PASS  VM 3316795b-821b-43ce-b679-a4a630986a33 is running on the target node (GET /api/vms/3316795b-821b-43ce-b679-a4a630986a33 on node B)
   PASS  usage metering recorded egress_bytes=256.0 MiB from real transfers
   PASS  usage metering recorded 1 completed migration(s)
   PASS  billing summary reports estimated_cost_usd=0.51 with rate usd_per_gb_egress=0.04
-  PASS  work-unit artifact: 1572864-byte body survived upload with sha256=2473b95fc2db12ac23127527a3151a02ab96f4cfc9907d25364130cb6f8728b9
+  PASS  work-unit artifact: 1572864-byte body survived upload with sha256=70064784b62a6c10e4998c267003f00667086dbdb526f6cb72edd9dd743fb9f7
   PASS  work unit failed on attempt 1 and left its checkpoint available
   PASS  work unit resumed on attempt 2 and completed (resumed after checkpoint)
-  PASS  round-trip migration: VM cd558eab-0f75-40a6-8ec4-c1256997b1de runs on node A again (transfer 488cbf8c-e260-4547-9335-4c5b7f0e3b88, qemu running)
-  PASS  crash reconcile: job mig-6c883919a47547e4bd9a0302fc8d22ab reads 'interrupted' (never running), no transfer survives as running, VM cd558eab-0f75-40a6-8ec4-c1256997b1de state=running matches its qemu (alive=1), live ownership: qemu running on fab-a, fabric view restored
-  PASS  node-loss drill: guest 6ba625a9-4bee-4e2e-826a-55996f309eea is running on node B
+  PASS  round-trip migration: VM 3316795b-821b-43ce-b679-a4a630986a33 runs on node A again (transfer de74b772-e732-4a05-9709-780d5e2af951, qemu running)
+  PASS  crash reconcile: job mig-108f304eb8734e74db586f5b81d650ea reads 'interrupted' (never running), no transfer survives as running, VM 3316795b-821b-43ce-b679-a4a630986a33 state=running matches its qemu (alive=1), live ownership: qemu running on fab-a, fabric view restored
+  PASS  node-loss drill: guest 386e4eea-ea5a-42e2-9094-3fbcdb62b4ba is running on node B
   PASS  node-loss drill: no automatic failover; the dead node's guest stayed put; reconcile-on-restart only
 
   shaping used: tbf 2mbit (netem unavailable on this kernel)

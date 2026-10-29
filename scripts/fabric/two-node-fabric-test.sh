@@ -1227,7 +1227,7 @@ print(json.dumps({"name":"drill-vm","image":sys.argv[1],"memory_mb":256,"vcpus":
 
           # (2) control-plane state: the survivor must NOT rewrite the dead
           # node's row. There is no failover.
-          drill_row="$(psql_q -c "SELECT state::text || ':' || coalesce(node_id,'-') FROM vms WHERE id = '$DRILL_VM'" "$DB_B" 2>&1 | tr '\n' ' ' | cut -c1-120)"
+          drill_row="$(psql_q -c "SELECT state::text || ':' || coalesce(node_id,'-') FROM vms WHERE id = '$DRILL_VM'" "$DB_B" 2>&1 | tr -d '[:space:]')"
           say "    node B's vms row for the lost guest: ${drill_row:-<none>}"
           case "$drill_row" in
             running:*) ;;
@@ -1246,13 +1246,40 @@ print(json.dumps({"name":"drill-vm","image":sys.argv[1],"memory_mb":256,"vcpus":
 
           # (4) reconcile-on-restart: when node B comes back it repairs its
           # own bookkeeping.
+          #
+          # The reconcile only fires for a row that says 'running' while its
+          # qemu is GONE (main.go: reconcileVMState -> "!alive && state ==
+          # running" -> "stopped"). Node B's api-server is dead, but its
+          # guest qemu is still running, so the row legitimately stays
+          # 'running' and the reconcile has nothing to do. To actually
+          # exercise it, the guest's qemu has to be gone too - which is the
+          # real "the host and everything on it died" case the README
+          # describes. So the qemu is killed here, exactly as a host power
+          # loss would kill it.
+          drill_qemu_pid="$(sudo cat "$WORK/storage-b/vms/$DRILL_VM/qemu.pid" 2>/dev/null | tr -dc '0-9')"
+          if [ -n "$drill_qemu_pid" ]; then
+            say "    killing node B's guest qemu (pid $drill_qemu_pid) as a host power loss would"
+            sudo kill -KILL "$drill_qemu_pid" 2>/dev/null || true
+            sleep 2
+          else
+            DRILL_PARTS="$DRILL_PARTS no-guest-qemu-pid"
+          fi
+
           start_node b
           if wait_health "$ADDR_B:$PORT_B" 60; then
-            drill_row2="$(psql_q -c "SELECT state::text FROM vms WHERE id = '$DRILL_VM'" "$DB_B" 2>&1 | tr '\n' ' ' | cut -c1-60)"
+            drill_row2="$(psql_q -c "SELECT state::text FROM vms WHERE id = '$DRILL_VM'" "$DB_B" 2>&1 | tr -d '[:space:]')"
             say "    node B after the restart: row=${drill_row2:-<none>}"
+            # 'stopped' is the ONLY passing value here: the row said
+            # 'running' with no live qemu, so the boot reconcile had to
+            # repair it. Anything else means the reconcile did not happen
+            # (or the guest was silently resurrected, which would be a
+            # failover this platform does not have).
             case "$drill_row2" in
-              stopped) say "    the 'running' row with no live qemu was reconciled to 'stopped' (repair, not failover)" ;;
-              *)       say "    the row reads '${drill_row2:-unknown}' after the restart (reconcile-on-restart, no auto-restart)" ;;
+              stopped)
+                say "    the 'running' row with no live qemu was reconciled to 'stopped' (repair, not failover)" ;;
+              *)
+                DRILL_PARTS="$DRILL_PARTS reconcile(${drill_row2:-none})"
+                say "    expected the row to be reconciled to 'stopped', got '${drill_row2:-none}'" ;;
             esac
           else
             DRILL_PARTS="$DRILL_PARTS node-b-did-not-return"
