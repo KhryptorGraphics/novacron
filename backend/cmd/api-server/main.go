@@ -2104,8 +2104,19 @@ func registerVMMigrateRouteWithPreflight(router *mux.Router, db *sql.DB, migrate
 // re-registers every still-running VM with the manager (see adoptManagerVM) so
 // that a post-restart Stop/Delete reaches the re-adopted qemu instead of 404ing
 // on an empty in-memory map.
+//
+// Only rows this node OWNS are reconciled. The pidfile check is inherently
+// local (vmBase/<id>/qemu.pid exists only where the guest runs), so a row
+// belonging to a peer would always read "not alive" here and be flipped
+// from 'running' to 'stopped' -- corrupting the peer's state whenever two
+// nodes share one database (the topology deploy/README.md §1 describes as
+// "at least one per fabric"). vms.node_id records the owning node, so the
+// query is scoped to it; a row with no owner (NULL) is treated as this
+// node's, which is the pre-existing single-node behaviour.
 func reconcileVMState(db *sql.DB, vmBase string, manager *core_vm.VMManager) {
-	rows, err := db.Query(`SELECT id, state FROM vms`)
+	self := selfNodeID()
+	rows, err := db.Query(
+		`SELECT id, state FROM vms WHERE node_id = $1 OR node_id IS NULL OR node_id = ''`, self)
 	if err != nil {
 		logger.Warn("VM reconcile skipped: query failed", "error", err)
 		return

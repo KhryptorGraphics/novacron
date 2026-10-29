@@ -23,7 +23,7 @@ KVM-capable unit.
 
 | Requirement | Where | Notes |
 |---|---|---|
-| postgres >= 13 | at least one per fabric | Migrations create the schema and the `uuid-ossp`/`pgcrypto` extensions themselves. |
+| postgres >= 13 | one per NODE (required) | Migrations create the schema and the `uuid-ossp`/`pgcrypto` extensions themselves. Each node has its own database: `vms.node_id` records the owning node and the boot reconcile only repairs rows this node owns, so a shared database would let one node's restart touch another's guests. |
 | DB role + database | e.g. `CREATE ROLE novacron LOGIN PASSWORD '...'; CREATE DATABASE novacron OWNER novacron;` | `install-node.sh --create-db` can create the database, never the role. |
 | `qemu-system-<arch>` + `qemu-img` | compute nodes | Guests are launched directly; `qemu-system-aarch64` on arm64, `-x86_64` on x86_64. |
 | `/dev/kvm` | nodes that run VMs | Device access, not a capability — the units add the `novacron` user to the `kvm` group. Without it guests fall back to TCG (very slow) and the install warns. |
