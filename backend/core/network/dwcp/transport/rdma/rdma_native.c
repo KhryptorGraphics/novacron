@@ -166,7 +166,7 @@ rdma_context_t* rdma_init(const char* device_name, int port, int use_event_chann
         goto cleanup;
     }
 
-    // Find requested device or use first one
+    // Find requested device or use the first USABLE one.
     if (device_name && strlen(device_name) > 0) {
         for (i = 0; i < num_devices; i++) {
             if (strcmp(ibv_get_device_name(dev_list[i]), device_name) == 0) {
@@ -179,7 +179,55 @@ rdma_context_t* rdma_init(const char* device_name, int port, int use_event_chann
             goto cleanup;
         }
     } else {
-        device = dev_list[0];
+        // Do NOT blindly take dev_list[0]. rdma_check_availability() accepts
+        // ANY device with an ACTIVE port and a queryable GID, but init used
+        // the first device in the list regardless: on a host whose first
+        // device is a broken residual one (the CI runners expose mana/mana_en
+        // whose port 1 fails ibv_query_gid with EINVAL), init then died with
+        // "Failed to query GID: Invalid argument" even though the availability
+        // check had said yes. Pick the first device that passes the SAME
+        // test the availability check applies.
+        for (i = 0; i < num_devices; i++) {
+            struct ibv_context *probe = ibv_open_device(dev_list[i]);
+            if (!probe) {
+                continue;
+            }
+            struct ibv_device_attr probe_attr;
+            int probe_ports = 0, p;
+            if (!ibv_query_device(probe, &probe_attr)) {
+                probe_ports = probe_attr.phys_port_cnt;
+                if (probe_ports > 4) {
+                    probe_ports = 4; /* sanity cap, mirrors the availability check */
+                }
+            }
+            for (p = 1; p <= probe_ports; p++) {
+                struct ibv_port_attr probe_port_attr;
+                union ibv_gid probe_gid;
+                if (ibv_query_port(probe, p, &probe_port_attr)) {
+                    continue;
+                }
+                if (probe_port_attr.state != IBV_PORT_ACTIVE) {
+                    continue;
+                }
+                if (ibv_query_gid(probe, p, ctx->gid_index, &probe_gid)) {
+                    continue;
+                }
+                device = dev_list[i];
+                if (ctx->port != p) {
+                    /* use the port that actually answered */
+                    ctx->port = p;
+                }
+                break;
+            }
+            ibv_close_device(probe);
+            if (device) {
+                break;
+            }
+        }
+        if (!device) {
+            set_error("No RDMA device with an ACTIVE port and queryable GID");
+            goto cleanup;
+        }
     }
 
     // Open device
