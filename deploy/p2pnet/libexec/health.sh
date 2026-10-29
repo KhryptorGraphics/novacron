@@ -59,8 +59,13 @@ check_handshake() {
     fi
 }
 
+# Total and steal jiffies of all CPUs. A throughput FAIL reports the steal share of the iperf window: on a
+# shared hypervisor (the 3-VM lab on one host) a starved vCPU lowers throughput without any p2pnet defect
+# (measured: 344 Mbit at ~3 % steal, 80-280 Mbit at 20-60 % steal for the same configuration).
+cpu_total_steal() { awk '/^cpu /{t=0; for (i=2; i<=9; i++) t+=$i; print t, $9; exit}' /proc/stat; }
+
 check_iperf() {
-    local peer=$1 ovl4=$2 target=$3 rtt json errfile rc=0 mbit reason
+    local peer=$1 ovl4=$2 target=$3 rtt json errfile rc=0 mbit reason tot0 st0 tot1 st1 steal
     if [[ ! $target =~ ^[0-9]+$ ]]; then
         emit FAIL "iperf.overlay.$peer" unavailable - 'no inventory path target'
         return 0
@@ -68,7 +73,10 @@ check_iperf() {
     rtt=$(timeout 20 ping -n -c 1 -W 2 "$ovl4" 2>/dev/null | sed -n 's/.* = [^/]*\/\([^/]*\)\/.*/\1/p' || true)
     errfile=$(mktemp)
     # -O 1 drops the slow-start second: the target is 95 % of the steady-state overlay ceiling.
+    read -r tot0 st0 < <(cpu_total_steal)
     json=$(timeout 20 "$MPTCP_EXEC" /usr/bin/iperf3 -c "$ovl4" -P 4 -O 1 -t 3 -J 2>"$errfile" </dev/null) || rc=$?
+    read -r tot1 st1 < <(cpu_total_steal)
+    steal=$(awk -v t=$((tot1 - tot0)) -v s=$((st1 - st0)) 'BEGIN { printf "%.1f", (t > 0 ? 100 * s / t : 0) }')
     mbit=$(jq -r '.end.sum_received.bits_per_second // empty | . / 1000000 | floor' <<<"$json" 2>/dev/null || true)
     if (( rc != 0 )) || [[ ! $mbit =~ ^[0-9]+$ ]]; then
         reason=$(jq -r '.error // empty' <<<"$json" 2>/dev/null || true)
@@ -86,7 +94,7 @@ check_iperf() {
         emit PASS "iperf.overlay.$peer" "${mbit}Mbit" ">=${target}Mbit" "RTT=${rtt:-unknown}ms; path ${path}"
     else
         local path="${P2P_NODE:-unknown}->${peer}"
-        emit FAIL "iperf.overlay.$peer" "${mbit}Mbit" ">=${target}Mbit" "RTT=${rtt:-unknown}ms; path ${path}; overlay throughput below the inventory-derived target"
+        emit FAIL "iperf.overlay.$peer" "${mbit}Mbit" ">=${target}Mbit" "RTT=${rtt:-unknown}ms; path ${path}; overlay throughput below the inventory-derived target; guest CPU steal ${steal}% during the run$(awk -v s="$steal" 'BEGIN { if (s >= 5) print " (host CPU contention lowers throughput; rerun on an idle host before treating this as a p2pnet defect)" }')"
     fi
 }
 

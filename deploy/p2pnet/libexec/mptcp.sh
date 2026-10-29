@@ -155,7 +155,8 @@ _mptcp_peer_verify() {
   pid=$!
   sleep 2
   output=$(ss -Mni dst "$address" 2>/dev/null || true)
-  if grep -Eq 'tcp-ulp-mptcp|MPTCP|subflows:' <<<"$output"; then
+  if grep -Eq 'tcp-ulp-mptcp|MPTCP|subflows(_max)?:' <<<"$output"; then
+    # ss prints `subflows:N` only once an extra subflow exists; every MPTCP socket carries `subflows_max:`.
     subflows=$(sed -nE 's/.*subflows:([0-9]+).*/\1/p' <<<"$output" | head -n1)
     subflows=${subflows:-0}
     if (( dual == 0 || subflows >= 1 )); then

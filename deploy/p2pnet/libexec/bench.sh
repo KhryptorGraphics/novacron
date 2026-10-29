@@ -16,10 +16,15 @@ _bench_install() {
   require_root
   load_env
   need_cmd systemctl iperf3 ss
+  local was_active=0 unit_changed=0
+  if systemctl is-active --quiet "$BENCH_UNIT"; then was_active=1; fi
   install_unit "$P2P_PREFIX/systemd/$BENCH_UNIT"
+  if (( UNITS_CHANGED )); then unit_changed=1; fi
   reload_units
   if ! systemctl is-enabled --quiet "$BENCH_UNIT" || ! systemctl is-active --quiet "$BENCH_UNIT"; then CHANGED=$((CHANGED + 1)); fi
   systemctl enable --now "$BENCH_UNIT"
+  # enable --now leaves an already-running listener on its old command line.
+  if (( was_active && unit_changed )); then systemctl restart "$BENCH_UNIT"; fi
   mark_installed "$BENCH_COMPONENT"
   printf 'p2pnet[bench] install complete: changed=%s\n' "$CHANGED"
 
@@ -34,6 +39,10 @@ _bench_verify() {
   local fail=0
   if systemctl is-active --quiet "$BENCH_UNIT"; then check PASS bench.service active; else check FAIL bench.service inactive; fail=1; fi
   if ss -Hltn | grep -Fq "$P2P_OVL4:5201"; then check PASS bench.listener "$P2P_OVL4:5201"; else check FAIL bench.listener "not listening on $P2P_OVL4:5201"; fail=1; fi
+  if [[ -z ${P2P_PLANE2_IP:-} ]]; then :
+  elif ! ip -o -4 addr show dev wg1 2>/dev/null | grep -Fq " $P2P_PLANE2_IP/"; then check SKIP bench.listener.plane2 "$P2P_PLANE2_IP not configured yet (wg1 comes up with: p2pnet mptcp install)"
+  elif ss -Hltn | grep -Fq "$P2P_PLANE2_IP:5201"; then check PASS bench.listener.plane2 "$P2P_PLANE2_IP:5201"
+  else check FAIL bench.listener.plane2 "not listening on $P2P_PLANE2_IP:5201"; fail=1; fi
   (( fail == 0 )) || return 1
 }
 

@@ -75,7 +75,7 @@ swarm_publish() {
         tmp=$(mktemp)
         printf 'put %s /torrents/%s.torrent.tmp\nrename /torrents/%s.torrent.tmp /torrents/%s.torrent\n' "$torrent" "$name" "$name" "$name" >"$tmp"
         chmod 0644 "$tmp"
-        if ! runuser -u p2pbulk -- env P2PNET_SSH_KEY=/var/lib/p2pnet/bulk/.ssh/id_ed25519 sftp -S /opt/p2pnet/libexec/ssh-p2p -P 2223 -b "$tmp" "p2pbulk@$address"; then log ERROR "failed publishing $name to $peer"; failed=1; fi
+        if ! runuser -u p2pbulk -- env P2PNET_SSH_KEY=/var/lib/p2pnet/bulk/.ssh/id_ed25519 sftp -S /opt/p2pnet/libexec/ssh-p2p -P 2223 -b "$tmp" "p2pbulk@$address" </dev/null; then log ERROR "failed publishing $name to $peer"; failed=1; fi
         rm -f -- "$tmp"
     done < <(swarm_peers)
     ((failed == 0)) || return 1

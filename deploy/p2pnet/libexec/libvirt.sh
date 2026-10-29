@@ -117,7 +117,7 @@ PY
   while IFS=$'\t' read -r peer ovl _; do
     [[ -n $peer ]] || continue
     uri="qemu+ssh://p2pvirt@${ovl}/system?command=/opt/p2pnet/libexec/ssh-p2p&no_tty=1"
-    if timeout 15 virsh -c "$uri" version >/dev/null 2>&1; then check PASS "libvirt.peer.$peer" 'remote libvirt reachable'; else check FAIL "libvirt.peer.$peer" 'remote libvirt connection failed'; failed=1; fi
+    if timeout 15 virsh -c "$uri" version >/dev/null 2>&1 </dev/null; then check PASS "libvirt.peer.$peer" 'remote libvirt reachable'; else check FAIL "libvirt.peer.$peer" 'remote libvirt connection failed'; failed=1; fi
   done < <(inv peers --node "$(self_node)" | cut -f1,2)
   verify_done "$failed"
 }

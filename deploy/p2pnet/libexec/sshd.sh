@@ -79,14 +79,14 @@ sshd_verify() {
   done
   while IFS=$'\t' read -r peer ovl4 _ _ _ _ _ _ _ _ _ replica; do
     [[ -n $peer && $peer != "$P2P_NODE" ]] || continue
-    if timeout 15 /opt/p2pnet/libexec/ssh-p2p -p 2222 "p2prepl@$ovl4" "state $replica/$P2P_NODE/_probe" 2>/dev/null | sed -n '1p' | grep -Fxq 'token=-'; then
+    if timeout 15 /opt/p2pnet/libexec/ssh-p2p -p 2222 "p2prepl@$ovl4" "state $replica/$P2P_NODE/_probe" 2>/dev/null </dev/null | sed -n '1p' | grep -Fxq 'token=-'; then
       check PASS "sshd.replication.$peer" guard-state
     else check FAIL "sshd.replication.$peer" state-probe-failed; fi
-    if timeout 15 /opt/p2pnet/libexec/ssh-p2p -p 2222 "p2prepl@$ovl4" id >/dev/null 2>&1; then
+    if timeout 15 /opt/p2pnet/libexec/ssh-p2p -p 2222 "p2prepl@$ovl4" id >/dev/null 2>&1 </dev/null; then
       check FAIL "sshd.guard.$peer" unexpected-command-allowed
     else check PASS "sshd.guard.$peer" id-denied; fi
     # shellcheck disable=SC2016
-    if timeout 15 runuser -u p2pbulk -- env P2PNET_SSH_KEY=/var/lib/p2pnet/bulk/.ssh/id_ed25519 bash -c 'printf "ls /torrents\\n" | sftp -S /opt/p2pnet/libexec/ssh-p2p -P 2223 -b - "p2pbulk@$1"' _ "$ovl4" >/dev/null 2>&1; then
+    if timeout 15 runuser -u p2pbulk -- env P2PNET_SSH_KEY=/var/lib/p2pnet/bulk/.ssh/id_ed25519 bash -c 'printf "ls /torrents\\n" | sftp -S /opt/p2pnet/libexec/ssh-p2p -P 2223 -b - "p2pbulk@$1"' _ "$ovl4" >/dev/null 2>&1 </dev/null; then
       check PASS "sshd.bulk.$peer" sftp-list
     else check FAIL "sshd.bulk.$peer" sftp-failed; fi
   done < <(inv peers --node "$P2P_NODE")
