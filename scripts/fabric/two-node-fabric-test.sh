@@ -29,7 +29,8 @@
 # Env:     FABRIC_SHAPE_MBIT=50   link rate to shape to (0 disables shaping)
 #          FABRIC_DELAY_MS=40     delay to add when netem is available
 #          FABRIC_REQUIRE_ALL=1   treat SKIPs as failures (used in CI)
-#          FABRIC_KEEP=1          leave nodes/netns/databases behind for inspection
+#          FABRIC_KEEP=1          leave netns/databases/logs behind for inspection
+#                               (the node processes are always stopped)
 #          FABRIC_ROUNDTRIP=0     skip assertions 6-7 (round trip + crash reconcile)
 #
 # Exit codes: 0 = every assertion passed (skips allowed unless FABRIC_REQUIRE_ALL),
@@ -186,7 +187,8 @@ cleanup() {
     sudo kill -KILL "${victims[@]}" 2>/dev/null
   fi
   if [ "$KEEP" = "1" ]; then
-    say "  FABRIC_KEEP=1 — leaving nodes, netns ($NS_B), veth pair and databases ($DB_A, $DB_B) in place"
+    say "  FABRIC_KEEP=1 — leaving netns ($NS_B), veth pair and databases ($DB_A, $DB_B) in place"
+    say "  note: the node processes were stopped above (cleanup kills them before returning)"
     say "  logs: $WORK"
     return $rc
   fi

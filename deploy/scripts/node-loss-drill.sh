@@ -40,7 +40,9 @@ usage() {
 
 Options:
   --report FILE  write the drill report to FILE (default: stdout only)
-  --keep         leave the drill's nodes/netns/databases up for inspection
+  --keep         leave the drill's netns/veth pair/databases/logs up for
+                 inspection (the node processes are always stopped -- the
+                 harness's cleanup kills them before it returns)
   -h, --help     this text
 EOF
 }
@@ -63,12 +65,24 @@ export FABRIC_DRILL=1
 
 if [ -n "$REPORT" ]; then
   mkdir -p "$(dirname "$REPORT")"
-  # The harness prints its own transcript; tee it into the report so the
-  # committed artifact is the drill's real output, not a summary of it.
+  # The harness prints its own transcript; tee it into a TEMP file so a failed
+  # run can never truncate the committed evidence artifact (tee straight into
+  # $REPORT would empty it at startup, leaving criterion-7 evidence holding
+  # only the header block of a failed drill). The report is copied into place
+  # only after the drill passes; on failure the transcript is left at the
+  # temp path and the old report is preserved untouched.
+  TMP_REPORT="$(mktemp "${TMPDIR:-/tmp}/node-loss-drill.XXXXXX.txt")"
   set +e
-  bash "$HARNESS" 2>&1 | tee "$REPORT"
+  bash "$HARNESS" 2>&1 | tee "$TMP_REPORT"
   RC="${PIPESTATUS[0]}"
   set -e
+  if [ "$RC" -eq 0 ]; then
+    cp "$TMP_REPORT" "$REPORT"
+    printf 'drill report written to %s\n' "$REPORT"
+  else
+    printf 'drill FAILED (exit %s) - %s left untouched; transcript: %s\n' \
+      "$RC" "$REPORT" "$TMP_REPORT" >&2
+  fi
   exit "$RC"
 fi
 

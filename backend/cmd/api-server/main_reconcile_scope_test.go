@@ -2,13 +2,9 @@ package main
 
 import (
 	"database/sql"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/khryptorgraphics/novacron/backend/core/auth"
 )
 
 // TestReconcileVMStateOnlyTouchesOwnRows proves the boot reconcile never
@@ -111,9 +107,3 @@ func TestReconcileVMStateQueryIsScopedToSelf(t *testing.T) {
 		t.Fatalf("the reconcile query must be scoped to this node: %v", err)
 	}
 }
-
-// Keep the imports used by the sibling test file in this package honest.
-var _ = os.Getenv
-var _ = filepath.Join
-var _ = jwt.NewWithClaims
-var _ = auth.NewSimpleAuthManager
