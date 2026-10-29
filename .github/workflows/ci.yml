@@ -372,6 +372,12 @@ jobs:
       - name: Run two-node fabric acceptance test
         env:
           FABRIC_REQUIRE_ALL: "1"
+          # The node-loss drill (deploy/README.md §7) runs here too: it is the
+          # only automated proof of the documented node-loss behaviour (no
+          # automatic failover, reconcile-on-restart only). It was previously
+          # exercised only by the committed evidence artifact, so a regression
+          # in the boot reconcile would not have been caught by CI.
+          FABRIC_DRILL: "1"
           FABRIC_PGHOST: 127.0.0.1
           FABRIC_PGPORT: "5432"
           FABRIC_PGUSER: postgres
