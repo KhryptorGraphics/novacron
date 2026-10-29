@@ -1,0 +1,85 @@
+
+=== prerequisites
+  toolchain, sudo, postgres: ok
+  qemu: ok (qemu-system-aarch64)
+  socat: ok
+
+=== build
+  built /tmp/fabric-test-797815/api-server
+
+=== databases
+NOTICE:  database "novacron_fab_a_797815" does not exist, skipping
+NOTICE:  database "novacron_fab_b_797815" does not exist, skipping
+  novacron_fab_a_797815 and novacron_fab_b_797815 created and migrated
+
+=== network
+  veth-fh-797815=10.96.0.1 <-> fabtest-b-797815:veth-fn-797815=10.96.0.2
+  PASS  inter-node path traverses the veth (ip route get 10.96.0.2 -> dev veth-fh-797815)
+  shaping: tbf 50mbit (netem unavailable on this kernel)
+
+=== start nodes
+  PASS  node A healthy on 10.96.0.1:18190
+  PASS  node B healthy on 10.96.0.2:18191 (inside fabtest-b-797815)
+  PASS  operator account usable on both nodes
+
+=== assertion 1: membership and link profile
+  PASS  node B joined and is reachable from A (GET /api/cluster/nodes)
+    measured outbound link: 44.7 Mbps local->fab-b, rtt 0.418 ms (shaping: tbf 50mbit (netem unavailable on this kernel))
+  PASS  link profile carries a fresh outbound throughput (44.7 Mbps)
+
+=== assertion 2: job dispatched to the peer
+  PASS  job 7d58e7c7-2f92-478b-bd4f-1503fc23e3dd placed on the peer (node_id=fab-b)
+  PASS  job completed on the peer and its stdout was fetched back through node A
+
+=== assertion 3: second transfer to a busy link is queued with an ETA
+  PASS  transfer admission: T1 running, T2 queued with eta_seconds=12.018062464
+
+=== assertion 4: cross-node migration moves the VM to the target
+  PASS  VM f3d95300-a2e8-4bff-b8f8-1dc64512c36f is running on the target node (GET /api/vms/f3d95300-a2e8-4bff-b8f8-1dc64512c36f on node B)
+
+=== assertion 5: billing usage reflects measured migration egress
+  PASS  usage metering recorded egress_bytes=256.0 MiB from real transfers
+  PASS  usage metering recorded 1 completed migration(s)
+  PASS  billing summary reports estimated_cost_usd=0.51 with rate usd_per_gb_egress=0.04
+
+=== assertion 5b: work-unit API stages a >1 MiB input and resumes from its checkpoint
+  PASS  work-unit artifact: 1572864-byte body survived upload with sha256=6f6d584a241bf9b9ce74bd4ad738ca686403b60c2dae2cd66b8fca93099dfa2f
+  PASS  work unit failed on attempt 1 and left its checkpoint available
+  PASS  work unit resumed on attempt 2 and completed (resumed after checkpoint)
+
+=== assertion 6: round-trip migration (B -> A) over node A's stale dest state
+    node A still holds /tmp/fabric-test-797815/storage-a/vms/f3d95300-a2e8-4bff-b8f8-1dc64512c36f/disk.qcow2: yes
+    round-trip transfer cf29452d-bea1-4898-82df-789946ff3479 submitted on node B (status running)
+    node A after the round trip: state=running node_id=fab-a qemu=running
+  PASS  round-trip migration: VM f3d95300-a2e8-4bff-b8f8-1dc64512c36f runs on node A again (transfer cf29452d-bea1-4898-82df-789946ff3479, qemu running)
+
+=== assertion 7: node A killed mid-migration reconciles honestly on restart
+    migration job mig-011c8a3e8cba73420bf3b9b3e4ac7a3b accepted; waiting until it is genuinely in flight
+  SKIP  crash reconcile (migration completed before the kill (nothing was mid-flight to crash))
+
+=== summary
+  PASS  inter-node path traverses the veth (ip route get 10.96.0.2 -> dev veth-fh-797815)
+  PASS  node A healthy on 10.96.0.1:18190
+  PASS  node B healthy on 10.96.0.2:18191 (inside fabtest-b-797815)
+  PASS  operator account usable on both nodes
+  PASS  node B joined and is reachable from A (GET /api/cluster/nodes)
+  PASS  link profile carries a fresh outbound throughput (44.7 Mbps)
+  PASS  job 7d58e7c7-2f92-478b-bd4f-1503fc23e3dd placed on the peer (node_id=fab-b)
+  PASS  job completed on the peer and its stdout was fetched back through node A
+  PASS  transfer admission: T1 running, T2 queued with eta_seconds=12.018062464
+  PASS  VM f3d95300-a2e8-4bff-b8f8-1dc64512c36f is running on the target node (GET /api/vms/f3d95300-a2e8-4bff-b8f8-1dc64512c36f on node B)
+  PASS  usage metering recorded egress_bytes=256.0 MiB from real transfers
+  PASS  usage metering recorded 1 completed migration(s)
+  PASS  billing summary reports estimated_cost_usd=0.51 with rate usd_per_gb_egress=0.04
+  PASS  work-unit artifact: 1572864-byte body survived upload with sha256=6f6d584a241bf9b9ce74bd4ad738ca686403b60c2dae2cd66b8fca93099dfa2f
+  PASS  work unit failed on attempt 1 and left its checkpoint available
+  PASS  work unit resumed on attempt 2 and completed (resumed after checkpoint)
+  PASS  round-trip migration: VM f3d95300-a2e8-4bff-b8f8-1dc64512c36f runs on node A again (transfer cf29452d-bea1-4898-82df-789946ff3479, qemu running)
+  SKIP  crash reconcile (migration completed before the kill (nothing was mid-flight to crash))
+
+  shaping used: tbf 50mbit (netem unavailable on this kernel)
+  pass=17 fail=0 skip=1
+RESULT: FAIL (FABRIC_REQUIRE_ALL=1 and 1 assertion(s) were skipped)
+
+=== cleanup
+  nodes stopped, netns/veth removed, test databases dropped
