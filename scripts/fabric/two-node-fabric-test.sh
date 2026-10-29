@@ -283,6 +283,27 @@ fi
 say "  shaping: $SHAPING_MODE"
 [ "$SHAPING_MODE" = "none" ] && skip "link shaping" "tc could not shape the veth; timings will be LAN-speed"
 
+# Re-shape the veth pair to a new rate. Assertion 7 needs the migration to
+# still be copying bytes when the kill lands; at the default 50 Mbit a
+# cirros-sized guest finishes its block migration in well under a second, so
+# the in-flight window can never be hit. Slowing the link makes the crash
+# land mid-migration deterministically instead of racing it.
+reshape_link() { # reshape_link <mbit>
+  local mbit="$1"
+  sudo tc qdisc del dev "$VETH_H" root 2>/dev/null
+  sudo ip netns exec "$NS_B" tc qdisc del dev "$VETH_N" root 2>/dev/null
+  if sudo ip netns exec "$NS_B" tc qdisc add dev "$VETH_N" root netem rate "${mbit}mbit" delay "${DELAY_MS}ms" 2>/dev/null \
+     && sudo tc qdisc add dev "$VETH_H" root netem rate "${mbit}mbit" delay "${DELAY_MS}ms" 2>/dev/null; then
+    SHAPING_MODE="netem ${mbit}mbit/${DELAY_MS}ms"
+  elif sudo tc qdisc add dev "$VETH_H" root tbf rate "${mbit}mbit" burst 32kbit latency 400ms 2>/dev/null \
+     && sudo ip netns exec "$NS_B" tc qdisc add dev "$VETH_N" root tbf rate "${mbit}mbit" burst 32kbit latency 400ms 2>/dev/null; then
+    SHAPING_MODE="tbf ${mbit}mbit (netem unavailable on this kernel)"
+  else
+    SHAPING_MODE="none (tc reshaping unavailable)"
+  fi
+  say "  reshaping link: $SHAPING_MODE"
+}
+
 # --- start the two nodes ----------------------------------------------------
 
 start_node() { # start_node <a|b>
@@ -892,6 +913,10 @@ elif [ "$HAVE_QEMU" = "0" ]; then
 elif [ "${ROUNDTRIP_OK:-0}" != "1" ]; then
   skip "crash reconcile" "no VM running on node A to migrate (see the round-trip assertion)"
 else
+  # Slow the link first: at the default rate the guest's block migration
+  # finishes faster than the poll loop can observe it, and the assertion
+  # skipped instead of crashing a migration that was actually in flight.
+  reshape_link "${FABRIC_CRASH_SHAPE_MBIT:-2}"
   job_json="$(api a POST "/api/vms/$VM_ID/migrate/async" "{\"target_node\":\"fab-b\",\"migration_type\":\"block\",\"target_addr\":\"$ADDR_B:$PORT_B\"}")"
   JOB_ID="$(json_get 'd.get("job_id","")' "$job_json")"
   if [ -z "$JOB_ID" ]; then
@@ -902,8 +927,12 @@ else
     INFLIGHT=0; INFLIGHT_SRC=""; jst=""
     deadline=$(( $(date +%s) + 45 ))
     while [ "$(date +%s)" -lt "$deadline" ]; do
-      jst="$(json_get 'd.get("status","")' "$(api a GET "/api/migrate/jobs/$JOB_ID")")"
-      [ "$jst" = "running" ] || break
+      # Read the STRONG evidence first: a live drive-mirror block job on the
+      # source qemu proves the migration is genuinely copying bytes. The old
+      # order read the job status first and broke out of the loop the moment
+      # it was no longer "running", so a migration that completed inside one
+      # poll interval was misreported as "completed before the kill" and the
+      # assertion skipped instead of running.
       if [ "$(vm_qemu_block_jobs a "$VM_ID")" != "[]" ]; then
         INFLIGHT=1; INFLIGHT_SRC="drive-mirror block job running on node A's qemu"
         break  # the source qemu is mirroring right now
@@ -917,7 +946,9 @@ else
         fi
       done
       [ "$INFLIGHT" = "1" ] && break
-      sleep 2
+      jst="$(json_get 'd.get("status","")' "$(api a GET "/api/migrate/jobs/$JOB_ID")")"
+      [ "$jst" = "running" ] || break
+      sleep 1
     done
     if [ "$INFLIGHT" != "1" ]; then
       case "$jst" in
