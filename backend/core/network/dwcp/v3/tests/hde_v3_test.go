@@ -34,26 +34,31 @@ func TestHDEv3MLCompression(t *testing.T) {
 		testData := make([]byte, 1024*1024) // 1MB
 		rand.Read(testData)
 
-		// Test local compression (fast)
-		localStart := time.Now()
+		// Local tier (zstd level 0) and Global tier (zstd level 9).
 		localCompressed, err := hde.CompressMemory("vm-1", testData, dwcp.CompressionLocal)
-		localTime := time.Since(localStart)
 		require.NoError(t, err)
 
-		// Test global compression (max)
-		globalStart := time.Now()
 		globalCompressed, err := hde.CompressMemory("vm-2", testData, dwcp.CompressionGlobal)
-		globalTime := time.Since(globalStart)
 		require.NoError(t, err)
 
-		// Global should compress better but take longer
+		// The tier must actually select a stronger compressor: Global (level 9)
+		// has to produce a smaller payload than Local (level 0). This is the
+		// observable consequence of the tier mapping.
+		//
+		// It used to also assert that Global took LONGER than Local, measured
+		// in wall-clock time with a 10% tolerance. That assertion tested how
+		// fast the host happened to be, not what the code does: on a loaded
+		// machine the two tiers are within a fraction of a millisecond of
+		// each other and the assertion failed on the ARM64 census leg even
+		// though the tier mapping was correct (measured: local 5.77ms vs
+		// global 4.84ms - global was FASTER here, on a 14-core host that
+		// was also running unrelated work). Timing is incidental to the
+		// contract, so it is not asserted; the ratio is.
 		assert.Less(t, len(globalCompressed), len(localCompressed),
-			"Global compression should achieve better ratio")
-		assert.Greater(t, globalTime, localTime*9/10, // Allow some variance
-			"Global compression should take longer than local")
+			"Global compression (zstd level 9) should achieve a better ratio than Local (level 0)")
 
-		t.Logf("✅ ML compression: Local %d bytes in %v, Global %d bytes in %v",
-			len(localCompressed), localTime, len(globalCompressed), globalTime)
+		t.Logf("✅ ML compression: Local %d bytes, Global %d bytes",
+			len(localCompressed), len(globalCompressed))
 	})
 
 	t.Run("adaptive_compression_ratio", func(t *testing.T) {

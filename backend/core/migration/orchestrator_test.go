@@ -72,7 +72,13 @@ func TestLiveMigrationOrchestrator(t *testing.T) {
 			Force:    false,
 		}
 
-		migrationID, err := orchestrator.MigrateVM(ctx, "test-vm-1", "node-1", "localhost:9876", options)
+		// Use the listener's actual address rather than a hardcoded port: the
+		// fixed ":9876" collided with anything else on the host listening there
+		// (a local MCP server held it), which failed the whole package for a
+		// reason that has nothing to do with the orchestrator.
+		destination := listener.Addr().String()
+
+		migrationID, err := orchestrator.MigrateVM(ctx, "test-vm-1", "node-1", destination, options)
 		require.NoError(t, err)
 		assert.NotEmpty(t, migrationID)
 
@@ -697,7 +703,12 @@ func getTestConfig(t *testing.T) MigrationConfig {
 }
 
 func startTestServer() (net.Listener, error) {
-	listener, err := net.Listen("tcp", ":9876")
+	// Listen on an ephemeral port ("127.0.0.1:0") instead of a fixed one.
+	// The fixed ":9876" collided with anything else on the host already
+	// listening there, which failed the entire package for a reason that has
+	// nothing to do with the orchestrator. Callers use listener.Addr() to
+	// learn the address.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
