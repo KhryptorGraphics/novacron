@@ -450,6 +450,14 @@ login_resp="$(curl -sS --max-time 20 -X POST "http://$ADDR_A:$PORT_A/api/auth/lo
   -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASS\"}")"
 tok="$(json_get 'd.get("token","")' "$login_resp")"
 [ -n "$tok" ] && echo "$tok" > "$WORK/token-a"
+# Node B has its own users table, so it needs the same promotion and a fresh
+# login: the drill creates its guest ON node B, and the pre-promotion token
+# there still carries role "viewer".
+psql_q -d "$DB_B" -c "UPDATE users SET role = 'admin' WHERE email = '$ADMIN_EMAIL'" >/dev/null 2>&1
+login_resp_b="$(curl -sS --max-time 20 -X POST "http://$ADDR_B:$PORT_B/api/auth/login" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASS\"}")"
+tok_b="$(json_get 'd.get("token","")' "$login_resp_b")"
+[ -n "$tok_b" ] && echo "$tok_b" > "$WORK/token-b"
 # --- assertion 2: job dispatched to the peer --------------------------------
 head2 "assertion 2: job dispatched to the peer"
 JOB_MARKER="fabric-job-$RUN_ID"
@@ -560,7 +568,7 @@ fi
 # --- assertion 5: usage metering recorded the fabric's real activity ---------
 
 head2 "assertion 5: billing usage reflects measured migration egress"
-BILL_OK=0; BILL_EGRESS=0; BILL_MIGRATIONS=0
+BILL_OK=0; BILL_EGRESS=0; BILL_MIGRATIONS=0; BILL_RATE=0; BILL_COST=0
 summary_json="$(api a GET /api/billing/usage/summary)"
 if [ -n "$summary_json" ] && [ "$summary_json" != "null" ]; then
   BILL_EGRESS="$(json_get 'd.get("totals",{}).get("egress_bytes",0)' "$summary_json")"
@@ -835,6 +843,23 @@ pidfile_alive() {
   [ -n "$pid" ] || return 1
   kill -0 "$pid" 2>/dev/null || return 1
   tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q -- "$2"
+}
+
+# pidfile_alive_root <pidfile> <vm-id>: the same rule for a guest whose
+# storage is owned by the ROOT api-server inside node B's namespace. That
+# api-server creates its VM directory 0700 root:root, so the harness (as the
+# invoking user) cannot read the pidfile at all -- an EACCES, not a dead
+# guest. Node A's own storage is user-readable, so it uses pidfile_alive.
+pidfile_alive_root() {
+  local pid
+  sudo test -r "$1" 2>/dev/null || return 1
+  # `sudo tr ... < "$file"` would redirect in the CALLING shell (unprivileged),
+  # so the read would still fail with EACCES. The privileged process has to do
+  # the reading: `sudo cat file | tr ...`.
+  pid="$(sudo cat "$1" 2>/dev/null | tr -dc '0-9')"
+  [ -n "$pid" ] || return 1
+  sudo kill -0 "$pid" 2>/dev/null || return 1
+  sudo cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' ' ' | grep -q -- "$2"
 }
 
 # --- assertion 6: bounce-back migration B -> A ------------------------------
@@ -1112,6 +1137,146 @@ else
       ok "crash reconcile: job $JOB_ID reads '${jst}' (never running), no transfer survives as running, VM $VM_ID state=${a_state} matches its qemu (alive=$PA), live ownership: $OWN_BASIS, fabric view restored"
     else
       bad "crash reconcile after node A's crash:$FAILED_PARTS"
+    fi
+  fi
+fi
+
+# --- node-loss drill (opt-in) ------------------------------------------------
+#
+# FABRIC_DRILL=1 runs the node-loss drill documented in deploy/README.md §7:
+# what actually happens when a node dies with a VM on it. It lives here, after
+# assertion 7 and before cleanup, because the drill needs a LIVE two-node
+# fabric - the harness's own cleanup kills the node processes even under
+# FABRIC_KEEP=1, so a separate script could not reuse them.
+#
+# The drill asserts the DOCUMENTED behaviour, including the parts that are
+# deliberately not automatic: no automatic failover, reconcile-on-restart
+# only, and a guest on a dead node is a single point of failure.
+if [ "${FABRIC_DRILL:-0}" = "1" ]; then
+  head2 "node-loss drill: what happens when a node dies with a VM on it"
+  DRILL_OK=0; DRILL_PARTS=""
+
+  # The guest under test must genuinely live on node B when node B dies, so it
+  # is created pinned to B. (The fabric transfer runner never deletes the
+  # source row, so a guest migrated back to node A would leave a stale row
+  # rather than a running guest - losing that would prove nothing.)
+  drill_img=""
+  for c in "$WORK"/cirros*.img "${IMG:-}"; do
+    [ -n "$c" ] && [ -f "$c" ] && drill_img="$c" && break
+  done
+  if [ -z "$drill_img" ]; then
+    bad "node-loss drill: no bootable image available to create the drill's guest (the drill did not run)"
+  else
+    drill_body="$(python3 -c '
+import json,sys
+print(json.dumps({"name":"drill-vm","image":sys.argv[1],"memory_mb":256,"vcpus":1,"disk_size_gb":1,"node_id":"fab-b"}))
+' "$drill_img")"
+    drill_vm="$(api b POST /api/vms "$drill_body")"
+    DRILL_VM="$(json_get 'd.get("id","")' "$drill_vm")"
+    if [ -z "$DRILL_VM" ]; then
+      bad "node-loss drill: could not create the drill's guest on node B: $drill_vm (the drill did not run)"
+    else
+      # Create and start on the OWNING node: a create pinned to fab-b is
+      # dispatched to node B, so its row lands in DB_B and node A has no row
+      # for it - starting it through node A would 404 and no qemu would run.
+      api b POST "/api/vms/$DRILL_VM/start" >/dev/null 2>&1 || true
+      sleep 6
+      # Confirm node B really runs it (the pidfile is the authority).
+      deadline=$(( $(date +%s) + 60 )); drill_owned=""
+      while [ "$(date +%s)" -lt "$deadline" ]; do
+        if pidfile_alive_root "$WORK/storage-b/vms/$DRILL_VM/qemu.pid" "$DRILL_VM"; then drill_owned=1; break; fi
+        sleep 2
+      done
+      if [ -z "$drill_owned" ]; then
+        bad "node-loss drill: the drill's guest never came up on node B (the drill did not run)"
+      else
+        ok "node-loss drill: guest $DRILL_VM is running on node B"
+
+        # (1) detection: node A must report node B unreachable.
+        # Node B's api-server is started as `sudo ip netns exec ... setsid
+        # nohup $BIN`, so its recorded pid file names sudo's, not the
+        # server's. Matching the binary path with pgrep -f also matches that
+        # wrapper (the path is in ITS argv too), so match on the process
+        # whose FIRST argv element IS the binary: only the exec'd server
+        # looks like that.
+        drill_a_pid="$(tr -dc '0-9' <"$WORK/node-a.pid" 2>/dev/null || true)"
+        drill_b_pid=""
+        for p in $(sudo pgrep -f "api-server" 2>/dev/null); do
+          [ "$p" = "$drill_a_pid" ] && continue
+          first_arg="$(sudo cat "/proc/$p/cmdline" 2>/dev/null | tr '\0' '\n' | head -1)"
+          [ "$first_arg" = "$BIN" ] && { drill_b_pid="$p"; break; }
+        done
+        if [ -n "$drill_b_pid" ]; then
+          say "    SIGKILLing node B's api-server (pid $drill_b_pid) -- its qemu keeps running, which is the point"
+          # sudo: node B's api-server runs as root inside its namespace (the
+          # harness starts it under `sudo ip netns exec`), so an unprivileged
+          # kill would fail with EPERM and the node would never die.
+          sudo kill -KILL "$drill_b_pid" 2>/dev/null || true
+          # The heartbeat is a 30 s tick, and the cluster's own reachability
+          # logic needs the link's measured_at to go stale, so detection is
+          # not immediate: give it several heartbeat intervals before
+          # declaring that the dead node is still reported as reachable.
+          deadline=$(( $(date +%s) + 180 )); drill_reachable="unknown"
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            drill_reachable="$(json_get '[n.get("reachable") for n in d.get("nodes",[]) if n.get("node_id")=="fab-b"][0] if [n for n in d.get("nodes",[]) if n.get("node_id")=="fab-b"] else False' "$(api a GET /api/cluster/nodes)")"
+            [ "$drill_reachable" = "False" ] && break
+            sleep 3
+          done
+          say "    node A reports fab-b reachable=$drill_reachable"
+          [ "$drill_reachable" = "False" ] || DRILL_PARTS="$DRILL_PARTS detection($drill_reachable)"
+
+          # (2) control-plane state: the survivor must NOT rewrite the dead
+          # node's row. There is no failover.
+          drill_row="$(psql_q -c "SELECT state::text || ':' || coalesce(node_id,'-') FROM vms WHERE id = '$DRILL_VM'" "$DB_B" 2>&1 | tr '\n' ' ' | cut -c1-120)"
+          say "    node B's vms row for the lost guest: ${drill_row:-<none>}"
+          case "$drill_row" in
+            running:*) ;;
+            *) DRILL_PARTS="$DRILL_PARTS row(${drill_row:-none})" ;;
+          esac
+
+          # (3) no silent migration: no qemu for the guest may run on the
+          # survivor. The API row is NOT the ground truth here (the transfer
+          # runner leaves a stale row behind), so the pidfile is.
+          if pidfile_alive "$WORK/storage-a/vms/$DRILL_VM/qemu.pid" "$DRILL_VM"; then
+            DRILL_PARTS="$DRILL_PARTS guest-moved-to-survivor"
+            say "    a qemu for the guest is alive on node A - it moved without an operator"
+          else
+            say "    no qemu for the guest runs on node A (it stayed on the dead node)"
+          fi
+
+          # (4) reconcile-on-restart: when node B comes back it repairs its
+          # own bookkeeping.
+          start_node b
+          if wait_health "$ADDR_B:$PORT_B" 60; then
+            drill_row2="$(psql_q -c "SELECT state::text FROM vms WHERE id = '$DRILL_VM'" "$DB_B" 2>&1 | tr '\n' ' ' | cut -c1-60)"
+            say "    node B after the restart: row=${drill_row2:-<none>}"
+            case "$drill_row2" in
+              stopped) say "    the 'running' row with no live qemu was reconciled to 'stopped' (repair, not failover)" ;;
+              *)       say "    the row reads '${drill_row2:-unknown}' after the restart (reconcile-on-restart, no auto-restart)" ;;
+            esac
+          else
+            DRILL_PARTS="$DRILL_PARTS node-b-did-not-return"
+            say "    node B did not come back within 60s"
+          fi
+
+          # (5) no automatic restart: the guest is not running on the peer.
+          if pidfile_alive "$WORK/storage-a/vms/$DRILL_VM/qemu.pid" "$DRILL_VM"; then
+            DRILL_PARTS="$DRILL_PARTS guest-auto-restarted"
+            say "    a qemu for the guest is running on node A - it was auto-restarted"
+          else
+            say "    the guest was not auto-restarted on the peer (the documented single point of failure stands)"
+          fi
+
+          if [ -z "$DRILL_PARTS" ]; then
+            DRILL_OK=1
+            ok "node-loss drill: no automatic failover; the dead node's guest stayed put; reconcile-on-restart only"
+          else
+            bad "node-loss drill:$DRILL_PARTS"
+          fi
+        else
+          bad "node-loss drill: could not identify node B's api-server (the pid lookup failed, so no check ran)"
+        fi
+      fi
     fi
   fi
 fi

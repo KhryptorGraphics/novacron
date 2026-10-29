@@ -1,0 +1,71 @@
+NovaCron backup -> wipe -> restore -> verify (2026-10-29)
+  database: novacron_brtest on 127.0.0.1:5433
+
+--- 0. seed a migrated database with a known row
+DROP DATABASE
+CREATE DATABASE
+INSERT 0 1
+  pre-backup VM list:
+11111111-1111-1111-1111-111111111111 restore-probe-vm stopped
+
+--- 1. backup
+  2026-10-29T13:36:39Z dumping novacron_brtest (schema version unknown) -> /tmp/brtest/novacron_brtest-20261029T133639Z.dump
+  2026-10-29T13:36:39Z backup ok: /tmp/brtest/novacron_brtest-20261029T133639Z.dump (76669 bytes, sha256 in /tmp/brtest/novacron_brtest-20261029T133639Z.dump.sha256)
+
+--- 2. wipe the database
+  NOTICE:  drop cascades to 39 other objects
+  DETAIL:  drop cascades to extension uuid-ossp
+  drop cascades to extension pgcrypto
+  drop cascades to type user_status
+  drop cascades to type user_role
+  drop cascades to type vm_state
+  drop cascades to type migration_type
+  drop cascades to type migration_status
+  drop cascades to type alert_severity
+  drop cascades to type resource_type
+  drop cascades to table organizations
+  drop cascades to table users
+  drop cascades to table sessions
+  drop cascades to table audit_logs
+  drop cascades to table nodes
+  drop cascades to table vms
+  drop cascades to table vm_metrics
+  drop cascades to table node_metrics
+  drop cascades to table migrations
+  drop cascades to table alerts
+  drop cascades to table storage_volumes
+  drop cascades to table network_interfaces
+  drop cascades to table snapshots
+  drop cascades to table jobs
+  drop cascades to table api_keys
+  drop cascades to function update_updated_at_column()
+  drop cascades to table organization_quotas
+  drop cascades to table user_quotas
+  drop cascades to function check_quota_available(uuid,integer,integer,integer)
+  drop cascades to table migration_jobs
+  drop cascades to table roles
+  drop cascades to table permissions
+  drop cascades to table auth_tokens
+  drop cascades to table cluster_peers
+  drop cascades to table fabric_jobs
+  drop cascades to table usage_events
+  drop cascades to table vm_restart_state
+  drop cascades to table cluster_nodes
+  drop cascades to table user_two_factor
+  drop cascades to table networks
+  DROP SCHEMA
+  CREATE SCHEMA
+  public tables after the wipe: 0
+
+--- 3. restore
+  2026-10-29T13:36:39Z checksum ok: /tmp/brtest/novacron_brtest-20261029T133639Z.dump
+  2026-10-29T13:36:39Z restoring /tmp/brtest/novacron_brtest-20261029T133639Z.dump into novacron_brtest (jobs=1)
+  2026-10-29T13:36:40Z restore ok: novacron_brtest now has 28 public tables
+  2026-10-29T13:36:40Z reminder: start the units again ('sudo systemctl start novacron-api-server') and check /health
+
+--- 4. verify the restored state matches the pre-backup state
+  public tables after the restore: 28
+  restored VM list:
+    11111111-1111-1111-1111-111111111111 restore-probe-vm stopped
+
+DROP DATABASE
