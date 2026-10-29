@@ -16,6 +16,13 @@ import (
 	"github.com/novacron/cli/pkg/auth"
 )
 
+// TrustedOperatorHeader is the opt-in marker the fabric job / work-unit
+// submit routes require. Those routes run the workload as a native process in
+// the api-server's account (there is no sandbox), so a client must state that
+// it intends that by sending this header. It is an intent marker, not an
+// authorization control — the server still checks the caller's admin role.
+const TrustedOperatorHeader = "X-NovaCron-Trusted-Operator"
+
 // Client is the main API client
 type Client struct {
 	baseURL    string
@@ -104,6 +111,14 @@ func (c *Client) SetToken(token string) {
 
 // Request makes an HTTP request
 func (c *Client) Request(ctx context.Context, method, path string, body interface{}) (*http.Response, error) {
+	return c.RequestWithHeaders(ctx, method, path, body, nil)
+}
+
+// RequestWithHeaders makes an HTTP request with extra headers. Headers are
+// set before the request is sent, so they reach the server. This is the
+// extension point for routes that require an opt-in marker (for example the
+// trusted-operator header on the fabric job / work-unit submit routes).
+func (c *Client) RequestWithHeaders(ctx context.Context, method, path string, body interface{}, headers map[string]string) (*http.Response, error) {
 	// Build URL
 	url := c.baseURL + path
 
@@ -126,6 +141,9 @@ func (c *Client) Request(ctx context.Context, method, path string, body interfac
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
 
 	// Add authentication
 	if c.token != "" {
@@ -202,6 +220,24 @@ func (c *Client) Get(ctx context.Context, path string, result interface{}) error
 // Post makes a POST request
 func (c *Client) Post(ctx context.Context, path string, body, result interface{}) error {
 	resp, err := c.Request(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if result != nil {
+		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+			return fmt.Errorf("failed to decode response: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// PostWithHeaders makes a POST request with extra headers (see
+// RequestWithHeaders).
+func (c *Client) PostWithHeaders(ctx context.Context, path string, body, result interface{}, headers map[string]string) error {
+	resp, err := c.RequestWithHeaders(ctx, http.MethodPost, path, body, headers)
 	if err != nil {
 		return err
 	}

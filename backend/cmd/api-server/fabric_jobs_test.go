@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -296,6 +297,10 @@ func TestFabricJobSubmissionUsesFreshOutboundMeasurement(t *testing.T) {
 // POST /compute/jobs: a viewer (or unauthenticated) request is rejected with
 // 403 before any placement or DB work occurs. This locks in the fix for the
 // Advisor 4 bypass where /compute/jobs was an unguarded Process-driver entry.
+//
+// The trusted-operator marker is deliberately NOT required for this
+// rejection: the role check runs first, so a non-admin is told 403 (the reason
+// that actually matters) rather than 400 (missing opt-in header).
 func TestFabricJobSubmissionRejectsNonAdmin(t *testing.T) {
 	db, _, err := sqlmock.New()
 	if err != nil {
@@ -317,5 +322,49 @@ func TestFabricJobSubmissionRejectsNonAdmin(t *testing.T) {
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("role=%q: expected 403, got %d body=%s", role, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+// TestFabricJobSubmissionRequiresTrustedOperatorHeader proves the second gate
+// on POST /compute/jobs: an admin who did NOT send the trusted-operator marker
+// is refused with 400, because that route runs the workload as a native
+// process in the api-server's account (no sandbox) and the caller must opt in
+// to that explicitly.
+//
+// The marker is an intent flag, not a security control: the admin role is
+// what authorizes the call, and the server cannot verify who sent the header.
+func TestFabricJobSubmissionRequiresTrustedOperatorHeader(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	apiRouter := mux.NewRouter()
+	registerFabricJobRoutes(apiRouter, db, nil, t.TempDir())
+
+	body, _ := json.Marshal(fabricJobSpec{Command: "/bin/true", MemoryMB: 128})
+
+	// Admin WITHOUT the marker -> 400, and the message names the header.
+	req := httptest.NewRequest(http.MethodPost, "/compute/jobs", bytes.NewReader(body))
+	req = req.WithContext(context.WithValue(req.Context(), "role", "admin"))
+	rec := httptest.NewRecorder()
+	apiRouter.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("admin without the marker: expected 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), trustedOperatorHeader) {
+		t.Fatalf("the 400 must name the missing header, got %s", rec.Body.String())
+	}
+
+	// A non-admin WITH the marker is still refused with 403: the marker
+	// grants nothing on its own.
+	viewerReq := httptest.NewRequest(http.MethodPost, "/compute/jobs", bytes.NewReader(body))
+	viewerReq.Header.Set(trustedOperatorHeader, "1")
+	viewerReq = viewerReq.WithContext(context.WithValue(viewerReq.Context(), "role", "viewer"))
+	viewerRec := httptest.NewRecorder()
+	apiRouter.ServeHTTP(viewerRec, viewerReq)
+	if viewerRec.Code != http.StatusForbidden {
+		t.Fatalf("viewer with the marker: expected 403, got %d body=%s", viewerRec.Code, viewerRec.Body.String())
 	}
 }

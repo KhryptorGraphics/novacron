@@ -155,6 +155,7 @@ const nodeB: FabricNode = {
   link: {
     rtt_ms: 0.341,
     last_heartbeat: '2026-09-20T11:29:24Z',
+    rtt_stale: false,
     stale: false,
   },
 };
@@ -316,6 +317,11 @@ describe('FabricClient jobs', () => {
     });
     expect(server.requests[0].headers['content-type']).toBe(
       'application/json'
+    );
+    // The route runs the workload unsandboxed, so the client must send the
+    // trusted-operator opt-in marker.
+    expect(server.requests[0].headers['x-novacron-trusted-operator']).toBe(
+      '1'
     );
     expect(server.requests[0].body).toEqual({
       name: 'e2e',

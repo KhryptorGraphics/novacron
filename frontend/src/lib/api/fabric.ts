@@ -162,10 +162,14 @@ export const fabricApi = {
     return Array.isArray(payload.jobs) ? payload.jobs : [];
   },
   getJob: (jobId: string) => request<FabricJobDetail>(`/api/compute/jobs/${encodeURIComponent(jobId)}`),
+  // The fabric job runs the given command as a native process in the
+  // api-server's account (no sandbox), so the request carries the
+  // trusted-operator opt-in marker the route requires.
   submitJob: (body: FabricJobRequest) =>
     request<FabricJobSubmission>('/api/compute/jobs', {
       method: 'POST',
       body: JSON.stringify(body),
+      headers: { 'X-NovaCron-Trusted-Operator': '1' },
     }),
   cancelJob: (jobId: string) =>
     request<FabricJobCancelResult>(`/api/compute/jobs/${encodeURIComponent(jobId)}/cancel`, {

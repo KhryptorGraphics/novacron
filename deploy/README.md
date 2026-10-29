@@ -148,24 +148,33 @@ Fleet-level checks after a start: `GET /api/cluster/nodes` and
 `GET /api/cluster/links` (operator JWT) show per-peer capacity, RTT freshness,
 and separate inbound/outbound rates with per-measurement timestamps.
 
-Fabric work units (admin JWT) build on the same peer link telemetry:
+Fabric work units (admin JWT) build on the same peer link telemetry.
+
+These routes run the workload as a **native process in the api-server's
+account — there is no sandbox** — so the caller must send the
+`X-NovaCron-Trusted-Operator` header to opt in explicitly. The header is an
+intent marker, not an authorization control: the admin JWT is what authorizes
+the call, and the server cannot verify who sent the header.
 
 ```bash
 # 1. Store an input; the response's sha256 is its cache address.
 curl -sS -X POST "$API/api/compute/work-units/artifacts" \
-  -H "Authorization: Bearer $TOKEN" --data-binary @input.tar
+  -H "Authorization: Bearer $TOKEN" -H "X-NovaCron-Trusted-Operator: 1" \
+  --data-binary @input.tar
 # {"sha256":"<64 hex>","size_bytes":1234,"cached":false}
 
 # 2. Submit. The unit is placed, inputs are staged only where missing, and the
 #    runner gets NOVACRON_ARTIFACT_DIR / _ARTIFACTS / _CHECKPOINT_PATH /
 #    _ATTEMPT_FILE / _WORK_UNIT_ID. `attempt_limit` caps retries.
 curl -sS -X POST "$API/api/compute/work-units" -H "Authorization: Bearer $TOKEN" \
+  -H "X-NovaCron-Trusted-Operator: 1" \
   -H 'Content-Type: application/json' -d '{
     "command":"/usr/local/bin/my-job","artifact_hashes":["<64 hex>"],"attempt_limit":3}'
 
 # 3. Inspect (driver-truth status, attempts, checkpoint availability), then retry.
 curl -sS "$API/api/compute/work-units/<id>" -H "Authorization: Bearer $TOKEN"
-curl -sS -X POST "$API/api/compute/work-units/<id>/retry" -H "Authorization: Bearer $TOKEN"
+curl -sS -X POST "$API/api/compute/work-units/<id>/retry" -H "Authorization: Bearer $TOKEN" \
+  -H "X-NovaCron-Trusted-Operator: 1"
 ```
 
 A retry restarts the same VM with the same checkpoint path and an advanced

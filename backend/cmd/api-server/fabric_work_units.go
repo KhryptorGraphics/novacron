@@ -132,6 +132,9 @@ func registerFabricWorkUnitRoutes(root, apiRouter *mux.Router, db *sql.DB, vmMan
 			writeJSONError(w, http.StatusForbidden, "work-unit execution is restricted to admins")
 			return
 		}
+		if !requireTrustedOperator(w, r) {
+			return
+		}
 		var spec workUnitSpec
 		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&spec); err != nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid request body")
@@ -193,6 +196,9 @@ func registerFabricWorkUnitRoutes(root, apiRouter *mux.Router, db *sql.DB, vmMan
 			writeJSONError(w, http.StatusForbidden, "work-unit retry is restricted to admins")
 			return
 		}
+		if !requireTrustedOperator(w, r) {
+			return
+		}
 		rec, err := getWorkUnit(r.Context(), db, mux.Vars(r)["id"])
 		if err != nil {
 			writeJSONError(w, http.StatusNotFound, "work unit not found")
@@ -217,6 +223,9 @@ func registerFabricWorkUnitRoutes(root, apiRouter *mux.Router, db *sql.DB, vmMan
 	apiRouter.HandleFunc("/compute/work-units/artifacts", func(w http.ResponseWriter, r *http.Request) {
 		if !workUnitAdmin(r.Context()) {
 			writeJSONError(w, http.StatusForbidden, "work-unit artifacts are restricted to admins")
+			return
+		}
+		if !requireTrustedOperator(w, r) {
 			return
 		}
 		if r.ContentLength > maxWorkUnitArtifactBytes {

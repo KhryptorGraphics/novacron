@@ -31,6 +31,37 @@ import (
 	core_vm "github.com/khryptorgraphics/novacron/backend/core/vm"
 )
 
+// trustedOperatorHeader is the opt-in marker a client sends when it intends the
+// workload to run as a native process in the api-server's account.
+//
+// It is NOT an authorization control and it is NOT a sandbox. The
+// authorization is workUnitAdmin (the caller's role must be admin/super-admin),
+// which is checked separately and is what actually decides access. This header
+// only records the caller's INTENT, so that an operator can tell a
+// trusted-operator submission apart from any future sandboxed path, and so that
+// a client which does not understand the non-sandboxed trust boundary cannot
+// silently start native commands by accident.
+//
+// Because the header is client-supplied it carries no security weight on its
+// own: a caller who can authenticate as an admin could send it anyway. That is
+// inherent to the documented non-sandboxed trust boundary — the workload runs
+// unsandboxed as the api-server's account either way.
+const trustedOperatorHeader = "X-NovaCron-Trusted-Operator"
+
+// requireTrustedOperator rejects a request that did not explicitly opt into
+// trusted-operator execution. It is applied AFTER the admin-role check, so a
+// non-admin still gets 403 for the reason that actually matters (their role),
+// and only an admin who also forgot the header sees this message.
+func requireTrustedOperator(w http.ResponseWriter, r *http.Request) bool {
+	if strings.TrimSpace(r.Header.Get(trustedOperatorHeader)) != "" {
+		return true
+	}
+	writeJSONError(w, http.StatusBadRequest,
+		"this route runs the workload as a native process in the api-server's account (no sandbox); "+
+			"send "+trustedOperatorHeader+" to opt in")
+	return false
+}
+
 // jobStatus* mirror the VM lifecycle as a job outcome. "pending" covers the
 // window between create and start; the VM state then drives everything.
 const (
@@ -82,6 +113,9 @@ func registerFabricJobRoutes(apiRouter *mux.Router, db *sql.DB, vmManager *core_
 	apiRouter.HandleFunc("/compute/jobs", func(w http.ResponseWriter, r *http.Request) {
 		if !workUnitAdmin(r.Context()) {
 			writeJSONError(w, http.StatusForbidden, "job submission is restricted to admins")
+			return
+		}
+		if !requireTrustedOperator(w, r) {
 			return
 		}
 		var spec fabricJobSpec

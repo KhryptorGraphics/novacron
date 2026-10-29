@@ -37,9 +37,15 @@ func (s *FabricService) ListNodes(ctx context.Context) ([]api.FabricNode, error)
 
 // SubmitJob places and starts a job, returning its id, executor and the
 // placement decision that chose the node.
+//
+// The fabric job runs the given command as a native process in the
+// api-server's account (no sandbox), so the request carries the
+// trusted-operator opt-in marker the route requires.
 func (s *FabricService) SubmitJob(ctx context.Context, spec api.FabricJobSpec) (*api.FabricJobSubmission, error) {
 	var out api.FabricJobSubmission
-	if err := s.client.Post(ctx, "/api/compute/jobs", spec, &out); err != nil {
+	if err := s.client.PostWithHeaders(ctx, "/api/compute/jobs", spec, &out, map[string]string{
+		api.TrustedOperatorHeader: "1",
+	}); err != nil {
 		return nil, fmt.Errorf("failed to submit job: %w", err)
 	}
 

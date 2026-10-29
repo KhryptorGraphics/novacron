@@ -20,6 +20,13 @@ import {
 // Default request timeout, mirroring the DWCP client's defaultConfig.
 export const DEFAULT_FABRIC_TIMEOUT = 60000;
 
+// TRUSTED_OPERATOR_HEADER is the opt-in marker the fabric job / work-unit
+// submit routes require. Those routes run the workload as a native process in
+// the api-server's account (there is no sandbox), so a client must state that
+// it intends that by sending this header. It is an intent marker, not an
+// authorization control - the server still checks the caller's admin role.
+export const TRUSTED_OPERATOR_HEADER = 'X-NovaCron-Trusted-Operator';
+
 // One measured direction relative to the node reporting the link profile.
 export interface FabricLinkDirection {
   throughput_bps: number;
@@ -278,11 +285,16 @@ export class FabricClient {
   }
 
   // Place and start a job; the response carries the placement decision.
+  //
+  // The fabric job runs the given command as a native process in the
+  // api-server's account (no sandbox), so the request carries the
+  // trusted-operator opt-in marker the route requires.
   async submitJob(req: FabricJobRequest): Promise<FabricJobSubmission> {
     return this.request<FabricJobSubmission>(
       'POST',
       '/api/compute/jobs',
-      req
+      req,
+      { extraHeaders: { [TRUSTED_OPERATOR_HEADER]: '1' } }
     );
   }
 
@@ -345,7 +357,7 @@ export class FabricClient {
     method: string,
     path: string,
     body?: unknown,
-    options: { authenticated?: boolean } = {}
+    options: { authenticated?: boolean; extraHeaders?: Record<string, string> } = {}
   ): Promise<T> {
     const fetchImpl = this.fetchImpl;
     if (!fetchImpl) {
@@ -360,6 +372,9 @@ export class FabricClient {
     }
     if (body !== undefined) {
       headers['Content-Type'] = 'application/json';
+    }
+    if (options.extraHeaders) {
+      Object.assign(headers, options.extraHeaders);
     }
 
     const url = this.baseUrl + path;

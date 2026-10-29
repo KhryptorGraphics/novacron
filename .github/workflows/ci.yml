@@ -168,6 +168,23 @@ jobs:
           ./backend/api/websocket
           ./backend/pkg/config
 
+      # The criterion's required command set includes the race gate; it must
+      # run on arm64 too, not only on x86. -race needs cgo, which the
+      # libibverbs-dev install above provides.
+      - name: Run vm/auth/netutil package tests (arm64, separate module)
+        working-directory: backend/core
+        env:
+          CGO_ENABLED: "1"
+        run: go test -short -race ./vm/ ./auth/... ./netutil/... ./audit/...
+
+      # The full backend/core census, so a package that only compiles on x86
+      # cannot pass the arm64 leg unnoticed.
+      - name: Run backend/core short suite (arm64, full census)
+        working-directory: backend/core
+        env:
+          CGO_ENABLED: "1"
+        run: go test -short -timeout 30m ./...
+
   x86-boot-test:
     name: x86 KVM Boot Smoke Test
     runs-on: ubuntu-latest # ubuntu-latest runners are x86_64

@@ -21,8 +21,14 @@ import (
 	core_vm "github.com/khryptorgraphics/novacron/backend/core/vm"
 )
 
+// workUnitAdminRequest builds an admin request that also carries the
+// trusted-operator opt-in marker the execution routes require. Admin role
+// alone is what authorizes the call; the header records the intent to run
+// unsandboxed native code.
 func workUnitAdminRequest(req *http.Request) *http.Request {
-	return req.WithContext(context.WithValue(req.Context(), "role", "admin"))
+	req = req.WithContext(context.WithValue(req.Context(), "role", "admin"))
+	req.Header.Set(trustedOperatorHeader, "1")
+	return req
 }
 
 func TestWorkUnitArtifactUploadIsContentAddressedAndAdminOnly(t *testing.T) {
@@ -39,6 +45,7 @@ func TestWorkUnitArtifactUploadIsContentAddressedAndAdminOnly(t *testing.T) {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodPost, "/compute/work-units/artifacts", bytes.NewReader(artifact))
 		req.Header.Set("Content-Type", "application/octet-stream")
+		req.Header.Set(trustedOperatorHeader, "1")
 		if role != "" {
 			req = req.WithContext(context.WithValue(req.Context(), "role", role))
 		}

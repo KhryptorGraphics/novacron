@@ -101,15 +101,22 @@ psql_do() { PGPASSWORD="$PGPASS" psql -h "$PGHOST_ADDR" -p "$PGPORT" -U "$PGUSER
 psql_q()  { PGPASSWORD="$PGPASS" psql -h "$PGHOST_ADDR" -p "$PGPORT" -U "$PGUSER" -tAq "$@"; }
 
 api() { # api <node: a|b> <method> <path> [json-body]
-  local node="$1" method="$2" path="$3" body="${4:-}" port addr token
+  local node="$1" method="$2" path="$3" body="${4:-}" port addr token trusted=()
   case "$node" in a) port="$PORT_A"; addr="$ADDR_A";; b) port="$PORT_B"; addr="$ADDR_B";; *) return 2;; esac
   token="$(cat "$WORK/token-$node" 2>/dev/null)"
+  # The fabric job / work-unit submit routes run the workload as a native
+  # process in the api-server's account (no sandbox), so a client must send the
+  # trusted-operator opt-in marker. Only those routes need it.
+  case "$path" in
+    /api/compute/jobs|/api/compute/work-units|/api/compute/work-units/*)
+      trusted=(-H "X-NovaCron-Trusted-Operator: 1") ;;
+  esac
   if [ -n "$body" ]; then
     curl -sS --max-time 30 -X "$method" "http://$addr:$port$path" \
-      -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d "$body"
+      -H "Authorization: Bearer $token" -H 'Content-Type: application/json' "${trusted[@]}" -d "$body"
   else
     curl -sS --max-time 30 -X "$method" "http://$addr:$port$path" \
-      -H "Authorization: Bearer $token"
+      -H "Authorization: Bearer $token" "${trusted[@]}"
   fi
 }
 
@@ -645,6 +652,7 @@ WU_SHA="$(sha256sum "$WU_INPUT" | cut -d' ' -f1)"
 WU_BYTES="$(wc -c < "$WU_INPUT" | tr -d ' ')"
 wu_upload="$(curl -sS --max-time 60 -X POST "http://$ADDR_A:$PORT_A/api/compute/work-units/artifacts" \
   -H "Authorization: Bearer $(cat "$WORK/token-a" 2>/dev/null)" \
+  -H "X-NovaCron-Trusted-Operator: 1" \
   --data-binary "@$WU_INPUT")"
 WU_SHA_GOT="$(json_get 'd.get("sha256","")' "$wu_upload")"
 WU_BYTES_GOT="$(json_get 'd.get("size_bytes","")' "$wu_upload")"
